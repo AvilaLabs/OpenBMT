@@ -54,6 +54,32 @@ object AppWords {
     /** The notification when Tor is not connected (OA-88). */
     const val watchNotificationNoOrbot = "Not watching: Tor is not connected. Instant sales are off."
 
+    // ---- the key map on the key-setup screens ---------------------------------------------------
+
+    /** The three keys' names, where each lives, and the state words, as the key map shows them. */
+    const val keyMapKey1 = "Key 1"
+    const val keyMapKey1Where = "This phone"
+    const val keyMapKey2 = "Key 2"
+    const val keyMapKey2Where = "Key app, second phone"
+    const val keyMapKey3 = "Key 3"
+    const val keyMapKey3Where = "Words on steel"
+    const val keyMapMade = "Made"
+    const val keyMapNext = "Next"
+    const val keyMapNotYet = "Not yet"
+    const val keyMapRule = "Any 2 of the 3 keys can spend. One alone cannot."
+
+    /** The key map's spoken description; `{k1}`, `{k2}` and `{k3}` are the state words in lower case. */
+    const val keyMapSpoken = "Key 1, on this phone: {k1}. Key 2, on the Key app: {k2}. Key 3, on steel: {k3}. Any 2 of the 3 keys can spend."
+
+    /** Every key and its text, in the order of the words file, for docs/screens/owner-app.md. */
+    fun keyMapAll(): List<Pair<String, String>> = listOf(
+        "keyMapKey1" to keyMapKey1, "keyMapKey1Where" to keyMapKey1Where,
+        "keyMapKey2" to keyMapKey2, "keyMapKey2Where" to keyMapKey2Where,
+        "keyMapKey3" to keyMapKey3, "keyMapKey3Where" to keyMapKey3Where,
+        "keyMapMade" to keyMapMade, "keyMapNext" to keyMapNext, "keyMapNotYet" to keyMapNotYet,
+        "keyMapRule" to keyMapRule, "keyMapSpoken" to keyMapSpoken,
+    )
+
     // ---- setting up ------------------------------------------------------------------
 
     val notSetUp = w(
@@ -1278,6 +1304,13 @@ object AppWords {
                 "|---|---|\n",
         )
         for ((key, text) in FirstRunWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
+        out.append(
+            "\nThe key map at the top of the key-setup screens. `{k1}`, `{k2}` and `{k3}` are\n" +
+                "the state words in lower case:\n\n" +
+                "| Key | Text |\n" +
+                "|---|---|\n",
+        )
+        for ((key, text) in keyMapAll()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         return out.toString()
     }
 

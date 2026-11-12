@@ -28,12 +28,19 @@ import org.openbmt.owner.WalletBuiltView
 // keeps between two steps is sealed on this phone before the next screen is shown. It signs nothing.
 
 /** What the screens of one ceremony hold in memory. The record is the library's, sealed on disk at each step. */
-internal class CeremonyDraft(var record: ByteArray) {
+internal class CeremonyDraft(var record: ByteArray, var stage: Int = 1) {
     var answer: ByteArray? = null
+    var rootChecked = false
     var read: AnswerView? = null
     var key2Text: String? = null
     var built: WalletBuiltView? = null
+
+    /** The state of each of the three keys, from what the ceremony holds now and not from the screen that asks. */
+    fun keyStates(): List<KeyState> =
+        KeyMapModel.states(if (built != null) maxOf(stage, 2) else stage, read != null, rootChecked, read?.key2 != null)
 }
+
+private fun Controller.keyMap(d: CeremonyDraft?): View = ui.keyMap(d?.keyStates() ?: KeyMapModel.allMade)
 
 private fun Controller.ceremonyFile() = SealedFile(appDir, KeystoreSealer(AppFiles.KEY_ALIAS), AppFiles.CEREMONY_FILE)
 
@@ -82,11 +89,10 @@ internal fun Controller.startCeremony() {
 
 /** Key 1 is made: the library's words of the stage, and what to do on the Key app. */
 private fun Controller.showKeyMade(stateWords: SayWords) {
-    centre(
-        stateWords,
+    screen(
+        "Key 1 is made", listOf(ui.words(AppWords.ceremonyScanNext)),
         listOf(ui.primary(ResumeAction.ScanAnswer.label) { scanAnswer() }, ui.button("Start again") { showStartAgain() }),
-        extra = listOf(ui.words(AppWords.ceremonyScanNext)),
-        title = "Key 1 is made", logo = false,
+        words = stateWords, lead = keyMap(ceremony),
     )
 }
 
@@ -112,7 +118,7 @@ internal fun Controller.showCeremonyResume(message: SayWords?) {
         return notReadable(AppWords.libraryMissing(e.message))
     }
     val action = CeremonyModel.resumeAction(at.stage) ?: return notReadable(AppWords.ceremonyRecordNotRead("stage ${at.stage}"))
-    ceremony = CeremonyDraft(record)
+    ceremony = CeremonyDraft(record, at.stage)
     ceremonyLogoShown = false
     val views = ArrayList<View>()
     message?.let { views.add(ui.words(it)) }
@@ -124,7 +130,7 @@ internal fun Controller.showCeremonyResume(message: SayWords?) {
             ResumeAction.SaveSetup -> saveFinished(record)
         }
     }
-    screen("Setup in progress", views, listOf(go, ui.button("Start again") { showStartAgain() }), words = AppWords.ceremonyResume)
+    screen("Setup in progress", views, listOf(go, ui.button("Start again") { showStartAgain() }), words = AppWords.ceremonyResume, lead = keyMap(ceremony))
 }
 
 /** A record that does not read: the way out is to start again, which throws it away after a confirmation. */
@@ -186,6 +192,7 @@ private fun Controller.readAnswer(bytes: ByteArray) {
         d.answer = bytes
         d.read = read
         d.key2Text = null
+        d.rootChecked = false
         showRootCheck(d, read)
     } catch (e: OwnerException) {
         showAnswerFailed(e.sayWords())
@@ -197,14 +204,16 @@ private fun Controller.readAnswer(bytes: ByteArray) {
 private fun Controller.showRootCheck(d: CeremonyDraft, read: AnswerView) {
     val body = listOf(stack(label("The Key app's identity words"), wordCards(CeremonyModel.wordsLine(read.keyAppRootWords))))
     val same = ui.primary("The Key app shows the same words") {
+        d.rootChecked = true
         if (read.key2 == null) showKey2(d, null) else buildWallet(d)
     }
     val differ = ui.danger("They differ") {
         d.answer = null
         d.read = null
+        d.rootChecked = false
         showAnswerFailed(AppWords.ceremonyRootDiffers)
     }
-    screen("Check the Key app", body, listOf(same, ui.button("Start again") { showStartAgain() }, differ), words = AppWords.ceremonyCompareRoot)
+    screen("Check the Key app", body, listOf(same, ui.button("Start again") { showStartAgain() }, differ), words = AppWords.ceremonyCompareRoot, lead = keyMap(d))
 }
 
 // ---- the third step: key 2, when the Key app holds none --------------------------------------------------------------
@@ -224,7 +233,7 @@ private fun Controller.showKey2(d: CeremonyDraft, message: SayWords?) {
     screen(
         "Key 2", listOf(pasted, use),
         listOf(ui.primary("Scan key 2's code") { scanKey2(d) }, ui.button("Start again") { showStartAgain() }),
-        words = message ?: AppWords.ceremonyKey2Needed,
+        words = message ?: AppWords.ceremonyKey2Needed, lead = keyMap(d),
     )
 }
 
@@ -331,7 +340,7 @@ private fun Controller.showWalletCheck(d: CeremonyDraft, built: WalletBuiltView)
     screen(
         "The new wallet", views,
         listOf(ui.primary("Show the Key app its setup") { showSetupCode(d, built) }, ui.button("Start again") { showStartAgain() }),
-        words = AppWords.ceremonyCheckWallet,
+        words = AppWords.ceremonyCheckWallet, lead = keyMap(d),
     )
     snap?.post { snap.play() }
 }
@@ -363,7 +372,7 @@ private fun Controller.showSetupCode(d: CeremonyDraft, built: WalletBuiltView) {
         actions.add(ui.button("Show again") { showSetupCode(d, built) })
         actions.add(ui.button("Back") { showWalletCheck(d, built) })
     }
-    codeScreen("Setup for the Key app", step.words, view, below, actions, back = { showWalletCheck(d, built) })
+    codeScreen("Setup for the Key app", step.words, view, below, actions, back = { showWalletCheck(d, built) }, lead = keyMap(d))
 }
 
 /** The owner says the words differ: the wallet is not finished, and only starting again on both phones goes on. */
@@ -436,7 +445,7 @@ private fun Controller.saveFinished(record: ByteArray, message: SayWords? = null
         actions.add(ui.primary("Save and start") { save() })
     }
     actions.add(ui.button("Start again") { showStartAgain() })
-    screen("Save the setup", emptyList(), actions, words = message ?: AppWords.ceremonySaveNext)
+    screen("Save the setup", emptyList(), actions, words = message ?: AppWords.ceremonySaveNext, lead = keyMap(ceremony))
 }
 
 private fun Controller.showSaveFailed(words: SayWords, record: ByteArray) {

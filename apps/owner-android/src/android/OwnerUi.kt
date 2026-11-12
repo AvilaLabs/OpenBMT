@@ -223,9 +223,11 @@ internal fun Controller.codeScreen(
     below: List<View> = emptyList(),
     actions: List<Button> = emptyList(),
     back: (() -> Unit)? = null,
+    lead: View? = null,
 ) {
     val model = WordsModel.of(words)
     val all = ArrayList<View>()
+    if (lead != null) all.add(lead)
     all.add(ui.compactWords(model))
     if (code != null) all.add(ui.codeCard(code))
     all.addAll(below)

@@ -13,6 +13,7 @@ import org.openbmt.app.ControlMessage
 import org.openbmt.app.ControlReader
 import org.openbmt.app.Format
 import org.openbmt.app.KeyTextOutcome
+import org.openbmt.app.Palette
 import org.openbmt.app.SayCheck
 import org.openbmt.app.SayWords
 import org.openbmt.app.Sealed
@@ -162,7 +163,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1, "one row for each words and the header, and for each of the first run's")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + AppWords.keyMapAll().size + 1, "one row for each words and the header, and for each of the first run's and of the key map's")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -1266,6 +1267,63 @@ object AppModelTest {
         ok(AppWords.ceremonyCompareSetup.what.contains("checksum words") && AppWords.ceremonyCompareSetup.what.contains("fingerprints"), "the owner is told to compare the checksum words and the fingerprints")
         ok(AppWords.ceremonyRecordNotRead("x").detail == "x" && AppWords.ceremonyRecordNotRead(null).detail == null, "a record that does not read carries the reason")
         ok(AppWords.notSetUp.next.contains("Make a new shop wallet") && AppWords.setupTextNeeded.next.contains("Paste the setup text"), "the two choices have words")
+    }
+
+    private fun keyMapTests() {
+        // The words are the words file's, exactly.
+        ok(AppWords.keyMapKey1 == "Key 1" && AppWords.keyMapKey1Where == "This phone" && AppWords.keyMapKey2 == "Key 2" &&
+            AppWords.keyMapKey2Where == "Key app, second phone" && AppWords.keyMapKey3 == "Key 3" && AppWords.keyMapKey3Where == "Words on steel", "the key map's names and places")
+        ok(AppWords.keyMapMade == "Made" && AppWords.keyMapNext == "Next" && AppWords.keyMapNotYet == "Not yet", "the key map's states")
+        ok(AppWords.keyMapRule == "Any 2 of the 3 keys can spend. One alone cannot.", "the key map's rule")
+        ok(AppWords.keyMapSpoken == "Key 1, on this phone: {k1}. Key 2, on the Key app: {k2}. Key 3, on steel: {k3}. Any 2 of the 3 keys can spend.", "the spoken description, as written")
+        val keys = AppWords.keyMapAll().map { it.first }
+        ok(keys.size == 11 && keys.toSet().size == 11 && keys.all { k -> AppWords.all().none { it.first == k } }, "the key map's keys are used once")
+        val screensMdText = File(appDir, "../../docs/screens/owner-app.md").readText()
+        ok(keys.all { k -> screensMdText.contains("| $k |") }, "docs/screens/owner-app.md has every key map key")
+        // The checks of the words: each label as a heading, each sentence as a sentence.
+        for ((name, text) in AppWords.keyMapAll()) {
+            val sentence = name == "keyMapRule"
+            val w = if (sentence) Words(Tones.INFO, Who.OWNER, "Key map", text, "Go on.", null, null, null, null).say()
+            else if (name == "keyMapSpoken") Words(Tones.INFO, Who.OWNER, "Key map", KeyMapModel.spoken(listOf(KeyState.Made, KeyState.Next, KeyState.NotYet)), "Go on.", null, null, null, null).say()
+            else Words(Tones.INFO, Who.OWNER, text, "Go on.", "Look.", null, null, null, null).say()
+            ok(SayCheck.problem(w) == null, "key map words $name: ${SayCheck.problem(w)}")
+        }
+        // The state of each key at each stage of the ceremony.
+        val made = KeyState.Made
+        val next = KeyState.Next
+        val not = KeyState.NotYet
+        ok(KeyMapModel.states(1, false, false, false) == listOf(made, next, not), "key 1 made: 1 made, 2 next, 3 not yet")
+        ok(KeyMapModel.states(1, true, false, true) == listOf(made, next, next) && KeyMapModel.states(1, true, false, false) == listOf(made, next, next), "the answer read, its words not compared: 2 and 3 next")
+        ok(KeyMapModel.states(1, true, true, true) == listOf(made, made, made), "the words match and the answer holds key 2: all made")
+        ok(KeyMapModel.states(1, true, true, false) == listOf(made, next, made), "the words match and key 2 must come from elsewhere: 2 next")
+        ok(KeyMapModel.states(2, false, false, false) == KeyMapModel.allMade && KeyMapModel.states(3, false, false, false) == KeyMapModel.allMade, "a resume after the wallet is built or confirmed: all made")
+        ok(KeyMapModel.states(1, false, false, false) == KeyMapModel.states(1, false, false, true), "a resume after key 1 shows what key 1 made does")
+        // The draft decides, not the screen that asks: the same draft gives the same states whoever draws it.
+        val src = ceremonyCode()
+        ok(src.contains("KeyMapModel.states(if (built != null) maxOf(stage, 2) else stage, read != null, rootChecked, read?.key2 != null)") &&
+            src.contains("CeremonyDraft(record, at.stage)"), "the states come from the draft, and a resume sets its stage")
+        ok(Regex("lead = keyMap\\(").findAll(src).count() == 7 && src.contains("rootChecked = true"), "the key made, resume, root check, key 2, wallet check, setup code and save screens carry the key map")
+        // The spoken description fills in the three states in lower case.
+        ok(KeyMapModel.spoken(listOf(made, next, not)) == "Key 1, on this phone: made. Key 2, on the Key app: next. Key 3, on steel: not yet. Any 2 of the 3 keys can spend.", "spoken, key 1 made")
+        ok(KeyMapModel.spoken(KeyMapModel.allMade) == "Key 1, on this phone: made. Key 2, on the Key app: made. Key 3, on steel: made. Any 2 of the 3 keys can spend.", "spoken, all made")
+        ok(!KeyMapModel.spoken(listOf(made, next, not)).contains("{"), "no placeholder is left")
+        ok(source("src/android/KeyMap.kt").contains("KeyMapModel.spoken(states)") && source("src/android/KeyMap.kt").contains("contentDescription"), "the view is described by the spoken text")
+        // Colours: key 1 is the waiting band, key 2 the paid band, key 3 the ended band; the dark scheme has its own.
+        ok(KeyMapModel.fill(0, false) == Palette.waiting.band && KeyMapModel.fill(1, false) == Palette.paid.band && KeyMapModel.fill(2, false) == Palette.ended.band, "light: the three bands")
+        ok(KeyMapModel.fill(0, true) == Palette.dark.info.band && KeyMapModel.fill(1, true) == Palette.dark.good.band && KeyMapModel.fill(2, true) == Palette.dark.wait.band, "dark: the dark scheme's bands")
+        for (night in listOf(false, true)) {
+            val s = Palette.of(night)
+            for (i in 0..2) {
+                ok(Palette.contrast(Palette.WHITE, KeyMapModel.fill(i, night)) >= Palette.MIN_CONTRAST, "white on key ${i + 1}'s fill, night $night")
+                ok(Palette.contrast(KeyMapModel.ink(i, night), KeyMapModel.tint(i, night)) >= Palette.MIN_CONTRAST, "next chip's text on its tint, key ${i + 1}, night $night")
+                ok(Palette.contrast(KeyMapModel.ink(i, night), s.surface) >= Palette.MIN_CONTRAST, "next outline and text on the card, key ${i + 1}, night $night")
+                val line = KeyMapModel.notYetLine(i, night)
+                ok(Palette.contrast(line, s.surface) in 1.4..Palette.contrast(KeyMapModel.ink(i, night), s.surface), "the not-yet line is seen but weaker than the key's own colour, key ${i + 1}, night $night")
+            }
+            ok(Palette.contrast(s.secondary, s.surface) >= Palette.MIN_CONTRAST && Palette.contrast(s.secondary, s.chip) >= Palette.MIN_CONTRAST, "the not-yet label and the places read, night $night")
+            ok(Palette.contrast(s.text, s.surface) >= Palette.MIN_CONTRAST, "the key's name reads on its card, night $night")
+        }
+        ok(KeyMapModel.STACK_BELOW_DP == 340, "the cards stack below 340 dp")
     }
 
     private fun ceremonyCode() = source("src/android/Ceremony.kt")
@@ -2957,6 +3015,7 @@ object AppModelTest {
         exchangeTests()
         counterTests()
         ceremonyTests()
+        keyMapTests()
         firstRunTests()
         pictureTests()
         ruleTests(rulesMd)

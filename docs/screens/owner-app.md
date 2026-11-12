@@ -391,3 +391,20 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | kgDoneTitle | Shut down Tails |
 | kgDoneText | On the page, press Clear and close, then shut down Tails and take out both sticks. Keep the card somewhere safe and private, and put the words on steel as soon as you can. |
 | kgDoneButton | Done |
+
+The key map at the top of the key-setup screens. `{k1}`, `{k2}` and `{k3}` are
+the state words in lower case:
+
+| Key | Text |
+|---|---|
+| keyMapKey1 | Key 1 |
+| keyMapKey1Where | This phone |
+| keyMapKey2 | Key 2 |
+| keyMapKey2Where | Key app, second phone |
+| keyMapKey3 | Key 3 |
+| keyMapKey3Where | Words on steel |
+| keyMapMade | Made |
+| keyMapNext | Next |
+| keyMapNotYet | Not yet |
+| keyMapRule | Any 2 of the 3 keys can spend. One alone cannot. |
+| keyMapSpoken | Key 1, on this phone: {k1}. Key 2, on the Key app: {k2}. Key 3, on steel: {k3}. Any 2 of the 3 keys can spend. |
