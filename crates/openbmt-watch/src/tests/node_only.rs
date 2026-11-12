@@ -7,7 +7,6 @@ use openbmt_core::policy::{
 use openbmt_core::say::Tone;
 
 use super::kit::*;
-use crate::say::node_only_placeholders as words;
 use crate::{
     NodeOnlyFault, NodeOnlyHealth, NodeOnlyInput, NodeOnlyLine, NodeOnlyProblem, NodeOnlyTracker,
     OwnNodeInput, OwnNodeLink, OwnNodeProblem, PeerAddr, SaleStatus, SaleWatch, Source,
@@ -311,14 +310,26 @@ fn wr_67_every_state_has_words_with_its_rule_and_the_ones_not_written_say_so() {
         ] {
             let w = line.words();
             assert_eq!(w.code, Some("WR-67"));
-            assert!(w.heading.starts_with("WORDS_NEEDED_WR_67_"), "{line:?}");
-            assert_ne!(w.tone, Tone::Stop);
+            assert_eq!(openbmt_core::say::check(&w), Ok(()), "{line:?}");
         }
+        // With other nodes asked meanwhile, payments are still checked.
+        assert_ne!(NodeOnlyLine::CheckingWithOthers(p).words().tone, Tone::Stop);
+        // Without them, a node that is down stops the checks, and the line says so.
+        let alone = NodeOnlyLine::NotUsable(p).words();
+        let waiting = matches!(
+            p,
+            NodeOnlyProblem::Node(OwnNodeProblem::Connecting { .. })
+                | NodeOnlyProblem::Node(OwnNodeProblem::TipUnknown)
+        );
+        assert_eq!(alone.tone == Tone::Stop, !waiting, "{p:?}");
         let heading = NodeOnlyLine::NotUsable(p).words().heading;
         assert!(!seen.contains(&heading), "{heading}");
         seen.push(heading);
     }
-    assert_eq!(NodeOnlyLine::Usable.words().heading, words::USABLE);
+    assert_eq!(
+        NodeOnlyLine::Usable.words().heading,
+        "Your node is checking"
+    );
     assert_eq!(seen.len(), 9);
 }
 

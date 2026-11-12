@@ -230,7 +230,7 @@ fn cr_105_every_check_line_has_words_and_a_name() {
         assert_eq!(openbmt_core::say::check(&words), Ok(()));
         assert!(names.insert(check_line_name(line)));
     }
-    assert_eq!(names.len(), 7);
+    assert_eq!(names.len(), 8);
 }
 
 #[test]

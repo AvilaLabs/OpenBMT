@@ -188,75 +188,125 @@ impl OwnNodeHealth {
     }
 }
 
-/// Placeholders: the words of the health line with `node_only` on (WR-67)
-/// are not written yet, and the words of the mode with the light client do
-/// not fit this one (they speak of a light check that is not there). Each
-/// is the heading, the sentence of what happened and the sentence of what
-/// to do next of one state, until real words replace it. They are not in
-/// [`all_words`], which only holds words that keep the rules of SC-12.
-pub mod node_only_placeholders {
-    /// The node is usable.
-    pub const USABLE: &str = "WORDS_NEEDED_WR_67_USABLE";
-    /// Connecting to the node (WR-63, first two minutes).
-    pub const CONNECTING: &str = "WORDS_NEEDED_WR_67_CONNECTING";
-    /// The node is not reachable (WR-63).
-    pub const UNREACHABLE: &str = "WORDS_NEEDED_WR_67_UNREACHABLE";
-    /// The node was dropped for breaking a rule (WR-63).
-    pub const REFUSED: &str = "WORDS_NEEDED_WR_67_REFUSED";
-    /// The node has gone quiet (WR-63).
-    pub const SILENT: &str = "WORDS_NEEDED_WR_67_SILENT";
-    /// The node is behind (WR-63).
-    pub const BEHIND: &str = "WORDS_NEEDED_WR_67_BEHIND";
-    /// The node's progress is not known (WR-63).
-    pub const TIP_UNKNOWN: &str = "WORDS_NEEDED_WR_67_TIP_UNKNOWN";
-    /// The node does not offer compact filters (NR-107).
-    pub const MISSING_FILTERS: &str = "WORDS_NEEDED_WR_67_MISSING_FILTERS";
-    /// The node does not keep a block that is needed (NR-108).
-    pub const LACKS_BLOCK: &str = "WORDS_NEEDED_WR_67_LACKS_BLOCK";
-    /// The node cannot be used and other nodes are asked meanwhile (NR-110).
-    pub const CHECKING_WITH_OTHERS: &str = "WORDS_NEEDED_WR_67_CHECKING_WITH_OTHERS";
-}
-
 impl NodeOnlyProblem {
-    /// The placeholder for this problem, and the time it began, if it has
-    /// one.
-    fn placeholder(self) -> (&'static str, Option<u64>) {
-        use node_only_placeholders as p;
+    /// What the owner is told when the own node, which alone checks the
+    /// payments in this mode, cannot be used (WR-67).
+    fn words(self) -> Words {
+        const NONE: &str = "so no payment can be checked until it is back.";
+        let words = match self {
+            Self::Node(OwnNodeProblem::Connecting { since }) => Words::new(
+                Tone::Info,
+                "Connecting to your node",
+                "This counter is reaching your node over Tor, and checks payments once it answers.",
+                Who::Nobody,
+                "Nothing to do. It takes up to two minutes.",
+            )
+            .at(since),
+            Self::Node(OwnNodeProblem::Unreachable { since }) => Words::new(
+                Tone::Stop,
+                "Your node is not reachable",
+                format!("This counter cannot reach your node, {NONE}"),
+                Who::Owner,
+                "Check that your node is running and that Tor works. The counter tries again by itself.",
+            )
+            .at(since),
+            Self::Node(OwnNodeProblem::Refused { since }) => Words::new(
+                Tone::Stop,
+                "Your node was dropped",
+                format!("Your node sent something this counter does not accept, {NONE}"),
+                Who::Owner,
+                "Check your node's software, then ask the counter to try your node again.",
+            )
+            .at(since),
+            Self::Node(OwnNodeProblem::Silent { since }) => Words::new(
+                Tone::Stop,
+                "Your node has gone quiet",
+                format!("Nothing has come from your node for ten minutes, {NONE}"),
+                Who::Owner,
+                "Check that your node is running. The counter keeps listening for it.",
+            )
+            .at(since),
+            Self::Node(OwnNodeProblem::Behind { blocks }) => Words::new(
+                Tone::Stop,
+                "Your node is behind",
+                if blocks == 1 {
+                    "Your node has been a block behind for more than five minutes, so payments wait until it catches up.".to_string()
+                } else {
+                    format!("Your node is {blocks} blocks behind, so payments wait until it catches up.")
+                },
+                Who::Owner,
+                "Wait for your node to catch up, or check that it is running.",
+            ),
+            Self::Node(OwnNodeProblem::TipUnknown) => Words::new(
+                Tone::Info,
+                "Your node's progress unknown",
+                "This counter does not yet know how far your node has got, so payments wait until it does.",
+                Who::Nobody,
+                "Nothing to do. The counter asks again when your node next speaks.",
+            ),
+            Self::MissingFilters { since } => Words::new(
+                Tone::Stop,
+                "Node lacks block filters",
+                format!("Your node does not offer the block filters this counter reads, {NONE}"),
+                Who::Owner,
+                "Set blockfilterindex=1 and peerblockfilters=1 in your node's settings, then restart it.",
+            )
+            .at(since),
+            Self::LacksBlock { since, .. } => Words::new(
+                Tone::Stop,
+                "Node lacks an old block",
+                "Your node no longer keeps a block this counter needs, so a payment in it cannot be checked.",
+                Who::Owner,
+                "Turn off pruning in your node's settings, or use a node that keeps every block.",
+            )
+            .at(since),
+        };
+        words.code("WR-67")
+    }
+
+    /// The time the problem began, if it has one.
+    fn since(self) -> Option<u64> {
         match self {
-            Self::Node(OwnNodeProblem::Connecting { since }) => (p::CONNECTING, Some(since)),
-            Self::Node(OwnNodeProblem::Unreachable { since }) => (p::UNREACHABLE, Some(since)),
-            Self::Node(OwnNodeProblem::Refused { since }) => (p::REFUSED, Some(since)),
-            Self::Node(OwnNodeProblem::Silent { since }) => (p::SILENT, Some(since)),
-            Self::Node(OwnNodeProblem::Behind { .. }) => (p::BEHIND, None),
-            Self::Node(OwnNodeProblem::TipUnknown) => (p::TIP_UNKNOWN, None),
-            Self::MissingFilters { since } => (p::MISSING_FILTERS, Some(since)),
-            Self::LacksBlock { since, .. } => (p::LACKS_BLOCK, Some(since)),
+            Self::Node(OwnNodeProblem::Connecting { since })
+            | Self::Node(OwnNodeProblem::Unreachable { since })
+            | Self::Node(OwnNodeProblem::Refused { since })
+            | Self::Node(OwnNodeProblem::Silent { since })
+            | Self::MissingFilters { since }
+            | Self::LacksBlock { since, .. } => Some(since),
+            Self::Node(OwnNodeProblem::Behind { .. }) | Self::Node(OwnNodeProblem::TipUnknown) => {
+                None
+            }
         }
     }
 }
 
 impl NodeOnlyLine {
-    /// WR-67: the health line of the own node with `node_only` on. Every
-    /// state has a value; the sentences are placeholders (see
-    /// [`node_only_placeholders`]) and the rule number is in the small
-    /// print.
+    /// WR-67: the health line of the own node with `node_only` on.
     pub fn words(&self) -> Words {
-        use node_only_placeholders as p;
-        let (text, at, who) = match *self {
-            Self::Usable => (p::USABLE, None, Who::Nobody),
-            Self::NotUsable(problem) => {
-                let (reason, at) = problem.placeholder();
-                (reason, at, Who::Owner)
-            }
+        match *self {
+            Self::Usable => Words::new(
+                Tone::Info,
+                "Your node is checking",
+                "Your node is connected and up to date, and it alone checks this counter's payments.",
+                Who::Nobody,
+                "Nothing to do.",
+            )
+            .code("WR-67"),
+            Self::NotUsable(problem) => problem.words(),
             Self::CheckingWithOthers(problem) => {
-                let (_, at) = problem.placeholder();
-                (p::CHECKING_WITH_OTHERS, at, Who::Owner)
+                let words = Words::new(
+                    Tone::Info,
+                    "Checking with other nodes",
+                    "Your node cannot be used right now, so this counter checks payments with other nodes until it is back.",
+                    Who::Owner,
+                    "Check that your node is running and that Tor works.",
+                )
+                .code("WR-67");
+                match problem.since() {
+                    Some(at) => words.at(at),
+                    None => words,
+                }
             }
-        };
-        let words = Words::new(Tone::Info, text, text, who, text).code("WR-67");
-        match at {
-            Some(at) => words.at(at),
-            None => words,
         }
     }
 }
@@ -521,6 +571,60 @@ impl Refusal {
 /// [`Refusal::group`]).
 pub fn all_words() -> Vec<(String, Words)> {
     let mut all = Vec::new();
+    all.push((
+        "NodeOnlyLine::Usable".to_string(),
+        NodeOnlyLine::Usable.words(),
+    ));
+    all.push((
+        "NodeOnlyLine::CheckingWithOthers".to_string(),
+        NodeOnlyLine::CheckingWithOthers(NodeOnlyProblem::MissingFilters { since: 1 }).words(),
+    ));
+    for (name, problem) in [
+        (
+            "Connecting",
+            NodeOnlyProblem::Node(OwnNodeProblem::Connecting { since: 1 }),
+        ),
+        (
+            "Unreachable",
+            NodeOnlyProblem::Node(OwnNodeProblem::Unreachable { since: 1 }),
+        ),
+        (
+            "Refused",
+            NodeOnlyProblem::Node(OwnNodeProblem::Refused { since: 1 }),
+        ),
+        (
+            "Silent",
+            NodeOnlyProblem::Node(OwnNodeProblem::Silent { since: 1 }),
+        ),
+        (
+            "Behind1",
+            NodeOnlyProblem::Node(OwnNodeProblem::Behind { blocks: 1 }),
+        ),
+        (
+            "Behind",
+            NodeOnlyProblem::Node(OwnNodeProblem::Behind { blocks: 3 }),
+        ),
+        (
+            "TipUnknown",
+            NodeOnlyProblem::Node(OwnNodeProblem::TipUnknown),
+        ),
+        (
+            "MissingFilters",
+            NodeOnlyProblem::MissingFilters { since: 1 },
+        ),
+        (
+            "LacksBlock",
+            NodeOnlyProblem::LacksBlock {
+                height: 5,
+                since: 1,
+            },
+        ),
+    ] {
+        all.push((
+            format!("NodeOnlyLine::NotUsable/{name}"),
+            NodeOnlyLine::NotUsable(problem).words(),
+        ));
+    }
     for problem in [
         Problem::TooFewPeerGroups,
         Problem::TooFewFilterPeers,

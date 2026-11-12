@@ -14,11 +14,6 @@ const WAIT_NEXT: &str =
     "Nothing to do. It turns green when the payment is in a block, in about ten \
      minutes, or take another kind of payment.";
 
-/// Placeholder: the words for a payment checked by the shop's own node alone
-/// (WR-66) are not written yet. [`all_words`] does not list this mode until
-/// they are.
-pub const WORDS_NEEDED_CR_10_OWN_NODE_ONLY: &str = "WORDS_NEEDED_CR_10_OWN_NODE_ONLY";
-
 impl CheckMode {
     /// How the payment was checked, for the line under a sale.
     pub fn words(&self) -> Words {
@@ -35,7 +30,10 @@ impl CheckMode {
                 "Checked by the Box",
                 "Only the shop's Box reported the payment; this counter did not see it itself.",
             ),
-            Self::OwnNodeOnly => (WORDS_NEEDED_CR_10_OWN_NODE_ONLY, WORDS_NEEDED_CR_10_OWN_NODE_ONLY),
+            Self::OwnNodeOnly => (
+                "Checked by the shop's node",
+                "The shop's own Bitcoin node saw the payment, and this counter checks with that node alone.",
+            ),
         };
         Words::new(
             Tone::Info,
@@ -174,6 +172,7 @@ pub fn all_words() -> Vec<(String, Words)> {
         CheckMode::Light,
         CheckMode::NodeAlsoSeenByLight,
         CheckMode::BoxReportsOnly,
+        CheckMode::OwnNodeOnly,
     ] {
         all.push((
             format!("CheckMode::{}", check_mode_name(mode)),
@@ -281,6 +280,7 @@ mod tests {
             CheckMode::Light,
             CheckMode::NodeAlsoSeenByLight,
             CheckMode::BoxReportsOnly,
+            CheckMode::OwnNodeOnly,
         ] {
             assert!(has(format!("CheckMode::{}", check_mode_name(m))));
         }

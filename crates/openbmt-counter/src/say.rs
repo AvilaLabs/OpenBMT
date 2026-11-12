@@ -284,8 +284,7 @@ impl Screen {
             (Some(CheckMode::NodeAlsoSeenByLight), _, true) => Some(CheckLine::YourNodeAndLight),
             (Some(CheckMode::NodeAlsoSeenByLight), _, false) => Some(CheckLine::BoxAndLight),
             (Some(CheckMode::BoxReportsOnly), _, _) => Some(CheckLine::BoxOnly),
-            // The line for the own node alone has no words yet (WR-66).
-            (Some(CheckMode::OwnNodeOnly), _, _) => None,
+            (Some(CheckMode::OwnNodeOnly), _, _) => Some(CheckLine::YourNodeOnly),
             (None, true, _) => Some(CheckLine::OwnNodeWaitingForLight),
             (None, false, _) => None,
         }
@@ -330,6 +329,8 @@ pub enum CheckLine {
     BoxAndLight,
     /// The Box alone.
     BoxOnly,
+    /// The shop's own node alone, with `node_only` on (WR-66).
+    YourNodeOnly,
     /// The payment arrived over Lightning, which is final at once
     /// (CR-109). It is the line of a sale that is paid, not of one that
     /// waits.
@@ -337,13 +338,14 @@ pub enum CheckLine {
 }
 
 /// Every [`CheckLine`], for SC-01.
-pub const ALL_CHECK_LINES: [CheckLine; 7] = [
+pub const ALL_CHECK_LINES: [CheckLine; 8] = [
     CheckLine::Light,
     CheckLine::LightOwnNodeUnusable,
     CheckLine::YourNodeAndLight,
     CheckLine::OwnNodeWaitingForLight,
     CheckLine::BoxAndLight,
     CheckLine::BoxOnly,
+    CheckLine::YourNodeOnly,
     CheckLine::LightningFinal,
 ];
 
@@ -387,6 +389,12 @@ impl CheckLine {
                 Who::Nobody,
                 "Nothing to do. The counter keeps watching for the light check.",
             ),
+            Self::YourNodeOnly => (
+                "Your node checked it",
+                "Your own node saw this payment. The shop checks payments with its node alone.",
+                Who::Nobody,
+                "Nothing to do.",
+            ),
             Self::LightningFinal => (
                 "Lightning, final",
                 "This payment arrived over Lightning, through the shop's node, so no block is needed.",
@@ -407,6 +415,7 @@ pub fn check_line_name(line: CheckLine) -> &'static str {
         CheckLine::OwnNodeWaitingForLight => "OwnNodeWaitingForLight",
         CheckLine::BoxAndLight => "BoxAndLight",
         CheckLine::BoxOnly => "BoxOnly",
+        CheckLine::YourNodeOnly => "YourNodeOnly",
         CheckLine::LightningFinal => "LightningFinal",
     }
 }
