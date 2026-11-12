@@ -2821,10 +2821,10 @@ object AppModelTest {
             shown["realCount"] == "{n} of {total}" && FirstRunWords.count(2, 4) == "2 of 4" && shown["realNext"] == "Next case" && shown["realToBitcoin"] == "Your own bitcoin" &&
             shown["realBitcoinHead"] == "Your own bitcoin is different" && shown["realDone"] == "Done", "the real cases page words are the approved ones")
         ok(!shown.keys.any { it.startsWith("realCase") && it.endsWith("End") } && !shown.containsKey("realBitcoinTitle"), "the case-end chips and their words are gone")
-        ok(shown["realCase1Quote"] == "\"I got to a point where I was going to sell my kidney…\"" && shown["realCase1Who"] == "A woman in Beirut, for her sister's cancer treatment" &&
-            shown["realCase2Quote"] == "\"We can't make any withdrawals, we can't make deposits, pay our suppliers.\"" && shown["realCase2Who"] == "A florist in Nicosia, with the banks shut" &&
-            shown["realCase3Quote"] == "\"If the settlement is not done by then, it means bankruptcy.\"" && shown["realCase3Who"] == "A seller of household goods in Seoul" &&
-            shown["realCase4Quote"] == "\"[The bank] was only going to pay us \$500 out of that \$280,000.\"" && shown["realCase4Who"] == "A former teacher who had saved for 15 years for a family home", "each real case has its quote and who, exactly")
+        ok(shown["realCase1Quote"] == "“I got to a point where I was going to sell my kidney…”" && shown["realCase1Who"] == "A woman in Beirut, for her sister's cancer treatment" &&
+            shown["realCase2Quote"] == "“We can't make any withdrawals, we can't make deposits, pay our suppliers.”" && shown["realCase2Who"] == "A florist in Nicosia, with the banks shut" &&
+            shown["realCase3Quote"] == "“If the settlement is not done by then, it means bankruptcy.”" && shown["realCase3Who"] == "A seller of household goods in Seoul" &&
+            shown["realCase4Quote"] == "“[The bank] was only going to pay us \$500 out of that \$280,000.”" && shown["realCase4Who"] == "A former teacher who had saved for 15 years for a family home", "each real case has its quote and who, exactly")
         val screensMdText = File(appDir, "../../docs/screens/owner-app.md").readText()
         for (k in listOf("whyRealCases", "realTitle", "realBar", "realCount", "realNext", "realToBitcoin", "realDone", "realCase1Head", "realCase2Head", "realCase3Head", "realCase4Head", "realIntro", "realCase1Place", "realCase1Text", "realCase1Quote", "realCase1Who", "realCase2Place", "realCase2Text",
             "realCase3Place", "realCase3Text", "realCase3Quote", "realCase3Who", "realCase4Place", "realCase4Text", "realCase4Quote", "realCase4Who", "realBitcoinHead", "realBitcoinText", "realKeysTitle", "realKeysText", "realCoinTitle", "realCoinText", "realMore")) {

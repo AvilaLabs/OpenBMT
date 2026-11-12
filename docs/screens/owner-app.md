@@ -342,19 +342,19 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | realIntro | Money in a bank or a payment app is not in your hands. Someone else decides when you can have it. In each case below, people could not get their own money out, through no fault of their own. |
 | realCase1Place | Lebanon, since 2019 |
 | realCase1Text | In 2019 Lebanon's banks stopped letting people take out their own dollars. Someone with $100,000 saved could get about $500 a month, paid in local money worth a third as much or less. Six years later most of it is still locked in the banks, and no law says they will get it back. |
-| realCase1Quote | "I got to a point where I was going to sell my kidney…" |
+| realCase1Quote | “I got to a point where I was going to sell my kidney…” |
 | realCase1Who | A woman in Beirut, for her sister's cancer treatment |
 | realCase2Place | Laiki Bank, Cyprus, 2013 |
 | realCase2Text | Overnight, the government shut Laiki Bank and took every balance above €100,000 to cover the bank's losses. Nobody asked the account holders. A business with €500,000 there kept €100,000. Of the €400,000 taken, about €24,000 came back in six years. |
-| realCase2Quote | "We can't make any withdrawals, we can't make deposits, pay our suppliers." |
+| realCase2Quote | “We can't make any withdrawals, we can't make deposits, pay our suppliers.” |
 | realCase2Who | A florist in Nicosia, with the banks shut |
 | realCase3Place | TMON and WeMakePrice, South Korea, 2024 |
 | realCase3Text | Two large shopping websites held their sellers' money from every sale, then ran out of cash and stopped paying. About 48,000 sellers were cut off from $900 million they had already earned, about $19,000 each. The government's answer was to offer them loans: credit against their own unpaid money. |
-| realCase3Quote | "If the settlement is not done by then, it means bankruptcy." |
+| realCase3Quote | “If the settlement is not done by then, it means bankruptcy.” |
 | realCase3Who | A seller of household goods in Seoul |
 | realCase4Place | Synapse, United States, 2024 |
 | realCase4Text | Synapse moved money between finance apps and the banks that held it. When it went bankrupt, accounts were frozen for months. One app's customers had $64.9 million in their accounts and were offered $11.8 million back. Deposit insurance did not cover them, because Synapse was not a bank. |
-| realCase4Quote | "[The bank] was only going to pay us $500 out of that $280,000." |
+| realCase4Quote | “[The bank] was only going to pay us $500 out of that $280,000.” |
 | realCase4Who | A former teacher who had saved for 15 years for a family home |
 | realBitcoinHead | Your own bitcoin is different |
 | realBitcoinText | Bitcoin in your own wallet is not held by a bank or a payment company. Nobody can put a hold on it, close the account or cap your withdrawals, because there is no account. It moves only when your keys sign. |
