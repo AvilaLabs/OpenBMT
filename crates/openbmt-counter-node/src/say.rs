@@ -275,7 +275,7 @@ impl SettingsLine {
             Self::RestartNeeded => Words::new(
                 Tone::Info,
                 "Restart for settings",
-                "The owner changed Tor or the Lightning node, which only take effect when the counter starts again.",
+                "The owner changed Tor, a node the shop uses or how payments are checked, which only take effect when the counter starts again.",
                 Who::Nobody,
                 "Nothing to do. The counter starts again by itself when no sale screen is open.",
             )

@@ -66,7 +66,7 @@ mod tests;
 pub use chainview::ChainView;
 pub use confirm::{
     loosened_fields, ChangeNotice, ChangedField, ConfirmRefused, FieldValue, Pending,
-    PendingChange, PENDING_SECS, WORDS_NEEDED_NR_105_FIELD_LABELS,
+    PendingChange, PENDING_SECS,
 };
 pub use dirstore::{DirStore, DirStoreError, Loaded, TornTail, CONFIRM_FILE, SETTINGS_FILE};
 pub use lightning::{
@@ -95,7 +95,6 @@ pub use settings::{
     decode_file as decode_settings_file, decode_frame as decode_settings_frame,
     effective as effective_settings, effective_of as effective_settings_of, Effective,
     SettingsFault, SettingsFrame, SettingsLine, SettingsRefused, MAX_SETTINGS_FILE_BYTES,
-    WORDS_NEEDED_NR_105_RESTART,
 };
 pub use swap::{
     SaleSwap, SwapDriver, SwapRecord, SwapRequest, MAGIC_SWAP_RECORD, NOT_FOR_THIS_SALE,

@@ -40,6 +40,9 @@ object ConfirmChange {
         "lightning_node" -> "Lightning node"
         "watch_key" -> "Watch in the background"
         "swap" -> "Lightning swaps"
+        "own_node" -> "Your node"
+        "node_only" -> "Check with your node only"
+        "light_fallback" -> "Other nodes when yours is down"
         else -> AppWords.OTHER_SETTING
     }
 

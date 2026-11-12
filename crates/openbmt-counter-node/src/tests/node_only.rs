@@ -266,7 +266,7 @@ fn ap_11_node_only_turned_on_is_kept_confirmed_applied_and_then_the_driver_says_
     );
     assert_eq!(
         waiting.fields[0].now,
-        crate::FieldValue::Code("none".to_string())
+        crate::FieldValue::Code("Not set".to_string())
     );
     assert_eq!(waiting.fields[1].now, crate::FieldValue::Flag(false));
     assert_eq!(waiting.fields[1].after, crate::FieldValue::Flag(true));

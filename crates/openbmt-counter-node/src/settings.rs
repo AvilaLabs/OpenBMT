@@ -308,13 +308,6 @@ pub fn check_not_rolled(version: u32, recorded: Option<u32>) -> Result<(), Setti
     }
 }
 
-/// WORDS NEEDED (NR-105): the words of [`SettingsLine::RestartNeeded`] say
-/// that the owner changed Tor or the Lightning node. A restart is now also
-/// needed when the settings change the own node, node-only or the light
-/// fallback, so those words must name them too. Not written here.
-pub const WORDS_NEEDED_NR_105_RESTART: &str =
-    "SettingsLine::RestartNeeded: name the own node and node-only as causes of a restart";
-
 /// What Home says about the settings besides the link's line: the one thing
 /// the cashier or a manager must know. Its words are in [`crate::say`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
