@@ -348,7 +348,7 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | kgNeedTitle | What you need |
 | kgNeedList1 | A laptop or desktop computer. It does not have to be new. |
 | kgNeedList2 | Two USB sticks: one of 8 GB or more for Tails, and any small one for the key maker page. |
-| kgNeedList3 | A coin, a pen, and the blank card from this app. |
+| kgNeedList3 | A coin or one six-sided die, a pen, and the blank card from this app. |
 | kgNeedList4 | About an hour, somewhere nobody can see your screen. |
 | kgNeedCard | No card? Any paper will do for now. Write "TEMPORARY. PUT THIS ON STEEL." at the top. |
 | kgTailsTitle | Put Tails on the big stick |
@@ -363,7 +363,7 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | kgOpenTitle | Open the key maker page |
 | kgOpenText | Plug in the small stick. Open it in the Files app and open openbmt-keymaker.html in Tor Browser. If it says the page did not start, reload it once. |
 | kgFollowTitle | Follow the page |
-| kgFollowText | Do the rehearsal first, then flip for real. Come back to this phone when the page shows a code to scan. |
+| kgFollowText | Do the rehearsal first, then flip or roll for real. Come back to this phone when the page shows a code to scan. |
 | kgScanButton | Scan the page's code |
 | kgCompareTitle | Compare with the page |
 | kgCompareText | The page and this phone must show the same fingerprint and first address, every character. |

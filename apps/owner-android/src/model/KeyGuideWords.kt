@@ -20,7 +20,7 @@ object KeyGuideWords {
     val kgNeedList = listOf(
         "A laptop or desktop computer. It does not have to be new.",
         "Two USB sticks: one of 8 GB or more for Tails, and any small one for the key maker page.",
-        "A coin, a pen, and the blank card from this app.",
+        "A coin or one six-sided die, a pen, and the blank card from this app.",
         "About an hour, somewhere nobody can see your screen.",
     )
     const val kgNeedCard = "No card? Any paper will do for now. Write \"TEMPORARY. PUT THIS ON STEEL.\" at the top."
@@ -46,7 +46,7 @@ object KeyGuideWords {
         "If it says the page did not start, reload it once."
 
     const val kgFollowTitle = "Follow the page"
-    const val kgFollowText = "Do the rehearsal first, then flip for real. Come back to this phone when the page shows a code to scan."
+    const val kgFollowText = "Do the rehearsal first, then flip or roll for real. Come back to this phone when the page shows a code to scan."
     const val kgScanButton = "Scan the page's code"
 
     const val kgCompareTitle = "Compare with the page"
