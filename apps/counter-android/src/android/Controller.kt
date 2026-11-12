@@ -129,6 +129,7 @@ class Controller(private val act: MainActivity) {
     private val workers = ArrayList<Thread>()
     private var lightningThread: Thread? = null
     private var transport: LightningTransport? = null
+    private var swapTransport: SwapTransport? = null
     private val lightningJobs = LinkedBlockingQueue<Runnable>()
     private val startLock = Any()
 
@@ -540,6 +541,9 @@ class Controller(private val act: MainActivity) {
     private fun startLightning(id: Int, n: CounterNode, gate: TorGate) {
         val t = LightningTransport(gate.torOn, gate.address)
         transport = t
+        // CR-225: the swap provider is reached through the same Tor, by its onion name only.
+        val swapTransport = SwapTransport(gate.address)
+        this.swapTransport = swapTransport
         lightningJobs.clear()
         val worker = Thread {
             while (runId == id) {
@@ -549,10 +553,19 @@ class Controller(private val act: MainActivity) {
                         job.run()
                         continue
                     }
-                    val request = n.lnNext(nowSecs()) ?: continue
-                    when (val out = t.send(request) { der -> pinned(n, request, der) }) {
-                        is LnOutcome.Answer -> n.lnReply(request.id, out.status.toLong(), out.body)
-                        is LnOutcome.Failed -> n.lnFailed(request.id, out.why)
+                    val request = n.lnNext(nowSecs())
+                    if (request != null) {
+                        when (val out = t.send(request) { der -> pinned(n, request, der) }) {
+                            is LnOutcome.Answer -> n.lnReply(request.id, out.status.toLong(), out.body)
+                            is LnOutcome.Failed -> n.lnFailed(request.id, out.why)
+                        }
+                        continue
+                    }
+                    // CR-219: the swap provider's request, one at a time like the node's.
+                    val swap = n.swapNext(nowSecs()) ?: continue
+                    when (val out = swapTransport.send(swap.hostPort, swap.bytes)) {
+                        is SwapOutcome.Answer -> n.swapReply(swap.id, out.bytes)
+                        is SwapOutcome.Failed -> n.swapFailed(swap.id)
                     }
                 } catch (_: InterruptedException) {
                     return@Thread
@@ -600,6 +613,7 @@ class Controller(private val act: MainActivity) {
         lightningThread?.interrupt()
         lightningThread = null
         transport = null
+        swapTransport = null
         lightningJobs.clear()
         node?.let {
             try {
@@ -1726,13 +1740,17 @@ class Controller(private val act: MainActivity) {
                 // CR-113: the line that says Lightning is not available for this sale, or that its code is on the way.
                 val ln = s.lightning
                 val unavailable = ln?.unavailable
+                val failed = ln?.failed
                 when {
                     unavailable != null -> extra.add(WordsModel.of(unavailable.say()))
                     ln != null && ln.waiting -> extra.add(WordsModel.of(AppWords.lightningWaiting))
+                    failed != null -> extra.add(WordsModel.of(failed.say()))
                 }
+                // CR-219: with a swap provider set and none for this sale, the code stays on-chain and one small line says so.
+                val notForThisSale = ln != null && ln.notForThisSale
                 val sig = listOf(
                     s.state, says.heading, says.what, says.next, s.receivedSats, s.needsSats, payment?.copyUri, flash?.heading,
-                    flash?.what, extra.joinToString("\u0002") { it.heading + it.what + it.next },
+                    flash?.what, extra.joinToString("\u0002") { it.heading + it.what + it.next }, notForThisSale,
                 ).joinToString("\u0001")
                 if (sig != lastSig) {
                     lastSig = sig
@@ -1755,6 +1773,9 @@ class Controller(private val act: MainActivity) {
                         payment?.let { p ->
                             val qr = FrameLayout(act).apply { addView(QrView(act, p, side), FrameLayout.LayoutParams(side, side)) }
                             body.add(ui.codeCard(qr))
+                        }
+                        if (notForThisSale) {
+                            body.add(ui.text(AppWords.lnNotForThisSale, 13f, colour = ui.pal.secondary).also { it.gravity = android.view.Gravity.CENTER })
                         }
                         val words = LinearLayout(act).apply {
                             orientation = LinearLayout.VERTICAL

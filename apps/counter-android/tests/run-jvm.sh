@@ -3,8 +3,9 @@
 # (and docs/screens/counter-app.md), the PIN store with a fake clock, the
 # pairing steps, the config, the keypad, the QR layout, the price schedule and
 # book with a fake clock and a fake fetcher, the Tor gate and the screen
-# choice, and the Lightning transport against a local HTTPS server with a
-# self-signed certificate (made here with keytool); then the tests of the shared code (apps/android-common/tests). No
+# choice, the Lightning transport against a local HTTPS server with a
+# self-signed certificate (made here with keytool) and the swap transport
+# against a local SOCKS proxy; then the tests of the shared code (apps/android-common/tests). No
 # Android class is used and nothing is fetched.
 #
 # OPENBMT_WRITE_SCREENS=1 writes docs/screens/counter-app.md first.
@@ -38,7 +39,7 @@ trap 'rm -rf "$scratch/jvm-classes"' EXIT
     -classpath "$lib/kotlin-stdlib.jar:$lib/annotations-13.0.jar" \
     -d "$scratch/jvm-classes" \
     "$wrapper/Native.kt" "$wrapper/CounterNode.kt" \
-    "$common"/src/model/*.kt "$tor_part"/src/model/*.kt "$app"/src/model/*.kt "$app/tests/AppModelTest.kt" "$app/tests/LightningTransportTest.kt"
+    "$common"/src/model/*.kt "$tor_part"/src/model/*.kt "$app"/src/model/*.kt "$app/tests/AppModelTest.kt" "$app/tests/LightningTransportTest.kt" "$app/tests/SwapTransportTest.kt"
 
 "$JAVA_HOME/bin/java" -Xmx2g -cp "$scratch/jvm-classes:$lib/kotlin-stdlib.jar" \
     org.openbmt.counter.app.AppModelTest "$repo/docs/screens/counter-app.md"
@@ -48,3 +49,7 @@ trap 'rm -rf "$scratch/jvm-classes"' EXIT
     -validity 2 -storetype PKCS12 -keystore "$scratch/pin.p12" -storepass changeit -keypass changeit 2>/dev/null
 "$JAVA_HOME/bin/java" -Xmx1g -cp "$scratch/jvm-classes:$lib/kotlin-stdlib.jar" \
     org.openbmt.counter.app.LightningTransportTest "$scratch/pin.p12"
+
+# The transport of CR-225 against a local SOCKS proxy and a local plain-HTTP server.
+"$JAVA_HOME/bin/java" -Xmx1g -cp "$scratch/jvm-classes:$lib/kotlin-stdlib.jar" \
+    org.openbmt.counter.app.SwapTransportTest

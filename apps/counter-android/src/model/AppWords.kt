@@ -208,6 +208,12 @@ object AppWords {
         "Let the customer pay on-chain with the code above, or wait a few seconds.",
     )
 
+    /**
+     * CR-219: the small line under the code when a provider is set and this sale has no swap. It has no
+     * heading of its own, so it is not one of the [all] words.
+     */
+    const val lnNotForThisSale = "Lightning is not available for this sale."
+
     // ---- Tor and Orbot ------------------------------------------------------------------
 
     /** The built-in Tor, which is the choice of a new counter (CR-201, CR-203). */
