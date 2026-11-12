@@ -101,13 +101,13 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use openbmt_counter_node::{Ceremony, OwnCeremony};
 
-use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
-use crate::error::{internal, refused_by, wrong_state, CounterError};
 use crate::bills::{
     BillKindView, BillNumberArgs, BillPartArgs, BillPartView, BillRow, BillStateView,
     CloseShortArgs, JoinSaleArgs, OpenBillArgs, OtherPartArgs, PartWayView, ReferenceArgs,
     TabAmountArgs,
 };
+use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
+use crate::error::{internal, refused_by, wrong_state, CounterError};
 use crate::host::{real_spawn, Entry, Spawn};
 use crate::pay::Payment;
 use crate::rates::{
@@ -547,12 +547,9 @@ fn build_ops() -> Vec<Op> {
         op(78, "add_other_part", Node, |c, a: OtherPartArgs| {
             c.entry()?.add_other_part(a)
         }),
-        op(
-            79,
-            "bill_split",
-            Node,
-            |c, (number, people): (u32, u8)| c.entry()?.bill_split(number, people),
-        ),
+        op(79, "bill_split", Node, |c, (number, people): (u32, u8)| {
+            c.entry()?.bill_split(number, people)
+        }),
         op(80, "set_tab_amount", Node, |c, a: TabAmountArgs| {
             c.entry()?.set_tab_amount(a)
         }),

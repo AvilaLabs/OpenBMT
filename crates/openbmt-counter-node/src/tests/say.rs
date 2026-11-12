@@ -112,7 +112,9 @@ fn sc_12_every_word_keeps_the_rules() {
     // CR-255: the words of bills are placeholders until they are written;
     // the counter's own test checks them.
     let written = |all: Vec<(String, Words)>| -> Vec<(String, Words)> {
-        all.into_iter().filter(|(_, w)| !is_placeholder(w)).collect()
+        all.into_iter()
+            .filter(|(_, w)| !is_placeholder(w))
+            .collect()
     };
     assert_eq!(check_distinct(&written(all_words())), Ok(()));
     assert_eq!(check_distinct(&written(program_words())), Ok(()));

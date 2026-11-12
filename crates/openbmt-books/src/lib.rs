@@ -56,7 +56,7 @@ pub mod value;
 #[cfg(test)]
 mod tests;
 
-pub use books::{Books, DayTotals, MAX_BILLS};
+pub use books::{Books, DayTotals, MAX_BILLS, MAX_BILL_PARTS};
 pub use bundle::MAGIC_BUNDLE;
 pub use date::{Date, YearMonth};
 pub use error::{BooksError, ExportError, OpenError, SealError};

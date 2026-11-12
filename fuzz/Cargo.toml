@@ -825,3 +825,24 @@ path = "fuzz_targets/owner_own_spend_decode.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "counter_bills_decode"
+path = "fuzz_targets/counter_bills_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "books_bundle_bills_decode"
+path = "fuzz_targets/books_bundle_bills_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "books_till_csv"
+path = "fuzz_targets/books_till_csv.rs"
+test = false
+doc = false
+bench = false

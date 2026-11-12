@@ -3,11 +3,11 @@
 //! entry behind them. The words are the placeholders of the library until
 //! they are written (CR-255).
 
-use openbmt_counter_node::Node;
 use openbmt_counter::{
     Amount, Bill, BillEnd, BillKind, BillPart, BillRefused, BillView, PartRefused, PartWay,
     PosState, SaleExtras,
 };
+use openbmt_counter_node::Node;
 
 use crate::codec::{wire_record, wire_record_get, wire_unit_enum};
 use crate::error::{from_rule, CounterError};
@@ -360,8 +360,12 @@ impl Entry {
     /// CR-246: open a bill or a tab; returns its number.
     pub(crate) fn open_bill(&self, a: OpenBillArgs) -> Result<u32, CounterError> {
         self.run(Some(a.now), |node, _, _| {
-            node.open_bill(kind_of(a.kind), Amount(a.amount_minor), a.reference.as_deref())
-                .map_err(|e| bill_error(&e))
+            node.open_bill(
+                kind_of(a.kind),
+                Amount(a.amount_minor),
+                a.reference.as_deref(),
+            )
+            .map_err(|e| bill_error(&e))
         })
     }
 
@@ -376,8 +380,7 @@ impl Entry {
     /// CR-248: join a sale to a bill.
     pub(crate) fn join_sale(&self, a: JoinSaleArgs) -> Result<(), CounterError> {
         self.run(Some(a.now), |node, _, _| {
-            node.join_sale(a.number, a.sale)
-                .map_err(|e| bill_error(&e))
+            node.join_sale(a.number, a.sale).map_err(|e| bill_error(&e))
         })
     }
 

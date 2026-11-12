@@ -100,4 +100,3 @@ fn cr_251_a_tab_is_raised_and_finished_through_the_node() {
     rig.node.finish_tab(number).unwrap();
     assert!(!rig.node.bill_views()[0].bill.is_open());
 }
-

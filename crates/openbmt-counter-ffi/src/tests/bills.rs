@@ -127,7 +127,11 @@ fn cr_246_a_bill_opens_with_a_number_and_is_listed_with_placeholder_words() {
     assert_eq!((rows[1].kind, rows[1].amount), (2, 5_000));
     assert!(rows[0].heading.starts_with("WORDS_NEEDED_"));
     // A bill of nothing is refused, with the rule.
-    let response = rig.call(74, handle, &W::new().u64(T0).u8(1).u64(0).opt_string(None).0);
+    let response = rig.call(
+        74,
+        handle,
+        &W::new().u64(T0).u8(1).u64(0).opt_string(None).0,
+    );
     assert_eq!(refused(&response), (1, "CR-246".to_string()));
 }
 
@@ -250,13 +254,7 @@ fn cr_252_close_short_needs_a_manager_and_cancel_is_refused_once_a_part_counts()
     let (rig, handle) = ready();
     let number = open_bill(&rig, handle, 1, 1_000, None);
     assert!(Rd::error(&other_part(&rig, handle, number, 400, 1)).is_none());
-    let close = |manager: bool| {
-        W::new()
-            .u64(T0)
-            .u32(number)
-            .actor(manager, "Ana")
-            .0
-    };
+    let close = |manager: bool| W::new().u64(T0).u32(number).actor(manager, "Ana").0;
     assert_eq!(
         refused(&rig.call(82, handle, &close(false))),
         (1, "CR-252".to_string())
@@ -279,7 +277,10 @@ fn cr_252_close_short_needs_a_manager_and_cancel_is_refused_once_a_part_counts()
     let empty = open_bill(&rig, handle, 1, 1_000, None);
     assert!(Rd::error(&rig.call(83, handle, &cancel(empty))).is_none());
     let rows = bills(&rig, handle);
-    assert_eq!(rows.iter().find(|r| r.number == empty).map(|r| r.state), Some(3));
+    assert_eq!(
+        rows.iter().find(|r| r.number == empty).map(|r| r.state),
+        Some(3)
+    );
 }
 
 #[test]
