@@ -241,7 +241,7 @@ fn cr_188_the_app_words_of_the_tips_are_the_librarys() {
         words.heading.as_str(),
         words.what.as_str(),
         words.next.as_str(),
-        words.code.as_deref().expect("a code"),
+        words.code.expect("a code"),
         TIPS_LINE_LABEL,
         TIP_OTHER_LABEL,
         TIP_NONE_LABEL,
