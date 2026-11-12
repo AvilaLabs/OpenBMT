@@ -57,13 +57,40 @@ use bitcoin::{ScriptBuf, Txid};
 use openbmt_core::policy::{CheckMode, InstantLabel};
 use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_watch::{
-    HeaderChain, OwnNodeHealth, SaleStatus, SaleWatch, MAX_SCRIPT_BYTES, MAX_TOLERANCE_BPS,
+    HeaderChain, NodeOnlyHealth, OwnNodeHealth, SaleStatus, SaleWatch, MAX_SCRIPT_BYTES,
+    MAX_TOLERANCE_BPS,
 };
 
 use crate::desk::{len32, valid_name, Role};
 use crate::events::{label_from_u8, label_to_u8, mode_from_u8, mode_to_u8};
 use crate::money::{is_enough, sats_for, value_of, Amount, Currency, Quote, Rate, QUOTE_SECS};
 use crate::refund::{refund_text_ok, RefundEntry, MAX_REFUNDS_PER_SALE};
+
+/// How the own node counts in a sale's status (NR-105, WR-62, WR-66): as a
+/// second check next to the light client, or, with `node_only` on, as the
+/// only check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnCheck {
+    /// The own node's health as a second check (`status_with_own_node`);
+    /// `OwnNodeHealth::not_configured()` when there is none.
+    Mixed(OwnNodeHealth),
+    /// The health of the own node as the only check (`status_node_only`).
+    NodeOnly(NodeOnlyHealth),
+}
+
+impl OwnCheck {
+    fn status<C: HeaderChain + ?Sized>(
+        &self,
+        watch: &mut SaleWatch,
+        headers: &C,
+        now: u64,
+    ) -> SaleStatus {
+        match self {
+            Self::Mixed(own) => watch.status_with_own_node(headers, now, own),
+            Self::NodeOnly(health) => watch.status_node_only(headers, now, health),
+        }
+    }
+}
 use crate::{
     DUST_SATS, MAX_LATE_PAYMENTS, MAX_NAME_BYTES, MAX_QUOTES, MAX_SEGMENTS, MAX_WATCH_BYTES,
 };
@@ -566,9 +593,9 @@ impl Sale {
         headers: &C,
         now: u64,
         depth: u32,
-        own: &OwnNodeHealth,
+        own: &OwnCheck,
     ) -> (SaleStatus, u64) {
-        let first = self.watch.status_with_own_node(headers, now, own);
+        let first = own.status(&mut self.watch, headers, now);
         let before = self.watch.sale_sats();
         let received = if first.received_sats < DUST_SATS {
             0
@@ -579,7 +606,7 @@ impl Sale {
         let status = if self.watch.sale_sats() == before {
             first
         } else {
-            self.watch.status_with_own_node(headers, now, own)
+            own.status(&mut self.watch, headers, now)
         };
         if first.unconfirmed_again {
             self.reopened = true;

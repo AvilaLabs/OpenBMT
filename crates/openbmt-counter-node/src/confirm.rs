@@ -71,6 +71,19 @@ fn limit(old: &Limit, new: &Limit) -> (FieldValue, FieldValue) {
     }
 }
 
+/// WORDS NEEDED (NR-105): the confirmation page labels a field by its name
+/// in the counter app; `own_node`, `node_only` and `light_fallback` have no
+/// label there yet and show as "Another setting". Not written here.
+pub const WORDS_NEEDED_NR_105_FIELD_LABELS: &str =
+    "labels in the counter app for own_node, node_only and light_fallback";
+
+/// The own node of `s` as text, or "none" (AP-11).
+fn own_node_text(s: &Settings) -> String {
+    s.own_node
+        .as_ref()
+        .map_or_else(|| "none".to_string(), |n| format!("{}:{}", n.name, n.port))
+}
+
 /// The values of `field` in `old` and `new`, or `None` for a field that is not
 /// shown (the Lightning node, the watch key and the Boxes, which no
 /// loosening of a counter's concern names).
@@ -113,6 +126,11 @@ fn values(field: &str, old: &Settings, new: &Settings) -> Option<(FieldValue, Fi
         "min_sale_sats" => (Sats(old.min_sale_sats), Sats(new.min_sale_sats)),
         "devices" => (count(old.devices.len()), count(new.devices.len())),
         "counters" => (count(old.counters.len()), count(new.counters.len())),
+        // AP-11: the node every device trusts for its payments, as
+        // `<name>:<port>`, or "none".
+        "own_node" => (Code(own_node_text(old)), Code(own_node_text(new))),
+        "node_only" => (Flag(old.node_only), Flag(new.node_only)),
+        "light_fallback" => (Flag(old.light_fallback), Flag(new.light_fallback)),
         "currency" => (
             Code(old.currency.code().to_string()),
             Code(new.currency.code().to_string()),

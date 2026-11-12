@@ -91,7 +91,7 @@ pub use refusal::{
     OverrideRefused, RangeTakeRefused, RefundRefused, RequoteRefused, SightingError, StaffRefused,
     TotalsRefused, WithdrawRefused,
 };
-pub use sale::{End, LightningPaid, OverrideMark, PosState, RequestDays, Sale, Segment};
+pub use sale::{End, LightningPaid, OverrideMark, OwnCheck, PosState, RequestDays, Sale, Segment};
 pub use screen::{Color, Next, Report, Screen, State, Why};
 pub use staff::{StaffChange, StaffEvent};
 pub use store::{Slot, Store, StoreFault};

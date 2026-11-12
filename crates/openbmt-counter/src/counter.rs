@@ -28,7 +28,8 @@ use openbmt_core::policy::{
 use openbmt_core::records::{DeviceList, Record, RecordKind, Verifier};
 use openbmt_core::settings::{SettingNote, Settings};
 use openbmt_watch::{
-    HeaderChain, Health, OwnNodeHealth, Problem, Refusal, Sighted, Source, WellFormedBlock,
+    HeaderChain, Health, NodeOnlyHealth, OwnNodeHealth, Problem, Refusal, Sighted, Source,
+    WellFormedBlock,
 };
 
 use crate::batch_held::BatchHeld;
@@ -52,7 +53,7 @@ use crate::refusal::{
     LightningRefused, LoadError, NoteRefused, OpenRefused, OverrideRefused, RangeTakeRefused,
     RefundRefused, RequoteRefused, SightingError, StaffRefused, TotalsRefused, WithdrawRefused,
 };
-use crate::sale::{End, LightningPaid, OverrideMark, PosState, RequestDays, Sale};
+use crate::sale::{End, LightningPaid, OverrideMark, OwnCheck, PosState, RequestDays, Sale};
 use crate::screen::{Next, Report, Screen, State, Why};
 use crate::staff::StaffEvent;
 use crate::store::{Slot, Store, StoreFault};
@@ -1606,7 +1607,12 @@ impl Counter {
             return Err(RequoteRefused::AmountTooLarge);
         };
         let depth = self.depth();
-        sale.refresh(headers, now, depth, &OwnNodeHealth::not_configured());
+        sale.refresh(
+            headers,
+            now,
+            depth,
+            &OwnCheck::Mixed(OwnNodeHealth::not_configured()),
+        );
         if sale.frozen.is_some() {
             return Err(RequoteRefused::AlreadyEnough);
         }
@@ -1631,7 +1637,12 @@ impl Counter {
         }
         let quote = Quote::new(rate, now);
         sale.quotes.push(quote);
-        sale.refresh(headers, now, depth, &OwnNodeHealth::not_configured());
+        sale.refresh(
+            headers,
+            now,
+            depth,
+            &OwnCheck::Mixed(OwnNodeHealth::not_configured()),
+        );
         let event = Event::Requoted {
             index,
             at: now,
@@ -1761,6 +1772,18 @@ impl Counter {
         let mut known = Vec::new();
         for (index, sale) in self.sales.iter_mut() {
             if sale.is_live() && sale.watch.own_node_saw(txid) {
+                known.push(*index);
+            }
+        }
+        known
+    }
+
+    /// As [`Counter::own_node_saw`], with the clock at the report: in
+    /// node-only mode the conflict watch counts from it (WR-66).
+    pub fn own_node_saw_at(&mut self, txid: Txid, at: u64) -> Vec<u32> {
+        let mut known = Vec::new();
+        for (index, sale) in self.sales.iter_mut() {
+            if sale.is_live() && sale.watch.own_node_saw_at(txid, at) {
                 known.push(*index);
             }
         }
@@ -1958,10 +1981,10 @@ impl Counter {
             .get(&index)
             .cloned()
             .ok_or(LightningRefused::UnknownSale(index))?;
-        let own = OwnNodeHealth::not_configured();
+        let own = OwnCheck::Mixed(OwnNodeHealth::not_configured());
         if base.lightning.is_some() {
             return self
-                .judge_with_own_node(index, facts, &own, store)
+                .judge_checked(index, facts, &own, store)
                 .map_err(LightningRefused::Judge);
         }
         if !base.is_live() {
@@ -2028,7 +2051,7 @@ impl Counter {
         self.finish(store, sale, &events)
             .map_err(LightningRefused::Store)?;
         let mut screen = self
-            .judge_with_own_node(index, facts, &own, store)
+            .judge_checked(index, facts, &own, store)
             .map_err(LightningRefused::Judge)?;
         screen.reports = reports;
         Ok(screen)
@@ -2123,10 +2146,10 @@ impl Counter {
             .get(&index)
             .cloned()
             .ok_or(LightningRefused::UnknownSale(index))?;
-        let own = OwnNodeHealth::not_configured();
+        let own = OwnCheck::Mixed(OwnNodeHealth::not_configured());
         if base.lightning.is_some() {
             return self
-                .judge_with_own_node(index, facts, &own, store)
+                .judge_checked(index, facts, &own, store)
                 .map(Some)
                 .map_err(LightningRefused::Judge);
         }
@@ -2217,7 +2240,7 @@ impl Counter {
             return Err(LightningRefused::Store(e));
         }
         let mut screen = self
-            .judge_with_own_node(index, facts, &own, store)
+            .judge_checked(index, facts, &own, store)
             .map_err(LightningRefused::Judge)?;
         screen.reports = reports;
         Ok(Some(screen))
@@ -2385,6 +2408,32 @@ impl Counter {
         index: u32,
         facts: &Facts<'_, C>,
         own: &OwnNodeHealth,
+        store: &mut S,
+    ) -> Result<Screen, JudgeError<S::Error>> {
+        self.judge_checked(index, facts, &OwnCheck::Mixed(*own), store)
+    }
+
+    /// [`Counter::judge`] with `node_only` on (NR-105, WR-66 to WR-68):
+    /// `health` is the node-only health line as the app's
+    /// `NodeOnlyTracker` gives it now. A payment the own node reports while
+    /// it can be used is judged in the mode `CheckMode::OwnNodeOnly`; the
+    /// light client's groups count only with `light_fallback` on and the
+    /// random peers running (WR-68).
+    pub fn judge_with_node_only<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        facts: &Facts<'_, C>,
+        health: &NodeOnlyHealth,
+        store: &mut S,
+    ) -> Result<Screen, JudgeError<S::Error>> {
+        self.judge_checked(index, facts, &OwnCheck::NodeOnly(*health), store)
+    }
+
+    fn judge_checked<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        facts: &Facts<'_, C>,
+        own: &OwnCheck,
         store: &mut S,
     ) -> Result<Screen, JudgeError<S::Error>> {
         if self.unreadable.contains(&index) {
@@ -2915,6 +2964,29 @@ impl Counter {
         own: &OwnNodeHealth,
         store: &mut S,
     ) -> Overridden<S::Error> {
+        self.override_checked(index, actor, facts, &OwnCheck::Mixed(*own), store)
+    }
+
+    /// [`Counter::override_sale`] judged with `node_only` on (NR-105).
+    pub fn override_sale_with_node_only<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        actor: Actor,
+        facts: &Facts<'_, C>,
+        health: &NodeOnlyHealth,
+        store: &mut S,
+    ) -> Overridden<S::Error> {
+        self.override_checked(index, actor, facts, &OwnCheck::NodeOnly(*health), store)
+    }
+
+    fn override_checked<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        actor: Actor,
+        facts: &Facts<'_, C>,
+        own: &OwnCheck,
+        store: &mut S,
+    ) -> Overridden<S::Error> {
         let mut reports = Vec::new();
         let result = self.override_inner(index, actor, facts, own, store, &mut reports);
         Overridden { reports, result }
@@ -2925,14 +2997,14 @@ impl Counter {
         index: u32,
         actor: Actor,
         facts: &Facts<'_, C>,
-        own: &OwnNodeHealth,
+        own: &OwnCheck,
         store: &mut S,
         reports: &mut Vec<Report>,
     ) -> Result<(), OverrideRefused<S::Error>> {
         if !valid_name(&actor.name) {
             return Err(OverrideRefused::BadName);
         }
-        let mut screen = match self.judge_with_own_node(index, facts, own, store) {
+        let mut screen = match self.judge_checked(index, facts, own, store) {
             Ok(screen) => screen,
             Err(JudgeError::UnknownSale(i)) => return Err(OverrideRefused::UnknownSale(i)),
             Err(e) => return Err(OverrideRefused::Judge(e)),
@@ -3435,8 +3507,12 @@ impl Counter {
         headers: &C,
     ) -> (u64, u32) {
         let mut copy = sale.clone();
-        let (status, received) =
-            copy.refresh(headers, now, self.depth(), &OwnNodeHealth::not_configured());
+        let (status, received) = copy.refresh(
+            headers,
+            now,
+            self.depth(),
+            &OwnCheck::Mixed(OwnNodeHealth::not_configured()),
+        );
         // CR-111: what arrived over Lightning is received and final at once.
         if let Some(paid) = &sale.lightning {
             return (received.saturating_add(paid.sats()), u32::MAX);

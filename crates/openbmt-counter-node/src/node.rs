@@ -113,27 +113,27 @@ use openbmt_core::pinned_wallet::SignedRange;
 use openbmt_core::records::Record;
 use openbmt_core::say::Words;
 use openbmt_core::settings::{
-    Authority, Change, SettingNote, Settings, SettingsError, SignedSettings, SwapProvider,
-    LIGHTNING_NODE_BYTES,
+    Authority, Change, OwnNode as SettingsOwnNode, SettingNote, Settings, SettingsError,
+    SignedSettings, SwapProvider, LIGHTNING_NODE_BYTES,
 };
 use openbmt_core::wire::DecodeError;
 use openbmt_counter::{
     Actor, Amount, BatchTakeRefused, BlockError, CancelRefused, CashRefund, CommandRefused,
     Counter, Currency, DayTotals, Facts, HeartbeatRefused, HeartbeatView, JudgeError,
-    LightningPaid, LoadError, NoteRefused, OpenFacts, OpenRefused, Opened, Overridden, OwnPairing,
-    Pairing, Quote, RangeTakeRefused, Rate, RateSource, RefundRefused, RefundRequest, RefundView,
-    Report, RequoteRefused, SaleExtras, Screen, SightingError, Slot, StaffEvent, StaffRefused,
-    Store, StoreFault, SwapPaid, TotalsRefused, WithdrawRefused,
+    LightningPaid, LoadError, NoteRefused, OpenFacts, OpenRefused, Opened, Overridden, OwnCheck,
+    OwnPairing, Pairing, Quote, RangeTakeRefused, Rate, RateSource, RefundRefused, RefundRequest,
+    RefundView, Report, RequoteRefused, SaleExtras, Screen, SightingError, Slot, StaffEvent,
+    StaffRefused, Store, StoreFault, SwapPaid, TotalsRefused, WithdrawRefused,
 };
 use openbmt_lightning::{CertPin, Credential, Reply};
 use openbmt_net_io::{
     AppEvent, Clock, DirLock, Driver, DriverConfig, EventReceiver, FileStorage, Handle, Key,
-    OsRandomness, OwnNodeEvent, Storage, SystemClock,
+    NetMode, OsRandomness, OwnNode, OwnNodeEvent, Storage, SystemClock,
 };
 use openbmt_watch::{
     check_blocks_checked, check_health, BlockProgress, HeaderChain, HeaderStore, Health,
-    HealthInput, OwnNodeHealth, OwnNodeInput, OwnNodeLink, OwnNodeTracker, PeerAddr, Source,
-    WellFormedBlock,
+    HealthInput, NodeOnlyHealth, NodeOnlyInput, NodeOnlyLine, NodeOnlyTracker, OwnNodeHealth,
+    OwnNodeInput, OwnNodeLink, OwnNodeTracker, PeerAddr, Source, WellFormedBlock,
 };
 
 use crate::chainview::ChainView;
@@ -411,6 +411,73 @@ impl NodeConfig {
     }
 }
 
+/// CR-164, NR-105: the parts of the settings that the driver is started
+/// with. A change in any of them needs a restart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StartedWith {
+    tor_on: bool,
+    lightning_node: Option<[u8; LIGHTNING_NODE_BYTES]>,
+    swap: Option<SwapProvider>,
+    own_node: Option<SettingsOwnNode>,
+    node_only: bool,
+    light_fallback: bool,
+}
+
+impl StartedWith {
+    fn of(settings: &Settings) -> Self {
+        Self {
+            tor_on: settings.tor_on,
+            lightning_node: settings.lightning_node,
+            swap: settings.swap.clone(),
+            own_node: settings.own_node.clone(),
+            node_only: settings.node_only,
+            light_fallback: settings.light_fallback,
+        }
+    }
+
+    /// Whether Tor, the Lightning node or the swap provider differ.
+    fn tor_or_lightning_differ(&self, other: &Self) -> bool {
+        (self.tor_on, self.lightning_node, &self.swap)
+            != (other.tor_on, other.lightning_node, &other.swap)
+    }
+
+    /// Whether the own node or the mode differ (NR-105).
+    fn node_differs(&self, other: &Self) -> bool {
+        (&self.own_node, self.node_only, self.light_fallback)
+            != (&other.own_node, other.node_only, other.light_fallback)
+    }
+}
+
+/// NR-105: the node and the mode the settings in force give the driver. A
+/// node the settings name replaces the one of the counter app's own
+/// configuration, which is then not used (a note says so); the mode is
+/// `NodeOnly` when `node_only` is on, else `Mixed`.
+fn apply_settings_to_driver(
+    settings: &Settings,
+    driver: &mut DriverConfig,
+    notes: &mut VecDeque<String>,
+) -> Result<(), StartError> {
+    if let Some(own) = &settings.own_node {
+        let node =
+            OwnNode::onion(&own.name, own.port).map_err(|e| StartError::Driver(e.to_string()))?;
+        if driver.own_node.is_some() {
+            notes.push_back(
+                "NR-105: the settings name an own node: the counter app's own node is not used"
+                    .to_string(),
+            );
+        }
+        driver.own_node = Some(node);
+    }
+    driver.mode = if settings.node_only {
+        NetMode::NodeOnly {
+            light_fallback: settings.light_fallback,
+        }
+    } else {
+        NetMode::Mixed
+    };
+    Ok(())
+}
+
 /// The counter, joined to a driver and a directory. See the module docs.
 pub struct Node<P: DriverPort = Handle> {
     counter: Counter,
@@ -428,13 +495,10 @@ pub struct Node<P: DriverPort = Handle> {
     /// CR-160, CR-236: who may sign the settings the owner sends: the two
     /// roots the counter pinned at pairing, or the owner root alone.
     authority: Authority,
-    /// CR-164: what the node was started with that settings can change: the
-    /// Tor switch and the Lightning node.
-    started_with: (
-        bool,
-        Option<[u8; LIGHTNING_NODE_BYTES]>,
-        Option<SwapProvider>,
-    ),
+    /// CR-164, NR-105: what the node was started with that settings can
+    /// change: the Tor switch, the Lightning node and swap provider, the own
+    /// node and the mode.
+    started_with: StartedWith,
     /// CR-162: the settings in force have no `Setting` record yet.
     setting_unrecorded: Option<SettingNote>,
     /// CR-239: the one change that waits for a counter's confirmation.
@@ -448,8 +512,19 @@ pub struct Node<P: DriverPort = Handle> {
     own_input: Option<OwnNodeInput>,
     /// WR-63: since when the own node has been one block behind.
     own_tracker: OwnNodeTracker,
-    /// The health line of the own node as last worked out.
+    /// The health line of the own node as last worked out. With `node_only`
+    /// on it is the `own` of `node_only_health`.
     own_health: OwnNodeHealth,
+    /// NR-105: the driver was started in node-only mode (NR-106), from the
+    /// settings.
+    node_only: bool,
+    /// NR-103: what the driver last said in node-only mode, or, before it
+    /// has said anything, that there has been no connection since the start.
+    node_only_input: Option<NodeOnlyInput>,
+    /// WR-63 with NR-107 and NR-108.
+    node_only_tracker: NodeOnlyTracker,
+    /// The node-only health as last worked out (WR-66 to WR-68).
+    node_only_health: Option<NodeOnlyHealth>,
     /// The sales the node knows of, live or not.
     known: BTreeSet<u32>,
     cache: VecDeque<(Txid, Vec<u8>)>,
@@ -637,7 +712,10 @@ impl<P: DriverPort> Node<P> {
             store.put_checked(watch_from).map_err(StartError::Checked)?;
         }
         driver.watch_from = watch_from;
+        apply_settings_to_driver(&settings, &mut driver, &mut notes)?;
         let own_configured = driver.own_node.is_some();
+        let node_only = settings.node_only && own_configured;
+        let node_light_fallback = settings.light_fallback;
         let started_at = clock.now();
         let pending = load_pending(&mut store, &authority, &settings, started_at, &mut notes);
         let counter_id: [u8; 4] = counter
@@ -681,24 +759,33 @@ impl<P: DriverPort> Node<P> {
             health_base: None,
             health: None,
             blocks_behind_since: None,
-            started_with: (
-                settings.tor_on,
-                settings.lightning_node,
-                settings.swap.clone(),
-            ),
+            started_with: StartedWith::of(&settings),
             settings,
             authority,
             setting_unrecorded,
             pending,
             notice: None,
             own_configured,
-            own_input: own_configured.then_some(OwnNodeInput {
+            own_input: (own_configured && !node_only).then_some(OwnNodeInput {
                 link: OwnNodeLink::Down { since: started_at },
                 best_height: None,
                 last_heard: None,
             }),
             own_tracker: OwnNodeTracker::new(),
             own_health: OwnNodeHealth::not_configured(),
+            node_only,
+            node_only_input: node_only.then_some(NodeOnlyInput {
+                node: OwnNodeInput {
+                    link: OwnNodeLink::Down { since: started_at },
+                    best_height: None,
+                    last_heard: None,
+                },
+                fault: None,
+                light_fallback: node_light_fallback,
+                fallback_running: false,
+            }),
+            node_only_tracker: NodeOnlyTracker::new(),
+            node_only_health: None,
             known,
             cache: VecDeque::new(),
             notes,
@@ -825,7 +912,14 @@ impl<P: DriverPort> Node<P> {
         if self.own_configured {
             // WR-63: the way to the node is built again, so "connecting"
             // holds for another 120 seconds if it is not connected now.
-            if self
+            if self.node_only {
+                if self
+                    .node_only_input
+                    .is_none_or(|i| i.node.link != OwnNodeLink::Connected)
+                {
+                    self.node_only_tracker.retry(self.clock.now());
+                }
+            } else if self
                 .own_input
                 .is_none_or(|i| i.link != OwnNodeLink::Connected)
             {
@@ -893,12 +987,12 @@ impl<P: DriverPort> Node<P> {
     /// CR-164: whether the settings in force change what the node was
     /// started with (the Tor switch or the Lightning node), so that the app
     /// must start the node again before they take effect.
+    ///
+    /// NR-105: the own node and the mode count too: the driver takes both
+    /// from the settings when it starts, and a change of either takes effect
+    /// only at the next start.
     pub fn restart_needed(&self) -> bool {
-        (
-            self.settings.tor_on,
-            self.settings.lightning_node,
-            self.settings.swap.clone(),
-        ) != self.started_with
+        StartedWith::of(&self.settings) != self.started_with
     }
 
     /// CR-165: whether the settings in force no longer list this counter.
@@ -987,7 +1081,7 @@ impl<P: DriverPort> Node<P> {
         self.store
             .put_settings(bytes)
             .map_err(SettingsRefused::Store)?;
-        let before = self.restart_needed();
+        let before = StartedWith::of(&self.settings);
         self.counter.set_settings(signed.settings.clone());
         self.settings = signed.settings.clone();
         self.setting_unrecorded = Some(SettingNote {
@@ -1006,8 +1100,16 @@ impl<P: DriverPort> Node<P> {
         if self.removed() {
             self.note("CR-165: the settings no longer list this counter".to_string());
         }
-        if !before && self.restart_needed() {
+        let now = StartedWith::of(&self.settings);
+        let started = &self.started_with;
+        if now.tor_or_lightning_differ(started) && !before.tor_or_lightning_differ(started) {
             self.note("CR-164: the settings change Tor or Lightning: restart needed".to_string());
+        }
+        let started = &self.started_with;
+        if now.node_differs(started) && !before.node_differs(started) {
+            self.note(
+                "NR-105: the settings change the own node or node-only: restart needed".to_string(),
+            );
         }
         self.notice = None;
         self.drop_pending_covered();
@@ -1339,15 +1441,51 @@ impl<P: DriverPort> Node<P> {
 
     /// WR-63: the own node's health line now, with the counter's tip and
     /// the node's clock.
+    ///
+    /// NR-105: with `node_only` on this is the node's health as the
+    /// node-only tracker reads it (WR-66, WR-67): `usable` is false for the
+    /// faults of NR-107 and NR-108 too.
     fn own_health_now(&mut self) -> OwnNodeHealth {
         if !self.own_configured {
             return OwnNodeHealth::not_configured();
         }
         let now = self.clock.now();
         let tip = self.view.tip_height();
+        if self.node_only {
+            let health = self
+                .node_only_tracker
+                .check(self.node_only_input.as_ref(), tip, now);
+            self.node_only_health = Some(health);
+            self.own_health = health.own;
+            return health.own;
+        }
         let health = self.own_tracker.check(self.own_input.as_ref(), tip, now);
         self.own_health = health;
         health
+    }
+
+    /// How the own node counts in a sale's status now: the second check of
+    /// WR-62, or, with `node_only` on, the only check of WR-66.
+    fn own_check_now(&mut self) -> OwnCheck {
+        let own = self.own_health_now();
+        match self.node_only_health.filter(|_| self.node_only) {
+            Some(health) => OwnCheck::NodeOnly(health),
+            None => OwnCheck::Mixed(own),
+        }
+    }
+
+    /// WR-67: the node-only health line, when the node is in that mode.
+    pub fn node_only_line(&mut self) -> Option<NodeOnlyLine> {
+        if !self.node_only {
+            return None;
+        }
+        self.own_health_now();
+        self.node_only_health.map(|h| h.line())
+    }
+
+    /// NR-105: whether the node was started in node-only mode.
+    pub fn node_only(&self) -> bool {
+        self.node_only
     }
 
     fn take_own_events(&mut self, touched: &mut BTreeSet<u32>) {
@@ -1365,11 +1503,18 @@ impl<P: DriverPort> Node<P> {
                 // WR-61: a report for a transaction no sale knows records
                 // nothing; the node is asked again after the light client's
                 // sighting.
-                OwnNodeEvent::Has(txid) => touched.extend(self.counter.own_node_saw(txid)),
-                OwnNodeEvent::State(input) => self.own_state(input, touched),
-                // The driver sends this only in the mode of NR-106, which no
-                // app sets yet (the next slice reads it from the settings).
-                OwnNodeEvent::NodeOnly(_) => {}
+                OwnNodeEvent::Has(txid) => {
+                    let now = self.clock.now();
+                    touched.extend(self.counter.own_node_saw_at(txid, now));
+                }
+                // The driver sends `State` in the mode with the light client
+                // and `NodeOnly` in the mode of NR-106; the node reads the
+                // one that matches the mode it was started in.
+                OwnNodeEvent::State(input) if !self.node_only => self.own_state(input, touched),
+                OwnNodeEvent::NodeOnly(input) if self.node_only => {
+                    self.node_only_state(input, touched);
+                }
+                OwnNodeEvent::State(_) | OwnNodeEvent::NodeOnly(_) => {}
             }
         }
     }
@@ -1385,6 +1530,27 @@ impl<P: DriverPort> Node<P> {
             self.ask_own_node_about_sales();
         }
         if before.usable != after.usable || before.problem != after.problem {
+            touched.extend(self.sales_with_payments());
+        }
+    }
+
+    /// NR-103, WR-66: what the driver says in node-only mode. The sales that
+    /// have a payment are judged again when the line or the fallback
+    /// changed.
+    fn node_only_state(&mut self, input: NodeOnlyInput, touched: &mut BTreeSet<u32>) {
+        let was_connected = self
+            .node_only_input
+            .is_some_and(|i| i.node.link == OwnNodeLink::Connected);
+        let before = self.node_only_health;
+        self.node_only_input = Some(input);
+        self.own_health_now();
+        let after = self.node_only_health;
+        if input.node.link == OwnNodeLink::Connected && !was_connected {
+            self.ask_own_node_about_sales();
+        }
+        let key =
+            |h: Option<NodeOnlyHealth>| h.map(|h| (h.own.usable, h.problem, h.fallback_running));
+        if key(before) != key(after) {
             touched.extend(self.sales_with_payments());
         }
     }
@@ -1924,7 +2090,7 @@ impl<P: DriverPort> Node<P> {
     /// in the returned screen, once.
     pub fn judge(&mut self, index: u32) -> Result<Screen, JudgeError<DirStoreError>> {
         let now = self.clock.now();
-        let own = self.own_health_now();
+        let own = self.own_check_now();
         let facts = Facts {
             chain: &self.view,
             health: self.health.unwrap_or(NO_ANSWER_YET),
@@ -1932,8 +2098,16 @@ impl<P: DriverPort> Node<P> {
             remote_order: false,
             now,
         };
-        self.counter
-            .judge_with_own_node(index, &facts, &own, &mut self.store)
+        match own {
+            OwnCheck::Mixed(own) => {
+                self.counter
+                    .judge_with_own_node(index, &facts, &own, &mut self.store)
+            }
+            OwnCheck::NodeOnly(health) => {
+                self.counter
+                    .judge_with_node_only(index, &facts, &health, &mut self.store)
+            }
+        }
     }
 
     /// CR-113: what the screen of a sale shows of Lightning.
@@ -2159,7 +2333,7 @@ impl<P: DriverPort> Node<P> {
     /// PIN.
     pub fn override_sale(&mut self, index: u32, actor: Actor) -> Overridden<DirStoreError> {
         let now = self.clock.now();
-        let own = self.own_health_now();
+        let own = self.own_check_now();
         let facts = Facts {
             chain: &self.view,
             health: self.health.unwrap_or(NO_ANSWER_YET),
@@ -2167,8 +2341,22 @@ impl<P: DriverPort> Node<P> {
             remote_order: false,
             now,
         };
-        self.counter
-            .override_sale_with_own_node(index, actor, &facts, &own, &mut self.store)
+        match own {
+            OwnCheck::Mixed(own) => self.counter.override_sale_with_own_node(
+                index,
+                actor,
+                &facts,
+                &own,
+                &mut self.store,
+            ),
+            OwnCheck::NodeOnly(health) => self.counter.override_sale_with_node_only(
+                index,
+                actor,
+                &facts,
+                &health,
+                &mut self.store,
+            ),
+        }
     }
 
     /// A person asks for a refund of a sale (CR-60 to CR-69). The request is

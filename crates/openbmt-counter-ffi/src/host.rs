@@ -1045,12 +1045,17 @@ impl Entry {
     pub(crate) fn status(&self) -> Result<StatusView, CounterError> {
         self.run(None, |node, _, _| {
             let own = node.own_node_health();
-            let own_node = match own.words() {
-                Some(words) => Some(OwnNodeView {
+            // NR-105, WR-67: in node-only mode the line is the node-only one.
+            let own_node = match (node.node_only_line(), own.words()) {
+                (Some(line), _) => Some(OwnNodeView {
+                    usable: own.usable,
+                    words: WordsView(line.words()),
+                }),
+                (None, Some(words)) => Some(OwnNodeView {
                     usable: own.usable,
                     words: WordsView(words),
                 }),
-                None => self.own_refused.clone().map(|words| OwnNodeView {
+                (None, None) => self.own_refused.clone().map(|words| OwnNodeView {
                     usable: false,
                     words,
                 }),

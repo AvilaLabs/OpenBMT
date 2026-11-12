@@ -134,6 +134,46 @@ fn wr_66_a_payment_the_node_does_not_hold_has_no_mode_and_waits() {
 }
 
 #[test]
+fn wr_66_the_conflict_watch_counts_from_the_nodes_first_report() {
+    let tx = pays();
+    let mut w = watch();
+    w.sighting(&bytes(&tx), peer(20), NOW).unwrap();
+    // Reported at NOW, read 30 seconds later; a second report does not
+    // start the time over.
+    assert!(w.own_node_saw_at(tx.compute_txid(), NOW));
+    assert!(w.own_node_saw_at(tx.compute_txid(), NOW + 20));
+    let chain = TestChain::new(1);
+    let h = usable();
+    assert_eq!(w.status_node_only(&chain, NOW, &h).secs_since_first_seen, 0);
+    assert_eq!(
+        w.status_node_only(&chain, NOW + 30, &h)
+            .secs_since_first_seen,
+        30
+    );
+    // Without a report there is no time at all; in the mixed mode the
+    // report starts no clock (WR-46).
+    let mut other = watch();
+    other.sighting(&bytes(&tx), peer(20), NOW).unwrap();
+    assert!(other.own_node_saw(tx.compute_txid()));
+    assert_eq!(
+        other
+            .status_node_only(&chain, NOW + 30, &h)
+            .secs_since_first_seen,
+        0
+    );
+    let mut mixed = watch();
+    mixed.sighting(&bytes(&tx), peer(20), NOW).unwrap();
+    assert!(mixed.own_node_saw_at(tx.compute_txid(), NOW));
+    let own = crate::check_own_node(Some(&connected().node), TIP, NOW, None);
+    assert_eq!(
+        mixed
+            .status_with_own_node(&chain, NOW + 30, &own)
+            .secs_since_first_seen,
+        0
+    );
+}
+
+#[test]
 fn wr_66_a_node_that_cannot_be_used_gives_no_mode() {
     let tx = pays();
     let mut w = watch();

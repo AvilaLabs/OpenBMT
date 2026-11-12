@@ -98,6 +98,10 @@ struct Entry {
     by_box: bool,
     /// WR-61: the own node reported it. Not stored (WR-65).
     by_own_node: bool,
+    /// WR-66: when the own node first reported it, if the caller said. Not
+    /// stored: after a restart the node reports again and the time starts
+    /// again, the safe side.
+    own_reported: Option<u64>,
     /// WR-46.
     first_seen: Option<u64>,
     /// Blocks that held it, whether or not they are still on the chain.
@@ -118,6 +122,19 @@ struct Standing {
 }
 
 impl Entry {
+    /// WR-46, WR-66: when the time since first seen starts: the first
+    /// sighting that made the transaction seen and, with `node_only` on, the
+    /// own node's first report if it came earlier.
+    fn clock_start(&self, node_only: bool) -> Option<u64> {
+        match (
+            self.first_seen,
+            node_only.then_some(self.own_reported).flatten(),
+        ) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
     fn spends(&self, outpoint: &OutPoint) -> bool {
         self.tx.input.iter().any(|i| &i.previous_output == outpoint)
     }
@@ -291,6 +308,22 @@ impl SaleWatch {
         match self.entries.iter_mut().find(|e| e.txid == txid) {
             Some(entry) => {
                 entry.by_own_node = true;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// As [`SaleWatch::own_node_saw`], with the caller's clock at the
+    /// report. With `node_only` on (WR-66) the conflict watch of section 6
+    /// counts from the first such report: the node's announcements stand in
+    /// for the peers'. In the mode with the light client the time is not
+    /// used (WR-46).
+    pub fn own_node_saw_at(&mut self, txid: Txid, at: u64) -> bool {
+        match self.entries.iter_mut().find(|e| e.txid == txid) {
+            Some(entry) => {
+                entry.by_own_node = true;
+                entry.own_reported.get_or_insert(at);
                 true
             }
             None => false,
@@ -482,7 +515,8 @@ impl SaleWatch {
                     None => e.mode(own.usable),
                 },
                 e.groups.len(),
-                e.first_seen.map_or(0, |t| now.saturating_sub(t)),
+                e.clock_start(node_only.is_some())
+                    .map_or(0, |t| now.saturating_sub(t)),
             ),
             None => (None, 0, 0),
         };
@@ -658,6 +692,7 @@ impl SaleWatch {
             groups: BTreeSet::new(),
             by_box: false,
             by_own_node: false,
+            own_reported: None,
             first_seen: None,
             blocks: block.into_iter().collect(),
             learned: None,
@@ -799,6 +834,7 @@ impl Entry {
             groups,
             by_box,
             by_own_node: false,
+            own_reported: None,
             first_seen,
             blocks,
             learned,
