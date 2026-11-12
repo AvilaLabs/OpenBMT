@@ -68,8 +68,15 @@ class MainActivity : Activity() {
         controller.permission(requestCode, grantResults)
     }
 
+    @Suppress("DEPRECATION")
+    @Deprecated("The platform's own back call; no AndroidX is used")
+    override fun onBackPressed() {
+        if (!controller.systemBack()) super.onBackPressed()
+    }
+
     /** Shows [page] as the whole content. */
     fun show(page: View) {
+        controller.firstRunBack = null
         setContentView(page)
     }
 }

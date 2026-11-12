@@ -2785,6 +2785,7 @@ object AppModelTest {
         ok(practiceScreens.contains("FirstRunWords.practiceBanner") && practiceScreens.contains("Practice.QR_TEXT"), "every practice page carries the banner, and the code is the practice line")
         ok(screens.substringAfter("private fun Controller.practicePage").substringBefore("private fun Controller.showPractice").contains("tone = ui.pal.warn"), "the banner is the tinted bar")
         ok(source("src/android/Controller.kt").contains("ScreenModel.pick(fault, status, torBlocked, node != null, ceremonyPending())") && source("src/android/Controller.kt").contains("return showEntry()"), "the app opens on the welcome when nothing is saved")
+        ok(source("src/android/MainActivity.kt").contains("controller.systemBack()") && source("src/android/MainActivity.kt").contains("controller.firstRunBack = null"), "the system's Back does what the arrow does on a first-run screen, and a screen of any other kind clears it")
         ok(source("src/android/AddCounter.kt").contains("afterFirstCounter()") && source("src/android/Screens.kt").contains("tillStepsRow"), "the steps follow the first counter and are in Settings")
 
         val keys = FirstRunWords.all().map { it.first }

@@ -86,6 +86,16 @@ class Controller(internal val act: MainActivity) {
     internal var welcomeNotice: String? = null
     internal val shopFile by lazy { ShopFile(dir) }
 
+    /** What the system's Back does on a screen of the first run: the same as the bar's arrow. Cleared by every screen that is shown. */
+    internal var firstRunBack: (() -> Unit)? = null
+
+    /** The system's Back: true when a screen of the first run took it. */
+    fun systemBack(): Boolean {
+        val b = firstRunBack ?: return false
+        b()
+        return true
+    }
+
     /** A key ceremony was begun and not finished: the first screen resumes it instead of the welcome. */
     internal fun ceremonyPending(): Boolean = File(dir, AppFiles.CEREMONY_FILE).exists() && !File(dir, AppFiles.SETUP_FILE).exists()
 

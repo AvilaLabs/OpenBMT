@@ -49,6 +49,12 @@ internal fun Controller.showFirstRun() {
     }
 }
 
+/** A page of the first run with a way back: the system's Back does the same as the bar's arrow. */
+private fun Controller.stepScreen(title: String, body: List<View>, actions: List<Button> = emptyList(), back: () -> Unit, tone: org.openbmt.app.Tone? = null) {
+    screen(title, body, actions, back = back, tone = tone)
+    firstRunBack = back
+}
+
 private fun Controller.heading(text: String): TextView = ui.text(text, Type.HEADING, bold = true)
 
 // ---- welcome -------------------------------------------------------------------------------------------------------
@@ -74,7 +80,7 @@ private fun Controller.startPractice() {
 
 /** A page of the practice shop: the banner is the bar, tinted, so that every screen carries it. */
 private fun Controller.practicePage(views: List<View>, actions: List<Button>, back: () -> Unit) {
-    screen(FirstRunWords.practiceBanner, views, actions, back = back, tone = ui.pal.warn)
+    stepScreen(FirstRunWords.practiceBanner, views, actions, back, tone = ui.pal.warn)
 }
 
 private fun Controller.showPractice(p: Practice) {
@@ -170,7 +176,7 @@ private fun Controller.showShop(r: FirstRun) {
     }
     val body = listOf(heading(FirstRunWords.shopTitle), name.view, stack(label(FirstRunWords.shopCurrencyLabel), money), para(FirstRunWords.shopCurrencyNote), msg)
     val back = { capture(); r.back(); showFirstRun() }
-    screen(
+    stepScreen(
         FirstRunWords.shopTitle, body,
         listOf(
             ui.primary(FirstRunWords.shopNext) {
@@ -184,7 +190,7 @@ private fun Controller.showShop(r: FirstRun) {
                 }
             },
         ),
-        back = back,
+        back,
     )
 }
 
@@ -230,9 +236,9 @@ private fun Controller.showTillChoice(r: FirstRun) {
             msg.show(ui.words(AppWords.fileNotSaved(e.message)))
         }
     }
-    screen(
+    stepScreen(
         FirstRunWords.shopTitle, listOf(heading(FirstRunWords.tillTitle), para(FirstRunWords.tillText), search, list, msg),
-        listOf(next), back = { r.back(); showFirstRun() },
+        listOf(next), { r.back(); showFirstRun() },
     )
 }
 
@@ -244,25 +250,25 @@ private fun Controller.showMoney(r: FirstRun) {
         RowItem(FirstRunWords.moneyMake, FirstRunWords.moneyMakeNote) { r.choose(MoneyChoice.Make); showFirstRun() },
         RowItem(FirstRunWords.moneyLater, FirstRunWords.moneyLaterNote) { r.choose(MoneyChoice.Later); showFirstRun() },
     )
-    screen(
+    stepScreen(
         FirstRunWords.shopTitle, listOf(heading(FirstRunWords.moneyTitle), para(FirstRunWords.moneyText), ui.rows(rows)),
         back = { r.back(); showFirstRun() },
     )
 }
 
 private fun Controller.showWhy(r: FirstRun) {
-    screen(
+    stepScreen(
         FirstRunWords.shopTitle,
         listOf(heading(FirstRunWords.whyTitle), para(FirstRunWords.whyText1), para(FirstRunWords.whyText2), para(FirstRunWords.whyText3)),
-        listOf(ui.primary(FirstRunWords.shopNext) { r.next(); showFirstRun() }), back = { r.back(); showFirstRun() },
+        listOf(ui.primary(FirstRunWords.shopNext) { r.next(); showFirstRun() }), { r.back(); showFirstRun() },
     )
 }
 
 /** This build has no path of its own for the three choices yet: the existing setup follows. */
 private fun Controller.showNotYet(r: FirstRun) {
-    screen(
+    stepScreen(
         FirstRunWords.shopTitle, listOf(para(FirstRunWords.moneyNotYet)),
-        listOf(ui.primary(FirstRunWords.shopNext) { showFirstStart(null) }), back = { r.back(); showFirstRun() },
+        listOf(ui.primary(FirstRunWords.shopNext) { showFirstStart(null) }), { r.back(); showFirstRun() },
     )
 }
 
@@ -282,7 +288,7 @@ internal fun Controller.showTillSteps(till: Till, back: () -> Unit) {
             },
         )
     }
-    screen(page.title, views, listOf(ui.primary(FirstRunWords.tillStepsDone) { back() }), back = back)
+    stepScreen(page.title, views, listOf(ui.primary(FirstRunWords.tillStepsDone) { back() }), back)
 }
 
 /** What follows the first counter: the steps for the chosen till once, then home. */
