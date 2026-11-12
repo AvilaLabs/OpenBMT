@@ -1849,3 +1849,82 @@ not in this section; it stays refused as CR-236 says.
   bytes are each read as at most one kind.
 - **CR-244.** Every state and refusal of this section has words under
   `docs/SCREEN-RULES.md`.
+
+## 25. Bills, tabs and the till's reference
+
+A table splits its check, a guest pays a deposit and then the rest, a bar
+keeps a tab open all night. A bill is the amount owed in the shop's money,
+paid in parts: each bitcoin part is an ordinary sale with every rule of the
+sections above, and a part paid another way is written down by the cashier.
+A tab is a bill whose amount grows while it is open. The till's reference
+(its check or receipt number) can ride on a sale or a bill, so that what the
+till closed as bitcoin can be matched against what arrived
+(`docs/BOOKS-RULES.md` §13). Status: specification, written before the code.
+
+- **CR-245.** A sale or a bill may carry the till's reference: 1 to 32
+  characters of `A-Z`, `a-z`, `0-9`, `-`, `_`, `/`, `#` and `.`. It is set
+  when the sale or the bill is opened, or added once later; one that already
+  has a reference takes no second one. A reference that does not fit is
+  refused with nothing written. It is written as a `Sale` record with tag 25
+  (the time, then the sale's index or the bill's number as CR-247 says, a
+  length byte and the text). The counter does not read it; the books and the
+  match of `docs/BOOKS-RULES.md` §13 do. Unlike a note (CR-212), the
+  reference is also given to the POS reader with the sale's events, because
+  it is the till's own number.
+- **CR-246.** A bill has a number, an amount in the minor units of the
+  shop's currency (CR-193), above 0 and at most the largest amount of
+  CR-05, a kind (a bill or a tab) and a state: open, settled, closed short
+  or cancelled. Its number is the counter's next bill number, a 32-bit count
+  from 1 that is stored before it is used, as CR-03 stores the next index,
+  so a number is never given twice.
+- **CR-247.** A bill is written as `Sale` records: tag 26 when it opens (the
+  time, its number, its kind, its amount and the currency's code), tag 27
+  when a tab's amount changes (the time, its number, the new amount), tag 28
+  for a part paid another way (the time, its number, the amount and the way:
+  1 cash, 2 card, 3 other), tag 29 when it ends (the time, its number and how
+  it ended: 1 settled, 2 closed short, 3 cancelled), and tag 30 when a sale
+  becomes one of its parts (the time, its number and the sale's index). Each
+  record is stored before the state it names, as CR-59 stores a quote.
+- **CR-248.** A bitcoin part is a sale opened for the bill, or a sale already
+  open or paid that the cashier joins to it, such as a paid deposit request
+  (CR-205). A sale is a part of at most one bill, and joining it is final.
+  The part's amount is the sale's amount; its tip is not part of the bill
+  (CR-189). Every rule of the sale holds for the part as for any sale:
+  quotes, limits, Lightning, overrides, refunds.
+- **CR-249.** What a bill has received is the sum of its parts that count:
+  a bitcoin part counts with its amount in the shop's money once the sale is
+  paid by its own rules (accepted, or confirmed for a request); a part paid
+  another way counts with the amount the cashier typed. A part that is
+  pending counts for nothing until it is paid. The bill is settled, and
+  written so (tag 29), when what it has received reaches its amount; the
+  part that passes it is not cut short, and any excess is that sale's
+  overpayment, judged as CR-16 judges it.
+- **CR-250.** The counter helps the cashier split what is left: it shows
+  what is left and, when asked for a number of people from 2 to 20, the
+  amount each, rounded up to a minor unit, the last share taking what is
+  left over. Each share is opened as a part only when its customer is ready.
+- **CR-251.** A tab's amount may be raised while it is open, and lowered to
+  no less than what it has received. A bill's amount does not change. A tab
+  is settled only when the cashier says it is finished and what it has
+  received reaches its amount; until then it stays open whatever has
+  arrived.
+- **CR-252.** A bill that has received less than its amount can be closed
+  short with the manager's PIN (CR-84); what was not paid is written in the
+  record's amount, and the books show it. A bill with no part that counts
+  and none pending can be cancelled; one that has received something or has
+  a part pending cannot, and its parts are refunded by the rules of section
+  7 if they are to be refunded.
+- **CR-253.** Bills are stored in their own file, `bills.bin`, magic `OBM[`,
+  version 1, written by atomic steps: the next bill number, then each open
+  bill (number, kind, amount, currency, reference, its parts: the sale's
+  index, or the amount and way of a part paid another way) and each bill
+  that ended in the last 7 days, oldest first. At most 256 bills are open
+  and a bill has at most 32 parts; a new bill or part past those is refused
+  with words. The read is strict and bounded, as CR-42 reads sales.
+- **CR-254.** The Paid screen of a sale shows the sale's number and, when it
+  has one, the till's reference, large enough to copy into the till's
+  payment note, because a fiscal till may need them on its receipt
+  (`docs/BOOKS-RULES.md` §13).
+- **CR-255.** Every state and refusal of this section has words under
+  `docs/SCREEN-RULES.md`; until the words are written a placeholder constant
+  `WORDS_NEEDED_CR_xxx` names the rule.

@@ -359,3 +359,52 @@ later (`docs/COUNTER-RULES.md`, CR-206).
 - **No passphrase strength check, no key storage, no schedule.** Choosing the
   place, the time and the passphrase is for the app.
 - **No clock, no network, no randomness of its own.**
+
+## 13. Bills, the till's reference and the till's own payments
+
+A counter can take one bill in several parts and carry the till's reference
+on a sale or a bill (`docs/COUNTER-RULES.md` §25). The books show both, and a
+separate step matches the till's own list of payments against what arrived,
+so a check closed as bitcoin with nothing behind it is found. Status:
+specification, written before the code.
+
+- **BK-43.** A sale or a bill holds its reference when a `Sale` record with
+  tag 25 names it (CR-245); when there are two for one, the first stands,
+  since the counter takes no second one. The full ledger (BK-19) has it in a
+  column "Till reference" after "Sale note", empty when there is none. The
+  accounting export (BK-17) holds the reference in the description, after
+  the opaque sale ID, since it is the shop's own number and reveals no
+  payment.
+- **BK-44.** A bill is folded from its records (CR-247) as a sale is: its
+  number, kind, amount and currency, its reference, its parts (bitcoin parts
+  by their sales, parts paid another way by their amount and way) and how it
+  ended. The full ledger has one line per bill after the sales, with what it
+  received in bitcoin, what it received another way, what was left unpaid
+  when it was closed short, and the opaque IDs of its sales. A part paid
+  another way is the cashier's word and is written as such; it is never an
+  income line of the accounting export, which counts bitcoin only (BK-17).
+- **BK-45.** The bundle (BK-28) is version 5 when at least one sale or bill
+  has a reference or one bill exists: version 4's fields, then each sale's
+  reference (0, or 1 and the text), then the bills. A bundle with neither is
+  written as before; versions 1 to 4 still read. Reading is strict, as BK-42
+  says.
+- **BK-46.** The till's own payments are read from a CSV file the till
+  exports. The owner says once, per till, which column holds the reference,
+  the amount, the payment type and the time, and which payment type means
+  bitcoin; the mapping is kept with the books' settings. A file is at most
+  8 MiB and 100,000 lines, RFC 4180 (BK-20), UTF-8; one that does not read
+  is refused whole, naming the line.
+- **BK-47.** The match takes the lines whose payment type is bitcoin and
+  the sales and bills of the same days, and pairs them by reference. It
+  gives four lists: matched (same reference, amounts equal to the minor
+  unit); amount differs (same reference, different amount); the till's
+  line with no paid sale or bill behind it (a check closed as bitcoin that
+  bitcoin did not pay); and a paid sale or bill whose reference is in no
+  line of the file. A line or a sale with no reference goes to its own
+  list, to be matched by hand. The match changes no record and no total; it
+  is a report, kept until the owner clears it.
+- **BK-48.** The library does the reading and the matching (`openbmt-books`,
+  no network, no clock of its own). The owner app's part is picking the
+  file, the mapping screen and showing the lists, with words under
+  `docs/SCREEN-RULES.md`; until they are written a placeholder constant
+  `WORDS_NEEDED_BK_xxx` names the rule.
