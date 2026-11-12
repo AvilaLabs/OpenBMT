@@ -333,6 +333,7 @@ fn event_at(event: &Event) -> u64 {
     match event {
         Event::Opened { at, .. }
         | Event::Requoted { at, .. }
+        | Event::Noted { at, .. }
         | Event::Expired { at, .. }
         | Event::Cancelled { at, .. }
         | Event::PaidAtOnce { at, .. }

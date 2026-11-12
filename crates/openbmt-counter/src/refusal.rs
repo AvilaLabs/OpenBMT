@@ -64,6 +64,8 @@ pub enum OpenRefused<E> {
     AddressInUse,
     /// CR-61: the name of the person who opens the sale is not a label.
     BadName,
+    /// CR-206: the note on the sale is not plain text of 1 to 64 characters.
+    BadNote,
     /// CR-03: the next index could not be stored, so no address was handed
     /// out.
     AddressNotStored(StoreFault<E>),
@@ -86,6 +88,7 @@ impl<E> OpenRefused<E> {
             Self::RateLimited => "CR-04",
             Self::NoAddress | Self::AddressInUse => "CR-02",
             Self::BadName => "CR-61",
+            Self::BadNote => "CR-206",
             Self::AddressNotStored(_) => "CR-03",
             Self::Store(_) => "CR-40",
         }
@@ -134,6 +137,10 @@ impl<E: fmt::Display> fmt::Display for OpenRefused<E> {
             Self::BadName => write!(
                 f,
                 "the name of the person is not a label of 1 to 64 characters with no control character"
+            ),
+            Self::BadNote => write!(
+                f,
+                "a note is plain text of 1 to 64 characters with no control character"
             ),
             Self::AddressNotStored(e) => write!(
                 f,
@@ -195,6 +202,8 @@ pub enum RequoteRefused<E> {
     AlreadyEnough,
     /// CR-05: the sale already has the most quotes.
     TooManyQuotes,
+    /// CR-207: a request to send keeps the one quote it was made with.
+    IsRequest,
     /// CR-05: the amount needs more than 21,000,000 bitcoin at the rate.
     AmountTooLarge,
     /// CR-75: the new quote would put a sale with nothing received below
@@ -224,6 +233,7 @@ impl<E> RequoteRefused<E> {
             Self::UnknownSale(_) => "CR-11",
             Self::SaleEnded | Self::TooManyQuotes | Self::AmountTooLarge => "CR-05",
             Self::AlreadyEnough => "CR-08",
+            Self::IsRequest => "CR-207",
             Self::BelowMinimum { .. } => "CR-75",
             Self::StaleRate { .. } => "CR-58",
             Self::Store(_) => "CR-40",
@@ -239,6 +249,7 @@ impl<E: fmt::Display> fmt::Display for RequoteRefused<E> {
             Self::SaleEnded => write!(f, "the sale has ended and takes no new quote"),
             Self::AlreadyEnough => write!(f, "enough has arrived; the sale takes no new quote"),
             Self::TooManyQuotes => write!(f, "the sale has the most quotes it can keep"),
+            Self::IsRequest => write!(f, "a request to send keeps the quote it was made with"),
             Self::BelowMinimum { sats, min_sats } => write!(
                 f,
                 "at the new rate the sale is only {sats} sats, below the shop's smallest \
@@ -255,6 +266,47 @@ impl<E: fmt::Display> fmt::Display for RequoteRefused<E> {
 }
 
 impl<E: fmt::Debug + fmt::Display> std::error::Error for RequoteRefused<E> {}
+
+/// Why a note was not added to a sale (CR-206).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoteRefused<E> {
+    /// CR-11: the counter has no sale with this index.
+    UnknownSale(u32),
+    /// CR-206: the note is not plain text of 1 to 64 characters.
+    BadNote,
+    /// CR-206: the sale has a note already.
+    AlreadyNoted,
+    /// CR-40: a write failed.
+    Store(StoreFault<E>),
+}
+
+impl<E> NoteRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::UnknownSale(_) => "CR-11",
+            Self::BadNote | Self::AlreadyNoted => "CR-206",
+            Self::Store(_) => "CR-40",
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for NoteRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::UnknownSale(i) => write!(f, "there is no sale with index {i}"),
+            Self::BadNote => write!(
+                f,
+                "a note is plain text of 1 to 64 characters with no control character"
+            ),
+            Self::AlreadyNoted => write!(f, "the sale has a note already"),
+            Self::Store(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for NoteRefused<E> {}
 
 /// Why a sale was not cancelled (CR-07).
 #[derive(Debug, Clone, PartialEq, Eq)]

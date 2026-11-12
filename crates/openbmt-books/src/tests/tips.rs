@@ -77,11 +77,11 @@ fn bk_38_the_ledger_has_the_tip_in_its_last_column() {
         .lines()
         .find(|l| l.starts_with("Type,"))
         .expect("header");
-    assert!(header.ends_with(",Tips"), "{header}");
+    assert!(header.ends_with(",Tips,Sale note"), "{header}");
     let rows: Vec<&str> = ledger.lines().filter(|l| l.starts_with("sale,")).collect();
     assert_eq!(rows.len(), 5);
-    assert!(rows.iter().any(|r| r.ends_with(",2.75")));
-    assert!(rows.iter().any(|r| r.ends_with(",1.00")));
+    assert!(rows.iter().any(|r| r.ends_with(",2.75,")));
+    assert!(rows.iter().any(|r| r.ends_with(",1.00,")));
     // The amount column is the sale's own, and a sale without a tip is empty.
     assert!(rows.iter().any(|r| r.contains(",18.50,")));
     assert!(rows

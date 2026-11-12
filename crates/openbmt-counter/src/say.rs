@@ -28,8 +28,8 @@ use crate::heartbeat::{HeartbeatView, NotVerified};
 use crate::refund::{RefundState, RefundView};
 use crate::refusal::{
     BlockError, CancelRefused, CommandRefused, DestinationRefused, HeartbeatRefused, JudgeError,
-    LightningRefused, LoadError, OpenRefused, OverrideRefused, RefundRefused, RequoteRefused,
-    SightingError, StaffRefused, TotalsRefused, WithdrawRefused,
+    LightningRefused, LoadError, NoteRefused, OpenRefused, OverrideRefused, RefundRefused,
+    RequoteRefused, SightingError, StaffRefused, TotalsRefused, WithdrawRefused,
 };
 use crate::screen::{Color, Next, Screen, State, Why};
 use crate::store::StoreFault;
@@ -576,6 +576,7 @@ impl<E: Display> OpenRefused<E> {
                 "Sign in again, or ask a manager to rename the cashier.",
                 "CR-61",
             ),
+            Self::BadNote => note_not_read(),
             Self::AddressNotStored(fault) => store_failed(
                 fault,
                 "Payment code not saved",
@@ -706,6 +707,13 @@ impl<E: Display> RequoteRefused<E> {
                 "Start a new sale. If the customer already paid on this one, tell the owner.",
                 "CR-05",
             ),
+            Self::IsRequest => refused(
+                "Request keeps its price",
+                "A request to send keeps the price it was made with, so it takes no new price.",
+                Who::Nobody,
+                "Nothing to do.",
+                "CR-207",
+            ),
             Self::AmountTooLarge => refused(
                 "New price too large",
                 "That is more than any real payment could be, so the price was not changed.",
@@ -735,6 +743,49 @@ impl<E: Display> RequoteRefused<E> {
                 fault,
                 "New price not saved",
                 "the sale keeps its old price",
+                Tone::Ended,
+                Who::Cashier,
+                RETRY_NEXT,
+            ),
+        }
+    }
+}
+
+/// CR-206: a note that is not plain text of 1 to 64 characters.
+fn note_not_read() -> Words {
+    refused(
+        "Note not accepted",
+        "A note must be plain text of 1 to 64 characters, so it was not saved.",
+        Who::Cashier,
+        "Type it again, shorter.",
+        "CR-206",
+    )
+}
+
+impl<E: Display> NoteRefused<E> {
+    /// What the cashier is told when a note is not added to a sale.
+    pub fn words(&self) -> Words {
+        match self {
+            Self::UnknownSale(i) => refused(
+                "Sale not found",
+                "The counter has no such sale to add a note to.",
+                Who::Cashier,
+                NOT_FOUND_NEXT,
+                "CR-11",
+            )
+            .detail(format!("Sale number {i}.")),
+            Self::BadNote => note_not_read(),
+            Self::AlreadyNoted => refused(
+                "Note already added",
+                "This sale has a note already, so the new one was not saved.",
+                Who::Nobody,
+                "Nothing to do.",
+                "CR-206",
+            ),
+            Self::Store(fault) => store_failed(
+                fault,
+                "Note not saved",
+                "the note was not added",
                 Tone::Ended,
                 Who::Cashier,
                 RETRY_NEXT,
@@ -1907,6 +1958,7 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("NoAddress", OpenRefused::NoAddress),
         ("AddressInUse", OpenRefused::AddressInUse),
         ("BadName", OpenRefused::BadName),
+        ("BadNote", OpenRefused::BadNote),
         ("AddressNotStored", OpenRefused::AddressNotStored(w())),
         ("Store", OpenRefused::Store(w())),
         ("Store/Record", OpenRefused::Store(record_fault())),
@@ -1937,6 +1989,7 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("SaleEnded", RequoteRefused::SaleEnded),
         ("AlreadyEnough", RequoteRefused::AlreadyEnough),
         ("TooManyQuotes", RequoteRefused::TooManyQuotes),
+        ("IsRequest", RequoteRefused::IsRequest),
         ("AmountTooLarge", RequoteRefused::AmountTooLarge),
         (
             "BelowMinimum",
@@ -1956,6 +2009,15 @@ pub fn all_words() -> Vec<(String, Words)> {
     ];
     for (name, r) in requote {
         all.push((format!("RequoteRefused::{name}"), r.words()));
+    }
+    let note: Vec<(&str, NoteRefused<String>)> = vec![
+        ("UnknownSale", NoteRefused::UnknownSale(3)),
+        // `NoteRefused::BadNote` says what `OpenRefused::BadNote` says.
+        ("AlreadyNoted", NoteRefused::AlreadyNoted),
+        ("Store", NoteRefused::Store(w())),
+    ];
+    for (name, r) in note {
+        all.push((format!("NoteRefused::{name}"), r.words()));
     }
     let cancel: Vec<(&str, CancelRefused<String>)> = vec![
         ("UnknownSale", CancelRefused::UnknownSale(3)),

@@ -6,6 +6,7 @@ mod hostile;
 mod input;
 mod lightning;
 mod meta;
+mod notes;
 mod outflow;
 mod real;
 mod records;

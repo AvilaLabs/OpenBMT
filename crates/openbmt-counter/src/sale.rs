@@ -39,6 +39,18 @@
 //! may be empty and its Lightning flag may be 0. A sale that was not paid
 //! over Lightning and has no tip is written as before, so every earlier file
 //! reads back and every earlier build's file is unchanged.
+//!
+//! OBML | 5 | the fields of version 1
+//!   | tip u64 (0 for none) | Lightning (flag, payment_hash (32),
+//!   amount_msat u64, settled_at (flag, u64))
+//!   | n_refunds u32 | n_refunds * refund entry
+//!   | request u8 (0 none, else 1, 3 or 7 days) | note (flag, len u8, text)
+//!
+//! Version 5 is written only for a request to send (CR-204) or a sale with a
+//! note (CR-206), and holds at least one of the two. A request has one quote,
+//! and the quote lasts the request's days instead of [`QUOTE_SECS`]. A
+//! request is never paid over Lightning. Every sale without either is
+//! written as before.
 
 use bitcoin::hashes::Hash;
 use bitcoin::{ScriptBuf, Txid};
@@ -51,7 +63,7 @@ use openbmt_watch::{
 use crate::desk::{len32, valid_name, Role};
 use crate::events::{label_from_u8, label_to_u8, mode_from_u8, mode_to_u8};
 use crate::money::{is_enough, sats_for, value_of, Amount, Currency, Quote, Rate, QUOTE_SECS};
-use crate::refund::{RefundEntry, MAX_REFUNDS_PER_SALE};
+use crate::refund::{refund_text_ok, RefundEntry, MAX_REFUNDS_PER_SALE};
 use crate::{
     DUST_SATS, MAX_LATE_PAYMENTS, MAX_NAME_BYTES, MAX_QUOTES, MAX_SEGMENTS, MAX_WATCH_BYTES,
 };
@@ -62,6 +74,48 @@ const SALE_VERSION_WITH_REFUNDS: u8 = 2;
 const SALE_VERSION_LIGHTNING: u8 = 3;
 /// The version byte of a sale with a tip (CR-189).
 const SALE_VERSION_TIP: u8 = 4;
+/// The version byte of a request to send or a sale with a note (CR-204,
+/// CR-206).
+const SALE_VERSION_REQUEST: u8 = 5;
+/// Seconds in a day.
+const DAY_SECS: u64 = 86_400;
+
+/// How long a request to send lasts (CR-204).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestDays {
+    /// One day.
+    One,
+    /// Three days.
+    Three,
+    /// Seven days.
+    Seven,
+}
+
+impl RequestDays {
+    /// The number of days: 1, 3 or 7.
+    pub fn days(self) -> u8 {
+        match self {
+            Self::One => 1,
+            Self::Three => 3,
+            Self::Seven => 7,
+        }
+    }
+
+    /// The days of a number; `None` unless it is 1, 3 or 7.
+    pub fn from_days(days: u8) -> Option<Self> {
+        match days {
+            1 => Some(Self::One),
+            3 => Some(Self::Three),
+            7 => Some(Self::Seven),
+            _ => None,
+        }
+    }
+
+    /// The lifetime in seconds.
+    pub fn secs(self) -> u64 {
+        u64::from(self.days()) * DAY_SECS
+    }
+}
 
 /// What the sale keeps of a Lightning payment (CR-109, CR-110): the facts
 /// the node reported when the invoice was settled.
@@ -161,6 +215,11 @@ pub struct Sale {
     pub(crate) late_unlisted: bool,
     pub(crate) refunds: Vec<RefundEntry>,
     pub(crate) lightning: Option<LightningPaid>,
+    /// The lifetime of a request to send; none for a sale shown at the till
+    /// (CR-204).
+    pub(crate) request: Option<RequestDays>,
+    /// The note on the sale (CR-206): plain text of 1 to 64 characters.
+    pub(crate) note: Option<String>,
 }
 
 impl Sale {
@@ -207,6 +266,8 @@ impl Sale {
             late_unlisted: false,
             refunds: Vec::new(),
             lightning: None,
+            request: None,
+            note: None,
         }
     }
 
@@ -300,6 +361,29 @@ impl Sale {
     /// The Lightning payment that settled the sale, if one did (CR-109).
     pub fn lightning(&self) -> Option<&LightningPaid> {
         self.lightning.as_ref()
+    }
+
+    /// The lifetime of the sale if it is a request to send (CR-204).
+    pub fn request(&self) -> Option<RequestDays> {
+        self.request
+    }
+
+    /// Whether the sale is a request to send (CR-204).
+    pub fn is_request(&self) -> bool {
+        self.request.is_some()
+    }
+
+    /// The second at which a sale with nothing received expires (CR-07,
+    /// CR-204): [`crate::EXPIRY_SECS`] after it opened, or the days of a
+    /// request.
+    pub fn expires_at(&self) -> u64 {
+        let life = self.request.map_or(crate::EXPIRY_SECS, RequestDays::secs);
+        self.opened_at.saturating_add(life)
+    }
+
+    /// The note on the sale (CR-206).
+    pub fn note(&self) -> Option<&str> {
+        self.note.as_deref()
     }
 
     /// The exposure for this sale is counted in the ledger.
@@ -568,7 +652,34 @@ impl Sale {
         }
         out.extend_from_slice(&len32(watch.len()).to_le_bytes());
         out.extend_from_slice(&watch);
-        if self.tip.0 > 0 {
+        if self.request.is_some() || self.note.is_some() {
+            if let Some(byte) = out.get_mut(4) {
+                *byte = SALE_VERSION_REQUEST;
+            }
+            out.extend_from_slice(&self.tip.0.to_le_bytes());
+            match &self.lightning {
+                Some(paid) => {
+                    out.push(1);
+                    out.extend_from_slice(&paid.payment_hash);
+                    out.extend_from_slice(&paid.amount_msat.to_le_bytes());
+                    wire::put_opt_u64(&mut out, paid.settled_at);
+                }
+                None => out.push(0),
+            }
+            out.extend_from_slice(&len32(self.refunds.len()).to_le_bytes());
+            for entry in &self.refunds {
+                entry.write(&mut out);
+            }
+            out.push(self.request.map_or(0, RequestDays::days));
+            match &self.note {
+                Some(note) => {
+                    out.push(1);
+                    out.push(u8::try_from(note.len()).unwrap_or(u8::MAX));
+                    out.extend_from_slice(note.as_bytes());
+                }
+                None => out.push(0),
+            }
+        } else if self.tip.0 > 0 {
             if let Some(byte) = out.get_mut(4) {
                 *byte = SALE_VERSION_TIP;
             }
@@ -632,6 +743,7 @@ impl Sale {
             && version != SALE_VERSION_WITH_REFUNDS
             && version != SALE_VERSION_LIGHTNING
             && version != SALE_VERSION_TIP
+            && version != SALE_VERSION_REQUEST
         {
             return Err(DecodeError::UnsupportedVersion(version));
         }
@@ -661,9 +773,6 @@ impl Sale {
             let rate = Rate::new(r.u64_le()?).ok_or(bad("a rate is zero"))?;
             let from = r.u64_le()?;
             let until = r.u64_le()?;
-            if until != from.saturating_add(QUOTE_SECS) {
-                return Err(bad("a quote does not last the quote time"));
-            }
             if sats_for(amount, rate).is_none() {
                 return Err(bad("a quote cannot price the amount"));
             }
@@ -760,15 +869,17 @@ impl Sale {
         let mut refunds: Vec<RefundEntry> = Vec::new();
         let mut lightning = None;
         let mut tip = Amount(0);
-        if version == SALE_VERSION_TIP {
+        let extended = version == SALE_VERSION_TIP || version == SALE_VERSION_REQUEST;
+        if extended {
             tip = Amount(r.u64_le()?);
             // The tip is part of the sum due, and a tip is never more than
-            // the sale's own amount (CR-190).
-            if tip.0 == 0 || tip.0 > amount.0.saturating_sub(tip.0) {
+            // the sale's own amount (CR-190). Version 5 may have none.
+            let none = tip.0 == 0 && version == SALE_VERSION_REQUEST;
+            if !none && (tip.0 == 0 || tip.0 > amount.0.saturating_sub(tip.0)) {
                 return Err(bad("a sale's tip is nothing or more than the sale itself"));
             }
         }
-        if version == SALE_VERSION_LIGHTNING || (version == SALE_VERSION_TIP && r.flag()?) {
+        if version == SALE_VERSION_LIGHTNING || (extended && r.flag()?) {
             let payment_hash = r.array::<32>()?;
             let amount_msat = r.u64_le()?;
             if amount_msat == 0 {
@@ -780,10 +891,7 @@ impl Sale {
                 settled_at: r.opt_u64()?,
             });
         }
-        if version == SALE_VERSION_WITH_REFUNDS
-            || version == SALE_VERSION_LIGHTNING
-            || version == SALE_VERSION_TIP
-        {
+        if version == SALE_VERSION_WITH_REFUNDS || version == SALE_VERSION_LIGHTNING || extended {
             let n = r.count(MAX_REFUNDS_PER_SALE, 28)?;
             if n == 0 && version == SALE_VERSION_WITH_REFUNDS {
                 return Err(bad("version 2 holds no refund entry"));
@@ -800,8 +908,46 @@ impl Sale {
                 refunds.push(entry);
             }
         }
+        let mut request = None;
+        let mut note = None;
+        if version == SALE_VERSION_REQUEST {
+            request = match r.u8()? {
+                0 => None,
+                days => Some(
+                    RequestDays::from_days(days)
+                        .ok_or(bad("a request does not last 1, 3 or 7 days"))?,
+                ),
+            };
+            if r.flag()? {
+                let len = usize::from(r.u8()?);
+                let text = std::str::from_utf8(r.take(len)?)
+                    .map_err(|_| bad("a note is not text"))?
+                    .to_string();
+                if !refund_text_ok(&text) {
+                    return Err(bad("a note is not plain text of 1 to 64 characters"));
+                }
+                note = Some(text);
+            }
+            if request.is_none() && note.is_none() {
+                return Err(bad("version 5 holds neither a request nor a note"));
+            }
+        }
         r.finish()?;
 
+        // CR-05, CR-204: a quote lasts the quote time; the one quote of a
+        // request lasts the request's days.
+        let life = request.map_or(QUOTE_SECS, RequestDays::secs);
+        if quotes
+            .iter()
+            .any(|q| q.until != q.from.saturating_add(life))
+        {
+            return Err(bad("a quote does not last the quote time"));
+        }
+        if request.is_some() && (quotes.len() != 1 || lightning.is_some()) {
+            return Err(bad(
+                "a request has one quote and is not paid over Lightning",
+            ));
+        }
         if watch.script() != script.as_script() {
             return Err(bad("the watch is for another script"));
         }
@@ -847,6 +993,8 @@ impl Sale {
             late_unlisted,
             refunds,
             lightning,
+            request,
+            note,
         })
     }
 }

@@ -44,17 +44,16 @@ use crate::refund::{
 };
 use crate::refusal::{
     BatchTakeRefused, BlockError, CancelRefused, CommandRefused, HeartbeatRefused, JudgeError,
-    LightningRefused, LoadError, OpenRefused, OverrideRefused, RefundRefused, RequoteRefused,
-    SightingError, StaffRefused, TotalsRefused, WithdrawRefused,
+    LightningRefused, LoadError, NoteRefused, OpenRefused, OverrideRefused, RefundRefused,
+    RequoteRefused, SightingError, StaffRefused, TotalsRefused, WithdrawRefused,
 };
-use crate::sale::{End, LightningPaid, OverrideMark, PosState, Sale};
+use crate::sale::{End, LightningPaid, OverrideMark, PosState, RequestDays, Sale};
 use crate::screen::{Next, Report, Screen, State, Why};
 use crate::staff::StaffEvent;
 use crate::store::{Slot, Store, StoreFault};
 use crate::totals::{fold_day, record_time, DayTotals, TOTALS_BLOCK, TOTALS_MAX_RECORDS};
 use crate::{
-    DUST_SATS, EXPIRY_SECS, MAX_LATE_PAYMENTS, MAX_QUOTES, MAX_SETTLE_PER_CALL, SETTLE_SECS,
-    STUCK_SECS,
+    DUST_SATS, MAX_LATE_PAYMENTS, MAX_QUOTES, MAX_SETTLE_PER_CALL, SETTLE_SECS, STUCK_SECS,
 };
 use openbmt_core::policy::{OffReason, WaitReason};
 
@@ -119,6 +118,16 @@ pub struct Opened {
     pub needs_sats: u64,
     /// The first quote.
     pub quote: Quote,
+}
+
+/// What a sale may carry besides its amount: a note (CR-206) and the days of
+/// a request to send (CR-205).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SaleExtras<'a> {
+    /// The note: plain text of 1 to 64 characters.
+    pub note: Option<&'a str>,
+    /// Make the sale a request to send that lasts these days.
+    pub request: Option<RequestDays>,
 }
 
 /// What judging a sale needs to know (CR-12).
@@ -1109,15 +1118,53 @@ impl Counter {
         &mut self,
         amount: Amount,
         tip: Amount,
-        _currency: Currency,
+        currency: Currency,
         rate: Rate,
         source: &RateSource,
         facts: OpenFacts,
         by: Option<&Actor>,
         store: &mut S,
     ) -> Result<Opened, OpenRefused<S::Error>> {
+        self.open_with_extras(
+            amount,
+            tip,
+            currency,
+            rate,
+            source,
+            facts,
+            by,
+            SaleExtras::default(),
+            store,
+        )
+    }
+
+    /// [`Counter::open_with_tip`] for a sale that carries a note (CR-206), or
+    /// is a request to send (CR-205): `extras` says which. A note that is not
+    /// plain text of 1 to 64 characters is refused with nothing written. A
+    /// request has the lifetime of its days, one quote that holds for all of
+    /// it, and is never accepted at once (CR-205, CR-208).
+    ///
+    /// The writes are those of [`Counter::open`], and then, for a note, a
+    /// `Sale` record "noted" (CR-206): if it fails, the sale is stored, `Err`
+    /// is returned and the address must not be shown.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_with_extras<S: Store>(
+        &mut self,
+        amount: Amount,
+        tip: Amount,
+        _currency: Currency,
+        rate: Rate,
+        source: &RateSource,
+        facts: OpenFacts,
+        by: Option<&Actor>,
+        extras: SaleExtras<'_>,
+        store: &mut S,
+    ) -> Result<Opened, OpenRefused<S::Error>> {
         if by.is_some_and(|a| !refund_text_ok(&a.name)) {
             return Err(OpenRefused::BadName);
+        }
+        if extras.note.is_some_and(|n| !refund_text_ok(n)) {
+            return Err(OpenRefused::BadNote);
         }
         let now = facts.now;
         // CR-196, CR-197: the currency is the settings'; Bitcoin Standard
@@ -1188,8 +1235,12 @@ impl Counter {
             return Err(OpenRefused::AddressInUse);
         }
 
-        let quote = Quote::new(rate, now);
-        let sale = Sale::new(
+        // CR-205: the one quote of a request holds for its whole lifetime.
+        let quote = match extras.request {
+            Some(days) => Quote::lasting(rate, now, days.secs()),
+            None => Quote::new(rate, now),
+        };
+        let mut sale = Sale::new(
             index,
             script.clone(),
             now,
@@ -1200,6 +1251,8 @@ impl Counter {
             needs_sats,
             self.settings.underpayment_tolerance_bps,
         );
+        sale.request = extras.request;
+        sale.note = extras.note.map(str::to_string);
         self.put_sale(store, sale).map_err(OpenRefused::Store)?;
         let event = Event::Opened {
             index,
@@ -1214,12 +1267,57 @@ impl Counter {
         };
         self.write_event(store, &event)
             .map_err(OpenRefused::Store)?;
+        if let Some(note) = extras.note {
+            let noted = Event::Noted {
+                index,
+                at: now,
+                note: note.to_string(),
+            };
+            self.write_event(store, &noted)
+                .map_err(OpenRefused::Store)?;
+        }
         Ok(Opened {
             index,
             script,
             needs_sats,
             quote,
         })
+    }
+
+    /// CR-206: add a note to a sale that has none. The note is plain text of
+    /// 1 to 64 characters (the check of a person's name, CR-61); a sale takes
+    /// one note, set when it opened or added here once. Works on a sale in
+    /// any state: a note is a word about the sale, not a change to it.
+    ///
+    /// The writes, in this order: a `Sale` record "noted", then the sale. If
+    /// the process stops between them the sale has no note and `Err` is
+    /// returned; asking again writes a second record.
+    pub fn add_note<S: Store>(
+        &mut self,
+        index: u32,
+        note: &str,
+        now: u64,
+        store: &mut S,
+    ) -> Result<(), NoteRefused<S::Error>> {
+        if !refund_text_ok(note) {
+            return Err(NoteRefused::BadNote);
+        }
+        let mut sale = self
+            .sales
+            .get(&index)
+            .cloned()
+            .ok_or(NoteRefused::UnknownSale(index))?;
+        if sale.note.is_some() {
+            return Err(NoteRefused::AlreadyNoted);
+        }
+        sale.note = Some(note.to_string());
+        let event = Event::Noted {
+            index,
+            at: now,
+            note: note.to_string(),
+        };
+        self.finish(store, sale, &[event])
+            .map_err(NoteRefused::Store)
     }
 
     /// CR-197: the rate and its source a price is made with. The caller's,
@@ -1263,6 +1361,9 @@ impl Counter {
             .ok_or(RequoteRefused::UnknownSale(index))?;
         if !sale.is_live() {
             return Err(RequoteRefused::SaleEnded);
+        }
+        if sale.is_request() {
+            return Err(RequoteRefused::IsRequest);
         }
         if sale.quotes.len() >= MAX_QUOTES {
             return Err(RequoteRefused::TooManyQuotes);
@@ -1867,7 +1968,7 @@ impl Counter {
             && !st.conflict_seen
             && sale.accepted.is_none()
             && sale.overridden.is_none()
-            && now >= sale.opened_at.saturating_add(EXPIRY_SECS)
+            && now >= sale.expires_at()
         {
             sale.ended = Some((End::Expired, now));
             events.push(Event::Expired { index, at: now });
@@ -1938,6 +2039,13 @@ impl Counter {
                     State::DoNotHandOver,
                     Why::CannotCheck(facts.health.problem),
                     Next::AskOwnerOrOtherPayment,
+                );
+            } else if sale.is_request() {
+                // CR-208: a request is paid when what arrived is at the
+                // confirmation depth, as a sale above the instant limits is.
+                (why, next) = (
+                    Why::Wait(WaitReason::OverSaleLimit),
+                    Next::WaitForConfirmation { depth },
                 );
             } else if st.mode.is_none() {
                 // Waiting: not yet seen by enough of the network.

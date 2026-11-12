@@ -65,7 +65,7 @@ mod tests;
 pub use batch_held::{batch_digest, BatchHeld};
 pub use counter::{
     sale_payment_id, Actor, BlockEffect, BlockTaken, Counter, Facts, OpenFacts, Opened, Overridden,
-    Pairing, Settled, Sightings, Stored,
+    Pairing, SaleExtras, Settled, Sightings, Stored,
 };
 pub use desk::{Desk, OverrideEntry, Role};
 pub use events::Event;
@@ -81,10 +81,11 @@ pub use refund::{
 };
 pub use refusal::{
     BatchTakeRefused, BlockError, CancelRefused, CommandRefused, DestinationRefused,
-    HeartbeatRefused, JudgeError, LightningRefused, LoadError, OpenRefused, OverrideRefused,
-    RefundRefused, RequoteRefused, SightingError, StaffRefused, TotalsRefused, WithdrawRefused,
+    HeartbeatRefused, JudgeError, LightningRefused, LoadError, NoteRefused, OpenRefused,
+    OverrideRefused, RefundRefused, RequoteRefused, SightingError, StaffRefused, TotalsRefused,
+    WithdrawRefused,
 };
-pub use sale::{End, LightningPaid, OverrideMark, PosState, Sale, Segment};
+pub use sale::{End, LightningPaid, OverrideMark, PosState, RequestDays, Sale, Segment};
 pub use screen::{Color, Next, Report, Screen, State, Why};
 pub use staff::{StaffChange, StaffEvent};
 pub use store::{Slot, Store, StoreFault};

@@ -336,6 +336,8 @@ pub struct Sale {
     pub pos: PosMark,
     /// BK-32: how the sale was paid.
     pub payment_mode: PaymentMode,
+    /// BK-41: the note on the sale, as the counter wrote it.
+    pub note: Option<String>,
 }
 
 impl Sale {

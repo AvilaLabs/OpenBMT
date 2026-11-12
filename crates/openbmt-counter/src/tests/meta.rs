@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 21] = [
+const TEST_SOURCES: [&str; 22] = [
     include_str!("currency.rs"),
     include_str!("encodings.rs"),
     include_str!("heartbeat.rs"),
@@ -18,6 +18,7 @@ const TEST_SOURCES: [&str; 21] = [
     include_str!("records.rs"),
     include_str!("refunds.rs"),
     include_str!("reports.rs"),
+    include_str!("requests.rs"),
     include_str!("settings.rs"),
     include_str!("settle.rs"),
     include_str!("batch_held.rs"),
@@ -33,7 +34,7 @@ const TEST_SOURCES: [&str; 21] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 68] = [
+const NOT_HERE: [(&str, &str); 73] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -301,6 +302,33 @@ const NOT_HERE: [(&str, &str); 68] = [
          app's JVM tests (`apps/counter-android`)",
     ),
     (
+        "CR-212",
+        "the POS reader's facts and notices are `openbmt-pos`'s, and the note goes to none of \
+         them; tested in `openbmt-pos` (`cr_212_*` in `tests/facts.rs`), and the books' side \
+         in `openbmt-books` (BK-41)",
+    ),
+    (
+        "CR-213",
+        "the New sale button, the note field and the chips are the Android app's; tested in the \
+         app's JVM tests (`apps/counter-android`)",
+    ),
+    (
+        "CR-214",
+        "the page of a request and the share are the Android app's; the link is made in \
+         `openbmt-counter-ffi`; tested there and in the app's JVM tests, and the share sheet \
+         needs a device to test",
+    ),
+    (
+        "CR-215",
+        "the list on Home is the Android app's, from the rows `openbmt-counter-ffi` gives; \
+         tested there and in the app's JVM tests",
+    ),
+    (
+        "CR-216",
+        "the details of a sale are the Android app's; tested in the app's JVM tests \
+         (`apps/counter-android`)",
+    ),
+    (
         "CR-166",
         "the device list message is dropped by the link; tested in `openbmt-counter-node` \
          (`tests/link.rs`)",
@@ -392,9 +420,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_one_hundred_and_fifty_five_rules() {
+fn the_rules_file_defines_one_hundred_and_sixty_seven_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 155);
+    assert_eq!(ids.len(), 167);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -431,6 +459,8 @@ fn the_rules_file_defines_one_hundred_and_fifty_five_rules() {
             && ids.contains("CR-199")
             && ids.contains("CR-200")
             && ids.contains("CR-204")
+            && ids.contains("CR-205")
+            && ids.contains("CR-216")
     );
 }
 

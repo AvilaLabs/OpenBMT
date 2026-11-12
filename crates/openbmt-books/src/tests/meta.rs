@@ -14,7 +14,7 @@ use crate::{BooksError, ExportError, OpenError, SaleKey, SealError};
 
 const RULES: &str = include_str!("../../../../docs/BOOKS-RULES.md");
 
-const TEST_SOURCES: [&str; 11] = [
+const TEST_SOURCES: [&str; 12] = [
     include_str!("input.rs"),
     include_str!("lightning.rs"),
     include_str!("sale.rs"),
@@ -26,6 +26,7 @@ const TEST_SOURCES: [&str; 11] = [
     include_str!("sealed.rs"),
     include_str!("staff.rs"),
     include_str!("tips.rs"),
+    include_str!("notes.rs"),
 ];
 const MORE_TEST_SOURCES: [&str; 1] = [include_str!("hostile.rs")];
 
@@ -44,13 +45,13 @@ fn sources() -> String {
 #[test]
 fn the_rules_file_defines_its_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 40, "{ids:?}");
-    assert!(ids.contains("BK-01") && ids.contains("BK-40"));
+    assert_eq!(ids.len(), 42, "{ids:?}");
+    assert!(ids.contains("BK-01") && ids.contains("BK-42"));
     let numbers: Vec<u32> = ids
         .iter()
         .map(|i| i[3..].parse().expect("a number"))
         .collect();
-    assert_eq!(numbers, (1..=40).collect::<Vec<u32>>());
+    assert_eq!(numbers, (1..=42).collect::<Vec<u32>>());
 }
 
 #[test]
@@ -121,7 +122,7 @@ fn the_rules_file_keeps_its_lines_short_outside_tables() {
 #[test]
 fn the_rules_say_the_export_is_not_tax_advice_and_covers_us_rules_only() {
     assert!(RULES.contains("not tax advice") && RULES.contains("US rules only"));
-    assert!(RULES.contains("## 11. What these rules do not do"));
+    assert!(RULES.contains("## 12. What these rules do not do"));
 }
 
 #[test]

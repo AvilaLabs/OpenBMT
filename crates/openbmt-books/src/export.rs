@@ -208,7 +208,7 @@ impl Books {
     }
 }
 
-const LEDGER_COLUMNS: [&str; 30] = [
+const LEDGER_COLUMNS: [&str; 31] = [
     "Type",
     "Sale ID",
     "Counter",
@@ -239,6 +239,7 @@ const LEDGER_COLUMNS: [&str; 30] = [
     "Lightning amount (msat)",
     "Lightning settled (UTC)",
     "Tips",
+    "Sale note",
 ];
 
 fn blank_row() -> Vec<Cell> {
@@ -386,6 +387,9 @@ fn sale_row(sale: &Sale) -> Result<Vec<Cell>, ExportError> {
             29,
             Cell::Number(format_minor(tip.minor, sale.currency)),
         );
+    }
+    if let Some(note) = &sale.note {
+        set(&mut row, 30, Cell::text(note.clone()));
     }
     let names: Vec<&str> = sale.overrides.iter().map(|o| o.name.as_str()).collect();
     if !names.is_empty() {

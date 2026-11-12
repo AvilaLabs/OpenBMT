@@ -15,6 +15,7 @@ mod recordlog;
 mod records;
 mod refunds;
 mod reports;
+mod requests;
 mod say;
 mod settings;
 mod settle;

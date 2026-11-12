@@ -63,6 +63,7 @@ by hand. To write it again, run the test
 | OpenRefused::NoAddress | No payment code left | The counter has no payment code left to hand out. | Take another kind of payment. Tell the owner: this counter needs new addresses. | the cashier | CR-02 |
 | OpenRefused::AddressInUse | Payment code in use | The next payment code is already used by another sale. | Take another kind of payment and tell the owner: a payment code was used twice. | the cashier | CR-02 |
 | OpenRefused::BadName | Sale not opened | The name of the person at the till must be plain text of 1 to 64 characters, so the sale was not opened. | Sign in again, or ask a manager to rename the cashier. | the cashier | CR-61 |
+| OpenRefused::BadNote | Note not accepted | A note must be plain text of 1 to 64 characters, so it was not saved. | Type it again, shorter. | the cashier | CR-206 |
 | OpenRefused::AddressNotStored | Payment code not saved | The counter could not save it, so no payment code was handed out. | Try once more. If it fails again, take another kind of payment and tell the owner: the counter cannot save. See Details. | the cashier | CR-03 |
 | OpenRefused::Store | Sale not started | The counter could not save it, so the sale was not started. | Try once more. If it fails again, take another kind of payment and tell the owner: the counter cannot save. See Details. | the cashier | CR-40 |
 | OpenRefused::Store/Record | Sale not started | The counter could not write its record, so the sale was not started. | Try once more. If it fails again, take another kind of payment and tell the owner: the counter cannot save. See Details. | the cashier | CR-40 |
@@ -74,10 +75,14 @@ by hand. To write it again, run the test
 | RequoteRefused::SaleEnded | Sale already ended | The sale has ended, so it takes no new price. | Start a new sale. | the cashier | CR-05 |
 | RequoteRefused::AlreadyEnough | Already paid enough | Enough has arrived for this sale, so it takes no new price. | Nothing to do. The sale screen says when to hand over the goods. | nobody | CR-08 |
 | RequoteRefused::TooManyQuotes | Too many new prices | This sale has had as many new prices as it can keep. | Start a new sale. If the customer already paid on this one, tell the owner. | the cashier | CR-05 |
+| RequoteRefused::IsRequest | Request keeps its price | A request to send keeps the price it was made with, so it takes no new price. | Nothing to do. | nobody | CR-207 |
 | RequoteRefused::AmountTooLarge | New price too large | That is more than any real payment could be, so the price was not changed. | Check the amount and enter it again. | the cashier | CR-05 |
 | RequoteRefused::BelowMinimum | Below the bitcoin minimum | At the new price this sale is under the smallest bitcoin sale this shop takes, 26,000 sats. | Cancel this sale and take another kind of payment. | the cashier | CR-75 |
 | RequoteRefused::StaleRate | Price too old to renew | The exchange price is too old to give this sale a new price. | Wait for a new price, or check the internet connection. If it stays old, tell the owner. | the cashier | CR-58 |
 | RequoteRefused::Store | New price not saved | The counter could not save it, so the sale keeps its old price. | Try once more. If it fails again, tell the owner: the counter cannot save. See Details. | the cashier | CR-40 |
+| NoteRefused::UnknownSale | Sale not found | The counter has no such sale to add a note to. | Look the sale up again. If it is missing, tell the owner: the counter lost a sale. | the cashier | CR-11 |
+| NoteRefused::AlreadyNoted | Note already added | This sale has a note already, so the new one was not saved. | Nothing to do. | nobody | CR-206 |
+| NoteRefused::Store | Note not saved | The counter could not save it, so the note was not added. | Try once more. If it fails again, tell the owner: the counter cannot save. See Details. | the cashier | CR-40 |
 | CancelRefused::UnknownSale | Sale not found | The counter has no such sale to cancel. | Look the sale up again. If it is missing, tell the owner: the counter lost a sale. | the cashier | CR-11 |
 | CancelRefused::AlreadyEnded | Sale already ended | The sale has already ended, so there is nothing to cancel. | Nothing to do. | nobody | CR-07 |
 | CancelRefused::MoneyArrived | Cannot cancel: money arrived | Something has arrived for this sale, so it cannot be cancelled. | If the customer should get it back, start a refund on this sale. | the cashier | CR-07 |

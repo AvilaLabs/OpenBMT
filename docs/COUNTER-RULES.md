@@ -1459,3 +1459,91 @@ RT-03, RT-24).
   failing, choose Use Orbot.", with a button "Try again" that starts again,
   with a new run if the old one ended, and a button "Tor" that opens the
   choice (CR-203).
+
+## 21. Requests to send, and a note on a sale
+
+A shop can take a deposit days ahead from a customer who is not at the till,
+and match it with the balance later. The cashier makes the sale a request:
+the same sale, the same address and the same checks, with a longer life. A
+note names it. Nothing is sent by the counter: the cashier shares the code
+by any means the phone has.
+
+- **CR-205.** A request to send is a sale (`Counter::open_with_extras`) that
+  lasts 1, 3 or 7 days, the cashier's choice, in place of CR-07's 15
+  minutes. It has one quote, made when the request is made, and the quote
+  holds for the whole life of the request instead of the 5 minutes of CR-05:
+  the satoshis are fixed when the request is made, and a move in the price
+  before the payment is the shop's. It needs the same things any sale needs
+  to open (CR-01 to CR-05, CR-75, CR-17): the rate is fresh, and the
+  satoshis are above the shop's smallest bitcoin sale.
+- **CR-206.** Any sale may carry a note: plain text of 1 to 64 characters,
+  with no control character (the check of a person's name, CR-61). It is set
+  when the sale opens (`SaleExtras`) or added once later
+  (`Counter::add_note`); a sale that has a note takes no second one. A note
+  that is not plain text of 1 to 64 characters is refused with nothing
+  written: it says "Note not accepted", "A note must be plain text of 1 to 64
+  characters, so it was not saved." and "Type it again, shorter." for the
+  cashier. The note is written as a record of its own, a `Sale` record with
+  tag 24 (the time, then a length byte and the text), after the record of the
+  opening for a sale opened with one, and in the stored sale (CR-211).
+- **CR-207.** A request takes no new quote: `Counter::requote` refuses it,
+  and the one quote stays in force until the request ends.
+- **CR-208.** A request is never accepted at once and never paid over
+  Lightning. It is paid when what arrived is at the confirmation depth of the
+  settings, as a sale above the instant limits is: until then it waits, with
+  nothing counted in the exposure ledger. The shop's node is not asked for an
+  invoice for it. Part paid, overpaid, a payment after the request ended, an
+  override and a refund are judged as for any sale (CR-12, CR-16, CR-19,
+  CR-61 to CR-74).
+- **CR-209.** A request ends as a sale does. With nothing received when its
+  days run out it expires, with the words of an expired sale (CR-07), and a
+  request that has received something does not expire. The cashier can cancel
+  it from its details like a sale (CR-07). A payment that arrives after it
+  ended is a late payment (CR-19).
+- **CR-210.** The counter sees a payment whenever it runs, and a request is
+  stored with the other sales: a request made before the counter was closed
+  and paid while it was closed shows Paid when the counter starts again and
+  has caught up with the chain, by the same steps as any sale (CR-42, CR-163).
+  No other mechanism looks for it.
+- **CR-211.** The stored sale (`OBML`) is version 5 when the sale is a
+  request or has a note, and holds at least one of the two: the fields of
+  version 1, the tip (0 for none), the Lightning payment (a flag, and the
+  fields of version 3 when it is 1), the refund entries, then the request
+  (a byte: 0, or 1, 3 or 7 days) and the note (a flag; then a length byte and
+  the text). A request has one quote, which lasts the request's days, and has
+  no Lightning payment. A sale with neither is written as before, so every
+  earlier file reads back, as a sale with no note and no request, and every
+  earlier build's file is unchanged. The read is strict, as CR-42 says.
+- **CR-212.** The note is the owner's and the books': it is carried on the
+  sale's line in the books' full ledger (BK-41), and goes to no other device than the
+  owner's. The POS reader is told of a sale as before and is never told its
+  note: the record of a note changes nothing it is sent.
+- **CR-213.** On New sale, under the keypad's main button, the counter app has
+  a quieter button "Request to send". It opens a page with the note field,
+  which says "Optional. Like a booking name or date.", and the choice of
+  lifetime as three chips, "1 day", "3 days" and "7 days", and a button "Make
+  the request". The request is made with the amount typed, the tip step is
+  not asked, and the app goes on to the page of the request (CR-214). A note
+  the library refuses shows the words of CR-206 on the page and makes no
+  request.
+- **CR-214.** The page of a request shows the code, the amount and the words
+  below it: "Request ready", "The customer can pay this request from anywhere
+  until {date}. The amount in bitcoin is fixed at {sats}." and "Share the
+  link or the code with the customer. The counter shows Paid once the payment
+  is confirmed.", for the cashier. It has two buttons. "Share the link" gives
+  Android's share sheet the payment link: the payment request URI the sale
+  already shows, with its amount and label (CR-83). "Share the code" gives it
+  the code as a PNG image. Nothing is sent by the app itself, and the
+  image is made in the app's own folder, shared by one-time access, and
+  deleted when the page is left. Back goes Home. The page of a request that
+  is open again, from the list of CR-215, says "Waiting for payment", "This
+  request is open until {date}. It is paid once the payment is confirmed." and
+  "Nothing to do.", for nobody; one that expired says what an expired sale
+  says.
+- **CR-215.** Home lists the open requests under the heading "Open requests",
+  each with its note, or its amount when it has none, the newest first. A
+  row opens the page of CR-214. A request that is paid or has ended is not in
+  the list.
+- **CR-216.** A sale's details show its note under "Note", or a button "Add a
+  note" when it has none, which asks for the note as CR-213 does and adds it
+  once (CR-206).

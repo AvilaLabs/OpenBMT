@@ -309,7 +309,29 @@ the sale (`docs/COUNTER-RULES.md`, CR-187 to CR-192).
   amount and a tip that do not add up inside 64 bits, and a version 3 bundle
   with no sale with a tip (it would not encode back to itself) are refused.
 
-## 11. What these rules do not do
+## 11. Notes
+
+A sale can carry a note, which the cashier wrote when it opened or added
+later (`docs/COUNTER-RULES.md`, CR-206).
+
+- **BK-41.** A sale holds its note when a `Sale` record "noted" names it
+  (CR-206): plain text of 1 to 64 characters. When there are two records for
+  one sale (a step that was tried again), the last one stands. A sale with
+  no such record, and every record from before notes, has none. The note is
+  the owner's: the full ledger (BK-19) has it in a last column, "Sale note",
+  empty for a sale without one, written as any text field is (BK-21). The
+  accounting export (BK-17) is unchanged and holds no note (BK-18), and no
+  total changes.
+- **BK-42.** The bundle (BK-28) is version 4 when at least one sale has a
+  note. Every sale in it then ends with its payment mode, as in version 2
+  (BK-33), its tip, as in version 3 (BK-40), and then its note: 0, or 1 and
+  the note as a length byte and the text. A bundle with no sale with a note
+  is written as before, in version 1, 2 or 3, and all three are still read,
+  with no notes. Reading is strict: a note that is empty, longer than 64
+  characters or holds a control character, and a version 4 bundle with no
+  sale with a note (it would not encode back to itself), are refused.
+
+## 12. What these rules do not do
 
 - **No tax advice, and US rules only.** The export writes down what the records
   say. Whether a sale is income, which value counts, and what a disposal

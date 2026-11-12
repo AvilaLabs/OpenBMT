@@ -43,6 +43,8 @@ const TAG_LATE_LIGHTNING: u8 = 21;
 // without a known height keeps its earlier tag and bytes.
 const TAG_REFUND_REQUESTED_AT_HEIGHT: u8 = 22;
 const TAG_REFUND_PAID_IN_CASH_AT_HEIGHT: u8 = 23;
+/// A note on a sale (CR-206).
+const TAG_NOTED: u8 = 24;
 
 /// Something that happened to a sale and is written down.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,6 +88,17 @@ pub enum Event {
         minor_per_btc: u64,
         /// Where the new quote's rate came from (CR-57).
         source: RateSource,
+    },
+    /// The sale was given a note, when it opened or later (CR-206; kind
+    /// `Sale`). The note is the owner's and the books': nothing of it goes to
+    /// a POS reader.
+    Noted {
+        /// The receive index.
+        index: u32,
+        /// When.
+        at: u64,
+        /// The note: plain text of 1 to 64 characters.
+        note: String,
     },
     /// The sale ended with nothing received (CR-07; kind `Sale`).
     Expired {
@@ -483,6 +496,7 @@ impl Event {
             | Self::SurplusOwed { index, .. }
             | Self::Dust { index, .. }
             | Self::Requoted { index, .. }
+            | Self::Noted { index, .. }
             | Self::Override { index, .. }
             | Self::Replaced { index, .. }
             | Self::Reopened { index, .. }
@@ -509,6 +523,7 @@ impl Event {
             | Self::SurplusOwed { at, .. }
             | Self::Dust { at, .. }
             | Self::Requoted { at, .. }
+            | Self::Noted { at, .. }
             | Self::Override { at, .. }
             | Self::Replaced { at, .. }
             | Self::Reopened { at, .. }
@@ -525,6 +540,7 @@ impl Event {
         match self {
             Self::Opened { .. }
             | Self::Requoted { .. }
+            | Self::Noted { .. }
             | Self::Expired { .. }
             | Self::Cancelled { .. } => RecordKind::Sale,
             Self::PaidAtOnce { .. }
@@ -557,6 +573,7 @@ impl Event {
                 *at,
             ),
             Self::Requoted { index, at, .. } => (TAG_REQUOTED, *index, *at),
+            Self::Noted { index, at, .. } => (TAG_NOTED, *index, *at),
             Self::Expired { index, at } => (TAG_EXPIRED, *index, *at),
             Self::Cancelled { index, at, .. } => (TAG_CANCELLED, *index, *at),
             Self::PaidAtOnce { index, at, .. } => (TAG_PAID_AT_ONCE, *index, *at),
@@ -692,6 +709,7 @@ impl Event {
                 wire::put_opt_u64(&mut out, *settled_at);
                 out.extend_from_slice(&valued.0.to_le_bytes());
             }
+            Self::Noted { note, .. } => write_text(&mut out, note),
             Self::LatePayment { txid, sats, .. } => {
                 out.extend_from_slice(txid);
                 out.extend_from_slice(&sats.to_le_bytes());
@@ -910,6 +928,11 @@ impl Event {
                     valued: Amount(r.u64_le()?),
                 }
             }
+            TAG_NOTED => Self::Noted {
+                index,
+                at,
+                note: read_text(&mut r, "a note is not plain text of 1 to 64 characters")?,
+            },
             TAG_LATE_PAYMENT => Self::LatePayment {
                 index,
                 at,

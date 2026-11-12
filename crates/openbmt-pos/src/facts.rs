@@ -289,6 +289,7 @@ fn fold_event(
         }
         Event::Opened { .. }
         | Event::Requoted { .. }
+        | Event::Noted { .. }
         | Event::Expired { .. }
         | Event::Cancelled { .. }
         | Event::LatePayment { .. }

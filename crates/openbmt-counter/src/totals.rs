@@ -327,7 +327,8 @@ impl Fold {
                     }
                 }
             }
-            Event::LatePayment { .. }
+            Event::Noted { .. }
+            | Event::LatePayment { .. }
             | Event::LateLightning { .. }
             | Event::SurplusOwed { .. }
             | Event::Dust { .. }

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use bitcoin::hashes::Hash;
 use bitcoin::Transaction;
 use openbmt_core::policy::{CheckMode, OffReason};
-use openbmt_counter::{OpenRefused, Report, State, Store, Why};
+use openbmt_counter::{Amount, OpenRefused, Report, RequestDays, SaleExtras, State, Store, Why};
 use openbmt_net_io::AppEvent;
 use openbmt_watch::{check_health, HeaderChain, Peer, PeerTransport, Problem};
 
@@ -678,4 +678,51 @@ fn a_refund_request_is_a_record_on_the_nodes_chain_and_survives_a_restart() {
     assert_eq!(views.len(), 2);
     assert_eq!(views[0].state, RefundState::Withdrawn);
     assert_eq!(views[1].state, RefundState::PaidInCash);
+}
+
+#[test]
+fn cr_210_a_request_paid_while_the_node_was_closed_shows_paid_on_the_next_start() {
+    let dir = Scratch::new();
+    let mut rig = start(dir.path());
+    assert!(rig.feed(vec![Rig::peers()]).is_empty());
+    let opened = rig
+        .node
+        .open_with_extras(
+            five_dollars(),
+            Amount(0),
+            usd(),
+            rate(),
+            &source_at(&rig.time),
+            None,
+            SaleExtras {
+                note: Some("Tour 12 May"),
+                request: Some(RequestDays::Seven),
+            },
+        )
+        .unwrap();
+    assert_eq!(opened.quote.until, opened.quote.from + 7 * 86_400);
+    assert_eq!(
+        rig.node.judge(opened.index).unwrap().state,
+        State::NotPaidYet
+    );
+    assert!(rig.node.shutdown().is_empty());
+    drop(rig);
+
+    // Closed for two days; the payment was mined meanwhile.
+    let pay = spend(1, &[(&script_of(0), 5_000)]);
+    let mut blocks = Blocks::default();
+    let first = blocks.extend(std::slice::from_ref(&pay)).clone();
+    fs::write(dir.path().join("headers.bin"), blocks.stored_headers()).unwrap();
+    let time = Arc::new(AtomicU64::new(T0 + 2 * 86_400));
+    let mut again = start_at(dir.path(), time);
+    assert!(again.launch.scripts.contains(&script_of(0)));
+    assert!(again.feed(vec![Rig::peers()]).is_empty());
+    let sale = again.node.counter().sale(0).unwrap();
+    assert_eq!(sale.note(), Some("Tour 12 May"));
+    assert!(sale.is_request());
+    let reports = again.feed(vec![joined(1, &first), block_event(&first)]);
+    assert_eq!(reports, vec![Report::PosPaid { index: 0 }]);
+    let screen = again.node.judge(0).unwrap();
+    assert_eq!(screen.state, State::Confirmed);
+    assert_eq!(screen.received_sats, 5_000);
 }

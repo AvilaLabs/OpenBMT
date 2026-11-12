@@ -9,6 +9,7 @@ fn kinds(w: &World) -> Vec<&'static str> {
         .map(|e| match e {
             Event::Opened { .. } => "opened",
             Event::Requoted { .. } => "requoted",
+            Event::Noted { .. } => "noted",
             Event::Expired { .. } => "expired",
             Event::Cancelled { .. } => "cancelled",
             Event::PaidAtOnce { .. } => "paid-at-once",

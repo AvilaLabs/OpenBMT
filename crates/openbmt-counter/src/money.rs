@@ -233,6 +233,16 @@ impl Quote {
         }
     }
 
+    /// A quote that holds from `from` for `secs` seconds: the one quote of a
+    /// request to send (CR-204). The end saturates at the largest time.
+    pub fn lasting(rate: Rate, from: u64, secs: u64) -> Self {
+        Self {
+            rate,
+            from,
+            until: from.saturating_add(secs),
+        }
+    }
+
     /// Whether the quote holds at `now`.
     pub fn holds(&self, now: u64) -> bool {
         self.from <= now && now < self.until

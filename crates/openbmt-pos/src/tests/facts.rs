@@ -391,3 +391,21 @@ fn ps_09_without_the_records_the_inference_applies_per_sale() {
     assert!(f[0].unpaid_after && f[0].paid_at == Some(T0 + 5));
     assert!(f[1].is_paid_now());
 }
+
+// CR-212: the note on a sale is the owner's; the POS reader is told nothing
+// of it.
+#[test]
+fn cr_212_a_note_on_a_sale_changes_nothing_the_reader_is_told() {
+    let plain = [opened(0, 10, 500), at_once(0, 20), final_(0, 30)];
+    let noted = [
+        opened(0, 10, 500),
+        Event::Noted {
+            index: 0,
+            at: 11,
+            note: "Tour 12 May".to_string(),
+        },
+        at_once(0, 20),
+        final_(0, 30),
+    ];
+    assert_eq!(facts_of(&plain).unwrap(), facts_of(&noted).unwrap());
+}

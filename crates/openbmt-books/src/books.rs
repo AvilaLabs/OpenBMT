@@ -118,6 +118,7 @@ fn new_sale(key: SaleKey, event: &Event) -> Option<Sale> {
         overrides: Vec::new(),
         pos: PosMark::NotRecorded,
         payment_mode: PaymentMode::OnChain,
+        note: None,
     })
 }
 
@@ -176,6 +177,9 @@ fn fold(sale: &mut Sale, pending: &mut Pending, event: &Event) -> Result<(), Boo
             sale.last_quote_rate_minor_per_btc = *minor_per_btc;
             sale.last_rate_source = Value::Known(source.clone());
         }
+        // BK-41: the note is the owner's; a second record for the same sale
+        // is a retry, and the last one stands.
+        Event::Noted { note, .. } => sale.note = Some(note.clone()),
         Event::Expired { .. } => sale.state = SaleState::Expired,
         Event::Cancelled { .. } => sale.state = SaleState::Cancelled,
         Event::PaidAtOnce {
@@ -670,6 +674,7 @@ fn event_time(event: &Event) -> Option<u64> {
     Some(match event {
         Event::Opened { at, .. }
         | Event::Requoted { at, .. }
+        | Event::Noted { at, .. }
         | Event::Expired { at, .. }
         | Event::Cancelled { at, .. }
         | Event::PaidAtOnce { at, .. }

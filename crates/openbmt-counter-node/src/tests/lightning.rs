@@ -4,7 +4,7 @@
 use std::sync::atomic::Ordering;
 
 use openbmt_core::say::{check, Who};
-use openbmt_counter::{Rate, Report, State};
+use openbmt_counter::{Amount, Rate, Report, RequestDays, SaleExtras, State};
 use openbmt_lightning::testing::{
     cln, cln_created, cln_denied, cln_duplicate_label, cln_listed, cln_lookup, der, hash, lnd,
     lnd_created, lnd_denied, lnd_lookup, node_key, reply, Make,
@@ -991,4 +991,38 @@ fn with_first_invoice_of(rig: &mut Rig, c: &Credential) -> u32 {
     rig.node
         .lightning_reply(create.id, &created_for(c, index, SATS));
     index
+}
+
+#[test]
+fn cr_208_a_request_is_never_asked_of_the_shops_node() {
+    for c in [lnd(), cln()] {
+        let dir = Scratch::new();
+        let mut rig = rig(&dir, c.clone());
+        let facts = SaleExtras {
+            note: None,
+            request: Some(RequestDays::Three),
+        };
+        let index = rig
+            .node
+            .open_with_extras(
+                five_dollars(),
+                Amount(0),
+                usd(),
+                rate(),
+                &source_at(&rig.time),
+                None,
+                facts,
+            )
+            .unwrap()
+            .index;
+        assert!(rig.node.lightning_next().is_none());
+        assert!(matches!(rig.node.lightning_sale(index), SaleLightning::Off));
+        // A sale at the till opened after it asks as before.
+        let plain = open(&mut rig);
+        assert!(rig.node.lightning_next().is_some());
+        assert!(!matches!(
+            rig.node.lightning_sale(plain),
+            SaleLightning::Off
+        ));
+    }
 }

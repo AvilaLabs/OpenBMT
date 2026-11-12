@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use openbmt_core::identity::DeviceId;
 use openbmt_core::wire::{self, DecodeError, Reader};
+use openbmt_counter::refund::refund_text_ok;
 use openbmt_counter::{Currency, RateSource, Role, MAX_FINAL_PAYMENTS, MAX_NAME_BYTES};
 
 use crate::books::{Books, MAX_COUNTERS, MAX_LINES, MAX_PER_SALE, MAX_SALES};
@@ -24,6 +25,11 @@ const VERSION_LIGHTNING: u8 = 2;
 /// BK-40: the version of a bundle that holds a sale with a tip. Every sale
 /// in it ends with its payment mode (as in version 2) and then its tip.
 const VERSION_TIPS: u8 = 3;
+
+/// BK-42: the version of a bundle that holds a sale with a note. Every sale
+/// in it ends with its payment mode and its tip, as in version 3, and then
+/// its note.
+const VERSION_NOTES: u8 = 4;
 
 /// Fewest bytes a sale takes (it is 133), for the count check.
 const MIN_SALE: usize = 130;
@@ -260,7 +266,30 @@ fn get_tip(r: &mut Reader<'_>) -> Result<Option<TipNote>, DecodeError> {
     Ok(Some(TipNote { minor, by }))
 }
 
-fn put_sale(out: &mut Vec<u8>, s: &Sale, with_mode: bool, with_tips: bool) {
+fn put_note(out: &mut Vec<u8>, note: &Option<String>) {
+    match note {
+        Some(n) => {
+            out.push(1);
+            put_text(out, n);
+        }
+        None => out.push(0),
+    }
+}
+
+fn get_note(r: &mut Reader<'_>) -> Result<Option<String>, DecodeError> {
+    if !r.flag()? {
+        return Ok(None);
+    }
+    let note = get_text(r)?;
+    if !refund_text_ok(&note) {
+        return Err(DecodeError::NonCanonical(
+            "a note is not plain text of 1 to 64 characters",
+        ));
+    }
+    Ok(Some(note))
+}
+
+fn put_sale(out: &mut Vec<u8>, s: &Sale, with_mode: bool, with_tips: bool, with_notes: bool) {
     put_key(out, &s.key);
     out.extend_from_slice(&s.opened_at.to_le_bytes());
     out.extend_from_slice(&s.amount_minor.to_le_bytes());
@@ -304,9 +333,17 @@ fn put_sale(out: &mut Vec<u8>, s: &Sale, with_mode: bool, with_tips: bool) {
     if with_tips {
         put_tip(out, &s.tip);
     }
+    if with_notes {
+        put_note(out, &s.note);
+    }
 }
 
-fn get_sale(r: &mut Reader<'_>, with_mode: bool, with_tips: bool) -> Result<Sale, DecodeError> {
+fn get_sale(
+    r: &mut Reader<'_>,
+    with_mode: bool,
+    with_tips: bool,
+    with_notes: bool,
+) -> Result<Sale, DecodeError> {
     let key = get_key(r)?;
     let opened_at = get_time(r)?;
     let amount_minor = r.u64_le()?;
@@ -380,6 +417,7 @@ fn get_sale(r: &mut Reader<'_>, with_mode: bool, with_tips: bool) -> Result<Sale
         PaymentMode::OnChain
     };
     let tip = if with_tips { get_tip(r)? } else { None };
+    let note = if with_notes { get_note(r)? } else { None };
     if tip
         .as_ref()
         .is_some_and(|t| amount_minor.checked_add(t.minor).is_none())
@@ -427,6 +465,7 @@ fn get_sale(r: &mut Reader<'_>, with_mode: bool, with_tips: bool) -> Result<Sale
         overrides,
         pos,
         payment_mode,
+        note,
     })
 }
 
@@ -472,8 +511,11 @@ impl Books {
         // BK-33: version 2 only when a sale was paid over Lightning, so
         // every other bundle is the one every earlier build wrote.
         // BK-40: version 3 only when a sale carries a tip, and then it holds
-        // the payment mode of every sale too.
-        let with_tips = self.sales.iter().any(|s| s.tip.is_some());
+        // the payment mode of every sale too. BK-42: version 4 only when a
+        // sale carries a note, and then every sale holds its mode, its tip
+        // and its note.
+        let with_notes = self.sales.iter().any(|s| s.note.is_some());
+        let with_tips = with_notes || self.sales.iter().any(|s| s.tip.is_some());
         let with_mode = with_tips
             || self
                 .sales
@@ -481,7 +523,9 @@ impl Books {
                 .any(|s| s.payment_mode.lightning().is_some());
         if with_mode {
             if let Some(byte) = out.get_mut(4) {
-                *byte = if with_tips {
+                *byte = if with_notes {
+                    VERSION_NOTES
+                } else if with_tips {
                     VERSION_TIPS
                 } else {
                     VERSION_LIGHTNING
@@ -491,7 +535,7 @@ impl Books {
         put_marks(&mut out, &self.high_water);
         put_u32(&mut out, self.sales.len());
         for s in &self.sales {
-            put_sale(&mut out, s, with_mode, with_tips);
+            put_sale(&mut out, s, with_mode, with_tips, with_notes);
         }
         put_u32(&mut out, self.disposals.len());
         for d in &self.disposals {
@@ -514,17 +558,18 @@ impl Books {
         if r.take(4)? != MAGIC_BUNDLE {
             return Err(DecodeError::BadMagic);
         }
-        let (with_mode, with_tips) = match r.u8()? {
-            wire::VERSION => (false, false),
-            VERSION_LIGHTNING => (true, false),
-            VERSION_TIPS => (true, true),
+        let (with_mode, with_tips, with_notes) = match r.u8()? {
+            wire::VERSION => (false, false, false),
+            VERSION_LIGHTNING => (true, false, false),
+            VERSION_TIPS => (true, true, false),
+            VERSION_NOTES => (true, true, true),
             v => return Err(DecodeError::UnsupportedVersion(v)),
         };
         let high_water = get_marks(&mut r)?;
         let n = r.count(MAX_SALES, MIN_SALE)?;
         let mut sales: Vec<Sale> = Vec::with_capacity(n.min(4096));
         for _ in 0..n {
-            let sale = get_sale(&mut r, with_mode, with_tips)?;
+            let sale = get_sale(&mut r, with_mode, with_tips, with_notes)?;
             if sales.last().is_some_and(|p| p.key >= sale.key) {
                 return Err(DecodeError::NonCanonical("sales are not in order"));
             }
@@ -561,9 +606,15 @@ impl Books {
             ));
         }
         // A version 3 bundle holds a sale with a tip, for the same reason.
-        if with_tips && !sales.iter().any(|s| s.tip.is_some()) {
+        if with_tips && !with_notes && !sales.iter().any(|s| s.tip.is_some()) {
             return Err(DecodeError::NonCanonical(
                 "a version 3 bundle holds no sale with a tip",
+            ));
+        }
+        // A version 4 bundle holds a sale with a note, for the same reason.
+        if with_notes && !sales.iter().any(|s| s.note.is_some()) {
+            return Err(DecodeError::NonCanonical(
+                "a version 4 bundle holds no sale with a note",
             ));
         }
         // The marks must be the ones the sales give.

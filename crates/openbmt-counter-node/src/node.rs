@@ -112,9 +112,10 @@ use openbmt_core::wire::DecodeError;
 use openbmt_counter::{
     Actor, Amount, BatchTakeRefused, BlockError, CancelRefused, CashRefund, CommandRefused,
     Counter, Currency, DayTotals, Facts, HeartbeatRefused, HeartbeatView, JudgeError,
-    LightningPaid, LoadError, OpenFacts, OpenRefused, Opened, Overridden, Pairing, Quote, Rate,
-    RateSource, RefundRefused, RefundRequest, RefundView, Report, RequoteRefused, Screen,
-    SightingError, StaffEvent, StaffRefused, StoreFault, TotalsRefused, WithdrawRefused,
+    LightningPaid, LoadError, NoteRefused, OpenFacts, OpenRefused, Opened, Overridden, Pairing,
+    Quote, Rate, RateSource, RefundRefused, RefundRequest, RefundView, Report, RequoteRefused,
+    SaleExtras, Screen, SightingError, StaffEvent, StaffRefused, StoreFault, TotalsRefused,
+    WithdrawRefused,
 };
 use openbmt_lightning::{CertPin, Credential, Reply};
 use openbmt_net_io::{
@@ -577,6 +578,10 @@ impl<P: DriverPort> Node<P> {
                 })
                 .collect();
             let open = s.is_live();
+            // CR-208: a request is never asked of the Lightning node.
+            if s.is_request() {
+                continue;
+            }
             node.ln.sale_restored(index, &quotes, open, started_at);
         }
         node.take_ln_notes();
@@ -1268,12 +1273,37 @@ impl<P: DriverPort> Node<P> {
         source: &RateSource,
         by: Option<&Actor>,
     ) -> Result<Opened, OpenRefused<DirStoreError>> {
+        self.open_with_extras(
+            amount,
+            tip,
+            currency,
+            rate,
+            source,
+            by,
+            SaleExtras::default(),
+        )
+    }
+
+    /// [`Node::open_with_tip`] for a sale with a note (CR-206) or a request
+    /// to send (CR-205). A request is not asked of the shop's Lightning node
+    /// (CR-208).
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_with_extras(
+        &mut self,
+        amount: Amount,
+        tip: Amount,
+        currency: Currency,
+        rate: Rate,
+        source: &RateSource,
+        by: Option<&Actor>,
+        extras: SaleExtras<'_>,
+    ) -> Result<Opened, OpenRefused<DirStoreError>> {
         let facts = OpenFacts {
             health: self.health.unwrap_or(NO_ANSWER_YET),
             rescan_pending: false,
             now: self.clock.now(),
         };
-        let opened = self.counter.open_with_tip(
+        let opened = self.counter.open_with_extras(
             amount,
             tip,
             currency,
@@ -1281,13 +1311,22 @@ impl<P: DriverPort> Node<P> {
             source,
             facts,
             by,
+            extras,
             &mut self.store,
         )?;
         self.known.insert(opened.index);
         self.port.watch_script(opened.script.clone());
-        self.ln
-            .sale_opened(opened.index, opened.needs_sats, self.clock.now());
+        if extras.request.is_none() {
+            self.ln
+                .sale_opened(opened.index, opened.needs_sats, self.clock.now());
+        }
         Ok(opened)
+    }
+
+    /// CR-206: add a note to a sale that has none.
+    pub fn add_note(&mut self, index: u32, note: &str) -> Result<(), NoteRefused<DirStoreError>> {
+        let now = self.clock.now();
+        self.counter.add_note(index, note, now, &mut self.store)
     }
 
     /// Work out the state of a sale now (CR-10 to CR-19). What it reports is
@@ -1375,7 +1414,7 @@ impl<P: DriverPort> Node<P> {
                 .known
                 .iter()
                 .filter_map(|i| self.counter.sale(*i))
-                .filter(|s| s.is_live())
+                .filter(|s| s.is_live() && !s.is_request())
                 .map(|s| (s.index(), s.needs_sats()))
                 .collect();
             for (index, sats) in live {
