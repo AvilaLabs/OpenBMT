@@ -66,8 +66,9 @@ version they describe.
   and say that the counter holds a key to the node that is limited to
   invoices. The counter cannot check the node's release: `getinfo`, the call
   that names it, is one the credential must be refused (LN-06, LN-09), and a
-  credential wide enough to read it would be wider than invoices need. Reading a credential is never enough to trust it, so every setup
-  probes it (LN-06, LN-09).
+  credential wide enough to read it would be wider than invoices need.
+  Reading a credential is never enough to trust it, so every setup probes
+  it (LN-06, LN-09).
 
 ## 3. LND
 
