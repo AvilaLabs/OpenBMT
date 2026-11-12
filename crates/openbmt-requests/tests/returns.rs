@@ -273,18 +273,111 @@ fn rq_28_an_address_of_the_shops_own_wallet_is_refused() {
 }
 
 #[test]
-fn rq_28_a_bitcoin_link_is_not_read_here_yet_and_is_refused_as_not_an_address() {
-    // A strict BIP 321 reader is written apart; for now a plain address only.
-    for link in [
-        format!("bitcoin:{P2WPKH}"),
-        format!("BITCOIN:{P2WPKH_UPPER}?amount=1"),
-        format!("bitcoin:{P2WPKH}?amount=0.001&label=x"),
-    ] {
+fn rq_28_a_bitcoin_link_uses_its_address_and_ignores_its_amount_for_the_return() {
+    let no_amount = format!("bitcoin:{P2WPKH}");
+    let one_btc = format!("bitcoin:{P2WPKH}?amount=1");
+    let small_amount_and_details = format!(
+        "bitcoin:{P2WPKH}?req-amount=0.001&req-label=return&req-message=thanks&lightning=lnbc1invoice&lno=lno1offer&sp=sp1silent"
+    );
+    assert_eq!(
+        check_return_address(&no_amount, not_own),
+        Ok(script_of(P2WPKH))
+    );
+    assert_eq!(
+        check_return_address(&one_btc, not_own),
+        Ok(script_of(P2WPKH))
+    );
+    assert_eq!(
+        check_return_address(&small_amount_and_details, not_own),
+        Ok(script_of(P2WPKH))
+    );
+    // The scheme check is ASCII case-insensitive, and all-uppercase bech32
+    // remains accepted by the Bitcoin address parser.
+    assert_eq!(
+        check_return_address(&format!("BITCOIN:{P2WPKH_UPPER}?amount=2"), not_own),
+        Ok(script_of(P2WPKH))
+    );
+}
+
+#[test]
+fn rq_28_addressless_payment_uris_do_not_provide_a_return_address() {
+    for method in ["lightning=lnbc1invoice", "lno=lno1offer", "sp=sp1silent"] {
+        let link = format!("bitcoin:?{method}");
         assert_eq!(
             check_return_address(&link, not_own),
-            Err(AddressRefused::NotAnAddress)
+            Err(AddressRefused::NotAnAddress),
+            "{link}"
         );
     }
+}
+
+#[test]
+fn rq_28_a_testnet_address_in_a_bitcoin_link_is_refused_as_testnet() {
+    assert_eq!(
+        check_return_address(&format!("bitcoin:{TESTNET}?amount=1"), not_own),
+        Err(AddressRefused::TestNetwork)
+    );
+}
+
+#[test]
+fn rq_28_a_shops_own_address_in_a_bitcoin_link_is_refused() {
+    let own = script_of(P2WSH);
+    assert_eq!(
+        check_return_address(&format!("bitcoin:{P2WSH}?amount=1"), |s| *s
+            == *own.as_script()),
+        Err(AddressRefused::Own)
+    );
+}
+
+#[test]
+fn rq_28_a_link_with_an_unknown_optional_parameter_uses_its_address() {
+    let link = format!("bitcoin:{P2WPKH}?future-method=ignored");
+    assert_eq!(check_return_address(&link, not_own), Ok(script_of(P2WPKH)));
+}
+
+#[test]
+fn rq_28_a_link_with_an_unknown_required_parameter_is_refused() {
+    let link = format!("bitcoin:{P2WPKH}?req-future-method=required");
+    assert_eq!(
+        check_return_address(&link, not_own),
+        Err(AddressRefused::NotAnAddress)
+    );
+}
+
+#[test]
+fn rq_28_invalid_uri_amount_is_refused_by_the_strict_uri_parser() {
+    let link = format!("bitcoin:{P2WPKH}?amount=not-a-number");
+    assert_eq!(
+        check_return_address(&link, not_own),
+        Err(AddressRefused::NotAnAddress)
+    );
+}
+
+#[test]
+fn rq_28_plain_addresses_keep_their_size_limit_and_uris_use_their_own_limit() {
+    let plain_128 = format!("{}{}", P2WPKH, "x".repeat(128 - P2WPKH.len()));
+    let plain_129 = format!("{}{}", P2WPKH, "x".repeat(129 - P2WPKH.len()));
+    assert_eq!(
+        check_return_address(&plain_128, not_own),
+        Err(AddressRefused::NotAnAddress)
+    );
+    assert_eq!(
+        check_return_address(&plain_129, not_own),
+        Err(AddressRefused::NotAnAddress)
+    );
+
+    let prefix = format!("bitcoin:{P2WPKH}?x=");
+    let uri_2048 = format!("{prefix}{}", "a".repeat(2048 - prefix.len()));
+    let uri_2049 = format!("{prefix}{}", "a".repeat(2049 - prefix.len()));
+    assert_eq!(uri_2048.len(), 2048);
+    assert_eq!(
+        check_return_address(&uri_2048, not_own),
+        Ok(script_of(P2WPKH))
+    );
+    assert_eq!(
+        check_return_address(&uri_2049, not_own),
+        Err(AddressRefused::NotAnAddress)
+    );
 }
 
 #[test]

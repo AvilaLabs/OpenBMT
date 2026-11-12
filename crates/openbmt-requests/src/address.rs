@@ -1,13 +1,13 @@
 //! The address a customer sends for a return (RQ-27, RQ-28, RQ-33).
 //!
-//! Only a plain address is read here. A `bitcoin:` link is refused as "not
-//! an address" until a strict BIP 321 reader is added; the amount of a link
-//! is to be ignored when it is (RQ-28).
+//! A plain address or a strict-profile BIP 321 `bitcoin:` link may supply the
+//! return address. URI payment details do not affect the returned script.
 
 use std::str::FromStr;
 
 use bitcoin::address::NetworkUnchecked;
 use bitcoin::{Address, Network, Script, ScriptBuf};
+use openbmt_core::bip321::{PaymentRequest, Refusal as PaymentRequestRefusal, MAX_URI_BYTES};
 use openbmt_counter::refund::is_payment_script;
 
 use crate::error::AddressRefused;
@@ -16,27 +16,47 @@ use crate::error::AddressRefused;
 /// is at most 90 characters; a longer text cannot be one.
 pub const MAX_ADDRESS_BYTES: usize = 128;
 
-/// RQ-28, RQ-33: the script behind a pasted or scanned address. It must be
-/// a valid mainnet address of a standard kind (P2WPKH, P2WSH, P2TR, P2SH,
-/// P2PKH) and not one for which `is_own` is true (an address of the shop's
-/// own wallet). Spaces around it are ignored. Any text at all gives an
-/// answer and never a panic.
+/// RQ-28, RQ-33: the script behind a pasted or scanned address, optionally
+/// from a strict-profile BIP 321 `bitcoin:` link. It must be a valid mainnet
+/// address of a standard kind (P2WPKH, P2WSH, P2TR, P2SH, P2PKH) and not one
+/// for which `is_own` is true (an address of the shop's own wallet). For a
+/// link, only its address is used; URI payment details do not change the
+/// return amount or script. ASCII whitespace around the input is ignored.
+/// Any text gives an answer and never a panic.
 pub fn check_return_address(
     text: &str,
     is_own: impl Fn(&Script) -> bool,
 ) -> Result<ScriptBuf, AddressRefused> {
     let text = text.trim_ascii();
-    if text.is_empty()
-        || text.len() > MAX_ADDRESS_BYTES
-        || !text.bytes().all(|b| b.is_ascii_graphic())
-    {
+    if text.is_empty() {
         return Err(AddressRefused::NotAnAddress);
     }
-    let parsed =
-        Address::<NetworkUnchecked>::from_str(text).map_err(|_| AddressRefused::NotAnAddress)?;
-    let checked = parsed
-        .require_network(Network::Bitcoin)
-        .map_err(|_| AddressRefused::TestNetwork)?;
+
+    let checked = if matches!(
+        text.get(.."bitcoin:".len()),
+        Some(scheme) if scheme.eq_ignore_ascii_case("bitcoin:")
+    ) {
+        if text.len() > MAX_URI_BYTES {
+            return Err(AddressRefused::NotAnAddress);
+        }
+        let request = PaymentRequest::parse(text).map_err(|refusal| {
+            if refusal == PaymentRequestRefusal::TestnetAddress {
+                AddressRefused::TestNetwork
+            } else {
+                AddressRefused::NotAnAddress
+            }
+        })?;
+        request.address.ok_or(AddressRefused::NotAnAddress)?
+    } else {
+        if text.len() > MAX_ADDRESS_BYTES || !text.bytes().all(|b| b.is_ascii_graphic()) {
+            return Err(AddressRefused::NotAnAddress);
+        }
+        let parsed = Address::<NetworkUnchecked>::from_str(text)
+            .map_err(|_| AddressRefused::NotAnAddress)?;
+        parsed
+            .require_network(Network::Bitcoin)
+            .map_err(|_| AddressRefused::TestNetwork)?
+    };
     let script = checked.script_pubkey();
     if !is_payment_script(&script) {
         return Err(AddressRefused::NotAnAddress);
