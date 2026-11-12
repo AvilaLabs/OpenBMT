@@ -33,6 +33,17 @@ $500 a month.
 >
 > A manufacturer in Lebanon, November 2019.[^q-lebanon]
 
+By 2022 some depositors went to desperate lengths to reach their own
+savings. In August a man held staff and customers in a Beirut bank for
+seven hours to take out part of his own $200,000 to pay his father's
+hospital bills.[^lb-aug] In September a woman took more than $13,000 of her
+own savings from a Beirut branch to pay for her sister's cancer
+treatment.
+
+> "I got to a point where I was going to sell my kidney…"
+>
+> The woman in Beirut, September 2022.[^lb-sep]
+
 **How it ended:** it has not. A draft law of December 2025 would repay up
 to $100,000 per depositor in cash over four years and the rest in bonds.
 Parliament had not passed it.[^lebanon]
@@ -47,6 +58,11 @@ turned into shares of the bank.
 > "We can't make any withdrawals, we can't make deposits, pay our suppliers."
 >
 > A florist in the old town of Nicosia, with the banks shut, March 2013.[^q-cyprus]
+
+> "The money you worked for your whole life."
+>
+> A bank worker marching in Nicosia, whose pension fund was held in the
+> two banks, April 2013.[^q-cyprus2]
 
 **How it ended:** by 2019, Laiki's account holders had got back about 6
 cents of each euro taken. A business with €500,000 there kept €100,000,
@@ -78,9 +94,16 @@ frozen for months. Mainvest, which raised money from the public for
 restaurants and small shops, could not reach about $2.4 million and closed
 in June 2024.
 
-> "A bank just robbed us."
+> "[The bank] was only going to pay us $500 out of that $280,000."
 >
-> A savings-app customer in Tampa, Florida, who had about $94,000 there and was shown $128.68 back, November 2024.[^q-synapse]
+> A former schoolteacher in Texas who had saved for 15 years for a family
+> home, then kept the money from selling it in a savings app, November
+> 2024.[^q-synapse]
+
+> "Now that I don't have that money, there's no house. Back to renting."
+>
+> A customer who had been saving for the down payment on his first
+> home.[^q-synapse2]
 
 **How it ended:** one app's 13,725 customers had $64.9 million in their
 accounts and were offered $11.8 million back, about 18 cents on the dollar
@@ -124,6 +147,12 @@ banks, the government froze bank deposits. Dollar savings were then turned
 into pesos by order. In early 2002, 27,700 million pesos were locked into
 fixed terms.
 
+> "Unfortunately, we are too old to just sit back and wait until 2012."
+>
+> A pensioner of 72 in Argentina who, with her husband, had sold a house
+> and a car and kept the money in the bank as a safety net, June
+> 2002.[^q-argentina]
+
 **How it ended:** in February 2003 nearly half of it, 12,995 million
 pesos, was still locked. The government later paid part of the difference
 between the dollars and the pesos in bonds.[^argentina]
@@ -139,6 +168,20 @@ brought the total returned to 37.3% of the deposits.
 full by 2021. The other 4,300 or so were still waiting. Payments to them
 began in April 2023, seven and a half years after the bank
 closed.[^imperial]
+
+**PMC Bank, India, 2019 to 2020.** In September 2019 India's central
+bank took control of Punjab and Maharashtra Co-operative Bank after it was
+accused of fraud, and froze most withdrawals. At first a depositor could
+take out 1,000 rupees. Its more than 900,000 depositors could not reach
+the rest of their own money.
+
+> "I just borrowed money from wherever I could, I had to save my daughter."
+>
+> A man of 82 in Mumbai with more than 2.5 million rupees in the bank,
+> whose daughter had a brain tumour.[^pmc]
+
+**How it ended:** almost a year after the collapse, in August 2020,
+depositors could take out at most 100,000 rupees each.[^pmc-start]
 
 **Flipcause, United States, Stripe, 2025.** Flipcause collected online
 donations for charities and schools. On 2 December 2025, after a warning
@@ -186,6 +229,11 @@ government commission's approval.
 > "If we keep going like this we're going to close."
 >
 > The owner of a bird shop in Athens that imports its stock, July 2015.[^q-greece]
+
+> "I have no money for medication for my wife, who had an operation."
+>
+> A retired sailor who had worked 50 years at sea, queuing at a bank for
+> 120 euros, July 2015.[^q-greece2]
 
 **How it ended:** the banks reopened on 20 July. The national bank's own
 review found that firms kept importing and the damage stayed smaller than
@@ -314,6 +362,35 @@ other people, must show the same wallet before the shop uses it.
 > **OpenBMT has had no independent security audit. Do not use it with real
 > funds.**
 
+[^lb-aug]: Voice of America,
+    [Hostage standoff at Beirut bank ends with gunman's arrest](https://www.voanews.com/a/hostage-sandoff-at-beirut-bank-ends-with-gunman-s-arrest-/6697663.html),
+    11 August 2022; [Al Jazeera, 14 September 2022](https://www.aljazeera.com/news/2022/9/14/armed-woman-breaks-into-beirut-bank-takes-trapped-savings),
+    for the $200,000. Read 2026-11-12.
+
+[^lb-sep]: [The Daily Star, 14 September 2022](https://www.thedailystar.net/middle-east/news/depositors-lebanon-hold-2-banks-weapons-access-own-money-3119346).
+    Read 2026-11-12.
+
+[^q-cyprus2]: Associated Press, via
+    [Fox News, 9 April 2013](https://www.foxnews.com/world/cyprus-banking-collapse-wipes-out-dying-fathers-bank-share-savings-for-childrens-future).
+    Read 2026-11-12.
+
+[^q-synapse2]: [Reynolds Center for Business Journalism, 31 March 2025](https://businessjournalism.org/2025/03/synapse-collapse/).
+    Read 2026-11-12.
+
+[^q-greece2]: AFP, via
+    [Daily Sabah, 1 July 2015](https://www.dailysabah.com/economy/2015/07/01/greek-pensioners-besiege-banks-to-withdraw-120-euros).
+    Read 2026-11-12.
+
+[^q-argentina]: [Inter Press Service, 24 June 2002](https://www.ipsnews.net/2002/06/argentina-small-savers-are-the-big-losers/).
+    Read 2026-11-12.
+
+[^pmc]: Reuters, via
+    [DT Next, 26 August 2020](https://www.dtnext.in/news/business/no-funds-available-depositors-at-india-pmc-bank-survive-on-loans-charity),
+    for the depositors, the man in Mumbai and the limits in 2020. Read 2026-11-12.
+
+[^pmc-start]: [BOOM, 25 September 2019](https://www.boomlive.in/customers-panic-as-rbi-puts-curbs-on-pmc-bank-all-you-need-to-know),
+    for the first limit of 1,000 rupees. Read 2026-11-12.
+
 [^q-lebanon]: [Gulf News, 27 November 2019](https://gulfnews.com/world/mena/crunch-time-for-lebanons-businesses-1.68071494).
     Read 2026-11-12.
 
@@ -324,8 +401,7 @@ other people, must show the same wallet before the shop uses it.
 [^q-tmon]: [The Asia Business Daily, 30 July 2024](https://view.asiae.co.kr/en/article/2024072916184740229),
     in the paper's English translation. Read 2026-11-12.
 
-[^q-synapse]: CNBC, via
-    [NBC New York, 22 November 2024](https://www.nbcnewyork.com/news/business/money-report/i-have-no-money-thousands-of-americans-see-their-savings-vanish-in-synapse-fintech-crisis/6009469/?amp=1).
+[^q-synapse]: [CNBC, 22 November 2024](https://www.cnbc.com/2024/11/22/synapse-bankruptcy-thousands-of-americans-see-their-savings-vanish.html).
     Read 2026-11-12.
 
 [^q-digitalriver]: [The Register, 15 October 2024](https://www.theregister.com/2024/10/15/digital_river_runs_dry_hasnt/).
