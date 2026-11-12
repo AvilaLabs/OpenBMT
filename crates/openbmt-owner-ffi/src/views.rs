@@ -1383,7 +1383,29 @@ pub struct SettingsHeldView {
     pub lightning_node: Option<Vec<u8>>,
     /// What the shop prices in; every limit above is in whole units of it.
     pub currency: ShopCurrencyView,
+    /// The swap provider the settings name, when they name one (CR-218).
+    pub swap: Option<SwapHeldView>,
 }
+
+/// The swap provider the settings in force name (CR-218).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwapHeldView {
+    /// The provider's name.
+    pub name: String,
+    /// Its onion name.
+    pub onion: String,
+    /// The path prefix of its API.
+    pub path_prefix: String,
+    /// The most the shop takes over Lightning for one sale, in satoshis.
+    pub max_sale_sats: u64,
+}
+
+wire_record!(SwapHeldView {
+    name,
+    onion,
+    path_prefix,
+    max_sale_sats
+});
 
 wire_record!(SettingsHeldView {
     version,
@@ -1410,7 +1432,8 @@ wire_record!(SettingsHeldView {
     counters,
     boxes,
     lightning_node,
-    currency
+    currency,
+    swap
 });
 
 /// The kinds of signed object that wait in the outbox.

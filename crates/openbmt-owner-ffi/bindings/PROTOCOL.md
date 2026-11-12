@@ -212,11 +212,14 @@ QueuedRefund: record: id: u32, received_sats: u64, reached_refund_depth: bool
 SettingsQueuedView: record: tightening: bool, id: u32, signed: option<list<u8>>
 LightningAction: enum, one tag byte
     tags Keep=0 Remove=1 Set=2
+SwapAction: enum, one tag byte
+    tags Keep=0 Remove=1 Set=2
+SwapHeldView: record: name: string, onion: string, path_prefix: string, max_sale_sats: u64
 CurrencyAction: enum, one tag byte
     tags Keep=0 Usd=1 Eur=2 Gbp=3 Jpy=4 Aud=5 Inr=6 Krw=7 Idr=8 Sgd=9 Sats=10
 ShopCurrencyView: enum, one tag byte
     tags Usd=1 Eur=2 Gbp=3 Jpy=4 Aud=5 Inr=6 Krw=7 Idr=8 Sgd=9 Sats=10
-SettingsEditArgs: record: usd_per_btc: option<u64>, light_per_sale: option<u32>, light_budget: option<u32>, node_per_sale: option<u32>, node_budget: option<u32>, box_per_sale: option<u32>, box_budget: option<u32>, underpayment_tolerance_bps: option<u32>, refund_cap: option<u32>, refund_daily_cap: option<u32>, cashier_override_daily_cap: option<u32>, manager_override_ceiling: option<u32>, min_confirmations: option<u8>, final_confirmations: option<u8>, heartbeat_max_age_secs: option<u32>, tor_on: option<bool>, customer_wifi: option<bool>, min_sale_sats: option<u64>, tips_on: option<bool>, tip_percents: option<list<u8>>, shares: list<CounterShareView>, lightning: LightningAction, lightning_text: string, currency: CurrencyAction
+SettingsEditArgs: record: usd_per_btc: option<u64>, light_per_sale: option<u32>, light_budget: option<u32>, node_per_sale: option<u32>, node_budget: option<u32>, box_per_sale: option<u32>, box_budget: option<u32>, underpayment_tolerance_bps: option<u32>, refund_cap: option<u32>, refund_daily_cap: option<u32>, cashier_override_daily_cap: option<u32>, manager_override_ceiling: option<u32>, min_confirmations: option<u8>, final_confirmations: option<u8>, heartbeat_max_age_secs: option<u32>, tor_on: option<bool>, customer_wifi: option<bool>, min_sale_sats: option<u64>, tips_on: option<bool>, tip_percents: option<list<u8>>, shares: list<CounterShareView>, lightning: LightningAction, lightning_text: string, currency: CurrencyAction, swap: SwapAction, swap_name: string, swap_onion: string, swap_prefix: string, swap_max_sats: u64
 SettingChangeView: record: field: string, label: string, counter: option<list<u8>>, old: string, new: string, loosening: bool
 SettingsPreviewView: record: version: u32, changes: list<SettingChangeView>, needs_key_app: bool, nothing_changed: bool, shares_total_bps: u32, usd_per_btc: option<u64>, sats_per_usd: option<u64>, settings: list<u8>, currency: ShopCurrencyView
 DeliverView: record: sent: u32, waiting: u32, notes: list<string>
@@ -233,7 +236,7 @@ OldAddressesView: record: kind: OldKind, count: u64, days_ago: u64, next: option
 DeepRequestView: record: asked: bool, words: Words
 LimitView: record: sats: u64, display_usd: u32
 CounterShareView: record: counter: list<u8>, bps: u32
-SettingsHeldView: record: version: u32, light_per_sale: LimitView, light_budget: LimitView, node_per_sale: LimitView, node_budget: LimitView, box_per_sale: LimitView, box_budget: LimitView, underpayment_tolerance_bps: u32, refund_cap: LimitView, refund_daily_cap: LimitView, cashier_override_daily_cap: LimitView, manager_override_ceiling: LimitView, min_confirmations: u8, final_confirmations: u8, heartbeat_max_age_secs: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, tips_on: bool, tip_percents: list<u8>, devices: list<list<u8>>, counters: list<CounterShareView>, boxes: list<list<u8>>, lightning_node: option<list<u8>>, currency: ShopCurrencyView
+SettingsHeldView: record: version: u32, light_per_sale: LimitView, light_budget: LimitView, node_per_sale: LimitView, node_budget: LimitView, box_per_sale: LimitView, box_budget: LimitView, underpayment_tolerance_bps: u32, refund_cap: LimitView, refund_daily_cap: LimitView, cashier_override_daily_cap: LimitView, manager_override_ceiling: LimitView, min_confirmations: u8, final_confirmations: u8, heartbeat_max_age_secs: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, tips_on: bool, tip_percents: list<u8>, devices: list<list<u8>>, counters: list<CounterShareView>, boxes: list<list<u8>>, lightning_node: option<list<u8>>, currency: ShopCurrencyView, swap: option<SwapHeldView>
 OutboxKind: enum, one tag byte
     tags Transaction=0 Batch=1 Settings=2 Pairing=3 BoxWelcome=4
 OutboxRow: record: id: u32, kind: OutboxKind, txid: option<string>, counter: option<list<u8>>, version: option<u32>, signed_at: option<u64>, size: u32, words: Words

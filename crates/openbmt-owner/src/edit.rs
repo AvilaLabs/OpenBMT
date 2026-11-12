@@ -8,7 +8,7 @@ use openbmt_core::currency::ShopCurrency;
 use openbmt_core::identity::DeviceId;
 use openbmt_core::settings::{
     carried_limit_fields, changed_fields, classify_change, Change, FieldChange, Limit, Settings,
-    LIGHTNING_NODE_BYTES,
+    SwapProvider, LIGHTNING_NODE_BYTES,
 };
 
 use crate::error::{NodeKeyFault, Refusal};
@@ -25,6 +25,16 @@ pub enum LightningEdit {
     /// Name this node, as typed or scanned: a 66-digit key, or an address
     /// `key@host:port` of which only the key is taken.
     Set(String),
+}
+
+/// What an edit does to the swap provider (CR-218).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SwapEdit {
+    /// Name no provider: Lightning through a swap provider stops.
+    Remove,
+    /// Name this provider. The settings check it as they check every
+    /// signed settings (name, onion name, path prefix, the largest sale).
+    Set(SwapProvider),
 }
 
 /// What an edit does to the watch key (CR-185).
@@ -95,6 +105,8 @@ pub struct SettingsEdit {
     pub shares: Vec<(DeviceId, u16)>,
     /// The Lightning node: `None` keeps it.
     pub lightning_node: Option<LightningEdit>,
+    /// The swap provider: `None` keeps it (CR-218).
+    pub swap: Option<SwapEdit>,
     /// The watch key: `None` keeps it.
     pub watch_key: Option<WatchEdit>,
 }
@@ -469,6 +481,11 @@ impl Owner {
             None => {}
             Some(LightningEdit::Remove) => s.lightning_node = None,
             Some(LightningEdit::Set(text)) => s.lightning_node = Some(parse_lightning_node(text)?),
+        }
+        match &edit.swap {
+            None => {}
+            Some(SwapEdit::Remove) => s.swap = None,
+            Some(SwapEdit::Set(provider)) => s.swap = Some(provider.clone()),
         }
         match &edit.watch_key {
             None => {}

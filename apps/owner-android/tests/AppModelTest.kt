@@ -41,6 +41,7 @@ import org.openbmt.owner.CounterState
 import org.openbmt.owner.EntryKind
 import org.openbmt.owner.Limit
 import org.openbmt.owner.LightningAction
+import org.openbmt.owner.SwapAction
 import org.openbmt.owner.LinkState
 import org.openbmt.owner.OutboxKind
 import org.openbmt.owner.OutboxRow
@@ -1466,6 +1467,33 @@ object AppModelTest {
         d.price = "$98,500"
         ok((SettingsEditModel.args(d, held) as Form.Ok).value.usdPerBtc == 98_500L, "the price goes to the node as whole dollars, and the node converts it")
         ok(SettingsEditModel.args(SettingsDraft(), held).let { it is Form.Ok && it.value.usdPerBtc == null }, "no price is sent that was not typed")
+        swapSettingTests(held)
+    }
+
+    /** CR-218: the swap provider row: the words as written down, the draft turned into the edit, and the address split. */
+    private fun swapSettingTests(held: SettingsHeld) {
+        ok(AppWords.swapSettingTitle == "Lightning through a swap provider" && AppWords.swapSettingProvider == "Provider" && AppWords.swapSettingOnion == "Onion address", "CR-218: the row's words, as written down")
+        ok(AppWords.swapSettingMax == "Largest sale over Lightning" && AppWords.swapSettingOn == "Turn on" && AppWords.swapSettingOff == "Turn off", "CR-218: the row's buttons, as written down")
+        ok(
+            AppWords.swapSettingText == "Customers can pay over Lightning. A swap provider you pick turns each payment into bitcoin that only your counter can claim, to your own wallet. The provider never holds your money.",
+            "CR-218: the row's text, as written down",
+        )
+        ok(AppWords.swapSettingFee("0.6", 558) == "The provider charges 0.6% plus about 558 sats per sale.", "CR-218: the fee line, as written down")
+        ok(AppWords.all().none { it.second.what == AppWords.swapSettingText }, "CR-218: the lines of the row have no heading and are not in the list of words")
+        ok(SettingsEditModel.splitOnion(" http://abc.onion/api/ ") == ("abc.onion" to "/api") && SettingsEditModel.splitOnion("abc.onion") == ("abc.onion" to "") && SettingsEditModel.splitOnion("https://abc.onion") == ("abc.onion" to ""), "CR-218: a whole address is split into the name and the path prefix")
+        ok(SettingsEditModel.swapNow(held) == "none", "CR-218: no provider is none")
+        val d = SettingsDraft()
+        ok(d.isEmpty, "an empty draft")
+        d.swap = NodeChoice.Set
+        d.swapName = " Pretend "
+        d.swapOnion = "http://abc.onion/api"
+        d.swapMax = "1,000"
+        ok(!d.isEmpty && SettingsEditModel.args(d, held) is Form.Refused, "CR-218: a largest sale that is not a number is refused with words")
+        d.swapMax = "1000000"
+        val a = (SettingsEditModel.args(d, held) as Form.Ok).value
+        ok(a.swap == SwapAction.Set && a.swapName == "Pretend" && a.swapOnion == "abc.onion" && a.swapPrefix == "/api" && a.swapMaxSats == 1_000_000L, "CR-218: the arguments carry the provider")
+        d.swap = NodeChoice.Remove
+        ok((SettingsEditModel.args(d, held) as Form.Ok).value.swap == SwapAction.Remove, "CR-218: turning it off")
     }
 
     private fun oa_35_after_the_queue_the_existing_screens_take_over() {

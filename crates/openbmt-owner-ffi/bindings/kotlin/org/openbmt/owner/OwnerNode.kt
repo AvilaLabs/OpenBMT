@@ -157,6 +157,9 @@ private const val TAG_CASH_AMOUNT_VIEW_ALL = 1
 private const val TAG_LIGHTNING_ACTION_KEEP = 0
 private const val TAG_LIGHTNING_ACTION_REMOVE = 1
 private const val TAG_LIGHTNING_ACTION_SET = 2
+private const val TAG_SWAP_ACTION_KEEP = 0
+private const val TAG_SWAP_ACTION_REMOVE = 1
+private const val TAG_SWAP_ACTION_SET = 2
 private const val TAG_SHOP_CURRENCY_VIEW_USD = 1
 private const val TAG_SHOP_CURRENCY_VIEW_EUR = 2
 private const val TAG_SHOP_CURRENCY_VIEW_GBP = 3
@@ -589,10 +592,18 @@ class SettingsHeld(
     val lightningNode: ByteArray?,
     /** What the shop prices in; every limit above is in whole units of it. */
     val currency: ShopCurrency = ShopCurrency.Usd,
+    /** The swap provider the settings name, when they name one (CR-218). */
+    val swap: SwapHeld? = null,
 )
+
+/** The swap provider the settings in force name (CR-218). */
+class SwapHeld(val name: String, val onion: String, val pathPrefix: String, val maxSaleSats: Long)
 
 /** What an edit does to the Lightning node. */
 enum class LightningAction { Keep, Remove, Set }
+
+/** What an edit does to the swap provider (CR-218). */
+enum class SwapAction { Keep, Remove, Set }
 
 /**
  * A change of the settings for [OwnerNode.previewSettings]: a null field (an empty [shares]) is kept.
@@ -630,6 +641,12 @@ data class SettingsEditArgs(
     val lightningText: String = "",
     /** The currency to change to; null keeps it. */
     val currency: ShopCurrency? = null,
+    /** What to do with the swap provider; the four fields after it are read only when it is Set (CR-218). */
+    val swap: SwapAction = SwapAction.Keep,
+    val swapName: String = "",
+    val swapOnion: String = "",
+    val swapPrefix: String = "",
+    val swapMaxSats: Long = 0,
 )
 
 /** One changed field in the words of a screen; [counter] is set for a counter's share. */
@@ -1463,7 +1480,7 @@ internal fun Reader.settingsHeld(): SettingsHeld =
         limit(), limit(), limit(), limit(), u8(), u8(), u32(), bool(), bool(), u64(),
         bool(), bytes().map { it.toInt() and 0xff },
         list { bytes() }, list { CounterShare(bytes(), u32()) }, list { bytes() },
-        option { bytes() }, shopCurrency(),
+        option { bytes() }, shopCurrency(), option { SwapHeld(string(), string(), string(), u64()) },
     )
 
 private fun Reader.settingChange(): SettingChange =
@@ -1473,6 +1490,15 @@ internal fun Reader.settingsPreview(): SettingsPreview =
     SettingsPreview(
         u32(), list { settingChange() }, bool(), bool(), u32(), option { u64() }, option { u64() }, bytes(),
         shopCurrency(),
+    )
+
+private fun Writer.swapAction(v: SwapAction): Writer =
+    u8(
+        when (v) {
+            SwapAction.Keep -> TAG_SWAP_ACTION_KEEP
+            SwapAction.Remove -> TAG_SWAP_ACTION_REMOVE
+            SwapAction.Set -> TAG_SWAP_ACTION_SET
+        },
     )
 
 private fun Writer.lightningAction(v: LightningAction): Writer =
@@ -1506,7 +1532,8 @@ internal fun Writer.settingsEdit(a: SettingsEditArgs): Writer {
     option(a.tipsOn) { bool(it) }
     option(a.tipPercents) { p -> bytes(ByteArray(p.size) { i -> p[i].toByte() }) }
     list(a.shares) { bytes(it.counter).u32(it.bps) }
-    return lightningAction(a.lightning).string(a.lightningText).currencyAction(a.currency)
+    lightningAction(a.lightning).string(a.lightningText).currencyAction(a.currency)
+    return swapAction(a.swap).string(a.swapName).string(a.swapOnion).string(a.swapPrefix).u64(a.swapMaxSats)
 }
 
 internal fun Reader.outboxRow(): OutboxRow =

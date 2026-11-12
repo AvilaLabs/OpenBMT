@@ -397,6 +397,36 @@ fn as_27_the_lightning_node_is_shown_in_full_and_naming_it_loosens() {
 }
 
 #[test]
+fn as_27_a_swap_provider_is_shown_in_full_and_naming_it_tightens() {
+    let mut a = approver_with_key2();
+    cosign_settings(&mut a, 200, 2, &[1], &Store::default());
+    let mut named = settings_with(3, &[1]);
+    named.swap = Some(openbmt_core::settings::SwapProvider {
+        name: "Pretend".to_string(),
+        onion: "a4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dwc6ad.onion".to_string(),
+        path_prefix: "/api".to_string(),
+        max_sale_sats: 1_000_000,
+    });
+    let lines = lines_of(&mut a, vec![settings_item(named)]);
+    let Detail::Settings(s) = &lines[0].detail else {
+        panic!()
+    };
+    assert_eq!(s.changes.len(), 1);
+    let c = &s.changes[0];
+    assert_eq!(c.field, "Lightning through a swap provider");
+    assert_eq!(c.old.as_deref(), Some("no swap provider"));
+    assert_eq!(
+        c.new,
+        "Lightning payments go through Pretend at \
+         a4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dwc6ad.onion/api, up to 1000000 sats a sale"
+    );
+    // The claim pays the shop's own address, so naming a provider is not a
+    // loosening (CR-218).
+    assert_eq!(c.direction, Change::Tightening);
+    assert_eq!(s.overall, Some(Change::Tightening));
+}
+
+#[test]
 fn as_27_the_watch_key_is_shown_in_full_and_naming_it_loosens() {
     let key = openbmt_core::identity::Identity::from_secret_bytes(&[9; 32])
         .unwrap()

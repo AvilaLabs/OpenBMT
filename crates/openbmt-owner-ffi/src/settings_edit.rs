@@ -7,8 +7,10 @@
 //! written and read like those of [`views`](crate::views).
 
 use openbmt_core::currency::{grouped, ShopCurrency};
-use openbmt_core::settings::{Change, Limit, Settings, SignedSettings, LIGHTNING_NODE_BYTES};
-use openbmt_owner::{LightningEdit, SettingsEdit, SettingsPreview};
+use openbmt_core::settings::{
+    Change, Limit, Settings, SignedSettings, SwapProvider, LIGHTNING_NODE_BYTES,
+};
+use openbmt_owner::{LightningEdit, SettingsEdit, SettingsPreview, SwapEdit};
 
 use crate::codec::{wire_record, wire_record_get, wire_unit_enum};
 use crate::error::{refused_by, AppError};
@@ -26,6 +28,23 @@ pub enum LightningAction {
 }
 
 wire_unit_enum!(LightningAction {
+    Keep = 0,
+    Remove = 1,
+    Set = 2
+});
+
+/// What an edit does to the swap provider (CR-218).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwapAction {
+    /// Keep the provider as it is.
+    Keep,
+    /// Name no provider.
+    Remove,
+    /// Name the provider of the four fields.
+    Set,
+}
+
+wire_unit_enum!(SwapAction {
     Keep = 0,
     Remove = 1,
     Set = 2
@@ -150,6 +169,17 @@ pub struct SettingsEditArgs {
     /// The shop's currency (CR-198): `Keep`, or the one to change to, which
     /// needs every limit again.
     pub currency: CurrencyAction,
+    /// What to do with the swap provider (CR-218).
+    pub swap: SwapAction,
+    /// The provider's name, read only when `swap` is `Set`.
+    pub swap_name: String,
+    /// The provider's onion name, read only when `swap` is `Set`.
+    pub swap_onion: String,
+    /// The path prefix of the provider's API, read only when `swap` is `Set`.
+    pub swap_prefix: String,
+    /// The most the shop takes over Lightning for one sale, in satoshis,
+    /// read only when `swap` is `Set`.
+    pub swap_max_sats: u64,
 }
 
 wire_record_get!(SettingsEditArgs {
@@ -176,7 +206,12 @@ wire_record_get!(SettingsEditArgs {
     shares,
     lightning,
     lightning_text,
-    currency
+    currency,
+    swap,
+    swap_name,
+    swap_onion,
+    swap_prefix,
+    swap_max_sats
 });
 
 wire_record!(SettingsEditArgs {
@@ -203,7 +238,12 @@ wire_record!(SettingsEditArgs {
     shares,
     lightning,
     lightning_text,
-    currency
+    currency,
+    swap,
+    swap_name,
+    swap_onion,
+    swap_prefix,
+    swap_max_sats
 });
 
 /// One changed field, in the words of a screen (AS-77).
@@ -288,6 +328,16 @@ pub(crate) fn to_edit(
         LightningAction::Remove => Some(LightningEdit::Remove),
         LightningAction::Set => Some(LightningEdit::Set(a.lightning_text)),
     };
+    let swap = match a.swap {
+        SwapAction::Keep => None,
+        SwapAction::Remove => Some(SwapEdit::Remove),
+        SwapAction::Set => Some(SwapEdit::Set(SwapProvider {
+            name: a.swap_name,
+            onion: a.swap_onion,
+            path_prefix: a.swap_prefix,
+            max_sale_sats: a.swap_max_sats,
+        })),
+    };
     Ok(SettingsEdit {
         currency: a.currency.named(),
         usd_per_btc: a.usd_per_btc,
@@ -312,6 +362,7 @@ pub(crate) fn to_edit(
         tip_percents: a.tip_percents,
         shares,
         lightning_node,
+        swap,
         watch_key: None,
     })
 }
@@ -404,6 +455,21 @@ pub(crate) fn node_text(key: &Option<[u8; LIGHTNING_NODE_BYTES]>) -> String {
     match key {
         None => "none".to_string(),
         Some(key) => key.iter().map(|b| format!("{b:02x}")).collect(),
+    }
+}
+
+/// The swap provider in words: its name, its onion name and the largest
+/// sale over Lightning, or none.
+pub(crate) fn swap_text(provider: &Option<SwapProvider>) -> String {
+    match provider {
+        None => "none".to_string(),
+        Some(p) => format!(
+            "{} at {}{}, sales up to {} sats",
+            p.name,
+            p.onion,
+            p.path_prefix,
+            grouped(p.max_sale_sats)
+        ),
     }
 }
 
@@ -514,6 +580,10 @@ fn field_words(
                 node_text(&old.lightning_node),
                 node_text(&new.lightning_node),
             ),
+        ),
+        "swap" => (
+            "Lightning through a swap provider",
+            (swap_text(&old.swap), swap_text(&new.swap)),
         ),
         "watch_key" => (
             "Watch in the background",

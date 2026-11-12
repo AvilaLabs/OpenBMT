@@ -51,6 +51,7 @@ internal fun Controller.showChangeSettings(message: SayWords? = null) {
         for (g in SettingsEditModel.groups) rows.add(RowItem(g.words.heading) { if (g === SettingsEditModel.currency) showEditCurrency() else showEditGroup(g) })
         rows.add(RowItem(AppWords.editGroupShares.heading) { showEditShares() })
         rows.add(RowItem(AppWords.editGroupLightning.heading) { showEditLightning() })
+        rows.add(RowItem(AppWords.swapSettingTitle) { showEditSwap() })
         views.add(ui.rows(rows))
         val actions = listOf(
             ui.primary("Review") { showEditReview() },
@@ -255,6 +256,48 @@ private fun Controller.showEditLightning(prefill: String? = null, message: SayWo
             )
         }
         screen(AppWords.editGroupLightning.heading, views, actions, back = { showChangeSettings() }, words = AppWords.editGroupLightning)
+    }
+}
+
+/** CR-218: the swap provider the settings hold, its name, its onion address and the largest sale over Lightning, and the ways to turn it on or off. */
+private fun Controller.showEditSwap() {
+    withHeld({ w -> showChangeSettings(w) }) { _, held ->
+        val views = ArrayList<View>()
+        views.add(para(AppWords.swapSettingText))
+        views.add(stack(label("Now"), line(SettingsEditModel.swapNow(held), muted = true)))
+        val name = ui.field(AppWords.swapSettingProvider)
+        val onion = ui.field(AppWords.swapSettingOnion, lines = 2, mono = true)
+        val max = ui.field(AppWords.swapSettingMax)
+        val typing = settingsDraft.swap == NodeChoice.Set
+        name.setText(if (typing) settingsDraft.swapName else held.swap?.name ?: "")
+        onion.setText(if (typing) settingsDraft.swapOnion else held.swap?.let { it.onion + it.pathPrefix } ?: "")
+        max.setText(if (typing) settingsDraft.swapMax else held.swap?.maxSaleSats?.toString() ?: "")
+        views.add(ui.labelled(AppWords.swapSettingProvider, name))
+        views.add(ui.labelled(AppWords.swapSettingOnion, onion))
+        views.add(ui.labelled(AppWords.swapSettingMax, max))
+        val actions = ArrayList<android.widget.Button>()
+        actions.add(
+            ui.primary(AppWords.swapSettingOn) {
+                settingsDraft.swap = NodeChoice.Set
+                settingsDraft.swapName = name.text.toString()
+                settingsDraft.swapOnion = onion.text.toString()
+                settingsDraft.swapMax = max.text.toString()
+                showChangeSettings()
+            },
+        )
+        if (held.swap != null) {
+            actions.add(
+                ui.danger(AppWords.swapSettingOff) {
+                    settingsDraft.swap = NodeChoice.Remove
+                    settingsDraft.swapName = ""
+                    settingsDraft.swapOnion = ""
+                    settingsDraft.swapMax = ""
+                    showChangeSettings()
+                },
+            )
+        }
+        actions.add(ui.button("Back") { showChangeSettings() })
+        screen(AppWords.swapSettingTitle, views, actions, back = { showChangeSettings() })
     }
 }
 

@@ -429,6 +429,7 @@ fn read_settings(r: &mut Rd<'_>) -> Held {
     let boxes = r.list(Rd::bytes);
     let node = r.opt(Rd::bytes);
     let currency = r.u8();
+    let _swap = r.opt(|r| (r.string(), r.string(), r.string(), r.u64()));
     Held {
         version,
         limits,

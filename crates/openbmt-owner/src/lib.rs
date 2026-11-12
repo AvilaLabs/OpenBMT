@@ -61,7 +61,7 @@ pub use counter::{
 };
 pub use edit::{
     parse_lightning_node, price_band, sats_per_usd_at, LightningEdit, SettingsEdit,
-    SettingsPreview, WatchEdit, MAX_EDIT_CONFIRMATIONS, MAX_USD_PER_BTC, MIN_USD_PER_BTC,
+    SettingsPreview, SwapEdit, WatchEdit, MAX_EDIT_CONFIRMATIONS, MAX_USD_PER_BTC, MIN_USD_PER_BTC,
 };
 pub use error::{BoxGap, BundleGap, NodeKeyFault, OwnerError, Refusal, RestoreError, SetupError};
 pub use state::Owner;

@@ -127,6 +127,7 @@ use crate::price::{
 use crate::say::{TONES, WHOS};
 use crate::settings_edit::{
     CurrencyAction, LightningAction, SettingChangeView, SettingsEditArgs, SettingsPreviewView,
+    SwapAction,
 };
 use crate::setup_lock::{self, PinChangeArgs};
 use crate::signer_views::{
@@ -141,7 +142,7 @@ use crate::views::{
     OutboxKind, OutboxRow, OutcomeKind, OutcomeView, OwnerNetwork, PumpView, QueueView,
     QueuedRefund, ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView,
     SendKind, SendRow, SettingsHeldView, SettingsQueuedView, ShopCurrencyView, SkippedView,
-    StageKind, StageView, StartConfig, StatusView, TakenView, ViewKind, WordsView,
+    StageKind, StageView, StartConfig, StatusView, SwapHeldView, TakenView, ViewKind, WordsView,
 };
 use crate::watch::{self, WatchEntry, WatchStart, WatchStepView};
 
@@ -867,6 +868,8 @@ fn definitions() -> Vec<TypeDef> {
         QueuedRefund::define(),
         SettingsQueuedView::define(),
         LightningAction::define(),
+        SwapAction::define(),
+        SwapHeldView::define(),
         CurrencyAction::define(),
         ShopCurrencyView::define(),
         SettingsEditArgs::define(),

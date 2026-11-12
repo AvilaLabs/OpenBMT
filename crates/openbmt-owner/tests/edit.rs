@@ -5,10 +5,10 @@ mod common;
 
 use common::*;
 use openbmt_core::currency::ShopCurrency;
-use openbmt_core::settings::{Change, FieldChange, Limit, Settings};
+use openbmt_core::settings::{Change, FieldChange, Limit, Settings, SwapProvider};
 use openbmt_owner::{
     parse_lightning_node, sats_per_usd_at, LightningEdit, NodeKeyFault, Refusal, SettingsEdit,
-    SettingsQueued, WatchEdit, MAX_USD_PER_BTC, MIN_USD_PER_BTC,
+    SettingsQueued, SwapEdit, WatchEdit, MAX_USD_PER_BTC, MIN_USD_PER_BTC,
 };
 
 /// $100,000 a bitcoin: 1,000 satoshis to a dollar, the rate of the rig's settings.
@@ -246,6 +246,80 @@ fn as_74_every_field_has_an_edit_that_loosens_and_one_that_tightens() {
     }
     // Every editable field was both loosened and tightened.
     assert_eq!(seen.len(), 2 * 19);
+}
+
+const ONION: &str = "a4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dwc6ad.onion";
+
+fn provider() -> SwapProvider {
+    SwapProvider {
+        name: "Pretend".to_string(),
+        onion: ONION.to_string(),
+        path_prefix: "/api".to_string(),
+        max_sale_sats: 1_000_000,
+    }
+}
+
+#[test]
+fn as_74_a_swap_provider_is_named_and_removed_and_either_way_tightens() {
+    // Naming a provider pays the shop's own address and no one else's, so
+    // the owner phone's signature alone suffices (CR-218).
+    let mut rig = held(plain);
+    let edit = SettingsEdit {
+        swap: Some(SwapEdit::Set(provider())),
+        ..SettingsEdit::default()
+    };
+    let preview = rig.owner.settings_preview(&edit).expect("a preview");
+    assert_eq!(
+        preview.fields,
+        vec![FieldChange {
+            field: "swap",
+            direction: Change::Tightening
+        }]
+    );
+    assert_eq!(preview.change, Change::Tightening);
+    assert_eq!(preview.settings.swap, Some(provider()));
+    let queued = ok(rig.owner.queue_settings(preview.settings, nop));
+    assert!(matches!(queued, SettingsQueued::Tightening { .. }));
+    // Removing it, from settings that hold one.
+    let rig = held(|s| s.swap = Some(provider()));
+    let edit = SettingsEdit {
+        swap: Some(SwapEdit::Remove),
+        ..SettingsEdit::default()
+    };
+    let preview = rig.owner.settings_preview(&edit).expect("a preview");
+    assert_eq!(preview.settings.swap, None);
+    assert_eq!(preview.change, Change::Tightening);
+}
+
+#[test]
+fn as_74_a_swap_provider_that_does_not_check_is_refused_and_so_is_one_with_a_node() {
+    let rig = held(plain);
+    let refuse = |edit: SettingsEdit| match rig.owner.settings_preview(&edit) {
+        Err(Refusal::SettingsInvalid(why)) => why,
+        other => panic!("{other:?}"),
+    };
+    let set = |p: SwapProvider| SettingsEdit {
+        swap: Some(SwapEdit::Set(p)),
+        ..SettingsEdit::default()
+    };
+    refuse(set(SwapProvider {
+        onion: "not-an-onion.example".to_string(),
+        ..provider()
+    }));
+    refuse(set(SwapProvider {
+        name: String::new(),
+        ..provider()
+    }));
+    refuse(set(SwapProvider {
+        max_sale_sats: 25_000_001,
+        ..provider()
+    }));
+    // One Lightning path at a time (CR-218).
+    refuse(SettingsEdit {
+        swap: Some(SwapEdit::Set(provider())),
+        lightning_node: Some(LightningEdit::Set(KEY.to_string())),
+        ..SettingsEdit::default()
+    });
 }
 
 #[test]

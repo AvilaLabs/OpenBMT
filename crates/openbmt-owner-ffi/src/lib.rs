@@ -96,6 +96,7 @@ pub use price::{AgreedPriceView, PriceArgs, PriceReplyView, PriceSourceView};
 pub use say::{all_words, words_for};
 pub use settings_edit::{
     CurrencyAction, LightningAction, SettingChangeView, SettingsEditArgs, SettingsPreviewView,
+    SwapAction,
 };
 pub use setup_lock::PinChangeArgs;
 pub use views::{
@@ -106,5 +107,5 @@ pub use views::{
     OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView,
     RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind, SendRow, SettingsHeldView,
     SettingsQueuedView, ShopCurrencyView, SkippedView, StageKind, StageView, StartConfig,
-    StatusView, TakenView, ViewKind, WordsView,
+    StatusView, SwapHeldView, TakenView, ViewKind, WordsView,
 };

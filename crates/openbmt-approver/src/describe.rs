@@ -4,7 +4,7 @@ use std::fmt::Write;
 
 use openbmt_core::currency::ShopCurrency;
 use openbmt_core::identity::DeviceId;
-use openbmt_core::settings::{Limit, Settings, LIGHTNING_NODE_BYTES};
+use openbmt_core::settings::{Limit, Settings, SwapProvider, LIGHTNING_NODE_BYTES};
 
 /// Bytes as lower-case hex.
 pub(crate) fn hex(bytes: &[u8]) -> String {
@@ -46,6 +46,7 @@ pub(crate) fn shown_name(field: &'static str) -> &'static str {
         "currency" => "Currency",
         "min_sale_sats" => "Smallest bitcoin sale",
         "lightning_node" => "Lightning node",
+        "swap" => "Lightning through a swap provider",
         "watch_key" => "Watch key",
         "tips_on" => "Ask for a tip",
         "tip_percents" => "Tips",
@@ -60,6 +61,19 @@ fn lightning_node(key: &Option<[u8; LIGHTNING_NODE_BYTES]>) -> String {
     match key {
         Some(k) => format!("Lightning payments go to node {}", hex(k)),
         None => "no Lightning node".to_string(),
+    }
+}
+
+/// The line for the swap provider (CR-218): its name, its onion name in
+/// full and the largest sale over Lightning, so that the key holder can
+/// compare them with what the owner's phone shows.
+fn swap(provider: &Option<SwapProvider>) -> String {
+    match provider {
+        Some(p) => format!(
+            "Lightning payments go through {} at {}{}, up to {} sats a sale",
+            p.name, p.onion, p.path_prefix, p.max_sale_sats
+        ),
+        None => "no swap provider".to_string(),
     }
 }
 
@@ -152,6 +166,7 @@ pub(crate) fn field_values(s: &Settings) -> Vec<(&'static str, String)> {
         ("counters", counters),
         ("boxes", boxes),
         ("lightning_node", lightning_node(&s.lightning_node)),
+        ("swap", swap(&s.swap)),
         ("watch_key", watch_key(&s.watch_key)),
         ("tips_on", flag(s.tips_on)),
         ("tip_percents", tip_percents(&s.tip_percents)),

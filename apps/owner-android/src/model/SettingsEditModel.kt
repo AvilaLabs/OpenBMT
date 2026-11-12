@@ -8,6 +8,7 @@ import org.openbmt.owner.SettingsEditArgs
 import org.openbmt.owner.SettingsHeld
 import org.openbmt.owner.SettingsPreview
 import org.openbmt.owner.ShopCurrency
+import org.openbmt.owner.SwapAction
 
 /** The kinds of value a field of the editor holds. */
 enum class FieldKind { Dollars, Percent, Blocks, Minutes, Sats, Switch, TipPercent }
@@ -52,6 +53,12 @@ class SettingsDraft {
     var node: NodeChoice = NodeChoice.Keep
     var nodeText: String = ""
 
+    /** What the owner chose for the swap provider (CR-218), and what was typed for it. */
+    var swap: NodeChoice = NodeChoice.Keep
+    var swapName: String = ""
+    var swapOnion: String = ""
+    var swapMax: String = ""
+
     /** The currency chosen, only when it is not the one the settings hold (CR-198). */
     var currency: ShopCurrency? = null
 
@@ -61,7 +68,7 @@ class SettingsDraft {
      */
     var price: String = ""
 
-    val isEmpty: Boolean get() = typed.isEmpty() && shares.isEmpty() && node == NodeChoice.Keep && currency == null
+    val isEmpty: Boolean get() = typed.isEmpty() && shares.isEmpty() && node == NodeChoice.Keep && swap == NodeChoice.Keep && currency == null
 
     /**
      * Choose a currency. A currency other than the one [held] is a new currency: what was typed as a limit and the
@@ -274,6 +281,21 @@ object SettingsEditModel {
     fun nodeNow(held: SettingsHeld): String =
         held.lightningNode?.joinToString("") { "%02x".format(it) } ?: "none"
 
+    /** The swap provider the settings hold, in one line, or "none" (CR-218). */
+    fun swapNow(held: SettingsHeld): String =
+        held.swap?.let { "${it.name} at ${it.onion}${it.pathPrefix}, sales up to ${Format.sats(it.maxSaleSats)}" } ?: "none"
+
+    /**
+     * The provider's address as typed: a bare onion name, or the whole address with `http://` and the path its API
+     * is served under, which is split into the name and the path prefix. The library judges what is left (CR-218).
+     */
+    fun splitOnion(text: String): Pair<String, String> {
+        var t = text.trim()
+        for (scheme in listOf("http://", "https://")) if (t.lowercase().startsWith(scheme)) t = t.substring(scheme.length)
+        val slash = t.indexOf('/')
+        return if (slash < 0) t to "" else t.substring(0, slash) to t.substring(slash).trimEnd('/')
+    }
+
     /** What the shares add up to and what remains, as one line; over the whole says by how much. */
     fun sharesTotalLine(bps: List<Long>): String {
         val total = bps.sum()
@@ -333,6 +355,16 @@ object SettingsEditModel {
             NodeChoice.Set -> when (val t = nodeText(draft.nodeText)) {
                 is Form.Refused -> return t
                 is Form.Ok -> a.copy(lightning = LightningAction.Set, lightningText = t.value)
+            }
+        }
+        a = when (draft.swap) {
+            NodeChoice.Keep -> a
+            NodeChoice.Remove -> a.copy(swap = SwapAction.Remove)
+            NodeChoice.Set -> {
+                val max = draft.swapMax.trim().takeIf { it.isNotEmpty() && it.all { c -> c in '0'..'9' } && it.length <= 12 }?.toLong()
+                    ?: return Form.Refused(AppWords.editValueNotRead(FieldKind.Sats, AppWords.swapSettingMax, draft.currency ?: held.currency))
+                val (onion, prefix) = splitOnion(draft.swapOnion)
+                a.copy(swap = SwapAction.Set, swapName = draft.swapName.trim(), swapOnion = onion, swapPrefix = prefix, swapMaxSats = max)
             }
         }
         if (draft.price.isNotBlank()) {

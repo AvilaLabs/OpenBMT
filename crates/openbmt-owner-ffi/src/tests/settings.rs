@@ -37,6 +37,10 @@ struct Edit {
     text: String,
     /// The tag of the currency to change to; 0 keeps it.
     currency: u8,
+    /// The swap provider: what to do (0 keeps, 1 removes, 2 sets) and the
+    /// name, the onion name, the path prefix and the largest sale.
+    swap: u8,
+    swap_fields: (String, String, String, u64),
 }
 
 // The ten limits in the order of the frame, with the tolerance after six.
@@ -89,7 +93,16 @@ impl Edit {
         for (counter, bps) in &self.shares {
             w = w.bytes(counter).u32(*bps);
         }
-        w.u8(self.lightning).string(&self.text).u8(self.currency).0
+        let (name, onion, prefix, most) = &self.swap_fields;
+        w.u8(self.lightning)
+            .string(&self.text)
+            .u8(self.currency)
+            .u8(self.swap)
+            .string(name)
+            .string(onion)
+            .string(prefix)
+            .u64(*most)
+            .0
     }
 }
 
@@ -587,4 +600,54 @@ fn cr_198_a_change_of_currency_that_carries_a_limit_or_lacks_a_price_is_refused_
     };
     assert!(preview(&rig, handle, &same).unwrap().nothing_changed);
     assert_eq!(entries(&rig, handle), 0);
+}
+
+#[test]
+fn as_74_a_swap_provider_is_named_in_words_and_either_way_tightens() {
+    let (rig, handle) = held();
+    let named = Edit {
+        swap: SET,
+        swap_fields: (
+            "Pretend".to_string(),
+            "a4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dwc6ad.onion".to_string(),
+            "/api".to_string(),
+            1_000_000,
+        ),
+        ..Edit::default()
+    };
+    let p = preview(&rig, handle, &named).expect("a preview");
+    assert_eq!(p.changes.len(), 1);
+    let c = &p.changes[0];
+    assert_eq!(c.field, "swap");
+    assert_eq!(c.label, "Lightning through a swap provider");
+    assert_eq!(c.old, "none");
+    assert_eq!(
+        c.new,
+        "Pretend at a4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dwc6ad.onion/api, \
+         sales up to 1,000,000 sats"
+    );
+    assert!(!c.loosening && !p.needs_key_app);
+    // A provider that does not check comes back with words, and nothing is
+    // queued.
+    let bad = Edit {
+        swap: SET,
+        swap_fields: (
+            "Pretend".to_string(),
+            "example.com".to_string(),
+            String::new(),
+            1_000_000,
+        ),
+        ..Edit::default()
+    };
+    assert!(preview(&rig, handle, &bad).is_err());
+    // Removing what is not there changes nothing.
+    let gone = Edit {
+        swap: REMOVE,
+        ..Edit::default()
+    };
+    assert!(
+        preview(&rig, handle, &gone)
+            .expect("a preview")
+            .nothing_changed
+    );
 }

@@ -783,6 +783,21 @@ object AppWords {
         "Type each share as a percent with up to two decimals.",
     )
 
+    // ---- Lightning through a swap provider (CR-218) --------------------------------------------
+
+    /** The settings row, and the heading of its screen. These lines have no heading of their own, so they are not in the list of words. */
+    const val swapSettingTitle = "Lightning through a swap provider"
+    const val swapSettingText =
+        "Customers can pay over Lightning. A swap provider you pick turns each payment into bitcoin that only your counter can claim, to your own wallet. The provider never holds your money."
+    const val swapSettingProvider = "Provider"
+    const val swapSettingOnion = "Onion address"
+    const val swapSettingMax = "Largest sale over Lightning"
+    const val swapSettingOn = "Turn on"
+    const val swapSettingOff = "Turn off"
+
+    /** The provider's fee, once its live terms are known: the percentage and the miner fees in satoshis. */
+    fun swapSettingFee(percent: String, sats: Long) = "The provider charges $percent% plus about $sats sats per sale."
+
     val editGroupLightning = w(
         Tones.INFO, "Lightning node",
         "The shop's own Lightning node: every Lightning payment must be made out to this node's key.",

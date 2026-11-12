@@ -111,6 +111,7 @@ object ProtocolDecoderTest {
         check(held.heartbeatMaxAgeSecs == 900L && held.torOn && !held.customerWifi && held.minSaleSats == 0L)
         check(held.devices.size == 1 && held.counters.size == 1 && held.counters[0].bps == 10_000L)
         check(held.tipsOn && held.tipPercents == listOf(10, 15, 20))
+        check(held.swap?.name == "Pretend" && held.swap?.onion == "abc.onion" && held.swap?.pathPrefix == "/api" && held.swap?.maxSaleSats == 1_000_000L)
         check(held.boxes.isEmpty())
         check(held.lightningNode!!.size == 33 && held.lightningNode!![0].toInt() == 2)
         check(held.currency == ShopCurrency.Jpy && held.currency.code == "JPY" && held.currency.plural == "yen")
@@ -126,8 +127,8 @@ object ProtocolDecoderTest {
         check(!preview.changes[1].loosening && preview.sharesTotalBps == 8_333L && preview.usdPerBtc == 98_500L && preview.satsPerUsd == 1_015L)
         check(preview.settings.size == 2)
         check(preview.currency == ShopCurrency.Eur && preview.currency.label == "Euro (EUR)")
-        rejects("a currency tag that is not a choice") { decodeResponse(settingsFrame().also { it[it.size - 1] = 0 }).let { r -> r.option { r.settingsHeld() } } }
-        rejects("a currency tag past the list") { decodeResponse(settingsFrame().also { it[it.size - 1] = 11 }).let { r -> r.option { r.settingsHeld() } } }
+        rejects("a currency tag that is not a choice") { decodeResponse(settingsFrame(swap = false).also { it[it.size - 2] = 0 }).let { r -> r.option { r.settingsHeld() } } }
+        rejects("a currency tag past the list") { decodeResponse(settingsFrame(swap = false).also { it[it.size - 2] = 11 }).let { r -> r.option { r.settingsHeld() } } }
         rejects("a preview flag") { decodeResponse(previewFrame(needsKeyApp = 2)).settingsPreview() }
         rejects("a short preview") { decodeResponse(previewFrame().copyOf(30)).settingsPreview() }
 
@@ -652,7 +653,7 @@ object ProtocolDecoderTest {
         return header(0, out.toByteArray())
     }
 
-    private fun settingsFrame(): ByteArray {
+    private fun settingsFrame(swap: Boolean = true): ByteArray {
         val w = Writer().u8(1).u32(3)
         for (i in 0 until 6) w.u64(if (i == 0) 500L else 1000L).u32(if (i == 0) 7 else 1)
         w.u32(100)
@@ -664,6 +665,8 @@ object ProtocolDecoderTest {
         w.u32(0)
         w.u8(1).bytes(ByteArray(33) { if (it == 0) 2 else 7 })
         w.u8(4)
+        // The swap provider the settings name (CR-218).
+        if (swap) w.u8(1).string("Pretend").string("abc.onion").string("/api").u64(1_000_000) else w.u8(0)
         return header(0, w.toByteArray())
     }
 
@@ -679,7 +682,7 @@ object ProtocolDecoderTest {
 
     /** The request `previewSettings` writes for [sampleEdit]; the Rust test of the same name writes it too. */
     private const val EDIT_FRAME_HEX =
-        "4f424d6b012f00010000000000000001e803000000000000010a0000000000013200000000000001640000000000000103000001010000000000000000010000000000"
+        "4f424d6b012f00010000000000000001e803000000000000010a0000000000013200000000000001640000000000000103000001010000000000000000010000000000000000000000000000000000000000000000000000"
 
     private fun sampleEdit() =
         SettingsEditArgs(
