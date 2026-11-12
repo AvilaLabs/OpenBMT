@@ -420,7 +420,7 @@ Connect your wallet, after the advice on an own wallet, in `ConnectWords`:
 | introStep1 | Open your wallet on the computer or phone where it lives. |
 | introStep2 | Find Export or Settings, then Output descriptor. |
 | introStep3 | Show it as a code, then scan it with this phone. |
-| introNote | Sparrow, Nunchuk and Bitcoin Core can show one. A wallet that shows only an xpub or zpub cannot be used yet. |
+| introNote | Sparrow and Coldcard can show one. A wallet that shows only an xpub or zpub cannot be used yet. |
 | introScan | Scan the code |
 | introPaste | Paste the text |
 | pasteHint | Paste the output descriptor here. |
