@@ -19,7 +19,8 @@
 //! `openbmt-counter` crate, and `OBMT` (the owner's signed watcher
 //! heartbeat). An own-wallet pairing has `OBM-` (offer), `OBM.` (request),
 //! `OBM/` (bundle), `OBM:` (the counter's record) and `OBM;` (the range
-//! book), beside `OBM)` and `OBM*` of `pinned_wallet`. The address book (`OBMA`) and the header store (`OBMW`) have
+//! book), beside `OBM)` and `OBM*` of `pinned_wallet`, and `OBM<` carries signed settings
+//! with a counter's confirmation (`confirmed`). The address book (`OBMA`) and the header store (`OBMW`) have
 //! their own magics in the crates that write them.
 //!
 //! [`Reader`], [`start`], [`put_opt_u64`] and [`len_u32`] are public so that
@@ -95,6 +96,8 @@ pub const MAGIC_OWN_BUNDLE: [u8; 4] = *b"OBM/";
 pub const MAGIC_OWN_PAIRING_RECORD: [u8; 4] = *b"OBM:";
 /// Magic of a counter's range book slot (CR-234).
 pub const MAGIC_RANGE_BOOK: [u8; 4] = *b"OBM;";
+/// Magic of signed settings that carry a counter's confirmation (CR-242).
+pub const MAGIC_CONFIRMED_SETTINGS: [u8; 4] = *b"OBM<";
 /// Magic of a [`SignedRelayHint`](crate::relay::SignedRelayHint), the relay
 /// for counters (CR-132).
 pub const MAGIC_RELAY_FOR_COUNTERS: [u8; 4] = *b"OBMz";

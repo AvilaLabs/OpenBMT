@@ -13,6 +13,7 @@ pub mod bip321;
 pub mod boxpair;
 pub mod bundle;
 pub mod command;
+pub mod confirmed;
 pub mod currency;
 pub mod entropy;
 mod hashing;
