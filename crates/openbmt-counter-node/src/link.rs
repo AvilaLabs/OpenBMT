@@ -13,7 +13,8 @@
 //! - Batch: decoded as a `SignedBatch` and given to `Node::add_batch`.
 //! - Records received: the owner's mark (LK-55), which is also given to the
 //!   node as the mark that settling goes by (CR-76).
-//! - Settings: decoded as the `OBMS` frame and given to `Node::take_settings`
+//! - Settings: decoded as the `OBMS` frame, or the `OBM<` frame of CR-242, and given to
+//!   `Node::take_settings` or `Node::take_confirmed_settings`
 //!   (CR-160 to CR-162). A version that is not above the one in force is
 //!   dropped without a word.
 //! - Device lists: noted and dropped. The device list travels inside the
@@ -57,7 +58,7 @@ use openbmt_link::{ClientError, Kind, Role};
 
 use crate::node::{DriverPort, Node};
 use crate::notices::{NoticeOutbox, NoticeStoreError};
-use crate::settings::decode_file;
+use crate::settings::{decode_frame, SettingsFrame};
 
 /// Most lines the link's own notes keep; the oldest goes first.
 pub const NOTE_LOG: usize = 64;
@@ -470,14 +471,19 @@ impl<R: Post> CounterLink<R> {
 
     /// CR-160: settings from the owner.
     fn take_settings<P: DriverPort>(&mut self, node: &mut Node<P>, content: &[u8]) {
-        let signed = match decode_file(content) {
-            Ok(signed) => signed,
+        let frame = match decode_frame(content) {
+            Ok(frame) => frame,
             Err(e) => {
                 self.refused_by_node(format!("CR-160: the owner's settings do not read: {e}"));
                 return;
             }
         };
-        if let Err(e) = node.take_settings(&signed) {
+        // CR-242: either frame; a counter's confirmation rides in `OBM<`.
+        let taken = match &frame {
+            SettingsFrame::Plain(signed) => node.take_settings(signed),
+            SettingsFrame::Confirmed(c) => node.take_confirmed_settings(c),
+        };
+        if let Err(e) = taken {
             self.refused_by_node(e.to_string());
         }
     }

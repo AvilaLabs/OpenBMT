@@ -52,27 +52,32 @@ pub fn classify(old: &Settings, new: &Settings) -> ChangeClass {
         if c.direction != Change::Loosening {
             continue;
         }
-        let this = match c.field {
-            "lightning_node" => ChangeClass::Redirect,
-            // A watch key and a new Box are named in the settings but move
-            // no money and lift no limit (AP-01).
-            "watch_key" | "boxes" => ChangeClass::Free,
-            // A Box is also on the device list (BX-20), so adding one adds
-            // a device; that alone is not a loosening here. Any other
-            // device added is.
-            "devices"
-                if new
-                    .devices
-                    .difference(&old.devices)
-                    .all(|d| new.boxes.contains(d) && !old.boxes.contains(d)) =>
-            {
-                ChangeClass::Free
-            }
-            _ => ChangeClass::Loosen,
-        };
-        class = class.max(this);
+        class = class.max(field_class(old, new, c.field));
     }
     class
+}
+
+/// The class of one field that loosens (AP-01): what [`classify`] takes it
+/// for. A field that tightens is Free whatever its name is.
+pub fn field_class(old: &Settings, new: &Settings, field: &str) -> ChangeClass {
+    match field {
+        "lightning_node" => ChangeClass::Redirect,
+        // A watch key and a new Box are named in the settings but move
+        // no money and lift no limit (AP-01).
+        "watch_key" | "boxes" => ChangeClass::Free,
+        // A Box is also on the device list (BX-20), so adding one adds
+        // a device; that alone is not a loosening here. Any other
+        // device added is.
+        "devices"
+            if new
+                .devices
+                .difference(&old.devices)
+                .all(|d| new.boxes.contains(d) && !old.boxes.contains(d)) =>
+        {
+            ChangeClass::Free
+        }
+        _ => ChangeClass::Loosen,
+    }
 }
 
 /// The four words both screens show for a change (AP-03): the first 44 bits

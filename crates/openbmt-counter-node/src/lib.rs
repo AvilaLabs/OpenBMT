@@ -46,6 +46,7 @@
 )]
 
 pub mod chainview;
+pub mod confirm;
 pub mod dirstore;
 pub mod lightning;
 pub mod link;
@@ -63,7 +64,11 @@ pub mod swap;
 mod tests;
 
 pub use chainview::ChainView;
-pub use dirstore::{DirStore, DirStoreError, Loaded, TornTail, SETTINGS_FILE};
+pub use confirm::{
+    loosened_fields, ChangeNotice, ChangedField, ConfirmRefused, FieldValue, Pending,
+    PendingChange, PENDING_SECS,
+};
+pub use dirstore::{DirStore, DirStoreError, Loaded, TornTail, CONFIRM_FILE, SETTINGS_FILE};
 pub use lightning::{
     Lightning, LightningOff, LightningRecord, LightningStatus, LnEvent, LnRequest, LnTransport,
     SaleLightning, SetupRefused, SetupStep, MAGIC_LIGHTNING_RECORD,
@@ -87,9 +92,9 @@ pub use paired_own::{
 };
 pub use relaylink::{link_route, start_link, LinkLine, LinkNotStarted};
 pub use settings::{
-    decode_file as decode_settings_file, effective as effective_settings,
-    effective_of as effective_settings_of, Effective, SettingsFault, SettingsLine, SettingsRefused,
-    MAX_SETTINGS_FILE_BYTES,
+    decode_file as decode_settings_file, decode_frame as decode_settings_frame,
+    effective as effective_settings, effective_of as effective_settings_of, Effective,
+    SettingsFault, SettingsFrame, SettingsLine, SettingsRefused, MAX_SETTINGS_FILE_BYTES,
 };
 pub use swap::{
     SaleSwap, SwapDriver, SwapRecord, SwapRequest, MAGIC_SWAP_RECORD, NOT_FOR_THIS_SALE,

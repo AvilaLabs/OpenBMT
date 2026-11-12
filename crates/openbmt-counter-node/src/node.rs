@@ -103,15 +103,18 @@ use std::time::{Duration, Instant};
 
 use bitcoin::consensus::deserialize;
 use bitcoin::{Address, BlockHash, Network, ScriptBuf, Transaction, Txid};
+use openbmt_core::approval::ChangeClass;
 use openbmt_core::batch::{AddError, PinnedRoots, SignedBatch};
 use openbmt_core::command::SignedCommand;
+use openbmt_core::confirmed::{ConfirmedError, ConfirmedSettings};
 use openbmt_core::heartbeat::SignedHeartbeat;
 use openbmt_core::identity::Identity;
 use openbmt_core::pinned_wallet::SignedRange;
 use openbmt_core::records::Record;
 use openbmt_core::say::Words;
 use openbmt_core::settings::{
-    Authority, Change, SettingNote, Settings, SignedSettings, SwapProvider, LIGHTNING_NODE_BYTES,
+    Authority, Change, SettingNote, Settings, SettingsError, SignedSettings, SwapProvider,
+    LIGHTNING_NODE_BYTES,
 };
 use openbmt_core::wire::DecodeError;
 use openbmt_counter::{
@@ -134,13 +137,14 @@ use openbmt_watch::{
 };
 
 use crate::chainview::ChainView;
+use crate::confirm::{ChangeNotice, ConfirmRefused, Pending, PendingChange};
 use crate::dirstore::{DirStore, DirStoreError};
 use crate::lightning::{
     Lightning, LightningStatus, LnEvent, LnRequest, LnTransport, SaleLightning, SetupRefused,
     SetupStep,
 };
 use crate::notices::NodeRecords;
-use crate::settings::{check_not_rolled, SettingsFault, SettingsRefused};
+use crate::settings::{check_not_rolled, decode_file, SettingsFault, SettingsRefused};
 use crate::swap::{Effect, SaleSwap, SwapDriver, SwapRequest, Update};
 
 /// Most transactions the node keeps for later announcements.
@@ -433,6 +437,10 @@ pub struct Node<P: DriverPort = Handle> {
     ),
     /// CR-162: the settings in force have no `Setting` record yet.
     setting_unrecorded: Option<SettingNote>,
+    /// CR-239: the one change that waits for a counter's confirmation.
+    pending: Option<Pending>,
+    /// CR-244: what the manager is told about a change that came to nothing.
+    notice: Option<ChangeNotice>,
     /// CR-103: the driver was started with an own node.
     own_configured: bool,
     /// What the driver last said about the own node (NR-102), or, before it
@@ -468,6 +476,50 @@ pub struct Node<P: DriverPort = Handle> {
     network: Network,
     /// NR-79. Last, so that it is released after the driver has stopped.
     _lock: DirLock,
+}
+
+/// CR-239: the change that waited at the last stop, read from its file. A
+/// file that does not read, is not signed by the owner root, is not valid or
+/// does not go past the settings in force is of no use and is removed, with a
+/// note: the settings are not in force either way. It arrived when its file
+/// was written, and never later than `now`.
+fn load_pending(
+    store: &mut DirStore,
+    authority: &Authority,
+    in_force: &Settings,
+    now: u64,
+    notes: &mut VecDeque<String>,
+) -> Option<Pending> {
+    let bytes = match store.confirm_file() {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) => return None,
+        Err(e) => {
+            notes.push_back(format!(
+                "CR-239: the file of the waiting change was not read: {e}"
+            ));
+            return None;
+        }
+    };
+    let signed = decode_file(&bytes).ok().filter(|signed| {
+        matches!(authority, Authority::OwnWallet { .. })
+            && signed.verify_signatures_with(authority).is_ok()
+            && signed.settings.version > in_force.version
+    });
+    let Some(signed) = signed else {
+        notes.push_back("CR-239: the file of the waiting change is of no use: removed".to_string());
+        if let Err(e) = store.remove_confirm() {
+            notes.push_back(format!(
+                "CR-239: the file of the waiting change was not removed: {e}"
+            ));
+        }
+        return None;
+    };
+    let arrived = store.confirm_written_at().map_or(now, |t| t.min(now));
+    Some(Pending {
+        signed,
+        arrived,
+        confirmed: false,
+    })
 }
 
 impl Node<Handle> {
@@ -587,6 +639,7 @@ impl<P: DriverPort> Node<P> {
         driver.watch_from = watch_from;
         let own_configured = driver.own_node.is_some();
         let started_at = clock.now();
+        let pending = load_pending(&mut store, &authority, &settings, started_at, &mut notes);
         let counter_id: [u8; 4] = counter
             .device_id()
             .to_bytes()
@@ -636,6 +689,8 @@ impl<P: DriverPort> Node<P> {
             settings,
             authority,
             setting_unrecorded,
+            pending,
+            notice: None,
             own_configured,
             own_input: own_configured.then_some(OwnNodeInput {
                 link: OwnNodeLink::Down { since: started_at },
@@ -856,6 +911,13 @@ impl<P: DriverPort> Node<P> {
     /// the counter's record. Newer ones are checked against the pinned roots
     /// and the settings in force, written to the settings file and only then
     /// used, and then recorded. On an error nothing changed.
+    ///
+    /// CR-239: for a counter paired with the shop's own wallet, settings that
+    /// pass every check but need a counter's confirmation (a Loosen change)
+    /// are not refused: they are kept as the one change to confirm and are
+    /// not in force, and the answer is `Ok(None)`, as for a version that does
+    /// not go past the one in force; [`Node::pending_change`] says what waits.
+    /// A Redirect change is refused.
     pub fn take_settings(
         &mut self,
         signed: &SignedSettings,
@@ -863,11 +925,67 @@ impl<P: DriverPort> Node<P> {
         if signed.settings.version <= self.settings.version {
             return Ok(None);
         }
-        let change = signed
-            .verify_with(&self.authority, Some(&self.settings))
-            .map_err(SettingsRefused::Verify)?;
+        match signed.verify_with(&self.authority, Some(&self.settings)) {
+            Ok(change) => self.commit_settings(signed, &signed.to_bytes(), change),
+            Err(SettingsError::ConfirmationRequired(ChangeClass::Loosen)) => {
+                self.keep_pending(signed)?;
+                Ok(None)
+            }
+            Err(e) => Err(self.refused(e, signed.settings.version)),
+        }
+    }
+
+    /// CR-242: take signed settings that carry a counter's confirmation (the
+    /// frame `OBM<`). The settings are checked as `take_settings` checks them,
+    /// and a Loosen change is taken when the confirmation is from a counter of
+    /// the settings in force and signed for these settings (AP-04, AP-05).
+    /// A confirmation that is not is refused with a note, and nothing
+    /// changes. The settings file then holds the `OBM<` frame whole. A
+    /// counter paired with the Key app takes no such frame.
+    pub fn take_confirmed_settings(
+        &mut self,
+        confirmed: &ConfirmedSettings,
+    ) -> Result<Option<Change>, SettingsRefused> {
+        let Authority::OwnWallet { owner } = self.authority else {
+            return Err(SettingsRefused::NoConfirmationHere);
+        };
+        if confirmed.signed.settings.version <= self.settings.version {
+            return Ok(None);
+        }
+        match confirmed.verify(&owner, &self.settings) {
+            Ok(change) => self.commit_settings(&confirmed.signed, &confirmed.to_bytes(), change),
+            Err(ConfirmedError::Confirmation(e)) => {
+                self.notice = Some(ChangeNotice::BadConfirmation {
+                    version: confirmed.signed.settings.version,
+                });
+                Err(SettingsRefused::Confirmation(e))
+            }
+            Err(ConfirmedError::Settings(e)) => {
+                Err(self.refused(e, confirmed.signed.settings.version))
+            }
+        }
+    }
+
+    /// A refusal of settings: a Redirect change is told to the manager as one
+    /// that needs the wallet (CR-239).
+    fn refused(&mut self, e: SettingsError, version: u32) -> SettingsRefused {
+        if e == SettingsError::ConfirmationRequired(ChangeClass::Redirect) {
+            self.notice = Some(ChangeNotice::NeedsWallet { version });
+        }
+        SettingsRefused::Verify(e)
+    }
+
+    /// Put checked settings in force: written to the settings file as `bytes`
+    /// (CR-161) and only then used, and recorded (CR-162). A change that waits
+    /// at the same or a lower version is dropped (CR-239).
+    fn commit_settings(
+        &mut self,
+        signed: &SignedSettings,
+        bytes: &[u8],
+        change: Change,
+    ) -> Result<Option<Change>, SettingsRefused> {
         self.store
-            .put_settings(&signed.to_bytes())
+            .put_settings(bytes)
             .map_err(SettingsRefused::Store)?;
         let before = self.restart_needed();
         self.counter.set_settings(signed.settings.clone());
@@ -891,8 +1009,113 @@ impl<P: DriverPort> Node<P> {
         if !before && self.restart_needed() {
             self.note("CR-164: the settings change Tor or Lightning: restart needed".to_string());
         }
+        self.notice = None;
+        self.drop_pending_covered();
         self.retry_setting_record();
         Ok(Some(change))
+    }
+
+    // CR-239 to CR-244: a change that waits for a counter's confirmation.
+
+    /// CR-239: keep `signed` as the counter's one change to confirm: the
+    /// `OBMS` frame and nothing else, written whole before it is used. Newer
+    /// settings replace older ones; the same or a lower version is dropped.
+    fn keep_pending(&mut self, signed: &SignedSettings) -> Result<(), SettingsRefused> {
+        self.expire_pending();
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|p| p.signed.settings.version >= signed.settings.version)
+        {
+            return Ok(());
+        }
+        self.store
+            .put_confirm(&signed.to_bytes())
+            .map_err(SettingsRefused::Store)?;
+        self.pending = Some(Pending {
+            signed: signed.clone(),
+            arrived: self.clock.now(),
+            confirmed: false,
+        });
+        self.notice = None;
+        self.note(format!(
+            "CR-239: settings version {} loosen the limits: kept to be confirmed at a counter",
+            signed.settings.version
+        ));
+        Ok(())
+    }
+
+    /// CR-239: drop the change that waits when settings of the same or a
+    /// higher version are in force.
+    fn drop_pending_covered(&mut self) {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|p| p.signed.settings.version <= self.settings.version)
+        {
+            self.remove_pending();
+        }
+    }
+
+    /// CR-239: drop the change that waits when seven days have passed since
+    /// it arrived, and tell the manager so (CR-244).
+    fn expire_pending(&mut self) {
+        let now = self.clock.now();
+        let Some(p) = self.pending.as_ref().filter(|p| now >= p.expires_at()) else {
+            return;
+        };
+        let version = p.signed.settings.version;
+        self.remove_pending();
+        self.notice = Some(ChangeNotice::Dropped { version });
+        self.note(format!(
+            "CR-239: the change to settings version {version} was not confirmed in seven days: dropped"
+        ));
+    }
+
+    fn remove_pending(&mut self) {
+        self.pending = None;
+        if let Err(e) = self.store.remove_confirm() {
+            self.note(format!(
+                "CR-239: the file of the waiting change was not removed: {e}"
+            ));
+        }
+    }
+
+    /// CR-240: the change that waits, with each field it loosens against the
+    /// settings in force, its version and the four words, or `None`.
+    pub fn pending_change(&mut self) -> Option<PendingChange> {
+        self.expire_pending();
+        self.pending
+            .as_ref()
+            .map(|p| PendingChange::of(p, &self.settings))
+    }
+
+    /// CR-244: what the manager is told about a change that came to nothing,
+    /// if anything.
+    pub fn change_notice(&self) -> Option<ChangeNotice> {
+        self.notice
+    }
+
+    /// CR-241: sign the confirmation of the change that waits, as the version
+    /// the person was shown, and write it as a record of the counter's chain.
+    /// The caller asks only after the manager's PIN was right (CR-84). It
+    /// puts nothing in force here (CR-242).
+    pub fn confirm_pending(&mut self, version: u32) -> Result<(), ConfirmRefused> {
+        self.expire_pending();
+        let hash = match &self.pending {
+            Some(p) if p.signed.settings.version == version => p.signed.settings.hash(),
+            _ => return Err(ConfirmRefused::NothingWaits),
+        };
+        self.counter
+            .record_confirmation(&hash, &mut self.store)
+            .map_err(|e| ConfirmRefused::NotWritten(e.to_string()))?;
+        if let Some(p) = self.pending.as_mut() {
+            p.confirmed = true;
+        }
+        self.note(format!(
+            "CR-241: the change to settings version {version} was confirmed by a manager"
+        ));
+        Ok(())
     }
 
     /// CR-162: write the `Setting` record the settings in force are waiting
@@ -922,6 +1145,7 @@ impl<P: DriverPort> Node<P> {
     /// every live sale that an event touched. Returns what must leave the
     /// counter. With a `wait` of zero it takes what is already waiting.
     pub fn pump(&mut self, wait: Duration) -> Vec<Report> {
+        self.expire_pending();
         let deadline = Instant::now() + wait;
         let mut reports = Vec::new();
         let mut touched = BTreeSet::new();

@@ -52,6 +52,9 @@ const RECORDS_FILE: &str = "records.bin";
 const CHECKED_FILE: &str = "checked.bin";
 /// The file of the newest signed settings the counter took (CR-161).
 pub const SETTINGS_FILE: &str = "settings.bin";
+/// The file of the one change that waits for a counter's confirmation
+/// (CR-239).
+pub const CONFIRM_FILE: &str = "confirm.bin";
 
 /// Why a file operation or a read failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -343,6 +346,42 @@ impl DirStore {
     /// taken none from the owner. The bytes are not read here.
     pub fn settings_file(&self) -> Result<Option<Vec<u8>>, DirStoreError> {
         self.read(SETTINGS_FILE)
+    }
+
+    /// CR-239: replace the stored change that waits to be confirmed, written
+    /// whole. On an error the old file is as it was.
+    pub fn put_confirm(&mut self, bytes: &[u8]) -> Result<(), DirStoreError> {
+        self.write_whole(CONFIRM_FILE, bytes)
+    }
+
+    /// CR-239: the stored change that waits to be confirmed, or `None`. The
+    /// bytes are not read here.
+    pub fn confirm_file(&self) -> Result<Option<Vec<u8>>, DirStoreError> {
+        self.read(CONFIRM_FILE)
+    }
+
+    /// CR-239: when the file of the waiting change was last written, in
+    /// seconds since 1970, which is when the change arrived. `None` when
+    /// there is no file or the system does not say.
+    pub fn confirm_written_at(&self) -> Option<u64> {
+        let modified = fs::metadata(self.path(CONFIRM_FILE))
+            .and_then(|m| m.modified())
+            .ok()?;
+        modified
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .map(|d| d.as_secs())
+    }
+
+    /// CR-239: take the waiting change away: remove the file and flush the
+    /// directory. No file is nothing to remove.
+    pub fn remove_confirm(&mut self) -> Result<(), DirStoreError> {
+        match fs::remove_file(self.path(CONFIRM_FILE)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(io_err(CONFIRM_FILE, "remove")(e)),
+        }
+        self.sync_dir()
     }
 
     /// Read everything back. A cut-short last record is cut off the file

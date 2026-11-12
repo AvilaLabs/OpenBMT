@@ -8,11 +8,13 @@
 //! [`program_words`] joins the four and [`screens_markdown`] writes them as
 //! one table (`docs/screens/counter.md`).
 
+use openbmt_core::approval::ChangeClass;
 use openbmt_core::pairing::PairError;
 use openbmt_core::pairing_own::OwnPairError;
 use openbmt_core::say::{Tone, Who, Words};
 use openbmt_core::settings::SettingsError;
 
+use crate::confirm::{ChangeNotice, ConfirmRefused};
 use crate::dirstore::DirStoreError;
 use crate::node::{HeartbeatNotTaken, StartError};
 use crate::paired::{PairRefused, RelayRefused};
@@ -110,13 +112,10 @@ impl SettingsRefused {
                 "Nothing to do. The owner's phone sends them again by itself.",
             )
             .detail(e.to_string()),
-            Self::Verify(SettingsError::ConfirmationRequired(_)) => Words::new(
-                Tone::Ended,
-                "Needs a counter's OK",
-                "This change loosens the limits or moves where money goes. That needs a counter's OK, which is not built yet. Nothing changed.",
-                Who::Owner,
-                "Make only changes that tighten for now, and keep this setting as it is.",
-            ),
+            Self::Verify(SettingsError::ConfirmationRequired(ChangeClass::Redirect)) => {
+                needs_wallet()
+            }
+            Self::Confirmation(_) | Self::NoConfirmationHere => bad_confirmation(),
             Self::Verify(e) => Words::new(
                 Tone::Ended,
                 "Settings refused",
@@ -178,6 +177,83 @@ impl SettingsFault {
             .detail(self.to_string()),
         }
         .code(self.rule())
+    }
+}
+
+/// CR-239: a change that sends payments somewhere else needs the wallet, not
+/// a counter.
+fn needs_wallet() -> Words {
+    Words::new(
+        Tone::Ended,
+        "Change needs the wallet",
+        "This change sends payments somewhere else, which only the shop's wallet can approve. That is not built yet, so nothing changed.",
+        Who::Owner,
+        "Keep this setting as it is for now.",
+    )
+    .code("CR-239")
+}
+
+/// CR-242: the confirmation that came with a change is not a counter's of
+/// this shop.
+fn bad_confirmation() -> Words {
+    Words::new(
+        Tone::Ended,
+        "Confirmation refused",
+        "The change came with a confirmation that is not from a counter of this shop, so nothing changed.",
+        Who::Manager,
+        "Ask the owner to have the change confirmed at a counter again.",
+    )
+    .code("CR-242")
+}
+
+impl ChangeNotice {
+    /// What a manager is told about a change that came to nothing (CR-239,
+    /// CR-242, CR-244).
+    pub fn words(&self) -> Words {
+        match self {
+            Self::Dropped { .. } => Words::new(
+                Tone::Ended,
+                "Change not confirmed in time",
+                "A change from the owner phone waited seven days and was dropped. Nothing changed.",
+                Who::Manager,
+                "Ask the owner to make the change again.",
+            )
+            .code("CR-239"),
+            Self::BadConfirmation { .. } => bad_confirmation(),
+            Self::NeedsWallet { .. } => needs_wallet(),
+        }
+    }
+}
+
+/// CR-241: what a manager is told when the confirmation was signed.
+pub fn change_confirmed_words() -> Words {
+    Words::new(
+        Tone::Good,
+        "Change confirmed",
+        "The owner phone sends the change to every counter. It applies once it arrives.",
+        Who::Nobody,
+        "Nothing to do.",
+    )
+    .code("CR-241")
+}
+
+/// CR-241: the refusals of a confirmation have no words yet; these stand in
+/// for a heading, a sentence and a next step, and name the rule. They are not
+/// in [`all_words`] until the words are written.
+pub const WORDS_NEEDED_CR_241_NOTHING_WAITS: &str = "WORDS NEEDED CR-241 NOTHING WAITS";
+/// CR-241: the record of the confirmation could not be written.
+pub const WORDS_NEEDED_CR_241_NOT_WRITTEN: &str = "WORDS NEEDED CR-241 NOT WRITTEN";
+
+impl ConfirmRefused {
+    /// What a manager is told when the confirmation was not signed.
+    pub fn words(&self) -> Words {
+        let needed = match self {
+            Self::NothingWaits => WORDS_NEEDED_CR_241_NOTHING_WAITS,
+            Self::NotWritten(_) => WORDS_NEEDED_CR_241_NOT_WRITTEN,
+        };
+        Words::new(Tone::Stop, needed, needed, Who::Manager, needed)
+            .code(self.rule())
+            .detail(self.to_string())
     }
 }
 
@@ -782,6 +858,14 @@ pub fn all_words() -> Vec<(String, Words)> {
     for line in [SettingsLine::Removed, SettingsLine::RestartNeeded] {
         all.push((format!("SettingsLine::{line:?}"), line.words()));
     }
+    // CR-239, CR-241: the dropped change and the confirmation signed. The
+    // other two notices say what a refusal of settings says and are listed
+    // there.
+    all.push((
+        "ChangeNotice::Dropped".to_string(),
+        ChangeNotice::Dropped { version: 2 }.words(),
+    ));
+    all.push(("ChangeConfirmed".to_string(), change_confirmed_words()));
     all
 }
 
@@ -865,9 +949,11 @@ pub fn every_settings_refused() -> Vec<(&'static str, SettingsRefused)> {
         ),
         (
             "ConfirmationRequired",
-            SettingsRefused::Verify(SettingsError::ConfirmationRequired(
-                openbmt_core::approval::ChangeClass::Loosen,
-            )),
+            SettingsRefused::Verify(SettingsError::ConfirmationRequired(ChangeClass::Redirect)),
+        ),
+        (
+            "Confirmation",
+            SettingsRefused::Confirmation(openbmt_core::approval::ConfirmError::NotACounter),
         ),
         (
             "Store",

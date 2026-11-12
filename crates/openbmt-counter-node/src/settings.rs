@@ -23,8 +23,10 @@
 
 use std::fmt;
 
+use openbmt_core::approval::ConfirmError;
+use openbmt_core::confirmed::ConfirmedSettings;
 use openbmt_core::settings::{Authority, Settings, SettingsError, SignedSettings};
-use openbmt_core::wire::DecodeError;
+use openbmt_core::wire::{DecodeError, MAGIC_CONFIRMED_SETTINGS};
 
 use crate::dirstore::{DirStore, DirStoreError};
 use crate::paired::PairingRecord;
@@ -49,6 +51,51 @@ pub fn decode_file(bytes: &[u8]) -> Result<SignedSettings, DecodeError> {
     Ok(signed)
 }
 
+/// What the settings file or a message of kind Settings holds: the `OBMS`
+/// frame, or the `OBM<` frame that carries a counter's confirmation as well
+/// (CR-242).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingsFrame {
+    /// Signed settings (`OBMS`).
+    Plain(SignedSettings),
+    /// Signed settings and a counter's confirmation (`OBM<`).
+    Confirmed(ConfirmedSettings),
+}
+
+impl SettingsFrame {
+    /// The signed settings, whichever frame carried them.
+    pub fn signed(&self) -> &SignedSettings {
+        match self {
+            Self::Plain(signed) => signed,
+            Self::Confirmed(c) => &c.signed,
+        }
+    }
+
+    /// The bytes of the frame, as they are kept and sent.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match self {
+            Self::Plain(signed) => signed.to_bytes(),
+            Self::Confirmed(c) => c.to_bytes(),
+        }
+    }
+}
+
+/// CR-160, CR-242: read a message of kind Settings, or the settings file, as
+/// either frame, each as strictly as it is read alone: the `OBM<` frame by
+/// its own magic, anything else as [`decode_file`] reads it.
+pub fn decode_frame(bytes: &[u8]) -> Result<SettingsFrame, DecodeError> {
+    if bytes.starts_with(&MAGIC_CONFIRMED_SETTINGS) {
+        let c = ConfirmedSettings::from_bytes(bytes)?;
+        if c.to_bytes() != bytes {
+            return Err(DecodeError::NonCanonical(
+                "the settings are not in the form they are written in",
+            ));
+        }
+        return Ok(SettingsFrame::Confirmed(c));
+    }
+    decode_file(bytes).map(SettingsFrame::Plain)
+}
+
 /// Why settings the owner sent were not taken. Nothing changed. Each names
 /// its rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,14 +108,23 @@ pub enum SettingsRefused {
     /// CR-161: the settings could not be written to the folder, so they were
     /// not used.
     Store(DirStoreError),
+    /// CR-242: the confirmation of a counter that came with the settings is
+    /// not one the settings in force accept.
+    Confirmation(ConfirmError),
+    /// CR-242: a counter paired with the Key app takes no confirmation of a
+    /// counter: its loosening carries the Key app's signature.
+    NoConfirmationHere,
 }
 
 impl SettingsRefused {
     /// The rule the refusal belongs to.
     pub fn rule(&self) -> &'static str {
         match self {
+            // A change that sends payments elsewhere is refused by CR-239.
+            Self::Verify(SettingsError::ConfirmationRequired(_)) => "CR-239",
             Self::Bytes(_) | Self::Verify(_) => "CR-160",
             Self::Store(_) => "CR-161",
+            Self::Confirmation(_) | Self::NoConfirmationHere => "CR-242",
         }
     }
 }
@@ -80,6 +136,11 @@ impl fmt::Display for SettingsRefused {
             Self::Bytes(e) => write!(f, "the owner's settings do not read: {e}"),
             Self::Verify(e) => write!(f, "the owner's settings are refused: {e}"),
             Self::Store(e) => write!(f, "the owner's settings were not written, so not used: {e}"),
+            Self::Confirmation(e) => write!(f, "the confirmation that came with the settings: {e}"),
+            Self::NoConfirmationHere => write!(
+                f,
+                "a counter paired with the Key app takes no counter's confirmation"
+            ),
         }
     }
 }
@@ -199,7 +260,23 @@ fn effective_under(
             note: None,
         });
     };
-    let signed = decode_file(&bytes).map_err(SettingsFault::Decode)?;
+    let frame = decode_frame(&bytes).map_err(SettingsFault::Decode)?;
+    if let SettingsFrame::Confirmed(c) = &frame {
+        // CR-163: the frame of a confirmation is the one an own-wallet
+        // counter writes; the counter's own signature is checked again, and
+        // a counter paired with the Key app never wrote one.
+        if matches!(authority, Authority::KeyApp(_)) {
+            return Err(SettingsFault::Verify(SettingsError::Invalid(
+                "CR-242: a counter paired with the Key app keeps no confirmation of a counter",
+            )));
+        }
+        c.verify_signature().map_err(|_| {
+            SettingsFault::Verify(SettingsError::Invalid(
+                "CR-242: the confirmation of a counter in the settings file is not signed",
+            ))
+        })?;
+    }
+    let signed = frame.signed().clone();
     if check_file(&signed, authority, &record_settings.settings)? {
         return Ok(Effective {
             signed,
