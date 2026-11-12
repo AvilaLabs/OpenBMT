@@ -11,6 +11,7 @@ use openbmt_core::say::{Tone, Who, Words};
 
 use crate::fees::FeeError;
 use crate::health::{Health, Problem};
+use crate::node_only::{NodeOnlyLine, NodeOnlyProblem};
 use crate::own_node::{OwnNodeHealth, OwnNodeProblem};
 use crate::refusal::Refusal;
 
@@ -184,6 +185,79 @@ impl OwnNodeHealth {
             words = words.at(heard);
         }
         Some(words)
+    }
+}
+
+/// Placeholders: the words of the health line with `node_only` on (WR-67)
+/// are not written yet, and the words of the mode with the light client do
+/// not fit this one (they speak of a light check that is not there). Each
+/// is the heading, the sentence of what happened and the sentence of what
+/// to do next of one state, until real words replace it. They are not in
+/// [`all_words`], which only holds words that keep the rules of SC-12.
+pub mod node_only_placeholders {
+    /// The node is usable.
+    pub const USABLE: &str = "WORDS_NEEDED_WR_67_USABLE";
+    /// Connecting to the node (WR-63, first two minutes).
+    pub const CONNECTING: &str = "WORDS_NEEDED_WR_67_CONNECTING";
+    /// The node is not reachable (WR-63).
+    pub const UNREACHABLE: &str = "WORDS_NEEDED_WR_67_UNREACHABLE";
+    /// The node was dropped for breaking a rule (WR-63).
+    pub const REFUSED: &str = "WORDS_NEEDED_WR_67_REFUSED";
+    /// The node has gone quiet (WR-63).
+    pub const SILENT: &str = "WORDS_NEEDED_WR_67_SILENT";
+    /// The node is behind (WR-63).
+    pub const BEHIND: &str = "WORDS_NEEDED_WR_67_BEHIND";
+    /// The node's progress is not known (WR-63).
+    pub const TIP_UNKNOWN: &str = "WORDS_NEEDED_WR_67_TIP_UNKNOWN";
+    /// The node does not offer compact filters (NR-107).
+    pub const MISSING_FILTERS: &str = "WORDS_NEEDED_WR_67_MISSING_FILTERS";
+    /// The node does not keep a block that is needed (NR-108).
+    pub const LACKS_BLOCK: &str = "WORDS_NEEDED_WR_67_LACKS_BLOCK";
+    /// The node cannot be used and other nodes are asked meanwhile (NR-110).
+    pub const CHECKING_WITH_OTHERS: &str = "WORDS_NEEDED_WR_67_CHECKING_WITH_OTHERS";
+}
+
+impl NodeOnlyProblem {
+    /// The placeholder for this problem, and the time it began, if it has
+    /// one.
+    fn placeholder(self) -> (&'static str, Option<u64>) {
+        use node_only_placeholders as p;
+        match self {
+            Self::Node(OwnNodeProblem::Connecting { since }) => (p::CONNECTING, Some(since)),
+            Self::Node(OwnNodeProblem::Unreachable { since }) => (p::UNREACHABLE, Some(since)),
+            Self::Node(OwnNodeProblem::Refused { since }) => (p::REFUSED, Some(since)),
+            Self::Node(OwnNodeProblem::Silent { since }) => (p::SILENT, Some(since)),
+            Self::Node(OwnNodeProblem::Behind { .. }) => (p::BEHIND, None),
+            Self::Node(OwnNodeProblem::TipUnknown) => (p::TIP_UNKNOWN, None),
+            Self::MissingFilters { since } => (p::MISSING_FILTERS, Some(since)),
+            Self::LacksBlock { since, .. } => (p::LACKS_BLOCK, Some(since)),
+        }
+    }
+}
+
+impl NodeOnlyLine {
+    /// WR-67: the health line of the own node with `node_only` on. Every
+    /// state has a value; the sentences are placeholders (see
+    /// [`node_only_placeholders`]) and the rule number is in the small
+    /// print.
+    pub fn words(&self) -> Words {
+        use node_only_placeholders as p;
+        let (text, at, who) = match *self {
+            Self::Usable => (p::USABLE, None, Who::Nobody),
+            Self::NotUsable(problem) => {
+                let (reason, at) = problem.placeholder();
+                (reason, at, Who::Owner)
+            }
+            Self::CheckingWithOthers(problem) => {
+                let (_, at) = problem.placeholder();
+                (p::CHECKING_WITH_OTHERS, at, Who::Owner)
+            }
+        };
+        let words = Words::new(Tone::Info, text, text, who, text).code("WR-67");
+        match at {
+            Some(at) => words.at(at),
+            None => words,
+        }
     }
 }
 

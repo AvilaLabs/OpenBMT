@@ -51,6 +51,9 @@ pub enum CheckMode {
     NodeAlsoSeenByLight,
     /// Only the Box reports it.
     BoxReportsOnly,
+    /// The shop's own node alone, with no light client (WR-66). Its instant
+    /// limits are those of `NodeAlsoSeenByLight`.
+    OwnNodeOnly,
 }
 
 /// What the screen says when a payment is accepted at once.
@@ -137,7 +140,7 @@ impl InstantPolicy {
     pub fn limits(&self, mode: CheckMode) -> ModeLimits {
         match mode {
             CheckMode::Light => self.light,
-            CheckMode::NodeAlsoSeenByLight => self.node,
+            CheckMode::NodeAlsoSeenByLight | CheckMode::OwnNodeOnly => self.node,
             CheckMode::BoxReportsOnly => self.box_only,
         }
     }
@@ -328,7 +331,7 @@ pub fn evaluate(policy: &InstantPolicy, i: &Inputs) -> Decision {
     Instant {
         label: match mode {
             CheckMode::Light => InstantLabel::LightCheck,
-            CheckMode::NodeAlsoSeenByLight => InstantLabel::YourNode,
+            CheckMode::NodeAlsoSeenByLight | CheckMode::OwnNodeOnly => InstantLabel::YourNode,
             CheckMode::BoxReportsOnly => InstantLabel::YourBox,
         },
         mode,

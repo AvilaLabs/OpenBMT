@@ -23,6 +23,7 @@
 //! 6. [`health`]: whether the check is working.
 //! 7. [`fees`]: a fee rate checked from full blocks (`docs/FEE-RULES.md`).
 //! 8. [`own_node`]: the merchant's own node, kept apart from the peers.
+//!    [`node_only`]: the own node as the only source (WR-66 to WR-68).
 //!
 //! This crate has had internal review only. No independent security audit
 //! has been done yet.
@@ -36,6 +37,7 @@ pub mod fees;
 pub mod headers;
 pub mod health;
 pub mod netgroup;
+pub mod node_only;
 pub mod own_node;
 pub mod proof;
 mod refusal;
@@ -54,6 +56,9 @@ pub use health::{
     Problem,
 };
 pub use netgroup::{host_group, network_group, NetGroup, PeerAddr};
+pub use node_only::{
+    NodeOnlyFault, NodeOnlyHealth, NodeOnlyInput, NodeOnlyLine, NodeOnlyProblem, NodeOnlyTracker,
+};
 pub use own_node::{
     check_own_node, OwnNodeHealth, OwnNodeInput, OwnNodeLink, OwnNodeProblem, OwnNodeTracker,
 };

@@ -8,6 +8,7 @@ mod health;
 mod kit;
 mod meta;
 mod netgroup;
+mod node_only;
 mod own_node;
 mod persist;
 mod proof;

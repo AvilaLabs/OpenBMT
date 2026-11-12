@@ -342,7 +342,7 @@ impl Settings {
     pub fn budget(&self, mode: CheckMode) -> &Limit {
         match mode {
             CheckMode::Light => &self.light_budget,
-            CheckMode::NodeAlsoSeenByLight => &self.node_budget,
+            CheckMode::NodeAlsoSeenByLight | CheckMode::OwnNodeOnly => &self.node_budget,
             CheckMode::BoxReportsOnly => &self.box_budget,
         }
     }

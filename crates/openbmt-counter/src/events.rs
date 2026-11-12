@@ -376,6 +376,7 @@ pub(crate) fn mode_to_u8(m: CheckMode) -> u8 {
         CheckMode::Light => 1,
         CheckMode::NodeAlsoSeenByLight => 2,
         CheckMode::BoxReportsOnly => 3,
+        CheckMode::OwnNodeOnly => 4,
     }
 }
 
@@ -385,6 +386,7 @@ pub(crate) fn mode_from_u8(b: u8) -> Option<CheckMode> {
         1 => Some(CheckMode::Light),
         2 => Some(CheckMode::NodeAlsoSeenByLight),
         3 => Some(CheckMode::BoxReportsOnly),
+        4 => Some(CheckMode::OwnNodeOnly),
         _ => None,
     }
 }

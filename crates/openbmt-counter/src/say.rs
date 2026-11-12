@@ -284,6 +284,8 @@ impl Screen {
             (Some(CheckMode::NodeAlsoSeenByLight), _, true) => Some(CheckLine::YourNodeAndLight),
             (Some(CheckMode::NodeAlsoSeenByLight), _, false) => Some(CheckLine::BoxAndLight),
             (Some(CheckMode::BoxReportsOnly), _, _) => Some(CheckLine::BoxOnly),
+            // The line for the own node alone has no words yet (WR-66).
+            (Some(CheckMode::OwnNodeOnly), _, _) => None,
             (None, true, _) => Some(CheckLine::OwnNodeWaitingForLight),
             (None, false, _) => None,
         }

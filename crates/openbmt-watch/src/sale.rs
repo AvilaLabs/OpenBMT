@@ -16,6 +16,7 @@ use openbmt_core::wire::{self, DecodeError, Reader};
 
 use crate::chain::{confirmations, HeaderChain};
 use crate::netgroup::{network_group, NetGroup, PeerAddr};
+use crate::node_only::NodeOnlyHealth;
 use crate::own_node::OwnNodeHealth;
 use crate::proof::ProvenPayment;
 use crate::{
@@ -123,6 +124,19 @@ impl Entry {
 
     fn conflicts_with(&self, other: &Transaction) -> bool {
         other.input.iter().any(|i| self.spends(&i.previous_output))
+    }
+
+    /// WR-66, WR-68: the mode with `node_only` on. The own node's report
+    /// while it can be used; else, with `light_fallback`, the light client's
+    /// three groups (WR-44); else none.
+    fn node_only_mode(&self, own_usable: bool, light_fallback: bool) -> Option<CheckMode> {
+        if self.by_own_node && own_usable {
+            Some(CheckMode::OwnNodeOnly)
+        } else if light_fallback && self.groups.len() >= SEEN_GROUPS {
+            Some(CheckMode::Light)
+        } else {
+            None
+        }
     }
 
     /// WR-44, WR-45, WR-62.
@@ -349,6 +363,35 @@ impl SaleWatch {
         now: u64,
         own: &OwnNodeHealth,
     ) -> SaleStatus {
+        self.status_inner(chain, now, own, None)
+    }
+
+    /// As [`SaleWatch::status`], with `node_only` on (WR-66 to WR-68). "Seen
+    /// by the light client" is not used: a payment the own node holds while
+    /// it can be used has the mode `CheckMode::OwnNodeOnly`, and
+    /// `own_node_counted` says the node is what makes it. With
+    /// `health.light_fallback` on, a payment that the random peers
+    /// reported from enough network groups (WR-44) has the light check's
+    /// mode when the node does not make the mode, and keeps it after the
+    /// node returns. A payment that neither holds has no mode. The Box's
+    /// report gives no mode here.
+    pub fn status_node_only<C: HeaderChain + ?Sized>(
+        &mut self,
+        chain: &C,
+        now: u64,
+        health: &NodeOnlyHealth,
+    ) -> SaleStatus {
+        self.status_inner(chain, now, &health.own, Some(health.light_fallback))
+    }
+
+    /// `node_only` is `Some(light_fallback)` in the mode of WR-66.
+    fn status_inner<C: HeaderChain + ?Sized>(
+        &mut self,
+        chain: &C,
+        now: u64,
+        own: &OwnNodeHealth,
+        node_only: Option<bool>,
+    ) -> SaleStatus {
         let confs: Vec<u32> = self
             .entries
             .iter()
@@ -434,7 +477,10 @@ impl SaleWatch {
             .map(|i| &self.entries[i]);
         let (mode, peer_groups, secs_since_first_seen) = match weakest {
             Some(e) => (
-                e.mode(own.usable),
+                match node_only {
+                    Some(light_fallback) => e.node_only_mode(own.usable, light_fallback),
+                    None => e.mode(own.usable),
+                },
                 e.groups.len(),
                 e.first_seen.map_or(0, |t| now.saturating_sub(t)),
             ),
@@ -442,8 +488,9 @@ impl SaleWatch {
         };
         // WR-61, WR-62.
         let own_node_saw = weakest.is_some_and(|e| e.by_own_node);
-        let own_node_counted =
-            weakest.is_some_and(|e| e.by_own_node && own.usable && e.groups.len() >= SEEN_GROUPS);
+        let own_node_counted = weakest.is_some_and(|e| {
+            e.by_own_node && own.usable && (node_only.is_some() || e.groups.len() >= SEEN_GROUPS)
+        });
 
         // WR-33.
         let now_confirmed: BTreeSet<Txid> = (0..self.entries.len())
