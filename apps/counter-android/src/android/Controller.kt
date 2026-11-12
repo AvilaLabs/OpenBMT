@@ -384,7 +384,7 @@ class Controller(private val act: MainActivity) {
         pumpFault = null
         // CR-197: Bitcoin Standard has no price: no source is asked and there is no book.
         val sources = ShopPrices.sources(m, allSources)
-        val b = PriceBook(LibraryRates, { nowSecs() })
+        val b = PriceBook(LibraryRates, { nowSecs() }, (config?.tor ?: TorChoice.Orbot).missingWords)
         book = if (m.isSats) null else b
         val runner = PriceRunner(b, HttpsFetcher(gate))
         val schedule = PriceSchedule(sources.map { it.id }, System.currentTimeMillis())
@@ -1422,7 +1422,7 @@ class Controller(private val act: MainActivity) {
         return when (val s = b.status()) {
             is PriceStatus.Ready -> AppWords.priceReady(m.show(s.rate.rate), s.sources)
             is PriceStatus.Refused -> s.words
-            PriceStatus.TorMissing -> AppWords.orbotNotRunning
+            PriceStatus.TorMissing -> b.torMissingWords
         }
     }
 
@@ -2469,7 +2469,7 @@ class Controller(private val act: MainActivity) {
                 ),
                 label("Tor"),
                 ui.text(
-                    "When the shop's settings turn Tor on, every connection goes through Orbot on this phone. If Orbot is not running the counter sends nothing and says so.",
+                    "When the shop's settings turn Tor on, every connection goes through Tor: the counter runs Tor itself, or uses Orbot if the manager chooses it. If Tor is not connected the counter sends nothing and says so.",
                     16f,
                 ),
                 label("Lightning"),
@@ -2483,7 +2483,7 @@ class Controller(private val act: MainActivity) {
                 ui.text(
                     "The manager can give the counter the Tor address of a node of the shop's own, with the PIN. The counter then asks it about each payment " +
                         "as well, and a payment both see is held to the higher limits. If the node cannot be reached the sale screen says it used the light check. " +
-                        "A home-network address is refused, and the node needs Tor, so Orbot must be on.",
+                        "A home-network address is refused, and the node needs Tor, so Tor must be on in the shop's settings.",
                     16f,
                 ),
             ),

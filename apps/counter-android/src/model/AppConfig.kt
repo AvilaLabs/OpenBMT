@@ -23,6 +23,13 @@ enum class TorChoice(val key: String) {
             Orbot -> AppWords.torUsesOrbot
         }
 
+    /** What is said when Tor is on and no proxy answers: Orbot's words only for Use Orbot (CR-204). */
+    val missingWords: SayWords
+        get() = when (this) {
+            BuiltIn -> AppWords.torFailed
+            Orbot -> AppWords.orbotNotRunning
+        }
+
     /** The button of the choice. */
     val label: String
         get() = when (this) {

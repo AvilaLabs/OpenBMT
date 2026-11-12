@@ -517,6 +517,11 @@ object AppModelTest {
         runner.turn(src("kraken"))
         ok(book.status() is PriceStatus.TorMissing && rates.parsed.size == parsedBefore, "a missing Orbot is its own status and parses nothing")
         ok(book.notes()[0].words == AppWords.orbotNotRunning, "and a note with the Orbot words")
+        // CR-204: with the built-in Tor the missing proxy is Tor's, and Orbot is not named.
+        ok(TorChoice.BuiltIn.missingWords === AppWords.torFailed && TorChoice.Orbot.missingWords === AppWords.orbotNotRunning, "CR-204: each choice has its words for a proxy that does not answer")
+        val builtInBook = PriceBook(rates, { clock.secs }, TorChoice.BuiltIn.missingWords)
+        PriceRunner(builtInBook, fetcher).turn(src("kraken"))
+        ok(builtInBook.status() is PriceStatus.TorMissing && builtInBook.torMissingWords === AppWords.torFailed && builtInBook.notes()[0].words === AppWords.torFailed, "CR-204: a built-in Tor that does not answer is a note and a status in Tor's words")
         fetcher.replies["kraken"] = FetchResult.Body("7355450".toByteArray())
         fetcher.replies["coinbase"] = FetchResult.Body("7355218".toByteArray())
         runner.turn(src("kraken"))
@@ -1196,6 +1201,8 @@ object AppModelTest {
         ok(controller.contains("ui.primary(\"Try again\") { begin() }, ui.button(\"Tor\") { showTor() }") && controller.contains("const val TOR_WAIT_MS = 90_000L"), "CR-204: Try again starts again, Tor opens the choice, and it waits 90 seconds for a circuit")
         val runner = File(appDir, "../android-common/tor/src/android/TorRunner.kt").readText()
         ok(runner.contains("catch (e: LinkageError)") && runner.contains("class TorStartException") && runner.contains("val run = current?.takeIf { !it.done }"), "CR-204: a library that does not load fails to start, and a run that has ended is not reused")
+        ok(controller.contains("PriceBook(LibraryRates, { nowSecs() }, (config?.tor ?: TorChoice.Orbot).missingWords)") && controller.contains("PriceStatus.TorMissing -> b.torMissingWords") && !controller.contains("PriceStatus.TorMissing -> AppWords.orbotNotRunning"), "CR-204: the price words follow the choice")
+        ok(!controller.contains("goes through Orbot on this phone") && !controller.contains("so Orbot must be on"), "the About text no longer says Orbot where either choice applies")
         ok(File(appDir, "../../docs/COUNTER-RULES.md").readText().contains("- **CR-204.**"), "CR-204 is in the rules")
     }
 

@@ -99,9 +99,9 @@ object AppWords {
 
     val torIsOn = w(
         Tones.INFO, "Tor is on for this shop",
-        "The shop's settings send every connection of this counter through Tor, with Orbot.",
+        "The shop's settings send every connection of this counter through Tor.",
         Who.MANAGER,
-        "Keep Orbot running. The manager can check its address under Network.",
+        "Nothing to do. The manager can choose how under Tor.",
     )
 
     val torIsOff = w(
@@ -115,14 +115,14 @@ object AppWords {
 
     val networkAbout = w(
         Tones.INFO, "Network",
-        "When the shop's settings turn Tor on, this counter sends everything through Orbot, at the address below.",
+        "When the shop's settings turn Tor on and this counter uses Orbot, it sends everything through Orbot, at the address below.",
         Who.MANAGER,
         "Change the address only if Orbot listens somewhere else, then type the manager's PIN.",
     )
 
     val networkSaved = w(
         Tones.GOOD, "Address saved",
-        "The counter will look for Orbot at the new address.",
+        "The counter will look for Orbot at the new address when it uses Orbot.",
         Who.MANAGER,
         "Tap Start to use it now.",
     )

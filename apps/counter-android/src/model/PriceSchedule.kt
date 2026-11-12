@@ -1,5 +1,6 @@
 package org.openbmt.counter.app
 
+import org.openbmt.app.SayWords
 import org.openbmt.counter.CounterException
 import org.openbmt.counter.Rate
 import org.openbmt.counter.RateSource
@@ -100,7 +101,12 @@ sealed class PriceStatus {
  * quoted at [rate], which is the library's `combine` of what is here, never
  * of a fetch made for the sale.
  */
-class PriceBook(private val rates: RatesPort, private val clockSecs: () -> Long) {
+class PriceBook(
+    private val rates: RatesPort,
+    private val clockSecs: () -> Long,
+    /** What is said when no proxy answered: the words of the Tor in use (CR-204). */
+    val torMissingWords: SayWords = AppWords.orbotNotRunning,
+) {
     private val samples = LinkedHashMap<String, Sample>()
     private val notes = LinkedHashMap<String, SourceNote>()
     @Volatile
@@ -131,7 +137,7 @@ class PriceBook(private val rates: RatesPort, private val clockSecs: () -> Long)
             is FetchResult.NotReached -> { torMissing = false; SourceNote(source, now, AppWords.sourceNotAnswered, null) }
             is FetchResult.Status -> { torMissing = false; SourceNote(source, now, AppWords.sourceRefusedStatus(result.code), null) }
             FetchResult.TooLong -> { torMissing = false; SourceNote(source, now, AppWords.sourceReplyTooLong, null) }
-            FetchResult.TorMissing -> { torMissing = true; SourceNote(source, now, AppWords.orbotNotRunning, null) }
+            FetchResult.TorMissing -> { torMissing = true; SourceNote(source, now, torMissingWords, null) }
         }
         synchronized(this) { notes[source] = note }
     }

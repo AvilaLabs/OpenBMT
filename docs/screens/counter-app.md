@@ -22,15 +22,15 @@ These are the words of what the app decides itself.
 | pinNotAccepted | PIN not accepted | A PIN is 6 to 12 digits, and the two entries must be the same, so nothing was saved. | Type a PIN of 6 to 12 digits twice, then save again. | a manager |  |
 | nameNotAccepted | Name not accepted | A name is 1 to 64 characters long, so it was not saved. | Type the name again. | the cashier |  |
 | torAddressNotAccepted | Tor address not accepted | The address of Orbot must be a host, a colon and a port, like 127.0.0.1:9050. | Type the address again. | a manager |  |
-| torIsOn | Tor is on for this shop | The shop's settings send every connection of this counter through Tor, with Orbot. | Keep Orbot running. The manager can check its address under Network. | a manager |  |
+| torIsOn | Tor is on for this shop | The shop's settings send every connection of this counter through Tor. | Nothing to do. The manager can choose how under Tor. | a manager |  |
 | torIsOff | Tor is off for this shop | The shop's settings do not use Tor, so the price sources and the network can see this shop's address. | Nothing to do here. The owner can switch Tor on in the shop's settings. | the owner |  |
 | orbotNotRunning | Tor is not running | Tor is on for this shop, but Orbot is not running. | Open Orbot and turn it on. If it listens at another address, the manager can change it under Network. | a manager |  |
 | torBuiltIn | Tor | This app runs Tor itself, so Orbot is not needed. | Nothing to do. To use Orbot instead, choose Use Orbot. | nobody |  |
 | torUsesOrbot | Tor through Orbot | This app sends everything through Orbot, which must be installed and running. | Keep Orbot running. To stop needing it, choose Built-in Tor. | the owner |  |
 | torStarting | Starting Tor | This app is connecting to the Tor network, which can take up to a minute. | Wait on this screen. | nobody |  |
 | torFailed | Tor did not start | This app could not connect to the Tor network. | Check that the phone is online, then try again. If it keeps failing, choose Use Orbot. | the owner |  |
-| networkAbout | Network | When the shop's settings turn Tor on, this counter sends everything through Orbot, at the address below. | Change the address only if Orbot listens somewhere else, then type the manager's PIN. | a manager |  |
-| networkSaved | Address saved | The counter will look for Orbot at the new address. | Tap Start to use it now. | a manager |  |
+| networkAbout | Network | When the shop's settings turn Tor on and this counter uses Orbot, it sends everything through Orbot, at the address below. | Change the address only if Orbot listens somewhere else, then type the manager's PIN. | a manager |  |
+| networkSaved | Address saved | The counter will look for Orbot at the new address when it uses Orbot. | Tap Start to use it now. | a manager |  |
 | ownNodeAbout | Your own node | A node of your own, reached by a Tor address, can check each payment as well as the light check does. | Type its Tor address and the manager's PIN, then save. | a manager |  |
 | ownNodeSaved | Own node saved | The counter will ask your own node about each payment, once it has started again. | Wait a moment while the counter starts again. | a manager |  |
 | ownNodeRemoved | Own node removed | The counter checks payments with the light check only. | Wait a moment while the counter starts again. | a manager |  |
