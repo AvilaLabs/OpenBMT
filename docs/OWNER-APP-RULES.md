@@ -970,3 +970,78 @@ signs batches, settings and pairings, are never in the service.
   sale numbers, times and amounts, and no addresses." and "Give it to your
   bookkeeper." A refusal of the library is shown in its own words, and then
   no file is offered for what was refused and nothing is written.
+
+## 17. Counters paired with the shop's own wallet
+
+A shop that uses its own wallet has no Key app. The owner phone keeps the
+wallet's public description, makes the offer a new counter scans, checks
+the counter's request and the four words, and gives each counter its
+ranges of indexes, from which the counter makes its own addresses
+(`docs/COUNTER-RULES.md` §23, `docs/WALLET-RULES.md` §3). The owner phone
+signs alone; the checks a second signature made are made instead by the
+person who compares the first address with the wallet and the four words
+with the counter. A shop paired through the Key app keeps sections 6 and 7
+unchanged.
+
+- **OA-105.** The shop's wallet is kept once "Connect your wallet" has
+  reached "Wallet checked": the pinned wallet (`OBM)`, WL-21) in its own
+  file, sealed with the app's storage key as its other files are and
+  written by atomic steps. Nothing is kept before the owner taps "Same
+  address". A file that does not read back as exactly what was written
+  is refused, and the app makes no offer and no range until it reads.
+  Changing or replacing the wallet is not in these rules.
+- **OA-106.** The ranges of every device come from one allocation book in
+  the owner state: for each device, its ranges in the order given. The next
+  range starts at the end of the highest range ever given, so no two
+  devices share an index and no index is given twice, also after a counter
+  is forgotten. A range holds 1,000 indexes and ends below 2^31 (WL-23).
+  The range is written to the book before it is signed, and signed before
+  it is sent or shown. The owner phone's own requests take their ranges
+  from the same book under the owner root as the device (RQ-02).
+- **OA-107.** Every index of every range in the book is in the owner
+  phone's watch set from the moment it is written, so a payment to any
+  address a counter or a request handed out is seen (OC-01).
+- **OA-108.** "Add a counter" shows the offer (`OBM-`, CR-227) as a code,
+  `ur:bytes`, drawn as OA-24 draws a bundle, with the words "Scan this with
+  the new counter. It shows your wallet's first address: check it against
+  your wallet." The settings floor in it is the version of the settings in
+  force. The offer lives 10 minutes (CR-229); after that the page says it
+  has ended and offers a new one.
+- **OA-109.** "Scan the counter's code" reads the counter's request
+  (`OBM.`, CR-229) as OA-22 reads a code: only `ur:bytes`, at most 1,024
+  bytes, judged by the node and not in Kotlin. A request for another
+  offer, one whose signature fails, one from the owner's own key, a name
+  that is not plain text and a request after the 10 minutes are each
+  refused with words. A request that reads shows the counter's name and
+  its four words large, "Check that the counter shows these same four
+  words.", and two buttons, "They match" and "They differ".
+- **OA-110.** "They match" makes, in this order: the first settings (the
+  owner root's signature only, a version above the floor, this counter on
+  the device list and among the counters with equal shares of the instant
+  limits as OA-23 says, and the price of OA-23 on a phone that holds no
+  settings yet), the first range of OA-106, and the pairing entry signed
+  under `OpenBMT/pairing-own/v1` (CR-230). It shows the bundle (`OBM/`) as
+  a code with the words of OA-24. "They differ" forgets the request and
+  allocates nothing. Leaving the page before "They match" queues nothing.
+- **OA-111.** The counter is marked paired only on the owner's word, the
+  button "The counter shows Paired", as OA-25 says. Until then "Show the
+  code again" draws the same bundle again and allocates nothing new.
+- **OA-112.** The owner node counts, for each counter, the indexes of its
+  held ranges that its records have not yet used (`Opened` records name
+  the index; range-held records, tag 35, name the ranges it holds). When
+  fewer than 300 are left and no range waits for that counter, it allocates
+  the next range and sends it as a message of kind Range (LK-77). The range
+  waits in its own outbox file, magic `OBM>`, kept and sent again as
+  LK-70 to LK-72 keep batches, until the counter's range-held record shows
+  it. A range that has waited 24 hours raises the alert of LK-73 for its
+  counter. At most one range waits for a counter at a time.
+- **OA-113.** The wallet's page shows how far ahead the shop's wallet must
+  look to show every payment (its gap limit): the longest run of indexes
+  with no payment, counted from index 0 to the highest index given out,
+  plus one. When that is above 20 it says "Set your wallet to look at least
+  {n} addresses ahead, or it will not show every payment." and lists the
+  wallets that can (as the handbook's wallet page does). It is worked out
+  from the watch set and changes as payments arrive.
+- **OA-114.** Every state and refusal of this section has words under
+  `docs/SCREEN-RULES.md`; until the words are written a placeholder
+  constant `WORDS_NEEDED_OA_xxx` names the rule.
