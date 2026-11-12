@@ -299,6 +299,11 @@ object ProtocolDecoderTest {
             OwnerPrice.agree(listOf(PriceReply("bitstamp", "nope".toByteArray(), 1_700_000_000L), last("gemini", "98000")), 1_700_000_000L)
         }
         refusedBy("a source that is not in the table", "RT-31") { OwnerPrice.agree(listOf(PriceReply("nowhere", ByteArray(0), 1L)), 1L) }
+        // The price in the shop's currency (OA-102): the dollar sources again, in whole and in minor units, and no sources for Bitcoin Standard.
+        check(OwnerPrice.sourcesFor("USD").map { it.id } == sources.map { it.id }) { "the sources of USD" }
+        val usd = OwnerPrice.agreeFor("USD", listOf(last("bitstamp", "98500.50"), last("gemini", "98500.50")), 1_700_000_000L)
+        check(usd.wholePerBtc == 98_501L && usd.minorPerBtc == 9_850_050L && usd.sourceLabel == "med.bg") { "agreed in USD: ${usd.wholePerBtc}" }
+        refusedBy("Bitcoin Standard", "request-malformed") { OwnerPrice.sourcesFor("SAT") }
     }
 
     /**

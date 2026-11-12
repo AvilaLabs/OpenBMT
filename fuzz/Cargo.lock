@@ -586,7 +586,9 @@ version = "0.1.0"
 dependencies = [
  "bitcoin",
  "jni-sys",
+ "openbmt-books",
  "openbmt-core",
+ "openbmt-counter",
  "openbmt-counter-node",
  "openbmt-courier",
  "openbmt-link",

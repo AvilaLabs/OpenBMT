@@ -1,6 +1,7 @@
 package org.openbmt.owner.app
 
 import android.view.View
+import android.widget.Button
 import org.openbmt.app.RowItem
 
 /**
@@ -18,7 +19,7 @@ internal fun Controller.showBooks() {
     val offsetMinutes = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60_000
     val books = attempt(msg) { n.books(offsetMinutes) }
     val views = ArrayList<View>()
-    val footer = ArrayList<View>()
+    val footer = ArrayList<Button>()
     if (books == null) {
         views.add(msg)
     } else {

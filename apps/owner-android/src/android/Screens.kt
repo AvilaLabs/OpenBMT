@@ -469,10 +469,11 @@ internal fun Controller.showCashOut(): Unit = withNode { n ->
             is Form.Refused -> msg.show(ui.words(f.words))
             is Form.Ok -> {
                 // The books record a cash-out at a price (OA-102): the sources are asked for it, except in Bitcoin Standard.
-                val currency = attempt(msg) { n.settings().currency }
+                // A phone with no settings has no currency to ask in: its cash-out is queued with no price.
+                val currency = attempt(msg) { n.settings()?.currency ?: ShopCurrency.Sats }
                 if (currency != null && currency != ShopCurrency.Sats) {
                     showCashOutPrice(n, f.value, currency)
-                } else if (attempt(msg) { n.cashOut(f.value) } != null) {
+                } else if (currency != null && attempt(msg) { n.cashOut(f.value) } != null) {
                     centre(AppWords.cashOutQueued, listOf(ui.button("Back") { showCashOut() }))
                 }
             }
