@@ -698,11 +698,7 @@ or `cancelled` to `paid` while the Box still keeps it, because the counter's
 word that it was paid is what the till needs most; a till that cancelled a
 sale and then reads `paid` has been paid. The numbers of the counters' notices
 are checked for the till against the last till notice taken from the counter,
-in memory, because the till works on a Box that reads no POS. The words of
-the headings and sentences of `tillKeyWrong`, `tillOff`, `tillUnknownCounter`,
-`tillWrongMoney` and `tillLost` are longer than the console's limits for a
-screen (SC-12 `check`), so the SC-12 test checks them with the lengths
-cut and checks their text against the words as written.
+in memory, because the till works on a Box that reads no POS.
 
 ## 6. What these rules do not do
 

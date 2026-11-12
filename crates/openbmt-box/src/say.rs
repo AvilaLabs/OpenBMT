@@ -1085,14 +1085,14 @@ impl TillAnswer {
     pub fn words(&self) -> Words {
         match self {
             Self::KeyWrong => stop(
-                "The Box did not accept this till",
+                "Wrong till key",
                 "The key in this payment method is not the Box's till key.".into(),
                 Who::BoxKeeper,
                 "Copy the till key from the Box again into this payment method.",
             )
             .code("BX-71"),
             Self::Off => stop(
-                "The Box does not take sales from a till",
+                "Till listener is off",
                 "The Box was started without its till listener.".into(),
                 Who::BoxKeeper,
                 "Start the Box with the till listener on. The handbook shows how.",
@@ -1106,16 +1106,16 @@ impl TillAnswer {
             )
             .code("BX-72"),
             Self::UnknownCounter(code) => stop(
-                &format!("No counter {}", plain(code)),
-                "The shop has no counter with the code in this payment method.".into(),
+                "Counter not found",
+                format!("The shop has no counter with the code {}.", plain(code)),
                 Who::BoxKeeper,
-                "Check the counter code in this payment method. The owner app shows each counter as \"Counter\" and its code.",
+                "Check the counter code in this payment method. The owner app shows it after the word Counter.",
             )
             .code("BX-72"),
             Self::WrongMoney { shop, asked } => stop(
-                &format!("The counters take {}, not {}", plain(shop), plain(asked)),
+                "Wrong currency",
                 format!(
-                    "This sale is in {}, and the shop's counters are set up in {}.",
+                    "This sale is in {}, and the shop's counters take {}.",
                     plain(asked),
                     plain(shop)
                 ),
@@ -1132,7 +1132,7 @@ impl TillAnswer {
             .code("BX-72"),
             Self::Expired => Words::new(
                 Tone::Ended,
-                "The counter did not start this sale",
+                "Sale not started",
                 "Nobody pressed Start on the counter within 5 minutes.",
                 Who::Cashier,
                 "Try again, or take the payment on the counter and pick Bitcoin by hand.",

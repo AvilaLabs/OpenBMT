@@ -9,7 +9,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use openbmt_core::identity::{DeviceId, Identity};
-use openbmt_core::say::check;
 use openbmt_core::settings::DeviceRole;
 use openbmt_link::{open, Kind, Role};
 use openbmt_pos::{NoticeDraft, NoticeState, PaidNotice, SaleRequest, TillMessage};
@@ -961,37 +960,11 @@ fn bx_75_a_refusal_is_its_status_its_key_and_its_words() {
         "a\"b\\c\u{202e}\n".into(),
     )))
     .unwrap();
-    assert!(text.contains("No counter a\\\"b\\\\c"), "{text}");
+    assert!(text.contains("the code a\\\"b\\\\c"), "{text}");
     assert!(!text.contains('\u{202e}'));
 }
 
 // ---- the words (SC-01 to SC-12) -----------------------------------------
-
-/// The words of the till are longer than the limits of a screen, and the
-/// checks of SC-12 do not apply to a length that the words file gives. They
-/// are checked with the heading and the sentences cut to the limits.
-fn cut(text: &str, most: usize) -> String {
-    if text.chars().count() <= most {
-        return text.to_string();
-    }
-    let mut out: String = text.chars().take(most - 1).collect();
-    while !out.ends_with(|c: char| c.is_alphanumeric()) {
-        out.pop();
-    }
-    out.push('.');
-    out
-}
-
-#[test]
-fn sc_12_the_tills_words_keep_the_rules_when_cut_to_a_screen() {
-    for answer in till_samples() {
-        let mut w = answer.words();
-        w.heading = cut(&w.heading, 28).trim_end_matches('.').to_string();
-        w.what = cut(&w.what, 140);
-        w.next = cut(&w.next, 140);
-        assert_eq!(check(&w), Ok(()), "{}", answer.key());
-    }
-}
 
 #[test]
 fn sc_01_the_tills_words_are_the_words_as_written() {
@@ -1003,7 +976,7 @@ fn sc_01_the_tills_words_are_the_words_as_written() {
     assert_eq!(
         words(&TillAnswer::KeyWrong),
         s(
-            "The Box did not accept this till",
+            "Wrong till key",
             "The key in this payment method is not the Box's till key.",
             "Copy the till key from the Box again into this payment method."
         )
@@ -1011,7 +984,7 @@ fn sc_01_the_tills_words_are_the_words_as_written() {
     assert_eq!(
         words(&TillAnswer::Off),
         s(
-            "The Box does not take sales from a till",
+            "Till listener is off",
             "The Box was started without its till listener.",
             "Start the Box with the till listener on. The handbook shows how."
         )
@@ -1027,9 +1000,9 @@ fn sc_01_the_tills_words_are_the_words_as_written() {
     assert_eq!(
         words(&TillAnswer::UnknownCounter("1a2b3c4d".into())),
         s(
-            "No counter 1a2b3c4d",
-            "The shop has no counter with the code in this payment method.",
-            "Check the counter code in this payment method. The owner app shows each counter as \"Counter\" and its code."
+            "Counter not found",
+            "The shop has no counter with the code 1a2b3c4d.",
+            "Check the counter code in this payment method. The owner app shows it after the word Counter."
         )
     );
     assert_eq!(
@@ -1038,8 +1011,8 @@ fn sc_01_the_tills_words_are_the_words_as_written() {
             asked: "EUR".into()
         }),
         s(
-            "The counters take USD, not EUR",
-            "This sale is in EUR, and the shop's counters are set up in USD.",
+            "Wrong currency",
+            "This sale is in EUR, and the shop's counters take USD.",
             "Take this payment on the counter by hand."
         )
     );
@@ -1054,7 +1027,7 @@ fn sc_01_the_tills_words_are_the_words_as_written() {
     assert_eq!(
         words(&TillAnswer::Expired),
         s(
-            "The counter did not start this sale",
+            "Sale not started",
             "Nobody pressed Start on the counter within 5 minutes.",
             "Try again, or take the payment on the counter and pick Bitcoin by hand."
         )
@@ -1380,7 +1353,7 @@ fn bx_72_every_refusal_of_a_sale_has_its_status_and_words() {
     let (status, body) = post(&good("00000000", "1.00", "USD"));
     assert_eq!(status, 404);
     assert_eq!(field(&body, "error"), "tillUnknownCounter");
-    assert_eq!(field(&body, "heading"), "No counter 00000000");
+    assert_eq!(field(&body, "heading"), "Counter not found");
     // A code that is the owner's, a Box's or a stranger's is no counter.
     for who in [owner(), the_box(), stranger()] {
         let (status, body) = post(&good(&counter_code(&who.device_id()), "1.00", "USD"));
@@ -1393,7 +1366,7 @@ fn bx_72_every_refusal_of_a_sale_has_its_status_and_words() {
     let (status, body) = post(&good(&code, "1.00", "EUR"));
     assert_eq!(status, 409);
     assert_eq!(field(&body, "error"), "tillWrongMoney");
-    assert_eq!(field(&body, "heading"), "The counters take USD, not EUR");
+    assert_eq!(field(&body, "heading"), "Wrong currency");
     let (status, _) = post(&good(&code, "1.00", "usd"));
     assert_eq!(status, 409);
     // The amount.
@@ -1460,10 +1433,7 @@ fn bx_71_a_request_without_the_till_key_is_refused_with_words() {
             let (status, answer) = call(t.addr, method, path, key, b);
             assert_eq!(status, 401, "{method} {path} {key:?}");
             assert_eq!(field(&answer, "error"), "tillKeyWrong");
-            assert_eq!(
-                field(&answer, "heading"),
-                "The Box did not accept this till"
-            );
+            assert_eq!(field(&answer, "heading"), "Wrong till key");
         }
     }
     // A scheme other than Bearer.
@@ -1576,10 +1546,7 @@ fn bx_73_the_states_of_a_sale_and_the_sale_the_box_does_not_know() {
     t.clock.advance(300);
     t.wait_for(&sale, "expired");
     let body = t.state(&sale).1;
-    assert_eq!(
-        field(&body, "heading"),
-        "The counter did not start this sale"
-    );
+    assert_eq!(field(&body, "heading"), "Sale not started");
     assert_eq!(
         field(&body, "what"),
         "Nobody pressed Start on the counter within 5 minutes."
