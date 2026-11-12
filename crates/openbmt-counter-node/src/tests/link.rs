@@ -67,11 +67,20 @@ fn world(cfg: CounterLinkConfig) -> World {
 }
 
 fn world_with(cfg: CounterLinkConfig, owner_mailbox_first: bool) -> World {
+    world_on(cfg, owner_mailbox_first, start)
+}
+
+/// A world whose node is made by `make` over the node's directory.
+fn world_on(
+    cfg: CounterLinkConfig,
+    owner_mailbox_first: bool,
+    make: impl FnOnce(&std::path::Path) -> Rig,
+) -> World {
     let relay = MemoryRelay::new(id(99), &[owner(), counter()]).unwrap();
     let node_dir = Scratch::new();
     let link_dir = Scratch::new();
     let owner_dir = Scratch::new();
-    let rig = start(node_dir.path());
+    let rig = make(node_dir.path());
     let mut link = CounterLink::new(
         courier(
             &relay,
@@ -885,4 +894,70 @@ fn lk_74_the_counter_listens_to_the_watch_key_the_settings_name_and_to_no_other(
         .unwrap();
     w.step(T0 + 4);
     assert_eq!(w.link.state().heartbeats_taken, 1);
+}
+
+/// A node of a counter paired with the shop's own wallet (CR-234): counter 3,
+/// the owner root 1, a first range of 1,000 indexes.
+fn own_rig(dir: &std::path::Path) -> Rig {
+    let time = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(T0));
+    let record = super::paired_own::record();
+    let mut config = crate::NodeConfig::new_own(
+        dir,
+        id(3),
+        record.own_pairing(super::paired_own::POLICY),
+        settings(),
+        openbmt_net_io::DriverConfig::new(bitcoin::Network::Bitcoin, 0),
+    );
+    config.clock = Box::new(TestClock(time.clone()));
+    config.health = Box::new(|_| healthy());
+    start_with(config, time)
+}
+
+fn range_bytes(start: u32, end: u32) -> Vec<u8> {
+    openbmt_core::pinned_wallet::SignedRange::sign(
+        &id(1),
+        openbmt_core::pinned_wallet::IndexRange::new(counter(), start, end).unwrap(),
+    )
+    .unwrap()
+    .to_bytes()
+}
+
+#[test]
+fn lk_77_a_range_is_given_to_an_own_wallet_counter_and_refused_by_a_key_app_one() {
+    // The own-wallet counter takes a range that overlaps nothing.
+    let mut w = world_on(config(), true, own_rig);
+    let before = w.rig.node.counter().range_ledger().unwrap().remaining();
+    w.send(Kind::Range, &range_bytes(1_000, 2_000));
+    w.step(T0);
+    assert_eq!(w.link.state().node_refusals, 0);
+    assert_eq!(
+        w.rig.node.counter().range_ledger().unwrap().remaining(),
+        before + 1_000
+    );
+    // One over indexes it holds is refused and noted, and the step goes on.
+    w.send(Kind::Range, &range_bytes(1_500, 2_500));
+    w.send(Kind::Range, b"junk");
+    w.step(T0 + 1);
+    assert_eq!(w.link.state().node_refusals, 2);
+    let notes = w.notes();
+    assert!(
+        notes.iter().any(|n| n.contains("range not taken")),
+        "{notes:?}"
+    );
+    assert!(notes.iter().any(|n| n.contains("range does not decode")));
+    assert_eq!(
+        w.rig.node.counter().range_ledger().unwrap().remaining(),
+        before + 1_000
+    );
+    // A batch is not what this counter takes (CR-235).
+    w.send(Kind::Batch, &batch(10, 5).to_bytes());
+    w.step(T0 + 2);
+    assert!(w.notes().iter().any(|n| n.contains("batch not taken")));
+
+    // A counter paired with the Key app drops a range with a note.
+    let mut k = world(config());
+    k.send(Kind::Range, &range_bytes(0, 1_000));
+    k.step(T0);
+    assert_eq!(k.link.state().node_refusals, 1);
+    assert!(k.notes().iter().any(|n| n.contains("range not taken")));
 }

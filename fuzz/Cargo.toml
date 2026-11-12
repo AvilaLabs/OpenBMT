@@ -761,3 +761,10 @@ path = "fuzz_targets/range_ledger_decode.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "counter_own_pairing_record_decode"
+path = "fuzz_targets/counter_own_pairing_record_decode.rs"
+test = false
+doc = false
+bench = false

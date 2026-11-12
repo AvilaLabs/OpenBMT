@@ -152,12 +152,17 @@ impl Registry {
 
     /// CR-92: the person says the words match. A refusal ends the ceremony.
     pub(crate) fn pair_match(&self, now: u64) -> Result<(), CounterError> {
-        if let Some(c) = self.own_ceremony().as_mut() {
-            let result = c.confirm(now);
-            if result.is_err() {
-                *self.own_ceremony() = None;
+        {
+            let mut own = self.own_ceremony();
+            if let Some(c) = own.as_mut() {
+                let result = c.confirm(now);
+                // A call before "Same address" changes nothing; any other
+                // refusal ends the ceremony.
+                if result.is_err() && result != Err(OwnPairRefused::NoCeremony) {
+                    *own = None;
+                }
+                return result.map_err(refused_own);
             }
-            return result.map_err(refused_own);
         }
         let mut slot = self.ceremony();
         let Some(c) = slot.as_mut() else {
@@ -173,11 +178,14 @@ impl Registry {
     /// CR-92: the person says the words differ. The ceremony, its key and its
     /// number are forgotten, and the words say what happened and what to do.
     pub(crate) fn pair_differ(&self) -> Result<WordsView, CounterError> {
+        use openbmt_counter_node::say::PairStep;
         *self.ceremony() = None;
-        *self.own_ceremony() = None;
-        Ok(WordsView(
-            openbmt_counter_node::say::PairStep::Differ.words(),
-        ))
+        let step = if self.own_ceremony().take().is_some() {
+            PairStep::OwnDiffer
+        } else {
+            PairStep::Differ
+        };
+        Ok(WordsView(step.words()))
     }
 
     /// The person leaves the ceremony: it is forgotten.

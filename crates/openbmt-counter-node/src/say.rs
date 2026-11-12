@@ -342,17 +342,21 @@ pub enum PairStep {
     /// address in a pairing with the shop's own wallet (CR-228); the counter
     /// forgot the pairing before it made a key.
     AddressDiffers,
+    /// The person said the four words differ in a pairing with the shop's own
+    /// wallet (CR-229); the counter forgot the pairing.
+    OwnDiffer,
 }
 
 impl PairStep {
     /// Every step.
-    pub const ALL: [PairStep; 6] = [
+    pub const ALL: [PairStep; 7] = [
         Self::ScanOffer,
         Self::CompareWords,
         Self::ScanOwner,
         Self::Paired,
         Self::Differ,
         Self::AddressDiffers,
+        Self::OwnDiffer,
     ];
 
     /// The name of the step.
@@ -364,6 +368,7 @@ impl PairStep {
             Self::Paired => "Paired",
             Self::Differ => "Differ",
             Self::AddressDiffers => "AddressDiffers",
+            Self::OwnDiffer => "OwnDiffer",
         }
     }
 
@@ -414,6 +419,14 @@ impl PairStep {
                 "Check that the owner phone has your wallet, then start the pairing again from the owner phone.",
             )
             .code("CR-228"),
+            Self::OwnDiffer => Words::new(
+                Tone::Stop,
+                "Words differ: stopped",
+                WORDS_NEEDED_CR_229_DIFFER,
+                Who::Manager,
+                "Words needed for what to do next.",
+            )
+            .code("CR-229"),
         }
     }
 }
@@ -496,6 +509,11 @@ impl PairRefused {
 /// what happened allow.
 pub const WORDS_NEEDED_CR_236_CONFIRMATION: &str =
     "Words needed: this change needs a counter to confirm it.";
+/// CR-229: the words for the four words differing in a pairing with the
+/// shop's own wallet are still to be written. The words of the Key app's
+/// ceremony name the Key app.
+pub const WORDS_NEEDED_CR_229_DIFFER: &str =
+    "Words needed: the four words did not match, so nothing was saved.";
 /// CR-228: the words for a pairing step with no pairing at that step are
 /// still to be written.
 pub const WORDS_NEEDED_CR_228_NO_CEREMONY: &str =

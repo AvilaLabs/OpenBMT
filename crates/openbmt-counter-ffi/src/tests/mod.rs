@@ -11,6 +11,7 @@ mod link;
 mod lock;
 mod own_node;
 mod pairing;
+mod pairing_own;
 mod pay;
 mod protocol;
 mod rates;

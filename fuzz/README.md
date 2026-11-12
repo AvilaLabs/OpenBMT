@@ -36,6 +36,7 @@ exactly the input bytes.
 | `own_request_decode` | `OwnRequest::from_bytes` (CR-229), with re-encode equality, on the input as it is and behind the frame header |
 | `own_bundle_decode` | `OwnBundle::from_bytes` (versions 1 and 2, the second with a relay, CR-230), with re-encode equality and the version that matches the relay, on the input as it is and behind each version's frame header |
 | `range_ledger_decode` | `RangeLedger::from_bytes` (the `OBM;` slot, CR-234) under a fixed owner root and counter: re-encode equality, and a ledger of no range hands out no index |
+| `counter_own_pairing_record_decode` | `OwnPairingRecord::from_bytes` (the `OBM:` record, versions 1 and 2, the second with a relay, CR-233), with re-encode equality and the version that matches the relay, and `PairedRecord::from_bytes` taking it as the own-wallet kind, on the input as it is and behind each version's frame header |
 | `pair_request_decode` | `PairRequest::from_bytes` |
 | `counter_bundle_decode` | `CounterBundle::from_bytes` (versions 1 and 2, the second with a relay, CR-130), with re-encode equality, on the input as it is and behind each version's frame header; a bundle with a relay must read as version 1 without it |
 | `counter_pairing_record_decode` | `PairingRecord::from_bytes` (the counter's stored pairing record, versions 1 and 2, CR-131), with re-encode equality, on the input as it is and behind each version's frame header |
