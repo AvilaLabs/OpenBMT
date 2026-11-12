@@ -11,6 +11,7 @@ mod lightning;
 mod link;
 mod lock;
 mod own_node;
+mod own_owner;
 mod pairing;
 mod pairing_own;
 mod pay;

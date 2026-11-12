@@ -405,6 +405,7 @@ dependencies = [
  "openbmt-link",
  "openbmt-net-io",
  "openbmt-owner",
+ "openbmt-owner-node",
  "openbmt-qr",
  "openbmt-rates",
  "openbmt-signer",

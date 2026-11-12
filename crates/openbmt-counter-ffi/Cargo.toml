@@ -36,6 +36,9 @@ jni-sys = "=0.3.0"
 # The other ends of the pairing ceremony, for the test that runs it whole.
 openbmt-approver = { path = "../openbmt-approver" }
 openbmt-owner = { path = "../openbmt-owner" }
+# The owner phone of a shop with its own wallet, which pairs the counter
+# and gives it ranges in the end-to-end test.
+openbmt-owner-node = { path = "../openbmt-owner-node" }
 openbmt-signer = { path = "../openbmt-signer" }
 # The recorded replies and the invoice writer of the Lightning tests.
 openbmt-lightning = { path = "../openbmt-lightning", features = ["testing"] }

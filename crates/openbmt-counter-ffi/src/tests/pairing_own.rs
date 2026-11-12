@@ -3,7 +3,9 @@
 //! phone's offer, the first address, the counter's request, the owner
 //! phone's bundle, and a start from the stored record that opens a sale on
 //! an address of the wallet. The owner phone's side is the functions of
-//! `openbmt_core::pairing_own`.
+//! `openbmt_core::pairing_own`, which lets these tests make a bundle that
+//! the real owner phone never would; the real owner phone pairs a real
+//! counter in `own_owner.rs`.
 
 use openbmt_core::identity::Identity;
 use openbmt_core::pairing_own::{OwnBundle, OwnOffer, OwnRequest};
@@ -16,10 +18,10 @@ use crate::StartConfig;
 
 /// The Key Maker's test seed, account 0 (WL-06): the first receive address
 /// is the one WL-06 names.
-const SINGLE: &str = "wpkh([818bc9b6/84h/0h/0h]xpub6CgURS1GrKZkAoRGBTKYX9FhLgkKnQVZ6vdNBUbiu24xtRJ6RzLKpdg4CqsVyBLzimcJsviP59hSoGJEpTJiXE8bdBLw1qPC1DXRatKehb8/<0;1>/*)#96yh9yhx";
-const FIRST_ADDRESS: &str = "bc1qyjassxtmzl02s8de8jw9365qmuvwg74udtp3vj";
-const MULTI: &str = "wsh(sortedmulti(2,[73c5da0a/48h/0h/0h/2h]xpub6DkFAXWQ2dHxq2vatrt9qyA3bXYU4ToWQwCHbf5XB2mSTexcHZCeKS1VZYcPoBd5X8yVcbXFHJR9R8UCVpt82VX1VhR28mCyxUFL4r6KFrf/<0;1>/*,[b8688df1/48h/0h/0h/2h]xpub6FQya7zGhR92kacYsNnjreouvnHJMpXYsUXnW6NJJAJRCKsa26TzDy4LdnGhEurr3d6y1J8PJ7EEMKQp74XTqYvmGJNogYXSKDszYHtF8mX/<0;1>/*,[28645006/48h/0h/0h/2h]xpub6DnEBNkSJKBYQmsbhS1sP9cNdtU5c9PLFGCjTJmxicxc13WB8zNNGQazabQpyFAGW5bV9tMko4uBxDxjUKL6dSAcx1tEbgEHtgSqyRsekh6/<0;1>/*))#34zcp4yt";
-const FLOOR: u32 = 4;
+pub(super) const SINGLE: &str = "wpkh([818bc9b6/84h/0h/0h]xpub6CgURS1GrKZkAoRGBTKYX9FhLgkKnQVZ6vdNBUbiu24xtRJ6RzLKpdg4CqsVyBLzimcJsviP59hSoGJEpTJiXE8bdBLw1qPC1DXRatKehb8/<0;1>/*)#96yh9yhx";
+pub(super) const FIRST_ADDRESS: &str = "bc1qyjassxtmzl02s8de8jw9365qmuvwg74udtp3vj";
+pub(super) const MULTI: &str = "wsh(sortedmulti(2,[73c5da0a/48h/0h/0h/2h]xpub6DkFAXWQ2dHxq2vatrt9qyA3bXYU4ToWQwCHbf5XB2mSTexcHZCeKS1VZYcPoBd5X8yVcbXFHJR9R8UCVpt82VX1VhR28mCyxUFL4r6KFrf/<0;1>/*,[b8688df1/48h/0h/0h/2h]xpub6FQya7zGhR92kacYsNnjreouvnHJMpXYsUXnW6NJJAJRCKsa26TzDy4LdnGhEurr3d6y1J8PJ7EEMKQp74XTqYvmGJNogYXSKDszYHtF8mX/<0;1>/*,[28645006/48h/0h/0h/2h]xpub6DnEBNkSJKBYQmsbhS1sP9cNdtU5c9PLFGCjTJmxicxc13WB8zNNGQazabQpyFAGW5bV9tMko4uBxDxjUKL6dSAcx1tEbgEHtgSqyRsekh6/<0;1>/*))#34zcp4yt";
+pub(super) const FLOOR: u32 = 4;
 const PEER: &str = "127.0.0.1:8333";
 /// The tag bytes of `OwnWalletKind`.
 const KIND_SINGLE: u8 = 1;
@@ -29,7 +31,7 @@ fn owner() -> Identity {
     Identity::from_secret_bytes(&[0x11; 32]).unwrap()
 }
 
-fn offer_for(text: &str) -> OwnOffer {
+pub(super) fn offer_for(text: &str) -> OwnOffer {
     OwnOffer::new(
         bitcoin::Network::Bitcoin,
         owner().device_id(),
@@ -41,7 +43,7 @@ fn offer_for(text: &str) -> OwnOffer {
 
 /// What `pair_begin` returns for an own-wallet offer: the request, the
 /// words, the address and the kind byte, or the refusal's rule.
-fn begin(rig: &Rig, offer: &[u8]) -> Result<(Vec<u8>, Vec<String>, String, u8), String> {
+pub(super) fn begin(rig: &Rig, offer: &[u8]) -> Result<(Vec<u8>, Vec<String>, String, u8), String> {
     let response = rig.call(
         44,
         0,
@@ -61,7 +63,7 @@ fn begin(rig: &Rig, offer: &[u8]) -> Result<(Vec<u8>, Vec<String>, String, u8), 
 
 /// `pair_address_same`: the request, the words and the empty address, or the
 /// refusal's rule.
-fn same(rig: &Rig, now: u64) -> Result<(Vec<u8>, Vec<String>), String> {
+pub(super) fn same(rig: &Rig, now: u64) -> Result<(Vec<u8>, Vec<String>), String> {
     let response = rig.call(69, 0, &W::new().u64(now).string("Front counter").0);
     if let Some(e) = Rd::error(&response) {
         return Err(e.rule);
@@ -75,7 +77,7 @@ fn same(rig: &Rig, now: u64) -> Result<(Vec<u8>, Vec<String>), String> {
     Ok((request, words))
 }
 
-fn matched(rig: &Rig, now: u64) -> Result<(), String> {
+pub(super) fn matched(rig: &Rig, now: u64) -> Result<(), String> {
     let response = rig.call(45, 0, &W::new().u64(now).0);
     match Rd::error(&response) {
         Some(e) => Err(e.rule),
@@ -86,7 +88,7 @@ fn matched(rig: &Rig, now: u64) -> Result<(), String> {
     }
 }
 
-fn finish(rig: &Rig, bundle: &[u8], now: u64) -> Result<Vec<u8>, String> {
+pub(super) fn finish(rig: &Rig, bundle: &[u8], now: u64) -> Result<Vec<u8>, String> {
     let response = rig.call(48, 0, &W::new().u64(now).bytes(bundle).0);
     if let Some(e) = Rd::error(&response) {
         assert!(!e.words.heading.is_empty(), "{e:?}");
