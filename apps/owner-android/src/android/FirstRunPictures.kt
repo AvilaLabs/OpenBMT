@@ -297,22 +297,24 @@ private class Scene(private val c: Canvas, private val p: Paint, private val pal
     }
 
     private fun till(t: Float) {
-        card(52f, 12f, 268f, 148f, 14f)
-        rr(66f, 26f, 254f, 62f, 6f, pal.chip)
-        rr(80f, 38f, 150f, 44f, 3f, pal.hint)
-        rr(80f, 49f, 120f, 54f, 3f, pal.divider)
+        // Four keys of 36 with 18 between, and 21 to the frame on both sides; the glow stays inside the frame.
+        card(40f, 12f, 280f, 148f, 14f)
+        rr(61f, 26f, 259f, 62f, 6f, pal.chip)
+        rr(75f, 38f, 145f, 44f, 3f, pal.hint)
+        rr(75f, 49f, 115f, 54f, 3f, pal.divider)
         val lit = ease(seg(t, 0.35f, 0.6f))
-        val xs = listOf(66f, 118f, 170f, 222f)
+        val xs = listOf(61f, 115f, 169f, 223f)
         for ((k, l) in xs.withIndex()) {
             val top = 78f
             val on = if (k == 3) lit else 0f
             if (on > 0f) {
-                dot(l + 16f, top + 28f, 30f * on, withAlpha(Palette.BRAND, 0.25f * on))
+                val g = 9f * on
+                rr(l - g, top - g, l + 36f + g, top + 56f + g, 8f + g, withAlpha(Palette.BRAND, 0.28f * on))
             }
-            rr(l, top, l + 32f, top + 56f, 8f, if (on > 0.5f) Palette.BRAND else pal.chip)
-            rrOutline(l, top, l + 32f, top + 56f, 8f, if (on > 0.5f) Palette.BRAND else pal.fieldLine)
+            rr(l, top, l + 36f, top + 56f, 8f, if (on > 0.5f) Palette.BRAND else pal.chip)
+            rrOutline(l, top, l + 36f, top + 56f, 8f, if (on > 0.5f) Palette.BRAND else pal.fieldLine)
             val mark = if (on > 0.5f) Palette.WHITE else pal.secondary
-            val x = l + 16f
+            val x = l + 18f
             val y = top + 28f
             when (k) {
                 0 -> { rrOutline(x - 10f, y - 7f, x + 10f, y + 7f, 2f, mark); c.drawLine(x - 10f, y - 2f, x + 10f, y - 2f, p) }
@@ -335,31 +337,32 @@ private class Scene(private val c: Canvas, private val p: Paint, private val pal
         rr(56f, 82f, 152f, 98f, 8f, pal.chip)
         rrOutline(56f, 82f, 152f, 98f, 8f, pal.fieldLine)
         lock(104f, 118f, 22f, ease(seg(t, 0.52f, 0.66f)), pal.good.band, pal.surface)
-        // The other side: a plain building, and a faint coin that comes up to the line and goes back.
+        // The other side: a plain building and nothing else.
         rr(236f, 78f, 290f, 140f, 3f, pal.divider)
         path.reset(); path.moveTo(230f, 80f); path.lineTo(263f, 52f); path.lineTo(296f, 80f); path.close()
         fill(pal.divider); c.drawPath(path, p)
         for (k in 0 until 3) rr(246f + k * 14f, 96f, 254f + k * 14f, 124f, 2f, pal.surface)
-        val toward = bump(t, 0.5f, 0.92f)
-        coin(lerp(262f, 214f, toward), 34f, 12f, 1f, 0.45f)
     }
 
     private fun why(t: Float) {
         val ground = 128f
         line(pal.divider, 3f)
-        c.drawLine(70f, ground + 20f, 250f, ground + 20f, p)
-        val up = seg(t, 0.05f, 0.58f)
-        val y = ground - 92f * 4f * up * (1f - up)
+        c.drawLine(60f, ground + 20f, 260f, ground + 20f, p)
+        val up = seg(t, 0.05f, 0.55f)
+        val y = ground - 80f * 4f * up * (1f - up)
         val spin = ease(up) * 4f * Math.PI.toFloat()
-        val land = bump(t, 0.58f, 0.7f)
-        coin(160f, y + land * 3f, 18f, Math.cos(spin.toDouble()).toFloat())
-        val pop = seg(t, 0.68f, 0.86f)
-        val s = if (pop <= 0f) 0f else ease(pop) * (1f + 0.15f * bump(t, 0.68f, 0.9f))
-        c.save()
-        c.translate(214f, 74f)
-        c.scale(s, s)
-        lock(0f, 0f, 30f, 1f, pal.good.band, pal.surface)
-        c.restore()
+        val land = bump(t, 0.55f, 0.68f)
+        coin(124f, y + land * 3f, 18f, Math.cos(spin.toDouble()).toFloat())
+        // After the coin has landed a green lock, the wallet's, rises beside it and shuts.
+        val pop = ease(seg(t, 0.6f, 0.76f))
+        val shut = ease(seg(t, 0.74f, 0.88f))
+        if (pop > 0f) {
+            c.save()
+            c.translate(206f, 128f)
+            c.scale(pop, pop)
+            lock(0f, 0f, 40f, shut, pal.good.band, pal.surface)
+            c.restore()
+        }
     }
 
     private fun usb(t: Float) {
