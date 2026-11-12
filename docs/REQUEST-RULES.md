@@ -1,7 +1,9 @@
 # Request rules: asking a customer to pay from anywhere
 
-Status: specification. Nothing in it is built yet. Each rule has an ID so
-that a test can name the rule it proves (`rq_NN_*`).
+Status: the library is built, in `crates/openbmt-requests`, with a test
+named for each rule (`rq_NN_*`). The owner app does not use it yet, and a
+`bitcoin:` link pasted as a return address is still refused until the
+library reads it with the BIP 321 reader of `docs/URI-RULES.md`.
 
 A shop often needs to be paid by someone who is not at the till: a deposit
 for a booking, an invoice to a business, a stall fee, a customer abroad, a
