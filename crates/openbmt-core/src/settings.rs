@@ -19,6 +19,7 @@ use crate::approval::ChangeClass;
 use crate::batch::PinnedRoots;
 use crate::currency::ShopCurrency;
 use crate::identity::{tagged_hash, DeviceId, Identity, Sig, TAG_SETTINGS};
+use crate::onion::{parse_onion_name, SUFFIX};
 use crate::policy::{self, CheckMode};
 use crate::wire::{self, DecodeError, Reader};
 
@@ -64,6 +65,15 @@ const EXTENSION_VERSION: u8 = 2;
 /// The version byte of a settings message that also names a swap provider
 /// (CR-218): the extension block of version 2 always, then the provider.
 const SWAP_VERSION: u8 = 3;
+
+/// The version byte of a settings message that names the shop's own node
+/// (NR-105): everything version 3 holds, with the swap provider as a flag
+/// and then the provider, then the own-node block. It is the version of
+/// exactly the settings that name an own node.
+const OWN_NODE_VERSION: u8 = 4;
+
+/// Characters of the base32 part of a Tor v3 host name (NR-92).
+const ONION_BASE_CHARS: usize = 56;
 
 /// Most bytes of a swap provider's name (CR-218).
 pub const MAX_SWAP_NAME_BYTES: usize = 32;
@@ -161,6 +171,70 @@ impl SwapProvider {
             path_prefix,
             max_sale_sats: r.u64_le()?,
         })
+    }
+}
+
+/// The shop's own Bitcoin node (NR-98, NR-105): the host name of a Tor v3
+/// address and a port.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnNode {
+    /// The host name, 56 lower-case base32 characters and `.onion`, with the
+    /// checksum and version of a v3 address (NR-92).
+    pub name: String,
+    /// The port, from 1 to 65535.
+    pub port: u16,
+}
+
+impl OwnNode {
+    /// NR-98: the own node at this host name and port. A name that NR-92
+    /// does not accept and port 0 are refused, with the reason in the
+    /// message (it starts "NR-105: ").
+    pub fn new(name: &str, port: u16) -> Result<Self, SettingsError> {
+        let own = Self {
+            name: name.to_string(),
+            port,
+        };
+        own.validate()?;
+        Ok(own)
+    }
+
+    /// The check of NR-98 on a name and a port, with the same function the
+    /// driver reads the name with ([`parse_onion_name`]).
+    pub fn validate(&self) -> Result<(), SettingsError> {
+        if parse_onion_name(&self.name).is_none() {
+            return Err(SettingsError::Invalid(
+                "NR-105: the own node is not a Tor v3 host name (NR-98)",
+            ));
+        }
+        if self.port == 0 {
+            return Err(SettingsError::Invalid(
+                "NR-105: the own node's port is not from 1 to 65535 (NR-98)",
+            ));
+        }
+        Ok(())
+    }
+
+    /// The 56 characters of the name, without `.onion`: what is written.
+    fn write(&self, out: &mut Vec<u8>) {
+        let base = self.name.strip_suffix(SUFFIX).unwrap_or(&self.name);
+        out.extend_from_slice(base.as_bytes());
+        out.extend_from_slice(&self.port.to_le_bytes());
+    }
+
+    fn read(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let base = std::str::from_utf8(r.take(ONION_BASE_CHARS)?)
+            .map_err(|_| DecodeError::NonCanonical("the own node's name is not text"))?;
+        let name = format!("{base}{SUFFIX}");
+        if parse_onion_name(&name).is_none() {
+            return Err(DecodeError::NonCanonical(
+                "the own node's name is not a v3 name",
+            ));
+        }
+        let port = r.u16_le()?;
+        if port == 0 {
+            return Err(DecodeError::NonCanonical("the own node's port is 0"));
+        }
+        Ok(Self { name, port })
     }
 }
 
@@ -273,6 +347,17 @@ pub struct Settings {
     /// claim pays the shop's own address, so the owner phone signs alone.
     /// A shop names a Lightning node or a swap provider, never both.
     pub swap: Option<SwapProvider>,
+    /// The shop's own Bitcoin node, if it has one (NR-105): the node every
+    /// device of the shop reaches at that Tor v3 name and port. With
+    /// `node_only` off it is a second check next to the light client
+    /// (NR-98 to NR-103).
+    pub own_node: Option<OwnNode>,
+    /// Every payment is checked against the own node alone, with no random
+    /// peers (NR-106). On only with `own_node` set.
+    pub node_only: bool,
+    /// In node-only mode, the random peers start when the own node cannot
+    /// be used (NR-110). On only with `node_only`.
+    pub light_fallback: bool,
     /// The public key of the watch key the owner phone's background watcher
     /// signs heartbeats with (CR-50, CR-55), if the owner turned that on. A
     /// counter takes a heartbeat signed by it, under its own tag, as it
@@ -322,6 +407,9 @@ impl Settings {
             boxes: BTreeSet::new(),
             lightning_node: None,
             swap: None,
+            own_node: None,
+            node_only: false,
+            light_fallback: false,
             watch_key: None,
             tips_on: false,
             tip_percents: DEFAULT_TIP_PERCENTS.to_vec(),
@@ -336,6 +424,21 @@ impl Settings {
         self.currency != ShopCurrency::Usd
             || self.tips_on
             || self.tip_percents != DEFAULT_TIP_PERCENTS
+    }
+
+    /// The version byte of the frame these settings are written in: 4 when
+    /// they name an own node (NR-105), else 3 when they name a swap provider
+    /// (CR-218), else 2 when they carry the extension block, else 1.
+    fn frame_version(&self) -> u8 {
+        if self.own_node.is_some() {
+            OWN_NODE_VERSION
+        } else if self.swap.is_some() {
+            SWAP_VERSION
+        } else if self.has_extension_block() {
+            EXTENSION_VERSION
+        } else {
+            1
+        }
     }
 
     /// The shop-wide outstanding instant total for a check mode.
@@ -454,6 +557,19 @@ impl Settings {
                 ));
             }
         }
+        if let Some(own) = &self.own_node {
+            own.validate()?;
+        }
+        if self.node_only && self.own_node.is_none() {
+            return Err(SettingsError::Invalid(
+                "NR-105: node-only is on and no own node is named",
+            ));
+        }
+        if self.light_fallback && !self.node_only {
+            return Err(SettingsError::Invalid(
+                "NR-105: the light fallback is on and node-only is not",
+            ));
+        }
         if let Some(key) = &self.watch_key {
             if self.devices.contains(key)
                 || self.counters.contains_key(key)
@@ -549,7 +665,7 @@ impl Settings {
         // CR-193, CR-187: the extension block is the currency byte and then
         // the tips block. It is left out, and the message is version 1, when
         // the shop is a dollar shop with tips off and the first percents.
-        if self.has_extension_block() || self.swap.is_some() {
+        if self.frame_version() >= EXTENSION_VERSION {
             out.push(self.currency.to_byte());
             out.push(u8::from(self.tips_on));
             out.push(u8::try_from(self.tip_percents.len()).unwrap_or(u8::MAX));
@@ -557,7 +673,24 @@ impl Settings {
         }
         // CR-218: version 3 holds the swap provider after the block, and is
         // the version of exactly the settings that name one.
-        if let Some(swap) = &self.swap {
+        // NR-105: version 4 writes the swap provider behind a flag, then the
+        // own-node block: a flag, the name and the port, node-only and the
+        // light fallback. Settings that name no own node never reach it.
+        if self.own_node.is_some() {
+            match &self.swap {
+                Some(swap) => {
+                    out.push(1);
+                    swap.write(&mut out);
+                }
+                None => out.push(0),
+            }
+            if let Some(own) = &self.own_node {
+                out.push(1);
+                own.write(&mut out);
+            }
+            out.push(u8::from(self.node_only));
+            out.push(u8::from(self.light_fallback));
+        } else if let Some(swap) = &self.swap {
             swap.write(&mut out);
         }
         out
@@ -660,10 +793,25 @@ impl Settings {
             (ShopCurrency::Usd, false, DEFAULT_TIP_PERCENTS.to_vec())
         };
 
-        let swap = if version_byte >= SWAP_VERSION {
-            Some(SwapProvider::read(r)?)
+        let (swap, own_node, node_only, light_fallback) = if version_byte >= OWN_NODE_VERSION {
+            let swap = if r.flag()? {
+                Some(SwapProvider::read(r)?)
+            } else {
+                None
+            };
+            if !r.flag()? {
+                return Err(DecodeError::NonCanonical(
+                    "a version 4 message names an own node",
+                ));
+            }
+            let own_node = Some(OwnNode::read(r)?);
+            let node_only = r.flag()?;
+            let light_fallback = r.flag()?;
+            (swap, own_node, node_only, light_fallback)
+        } else if version_byte >= SWAP_VERSION {
+            (Some(SwapProvider::read(r)?), None, false, false)
         } else {
-            None
+            (None, None, false, false)
         };
 
         Ok(Self {
@@ -690,6 +838,9 @@ impl Settings {
             boxes,
             lightning_node,
             swap,
+            own_node,
+            node_only,
+            light_fallback,
             watch_key,
             tips_on,
             tip_percents,
@@ -920,6 +1071,24 @@ pub fn changed_fields(old: &Settings, new: &Settings) -> Vec<FieldChange> {
             direction: Change::Tightening,
         });
     }
+    // AP-11, NR-105: which node every device trusts for its payments.
+    // Turning node-only on, naming an own node or another one while it is
+    // on, and turning the light fallback on loosen; the rest only narrows
+    // or adds a second check.
+    if old.own_node != new.own_node {
+        o.push(FieldChange {
+            field: "own_node",
+            direction: dir(new.own_node.is_some() && new.node_only),
+        });
+    }
+    flag(o, "node_only", old.node_only, new.node_only, true);
+    flag(
+        o,
+        "light_fallback",
+        old.light_fallback,
+        new.light_fallback,
+        true,
+    );
     // Naming a watch key, or another one, lets instant sales go on on the
     // word of a key that is not the owner root, so it loosens; taking the key
     // away only stops that.
@@ -1182,8 +1351,9 @@ impl SignedSettings {
 
 impl SignedSettings {
     /// Wire form: `OBMS`, version 1 (2 when the settings carry the extension
-    /// block, the currency and the tips, CR-187 and CR-193, and 3 when they
-    /// also name a swap provider, CR-218), the bytes of
+    /// block, the currency and the tips, CR-187 and CR-193, 3 when they
+    /// also name a swap provider, CR-218, and 4 when they name an own node,
+    /// NR-105), the bytes of
     /// [`Settings::encode`] (the
     /// bytes that are hashed and signed), the owner signature, a flag byte
     /// (1 if a Key app signature follows, else 0) and, only when the flag is
@@ -1192,14 +1362,8 @@ impl SignedSettings {
     pub fn to_bytes(&self) -> Vec<u8> {
         let body = self.settings.encode();
         let mut out = wire::start(&wire::MAGIC_SIGNED_SETTINGS, body.len() + 129);
-        if self.settings.swap.is_some() {
-            if let Some(byte) = out.get_mut(4) {
-                *byte = SWAP_VERSION;
-            }
-        } else if self.settings.has_extension_block() {
-            if let Some(byte) = out.get_mut(4) {
-                *byte = EXTENSION_VERSION;
-            }
+        if let Some(byte) = out.get_mut(4) {
+            *byte = self.settings.frame_version();
         }
         out.extend_from_slice(&body);
         out.extend_from_slice(&self.owner_sig.0);
@@ -1219,7 +1383,7 @@ impl SignedSettings {
     /// [`SignedSettings::verify`].
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
         let (mut r, version) =
-            Reader::framed_up_to(bytes, &wire::MAGIC_SIGNED_SETTINGS, SWAP_VERSION)?;
+            Reader::framed_up_to(bytes, &wire::MAGIC_SIGNED_SETTINGS, OWN_NODE_VERSION)?;
         let settings = Settings::read(&mut r, version)?;
         let owner_sig = r.sig()?;
         let approver_sig = if r.flag()? { Some(r.sig()?) } else { None };
@@ -2205,7 +2369,7 @@ mod tests {
         };
         assert_eq!(edit(3, b'X'), DecodeError::BadMagic);
         assert_eq!(edit(4, 0), DecodeError::UnsupportedVersion(0));
-        assert_eq!(edit(4, 4), DecodeError::UnsupportedVersion(4));
+        assert_eq!(edit(4, 5), DecodeError::UnsupportedVersion(5));
         assert!(matches!(edit(TOR_AT, 2), DecodeError::NonCanonical(_)));
         assert!(matches!(edit(TOR_AT + 1, 2), DecodeError::NonCanonical(_)));
         // The Key app signature flag is the last byte but 64.
@@ -2873,8 +3037,8 @@ mod tests {
         let mut v1 = bytes.clone();
         v1[4] = 1;
         assert!(SignedSettings::from_bytes(&v1).is_err());
-        // A version 4 frame is not known, and a version 3 frame has no
-        // provider after the block.
+        // A version 4 frame holds more than this body, and a version 3 frame
+        // has no provider after the block.
         let mut v4 = bytes.clone();
         v4[4] = 4;
         assert!(SignedSettings::from_bytes(&v4).is_err());
@@ -2932,7 +3096,7 @@ mod tests {
             let mut v2 = bytes.clone();
             v2[4] = 2;
             assert!(SignedSettings::from_bytes(&v2).is_err());
-            // A version 4 frame is not known.
+            // A version 4 frame reads the provider's length as a flag.
             let mut v4 = bytes;
             v4[4] = 4;
             assert!(SignedSettings::from_bytes(&v4).is_err());
@@ -3001,6 +3165,352 @@ mod tests {
         let mut gone = other.clone();
         gone.swap = None;
         assert_eq!(classify_change(&other, &gone), Change::Tightening);
+    }
+
+    // ---- the shop's own node (NR-105) ---------------------------------------
+
+    fn node_name(seed: u8) -> String {
+        crate::onion::onion_name(&[seed; 32])
+    }
+
+    fn with_own_node(mut s: Settings, node_only: bool, light_fallback: bool) -> Settings {
+        s.own_node = Some(OwnNode::new(&node_name(7), 8333).unwrap());
+        s.node_only = node_only;
+        s.light_fallback = light_fallback;
+        s
+    }
+
+    /// The bytes of the settings as versions 1 to 3 wrote them, written
+    /// out again here field by field: the check that nothing before the own
+    /// node moved.
+    fn reference_body(s: &Settings) -> Vec<u8> {
+        let mut out = s.version.to_le_bytes().to_vec();
+        for l in [
+            &s.light_per_sale,
+            &s.light_budget,
+            &s.node_per_sale,
+            &s.node_budget,
+            &s.box_per_sale,
+            &s.box_budget,
+            &s.refund_cap,
+            &s.refund_daily_cap,
+            &s.cashier_override_daily_cap,
+            &s.manager_override_ceiling,
+        ] {
+            out.extend_from_slice(&l.sats.to_le_bytes());
+            out.extend_from_slice(&l.display_usd.to_le_bytes());
+        }
+        out.extend_from_slice(&s.underpayment_tolerance_bps.to_le_bytes());
+        out.extend_from_slice(&[s.min_confirmations, s.final_confirmations]);
+        out.extend_from_slice(&s.heartbeat_max_age_secs.to_le_bytes());
+        out.extend_from_slice(&[u8::from(s.tor_on), u8::from(s.customer_wifi)]);
+        out.extend_from_slice(&s.min_sale_sats.to_le_bytes());
+        out.extend_from_slice(&(s.devices.len() as u32).to_le_bytes());
+        for d in &s.devices {
+            out.extend_from_slice(&d.to_bytes());
+        }
+        out.extend_from_slice(&(s.counters.len() as u32).to_le_bytes());
+        for (d, share) in &s.counters {
+            out.extend_from_slice(&d.to_bytes());
+            out.extend_from_slice(&share.to_le_bytes());
+        }
+        out.extend_from_slice(&(s.boxes.len() as u32).to_le_bytes());
+        for d in &s.boxes {
+            out.extend_from_slice(&d.to_bytes());
+        }
+        match &s.lightning_node {
+            Some(k) => {
+                out.push(1);
+                out.extend_from_slice(k);
+            }
+            None => out.push(0),
+        }
+        match &s.watch_key {
+            Some(k) => {
+                out.push(1);
+                out.extend_from_slice(&k.to_bytes());
+            }
+            None => out.push(0),
+        }
+        if s.currency != ShopCurrency::Usd
+            || s.tips_on
+            || s.tip_percents != DEFAULT_TIP_PERCENTS
+            || s.swap.is_some()
+        {
+            out.push(s.currency.to_byte());
+            out.push(u8::from(s.tips_on));
+            out.push(s.tip_percents.len() as u8);
+            out.extend_from_slice(&s.tip_percents);
+        }
+        if let Some(p) = &s.swap {
+            for t in [&p.name, &p.onion, &p.path_prefix] {
+                out.push(t.len() as u8);
+                out.extend_from_slice(t.as_bytes());
+            }
+            out.extend_from_slice(&p.max_sale_sats.to_le_bytes());
+        }
+        out
+    }
+
+    #[test]
+    fn nr_105_settings_without_an_own_node_are_written_as_before() {
+        let plain = wire_settings();
+        let mut tips = plain.clone();
+        tips.tips_on = true;
+        let mut yen = plain.clone();
+        yen.currency = ShopCurrency::Jpy;
+        yen.tip_percents = vec![5];
+        let mut swap = plain.clone();
+        swap.swap = Some(swap_provider());
+        let mut node = plain.clone();
+        node.lightning_node = Some(node_key(7));
+        node.watch_key = Some(identity(60).device_id());
+        for (want, s) in [(1u8, plain), (2, tips), (2, yen), (3, swap), (1, node)] {
+            assert_eq!(s.own_node, None);
+            assert!(!s.node_only && !s.light_fallback);
+            let body = reference_body(&s);
+            assert_eq!(s.encode(), body);
+            let bytes = signed_both(s.clone()).to_bytes();
+            assert_eq!(bytes[4], want);
+            assert_eq!(&bytes[..4], b"OBMS");
+            assert_eq!(&bytes[5..5 + body.len()], &body[..]);
+            assert_eq!(bytes.len(), 5 + body.len() + 64 + 1 + 64);
+            assert_eq!(SignedSettings::from_bytes(&bytes).unwrap().settings, s);
+        }
+    }
+
+    #[test]
+    fn nr_105_the_three_fields_start_off() {
+        let s = Settings::defaults(RATE);
+        assert_eq!(s.own_node, None);
+        assert!(!s.node_only);
+        assert!(!s.light_fallback);
+        assert_eq!(s.validate(), Ok(()));
+    }
+
+    #[test]
+    fn nr_105_node_only_needs_an_own_node_and_the_fallback_needs_node_only() {
+        for (node, only, fallback, ok) in [
+            (false, false, false, true),
+            (true, false, false, true),
+            (true, true, false, true),
+            (true, true, true, true),
+            (false, true, false, false),
+            (false, true, true, false),
+            (true, false, true, false),
+            (false, false, true, false),
+        ] {
+            let mut s = base();
+            if node {
+                s = with_own_node(s, false, false);
+            }
+            s.node_only = only;
+            s.light_fallback = fallback;
+            match s.validate() {
+                Ok(()) => assert!(ok, "{node} {only} {fallback}"),
+                Err(SettingsError::Invalid(m)) => {
+                    assert!(!ok, "{node} {only} {fallback}");
+                    assert!(m.starts_with("NR-105: "), "{m}");
+                }
+                Err(other) => panic!("{other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn nr_105_the_own_node_is_a_v3_name_with_a_port_from_one() {
+        let good = node_name(3);
+        assert!(OwnNode::new(&good, 1).is_ok());
+        assert!(OwnNode::new(&good, 65_535).is_ok());
+        let mut flipped = good.clone().into_bytes();
+        flipped[10] = if flipped[10] == b'a' { b'b' } else { b'a' };
+        let bad_names = [
+            String::from_utf8(flipped).unwrap(),
+            good.to_uppercase(),
+            good[..good.len() - 6].to_string(),
+            "127.0.0.1".to_string(),
+            "192.168.1.5".to_string(),
+            "node.example.com".to_string(),
+            "w2mqd2fcbgiop7oyxoes2ozmdnvgon22oipj7vzh2rquepf7cxauauad".to_string(),
+            String::new(),
+        ];
+        for name in &bad_names {
+            let err = OwnNode::new(name, 8333).unwrap_err();
+            assert!(matches!(err, SettingsError::Invalid(m) if m.starts_with("NR-105: ")));
+            let mut s = base();
+            s.own_node = Some(OwnNode {
+                name: name.clone(),
+                port: 8333,
+            });
+            assert!(s.validate().is_err(), "{name}");
+        }
+        let err = OwnNode::new(&good, 0).unwrap_err();
+        assert!(matches!(err, SettingsError::Invalid(m) if m.starts_with("NR-105: ")));
+        let mut s = base();
+        s.own_node = Some(OwnNode {
+            name: good,
+            port: 0,
+        });
+        assert!(s.validate().is_err());
+    }
+
+    #[test]
+    fn nr_105_settings_with_an_own_node_are_version_four_and_read_back() {
+        let mut swap_and_tips = wire_settings();
+        swap_and_tips.swap = Some(swap_provider());
+        swap_and_tips.tips_on = true;
+        let cases = [wire_settings(), swap_and_tips, {
+            let mut s = wire_settings();
+            s.currency = ShopCurrency::Eur;
+            s.lightning_node = Some(node_key(7));
+            s
+        }];
+        for plain in cases {
+            for (only, fallback) in [(false, false), (true, false), (true, true)] {
+                let s = with_own_node(plain.clone(), only, fallback);
+                assert_eq!(s.validate(), Ok(()));
+                let bytes = signed_both(s.clone()).to_bytes();
+                assert_eq!(bytes[4], 4);
+                let back = SignedSettings::from_bytes(&bytes).unwrap();
+                assert_eq!(back.settings, s);
+                assert_eq!(back.to_bytes(), bytes);
+                let (_, _, roots) = roots();
+                assert!(back.verify_signatures(&roots).is_ok());
+                // One set of settings, one hash, and it is not that of the
+                // settings without the node.
+                assert_ne!(s.hash(), plain.hash());
+            }
+        }
+    }
+
+    #[test]
+    fn nr_105_version_four_is_written_byte_by_byte() {
+        let s = with_own_node(wire_settings(), true, true);
+        let body = s.encode();
+        let name = node_name(7);
+        let mut tail = Vec::new();
+        // The extension block: the currency byte (USD), tips off, the first
+        // three percents.
+        tail.extend_from_slice(&[ShopCurrency::Usd.to_byte(), 0, 3, 10, 15, 20]);
+        // No swap provider; an own node; its 56 characters and its port.
+        tail.extend_from_slice(&[0, 1]);
+        tail.extend_from_slice(name.trim_end_matches(".onion").as_bytes());
+        tail.extend_from_slice(&8333u16.to_le_bytes());
+        // Node-only, and the light fallback.
+        tail.extend_from_slice(&[1, 1]);
+        assert_eq!(&body[body.len() - tail.len()..], &tail[..]);
+        assert_eq!(tail.len(), 6 + 2 + 56 + 2 + 2);
+        // Before the tail: version 1 up to the watch key's flag.
+        let v1 = reference_body(&wire_settings());
+        assert_eq!(&body[..v1.len()], &v1[..]);
+        assert_eq!(body.len(), v1.len() + tail.len());
+        // With a swap provider the flag is 1 and the provider follows.
+        let mut with_swap = s.clone();
+        with_swap.swap = Some(swap_provider());
+        let body = with_swap.encode();
+        let p = swap_provider();
+        let swap_len = 1 + p.name.len() + 1 + p.onion.len() + 1 + p.path_prefix.len() + 8;
+        let at = v1.len() + 6;
+        assert_eq!(body[at], 1);
+        assert_eq!(body[at + 1], p.name.len() as u8);
+        assert_eq!(body[at + 1 + swap_len], 1);
+        assert_eq!(body.len(), at + 1 + swap_len + 1 + 56 + 2 + 2);
+    }
+
+    #[test]
+    fn nr_105_a_frame_that_is_not_the_one_encoding_is_refused() {
+        let s = with_own_node(wire_settings(), true, true);
+        let bytes = signed_both(s.clone()).to_bytes();
+        let body_end = bytes.len() - 64 - 1 - 64;
+        let own_flag = body_end - 2 - 2 - 56 - 1;
+        let name_at = own_flag + 1;
+        let port_at = name_at + 56;
+        let (only_at, fallback_at) = (body_end - 2, body_end - 1);
+        assert_eq!(bytes[own_flag], 1);
+        // Each flag takes 0 and 1 only.
+        for at in [own_flag - 1, own_flag, only_at, fallback_at] {
+            for v in [2u8, 0xff] {
+                let mut bad = bytes.clone();
+                bad[at] = v;
+                assert!(SignedSettings::from_bytes(&bad).is_err(), "{at} {v}");
+            }
+        }
+        // The own node's flag at 0 is a frame that is version 3 or less.
+        let mut no_node = bytes.clone();
+        no_node[own_flag] = 0;
+        assert!(SignedSettings::from_bytes(&no_node).is_err());
+        // A name that is not a v3 name: a capital, a flipped character, a
+        // character outside the alphabet.
+        for (at, v) in [(name_at, b'A'), (name_at + 10, b'1'), (name_at + 20, b'-')] {
+            let mut bad = bytes.clone();
+            bad[at] = v;
+            assert!(SignedSettings::from_bytes(&bad).is_err(), "{at}");
+        }
+        let mut other = bytes.clone();
+        other[name_at + 5] = if other[name_at + 5] == b'a' {
+            b'b'
+        } else {
+            b'a'
+        };
+        assert!(SignedSettings::from_bytes(&other).is_err());
+        // Port 0.
+        let mut zero = bytes.clone();
+        zero[port_at..port_at + 2].copy_from_slice(&[0, 0]);
+        assert!(SignedSettings::from_bytes(&zero).is_err());
+        // Every cut of the block fails, and so does a byte too many.
+        for cut in 1..=70 {
+            let mut short = bytes[..body_end - cut].to_vec();
+            short.extend_from_slice(&bytes[body_end..]);
+            assert!(SignedSettings::from_bytes(&short).is_err(), "{cut}");
+        }
+        let mut long = bytes[..body_end].to_vec();
+        long.push(0);
+        long.extend_from_slice(&bytes[body_end..]);
+        assert!(SignedSettings::from_bytes(&long).is_err());
+        let mut trailing = bytes.clone();
+        trailing.push(0);
+        assert!(SignedSettings::from_bytes(&trailing).is_err());
+        // The frame's version byte: 3 leaves the node's bytes over, and 5 is
+        // not known.
+        for v in [2u8, 3, 5] {
+            let mut bad = bytes.clone();
+            bad[4] = v;
+            assert!(SignedSettings::from_bytes(&bad).is_err(), "{v}");
+        }
+    }
+
+    #[test]
+    fn nr_105_version_four_never_holds_settings_without_a_node() {
+        // The bytes of settings without a node, with the version byte 4 and
+        // the block that says so: refused, so the body has one encoding.
+        let plain = wire_settings();
+        let bytes = signed_both(plain.clone()).to_bytes();
+        let body_end = bytes.len() - 64 - 1 - 64;
+        let mut forged = bytes[..4].to_vec();
+        forged.push(4);
+        forged.extend_from_slice(&bytes[5..body_end]);
+        forged.extend_from_slice(&[ShopCurrency::Usd.to_byte(), 0, 3, 10, 15, 20]);
+        forged.extend_from_slice(&[0, 0, 0, 0]);
+        forged.extend_from_slice(&bytes[body_end..]);
+        assert!(SignedSettings::from_bytes(&forged).is_err());
+    }
+
+    #[test]
+    fn nr_105_every_frame_that_reads_encodes_to_the_same_bytes() {
+        let s = with_own_node(wire_settings(), true, false);
+        let bytes = signed_both(s).to_bytes();
+        // Flip each byte of the node block and of the flags around it: what
+        // reads must write back the same.
+        let body_end = bytes.len() - 64 - 1 - 64;
+        for at in body_end - 70..body_end {
+            for v in [0u8, 1, 2, b'a', b'7', 0xff] {
+                let mut t = bytes.clone();
+                t[at] = v;
+                if let Ok(back) = SignedSettings::from_bytes(&t) {
+                    assert_eq!(back.to_bytes(), t, "{at} {v}");
+                }
+            }
+        }
     }
 
     #[test]
@@ -3127,10 +3637,10 @@ mod tests {
             ShopCurrency::Usd
         );
         let mut v4 = wire.clone();
-        v4[4] = 4;
+        v4[4] = 5;
         assert_eq!(
             SignedSettings::from_bytes(&v4),
-            Err(DecodeError::UnsupportedVersion(4))
+            Err(DecodeError::UnsupportedVersion(5))
         );
         let mut v0 = wire;
         v0[4] = 0;
@@ -3272,10 +3782,10 @@ mod tests {
         v1[4] = 1;
         assert!(SignedSettings::from_bytes(&v1).is_err());
         let mut v4 = wire;
-        v4[4] = 4;
+        v4[4] = 5;
         assert_eq!(
             SignedSettings::from_bytes(&v4),
-            Err(DecodeError::UnsupportedVersion(4))
+            Err(DecodeError::UnsupportedVersion(5))
         );
     }
 

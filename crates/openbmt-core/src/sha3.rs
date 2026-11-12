@@ -87,7 +87,7 @@ fn absorb(state: &mut [u64; 25], block: &[u8; RATE]) {
 }
 
 /// SHA3-256 of the input.
-pub(crate) fn sha3_256(input: &[u8]) -> [u8; 32] {
+pub fn sha3_256(input: &[u8]) -> [u8; 32] {
     let mut state = [0u64; 25];
     let (full, rest) = input.as_chunks::<RATE>();
     for block in full {

@@ -3,7 +3,8 @@
 use libfuzzer_sys::fuzz_target;
 use openbmt_core::approval::{classify, ChangeClass};
 use openbmt_core::identity::Identity;
-use openbmt_core::settings::{classify_change, Change, Settings};
+use openbmt_core::onion::onion_name;
+use openbmt_core::settings::{classify_change, Change, OwnNode, Settings};
 
 fn id(n: u8) -> openbmt_core::identity::DeviceId {
     Identity::from_secret_bytes(&[n % 200 + 1; 32])
@@ -17,7 +18,7 @@ fn build(steps: &[u8]) -> Settings {
     let mut s = Settings::defaults(1_000);
     for step in steps.chunks_exact(2) {
         let v = step[1];
-        match step[0] % 16 {
+        match step[0] % 19 {
             0 => s.light_per_sale.sats = u64::from(v),
             1 => s.node_budget.sats = u64::from(v),
             2 => s.underpayment_tolerance_bps = u32::from(v),
@@ -41,6 +42,14 @@ fn build(steps: &[u8]) -> Settings {
             12 => s.watch_key = (v & 1 == 1).then(|| id(v)),
             13 => s.tips_on = v & 1 == 1,
             14 => s.refund_cap.display_usd = u32::from(v),
+            15 => {
+                s.own_node = (v & 1 == 1).then(|| OwnNode {
+                    name: onion_name(&[v | 1; 32]),
+                    port: 8333,
+                })
+            }
+            16 => s.node_only = v & 1 == 1,
+            17 => s.light_fallback = v & 1 == 1,
             _ => s.version = u32::from(v),
         }
     }

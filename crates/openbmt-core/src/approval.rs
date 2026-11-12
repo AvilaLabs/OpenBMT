@@ -1,5 +1,5 @@
 //! Approvals for a shop that uses its own wallet (`docs/APPROVAL-RULES.md`,
-//! AP-01 to AP-10).
+//! AP-01 to AP-11).
 //!
 //! A shop without a Key app still needs a second approval for any change
 //! that can let money leave or be taken at risk. What kind of approval is
@@ -65,6 +65,10 @@ pub fn field_class(old: &Settings, new: &Settings, field: &str) -> ChangeClass {
         // A watch key and a new Box are named in the settings but move
         // no money and lift no limit (AP-01).
         "watch_key" | "boxes" => ChangeClass::Free,
+        // AP-11: the own node decides which node every device trusts for
+        // its payments, but only while node-only is on in the new
+        // settings; as a second check it moves nothing.
+        "own_node" if !(new.node_only && new.own_node.is_some()) => ChangeClass::Free,
         // A Box is also on the device list (BX-20), so adding one adds
         // a device; that alone is not a loosening here. Any other
         // device added is.
@@ -474,6 +478,7 @@ pub(crate) mod test_signing {
 mod tests {
     use super::test_signing::*;
     use super::*;
+    use crate::settings::{classify_change, OwnNode};
     use crate::testutil::identity;
     use std::str::FromStr;
 
@@ -641,6 +646,99 @@ mod tests {
         assert_eq!(classify(&old, &new), ChangeClass::Loosen);
         assert!(ChangeClass::Free < ChangeClass::Loosen);
         assert!(ChangeClass::Loosen < ChangeClass::Redirect);
+    }
+
+    fn own(seed: u8) -> OwnNode {
+        OwnNode::new(&crate::onion::onion_name(&[seed; 32]), 8333).unwrap()
+    }
+
+    /// Settings with an own node and node-only as given.
+    fn with_node(node: Option<u8>, node_only: bool, fallback: bool) -> Settings {
+        let mut s = base();
+        s.own_node = node.map(own);
+        s.node_only = node_only;
+        s.light_fallback = fallback;
+        s
+    }
+
+    #[test]
+    fn ap_11_turning_node_only_on_is_a_loosening() {
+        let old = with_node(Some(1), false, false);
+        let new = next(&with_node(Some(1), true, false));
+        assert_eq!(classify(&old, &new), ChangeClass::Loosen);
+        assert_eq!(classify_change(&old, &new), Change::Loosening);
+    }
+
+    #[test]
+    fn ap_11_setting_or_changing_the_node_while_node_only_is_on_loosens() {
+        // Set, with node-only turned on in the same change.
+        let old = base();
+        let new = next(&with_node(Some(1), true, false));
+        assert_eq!(classify(&old, &new), ChangeClass::Loosen);
+        // Changed while node-only stays on: only the node differs.
+        let old = with_node(Some(1), true, false);
+        let new = next(&with_node(Some(2), true, false));
+        let fields = changed_fields(&old, &new);
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].field, "own_node");
+        assert_eq!(classify(&old, &new), ChangeClass::Loosen);
+        assert_eq!(field_class(&old, &new, "own_node"), ChangeClass::Loosen);
+    }
+
+    #[test]
+    fn ap_11_turning_the_light_fallback_on_is_a_loosening() {
+        let old = with_node(Some(1), true, false);
+        let new = next(&with_node(Some(1), true, true));
+        assert_eq!(classify(&old, &new), ChangeClass::Loosen);
+    }
+
+    #[test]
+    fn ap_11_taking_the_node_away_and_turning_the_modes_off_are_free() {
+        let on = with_node(Some(1), true, true);
+        // Off, one step at a time and all at once.
+        for new in [
+            with_node(Some(1), true, false),
+            with_node(Some(1), false, false),
+            with_node(None, false, false),
+        ] {
+            let new = next(&new);
+            assert_eq!(classify(&on, &new), ChangeClass::Free);
+            assert_eq!(classify_change(&on, &new), Change::Tightening);
+        }
+        // The node taken away while node-only is off.
+        let old = with_node(Some(1), false, false);
+        let new = next(&with_node(None, false, false));
+        assert_eq!(classify(&old, &new), ChangeClass::Free);
+    }
+
+    #[test]
+    fn ap_11_setting_or_changing_the_node_while_node_only_is_off_is_free() {
+        let old = base();
+        let new = next(&with_node(Some(1), false, false));
+        assert_eq!(classify(&old, &new), ChangeClass::Free);
+        assert_eq!(classify_change(&old, &new), Change::Tightening);
+        let old = with_node(Some(1), false, false);
+        let new = next(&with_node(Some(2), false, false));
+        assert_eq!(classify(&old, &new), ChangeClass::Free);
+        assert_eq!(field_class(&old, &new, "own_node"), ChangeClass::Free);
+    }
+
+    #[test]
+    fn ap_11_a_free_node_change_with_node_only_turned_on_is_a_loosening() {
+        let old = with_node(Some(1), false, false);
+        let new = next(&with_node(Some(2), true, false));
+        let fields: Vec<_> = changed_fields(&old, &new).iter().map(|c| c.field).collect();
+        assert_eq!(fields, ["own_node", "node_only"]);
+        assert_eq!(classify(&old, &new), ChangeClass::Loosen);
+    }
+
+    #[test]
+    fn ap_11_the_light_fallback_does_not_hide_a_free_change() {
+        // A change that only turns the fallback off is Free even with a
+        // node change that is Free.
+        let old = with_node(Some(1), true, true);
+        let new = next(&with_node(Some(1), true, false));
+        assert_eq!(classify(&old, &new), ChangeClass::Free);
     }
 
     #[test]
@@ -879,10 +977,13 @@ mod tests {
 
     #[test]
     fn the_rules_file_defines_the_rules_the_tests_name() {
-        let ids = rule_ids();
-        assert_eq!(ids.len(), 10);
+        // AP-11 sits with the field classes of section 1, so the order of
+        // the file is not the order of the numbers.
+        let mut ids = rule_ids();
+        ids.sort();
+        assert_eq!(ids.len(), 11);
         assert_eq!(ids.first().map(String::as_str), Some("AP-01"));
-        assert_eq!(ids.last().map(String::as_str), Some("AP-10"));
+        assert_eq!(ids.last().map(String::as_str), Some("AP-11"));
     }
 
     #[test]

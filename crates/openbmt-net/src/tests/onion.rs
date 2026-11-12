@@ -2,7 +2,7 @@
 //! checksum.
 
 use crate::onion::{onion_name, parse_onion_name};
-use crate::sha3::sha3_256;
+use openbmt_core::sha3::sha3_256;
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()

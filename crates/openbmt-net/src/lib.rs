@@ -43,7 +43,6 @@ pub mod onion;
 pub mod own_node;
 mod reason;
 pub mod session;
-mod sha3;
 pub mod v2;
 
 #[cfg(test)]
