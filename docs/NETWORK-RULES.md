@@ -665,3 +665,16 @@ the node these rules are written and tested against.
   what the shop's devices ask of it, as any peer would; no other node
   learns anything from them. The node's own connections to the network are
   the node's.
+- **NR-112.** In this mode no other peer can announce a held transaction
+  back (NR-87), so the own node is asked instead. At least 130 seconds
+  after the node was sent the announcement, and every 60 seconds after
+  until it answers, the manager sends the node `getdata` for the
+  transaction by its txid. The node answers only from its memory pool, and
+  only once the transaction has waited out its two-minute relay delay, so
+  a reply that is the same transaction, witness included, means the node
+  holds it in its pool. The manager then says `HeldByNode`; a `notfound`
+  changes nothing and the asking goes on. NR-88 applies as before, with
+  the announcement sent again to the node alone. While the light fallback
+  runs (NR-110), NR-87 counts the random peers as well, and either state
+  may come first. As in NR-87, this is evidence that the node took the
+  transaction, not that anyone will mine it.
