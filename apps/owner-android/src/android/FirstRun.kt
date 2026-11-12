@@ -316,7 +316,7 @@ private fun Controller.showRealCases(r: FirstRun) {
         column.addView(count, ui.margins(top = 0, bottom = 22))
         if (page == 0) column.addView(below(sans(FirstRunWords.realIntro, 15.5f, pal.secondary, 1.28f), 0).also { it.layoutParams = ui.margins(bottom = 26) })
         column.addView(sans(place, 14f, pal.hint), ui.margins(bottom = 10))
-        column.addView(serif(head, 27f, 1.25f, medium = true), ui.margins(bottom = 16))
+        column.addView(serif(head, 27f, 1.0f, medium = true), ui.margins(bottom = 16))
         column.addView(sans(text, 15.5f, pal.secondary, 1.3f))
         column.addView(serif(quote, 23f, 1.12f), ui.margins(top = 26, bottom = 6))
         column.addView(sans(who, 13.5f, pal.hint))
@@ -326,10 +326,10 @@ private fun Controller.showRealCases(r: FirstRun) {
             ui.primary(if (last) FirstRunWords.realToBitcoin else FirstRunWords.realNext) { next() },
         )
     } else {
-        column.addView(serif(FirstRunWords.realBitcoinHead, 27f, 1.25f, medium = true), ui.margins(top = 0, bottom = 16))
+        column.addView(serif(FirstRunWords.realBitcoinHead, 27f, 1.0f, medium = true), ui.margins(top = 0, bottom = 16))
         column.addView(sans(FirstRunWords.realBitcoinText, 15.5f, pal.secondary, 1.3f))
         for ((title, text) in listOf(FirstRunWords.realKeysTitle to FirstRunWords.realKeysText, FirstRunWords.realCoinTitle to FirstRunWords.realCoinText)) {
-            column.addView(serif(title, 20f, 1.25f), ui.margins(top = 28, bottom = 8))
+            column.addView(serif(title, 20f, 1.05f), ui.margins(top = 28, bottom = 8))
             column.addView(sans(text, 15.5f, pal.secondary, 1.3f))
         }
         column.addView(sans(FirstRunWords.realMore, 13.5f, pal.hint, 1.2f), ui.margins(top = 28))
