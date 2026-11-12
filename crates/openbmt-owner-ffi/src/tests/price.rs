@@ -101,3 +101,69 @@ fn oa_101_a_source_not_in_the_table_is_a_missing_reply_and_a_bad_request_is_refu
         "handle-unexpected"
     );
 }
+
+fn request_for(currency: &str, replies: Vec<W>, now: u64) -> Vec<u8> {
+    let mut w = W::new()
+        .string(currency)
+        .u32(u32::try_from(replies.len()).expect("few"));
+    for r in replies {
+        w.0.extend_from_slice(&r.0);
+    }
+    w.u64(now).0
+}
+
+#[test]
+fn oa_102_the_sources_of_the_shops_currency_are_the_librarys_and_sats_has_none() {
+    let rig = Rig::new();
+    let ids = |code: &str| {
+        let response = rig.call(142, 0, &W::new().string(code).0);
+        let mut r = Rd::ok(&response);
+        let rows = r.list(|r| (r.string(), r.string()));
+        r.done();
+        rows.into_iter().map(|(id, _)| id).collect::<Vec<_>>()
+    };
+    assert_eq!(ids("USD"), ["kraken", "coinbase", "bitstamp", "gemini"]);
+    let eur = ids("EUR");
+    assert!(!eur.is_empty() && eur.iter().all(|id| !ids("USD").contains(id)));
+    for bad in ["SAT", "usd", "XXX", ""] {
+        let f = Rd::error(&rig.call(142, 0, &W::new().string(bad).0)).expect("refused");
+        assert_eq!(
+            (f.status, f.rule.as_str()),
+            (1, "request-malformed"),
+            "{bad:?}"
+        );
+    }
+    // The call names no node.
+    assert_eq!(
+        Rd::error(&rig.call(142, 7, &W::new().string("USD").0))
+            .expect("refused")
+            .rule,
+        "handle-unexpected"
+    );
+}
+
+#[test]
+fn oa_102_the_price_is_given_in_whole_units_and_in_minor_units_of_the_currency() {
+    let rig = Rig::new();
+    let ask =
+        |currency: &str, replies: Vec<W>| rig.call(143, 0, &request_for(currency, replies, NOW));
+    // Dollars: the same agreement as the dollar op.
+    let response = ask(
+        "USD",
+        vec![last("bitstamp", "98500.50"), last("gemini", "98500.50")],
+    );
+    let mut r = Rd::ok(&response);
+    assert_eq!((r.u64(), r.u64()), (98_501, 9_850_050));
+    assert_eq!(r.string(), "med.bg");
+    r.done();
+    // A reply of a source of another currency is not a sample of this one.
+    let f = Rd::error(&ask(
+        "EUR",
+        vec![last("bitstamp", "98500.50"), last("gemini", "98500.50")],
+    ))
+    .expect("refused");
+    assert_eq!((f.status, f.rule.as_str()), (1, "RT-31"));
+    // Bitcoin Standard asks nothing.
+    let f = Rd::error(&ask("SAT", vec![])).expect("refused");
+    assert_eq!(f.rule, "request-malformed");
+}

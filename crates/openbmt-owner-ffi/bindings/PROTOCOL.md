@@ -21,7 +21,8 @@ response  "OBMl" | version 1 | status u8 | ...
     every string is a u16 length and UTF-8
 ```
 
-Integers are little-endian. A bool is one byte, 0 or 1. A string is a
+Integers are little-endian; an `i32` is two's complement. A bool is
+one byte, 0 or 1. A string is a
 u32 length and UTF-8 (a `str16` is a u16 length and UTF-8, and is
 used only inside `Words`). `list<T>` is a u32 count and the
 elements; `list<u8>` is the bytes type. `option<T>` is a flag byte 0
@@ -139,6 +140,9 @@ ops run on another; it waits for at most 250 ms.
 136 watch_stop       handle watch args () -> ()
 140 price_sources    handle zero  args () -> list<PriceSourceView>
 141 price_agree      handle zero  args PriceArgs -> AgreedPriceView
+142 price_sources_for handle zero  args string -> list<PriceSourceView>
+143 price_agree_for  handle zero  args PriceForArgs -> AgreedPriceInView
+144 books            handle node  args BooksArgs -> BooksView
 ```
 
 ## Types
@@ -155,7 +159,8 @@ WatchStepView: record: sent: u64, reached: bool, relay_refused: bool, notes: lis
 RefundArgs: record: counter: list<u8>, sale: u32, cashier: string, address: string, sats: u64
 CashAmountView: enum, a tag byte, then: Sats(sats: u64) | All
     tags Sats=0 All=1
-CashOutArgs: record: address: string, amount: CashAmountView, label: string
+CashPriceView: record: currency: string, whole_per_btc: u64
+CashOutArgs: record: address: string, amount: CashAmountView, label: string, price: option<CashPriceView>
 BatchArgs: record: counter: list<u8>, start: u32, count: u32
 AlertKind: enum, one tag byte
     tags MissedCheckIn=0 Diverged=1 BatchUndelivered=2
@@ -279,4 +284,10 @@ PriceSourceView: record: id: string, url: string
 PriceReplyView: record: source: string, body: list<u8>, fetched_at: u64
 PriceArgs: record: replies: list<PriceReplyView>, now: u64
 AgreedPriceView: record: usd_per_btc: u64, minor_per_btc: u64, source_label: string
+PriceForArgs: record: currency: string, replies: list<PriceReplyView>, now: u64
+AgreedPriceInView: record: whole_per_btc: u64, minor_per_btc: u64, source_label: string
+BooksArgs: record: offset_minutes: i32
+BooksDayView: record: date: string, sales: u64, waiting: u64, amount: string
+BooksFileView: record: month: string, csv: list<u8>
+BooksView: record: currency: string, days: list<BooksDayView>, accounting: list<BooksFileView>, ledger: list<u8>, refusal: option<Words>
 ```

@@ -22,7 +22,10 @@ jni = []
 # The same exact versions as the other crates, so the types unify. Every
 # openbmt crate is a path dependency inside this workspace.
 [dependencies]
+# The books the owner phone shows and exports (BK-01 and on).
+openbmt-books = { path = "../openbmt-books" }
 openbmt-core = { path = "../openbmt-core" }
+openbmt-counter = { path = "../openbmt-counter" }
 openbmt-counter-node = { path = "../openbmt-counter-node" }
 openbmt-courier = { path = "../openbmt-courier" }
 openbmt-link = { path = "../openbmt-link" }

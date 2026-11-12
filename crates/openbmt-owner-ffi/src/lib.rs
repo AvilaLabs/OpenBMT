@@ -47,6 +47,7 @@
     )
 )]
 
+mod books;
 mod boxnet;
 mod call;
 mod ceremony;

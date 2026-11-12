@@ -139,6 +139,9 @@ private const val OP_WATCH_STEP = 135
 private const val OP_WATCH_STOP = 136
 private const val OP_PRICE_SOURCES = 140
 private const val OP_PRICE_AGREE = 141
+private const val OP_PRICE_SOURCES_FOR = 142
+private const val OP_PRICE_AGREE_FOR = 143
+private const val OP_BOOKS = 144
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -303,8 +306,14 @@ sealed class CashAmount {
     object All : CashAmount()
 }
 
+/**
+ * The price the owner confirmed for a cash-out, which the books record it at (OA-102): the shop's currency
+ * (`SAT` for Bitcoin Standard) and the price of one bitcoin in whole units of it (100,000,000 for Bitcoin Standard).
+ */
+class CashPrice(val currency: String, val wholePerBtc: Long)
+
 /** A cash-out. The address is checked by the library, never by the app. */
-class CashOutArgs(val address: String, val amount: CashAmount, val label: String)
+class CashOutArgs(val address: String, val amount: CashAmount, val label: String, val price: CashPrice? = null)
 
 class BatchArgs(val counter: ByteArray, val start: Long, val count: Long)
 
@@ -732,6 +741,28 @@ class PriceReply(val source: String, val body: ByteArray, val fetchedAt: Long)
 
 /** The price the sources agree on: whole dollars for one bitcoin, rounded half up, the same in minor units, and the label of the sources used. */
 class AgreedPrice(val usdPerBtc: Long, val minorPerBtc: Long, val sourceLabel: String)
+
+/** The price the sources agree on in the shop's currency (OA-102): whole units for one bitcoin, rounded half up, the same in minor units, and the label of the sources used. */
+class AgreedPriceIn(val wholePerBtc: Long, val minorPerBtc: Long, val sourceLabel: String)
+
+/** One shop-local day of the books (OA-103): [amount] is a decimal in the shop's currency, as the books write an amount. */
+class BooksDay(val date: String, val sales: Long, val waiting: Long, val amount: String)
+
+/** One month of the accounting export: [month] is `YYYY-MM` and [csv] is what the library made. */
+class BooksFile(val month: String, val csv: ByteArray)
+
+/**
+ * The books (OA-103): the days newest first, the accounting export (a file for each month, oldest first), the full
+ * ledger (empty when it was not made) and, when an export was not made, the library's words for why. [currency] is
+ * empty when the phone holds no settings.
+ */
+class Books(
+    val currency: String,
+    val days: List<BooksDay>,
+    val accounting: List<BooksFile>,
+    val ledger: ByteArray,
+    val refusal: Words?,
+)
 
 /** The code a counter takes: [code] is the bundle to show, [withBatch] says the first addresses are in it. */
 class CounterBundle(val code: ByteArray, val withBatch: Boolean, val words: Words)
@@ -1758,6 +1789,7 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
         val r =
             call(OP_CASH_OUT, handle) {
                 it.string(args.address).cashAmount(args.amount).string(args.label)
+                    .option(args.price) { p -> it.string(p.currency).u64(p.wholePerBtc) }
             }
         return r.u32().also { r.end() }
     }
@@ -1936,6 +1968,21 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
         return r.u32().also { r.end() }
     }
 
+    /**
+     * The books from what the node holds (OA-103), with the totals by shop-local day. [offsetMinutes] is the
+     * shop's offset from UTC in minutes east, from the phone.
+     */
+    fun books(offsetMinutes: Int): Books {
+        val r = call(OP_BOOKS, handle) { it.u32(offsetMinutes.toLong() and 0xffffffffL) }
+        return Books(
+            r.string(),
+            r.list { BooksDay(r.string(), r.u64(), r.u64(), r.string()) },
+            r.list { BooksFile(r.string(), r.bytes()) },
+            r.bytes(),
+            r.option { r.words() },
+        ).also { r.end() }
+    }
+
     /** What the till screen shows: the connection, the open alerts and the counts. */
     fun posState(): PosState {
         val r = call(OP_POS_STATE, handle)
@@ -2044,6 +2091,20 @@ object OwnerPrice {
             w.list(replies) { w.string(it.source).bytes(it.body).u64(it.fetchedAt) }.u64(now)
         }
         return AgreedPrice(r.u64(), r.u64(), r.string()).also { r.end() }
+    }
+
+    /** The sources of the shop's currency, in the library's table (OA-102). [currency] is three capital letters, not `SAT`. */
+    fun sourcesFor(currency: String): List<PriceSource> {
+        val r = call(OP_PRICE_SOURCES_FOR, 0) { it.string(currency) }
+        return r.list { PriceSource(r.string(), r.string()) }.also { r.end() }
+    }
+
+    /** The price the [replies] agree on at [now], in whole units of [currency] and in minor units (OA-102). */
+    fun agreeFor(currency: String, replies: List<PriceReply>, now: Long): AgreedPriceIn {
+        val r = call(OP_PRICE_AGREE_FOR, 0) { w ->
+            w.string(currency).list(replies) { w.string(it.source).bytes(it.body).u64(it.fetchedAt) }.u64(now)
+        }
+        return AgreedPriceIn(r.u64(), r.u64(), r.string()).also { r.end() }
     }
 }
 

@@ -72,6 +72,14 @@ impl<'a> Reader<'a> {
         Ok(u32::from_le_bytes(b))
     }
 
+    pub(crate) fn i32(&mut self) -> Result<i32, AppError> {
+        let b: [u8; 4] = self
+            .take(4)?
+            .try_into()
+            .map_err(|_| malformed("the request ends before its last field"))?;
+        Ok(i32::from_le_bytes(b))
+    }
+
     pub(crate) fn u64(&mut self) -> Result<u64, AppError> {
         let b: [u8; 8] = self
             .take(8)?
@@ -161,6 +169,7 @@ macro_rules! primitive {
 
 primitive!(u8, "u8", u8);
 primitive!(u32, "u32", u32);
+primitive!(i32, "i32", i32);
 primitive!(u64, "u64", u64);
 
 impl Shaped for bool {

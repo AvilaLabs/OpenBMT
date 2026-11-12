@@ -214,7 +214,7 @@ fn a_batch_a_cash_out_and_the_queue() {
     let cash = |address: &str, amount: &[u8]| {
         let mut w = W::new().string(address);
         w.0.extend_from_slice(amount);
-        rig.call(44, handle, &w.string("till").0)
+        rig.call(44, handle, &w.string("till").u8(0).0)
     };
     let sats = [&[0u8][..], &5_000u64.to_le_bytes()].concat();
     for bad in [

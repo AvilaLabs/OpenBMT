@@ -40,6 +40,7 @@ use bitcoin::secp256k1::Secp256k1;
 use bitcoin::{Address, BlockHash, Network, ScriptBuf, Txid};
 use openbmt_core::batch::PinnedRoots;
 use openbmt_core::batch::{BatchBuilder, BatchPolicy, SignedBatch};
+use openbmt_core::currency::ShopCurrency;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::pairing::PAIRING_WINDOW_SECS;
 use openbmt_core::records::DeviceList;
@@ -54,7 +55,7 @@ use openbmt_net_io::{
 };
 use openbmt_owner::say::EntryKind;
 use openbmt_owner::{
-    CashAmount, Delivery, ItemOutcome, OwnerError, SaleFacts, SaleKey, SettingsEdit,
+    CashAmount, Delivery, ItemOutcome, OwnerError, RateNote, SaleFacts, SaleKey, SettingsEdit,
     SettingsQueued, Stage, WatchEdit,
 };
 use openbmt_owner_node::coins::ViewState;
@@ -73,6 +74,7 @@ use openbmt_owner_node::{
 use openbmt_signer::SignerState;
 use openbmt_watch::HeaderChain;
 
+use crate::books::{self, BooksArgs, BooksView};
 use crate::boxnet::{
     self, BoxDeliverArgs, BoxDeliveredView, BoxFoundView, BoxLinkArgs, BoxQueueArgs, BoxQueuedView,
     PendingBoxView, WaitingBoxView,
@@ -95,13 +97,13 @@ use crate::signer_views::{
 };
 use crate::views::{
     AlertKind, AlertView, BatchArgs, BatchWaitingView, BuiltView, CashAmountView, CashOutArgs,
-    CashOutRow, ClearArgs, CounterShareView, CounterView, DeepRequestView, DeliverView,
-    EntryKindView, EntryRow, HaltedView, HealthView, LimitView, LinkConfig, LinkStepView, LinkView,
-    MergeOfferView, NoteKindView, OldAddressesView, OldKind, OutboxKind, OutboxRow, OutcomeKind,
-    OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView,
-    RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind, SendRow, SettingsHeldView,
-    SettingsQueuedView, ShopCurrencyView, SkippedView, StageKind, StageView, StartConfig,
-    StatusView, TakenView, ViewKind, WordsView,
+    CashOutRow, CashPriceView, ClearArgs, CounterShareView, CounterView, DeepRequestView,
+    DeliverView, EntryKindView, EntryRow, HaltedView, HealthView, LimitView, LinkConfig,
+    LinkStepView, LinkView, MergeOfferView, NoteKindView, OldAddressesView, OldKind, OutboxKind,
+    OutboxRow, OutcomeKind, OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund,
+    ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind,
+    SendRow, SettingsHeldView, SettingsQueuedView, ShopCurrencyView, SkippedView, StageKind,
+    StageView, StartConfig, StatusView, TakenView, ViewKind, WordsView,
 };
 
 /// The longest a `pump` waits, whatever the app asks for, so that a call
@@ -248,6 +250,32 @@ fn bytes32(what: &str, rule: &str, bytes: &[u8]) -> Result<[u8; 32], AppError> {
 fn device(what: &str, rule: &str, bytes: &[u8]) -> Result<DeviceId, AppError> {
     DeviceId::from_bytes(&bytes32(what, rule, bytes)?)
         .map_err(|e| refused_by(rule, format!("{what}: {e}")))
+}
+
+/// OA-102: the price a cash-out is recorded at, in minor units per bitcoin.
+pub(crate) fn cash_price(p: &CashPriceView) -> Result<RateNote, AppError> {
+    let currency = ShopCurrency::from_code(&p.currency).ok_or_else(|| {
+        refused_by(
+            "request-malformed",
+            format!("{:?} is not a currency of a shop", p.currency),
+        )
+    })?;
+    let code = <[u8; 3]>::try_from(currency.code().as_bytes())
+        .map_err(|_| internal("a currency code is not three letters"))?;
+    let minor_per_btc = p
+        .whole_per_btc
+        .checked_mul(10u64.pow(currency.minor_digits()))
+        .filter(|m| *m != 0)
+        .ok_or_else(|| {
+            refused_by(
+                "request-malformed",
+                "the price is zero or too large to be a price of a bitcoin",
+            )
+        })?;
+    Ok(RateNote {
+        currency: code,
+        minor_per_btc,
+    })
 }
 
 /// What a node call refused with, as the error the app gets.
@@ -1258,13 +1286,22 @@ impl Entry {
                 CashAmountView::Sats { sats } => CashAmount::Sats(sats),
                 CashAmountView::All => CashAmount::All,
             };
+            let price = match &a.price {
+                Some(p) => Some(cash_price(p)?),
+                None => None,
+            };
             let write = st.node.queue_writer();
             st.node
                 .owner_mut()
                 .map_err(|e| node_error(&e))?
-                .queue_cash_out(script, amount, &a.label, &write)
+                .queue_cash_out_priced(script, amount, &a.label, price, &write)
                 .map_err(|e| queue_error(&e))
         })
+    }
+
+    /// OA-103: the books from what the node holds.
+    pub(crate) fn books(&self, a: BooksArgs) -> Result<BooksView, AppError> {
+        self.run(None, move |st| books::build(&st.node, st.link.as_ref(), &a))
     }
 
     /// Sign a batch of addresses for a counter and queue it. The wallet

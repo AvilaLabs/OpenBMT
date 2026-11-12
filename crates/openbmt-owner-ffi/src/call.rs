@@ -76,7 +76,12 @@
 //! - 140 and 141: the price of a bitcoin from the sources
 //!   (`docs/OWNER-APP-RULES.md` OA-101): the table of sources the app fetches
 //!   and the call that takes their replies and gives the price they agree
-//!   on. They work on no node.
+//!   on. They work on no node. 142 and 143 are the same for the shop's
+//!   currency (OA-102): the sources of that currency, and the price they
+//!   agree on in whole units and in minor units.
+//! - 144: the books (`docs/OWNER-APP-RULES.md` OA-103): the totals by day and
+//!   the two CSV exports, built from the counters' verified records and the
+//!   log of what was paid out.
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -90,6 +95,7 @@ use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
+use crate::books::{BooksArgs, BooksDayView, BooksFileView, BooksView};
 use crate::boxnet::{
     self, BoxDeliverArgs, BoxDeliveredView, BoxFoundView, BoxLinkArgs, BoxOwnCheckArgs,
     BoxOwnCheckView, BoxOwnInvitationView, BoxQueueArgs, BoxQueuedView, PendingBoxView,
@@ -109,7 +115,10 @@ use crate::pos_views::{
     PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
     PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
 };
-use crate::price::{self, AgreedPriceView, PriceArgs, PriceReplyView, PriceSourceView};
+use crate::price::{
+    self, AgreedPriceInView, AgreedPriceView, PriceArgs, PriceForArgs, PriceReplyView,
+    PriceSourceView,
+};
 use crate::say::{TONES, WHOS};
 use crate::settings_edit::{
     CurrencyAction, LightningAction, SettingChangeView, SettingsEditArgs, SettingsPreviewView,
@@ -121,13 +130,13 @@ use crate::signer_views::{
 };
 use crate::views::{
     put_words, AlertKind, AlertView, BatchArgs, BatchWaitingView, BuiltView, CashAmountView,
-    CashOutArgs, CashOutRow, ClearArgs, CounterShareView, CounterView, DeepRequestView,
-    DeliverView, EntryKindView, EntryRow, HaltedView, HealthView, LimitView, LinkConfig,
-    LinkStepView, LinkView, MergeOfferView, NoteKindView, OldAddressesView, OldKind, OutboxKind,
-    OutboxRow, OutcomeKind, OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund,
-    ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind,
-    SendRow, SettingsHeldView, SettingsQueuedView, ShopCurrencyView, SkippedView, StageKind,
-    StageView, StartConfig, StatusView, TakenView, ViewKind, WordsView,
+    CashOutArgs, CashOutRow, CashPriceView, ClearArgs, CounterShareView, CounterView,
+    DeepRequestView, DeliverView, EntryKindView, EntryRow, HaltedView, HealthView, LimitView,
+    LinkConfig, LinkStepView, LinkView, MergeOfferView, NoteKindView, OldAddressesView, OldKind,
+    OutboxKind, OutboxRow, OutcomeKind, OutcomeView, OwnerNetwork, PumpView, QueueView,
+    QueuedRefund, ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView,
+    SendKind, SendRow, SettingsHeldView, SettingsQueuedView, ShopCurrencyView, SkippedView,
+    StageKind, StageView, StartConfig, StatusView, TakenView, ViewKind, WordsView,
 };
 use crate::watch::{self, WatchEntry, WatchStart, WatchStepView};
 
@@ -665,6 +674,13 @@ fn build_ops() -> Vec<Op> {
         }),
         op(140, "price_sources", Zero, |_, ()| Ok(price::sources())),
         op(141, "price_agree", Zero, |_, a: PriceArgs| price::agree(a)),
+        op(142, "price_sources_for", Zero, |_, currency: String| {
+            price::sources_for_currency(currency)
+        }),
+        op(143, "price_agree_for", Zero, |_, a: PriceForArgs| {
+            price::agree_for(a)
+        }),
+        op(144, "books", Node, |c, a: BooksArgs| c.entry()?.books(a)),
     ]
 }
 
@@ -799,6 +815,7 @@ fn definitions() -> Vec<TypeDef> {
         WatchStepView::define(),
         RefundArgs::define(),
         CashAmountView::define(),
+        CashPriceView::define(),
         CashOutArgs::define(),
         BatchArgs::define(),
         AlertKind::define(),
@@ -905,6 +922,12 @@ fn definitions() -> Vec<TypeDef> {
         PriceReplyView::define(),
         PriceArgs::define(),
         AgreedPriceView::define(),
+        PriceForArgs::define(),
+        AgreedPriceInView::define(),
+        BooksArgs::define(),
+        BooksDayView::define(),
+        BooksFileView::define(),
+        BooksView::define(),
     ]
 }
 
@@ -959,7 +982,8 @@ pub fn protocol_description() -> String {
          \x20   every string is a u16 length and UTF-8\n\
          ```\n\
          \n\
-         Integers are little-endian. A bool is one byte, 0 or 1. A string is a\n\
+         Integers are little-endian; an `i32` is two's complement. A bool is\n\
+         one byte, 0 or 1. A string is a\n\
          u32 length and UTF-8 (a `str16` is a u16 length and UTF-8, and is\n\
          used only inside `Words`). `list<T>` is a u32 count and the\n\
          elements; `list<u8>` is the bytes type. `option<T>` is a flag byte 0\n\

@@ -57,6 +57,7 @@ fn corpus(handle: u64) -> Vec<Vec<u8>> {
                 .u8(0)
                 .u64(5_000)
                 .string("till")
+                .u8(0)
                 .0,
         ),
         frame(

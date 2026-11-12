@@ -1,17 +1,17 @@
 //! The owner phone's own ask of the price sources (`docs/OWNER-APP-RULES.md`
-//! OA-101): the table of sources for the app to fetch, and the one call that
-//! takes what the sources answered and gives the price they agree on, or the
-//! rates library's refusal with its words. The rules and the numbers are in
+//! OA-101, OA-102): the table of sources for the app to fetch, and the one
+//! call that takes what the sources answered and gives the price they agree
+//! on, or the rates library's refusal with its words. The rules and the numbers are in
 //! `openbmt-rates` (`docs/RATE-RULES.md`) and `openbmt-owner-node`; this
 //! file converts types. It has no state, no network and no clock: the app
 //! fetches, through Tor, and hands the bytes over. Neither op takes a node.
 
 use openbmt_core::currency::ShopCurrency;
 use openbmt_owner_node::{agreed_price, PriceReply};
-use openbmt_rates::sources_for;
+use openbmt_rates::{source, sources_for};
 
 use crate::codec::{wire_record, wire_record_get};
-use crate::error::{from_words, AppError, Kind};
+use crate::error::{from_words, refused_by, AppError, Kind};
 
 /// One source of the table (RT-01), for the app to fetch.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,4 +107,97 @@ pub(crate) fn agree(args: PriceArgs) -> Result<AgreedPriceView, AppError> {
             source_label: p.source_label,
         })
         .map_err(|e| from_words(Kind::Refused, e.rule(), e, e.words()))
+}
+
+/// OA-102: the arguments of `price_agree_for`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PriceForArgs {
+    /// The shop's currency: three capital letters, not `SAT`.
+    pub currency: String,
+    /// What the sources answered.
+    pub replies: Vec<PriceReplyView>,
+    /// The time now, by the phone's clock.
+    pub now: u64,
+}
+
+wire_record!(PriceForArgs {
+    currency,
+    replies,
+    now
+});
+wire_record_get!(PriceForArgs {
+    currency,
+    replies,
+    now
+});
+
+/// OA-102: the price the sources agree on, in the shop's currency.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgreedPriceInView {
+    /// The price of one bitcoin in whole units of the currency, rounded
+    /// half up.
+    pub whole_per_btc: u64,
+    /// The price in minor units per bitcoin.
+    pub minor_per_btc: u64,
+    /// The label of the sources used.
+    pub source_label: String,
+}
+
+wire_record!(AgreedPriceInView {
+    whole_per_btc,
+    minor_per_btc,
+    source_label
+});
+
+/// The currency a call names, one that has price sources.
+fn priced(code: &str) -> Result<ShopCurrency, AppError> {
+    ShopCurrency::from_code(code)
+        .filter(|c| !c.is_sats())
+        .ok_or_else(|| {
+            refused_by(
+                "request-malformed",
+                format!("{code:?} is not a currency that has price sources"),
+            )
+        })
+}
+
+/// OA-102, RT-01, RT-40: the table of sources of the shop's currency. Bitcoin
+/// Standard has none and is refused: it asks for no price.
+pub(crate) fn sources_for_currency(code: String) -> Result<Vec<PriceSourceView>, AppError> {
+    let currency = priced(&code)?;
+    Ok(sources_for(currency)
+        .map(|s| PriceSourceView {
+            id: s.id.to_string(),
+            url: s.url.to_string(),
+        })
+        .collect())
+}
+
+/// OA-102: the price the replies agree on at `now`, in whole units of the
+/// shop's currency as well as in minor units. A refusal of the rates library
+/// carries its own words.
+pub(crate) fn agree_for(args: PriceForArgs) -> Result<AgreedPriceInView, AppError> {
+    let currency = priced(&args.currency)?;
+    let replies: Vec<PriceReply> = args
+        .replies
+        .into_iter()
+        .filter(|r| source(&r.source).is_some_and(|s| s.currency == currency))
+        .map(|r| PriceReply {
+            source: r.source,
+            body: r.body,
+            fetched_at: r.fetched_at,
+        })
+        .collect();
+    let agreed = agreed_price(&replies, args.now)
+        .map_err(|e| from_words(Kind::Refused, e.rule(), e, e.words()))?;
+    let scale = 10u64.pow(currency.minor_digits());
+    Ok(AgreedPriceInView {
+        whole_per_btc: agreed
+            .minor_per_btc
+            .saturating_add(scale / 2)
+            .checked_div(scale)
+            .unwrap_or(0),
+        minor_per_btc: agreed.minor_per_btc,
+        source_label: agreed.source_label,
+    })
 }

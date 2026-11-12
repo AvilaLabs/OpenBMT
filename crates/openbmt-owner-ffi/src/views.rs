@@ -302,6 +302,27 @@ impl Define for CashAmountView {
     }
 }
 
+/// OA-102: the price the owner confirmed for a cash-out, which the books
+/// record it at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CashPriceView {
+    /// The shop's currency: three capital letters, `SAT` for Bitcoin
+    /// Standard.
+    pub currency: String,
+    /// The price of one bitcoin in whole units of the currency (for
+    /// Bitcoin Standard, 100,000,000 satoshis).
+    pub whole_per_btc: u64,
+}
+
+wire_record!(CashPriceView {
+    currency,
+    whole_per_btc
+});
+wire_record_get!(CashPriceView {
+    currency,
+    whole_per_btc
+});
+
 /// The arguments of `cash_out`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CashOutArgs {
@@ -311,17 +332,21 @@ pub struct CashOutArgs {
     pub amount: CashAmountView,
     /// What the Key app shows for the destination.
     pub label: String,
+    /// The price the owner confirmed (OA-102).
+    pub price: Option<CashPriceView>,
 }
 
 wire_record!(CashOutArgs {
     address,
     amount,
-    label
+    label,
+    price
 });
 wire_record_get!(CashOutArgs {
     address,
     amount,
-    label
+    label,
+    price
 });
 
 /// The arguments of `sign_batch`.
