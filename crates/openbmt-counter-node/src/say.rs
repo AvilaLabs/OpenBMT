@@ -9,12 +9,14 @@
 //! one table (`docs/screens/counter.md`).
 
 use openbmt_core::pairing::PairError;
+use openbmt_core::pairing_own::OwnPairError;
 use openbmt_core::say::{Tone, Who, Words};
 use openbmt_core::settings::SettingsError;
 
 use crate::dirstore::DirStoreError;
 use crate::node::{HeartbeatNotTaken, StartError};
 use crate::paired::{PairRefused, RelayRefused};
+use crate::paired_own::OwnPairRefused;
 use crate::relaylink::LinkLine;
 use crate::settings::{SettingsFault, SettingsLine, SettingsRefused};
 
@@ -108,6 +110,13 @@ impl SettingsRefused {
                 "Nothing to do. The owner's phone sends them again by itself.",
             )
             .detail(e.to_string()),
+            Self::Verify(SettingsError::ConfirmationRequired(_)) => Words::new(
+                Tone::Ended,
+                "Needs a counter's OK",
+                "This change raises a limit or moves money somewhere new, and needs a counter to confirm it. The counter keeps its settings.",
+                Who::Owner,
+                "Make a change that does not raise a limit, or wait for the update that adds confirmation at the counter.",
+            ),
             Self::Verify(e) => Words::new(
                 Tone::Ended,
                 "Settings refused",
@@ -468,6 +477,144 @@ impl PairRefused {
     }
 }
 
+/// CR-228: the words for a pairing step with no pairing at that step are
+/// still to be written.
+pub const WORDS_NEEDED_CR_228_NO_CEREMONY: &str =
+    "Words needed: the pairing is not at this step or was forgotten.";
+/// CR-229: the words for a counter that could not make a key are still to be
+/// written.
+pub const WORDS_NEEDED_CR_229_NO_RANDOMNESS: &str =
+    "Words needed: the counter could not make its key for pairing.";
+/// CR-227: the words for an offer that is not for the main network are still
+/// to be written.
+pub const WORDS_NEEDED_CR_227_NETWORK: &str =
+    "Words needed: the owner phone's offer is not for the main network.";
+/// CR-229: the words for a counter whose key is the owner's are still to be
+/// written.
+pub const WORDS_NEEDED_CR_229_COUNTER_IS_OWNER: &str =
+    "Words needed: the counter's key is the owner phone's key.";
+/// CR-229: the words for a request made for another offer are still to be
+/// written.
+pub const WORDS_NEEDED_CR_229_BINDING: &str =
+    "Words needed: the request was made for another offer.";
+/// CR-232: the words for a first range that is not signed for this counter
+/// or is badly shaped are still to be written.
+pub const WORDS_NEEDED_CR_232_RANGE: &str =
+    "Words needed: the first range is not signed for this counter or is badly shaped.";
+/// CR-231: the words for settings that are not signed by the owner phone or
+/// are not valid are still to be written.
+pub const WORDS_NEEDED_CR_231_SETTINGS: &str =
+    "Words needed: the first settings are not signed by the owner phone or are not valid.";
+/// CR-231: the words for settings that are not newer than the offer's are
+/// still to be written.
+pub const WORDS_NEEDED_CR_231_SETTINGS_OLD: &str =
+    "Words needed: the first settings are not newer than the offer's.";
+/// CR-231: the words for settings that do not list this counter on the
+/// device list are still to be written.
+pub const WORDS_NEEDED_CR_231_NOT_ON_DEVICES: &str =
+    "Words needed: the first settings do not list this counter as a device.";
+/// CR-231: the words for settings that do not give this counter a share are
+/// still to be written.
+pub const WORDS_NEEDED_CR_231_NOT_ON_COUNTERS: &str =
+    "Words needed: the first settings do not give this counter a share.";
+/// CR-230: the words for a relay not signed by the owner root are still to
+/// be written.
+pub const WORDS_NEEDED_CR_230_RELAY: &str =
+    "Words needed: the relay in the owner phone's code is not signed by the owner.";
+/// CR-233: the words for a saved pairing that does not read back are still
+/// to be written.
+pub const WORDS_NEEDED_CR_233_RECORD: &str =
+    "Words needed: the pairing this counter saved does not read back.";
+/// CR-233: the words for a saved pairing that holds no key are still to be
+/// written.
+pub const WORDS_NEEDED_CR_233_RECORD_KEY: &str =
+    "Words needed: the pairing this counter saved holds no key.";
+
+impl OwnPairRefused {
+    /// What the person at the counter or the owner is told when a step of
+    /// pairing with the shop's own wallet, or a saved one, is not accepted
+    /// (CR-227 to CR-233). Nothing was paired. A refusal whose words are
+    /// those of a refusal of the Key app's ceremony says them; the others
+    /// are the words of the design, or a `WORDS_NEEDED_` constant where none
+    /// are written yet.
+    pub fn words(&self) -> Words {
+        let needed = |what: &str| {
+            Words::new(
+                Tone::Stop,
+                "Words needed",
+                what,
+                Who::Manager,
+                "Words needed for what to do next.",
+            )
+        };
+        match self {
+            Self::NoCeremony => needed(WORDS_NEEDED_CR_228_NO_CEREMONY),
+            Self::NoRandomness => needed(WORDS_NEEDED_CR_229_NO_RANDOMNESS),
+            Self::Pair(e) => own_pair_error_words(e),
+            Self::Bundle(e) => PairRefused::Bundle(e.clone()).words(),
+            Self::Settings(_) => needed(WORDS_NEEDED_CR_231_SETTINGS),
+            Self::SettingsOld { .. } => needed(WORDS_NEEDED_CR_231_SETTINGS_OLD),
+            Self::NotOnDevices => needed(WORDS_NEEDED_CR_231_NOT_ON_DEVICES),
+            Self::NotOnCounters => needed(WORDS_NEEDED_CR_231_NOT_ON_COUNTERS),
+            Self::RelayNotSigned => needed(WORDS_NEEDED_CR_230_RELAY),
+            Self::Record(_) => needed(WORDS_NEEDED_CR_233_RECORD),
+            Self::RecordKey => needed(WORDS_NEEDED_CR_233_RECORD_KEY),
+        }
+        .code(self.rule())
+        .detail(self.to_string())
+    }
+}
+
+/// The words for a step of an own-wallet pairing that stopped (CR-227 to
+/// CR-232).
+pub fn own_pair_error_words(e: &OwnPairError) -> Words {
+    let needed = |what: &str| {
+        Words::new(
+            Tone::Stop,
+            "Words needed",
+            what,
+            Who::Manager,
+            "Words needed for what to do next.",
+        )
+    };
+    // The refusals the two ceremonies share say the same words.
+    let shared = |e: PairError| pair_error_words(&e);
+    match e {
+        OwnPairError::NotMainNetwork => needed(WORDS_NEEDED_CR_227_NETWORK),
+        OwnPairError::InvalidName => shared(PairError::InvalidName),
+        OwnPairError::CounterIsOwner => needed(WORDS_NEEDED_CR_229_COUNTER_IS_OWNER),
+        OwnPairError::Decode(inner) => shared(PairError::Decode(inner.clone())),
+        OwnPairError::BindingMismatch => needed(WORDS_NEEDED_CR_229_BINDING),
+        OwnPairError::RequestSignatureInvalid => shared(PairError::RequestSignatureInvalid),
+        OwnPairError::NotConfirmed => shared(PairError::NotConfirmed),
+        OwnPairError::ClockWentBack => shared(PairError::ClockWentBack),
+        OwnPairError::Expired => shared(PairError::Expired),
+        OwnPairError::WrongWallet => Words::new(
+            Tone::Stop,
+            "Wrong wallet",
+            "The owner phone's code is for a different wallet than the one this counter checked. Nothing was saved.",
+            Who::Manager,
+            "Start the pairing again from the owner phone.",
+        ),
+        OwnPairError::WrongCounter => shared(PairError::WrongCounter),
+        OwnPairError::WrongNonce => shared(PairError::WrongNonce),
+        OwnPairError::WrongName => shared(PairError::WrongName),
+        OwnPairError::OwnerSignatureInvalid => shared(PairError::OwnerSignatureInvalid),
+        OwnPairError::NotTheOwner => shared(PairError::NotTheOwner),
+        OwnPairError::Bundle(_) => shared(PairError::Decode(
+            openbmt_core::wire::DecodeError::NonCanonical("the peers"),
+        )),
+        OwnPairError::Range(_) => needed(WORDS_NEEDED_CR_232_RANGE),
+        OwnPairError::RangeTooSmall { .. } => Words::new(
+            Tone::Stop,
+            "Too few addresses",
+            "The owner phone gave this counter fewer than 1,000 addresses, the least it takes. Nothing was saved.",
+            Who::Manager,
+            "Update the owner phone, then start the pairing again.",
+        ),
+    }
+}
+
 impl LinkLine {
     /// What the counter's screen says about the link to the owner (CR-136).
     /// The link never holds up a sale, and the words say so.
@@ -650,6 +797,13 @@ pub fn all_words() -> Vec<(String, Words)> {
     for (name, e) in every_pair_refused() {
         all.push((format!("PairRefused::{name}"), e.words()));
     }
+    // CR-227 to CR-233: only the words that the Key app's ceremony does not
+    // already say are listed again; the shared ones are listed above.
+    for (name, e) in every_own_pair_refused() {
+        if own_words_are_new(&e) {
+            all.push((format!("OwnPairRefused::{name}"), e.words()));
+        }
+    }
     for (name, line) in every_link_line() {
         // The one that has no time is the same state as the one that has:
         // listed once.
@@ -672,6 +826,75 @@ pub fn all_words() -> Vec<(String, Words)> {
     all
 }
 
+/// Whether the words of an own-wallet refusal are its own and not those of a
+/// refusal of the Key app's ceremony.
+pub fn own_words_are_new(e: &OwnPairRefused) -> bool {
+    match e {
+        OwnPairRefused::Pair(inner) => matches!(
+            inner,
+            OwnPairError::NotMainNetwork
+                | OwnPairError::CounterIsOwner
+                | OwnPairError::BindingMismatch
+                | OwnPairError::WrongWallet
+                | OwnPairError::Range(_)
+                | OwnPairError::RangeTooSmall { .. }
+        ),
+        OwnPairRefused::Bundle(_) => false,
+        _ => true,
+    }
+}
+
+/// One value of every refusal of an own-wallet pairing step, with its name.
+pub fn every_own_pair_refused() -> Vec<(&'static str, OwnPairRefused)> {
+    use openbmt_core::pinned_wallet::RangeError;
+    use openbmt_core::wire::DecodeError;
+    vec![
+        ("NoCeremony", OwnPairRefused::NoCeremony),
+        ("NoRandomness", OwnPairRefused::NoRandomness),
+        (
+            "Pair/NotMainNetwork",
+            OwnPairRefused::Pair(OwnPairError::NotMainNetwork),
+        ),
+        (
+            "Pair/CounterIsOwner",
+            OwnPairRefused::Pair(OwnPairError::CounterIsOwner),
+        ),
+        (
+            "Pair/BindingMismatch",
+            OwnPairRefused::Pair(OwnPairError::BindingMismatch),
+        ),
+        (
+            "Pair/WrongWallet",
+            OwnPairRefused::Pair(OwnPairError::WrongWallet),
+        ),
+        (
+            "Pair/Range",
+            OwnPairRefused::Pair(OwnPairError::Range(RangeError::BadSignature)),
+        ),
+        (
+            "Pair/RangeTooSmall",
+            OwnPairRefused::Pair(OwnPairError::RangeTooSmall {
+                got: 999,
+                need: 1_000,
+            }),
+        ),
+        ("Bundle", OwnPairRefused::Bundle(DecodeError::Truncated)),
+        (
+            "Settings",
+            OwnPairRefused::Settings(SettingsError::OwnerSignatureInvalid),
+        ),
+        (
+            "SettingsOld",
+            OwnPairRefused::SettingsOld { floor: 4, got: 4 },
+        ),
+        ("NotOnDevices", OwnPairRefused::NotOnDevices),
+        ("NotOnCounters", OwnPairRefused::NotOnCounters),
+        ("RelayNotSigned", OwnPairRefused::RelayNotSigned),
+        ("Record", OwnPairRefused::Record(DecodeError::Truncated)),
+        ("RecordKey", OwnPairRefused::RecordKey),
+    ]
+}
+
 /// One value of every refusal of settings from the owner, with its name.
 pub fn every_settings_refused() -> Vec<(&'static str, SettingsRefused)> {
     use openbmt_core::wire::DecodeError;
@@ -680,6 +903,12 @@ pub fn every_settings_refused() -> Vec<(&'static str, SettingsRefused)> {
         (
             "Verify",
             SettingsRefused::Verify(SettingsError::ApproverRequired),
+        ),
+        (
+            "ConfirmationRequired",
+            SettingsRefused::Verify(SettingsError::ConfirmationRequired(
+                openbmt_core::approval::ChangeClass::Loosen,
+            )),
         ),
         (
             "Store",

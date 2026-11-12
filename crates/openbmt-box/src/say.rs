@@ -427,7 +427,9 @@ fn settings_words(e: &SettingsError) -> Words {
             Who::Owner,
             "Send the newest settings from the owner's phone.",
         ),
-        SettingsError::Invalid(_) => stop(
+        // A Box is paired with the Key app: a change that needs a counter's
+        // confirmation is not asked of it, and if one came it breaks a rule.
+        SettingsError::Invalid(_) | SettingsError::ConfirmationRequired(_) => stop(
             "Settings break a rule",
             "The new settings break one of the rules every settings must keep.".into(),
             Who::Owner,

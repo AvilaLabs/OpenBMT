@@ -46,6 +46,7 @@ use std::collections::VecDeque;
 use openbmt_core::batch::SignedBatch;
 use openbmt_core::command::SignedCommand;
 use openbmt_core::identity::{DeviceId, Identity};
+use openbmt_core::pinned_wallet::SignedRange;
 use openbmt_core::records::GENESIS;
 use openbmt_counter::Report;
 use openbmt_courier::{
@@ -446,6 +447,14 @@ impl<R: Post> CounterLink<R> {
                     }
                 }
                 Err(e) => self.refused_by_node(format!("batch does not decode: {e}")),
+            },
+            Kind::Range => match SignedRange::from_bytes(&message.content) {
+                Ok(signed) => {
+                    if let Err(e) = node.add_range(signed) {
+                        self.refused_by_node(format!("range not taken: {e}"));
+                    }
+                }
+                Err(e) => self.refused_by_node(format!("range does not decode: {e}")),
             },
             Kind::RecordsReceived => self.take_mark(node, &message.content),
             Kind::Settings => self.take_settings(node, &message.content),

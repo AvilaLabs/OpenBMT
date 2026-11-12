@@ -109,6 +109,7 @@ fn corrupt(file: &str, why: &'static str) -> DirStoreError {
 pub fn slot_file(slot: Slot) -> String {
     match slot {
         Slot::Batches => "batches.bin".to_string(),
+        Slot::Ranges => "ranges.bin".to_string(),
         Slot::Exposure => "exposure.bin".to_string(),
         Slot::Pause => "pause.bin".to_string(),
         Slot::Desk => "desk.bin".to_string(),
@@ -161,6 +162,8 @@ pub struct TornTail {
 pub struct Loaded {
     /// The address batches (`OBMC`).
     pub batches: Option<Vec<u8>>,
+    /// The ranges of a counter paired with the shop's own wallet (`OBM;`).
+    pub ranges: Option<Vec<u8>>,
     /// The exposure ledger (`OBME`).
     pub exposure: Option<Vec<u8>>,
     /// The pause tracker (`OBMP`).
@@ -187,6 +190,7 @@ impl Loaded {
     pub fn stored(&self) -> Stored<'_> {
         Stored {
             batches: self.batches.as_deref(),
+            ranges: self.ranges.as_deref(),
             exposure: self.exposure.as_deref(),
             pause: self.pause.as_deref(),
             desk: self.desk.as_deref(),
@@ -346,6 +350,7 @@ impl DirStore {
     pub fn load(&self) -> Result<Loaded, DirStoreError> {
         let mut loaded = Loaded {
             batches: self.read(&slot_file(Slot::Batches))?,
+            ranges: self.read(&slot_file(Slot::Ranges))?,
             exposure: self.read(&slot_file(Slot::Exposure))?,
             pause: self.read(&slot_file(Slot::Pause))?,
             desk: self.read(&slot_file(Slot::Desk))?,

@@ -27,9 +27,10 @@ use crate::desk::Role;
 use crate::heartbeat::{HeartbeatView, NotVerified};
 use crate::refund::{RefundState, RefundView};
 use crate::refusal::{
-    BlockError, CancelRefused, CommandRefused, DestinationRefused, HeartbeatRefused, JudgeError,
-    LightningRefused, LoadError, NoteRefused, OpenRefused, OverrideRefused, RefundRefused,
-    RequoteRefused, SightingError, StaffRefused, TotalsRefused, WithdrawRefused,
+    BatchTakeRefused, BlockError, CancelRefused, CommandRefused, DestinationRefused,
+    HeartbeatRefused, JudgeError, LightningRefused, LoadError, NoteRefused, OpenRefused,
+    OverrideRefused, RangeTakeRefused, RefundRefused, RequoteRefused, SightingError, StaffRefused,
+    TotalsRefused, WithdrawRefused,
 };
 use crate::screen::{Color, Next, Screen, State, Why};
 use crate::store::StoreFault;
@@ -1279,6 +1280,64 @@ impl LoadError {
     }
 }
 
+/// CR-235: the words for a range that could not be saved are still to be
+/// written. This stands where they go.
+pub const WORDS_NEEDED_CR_235_STORE: &str =
+    "Words needed: the owner's new addresses could not be saved.";
+
+impl<E> BatchTakeRefused<E> {
+    /// What the owner is told when a batch is sent to a counter that makes
+    /// its own addresses from the shop's wallet (CR-235). The other refusals
+    /// of a batch are told by the app that sent it.
+    pub fn own_wallet_words() -> Words {
+        Words::new(
+            Tone::Info,
+            "Batch not needed",
+            "This counter makes its own addresses from the shop's wallet, so a batch of addresses was not taken.",
+            Who::Owner,
+            "Nothing to do. If this keeps showing, update the owner phone.",
+        )
+        .code("CR-235")
+    }
+}
+
+impl<E: Display> RangeTakeRefused<E> {
+    /// What the owner is told when a range of indexes was not taken
+    /// (CR-235). Nothing changed.
+    pub fn words(&self) -> Words {
+        match self {
+            Self::Range(e) => Words::new(
+                Tone::Ended,
+                "Address range refused",
+                "The owner phone sent addresses that this counter has used or already holds, or that were not signed for this counter. Nothing changed.",
+                Who::Owner,
+                "Open the owner phone so that it sends a new range.",
+            )
+            .code("CR-235")
+            .detail(e.to_string()),
+            Self::KeyApp => Words::new(
+                Tone::Info,
+                "Range not taken",
+                "This counter was paired with the Key app and takes address batches, not ranges.",
+                Who::Owner,
+                "Pair the counter again from the owner phone if the shop now uses its own wallet.",
+            )
+            .code("CR-235"),
+            // The words for a range that could not be saved are still to be
+            // written.
+            Self::Record(_) | Self::Store(_) => Words::new(
+                Tone::Ended,
+                "Words needed",
+                WORDS_NEEDED_CR_235_STORE,
+                Who::Owner,
+                "Words needed for what to do next.",
+            )
+            .code("CR-235")
+            .detail(self.to_string()),
+        }
+    }
+}
+
 impl DestinationRefused {
     /// What the cashier is told when a scanned refund code cannot be used.
     pub fn words(&self) -> Words {
@@ -2202,6 +2261,22 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("ScriptKind", DestinationRefused::ScriptKind),
     ] {
         all.push((format!("DestinationRefused::{name}"), e.words()));
+    }
+    all.push((
+        "BatchTakeRefused::OwnWallet".to_string(),
+        BatchTakeRefused::<String>::own_wallet_words(),
+    ));
+    for (name, e) in [
+        (
+            "Range",
+            RangeTakeRefused::<String>::Range(openbmt_core::pairing_own::OwnPairError::Range(
+                openbmt_core::pinned_wallet::RangeError::OverlapsUsed,
+            )),
+        ),
+        ("KeyApp", RangeTakeRefused::KeyApp),
+        ("Store", RangeTakeRefused::Store("disk full".to_string())),
+    ] {
+        all.push((format!("RangeTakeRefused::{name}"), e.words()));
     }
     let refund: Vec<(&str, RefundRefused<String>)> = vec![
         ("BadText", RefundRefused::BadText("name")),

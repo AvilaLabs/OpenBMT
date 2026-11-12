@@ -400,7 +400,9 @@ fn eval_settings(
     // `ApproverRequired` means every check passed and the change loosens.
     let (failed, overall) = match &verdict {
         Err(SettingsError::OwnerSignatureInvalid) => (Some(0), None),
-        Err(SettingsError::Invalid(_)) => (Some(1), None),
+        // The Key app checks under the two roots, which never ask for a
+        // counter's confirmation; one that came would break a rule.
+        Err(SettingsError::Invalid(_) | SettingsError::ConfirmationRequired(_)) => (Some(1), None),
         Err(SettingsError::StaleVersion { .. }) => (Some(2), None),
         Err(SettingsError::ApproverSignatureInvalid) => (Some(0), None),
         Err(SettingsError::ApproverRequired) => (None, Some(Change::Loosening)),

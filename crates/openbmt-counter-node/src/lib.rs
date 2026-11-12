@@ -53,6 +53,7 @@ pub mod node;
 pub mod notices;
 pub mod ownnode;
 pub mod paired;
+pub mod paired_own;
 pub mod relaylink;
 pub mod say;
 pub mod settings;
@@ -81,10 +82,14 @@ pub use paired::{
     batch_policy, Ceremony, PairRefused, PairingRecord, RelayRefused, Started, BATCH_MIN_COUNT,
     MAGIC_PAIRING_RECORD,
 };
+pub use paired_own::{
+    OwnCeremony, OwnFirstAddress, OwnPairRefused, OwnPairingRecord, PairedRecord, RecordRefused,
+};
 pub use relaylink::{link_route, start_link, LinkLine, LinkNotStarted};
 pub use settings::{
-    decode_file as decode_settings_file, effective as effective_settings, Effective, SettingsFault,
-    SettingsLine, SettingsRefused, MAX_SETTINGS_FILE_BYTES,
+    decode_file as decode_settings_file, effective as effective_settings,
+    effective_of as effective_settings_of, Effective, SettingsFault, SettingsLine, SettingsRefused,
+    MAX_SETTINGS_FILE_BYTES,
 };
 pub use swap::{
     SaleSwap, SwapDriver, SwapRecord, SwapRequest, MAGIC_SWAP_RECORD, NOT_FOR_THIS_SALE,

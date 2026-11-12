@@ -107,19 +107,20 @@ use openbmt_core::batch::{AddError, PinnedRoots, SignedBatch};
 use openbmt_core::command::SignedCommand;
 use openbmt_core::heartbeat::SignedHeartbeat;
 use openbmt_core::identity::Identity;
+use openbmt_core::pinned_wallet::SignedRange;
 use openbmt_core::records::Record;
 use openbmt_core::say::Words;
 use openbmt_core::settings::{
-    Change, SettingNote, Settings, SignedSettings, SwapProvider, LIGHTNING_NODE_BYTES,
+    Authority, Change, SettingNote, Settings, SignedSettings, SwapProvider, LIGHTNING_NODE_BYTES,
 };
 use openbmt_core::wire::DecodeError;
 use openbmt_counter::{
     Actor, Amount, BatchTakeRefused, BlockError, CancelRefused, CashRefund, CommandRefused,
     Counter, Currency, DayTotals, Facts, HeartbeatRefused, HeartbeatView, JudgeError,
-    LightningPaid, LoadError, NoteRefused, OpenFacts, OpenRefused, Opened, Overridden, Pairing,
-    Quote, Rate, RateSource, RefundRefused, RefundRequest, RefundView, Report, RequoteRefused,
-    SaleExtras, Screen, SightingError, Slot, StaffEvent, StaffRefused, Store, StoreFault, SwapPaid,
-    TotalsRefused, WithdrawRefused,
+    LightningPaid, LoadError, NoteRefused, OpenFacts, OpenRefused, Opened, Overridden, OwnPairing,
+    Pairing, Quote, RangeTakeRefused, Rate, RateSource, RefundRefused, RefundRequest, RefundView,
+    Report, RequoteRefused, SaleExtras, Screen, SightingError, Slot, StaffEvent, StaffRefused,
+    Store, StoreFault, SwapPaid, TotalsRefused, WithdrawRefused,
 };
 use openbmt_lightning::{CertPin, Credential, Reply};
 use openbmt_net_io::{
@@ -327,8 +328,13 @@ pub struct NodeConfig {
     pub dir: PathBuf,
     /// The counter's identity.
     pub identity: Identity,
-    /// What the counter was paired with.
+    /// What the counter was paired with. For a counter paired with the
+    /// shop's own wallet ([`NodeConfig::new_own`]) the roots are the owner
+    /// root and the counter's own key, which never signs a batch.
     pub pairing: Pairing,
+    /// What a counter paired with the shop's own wallet was paired with
+    /// (CR-234), or `None` for a counter paired with the Key app.
+    pub own: Option<OwnPairing>,
     /// The shop's settings, already checked by the caller.
     pub settings: Settings,
     /// The first signed batch of addresses. Taken only when the directory
@@ -364,6 +370,7 @@ impl NodeConfig {
             dir: dir.into(),
             identity,
             pairing,
+            own: None,
             settings,
             first_batch: None,
             driver,
@@ -372,6 +379,31 @@ impl NodeConfig {
             lightning: None,
             announce_settings: false,
         }
+    }
+
+    /// A configuration for a counter paired with the shop's own wallet
+    /// (CR-234), with the system clock and the real health rules. The counter
+    /// takes ranges, not batches, and checks settings under the owner root
+    /// alone (CR-236).
+    pub fn new_own(
+        dir: impl Into<PathBuf>,
+        identity: Identity,
+        own: OwnPairing,
+        settings: Settings,
+        driver: DriverConfig,
+    ) -> Self {
+        let me = identity.device_id();
+        let pairing = Pairing {
+            roots: PinnedRoots {
+                owner: own.owner,
+                approver: me,
+            },
+            wallet_checksum: own.wallet.checksum32(),
+            batch_policy: own.batch_policy,
+        };
+        let mut config = Self::new(dir, identity, pairing, settings, driver);
+        config.own = Some(own);
+        config
     }
 }
 
@@ -389,8 +421,9 @@ pub struct Node<P: DriverPort = Handle> {
     /// WR-54: since when a header has been known above the checked height.
     blocks_behind_since: Option<u64>,
     settings: Settings,
-    /// CR-160: the two roots the counter pinned at pairing.
-    roots: PinnedRoots,
+    /// CR-160, CR-236: who may sign the settings the owner sends: the two
+    /// roots the counter pinned at pairing, or the owner root alone.
+    authority: Authority,
     /// CR-164: what the node was started with that settings can change: the
     /// Tor switch and the Lightning node.
     started_with: (
@@ -461,6 +494,7 @@ impl<P: DriverPort> Node<P> {
             dir,
             identity,
             pairing,
+            own,
             settings,
             first_batch,
             mut driver,
@@ -505,10 +539,17 @@ impl<P: DriverPort> Node<P> {
         };
         let view = ChainView::from_store(&headers);
 
-        let roots = pairing.roots;
-        let mut counter =
-            Counter::load(identity, pairing, settings.clone(), loaded.stored(), &store)
-                .map_err(StartError::Counter)?;
+        let authority = match &own {
+            Some(own) => Authority::OwnWallet { owner: own.owner },
+            None => Authority::KeyApp(pairing.roots),
+        };
+        let mut counter = match &own {
+            Some(own) => {
+                Counter::load_own(identity, own, settings.clone(), loaded.stored(), &store)
+            }
+            None => Counter::load(identity, pairing, settings.clone(), loaded.stored(), &store),
+        }
+        .map_err(StartError::Counter)?;
         // CR-163: settings below what the counter's own records name are an
         // old copy of the file.
         check_not_rolled(settings.version, counter.settings_recorded())
@@ -522,7 +563,7 @@ impl<P: DriverPort> Node<P> {
             change: Change::Loosening,
             hash: settings.hash(),
         });
-        if loaded.batches.is_none() {
+        if loaded.batches.is_none() && own.is_none() {
             if let Some(batch) = first_batch {
                 counter
                     .add_batch(batch, &mut store)
@@ -593,7 +634,7 @@ impl<P: DriverPort> Node<P> {
                 settings.swap.clone(),
             ),
             settings,
-            roots,
+            authority,
             setting_unrecorded,
             own_configured,
             own_input: own_configured.then_some(OwnNodeInput {
@@ -823,7 +864,7 @@ impl<P: DriverPort> Node<P> {
             return Ok(None);
         }
         let change = signed
-            .verify(&self.roots, Some(&self.settings))
+            .verify_with(&self.authority, Some(&self.settings))
             .map_err(SettingsRefused::Verify)?;
         self.store
             .put_settings(&signed.to_bytes())
@@ -2029,6 +2070,15 @@ impl<P: DriverPort> Node<P> {
         signed: SignedBatch,
     ) -> Result<(), BatchTakeRefused<DirStoreError>> {
         self.counter.take_batch(signed, &mut self.store)
+    }
+
+    /// CR-235: take a new signed range of indexes and write the record that
+    /// says it is held. A range already held is taken as nothing (CR-168).
+    pub fn add_range(
+        &mut self,
+        signed: SignedRange,
+    ) -> Result<(), RangeTakeRefused<DirStoreError>> {
+        self.counter.take_range(signed, &mut self.store)
     }
 
     /// Stop the driver, then take the events it left in the channel. The

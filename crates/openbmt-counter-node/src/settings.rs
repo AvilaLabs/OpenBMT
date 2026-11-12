@@ -23,12 +23,12 @@
 
 use std::fmt;
 
-use openbmt_core::batch::PinnedRoots;
-use openbmt_core::settings::{Settings, SettingsError, SignedSettings};
+use openbmt_core::settings::{Authority, Settings, SettingsError, SignedSettings};
 use openbmt_core::wire::DecodeError;
 
 use crate::dirstore::{DirStore, DirStoreError};
 use crate::paired::PairingRecord;
+use crate::paired_own::PairedRecord;
 
 /// CR-161: the most the settings file holds, in bytes.
 pub const MAX_SETTINGS_FILE_BYTES: usize = 64 * 1024;
@@ -161,11 +161,11 @@ impl Effective {
 /// is not above the record's.
 fn check_file(
     signed: &SignedSettings,
-    roots: &PinnedRoots,
+    authority: &Authority,
     floor: &Settings,
 ) -> Result<bool, SettingsFault> {
     signed
-        .verify_signatures(roots)
+        .verify_signatures_with(authority)
         .map_err(SettingsFault::Verify)?;
     Ok(signed.settings.version > floor.version)
 }
@@ -177,15 +177,30 @@ fn check_file(
 /// settings, which may be looser than what the owner last sent. A file with
 /// settings no newer than the record's is left as it is and noted.
 pub fn effective(store: &DirStore, record: &PairingRecord) -> Result<Effective, SettingsFault> {
+    effective_under(store, &Authority::KeyApp(record.roots), &record.settings)
+}
+
+/// [`effective`] for a pairing record of either kind (CR-233): under the
+/// owner root alone, a settings file that carries a Key app signature is a
+/// fault (CR-236).
+pub fn effective_of(store: &DirStore, record: &PairedRecord) -> Result<Effective, SettingsFault> {
+    effective_under(store, &record.authority(), record.settings())
+}
+
+fn effective_under(
+    store: &DirStore,
+    authority: &Authority,
+    record_settings: &SignedSettings,
+) -> Result<Effective, SettingsFault> {
     let Some(bytes) = store.settings_file().map_err(SettingsFault::Read)? else {
         return Ok(Effective {
-            signed: record.settings.clone(),
+            signed: record_settings.clone(),
             from_file: false,
             note: None,
         });
     };
     let signed = decode_file(&bytes).map_err(SettingsFault::Decode)?;
-    if check_file(&signed, &record.roots, &record.settings.settings)? {
+    if check_file(&signed, authority, &record_settings.settings)? {
         return Ok(Effective {
             signed,
             from_file: true,
@@ -196,9 +211,9 @@ pub fn effective(store: &DirStore, record: &PairingRecord) -> Result<Effective, 
         note: Some(format!(
             "CR-163: the settings file is version {}, which is not above the pairing's version \
              {}: the pairing's settings are used",
-            signed.settings.version, record.settings.settings.version
+            signed.settings.version, record_settings.settings.version
         )),
-        signed: record.settings.clone(),
+        signed: record_settings.clone(),
         from_file: false,
     })
 }
