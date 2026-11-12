@@ -20,6 +20,7 @@ import android.widget.TextView
 import java.io.File
 import java.io.IOException
 import java.security.GeneralSecurityException
+import java.security.SecureRandom
 import java.time.ZoneId
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
@@ -259,6 +260,7 @@ class Controller(private val act: MainActivity) {
             lightningFault = AppWords.storageUnavailable(e.message)
             null
         }
+        dropSharedImage()
         startNode()
     }
 
@@ -1547,12 +1549,17 @@ class Controller(private val act: MainActivity) {
 
     // ---- sharing a request -------------------------------------------------------------------------------------------------------
 
-    private fun shareFolder(): File = File(act.cacheDir, ShareImageProvider.FOLDER)
+    private fun shareUri(name: String): Uri =
+        Uri.Builder().scheme("content").authority(ShareImageProvider.AUTHORITY).appendPath(ShareNames.FOLDER).appendPath(name).build()
 
-    /** CR-214: the image given to the share sheet is deleted when the page is left. */
-    private fun dropSharedImage() {
-        File(shareFolder(), ShareImageProvider.NAME).delete()
-    }
+    /** CR-214: every address handed to the share sheet is revoked and its image deleted when the page is left. */
+    private val shared = ShareLedger(
+        File(act.cacheDir, ShareNames.FOLDER),
+        { name -> act.revokeUriPermission(shareUri(name), Intent.FLAG_GRANT_READ_URI_PERMISSION) },
+        { ByteArray(ShareNames.BYTES).also { SecureRandom().nextBytes(it) } },
+    )
+
+    private fun dropSharedImage() = shared.end()
 
     /** CR-214: the label of the payment link: the request's note, or its amount when it has none. */
     private fun requestLabel(index: Long, info: SaleInfo, needsSats: Long): String =
@@ -1569,7 +1576,7 @@ class Controller(private val act: MainActivity) {
         }
     }
 
-    /** CR-214: gives the share sheet the code as a PNG image, read once through [ShareImageProvider]. */
+    /** CR-214: gives the share sheet the code as a PNG image, under a fresh name through [ShareImageProvider]. */
     private fun shareCode(payment: Payment, refused: (SayWords) -> Unit) {
         try {
             val side = 720
@@ -1578,11 +1585,8 @@ class Controller(private val act: MainActivity) {
             view.layout(0, 0, side, side)
             val bitmap = Bitmap.createBitmap(side, side, Bitmap.Config.ARGB_8888)
             view.draw(Canvas(bitmap))
-            val folder = shareFolder()
-            folder.mkdirs()
-            File(folder, ShareImageProvider.NAME).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            val uri = Uri.Builder().scheme("content").authority(ShareImageProvider.AUTHORITY)
-                .appendPath(ShareImageProvider.FOLDER).appendPath(ShareImageProvider.NAME).build()
+            val name = shared.begin { f -> f.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) } }
+            val uri = shareUri(name)
             val send = Intent(Intent.ACTION_SEND).setType("image/png").putExtra(Intent.EXTRA_STREAM, uri)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             act.startActivity(Intent.createChooser(send, null))

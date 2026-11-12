@@ -1208,6 +1208,50 @@ object AppModelTest {
     }
 
     /** CR-219: the small line under the code when a provider is set and this sale has no swap. */
+    private fun cr214ShareTests() {
+        val root = Files.createTempDirectory("share").toFile()
+        val folder = File(root, ShareNames.FOLDER)
+        val good = "0123456789abcdef0123456789abcdef"
+        // The provider's name check: only 32 lower-case hex digits, and only a file that exists.
+        folder.mkdirs()
+        File(folder, good).writeText("png")
+        File(root, good).writeText("outside")
+        File(folder, "request.png").writeText("old")
+        ok(ShareNames.valid(good), "CR-214: a name of 16 hex bytes is valid")
+        ok(ShareNames.resolve(folder, good)?.readText() == "png", "CR-214: a good name that exists is served")
+        ok(ShareNames.resolve(folder, "0123456789abcdef0123456789abcde") == null, "CR-214: a short name is refused")
+        ok(ShareNames.resolve(folder, good + "0") == null, "CR-214: a long name is refused")
+        ok(ShareNames.resolve(folder, "0123456789abcdef0123456789abcdeg") == null, "CR-214: a non-hex name is refused")
+        ok(ShareNames.resolve(folder, "0123456789ABCDEF0123456789ABCDEF") == null, "CR-214: upper case is refused")
+        ok(ShareNames.resolve(folder, "request.png") == null, "CR-214: the old fixed name is refused")
+        ok(ShareNames.resolve(folder, "..") == null && ShareNames.resolve(folder, "../$good") == null, "CR-214: dot-dot is refused")
+        ok(ShareNames.resolve(folder, "..%2f" + good.substring(0, 26)) == null, "CR-214: an escaped path is refused")
+        ok(ShareNames.resolve(File(root, "other"), good) == null, "CR-214: another folder serves nothing")
+        ok(ShareNames.resolve(folder, "fedcba9876543210fedcba9876543210") == null, "CR-214: a good name with no file is refused")
+
+        // The controller's bookkeeping.
+        val revoked = mutableListOf<String>()
+        val rnd = java.security.SecureRandom()
+        val ledger = ShareLedger(folder, { revoked.add(it) }, { ByteArray(ShareNames.BYTES).also { rnd.nextBytes(it) } })
+        ledger.end()
+        ok((folder.listFiles()?.size ?: 0) == 0, "CR-214: starting empties the folder")
+        val a = ledger.begin { it.writeText("A") }
+        ok(ShareNames.valid(a) && File(folder, a).readText() == "A", "CR-214: a share makes a file under a fresh valid name")
+        ok(ledger.handedOut() == listOf(a) && revoked.isEmpty(), "CR-214: a share adds one address and revokes nothing")
+        val b = ledger.begin { it.writeText("B") }
+        ok(a != b, "CR-214: each share has its own name")
+        ok(revoked == listOf(a), "CR-214: a new share revokes the earlier address")
+        ok(!File(folder, a).exists() && File(folder, b).readText() == "B", "CR-214: a new share deletes the earlier image first")
+        ok(ledger.handedOut() == listOf(b), "CR-214: only the new address is held")
+        File(folder, "stray").writeText("x")
+        ledger.end()
+        ok(revoked == listOf(a, b) && ledger.handedOut().isEmpty(), "CR-214: leaving revokes every address")
+        ok((folder.listFiles()?.size ?: 0) == 0, "CR-214: leaving empties the folder")
+        throws("CR-214: a failed write leaves nothing behind") { ledger.begin { throw IOException("full") } }
+        ok((folder.listFiles()?.size ?: 0) == 0 && ledger.handedOut().isEmpty(), "CR-214: a failed share adds no address")
+        root.deleteRecursively()
+    }
+
     private fun cr219SwapTests() {
         ok(AppWords.lnNotForThisSale == "Lightning is not available for this sale.", "CR-219: the small line, as written down")
         ok(AppWords.all().none { it.second.what == AppWords.lnNotForThisSale }, "CR-219: the small line has no heading and is not in the list of words")
@@ -1236,7 +1280,8 @@ object AppModelTest {
         ok(controller.contains("ui.secondary(WordsOfRequests.REQUEST)") && controller.contains("listOf(open, request)"), "CR-213: the quieter button is under the main one")
         ok(controller.contains("n.openRequest(") && controller.contains("showSale(o.index, o.payment, null, made = true)"), "CR-213: the request is made and its page opens")
         ok(controller.contains("Intent.ACTION_SEND") && controller.contains("setType(\"text/plain\")") && controller.contains("setType(\"image/png\")"), "CR-214: the link and the code go to the share sheet")
-        ok(controller.contains("File(shareFolder(), ShareImageProvider.NAME).delete()") && controller.contains("dropSharedImage()\n        tick = null"), "CR-214: the image is deleted when the page is left")
+        ok(controller.contains("private fun dropSharedImage() = shared.end()") && controller.contains("dropSharedImage()\n        tick = null"), "CR-214: the images are ended when the page is left")
+        ok(controller.contains("shared.begin {") && controller.contains("revokeUriPermission("), "CR-214: a share has its own address and the earlier ones are revoked")
         ok(controller.contains("n.requests(nowSecs())") && controller.contains("WordsOfRequests.OPEN_REQUESTS"), "CR-215: Home lists the open requests")
         ok(controller.contains("WordsOfRequests.ADD_NOTE") && controller.contains("n.addNote("), "CR-216: a sale's details add a note")
         val manifest = File(appDir, "AndroidManifest.xml").readText()
@@ -1273,6 +1318,7 @@ object AppModelTest {
         cr203TorChoiceTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr204TorFailsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr219SwapTests()
+        cr214ShareTests()
         cr213RequestsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         println("AppModelTest (counter): $count checks passed")
     }

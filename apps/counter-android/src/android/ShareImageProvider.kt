@@ -11,25 +11,30 @@ import java.io.File
 import java.io.FileNotFoundException
 
 /**
- * CR-214: hands the share sheet the one image of a request's code, by one-time access. It is not exported; the
- * counter grants the chosen app read access to this one address when the person taps "Share the code", and the
- * file is deleted when the page is left. It serves only [NAME] in the app's own cache folder, read only.
+ * CR-214: hands the share sheet the image of a request's code. It is not exported; the counter grants the chosen app
+ * read access to the address of one image when the person taps "Share the code", and revokes it and deletes the file
+ * when the page is left. Each image has a fresh random name; the provider serves only a name of that form that exists
+ * in the app's own cache folder, read only.
  */
 class ShareImageProvider : ContentProvider() {
     override fun onCreate(): Boolean = true
 
-    private fun file(uri: Uri): File? {
-        val ctx = context ?: return null
-        if (uri.pathSegments != listOf(FOLDER, NAME)) return null
-        return File(File(ctx.cacheDir, FOLDER), NAME).takeIf { it.isFile }
+    private fun name(uri: Uri): String? {
+        val parts = uri.pathSegments
+        return if (parts.size == 2 && parts[0] == ShareNames.FOLDER) parts[1] else null
     }
 
-    override fun getType(uri: Uri): String? = if (uri.pathSegments == listOf(FOLDER, NAME)) "image/png" else null
+    private fun file(uri: Uri): File? {
+        val ctx = context ?: return null
+        return ShareNames.resolve(File(ctx.cacheDir, ShareNames.FOLDER), name(uri) ?: return null)
+    }
+
+    override fun getType(uri: Uri): String? = if (file(uri) != null) "image/png" else null
 
     override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor? {
         val f = file(uri) ?: return null
         val cursor = MatrixCursor(arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), 1)
-        cursor.addRow(arrayOf<Any>(NAME, f.length()))
+        cursor.addRow(arrayOf<Any>("request.png", f.length()))
         return cursor
     }
 
@@ -47,7 +52,5 @@ class ShareImageProvider : ContentProvider() {
 
     companion object {
         const val AUTHORITY = "org.openbmt.counter.app.share"
-        const val FOLDER = "share"
-        const val NAME = "request.png"
     }
 }

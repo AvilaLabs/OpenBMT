@@ -1565,9 +1565,11 @@ by any means the phone has.
   is confirmed.", for the cashier. It has two buttons. "Share the link" gives
   Android's share sheet the payment link: the payment request URI the sale
   already shows, with its amount and label (CR-83). "Share the code" gives it
-  the code as a PNG image. Nothing is sent by the app itself, and the
-  image is made in the app's own folder, shared by one-time access, and
-  deleted when the page is left. Back goes Home. The page of a request that
+  the code as a PNG image. Nothing is sent by the app itself. Each image
+  is made in the app's own folder under a fresh random name and shared at
+  its own address. When the page is left, when another image is shared and
+  when the app starts, every address given out is revoked and every image
+  deleted. Back goes Home. The page of a request that
   is open again, from the list of CR-215, says "Waiting for payment", "This
   request is open until {date}. It is paid once the payment is confirmed." and
   "Nothing to do.", for nobody; one that expired says what an expired sale
