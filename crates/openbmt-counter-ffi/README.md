@@ -122,6 +122,17 @@ at once. A sale's screen carries the Lightning line and, when the invoice
 has passed, the code of LN-18 as its payment; `StateView::PaidLightning` is
 a sale paid by Lightning, final at once.
 
+Ops 66 to 68 carry the shop's swap provider (CR-219, CR-225): `swap_next`
+hands out the next request for the provider's onion name (the number, the
+`host:port`, and the bytes of an HTTP/1.1 request), `swap_reply` takes the
+bytes that came back and `swap_failed` says there were none. The app sends
+the bytes to port 80 of the onion name through its own Tor, one request at a
+time, and never around it. A sale's Lightning line then also carries the
+small line for a sale with no swap (`not_for_this_sale`), the words of a swap
+that failed (`failed`), and, while the sale waits for one block, the sale's
+words are those of CR-221. The status's Lightning line carries the words of a
+claim that is stuck (CR-222) when no node connection is saved.
+
 ## Storage
 
 The node stores in a data folder (the app passes `noBackupFilesDir`). The

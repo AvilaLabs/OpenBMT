@@ -18,5 +18,6 @@ mod requests;
 mod screen;
 mod staff;
 mod strict;
+mod swap;
 mod tips;
 pub(crate) mod wire;

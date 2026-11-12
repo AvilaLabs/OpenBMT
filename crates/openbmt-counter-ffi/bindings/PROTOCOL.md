@@ -104,6 +104,9 @@ ops run on another; it waits for at most 250 ms.
  63 sale_info        handle node  args u32 -> SaleInfoView
  64 requests         handle node  args u64 -> list<RequestRow>
  65 request_link     handle node  args (u32, string) -> string
+ 66 swap_next        handle node  args u64 -> option<SwapRequestView>
+ 67 swap_reply       handle node  args SwapReplyArgs -> ()
+ 68 swap_failed      handle node  args u64 -> ()
 ```
 
 ## Types
@@ -177,6 +180,8 @@ LnTransportView: enum, one tag byte
     tags PinRefused=0 Unreachable=1 TimedOut=2 TooBig=3 Redirected=4
 LnFailArgs: record: id: u64, why: LnTransportView
 LnStepView: record: next: option<LnRequestView>, record: option<list<u8>>
-LightningSaleView: record: invoice: bool, waiting: bool, unavailable: option<Words>
+LightningSaleView: record: invoice: bool, waiting: bool, unavailable: option<Words>, not_for_this_sale: bool, failed: option<Words>
+SwapRequestView: record: id: u64, host_port: string, bytes: list<u8>
+SwapReplyArgs: record: id: u64, bytes: list<u8>
 LightningStatusView: record: ready: bool, words: Words
 ```

@@ -1228,13 +1228,61 @@ pub struct LightningSaleView {
     /// The line that says Lightning is not available for this sale, with
     /// the reason in its details.
     pub unavailable: Option<WordsView>,
+    /// CR-219: through a swap provider, the sale has none, and the small
+    /// line says so.
+    pub not_for_this_sale: bool,
+    /// CR-223: through a swap provider, the swap failed before its claim.
+    pub failed: Option<WordsView>,
 }
 
 wire_record!(LightningSaleView {
     invoice,
     waiting,
-    unavailable
+    unavailable,
+    not_for_this_sale,
+    failed
 });
+
+/// One request for the app to send to the swap provider (CR-225): plain
+/// HTTP/1.1 to the onion name through the counter's own Tor, never around it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwapRequestView {
+    /// The number the answer comes back with.
+    pub id: u64,
+    /// `host:port` of the provider's onion service.
+    pub host_port: String,
+    /// The bytes to send, a whole HTTP/1.1 request.
+    pub bytes: Vec<u8>,
+}
+
+wire_record!(SwapRequestView {
+    id,
+    host_port,
+    bytes
+});
+
+impl From<openbmt_counter_node::SwapRequest> for SwapRequestView {
+    fn from(r: openbmt_counter_node::SwapRequest) -> Self {
+        Self {
+            id: r.id,
+            host_port: r.host_port,
+            bytes: r.bytes,
+        }
+    }
+}
+
+/// What the provider answered (CR-225): everything it sent until it closed
+/// the connection, at most 64 KiB.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwapReplyArgs {
+    /// The number of the request.
+    pub id: u64,
+    /// The bytes that came back.
+    pub bytes: Vec<u8>,
+}
+
+wire_record!(SwapReplyArgs { id, bytes });
+wire_record_get!(SwapReplyArgs { id, bytes });
 
 /// The Lightning line of the status (CR-116).
 #[derive(Debug, Clone, PartialEq, Eq)]

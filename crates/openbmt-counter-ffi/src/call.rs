@@ -69,6 +69,10 @@
 //!   says what a sale carries besides its amount, 64 `requests` lists the
 //!   open requests (CR-215) and 65 `request_link` gives the payment link of
 //!   one (CR-214).
+//! - 66 to 68 Lightning through a swap provider (CR-219, CR-225):
+//!   `swap_next` hands out the next request for the provider's onion name,
+//!   `swap_reply` takes the bytes that came back and `swap_failed` says there
+//!   were none. The app sends them over plain HTTP/1.1 through its own Tor.
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -103,8 +107,8 @@ use crate::views::{
     OpenTipArgs, OpenedView, OverrideArgs, OwnNodeCheckArgs, OwnNodeView, PairBeginArgs,
     PairStartedView, PairingView, PersonLineView, PumpView, RefundArgs, RefundAskView, RefundRow,
     RefundStateView, RelayKind, ReportView, RequestRow, RequoteArgs, SaleInfoView, ScreenView,
-    StaffArgs, StartConfig, StateView, StatusView, TallyView, TipChoiceView, TipTallyView,
-    WithdrawArgs, WordsView,
+    StaffArgs, StartConfig, StateView, StatusView, SwapReplyArgs, SwapRequestView, TallyView,
+    TipChoiceView, TipTallyView, WithdrawArgs, WordsView,
 };
 
 /// The first four bytes of a request.
@@ -475,6 +479,15 @@ fn build_ops() -> Vec<Op> {
             Node,
             |c, (index, label): (u32, String)| c.entry()?.request_link(index, &label),
         ),
+        op(66, "swap_next", Node, |c, now: u64| {
+            c.entry()?.swap_next(now)
+        }),
+        op(67, "swap_reply", Node, |c, a: SwapReplyArgs| {
+            c.entry()?.swap_reply(a)
+        }),
+        op(68, "swap_failed", Node, |c, id: u64| {
+            c.entry()?.swap_failed(id)
+        }),
     ]
 }
 
@@ -660,6 +673,8 @@ fn definitions() -> Vec<TypeDef> {
         LnFailArgs::define(),
         LnStepView::define(),
         LightningSaleView::define(),
+        SwapRequestView::define(),
+        SwapReplyArgs::define(),
         LightningStatusView::define(),
     ]
 }

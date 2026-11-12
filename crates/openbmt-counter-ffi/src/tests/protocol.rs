@@ -82,6 +82,9 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (63, "sale_info"),
         (64, "requests"),
         (65, "request_link"),
+        (66, "swap_next"),
+        (67, "swap_reply"),
+        (68, "swap_failed"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);
