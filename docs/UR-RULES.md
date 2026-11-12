@@ -136,7 +136,9 @@ cosigner key out of a finished UR (section 7).
   BBQr sets of `docs/BBQR-RULES.md`: write the parts of a payload, open a
   reader of sets of type P or T, give it a part, take its result, close
   it; a reader's refusal is the rule code BQ-01 to BQ-12 of the part's
-  fault, the handles are those of UR-22 and at most four readers are open),
+  fault, the handles are those of UR-22 and at most four readers are open;
+  and 13 to 16 for the wallet reader of UR-34 to UR-40: open a reader,
+  give it a part, take its result, close it),
   the fields of the operation and nothing after them, with every length
   exactly the bytes that follow. A
   request of any other shape (another magic, version or operation, a cut,
