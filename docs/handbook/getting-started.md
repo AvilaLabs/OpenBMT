@@ -11,7 +11,7 @@ built.
 
 ## The three parts
 
-![Your wallet holds the keys. The owner phone and the counter can only watch.](images/parts.svg)
+<img src="images/parts.svg" alt="Your wallet holds the keys. The owner phone and the counter can only watch." style="width:100%;max-width:480px">
 
 | Part | What it is | Its job | Can it spend the money? |
 |---|---|---|---|
@@ -27,7 +27,7 @@ both phones with a PIN.
 
 ## How a payment travels
 
-![The customer's wallet pays your wallet directly. The counter watches and tells the cashier.](images/payment-path.svg)
+<img src="images/payment-path.svg" alt="The customer's wallet pays your wallet directly. The counter watches and tells the cashier." style="width:100%;max-width:480px">
 
 The customer's wallet pays an address of your wallet. The counter watches
 the Bitcoin network for that payment and tells the cashier when it has
@@ -37,7 +37,7 @@ other payment.
 
 ## When you do what
 
-![Once at setup, at every sale, and now and then.](images/when.svg)
+<img src="images/when.svg" alt="Once at setup, at every sale, and now and then." style="width:100%;max-width:480px">
 
 | When | What | Where | Time |
 |---|---|---|---|
@@ -70,7 +70,7 @@ from the list: Square, Toast, Shopify POS, Loyverse, Odoo, Hike, StoreHub,
 
 **Where:** owner phone, with your wallet or a laptop. **When:** once.
 
-![Do you have a cold wallet? Yes: connect it. No: make one with a coin or a die. Not now: set up the rest first.](images/wallet-choice.svg)
+<img src="images/wallet-choice.svg" alt="Do you have a cold wallet? Yes: connect it. No: make one with a coin or a die. Not now: set up the rest first." style="width:100%;max-width:480px">
 
 A **cold wallet** keeps its keys on a device that never connects to the
 internet. This is the industry's standard for money a business keeps. A
@@ -98,7 +98,7 @@ built.
 
 **Where:** the counter and the owner phone. **When:** once per counter.
 
-![The counter shows a code, the owner phone scans it, both show the same four words, then the counter scans the owner phone's code and says Paired.](images/pairing.svg)
+<img src="images/pairing.svg" alt="The counter shows a code, the owner phone scans it, both show the same four words, then the counter scans the owner phone's code and says Paired." style="width:100%;max-width:480px">
 
 1. Install the Counter app on the phone or tablet that stays at the till.
    It shows a code.
@@ -130,7 +130,7 @@ the amount to the counter, so the cashier does not type it twice.
 
 **Where:** the counter and the till. **When:** every sale.
 
-![Type the amount, the customer scans, the counter says Paid, close the sale in the till.](images/sale-steps.svg)
+<img src="images/sale-steps.svg" alt="Type the amount, the customer scans, the counter says Paid, close the sale in the till." style="width:100%;max-width:480px">
 
 1. Ring up the sale in the till as usual.
 2. Type the amount on the counter, or let the till send it.
@@ -161,7 +161,7 @@ wallet you hold are being built.
 
 ## Optional parts
 
-![The Box, your own Bitcoin node and Lightning, each optional.](images/optional.svg)
+<img src="images/optional.svg" alt="The Box, your own Bitcoin node and Lightning, each optional." style="width:100%;max-width:480px">
 
 | Part | What it adds | When it is worth it |
 |---|---|---|
@@ -171,7 +171,7 @@ wallet you hold are being built.
 
 ## The good practice behind these steps
 
-![A checklist of the habits above.](images/checklist.svg)
+<img src="images/checklist.svg" alt="A checklist of the habits above." style="width:100%;max-width:480px">
 
 These are the habits that experienced merchants who keep their own
 bitcoin follow. OpenBMT builds most of them in; the rest are yours.

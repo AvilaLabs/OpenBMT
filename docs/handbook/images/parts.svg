@@ -1,36 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 320" role="img" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 532" role="img" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
 <title>Your wallet holds the keys. The owner phone and the counter can only watch.</title>
-<rect x="0.5" y="0.5" width="719" height="319" rx="16" fill="#FFFFFF" stroke="#D5D9E0" stroke-width="1" />
-<rect x="20" y="20" width="216" height="280" rx="12" fill="#F4F5F7" stroke="#E2E5EA" stroke-width="1" />
-<rect x="252" y="20" width="216" height="280" rx="12" fill="#F4F5F7" stroke="#E2E5EA" stroke-width="1" />
-<rect x="484" y="20" width="216" height="280" rx="12" fill="#F4F5F7" stroke="#E2E5EA" stroke-width="1" />
-<rect x="68.0" y="50" width="56" height="76" rx="8" fill="#F4F5F7" stroke="#4A505A" stroke-width="2" />
-<rect x="76.0" y="58" width="40" height="28.88" rx="3" fill="#FFFFFF" stroke="#4A505A" stroke-width="1.5" />
-<circle cx="86.66666666666667" cy="110" r="5" fill="#E7E9EE" stroke="#4A505A" stroke-width="1.5"/>
-<circle cx="105.33333333333334" cy="110" r="5" fill="#E7E9EE" stroke="#4A505A" stroke-width="1.5"/>
-<rect x="134.0" y="66" width="64" height="44" rx="3" fill="#E7E9EE" stroke="#4A505A" stroke-width="2" />
-<circle cx="142.0" cy="74" r="3" fill="#4A505A" stroke="none" stroke-width="1"/>
-<circle cx="142.0" cy="102" r="3" fill="#4A505A" stroke="none" stroke-width="1"/>
-<circle cx="190.0" cy="74" r="3" fill="#4A505A" stroke="none" stroke-width="1"/>
-<circle cx="190.0" cy="102" r="3" fill="#4A505A" stroke="none" stroke-width="1"/>
-<rect x="330.0" y="44" width="60" height="100" rx="10" fill="#F4F5F7" stroke="#4A505A" stroke-width="2" />
-<rect x="352.0" y="49" width="16" height="4" rx="2" fill="#4A505A" stroke="none" stroke-width="1" />
-<rect x="336.0" y="58" width="48" height="76" rx="4" fill="#FFFFFF" stroke="#D5D9E0" stroke-width="1" />
-<rect x="540.0" y="60" width="104" height="72" rx="9" fill="#F4F5F7" stroke="#4A505A" stroke-width="2" />
-<circle cx="637.0" cy="96.0" r="2.5" fill="#4A505A" stroke="none" stroke-width="1"/>
-<rect x="546.0" y="66" width="84" height="60" rx="3" fill="#FFFFFF" stroke="#D5D9E0" stroke-width="1" />
-<text x="128.0" y="182" font-size="18" font-weight="bold" text-anchor="middle" fill="#111317">Your wallet</text>
-<text x="128.0" y="208" font-size="15" font-weight="normal" text-anchor="middle" fill="#4A505A">Holds the keys</text>
-<text x="360.0" y="182" font-size="18" font-weight="bold" text-anchor="middle" fill="#111317">Owner phone</text>
-<text x="360.0" y="208" font-size="15" font-weight="normal" text-anchor="middle" fill="#4A505A">Sets up, shows payments,</text>
-<text x="360.0" y="229" font-size="15" font-weight="normal" text-anchor="middle" fill="#4A505A">keeps the books</text>
-<text x="592.0" y="182" font-size="18" font-weight="bold" text-anchor="middle" fill="#111317">Counter</text>
-<text x="592.0" y="208" font-size="15" font-weight="normal" text-anchor="middle" fill="#4A505A">Shows the code,</text>
-<text x="592.0" y="229" font-size="15" font-weight="normal" text-anchor="middle" fill="#4A505A">says Paid</text>
-<rect x="73.0" y="250" width="110" height="28" rx="14" fill="#12805C" stroke="none" stroke-width="1" />
-<text x="128.0" y="269.5" font-size="15" font-weight="bold" text-anchor="middle" fill="#FFFFFF">Can spend</text>
-<rect x="295.75" y="250.75" width="128.5" height="26.5" rx="13" fill="#FFFFFF" stroke="#5B616B" stroke-width="1.5" />
-<text x="360.0" y="269.5" font-size="15" font-weight="bold" text-anchor="middle" fill="#5B616B">Watches only</text>
-<rect x="527.75" y="250.75" width="128.5" height="26.5" rx="13" fill="#FFFFFF" stroke="#5B616B" stroke-width="1.5" />
-<text x="592.0" y="269.5" font-size="15" font-weight="bold" text-anchor="middle" fill="#5B616B">Watches only</text>
+<rect x="0.5" y="0.5" width="479" height="531" rx="16" fill="#FFFFFF" stroke="#D5D9E0" stroke-width="1" />
+<rect x="16" y="16" width="448" height="160" rx="12" fill="#F4F5F7" stroke="#E2E5EA" stroke-width="1" />
+<rect x="16" y="186" width="448" height="160" rx="12" fill="#F4F5F7" stroke="#E2E5EA" stroke-width="1" />
+<rect x="16" y="356" width="448" height="160" rx="12" fill="#F4F5F7" stroke="#E2E5EA" stroke-width="1" />
+<g transform="translate(32.0 52.0) scale(0.95)"><rect x="0" y="0" width="56" height="76" rx="8" fill="#F4F5F7" stroke="#4A505A" stroke-width="2" /><rect x="8" y="8" width="40" height="28.88" rx="3" fill="#FFFFFF" stroke="#4A505A" stroke-width="1.5" /><circle cx="18.666666666666668" cy="60" r="5" fill="#E7E9EE" stroke="#4A505A" stroke-width="1.5"/><circle cx="37.333333333333336" cy="60" r="5" fill="#E7E9EE" stroke="#4A505A" stroke-width="1.5"/><rect x="64" y="16" width="64" height="44" rx="3" fill="#E7E9EE" stroke="#4A505A" stroke-width="2" /><circle cx="72" cy="24" r="3" fill="#4A505A" stroke="none" stroke-width="1"/><circle cx="72" cy="52" r="3" fill="#4A505A" stroke="none" stroke-width="1"/><circle cx="120" cy="24" r="3" fill="#4A505A" stroke="none" stroke-width="1"/><circle cx="120" cy="52" r="3" fill="#4A505A" stroke="none" stroke-width="1"/></g>
+<g transform="translate(52.0 211.0) scale(1.0)"><rect x="0" y="0" width="60" height="100" rx="10" fill="#F4F5F7" stroke="#4A505A" stroke-width="2" /><rect x="22.0" y="5" width="16" height="4" rx="2" fill="#4A505A" stroke="none" stroke-width="1" /><rect x="6" y="14" width="48" height="76" rx="4" fill="#FFFFFF" stroke="#D5D9E0" stroke-width="1" /></g>
+<g transform="translate(26.0 395.0) scale(1.0)"><rect x="0" y="0" width="104" height="72" rx="9" fill="#F4F5F7" stroke="#4A505A" stroke-width="2" /><circle cx="97" cy="36.0" r="2.5" fill="#4A505A" stroke="none" stroke-width="1"/><rect x="6" y="6" width="84" height="60" rx="3" fill="#FFFFFF" stroke="#D5D9E0" stroke-width="1" /></g>
+<text x="164" y="54" font-size="24" font-weight="bold" text-anchor="start" fill="#111317">Your wallet</text>
+<text x="164" y="84" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">Holds the keys</text>
+<rect x="164" y="128" width="130" height="32" rx="16" fill="#12805C" stroke="none" stroke-width="1" />
+<text x="229.0" y="150" font-size="18" font-weight="bold" text-anchor="middle" fill="#FFFFFF">Can spend</text>
+<text x="164" y="224" font-size="24" font-weight="bold" text-anchor="start" fill="#111317">Owner phone</text>
+<text x="164" y="254" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">Sets up, shows payments,</text>
+<text x="164" y="280" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">keeps the books</text>
+<rect x="164.75" y="298.75" width="158.5" height="30.5" rx="15" fill="#FFFFFF" stroke="#5B616B" stroke-width="1.5" />
+<text x="244.0" y="320" font-size="18" font-weight="bold" text-anchor="middle" fill="#5B616B">Watches only</text>
+<text x="164" y="394" font-size="24" font-weight="bold" text-anchor="start" fill="#111317">Counter</text>
+<text x="164" y="424" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">Shows the code,</text>
+<text x="164" y="450" font-size="20" font-weight="normal" text-anchor="start" fill="#4A505A">says Paid</text>
+<rect x="164.75" y="468.75" width="158.5" height="30.5" rx="15" fill="#FFFFFF" stroke="#5B616B" stroke-width="1.5" />
+<text x="244.0" y="490" font-size="18" font-weight="bold" text-anchor="middle" fill="#5B616B">Watches only</text>
 </svg>
