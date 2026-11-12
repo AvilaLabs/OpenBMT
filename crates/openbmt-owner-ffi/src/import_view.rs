@@ -50,7 +50,7 @@ fn wipe(text: String) {
     std::hint::black_box(&mut bytes);
 }
 
-fn refused(r: ImportRefused) -> AppError {
+pub(crate) fn refused(r: ImportRefused) -> AppError {
     let rule = match r {
         ImportRefused::HasPrivateKey => "WL-08",
         ImportRefused::Damaged => "WL-10",

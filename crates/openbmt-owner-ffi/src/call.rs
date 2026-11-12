@@ -86,6 +86,11 @@
 //!   WL-08 to WL-15) for the key maker guide: its fingerprint and first
 //!   address, or the words of the refusal. It works on no node and stores
 //!   nothing.
+//! - 147 to 157: the owner phone of a shop with its own wallet
+//!   (`docs/OWNER-APP-RULES.md` OA-105 to OA-113): make the owner root, keep
+//!   and read the wallet's file, make the offer, read the counter's request,
+//!   make the bundle, differ, the counters waiting, the bundle again, that
+//!   the counter took it, and the gap limit. They work on no node.
 //! - 146: the full ledger (`docs/BOOKS-RULES.md` BK-19), made only when the
 //!   request says the person accepted the warning; `false` refuses. The
 //!   books call (144) never holds it.
@@ -119,6 +124,10 @@ use crate::counter_views::{
 use crate::error::{internal, refused_by, wrong_state, AppError};
 use crate::host::{real_spawn, Entry, Spawn};
 use crate::import_view::{self, ImportKind, ImportView};
+use crate::own::{
+    self, OwnBundleView, OwnConfirmArgs, OwnCounterArgs, OwnGapArgs, OwnGapView, OwnMade,
+    OwnOfferView, OwnOwnerMade, OwnRequestArgs, OwnRequestView, OwnShopArgs, OwnWalletView,
+};
 use crate::pos_views::{
     PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
     PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
@@ -696,6 +705,33 @@ fn build_ops() -> Vec<Op> {
         op(146, "books_ledger", Node, |c, acknowledged: bool| {
             c.entry()?.books_ledger(acknowledged)
         }),
+        op(147, "own_owner_make", Zero, |_, ()| own::owner_make()),
+        op(148, "own_wallet_pin", Zero, |_, text: String| {
+            own::wallet_pin(text)
+        }),
+        op(149, "own_wallet_read", Zero, |_, file: Vec<u8>| {
+            own::wallet_read(file)
+        }),
+        op(150, "own_offer", Zero, |_, (a, now): (OwnShopArgs, u64)| {
+            own::offer(a, now)
+        }),
+        op(151, "own_request", Zero, |_, a: OwnRequestArgs| {
+            own::request(a)
+        }),
+        op(152, "own_confirm", Zero, |_, a: OwnConfirmArgs| {
+            own::confirm(a)
+        }),
+        op(153, "own_differ", Zero, |_, ()| own::differ()),
+        op(154, "own_waiting", Zero, |_, a: OwnShopArgs| {
+            own::waiting(a)
+        }),
+        op(155, "own_bundle", Zero, |_, a: OwnCounterArgs| {
+            own::bundle_again(a)
+        }),
+        op(156, "own_delivered", Zero, |_, a: OwnCounterArgs| {
+            own::delivered(a)
+        }),
+        op(157, "own_gap", Zero, |_, a: OwnGapArgs| own::gap(a)),
     ]
 }
 
@@ -913,6 +949,18 @@ fn definitions() -> Vec<TypeDef> {
         CounterQueuedView::define(),
         WaitingCounterView::define(),
         CounterBundleView::define(),
+        OwnShopArgs::define(),
+        OwnOwnerMade::define(),
+        OwnWalletView::define(),
+        OwnMade::define(),
+        OwnOfferView::define(),
+        OwnRequestArgs::define(),
+        OwnRequestView::define(),
+        OwnConfirmArgs::define(),
+        OwnCounterArgs::define(),
+        OwnBundleView::define(),
+        OwnGapArgs::define(),
+        OwnGapView::define(),
         PinChangeArgs::define(),
         BoxLinkArgs::define(),
         BoxFoundView::define(),

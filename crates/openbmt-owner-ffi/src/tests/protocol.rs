@@ -122,6 +122,17 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (144, "books"),
         (145, "wallet_import_read"),
         (146, "books_ledger"),
+        (147, "own_owner_make"),
+        (148, "own_wallet_pin"),
+        (149, "own_wallet_read"),
+        (150, "own_offer"),
+        (151, "own_request"),
+        (152, "own_confirm"),
+        (153, "own_differ"),
+        (154, "own_waiting"),
+        (155, "own_bundle"),
+        (156, "own_delivered"),
+        (157, "own_gap"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

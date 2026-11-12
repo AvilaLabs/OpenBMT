@@ -145,6 +145,17 @@ ops run on another; it waits for at most 250 ms.
 144 books            handle node  args BooksArgs -> BooksView
 145 wallet_import_read handle zero  args string -> ImportView
 146 books_ledger     handle node  args bool -> list<u8>
+147 own_owner_make   handle zero  args () -> OwnOwnerMade
+148 own_wallet_pin   handle zero  args string -> OwnWalletView
+149 own_wallet_read  handle zero  args list<u8> -> OwnWalletView
+150 own_offer        handle zero  args (OwnShopArgs, u64) -> OwnOfferView
+151 own_request      handle zero  args OwnRequestArgs -> OwnRequestView
+152 own_confirm      handle zero  args OwnConfirmArgs -> OwnBundleView
+153 own_differ       handle zero  args () -> Words
+154 own_waiting      handle zero  args OwnShopArgs -> list<WaitingCounterView>
+155 own_bundle       handle zero  args OwnCounterArgs -> OwnBundleView
+156 own_delivered    handle zero  args OwnCounterArgs -> ()
+157 own_gap          handle zero  args OwnGapArgs -> OwnGapView
 ```
 
 ## Types
@@ -262,6 +273,18 @@ CounterConfirmArgs: record: pairing: u32, usd_per_btc: u64
 CounterQueuedView: record: settings: u32, version: u32, batch: u32, batch_count: u32, shares: list<CounterShareView>, words: Words
 WaitingCounterView: record: counter: list<u8>, name: string
 CounterBundleView: record: code: list<u8>, with_batch: bool, words: Words
+OwnShopArgs: record: dir: string, owner_secret: list<u8>, wallet: list<u8>
+OwnOwnerMade: record: secret: list<u8>, root: list<u8>
+OwnWalletView: record: file: list<u8>, first_address: string, multisig: bool
+OwnMade: record: code: list<u8>, made_at: u64
+OwnOfferView: record: made: OwnMade, ends_at: u64, floor: u32, first_address: string
+OwnRequestArgs: record: shop: OwnShopArgs, made: OwnMade, now: u64, request: list<u8>
+OwnRequestView: record: counter: list<u8>, name: string, session_words: list<string>, needs_rate: bool, shares: list<CounterShareView>, seconds_left: u64
+OwnConfirmArgs: record: shop: OwnShopArgs, made: OwnMade, now: u64, request: list<u8>, usd_per_btc: u64, relay: option<list<u8>>
+OwnCounterArgs: record: shop: OwnShopArgs, counter: list<u8>
+OwnBundleView: record: counter: list<u8>, code: list<u8>, first_start: u32, first_end: u32, settings_version: u32, shares: list<CounterShareView>
+OwnGapArgs: record: paid: list<u32>, highest_given: option<u32>
+OwnGapView: record: needed: u32, notice: bool
 PinChangeArgs: record: locked: list<u8>, current: string, new: string
 BoxLinkArgs: record: address: string, proxy: string
 BoxFoundView: record: claim: list<u8>, box_key: list<u8>, needs_rate: bool

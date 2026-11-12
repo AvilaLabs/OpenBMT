@@ -11,6 +11,7 @@ mod import;
 pub(crate) mod kit;
 mod kotlin;
 mod lock;
+mod own;
 mod pos;
 mod price;
 mod protocol;

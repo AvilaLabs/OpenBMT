@@ -34,7 +34,7 @@ fn seed() -> (String, String, String) {
     (fingerprint, xpub, address)
 }
 
-fn descriptor() -> String {
+pub(super) fn descriptor() -> String {
     let (fp, xpub, _) = seed();
     SingleKeyWallet::new(
         Fingerprint::from_str(&fp).expect("fingerprint"),

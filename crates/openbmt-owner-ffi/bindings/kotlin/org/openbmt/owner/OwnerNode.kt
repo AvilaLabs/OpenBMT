@@ -144,6 +144,17 @@ private const val OP_PRICE_AGREE_FOR = 143
 private const val OP_BOOKS = 144
 private const val OP_WALLET_IMPORT_READ = 145
 private const val OP_BOOKS_LEDGER = 146
+private const val OP_OWN_OWNER_MAKE = 147
+private const val OP_OWN_WALLET_PIN = 148
+private const val OP_OWN_WALLET_READ = 149
+private const val OP_OWN_OFFER = 150
+private const val OP_OWN_REQUEST = 151
+private const val OP_OWN_CONFIRM = 152
+private const val OP_OWN_DIFFER = 153
+private const val OP_OWN_WAITING = 154
+private const val OP_OWN_BUNDLE = 155
+private const val OP_OWN_DELIVERED = 156
+private const val OP_OWN_GAP = 157
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -723,6 +734,43 @@ class CounterQueued(
 
 /** A counter whose finished pairing waits to be handed over. [name] is text from the counter. */
 class WaitingCounter(val counter: ByteArray, val name: String)
+
+/** The owner root a shop with its own wallet is made with: [secret] is kept sealed by the app (OA-105). */
+class OwnOwnerMade(val secret: ByteArray, val root: ByteArray)
+
+/** A wallet that read: its file (`OBM)`, kept sealed), its first receive address and whether it is 2-of-3. */
+class OwnWalletView(val file: ByteArray, val firstAddress: String, val multisig: Boolean)
+
+/** An offer as made (OA-108): its code and the time it was made, handed back with each later call. */
+class OwnMade(val code: ByteArray, val madeAt: Long)
+
+class OwnOfferView(val made: OwnMade, val endsAt: Long, val floor: Long, val firstAddress: String)
+
+/** The counter's request read (OA-109): its four words are [sessionWords]. */
+class OwnRequestView(
+    val counter: ByteArray,
+    val name: String,
+    val sessionWords: List<String>,
+    val needsRate: Boolean,
+    val shares: List<CounterShare>,
+    val secondsLeft: Long,
+)
+
+/** The bundle a counter takes (OA-110, OA-111): [code] is drawn as a code. */
+class OwnBundleView(
+    val counter: ByteArray,
+    val code: ByteArray,
+    val firstStart: Long,
+    val firstEnd: Long,
+    val settingsVersion: Long,
+    val shares: List<CounterShare>,
+)
+
+/** How far ahead the wallet must look (OA-113); [notice] is true above 20. */
+class OwnGapView(val needed: Long, val notice: Boolean)
+
+/** What every call on the own-wallet shop is given: the folder, the owner secret and the wallet's file. */
+class OwnShopArgs(val dir: String, val ownerSecret: ByteArray, val wallet: ByteArray)
 
 /** Where a Box is: `host:port` on the local network, or a v3 `.onion` name and port through [proxy]. */
 class BoxLink(val address: String, val proxy: String)
@@ -1461,6 +1509,17 @@ internal fun Reader.counterQueued(): CounterQueued =
     CounterQueued(u32(), u32(), u32(), u32(), list { CounterShare(bytes(), u32()) }, words())
 
 internal fun Reader.waitingCounter(): WaitingCounter = WaitingCounter(bytes(), string())
+
+internal fun Reader.ownWalletView(): OwnWalletView = OwnWalletView(bytes(), string(), bool())
+
+internal fun Reader.ownMade(): OwnMade = OwnMade(bytes(), u64())
+
+internal fun Reader.ownBundleView(): OwnBundleView =
+    OwnBundleView(bytes(), bytes(), u32(), u32(), u32(), list { CounterShare(bytes(), u32()) })
+
+internal fun Writer.ownShop(a: OwnShopArgs): Writer = string(a.dir).bytes(a.ownerSecret).bytes(a.wallet)
+
+internal fun Writer.ownMade(m: OwnMade): Writer = bytes(m.code).u64(m.madeAt)
 
 internal fun Reader.boxFound(): BoxFound = BoxFound(bytes(), bytes(), bool())
 
@@ -2244,5 +2303,89 @@ object OwnerLock {
     fun changePin(locked: ByteArray, current: String, new: String): ByteArray {
         val r = call(OP_SETUP_CHANGE_PIN, 0) { it.bytes(locked).string(current).string(new) }
         return r.bytes().also { r.end() }
+    }
+}
+
+/**
+ * The owner phone of a shop with its own wallet (`docs/OWNER-APP-RULES.md` OA-105 to OA-113). No node runs
+ * while these are called, so they name no handle. Each call that opens the shop is given the folder, the
+ * owner secret and the wallet's file (the app keeps the last two sealed) and stores what it changed before it
+ * returns.
+ */
+object OwnerOwn {
+    /** Make the owner root of the shop. */
+    fun make(): OwnOwnerMade {
+        val r = call(OP_OWN_OWNER_MAKE, 0)
+        return OwnOwnerMade(r.bytes(), r.bytes()).also { r.end() }
+    }
+
+    /** The file that keeps the wallet, from the text the owner scanned and checked. */
+    fun pin(text: String): OwnWalletView {
+        val r = call(OP_OWN_WALLET_PIN, 0) { it.string(text) }
+        return r.ownWalletView().also { r.end() }
+    }
+
+    /** Read the file back; one that does not read is refused with the words. */
+    fun read(file: ByteArray): OwnWalletView {
+        val r = call(OP_OWN_WALLET_READ, 0) { it.bytes(file) }
+        return r.ownWalletView().also { r.end() }
+    }
+
+    /** The offer (OA-108); it lasts 10 minutes and is held in memory only. */
+    fun offer(shop: OwnShopArgs, now: Long): OwnOfferView {
+        val r = call(OP_OWN_OFFER, 0) { it.ownShop(shop).u64(now) }
+        return OwnOfferView(r.ownMade(), r.u64(), r.u32(), r.string()).also { r.end() }
+    }
+
+    /** Read the counter's request (OA-109): its four words are shown on both phones. */
+    fun request(shop: OwnShopArgs, made: OwnMade, now: Long, request: ByteArray): OwnRequestView {
+        val r = call(OP_OWN_REQUEST, 0) { it.ownShop(shop).ownMade(made).u64(now).bytes(request) }
+        return OwnRequestView(
+            r.bytes(), r.string(), r.strings(), r.bool(), r.list { CounterShare(r.bytes(), r.u32()) }, r.u64(),
+        ).also { r.end() }
+    }
+
+    /** "They match" (OA-110): the first settings, the first range and the signed pairing, and the bundle. */
+    fun confirm(
+        shop: OwnShopArgs,
+        made: OwnMade,
+        now: Long,
+        request: ByteArray,
+        usdPerBtc: Long,
+        relay: ByteArray?,
+    ): OwnBundleView {
+        val r = call(OP_OWN_CONFIRM, 0) {
+            it.ownShop(shop).ownMade(made).u64(now).bytes(request).u64(usdPerBtc).option(relay) { b -> it.bytes(b) }
+        }
+        return r.ownBundleView().also { r.end() }
+    }
+
+    /** "They differ" (OA-110): nothing was paired; the words say so. */
+    fun differ(): Words {
+        val r = call(OP_OWN_DIFFER, 0)
+        return r.words().also { r.end() }
+    }
+
+    /** The counters whose bundle waits (OA-111). */
+    fun waiting(shop: OwnShopArgs): List<WaitingCounter> {
+        val r = call(OP_OWN_WAITING, 0) { it.ownShop(shop) }
+        return r.list { r.waitingCounter() }.also { r.end() }
+    }
+
+    /** The bundle of a waiting counter again, as it was made (OA-111). */
+    fun bundleAgain(shop: OwnShopArgs, counter: ByteArray): OwnBundleView {
+        val r = call(OP_OWN_BUNDLE, 0) { it.ownShop(shop).bytes(counter) }
+        return r.ownBundleView().also { r.end() }
+    }
+
+    /** The counter shows Paired (OA-111). */
+    fun delivered(shop: OwnShopArgs, counter: ByteArray) = callUnit(OP_OWN_DELIVERED, 0) { it.ownShop(shop).bytes(counter) }
+
+    /** How far ahead the wallet must look (OA-113). */
+    fun gap(paid: List<Long>, highestGiven: Long?): OwnGapView {
+        val r = call(OP_OWN_GAP, 0) { w ->
+            w.list(paid) { w.u32(it) }.option(highestGiven) { w.u32(it) }
+        }
+        return OwnGapView(r.u32(), r.bool()).also { r.end() }
     }
 }

@@ -11,6 +11,8 @@ use openbmt_core::say::{Tone, Who, Words};
 use crate::own_shop::OwnRefusal;
 use crate::say::stop;
 
+/// OA-105: the words of a shop's state that does not read or is not stored.
+pub const WORDS_NEEDED_OA_105: &str = "WORDS_NEEDED_OA_105";
 /// OA-106: the words of a book that gave no range are still to be written.
 pub const WORDS_NEEDED_OA_106: &str = "WORDS_NEEDED_OA_106";
 /// OA-107: the words of a book that is past what the phone watches.
@@ -68,7 +70,35 @@ pub fn they_differ() -> Words {
     .code("OA-110")
 }
 
+/// OA-105: the file that keeps the wallet's description does not read.
+pub fn wallet_not_readable() -> Words {
+    stop(
+        "Wallet not readable",
+        "The file that keeps your wallet's description could not be read, so no counter can be added.",
+        Who::Owner,
+        "Do not clear the app's data. Your money is in your wallet, not in this file.",
+    )
+    .code("OA-105")
+}
+
 impl OwnRefusal {
+    /// The rule behind the refusal, for the small print and for logs.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::OfferEnded | Self::ClockWentBack | Self::NotThisShopsOffer => "OA-108",
+            Self::NotARequest
+            | Self::OtherOffer
+            | Self::BadSignature
+            | Self::OwnKey
+            | Self::BadName => "OA-109",
+            Self::AlreadyAdded | Self::Pairing(_) | Self::Settings(_) => "OA-110",
+            Self::Book(crate::own_book::BookError::WatchBudget) => "OA-107",
+            Self::Book(_) => "OA-106",
+            Self::NoBundle | Self::TooManyWaiting => "OA-111",
+            Self::UnknownCounter => "OA-112",
+        }
+    }
+
     /// What the owner is told (OA-109, OA-114).
     pub fn words(&self) -> Words {
         match self {
@@ -122,6 +152,7 @@ pub fn all_own_words() -> Vec<(String, Words)> {
     let mut all: Vec<(String, Words)> = Vec::new();
     let mut add = |name: &str, words: Words| all.push((name.to_string(), words));
     add("they_differ", they_differ());
+    add("wallet_not_readable", wallet_not_readable());
     let refusals = [
         ("OwnRefusal::OfferEnded", OwnRefusal::OfferEnded),
         ("OwnRefusal::ClockWentBack", OwnRefusal::ClockWentBack),

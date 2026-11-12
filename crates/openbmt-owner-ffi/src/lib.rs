@@ -58,6 +58,7 @@ pub mod host;
 mod import_view;
 #[cfg(any(target_os = "android", feature = "jni"))]
 mod jni;
+mod own;
 mod pos_views;
 mod price;
 mod say;
@@ -88,6 +89,10 @@ pub use counter_views::{
 pub use error::{AppError, Kind};
 pub use host::{Entry, KEY1_FILE, MAX_WAIT_MS, SLICE_MS};
 pub use import_view::{ImportKind, ImportView};
+pub use own::{
+    OwnBundleView, OwnConfirmArgs, OwnCounterArgs, OwnGapArgs, OwnGapView, OwnMade, OwnOfferView,
+    OwnOwnerMade, OwnRequestArgs, OwnRequestView, OwnShopArgs, OwnWalletView,
+};
 pub use pos_views::{
     PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
     PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,

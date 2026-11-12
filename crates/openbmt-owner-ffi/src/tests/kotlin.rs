@@ -197,6 +197,12 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "OutboxRow(",
         "u32(), outboxKind(), option { string() }, option { bytes() }, option { u32() },",
         "option { u64() }, u32(), words(),",
+        "OwnWalletView(bytes(), string(), bool())",
+        "OwnMade(bytes(), u64())",
+        "OwnBundleView(bytes(), bytes(), u32(), u32(), u32(), list { CounterShare(bytes(), u32()) })",
+        "OwnOfferView(r.ownMade(), r.u64(), r.u32(), r.string())",
+        "r.bytes(), r.string(), r.strings(), r.bool(), r.list { CounterShare(r.bytes(), r.u32()) }, r.u64(),",
+        "string(a.dir).bytes(a.ownerSecret).bytes(a.wallet)",
     ] {
         assert!(text.contains(needle), "{needle}");
     }
@@ -225,6 +231,13 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "PriceReplyView: record: source: string, body: list<u8>, fetched_at: u64",
         "PriceArgs: record: replies: list<PriceReplyView>, now: u64",
         "AgreedPriceView: record: usd_per_btc: u64, minor_per_btc: u64, source_label: string",
+        "OwnWalletView: record: file: list<u8>, first_address: string, multisig: bool",
+        "OwnMade: record: code: list<u8>, made_at: u64",
+        "OwnOfferView: record: made: OwnMade, ends_at: u64, floor: u32, first_address: string",
+        "OwnRequestView: record: counter: list<u8>, name: string, session_words: list<string>, needs_rate: bool, shares: list<CounterShareView>, seconds_left: u64",
+        "OwnBundleView: record: counter: list<u8>, code: list<u8>, first_start: u32, first_end: u32, settings_version: u32, shares: list<CounterShareView>",
+        "OwnShopArgs: record: dir: string, owner_secret: list<u8>, wallet: list<u8>",
+        "OwnGapView: record: needed: u32, notice: bool",
         "OldAddressesView: record: kind: OldKind, count: u64, days_ago: u64, next: option<u64>, running: bool, words: option<Words>",
     ] {
         assert!(protocol.contains(line), "{line}");
