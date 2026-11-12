@@ -10,7 +10,8 @@
 //! ## What the node does with each event
 //!
 //! - `Peers`: runs the health rules (WR-50 to WR-53) and keeps the answer
-//!   for `open` and `judge`.
+//!   for `open` and `judge`. WR-54 is applied to it after every batch of
+//!   events, from the checked height and the clock.
 //! - `Chain`: updates the [`ChainView`].
 //! - `Sighting`: offers the transaction to the counter once for every peer
 //!   address it came from. If any sale took it, the bytes are kept in a small
@@ -123,8 +124,9 @@ use openbmt_net_io::{
     OsRandomness, OwnNodeEvent, Storage, SystemClock,
 };
 use openbmt_watch::{
-    check_health, HeaderChain, HeaderStore, Health, HealthInput, OwnNodeHealth, OwnNodeInput,
-    OwnNodeLink, OwnNodeTracker, PeerAddr, Source, WellFormedBlock,
+    check_blocks_checked, check_health, BlockProgress, HeaderChain, HeaderStore, Health,
+    HealthInput, OwnNodeHealth, OwnNodeInput, OwnNodeLink, OwnNodeTracker, PeerAddr, Source,
+    WellFormedBlock,
 };
 
 use crate::chainview::ChainView;
@@ -292,7 +294,8 @@ impl DriverPort for Handle {
     }
 }
 
-/// The function that answers the health question (WR-50 to WR-53). It is
+/// The function that answers the health question (WR-50 to WR-53; the node
+/// applies WR-54 to its answer). It is
 /// `Send`, so that an app can keep the node behind a lock and call it from
 /// more than one thread.
 pub type HealthFn = Box<dyn Fn(&HealthInput<'_>) -> Health + Send>;
@@ -359,7 +362,11 @@ pub struct Node<P: DriverPort = Handle> {
     view: ChainView,
     clock: Box<dyn Clock + Send>,
     health_fn: HealthFn,
+    /// The last answer of `health_fn`, before WR-54 is applied.
+    health_base: Option<Health>,
     health: Option<Health>,
+    /// WR-54: since when a header has been known above the checked height.
+    blocks_behind_since: Option<u64>,
     settings: Settings,
     /// CR-160: the two roots the counter pinned at pairing.
     roots: PinnedRoots,
@@ -533,7 +540,9 @@ impl<P: DriverPort> Node<P> {
             view,
             clock,
             health_fn: health,
+            health_base: None,
             health: None,
+            blocks_behind_since: None,
             started_with: (settings.tor_on, settings.lightning_node),
             settings,
             roots,
@@ -825,6 +834,9 @@ impl<P: DriverPort> Node<P> {
             self.apply(event, &mut touched, &mut reports);
         }
         self.take_own_events(&mut touched);
+        // WR-54 reads the checked height and the clock, which move without
+        // a `Peers` event.
+        self.refresh_health(&mut touched);
         // Whether a block must be downloaded in full depends on the sales'
         // payments and the chain, and those change only with an event.
         let changed = !touched.is_empty();
@@ -925,13 +937,8 @@ impl<P: DriverPort> Node<P> {
                     now: self.clock.now(),
                     behind_since: ahead_since,
                 };
-                let answer = (self.health_fn)(&input);
-                if self.health != Some(answer) {
-                    // A sale that waits on the check can turn red, or green
-                    // again, when the answer changes.
-                    touched.extend(self.sales_with_payments());
-                }
-                self.health = Some(answer);
+                self.health_base = Some((self.health_fn)(&input));
+                self.refresh_health(touched);
             }
             AppEvent::Chain { joined, left } => {
                 // The blocks that take the place of the ones that left have
@@ -976,6 +983,35 @@ impl<P: DriverPort> Node<P> {
     }
 
     // CR-103: the own node.
+
+    /// WR-54: the answer of the health rules with the block frontier taken
+    /// in. A sale that waits on the check can turn red, or green again,
+    /// when the answer changes.
+    fn refresh_health(&mut self, touched: &mut BTreeSet<u32>) {
+        let Some(base) = self.health_base else {
+            return;
+        };
+        let now = self.clock.now();
+        let tip_height = self.view.tip_height();
+        if tip_height > self.checked {
+            self.blocks_behind_since.get_or_insert(now);
+        } else {
+            self.blocks_behind_since = None;
+        }
+        let answer = check_blocks_checked(
+            base,
+            &BlockProgress {
+                tip_height,
+                checked_height: self.checked,
+                behind_since: self.blocks_behind_since,
+                now,
+            },
+        );
+        if self.health != Some(answer) {
+            touched.extend(self.sales_with_payments());
+        }
+        self.health = Some(answer);
+    }
 
     /// WR-63: the own node's health line now, with the counter's tip and
     /// the node's clock.
@@ -1601,6 +1637,13 @@ impl<P: DriverPort> Node<P> {
         let now = self.clock.now();
         self.counter
             .refund_in_cash(index, cash, now, &self.view, &mut self.store)
+    }
+
+    /// CR-217: what a bitcoin refund of a sale paid over Lightning can still
+    /// ask; `None` for a sale that no Lightning payment settled.
+    pub fn refund_onchain_room(&self, index: u32) -> Option<u64> {
+        self.counter
+            .refund_onchain_room(index, self.clock.now(), &self.view)
     }
 
     /// The refunds of a sale, for the screen and the receipt (CR-72).

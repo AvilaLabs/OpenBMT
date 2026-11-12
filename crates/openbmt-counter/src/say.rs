@@ -1420,6 +1420,13 @@ impl<E: Display> RefundRefused<E> {
                 "Ask the owner whether the request was dropped. If it was, a manager can give the cash refund.",
                 "CR-119",
             ),
+            Self::LightningCashOnly { .. } => refused(
+                "Refund in cash",
+                "This sale was paid over Lightning, and the owner's phone can only check payments it sees on the chain, so a bitcoin refund cannot be sent.",
+                Who::Cashier,
+                "Give the refund in cash from the till.",
+                "CR-217",
+            ),
             Self::NeedsManagerSingle {
                 sats: amount,
                 limit,
@@ -2229,6 +2236,13 @@ pub fn all_words() -> Vec<(String, Words)> {
             RefundRefused::WithdrawnMayBePaid {
                 received: 10_000,
                 asked: 6_000,
+                sats: 5_000,
+            },
+        ),
+        (
+            "LightningCashOnly",
+            RefundRefused::LightningCashOnly {
+                room: 0,
                 sats: 5_000,
             },
         ),

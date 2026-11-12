@@ -44,12 +44,22 @@ impl Problem {
                 "This counter's clock is more than two hours behind the network's.",
                 "Set the counter's clock to the right time.",
             ),
+            Self::BlocksBehind => (
+                "Instant sales paused",
+                "The counter heard of a new block but has not received it yet, so it cannot check it for a conflicting payment.",
+                "Nothing to do. Instant sales come back when the block arrives; until then sales wait for a confirmation.",
+            ),
         };
-        Words::new(Tone::Stop, heading, what, Who::Owner, next).code(match self {
+        let (tone, who) = match self {
+            Self::BlocksBehind => (Tone::Info, Who::Nobody),
+            _ => (Tone::Stop, Who::Owner),
+        };
+        Words::new(tone, heading, what, who, next).code(match self {
             Self::TooFewPeerGroups | Self::TooFewFilterPeers => "WR-50",
             Self::TipIsOld => "WR-51",
             Self::HeadersBehind => "WR-52",
             Self::ClockMismatch => "WR-53",
+            Self::BlocksBehind => "WR-54",
         })
     }
 }
@@ -443,6 +453,7 @@ pub fn all_words() -> Vec<(String, Words)> {
         Problem::TipIsOld,
         Problem::HeadersBehind,
         Problem::ClockMismatch,
+        Problem::BlocksBehind,
     ] {
         all.push((
             format!("Problem::{}", problem_name(problem)),
@@ -472,6 +483,7 @@ pub fn problem_name(p: Problem) -> &'static str {
         Problem::TipIsOld => "TipIsOld",
         Problem::HeadersBehind => "HeadersBehind",
         Problem::ClockMismatch => "ClockMismatch",
+        Problem::BlocksBehind => "BlocksBehind",
     }
 }
 

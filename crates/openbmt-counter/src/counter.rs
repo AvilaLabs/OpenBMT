@@ -2637,6 +2637,12 @@ impl Counter {
         let (received, confirmations) = self.refund_facts(&base, now, headers);
         let height = chain_height(headers);
         self.refund_limits(&base, &actor, false, sats, received, now, height)?;
+        // CR-217: Lightning has nothing on the chain for the owner to check.
+        if let Some(room) = self.onchain_refund_room(&base, now, headers) {
+            if sats > room {
+                return Err(RefundRefused::LightningCashOnly { room, sats });
+            }
+        }
         let final_depth = self.final_depth();
         let number = self.desk.last_refund_no().saturating_add(1);
         let mut desk = self.desk.clone();
@@ -2882,6 +2888,37 @@ impl Counter {
                 at: e.at,
             })
             .collect()
+    }
+
+    /// CR-217: what a bitcoin refund of a sale paid over Lightning can still
+    /// ask: what arrived on-chain for it, less the requests that stand. `None`
+    /// for a sale that no Lightning payment settled, which has no such limit
+    /// beyond CR-67. `Some(0)` means the sale is refunded in cash only.
+    pub fn refund_onchain_room<C: HeaderChain + ?Sized>(
+        &self,
+        index: u32,
+        now: u64,
+        headers: &C,
+    ) -> Option<u64> {
+        let sale = self.sales.get(&index)?;
+        self.onchain_refund_room(sale, now, headers)
+    }
+
+    fn onchain_refund_room<C: HeaderChain + ?Sized>(
+        &self,
+        sale: &Sale,
+        now: u64,
+        headers: &C,
+    ) -> Option<u64> {
+        let paid = sale.lightning.as_ref()?;
+        let (received, _) = self.refund_facts(sale, now, headers);
+        let onchain = received.saturating_sub(paid.sats());
+        let asked = sale
+            .refunds
+            .iter()
+            .filter(|e| e.kind == EntryKind::Request && !e.withdrawn)
+            .fold(0u64, |sum, e| sum.saturating_add(e.sats));
+        Some(onchain.saturating_sub(asked))
     }
 
     /// The refund depth (CR-66): the setting `final_confirmations`, and never

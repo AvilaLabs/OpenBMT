@@ -739,7 +739,10 @@ and no TLS certificate company is needed **[design, R5]**.
 - **Stall and unhealthy state.** If the light client has few filter-serving
   peers, stops getting new blocks, or sees headers fall behind, the counter
   shows "Check unhealthy" and **turns instant acceptance off** until the check
-  recovers. Bitcoin Core does not serve compact filters by default, so the pool
+  recovers. Stops getting new blocks covers block bodies as well as headers:
+  when a header is known above the height checked in full for more than 15
+  seconds **[to tune]**, the check is unhealthy until the block arrives.
+  Bitcoin Core does not serve compact filters by default, so the pool
   of filter peers is small **[verify the current count, E3]**.
 - **Watcher heartbeat.** Instant needs a heartbeat from the owner phone,
   signed with a pinned key, within N minutes (default 10 **[to tune]**). The

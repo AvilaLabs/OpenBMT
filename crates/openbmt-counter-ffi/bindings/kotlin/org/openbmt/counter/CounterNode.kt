@@ -248,7 +248,7 @@ class TipTally(val count: Long, val minor: Long)
 class TipChoice(val percent: Int, val tipMinor: Long)
 
 /** What a sale carries besides its amount: its note, and the days of a request to send (0 for a sale shown at the till) (CR-205, CR-206). */
-class SaleInfo(val note: String?, val requestDays: Int, val expiresAt: Long)
+class SaleInfo(val note: String?, val requestDays: Int, val expiresAt: Long, val cashRefundOnly: Boolean)
 
 /** One open request to send, for the list on Home (CR-215). */
 class OpenRequest(
@@ -737,7 +737,7 @@ private fun Reader.payment(): Payment = Payment(string(), string(), string(), u3
 internal fun Reader.opened(): Opened =
     Opened(u32(), u64(), u64(), u64(), u64(), payment())
 
-internal fun Reader.saleInfo(): SaleInfo = SaleInfo(option { string() }, u8(), u64())
+internal fun Reader.saleInfo(): SaleInfo = SaleInfo(option { string() }, u8(), u64(), bool())
 
 internal fun Reader.openRequest(): OpenRequest =
     OpenRequest(u32(), option { string() }, u64(), u64(), u64(), u64())

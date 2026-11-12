@@ -127,7 +127,7 @@ OpenArgs: record: now: u64, amount_minor: u64, currency: string, rate: u64, sour
 OpenTipArgs: record: now: u64, amount_minor: u64, tip_minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64, actor: option<ActorView>
 OpenRequestArgs: record: now: u64, amount_minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64, actor: option<ActorView>, note: option<string>, days: u8
 AddNoteArgs: record: now: u64, index: u32, note: string
-SaleInfoView: record: note: option<string>, request_days: u8, expires_at: u64
+SaleInfoView: record: note: option<string>, request_days: u8, expires_at: u64, cash_refund_only: bool
 RequestRow: record: index: u32, note: option<string>, amount_minor: u64, opened_at: u64, expires_at: u64, needs_sats: u64
 TipChoiceView: record: percent: u8, tip_minor: u64
 TipTallyView: record: count: u32, minor: u64

@@ -266,6 +266,15 @@ Instant acceptance needs a check that is working. The library answers
   reports "clock mismatch": the counter's price lock and sale expiry must
   not trust the local clock (§5.1). A clock that is far ahead looks the
   same as a tip that is old, and is reported under WR-51.
+- **WR-54.** The counter has not known a header above the height it has
+  checked in full for more than 15 seconds **[to tune]**. Headers alone do
+  not show that the blocks behind them arrived: a peer that holds back a
+  block body leaves the headers fresh. The checked height is the one of
+  `docs/NETWORK-RULES.md` (NR-40 to NR-45). The library keeps no state:
+  the caller holds the time since when the tip has been above the checked
+  height and passes it back with each check. A caller that drops it never
+  fails this rule. The problem is named after the rules WR-50 to WR-53, so
+  it is reported only when none of them fails.
 
 ## 7. The merchant's own node
 

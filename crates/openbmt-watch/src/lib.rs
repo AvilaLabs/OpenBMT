@@ -49,7 +49,10 @@ pub use block::{payments_in_block, spends_in_block, WellFormedBlock};
 pub use chain::{check_header, confirmations, HeaderChain};
 pub use fees::{block_fee_sample, FeeError, FeeHistory, FeeSample};
 pub use headers::{Accepted, HeaderStore};
-pub use health::{check_health, Health, HealthInput, Peer, PeerTransport, Problem};
+pub use health::{
+    check_blocks_checked, check_health, BlockProgress, Health, HealthInput, Peer, PeerTransport,
+    Problem,
+};
 pub use netgroup::{host_group, network_group, NetGroup, PeerAddr};
 pub use own_node::{
     check_own_node, OwnNodeHealth, OwnNodeInput, OwnNodeLink, OwnNodeProblem, OwnNodeTracker,
@@ -102,6 +105,9 @@ pub const BEHIND_BLOCKS: u32 = 2;
 pub const MAX_BEHIND_SECS: u64 = 600;
 /// WR-53: seconds the clock may be behind the tip's header time.
 pub const MAX_CLOCK_BEHIND_SECS: u64 = 7_200;
+/// WR-54: seconds the counter may know a header above the height it has
+/// checked in full before the check counts as behind on blocks.
+pub const MAX_BLOCKS_BEHIND_SECS: u64 = 15;
 /// WR-63: blocks the counter's tip may be above the own node's best height,
 /// for at most `OWN_NODE_LAG_SECS`, before the node counts as behind. A new
 /// block reaches the counter's peers before it reaches the own node, so one

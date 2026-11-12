@@ -2035,7 +2035,8 @@ class Controller(private val act: MainActivity) {
             s.check?.let { views.add(note(it.say())) }
             for (f in s.flags) views.add(note(f.say()))
             // CR-216: the note of the sale, or a way to add one.
-            val saleNote = n.saleInfo(index).note
+            val info = n.saleInfo(index)
+            val saleNote = info.note
             if (saleNote != null) {
                 views.add(ui.facts(listOf(WordsOfRequests.NOTE to saleNote)))
             } else {
@@ -2055,7 +2056,12 @@ class Controller(private val act: MainActivity) {
                     views.add(ui.danger("Withdraw this request") { showWithdraw(index, number) })
                 }
             }
-            actions.add(ui.button("Ask for a refund") { showRefundRequest(index) })
+            // CR-217: a sale paid over Lightning is refunded in cash only.
+            if (info.cashRefundOnly) {
+                views.add(note(AppWords.lightningRefundCash))
+            } else {
+                actions.add(ui.button("Ask for a refund") { showRefundRequest(index) })
+            }
             actions.add(ui.button("Refund in cash from the till") { showCashRefund(index) })
         } catch (e: CounterException) {
             views.add(note(e.sayWords()))

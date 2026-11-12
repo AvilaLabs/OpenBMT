@@ -23,7 +23,7 @@ draws what it is told.
 ## 1. Opening a sale
 
 - **CR-01.** Bitcoin is offered only when the check is healthy (WR-50 to
-  WR-53) at that moment. Otherwise opening is refused and the cashier is
+  WR-54) at that moment. Otherwise opening is refused and the cashier is
   told to use another payment type. A clock mismatch (WR-53) refuses
   opening too: the price lock and the expiry cannot be trusted.
 - **CR-02.** A sale gets the next unused address of the counter's current
@@ -122,7 +122,11 @@ carries two texts: why it is in this state, and what happens next (§2.6).
   6. the sale was accepted at once earlier (CR-13): `PaidInstant`;
   7. enough has arrived, unconfirmed: ask the instant decision.
      `Instant` gives `PaidInstant`; anything else gives `Waiting` with its
-     reason, or `DoNotHandOver` (cannot check) if the check is not healthy;
+     reason, or `DoNotHandOver` (cannot check) if the check is not healthy.
+     The check is not healthy while the counter is behind on blocks
+     (WR-54): a header is known above the height checked in full, so a
+     conflicting payment in that block cannot have been seen. No sale is
+     accepted at once then, and it waits for a confirmation;
   8. something has arrived, not enough: `PartPaid`;
   9. nothing: `NotPaidYet`, or `Expired` under CR-07.
 - **CR-13.** Accepting at once is a step with a record. The counter adds
@@ -807,8 +811,22 @@ counter holds is not, and never leaves the counter.
   payment", and never a change of the sale's state. A refund of a sale paid
   over Lightning uses the refund paths of section 7: what the node received
   counts as received and as at the refund depth at once, so a cash refund
-  (CR-71) and an on-chain refund (CR-60) are both open. There is no refund
-  over Lightning: the counter holds no key that can pay.
+  (CR-71) is open for all of it. An on-chain refund (CR-60) is open only up
+  to what arrived on-chain (CR-217). There is no refund over Lightning: the
+  counter holds no key that can pay.
+- **CR-217.** The owner's phone pays a refund only against payments it sees
+  on the chain, and a payment over Lightning is not on the chain. So the
+  counter offers only a cash refund (CR-71) for a sale whose payment is
+  all Lightning, and refuses a request for a bitcoin refund of it (CR-60)
+  with "Refund in cash", for the cashier: "This sale was paid over
+  Lightning, and the owner's phone can only check payments it sees on the
+  chain, so a bitcoin refund cannot be sent." and "Give the refund in cash
+  from the till." A sale paid partly over Lightning and partly on-chain can
+  be refunded on-chain up to what arrived on-chain, less the requests that
+  stand (withdrawn ones do not count here), and the rest in cash. A request
+  past that is refused the same way. A sale that no Lightning payment
+  settled has no such limit. The sale's details do not offer the request
+  while nothing is left to ask on-chain. The owner's side does not change.
 - **CR-112.** The driver asks the node for an invoice for each quote of a sale:
   the amount is the quote's satoshis times 1,000, the lifetime
   `QUOTE_SECS` (CR-05, LN-13) and the attempt is the next one for that sale
@@ -909,7 +927,8 @@ counter holds is not, and never leaves the counter.
   of `docs/DESIGN.md` §6 are what protect the shop.
 - **They do not refund.** Surplus and cancelled sales with money on them
   are recorded for the owner's refund session (§2.4). A sale paid over
-  Lightning is refunded in cash or on-chain, never over Lightning (CR-111).
+  Lightning is refunded in cash, or on-chain up to what arrived on-chain
+  (CR-217), never over Lightning (CR-111).
 - **They do not talk to the POS.** CR-30 says what to report; the
   connector reports it.
 - **They do not know who a person is.** The list of managers and their

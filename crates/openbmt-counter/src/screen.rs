@@ -284,6 +284,7 @@ pub fn problem_text(p: Option<Problem>) -> &'static str {
         Some(Problem::TipIsOld) => "the counter's newest block is too old",
         Some(Problem::HeadersBehind) => "the counter is behind the network",
         Some(Problem::ClockMismatch) => "the counter's clock does not match the network's",
+        Some(Problem::BlocksBehind) => "the counter is waiting for a new block",
         None => "the check is not working",
     }
 }

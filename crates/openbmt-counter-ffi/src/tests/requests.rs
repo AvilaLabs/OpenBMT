@@ -46,6 +46,8 @@ fn sale_info(rig: &Rig, handle: u64, index: u32) -> (Option<String>, u8, u64) {
     let response = rig.call(63, handle, &W::new().u32(index).0);
     let mut r = Rd::ok(&response);
     let info = (r.opt(Rd::string), r.u8(), r.u64());
+    // CR-217: no sale of these tests was paid over Lightning.
+    assert!(!r.bool());
     r.done();
     info
 }

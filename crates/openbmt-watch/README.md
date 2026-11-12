@@ -37,7 +37,7 @@ been done yet.** Do not use it with real funds.
 | `SaleWatch::confirmed` | A `ProvenPayment` from the proof or block calls. | WR-30 to WR-34, WR-42 |
 | `SaleWatch::watched_outpoints`, `spent_elsewhere` | Look for spends of the payment's coins in blocks; record one. | WR-42, WR-43 |
 | `SaleWatch::status` | Everything the rules say about the sale now, worked out again from the chain. | WR-31 to WR-34, WR-42 to WR-46 |
-| `check_health` | Whether the check is working, and the first rule that fails. | WR-50 to WR-53 |
+| `check_health` | Whether the check is working, and the first rule that fails. | WR-50 to WR-54 |
 
 A refusal means nothing was believed and nothing was recorded. The one
 exception is WR-34: a transaction the sale cannot keep marks the sale "needs
@@ -53,7 +53,7 @@ a person".
 | WR-20 to WR-23 | `src/block.rs` |
 | WR-30 to WR-34, WR-40, WR-42 to WR-46 | `src/sale.rs` |
 | WR-41 | `src/netgroup.rs` |
-| WR-50 to WR-53 | `src/health.rs` |
+| WR-50 to WR-54 | `src/health.rs` |
 | Refusals and their rule IDs | `src/refusal.rs` |
 | Thresholds | `pub const`s in `src/lib.rs`, named for their rule |
 

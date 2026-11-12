@@ -541,6 +541,14 @@ object AppWords {
         "Do not give it in cash until the owner says it was dropped.",
     )
 
+    /** CR-217: on the details of a sale paid over Lightning, in place of the button that asks for a bitcoin refund. */
+    val lightningRefundCash = w(
+        Tones.ENDED, "Refund in cash",
+        "This sale was paid over Lightning, and the owner's phone can only check payments it sees on the chain, so a bitcoin refund cannot be sent.",
+        Who.CASHIER,
+        "Give the refund in cash from the till.",
+    )
+
     val cashRefunded = w(
         Tones.GOOD, "Cash refund saved",
         "The cash refund from the till is written down, and the bitcoin is kept.",
@@ -709,6 +717,7 @@ object AppWords {
         "requestOpen" to requestOpen("2026-11-14 10:00"),
         "refundAsked" to refundAsked,
         "refundWithdrawn" to refundWithdrawn,
+        "lightningRefundCash" to lightningRefundCash,
         "cashRefunded" to cashRefunded,
         "starting" to starting,
         "stopped" to stopped,

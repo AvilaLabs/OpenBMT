@@ -79,6 +79,7 @@ object AppModelTest {
         ok(AppWords.orbotNotRunning.what == "Tor is on for this shop, but Orbot is not running.", "the Orbot words, as written down")
         ok(AppWords.orbotNotRunning.next == "Open Orbot and turn it on. If it listens at another address, the manager can change it under Network.", "the Orbot next step")
         ok(AppWords.orbotNotRunning.who == Who.MANAGER, "the manager does it")
+        ok(AppWords.lightningRefundCash.who == Who.CASHIER && AppWords.lightningRefundCash.next == "Give the refund in cash from the till.", "a Lightning-paid sale is refunded in cash by the cashier")
         ok(AppWords.pinWrong(4).tone == Tones.STOP && AppWords.pinWrong(4).next.contains("4 seconds"), "a wrong PIN says how long")
         ok(AppWords.waitText(1) == "1 second" && AppWords.waitText(59) == "59 seconds", "short waits")
         ok(AppWords.waitText(60) == "1 minute" && AppWords.waitText(300) == "5 minutes" && AppWords.waitText(121) == "3 minutes", "long waits")

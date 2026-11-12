@@ -366,12 +366,16 @@ pub struct SaleInfoView {
     pub request_days: u8,
     /// When a sale with nothing received expires, in seconds since 1970.
     pub expires_at: u64,
+    /// CR-217: a bitcoin refund of the sale cannot be asked for: it was paid
+    /// over Lightning and nothing of it is left to refund on-chain.
+    pub cash_refund_only: bool,
 }
 
 wire_record!(SaleInfoView {
     note,
     request_days,
-    expires_at
+    expires_at,
+    cash_refund_only
 });
 
 /// One open request, for the list on Home (CR-215).

@@ -227,3 +227,43 @@ fn after_a_restart_there_is_no_heartbeat_and_the_old_number_is_refused() {
     assert!(rig.node.heartbeat(&owner_bytes(&hb(2, T0 + 20))).is_ok());
     assert!(rig.node.counter().heartbeat_for_policy(T0 + 20).verified);
 }
+
+// WR-54.
+
+#[test]
+fn wr_54_headers_ahead_of_the_checked_height_keep_a_sale_from_being_accepted_at_once() {
+    let dir = Scratch::new();
+    let mut rig = rig_with_a_seen_sale(&dir);
+    // The headers advance by a block whose body does not arrive: the checked
+    // height stays at 0.
+    let block = mine(genesis(), 1, 1, &[]);
+    rig.feed(vec![joined(1, &block)]);
+    let heartbeat = |seq: u64, time: u64| {
+        let mut h = hb(seq, time);
+        h.tip_height = 1;
+        h.tip_hash = block.block_hash().to_byte_array();
+        owner_bytes(&h)
+    };
+    // Inside the 15 seconds the check still works.
+    rig.time.store(T0 + 10 + 15, Ordering::SeqCst);
+    rig.feed(vec![]);
+    assert!(rig.node.health().unwrap().healthy);
+    // Past them it does not, and the sale waits for a confirmation.
+    rig.time.store(T0 + 10 + 16, Ordering::SeqCst);
+    rig.feed(vec![]);
+    let health = rig.node.health().unwrap();
+    assert!(!health.healthy);
+    assert_eq!(health.problem, Some(openbmt_watch::Problem::BlocksBehind));
+    rig.node.heartbeat(&heartbeat(1, T0 + 26)).unwrap();
+    let screen = rig.node.judge(0).unwrap();
+    assert_ne!(screen.state, State::PaidInstant);
+    assert_eq!(
+        screen.why,
+        Why::CannotCheck(Some(openbmt_watch::Problem::BlocksBehind))
+    );
+    assert_eq!(rig.node.counter().exposure_outstanding(), 0);
+    // The body arrives and the frontier moves: instant is open again.
+    rig.feed(vec![AppEvent::Checked(1)]);
+    assert!(rig.node.health().unwrap().healthy);
+    assert_eq!(rig.node.judge(0).unwrap().state, State::PaidInstant);
+}

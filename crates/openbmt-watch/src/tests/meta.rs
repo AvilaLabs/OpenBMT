@@ -33,7 +33,7 @@ fn rule_ids() -> Vec<String> {
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
     let ids = rule_ids();
-    assert_eq!(ids.len(), 41);
+    assert_eq!(ids.len(), 42);
     assert!(ids.contains(&"WR-01".to_string()) && ids.contains(&"WR-65".to_string()));
 }
 
@@ -131,6 +131,7 @@ fn every_problem_names_a_rule_of_the_file() {
         Problem::TipIsOld,
         Problem::HeadersBehind,
         Problem::ClockMismatch,
+        Problem::BlocksBehind,
     ] {
         assert!(ids.contains(&p.rule().to_string()), "{p:?}");
     }

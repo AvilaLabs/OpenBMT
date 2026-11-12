@@ -95,6 +95,10 @@ impl From<Problem> for Alert {
             Problem::TipIsOld => Self::TipIsOld,
             Problem::HeadersBehind => Self::HeadersBehind,
             Problem::ClockMismatch => Self::ClockMismatch,
+            // The owner's watcher never works out the block frontier, so it
+            // never reports this one; the nearest alert is the one for a
+            // check that is behind.
+            Problem::BlocksBehind => Self::HeadersBehind,
         }
     }
 }

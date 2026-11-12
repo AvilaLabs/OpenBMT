@@ -62,6 +62,15 @@ pub const MAX_WATCHED_SCRIPTS: usize = 100_000;
 pub const MAX_BLOCKS_IN_WORK: usize = 8;
 /// NR-42, NR-45: seconds a filter or a block may take to arrive.
 pub const ANSWER_SECS: u64 = 60;
+/// NR-104: seconds a block may take to arrive while every new block is
+/// downloaded in full (NR-44), before another peer is asked for it.
+pub const BODY_ASK_SECS: u64 = 10;
+/// NR-104: block requests in a row that a peer let run past
+/// [`BODY_ASK_SECS`] before it is asked last for blocks.
+pub const BODY_MISSES_LAST: u32 = 2;
+/// NR-104: most block requests that ran past [`BODY_ASK_SECS`] and are
+/// still waited for.
+const MAX_SLOW_BLOCKS: usize = 1_024;
 /// NR-40: seconds a peer must have shown its newest block before it is asked
 /// for that block's filter, so that its filter index has taken the block.
 pub const FILTER_SETTLE_SECS: u64 = 2;
@@ -305,6 +314,8 @@ struct PeerState {
     /// NR-32: when the last re-ask of headers went out.
     last_reask: Option<u64>,
     unanswered: u32,
+    /// NR-104: block requests in a row that ran past [`BODY_ASK_SECS`].
+    body_misses: u32,
     stale: VecDeque<Stale>,
     /// NR-33: the peer sent headers that the store could not take for a
     /// reason that is not the peer's doing.
@@ -395,6 +406,9 @@ pub struct Manager {
     peers: BTreeMap<PeerId, PeerState>,
     scripts: BTreeSet<ScriptBuf>,
     all_blocks: bool,
+    /// NR-104: block requests that ran past `BODY_ASK_SECS`: the peer, the
+    /// block and when the 60 seconds of NR-45 are over.
+    slow_blocks: VecDeque<(PeerId, BlockHash, u64)>,
     fetch_transactions: bool,
     /// NR-47: the one block the app asked for by hash, and not yet given.
     fee_work: Option<BlockWork>,
@@ -449,6 +463,7 @@ impl Manager {
             peers: BTreeMap::new(),
             scripts: BTreeSet::new(),
             all_blocks: false,
+            slow_blocks: VecDeque::new(),
             fetch_transactions: true,
             fee_work: None,
             now: 0,
@@ -560,6 +575,7 @@ impl Manager {
                 ahead_since: None,
                 last_reask: None,
                 unanswered: 0,
+                body_misses: 0,
                 stale: VecDeque::new(),
                 blocked: false,
             },
@@ -618,6 +634,25 @@ impl Manager {
             self.release_tx(&txid);
             self.push_stale(id, Stale::Tx(txid));
             self.note_unanswered(id, &mut out);
+        }
+        // NR-104: a block that was asked of another peer early is still the
+        // first peer's request until the 60 seconds are over.
+        let mut late = Vec::new();
+        self.slow_blocks.retain(|&(id, hash, due)| {
+            let over = now >= due;
+            if over {
+                late.push((id, hash));
+            }
+            !over
+        });
+        for (id, hash) in late {
+            let waiting = self
+                .peers
+                .get(&id)
+                .is_some_and(|p| p.stale.contains(&Stale::Block(hash)));
+            if waiting {
+                self.note_unanswered(id, &mut out);
+            }
         }
         self.own_tick(now, &mut out);
         self.age_held(now, &mut out);
@@ -943,6 +978,12 @@ impl Manager {
                 false,
                 out,
             );
+        }
+    }
+
+    fn reset_body_misses(&mut self, id: PeerId) {
+        if let Some(peer) = self.peers.get_mut(&id) {
+            peer.body_misses = 0;
         }
     }
 
@@ -1441,39 +1482,69 @@ impl Manager {
     /// NR-45: the block from one peer at a time. True while the block is in
     /// work.
     fn advance_fetch(&mut self, item: &mut BlockWork, now: u64, out: &mut Vec<Output>) -> bool {
+        // NR-104: a sale waits for the block, so another peer is asked early.
+        let wait = if self.all_blocks {
+            BODY_ASK_SECS
+        } else {
+            ANSWER_SECS
+        };
         if let Some(id) = item.fetch_peer {
-            if now < item.fetch_since.saturating_add(ANSWER_SECS) {
+            if now < item.fetch_since.saturating_add(wait) {
                 return true;
             }
             item.fetch_peer = None;
             item.failed.insert(id);
             self.push_stale(id, Stale::Block(item.hash));
-            self.note_unanswered(id, out);
+            if self.all_blocks {
+                // The request is not given up: it still counts as
+                // unanswered (NR-42) if the block has not come by the time
+                // the 60 seconds of NR-45 are over.
+                if let Some(peer) = self.peers.get_mut(&id) {
+                    peer.body_misses = peer.body_misses.saturating_add(1);
+                }
+                if self.slow_blocks.len() >= MAX_SLOW_BLOCKS {
+                    self.slow_blocks.pop_front();
+                }
+                let due = item.fetch_since.saturating_add(ANSWER_SECS);
+                self.slow_blocks.push_back((id, item.hash, due));
+            } else {
+                self.note_unanswered(id, out);
+            }
         }
         if now < item.resume_at {
             return true;
         }
-        let ready = self.ready_peers();
+        // NR-104: a peer that missed twice in a row is asked last, whether
+        // it has shown the block or not.
+        let (last, ready): (Vec<PeerId>, Vec<PeerId>) =
+            self.ready_peers().into_iter().partition(|id| {
+                self.peers
+                    .get(id)
+                    .is_some_and(|p| p.body_misses >= BODY_MISSES_LAST)
+            });
         // NR-45: a peer that has shown the block is asked first.
         let shown = |id: &PeerId| {
             self.peers
                 .get(id)
                 .is_some_and(|p| p.shown_height >= item.height)
         };
-        let pick = ready
-            .iter()
-            .find(|id| !item.failed.contains(id) && shown(id))
-            .or_else(|| ready.iter().find(|id| !item.failed.contains(id)));
+        let pick_from = |ids: &[PeerId]| {
+            ids.iter()
+                .find(|id| !item.failed.contains(id) && shown(id))
+                .or_else(|| ids.iter().find(|id| !item.failed.contains(id)))
+                .copied()
+        };
+        let pick = pick_from(&ready).or_else(|| pick_from(&last));
         match pick {
-            Some(&id) => {
+            Some(id) => {
                 item.fetch_peer = Some(id);
                 item.fetch_since = now;
                 self.send(id, Request::GetBlock(item.hash), out);
             }
-            None if !ready.is_empty() => {
+            None if !ready.is_empty() || !last.is_empty() => {
                 // Every ready peer failed: start over after a pause.
                 item.failed.clear();
-                item.resume_at = now.saturating_add(ANSWER_SECS);
+                item.resume_at = now.saturating_add(wait);
             }
             None => {}
         }
@@ -1540,6 +1611,8 @@ impl Manager {
         });
         let Some(height) = asked else {
             if hash.is_some_and(|hash| self.take_stale(id, Stale::Block(hash))) {
+                // It came late, but it came.
+                self.reset_body_misses(id);
                 return;
             }
             let other = self
@@ -1559,6 +1632,7 @@ impl Manager {
             return;
         };
         self.answered(id);
+        self.reset_body_misses(id);
         let parsed = WellFormedBlock::parse(&bytes);
         let wb = match parsed {
             Ok(wb) if wb.hash() == item.hash => wb,

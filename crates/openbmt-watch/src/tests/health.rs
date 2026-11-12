@@ -1,6 +1,9 @@
 //! Section 6: health, each threshold at its exact edge.
 
-use crate::{check_health, HealthInput, Peer, PeerAddr, PeerTransport, Problem};
+use crate::{
+    check_blocks_checked, check_health, BlockProgress, HealthInput, Peer, PeerAddr, PeerTransport,
+    Problem,
+};
 
 const NOW: u64 = 1_700_000_000;
 const TIP: u32 = 800_000;
@@ -255,4 +258,52 @@ fn wr_51_problems_name_their_rules() {
     assert_eq!(Problem::TipIsOld.rule(), "WR-51");
     assert_eq!(Problem::HeadersBehind.rule(), "WR-52");
     assert_eq!(Problem::ClockMismatch.rule(), "WR-53");
+    assert_eq!(Problem::BlocksBehind.rule(), "WR-54");
+}
+
+fn progress(checked: u32, behind_since: Option<u64>, now: u64) -> BlockProgress {
+    BlockProgress {
+        tip_height: TIP,
+        checked_height: checked,
+        behind_since,
+        now,
+    }
+}
+
+#[test]
+fn wr_54_a_header_without_its_block_for_over_15_seconds_is_not_healthy() {
+    let peers = good_peers();
+    let ok = check_health(&input(&peers));
+    assert!(ok.healthy);
+    // Checked up to the tip: healthy whatever the stored time says.
+    assert_eq!(
+        check_blocks_checked(ok, &progress(TIP, Some(NOW - 99), NOW)),
+        ok
+    );
+    // The edge: 15 seconds is still healthy, 16 is not.
+    assert_eq!(
+        check_blocks_checked(ok, &progress(TIP - 1, Some(NOW - 15), NOW)),
+        ok
+    );
+    let late = check_blocks_checked(ok, &progress(TIP - 1, Some(NOW - 16), NOW));
+    assert!(!late.healthy);
+    assert_eq!(late.problem, Some(Problem::BlocksBehind));
+    // A caller that stores no time never fails the rule.
+    assert_eq!(check_blocks_checked(ok, &progress(TIP - 1, None, NOW)), ok);
+    // A clock that went back does not fail it.
+    assert_eq!(
+        check_blocks_checked(ok, &progress(TIP - 1, Some(NOW + 50), NOW)),
+        ok
+    );
+}
+
+#[test]
+fn wr_54_an_earlier_problem_stays_the_first() {
+    let peers = [peer("8.8.1.1", true, TIP)];
+    let bad = check_health(&input(&peers));
+    assert_eq!(bad.problem, Some(Problem::TooFewPeerGroups));
+    assert_eq!(
+        check_blocks_checked(bad, &progress(TIP - 5, Some(NOW - 600), NOW)),
+        bad
+    );
 }

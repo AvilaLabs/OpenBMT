@@ -164,6 +164,7 @@ thin driver that owns the sockets.
   answer **[to tune]**, then of another. A peer that has shown the block
   is preferred to one that has not. When every connected peer has
   failed to give a block, the counter waits 60 seconds and starts over.
+  While NR-44 holds, NR-104 shortens the 60 seconds.
   A block is identified by its hash on the header chain; a peer cannot
   substitute another. At most 8 blocks are in work at once.
 - **NR-46.** When the best chain changes, the blocks that joined are
@@ -600,3 +601,12 @@ and what the node reports is kept apart from what they report
   and a report that was dropped is asked for again; a dropped report is
   never taken for a "yes", and the counter falls back to the light check
   while it is missing (WR-64). Without an own node nothing is sent.
+- **NR-104.** While NR-44 holds, a sale is waiting for the blocks, so a block
+  that has not arrived 10 seconds after it was asked for is asked of another
+  peer at once, without waiting for the 60 seconds of NR-45 **[to tune]**. The
+  first request is not cancelled: the peer is counted as unanswered (NR-42)
+  once the 60 seconds are over, as before, and a block that comes late is
+  dropped as one that was given up. A peer that lets two requests in a row
+  pass 10 seconds is asked last for blocks, until one of its blocks arrives.
+  When every connected peer has failed to give the block, the counter waits 10
+  seconds and starts over. Without NR-44 nothing changes: 60 seconds each.

@@ -86,6 +86,7 @@ fn sc_01_no_variant_is_missing() {
         Problem::TipIsOld,
         Problem::HeadersBehind,
         Problem::ClockMismatch,
+        Problem::BlocksBehind,
     ] {
         assert!(has(format!("Problem::{}", problem_name(p))));
     }

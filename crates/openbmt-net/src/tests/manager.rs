@@ -14,7 +14,9 @@ use openbmt_watch::{network_group, HeaderStore, PeerAddr};
 
 use super::kit::{command_field, raw_frame, raw_header, verack_frame, version_frame};
 use super::manager_kit::*;
-use crate::manager::{ANSWER_SECS, FILTER_SETTLE_SECS, MAX_ANNOUNCED_BLOCKS, MAX_UNANSWERED};
+use crate::manager::{
+    ANSWER_SECS, BODY_ASK_SECS, FILTER_SETTLE_SECS, MAX_ANNOUNCED_BLOCKS, MAX_UNANSWERED,
+};
 use crate::{
     ConnectRefused, Manager, ManagerConfig, Output, PeerAddress, PeerId, MAX_OUTGOING_BYTES,
 };
@@ -1229,11 +1231,11 @@ fn all_blocks_net(k: usize) -> (Net, PeerId, PeerId, Vec<bitcoin::Block>) {
 }
 
 #[test]
-fn nr_45_a_block_not_delivered_in_sixty_seconds_is_asked_of_another_peer() {
+fn nr_104_a_block_not_delivered_in_ten_seconds_is_asked_of_another_peer() {
     let (mut n, a, b, blocks) = all_blocks_net(1);
     let hash = blocks[0].block_hash();
     assert_eq!(block_requests(&n.sent(a)), vec![hash]);
-    assert!(n.tick(59).is_empty());
+    assert!(n.tick(BODY_ASK_SECS - 1).is_empty());
     assert!(block_requests(&n.sent(b)).is_empty());
     let out = n.tick(1);
     assert!(disconnects(&out).is_empty());
@@ -1249,6 +1251,26 @@ fn nr_45_a_block_not_delivered_in_sixty_seconds_is_asked_of_another_peer() {
 }
 
 #[test]
+fn nr_104_a_peer_that_misses_twice_in_a_row_is_asked_last_for_blocks() {
+    let (mut n, a, b, blocks) = all_blocks_net(2);
+    let (h1, h2) = (blocks[0].block_hash(), blocks[1].block_hash());
+    // Both blocks are asked of a, the lowest ID, and both run past 10
+    // seconds: two misses in a row. b is asked for both.
+    assert_eq!(block_requests(&n.sent(a)), vec![h1, h2]);
+    n.tick(BODY_ASK_SECS);
+    assert_eq!(block_requests(&n.sent(b)), vec![h1, h2]);
+    // b gives the first and misses the second. Every peer has failed it, so
+    // it starts over after 10 seconds, and b goes first although a has the
+    // lower ID.
+    n.block(b, &blocks[0]);
+    n.tick(BODY_ASK_SECS);
+    assert!(block_requests(&n.sent(a)).is_empty());
+    n.tick(BODY_ASK_SECS);
+    assert!(block_requests(&n.sent(a)).is_empty());
+    assert_eq!(block_requests(&n.sent(b)), vec![h2]);
+}
+
+#[test]
 fn nr_45_not_found_moves_on_at_once() {
     let (mut n, a, b, blocks) = all_blocks_net(1);
     let hash = blocks[0].block_hash();
@@ -1256,11 +1278,12 @@ fn nr_45_not_found_moves_on_at_once() {
     let out = n.not_found_block(a, hash);
     assert!(out.is_empty());
     assert_eq!(block_requests(&n.sent(b)), vec![hash]);
-    // Both failed: no spinning. The pause is a minute, then it starts over.
+    // Both failed: no spinning. The pause is 10 seconds while a sale waits
+    // for blocks (NR-104), then it starts over.
     n.not_found_block(b, hash);
     assert!(block_requests(&n.sent(a)).is_empty());
     assert!(block_requests(&n.sent(b)).is_empty());
-    n.tick(59);
+    n.tick(BODY_ASK_SECS - 1);
     assert!(block_requests(&n.sent(a)).is_empty());
     n.tick(1);
     assert_eq!(block_requests(&n.sent(a)), vec![hash]);

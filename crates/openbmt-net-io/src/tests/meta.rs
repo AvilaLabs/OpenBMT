@@ -22,8 +22,8 @@ const IMPLEMENTED: [&str; 32] = [
 
 /// Rules from NR-70 on that another crate alone carries out: the net crate
 /// (NR-84, and the manager's NR-86 to NR-89) and the owner's node (NR-91).
-const IN_NET_ONLY: [&str; 7] = [
-    "NR-84", "NR-86", "NR-87", "NR-88", "NR-89", "NR-91", "NR-95",
+const IN_NET_ONLY: [&str; 8] = [
+    "NR-84", "NR-86", "NR-87", "NR-88", "NR-89", "NR-91", "NR-95", "NR-104",
 ];
 
 /// Every rule ID that the rules file defines (in bold at the start of a

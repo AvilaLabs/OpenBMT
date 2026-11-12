@@ -81,6 +81,7 @@ These are the words of what the app decides itself.
 | requestOpen | Waiting for payment | This request is open until 2026-11-14 10:00. It is paid once the payment is confirmed. | Nothing to do. | nobody |  |
 | refundAsked | Refund asked for | The refund request is saved, and it is paid only after the owner approves it. | Nothing more to do here. Tell the customer the owner pays refunds from the owner's phone. | the cashier |  |
 | refundWithdrawn | Refund withdrawn | The withdrawal is sent to the owner. A refund the owner has already started approving may still be paid. | Do not give it in cash until the owner says it was dropped. | the cashier |  |
+| lightningRefundCash | Refund in cash | This sale was paid over Lightning, and the owner's phone can only check payments it sees on the chain, so a bitcoin refund cannot be sent. | Give the refund in cash from the till. | the cashier |  |
 | cashRefunded | Cash refund saved | The cash refund from the till is written down, and the bitcoin is kept. | Give the customer the cash. | the cashier |  |
 | starting | Starting | The counter is starting and looking for the network. | Wait a moment. Keep the app open. | nobody |  |
 | stopped | Counter stopped | The counter has stopped, so no sale can be opened. | Close the app and open it again. If it stays stopped, take another kind of payment. | the cashier |  |

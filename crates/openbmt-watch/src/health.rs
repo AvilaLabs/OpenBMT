@@ -13,13 +13,19 @@
 //! than 10 minutes have passed since that time. If `behind` is true and
 //! `behind_since` is `None`, the clock has not started and WR-52 holds for
 //! now.
+//!
+//! WR-54 looks at block bodies, which [`check_health`] does not see: the
+//! caller works out the height up to which every block has been checked and
+//! passes it, with the time since it fell behind the tip, to
+//! [`check_blocks_checked`], which turns a healthy answer into
+//! `BlocksBehind` when the check has been behind for too long.
 
 use std::collections::BTreeSet;
 
 use crate::netgroup::{network_group, PeerAddr};
 use crate::{
-    BEHIND_BLOCKS, MAX_BEHIND_SECS, MAX_CLOCK_BEHIND_SECS, MAX_TIP_AGE_SECS, MIN_FILTER_GROUPS,
-    MIN_PEER_GROUPS,
+    BEHIND_BLOCKS, MAX_BEHIND_SECS, MAX_BLOCKS_BEHIND_SECS, MAX_CLOCK_BEHIND_SECS,
+    MAX_TIP_AGE_SECS, MIN_FILTER_GROUPS, MIN_PEER_GROUPS,
 };
 
 /// How a connection to a peer is carried (NR-82). No health rule reads it;
@@ -76,6 +82,9 @@ pub enum Problem {
     HeadersBehind,
     /// WR-53: the clock is more than 2 hours behind the tip's header time.
     ClockMismatch,
+    /// WR-54: the counter has known a header above the height it has checked
+    /// in full for more than 15 seconds.
+    BlocksBehind,
 }
 
 impl Problem {
@@ -86,6 +95,7 @@ impl Problem {
             Self::TipIsOld => "WR-51",
             Self::HeadersBehind => "WR-52",
             Self::ClockMismatch => "WR-53",
+            Self::BlocksBehind => "WR-54",
         }
     }
 }
@@ -95,14 +105,14 @@ impl Problem {
 pub struct Health {
     /// Every rule holds.
     pub healthy: bool,
-    /// The first rule that does not, in the order WR-50 to WR-53.
+    /// The first rule that does not, in the order WR-50 to WR-54.
     pub problem: Option<Problem>,
     /// Some peer announces a height more than 2 above the tip. The caller
     /// stores the time this first became true (see the module docs).
     pub behind: bool,
 }
 
-/// WR-50 to WR-53.
+/// WR-50 to WR-54.
 pub fn check_health(input: &HealthInput<'_>) -> Health {
     let behind = input
         .peers
@@ -148,4 +158,44 @@ fn first_problem(input: &HealthInput<'_>, behind: bool) -> Option<Problem> {
         return Some(Problem::ClockMismatch);
     }
     None
+}
+
+/// What WR-54 reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlockProgress {
+    /// Height of the counter's tip.
+    pub tip_height: u32,
+    /// The height up to which every block has been checked in full.
+    pub checked_height: u32,
+    /// When the tip first was above the checked height, as the caller stored
+    /// it; `None` if it is not above now.
+    pub behind_since: Option<u64>,
+    /// The counter's clock, in seconds.
+    pub now: u64,
+}
+
+impl BlockProgress {
+    /// Whether some header is known above the checked height.
+    pub fn behind(&self) -> bool {
+        self.tip_height > self.checked_height
+    }
+}
+
+/// WR-54: `health` with the block frontier taken in. A problem that
+/// [`check_health`] found stays the first one. Otherwise the answer is
+/// `BlocksBehind` when the tip has been above the checked height for more
+/// than 15 seconds. A caller that never stores the time never fails this
+/// rule, as with WR-52.
+pub fn check_blocks_checked(health: Health, progress: &BlockProgress) -> Health {
+    if !health.healthy || !progress.behind() {
+        return health;
+    }
+    match progress.behind_since {
+        Some(since) if progress.now.saturating_sub(since) > MAX_BLOCKS_BEHIND_SECS => Health {
+            healthy: false,
+            problem: Some(Problem::BlocksBehind),
+            behind: health.behind,
+        },
+        _ => health,
+    }
 }

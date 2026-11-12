@@ -8,10 +8,11 @@ use openbmt_core::records::RecordKind;
 use openbmt_core::wire::DecodeError;
 
 use super::kit::*;
-use crate::refund::{Ask, CashRefund, RefundAsk, RefundRequest};
+use crate::refund::{CashRefund, RefundAsk, RefundRequest};
 use crate::say::{check_line_name, CheckLine};
 use crate::{
-    Actor, Amount, Event, LightningPaid, LightningRefused, Report, Role, Sale, Screen, State, Why,
+    Actor, Amount, Event, LightningPaid, LightningRefused, RefundRefused, Report, Role, Sale,
+    Screen, State, Why,
 };
 
 fn paid(msat: u64) -> LightningPaid {
@@ -323,67 +324,119 @@ fn cr_111_what_arrived_before_is_owed_back_and_what_arrives_after_is_late() {
     assert_eq!(w.c.sale(o.index).unwrap().late_payments().len(), 1);
 }
 
-#[test]
-fn cr_111_what_arrived_over_lightning_can_be_refunded_in_cash_or_on_chain() {
-    let mut w = World::new();
-    let o = w.open_five();
-    w.lightning(o.index, paid(5_000_000)).unwrap();
-    // A cash refund of $2.00 (2,000 sats) is taken.
-    w.c.refund_in_cash(
-        o.index,
-        CashRefund {
-            actor: ann(),
-            minor: Amount(200),
-            reason: "till refund".to_string(),
-        },
-        w.now,
-        &w.chain,
-        &mut w.m,
-    )
-    .unwrap();
-    // An on-chain refund of the rest is a request at the refund depth
-    // already: the payment is final at once.
-    let request = RefundRequest {
-        ask: RefundAsk::Sats(3_000),
-        destination: p2wsh(0xa1),
-        actor: ann(),
-        reason: "wrong size".to_string(),
-    };
-    let number =
-        w.c.request_refund(o.index, request, w.now, &w.chain, &mut w.m)
-            .unwrap();
-    assert_eq!(number, 1);
-    let events = w.m.events();
-    let requested = events
-        .iter()
-        .find_map(|e| match e {
-            Event::RefundRequested {
-                received_sats,
-                waiting_for_depth,
-                ask,
-                ..
-            } => Some((*received_sats, *waiting_for_depth, ask.clone())),
-            _ => None,
-        })
-        .unwrap();
-    assert_eq!(requested.0, 5_000);
-    assert!(!requested.1);
-    assert_eq!(requested.2, Ask::Sats);
-    assert!(w.c.sale(o.index).unwrap().at_refund_depth());
-    // More than was received is still refused.
-    let more = RefundRequest {
-        ask: RefundAsk::Sats(1),
-        destination: p2wsh(0xa2),
+fn request(sats: u64, to: u8) -> RefundRequest {
+    RefundRequest {
+        ask: RefundAsk::Sats(sats),
+        destination: p2wsh(to),
         actor: Actor {
             role: Role::Manager,
             name: "max".to_string(),
         },
-        reason: "again".to_string(),
-    };
-    assert!(w
-        .c
-        .request_refund(o.index, more, w.now, &w.chain, &mut w.m)
-        .is_err());
+        reason: "wrong size".to_string(),
+    }
+}
+
+fn cash(minor: u64) -> CashRefund {
+    CashRefund {
+        actor: ann(),
+        minor: Amount(minor),
+        reason: "till refund".to_string(),
+    }
+}
+
+#[test]
+fn cr_111_what_arrived_over_lightning_counts_as_received_for_a_cash_refund() {
+    let mut w = World::new();
+    let o = w.open_five();
+    w.lightning(o.index, paid(5_000_000)).unwrap();
+    // A cash refund of $2.00 (2,000 sats) is taken, and so is the rest.
+    w.c.refund_in_cash(o.index, cash(200), w.now, &w.chain, &mut w.m)
+        .unwrap();
+    w.c.refund_in_cash(o.index, cash(300), w.now, &w.chain, &mut w.m)
+        .unwrap();
+    assert!(w.c.sale(o.index).unwrap().at_refund_depth());
+    // More than was received is still refused.
+    let err =
+        w.c.refund_in_cash(o.index, cash(1), w.now, &w.chain, &mut w.m)
+            .unwrap_err();
+    assert!(matches!(err, RefundRefused::MoreThanReceived { .. }));
+}
+
+#[test]
+fn cr_217_a_sale_paid_only_over_lightning_is_refunded_in_cash_only() {
+    let mut w = World::new();
+    let o = w.open_five();
+    w.lightning(o.index, paid(5_000_000)).unwrap();
+    assert_eq!(w.c.refund_onchain_room(o.index, w.now, &w.chain), Some(0));
+    let err =
+        w.c.request_refund(o.index, request(3_000, 0xa1), w.now, &w.chain, &mut w.m)
+            .unwrap_err();
+    assert_eq!(
+        err,
+        RefundRefused::LightningCashOnly {
+            room: 0,
+            sats: 3_000
+        }
+    );
+    assert_eq!(err.rule(), "CR-217");
+    assert!(err.to_string().starts_with("CR-217: "));
+    assert_eq!(err.words().heading, "Refund in cash");
+    // Nothing was written, and the cash refund is open.
+    assert!(w.c.refund_views(o.index).is_empty());
+    w.c.refund_in_cash(o.index, cash(300), w.now, &w.chain, &mut w.m)
+        .unwrap();
+}
+
+#[test]
+fn cr_217_a_part_lightning_sale_is_refunded_on_chain_up_to_its_on_chain_part() {
+    let mut w = World::new();
+    let o = w.open_five();
+    let part = w.pay(&o, 3_000);
+    w.see(&part, 1);
+    w.lightning(o.index, paid(5_000_000)).unwrap();
+    assert_eq!(
+        w.c.refund_onchain_room(o.index, w.now, &w.chain),
+        Some(3_000)
+    );
+    // Past the on-chain part: refused, though less than was received in all.
+    let err =
+        w.c.request_refund(o.index, request(3_001, 0xa1), w.now, &w.chain, &mut w.m)
+            .unwrap_err();
+    assert_eq!(
+        err,
+        RefundRefused::LightningCashOnly {
+            room: 3_000,
+            sats: 3_001
+        }
+    );
+    // The on-chain part is open, and takes the room.
+    w.c.request_refund(o.index, request(2_000, 0xa1), w.now, &w.chain, &mut w.m)
+        .unwrap();
+    assert_eq!(
+        w.c.refund_onchain_room(o.index, w.now, &w.chain),
+        Some(1_000)
+    );
+    let err =
+        w.c.request_refund(o.index, request(1_001, 0xa2), w.now, &w.chain, &mut w.m)
+            .unwrap_err();
+    assert_eq!(
+        err,
+        RefundRefused::LightningCashOnly {
+            room: 1_000,
+            sats: 1_001
+        }
+    );
+    // Cash is open for the rest: $3.00 is 3,000 sats, within what was
+    // received.
+    w.c.refund_in_cash(o.index, cash(300), w.now, &w.chain, &mut w.m)
+        .unwrap();
+}
+
+#[test]
+fn cr_217_a_sale_not_paid_over_lightning_has_no_such_limit() {
+    let mut w = World::new();
+    let o = w.open_five();
+    assert_eq!(w.c.refund_onchain_room(o.index, w.now, &w.chain), None);
 }
 
 fn late_paid(hash: u8, msat: u64) -> LightningPaid {

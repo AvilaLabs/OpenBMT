@@ -512,6 +512,7 @@ impl Entry {
                 note: sale.note().map(str::to_string),
                 request_days: sale.request().map_or(0, RequestDays::days),
                 expires_at: sale.expires_at(),
+                cash_refund_only: node.refund_onchain_room(index) == Some(0),
             })
         })
     }

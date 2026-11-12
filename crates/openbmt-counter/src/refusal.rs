@@ -795,6 +795,16 @@ pub enum RefundRefused<E> {
         /// What this one asks, in satoshis.
         sats: u64,
     },
+    /// CR-217: a bitcoin refund of a sale paid over Lightning would pass what
+    /// arrived on-chain for it; the owner's phone can check only payments it
+    /// sees on the chain.
+    LightningCashOnly {
+        /// What an on-chain refund of the sale can still ask, in satoshis:
+        /// what arrived on-chain, less the requests already made.
+        room: u64,
+        /// What this one asks, in satoshis.
+        sats: u64,
+    },
     /// CR-69: a cashier asks for more than the largest single refund; a
     /// manager is needed.
     NeedsManagerSingle {
@@ -832,6 +842,7 @@ impl<E> RefundRefused<E> {
             | Self::MoreThanReceived { .. } => "CR-67",
             Self::OwnScript => "CR-68",
             Self::WithdrawnMayBePaid { .. } => "CR-119",
+            Self::LightningCashOnly { .. } => "CR-217",
             Self::NothingReceived => "CR-65",
             Self::NeedsManagerSingle { .. } | Self::NeedsManagerDaily { .. } => "CR-69",
             Self::Store(_) => "CR-40",
@@ -887,6 +898,11 @@ impl<E: fmt::Display> fmt::Display for RefundRefused<E> {
                 "{sats} sats on top of {asked} sats asked, withdrawn requests included, is more \
                  than the {received} sats received; the owner may still pay a withdrawn \
                  request, so a cashier cannot give this in cash"
+            ),
+            Self::LightningCashOnly { room, sats } => write!(
+                f,
+                "{sats} sats is more than the {room} sats of this Lightning-paid sale that \
+                 arrived on-chain and can be refunded on-chain; give the refund in cash"
             ),
             Self::NeedsManagerSingle { sats, limit } => write!(
                 f,
