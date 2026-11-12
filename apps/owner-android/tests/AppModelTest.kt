@@ -2808,10 +2808,10 @@ object AppModelTest {
             shown["realCase1Place"] == "Lebanon, since 2019" && shown["realCase4End"] == "18¢ per dollar back" && shown["whyText2"]!!.contains("with a coin or a die."), "the real cases words are the ones of the words file")
         ok(listOf(1, 2, 3, 4).map { shown["realCase${it}Place"]!!.substringBefore(",") } == listOf("Lebanon", "Laiki Bank", "TMON and WeMakePrice", "Synapse"), "the four cases come worst first, in the order of the words file")
         ok(source("src/android/FirstRun.kt").contains("contentDescription = \"\$place. \$end. \$text \$who said: \$quote\""), "each case is spoken as its place, how it ended, its text, who said the quote and the quote")
-        ok(shown["realCase1Quote"] == "\"No bank transfers are allowed, so we cannot import materials.\"" && shown["realCase1Who"] == "A manufacturer in Lebanon" &&
+        ok(shown["realCase1Quote"] == "\"I got to a point where I was going to sell my kidney…\"" && shown["realCase1Who"] == "A woman in Beirut, for her sister's cancer treatment" &&
             shown["realCase2Quote"] == "\"We can't make any withdrawals, we can't make deposits, pay our suppliers.\"" && shown["realCase2Who"] == "A florist in Nicosia, with the banks shut" &&
             shown["realCase3Quote"] == "\"If the settlement is not done by then, it means bankruptcy.\"" && shown["realCase3Who"] == "A seller of household goods in Seoul" &&
-            shown["realCase4Quote"] == "\"A bank just robbed us.\"" && shown["realCase4Who"] == "A customer who had \$94,000 and was shown \$128.68 back", "each real case has its quote and who, exactly")
+            shown["realCase4Quote"] == "\"[The bank] was only going to pay us \$500 out of that \$280,000.\"" && shown["realCase4Who"] == "A former teacher who had saved for 15 years for a family home", "each real case has its quote and who, exactly")
         val screensMdText = File(appDir, "../../docs/screens/owner-app.md").readText()
         for (k in listOf("whyRealCases", "realTitle", "realIntro", "realCase1Place", "realCase1End", "realCase1Text", "realCase1Quote", "realCase1Who", "realCase2Place", "realCase2End", "realCase2Text",
             "realCase3Place", "realCase3End", "realCase3Text", "realCase3Quote", "realCase3Who", "realCase4Place", "realCase4End", "realCase4Text", "realCase4Quote", "realCase4Who", "realBitcoinTitle", "realBitcoinText", "realKeysTitle", "realKeysText", "realCoinTitle", "realCoinText", "realMore")) {
