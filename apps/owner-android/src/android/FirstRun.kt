@@ -64,6 +64,7 @@ private fun Controller.showWelcome() {
     r.toWelcome()
     val views = ArrayList<View>()
     welcomeNotice?.let { views.add(line(it, bold = true)); welcomeNotice = null }
+    views.add(0, ui.welcomePicture())
     views.add(heading(FirstRunWords.welcomeTitle))
     views.add(para(FirstRunWords.welcomeText))
     val tryIt = ui.button(FirstRunWords.welcomeTry) { startPractice() }
@@ -88,7 +89,7 @@ private fun Controller.showPractice(p: Practice) {
     fun go() { p.next(); showFirstRun() }
     when (p.step) {
         PracticeStep.Intro -> practicePage(
-            listOf(heading(FirstRunWords.practiceIntroTitle), para(FirstRunWords.practiceIntroText)),
+            listOf(ui.practicePicture(), heading(FirstRunWords.practiceIntroTitle), para(FirstRunWords.practiceIntroText)),
             listOf(ui.primary(FirstRunWords.practiceStart) { go() }), back,
         )
         PracticeStep.Amount -> showPracticeAmount(p, back)
@@ -237,7 +238,7 @@ private fun Controller.showTillChoice(r: FirstRun) {
         }
     }
     stepScreen(
-        FirstRunWords.shopTitle, listOf(heading(FirstRunWords.tillTitle), para(FirstRunWords.tillText), search, list, msg),
+        FirstRunWords.shopTitle, listOf(ui.tillPicture(), heading(FirstRunWords.tillTitle), para(FirstRunWords.tillText), search, list, msg),
         listOf(next), { r.back(); showFirstRun() },
     )
 }
@@ -251,7 +252,7 @@ private fun Controller.showMoney(r: FirstRun) {
         RowItem(FirstRunWords.moneyLater, FirstRunWords.moneyLaterNote) { r.choose(MoneyChoice.Later); showFirstRun() },
     )
     stepScreen(
-        FirstRunWords.shopTitle, listOf(heading(FirstRunWords.moneyTitle), para(FirstRunWords.moneyText), ui.rows(rows)),
+        FirstRunWords.shopTitle, listOf(ui.moneyPicture(), heading(FirstRunWords.moneyTitle), para(FirstRunWords.moneyText), ui.rows(rows)),
         back = { r.back(); showFirstRun() },
     )
 }
@@ -259,7 +260,7 @@ private fun Controller.showMoney(r: FirstRun) {
 private fun Controller.showWhy(r: FirstRun) {
     stepScreen(
         FirstRunWords.shopTitle,
-        listOf(heading(FirstRunWords.whyTitle), para(FirstRunWords.whyText1), para(FirstRunWords.whyText2), para(FirstRunWords.whyText3)),
+        listOf(ui.whyPicture(), heading(FirstRunWords.whyTitle), para(FirstRunWords.whyText1), para(FirstRunWords.whyText2), para(FirstRunWords.whyText3)),
         listOf(ui.primary(FirstRunWords.shopNext) { r.next(); showFirstRun() }), { r.back(); showFirstRun() },
     )
 }

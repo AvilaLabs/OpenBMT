@@ -2794,6 +2794,23 @@ object AppModelTest {
         ok(FirstRunWords.with(FirstRunWords.tillStepsTitle, "Odoo") == "Add Bitcoin to Odoo", "{till} is the till's name")
     }
 
+    private fun pictureTests() {
+        for (p in PictureTiming.Picture.values()) {
+            ok(p.loopMs in 2000..3000, "${p.name}: a loop of two to three seconds")
+            ok(PictureTiming.position(p, 0, true) == 0f, "${p.name}: starts at 0")
+            ok(PictureTiming.position(p, p.loopMs.toLong(), true) == 0f && PictureTiming.position(p, p.loopMs * 5L + 750, true) == 750f / p.loopMs, "${p.name}: the loop repeats")
+            ok((0 until p.loopMs step 10).all { PictureTiming.position(p, it.toLong(), true) in 0f..0.999f }, "${p.name}: the position stays inside the loop")
+            ok(PictureTiming.position(p, 1234, false) == PictureTiming.STILL && PictureTiming.position(p, 0, false) == PictureTiming.STILL, "${p.name}: with animations off it is the last frame at any time")
+        }
+        ok(PictureTiming.seg(1f, 0.3f, PictureTiming.DONE_BY) == 1f && PictureTiming.seg(PictureTiming.STILL, 0.1f, 0.5f) == 1f, "the last frame is past the end of every move")
+        ok(PictureTiming.seg(0f, 0.2f, 0.6f) == 0f && Math.abs(PictureTiming.seg(0.4f, 0.2f, 0.6f) - 0.5f) < 1e-6f, "a move is 0 before it and linear in it")
+        ok(PictureTiming.seg(0.5f, 0.5f, 0.5f) == 1f && PictureTiming.seg(0.4f, 0.5f, 0.5f) == 0f, "an empty stretch is a step")
+        ok(PictureTiming.ease(0f) == 0f && PictureTiming.ease(1f) == 1f && Math.abs(PictureTiming.ease(0.5f) - 0.5f) < 1e-6f && PictureTiming.ease(2f) == 1f, "ease keeps its ends")
+        ok(PictureTiming.bump(0f, 0.2f, 0.6f) == 0f && PictureTiming.bump(1f, 0.2f, 0.6f) < 1e-6f && PictureTiming.bump(0.4f, 0.2f, 0.6f) > 0.99f, "a bump is 0 at both ends")
+        val src = source("src/android/FirstRunPictures.kt")
+        ok(!Regex("drawText|StaticLayout|TextView|\"[A-Za-z]{2,}").containsMatchIn(src.replace(Regex("//.*"), "").replace(Regex("/\\*[\\s\\S]*?\\*/"), "")), "the pictures draw shapes only: no text and no string of words")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         val screensMd = args.firstOrNull()?.let { File(it) }
@@ -2811,6 +2828,7 @@ object AppModelTest {
         counterTests()
         ceremonyTests()
         firstRunTests()
+        pictureTests()
         ruleTests(rulesMd)
         println("AppModelTest (owner): $count checks passed")
     }
