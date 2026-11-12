@@ -7,6 +7,7 @@ use openbmt_core::wire::DecodeError;
 use openbmt_counter::{Amount, Event, RateSource, Role};
 
 use super::kit::*;
+use crate::notice::TAG_PAID_NOTICE;
 use crate::*;
 
 fn draft(index: u32, state: NoticeState, at: u64) -> NoticeDraft {
@@ -17,6 +18,7 @@ fn draft(index: u32, state: NoticeState, at: u64) -> NoticeDraft {
         opened_at: T0,
         state,
         state_at: at,
+        till_sale: None,
     }
 }
 
@@ -452,4 +454,140 @@ fn bx_42_a_pos_notice_holds_no_satoshi_amount_address_or_txid() {
     for word in ["satoshi", "sats", "txid", "bc1", "address"] {
         assert!(!text.contains(word), "{text}");
     }
+}
+
+fn till_notice(number: u64, sale: [u8; 16], state: NoticeState) -> PaidNotice {
+    let d = NoticeDraft {
+        till_sale: Some(sale),
+        ..draft(7, state, T0 + 5)
+    };
+    PaidNotice::sign(&identity(3), number, &d).unwrap()
+}
+
+#[test]
+fn bx_77_a_notice_made_before_the_till_still_reads_and_verifies() {
+    // The bytes of a notice as they were laid out before the till sale
+    // existed, signed by hand.
+    let id = identity(3);
+    let mut old = openbmt_core::wire::start(&MAGIC_PAID_NOTICE, PAID_NOTICE_LEN);
+    old.extend_from_slice(&id.device_id().to_bytes());
+    old.extend_from_slice(&9u64.to_le_bytes());
+    old.extend_from_slice(&7u32.to_le_bytes());
+    old.extend_from_slice(&500u64.to_le_bytes());
+    old.extend_from_slice(b"USD");
+    old.extend_from_slice(&T0.to_le_bytes());
+    old.push(2);
+    old.extend_from_slice(&(T0 + 5).to_le_bytes());
+    let sig = id.sign_tagged(TAG_PAID_NOTICE, &old);
+    old.extend_from_slice(&sig.0);
+    assert_eq!(old.len(), PAID_NOTICE_LEN);
+    assert_eq!(old[4], 1);
+    let n = PaidNotice::from_bytes(&old).unwrap();
+    assert_eq!(n.till_sale, None);
+    assert!(n.verify());
+    // And a notice made now with no till sale is those same bytes.
+    let same = PaidNotice::sign(&id, 9, &draft(7, NoticeState::Paid, T0 + 5)).unwrap();
+    assert_eq!(same.to_bytes(), old);
+}
+
+#[test]
+fn bx_77_a_notice_names_its_till_sale_and_the_name_is_signed() {
+    let sale = [0xab; 16];
+    let n = till_notice(4, sale, NoticeState::Opened);
+    let bytes = n.to_bytes();
+    assert_eq!(bytes.len(), PAID_NOTICE_TILL_LEN);
+    assert_eq!(bytes[4], 2);
+    let back = PaidNotice::from_bytes(&bytes).unwrap();
+    assert_eq!(back, n);
+    assert_eq!(back.till_sale, Some(sale));
+    assert!(back.verify());
+    // Changing the name breaks the signature.
+    let mut other = back.clone();
+    other.till_sale = Some([0xcd; 16]);
+    assert!(!other.verify());
+    // The length is exact for both versions.
+    let mut long = bytes.clone();
+    long.push(0);
+    assert!(PaidNotice::from_bytes(&long).is_err());
+    assert!(PaidNotice::from_bytes(&bytes[..PAID_NOTICE_LEN]).is_err());
+    // Version 2 cut to the old length and version 1 at the new length are
+    // not notices.
+    let mut as_v1 = bytes.clone();
+    as_v1[4] = 1;
+    assert!(PaidNotice::from_bytes(&as_v1).is_err());
+    let mut as_v3 = bytes;
+    as_v3[4] = 3;
+    assert!(PaidNotice::from_bytes(&as_v3).is_err());
+}
+
+#[test]
+fn bx_77_a_till_sale_does_not_change_what_the_sale_is() {
+    let sale = [1; 16];
+    let notices = [
+        till_notice(1, sale, NoticeState::Opened),
+        till_notice(2, sale, NoticeState::Paid),
+    ];
+    let plain = [
+        notice(1, 7, NoticeState::Opened, T0 + 5),
+        notice(2, 7, NoticeState::Paid, T0 + 5),
+    ];
+    assert_eq!(facts_from_notices(&notices), facts_from_notices(&plain));
+}
+
+fn request() -> SaleRequest {
+    SaleRequest {
+        sale: [7; 16],
+        amount: Amount(1250),
+        currency: usd(),
+        reference: "Order 00012-003-0004".into(),
+        expires_at: T0 + 300,
+    }
+}
+
+#[test]
+fn bx_76_a_sale_request_and_a_cancel_read_back_exactly() {
+    let r = TillMessage::Request(request());
+    assert_eq!(TillMessage::from_bytes(&r.to_bytes()).unwrap(), r);
+    assert_eq!(&r.to_bytes()[..4], b"OBM(");
+    let c = TillMessage::Cancel(SaleCancel { sale: [9; 16] });
+    assert_eq!(TillMessage::from_bytes(&c.to_bytes()).unwrap(), c);
+    assert_eq!(c.to_bytes().len(), 5 + 1 + 16);
+}
+
+#[test]
+fn bx_76_a_sale_request_is_read_strictly() {
+    let good = TillMessage::Request(request()).to_bytes();
+    // Trailing byte, cut, wrong magic, wrong version, wrong kind.
+    let mut long = good.clone();
+    long.push(0);
+    assert!(TillMessage::from_bytes(&long).is_err());
+    assert!(TillMessage::from_bytes(&good[..good.len() - 1]).is_err());
+    let mut bad = good.clone();
+    bad[0] = b'X';
+    assert!(TillMessage::from_bytes(&bad).is_err());
+    let mut bad = good.clone();
+    bad[4] = 2;
+    assert!(TillMessage::from_bytes(&bad).is_err());
+    let mut bad = good.clone();
+    bad[5] = 3;
+    assert!(TillMessage::from_bytes(&bad).is_err());
+    // A zero amount, a lower-case currency, a reference that is not
+    // printable ASCII or is over 40 bytes.
+    let mut bad = good.clone();
+    bad[22..30].copy_from_slice(&0u64.to_le_bytes());
+    assert!(TillMessage::from_bytes(&bad).is_err());
+    let mut bad = good.clone();
+    bad[30] = b'u';
+    assert!(TillMessage::from_bytes(&bad).is_err());
+    let mut bad = good.clone();
+    let last = bad.len() - 1;
+    bad[last] = 0x07;
+    assert!(TillMessage::from_bytes(&bad).is_err());
+    let long_ref = TillMessage::Request(SaleRequest {
+        reference: "x".repeat(41),
+        ..request()
+    });
+    assert!(TillMessage::from_bytes(&long_ref.to_bytes()).is_err());
+    assert!(reference_ok(&"x".repeat(40)));
+    assert!(!reference_ok("tab\there"));
 }

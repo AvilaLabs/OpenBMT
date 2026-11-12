@@ -611,6 +611,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 opened_at,
                 state,
                 state_at: now,
+                till_sale: None,
             };
             let number = next_number(&dir, from, "notice")?;
             let notice = PaidNotice::sign(&who, number, &draft).ok_or("the notice was not made")?;

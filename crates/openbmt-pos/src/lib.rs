@@ -53,6 +53,7 @@ pub mod notice;
 pub mod reference;
 pub mod say;
 pub mod settings;
+pub mod till;
 
 #[cfg(test)]
 mod tests;
@@ -73,10 +74,13 @@ pub use model::{
 };
 pub use notice::{
     facts_from_notices, NoticeDraft, NoticeMaker, NoticeState, PaidNotice, PosItem, PosNotice,
-    SaleMismatch, MAGIC_PAID_NOTICE, MAGIC_POS_NOTICE, PAID_NOTICE_LEN,
+    SaleMismatch, MAGIC_PAID_NOTICE, MAGIC_POS_NOTICE, PAID_NOTICE_LEN, PAID_NOTICE_TILL_LEN,
 };
 pub use reference::{find_reference, IdempotencyKey, RefCode};
 pub use settings::{LocationCounters, Settings, SettingsError, Timing};
+pub use till::{
+    reference_ok, SaleCancel, SaleRequest, TillMessage, MAGIC_TILL_SALE, MAX_TILL_REFERENCE,
+};
 
 /// PS-01: longest order or tender id, in bytes.
 pub const MAX_ID_BYTES: usize = 64;

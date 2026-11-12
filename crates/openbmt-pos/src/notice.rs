@@ -36,11 +36,16 @@ pub const MAGIC_POS_NOTICE: [u8; 4] = *b"OBMd";
 pub const TAG_PAID_NOTICE: &str = "OpenBMT/paid-notice/v1";
 /// The tag of the hash a POS notice's signature covers.
 pub const TAG_POS_NOTICE: &str = "OpenBMT/pos-notice/v1";
-/// The length of every paid notice: magic and version (5), counter key
-/// (32), number (8), sale index (4), amount (8), currency (3), opened (8),
-/// state (1), state time (8) and signature (64). Nothing else is in it
-/// (BX-40).
+/// The length of every paid notice that does not name a till sale: magic and
+/// version (5), counter key (32), number (8), sale index (4), amount (8),
+/// currency (3), opened (8), state (1), state time (8) and signature (64).
+/// Nothing else is in it (BX-40).
 pub const PAID_NOTICE_LEN: usize = 141;
+/// The length of a paid notice that names a till sale (BX-77): the same
+/// fields, version 2, and the 16 bytes of the sale's id before the signature.
+pub const PAID_NOTICE_TILL_LEN: usize = PAID_NOTICE_LEN + 16;
+/// The version byte of a paid notice that names a till sale.
+const TILL_VERSION: u8 = 2;
 
 /// The four things a paid notice says about a sale (BX-40).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -109,6 +114,9 @@ pub struct PaidNotice {
     /// When the state was reached; for "paid", when the sale was first
     /// reported paid.
     pub state_at: u64,
+    /// The till sale this notice answers, when the sale was asked for by a
+    /// till through the Box (BX-77). Signed with the rest.
+    pub till_sale: Option<[u8; 16]>,
     /// The counter's signature over [`PaidNotice::signing_bytes`].
     pub sig: Sig,
 }
@@ -128,6 +136,8 @@ pub struct NoticeDraft {
     pub state: NoticeState,
     /// When the state was reached.
     pub state_at: u64,
+    /// The till sale the sale answers, if a till asked for it (BX-77).
+    pub till_sale: Option<[u8; 16]>,
 }
 
 impl PaidNotice {
@@ -145,6 +155,7 @@ impl PaidNotice {
             opened_at: draft.opened_at,
             state: draft.state,
             state_at: draft.state_at,
+            till_sale: draft.till_sale,
             sig: Sig([0; 64]),
         };
         notice.sig = identity.sign_tagged(TAG_PAID_NOTICE, &notice.signing_bytes());
@@ -153,7 +164,14 @@ impl PaidNotice {
 
     /// The bytes the signature covers: everything before it.
     pub fn signing_bytes(&self) -> Vec<u8> {
-        let mut out = wire::start(&MAGIC_PAID_NOTICE, PAID_NOTICE_LEN);
+        let mut out = wire::start(&MAGIC_PAID_NOTICE, PAID_NOTICE_TILL_LEN);
+        // A notice with no till sale is exactly what it always was, version 1
+        // and 141 bytes, so that notices made before the till still verify.
+        if self.till_sale.is_some() {
+            if let Some(version) = out.last_mut() {
+                *version = TILL_VERSION;
+            }
+        }
         out.extend_from_slice(&self.counter.to_bytes());
         out.extend_from_slice(&self.number.to_le_bytes());
         out.extend_from_slice(&self.index.to_le_bytes());
@@ -162,6 +180,9 @@ impl PaidNotice {
         out.extend_from_slice(&self.opened_at.to_le_bytes());
         out.push(self.state.to_byte());
         out.extend_from_slice(&self.state_at.to_le_bytes());
+        if let Some(sale) = &self.till_sale {
+            out.extend_from_slice(sale);
+        }
         out
     }
 
@@ -173,13 +194,14 @@ impl PaidNotice {
     }
 
     /// Read a notice strictly: the length is exact, the state and the
-    /// currency are known and the number is not zero. The signature is not
-    /// checked here: see [`PaidNotice::verify`].
+    /// currency are known and the number is not zero. Version 1 has no till
+    /// sale and version 2 has one. The signature is not checked here: see
+    /// [`PaidNotice::verify`].
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
-        if bytes.len() > PAID_NOTICE_LEN {
+        if bytes.len() > PAID_NOTICE_TILL_LEN {
             return Err(DecodeError::TrailingBytes);
         }
-        let mut r = Reader::framed(bytes, &MAGIC_PAID_NOTICE)?;
+        let (mut r, version) = Reader::framed_up_to(bytes, &MAGIC_PAID_NOTICE, TILL_VERSION)?;
         let counter = r.device_id()?;
         let number = r.u64_le()?;
         if number == 0 {
@@ -193,6 +215,11 @@ impl PaidNotice {
         let state = NoticeState::from_byte(r.u8()?)
             .ok_or(DecodeError::NonCanonical("a notice state is not known"))?;
         let state_at = r.u64_le()?;
+        let till_sale = if version == TILL_VERSION {
+            Some(r.array::<16>()?)
+        } else {
+            None
+        };
         let sig = r.sig()?;
         r.finish()?;
         Ok(Self {
@@ -204,6 +231,7 @@ impl PaidNotice {
             opened_at,
             state,
             state_at,
+            till_sale,
             sig,
         })
     }
@@ -418,6 +446,7 @@ impl NoticeMaker {
             opened_at: fact.opened_at,
             state,
             state_at,
+            till_sale: None,
         }))
     }
 }

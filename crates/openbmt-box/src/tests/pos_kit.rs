@@ -128,6 +128,7 @@ pub fn draft(index: u32, state: NoticeState, at: u64, cents: u64) -> NoticeDraft
         opened_at: NOW,
         state,
         state_at: at,
+        till_sale: None,
     }
 }
 

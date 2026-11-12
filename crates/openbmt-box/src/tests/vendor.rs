@@ -123,6 +123,7 @@ fn paid_notices(amount: u64) -> Vec<(DeviceId, Vec<u8>)> {
         opened_at: TENDER_AT - 120,
         state,
         state_at: at,
+        till_sale: None,
     };
     vec![
         item(&counter1(), 1, &draft(NoticeState::Opened, TENDER_AT - 120)),
@@ -536,6 +537,7 @@ fn bx_49_the_counters_on_the_device_list_serve_the_one_location() {
         opened_at: TENDER_AT - 120,
         state,
         state_at: at,
+        till_sale: None,
     };
     pos.take_notices(
         &[
