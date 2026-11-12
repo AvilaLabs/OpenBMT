@@ -347,6 +347,23 @@ library keeps that apart from what the random peers report.
   sights a transaction the own node reported earlier than the sale knew it.
   Until the node answers, the light check's mode applies.
 
+- **WR-66.** With `node_only` on (NR-105), "seen by the light client"
+  (WR-44) is not used. A payment the own node holds in its memory pool
+  (WR-61) while it can be used (WR-63) has the check mode `OwnNodeOnly`,
+  which takes the instant limits of `NodeAlsoSeenByLight`: the node has
+  checked the transaction's scripts and that it conflicts with nothing it
+  holds. The conflict watch of section 6 reads the own node's
+  announcements in place of the peers'. A payment the node does not hold
+  has no mode and waits for a confirmation, as WR-45's last case.
+- **WR-67.** In this mode the health line is the own node's alone: usable,
+  connecting, not reachable, behind, silent, missing compact filters
+  (NR-107), lacking an old block (NR-108), or checking with other nodes
+  while it is not usable (NR-110). Every state has words (SC-01).
+- **WR-68.** With `light_fallback` on and the random peers running
+  (NR-110), WR-44 and WR-45 apply to what they report until the own node is
+  usable again; a payment first seen by them keeps the light check's mode
+  even after the node returns, unless the node then reports it (WR-66).
+
 ## 8. What these rules do not do
 
 - **They do not prove that a payment will confirm.** An unconfirmed

@@ -613,3 +613,55 @@ and what the node reports is kept apart from what they report
   pass 10 seconds is asked last for blocks, until one of its blocks arrives.
   When every connected peer has failed to give the block, the counter waits 10
   seconds and starts over. Without NR-44 nothing changes: 60 seconds each.
+
+## 14. Only your own node
+
+A shop that runs its own Bitcoin Core node can choose to check every
+payment against that node alone, with no random peers at all. The node
+checks every rule of Bitcoin itself, and nobody else learns which addresses
+the shop watches. Section 13's own node, a second check next to the light
+client, stays as it is for shops that do not choose this. Bitcoin Core is
+the node these rules are written and tested against.
+
+- **NR-105.** Three fields of the shop's signed settings
+  (`openbmt_core::settings::Settings`) say how the shop's devices reach the
+  network: `own_node`, the node's Tor v3 name and port as NR-98 accepts
+  them, or none; `node_only`, which may be on only when `own_node` is set;
+  and `light_fallback`, which may be on only when `node_only` is. Settings
+  that break either condition are not valid. Every device of the shop, the
+  counters, the owner phone and its background watcher, takes the node and
+  the mode from the settings in force; the counter's own setting of an own
+  node (its app configuration) is not used once the settings name one.
+- **NR-106.** With `node_only` on, the driver dials the own node and nothing
+  else: no anchors, no fixed peers, no address book, no seeds and no onion
+  peers. The own node is then the only peer, and it serves the headers,
+  filters, blocks and transactions that sections 4 to 6 ask of peers. The
+  checks of those sections still apply to what it sends: a header chain is
+  checked for its proof of work and difficulty as from any peer, a block
+  must match its header, a filter must be the one its header commits to
+  where the counter can check it. A node can withhold; it cannot make work
+  it did not do.
+- **NR-107.** A node that does not advertise compact filters
+  (`NODE_COMPACT_FILTERS`, BIP 157) and blocks (`NODE_NETWORK` or
+  `NODE_NETWORK_LIMITED`) in its `version` cannot serve a device in this
+  mode. The device says so, names the two Bitcoin Core settings it needs
+  (`blockfilterindex=1`, `peerblockfilters=1`), and does not count the
+  node as usable (WR-63).
+- **NR-108.** A block older than the node serves (a node that keeps only
+  recent blocks serves the last 288) is not fetched elsewhere. A device that
+  needs one, after being off for days, says which block it lacks and that
+  the node must keep blocks that far back, and waits; with
+  `light_fallback` on, NR-110 applies.
+- **NR-109.** Transactions go out only to the own node in this mode:
+  refunds, cash-outs and every broadcast of section 11.
+- **NR-110.** When the own node cannot be used (WR-63), a device in this
+  mode without `light_fallback` dials no one else: sales wait, nothing is
+  accepted at once, and the line says so (WR-67). With `light_fallback` on,
+  the driver starts the random peers of sections 3 to 6 as if `node_only`
+  were off, says so on the line, and stops them when the own node has been
+  usable for 2 minutes **[to tune]**. Nothing falls back without the line
+  saying it.
+- **NR-111.** What the network learns in this mode: the own node learns
+  what the shop's devices ask of it, as any peer would; no other node
+  learns anything from them. The node's own connections to the network are
+  the node's.

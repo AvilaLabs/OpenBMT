@@ -23,6 +23,14 @@ signature for every loosening change, unchanged.
   takes the highest class among them: Redirect over Loosen over Free. No
   change at all is Free.
 
+- **AP-11. The shop's own node.** Setting `own_node` while `node_only` is
+  on, changing it while `node_only` is on, turning `node_only` on and
+  turning `light_fallback` on are Loosen: they decide which node every
+  device trusts for its payments (NR-105). Taking `own_node` away, and
+  turning `node_only` or `light_fallback` off, are Free. Setting or
+  changing `own_node` while `node_only` is off is Free: the node is then a
+  second check only (NR-98 to NR-103, WR-60 to WR-65).
+
 ## 2. Counter confirmation
 
 - **AP-03. Four words.** The four words that both screens show are BIP-39
