@@ -15,3 +15,4 @@ apps/key-android/build/
 # mdBook output
 dist/
 .wrangler/
+__pycache__/

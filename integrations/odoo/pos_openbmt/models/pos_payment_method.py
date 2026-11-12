@@ -24,11 +24,35 @@ CURRENCY_RE = re.compile(r'^[A-Z]{3}$')
 STATES = ('waiting', 'opened', 'paid', 'unpaid', 'expired', 'cancelled')
 ENDED = ('paid', 'unpaid', 'expired', 'cancelled')
 
-# Keys of errors this module raises itself; the words file has no text for
-# them, so no words travel with them.
+# Errors this module finds itself, before or instead of an answer from the
+# Box, with the words the cashier sees.
 ERR_TRANSPORT = 'tillTransport'
 ERR_ANSWER = 'tillBadAnswer'
 ERR_SETUP = 'tillNotSet'
+LOCAL_WORDS = {
+    ERR_TRANSPORT: {
+        'heading': 'The till cannot reach the Box',
+        'what': "Odoo's server got no answer from the Box address in this "
+                'payment method.',
+        'next': 'Check that the Box is on, that its till listener is started '
+                'and that the address is right. Until then, take the payment '
+                'on the counter and pick Bitcoin by hand.',
+    },
+    ERR_ANSWER: {
+        'heading': 'The Box gave an answer the till cannot read',
+        'what': 'The answer from the Box address is not one the till '
+                "expects. The address may point at something other than the "
+                "Box's till listener.",
+        'next': 'Check the Box address in this payment method. Until then, '
+                'take the payment on the counter and pick Bitcoin by hand.',
+    },
+    ERR_SETUP: {
+        'heading': 'This payment method is not set up',
+        'what': 'The Box address, till key or counter code is missing or '
+                "wrong, or the sale's amount cannot be sent.",
+        'next': 'Check the three OpenBMT fields of this payment method.',
+    },
+}
 
 
 class PosPaymentMethod(models.Model):
@@ -67,10 +91,10 @@ class PosPaymentMethod(models.Model):
                 and isinstance(currency, str) and CURRENCY_RE.match(currency)
                 and isinstance(reference, str)
                 and isinstance(request, str) and REQUEST_RE.match(request)):
-            return {'error': ERR_SETUP, 'words': None}
+            return {'error': ERR_SETUP, 'words': LOCAL_WORDS[ERR_SETUP]}
         counter = self.openbmt_counter or ''
         if not COUNTER_RE.match(counter):
-            return {'error': ERR_SETUP, 'words': None}
+            return {'error': ERR_SETUP, 'words': LOCAL_WORDS[ERR_SETUP]}
         body = {
             'counter': counter,
             'amount': amount,
@@ -83,13 +107,13 @@ class PosPaymentMethod(models.Model):
     def openbmt_status(self, sale):
         self.ensure_one()
         if not (isinstance(sale, str) and SALE_RE.match(sale)):
-            return {'error': ERR_SETUP, 'words': None}
+            return {'error': ERR_SETUP, 'words': LOCAL_WORDS[ERR_SETUP]}
         return self._openbmt_call('GET', '/till/v1/sales/' + sale, None, sale)
 
     def openbmt_cancel(self, sale):
         self.ensure_one()
         if not (isinstance(sale, str) and SALE_RE.match(sale)):
-            return {'error': ERR_SETUP, 'words': None}
+            return {'error': ERR_SETUP, 'words': LOCAL_WORDS[ERR_SETUP]}
         return self._openbmt_call(
             'POST', '/till/v1/sales/' + sale + '/cancel', {}, sale)
 
@@ -99,7 +123,7 @@ class PosPaymentMethod(models.Model):
         base = self._openbmt_base()
         key = self.sudo().openbmt_till_key
         if base is None or not key:
-            return {'error': ERR_SETUP, 'words': None}
+            return {'error': ERR_SETUP, 'words': LOCAL_WORDS[ERR_SETUP]}
         try:
             response = requests.request(
                 verb, base + path, json=body, timeout=TIMEOUT,
@@ -111,9 +135,9 @@ class PosPaymentMethod(models.Model):
             # The class name only: the text of an exception may carry
             # request details.
             _logger.warning('OpenBMT box call failed: %s', type(exc).__name__)
-            return {'error': ERR_TRANSPORT, 'words': None}
+            return {'error': ERR_TRANSPORT, 'words': LOCAL_WORDS[ERR_TRANSPORT]}
         if raw is None:
-            return {'error': ERR_ANSWER, 'words': None}
+            return {'error': ERR_ANSWER, 'words': LOCAL_WORDS[ERR_ANSWER]}
         return self._openbmt_parse(response.status_code, raw, sale)
 
     def _openbmt_base(self):
@@ -148,9 +172,9 @@ class PosPaymentMethod(models.Model):
         try:
             data = json.loads(raw.decode('utf-8'))
         except (UnicodeDecodeError, ValueError):
-            return {'error': ERR_ANSWER, 'words': None}
+            return {'error': ERR_ANSWER, 'words': LOCAL_WORDS[ERR_ANSWER]}
         if not isinstance(data, dict):
-            return {'error': ERR_ANSWER, 'words': None}
+            return {'error': ERR_ANSWER, 'words': LOCAL_WORDS[ERR_ANSWER]}
         if status == 200:
             return self._openbmt_sale(data, sale)
         error = data.get('error')
@@ -159,24 +183,24 @@ class PosPaymentMethod(models.Model):
                 and isinstance(error, str) and error.startswith('till')
                 and len(error) <= 40 and error.isalnum() and words):
             return {'error': error, 'words': words}
-        return {'error': ERR_ANSWER, 'words': None}
+        return {'error': ERR_ANSWER, 'words': LOCAL_WORDS[ERR_ANSWER]}
 
     def _openbmt_sale(self, data, expected):
         got = data.get('sale')
         state = data.get('state')
         if not isinstance(got, str) or not SALE_RE.match(got):
-            return {'error': ERR_ANSWER, 'words': None}
+            return {'error': ERR_ANSWER, 'words': LOCAL_WORDS[ERR_ANSWER]}
         if expected is not None and got != expected:
-            return {'error': ERR_ANSWER, 'words': None}
+            return {'error': ERR_ANSWER, 'words': LOCAL_WORDS[ERR_ANSWER]}
         if state not in STATES:
-            return {'error': ERR_ANSWER, 'words': None}
+            return {'error': ERR_ANSWER, 'words': LOCAL_WORDS[ERR_ANSWER]}
         words = self._openbmt_words(data.get('words'))
         if state in ENDED:
             # A paid sale may carry its text as one plain line.
             if words is None:
-                return {'error': ERR_ANSWER, 'words': None}
+                return {'error': ERR_ANSWER, 'words': LOCAL_WORDS[ERR_ANSWER]}
         elif 'words' in data and data['words'] is not None:
-            return {'error': ERR_ANSWER, 'words': None}
+            return {'error': ERR_ANSWER, 'words': LOCAL_WORDS[ERR_ANSWER]}
         return {'state': state, 'sale': got, 'words': words}
 
     @staticmethod

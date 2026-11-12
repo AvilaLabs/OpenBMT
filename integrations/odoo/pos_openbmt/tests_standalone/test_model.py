@@ -175,7 +175,7 @@ class Refusals(Base):
                      {'openbmt_box_address': 'http://127.0.0.1:99999'},
                      {'openbmt_box_address': 'http://'}):
             r = self.start(method=self.make(**over))
-            self.assertEqual(r, {'error': mod.ERR_SETUP, 'words': None}, over)
+            self.assertEqual(r, {'error': mod.ERR_SETUP, 'words': mod.LOCAL_WORDS[mod.ERR_SETUP]}, over)
         self.assertEqual(self.box.seen, [])
 
     def test_https_scheme_accepted_by_check(self):
@@ -187,7 +187,7 @@ class Transport(Base):
     def test_connection_refused(self):
         m = self.make(openbmt_box_address='http://127.0.0.1:1')
         r = self.start(method=m)
-        self.assertEqual(r, {'error': mod.ERR_TRANSPORT, 'words': None})
+        self.assertEqual(r, {'error': mod.ERR_TRANSPORT, 'words': mod.LOCAL_WORDS[mod.ERR_TRANSPORT]})
         self.assert_clean(r)
 
     def test_timeout(self):
@@ -197,13 +197,13 @@ class Transport(Base):
         self.box.mode = 'slow'
         self.box.delay = 1.5
         r = self.start()
-        self.assertEqual(r, {'error': mod.ERR_TRANSPORT, 'words': None})
+        self.assertEqual(r, {'error': mod.ERR_TRANSPORT, 'words': mod.LOCAL_WORDS[mod.ERR_TRANSPORT]})
         self.assert_clean(r)
 
     def test_redirect_refused(self):
         self.box.mode = 'redirect'
         r = self.start()
-        self.assertEqual(r, {'error': mod.ERR_ANSWER, 'words': None})
+        self.assertEqual(r, {'error': mod.ERR_ANSWER, 'words': mod.LOCAL_WORDS[mod.ERR_ANSWER]})
         self.assertEqual([p for _, p, _ in self.box.seen], ['/till/v1/sales'])
 
     def test_garbage_refused(self):
@@ -229,7 +229,7 @@ class Transport(Base):
         for shape in bad:
             self.box.shape = shape
             self.assertEqual(self.method.openbmt_status(sale),
-                             {'error': mod.ERR_ANSWER, 'words': None}, shape)
+                             {'error': mod.ERR_ANSWER, 'words': mod.LOCAL_WORDS[mod.ERR_ANSWER]}, shape)
 
     def test_oversize_answer_refused(self):
         self.box.mode = 'shape'
@@ -252,7 +252,7 @@ class Transport(Base):
                             (401, b'{"error":"tillKeyWrong"}'), (401, b'[1]'),
                             (302, b'{}')):
             self.assertEqual(parse(status, raw, None),
-                             {'error': mod.ERR_ANSWER, 'words': None}, (status, raw))
+                             {'error': mod.ERR_ANSWER, 'words': mod.LOCAL_WORDS[mod.ERR_ANSWER]}, (status, raw))
 
     def test_failure_log_has_class_name_only(self):
         m = self.make(openbmt_box_address='http://127.0.0.1:1')
