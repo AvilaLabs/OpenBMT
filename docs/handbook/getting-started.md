@@ -13,11 +13,11 @@ built.
 
 <img src="images/parts.svg" alt="Your wallet holds the keys. The owner phone and the counter can only watch." style="width:100%;max-width:480px">
 
-| Part | What it is | Its job | Can it spend the money? |
-|---|---|---|---|
-| **Your wallet** | A hardware signer, such as a Coldcard or a Passport, or a computer kept offline, with 12 recovery words written down and put on steel | Holds the keys. Every payment lands here, and only this can send money out. | Yes. Nothing else can. |
-| **Owner phone** | Your own Android phone with the OpenBMT Owner app | Sets up the shop, shows every payment, keeps the books, and prepares refunds and cash-outs for your wallet to sign | No |
-| **Counter** | An Android phone or tablet at the till with the OpenBMT Counter app | Shows the customer a payment code for each sale and says when it is paid | No |
+| Part | What it is and does |
+|---|---|
+| **Your wallet** | A hardware signer, such as a Coldcard or a Passport, or a computer kept offline, with 12 recovery words on steel. It holds the keys: every payment lands here, and only it can send money out. |
+| **Owner phone** | Your own Android phone with the OpenBMT Owner app. It sets up the shop, shows every payment, keeps the books, and prepares refunds and cash-outs for your wallet to sign. It cannot spend. |
+| **Counter** | An Android phone or tablet at the till with the OpenBMT Counter app. It shows the customer a payment code for each sale and says when it is paid. It cannot spend. |
 
 The owner phone and the counter hold only your wallet's public
 description. It lets them make a new address for each sale and see
@@ -39,11 +39,11 @@ other payment.
 
 <img src="images/when.svg" alt="Once at setup, at every sale, and now and then." style="width:100%;max-width:480px">
 
-| When | What | Where | Time |
-|---|---|---|---|
-| Once | Steps 1 to 5 | Owner phone, a laptop, the counter, the till's back office | About two hours, most of it making the wallet |
-| Every sale | Step 6 | Counter and till | Under a minute |
-| Now and then | Step 7 | Owner phone and your wallet | Minutes, when needed |
+| When | What and where |
+|---|---|
+| Once | Steps 1 to 5, on the owner phone, a laptop, the counter and the till's back office. About two hours, most of it making the wallet. |
+| Every sale | Step 6, at the counter and the till. Under a minute. |
+| Now and then | Step 7, on the owner phone and your wallet. Minutes, when needed. |
 
 ## Step 1. Install the Owner app on your phone
 
@@ -163,11 +163,11 @@ wallet you hold are being built.
 
 <img src="images/optional.svg" alt="The Box, your own Bitcoin node and Lightning, each optional." style="width:100%;max-width:480px">
 
-| Part | What it adds | When it is worth it |
-|---|---|---|
-| **The Box** | A small computer in the shop that lets the till send amounts to the counter | When typing each amount twice slows the queue |
-| **Your own Bitcoin node** | A second, independent check of each payment, on a computer you run | When you want to rely on nobody else's view of the network |
-| **Lightning** | Instant, low-fee payments for small sales, through your own Lightning node or a swap service you name. The money still lands in your wallet. | When you sell many small items, such as coffee |
+| Part | What it adds, and when it is worth it |
+|---|---|
+| **The Box** | A small computer in the shop that lets the till send amounts to the counter. Worth it when typing each amount twice slows the queue. |
+| **Your own Bitcoin node** | A second, independent check of each payment, on a computer you run. Worth it when you want to rely on nobody else's view of the network. |
+| **Lightning** | Fast, low-fee payments for small sales, through your own Lightning node or a swap service you name. The money still lands in your wallet. Worth it when you sell many small items, such as coffee. |
 
 ## The good practice behind these steps
 
