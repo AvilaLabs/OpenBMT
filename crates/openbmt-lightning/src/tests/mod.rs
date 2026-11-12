@@ -8,6 +8,7 @@ mod credential;
 mod lnd;
 mod meta;
 mod payment;
+mod real_nodes;
 mod say;
 mod settings;
 
