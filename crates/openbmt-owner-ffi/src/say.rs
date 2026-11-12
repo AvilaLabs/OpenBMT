@@ -75,15 +75,6 @@ type Entry = (
 );
 
 /// The rule strings this layer makes, each with its own words.
-// Words not written yet: a shop with its own wallet has no Key app.
-const WORDS_NEEDED_OA_NO_KEY_APP_HEADING: &str = "WORDS NEEDED OA-NO-KEY";
-const WORDS_NEEDED_OA_NO_KEY_APP_WHAT: &str = "WORDS NEEDED OA-NO-KEY-APP what.";
-const WORDS_NEEDED_OA_NO_KEY_APP_NEXT: &str = "WORDS NEEDED OA-NO-KEY-APP next.";
-
-const WORDS_NEEDED_OA_NO_OWN_WALLET_HEADING: &str = "WORDS NEEDED OA-NO-OWN";
-const WORDS_NEEDED_OA_NO_OWN_WALLET_WHAT: &str = "WORDS NEEDED OA-NO-OWN-WALLET what.";
-const WORDS_NEEDED_OA_NO_OWN_WALLET_NEXT: &str = "WORDS NEEDED OA-NO-OWN-WALLET next.";
-
 const RULES: &[Entry] = &[
     (
         "watch-file",
@@ -256,18 +247,18 @@ const RULES: &[Entry] = &[
     (
         "no-key-app",
         Kind::State,
-        WORDS_NEEDED_OA_NO_KEY_APP_HEADING,
-        WORDS_NEEDED_OA_NO_KEY_APP_WHAT,
+        "No Key app in this shop",
+        "This shop's money goes to its own wallet, so there is no Key app to ask.",
         Who::Owner,
-        WORDS_NEEDED_OA_NO_KEY_APP_NEXT,
+        "Nothing to do. This step is only for shops that use the Key app.",
     ),
     (
         "no-own-wallet",
         Kind::State,
-        WORDS_NEEDED_OA_NO_OWN_WALLET_HEADING,
-        WORDS_NEEDED_OA_NO_OWN_WALLET_WHAT,
+        "No own wallet in this shop",
+        "The address gap is shown only for a shop whose money goes to its own wallet.",
         Who::Owner,
-        WORDS_NEEDED_OA_NO_OWN_WALLET_NEXT,
+        "Nothing to do. This phone already watches every address of the shop.",
     ),
     (
         "start-key1",
