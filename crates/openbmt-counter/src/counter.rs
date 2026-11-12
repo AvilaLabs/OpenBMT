@@ -19,6 +19,7 @@ use openbmt_core::batch::{
 use openbmt_core::command::{Action, SignedCommand};
 use openbmt_core::heartbeat::SignedHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
+use openbmt_core::pinned_wallet::{RangeError, SignedRange};
 use openbmt_core::policy::{
     amount_at_risk, evaluate, CheckMode, Decision, Exposure, ExposureError, ExposureWriteError,
     Heartbeat, Inputs, InstantPolicy, PauseStatus, PauseTracker, PaymentId,
@@ -37,6 +38,8 @@ use crate::money::{
     sats_for, tip_for_percent, value_of, Amount, Currency, Quote, Rate, RateSource, TipChoice,
     MAX_SATS,
 };
+use crate::own::{OwnPairing, OwnSource};
+use crate::range_held::RangeHeld;
 use crate::recordlog::{RecordLog, MAX_UNSENT_IN_MEMORY, READ_CHUNK};
 use crate::refund::{
     dust_limit, refund_text_ok, sats_floor, Ask, CashRefund, EntryKind, RefundAsk, RefundEntry,
@@ -44,8 +47,8 @@ use crate::refund::{
 };
 use crate::refusal::{
     BatchTakeRefused, BlockError, CancelRefused, CommandRefused, HeartbeatRefused, JudgeError,
-    LightningRefused, LoadError, NoteRefused, OpenRefused, OverrideRefused, RefundRefused,
-    RequoteRefused, SightingError, StaffRefused, TotalsRefused, WithdrawRefused,
+    LightningRefused, LoadError, NoteRefused, OpenRefused, OverrideRefused, RangeTakeRefused,
+    RefundRefused, RequoteRefused, SightingError, StaffRefused, TotalsRefused, WithdrawRefused,
 };
 use crate::sale::{End, LightningPaid, OverrideMark, PosState, RequestDays, Sale};
 use crate::screen::{Next, Report, Screen, State, Why};
@@ -75,6 +78,8 @@ pub struct Pairing {
 pub struct Stored<'a> {
     /// The address batches (`OBMC`).
     pub batches: Option<&'a [u8]>,
+    /// The ranges of a counter paired with the shop's own wallet (`OBM;`).
+    pub ranges: Option<&'a [u8]>,
     /// The exposure ledger (`OBME`).
     pub exposure: Option<&'a [u8]>,
     /// The pause tracker (`OBMP`).
@@ -263,9 +268,17 @@ fn ended_screen(sale: &Sale, end: End) -> Screen {
 #[derive(Debug)]
 pub struct Counter {
     identity: Identity,
-    roots: PinnedRoots,
+    /// The owner root pinned at pairing: the one that signs commands and
+    /// heartbeats, whichever way the counter was paired.
+    owner: DeviceId,
     settings: Settings,
+    /// The batches of a counter paired with the Key app. A counter paired
+    /// with the shop's own wallet keeps this empty and never adds to it.
     batches: CounterBatches,
+    /// The address source of a counter paired with the shop's own wallet
+    /// (CR-234). `None` for a counter paired with the Key app, whose
+    /// addresses come from `batches`.
+    own: Option<OwnSource>,
     exposure: Exposure,
     pause: PauseTracker,
     /// The pause changed in memory and its write failed. It is written again
@@ -310,6 +323,8 @@ pub struct Counter {
     /// range (first index, first index after) with its digest. Built from the
     /// records at start.
     held_batches: BTreeMap<(u32, u32), [u8; 32]>,
+    /// CR-235: the same for the ranges the counter's records say it took.
+    held_ranges: BTreeMap<(u32, u32), [u8; 32]>,
     /// CR-221: sales whose swap provider has locked the bitcoin and whose
     /// claim is not yet in a block. Such a sale does not expire. Not stored:
     /// the node says it again after a start.
@@ -330,7 +345,8 @@ impl Counter {
                 pairing.batch_policy,
             ),
             identity,
-            roots: pairing.roots,
+            owner: pairing.roots.owner,
+            own: None,
             settings,
             exposure: Exposure::new(),
             pause: PauseTracker::new(),
@@ -350,8 +366,73 @@ impl Counter {
             last_record: BTreeMap::new(),
             settings_recorded: None,
             held_batches: BTreeMap::new(),
+            held_ranges: BTreeMap::new(),
             swap_pending: BTreeSet::new(),
         }
+    }
+
+    /// A counter paired with the shop's own wallet that has never run
+    /// (CR-234). It has no Key app: the owner root signs its commands,
+    /// heartbeats and settings, and its addresses come from the wallet. The
+    /// ranges are those of the pairing's first range.
+    pub fn new_own(
+        identity: Identity,
+        pairing: &OwnPairing,
+        settings: Settings,
+    ) -> Result<Self, LoadError> {
+        let me = identity.device_id();
+        let own = OwnSource::open(me, pairing, None)?;
+        // The counter's own key stands where no Key app is. It never signs a
+        // batch, and none is ever added to this empty set.
+        let roots = PinnedRoots {
+            owner: pairing.owner,
+            approver: me,
+        };
+        let pairing_keyapp = Pairing {
+            roots,
+            wallet_checksum: pairing.wallet.checksum32(),
+            batch_policy: pairing.batch_policy,
+        };
+        let mut counter = Self::new(identity, pairing_keyapp, settings);
+        counter.own = Some(own);
+        Ok(counter)
+    }
+
+    /// CR-42, CR-234: start a counter paired with the shop's own wallet from
+    /// what the store holds, as [`Counter::load`] does for the Key app. The
+    /// slot of ranges is read and every range in it is checked again against
+    /// the owner root and this counter; a slot that does not read or check
+    /// refuses the start. With no slot the ledger is made from the pairing's
+    /// first range.
+    pub fn load_own<S: Store>(
+        identity: Identity,
+        pairing: &OwnPairing,
+        settings: Settings,
+        stored: Stored<'_>,
+        store: &S,
+    ) -> Result<Self, LoadError>
+    where
+        S::Error: std::fmt::Display,
+    {
+        let me = identity.device_id();
+        let own = OwnSource::open(me, pairing, stored.ranges)?;
+        let roots = PinnedRoots {
+            owner: pairing.owner,
+            approver: me,
+        };
+        let pairing_keyapp = Pairing {
+            roots,
+            wallet_checksum: pairing.wallet.checksum32(),
+            batch_policy: pairing.batch_policy,
+        };
+        // The slot of batches is not read: this counter has none.
+        let stored = Stored {
+            batches: None,
+            ..stored
+        };
+        let mut counter = Self::load(identity, pairing_keyapp, settings, stored, store)?;
+        counter.own = Some(own);
+        Ok(counter)
     }
 
     /// CR-42: start from what the store holds. Every slot is checked whole.
@@ -393,10 +474,11 @@ impl Counter {
         if let Some(bytes) = stored.desk {
             counter.desk = Desk::from_bytes(bytes).map_err(LoadError::Desk)?;
         }
-        let (log, last, book, highest, setting, held) = Self::read_chain(me, store)?;
+        let (log, last, book, highest, setting, held, held_ranges) = Self::read_chain(me, store)?;
         counter.records = log;
         counter.settings_recorded = setting;
         counter.held_batches = held;
+        counter.held_ranges = held_ranges;
         for (slot_index, bytes) in stored.sales {
             match Sale::from_bytes(bytes) {
                 Ok(sale) if sale.index == slot_index => counter.install(sale),
@@ -437,6 +519,7 @@ impl Counter {
             u64,
             Option<u32>,
             BTreeMap<(u32, u32), [u8; 32]>,
+            BTreeMap<(u32, u32), [u8; 32]>,
         ),
         LoadError,
     >
@@ -451,6 +534,7 @@ impl Counter {
         let mut highest = 0u64;
         let mut setting: Option<u32> = None;
         let mut held: BTreeMap<(u32, u32), [u8; 32]> = BTreeMap::new();
+        let mut held_ranges: BTreeMap<(u32, u32), [u8; 32]> = BTreeMap::new();
         let keep = usize::try_from(MAX_UNSENT_IN_MEMORY).unwrap_or(usize::MAX);
         loop {
             let chunk = store
@@ -474,6 +558,9 @@ impl Counter {
                         setting = setting.max(Some(note.version));
                     } else if let Ok(batch) = BatchHeld::decode(&record.body) {
                         held.insert((batch.start, batch.end), batch.digest);
+                    } else if let Ok(range) = RangeHeld::decode(&record.body) {
+                        // CR-235: or a range, with its own tag byte.
+                        held_ranges.insert((range.start, range.end), range.digest);
                     }
                 } else if !matches!(record.kind, RecordKind::CheckIn | RecordKind::Pairing) {
                     if let Ok(event) = Event::decode(&record.body) {
@@ -491,7 +578,7 @@ impl Counter {
             }
         }
         let log = RecordLog::from_parts(check.len(), check.head(), tail);
-        Ok((log, last, book, highest, setting, held))
+        Ok((log, last, book, highest, setting, held, held_ranges))
     }
 
     /// CR-75: how many sales this counter has refused for being below the
@@ -565,6 +652,9 @@ impl Counter {
         signed: SignedBatch,
         store: &mut S,
     ) -> Result<(), BatchTakeRefused<S::Error>> {
+        if self.own.is_some() {
+            return Err(BatchTakeRefused::OwnWallet);
+        }
         let held = BatchHeld::of(&signed);
         let recorded =
             held.is_some_and(|h| self.held_batches.get(&(h.start, h.end)) == Some(&h.digest));
@@ -586,6 +676,50 @@ impl Counter {
         self.batches
             .add(signed, |bytes| store.put(Slot::Batches, bytes))
             .map_err(BatchTakeRefused::Add)
+    }
+
+    /// CR-235: take a signed range of indexes the owner sent, and say so in
+    /// a record, in the order of [`Counter::take_batch`]. A counter paired
+    /// with the Key app takes no range. The range must pass CR-232 (the owner
+    /// root's signature, this counter, a valid shape, at least the smallest
+    /// range) and overlap no index handed out and no range still in use
+    /// (WL-25, WL-26). A range the records already show as taken (the same
+    /// range and digest) is taken as nothing and writes no second record
+    /// (CR-168). Otherwise the range is checked on a copy of the ledger with
+    /// nothing stored; the record is written (CR-40, CR-167); and the ranges
+    /// are stored last. If that last write fails the record stays, the ranges
+    /// are as they were, and a second try of the same range stores it without
+    /// a second record.
+    pub fn take_range<S: Store>(
+        &mut self,
+        signed: SignedRange,
+        store: &mut S,
+    ) -> Result<(), RangeTakeRefused<S::Error>> {
+        let me = self.identity.device_id();
+        let Some(own) = self.own.as_ref() else {
+            return Err(RangeTakeRefused::KeyApp);
+        };
+        let held = RangeHeld::of(&signed);
+        let recorded = self.held_ranges.get(&(held.start, held.end)) == Some(&held.digest);
+        own.check(&signed, &me).map_err(RangeTakeRefused::Range)?;
+        let mut next = own.clone();
+        match next.ledger.accept(&signed) {
+            Err(RangeError::OverlapsUsed | RangeError::OverlapsTaken) if recorded => {
+                return Ok(());
+            }
+            Err(e) => return Err(RangeTakeRefused::Range(e.into())),
+            Ok(()) => {}
+        }
+        if !recorded {
+            self.append_record(store, held.kind(), held.encode())
+                .map_err(RangeTakeRefused::Record)?;
+            self.held_ranges.insert((held.start, held.end), held.digest);
+        }
+        store
+            .put(Slot::Ranges, &next.ledger.to_bytes())
+            .map_err(RangeTakeRefused::Store)?;
+        self.own = Some(next);
+        Ok(())
     }
 
     // Getters.
@@ -825,9 +959,31 @@ impl Counter {
         self.identity.device_id()
     }
 
-    /// The address batches.
+    /// The address batches. Empty for a counter paired with the shop's own
+    /// wallet, which has [`Counter::range_ledger`] instead.
     pub fn batches(&self) -> &CounterBatches {
         &self.batches
+    }
+
+    /// CR-234: the ranges of a counter paired with the shop's own wallet, or
+    /// `None` for one paired with the Key app.
+    pub fn range_ledger(&self) -> Option<&openbmt_core::pairing_own::RangeLedger> {
+        self.own.as_ref().map(|o| &o.ledger)
+    }
+
+    /// The addresses left to hand out, from the batches or from the ranges.
+    fn addresses_left(&self) -> u64 {
+        match &self.own {
+            Some(own) => own.ledger.remaining(),
+            None => self.batches.remaining() as u64,
+        }
+    }
+
+    /// Whether `script` is one of the shop's own that the counter holds: in a
+    /// batch, or handed out from the wallet.
+    fn holds_own_script(&self, script: &bitcoin::Script) -> bool {
+        self.batches.holds_script(script)
+            || self.own.as_ref().is_some_and(|o| o.known.contains(script))
     }
 
     /// Every script the counter watches: the live sales, the archived ones
@@ -836,6 +992,9 @@ impl Counter {
     /// every issued address for good (CR-80).
     pub fn watched_scripts(&self) -> Vec<ScriptBuf> {
         let mut all: BTreeSet<ScriptBuf> = self.batches.watched_scripts().iter().cloned().collect();
+        if let Some(own) = &self.own {
+            all.extend(own.watched.iter().cloned());
+        }
         all.extend(self.sales.values().map(|s| s.script.clone()));
         all.extend(self.archived.keys().cloned());
         all.into_iter().collect()
@@ -945,6 +1104,11 @@ impl Counter {
         if !self.unreadable.is_empty() {
             return Ok(0);
         }
+        // A counter paired with the shop's own wallet keeps every address it
+        // handed out on its watch list: the ranges hold indexes, not times.
+        if self.own.is_some() {
+            return Ok(0);
+        }
         let held: BTreeSet<&ScriptBuf> = self
             .sales
             .values()
@@ -959,6 +1123,30 @@ impl Counter {
     }
 
     // Internal helpers.
+
+    /// CR-03, CR-234: the next address and its index, stored before it is
+    /// handed back. From the batches, or, for a counter paired with the
+    /// shop's own wallet, the wallet's receive address at the next index of
+    /// the ranges, with the whole ledger written first.
+    fn issue_address<S: Store>(
+        &mut self,
+        now: u64,
+        store: &mut S,
+    ) -> Result<Option<(u32, ScriptBuf)>, OpenRefused<S::Error>> {
+        if let Some(own) = &self.own {
+            let Some((next, index, script)) = own.issue() else {
+                return Ok(None);
+            };
+            store
+                .put(Slot::Ranges, &next.ledger.to_bytes())
+                .map_err(|e| OpenRefused::AddressNotStored(StoreFault::Write(e)))?;
+            self.own = Some(next);
+            return Ok(Some((index, script)));
+        }
+        self.batches
+            .next_script(now, |bytes| store.put(Slot::Batches, bytes))
+            .map_err(|e| OpenRefused::AddressNotStored(StoreFault::Write(e)))
+    }
 
     fn install(&mut self, sale: Sale) {
         if !sale.is_live() {
@@ -1234,16 +1422,13 @@ impl Counter {
         if !desk.has_room_for_address() {
             return Err(OpenRefused::RateLimited);
         }
-        if self.batches.remaining() == 0 {
+        if self.addresses_left() == 0 {
             return Err(OpenRefused::NoAddress);
         }
         desk.push_address_time(now);
         self.put_desk(store, desk).map_err(OpenRefused::Store)?;
 
-        let issued = self
-            .batches
-            .next_script(now, |bytes| store.put(Slot::Batches, bytes))
-            .map_err(|e| OpenRefused::AddressNotStored(StoreFault::Write(e)))?;
+        let issued = self.issue_address(now, store)?;
         let Some((index, script)) = issued else {
             return Err(OpenRefused::NoAddress);
         };
@@ -2910,7 +3095,7 @@ impl Counter {
         if sats < dust {
             return Err(RefundRefused::BelowDust { sats, dust });
         }
-        if self.batches.holds_script(&destination) {
+        if self.holds_own_script(&destination) {
             return Err(RefundRefused::OwnScript);
         }
         let (received, confirmations) = self.refund_facts(&base, now, headers);
@@ -3324,8 +3509,8 @@ impl Counter {
         store: &mut S,
     ) -> Result<(), CommandRefused<S::Error>> {
         signed
-            .verify(
-                &self.roots,
+            .verify_owner(
+                &self.owner,
                 &self.identity.device_id(),
                 self.desk.last_command_seq(),
             )
@@ -3380,8 +3565,8 @@ impl Counter {
         store: &mut S,
     ) -> Result<HeartbeatView, HeartbeatRefused<S::Error>> {
         let hb = signed
-            .verify(
-                &self.roots,
+            .verify_owner(
+                &self.owner,
                 self.settings.watch_key.as_ref(),
                 &self.identity.device_id(),
                 self.desk.last_heartbeat_seq(),

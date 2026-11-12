@@ -143,6 +143,7 @@ impl Mem {
     pub fn stored(&self) -> Stored<'_> {
         Stored {
             batches: self.slots.get(&Slot::Batches).map(Vec::as_slice),
+            ranges: self.slots.get(&Slot::Ranges).map(Vec::as_slice),
             exposure: self.slots.get(&Slot::Exposure).map(Vec::as_slice),
             pause: self.slots.get(&Slot::Pause).map(Vec::as_slice),
             desk: self.slots.get(&Slot::Desk).map(Vec::as_slice),
@@ -380,6 +381,11 @@ impl World {
         let mut m = Mem::default();
         c.add_batch(batch, &mut m).unwrap();
         m.reset();
+        Self::with_counter(c, m)
+    }
+
+    /// This counter and its store, with a chain whose tip is at 100.
+    pub fn with_counter(c: Counter, m: Mem) -> Self {
         Self {
             c,
             m,

@@ -10,6 +10,7 @@ mod lightning;
 mod meta;
 mod open;
 mod overrides;
+mod own;
 mod own_node;
 mod recordlog;
 mod records;

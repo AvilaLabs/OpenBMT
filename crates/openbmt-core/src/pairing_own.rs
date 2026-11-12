@@ -632,11 +632,11 @@ pub struct OwnPaired {
     pub pairing: OwnSignedPairing,
 }
 
-/// CR-232: the first range is signed by the owner root, names this counter,
+/// CR-232, CR-235: a range is signed by the owner root, names this counter,
 /// has a valid shape and holds at least `min_count` indexes. The smallest
 /// size is the counter's own: pass [`DEFAULT_MIN_COUNT`] unless a test needs
 /// less.
-pub fn check_first_range(
+pub fn check_range(
     range: &SignedRange,
     owner: &DeviceId,
     counter: &DeviceId,
@@ -833,6 +833,11 @@ impl RangeLedger {
         self.book.accept_signed(range, &self.owner)?;
         self.signed.push(*range);
         Ok(())
+    }
+
+    /// The owner root the ledger checks ranges against.
+    pub fn owner(&self) -> DeviceId {
+        self.owner
     }
 
     /// Hand out the next unused index (WL-27).

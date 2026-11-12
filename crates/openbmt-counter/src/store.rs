@@ -12,6 +12,9 @@ use openbmt_core::records::ChainError;
 pub enum Slot {
     /// The address batches (`OBMC`).
     Batches,
+    /// The ranges of a counter paired with the shop's own wallet (`OBM;`,
+    /// CR-234).
+    Ranges,
     /// The exposure ledger (`OBME`).
     Exposure,
     /// The pause tracker (`OBMP`).

@@ -49,6 +49,8 @@ pub mod desk;
 pub mod events;
 pub mod heartbeat;
 pub mod money;
+pub mod own;
+pub mod range_held;
 mod recordlog;
 pub mod refund;
 pub mod refusal;
@@ -74,6 +76,8 @@ pub use money::{
     sats_for, tip_for_percent, value_of, Amount, BadSourceLabel, Currency, Quote, Rate, RateSource,
     TipChoice, MAX_RATE_AGE_SECS, MAX_RATE_AHEAD_SECS, MAX_SOURCE_LABEL_BYTES, QUOTE_SECS,
 };
+pub use own::OwnPairing;
+pub use range_held::{range_digest, RangeHeld};
 pub use recordlog::{KEEP_RECORDS, MAX_READ, MAX_UNSENT_IN_MEMORY};
 pub use refund::{
     refund_destination, Ask, CashRefund, RefundAsk, RefundRequest, RefundState, RefundView,
@@ -82,8 +86,8 @@ pub use refund::{
 pub use refusal::{
     BatchTakeRefused, BlockError, CancelRefused, CommandRefused, DestinationRefused,
     HeartbeatRefused, JudgeError, LightningRefused, LoadError, NoteRefused, OpenRefused,
-    OverrideRefused, RefundRefused, RequoteRefused, SightingError, StaffRefused, TotalsRefused,
-    WithdrawRefused,
+    OverrideRefused, RangeTakeRefused, RefundRefused, RequoteRefused, SightingError, StaffRefused,
+    TotalsRefused, WithdrawRefused,
 };
 pub use sale::{End, LightningPaid, OverrideMark, PosState, RequestDays, Sale, Segment};
 pub use screen::{Color, Next, Report, Screen, State, Why};

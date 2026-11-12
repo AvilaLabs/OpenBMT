@@ -476,10 +476,10 @@ fn cr_232_the_first_range_is_checked_and_not_below_the_minimum() {
     let me = counter().device_id();
     let min = FIRST_RANGE_MIN_COUNT;
     assert_eq!(min, 1_000);
-    assert!(check_first_range(&range(0, min), &owner_id, &me, min).is_ok());
-    assert!(check_first_range(&range(50, 50 + MAX_RANGE_LEN), &owner_id, &me, min).is_ok());
+    assert!(check_range(&range(0, min), &owner_id, &me, min).is_ok());
+    assert!(check_range(&range(50, 50 + MAX_RANGE_LEN), &owner_id, &me, min).is_ok());
     assert_eq!(
-        check_first_range(&range(0, min - 1), &owner_id, &me, min).err(),
+        check_range(&range(0, min - 1), &owner_id, &me, min).err(),
         Some(OwnPairError::RangeTooSmall {
             got: min - 1,
             need: min
@@ -492,12 +492,12 @@ fn cr_232_the_first_range_is_checked_and_not_below_the_minimum() {
     )
     .unwrap();
     assert_eq!(
-        check_first_range(&other, &owner_id, &me, min).err(),
+        check_range(&other, &owner_id, &me, min).err(),
         Some(OwnPairError::Range(RangeError::WrongCounter))
     );
     let forged = SignedRange::sign(&identity(2), IndexRange::new(me, 0, min).unwrap()).unwrap();
     assert_eq!(
-        check_first_range(&forged, &owner_id, &me, min).err(),
+        check_range(&forged, &owner_id, &me, min).err(),
         Some(OwnPairError::Range(RangeError::BadSignature))
     );
 }

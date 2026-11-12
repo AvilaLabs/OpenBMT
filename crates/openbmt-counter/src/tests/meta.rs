@@ -6,13 +6,14 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 23] = [
+const TEST_SOURCES: [&str; 24] = [
     include_str!("currency.rs"),
     include_str!("encodings.rs"),
     include_str!("heartbeat.rs"),
     include_str!("lightning.rs"),
     include_str!("open.rs"),
     include_str!("overrides.rs"),
+    include_str!("own.rs"),
     include_str!("own_node.rs"),
     include_str!("recordlog.rs"),
     include_str!("records.rs"),
@@ -35,7 +36,7 @@ const TEST_SOURCES: [&str; 23] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 80] = [
+const NOT_HERE: [(&str, &str); 90] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -438,6 +439,46 @@ const NOT_HERE: [(&str, &str); 80] = [
         "the redraw after a change of light and dark is the Android app's; the choice of screen \
          it draws is tested in the app's JVM tests, and the window needs a device to test",
     ),
+    (
+        "CR-227",
+        "the offer's codec is `openbmt-core`'s (`pairing_own`); its tests are there",
+    ),
+    (
+        "CR-228",
+        "the first address and the kind are made by `openbmt-core` (`pairing_own`) and shown by the ceremony of `openbmt-counter-node`; their tests are there",
+    ),
+    (
+        "CR-229",
+        "the request, the binding and the words are `openbmt-core`'s (`pairing_own`) and the ceremony's, in `openbmt-counter-node`; their tests are there",
+    ),
+    (
+        "CR-230",
+        "the bundle and the order of its checks are `openbmt-core`'s (`pairing_own`) and `openbmt-counter-node`'s (`paired`); their tests are there",
+    ),
+    (
+        "CR-231",
+        "the first settings are checked by the counter node's pairing, under the owner-only authority of `openbmt-core`; their tests are there",
+    ),
+    (
+        "CR-232",
+        "the first range is checked by `openbmt-core` (`pairing_own`) and the counter node's pairing; the same check of a later range is tested here under CR-235",
+    ),
+    (
+        "CR-233",
+        "the record is the counter node's (`paired`); its tests are there",
+    ),
+    (
+        "CR-236",
+        "the class of a settings change is computed by `openbmt-core` and applied by the counter node; their tests are there",
+    ),
+    (
+        "CR-237",
+        "the screens are the Android app's; their tests are the app's JVM tests (`apps/counter-android`)",
+    ),
+    (
+        "CR-238",
+        "the words are listed in `openbmt-counter-node` and `openbmt-counter-ffi` (SC-12)",
+    ),
 ];
 
 /// The rule number at the start of `rest` (what follows `CR-`): every digit,
@@ -458,7 +499,7 @@ fn defined() -> BTreeSet<String> {
 #[test]
 fn the_rules_file_defines_one_hundred_and_sixty_seven_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 177);
+    assert_eq!(ids.len(), 189);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")

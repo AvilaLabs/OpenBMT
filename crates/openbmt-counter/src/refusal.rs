@@ -11,6 +11,7 @@ use std::fmt;
 use openbmt_core::batch::AddError;
 use openbmt_core::command::CommandError;
 use openbmt_core::heartbeat::HeartbeatError;
+use openbmt_core::pairing_own::OwnPairError;
 use openbmt_core::records::ChainError;
 use openbmt_core::wire::DecodeError;
 use openbmt_watch::{Problem, Refusal};
@@ -663,6 +664,9 @@ pub enum LoadError {
     Pause(DecodeError),
     /// CR-42: the stored desk does not read back.
     Desk(DecodeError),
+    /// CR-234: the stored ranges do not read back or do not check against the
+    /// owner root and this counter, or the pairing's first range is refused.
+    Ranges(DecodeError),
     /// CR-42: the stored record chain does not verify.
     Records(ChainError),
     /// CR-42, CR-81: the stored records could not be read, or one does not
@@ -685,6 +689,7 @@ impl fmt::Display for LoadError {
             Self::Exposure(e) => write!(f, "the stored exposure ledger does not read back: {e}"),
             Self::Pause(e) => write!(f, "the stored pause state does not read back: {e}"),
             Self::Desk(e) => write!(f, "the stored counter state does not read back: {e}"),
+            Self::Ranges(e) => write!(f, "the stored ranges do not read back or check: {e}"),
             Self::Records(e) => write!(f, "the stored records do not verify: {e}"),
             Self::RecordsUnread(e) => write!(f, "the stored records cannot be read: {e}"),
         }
@@ -1061,6 +1066,9 @@ pub enum BatchTakeRefused<E> {
     /// CR-40: the record that says the batch is held could not be written.
     /// Nothing changed.
     Record(StoreFault<E>),
+    /// CR-235: a counter paired with the shop's own wallet makes its own
+    /// addresses and drops a batch.
+    OwnWallet,
 }
 
 impl<E> BatchTakeRefused<E> {
@@ -1069,6 +1077,7 @@ impl<E> BatchTakeRefused<E> {
         match self {
             Self::Add(_) => "CR-168",
             Self::Record(_) => "CR-167",
+            Self::OwnWallet => "CR-235",
         }
     }
 }
@@ -1079,8 +1088,55 @@ impl<E: fmt::Display> fmt::Display for BatchTakeRefused<E> {
         match self {
             Self::Add(e) => write!(f, "{e}"),
             Self::Record(e) => write!(f, "{e}"),
+            Self::OwnWallet => write!(f, "This counter makes its own addresses."),
         }
     }
 }
 
 impl<E: fmt::Debug + fmt::Display> std::error::Error for BatchTakeRefused<E> {}
+
+/// Why a range of indexes was not taken (CR-235).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RangeTakeRefused<E> {
+    /// The range failed CR-232 (the owner's signature, this counter, the
+    /// shape, the smallest size), or overlaps an index handed out or a range
+    /// still in use (WL-25, WL-26). Nothing changed.
+    Range(OwnPairError),
+    /// CR-40: the record that says the range is held could not be written.
+    /// Nothing changed.
+    Record(StoreFault<E>),
+    /// The ranges could not be stored. The ranges are as they were; the
+    /// record may have been written first, which a second try of the same
+    /// range does not repeat (CR-168).
+    Store(E),
+    /// CR-235: a counter paired with the Key app takes batches, not ranges.
+    KeyApp,
+}
+
+impl<E> RangeTakeRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::Range(_) | Self::Store(_) => "CR-235",
+            Self::Record(_) => "CR-235",
+            Self::KeyApp => "CR-235",
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for RangeTakeRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::Range(e) => write!(f, "{e}"),
+            Self::Record(e) => write!(f, "{e}"),
+            Self::Store(e) => write!(f, "the ranges could not be stored: {e}"),
+            Self::KeyApp => write!(
+                f,
+                "this counter was paired with the Key app and takes batches, not ranges"
+            ),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for RangeTakeRefused<E> {}

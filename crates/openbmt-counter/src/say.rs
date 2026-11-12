@@ -1233,7 +1233,10 @@ impl LoadError {
     /// saved file does not read back (SC-10).
     pub fn words(&self) -> Words {
         let (heading, what, detail) = match self {
-            Self::Batches(e) => (
+            // CR-234: the saved ranges of a counter that makes its own
+            // addresses are the same case as saved batches, and are told the
+            // same.
+            Self::Batches(e) | Self::Ranges(e) => (
                 "Saved addresses unreadable",
                 "The counter's saved payment codes do not read back, so it did not start and nothing was changed.",
                 e.to_string(),
