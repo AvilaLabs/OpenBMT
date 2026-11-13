@@ -162,7 +162,15 @@ funds.**
   never photographed.
 - **SK-34. Tested.** Both children equal the BIP-85 specification's test
   vectors for the specification's own key, and the stick's QR codes decode
-  to the same bytes.
+  to the same bytes. The node's ID of SK-35 equals the core's for the same
+  child.
+- **SK-35. The Lightning node's ID.** After the Shop Lightning code, the
+  stick shows the node's ID made from it (`docs/SHOP-LIGHTNING-RULES.md`
+  SL-72), as a QR code of its 66 hexadecimal characters in lower case, with
+  its first and last 8 characters in large type. The screen says that the
+  ID is public and spends nothing, and that the owner phone scans it to turn
+  Shop Lightning on. The ID is made by `openbmt-core`, as the counter makes
+  it.
 
 ## 6. Checking the stick
 

@@ -82,6 +82,9 @@ what arrives as if it came from an enemy.
   | POS notice | Box | counter, owner |
   | Range | owner | counter |
   | Switch | owner | counter |
+  | Store | Lightning counter | Box |
+  | Stored | Box | Lightning counter |
+  | Lightning report | Lightning counter | owner |
 
   The watcher is the owner phone's background watcher (LK-74). It sends
   heartbeats and nothing else. A kind from a sender whose role may not send
@@ -489,3 +492,47 @@ The intervals in LK-56, LK-57, LK-61, LK-62 and LK-64 are fields of a
 configuration with these defaults. A step that finds the relay unreachable
 tries again after a pause (5 seconds by default), so that a loop that runs
 several times a second does not wait for a connection each time.
+
+## 7. Shop Lightning's store
+
+The Lightning counter keeps the second copy of its node's state on the
+shop's Box (`docs/SHOP-LIGHTNING-RULES.md` SL-73, SL-74). These rules say
+how the two talk.
+
+- **LK-80. The kinds.** Store (byte 14) goes from the Lightning counter to
+  the Box that the settings in force name as its second device, and Stored
+  (byte 15) goes back. Lightning report (byte 16) goes from the Lightning
+  counter to the owner. A message of these kinds from or to any other
+  device is refused (LK-08). A Box whose last settings named it as the
+  second device of a counter keeps taking that counter's Store messages
+  for the time `docs/BOX-RULES.md` BX-94 gives, so that a node closing its
+  channels still stores twice.
+- **LK-81. Numbers of their own.** Store and Stored messages take their
+  numbers from a count of their own for each sender and reader pair, apart
+  from every other kind, so that a Store sent straight to the Box and a
+  Paid notice still waiting in the relay never refuse each other. Both
+  counts are stored as LK-40 says.
+- **LK-82. Straight to the Box.** A Store goes to the Box as the relay
+  request "store" on the counter's relay connection, and the answer to that
+  request is the Box's Stored message. A Store never waits in a mailbox,
+  and a relay that is not a Box refuses the request. The request needs no
+  challenge (LK-23): the seal proves the sender, and the number stops a
+  replay.
+- **LK-83. What they carry.** A Store carries a request ID of 16 random
+  bytes, an action (write, read, list or remove) and a name (the node's
+  names: 1 to 255 of the characters `A-Z a-z 0-9 _ - ~`). A write carries
+  one part of the blob, at most 60,000 bytes, with the part's number, the
+  number of parts and the SHA-256 of the whole blob; a blob is at most
+  16 MiB. A read names the part it asks for. A list names the name to list
+  after, so that a long list comes in turns. A Stored carries the same
+  request ID and action and then: for a part of a write, "taken", and for
+  the last part, "written" with the SHA-256 of what the Box stored; for a
+  read, the part with its number, the number of parts and the SHA-256 of
+  the whole blob, or "none"; for a list, the names that fit and whether
+  more follow; for a remove, "removed"; or a refusal with its cause. The
+  counter checks that the request ID, the action and the SHA-256 are its
+  own before it counts anything.
+- **LK-84. The Lightning report.** It is sent with each check-in (LK-57)
+  and carries what `docs/SHOP-LIGHTNING-RULES.md` SL-78 lists, each as a
+  number of satoshis, a time or a cause code. It is not a record: a lost
+  report is replaced by the next one, and the owner keeps only the newest.

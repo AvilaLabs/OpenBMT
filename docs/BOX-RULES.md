@@ -3,7 +3,7 @@
 Status: specification for `crates/openbmt-box`. All sections are
 implemented, section 4 (the POS on the Box, and its way to a vendor over
 curl), section 5b (the status page) and section 5c (the till listener)
-included.
+included. Section 5d (Shop Lightning's store) is specified and not built yet.
 Each rule has an ID so that a test can name the rule it proves. The rules
 implement `docs/DESIGN.md` §5.3 and close the open item of §16: how a Box,
 which has no screen, is paired.
@@ -11,7 +11,9 @@ which has no screen, is paired.
 The Box is a program on a small computer the merchant owns. It does three
 jobs and no others: it is the relay between the shop's devices
 (`docs/LINK-RULES.md` §2), it reads the POS and matches orders to sales
-(`docs/POS-RULES.md`), and it keeps what both need on disk. It holds no
+(`docs/POS-RULES.md`), and it keeps what both need on disk. With Shop
+Lightning on, it also keeps the sealed second copy of the Lightning
+counter's state (section 5d), which it cannot open. It holds no
 bitcoin key, derives no address, checks no payment and cannot move funds.
 What it says is a hint to the other devices and never a proof.
 
@@ -746,6 +748,37 @@ word that it was paid is what the till needs most; a till that cancelled a
 sale and then reads `paid` has been paid. The numbers of the counters' notices
 are checked for the till against the last till notice taken from the counter,
 in memory, because the till works on a Box that reads no POS.
+
+## 5d. Shop Lightning's store
+
+- **BX-90. Who it keeps for.** A Box keeps the Shop Lightning state of the
+  Lightning counter that its settings name with this Box as the second
+  device (`docs/SHOP-LIGHTNING-RULES.md` SL-71), and of no other device. It
+  answers the "store" request as `docs/LINK-RULES.md` LK-80 to LK-83 say.
+- **BX-91. Stored whole before the answer.** The parts of a write are put
+  in a file of their own as they come. When the last part is in and the
+  bytes have the SHA-256 the parts name, the file is synced, renamed over
+  the old blob of that name and the directory synced, and only then does
+  the Box answer "written". A write whose parts stop for 60 seconds is
+  dropped. At most 8 writes are in progress for the counter at once; one
+  more is refused with its cause.
+- **BX-92. How much.** At most 1 GiB and 10,000 names for the counter. A
+  write past either is refused with its cause, and the status page says the
+  store is full (section 5b).
+- **BX-93. Where.** In `lightning/<counter ID in hex>/` of the data
+  directory, one file per name, the file named by the hexadecimal of the
+  name, mode 0600 as every file of the Box (section 5a).
+- **BX-94. When the settings change.** When the settings stop naming this
+  Box as a counter's second device, the Box keeps that counter's state and
+  goes on answering its store requests for 30 days, so that a node closing
+  its channels still stores twice (SL-77). Then it deletes that counter's
+  directory. A counter named again within the 30 days finds its state as it
+  was.
+- **BX-95. Tested.** A write counts only after the file is in place; a
+  write cut off leaves the old blob; a part with the wrong SHA-256, a write
+  past the limits, and a store request from any device other than the named
+  counter are refused; a counter that is no longer named is served for 30
+  days and then its state is gone.
 
 ## 6. What these rules do not do
 

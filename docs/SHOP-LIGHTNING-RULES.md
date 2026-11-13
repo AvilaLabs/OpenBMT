@@ -39,7 +39,8 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
 - **SL-03. Where it runs.** On one counter the owner picks, called the
   Lightning counter. Every other counter asks it for invoices over the shop's
   own link (`docs/LINK-RULES.md`) and never holds the key. A shop with a Box
-  may run it there instead. The owner phone never runs it.
+  may run it there instead. The owner phone never runs it. In the first
+  build only the Lightning counter takes Lightning (SL-70).
 - **SL-04. Off until turned on.** A shop without Shop Lightning takes
   on-chain payments, or Lightning through its own node
   (`docs/LIGHTNING-RULES.md`) or a swap (`docs/SWAP-RULES.md`). Turning it on
@@ -71,7 +72,8 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
 - **SL-20. Every change stored twice.** A channel's state is written to the
   Lightning counter and to a second shop device the owner picks (another
   counter, the Box, or the owner phone). The second device holds only the
-  encrypted state, never the key.
+  encrypted state, never the key. In the first build the second device is
+  the shop's Box (SL-73).
 - **SL-21. Paid only when both have it.** The persister answers
   `ChannelMonitorUpdateStatus::InProgress` (`chain/mod.rs:271`) and reports
   completion with `ChainMonitor::channel_monitor_updated`
@@ -226,3 +228,80 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   of beta or a review of its funds-loss cases against SL-21 to SL-25; the
   purist check against `docs/DESIGN.md`'s standard; and a run on signet with
   the provider the handbook will name.
+
+## 11. The first build on a counter
+
+Sections 1 to 8 describe Shop Lightning in full. This section is what the
+first build on a counter does. Where it is narrower, it holds until a later
+section widens it.
+
+- **SL-70. Only the Lightning counter.** Only the Lightning counter named in
+  the settings (SL-71) offers Lightning. Every other counter takes on-chain
+  payments only, as in a shop without Shop Lightning. Asking the Lightning
+  counter for invoices over the link (SL-03), and running the node on a Box,
+  come later.
+- **SL-71. In the signed settings.** The settings field `shop_lightning`
+  names the Lightning counter, which is a counter of the settings; the
+  node's ID, 33 bytes (SL-72); the second device, which is a Box of the
+  settings (SL-73); the provider, by its node ID and its IP address and port
+  (SL-28, SL-32); the cap, in satoshis (SL-34); and the most the shop pays
+  for one opening, in satoshis (SL-29). With the field unset, Shop Lightning
+  is off (SL-04). It is never set together with `lightning_node` or `swap`.
+  Settings that break any of this are refused when they are read, as any
+  other settings that do not check are. Settings without the field encode
+  and hash exactly as they did before it existed.
+- **SL-72. The node's ID, pinned.** The node's ID is the public key the
+  library makes from the seed of SL-10. The seed's BIP-32 master key gives
+  the 32 bytes handed to `KeysManager::new`, and the node key is the
+  hardened child `0'` of the master key of those 32 bytes. `openbmt-core`
+  makes the same ID without the library. A test of `openbmt-lightning-node`
+  checks that the two agree for the vector of SL-10 and for two other seeds.
+  The Lightning counter refuses a scanned seed whose ID is not the pinned
+  one, before it stores anything. A node whose seed does not give the pinned
+  ID does not start.
+- **SL-73. The Box keeps the second copy.** The second device of SL-20 is
+  the shop's Box, which is also the shop's relay (`docs/BOX-RULES.md`
+  section 5d). Another counter or the owner phone as the second device comes
+  later. A shop without a Box cannot turn Shop Lightning on, and the owner
+  phone says why.
+- **SL-74. Over the shop's own link.** The Lightning counter writes, reads,
+  lists and removes its stored state with messages of the kinds Store and
+  Stored (`docs/LINK-RULES.md` LK-80 to LK-83), sent straight to the Box on
+  the counter's relay connection. Each message is sealed for the other
+  device and signed by the sender's identity key, as every link message is.
+  A write counts only when the Box's Stored answer, opened and checked,
+  names the same request and the SHA-256 of the same bytes. A device on the
+  shop's network that is not the Box cannot make that answer, so it cannot
+  make the counter count a payment whose state is kept only once (SL-21).
+  The node crate's plain TCP device is for tests and is never built into an
+  app.
+- **SL-75. What the Box can see.** The state is sealed with the node's key
+  before it leaves the counter (SL-20), and the link seals it again. The Box
+  sees the names the state is stored under, their sizes and when they
+  change. It holds no key that opens the state.
+- **SL-76. Turning it on.** The owner phone turns Shop Lightning on by a
+  change of the settings (`docs/APPROVAL-RULES.md` AP-13). It takes the
+  node's ID from the stick's code (`docs/STICK-RULES.md` SK-35), never from
+  a counter. The Lightning counter then scans the stick's seed code (SK-32)
+  and checks it against the pinned ID (SL-72).
+- **SL-77. Turning it off or moving it.** Settings without
+  `shop_lightning`, or naming another Lightning counter or another node's
+  ID, make the counter close every channel of the node it runs (SL-36). It
+  offers no invoice from then on. It keeps the seed, and keeps storing
+  twice, until every channel is closed and its money is in the shop's
+  wallet; then it deletes the seed (SL-12, SL-13).
+- **SL-78. What the owner sees.** With each check-in, the Lightning counter
+  sends the owner a message of kind Lightning report (`docs/LINK-RULES.md`
+  LK-84) with the facts of SL-45: the balance, the room to receive, the
+  opening fees paid so far, when the Box last stored the state, the time of
+  the last sweep, and why Lightning is not offered when it is not (SL-41).
+  The owner phone shows the newest report and when it came. The cap and the
+  provider it shows are those of the settings.
+- **SL-79. Tested.** The core's ID equals the library's (SL-72); settings
+  with `shop_lightning` round-trip, and each broken case of SL-71 is refused;
+  a counter given a seed of another ID stores nothing; a write the Box did
+  not answer, or answered for another request or other bytes, does not
+  count; a device that is not the Box cannot answer for it; on regtest a
+  payment at the Lightning counter is stored on the Box before the sale is
+  paid, and with the Box away the counter shows the on-chain code alone;
+  turning Shop Lightning off closes the channels and then deletes the seed.

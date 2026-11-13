@@ -19,6 +19,7 @@ signature for every loosening change, unchanged.
   its place on the device list), the watch key set or changed, and any
   change that tightens, including taking the Lightning node away. The
   per-field direction is the one `settings::changed_fields` gives.
+  `shop_lightning` takes the classes of AP-13.
 - **AP-02. The highest class wins.** A change that touches several fields
   takes the highest class among them: Redirect over Loosen over Free. No
   change at all is Free.
@@ -30,6 +31,15 @@ signature for every loosening change, unchanged.
   turning `node_only` or `light_fallback` off, are Free. Setting or
   changing `own_node` while `node_only` is off is Free: the node is then a
   second check only (NR-98 to NR-103, WR-60 to WR-65).
+
+- **AP-13. Shop Lightning.** Setting `shop_lightning`
+  (`docs/SHOP-LIGHTNING-RULES.md` SL-71), or changing its node's ID or its
+  Lightning counter, is Redirect: the node decides where Lightning payments
+  go, as `lightning_node` does. Changing the provider or the second device,
+  and raising the cap or the most for one opening, are Loosen. Lowering
+  either, and taking `shop_lightning` away, are Free. When `shop_lightning`
+  is set, the "Lightning node" line of the wallet's message (AP-06) gives
+  its node's ID.
 
 ## 2. Counter confirmation
 
