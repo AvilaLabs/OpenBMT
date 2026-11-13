@@ -14,7 +14,9 @@ mod key;
 mod notice;
 mod pairing;
 mod range;
+mod reply;
 mod request;
+pub mod say;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -27,6 +29,7 @@ pub use pairing::{
     pairing_id_of, PairingCode, MAX_SHOP_NAME_BYTES, PAIRING_ID_BYTES, PAIRING_MAGIC, SECRET_BYTES,
 };
 pub use range::{Range, MAX_ADDRESS_BYTES, MIN_ADDRESS_BYTES, RANGE_MAGIC, RANGE_SIZE};
+pub use reply::{NoticeAction, OrdersReply, RangeReply, RangeResult};
 pub use request::{
     orders_request_body, SignedRequest, HEADER_MAC, HEADER_NONCE, HEADER_TIME, NONCE_BYTES,
     ROUTE_NOTICE, ROUTE_ORDERS, ROUTE_RANGE, TIME_WINDOW_SECS,
