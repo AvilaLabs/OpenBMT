@@ -219,6 +219,13 @@ private const val OP_REQUEST_REPEATS = 223
 private const val OP_REQUEST_STOP_REPEATING = 224
 private const val OP_REQUEST_STATE = 225
 private const val OP_REQUEST_RETURN_ASK = 226
+private const val OP_WEB_PAIR_START = 227
+private const val OP_WEB_PAIR_CONFIRM = 228
+private const val OP_WEB_UNPAIR = 229
+private const val OP_WEB_STATE = 230
+private const val OP_WEB_STEP = 231
+private const val OP_WEB_REPLY = 232
+private const val OP_WEB_CODE_READ = 233
 private const val OP_REQUEST_READ = 234
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
@@ -232,6 +239,19 @@ private const val TAG_REQUEST_PRICE_IN_SHOP_CURRENCY = 1
 private const val TAG_REQUEST_EVERY_WEEK = 0
 private const val TAG_REQUEST_EVERY_MONTH = 1
 private const val TAG_REQUEST_EVERY_YEAR = 2
+private const val TAG_WEB_PAIRING_KIND_NONE = 0
+private const val TAG_WEB_PAIRING_KIND_WAITING = 1
+private const val TAG_WEB_PAIRING_KIND_PAIRED = 2
+private const val TAG_WEB_STEP_KIND_IDLE = 0
+private const val TAG_WEB_STEP_KIND_BUSY = 1
+private const val TAG_WEB_STEP_KIND_CALL = 2
+private const val TAG_WEB_CALL_KIND_VIEW_ORDERS = 0
+private const val TAG_WEB_CALL_KIND_VIEW_RANGE = 1
+private const val TAG_WEB_CALL_KIND_VIEW_NOTICE = 2
+private const val TAG_WEB_OUTCOME_ANSWERED = 0
+private const val TAG_WEB_OUTCOME_NOT_REACHED = 1
+private const val TAG_WEB_OUTCOME_TOR_MISSING = 2
+private const val TAG_WEB_OUTCOME_TOO_LONG = 3
 private const val TAG_REQUEST_STATUS_VIEW_WAITING = 0
 private const val TAG_REQUEST_STATUS_VIEW_PART_PAID = 1
 private const val TAG_REQUEST_STATUS_VIEW_PAID = 2
@@ -1283,6 +1303,62 @@ class RequestState(
     val returns: Words?,
 )
 
+// ---- web orders (docs/WEB-ORDER-RULES.md) ---------------------------------------------
+
+/** What `webPairStart` gives (WO-05): the [code] to paste into the store's settings and the [fingerprint] to compare with the one the store shows. */
+class WebPair(val code: String, val fingerprint: String, val shopName: String, val url: String)
+
+/** What a pairing code holds that the owner compares (WO-05). */
+class WebCode(val fingerprint: String, val shopName: String)
+
+/** How far the pairing has come. */
+enum class WebPairing { None, Waiting, Paired }
+
+/** One order the owner phone refused (WO-22). */
+class WebRefused(val order: Long, val address: String, val sats: Long, val at: Long, val words: Words)
+
+/** What the store's page shows (WO-21, WO-22). */
+class WebState(
+    val off: Words?,
+    val pairing: WebPairing,
+    val shopName: String,
+    val url: String,
+    val fingerprint: String,
+    val code: String?,
+    val lastVisit: Long?,
+    val failure: Words?,
+    val retryAt: Long?,
+    val left: Long?,
+    val addressesSent: Long,
+    val trouble: Words?,
+    val orders: Long,
+    val waiting: Long,
+    val told: Long,
+    val noticesWaiting: Long,
+    val refused: List<WebRefused>,
+)
+
+/** Which call of a visit. */
+enum class WebCallKind { Orders, Range, Notice }
+
+/** What the node wants next. */
+enum class WebStepKind { Idle, Busy, Call }
+
+/** One POST to the store, to be sent as it is: [headers] are name and value pairs, [body] is exactly what is sent (WO-20). */
+class WebCall(
+    val kind: WebCallKind,
+    val url: String,
+    val headers: List<Pair<String, String>>,
+    val contentType: String,
+    val body: ByteArray,
+)
+
+/** What `webStep` gives: [call] is there for [WebStepKind.Call]. */
+class WebStep(val step: WebStepKind, val call: WebCall?)
+
+/** How a call ended, as the app saw it. */
+enum class WebOutcome { Answered, NotReached, TorMissing, TooLong }
+
 /** The code a counter takes: [code] is the bundle to show, [withBatch] says the first addresses are in it. */
 class CounterBundle(val code: ByteArray, val withBatch: Boolean, val words: Words)
 
@@ -1625,6 +1701,54 @@ internal fun Writer.requestEvery(v: RequestEvery): Writer =
             RequestEvery.Year -> TAG_REQUEST_EVERY_YEAR
         },
     )
+
+internal fun Writer.webOutcome(v: WebOutcome): Writer =
+    u8(
+        when (v) {
+            WebOutcome.Answered -> TAG_WEB_OUTCOME_ANSWERED
+            WebOutcome.NotReached -> TAG_WEB_OUTCOME_NOT_REACHED
+            WebOutcome.TorMissing -> TAG_WEB_OUTCOME_TOR_MISSING
+            WebOutcome.TooLong -> TAG_WEB_OUTCOME_TOO_LONG
+        },
+    )
+
+internal fun Reader.webPair(): WebPair = WebPair(string(), string(), string(), string())
+
+internal fun Reader.webPairing(): WebPairing =
+    when (val t = u8()) {
+        TAG_WEB_PAIRING_KIND_NONE -> WebPairing.None
+        TAG_WEB_PAIRING_KIND_WAITING -> WebPairing.Waiting
+        TAG_WEB_PAIRING_KIND_PAIRED -> WebPairing.Paired
+        else -> tag("WebPairingKind $t")
+    }
+
+internal fun Reader.webState(): WebState =
+    WebState(
+        option { words() }, webPairing(), string(), string(), string(), option { string() },
+        option { u64() }, option { words() }, option { u64() }, option { u64() }, u32(),
+        option { words() }, u32(), u32(), u32(), u32(),
+        list { WebRefused(u64(), string(), u64(), u64(), words()) },
+    )
+
+internal fun Reader.webStep(): WebStep {
+    val kind = when (val t = u8()) {
+        TAG_WEB_STEP_KIND_IDLE -> WebStepKind.Idle
+        TAG_WEB_STEP_KIND_BUSY -> WebStepKind.Busy
+        TAG_WEB_STEP_KIND_CALL -> WebStepKind.Call
+        else -> tag("WebStepKind $t")
+    }
+    val call = option {
+        val callKind = when (val t = u8()) {
+            TAG_WEB_CALL_KIND_VIEW_ORDERS -> WebCallKind.Orders
+            TAG_WEB_CALL_KIND_VIEW_RANGE -> WebCallKind.Range
+            TAG_WEB_CALL_KIND_VIEW_NOTICE -> WebCallKind.Notice
+            else -> tag("WebCallKindView $t")
+        }
+        WebCall(callKind, string(), list { string() to string() }, string(), bytes())
+    }
+    if ((kind == WebStepKind.Call) != (call != null)) fail("a web step has a call exactly when it is a call")
+    return WebStep(kind, call)
+}
 
 internal fun Reader.requestMade(): RequestMade = RequestMade(u64(), u32(), string())
 
@@ -3118,6 +3242,42 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
         return r.requestState().also { r.end() }
     }
 
+    /** WO-05, WO-06: make the key and the pairing code for the store at [url]; the owner pastes the code into the store's settings. */
+    fun webPairStart(ask: RequestAsk, url: String, shopName: String): WebPair {
+        val r = call(OP_WEB_PAIR_START, handle) { it.requestAsk(ask).string(url).string(shopName) }
+        return r.webPair().also { r.end() }
+    }
+
+    /** WO-05: the owner says the fingerprint the store shows is the one this phone shows; the store is visited from now on. */
+    fun webPairConfirm(ask: RequestAsk): WebState {
+        val r = call(OP_WEB_PAIR_CONFIRM, handle) { it.requestAsk(ask) }
+        return r.webState().also { r.end() }
+    }
+
+    /** WO-07: forget the key and the secret. The addresses given stay watched. */
+    fun webUnpair(ask: RequestAsk): WebState {
+        val r = call(OP_WEB_UNPAIR, handle) { it.requestAsk(ask) }
+        return r.webState().also { r.end() }
+    }
+
+    /** WO-21, WO-22: what the store's page shows. */
+    fun webState(ask: RequestAsk): WebState {
+        val r = call(OP_WEB_STATE, handle) { it.requestAsk(ask) }
+        return r.webState().also { r.end() }
+    }
+
+    /** WO-20: the next step of a visit; [force] asks for a visit now, without the waiting after a failure. */
+    fun webStep(ask: RequestAsk, force: Boolean): WebStep {
+        val r = call(OP_WEB_STEP, handle) { it.requestAsk(ask).bool(force) }
+        return r.webStep().also { r.end() }
+    }
+
+    /** WO-20: the store's answer to the call in the air: [status] and [body] when it answered, else the [outcome] that says why not. */
+    fun webReply(ask: RequestAsk, outcome: WebOutcome, status: Long, body: ByteArray): WebState {
+        val r = call(OP_WEB_REPLY, handle) { it.requestAsk(ask).webOutcome(outcome).u32(status).bytes(body) }
+        return r.webState().also { r.end() }
+    }
+
     /** RQ-27: the line that asks a customer for a bitcoin address, for a return of [amount] from request [number]. */
     fun requestReturnAsk(ask: RequestAsk, number: Long, inCurrency: Boolean, amount: Long, shopName: String): String {
         val r = call(OP_REQUEST_RETURN_ASK, handle) { w ->
@@ -3260,6 +3420,14 @@ object OwnerImport {
     fun read(text: String): ImportedWalletView {
         val r = call(OP_WALLET_IMPORT_READ, 0) { it.string(text) }
         return ImportedWalletView(r.importKind(), r.option { r.string() }, r.string()).also { r.end() }
+    }
+}
+
+object OwnerWeb {
+    /** WO-05: the fingerprint and the shop's name in a pairing code, or an [OwnerException] with the words. */
+    fun readCode(text: String): WebCode {
+        val r = call(OP_WEB_CODE_READ, 0) { it.string(text) }
+        return WebCode(r.string(), r.string()).also { r.end() }
     }
 }
 

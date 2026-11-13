@@ -146,6 +146,6 @@ pub use web_orders::{
     MAGIC_WEB_ORDERS, MAX_ORDERS, MAX_RANGES, MAX_REFUSALS, WEB_ORDERS_FILE,
 };
 pub use web_visit::{
-    OrderStand, WebCall, WebCallKind, WebFailure, WebPairShown, WebStateInfo, WebStep,
-    BACKOFF_FIRST_SECS, BACKOFF_MAX_SECS,
+    trouble_words, OrderStand, WebCall, WebCallKind, WebFailure, WebPairShown, WebStateInfo,
+    WebStep, BACKOFF_FIRST_SECS, BACKOFF_MAX_SECS,
 };

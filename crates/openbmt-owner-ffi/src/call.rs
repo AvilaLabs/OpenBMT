@@ -75,6 +75,12 @@
 //!   due, stop a series, the state Home shows, and the line that asks a
 //!   customer for an address. Every call is given the time, the shop's
 //!   offset from UTC and the newest rate.
+//! - 227 to 233: the owner phone's web orders (`docs/WEB-ORDER-RULES.md`,
+//!   WO-05 to WO-32): make the pairing code for a store, the owner's word
+//!   that the fingerprints match, unpairing, the store's state, the next
+//!   step of a visit (which the app sends to the store) and the store's
+//!   answer to it. 233 reads a pairing code to show what is compared; it
+//!   works on no node.
 //! - 100 to 103: the lock on the setup text the app stores
 //!   (`docs/LOCK-RULES.md`, `docs/OWNER-APP-RULES.md` OA-60 to OA-62):
 //!   whether stored bytes are a locked setup, lock a text under a PIN, open
@@ -208,6 +214,11 @@ use crate::views::{
     TakenView, ViewKind, WordsView,
 };
 use crate::watch::{self, WatchEntry, WatchStart, WatchStepView};
+use crate::web_orders::{
+    self, WebCallKindView, WebCallView, WebCodeView, WebHeaderView, WebOutcome, WebPairArgs,
+    WebPairView, WebPairingKind, WebRefusedView, WebReplyArgs, WebStateView, WebStepArgs,
+    WebStepKind, WebStepView,
+};
 
 /// The first four bytes of a request.
 pub const REQUEST_MAGIC: [u8; 4] = *b"OBMk";
@@ -1019,6 +1030,26 @@ fn build_ops() -> Vec<Op> {
             Node,
             |c, a: RequestReturnArgs| c.entry()?.request_return_ask(a),
         ),
+        op(227, "web_pair_start", Node, |c, a: WebPairArgs| {
+            c.entry()?.web_pair_start(a)
+        }),
+        op(228, "web_pair_confirm", Node, |c, ask: RequestAsk| {
+            c.entry()?.web_pair_confirm(ask)
+        }),
+        op(229, "web_unpair", Node, |c, ask: RequestAsk| {
+            c.entry()?.web_unpair(ask)
+        }),
+        op(230, "web_state", Node, |c, ask: RequestAsk| {
+            c.entry()?.web_state(ask)
+        }),
+        op(231, "web_step", Node, |c, a: WebStepArgs| {
+            c.entry()?.web_step(a)
+        }),
+        op(232, "web_reply", Node, |c, a: WebReplyArgs| {
+            c.entry()?.web_reply(a)
+        }),
+        op(233, "web_code_read", Zero, |_, text: String| {
+            web_orders::read_code(text)
         op(234, "request_read", Node, |c, a: RequestNumberArgs| {
             c.entry()?.request_read(a)
         }),
@@ -1354,6 +1385,20 @@ fn definitions() -> Vec<TypeDef> {
         RequestReturnAddedView::define(),
         RequestRepeatsView::define(),
         RequestStateView::define(),
+        WebPairArgs::define(),
+        WebPairView::define(),
+        WebCodeView::define(),
+        WebPairingKind::define(),
+        WebRefusedView::define(),
+        WebStateView::define(),
+        WebStepArgs::define(),
+        WebStepKind::define(),
+        WebCallKindView::define(),
+        WebHeaderView::define(),
+        WebCallView::define(),
+        WebStepView::define(),
+        WebOutcome::define(),
+        WebReplyArgs::define(),
         RequestStatusView::define(),
         RequestEndView::define(),
         PaymentAfterView::define(),

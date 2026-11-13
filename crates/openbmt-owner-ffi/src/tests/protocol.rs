@@ -197,6 +197,13 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (224, "request_stop_repeating"),
         (225, "request_state"),
         (226, "request_return_ask"),
+        (227, "web_pair_start"),
+        (228, "web_pair_confirm"),
+        (229, "web_unpair"),
+        (230, "web_state"),
+        (231, "web_step"),
+        (232, "web_reply"),
+        (233, "web_code_read"),
         (234, "request_read"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();

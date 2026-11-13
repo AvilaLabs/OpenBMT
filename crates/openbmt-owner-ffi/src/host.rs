@@ -122,6 +122,10 @@ use crate::views::{
     SendRow, SettingsHeldView, SettingsQueuedView, ShopCurrencyView, SkippedView, StageKind,
     StageView, StartConfig, StatusView, SwapHeldView, TakenView, ViewKind, WordsView,
 };
+use crate::web_orders::{
+    self as web, WebPairArgs, WebPairView, WebReplyArgs, WebStateView, WebStepArgs, WebStepKind,
+    WebStepView,
+};
 
 /// The longest a `pump` waits, whatever the app asks for, so that a call
 /// from the screen thread is never kept longer than this.
@@ -2832,6 +2836,72 @@ impl Entry {
         })
     }
 
+    /// WO-05, WO-06: make the key and the pairing code for a store.
+    pub(crate) fn web_pair_start(&self, a: WebPairArgs) -> Result<WebPairView, AppError> {
+        self.run(Some(a.ask.now), move |st| {
+            request_prepare(st, &a.ask)?;
+            web::pair_start(&mut st.node, &a)
+        })
+    }
+
+    /// WO-05: the owner says the fingerprints match.
+    pub(crate) fn web_pair_confirm(&self, ask: RequestAsk) -> Result<WebStateView, AppError> {
+        self.run(Some(ask.now), move |st| {
+            request_prepare(st, &ask)?;
+            st.node.web_pair_confirm().map_err(web::web_error)?;
+            Ok(web::state(&st.node))
+        })
+    }
+
+    /// WO-07: forget the key and the secret.
+    pub(crate) fn web_unpair(&self, ask: RequestAsk) -> Result<WebStateView, AppError> {
+        self.run(Some(ask.now), move |st| {
+            request_prepare(st, &ask)?;
+            st.node.web_unpair().map_err(web::web_error)?;
+            Ok(web::state(&st.node))
+        })
+    }
+
+    /// WO-21, WO-22: what the store's page shows.
+    pub(crate) fn web_state(&self, ask: RequestAsk) -> Result<WebStateView, AppError> {
+        self.run(Some(ask.now), move |st| {
+            request_prepare(st, &ask)?;
+            Ok(web::state(&st.node))
+        })
+    }
+
+    /// WO-20, WO-10: the next step of a visit. When the node needs indexes
+    /// for a range they are taken from the desk here, as a request's is.
+    pub(crate) fn web_step(&self, a: WebStepArgs) -> Result<WebStepView, AppError> {
+        self.run(Some(a.ask.now), move |st| {
+            request_prepare(st, &a.ask)?;
+            let State { node, own, dir, .. } = st;
+            // One request for indexes at most in a visit.
+            for _ in 0..2 {
+                let step = node
+                    .web_step(a.ask.now, a.force, &mut web::Kernel)
+                    .map_err(web::web_error)?;
+                if let Some(view) = web::step_view(step.clone()) {
+                    return Ok(view);
+                }
+                if let openbmt_owner_node::WebStep::NeedIndexes(n) = step {
+                    requests::ready(node)?;
+                    let indexes = desk_indexes(node, own, dir, a.ask.now, n)?;
+                    node.web_give_indexes(&indexes).map_err(web::web_error)?;
+                }
+            }
+            Ok(WebStepView {
+                step: WebStepKind::Idle,
+                call: None,
+            })
+        })
+    }
+
+    /// WO-20: the store's answer to the call in the air.
+    pub(crate) fn web_reply(&self, a: WebReplyArgs) -> Result<WebStateView, AppError> {
+        self.run(Some(a.ask.now), move |st| {
+            request_prepare(st, &a.ask)?;
+            web::reply(&mut st.node, &a)
     /// RQ-35: one request as the book keeps it, for its page.
     pub(crate) fn request_read(&self, a: RequestNumberArgs) -> Result<RequestDetailView, AppError> {
         self.run(Some(a.ask.now), move |st| {

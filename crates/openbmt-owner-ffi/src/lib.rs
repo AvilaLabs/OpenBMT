@@ -71,6 +71,7 @@ mod signer_views;
 mod starter;
 mod views;
 pub mod watch;
+mod web_orders;
 
 #[cfg(test)]
 mod tests;
@@ -138,4 +139,9 @@ pub use views::{
     ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind,
     SendRow, SettingsHeldView, SettingsQueuedView, ShopCurrencyView, SkippedView, StageKind,
     StageView, StartConfig, StatusView, SwapHeldView, TakenView, ViewKind, WordsView,
+};
+pub use web_orders::{
+    WebCallKindView, WebCallView, WebCodeView, WebHeaderView, WebOutcome, WebPairArgs, WebPairView,
+    WebPairingKind, WebRefusedView, WebReplyArgs, WebStateView, WebStepArgs, WebStepKind,
+    WebStepView,
 };

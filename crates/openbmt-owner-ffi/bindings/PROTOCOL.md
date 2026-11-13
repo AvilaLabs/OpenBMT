@@ -220,6 +220,13 @@ ops run on another; it waits for at most 250 ms.
 224 request_stop_repeating handle node  args RequestNumberArgs -> ()
 225 request_state    handle node  args RequestAsk -> RequestStateView
 226 request_return_ask handle node  args RequestReturnArgs -> string
+227 web_pair_start   handle node  args WebPairArgs -> WebPairView
+228 web_pair_confirm handle node  args RequestAsk -> WebStateView
+229 web_unpair       handle node  args RequestAsk -> WebStateView
+230 web_state        handle node  args RequestAsk -> WebStateView
+231 web_step         handle node  args WebStepArgs -> WebStepView
+232 web_reply        handle node  args WebReplyArgs -> WebStateView
+233 web_code_read    handle zero  args string -> WebCodeView
 234 request_read     handle node  args RequestNumberArgs -> RequestDetailView
 ```
 
@@ -461,6 +468,24 @@ RequestReturnArgs: record: ask: RequestAsk, number: u64, in_currency: bool, amou
 RequestReturnAddedView: record: id: u64, refund: u32, sats: u64, groups: string, words: Words
 RequestRepeatsView: record: made: list<RequestMadeView>
 RequestStateView: record: off: option<Words>, ready: bool, open: u32, overdue: u32, ready_to_send: u32, overdue_row: option<string>, arrivals_waiting: u32, returns_queued: u32, returns_sats: u64, returns: option<Words>
+WebPairArgs: record: ask: RequestAsk, url: string, shop_name: string
+WebPairView: record: code: string, fingerprint: string, shop_name: string, url: string
+WebCodeView: record: fingerprint: string, shop_name: string
+WebPairingKind: enum, one tag byte
+    tags None=0 Waiting=1 Paired=2
+WebRefusedView: record: order: u64, address: string, sats: u64, at: u64, words: Words
+WebStateView: record: off: option<Words>, pairing: WebPairingKind, shop_name: string, url: string, fingerprint: string, code: option<string>, last_visit: option<u64>, failure: option<Words>, retry_at: option<u64>, left: option<u64>, addresses_sent: u32, trouble: option<Words>, orders: u32, waiting: u32, told: u32, notices_waiting: u32, refused: list<WebRefusedView>
+WebStepArgs: record: ask: RequestAsk, force: bool
+WebStepKind: enum, one tag byte
+    tags Idle=0 Busy=1 Call=2
+WebCallKindView: enum, one tag byte
+    tags Orders=0 Range=1 Notice=2
+WebHeaderView: record: name: string, value: string
+WebCallView: record: kind: WebCallKindView, url: string, headers: list<WebHeaderView>, content_type: string, body: list<u8>
+WebStepView: record: step: WebStepKind, call: option<WebCallView>
+WebOutcome: enum, one tag byte
+    tags Answered=0 NotReached=1 TorMissing=2 TooLong=3
+WebReplyArgs: record: ask: RequestAsk, outcome: WebOutcome, status: u32, body: list<u8>
 RequestStatusView: enum, one tag byte
     tags Waiting=0 PartPaid=1 Paid=2 Overpaid=3 Almost=4
 RequestEndView: enum, one tag byte

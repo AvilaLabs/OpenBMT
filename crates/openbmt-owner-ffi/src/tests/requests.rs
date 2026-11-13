@@ -11,9 +11,9 @@ use super::kit::{Rig, OWNER_SECRET};
 use super::wire::{frame, Rd, W};
 use crate::dispatch;
 
-const T0: u64 = 1_000_000;
+pub(super) const T0: u64 = 1_000_000;
 
-fn wallet_file(rig: &Rig) -> Vec<u8> {
+pub(super) fn wallet_file(rig: &Rig) -> Vec<u8> {
     let response = rig.call(148, 0, &W::new().string(&descriptor()).0);
     let mut r = Rd::ok(&response);
     let (file, _, _) = (r.bytes(), r.string(), r.bool());
@@ -29,7 +29,7 @@ fn shop(rig: &Rig, wallet: &[u8]) -> W {
 }
 
 /// The shop learns its settings by adding a counter (OA-110).
-fn settle(rig: &Rig, file: &[u8]) {
+pub(super) fn settle(rig: &Rig, file: &[u8]) {
     let code = Rd::ok(&dispatch(
         rig.registry(),
         &frame(150, 0, &shop(rig, file).u64(T0).0),
@@ -52,7 +52,7 @@ fn settle(rig: &Rig, file: &[u8]) {
 }
 
 /// What every request op is given: the time, the offset, no rate.
-fn ask(now: u64) -> W {
+pub(super) fn ask(now: u64) -> W {
     W::new().u64(now).u32(0).u8(0)
 }
 

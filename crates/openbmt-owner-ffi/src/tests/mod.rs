@@ -23,4 +23,5 @@ mod setup_lock;
 mod starter;
 mod strict;
 mod watch;
+mod web_orders;
 pub(crate) mod wire;
