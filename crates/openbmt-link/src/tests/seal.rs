@@ -596,8 +596,8 @@ fn lk_08_seal_and_open_refuse_a_kind_the_role_may_not_send() {
         open_as_counter(&unknown).unwrap_err(),
         OpenError::UnknownKind(0)
     );
-    unknown[77] = 12;
-    assert_eq!(inspect(&unknown).unwrap_err(), OpenError::UnknownKind(12));
+    unknown[77] = 13;
+    assert_eq!(inspect(&unknown).unwrap_err(), OpenError::UnknownKind(13));
 }
 
 #[test]
@@ -752,7 +752,7 @@ fn lk_08_a_range_is_sent_by_the_owner_to_a_counter_and_is_kind_11() {
 }
 
 #[test]
-fn lk_78_a_switch_is_sent_by_the_owner_to_a_counter_and_is_kind_12() {
+fn kind_12_lk_78_a_switch_is_sent_by_the_owner_to_a_counter_and_is_kind_12() {
     assert_eq!(Kind::Switch.to_byte(), 12);
     assert_eq!(Kind::from_byte(12), Some(Kind::Switch));
     assert_eq!(Kind::from_byte(13), None);
