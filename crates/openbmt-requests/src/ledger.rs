@@ -81,7 +81,7 @@ impl RequestBook {
             returns: self
                 .returns
                 .iter()
-                .filter(|r| r.request == request.number)
+                .filter(|r| r.request == request.number && r.state.counts())
                 .map(|r| LedgerReturn {
                     sats: r.sats,
                     queued_at: r.queued_at,

@@ -264,3 +264,25 @@ errors!(
     AddressRefused,
     BookError
 );
+
+/// Why a return could not be ended as cancelled (RQ-29). The owner never
+/// sees it: the book follows the queue, which only offers a cancel for a
+/// refund that waits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelReturnRefused {
+    /// There is no such return.
+    NoSuchReturn,
+    /// The return is not waiting in the queue.
+    NotQueued,
+}
+
+impl fmt::Display for CancelReturnRefused {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoSuchReturn => write!(f, "RQ-29: there is no such return"),
+            Self::NotQueued => write!(f, "RQ-29: the return is not waiting in the queue"),
+        }
+    }
+}
+
+impl std::error::Error for CancelReturnRefused {}

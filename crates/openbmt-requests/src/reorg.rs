@@ -66,7 +66,7 @@ impl RequestBook {
     /// first.
     pub(crate) fn trim_queued(&mut self, numbers: &[u64]) -> Vec<Return> {
         let mut returned: HashMap<u64, u64> = HashMap::new();
-        for r in &self.returns {
+        for r in self.returns.iter().filter(|r| r.state.counts()) {
             let total = returned.entry(r.request).or_insert(0);
             *total = total.saturating_add(r.sats);
         }
@@ -104,7 +104,7 @@ impl RequestBook {
         let returned = self
             .returns
             .iter()
-            .filter(|r| r.request == number)
+            .filter(|r| r.request == number && r.state.counts())
             .fold(0u64, |t, r| t.saturating_add(r.sats));
         returned
             .checked_sub(request.received_sats())

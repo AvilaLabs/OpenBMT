@@ -44,8 +44,8 @@ pub use book::{NewRequest, PriceIn, RequestBook, Shop, MAX_REQUESTS, MAX_RETURNS
 pub use codec::MAGIC_REQUEST_BOOK;
 pub use date::{day_of, end_of_day, Day};
 pub use error::{
-    AddressRefused, BookError, CreditRefused, EndRefused, Limit, MakeRefused, RepeatRefused,
-    ReturnRefused, ShareRefused,
+    AddressRefused, BookError, CancelReturnRefused, CreditRefused, EndRefused, Limit, MakeRefused,
+    RepeatRefused, ReturnRefused, ShareRefused,
 };
 pub use fsio::REQUEST_BOOK_FILE;
 pub use ledger::{LedgerLine, LedgerPayment, LedgerReturn};

@@ -1,7 +1,7 @@
 //! The request book as bytes (RQ-30).
 //!
-//! Layout, all numbers little-endian: the magic `OBM=`, the version byte 1,
-//! then
+//! Layout, all numbers little-endian: the magic `OBM=`, the version byte (2;
+//! version 1 is still read, see below), then
 //!
 //! ```text
 //! next number u64 | next return id u64
@@ -10,6 +10,7 @@
 //!   number u64 | note (len u16, UTF-8) | amount u64
 //!   | pricing u8 (0 bitcoin, 1 currency) + currency byte for 1
 //!   | made at u64 | made day u32 | due day u32 | address index u32
+//!   | wallet (version 2): flag, then the wallet's checksum 32
 //!   | repeat flag, then every u8 (1 week, 2 month, 3 year), series u64,
 //!     index u32, first due u32, lead u8
 //!   | end flag, then kind u8 (1 cancelled, 2 closed, 3 counted paid), at u64
@@ -20,8 +21,13 @@
 //!     flags u8 (1 late, 2 old price, 4 after a cancel, 8 after a close)
 //! returns: count u32, then each
 //!   id u64 | request u64 | script (len u8, bytes) | sats u64 | queued at u64
-//!   | state u8 (0 queued, 1 sent + txid 32, 2 done + txid 32 + at u64)
+//!   | state u8 (0 queued, 1 sent + txid 32, 2 done + txid 32 + at u64,
+//!     3 cancelled + at u64: version 2)
 //! ```
+//!
+//! Version 1 has no wallet field and no cancelled state. Its requests have
+//! no wallet (RQ-04) until the owner node gives them the wallet that was
+//! pinned when it read the book; the book is then written as version 2.
 //!
 //! The requests are numbered 1, 2, 3 and so on with none missing. The
 //! returns' ids count up, with a gap where a return left the queue
@@ -50,6 +56,9 @@ use crate::returns::MAX_QUEUED_RETURNS;
 
 /// The magic of the request book (RQ-30).
 pub const MAGIC_REQUEST_BOOK: [u8; 4] = *b"OBM=";
+
+/// The version the book is written in.
+const VERSION: u8 = 2;
 
 /// The fewest bytes a request takes: its fixed fields, an empty note, no
 /// repeat, no end, no quotes and no credits.
@@ -83,7 +92,14 @@ fn rate_of(raw: u64) -> Option<Rate> {
 impl RequestBook {
     /// The book as bytes (RQ-30).
     pub fn to_bytes(&self) -> Vec<u8> {
+        self.encode(VERSION)
+    }
+
+    pub(crate) fn encode(&self, version: u8) -> Vec<u8> {
         let mut out = wire::start(&MAGIC_REQUEST_BOOK, 64 + self.requests.len() * 120);
+        if let Some(v) = out.get_mut(4) {
+            *v = version;
+        }
         out.extend_from_slice(&self.next_number.to_le_bytes());
         out.extend_from_slice(&self.next_return.to_le_bytes());
         out.extend_from_slice(&wire::len_u32(self.stopped.len()).to_le_bytes());
@@ -92,11 +108,11 @@ impl RequestBook {
         }
         out.extend_from_slice(&wire::len_u32(self.requests.len()).to_le_bytes());
         for r in &self.requests {
-            encode_request(&mut out, r);
+            encode_request(&mut out, r, version);
         }
         out.extend_from_slice(&wire::len_u32(self.returns.len()).to_le_bytes());
         for r in &self.returns {
-            encode_return(&mut out, r);
+            encode_return(&mut out, r, version);
         }
         out
     }
@@ -104,7 +120,8 @@ impl RequestBook {
     /// Read the book strictly (RQ-30, RQ-34): any bytes at all give a book
     /// or a refusal, never a panic.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, BookError> {
-        let mut r = Reader::framed(bytes, &MAGIC_REQUEST_BOOK).map_err(corrupt)?;
+        let (mut r, version) =
+            Reader::framed_up_to(bytes, &MAGIC_REQUEST_BOOK, VERSION).map_err(corrupt)?;
         let next_number = r.u64_le().map_err(corrupt)?;
         let next_return = r.u64_le().map_err(corrupt)?;
         let n = r.count(MAX_REQUESTS, 8).map_err(corrupt)?;
@@ -120,7 +137,7 @@ impl RequestBook {
         let mut requests: Vec<Request> = Vec::with_capacity(n);
         let mut indexes: HashSet<u32> = HashSet::with_capacity(n);
         for at in 0..n {
-            let request = decode_request(&mut r)?;
+            let request = decode_request(&mut r, version)?;
             if request.number != at as u64 + 1 {
                 return bad("the requests are not numbered 1, 2, 3 and so on");
             }
@@ -178,7 +195,7 @@ impl RequestBook {
         // returns, whatever the number of requests.
         let mut returned: Vec<(u64, bool)> = vec![(0, false); requests.len()];
         for _ in 0..n {
-            let ret = decode_return(&mut r)?;
+            let ret = decode_return(&mut r, version)?;
             // Ids only count up: a return taken off the queue (RQ-37) leaves
             // a gap.
             if returns.last().is_some_and(|l| l.id >= ret.id) || ret.id == 0 {
@@ -191,7 +208,9 @@ impl RequestBook {
             else {
                 return bad("a return is from a request that is not in the book");
             };
-            sum.0 = sum.0.saturating_add(ret.sats);
+            if ret.state.counts() {
+                sum.0 = sum.0.saturating_add(ret.sats);
+            }
             sum.1 |= ret.state == ReturnState::Queued;
             returns.push(ret);
         }
@@ -219,15 +238,16 @@ impl RequestBook {
             next_return,
             returns,
             stopped,
+            wallet: None,
         };
-        if book.to_bytes() != bytes {
+        if book.encode(version) != bytes {
             return bad("it does not encode to the same bytes");
         }
         Ok(book)
     }
 }
 
-fn encode_request(out: &mut Vec<u8>, r: &Request) {
+fn encode_request(out: &mut Vec<u8>, r: &Request, version: u8) {
     out.extend_from_slice(&r.number.to_le_bytes());
     out.extend_from_slice(
         &u16::try_from(r.note.len())
@@ -244,6 +264,15 @@ fn encode_request(out: &mut Vec<u8>, r: &Request) {
     out.extend_from_slice(&r.made.0.to_le_bytes());
     out.extend_from_slice(&r.due.0.to_le_bytes());
     out.extend_from_slice(&r.address_index.to_le_bytes());
+    if version >= 2 {
+        match r.wallet {
+            None => out.push(0),
+            Some(w) => {
+                out.push(1);
+                out.extend_from_slice(&w);
+            }
+        }
+    }
     match r.repeat {
         None => out.push(0),
         Some(rep) => {
@@ -299,7 +328,7 @@ fn encode_request(out: &mut Vec<u8>, r: &Request) {
     }
 }
 
-fn encode_return(out: &mut Vec<u8>, r: &Return) {
+fn encode_return(out: &mut Vec<u8>, r: &Return, _version: u8) {
     out.extend_from_slice(&r.id.to_le_bytes());
     out.extend_from_slice(&r.request.to_le_bytes());
     let script = r.script.as_bytes();
@@ -318,6 +347,10 @@ fn encode_return(out: &mut Vec<u8>, r: &Return) {
             out.extend_from_slice(&txid);
             out.extend_from_slice(&at.to_le_bytes());
         }
+        ReturnState::Cancelled { at } => {
+            out.push(3);
+            out.extend_from_slice(&at.to_le_bytes());
+        }
     }
 }
 
@@ -329,7 +362,7 @@ fn day(r: &mut Reader<'_>) -> Result<Day, BookError> {
     Ok(Day(d))
 }
 
-fn decode_request(r: &mut Reader<'_>) -> Result<Request, BookError> {
+fn decode_request(r: &mut Reader<'_>, version: u8) -> Result<Request, BookError> {
     let number = r.u64_le().map_err(corrupt)?;
     let len = usize::from(r.u16_le().map_err(corrupt)?);
     let note = std::str::from_utf8(r.take(len).map_err(corrupt)?)
@@ -358,6 +391,11 @@ fn decode_request(r: &mut Reader<'_>) -> Result<Request, BookError> {
     let made = day(r)?;
     let due = day(r)?;
     let address_index = r.u32_le().map_err(corrupt)?;
+    let wallet = if version >= 2 && r.flag().map_err(corrupt)? {
+        Some(r.array::<32>().map_err(corrupt)?)
+    } else {
+        None
+    };
     let repeat = if r.flag().map_err(corrupt)? {
         let every = match r.u8().map_err(corrupt)? {
             1 => Every::Week,
@@ -514,6 +552,7 @@ fn decode_request(r: &mut Reader<'_>) -> Result<Request, BookError> {
         made,
         due,
         address_index,
+        wallet,
         repeat,
         end,
         quotes,
@@ -521,7 +560,7 @@ fn decode_request(r: &mut Reader<'_>) -> Result<Request, BookError> {
     })
 }
 
-fn decode_return(r: &mut Reader<'_>) -> Result<Return, BookError> {
+fn decode_return(r: &mut Reader<'_>, version: u8) -> Result<Return, BookError> {
     let id = r.u64_le().map_err(corrupt)?;
     let request = r.u64_le().map_err(corrupt)?;
     let len = usize::from(r.u8().map_err(corrupt)?);
@@ -545,6 +584,9 @@ fn decode_return(r: &mut Reader<'_>) -> Result<Return, BookError> {
         },
         2 => ReturnState::Done {
             txid: r.array::<32>().map_err(corrupt)?,
+            at: r.u64_le().map_err(corrupt)?,
+        },
+        3 if version >= 2 => ReturnState::Cancelled {
             at: r.u64_le().map_err(corrupt)?,
         },
         _ => return bad("a return is in no known state"),

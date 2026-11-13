@@ -4,7 +4,7 @@ use bitcoin::ScriptBuf;
 use openbmt_counter::refund::{dust_limit, is_payment_script};
 
 use crate::book::{RequestBook, MAX_RETURNS};
-use crate::error::ReturnRefused;
+use crate::error::{CancelReturnRefused, ReturnRefused};
 use crate::model::{sats_floor, CheckedRate, Return, ReturnState};
 use openbmt_counter::money::MAX_SATS;
 
@@ -24,15 +24,33 @@ pub enum ReturnAmount {
 
 impl RequestBook {
     /// RQ-26: what may still be returned from a request: what it received
-    /// less what was already returned from it, queued, sent or done.
+    /// less what was already returned from it, queued, sent or done (not
+    /// cancelled).
     pub fn returnable_sats(&self, number: u64) -> Option<u64> {
         let request = self.request(number)?;
         let returned = self
             .returns
             .iter()
-            .filter(|r| r.request == number)
+            .filter(|r| r.request == number && r.state.counts())
             .fold(0u64, |t, r| t.saturating_add(r.sats));
         Some(request.received_sats().saturating_sub(returned))
+    }
+
+    /// RQ-29: the owner cancelled the payment of return `id` in the queue.
+    /// A queued return ends as cancelled: it no longer counts toward what
+    /// was returned, so that amount can be returned again. Nothing else
+    /// changes; a return that is in a spend or done stays as it is.
+    pub fn cancel_return(&mut self, id: u64, at: u64) -> Result<(), CancelReturnRefused> {
+        let r = self
+            .returns
+            .iter_mut()
+            .find(|r| r.id == id)
+            .ok_or(CancelReturnRefused::NoSuchReturn)?;
+        if r.state != ReturnState::Queued {
+            return Err(CancelReturnRefused::NotQueued);
+        }
+        r.state = ReturnState::Cancelled { at };
+        Ok(())
     }
 
     /// RQ-26 to RQ-29: queue a return to an address the customer sent,

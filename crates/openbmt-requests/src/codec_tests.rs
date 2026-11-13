@@ -393,3 +393,103 @@ fn rq_34_the_wide_note_of_64_characters_is_read_back() {
     assert_eq!(b.requests[0].note.len(), 256);
     assert_eq!(RequestBook::from_bytes(&b.to_bytes()).unwrap(), b);
 }
+
+#[test]
+fn rq_04_a_book_of_version_1_still_reads_with_no_wallet_on_its_requests() {
+    let mut b = RequestBook::new();
+    let n = b
+        .make(&new("Rent", 5_000, false, None), 3, T0, &shop(), None)
+        .unwrap();
+    assert_eq!(n, 1);
+    let old = b.encode(1);
+    assert_eq!(old.get(4), Some(&1));
+    let mut read = RequestBook::from_bytes(&old).unwrap();
+    assert_eq!(read.request(1).unwrap().wallet, None);
+    // The wallet pinned when it was read goes to every request without one,
+    // and the book is then written as version 2 and reads back the same.
+    assert_eq!(read.assign_wallet([7; 32]), 1);
+    assert_eq!(read.assign_wallet([8; 32]), 0);
+    let new_bytes = read.to_bytes();
+    assert_eq!(new_bytes.get(4), Some(&2));
+    let again = RequestBook::from_bytes(&new_bytes).unwrap();
+    assert_eq!(again.request(1).unwrap().wallet, Some([7; 32]));
+    assert_eq!(again.to_bytes(), new_bytes);
+    // A version 1 book has no cancelled return and no wallet: a version 1
+    // frame that holds either is not one.
+    let mut with_wallet = old.clone();
+    with_wallet.splice(0..0, []);
+    assert!(RequestBook::from_bytes(&new_bytes[..4]).is_err());
+    let mut v3 = new_bytes.clone();
+    v3[4] = 3;
+    assert!(RequestBook::from_bytes(&v3).is_err());
+}
+
+#[test]
+fn rq_04_a_request_keeps_the_wallet_it_was_made_from() {
+    let mut b = RequestBook::new();
+    b.use_wallet(Some([1; 32]));
+    b.make(&new("Old", 5_000, false, None), 0, T0, &shop(), None)
+        .unwrap();
+    b.use_wallet(Some([2; 32]));
+    b.make(&new("New", 5_000, false, None), 1, T0, &shop(), None)
+        .unwrap();
+    assert_eq!(b.request(1).unwrap().wallet, Some([1; 32]));
+    assert_eq!(b.request(2).unwrap().wallet, Some([2; 32]));
+    let read = RequestBook::from_bytes(&b.to_bytes()).unwrap();
+    assert_eq!(read.request(1).unwrap().wallet, Some([1; 32]));
+    assert_eq!(read.request(2).unwrap().wallet, Some([2; 32]));
+    // Giving a wallet to the unlabelled never changes one that has it.
+    let mut read = read;
+    assert_eq!(read.assign_wallet([9; 32]), 0);
+}
+
+#[test]
+fn rq_29_a_cancelled_return_is_written_and_read_and_counts_for_nothing() {
+    let mut b = RequestBook::new();
+    let n = b
+        .make(&new("Rent", 100_000, false, None), 0, T0, &shop(), None)
+        .unwrap();
+    b.credit(
+        n,
+        &[Arrival {
+            txid: [1; 32],
+            vout: 0,
+            height: 10,
+            block_time: T0,
+            sats: 100_000,
+        }],
+        T0,
+        &shop(),
+        None,
+    )
+    .unwrap();
+    let id = b
+        .queue_return(n, ReturnAmount::Sats(40_000), script(), T0, None)
+        .unwrap();
+    assert_eq!(b.returnable_sats(n), Some(60_000));
+    b.cancel_return(id, T0 + 5).unwrap();
+    assert_eq!(b.returnable_sats(n), Some(100_000));
+    assert_eq!(b.returns()[0].state, ReturnState::Cancelled { at: T0 + 5 });
+    assert_eq!(b.over_returned(n), None);
+    assert!(b.returns_to_pay().is_empty());
+    let read = RequestBook::from_bytes(&b.to_bytes()).unwrap();
+    assert_eq!(read.returns(), b.returns());
+    // The same amount can be returned again, and the ledger shows only it.
+    b.queue_return(n, ReturnAmount::Sats(100_000), script(), T0 + 6, None)
+        .unwrap();
+    assert_eq!(b.ledger_lines()[0].returns.len(), 1);
+    // Only a queued return is cancelled.
+    assert_eq!(
+        b.cancel_return(id, T0 + 7),
+        Err(CancelReturnRefused::NotQueued)
+    );
+    assert_eq!(
+        b.cancel_return(99, T0 + 7),
+        Err(CancelReturnRefused::NoSuchReturn)
+    );
+    b.mark_returns_sent(&[2], [3; 32]);
+    assert_eq!(
+        b.cancel_return(2, T0 + 8),
+        Err(CancelReturnRefused::NotQueued)
+    );
+}

@@ -38,15 +38,16 @@ use std::path::Path;
 use bitcoin::hashes::Hash;
 use bitcoin::{Address, BlockHash, ScriptBuf};
 use openbmt_core::currency::ShopCurrency;
+use openbmt_core::pinned_wallet::PinnedWallet;
 use openbmt_core::say::Words;
-use openbmt_core::wallet::Keychain;
+use openbmt_core::wallet_single::ImportedWallet;
 use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_owner::{SaleFacts, SaleKey, Stage};
 use openbmt_requests::say;
 use openbmt_requests::{
     check_return_address, share_link, AddressRefused, Arrival, BookError, CheckedRate,
     CreditRefused, Day, DueRepeat, EndRefused, MakeRefused, NewRequest, Quote, RepeatRefused,
-    RequestBook, ReturnAmount, ReturnRefused, ShareRefused, Shop,
+    Request, RequestBook, ReturnAmount, ReturnRefused, ShareRefused, Shop,
 };
 use openbmt_watch::HeaderChain;
 
@@ -297,12 +298,15 @@ pub(crate) struct Requests {
 
 impl Requests {
     /// RQ-01, RQ-30, RQ-31: read the book and the arrivals of the folder.
-    /// A shop with a Key app has none and reads nothing.
-    pub(crate) fn open(dir: &Path, own_wallet: bool) -> Self {
-        let state = if own_wallet {
-            Self::read(dir).map_err(RequestsOff::Unreadable)
-        } else {
-            Err(RequestsOff::KeyApp)
+    /// A shop with a Key app has none and reads nothing. `wallet` is the
+    /// checksum of the wallet pinned now (RQ-04): new requests are made from
+    /// it, and a request of an old book that recorded no wallet is given it,
+    /// the book being stored again at once so that a later re-pin cannot
+    /// change which wallet that was.
+    pub(crate) fn open(dir: &Path, wallet: Option<[u8; 32]>) -> Self {
+        let state = match wallet {
+            Some(wallet) => Self::read(dir, wallet).map_err(RequestsOff::Unreadable),
+            None => Err(RequestsOff::KeyApp),
         };
         Self {
             state,
@@ -311,8 +315,12 @@ impl Requests {
         }
     }
 
-    fn read(dir: &Path) -> Result<Loaded, BookError> {
-        let book = RequestBook::open(dir)?;
+    fn read(dir: &Path, wallet: [u8; 32]) -> Result<Loaded, BookError> {
+        let mut book = RequestBook::open(dir)?;
+        book.use_wallet(Some(wallet));
+        if book.assign_wallet(wallet) > 0 {
+            book.save(dir)?;
+        }
         let pending = match openbmt_requests::fsio::read_file(dir, REQUEST_ARRIVALS_FILE)? {
             Some(bytes) => decode_arrivals(&bytes).map_err(corrupt)?,
             None => Vec::new(),
@@ -408,8 +416,29 @@ impl<P: OwnerPort> OwnerNode<P> {
             .map_or_else(|_| String::new(), |a| a.to_string())
     }
 
-    fn desk_script(&self, index: u32) -> Option<ScriptBuf> {
-        self.wallet.receive_script(index).ok()
+    /// RQ-04: the checksum of the wallet pinned now.
+    fn current_wallet(&self) -> [u8; 32] {
+        PinnedWallet::new(self.wallet.clone()).checksum32()
+    }
+
+    /// RQ-04: the wallet a request was made from: the one in force or one
+    /// the shop pinned before, which the node still follows.
+    fn wallet_of(&self, wallet: Option<[u8; 32]>) -> Option<ImportedWallet> {
+        let wanted = wallet.unwrap_or_else(|| self.current_wallet());
+        if wanted == self.current_wallet() {
+            return Some(self.wallet.clone());
+        }
+        self.former
+            .iter()
+            .find(|f| f.pinned().checksum32() == wanted)
+            .map(|f| f.pinned().wallet().clone())
+    }
+
+    /// RQ-04: the script of a request's address, from its own wallet.
+    fn request_script(&self, request: &Request) -> Option<ScriptBuf> {
+        self.wallet_of(request.wallet)?
+            .receive_script(request.address_index)
+            .ok()
     }
 
     fn request_ready(&self) -> Result<(&Loaded, RequestContext), RequestError> {
@@ -483,7 +512,10 @@ impl<P: OwnerPort> OwnerNode<P> {
                 .map_err(RequestError::Make)
         })?;
         let script = self
-            .desk_script(index)
+            .requests()
+            .ok()
+            .and_then(|b| b.request(number))
+            .and_then(|r| self.request_script(r))
             .ok_or(RequestError::Make(MakeRefused::IndexUsed))?;
         Ok(MadeRequest {
             number,
@@ -519,7 +551,10 @@ impl<P: OwnerPort> OwnerNode<P> {
                 number,
                 index,
                 address: self
-                    .desk_script(index)
+                    .requests()
+                    .ok()
+                    .and_then(|b| b.request(number))
+                    .and_then(|r| self.request_script(r))
                     .map_or_else(String::new, |s| self.address_of(&s)),
             })
             .collect())
@@ -541,17 +576,17 @@ impl<P: OwnerPort> OwnerNode<P> {
     ) -> Result<Shared, RequestError> {
         self.request_ready()?;
         let rate = self.requests.rate.clone();
-        let (quote, index) = self.edit(|book, _| {
+        let quote = self.edit(|book, _| {
             let quote = book
                 .share(number, now, rate.as_ref())
                 .map_err(RequestError::Share)?;
-            let index = book
-                .request(number)
-                .map_or(0, |request| request.address_index);
-            Ok((quote, index))
+            Ok(quote)
         })?;
         let address = self
-            .desk_script(index)
+            .requests()
+            .ok()
+            .and_then(|b| b.request(number))
+            .and_then(|r| self.request_script(r))
             .map_or_else(String::new, |s| self.address_of(&s));
         let link = share_link(&address, quote.sats, shop_name);
         Ok(Shared {
@@ -746,8 +781,15 @@ impl<P: OwnerPort> OwnerNode<P> {
         let Ok(loaded) = &self.requests.state else {
             return;
         };
-        let by_index: BTreeSet<u32> = loaded.book.address_indexes().into_iter().collect();
-        if by_index.is_empty() {
+        // RQ-04: each request's address is its own wallet's, which may be one
+        // the shop pinned before.
+        let by_script: BTreeMap<ScriptBuf, u32> = loaded
+            .book
+            .requests()
+            .iter()
+            .filter_map(|r| Some((self.request_script(r)?, r.address_index)))
+            .collect();
+        if by_script.is_empty() {
             return;
         }
         let Some(height) = self.watcher.chain().height_of(hash) else {
@@ -762,10 +804,8 @@ impl<P: OwnerPort> OwnerNode<P> {
             let txid = tx.compute_txid();
             for (vout, out) in tx.output.iter().enumerate() {
                 let sats = out.value.to_sat();
-                let Some((Keychain::Receive, index)) = self.scripts.get(&out.script_pubkey) else {
-                    continue;
-                };
-                let (Some(vout), true) = (u32::try_from(vout).ok(), by_index.contains(index))
+                let (Some(index), Some(vout)) =
+                    (by_script.get(&out.script_pubkey), u32::try_from(vout).ok())
                 else {
                     continue;
                 };
@@ -873,12 +913,16 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// depth, and follow the refunds of the returns. Called after the
     /// events of a pump are applied, so the chain is the node's newest.
     pub(crate) fn requests_tick(&mut self) {
-        let (Ok(loaded), Some(context)) = (&self.requests.state, self.requests.context) else {
+        let Ok(loaded) = &self.requests.state else {
             return;
         };
-        if !loaded.pending.is_empty() && self.view.ready() {
-            self.credit_arrivals(context);
+        if let Some(context) = self.requests.context {
+            if !loaded.pending.is_empty() && self.view.ready() {
+                self.credit_arrivals(context);
+            }
         }
+        // The queue is followed with or without a context: a refund the
+        // owner cancelled is noticed at start as well (RQ-29).
         self.follow_returns();
     }
 
@@ -960,7 +1004,9 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// refund in a transaction that was sent makes its return Sent; one that
     /// is paid makes it done; one that goes back to the queue (the spend was
     /// replaced) puts the return back (OC-03); one that was archived after it
-    /// was paid is done.
+    /// was paid is done; one the owner cancelled in the queue (no longer
+    /// there) ends the return as cancelled. The book is written before the
+    /// queue is touched again, as everywhere.
     fn follow_returns(&mut self) {
         let stages: BTreeMap<String, Stage> = self
             .owner
@@ -1002,6 +1048,9 @@ impl<P: OwnerPort> OwnerNode<P> {
                     Some(Stage::Queued | Stage::InSession { .. } | Stage::Returned { .. }),
                 ) => Some(ReturnStep::Replaced(txid)),
                 (ReturnState::Sent { txid }, None) => Some(ReturnStep::Done(txid)),
+                // The owner took the refund off the queue: the return ends
+                // as cancelled and its amount can be returned again.
+                (ReturnState::Queued, None) => Some(ReturnStep::Cancelled(r.id)),
                 _ => None,
             };
             steps.extend(step);
@@ -1021,6 +1070,9 @@ impl<P: OwnerPort> OwnerNode<P> {
                     ReturnStep::Replaced(txid) => {
                         book.requeue_returns(*txid);
                     }
+                    ReturnStep::Cancelled(id) => {
+                        let _ = book.cancel_return(*id, now);
+                    }
                 }
             }
             Ok(())
@@ -1038,4 +1090,5 @@ enum ReturnStep {
     Sent(u64, [u8; 32]),
     Done([u8; 32]),
     Replaced([u8; 32]),
+    Cancelled(u64),
 }

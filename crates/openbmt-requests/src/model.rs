@@ -189,6 +189,10 @@ pub struct Request {
     pub due: Day,
     /// The index of its address on the desk (RQ-03).
     pub address_index: u32,
+    /// RQ-04: the checksum of the wallet its address was made from; none for
+    /// a request of a book that did not record it, until the owner node
+    /// gives it the wallet that was pinned when the book was read.
+    pub wallet: Option<[u8; 32]>,
     /// The series, if it repeats.
     pub repeat: Option<Repeat>,
     /// How it ended, and when.
@@ -385,6 +389,19 @@ pub enum ReturnState {
         /// When it was confirmed, in Unix seconds.
         at: u64,
     },
+    /// RQ-29: the owner cancelled its payment in the queue. It no longer
+    /// counts toward what was returned.
+    Cancelled {
+        /// When it was cancelled, in Unix seconds.
+        at: u64,
+    },
+}
+
+impl ReturnState {
+    /// Whether a return in this state counts toward what was returned.
+    pub fn counts(&self) -> bool {
+        !matches!(self, Self::Cancelled { .. })
+    }
 }
 
 /// Money given back from a request (RQ-26 to RQ-29).

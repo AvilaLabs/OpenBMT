@@ -91,7 +91,7 @@ fn rq_30_the_book_has_its_own_magic_and_version() {
     assert_eq!(MAGIC_REQUEST_BOOK, *b"OBM=");
     let bytes = RequestBook::new().to_bytes();
     assert_eq!(&bytes[..4], b"OBM=");
-    assert_eq!(bytes[4], 1);
+    assert_eq!(bytes[4], 2);
     assert_eq!(RequestBook::from_bytes(&bytes).unwrap(), RequestBook::new());
 }
 
@@ -113,7 +113,10 @@ fn rq_30_another_magic_or_version_is_refused() {
     other[3] = b'!';
     assert!(RequestBook::from_bytes(&other).is_err());
     let mut other = bytes.clone();
-    other[4] = 2;
+    other[4] = 3;
+    assert!(RequestBook::from_bytes(&other).is_err());
+    // Version 2's body is not a version 1 body.
+    other[4] = 1;
     assert!(RequestBook::from_bytes(&other).is_err());
     other[4] = 0;
     assert!(RequestBook::from_bytes(&other).is_err());

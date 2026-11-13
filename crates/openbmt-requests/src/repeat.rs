@@ -129,6 +129,7 @@ impl RequestBook {
             made: day_of(now, tz_offset_secs),
             due: due.due,
             address_index,
+            wallet: self.wallet,
             repeat: Some(Repeat {
                 index: due.index,
                 ..series

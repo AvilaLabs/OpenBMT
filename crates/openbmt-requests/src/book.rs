@@ -70,6 +70,8 @@ pub struct RequestBook {
     pub(crate) next_return: u64,
     pub(crate) returns: Vec<Return>,
     pub(crate) stopped: Vec<u64>,
+    /// RQ-04: the wallet new requests are made from. Not part of the file.
+    pub(crate) wallet: Option<[u8; 32]>,
 }
 
 impl Default for RequestBook {
@@ -87,7 +89,25 @@ impl RequestBook {
             next_return: 1,
             returns: Vec::new(),
             stopped: Vec::new(),
+            wallet: None,
         }
+    }
+
+    /// RQ-04: the wallet new requests are made from, by its checksum. The
+    /// owner node gives it each time it reads the book.
+    pub fn use_wallet(&mut self, wallet: Option<[u8; 32]>) {
+        self.wallet = wallet;
+    }
+
+    /// RQ-04: give every request that has no wallet recorded (one of a book
+    /// of the first version) `wallet`. Returns how many were given it.
+    pub fn assign_wallet(&mut self, wallet: [u8; 32]) -> usize {
+        let mut n = 0;
+        for r in self.requests.iter_mut().filter(|r| r.wallet.is_none()) {
+            r.wallet = Some(wallet);
+            n += 1;
+        }
+        n
     }
 
     /// The number the next request gets (RQ-05).
@@ -229,6 +249,7 @@ impl RequestBook {
             made,
             due: new.due,
             address_index,
+            wallet: self.wallet,
             repeat,
             end: None,
             quotes: Vec::new(),

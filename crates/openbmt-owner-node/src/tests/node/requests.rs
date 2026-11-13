@@ -20,13 +20,15 @@ fn external_address(n: u8) -> String {
         .to_string()
 }
 
+use super::former::{old_script, old_wallet};
 use super::live::{pay_to_script, DAY, START};
-use super::own::{counter, own_receive, own_setup};
+use super::own::{counter, own_receive, own_setup, single as own_wallet};
 use super::*;
 use crate::requests::{
     return_label, PendingArrival, RequestContext, RequestError, RequestsOff, REQUEST_ARRIVALS_FILE,
 };
-use crate::{NotWatching, OwnNode, REQUEST_BOOK_FILE};
+use crate::{former_coins_file, FormerParts, NotWatching, OwnNode, REQUEST_BOOK_FILE};
+use openbmt_core::pinned_wallet::PinnedWallet;
 
 fn context(depth: u8) -> RequestContext {
     RequestContext {
@@ -497,6 +499,209 @@ fn rq_29_a_return_follows_its_refund_to_sent_back_to_the_queue_and_done() {
         on_disk.returns()[0].state,
         ReturnState::Done { .. }
     ));
+}
+
+/// A node of the shop whose wallet in force is the one pinned before (the
+/// test key of `former`), with the desk's range in its book.
+fn old_wallet_rig(dir: &Dir) -> (Rig, AllocationBook, Setup) {
+    let setup = Setup {
+        own: Some(AllocationBook::new()),
+        own_wallet: Some(old_wallet()),
+        ..Setup::default()
+    };
+    let mut rig = start(dir, &setup).unwrap();
+    let mut book = AllocationBook::new();
+    let desk = rig.node.owner().owner_id();
+    rig.give(&mut book, desk, START);
+    rig.node.set_request_context(context(1), None);
+    (rig, book, setup)
+}
+
+/// The same shop after its re-pin: the wallet in force is another, and the
+/// old one is followed up to the end of what its book handed out.
+fn repinned_setup(book: AllocationBook) -> Setup {
+    let old = PinnedWallet::new(old_wallet());
+    Setup {
+        own: Some(book),
+        former: vec![FormerParts {
+            file: former_coins_file(&old.checksum32()),
+            wallet: old,
+            end: 1_000,
+        }],
+        ..Setup::default()
+    }
+}
+
+#[test]
+fn rq_04_a_request_made_before_a_repin_is_still_credited_after_it_and_a_new_one_uses_the_new_wallet(
+) {
+    let dir = Dir::new();
+    let (mut rig, book, _setup) = old_wallet_rig(&dir);
+    let old_sum = PinnedWallet::new(old_wallet()).checksum32();
+    let made = rig.node.make_request(&deposit(100_000), 2, START).unwrap();
+    assert_eq!(
+        made.address,
+        bitcoin::Address::from_script(&old_script(2), bitcoin::Network::Bitcoin)
+            .unwrap()
+            .to_string()
+    );
+    assert_eq!(
+        rig.node.requests().unwrap().request(1).unwrap().wallet,
+        Some(old_sum)
+    );
+    let chain = rig.chain.clone();
+    rig.node.shutdown();
+    drop(rig);
+    // The re-pin: another wallet is in force.
+    let mut rig = start_at(&dir, &repinned_setup(book.clone()), chain).unwrap();
+    rig.node.set_request_context(context(1), None);
+    let new_sum = PinnedWallet::new(own_wallet()).checksum32();
+    assert_ne!(old_sum, new_sum);
+    // The request keeps the wallet it was made from, and the book is not
+    // rewritten with another.
+    assert_eq!(
+        rig.node.requests().unwrap().request(1).unwrap().wallet,
+        Some(old_sum)
+    );
+    // A payment to its address, the old wallet's, is credited.
+    rig.mine(&[pay_to_script(&old_script(2), 7, 100_000)]);
+    rig.mine_empty(1);
+    assert_eq!(status(&rig, 1), Status::Paid);
+    assert_eq!(received(&rig, 1), 100_000);
+    // A payment to the same index of the wallet in force is not the request's.
+    rig.mine(&[pay_to_script(&own_receive(2), 8, 5_000)]);
+    rig.mine_empty(1);
+    assert_eq!(received(&rig, 1), 100_000);
+    // A request made after the move takes the wallet in force.
+    let next = rig.node.make_request(&deposit(7_000), 3, START).unwrap();
+    assert_eq!(
+        next.address,
+        bitcoin::Address::from_script(&own_receive(3), bitcoin::Network::Bitcoin)
+            .unwrap()
+            .to_string()
+    );
+    assert_eq!(
+        rig.node.requests().unwrap().request(2).unwrap().wallet,
+        Some(new_sum)
+    );
+    // Both are watched across another restart.
+    let chain = rig.chain.clone();
+    rig.node.shutdown();
+    drop(rig);
+    let mut rig = start_at(&dir, &repinned_setup(book), chain).unwrap();
+    rig.node.set_request_context(context(1), None);
+    rig.mine(&[pay_to_script(&own_receive(3), 9, 7_000)]);
+    rig.mine_empty(1);
+    assert_eq!(status(&rig, 2), Status::Paid);
+}
+
+#[test]
+fn rq_04_a_book_of_version_1_reads_and_its_requests_take_the_wallet_pinned_when_it_was_read() {
+    let dir = Dir::new();
+    let (mut rig, book, setup) = desk_rig(&dir, 1);
+    rig.node.make_request(&deposit(100_000), 0, START).unwrap();
+    rig.node.shutdown();
+    drop(rig);
+    // Version 2 of the same book without the wallet is version 1: the
+    // version byte, and no flag and no checksum after the index.
+    let path = dir.path().join(REQUEST_BOOK_FILE);
+    let mut bytes = std::fs::read(&path).unwrap();
+    assert_eq!(bytes[4], 2);
+    assert_eq!(bytes[75], 1, "the wallet flag of the first request");
+    bytes.drain(75..75 + 33);
+    bytes[4] = 1;
+    std::fs::write(&path, &bytes).unwrap();
+    let mut setup = setup;
+    setup.own = Some(book);
+    let rig = start_at(&dir, &setup, Vec::new()).unwrap();
+    let sum = PinnedWallet::new(own_wallet()).checksum32();
+    let request = rig.node.requests().unwrap().request(1).unwrap().clone();
+    assert_eq!(request.wallet, Some(sum));
+    assert_eq!(request.address_index, 0);
+    // The file was rewritten as version 2 at once.
+    assert_eq!(std::fs::read(&path).unwrap()[4], 2);
+    assert_eq!(
+        openbmt_requests::RequestBook::open(dir.path())
+            .unwrap()
+            .request(1)
+            .unwrap()
+            .wallet,
+        Some(sum)
+    );
+}
+
+#[test]
+fn rq_29_a_return_the_owner_cancelled_in_the_queue_ends_cancelled_and_can_be_returned_again() {
+    let dir = Dir::new();
+    let (mut rig, _book, _setup) = desk_rig(&dir, 1);
+    rig.node.make_request(&deposit(100_000), 0, START).unwrap();
+    rig.mine(&[payment(0, 7, 130_000)]);
+    rig.mine_empty(1);
+    let added = rig
+        .node
+        .add_return(1, ReturnAmount::Sats(130_000), &external_address(9), START)
+        .unwrap();
+    assert_eq!(rig.node.requests().unwrap().returnable_sats(1), Some(0));
+    // The owner cancels the refund in the queue.
+    let write = rig.node.queue_writer();
+    rig.node
+        .owner_mut()
+        .unwrap()
+        .cancel(added.refund, &write)
+        .unwrap();
+    rig.tick();
+    let state = |rig: &Rig| rig.node.requests().unwrap().returns()[0].state;
+    assert!(matches!(state(&rig), ReturnState::Cancelled { .. }));
+    assert_eq!(
+        rig.node.requests().unwrap().returnable_sats(1),
+        Some(130_000)
+    );
+    // It is stored, and the amount can be returned again.
+    let on_disk = openbmt_requests::RequestBook::open(dir.path()).unwrap();
+    assert!(matches!(
+        on_disk.returns()[0].state,
+        ReturnState::Cancelled { .. }
+    ));
+    let again = rig
+        .node
+        .add_return(1, ReturnAmount::Sats(130_000), &external_address(10), START)
+        .unwrap();
+    assert_ne!(again.id, added.id);
+}
+
+#[test]
+fn rq_29_a_refund_found_cancelled_at_start_ends_its_return() {
+    let dir = Dir::new();
+    let (mut rig, book, setup) = desk_rig(&dir, 1);
+    rig.node.make_request(&deposit(100_000), 0, START).unwrap();
+    rig.mine(&[payment(0, 7, 130_000)]);
+    rig.mine_empty(1);
+    let added = rig
+        .node
+        .add_return(1, ReturnAmount::Sats(30_000), &external_address(9), START)
+        .unwrap();
+    // The owner's queue is written; the book is not told (stopped here).
+    let write = rig.node.queue_writer();
+    rig.node
+        .owner_mut()
+        .unwrap()
+        .cancel(added.refund, &write)
+        .unwrap();
+    let chain = rig.chain.clone();
+    rig.node.shutdown();
+    drop(rig);
+    let mut setup = setup;
+    setup.own = Some(book);
+    let mut rig = start_at(&dir, &setup, chain).unwrap();
+    rig.tick();
+    assert!(matches!(
+        rig.node.requests().unwrap().returns()[0].state,
+        ReturnState::Cancelled { .. }
+    ));
+    assert_eq!(
+        rig.node.requests().unwrap().returnable_sats(1),
+        Some(130_000)
+    );
 }
 
 #[test]

@@ -448,6 +448,11 @@ impl FormerWatch {
         self.scripts.contains_key(script)
     }
 
+    /// The wallet this watch follows.
+    pub(crate) fn pinned(&self) -> &PinnedWallet {
+        &self.wallet
+    }
+
     fn knows(&self, op: &OutPoint) -> bool {
         self.view.owned().any(|c| c.outpoint == *op)
             || self.view.pending().any(|p| {
@@ -845,7 +850,11 @@ impl<P: OwnerPort> OwnerNode<P> {
         }
         let own = own_book.as_ref().map(OwnIssued::of);
         // RQ-01, RQ-31: the request book of a shop with its own wallet.
-        let requests = Requests::open(&dir, own.is_some());
+        let requests = Requests::open(
+            &dir,
+            own.is_some()
+                .then(|| PinnedWallet::new(wallet.clone()).checksum32()),
+        );
         let kept = requests.indexes();
         let issued = issuing(&owner, own.as_ref());
         let (receive, change) = marks_of(&issued, &view);

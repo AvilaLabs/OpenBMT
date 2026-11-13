@@ -304,6 +304,7 @@ fn command(node: &mut OwnerNode, dir: &Path, line: &str) -> Result<bool, String>
                         ReturnState::Queued => "queued",
                         ReturnState::Sent { .. } => "sent",
                         ReturnState::Done { .. } => "done",
+                        ReturnState::Cancelled { .. } => "cancelled",
                     };
                     say(format!("return {} {state}", r.id));
                 }

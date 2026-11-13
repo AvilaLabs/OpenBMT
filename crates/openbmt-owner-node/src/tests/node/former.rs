@@ -14,7 +14,7 @@ use super::*;
 use crate::{former_coins_file, FormerParts, OwnNode, COINS_OF_FILE};
 
 /// The wallet the shop pinned before: a test key.
-fn old_wallet() -> ImportedWallet {
+pub(super) fn old_wallet() -> ImportedWallet {
     let master = Xpriv::new_master(Network::Bitcoin, &[0x55; 32]).unwrap();
     let path: DerivationPath = "m/84'/0'/0'".parse().unwrap();
     let account = master.derive_priv(secp(), &path).unwrap();
