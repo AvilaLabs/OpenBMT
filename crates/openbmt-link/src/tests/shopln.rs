@@ -806,7 +806,7 @@ fn lk_84_the_report_round_trips_and_decodes_strictly() {
 fn lk_84_the_report_is_five_u64_and_a_u16_after_the_frame() {
     let bytes = report().to_bytes();
     assert_eq!(bytes.len(), 4 + 1 + 5 * 8 + 2);
-    assert_eq!(&bytes[..4], b"OBM\\");
+    assert_eq!(&bytes[..4], b"OBM\x1f");
     assert_eq!(&bytes[5..13], &123_456u64.to_le_bytes());
     assert_eq!(&bytes[13..21], &4_000_000u64.to_le_bytes());
     assert_eq!(&bytes[21..29], &2_500u64.to_le_bytes());

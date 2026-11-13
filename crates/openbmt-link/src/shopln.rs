@@ -1,9 +1,9 @@
 //! What the Shop Lightning kinds carry (LK-83, LK-84).
 //!
 //! ```text
-//! Store:   OBM^ | version | request ID 16 | action u8 | body
+//! Store:   OBM 0x1e | version | request ID 16 | action u8 | body
 //! Stored:  OBM_ | version | request ID 16 | action u8 | result u8 | data
-//! Report:  OBM\ | version | six fields (LK-84)
+//! Report:  OBM 0x1f | version | six fields (LK-84)
 //! ```
 //!
 //! Decoding is strict, as in [`openbmt_core::wire`]: bytes decode only if
@@ -16,11 +16,11 @@ use std::fmt;
 use openbmt_core::wire::{self, DecodeError, Reader};
 
 /// Magic of a Store message's content.
-pub const MAGIC_STORE: [u8; 4] = *b"OBM^";
+pub const MAGIC_STORE: [u8; 4] = *b"OBM\x1e";
 /// Magic of a Stored message's content.
 pub const MAGIC_STORED: [u8; 4] = *b"OBM_";
 /// Magic of a Lightning report's content.
-pub const MAGIC_LIGHTNING_REPORT: [u8; 4] = *b"OBM\\";
+pub const MAGIC_LIGHTNING_REPORT: [u8; 4] = *b"OBM\x1f";
 
 /// The longest part of a blob, in bytes (LK-83).
 pub const MAX_PART_LEN: usize = 60_000;
