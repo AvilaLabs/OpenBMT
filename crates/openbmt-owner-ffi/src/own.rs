@@ -348,6 +348,10 @@ pub struct OwnBundleView {
     pub settings_version: u32,
     /// Each counter's share of the instant limit in the settings.
     pub shares: Vec<CounterShareView>,
+    /// The settings in it wait for a counter's confirmation on the owner
+    /// phone instead of being in force: a counter was added while one is in
+    /// force and the shop has a Box (OA-122).
+    pub waiting: bool,
 }
 
 wire_record!(OwnBundleView {
@@ -356,7 +360,36 @@ wire_record!(OwnBundleView {
     first_start,
     first_end,
     settings_version,
-    shares
+    shares,
+    waiting
+});
+
+/// The change that waits for a counter's confirmation, if one does
+/// (OA-119 to OA-121). `present` is false when none waits, and the rest are
+/// then empty.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnWaitingView {
+    /// Whether a change waits.
+    pub present: bool,
+    /// The version of the settings that wait.
+    pub version: u32,
+    /// Their four words (AP-03).
+    pub words: Vec<String>,
+    /// The names of the fields they loosen.
+    pub fields: Vec<String>,
+    /// When the owner signed them.
+    pub signed_at: u64,
+    /// When they are dropped if no counter confirmed them.
+    pub ends_at: u64,
+}
+
+wire_record!(OwnWaitingView {
+    present,
+    version,
+    words,
+    fields,
+    signed_at,
+    ends_at
 });
 
 /// What a counter's records say of the switch to the new wallet (SS-41).
@@ -700,6 +733,7 @@ fn bundle_view(
     counter: DeviceId,
     bundle: &openbmt_core::pairing_own::OwnBundle,
     shares: Vec<(DeviceId, u16)>,
+    waiting: bool,
 ) -> OwnBundleView {
     OwnBundleView {
         counter: counter.to_bytes().to_vec(),
@@ -708,6 +742,7 @@ fn bundle_view(
         first_end: bundle.first_range.range.end,
         settings_version: bundle.settings.settings.version,
         shares: shares_view(shares),
+        waiting,
     }
 }
 
@@ -735,14 +770,29 @@ pub(crate) fn confirm(a: OwnConfirmArgs) -> Result<OwnBundleView, AppError> {
         })
         .transpose()?;
     with_shop(shop, |node| {
+        let writer = node.waiting_writer();
         let (shop, store) = node.shop_and_store();
         let paired = shop
-            .confirm(&made, now, &request, usd_per_btc, Vec::new(), relay, &store)
+            .confirm_with(
+                &made,
+                now,
+                &request,
+                usd_per_btc,
+                Vec::new(),
+                relay,
+                &store,
+                &writer,
+            )
             .map_err(own_error)?;
         let counter = paired.bundle.pairing.entry.counter;
         // SS-41: the bundle waits in the shop's record from here.
         open_offers().remove(&dir);
-        Ok(bundle_view(counter, &paired.bundle, paired.shares))
+        Ok(bundle_view(
+            counter,
+            &paired.bundle,
+            paired.shares,
+            paired.waiting,
+        ))
     })
 }
 
@@ -786,7 +836,36 @@ pub(crate) fn bundle_again(a: OwnCounterArgs) -> Result<OwnBundleView, AppError>
             .iter()
             .map(|(c, s)| (*c, *s))
             .collect();
-        Ok(bundle_view(counter, &bundle, shares))
+        let waiting = node
+            .shop()
+            .waiting_change()
+            .is_some_and(|w| w.signed.settings.version >= bundle.settings.settings.version);
+        Ok(bundle_view(counter, &bundle, shares, waiting))
+    })
+}
+
+/// Op 114: the change that waits for a counter's confirmation, with its four
+/// words and the fields it loosens (OA-119, OA-121).
+pub(crate) fn waiting_change(a: OwnShopArgs) -> Result<OwnWaitingView, AppError> {
+    with_shop(a, |node| {
+        Ok(match node.waiting_view() {
+            Some(w) => OwnWaitingView {
+                present: true,
+                version: w.version,
+                words: w.words.iter().map(|x| (*x).to_string()).collect(),
+                fields: w.fields.iter().map(|x| (*x).to_string()).collect(),
+                signed_at: w.signed_at,
+                ends_at: w.ends_at,
+            },
+            None => OwnWaitingView {
+                present: false,
+                version: 0,
+                words: Vec::new(),
+                fields: Vec::new(),
+                signed_at: 0,
+                ends_at: 0,
+            },
+        })
     })
 }
 

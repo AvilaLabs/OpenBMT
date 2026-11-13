@@ -314,6 +314,9 @@ struct Carried {
     /// The counters and Boxes the settings themselves name; a target not in
     /// it is a device they remove (LK-76).
     named: BTreeSet<DeviceId>,
+    /// Settings that wait for a counter's confirmation (OA-119): replaced by
+    /// a newer change, by the confirmed settings, or dropped.
+    held: bool,
 }
 
 /// The batches a counter's records show it holds, and how many of its records
@@ -827,6 +830,7 @@ impl<R: Post> OwnerLink<R> {
         signed
             .verify_signatures_with(authority)
             .map_err(SettingsNotCarried::Check)?;
+        self.drop_held_settings();
         self.carried.retain(|c| c.version != signed.settings.version);
         self.carry_prepared(
             id,
@@ -855,6 +859,7 @@ impl<R: Post> OwnerLink<R> {
             .verify(owner, current)
             .map_err(SettingsNotCarried::Confirmed)?;
         let version = confirmed.signed.settings.version;
+        self.drop_held_settings();
         self.carried.retain(|c| c.version != version);
         self.settings_sent.retain(|(_, v), _| *v != version);
         self.boxes_sent.retain(|(_, v)| *v != version);
@@ -867,6 +872,23 @@ impl<R: Post> OwnerLink<R> {
             Carry::All,
             now,
         )
+    }
+
+    /// OA-121: forget the settings that wait for a confirmation, which a newer
+    /// change, the confirmed settings or their seven days have replaced.
+    pub fn drop_held_settings(&mut self) {
+        let gone: Vec<u32> = self
+            .carried
+            .iter()
+            .filter(|c| c.held)
+            .map(|c| c.version)
+            .collect();
+        self.carried.retain(|c| !c.held);
+        if let Err(e) = self.roster.retain(|e| !gone.contains(&e.version)) {
+            self.note(format!("the settings roster could not be saved: {e}"));
+        }
+        self.settings_sent.retain(|(_, v), _| !gone.contains(v));
+        self.drop_retired();
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -927,6 +949,7 @@ impl<R: Post> OwnerLink<R> {
             bytes,
             targets,
             named: roles_of(settings).into_keys().collect(),
+            held: carry == Carry::CountersOnly,
         });
         self.carried.sort_by_key(|c| c.version);
         self.send_settings(now);

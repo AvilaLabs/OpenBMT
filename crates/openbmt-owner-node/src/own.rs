@@ -151,9 +151,6 @@ pub struct ToppedUp {
 pub struct OwnNode {
     shop: OwnShop,
     dir: PathBuf,
-    /// The hash of the waiting change the link was last given, so that it is
-    /// handed over once and not at every turn.
-    waiting_carried: Option<[u8; 32]>,
 }
 
 impl fmt::Debug for OwnNode {
@@ -199,7 +196,6 @@ impl OwnNode {
         Ok(Self {
             shop,
             dir: dir.to_path_buf(),
-            waiting_carried: None,
         })
     }
 
@@ -246,9 +242,12 @@ impl OwnNode {
     /// joined to it as `OBM<`, handed to the link for every counter and the
     /// Box, and then the settings are put in force and the file is deleted,
     /// in that order. A change that has waited seven days is dropped.
+    /// `given` is the hash of the waiting change the link was last handed,
+    /// which the caller keeps between turns so that it is handed over once.
     pub fn step_waiting<R: Post>(
         &mut self,
         link: &mut OwnerLink<R>,
+        given: &mut Option<[u8; 32]>,
         now: u64,
     ) -> Result<WaitingStep, OwnNodeError> {
         let Some(held) = self.shop.waiting_change().cloned() else {
@@ -256,17 +255,18 @@ impl OwnNode {
         };
         if held.expired(now) {
             self.shop.drop_waiting();
-            self.waiting_carried = None;
+            link.drop_held_settings();
+            *given = None;
             remove_file(&self.dir, OWN_WAITING_FILE)?;
             return Ok(WaitingStep::Expired);
         }
         let owner = self.shop.owner_id();
         let authority = Authority::OwnWallet { owner };
         let hash = held.hash();
-        if self.waiting_carried != Some(hash) {
+        if *given != Some(hash) {
             let version = held.signed.settings.version;
             match link.carry_held_settings(version, &held.signed, &authority, now) {
-                Ok(()) => self.waiting_carried = Some(hash),
+                Ok(()) => *given = Some(hash),
                 Err(e) => return Err(OwnNodeError::NotCarried(e.to_string())),
             }
         }
@@ -287,7 +287,7 @@ impl OwnNode {
         let (shop, store) = self.shop_and_store();
         shop.put_in_force(&confirmed, store)
             .map_err(|e| OwnNodeError::Io(format!("{e}")))?;
-        self.waiting_carried = None;
+        *given = None;
         remove_file(&self.dir, OWN_WAITING_FILE)?;
         Ok(WaitingStep::Joined(version))
     }
@@ -686,13 +686,15 @@ impl OwnNode {
     /// OC-22), the link follows the counters of the settings (LK-67), each
     /// counter running low is given its next range (OA-112), and the
     /// settings in force are carried to the counters (CR-236). `carried` is
-    /// the version of the settings already carried to every counter, which
-    /// the caller keeps between turns.
+    /// the version of the settings already carried to every counter, and
+    /// `waiting_given` the hash of the waiting change the link was handed,
+    /// which the caller keeps between turns.
     pub fn tick<P: OwnerPort, R: Post>(
         &mut self,
         node: &mut OwnerNode<P>,
         link: &mut OwnerLink<R>,
         carried: &mut u32,
+        waiting_given: &mut Option<[u8; 32]>,
         now: u64,
     ) -> Result<OwnTick, OwnNodeError> {
         let mut notes = Vec::new();
@@ -707,7 +709,7 @@ impl OwnNode {
             }
         }
         let topped_up = self.top_up_with(link, now, node)?;
-        let waiting = match self.step_waiting(link, now) {
+        let waiting = match self.step_waiting(link, waiting_given, now) {
             Ok(step) => step,
             Err(e) => {
                 notes.push(format!("OA-120: the waiting change: {e}"));

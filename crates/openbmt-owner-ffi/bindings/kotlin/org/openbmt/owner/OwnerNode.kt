@@ -125,6 +125,7 @@ private const val OP_BOXES_PENDING = 110
 private const val OP_BOX_FORGET = 111
 private const val OP_OWN_BOX_WELCOME = 112
 private const val OP_OWN_RELAY_SIGN = 113
+private const val OP_OWN_WAITING_CHANGE = 114
 private const val OP_SIGNER_REGISTRATION = 120
 private const val OP_SIGNER_BUILD = 121
 private const val OP_SIGNER_EXPORT = 122
@@ -1084,6 +1085,22 @@ class OwnBundleView(
     val firstEnd: Long,
     val settingsVersion: Long,
     val shares: List<CounterShare>,
+    /** The settings in it wait for a counter's confirmation instead of being in force (OA-122). */
+    val waiting: Boolean = false,
+)
+
+/**
+ * The change that waits for a counter's confirmation (OA-119 to OA-121): [words] are its four words (AP-03),
+ * [fields] the names of the fields it loosens, [signedAt] when the owner signed it and [endsAt] when it is
+ * dropped if no counter confirmed it. When [present] is false the rest is empty.
+ */
+class OwnWaitingView(
+    val present: Boolean,
+    val version: Long,
+    val words: List<String>,
+    val fields: List<String>,
+    val signedAt: Long,
+    val endsAt: Long,
 )
 
 /** How far ahead the wallet must look (OA-113); [notice] is true above 20. */
@@ -2351,7 +2368,10 @@ internal fun Reader.ownWalletView(): OwnWalletView = OwnWalletView(bytes(), stri
 internal fun Reader.ownMade(): OwnMade = OwnMade(bytes(), u64())
 
 internal fun Reader.ownBundleView(): OwnBundleView =
-    OwnBundleView(bytes(), bytes(), u32(), u32(), u32(), list { CounterShare(bytes(), u32()) })
+    OwnBundleView(bytes(), bytes(), u32(), u32(), u32(), list { CounterShare(bytes(), u32()) }, bool())
+
+internal fun Reader.ownWaitingView(): OwnWaitingView =
+    OwnWaitingView(bool(), u32(), strings(), strings(), u64(), u64())
 
 internal fun Writer.ownShop(a: OwnShopArgs): Writer = string(a.dir).bytes(a.ownerSecret).bytes(a.wallet)
 
@@ -3610,6 +3630,12 @@ object OwnerOwn {
     fun bundleAgain(shop: OwnShopArgs, counter: ByteArray): OwnBundleView {
         val r = call(OP_OWN_BUNDLE, 0) { it.ownShop(shop).bytes(counter) }
         return r.ownBundleView().also { r.end() }
+    }
+
+    /** The change that waits for a counter's confirmation, with its four words and the fields it loosens (OA-119). */
+    fun waitingChange(shop: OwnShopArgs): OwnWaitingView {
+        val r = call(OP_OWN_WAITING_CHANGE, 0) { it.ownShop(shop) }
+        return r.ownWaitingView().also { r.end() }
     }
 
     /** The counter shows Paired (OA-111). */

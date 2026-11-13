@@ -220,6 +220,8 @@ impl Clock for AppClock {
 struct OwnShop {
     wallet: PinnedWallet,
     carried: u32,
+    /// The hash of the waiting change the link was last handed (OA-119).
+    waiting_given: Option<[u8; 32]>,
 }
 
 /// What lives on the node's thread.
@@ -734,8 +736,9 @@ fn own_link_step(
     };
     let identity = node.owner_identity().map_err(|e| node_error(&e))?;
     let carried = &mut own.carried;
+    let waiting_given = &mut own.waiting_given;
     let turn = own::turn_on_shop(dir, identity, own.wallet.clone(), |shop| {
-        shop.tick(node, link, carried, now)
+        shop.tick(node, link, carried, waiting_given, now)
     })
     .map_err(own::node_error)?;
     for topped in &turn.topped_up {
@@ -1061,7 +1064,11 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
             pos: OwnerPos::open(&dir),
             key1,
             key1_account: key1_keys.map(|(account, _, _)| account),
-            own: own_wallet.map(|wallet| OwnShop { wallet, carried: 0 }),
+            own: own_wallet.map(|wallet| OwnShop {
+                wallet,
+                carried: 0,
+                waiting_given: None,
+            }),
             policy,
             dir,
             network,

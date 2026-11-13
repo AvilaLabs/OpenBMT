@@ -164,7 +164,7 @@ use crate::host::{real_spawn, Entry, Spawn};
 use crate::import_view::{self, ImportKind, ImportView};
 use crate::own::{
     self, OwnBoxDeliveredView, OwnBoxWelcomeArgs, OwnBundleView, OwnConfirmArgs, OwnCounterArgs,
-    OwnGapArgs, OwnGapView, OwnMade, OwnOfferView, OwnOwnerMade, OwnRelayArgs, OwnRequestArgs,
+    OwnGapArgs, OwnGapView, OwnMade, OwnOfferView, OwnOwnerMade, OwnRelayArgs, OwnRequestArgs, OwnWaitingView,
     OwnRequestView, OwnShopArgs, OwnWalletView, SwitchRowView, SwitchStateKind,
 };
 use crate::own_spend_views::{
@@ -707,6 +707,9 @@ fn build_ops() -> Vec<Op> {
         }),
         op(113, "own_relay_sign", Zero, |_, a: OwnRelayArgs| {
             own::relay_sign(a)
+        }),
+        op(114, "own_waiting_change", Zero, |_, a: OwnShopArgs| {
+            own::waiting_change(a)
         }),
         op(120, "signer_registration", Node, |c, shop: String| {
             c.entry()?.signer_registration(shop)
@@ -1289,6 +1292,7 @@ fn definitions() -> Vec<TypeDef> {
         OwnConfirmArgs::define(),
         OwnCounterArgs::define(),
         OwnBundleView::define(),
+        OwnWaitingView::define(),
         OwnBoxWelcomeArgs::define(),
         OwnBoxDeliveredView::define(),
         OwnRelayArgs::define(),

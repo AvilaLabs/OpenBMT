@@ -103,6 +103,7 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (111, "box_forget"),
         (112, "own_box_welcome"),
         (113, "own_relay_sign"),
+        (114, "own_waiting_change"),
         (120, "signer_registration"),
         (121, "signer_build"),
         (122, "signer_export"),

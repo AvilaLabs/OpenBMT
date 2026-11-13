@@ -126,6 +126,7 @@ ops run on another; it waits for at most 250 ms.
 111 box_forget       handle node  args list<u8> -> ()
 112 own_box_welcome  handle zero  args OwnBoxWelcomeArgs -> OwnBoxDeliveredView
 113 own_relay_sign   handle zero  args OwnRelayArgs -> list<u8>
+114 own_waiting_change handle zero  args OwnShopArgs -> OwnWaitingView
 120 signer_registration handle node  args string -> RegistrationView
 121 signer_build     handle node  args (u64, u64) -> SignerBuiltView
 122 signer_export    handle node  args SignerExportArgs -> SignerFileView
@@ -357,7 +358,8 @@ OwnRequestArgs: record: shop: OwnShopArgs, made: OwnMade, now: u64, request: lis
 OwnRequestView: record: counter: list<u8>, name: string, session_words: list<string>, needs_rate: bool, shares: list<CounterShareView>, seconds_left: u64
 OwnConfirmArgs: record: shop: OwnShopArgs, made: OwnMade, now: u64, request: list<u8>, usd_per_btc: u64, relay: option<list<u8>>
 OwnCounterArgs: record: shop: OwnShopArgs, counter: list<u8>
-OwnBundleView: record: counter: list<u8>, code: list<u8>, first_start: u32, first_end: u32, settings_version: u32, shares: list<CounterShareView>
+OwnBundleView: record: counter: list<u8>, code: list<u8>, first_start: u32, first_end: u32, settings_version: u32, shares: list<CounterShareView>, waiting: bool
+OwnWaitingView: record: present: bool, version: u32, words: list<string>, fields: list<string>, signed_at: u64, ends_at: u64
 OwnBoxWelcomeArgs: record: shop: OwnShopArgs, link: BoxLinkArgs, invitation: string, claim: list<u8>, usd_per_btc: u64
 OwnBoxDeliveredView: record: box_key: list<u8>, counters: list<list<u8>>, settings_version: u32
 OwnRelayArgs: record: owner_secret: list<u8>, address: string, relay_key: list<u8>

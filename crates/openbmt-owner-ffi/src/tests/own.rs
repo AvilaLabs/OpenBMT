@@ -144,6 +144,7 @@ fn oa_108_to_oa_111_the_offer_the_request_the_bundle_and_delivery_go_through_dis
     let mut r = Rd::ok(&response);
     let (who, bundle, start, end, version) = (r.bytes(), r.bytes(), r.u32(), r.u32(), r.u32());
     let shares = r.list(|r| (r.bytes(), r.u32()));
+    assert!(!r.bool(), "the first counter has nothing to wait for");
     r.done();
     assert_eq!(who, counter_key);
     assert_eq!((start, end), (0, 1_000));
@@ -809,4 +810,16 @@ fn ss_41_a_repin_that_waits_comes_back_with_its_words_and_code_and_writes_nothin
     // "They differ" gives the offer up: the unsettled queue waits again.
     Rd::ok(&call(153, &[]));
     waits(&repin(handle), "Upgrade waits for a payment");
+#[test]
+fn oa_119_no_change_waits_in_a_shop_that_has_none() {
+    let dir = Scratch::new();
+    let file = wallet_file();
+    let response = call(114, &shop(&dir, &file).0);
+    let mut r = Rd::ok(&response);
+    assert!(!r.bool(), "present");
+    assert_eq!(r.u32(), 0);
+    assert!(r.list(Rd::string).is_empty());
+    assert!(r.list(Rd::string).is_empty());
+    assert_eq!((r.u64(), r.u64()), (0, 0));
+    r.done();
 }
