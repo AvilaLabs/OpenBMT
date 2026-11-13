@@ -499,8 +499,15 @@ fn nr_110_with_light_fallback_the_random_peers_start_with_a_note_and_stop_after_
     assert!(notes.is_some(), "the stop is said in a note");
     // And nobody is dialed again.
     let accepted = other.accept_count();
-    clock.set(T0 + 10 + FALLBACK_STOP_SECS + 300);
-    settle();
+    // The clock moves in steps shorter than a ping, each one settled: a
+    // single jump of 300 s would make the own node's pong late by the
+    // clock, the link would drop, and NR-110 would rightly start the random
+    // peers again.
+    let stop_at = T0 + 10 + FALLBACK_STOP_SECS;
+    for step in 1..=5 {
+        clock.set(stop_at + 60 * step);
+        settle();
+    }
     assert_eq!(other.accept_count(), accepted);
 }
 
