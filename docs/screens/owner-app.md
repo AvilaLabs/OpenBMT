@@ -517,123 +517,123 @@ core's own words, which the binding does not carry yet:
 
 | Key | Text |
 |---|---|
-| SS00_ROW_TITLE | WORDS_NEEDED_OA_SS00_ROW_TITLE |
-| SS00_ROW_SUB | WORDS_NEEDED_OA_SS00_ROW_SUB |
-| SS00_SCREEN_TITLE | WORDS_NEEDED_OA_SS00_SCREEN_TITLE |
-| SS00_START_BUTTON | WORDS_NEEDED_OA_SS00_START_BUTTON |
-| SS00_BACK_BUTTON | WORDS_NEEDED_OA_SS00_BACK_BUTTON |
-| SS00_DONE_BUTTON | WORDS_NEEDED_OA_SS00_DONE_BUTTON |
-| SS24_NO_LOCK_HEADING | WORDS_NEEDED_OA_SS24_NO_LOCK_HEADING |
-| SS24_NO_LOCK_WHAT | WORDS_NEEDED_OA_SS24_NO_LOCK_WHAT |
-| SS24_NO_LOCK_NEXT | WORDS_NEEDED_OA_SS24_NO_LOCK_NEXT |
-| SS13_TITLE | WORDS_NEEDED_OA_SS13_TITLE |
-| SS13_PEN | WORDS_NEEDED_OA_SS13_PEN |
-| SS13_NO_PHOTO | WORDS_NEEDED_OA_SS13_NO_PHOTO |
-| SS13_NOBODY_ASKS | WORDS_NEEDED_OA_SS13_NOBODY_ASKS |
-| SS13_CONTINUE | WORDS_NEEDED_OA_SS13_CONTINUE |
-| SS33_TITLE | WORDS_NEEDED_OA_SS33_TITLE |
-| SS33_USB_NAME | WORDS_NEEDED_OA_SS33_USB_NAME |
-| SS33_USB_WHY | WORDS_NEEDED_OA_SS33_USB_WHY |
-| SS33_ROOT_NAME | WORDS_NEEDED_OA_SS33_ROOT_NAME |
-| SS33_ROOT_WHY | WORDS_NEEDED_OA_SS33_ROOT_WHY |
-| SS33_OVERLAY_NAME | WORDS_NEEDED_OA_SS33_OVERLAY_NAME |
-| SS33_OVERLAY_WHY | WORDS_NEEDED_OA_SS33_OVERLAY_WHY |
-| SS33_SERVICE_NAME | WORDS_NEEDED_OA_SS33_SERVICE_NAME |
-| SS33_SERVICE_WHY | WORDS_NEEDED_OA_SS33_SERVICE_WHY |
-| SS33_SERVICE_NOT_TOOL_NAME | WORDS_NEEDED_OA_SS33_SERVICE_NOT_TOOL_NAME |
-| SS33_SERVICE_NOT_TOOL_WHY | WORDS_NEEDED_OA_SS33_SERVICE_NOT_TOOL_WHY |
-| SS33_SERVICE_NOT_TOOL_REFUSED | WORDS_NEEDED_OA_SS33_SERVICE_NOT_TOOL_REFUSED |
-| SS34_PATCH_NAME | WORDS_NEEDED_OA_SS34_PATCH_NAME |
-| SS34_PATCH_WHY | WORDS_NEEDED_OA_SS34_PATCH_WHY |
-| SS34_PATCH_UNKNOWN_NAME | WORDS_NEEDED_OA_SS34_PATCH_UNKNOWN_NAME |
-| SS34_PATCH_UNKNOWN_WHY | WORDS_NEEDED_OA_SS34_PATCH_UNKNOWN_WHY |
-| SS33_OVERLAY_NOTE | WORDS_NEEDED_OA_SS33_OVERLAY_NOTE |
-| SS33_CONFIRM_BUTTON | WORDS_NEEDED_OA_SS33_CONFIRM_BUTTON |
-| SS33_CONFIRM_AGAIN | WORDS_NEEDED_OA_SS33_CONFIRM_AGAIN |
-| SS35_TITLE | WORDS_NEEDED_OA_SS35_TITLE |
-| SS35_LIMIT_LABEL | WORDS_NEEDED_OA_SS35_LIMIT_LABEL |
-| SS35_PRICE_LABEL | WORDS_NEEDED_OA_SS35_PRICE_LABEL |
-| SS35_DATE_LABEL | WORDS_NEEDED_OA_SS35_DATE_LABEL |
-| SS38_STOP_LABEL | WORDS_NEEDED_OA_SS38_STOP_LABEL |
-| SS35_LIMIT_INVALID | WORDS_NEEDED_OA_SS35_LIMIT_INVALID |
-| SS35_DATE_INVALID | WORDS_NEEDED_OA_SS35_DATE_INVALID |
-| SS03_DICE_LABEL | WORDS_NEEDED_OA_SS03_DICE_LABEL |
-| SS03_DICE_INVALID | WORDS_NEEDED_OA_SS03_DICE_INVALID |
-| SS35_CONTINUE | WORDS_NEEDED_OA_SS35_CONTINUE |
-| SS10_PAGE_TITLE | WORDS_NEEDED_OA_SS10_PAGE_TITLE |
-| SS10_PAGE_NEXT | WORDS_NEEDED_OA_SS10_PAGE_NEXT |
-| SS10_PAGE_WRITTEN | WORDS_NEEDED_OA_SS10_PAGE_WRITTEN |
-| SS10_CHECK_TITLE | WORDS_NEEDED_OA_SS10_CHECK_TITLE |
-| SS10_CHECK_ASK | WORDS_NEEDED_OA_SS10_CHECK_ASK |
-| SS11_TYPED | WORDS_NEEDED_OA_SS11_TYPED |
-| SS11_ACCEPTED | WORDS_NEEDED_OA_SS11_ACCEPTED |
-| SS11_NOT_ACCEPTED | WORDS_NEEDED_OA_SS11_NOT_ACCEPTED |
-| SS11_KEY_BACKSPACE | WORDS_NEEDED_OA_SS11_KEY_BACKSPACE |
-| SS11_KEY_ENTER | WORDS_NEEDED_OA_SS11_KEY_ENTER |
-| SS10_CHECK_WRONG | WORDS_NEEDED_OA_SS10_CHECK_WRONG |
-| SS10_MADE_HEADING | WORDS_NEEDED_OA_SS10_MADE_HEADING |
-| SS21_AUTH_TITLE | WORDS_NEEDED_OA_SS21_AUTH_TITLE |
-| SS21_AUTH_SUBTITLE | WORDS_NEEDED_OA_SS21_AUTH_SUBTITLE |
-| SS21_AUTH_SEAL | WORDS_NEEDED_OA_SS21_AUTH_SEAL |
-| SS21_AUTH_PAY | WORDS_NEEDED_OA_SS21_AUTH_PAY |
-| SS21_AUTH_MOVE | WORDS_NEEDED_OA_SS21_AUTH_MOVE |
-| SS21_AUTH_FAILED | WORDS_NEEDED_OA_SS21_AUTH_FAILED |
-| SS20_SEALED_HEADING | WORDS_NEEDED_OA_SS20_SEALED_HEADING |
-| SS20_SEALED_WHAT | WORDS_NEEDED_OA_SS20_SEALED_WHAT |
-| SS20_SEALED_NEXT | WORDS_NEEDED_OA_SS20_SEALED_NEXT |
-| SS20_NOT_SAVED_HEADING | WORDS_NEEDED_OA_SS20_NOT_SAVED_HEADING |
-| SS20_NOT_SAVED_WHAT | WORDS_NEEDED_OA_SS20_NOT_SAVED_WHAT |
-| SS20_NOT_SAVED_NEXT | WORDS_NEEDED_OA_SS20_NOT_SAVED_NEXT |
-| SS23_KEY_GONE_HEADING | WORDS_NEEDED_OA_SS23_KEY_GONE_HEADING |
-| SS23_KEY_GONE_WHAT | WORDS_NEEDED_OA_SS23_KEY_GONE_WHAT |
-| SS23_KEY_GONE_NEXT | WORDS_NEEDED_OA_SS23_KEY_GONE_NEXT |
-| SS23_RESTORE_BUTTON | WORDS_NEEDED_OA_SS23_RESTORE_BUTTON |
-| SS23_RESTORE_TITLE | WORDS_NEEDED_OA_SS23_RESTORE_TITLE |
-| SS23_RESTORE_ASK | WORDS_NEEDED_OA_SS23_RESTORE_ASK |
-| SS23_RESTORE_FINISH | WORDS_NEEDED_OA_SS23_RESTORE_FINISH |
-| SS23_RESTORED_HEADING | WORDS_NEEDED_OA_SS23_RESTORED_HEADING |
-| SS23_RESTORED_WHAT | WORDS_NEEDED_OA_SS23_RESTORED_WHAT |
-| SS23_RESTORED_NEXT | WORDS_NEEDED_OA_SS23_RESTORED_NEXT |
-| SS36_HELD | WORDS_NEEDED_OA_SS36_HELD |
-| SS36_LIMIT | WORDS_NEEDED_OA_SS36_LIMIT |
-| SS36_MOVE_BY | WORDS_NEEDED_OA_SS36_MOVE_BY |
-| SS37_NOT_YET_UNTIL | WORDS_NEEDED_OA_SS37_NOT_YET_UNTIL |
-| SS37_TITLE | WORDS_NEEDED_OA_SS37_TITLE |
-| SS37_UPGRADE_NOW | WORDS_NEEDED_OA_SS37_UPGRADE_NOW |
-| SS37_NOT_YET | WORDS_NEEDED_OA_SS37_NOT_YET |
-| SS37_NOT_YET_SENTENCE | WORDS_NEEDED_OA_SS37_NOT_YET_SENTENCE |
-| SS37_NOT_YET_ASK | WORDS_NEEDED_OA_SS37_NOT_YET_ASK |
-| SS37_NOT_YET_CONFIRM | WORDS_NEEDED_OA_SS37_NOT_YET_CONFIRM |
-| SS37_NOT_YET_DIFFERS | WORDS_NEEDED_OA_SS37_NOT_YET_DIFFERS |
-| SS37_NOT_YET_GRANTED | WORDS_NEEDED_OA_SS37_NOT_YET_GRANTED |
+| SS00_ROW_TITLE | Start simple |
+| SS00_ROW_SUB | A small wallet on this phone, for a shop's first sales |
+| SS00_SCREEN_TITLE | Start simple |
+| SS00_START_BUTTON | Start |
+| SS00_BACK_BUTTON | Back |
+| SS00_DONE_BUTTON | Done |
+| SS24_NO_LOCK_HEADING | Set a screen lock first |
+| SS24_NO_LOCK_WHAT | The starter wallet's key is locked by the phone's screen lock, and this phone has none. |
+| SS24_NO_LOCK_NEXT | Set a PIN, pattern or password in the phone's settings, then come back. |
+| SS13_TITLE | Before the words |
+| SS13_PEN | Write the 12 words on the card, in pen. |
+| SS13_NO_PHOTO | Never take a photo or a screenshot of them. Apps that steal bitcoin read people's photos for exactly this. |
+| SS13_NOBODY_ASKS | No app and no person will ever ask you for these words. Anyone who does is a thief. |
+| SS13_CONTINUE | Show the words |
+| SS33_TITLE | Checks of this phone |
+| SS33_USB_NAME | USB debugging is on |
+| SS33_USB_WHY | A computer plugged into this phone could read and control it. Turn it off in the developer options unless you need it. |
+| SS33_ROOT_NAME | This phone may be rooted |
+| SS33_ROOT_WHY | Apps on a rooted phone can get around the phone's own protections, including the ones that keep this key. |
+| SS33_OVERLAY_NAME | An app can draw over others |
+| SS33_OVERLAY_WHY | An app that draws over other apps can put fake buttons over this one. Check that you know and trust it. |
+| SS33_SERVICE_NAME | An accessibility tool is on |
+| SS33_SERVICE_WHY | Accessibility tools can read the screen. This one says it is a tool for people who need it. Check that you know it. |
+| SS33_SERVICE_NOT_TOOL_NAME | An app reads the screen |
+| SS33_SERVICE_NOT_TOOL_WHY | An app that is not an accessibility tool may read and control the screen. Apps that steal bitcoin work this way. |
+| SS33_SERVICE_NOT_TOOL_REFUSED | No key is made and no words are shown while it is on. Turn it off in the phone's accessibility settings, then try again. |
+| SS34_PATCH_NAME | The phone's updates are old |
+| SS34_PATCH_WHY | This phone's last update is more than six months old, so it may lack fixes for known attacks. Update it if you can. |
+| SS34_PATCH_UNKNOWN_NAME | Last update not known |
+| SS34_PATCH_UNKNOWN_WHY | This phone does not say when it was last updated, so it may lack fixes for known attacks. |
+| SS33_OVERLAY_NOTE | Android does not show every app that can draw over others, so one may be on this phone and not be listed here. |
+| SS33_CONFIRM_BUTTON | Go on anyway |
+| SS33_CONFIRM_AGAIN | Each thing below was found on this phone. Go on only if you understand it. |
+| SS35_TITLE | Your limit and your date |
+| SS35_LIMIT_LABEL | Most it may hold |
+| SS35_PRICE_LABEL | Price of one bitcoin |
+| SS35_DATE_LABEL | Move to a key made offline by |
+| SS38_STOP_LABEL | Stop bitcoin sales above my limit |
+| SS35_LIMIT_INVALID | Type the most the starter wallet may hold, as a whole number. |
+| SS35_DATE_INVALID | Type a date after today. |
+| SS03_DICE_LABEL | Dice rolls, if you like |
+| SS03_DICE_INVALID | Type only numbers from 1 to 6. |
+| SS35_CONTINUE | Make the wallet |
+| SS10_PAGE_TITLE | Write these on the card |
+| SS10_PAGE_NEXT | Next four words |
+| SS10_PAGE_WRITTEN | All 12 are written |
+| SS10_CHECK_TITLE | Check the card |
+| SS10_CHECK_ASK | Type the first four letters of word number |
+| SS11_TYPED | Letters typed |
+| SS11_ACCEPTED | Words checked |
+| SS11_NOT_ACCEPTED | Words checked so far |
+| SS11_KEY_BACKSPACE | Erase |
+| SS11_KEY_ENTER | Enter |
+| SS10_CHECK_WRONG | That is not the word on the card at that number. The words are shown again. |
+| SS10_MADE_HEADING | Starter wallet made |
+| SS21_AUTH_TITLE | Unlock the starter wallet |
+| SS21_AUTH_SUBTITLE | Your fingerprint, face or phone PIN opens the key for this one step. |
+| SS21_AUTH_SEAL | Lock the key on this phone |
+| SS21_AUTH_PAY | Pay this refund |
+| SS21_AUTH_MOVE | Move everything to the new wallet |
+| SS21_AUTH_FAILED | The phone did not unlock the key. Nothing was signed. |
+| SS20_SEALED_HEADING | The key is on this phone |
+| SS20_SEALED_WHAT | The starter wallet's key is locked by this phone's key hardware and opens only with your fingerprint, face or PIN. |
+| SS20_SEALED_NEXT | Keep the card with the 12 words somewhere safe, away from the phone. |
+| SS20_NOT_SAVED_HEADING | The key was not kept |
+| SS20_NOT_SAVED_WHAT | The phone could not lock the key, so nothing was kept and no wallet was made. |
+| SS20_NOT_SAVED_NEXT | Try again. If it happens again, make the key on the stick instead. |
+| SS23_KEY_GONE_HEADING | Key gone from this phone |
+| SS23_KEY_GONE_WHAT | The phone deleted the starter wallet's key, as it does when the screen lock is removed. The money is still in the wallet. |
+| SS23_KEY_GONE_NEXT | Type the 12 words from the card to bring it back. |
+| SS23_RESTORE_BUTTON | Type the 12 words |
+| SS23_RESTORE_TITLE | Bring back the starter key |
+| SS23_RESTORE_ASK | Type word number |
+| SS23_RESTORE_FINISH | Check the words |
+| SS23_RESTORED_HEADING | Starter key back |
+| SS23_RESTORED_WHAT | The 12 words are the starter wallet's, and the key is locked on this phone again. |
+| SS23_RESTORED_NEXT | Keep the card somewhere safe. |
+| SS36_HELD | Holds |
+| SS36_LIMIT | Limit |
+| SS36_MOVE_BY | Move by |
+| SS37_NOT_YET_UNTIL | Not yet, until |
+| SS37_TITLE | Upgrade your wallet |
+| SS37_UPGRADE_NOW | Upgrade now |
+| SS37_NOT_YET | Not yet |
+| SS37_NOT_YET_SENTENCE | My shop's money stays on a wallet made on my everyday phone. |
+| SS37_NOT_YET_ASK | To wait up to 7 more days, type this: |
+| SS37_NOT_YET_CONFIRM | Wait |
+| SS37_NOT_YET_DIFFERS | That is not the sentence exactly. Check each word. |
+| SS37_NOT_YET_GRANTED | The upgrade waits until the date shown. Sales go on. |
 | SS36_CORE_LINE | WORDS_NEEDED_OA_SS36_CORE_LINE |
 | SS37_CORE_AT_LIMIT | WORDS_NEEDED_OA_SS37_CORE_AT_LIMIT |
 | SS37_CORE_PAST_DATE | WORDS_NEEDED_OA_SS37_CORE_PAST_DATE |
 | SS37_CORE_NOT_YET | WORDS_NEEDED_OA_SS37_CORE_NOT_YET |
 | SS37_CORE_HELD | WORDS_NEEDED_OA_SS37_CORE_HELD |
 | SS43_CORE_DELETED | WORDS_NEEDED_OA_SS43_CORE_DELETED |
-| SS30_TITLE | WORDS_NEEDED_OA_SS30_TITLE |
-| SS30_EMPTY | WORDS_NEEDED_OA_SS30_EMPTY |
-| SS31_FEE_RATE | WORDS_NEEDED_OA_SS31_FEE_RATE |
-| SS31_AUTHORISE | WORDS_NEEDED_OA_SS31_AUTHORISE |
-| SS31_SEND_BUTTON | WORDS_NEEDED_OA_SS31_SEND_BUTTON |
-| SS31_ADDRESS_LABEL | WORDS_NEEDED_OA_SS31_ADDRESS_LABEL |
-| SS31_AMOUNT_LABEL | WORDS_NEEDED_OA_SS31_AMOUNT_LABEL |
-| SS31_FEE_LABEL | WORDS_NEEDED_OA_SS31_FEE_LABEL |
-| SS31_CHANGE_LABEL | WORDS_NEEDED_OA_SS31_CHANGE_LABEL |
+| SS30_TITLE | Pay from the starter wallet |
+| SS30_EMPTY | No refund waits. |
+| SS31_FEE_RATE | Fee rate |
+| SS31_AUTHORISE | Check the address and the amount, then unlock |
+| SS31_SEND_BUTTON | Send |
+| SS31_ADDRESS_LABEL | To |
+| SS31_AMOUNT_LABEL | Amount |
+| SS31_FEE_LABEL | Fee |
+| SS31_CHANGE_LABEL | Back to the starter wallet |
 | SS30_NO_COIN_VIEW_HEADING | WORDS_NEEDED_OA_SS30_NO_COIN_VIEW_HEADING |
 | SS30_NO_COIN_VIEW_WHAT | WORDS_NEEDED_OA_SS30_NO_COIN_VIEW_WHAT |
 | SS30_NO_COIN_VIEW_NEXT | WORDS_NEEDED_OA_SS30_NO_COIN_VIEW_NEXT |
-| SS30_SIGNED_HEADING | WORDS_NEEDED_OA_SS30_SIGNED_HEADING |
-| SS30_SIGNED_WHAT | WORDS_NEEDED_OA_SS30_SIGNED_WHAT |
-| SS30_SIGNED_NEXT | WORDS_NEEDED_OA_SS30_SIGNED_NEXT |
-| SS42_TITLE | WORDS_NEEDED_OA_SS42_TITLE |
-| SS42_WALLET_LABEL | WORDS_NEEDED_OA_SS42_WALLET_LABEL |
-| SS42_INDEX_LABEL | WORDS_NEEDED_OA_SS42_INDEX_LABEL |
-| SS42_EVERYTHING | WORDS_NEEDED_OA_SS42_EVERYTHING |
-| SS42_INVALID | WORDS_NEEDED_OA_SS42_INVALID |
-| SS42_CREDENTIAL_ONLY | WORDS_NEEDED_OA_SS42_CREDENTIAL_ONLY |
-| SS43_TITLE | WORDS_NEEDED_OA_SS43_TITLE |
-| SS43_WAITING | WORDS_NEEDED_OA_SS43_WAITING |
-| SS43_DELETE_BUTTON | WORDS_NEEDED_OA_SS43_DELETE_BUTTON |
-| SS43_CONFIRMATIONS_UNKNOWN | WORDS_NEEDED_OA_SS43_CONFIRMATIONS_UNKNOWN |
+| SS30_SIGNED_HEADING | Signed, not sent yet |
+| SS30_SIGNED_WHAT | The payment is signed. Check it once more before it goes. |
+| SS30_SIGNED_NEXT | Press Send. |
+| SS42_TITLE | Move to the new wallet |
+| SS42_WALLET_LABEL | New wallet's description |
+| SS42_INDEX_LABEL | Address number |
+| SS42_EVERYTHING | Everything in the starter wallet goes to the new wallet in one payment. |
+| SS42_INVALID | That description is not a wallet this phone can read. |
+| SS42_CREDENTIAL_ONLY | This last step takes the phone's PIN, not a fingerprint. |
+| SS43_TITLE | Delete the starter key |
+| SS43_WAITING | The move is not confirmed yet. The key is deleted once it has one confirmation. |
+| SS43_DELETE_BUTTON | Delete the key |
+| SS43_CONFIRMATIONS_UNKNOWN | The phone does not know yet whether the move is confirmed. |

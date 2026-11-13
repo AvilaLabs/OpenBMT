@@ -3554,18 +3554,24 @@ object AppModelTest {
         val today = java.time.LocalDate.of(2026, 11, 13)
         val all = StarterWords.all()
 
-        // Words: every text of the starter screens is a placeholder named for its rule, shown as its own name.
+        // Words: every text of the starter screens is listed under the key of its rule; one not written yet is a
+        // placeholder that shows its own name.
         for ((k, n) in all) {
-            ok(Regex("WORDS_NEEDED_OA_SS\\d{2}_[A-Z0-9_]+").matches(n) && n.removePrefix("WORDS_NEEDED_OA_") == k, "$n is named for a rule")
-            val w = StarterWords.said(n)
-            ok(StarterWords.isPlaceholder(w) && w.heading == n && w.what == n && w.next == n, "$n shows its name")
+            ok(Regex("SS\\d{2}_[A-Z0-9_]+").matches(k), "$k is named for a rule")
+            if (n.startsWith("WORDS_NEEDED_")) {
+                ok(n == "WORDS_NEEDED_OA_$k", "$n is its own key")
+                val w = StarterWords.said(n)
+                ok(StarterWords.isPlaceholder(w) && w.heading == n && w.what == n && w.next == n, "$n shows its name")
+            } else {
+                ok(n.isNotBlank() && n.trim() == n, "$k is written")
+            }
         }
-        ok(all.map { it.second }.toSet().size == all.size, "each placeholder once")
+        ok(all.map { it.first }.toSet().size == all.size, "each key once")
         val wordsSource = source("src/model/StarterWords.kt")
-        ok(Regex("need\\(\"WORDS_NEEDED").findAll(wordsSource).count() == all.size, "every placeholder of the source is in the list")
+        ok(Regex("(need|say)\\(\"").findAll(wordsSource).count() == all.size, "every text of the source is in the list")
         ok(all.size > 100 && listOf("SS13_PEN", "SS13_NO_PHOTO", "SS13_NOBODY_ASKS").all { k -> all.any { it.first == k } }, "SS-13 has one constant for each sentence")
-        ok(all.any { it.first == "SS37_NOT_YET_SENTENCE" }, "the sentence of Not yet is a placeholder")
-        for (f in FindingKind.values()) ok(StarterWords.isPlaceholder(StarterWords.said(StarterChecks.name(f))) && StarterChecks.why(f).startsWith("WORDS_NEEDED_OA_SS3"), "$f has a name and an explanation")
+        ok(all.any { it.first == "SS37_NOT_YET_SENTENCE" }, "the sentence of Not yet has its own key")
+        for (f in FindingKind.values()) ok(StarterChecks.name(f).isNotBlank() && StarterChecks.why(f).length > StarterChecks.name(f).length && !StarterChecks.why(f).startsWith("WORDS_NEEDED_"), "$f has a name and an explanation")
         val md = AppWords.screensMarkdown()
         ok(all.all { (k, _) -> md.contains("| $k |") }, "docs/screens/owner-app.md lists them")
         // No sentence of the app's own is written in the starter files: every string of a screen is a StarterWords name or a number.
@@ -3646,7 +3652,7 @@ object AppModelTest {
         // "Not yet": the sentence exactly, at most 7 days.
         val sentence = StarterWords.notYetSentence
         ok(StarterNotYet.grant(core, sentence, sentence, now) == now + StarterNotYet.MAX_SECS, "the sentence typed exactly gives 7 days")
-        for (bad in listOf("", sentence.lowercase(), sentence + " ", " $sentence", sentence.dropLast(1), sentence.replace('_', ' '))) ok(StarterNotYet.grant(core, bad, sentence, now) == null, "no Not yet for: '$bad'")
+        for (bad in listOf("", sentence.lowercase(), sentence + " ", " $sentence", sentence.dropLast(1), sentence.replace(" ", "  "))) ok(StarterNotYet.grant(core, bad, sentence, now) == null, "no Not yet for: '$bad'")
         ok(StarterNotYet.MAX_SECS == 7L * 24 * 60 * 60, "7 days")
 
         // SS-11: the keypad.
