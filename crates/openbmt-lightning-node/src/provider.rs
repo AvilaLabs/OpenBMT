@@ -2,8 +2,8 @@
 //!
 //! The decisions are pure functions here, so that they are tested without a
 //! provider: which of the provider's offers to take, what it costs, whether
-//! its window to be back online is long enough, and what to ask for as our
-//! `to_self_delay`.
+//! its window to be back online is long enough, and what to ask for as the
+//! shop's own `to_self_delay`.
 //!
 //! `client_trusts_lsp` is a setting of the provider's service, not of the
 //! client: in `lightning-liquidity` 0.2.8 the client side has no trust option
