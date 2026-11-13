@@ -489,3 +489,142 @@ fn ss_42_the_move_after_the_switch_is_refused_with_its_words_when_a_counter_wait
     assert!(text.contains("starter-move-not-ready"), "{text}");
     assert!(text.contains("Not every counter switched"), "{text}");
 }
+
+/// A transaction that spends `from` and pays each of `outs`.
+fn spend(
+    from: &bitcoin::Transaction,
+    vout: u32,
+    outs: &[(&bitcoin::ScriptBuf, u64)],
+) -> bitcoin::Transaction {
+    let mut tx = tx_from(0, outs);
+    tx.input[0].previous_output = bitcoin::OutPoint::new(from.compute_txid(), vout);
+    tx
+}
+
+#[test]
+fn ss_36_ss_43_the_starter_wallets_coins_and_confirmations_come_from_the_node_watch() {
+    use openbmt_core::wallet::Keychain;
+    // These ops read the node's watch only, so any node serves; the one of
+    // the test kit is on the regtest chain, which the rig can mine.
+    let rig = super::kit::Rig::new();
+    let handle = rig.start();
+    let held = || Rd::ok(&rig.call(208, handle, &[])).u64();
+    let confirmations = |txid: &str| {
+        let response = rig.call(211, handle, &W::new().string(txid).0);
+        let mut r = Rd::ok(&response);
+        let out = r.opt(|r| r.u32());
+        r.done();
+        out
+    };
+    rig.mine_empty(handle, 1);
+    assert_eq!(held(), 0, "nothing is paid yet");
+    // A payment into the wallet that a block holds is held.
+    let pay = tx_from(7, &[(&super::kit::receive(0), 50_000)]);
+    rig.mine(handle, std::slice::from_ref(&pay));
+    rig.mine_empty(handle, 5);
+    assert_eq!(held(), 50_000);
+    // A transaction the owner phone signed goes to the node's outbox: it
+    // pays 20,000 away and 29,000 back to the wallet's change. What it
+    // spent no longer counts and its change counts once.
+    let change = super::kit::kit()
+        .wallet
+        .script(Keychain::Change, 0)
+        .unwrap();
+    let away = super::kit::external(3);
+    let out = spend(&pay, 0, &[(&away, 20_000), (&change, 29_000)]);
+    let txid = out.compute_txid().to_string();
+    assert_eq!(
+        confirmations(&txid),
+        None,
+        "the node knows nothing of it yet"
+    );
+    let sent = |tx: &bitcoin::Transaction, refunds: &[u32]| {
+        let mut w = W::new()
+            .bytes(&bitcoin::consensus::encode::serialize(tx))
+            .u32(u32::try_from(refunds.len()).unwrap());
+        for r in refunds {
+            w = w.u32(*r);
+        }
+        rig.call(210, handle, &w.0)
+    };
+    assert_eq!(Rd::ok(&sent(&out, &[])).string(), txid);
+    // The change chain is watched from now on: the driver rechecks the
+    // blocks for it, as the rig does.
+    rig.feed(handle, Vec::new());
+    assert_eq!(held(), 29_000);
+    assert_eq!(confirmations(&txid), Some(0), "held, and in no block");
+    // Giving it again changes nothing.
+    assert_eq!(Rd::ok(&sent(&out, &[])).string(), txid);
+    assert_eq!(held(), 29_000);
+    // A block holds it: one confirmation, then the tip counts.
+    rig.mine(handle, std::slice::from_ref(&out));
+    assert_eq!(confirmations(&txid), Some(1));
+    rig.mine_empty(handle, 2);
+    assert_eq!(confirmations(&txid), Some(3));
+    assert_eq!(held(), 29_000);
+    // What does not read, and a refund that is not queued, are refused.
+    let fault = Rd::error(&rig.call(211, handle, &W::new().string("zz").0)).expect("refused");
+    assert_eq!(fault.rule, "id-length");
+    let fault =
+        Rd::error(&rig.call(210, handle, &W::new().bytes(&[1, 2, 3]).u32(0).0)).expect("refused");
+    assert_eq!(fault.status, 1);
+    let missing = rig.call(
+        209,
+        handle,
+        &W::new()
+            .bytes(&[9; 10])
+            .bytes(&[7; 32])
+            .u32(77)
+            .u64(1_000)
+            .u32(1)
+            .0,
+    );
+    assert_eq!(Rd::error(&missing).expect("refused").rule, "starter-refund");
+}
+
+#[test]
+fn ss_41_ss_42_the_move_and_the_repin_need_the_node_and_the_counters() {
+    let rig = super::kit::Rig::new();
+    let file = wallet_file();
+    // A shop with a Key app has no starter wallet to move or re-pin.
+    let key_app = rig.start();
+    let move_args = || {
+        W::new()
+            .bytes(&[9; 10])
+            .bytes(&[7; 32])
+            .string(&descriptor())
+            .u64(T0)
+            .u64(1_000)
+            .u32(1)
+            .0
+    };
+    let fault = Rd::error(&rig.call(203, key_app, &move_args())).expect("refused");
+    assert_eq!(fault.rule, "no-own-wallet");
+    let fault =
+        Rd::error(&rig.call(212, key_app, &W::new().string(&descriptor()).0)).expect("refused");
+    assert_eq!(fault.rule, "no-own-wallet");
+    // With no link there are no counters to ask.
+    let rig = super::kit::Rig::new();
+    let own = Rd::ok(&rig.start_own(&file)).u64();
+    for (op, fields) in [
+        (203u16, move_args()),
+        (212, W::new().string(&descriptor()).0),
+    ] {
+        let fault = Rd::error(&rig.call(op, own, &fields)).expect("refused");
+        assert_eq!(fault.rule, "link-none", "op {op}");
+    }
+    // A description that does not read, and a data key of the wrong size,
+    // are refused first.
+    let fault = Rd::error(&rig.call(212, own, &W::new().string("nope").0)).expect("refused");
+    assert_eq!(fault.rule, "starter-new-wallet");
+    let short = W::new()
+        .bytes(&[9; 10])
+        .bytes(&[7; 5])
+        .string(&descriptor())
+        .u64(T0)
+        .u64(1_000)
+        .u32(1)
+        .0;
+    let fault = Rd::error(&rig.call(203, own, &short)).expect("refused");
+    assert_eq!(fault.rule, "SS-20");
+}

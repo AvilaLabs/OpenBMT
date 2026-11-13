@@ -81,6 +81,7 @@ use openbmt_net_io::{
 };
 use openbmt_owner::own_book::AllocationBook;
 use openbmt_owner::own_spend::{OwnBuilt, OwnFile, OwnTaken};
+use openbmt_owner::starter::{held_sats, IncomingCoin};
 use openbmt_owner::{Built, Delivery, IssuedRange, Options, Owner, OwnerError, Stage, Taken};
 use openbmt_signer::SignerState;
 use openbmt_watch::{FeeHistory, HeaderChain, Refusal, WellFormedBlock};
@@ -1142,6 +1143,88 @@ impl<P: OwnerPort> OwnerNode<P> {
         self.coins().iter().fold(0u64, |sum, coin| {
             sum.saturating_add(coin.output().map_or(0, |output| output.value.to_sat()))
         })
+    }
+
+    /// SS-36: what the starter wallet holds, from the coins the view offers
+    /// and the payments into the wallet that the node holds and no block has
+    /// confirmed (the library's [`held_sats`]). `None` unless the view is
+    /// ready: a view that is not ready has no coin to count.
+    ///
+    /// [`held_sats`]: openbmt_owner::starter::held_sats
+    pub fn starter_held(&self) -> Option<u64> {
+        if !self.view.ready() {
+            return None;
+        }
+        let coins = self.coins();
+        let incoming: Vec<IncomingCoin> = self
+            .view
+            .pending()
+            .flat_map(|p| {
+                let txid = p.tx.compute_txid();
+                p.own.iter().filter_map(move |(vout, _, _)| {
+                    let at = usize::try_from(*vout).ok()?;
+                    Some(IncomingCoin {
+                        outpoint: OutPoint::new(txid, *vout),
+                        sats: p.tx.output.get(at)?.value.to_sat(),
+                    })
+                })
+            })
+            .collect();
+        Some(held_sats(&coins, &incoming))
+    }
+
+    /// SS-30, SS-42: the coins the starter wallet signs from, the height of
+    /// the tip they are counted from and the next index of the change
+    /// chain. The view must be ready and have checked every block up to the
+    /// tip, as for the spends of the shop's own wallet (AS-101).
+    pub fn starter_coins(&self) -> Result<(Vec<openbmt_spend::Coin>, u32, u32), NodeError> {
+        if let Some(why) = &self.halted {
+            return Err(NodeError::NotReady(why.clone()));
+        }
+        if self.awaiting_rescan > 0 {
+            return Err(NodeError::NotReady(
+                "waiting for the script rescan to start".into(),
+            ));
+        }
+        if !self.view.ready() {
+            return Err(NodeError::NotReady(self.view.state().to_string()));
+        }
+        let tip = self.watcher.chain().tip_height();
+        if self.view.checked() < tip {
+            return Err(NodeError::NotReady(format!(
+                "the coin view has checked blocks up to {} and the chain is at {tip}",
+                self.view.checked()
+            )));
+        }
+        Ok((self.view.coins(tip), tip, self.view.change_next()))
+    }
+
+    /// SS-30, SS-42: a finished transaction of the starter wallet goes to
+    /// the outbox, and the node sends it and follows it as it does the
+    /// spends of the shop's own wallet (AS-104). `refunds` are the queued
+    /// refunds it pays.
+    pub fn take_starter(&mut self, tx: &[u8], refunds: &[u32]) -> Result<Txid, NodeError> {
+        let write = self.queue_writer();
+        let txid = self.owner_mut()?.take_starter(tx, refunds, write)?;
+        self.refresh_marks();
+        self.reconcile();
+        Ok(txid)
+    }
+
+    /// SS-43: how deep the transaction `txid` is in the checked chain: 0
+    /// while the node holds it and no block does, `None` when the node
+    /// knows nothing of it.
+    pub fn starter_confirmations(&self, txid: &Txid) -> Option<u32> {
+        let tip = self.watcher.chain().tip_height();
+        if let Some(h) = self.view.confirmed_height(txid) {
+            return Some(tip.saturating_sub(h).saturating_add(1));
+        }
+        match self.send_state(txid) {
+            Some(SendState::Confirmed { depth }) => Some(depth),
+            Some(SendState::Done) => Some(self.refund_depth().max(1)),
+            Some(_) => Some(0),
+            None => None,
+        }
     }
 
     /// The state of the view.

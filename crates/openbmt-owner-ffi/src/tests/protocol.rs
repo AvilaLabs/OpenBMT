@@ -171,6 +171,11 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (205, "starter_state_words"),
         (206, "starter_held_words"),
         (207, "starter_deleted_words"),
+        (208, "starter_held"),
+        (209, "starter_pay_node"),
+        (210, "starter_send"),
+        (211, "starter_confirmations"),
+        (212, "own_repin"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

@@ -406,7 +406,7 @@ fn coins_of(list: &[StarterCoinView]) -> Result<Vec<Coin>, AppError> {
 
 /// The data key the app handed over, taken as a [`DataKey`] that wipes its
 /// copy; the bytes this layer read are overwritten here too.
-fn data_key_of(bytes: &mut [u8]) -> Result<DataKey, AppError> {
+pub(crate) fn data_key_of(bytes: &mut [u8]) -> Result<DataKey, AppError> {
     let key = DataKey::from_slice(bytes).map_err(|e| refusal(&e));
     for b in bytes.iter_mut() {
         *b = 0;
@@ -597,27 +597,52 @@ wire_record_get!(StarterMoveArgs {
 /// (SS-42).
 pub(crate) fn move_all(mut a: StarterMoveArgs) -> Result<StarterPaidView, AppError> {
     let key = data_key_of(&mut a.data_key)?;
-    let new = ImportedWallet::read(&a.new_wallet).map_err(|e| {
+    let coins = coins_of(&a.coins)?;
+    move_with(
+        &a.sealed,
+        &key,
+        &a.new_wallet,
+        a.new_index,
+        &coins,
+        a.fee_rate,
+        a.min_confirmations,
+        a.lock_height,
+    )
+}
+
+/// The move of every one of `coins` to the new wallet `description` at
+/// `new_index` (SS-42).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn move_with(
+    sealed: &[u8],
+    key: &DataKey,
+    description: &str,
+    new_index: u32,
+    coins: &[Coin],
+    fee_rate: u64,
+    min_confirmations: u32,
+    lock_height: u32,
+) -> Result<StarterPaidView, AppError> {
+    let new = ImportedWallet::read(description).map_err(|e| {
         refused_with(
             "starter-new-wallet",
             format!("the new wallet: {e:?}"),
             starter::new_wallet_unreadable_words(),
         )
     })?;
-    let to: ScriptBuf = starter::receive_script_of(&new, a.new_index).map_err(|e| refusal(&e))?;
+    let to: ScriptBuf = starter::receive_script_of(&new, new_index).map_err(|e| refusal(&e))?;
     let destination = Address::from_script(&to, new.network())
         .map(|x| x.to_string())
         .unwrap_or_default();
-    let coins = coins_of(&a.coins)?;
     let paid = starter::move_all(
-        &a.sealed,
-        &key,
-        &coins,
+        sealed,
+        key,
+        coins,
         &new,
-        a.new_index,
-        a.fee_rate,
-        a.min_confirmations,
-        a.lock_height,
+        new_index,
+        fee_rate,
+        min_confirmations,
+        lock_height,
     )
     .map_err(|e| refusal(&e))?;
     Ok(paid_view(&paid, destination))
@@ -884,4 +909,190 @@ pub(crate) fn held_words() -> Result<WordsView, AppError> {
 /// Op 207: the words said when the key is deleted (SS-43).
 pub(crate) fn deleted_words() -> Result<WordsView, AppError> {
     Ok(WordsView(starter::deleted_words()))
+}
+
+// ---- the owner node's watch of the starter wallet ----------------------------
+
+/// The arguments of `starter_pay_node` (SS-30, SS-31): the queued refund to
+/// pay, by its number in the owner's queue. The coins are the owner node's
+/// watch of the wallet, the address and the amount are the refund's, and the
+/// lock time is the node's tip, so the app hands over none of them.
+#[derive(Clone, PartialEq, Eq)]
+pub struct StarterNodePayArgs {
+    /// The sealed seed the app stores.
+    pub sealed: Vec<u8>,
+    /// The data key, opened from the Keystore for this call only.
+    pub data_key: Vec<u8>,
+    /// The refund's number in the queue.
+    pub refund: u32,
+    /// The fee rate in satoshis per 1000 virtual bytes (`starter_fee_rate`).
+    pub fee_rate: u64,
+    /// The fewest confirmations a coin needs.
+    pub min_confirmations: u32,
+}
+
+impl fmt::Debug for StarterNodePayArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StarterNodePayArgs")
+            .field("refund", &self.refund)
+            .finish_non_exhaustive()
+    }
+}
+
+wire_record!(StarterNodePayArgs {
+    sealed,
+    data_key,
+    refund,
+    fee_rate,
+    min_confirmations
+});
+wire_record_get!(StarterNodePayArgs {
+    sealed,
+    data_key,
+    refund,
+    fee_rate,
+    min_confirmations
+});
+
+/// The arguments of `starter_move_switched` (SS-42): everything to the new
+/// wallet. The coins are the owner node's watch of the starter wallet and
+/// the new wallet's index is the next one of the owner's wallet state.
+#[derive(Clone, PartialEq, Eq)]
+pub struct StarterNodeMoveArgs {
+    /// The sealed seed the app stores.
+    pub sealed: Vec<u8>,
+    /// The data key, opened from the Keystore for this call only.
+    pub data_key: Vec<u8>,
+    /// The new wallet's description, as it was connected.
+    pub new_wallet: String,
+    /// The time, in seconds.
+    pub now: u64,
+    /// The fee rate in satoshis per 1000 virtual bytes.
+    pub fee_rate: u64,
+    /// The fewest confirmations a coin needs; every coin must have them.
+    pub min_confirmations: u32,
+}
+
+impl fmt::Debug for StarterNodeMoveArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StarterNodeMoveArgs")
+            .field("now", &self.now)
+            .finish_non_exhaustive()
+    }
+}
+
+wire_record!(StarterNodeMoveArgs {
+    sealed,
+    data_key,
+    new_wallet,
+    now,
+    fee_rate,
+    min_confirmations
+});
+wire_record_get!(StarterNodeMoveArgs {
+    sealed,
+    data_key,
+    new_wallet,
+    now,
+    fee_rate,
+    min_confirmations
+});
+
+/// The arguments of `starter_send` (SS-30, SS-42): a signed transaction for
+/// the node's outbox, and the queued refunds it pays (none for the move).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StarterSendArgs {
+    /// The transaction, consensus bytes, as `starter_pay_node` gave it.
+    pub tx: Vec<u8>,
+    /// The refunds it pays.
+    pub refunds: Vec<u32>,
+}
+
+wire_record!(StarterSendArgs { tx, refunds });
+wire_record_get!(StarterSendArgs { tx, refunds });
+
+/// What a call to re-pin the owner's wallet did (SS-41).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnRepinKind {
+    /// Every counter had switched: the new wallet is pinned now.
+    Done,
+    /// The new wallet was pinned already.
+    AlreadyDone,
+    /// A counter has not switched: nothing changed.
+    NotReady,
+}
+
+wire_unit_enum!(OwnRepinKind {
+    Done = 0,
+    AlreadyDone = 1,
+    NotReady = 2
+});
+
+/// The answer of `own_repin`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnRepinView {
+    /// What the call did.
+    pub kind: OwnRepinKind,
+    /// The pinned wallet's file after the call: the file the app keeps and
+    /// starts the node with, so that the node watches the new wallet. Empty
+    /// when nothing was re-pinned.
+    pub wallet: Vec<u8>,
+    /// Counters with no record for the new wallet yet.
+    pub waiting: u32,
+    /// Counters whose record says they did not switch.
+    pub refused: u32,
+}
+
+wire_record!(OwnRepinView {
+    kind,
+    wallet,
+    waiting,
+    refused
+});
+
+pub(crate) fn not_watching(why: impl fmt::Display) -> AppError {
+    from_words(
+        Kind::State,
+        "starter-not-watching",
+        format!("the node's watch of the starter wallet is not ready: {why}"),
+        starter::not_watching_words(),
+    )
+}
+
+/// SS-30: the queued refund is not there, or is not queued any more.
+pub(crate) fn no_such_refund(id: u32) -> AppError {
+    refused_with(
+        "starter-refund",
+        format!("refund {id} is not a refund that waits in the queue"),
+        starter::no_such_refund_words(),
+    )
+}
+
+/// The refund `id`, as the queue holds it, paid from the node's coins
+/// (SS-30): the address and the amount are the refund's.
+pub(crate) fn pay_from_node(
+    mut a: StarterNodePayArgs,
+    refund: &openbmt_owner::Refund,
+    network: bitcoin::Network,
+    coins: &[Coin],
+    change_index: u32,
+    lock_height: u32,
+) -> Result<StarterPaidView, AppError> {
+    let key = data_key_of(&mut a.data_key)?;
+    let paid = starter::pay_refund(
+        &a.sealed,
+        &key,
+        coins,
+        &refund.script,
+        refund.sats,
+        a.fee_rate,
+        change_index,
+        a.min_confirmations,
+        lock_height,
+    )
+    .map_err(|e| refusal(&e))?;
+    let destination = Address::from_script(&refund.script, network)
+        .map(|x| x.to_string())
+        .unwrap_or_default();
+    Ok(paid_view(&paid, destination))
 }

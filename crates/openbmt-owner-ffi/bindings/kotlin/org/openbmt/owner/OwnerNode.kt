@@ -193,6 +193,11 @@ private const val OP_STARTER_LINE_WORDS = 204
 private const val OP_STARTER_STATE_WORDS = 205
 private const val OP_STARTER_HELD_WORDS = 206
 private const val OP_STARTER_DELETED_WORDS = 207
+private const val OP_STARTER_HELD = 208
+private const val OP_STARTER_PAY_NODE = 209
+private const val OP_STARTER_SEND = 210
+private const val OP_STARTER_CONFIRMATIONS = 211
+private const val OP_OWN_REPIN = 212
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -200,6 +205,9 @@ private const val TAG_OWNER_NETWORK_MAINNET = 0
 private const val TAG_OWNER_NETWORK_TESTNET = 1
 private const val TAG_OWNER_NETWORK_SIGNET = 2
 private const val TAG_OWNER_NETWORK_REGTEST = 3
+private const val TAG_OWN_REPIN_KIND_DONE = 0
+private const val TAG_OWN_REPIN_KIND_ALREADY_DONE = 1
+private const val TAG_OWN_REPIN_KIND_NOT_READY = 2
 private const val TAG_STARTER_LIMIT_KIND_UNDER = 0
 private const val TAG_STARTER_LIMIT_KIND_AT_LIMIT = 1
 private const val TAG_STARTER_LIMIT_KIND_PAST_DATE = 2
@@ -597,6 +605,16 @@ class StarterPaid(
     val changeSats: Long?,
     val destination: String,
 )
+
+/** What a call to re-pin the owner's wallet did (SS-41). */
+enum class OwnRepinKind { Done, AlreadyDone, NotReady }
+
+/**
+ * The answer of [OwnerNode.ownRepin]: [wallet] is the pinned wallet's file after the call, which the app keeps and
+ * starts the node with so that it watches the new wallet (empty when [kind] is [OwnRepinKind.NotReady]); [waiting]
+ * and [refused] count the counters that have not switched.
+ */
+class OwnRepin(val kind: OwnRepinKind, val wallet: ByteArray, val waiting: Long, val refused: Long)
 
 /** What a refill of the float queued (FL-30). */
 class FloatRefillView(val id: Long, val sats: Long, val address: String)
@@ -1651,6 +1669,14 @@ private fun Writer.floatCoin(c: FloatCoin): Writer =
 private fun Reader.starterPaid(): StarterPaid =
     StarterPaid(bytes(), string(), u64(), u64(), u64(), option { u32() }, option { u64() }, string())
 
+private fun Reader.ownRepinKind(): OwnRepinKind =
+    when (u8()) {
+        TAG_OWN_REPIN_KIND_DONE -> OwnRepinKind.Done
+        TAG_OWN_REPIN_KIND_ALREADY_DONE -> OwnRepinKind.AlreadyDone
+        TAG_OWN_REPIN_KIND_NOT_READY -> OwnRepinKind.NotReady
+        else -> tag("OwnRepinKind")
+    }
+
 private fun Writer.starterLimitKind(v: StarterLimitKind): Writer =
     u8(
         when (v) {
@@ -2080,25 +2106,63 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
     }
 
     /**
-     * SS-42: as [OwnerStarter.move], built only when every counter of the settings in force is switched to the new
-     * wallet. Refused with the words of the move when one is waiting or refused.
+     * SS-42: move everything in the starter wallet to the new wallet [newWallet] (its description), in one payment,
+     * built only when every counter of the settings in force is switched to it. Refused with the words of the move when
+     * one is waiting or refused. The coins are the node's watch of the starter wallet and the address is the next one of
+     * the new wallet in the owner's own state, so neither is given.
      */
     fun starterMoveSwitched(
         sealed: ByteArray,
         dataKey: ByteArray,
         newWallet: String,
-        newIndex: Long,
+        now: Long,
         feeRate: Long,
         minConfirmations: Long,
-        lockHeight: Long,
-        coins: List<StarterCoin>,
     ): StarterPaid {
         val r = callSecret(OP_STARTER_MOVE_SWITCHED, handle) { w ->
-            w.bytes(sealed).bytes(dataKey).string(newWallet).u32(newIndex).u64(feeRate).u32(minConfirmations)
-                .u32(lockHeight).list(coins) { w.floatCoin(it) }
+            w.bytes(sealed).bytes(dataKey).string(newWallet).u64(now).u64(feeRate).u32(minConfirmations)
         }
         java.util.Arrays.fill(dataKey, 0.toByte())
         return r.starterPaid().also { r.end() }
+    }
+
+    /**
+     * SS-41: once every counter of the settings in force is switched to [newWallet] (its description), the owner's
+     * pinned wallet becomes the new wallet, once. The file in the answer is what the node is started with from then on.
+     */
+    fun ownRepin(newWallet: String): OwnRepin {
+        val r = call(OP_OWN_REPIN, handle) { it.string(newWallet) }
+        return OwnRepin(r.ownRepinKind(), r.bytes(), r.u32(), r.u32()).also { r.end() }
+    }
+
+    /** SS-36: what the starter wallet holds, in satoshis, from the node's watch of it: confirmed coins and payments on their way. */
+    fun starterHeld(): Long {
+        val r = call(OP_STARTER_HELD, handle)
+        return r.u64().also { r.end() }
+    }
+
+    /**
+     * SS-30, SS-31: sign the queued refund number [refund] from the node's coins. The address and the amount are the
+     * refund's. The payment is not sent: [starterSend] gives it to the node's outbox.
+     */
+    fun starterPay(sealed: ByteArray, dataKey: ByteArray, refund: Long, feeRate: Long, minConfirmations: Long): StarterPaid {
+        val r = callSecret(OP_STARTER_PAY_NODE, handle) { w ->
+            w.bytes(sealed).bytes(dataKey).u32(refund).u64(feeRate).u32(minConfirmations)
+        }
+        java.util.Arrays.fill(dataKey, 0.toByte())
+        return r.starterPaid().also { r.end() }
+    }
+
+    /** SS-30, SS-42: give the signed transaction [tx] to the node's outbox, with the queued [refunds] it pays (none for the move). Gives its ID. */
+    fun starterSend(tx: ByteArray, refunds: List<Long>): String {
+        val r = call(OP_STARTER_SEND, handle) { w -> w.bytes(tx).list(refunds) { w.u32(it) } }
+        return r.string().also { r.end() }
+    }
+
+    /** SS-43: how deep the transaction [txid] is, from the node's watch: 0 while it waits for a block, null when the node does not know it. */
+    fun starterConfirmations(txid: String): Long? {
+        val r = call(OP_STARTER_CONFIRMATIONS, handle) { it.string(txid) }
+        return r.option { r.u32() }.also { r.end() }
     }
 
     /**

@@ -63,6 +63,11 @@
 //! - 204 to 207: the words of the starter wallet's own screens that the Rust
 //!   core writes (SS-36, SS-37, SS-43): the home line, a state of the limit
 //!   and the date, a change that waits and the deleted key.
+//! - 208 to 212: the starter wallet from the owner node's watch of it: what it
+//!   holds, a queued refund signed from its coins, a signed transaction given
+//!   to the node's outbox, a transaction's confirmations by its ID, and the
+//!   owner's pinned wallet becoming the new wallet once every counter has
+//!   switched (SS-30, SS-36, SS-41 to SS-43).
 //! - 100 to 103: the lock on the setup text the app stores
 //!   (`docs/LOCK-RULES.md`, `docs/OWNER-APP-RULES.md` OA-60 to OA-62):
 //!   whether stored bytes are a locked setup, lock a text under a PIN, open
@@ -168,10 +173,11 @@ use crate::signer_views::{
     SignerExportArgs, SignerFileView, SignerLineView, SignerTakeArgs, SignerTakenView,
 };
 use crate::starter::{
-    self as starter_ops, StarterChangeKind, StarterCheckView, StarterFeeArgs, StarterHeldArgs,
-    StarterImageView, StarterLimitArgs, StarterLimitKind, StarterLimitView, StarterMakeArgs,
-    StarterMoveArgs, StarterOfferArgs, StarterOpenArgs, StarterPageArgs, StarterPaidView,
-    StarterPayArgs, StarterSealedView, StarterSlot, StarterTypedView, StarterWalletView,
+    self as starter_ops, OwnRepinKind, OwnRepinView, StarterChangeKind, StarterCheckView,
+    StarterFeeArgs, StarterHeldArgs, StarterImageView, StarterLimitArgs, StarterLimitKind,
+    StarterLimitView, StarterMakeArgs, StarterMoveArgs, StarterNodeMoveArgs, StarterNodePayArgs,
+    StarterOfferArgs, StarterOpenArgs, StarterPageArgs, StarterPaidView, StarterPayArgs,
+    StarterSealedView, StarterSendArgs, StarterSlot, StarterTypedView, StarterWalletView,
 };
 use crate::views::{
     put_words, AlertKind, AlertView, BatchArgs, BatchWaitingView, BuiltView, CashAmountView,
@@ -885,7 +891,7 @@ fn build_ops() -> Vec<Op> {
             203,
             "starter_move_switched",
             Node,
-            |c, a: StarterMoveArgs| c.entry()?.starter_move_switched(a),
+            |c, a: StarterNodeMoveArgs| c.entry()?.starter_move_switched(a),
         ),
         op(204, "starter_line_words", Zero, |_, _: ()| {
             starter_ops::line_words()
@@ -901,6 +907,21 @@ fn build_ops() -> Vec<Op> {
         }),
         op(207, "starter_deleted_words", Zero, |_, _: ()| {
             starter_ops::deleted_words()
+        }),
+        op(208, "starter_held", Node, |c, _: ()| {
+            c.entry()?.starter_held()
+        }),
+        op(209, "starter_pay_node", Node, |c, a: StarterNodePayArgs| {
+            c.entry()?.starter_pay_node(a)
+        }),
+        op(210, "starter_send", Node, |c, a: StarterSendArgs| {
+            c.entry()?.starter_send(a)
+        }),
+        op(211, "starter_confirmations", Node, |c, txid: String| {
+            c.entry()?.starter_confirmations(txid)
+        }),
+        op(212, "own_repin", Node, |c, new_wallet: String| {
+            c.entry()?.own_repin(new_wallet)
         }),
     ]
 }
@@ -1172,6 +1193,11 @@ fn definitions() -> Vec<TypeDef> {
         StarterPaidView::define(),
         StarterMoveArgs::define(),
         StarterOpenArgs::define(),
+        StarterNodePayArgs::define(),
+        StarterNodeMoveArgs::define(),
+        StarterSendArgs::define(),
+        OwnRepinKind::define(),
+        OwnRepinView::define(),
         SwitchStateKind::define(),
         SwitchRowView::define(),
         StarterFeeArgs::define(),

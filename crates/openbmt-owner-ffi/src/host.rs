@@ -2408,13 +2408,78 @@ impl Entry {
     }
 
     /// SS-42: the one move of the starter wallet, built only when every
-    /// counter of the settings in force is switched to the new wallet.
+    /// counter of the settings in force is switched to the new wallet. The
+    /// coins are the node's watch of the starter wallet, and the new
+    /// wallet's index is the next one of the owner's wallet state.
     pub(crate) fn starter_move_switched(
         &self,
-        a: crate::starter::StarterMoveArgs,
+        mut a: crate::starter::StarterNodeMoveArgs,
     ) -> Result<crate::starter::StarterPaidView, AppError> {
         let new = PinnedWallet::from_text(&a.new_wallet)
             .map_err(crate::starter::new_wallet_unreadable)?;
+        let key = crate::starter::data_key_of(&mut a.data_key)?;
+        self.run(Some(a.now), move |st| {
+            let State {
+                node,
+                link,
+                own,
+                dir,
+                ..
+            } = st;
+            let (own, link) = own_and_link(own, link)?;
+            link.scan_index_use();
+            let ready = own::turn_on_shop(
+                dir,
+                node.owner_identity().map_err(|e| node_error(&e))?,
+                own.wallet.clone(),
+                |shop| Ok(shop.move_ready(link, &new)),
+            )
+            .map_err(own::node_error)?;
+            ready.map_err(|e| crate::starter::not_ready(&e))?;
+            let (coins, tip, _) = node.starter_coins().map_err(crate::starter::not_watching)?;
+            // Nothing is taken from the book unless there is a coin to move
+            // and each one has its confirmation.
+            if coins.is_empty() {
+                return Err(crate::starter::refusal(
+                    &openbmt_owner::starter::StarterRefusal::NothingToMove,
+                ));
+            }
+            if coins.iter().any(|c| c.confirmations < a.min_confirmations) {
+                return Err(crate::starter::refusal(
+                    &openbmt_owner::starter::StarterRefusal::Unconfirmed,
+                ));
+            }
+            let index = own::turn_on_shop(
+                dir,
+                node.owner_identity().map_err(|e| node_error(&e))?,
+                own.wallet.clone(),
+                |shop| shop.move_index(a.now),
+            )
+            .map_err(own::node_error)?;
+            crate::starter::move_with(
+                &a.sealed,
+                &key,
+                &a.new_wallet,
+                index,
+                &coins,
+                a.fee_rate,
+                a.min_confirmations,
+                tip,
+            )
+        })
+    }
+
+    /// SS-41: once every counter of the settings in force is switched to the
+    /// new wallet, the owner's pinned wallet becomes the new wallet, and the
+    /// file the node is started with from then on is given back.
+    pub(crate) fn own_repin(
+        &self,
+        new_wallet: String,
+    ) -> Result<crate::starter::OwnRepinView, AppError> {
+        use crate::starter::{OwnRepinKind, OwnRepinView};
+        use openbmt_owner::own_switch::Repin;
+        let new =
+            PinnedWallet::from_text(&new_wallet).map_err(crate::starter::new_wallet_unreadable)?;
         self.run(None, move |st| {
             let State {
                 node,
@@ -2424,15 +2489,87 @@ impl Entry {
                 ..
             } = st;
             let (own, link) = own_and_link(own, link)?;
-            let identity = node.owner_identity().map_err(|e| node_error(&e))?;
             link.scan_index_use();
-            let ready = own::turn_on_shop(dir, identity, own.wallet.clone(), |shop| {
-                Ok(shop.move_ready(link, &new))
-            })
+            let done = own::turn_on_shop(
+                dir,
+                node.owner_identity().map_err(|e| node_error(&e))?,
+                own.wallet.clone(),
+                |shop| shop.repin(link, &new),
+            )
             .map_err(own::node_error)?;
-            ready.map_err(|e| crate::starter::not_ready(&e))?;
-            crate::starter::move_all(a)
+            let view = |kind, wallet: Vec<u8>, waiting: usize, refused: usize| OwnRepinView {
+                kind,
+                wallet,
+                waiting: u32::try_from(waiting).unwrap_or(u32::MAX),
+                refused: u32::try_from(refused).unwrap_or(u32::MAX),
+            };
+            Ok(match done {
+                Repin::Done => {
+                    own.wallet = new.clone();
+                    view(OwnRepinKind::Done, new.to_bytes(), 0, 0)
+                }
+                Repin::AlreadyDone => view(OwnRepinKind::AlreadyDone, new.to_bytes(), 0, 0),
+                Repin::NotReady(n) => view(
+                    OwnRepinKind::NotReady,
+                    Vec::new(),
+                    n.waiting.len(),
+                    n.refused.len(),
+                ),
+            })
         })
+    }
+
+    /// SS-36: what the starter wallet holds, from the node's watch of it.
+    pub(crate) fn starter_held(&self) -> Result<u64, AppError> {
+        self.run(None, |st| {
+            st.node
+                .starter_held()
+                .ok_or_else(|| crate::starter::not_watching(st.node.state()))
+        })
+    }
+
+    /// SS-30: sign the queued refund `a.refund` from the node's coins.
+    pub(crate) fn starter_pay_node(
+        &self,
+        a: crate::starter::StarterNodePayArgs,
+    ) -> Result<crate::starter::StarterPaidView, AppError> {
+        self.run(None, move |st| {
+            let network = st.network;
+            let refund = st
+                .node
+                .owner()
+                .refunds()
+                .iter()
+                .find(|r| r.id == a.refund && r.stage == openbmt_owner::Stage::Queued)
+                .cloned()
+                .ok_or_else(|| crate::starter::no_such_refund(a.refund))?;
+            let (coins, tip, change) = st
+                .node
+                .starter_coins()
+                .map_err(crate::starter::not_watching)?;
+            crate::starter::pay_from_node(a, &refund, network, &coins, change, tip)
+        })
+    }
+
+    /// SS-30, SS-42: give a signed transaction of the starter wallet to the
+    /// node's outbox.
+    pub(crate) fn starter_send(
+        &self,
+        a: crate::starter::StarterSendArgs,
+    ) -> Result<String, AppError> {
+        self.run(None, move |st| {
+            st.node
+                .take_starter(&a.tx, &a.refunds)
+                .map(|txid| txid.to_string())
+                .map_err(|e| node_error(&e))
+        })
+    }
+
+    /// SS-43: how deep a transaction is, by its ID, from the node's watch.
+    pub(crate) fn starter_confirmations(&self, txid: String) -> Result<Option<u32>, AppError> {
+        let txid = Txid::from_str(&txid)
+            .map_err(|e| refused_by("id-length", format!("a transaction ID {txid:?}: {e}")))?;
+        self.run(None, move |st| Ok(st.node.starter_confirmations(&txid)))
     }
 
     /// Archive the paid rows that no reorganization can reopen.

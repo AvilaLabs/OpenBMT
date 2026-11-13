@@ -189,11 +189,16 @@ ops run on another; it waits for at most 250 ms.
 200 own_offer_starter handle zero  args (OwnShopArgs, u64) -> OwnOfferView
 201 own_switch_send  handle node  args (list<u8>, u64) -> list<SwitchRowView>
 202 own_switch_status handle node  args list<u8> -> list<SwitchRowView>
-203 starter_move_switched handle node  args StarterMoveArgs -> StarterPaidView
+203 starter_move_switched handle node  args StarterNodeMoveArgs -> StarterPaidView
 204 starter_line_words handle zero  args () -> Words
 205 starter_state_words handle zero  args StarterLimitKind -> option<Words>
 206 starter_held_words handle zero  args () -> Words
 207 starter_deleted_words handle zero  args () -> Words
+208 starter_held     handle node  args () -> u64
+209 starter_pay_node handle node  args StarterNodePayArgs -> StarterPaidView
+210 starter_send     handle node  args StarterSendArgs -> string
+211 starter_confirmations handle node  args string -> option<u32>
+212 own_repin        handle node  args string -> OwnRepinView
 ```
 
 ## Types
@@ -364,6 +369,12 @@ StarterPayArgs: record: sealed: list<u8>, data_key: list<u8>, network: OwnerNetw
 StarterPaidView: record: tx: list<u8>, txid: string, fee: u64, vsize: u64, paid: u64, change_index: option<u32>, change_sats: option<u64>, destination: string
 StarterMoveArgs: record: sealed: list<u8>, data_key: list<u8>, new_wallet: string, new_index: u32, fee_rate: u64, min_confirmations: u32, lock_height: u32, coins: list<FloatCoinView>
 StarterOpenArgs: record: sealed: list<u8>, data_key: list<u8>
+StarterNodePayArgs: record: sealed: list<u8>, data_key: list<u8>, refund: u32, fee_rate: u64, min_confirmations: u32
+StarterNodeMoveArgs: record: sealed: list<u8>, data_key: list<u8>, new_wallet: string, now: u64, fee_rate: u64, min_confirmations: u32
+StarterSendArgs: record: tx: list<u8>, refunds: list<u32>
+OwnRepinKind: enum, one tag byte
+    tags Done=0 AlreadyDone=1 NotReady=2
+OwnRepinView: record: kind: OwnRepinKind, wallet: list<u8>, waiting: u32, refused: u32
 SwitchStateKind: enum, one tag byte
     tags Switched=0 Waiting=1 Refused=2
 SwitchRowView: record: counter: list<u8>, name: string, state: SwitchStateKind, words: Words

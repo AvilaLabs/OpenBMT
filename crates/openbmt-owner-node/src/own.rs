@@ -30,7 +30,7 @@ use openbmt_courier::Post;
 use openbmt_owner::own_book::{gap_limit, needs_range, unused_indexes, AllocationBook};
 use openbmt_owner::own_shop::{OwnError, OwnRefusal, OwnRestoreError, OwnShop};
 use openbmt_owner::own_switch::{
-    move_ready, switch_status, HeldSwitch, MoveNotReady, SwitchStatus,
+    move_ready, switch_status, HeldSwitch, MoveNotReady, Repin, SwitchStatus,
 };
 
 use crate::link::{OwnerLink, SettingsNotCarried};
@@ -354,6 +354,33 @@ impl OwnNode {
         new: &PinnedWallet,
     ) -> Result<(), MoveNotReady> {
         move_ready(&self.switch_rows(link, new))
+    }
+
+    /// SS-42: the receive index of the new wallet that the one move pays,
+    /// from a new range of the owner's own in the book, stored first.
+    pub fn move_index(&mut self, now: u64) -> Result<u32, OwnNodeError> {
+        let (shop, store) = self.shop_and_store();
+        shop.move_index(now, store).map_err(|e| match e {
+            OwnError::Store(why) => OwnNodeError::Io(why),
+            OwnError::Refused(r) => OwnNodeError::Switch(r),
+        })
+    }
+
+    /// SS-41: once every counter of the settings in force is switched to
+    /// `new`, the shop's pinned wallet becomes `new` and its state is stored
+    /// for it. The node that watches the wallet takes the new one when it is
+    /// started again with the new wallet's file.
+    pub fn repin<R: Post>(
+        &mut self,
+        link: &OwnerLink<R>,
+        new: &PinnedWallet,
+    ) -> Result<Repin, OwnNodeError> {
+        let rows = self.switch_rows(link, new);
+        let (shop, store) = self.shop_and_store();
+        shop.repin(new, &rows, store).map_err(|e| match e {
+            OwnError::Store(why) => OwnNodeError::Io(why),
+            OwnError::Refused(r) => OwnNodeError::Switch(r),
+        })
     }
 
     /// OA-113: how far ahead the wallet must look, from the indexes that
