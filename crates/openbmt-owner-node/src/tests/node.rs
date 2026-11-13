@@ -32,6 +32,7 @@ mod own;
 mod own_spend;
 mod paid_log;
 mod receipts;
+mod requests;
 mod stopped;
 
 use super::coins::{mine, tx_from};

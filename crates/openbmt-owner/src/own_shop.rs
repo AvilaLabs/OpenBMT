@@ -564,6 +564,13 @@ impl OwnShop {
         &self.state.book
     }
 
+    /// SS-42: the receive index of the new wallet that the planned move of
+    /// the starter wallet pays, if one was taken. It is the first index of a
+    /// range of the owner's own, so the desk (RQ-02) leaves it alone.
+    pub fn move_plan_index(&self) -> Option<u32> {
+        self.state.move_plan.as_ref().map(|plan| plan.index)
+    }
+
     /// Store `next`, and take it into memory only if the store worked.
     fn commit<E>(
         &mut self,

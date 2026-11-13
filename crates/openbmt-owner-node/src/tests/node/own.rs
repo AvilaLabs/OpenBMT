@@ -24,20 +24,20 @@ pub(super) fn own_receive(index: u32) -> ScriptBuf {
     single().receive_script(index).unwrap()
 }
 
-fn counter() -> DeviceId {
+pub(super) fn counter() -> DeviceId {
     id(0x31).device_id()
 }
 
 impl Rig {
     /// The book gives `device` the next range at `at`, and the node is told.
-    fn give(&mut self, book: &mut AllocationBook, device: DeviceId, at: u64) {
+    pub(super) fn give(&mut self, book: &mut AllocationBook, device: DeviceId, at: u64) {
         book.allocate(device, at).unwrap();
         self.node.set_own_book(book).unwrap();
         self.rescan();
     }
 }
 
-fn own_setup(live: usize) -> (Setup, Arc<AtomicU64>) {
+pub(super) fn own_setup(live: usize) -> (Setup, Arc<AtomicU64>) {
     let (mut setup, time) = setup(live);
     setup.own = Some(AllocationBook::new());
     (setup, time)

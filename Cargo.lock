@@ -874,6 +874,7 @@ dependencies = [
  "openbmt-pos",
  "openbmt-pos-readers",
  "openbmt-rates",
+ "openbmt-requests",
  "openbmt-session",
  "openbmt-signer",
  "openbmt-spend",

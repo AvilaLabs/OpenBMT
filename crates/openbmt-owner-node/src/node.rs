@@ -96,6 +96,7 @@ use crate::deep::{DeepRun, DeepSpawn};
 use crate::live::{plan_release, WatchLimits, REBALANCE_SECS};
 use crate::paid_log::{value_at, PaidEntry, PaidLog, PaidValue, PaidWhat, PAID_LOG_FILE};
 use crate::receipts::read_fee_history;
+use crate::requests::Requests;
 use crate::settle_owed::{Owed, OwedKind, SettleOwed, SETTLE_OWED_FILE};
 use crate::take_journal::{TakeJournal, MAX_JOURNAL_BYTES};
 use crate::watcher::{write_file, OwnerConfig, OwnerStartError, OwnerWatcher};
@@ -405,7 +406,7 @@ pub(crate) struct FormerWatch {
     wallet: PinnedWallet,
     file: String,
     pub(crate) view: CoinView,
-    scripts: ScriptSet,
+    pub(crate) scripts: ScriptSet,
 }
 
 impl FormerWatch {
@@ -441,6 +442,10 @@ impl FormerWatch {
             view,
             scripts,
         })
+    }
+
+    pub(crate) fn has_script(&self, script: &ScriptBuf) -> bool {
+        self.scripts.contains_key(script)
     }
 
     fn knows(&self, op: &OutPoint) -> bool {
@@ -554,11 +559,13 @@ fn held_receive(view: &CoinView) -> std::collections::BTreeSet<u32> {
 }
 
 /// OC-22, OC-23: the receive indices to set aside for these marks, none
-/// when `allow` is false. An error when the live watch would still pass the
+/// when `allow` is false. `keep` are the indices of the desk's requests,
+/// which are never set aside (RQ-04). An error when the live watch would still pass the
 /// driver's limit.
 fn release_plan(
     issuing: &Issuing<'_>,
     view: &CoinView,
+    keep: &std::collections::BTreeSet<u32>,
     marks: (u32, u32),
     now: u64,
     limits: &WatchLimits,
@@ -574,10 +581,13 @@ fn release_plan(
     let bound = u64::try_from(limits.live).unwrap_or(u64::MAX);
     let mut release = Vec::new();
     if allow && live > bound {
+        // RQ-04: the address of a request stays in the live watch for good.
+        let mut held = held_receive(view);
+        held.extend(keep.iter().copied());
         release = plan_release(
             issuing.ranges,
             view.released(),
-            &held_receive(view),
+            &held,
             now,
             limits.quiet_secs,
             live - bound,
@@ -682,6 +692,8 @@ pub struct OwnerNode<P: OwnerPort = Handle> {
     paid_log: PaidLog,
     /// OC-52: the settlements a block owes the queue.
     owed: SettleOwed,
+    /// RQ-30: the owner's payment requests and the arrivals that wait.
+    pub(crate) requests: Requests,
     pub(crate) owner_secret: [u8; 32],
     approver: DeviceId,
     policy: BatchPolicy,
@@ -832,9 +844,12 @@ impl<P: OwnerPort> OwnerNode<P> {
                 .map_err(NodeError::Files)?;
         }
         let own = own_book.as_ref().map(OwnIssued::of);
+        // RQ-01, RQ-31: the request book of a shop with its own wallet.
+        let requests = Requests::open(&dir, own.is_some());
+        let kept = requests.indexes();
         let issued = issuing(&owner, own.as_ref());
         let (receive, change) = marks_of(&issued, &view);
-        let release = release_plan(&issued, &view, (receive, change), now, &limits, true)?;
+        let release = release_plan(&issued, &view, &kept, (receive, change), now, &limits, true)?;
         let old_checked = view.checked();
         view.watch_plan(
             receive,
@@ -918,6 +933,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             take_journal,
             paid_log,
             owed,
+            requests,
             owner_secret,
             approver,
             policy,
@@ -940,6 +956,8 @@ impl<P: OwnerPort> OwnerNode<P> {
             ));
             node.forget_owed_blocks(&left);
             node.forget_fee_samples_from(fork.saturating_add(1), &left);
+            // RQ-37, OC-53: the requests undo the same blocks.
+            node.requests_reorg(fork);
             node.after_reorg(effect);
         }
         if node.take_journal.is_none() {
@@ -1608,6 +1626,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         release_plan(
             &wider,
             &self.view,
+            &self.desk_kept(),
             marks,
             self.watcher.now(),
             &self.limits,
@@ -1631,6 +1650,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         let release = match release_plan(
             &issued,
             &self.view,
+            &self.desk_kept(),
             (receive, change),
             now,
             &self.limits,
@@ -2978,6 +2998,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         self.settle();
         self.settle_owed();
         self.release_holds();
+        self.requests_tick();
     }
 
     /// Stop the drivers.
@@ -3081,7 +3102,12 @@ impl<P: OwnerPort> OwnerNode<P> {
             .view
             .reorganize(left, fork, |b| write_file(&dir, COINS_FILE, b))
         {
-            Ok(effect) => self.after_reorg(effect),
+            Ok(effect) => {
+                // RQ-37: the requests undo the same blocks, before the facts
+                // of the queued refunds are worked out again.
+                self.requests_reorg(fork);
+                self.after_reorg(effect);
+            }
             Err(e) => self.stop(format!("the coin view could not be stored: {e}")),
         }
     }
@@ -3163,17 +3189,22 @@ impl<P: OwnerPort> OwnerNode<P> {
         sales.dedup();
         for sale in sales {
             let held = self.owner.sale_facts(&sale);
-            let fresh = match crate::facts::verified_facts(
-                &self.view,
-                &self.owner,
-                sale,
-                tip,
-                self.refund_depth,
-            ) {
-                Ok(facts) => facts,
-                Err(_) => openbmt_owner::SaleFacts {
-                    received_sats: held.map_or(0, |f| f.received_sats),
-                    reached_refund_depth: false,
+            // RQ-26: a return of a request is a refund of the desk's sale;
+            // what it received is what the book credited at the depth.
+            let fresh = match self.desk_facts(&sale) {
+                Some(facts) => facts,
+                None => match crate::facts::verified_facts(
+                    &self.view,
+                    &self.owner,
+                    sale,
+                    tip,
+                    self.refund_depth,
+                ) {
+                    Ok(facts) => facts,
+                    Err(_) => openbmt_owner::SaleFacts {
+                        received_sats: held.map_or(0, |f| f.received_sats),
+                        reached_refund_depth: false,
+                    },
                 },
             };
             if held == Some(fresh) {
@@ -3226,6 +3257,9 @@ impl<P: OwnerPort> OwnerNode<P> {
             }) {
             Ok(effect) => {
                 self.apply_former(&block, hash);
+                // RQ-15: the payments to requests are found in the block the
+                // view applied, and credited at the confirmation depth.
+                self.requests_arrivals(hash, bytes);
                 // FE-20: a block downloaded in full and checked gives a
                 // fee sample.
                 self.take_fee_sample(hash, bytes);

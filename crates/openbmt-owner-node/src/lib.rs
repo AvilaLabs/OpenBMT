@@ -26,6 +26,12 @@
 //! app sends the requests and hands the answers in, and the sales come from
 //! the verified copies of the counters' records.
 //!
+//! The [`requests`] module joins the payment-request library to the node
+//! (`docs/REQUEST-RULES.md`, RQ-01 to RQ-37): the request book in the node's
+//! folder, the desk's addresses in the live watch, the payments credited from
+//! the blocks the coin view applies at the shop's confirmation depth, the
+//! blocks that leave the chain, and the returns on the owner's refund queue.
+//!
 //! The [`paid_log`] module keeps what the owner paid out, a refund or a
 //! cash-out at a time, with its value in the shop's currency, for the books
 //! (`docs/OWNER-COINS-RULES.md`, OC-48 to OC-51).
@@ -72,6 +78,7 @@ pub mod price;
 pub mod range_outbox;
 pub mod receipts;
 pub mod refunds;
+pub mod requests;
 pub mod say;
 pub mod settings_roster;
 pub mod settle_owed;
@@ -116,6 +123,10 @@ pub use range_outbox::{PendingRange, RangeOutbox, RangeOutboxError, MAX_PENDING_
 pub use receipts::{MergeOffer, MergeRefused, ReceiptsLine, FEE_FILE, MERGE_MIN_COINS};
 pub use refunds::{
     Applied, CashRefundSeen, Evidence, IntakeError, NoteKind, RefundIntake, RefundNote, Stopped,
+};
+pub use requests::{
+    return_label, MadeRequest, PendingArrival, RequestContext, RequestError, RequestsOff, ReturnAdded,
+    Shared, MAX_ARRIVALS, REQUEST_ARRIVALS_FILE, REQUEST_BOOK_FILE,
 };
 pub use settings_roster::{RosterEntry, RosterError, SettingsRoster};
 pub use settle_owed::{
