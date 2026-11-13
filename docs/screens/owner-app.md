@@ -623,7 +623,6 @@ core's own words, which the binding does not carry yet:
 | SS30_SIGNED_NEXT | Press Send. |
 | SS42_TITLE | Move to the new wallet |
 | SS42_WALLET_LABEL | New wallet's description |
-| SS42_INDEX_LABEL | Address number |
 | SS42_EVERYTHING | Everything in the starter wallet goes to the new wallet in one payment. |
 | SS42_INVALID | That description is not a wallet this phone can read. |
 | SS42_CREDENTIAL_ONLY | This last step takes the phone's PIN, not a fingerprint. |

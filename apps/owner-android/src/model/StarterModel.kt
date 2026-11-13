@@ -371,7 +371,12 @@ class StarterStore(base: File) {
     fun saveRecord(r: StarterRecord) = write(RECORD, r.toText().toByteArray(Charsets.UTF_8))
     fun loadRecord(): StarterRecord? = read(RECORD)?.let { StarterRecord.parse(it.toString(Charsets.UTF_8)) }
 
-    /** A signed payment that waits to be sent and to be confirmed once (SS-42, SS-43): its ID, then the transaction. */
+    /** The new wallet's description the move was made to, kept so that the pinned wallet can change to it (SS-41, SS-43). */
+    fun saveNewWallet(description: String) = write(NEW_WALLET, description.toByteArray(Charsets.UTF_8))
+
+    fun loadNewWallet(): String? = read(NEW_WALLET)?.toString(Charsets.UTF_8)?.takeIf { it.isNotEmpty() }
+
+    /** The move, signed and given to the node's outbox, that is to be confirmed once (SS-42, SS-43): its ID, then the transaction. */
     fun savePending(paid: StarterPaid) = write(PENDING, (paid.txid + "\n").toByteArray(Charsets.UTF_8) + paid.tx)
 
     fun loadPendingTxid(): String? = read(PENDING)?.let { b -> String(b, 0, b.indexOf('\n'.code.toByte()).coerceAtLeast(0), Charsets.UTF_8).ifEmpty { null } }
@@ -397,6 +402,7 @@ class StarterStore(base: File) {
         const val WALLET = "wallet.txt"
         const val RECORD = "record.txt"
         const val PENDING = "pending.tx"
+        const val NEW_WALLET = "new-wallet.txt"
 
         /** The Keystore key of the starter, apart from every other key of the app. */
         const val KEY_ALIAS = "openbmt-owner-starter-v1"
@@ -422,10 +428,9 @@ object StarterPayModel {
         return out
     }
 
-    /** SS-42: before the owner authenticates, the move says it takes everything to the new wallet's address [index]. */
-    fun moveBeforeLines(newWallet: String, index: Long, feeRatePerKvb: Long): List<Pair<String, String>> = listOf(
+    /** SS-42: before the owner authenticates, the move says it takes everything to the new wallet. */
+    fun moveBeforeLines(newWallet: String, feeRatePerKvb: Long): List<Pair<String, String>> = listOf(
         StarterWords.moveWalletLabel to newWallet,
-        StarterWords.moveIndexLabel to index.toString(),
         StarterWords.payFeeRate to "${feeRatePerKvb / 1000}.${(feeRatePerKvb % 1000).toString().padStart(3, '0')} sat/vB",
     )
 

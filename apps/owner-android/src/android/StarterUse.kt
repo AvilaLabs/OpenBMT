@@ -8,12 +8,12 @@ import org.openbmt.app.SayWords
 import org.openbmt.app.Tones
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
+import org.openbmt.owner.OwnRepinKind
 import org.openbmt.owner.OwnerStarter
 import org.openbmt.owner.ReceiptsKind
 import org.openbmt.owner.RefundRow
 import org.openbmt.owner.StageKind
 import org.openbmt.owner.StarterChangeKind
-import org.openbmt.owner.StarterCoin
 import org.openbmt.owner.StarterPaid
 
 // Using the starter wallet (`docs/START-SIMPLE-RULES.md`): the home line (SS-36), the upgrade screen and "Not yet"
@@ -21,21 +21,6 @@ import org.openbmt.owner.StarterPaid
 // deleting of the key (SS-43). The library decides the state of the limit and signs; this file shows what the owner is
 // to see before they prove they are there, and carries their choices. The data key is opened only for one call and
 // overwritten (`StarterKeys.kt`).
-
-/**
- * What the app does not have yet: a view of the starter wallet's coins (txid, output, the payment that made it, its
- * confirmations) and of the move's confirmations. The binding has no op for either, so [NoChain] says nothing and the
- * payment and delete screens say why they cannot go on.
- */
-internal interface StarterChain {
-    fun coins(): List<StarterCoin>?
-    fun confirmations(txid: String): Long?
-}
-
-internal object NoChain : StarterChain {
-    override fun coins(): List<StarterCoin>? = null
-    override fun confirmations(txid: String): Long? = null
-}
 
 /** The least confirmations of a coin that a payment of the starter wallet spends. */
 private const val MIN_CONFIRMATIONS = 1L
@@ -50,12 +35,12 @@ internal fun Controller.starterRecord(): StarterRecord? = try {
 
 // ---- the home line and the upgrade screen (SS-36, SS-37) -----------------------------------------------------------------
 
-/** Where the wallet stands, from what it holds now (what the node says the wallet can spend); null when there is no starter key on the phone. */
+/** Where the wallet stands, from what it holds now (confirmed coins and payments on their way, as the node's watch counts them); null when there is no starter key on the phone. */
 internal fun Controller.starterLine(n: OwnerNode): HomeLine? {
     if (!starter.store.hasSealed()) return null
     val record = starterRecord() ?: return null
     val held = try {
-        n.status().balanceSats
+        n.starterHeld()
     } catch (_: OwnerException) {
         return null
     }
@@ -205,7 +190,6 @@ internal fun Controller.showStarterPay() {
 
 /** SS-31: every address in full and every amount before the owner proves they are there. */
 private fun Controller.starterPayConfirm(n: OwnerNode, r: RefundRow) {
-    val coins = starter.chain.coins() ?: return centre(StarterWords.noCoinView, listOf(ui.button(StarterWords.backButton) { showStarterPay() }), title = StarterWords.payTitle)
     val rate = try {
         OwnerStarter.feeRate(recentRate(n), null)
     } catch (e: OwnerException) {
@@ -216,11 +200,8 @@ private fun Controller.starterPayConfirm(n: OwnerNode, r: RefundRow) {
     val msg = Slot(act)
     val views = listOf(ui.facts(StarterPayModel.beforeLines(r.address, r.sats, rate)), ui.text(StarterWords.payAuthorise, 16f), msg)
     val go = ui.primary(StarterWords.authPay) {
-        starterSign(msg, false, StarterWords.authPay, { showStarterPay() }) { sealed, key, record ->
-            OwnerStarter.pay(
-                sealed, key, setup?.network ?: AppConfig.NETWORK, r.address, r.sats, rate, record.changeIndex,
-                MIN_CONFIRMATIONS, n.status().tipHeight, coins,
-            )
+        starterSign(n, msg, false, StarterWords.authPay, { showStarterPay() }, listOf(r.id), null) { sealed, key, _ ->
+            n.starterPay(sealed, key, r.id, rate, MIN_CONFIRMATIONS)
         }
     }
     screen(StarterWords.payTitle, views, listOf(go, ui.button(StarterWords.backButton) { showStarterPay() }), back = { showStarterPay() })
@@ -231,10 +212,13 @@ private fun Controller.starterPayConfirm(n: OwnerNode, r: RefundRow) {
  * the phone dropped goes to the restore (SS-23). [credentialOnly]: the final move asks for the phone's PIN (SS-21).
  */
 private fun Controller.starterSign(
+    n: OwnerNode,
     msg: Slot,
     credentialOnly: Boolean,
     description: String,
     back: () -> Unit,
+    refunds: List<Long>,
+    newWallet: String?,
     sign: (sealed: ByteArray, key: ByteArray, record: StarterRecord) -> StarterPaid,
 ) {
     val sealed = starter.store.loadSealed()
@@ -250,7 +234,7 @@ private fun Controller.starterSign(
             } catch (e: LinkageError) {
                 return@starterWithDataKey msg.show(words(AppWords.libraryMissing(e.message)))
             }
-            showStarterSigned(paid, record, credentialOnly, back)
+            showStarterSigned(n, paid, record, credentialOnly, refunds, newWallet, back)
         },
         gone = { showStarterKeyGone() },
         failed = { msg.show(words(StarterWords.said(StarterWords.authFailed, Tones.STOP))) },
@@ -258,17 +242,33 @@ private fun Controller.starterSign(
 }
 
 /** What was signed, shown in full before it goes out: every address, every amount, the fee and the change. */
-private fun Controller.showStarterSigned(paid: StarterPaid, record: StarterRecord, isMove: Boolean, back: () -> Unit) {
+private fun Controller.showStarterSigned(
+    n: OwnerNode,
+    paid: StarterPaid,
+    record: StarterRecord,
+    isMove: Boolean,
+    refunds: List<Long>,
+    newWallet: String?,
+    back: () -> Unit,
+) {
     val msg = Slot(act)
     val send = ui.primary(StarterWords.paySendButton) {
         try {
-            starter.store.savePending(paid)
+            // The move is kept first, so that its confirmations are asked of the node by its ID and the new wallet is
+            // there for the pinned wallet to change to; then the node's outbox takes it, and the app sends nothing.
+            if (isMove) {
+                starter.store.savePending(paid)
+                newWallet?.let { starter.store.saveNewWallet(it) }
+            }
             if (paid.changeIndex != null) starter.store.saveRecord(record.withNextChange())
+            n.starterSend(paid.tx, refunds)
             centre(
                 StarterWords.signed,
                 listOf(ui.primary(StarterWords.doneButton) { if (isMove) showStarterDelete() else showStarter() }),
                 extra = listOf(ui.text(paid.txid, 14f, mono = true)), title = StarterWords.screenTitle,
             )
+        } catch (e: OwnerException) {
+            msg.show(words(e.sayWords()))
         } catch (e: IOException) {
             msg.show(words(AppWords.fileNotSaved(e.message)))
         }
@@ -284,23 +284,17 @@ internal fun Controller.showStarterMove() {
     starterChecked(CheckStage.Paying, back = { showStarter() }) {
         val msg = Slot(act)
         val wallet = ui.field(StarterWords.moveWalletLabel, lines = 3, mono = true)
-        val index = ui.field(StarterWords.moveIndexLabel).also { it.setText("0") }
-        val views = listOf(
-            ui.text(StarterWords.moveEverything, 16f), ui.labelled(StarterWords.moveWalletLabel, wallet),
-            ui.labelled(StarterWords.moveIndexLabel, index), msg,
-        )
+        val views = listOf(ui.text(StarterWords.moveEverything, 16f), ui.labelled(StarterWords.moveWalletLabel, wallet), msg)
         val go = ui.primary(StarterWords.authMove) {
             val description = wallet.text.toString().trim()
-            val at = index.text.toString().trim().toLongOrNull()?.takeIf { it >= 0 }
-            if (description.isEmpty() || at == null) return@primary msg.show(words(StarterWords.said(StarterWords.moveInvalid, Tones.STOP)))
-            starterMoveConfirm(n, description, at)
+            if (description.isEmpty()) return@primary msg.show(words(StarterWords.said(StarterWords.moveInvalid, Tones.STOP)))
+            starterMoveConfirm(n, description)
         }
         screen(StarterWords.moveTitle, views, listOf(go, ui.button(StarterWords.backButton) { showStarter() }), back = { showStarter() })
     }
 }
 
-private fun Controller.starterMoveConfirm(n: OwnerNode, newWallet: String, index: Long) {
-    val coins = starter.chain.coins() ?: return centre(StarterWords.noCoinView, listOf(ui.button(StarterWords.backButton) { showStarterMove() }), title = StarterWords.moveTitle)
+private fun Controller.starterMoveConfirm(n: OwnerNode, newWallet: String) {
     val rate = try {
         OwnerStarter.feeRate(recentRate(n), null)
     } catch (e: OwnerException) {
@@ -310,11 +304,11 @@ private fun Controller.starterMoveConfirm(n: OwnerNode, newWallet: String, index
     }
     val msg = Slot(act)
     val views = listOf(
-        ui.facts(StarterPayModel.moveBeforeLines(newWallet, index, rate)), ui.text(StarterWords.moveCredentialOnly, 16f), msg,
+        ui.facts(StarterPayModel.moveBeforeLines(newWallet, rate)), ui.text(StarterWords.moveCredentialOnly, 16f), msg,
     )
     val go = ui.primary(StarterWords.authMove) {
-        starterSign(msg, true, StarterWords.authMove, { showStarterMove() }) { sealed, key, _ ->
-            OwnerStarter.move(sealed, key, newWallet, index, rate, MIN_CONFIRMATIONS, n.status().tipHeight, coins)
+        starterSign(n, msg, true, StarterWords.authMove, { showStarterMove() }, emptyList(), newWallet) { sealed, key, _ ->
+            n.starterMoveSwitched(sealed, key, newWallet, nowSecs(), rate, MIN_CONFIRMATIONS)
         }
     }
     screen(StarterWords.moveTitle, views, listOf(go, ui.button(StarterWords.backButton) { showStarterMove() }), back = { showStarterMove() })
@@ -322,8 +316,13 @@ private fun Controller.starterMoveConfirm(n: OwnerNode, newWallet: String, index
 
 /** SS-43: once the move has one confirmation the sealed seed, the wrapped key and the Keystore key are deleted. */
 internal fun Controller.showStarterDelete() {
+    val n = node ?: return begin()
     val txid = starter.store.loadPendingTxid() ?: return showStarter()
-    val confirmations = starter.chain.confirmations(txid)
+    val confirmations = try {
+        n.starterConfirmations(txid)
+    } catch (_: OwnerException) {
+        null
+    }
     val ready = try {
         StarterPayModel.mayDelete(LibraryStarter, confirmations)
     } catch (_: OwnerException) {
@@ -340,10 +339,32 @@ internal fun Controller.showStarterDelete() {
             ui.danger(StarterWords.deleteButton) {
                 starter.store.deleteKey()
                 starter.keystore.delete()
+                starterRepin(n)
                 centre(StarterCoreWords.deleted(LibraryStarter), listOf(ui.primary(StarterWords.doneButton) { showHome() }), title = StarterWords.screenTitle)
             },
         )
     }
     actions.add(ui.button(StarterWords.backButton) { showStarter() })
     screen(StarterWords.deleteTitle, views, actions, back = { showStarter() })
+}
+
+/**
+ * SS-41: once every counter has switched, the owner's pinned wallet becomes the new wallet, which the node watches from its
+ * next start. It is asked after the move has its confirmation and the key is gone, because until then the starter wallet's
+ * coins are read from the pinned wallet. A counter that has not switched leaves it as it is; the call is made again at the
+ * next visit.
+ */
+private fun Controller.starterRepin(n: OwnerNode) {
+    val newWallet = try {
+        starter.store.loadNewWallet()
+    } catch (_: IOException) {
+        null
+    } ?: return
+    try {
+        val done = n.ownRepin(newWallet)
+        if (done.kind != OwnRepinKind.NotReady) ownStore.saveWallet(done.wallet)
+    } catch (_: OwnerException) {
+    } catch (_: IOException) {
+    } catch (_: LinkageError) {
+    }
 }

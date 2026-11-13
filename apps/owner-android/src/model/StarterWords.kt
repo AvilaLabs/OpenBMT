@@ -148,7 +148,6 @@ object StarterWords {
     val signedNext = say("SS30_SIGNED_NEXT", "Press Send.")
     val moveTitle = say("SS42_TITLE", "Move to the new wallet")
     val moveWalletLabel = say("SS42_WALLET_LABEL", "New wallet's description")
-    val moveIndexLabel = say("SS42_INDEX_LABEL", "Address number")
     val moveEverything = say("SS42_EVERYTHING", "Everything in the starter wallet goes to the new wallet in one payment.")
     val moveInvalid = say("SS42_INVALID", "That description is not a wallet this phone can read.")
     val moveCredentialOnly = say("SS42_CREDENTIAL_ONLY", "This last step takes the phone's PIN, not a fingerprint.")

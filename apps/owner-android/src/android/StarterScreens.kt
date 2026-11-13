@@ -45,9 +45,6 @@ internal class StarterRuntime(base: File) {
 
     /** Set when the app comes into view: the upgrade screen is the first screen once (SS-37). */
     var gate = false
-
-    /** The library's coins and confirmations; none yet (see `StarterUse.kt`). */
-    var chain: StarterChain = NoChain
 }
 
 /** SS-11: clears the picture of words, and drops a setup or restore that is open. */
