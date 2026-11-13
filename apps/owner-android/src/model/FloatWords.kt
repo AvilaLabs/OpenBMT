@@ -38,7 +38,7 @@ object FloatWords {
     val refundListEmpty = "No refund is waiting to be paid."
     val refundReadyHeading = "These refunds are ready. Tap one to pay it from the float."
     val refundTooBig = "Some ready refunds are more than the float holds. Pay those from the shop's savings, or refill the float first."
-    val keyGone = "The float's key is no longer on this phone, so nothing can be paid from it. The money in the float is safe: the stick makes the float's words again from the shop's words."
+    val keyGone = "The float's key is no longer on this phone, as happens when the screen lock is removed, so nothing can be paid from it. The money in the float is safe."
     val payDoneHeading = "Refund on its way"
     val payDoneWhat = "The float paid this refund, and this phone is sending it to the customer's address."
     val payDoneNext = "Nothing to do."
@@ -52,10 +52,10 @@ object FloatWords {
 
     // FL-06: scanning the float's words again, to bring back the key the phone dropped. Not written yet (OA-114): each is a
     // placeholder that shows its own name where the words will be.
-    val restoreScan = "WORDS_NEEDED_OA_FL06_SCAN"
-    val restoreWhat = "WORDS_NEEDED_OA_FL06_WHAT"
-    val restoreDone = "WORDS_NEEDED_OA_FL06_DONE"
-    val restoreNeedsFloat = "WORDS_NEEDED_OA_FL06_NO_FLOAT"
+    val restoreScan = "Bring the key back"
+    val restoreWhat = "Make the float's words on the stick again, with the same number as before, and scan them here."
+    val restoreDone = "The float's key is back on this phone. Refunds can be paid from the float again."
+    val restoreNeedsFloat = "This phone has no record of the float to bring its key into. Set the float up again from its page."
 
     /** Every text, in screen order. */
     fun all(): List<String> = listOf(

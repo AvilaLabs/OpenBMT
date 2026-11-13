@@ -202,14 +202,11 @@ fn sc_12_every_word_keeps_the_rules() {
     assert_eq!(check_distinct(&written_words()), Ok(()));
 }
 
-/// The words that are written: a placeholder stands for words not written
-/// yet and is left out of the checks of a sentence (OA-114), as `own_say`'s
-/// own checks leave it out.
+/// Every word of the owner library: none is a placeholder (OA-114).
 fn written_words() -> Vec<(String, Words)> {
-    all_words()
-        .into_iter()
-        .filter(|(_, w)| !crate::own_say::is_placeholder(w))
-        .collect()
+    let all = all_words();
+    assert!(all.iter().all(|(_, w)| !crate::own_say::is_placeholder(w)));
+    all
 }
 
 #[test]

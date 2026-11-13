@@ -246,10 +246,11 @@ impl FloatRefusal {
                 "Nothing was moved. Check the shop's wallet is connected, then try again.",
                 code,
             ),
-            Self::NotThisFloat => needed(
-                "WORDS_NEEDED_FL06_HEADING",
-                "WORDS_NEEDED_FL06_WHAT",
-                "WORDS_NEEDED_FL06_NEXT",
+            Self::NotThisFloat => stop(
+                "Not this float's words",
+                "These words make a different wallet from the float this phone keeps, so nothing was kept.",
+                "Check that the stick made them from this shop's words with the same number as before, then scan them again.",
+                code,
             ),
         };
         match self {
@@ -264,13 +265,6 @@ impl FloatRefusal {
 
 fn stop(heading: &str, what: &str, next: &str, code: &'static str) -> Words {
     Words::new(Tone::Stop, heading, what, Who::Owner, next).code(code)
-}
-
-/// Words that are still to be written: a placeholder for each of the heading
-/// and the two sentences, as `own_say::needed` does for the owner's own
-/// wallet (OA-114). [`crate::own_say::is_placeholder`] tells them.
-fn needed(heading: &'static str, what: &'static str, next: &'static str) -> Words {
-    Words::new(Tone::Stop, heading, what, Who::Owner, next).code("FL-06")
 }
 
 /// A value of each refusal, with the name of its variant, for the words of

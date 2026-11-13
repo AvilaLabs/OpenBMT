@@ -4228,6 +4228,6 @@ object AppModelTest {
         val words = FloatWords.all()
         ok(words.size == 49 && words.toSet().size == words.size, "each float text is written once")
         ok(words.none { it.isBlank() }, "no float text is empty")
-        ok(FloatWords.placeholders().size == 4 && FloatWords.placeholders().all { it.startsWith("WORDS_NEEDED_OA_FL06_") }, "the only float texts not written yet are the four of FL-06, each named after its rule")
+        ok(FloatWords.placeholders().isEmpty(), "every float text is written")
     }
 }

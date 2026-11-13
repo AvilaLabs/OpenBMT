@@ -743,17 +743,9 @@ fn fl_35_a_sweep_that_leaves_a_coin_out_fails_the_check() {
 fn fl_words_every_state_has_its_own_words_and_names_its_rule() {
     let all = all_float_words();
     assert!(all.len() >= 19);
-    // FL-06 is a placeholder until its words are written (OA-114).
-    let placeholders: Vec<&str> = all
+    assert!(all
         .iter()
-        .filter(|(_, w)| openbmt_owner::own_say::is_placeholder(w))
-        .map(|(n, _)| n.as_str())
-        .collect();
-    assert_eq!(placeholders, ["FloatRefusal/NotThisFloat"]);
-    let all: Vec<_> = all
-        .into_iter()
-        .filter(|(_, w)| !openbmt_owner::own_say::is_placeholder(w))
-        .collect();
+        .all(|(_, w)| !openbmt_owner::own_say::is_placeholder(w)));
     for (name, w) in &all {
         assert!(w.heading.chars().count() < 28, "{name}");
         assert_ne!(w.heading, w.what, "{name}");
@@ -913,12 +905,10 @@ fn fl_06_words_of_another_index_or_another_shop_are_refused() {
 }
 
 #[test]
-fn fl_06_the_words_of_the_refusal_are_the_placeholder_that_names_its_rule() {
+fn fl_06_the_refusal_has_its_own_words_and_names_its_rule() {
     let w = FloatRefusal::NotThisFloat.words();
-    assert!(openbmt_owner::own_say::is_placeholder(&w));
-    assert_eq!(w.heading, "WORDS_NEEDED_FL06_HEADING");
-    assert_eq!(w.what, "WORDS_NEEDED_FL06_WHAT");
-    assert_eq!(w.next, "WORDS_NEEDED_FL06_NEXT");
+    assert!(!openbmt_owner::own_say::is_placeholder(&w));
+    assert_eq!(w.heading, "Not this float's words");
     assert_eq!(w.code, Some("FL-06"));
 }
 
