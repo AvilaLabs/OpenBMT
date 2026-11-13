@@ -3727,6 +3727,16 @@ object AppModelTest {
         ok(use.contains("n.starterHeld()") && use.contains("n.starterPay(") && use.contains("n.starterMoveSwitched(") && use.contains("n.starterSend(") && use.contains("n.starterConfirmations(") && use.contains("n.ownRepin("), "the node's watch and outbox are the ones asked")
         ok(!use.contains("moveIndexLabel") && !use.contains("ui.field(StarterWords.moveIndex"), "the move screen has no field for the address number")
         ok(!use.contains("broadcast") && !use.contains("HttpURLConnection"), "the app does not send a transaction itself")
+        // SS-43: a payment that came to the starter wallet after the move is the node's fact, shown on home with the offer to
+        // restore and move it; the three placeholders of the old coin view are gone.
+        ok(use.contains("n.starterLate()") && use.contains("n.starterLateMove(") && use.contains("StarterWords.late"), "the late payment is asked of the node and moved from the former wallet")
+        ok(source("src/android/Screens.kt").contains("starterLateView(n)"), "home shows the late payment")
+        ok(use.contains("n.ownPinnedWallet()") && source("src/android/Controller.kt").contains("starterWalletFileFollows(n)"), "a start finishes a re-pin whose wallet file was not written")
+        ok(use.contains("stopNode()") && use.contains("startNode()"), "the node starts again after the re-pin")
+        val wordsText = source("src/model/StarterWords.kt")
+        ok(!wordsText.contains("NO_COIN_VIEW") && !wordsText.contains("noCoinView"), "the old coin-view placeholders are gone")
+        ok(listOf("HEADING", "WHAT", "NEXT").all { StarterWords.all().any { (k, n) -> k == "SS43_LATE_PAYMENT_$it" && n == "WORDS_NEEDED_OA_SS43_LATE_PAYMENT_$it" } }, "the late payment has its three placeholders")
+        ok(StarterWords.isPlaceholder(StarterWords.late) && StarterWords.late.heading == "WORDS_NEEDED_OA_SS43_LATE_PAYMENT_HEADING", "its words show the name")
 
         // SS-12: every screen that shows or takes words goes through the one helper.
         val helper = source("src/android/StarterWindow.kt")

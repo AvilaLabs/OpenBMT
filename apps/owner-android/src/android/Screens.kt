@@ -86,6 +86,8 @@ internal fun Controller.showHome(): Unit = withNode { n ->
             views.add(hero)
             // SS-36: the starter wallet's line, which cannot be dismissed.
             starterLine(n)?.let { views.add(starterLineView(it)) }
+            // SS-43: a payment that came to the starter wallet after the move.
+            starterLateView(n)?.let { views.add(it) }
             // Home has no count of open approvals, of what waits to be delivered or of the refund queue, and it adds no
             // library call to get one: the card shows a row when a count is given, and none is given today (OA-91).
             val counts = listOf<Pair<String, Int?>>("Open approvals" to null, "Waiting to be delivered" to null, "Refund queue" to null)

@@ -14,6 +14,7 @@ import org.openbmt.owner.ReceiptsKind
 import org.openbmt.owner.RefundRow
 import org.openbmt.owner.StageKind
 import org.openbmt.owner.StarterChangeKind
+import org.openbmt.owner.StarterLate
 import org.openbmt.owner.StarterPaid
 
 // Using the starter wallet (`docs/START-SIMPLE-RULES.md`): the home line (SS-36), the upgrade screen and "Not yet"
@@ -31,6 +32,70 @@ internal fun Controller.starterRecord(): StarterRecord? = try {
     starter.store.loadRecord()
 } catch (_: IOException) {
     null
+}
+
+// ---- a payment that came late (SS-43) ---------------------------------------------------------------------------------------------
+
+/** SS-43: the former wallets the node saw a coin arrive at after the re-pin; none when the node cannot say. */
+private fun Controller.starterLate(n: OwnerNode): List<StarterLate> = try {
+    n.starterLate()
+} catch (_: OwnerException) {
+    emptyList()
+} catch (_: LinkageError) {
+    emptyList()
+}
+
+/**
+ * SS-43: a payment that reached the starter wallet after the move is the node's own fact, shown on the home screen with the
+ * offer to restore the key (SS-23) and move it. Null when nothing came late.
+ */
+internal fun Controller.starterLateView(n: OwnerNode): View? {
+    val late = starterLate(n)
+    if (late.isEmpty()) return null
+    val slot = Slot(act, 12)
+    val action = if (starter.store.hasSealed()) StarterWords.moveTitle else StarterWords.restoreButton
+    slot.show(
+        words(StarterWords.late),
+        ui.facts(listOf(StarterWords.payAmountLabel to Format.sats(late.sumOf { it.sats }))),
+        ui.primary(action) { starterLateStart() },
+    )
+    return slot
+}
+
+/** With no key on the phone the move starts at the restore (SS-23); with one, at the move itself. */
+private fun Controller.starterLateStart() {
+    if (starter.store.hasSealed()) showStarterLateMove() else starterChecked(CheckStage.Words, back = { showHome() }) { showStarterRestore() }
+}
+
+/** SS-43: the move of what came late to the former wallet's address, to the wallet in force, with the phone's PIN. */
+internal fun Controller.showStarterLateMove() {
+    val n = node ?: return begin()
+    val late = starterLate(n).firstOrNull() ?: return showHome()
+    starterChecked(CheckStage.Paying, back = { showHome() }) { starterLateConfirm(n, late) }
+}
+
+private fun Controller.starterLateConfirm(n: OwnerNode, late: StarterLate) {
+    val rate = try {
+        OwnerStarter.feeRate(recentRate(n), null)
+    } catch (e: OwnerException) {
+        return centre(e.sayWords(), listOf(ui.button(StarterWords.backButton) { showHome() }), title = StarterWords.moveTitle)
+    } catch (e: LinkageError) {
+        return centre(AppWords.libraryMissing(e.message), listOf(ui.button(StarterWords.backButton) { showHome() }), title = StarterWords.moveTitle)
+    }
+    val newWallet = try {
+        starter.store.loadNewWallet()
+    } catch (_: IOException) {
+        null
+    }
+    val lines = listOf(StarterWords.payAmountLabel to Format.sats(late.sats)) + StarterPayModel.moveBeforeLines(newWallet.orEmpty(), rate).drop(if (newWallet == null) 1 else 0)
+    val msg = Slot(act)
+    val views = listOf(ui.facts(lines), ui.text(StarterWords.moveCredentialOnly, 16f), msg)
+    val go = ui.primary(StarterWords.authMove) {
+        starterSign(n, msg, true, StarterWords.authMove, { showHome() }, emptyList(), null) { sealed, key, _ ->
+            n.starterLateMove(sealed, key, late.wallet, nowSecs(), rate, MIN_CONFIRMATIONS)
+        }
+    }
+    screen(StarterWords.moveTitle, views, listOf(go, ui.button(StarterWords.backButton) { showHome() }), back = { showHome() })
 }
 
 // ---- the home line and the upgrade screen (SS-36, SS-37) -----------------------------------------------------------------
@@ -153,6 +218,7 @@ internal fun Controller.showStarterManage() {
         RowItem(StarterWords.payTitle) { showStarterPay() },
         RowItem(StarterWords.moveTitle) { showStarterMove() },
     )
+    if (starterLate(n).isNotEmpty()) rows.add(RowItem(StarterWords.lateHeading) { showStarterLateMove() })
     if (starter.store.loadPendingTxid() != null) rows.add(RowItem(StarterWords.deleteTitle) { showStarterDelete() })
     views.add(ui.rows(rows))
     screen(StarterWords.screenTitle, views, listOf(ui.button(StarterWords.backButton) { showHome() }), back = { showHome() })
@@ -339,8 +405,9 @@ internal fun Controller.showStarterDelete() {
             ui.danger(StarterWords.deleteButton) {
                 starter.store.deleteKey()
                 starter.keystore.delete()
-                starterRepin(n)
-                centre(StarterCoreWords.deleted(LibraryStarter), listOf(ui.primary(StarterWords.doneButton) { showHome() }), title = StarterWords.screenTitle)
+                val repinned = starterRepin(n)
+                // The node watches the wallet it was started with: after the re-pin it starts again with the new one.
+                centre(StarterCoreWords.deleted(LibraryStarter), listOf(ui.primary(StarterWords.doneButton) { if (repinned) { stopNode(); startNode() } else showHome() }), title = StarterWords.screenTitle)
             },
         )
     }
@@ -350,19 +417,39 @@ internal fun Controller.showStarterDelete() {
 
 /**
  * SS-41: once every counter has switched, the owner's pinned wallet becomes the new wallet, which the node watches from its
- * next start. It is asked after the move has its confirmation and the key is gone, because until then the starter wallet's
- * coins are read from the pinned wallet. A counter that has not switched leaves it as it is; the call is made again at the
- * next visit.
+ * next start; the starter wallet stays watched as a former wallet (SS-43). It is asked after the move has its confirmation
+ * and the key is gone, because until then the starter wallet's coins are read from the pinned wallet. A counter that has not
+ * switched leaves it as it is. A stop between the shop's file and the wallet's file is finished at the next start
+ * (`adopt`). True when the node is to start again.
  */
-private fun Controller.starterRepin(n: OwnerNode) {
+private fun Controller.starterRepin(n: OwnerNode): Boolean {
     val newWallet = try {
         starter.store.loadNewWallet()
     } catch (_: IOException) {
         null
-    } ?: return
-    try {
+    } ?: return false
+    return try {
         val done = n.ownRepin(newWallet)
         if (done.kind != OwnRepinKind.NotReady) ownStore.saveWallet(done.wallet)
+        done.kind == OwnRepinKind.Done
+    } catch (_: OwnerException) {
+        false
+    } catch (_: IOException) {
+        false
+    } catch (_: LinkageError) {
+        false
+    }
+}
+
+/**
+ * SS-41: the wallet file the app starts the node with is the shop's pinned wallet. When the shop's file was written for the
+ * new wallet and the app's was not (a stop between the two), the node started with the recorded new wallet, and its file is
+ * written now.
+ */
+internal fun Controller.starterWalletFileFollows(n: OwnerNode) {
+    try {
+        val pinned = n.ownPinnedWallet()
+        if (!pinned.contentEquals(ownStore.loadWallet())) ownStore.saveWallet(pinned)
     } catch (_: OwnerException) {
     } catch (_: IOException) {
     } catch (_: LinkageError) {

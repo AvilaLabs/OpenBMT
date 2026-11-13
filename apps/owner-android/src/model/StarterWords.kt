@@ -140,9 +140,6 @@ object StarterWords {
     val payAmountLabel = say("SS31_AMOUNT_LABEL", "Amount")
     val payFeeLabel = say("SS31_FEE_LABEL", "Fee")
     val payChangeLabel = say("SS31_CHANGE_LABEL", "Back to the starter wallet")
-    val noCoinViewHeading = need("WORDS_NEEDED_OA_SS30_NO_COIN_VIEW_HEADING")
-    val noCoinViewWhat = need("WORDS_NEEDED_OA_SS30_NO_COIN_VIEW_WHAT")
-    val noCoinViewNext = need("WORDS_NEEDED_OA_SS30_NO_COIN_VIEW_NEXT")
     val signedHeading = say("SS30_SIGNED_HEADING", "Signed, not sent yet")
     val signedWhat = say("SS30_SIGNED_WHAT", "The payment is signed. Check it once more before it goes.")
     val signedNext = say("SS30_SIGNED_NEXT", "Press Send.")
@@ -154,6 +151,9 @@ object StarterWords {
     val deleteTitle = say("SS43_TITLE", "Delete the starter key")
     val deleteWaiting = say("SS43_WAITING", "The move is not confirmed yet. The key is deleted once it has one confirmation.")
     val deleteButton = say("SS43_DELETE_BUTTON", "Delete the key")
+    val lateHeading = need("WORDS_NEEDED_OA_SS43_LATE_PAYMENT_HEADING")
+    val lateWhat = need("WORDS_NEEDED_OA_SS43_LATE_PAYMENT_WHAT")
+    val lateNext = need("WORDS_NEEDED_OA_SS43_LATE_PAYMENT_NEXT")
     val deleteUnknown = say("SS43_CONFIRMATIONS_UNKNOWN", "The phone does not know yet whether the move is confirmed.")
 
     /** Words that are still to be written: the placeholder stands in the heading and both sentences. */
@@ -172,7 +172,7 @@ object StarterWords {
     val sealed: SayWords get() = said(sealedHeading, sealedWhat, sealedNext, Tones.GOOD)
     val keyGoneFallback: SayWords get() = said(keyGoneFallbackHeading, keyGoneFallbackWhat, keyGoneFallbackNext, Tones.STOP)
     val restored: SayWords get() = said(restoredHeading, restoredWhat, restoredNext, Tones.GOOD)
-    val noCoinView: SayWords get() = said(noCoinViewHeading, noCoinViewWhat, noCoinViewNext, Tones.STOP)
+    val late: SayWords get() = said(lateHeading, lateWhat, lateNext, Tones.INFO)
     val signed: SayWords get() = said(signedHeading, signedWhat, signedNext, Tones.INFO)
 
     /** Every key and its text, in order, for docs/screens/owner-app.md. */

@@ -615,9 +615,6 @@ core's own words, which the binding does not carry yet:
 | SS31_AMOUNT_LABEL | Amount |
 | SS31_FEE_LABEL | Fee |
 | SS31_CHANGE_LABEL | Back to the starter wallet |
-| SS30_NO_COIN_VIEW_HEADING | WORDS_NEEDED_OA_SS30_NO_COIN_VIEW_HEADING |
-| SS30_NO_COIN_VIEW_WHAT | WORDS_NEEDED_OA_SS30_NO_COIN_VIEW_WHAT |
-| SS30_NO_COIN_VIEW_NEXT | WORDS_NEEDED_OA_SS30_NO_COIN_VIEW_NEXT |
 | SS30_SIGNED_HEADING | Signed, not sent yet |
 | SS30_SIGNED_WHAT | The payment is signed. Check it once more before it goes. |
 | SS30_SIGNED_NEXT | Press Send. |
@@ -629,4 +626,7 @@ core's own words, which the binding does not carry yet:
 | SS43_TITLE | Delete the starter key |
 | SS43_WAITING | The move is not confirmed yet. The key is deleted once it has one confirmation. |
 | SS43_DELETE_BUTTON | Delete the key |
+| SS43_LATE_PAYMENT_HEADING | WORDS_NEEDED_OA_SS43_LATE_PAYMENT_HEADING |
+| SS43_LATE_PAYMENT_WHAT | WORDS_NEEDED_OA_SS43_LATE_PAYMENT_WHAT |
+| SS43_LATE_PAYMENT_NEXT | WORDS_NEEDED_OA_SS43_LATE_PAYMENT_NEXT |
 | SS43_CONFIRMATIONS_UNKNOWN | The phone does not know yet whether the move is confirmed. |

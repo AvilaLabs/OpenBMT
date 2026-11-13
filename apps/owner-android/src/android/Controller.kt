@@ -428,6 +428,7 @@ class Controller(internal val act: MainActivity) {
 
     private fun adopt(id: Int, n: OwnerNode) {
         node = n
+        if (setup == null) starterWalletFileFollows(n)
         // The service is started while the app is on screen, which Android allows; it waits for the hand-over (OA-82).
         if (watchStore.enabled()) WatchService.start(act)
         pumpFault = null
