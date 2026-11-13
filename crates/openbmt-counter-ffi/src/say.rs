@@ -73,7 +73,8 @@ type Entry = (
 );
 
 const NOTICES_HEADING: &str = "Box notices not started";
-const NOTICES_WHAT: &str = "This counter could not open its file of notices to the Box, so it did not start.";
+const NOTICES_WHAT: &str =
+    "This counter could not open its file of notices to the Box, so it did not start.";
 const NOTICES_NEXT: &str = "Restart the app. If it keeps failing, check the phone's free space.";
 
 /// The rule strings this layer makes, each with its own words.

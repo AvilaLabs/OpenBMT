@@ -255,7 +255,7 @@ fn settings_reconcile_box_routes_without_demoting_owner_or_retaining_removed_box
 }
 
 #[test]
-fn corrupt_notice_outbox_refuses_start_with_the_notice_placeholders() {
+fn corrupt_notice_outbox_refuses_start_with_the_notice_words() {
     let server = relay();
     let rig = Rig::new();
     std::fs::write(rig.dir().join("notice-outbox"), b"broken").unwrap();
@@ -264,8 +264,14 @@ fn corrupt_notice_outbox_refuses_start_with_the_notice_placeholders() {
     let fault = Rd::error(&response).expect("notice outbox is refused");
     assert_eq!(fault.rule, "BX-40");
     assert_eq!(fault.words.heading, "Box notices not started");
-    assert_eq!(fault.words.what, "This counter could not open its file of notices to the Box, so it did not start.");
-    assert_eq!(fault.words.next, "Restart the app. If it keeps failing, check the phone's free space.");
+    assert_eq!(
+        fault.words.what,
+        "This counter could not open its file of notices to the Box, so it did not start."
+    );
+    assert_eq!(
+        fault.words.next,
+        "Restart the app. If it keeps failing, check the phone's free space."
+    );
 }
 
 #[test]

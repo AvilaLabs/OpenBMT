@@ -52,17 +52,7 @@ fn the_words_of_this_layer_keep_the_rules_and_none_reads_like_another() {
     assert!(all.len() > 30);
     let mut seen = BTreeSet::new();
     for (name, words) in &all {
-        if name == "BX-40" {
-            // These three texts are deliberately placeholders until wording
-            // is supplied; all other entries still pass the sentence checks.
-            assert_eq!(words.heading, "Box notices not started");
-            assert_eq!(words.what, "This counter could not open its file of notices to the Box, so it did not start.");
-            assert_eq!(words.next, "Restart the app. If it keeps failing, check the phone's free space.");
-            assert_eq!(words.tone, Tone::Stop);
-            assert_eq!(words.who, Who::Owner);
-        } else {
-            check(words).unwrap_or_else(|why| panic!("{name}: {why}"));
-        }
+        check(words).unwrap_or_else(|why| panic!("{name}: {why}"));
         assert!(
             seen.insert((words.heading.clone(), words.what.clone())),
             "{name} reads like another"
