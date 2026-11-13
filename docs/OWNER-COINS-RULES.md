@@ -544,6 +544,21 @@ the shop's currency, so the node keeps a log of its own.
   beaten this way leaves the outbox and its entries go back to the queue
   for a new approval, as OC-03 says, also when the first attempt to store
   that failed.
+- **OC-55. A beaten transaction can come back.** A signed transaction that a
+  block beat can still confirm if that block leaves the chain, and a new
+  transaction for the same entries that spends other coins could then
+  confirm beside it and pay them twice. So an entry whose transaction was
+  beaten, whether of the outbox (OC-52) or signed elsewhere (AS-89), is held:
+  it is in no new transaction until the block that beat it is 100 blocks
+  deep, the depth below which the node undoes no block (OC-53). Until then
+  the beaten transaction stays watched, and if it confirms after all its
+  entries are paid with its ID as OC-52 settles a paid one, whatever stage
+  they are in, and an approval or waiting transaction that holds one loses
+  it. At that depth it is no longer watched and the entries go back to the
+  queue. A held entry is shown as held, with the block count left. A new
+  transaction that spends one of the beaten transaction's coins, or an
+  output of the transaction that beat it, cannot confirm beside it, and may
+  pay a held entry at once.
 
 ## What these rules do not say
 

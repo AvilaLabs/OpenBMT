@@ -693,8 +693,9 @@ app, which holds the approver key.
   holds one loses that item, and a waiting transaction that holds one is
   dropped and the caller is told which. The caller reports
   `mark_elsewhere_replaced` when another transaction spent one of its coins:
-  it is no longer watched, and the entries keep their outpoints as AS-68
-  has it. An approval abandoned before the export keeps nothing and behaves
+  it stays watched and its entries are held until that transaction's block
+  is deep, as `docs/OWNER-COINS-RULES.md` OC-55 says, and the entries keep
+  their outpoints as AS-68 has it. An approval abandoned before the export keeps nothing and behaves
   as AS-66 says.
 
   The transaction is watched from the moment of the export, not only after
