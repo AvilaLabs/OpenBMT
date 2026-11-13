@@ -1,7 +1,7 @@
 //! The kernel's random bytes, read with the `getrandom` system call and
 //! nothing else (`docs/START-SIMPLE-RULES.md`, SS-01). The call waits until
 //! the kernel's generator is ready; flags are 0, so it is the same pool as
-//! `/dev/urandom` once that is ready. No Java generator, no pool of our own,
+//! `/dev/urandom` once that is ready. No Java generator, no pool kept by this crate,
 //! no file is opened.
 //!
 //! This crate holds the one `unsafe` block of the starter wallet's randomness:
