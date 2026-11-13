@@ -296,7 +296,7 @@ fn to_hex(bytes: &[u8]) -> String {
 
 fn from_hex(text: &str) -> Result<Vec<u8>, String> {
     let text = text.trim();
-    if text.len() % 2 != 0 || !text.is_ascii() {
+    if !text.len().is_multiple_of(2) || !text.is_ascii() {
         return Err("hex of whole bytes is needed".to_string());
     }
     (0..text.len())

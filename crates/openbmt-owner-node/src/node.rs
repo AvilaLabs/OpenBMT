@@ -1734,14 +1734,13 @@ impl<P: OwnerPort> OwnerNode<P> {
         if let Some(why) = &self.halted {
             return Err(NodeError::NotReady(why.clone()));
         }
-        let at = self
-            .former
-            .iter()
-            .position(FormerWatch::is_float)
-            .ok_or_else(|| NodeError::NotReady("the float is not watched".into()))?;
         let dir = self.dir.clone();
         let tip = self.watcher.chain().tip_height();
-        let f = &mut self.former[at];
+        let f = self
+            .former
+            .iter_mut()
+            .find(|f| f.is_float())
+            .ok_or_else(|| NodeError::NotReady("the float is not watched".into()))?;
         let wallet = f
             .float
             .clone()
