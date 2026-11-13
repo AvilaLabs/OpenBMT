@@ -36,6 +36,7 @@ mod queue;
 mod receipts;
 mod requests;
 mod stopped;
+mod web_orders;
 
 use super::coins::{mine, tx_from};
 use super::{id, Dir, TestClock};
@@ -221,6 +222,7 @@ impl Randomness for Counter {
     }
 }
 
+#[derive(Clone)]
 struct Setup {
     proxy: Option<SocketAddr>,
     without_tor: bool,

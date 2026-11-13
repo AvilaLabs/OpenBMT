@@ -405,7 +405,10 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// The desk index of every request, for the allocation of the next
     /// (RQ-03).
     pub fn request_indexes(&self) -> BTreeSet<u32> {
-        self.requests.indexes()
+        let mut taken = self.requests.indexes();
+        // WO-12: an address given to a store is never given to a request.
+        taken.extend(self.web.indexes());
+        taken
     }
 
     /// The app gives the shop's settings, its time zone and the newest rate
@@ -418,26 +421,26 @@ impl<P: OwnerPort> OwnerNode<P> {
         }
     }
 
-    fn address_of(&self, script: &ScriptBuf) -> String {
+    pub(crate) fn address_of(&self, script: &ScriptBuf) -> String {
         Address::from_script(script, self.network())
             .map_or_else(|_| String::new(), |a| a.to_string())
     }
 
     /// RQ-04: the wallet pinned now: the one a re-pin gave while the node
     /// runs, else the one the node started with.
-    fn pinned_now(&self) -> &ImportedWallet {
+    pub(crate) fn pinned_now(&self) -> &ImportedWallet {
         self.pinned_now.as_ref().unwrap_or(&self.wallet)
     }
 
     /// RQ-04: the checksum of the wallet pinned now.
-    fn current_wallet(&self) -> [u8; 32] {
+    pub(crate) fn current_wallet(&self) -> [u8; 32] {
         PinnedWallet::new(self.pinned_now().clone()).checksum32()
     }
 
     /// RQ-04: the wallet a request was made from: the one pinned now, the
     /// one the node started with (before a re-pin it ran under) or one the
     /// shop pinned before, which the node still follows.
-    fn wallet_of(&self, wallet: Option<[u8; 32]>) -> Option<ImportedWallet> {
+    pub(crate) fn wallet_of(&self, wallet: Option<[u8; 32]>) -> Option<ImportedWallet> {
         let wanted = wallet.unwrap_or_else(|| self.current_wallet());
         let sum = |w: &ImportedWallet| PinnedWallet::new(w.clone()).checksum32();
         if wanted == self.current_wallet() {
@@ -454,13 +457,13 @@ impl<P: OwnerPort> OwnerNode<P> {
     }
 
     /// RQ-04: the script of a request's address, from its own wallet.
-    fn request_script(&self, request: &Request) -> Option<ScriptBuf> {
+    pub(crate) fn request_script(&self, request: &Request) -> Option<ScriptBuf> {
         self.wallet_of(request.wallet)?
             .receive_script(request.address_index)
             .ok()
     }
 
-    fn request_ready(&self) -> Result<(&Loaded, RequestContext), RequestError> {
+    pub(crate) fn request_ready(&self) -> Result<(&Loaded, RequestContext), RequestError> {
         let loaded = self
             .requests
             .state
@@ -474,7 +477,7 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// then take it into memory (RQ-03, RQ-12, RQ-30). `change` may also
     /// change the arrivals. Nothing changes on a refusal or a store that
     /// fails.
-    fn edit<T>(
+    pub(crate) fn edit<T>(
         &mut self,
         change: impl FnOnce(&mut RequestBook, &mut Vec<PendingArrival>) -> Result<T, RequestError>,
     ) -> Result<T, RequestError> {
@@ -792,7 +795,7 @@ impl<P: OwnerPort> OwnerNode<P> {
 
     /// RQ-04: the receive indexes the live watch never sets aside.
     pub(crate) fn desk_kept(&self) -> BTreeSet<u32> {
-        self.requests.indexes()
+        self.request_indexes()
     }
 
     /// RQ-15, RQ-10: a block the coin view applied. Every output to a
@@ -800,17 +803,25 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// credited at the confirmation depth. Called from the place the block
     /// is applied to the view, with the bytes the block came as.
     pub(crate) fn requests_arrivals(&mut self, hash: &BlockHash, bytes: &[u8]) {
+        if self.requests.state.is_err() {
+            return;
+        }
+        // WO-12: a payment to an address given to a store is kept before its
+        // order is taken, so that the order's request finds it.
+        let web_scripts = self.web_script_map();
         let Ok(loaded) = &self.requests.state else {
             return;
         };
         // RQ-04: each request's address is its own wallet's, which may be one
         // the shop pinned before.
-        let by_script: BTreeMap<ScriptBuf, u32> = loaded
-            .book
-            .requests()
-            .iter()
-            .filter_map(|r| Some((self.request_script(r)?, r.address_index)))
-            .collect();
+        let mut by_script: BTreeMap<ScriptBuf, u32> = web_scripts;
+        by_script.extend(
+            loaded
+                .book
+                .requests()
+                .iter()
+                .filter_map(|r| Some((self.request_script(r)?, r.address_index))),
+        );
         if by_script.is_empty() {
             return;
         }
@@ -975,8 +986,15 @@ impl<P: OwnerPort> OwnerNode<P> {
             .iter()
             .map(|r| (r.address_index, r.number))
             .collect();
+        let web = self.web.indexes();
         let mut by_request: BTreeMap<u64, Vec<Arrival>> = BTreeMap::new();
+        let mut orphans: Vec<PendingArrival> = Vec::new();
         for a in &due {
+            if !by_index.contains_key(&a.index) && web.contains(&a.index) {
+                // WO-12: paid to an address given to a store whose order was
+                // not taken yet: it waits for the order.
+                orphans.push(*a);
+            }
             if let Some(number) = by_index.get(&a.index) {
                 by_request.entry(*number).or_default().push(Arrival {
                     txid: a.txid,
@@ -992,6 +1010,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         let shop = context.shop();
         let mut next = loaded.clone();
         let mut waiting: Vec<PendingArrival> = rest;
+        waiting.extend(orphans);
         for (number, arrivals) in &by_request {
             match next
                 .book

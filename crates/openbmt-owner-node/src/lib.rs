@@ -86,6 +86,8 @@ pub mod switch_outbox;
 mod take_journal;
 pub mod watch;
 pub mod watcher;
+pub mod web_orders;
+pub mod web_visit;
 
 #[cfg(test)]
 mod tests;
@@ -139,3 +141,11 @@ pub use watch::{
     WatchConfig, WatchLink, WatchLinkConfig, WatchNode, WatchStartError, WatchState, WATCH_LINK_DIR,
 };
 pub use watcher::{OwnerConfig, OwnerStartError, OwnerWatcher, HEARTBEAT_FILE, NOTE_LOG};
+pub use web_orders::{
+    check_store_url, PairState, RefusedOrder, RefusedWhy, WebError, LOW_ADDRESSES,
+    MAGIC_WEB_ORDERS, MAX_ORDERS, MAX_RANGES, MAX_REFUSALS, WEB_ORDERS_FILE,
+};
+pub use web_visit::{
+    OrderStand, WebCall, WebCallKind, WebFailure, WebPairShown, WebStateInfo, WebStep,
+    BACKOFF_FIRST_SECS, BACKOFF_MAX_SECS,
+};

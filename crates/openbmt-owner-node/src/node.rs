@@ -102,6 +102,7 @@ use crate::requests::Requests;
 use crate::settle_owed::{Owed, OwedKind, SettleOwed, SETTLE_OWED_FILE};
 use crate::take_journal::{TakeJournal, MAX_JOURNAL_BYTES};
 use crate::watcher::{write_file, OwnerConfig, OwnerStartError, OwnerWatcher};
+use crate::web_visit::WebOrders;
 
 static TAKE_JOURNAL_LOCK: Mutex<()> = Mutex::new(());
 
@@ -785,6 +786,9 @@ pub struct OwnerNode<P: OwnerPort = Handle> {
     owed: SettleOwed,
     /// RQ-30: the owner's payment requests and the arrivals that wait.
     pub(crate) requests: Requests,
+    /// WO-05 to WO-32: the pairing with a store, the addresses given to it
+    /// and its orders.
+    pub(crate) web: WebOrders,
     pub(crate) owner_secret: [u8; 32],
     approver: DeviceId,
     policy: BatchPolicy,
@@ -969,7 +973,11 @@ impl<P: OwnerPort> OwnerNode<P> {
             own.is_some()
                 .then(|| PinnedWallet::new(wallet.clone()).checksum32()),
         );
-        let kept = requests.indexes();
+        // WO-12: the addresses given to a store are watched for good, as a
+        // request's are (RQ-04).
+        let web = WebOrders::open(&dir);
+        let mut kept = requests.indexes();
+        kept.extend(web.indexes());
         let issued = issuing(&owner, own.as_ref());
         let (receive, change) = marks_of(&issued, &view);
         let release = release_plan(&issued, &view, &kept, (receive, change), now, &limits, true)?;
@@ -1061,6 +1069,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             paid_log,
             owed,
             requests,
+            web,
             owner_secret,
             approver,
             policy,
@@ -3334,6 +3343,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         self.settle_owed();
         self.release_holds();
         self.requests_tick();
+        self.web_tick();
     }
 
     /// Stop the drivers.
