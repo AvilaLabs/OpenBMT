@@ -44,7 +44,12 @@ an end, payments in parts, repeats and returns.
   first is cancelled.
 - **RQ-04.** Every address of the desk is in the owner phone's watch set
   from the moment it is written, and stays in it for good: a payment to a
-  request that is paid, cancelled or years old is still seen (OC-01).
+  request that is paid, cancelled or years old is still seen (OC-01). Each
+  request records the wallet its address was made from (that wallet's
+  fingerprint), and its address is watched from that wallet's description
+  for good, also after the shop moves to another wallet (SS-41): the
+  desk's addresses count among those handed out. A request made after the
+  move uses the new wallet.
 
 ## 2. What a request is
 
@@ -205,7 +210,10 @@ an end, payments in parts, repeats and returns.
   back to the queue if the spend is replaced without it (OC-03). The books
   record each return against its request. A return is accepted only while
   fewer than 99 returns are queued or in a spend not yet confirmed, so a
-  spend replaced without them never brings the queue above 99.
+  spend replaced without them never brings the queue above 99. A return
+  whose payment the owner cancels in the queue ends as cancelled in the
+  book: it no longer counts toward what was returned, and the money it would
+  have paid can be returned again.
 
 ## 8. The request book
 
