@@ -149,7 +149,7 @@ fn rq_30_fields_that_do_not_agree_with_each_other_are_refused() {
     refused(|b| b.requests[0].address_index = b.requests[1].address_index);
     refused(|b| b.requests[1].number = 9);
     refused(|b| b.next_number += 1);
-    refused(|b| b.next_return += 1);
+    refused(|b| b.next_return = 1);
     refused(|b| b.requests[0].credits[0].value += 1);
     refused(|b| b.requests[1].credits[0].value += 1);
     refused(|b| b.requests[1].credits[0].rate = None);
@@ -173,7 +173,10 @@ fn rq_30_fields_that_do_not_agree_with_each_other_are_refused() {
     assert!(RequestBook::from_bytes(&dup.to_bytes()).is_err());
     refused(|b| b.requests[0].end = Some((End::CountedPaid, 1)));
     refused(|b| b.returns[0].request = 99);
-    refused(|b| b.returns[0].sats = 10_000_000);
+    refused(|b| {
+        b.returns[0].sats = 10_000_000;
+        b.returns[0].state = ReturnState::Queued;
+    });
     refused(|b| b.returns[0].id = 2);
     refused(|b| b.stopped = vec![2]);
     refused(|b| b.stopped = vec![5, 5]);
@@ -276,6 +279,31 @@ fn rq_30_returns_queued_or_in_a_spend_together_are_at_most_99_in_the_file() {
         RequestBook::from_bytes(&hundred.to_bytes()).unwrap(),
         hundred
     );
+}
+
+#[test]
+fn rq_37_the_read_takes_more_returned_than_received_only_with_none_queued() {
+    let mut b = RequestBook::new();
+    b.make(&new("x", 60_000, false, None), 0, T0, &shop(), None)
+        .unwrap();
+    b.credit(1, &[arrival(1, 10, T0, 100_000)], T0, &shop(), None)
+        .unwrap();
+    for sats in [40_000, 30_000, 30_000] {
+        b.queue_return(1, ReturnAmount::Sats(sats), script(), T0, None)
+            .unwrap();
+    }
+    b.mark_returns_sent(&[1, 2], [1; 32]);
+    b.take_back_above(5);
+    // Returns 1 and 2 are in a spend, 3 was taken off the queue: a gap in
+    // the ids, and 70,000 returned of nothing received.
+    assert_eq!(b.returns().len(), 2);
+    assert_eq!(b.over_returned(1), Some(70_000));
+    assert_eq!(RequestBook::from_bytes(&b.to_bytes()).unwrap(), b);
+    // The gap alone is a book that reads; a queued return of that request
+    // beside the excess is not.
+    let mut queued = b.clone();
+    queued.returns[1].state = ReturnState::Queued;
+    assert!(RequestBook::from_bytes(&queued.to_bytes()).is_err());
 }
 
 #[test]

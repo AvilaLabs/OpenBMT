@@ -456,6 +456,16 @@ pub fn due_fact(due: &str) -> String {
     format!("Due {due}")
 }
 
+/// RQ-37: the placeholder for the fact that more was returned from a request
+/// than it now received; the words are not written yet (RQ-36).
+pub const WORDS_NEEDED_RQ_37_OVER_RETURNED: &str = "WORDS_NEEDED_RQ_37_OVER_RETURNED";
+
+/// RQ-37: the line under a request's state when more was returned than it
+/// received (see `RequestBook::over_returned`).
+pub fn over_returned_line() -> &'static str {
+    WORDS_NEEDED_RQ_37_OVER_RETURNED
+}
+
 /// RQ-29: the line of a return that is done.
 pub fn returned_line(amount: &str, date: &str) -> String {
     format!("Returned {amount} \u{b7} {date}")

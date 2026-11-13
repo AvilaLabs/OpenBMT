@@ -1,5 +1,5 @@
 //! Payment requests on the owner phone (`docs/REQUEST-RULES.md`, RQ-01 to
-//! RQ-36).
+//! RQ-37).
 //!
 //! A shop asks a customer who is not at the till to pay: a deposit, an
 //! invoice, a stall fee. The owner phone makes the address, keeps the
@@ -10,7 +10,7 @@
 //! 1. [`date`]: the shop's calendar, written out (no date library).
 //! 2. [`model`]: a request, its quotes, payments and returns, and how the
 //!    state is read from them.
-//! 3. [`book`], [`list`], [`repeat`], [`returns`], [`ledger`]: the
+//! 3. [`book`], [`list`], [`repeat`], [`returns`], [`reorg`], [`ledger`]: the
 //!    [`RequestBook`] and what is done with it.
 //! 4. [`address`]: the address a customer sends for a return.
 //! 5. [`codec`], [`fsio`]: the book as `OBM=` bytes and as a file.
@@ -31,6 +31,7 @@ pub mod fsio;
 pub mod ledger;
 pub mod list;
 pub mod model;
+pub mod reorg;
 pub mod repeat;
 pub mod returns;
 pub mod say;
@@ -53,6 +54,7 @@ pub use model::{
     After, Arrival, CheckedRate, Credit, End, Every, Marks, Pricing, Quote, Repeat, Request,
     Return, ReturnState, Status,
 };
+pub use reorg::Reorged;
 pub use repeat::DueRepeat;
 pub use returns::{ReturnAmount, MAX_QUEUED_RETURNS};
 

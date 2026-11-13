@@ -9,12 +9,13 @@ use openbmt_requests::{
 };
 
 const RULES: &str = include_str!("../../../docs/REQUEST-RULES.md");
-const TEST_SOURCES: [&str; 9] = [
+const TEST_SOURCES: [&str; 10] = [
     include_str!("dates.rs"),
     include_str!("requests.rs"),
     include_str!("matching.rs"),
     include_str!("repeats.rs"),
     include_str!("returns.rs"),
+    include_str!("reorg.rs"),
     include_str!("bookfile.rs"),
     include_str!("property.rs"),
     include_str!("../src/codec_tests.rs"),
@@ -39,8 +40,8 @@ fn rule_ids() -> Vec<String> {
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
     let ids = rule_ids();
-    assert_eq!(ids.len(), 36);
-    assert!(ids.contains(&"RQ-01".to_string()) && ids.contains(&"RQ-36".to_string()));
+    assert_eq!(ids.len(), 37);
+    assert!(ids.contains(&"RQ-01".to_string()) && ids.contains(&"RQ-37".to_string()));
     let mut sorted = ids.clone();
     sorted.sort();
     sorted.dedup();

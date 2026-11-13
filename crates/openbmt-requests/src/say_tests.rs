@@ -350,3 +350,8 @@ fn sc_12_the_dialogs_keep_the_lengths_the_rules_give() {
         assert!(d.text.ends_with('.'));
     }
 }
+
+#[test]
+fn rq_37_the_over_returned_fact_has_a_placeholder_until_its_words_are_written() {
+    assert_eq!(over_returned_line(), "WORDS_NEEDED_RQ_37_OVER_RETURNED");
+}

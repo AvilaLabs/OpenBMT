@@ -133,16 +133,23 @@ impl RequestBook {
     }
 
     /// RQ-29: the spend `txid` was replaced without them: they go back to
-    /// the queue. A return that is done stays done.
+    /// the queue. A return that is done stays done. Returns how many are in
+    /// the queue again. A request that already shows more returned than
+    /// received (RQ-37) keeps none of its requeued returns that would add to
+    /// it: they come off the queue again, newest first, as after a reorg.
     pub fn requeue_returns(&mut self, txid: [u8; 32]) -> usize {
-        let mut n = 0;
+        let mut n = 0usize;
+        let mut touched: Vec<u64> = Vec::new();
         for r in &mut self.returns {
             if r.state == (ReturnState::Sent { txid }) {
                 r.state = ReturnState::Queued;
                 n += 1;
+                if !touched.contains(&r.request) {
+                    touched.push(r.request);
+                }
             }
         }
-        n
+        n.saturating_sub(self.trim_queued(&touched).len())
     }
 
     fn move_returns(&mut self, ids: &[u64], from: ReturnState, to: ReturnState) -> usize {

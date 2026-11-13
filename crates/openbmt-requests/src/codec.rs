@@ -23,8 +23,9 @@
 //!   | state u8 (0 queued, 1 sent + txid 32, 2 done + txid 32 + at u64)
 //! ```
 //!
-//! The requests are numbered 1, 2, 3 and so on with none missing, and the
-//! returns likewise. The read is strict: another magic or version, a count
+//! The requests are numbered 1, 2, 3 and so on with none missing. The
+//! returns' ids count up, with a gap where a return left the queue
+//! (RQ-37). The read is strict: another magic or version, a count
 //! over its limit, a field out of range or that does not agree with
 //! another, and bytes left over are refused, and what decodes encodes to
 //! the same bytes.
@@ -154,23 +155,30 @@ impl RequestBook {
         }
         let n = r.count(MAX_RETURNS, MIN_RETURN_BYTES).map_err(corrupt)?;
         let mut returns: Vec<Return> = Vec::with_capacity(n);
-        for at in 0..n {
+        // Per request, by number less one: the satoshis returned in every
+        // state, and whether any return is still queued. One pass over the
+        // returns, whatever the number of requests.
+        let mut returned: Vec<(u64, bool)> = vec![(0, false); requests.len()];
+        for _ in 0..n {
             let ret = decode_return(&mut r)?;
-            if ret.id != at as u64 + 1 {
-                return bad("the returns are not numbered 1, 2, 3 and so on");
+            // Ids only count up: a return taken off the queue (RQ-37) leaves
+            // a gap.
+            if returns.last().is_some_and(|l| l.id >= ret.id) || ret.id == 0 {
+                return bad("the returns are not in the order of their numbers");
             }
-            if usize::try_from(ret.request)
+            let Some(sum) = usize::try_from(ret.request)
                 .ok()
                 .and_then(|q| q.checked_sub(1))
-                .and_then(|q| requests.get(q))
-                .is_none()
-            {
+                .and_then(|q| returned.get_mut(q))
+            else {
                 return bad("a return is from a request that is not in the book");
-            }
+            };
+            sum.0 = sum.0.saturating_add(ret.sats);
+            sum.1 |= ret.state == ReturnState::Queued;
             returns.push(ret);
         }
-        if next_return != n as u64 + 1 {
-            return bad("the next return is not the one after the last");
+        if returns.last().is_some_and(|l| next_return <= l.id) || next_return == u64::MAX {
+            return bad("the next return is not after the last");
         }
         r.finish().map_err(corrupt)?;
         let in_flight = returns
@@ -180,6 +188,13 @@ impl RequestBook {
         if in_flight > MAX_QUEUED_RETURNS {
             return bad("more returns are queued or in a spend than one payment takes");
         }
+        // More returned than received is only a book after a reorg (RQ-37),
+        // and then none of that request's returns wait in the queue.
+        for (request, (total, queued)) in requests.iter().zip(&returned) {
+            if *total > request.received_sats() && *queued {
+                return bad("more was returned from a request than it received");
+            }
+        }
         let book = Self {
             next_number,
             requests,
@@ -187,16 +202,6 @@ impl RequestBook {
             returns,
             stopped,
         };
-        for request in &book.requests {
-            let returned = book
-                .returns
-                .iter()
-                .filter(|r| r.request == request.number)
-                .fold(0u64, |t, r| t.saturating_add(r.sats));
-            if returned > request.received_sats() {
-                return bad("more was returned from a request than it received");
-            }
-        }
         if book.to_bytes() != bytes {
             return bad("it does not encode to the same bytes");
         }
