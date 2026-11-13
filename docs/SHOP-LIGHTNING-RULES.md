@@ -118,9 +118,23 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   transactions from the shop's own Bitcoin Core (`lightning-block-sync`
   `RpcClient`) or from the compact-filter watcher (`docs/WATCHER-RULES.md`),
   through `chain::Confirm` and `chain::Filter`. Never Electrum, Esplora or any
-  server that would learn the shop's addresses.
+  server that would learn the shop's addresses. On compact filters the newest
+  block reaches the library once its header is stored, which can be about a
+  minute after the block arrives; the library keeps its deadlines in blocks,
+  so a minute is far inside every one.
+- **SL-26a. Fee rates without Core.** On compact filters the fee rates the
+  library asks for come from samples of blocks, taken as the owner's device
+  takes them (`docs/FEE-RULES.md` FE-20, with the node's own `fee-history.bin`):
+  the rates for a channel, a close and a spend are the recent rate (FE-13);
+  the urgent rate and the most a provider may set are twice the higher of the
+  recent and the usual rate (FE-17). No rate is ever below the fixed floor the
+  node uses with Core, and until the first sample the fixed rates are used.
 - **SL-27. What it watches.** The funding output of each channel and every
-  output the library registers with `chain::Filter`.
+  output the library registers with `chain::Filter`. When a block that holds a
+  channel's funding leaves the chain, the library closes that channel by
+  force, since it uses a channel only on a confirmed funding, and the shop's
+  money comes back as from any close (SL-33, SL-36); a later payment opens a
+  new channel (SL-29).
 
 ## 5. The provider
 
@@ -142,7 +156,11 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   (`announce_for_forwarding` false), inbound channels are accepted by hand
   (`manually_accept_inbound_channels`) and only from the chosen provider.
 - **SL-32. Tor.** With Tor on, the node reaches the provider through Tor,
-  handing the SOCKS stream to `lightning_net_tokio::setup_outbound`.
+  handing the SOCKS stream to `lightning_net_tokio::setup_outbound`, and the
+  compact-filter watcher reaches its peers through the same proxy. A proxy
+  that does not answer at start stops the node before anything is made on
+  disk; there is never a connection outside Tor. The provider is given as an
+  IP address and port: a provider at an onion address is not built yet.
 
 ## 6. The cap, the sweep and the close
 

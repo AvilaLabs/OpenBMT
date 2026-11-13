@@ -22,9 +22,6 @@ pub const SL_41: &str = "No Lightning channel can take a payment and the provide
 /// A channel is open (SL-45).
 pub const SL_45: &str = "A Lightning channel is open.";
 
-// Placeholders: the sentences for these states are written by the owner, not
-// by the code. Each value is its own name.
-
 /// The invoice could not be stored on both devices, so it was not made (SL-20, SL-24).
 pub const SL_20_INVOICE_NOT_STORED: &str = "The Lightning invoice could not be stored on both devices, so it is not shown. Take this payment on-chain.";
 /// Money from a closed channel is waiting to be moved to the shop's wallet (SL-33, SL-36).
@@ -34,6 +31,6 @@ pub const SL_33_DESTINATION_REFUSED: &str =
     "That address is not one of the shop's wallet, so Lightning money is not sent there.";
 
 /// Tor is on and the proxy cannot be reached, so nothing is connected (SL-32).
-pub const SL_32_TOR_UNREACHABLE: &str = "WORDS_NEEDED_SL_32_TOR_UNREACHABLE";
+pub const SL_32_TOR_UNREACHABLE: &str = "Tor is on but its proxy is not answering, so Shop Lightning does not start. Start Tor on this device, or turn Tor off.";
 /// The chain data from the peers could not be started (SL-26).
-pub const SL_26_FILTERS_NOT_STARTED: &str = "WORDS_NEEDED_SL_26_FILTERS_NOT_STARTED";
+pub const SL_26_FILTERS_NOT_STARTED: &str = "Shop Lightning could not start reading blocks from the network, so it does not start. Check that this device is online, then try again.";
