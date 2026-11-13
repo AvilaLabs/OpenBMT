@@ -299,6 +299,7 @@ fn check_start(
             Some(LinkPlan {
                 hint,
                 identity: record.identity().map_err(record_refused)?,
+                notice_identity: record.identity().map_err(record_refused)?,
                 owner: record.owner(),
                 proxy: driver.proxy.or(proxy),
                 tor_on: settings.tor_on,
@@ -375,7 +376,10 @@ impl Entry {
             link,
         } = check_start(req, policy, &clock)?;
         let node = Node::start_with(config, spawn).map_err(|e| start_error(&e))?;
-        let link = link.map(|plan| LinkSlot::start(plan, LEASE_WAIT));
+        let link = link
+            .map(|plan| LinkSlot::start(plan, LEASE_WAIT, &node))
+            .transpose()
+            .map_err(|e| refused_by("BX-40", e))?;
         Ok(Self {
             inner: Mutex::new(Inner {
                 node: Some(node),
@@ -1086,6 +1090,9 @@ impl Entry {
         let out = self.run(Some(now), |node, held, _| {
             let (reports, out) = link.take_step(node, polled, now);
             held.extend(reports);
+            // Settings may have changed in this very relay frame. Route
+            // notices only to the Box keys the node now trusts.
+            crate::relay::sync_box_peers(link.courier_mut(), node.settings().boxes.iter().copied());
             Ok(out)
         })?;
         link.send_step(out, now);

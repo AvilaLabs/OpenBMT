@@ -24,9 +24,11 @@ use std::time::{Duration, Instant};
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::relay::{RelayHint, SignedRelayHint};
 use openbmt_counter_node::{
-    start_link, CounterLink, LinkLine, LinkNotStarted, LinkState, PairedRecord, RelayRefused,
-    SettingsLine,
+    start_link, CounterLink, DriverPort, LinkLine, LinkNotStarted, LinkState, Node,
+    NoticeStoreError, PairedRecord, RelayRefused, SettingsLine,
 };
+use openbmt_courier::{Courier, Post};
+use openbmt_link::Role;
 
 use crate::error::{from_rule, CounterError};
 use crate::views::{LinkStepView, LinkView, WordsView};
@@ -72,6 +74,7 @@ impl Drop for LinkLease {
 pub(crate) struct LinkPlan {
     pub(crate) hint: RelayHint,
     pub(crate) identity: Identity,
+    pub(crate) notice_identity: Identity,
     pub(crate) owner: DeviceId,
     pub(crate) proxy: Option<SocketAddr>,
     pub(crate) tor_on: bool,
@@ -99,7 +102,11 @@ pub(crate) struct LinkSlot {
 impl LinkSlot {
     /// Make the link of `plan`. A link that cannot start leaves a slot
     /// whose line says why; the counter itself goes on.
-    pub(crate) fn start(plan: LinkPlan, wait: Duration) -> Self {
+    pub(crate) fn start<P: DriverPort>(
+        plan: LinkPlan,
+        wait: Duration,
+        node: &Node<P>,
+    ) -> Result<Self, NoticeStoreError> {
         let lease = LinkLease::claim(&plan.dir, wait);
         let started = match lease {
             None => Err(LinkNotStarted::Files(
@@ -114,11 +121,17 @@ impl LinkSlot {
                 plan.tor_on,
             ),
         };
-        let (link, line) = match started {
+        let (mut link, line) = match started {
             Ok(link) => (Some(link), LinkLine::Connecting),
             Err(e) => (None, LinkLine::from(&e)),
         };
-        Self {
+        // Keep an outbox even before the first Box is added. Its signer is
+        // read from the same checked pairing as the node and courier.
+        if let Some(link) = link.as_mut() {
+            link.enable_notices(plan.notice_identity, plan.dir, node)?;
+            sync_box_peers(link.courier_mut(), node.settings().boxes.iter().copied());
+        }
+        Ok(Self {
             link: Mutex::new(link),
             snapshot: Mutex::new(Snapshot {
                 line,
@@ -128,7 +141,7 @@ impl LinkSlot {
                 state: None,
             }),
             _lease: lease,
-        }
+        })
     }
 
     fn snapshot(&self) -> Snapshot {
@@ -187,6 +200,31 @@ impl LinkSlot {
             };
         }
         s.state = Some(state);
+    }
+}
+
+/// Make the courier's Box destinations exactly the Boxes in the settings
+/// currently in force. Keep its owner and other peer roles intact.
+pub(crate) fn sync_box_peers<R: Post>(
+    courier: &mut Courier<R>,
+    boxes: impl IntoIterator<Item = DeviceId>,
+) {
+    let boxes: BTreeSet<DeviceId> = boxes.into_iter().collect();
+    let stale: Vec<DeviceId> = courier
+        .peers()
+        .iter()
+        .filter(|(id, role)| **role == Role::Box && !boxes.contains(id))
+        .map(|(id, _)| *id)
+        .collect();
+    for id in stale {
+        courier.remove_peer(&id);
+    }
+    for id in boxes {
+        // The owner takes precedence in settings (BX-24). More generally,
+        // preserve any already configured non-Box route role on collision.
+        if !courier.peers().contains_key(&id) {
+            courier.set_peer(id, Role::Box);
+        }
     }
 }
 

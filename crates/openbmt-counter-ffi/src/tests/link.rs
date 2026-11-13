@@ -10,12 +10,13 @@ use bitcoin::hashes::Hash;
 use openbmt_core::heartbeat::WatcherHeartbeat;
 use openbmt_core::identity::Identity;
 use openbmt_core::relay::{RelayHint, RelayRoute, SignedRelayHint};
-use openbmt_core::settings::SignedSettings;
-use openbmt_courier::{Courier, CourierConfig, FirstStart, Received, RelayPost};
+use openbmt_core::settings::{Settings, SignedSettings};
+use openbmt_courier::{Courier, CourierConfig, FirstStart, MemoryRelay, Received, RelayPost};
 use openbmt_link::{
     ClientConfig, Kind, MemoryStore, Relay, RelayConfig, Role, Route, Server, ServerConfig,
 };
 use openbmt_net_io::SystemClock;
+use openbmt_pos::{NoticeState, PaidNotice, SaleRequest, TillMessage};
 
 use super::kit::{genesis, id, peers_event, record_with, signed_settings, Rig, Scratch, T0};
 use super::wire::{LinkV, Rd, W};
@@ -35,6 +36,47 @@ fn relay() -> Server {
     let mut relay = Relay::new(id(99), RelayConfig::default(), MemoryStore::new()).unwrap();
     relay
         .set_members(&[id(1).device_id(), id(3).device_id()], 0)
+        .unwrap();
+    Server::start(
+        listener,
+        relay,
+        Arc::new(SystemClock),
+        ServerConfig::default(),
+    )
+    .unwrap()
+}
+
+fn relay_with_box() -> Server {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut relay = Relay::new(id(99), RelayConfig::default(), MemoryStore::new()).unwrap();
+    relay
+        .set_members(
+            &[id(1).device_id(), id(3).device_id(), id(7).device_id()],
+            0,
+        )
+        .unwrap();
+    Server::start(
+        listener,
+        relay,
+        Arc::new(SystemClock),
+        ServerConfig::default(),
+    )
+    .unwrap()
+}
+
+fn relay_with_boxes() -> Server {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut relay = Relay::new(id(99), RelayConfig::default(), MemoryStore::new()).unwrap();
+    relay
+        .set_members(
+            &[
+                id(1).device_id(),
+                id(3).device_id(),
+                id(7).device_id(),
+                id(8).device_id(),
+            ],
+            0,
+        )
         .unwrap();
     Server::start(
         listener,
@@ -93,6 +135,48 @@ fn config_for(rig: &Rig, relay: Option<RelayHint>, link_proxy: Option<&str>) -> 
     }
 }
 
+fn config_for_box(rig: &Rig, relay: RelayHint) -> StartConfig {
+    let mut settings: Settings = signed_settings().settings;
+    settings.devices.insert(id(7).device_id());
+    settings.boxes.insert(id(7).device_id());
+    let signed = SignedSettings {
+        owner_sig: settings.sign(&id(1)),
+        approver_sig: Some(settings.sign(&id(2))),
+        settings,
+    };
+    let mut record = record_with(signed);
+    record.relay = Some(relay);
+    StartConfig {
+        dir: rig.dir().to_str().unwrap().to_string(),
+        now: T0,
+        record: record.to_bytes(),
+        proxy: None,
+        own_node: None,
+        lightning: None,
+        link_proxy: None,
+    }
+}
+
+fn box_courier(addr: SocketAddr, dir: &Scratch) -> Courier<RelayPost> {
+    box_courier_for(addr, id(7), dir)
+}
+
+fn box_courier_for(addr: SocketAddr, identity: Identity, dir: &Scratch) -> Courier<RelayPost> {
+    Courier::start(
+        CourierConfig {
+            dir: dir.path().to_path_buf(),
+            identity,
+            role: Role::Box,
+            peers: [(id(3).device_id(), Role::Counter)].into_iter().collect(),
+            route: Route::Direct(addr),
+            relay: id(99).device_id(),
+            client: ClientConfig::default(),
+        },
+        FirstStart::Yes,
+    )
+    .unwrap()
+}
+
 fn pump(rig: &Rig, handle: u64) {
     let response = rig.call(OP_PUMP, handle, &W::new().u64(T0).u32(50).0);
     let mut r = Rd::ok(&response);
@@ -123,6 +207,266 @@ fn state(rig: &Rig, handle: u64) -> Option<LinkV> {
 
 fn of_kind(got: &[Received], kind: Kind) -> usize {
     got.iter().filter(|r| r.kind == kind).count()
+}
+
+#[test]
+fn settings_reconcile_box_routes_without_demoting_owner_or_retaining_removed_boxes() {
+    let relay = MemoryRelay::new(
+        id(99),
+        &[
+            id(1).device_id(),
+            id(3).device_id(),
+            id(7).device_id(),
+            id(8).device_id(),
+        ],
+    )
+    .unwrap();
+    let dir = Scratch::new();
+    let mut courier = Courier::start_with(
+        relay.post(),
+        id(3),
+        Role::Counter,
+        [
+            (id(1).device_id(), Role::Owner),
+            (id(8).device_id(), Role::Box),
+        ]
+        .into_iter()
+        .collect(),
+        dir.path(),
+        FirstStart::Yes,
+    )
+    .unwrap();
+
+    // Owner precedence is explicit in settings role resolution (BX-24):
+    // even if a settings Box set contains the owner key, it remains Owner.
+    crate::relay::sync_box_peers(&mut courier, [id(1).device_id(), id(7).device_id()]);
+    assert_eq!(courier.peers().get(&id(1).device_id()), Some(&Role::Owner));
+    assert_eq!(courier.peers().get(&id(7).device_id()), Some(&Role::Box));
+    assert!(!courier.peers().contains_key(&id(8).device_id()));
+
+    // Reconciliation is idempotent and a later settings change removes the
+    // old destination while adding its replacement.
+    crate::relay::sync_box_peers(&mut courier, [id(7).device_id()]);
+    assert_eq!(courier.peers().len(), 2);
+    crate::relay::sync_box_peers(&mut courier, [id(8).device_id()]);
+    assert_eq!(courier.peers().get(&id(8).device_id()), Some(&Role::Box));
+    assert!(!courier.peers().contains_key(&id(7).device_id()));
+    assert_eq!(courier.peers().get(&id(1).device_id()), Some(&Role::Owner));
+}
+
+#[test]
+fn corrupt_notice_outbox_refuses_start_with_the_notice_placeholders() {
+    let server = relay();
+    let rig = Rig::new();
+    std::fs::write(rig.dir().join("notice-outbox"), b"broken").unwrap();
+    let config = config_for(&rig, Some(hint_for(server.local_addr())), None);
+    let response = rig.call(1, 0, &W::new().start(&config).0);
+    let fault = Rd::error(&response).expect("notice outbox is refused");
+    assert_eq!(fault.rule, "BX-40");
+    assert_eq!(fault.words.heading, "WORDS_NEEDED_CR_268_NOTICES_HEADING");
+    assert_eq!(fault.words.what, "WORDS_NEEDED_CR_268_NOTICES_WHAT");
+    assert_eq!(fault.words.next, "WORDS_NEEDED_CR_268_NOTICES_NEXT");
+}
+
+#[test]
+fn settings_box_receives_till_open_and_paid_notices_through_the_ffi_link() {
+    const TILL_SALE: [u8; 16] = [0x47; 16];
+    let server = relay_with_box();
+    let owner_dir = Scratch::new();
+    let mut owner = owner_courier(server.local_addr(), &owner_dir);
+    owner.poll().unwrap();
+    let box_dir = Scratch::new();
+    let mut box_side = box_courier(server.local_addr(), &box_dir);
+    box_side.poll().unwrap();
+
+    let rig = Rig::new();
+    let handle = rig.start_with(&config_for_box(&rig, hint_for(server.local_addr())));
+    rig.send(vec![peers_event()]);
+    pump(&rig, handle);
+    step(&rig, handle, T0, false);
+
+    // A till request handed to the node; opening it through the FFI records
+    // CR-268 before the sale's Opened record.
+    let entry = rig.registry().entry_for_test(handle).expect("a node");
+    let request = TillMessage::Request(SaleRequest {
+        sale: TILL_SALE,
+        amount: openbmt_counter::Amount(500),
+        currency: openbmt_counter::Currency::new(*b"USD").unwrap(),
+        reference: "POS/0047".to_string(),
+        expires_at: T0 + 300,
+    })
+    .to_bytes();
+    entry
+        .run(Some(T0), |node, _, _| {
+            node.take_till_notice(&id(7).device_id(), &request)
+                .map_err(|e| crate::error::refused_by("BX-76", e))?;
+            Ok(())
+        })
+        .unwrap();
+    let opened_response = rig.call(
+        86,
+        handle,
+        &W::new()
+            .u64(T0)
+            .bytes(&TILL_SALE)
+            .u64(10_000_000)
+            .string("test-fixed")
+            .u64(T0)
+            .u8(0)
+            .0,
+    );
+    let mut opened_reader = Rd::ok(&opened_response);
+    let opened = opened_reader.opened();
+    opened_reader.done();
+    step(&rig, handle, T0 + 1, false);
+
+    // Settle the opened notice at the relay, then confirm the sale. The Box
+    // has not polled yet, so both notices must still be waiting for it.
+    let pay = super::kit::spend(1, &[(&super::kit::script_of(opened.index), 5_000)]);
+    rig.send(vec![super::kit::sighting(&pay, vec![super::kit::peer(20)])]);
+    pump(&rig, handle);
+    let block = super::kit::mine(super::kit::genesis(), 1, std::slice::from_ref(&pay));
+    rig.send(vec![
+        super::kit::joined(1, &block),
+        super::kit::block_event(&block),
+    ]);
+    pump(&rig, handle);
+    step(&rig, handle, T0 + 2, false);
+
+    let received = box_side.poll().unwrap();
+    let notices: Vec<PaidNotice> = received
+        .iter()
+        .filter(|message| message.kind == Kind::PaidNotice)
+        .map(|message| PaidNotice::from_bytes(&message.content).unwrap())
+        .collect();
+    assert_eq!(
+        notices.len(),
+        2,
+        "both notices reached the Box: {received:?}"
+    );
+    assert_eq!(notices[0].state, NoticeState::Opened);
+    assert_eq!(notices[0].till_sale, Some(TILL_SALE));
+    assert_eq!(notices[1].state, NoticeState::Paid);
+    assert_eq!(notices[1].till_sale, Some(TILL_SALE));
+}
+
+#[test]
+fn owner_settings_replace_box_route_before_the_same_step_sends_notices() {
+    let server = relay_with_boxes();
+    let owner_dir = Scratch::new();
+    let mut owner = owner_courier(server.local_addr(), &owner_dir);
+    owner.poll().unwrap();
+    let old_box_dir = Scratch::new();
+    let mut old_box = box_courier_for(server.local_addr(), id(7), &old_box_dir);
+    old_box.poll().unwrap();
+    let new_box_dir = Scratch::new();
+    let mut new_box = box_courier_for(server.local_addr(), id(8), &new_box_dir);
+    new_box.poll().unwrap();
+
+    let rig = Rig::new();
+    let handle = rig.start_with(&config_for_box(&rig, hint_for(server.local_addr())));
+    rig.send(vec![peers_event()]);
+    pump(&rig, handle);
+    step(&rig, handle, T0, false);
+
+    // Establish and drain one notice at the old Box.
+    let first = rig.call(
+        11,
+        handle,
+        &W::new().open(T0, 500, "USD", 10_000_000, "test-fixed").0,
+    );
+    let mut first_reader = Rd::ok(&first);
+    first_reader.opened();
+    first_reader.done();
+    step(&rig, handle, T0 + 1, false);
+    let first_notice = old_box.poll().unwrap();
+    assert_eq!(
+        of_kind(&first_notice, Kind::PaidNotice),
+        1,
+        "{first_notice:?}"
+    );
+
+    // The second sale is already in the node's records when the owner sends
+    // a signed replacement. This same link step applies the settings and
+    // sends notices, so it must route the new destination before sending.
+    let second = rig.call(
+        11,
+        handle,
+        &W::new()
+            .open(T0 + 1, 500, "USD", 10_000_000, "test-fixed")
+            .0,
+    );
+    let mut second_reader = Rd::ok(&second);
+    let second_opened = second_reader.opened();
+    second_reader.done();
+    let mut replacement = signed_settings().settings;
+    replacement.devices.remove(&id(7).device_id());
+    replacement.boxes.remove(&id(7).device_id());
+    replacement.devices.insert(id(8).device_id());
+    replacement.boxes.insert(id(8).device_id());
+    owner
+        .send(
+            &id(3).device_id(),
+            Kind::Settings,
+            &both_roots(replacement, 2),
+        )
+        .unwrap();
+    let (link, notes) = step(&rig, handle, T0 + 2, false);
+    assert_eq!(link.settings_version, 2, "{notes:?}");
+
+    // The new Box gets the second sale in that step; the earlier notice was
+    // already settled for every Box in the old settings. The removed Box has
+    // no additional destination.
+    let new_notices = new_box.poll().unwrap();
+    assert_eq!(
+        of_kind(&new_notices, Kind::PaidNotice),
+        1,
+        "{new_notices:?}"
+    );
+    let notice = PaidNotice::from_bytes(
+        &new_notices
+            .iter()
+            .find(|message| message.kind == Kind::PaidNotice)
+            .unwrap()
+            .content,
+    )
+    .unwrap();
+    assert_eq!(notice.index, second_opened.index);
+    assert!(
+        old_box.poll().unwrap().is_empty(),
+        "removed Box still got a notice"
+    );
+
+    // The pairing record still names the old Box. Restart must initialize
+    // routing from the newer settings saved by the node instead.
+    let stopped = rig.call(2, handle, &[]);
+    let mut stopped_reader = Rd::ok(&stopped);
+    stopped_reader.pump();
+    stopped_reader.done();
+    rig.arm();
+    let handle = rig.start_with(&config_for_box(&rig, hint_for(server.local_addr())));
+    rig.send(vec![peers_event()]);
+    pump(&rig, handle);
+    let third = rig.call(
+        11,
+        handle,
+        &W::new()
+            .open(T0 + 3, 500, "USD", 10_000_000, "test-fixed")
+            .0,
+    );
+    let mut third_reader = Rd::ok(&third);
+    let third_opened = third_reader.opened();
+    third_reader.done();
+    step(&rig, handle, T0 + 4, false);
+    let after_restart = new_box.poll().unwrap();
+    let notices: Vec<_> = after_restart
+        .iter()
+        .filter(|message| message.kind == Kind::PaidNotice)
+        .map(|message| PaidNotice::from_bytes(&message.content).unwrap())
+        .collect();
+    assert_eq!(notices.len(), 1, "{after_restart:?}");
+    assert_eq!(notices[0].index, third_opened.index);
+    assert!(old_box.poll().unwrap().is_empty());
 }
 
 #[test]

@@ -72,8 +72,20 @@ type Entry = (
     &'static str,
 );
 
+const WORDS_NEEDED_CR_268_NOTICES_HEADING: &str = "WORDS_NEEDED_CR_268_NOTICES_HEADING";
+const WORDS_NEEDED_CR_268_NOTICES_WHAT: &str = "WORDS_NEEDED_CR_268_NOTICES_WHAT";
+const WORDS_NEEDED_CR_268_NOTICES_NEXT: &str = "WORDS_NEEDED_CR_268_NOTICES_NEXT";
+
 /// The rule strings this layer makes, each with its own words.
 const RULES: &[Entry] = &[
+    (
+        "BX-40",
+        Kind::Refused,
+        WORDS_NEEDED_CR_268_NOTICES_HEADING,
+        WORDS_NEEDED_CR_268_NOTICES_WHAT,
+        Who::Owner,
+        WORDS_NEEDED_CR_268_NOTICES_NEXT,
+    ),
     (
         "request-too-long",
         Kind::Refused,
