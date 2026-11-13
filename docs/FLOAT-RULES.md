@@ -28,16 +28,30 @@ funds.**
 - **FL-02. A plain wallet.** The float is the single-key native SegWit
   wallet of those child words, account `m/84'/0'/0'`, with no passphrase,
   so any wallet that reads 12 words can open it.
-- **FL-03. Kept, and kept only here.** The child words are kept by the owner
-  app under a key of the phone's keystore that cannot leave the phone. The
-  library holds them in memory only while signing and takes no storage of
-  its own. They are never sent to a counter, a Box or anywhere else, and
-  never shown again on the phone.
+- **FL-03. Kept, and kept only here.** The scanned code goes to the Rust
+  core as bytes, and the child words are never a Kotlin or Java string
+  (`docs/START-SIMPLE-RULES.md` SS-11). The core seals the seed as SS-20
+  says for the starter wallet, under its own label
+  `OpenBMT/float/seal/v1`, so that a sealed float seed never opens as a
+  starter seed nor the other way round, and the data key is wrapped by a
+  key of the phone's keystore of its own, behind the owner's proof of
+  presence (SS-21). The core opens the seed for one signing and then zeroes
+  it. The words are never sent to a counter, a Box or anywhere else, and
+  never shown again on the phone. The screen that scans them is protected
+  as SS-12 says.
 - **FL-04. A new float after a loss.** The index starts at 0. After a lost
   or replaced phone, the owner makes the next index on the stick, and the
   new phone first moves what is left in the old float to the new one
   (FL-30). The owner phone remembers the index so that it can say which one
   to make.
+
+- **FL-05. Watched by the owner node.** The owner node watches the float's
+  wallet as a wallet of its own, beside the pinned wallet and its former
+  ones: its own coin view, kept in its own file, from the day the float was
+  set up, over both chains up to 20 past the highest index used or handed
+  out. Its coins are in no total of the shop's wallet, never pay anything
+  but a float payment, and are given to the float's calls as the checked
+  view that FL-10, FL-11 and FL-20 need. No sale's facts come from it.
 
 ## 2. The cap
 
@@ -56,9 +70,14 @@ funds.**
 
 - **FL-20. From the queue.** A bitcoin refund queued as `docs/OWNER-APP-RULES.md`
   OA-115 says may be paid from the float when the float holds enough for it
-  and its fee. The owner picks it and confirms; the library builds the
-  transaction from the float's own coins, with change back to the float,
-  signs it, finishes it and hands it to the outbox as any other payment.
+  and its fee, and the refund is ready (`docs/SESSION-RULES.md` AS-52,
+  AS-53). The owner picks it and confirms; the library builds the
+  transaction from the float's checked coins (FL-05), with change back to
+  the float, signs it with the sealed seed (FL-03), finishes it and hands it
+  to the node's outbox. The outbox takes a float payment only when it spends
+  only coins of the float's view, pays only ready refunds and the float's
+  change, and each refund it pays is still queued; it is then sent, watched
+  and settled as any other payment, and the refund is paid by it.
 - **FL-21. Only the float's coins.** The transaction spends only coins of
   the float's wallet and pays only the refund's address and the float's own
   change. The library checks this on the finished transaction before it
@@ -86,8 +105,12 @@ funds.**
 
 - **FL-35. Off.** Turning the float off moves all of it to a fresh address
   of the shop's wallet, derived by the owner phone from the shop's pinned
-  wallet description, and deletes the child words once that payment has
-  one confirmation.
+  wallet description: the first of a range of the owner phone's own, taken
+  once above every range given out, as `docs/START-SIMPLE-RULES.md` SS-42
+  takes the move's address, so signing the move again pays the same
+  address. The move goes through the outbox as FL-20 says, with no refund.
+  The sealed seed and its keystore key are deleted once that payment has
+  one confirmation, and the node stops watching the float a day after.
 
 ## 6. Tests
 
