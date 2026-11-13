@@ -223,6 +223,7 @@ with its name before the colon. Do not edit by hand: run the tests with
 | owner: StarterRefusal/NothingToMove | Nothing to move | The starter wallet holds no money, so there is nothing to move. | No payment is needed. | Owner | SS-42 |
 | owner: StarterRefusal/NewAddress | No address in new wallet | This phone cannot work out an address from the new wallet's description. | Connect the new wallet again from its own screen. | Owner | SS-42 |
 | owner: StarterRefusal/Unconfirmed | Wait for a payment | A payment into the starter wallet is not confirmed yet. The move waits so that it takes everything at once. | Try again after its first confirmation. | Owner | SS-42 |
+| owner: StarterRefusal/Unsettled | Upgrade waits for a payment | Another payment from the starter wallet is not in a block yet, so the shop cannot finish moving to the new wallet. | Wait until that payment is in a block, then finish the upgrade. | Owner | SS-41 |
 | owner: StarterLine | Starter wallet | What it holds, the limit you set and your date to move to a key made offline. | Move before the limit or the date, from Upgrade now. | Owner | SS-36 |
 | owner: StarterState/AtLimit | Starter wallet at limit | The starter wallet holds as much as the limit you set. Sales go on. | Upgrade now to a key made offline, or choose Not yet. | Owner | SS-37 |
 | owner: StarterState/PastDate | Time to upgrade | The date you set to move to a key made offline has come. Sales go on. | Upgrade now, or choose Not yet. | Owner | SS-37 |

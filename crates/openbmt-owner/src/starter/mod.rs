@@ -331,15 +331,12 @@ impl StarterRefusal {
                 "Try again after its first confirmation.",
                 rule,
             ),
-            // The words are not written yet: the placeholder names the rule.
-            Self::Unsettled => Words::new(
-                Tone::Stop,
-                "WORDS_NEEDED_SS41_UNSETTLED_HEADING",
-                "WORDS_NEEDED_SS41_UNSETTLED_WHAT",
-                Who::Owner,
-                "WORDS_NEEDED_SS41_UNSETTLED_NEXT",
-            )
-            .code(rule),
+            Self::Unsettled => stop(
+                "Upgrade waits for a payment",
+                "Another payment from the starter wallet is not in a block yet, so the shop cannot finish moving to the new wallet.",
+                "Wait until that payment is in a block, then finish the upgrade.",
+                rule,
+            ),
         };
         match self {
             Self::Plan(why)
@@ -394,6 +391,7 @@ pub fn all_refusals() -> Vec<(&'static str, StarterRefusal)> {
         ("NothingToMove", StarterRefusal::NothingToMove),
         ("NewAddress", StarterRefusal::NewAddress),
         ("Unconfirmed", StarterRefusal::Unconfirmed),
+        ("Unsettled", StarterRefusal::Unsettled),
     ]
 }
 
