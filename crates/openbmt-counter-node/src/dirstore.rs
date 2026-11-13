@@ -25,7 +25,10 @@
 //! [`INDEX_STRIDE`] records.
 //!
 //! One more small file holds the height up to which every block has been
-//! checked (NR-75), written whole like a slot. Another holds the newest
+//! checked (NR-75), written whole like a slot. It is four bytes (the height,
+//! LE) or, with the hashes of the blocks at and below that height (NR-46), the
+//! height, a count `n` (one byte, 1 to [`CHECKED_WINDOW`]) and `n` hashes
+//! of 32 bytes, the oldest first, the last at the height itself. Another holds the newest
 //! signed settings the counter took from the owner (CR-161), also written
 //! whole.
 
@@ -50,6 +53,9 @@ pub const INDEX_STRIDE: u64 = 64;
 
 const RECORDS_FILE: &str = "records.bin";
 const CHECKED_FILE: &str = "checked.bin";
+/// NR-46: most hashes the checked file holds: the blocks at and below the
+/// checked height that a reorganization while stopped is looked for in.
+pub const CHECKED_WINDOW: usize = 100;
 /// The file of the newest signed settings the counter took (CR-161).
 pub const SETTINGS_FILE: &str = "settings.bin";
 /// The file of the one change that waits for a counter's confirmation
@@ -192,6 +198,10 @@ pub struct Loaded {
     pub torn: Option<TornTail>,
     /// The height up to which every block has been checked.
     pub checked: Option<u32>,
+    /// NR-46: the hashes of the blocks at the checked height and the ones
+    /// below it, the oldest first, the last at the height. Empty when the file
+    /// holds the height alone.
+    pub checked_hashes: Vec<[u8; 32]>,
 }
 
 impl Loaded {
@@ -339,8 +349,20 @@ impl DirStore {
     }
 
     /// Replace the stored height up to which every block has been checked.
-    pub fn put_checked(&mut self, height: u32) -> Result<(), DirStoreError> {
-        self.write_whole(CHECKED_FILE, &height.to_le_bytes())
+    /// `hashes` are those of [`Loaded::checked_hashes`]: at most
+    /// [`CHECKED_WINDOW`], and none writes the height alone.
+    pub fn put_checked(&mut self, height: u32, hashes: &[[u8; 32]]) -> Result<(), DirStoreError> {
+        let hashes = hashes
+            .get(hashes.len().saturating_sub(CHECKED_WINDOW)..)
+            .unwrap_or_default();
+        let mut out = height.to_le_bytes().to_vec();
+        if !hashes.is_empty() {
+            out.push(u8::try_from(hashes.len()).unwrap_or(u8::MAX));
+            for hash in hashes {
+                out.extend_from_slice(hash);
+            }
+        }
+        self.write_whole(CHECKED_FILE, &out)
     }
 
     /// CR-161: replace the stored signed settings, written whole. On an
@@ -439,10 +461,17 @@ impl DirStore {
             ..Loaded::default()
         };
         if let Some(bytes) = self.read(CHECKED_FILE)? {
-            let four: [u8; 4] = bytes
-                .as_slice()
-                .try_into()
-                .map_err(|_| corrupt(CHECKED_FILE, "it is not four bytes long"))?;
+            let bad = || corrupt(CHECKED_FILE, "it is not a height with its hashes");
+            let (head, rest) = bytes.split_at_checked(4).ok_or_else(bad)?;
+            let four: [u8; 4] = head.try_into().map_err(|_| bad())?;
+            if let Some((count, body)) = rest.split_first() {
+                let n = usize::from(*count);
+                if n == 0 || n > CHECKED_WINDOW || body.len() != n.saturating_mul(32) {
+                    return Err(bad());
+                }
+                let (hashes, _) = body.as_chunks::<32>();
+                loaded.checked_hashes = hashes.to_vec();
+            }
             loaded.checked = Some(u32::from_le_bytes(four));
         }
         let listing = fs::read_dir(&self.dir).map_err(io_err("the data directory", "list"))?;

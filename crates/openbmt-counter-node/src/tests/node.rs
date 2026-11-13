@@ -389,21 +389,33 @@ fn the_driver_starts_where_the_checked_height_and_the_headers_say() {
     let rig = start(dir.path());
     assert_eq!(rig.launch.driver.watch_from, 3);
     assert_eq!(rig.node.checked_height(), 3);
+    // With the hashes of the blocks up to it (NR-46): the height, a count
+    // and the hashes of the genesis block and the three above it.
+    let stored = fs::read(dir.path().join("checked.bin")).unwrap();
+    assert_eq!(&stored[..4], &3u32.to_le_bytes());
+    assert_eq!(stored[4], 4);
+    assert_eq!(stored.len(), 5 + 4 * 32);
     assert_eq!(
-        fs::read(dir.path().join("checked.bin")).unwrap(),
-        3u32.to_le_bytes()
+        &stored[stored.len() - 32..],
+        &blocks.tip_hash().to_byte_array()
     );
     assert_eq!(rig.node.chain().tip_height(), 3);
     // Each start below needs the directory free (NR-79).
     drop(rig);
 
     // A stored height below the tip is used as it is.
-    DirStore::open(dir.path()).unwrap().put_checked(2).unwrap();
+    DirStore::open(dir.path())
+        .unwrap()
+        .put_checked(2, &[])
+        .unwrap();
     assert_eq!(start(dir.path()).launch.driver.watch_from, 2);
 
     // One above the tip (the headers were saved before the height) is cut to
     // the tip: the blocks above it are asked for again.
-    DirStore::open(dir.path()).unwrap().put_checked(10).unwrap();
+    DirStore::open(dir.path())
+        .unwrap()
+        .put_checked(10, &[])
+        .unwrap();
     assert_eq!(start(dir.path()).launch.driver.watch_from, 3);
 
     // Addresses were shown and the height is gone: from the first block.
@@ -743,4 +755,74 @@ fn cr_210_a_request_paid_while_the_node_was_closed_shows_paid_on_the_next_start(
     let screen = again.node.judge(0).unwrap();
     assert_eq!(screen.state, State::Confirmed);
     assert_eq!(screen.received_sats, 5_000);
+}
+
+#[test]
+fn nr_46_a_payment_in_a_block_that_replaced_a_checked_one_while_stopped_is_seen_after_start() {
+    let dir = Scratch::new();
+    let mut old = Blocks::default();
+    for _ in 0..4 {
+        old.extend(&[]);
+    }
+    fs::write(dir.path().join("headers.bin"), old.stored_headers()).unwrap();
+    // The first run: the counter shows an address, and has checked up to 4.
+    let (mut rig, pay) = rig_with_a_sale(&dir);
+    assert_eq!(rig.node.checked_height(), 4);
+    rig.node.shutdown();
+    drop(rig);
+
+    // While it was stopped the chain changed: blocks 3 and 4 were replaced
+    // and the new block 3 holds the payment.
+    let mut new = Blocks::default();
+    new.extend(&[]);
+    new.extend(&[]);
+    let alt3 = mine(new.tip_hash(), 3, 1, std::slice::from_ref(&pay));
+    let alt4 = mine(alt3.block_hash(), 4, 1, &[]);
+    let alt5 = mine(alt4.block_hash(), 5, 1, &[]);
+    let mut store = openbmt_watch::HeaderStore::new(bitcoin::Network::Regtest).unwrap();
+    for b in [new.at(1), new.at(2), &alt3, &alt4, &alt5] {
+        store.accept(&b.header, u64::MAX / 2).unwrap();
+    }
+    fs::write(dir.path().join("headers.bin"), store.to_bytes()).unwrap();
+
+    let mut rig = start(dir.path());
+    // The driver checks again from the block below the first one that was
+    // replaced, and the file says so.
+    assert_eq!(rig.launch.driver.watch_from, 2);
+    assert_eq!(rig.node.checked_height(), 2);
+    assert!(rig
+        .node
+        .notes()
+        .any(|n| n.contains("not on the stored chain")));
+    let stored = DirStore::open(dir.path()).unwrap().load().unwrap();
+    assert_eq!(stored.checked, Some(2));
+    assert_eq!(stored.checked_hashes.len(), 3);
+    // The blocks above it come, and the payment is seen.
+    rig.feed(vec![Rig::peers(), block_event(&alt3), AppEvent::Checked(3)]);
+    assert_eq!(rig.node.judge(0).unwrap().received_sats, 5_000);
+}
+
+#[test]
+fn nr_46_a_checked_block_still_on_the_chain_leaves_the_height_and_a_height_alone_is_read() {
+    let dir = Scratch::new();
+    let mut blocks = Blocks::default();
+    for _ in 0..4 {
+        blocks.extend(&[]);
+    }
+    fs::write(dir.path().join("headers.bin"), blocks.stored_headers()).unwrap();
+    let (rig, _) = rig_with_a_sale(&dir);
+    drop(rig);
+    assert_eq!(start(dir.path()).launch.driver.watch_from, 4);
+    drop(start(dir.path()));
+    // The file of before the hashes, read as no hashes.
+    DirStore::open(dir.path())
+        .unwrap()
+        .put_checked(3, &[])
+        .unwrap();
+    let loaded = DirStore::open(dir.path()).unwrap().load().unwrap();
+    assert_eq!((loaded.checked, loaded.checked_hashes.len()), (Some(3), 0));
+    assert_eq!(start(dir.path()).launch.driver.watch_from, 3);
+    // A file that is neither is refused.
+    fs::write(dir.path().join("checked.bin"), [3, 0, 0, 0, 2, 9]).unwrap();
+    assert!(DirStore::open(dir.path()).unwrap().load().is_err());
 }

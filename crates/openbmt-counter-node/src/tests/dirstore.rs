@@ -57,7 +57,7 @@ fn every_slot_and_the_checked_height_read_back() {
             .put(Slot::Sale(index), format!("sale {index}").as_bytes())
             .unwrap();
     }
-    store.put_checked(321).unwrap();
+    store.put_checked(321, &[]).unwrap();
     let loaded = DirStore::open(dir.path()).unwrap().load().unwrap();
     assert_eq!(loaded.batches.as_deref(), Some(&b"batches"[..]));
     assert_eq!(loaded.exposure.as_deref(), Some(&b"exposure"[..]));
@@ -128,7 +128,7 @@ fn a_failed_write_leaves_the_old_value() {
     let mut store = DirStore::open(dir.path()).unwrap();
     store.put(Slot::Desk, b"old").unwrap();
     store.put(Slot::Sale(1), b"old sale").unwrap();
-    store.put_checked(5).unwrap();
+    store.put_checked(5, &[]).unwrap();
     // A directory where the temporary file belongs: the file cannot be made.
     for name in ["desk.bin.tmp", "sale-1.bin.tmp", "checked.bin.tmp"] {
         fs::create_dir(dir.path().join(name)).unwrap();
@@ -139,7 +139,7 @@ fn a_failed_write_leaves_the_old_value() {
         "{err}"
     );
     assert!(store.put(Slot::Sale(1), b"new sale").is_err());
-    assert!(store.put_checked(9).is_err());
+    assert!(store.put_checked(9, &[]).is_err());
     let loaded = store.load().unwrap();
     assert_eq!(loaded.desk.as_deref(), Some(&b"old"[..]));
     assert_eq!(loaded.sales, vec![(1, b"old sale".to_vec())]);

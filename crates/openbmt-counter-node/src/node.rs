@@ -102,6 +102,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use bitcoin::consensus::deserialize;
+use bitcoin::hashes::Hash;
 use bitcoin::{Address, BlockHash, Network, ScriptBuf, Transaction, Txid};
 use openbmt_core::approval::ChangeClass;
 use openbmt_core::batch::{AddError, PinnedRoots, SignedBatch};
@@ -140,7 +141,7 @@ use openbmt_watch::{
 
 use crate::chainview::ChainView;
 use crate::confirm::{ChangeNotice, ConfirmRefused, Pending, PendingChange};
-use crate::dirstore::{DirStore, DirStoreError};
+use crate::dirstore::{DirStore, DirStoreError, CHECKED_WINDOW};
 use crate::lightning::{
     Lightning, LightningStatus, LnEvent, LnRequest, LnTransport, SaleLightning, SetupRefused,
     SetupStep,
@@ -323,6 +324,39 @@ impl DriverPort for Handle {
 }
 
 /// CR-219: 32 bytes from the operating system, or none when it has none.
+/// NR-46: the hashes of the blocks of `view` at `height` and below it, the
+/// oldest first, as many as the checked file holds.
+fn checked_window(view: &ChainView, height: u32) -> Vec<[u8; 32]> {
+    let mut hashes: Vec<[u8; 32]> = (0..CHECKED_WINDOW as u32)
+        .map_while(|i| height.checked_sub(i))
+        .map_while(|h| view.hash_at(h))
+        .map(|hash| hash.to_byte_array())
+        .collect();
+    hashes.reverse();
+    hashes
+}
+
+/// NR-46: where the checked height goes when the block it was written for
+/// is not on the chain `view` holds: the highest height below it whose
+/// stored hash is. None when the block is there, when the stored form has
+/// no hashes, or when the chain does not reach that height. A chain that
+/// holds none of the stored blocks takes it below all of them.
+fn checked_fork(checked: u32, stored: &[[u8; 32]], view: &ChainView) -> Option<u32> {
+    let (top, below) = stored.split_last()?;
+    let on_chain = view.hash_at(checked)?;
+    if on_chain.to_byte_array() == *top {
+        return None;
+    }
+    for (back, hash) in (1u32..).zip(below.iter().rev()) {
+        let height = checked.checked_sub(back)?;
+        if view.hash_at(height).map(|h| h.to_byte_array()) == Some(*hash) {
+            return Some(height);
+        }
+    }
+    let n = u32::try_from(stored.len()).unwrap_or(u32::MAX);
+    Some(checked.saturating_sub(n))
+}
+
 fn os_random() -> Option<[u8; 32]> {
     use std::io::Read;
     let mut file = std::fs::File::open("/dev/urandom").ok()?;
@@ -825,8 +859,25 @@ impl<P: DriverPort> Node<P> {
             None if shown_before => headers.start_height(),
             None => tip,
         };
-        if loaded.checked.is_none() {
-            store.put_checked(watch_from).map_err(StartError::Checked)?;
+        // NR-46: the block the checked height was written for is looked up in
+        // the stored chain. When it is gone, the height goes down to the
+        // highest block below it that is still there, so the blocks that
+        // took its place are checked again.
+        let mut watch_from = watch_from;
+        let lowered = loaded
+            .checked
+            .and_then(|c| checked_fork(c, &loaded.checked_hashes, &view));
+        if let Some(lower) = lowered {
+            notes.push_back(format!(
+                "the block at the checked height is not on the stored chain; checking again \
+                 from {lower}"
+            ));
+            watch_from = watch_from.min(lower);
+        }
+        if loaded.checked.is_none() || lowered.is_some() {
+            store
+                .put_checked(watch_from, &checked_window(&view, watch_from))
+                .map_err(StartError::Checked)?;
         }
         driver.watch_from = watch_from;
         apply_settings_to_driver(&settings, &mut driver, &mut notes)?;
@@ -913,7 +964,7 @@ impl<P: DriverPort> Node<P> {
             cache: VecDeque::new(),
             notes,
             all_blocks: false,
-            checked: loaded.checked.unwrap_or(watch_from),
+            checked: watch_from,
             checked_cap: None,
             stopped: false,
             last_settle: None,
@@ -2074,7 +2125,10 @@ impl<P: DriverPort> Node<P> {
         if height >= self.checked {
             return;
         }
-        match self.store.put_checked(height) {
+        match self
+            .store
+            .put_checked(height, &checked_window(&self.view, height))
+        {
             Ok(()) => self.checked = height,
             Err(e) => self.note(format!(
                 "the checked height was not taken down to {height} after a \
@@ -2088,7 +2142,10 @@ impl<P: DriverPort> Node<P> {
         if height <= self.checked {
             return;
         }
-        match self.store.put_checked(height) {
+        match self
+            .store
+            .put_checked(height, &checked_window(&self.view, height))
+        {
             Ok(()) => self.checked = height,
             Err(e) => self.note(format!("the checked height {height} was not stored: {e}")),
         }
