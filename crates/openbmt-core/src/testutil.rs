@@ -87,3 +87,30 @@ pub fn assert_strict_decoding<T>(
         }
     }
 }
+
+/// The compressed public key of the secret `[seed; 32]`: a valid node ID.
+pub fn node_key(seed: u8) -> [u8; crate::settings::LIGHTNING_NODE_BYTES] {
+    let sk = bitcoin::secp256k1::SecretKey::from_slice(&[seed; 32]).expect("a key");
+    bitcoin::secp256k1::PublicKey::from_secret_key(secp(), &sk).serialize()
+}
+
+/// `settings` with Shop Lightning set (SL-71): the counter is identity 60
+/// and the second device is the Box, identity 61, both added.
+pub fn with_shop_lightning(mut s: crate::settings::Settings) -> crate::settings::Settings {
+    let counter = identity(60).device_id();
+    let boxed = identity(61).device_id();
+    s.devices.insert(counter);
+    s.devices.insert(boxed);
+    s.counters.insert(counter, 500);
+    s.boxes.insert(boxed);
+    s.shop_lightning = Some(crate::settings::ShopLightning {
+        counter,
+        node_id: node_key(7),
+        second_device: boxed,
+        provider_node_id: node_key(8),
+        provider_addr: "203.0.113.5:9735".parse().expect("an address"),
+        cap_sats: 5_000_000,
+        max_opening_fee_sats: 20_000,
+    });
+    s
+}

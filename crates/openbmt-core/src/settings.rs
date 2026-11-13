@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::net::{IpAddr, SocketAddr};
 
 use crate::approval::ChangeClass;
 use crate::batch::PinnedRoots;
@@ -71,6 +72,12 @@ const SWAP_VERSION: u8 = 3;
 /// and then the provider, then the own-node block. It is the version of
 /// exactly the settings that name an own node.
 const OWN_NODE_VERSION: u8 = 4;
+
+/// The version byte of a settings message that names Shop Lightning
+/// (SL-71): the swap provider and the own node as flags, the two flags of
+/// the own node, then the Shop Lightning block. It is the version of exactly
+/// the settings that name Shop Lightning.
+const SHOP_LIGHTNING_VERSION: u8 = 5;
 
 /// Characters of the base32 part of a Tor v3 host name (NR-92).
 const ONION_BASE_CHARS: usize = 56;
@@ -238,6 +245,97 @@ impl OwnNode {
     }
 }
 
+/// Shop Lightning as the signed settings name it (SL-71): the Lightning
+/// counter, the node it runs, the Box that keeps the second copy, the
+/// provider that opens channels to it and the two limits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShopLightning {
+    /// The Lightning counter: a counter of the settings.
+    pub counter: DeviceId,
+    /// The node's ID, a compressed public key (SL-72).
+    pub node_id: [u8; LIGHTNING_NODE_BYTES],
+    /// The second device: a Box of the settings (SL-73).
+    pub second_device: DeviceId,
+    /// The provider's node ID, a compressed public key (SL-28).
+    pub provider_node_id: [u8; LIGHTNING_NODE_BYTES],
+    /// The provider's IP address and port (SL-32).
+    pub provider_addr: SocketAddr,
+    /// The most the node holds, in satoshis (SL-34).
+    pub cap_sats: u64,
+    /// The most the shop pays for one opening, in satoshis (SL-29).
+    pub max_opening_fee_sats: u64,
+}
+
+impl ShopLightning {
+    /// The checks of SL-71 that need only this block: both keys are
+    /// compressed points, the provider's port is not 0 and the cap is above
+    /// 0. Which devices these are is the settings' to check.
+    pub fn validate(&self) -> Result<(), SettingsError> {
+        let bad = |why: &'static str| Err(SettingsError::Invalid(why));
+        for key in [&self.node_id, &self.provider_node_id] {
+            if bitcoin::secp256k1::PublicKey::from_slice(key).is_err() {
+                return bad("SL-71: a Shop Lightning node ID is not a compressed public key");
+            }
+        }
+        if self.provider_addr.port() == 0 {
+            return bad("SL-71: the provider's port is not from 1 to 65535");
+        }
+        if self.cap_sats == 0 {
+            return bad("SL-71: the Shop Lightning cap is 0");
+        }
+        Ok(())
+    }
+
+    /// The counter, the node, the second device, the provider's ID, its
+    /// address (a family byte 4 or 6, 4 or 16 address bytes, and the port as
+    /// `u16`) and the two limits as `u64`.
+    fn write(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.counter.to_bytes());
+        out.extend_from_slice(&self.node_id);
+        out.extend_from_slice(&self.second_device.to_bytes());
+        out.extend_from_slice(&self.provider_node_id);
+        match self.provider_addr.ip() {
+            IpAddr::V4(ip) => {
+                out.push(4);
+                out.extend_from_slice(&ip.octets());
+            }
+            IpAddr::V6(ip) => {
+                out.push(6);
+                out.extend_from_slice(&ip.octets());
+            }
+        }
+        out.extend_from_slice(&self.provider_addr.port().to_le_bytes());
+        out.extend_from_slice(&self.cap_sats.to_le_bytes());
+        out.extend_from_slice(&self.max_opening_fee_sats.to_le_bytes());
+    }
+
+    fn read(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let counter = r.device_id()?;
+        let node_id = r.array::<LIGHTNING_NODE_BYTES>()?;
+        let second_device = r.device_id()?;
+        let provider_node_id = r.array::<LIGHTNING_NODE_BYTES>()?;
+        let ip = match r.u8()? {
+            4 => IpAddr::from(r.array::<4>()?),
+            6 => IpAddr::from(r.array::<16>()?),
+            _ => {
+                return Err(DecodeError::NonCanonical(
+                    "the provider's address family is not 4 or 6",
+                ))
+            }
+        };
+        let provider_addr = SocketAddr::new(ip, r.u16_le()?);
+        Ok(Self {
+            counter,
+            node_id,
+            second_device,
+            provider_node_id,
+            provider_addr,
+            cap_sats: r.u64_le()?,
+            max_opening_fee_sats: r.u64_le()?,
+        })
+    }
+}
+
 /// What a device is to the shop, as the signed settings give it (BX-24).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceRole {
@@ -352,6 +450,9 @@ pub struct Settings {
     /// `node_only` off it is a second check next to the light client
     /// (NR-98 to NR-103).
     pub own_node: Option<OwnNode>,
+    /// Shop Lightning (SL-71): off when `None`. Never set together with
+    /// `lightning_node` or `swap`.
+    pub shop_lightning: Option<ShopLightning>,
     /// Every payment is checked against the own node alone, with no random
     /// peers (NR-106). On only with `own_node` set.
     pub node_only: bool,
@@ -408,6 +509,7 @@ impl Settings {
             lightning_node: None,
             swap: None,
             own_node: None,
+            shop_lightning: None,
             node_only: false,
             light_fallback: false,
             watch_key: None,
@@ -427,10 +529,13 @@ impl Settings {
     }
 
     /// The version byte of the frame these settings are written in: 4 when
-    /// they name an own node (NR-105), else 3 when they name a swap provider
+    /// they name Shop Lightning (SL-71), else 4 when they name an own node
+    /// (NR-105), else 3 when they name a swap provider
     /// (CR-218), else 2 when they carry the extension block, else 1.
     fn frame_version(&self) -> u8 {
-        if self.own_node.is_some() {
+        if self.shop_lightning.is_some() {
+            SHOP_LIGHTNING_VERSION
+        } else if self.own_node.is_some() {
             OWN_NODE_VERSION
         } else if self.swap.is_some() {
             SWAP_VERSION
@@ -560,6 +665,24 @@ impl Settings {
         if let Some(own) = &self.own_node {
             own.validate()?;
         }
+        if let Some(sl) = &self.shop_lightning {
+            sl.validate()?;
+            if !self.counters.contains_key(&sl.counter) {
+                return Err(SettingsError::Invalid(
+                    "SL-71: the Lightning counter is not a counter of the settings",
+                ));
+            }
+            if !self.boxes.contains(&sl.second_device) {
+                return Err(SettingsError::Invalid(
+                    "SL-71: the second device is not a Box of the settings",
+                ));
+            }
+            if self.lightning_node.is_some() || self.swap.is_some() {
+                return Err(SettingsError::Invalid(
+                    "SL-71: Shop Lightning is set with a Lightning node or a swap provider",
+                ));
+            }
+        }
         if self.node_only && self.own_node.is_none() {
             return Err(SettingsError::Invalid(
                 "NR-105: node-only is on and no own node is named",
@@ -676,7 +799,27 @@ impl Settings {
         // NR-105: version 4 writes the swap provider behind a flag, then the
         // own-node block: a flag, the name and the port, node-only and the
         // light fallback. Settings that name no own node never reach it.
-        if self.own_node.is_some() {
+        // SL-71: version 5 writes both behind a flag, then the two flags of
+        // the own node and the Shop Lightning block.
+        if let Some(sl) = &self.shop_lightning {
+            match &self.swap {
+                Some(swap) => {
+                    out.push(1);
+                    swap.write(&mut out);
+                }
+                None => out.push(0),
+            }
+            match &self.own_node {
+                Some(own) => {
+                    out.push(1);
+                    own.write(&mut out);
+                }
+                None => out.push(0),
+            }
+            out.push(u8::from(self.node_only));
+            out.push(u8::from(self.light_fallback));
+            sl.write(&mut out);
+        } else if self.own_node.is_some() {
             match &self.swap {
                 Some(swap) => {
                     out.push(1);
@@ -793,26 +936,42 @@ impl Settings {
             (ShopCurrency::Usd, false, DEFAULT_TIP_PERCENTS.to_vec())
         };
 
-        let (swap, own_node, node_only, light_fallback) = if version_byte >= OWN_NODE_VERSION {
-            let swap = if r.flag()? {
-                Some(SwapProvider::read(r)?)
+        let (swap, own_node, node_only, light_fallback, shop_lightning) =
+            if version_byte >= SHOP_LIGHTNING_VERSION {
+                let swap = if r.flag()? {
+                    Some(SwapProvider::read(r)?)
+                } else {
+                    None
+                };
+                let own_node = if r.flag()? {
+                    Some(OwnNode::read(r)?)
+                } else {
+                    None
+                };
+                let node_only = r.flag()?;
+                let light_fallback = r.flag()?;
+                let sl = Some(ShopLightning::read(r)?);
+                (swap, own_node, node_only, light_fallback, sl)
+            } else if version_byte >= OWN_NODE_VERSION {
+                let swap = if r.flag()? {
+                    Some(SwapProvider::read(r)?)
+                } else {
+                    None
+                };
+                if !r.flag()? {
+                    return Err(DecodeError::NonCanonical(
+                        "a version 4 message names an own node",
+                    ));
+                }
+                let own_node = Some(OwnNode::read(r)?);
+                let node_only = r.flag()?;
+                let light_fallback = r.flag()?;
+                (swap, own_node, node_only, light_fallback, None)
+            } else if version_byte >= SWAP_VERSION {
+                (Some(SwapProvider::read(r)?), None, false, false, None)
             } else {
-                None
+                (None, None, false, false, None)
             };
-            if !r.flag()? {
-                return Err(DecodeError::NonCanonical(
-                    "a version 4 message names an own node",
-                ));
-            }
-            let own_node = Some(OwnNode::read(r)?);
-            let node_only = r.flag()?;
-            let light_fallback = r.flag()?;
-            (swap, own_node, node_only, light_fallback)
-        } else if version_byte >= SWAP_VERSION {
-            (Some(SwapProvider::read(r)?), None, false, false)
-        } else {
-            (None, None, false, false)
-        };
 
         Ok(Self {
             version,
@@ -839,6 +998,7 @@ impl Settings {
             lightning_node,
             swap,
             own_node,
+            shop_lightning,
             node_only,
             light_fallback,
             watch_key,
@@ -1079,6 +1239,29 @@ pub fn changed_fields(old: &Settings, new: &Settings) -> Vec<FieldChange> {
         o.push(FieldChange {
             field: "own_node",
             direction: dir(new.own_node.is_some() && new.node_only),
+        });
+    }
+    // AP-13, SL-71: the node decides where Lightning payments go. Setting
+    // the field or changing its node or counter redirects, which loosens;
+    // the provider, the second device and higher limits loosen; lower
+    // limits and taking the field away tighten.
+    if old.shop_lightning != new.shop_lightning {
+        let loosens = match (&old.shop_lightning, &new.shop_lightning) {
+            (_, None) => false,
+            (None, Some(_)) => true,
+            (Some(a), Some(b)) => {
+                a.node_id != b.node_id
+                    || a.counter != b.counter
+                    || a.provider_node_id != b.provider_node_id
+                    || a.provider_addr != b.provider_addr
+                    || a.second_device != b.second_device
+                    || b.cap_sats > a.cap_sats
+                    || b.max_opening_fee_sats > a.max_opening_fee_sats
+            }
+        };
+        o.push(FieldChange {
+            field: "shop_lightning",
+            direction: dir(loosens),
         });
     }
     flag(o, "node_only", old.node_only, new.node_only, true);
@@ -1352,8 +1535,8 @@ impl SignedSettings {
 impl SignedSettings {
     /// Wire form: `OBMS`, version 1 (2 when the settings carry the extension
     /// block, the currency and the tips, CR-187 and CR-193, 3 when they
-    /// also name a swap provider, CR-218, and 4 when they name an own node,
-    /// NR-105), the bytes of
+    /// also name a swap provider, CR-218, 4 when they name an own node,
+    /// NR-105, and 5 when they name Shop Lightning, SL-71), the bytes of
     /// [`Settings::encode`] (the
     /// bytes that are hashed and signed), the owner signature, a flag byte
     /// (1 if a Key app signature follows, else 0) and, only when the flag is
@@ -1383,7 +1566,7 @@ impl SignedSettings {
     /// [`SignedSettings::verify`].
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
         let (mut r, version) =
-            Reader::framed_up_to(bytes, &wire::MAGIC_SIGNED_SETTINGS, OWN_NODE_VERSION)?;
+            Reader::framed_up_to(bytes, &wire::MAGIC_SIGNED_SETTINGS, SHOP_LIGHTNING_VERSION)?;
         let settings = Settings::read(&mut r, version)?;
         let owner_sig = r.sig()?;
         let approver_sig = if r.flag()? { Some(r.sig()?) } else { None };
@@ -1507,7 +1690,7 @@ impl SettingNote {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::identity;
+    use crate::testutil::{identity, with_shop_lightning};
 
     const RATE: u64 = 1_000;
 
@@ -2369,7 +2552,7 @@ mod tests {
         };
         assert_eq!(edit(3, b'X'), DecodeError::BadMagic);
         assert_eq!(edit(4, 0), DecodeError::UnsupportedVersion(0));
-        assert_eq!(edit(4, 5), DecodeError::UnsupportedVersion(5));
+        assert_eq!(edit(4, 6), DecodeError::UnsupportedVersion(6));
         assert!(matches!(edit(TOR_AT, 2), DecodeError::NonCanonical(_)));
         assert!(matches!(edit(TOR_AT + 1, 2), DecodeError::NonCanonical(_)));
         // The Key app signature flag is the last byte but 64.
@@ -3637,10 +3820,10 @@ mod tests {
             ShopCurrency::Usd
         );
         let mut v4 = wire.clone();
-        v4[4] = 5;
+        v4[4] = 6;
         assert_eq!(
             SignedSettings::from_bytes(&v4),
-            Err(DecodeError::UnsupportedVersion(5))
+            Err(DecodeError::UnsupportedVersion(6))
         );
         let mut v0 = wire;
         v0[4] = 0;
@@ -3782,10 +3965,10 @@ mod tests {
         v1[4] = 1;
         assert!(SignedSettings::from_bytes(&v1).is_err());
         let mut v4 = wire;
-        v4[4] = 5;
+        v4[4] = 6;
         assert_eq!(
             SignedSettings::from_bytes(&v4),
-            Err(DecodeError::UnsupportedVersion(5))
+            Err(DecodeError::UnsupportedVersion(6))
         );
     }
 
@@ -3916,5 +4099,241 @@ mod tests {
             Ok(Change::Loosening)
         );
         assert_eq!(store.current().map(|s| s.currency), Some(ShopCurrency::Jpy));
+    }
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    #[test]
+    fn sl_71_settings_without_the_field_encode_and_hash_as_before() {
+        let plain = wire_settings();
+        assert_eq!(plain.shop_lightning, None);
+        assert_eq!(plain.encode(), reference_body(&plain));
+        assert_eq!(
+            hex(&plain.hash()),
+            "b5484507f5d6f8d7d9110b5a96e2e8c5de4fa7fe8de7548894bc812c94d35057",
+            "hash of the version 1 fixture"
+        );
+        let own = with_own_node(plain, true, true);
+        assert_eq!(
+            hex(&own.hash()),
+            "a5827abd40c2caa9535fc78da3abb33bf98b8c5488b6e681360bfe604c173c1c",
+            "hash of the version 4 fixture"
+        );
+        let bytes = signed_both(own.clone()).to_bytes();
+        assert_eq!(bytes[4], 4);
+        assert_eq!(SignedSettings::from_bytes(&bytes).unwrap().settings, own);
+    }
+
+    #[test]
+    fn sl_71_the_field_starts_off() {
+        assert_eq!(Settings::defaults(RATE).shop_lightning, None);
+    }
+
+    #[test]
+    fn sl_71_settings_with_the_field_are_version_five_and_read_back() {
+        let v6: SocketAddr = "[2001:db8::1]:9736".parse().unwrap();
+        let mut cases = vec![with_shop_lightning(wire_settings())];
+        let mut v6_case = with_shop_lightning(wire_settings());
+        v6_case.shop_lightning.as_mut().unwrap().provider_addr = v6;
+        v6_case.tips_on = true;
+        cases.push(v6_case);
+        cases.push(with_shop_lightning(with_own_node(
+            wire_settings(),
+            true,
+            true,
+        )));
+        for s in cases {
+            assert_eq!(s.validate(), Ok(()));
+            let signed = signed_both(s.clone());
+            let bytes = signed.to_bytes();
+            assert_eq!(bytes[4], 5);
+            let back = SignedSettings::from_bytes(&bytes).unwrap();
+            assert_eq!(back.settings, s);
+            assert_eq!(back.to_bytes(), bytes);
+            let (_, _, roots) = roots();
+            assert!(back.verify_signatures(&roots).is_ok());
+            assert_ne!(s.hash(), wire_settings().hash());
+            // Every cut of the body fails, and so does an older frame.
+            let body_end = bytes.len() - 64 - 1 - 64;
+            for cut in 1..=40 {
+                let mut short = bytes[..body_end - cut].to_vec();
+                short.extend_from_slice(&bytes[body_end..]);
+                assert!(SignedSettings::from_bytes(&short).is_err(), "{cut}");
+            }
+            for old in 1..=4u8 {
+                let mut frame = bytes.clone();
+                frame[4] = old;
+                assert!(SignedSettings::from_bytes(&frame).is_err(), "v{old}");
+            }
+            let mut v6_frame = bytes.clone();
+            v6_frame[4] = 6;
+            assert!(SignedSettings::from_bytes(&v6_frame).is_err());
+        }
+    }
+
+    #[test]
+    fn sl_71_the_block_is_written_in_its_order() {
+        let s = with_shop_lightning(wire_settings());
+        let sl = s.shop_lightning.unwrap();
+        let body = s.encode();
+        let mut tail = vec![0, 0, 0, 0];
+        tail.extend_from_slice(&sl.counter.to_bytes());
+        tail.extend_from_slice(&sl.node_id);
+        tail.extend_from_slice(&sl.second_device.to_bytes());
+        tail.extend_from_slice(&sl.provider_node_id);
+        tail.push(4);
+        tail.extend_from_slice(&[203, 0, 113, 5]);
+        tail.extend_from_slice(&9735u16.to_le_bytes());
+        tail.extend_from_slice(&5_000_000u64.to_le_bytes());
+        tail.extend_from_slice(&20_000u64.to_le_bytes());
+        assert_eq!(&body[body.len() - tail.len()..], &tail[..]);
+    }
+
+    #[test]
+    fn sl_71_a_block_that_is_not_canonical_is_refused() {
+        let s = with_shop_lightning(wire_settings());
+        let bytes = signed_both(s).to_bytes();
+        let body_end = bytes.len() - 64 - 1 - 64;
+        // The family byte sits 8 + 8 + 2 + 4 bytes before the end of the body.
+        let family = body_end - 8 - 8 - 2 - 4 - 1;
+        assert_eq!(bytes[family], 4);
+        for bad in [0u8, 5, 7] {
+            let mut b = bytes.clone();
+            b[family] = bad;
+            assert!(SignedSettings::from_bytes(&b).is_err(), "family {bad}");
+        }
+        // A flag that is neither 0 nor 1: the four before the block (the
+        // swap provider, the own node, node-only, the light fallback).
+        for at in 1..=4 {
+            let mut b = bytes.clone();
+            b[body_end - 153 - at] = 2;
+            assert!(SignedSettings::from_bytes(&b).is_err(), "flag {at}");
+        }
+    }
+
+    #[test]
+    fn sl_71_each_broken_case_is_refused_when_read() {
+        let good = with_shop_lightning(wire_settings());
+        assert_eq!(good.validate(), Ok(()));
+        let counter = good.shop_lightning.unwrap().counter;
+        let other_counter = identity(41).device_id();
+        let other_box = identity(70).device_id();
+        type Case = (&'static str, Box<dyn Fn(&mut Settings)>);
+        let mut cases: Vec<Case> = vec![
+            (
+                "counter not in counters",
+                Box::new(|s| s.shop_lightning.as_mut().unwrap().counter = identity(71).device_id()),
+            ),
+            (
+                "counter is a box",
+                Box::new(move |s| {
+                    let b = s.shop_lightning.unwrap().second_device;
+                    s.shop_lightning.as_mut().unwrap().counter = b;
+                }),
+            ),
+            (
+                "second device not a box",
+                Box::new(move |s| s.shop_lightning.as_mut().unwrap().second_device = other_counter),
+            ),
+            (
+                "second device on the list but not a box",
+                Box::new(move |s| {
+                    s.devices.insert(other_box);
+                    s.shop_lightning.as_mut().unwrap().second_device = other_box;
+                }),
+            ),
+            (
+                "with a lightning node",
+                Box::new(|s| s.lightning_node = Some(node_key(9))),
+            ),
+            (
+                "with a swap provider",
+                Box::new(|s| s.swap = Some(swap_provider())),
+            ),
+            (
+                "node id not a point",
+                Box::new(|s| s.shop_lightning.as_mut().unwrap().node_id = [0; 33]),
+            ),
+            (
+                "node id uncompressed prefix",
+                Box::new(|s| s.shop_lightning.as_mut().unwrap().node_id[0] = 4),
+            ),
+            (
+                "provider id not a point",
+                Box::new(|s| s.shop_lightning.as_mut().unwrap().provider_node_id = [5; 33]),
+            ),
+            (
+                "cap 0",
+                Box::new(|s| s.shop_lightning.as_mut().unwrap().cap_sats = 0),
+            ),
+            (
+                "port 0",
+                Box::new(|s| s.shop_lightning.as_mut().unwrap().provider_addr.set_port(0)),
+            ),
+        ];
+        cases.push((
+            "counter not on the device list",
+            Box::new(move |s| {
+                s.devices.remove(&counter);
+            }),
+        ));
+        for (what, change) in cases {
+            let mut s = good.clone();
+            change(&mut s);
+            assert!(s.validate().is_err(), "{what}");
+            // The refusal also holds for a message that carries it.
+            let (_, _, roots) = roots();
+            assert!(
+                signed_both(s).verify(&roots, None).is_err(),
+                "{what} when read"
+            );
+        }
+        // A zero fee limit is allowed: the shop pays no opening fee.
+        let mut free = good;
+        free.shop_lightning.as_mut().unwrap().max_opening_fee_sats = 0;
+        assert_eq!(free.validate(), Ok(()));
+    }
+
+    #[test]
+    fn sl_71_changed_fields_names_the_field_with_its_direction() {
+        let old = with_shop_lightning(base());
+        let step = |f: &dyn Fn(&mut ShopLightning)| {
+            let mut new = next(&old);
+            f(new.shop_lightning.as_mut().unwrap());
+            changed_fields(&old, &new)
+        };
+        let up = step(&|sl| sl.cap_sats += 1);
+        assert_eq!(up.len(), 1);
+        assert_eq!(up[0].field, "shop_lightning");
+        assert_eq!(up[0].direction, Change::Loosening);
+        assert_eq!(
+            step(&|sl| sl.cap_sats -= 1)[0].direction,
+            Change::Tightening
+        );
+        assert_eq!(
+            step(&|sl| sl.max_opening_fee_sats -= 1)[0].direction,
+            Change::Tightening
+        );
+        assert_eq!(
+            step(&|sl| sl.max_opening_fee_sats += 1)[0].direction,
+            Change::Loosening
+        );
+        assert_eq!(
+            step(&|sl| sl.node_id = node_key(9))[0].direction,
+            Change::Loosening
+        );
+        assert_eq!(
+            step(&|sl| sl.provider_addr.set_port(1))[0].direction,
+            Change::Loosening
+        );
+        let mut off = next(&old);
+        off.shop_lightning = None;
+        assert_eq!(changed_fields(&old, &off)[0].direction, Change::Tightening);
+        let mut on = next(&base());
+        on.shop_lightning = old.shop_lightning;
+        assert_eq!(changed_fields(&base(), &on)[0].direction, Change::Loosening);
+        assert!(changed_fields(&old, &next(&old)).is_empty());
     }
 }
