@@ -2,6 +2,7 @@
 //! needs, loads the keyboard modules, shows the screens of the rules and
 //! turns the computer off.
 
+mod display;
 mod sys;
 
 use std::time::Duration;
@@ -12,7 +13,7 @@ use openbmt_stick::screen::Screen as Page;
 /// How long to wait for the frame buffer before giving up.
 const FRAME_BUFFER_WAIT: Duration = Duration::from_secs(30);
 
-fn show(display: &mut sys::Screen, page: &Page) {
+fn show(display: &mut display::Screen, page: &Page) {
     display.show(page);
     #[cfg(feature = "serial-echo")]
     sys::serial_echo(page);
@@ -27,7 +28,7 @@ fn main() {
     let mut ready = sys::KernelChance.kernel_bytes();
     ready.fill(0);
     let facts = sys::read_facts();
-    let mut display = match sys::Screen::open(FRAME_BUFFER_WAIT) {
+    let mut display = match display::Screen::open(FRAME_BUFFER_WAIT) {
         Ok(d) => d,
         Err(_) => sys::power_off(),
     };

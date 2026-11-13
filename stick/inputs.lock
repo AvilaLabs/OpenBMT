@@ -1,0 +1,9 @@
+# SK-02: every file of the stick that is not ours comes from one of these
+# packages of the Ubuntu archive (resolute, archive.ubuntu.com). The build
+# downloads exactly these and refuses a package whose SHA-256 differs.
+#
+# package  version  sha256
+shim-signed                      1.59+15.8-0ubuntu2    f8ed71ce2d91a304b6d5eb84997f846f331b554578bc02dbfe78e13ad8ac81a9
+grub-efi-amd64-signed            1.215+2.14-2ubuntu1   603fe7db065634780d9576bab48fce8143a0451697c5be75a6cdb1f6a5e39188
+linux-image-7.0.0-42-generic     7.0.0-42.42           179381704964d6b79c8d2bab2f5d51d8679cb13e9bf51a3293e28f90b708c96e
+linux-modules-7.0.0-42-generic   7.0.0-42.42           af173ab8a9a18ec6f4f450963de4c73ccef4c61bd5c1ab20f7a085b7ca15c9d6

@@ -1,0 +1,1 @@
+quiet loglevel=3 panic=-1 module.sig_enforce=1 retain_initrd vt.global_cursor_default=0

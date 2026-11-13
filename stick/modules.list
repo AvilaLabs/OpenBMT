@@ -1,0 +1,14 @@
+# SK-04: the only kernel modules on the stick, one path a line, relative to
+# /lib/modules/7.0.0-42-generic in linux-modules-7.0.0-42-generic. Each file is
+# copied unchanged (it carries the distribution's signature).
+#
+# The kernel has the USB host drivers (xhci, ehci, ohci, uhci), the PS/2
+# keyboard (i8042 and atkbd) and the firmware frame buffer (simpledrm) built
+# in, so only the USB keyboard's class driver is a module.
+#
+# The generic HID core, which the USB keyboard driver sits on.
+kernel/drivers/hid/hid.ko.zst
+# Binds a plain keyboard to the HID core.
+kernel/drivers/hid/hid-generic.ko.zst
+# The USB HID class driver: a USB keyboard becomes an input event device.
+kernel/drivers/hid/usbhid/usbhid.ko.zst

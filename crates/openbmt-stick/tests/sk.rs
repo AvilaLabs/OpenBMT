@@ -10,6 +10,7 @@ use openbmt_stick::check::{answer_matches, pick_positions};
 use openbmt_stick::draw::{pack, render, text_scale, write_row, Channel, PixelFormat};
 use openbmt_stick::keys::{key_from_code, key_from_event, Key, EVENT_SIZE};
 use openbmt_stick::mix::{dice_alone, dice_values, mix, MixError};
+use openbmt_stick::modlist::{check_list, FORBIDDEN};
 use openbmt_stick::mounts::{MOUNTS, NEVER};
 use openbmt_stick::outputs::{public_of, words_of};
 use openbmt_stick::screen::Screen;
@@ -888,4 +889,130 @@ fn sk_14_the_screen_is_drawn_large_and_packed_in_the_depth_the_buffer_reports() 
     let mut row24 = [0u8; 6];
     write_row(&mut row24, &[0x00010203, 0x00040506], &rgb24);
     assert_eq!(row24, [3, 2, 1, 6, 5, 4]);
+}
+
+fn stick_file(name: &str) -> String {
+    std::fs::read_to_string(root().join("../../stick").join(name)).unwrap()
+}
+
+#[test]
+fn sk_04_the_modules_list_is_the_usb_keyboard_drivers_and_nothing_forbidden() {
+    let text = stick_file("modules.list");
+    let list = check_list(&text).unwrap();
+    assert_eq!(
+        list,
+        [
+            "kernel/drivers/hid/hid.ko.zst",
+            "kernel/drivers/hid/hid-generic.ko.zst",
+            "kernel/drivers/hid/usbhid/usbhid.ko.zst",
+        ]
+    );
+    // The build refuses the same paths (stick/build.sh keeps its own copy of
+    // the folders).
+    let build = stick_file("build.sh");
+    for f in FORBIDDEN {
+        assert!(
+            build.contains(&format!("{f}*")),
+            "build.sh does not refuse {f}"
+        );
+    }
+}
+
+#[test]
+fn sk_04_a_list_with_a_forbidden_module_is_refused() {
+    for bad in [
+        "kernel/drivers/net/ethernet/intel/e1000e/e1000e.ko.zst",
+        "kernel/net/wireless/cfg80211.ko.zst",
+        "kernel/drivers/bluetooth/btusb.ko.zst",
+        "kernel/drivers/usb/storage/usb-storage.ko.zst",
+        "kernel/drivers/scsi/sd_mod.ko.zst",
+        "kernel/drivers/ata/libata.ko.zst",
+        "kernel/drivers/nvme/host/nvme.ko.zst",
+        "kernel/fs/ext4/ext4.ko.zst",
+        "kernel/sound/core/snd.ko.zst",
+        "kernel/drivers/media/usb/uvc/uvcvideo.ko.zst",
+    ] {
+        assert!(
+            check_list(&format!("kernel/drivers/hid/hid.ko.zst\n{bad}\n")).is_err(),
+            "{bad}"
+        );
+    }
+    assert!(check_list("").is_err());
+    assert!(check_list("# only a comment\n").is_err());
+    assert!(check_list("kernel/drivers/hid/../../fs/x.ko.zst").is_err());
+    assert!(check_list("/lib/modules/x.ko").is_err());
+    assert!(check_list("kernel/drivers/hid/hid.ko").is_err());
+}
+
+#[test]
+fn sk_02_the_inputs_lock_names_four_pinned_packages() {
+    let text = stick_file("inputs.lock");
+    let rows: Vec<Vec<&str>> = text
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+        .map(|l| l.split_whitespace().collect())
+        .collect();
+    let names: Vec<&str> = rows.iter().map(|r| r[0]).collect();
+    assert_eq!(
+        names,
+        [
+            "shim-signed",
+            "grub-efi-amd64-signed",
+            "linux-image-7.0.0-42-generic",
+            "linux-modules-7.0.0-42-generic"
+        ]
+    );
+    for r in &rows {
+        assert_eq!(r.len(), 3, "{r:?}");
+        assert_eq!(r[2].len(), 64, "{r:?}");
+        assert!(
+            r[2].bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
+            "{r:?}"
+        );
+    }
+    // The build refuses a package whose hash differs, and downloads by name
+    // and version only.
+    let build = stick_file("build.sh");
+    assert!(build.contains("differs from inputs.lock"));
+    assert!(build.contains("apt-get download \"$pkg=$ver\""));
+}
+
+#[test]
+fn sk_03_the_command_line_is_one_fixed_line_and_the_kernel_enforces_signatures() {
+    let text = stick_file("cmdline");
+    assert_eq!(text.lines().count(), 1);
+    assert!(text.ends_with('\n'));
+    let words: Vec<&str> = text.split_whitespace().collect();
+    assert!(words.contains(&"module.sig_enforce=1"));
+    assert!(
+        words.contains(&"retain_initrd"),
+        "SK-31 reads the initrd from memory"
+    );
+    for w in &words {
+        assert!(
+            !w.starts_with("init=") && !w.starts_with("rdinit=") && !w.starts_with("root="),
+            "{w}"
+        );
+    }
+    // grub.cfg boots the kernel and initrd.img and nothing else, with no menu.
+    let build = stick_file("build.sh");
+    assert!(build.contains("linux /vmlinuz $cmdline"));
+    assert!(build.contains("initrd /initrd.img"));
+    assert!(!build.contains("menuentry"));
+}
+
+#[test]
+fn sk_26_the_test_seeds_descriptor_has_the_key_makers_checksum() {
+    let words: Vec<&str> =
+        "primary fetch primary fetch primary fetch primary fetch primary fetch primary fever"
+            .split(' ')
+            .collect();
+    let p = public_of(&words).unwrap();
+    // tools/keymaker/test/core.test.js, KM-06.
+    assert!(
+        p.descriptor.ends_with("/<0;1>/*)#96yh9yhx"),
+        "{}",
+        p.descriptor
+    );
 }

@@ -10,11 +10,10 @@ use std::io::{self, Read};
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use bitcoin::hashes::{sha256, Hash};
 use openbmt_stick::app::{Chance, Facts};
-use openbmt_stick::draw::{self, Channel, PixelFormat};
 use openbmt_stick::keys::{key_from_event, Key, EVENT_SIZE};
 use openbmt_stick::mix::KERNEL_BYTES;
 use openbmt_stick::mounts::MOUNTS;
@@ -198,187 +197,6 @@ impl Chance for KernelChance {
     }
 }
 
-#[repr(C)]
-#[derive(Default, Clone, Copy)]
-struct FbBitfield {
-    offset: u32,
-    length: u32,
-    msb_right: u32,
-}
-
-/// `struct fb_var_screeninfo` of `linux/fb.h`.
-#[repr(C)]
-#[derive(Default, Clone, Copy)]
-struct FbVar {
-    xres: u32,
-    yres: u32,
-    xres_virtual: u32,
-    yres_virtual: u32,
-    xoffset: u32,
-    yoffset: u32,
-    bits_per_pixel: u32,
-    grayscale: u32,
-    red: FbBitfield,
-    green: FbBitfield,
-    blue: FbBitfield,
-    transp: FbBitfield,
-    nonstd: u32,
-    activate: u32,
-    height: u32,
-    width: u32,
-    accel_flags: u32,
-    pixclock: u32,
-    left_margin: u32,
-    right_margin: u32,
-    upper_margin: u32,
-    lower_margin: u32,
-    hsync_len: u32,
-    vsync_len: u32,
-    sync: u32,
-    vmode: u32,
-    rotate: u32,
-    colorspace: u32,
-    reserved: [u32; 4],
-}
-
-/// `struct fb_fix_screeninfo` of `linux/fb.h`.
-#[repr(C)]
-#[derive(Default, Clone, Copy)]
-struct FbFix {
-    id: [u8; 16],
-    smem_start: libc::c_ulong,
-    smem_len: u32,
-    kind: u32,
-    kind_aux: u32,
-    visual: u32,
-    xpanstep: u16,
-    ypanstep: u16,
-    ywrapstep: u16,
-    line_length: u32,
-    mmio_start: libc::c_ulong,
-    mmio_len: u32,
-    accel: u32,
-    capabilities: u16,
-    reserved: [u16; 2],
-}
-
-const FBIOGET_VSCREENINFO: libc::c_ulong = 0x4600;
-const FBIOGET_FSCREENINFO: libc::c_ulong = 0x4602;
-const KDSETMODE: libc::c_ulong = 0x4b3a;
-const KD_GRAPHICS: libc::c_ulong = 1;
-
-/// SK-14: the frame buffer, mapped into memory.
-pub struct Screen {
-    _file: File,
-    map: *mut u8,
-    map_len: usize,
-    width: usize,
-    height: usize,
-    line: usize,
-    format: PixelFormat,
-    // The text console is told to stop drawing; kept open to stay so.
-    _tty: Option<File>,
-}
-
-impl Screen {
-    /// Opens `/dev/fb0`, waiting up to `wait` for it to appear.
-    pub fn open(wait: Duration) -> io::Result<Screen> {
-        let start = Instant::now();
-        let file = loop {
-            match OpenOptions::new().read(true).write(true).open("/dev/fb0") {
-                Ok(f) => break f,
-                Err(e) if start.elapsed() >= wait => return Err(e),
-                Err(_) => std::thread::sleep(Duration::from_millis(100)),
-            }
-        };
-        let mut var = FbVar::default();
-        let mut fix = FbFix::default();
-        let fd = file.as_raw_fd();
-        // SAFETY: both structs are `repr(C)` copies of the kernel's and are
-        // valid for writes of their size; the ioctls fill them.
-        let (a, b) = unsafe {
-            (
-                libc::ioctl(fd, FBIOGET_VSCREENINFO as _, &mut var as *mut FbVar),
-                libc::ioctl(fd, FBIOGET_FSCREENINFO as _, &mut fix as *mut FbFix),
-            )
-        };
-        if a != 0 || b != 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let line = fix.line_length as usize;
-        let map_len = fix.smem_len as usize;
-        if line == 0 || map_len == 0 || var.bits_per_pixel % 8 != 0 {
-            return Err(io::Error::from(io::ErrorKind::Unsupported));
-        }
-        // SAFETY: maps the frame buffer's memory shared and writable for
-        // `smem_len` bytes; the result is checked before use.
-        let map = unsafe {
-            libc::mmap(
-                std::ptr::null_mut(),
-                map_len,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_SHARED,
-                fd,
-                0,
-            )
-        };
-        if map == libc::MAP_FAILED {
-            return Err(io::Error::last_os_error());
-        }
-        let ch = |b: FbBitfield| Channel {
-            offset: b.offset,
-            length: b.length,
-        };
-        // Stop the text console drawing over the screen (best effort).
-        let tty = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open("/dev/tty0")
-            .ok();
-        if let Some(t) = &tty {
-            // SAFETY: a plain ioctl on an open terminal; no pointers.
-            let _ = unsafe { libc::ioctl(t.as_raw_fd(), KDSETMODE as _, KD_GRAPHICS) };
-        }
-        Ok(Screen {
-            _file: file,
-            map: map.cast(),
-            map_len,
-            width: var.xres as usize,
-            height: var.yres as usize,
-            line,
-            format: PixelFormat {
-                bits_per_pixel: var.bits_per_pixel,
-                red: ch(var.red),
-                green: ch(var.green),
-                blue: ch(var.blue),
-            },
-            _tty: tty,
-        })
-    }
-
-    /// Draws a screen of the program.
-    pub fn show(&mut self, screen: &openbmt_stick::screen::Screen) {
-        let buf = draw::render(screen, self.width, self.height);
-        // SAFETY: `map` is a live mapping of `map_len` bytes, owned by this
-        // value until drop; no other reference to it exists.
-        let mem = unsafe { std::slice::from_raw_parts_mut(self.map, self.map_len) };
-        let bytes = (self.format.bits_per_pixel / 8) as usize;
-        for (y, row) in buf.chunks_exact(self.width).enumerate() {
-            let start = y * self.line;
-            if let Some(dst) = mem.get_mut(start..start + self.width * bytes) {
-                draw::write_row(dst, row, &self.format);
-            }
-        }
-    }
-}
-
-impl Drop for Screen {
-    fn drop(&mut self) {
-        // SAFETY: unmaps the mapping made in `open`, once.
-        unsafe { libc::munmap(self.map.cast(), self.map_len) };
-    }
-}
-
 /// SK-14: the keyboards, read through the kernel's input events. Devices that
 /// appear later (a USB keyboard enumerates after the modules load) are found
 /// by looking again every half second.
@@ -410,6 +228,8 @@ impl Keyboards {
                 .open(&p)
             {
                 self.open.push((p, f));
+                #[cfg(feature = "serial-echo")]
+                serial_inputs();
             }
         }
     }
@@ -469,5 +289,40 @@ pub fn serial_echo(screen: &openbmt_stick::screen::Screen) {
         .open("/dev/ttyS0")
     {
         let _ = f.write_all(openbmt_stick::screen::echo_text(screen).as_bytes());
+    }
+}
+
+/// SK-40: the names of the input devices the kernel has, for the test that a
+/// USB keyboard's driver was loaded. Not in a release.
+#[cfg(feature = "serial-echo")]
+pub fn serial_inputs() {
+    use std::io::Write;
+    let mut names: Vec<String> = fs::read_dir("/sys/class/input")
+        .map(|rd| {
+            rd.flatten()
+                .filter_map(|e| read_trim(&format!("{}/name", e.path().display())))
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    if let Ok(mut f) = OpenOptions::new()
+        .write(true)
+        .custom_flags(libc::O_NOCTTY)
+        .open("/dev/ttyS0")
+    {
+        let _ = writeln!(f, "OBM-ECHO INPUTS {}", names.join(" | "));
+    }
+}
+
+/// SK-40: one line to the serial port. Not in a release.
+#[cfg(feature = "serial-echo")]
+pub fn serial_note(line: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = OpenOptions::new()
+        .write(true)
+        .custom_flags(libc::O_NOCTTY)
+        .open("/dev/ttyS0")
+    {
+        let _ = writeln!(f, "OBM-ECHO {line}");
     }
 }

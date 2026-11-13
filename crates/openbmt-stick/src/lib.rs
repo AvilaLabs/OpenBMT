@@ -14,6 +14,7 @@ pub mod draw;
 pub mod font;
 pub mod keys;
 pub mod mix;
+pub mod modlist;
 pub mod mounts;
 pub mod outputs;
 pub mod screen;
