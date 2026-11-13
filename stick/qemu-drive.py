@@ -247,10 +247,10 @@ def check_result(s, words, exp):
     fl = press("f")
     if fl["id"] != "float" or fl["qr"] != exp["float0qrrow"]:
         fail("the refund float's code at index 0 differs from the core's")
-    if field(fl, W["WORDS_NEEDED_SK_32_FLOAT_INDEX"]) != "0":
+    if field(fl, W["SK_32_FLOAT_INDEX"]) != "0":
         fail("the float index shown is not 0: %r" % fl["lines"])
     fl1 = press("equal")
-    if fl1["qr"] != exp["float1qrrow"] or field(fl1, W["WORDS_NEEDED_SK_32_FLOAT_INDEX"]) != "1":
+    if fl1["qr"] != exp["float1qrrow"] or field(fl1, W["SK_32_FLOAT_INDEX"]) != "1":
         fail("the refund float's code at index 1 differs from the core's")
     if fl1["qr"] == fl["qr"]:
         fail("index 1 gives the same code as index 0")
@@ -349,7 +349,7 @@ elif scenario in ("sign-ur", "sign-bbqr", "sign-refuse", "camera"):
     if any(m in wait_modules("start") for m in CAMERA_MODULES):
         fail("a camera module was loaded before the choice: %r" % modules("start"))
     ok("SK-51 before the choice no camera module is loaded (%d modules: %s)" % (len(modules("start")), " ".join(modules("start"))))
-    if not any(W["WORDS_NEEDED_SK_50_MENU_SIGN"] in l and l.lstrip(" >").startswith("4 ") for l in first["lines"]):
+    if not any(W["SK_50_MENU_SIGN"] in l and l.lstrip(" >").startswith("4 ") for l in first["lines"]):
         fail("the first screen has no fourth choice: %r" % first["lines"])
     ok("SK-50 the first screen has a fourth choice: Sign a payment")
     s = press("4")
@@ -372,7 +372,7 @@ elif scenario in ("sign-ur", "sign-bbqr", "sign-refuse", "camera"):
             time.sleep(0.5)
         else:
             fail("the no-camera screen never came: %r" % screens()[-1]["lines"])
-        if W["WORDS_NEEDED_SK_52_NO_CAMERA"] not in cur["lines"]:
+        if W["SK_52_NO_CAMERA"] not in cur["lines"]:
             fail("no-camera words: %r" % cur["lines"])
         ok("SK-52 no camera found: the screen says so")
         shot("nocamera", 300)
@@ -425,7 +425,7 @@ elif scenario in ("sign-ur", "sign-bbqr", "sign-refuse", "camera"):
             if cur["id"] != "sign-scan":
                 break
             for l in cur["lines"]:
-                if l.startswith(W["WORDS_NEEDED_SK_52_PARTS"] + " "):
+                if l.startswith(W["SK_52_PARTS"] + " "):
                     total_seen = l.split()[-1]
         cur = screens()[-1]
         if cur["id"] != "type":
@@ -436,11 +436,11 @@ elif scenario in ("sign-ur", "sign-bbqr", "sign-refuse", "camera"):
             for w in other:
                 type_text(w)
                 s = press("ret")
-            if s["id"] != "sign-refused" or W["WORDS_NEEDED_SK_54_OTHER_WALLET"] not in s["lines"]:
+            if s["id"] != "sign-refused" or W["SK_54_OTHER_WALLET"] not in s["lines"]:
                 fail("a payment of another wallet was not refused: %r" % s["lines"])
             if any(l.startswith("bc1") or "bc1" in l for l in s["lines"]):
                 fail("an address was shown before the refusal")
-            ok("SK-53 words of another wallet: refused before anything is shown (%s)" % W["WORDS_NEEDED_SK_54_OTHER_WALLET"])
+            ok("SK-53 words of another wallet: refused before anything is shown (%s)" % W["SK_54_OTHER_WALLET"])
             shot("refused", 300)
         else:
             for w in TEST_SEED:
@@ -454,16 +454,16 @@ elif scenario in ("sign-ur", "sign-bbqr", "sign-refuse", "camera"):
                 info[k] = v
             addr, amount = info["first-output"].split()
             text = "\n".join(s["lines"])
-            unit = W["WORDS_NEEDED_SK_55_UNIT_BTC"]
+            unit = W["SK_55_UNIT_BTC"]
             if ("1 " + addr) not in s["lines"] or (amount + " " + unit) not in s["lines"]:
                 fail("the review does not show output 1 (%s %s): %r" % (addr, amount, s["lines"]))
-            if not any(l.startswith(W["WORDS_NEEDED_SK_55_FEE"] + " " + info["fee"]) for l in s["lines"]):
+            if not any(l.startswith(W["SK_55_FEE"] + " " + info["fee"]) for l in s["lines"]):
                 fail("the review's fee is not %s: %r" % (info["fee"], s["lines"]))
-            if not any(l.startswith(W["WORDS_NEEDED_SK_55_SENT"] + " ") for l in s["lines"]):
+            if not any(l.startswith(W["SK_55_SENT"] + " ") for l in s["lines"]):
                 fail("no total sent away")
-            if not any(l.startswith(W["WORDS_NEEDED_SK_55_FEE_RATE"] + " ") for l in s["lines"]):
+            if not any(l.startswith(W["SK_55_FEE_RATE"] + " ") for l in s["lines"]):
                 fail("no fee rate")
-            own = sum(1 for l in s["lines"] if W["WORDS_NEEDED_SK_55_OWN"] in l)
+            own = sum(1 for l in s["lines"] if W["SK_55_OWN"] in l)
             if own != 1:
                 fail("expected one own output, got %d: %r" % (own, s["lines"]))
             ok("SK-55 review: output 1 %s %s, fee %s, one own output (the change), total and rate shown" % (addr, amount, info["fee"]))

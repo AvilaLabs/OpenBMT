@@ -45,7 +45,10 @@ funds.**
   `drivers/scsi`, `drivers/ata`, `drivers/nvme`, `fs`, `sound` or
   `drivers/media`, and any module of the camera list outside
   `drivers/media/usb/uvc`, `drivers/media/common/videobuf2`,
-  `drivers/media/v4l2-core` and `drivers/media/mc`.
+  `drivers/media/v4l2-core` and `drivers/media/mc`, except the one file
+  `drivers/media/common/uvc` that the USB video class driver needs. The
+  camera modules sit apart from the others in `initrd.img`, so that start-up
+  does not load them.
 - **SK-05. Same input, same bytes.** Two builds of one commit with the same
   `inputs.lock` give byte-identical files: the archive's members sorted,
   every time and owner fixed, compressed with no name or time.

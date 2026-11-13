@@ -256,7 +256,7 @@ impl<C: Chance> App<C> {
             } => {
                 let mut lines = Vec::new();
                 if *sign {
-                    lines.push(WORDS_NEEDED_SK_53_WORDS.to_string());
+                    lines.push(SK_53_WORDS.to_string());
                 }
                 lines.push(format!("{SK_28_TYPE} {}", words.len() + 1));
                 if let Some(e) = error {
@@ -312,13 +312,13 @@ impl<C: Chance> App<C> {
                 gathering, camera, ..
             } => {
                 let (have, total) = gathering.progress();
-                let mut lines = vec![WORDS_NEEDED_SK_52_SCAN_TITLE.to_string()];
+                let mut lines = vec![SK_52_SCAN_TITLE.to_string()];
                 if !camera {
-                    lines.push(WORDS_NEEDED_SK_52_LOOKING.to_string());
+                    lines.push(SK_52_LOOKING.to_string());
                 }
-                lines.push(format!("{WORDS_NEEDED_SK_52_PARTS} {have}/{total}"));
+                lines.push(format!("{SK_52_PARTS} {have}/{total}"));
                 lines.push(String::new());
-                lines.push(format!("Esc {WORDS_NEEDED_SK_52_BACK}"));
+                lines.push(format!("Esc {SK_52_BACK}"));
                 Screen {
                     id: "sign-scan",
                     lines,
@@ -327,30 +327,27 @@ impl<C: Chance> App<C> {
             }
             State::NoCamera => Screen {
                 id: "sign-nocamera",
-                lines: vec![
-                    WORDS_NEEDED_SK_52_NO_CAMERA.to_string(),
-                    format!("Esc {SK_29_TURN_OFF}"),
-                ],
+                lines: vec![SK_52_NO_CAMERA.to_string(), format!("Esc {SK_29_TURN_OFF}")],
                 qr: None,
             },
             State::Refused { why } => {
                 let (reason, input) = match why {
                     // Cannot happen for 12 words of the list; no reason to name.
                     Refusal::Internal => ("", None),
-                    Refusal::NotAPsbt => (WORDS_NEEDED_SK_52_BAD_FILE, None),
-                    Refusal::NotMainnet => (WORDS_NEEDED_SK_54_NOT_MAINNET, None),
-                    Refusal::NoPrevout(i) => (WORDS_NEEDED_SK_54_NO_PREVOUT, Some(*i)),
-                    Refusal::PrevoutMismatch(i) => (WORDS_NEEDED_SK_54_PREVOUT_MISMATCH, Some(*i)),
-                    Refusal::NoPath(i) => (WORDS_NEEDED_SK_54_NO_PATH, Some(*i)),
-                    Refusal::OtherWallet(i) => (WORDS_NEEDED_SK_54_OTHER_WALLET, Some(*i)),
-                    Refusal::PathNotWallet(i) => (WORDS_NEEDED_SK_54_PATH_NOT_WALLET, Some(*i)),
-                    Refusal::KeyMismatch(i) => (WORDS_NEEDED_SK_54_KEY_MISMATCH, Some(*i)),
-                    Refusal::SighashNotAll(i) => (WORDS_NEEDED_SK_54_NOT_SIGHASH_ALL, Some(*i)),
-                    Refusal::OutputsExceedInputs => (WORDS_NEEDED_SK_54_OUTPUTS_EXCEED, None),
+                    Refusal::NotAPsbt => (SK_52_BAD_FILE, None),
+                    Refusal::NotMainnet => (SK_54_NOT_MAINNET, None),
+                    Refusal::NoPrevout(i) => (SK_54_NO_PREVOUT, Some(*i)),
+                    Refusal::PrevoutMismatch(i) => (SK_54_PREVOUT_MISMATCH, Some(*i)),
+                    Refusal::NoPath(i) => (SK_54_NO_PATH, Some(*i)),
+                    Refusal::OtherWallet(i) => (SK_54_OTHER_WALLET, Some(*i)),
+                    Refusal::PathNotWallet(i) => (SK_54_PATH_NOT_WALLET, Some(*i)),
+                    Refusal::KeyMismatch(i) => (SK_54_KEY_MISMATCH, Some(*i)),
+                    Refusal::SighashNotAll(i) => (SK_54_NOT_SIGHASH_ALL, Some(*i)),
+                    Refusal::OutputsExceedInputs => (SK_54_OUTPUTS_EXCEED, None),
                 };
-                let mut lines = vec![WORDS_NEEDED_SK_54_REFUSED.to_string(), reason.to_string()];
+                let mut lines = vec![SK_54_REFUSED.to_string(), reason.to_string()];
                 if let Some(i) = input {
-                    lines.push(format!("{WORDS_NEEDED_SK_54_INPUT} {}", i + 1));
+                    lines.push(format!("{SK_54_INPUT} {}", i + 1));
                 }
                 lines.push(String::new());
                 lines.push(format!("Esc {SK_29_TURN_OFF}"));
@@ -366,8 +363,8 @@ impl<C: Chance> App<C> {
                 Screen {
                     id: "sign-out",
                     lines: vec![
-                        WORDS_NEEDED_SK_56_SHOW.to_string(),
-                        format!("{WORDS_NEEDED_SK_56_PART} {}/{n}", frame + 1),
+                        SK_56_SHOW.to_string(),
+                        format!("{SK_56_PART} {}/{n}", frame + 1),
                         format!("Esc {SK_29_TURN_OFF}"),
                     ],
                     qr: self.out_codes.get(*frame).cloned(),
@@ -378,7 +375,7 @@ impl<C: Chance> App<C> {
 
     /// SK-55: the payment's outputs, the total sent away, the fee and its rate.
     fn review_screen(&self, page: usize) -> Screen {
-        let mut lines = vec![WORDS_NEEDED_SK_55_TITLE.to_string()];
+        let mut lines = vec![SK_55_TITLE.to_string()];
         if let Some(r) = self
             .job
             .as_ref()
@@ -395,37 +392,28 @@ impl<C: Chance> App<C> {
             {
                 lines.push(format!("{} {}", i + 1, o.address));
                 let own = if o.own {
-                    format!(" {WORDS_NEEDED_SK_55_OWN}")
+                    format!(" {SK_55_OWN}")
                 } else {
                     String::new()
                 };
-                lines.push(format!(
-                    "{} {WORDS_NEEDED_SK_55_UNIT_BTC}{own}",
-                    btc(o.sats)
-                ));
+                lines.push(format!("{} {SK_55_UNIT_BTC}{own}", btc(o.sats)));
             }
             lines.push(String::new());
             lines.push(format!(
-                "{WORDS_NEEDED_SK_55_SENT} {} {WORDS_NEEDED_SK_55_UNIT_BTC}",
+                "{SK_55_SENT} {} {SK_55_UNIT_BTC}",
                 btc(r.sent_away)
             ));
+            lines.push(format!("{SK_55_FEE} {} {SK_55_UNIT_BTC}", btc(r.fee)));
             lines.push(format!(
-                "{WORDS_NEEDED_SK_55_FEE} {} {WORDS_NEEDED_SK_55_UNIT_BTC}",
-                btc(r.fee)
-            ));
-            lines.push(format!(
-                "{WORDS_NEEDED_SK_55_FEE_RATE} {} {WORDS_NEEDED_SK_55_UNIT_RATE}",
+                "{SK_55_FEE_RATE} {} {SK_55_UNIT_RATE}",
                 hundredths(r.fee_rate_hundredths())
             ));
             if pages > 1 {
-                lines.push(format!(
-                    "Up Down {WORDS_NEEDED_SK_55_PAGE} {}/{pages}",
-                    page + 1
-                ));
+                lines.push(format!("Up Down {SK_55_PAGE} {}/{pages}", page + 1));
             }
         }
-        lines.push(format!("Enter {WORDS_NEEDED_SK_55_SIGN}"));
-        lines.push(format!("Esc {WORDS_NEEDED_SK_55_REFUSE}"));
+        lines.push(format!("Enter {SK_55_SIGN}"));
+        lines.push(format!("Esc {SK_55_REFUSE}"));
         Screen {
             id: "sign-review",
             lines,
@@ -458,7 +446,7 @@ impl<C: Chance> App<C> {
                 format!("{} 1 {SK_20_MENU_MIX}", mark(0)),
                 format!("{} 2 {SK_22_MENU_DICE}", mark(1)),
                 format!("{} 3 {SK_28_MENU_CHECK}", mark(2)),
-                format!("{} 4 {WORDS_NEEDED_SK_50_MENU_SIGN}", mark(3)),
+                format!("{} 4 {SK_50_MENU_SIGN}", mark(3)),
                 SK_10_MENU_KEYS.to_string(),
                 format!("Esc {SK_29_TURN_OFF}"),
             ],
@@ -478,8 +466,8 @@ impl<C: Chance> App<C> {
                     format!("{SK_26_DESCRIPTOR} {}", p.descriptor),
                     format!("Enter {SK_26_SHOW_QR}"),
                     format!("S {SK_27_SEEDQR}"),
-                    format!("F {WORDS_NEEDED_SK_32_MENU_FLOAT}"),
-                    format!("L {WORDS_NEEDED_SK_32_MENU_LIGHTNING}"),
+                    format!("F {SK_32_MENU_FLOAT}"),
+                    format!("L {SK_32_MENU_LIGHTNING}"),
                     off,
                 ],
                 qr: None,
@@ -489,8 +477,8 @@ impl<C: Chance> App<C> {
                 lines: vec![
                     SK_26_SCAN.to_string(),
                     format!("Enter {SK_26_SHOW_TEXT}"),
-                    format!("F {WORDS_NEEDED_SK_32_MENU_FLOAT}"),
-                    format!("L {WORDS_NEEDED_SK_32_MENU_LIGHTNING}"),
+                    format!("F {SK_32_MENU_FLOAT}"),
+                    format!("L {SK_32_MENU_LIGHTNING}"),
                     off,
                 ],
                 qr: self.descriptor_qr.clone(),
@@ -507,12 +495,12 @@ impl<C: Chance> App<C> {
             (View::Float, Some(_)) => Screen {
                 id: "float",
                 lines: vec![
-                    WORDS_NEEDED_SK_33_FLOAT_WHAT.to_string(),
-                    WORDS_NEEDED_SK_33_FLOAT_SPENDS.to_string(),
-                    WORDS_NEEDED_SK_33_FLOAT_SCAN.to_string(),
-                    WORDS_NEEDED_SK_33_FLOAT_NO_PHOTO.to_string(),
-                    format!("{WORDS_NEEDED_SK_32_FLOAT_INDEX} {}", self.float_index),
-                    format!("+ - {WORDS_NEEDED_SK_32_FLOAT_INDEX_KEYS}"),
+                    SK_33_FLOAT_WHAT.to_string(),
+                    SK_33_FLOAT_SPENDS.to_string(),
+                    SK_33_FLOAT_SCAN.to_string(),
+                    SK_33_FLOAT_NO_PHOTO.to_string(),
+                    format!("{SK_32_FLOAT_INDEX} {}", self.float_index),
+                    format!("+ - {SK_32_FLOAT_INDEX_KEYS}"),
                     format!("Enter {SK_26_SHOW_TEXT}"),
                     off,
                 ],
@@ -521,10 +509,10 @@ impl<C: Chance> App<C> {
             (View::Lightning, Some(_)) => Screen {
                 id: "lightning",
                 lines: vec![
-                    WORDS_NEEDED_SK_33_LIGHTNING_WHAT.to_string(),
-                    WORDS_NEEDED_SK_33_LIGHTNING_SPENDS.to_string(),
-                    WORDS_NEEDED_SK_33_LIGHTNING_SCAN.to_string(),
-                    WORDS_NEEDED_SK_33_LIGHTNING_NO_PHOTO.to_string(),
+                    SK_33_LIGHTNING_WHAT.to_string(),
+                    SK_33_LIGHTNING_SPENDS.to_string(),
+                    SK_33_LIGHTNING_SCAN.to_string(),
+                    SK_33_LIGHTNING_NO_PHOTO.to_string(),
                     format!("Enter {SK_26_SHOW_TEXT}"),
                     off,
                 ],

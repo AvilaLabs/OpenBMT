@@ -681,34 +681,17 @@ fn sk_15_every_word_is_distinct_and_some_screen_shows_each() {
             "{name} listed twice"
         );
     }
-    // A placeholder is allowed only when its value is its own name: the words
-    // are written by the owner of the rules, not by the code.
+    // No placeholder remains: the words are written by the owner of the
+    // rules, not by the code.
     let src = std::fs::read_to_string(root().join("src/words.rs")).unwrap();
     let tag = ["WORDS", "_NEEDED"].concat();
-    for line in src
-        .lines()
-        .filter(|l| l.starts_with("pub const ") && l.contains(&tag))
-    {
-        let name = line
-            .trim_start_matches("pub const ")
-            .split(':')
-            .next()
-            .unwrap()
-            .to_string();
-        assert!(
-            line.contains(&format!("{name}: &str = \"{name}\";")),
-            "{line}"
-        );
-    }
-    // Every constant is named SK_ or is a placeholder of a rule.
+    assert!(!src.contains(&tag), "a placeholder remains in words.rs");
+    // Every constant is named for its rule.
     for line in src
         .lines()
         .filter(|l| l.starts_with("pub const ") && !l.starts_with("pub const ALL"))
     {
-        assert!(
-            line.starts_with("pub const SK_") || line.starts_with(&format!("pub const {tag}_SK_")),
-            "{line}"
-        );
+        assert!(line.starts_with("pub const SK_"), "{line}");
     }
 }
 

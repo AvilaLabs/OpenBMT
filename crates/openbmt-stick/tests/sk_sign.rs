@@ -312,15 +312,15 @@ fn sk_32_f_and_l_open_the_two_screens_from_both_views_and_enter_returns() {
     }
     // Both open from the text view's own list of keys.
     let t = text(&result_app());
-    assert!(t.contains(&format!("F {}", words::WORDS_NEEDED_SK_32_MENU_FLOAT)));
-    assert!(t.contains(&format!("L {}", words::WORDS_NEEDED_SK_32_MENU_LIGHTNING)));
+    assert!(t.contains(&format!("F {}", words::SK_32_MENU_FLOAT)));
+    assert!(t.contains(&format!("L {}", words::SK_32_MENU_LIGHTNING)));
 }
 
 #[test]
 fn sk_32_the_float_screen_shows_the_index_and_the_seedqr_of_that_index() {
     let mut a = result_app();
     a.key(Key::Char('f'));
-    let label = words::WORDS_NEEDED_SK_32_FLOAT_INDEX;
+    let label = words::SK_32_FLOAT_INDEX;
     let qr_at = |i: u32| {
         compact_seedqr(&float_entropy(&WORDS, i).unwrap())
             .unwrap()
@@ -372,10 +372,10 @@ fn sk_33_each_screen_says_what_the_code_is_what_it_spends_how_often_it_is_scanne
     a.key(Key::Char('f'));
     let t = text(&a);
     for w in [
-        words::WORDS_NEEDED_SK_33_FLOAT_WHAT,
-        words::WORDS_NEEDED_SK_33_FLOAT_SPENDS,
-        words::WORDS_NEEDED_SK_33_FLOAT_SCAN,
-        words::WORDS_NEEDED_SK_33_FLOAT_NO_PHOTO,
+        words::SK_33_FLOAT_WHAT,
+        words::SK_33_FLOAT_SPENDS,
+        words::SK_33_FLOAT_SCAN,
+        words::SK_33_FLOAT_NO_PHOTO,
     ] {
         assert!(t.contains(w), "{w}");
     }
@@ -383,10 +383,10 @@ fn sk_33_each_screen_says_what_the_code_is_what_it_spends_how_often_it_is_scanne
     a.key(Key::Char('l'));
     let t = text(&a);
     for w in [
-        words::WORDS_NEEDED_SK_33_LIGHTNING_WHAT,
-        words::WORDS_NEEDED_SK_33_LIGHTNING_SPENDS,
-        words::WORDS_NEEDED_SK_33_LIGHTNING_SCAN,
-        words::WORDS_NEEDED_SK_33_LIGHTNING_NO_PHOTO,
+        words::SK_33_LIGHTNING_WHAT,
+        words::SK_33_LIGHTNING_SPENDS,
+        words::SK_33_LIGHTNING_SCAN,
+        words::SK_33_LIGHTNING_NO_PHOTO,
     ] {
         assert!(t.contains(w), "{w}");
     }
@@ -439,7 +439,7 @@ fn sk_50_the_fourth_choice_loads_the_camera_and_no_other_does() {
     for _ in 0..3 {
         b.key(Key::Down);
     }
-    assert!(text(&b).contains(&format!("> 4 {}", words::WORDS_NEEDED_SK_50_MENU_SIGN)));
+    assert!(text(&b).contains(&format!("> 4 {}", words::SK_50_MENU_SIGN)));
     assert_eq!(b.key(Key::Enter), Outcome::LoadCamera);
     // Esc on the reading screen goes back to the first screen.
     b.key(Key::Escape);
@@ -455,7 +455,7 @@ fn sk_52_no_camera_in_the_set_time_says_so_and_the_owner_can_turn_off() {
     assert!(a.tick(1_000));
     let s = a.screen();
     assert_eq!(s.id, "sign-nocamera");
-    assert!(text(&a).contains(words::WORDS_NEEDED_SK_52_NO_CAMERA));
+    assert!(text(&a).contains(words::SK_52_NO_CAMERA));
     assert_eq!(a.key(Key::Escape), Outcome::TurnOff);
     // A camera that is open stops the clock.
     let mut b = app();
@@ -472,7 +472,7 @@ fn sk_52_the_screen_shows_the_parts_read_out_of_the_parts_needed() {
     let mut a = app();
     a.key(Key::Char('4'));
     a.camera_found();
-    let label = words::WORDS_NEEDED_SK_52_PARTS;
+    let label = words::SK_52_PARTS;
     assert!(text(&a).contains(&format!("{label} 0/0")));
     a.frame_text(&texts[0]);
     let needed = texts.len() / 2;
@@ -599,11 +599,11 @@ fn sk_53_a_payment_of_another_wallet_is_refused_before_anything_is_shown() {
     let s = a.screen();
     assert_eq!(s.id, "sign-refused");
     let t = text(&a);
-    assert!(t.contains(words::WORDS_NEEDED_SK_54_OTHER_WALLET), "{t}");
-    assert!(t.contains(&format!("{} 1", words::WORDS_NEEDED_SK_54_INPUT)));
+    assert!(t.contains(words::SK_54_OTHER_WALLET), "{t}");
+    assert!(t.contains(&format!("{} 1", words::SK_54_INPUT)));
     // No output, no amount.
     assert!(!t.contains("bc1"));
-    assert!(!t.contains(words::WORDS_NEEDED_SK_55_TITLE));
+    assert!(!t.contains(words::SK_55_TITLE));
     // The words are not kept after a refusal; Esc turns off.
     assert_eq!(a.key(Key::Escape), Outcome::TurnOff);
     assert!(!a.holds_anything());
@@ -612,16 +612,16 @@ fn sk_53_a_payment_of_another_wallet_is_refused_before_anything_is_shown() {
 #[test]
 fn sk_54_the_screen_names_each_refusal_and_its_input() {
     let want = [
-        words::WORDS_NEEDED_SK_52_BAD_FILE,
-        words::WORDS_NEEDED_SK_54_NOT_MAINNET,
-        words::WORDS_NEEDED_SK_54_NO_PREVOUT,
-        words::WORDS_NEEDED_SK_54_PREVOUT_MISMATCH,
-        words::WORDS_NEEDED_SK_54_NO_PATH,
-        words::WORDS_NEEDED_SK_54_OTHER_WALLET,
-        words::WORDS_NEEDED_SK_54_PATH_NOT_WALLET,
-        words::WORDS_NEEDED_SK_54_KEY_MISMATCH,
-        words::WORDS_NEEDED_SK_54_NOT_SIGHASH_ALL,
-        words::WORDS_NEEDED_SK_54_OUTPUTS_EXCEED,
+        words::SK_52_BAD_FILE,
+        words::SK_54_NOT_MAINNET,
+        words::SK_54_NO_PREVOUT,
+        words::SK_54_PREVOUT_MISMATCH,
+        words::SK_54_NO_PATH,
+        words::SK_54_OTHER_WALLET,
+        words::SK_54_PATH_NOT_WALLET,
+        words::SK_54_KEY_MISMATCH,
+        words::SK_54_NOT_SIGHASH_ALL,
+        words::SK_54_OUTPUTS_EXCEED,
     ];
     for ((name, bytes), reason) in common::refused_payments().into_iter().zip(want) {
         let mut a = scanned(&bytes, Form::Ur);
@@ -629,7 +629,7 @@ fn sk_54_the_screen_names_each_refusal_and_its_input() {
         assert_eq!(a.screen().id, "sign-refused", "{name}");
         let t = text(&a);
         assert!(t.contains(reason), "{name}: {t}");
-        assert!(t.contains(words::WORDS_NEEDED_SK_54_REFUSED));
+        assert!(t.contains(words::SK_54_REFUSED));
     }
 }
 
@@ -743,22 +743,14 @@ fn sk_55_the_review_screen_lists_every_output_the_total_the_fee_and_the_rate() {
         .unwrap()
         .to_string();
     assert!(t.contains(&format!("1 {ext}")), "{t}");
-    assert!(t.contains(&format!(
-        "{} {}",
-        btc(500_000),
-        words::WORDS_NEEDED_SK_55_UNIT_BTC
-    )));
-    assert!(t.contains(&format!(
-        "{} {}",
-        words::WORDS_NEEDED_SK_55_SENT,
-        btc(500_000)
-    )));
-    assert!(t.contains(&w(words::WORDS_NEEDED_SK_55_FEE)));
-    assert!(t.contains(&w(words::WORDS_NEEDED_SK_55_FEE_RATE)));
-    assert!(t.contains(&format!("Enter {}", words::WORDS_NEEDED_SK_55_SIGN)));
-    assert!(t.contains(&format!("Esc {}", words::WORDS_NEEDED_SK_55_REFUSE)));
+    assert!(t.contains(&format!("{} {}", btc(500_000), words::SK_55_UNIT_BTC)));
+    assert!(t.contains(&format!("{} {}", words::SK_55_SENT, btc(500_000))));
+    assert!(t.contains(&w(words::SK_55_FEE)));
+    assert!(t.contains(&w(words::SK_55_FEE_RATE)));
+    assert!(t.contains(&format!("Enter {}", words::SK_55_SIGN)));
+    assert!(t.contains(&format!("Esc {}", words::SK_55_REFUSE)));
     // Exactly one output is marked own.
-    assert_eq!(t.matches(words::WORDS_NEEDED_SK_55_OWN).count(), 1);
+    assert_eq!(t.matches(words::SK_55_OWN).count(), 1);
     // Esc refuses and nothing is signed.
     assert_eq!(a.key(Key::Escape), Outcome::Continue);
     assert_eq!(a.screen().id, "start");
@@ -770,7 +762,7 @@ fn sk_55_more_than_three_outputs_take_pages() {
     let mut a = scanned(&common::many_outputs_payment().serialize(), Form::Ur);
     type_words(&mut a, &WORDS);
     let first = text(&a);
-    assert!(first.contains(&format!("{} 1/2", words::WORDS_NEEDED_SK_55_PAGE)));
+    assert!(first.contains(&format!("{} 1/2", words::SK_55_PAGE)));
     let ext = |n| {
         Address::from_script(&common::external(n), Network::Bitcoin)
             .unwrap()
@@ -781,7 +773,7 @@ fn sk_55_more_than_three_outputs_take_pages() {
     let second = text(&a);
     assert!(second.contains(&ext(4)) && second.contains(&ext(5)) && !second.contains(&ext(1)));
     // The totals are on every page.
-    assert!(second.contains(words::WORDS_NEEDED_SK_55_SENT));
+    assert!(second.contains(words::SK_55_SENT));
     a.key(Key::Up);
     assert_eq!(text(&a), first);
 }
@@ -949,22 +941,53 @@ fn sk_58_a_signature_does_not_cover_a_changed_transaction() {
 }
 
 #[test]
-fn sk_15_the_new_screens_show_every_new_word_and_no_other_sentence() {
+fn sk_15_the_new_screens_show_every_new_word() {
     let seen = common::walk_new_screens();
-    let src = std::fs::read_to_string(
-        std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_default())
-            .join("src/words.rs"),
-    )
-    .unwrap();
-    for name in words::ALL
-        .iter()
-        .filter(|n| n.starts_with("WORDS_NEEDED_SK_"))
-    {
-        // A placeholder is its own name, and an added screen shows it.
-        assert!(
-            src.contains(&format!("pub const {name}: &str = \"{name}\";")),
-            "{name}"
-        );
-        assert!(seen.contains(name), "no new screen shows {name}");
+    for word in [
+        words::SK_50_MENU_SIGN,
+        words::SK_32_MENU_FLOAT,
+        words::SK_32_MENU_LIGHTNING,
+        words::SK_32_FLOAT_INDEX,
+        words::SK_32_FLOAT_INDEX_KEYS,
+        words::SK_33_FLOAT_WHAT,
+        words::SK_33_FLOAT_SPENDS,
+        words::SK_33_FLOAT_SCAN,
+        words::SK_33_FLOAT_NO_PHOTO,
+        words::SK_33_LIGHTNING_WHAT,
+        words::SK_33_LIGHTNING_SPENDS,
+        words::SK_33_LIGHTNING_SCAN,
+        words::SK_33_LIGHTNING_NO_PHOTO,
+        words::SK_52_SCAN_TITLE,
+        words::SK_52_LOOKING,
+        words::SK_52_PARTS,
+        words::SK_52_BACK,
+        words::SK_52_NO_CAMERA,
+        words::SK_52_BAD_FILE,
+        words::SK_53_WORDS,
+        words::SK_54_REFUSED,
+        words::SK_54_INPUT,
+        words::SK_54_NOT_MAINNET,
+        words::SK_54_NO_PREVOUT,
+        words::SK_54_PREVOUT_MISMATCH,
+        words::SK_54_NO_PATH,
+        words::SK_54_OTHER_WALLET,
+        words::SK_54_PATH_NOT_WALLET,
+        words::SK_54_KEY_MISMATCH,
+        words::SK_54_NOT_SIGHASH_ALL,
+        words::SK_54_OUTPUTS_EXCEED,
+        words::SK_55_TITLE,
+        words::SK_55_OWN,
+        words::SK_55_SENT,
+        words::SK_55_FEE,
+        words::SK_55_FEE_RATE,
+        words::SK_55_UNIT_BTC,
+        words::SK_55_UNIT_RATE,
+        words::SK_55_PAGE,
+        words::SK_55_SIGN,
+        words::SK_55_REFUSE,
+        words::SK_56_SHOW,
+        words::SK_56_PART,
+    ] {
+        assert!(seen.contains(word), "no new screen shows {word}");
     }
 }

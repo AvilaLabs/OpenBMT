@@ -95,93 +95,103 @@ pub const SK_28_KEYS: &str =
 /// After "Esc", on the first screen and every screen after the words (SK-29).
 pub const SK_29_TURN_OFF: &str = "to turn off. Nothing is kept.";
 
-// Placeholders: each is its own name until the words are written.
 /// The first screen's fourth choice: sign a payment (SK-50).
-pub const WORDS_NEEDED_SK_50_MENU_SIGN: &str = "WORDS_NEEDED_SK_50_MENU_SIGN";
+pub const SK_50_MENU_SIGN: &str = "Sign a payment from the owner phone";
 /// After "F" on the result screens: show the refund float's key (SK-32).
-pub const WORDS_NEEDED_SK_32_MENU_FLOAT: &str = "WORDS_NEEDED_SK_32_MENU_FLOAT";
+pub const SK_32_MENU_FLOAT: &str = "to show the key of the refund float";
 /// After "L" on the result screens: show Shop Lightning's key (SK-32).
-pub const WORDS_NEEDED_SK_32_MENU_LIGHTNING: &str = "WORDS_NEEDED_SK_32_MENU_LIGHTNING";
+pub const SK_32_MENU_LIGHTNING: &str = "to show the key of Shop Lightning";
 /// The label before the refund float's index, 0 to 99, on its screen (SK-32).
-pub const WORDS_NEEDED_SK_32_FLOAT_INDEX: &str = "WORDS_NEEDED_SK_32_FLOAT_INDEX";
+pub const SK_32_FLOAT_INDEX: &str = "Float number:";
 /// After the keys + and - on the refund float's screen: they change the index (SK-32).
-pub const WORDS_NEEDED_SK_32_FLOAT_INDEX_KEYS: &str = "WORDS_NEEDED_SK_32_FLOAT_INDEX_KEYS";
+pub const SK_32_FLOAT_INDEX_KEYS: &str =
+    "to change the number. Use the one the owner phone asks for.";
 /// The refund float's screen: what the code is (SK-33).
-pub const WORDS_NEEDED_SK_33_FLOAT_WHAT: &str = "WORDS_NEEDED_SK_33_FLOAT_WHAT";
+pub const SK_33_FLOAT_WHAT: &str =
+    "This code is the key of the refund float, made from your 12 words.";
 /// The refund float's screen: it can spend the float's money and nothing else (SK-33).
-pub const WORDS_NEEDED_SK_33_FLOAT_SPENDS: &str = "WORDS_NEEDED_SK_33_FLOAT_SPENDS";
+pub const SK_33_FLOAT_SPENDS: &str = "It can spend the money in the float and nothing else.";
 /// The refund float's screen: it is scanned once by the owner phone (SK-33).
-pub const WORDS_NEEDED_SK_33_FLOAT_SCAN: &str = "WORDS_NEEDED_SK_33_FLOAT_SCAN";
+pub const SK_33_FLOAT_SCAN: &str =
+    "Scan it once with the owner phone, when it asks for the float's key.";
 /// The refund float's screen: never photographed (SK-33).
-pub const WORDS_NEEDED_SK_33_FLOAT_NO_PHOTO: &str = "WORDS_NEEDED_SK_33_FLOAT_NO_PHOTO";
+pub const SK_33_FLOAT_NO_PHOTO: &str =
+    "Never take a photo of this code. Anyone with one can spend the float.";
 /// Shop Lightning's screen: what the code is (SK-33).
-pub const WORDS_NEEDED_SK_33_LIGHTNING_WHAT: &str = "WORDS_NEEDED_SK_33_LIGHTNING_WHAT";
+pub const SK_33_LIGHTNING_WHAT: &str =
+    "This code is the key of Shop Lightning, made from your 12 words.";
 /// Shop Lightning's screen: it can spend the node's money and nothing else (SK-33).
-pub const WORDS_NEEDED_SK_33_LIGHTNING_SPENDS: &str = "WORDS_NEEDED_SK_33_LIGHTNING_SPENDS";
+pub const SK_33_LIGHTNING_SPENDS: &str =
+    "It can spend the money of Shop Lightning and nothing else.";
 /// Shop Lightning's screen: it is scanned once by the Lightning counter (SK-33).
-pub const WORDS_NEEDED_SK_33_LIGHTNING_SCAN: &str = "WORDS_NEEDED_SK_33_LIGHTNING_SCAN";
+pub const SK_33_LIGHTNING_SCAN: &str =
+    "Scan it once with the counter or Box that runs Shop Lightning, when it asks for its key.";
 /// Shop Lightning's screen: never photographed (SK-33).
-pub const WORDS_NEEDED_SK_33_LIGHTNING_NO_PHOTO: &str = "WORDS_NEEDED_SK_33_LIGHTNING_NO_PHOTO";
+pub const SK_33_LIGHTNING_NO_PHOTO: &str =
+    "Never take a photo of this code. Anyone with one can spend the Lightning money.";
 /// The title of the screen that reads the payment's QR codes (SK-52).
-pub const WORDS_NEEDED_SK_52_SCAN_TITLE: &str = "WORDS_NEEDED_SK_52_SCAN_TITLE";
+pub const SK_52_SCAN_TITLE: &str =
+    "Hold the owner phone's payment code up to this computer's camera.";
 /// On that screen while no camera is open yet (SK-52).
-pub const WORDS_NEEDED_SK_52_LOOKING: &str = "WORDS_NEEDED_SK_52_LOOKING";
+pub const SK_52_LOOKING: &str = "Looking for a camera.";
 /// The label before the parts read out of the parts needed (SK-52).
-pub const WORDS_NEEDED_SK_52_PARTS: &str = "WORDS_NEEDED_SK_52_PARTS";
+pub const SK_52_PARTS: &str = "Parts read:";
 /// After "Esc" on that screen: back to the first screen (SK-52).
-pub const WORDS_NEEDED_SK_52_BACK: &str = "WORDS_NEEDED_SK_52_BACK";
+pub const SK_52_BACK: &str = "to stop and go back to the start";
 /// No camera was found in the set time (SK-52).
-pub const WORDS_NEEDED_SK_52_NO_CAMERA: &str = "WORDS_NEEDED_SK_52_NO_CAMERA";
+pub const SK_52_NO_CAMERA: &str =
+    "No camera was found. Turn off, plug a camera in and start again.";
 /// All parts were read and they are not a payment the stick takes (SK-52).
-pub const WORDS_NEEDED_SK_52_BAD_FILE: &str = "WORDS_NEEDED_SK_52_BAD_FILE";
+pub const SK_52_BAD_FILE: &str = "These codes are not a payment this stick can sign.";
 /// Above the typed-words screen of a payment: the wallet's 12 words are needed (SK-53).
-pub const WORDS_NEEDED_SK_53_WORDS: &str = "WORDS_NEEDED_SK_53_WORDS";
+pub const SK_53_WORDS: &str = "To sign, type the 12 words of the wallet that pays.";
 /// The title of a refused payment (SK-54).
-pub const WORDS_NEEDED_SK_54_REFUSED: &str = "WORDS_NEEDED_SK_54_REFUSED";
+pub const SK_54_REFUSED: &str = "This payment is not signed:";
 /// The label before the number of the input a refusal names (SK-54).
-pub const WORDS_NEEDED_SK_54_INPUT: &str = "WORDS_NEEDED_SK_54_INPUT";
+pub const SK_54_INPUT: &str = "Coin number";
 /// Refused: the payment is not for real bitcoin (SK-54).
-pub const WORDS_NEEDED_SK_54_NOT_MAINNET: &str = "WORDS_NEEDED_SK_54_NOT_MAINNET";
+pub const SK_54_NOT_MAINNET: &str = "It is for a test network, not real bitcoin.";
 /// Refused: an input lacks its previous output (SK-54).
-pub const WORDS_NEEDED_SK_54_NO_PREVOUT: &str = "WORDS_NEEDED_SK_54_NO_PREVOUT";
+pub const SK_54_NO_PREVOUT: &str = "It does not say what one of its coins holds.";
 /// Refused: an input's previous outputs disagree (SK-54).
-pub const WORDS_NEEDED_SK_54_PREVOUT_MISMATCH: &str = "WORDS_NEEDED_SK_54_PREVOUT_MISMATCH";
+pub const SK_54_PREVOUT_MISMATCH: &str = "It says two different things about one of its coins.";
 /// Refused: an input lacks its key path (SK-54).
-pub const WORDS_NEEDED_SK_54_NO_PATH: &str = "WORDS_NEEDED_SK_54_NO_PATH";
+pub const SK_54_NO_PATH: &str = "It does not say which key of the wallet one of its coins needs.";
 /// Refused: an input is not of the wallet of these words (SK-53, SK-54).
-pub const WORDS_NEEDED_SK_54_OTHER_WALLET: &str = "WORDS_NEEDED_SK_54_OTHER_WALLET";
+pub const SK_54_OTHER_WALLET: &str = "It spends a coin that is not in the wallet of these words.";
 /// Refused: an input's key path is not of the wallet's two chains (SK-54).
-pub const WORDS_NEEDED_SK_54_PATH_NOT_WALLET: &str = "WORDS_NEEDED_SK_54_PATH_NOT_WALLET";
+pub const SK_54_PATH_NOT_WALLET: &str = "It asks for a key outside this wallet's addresses.";
 /// Refused: the key at an input's path is not the input's key (SK-54).
-pub const WORDS_NEEDED_SK_54_KEY_MISMATCH: &str = "WORDS_NEEDED_SK_54_KEY_MISMATCH";
+pub const SK_54_KEY_MISMATCH: &str = "The key it asks for does not match the coin it spends.";
 /// Refused: an input asks for a signature other than SIGHASH_ALL (SK-54).
-pub const WORDS_NEEDED_SK_54_NOT_SIGHASH_ALL: &str = "WORDS_NEEDED_SK_54_NOT_SIGHASH_ALL";
+pub const SK_54_NOT_SIGHASH_ALL: &str =
+    "It asks for a kind of signature that would let the payment be changed afterward.";
 /// Refused: the outputs pay more than the inputs hold (SK-54).
-pub const WORDS_NEEDED_SK_54_OUTPUTS_EXCEED: &str = "WORDS_NEEDED_SK_54_OUTPUTS_EXCEED";
+pub const SK_54_OUTPUTS_EXCEED: &str = "It pays out more than its coins hold.";
 /// The title of the review before signing (SK-55).
-pub const WORDS_NEEDED_SK_55_TITLE: &str = "WORDS_NEEDED_SK_55_TITLE";
+pub const SK_55_TITLE: &str = "Check every address and amount before you sign.";
 /// After an output the stick derived itself from these words (SK-55).
-pub const WORDS_NEEDED_SK_55_OWN: &str = "WORDS_NEEDED_SK_55_OWN";
+pub const SK_55_OWN: &str = "(change, back to your wallet)";
 /// The label before the total sent away (SK-55).
-pub const WORDS_NEEDED_SK_55_SENT: &str = "WORDS_NEEDED_SK_55_SENT";
+pub const SK_55_SENT: &str = "Total sent away:";
 /// The label before the fee (SK-55).
-pub const WORDS_NEEDED_SK_55_FEE: &str = "WORDS_NEEDED_SK_55_FEE";
+pub const SK_55_FEE: &str = "Fee:";
 /// The label before the fee per virtual byte (SK-55).
-pub const WORDS_NEEDED_SK_55_FEE_RATE: &str = "WORDS_NEEDED_SK_55_FEE_RATE";
+pub const SK_55_FEE_RATE: &str = "Fee rate:";
 /// After an amount: bitcoin (SK-55).
-pub const WORDS_NEEDED_SK_55_UNIT_BTC: &str = "WORDS_NEEDED_SK_55_UNIT_BTC";
+pub const SK_55_UNIT_BTC: &str = "BTC";
 /// After the fee per virtual byte: satoshis per virtual byte (SK-55).
-pub const WORDS_NEEDED_SK_55_UNIT_RATE: &str = "WORDS_NEEDED_SK_55_UNIT_RATE";
+pub const SK_55_UNIT_RATE: &str = "sat/vB";
 /// After "Up" and "Down" when the outputs fill more than one page: the page (SK-55).
-pub const WORDS_NEEDED_SK_55_PAGE: &str = "WORDS_NEEDED_SK_55_PAGE";
+pub const SK_55_PAGE: &str = "to see more. Page";
 /// After "Enter" on the review: sign (SK-55).
-pub const WORDS_NEEDED_SK_55_SIGN: &str = "WORDS_NEEDED_SK_55_SIGN";
+pub const SK_55_SIGN: &str = "to sign it";
 /// After "Esc" on the review: refuse, nothing is signed (SK-55).
-pub const WORDS_NEEDED_SK_55_REFUSE: &str = "WORDS_NEEDED_SK_55_REFUSE";
+pub const SK_55_REFUSE: &str = "to refuse. Nothing is signed.";
 /// The title of the signed payment's QR screen: scan it back with the owner phone (SK-56).
-pub const WORDS_NEEDED_SK_56_SHOW: &str = "WORDS_NEEDED_SK_56_SHOW";
+pub const SK_56_SHOW: &str = "Signed. Scan this with the owner phone to send it.";
 /// The label before the part shown out of the parts (SK-56).
-pub const WORDS_NEEDED_SK_56_PART: &str = "WORDS_NEEDED_SK_56_PART";
+pub const SK_56_PART: &str = "Part";
 
 /// Every constant above, for the test that each is distinct and shown.
 pub const ALL: &[&str] = &[
@@ -228,49 +238,49 @@ pub const ALL: &[&str] = &[
     SK_28_BAD_CHECKSUM,
     SK_28_KEYS,
     SK_29_TURN_OFF,
-    WORDS_NEEDED_SK_50_MENU_SIGN,
-    WORDS_NEEDED_SK_32_MENU_FLOAT,
-    WORDS_NEEDED_SK_32_MENU_LIGHTNING,
-    WORDS_NEEDED_SK_32_FLOAT_INDEX,
-    WORDS_NEEDED_SK_32_FLOAT_INDEX_KEYS,
-    WORDS_NEEDED_SK_33_FLOAT_WHAT,
-    WORDS_NEEDED_SK_33_FLOAT_SPENDS,
-    WORDS_NEEDED_SK_33_FLOAT_SCAN,
-    WORDS_NEEDED_SK_33_FLOAT_NO_PHOTO,
-    WORDS_NEEDED_SK_33_LIGHTNING_WHAT,
-    WORDS_NEEDED_SK_33_LIGHTNING_SPENDS,
-    WORDS_NEEDED_SK_33_LIGHTNING_SCAN,
-    WORDS_NEEDED_SK_33_LIGHTNING_NO_PHOTO,
-    WORDS_NEEDED_SK_52_SCAN_TITLE,
-    WORDS_NEEDED_SK_52_LOOKING,
-    WORDS_NEEDED_SK_52_PARTS,
-    WORDS_NEEDED_SK_52_BACK,
-    WORDS_NEEDED_SK_52_NO_CAMERA,
-    WORDS_NEEDED_SK_52_BAD_FILE,
-    WORDS_NEEDED_SK_53_WORDS,
-    WORDS_NEEDED_SK_54_REFUSED,
-    WORDS_NEEDED_SK_54_INPUT,
-    WORDS_NEEDED_SK_54_NOT_MAINNET,
-    WORDS_NEEDED_SK_54_NO_PREVOUT,
-    WORDS_NEEDED_SK_54_PREVOUT_MISMATCH,
-    WORDS_NEEDED_SK_54_NO_PATH,
-    WORDS_NEEDED_SK_54_OTHER_WALLET,
-    WORDS_NEEDED_SK_54_PATH_NOT_WALLET,
-    WORDS_NEEDED_SK_54_KEY_MISMATCH,
-    WORDS_NEEDED_SK_54_NOT_SIGHASH_ALL,
-    WORDS_NEEDED_SK_54_OUTPUTS_EXCEED,
-    WORDS_NEEDED_SK_55_TITLE,
-    WORDS_NEEDED_SK_55_OWN,
-    WORDS_NEEDED_SK_55_SENT,
-    WORDS_NEEDED_SK_55_FEE,
-    WORDS_NEEDED_SK_55_FEE_RATE,
-    WORDS_NEEDED_SK_55_UNIT_BTC,
-    WORDS_NEEDED_SK_55_UNIT_RATE,
-    WORDS_NEEDED_SK_55_PAGE,
-    WORDS_NEEDED_SK_55_SIGN,
-    WORDS_NEEDED_SK_55_REFUSE,
-    WORDS_NEEDED_SK_56_SHOW,
-    WORDS_NEEDED_SK_56_PART,
+    SK_50_MENU_SIGN,
+    SK_32_MENU_FLOAT,
+    SK_32_MENU_LIGHTNING,
+    SK_32_FLOAT_INDEX,
+    SK_32_FLOAT_INDEX_KEYS,
+    SK_33_FLOAT_WHAT,
+    SK_33_FLOAT_SPENDS,
+    SK_33_FLOAT_SCAN,
+    SK_33_FLOAT_NO_PHOTO,
+    SK_33_LIGHTNING_WHAT,
+    SK_33_LIGHTNING_SPENDS,
+    SK_33_LIGHTNING_SCAN,
+    SK_33_LIGHTNING_NO_PHOTO,
+    SK_52_SCAN_TITLE,
+    SK_52_LOOKING,
+    SK_52_PARTS,
+    SK_52_BACK,
+    SK_52_NO_CAMERA,
+    SK_52_BAD_FILE,
+    SK_53_WORDS,
+    SK_54_REFUSED,
+    SK_54_INPUT,
+    SK_54_NOT_MAINNET,
+    SK_54_NO_PREVOUT,
+    SK_54_PREVOUT_MISMATCH,
+    SK_54_NO_PATH,
+    SK_54_OTHER_WALLET,
+    SK_54_PATH_NOT_WALLET,
+    SK_54_KEY_MISMATCH,
+    SK_54_NOT_SIGHASH_ALL,
+    SK_54_OUTPUTS_EXCEED,
+    SK_55_TITLE,
+    SK_55_OWN,
+    SK_55_SENT,
+    SK_55_FEE,
+    SK_55_FEE_RATE,
+    SK_55_UNIT_BTC,
+    SK_55_UNIT_RATE,
+    SK_55_PAGE,
+    SK_55_SIGN,
+    SK_55_REFUSE,
+    SK_56_SHOW,
+    SK_56_PART,
 ];
 
 /// What the first screen shows after [`SK_06_SECURE_BOOT`] for the
