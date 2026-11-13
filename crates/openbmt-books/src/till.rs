@@ -189,6 +189,16 @@ impl TillLine {
 }
 
 /// RFC 4180 records, each with the line it starts on.
+/// The line ends in `bytes`: each `\n`, `\r\n` or lone `\r` once, the way
+/// `records` counts lines, so that a line it names exists.
+fn line_ends(bytes: &[u8]) -> usize {
+    bytes
+        .iter()
+        .enumerate()
+        .filter(|(i, b)| **b == b'\n' || (**b == b'\r' && bytes.get(i + 1) != Some(&b'\n')))
+        .count()
+}
+
 fn records(text: &str) -> Result<Vec<(usize, Vec<String>)>, TillCsvError> {
     let err = |line, problem| TillCsvError { line, problem };
     let mut out: Vec<(usize, Vec<String>)> = Vec::new();
@@ -213,7 +223,9 @@ fn records(text: &str) -> Result<Vec<(usize, Vec<String>)>, TillCsvError> {
                             }
                         }
                         Some(c) => {
-                            if c == '\n' {
+                            // A line ends at `\n`, `\r\n` or a lone `\r`,
+                            // as `line_ends` counts them.
+                            if c == '\n' || (c == '\r' && chars.peek() != Some(&'\n')) {
                                 line += 1;
                             }
                             field.push(c);
@@ -353,9 +365,9 @@ pub fn read_till_csv(
     if bytes.len() > MAX_TILL_BYTES {
         return Err(whole(TillCsvProblem::TooLarge));
     }
-    let lines = bytes.iter().filter(|b| **b == b'\n').count() + 1;
-    // A final newline does not start a line.
-    let lines = if bytes.last() == Some(&b'\n') {
+    let lines = line_ends(bytes) + 1;
+    // A final line end does not start a line.
+    let lines = if matches!(bytes.last(), Some(b'\n' | b'\r')) {
         lines - 1
     } else {
         lines
@@ -369,7 +381,7 @@ pub fn read_till_csv(
     let text = std::str::from_utf8(bytes).map_err(|e| {
         let good = bytes.get(..e.valid_up_to()).unwrap_or_default();
         TillCsvError {
-            line: good.iter().filter(|b| **b == b'\n').count() + 1,
+            line: line_ends(good) + 1,
             problem: TillCsvProblem::NotUtf8,
         }
     })?;

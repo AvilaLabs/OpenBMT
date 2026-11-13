@@ -564,6 +564,35 @@ fn bk_46_a_file_is_at_most_eight_mib_and_one_hundred_thousand_lines() {
         read_till_csv(&exact, &m, 0).unwrap_err().problem,
         TillCsvProblem::TooLarge
     );
+    // A lone carriage return ends a line too, as some tills write it, and
+    // counts toward the limit the same way.
+    let cr = "A,1,Bitcoin,2025-02-01\r".repeat(MAX_TILL_LINES + 1);
+    let e = read_till_csv(cr.as_bytes(), &m, 0).unwrap_err();
+    assert_eq!(
+        (e.line, e.problem),
+        (MAX_TILL_LINES + 1, TillCsvProblem::TooManyLines)
+    );
+}
+
+#[test]
+fn bk_46_a_lone_carriage_return_ends_a_line_and_the_lines_named_exist() {
+    let m = TillMapping {
+        has_header: false,
+        ..mapping()
+    };
+    let lines =
+        read_till_csv(b"K1,1,Bitcoin,2025-02-01\rK2,2,Card,2025-02-01\r", &m, 0).expect("read");
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[1].line, 2);
+    // A lone carriage return inside quotes counts as a line as well.
+    let q = "\"A\rB\",1,Bitcoin,2025-02-01\nZ,x,Bitcoin,2025-02-01\n";
+    let e = read_till_csv(q.as_bytes(), &m, 0).unwrap_err();
+    assert_eq!((e.line, e.problem), (3, TillCsvProblem::BadAmount));
+    // Not UTF-8 after lone carriage returns names the same line.
+    let mut bytes = b"K1,1,Bitcoin,2025-02-01\rK2,1,Bitcoin,2025-02-01\r".to_vec();
+    bytes.extend_from_slice(b"B,1,Bit\xffcoin,2025-02-01\r");
+    let e = read_till_csv(&bytes, &m, 0).unwrap_err();
+    assert_eq!((e.line, e.problem), (3, TillCsvProblem::NotUtf8));
 }
 
 // BK-47.

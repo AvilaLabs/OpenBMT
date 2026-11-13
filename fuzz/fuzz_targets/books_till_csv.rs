@@ -23,7 +23,13 @@ fuzz_target!(|data: &[u8]| {
     let offset = i32::from(head[0] >> 4) * 60 - 600;
     match read_till_csv(file, &mapping, offset) {
         Ok(lines) => {
-            let rows = file.iter().filter(|b| **b == b'\n').count() + 1;
+            // Lines end at `\n`, `\r\n` or a lone `\r`.
+            let rows = file
+                .iter()
+                .enumerate()
+                .filter(|(i, b)| **b == b'\n' || (**b == b'\r' && file.get(i + 1) != Some(&b'\n')))
+                .count()
+                + 1;
             for line in &lines {
                 assert!(line.line >= 1 && line.line <= rows);
             }
