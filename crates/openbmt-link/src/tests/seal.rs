@@ -530,7 +530,7 @@ fn lk_07_padding_that_is_not_zero_or_not_minimal_is_refused() {
 #[test]
 fn lk_08_the_table_of_kinds() {
     use Role::{Box as B, Counter as C, Owner as O, Watch as W};
-    let table: [(Kind, Role, Role); 19] = [
+    let table: [(Kind, Role, Role); 20] = [
         (Kind::Heartbeat, O, C),
         (Kind::Heartbeat, W, C),
         (Kind::Command, O, C),
@@ -539,6 +539,7 @@ fn lk_08_the_table_of_kinds() {
         (Kind::Batch, O, C),
         (Kind::Range, O, C),
         (Kind::Switch, O, C),
+        (Kind::Starter, O, C),
         (Kind::DeviceList, O, C),
         (Kind::DeviceList, O, B),
         (Kind::CheckIn, C, O),
@@ -599,8 +600,8 @@ fn lk_08_seal_and_open_refuse_a_kind_the_role_may_not_send() {
         open_as_counter(&unknown).unwrap_err(),
         OpenError::UnknownKind(0)
     );
-    unknown[77] = 13;
-    assert_eq!(inspect(&unknown).unwrap_err(), OpenError::UnknownKind(13));
+    unknown[77] = 14;
+    assert_eq!(inspect(&unknown).unwrap_err(), OpenError::UnknownKind(14));
 }
 
 #[test]
@@ -758,7 +759,7 @@ fn lk_08_a_range_is_sent_by_the_owner_to_a_counter_and_is_kind_11() {
 fn kind_12_lk_78_a_switch_is_sent_by_the_owner_to_a_counter_and_is_kind_12() {
     assert_eq!(Kind::Switch.to_byte(), 12);
     assert_eq!(Kind::from_byte(12), Some(Kind::Switch));
-    assert_eq!(Kind::from_byte(13), None);
+    assert_eq!(Kind::from_byte(14), None);
     let m = owner_to_counter(1, Kind::Switch, b"x");
     assert_eq!(open_as_counter(&m).unwrap().kind, Kind::Switch);
     // Not from a counter to the owner, not from a box or a watcher, and not
@@ -768,4 +769,20 @@ fn kind_12_lk_78_a_switch_is_sent_by_the_owner_to_a_counter_and_is_kind_12() {
     assert!(!Kind::Switch.allowed(Role::Box, Role::Counter));
     assert!(!Kind::Switch.allowed(Role::Watch, Role::Counter));
     assert!(!Kind::Switch.allowed(Role::Owner, Role::Box));
+}
+
+#[test]
+fn kind_13_lk_79_a_starter_line_is_sent_by_the_owner_to_a_counter_and_is_kind_13() {
+    assert_eq!(Kind::Starter.to_byte(), 13);
+    assert_eq!(Kind::from_byte(13), Some(Kind::Starter));
+    assert_eq!(Kind::from_byte(14), None);
+    let m = owner_to_counter(1, Kind::Starter, b"x");
+    assert_eq!(open_as_counter(&m).unwrap().kind, Kind::Starter);
+    // Not from a counter to the owner, not from a box or a watcher, and not
+    // to a box.
+    assert!(Kind::Starter.allowed(Role::Owner, Role::Counter));
+    assert!(!Kind::Starter.allowed(Role::Counter, Role::Owner));
+    assert!(!Kind::Starter.allowed(Role::Box, Role::Counter));
+    assert!(!Kind::Starter.allowed(Role::Watch, Role::Counter));
+    assert!(!Kind::Starter.allowed(Role::Owner, Role::Box));
 }

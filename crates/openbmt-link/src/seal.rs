@@ -94,9 +94,12 @@ pub enum Kind {
     /// A switch from the starter wallet to a new one, from the owner to a
     /// counter paired with the starter wallet (LK-78).
     Switch,
+    /// The starter line from the owner, to a counter paired with the starter
+    /// wallet (LK-79).
+    Starter,
     /// A write, read, list or remove of Shop Lightning's stored state, from
     /// the Lightning counter to the Box that keeps the second copy
-    /// (LK-80). Byte 13 is another kind's.
+    /// (LK-80). Byte 13 is the starter line's.
     Store,
     /// The Box's answer to a Store (LK-80).
     Stored,
@@ -106,7 +109,7 @@ pub enum Kind {
 
 impl Kind {
     /// Every kind.
-    pub const ALL: [Kind; 15] = [
+    pub const ALL: [Kind; 16] = [
         Kind::Heartbeat,
         Kind::Command,
         Kind::Settings,
@@ -119,6 +122,7 @@ impl Kind {
         Kind::RecordsReceived,
         Kind::Range,
         Kind::Switch,
+        Kind::Starter,
         Kind::Store,
         Kind::Stored,
         Kind::LightningReport,
@@ -139,6 +143,7 @@ impl Kind {
             Kind::RecordsReceived => 10,
             Kind::Range => 11,
             Kind::Switch => 12,
+            Kind::Starter => 13,
             Kind::Store => 14,
             Kind::Stored => 15,
             Kind::LightningReport => 16,
@@ -168,9 +173,12 @@ impl Kind {
         use Role::{Box as TheBox, Counter, Owner, Watch};
         match self {
             Kind::Heartbeat => (from == Owner || from == Watch) && to == Counter,
-            Kind::Command | Kind::Batch | Kind::RecordsReceived | Kind::Range | Kind::Switch => {
-                from == Owner && to == Counter
-            }
+            Kind::Command
+            | Kind::Batch
+            | Kind::RecordsReceived
+            | Kind::Range
+            | Kind::Switch
+            | Kind::Starter => from == Owner && to == Counter,
             Kind::Settings | Kind::DeviceList => from == Owner && (to == Counter || to == TheBox),
             Kind::CheckIn | Kind::Records => from == Counter && to == Owner,
             Kind::PaidNotice => from == Counter && to == TheBox,
