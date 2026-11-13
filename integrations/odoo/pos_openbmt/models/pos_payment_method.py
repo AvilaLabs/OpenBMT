@@ -121,11 +121,10 @@ LOCAL_WORDS = {
                 'Until then, take the payment on the counter and pick '
                 'Bitcoin by hand.',
     },
-    # Placeholder words, to be written (BX-80).
     ERR_MISMATCH: {
-        'heading': 'WORDS_NEEDED_BX80_MISMATCH_HEADING',
-        'what': 'WORDS_NEEDED_BX80_MISMATCH_WHAT',
-        'next': 'WORDS_NEEDED_BX80_MISMATCH_NEXT',
+        'heading': 'Box answer does not match',
+        'what': 'The Box took a sale that is not the one this till asked for, so the sale was cancelled and nothing was charged.',
+        'next': "Take the payment again. If it keeps happening, check the connection between Odoo's server and the Box.",
     },
 }
 

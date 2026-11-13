@@ -28,12 +28,19 @@ const TEST_SOURCES: [&str; 9] = [
 ];
 
 /// Rules this crate does not test, each with the reason.
-const NOT_HERE: [(&str, &str); 1] = [(
-    "BX-17",
-    "what the owner phone's screen says when there is no Key app is the \
-     phone's; the bytes are the same as with one (bx_17 shows the pairing \
-     does not depend on the Key app's identity)",
-)];
+const NOT_HERE: [(&str, &str); 2] = [
+    (
+        "BX-17",
+        "what the owner phone's screen says when there is no Key app is the \
+         phone's; the bytes are the same as with one (bx_17 shows the pairing \
+         does not depend on the Key app's identity)",
+    ),
+    (
+        "BX-18",
+        "a Box of a shop with its own wallet is not built yet; its tests come \
+         with it",
+    ),
+];
 
 fn all_rules() -> BTreeSet<String> {
     RULES
@@ -48,9 +55,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_fifty_rules() {
+fn the_rules_file_defines_fifty_one_rules() {
     let all = all_rules();
-    assert_eq!(all.len(), 50);
+    assert_eq!(all.len(), 51);
     assert!(all.contains("BX-01") && all.contains("BX-43") && all.contains("BX-80"));
 }
 

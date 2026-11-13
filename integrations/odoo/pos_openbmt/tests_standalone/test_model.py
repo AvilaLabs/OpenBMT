@@ -491,9 +491,9 @@ class Bound(Base):
     def test_the_words_of_the_mismatch_are_placeholders(self):
         words = mod.LOCAL_WORDS[mod.ERR_MISMATCH]
         self.assertEqual(
-            words, {'heading': 'WORDS_NEEDED_BX80_MISMATCH_HEADING',
-                    'what': 'WORDS_NEEDED_BX80_MISMATCH_WHAT',
-                    'next': 'WORDS_NEEDED_BX80_MISMATCH_NEXT'})
+            words, {'heading': 'Box answer does not match',
+                    'what': 'The Box took a sale that is not the one this till asked for, so the sale was cancelled and nothing was charged.',
+                    'next': "Take the payment again. If it keeps happening, check the connection between Odoo's server and the Box."})
 
     def mismatch(self, r):
         self.assertEqual(r, {'error': mod.ERR_MISMATCH,
