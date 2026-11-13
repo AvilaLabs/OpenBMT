@@ -96,11 +96,12 @@ pub use live::{
     OWNER_LIVE_WATCH, QUIET_SECS,
 };
 pub use node::{
-    NodeError, OwnerNode, OwnerParts, OwnerPort, SendRefused, SendState, BROADCAST_DIR, COINS_FILE,
-    NO_TOR, QUEUE_FILE, TAKE_JOURNAL_FILE,
+    FormerHeld, FormerParts, NodeError, OwnerNode, OwnerParts, OwnerPort, SendRefused, SendState,
+    BROADCAST_DIR, COINS_FILE, NO_TOR, QUEUE_FILE, TAKE_JOURNAL_FILE,
 };
 pub use own::{
-    own_approver, NotWatching, OwnNode, OwnNodeError, OwnTick, ToppedUp, Watching, OWN_STATE_FILE,
+    former_coins_file, own_approver, NotWatching, OwnNode, OwnNodeError, OwnTick, ToppedUp,
+    Watching, COINS_OF_FILE, OWN_STATE_FILE,
 };
 pub use paid_log::{
     value_at, PaidEntry, PaidLog, PaidValue, PaidWhat, MAGIC_PAID_LOG, MAX_PAID_ENTRIES,

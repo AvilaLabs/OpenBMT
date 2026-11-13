@@ -756,6 +756,16 @@ fn own_and_link<'a>(
     Ok((own, link))
 }
 
+/// The shop's own wallet, for a call that needs no link.
+fn own_only(own: &mut Option<OwnShop>) -> Result<&mut OwnShop, AppError> {
+    own.as_mut().ok_or_else(|| {
+        wrong_state(
+            "no-own-wallet",
+            "this shop has a Key app: it has no starter wallet to switch from",
+        )
+    })
+}
+
 /// The name an own-wallet shop gives a counter in its words: "Counter" and
 /// the first 4 bytes of its key in hex, as the app's lists label it.
 pub(crate) fn counter_label(counter: &DeviceId) -> String {
@@ -789,6 +799,32 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
                 .map_err(|e| refused_by("start-wallet", format!("the wallet's file: {e}")))
         })
         .transpose()?;
+    let dir = PathBuf::from(&req.dir);
+    // SS-41, SS-43, CR-261: the wallet in force is the shop's, which is the
+    // new wallet when a re-pin was stored before its file was written; the
+    // coin view file goes to the wallet it is for; and the wallets pinned
+    // before are watched on.
+    let mut former = Vec::new();
+    let mut own_book = None;
+    let own_wallet = match own_wallet {
+        Some(file) => {
+            let identity = Identity::from_secret_bytes(&secret)
+                .map_err(|e| refused_by("start-secret", format!("the owner secret: {e}")))?;
+            let (wallet, book, parts) = own::turn_on_shop(&dir, identity, file, |n| {
+                n.settle_coins()?;
+                Ok((
+                    n.shop().wallet().clone(),
+                    n.shop().book().clone(),
+                    n.former_parts(),
+                ))
+            })
+            .map_err(own::node_error)?;
+            former = parts;
+            own_book = Some(book);
+            Some(wallet)
+        }
+        None => None,
+    };
     let (wallet, approver, key_app) = match &own_wallet {
         Some(pinned) => (
             pinned.wallet().clone(),
@@ -854,7 +890,6 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
         min_count: req.batch_min_count,
     };
     clock.fetch_max(req.now, Ordering::SeqCst);
-    let dir = PathBuf::from(&req.dir);
     let mut config = OwnerConfig::new(dir.clone(), identity, driver);
     config.clock = Box::new(AppClock(Arc::clone(clock)));
     config.birthday = req.birthday;
@@ -865,15 +900,8 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
     parts.refund_depth = req.refund_depth;
     // OA-107: the ranges of the shop's allocation book are the issued
     // ranges the live watch follows, from the file the shop's ops keep.
-    if let Some(pinned) = &own_wallet {
-        let identity = Identity::from_secret_bytes(&secret)
-            .map_err(|e| refused_by("start-secret", format!("the owner secret: {e}")))?;
-        let book = own::turn_on_shop(&dir, identity, pinned.clone(), |n| {
-            Ok(n.shop().book().clone())
-        })
-        .map_err(own::node_error)?;
-        parts.own_book = Some(book);
-    }
+    parts.own_book = own_book;
+    parts.former = former;
     let mut node = OwnerNode::start_with(config, parts, spawn).map_err(|e| node_error(&e))?;
     // From here on a failure lets the node go before it is reported.
     let rest = (|| {
@@ -2453,7 +2481,7 @@ impl Entry {
                 dir,
                 node.owner_identity().map_err(|e| node_error(&e))?,
                 own.wallet.clone(),
-                |shop| shop.move_index(a.now),
+                |shop| shop.move_index(&new, a.now),
             )
             .map_err(own::node_error)?;
             crate::starter::move_with(
@@ -2506,6 +2534,9 @@ impl Entry {
             Ok(match done {
                 Repin::Done => {
                     own.wallet = new.clone();
+                    // What the node holds is the old wallet's: it reads
+                    // nothing as the wallet in force until it starts again.
+                    node.mark_repinned();
                     view(OwnRepinKind::Done, new.to_bytes(), 0, 0)
                 }
                 Repin::AlreadyDone => view(OwnRepinKind::AlreadyDone, new.to_bytes(), 0, 0),
@@ -2516,6 +2547,75 @@ impl Entry {
                     n.refused.len(),
                 ),
             })
+        })
+    }
+
+    /// SS-41: the file of the wallet the shop has pinned now, which the app
+    /// keeps and starts the node with. It differs from the file the app
+    /// started with when a re-pin was stored and its file was not written.
+    pub(crate) fn own_pinned_wallet(&self) -> Result<Vec<u8>, AppError> {
+        self.run(None, |st| Ok(own_only(&mut st.own)?.wallet.to_bytes()))
+    }
+
+    /// SS-43: what the former wallets hold that the node saw arrive after
+    /// the re-pin.
+    pub(crate) fn starter_late(&self) -> Result<Vec<crate::starter::StarterLateView>, AppError> {
+        self.run(None, |st| {
+            Ok(st
+                .node
+                .former_held()
+                .into_iter()
+                .map(|h| crate::starter::StarterLateView {
+                    wallet: h.wallet.to_vec(),
+                    sats: h.sats,
+                    coins: h.coins,
+                })
+                .collect())
+        })
+    }
+
+    /// SS-43: the move of a late payment: the coins of the former wallet
+    /// `a.wallet`, from the node's watch of it, to the wallet in force.
+    pub(crate) fn starter_late_move(
+        &self,
+        mut a: crate::starter::StarterLateMoveArgs,
+    ) -> Result<crate::starter::StarterPaidView, AppError> {
+        let wallet = bytes32("the former wallet's checksum", "id-length", &a.wallet)?;
+        let key = crate::starter::data_key_of(&mut a.data_key)?;
+        self.run(Some(a.now), move |st| {
+            let State { node, own, dir, .. } = st;
+            let own = own_only(own)?;
+            let (coins, tip) = node
+                .former_coins(&wallet)
+                .map_err(crate::starter::not_watching)?;
+            if coins.is_empty() {
+                return Err(crate::starter::refusal(
+                    &openbmt_owner::starter::StarterRefusal::NothingToMove,
+                ));
+            }
+            if coins.iter().any(|c| c.confirmations < a.min_confirmations) {
+                return Err(crate::starter::refusal(
+                    &openbmt_owner::starter::StarterRefusal::Unconfirmed,
+                ));
+            }
+            let pinned = own.wallet.clone();
+            let index = own::turn_on_shop(
+                dir,
+                node.owner_identity().map_err(|e| node_error(&e))?,
+                pinned.clone(),
+                |shop| shop.move_index(&pinned, a.now),
+            )
+            .map_err(own::node_error)?;
+            crate::starter::move_with(
+                &a.sealed,
+                &key,
+                pinned.canonical_string(),
+                index,
+                &coins,
+                a.fee_rate,
+                a.min_confirmations,
+                tip,
+            )
         })
     }
 

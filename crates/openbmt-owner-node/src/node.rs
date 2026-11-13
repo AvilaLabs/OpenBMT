@@ -62,7 +62,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::io::{self, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -72,6 +72,7 @@ use bitcoin::consensus::deserialize;
 use bitcoin::{BlockHash, Network, OutPoint, ScriptBuf, Transaction, Txid};
 use openbmt_core::batch::BatchPolicy;
 use openbmt_core::identity::{DeviceId, Identity};
+use openbmt_core::pinned_wallet::PinnedWallet;
 use openbmt_core::wallet::Keychain;
 use openbmt_core::wallet_single::ImportedWallet;
 use openbmt_counter_node::{DriverPort, MAX_EVENTS_PER_PUMP};
@@ -368,6 +369,90 @@ pub struct OwnerParts {
     /// follow (OC-22 to OC-24). `None` for a shop with a Key app, whose
     /// issued ranges are those of its queue.
     pub own_book: Option<AllocationBook>,
+    /// SS-43: the wallets the shop pinned before a re-pin, each watched up
+    /// to the index its book had reached. Empty for any other shop.
+    pub former: Vec<FormerParts>,
+}
+
+/// SS-43: a wallet pinned before the re-pin, which the node keeps watching
+/// so that a payment that arrives later is seen.
+#[derive(Debug, Clone)]
+pub struct FormerParts {
+    /// The wallet.
+    pub wallet: PinnedWallet,
+    /// One past the highest receive index given out for it.
+    pub end: u32,
+    /// The file its coin view is kept in, under the node's folder.
+    pub file: String,
+}
+
+/// SS-43: what a former wallet holds that the node saw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FormerHeld {
+    /// The checksum of the former wallet's pinned frame.
+    pub wallet: [u8; 32],
+    /// What its coins add up to, in sats.
+    pub sats: u64,
+    /// How many coins it holds.
+    pub coins: u32,
+}
+
+/// A former wallet as the node follows it: its own coin view, apart from the
+/// wallet in force, fed by the same blocks.
+pub(crate) struct FormerWatch {
+    wallet: PinnedWallet,
+    file: String,
+    pub(crate) view: CoinView,
+    scripts: ScriptSet,
+}
+
+impl FormerWatch {
+    fn open(dir: &Path, parts: FormerParts, birthday: u32) -> Result<Self, NodeError> {
+        let mut view = match fs::read(dir.join(&parts.file)) {
+            Ok(bytes) => CoinView::from_bytes(&bytes)
+                .map_err(|e| NodeError::Files(format!("{} does not read back: {e}", parts.file)))?,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => CoinView::new(birthday),
+            Err(e) => return Err(NodeError::Files(format!("{}: {e}", parts.file))),
+        };
+        let file = parts.file.clone();
+        let change = view.change_next();
+        let through = view.checked();
+        view.watch_plan(parts.end, change, through, &[], 0, |b| {
+            write_file(dir, &file, b)
+        })
+        .map_err(NodeError::Files)?;
+        let scripts = former_scripts(parts.wallet.wallet(), &view);
+        Ok(Self {
+            wallet: parts.wallet,
+            file: parts.file,
+            view,
+            scripts,
+        })
+    }
+
+    fn knows(&self, op: &OutPoint) -> bool {
+        self.view.owned().any(|c| c.outpoint == *op)
+            || self.view.pending().any(|p| {
+                p.tx.compute_txid() == op.txid && p.own.iter().any(|(v, _, _)| *v == op.vout)
+            })
+    }
+}
+
+/// Every script of a former wallet the view watches: no script of it is set
+/// aside, since the wallet is small and no longer grows.
+fn former_scripts(wallet: &ImportedWallet, view: &CoinView) -> ScriptSet {
+    let mut set = ScriptSet::new();
+    for i in 0..view.receive_watch() {
+        if let Ok(script) = wallet.receive_script(i) {
+            set.insert(script, (Keychain::Receive, i));
+        }
+    }
+    for i in 0..view.change_watch() {
+        if let Ok(script) = wallet.change_script(i) {
+            set.insert(script, (Keychain::Change, i));
+        }
+    }
+    set
 }
 
 impl OwnerParts {
@@ -389,6 +474,7 @@ impl OwnerParts {
             random: Box::new(random),
             limits: WatchLimits::default(),
             own_book: None,
+            former: Vec::new(),
         })
     }
 }
@@ -561,6 +647,12 @@ pub struct OwnerNode<P: OwnerPort = Handle> {
     pub(crate) wallet: ImportedWallet,
     /// OC-10: the issued ranges of a shop with its own wallet.
     pub(crate) own: Option<OwnIssued>,
+    /// SS-43: the wallets pinned before the re-pin.
+    pub(crate) former: Vec<FormerWatch>,
+    /// SS-41: the shop's wallet was re-pinned after this node started, so
+    /// what the view holds is the old wallet's: nothing is read from it as
+    /// the wallet in force until the node starts again.
+    repinned: bool,
     pub(crate) dir: PathBuf,
     refund_depth: u32,
     random: Box<dyn Randomness>,
@@ -638,6 +730,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             random,
             limits,
             own_book,
+            former,
         } = parts;
         limits.check().map_err(NodeError::Config)?;
         let now = clock.now();
@@ -727,6 +820,16 @@ impl<P: OwnerPort> OwnerNode<P> {
         )
         .map_err(NodeError::Files)?;
         let scripts = live_scripts(&wallet, &view)?;
+        let mut former_watches = Vec::with_capacity(former.len());
+        for f in former {
+            former_watches.push(FormerWatch::open(&dir, f, birthday)?);
+        }
+        // The blocks are read again from the lowest position of any view: a
+        // former wallet whose marks grew has its own to catch up.
+        let watch_from = former_watches
+            .iter()
+            .map(|f| f.view.checked())
+            .fold(view.checked(), u32::min);
 
         let main_config = OwnerConfig {
             dir: dir.clone(),
@@ -735,12 +838,16 @@ impl<P: OwnerPort> OwnerNode<P> {
             driver: driver.clone(),
             clock,
             health,
-            watch_from: Some(view.checked()),
+            watch_from: Some(watch_from),
             birthday,
             broadcast_proxy,
             broadcast_without_tor,
         };
-        let initial: Vec<ScriptBuf> = scripts.keys().cloned().collect();
+        let initial: Vec<ScriptBuf> = scripts
+            .keys()
+            .chain(former_watches.iter().flat_map(|f| f.scripts.keys()))
+            .cloned()
+            .collect();
         let watcher = OwnerWatcher::start_with_lock(main_config, lock, |d, p| spawn(d, p, initial))
             .map_err(NodeError::Start)?;
         // The owner node asks for no unconfirmed transaction: only a
@@ -769,6 +876,8 @@ impl<P: OwnerPort> OwnerNode<P> {
             scripts,
             wallet,
             own,
+            former: former_watches,
+            repinned: false,
             dir,
             refund_depth,
             random,
@@ -1152,7 +1261,7 @@ impl<P: OwnerPort> OwnerNode<P> {
     ///
     /// [`held_sats`]: openbmt_owner::starter::held_sats
     pub fn starter_held(&self) -> Option<u64> {
-        if !self.view.ready() {
+        if self.repinned || !self.view.ready() {
             return None;
         }
         let coins = self.coins();
@@ -1178,6 +1287,11 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// chain. The view must be ready and have checked every block up to the
     /// tip, as for the spends of the shop's own wallet (AS-101).
     pub fn starter_coins(&self) -> Result<(Vec<openbmt_spend::Coin>, u32, u32), NodeError> {
+        if self.repinned {
+            return Err(NodeError::NotReady(
+                "the shop's wallet changed: the node starts again".into(),
+            ));
+        }
         if let Some(why) = &self.halted {
             return Err(NodeError::NotReady(why.clone()));
         }
@@ -1211,12 +1325,83 @@ impl<P: OwnerPort> OwnerNode<P> {
         Ok(txid)
     }
 
+    /// SS-41: the shop's wallet was re-pinned: the node reads nothing more
+    /// of the view as the wallet in force, and the app starts it again.
+    pub fn mark_repinned(&mut self) {
+        self.repinned = true;
+    }
+
+    /// SS-43: the former wallets that hold a coin the node saw, each with
+    /// what it holds. A view that is not ready, or has not checked every
+    /// block up to the tip, says nothing: it has no coin to count.
+    pub fn former_held(&self) -> Vec<FormerHeld> {
+        let tip = self.watcher.chain().tip_height();
+        self.former
+            .iter()
+            .filter(|f| f.view.ready() && f.view.checked() >= tip)
+            .filter_map(|f| {
+                let coins = f.view.coins(tip);
+                let sats = coins.iter().fold(0u64, |sum, coin| {
+                    sum.saturating_add(coin.output().map_or(0, |o| o.value.to_sat()))
+                });
+                (!coins.is_empty()).then(|| FormerHeld {
+                    wallet: f.wallet.checksum32(),
+                    sats,
+                    coins: u32::try_from(coins.len()).unwrap_or(u32::MAX),
+                })
+            })
+            .collect()
+    }
+
+    /// SS-43: the coins of the former wallet `wallet` and the tip they are
+    /// counted from, for the move of a late payment. Ready and caught up
+    /// as [`OwnerNode::starter_coins`] needs.
+    pub fn former_coins(
+        &self,
+        wallet: &[u8; 32],
+    ) -> Result<(Vec<openbmt_spend::Coin>, u32), NodeError> {
+        if let Some(why) = &self.halted {
+            return Err(NodeError::NotReady(why.clone()));
+        }
+        if self.awaiting_rescan > 0 {
+            return Err(NodeError::NotReady(
+                "waiting for the script rescan to start".into(),
+            ));
+        }
+        let f = self
+            .former
+            .iter()
+            .find(|f| f.wallet.checksum32() == *wallet)
+            .ok_or_else(|| NodeError::NotReady("no such former wallet".into()))?;
+        if !f.view.ready() {
+            return Err(NodeError::NotReady(f.view.state().to_string()));
+        }
+        let tip = self.watcher.chain().tip_height();
+        if f.view.checked() < tip {
+            return Err(NodeError::NotReady(format!(
+                "the coin view has checked blocks up to {} and the chain is at {tip}",
+                f.view.checked()
+            )));
+        }
+        Ok((f.view.coins(tip), tip))
+    }
+
+    /// The height of the block that holds `txid`, in the view of the wallet
+    /// in force or of a former one.
+    fn confirmed_height_any(&self, txid: &Txid) -> Option<u32> {
+        self.view.confirmed_height(txid).or_else(|| {
+            self.former
+                .iter()
+                .find_map(|f| f.view.confirmed_height(txid))
+        })
+    }
+
     /// SS-43: how deep the transaction `txid` is in the checked chain: 0
     /// while the node holds it and no block does, `None` when the node
     /// knows nothing of it.
     pub fn starter_confirmations(&self, txid: &Txid) -> Option<u32> {
         let tip = self.watcher.chain().tip_height();
-        if let Some(h) = self.view.confirmed_height(txid) {
+        if let Some(h) = self.confirmed_height_any(txid) {
             return Some(tip.saturating_sub(h).saturating_add(1));
         }
         match self.send_state(txid) {
@@ -1251,7 +1436,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         ) {
             return Some(stored);
         }
-        match self.view.confirmed_height(txid) {
+        match self.confirmed_height_any(txid) {
             Some(h) => {
                 let tip = self.watcher.chain().tip_height();
                 Some(SendState::Confirmed {
@@ -1911,6 +2096,10 @@ impl<P: OwnerPort> OwnerNode<P> {
     }
 
     fn known_input(&self, op: &OutPoint) -> bool {
+        self.main_knows(op) || self.former.iter().any(|f| f.knows(op))
+    }
+
+    fn main_knows(&self, op: &OutPoint) -> bool {
         self.view.owned().any(|c| c.outpoint == *op)
             || self.view.pending().any(|p| {
                 p.tx.compute_txid() == op.txid && p.own.iter().any(|(v, _, _)| *v == op.vout)
@@ -1945,10 +2134,39 @@ impl<P: OwnerPort> OwnerNode<P> {
                 self.states.insert(txid, SendState::Unresolved);
                 continue;
             };
-            if self.view.confirmed_height(&txid).is_some() {
+            if self.confirmed_height_any(&txid).is_some() {
                 self.states.insert(txid, SendState::Sent);
-            } else if self.view.pending().any(|p| p.tx.compute_txid() == txid) {
+            } else if self.view.pending().any(|p| p.tx.compute_txid() == txid)
+                || self
+                    .former
+                    .iter()
+                    .any(|f| f.view.pending().any(|p| p.tx.compute_txid() == txid))
+            {
                 self.dispatch(txid, &bytes);
+            } else if let Some(at) = self
+                .former
+                .iter()
+                .position(|f| tx.input.iter().all(|i| f.knows(&i.previous_output)))
+                .filter(|_| !tx.input.iter().all(|i| self.main_knows(&i.previous_output)))
+            {
+                // SS-43: a move of a late payment spends the coins of a
+                // former wallet, which that wallet's own view holds.
+                let dir = self.dir.clone();
+                let Some(f) = self.former.get_mut(at) else {
+                    continue;
+                };
+                match f
+                    .view
+                    .add_pending(&tx, &f.scripts, |b| write_file(&dir, &f.file, b))
+                {
+                    Ok(_) => self.dispatch(txid, &bytes),
+                    Err(PendingError::Full) => {
+                        self.note(format!("{txid} waits: 64 transactions are held already"));
+                    }
+                    Err(PendingError::Store(e)) => {
+                        self.note(format!("{txid} could not be held: {e}"));
+                    }
+                }
             } else if tx
                 .input
                 .iter()
@@ -2024,8 +2242,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 _ => None,
             })
             .filter(|txid| {
-                self.view
-                    .confirmed_height(txid)
+                self.confirmed_height_any(txid)
                     .is_some_and(|h| tip.saturating_sub(h).saturating_add(1) >= depth)
             })
             .collect();
@@ -2071,8 +2288,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                         Delivery::Transaction { txid: held, .. } if held == txid
                     )
                 }) && self
-                    .view
-                    .confirmed_height(txid)
+                    .confirmed_height_any(txid)
                     .is_some_and(|h| tip.saturating_sub(h).saturating_add(1) >= depth)
                 {
                     Some(*txid)
@@ -2509,6 +2725,18 @@ impl<P: OwnerPort> OwnerNode<P> {
         // FE-20: the samples of the blocks that left go with them.
         self.forget_fee_samples_from(fork.saturating_add(1), left);
         let dir = self.dir.clone();
+        let mut notes = Vec::new();
+        for f in &mut self.former {
+            if let Err(e) = f
+                .view
+                .reorganize(left, fork, |b| write_file(&dir, &f.file, b))
+            {
+                notes.push(format!("a former wallet's view could not be stored: {e}"));
+            }
+        }
+        for line in notes {
+            self.note(line);
+        }
         match self
             .view
             .reorganize(left, fork, |b| write_file(&dir, COINS_FILE, b))
@@ -2655,6 +2883,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 write_file(&dir, COINS_FILE, b)
             }) {
             Ok(effect) => {
+                self.apply_former(&block, hash);
                 // FE-20: a block downloaded in full and checked gives a
                 // fee sample.
                 self.take_fee_sample(hash, bytes);
@@ -2680,6 +2909,32 @@ impl<P: OwnerPort> OwnerNode<P> {
         }
     }
 
+    /// SS-43: the block goes to the view of each former wallet too. One that
+    /// cannot take it is noted and does not stop the node: its wallet is not
+    /// the one in force.
+    fn apply_former(&mut self, block: &WellFormedBlock, hash: &BlockHash) {
+        let dir = self.dir.clone();
+        let mut notes = Vec::new();
+        for f in &mut self.former {
+            match f
+                .view
+                .apply_block(block, self.watcher.chain(), &f.scripts, |b| {
+                    write_file(&dir, &f.file, b)
+                }) {
+                Ok(effect) => {
+                    for txid in effect.confirmed {
+                        notes.push(format!("{txid} is in block {hash}"));
+                    }
+                }
+                Err(ApplyError::Refused(Refusal::NotOnChain)) => {}
+                Err(e) => notes.push(format!("a former wallet could not take block {hash}: {e}")),
+            }
+        }
+        for line in notes {
+            self.note(line);
+        }
+    }
+
     fn checked(&mut self, height: u32) {
         if self.halted.is_some() || self.awaiting_rescan > 0 {
             return;
@@ -2695,6 +2950,19 @@ impl<P: OwnerPort> OwnerNode<P> {
             {
                 self.stop(format!("the coin view could not be stored: {e}"));
             }
+        }
+        let mut notes = Vec::new();
+        let dir = self.dir.clone();
+        for f in &mut self.former {
+            let caught = matches!(f.view.state(), ViewState::Rescanning { to } if height >= to);
+            if height >= tip || caught || height.saturating_sub(f.view.checked()) >= CHECKED_EVERY {
+                if let Err(e) = f.view.set_checked(height, |b| write_file(&dir, &f.file, b)) {
+                    notes.push(format!("a former wallet's view could not be stored: {e}"));
+                }
+            }
+        }
+        for line in notes {
+            self.note(line);
         }
         // FE-20: when the node is at the tip and has taken no sample in the
         // last 24 checked blocks, it asks for one more full block.

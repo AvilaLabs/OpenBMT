@@ -628,3 +628,77 @@ fn ss_41_ss_42_the_move_and_the_repin_need_the_node_and_the_counters() {
     let fault = Rd::error(&rig.call(203, own, &short)).expect("refused");
     assert_eq!(fault.rule, "SS-20");
 }
+
+/// A second single-key wallet, for the re-pin.
+const OTHER: &str = "wpkh([37b5eed4/84h/0h/0h]xpub6BkU445MSEBXbPjD3g2c2ch6mn8yy1SXXQUM7EwjgYiq6Wt1NDwDZ45npqWcV8uQC5oi2gHuVukoCoZZyT4HKq8EpotPMqGqxdZRuapCQ23/<0;1>/*)#yhygl07f";
+
+fn file_of(descriptor: &str) -> Vec<u8> {
+    let response = call(148, &W::new().string(descriptor).0);
+    let mut r = Rd::ok(&response);
+    let (file, _, _) = (r.bytes(), r.string(), r.bool());
+    r.done();
+    file
+}
+
+#[test]
+fn ss_41_a_start_between_the_repin_and_its_wallet_file_finishes_the_repin() {
+    use openbmt_owner_node::OwnNode;
+    let rig = super::kit::Rig::new();
+    let (old_file, new_file) = (wallet_file(), file_of(OTHER));
+    let (old, new) = (
+        PinnedWallet::from_bytes(&old_file).unwrap(),
+        PinnedWallet::from_bytes(&new_file).unwrap(),
+    );
+    // The shop's state was stored for the new wallet, with the re-pin
+    // recorded, and the app's file is still the old one.
+    let identity = Identity::from_secret_bytes(&super::kit::OWNER_SECRET).unwrap();
+    let mut node = OwnNode::open(&rig.dir(), identity, old.clone()).unwrap();
+    let (shop, store) = node.shop_and_store();
+    shop.repin(&new, &[], store).unwrap();
+    drop(node);
+    // The old file finishes the re-pin: the pinned wallet is the new one, to
+    // be written, and asking again gives the same.
+    let handle = Rd::ok(&rig.start_own(&old_file)).u64();
+    for _ in 0..2 {
+        let response = rig.call(213, handle, &[]);
+        let mut r = Rd::ok(&response);
+        assert_eq!(r.bytes(), new_file);
+        r.done();
+    }
+    // No late payment is held: the node has seen no block.
+    let response = rig.call(214, handle, &[]);
+    let mut r = Rd::ok(&response);
+    assert!(r.list(|r| r.bytes()).is_empty());
+    r.done();
+}
+
+#[test]
+fn ss_43_the_late_payment_ops_need_an_own_wallet_the_former_wallets_coins_and_a_key() {
+    let rig = super::kit::Rig::new();
+    let key_app = rig.start();
+    let fault = Rd::error(&rig.call(213, key_app, &[])).expect("refused");
+    assert_eq!(fault.rule, "no-own-wallet");
+    let args = |wallet: &[u8], key: &[u8]| {
+        W::new()
+            .bytes(&[9; 10])
+            .bytes(key)
+            .bytes(wallet)
+            .u64(T0)
+            .u64(1_000)
+            .u32(1)
+            .0
+    };
+    // A checksum of the wrong size, and a key of the wrong size, are refused
+    // first.
+    let fault = Rd::error(&rig.call(215, key_app, &args(&[1; 5], &[7; 32]))).expect("refused");
+    assert_eq!(fault.rule, "id-length");
+    let fault = Rd::error(&rig.call(215, key_app, &args(&[1; 32], &[7; 5]))).expect("refused");
+    assert_eq!(fault.rule, "SS-20");
+    let fault = Rd::error(&rig.call(215, key_app, &args(&[1; 32], &[7; 32]))).expect("refused");
+    assert_eq!(fault.rule, "no-own-wallet");
+    // An own-wallet node has no former wallet and nothing to move.
+    let rig = super::kit::Rig::new();
+    let own = Rd::ok(&rig.start_own(&wallet_file())).u64();
+    let fault = Rd::error(&rig.call(215, own, &args(&[1; 32], &[7; 32]))).expect("refused");
+    assert_eq!(fault.rule, "starter-not-watching");
+}

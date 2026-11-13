@@ -577,7 +577,11 @@ fn oa_114_every_state_and_refusal_has_words_or_the_placeholder_that_names_its_ru
     assert!(all.len() >= 18);
     for (name, w) in &all {
         if is_placeholder(w) {
-            assert!(w.heading.starts_with("WORDS_NEEDED_OA_"), "{name}");
+            assert!(
+                w.heading.starts_with("WORDS_NEEDED_OA_")
+                    || w.heading.starts_with("WORDS_NEEDED_SS"),
+                "{name}"
+            );
         } else {
             assert_eq!(check(w), Ok(()), "{name}");
         }
@@ -709,10 +713,11 @@ fn ss_41_the_pinned_wallet_becomes_the_new_wallet_once_and_only_when_every_count
     let back = OwnShop::restore(id(1), new.clone(), &disk.get()).unwrap();
     assert_eq!(back.wallet(), &new);
     assert_eq!(back.book(), s.book());
-    assert!(matches!(
-        OwnShop::restore(id(1), old.clone(), &disk.get()),
-        Err(OwnRestoreError::NotThisShop)
-    ));
+    // The old wallet's file over the new state is the crash between the two
+    // writes: the shop finishes the re-pin. Another wallet's file does not.
+    let finished = OwnShop::restore(id(1), old.clone(), &disk.get()).unwrap();
+    assert!(finished.recovered_repin());
+    assert_eq!(finished.wallet(), &new);
     // Once: asking again stores nothing and changes nothing, whatever the
     // counters say.
     let again = s
@@ -736,22 +741,142 @@ fn ss_41_a_shop_with_no_counter_in_force_has_nothing_to_wait_for() {
     assert_eq!(s.wallet(), &new);
 }
 
+/// A third wallet: another single-key account.
+fn third() -> PinnedWallet {
+    PinnedWallet::from_text("wpkh([37b5eed4/84h/0h/0h]xpub6BkU445MSEBXbPjD3g2c2ch6mn8yy1SXXQUM7EwjgYiq6Wt1NDwDZ45npqWcV8uQC5oi2gHuVukoCoZZyT4HKq8EpotPMqGqxdZRuapCQ23/<0;1>/*)#yhygl07f").unwrap()
+}
+
 #[test]
 fn ss_42_the_move_pays_an_index_of_a_new_range_above_every_range_given() {
-    let (mut s, disk, _, _) = switched_shop();
+    let (mut s, disk, _, new) = switched_shop();
     // The counter holds 0 to 1,000 and its switch range 1,000 to 2,000.
-    let first = s.move_index(T0 + 100, |b| disk.put(b)).unwrap();
+    let first = s.move_index(&new, T0 + 100, |b| disk.put(b)).unwrap();
     assert_eq!(first, 2_000);
     assert_eq!(s.book().next_start(), 3_000);
     assert_eq!(s.book().device_of(first), Some(s.owner_id()));
-    let second = s.move_index(T0 + 110, |b| disk.put(b)).unwrap();
-    assert_eq!(second, 3_000);
-    // A failed store takes no range.
-    let before = s.book().clone();
-    let failed = s.move_index(T0 + 120, |_: &[u8]| Err("disk full".to_string()));
-    assert!(matches!(failed, Err(OwnError::Store(_))));
-    assert_eq!(s.book(), &before);
     let back =
         OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), &disk.get()).unwrap();
     assert_eq!(back.book(), s.book());
+}
+
+#[test]
+fn ss_42_the_move_index_is_taken_once_for_a_new_wallet_and_a_retry_gets_the_same() {
+    let (mut s, disk, _, new) = switched_shop();
+    let first = s.move_index(&new, T0 + 100, |b| disk.put(b)).unwrap();
+    let book = s.book().clone();
+    let stored = disk.get();
+    // A retry of the signing: the same index, nothing allocated, nothing
+    // stored.
+    let again = s
+        .move_index(&new, T0 + 900, |_: &[u8]| -> Result<(), String> {
+            panic!("stored")
+        })
+        .unwrap();
+    assert_eq!(again, first);
+    assert_eq!(s.book(), &book);
+    assert_eq!(disk.get(), stored);
+    // The plan is in the stored state: a shop restored from it answers the
+    // same.
+    let mut back =
+        OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), &disk.get()).unwrap();
+    let kept = back
+        .move_index(&new, T0 + 950, |_: &[u8]| -> Result<(), String> {
+            panic!("stored")
+        })
+        .unwrap();
+    assert_eq!(kept, first);
+    assert_eq!(back.book(), s.book());
+}
+
+#[test]
+fn ss_42_another_new_wallet_is_refused_while_the_first_is_not_pinned_and_a_failed_store_takes_nothing(
+) {
+    use openbmt_owner::own_switch::{Repin, SwitchStatus};
+    let (mut s, disk, counter, new) = switched_shop();
+    // A failed store takes no range and plans nothing.
+    let before = s.book().clone();
+    let failed = s.move_index(&new, T0 + 100, |_: &[u8]| Err("disk full".to_string()));
+    assert!(matches!(failed, Err(OwnError::Store(_))));
+    assert_eq!(s.book(), &before);
+    let first = s.move_index(&new, T0 + 110, |b| disk.put(b)).unwrap();
+    assert_eq!(first, 2_000);
+    // Another new wallet is refused, and takes nothing.
+    let other = third();
+    let book = s.book().clone();
+    let r = refused(s.move_index(&other, T0 + 120, |b| disk.put(b)));
+    assert_eq!(r, OwnRefusal::OtherNewWallet);
+    assert_eq!(s.book(), &book);
+    // Once the new wallet is pinned, the plan is done: the same wallet gets
+    // the same index (a late payment's move), another gets a range of its own.
+    let rows = [(counter, SwitchStatus::Switched)];
+    assert_eq!(s.repin(&new, &rows, |b| disk.put(b)).unwrap(), Repin::Done);
+    assert_eq!(
+        s.move_index(&new, T0 + 130, |b| disk.put(b)).unwrap(),
+        first
+    );
+    let next = s.move_index(&other, T0 + 140, |b| disk.put(b)).unwrap();
+    assert_eq!(next, 3_000);
+}
+
+#[test]
+fn ss_41_a_crash_at_each_point_of_the_repin_leaves_exactly_the_old_state_or_exactly_the_new_one() {
+    use openbmt_owner::own_switch::{Repin, SwitchStatus};
+    let (mut s, disk, counter, new) = switched_shop();
+    let old = s.wallet().clone();
+    let old_state = disk.get();
+    let rows = [(counter, SwitchStatus::Switched)];
+    // The wallet file the app keeps, and the state file: a crash writes none,
+    // the state only, or both.
+    let wallet_file = RefCell::new(old.to_bytes());
+    // Before the own-shop write: the store fails, the files are the old ones.
+    let failed = s.repin(&new, &rows, |_: &[u8]| Err("crash".to_string()));
+    assert!(matches!(failed, Err(OwnError::Store(_))));
+    let start = |state: &[u8], file: &[u8]| {
+        OwnShop::restore(id(1), PinnedWallet::from_bytes(file).unwrap(), state)
+    };
+    let at = start(&old_state, &wallet_file.borrow()).unwrap();
+    assert_eq!(at.wallet(), &old);
+    assert!(!at.recovered_repin());
+    assert_eq!(at.to_bytes(), old_state);
+    // The re-pin: the own-shop write happens first.
+    assert_eq!(s.repin(&new, &rows, |b| disk.put(b)).unwrap(), Repin::Done);
+    let new_state = disk.get();
+    // After the own-shop write, before the wallet write: the state names the
+    // new wallet and the wallet file is the old one. The start finishes it.
+    let at = start(&new_state, &wallet_file.borrow()).unwrap();
+    assert_eq!(at.wallet(), &new);
+    assert!(at.recovered_repin());
+    assert_eq!(at.to_bytes(), new_state);
+    assert_eq!(at.former_wallets().len(), 1);
+    assert_eq!(at.former_wallets()[0].wallet, old);
+    // The caller writes the wallet file; then the next start is a plain one.
+    *wallet_file.borrow_mut() = at.wallet().to_bytes();
+    let done = start(&new_state, &wallet_file.borrow()).unwrap();
+    assert_eq!(done.wallet(), &new);
+    assert!(!done.recovered_repin());
+    assert_eq!(done.to_bytes(), new_state);
+    // Any other mismatch stays refused: a third wallet's file, the old
+    // wallet's file with the old state's record missing, another owner.
+    assert!(matches!(
+        start(&new_state, &third().to_bytes()),
+        Err(OwnRestoreError::NotThisShop)
+    ));
+    assert!(matches!(
+        OwnShop::restore(id(2), new.clone(), &new_state),
+        Err(OwnRestoreError::NotThisShop)
+    ));
+    let no_record = {
+        let mut other = shop(SINGLE);
+        let d = Disk::new();
+        other.allocate_desk(T0, |b| d.put(b)).unwrap();
+        d.get()
+    };
+    assert!(matches!(
+        start(&no_record, &new.to_bytes()),
+        Err(OwnRestoreError::NotThisShop)
+    ));
+    // A state with a tail cut short is refused, as every cut is.
+    for cut in 1..40 {
+        assert!(start(&new_state[..new_state.len() - cut], &new.to_bytes()).is_err());
+    }
 }

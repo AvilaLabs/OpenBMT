@@ -102,6 +102,7 @@ impl OwnRefusal {
             | Self::BadName => "OA-109",
             Self::AlreadyAdded | Self::Pairing(_) | Self::Settings(_) => "OA-110",
             Self::SwitchSameWallet => "SS-41",
+            Self::OtherNewWallet => "SS-42",
             Self::Book(_) => "OA-106",
             Self::NoBundle | Self::TooManyWaiting => "OA-111",
             Self::UnknownCounter => "OA-112",
@@ -218,6 +219,7 @@ impl OwnRefusal {
                 "Connect the wallet made offline instead.",
             )
             .code("SS-41"),
+            Self::OtherNewWallet => needed("WORDS_NEEDED_SS42_OTHER_NEW_WALLET"),
             Self::UnknownCounter => stop(
                 "Counter not in the shop",
                 "Addresses were asked for a counter this phone did not pair, so none were given.",
@@ -272,6 +274,7 @@ pub fn all_own_words() -> Vec<(String, Words)> {
             OwnRefusal::Book(BookError::Corrupt("a sample")),
         ),
         ("OwnRefusal::SwitchSameWallet", OwnRefusal::SwitchSameWallet),
+        ("OwnRefusal::OtherNewWallet", OwnRefusal::OtherNewWallet),
         ("OwnRefusal::NoBundle", OwnRefusal::NoBundle),
         ("OwnRefusal::UnknownCounter", OwnRefusal::UnknownCounter),
         ("OwnRefusal::TooManyWaiting", OwnRefusal::TooManyWaiting),
@@ -318,7 +321,8 @@ mod tests {
             assert!(
                 w.heading == w.what
                     && w.what == w.next
-                    && w.heading.starts_with("WORDS_NEEDED_OA_"),
+                    && (w.heading.starts_with("WORDS_NEEDED_OA_")
+                        || w.heading.starts_with("WORDS_NEEDED_SS")),
                 "{name}"
             );
         }
@@ -339,6 +343,7 @@ mod tests {
                 OwnRefusal::BadName => "OwnRefusal::BadName",
                 OwnRefusal::AlreadyAdded => "OwnRefusal::AlreadyAdded",
                 OwnRefusal::SwitchSameWallet => "OwnRefusal::SwitchSameWallet",
+                OwnRefusal::OtherNewWallet => "OwnRefusal::OtherNewWallet",
                 OwnRefusal::Settings(_) => "OwnRefusal::Settings",
                 OwnRefusal::Book(_) => "OwnRefusal::Book(Full)",
                 OwnRefusal::NoBundle => "OwnRefusal::NoBundle",
@@ -359,6 +364,7 @@ mod tests {
             OwnRefusal::BadName,
             OwnRefusal::AlreadyAdded,
             OwnRefusal::SwitchSameWallet,
+            OwnRefusal::OtherNewWallet,
             OwnRefusal::NoBundle,
             OwnRefusal::UnknownCounter,
             OwnRefusal::TooManyWaiting,

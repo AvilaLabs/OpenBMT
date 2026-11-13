@@ -174,10 +174,11 @@ use crate::signer_views::{
 };
 use crate::starter::{
     self as starter_ops, OwnRepinKind, OwnRepinView, StarterChangeKind, StarterCheckView,
-    StarterFeeArgs, StarterHeldArgs, StarterImageView, StarterLimitArgs, StarterLimitKind,
-    StarterLimitView, StarterMakeArgs, StarterMoveArgs, StarterNodeMoveArgs, StarterNodePayArgs,
-    StarterOfferArgs, StarterOpenArgs, StarterPageArgs, StarterPaidView, StarterPayArgs,
-    StarterSealedView, StarterSendArgs, StarterSlot, StarterTypedView, StarterWalletView,
+    StarterFeeArgs, StarterHeldArgs, StarterImageView, StarterLateMoveArgs, StarterLateView,
+    StarterLimitArgs, StarterLimitKind, StarterLimitView, StarterMakeArgs, StarterMoveArgs,
+    StarterNodeMoveArgs, StarterNodePayArgs, StarterOfferArgs, StarterOpenArgs, StarterPageArgs,
+    StarterPaidView, StarterPayArgs, StarterSealedView, StarterSendArgs, StarterSlot,
+    StarterTypedView, StarterWalletView,
 };
 use crate::views::{
     put_words, AlertKind, AlertView, BatchArgs, BatchWaitingView, BuiltView, CashAmountView,
@@ -923,6 +924,18 @@ fn build_ops() -> Vec<Op> {
         op(212, "own_repin", Node, |c, new_wallet: String| {
             c.entry()?.own_repin(new_wallet)
         }),
+        op(213, "own_pinned_wallet", Node, |c, _: ()| {
+            c.entry()?.own_pinned_wallet()
+        }),
+        op(214, "starter_late", Node, |c, _: ()| {
+            c.entry()?.starter_late()
+        }),
+        op(
+            215,
+            "starter_late_move",
+            Node,
+            |c, a: StarterLateMoveArgs| c.entry()?.starter_late_move(a),
+        ),
     ]
 }
 
@@ -1198,6 +1211,8 @@ fn definitions() -> Vec<TypeDef> {
         StarterSendArgs::define(),
         OwnRepinKind::define(),
         OwnRepinView::define(),
+        StarterLateMoveArgs::define(),
+        StarterLateView::define(),
         SwitchStateKind::define(),
         SwitchRowView::define(),
         StarterFeeArgs::define(),

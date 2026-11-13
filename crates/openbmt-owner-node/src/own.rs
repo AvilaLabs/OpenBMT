@@ -34,11 +34,23 @@ use openbmt_owner::own_switch::{
 };
 
 use crate::link::{OwnerLink, SettingsNotCarried};
-use crate::node::{OwnerNode, OwnerPort};
+use crate::node::{FormerParts, OwnerNode, OwnerPort, COINS_FILE};
 use crate::watcher::write_file;
 
 /// The shop's state, in the node's folder.
 pub const OWN_STATE_FILE: &str = "own-shop";
+
+/// The checksum of the wallet the coin view file is for (SS-43).
+pub const COINS_OF_FILE: &str = "coins-of";
+
+/// SS-43: the file a former wallet's coin view is kept in.
+pub fn former_coins_file(wallet: &[u8; 32]) -> String {
+    let mut name = String::from("former-coins-");
+    for byte in &wallet[..8] {
+        name.push_str(&format!("{byte:02x}"));
+    }
+    name
+}
 
 /// The key a shop with its own wallet gives the owner node's queue in place
 /// of a Key app's: made from the owner's secret and a tag, so that no
@@ -356,14 +368,56 @@ impl OwnNode {
         move_ready(&self.switch_rows(link, new))
     }
 
-    /// SS-42: the receive index of the new wallet that the one move pays,
-    /// from a new range of the owner's own in the book, stored first.
-    pub fn move_index(&mut self, now: u64) -> Result<u32, OwnNodeError> {
+    /// SS-42: the receive index of `new` that the one move pays, from a new
+    /// range of the owner's own in the book, stored first and taken once for
+    /// a new wallet.
+    pub fn move_index(&mut self, new: &PinnedWallet, now: u64) -> Result<u32, OwnNodeError> {
         let (shop, store) = self.shop_and_store();
-        shop.move_index(now, store).map_err(|e| match e {
+        shop.move_index(new, now, store).map_err(|e| match e {
             OwnError::Store(why) => OwnNodeError::Io(why),
             OwnError::Refused(r) => OwnNodeError::Switch(r),
         })
+    }
+
+    /// SS-43: the wallets the shop pinned before a re-pin, for the node to
+    /// keep watching: each with the index its book had reached and the file
+    /// its coin view is kept in.
+    pub fn former_parts(&self) -> Vec<FormerParts> {
+        self.shop
+            .former_wallets()
+            .iter()
+            .map(|f| FormerParts {
+                wallet: f.wallet.clone(),
+                end: f.end,
+                file: former_coins_file(&f.wallet.checksum32()),
+            })
+            .collect()
+    }
+
+    /// SS-41, SS-43, CR-261's way: before the node starts, the coin view
+    /// file in the folder is for the wallet in force. A file marked as
+    /// another wallet's (the re-pin came after it was written) is that
+    /// former wallet's view and is put under its own name, so that the wallet
+    /// in force starts with none, and a start between the two steps finishes
+    /// them. A node never calls this while it runs.
+    pub fn settle_coins(&self) -> Result<(), OwnNodeError> {
+        let io = |what: &str, e: io::Error| OwnNodeError::Io(format!("{what}: {e}"));
+        let now = self.shop.wallet().checksum32();
+        match fs::read(self.dir.join(COINS_OF_FILE)) {
+            Ok(of) if of == now => return Ok(()),
+            Ok(of) => {
+                if let Ok(of) = <[u8; 32]>::try_from(of.as_slice()) {
+                    let from = self.dir.join(COINS_FILE);
+                    if from.exists() {
+                        fs::rename(&from, self.dir.join(former_coins_file(&of)))
+                            .map_err(|e| io("the coin view", e))?;
+                    }
+                }
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(io("read", e)),
+        }
+        write_file(&self.dir, COINS_OF_FILE, &now).map_err(OwnNodeError::Io)
     }
 
     /// SS-41: once every counter of the settings in force is switched to

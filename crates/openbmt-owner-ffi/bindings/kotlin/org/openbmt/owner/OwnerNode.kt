@@ -198,6 +198,9 @@ private const val OP_STARTER_PAY_NODE = 209
 private const val OP_STARTER_SEND = 210
 private const val OP_STARTER_CONFIRMATIONS = 211
 private const val OP_OWN_REPIN = 212
+private const val OP_OWN_PINNED_WALLET = 213
+private const val OP_STARTER_LATE = 214
+private const val OP_STARTER_LATE_MOVE = 215
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -615,6 +618,12 @@ enum class OwnRepinKind { Done, AlreadyDone, NotReady }
  * and [refused] count the counters that have not switched.
  */
 class OwnRepin(val kind: OwnRepinKind, val wallet: ByteArray, val waiting: Long, val refused: Long)
+
+/**
+ * A former wallet that holds a coin the node saw arrive after the re-pin (SS-43): [wallet] is its checksum, [sats] what
+ * its coins add up to, [coins] how many.
+ */
+class StarterLate(val wallet: ByteArray, val sats: Long, val coins: Long)
 
 /** What a refill of the float queued (FL-30). */
 class FloatRefillView(val id: Long, val sats: Long, val address: String)
@@ -2133,6 +2142,40 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
     fun ownRepin(newWallet: String): OwnRepin {
         val r = call(OP_OWN_REPIN, handle) { it.string(newWallet) }
         return OwnRepin(r.ownRepinKind(), r.bytes(), r.u32(), r.u32()).also { r.end() }
+    }
+
+    /**
+     * SS-41: the file of the wallet the shop has pinned now. It is the file the node was started with, except after a
+     * re-pin whose file was not written: then it is the new wallet's, and the app writes it.
+     */
+    fun ownPinnedWallet(): ByteArray {
+        val r = call(OP_OWN_PINNED_WALLET, handle)
+        return r.bytes().also { r.end() }
+    }
+
+    /** SS-43: the former wallets that hold a coin the node saw arrive after the re-pin. */
+    fun starterLate(): List<StarterLate> {
+        val r = call(OP_STARTER_LATE, handle)
+        return r.list { StarterLate(r.bytes(), r.u64(), r.u32()) }.also { r.end() }
+    }
+
+    /**
+     * SS-43: sign the move of the coins of the former wallet [wallet] (its checksum) to the wallet in force, from the
+     * node's watch of it. The move is not sent: [starterSend] gives it to the node's outbox.
+     */
+    fun starterLateMove(
+        sealed: ByteArray,
+        dataKey: ByteArray,
+        wallet: ByteArray,
+        now: Long,
+        feeRate: Long,
+        minConfirmations: Long,
+    ): StarterPaid {
+        val r = callSecret(OP_STARTER_LATE_MOVE, handle) { w ->
+            w.bytes(sealed).bytes(dataKey).bytes(wallet).u64(now).u64(feeRate).u32(minConfirmations)
+        }
+        java.util.Arrays.fill(dataKey, 0.toByte())
+        return r.starterPaid().also { r.end() }
     }
 
     /** SS-36: what the starter wallet holds, in satoshis, from the node's watch of it: confirmed coins and payments on their way. */

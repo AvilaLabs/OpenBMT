@@ -23,9 +23,21 @@
 //!          | book len u32 LE | book ("OBM?")
 //!          | waiting count u32 LE | per bundle, ascending by counter:
 //!            len u32 LE | bundle ("OBM/")
+//!          | the tail of the switch (SS-41, SS-42), only when it holds
+//!            anything: 1 | move plan: flag, then wallet hash (32) and index
+//!            u32 LE | re-pin: flag, then the old wallet's hash (32) and len
+//!            u32 LE | the new wallet's file | former wallets: count u32 LE,
+//!            per wallet: len u32 LE | wallet file | end u32 LE
 //! ```
 //!
 //! Decoding is strict: what decodes encodes to the same bytes.
+//!
+//! The re-pin is stored first, with the wallet hash of the new wallet, and
+//! then the caller writes the new wallet's file (CR-261's order for the
+//! counter). A start that finds the shop's file for the new wallet and the
+//! wallet's file still the old one, with the re-pin recorded, finishes it:
+//! the shop takes the recorded new wallet ([`OwnShop::recovered_repin`]) and
+//! the caller writes its file. Any other mismatch is refused.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -105,6 +117,9 @@ pub enum OwnRefusal {
     AlreadyAdded,
     /// SS-41: the new wallet is the shop's own wallet.
     SwitchSameWallet,
+    /// SS-42: the move of the starter wallet is planned for another new
+    /// wallet, which is not the pinned wallet yet.
+    OtherNewWallet,
     /// The settings could not be made, as [`Refusal`] says.
     Settings(Refusal),
     /// OA-106, OA-107: the book gave no range.
@@ -133,6 +148,10 @@ impl fmt::Display for OwnRefusal {
             Self::BadName => write!(f, "OA-109: the counter's name is not plain text"),
             Self::AlreadyAdded => write!(f, "OA-110: the counter is added already"),
             Self::SwitchSameWallet => write!(f, "SS-41: the new wallet is the wallet in use"),
+            Self::OtherNewWallet => write!(
+                f,
+                "SS-42: the move is planned for another new wallet, which is not pinned yet"
+            ),
             Self::Settings(r) => write!(f, "{r}"),
             Self::Book(e) => write!(f, "{e}"),
             Self::NoBundle => write!(f, "OA-111: no bundle waits for this counter"),
@@ -264,12 +283,52 @@ pub struct WaitingOwnCounter {
     pub name: String,
 }
 
+/// The most former wallets a state keeps.
+pub const MAX_FORMER: usize = 8;
+/// The largest wallet file a snapshot holds, in bytes.
+const MAX_WALLET_BYTES: usize = 16 * 1024;
+
+/// SS-42: the index of the new wallet that the move pays, taken once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MovePlan {
+    /// The hash of the new wallet it is for.
+    wallet: [u8; 32],
+    /// The index in the new wallet.
+    index: u32,
+}
+
+/// SS-41: the re-pin that was made, kept so that a start between the state
+/// and the wallet's file can finish it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RepinRecord {
+    /// The hash of the wallet that was pinned before.
+    old: [u8; 32],
+    /// The wallet pinned by it.
+    new: PinnedWallet,
+}
+
+/// SS-43: a wallet the shop had pinned before the re-pin. The owner node
+/// keeps watching its receive indexes below `end`, so that a payment that
+/// arrives later is seen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FormerWallet {
+    /// The wallet.
+    pub wallet: PinnedWallet,
+    /// One past the highest index of the book when it was re-pinned: no
+    /// index at or above it was ever given out for this wallet.
+    pub end: u32,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct OwnState {
     known: Option<SignedSettings>,
     book: AllocationBook,
     /// Ascending by counter.
     waiting: Vec<OwnBundle>,
+    move_plan: Option<MovePlan>,
+    repin: Option<RepinRecord>,
+    /// Oldest first.
+    former: Vec<FormerWallet>,
 }
 
 impl OwnState {
@@ -295,8 +354,48 @@ impl OwnState {
             out.extend_from_slice(&wire::len_u32(bytes.len()).to_le_bytes());
             out.extend_from_slice(&bytes);
         }
+        if self.move_plan.is_some() || self.repin.is_some() || !self.former.is_empty() {
+            out.push(1);
+            match &self.move_plan {
+                Some(p) => {
+                    out.push(1);
+                    out.extend_from_slice(&p.wallet);
+                    out.extend_from_slice(&p.index.to_le_bytes());
+                }
+                None => out.push(0),
+            }
+            match &self.repin {
+                Some(r) => {
+                    out.push(1);
+                    out.extend_from_slice(&r.old);
+                    put_wallet(&mut out, &r.new);
+                }
+                None => out.push(0),
+            }
+            out.extend_from_slice(&wire::len_u32(self.former.len()).to_le_bytes());
+            for f in &self.former {
+                put_wallet(&mut out, &f.wallet);
+                out.extend_from_slice(&f.end.to_le_bytes());
+            }
+        }
         out
     }
+}
+
+fn put_wallet(out: &mut Vec<u8>, wallet: &PinnedWallet) {
+    let bytes = wallet.to_bytes();
+    out.extend_from_slice(&wire::len_u32(bytes.len()).to_le_bytes());
+    out.extend_from_slice(&bytes);
+}
+
+fn take_wallet(r: &mut Reader<'_>) -> Result<PinnedWallet, OwnRestoreError> {
+    let n = usize::try_from(r.u32_le().map_err(corrupt)?)
+        .map_err(|_| OwnRestoreError::Corrupt("a wallet is too long"))?;
+    if n > MAX_WALLET_BYTES {
+        return Err(OwnRestoreError::Corrupt("a wallet is too long"));
+    }
+    PinnedWallet::from_bytes(r.take(n).map_err(corrupt)?)
+        .map_err(|_| OwnRestoreError::Corrupt("a wallet does not read back"))
 }
 
 /// The owner phone of a shop with its own wallet. See the module docs.
@@ -304,6 +403,7 @@ pub struct OwnShop {
     identity: Identity,
     wallet: PinnedWallet,
     state: OwnState,
+    recovered: bool,
 }
 
 impl fmt::Debug for OwnShop {
@@ -322,6 +422,7 @@ impl OwnShop {
             identity,
             wallet,
             state: OwnState::default(),
+            recovered: false,
         }
     }
 
@@ -334,7 +435,7 @@ impl OwnShop {
         let mut r = Reader::framed(bytes, &MAGIC_OWN_STATE).map_err(corrupt)?;
         let owner = r.device_id().map_err(corrupt)?;
         let wallet_hash = r.array::<32>().map_err(corrupt)?;
-        if owner != identity.device_id() || wallet_hash != wallet.checksum32() {
+        if owner != identity.device_id() {
             return Err(OwnRestoreError::NotThisShop);
         }
         let known = if r.flag().map_err(corrupt)? {
@@ -367,21 +468,61 @@ impl OwnShop {
             }
             waiting.push(bundle);
         }
+        let (mut move_plan, mut repin, mut former) = (None, None, Vec::new());
+        if !r.is_empty() {
+            if r.u8().map_err(corrupt)? != 1 {
+                return Err(OwnRestoreError::Corrupt("the tail is of another kind"));
+            }
+            if r.flag().map_err(corrupt)? {
+                move_plan = Some(MovePlan {
+                    wallet: r.array::<32>().map_err(corrupt)?,
+                    index: r.u32_le().map_err(corrupt)?,
+                });
+            }
+            if r.flag().map_err(corrupt)? {
+                repin = Some(RepinRecord {
+                    old: r.array::<32>().map_err(corrupt)?,
+                    new: take_wallet(&mut r)?,
+                });
+            }
+            let count = r.count(MAX_FORMER * 8, 8).map_err(corrupt)?;
+            for _ in 0..count {
+                let wallet = take_wallet(&mut r)?;
+                let end = r.u32_le().map_err(corrupt)?;
+                former.push(FormerWallet { wallet, end });
+            }
+        }
         r.finish().map_err(corrupt)?;
         let state = OwnState {
             known,
             book,
             waiting,
+            move_plan,
+            repin,
+            former,
         };
         if state.encode(&owner, &wallet_hash) != bytes {
             return Err(OwnRestoreError::Corrupt(
                 "it does not encode to the same bytes",
             ));
         }
+        // CR-261's recovery: the state is for the wallet the re-pin made, and
+        // the wallet's file is still the one it replaced.
+        let (wallet, recovered) = if wallet_hash == wallet.checksum32() {
+            (wallet, false)
+        } else {
+            match &state.repin {
+                Some(r) if r.old == wallet.checksum32() && r.new.checksum32() == wallet_hash => {
+                    (r.new.clone(), true)
+                }
+                _ => return Err(OwnRestoreError::NotThisShop),
+            }
+        };
         Ok(Self {
             identity,
             wallet,
             state,
+            recovered,
         })
     }
 
@@ -399,6 +540,18 @@ impl OwnShop {
     /// The shop's wallet.
     pub fn wallet(&self) -> &PinnedWallet {
         &self.wallet
+    }
+
+    /// SS-41: whether the state was restored over a wallet file that the
+    /// re-pin had replaced: the shop's wallet is the recorded new one and
+    /// the caller writes its file (`wallet().to_bytes()`).
+    pub fn recovered_repin(&self) -> bool {
+        self.recovered
+    }
+
+    /// SS-43: the wallets the shop pinned before a re-pin, oldest first.
+    pub fn former_wallets(&self) -> &[FormerWallet] {
+        &self.state.former
     }
 
     /// The settings in force: the latest this phone signed.
@@ -778,28 +931,49 @@ impl OwnShop {
         ))
     }
 
-    /// SS-41, SS-42: the receive index of the new wallet that the one move
-    /// of the starter wallet pays: the first index of a new range of the
-    /// owner's own, taken from the book after every range given so far (the
+    /// SS-41, SS-42: the receive index of `new_wallet` that the move of the
+    /// starter wallet pays: the first index of a new range of the owner's
+    /// own, taken from the book after every range given so far (the
     /// counters' switch ranges included), so that it was never a sale number
-    /// of the old wallet. The range is written to the book and stored
-    /// first. Each call takes a new range.
+    /// of the old wallet. The range and the plan are written to the state
+    /// together, and stored first. It is taken once for a new wallet: asking
+    /// again for the same wallet gives the same index and takes nothing, and
+    /// another wallet is refused while the planned one is not pinned yet.
     pub fn move_index<E>(
         &mut self,
+        new_wallet: &PinnedWallet,
         now: u64,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<u32, OwnError<E>> {
-        Ok(self.allocate_desk(now, persist)?.range.start)
+        let hash = new_wallet.checksum32();
+        if let Some(plan) = &self.state.move_plan {
+            if plan.wallet == hash {
+                return Ok(plan.index);
+            }
+            if plan.wallet != self.wallet.checksum32() {
+                return Err(OwnRefusal::OtherNewWallet.into());
+            }
+        }
+        let mut next = self.state.clone();
+        let range = next.book.allocate(self.identity.device_id(), now)?;
+        next.move_plan = Some(MovePlan {
+            wallet: hash,
+            index: range.start,
+        });
+        self.commit(next, persist)?;
+        Ok(range.start)
     }
 
     /// SS-41: once every counter of the settings in force has switched to
     /// `new_wallet` (`counters` is each one's status, as for
-    /// [`move_ready`]), the shop's pinned wallet becomes `new_wallet`, and
-    /// the state is stored for it before it takes effect (OA-105). The shop
-    /// restarts with the new wallet's file, so the owner node watches it from
-    /// then on. It happens once: with the new wallet already pinned nothing
-    /// changes, and with a counter not switched nothing changes. The
-    /// book and the settings stay as they are.
+    /// [`move_ready`]), the shop's pinned wallet becomes `new_wallet`. The
+    /// state is stored for it before it takes effect (OA-105), with the
+    /// re-pin recorded and the old wallet kept as a former one, watched up
+    /// to the book's end (SS-43); the caller then writes the new wallet's
+    /// file, and a start between the two finishes it
+    /// ([`OwnShop::restore`]). It happens once: with the new wallet already
+    /// pinned nothing changes, and with a counter not switched nothing
+    /// changes. The book and the settings stay as they are.
     pub fn repin<E>(
         &mut self,
         new_wallet: &PinnedWallet,
@@ -812,10 +986,21 @@ impl OwnShop {
         if let Err(not_ready) = move_ready(counters) {
             return Ok(Repin::NotReady(not_ready));
         }
-        let bytes = self
-            .state
-            .encode(&self.identity.device_id(), &new_wallet.checksum32());
+        if self.state.former.len() >= MAX_FORMER * 8 {
+            return Err(BookError::Full.into());
+        }
+        let mut next = self.state.clone();
+        next.former.push(FormerWallet {
+            wallet: self.wallet.clone(),
+            end: next.book.next_start(),
+        });
+        next.repin = Some(RepinRecord {
+            old: self.wallet.checksum32(),
+            new: new_wallet.clone(),
+        });
+        let bytes = next.encode(&self.identity.device_id(), &new_wallet.checksum32());
         persist(&bytes).map_err(OwnError::Store)?;
+        self.state = next;
         self.wallet = new_wallet.clone();
         Ok(Repin::Done)
     }

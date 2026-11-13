@@ -998,6 +998,66 @@ wire_record_get!(StarterNodeMoveArgs {
     min_confirmations
 });
 
+/// The arguments of `starter_late_move` (SS-43): the coins of a former
+/// wallet, to the wallet in force.
+#[derive(Clone, PartialEq, Eq)]
+pub struct StarterLateMoveArgs {
+    /// The sealed seed the app stores (or the one the restore made).
+    pub sealed: Vec<u8>,
+    /// The data key, opened from the Keystore for this call only.
+    pub data_key: Vec<u8>,
+    /// The checksum of the former wallet whose coins move.
+    pub wallet: Vec<u8>,
+    /// The time, in seconds.
+    pub now: u64,
+    /// The fee rate in satoshis per 1000 virtual bytes.
+    pub fee_rate: u64,
+    /// The fewest confirmations a coin needs; every coin must have them.
+    pub min_confirmations: u32,
+}
+
+impl fmt::Debug for StarterLateMoveArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StarterLateMoveArgs")
+            .field("now", &self.now)
+            .finish_non_exhaustive()
+    }
+}
+
+wire_record!(StarterLateMoveArgs {
+    sealed,
+    data_key,
+    wallet,
+    now,
+    fee_rate,
+    min_confirmations
+});
+wire_record_get!(StarterLateMoveArgs {
+    sealed,
+    data_key,
+    wallet,
+    now,
+    fee_rate,
+    min_confirmations
+});
+
+/// A former wallet that holds a coin the node saw (SS-43).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StarterLateView {
+    /// The checksum of the former wallet's pinned frame.
+    pub wallet: Vec<u8>,
+    /// What its coins add up to, in satoshis.
+    pub sats: u64,
+    /// How many coins it holds.
+    pub coins: u32,
+}
+
+wire_record!(StarterLateView {
+    wallet,
+    sats,
+    coins
+});
+
 /// The arguments of `starter_send` (SS-30, SS-42): a signed transaction for
 /// the node's outbox, and the queued refunds it pays (none for the move).
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -26,6 +26,7 @@ use openbmt_owner::{Delivery, SaleFacts, SaleKey, Stage};
 use openbmt_signer::SignerState;
 use openbmt_spend::Coin;
 
+mod former;
 mod live;
 mod own;
 mod own_spend;
@@ -228,6 +229,8 @@ struct Setup {
     own: Option<AllocationBook>,
     /// With `own`: the shop's wallet, when a test needs keys it knows.
     own_wallet: Option<openbmt_core::wallet_single::ImportedWallet>,
+    /// SS-43: the wallets pinned before a re-pin.
+    former: Vec<crate::FormerParts>,
 }
 
 impl Default for Setup {
@@ -240,6 +243,7 @@ impl Default for Setup {
             time: None,
             own: None,
             own_wallet: None,
+            former: Vec::new(),
         }
     }
 }
@@ -292,6 +296,7 @@ fn start_at(dir: &Dir, setup: &Setup, chain: Vec<Block>) -> Result<Rig, NodeErro
         None => OwnerParts::new(OWNER_SECRET, kit().wallet.clone(), approver_id(), policy())?,
     };
     parts.refund_depth = setup.refund_depth;
+    parts.former = setup.former.clone();
     parts.limits = setup.limits;
     parts.random = Box::new(Counter(1));
     let (l, s, sn) = (log.clone(), spawned.clone(), senders.clone());

@@ -199,6 +199,9 @@ ops run on another; it waits for at most 250 ms.
 210 starter_send     handle node  args StarterSendArgs -> string
 211 starter_confirmations handle node  args string -> option<u32>
 212 own_repin        handle node  args string -> OwnRepinView
+213 own_pinned_wallet handle node  args () -> list<u8>
+214 starter_late     handle node  args () -> list<StarterLateView>
+215 starter_late_move handle node  args StarterLateMoveArgs -> StarterPaidView
 ```
 
 ## Types
@@ -375,6 +378,8 @@ StarterSendArgs: record: tx: list<u8>, refunds: list<u32>
 OwnRepinKind: enum, one tag byte
     tags Done=0 AlreadyDone=1 NotReady=2
 OwnRepinView: record: kind: OwnRepinKind, wallet: list<u8>, waiting: u32, refused: u32
+StarterLateMoveArgs: record: sealed: list<u8>, data_key: list<u8>, wallet: list<u8>, now: u64, fee_rate: u64, min_confirmations: u32
+StarterLateView: record: wallet: list<u8>, sats: u64, coins: u32
 SwitchStateKind: enum, one tag byte
     tags Switched=0 Waiting=1 Refused=2
 SwitchRowView: record: counter: list<u8>, name: string, state: SwitchStateKind, words: Words
