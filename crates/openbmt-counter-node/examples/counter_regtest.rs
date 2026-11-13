@@ -5,7 +5,7 @@
 //! ```text
 //! counter_regtest <data dir> <node address> [--regtest-single-peer]
 //!     [--heartbeat-max-age <seconds>] [--customers-off-wifi]
-//!     [--regtest-own-node]
+//!     [--regtest-own-node] [--own-wallet <description>]
 //!     [--relay <address> --relay-key <hex>]
 //! ```
 //!
@@ -34,6 +34,15 @@
 //! the customers cannot join the counter's network, as on a counter on its
 //! own cellular line. With the default (true) the light check needs Tor to
 //! accept anything at once, and the example has no Tor.
+//!
+//! `--own-wallet <description>` pairs the counter with the shop's own wallet
+//! instead of the Key app (CR-227 to CR-235), with an offer marked as a
+//! starter wallet's (CR-256), so that the counter takes one switch to a new
+//! wallet (CR-257 to CR-263). The example plays the owner phone with the
+//! fixed test owner key, and the app with a file: the pairing record is made
+//! on the first run and kept in `own-record.bin` in the data directory. The
+//! commands `switch-take`, `switch-state`, `switch-same`, `switch-kept` and
+//! `switch-different` below drive the switch.
 //!
 //! **Test only, never use.** The three identities and the three wallet keys
 //! are made from fixed bytes that anyone can read here. The money they would
@@ -79,6 +88,17 @@
 //! - `own up`, `own down`, `own has <txid>`: what the own node would say
 //!   (`--regtest-own-node` only); `own status` prints the health line and
 //!   how often the node asked
+//! - `switch-take <description> <first index> <count>`: the owner's switch
+//!   message (CR-257) to a new wallet with that first range, taken as the
+//!   link takes it (LK-78): `switch taken` or `switch refused <why>`
+//!   (`--own-wallet` only)
+//! - `switch-state`: `switch pending address=<address> kind=<kind>` or
+//!   `switch none`
+//! - `switch-same`: the manager said "Same address" after the PIN (CR-261):
+//!   `switch same record_bytes=<n>`; the new record is held in memory
+//! - `switch-kept`: the app keeps that record in `own-record.bin`, and says
+//!   so: `switch kept` (CR-261, steps three and four)
+//! - `switch-different`: `switch different` (CR-260)
 //! - `limits`: the signed limits of the two checks
 //! - `settings <hex>`: signed settings the owner sent, taken as the link
 //!   takes them (CR-160 to CR-162): `settings taken version=<n>
@@ -136,7 +156,7 @@ use std::process::ExitCode;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
@@ -146,6 +166,8 @@ use bitcoin::{Address, Network, ScriptBuf, Txid};
 use openbmt_core::batch::{BatchBuilder, BatchPolicy, PinnedRoots, SignedBatch};
 use openbmt_core::heartbeat::WatcherHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
+use openbmt_core::pairing_own::{OwnBundle, OwnOffer, OwnRequest, SwitchOwn};
+use openbmt_core::pinned_wallet::{IndexRange, PinnedWallet, SignedRange};
 use openbmt_core::records::RecordKind;
 use openbmt_core::settings::{Settings, SignedSettings};
 use openbmt_core::wallet::{KeySlot, WalletDescription};
@@ -154,7 +176,8 @@ use openbmt_counter::{
     RateSource, RefundAsk, RefundRequest, Report, Role as CashierRole,
 };
 use openbmt_counter_node::{
-    CounterLink, CounterLinkConfig, DriverPort, Node, NodeConfig, MAX_OWN_ASKS,
+    CounterLink, CounterLinkConfig, DriverPort, Node, NodeConfig, OwnCeremony, OwnPairingRecord,
+    MAX_OWN_ASKS,
 };
 use openbmt_courier::{Courier, CourierConfig, FirstStart};
 use openbmt_link::{ClientConfig, Role, Route};
@@ -169,7 +192,8 @@ use openbmt_watch::{
 
 const USAGE: &str = "usage: counter_regtest <data dir> <node address> [--regtest-single-peer] \
                      [--heartbeat-max-age <seconds>] [--customers-off-wifi] \
-                     [--regtest-own-node] [--relay <address> --relay-key <hex>]";
+                     [--regtest-own-node] [--own-wallet <description>] \
+                     [--relay <address> --relay-key <hex>]";
 const ADDRESSES: u32 = 20;
 
 /// TEST ONLY: the name the node is told its own node has (a valid v3 onion
@@ -213,10 +237,24 @@ fn test_slot(index: u8, seed: &[u8; 32]) -> Result<KeySlot, String> {
 }
 
 struct Setup {
-    wallet: WalletDescription,
+    /// The wallet's description, as the `descriptor` line shows it.
+    wallet: String,
     config: NodeConfig,
     settings: Settings,
 }
+
+/// The file of the pairing record, which the app keeps for a counter paired
+/// with the shop's own wallet (`--own-wallet`).
+const OWN_RECORD_FILE: &str = "own-record.bin";
+
+/// What the switch commands share: the data directory, and the record the
+/// last "Same address" made, until the app keeps it.
+struct OwnFixture {
+    dir: String,
+    next_record: Mutex<Option<Vec<u8>>>,
+}
+
+static OWN_FIXTURE: OnceLock<OwnFixture> = OnceLock::new();
 
 /// TEST ONLY: the real driver with the own node's channel fed by hand, and
 /// every payment it sees offered as seen from three network groups. The
@@ -397,8 +435,19 @@ fn setup(
     let shown = settings.clone();
     let mut config = NodeConfig::new(dir, counter, pairing, settings, driver);
     config.first_batch = Some(first_batch);
+    config.health = health_fn(seen, single_peer);
+    Ok(Setup {
+        wallet: wallet.canonical_string().to_string(),
+        config,
+        settings: shown,
+    })
+}
+
+/// The health answer: the real rules, recorded for the `health` line, and
+/// with `single_peer` replaced by "healthy" (regtest with one local node).
+fn health_fn(seen: &Arc<Mutex<Seen>>, single_peer: bool) -> openbmt_counter_node::HealthFn {
     let seen = seen.clone();
-    config.health = Box::new(move |input: &HealthInput<'_>| {
+    Box::new(move |input: &HealthInput<'_>| {
         let real = check_health(input);
         if let Ok(mut s) = seen.lock() {
             s.real = Some(real);
@@ -427,11 +476,99 @@ fn setup(
         } else {
             real
         }
+    })
+}
+
+/// The pairing record of a counter paired with the shop's own wallet, from
+/// the file when there is one, and otherwise made by the whole ceremony of
+/// CR-227 to CR-232: the offer of a starter wallet (CR-256), the counter's
+/// request, the owner's bundle (the owner is the fixed test key) and the
+/// counter's finish.
+fn own_record(dir: &str, wallet: &PinnedWallet) -> Result<OwnPairingRecord, String> {
+    let path = Path::new(dir).join(OWN_RECORD_FILE);
+    if let Ok(bytes) = std::fs::read(&path) {
+        return OwnPairingRecord::from_bytes(&bytes).map_err(|e| format!("the record: {e}"));
+    }
+    let owner = identity(&OWNER_SECRET)?;
+    let counter = identity(&COUNTER_SECRET)?;
+    let now = now_secs();
+    let offer = OwnOffer::new(Network::Bitcoin, owner.device_id(), 0, wallet.clone())
+        .map_err(|e| format!("the offer: {e}"))?
+        .with_starter(true);
+    let (mut ceremony, shown) =
+        OwnCeremony::begin(&offer.to_bytes(), now).map_err(|e| e.to_string())?;
+    say(format!(
+        "offer version={} starter={} first_address={}",
+        offer.to_bytes().get(4).copied().unwrap_or(0),
+        offer.starter,
+        shown.address
+    ));
+    let started = ceremony
+        .address_same("Front counter", COUNTER_SECRET, [7; 32], now)
+        .map_err(|e| e.to_string())?;
+    ceremony.confirm(now).map_err(|e| e.to_string())?;
+    let request = OwnRequest::from_bytes(&started.request).map_err(|e| format!("request: {e}"))?;
+    let mut settings = Settings::defaults(1_000);
+    settings.version = 1;
+    settings.devices.insert(counter.device_id());
+    settings.counters.insert(counter.device_id(), 10_000);
+    let signed = SignedSettings {
+        owner_sig: settings.sign(&owner),
+        approver_sig: None,
+        settings,
+    };
+    let first = SignedRange::sign(
+        &owner,
+        IndexRange::new(counter.device_id(), 0, 1_000).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    let bundle = OwnBundle::build(&owner, &offer, &request, signed, first, Vec::new(), None)
+        .map_err(|e| format!("the bundle: {e}"))?;
+    let policy = BatchPolicy {
+        min_count: openbmt_core::batch::DEFAULT_MIN_COUNT,
+    };
+    let record = ceremony
+        .finish(&bundle.to_bytes(), &policy, now)
+        .map_err(|e| e.to_string())?;
+    std::fs::write(&path, record.to_bytes()).map_err(|e| format!("write the record: {e}"))?;
+    Ok(record)
+}
+
+/// `--own-wallet`: the setup of a counter paired with the shop's own wallet.
+fn setup_own(
+    dir: &str,
+    peer: SocketAddr,
+    single_peer: bool,
+    wallet_text: &str,
+    seen: &Arc<Mutex<Seen>>,
+) -> Result<Setup, String> {
+    let wallet = PinnedWallet::from_text(wallet_text).map_err(|e| format!("the wallet: {e}"))?;
+    let record = own_record(dir, &wallet)?;
+    let counter = identity(&COUNTER_SECRET)?;
+    let policy = BatchPolicy {
+        min_count: openbmt_core::batch::DEFAULT_MIN_COUNT,
+    };
+    let settings = record.settings.settings.clone();
+    let mut driver = DriverConfig::new(Network::Regtest, 0);
+    driver.allow_local = true;
+    driver.fixed_peers = vec![peer];
+    let mut config = NodeConfig::new_own(
+        dir,
+        counter,
+        record.own_pairing(policy),
+        settings.clone(),
+        driver,
+    );
+    config.own_record = Some(record);
+    config.health = health_fn(seen, single_peer);
+    let _ = OWN_FIXTURE.set(OwnFixture {
+        dir: dir.to_string(),
+        next_record: Mutex::new(None),
     });
     Ok(Setup {
-        wallet,
+        wallet: wallet_text.to_string(),
         config,
-        settings: shown,
+        settings,
     })
 }
 
@@ -762,11 +899,88 @@ fn command<P: DriverPort>(
                 node.checked_height()
             ));
         }
+        Some(word) if word.starts_with("switch-") => switch_command(node, word, &mut words)?,
         Some("quit") => return Ok(false),
         Some(other) => return Err(format!("unknown command: {other}")),
         None => {}
     }
     Ok(true)
+}
+
+/// The switch commands (`--own-wallet` only), as the owner's link and the
+/// app would drive them.
+fn switch_command<P: DriverPort>(
+    node: &mut Node<P>,
+    word: &str,
+    words: &mut std::str::SplitWhitespace<'_>,
+) -> Result<(), String> {
+    let fixture = OWN_FIXTURE
+        .get()
+        .ok_or("the switch commands need --own-wallet")?;
+    match word {
+        "switch-take" => {
+            let text = words.next().ok_or("the new wallet is missing")?;
+            let first: u32 = number(words.next(), "the first index")?;
+            let count: u32 = number(words.next(), "the count")?;
+            let new = PinnedWallet::from_text(text).map_err(|e| format!("the new wallet: {e}"))?;
+            let owner = identity(&OWNER_SECRET)?;
+            let counter = identity(&COUNTER_SECRET)?.device_id();
+            let old = fixture_old_wallet(fixture)?;
+            let range = SignedRange::sign(
+                &owner,
+                IndexRange::new(counter, first, first + count).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            let sw = SwitchOwn::sign(&owner, counter, old.checksum32(), new, range);
+            match node.take_switch(&sw.to_bytes()) {
+                Ok(()) => say("switch taken"),
+                Err(e) => say(format!("switch refused {e}")),
+            }
+        }
+        "switch-state" => match node.pending_switch() {
+            Some(p) => say(format!(
+                "switch pending address={} kind={:?}",
+                p.address, p.kind
+            )),
+            None => say("switch none"),
+        },
+        "switch-same" => match node.switch_same() {
+            Ok(record) => {
+                say(format!("switch same record_bytes={}", record.len()));
+                *fixture.next_record.lock().map_err(|e| e.to_string())? = Some(record);
+            }
+            Err(e) => say(format!("switch refused {e}")),
+        },
+        "switch-kept" => {
+            let record = fixture
+                .next_record
+                .lock()
+                .map_err(|e| e.to_string())?
+                .take()
+                .ok_or("no record waits to be kept")?;
+            std::fs::write(Path::new(&fixture.dir).join(OWN_RECORD_FILE), &record)
+                .map_err(|e| format!("keep the record: {e}"))?;
+            match node.switch_record_kept() {
+                Ok(()) => say("switch kept"),
+                Err(e) => say(format!("switch refused {e}")),
+            }
+        }
+        "switch-different" => match node.switch_different() {
+            Ok(()) => say("switch different"),
+            Err(e) => say(format!("switch refused {e}")),
+        },
+        other => return Err(format!("unknown command: {other}")),
+    }
+    Ok(())
+}
+
+/// The wallet the record in the app's file pins now.
+fn fixture_old_wallet(fixture: &OwnFixture) -> Result<PinnedWallet, String> {
+    let bytes = std::fs::read(Path::new(&fixture.dir).join(OWN_RECORD_FILE))
+        .map_err(|e| format!("the record: {e}"))?;
+    Ok(OwnPairingRecord::from_bytes(&bytes)
+        .map_err(|e| format!("the record: {e}"))?
+        .wallet)
 }
 
 fn now_secs() -> u64 {
@@ -812,6 +1026,7 @@ fn run(args: &[String]) -> Result<(), String> {
     let mut heartbeat_max_age = None;
     let mut customers_off_wifi = false;
     let mut own_node = false;
+    let mut own_wallet: Option<String> = None;
     let mut relay: Option<SocketAddr> = None;
     let mut relay_key: Option<DeviceId> = None;
     let mut rest = Vec::new();
@@ -832,6 +1047,8 @@ fn run(args: &[String]) -> Result<(), String> {
             customers_off_wifi = true;
         } else if arg == "--regtest-own-node" {
             own_node = true;
+        } else if arg == "--own-wallet" {
+            own_wallet = Some(args.next().ok_or(USAGE)?.clone());
         } else if arg == "--heartbeat-max-age" {
             let secs = args.next().ok_or(USAGE)?;
             heartbeat_max_age = Some(secs.parse().map_err(|_| format!("seconds: {secs}"))?);
@@ -851,17 +1068,20 @@ fn run(args: &[String]) -> Result<(), String> {
         wallet,
         config,
         settings,
-    } = setup(
-        dir,
-        peer,
-        single_peer,
-        heartbeat_max_age,
-        customers_off_wifi,
-        own_node,
-        &seen,
-    )?;
+    } = match own_wallet.as_deref() {
+        Some(text) => setup_own(dir, peer, single_peer, text, &seen)?,
+        None => setup(
+            dir,
+            peer,
+            single_peer,
+            heartbeat_max_age,
+            customers_off_wifi,
+            own_node,
+            &seen,
+        )?,
+    };
 
-    say(format!("descriptor {}", wallet.canonical_string()));
+    say(format!("descriptor {wallet}"));
     if single_peer {
         say("warning --regtest-single-peer: the health answer is replaced by \"healthy\"");
         say("warning one local node cannot meet WR-50 (3 groups, 2 filter peers):");
