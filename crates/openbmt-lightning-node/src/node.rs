@@ -2060,4 +2060,31 @@ mod tests {
             "02a5f163beb545f174bd305e1f3509ff04051164a4cf6271cdec273c6c0d401116"
         );
     }
+
+    #[test]
+    fn sl_72_the_cores_id_is_the_librarys_for_the_vector_and_two_other_seeds() {
+        let master = Xpriv::from_str("xprv9s21ZrQH143K2LBWUUQRFXhucrQqBpKdRRxNVq2zBqsx8HVqFk2uYo8kmbaLLHRdqtQpUm98uKfu3vca1LqdGhUtyoFnCNkfmXRyPXLjbKb").unwrap();
+        let vector = node_seed(&master, 0).unwrap();
+        let second = node_seed(&master, 1).unwrap();
+        let counted: [u8; 64] = std::array::from_fn(|i| (i as u8).wrapping_mul(7).wrapping_add(3));
+        let mut ids = Vec::new();
+        for seed in [vector.0, second.0, counted] {
+            // The node's own path to the library's key (SL-10).
+            let node_master = Xpriv::new_master(Network::Regtest, &seed).unwrap();
+            let keys = KeysManager::new(&node_master.private_key.secret_bytes(), 1, 1, true);
+            let library = keys.get_node_id(lightning::sign::Recipient::Node).unwrap();
+            let core = openbmt_core::shop_lightning::node_id(&seed);
+            assert_eq!(core, library.serialize());
+            ids.push(core);
+        }
+        // The vector's ID is the prototype's, and the three differ.
+        assert_eq!(
+            ids[0]
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>(),
+            "039fe56192d9a44a06a725f975e5d7ccf307e023e2eab9a6bb5114ee8f69b6a9e9"
+        );
+        assert!(ids[0] != ids[1] && ids[1] != ids[2] && ids[0] != ids[2]);
+    }
 }
