@@ -511,7 +511,15 @@ the shop's currency, so the node keeps a log of its own.
   entries and the new ones, stored through the watcher's atomic write, and
   swapped in only when the store succeeds. `archive_paid` does not touch it.
   It holds at most 100,000 entries; past that nothing more is appended and
-  the node notes it. It is read strictly: a length that is not a whole number
+  the node notes it. An entry whose payment did not happen is never
+  removed: it is undone by a later entry of the kind "undone" that names the
+  same kind, number and transaction. That entry is appended when the
+  transaction leaves the outbox without a confirmation that holds (it was
+  replaced, beaten, or left the chain and was not sent again), never only
+  because its block left, since the same bytes are sent again (OC-05) and
+  usually confirm. The books leave an entry and its undoing both out, so a
+  refund paid again by a new transaction is one disposal, not two. It is
+  read strictly: a length that is not a whole number
   of entries, a check that does not match, a flag that is not 0 or 1, a field
   that a kind does not use and is not zero, an entry that repeats an earlier
   one, a currency that is not three capital letters and a kind that is not

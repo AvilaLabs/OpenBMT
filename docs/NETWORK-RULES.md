@@ -169,11 +169,13 @@ thin driver that owns the sockets.
   substitute another. At most 8 blocks are in work at once.
 - **NR-46.** When the best chain changes, the blocks that joined are
   treated as new under NR-40 to NR-44. The checked height is kept with the
-  hash of the block at that height. At start, if that block is no longer
+  hashes of the blocks at that height and up to 99 below it. At start, if
+  the block at the checked height is no longer
   on the stored chain (the chain changed while the device was stopped, or
   after the headers were stored and before the change was handled), the
-  checked height goes down to the highest block below it that is still on
-  the chain, so the blocks that took its place are checked as new.
+  checked height goes down to the highest of the kept blocks that is still
+  on the chain, or below all of them when none is, so the blocks that took
+  its place are checked as new.
 - **NR-47.** The app may ask for one block of the best chain by its hash,
   whatever the filters say: no filter is asked for it, and it is fetched as
   NR-45 fetches any block (one peer at a time, 60 seconds each, a peer that
