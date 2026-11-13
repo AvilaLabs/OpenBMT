@@ -119,9 +119,18 @@ funds.**
 ## 7. The plugin
 
 - **WO-40. Small and plain.** PHP, for the WooCommerce versions still
-  supported, with no library beyond PHP's own sodium functions (for the
-  signature check, Ed25519, and the HMAC) and no call to any server but the
-  shop's rate sources. No tracking, no telemetry, no account.
+  supported, with no library and no package manager: only PHP's own
+  functions, sodium for the Ed25519 check and `hash_hmac` for the HMAC.
+  No call to any server but the shop's rate sources. No tracking, no
+  telemetry, no account. The plugin's own code is the whole of what it adds
+  to a store.
+- **WO-43. Why a signature and not only the HMAC.** The pairing secret is
+  kept in the store's database. A flaw elsewhere in WordPress that lets
+  someone read that database would give them the secret; with it alone they
+  could mark orders paid. The store holds only the public half of the web
+  order key, so reading the database does not let anyone sign a notice. On
+  the owner phone the key is Ed25519 from the `ed25519-dalek` crate, the one
+  package these rules add (`docs/DEPENDENCIES.md`).
 - **WO-41. Its words.** Every text the customer or the owner sees comes from
   one file of the plugin, written under `docs/SCREEN-RULES.md`, and is
   translatable in WordPress's usual way.
@@ -131,13 +140,19 @@ funds.**
 
 ## 8. Tests
 
-- **WO-50.** Signatures and HMAC from fixed vectors made by the Rust side and
-  checked by the PHP side, and the other way round; the rate quote against
-  `docs/RATE-RULES.md`'s test vectors; a whole order on regtest with
-  Bitcoin Core 32.1, WordPress and WooCommerce in a local test container:
-  pairing, a range, an order, its payment, the visit, the signed notice and
-  the order marked paid; a notice with a wrong signature, a wrong address
-  and a repeated notice refused; an address never given twice.
+- **WO-50. Without WordPress.** The plugin's logic is in classes that do
+  not call WordPress, and run under the PHP command line alone
+  (`tests_standalone`): signatures and HMAC from fixed vectors made by the
+  Rust side and checked by the PHP side, and the other way round; the rate
+  quote against `docs/RATE-RULES.md`'s test vectors; pairing, a range, an
+  order and a notice played through those classes; a notice with a wrong
+  signature, a wrong address and a repeated notice refused; an address
+  never given twice. No web server runs.
+- **WO-51. Inside WordPress.** Before any store uses the plugin: a whole
+  order on regtest with Bitcoin Core 32.1 and WordPress and WooCommerce at
+  fixed versions, checked against their published checksums and served
+  only on the local machine: pairing, a range, an order, its payment, the
+  visit, the signed notice and the order marked paid.
 
 ## 9. Later
 
