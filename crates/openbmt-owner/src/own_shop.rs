@@ -1020,7 +1020,10 @@ impl OwnShop {
     /// OA-120: the settings that wait, joined to `confirmation` as `OBM<`,
     /// when the confirmation is for them and from a counter of the settings
     /// in force. `None` otherwise.
-    pub fn join_confirmation(&self, confirmation: CounterConfirmation) -> Option<ConfirmedSettings> {
+    pub fn join_confirmation(
+        &self,
+        confirmation: CounterConfirmation,
+    ) -> Option<ConfirmedSettings> {
         let held = self.held.as_ref()?;
         let current = self.state.known.as_ref()?;
         held.join(confirmation, &self.identity.device_id(), &current.settings)

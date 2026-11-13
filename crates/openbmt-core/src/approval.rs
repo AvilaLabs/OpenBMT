@@ -81,7 +81,8 @@ pub fn field_class(old: &Settings, new: &Settings, field: &str) -> ChangeClass {
         "devices"
             if old.counters.is_empty()
                 && new.devices.difference(&old.devices).all(|d| {
-                    new.counters.contains_key(d) || (new.boxes.contains(d) && !old.boxes.contains(d))
+                    new.counters.contains_key(d)
+                        || (new.boxes.contains(d) && !old.boxes.contains(d))
                 }) =>
         {
             ChangeClass::Free

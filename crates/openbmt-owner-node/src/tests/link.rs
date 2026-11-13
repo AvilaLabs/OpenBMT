@@ -2771,7 +2771,11 @@ fn oa_119_a_change_that_waits_goes_to_the_counters_only_and_once() {
     // Settings that the owner did not sign are not taken.
     let mut forged = signed_by_owner(listed(3, |s| s.light_per_sale.sats += 60));
     forged.owner_sig = forged.settings.sign(&id(9));
-    assert!(b.w.link.carry_held_settings(3, &forged, &authority, T0).is_err());
+    assert!(b
+        .w
+        .link
+        .carry_held_settings(3, &forged, &authority, T0)
+        .is_err());
 }
 
 #[test]

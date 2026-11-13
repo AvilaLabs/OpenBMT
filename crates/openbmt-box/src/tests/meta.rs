@@ -30,14 +30,12 @@ const TEST_SOURCES: [&str; 10] = [
 ];
 
 /// Rules this crate does not test, each with the reason.
-const NOT_HERE: [(&str, &str); 1] = [
-    (
-        "BX-17",
-        "what the owner phone's screen says when there is no Key app is the \
+const NOT_HERE: [(&str, &str); 1] = [(
+    "BX-17",
+    "what the owner phone's screen says when there is no Key app is the \
          phone's; the bytes are the same as with one (bx_17 shows the pairing \
          does not depend on the Key app's identity)",
-    ),
-];
+)];
 
 fn all_rules() -> BTreeSet<String> {
     RULES

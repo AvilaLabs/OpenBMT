@@ -164,8 +164,8 @@ use crate::host::{real_spawn, Entry, Spawn};
 use crate::import_view::{self, ImportKind, ImportView};
 use crate::own::{
     self, OwnBoxDeliveredView, OwnBoxWelcomeArgs, OwnBundleView, OwnConfirmArgs, OwnCounterArgs,
-    OwnGapArgs, OwnGapView, OwnMade, OwnOfferView, OwnOwnerMade, OwnRelayArgs, OwnRequestArgs, OwnWaitingView,
-    OwnRequestView, OwnShopArgs, OwnWalletView, SwitchRowView, SwitchStateKind,
+    OwnGapArgs, OwnGapView, OwnMade, OwnOfferView, OwnOwnerMade, OwnRelayArgs, OwnRequestArgs,
+    OwnRequestView, OwnShopArgs, OwnWaitingView, OwnWalletView, SwitchRowView, SwitchStateKind,
 };
 use crate::own_spend_views::{
     OwnSpendBuildArgs, OwnSpendBuiltView, OwnSpendFileView, OwnSpendItemView, OwnSpendSessionView,

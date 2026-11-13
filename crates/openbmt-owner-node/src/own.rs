@@ -232,7 +232,9 @@ impl OwnNode {
             words: held.words(),
             fields: held.loosened_fields(&current.settings),
             signed_at: held.signed_at,
-            ends_at: held.signed_at.saturating_add(openbmt_owner::own_waiting::WAIT_SECS),
+            ends_at: held
+                .signed_at
+                .saturating_add(openbmt_owner::own_waiting::WAIT_SECS),
         })
     }
 

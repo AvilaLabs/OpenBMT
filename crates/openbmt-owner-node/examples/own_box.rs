@@ -32,7 +32,9 @@ use openbmt_core::identity::Identity;
 use openbmt_core::pairing_own::OwnCounterPairing;
 use openbmt_core::pinned_wallet::PinnedWallet;
 use openbmt_core::settings::SignedSettings;
-use openbmt_link::{os_random, seal, Client, ClientConfig, ClientError, Kind, Refusal, Role, Route};
+use openbmt_link::{
+    os_random, seal, Client, ClientConfig, ClientError, Kind, Refusal, Role, Route,
+};
 use openbmt_owner::own_shop::OwnShop;
 
 /// TEST ONLY, NEVER USE: the secret bytes of the owner root of `owner_regtest`.
@@ -219,8 +221,8 @@ fn pair(
 /// it (CR-241) is not part of this run.
 fn flow(dir: &str, addr: &str, box_dir: &str) -> Result<(), String> {
     let dirp = PathBuf::from(dir);
-    let text =
-        std::fs::read_to_string(dirp.join("invitation.txt")).map_err(|_| "no invitation is open")?;
+    let text = std::fs::read_to_string(dirp.join("invitation.txt"))
+        .map_err(|_| "no invitation is open")?;
     let invitation = Invitation::from_text(text.trim()).map_err(|e| e.to_string())?;
     let claim_bytes = std::fs::read(dirp.join("claim.bin")).map_err(|_| "no claim was kept")?;
     let claim = Claim::from_bytes(&claim_bytes).map_err(|e| e.to_string())?;

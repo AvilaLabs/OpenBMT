@@ -831,7 +831,8 @@ impl<R: Post> OwnerLink<R> {
             .verify_signatures_with(authority)
             .map_err(SettingsNotCarried::Check)?;
         self.drop_held_settings();
-        self.carried.retain(|c| c.version != signed.settings.version);
+        self.carried
+            .retain(|c| c.version != signed.settings.version);
         self.carry_prepared(
             id,
             &signed.settings,

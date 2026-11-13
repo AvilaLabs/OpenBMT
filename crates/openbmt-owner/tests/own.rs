@@ -1189,14 +1189,25 @@ fn oa_119_a_counter_added_once_one_is_in_force_waits_and_is_not_put_in_force() {
     let before = s.known_settings().unwrap().clone();
     let paired = pair_second(&mut s, &disk, &waiting, 4, T0 + 100);
     assert!(paired.waiting);
-    assert_eq!(s.known_settings(), Some(&before), "the settings in force stay");
+    assert_eq!(
+        s.known_settings(),
+        Some(&before),
+        "the settings in force stay"
+    );
     let held = s.waiting_change().unwrap();
     assert_eq!(held.signed.settings.version, before.settings.version + 1);
-    assert!(held.signed.settings.counters.contains_key(&id(4).device_id()));
+    assert!(held
+        .signed
+        .settings
+        .counters
+        .contains_key(&id(4).device_id()));
     assert_eq!(held.signed_at, T0 + 130);
     // It was written before anything was sent, and reads back strictly.
     assert_eq!(WaitingChange::from_bytes(&waiting.get()).unwrap(), *held);
-    assert_eq!(held.loosened_fields(&before.settings), vec!["devices", "counters"]);
+    assert_eq!(
+        held.loosened_fields(&before.settings),
+        vec!["devices", "counters"]
+    );
     assert_eq!(held.words().len(), 4);
 }
 
@@ -1207,7 +1218,12 @@ fn ap_12_the_first_counter_after_the_box_is_free_and_goes_in_force() {
     s.add_box(id(9).device_id(), USD, |b| disk.put(b)).unwrap();
     let paired = pair_second(&mut s, &disk, &waiting, 3, T0);
     assert!(!paired.waiting && s.waiting_change().is_none() && waiting.get().is_empty());
-    assert!(s.known_settings().unwrap().settings.counters.contains_key(&id(3).device_id()));
+    assert!(s
+        .known_settings()
+        .unwrap()
+        .settings
+        .counters
+        .contains_key(&id(3).device_id()));
 }
 
 #[test]
@@ -1242,7 +1258,10 @@ fn oa_119_a_waiting_file_that_cannot_be_written_changes_nothing_that_is_sent() {
     assert!(matches!(failing, Err(OwnError::Store(_))));
     assert!(s.waiting_change().is_none());
     assert_eq!(s.known_settings(), Some(&before));
-    assert!(s.counters_waiting().iter().all(|w| w.counter != id(4).device_id()));
+    assert!(s
+        .counters_waiting()
+        .iter()
+        .all(|w| w.counter != id(4).device_id()));
 }
 
 #[test]
@@ -1287,9 +1306,20 @@ fn oa_121_a_newer_change_replaces_the_one_that_waits_and_builds_on_it() {
     let first = s.waiting_change().unwrap().clone();
     pair_second(&mut s, &disk, &waiting, 5, T0 + 300);
     let second = s.waiting_change().unwrap();
-    assert_eq!(second.signed.settings.version, first.signed.settings.version + 1);
-    assert!(second.signed.settings.counters.contains_key(&id(4).device_id()));
-    assert!(second.signed.settings.counters.contains_key(&id(5).device_id()));
+    assert_eq!(
+        second.signed.settings.version,
+        first.signed.settings.version + 1
+    );
+    assert!(second
+        .signed
+        .settings
+        .counters
+        .contains_key(&id(4).device_id()));
+    assert!(second
+        .signed
+        .settings
+        .counters
+        .contains_key(&id(5).device_id()));
     assert_eq!(WaitingChange::from_bytes(&waiting.get()).unwrap(), *second);
 }
 
@@ -1303,7 +1333,10 @@ fn oa_121_a_change_is_dropped_after_seven_days_and_the_file_is_read_strictly() {
     assert!(held.expired(held.signed_at + WAIT_SECS));
     let bytes = waiting.get();
     for cut in 0..bytes.len() {
-        assert!(WaitingChange::from_bytes(&bytes[..cut]).is_err(), "cut at {cut}");
+        assert!(
+            WaitingChange::from_bytes(&bytes[..cut]).is_err(),
+            "cut at {cut}"
+        );
     }
     let mut more = bytes.clone();
     more.push(0);

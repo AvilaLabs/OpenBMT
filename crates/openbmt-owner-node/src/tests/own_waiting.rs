@@ -18,10 +18,16 @@ fn open(dir: &Dir) -> Result<OwnNode, OwnNodeError> {
 }
 
 fn request(made: &MadeOffer, n: u8) -> Vec<u8> {
-    OwnCounterPairing::begin(made.offer.clone(), &id(n), "Front", [n; 32], made.made_at + 5)
-        .unwrap()
-        .1
-        .to_bytes()
+    OwnCounterPairing::begin(
+        made.offer.clone(),
+        &id(n),
+        "Front",
+        [n; 32],
+        made.made_at + 5,
+    )
+    .unwrap()
+    .1
+    .to_bytes()
 }
 
 /// A node whose shop has counter 3 and Box 9, and whose second counter waits.
@@ -30,12 +36,30 @@ fn node_with_a_waiting_change(dir: &Dir) -> OwnNode {
     let writer = node.waiting_writer();
     let (shop, store) = node.shop_and_store();
     let made = shop.make_offer(T0).unwrap();
-    shop.confirm_with(&made, T0 + 30, &request(&made, 3), USD, vec![], None, &store, &writer)
-        .unwrap();
+    shop.confirm_with(
+        &made,
+        T0 + 30,
+        &request(&made, 3),
+        USD,
+        vec![],
+        None,
+        &store,
+        &writer,
+    )
+    .unwrap();
     shop.add_box(id(9).device_id(), 0, &store).unwrap();
     let made = shop.make_offer(T0 + 100).unwrap();
     let paired = shop
-        .confirm_with(&made, T0 + 130, &request(&made, 4), USD, vec![], None, &store, &writer)
+        .confirm_with(
+            &made,
+            T0 + 130,
+            &request(&made, 4),
+            USD,
+            vec![],
+            None,
+            &store,
+            &writer,
+        )
         .unwrap();
     assert!(paired.waiting);
     node
