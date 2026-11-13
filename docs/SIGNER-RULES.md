@@ -574,3 +574,13 @@ SR-81 and the screens of SR-82 by the Android app.
   never released: CI and the release scripts never build it, and the
   manifest check fails a release APK that has its package or its band. The
   release build keeps the check.
+- **SR-92. One history.** The stored state carries a generation number
+  that every save raises by one. A handle remembers the generation it
+  opened or last saved, and a save whose stored generation is not that one
+  is refused: nothing is written, nothing signed is returned, and the
+  handle opens the stored state again before it does anything else, so a
+  signature is always counted against every signature saved before it
+  (SR-32, SR-33, SR-36). The Key app's activity is a single instance
+  (`launchMode` `singleTask`), so that two screens never hold the signer at
+  once, and every unlock reads the state from the store, not from what was
+  read at start.

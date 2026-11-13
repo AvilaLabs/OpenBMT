@@ -98,6 +98,22 @@ merchant types it into the Box.
   device) the owner's phone makes the invitation and checks the claim, and
   its screen says that pairing rests on the owner's phone alone, as it
   does for a counter (`docs/DESIGN.md` §2.9).
+- **BX-18. A shop with its own wallet.** A shop set up on the owner phone
+  with its own wallet or a starter wallet has no Key app and no approver
+  root (`docs/COUNTER-RULES.md` CR-227 to CR-236). Its welcome says so: it
+  names the owner root and marks the shop as one of its own wallet, and the
+  Box then checks settings as a counter of that shop does (CR-236 and
+  section 24 of `docs/COUNTER-RULES.md`), with the owner root alone. The
+  first settings, taken with the welcome, rest on the owner's phone alone,
+  as BX-17 says. After them, a Free change is taken with the owner's
+  signature; a Loosen change is taken only with a counter's confirmation
+  (`docs/APPROVAL-RULES.md` AP-04, AP-05) by a counter of the settings in
+  force; a Redirect change is refused. The mark is pinned with the roots
+  (BX-16): a Box never moves between the two kinds, and a welcome of the
+  other kind is refused as a welcome for other roots. The owner phone keeps
+  the Box's address and relay key with the shop's own wallet, hands the
+  relay to each counter paired after the Box in its bundle (CR-130), and
+  shows the relay code of CR-132 for each counter paired before.
 
 What the invitation protects against. Someone on the shop's network, or a
 phone that has been taken over, cannot get a key of their own onto the
@@ -629,25 +645,29 @@ code and checks the payment.
 - **BX-72.** `POST /till/v1/sales` takes `Content-Type: application/json`
   and an object of strings: `counter`, `amount`, `currency`, `request` and
   `reference` (the last may be left out). `counter` is the first 4 bytes of a
-  counter's device key as 8 lowercase hex (the owner app's "Counter
-  1a2b3c4d") and must match exactly one counter of the settings in force, else
-  404 `tillUnknownCounter`. `currency` must be the shop's currency of the
-  settings in force, else 409 `tillWrongMoney`. `amount` is a decimal string
-  above zero with at most as many decimals as the shop's currency has minor
-  units (none for yen, won and satoshis), else 400 `tillBadAmount`.
-  `reference` is cut to 40 characters, with anything outside printable ASCII
-  dropped. `request` is 1 to 64 of `[A-Za-z0-9_-]`; the same `request` again
-  answers the same sale and sends nothing new. An object that does not read
-  is a 400 `tillBadRequest` with no words. The answer is 200 `{"sale":"<32
-  hex>","state":"waiting"}`. A Box that has not joined the shop answers 503
+  counter's device key as 8 lowercase hex (the owner app's "Counter 1a2b3c4d")
+  and must match exactly one counter of the settings in force, else 404
+  `tillUnknownCounter`. `currency` must be the shop's currency of the settings
+  in force, else 409 `tillWrongMoney`. `amount` is a decimal string above zero
+  with at most as many decimals as the shop's currency has minor units (none
+  for yen, won and satoshis), else 400 `tillBadAmount`. `reference` is cut to
+  40 characters, with anything outside printable ASCII dropped. `request` is 1
+  to 64 of `[A-Za-z0-9_-]`; the same `request` again answers the same sale and
+  sends nothing new. An object that does not read is a 400 `tillBadRequest`
+  with no words. The answer is 200 `{"sale":"<32
+  hex>","state":"waiting","amount","currency","request","reference"}`, the
+  last four as the Box took them: the amount written with exactly as many
+  decimals as the currency has minor units, and the reference after it was cut
+  (empty when there is none). A Box that has not joined the shop answers 503
   `tillNotPaired` to every request that carries the key.
-- **BX-73.** `GET /till/v1/sales/<sale>` answers 200 `{"sale","state"}`
-  where state is one of `waiting`, `opened`, `paid`, `unpaid`, `expired` and
-  `cancelled`, and for the last four also `words`, an object of `heading`,
-  `what` and `next`: for `paid` the plain line "Paid in bitcoin." in `what`
-  with the other two empty, and for the rest the words `tillUnpaid`,
-  `tillExpired` and `tillCancelled`. A sale the Box does not know, or an id
-  that is not 32 lowercase hex, is a 404 `tillLost`.
+- **BX-73.** `GET /till/v1/sales/<sale>` answers 200
+  `{"sale","state","amount","currency","request","reference"}`, the last four
+  as BX-72 gives them, where state is one of `waiting`, `opened`, `paid`,
+  `unpaid`, `expired` and `cancelled`, and for the last four also `words`, an
+  object of `heading`, `what` and `next`: for `paid` the plain line "Paid in
+  bitcoin." in `what` with the other two empty, and for the rest the words
+  `tillUnpaid`, `tillExpired` and `tillCancelled`. A sale the Box does not
+  know, or an id that is not 32 lowercase hex, is a 404 `tillLost`.
 - **BX-74.** `POST /till/v1/sales/<sale>/cancel` makes the sale `cancelled`
   unless it is `paid`, which stays `paid`, and sends the counter a cancel. The
   answer is the sale as BX-73 gives it. An unknown sale is a 404 `tillLost`.
@@ -688,42 +708,25 @@ code and checks the payment.
   own order when it reads `paid`.
 - **BX-80. The Box's answers are signed.** The listener is plain HTTP
   (BX-70), so whoever is on the path between the till's server and the Box
-  sees what is sent. The key the till holds is therefore never sent. The
-  till sends as its bearer token the tagged hash `OpenBMT/till-bearer/v1`
-  of the key, as 64 lowercase hex, and keeps the reply key, the tagged hash
+  sees what is sent. The key the till holds is therefore never sent. The till
+  sends as its bearer token the tagged hash `OpenBMT/till-bearer/v1` of the
+  key, as 64 lowercase hex, and keeps the reply key, the tagged hash
   `OpenBMT/till-reply/v1` of the key, which the Box keeps too. Every request
   carries `X-OBM-Nonce`, 32 lowercase hex the till makes fresh for that
   request; a request without one is a 400 `tillBadRequest`. Every answer,
-  refusals included, carries `X-OBM-Reply`: the HMAC-SHA256 under the reply
-  key of `OBM-TILL-REPLY-1`, the request's method, its path, its nonce, the
-  answer's status as three digits and the body, joined by line feeds, as 64
-  lowercase hex. The till takes an answer only when it carries the mac of
-  the request it sent, so an answer changed or made up on the path, or an
-  old one sent again, is refused: seeing the bearer token does not let
-  anyone sign. A `till-key` file of the earlier form, which holds no reply
-  key, is answered 401 `tillKeyOld` until a new key is made.
-
-What the code fixes. `till-key` takes no lock on the data directory (BX-02):
-it writes only that one file, by renaming a whole file over the old, and the
-Box reads the file at each request, so a key made while the Box runs works at
-once. The file holds a version byte, the tagged hash `OpenBMT/till-key/v1` of
-the token the till sends, and the reply key, each made as BIP340 tagged hashes
-are, so the Box needs no hashing code of its own. A file in the earlier form,
-which holds only a hash of the key, gets `tillKeyOld` until a new key is made.
-The shop's currency is named by its three letters, `SAT` for Bitcoin Standard
-(CR-196). A sale counts as waiting from BX-72 until
-the counter's "opened" notice; at most 32 do, and at most 4,096 sales of any
-state are kept, so that a till that makes and cancels sales cannot grow the
-table without limit. An opened sale that nothing comes of for an hour counts as
-`unpaid`. A "paid" or "final" notice moves a sale that is `unpaid`, `expired`
-or `cancelled` to `paid` while the Box still keeps it, because the counter's
-word that it was paid is what the till needs most; a till that cancelled a
-sale and then reads `paid` has been paid. The numbers of the counters' notices
-are checked for the till against the last till notice taken from the counter,
-in memory, because the till works on a Box that reads no POS.
-
-## 6. What these rules do not do
-
+  refusals included, carries `X-OBM-Reply`, 64 lowercase hex: the HMAC-SHA256
+  under the reply key of these, joined by line feeds: `OBM-TILL-REPLY-2`, the
+  request's method, its path, its nonce, the SHA-256 of the request's body as
+  64 lowercase hex (of no bytes for a request without a body), the answer's
+  status as three digits, and the answer's body. The till takes an answer only
+  when it carries the mac of the request it sent, body included, so an answer
+  changed or made up on the path, an old one sent again, or a true answer to a
+  request that was changed on its way, is refused: seeing the bearer token
+  does not let anyone sign. The till also checks that the amount, currency,
+  request and reference of every answer that names a sale are the ones it
+  asked for, and cancels the sale (BX-74) and fails the payment if they are
+  not. A `till-key` file of the earlier form, which holds no reply key, is
+  answered 401 `tillKeyOld` until a new key is made.
 - **They do not make the Box trusted.** A Box that lies can hold messages
   back (LK-26), report orders wrongly, and with a closing connector mark an
   order paid that was not. The owner's own matching is what catches the

@@ -162,9 +162,14 @@ funds.**
   counters' records (CR-262). The owner phone itself stays pinned to the
   starter wallet until the move of SS-42 has its confirmation and the key is
   deleted (SS-43); it then pins the new wallet, once, and keeps watching the
-  addresses of the starter wallet up to the last one handed out. The owner
-  phone's record of this change is written before the new wallet's file,
-  and a start between the two finishes the change. After it, the owner
+  addresses of the starter wallet up to the last one handed out. The owner's
+  queue moves with it: the queued refunds, the paid log and the facts of
+  the sales paid into the starter wallet are bound to the new wallet, and
+  the re-pin waits until no transaction of the starter wallet other than
+  the confirmed move is waiting or unconfirmed. The owner phone's record of
+  this change is written before the queue bound to the new wallet, and that
+  before the new wallet's file, and a start that finds the record finishes
+  the change, so the node always starts. After it, the owner
   phone reads the new wallet's coins from its birthday.
 - **SS-42. One move.** Once every counter in the settings in force has the
   record of CR-262 with the switched byte for the new wallet, the owner phone
