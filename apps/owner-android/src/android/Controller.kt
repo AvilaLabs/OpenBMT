@@ -34,6 +34,7 @@ import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
 import org.openbmt.owner.PosReply
 import org.openbmt.owner.PosRequest
+import org.openbmt.owner.StartConfig
 
 /**
  * The root of the app: what is saved, what runs, and the pages. The node runs
@@ -363,6 +364,16 @@ class Controller(internal val act: MainActivity) {
         }
     }
 
+    /** FL-05: [start] with the watch of the refund float added, when the float is on or was turned off less than a day ago. */
+    private fun floatWatching(start: StartConfig): StartConfig {
+        val store = FloatStore(appDir)
+        return try {
+            FloatModel.withWatch(start, FloatModel.watch(store.load(), store.loadWallet(), start.birthday, nowSecs()))
+        } catch (_: java.io.IOException) {
+            start
+        }
+    }
+
     internal fun startNode() {
         // A node is never started while the app is hidden: `hidden()` has already run (OA-62).
         if (!visible) return
@@ -411,7 +422,7 @@ class Controller(internal val act: MainActivity) {
                         val shop = ownStore.args() ?: return@Thread
                         OwnStart.config(shop, OwnerCeremony.defaults(AppConfig.NETWORK), AppConfig.NETWORK, nowSecs(), proxy)
                     }
-                    val n = OwnerNode.start(start)
+                    val n = OwnerNode.start(floatWatching(start))
                     if (id != runId) {
                         n.close()
                         return@Thread

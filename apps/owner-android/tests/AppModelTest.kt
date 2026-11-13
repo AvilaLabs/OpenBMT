@@ -4002,15 +4002,12 @@ object AppModelTest {
         ok(FloatModel.readyRefunds(queue).map { it.id } == listOf(1L, 5L), "only queued refunds that are not waiting for depth are ready, as the starter wallet's list reads them (FL-20)")
 
         class View(val held: Long) : FloatCore {
-            override fun open(words: String) = FloatWalletView("d", "a")
             override fun seal(scan: ByteArray) = FloatSealed(byteArrayOf(), ByteArray(32), FloatWalletView("d", "a"))
             override fun status(cap: Long, confirmed: Long, unconfirmedIncoming: Long): FloatStatus {
                 val h = confirmed + unconfirmedIncoming
                 return FloatStatus(h, h < cap / 4, if (h < cap) cap - h else null)
             }
             override fun feeRate(recent: Long?, typed: Long?) = typed ?: 0
-            override fun pay(words: String, network: OwnerNetwork, address: String, sats: Long, feeRate: Long, changeIndex: Long, minConfirmations: Long, lockHeight: Long, coins: List<FloatCoin>) = FloatPaid(byteArrayOf(), "", 0, 0, sats, null, null, address)
-            override fun sweep(words: String, shop: String, shopIndex: Long, feeRate: Long, minConfirmations: Long, lockHeight: Long, coins: List<FloatCoin>) = FloatPaid(byteArrayOf(), "", 0, 0, 0, null, null, "")
         }
         val core = View(0)
         val ready = FloatRecord(100_000, state = FloatState.Ready)
@@ -4041,7 +4038,17 @@ object AppModelTest {
         ok(drafted.setup && !drafted.refill && !drafted.pay && !drafted.sweep, "a cap alone enables only the setup")
         val live = FloatModel.actions(ready, home(ready, 10_000), true, queue)
         ok(!live.setup && live.refill, "a float that is on does not offer the setup again and offers the refill")
-        ok(!FloatModel.SIGNING_WIRED && !live.pay && !live.sweep, "paying and turning off stay off until the library can sign without the words as text and the node watches the float")
+        val rich = FloatModel.actions(ready, home(ready, 60_000), true, queue)
+        ok(rich.pay && rich.sweep && live.sweep && !live.pay, "a float that is on, with its key and a ready refund it covers, enables paying and turning off (FL-20, FL-35)")
+        val noKey = FloatModel.actions(ready, home(ready, 60_000), false, queue)
+        ok(!noKey.pay && !noKey.sweep, "with no key on the phone neither paying nor turning off is on")
+        val empty = FloatModel.actions(ready, home(ready, 0), true, queue)
+        ok(!empty.pay && !empty.sweep, "a float that holds nothing has nothing to pay or move")
+        val unknownHeld = FloatModel.actions(ready, home(ready, null), true, queue)
+        ok(!unknownHeld.pay && !unknownHeld.sweep, "without the node's view neither is on")
+        val off = FloatRecord(100_000, state = FloatState.Disabled)
+        val offActions = FloatModel.actions(off, home(off, 10_000), true, queue)
+        ok(!offActions.pay && !offActions.sweep && !offActions.refill, "a float that is off enables nothing")
 
         // FL-03, FL-04: the write order of the setup.
         val dir = tempDir()
@@ -4060,7 +4067,7 @@ object AppModelTest {
             ok(store.loadWallet()!!.description == "descriptor-text" && store.loadWallet()!!.firstAddress == "bc1qfirst", "the public wallet is kept with the record")
             ok(FloatStore.DIR != StarterStore.DIR && FloatStore.KEY_ALIAS != StarterStore.KEY_ALIAS && store.dir.name == FloatStore.DIR, "the float keeps its seal and its Keystore key apart from the starter wallet's")
             ok(store.loadSealed()!!.contentEquals(byteArrayOf(1, 2, 3)) && File(store.dir, StarterStore.SEALED).isFile && File(store.dir, StarterStore.WRAPPED).isFile, "the sealed seed and the wrapped key are kept as the starter wallet keeps them")
-            ok(File(store.dir, FloatStore.RECORD).readText().lines().all { it.substringBefore(": ") in setOf("cap-sats", "receive-index", "change-index", "state", "child-index", "") }, "the record holds no key material")
+            ok(File(store.dir, FloatStore.RECORD).readText().lines().all { it.substringBefore(": ") in setOf("cap-sats", "receive-index", "change-index", "state", "child-index", "watch-from", "off-at", "") }, "the record holds no key material")
             store.deleteKey()
             ok(!store.hasSealed() && !store.hasWrapped() && store.load() != null, "deleting the key leaves the public record")
             // An older record without a child index reads as index 0.
@@ -4072,12 +4079,63 @@ object AppModelTest {
             dir.deleteRecursively()
         }
 
+        // FL-05: what the node is started with to watch the float.
+        val wallet = FloatWalletView("descriptor-text", "bc1qfirst")
+        val used = FloatRecord(100_000, 3, 5, null, null, FloatState.Ready, 0, 800_000)
+        val watch = FloatModel.watch(used, wallet, 700_000, 10_000)!!
+        ok(watch.description == "descriptor-text" && watch.receiveEnd == 4L && watch.changeEnd == 6L && watch.birthday == 800_000L, "the node watches each chain up to one past the last index used or handed out, from the setup height")
+        ok(FloatModel.watch(FloatRecord(100_000, state = FloatState.Ready), wallet, 700_000, 10_000)!!.birthday == 700_000L, "with no setup height the shop's own start height is used")
+        ok(FloatModel.watch(FloatRecord(100_000, state = FloatState.NeedsSetup), wallet, 0, 0) == null && FloatModel.watch(null, wallet, 0, 0) == null && FloatModel.watch(used, null, 0, 0) == null, "no watch for a float that is not set up or has no public wallet")
+        val offAt = FloatRecord(100_000, 3, 5, null, null, FloatState.Disabled, 0, 800_000, 50_000)
+        ok(FloatModel.watch(offAt, wallet, 0, 50_000 + FloatModel.WATCH_AFTER_OFF_SECS - 1) != null && FloatModel.watch(offAt, wallet, 0, 50_000 + FloatModel.WATCH_AFTER_OFF_SECS) == null, "a float that was turned off is watched for a day more and then not (FL-35)")
+        ok(FloatModel.watch(FloatRecord(100_000, state = FloatState.Disabled), wallet, 0, 0) == null, "a float that is off with no off time is not watched")
+        val base = org.openbmt.owner.StartConfig("d", OwnerNetwork.Regtest, 1, byteArrayOf(1), byteArrayOf(2), "w", byteArrayOf(3), null, 4, 5, 6, "p", listOf("a"), null, true, null)
+        val started = FloatModel.withWatch(base, watch)
+        ok(started.float === watch && started.dir == "d" && started.birthday == 6L && started.wallet == "w" && started.fixedPeers == listOf("a") && started.withoutTor, "the float's watch is added and the rest of the start is the same")
+        ok(NodeFloat(null).coinView() === FloatCoinView.Unavailable, "with no node the float's coin view is unavailable")
+        val rec = FloatRecord(100_000, 1, 2, null, null, FloatState.Ready, 4, 123, 99)
+        val read = FloatRecord.parse(rec.text())
+        ok(read.watchFrom == 123L && read.offAt == 99L && read.childIndex == 4L, "the watch height and the off time round-trip")
+        ok(FloatRecord.parse("cap-sats: 5\nreceive-index: 1\nchange-index: 2\nstate: Ready\n").let { it.watchFrom == 0L && it.offAt == null }, "a record from before the watch reads with no height and no off time")
+
+        // FL-22: what the owner reads before and after signing.
+        val lines = FloatModel.beforeLines("bc1qaddr", 40_000, 12_500)
+        ok(lines.size == 3 && lines[0].second == "bc1qaddr" && lines[2].second == "12.500 sat/vB", "the refund's address in full, its amount and the fee rate come before the unlock")
+        val after = FloatModel.afterLines(FloatPaid(byteArrayOf(), "", 700, 141, 40_000, 1, 9_000, "bc1qaddr"))
+        ok(after.size == 4 && after[0].second == "bc1qaddr" && after[1].second == Format.sats(40_000), "the signed payment is shown in full with its fee and change")
+        ok(FloatModel.afterLines(FloatPaid(byteArrayOf(), "", 700, 141, 40_000, null, null, "bc1qaddr")).size == 3, "no change line when there is no change")
+
+        // FL-20, FL-35: records kept as the payments go.
+        run {
+            val d = tempDir()
+            try {
+                val store = FloatStore(d)
+                val r = FloatRecord(100_000, 2, 3, null, null, FloatState.Ready)
+                store.save(r)
+                store.changeUsed(r, 5)
+                store.changeUsed(r, 2)
+                ok(store.load()!!.nextChangeIndex == 6L, "a change address used moves the next change index on and never back")
+                store.pendingSweep(r, "33".repeat(32))
+                ok(store.load()!!.pendingSweepId == "33".repeat(32), "the move is recorded by its ID before the outbox takes it")
+                store.clearPendingSweep(r)
+                ok(store.load()!!.pendingSweepId == null && store.load()!!.state == FloatState.Ready, "a move the node never took can be signed again")
+            } finally {
+                d.deleteRecursively()
+            }
+        }
+
         // SS-12 and FL-03: the screen sets the window flags, and the words never become text.
         val screens = source("src/android/FloatScreens.kt")
         ok(screens.contains("StarterWindow.protect(act, page)") && screens.contains("StarterWindow.protect(act, act.window.decorView)"), "the float's setup page and its scan page set the window flags of SS-12")
         ok(screens.contains("floatWordsScreen(FloatWords.setupTitle"), "the setup screen is built through the protected helper")
         ok(screens.contains("LibraryFloat.seal(scanned)") && !screens.contains("LibraryFloat.open(") && !screens.contains("OwnerFloat.open(") && !screens.contains("String(bytes"), "the scan goes to the library as bytes and no words are made as text")
         ok(screens.indexOf("store.saveSealed(") < screens.indexOf("starterWrapKey(") && screens.indexOf("starterWrapKey(") < screens.indexOf("store.finishSetup("), "the screen keeps the seal, wraps the key, and records last")
+        ok(!screens.contains("OwnerFloat.pay(") && !screens.contains("OwnerFloat.sweep(") && !screens.contains("floatCore().open("), "no signing call takes the words as text")
+        ok(screens.contains("n.floatPay(sealed, key,") && screens.contains("n.floatSweep(sealed, key,") && screens.contains("n.floatSend(paid.tx, listOf(r.id), false)") && screens.contains("n.floatSend(paid.tx, emptyList(), true)"), "paying and turning off sign from the sealed seed and go through the node's outbox")
+        ok(screens.contains("keystore = floatKeystore()") && screens.contains("loadWrapped = { store.loadWrapped() }"), "the unlock uses the float's own Keystore key and wrapped key")
+        ok(screens.indexOf("store.pendingSweep(record, paid.txid)") < screens.indexOf("n.floatSend(paid.tx, emptyList(), true)"), "the move is recorded before the outbox takes it")
+        ok(screens.indexOf("store.deleteKey()") < screens.indexOf("store.completeSweep(") && screens.contains("FloatModel.sweepMayDeleteWords(confirmations)") && screens.contains("n.starterConfirmations(txid)"), "the key is deleted only after the move has a known confirmation")
+        ok(source("src/android/Controller.kt").contains("OwnerNode.start(floatWatching(start))"), "the node is started with the float's watch")
         ok(screens.contains("sealed.wipe()") && screens.contains("FloatWords.rowTitle)"), "the data key is overwritten when the seal cannot be kept, and the unlock prompt is the float's own")
 
         // The placeholders are named for their rule and written once.
@@ -4099,7 +4157,6 @@ object AppModelTest {
             var seenIncoming: Long? = null
             var view: FloatCoinView = FloatCoinView.Unavailable
 
-            override fun open(words: String) = FloatWalletView("descriptor", "address")
             override fun seal(scan: ByteArray) = FloatSealed(byteArrayOf(1), ByteArray(32), FloatWalletView("descriptor", "address"))
             override fun status(cap: Long, confirmed: Long, unconfirmedIncoming: Long): FloatStatus {
                 statusCalls++
@@ -4110,14 +4167,6 @@ object AppModelTest {
                 return FloatStatus(held, held < cap / 4, cap - held)
             }
             override fun feeRate(recent: Long?, typed: Long?) = typed ?: 0
-            override fun pay(
-                words: String, network: OwnerNetwork, address: String, sats: Long, feeRate: Long,
-                changeIndex: Long, minConfirmations: Long, lockHeight: Long, coins: List<FloatCoin>,
-            ) = FloatPaid(byteArrayOf(), "", 0, 0, sats, null, null, address)
-            override fun sweep(
-                words: String, shop: String, shopIndex: Long, feeRate: Long, minConfirmations: Long,
-                lockHeight: Long, coins: List<FloatCoin>,
-            ) = FloatPaid(byteArrayOf(), "", 0, 0, 0, null, null, "")
             override fun coinView() = view
         }
 
@@ -4151,12 +4200,12 @@ object AppModelTest {
 
             val waiting = FloatRecord(120_000, 7, 9, payId, sweepId, FloatState.Ready)
             for (depth in listOf(null, 0L)) {
-                val refused = runCatching { store.completeSweep(waiting, depth) }.exceptionOrNull()
+                val refused = runCatching { store.completeSweep(waiting, depth, 1_000) }.exceptionOrNull()
                 val persisted = store.load()!!
                 ok(refused is IllegalStateException && persisted.state == FloatState.Ready && persisted.pendingSweepId == sweepId, "an unknown or zero-confirmation sweep does not disable the float")
             }
-            store.completeSweep(waiting, 1)
-            ok(store.load()!!.state == FloatState.Disabled && store.load()!!.pendingSweepId == null, "a confirmed sweep can mark the float disabled")
+            store.completeSweep(waiting, 1, 1_000)
+            ok(store.load()!!.state == FloatState.Disabled && store.load()!!.pendingSweepId == null && store.load()!!.offAt == 1_000L, "a confirmed sweep can mark the float disabled and records when (FL-35)")
 
             File(store.dir, FloatStore.RECORD).writeText("cap-sats: nope\nstate: Ready\n")
             throws("a malformed float store record") { store.load() }

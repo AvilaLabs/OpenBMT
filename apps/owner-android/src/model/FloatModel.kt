@@ -3,13 +3,17 @@ package org.openbmt.owner.app
 import java.io.File
 import java.io.IOException
 import org.openbmt.app.DurableFile
+import org.openbmt.app.Format
 import org.openbmt.owner.FloatCoin
 import org.openbmt.owner.FloatPaid
 import org.openbmt.owner.FloatSealed
 import org.openbmt.owner.FloatStatus
 import org.openbmt.owner.FloatWalletView
+import org.openbmt.owner.FloatWatchConfig
+import org.openbmt.owner.StartConfig
 import org.openbmt.owner.OwnerFloat
-import org.openbmt.owner.OwnerNetwork
+import org.openbmt.owner.OwnerException
+import org.openbmt.owner.OwnerNode
 import org.openbmt.owner.RefundRow
 import org.openbmt.owner.StageKind
 
@@ -21,52 +25,41 @@ object FloatLimits {
 
 /** The binding surface used by the app. Kept injectable so model decisions can be exercised without JNI. */
 interface FloatCore {
-    fun open(words: String): FloatWalletView
-
     /** FL-01, FL-03: the scanned Compact SeedQR bytes become the float's seed inside the library and are sealed there. */
     fun seal(scan: ByteArray): FloatSealed
     fun status(cap: Long, confirmed: Long, unconfirmedIncoming: Long): FloatStatus
     fun feeRate(recent: Long?, typed: Long?): Long
-    fun pay(
-        words: String,
-        network: OwnerNetwork,
-        address: String,
-        sats: Long,
-        feeRate: Long,
-        changeIndex: Long,
-        minConfirmations: Long,
-        lockHeight: Long,
-        coins: List<FloatCoin>,
-    ): FloatPaid
-    fun sweep(
-        words: String,
-        shop: String,
-        shopIndex: Long,
-        feeRate: Long,
-        minConfirmations: Long,
-        lockHeight: Long,
-        coins: List<FloatCoin>,
-    ): FloatPaid
 
-    /** The current binding has no checked float coin-view call, so it must fail closed here. */
+    /** FL-05: the float's coins from the node's watch of the float; with none given it must fail closed. */
     fun coinView(): FloatCoinView = FloatCoinView.Unavailable
 }
 
 /** Direct forwarding to the owner library; it does not retain or store the words. */
 object LibraryFloat : FloatCore {
-    override fun open(words: String) = OwnerFloat.open(words)
     override fun seal(scan: ByteArray) = OwnerFloat.seal(scan)
     override fun status(cap: Long, confirmed: Long, unconfirmedIncoming: Long) =
         OwnerFloat.status(cap, confirmed, unconfirmedIncoming)
     override fun feeRate(recent: Long?, typed: Long?) = OwnerFloat.feeRate(recent, typed)
-    override fun pay(
-        words: String, network: OwnerNetwork, address: String, sats: Long, feeRate: Long,
-        changeIndex: Long, minConfirmations: Long, lockHeight: Long, coins: List<FloatCoin>,
-    ) = OwnerFloat.pay(words, network, address, sats, feeRate, changeIndex, minConfirmations, lockHeight, coins)
-    override fun sweep(
-        words: String, shop: String, shopIndex: Long, feeRate: Long,
-        minConfirmations: Long, lockHeight: Long, coins: List<FloatCoin>,
-    ) = OwnerFloat.sweep(words, shop, shopIndex, feeRate, minConfirmations, lockHeight, coins)
+}
+
+/**
+ * The library's float calls, with the coin view from the running node's watch of the float (FL-05). With no node, a node
+ * that is not watching yet, or a view that does not read, the view is [FloatCoinView.Unavailable]: no balance is guessed.
+ */
+class NodeFloat(private val node: OwnerNode?) : FloatCore by LibraryFloat {
+    override fun coinView(): FloatCoinView {
+        val n = node ?: return FloatCoinView.Unavailable
+        return try {
+            val held = n.floatCoins()
+            FloatCoinView.Checked(held.coins, held.confirmed, held.unconfirmedIncoming)
+        } catch (_: OwnerException) {
+            FloatCoinView.Unavailable
+        } catch (_: IllegalArgumentException) {
+            FloatCoinView.Unavailable
+        } catch (_: LinkageError) {
+            FloatCoinView.Unavailable
+        }
+    }
 }
 
 /** A coin view is either authoritative and checked by its provider, or unavailable. */
@@ -101,8 +94,14 @@ class FloatRecord(
     val state: FloatState = FloatState.NeedsSetup,
     /** FL-04: the BIP-85 index of the float's words, kept so that the phone can say which one to make next. */
     val childIndex: Long = 0,
+    /** FL-05: the height the node starts its watch of the float from; 0 when the phone did not know the tip at setup. */
+    val watchFrom: Long = 0,
+    /** FL-35: when the float was turned off, in seconds; the node keeps watching it for a day after. */
+    val offAt: Long? = null,
 ) {
     init {
+        require(watchFrom in 0..FloatLimits.MAX_INDEX) { "float watch height is outside the supported range" }
+        require(offAt == null || offAt >= 0) { "float off time is outside the supported range" }
         require(capSats in 1..FloatLimits.MAX_SATS) { "float cap is outside the supported range" }
         require(nextReceiveIndex in 0..FloatLimits.MAX_INDEX) { "float receive index is outside the supported range" }
         require(nextChangeIndex in 0..FloatLimits.MAX_INDEX) { "float change index is outside the supported range" }
@@ -112,7 +111,7 @@ class FloatRecord(
     }
 
     fun text(): String = "cap-sats: $capSats\nreceive-index: $nextReceiveIndex\nchange-index: $nextChangeIndex\n" +
-        "state: ${state.name}\nchild-index: $childIndex\n" + (pendingPayId?.let { "pending-pay-id: $it\n" } ?: "") +
+        "state: ${state.name}\nchild-index: $childIndex\nwatch-from: $watchFrom\n" + (offAt?.let { "off-at: $it\n" } ?: "") + (pendingPayId?.let { "pending-pay-id: $it\n" } ?: "") +
         (pendingSweepId?.let { "pending-sweep-id: $it\n" } ?: "")
 
     companion object {
@@ -127,7 +126,7 @@ class FloatRecord(
                 val key = line.substring(0, split)
                 if (fields.put(key, line.substring(split + 2)) != null) throw IOException("the float record repeats a field")
             }
-            val allowed = setOf("cap-sats", "receive-index", "change-index", "state", "child-index", "pending-pay-id", "pending-sweep-id")
+            val allowed = setOf("cap-sats", "receive-index", "change-index", "state", "child-index", "watch-from", "off-at", "pending-pay-id", "pending-sweep-id")
             if (fields.keys.any { it !in allowed }) throw IOException("the float record has an unknown field")
             fun number(name: String, max: Long): Long = fields[name]?.toLongOrNull()
                 ?.takeIf { it in 0..max } ?: throw IOException("the float record has no valid $name")
@@ -142,6 +141,8 @@ class FloatRecord(
                     number("change-index", FloatLimits.MAX_INDEX),
                     fields["pending-pay-id"], fields["pending-sweep-id"], state,
                     if (fields.containsKey("child-index")) number("child-index", FloatLimits.MAX_INDEX) else 0,
+                    if (fields.containsKey("watch-from")) number("watch-from", FloatLimits.MAX_INDEX) else 0,
+                    if (fields.containsKey("off-at")) number("off-at", Long.MAX_VALUE) else null,
                 )
             } catch (e: IllegalArgumentException) {
                 throw IOException("the float record does not read", e)
@@ -180,11 +181,11 @@ class FloatStore(base: File) {
      * public wallet go down, and then the record, last, as Ready at child index [childIndex] with receive index 0:
      * a Ready record never exists without its key.
      */
-    fun finishSetup(draft: FloatRecord, wallet: FloatWalletView, childIndex: Long = 0): FloatRecord {
+    fun finishSetup(draft: FloatRecord, wallet: FloatWalletView, childIndex: Long = 0, watchFrom: Long = 0): FloatRecord {
         if (!hasSealed() || !hasWrapped()) throw IllegalStateException("the float's key is not kept yet")
         if (!dir.isDirectory && !dir.mkdirs()) throw IOException("the float folder could not be made")
         DurableFile.write(dir, File(dir, WALLET), "${wallet.description}\n${wallet.firstAddress}\n".toByteArray(Charsets.UTF_8))
-        val ready = FloatRecord(draft.capSats, 0, 0, null, null, FloatState.Ready, childIndex)
+        val ready = FloatRecord(draft.capSats, 0, 0, null, null, FloatState.Ready, childIndex, watchFrom)
         save(ready)
         return ready
     }
@@ -201,7 +202,7 @@ class FloatStore(base: File) {
         require(capSats in 1..FloatLimits.MAX_SATS)
         val latest = current(record)
         val updated = FloatRecord(capSats, latest.nextReceiveIndex, latest.nextChangeIndex,
-            latest.pendingPayId, latest.pendingSweepId, latest.state, latest.childIndex)
+            latest.pendingPayId, latest.pendingSweepId, latest.state, latest.childIndex, latest.watchFrom, latest.offAt)
         save(updated)
         return updated
     }
@@ -216,12 +217,23 @@ class FloatStore(base: File) {
         save(copy(current(record), sweep = txid))
     }
 
+    fun clearPendingSweep(record: FloatRecord) = save(copy(current(record), sweep = null))
+
     fun clearPendingPay(record: FloatRecord) = save(copy(current(record), pay = null))
 
-    /** Mark disabled only after a known confirmation; an unknown depth never deletes the key. */
-    fun completeSweep(record: FloatRecord, confirmations: Long?) {
+    /** FL-20: a payment with change used change index [used]; the next one starts after it, so no address repeats. */
+    fun changeUsed(record: FloatRecord, used: Long) {
+        val latest = current(record)
+        if (used + 1 > latest.nextChangeIndex) save(copy(latest, change = used + 1))
+    }
+
+    /**
+     * Mark disabled only after a known confirmation; an unknown depth never deletes the key. [now] is when the float went
+     * off: the node watches it for a day after that (FL-35).
+     */
+    fun completeSweep(record: FloatRecord, confirmations: Long?, now: Long) {
         if (!FloatModel.sweepMayDeleteWords(confirmations)) throw IllegalStateException("the float move is not confirmed")
-        save(copy(current(record), sweep = null, state = FloatState.Disabled))
+        save(copy(current(record), sweep = null, state = FloatState.Disabled, offAt = now))
     }
 
     private fun current(fallback: FloatRecord): FloatRecord = load() ?: fallback
@@ -242,7 +254,8 @@ class FloatStore(base: File) {
             pay: String? = record.pendingPayId,
             sweep: String? = record.pendingSweepId,
             state: FloatState = record.state,
-        ) = FloatRecord(record.capSats, receive, change, pay, sweep, state, record.childIndex)
+            offAt: Long? = record.offAt,
+        ) = FloatRecord(record.capSats, receive, change, pay, sweep, state, record.childIndex, record.watchFrom, offAt)
     }
 }
 
@@ -302,25 +315,17 @@ object FloatModel {
 
     /**
      * FL-20: the float pays a refund only when it is on, its key is on the phone, the node has given its coins and the
-     * refund is ready and not larger than what it holds. Paying is not wired to the library yet (see `FloatScreens.kt`),
-     * so no screen uses this to enable a button.
+     * refund is ready and not larger than what it holds. The library makes the same checks when it signs, and the outbox again.
      */
     fun canPay(home: FloatHome, hasKey: Boolean, refund: RefundRow): Boolean =
         home.state == FloatState.Ready && hasKey && readyRefunds(listOf(refund)).isNotEmpty() && floatCovers(home, refund)
-
-    /**
-     * Whether the library can sign for the float on this phone. `float_pay` and `float_sweep` still take the words as text,
-     * which the phone must never hold (FL-03), and the node does not watch the float's coins or take its payments
-     * (see the report of the float wiring): no pay or turn-off button is enabled until that is built.
-     */
-    const val SIGNING_WIRED = false
 
     /** Which buttons the float page enables, from what the phone knows. */
     fun actions(record: FloatRecord?, home: FloatHome, hasKey: Boolean, refunds: List<RefundRow>): FloatActions = FloatActions(
         setup = record != null && record.state == FloatState.NeedsSetup,
         refill = canRefill(home),
-        pay = SIGNING_WIRED && refunds.any { canPay(home, hasKey, it) },
-        sweep = SIGNING_WIRED && canSweep(home, hasKey),
+        pay = refunds.any { canPay(home, hasKey, it) },
+        sweep = canSweep(home, hasKey),
     )
 
     /** FL-35: turning off needs the float's coins and its key, and something to move. */
@@ -330,5 +335,55 @@ object FloatModel {
     /** The next free receive index after a refill was queued to [record]'s current one (FL-30): no address is used twice. */
     fun afterRefill(record: FloatRecord): FloatRecord =
         FloatRecord(record.capSats, record.nextReceiveIndex + 1, record.nextChangeIndex, record.pendingPayId,
-            record.pendingSweepId, record.state, record.childIndex)
+            record.pendingSweepId, record.state, record.childIndex, record.watchFrom, record.offAt)
+
+    /** FL-35: how long the node keeps watching a float that was turned off, in seconds. */
+    const val WATCH_AFTER_OFF_SECS = 86_400L
+
+    /**
+     * FL-05: what the node is started with to watch the float: a float that is on, and one that was turned off less than a day
+     * ago. Each chain is watched to one past the last index used or handed out; the node adds 20. [fallbackBirthday] is the
+     * shop's own start height, used when the phone did not know the tip at setup.
+     */
+    fun watch(record: FloatRecord?, wallet: FloatWalletView?, fallbackBirthday: Long, now: Long): FloatWatchConfig? {
+        if (record == null || wallet == null) return null
+        val live = when (record.state) {
+            FloatState.Ready -> true
+            FloatState.Disabled -> record.offAt != null && now < record.offAt + WATCH_AFTER_OFF_SECS
+            FloatState.NeedsSetup -> false
+        }
+        if (!live) return null
+        return FloatWatchConfig(
+            wallet.description,
+            record.nextReceiveIndex + 1,
+            record.nextChangeIndex + 1,
+            if (record.watchFrom > 0) record.watchFrom else fallbackBirthday,
+        )
+    }
+
+    /** FL-05: [base] with the float's watch added, the rest of the start unchanged. */
+    fun withWatch(base: StartConfig, float: FloatWatchConfig?): StartConfig = StartConfig(
+        base.dir, base.network, base.now, base.ownerSecret, base.approverRoot, base.wallet, base.key1Account, base.key3Xpub,
+        base.batchMinCount, base.refundDepth, base.birthday, base.proxy, base.fixedPeers, base.broadcastProxy, base.withoutTor,
+        base.link, base.ownWallet, float,
+    )
+
+    /** FL-22: what the owner reads before proving they are there: the address in full, the amount and the fee rate. */
+    fun beforeLines(address: String, sats: Long, feeRatePerKvb: Long): List<Pair<String, String>> =
+        StarterPayModel.beforeLines(address, sats, feeRatePerKvb)
+
+    /** FL-35: before the move, the fee rate and the words that it goes to the shop's own wallet. */
+    fun sweepBeforeLines(feeRatePerKvb: Long): List<Pair<String, String>> = listOf(
+        StarterWords.payFeeRate to "${feeRatePerKvb / 1000}.${(feeRatePerKvb % 1000).toString().padStart(3, '0')} sat/vB",
+    )
+
+    /** After it is signed and before it goes out: every address in full, every amount, the fee and the change. */
+    fun afterLines(paid: FloatPaid): List<Pair<String, String>> {
+        val out = ArrayList<Pair<String, String>>()
+        out.add(StarterWords.payAddressLabel to paid.destination)
+        out.add(StarterWords.payAmountLabel to Format.sats(paid.paid))
+        out.add(StarterWords.payFeeLabel to Format.sats(paid.fee))
+        paid.changeSats?.let { out.add(StarterWords.payChangeLabel to Format.sats(it)) }
+        return out
+    }
 }

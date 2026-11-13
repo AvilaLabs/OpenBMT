@@ -6,15 +6,26 @@ import android.widget.Button
 import java.io.IOException
 import org.openbmt.app.Format
 import org.openbmt.app.RowItem
-import org.openbmt.app.SayWords
+import org.openbmt.app.Tones
+import org.openbmt.owner.FloatPaid
 import org.openbmt.owner.OwnerException
+import org.openbmt.owner.OwnerNode
+import org.openbmt.owner.ReceiptsKind
 import org.openbmt.owner.RefundRow
 
-// The refund float (`docs/FLOAT-RULES.md`). The setup (FL-01, FL-03, FL-04) is wired to the library: the float's words are scanned
-// as a Compact SeedQR, turned into the seed and sealed in Rust, wrapped with the Keystore as the starter wallet's seed is
-// (`StarterKeys.kt`), and never held as text. What the float holds, paying a refund and turning it off wait for the library: the
-// node does not watch the float's addresses and takes no payment of the float into its outbox, and `float_pay` and `float_sweep`
-// still take the words as text. Their buttons stay off (`FloatModel.SIGNING_WIRED`).
+// The refund float (`docs/FLOAT-RULES.md`). The setup (FL-01, FL-03, FL-04) scans the float's words as a Compact SeedQR, turns them
+// into the seed and seals it in Rust, wraps the data key with the Keystore as the starter wallet's seed is (`StarterKeys.kt`), and
+// never holds the words as text. What the float holds comes from the node's watch of it (FL-05). Paying a refund (FL-20 to FL-23)
+// and turning the float off (FL-35) sign in the library from the sealed seed, after the owner unlocks the key for that call, and
+// hand the finished payment to the node's outbox, which takes it only for the float's own coins.
+
+/** The library's float calls, with the coin view from the running node. */
+private fun Controller.floatCore(): FloatCore = NodeFloat(node)
+
+private const val MIN_CONFIRMATIONS = 1L
+
+/** FL-05: how many blocks before the tip the node's watch of a new float starts. */
+private const val WATCH_MARGIN = 144L
 
 internal fun Controller.floatRow(): RowItem {
     val record = try {
@@ -22,7 +33,7 @@ internal fun Controller.floatRow(): RowItem {
     } catch (_: IOException) {
         null
     }
-    val home = FloatModel.home(LibraryFloat, record)
+    val home = FloatModel.home(floatCore(), record)
     val sub = when {
         home.low == true -> FloatWords.statusLow
         home.heldSats != null -> Format.sats(home.heldSats)
@@ -38,8 +49,8 @@ internal fun Controller.showFloat(notice: String? = null) {
     } catch (_: IOException) {
         return floatReadFailed()
     }
-    val view = LibraryFloat.coinView()
-    val home = FloatModel.home(LibraryFloat, record, view)
+    val view = floatCore().coinView()
+    val home = FloatModel.home(floatCore(), record, view)
     val actions = FloatModel.actions(record, home, store.hasSealed(), emptyList())
     val body = ArrayList<View>()
     notice?.let { body.add(ui.text(it)) }
@@ -73,6 +84,58 @@ private fun Controller.floatWordsScreen(title: String, body: List<View>, actions
 
 private fun floatKeystore() = StarterKeystore(FloatStore.KEY_ALIAS)
 
+/** FL-05: the height the node starts watching a new float from: a day of blocks before the tip, or 0 when the tip is not known. */
+private fun Controller.watchFrom(): Long = try {
+    ((node?.status()?.tipHeight ?: 0L) - WATCH_MARGIN).coerceAtLeast(0L)
+} catch (_: OwnerException) {
+    0L
+} catch (_: LinkageError) {
+    0L
+}
+
+private fun Controller.recentRate(n: OwnerNode): Long? = try {
+    val r = n.receiptsLine()
+    if (r.kind == ReceiptsKind.Known && r.ratePerKvb > 0) r.ratePerKvb else null
+} catch (_: OwnerException) {
+    null
+}
+
+/** FL-03: the float's key is gone from the phone (or never was): nothing can be signed. */
+private fun Controller.floatKeyGone() {
+    screen(FloatWords.rowTitle, listOf(ui.text(FloatWords.keyGone)), listOf(ui.button(FloatWords.back) { showFloat() }), back = { showFloat() })
+}
+
+/**
+ * FL-20, FL-35: opens the float's data key for one call after the owner proves they are there, signs in the library from the
+ * sealed seed and gives the signed payment to [signed]. A key the phone dropped says so (FL-03).
+ */
+private fun Controller.floatSign(
+    msg: Slot,
+    description: String,
+    sign: (sealed: ByteArray, key: ByteArray) -> FloatPaid,
+    signed: (FloatPaid) -> Unit,
+) {
+    val store = FloatStore(appDir)
+    val sealed = try { store.loadSealed() } catch (_: IOException) { null } ?: return floatKeyGone()
+    starterWithDataKey(
+        false, description,
+        use = { key ->
+            val paid = try {
+                sign(sealed, key)
+            } catch (e: OwnerException) {
+                return@starterWithDataKey msg.show(ui.words(e.sayWords()))
+            } catch (e: LinkageError) {
+                return@starterWithDataKey msg.show(ui.words(AppWords.libraryMissing(e.message)))
+            }
+            signed(paid)
+        },
+        gone = { floatKeyGone() },
+        failed = { msg.show(ui.words(StarterWords.said(StarterWords.authFailed, Tones.STOP))) },
+        keystore = floatKeystore(),
+        loadWrapped = { store.loadWrapped() },
+    )
+}
+
 /** FL-01/04: no typed words or substitute QR format is accepted: only the Compact SeedQR of the float's 12 words. */
 private fun Controller.showFloatSetup(notice: View? = null) {
     val store = FloatStore(appDir)
@@ -81,7 +144,7 @@ private fun Controller.showFloatSetup(notice: View? = null) {
     } catch (_: IOException) {
         return floatReadFailed()
     }
-    val actions = FloatModel.actions(record, FloatModel.home(LibraryFloat, record), store.hasSealed(), emptyList())
+    val actions = FloatModel.actions(record, FloatModel.home(floatCore(), record), store.hasSealed(), emptyList())
     val body = ArrayList<View>()
     notice?.let { body.add(it) }
     body.add(ui.text(FloatWords.childOnly))
@@ -137,8 +200,10 @@ private fun Controller.floatSeal(store: FloatStore, draft: FloatRecord, scanned:
             return@starterWrapKey showFloatSetup(ui.text(FloatWords.sealFailed))
         }
         try {
-            store.finishSetup(draft, sealed.wallet)
-            showFloat(FloatWords.setupDone)
+            store.finishSetup(draft, sealed.wallet, 0, watchFrom())
+            // The node watches the float from its next start (FL-05).
+            stopNode()
+            startNode()
         } catch (_: IOException) {
             undo()
             showFloatSetup(ui.text(FloatWords.storageUnavailable))
@@ -184,8 +249,8 @@ private fun Controller.showFloatRefill() {
     val store = FloatStore(appDir)
     val record = try { store.load() } catch (_: IOException) { return floatReadFailed() }
     val wallet = try { store.loadWallet() } catch (_: IOException) { null }
-    val view = LibraryFloat.coinView()
-    val home = FloatModel.home(LibraryFloat, record, view)
+    val view = floatCore().coinView()
+    val home = FloatModel.home(floatCore(), record, view)
     val body = ArrayList<View>()
     body.add(ui.text(FloatWords.refillLinksSavings))
     val checked = view as? FloatCoinView.Checked
@@ -216,38 +281,176 @@ private fun Controller.showFloatRefill() {
     screen(FloatWords.refillAction, body, listOf(go, ui.button(FloatWords.back) { showFloat() }), back = { showFloat() })
 }
 
-/** FL-20/23: the ready refunds are listed as the starter wallet's list reads them; paying waits for the library. */
+/**
+ * FL-20/23: the ready refunds the float can cover are listed as the starter wallet's list reads them. One that is larger than
+ * what the float holds is not split; it stays in the queue for the shop's wallet.
+ */
 private fun Controller.showFloatRefund() {
     val store = FloatStore(appDir)
     val record = try { store.load() } catch (_: IOException) { return floatReadFailed() }
-    val home = FloatModel.home(LibraryFloat, record)
-    val ready: List<RefundRow> = try {
-        FloatModel.readyRefunds(node?.queue()?.refunds.orEmpty())
-    } catch (_: OwnerException) {
-        emptyList()
-    }
+    val n = node ?: return begin()
+    val home = FloatModel.home(floatCore(), record)
+    val msg = Slot(act)
+    val queue = attempt(msg) { n.queue() }
+    val ready: List<RefundRow> = FloatModel.readyRefunds(queue?.refunds.orEmpty())
+    val payable = ready.filter { FloatModel.canPay(home, store.hasSealed(), it) }
     val body = ArrayList<View>()
     if (ready.isEmpty()) {
         body.add(ui.text(FloatWords.refundListEmpty))
     } else {
         body.add(ui.text(FloatWords.refundReadyHeading))
-        body.add(ui.facts(ready.map { Format.sats(it.sats) to it.address }))
+        body.add(ui.rows(payable.map { r -> RowItem(Format.sats(r.sats), r.address) { floatPayConfirm(n, store, r) } }))
+        if (payable.size < ready.size) body.add(ui.text(FloatWords.refundTooBig))
     }
-    body.add(ui.text(FloatWords.refundNotWired))
-    val actions = FloatModel.actions(record, home, store.hasSealed(), ready)
-    val pay = ui.primary(FloatWords.payConfirm) {}
-    pay.isEnabled = actions.pay
-    screen(FloatWords.refundPay, body, listOf(pay, ui.button(FloatWords.back) { showFloat() }), back = { showFloat() })
+    body.add(msg)
+    screen(FloatWords.refundPay, body, listOf(ui.button(FloatWords.back) { showFloat() }), back = { showFloat() })
 }
 
-/** FL-35: no key deletion or shutdown can occur without a confirmed sweep, so with no sweep to send the button stays off. */
+/** FL-22: the address in full, the amount and the fee rate before the owner proves they are there; nothing is signed yet. */
+private fun Controller.floatPayConfirm(n: OwnerNode, store: FloatStore, r: RefundRow) {
+    val rate = try {
+        floatCore().feeRate(recentRate(n), null)
+    } catch (e: OwnerException) {
+        return centre(e.sayWords(), listOf(ui.button(FloatWords.back) { showFloatRefund() }), title = FloatWords.refundPay)
+    } catch (e: LinkageError) {
+        return centre(AppWords.libraryMissing(e.message), listOf(ui.button(FloatWords.back) { showFloatRefund() }), title = FloatWords.refundPay)
+    }
+    val msg = Slot(act)
+    val views = listOf(ui.facts(FloatModel.beforeLines(r.address, r.sats, rate)), ui.text(StarterWords.payAuthorise, 16f), msg)
+    val go = ui.primary(FloatWords.payConfirm) {
+        floatSign(msg, FloatWords.payConfirm, { sealed, key -> n.floatPay(sealed, key, r.id, rate, MIN_CONFIRMATIONS) }) { paid ->
+            floatPaySigned(n, store, paid, r)
+        }
+    }
+    screen(FloatWords.refundPay, views, listOf(go, ui.button(FloatWords.back) { showFloatRefund() }), back = { showFloatRefund() })
+}
+
+/** What was signed, shown in full before it goes out; the node's outbox takes it only for the float's own coins and this ready refund. */
+private fun Controller.floatPaySigned(n: OwnerNode, store: FloatStore, paid: FloatPaid, r: RefundRow) {
+    val msg = Slot(act)
+    val send = ui.primary(StarterWords.paySendButton) {
+        try {
+            record(store)?.let { rec -> paid.changeIndex?.let { store.changeUsed(rec, it) } }
+            n.floatSend(paid.tx, listOf(r.id), false)
+            centre(
+                StarterWords.said(FloatWords.payDone),
+                listOf(ui.primary(StarterWords.doneButton) { showFloat() }),
+                extra = listOf(ui.text(paid.txid, 14f, mono = true)), title = FloatWords.rowTitle,
+            )
+        } catch (e: OwnerException) {
+            msg.show(ui.words(e.sayWords()))
+        } catch (e: IOException) {
+            msg.show(ui.words(AppWords.fileNotSaved(e.message)))
+        }
+    }
+    screen(FloatWords.refundPay, listOf(ui.facts(FloatModel.afterLines(paid)), ui.words(StarterWords.signed), msg),
+        listOf(send, ui.button(FloatWords.back) { showFloatRefund() }), back = { showFloatRefund() })
+}
+
+private fun record(store: FloatStore): FloatRecord? = try { store.load() } catch (_: IOException) { null }
+
+/**
+ * FL-35: turning the float off moves all of it to an address of the shop's own range, once, through the node's outbox with no
+ * refund. Once the move has one confirmation the sealed seed, the wrapped key and the Keystore key are deleted.
+ */
 private fun Controller.showFloatSweep() {
     val store = FloatStore(appDir)
     val record = try { store.load() } catch (_: IOException) { return floatReadFailed() }
-    val home = FloatModel.home(LibraryFloat, record)
+    if (record?.pendingSweepId != null) return showFloatSweepDelete()
+    val n = node ?: return begin()
+    val home = FloatModel.home(floatCore(), record)
     val actions = FloatModel.actions(record, home, store.hasSealed(), emptyList())
-    val sweep = ui.primary(FloatWords.sweepConfirm) {}
+    val msg = Slot(act)
+    val body = ArrayList<View>()
+    body.add(ui.text(if (home.heldSats == null) FloatWords.sweepConfirmationsUnknown else FloatWords.sweepBefore))
+    if (home.state == FloatState.Ready && home.heldSats == 0L) body.add(ui.text(FloatWords.sweepNothing))
+    body.add(msg)
+    val sweep = ui.primary(FloatWords.sweepConfirm) { if (record != null) floatSweepConfirm(n, store, record) }
     sweep.isEnabled = actions.sweep
-    screen(FloatWords.sweepTitle, listOf(ui.text(FloatWords.sweepConfirmationsUnknown), ui.text(FloatWords.sweepNotWired)),
-        listOf(sweep, ui.button(FloatWords.back) { showFloat() }), back = { showFloat() })
+    screen(FloatWords.sweepTitle, body, listOf(sweep, ui.button(FloatWords.back) { showFloat() }), back = { showFloat() })
+}
+
+private fun Controller.floatSweepConfirm(n: OwnerNode, store: FloatStore, record: FloatRecord) {
+    val rate = try {
+        floatCore().feeRate(recentRate(n), null)
+    } catch (e: OwnerException) {
+        return centre(e.sayWords(), listOf(ui.button(FloatWords.back) { showFloatSweep() }), title = FloatWords.sweepTitle)
+    } catch (e: LinkageError) {
+        return centre(AppWords.libraryMissing(e.message), listOf(ui.button(FloatWords.back) { showFloatSweep() }), title = FloatWords.sweepTitle)
+    }
+    val msg = Slot(act)
+    val views = listOf(ui.facts(FloatModel.sweepBeforeLines(rate)), ui.text(StarterWords.payAuthorise, 16f), msg)
+    val go = ui.primary(FloatWords.sweepConfirm) {
+        floatSign(msg, FloatWords.sweepConfirm, { sealed, key -> n.floatSweep(sealed, key, nowSecs(), rate, MIN_CONFIRMATIONS) }) { paid ->
+            floatSweepSigned(n, store, record, paid)
+        }
+    }
+    screen(FloatWords.sweepTitle, views, listOf(go, ui.button(FloatWords.back) { showFloatSweep() }), back = { showFloatSweep() })
+}
+
+private fun Controller.floatSweepSigned(n: OwnerNode, store: FloatStore, record: FloatRecord, paid: FloatPaid) {
+    val msg = Slot(act)
+    val send = ui.primary(StarterWords.paySendButton) {
+        try {
+            // The move is kept first, so that its confirmations are asked of the node by its ID; then the node's outbox
+            // takes it, and the app sends nothing.
+            store.pendingSweep(record, paid.txid)
+            n.floatSend(paid.tx, emptyList(), true)
+            showFloatSweepDelete()
+        } catch (e: OwnerException) {
+            msg.show(ui.words(e.sayWords()))
+        } catch (e: IOException) {
+            msg.show(ui.words(AppWords.fileNotSaved(e.message)))
+        }
+    }
+    screen(FloatWords.sweepTitle, listOf(ui.facts(FloatModel.afterLines(paid)), ui.words(StarterWords.signed), msg),
+        listOf(send, ui.button(FloatWords.back) { showFloatSweep() }), back = { showFloatSweep() })
+}
+
+/** FL-35: after one confirmation of the move the key is deleted and the float is off; an unknown depth never deletes it. */
+private fun Controller.showFloatSweepDelete() {
+    val store = FloatStore(appDir)
+    val record = try { store.load() } catch (_: IOException) { return floatReadFailed() }
+    val txid = record?.pendingSweepId ?: return showFloat()
+    val n = node ?: return begin()
+    val confirmations = try {
+        n.starterConfirmations(txid)
+    } catch (_: OwnerException) {
+        null
+    }
+    val ready = FloatModel.sweepMayDeleteWords(confirmations)
+    val views = ArrayList<View>()
+    views.add(ui.text(txid, 14f, mono = true))
+    views.add(ui.text(if (confirmations == null) FloatWords.sweepDepthUnknown else FloatWords.sweepWaiting, 16f))
+    val actions = ArrayList<android.widget.Button>()
+    if (ready) {
+        actions.add(
+            ui.danger(StarterWords.deleteButton) {
+                try {
+                    store.deleteKey()
+                    floatKeystore().delete()
+                    store.completeSweep(record, confirmations, nowSecs())
+                    centre(
+                        StarterWords.said(FloatWords.sweepDeleted),
+                        listOf(ui.primary(StarterWords.doneButton) { showFloat() }), title = FloatWords.rowTitle,
+                    )
+                } catch (_: IOException) {
+                    showFloat(FloatWords.storageUnavailable)
+                }
+            },
+        )
+    }
+    if (confirmations == null) {
+        // The node never took the move: it can be signed again, to an address of the shop's own range taken once already.
+        actions.add(ui.primary(FloatWords.sweepConfirm) {
+            try {
+                store.clearPendingSweep(record)
+                showFloatSweep()
+            } catch (_: IOException) {
+                showFloat(FloatWords.storageUnavailable)
+            }
+        })
+    }
+    actions.add(ui.button(FloatWords.back) { showFloat() })
+    screen(FloatWords.sweepTitle, views, actions, back = { showFloat() })
 }

@@ -14,8 +14,6 @@ object FloatWords {
 
     // ---- not written yet ----
     val needCapFirst = need("WORDS_NEEDED_OA_FL10_NEED_CAP_FIRST")
-    val scanPrompt = need("WORDS_NEEDED_OA_FL01_SCAN_PROMPT")
-    val scanNotSeedQr = need("WORDS_NEEDED_OA_FL01_SCAN_NOT_SEEDQR")
     val scanFailed = need("WORDS_NEEDED_OA_FL01_SCAN_FAILED")
     val sealFailed = need("WORDS_NEEDED_OA_FL03_SEAL_FAILED")
     val unlockWhy = need("WORDS_NEEDED_OA_FL03_UNLOCK_WHY")
@@ -24,8 +22,14 @@ object FloatWords {
     val refillNoRoom = need("WORDS_NEEDED_OA_FL11_REFILL_NO_ROOM")
     val refundListEmpty = need("WORDS_NEEDED_OA_FL20_REFUND_LIST_EMPTY")
     val refundReadyHeading = need("WORDS_NEEDED_OA_FL20_REFUND_READY_HEADING")
-    val refundNotWired = need("WORDS_NEEDED_OA_FL20_REFUND_NOT_WIRED")
-    val sweepNotWired = need("WORDS_NEEDED_OA_FL35_SWEEP_NOT_WIRED")
+    val refundTooBig = need("WORDS_NEEDED_OA_FL23_REFUND_TOO_BIG")
+    val keyGone = need("WORDS_NEEDED_OA_FL03_KEY_GONE")
+    val payDone = need("WORDS_NEEDED_OA_FL20_PAY_DONE")
+    val sweepBefore = need("WORDS_NEEDED_OA_FL35_SWEEP_BEFORE")
+    val sweepNothing = need("WORDS_NEEDED_OA_FL35_NOTHING_TO_MOVE")
+    val sweepWaiting = need("WORDS_NEEDED_OA_FL35_WAITING")
+    val sweepDepthUnknown = need("WORDS_NEEDED_OA_FL35_DEPTH_UNKNOWN")
+    val sweepDeleted = need("WORDS_NEEDED_OA_FL35_DELETED")
 
     /** The placeholders: key and name, in screen order. */
     fun needed(): List<Pair<String, String>> = registry.toList()

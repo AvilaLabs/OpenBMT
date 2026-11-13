@@ -249,7 +249,8 @@ internal fun Controller.starterWrapKey(
 /**
  * SS-20, SS-21, SS-42: opens the wrapped data key after the owner proves they are there ([credentialOnly]: with the
  * phone's PIN alone, the final move), hands it to [use] and overwrites it at once. [gone] is the cue for the restore
- * (SS-23): the Keystore key is missing or was dropped. [failed] is the owner not proving it, or any other failure.
+ * (SS-23): the Keystore key is missing or was dropped. [failed] is the owner not proving it, or any other failure. The float
+ * gives its own [keystore] and [loadWrapped] (FL-03).
  */
 internal fun Controller.starterWithDataKey(
     credentialOnly: Boolean,
@@ -257,10 +258,11 @@ internal fun Controller.starterWithDataKey(
     use: (ByteArray) -> Unit,
     gone: () -> Unit,
     failed: () -> Unit,
+    keystore: StarterKeystore = starter.keystore,
+    loadWrapped: () -> ByteArray? = { starter.store.loadWrapped() },
 ) {
-    val keystore = starter.keystore
     val parts = try {
-        StarterWrap.unpack(starter.store.loadWrapped() ?: return gone())
+        StarterWrap.unpack(loadWrapped() ?: return gone())
     } catch (_: IOException) {
         return gone()
     }
