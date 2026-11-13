@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- For Android 11 and older: nothing is included (allowBackup is also off). -->
+<!-- For Android 11 and older: nothing is included (allowBackup is also off). The starter wallet's
+     files (SS-22: the sealed seed, the wrapped data key, its record) are in the no-backup folder, which the
+     system never backs up, and every domain is excluded here as well, so no rule can bring them in. -->
 <full-backup-content>
     <exclude domain="root" />
     <exclude domain="file" />

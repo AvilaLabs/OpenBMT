@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Nothing is backed up and nothing moves to a new phone, by cloud backup or
-     by device transfer. The setup and the node's files stay on this phone. -->
+     by device transfer. The setup and the node's files stay on this phone, and so do the starter
+     wallet's (SS-22: the sealed seed, the wrapped data key and its record, in the no-backup folder). -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="root" />

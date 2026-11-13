@@ -178,9 +178,10 @@ scan the code from it.
 
 ## Rules the app keeps without a device
 
-- **Five permissions.** INTERNET, CAMERA, and for "Watch in the background"
+- **Six permissions.** INTERNET, CAMERA, for "Watch in the background"
   FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE and POST_NOTIFICATIONS
-  (OA-89). CAMERA is asked for only when the scan button is tapped; the camera
+  (OA-89), and HIDE_OVERLAY_WINDOWS for the starter wallet's words screens
+  (SS-12). CAMERA is asked for only when the scan button is tapped; the camera
   is a feature that is not required; the notification permission is asked for
   only when the setting is turned on. `tests/check-manifest.sh`
   reads the built APK with `aapt2` and fails the build if anything differs.

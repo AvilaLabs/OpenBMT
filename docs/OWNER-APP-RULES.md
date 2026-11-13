@@ -36,18 +36,20 @@ run on a phone. Not for real funds.**
 - **OA-02.** Nothing is backed up and nothing moves to another phone:
   `allowBackup` is false, and the extraction rules exclude every domain for
   cloud backup and for device transfer.
-- **OA-03.** The manifest asks for exactly five permissions: INTERNET,
-  CAMERA, FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE and
-  POST_NOTIFICATIONS, and declares the camera as a feature that is not
-  required. CAMERA is declared for reading the Key app's response, a
-  counter's request and, in a key ceremony, the Key app's answer and key 2
-  from a code, and is asked for only when the owner taps a scan button
-  (OA-21, OA-22, OA-28). The other three are for the background watch and
-  are covered by OA-89. It has one activity, which is exported and is the
-  launcher, one service that is not exported (OA-82), and no receiver or
-  provider. Cleartext traffic is off and the app is not debuggable.
-  `apps/owner-android/tests/check-manifest.sh` reads the built APK and fails
-  the build if any of this differs.
+- **OA-03.** The manifest asks for exactly six permissions: INTERNET,
+  CAMERA, FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE,
+  POST_NOTIFICATIONS and HIDE_OVERLAY_WINDOWS, and declares the camera as a
+  feature that is not required. CAMERA is declared for reading the Key app's
+  response, a counter's request and, in a key ceremony, the Key app's answer
+  and key 2 from a code, and is asked for only when the owner taps a scan
+  button (OA-21, OA-22, OA-28). Three are for the background watch and are
+  covered by OA-89. HIDE_OVERLAY_WINDOWS, a normal permission of Android 12
+  and later, is for the screens of the starter wallet that show or take its
+  words (`docs/START-SIMPLE-RULES.md` SS-12). It has one activity, which is
+  exported and is the launcher, one service that is not exported (OA-82),
+  and no receiver or provider. Cleartext traffic is off and the app is not
+  debuggable. `apps/owner-android/tests/check-manifest.sh` reads the built
+  APK and fails the build if any of this differs.
 - **OA-04.** Every window of the app has `FLAG_SECURE`, set before any
   content is shown, so that no screenshot, screen recording or picture in
   the list of recent apps carries a balance, an address or a request. (The
