@@ -721,6 +721,14 @@ object AppWords {
                 "|---|---|\n",
         )
         for ((key, text) in WordsOfTill.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
+        out.append(
+            "\n## The starter line's payments (CR-273, CR-274)\n\n" +
+                "The labels of the cards on Home and of the day's payments on\n" +
+                "Today. The words are not written yet.\n\n" +
+                "| Key | Text |\n" +
+                "|---|---|\n",
+        )
+        for ((key, text) in WordsOfStarter.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         return out.toString()
     }
 

@@ -372,6 +372,23 @@ fun Ui.tillCard(lines: List<TillLine>, start: () -> Unit, notNow: () -> Unit): V
     return card
 }
 
+/** CR-274: the card of one payment from the starter wallet that nobody at the counter has seen, with its "seen" button. */
+fun Ui.starterCard(heading: String, lines: List<StarterLine>, seen: () -> Unit): View {
+    val card = surfaceCard()
+    val col = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(px(16), px(16), px(16), px(16))
+    }
+    col.addView(text(heading, 15f, bold = true))
+    for (l in lines) {
+        col.addView(text(l.label, 13f, colour = pal.secondary, medium = true), matchWide().also { it.topMargin = px(10) })
+        if (l.value.isNotEmpty()) col.addView(text(l.value, 20f, bold = true).also { it.fontFeatureSettings = "tnum" }, matchWide().also { it.topMargin = px(2) })
+    }
+    col.addView(primary(WordsOfStarter.SEEN) { seen() }, matchWide().also { it.topMargin = px(14) })
+    card.addView(col, matchWide())
+    return card
+}
+
 /**
  * The other lines of home in one surface card: each shows its heading with a tone dot. A line that is good shows
  * only its heading, and a tap shows its what and its next; any other line shows its words at once, with its

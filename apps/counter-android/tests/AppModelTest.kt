@@ -25,6 +25,9 @@ import org.openbmt.counter.ChangeValue
 import org.openbmt.counter.ChangeValueKind
 import org.openbmt.counter.PendingChange
 import org.openbmt.counter.PendingSwitch
+import org.openbmt.counter.StarterDecision
+import org.openbmt.counter.StarterPayment
+import org.openbmt.counter.StarterState
 import org.openbmt.counter.SwitchSame
 import org.openbmt.counter.TillOfSale
 import org.openbmt.counter.TillRequest
@@ -108,7 +111,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1 + WordsOfTill.all().size + 1, "one row for each words and the header, and for each text of the switch and of the till and their headers")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1 + WordsOfTill.all().size + 1 + WordsOfStarter.all().size + 1, "one row for each words and the header, and for each text of the switch, of the till and of the starter line and their headers")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -1323,6 +1326,47 @@ object AppModelTest {
         ok((205..216).all { rules.contains("- **CR-$it.**") }, "CR-205 to CR-216 are in the rules")
     }
 
+    // ---- the starter line (CR-273, CR-274) ------------------------------------------------------
+
+    private fun starterState(decision: StarterDecision, payments: List<StarterPayment> = emptyList()) = StarterState(
+        decision,
+        if (decision == StarterDecision.Open) null else Words(1, 0, "WORDS_NEEDED_CR273_STOPPED", "x.", "y.", null, null, null, null),
+        if (payments.any { !it.seen }) Words(1, 0, "WORDS_NEEDED_CR274_CARDS", "x.", "y.", null, null, null, null) else null,
+        1_000L, 500L, 1_700_000_000L, payments,
+    )
+
+    private fun cr273StarterTests(appDir: File?) {
+        val a = StarterPayment(ByteArray(32) { 1 }, 4_000, 1_700_000_100L, true, false)
+        val b = StarterPayment(ByteArray(32) { 2 }, 9_000, 1_700_000_200L, false, true)
+        val c = StarterPayment(ByteArray(32) { 3 }, 1_500, 1_700_100_000L, false, false)
+        // CR-273: New sale offers no bitcoin only when the library says stop, and then shows its words.
+        ok(StarterModel.offersBitcoin(null) && StarterModel.offersBitcoin(starterState(StarterDecision.Open)), "CR-273: a counter that is not a starter's offers bitcoin")
+        ok(StarterModel.offersBitcoin(starterState(StarterDecision.Unchecked)), "CR-273: a line that cannot be checked is told on Home, and the sale is not stopped by it")
+        ok(!StarterModel.offersBitcoin(starterState(StarterDecision.Stopped)), "CR-273: a stop offers no bitcoin")
+        ok(StarterModel.stopWords(starterState(StarterDecision.Stopped))?.heading == "WORDS_NEEDED_CR273_STOPPED" && StarterModel.stopWords(starterState(StarterDecision.Open)) == null, "CR-273: the stop shows the library's words")
+        ok(StarterModel.homeLine(starterState(StarterDecision.Unchecked))?.heading == "WORDS_NEEDED_CR273_STOPPED" && StarterModel.homeLine(starterState(StarterDecision.Open)) == null && StarterModel.homeLine(null) == null, "CR-273: Home says what the library says when the limit cannot be checked, and nothing when the line is fine")
+        // CR-274: the cards are the payments not yet seen; Today has the day's.
+        val state = starterState(StarterDecision.Open, listOf(c, b, a))
+        ok(StarterModel.unseen(state).map { it.sats } == listOf(1_500L, 4_000L), "CR-274: the cards are the payments not seen, in the library's order")
+        ok(StarterModel.unseen(null).isEmpty(), "CR-274: no state, no cards")
+        ok(StarterModel.day(state, 1_700_000_000L, 1_700_050_000L).map { it.sats } == listOf(9_000L, 4_000L), "CR-274: Today lists the payments in the day's window")
+        ok(StarterModel.day(state, 1_700_000_100L, 1_700_000_200L).map { it.sats } == listOf(4_000L), "CR-274: the window includes its start and leaves out its end")
+        ok(StarterModel.lines(a).map { it.label } == listOf(WordsOfStarter.AMOUNT, WordsOfStarter.TIME, WordsOfStarter.BY_OWNER), "CR-274: a card says that the owner phone made the payment")
+        ok(StarterModel.lines(c).last().label == WordsOfStarter.NOT_BY_OWNER, "CR-274: and when it did not")
+        ok(StarterModel.signature(listOf(a)) != StarterModel.signature(listOf(a, c)) && StarterModel.signature(emptyList()) == "", "CR-274: the cards are made again only when they change")
+        ok(WordsOfStarter.placeholders.all { WordsOfStarter.isPlaceholder(WordsOfStarter.said(it)) && WordsOfStarter.said(it).heading == WordsOfStarter.said(it).what }, "CR-276: each unwritten text shows its own name")
+        ok(WordsOfStarter.placeholders.all { it.startsWith("WORDS_NEEDED_CR274_") } && WordsOfStarter.placeholders.toSet().size == WordsOfStarter.placeholders.size, "CR-276: the placeholders name their rule, once each")
+        ok(WordsOfStarter.all().map { it.second }.toSet() == WordsOfStarter.placeholders.toSet(), "CR-276: every text of the list is a placeholder of the list")
+        if (appDir != null) {
+            val controller = File(appDir, "src/android/Controller.kt").readText()
+            val sale = controller.substringAfter("private fun showNewSale()").substringBefore("/** CR-213")
+            ok(sale.contains("starterStop()?.let { return showMessage(it,"), "CR-273: New sale shows the stop's words instead of the amount pad")
+            ok(controller.contains("StarterModel.homeLine(starter)") && controller.contains("HomeLine(\"starter\""), "CR-273: Home has the line")
+            ok(controller.contains("n.starterSeen(nowSecs(), p.txid)") && controller.contains("ui.starterCard("), "CR-274: a card has a seen button that tells the library")
+            ok(controller.contains("StarterModel.day(starterNow(n), from, DayWindow.end(now))"), "CR-274: Today lists the day's starter payments")
+        }
+    }
+
     // ---- the switch from the starter wallet (CR-259 to CR-264) -----------------------------
 
     private fun cr260ConfirmSwitchTests(appDir: File?) {
@@ -1601,6 +1645,7 @@ object AppModelTest {
         cr260ConfirmSwitchTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr245BillsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr266TillTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        cr273StarterTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         println("AppModelTest (counter): $count checks passed")
     }
 }

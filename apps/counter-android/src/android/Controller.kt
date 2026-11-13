@@ -65,6 +65,7 @@ import org.openbmt.counter.RefundState
 import org.openbmt.counter.RelayKind
 import org.openbmt.counter.SaleInfo
 import org.openbmt.counter.SaleState
+import org.openbmt.counter.StarterState
 import org.openbmt.counter.SwitchState
 import org.openbmt.counter.TillRequest
 import org.openbmt.counter.Shop
@@ -1047,6 +1048,7 @@ class Controller(private val act: MainActivity) {
         val noteSlot = Slot(act)
         val requestsSlot = Slot(act)
         val tillSlot = Slot(act)
+        val starterSlot = Slot(act)
         val linked = hasLink(n)
         // CR-147: who is at the till, and a way to lock it.
         val who = locks.who?.takeIf { cashiers.isNotEmpty() }
@@ -1070,11 +1072,12 @@ class Controller(private val act: MainActivity) {
         tiles.addView(pair, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.topMargin = ui.px(12) })
         // CR-246: bills and tabs, one tile under the others.
         tiles.addView(ui.tile(WordsOfBills.BILLS, Glyph.List, false) { showBills() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.px(104)).also { it.topMargin = ui.px(12) })
-        show(bar, listOf(health, tillSlot, lines, noteSlot, tiles, requestsSlot), emptyList(), Showing.Home)
+        show(bar, listOf(health, tillSlot, starterSlot, lines, noteSlot, tiles, requestsSlot), emptyList(), Showing.Home)
         var healthSig: String? = null
         var linesSig: String? = null
         var requestsSig: String? = null
         var tillSig: String? = null
+        var starterSig: String? = null
         tick = {
             val h = healthWords(n)
             val hs = sig(h)
@@ -1120,6 +1123,9 @@ class Controller(private val act: MainActivity) {
                 if (moved?.pending != null) items.add(HomeLine("switch", SwitchWords.homeLine))
                 moved?.notice?.let { items.add(HomeLine("switch-notice", it.say())) }
             }
+            // CR-273: a stop, or a line that cannot be checked, with the library's words.
+            val starter = starterNow(n)
+            StarterModel.homeLine(starter)?.let { items.add(HomeLine("starter", it)) }
             priceWords()?.let { items.add(HomeLine("price", it, priceNotes())) }
             val ls = items.joinToString("\u0002") { sig(it.words) + (it.extra ?: "") }
             if (ls != linesSig) {
@@ -1147,6 +1153,29 @@ class Controller(private val act: MainActivity) {
                         }).also { it.layoutParams = ui.margins(bottom = 12) }
                     }
                     tillSlot.show(*cards.toTypedArray())
+                }
+            }
+            // CR-274: each payment from the starter wallet nobody has seen, on its own card until someone taps "seen".
+            val unseen = StarterModel.unseen(starter)
+            val ss = StarterModel.signature(unseen)
+            if (ss != starterSig) {
+                starterSig = ss
+                if (unseen.isEmpty()) {
+                    starterSlot.show()
+                } else {
+                    val heading = starter?.cards?.heading.orEmpty()
+                    val cards = unseen.map { p ->
+                        ui.starterCard(heading, StarterModel.lines(p), seen = {
+                            try {
+                                n.starterSeen(nowSecs(), p.txid)
+                            } catch (e: CounterException) {
+                                noteSlot.show(note(e.sayWords()))
+                            }
+                            starterSig = null
+                            tick?.invoke()
+                        }).also { it.layoutParams = ui.margins(bottom = 12) }
+                    }
+                    starterSlot.show(*cards.toTypedArray())
                 }
             }
             // CR-215: the open requests, newest first, under their own heading.
@@ -1190,6 +1219,7 @@ class Controller(private val act: MainActivity) {
      * shown as for a sale typed here. A refusal is shown on Home and the request stays.
      */
     private fun startTillSale(n: CounterNode, request: TillRequest, refused: (SayWords) -> Unit) {
+        starterStop()?.let { return refused(it) }
         val (rate, words) = quote()
         if (rate == null) return refused(words ?: AppWords.stopped)
         try {
@@ -1737,9 +1767,23 @@ class Controller(private val act: MainActivity) {
 
     // ---- a new sale ------------------------------------------------------------------------------------------------------
 
+    /** CR-272, CR-273: what the starter line says, or null when the library cannot be asked. */
+    private fun starterNow(n: CounterNode): StarterState? =
+        try {
+            n.starterState(nowSecs())
+        } catch (e: CounterException) {
+            null
+        } catch (e: LinkageError) {
+            null
+        }
+
+    /** CR-273: the words that stand in the place of a sale when the line says to offer no bitcoin; null when the sale may open. */
+    private fun starterStop(): SayWords? = node?.let { StarterModel.stopWords(starterNow(it)) }
+
     private fun showNewSale() {
         if (lockedOut()) return
         val m = money ?: return render()
+        starterStop()?.let { return showMessage(it, "Back") { showHome() } }
         val entry = AmountEntry(m)
         val display = ui.text(entry.show(), 60f, bold = true).also {
             it.gravity = android.view.Gravity.CENTER
@@ -1790,6 +1834,7 @@ class Controller(private val act: MainActivity) {
 
     private fun makeRequest(amountMinor: Long, noteText: String?, days: Int, refused: (SayWords) -> Unit) {
         val n = node ?: return render()
+        starterStop()?.let { return refused(it) }
         val (rate, words) = quote()
         if (rate == null) return refused(words ?: AppWords.stopped)
         val m = money ?: return render()
@@ -2823,6 +2868,16 @@ class Controller(private val act: MainActivity) {
             }
             add(quiet)
             views.add(card)
+            // CR-274: the day's payments from the starter wallet, when the counter has any.
+            val starterDay = StarterModel.day(starterNow(n), from, DayWindow.end(now))
+            if (starterDay.isNotEmpty()) {
+                val pays = ui.surfaceCard()
+                pays.addView(ui.label(WordsOfStarter.TODAY).also { it.setPadding(ui.px(16), ui.px(12), ui.px(16), ui.px(4)) }, matchWide())
+                for (p in starterDay) {
+                    pays.addView(ui.text(StarterModel.todayLine(p), 14f, colour = ui.pal.secondary).also { it.setPadding(ui.px(16), ui.px(8), ui.px(16), ui.px(8)) }, matchWide())
+                }
+                views.add(pays)
+            }
             // The lines per person, behind the manager's PIN.
             if (people) {
                 val per = ui.surfaceCard()

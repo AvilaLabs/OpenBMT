@@ -129,3 +129,17 @@ The labels of the card on Home and of the line on a started sale.
 | start | Start |
 | notNow | Not now |
 | cancelled | The till cancelled this sale |
+
+## The starter line's payments (CR-273, CR-274)
+
+The labels of the cards on Home and of the day's payments on
+Today. The words are not written yet.
+
+| Key | Text |
+|---|---|
+| seen | WORDS_NEEDED_CR274_SEEN |
+| amount | WORDS_NEEDED_CR274_AMOUNT |
+| time | WORDS_NEEDED_CR274_TIME |
+| byOwner | WORDS_NEEDED_CR274_BY_OWNER |
+| notByOwner | WORDS_NEEDED_CR274_NOT_BY_OWNER |
+| today | WORDS_NEEDED_CR274_TODAY |
