@@ -245,9 +245,8 @@ fn cmd_keys(args: &[String]) -> Result<ExitCode, String> {
             let [r, c] = w.single_path_strings();
             for (name, text) in [("private-receive", &r), ("private-change", &c)] {
                 let mut body = text.split('#').next().unwrap_or_default().to_string();
-                for n in 0..2 {
-                    let public = w.slots()[n].xpub.to_string();
-                    body = body.replace(&public, &s.accounts[n].to_string());
+                for (slot, account) in w.slots().iter().zip(&s.accounts).take(2) {
+                    body = body.replace(&slot.xpub.to_string(), &account.to_string());
                 }
                 println!("{name} {body}");
             }
