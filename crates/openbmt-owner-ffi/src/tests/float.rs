@@ -10,8 +10,9 @@ use bitcoin::hashes::Hash;
 use bitcoin::transaction::Version;
 use bitcoin::{Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness};
 use openbmt_core::wallet::Keychain;
+use openbmt_owner::float::wallet_of_sealed;
 use openbmt_owner::float::{FloatWallet, FloatWords};
-use openbmt_owner::starter::{wallet_of_sealed, DataKey, KernelRandom};
+use openbmt_owner::starter::{DataKey, KernelRandom};
 
 use super::import::descriptor;
 use super::kit::Rig;
@@ -338,12 +339,9 @@ fn fl_03_a_scanned_seedqr_is_sealed_in_the_library_and_no_word_comes_back() {
     assert_eq!(key.len(), 32);
     assert_eq!(description, float().description());
     assert_eq!(first, float().receive_address(0).unwrap().to_string());
-    // The sealed seed opens, with the starter wallet's seal, to the float's own wallet.
+    // The sealed seed opens, with the float's own label, to the float's own wallet.
     let opened = wallet_of_sealed(&sealed, &DataKey::from_slice(&key).unwrap()).unwrap();
-    assert_eq!(
-        opened.receive_address(0).unwrap().to_string(),
-        float().receive_address(0).unwrap().to_string()
-    );
+    assert_eq!(opened, float());
     // Neither the entropy nor a word is in the sealed seed or the response.
     assert!(!response.windows(scan.len()).any(|w| w == scan.as_slice()));
     assert!(!String::from_utf8_lossy(&response).contains("galaxy"));
@@ -376,6 +374,21 @@ fn fl_03_a_kernel_that_gives_nothing_usable_seals_nothing() {
     let fault = Rd::error(&dispatch(
         &reg,
         &frame(OP_SEAL, 0, &W::new().bytes(&scan_bytes()).0),
+    ))
+    .expect("refused");
+    assert!(fault.rule.starts_with("SS-"), "{}", fault.rule);
+}
+
+#[test]
+fn ss_20_the_starter_ops_refuse_a_sealed_float() {
+    const OP_STARTER_OPEN: u16 = 196;
+    let reg = seal_registry();
+    let response = dispatch(&reg, &frame(OP_SEAL, 0, &W::new().bytes(&scan_bytes()).0));
+    let mut r = Rd::ok(&response);
+    let (sealed, key) = (r.bytes(), r.bytes());
+    let fault = Rd::error(&dispatch(
+        &reg,
+        &frame(OP_STARTER_OPEN, 0, &W::new().bytes(&sealed).bytes(&key).0),
     ))
     .expect("refused");
     assert!(fault.rule.starts_with("SS-"), "{}", fault.rule);

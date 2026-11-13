@@ -58,7 +58,7 @@ pub use pay::{
     MIN_RATE_PER_KVB,
 };
 pub use rebind::{RebindError, RebindFinish};
-pub(crate) use seal::seal_seed;
+pub(crate) use seal::{open_seed_with, seal_seed_with, FLOAT_SEAL_AAD};
 pub use seal::{wallet_of_sealed, DataKey, Restore, Sealed, DATA_KEY_BYTES};
 pub use setup::{pick_positions, Image, Key, Setup, Typed, ASKED, PAGES, WORDS_PER_PAGE};
 pub use watch::{held_sats, IncomingCoin};

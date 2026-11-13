@@ -42,7 +42,10 @@ pub use openbmt_spend::Coin;
 
 use crate::error::OwnerError;
 use crate::single_key::{check_pays_only, sign_p2wpkh_inputs, Breach};
-use crate::starter::{seal_seed, KernelRandom, Sealed, Seed, StarterRefusal, ENTROPY_BYTES};
+use crate::starter::{
+    open_seed_with, seal_seed_with, DataKey, KernelRandom, Sealed, Seed, StarterRefusal,
+    ENTROPY_BYTES, FLOAT_SEAL_AAD,
+};
 use crate::state::Owner;
 use crate::types::CashAmount;
 
@@ -436,7 +439,7 @@ pub enum FloatSealError {
 /// FL-01, FL-03: the 16 bytes of a Compact SeedQR the owner scanned, turned
 /// into the float's seed here and sealed as the starter wallet's seed is
 /// sealed (SS-20): the words are never text outside this call. The sealed
-/// seed opens with `starter::wallet_of_sealed`, the data key is given back
+/// seed opens with [`wallet_of_sealed`], the data key is given back
 /// once, and the entropy of the scan is the caller's to overwrite.
 pub fn seal_compact_seedqr(
     entropy: &[u8],
@@ -448,8 +451,19 @@ pub fn seal_compact_seedqr(
         .map_err(|_| FloatSealError::Float(FloatRefusal::Words))?;
     let seed = Seed::from_entropy(bytes);
     wipe(&mut bytes);
-    let sealed = seal_seed(&seed, rng).map_err(FloatSealError::Seal)?;
+    let sealed = seal_seed_with(&seed, rng, FLOAT_SEAL_AAD).map_err(FloatSealError::Seal)?;
     Ok(FloatSealed { sealed, wallet })
+}
+
+/// FL-03: the float's public wallet inside a sealed float seed, to check
+/// that the data key opens it. A starter wallet's blob is refused: the two
+/// are sealed under different labels.
+pub fn wallet_of_sealed(sealed: &[u8], key: &DataKey) -> Result<FloatWallet, FloatSealError> {
+    let seed = open_seed_with(sealed, key, FLOAT_SEAL_AAD).map_err(FloatSealError::Seal)?;
+    let mnemonic = seed.mnemonic().map_err(FloatSealError::Seal)?;
+    let words = FloatWords::new(&mnemonic.words().collect::<Vec<_>>().join(" "))
+        .map_err(FloatSealError::Float)?;
+    FloatWallet::from_words(&words).map_err(FloatSealError::Float)
 }
 
 /// The float's wallet and its account key, only inside one call.

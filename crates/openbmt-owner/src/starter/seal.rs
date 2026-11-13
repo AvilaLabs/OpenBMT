@@ -22,6 +22,9 @@ const NONCE_BYTES: usize = 12;
 const TAG_BYTES: usize = 16;
 const SEAL_VERSION: u8 = 1;
 const SEAL_AAD: &[u8] = b"OpenBMT/starter/seal/v1";
+/// FL-03: the refund float's seed is sealed the same way under a label of its
+/// own, so a starter blob never opens as a float's and the reverse.
+pub(crate) const FLOAT_SEAL_AAD: &[u8] = b"OpenBMT/float/seal/v1";
 
 /// The data key, in memory only while a call uses it. The buffer is
 /// overwritten when the value is dropped, and `Debug` hides it.
@@ -66,6 +69,15 @@ pub struct Sealed {
 /// SS-20: the seed sealed under a new random data key and a new random
 /// nonce, both from checked kernel reads (SS-02).
 pub(crate) fn seal_seed(seed: &Seed, rng: &mut dyn KernelRandom) -> Result<Sealed, StarterRefusal> {
+    seal_seed_with(seed, rng, SEAL_AAD)
+}
+
+/// [`seal_seed`] under the label `aad`.
+pub(crate) fn seal_seed_with(
+    seed: &Seed,
+    rng: &mut dyn KernelRandom,
+    aad: &'static [u8],
+) -> Result<Sealed, StarterRefusal> {
     let mut key_bytes = checked_read(rng)?;
     let data_key = DataKey(key_bytes);
     wipe(&mut key_bytes);
@@ -82,7 +94,7 @@ pub(crate) fn seal_seed(seed: &Seed, rng: &mut dyn KernelRandom) -> Result<Seale
             Nonce::from_slice(&nonce),
             Payload {
                 msg: seed.entropy(),
-                aad: SEAL_AAD,
+                aad,
             },
         )
         .map_err(|_| StarterRefusal::Open)?;
@@ -96,6 +108,15 @@ pub(crate) fn seal_seed(seed: &Seed, rng: &mut dyn KernelRandom) -> Result<Seale
 /// SS-20: open a sealed seed. A wrong key, a changed byte or a blob of
 /// another shape all give [`StarterRefusal::Open`].
 pub(crate) fn open_seed(sealed: &[u8], key: &DataKey) -> Result<Seed, StarterRefusal> {
+    open_seed_with(sealed, key, SEAL_AAD)
+}
+
+/// [`open_seed`] under the label `aad`.
+pub(crate) fn open_seed_with(
+    sealed: &[u8],
+    key: &DataKey,
+    aad: &'static [u8],
+) -> Result<Seed, StarterRefusal> {
     let (version, rest) = sealed.split_first().ok_or(StarterRefusal::Open)?;
     if *version != SEAL_VERSION || rest.len() != NONCE_BYTES + ENTROPY_BYTES + TAG_BYTES {
         return Err(StarterRefusal::Open);
@@ -103,13 +124,7 @@ pub(crate) fn open_seed(sealed: &[u8], key: &DataKey) -> Result<Seed, StarterRef
     let (nonce, ct) = rest.split_at(NONCE_BYTES);
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&key.0));
     let mut plain = cipher
-        .decrypt(
-            Nonce::from_slice(nonce),
-            Payload {
-                msg: ct,
-                aad: SEAL_AAD,
-            },
-        )
+        .decrypt(Nonce::from_slice(nonce), Payload { msg: ct, aad })
         .map_err(|_| StarterRefusal::Open)?;
     let out = <[u8; ENTROPY_BYTES]>::try_from(plain.as_slice())
         .map(Seed::from_entropy)

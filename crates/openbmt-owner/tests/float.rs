@@ -790,18 +790,49 @@ fn fl_03_a_scanned_seedqr_is_sealed_and_opens_to_the_floats_own_wallet() {
         .unwrap()
         .to_entropy();
     let made = seal_compact_seedqr(&entropy, &mut Steady(0)).unwrap();
-    let opened =
-        openbmt_owner::starter::wallet_of_sealed(&made.sealed.sealed, &made.sealed.data_key)
-            .unwrap();
+    let opened = wallet_of_sealed(&made.sealed.sealed, &made.sealed.data_key).unwrap();
     let float = FloatWallet::from_words(&float_words()).unwrap();
     assert_eq!(made.wallet, float);
-    assert_eq!(
-        opened.receive_address(0).unwrap().to_string(),
-        float.receive_address(0).unwrap().to_string()
-    );
-    // A scan of another length is refused, and a dry kernel seals nothing.
+    assert_eq!(opened, float);
+    // A scan of another length is refused.
     assert_eq!(
         seal_compact_seedqr(&entropy[..15], &mut Steady(0)).unwrap_err(),
         FloatSealError::Float(FloatRefusal::Words)
+    );
+}
+
+/// A starter wallet's sealed seed of the words `BIP85_CHILD_0`, made through the restore.
+fn starter_blob() -> openbmt_owner::starter::Sealed {
+    use openbmt_owner::starter::{Key, Restore, Seed};
+    let m = bip39::Mnemonic::parse_in_normalized(bip39::Language::English, BIP85_CHILD_0).unwrap();
+    let seed = Seed::from_mnemonic(&m).unwrap();
+    let description = seed.wallet().unwrap().description().to_string();
+    let mut restore = Restore::new();
+    for word in BIP85_CHILD_0.split(' ') {
+        for b in word.bytes() {
+            restore.key(Key::Letter(b)).unwrap();
+        }
+        restore.key(Key::Enter).unwrap();
+    }
+    restore.finish(&description, &mut Steady(0)).unwrap()
+}
+
+#[test]
+fn fl_03_the_float_path_refuses_a_sealed_starter_seed() {
+    let starter = starter_blob();
+    // The blob is good for the starter's own path, so the refusal is the label.
+    assert!(openbmt_owner::starter::wallet_of_sealed(&starter.sealed, &starter.data_key).is_ok());
+    assert!(wallet_of_sealed(&starter.sealed, &starter.data_key).is_err());
+}
+
+#[test]
+fn ss_20_the_starter_path_refuses_a_sealed_float() {
+    let entropy = bip39::Mnemonic::parse_in_normalized(bip39::Language::English, BIP85_CHILD_0)
+        .unwrap()
+        .to_entropy();
+    let made = seal_compact_seedqr(&entropy, &mut Steady(0)).unwrap();
+    assert!(
+        openbmt_owner::starter::wallet_of_sealed(&made.sealed.sealed, &made.sealed.data_key)
+            .is_err()
     );
 }
