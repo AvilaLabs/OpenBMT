@@ -735,6 +735,28 @@ impl<R: Post> OwnerLink<R> {
         Ok(())
     }
 
+    /// LK-79: the counters a starter line goes to: the counters the link
+    /// follows whose copy holds no record that they switched (CR-262).
+    pub fn starter_targets(&self) -> Vec<DeviceId> {
+        self.counters
+            .iter()
+            .filter(|c| !self.switch_records(c).iter().any(|h| h.switched))
+            .copied()
+            .collect()
+    }
+
+    /// LK-79: send a starter line (the `OBM_` frame) to a counter as a
+    /// message of kind Starter. It is not kept: the next line replaces it.
+    pub fn send_starter(&mut self, counter: &DeviceId, line: &[u8]) -> Result<(), SendError> {
+        self.send_now(counter, Kind::Starter, line)
+    }
+
+    /// LK-61, LK-79: seconds between the heartbeats, and between the starter
+    /// lines at the least.
+    pub fn heartbeat_every_secs(&self) -> u64 {
+        self.cfg.heartbeat_every_secs
+    }
+
     /// The switches that still wait for an answer, oldest first by counter.
     pub fn switches_waiting(&self) -> &[PendingSwitch] {
         self.switches.items()

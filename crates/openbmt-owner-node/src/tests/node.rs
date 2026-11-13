@@ -35,6 +35,7 @@ mod paid_log;
 mod queue;
 mod receipts;
 mod requests;
+mod starter;
 mod stopped;
 mod web_orders;
 

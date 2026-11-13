@@ -253,6 +253,26 @@ pub struct PendingTx {
     pub own: Vec<(u32, Keychain, u32)>,
 }
 
+/// A transaction of a block that spent coins of the wallet (LK-79): what it
+/// took out of the wallet and what it paid back to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpentTx {
+    /// The transaction.
+    pub txid: Txid,
+    /// The sum of the wallet's coins its inputs spent, in satoshis.
+    pub taken: u64,
+    /// The sum of its outputs that pay the wallet's scripts (the change), in
+    /// satoshis.
+    pub back: u64,
+}
+
+impl SpentTx {
+    /// What left the wallet: what it took less what came back.
+    pub fn out(&self) -> u64 {
+        self.taken.saturating_sub(self.back)
+    }
+}
+
 /// What a block did to the view when it was applied.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BlockEffect {
@@ -264,6 +284,9 @@ pub struct BlockEffect {
     /// node compares it with the transactions it was given only the ID of
     /// (AS-89).
     pub spent_by: Vec<(OutPoint, Txid)>,
+    /// Each transaction that spent coins of the wallet, in the order of the
+    /// first coin it spent.
+    pub spends: Vec<SpentTx>,
     /// Held transactions the block confirmed.
     pub confirmed: Vec<Txid>,
     /// Held transactions whose input the block spent in another
@@ -1240,9 +1263,28 @@ impl CoinView {
             if let Some(coin) = next.coins.remove(&outpoint) {
                 effect.spent.push(outpoint);
                 effect.spent_by.push((outpoint, by));
+                // LK-79: what the transaction took out of the wallet.
+                match effect.spends.iter_mut().find(|s| s.txid == by) {
+                    Some(entry) => entry.taken = entry.taken.saturating_add(coin.sats()),
+                    None => effect.spends.push(SpentTx {
+                        txid: by,
+                        taken: coin.sats(),
+                        back: 0,
+                    }),
+                }
                 spent_coins.push(coin);
             }
             spenders.insert(outpoint, by);
+        }
+        // LK-79: what each of them paid back to the wallet: the coins it
+        // made, whether or not a later input of the block spent them again.
+        for entry in &mut effect.spends {
+            entry.back = next
+                .coins
+                .values()
+                .chain(spent_coins.iter())
+                .filter(|c| c.outpoint.txid == entry.txid)
+                .fold(0u64, |sum, c| sum.saturating_add(c.sats()));
         }
         // OC-28: what this block spent may be what a receipt waited for.
         receipts_changed |= next.prune(chain.tip_height()) > 0;

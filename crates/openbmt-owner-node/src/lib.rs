@@ -82,6 +82,7 @@ pub mod requests;
 pub mod say;
 pub mod settings_roster;
 pub mod settle_owed;
+pub mod starter_line;
 pub mod switch_outbox;
 mod take_journal;
 pub mod watch;
@@ -134,6 +135,7 @@ pub use settings_roster::{RosterEntry, RosterError, SettingsRoster};
 pub use settle_owed::{
     Owed, OwedError, OwedKind, SettleOwed, MAGIC_SETTLE_OWED, MAX_OWED, SETTLE_OWED_FILE,
 };
+pub use starter_line::{StarterStep, STARTER_LINE_FILE};
 pub use switch_outbox::{
     PendingSwitch, SwitchOutbox, SwitchOutboxError, MAX_PENDING_SWITCHES, SWITCH_OUTBOX_FILE,
 };

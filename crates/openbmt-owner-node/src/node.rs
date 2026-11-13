@@ -765,6 +765,8 @@ pub struct OwnerNode<P: OwnerPort = Handle> {
     /// what the view holds is the old wallet's: nothing is read from it as
     /// the wallet in force until the node starts again.
     repinned: bool,
+    /// LK-79: what the starter line is made from.
+    pub(crate) starter: crate::starter_line::StarterLiner,
     /// RQ-04: with `repinned`, the wallet pinned now, which new requests are
     /// made from.
     pub(crate) pinned_now: Option<ImportedWallet>,
@@ -1056,6 +1058,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             own,
             former: former_watches,
             repinned: false,
+            starter: crate::starter_line::StarterLiner::default(),
             pinned_now: None,
             dir,
             refund_depth,
@@ -3448,6 +3451,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             .reorganize(left, fork, |b| write_file(&dir, COINS_FILE, b))
         {
             Ok(effect) => {
+                self.starter_note_reorg(fork);
                 // RQ-37: the requests undo the same blocks, before the facts
                 // of the queued refunds are worked out again.
                 self.requests_reorg(fork);
@@ -3601,6 +3605,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 write_file(&dir, COINS_FILE, b)
             }) {
             Ok(effect) => {
+                self.starter_note_block(&effect, hash);
                 self.apply_former(&block, hash);
                 // RQ-15: the payments to requests are found in the block the
                 // view applied, and credited at the confirmation depth.

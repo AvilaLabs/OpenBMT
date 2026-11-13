@@ -2831,4 +2831,30 @@ fn oa_120_a_confirmation_in_a_counters_records_is_read_from_its_copy() {
     b.w.step(T0);
     b.w.link.scan_index_use();
     assert_eq!(b.w.link.confirmations(), vec![(counter(), held)]);
+#[test]
+fn lk_79_a_starter_line_goes_to_a_counter_that_has_not_switched_and_is_not_kept_for_sending_again()
+{
+    let mut w = world();
+    assert_eq!(w.link.starter_targets(), vec![counter()]);
+    w.link.send_starter(&counter(), b"a line").unwrap();
+    let got = w.counter_gets();
+    let lines: Vec<&Received> = got.iter().filter(|r| r.kind == Kind::Starter).collect();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].content, b"a line");
+    // No resend list: later steps send no line of their own.
+    for at in [T0 + 1, T0 + 120, T0 + 1_000] {
+        w.step(at);
+    }
+    assert!(w.counter_gets().iter().all(|r| r.kind != Kind::Starter));
+    // A counter that refused a switch is still a starter counter; one that
+    // switched is not (CR-262, CR-275).
+    w.send_records(chain_with_switched(3, false, [9; 32]).records());
+    w.step(T0 + 1_001);
+    assert_eq!(w.link.starter_targets(), vec![counter()]);
+    let mut full = chain_with_switched(3, false, [9; 32]);
+    let held = SwitchedHeld::sign(&id(3), true, [8; 32]);
+    full.append(&id(3), held.kind(), held.encode()).unwrap();
+    w.send_records(&full.records()[4..]);
+    w.step(T0 + 1_002);
+    assert!(w.link.starter_targets().is_empty());
 }
