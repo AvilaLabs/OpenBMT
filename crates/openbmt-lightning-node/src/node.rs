@@ -10,24 +10,31 @@
 //! - A sale is paid only on `Event::PaymentClaimed` (SL-21): the library gives
 //!   that event only after the monitor update that holds the preimage is
 //!   complete, and an update is complete only when both copies are written.
+//!   The paid event is kept in the store until the caller acknowledges it
+//!   (`paid.rs`), and what is expected of each invoice survives a restart
+//!   (`expect.rs`).
+//! - Spendable outputs are swept to the address the caller gave (`sweep.rs`).
 
 use crate::bip85::NodeSeed;
 use crate::chain::{ChainFilter, CoreBroadcaster, CoreFees, CoreRpc};
 use crate::device::{DeviceSnapshot, DeviceState, DeviceStatus, SecondDevice};
+use crate::expect::{Claim, Expectation, Expectations};
 use crate::logger::Logger;
+use crate::paid::{PaidLog, PaidRecord};
 use crate::provider::{choose_offer, Offer, ProviderConfig, Refusal};
 use crate::room::{decide, room_to_receive_msat, OnChainReason, ReceiveDecision, Situation};
 use crate::seal::SealKey;
 use crate::state::{self, StartFrom, StateError};
 use crate::store::{Background, DeviceView, DualStore};
+use crate::sweep::{SweepDestination, Sweeper, SweeperParts};
 use crate::types::*;
 use bitcoin::bip32::Xpriv;
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::secp256k1::{PublicKey, Secp256k1};
-use bitcoin::{Address, BlockHash, Network};
+use bitcoin::{Address, BlockHash, Network, ScriptBuf};
 use lightning::chain::chainmonitor::ChainMonitor;
 use lightning::chain::channelmonitor::ChannelMonitor;
-use lightning::chain::{Listen, Watch};
+use lightning::chain::{BestBlock, Listen, Watch};
 use lightning::events::{Event, PaymentPurpose, ReplayEvent};
 use lightning::ln::channelmanager::{
     Bolt11InvoiceParameters, ChainParameters, ChannelManagerReadArgs,
@@ -36,7 +43,6 @@ use lightning::ln::peer_handler::{IgnoringMessageHandler, MessageHandler};
 use lightning::onion_message::messenger::NullMessageRouter;
 use lightning::routing::router::{RouteHint, RouteHintHop};
 use lightning::sign::{InMemorySigner, KeysManager, NodeSigner};
-use lightning::types::payment::PaymentHash;
 use lightning::util::config::{
     ChannelConfigOverrides, ChannelConfigUpdate, ChannelHandshakeConfigUpdate, UserConfig,
 };
@@ -45,7 +51,7 @@ use lightning::util::persist::{
     KVStore, CHANNEL_MANAGER_PERSISTENCE_KEY, CHANNEL_MANAGER_PERSISTENCE_PRIMARY_NAMESPACE,
     CHANNEL_MANAGER_PERSISTENCE_SECONDARY_NAMESPACE,
 };
-use lightning::util::ser::{ReadableArgs, Writeable};
+use lightning::util::ser::ReadableArgs;
 use lightning_block_sync::init::{synchronize_listeners, validate_best_block_header};
 use lightning_block_sync::poll::ChainPoller;
 use lightning_block_sync::rpc::RpcClient;
@@ -114,6 +120,11 @@ pub struct NodeConfig {
     pub max_opening_fee_msat: u64,
     /// Which copy of the state to start from (SL-25).
     pub start_from: StartFrom,
+    /// Where the sweeper sends spendable outputs: the shop wallet's next
+    /// address, as a script. Used on a first start; after the caller has
+    /// changed it with [`Node::set_sweep_destination`] the changed one is kept
+    /// and used.
+    pub sweep_to: ScriptBuf,
 }
 
 /// Why the node did not start.
@@ -160,6 +171,20 @@ pub struct Paid {
     pub amount_msat: u64,
     /// What the payer sent, if the library knows it.
     pub sender_intended_msat: Option<u64>,
+    /// When the claim was seen, in seconds since the epoch. A repeat of the
+    /// event carries the time of the first.
+    pub received_unix: u64,
+}
+
+impl From<PaidRecord> for Paid {
+    fn from(r: PaidRecord) -> Self {
+        Paid {
+            payment_hash: r.payment_hash,
+            amount_msat: r.amount_msat,
+            sender_intended_msat: r.sender_intended_msat,
+            received_unix: r.received_unix,
+        }
+    }
 }
 
 /// What the counter is told for an amount (SL-29, SL-40, SL-41).
@@ -195,6 +220,9 @@ pub enum InvoiceError {
     OnChainOnly(OnChainReason),
     /// The provider did not answer, or refused.
     Provider(String),
+    /// The invoice's expectations could not be stored on both devices, so the
+    /// invoice is not handed back (SL-20).
+    NotStored,
     /// The library could not make it.
     Library(String),
 }
@@ -223,10 +251,6 @@ enum Waiter {
     Buy(oneshot::Sender<(u64, u32)>),
 }
 
-struct Expected {
-    max_fee_msat: u64,
-}
-
 struct Shared {
     network: Network,
     provider: ProviderConfig,
@@ -243,12 +267,44 @@ struct Shared {
     logger: Arc<Logger>,
     paid: mpsc::UnboundedSender<Paid>,
     waiters: Mutex<HashMap<LSPSRequestId, Waiter>>,
-    expected: Mutex<HashMap<PaymentHash, Expected>>,
+    expectations: Expectations,
+    paid_log: PaidLog,
+    sweeper: Arc<Sweeper>,
+    destination: Arc<SweepDestination>,
     chain_height: AtomicU64,
     last_poll_ok: AtomicU64,
     stopping: AtomicBool,
     stop: Notify,
-    spendable_counter: AtomicU64,
+}
+
+/// What the chain poll tells of each block: the monitors, the manager and the
+/// sweeper, in that order.
+struct Listeners {
+    monitor: Arc<Monitor>,
+    manager: Arc<Manager>,
+    sweeper: Arc<Sweeper>,
+}
+
+impl Listen for Listeners {
+    fn filtered_block_connected(
+        &self,
+        header: &bitcoin::block::Header,
+        txdata: &lightning::chain::transaction::TransactionData,
+        height: u32,
+    ) {
+        self.monitor
+            .filtered_block_connected(header, txdata, height);
+        self.manager
+            .filtered_block_connected(header, txdata, height);
+        self.sweeper
+            .filtered_block_connected(header, txdata, height);
+    }
+
+    fn blocks_disconnected(&self, fork_point: BestBlock) {
+        self.monitor.blocks_disconnected(fork_point);
+        self.manager.blocks_disconnected(fork_point);
+        self.sweeper.blocks_disconnected(fork_point);
+    }
 }
 
 fn now_secs() -> u64 {
@@ -388,6 +444,26 @@ impl Node {
         ));
         let background = Arc::new(Background(Arc::clone(&store)));
         let flusher = store.spawn_lazy_flusher(&handle);
+        let now_unix = now_secs();
+        let expectations = Expectations::load(Arc::clone(&store), now_unix)
+            .await
+            .map_err(setup)?;
+        let paid_log = PaidLog::new(Arc::clone(&background));
+        let destination = Arc::new(
+            SweepDestination::load(Arc::clone(&background), config.sweep_to.clone())
+                .await
+                .map_err(setup)?,
+        );
+        let sweeper_parts = SweeperParts {
+            broadcaster: Arc::clone(&broadcaster),
+            fees: Arc::clone(&fees),
+            filter: Arc::clone(&filter),
+            store: Arc::clone(&background),
+            logger: Arc::clone(&logger),
+            keys: Arc::clone(&keys),
+            destination: Arc::clone(&destination),
+        };
+        let kept_sweeper = sweeper_parts.read().await.map_err(setup)?;
         let persister = |store: &Arc<DualStore>| -> Persister {
             Persister::new(
                 Arc::clone(store),
@@ -468,6 +544,9 @@ impl Node {
                     .collect();
                 let mut set: Vec<(BlockHash, &dyn Listen)> =
                     vec![(manager_hash, &manager as &dyn Listen)];
+                if let Some((best, sweeper)) = &kept_sweeper {
+                    set.push((best.block_hash, &**sweeper as &dyn Listen));
+                }
                 for (hash, l) in &listeners {
                     set.push((*hash, l as &dyn Listen));
                 }
@@ -481,9 +560,21 @@ impl Node {
                 )
             }
             None => {
-                let tip = validate_best_block_header(Arc::clone(&rpc))
+                let tip = match &kept_sweeper {
+                    // Spendable outputs are tracked: the sweeper is brought to
+                    // the tip, the manager is new there.
+                    Some((best, sweeper)) => synchronize_listeners(
+                        Arc::clone(&rpc),
+                        config.network,
+                        &mut cache,
+                        vec![(best.block_hash, &**sweeper as &dyn Listen)],
+                    )
                     .await
-                    .map_err(|e| StartError::Chain(format!("{e:?}")))?;
+                    .map_err(|e| StartError::Chain(format!("{e:?}")))?,
+                    None => validate_best_block_header(Arc::clone(&rpc))
+                        .await
+                        .map_err(|e| StartError::Chain(format!("{e:?}")))?,
+                };
                 let manager = Manager::new(
                     Arc::clone(&fees),
                     Arc::clone(&monitor),
@@ -505,6 +596,10 @@ impl Node {
             }
         };
         let manager = Arc::new(manager);
+        let sweeper = match kept_sweeper {
+            Some((_, sweeper)) => sweeper,
+            None => sweeper_parts.new_at(chain_tip.to_best_block()),
+        };
         for m in monitors {
             let id = m.channel_id();
             monitor
@@ -552,6 +647,11 @@ impl Node {
         ));
 
         let (paid_tx, paid_rx) = mpsc::unbounded_channel();
+        // The paid events the caller has not acknowledged come again, with the
+        // same payment hash.
+        for record in paid_log.pending(now_unix).await.map_err(setup)? {
+            let _ = paid_tx.send(Paid::from(record));
+        }
         let shared = Arc::new(Shared {
             network: config.network,
             provider: config.provider.clone(),
@@ -568,12 +668,14 @@ impl Node {
             logger: Arc::clone(&logger),
             paid: paid_tx,
             waiters: Mutex::new(HashMap::new()),
-            expected: Mutex::new(HashMap::new()),
+            expectations,
+            paid_log,
+            sweeper: Arc::clone(&sweeper),
+            destination: Arc::clone(&destination),
             chain_height: AtomicU64::new(chain_tip.height as u64),
             last_poll_ok: AtomicU64::new(now_secs()),
             stopping: AtomicBool::new(false),
             stop: Notify::new(),
-            spendable_counter: AtomicU64::new(0),
         });
 
         let mut tasks = vec![flusher];
@@ -586,9 +688,12 @@ impl Node {
                 Arc::clone(&fees),
                 config.network,
             );
-            let (monitor, manager) = (Arc::clone(&monitor), Arc::clone(&manager));
+            let listener = Listeners {
+                monitor: Arc::clone(&monitor),
+                manager: Arc::clone(&manager),
+                sweeper: Arc::clone(&sweeper),
+            };
             tasks.push(tokio::spawn(async move {
-                let listener = (monitor, manager);
                 let poller = ChainPoller::new(Arc::clone(&rpc), network);
                 let mut spv = SpvClient::new(chain_tip, poller, &mut cache, &listener);
                 let mut ticks = 0u64;
@@ -601,7 +706,7 @@ impl Node {
                         Ok((_, changed)) => {
                             shared.last_poll_ok.store(now_secs(), Ordering::SeqCst);
                             if changed {
-                                let h = listener.1.current_best_block().height;
+                                let h = listener.manager.current_best_block().height;
                                 shared.chain_height.store(h as u64, Ordering::SeqCst);
                             }
                         }
@@ -648,7 +753,7 @@ impl Node {
                     NoGossip::None,
                     Arc::clone(&shared.peers),
                     Some(Arc::clone(&shared.liquidity)),
-                    None::<Arc<crate::sweep::NoSweeper>>,
+                    Some(Arc::clone(&shared.sweeper)),
                     Arc::clone(&shared.logger),
                     None::<Arc<crate::sweep::NoScorer>>,
                     move |d: Duration| {
@@ -698,9 +803,10 @@ impl Node {
             .expect("the node's own key")
     }
 
-    /// The next sale that is paid (SL-21). Events are given at least once: a
-    /// start after a crash can give one again, and the counter ignores one it
-    /// has already marked.
+    /// The next sale that is paid (SL-21). Events are given at least once: each
+    /// is kept until [`Node::ack_paid`], and a start gives again every one not
+    /// acknowledged, with the same payment hash. The counter treats a repeat
+    /// as the same payment.
     pub async fn next_paid(&self) -> Option<Paid> {
         self.paid_rx.lock().await.recv().await
     }
@@ -708,6 +814,38 @@ impl Node {
     /// A sale that is paid, if one is waiting.
     pub fn try_paid(&self) -> Option<Paid> {
         self.paid_rx.try_lock().ok()?.try_recv().ok()
+    }
+
+    /// The caller has marked the sale with this payment hash paid: its event
+    /// is not given again after a restart (SL-21). Acknowledging one that is
+    /// not kept is not an error.
+    pub async fn ack_paid(&self, payment_hash: [u8; 32]) -> Result<(), String> {
+        self.shared
+            .paid_log
+            .ack(&payment_hash, now_secs())
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Changes where swept outputs go: the shop wallet's next address, as a
+    /// script. Kept, and used after a restart. An empty script is refused.
+    pub async fn set_sweep_destination(&self, script: ScriptBuf) -> Result<(), String> {
+        self.shared
+            .destination
+            .set(script)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Where swept outputs go now.
+    pub fn sweep_destination(&self) -> ScriptBuf {
+        self.shared.destination.get()
+    }
+
+    /// How many spendable outputs the sweeper still tracks: those not yet
+    /// spent, and those spent but not yet buried deep enough to forget.
+    pub fn tracked_outputs(&self) -> usize {
+        self.shared.sweeper.tracked_spendable_outputs().len()
     }
 
     /// What the manager reads.
@@ -808,10 +946,8 @@ impl Node {
                         ..Default::default()
                     })
                     .map_err(|e| InvoiceError::Library(format!("{e:?}")))?;
-                s.expected.lock().unwrap().insert(
-                    PaymentHash(invoice.payment_hash().to_byte_array()),
-                    Expected { max_fee_msat: 0 },
-                );
+                s.keep_expectation(invoice.payment_hash().to_byte_array(), 0)
+                    .await?;
                 Ok(MadeInvoice {
                     invoice,
                     opening_fee_msat: None,
@@ -819,8 +955,9 @@ impl Node {
             }
             Receive::NewChannel { fee_msat, offer } => {
                 let (scid, cltv_delta) = s.buy(amount_msat, offer).await?;
-                let invoice =
-                    s.jit_invoice(amount_msat, description, scid, cltv_delta, *fee_msat)?;
+                let invoice = s.jit_invoice(amount_msat, description, scid, cltv_delta)?;
+                s.keep_expectation(invoice.payment_hash().to_byte_array(), *fee_msat)
+                    .await?;
                 Ok(MadeInvoice {
                     invoice,
                     opening_fee_msat: Some(*fee_msat),
@@ -983,7 +1120,6 @@ impl Shared {
         description: Description,
         scid: u64,
         cltv_delta: u32,
-        fee_msat: u64,
     ) -> Result<Bolt11Invoice, InvoiceError> {
         let lib = |e: &dyn std::fmt::Debug| InvoiceError::Library(format!("{e:?}"));
         let (payment_hash, payment_secret) = self
@@ -1019,13 +1155,29 @@ impl Shared {
             .basic_mpp()
             .build_signed(|hash| Secp256k1::new().sign_ecdsa_recoverable(hash, &secret_key))
             .map_err(|e| lib(&e))?;
-        self.expected.lock().unwrap().insert(
-            payment_hash,
-            Expected {
-                max_fee_msat: fee_msat,
-            },
-        );
         Ok(invoice)
+    }
+
+    /// Stores what is expected of an invoice on both devices before the
+    /// invoice is handed back (SL-20, SL-24, SL-29).
+    async fn keep_expectation(
+        &self,
+        payment_hash: [u8; 32],
+        max_fee_msat: u64,
+    ) -> Result<(), InvoiceError> {
+        let now = now_secs();
+        let expectation = Expectation {
+            max_fee_msat,
+            expires_unix: now + INVOICE_EXPIRY_SECS as u64,
+        };
+        self.expectations
+            .record(payment_hash, expectation, now)
+            .await
+            .map_err(|e| {
+                self.logger
+                    .line(Level::Warn, &format!("invoice not stored: {e}"));
+                InvoiceError::NotStored
+            })
     }
 }
 
@@ -1171,24 +1323,24 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
             counterparty_skimmed_fee_msat,
             ..
         } => {
-            // Only invoices this node made, and no more skimmed than agreed (SL-29).
-            let max_fee = shared
-                .expected
-                .lock()
-                .unwrap()
-                .get(&payment_hash)
-                .map(|e| e.max_fee_msat);
+            // Only invoices this node made, not expired, and no more skimmed
+            // than agreed (SL-29), also for an invoice made before a restart.
+            let claim = shared.expectations.judge(
+                &payment_hash.0,
+                counterparty_skimmed_fee_msat,
+                now_secs(),
+            );
             let preimage = match &purpose {
                 PaymentPurpose::Bolt11InvoicePayment { .. } => purpose.preimage(),
                 _ => None,
             };
-            let allowed = counterparty_skimmed_fee_msat <= max_fee.unwrap_or(0);
+            let allowed = claim == Claim::Allowed;
             match (preimage, allowed) {
                 (Some(p), true) => shared.manager.claim_funds(p),
                 _ => {
                     log(
                         Level::Warn,
-                        format!("refused a payment of {amount_msat} msat, skimmed {counterparty_skimmed_fee_msat}"),
+                        format!("refused a payment of {amount_msat} msat, skimmed {counterparty_skimmed_fee_msat}: {claim:?}"),
                     );
                     shared.manager.fail_htlc_backwards(&payment_hash);
                 }
@@ -1202,12 +1354,35 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
         } => {
             // Both copies hold the claim: the library gave this event only
             // after the monitor update was complete (SL-21).
-            shared.expected.lock().unwrap().remove(&payment_hash);
-            let _ = shared.paid.send(Paid {
-                payment_hash: payment_hash.0,
-                amount_msat,
-                sender_intended_msat: sender_intended_total_msat,
-            });
+            // Kept until the caller acknowledges it, and only then given: a
+            // crash after this gives it again on the next start, and a
+            // failure to keep it makes the library give the event again.
+            let now = now_secs();
+            let record = match shared
+                .paid_log
+                .record(PaidRecord {
+                    payment_hash: payment_hash.0,
+                    amount_msat,
+                    sender_intended_msat: sender_intended_total_msat,
+                    received_unix: now,
+                })
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    log(Level::Warn, format!("paid event not kept: {e}"));
+                    return Err(ReplayEvent());
+                }
+            };
+            if let Err(e) = shared.expectations.forget(&payment_hash.0, now).await {
+                log(Level::Warn, format!("expectation not dropped: {e}"));
+                return Err(ReplayEvent());
+            }
+            // None: the caller has acknowledged this sale already, and this is
+            // the library's repeat of its event after a crash.
+            if let Some(record) = record {
+                let _ = shared.paid.send(Paid::from(record));
+            }
         }
         Event::ChannelPending {
             channel_id,
@@ -1260,25 +1435,34 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
                 format!("channel closed {channel_id}: {reason}"),
             );
         }
-        Event::SpendableOutputs { outputs, .. } => {
-            // Stage 1 has no sweeper: keep the descriptors where the state is
-            // kept, on both devices, so that nothing is lost.
-            let n = shared.spendable_counter.fetch_add(1, Ordering::SeqCst);
-            let mut blob = Vec::new();
-            blob.extend_from_slice(&(outputs.len() as u32).to_be_bytes());
-            for o in &outputs {
-                let bytes = o.encode();
-                blob.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
-                blob.extend_from_slice(&bytes);
-            }
-            let key = format!("{}-{n}", now_secs());
-            if KVStore::write(&*shared.background, "spendable_outputs", "", &key, blob)
+        Event::SpendableOutputs {
+            outputs,
+            channel_id,
+        } => {
+            // The sweeper keeps them in the store and spends them to the
+            // shop's address. A static output that pays the shop's own wallet
+            // (the address a close was given) is already there and is left
+            // out: it is not ours to sign. A failure to keep them gives the
+            // event again.
+            let (ours, left): (Vec<_>, Vec<_>) = outputs
+                .into_iter()
+                .partition(|d| crate::sweep::spendable_by_node(&shared.keys, d));
+            let n = ours.len();
+            if shared
+                .sweeper
+                .track_spendable_outputs(ours, channel_id, false, None)
                 .await
                 .is_err()
             {
                 return Err(ReplayEvent());
             }
-            log(Level::Warn, format!("spendable outputs kept: {key}"));
+            log(
+                Level::Info,
+                format!(
+                    "{n} spendable outputs tracked, {} left to the shop's wallet",
+                    left.len()
+                ),
+            );
         }
         other => {
             log(
@@ -1335,6 +1519,7 @@ mod tests {
             },
             max_opening_fee_msat: 1_000_000,
             start_from: StartFrom::Newer,
+            sweep_to: ScriptBuf::new(),
         }
     }
 

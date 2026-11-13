@@ -31,6 +31,15 @@
 #          and brought to the counter's newer copy (SL-25)
 #        - the node offline for 150 blocks and back is fine
 #        - a close pays the shop's wallet (SL-36)
+#        - an invoice made before a restart is paid after it, through the
+#          provider's opening of a channel, with the fee that was recorded
+#          (SL-20, SL-29)
+#        - a node killed between the claim and the acknowledgement gives the
+#          paid event again with the same payment hash, and not after the
+#          acknowledgement (SL-21)
+#        - a channel force-closed by the provider: the node's sweeper spends
+#          the shop's output, after the shop's wait, to the address the caller
+#          last gave, and Core sees it confirmed (SL-24, SL-33)
 #   The script ends `ALL PASS` only if every check printed PASS.
 #
 # Needs: Bitcoin Core 32.1 in ~/.local/opt/bitcoin-core-32.1/bin, LND in
@@ -252,7 +261,7 @@ note "provider $LSP_ID"
 start_shop() { # [extra arguments]; returns 0 once the control port answers
   : >"$BASE/shop.out"
   "$SHOP_BIN" ctl="$SHOP_CTL" data="$SHOP_DIR" rpc="$BTC_RPC" user="$RPC_USER" pass="$RPC_PASS" \
-    provider_id="$LSP_ID" provider_addr="127.0.0.1:$LSP_P2P" device="$DEV_PORT" "$@" \
+    provider_id="$LSP_ID" provider_addr="127.0.0.1:$LSP_P2P" device="$DEV_PORT" sweep_to="$SWEEP0" "$@" \
     >"$BASE/shop.out" 2>"$BASE/shop.err" &
   PIDS[shop]=$!
   local i
@@ -284,8 +293,9 @@ await_status() { # pattern seconds
   note "last status: $s"
   return 1
 }
-# Waits for the sale with this payment hash to be reported paid.
-await_paid() { # hash seconds
+# Waits for the sale with this payment hash to be reported paid, and
+# acknowledges it (the node keeps a paid event until it is acknowledged).
+await_paid_keep() { # hash seconds
   local i
   for i in $(seq 1 "$2"); do
     ctl "$SHOP_CTL" paid >>"$PAID_LOG"
@@ -293,6 +303,10 @@ await_paid() { # hash seconds
     sleep 1
   done
   return 1
+}
+await_paid() { # hash seconds
+  await_paid_keep "$1" "$2" || return 1
+  ctl "$SHOP_CTL" ack "$1" >/dev/null
 }
 hash_of() { lnc decodepayreq "$1" | jq -r .payment_hash; }
 pay() { # invoice [timeout]; returns lncli's status
@@ -309,6 +323,7 @@ shop_invoice() { # sats -> sets INVOICE and the reply
 lsp_channels_with_shop() { ctl "$LSP_CTL" channels | grep -c "cp=$SHOP_ID"; }
 
 say "Start the shop's node"
+SWEEP0=$(bw shop getnewaddress)
 start_shop max_fee_msat=3000000 || die "the node did not start: $(cat "$BASE/shop.out" "$BASE/shop.err" | tail -3)"
 SHOP_ID=$(ctl "$SHOP_CTL" nodeid)
 [ "$SHOP_ID" = "$EXPECTED_ID" ]
@@ -548,6 +563,107 @@ AFTER=$(bw shop getbalance)
 note "shop wallet: $BEFORE -> $AFTER"
 awk -v a="$AFTER" -v b="$BEFORE" 'BEGIN { exit !(a > b) }'
 check "SL-36: the shop's wallet was paid by the close" $?
+
+# ---- an invoice made before a restart ------------------------------------------
+
+say "Invoice made before a restart, paid after it, through the provider's opening"
+for _ in $(seq 1 20); do
+  mine 1
+  sleep 1
+  await_status "channels=0" 1 && break
+done
+await_status "provider=true channels=0" 60
+shop_invoice 20000
+note "$(sed 's/^\(invoice [a-z0-9]\{20\}\)[^ ]*/\1.../' <<<"$REPLY")"
+H10=$(hash_of "$INVOICE")
+INVOICE_10=$INVOICE
+[ -n "$INVOICE" ] && [ "$(field fee_msat "$REPLY")" -gt 0 ] 2>/dev/null
+check "SL-29: with no channel the invoice is one that opens one, with the provider's fee named ($(field fee_msat "$REPLY") msat)" $?
+stop_shop
+start_shop max_fee_msat=3000000
+check "the node starts again with that invoice unpaid" $?
+await_status "provider=true channels=0" 60
+pay "$INVOICE_10" 90s
+check "SL-20: the invoice made before the restart is paid through the provider's opening after it" $?
+await_paid "$H10" 30
+check "SL-20: and reported paid: the recorded expectation survived the restart (paid $H10)" $?
+await_status "channels=1 usable=1" 30
+check "SL-29: the payment opened a channel" $?
+
+# ---- the paid event after a crash ----------------------------------------------
+
+say "Paid event after a crash"
+shop_invoice 3000
+H11=$(hash_of "$INVOICE")
+pay "$INVOICE" 60s && await_paid_keep "$H11" 30
+check "a sale is paid and reported, not yet acknowledged" $?
+sleep 3
+kill -9 "${PIDS[shop]}" 2>/dev/null
+wait "${PIDS[shop]}" 2>/dev/null
+PIDS[shop]=
+note "node killed between the claim and the acknowledgement"
+start_shop max_fee_msat=3000000
+check "the node starts after the kill" $?
+await_status "provider=true channels=1" 60
+: >"$BASE/paid.again"
+for _ in $(seq 1 10); do
+  ctl "$SHOP_CTL" paid >>"$BASE/paid.again"
+  grep -q "paid $H11" "$BASE/paid.again" && break
+  sleep 1
+done
+grep -q "paid $H11 amount_msat=3000000" "$BASE/paid.again"
+check "SL-21: the paid event comes again after the kill, with the same payment hash and amount" $?
+ctl "$SHOP_CTL" ack "$H11" >/dev/null
+ctl "$SHOP_CTL" ack "$H10" >/dev/null
+stop_shop
+start_shop max_fee_msat=3000000
+: >"$BASE/paid.again"
+sleep 3
+ctl "$SHOP_CTL" paid >>"$BASE/paid.again"
+! grep -q "paid $H11" "$BASE/paid.again"
+check "SL-21: after the acknowledgement it does not come again" $?
+await_status "provider=true channels=1 usable=1" 60
+
+# ---- the sweeper ---------------------------------------------------------------
+
+say "Force close by the provider, and the sweeper"
+SWEEP1=$(bw shop getnewaddress)
+SWEEP2=$(bw shop getnewaddress)
+[ "$(ctl "$SHOP_CTL" sweep_to "$SWEEP1")" = "Ok(())" ]
+check "SL-33: the caller sets a destination for the sweeper" $?
+stop_shop
+start_shop max_fee_msat=3000000
+await_status "provider=true channels=1" 60
+[ "$(ctl "$SHOP_CTL" sweep_to "$SWEEP2")" = "Ok(())" ]
+check "SL-33: and changes it again after a restart" $?
+R=$(ctl "$LSP_CTL" forceclose "$SHOP_ID")
+note "provider force-close: $R"
+[ "$R" = "Ok(())" ]
+check "the provider force-closed the channel" $?
+mine 8
+for _ in $(seq 1 30); do
+  [ "$(ctl "$SHOP_CTL" tracked)" -ge 1 ] 2>/dev/null && break
+  mine 1
+  sleep 1
+done
+[ "$(ctl "$SHOP_CTL" tracked)" -ge 1 ] 2>/dev/null
+check "SL-33: the shop's output of the closed channel is tracked by the sweeper: tracked=$(ctl "$SHOP_CTL" tracked)" $?
+# Past the shop's to_self_delay (2016 blocks), in steps so that the node
+# follows the chain.
+for _ in 1 2 3 4; do mine 520; sleep 2; done
+note "height $(bcli getblockcount)"
+GOT=0
+for _ in $(seq 1 60); do
+  mine 1
+  sleep 2
+  GOT=$(bw shop getreceivedbyaddress "$SWEEP2" 1)
+  awk -v g="$GOT" 'BEGIN { exit !(g > 0) }' && break
+done
+note "received at the destination: $GOT"
+awk -v g="$GOT" 'BEGIN { exit !(g > 0) }'
+check "SL-33: the sweeper spent the shop's output to the address the caller gave last, and Core sees it confirmed ($GOT BTC)" $?
+[ "$(bw shop getreceivedbyaddress "$SWEEP1" 0)" = 0.00000000 ]
+check "SL-33: nothing went to the destination that was replaced" $?
 stop_shop
 
 echo

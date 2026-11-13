@@ -21,3 +21,13 @@ pub const SL_40: &str =
 pub const SL_41: &str = "No Lightning channel can take a payment and the provider is not answering, so this counter shows the on-chain code alone.";
 /// A channel is open (SL-45).
 pub const SL_45: &str = "A Lightning channel is open.";
+
+// Placeholders: the sentences for these states are written by the owner, not
+// by the code. Each value is its own name.
+
+/// The invoice could not be stored on both devices, so it was not made (SL-20, SL-24).
+pub const WORDS_NEEDED_SL_20_INVOICE_NOT_STORED: &str = "WORDS_NEEDED_SL_20_INVOICE_NOT_STORED";
+/// Money from a closed channel is waiting to be moved to the shop's wallet (SL-33, SL-36).
+pub const WORDS_NEEDED_SL_33_OUTPUTS_WAITING: &str = "WORDS_NEEDED_SL_33_OUTPUTS_WAITING";
+/// The address the swept money goes to is not usable (SL-33).
+pub const WORDS_NEEDED_SL_33_DESTINATION_REFUSED: &str = "WORDS_NEEDED_SL_33_DESTINATION_REFUSED";

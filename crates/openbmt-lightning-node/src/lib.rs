@@ -6,6 +6,9 @@
 //!   sealed for it (SL-20).
 //! - [`store`]: the store that writes both copies, the second device first
 //!   (SL-21, SL-23, SL-24); [`state`]: which copy is newer (SL-25).
+//! - [`expect`]: what is expected of each invoice, across a restart; [`paid`]:
+//!   the paid events kept until acknowledged; [`sweep`]: the spendable outputs
+//!   swept to the shop's address.
 //! - [`chain`]: chain data from the shop's own Bitcoin Core (SL-26).
 //! - [`provider`]: the choice among a provider's offers (SL-29, SL-30);
 //!   [`room`]: the room to receive and the decision for an amount (SL-40,
@@ -56,10 +59,18 @@
 //! - Only invoices this node made are paid: a payment to another hash, a
 //!   keysend and a payment from the provider that is not for an invoice are
 //!   failed back.
-//! - Spendable outputs of a force close are kept on both devices as they come;
-//!   stage 1 has no sweeper for them.
-//! - Events are given at least once. The counter ignores a paid event for a
-//!   sale it has already marked.
+//! - Spendable outputs of a close on the chain are swept by the library's
+//!   `OutputSweeper` to the address the caller gave ([`sweep`]); its state is
+//!   kept the way the manager is, the counter's copy first.
+//! - What is expected of each invoice (the most the provider may skim, the
+//!   expiry) is one sealed blob in the store, written the strict way, second
+//!   device first, before the invoice is handed back ([`expect`]). A payment
+//!   is claimed only for an invoice that is in it, not expired, with the skim
+//!   at or under the maximum, also after a restart.
+//! - Paid events are given at least once: each is kept in the store until
+//!   `Node::ack_paid`, and a start gives again every one not acknowledged,
+//!   with the same payment hash ([`paid`]). The counter treats a repeat as the
+//!   same payment.
 //! - Nothing here listens: the node makes one connection, to the provider.
 //! - The compact-filter watcher is a seam only ([`chain::FilterWatcher`]).
 //!
@@ -75,8 +86,10 @@ pub mod chain;
 pub mod close;
 pub mod device;
 pub mod device_tcp;
+pub mod expect;
 pub mod logger;
 pub mod node;
+pub mod paid;
 pub mod provider;
 pub mod room;
 pub mod seal;

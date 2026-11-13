@@ -7,10 +7,15 @@
 //!
 //! `shop_regtest ctl=<port> data=<dir> rpc=<port> user=<u> pass=<p>
 //!  provider_id=<pubkey> provider_addr=<host:port> device=<port>
-//!  [start_from=newer|local|device] [max_fee_msat=<n>] [index=<n>]`
+//!  [start_from=newer|local|device] [max_fee_msat=<n>] [index=<n>]
+//!  [sweep_to=<address>]`
 //!
 //! Commands: `nodeid`, `status`, `quote <sats>`, `invoice <sats>`, `paid`,
-//! `sweep <address> <sats>`, `close <address>`, `stop`.
+//! `ack <hash>`, `sweep <address> <sats>`, `sweep_to <address>`,
+//! `close <address>`, `stop`.
+//!
+//! `paid` lists the paid events waiting; each stays kept, and is given again
+//! after a restart, until `ack` with its hash.
 
 use bitcoin::bip32::Xpriv;
 use bitcoin::secp256k1::PublicKey;
@@ -71,6 +76,10 @@ async fn main() {
             .map(|v| v.parse().unwrap())
             .unwrap_or(3_000_000),
         start_from,
+        sweep_to: match args.get("sweep_to") {
+            Some(a) => regtest_address(a).unwrap().script_pubkey(),
+            None => bitcoin::ScriptBuf::new_op_return([0u8; 1]),
+        },
     };
     let node = match Node::start(config).await {
         Ok(n) => Arc::new(n),
@@ -151,16 +160,37 @@ async fn handle(node: &Node, p: &[&str]) -> String {
                     .iter()
                     .map(|b| format!("{b:02x}"))
                     .collect();
-                out.push(format!("paid {hash} amount_msat={}", paid.amount_msat));
+                out.push(format!(
+                    "paid {hash} amount_msat={} at={}",
+                    paid.amount_msat, paid.received_unix
+                ));
             }
             out.join("\n")
         }
+        "ack" => {
+            let hash: Option<[u8; 32]> = p.get(1).and_then(|h| {
+                (0..h.len() / 2)
+                    .map(|i| u8::from_str_radix(&h[2 * i..2 * i + 2], 16).ok())
+                    .collect::<Option<Vec<u8>>>()?
+                    .try_into()
+                    .ok()
+            });
+            match hash {
+                Some(h) => format!("{:?}", node.ack_paid(h).await),
+                None => "ERR ack <hash>".into(),
+            }
+        }
+        "sweep_to" => match regtest_address(p.get(1).copied().unwrap_or("")) {
+            Ok(a) => format!("{:?}", node.set_sweep_destination(a.script_pubkey()).await),
+            Err(e) => format!("ERR {e}"),
+        },
         "sweep" => {
             match Address::from_str(p[1]).and_then(|a| a.require_network(Network::Regtest)) {
                 Ok(a) => format!("{:?}", node.sweep(&a, sats(2))),
                 Err(e) => format!("ERR {e}"),
             }
         }
+        "tracked" => node.tracked_outputs().to_string(),
         "close" => {
             match Address::from_str(p[1]).and_then(|a| a.require_network(Network::Regtest)) {
                 Ok(a) => format!("{:?}", node.close_all(&a)),
@@ -169,6 +199,10 @@ async fn handle(node: &Node, p: &[&str]) -> String {
         }
         _ => "ERR unknown command".into(),
     }
+}
+
+fn regtest_address(a: &str) -> Result<Address, bitcoin::address::ParseError> {
+    Address::from_str(a)?.require_network(Network::Regtest)
 }
 
 fn describe(r: &Receive) -> String {

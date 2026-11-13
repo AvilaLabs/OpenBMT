@@ -115,6 +115,19 @@ fn handle(node: &ldk_node::Node, events: &Mutex<Vec<String>>, p: &[&str]) -> Str
             })
             .collect::<Vec<_>>()
             .join("\n"),
+        // Force-closes every channel with the node whose id is given.
+        "forceclose" => {
+            let Some(id) = p.get(1).and_then(|v| ldk_node::bitcoin::secp256k1::PublicKey::from_str(v).ok()) else {
+                return "ERR forceclose <node id>".into();
+            };
+            let results: Vec<String> = node
+                .list_channels()
+                .iter()
+                .filter(|c| c.counterparty_node_id == id)
+                .map(|c| format!("{:?}", node.force_close_channel(&c.user_channel_id, id, None)))
+                .collect();
+            results.join("\n")
+        }
         "events" => std::mem::take(&mut *events.lock().unwrap()).join("\n"),
         "stop" => format!("{:?}", node.stop()),
         _ => "ERR unknown command".into(),
