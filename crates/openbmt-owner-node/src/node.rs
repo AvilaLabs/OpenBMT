@@ -69,6 +69,7 @@ use std::time::{Duration, Instant};
 use bitcoin::bip32::Xpriv;
 use bitcoin::bip32::Xpub;
 use bitcoin::consensus::deserialize;
+use bitcoin::hashes::Hash;
 use bitcoin::{BlockHash, Network, OutPoint, ScriptBuf, Transaction, Txid};
 use openbmt_core::batch::BatchPolicy;
 use openbmt_core::identity::{DeviceId, Identity};
@@ -83,7 +84,7 @@ use openbmt_net_io::{
 use openbmt_owner::own_book::AllocationBook;
 use openbmt_owner::own_spend::{OwnBuilt, OwnFile, OwnTaken};
 use openbmt_owner::starter::{held_sats, IncomingCoin};
-use openbmt_owner::{Built, Delivery, IssuedRange, Options, Owner, OwnerError, Stage, Taken};
+use openbmt_owner::{Built, Delivery, Held, IssuedRange, Options, Owner, OwnerError, Stage, Taken};
 use openbmt_signer::SignerState;
 use openbmt_watch::{FeeHistory, HeaderChain, Refusal, WellFormedBlock};
 
@@ -2422,34 +2423,36 @@ impl<P: OwnerPort> OwnerNode<P> {
         // holds it.
         let in_block = |txid: &Txid| block.txdata.iter().find(|t| t.compute_txid() == *txid);
         let mut owed = Vec::new();
+        // OC-55: the transaction that spent one of a beaten transaction's
+        // coins, whose outputs a new transaction may spend.
+        let beaten_by = |txid: &Txid, inputs: &[OutPoint]| {
+            inputs
+                .iter()
+                .find_map(|op| spent.get(op).copied().filter(|by| by != txid))
+        };
         for (txid, inputs) in &outbox {
-            if !ids.contains(txid)
-                && inputs
-                    .iter()
-                    .any(|op| spent.get(op).is_some_and(|by| by != txid))
-            {
+            if let Some(by) = beaten_by(txid, inputs).filter(|_| !ids.contains(txid)) {
                 owed.push(Owed {
                     kind: OwedKind::OutboxBeaten,
                     txid: *txid,
                     block: *hash,
                     tx: None,
+                    by: Some(by),
                 });
             }
         }
         // AS-105: an item whose file went to the shop's own wallet is beaten
         // when a block spends one of its coins in another transaction.
         for open in self.owner.own_exported_transactions() {
-            if !ids.contains(&open.txid)
-                && open
-                    .inputs
-                    .iter()
-                    .any(|op| spent.get(op).is_some_and(|by| *by != open.txid))
+            if let Some(by) =
+                beaten_by(&open.txid, &open.inputs).filter(|_| !ids.contains(&open.txid))
             {
                 owed.push(Owed {
                     kind: OwedKind::ExportedBeaten,
                     txid: open.txid,
                     block: *hash,
                     tx: None,
+                    by: Some(by),
                 });
             }
         }
@@ -2460,18 +2463,19 @@ impl<P: OwnerPort> OwnerNode<P> {
                     txid: open.txid,
                     block: *hash,
                     tx: in_block(&open.txid).cloned(),
+                    by: None,
                 });
             }
         }
         for entry in elsewhere {
-            let (kind, tx) = if ids.contains(&entry.txid) {
-                (OwedKind::ElsewherePaid, in_block(&entry.txid).cloned())
-            } else if entry
-                .inputs
-                .iter()
-                .any(|op| spent.get(op).is_some_and(|by| *by != entry.txid))
-            {
-                (OwedKind::ElsewhereBeaten, None)
+            let (kind, tx, by) = if ids.contains(&entry.txid) {
+                (
+                    OwedKind::ElsewherePaid,
+                    in_block(&entry.txid).cloned(),
+                    None,
+                )
+            } else if let Some(by) = beaten_by(&entry.txid, &entry.inputs) {
+                (OwedKind::ElsewhereBeaten, None, Some(by))
             } else {
                 continue;
             };
@@ -2480,6 +2484,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 txid: entry.txid,
                 block: *hash,
                 tx,
+                by,
             });
         }
         owed
@@ -2686,9 +2691,10 @@ impl<P: OwnerPort> OwnerNode<P> {
             return;
         }
         let dir = self.dir.clone();
+        let held = self.held_by(item);
         match self
             .owner
-            .mark_exported_replaced(&txid, |b| write_queue_file(&dir, b))
+            .mark_exported_replaced_held(&txid, held, |b| write_queue_file(&dir, b))
         {
             Ok(()) => {
                 self.note(format!(
@@ -2750,24 +2756,41 @@ impl<P: OwnerPort> OwnerNode<P> {
 
     fn settle_elsewhere_beaten(&mut self, item: &Owed) {
         let txid = item.txid;
-        if !self.owner.signed_elsewhere().iter().any(|e| e.txid == txid) {
+        let Some(old) = self
+            .owner
+            .signed_elsewhere()
+            .iter()
+            .find(|e| e.txid == txid)
+            .map(|e| e.held)
+        else {
             if self.undone_for_item(&txid) {
                 self.forget_owed(item);
             }
             return;
-        }
+        };
         if self.ready_for_queue_write().is_err() {
             self.note(format!("{txid} waits for key 1 recovery"));
             return;
         }
         let dir = self.dir.clone();
+        // OC-55: held until the block that beat it is deep. One that is held
+        // already takes a later block only when its own has left the chain.
+        let old_gone = old.is_some_and(|h| {
+            self.watcher
+                .chain()
+                .height_of(&BlockHash::from_byte_array(h.block))
+                .is_none()
+        });
+        let held = self.held_by(item);
         match self
             .owner
-            .mark_elsewhere_replaced(&txid, |b| write_queue_file(&dir, b))
+            .hold_elsewhere(&txid, held, old_gone, |b| write_queue_file(&dir, b))
         {
             Ok(()) => {
                 self.note(format!(
-                    "{txid} was signed elsewhere and another transaction spent its coins; it is no longer watched"
+                    "{txid} was signed elsewhere and another transaction spent its coins; its \
+                     entries are held until block {} is {UNDO_BLOCKS} deep",
+                    item.block
                 ));
                 if self.undone_for_item(&txid) {
                     self.forget_owed(item);
@@ -2775,6 +2798,74 @@ impl<P: OwnerPort> OwnerNode<P> {
             }
             Err(e) => self.note(format!("{txid} could not be released: {e}")),
         }
+    }
+
+    /// OC-55: the block that beat a transaction, as the queue keeps it.
+    fn held_by(&self, item: &Owed) -> Held {
+        Held {
+            by: item.by.unwrap_or_else(Txid::all_zeros),
+            block: item.block.to_byte_array(),
+            height: self.watcher.chain().height_of(&item.block).unwrap_or(0),
+        }
+    }
+
+    /// OC-55: a transaction that was beaten is no longer watched, and its
+    /// entries are no longer held, when the block that beat it is deep on
+    /// the best chain. One whose block has left stays held and watched.
+    /// Idempotent: a release that was stored leaves nothing to release.
+    fn release_holds(&mut self) {
+        if self.halted.is_some() {
+            return;
+        }
+        let ready: Vec<Txid> = self
+            .owner
+            .signed_elsewhere()
+            .iter()
+            .filter(|e| {
+                e.held.is_some_and(|h| {
+                    openbmt_watch::chain::confirmations(
+                        self.watcher.chain(),
+                        &BlockHash::from_byte_array(h.block),
+                    )
+                    .is_some_and(|n| n >= UNDO_BLOCKS)
+                })
+            })
+            .map(|e| e.txid)
+            .collect();
+        for txid in ready {
+            if self.ready_for_queue_write().is_err() {
+                self.note(format!("{txid} release waits for key 1 recovery"));
+                return;
+            }
+            let dir = self.dir.clone();
+            match self
+                .owner
+                .release_held(&txid, |b| write_queue_file(&dir, b))
+            {
+                Ok(()) => self.note(format!(
+                    "{txid} is no longer watched: the block that beat it is {UNDO_BLOCKS} deep; \
+                     its entries are back in the queue"
+                )),
+                Err(e) => self.note(format!("{txid} could not be released: {e}")),
+            }
+        }
+    }
+
+    /// OC-55: the entries that are held, with the blocks left until the block
+    /// that beat their payment is deep.
+    pub fn held(&self) -> Vec<(openbmt_owner::HeldEntry, u32)> {
+        self.owner
+            .held_entries()
+            .into_iter()
+            .map(|h| {
+                let deep = openbmt_watch::chain::confirmations(
+                    self.watcher.chain(),
+                    &BlockHash::from_byte_array(h.block),
+                )
+                .unwrap_or(0);
+                (h, UNDO_BLOCKS.saturating_sub(deep))
+            })
+            .collect()
     }
 
     /// OC-52: another transaction spent a coin of one in the owner's own
@@ -2799,14 +2890,17 @@ impl<P: OwnerPort> OwnerNode<P> {
             return;
         }
         let dir = self.dir.clone();
+        let held = self.held_by(item);
         match self
             .owner
-            .mark_replaced(&txid, |b| write_queue_file(&dir, b))
+            .mark_replaced_held(&txid, held, |b| write_queue_file(&dir, b))
         {
             Ok(()) => {
                 self.note(format!(
                     "{txid} was replaced: another transaction spent its coins; its entries are \
-                     back in the queue and nothing is signed again by itself"
+                     held until block {} is {UNDO_BLOCKS} deep, and nothing is signed again by \
+                     itself",
+                    item.block
                 ));
                 self.unsend(&txid);
                 self.states.insert(txid, SendState::Replaced);
@@ -2883,6 +2977,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         self.deep_tick();
         self.settle();
         self.settle_owed();
+        self.release_holds();
     }
 
     /// Stop the drivers.

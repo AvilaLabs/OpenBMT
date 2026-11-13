@@ -3,12 +3,13 @@
 use std::collections::BTreeSet;
 
 use bitcoin::consensus::{deserialize, serialize};
+use bitcoin::hashes::Hash;
 use bitcoin::{OutPoint, Transaction, Txid};
 
 use crate::error::{OwnerError, Refusal};
 use crate::state::{Owner, State};
-use crate::types::{Delivery, Stage};
-use crate::MAX_CONFLICT_OUTPOINTS;
+use crate::types::{Delivery, Held, HeldEntry, SignedElsewhere, Stage};
+use crate::{MAX_CONFLICT_OUTPOINTS, MAX_SIGNED_ELSEWHERE};
 
 /// AS-63, AS-68: the reason a refund or a cash-out carries when its
 /// transaction was reported dropped. The words of a returned entry tell it
@@ -46,6 +47,26 @@ fn drop_waiting(st: &mut State, held: &Txid, entry: u32) {
         }
     }
     st.outbox.remove(at);
+}
+
+/// OC-55: keep `record`, a beaten transaction, in the list of those that
+/// are watched, in the order of the list. A record of the same ID is
+/// replaced.
+fn insert_held(st: &mut State, record: SignedElsewhere) -> Result<(), Refusal> {
+    if let Some(at) = st.elsewhere.iter().position(|e| e.txid == record.txid) {
+        if let Some(slot) = st.elsewhere.get_mut(at) {
+            *slot = record;
+        }
+        return Ok(());
+    }
+    if st.elsewhere.len() >= MAX_SIGNED_ELSEWHERE {
+        return Err(Refusal::Full("the list of payments signed elsewhere"));
+    }
+    let place = st
+        .elsewhere
+        .partition_point(|e| e.txid.to_byte_array() < record.txid.to_byte_array());
+    st.elsewhere.insert(place, record);
+    Ok(())
 }
 
 impl Owner {
@@ -289,6 +310,13 @@ impl Owner {
         txid: &Txid,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<(), OwnerError<E>> {
+        let next = self.exported_replaced_next(txid, None)?;
+        self.commit(next, persist)
+    }
+
+    /// The state after an open own-wallet transaction was beaten, with it
+    /// held when `held` is given.
+    fn exported_replaced_next(&self, txid: &Txid, held: Option<Held>) -> Result<State, Refusal> {
         let mut next = self.state.clone();
         let found = next.sessions.iter().find_map(|s| {
             s.own.as_ref()?;
@@ -310,12 +338,15 @@ impl Owner {
                 list.sort();
                 list.dedup();
                 if list.len() > MAX_CONFLICT_OUTPOINTS {
-                    return Err(Refusal::Full("the list of outpoints kept for a refund").into());
+                    return Err(Refusal::Full("the list of outpoints kept for a refund"));
                 }
             }
         }
         self.remove_item(&mut next, &session, number)?;
-        self.commit(next, persist)
+        if held.is_some() {
+            insert_held(&mut next, SignedElsewhere { held, ..record })?;
+        }
+        Ok(next)
     }
 
     /// AS-89: another transaction spent a coin of the transaction that was
@@ -336,6 +367,132 @@ impl Owner {
             .ok_or(Refusal::UnknownTransaction(*txid))?;
         next.elsewhere.remove(at);
         self.commit(next, persist)
+    }
+
+    /// OC-55: a block beat a transaction of the owner's own outbox. It
+    /// leaves the outbox and its entries are returned, but held: the
+    /// transaction stays watched, as one signed elsewhere is, until `held`'s
+    /// block is deep. Held again with the same ID is stored once.
+    pub fn mark_replaced_held<E>(
+        &mut self,
+        txid: &Txid,
+        held: Held,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), OwnerError<E>> {
+        let mut next = self.state.clone();
+        let (at, ids) = waiting(&next, txid).ok_or(Refusal::UnknownTransaction(*txid))?;
+        let (mut inputs, refunds, cash_out) = match next.outbox.get(at).map(|d| &d.what) {
+            Some(Delivery::Transaction {
+                tx,
+                refunds,
+                cash_out,
+                ..
+            }) => (
+                deserialize::<Transaction>(tx)
+                    .map(|t| t.input.iter().map(|i| i.previous_output).collect())
+                    .unwrap_or_else(|_| Vec::new()),
+                refunds.clone(),
+                *cash_out,
+            ),
+            _ => return Err(Refusal::UnknownTransaction(*txid).into()),
+        };
+        inputs.sort();
+        inputs.dedup();
+        for id in ids {
+            if let Some(stage) = next.stage_mut(id) {
+                *stage = Stage::Returned {
+                    reason: "its coins were spent by another transaction".to_string(),
+                };
+            }
+        }
+        next.outbox.remove(at);
+        insert_held(
+            &mut next,
+            SignedElsewhere {
+                txid: *txid,
+                refunds,
+                cash_out,
+                inputs,
+                held: Some(held),
+            },
+        )?;
+        self.commit(next, persist)
+    }
+
+    /// OC-55: a block beat a transaction that was given to a hardware
+    /// signer and is watched. It stays watched and its entries are held. A
+    /// transaction that is held already takes the new block only when the
+    /// block it had is no longer on the chain, which the caller says in
+    /// `old_block_gone`.
+    pub fn hold_elsewhere<E>(
+        &mut self,
+        txid: &Txid,
+        held: Held,
+        old_block_gone: bool,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), OwnerError<E>> {
+        let mut next = self.state.clone();
+        let record = next
+            .elsewhere
+            .iter_mut()
+            .find(|e| e.txid == *txid)
+            .ok_or(Refusal::UnknownTransaction(*txid))?;
+        match record.held {
+            Some(old) if !old_block_gone || old.block == held.block => return Ok(()),
+            _ => record.held = Some(held),
+        }
+        self.commit(next, persist)
+    }
+
+    /// OC-55: a block beat a transaction whose file was given to the shop's
+    /// own wallet, while its session is open (AS-105). As
+    /// [`Owner::mark_exported_replaced`], and the transaction stays watched
+    /// with its entries held.
+    pub fn mark_exported_replaced_held<E>(
+        &mut self,
+        txid: &Txid,
+        held: Held,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), OwnerError<E>> {
+        let next = self.exported_replaced_next(txid, Some(held))?;
+        self.commit(next, persist)
+    }
+
+    /// OC-55: the transaction `txid` is no longer watched and its entries
+    /// are no longer held: the block that beat it is deep. The entries are
+    /// as they were returned. An error when it is not held.
+    pub fn release_held<E>(
+        &mut self,
+        txid: &Txid,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), OwnerError<E>> {
+        let mut next = self.state.clone();
+        let at = next
+            .elsewhere
+            .iter()
+            .position(|e| e.txid == *txid && e.held.is_some())
+            .ok_or(Refusal::UnknownTransaction(*txid))?;
+        next.elsewhere.remove(at);
+        self.commit(next, persist)
+    }
+
+    /// OC-55: every held entry, with the transaction that may still confirm
+    /// and the block that beat it, ascending by entry number.
+    pub fn held_entries(&self) -> Vec<HeldEntry> {
+        let mut out: Vec<HeldEntry> = Vec::new();
+        for e in &self.state.elsewhere {
+            let Some(h) = e.held else { continue };
+            for id in e.refunds.iter().copied().chain(e.cash_out) {
+                out.push(HeldEntry {
+                    id,
+                    txid: e.txid,
+                    block: h.block,
+                    height: h.height,
+                });
+            }
+        }
+        out.sort_by_key(|h| (h.id, h.height));
+        out
     }
 
     /// AS-89: an entry that is in an open approval is paid by another

@@ -179,6 +179,51 @@ fn plan_refunds(
     }
 }
 
+/// OC-55: why an entry whose beaten transaction may still confirm is left out.
+const HELD: &str = "OC-55: WORDS_NEEDED_OC_55_HELD";
+
+/// OC-55: what a new transaction may do for an entry that is held.
+enum HeldWay {
+    /// Not held.
+    Free,
+    /// It may be paid by a transaction that spends all of these coins, which
+    /// no transaction beside the beaten one can spend.
+    Spend(Vec<OutPoint>),
+    /// None of those coins is in the pool: it stays held.
+    Held,
+}
+
+/// OC-55: an entry whose transaction was beaten by a block is in no new
+/// transaction unless that transaction spends one of the beaten
+/// transaction's coins or an output of the transaction that beat it: then
+/// the new one cannot confirm beside the beaten one, whatever happens to the
+/// block.
+fn held_way(st: &State, id: u32, pool: &[Coin]) -> HeldWay {
+    let mut spend: Vec<OutPoint> = Vec::new();
+    let mut held = false;
+    for e in &st.elsewhere {
+        let Some(h) = &e.held else { continue };
+        if !e.refunds.contains(&id) && e.cash_out != Some(id) {
+            continue;
+        }
+        held = true;
+        let way = pool
+            .iter()
+            .find(|c| e.inputs.contains(&c.outpoint) || c.outpoint.txid == h.by);
+        match way {
+            Some(c) => spend.push(c.outpoint),
+            None => return HeldWay::Held,
+        }
+    }
+    if !held {
+        HeldWay::Free
+    } else {
+        spend.sort();
+        spend.dedup();
+        HeldWay::Spend(spend)
+    }
+}
+
 const BLOCKED: &str = "AS-68: the outpoints its dropped transaction spent are used by another \
                        transaction of this session; it waits for the next";
 
@@ -394,12 +439,30 @@ impl Owner {
         let room = |items: &Vec<(Item, Frozen)>| items.len() + 1 < MAX_ITEMS_PER_SESSION;
         let full = "AS-50: the session holds no more items";
         // The refunds (AS-53, AS-55).
-        let ready: Vec<Refund> = next
+        let mut ready: Vec<Refund> = Vec::new();
+        for r in next
             .refunds
             .iter()
             .filter(|r| is_ready(&next, r) && own.is_none_or(|p| p.contains(&r.id)))
-            .cloned()
-            .collect();
+        {
+            let mut r = r.clone();
+            match held_way(&next, r.id, &pool) {
+                HeldWay::Free => {}
+                HeldWay::Spend(mut coins) => {
+                    r.conflict.append(&mut coins);
+                    r.conflict.sort();
+                    r.conflict.dedup();
+                }
+                HeldWay::Held => {
+                    skipped.push(Skipped {
+                        id: r.id,
+                        reason: HELD.to_string(),
+                    });
+                    continue;
+                }
+            }
+            ready.push(r);
+        }
         // AS-68: refunds that were in a dropped transaction are planned first,
         // each set of them together in one transaction of its own.
         let mut constrained: BTreeMap<Vec<OutPoint>, Vec<Refund>> = BTreeMap::new();
@@ -536,7 +599,7 @@ impl Owner {
             .filter(|c| c.stage == Stage::Queued && own.is_none_or(|p| p.contains(&c.id)))
             .cloned()
             .collect();
-        for c in cash {
+        for mut c in cash {
             let skip = |why: String, skipped: &mut Vec<Skipped>| {
                 skipped.push(Skipped {
                     id: c.id,
@@ -551,6 +614,18 @@ impl Owner {
                 skip("SP-21: no change index is left".to_string(), &mut skipped);
                 continue;
             };
+            match held_way(&next, c.id, &pool) {
+                HeldWay::Free => {}
+                HeldWay::Spend(mut coins) => {
+                    c.conflict.append(&mut coins);
+                    c.conflict.sort();
+                    c.conflict.dedup();
+                }
+                HeldWay::Held => {
+                    skip(HELD.to_string(), &mut skipped);
+                    continue;
+                }
+            }
             let (amount, send_all) = match c.amount {
                 CashAmount::Sats(n) => (n, false),
                 CashAmount::All => (0, true),

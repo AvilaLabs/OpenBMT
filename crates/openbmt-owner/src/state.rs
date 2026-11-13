@@ -950,7 +950,12 @@ impl Owner {
         }
         // AS-68: a dropped transaction may still confirm; the entry that was
         // in it cannot be cancelled while its outpoints are kept.
-        if next.conflict_mut(id).is_some_and(|c| !c.is_empty()) {
+        // OC-55: nor while the transaction that beat it may come back.
+        let is_held = next
+            .elsewhere
+            .iter()
+            .any(|e| e.held.is_some() && (e.refunds.contains(&id) || e.cash_out == Some(id)));
+        if is_held || next.conflict_mut(id).is_some_and(|c| !c.is_empty()) {
             return Err(Refusal::WrongStage(
                 "its dropped transaction may still confirm; ask for it again",
             )
@@ -1154,6 +1159,7 @@ pub(crate) fn exported_in(session: &OpenSession) -> Result<Vec<SignedElsewhere>,
             refunds: refunds.clone(),
             cash_out: *cash_out,
             inputs,
+            held: None,
         });
     }
     Ok(gone)

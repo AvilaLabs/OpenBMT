@@ -6,6 +6,7 @@ mod common;
 
 use std::convert::Infallible;
 
+use bitcoin::hashes::Hash;
 use bitcoin::psbt::Psbt;
 use bitcoin::sighash::EcdsaSighashType;
 use bitcoin::Transaction;
@@ -1186,4 +1187,101 @@ fn base64(b: &[u8]) -> String {
         }
     }
     out
+}
+
+#[test]
+fn oc_55_a_held_transaction_is_stored_as_version_6_and_an_older_queue_still_reads() {
+    let mut f = fixture();
+    let file = export(&mut f);
+    abandon(&mut f);
+    // Watched, nothing held: version 4, as before, and it reads.
+    assert_eq!(f.rig.owner_store.last()[4], 4);
+    restart(&mut f);
+    assert!(f.rig.owner.held_entries().is_empty());
+    let held = openbmt_owner::Held {
+        by: bitcoin::Txid::from_byte_array([9; 32]),
+        block: [3; 32],
+        height: 7,
+    };
+    let store = &f.rig.owner_store;
+    ok(f.rig
+        .owner
+        .hold_elsewhere(&file.txid, held, false, |b| store.put(b)));
+    assert_eq!(f.rig.owner_store.last()[4], 6);
+    restart(&mut f);
+    assert_eq!(f.rig.owner.signed_elsewhere()[0].held, Some(held));
+    let id = f.rig.owner.refunds()[0].id;
+    assert_eq!(f.rig.owner.held_entries().len(), 1);
+    assert_eq!(f.rig.owner.held_entries()[0].id, id);
+    // Held again with another block changes nothing while its block stands.
+    let other = openbmt_owner::Held {
+        block: [4; 32],
+        ..held
+    };
+    let store = &f.rig.owner_store;
+    ok(f.rig
+        .owner
+        .hold_elsewhere(&file.txid, other, false, |b| store.put(b)));
+    assert_eq!(f.rig.owner.signed_elsewhere()[0].held, Some(held));
+    // And takes the new block once its own has left.
+    let store = &f.rig.owner_store;
+    ok(f.rig
+        .owner
+        .hold_elsewhere(&file.txid, other, true, |b| store.put(b)));
+    assert_eq!(f.rig.owner.signed_elsewhere()[0].held, Some(other));
+    // It cannot be cancelled.
+    let store = &f.rig.owner_store;
+    assert!(f.rig.owner.cancel(id, |b| store.put(b)).is_err());
+    // Released: no longer watched, and the queue is version 1 again.
+    let store = &f.rig.owner_store;
+    ok(f.rig.owner.release_held(&file.txid, |b| store.put(b)));
+    assert!(f.rig.owner.signed_elsewhere().is_empty());
+    assert!(f.rig.owner.held_entries().is_empty());
+    let store = &f.rig.owner_store;
+    assert!(f
+        .rig
+        .owner
+        .release_held(&file.txid, |b| store.put(b))
+        .is_err());
+}
+
+#[test]
+fn oc_55_a_held_entry_is_built_only_with_a_coin_that_conflicts_with_the_beaten_transaction() {
+    let mut f = fixture();
+    let file = export(&mut f);
+    abandon(&mut f);
+    // A coin that is an output of the transaction that beat it.
+    let by_coin = coin(5, 0, 500_000);
+    let held = openbmt_owner::Held {
+        by: by_coin.outpoint.txid,
+        block: [3; 32],
+        height: 7,
+    };
+    let store = &f.rig.owner_store;
+    ok(f.rig
+        .owner
+        .hold_elsewhere(&file.txid, held, false, |b| store.put(b)));
+    let build = |f: &mut Fixture, coins: &[openbmt_spend::Coin]| {
+        let random = f.rig.random();
+        let store = &f.rig.owner_store;
+        let (built, signer) = ok(f.rig.owner.build_request_for_signer(
+            coins,
+            1_000,
+            1,
+            f.rig.lock_height,
+            NOW,
+            &random,
+            |b| store.put(b),
+        ));
+        (built.skipped, signer)
+    };
+    // A free coin of the wallet: the entry stays held and says so.
+    let (skipped, signer) = build(&mut f, &[coin(3, 0, 500_000)]);
+    assert!(signer.is_none());
+    assert_eq!(skipped.len(), 1);
+    assert!(skipped[0].reason.contains("WORDS_NEEDED_OC_55_HELD"));
+    // A coin of the transaction that beat it is enough.
+    let (skipped, signer) = build(&mut f, &[coin(3, 0, 500_000), by_coin.clone()]);
+    assert!(skipped.is_empty(), "{skipped:?}");
+    assert!(signer.is_some());
 }

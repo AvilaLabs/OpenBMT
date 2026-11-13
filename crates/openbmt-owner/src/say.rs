@@ -106,6 +106,15 @@ fn fault(heading: &str, what: impl Into<String>, code: &'static str) -> Words {
     .code(code)
 }
 
+/// OC-55: what the owner is told about an entry that is held, with the
+/// blocks left until the block that beat its payment is deep. The words are
+/// still to be written.
+pub fn held_words(blocks_left: u32) -> Words {
+    crate::own_say::needed("WORDS_NEEDED_OC_55_HELD")
+        .code("OC-55")
+        .detail(blocks_left.to_string())
+}
+
 impl Stage {
     /// What the owner is told about one queue entry of this `kind` at this
     /// stage. A returned entry is told two ways: one the network dropped,

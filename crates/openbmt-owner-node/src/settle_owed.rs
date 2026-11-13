@@ -18,6 +18,12 @@
 //! view's undo record: after the block's hash, an item of a paid kind has the
 //! transaction's length (u32 LE, 0 for none) and its bytes. A file in which
 //! no item carries one is written as version 1, as before.
+//!
+//! Version 3 (OC-55) is written when an item that a block beat carries the
+//! transaction in that block that spent one of its coins: an item of a
+//! beaten kind then has, after the block's hash, a flag and when it is set
+//! the transaction's ID (32 bytes). Items of a paid kind are as in version
+//! 2. A file in which no beaten item carries one is written as before.
 
 use std::fmt;
 
@@ -75,7 +81,7 @@ impl OwedKind {
     }
 
     /// Whether the block paid the transaction, so that it may carry it.
-    fn paid(self) -> bool {
+    pub fn paid(self) -> bool {
         matches!(self, Self::ExportedPaid | Self::ElsewherePaid)
     }
 
@@ -104,6 +110,10 @@ pub struct Owed {
     /// the ID `txid`. None for the other kinds, and for an item written
     /// before the file had it.
     pub tx: Option<Transaction>,
+    /// OC-55: for a beaten kind, the transaction in the block that spent one
+    /// of its coins. None for the paid kinds, and for an item written before
+    /// the file had it.
+    pub by: Option<Txid>,
 }
 
 impl Owed {
@@ -218,10 +228,11 @@ impl SettleOwed {
     /// The file for the list as it is.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = wire::start(&MAGIC_SETTLE_OWED, 4 + self.items.len() * OWED_LEN);
-        let with_tx = self.items.iter().any(|i| i.tx.is_some());
+        let with_by = self.items.iter().any(|i| i.by.is_some());
+        let with_tx = with_by || self.items.iter().any(|i| i.tx.is_some());
         if with_tx {
             if let Some(version) = out.get_mut(4) {
-                *version = 2;
+                *version = if with_by { 3 } else { 2 };
             }
         }
         out.extend_from_slice(&wire::len_u32(self.items.len()).to_le_bytes());
@@ -234,6 +245,15 @@ impl SettleOwed {
                 out.extend_from_slice(&wire::len_u32(bytes.len()).to_le_bytes());
                 out.extend_from_slice(&bytes);
             }
+            if with_by && !item.kind.paid() {
+                match &item.by {
+                    Some(by) => {
+                        out.push(1);
+                        out.extend_from_slice(&by.to_byte_array());
+                    }
+                    None => out.push(0),
+                }
+            }
         }
         out
     }
@@ -241,7 +261,7 @@ impl SettleOwed {
     /// OC-52: read a file back, strictly.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, OwedError> {
         let (mut r, version) =
-            Reader::framed_up_to(bytes, &MAGIC_SETTLE_OWED, 2).map_err(corrupt)?;
+            Reader::framed_up_to(bytes, &MAGIC_SETTLE_OWED, 3).map_err(corrupt)?;
         if bytes.len() > MAX_OWED_TX_BYTES + MAX_OWED * OWED_LEN + 16 {
             return Err(OwedError::TooMany);
         }
@@ -275,11 +295,21 @@ impl SettleOwed {
             } else {
                 None
             };
+            let by = if version >= 3 && !kind.paid() {
+                match r.u8().map_err(corrupt)? {
+                    0 => None,
+                    1 => Some(Txid::from_byte_array(r.array::<32>().map_err(corrupt)?)),
+                    _ => return Err(OwedError::Corrupt("a flag is not 0 or 1")),
+                }
+            } else {
+                None
+            };
             let item = Owed {
                 kind,
                 txid,
                 block,
                 tx,
+                by,
             };
             if let Some(last) = items.last() {
                 if last.key() >= item.key() {
@@ -312,6 +342,7 @@ mod tests {
             txid: Txid::from_byte_array([n; 32]),
             block: BlockHash::from_byte_array([block; 32]),
             tx: None,
+            by: None,
         }
     }
 
@@ -427,6 +458,7 @@ mod tests {
                 }),
                 block: BlockHash::from_byte_array([1; 32]),
                 tx: None,
+                by: None,
             })
             .collect();
         assert_eq!(SettleOwed::new().merged(&many), Err(OwedError::TooMany));
@@ -467,6 +499,7 @@ mod tests {
             txid: tx.compute_txid(),
             block: BlockHash::from_byte_array([6; 32]),
             tx: Some(tx),
+            by: None,
         }
     }
 
@@ -497,5 +530,33 @@ mod tests {
         let mut bare = sample().to_bytes();
         bare[4] = 2;
         assert!(SettleOwed::from_bytes(&bare).is_err());
+    }
+
+    #[test]
+    fn oc_55_a_beaten_item_keeps_the_transaction_that_beat_it_in_version_3() {
+        let mut beaten = item(OwedKind::OutboxBeaten, 4, 9);
+        beaten.by = Some(Txid::from_byte_array([77; 32]));
+        let list = SettleOwed::new()
+            .merged(&[
+                beaten.clone(),
+                paid_with_tx(1),
+                item(OwedKind::ElsewhereBeaten, 2, 9),
+            ])
+            .unwrap();
+        let bytes = list.to_bytes();
+        assert_eq!(bytes[4], 3);
+        let read = SettleOwed::from_bytes(&bytes).unwrap();
+        assert_eq!(read, list);
+        assert!(read.items().iter().any(|i| i.by == beaten.by));
+        // No item with one: version 1 or 2, as before, and they read.
+        let old = SettleOwed::new()
+            .merged(&[item(OwedKind::OutboxBeaten, 4, 9)])
+            .unwrap();
+        assert_eq!(old.to_bytes()[4], 1);
+        assert_eq!(SettleOwed::from_bytes(&old.to_bytes()).unwrap(), old);
+        // A version 3 file that no item needs is refused.
+        let mut v3 = old.to_bytes();
+        v3[4] = 3;
+        assert!(SettleOwed::from_bytes(&v3).is_err());
     }
 }

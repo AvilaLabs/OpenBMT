@@ -19,6 +19,8 @@ fuzz_target!(|data: &[u8]| {
             txid: Txid::from_byte_array([n; 32]),
             block: BlockHash::from_byte_array([n.wrapping_add(1); 32]),
             tx: None,
+            // OC-55: the beaten kinds carry the transaction that beat them.
+            by: (!kind.paid()).then(|| Txid::from_byte_array([n.wrapping_add(2); 32])),
         };
         let valid = SettleOwed::new()
             .merged(&[

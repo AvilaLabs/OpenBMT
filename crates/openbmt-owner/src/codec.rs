@@ -10,7 +10,8 @@
 //!   | version 2 and 3: Box claims
 //!   | version 3 and 4: cash-out prices | refund books
 //!   | version 4 and 5: transactions signed elsewhere
-//!   | version 5 only: open sessions of the shop's own wallet
+//!   | version 5 and 6: open sessions of the shop's own wallet
+//!   | version 6: held flags of the transactions signed elsewhere
 //! ```
 //!
 //! The version is 1 until the queue holds anything of a Box (a claim, a
@@ -43,6 +44,13 @@
 //! u32 count and the numbers, ascending). The sessions of the Key app are
 //! written in their own list as before and never hold an own-spend session.
 //!
+//! The version is 6 while a transaction that is watched was beaten by a block
+//! and its entries are held (OC-55), whatever else the queue holds. Version 6
+//! has the lists of version 5 (the own-spend sessions possibly none) and, in
+//! each transaction signed elsewhere after the outpoints, a flag and, when it
+//! is set, the transaction that beat it (32), the block (32) and its height
+//! u32. A snapshot with nothing held is never written as version 6.
+//!
 //! Every list is a u32 count and then its entries in ascending order of
 //! their key (the issued ranges: counter, start, count and the time the
 //! batch was signed, ascending by start and never overlapping, OC-10, OC-11,
@@ -67,7 +75,7 @@ use openbmt_spend::dust_limit;
 use crate::error::{Refusal, RestoreError};
 use crate::state::{outputs_fit, Frozen, OpenSession, Owner, SaleEntry, State};
 use crate::types::{
-    CashAmount, CashOut, Deliverable, Delivery, FeePayer, IssuedRange, Options, QueuedBatch,
+    CashAmount, CashOut, Deliverable, Delivery, FeePayer, Held, IssuedRange, Options, QueuedBatch,
     QueuedBoxClaim, QueuedPairing, QueuedSettings, RateNote, Refund, RefundBooks, RefundPacking,
     SaleFacts, SaleKey, SignedElsewhere, Stage,
 };
@@ -234,13 +242,15 @@ fn uses_books(st: &State) -> bool {
 pub(crate) fn encode(owner: &Owner, st: &State) -> Result<Vec<u8>, Refusal> {
     let mut out = wire::start(&MAGIC_OWNER_QUEUE, 1024);
     let own_sessions: Vec<&OpenSession> = st.sessions.iter().filter(|s| s.own.is_some()).collect();
-    let with_own = !own_sessions.is_empty();
+    let with_held = st.elsewhere.iter().any(|e| e.held.is_some());
+    let with_own = !own_sessions.is_empty() || with_held;
     let with_elsewhere = !st.elsewhere.is_empty() || with_own;
     let with_books = with_elsewhere || uses_books(st);
     let with_box = with_books || uses_box(st);
     if with_box {
         if let Some(v) = out.get_mut(4) {
             *v = match (with_own, with_elsewhere, with_books) {
+                (true, _, _) if with_held => 6,
                 (true, _, _) => 5,
                 (false, true, _) => 4,
                 (false, false, true) => 3,
@@ -440,11 +450,22 @@ pub(crate) fn encode(owner: &Owner, st: &State) -> Result<Vec<u8>, Refusal> {
                 None => out.push(0),
             }
             put_outpoints(&mut out, &e.inputs);
+            if with_held {
+                match &e.held {
+                    Some(h) => {
+                        out.push(1);
+                        put_txid(&mut out, &h.by);
+                        out.extend_from_slice(&h.block);
+                        out.extend_from_slice(&h.height.to_le_bytes());
+                    }
+                    None => out.push(0),
+                }
+            }
         }
     }
     if with_own {
         put_u32(&mut out, own_sessions.len());
-        for s in own_sessions {
+        for s in &own_sessions {
             out.extend_from_slice(&s.id);
             out.extend_from_slice(&s.created_at.to_le_bytes());
             put_blob(&mut out, &s.request);
@@ -632,7 +653,7 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
     let version = r.u8().map_err(d)?;
     let with_box = match version {
         1 => false,
-        2..=5 => true,
+        2..=6 => true,
         v => return Err(d(DecodeError::UnsupportedVersion(v))),
     };
     if r.array::<32>().map_err(d)? != owner.wallet_id {
@@ -985,15 +1006,29 @@ pub(crate) fn decode(owner: &Owner, bytes: &[u8]) -> Result<State, RestoreError>
             let refunds = read_ids(&mut r, MAX_REFUNDS_PER_TX).map_err(d)?;
             let cash_out = read_opt_id(&mut r).map_err(d)?;
             let inputs = read_outpoints(&mut r).map_err(d)?;
+            let held = if version >= 6 {
+                match r.u8().map_err(d)? {
+                    0 => None,
+                    1 => Some(Held {
+                        by: read_txid(&mut r).map_err(d)?,
+                        block: r.array().map_err(d)?,
+                        height: r.u32_le().map_err(d)?,
+                    }),
+                    k => return Err(d(DecodeError::UnknownKind(k))),
+                }
+            } else {
+                None
+            };
             st.elsewhere.push(SignedElsewhere {
                 txid,
                 refunds,
                 cash_out,
                 inputs,
+                held,
             });
         }
     }
-    if version == 5 {
+    if version >= 5 {
         // AS-107: the open sessions of the shop's own wallet.
         let n = r.count(MAX_OPEN_SESSIONS, 44).map_err(d)?;
         for _ in 0..n {

@@ -16,7 +16,7 @@
 //! entry before it). It is read strictly: a length that is not a whole number
 //! of entries, a check that does not match, a flag that is not 0 or 1, a field
 //! that a kind does not use and is not zero, an entry that repeats an earlier
-//! one and a currency that is not three capital letters all refuse the whole
+//! one that stands (a payment may be written again after its undoing, OC-55) and a currency that is not three capital letters all refuse the whole
 //! file, and so does an undoing that names no earlier entry. Nothing is
 //! repaired.
 
@@ -95,10 +95,14 @@ pub struct PaidEntry {
 }
 
 impl PaidEntry {
-    /// The entry's kind, number and transaction: two entries with the same
-    /// are the same payment, written once.
-    fn key(&self) -> (u8, u32, Txid) {
-        (self.kind_byte(), self.number, self.txid)
+    /// The kind, number and transaction of the payment this entry is, or
+    /// undoes.
+    fn payment_key(&self) -> (u8, u32, Txid) {
+        (
+            self.undoes_kind().unwrap_or(self.kind_byte()),
+            self.number,
+            self.txid,
+        )
     }
 
     fn kind_byte(&self) -> u8 {
@@ -268,18 +272,25 @@ impl PaidEntry {
     }
 }
 
-/// OC-50: the entries that stand: every payment that no later entry undoes,
-/// and no undoing. A refund paid, undone and paid again by another
-/// transaction is the last payment only.
+/// OC-50, OC-55: the entries that stand: every payment that no later entry
+/// undoes, and no undoing. A refund paid, undone and paid again by another
+/// transaction is the last payment only, and one paid, undone because its
+/// transaction was beaten and paid again by the same transaction, once it
+/// confirmed after all, is that payment (its entry written again after the
+/// undoing).
 pub fn standing(entries: &[PaidEntry]) -> Vec<PaidEntry> {
-    let undone: std::collections::BTreeSet<(u8, u32, Txid)> = entries
-        .iter()
-        .filter_map(|e| e.undoes_kind().map(|k| (k, e.number, e.txid)))
-        .collect();
-    entries
-        .iter()
-        .filter(|e| !e.is_undone() && !undone.contains(&e.key()))
-        .copied()
+    let mut at: std::collections::BTreeMap<(u8, u32, Txid), usize> = Default::default();
+    for (i, e) in entries.iter().enumerate() {
+        if e.is_undone() {
+            at.remove(&e.payment_key());
+        } else {
+            at.insert(e.payment_key(), i);
+        }
+    }
+    let mut keep: Vec<usize> = at.into_values().collect();
+    keep.sort_unstable();
+    keep.into_iter()
+        .filter_map(|i| entries.get(i).copied())
         .collect()
 }
 
@@ -315,19 +326,30 @@ impl PaidLog {
         }
         r.finish()?;
         let mut entries: Vec<PaidEntry> = Vec::with_capacity(chunks.len());
-        let mut seen = std::collections::BTreeSet::new();
+        // Whether each payment stands now: true after its entry, false
+        // after its undoing.
+        let mut standing_now: std::collections::BTreeMap<(u8, u32, Txid), bool> =
+            Default::default();
         for chunk in chunks {
             let entry = PaidEntry::read(chunk)?;
-            if !seen.insert(entry.key()) {
-                return Err(DecodeError::NonCanonical("an entry repeats an earlier one"));
-            }
-            if let Some(kind) = entry.undoes_kind() {
-                // OC-50: an undoing names an entry that is before it.
-                if !seen.contains(&(kind, entry.number, entry.txid)) {
+            let key = entry.payment_key();
+            let now = standing_now.get(&key).copied();
+            if entry.is_undone() {
+                // OC-50: an undoing names a payment that is before it and
+                // not undone yet.
+                if now != Some(true) {
                     return Err(DecodeError::NonCanonical(
                         "an undoing names no earlier entry",
                     ));
                 }
+                standing_now.insert(key, false);
+            } else {
+                // OC-55: a payment may be written again only after its
+                // undoing.
+                if now == Some(true) {
+                    return Err(DecodeError::NonCanonical("an entry repeats an earlier one"));
+                }
+                standing_now.insert(key, true);
             }
             entries.push(entry);
         }
@@ -356,13 +378,12 @@ impl PaidLog {
     }
 
     /// OC-50: the undoings that the payments `txid` made, and that are not
-    /// undone yet, need: one for each entry of that transaction.
+    /// undone yet, need: one for each entry of that transaction that stands.
     pub fn undoings_for(&self, txid: &Txid, at: u64) -> Vec<PaidEntry> {
-        self.entries
+        standing(&self.entries)
             .iter()
             .filter(|e| e.txid == *txid)
             .filter_map(|e| e.undoing(at))
-            .filter(|u| !self.holds(u))
             .collect()
     }
 
@@ -371,9 +392,25 @@ impl PaidLog {
         &self.entries
     }
 
-    /// Whether the log already holds this payment.
+    /// Whether the log already holds this entry as it stands: a payment that
+    /// is not undone, or an undoing of one that is.
     pub fn holds(&self, entry: &PaidEntry) -> bool {
-        self.entries.iter().any(|e| e.key() == entry.key())
+        let stands = self.stands(&entry.payment_key());
+        if entry.is_undone() {
+            !stands
+        } else {
+            stands
+        }
+    }
+
+    /// Whether the payment of this kind, number and transaction was written
+    /// and not undone since.
+    fn stands(&self, key: &(u8, u32, Txid)) -> bool {
+        self.entries
+            .iter()
+            .rev()
+            .find(|e| e.payment_key() == *key)
+            .is_some_and(|e| !e.is_undone())
     }
 
     /// OC-48: the file the log would be with `entries` added, built before
@@ -384,11 +421,7 @@ impl PaidLog {
         let mut next = self.clone();
         for e in entries {
             // An undoing is only added for a payment the log holds.
-            let names_one = e.undoes_kind().is_none_or(|k| {
-                next.entries
-                    .iter()
-                    .any(|p| p.key() == (k, e.number, e.txid))
-            });
+            let names_one = !e.is_undone() || next.stands(&e.payment_key());
             if names_one && !next.holds(e) {
                 next.entries.push(*e);
             }
@@ -630,6 +663,42 @@ mod tests {
         assert_eq!(standing(log.entries()), vec![cash_out(3), b]);
         assert_eq!(log.undoings_for(&a.txid, 1), Vec::new());
         assert_eq!(log.undoings_for(&b.txid, 1), vec![b.undoing(1).unwrap()]);
+    }
+
+    #[test]
+    fn oc_55_a_payment_may_be_written_again_after_its_undoing_and_stands_once() {
+        let paid = refund(1, Some(7));
+        let log = log_of(&[paid])
+            .with_added(&[undoing_of(&paid)])
+            .unwrap()
+            .unwrap();
+        // Its transaction came back: the payment is written again.
+        let mut again = paid;
+        again.at += 9_000;
+        let back = log.with_added(&[again]).unwrap().unwrap();
+        assert_eq!(back.entries().len(), 3);
+        assert_eq!(standing(back.entries()), vec![again]);
+        let bytes = back.to_bytes();
+        assert_eq!(bytes[4], 2);
+        assert_eq!(PaidLog::from_bytes(&bytes).unwrap(), back);
+        // Written once more while it stands, it is a no-op; and it can be
+        // undone again.
+        assert_eq!(back.with_added(&[again]), Ok(None));
+        assert_eq!(back.undoings_for(&paid.txid, 5).len(), 1);
+        // In a file, the same payment twice with no undoing between them,
+        // and an undoing of what is undone already, are refused.
+        let mut twice = wire::start(&MAGIC_PAID_LOG, 0);
+        twice[4] = 2;
+        for e in [paid, undoing_of(&paid), paid, paid] {
+            e.write(&mut twice);
+        }
+        assert!(PaidLog::from_bytes(&twice).is_err());
+        let mut undone_twice = wire::start(&MAGIC_PAID_LOG, 0);
+        undone_twice[4] = 2;
+        for e in [paid, undoing_of(&paid), undoing_of(&paid)] {
+            e.write(&mut undone_twice);
+        }
+        assert!(PaidLog::from_bytes(&undone_twice).is_err());
     }
 
     #[test]

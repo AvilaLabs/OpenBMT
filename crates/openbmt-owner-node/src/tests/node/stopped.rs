@@ -267,6 +267,7 @@ fn oc_53_an_owed_settlement_from_a_block_off_the_chain_is_dropped_at_any_tip_hei
             txid,
             block: BlockHash::from_byte_array([9; 32]),
             tx: None,
+            by: None,
         }])
         .unwrap();
     fs::write(dir.path().join(crate::SETTLE_OWED_FILE), stale.to_bytes()).unwrap();
@@ -754,6 +755,8 @@ fn oc_50_a_refund_beaten_and_paid_again_is_one_disposal() {
         (log[0].number, first, 0)
     );
     assert!(crate::standing(&log).is_empty());
+    // OC-55: held until the block that beat it is deep.
+    rig.mine_empty(100);
     let second = pay_again(&mut rig);
     assert_ne!(first, second);
     let log = rig.node.paid_log().to_vec();
@@ -840,5 +843,315 @@ fn oc_50_a_beaten_payment_that_waited_for_key_1_recovery_is_undone_once_after_it
     assert_eq!(
         rig.node.paid_log().iter().filter(|e| e.is_undone()).count(),
         1
+    );
+}
+
+// ---- OC-55: a beaten transaction can come back ---------------------------------------------
+
+const HELD_WORDS: &str = "WORDS_NEEDED_OC_55_HELD";
+
+/// Two refunds in one transaction, C, that was given to a hardware signer
+/// and abandoned, so that it is signed elsewhere; and a coin Y that C does
+/// not spend, which another transaction can pay from.
+fn signed_elsewhere_pair(rig: &mut Rig) -> (Transaction, [u32; 2]) {
+    let r1 = rig.queue_refund(10_000);
+    let write = rig.node.queue_writer();
+    let r2 = rig
+        .node
+        .owner_mut()
+        .unwrap()
+        .queue_refund(sale(1), "Mia", external(10), 10_000, None, &write)
+        .unwrap();
+    rig.fund(300_000);
+    let (_, session) = rig.node.build_request_for_signer(1_000, NOW).unwrap();
+    let session = session.expect("the refunds are a spend for the signer");
+    let mut signer = key1();
+    let file = rig
+        .node
+        .export_for_signer(
+            &session,
+            0,
+            &mut signer,
+            &kit().accounts[0],
+            NOW,
+            |_| Ok(()),
+        )
+        .unwrap();
+    let tx = bitcoin::psbt::Psbt::deserialize(&file.psbt)
+        .unwrap()
+        .unsigned_tx;
+    let write = rig.node.queue_writer();
+    rig.node
+        .owner_mut()
+        .unwrap()
+        .abandon_session(&session, &write)
+        .unwrap();
+    assert_eq!(tx.input.len(), 1, "C spends one coin, X");
+    assert_eq!(rig.node.owner().signed_elsewhere()[0].refunds.len(), 2);
+    // Y, a coin of the wallet that C does not spend.
+    let y = tx_from(
+        OutPoint::new(Txid::from_byte_array([8; 32]), 0),
+        &[(&receive(3), 200_000)],
+    );
+    rig.mine(&[y]);
+    rig.mine_empty(5);
+    (tx, [r1, r2])
+}
+
+/// A, another transaction that spends X and pays the first refund's
+/// destination. It returns change to the wallet, or sends all of it away.
+fn replacement_a(c: &Transaction) -> Transaction {
+    tx_from(
+        c.input[0].previous_output,
+        &[(&external(9), 10_000), (&receive(2), 280_000)],
+    )
+}
+
+fn replacement_a_without_change(c: &Transaction) -> Transaction {
+    tx_from(
+        c.input[0].previous_output,
+        &[(&external(9), 10_000), (&external(11), 280_000)],
+    )
+}
+
+/// What a build for the signer does with the held entries: the coins the
+/// spend takes, or none when nothing was built, and the entries it left out
+/// with the reason.
+fn try_build(rig: &mut Rig) -> (Vec<OutPoint>, Vec<(u32, String)>) {
+    // An earlier try leaves its session open, with the same ID.
+    for open in rig.node.owner().open_sessions() {
+        let write = rig.node.queue_writer();
+        rig.node
+            .owner_mut()
+            .unwrap()
+            .abandon_session(&open, &write)
+            .unwrap();
+    }
+    let (built, session) = match rig.node.build_request_for_signer(1_000, NOW) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("build refused: {e}");
+            return (Vec::new(), Vec::new());
+        }
+    };
+    let skipped = built
+        .skipped
+        .iter()
+        .map(|s| (s.id, s.reason.clone()))
+        .collect();
+    let Some(session) = session else {
+        return (Vec::new(), skipped);
+    };
+    let mut signer = key1();
+    let file = rig
+        .node
+        .export_for_signer(
+            &session,
+            0,
+            &mut signer,
+            &kit().accounts[0],
+            NOW,
+            |_| Ok(()),
+        )
+        .unwrap();
+    let tx = bitcoin::psbt::Psbt::deserialize(&file.psbt)
+        .unwrap()
+        .unsigned_tx;
+    (
+        tx.input.iter().map(|i| i.previous_output).collect(),
+        skipped,
+    )
+}
+
+#[test]
+fn oc_55_n13c_01_while_the_beating_block_is_shallow_the_entries_are_in_no_new_payment() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (c, [r1, r2]) = signed_elsewhere_pair(&mut rig);
+    let a = replacement_a_without_change(&c);
+    rig.mine(std::slice::from_ref(&a));
+    // C is still watched and both entries are held.
+    let held = rig.node.owner().held_entries();
+    assert_eq!(held.iter().map(|h| h.id).collect::<Vec<_>>(), vec![r1, r2]);
+    assert!(held.iter().all(|h| h.txid == c.compute_txid()));
+    assert_eq!(rig.node.held().len(), 2);
+    assert_eq!(rig.node.held()[0].1, 99);
+    // B, from Y, cannot pay R2 (nor R1): nothing is built, and each says why.
+    let (inputs, skipped) = try_build(&mut rig);
+    assert!(inputs.is_empty(), "{inputs:?}");
+    assert_eq!(skipped.len(), 2);
+    assert!(skipped.iter().all(|(_, why)| why.contains(HELD_WORDS)));
+    assert!(matches!(rig.node.owner().refunds()[0].stage, Stage::Queued));
+    // Cancelling one is refused too while it is held.
+    let write = rig.node.queue_writer();
+    assert!(rig.node.owner_mut().unwrap().cancel(r2, &write).is_err());
+    // The words are a placeholder with the count of blocks left.
+    let words = openbmt_owner::say::held_words(rig.node.held()[0].1);
+    assert_eq!(words.heading, HELD_WORDS);
+    assert_eq!(words.detail.as_deref(), Some("99"));
+}
+
+#[test]
+fn oc_55_a_payment_that_spends_a_coin_of_the_beating_transaction_is_allowed_at_once() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (c, [_r1, _r2]) = signed_elsewhere_pair(&mut rig);
+    let a = replacement_a(&c);
+    rig.mine(std::slice::from_ref(&a));
+    assert_eq!(rig.node.owner().held_entries().len(), 2);
+    let (inputs, skipped) = try_build(&mut rig);
+    // B spends A's change, so it cannot confirm beside C.
+    assert!(skipped.is_empty(), "{skipped:?}");
+    assert!(
+        inputs.contains(&OutPoint::new(a.compute_txid(), 1)),
+        "{inputs:?}"
+    );
+}
+
+#[test]
+fn oc_55_if_the_beating_block_leaves_and_c_confirms_its_entries_are_paid_by_c_once() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (c, [r1, r2]) = signed_elsewhere_pair(&mut rig);
+    let txid = c.compute_txid();
+    let a = replacement_a(&c);
+    rig.mine(std::slice::from_ref(&a));
+    assert_eq!(rig.node.owner().held_entries().len(), 2);
+    // A's block leaves and C is in the block that replaces it.
+    replace_tip(&mut rig, std::slice::from_ref(&c));
+    for r in rig.node.owner().refunds() {
+        assert_eq!(r.stage, Stage::Paid { txid }, "{}", r.id);
+    }
+    assert!(rig.node.owner().held_entries().is_empty());
+    assert!(rig.node.owner().signed_elsewhere().is_empty());
+    // The books: one payment of each refund, by C.
+    let standing = crate::standing(rig.node.paid_log());
+    assert_eq!(standing.len(), 2);
+    assert!(standing.iter().all(|e| e.txid == txid));
+    assert_eq!(
+        standing.iter().map(|e| e.number).collect::<Vec<_>>(),
+        vec![r1, r2]
+    );
+    // Nothing is left to pay a second time.
+    let (inputs, skipped) = try_build(&mut rig);
+    assert!(inputs.is_empty() && skipped.is_empty());
+}
+
+#[test]
+fn oc_55_a_restart_in_the_middle_keeps_the_hold_and_the_depth_releases_it() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (c, [r1, r2]) = signed_elsewhere_pair(&mut rig);
+    let a = replacement_a_without_change(&c);
+    rig.mine(std::slice::from_ref(&a));
+    rig.mine_empty(40);
+    let chain = rig.chain.clone();
+    rig.node.shutdown();
+    drop(rig);
+    let mut rig = start_at(&dir, &Setup::default(), chain).unwrap();
+    let held = rig.node.owner().held_entries();
+    assert_eq!(held.iter().map(|h| h.id).collect::<Vec<_>>(), vec![r1, r2]);
+    assert_eq!(rig.node.held()[0].1, 59);
+    rig.rescan();
+    let (inputs, skipped) = try_build(&mut rig);
+    assert!(
+        inputs.is_empty() && skipped.len() == 2,
+        "{inputs:?} {skipped:?}"
+    );
+    // At 100 deep it is let go, and the entries are built as free ones.
+    rig.mine_empty(58);
+    assert_eq!(rig.node.owner().held_entries().len(), 2);
+    rig.mine_empty(1);
+    assert!(rig.node.owner().held_entries().is_empty());
+    assert!(rig.node.owner().signed_elsewhere().is_empty());
+    // A restart after the release finds nothing to release.
+    let chain = rig.chain.clone();
+    rig.node.shutdown();
+    drop(rig);
+    let mut rig = start_at(&dir, &Setup::default(), chain).unwrap();
+    assert!(rig.node.owner().held_entries().is_empty());
+    rig.rescan();
+    let (inputs, skipped) = try_build(&mut rig);
+    assert!(!inputs.is_empty() && skipped.is_empty());
+}
+
+#[test]
+fn oc_55_a_reorganization_before_depth_100_keeps_the_hold_and_watches_c_again() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (c, _) = signed_elsewhere_pair(&mut rig);
+    let a = replacement_a_without_change(&c);
+    rig.mine(std::slice::from_ref(&a));
+    rig.mine_empty(98);
+    assert_eq!(rig.node.held()[0].1, 1);
+    // The beating block and everything above it leave, and other blocks
+    // take their place: the hold stays and does not count blocks of a chain
+    // that is gone.
+    let beating = rig.node.owner().held_entries()[0].height;
+    let keep = usize::try_from(beating).unwrap() - 1;
+    let left: Vec<BlockHash> = rig.chain.drain(keep..).map(|b| b.block_hash()).collect();
+    let mut joined = Vec::new();
+    let mut events = Vec::new();
+    for _ in 0..3 {
+        let height = u32::try_from(rig.chain.len()).unwrap() + 1;
+        let block = mine(rig.tip_hash(), height, 7, &[]);
+        rig.chain.push(block.clone());
+        joined.push((height, block.block_hash()));
+        events.push(AppEvent::Block {
+            hash: block.block_hash(),
+            bytes: serialize(&block),
+        });
+    }
+    let top = joined.last().unwrap().0;
+    let mut all = vec![AppEvent::Chain { joined, left }];
+    all.extend(events);
+    all.push(AppEvent::Checked(top));
+    rig.feed(all);
+    assert_eq!(rig.node.held()[0].1, 100);
+    assert_eq!(rig.node.owner().held_entries().len(), 2);
+    assert_eq!(rig.node.owner().signed_elsewhere().len(), 1);
+    // A later block that beats it again takes the hold over.
+    let a2 = replacement_a_without_change(&c);
+    rig.mine(std::slice::from_ref(&a2));
+    let held = rig.node.owner().held_entries();
+    assert_eq!(held.len(), 2);
+    assert_eq!(held[0].height, u32::try_from(rig.chain.len()).unwrap());
+}
+
+#[test]
+fn oc_55_an_outbox_payment_beaten_by_a_block_is_held_and_settles_as_paid_if_it_comes_back() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, other) = sent_and_beaten(&mut rig);
+    let txid = tx.compute_txid();
+    // Y, a coin the beaten payment does not spend.
+    let y = tx_from(
+        OutPoint::new(Txid::from_byte_array([8; 32]), 0),
+        &[(&receive(3), 200_000)],
+    );
+    rig.mine(&[y]);
+    rig.mine_empty(5);
+    rig.mine(std::slice::from_ref(&other));
+    assert!(matches!(refund_stage(&rig), Stage::Returned { .. }));
+    assert_eq!(rig.node.owner().held_entries().len(), 1);
+    let id = rig.node.owner().refunds()[0].id;
+    let write = rig.node.queue_writer();
+    rig.node.owner_mut().unwrap().requeue(id, &write).unwrap();
+    let (inputs, skipped) = try_build(&mut rig);
+    assert!(inputs.is_empty(), "{inputs:?}");
+    assert_eq!(skipped.len(), 1);
+    // The block that beat it leaves and the payment confirms after all.
+    replace_tip(&mut rig, std::slice::from_ref(&tx));
+    assert_eq!(refund_stage(&rig), Stage::Paid { txid });
+    assert!(rig.node.owner().held_entries().is_empty());
+    // The books: paid, undone when it was beaten, paid again when it came
+    // back: one payment.
+    let log = rig.node.paid_log().to_vec();
+    assert_eq!(log.len(), 3);
+    assert_eq!(crate::standing(&log).len(), 1);
+    let bytes = fs::read(dir.path().join(PAID_LOG_FILE)).unwrap();
+    assert_eq!(
+        crate::PaidLog::from_bytes(&bytes).unwrap().entries(),
+        log.as_slice()
     );
 }

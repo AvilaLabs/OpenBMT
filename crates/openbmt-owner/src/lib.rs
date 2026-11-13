@@ -75,9 +75,10 @@ pub use edit::{
 pub use error::{BoxGap, BundleGap, NodeKeyFault, OwnerError, Refusal, RestoreError, SetupError};
 pub use state::Owner;
 pub use types::{
-    Built, CashAmount, CashOut, Deliverable, Delivery, FeePayer, IssuedRange, ItemOutcome, Options,
-    QueuedBatch, QueuedBoxClaim, QueuedPairing, QueuedSettings, RateNote, Refund, RefundBooks,
-    RefundPacking, SaleFacts, SaleKey, SettingsQueued, SignedElsewhere, Skipped, Stage, Taken,
+    Built, CashAmount, CashOut, Deliverable, Delivery, FeePayer, Held, HeldEntry, IssuedRange,
+    ItemOutcome, Options, QueuedBatch, QueuedBoxClaim, QueuedPairing, QueuedSettings, RateNote,
+    Refund, RefundBooks, RefundPacking, SaleFacts, SaleKey, SettingsQueued, SignedElsewhere,
+    Skipped, Stage, Taken,
 };
 
 /// AS-65: the magic of the owner phone's stored queue.

@@ -1470,11 +1470,17 @@ fn as_89_an_abandoned_approval_whose_coin_another_transaction_spent_is_released(
     let (tx, _) = exported_then_abandoned(&mut rig);
     let other = tx_from(tx.input[0].previous_output, &[(&external(77), 1_000)]);
     rig.mine(&[other]);
-    // The old transaction can not confirm: it is no longer watched, and the
-    // refund waits to be built again.
-    assert!(rig.node.owner().signed_elsewhere().is_empty());
+    // OC-55: the old transaction is still watched and the refund is held
+    // until the block that beat it is deep; then it is let go.
+    assert_eq!(rig.node.owner().held_entries().len(), 1);
+    assert_eq!(rig.node.owner().signed_elsewhere().len(), 1);
     assert!(matches!(rig.node.owner().refunds()[0].stage, Stage::Queued));
     assert!(rig.node.paid_log().is_empty());
+    rig.mine_empty(98);
+    assert_eq!(rig.node.owner().signed_elsewhere().len(), 1);
+    rig.mine_empty(1);
+    assert!(rig.node.owner().signed_elsewhere().is_empty());
+    assert!(rig.node.owner().held_entries().is_empty());
 }
 
 #[test]
@@ -2064,7 +2070,7 @@ fn oc_52_as_89_a_signed_elsewhere_payment_beaten_during_key_recovery_is_released
     assert_eq!(rig.node.owner().signed_elsewhere().len(), 1);
     assert_eq!(owed_on_disk(&dir).items().len(), 1);
     recover(&mut rig);
-    assert!(rig.node.owner().signed_elsewhere().is_empty());
+    assert_eq!(rig.node.owner().held_entries().len(), 1);
     assert!(matches!(refund_stage(&rig), Stage::Queued));
     assert!(rig.node.paid_log().is_empty());
     assert!(owed_on_disk(&dir).is_empty());
@@ -2100,7 +2106,7 @@ fn oc_52_as_89_a_signed_elsewhere_payment_beaten_with_a_failed_queue_write_settl
     assert_eq!(owed_on_disk(&dir).items().len(), 1);
     fs::remove_dir(blocked).unwrap();
     rig.deliver(vec![]);
-    assert!(rig.node.owner().signed_elsewhere().is_empty());
+    assert_eq!(rig.node.owner().held_entries().len(), 1);
     assert!(matches!(refund_stage(&rig), Stage::Queued));
     assert!(rig.node.paid_log().is_empty());
     assert!(owed_on_disk(&dir).is_empty());

@@ -312,6 +312,34 @@ pub struct SignedElsewhere {
     pub cash_out: Option<u32>,
     /// What it spends, ascending.
     pub inputs: Vec<OutPoint>,
+    /// OC-55: set once a block beat it. Its entries are held, and it stays
+    /// watched, until that block is deep.
+    pub held: Option<Held>,
+}
+
+/// OC-55: the block that beat a transaction, and the transaction in it that
+/// spent one of its coins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Held {
+    /// The transaction that spent one of the beaten transaction's coins.
+    pub by: Txid,
+    /// The block that holds it.
+    pub block: [u8; 32],
+    /// That block's height.
+    pub height: u32,
+}
+
+/// OC-55: an entry that is held, and until which block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeldEntry {
+    /// The entry's number.
+    pub id: u32,
+    /// The beaten transaction that may still confirm.
+    pub txid: Txid,
+    /// The block that beat it.
+    pub block: [u8; 32],
+    /// That block's height.
+    pub height: u32,
 }
 
 /// What happened to one item of a session when its response was taken
