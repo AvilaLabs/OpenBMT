@@ -341,16 +341,14 @@ fn sr_92_the_activity_is_a_single_instance() {
 }
 
 #[test]
-fn sr_92_the_refusal_has_its_own_words_still_to_be_written() {
+fn sr_92_the_refusal_has_its_own_words() {
     let words = KeyError::Refused {
         rule: "SR-92".to_string(),
         text: "SR-92: x".to_string(),
     }
     .words();
-    assert!(crate::say::is_placeholder(&words));
-    assert_eq!(words.heading, "WORDS_NEEDED_SR92_HEADING");
-    assert_eq!(words.what, "WORDS_NEEDED_SR92_WHAT");
-    assert_eq!(words.next, "WORDS_NEEDED_SR92_NEXT");
+    assert_eq!(words.heading, "Saved on another screen");
+    assert_eq!(openbmt_core::say::check(&words), Ok(()));
     assert_eq!(words.code, Some("SR-92"));
 }
 

@@ -127,26 +127,19 @@ fn without_detail(mut words: Words) -> Words {
     words
 }
 
-/// SR-92: words still to be written. The placeholders name the rule, one
-/// for the heading and one for each sentence, until the words are approved.
+/// SR-92: a save over a stored state this screen did not open is refused.
 fn history_words(rule: &str) -> Option<Words> {
     Some(match rule {
         "SR-92" => Words::new(
             Tone::Stop,
-            "WORDS_NEEDED_SR92_HEADING",
-            "WORDS_NEEDED_SR92_WHAT",
+            "Saved on another screen",
+            "Another screen of the Key app saved since this one opened, so nothing was saved or signed here.",
             Who::KeyHolder,
-            "WORDS_NEEDED_SR92_NEXT",
+            "Unlock again and start over. Use the Key app on one screen at a time.",
         )
         .code("SR-92"),
         _ => return None,
     })
-}
-
-/// Whether these words are a placeholder, a text still to be written.
-#[cfg(test)]
-pub(crate) fn is_placeholder(words: &Words) -> bool {
-    words.heading.starts_with("WORDS_NEEDED_")
 }
 
 /// The words of a call that the app refused for a scanned payment code.
@@ -1362,28 +1355,9 @@ mod tests {
         all_words().into_iter().map(|(n, _)| n).collect()
     }
 
-    /// The words that are written: a placeholder stands in for words that
-    /// are not, and keeps its own shape instead (SR-92).
-    fn written(all: Vec<(String, Words)>) -> Vec<(String, Words)> {
-        for (name, w) in all.iter().filter(|(_, w)| is_placeholder(w)) {
-            assert!(
-                w.heading.starts_with("WORDS_NEEDED_SR92_")
-                    && w.what.starts_with("WORDS_NEEDED_SR92_")
-                    && w.next.starts_with("WORDS_NEEDED_SR92_")
-                    && w.heading != w.what
-                    && w.what != w.next,
-                "{name}"
-            );
-        }
-        all.into_iter()
-            .filter(|(_, w)| !is_placeholder(w))
-            .collect()
-    }
-
     #[test]
     fn sc_12_every_word_keeps_the_rules() {
-        assert_eq!(check_distinct(&written(all_words())), Ok(()));
-        assert!(all_words().iter().any(|(_, w)| is_placeholder(w)));
+        assert_eq!(check_distinct(&all_words()), Ok(()));
     }
 
     #[test]
@@ -1392,7 +1366,7 @@ mod tests {
         all.extend(openbmt_session::all_words());
         all.extend(openbmt_approver::all_words());
         all.extend(all_words());
-        assert_eq!(check_distinct(&written(all.clone())), Ok(()));
+        assert_eq!(check_distinct(&all), Ok(()));
         assert!(all.len() > 200, "{}", all.len());
     }
 
@@ -1622,9 +1596,6 @@ mod tests {
         for (kind, rule, text) in samples() {
             let w = own_words(kind, rule, text)
                 .unwrap_or_else(|| panic!("{kind:?} {rule} has no words of its own"));
-            if is_placeholder(&w) {
-                continue;
-            }
             assert_eq!(check(&w), Ok(()), "{kind:?} {rule}");
         }
     }

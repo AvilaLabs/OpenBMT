@@ -21,15 +21,21 @@ funds.**
 
 ## 1. The frame
 
-- **LC-01. The locked frame.** The frame is `OBMx`, version 1: the Argon2id
-  parameters (memory in KiB, passes and lanes, each 4 bytes), a 16-byte
-  salt, a 12-byte nonce, the length of the ciphertext, and the
+- **LC-01. The locked frame.** The frame is `OBMx`, version 1 or 2: the
+  Argon2id parameters (memory in KiB, passes and lanes, each 4 bytes), a
+  16-byte salt, a 12-byte nonce, the length of the ciphertext, and the
   ChaCha20-Poly1305 ciphertext of the bytes locked, with the whole header as
-  associated data. Decoding is strict: version 1, the exact length, a
-  ciphertext of at least the 16 bytes of the tag and at most 80 MiB, and
-  only bytes that writing the frame again would give. A frame that is cut,
-  lengthened or of another form is refused as unreadable. The bytes the
-  Key app wrote before this crate existed open unchanged.
+  associated data. In version 2 the first 8 sealed bytes are the generation
+  of the stored state, a little-endian `u64` that every save of the Key app
+  raises by one (`docs/SIGNER-RULES.md` SR-92); it is read only with the
+  key. A frame of version 1 reads as generation 0. The owner app writes
+  version 1; the Key app writes version 2, and a version 1 frame it opens
+  is written in version 2 at its next save. Decoding is strict: version 1 or
+  2, the exact length, a ciphertext of at least the 16 bytes of the tag (24
+  in version 2, with the generation) and at most 80 MiB, and only bytes
+  that writing the frame again would give. A frame that is cut, lengthened
+  or of another form is refused as unreadable. The bytes the Key app wrote
+  before this crate existed open unchanged.
 - **LC-02. The cost.** The parameters are 64 MiB, 3 passes and 1 lane. A
   frame that asks for more than 256 MiB, 10 passes or 4 lanes, or for no
   passes, no lanes or fewer than 8 blocks per lane, is refused when it is
@@ -54,7 +60,10 @@ funds.**
   checked against LC-03, a new salt and a new nonce are used, and the same
   bytes are locked again in one step: nothing is returned unless the
   current PIN opened the frame and the new PIN was taken. A salt or a nonce
-  that is the old frame's own is refused.
+  that is the old frame's own is refused. A frame of version 1 stays version
+  1; a frame of version 2 keeps its contents, with the generation raised by
+  one, and the Key app stores it only when the stored generation is still
+  the one it opened (SR-92).
 
 ## 3. The cost under test
 
