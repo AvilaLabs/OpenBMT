@@ -4,7 +4,9 @@
      and the app asks for no network and no other permission. The camera is not
      required, so the app installs on a phone without one and the person pastes
      text or chooses a file instead. tests/check-manifest.sh fails the build if
-     the list differs, or if anything but the launcher activity is exported. -->
+     the list differs, or if anything but the launcher activity is exported. The
+     activity is a single instance (singleTask), so that two screens never hold
+     the signer at once (SR-92). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.openbmt.key">
 
@@ -25,6 +27,7 @@
         <activity
             android:name="org.openbmt.key.app.MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|keyboardHidden|keyboard|screenLayout|smallestScreenSize|uiMode"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>

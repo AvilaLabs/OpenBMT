@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Checks what the built APK's manifest says, with the SDK's own aapt2: no
 # permission but CAMERA (with the camera feature not required), no network permission or setting, backup and device
-# transfer off, nothing exported but the launcher activity, and no service,
+# transfer off, nothing exported but the launcher activity, which is a single
+# instance (SR-92), and no service,
 # receiver or provider. The manifest in the APK is the merged one: no library
 # adds to it.
 #
@@ -83,6 +84,9 @@ exported="$(printf '%s\n' "$tree" | grep -c -E 'exported.*=true')"
 unexported="$(printf '%s\n' "$tree" | grep -c -E 'exported.*=false')"
 if [ "$exported" -eq 1 ] && [ "$unexported" -eq 0 ]; then pass "exactly one exported component"; else fail "exported components: $exported true, $unexported false"; fi
 if printf '%s\n' "$tree" | grep -q 'android.intent.category.LAUNCHER'; then pass "the exported one is the launcher"; else fail "no launcher category"; fi
+# SR-92: one instance of the activity, so two screens never hold the signer.
+# aapt2 prints the enum of launchMode as its number: 2 is singleTask.
+if printf '%s\n' "$tree" | grep -q -E 'launchMode.*=2$'; then pass "the activity is singleTask"; else fail "the activity is not singleTask"; fi
 if [ "$(count 'E: intent-filter')" -eq 1 ] && [ "$(count 'E: action')" -eq 1 ]; then pass "one intent filter with one action"; else fail "more intent filters or actions than the launcher's"; fi
 
 # 4. The SDK levels.

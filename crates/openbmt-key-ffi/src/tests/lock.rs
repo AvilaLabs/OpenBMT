@@ -84,7 +84,7 @@ fn sr_71_the_frame_reads_back_and_nothing_else_does() {
     let rig = rig();
     let bytes = rig.store.saved().expect("stored");
     assert_eq!(&bytes[..4], b"OBMx");
-    assert_eq!(bytes[4], 1);
+    assert_eq!(bytes[4], 2);
     let parsed = lock::decode(&bytes).expect("decodes");
     assert_eq!(parsed.to_bytes(), bytes);
     assert_eq!(parsed.header.to_bytes().len(), HEADER_LEN);
@@ -102,7 +102,7 @@ fn sr_71_the_frame_reads_back_and_nothing_else_does() {
     other[3] = b'7';
     assert!(lock::decode(&other).is_err());
     let mut other = bytes.clone();
-    other[4] = 2;
+    other[4] = 3;
     assert!(lock::decode(&other).is_err());
 
     // A flipped bit in the header never opens, whatever it does to the

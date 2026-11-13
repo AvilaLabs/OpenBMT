@@ -77,7 +77,7 @@ fn lc_01_the_frame_reads_back_and_nothing_else_does() {
     other[3] = b'7';
     assert!(decode(&other).is_err());
     let mut other = bytes.clone();
-    other[4] = 2;
+    other[4] = 3;
     assert!(decode(&other).is_err());
     // A ciphertext shorter than the tag, and a length that is not the bytes
     // that follow.
@@ -94,6 +94,51 @@ fn lc_01_the_frame_reads_back_and_nothing_else_does() {
         decode(b"owner_secret=00"),
         Err(DecodeError::BadMagic | DecodeError::Truncated)
     ));
+}
+
+#[test]
+fn lc_01_a_frame_of_version_2_holds_the_generation_inside_the_seal() {
+    let mut key = LockKey::new(cost!(), PIN, [7; SALT_LEN]).expect("a key");
+    let bytes = key
+        .seal_generation([8; NONCE_LEN], 41, b"inside")
+        .expect("sealed");
+    assert_eq!(bytes[4], 2);
+    let parsed = decode(&bytes).expect("decodes");
+    assert_eq!(parsed.header.version, 2);
+    assert_eq!(parsed.to_bytes(), bytes);
+    // The bytes inside do not include it; the key remembers it.
+    let (plain, opened) = open(&bytes, PIN).map_err(|_| ()).expect("opens");
+    assert_eq!(plain, b"inside");
+    assert_eq!(opened.generation(), 41);
+    assert_eq!(opened.stored_generation(&bytes).ok(), Some(41));
+    assert_eq!(unlock(&bytes, PIN).expect("opens"), b"inside");
+    // A frame of version 1 is generation 0, and the key of another PIN
+    // cannot read the generation.
+    let old = locked(b"inside");
+    assert_eq!(
+        open(&old, PIN)
+            .map_err(|_| ())
+            .expect("opens")
+            .1
+            .generation(),
+        0
+    );
+    assert_eq!(opened.stored_generation(&old).ok(), Some(0));
+    let other = LockKey::new(cost!(), "654321", [7; SALT_LEN]).expect("a key");
+    assert!(other.stored_generation(&bytes).is_err());
+    // A version 2 ciphertext is at least the generation and the tag.
+    let mut short = header_with(64, 1, 1, 23);
+    short[4] = 2;
+    assert!(decode(&short).is_err());
+    short = header_with(64, 1, 1, 24);
+    short[4] = 2;
+    assert!(decode(&short).is_ok());
+    // A change of PIN keeps the version, and raises the generation of a
+    // version 2 frame by one.
+    let mut new = LockKey::new(cost!(), "654321", [3; SALT_LEN]).expect("a key");
+    let moved = reseal(&bytes, &opened, &mut new, [4; NONCE_LEN]).expect("resealed");
+    assert_eq!(new.stored_generation(&moved).ok(), Some(42));
+    assert_eq!(unlock(&moved, "654321").expect("opens"), b"inside");
 }
 
 #[test]

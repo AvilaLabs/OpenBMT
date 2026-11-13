@@ -4,7 +4,7 @@
 
 use crate::app::{phase_of, Gate, Inner, KeyApp, LockStatus, Wiped};
 use crate::envelope::wipe_string;
-use crate::error::{internal, refused_by, store_failed, wrong_state, KeyError};
+use crate::error::{internal, refused_by, store_failed, wrong_state, KeyError, StoreError};
 use crate::keys::random_bytes;
 use crate::lock::{self, LockKey, OpenError, NONCE_LEN, SALT_LEN};
 
@@ -109,10 +109,22 @@ impl KeyApp {
     /// with the rule `pin-wrong` and changes nothing.
     pub fn unlock(&self, pin: String) -> Result<(), KeyError> {
         let result = self.run_locked(|inner| {
-            let Gate::Locked(stored) = &inner.gate else {
+            if !matches!(inner.gate, Gate::Locked(_)) {
                 return Err(wrong_state("not-locked", "the Key app is not locked"));
+            }
+            // SR-92: from the store as it is now, not from what was read
+            // when the app opened: another screen may have saved since.
+            let stored = match KeyApp::read_gate(inner.raw.as_ref())? {
+                Gate::Locked(stored) => stored,
+                other => {
+                    inner.gate = other;
+                    return Err(wrong_state(
+                        "not-locked",
+                        "the stored state is not locked any more",
+                    ));
+                }
             };
-            let (mut plain, key) = match lock::open(stored, &pin) {
+            let (mut plain, key) = match lock::open(&stored, &pin) {
                 Ok(opened) => opened,
                 Err(OpenError::WrongPin) => return Err(wrong_pin()),
                 Err(OpenError::Unreadable(e)) => return Err(unreadable(e)),
@@ -146,11 +158,19 @@ impl KeyApp {
             }
             lock::check_pin(&new)?;
             let mut key = new_key(inner, &new)?;
+            // SR-92: the turn at the store is kept from reading the frame to
+            // the end of the write.
+            let _turn = lock::store_turn();
             let stored = inner.raw.load().map_err(|e| KeyError::Store {
                 rule: "load".to_string(),
                 text: format!("could not read the stored state: {e}"),
             })?;
             if let Some(stored) = stored {
+                if lock::is_locked(&stored)
+                    && old.stored_generation(&stored).ok() != Some(old.generation())
+                {
+                    return Err(store_failed(&StoreError::Stale));
+                }
                 let nonce = random_bytes(&inner.raw, NONCE_LEN)?;
                 let nonce = <[u8; NONCE_LEN]>::try_from(nonce.as_slice())
                     .map_err(|_| internal("the nonce is not 12 bytes"))?;
@@ -158,7 +178,11 @@ impl KeyApp {
                     OpenError::WrongPin => internal("the stored state is not under the held PIN"),
                     OpenError::Unreadable(e) => unreadable(e),
                 })?;
+                let generation = key
+                    .stored_generation(&frame)
+                    .map_err(|_| internal("the stored state is not under the new PIN"))?;
                 inner.raw.save(frame).map_err(|e| store_failed(&e))?;
+                key.set_generation(generation);
             }
             *held = Some(key);
             Ok(())

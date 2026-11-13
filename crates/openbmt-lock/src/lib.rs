@@ -3,10 +3,16 @@
 //! owner app.
 //!
 //! ```text
-//! "OBMx" | 1 | m KiB u32 | t u32 | p u32 | salt (16) | nonce (12)
+//! "OBMx" | 1 or 2 | m KiB u32 | t u32 | p u32 | salt (16) | nonce (12)
 //!   | ciphertext length u32 | ciphertext (ChaCha20-Poly1305 of the
 //!     bytes locked, tag included)
 //! ```
+//!
+//! Version 2 holds, first inside the sealed bytes, the generation of the
+//! stored state: a `u64` that every save raises by one (SR-92), so that a
+//! handle can tell that the stored state is not the one it opened. A frame of
+//! version 1 reads as generation 0. The generation is read only with the
+//! key.
 //!
 //! The key is Argon2id of the PIN with the salt and the parameters in the
 //! header; the header, all of it, is the associated data. An app that locks
@@ -41,7 +47,7 @@
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
-use openbmt_core::wire::{self, DecodeError, Reader};
+use openbmt_core::wire::{DecodeError, Reader};
 
 #[cfg(test)]
 mod tests;
@@ -52,6 +58,13 @@ pub const MAGIC_LOCKED: [u8; 4] = *b"OBMx";
 pub const SALT_LEN: usize = 16;
 /// Bytes of nonce.
 pub const NONCE_LEN: usize = 12;
+/// The frame without a generation: the owner app's, and the Key app's
+/// before SR-92.
+const VERSION_PLAIN: u8 = 1;
+/// The frame whose sealed bytes start with the generation.
+const VERSION_GENERATION: u8 = 2;
+/// Bytes of the generation, the first sealed bytes of a version 2 frame.
+const GENERATION_LEN: usize = 8;
 /// Bytes of the AEAD's tag.
 const TAG_LEN: usize = 16;
 /// Bytes of the header: magic, version, three parameters, salt, nonce and
@@ -135,6 +148,8 @@ macro_rules! cost {
 /// What the header of a locked frame says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockedHeader {
+    /// The frame's version, 1 or 2.
+    pub version: u8,
     /// The key parameters.
     pub params: KdfParams,
     /// The salt.
@@ -148,7 +163,9 @@ pub struct LockedHeader {
 impl LockedHeader {
     /// The header's bytes: also the associated data of the AEAD.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = wire::start(&MAGIC_LOCKED, HEADER_LEN);
+        let mut out = Vec::with_capacity(HEADER_LEN);
+        out.extend_from_slice(&MAGIC_LOCKED);
+        out.push(self.version);
         out.extend_from_slice(&self.params.m_kib.to_le_bytes());
         out.extend_from_slice(&self.params.t.to_le_bytes());
         out.extend_from_slice(&self.params.p.to_le_bytes());
@@ -180,7 +197,7 @@ impl LockedFrame<'_> {
 /// LC-01: read a locked frame, strictly. The parameters are checked against
 /// the limit here, before anything runs Argon2.
 pub fn decode(bytes: &[u8]) -> Result<LockedFrame<'_>, DecodeError> {
-    let mut r = Reader::framed(bytes, &MAGIC_LOCKED)?;
+    let (mut r, version) = Reader::framed_up_to(bytes, &MAGIC_LOCKED, VERSION_GENERATION)?;
     let params = KdfParams {
         m_kib: r.u32_le()?,
         t: r.u32_le()?,
@@ -194,13 +211,19 @@ pub fn decode(bytes: &[u8]) -> Result<LockedFrame<'_>, DecodeError> {
     if n > MAX_CIPHERTEXT {
         return Err(DecodeError::TooLarge);
     }
-    if n < TAG_LEN {
+    let least = if version == VERSION_GENERATION {
+        TAG_LEN + GENERATION_LEN
+    } else {
+        TAG_LEN
+    };
+    if n < least {
         return Err(DecodeError::Truncated);
     }
     let ciphertext = r.take(n)?;
     r.finish()?;
     Ok(LockedFrame {
         header: LockedHeader {
+            version,
             params,
             salt,
             nonce,
@@ -263,6 +286,8 @@ pub struct LockKey {
     key: [u8; 32],
     /// The nonce of the last frame written or read under this key.
     last_nonce: Option<[u8; NONCE_LEN]>,
+    /// The generation of the state this key opened or last wrote (SR-92).
+    generation: u64,
 }
 
 impl Drop for LockKey {
@@ -303,6 +328,7 @@ impl LockKey {
             salt,
             key: derive(&params, pin, &salt)?,
             last_nonce: None,
+            generation: 0,
         })
     }
 
@@ -321,10 +347,34 @@ impl LockKey {
         same
     }
 
-    /// The frame that holds `plain`, under `nonce`.
-    fn seal(&self, nonce: [u8; NONCE_LEN], plain: &[u8]) -> Option<Vec<u8>> {
+    /// The generation of the state this key opened or last wrote (SR-92).
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Remember `generation` as the one this key wrote last, once the frame
+    /// that holds it is stored.
+    pub fn set_generation(&mut self, generation: u64) {
+        self.generation = generation;
+    }
+
+    /// The generation in `stored`, a locked frame under this key: 0 for a
+    /// frame of version 1. `WrongPin` when the frame is not under this key
+    /// or was changed, so that it is not the state this key was made for.
+    pub fn stored_generation(&self, stored: &[u8]) -> Result<u64, OpenError> {
+        let frame = decode(stored).map_err(OpenError::Unreadable)?;
+        let mut plain = self.open_frame(&frame).ok_or(OpenError::WrongPin)?;
+        let found = split_generation(frame.header.version, &mut plain);
+        plain.fill(0);
+        std::hint::black_box(&mut plain);
+        found.ok_or(OpenError::WrongPin)
+    }
+
+    /// The frame that holds `plain` under `version` and `nonce`.
+    fn seal(&self, version: u8, nonce: [u8; NONCE_LEN], plain: &[u8]) -> Option<Vec<u8>> {
         let body_len = u32::try_from(plain.len().checked_add(TAG_LEN)?).ok()?;
         let header = LockedHeader {
+            version,
             params: self.params,
             salt: self.salt,
             nonce,
@@ -366,12 +416,50 @@ impl LockKey {
     /// returned, so that a write that fails after this still never repeats
     /// it.
     pub fn seal_next(&mut self, nonce: [u8; NONCE_LEN], plain: &[u8]) -> Option<Vec<u8>> {
+        self.seal_next_as(VERSION_PLAIN, nonce, plain)
+    }
+
+    /// SR-92: [`seal_next`](Self::seal_next) in a version 2 frame, with
+    /// `generation` first inside the sealed bytes. The key's own generation
+    /// is not changed: the caller sets it once the frame is stored.
+    pub fn seal_generation(
+        &mut self,
+        nonce: [u8; NONCE_LEN],
+        generation: u64,
+        plain: &[u8],
+    ) -> Option<Vec<u8>> {
+        let mut inside = Vec::with_capacity(GENERATION_LEN.checked_add(plain.len())?);
+        inside.extend_from_slice(&generation.to_le_bytes());
+        inside.extend_from_slice(plain);
+        let sealed = self.seal_next_as(VERSION_GENERATION, nonce, &inside);
+        inside.fill(0);
+        std::hint::black_box(&mut inside);
+        sealed
+    }
+
+    fn seal_next_as(
+        &mut self,
+        version: u8,
+        nonce: [u8; NONCE_LEN],
+        plain: &[u8],
+    ) -> Option<Vec<u8>> {
         if self.last_nonce == Some(nonce) {
             return None;
         }
         self.last_nonce = Some(nonce);
-        self.seal(nonce, plain)
+        self.seal(version, nonce, plain)
     }
+}
+
+/// The generation at the front of `plain`, taken off it: 0 and nothing taken
+/// for a frame of version 1. `None` when a version 2 frame is too short.
+fn split_generation(version: u8, plain: &mut Vec<u8>) -> Option<u64> {
+    if version != VERSION_GENERATION {
+        return Some(0);
+    }
+    let head = <[u8; GENERATION_LEN]>::try_from(plain.get(..GENERATION_LEN)?).ok()?;
+    plain.drain(..GENERATION_LEN);
+    Some(u64::from_le_bytes(head))
 }
 
 /// Why a locked frame did not open.
@@ -384,18 +472,26 @@ pub enum OpenError {
 }
 
 /// LC-05: open a locked frame with the PIN. Returns the bytes inside and the
-/// key, ready for the writes that follow.
+/// key, ready for the writes that follow. The key remembers the frame's
+/// generation (SR-92); the bytes inside do not include it.
 pub fn open(bytes: &[u8], pin: &str) -> Result<(Vec<u8>, LockKey), OpenError> {
     let frame = decode(bytes).map_err(OpenError::Unreadable)?;
     let mut key =
         LockKey::new(frame.header.params, pin, frame.header.salt).ok_or(OpenError::WrongPin)?;
-    let plain = key.open_frame(&frame).ok_or(OpenError::WrongPin)?;
+    let mut plain = key.open_frame(&frame).ok_or(OpenError::WrongPin)?;
+    let Some(generation) = split_generation(frame.header.version, &mut plain) else {
+        plain.fill(0);
+        return Err(OpenError::WrongPin);
+    };
+    key.generation = generation;
     key.last_nonce = Some(frame.header.nonce);
     Ok((plain, key))
 }
 
 /// LC-06: the stored frame again under another key, for a change of PIN.
-/// `WrongPin` when `old` is not the key of `stored`.
+/// `WrongPin` when `old` is not the key of `stored`. A frame of version 1
+/// stays as it is; a frame of version 2 keeps its generation raised by one
+/// (SR-92), and the caller sets it on `new` once the frame is stored.
 pub fn reseal(
     stored: &[u8],
     old: &LockKey,
@@ -404,6 +500,14 @@ pub fn reseal(
 ) -> Result<Vec<u8>, OpenError> {
     let frame = decode(stored).map_err(OpenError::Unreadable)?;
     let mut plain = old.open_frame(&frame).ok_or(OpenError::WrongPin)?;
+    if frame.header.version == VERSION_GENERATION {
+        let raised = split_generation(frame.header.version, &mut plain)
+            .and_then(|g| g.checked_add(1))
+            .and_then(|g| new.seal_generation(nonce, g, &plain));
+        plain.fill(0);
+        std::hint::black_box(&mut plain);
+        return raised.ok_or(OpenError::WrongPin);
+    }
     let sealed = new.seal_next(nonce, &plain);
     plain.fill(0);
     std::hint::black_box(&mut plain);

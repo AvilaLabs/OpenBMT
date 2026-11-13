@@ -202,7 +202,18 @@ impl SessionHandle {
                 })?;
             inner.session = None;
             Ok(response)
-        })?;
+        });
+        let response = match response {
+            Ok(response) => response,
+            Err(e) => {
+                // SR-92: a refused save ended the session; the app reloaded.
+                if e.rule() == "SR-92" {
+                    state.done = true;
+                    state.cache = None;
+                }
+                return Err(e);
+            }
+        };
         state.done = true;
         state.cache = None;
         Ok(response)

@@ -823,11 +823,11 @@ mod tests {
 
         let response = h.call(&reg, &create(1)).expect("a response");
         assert_eq!(reply(&response).0, 0);
-        // 32 bytes for the identity and 32 for the words, the nonce, then
-        // the save.
+        // 32 bytes for the identity and 32 for the words, the nonce, the
+        // read of the stored generation (SR-92), then the save.
         assert_eq!(
             fake(|f| f.calls.clone()),
-            vec!["load", "random", "random", "random", "random", "save"]
+            vec!["load", "random", "random", "random", "random", "load", "save"]
         );
         let stored = fake(|f| f.stored.clone()).expect("stored");
         crate::lock::decode(&stored).expect("the locked frame decodes");

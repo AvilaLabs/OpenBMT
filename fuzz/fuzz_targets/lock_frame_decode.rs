@@ -19,12 +19,15 @@ fn read(bytes: &[u8]) {
     assert_eq!(bytes.len(), HEADER_LEN + frame.ciphertext.len());
     assert_eq!(frame.header.body_len as usize, frame.ciphertext.len());
     assert_eq!(frame.to_bytes(), bytes);
+    assert!(matches!(frame.header.version, 1 | 2));
 }
 
 fuzz_target!(|data: &[u8]| {
     read(data);
-    let mut framed = MAGIC_LOCKED.to_vec();
-    framed.push(1);
-    framed.extend_from_slice(data);
-    read(&framed);
+    for version in [1, 2] {
+        let mut framed = MAGIC_LOCKED.to_vec();
+        framed.push(version);
+        framed.extend_from_slice(data);
+        read(&framed);
+    }
 });

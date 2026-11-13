@@ -1604,9 +1604,20 @@ class Controller(private val act: MainActivity) {
         it.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
     }
 
+    /** Whether the library has locked the app again. */
+    private fun locked(): Boolean =
+        try {
+            app?.lockStatus() == LockStatus.Locked
+        } catch (_: KeyException) {
+            false
+        }
+
     private fun finishSession(s: KeySession) {
         allowed {
-            val bytes = attempt({ showLine(lines.size - 1) }) { s.finish() } ?: return@allowed
+            // SR-92: a save the library refused (another screen saved first) ends the session and locks the app, so
+            // the way back is the unlock screen, not the line.
+            val bytes = attempt({ if (locked()) { dropSession(); refresh(null) } else showLine(lines.size - 1) }) { s.finish() }
+                ?: return@allowed
             // The answer holds signatures only. A copy is kept so that a lost file
             // can be saved again: the state was stored before the answer was made.
             try {

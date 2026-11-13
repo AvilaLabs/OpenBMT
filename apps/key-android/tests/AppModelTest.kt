@@ -479,6 +479,7 @@ object AppModelTest {
         val manifest = File(appDir, "AndroidManifest.xml").readText()
         ok(manifest.contains("android:allowBackup=\"false\""), "cloud backup is off in the manifest")
         ok(manifest.contains("@xml/backup_rules") && manifest.contains("@xml/data_extraction_rules"), "both rule files are named")
+        ok(manifest.contains("android:launchMode=\"singleTask\""), "SR-92: the activity is a single instance")
         val domains = listOf("root", "file", "database", "sharedpref", "external")
         for (name in listOf("backup_rules", "data_extraction_rules")) {
             val xml = File(appDir, "res/xml/$name.xml").readText()

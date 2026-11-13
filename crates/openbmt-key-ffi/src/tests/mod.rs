@@ -6,6 +6,7 @@ mod boxpair;
 mod call;
 mod ceremony;
 mod deposit;
+mod history;
 mod kit;
 mod kit_scan;
 mod kotlin;

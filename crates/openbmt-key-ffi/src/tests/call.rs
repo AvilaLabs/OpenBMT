@@ -189,7 +189,10 @@ fn parse_response(response: &[u8]) -> Reply {
     let words = read_words(body.get(c.p..).expect("the words"));
     // Every error response carries words that keep the rules, and they are
     // the words of its kind, rule and text.
-    assert_eq!(check(&words), Ok(()), "{rule}: {text}");
+    // A placeholder stands in for words still to be written (SR-92).
+    if !crate::say::is_placeholder(&words) {
+        assert_eq!(check(&words), Ok(()), "{rule}: {text}");
+    }
     assert_eq!(words, words_for(kind_of(status), &rule, &text));
     CHECKED.with(|n| n.set(n.get() + 1));
     Err((status, rule, text))

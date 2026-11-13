@@ -121,6 +121,12 @@ pub(crate) fn internal(text: impl fmt::Display) -> KeyError {
 /// A failed or refused store, with the rule of the stored-before-released
 /// step.
 pub(crate) fn store_failed(why: &StoreError) -> KeyError {
+    if matches!(why, StoreError::Stale) {
+        return refused_by(
+            "SR-92",
+            "SR-92: another screen saved a newer state, so nothing was saved or signed",
+        );
+    }
     KeyError::Store {
         rule: "AS-34".to_string(),
         text: format!("AS-34: could not store the new state: {why}"),
@@ -142,12 +148,19 @@ pub enum StoreError {
         /// What was thrown.
         text: String,
     },
+    /// SR-92: the stored state is not the one this handle opened or last
+    /// saved, so nothing was written.
+    Stale,
 }
 
 impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Failed { text } | Self::Unexpected { text } => write!(f, "{text}"),
+            Self::Stale => write!(
+                f,
+                "the stored state is newer than the one this screen opened"
+            ),
         }
     }
 }

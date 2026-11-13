@@ -275,7 +275,8 @@ impl Drop for Wiped {
 pub(crate) enum Gate {
     /// The state is open, or nothing is stored.
     Open,
-    /// The locked frame as stored, waiting for the PIN.
+    /// The locked frame as stored when the app opened or reloaded, waiting
+    /// for the PIN. An unlock reads the store again (SR-92).
     Locked(Vec<u8>),
     /// An older state without a PIN, waiting for one.
     Legacy(Wiped),
@@ -301,6 +302,21 @@ pub(crate) struct Inner {
 }
 
 impl Inner {
+    /// SR-92: after a save was refused, drop the key and everything read
+    /// from the stored state, and read the store again: the handle is locked
+    /// (or empty, if nothing is stored now) and nothing is signed until the
+    /// PIN is given again. A store that cannot be read leaves the handle
+    /// locked: the unlock reads it again.
+    pub(crate) fn reload(&mut self) {
+        if let Ok(mut held) = self.lock.lock() {
+            *held = None;
+        }
+        self.session = None;
+        self.set_words(None);
+        self.phase = Phase::Empty;
+        self.gate = KeyApp::read_gate(self.raw.as_ref()).unwrap_or(Gate::Locked(Vec::new()));
+    }
+
     fn set_words(&mut self, words: Option<Vec<String>>) {
         if let Some(old) = self.words.take() {
             old.into_iter().for_each(wipe_string);
@@ -460,13 +476,17 @@ impl KeyApp {
         if open_only {
             guard.require_open()?;
         }
-        match catch_unwind(AssertUnwindSafe(|| f(&mut guard))) {
+        let result = match catch_unwind(AssertUnwindSafe(|| f(&mut guard))) {
             Ok(result) => result,
             Err(p) => {
                 guard.poisoned = true;
                 Err(internal(format!("caught a panic: {}", panic_text(&*p))))
             }
+        };
+        if matches!(&result, Err(e) if e.rule() == "SR-92") {
+            guard.reload();
         }
+        result
     }
 
     /// Use `store` for the calls that follow. The call protocol hands the
@@ -485,28 +505,34 @@ impl KeyApp {
         self.attach(Arc::new(Detached));
     }
 
-    fn open_inner(store: Arc<dyn KeyStore>) -> Result<Inner, KeyError> {
+    /// Read the store and say where the lock is: nothing stored, a locked
+    /// frame, or an older state with no PIN. No state is opened.
+    pub(crate) fn read_gate(store: &dyn KeyStore) -> Result<Gate, KeyError> {
         let loaded = store.load().map_err(|e| KeyError::Store {
             rule: "load".to_string(),
             text: format!("could not read the stored state: {e}"),
         })?;
-        let (phase, gate) = match loaded {
-            None => (Phase::Empty, Gate::Open),
+        Ok(match loaded {
+            None => Gate::Open,
             Some(bytes) if lock::is_locked(&bytes) => {
                 lock::decode(&bytes).map_err(|e| KeyError::Store {
                     rule: "OBMx".to_string(),
                     text: format!("OBMx: the stored state is not readable: {e}"),
                 })?;
-                (Phase::Empty, Gate::Locked(bytes))
+                Gate::Locked(bytes)
             }
             Some(bytes) => {
                 // An older state, with no PIN: read it now so that bytes
                 // that are not a state are refused here, and keep it until
                 // a PIN is set.
                 phase_of(&bytes)?;
-                (Phase::Empty, Gate::Legacy(Wiped(bytes)))
+                Gate::Legacy(Wiped(bytes))
             }
-        };
+        })
+    }
+
+    fn open_inner(store: Arc<dyn KeyStore>) -> Result<Inner, KeyError> {
+        let (phase, gate) = (Phase::Empty, Self::read_gate(store.as_ref())?);
         let lock = Arc::new(LockCell::default());
         Ok(Inner {
             store: Arc::new(Sealing::new(Arc::clone(&store), Arc::clone(&lock))),
