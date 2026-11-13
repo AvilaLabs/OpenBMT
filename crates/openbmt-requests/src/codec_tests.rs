@@ -341,6 +341,50 @@ fn rq_30_a_repeat_is_of_a_series_that_starts_with_a_first_request_the_same() {
 }
 
 #[test]
+fn rq_30_a_book_of_100000_requests_and_100000_returns_is_read_in_one_pass() {
+    // One funded request, the rest cancelled, every return done and from
+    // the funded one: the shape that a scan of the returns for each request
+    // takes ten billion steps to read.
+    let mut b = RequestBook::new();
+    b.make(&new("x", 60_000, false, None), 0, T0, &shop(), None)
+        .unwrap();
+    b.credit(1, &[arrival(1, 10, T0, 100_000_000)], T0, &shop(), None)
+        .unwrap();
+    let template = b.requests[0].clone();
+    for number in 2..=crate::MAX_REQUESTS as u64 {
+        b.requests.push(Request {
+            number,
+            address_index: number as u32 - 1,
+            end: Some((End::Cancelled, T0)),
+            credits: Vec::new(),
+            ..template.clone()
+        });
+    }
+    b.next_number = crate::MAX_REQUESTS as u64 + 1;
+    let ret = Return {
+        id: 0,
+        request: 1,
+        script: script(),
+        sats: 294,
+        queued_at: T0,
+        state: ReturnState::Done {
+            txid: [4; 32],
+            at: T0,
+        },
+    };
+    for id in 1..=crate::MAX_RETURNS as u64 {
+        b.returns.push(Return { id, ..ret.clone() });
+    }
+    b.next_return = crate::MAX_RETURNS as u64 + 1;
+    let bytes = b.to_bytes();
+    let started = std::time::Instant::now();
+    let read = RequestBook::from_bytes(&bytes).unwrap();
+    let took = started.elapsed();
+    assert!(read == b);
+    assert!(took.as_secs() < 5, "the read took {took:?}");
+}
+
+#[test]
 fn rq_34_the_wide_note_of_64_characters_is_read_back() {
     let mut b = RequestBook::new();
     let note = "\u{1f600}".repeat(64);
