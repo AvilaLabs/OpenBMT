@@ -1,8 +1,8 @@
 <?php
 /**
- * WO-41: every text the customer or the owner sees. Each is a placeholder
- * until the words are written under docs/SCREEN-RULES.md; the WooCommerce
- * layer, and only it, passes them through WordPress's translation.
+ * WO-41: the keys of every text the customer or the owner sees. The texts
+ * are in wc/class-openbmt-pay-words.php, each as a literal call WordPress can
+ * extract; this file holds no text and calls no WordPress function.
  */
 
 declare(strict_types=1);
@@ -11,7 +11,7 @@ namespace OpenBmtPay;
 
 final class Words {
 
-	/** The keys. The placeholder of a key is WORDS_NEEDED_ and the key. */
+	/** The keys. The text of a key is WORDS_NEEDED_ and the key, until the words are written. */
 	const KEYS = array(
 		'WO_01_GATEWAY_TITLE',
 		'WO_01_GATEWAY_DESCRIPTION',
@@ -28,6 +28,7 @@ final class Words {
 		'WO_11_LOW',
 		'WO_11_NONE',
 		'WO_11_LEFT',
+		'WO_11_DAMAGED',
 		'WO_15_NO_QUOTE',
 		'WO_15_CURRENCY_UNSUPPORTED',
 		'WO_16_TITLE',
@@ -36,6 +37,7 @@ final class Words {
 		'WO_16_LINK',
 		'WO_16_TIME_LEFT',
 		'WO_16_QUOTE_RAN_OUT',
+		'WO_16_QR_LABEL',
 		'WO_17_NOTE_ON_HOLD',
 		'WO_21_LAST_VISIT',
 		'WO_21_NEVER_VISITED',
@@ -48,14 +50,9 @@ final class Words {
 	);
 
 	/**
-	 * The text of a key.
-	 *
-	 * @throws \InvalidArgumentException For a key that is not in the list.
+	 * Whether a key is one of the list.
 	 */
-	public static function get( string $key ): string {
-		if ( ! in_array( $key, self::KEYS, true ) ) {
-			throw new \InvalidArgumentException( 'Unknown key' );
-		}
-		return 'WORDS_NEEDED_' . $key;
+	public static function has( string $key ): bool {
+		return in_array( $key, self::KEYS, true );
 	}
 }

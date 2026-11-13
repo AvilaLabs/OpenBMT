@@ -11,6 +11,7 @@ defined( 'ABSPATH' ) || exit;
 
 use OpenBmtPay\AddressPool;
 use OpenBmtPay\Bytes;
+use OpenBmtPay\Health;
 use OpenBmtPay\NonceLedger;
 use OpenBmtPay\Pairing;
 
@@ -84,13 +85,15 @@ final class OpenBmt_Pay_Store {
 	}
 
 	/**
-	 * WO-05: keeps a pairing. A different key starts with an empty pool.
+	 * WO-05, WO-10: keeps a pairing. A pairing with another id, or none
+	 * before, starts with an empty pool of its own and no numbers used once;
+	 * only the ranges of that pairing are taken into it.
 	 */
 	public static function pair( Pairing $code ): void {
 		$old = self::pairing();
-		if ( null === $old || $old['public'] !== $code->public ) {
-			update_option( self::OPT_POOL, ( new AddressPool() )->to_array(), false );
-			update_option( self::OPT_NONCES, array(), false );
+		if ( null === $old || Pairing::id_of( $old['secret'] ) !== $code->id() || self::health()['state'] === Health::DAMAGED ) {
+			update_option( self::OPT_POOL, ( new AddressPool( $code->id() ) )->to_array(), false );
+			update_option( self::OPT_NONCES, ( new NonceLedger() )->to_array(), false );
 		}
 		update_option(
 			self::OPT_PAIRING,
@@ -113,16 +116,18 @@ final class OpenBmt_Pay_Store {
 		delete_option( self::OPT_NONCES );
 	}
 
-	public static function pool(): AddressPool {
-		return AddressPool::from_array( get_option( self::OPT_POOL ) );
+	/**
+	 * The state of the kept data: unpaired, damaged or ready. Data that is
+	 * damaged is never read as an empty pool.
+	 *
+	 * @return array{state:string,pool:?AddressPool,nonces:?NonceLedger}
+	 */
+	public static function health(): array {
+		return Health::inspect( null !== self::pairing(), get_option( self::OPT_POOL, null ), get_option( self::OPT_NONCES, null ) );
 	}
 
 	public static function save_pool( AddressPool $pool ): void {
 		update_option( self::OPT_POOL, $pool->to_array(), false );
-	}
-
-	public static function nonces(): NonceLedger {
-		return NonceLedger::from_array( get_option( self::OPT_NONCES ) );
 	}
 
 	public static function save_nonces( NonceLedger $ledger ): void {

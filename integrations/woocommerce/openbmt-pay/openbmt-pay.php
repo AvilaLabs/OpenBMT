@@ -21,7 +21,7 @@ defined( 'ABSPATH' ) || exit;
 define( 'OPENBMT_PAY_DIR', plugin_dir_path( __FILE__ ) );
 
 require_once OPENBMT_PAY_DIR . 'src/load.php';
-require_once OPENBMT_PAY_DIR . 'wc/class-openbmt-pay-text.php';
+require_once OPENBMT_PAY_DIR . 'wc/class-openbmt-pay-words.php';
 require_once OPENBMT_PAY_DIR . 'wc/class-openbmt-pay-store.php';
 require_once OPENBMT_PAY_DIR . 'wc/class-openbmt-pay-rates.php';
 require_once OPENBMT_PAY_DIR . 'wc/class-openbmt-pay-rest.php';

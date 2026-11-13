@@ -12,8 +12,6 @@ use OpenBmtPay\Bech32;
 use OpenBmtPay\Bytes;
 use OpenBmtPay\Pairing;
 use OpenBmtPay\PaymentUri;
-use OpenBmtPay\Rates;
-use OpenBmtPay\ReplyReader;
 use OpenBmtPay\Words;
 
 // WO-10: the addresses of BIP 173 and BIP 350 are accepted, a changed one is not.
@@ -69,23 +67,45 @@ t_eq( 'bitcoin:' . $a . '?amount=0.001&label=Caf%C3%A9%20%26%20Co', PaymentUri::
 t_eq( 'bitcoin:' . $a, PaymentUri::link( $a, 0, '' ), 'wo_16 no amount and no label leaves the query out' );
 t_eq( 'BITCOIN:' . strtoupper( $a ) . '?amount=0.001&label=Shop', PaymentUri::qr_text( $a, 100000, 'Shop' ), 'wo_16 the code text has the address in upper case' );
 
-// WO-41: the words are placeholders, each once.
+// WO-41: the keys of the words, and the one file that holds the texts.
 t_eq( count( Words::KEYS ), count( array_unique( Words::KEYS ) ), 'wo_41 the keys are distinct' );
+t_eq( 34, count( Words::KEYS ), 'wo_41 there are 34 keys' );
+$file = (string) file_get_contents( dirname( __DIR__ ) . '/wc/class-openbmt-pay-words.php' );
+preg_match_all( "/^\t+'(WO_[0-9A-Z_]+)' => __\( 'WORDS_NEEDED_(WO_[0-9A-Z_]+)', 'openbmt-pay' \),$/m", $file, $found, PREG_SET_ORDER );
+t_eq( count( Words::KEYS ), count( $found ), 'wo_41 every key has one literal call WordPress can extract' );
+$in_file = array();
+foreach ( $found as $m ) {
+	t_eq( $m[1], $m[2], 'wo_41 the placeholder of ' . $m[1] . ' is named for its key' );
+	$in_file[] = $m[1];
+}
+t_eq( Words::KEYS, $in_file, 'wo_41 the file has the keys, in the order of the list' );
+t_eq( substr_count( $file, '__(' ), count( Words::KEYS ), 'wo_41 the file has no other call' );
 foreach ( Words::KEYS as $key ) {
-	t_eq( 'WORDS_NEEDED_' . $key, Words::get( $key ), "wo_41 $key is a placeholder" );
+	t_ok( Words::has( $key ), "wo_41 $key is a key" );
 	t_ok( 1 === preg_match( '/^WO_[0-9]{2}_[A-Z_]+$/', $key ), "wo_41 $key is named for its rule" );
 }
-try {
-	Words::get( 'WO_99_NOTHING' );
-	t_ok( false, 'wo_41 an unknown key is refused' );
-} catch ( InvalidArgumentException $e ) {
-	t_ok( true, 'wo_41 an unknown key is refused' );
+t_ok( ! Words::has( 'WO_99_NOTHING' ), 'wo_41 an unknown key is not a key' );
+// No text outside that file and the plugin header: no call of WordPress's translation anywhere else.
+$others = array_merge( glob( dirname( __DIR__ ) . '/src/*.php' ), array_diff( glob( dirname( __DIR__ ) . '/wc/*.php' ), array( dirname( __DIR__ ) . '/wc/class-openbmt-pay-words.php' ) ) );
+foreach ( $others as $f ) {
+	t_ok( 1 !== preg_match( '/\b(__|_e|_x|esc_html__|esc_attr__)\s*\(/', (string) file_get_contents( $f ) ), 'wo_41 ' . basename( $f ) . ' translates nothing itself' );
+	t_ok( false === strpos( (string) file_get_contents( $f ), 'WORDS_NEEDED_' ) || 'Words.php' === basename( $f ), 'wo_41 ' . basename( $f ) . ' holds no placeholder text' );
 }
-
-// WO-15: the reply reader is not built, so it refuses and no quote is made.
-t_refused( static function () {
-	ReplyReader::price_text( Rates::TABLE[0], '{"last":"73550.1"}' );
-}, 'NotBuilt', 'wo_15 the reply reader refuses until it is built' );
+// Every key the layer names is in the list, and every key of the list is used somewhere.
+$named = array();
+foreach ( $others as $f ) {
+	if ( 'Words.php' === basename( $f ) ) {
+		continue;
+	}
+	preg_match_all( "/'(WO_[0-9]{2}_[A-Z_]+)'/", (string) file_get_contents( $f ), $asked );
+	foreach ( $asked[1] as $key ) {
+		t_ok( Words::has( $key ), 'wo_41 ' . basename( $f ) . ' names a key of the list: ' . $key );
+		$named[ $key ] = true;
+	}
+}
+foreach ( Words::KEYS as $key ) {
+	t_ok( isset( $named[ $key ] ), "wo_41 $key is used by the layer" );
+}
 
 // WO-40: no call that reaches outside, no eval, no include of anything remote.
 $banned = array( 'eval(', 'curl_', 'file_get_contents( \'http', 'fsockopen', 'shell_exec', 'exec(', 'system(', 'passthru', 'popen', 'proc_open', 'unserialize', 'move_uploaded_file', '$_FILES' );

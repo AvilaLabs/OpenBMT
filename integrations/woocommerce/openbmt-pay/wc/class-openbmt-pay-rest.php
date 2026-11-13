@@ -13,6 +13,8 @@ defined( 'ABSPATH' ) || exit;
 use OpenBmtPay\AddressPool;
 use OpenBmtPay\AddressRange;
 use OpenBmtPay\Bytes;
+use OpenBmtPay\Health;
+use OpenBmtPay\Pairing;
 use OpenBmtPay\NoticeDecision;
 use OpenBmtPay\Refusal;
 use OpenBmtPay\RequestChecker;
@@ -61,12 +63,15 @@ final class OpenBmt_Pay_Rest {
 		$denied  = new WP_Error( 'openbmt_denied', '', array( 'status' => 403 ) );
 		$pairing = OpenBmt_Pay_Store::pairing();
 		$body    = $request->get_body();
-		if ( null === $pairing || ! is_ssl() || strlen( $body ) > self::BODY_MAX ) {
+		if ( null === $pairing || ! is_ssl() || strlen( $body ) > self::BODY_MAX || Health::READY !== OpenBmt_Pay_Store::health()['state'] ) {
 			return $denied;
 		}
 		$result = OpenBmt_Pay_Store::with_lock(
 			static function () use ( $request, $pairing, $body ) {
-				$ledger = OpenBmt_Pay_Store::nonces();
+				$ledger = OpenBmt_Pay_Store::health()['nonces'];
+				if ( null === $ledger ) {
+					return false;
+				}
 				try {
 					RequestChecker::check(
 						$pairing['secret'],
@@ -132,7 +137,7 @@ final class OpenBmt_Pay_Rest {
 		return new WP_REST_Response(
 			array(
 				'orders' => $list,
-				'left'   => OpenBmt_Pay_Store::pool()->remaining(),
+				'left'   => OpenBmt_Pay_Store::health()['pool']->remaining(),
 			),
 			200
 		);
@@ -150,15 +155,18 @@ final class OpenBmt_Pay_Rest {
 			return new WP_REST_Response( array( 'error' => 'unpaired' ), 403 );
 		}
 		try {
-			$range = AddressRange::open( Bytes::from_hex( trim( $request->get_body() ) ), $pairing['public'] );
+			$range = AddressRange::open( Bytes::from_hex( trim( $request->get_body() ) ), $pairing['public'], Pairing::id_of( $pairing['secret'] ) );
 		} catch ( Refusal $e ) {
 			OpenBmt_Pay_Store::log( 'range:' . $e->reason );
 			return new WP_REST_Response( array( 'error' => 'range' ), 400 );
 		}
 		$outcome = OpenBmt_Pay_Store::with_lock(
-			static function () use ( $range ) {
-				$pool    = OpenBmt_Pay_Store::pool();
-				$outcome = $pool->add( $range['start'], $range['addresses'] );
+			static function () use ( $range, $pairing ) {
+				$pool = OpenBmt_Pay_Store::health()['pool'];
+				if ( null === $pool ) {
+					return array( Health::DAMAGED, 0 );
+				}
+				$outcome = $pool->add( $range['start'], $range['addresses'], Pairing::id_of( $pairing['secret'] ) );
 				if ( AddressPool::ACCEPTED === $outcome ) {
 					OpenBmt_Pay_Store::save_pool( $pool );
 				}
@@ -259,7 +267,7 @@ final class OpenBmt_Pay_Rest {
 			'paid_late' => 'WO_31_NOTE_PAID_LATE',
 		);
 		$note  = sprintf(
-			OpenBmt_Pay_Text::t( $keys[ $state ] ),
+			OpenBmt_Pay_Words::t( $keys[ $state ] ),
 			OpenBmtPay\Money::btc_text( $notice['counted_sats'] ),
 			OpenBmtPay\Money::btc_text( $decision['asked_sats'] ),
 			implode( ', ', $notice['txids'] ),

@@ -10,26 +10,46 @@
 
 defined( 'ABSPATH' ) || exit;
 
+use OpenBmtPay\Health;
 use OpenBmtPay\Money;
 use OpenBmtPay\PaymentUri;
+use OpenBmtPay\Qr;
 use OpenBmtPay\Quote;
 use OpenBmtPay\Rates;
 use OpenBmtPay\Refusal;
 
 class OpenBmt_Pay_Gateway extends WC_Payment_Gateway {
 
+	/** The tags and attributes of the code's SVG (Qr::svg). */
+	const SVG_ALLOWED = array(
+		'svg'  => array(
+			'xmlns'           => true,
+			'viewbox'         => true,
+			'shape-rendering' => true,
+		),
+		'rect' => array(
+			'width'  => true,
+			'height' => true,
+			'fill'   => true,
+		),
+		'path' => array(
+			'fill' => true,
+			'd'    => true,
+		),
+	);
+
 	public function __construct() {
 		$this->id                 = 'openbmt';
 		$this->icon               = '';
 		$this->has_fields         = false;
-		$this->method_title       = OpenBmt_Pay_Text::t( 'WO_01_GATEWAY_TITLE' );
-		$this->method_description = OpenBmt_Pay_Text::t( 'WO_01_GATEWAY_DESCRIPTION' );
+		$this->method_title       = OpenBmt_Pay_Words::t( 'WO_01_GATEWAY_TITLE' );
+		$this->method_description = OpenBmt_Pay_Words::t( 'WO_01_GATEWAY_DESCRIPTION' );
 		$this->supports           = array( 'products' );
 
 		$this->init_form_fields();
 		$this->init_settings();
-		$this->title       = OpenBmt_Pay_Text::t( 'WO_01_GATEWAY_TITLE' );
-		$this->description = OpenBmt_Pay_Text::t( 'WO_01_GATEWAY_DESCRIPTION' );
+		$this->title       = OpenBmt_Pay_Words::t( 'WO_01_GATEWAY_TITLE' );
+		$this->description = OpenBmt_Pay_Words::t( 'WO_01_GATEWAY_DESCRIPTION' );
 		$this->enabled     = $this->get_option( 'enabled' );
 
 		add_action( 'woocommerce_update_options_payment_gateways_' . $this->id, array( $this, 'process_admin_options' ) );
@@ -39,9 +59,9 @@ class OpenBmt_Pay_Gateway extends WC_Payment_Gateway {
 	public function init_form_fields() {
 		$this->form_fields = array(
 			'enabled' => array(
-				'title'   => OpenBmt_Pay_Text::t( 'WO_01_SETTINGS_ENABLE' ),
+				'title'   => OpenBmt_Pay_Words::t( 'WO_01_SETTINGS_ENABLE' ),
 				'type'    => 'checkbox',
-				'label'   => OpenBmt_Pay_Text::t( 'WO_01_SETTINGS_ENABLE' ),
+				'label'   => OpenBmt_Pay_Words::t( 'WO_01_SETTINGS_ENABLE' ),
 				'default' => 'no',
 			),
 		);
@@ -56,7 +76,8 @@ class OpenBmt_Pay_Gateway extends WC_Payment_Gateway {
 		if ( ! parent::is_available() || null === OpenBmt_Pay_Store::pairing() || ! is_ssl() ) {
 			return false;
 		}
-		if ( OpenBmt_Pay_Store::pool()->is_empty() ) {
+		// Damaged data and an empty pool both hide Bitcoin; damaged data is never read as an empty pool.
+		if ( ! Health::shows_bitcoin( OpenBmt_Pay_Store::health() ) ) {
 			return false;
 		}
 		$currency = get_woocommerce_currency();
@@ -102,12 +123,15 @@ class OpenBmt_Pay_Gateway extends WC_Payment_Gateway {
 			}
 			$quote = $this->quote( $currency, (string) $order->get_total( 'edit' ) );
 		} catch ( Refusal $e ) {
-			wc_add_notice( OpenBmt_Pay_Text::t( 'WO_15_NO_QUOTE' ), 'error' );
+			wc_add_notice( OpenBmt_Pay_Words::t( 'WO_15_NO_QUOTE' ), 'error' );
 			return null;
 		}
 		$taken = OpenBmt_Pay_Store::with_lock(
 			static function () use ( $order ) {
-				$pool  = OpenBmt_Pay_Store::pool();
+				$pool = OpenBmt_Pay_Store::health()['pool'];
+				if ( null === $pool ) {
+					return null;
+				}
 				$taken = $pool->take( $order->get_id() );
 				if ( null !== $taken ) {
 					OpenBmt_Pay_Store::save_pool( $pool );
@@ -116,7 +140,7 @@ class OpenBmt_Pay_Gateway extends WC_Payment_Gateway {
 			}
 		);
 		if ( ! is_array( $taken ) ) {
-			wc_add_notice( OpenBmt_Pay_Text::t( 'WO_11_NONE' ), 'error' );
+			wc_add_notice( OpenBmt_Pay_Words::t( 'WO_11_NONE' ), 'error' );
 			return null;
 		}
 		$order->update_meta_data( '_openbmt_seq', (string) $order->get_id() );
@@ -128,7 +152,7 @@ class OpenBmt_Pay_Gateway extends WC_Payment_Gateway {
 		$order->update_meta_data( '_openbmt_total_minor', (string) Money::minor_from_decimal( wc_format_decimal( (string) $order->get_total( 'edit' ), Rates::minor_digits( $currency ) ), $currency ) );
 		$order->update_meta_data( '_openbmt_currency', $currency );
 		$order->save();
-		$order->update_status( 'on-hold', OpenBmt_Pay_Text::t( 'WO_17_NOTE_ON_HOLD' ) );
+		$order->update_status( 'on-hold', OpenBmt_Pay_Words::t( 'WO_17_NOTE_ON_HOLD' ) );
 		return array(
 			'result'   => 'success',
 			'redirect' => $this->get_return_url( $order ),
@@ -153,14 +177,21 @@ class OpenBmt_Pay_Gateway extends WC_Payment_Gateway {
 		$left    = max( 0, (int) $order->get_meta( '_openbmt_expires_at' ) - time() );
 		$link    = PaymentUri::link( $address, $sats, $pairing['name'] );
 		echo '<section class="openbmt-pay">';
-		echo '<h2>' . esc_html( OpenBmt_Pay_Text::t( 'WO_16_TITLE' ) ) . '</h2>';
-		echo '<p>' . esc_html( OpenBmt_Pay_Text::t( 'WO_16_ADDRESS' ) ) . ' <code>' . esc_html( $address ) . '</code></p>';
-		echo '<p>' . esc_html( OpenBmt_Pay_Text::t( 'WO_16_AMOUNT' ) ) . ' <code>' . esc_html( Money::btc_text( $sats ) ) . '</code></p>';
-		echo '<p><a href="' . esc_url( $link, array( 'bitcoin' ) ) . '">' . esc_html( OpenBmt_Pay_Text::t( 'WO_16_LINK' ) ) . '</a></p>';
+		echo '<h2>' . esc_html( OpenBmt_Pay_Words::t( 'WO_16_TITLE' ) ) . '</h2>';
+		echo '<p>' . esc_html( OpenBmt_Pay_Words::t( 'WO_16_ADDRESS' ) ) . ' <code>' . esc_html( $address ) . '</code></p>';
+		echo '<p>' . esc_html( OpenBmt_Pay_Words::t( 'WO_16_AMOUNT' ) ) . ' <code>' . esc_html( Money::btc_text( $sats ) ) . '</code></p>';
+		echo '<p><a href="' . esc_url( $link, array( 'bitcoin' ) ) . '">' . esc_html( OpenBmt_Pay_Words::t( 'WO_16_LINK' ) ) . '</a></p>';
+		try {
+			$svg = Qr::svg( Qr::encode( PaymentUri::qr_text( $address, $sats, $pairing['name'] ), 'M' ) );
+			// The SVG is made from the module matrix alone; kses keeps only its own tags and attributes.
+			echo '<div class="openbmt-pay-qr" role="img" aria-label="' . esc_attr( OpenBmt_Pay_Words::t( 'WO_16_QR_LABEL' ) ) . '">' . wp_kses( $svg, self::SVG_ALLOWED ) . '</div>';
+		} catch ( Refusal $e ) {
+			unset( $e );
+		}
 		if ( $left > 0 ) {
-			echo '<p>' . esc_html( sprintf( OpenBmt_Pay_Text::t( 'WO_16_TIME_LEFT' ), (string) intdiv( $left + 59, 60 ) ) ) . '</p>';
+			echo '<p>' . esc_html( sprintf( OpenBmt_Pay_Words::t( 'WO_16_TIME_LEFT' ), (string) intdiv( $left + 59, 60 ) ) ) . '</p>';
 		} else {
-			echo '<p>' . esc_html( OpenBmt_Pay_Text::t( 'WO_16_QUOTE_RAN_OUT' ) ) . '</p>';
+			echo '<p>' . esc_html( OpenBmt_Pay_Words::t( 'WO_16_QUOTE_RAN_OUT' ) ) . '</p>';
 		}
 		echo '</section>';
 	}
