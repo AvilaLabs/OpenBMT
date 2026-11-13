@@ -44,6 +44,24 @@ not ask a server what the wallet holds.
   named state "deep reorg: rescan", offers no coins, and stays so until it
   is reset and rescanned from the birthday height. Exactly 100 blocks can
   still be undone.
+- **OC-53. A reorganization while the node was stopped.** The view keeps
+  the hash of the block it last checked. At start, before the view or its
+  facts are used, that block is looked up in the chain the node holds. If
+  it is no longer there, the blocks of the view's undo records that are not
+  in that chain are the blocks that left, and they are undone as OC-05
+  says, in the view and in the view of every former wallet; when no undo
+  record reaches the fork, it is the deep reorganization of OC-06. The
+  background watch keeps headers and no coins, so this is also what
+  follows a reorganization it saw. A sale's facts, a refund's facts and a
+  settlement are never taken from a view that has not passed this check.
+- **OC-54. A payment finished elsewhere is undone too.** When a payment
+  given to a hardware signer is settled from a block (OC-52), the
+  transaction, taken from that block, is kept in the view's undo record as
+  the owner's own confirmed transactions are. If that block leaves the
+  chain, the paid rows it settled return to sent and the transaction is
+  followed again as OC-05 says: the node rebroadcasts the same bytes and
+  signs nothing. Its paid rows cannot be archived while the transaction is
+  in the undo horizon.
 
 ## 3. The watch set
 
@@ -480,7 +498,11 @@ the shop's currency, so the node keeps a log of its own.
   last quote the counter's records give, as a cash refund is valued, CR-71),
   rounded down; without a quote, none. A cash-out's value is the satoshis
   paid out at the price the owner confirmed when the cash-out was queued
-  (OA-102); without one, none. A value that is none is never made up.
+  (OA-102); without one, none. A value that is none is never made up. The
+  satoshis of a cash-out of everything are those its transaction paid out,
+  read from the transaction itself, also when it was finished on a
+  hardware signer and settled from a block (OC-52); they are never logged
+  as zero.
 - **OC-50.** The log is `paid-log.bin`: `OBM&`, version 1, and then entries of
   118 bytes, each ending in the first 8 bytes of the SHA-256 of the 110 bytes
   before it. The file is only added to: a new file is built from the old

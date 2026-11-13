@@ -90,7 +90,10 @@ merchant types it into the Box.
   invitation spent.
 - **BX-16.** Roots are pinned once. A paired Box takes a welcome from
   nobody. To pair it with another shop, or again with the same one, its
-  data directory is erased, which also gives it a new key.
+  data directory is erased, which also gives it a new key. The one answer
+  it still gives: the very welcome and settings it was paired with, byte
+  for byte, are answered as paired and change nothing, so an owner's phone
+  that lost the Box's first answer can finish pairing.
 - **BX-17.** Without a Key app (key 2 on a hardware wallet and no approver
   device) the owner's phone makes the invitation and checks the claim, and
   its screen says that pairing rests on the owner's phone alone, as it
