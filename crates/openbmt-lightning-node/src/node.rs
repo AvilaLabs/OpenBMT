@@ -1580,8 +1580,10 @@ mod tests {
     use lightning::routing::router::Router;
     use std::str::FromStr;
 
-    fn config(network: Network) -> NodeConfig {
-        let dir = temp_dir("node-config");
+    /// A config whose files go in a directory of this test's own, since
+    /// tests run at once and one test's start must not show in another's.
+    fn config(network: Network, test: &str) -> NodeConfig {
+        let dir = temp_dir(test);
         NodeConfig {
             network,
             seed: NodeSeed([3; 64]),
@@ -1617,14 +1619,13 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
-        let err = rt
-            .block_on(Node::start(config(Network::Bitcoin)))
-            .err()
-            .unwrap();
+        let c = config(Network::Bitcoin, "sl-60-mainnet");
+        let data_dir = c.data_dir.clone();
+        let err = rt.block_on(Node::start(c)).err().unwrap();
         assert!(matches!(err, StartError::MainnetNotYet));
         assert_eq!(err.to_string(), crate::words::SL_60);
         // Refused before anything was made on disk.
-        assert!(!temp_dir("node-config").join("node").exists());
+        assert!(!data_dir.exists());
     }
 
     #[test]
@@ -1634,7 +1635,10 @@ mod tests {
             .build()
             .unwrap();
         for n in [Network::Regtest, Network::Signet] {
-            let err = rt.block_on(Node::start(config(n))).err().unwrap();
+            let err = rt
+                .block_on(Node::start(config(n, "sl-60-test-networks")))
+                .err()
+                .unwrap();
             assert!(matches!(err, StartError::Chain(_)), "{err}");
         }
     }
@@ -1673,18 +1677,21 @@ mod tests {
             // A test-network key is refused as the counter's import refuses it.
             "wpkh([00000000/84h/1h/0h]tpubD6NzVbkrYhZ4XgiXtGrdW5XDAPFCL9h7we1vwNCpn8tGbBcgfVYjXyhWo4E1xkh56hjod1RhGjxbaTLV3X4FyWuejifB9jusQ46QzG87VKp/<0;1>/*)",
         ] {
-            let mut c = config(Network::Regtest);
+            let mut c = config(Network::Regtest, "sl-33-wallet");
             c.wallet = bad.to_string();
+            let data_dir = c.data_dir.clone();
             let err = rt.block_on(Node::start(c)).err().unwrap();
+            assert!(!data_dir.exists(), "{bad}");
             assert!(matches!(err, StartError::WalletRefused), "{err}");
             assert_eq!(err.to_string(), crate::words::SL_33_DESTINATION_REFUSED);
         }
         // An index with no address in the wallet is refused the same way.
-        let mut c = config(Network::Regtest);
+        let mut c = config(Network::Regtest, "sl-33-index");
         c.sweep_index = 1 << 31;
+        let data_dir = c.data_dir.clone();
         let err = rt.block_on(Node::start(c)).err().unwrap();
         assert!(matches!(err, StartError::WalletRefused), "{err}");
-        assert!(!temp_dir("node-config").join("node").exists());
+        assert!(!data_dir.exists());
     }
 
     #[test]
