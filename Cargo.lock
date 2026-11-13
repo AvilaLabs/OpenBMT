@@ -764,6 +764,7 @@ dependencies = [
  "openbmt-approver",
  "openbmt-bbqr",
  "openbmt-core",
+ "openbmt-kernel-random",
  "openbmt-session",
  "openbmt-signer",
  "openbmt-spend",
