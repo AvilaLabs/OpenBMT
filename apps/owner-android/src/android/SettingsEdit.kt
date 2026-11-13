@@ -354,6 +354,8 @@ internal fun Controller.showEditReview() {
             SettingsEditModel.reviewShares(p)?.let { views.add(ui.text(it, 15f)) }
             actions.add(
                 ui.button("Queue the change", ButtonKind.Primary) {
+                    // SS-37: a change that loosens waits while the starter wallet is at its limit or past its date.
+                    if (p.changes.any { it.loosening } && starterHolds(org.openbmt.owner.StarterChangeKind.Other)) return@button showStarterHeld { showChangeSettings() }
                     val q = attempt(msg) { n.queueSettings(p.settings) } ?: return@button
                     settingsDraft = SettingsDraft()
                     if (q.tightening) {

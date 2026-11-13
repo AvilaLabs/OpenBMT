@@ -81,6 +81,12 @@ import org.openbmt.owner.SettingsPreview
 import org.openbmt.owner.SetupFields
 import org.openbmt.owner.ShopCurrency
 import org.openbmt.owner.WaitingCounter
+import org.openbmt.owner.StarterChangeKind
+import org.openbmt.owner.StarterLimit
+import org.openbmt.owner.StarterLimitKind
+import org.openbmt.owner.StarterPaid
+import org.openbmt.owner.StarterTyped
+import org.openbmt.owner.StarterWalletView
 import org.openbmt.owner.Words
 
 /**
@@ -173,7 +179,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + OwnPairWords.all().size + 1 + AppWords.keyMapAll().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's and of the key map's")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + OwnPairWords.all().size + 1 + AppWords.keyMapAll().size + 1 + StarterWords.all().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's, of the key map's and of the starter wallet's")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -501,7 +507,7 @@ object AppModelTest {
         ok(!old.contains("<include") && old.contains("<exclude domain=\"file\""), "the old rules include nothing")
     }
 
-    private fun oa_03_the_manifest_asks_for_five_permissions_and_exports_one_activity() {
+    private fun oa_03_the_manifest_asks_for_six_permissions_and_exports_one_activity() {
         val manifest = source("AndroidManifest.xml")
         val permissions = Regex("<uses-permission android:name=\"([^\"]+)\"").findAll(manifest).map { it.groupValues[1] }.toList()
         ok(
@@ -511,6 +517,7 @@ object AppModelTest {
                 "android.permission.FOREGROUND_SERVICE",
                 "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
                 "android.permission.POST_NOTIFICATIONS",
+                "android.permission.HIDE_OVERLAY_WINDOWS",
             ),
             "the permissions: $permissions",
         )
@@ -522,7 +529,7 @@ object AppModelTest {
         ok(manifest.contains("android:usesCleartextTraffic=\"false\"") && !manifest.contains("debuggable"), "cleartext off, not debuggable")
         ok(manifest.contains("package=\"org.openbmt.owner.app\""), "the package")
         val check = source("tests/check-manifest.sh")
-        ok(check.contains("-eq 5 ]") && check.contains("camera.any") && check.contains("minSdkVersion:'29'") && check.contains("targetSdkVersion:'36'"), "the script checks the APK for the same")
+        ok(check.contains("-eq 6 ]") && check.contains("camera.any") && check.contains("minSdkVersion:'29'") && check.contains("targetSdkVersion:'36'"), "the script checks the APK for the same")
         val build = source("build.sh")
         ok(build.contains("min_sdk=29") && build.contains("target_sdk=36") && build.contains("arm64-v8a:aarch64-linux-android") && build.contains("x86_64:x86_64-linux-android"), "the build's levels and ABIs")
     }
@@ -2353,7 +2360,7 @@ object AppModelTest {
         ok(Regex("<property").findAll(manifest).count() == 1 && !manifest.substring(manifest.indexOf("<service")).contains("<intent-filter"), "one property, and the service has no filter")
         for (bad in listOf("BOOT_COMPLETED", "<receiver", "<provider", "<activity-alias", "WAKE_LOCK", "SCHEDULE_EXACT_ALARM", "USE_EXACT_ALARM")) ok(!manifest.contains(bad), "no $bad")
         val check = source("tests/check-manifest.sh")
-        ok(check.contains("foregroundServiceType.*0x40000000") && check.contains("PROPERTY_SPECIAL_USE_FGS_SUBTYPE") && check.contains("-eq 5 ]") && check.contains("for kind in receiver provider activity-alias"), "the script checks the built APK for all of it")
+        ok(check.contains("foregroundServiceType.*0x40000000") && check.contains("PROPERTY_SPECIAL_USE_FGS_SUBTYPE") && check.contains("-eq 6 ]") && check.contains("for kind in receiver provider activity-alias"), "the script checks the built APK for all of it")
         for (other in listOf("../key-android/AndroidManifest.xml", "../counter-android/AndroidManifest.xml")) {
             val m = source(other)
             ok(!m.contains("<service") && !m.contains("FOREGROUND_SERVICE") && !m.contains("POST_NOTIFICATIONS"), "$other is not changed")
@@ -3518,6 +3525,249 @@ object AppModelTest {
         ok(!Regex("drawText|StaticLayout|TextView|\"[A-Za-z]{2,}").containsMatchIn(src.replace(Regex("//.*"), "").replace(Regex("/\\*[\\s\\S]*?\\*/"), "")), "the pictures draw shapes only: no text and no string of words")
     }
 
+
+    // ---- the starter wallet (docs/START-SIMPLE-RULES.md), named ss_NN_... ------------------------------------------------
+
+    /** The library's decisions, as a fake that follows the rules of `starter/limit.rs`, for the pure parts. */
+    private class FakeCore : StarterCore {
+        val max = 7L * 24 * 60 * 60
+        override fun limitState(held: Long, limit: Long, now: Long, moveBy: Long, notYetUntil: Long?): StarterLimit {
+            val atLimit = held >= limit
+            val past = now >= moveBy
+            if (!atLimit && !past) return StarterLimit(StarterLimitKind.Under, null)
+            if (notYetUntil != null && notYetUntil > now && notYetUntil - now <= max) return StarterLimit(StarterLimitKind.NotYet, notYetUntil)
+            return StarterLimit(if (atLimit) StarterLimitKind.AtLimit else StarterLimitKind.PastDate, null)
+        }
+        override fun changeHeld(state: StarterLimitKind, change: StarterChangeKind) =
+            state != StarterLimitKind.Under && change in listOf(StarterChangeKind.RaiseLimit, StarterChangeKind.LaterDate, StarterChangeKind.AddCounter, StarterChangeKind.StopAboveOff, StarterChangeKind.Other)
+        override fun offersBitcoin(stopAboveLimit: Boolean, held: Long, limit: Long) = !stopAboveLimit || held < limit
+        override fun seedMayGo(moveConfirmations: Long) = moveConfirmations >= 1
+        override fun notYet(now: Long, askedSecs: Long) = now + minOf(askedSecs, max)
+    }
+
+    private fun env(
+        adb: Boolean = false, su: List<String> = emptyList(), testKeys: Boolean = false, overlays: List<String> = emptyList(),
+        services: List<AccessibilityEntry> = emptyList(), patch: String? = "2026-10-05", lock: Boolean = true,
+    ) = StarterEnvironment(adb, su, testKeys, overlays, services, patch, lock)
+
+    private fun starterTests() {
+        val today = java.time.LocalDate.of(2026, 11, 13)
+        val all = StarterWords.all()
+
+        // Words: every text of the starter screens is a placeholder named for its rule, shown as its own name.
+        for ((k, n) in all) {
+            ok(Regex("WORDS_NEEDED_OA_SS\\d{2}_[A-Z0-9_]+").matches(n) && n.removePrefix("WORDS_NEEDED_OA_") == k, "$n is named for a rule")
+            val w = StarterWords.said(n)
+            ok(StarterWords.isPlaceholder(w) && w.heading == n && w.what == n && w.next == n, "$n shows its name")
+        }
+        ok(all.map { it.second }.toSet().size == all.size, "each placeholder once")
+        val wordsSource = source("src/model/StarterWords.kt")
+        ok(Regex("need\\(\"WORDS_NEEDED").findAll(wordsSource).count() == all.size, "every placeholder of the source is in the list")
+        ok(all.size > 100 && listOf("SS13_PEN", "SS13_NO_PHOTO", "SS13_NOBODY_ASKS").all { k -> all.any { it.first == k } }, "SS-13 has one constant for each sentence")
+        ok(all.any { it.first == "SS37_NOT_YET_SENTENCE" }, "the sentence of Not yet is a placeholder")
+        for (f in FindingKind.values()) ok(StarterWords.isPlaceholder(StarterWords.said(StarterChecks.name(f))) && StarterChecks.why(f).startsWith("WORDS_NEEDED_OA_SS3"), "$f has a name and an explanation")
+        val md = AppWords.screensMarkdown()
+        ok(all.all { (k, _) -> md.contains("| $k |") }, "docs/screens/owner-app.md lists them")
+        // No sentence of the app's own is written in the starter files: every string of a screen is a StarterWords name or a number.
+        for (f in listOf("StarterScreens", "StarterUse")) {
+            val src = source("src/android/$f.kt").replace(Regex("//.*"), "").replace(Regex("/\\*[\\s\\S]*?\\*/"), "")
+            val literals = Regex("\"([^\"\\\\]*)\"").findAll(src).map { it.groupValues[1] }
+                .filter { it.any { c -> c.isLetter() } && !it.startsWith("android") && !it.startsWith("OpenBMT/") && !it.startsWith("AES") && !it.startsWith("Android") && it != "?" && !it.startsWith("android:") }
+                .filter { it.contains(' ') && it.length > 12 }.toList()
+            ok(literals.isEmpty(), "$f writes no sentence of its own: $literals")
+        }
+
+        // SS-33, SS-34: what is found, named, and what refuses.
+        ok(StarterChecks.decide(env(), CheckStage.Making, today).verdict == CheckVerdict.Clear, "a clean phone is clear")
+        ok(StarterChecks.decide(env(lock = false), CheckStage.Making, today).verdict == CheckVerdict.NoScreenLock, "SS-24: no screen lock, no wallet")
+        ok(StarterChecks.decide(env(lock = false), CheckStage.Paying, today).verdict == CheckVerdict.NoScreenLock, "no screen lock stops a payment too")
+        val usb = StarterChecks.decide(env(adb = true), CheckStage.Paying, today)
+        ok(usb.verdict == CheckVerdict.Confirm && usb.findings.single().kind == FindingKind.UsbDebugging, "USB debugging is named and confirmed")
+        ok(StarterChecks.decide(env(su = listOf("/system/xbin/su")), CheckStage.Making, today).findings.single().kind == FindingKind.Root, "a su binary is root")
+        ok(StarterChecks.decide(env(testKeys = true), CheckStage.Making, today).findings.single().kind == FindingKind.Root, "test-keys is a sign of root")
+        val ov = StarterChecks.decide(env(overlays = listOf("Some app")), CheckStage.Making, today)
+        ok(ov.verdict == CheckVerdict.Confirm && ov.findings.single().name == "Some app", "an overlay app is named")
+        val tool = AccessibilityEntry("A screen reader", true)
+        val other = AccessibilityEntry("An automation", false)
+        val one = StarterChecks.decide(env(services = listOf(tool)), CheckStage.Making, today)
+        ok(one.verdict == CheckVerdict.Confirm && one.findings.single().kind == FindingKind.ServiceTool && !one.findings.single().refuses, "an accessibility tool is named and confirmed, not refused")
+        for (stage in listOf(CheckStage.Making, CheckStage.Words)) {
+            val r = StarterChecks.decide(env(services = listOf(tool, other)), stage, today)
+            ok(r.verdict == CheckVerdict.Refused && r.findings.count { it.refuses } == 1 && r.findings.first { it.refuses }.name == "An automation", "a service that is not a tool refuses at $stage")
+            ok(!StarterChecks.mayGoOn(r, true), "a refusal is not passed by confirming")
+        }
+        val pay = StarterChecks.decide(env(services = listOf(other)), CheckStage.Paying, today)
+        ok(pay.verdict == CheckVerdict.Confirm && pay.findings.single().kind == FindingKind.ServiceNotTool, "at a payment it is named and confirmed")
+        ok(!StarterChecks.mayGoOn(pay, false) && StarterChecks.mayGoOn(pay, true) && StarterChecks.mayGoOn(StarterChecks.decide(env(), CheckStage.Paying, today), false), "the owner confirms again, and a clear phone needs nothing")
+        // SS-34: six months.
+        ok(!StarterChecks.patchIsOld("2026-05-13", today) && StarterChecks.patchIsOld("2026-05-12", today), "the patch is old after six months")
+        ok(StarterChecks.decide(env(patch = "2025-01-05"), CheckStage.Making, today).findings.single().kind == FindingKind.OldPatch, "an old patch is a warning")
+        ok(StarterChecks.decide(env(patch = "2025-01-05"), CheckStage.Making, today).verdict == CheckVerdict.Confirm, "and not a refusal")
+        ok(StarterChecks.decide(env(patch = "2025-01-05"), CheckStage.Paying, today).verdict == CheckVerdict.Clear, "the patch is looked at before the key only")
+        ok(StarterChecks.decide(env(patch = null), CheckStage.Making, today).findings.single().kind == FindingKind.PatchUnknown && StarterChecks.decide(env(patch = "x"), CheckStage.Making, today).findings.single().kind == FindingKind.PatchUnknown, "a patch date that is missing or unreadable is said to be unknown")
+        ok(StarterChecks.SU_PATHS.all { it.endsWith("su") || it.endsWith(".su") } && "/system/xbin/su" in StarterChecks.SU_PATHS, "the usual su paths")
+        val env0 = source("src/android/StarterWindow.kt")
+        ok(env0.contains("Settings.Global.ADB_ENABLED") && env0.contains("getEnabledAccessibilityServiceList") && env0.contains("isAccessibilityTool") && env0.contains("SDK_INT >= 31") && env0.contains("Build.TAGS") && env0.contains("Build.VERSION.SECURITY_PATCH") && env0.contains("isDeviceSecure"), "the phone's own facts are read")
+
+        // SS-35: the limit and the date.
+        val now = 1_800_000_000L
+        ok(StarterSetup.suggestedDate(now) == java.time.LocalDate.ofEpochDay(now / 86400 + 30).toString(), "the date suggested is 30 days on")
+        ok(StarterSetup.moveBy(StarterSetup.suggestedDate(now), now)!! > now && StarterSetup.moveBy("2020-01-01", now) == null && StarterSetup.moveBy("soon", now) == null && StarterSetup.moveBy("", now) == null, "a date must read and be in the future")
+        ok(StarterSetup.limitSats("500", 100_000) == 500_000L && StarterSetup.limitSats("1,000", 50_000) == 2_000_000L, "a limit in the shop's currency is worked out in satoshis at the price")
+        ok(StarterSetup.limitSats("200000", null) == 200_000L, "in Bitcoin Standard it is satoshis")
+        ok(StarterSetup.limitSats("0", 100_000) == null && StarterSetup.limitSats("-5", 100_000) == null && StarterSetup.limitSats("x", 100_000) == null && StarterSetup.limitSats("5", 0) == null && StarterSetup.limitSats("5", -1) == null && StarterSetup.limitSats("", 1) == null, "a limit is a whole number above zero at a price above zero")
+        ok(StarterSetup.limitSats("99999999999999999", 1) == null, "a limit that overflows is refused")
+        ok(StarterSetup.rolls("1 2,3 4 5 6")!!.toList() == listOf<Byte>(1, 2, 3, 4, 5, 6) && StarterSetup.rolls("")!!.isEmpty() && StarterSetup.rolls("7") == null && StarterSetup.rolls("0") == null && StarterSetup.rolls("a") == null, "die rolls are 1 to 6")
+        ok(StarterSetup.pageAfter(0, 3) == 1 && StarterSetup.pageAfter(1, 3) == 2 && StarterSetup.pageAfter(2, 3) == null, "ss_10: three screens of four words")
+        val rec = StarterRecord(123_456, 1_900_000_000, true, 1_800_100_000, 4)
+        val back = StarterRecord.parse(rec.toText())
+        ok(back.limitSats == 123_456L && back.moveBy == 1_900_000_000L && back.stopAboveLimit && back.notYetUntil == 1_800_100_000L && back.changeIndex == 4L, "the record reads back")
+        ok(StarterRecord.parse(StarterRecord(1, 2, false, null).toText()).notYetUntil == null && StarterRecord.parse("limit-sats: 1\nmove-by: 2\nstop-above-limit: false\n").changeIndex == 0L, "no Not yet, and an older record with no change index")
+        throws("a record with no limit") { StarterRecord.parse("move-by: 2\nstop-above-limit: false\n") }
+        throws("a record that does not read") { StarterRecord.parse("garbage\n") }
+        ok(rec.withNextChange().changeIndex == 5L && rec.withNotYet(null).notYetUntil == null, "the record moves on")
+
+        // SS-36, SS-37, SS-38: the library's decisions, used as they are.
+        val core = FakeCore()
+        val r0 = StarterRecord(1_000, now + 10 * 86400, false, null)
+        val under = StarterHome.line(core, r0, 500, now, StarterCoreWords.line) { StarterCoreWords.state(it) }
+        ok(under.state == StarterLimitKind.Under && !under.opensUpgrade && under.words.heading == StarterWords.coreLine, "under the limit and before the date: the line's own words, nothing asked")
+        ok(under.facts.map { it.first } == listOf(StarterWords.lineHeld, StarterWords.lineLimit, StarterWords.lineMoveBy) && under.facts[0].second == "500 sats" && under.facts[1].second == "1,000 sats" && under.facts[2].second == StarterHome.date(now + 10 * 86400), "the line shows what it holds, the limit and the date, as numbers")
+        val atLimit = StarterHome.line(core, r0, 1_000, now, StarterCoreWords.line) { StarterCoreWords.state(it) }
+        ok(atLimit.state == StarterLimitKind.AtLimit && atLimit.opensUpgrade && atLimit.words.heading == StarterWords.coreAtLimit, "at the limit: the upgrade screen, with the state's words")
+        val past = StarterHome.line(core, StarterRecord(1_000, now - 1, false, null), 0, now, StarterCoreWords.line) { StarterCoreWords.state(it) }
+        ok(past.state == StarterLimitKind.PastDate && past.opensUpgrade && past.words.heading == StarterWords.corePastDate, "past the date: the upgrade screen")
+        val held = StarterHome.line(core, r0.withNotYet(now + 3600), 2_000, now, StarterCoreWords.line) { StarterCoreWords.state(it) }
+        ok(held.state == StarterLimitKind.NotYet && !held.opensUpgrade && held.facts.last().first == StarterWords.lineNotYetUntil, "Not yet in force: no upgrade screen, and when it ends")
+        ok(StarterHome.line(core, r0.withNotYet(now + 9 * 86400), 2_000, now, StarterCoreWords.line) { StarterCoreWords.state(it) }.state == StarterLimitKind.AtLimit, "a Not yet longer than 7 days holds nothing off")
+        ok(core.changeHeld(StarterLimitKind.AtLimit, StarterChangeKind.AddCounter) && !core.changeHeld(StarterLimitKind.Under, StarterChangeKind.AddCounter) && !core.changeHeld(StarterLimitKind.AtLimit, StarterChangeKind.LowerLimit), "changes that loosen wait, others go through")
+        ok(core.offersBitcoin(false, 5, 1) && !core.offersBitcoin(true, 5, 1) && core.offersBitcoin(true, 0, 1), "sales never stop unless the owner said so")
+        ok(StarterCoreWords.state(StarterLimitKind.Under) == null && StarterCoreWords.state(StarterLimitKind.NotYet) != null, "the words of a state")
+        // "Not yet": the sentence exactly, at most 7 days.
+        val sentence = StarterWords.notYetSentence
+        ok(StarterNotYet.grant(core, sentence, sentence, now) == now + StarterNotYet.MAX_SECS, "the sentence typed exactly gives 7 days")
+        for (bad in listOf("", sentence.lowercase(), sentence + " ", " $sentence", sentence.dropLast(1), sentence.replace('_', ' '))) ok(StarterNotYet.grant(core, bad, sentence, now) == null, "no Not yet for: '$bad'")
+        ok(StarterNotYet.MAX_SECS == 7L * 24 * 60 * 60, "7 days")
+
+        // SS-11: the keypad.
+        ok(StarterKeypad.rows.joinToString("").toSet() == ('a'..'z').toSet() && StarterKeypad.rows.joinToString("").length == 26, "every letter once")
+        ok(StarterKeypad.letterKey('a') == 97 && StarterKeypad.BACKSPACE == 8 && StarterKeypad.ENTER == 13, "a key is the code the core takes")
+        throws("a key that is not a letter") { try { StarterKeypad.letterKey('A') } catch (e: IllegalArgumentException) { throw IOException("x") } }
+        val typed = StarterTyped(3, true, 1, false, false)
+        val counts = StarterKeypad.counts(typed)
+        ok(counts.typed == 3L && counts.accepted && counts.step == 1L && StarterKeypad.asked(listOf(2L, 5L, 9L), 1) == 5L && StarterKeypad.asked(listOf(2L, 5L, 9L), 3) == null, "only counts come back")
+        val pad = source("src/android/StarterScreens.kt")
+        ok(!pad.contains("TextWatcher") && !pad.contains("onKeyDown") && !pad.contains("setText(it") && !Regex("\\bkey\\.toChar|code\\.toChar|\\.toChar\\(").containsMatchIn(pad), "no letter is turned back into text on a words screen")
+
+        // SS-20, SS-23, SS-43: what is kept and what it means.
+        ok(StarterState.of(false, false, false) == StarterKeyState.None && StarterState.of(true, true, true) == StarterKeyState.Ready, "none, or ready")
+        ok(StarterState.of(true, true, false) == StarterKeyState.KeyGone && StarterState.of(true, false, true) == StarterKeyState.KeyGone && StarterState.of(false, true, true) == StarterKeyState.KeyGone, "a key that is gone, or a file that is, is the restore")
+        val iv = ByteArray(12) { it.toByte() }
+        val packed = StarterWrap.pack(iv, byteArrayOf(9, 8, 7))
+        val parts = StarterWrap.unpack(packed)
+        ok(parts.iv.contentEquals(iv) && parts.ciphertext.contentEquals(byteArrayOf(9, 8, 7)), "the wrapped key reads back")
+        throws("an empty wrapped key") { StarterWrap.unpack(ByteArray(0)) }
+        throws("a wrapped key cut short") { StarterWrap.unpack(byteArrayOf(12, 1, 2, 3)) }
+        throws("a wrapped key with no IV") { StarterWrap.unpack(byteArrayOf(0, 1, 2)) }
+        val dir = tempDir()
+        try {
+            val store = StarterStore(dir)
+            ok(store.dir.path.startsWith(dir.path) && !store.hasSealed() && !store.hasWrapped() && !store.hasWallet() && store.loadRecord() == null && store.loadSealed() == null, "nothing is kept at first")
+            store.saveSealed(byteArrayOf(1, 2, 3)); store.saveWrapped(packed); store.saveWallet(StarterWalletView("wpkh(xpub)", "abcd1234", "bc1qfirst")); store.saveRecord(rec)
+            ok(store.loadSealed()!!.contentEquals(byteArrayOf(1, 2, 3)) && store.loadWrapped()!!.contentEquals(packed), "the sealed seed and the wrapped key are kept")
+            val w = store.loadWallet()!!
+            ok(w.description == "wpkh(xpub)" && w.fingerprint == "abcd1234" && w.firstAddress == "bc1qfirst", "the public wallet is kept")
+            ok(store.loadRecord()!!.limitSats == 123_456L, "the record is kept")
+            store.savePending(StarterPaid(byteArrayOf(1, 2), "aa".repeat(32), 100, 140, 5000, null, null, "bc1qdest"))
+            ok(store.loadPendingTxid() == "aa".repeat(32), "a signed payment waits with its ID")
+            store.deleteKey()
+            ok(!store.hasSealed() && !store.hasWrapped() && store.hasWallet() && store.loadRecord() != null, "SS-43: the sealed seed and the wrapped key go, the public wallet stays")
+            ok(store.dir.listFiles()!!.none { it.name.endsWith(".tmp") }, "no temporary file is left")
+        } finally {
+            clean(dir)
+        }
+        ok(StarterPayModel.mayDelete(core, 1) && !StarterPayModel.mayDelete(core, 0) && !StarterPayModel.mayDelete(core, null), "the key is deleted when the move has one confirmation, and not when that is unknown")
+        // SS-31: what the owner sees before they authenticate.
+        val before = StarterPayModel.beforeLines("bc1qexampleaddressthatislong0000000000000000", 12_345, 2_500)
+        ok(before[0].second == "bc1qexampleaddressthatislong0000000000000000" && before[1].second == "12,345 sats" && before[2].second == "2.500 sat/vB", "the address in full, the amount and the fee rate")
+        val paid = StarterPaid(ByteArray(0), "bb".repeat(32), 300, 150, 12_345, 1, 700, "bc1qexampleaddressthatislong0000000000000000")
+        val after = StarterPayModel.afterLines(paid)
+        ok(after.map { it.second } == listOf("bc1qexampleaddressthatislong0000000000000000", "12,345 sats", "300 sats", "700 sats"), "after signing: address, amount, fee and change")
+        ok(StarterPayModel.afterLines(StarterPaid(ByteArray(0), "cc", 1, 1, 1, null, null, "x")).size == 3, "no change line when there is no change")
+        ok(StarterPayModel.moveBeforeLines("wpkh(xpub)", 3, 1_000)[1].second == "3", "the move shows the new wallet and the index")
+
+        // SS-12: every screen that shows or takes words goes through the one helper.
+        val helper = source("src/android/StarterWindow.kt")
+        ok(helper.contains("FLAG_SECURE") && helper.contains("setHideOverlayWindows(true)") && helper.contains("SDK_INT >= 31") && helper.contains("filterTouchesWhenObscured = true") && helper.contains("setAccessibilityDataSensitive(View.ACCESSIBILITY_DATA_SENSITIVE_YES)") && helper.contains("SDK_INT >= 34"), "the helper sets every flag")
+        val screens = source("src/android/StarterScreens.kt")
+        val builder = screens.substringAfter("private fun Controller.starterWordsScreen(").substringBefore("/** One screen of four numbered words")
+        ok(builder.contains("StarterWindow.secure(act, page)") && builder.indexOf("act.show(page)") in 0 until builder.indexOf("StarterWindow.secure(act, page)"), "the builder applies the helper once the page is on show")
+        ok(occurs(screens, "StarterWindow.secure(") == 1 && occurs(screens, "act.show(") == 1, "nothing else of the setup shows a page or applies flags on its own")
+        for (name in listOf("showStarterPage", "showStarterCheck", "showStarterRestore")) {
+            val body = screens.substringAfter("internal fun Controller.$name(").substringBefore("\n}\n")
+            ok(body.contains("starterWordsScreen("), "$name builds its screen with the helper")
+        }
+        ok(helper.contains("StarterWindow.sensitive(view)") && screens.contains("StarterWindow.sensitive(column)"), "the words image and the keypad are marked sensitive")
+        ok(source("src/android/MainActivity.kt").contains("StarterWindow.release(this)"), "every other screen lets overlays be drawn again")
+        // Nothing of a words screen is typed into a field, copied or logged.
+        for (f in listOf("StarterScreens", "StarterWindow")) {
+            val src = source("src/android/$f.kt")
+            val bad = listOf("EditText", "ui.field(", "ClipboardManager", "ClipData", "copy(", "android.util.Log", "Log.", "println", "Logger", "InputMethod", "setText(", "Toast", "SharedPreferences")
+            val found = bad.filter { src.replace(Regex("//.*"), "").contains(it) && !(f == "StarterScreens" && (it == "ui.field(" || it == "setText(")) }
+            ok(found.isEmpty(), "$f: no field, clipboard or log: $found")
+        }
+        // The limit screen is the one that has fields, and it is not a words screen.
+        val limitBody = screens.substringAfter("internal fun Controller.showStarterLimit(").substringBefore("// ---- making the key")
+        ok(limitBody.contains("ui.field(") && !limitBody.contains("starterWordsScreen("), "the limit and the date are typed in fields on a screen that takes no words")
+        val wordsOnly = screens.substringAfter("/** One screen of four numbered words").substringBefore("// ---- sealing")
+        ok(!wordsOnly.contains("ui.field(") && !wordsOnly.contains("EditText") && !wordsOnly.contains("setText("), "the screens of words have no field")
+        val restore = screens.substringAfter("internal fun Controller.showStarterRestore(").substringBefore("private fun Controller.finishRestore")
+        ok(!restore.contains("ui.field(") && !restore.contains("EditText"), "the restore has no field")
+        // The bitmap is cleared.
+        ok(helper.contains("bitmap?.recycle()") && helper.contains("image.wipe()") && helper.contains("pixels.fill(0)") && helper.contains("setImageDrawable(null)"), "the picture is recycled and its pixels zeroed")
+        ok(screens.contains("starter.image?.clear()") && occurs(screens, "clearImage()") >= 4 && source("src/android/Controller.kt").contains("starterLeave()"), "it is cleared when the owner leaves the screen and when the app goes out of view")
+        ok(source("src/android/MainActivity.kt").contains("FLAG_SECURE"), "the whole window is secure (OA-04)")
+
+        // SS-20, SS-21: the key.
+        val keys = source("src/android/StarterKeys.kt")
+        ok(keys.contains("setBlockModes(KeyProperties.BLOCK_MODE_GCM)") && keys.contains("setKeySize(256)") && keys.contains("setUserAuthenticationRequired(true)") && keys.contains("setUnlockedDeviceRequired(true)") && keys.contains("setIsStrongBoxBacked(true)"), "AES-256-GCM, owner needed, phone unlocked, StrongBox")
+        ok(keys.contains("PackageManager.FEATURE_STRONGBOX_KEYSTORE") && keys.contains("make(hasStrongBox())"), "StrongBox when the phone has it")
+        ok(keys.contains("setUserAuthenticationParameters(0, KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL)") && keys.contains("SDK_INT >= 30"), "Android 11 and later: every use, a strong biometric or the PIN")
+        ok(keys.contains("setUserAuthenticationValidityDurationSeconds(VALIDITY_SECS)") && keys.contains("VALIDITY_SECS = 10"), "Android 10: 10 seconds")
+        ok(keys.contains("BiometricManager.Authenticators.DEVICE_CREDENTIAL") && keys.contains("createConfirmDeviceCredentialIntent") && keys.contains("BiometricPrompt.CryptoObject(cipher)"), "the final move asks for the PIN alone, and the prompt wraps the cipher")
+        ok(keys.contains("import android.hardware.biometrics.BiometricPrompt") && !keys.contains("androidx"), "the platform's prompt, no library")
+        ok(!keys.contains("setKeyPurposes") && !keys.contains(".encoded") && !keys.contains("getEncoded") && !keys.contains("toString(") && !keys.contains("String(") && !keys.contains("Log."), "the key is never read out, and no secret becomes a string")
+        ok(StarterStore.KEY_ALIAS == "openbmt-owner-starter-v1" && AppFiles.KEY_ALIAS != StarterStore.KEY_ALIAS && AppFiles.WATCH_KEY_ALIAS != StarterStore.KEY_ALIAS && AppFiles.POS_KEY_ALIAS != StarterStore.KEY_ALIAS && AppFiles.OWN_KEY_ALIAS != StarterStore.KEY_ALIAS, "its own alias")
+        ok(source("src/model/StarterModel.kt").contains("const val DIR = \"starter\"") && source("src/android/Controller.kt").contains("StarterRuntime(dir)") && source("src/android/Controller.kt").contains("private val dir: File = act.noBackupFilesDir"), "the files are in the no-backup folder")
+        ok(keys.contains("dataKey.fill(0)") && keys.contains("key.fill(0)") && source("src/android/StarterUse.kt").contains("OwnerStarter.pay(") && source("src/android/StarterUse.kt").contains("OwnerStarter.move("), "the data key is overwritten after each use, and the app signs through the core")
+        for (f in listOf("StarterKeys", "StarterUse", "StarterScreens")) ok(!Regex("dataKey\\.toString|String\\(key|key\\.joinToString|dataKey\\.joinToString|Base64|toHexString").containsMatchIn(source("src/android/$f.kt")), "$f: the data key is not made text")
+        ok(source("src/android/StarterKeys.kt").contains("UserNotAuthenticatedException") && keys.contains("KeyPermanentlyInvalidatedException") && keys.contains("UnrecoverableKeyException"), "a key that is missing or dropped is told apart")
+        ok(screens.contains("OwnerStarter.open(sealed, ByteArray(32))") && screens.contains("restoreStart()") && screens.contains("restoreFinish("), "SS-23: the core's own words say the key is gone, then the restore on the keypad")
+        ok(screens.contains("CheckStage.Words") && screens.contains("CheckStage.Making") && source("src/android/StarterUse.kt").contains("CheckStage.Paying"), "the checks come before the key, before the words are typed and before every payment")
+        ok(Regex("starterChecked\\(CheckStage.Paying[^\\n]*starterPayConfirm").containsMatchIn(source("src/android/StarterUse.kt")) && source("src/android/StarterUse.kt").contains("starterChecked(CheckStage.Paying, back = { showStarter() })"), "a refund and the move are both checked first")
+        ok(source("src/android/StarterUse.kt").contains("starterSign(msg, true, StarterWords.authMove") && source("src/android/StarterUse.kt").contains("starterSign(msg, false, StarterWords.authPay"), "the move asks for the PIN alone, a refund for the usual proof")
+        ok(source("src/android/StarterUse.kt").contains("starter.store.deleteKey()") && source("src/android/StarterUse.kt").contains("starter.keystore.delete()") && source("src/android/StarterUse.kt").contains("StarterPayModel.mayDelete"), "SS-43: the files and the Keystore key go when the library allows")
+        val gateSrc = source("src/android/Screens.kt")
+        ok(gateSrc.contains("starterGate(n)") && gateSrc.contains("starterLine(n)?.let { views.add(starterLineView(it)) }") && gateSrc.contains("starterRow()"), "the home line and the upgrade gate and the entry are wired")
+        ok(source("src/android/AddCounter.kt").contains("starterHolds(") && source("src/android/SettingsEdit.kt").contains("starterHolds("), "adding counters and loosening settings wait (SS-37)")
+
+        // SS-22: never backed up. The manifest and both rule files are read.
+        val manifest = source("AndroidManifest.xml")
+        ok(manifest.contains("android:allowBackup=\"false\"") && manifest.contains("android:fullBackupContent=\"@xml/backup_rules\"") && manifest.contains("android:dataExtractionRules=\"@xml/data_extraction_rules\""), "backup is off and both rule files are named")
+        val older = source("res/xml/backup_rules.xml").replace(Regex("<!--[\\s\\S]*?-->"), "")
+        val newer = source("res/xml/data_extraction_rules.xml").replace(Regex("<!--[\\s\\S]*?-->"), "")
+        ok(!older.contains("<include") && !newer.contains("<include"), "no rule includes anything")
+        val domains = listOf("root", "file", "database", "sharedpref", "external")
+        for (d in domains) ok(older.contains("<exclude domain=\"$d\"") , "Android 11 and older: $d excluded")
+        for (place in listOf("cloud-backup", "device-transfer")) {
+            val block = newer.substringAfter("<$place>").substringBefore("</$place>")
+            ok(newer.contains("<$place>"), "Android 12 and later: $place is covered")
+            for (d in domains) ok(block.contains("<exclude domain=\"$d\""), "Android 12 and later: $place excludes $d")
+            ok(!block.contains("<include"), "$place includes nothing")
+        }
+        ok(manifest.contains("android.permission.HIDE_OVERLAY_WINDOWS"), "SS-12: the overlay permission is declared")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         val screensMd = args.firstOrNull()?.let { File(it) }
@@ -3538,6 +3788,7 @@ object AppModelTest {
         firstRunTests()
         connectTests()
         pictureTests()
+        starterTests()
         ruleTests(rulesMd)
         println("AppModelTest (owner): $count checks passed")
     }

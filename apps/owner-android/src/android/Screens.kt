@@ -50,12 +50,15 @@ private fun Controller.refusedPage(msg: Slot) {
 // ---- home ------------------------------------------------------------------------------------------
 
 internal fun Controller.showHome(): Unit = withNode { n ->
+    // SS-37: with the starter wallet at its limit or past its date, the app opens on the upgrade screen.
+    if (starterGate(n)) return@withNode
     val content = Slot(act, 14)
     homeTint = null
     screen("Owner", listOf(content), listOf(ui.primary("Spend") { showSpend() }), logo = true)
-    tick = {
+    tick = tick@{
         try {
             val s = n.status()
+            if (starterGate(n)) return@tick
             val pump = pumpFault
             val status: SayWords = when {
                 pump != null -> pump
@@ -81,6 +84,8 @@ internal fun Controller.showHome(): Unit = withNode { n ->
             val inProgress = OwnerModel.sendsInProgress(n.sendStates())
             val views = ArrayList<View>()
             views.add(hero)
+            // SS-36: the starter wallet's line, which cannot be dismissed.
+            starterLine(n)?.let { views.add(starterLineView(it)) }
             // Home has no count of open approvals, of what waits to be delivered or of the refund queue, and it adds no
             // library call to get one: the card shows a row when a count is given, and none is given today (OA-91).
             val counts = listOf<Pair<String, Int?>>("Open approvals" to null, "Waiting to be delivered" to null, "Refund queue" to null)
@@ -121,7 +126,7 @@ private fun Controller.showMoney() {
         { showReceipts() }, { showCashOut() }, { showOld() }, { showRefundNotes() }, { showSessions() }, { showQueue() }, { showOutbox() },
     )
     val rows = OwnerLook.moneyTitles.zip(opens).map { (title, go) -> RowItem(title) { go() } }
-    groupPage(OwnerLook.MONEY, rows + RowItem(OwnerLook.BOOKS, OwnerLook.BOOKS_SUB, onClick = { showBooks() }))
+    groupPage(OwnerLook.MONEY, rows + RowItem(OwnerLook.BOOKS, OwnerLook.BOOKS_SUB, onClick = { showBooks() }) + starterRow())
 }
 
 private fun Controller.showDevices() {

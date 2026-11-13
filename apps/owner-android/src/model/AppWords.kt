@@ -1330,6 +1330,15 @@ object AppWords {
                 "|---|---|\n",
         )
         for ((key, text) in keyMapAll()) out.append("| ${cell(key)} | ${cell(text)} |\n")
+        out.append(
+            "\nThe starter wallet (`docs/START-SIMPLE-RULES.md`, SS-10 to SS-43), in\n" +
+                "`StarterWords`. A text named `WORDS_NEEDED_OA_SS...` is not written yet\n" +
+                "and shows its own name. The ones with `CORE` in the name are the Rust\n" +
+                "core's own words, which the binding does not carry yet:\n\n" +
+                "| Key | Text |\n" +
+                "|---|---|\n",
+        )
+        for ((key, text) in StarterWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         return out.toString()
     }
 

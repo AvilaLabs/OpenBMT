@@ -92,6 +92,9 @@ class Controller(internal val act: MainActivity) {
     internal val ownStore by lazy { OwnShopStore(dir, KeystoreSealer(AppFiles.OWN_KEY_ALIAS)) }
     internal var ownPairing: OwnPairing? = null
 
+    // The starter wallet (`Starter*.kt`): what is kept, its Keystore key, the picture of words on show and the upgrade screen's turn.
+    internal val starter by lazy { StarterRuntime(dir) }
+
     /** What the system's Back does on a screen of the first run: the same as the bar's arrow. Cleared by every screen that is shown. */
     internal var firstRunBack: (() -> Unit)? = null
 
@@ -165,6 +168,7 @@ class Controller(internal val act: MainActivity) {
 
     fun visible() {
         visible = true
+        starter.gate = true
         main.removeCallbacks(relockTimer)
         // The watcher lets go of the node's folder before the node starts (OA-84).
         WatchRunner.reclaim()
@@ -196,6 +200,8 @@ class Controller(internal val act: MainActivity) {
         val wasVisible = visible
         visible = false
         if (pickerOpen || scan.asking) return
+        // SS-11: a picture of words is cleared and a setup or restore that is open is dropped when the app goes out of view.
+        starterLeave()
         scan.stop()
         stopTicker()
         val toWatch = handOverContents()
@@ -831,6 +837,7 @@ class Controller(internal val act: MainActivity) {
     }
 
     fun picked(code: Int, result: Int, data: Intent?) {
+        if (code == REQUEST_CREDENTIAL) return credentialResult(result)
         if (code != REQUEST_PICK) return
         // A result with no wait noted was already dealt with by the resume (OA-62).
         val since = pickerSince ?: return
@@ -852,6 +859,23 @@ class Controller(internal val act: MainActivity) {
         done(uri)
     }
 
+    // The phone's own PIN screen (SS-21, SS-42 on Android 10): the node keeps running while it is in front, as with a picker.
+    private var credentialDone: ((Boolean) -> Unit)? = null
+
+    internal fun startCredential(intent: Intent, done: (Boolean) -> Unit) {
+        credentialDone = done
+        pickerSince = SystemClock.elapsedRealtime()
+        @Suppress("DEPRECATION")
+        act.startActivityForResult(intent, REQUEST_CREDENTIAL)
+    }
+
+    private fun credentialResult(result: Int) {
+        pickerSince = null
+        val done = credentialDone
+        credentialDone = null
+        if (done != null) done(result == android.app.Activity.RESULT_OK) else begin()
+    }
+
     /** At most [limit] bytes of the file at [uri]; a longer file gives [limit] bytes, so that the caller can refuse it. */
     private fun readBytes(uri: Uri, limit: Int): ByteArray {
         val input = act.contentResolver.openInputStream(uri) ?: throw IOException("the file could not be opened")
@@ -870,6 +894,7 @@ class Controller(internal val act: MainActivity) {
     companion object {
         const val VERSION = "0.1.0"
         const val REQUEST_PICK = 1
+        const val REQUEST_CREDENTIAL = 2
 
         /** The request code of the notification permission's dialog (OA-83). */
         const val REQUEST_NOTIFY = 8001

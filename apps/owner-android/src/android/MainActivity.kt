@@ -77,6 +77,7 @@ class MainActivity : Activity() {
     /** Shows [page] as the whole content. */
     fun show(page: View) {
         controller.firstRunBack = null
+        StarterWindow.release(this)
         setContentView(page)
     }
 }

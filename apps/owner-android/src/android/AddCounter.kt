@@ -23,6 +23,8 @@ internal fun Controller.showAddCounter(message: SayWords? = null) {
         begin()
         return
     }
+    // SS-37: adding a counter waits while the starter wallet is at its limit or past its date.
+    if (starterHolds(org.openbmt.owner.StarterChangeKind.AddCounter)) return showStarterHeld { showHome() }
     val views = ArrayList<View>()
     message?.let { views.add(ui.words(it)) }
     for (line in CounterModel.explanation) views.add(ui.text(line, 16f))
