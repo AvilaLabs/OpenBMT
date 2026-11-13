@@ -14,11 +14,13 @@
 //! | `invitation` | `OBMg`, 1, the invitation (17), its nonce (32), the time it was entered (8, LE) |
 //! | `roots` | `OBMh`, 1, owner root (32), approver root (32) |
 //! | `settings` | the signed settings in force (`OBMS`) |
+//! | `paired-with` | `OBM~`, 1, the welcome and the first settings the Box was paired with, each as a length (4, LE) and its bytes (BX-16) |
 //! | `link-inbox`, `link-outbox` | the message numbers (LK-40) |
 //! | `pos.token` | the Box's own POS sign-in (BX-41); erased by BX-23 |
 //!
 //! Paired means `roots` is there. It is the last file a welcome writes, so
-//! a crash during pairing leaves the Box unpaired, never half paired.
+//! a crash during pairing leaves the Box unpaired, never half paired. A Box
+//! paired before `paired-with` existed has none, and answers no welcome.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -41,6 +43,8 @@ pub const INVITATION_FILE: &str = "invitation";
 pub const ROOTS_FILE: &str = "roots";
 /// The signed settings in force (BX-21).
 pub const SETTINGS_FILE: &str = "settings";
+/// The welcome and first settings the Box was paired with (BX-16).
+pub const PAIRED_WITH_FILE: &str = "paired-with";
 /// The Box's own POS sign-in (BX-41), erased by BX-23.
 pub const POS_TOKEN_FILE: &str = "pos.token";
 /// Seconds an invitation is good for on the Box's clock (BX-12).
@@ -54,6 +58,9 @@ pub const MAX_MEMBERS: usize = 64;
 const MAGIC_KEY: [u8; 4] = *b"OBMf";
 const MAGIC_INVITATION: [u8; 4] = *b"OBMg";
 const MAGIC_ROOTS: [u8; 4] = *b"OBMh";
+const MAGIC_PAIRED_WITH: [u8; 4] = *b"OBM~";
+/// Longest part of `paired-with` read back, in bytes.
+const MAX_PAIRED_WITH_PART: usize = 1 << 20;
 
 /// What the Box is doing, for the person at its console.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -220,6 +227,9 @@ struct OpenInvitation {
 struct Pairing {
     roots: PinnedRoots,
     signed: SignedSettings,
+    /// BX-16: the welcome and the first settings, as they arrived, when the
+    /// Box has them.
+    first: Option<(Vec<u8>, Vec<u8>)>,
 }
 
 /// The Box's state.
@@ -289,6 +299,23 @@ fn read_roots(bytes: &[u8]) -> Result<PinnedRoots, BoxError> {
     PinnedRoots::new(owner, approver).map_err(|_| damaged(ROOTS_FILE, "two roots that are one key"))
 }
 
+/// The welcome and settings in `paired-with`; a file that does not read is
+/// taken as absent, since it only serves a retry that is then refused.
+fn read_paired_with(bytes: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+    let mut r = Reader::framed(bytes, &MAGIC_PAIRED_WITH).ok()?;
+    let part = |r: &mut Reader<'_>| -> Option<Vec<u8>> {
+        let len = usize::try_from(r.u32_le().ok()?).ok()?;
+        if len > MAX_PAIRED_WITH_PART {
+            return None;
+        }
+        Some(r.take(len).ok()?.to_vec())
+    };
+    let welcome = part(&mut r)?;
+    let settings = part(&mut r)?;
+    r.finish().ok()?;
+    Some((welcome, settings))
+}
+
 fn read_invitation(bytes: &[u8]) -> Option<OpenInvitation> {
     let mut r = Reader::framed(bytes, &MAGIC_INVITATION).ok()?;
     let random = r.array::<17>().ok()?;
@@ -352,7 +379,14 @@ impl<F: BoxFiles> BoxCore<F> {
                     .map_err(|_| damaged(SETTINGS_FILE, "not signed settings"))?;
                 check_stored(&signed, &roots)
                     .map_err(|_| damaged(SETTINGS_FILE, "not signed by the pinned roots"))?;
-                Some(Pairing { roots, signed })
+                let first = read_file(&files, PAIRED_WITH_FILE)?
+                    .as_deref()
+                    .and_then(read_paired_with);
+                Some(Pairing {
+                    roots,
+                    signed,
+                    first,
+                })
             }
         };
         // A damaged invitation is forgotten: it is only a 30 minute secret.
@@ -506,17 +540,22 @@ impl<F: BoxFiles> BoxCore<F> {
     /// spent, removed from memory and disk, and then the roots are taken
     /// from the welcome, the settings are checked under them as first
     /// settings, they must list this Box as a Box, and the settings, the two
-    /// number files (LK-40) and last the roots are stored. Any failure after
-    /// the MAC leaves the Box unpaired with the invitation spent. A paired
-    /// Box takes a welcome from nobody (BX-16).
+    /// number files (LK-40), the welcome and settings as they arrived and
+    /// last the roots are stored. Any failure after the MAC leaves the Box
+    /// unpaired with the invitation spent. A paired Box takes a welcome from
+    /// nobody (BX-16), except that the very welcome and settings it was
+    /// paired with are answered as paired and change nothing.
     pub fn take_welcome(
         &mut self,
         welcome: &[u8],
         settings: &[u8],
         now: u64,
     ) -> Result<(), BoxError> {
-        if self.pairing.is_some() {
-            return Err(BoxError::AlreadyPaired);
+        if let Some(pairing) = &self.pairing {
+            return match &pairing.first {
+                Some((w, s)) if w == welcome && s == settings => Ok(()),
+                _ => Err(BoxError::AlreadyPaired),
+            };
         }
         let Some(open) = self.open.as_ref() else {
             return Err(BoxError::NoInvitation);
@@ -526,6 +565,7 @@ impl<F: BoxFiles> BoxCore<F> {
             self.expire(now);
             return Err(BoxError::InvitationExpired);
         }
+        let welcome_bytes = welcome;
         let welcome = Welcome::from_bytes(welcome).map_err(BoxError::BadWelcome)?;
         let roots = welcome
             .verify(&open.invitation, &self.id, &open.nonce)
@@ -555,13 +595,25 @@ impl<F: BoxFiles> BoxCore<F> {
         self.files
             .write(openbmt_courier::OUTBOX_FILE, &Outbox::default().to_bytes())
             .map_err(io_err(openbmt_courier::OUTBOX_FILE, "write"))?;
+        let mut first = wire::start(&MAGIC_PAIRED_WITH, 8 + welcome_bytes.len() + settings.len());
+        for part in [welcome_bytes, settings] {
+            first.extend_from_slice(&wire::len_u32(part.len()).to_le_bytes());
+            first.extend_from_slice(part);
+        }
+        self.files
+            .write(PAIRED_WITH_FILE, &first)
+            .map_err(io_err(PAIRED_WITH_FILE, "write"))?;
         let mut out = wire::start(&MAGIC_ROOTS, 64);
         out.extend_from_slice(&roots.owner.to_bytes());
         out.extend_from_slice(&roots.approver.to_bytes());
         self.files
             .write(ROOTS_FILE, &out)
             .map_err(io_err(ROOTS_FILE, "write"))?;
-        self.pairing = Some(Pairing { roots, signed });
+        self.pairing = Some(Pairing {
+            roots,
+            signed,
+            first: Some((welcome_bytes.to_vec(), settings.to_vec())),
+        });
         Ok(())
     }
 

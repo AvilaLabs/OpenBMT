@@ -313,6 +313,40 @@ fn bx_15_a_welcome_over_the_wire_pairs_the_box_and_opens_the_relay_to_its_member
 }
 
 #[test]
+fn bx_16_o13_01_a_lost_first_answer_is_answered_again_over_the_wire_and_a_different_welcome_is_not()
+{
+    let dir = TempDir::new("welcomeretry");
+    let (r, _) = start(&dir);
+    let inv = invitation(5);
+    let settings = sign_both(settings_with(1, &r.device_id())).to_bytes();
+    r.enter_invitation(&inv.to_text()).unwrap();
+    let claim = Claim::from_bytes(&connect(&r).claim().unwrap()).unwrap();
+    let welcome = Welcome::make(&inv, &claim, roots()).to_bytes();
+    // The first answer is lost on its way back: the connection is dropped.
+    {
+        let mut c = connect(&r);
+        c.welcome(&welcome, &settings).unwrap();
+    }
+    assert_eq!(r.status(), BoxStatus::Paired);
+    let members = r.members();
+    // The phone, not knowing it was taken, sends the same bytes again.
+    connect(&r).welcome(&welcome, &settings).unwrap();
+    assert_eq!(r.status(), BoxStatus::Paired);
+    assert_eq!(r.members(), members);
+    // Another welcome, or other settings, are refused as before.
+    let other = sign_both(settings_with(2, &r.device_id())).to_bytes();
+    assert_eq!(
+        refused(connect(&r).welcome(&welcome, &other).unwrap_err()),
+        Refusal::WelcomeRefused
+    );
+    assert_eq!(
+        refused(connect(&r).welcome(&[1; 101], &settings).unwrap_err()),
+        Refusal::WelcomeRefused
+    );
+    assert_eq!(r.status(), BoxStatus::Paired);
+}
+
+#[test]
 fn bx_15_every_failed_welcome_has_the_one_refusal_and_only_a_checked_mac_spends() {
     let inv = invitation(5);
     let dir = TempDir::new("welcomefail");

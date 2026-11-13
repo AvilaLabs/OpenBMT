@@ -8,7 +8,7 @@ use super::kit::*;
 use crate::files::{BoxFiles, DirFiles, MemFiles};
 use crate::state::{
     BoxCore, BoxError, BoxStatus, INVITATION_FILE, INVITE_SECS, KEY_FILE, MAX_MEMBERS,
-    POS_TOKEN_FILE, ROOTS_FILE, SETTINGS_FILE,
+    PAIRED_WITH_FILE, POS_TOKEN_FILE, ROOTS_FILE, SETTINGS_FILE,
 };
 
 fn is_damaged(e: &BoxError, file: &str) -> bool {
@@ -90,7 +90,14 @@ fn bx_04_a_paired_box_stores_no_wallet_no_address_and_no_signing_key() {
     names.sort();
     assert_eq!(
         names,
-        ["box.key", "link-inbox", "link-outbox", "roots", "settings"]
+        [
+            "box.key",
+            "link-inbox",
+            "link-outbox",
+            "paired-with",
+            "roots",
+            "settings"
+        ]
     );
     // Settings carry limits and keys that vouch for messages, nothing that
     // describes a wallet.
@@ -977,4 +984,93 @@ fn bx_51_an_unreadable_file_stops_the_start_with_the_file_named() {
         "{err}"
     );
     assert!(err.to_string().contains(ROOTS_FILE));
+}
+
+/// Every file the Box holds, by name.
+fn snapshot(core: &BoxCore<MemFiles>) -> Vec<(String, Vec<u8>)> {
+    let mut names = core.files().names();
+    names.sort();
+    names
+        .into_iter()
+        .map(|n| {
+            let bytes = core.files().read(&n).unwrap().unwrap();
+            (n, bytes)
+        })
+        .collect()
+}
+
+#[test]
+fn bx_16_o13_01_a_paired_box_answers_the_welcome_and_settings_it_was_paired_with() {
+    let mut core = fresh_core();
+    let inv = invitation(5);
+    enter(&mut core, &inv, 0x31);
+    let claim = core.claim(NOW + 1).unwrap();
+    let w = welcome_bytes(&inv, &claim);
+    let s = sign_both(settings_with(1, &core.device_id())).to_bytes();
+    assert_eq!(core.take_welcome(&w, &s, NOW + 2), Ok(()));
+    let paired = snapshot(&core);
+    assert!(paired.iter().any(|(n, _)| n == PAIRED_WITH_FILE));
+    // The answer was lost and the owner's phone tries again, any number of
+    // times: the Box says it is paired, and nothing changes.
+    for n in 0..3 {
+        assert_eq!(core.take_welcome(&w, &s, NOW + 100 + n), Ok(()));
+        assert_eq!(core.status(NOW + 100 + n), BoxStatus::Paired);
+        assert_eq!(snapshot(&core), paired);
+    }
+    assert_eq!(core.roots(), Some(roots()));
+    assert_eq!(core.settings().map(|s| s.version), Some(1));
+    // After a restart it still does.
+    let mut core = reopen(core).unwrap();
+    assert_eq!(core.take_welcome(&w, &s, NOW + 200), Ok(()));
+    assert_eq!(snapshot(&core), paired);
+    // And after newer settings were taken, the first settings are still
+    // answered and do not replace them.
+    let newer = sign_both(settings_with(2, &core.device_id())).to_bytes();
+    core.take_settings(&newer).unwrap();
+    let with_newer = snapshot(&core);
+    assert_eq!(core.take_welcome(&w, &s, NOW + 300), Ok(()));
+    assert_eq!(core.settings().map(|s| s.version), Some(2));
+    assert_eq!(snapshot(&core), with_newer);
+}
+
+#[test]
+fn bx_16_o13_01_any_other_welcome_or_settings_are_refused_by_a_paired_box() {
+    let mut core = fresh_core();
+    let inv = invitation(5);
+    enter(&mut core, &inv, 0x31);
+    let claim = core.claim(NOW + 1).unwrap();
+    let w = welcome_bytes(&inv, &claim);
+    let s = sign_both(settings_with(1, &core.device_id())).to_bytes();
+    core.take_welcome(&w, &s, NOW + 2).unwrap();
+    let paired = snapshot(&core);
+    // A welcome made for another invitation, the same welcome with other
+    // settings, the two swapped, a cut and nothing at all.
+    let other = invitation(6);
+    let other_claim = Claim::make(&other, core.device_id(), [0x32; 32]).to_bytes();
+    let other_welcome = welcome_bytes(&other, &other_claim);
+    let other_settings = sign_both(settings_with(2, &core.device_id())).to_bytes();
+    let cases: Vec<(&[u8], &[u8])> = vec![
+        (&other_welcome, &s),
+        (&other_welcome, &other_settings),
+        (&w, &other_settings),
+        (&s, &w),
+        (&w[..w.len() - 1], &s),
+        (&w, &s[..s.len() - 1]),
+        (&[], &[]),
+    ];
+    for (welcome, settings) in cases {
+        assert_eq!(
+            core.take_welcome(welcome, settings, NOW + 3),
+            Err(BoxError::AlreadyPaired)
+        );
+        assert_eq!(snapshot(&core), paired);
+    }
+    // A Box paired before the file existed answers no welcome.
+    core.files_mut().remove(PAIRED_WITH_FILE).unwrap();
+    let mut old = reopen(core).unwrap();
+    assert_eq!(old.status(NOW + 4), BoxStatus::Paired);
+    assert_eq!(
+        old.take_welcome(&w, &s, NOW + 4),
+        Err(BoxError::AlreadyPaired)
+    );
 }

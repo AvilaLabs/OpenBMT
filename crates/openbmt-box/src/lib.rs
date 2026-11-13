@@ -72,7 +72,7 @@ pub use runner::{
 };
 pub use state::{
     BoxCore, BoxError, BoxStatus, SettingsTaken, INVITATION_FILE, INVITE_SECS, KEY_FILE,
-    MAX_MEMBERS, MAX_TOKEN_BYTES, POS_TOKEN_FILE, ROOTS_FILE, SETTINGS_FILE,
+    MAX_MEMBERS, MAX_TOKEN_BYTES, PAIRED_WITH_FILE, POS_TOKEN_FILE, ROOTS_FILE, SETTINGS_FILE,
 };
 pub use status_page::{PageBackend, PageConfig, PageView, StatusPage};
 pub use till::{make_till_key, SaleState, TillRefusal, TillTable, TILL_KEY_FILE};
