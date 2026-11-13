@@ -731,3 +731,82 @@ fn ss_43_the_late_payment_ops_need_an_own_wallet_the_former_wallets_coins_and_a_
     let fault = Rd::error(&rig.call(215, own, &args(&[1; 32], &[7; 32]))).expect("refused");
     assert_eq!(fault.rule, "starter-not-watching");
 }
+
+/// The node of a shop with its own wallet and a link to one counter.
+fn start_own_linked(rig: &super::kit::Rig, wallet: &[u8]) -> u64 {
+    use super::kit::{counter_bytes, peers_event, start_config};
+    let mut config = start_config(rig.dir().to_str().expect("UTF-8"));
+    config.network = crate::OwnerNetwork::Mainnet;
+    config.own_wallet = Some(wallet.to_vec());
+    config.approver_root = Vec::new();
+    config.wallet = String::new();
+    config.key1_account = Vec::new();
+    config.key3_xpub = None;
+    config.link = Some(crate::LinkConfig {
+        route: crate::RouteView::Direct {
+            addr: "127.0.0.1:9".to_string(),
+        },
+        relay_key: id(0x41).device_id().to_bytes().to_vec(),
+        counters: vec![counter_bytes()],
+        heartbeat_every_secs: 60,
+        check_in_grace_secs: 3_600,
+    });
+    let handle = Rd::ok(&rig.call(1, 0, &W::new().start(&config).0)).u64();
+    rig.send(vec![peers_event()]);
+    rig.pump(handle);
+    handle
+}
+
+/// The files of the data folder with what they hold, to see that a refused
+/// re-pin wrote none.
+fn folder(dir: &std::path::Path) -> Vec<(String, Vec<u8>)> {
+    let mut all: Vec<(String, Vec<u8>)> = std::fs::read_dir(dir)
+        .unwrap()
+        .filter_map(|e| {
+            let e = e.unwrap();
+            let bytes = std::fs::read(e.path()).ok()?;
+            Some((e.file_name().to_string_lossy().into_owned(), bytes))
+        })
+        .collect();
+    all.sort();
+    all
+}
+
+#[test]
+fn ss_41_a_repin_that_waits_comes_back_with_its_words_and_code_and_writes_nothing() {
+    use super::kit::{external, OWNER_SECRET, T0};
+    let rig = super::kit::Rig::new();
+    let (old_file, new_text) = (wallet_file(), OTHER);
+    let handle = start_own_linked(&rig, &old_file);
+    let repin = |handle: u64| rig.call(212, handle, &W::new().string(new_text).0);
+    let waits = |response: &[u8], heading: &str| {
+        let fault = Rd::error(response).expect("refused");
+        assert_eq!(fault.rule, "SS-41");
+        assert_eq!(fault.words.code.as_deref(), Some("SS-41"));
+        assert_eq!(fault.words.heading, heading);
+    };
+    // Another payment of the starter wallet is in no block: it is the
+    // unsettled queue that waits, with the words written for it.
+    let pay = super::kit::tx_from(7, &[(&external(3), 20_000)]);
+    let send = W::new()
+        .bytes(&bitcoin::consensus::encode::serialize(&pay))
+        .u32(0)
+        .0;
+    Rd::ok(&rig.call(210, handle, &send)).string();
+    let before = folder(&rig.dir());
+    waits(&repin(handle), "Upgrade waits for a payment");
+    assert_eq!(folder(&rig.dir()), before, "nothing is written");
+    // An offer is shown: the pairing waits first, with the placeholder
+    // words that name the rule until they are written.
+    let shop_args = W::new()
+        .string(rig.dir().to_str().unwrap())
+        .bytes(&OWNER_SECRET)
+        .bytes(&old_file);
+    Rd::ok(&call(150, &shop_args.u64(T0).0)).bytes();
+    let before = folder(&rig.dir());
+    waits(&repin(handle), "WORDS_NEEDED_SS41_PAIRING_HEADING");
+    assert_eq!(folder(&rig.dir()), before, "nothing is written");
+    // "They differ" gives the offer up: the unsettled queue waits again.
+    Rd::ok(&call(153, &[]));
+    waits(&repin(handle), "Upgrade waits for a payment");
+}

@@ -17,6 +17,8 @@ use std::fmt;
 use openbmt_core::identity::DeviceId;
 use openbmt_core::say::{Tone, Who, Words};
 
+use crate::starter::StarterRefusal;
+
 /// What a counter's records say of the switch to one new wallet (SS-41).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SwitchStatus {
@@ -128,6 +130,41 @@ pub enum Repin {
     AlreadyDone,
     /// A counter has not switched: nothing was changed or stored.
     NotReady(MoveNotReady),
+    /// SS-41: work that is open on the owner phone holds the re-pin back
+    /// (the refusal says which): nothing was changed or stored.
+    Waits(StarterRefusal),
+}
+
+/// SS-41: what is open on the owner phone beyond the shop's own record when
+/// the re-pin is asked for. A counter's pairing that waits in the shop's
+/// record holds it as well, whatever is said here.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RepinHold {
+    /// The offer of a counter's pairing is shown and has not ended (OA-108).
+    pub offer_open: bool,
+    /// A payment from the shop's wallet is prepared and not finished
+    /// (AS-101).
+    pub payment_prepared: bool,
+    /// A transaction of the starter wallet other than the confirmed move is
+    /// waiting or unconfirmed.
+    pub queue_unsettled: bool,
+}
+
+impl RepinHold {
+    /// What holds the re-pin back, in the order the words say it: a pairing
+    /// first (`bundle_waits` is the shop's own record of one), then a
+    /// prepared payment, then the queue.
+    pub fn refusal(&self, bundle_waits: bool) -> Option<StarterRefusal> {
+        if self.offer_open || bundle_waits {
+            Some(StarterRefusal::PairingOpen)
+        } else if self.payment_prepared {
+            Some(StarterRefusal::PaymentPrepared)
+        } else if self.queue_unsettled {
+            Some(StarterRefusal::Unsettled)
+        } else {
+            None
+        }
+    }
 }
 
 /// The words of a state of this part, by the key of its rule.

@@ -13,8 +13,8 @@
 //! nothing of an unfinished pairing is stored (OA-110). One call at a time
 //! works on the folder.
 
-use std::collections::BTreeSet;
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use openbmt_core::identity::{DeviceId, Identity};
@@ -23,7 +23,7 @@ use openbmt_core::relay::SignedRelayHint;
 use openbmt_core::wallet_single::ImportedWallet;
 use openbmt_owner::own_book::{gap_limit, gap_needs_notice};
 use openbmt_owner::own_say::{shop_file_failed, they_differ, wallet_not_readable};
-use openbmt_owner::own_shop::{MadeOffer, OwnError, OwnRefusal};
+use openbmt_owner::own_shop::{offer_open_at, MadeOffer, OwnError, OwnRefusal};
 use openbmt_owner::own_switch::{status_words, SwitchStatus};
 use openbmt_owner_node::{OwnNode, OwnNodeError};
 use std::fmt;
@@ -35,6 +35,24 @@ use crate::views::{CounterShareView, WordsView};
 
 /// One call at a time works on the shop's folder.
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+/// SS-41: the offer each shop's app shows, by data folder, with the time it
+/// was made. The offer ops keep no node, so this is what tells the re-pin
+/// that a pairing is open: an offer is open until its time is over, "They
+/// differ" is said, or its counter is confirmed (the bundle then waits in
+/// the shop's record).
+static OPEN_OFFERS: Mutex<BTreeMap<PathBuf, u64>> = Mutex::new(BTreeMap::new());
+
+fn open_offers() -> std::sync::MutexGuard<'static, BTreeMap<PathBuf, u64>> {
+    OPEN_OFFERS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// SS-41: whether an offer of the shop at `dir` is shown at `now`.
+pub(crate) fn offer_open(dir: &Path, now: u64) -> bool {
+    open_offers()
+        .get(dir)
+        .is_some_and(|made_at| offer_open_at(*made_at, now))
+}
 
 /// What every op that opens the shop is given.
 #[derive(Clone, PartialEq, Eq)]
@@ -547,6 +565,7 @@ pub(crate) fn offer(a: OwnShopArgs, now: u64) -> Result<OwnOfferView, AppError> 
 }
 
 fn offer_as(a: OwnShopArgs, now: u64, starter: bool) -> Result<OwnOfferView, AppError> {
+    let dir = PathBuf::from(&a.dir);
     with_shop(a, |node| {
         let made = node
             .shop()
@@ -557,6 +576,8 @@ fn offer_as(a: OwnShopArgs, now: u64, starter: bool) -> Result<OwnOfferView, App
             .first_address()
             .map_err(|e| internal(format!("the first address: {e}")))?
             .to_string();
+        // SS-41: from here a pairing is open on this phone.
+        open_offers().insert(dir, made.made_at);
         Ok(OwnOfferView {
             ends_at: made.ends_at(),
             floor: made.offer.floor,
@@ -621,6 +642,7 @@ pub(crate) fn confirm(a: OwnConfirmArgs) -> Result<OwnBundleView, AppError> {
         relay,
     } = a;
     let made = made_of(&made)?;
+    let dir = PathBuf::from(&shop.dir);
     let relay = relay
         .map(|bytes| {
             SignedRelayHint::from_bytes(&bytes).map_err(|e| {
@@ -637,6 +659,8 @@ pub(crate) fn confirm(a: OwnConfirmArgs) -> Result<OwnBundleView, AppError> {
             .confirm(&made, now, &request, usd_per_btc, Vec::new(), relay, &store)
             .map_err(own_error)?;
         let counter = paired.bundle.pairing.entry.counter;
+        // SS-41: the bundle waits in the shop's record from here.
+        open_offers().remove(&dir);
         Ok(bundle_view(counter, &paired.bundle, paired.shares))
     })
 }
@@ -644,6 +668,9 @@ pub(crate) fn confirm(a: OwnConfirmArgs) -> Result<OwnBundleView, AppError> {
 /// Op 153: "They differ" (OA-110): nothing was queued and nothing is
 /// allocated, so there is nothing to forget but the app's own copy.
 pub(crate) fn differ() -> Result<WordsView, AppError> {
+    // SS-41: the offer is given up; the op names no shop, and one phone
+    // shows one offer.
+    open_offers().clear();
     Ok(WordsView(they_differ()))
 }
 

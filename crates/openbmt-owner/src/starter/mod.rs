@@ -123,6 +123,13 @@ pub enum StarterRefusal {
     /// move is waiting or unconfirmed, so the owner's queue stays with the
     /// starter wallet and the re-pin waits.
     Unsettled,
+    /// SS-41: a counter's pairing is open on the owner phone (an offer is
+    /// shown, or a bundle is not confirmed yet), so the re-pin waits and the
+    /// pairing is finished for the wallet it began with.
+    PairingOpen,
+    /// SS-41, AS-101: a payment from the shop's wallet is prepared and not
+    /// finished, so the re-pin waits.
+    PaymentPrepared,
 }
 
 impl fmt::Display for StarterRefusal {
@@ -158,6 +165,11 @@ impl fmt::Display for StarterRefusal {
                 f,
                 "SS-41: a transaction of the starter wallet is waiting or unconfirmed"
             ),
+            Self::PairingOpen => write!(f, "SS-41: a counter's pairing is open"),
+            Self::PaymentPrepared => write!(
+                f,
+                "SS-41: a payment from the shop's wallet is prepared and not finished"
+            ),
         }
     }
 }
@@ -184,7 +196,7 @@ impl StarterRefusal {
             | Self::NotEnough { .. }
             | Self::Wallet => "SS-30",
             Self::NothingToMove | Self::NewAddress | Self::Unconfirmed => "SS-42",
-            Self::Unsettled => "SS-41",
+            Self::Unsettled | Self::PairingOpen | Self::PaymentPrepared => "SS-41",
         }
     }
 
@@ -337,6 +349,23 @@ impl StarterRefusal {
                 "Wait until that payment is in a block, then finish the upgrade.",
                 rule,
             ),
+            // The words are not written yet: the placeholders name the rule.
+            Self::PairingOpen => Words::new(
+                Tone::Stop,
+                "WORDS_NEEDED_SS41_PAIRING_HEADING",
+                "WORDS_NEEDED_SS41_PAIRING_WHAT",
+                Who::Owner,
+                "WORDS_NEEDED_SS41_PAIRING_NEXT",
+            )
+            .code(rule),
+            Self::PaymentPrepared => Words::new(
+                Tone::Stop,
+                "WORDS_NEEDED_SS41_PAYMENT_HEADING",
+                "WORDS_NEEDED_SS41_PAYMENT_WHAT",
+                Who::Owner,
+                "WORDS_NEEDED_SS41_PAYMENT_NEXT",
+            )
+            .code(rule),
         };
         match self {
             Self::Plan(why)

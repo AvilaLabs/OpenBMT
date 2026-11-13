@@ -2559,15 +2559,19 @@ impl Entry {
 
     /// SS-41: once every counter of the settings in force is switched to the
     /// new wallet, the owner's pinned wallet becomes the new wallet, and the
-    /// file the node is started with from then on is given back.
+    /// file the node is started with from then on is given back. It waits,
+    /// with nothing stored, while a counter's pairing is open, while a
+    /// payment from the shop's wallet is prepared and not finished, and
+    /// while another transaction of the starter wallet is unsettled.
     pub(crate) fn own_repin(
         &self,
         new_wallet: String,
     ) -> Result<crate::starter::OwnRepinView, AppError> {
         use crate::starter::{OwnRepinKind, OwnRepinView};
-        use openbmt_owner::own_switch::Repin;
+        use openbmt_owner::own_switch::{Repin, RepinHold};
         let new =
             PinnedWallet::from_text(&new_wallet).map_err(crate::starter::new_wallet_unreadable)?;
+        let now = self.clock.load(Ordering::SeqCst);
         self.run(None, move |st| {
             let State {
                 node,
@@ -2581,16 +2585,16 @@ impl Entry {
             // SS-41: the queue moves with the re-pin, and it moves only when
             // no transaction of the starter wallet other than the confirmed
             // move is waiting or unconfirmed. Nothing is stored before.
-            if new.checksum32() != own.wallet.checksum32() && !node.starter_queue_may_move() {
-                return Err(crate::starter::refusal(
-                    &openbmt_owner::starter::StarterRefusal::Unsettled,
-                ));
-            }
+            let hold = RepinHold {
+                offer_open: own::offer_open(dir, now),
+                payment_prepared: !node.owner().own_sessions().is_empty(),
+                queue_unsettled: !node.starter_queue_may_move(),
+            };
             let done = own::turn_on_shop(
                 dir,
                 node.owner_identity().map_err(|e| node_error(&e))?,
                 own.wallet.clone(),
-                |shop| shop.repin(link, &new),
+                |shop| shop.repin(link, &new, hold),
             )
             .map_err(own::node_error)?;
             let view = |kind, wallet: Vec<u8>, waiting: usize, refused: usize| OwnRepinView {
@@ -2619,6 +2623,7 @@ impl Entry {
                     view(OwnRepinKind::Done, new.to_bytes(), 0, 0)
                 }
                 Repin::AlreadyDone => view(OwnRepinKind::AlreadyDone, new.to_bytes(), 0, 0),
+                Repin::Waits(why) => return Err(crate::starter::refusal(&why)),
                 Repin::NotReady(n) => view(
                     OwnRepinKind::NotReady,
                     Vec::new(),

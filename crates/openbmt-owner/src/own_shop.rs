@@ -58,7 +58,7 @@ use crate::counter::equal_shares;
 use crate::edit::sats_per_usd_at;
 use crate::error::Refusal;
 use crate::own_book::{AllocationBook, BookError};
-use crate::own_switch::{move_ready, Repin, SwitchStatus};
+use crate::own_switch::{move_ready, Repin, RepinHold, SwitchStatus};
 
 /// OA-105: the magic of the shop's state.
 pub const MAGIC_OWN_STATE: [u8; 4] = *b"OBM@";
@@ -247,6 +247,13 @@ impl MadeOffer {
     pub fn ends_at(&self) -> u64 {
         self.made_at.saturating_add(OFFER_WINDOW_SECS)
     }
+}
+
+/// SS-41: whether an offer made at `made_at` is still shown at `now`: its
+/// time is not over. A clock that is behind the offer's time counts it as
+/// shown.
+pub fn offer_open_at(made_at: u64, now: u64) -> bool {
+    now <= made_at.saturating_add(OFFER_WINDOW_SECS)
 }
 
 /// A request that read (OA-109): what the owner compares with the counter.
@@ -980,15 +987,37 @@ impl OwnShop {
     /// file, and a start between the two finishes it
     /// ([`OwnShop::restore`]). It happens once: with the new wallet already
     /// pinned nothing changes, and with a counter not switched nothing
-    /// changes. The book and the settings stay as they are.
+    /// changes. The book and the settings stay as they are. It waits too,
+    /// with nothing changed, while a counter's bundle is not confirmed
+    /// ([`OwnShop::counters_waiting`]); [`OwnShop::repin_with`] adds what
+    /// else is open.
     pub fn repin<E>(
         &mut self,
         new_wallet: &PinnedWallet,
         counters: &[(DeviceId, SwitchStatus)],
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<Repin, OwnError<E>> {
+        self.repin_with(new_wallet, counters, RepinHold::default(), persist)
+    }
+
+    /// SS-41: [`OwnShop::repin`] that also waits while an offer is shown,
+    /// while a payment from the shop's wallet is prepared and not finished,
+    /// and while the queue of the starter wallet is unsettled (`hold`). A
+    /// pairing started after the re-pin is for the new wallet: the offer is
+    /// made from the wallet in force ([`OwnShop::make_offer`]), and an offer
+    /// made before it is not this shop's any more.
+    pub fn repin_with<E>(
+        &mut self,
+        new_wallet: &PinnedWallet,
+        counters: &[(DeviceId, SwitchStatus)],
+        hold: RepinHold,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<Repin, OwnError<E>> {
         if new_wallet.checksum32() == self.wallet.checksum32() {
             return Ok(Repin::AlreadyDone);
+        }
+        if let Some(waits) = hold.refusal(!self.state.waiting.is_empty()) {
+            return Ok(Repin::Waits(waits));
         }
         if let Err(not_ready) = move_ready(counters) {
             return Ok(Repin::NotReady(not_ready));

@@ -455,7 +455,9 @@ private sealed class Repin {
 /**
  * SS-41: once every counter has switched, the owner's pinned wallet becomes the new wallet, which the node watches from its
  * next start; the starter wallet stays watched as a former wallet (SS-43), and the owner's queue moves with it. The core
- * waits while a transaction of the starter wallet other than the confirmed move is waiting or unconfirmed (SS-41). A stop
+ * waits while a counter's pairing is open, while a payment from the shop's wallet is prepared and not finished, and while a
+ * transaction of the starter wallet other than the confirmed move is waiting or unconfirmed (SS-41); each comes back as a
+ * refusal with its own words, shown as they are. A stop
  * between the shop's file and the wallet's file is finished at the next start (`adopt`). With no new wallet recorded there
  * is nothing to re-pin.
  */

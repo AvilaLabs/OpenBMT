@@ -200,3 +200,24 @@ fn ss_43_ss_41_the_coin_view_file_of_the_wallet_that_was_replaced_is_put_under_i
         std::fs::write(dir.path().join(COINS_OF_FILE), old.checksum32()).unwrap();
     }
 }
+
+#[test]
+fn ss_41_an_offer_made_after_the_repin_is_for_the_new_wallet_whichever_file_the_start_has() {
+    use openbmt_owner::own_shop::OwnShop;
+    let dir = Dir::new();
+    let old = PinnedWallet::new(old_wallet());
+    let new = PinnedWallet::new(single());
+    let state = dir.path().join(crate::OWN_STATE_FILE);
+    let shop = OwnShop::new(id(0x11), old.clone());
+    std::fs::write(&state, shop.to_bytes()).unwrap();
+    let mut node = OwnNode::open(dir.path(), id(0x11), old.clone()).unwrap();
+    assert_eq!(node.shop().make_offer(NOW).unwrap().offer.wallet, old);
+    let (shop, store) = node.shop_and_store();
+    shop.repin(&new, &[], store).unwrap();
+    drop(node);
+    for given in [old, new.clone()] {
+        let node = OwnNode::open(dir.path(), id(0x11), given).unwrap();
+        let made = node.shop().make_offer_as(NOW, false).unwrap();
+        assert_eq!(made.offer.wallet, new);
+    }
+}

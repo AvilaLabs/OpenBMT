@@ -670,6 +670,8 @@ fn switched_shop() -> (
     let (_, request) = counter_request(&made, 3, "Front");
     let counter = request.counter;
     confirm(&mut s, &disk, &made, &request, T0 + 30).unwrap();
+    // The counter shows Paired before it can switch (OA-111).
+    s.mark_delivered(&counter, |b| disk.put(b)).unwrap();
     let new = PinnedWallet::from_text(MULTI).unwrap();
     s.make_switch(counter, &new, T0 + 60, |b| disk.put(b))
         .unwrap();
@@ -879,4 +881,137 @@ fn ss_41_a_crash_at_each_point_of_the_repin_leaves_exactly_the_old_state_or_exac
     for cut in 1..40 {
         assert!(start(&new_state[..new_state.len() - cut], &new.to_bytes()).is_err());
     }
+}
+
+#[test]
+fn ss_41_the_repin_waits_while_a_counters_pairing_is_open_and_stores_nothing() {
+    use openbmt_owner::own_switch::{Repin, RepinHold};
+    use openbmt_owner::starter::StarterRefusal;
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    let new = PinnedWallet::from_text(MULTI).unwrap();
+    let never = |_: &[u8]| -> Result<(), String> { panic!("stored") };
+    // An offer is shown: the pairing is open.
+    let shown = RepinHold {
+        offer_open: true,
+        ..RepinHold::default()
+    };
+    assert_eq!(
+        s.repin_with(&new, &[], shown, never).unwrap(),
+        Repin::Waits(StarterRefusal::PairingOpen)
+    );
+    // A bundle that is not confirmed yet: the pairing is open, with no hold
+    // given at all.
+    let made = s.make_offer_as(T0, true).unwrap();
+    let (_, request) = counter_request(&made, 3, "Front");
+    confirm(&mut s, &disk, &made, &request, T0 + 30).unwrap();
+    let (stored, old) = (disk.get(), s.wallet().clone());
+    assert_eq!(
+        s.repin(&new, &[], never).unwrap(),
+        Repin::Waits(StarterRefusal::PairingOpen)
+    );
+    assert_eq!(s.wallet(), &old);
+    assert_eq!(disk.get(), stored);
+    // Confirmed: the pairing is closed and the re-pin goes through.
+    s.mark_delivered(&request.counter, |b| disk.put(b)).unwrap();
+    assert_eq!(s.repin(&new, &[], |b| disk.put(b)).unwrap(), Repin::Done);
+    assert_eq!(s.wallet(), &new);
+    assert_eq!(StarterRefusal::PairingOpen.rule(), "SS-41");
+}
+
+#[test]
+fn ss_41_the_repin_waits_while_a_payment_from_the_wallet_is_prepared_and_says_which_first() {
+    use openbmt_owner::own_switch::{Repin, RepinHold};
+    use openbmt_owner::starter::StarterRefusal;
+    let mut s = shop(SINGLE);
+    let new = PinnedWallet::from_text(MULTI).unwrap();
+    let never = |_: &[u8]| -> Result<(), String> { panic!("stored") };
+    let hold = |offer_open, payment_prepared, queue_unsettled| RepinHold {
+        offer_open,
+        payment_prepared,
+        queue_unsettled,
+    };
+    let waits = |s: &mut OwnShop, h: RepinHold| s.repin_with(&new, &[], h, never).unwrap();
+    assert_eq!(
+        waits(&mut s, hold(false, true, false)),
+        Repin::Waits(StarterRefusal::PaymentPrepared)
+    );
+    // A pairing is named before a payment, a payment before the queue.
+    assert_eq!(
+        waits(&mut s, hold(true, true, true)),
+        Repin::Waits(StarterRefusal::PairingOpen)
+    );
+    assert_eq!(
+        waits(&mut s, hold(false, true, true)),
+        Repin::Waits(StarterRefusal::PaymentPrepared)
+    );
+    assert_eq!(
+        waits(&mut s, hold(false, false, true)),
+        Repin::Waits(StarterRefusal::Unsettled)
+    );
+    // The new wallet pinned already is not made to wait.
+    let disk = Disk::new();
+    assert_eq!(
+        s.repin_with(&new, &[], hold(false, false, false), |b| disk.put(b))
+            .unwrap(),
+        Repin::Done
+    );
+    assert_eq!(
+        s.repin_with(&new, &[], hold(true, true, true), never)
+            .unwrap(),
+        Repin::AlreadyDone
+    );
+    assert_eq!(StarterRefusal::PaymentPrepared.rule(), "SS-41");
+}
+
+#[test]
+fn ss_41_the_words_of_the_two_waits_are_placeholders_that_name_the_rule() {
+    use openbmt_owner::starter::StarterRefusal;
+    for (r, stem) in [
+        (StarterRefusal::PairingOpen, "WORDS_NEEDED_SS41_PAIRING_"),
+        (
+            StarterRefusal::PaymentPrepared,
+            "WORDS_NEEDED_SS41_PAYMENT_",
+        ),
+    ] {
+        let w = r.words();
+        assert_eq!(w.heading, format!("{stem}HEADING"));
+        assert_eq!(w.what, format!("{stem}WHAT"));
+        assert_eq!(w.next, format!("{stem}NEXT"));
+        assert_eq!(w.code, Some("SS-41"));
+        assert!(is_placeholder(&w));
+    }
+}
+
+#[test]
+fn ss_41_an_offer_or_bundle_made_after_the_repin_is_for_the_new_wallet() {
+    use openbmt_owner::own_shop::offer_open_at;
+    use openbmt_owner::own_switch::Repin;
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    let new = PinnedWallet::from_text(MULTI).unwrap();
+    // An offer shown before the re-pin is for the starter wallet, and is not
+    // this shop's once the new wallet is pinned.
+    let before = s.make_offer_as(T0, true).unwrap();
+    assert_eq!(before.offer.wallet, *s.wallet());
+    assert_eq!(s.repin(&new, &[], |b| disk.put(b)).unwrap(), Repin::Done);
+    let (_, late) = counter_request(&before, 3, "Front");
+    assert_eq!(
+        refused(confirm(&mut s, &disk, &before, &late, T0 + 30)),
+        OwnRefusal::NotThisShopsOffer
+    );
+    // A pairing started after it offers the new wallet, and its bundle is
+    // signed for it.
+    let after = s.make_offer(T0 + 60).unwrap();
+    assert_eq!(after.offer.wallet, new);
+    let (_, request) = counter_request(&after, 4, "Side");
+    let paired = confirm(&mut s, &disk, &after, &request, T0 + 90).unwrap();
+    assert_eq!(paired.bundle.pairing.entry.wallet, new.checksum32());
+    // The same after a restart with the new wallet's file.
+    let back = OwnShop::restore(id(1), new.clone(), &disk.get()).unwrap();
+    assert_eq!(back.make_offer(T0 + 120).unwrap().offer.wallet, new);
+    // An offer is shown for ten minutes.
+    assert!(offer_open_at(T0, T0 + OFFER_WINDOW_SECS));
+    assert!(!offer_open_at(T0, T0 + OFFER_WINDOW_SECS + 1));
+    assert!(offer_open_at(T0, T0 - 1));
 }

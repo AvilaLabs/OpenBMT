@@ -259,3 +259,31 @@ fn as_106_the_merge_offer_of_an_own_wallet_is_built_signed_in_the_wallet_and_sen
         Some(MergeRefused::NoOffer)
     );
 }
+
+#[test]
+fn ss_41_a_prepared_payment_is_an_open_own_session_until_it_is_finished_or_given_up() {
+    let dir = Dir::new();
+    let mut rig = own_rig(&dir);
+    // Nothing is prepared: the re-pin has no payment to wait for.
+    assert!(rig.node.owner().own_sessions().is_empty());
+    let (built, refund) = built(&mut rig);
+    let session = built.session.unwrap();
+    // Prepared and not finished: the session is open, and the queue of the
+    // starter wallet may not move with it.
+    assert_eq!(rig.node.owner().own_sessions(), vec![session]);
+    assert!(!rig.node.starter_queue_may_move());
+    // Given up: the entries are back in the queue and nothing is open.
+    rig.node.abandon_session(&session).unwrap();
+    assert!(rig.node.owner().own_sessions().is_empty());
+    // Taken and sent: the session is finished (the sent transaction is the
+    // queue's own business, SS-41's third wait).
+    let built = rig.node.build_own_spend(&[refund], 1_000, NOW).unwrap();
+    let session = built.session.unwrap();
+    let number = built.items[0].number;
+    let file = rig.node.own_file(&session, number).unwrap();
+    rig.node
+        .take_own(&session, number, &wallet_signs(&file.psbt))
+        .unwrap();
+    assert!(rig.node.owner().own_sessions().is_empty());
+    assert!(!rig.node.starter_queue_may_move());
+}
