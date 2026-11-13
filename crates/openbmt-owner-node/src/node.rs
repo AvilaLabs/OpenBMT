@@ -2357,7 +2357,21 @@ impl<P: OwnerPort> OwnerNode<P> {
     fn owed_in(&self, hash: &BlockHash, bytes: &[u8]) -> Vec<Owed> {
         let exported = self.owner.exported_transactions(None);
         let elsewhere = self.owner.signed_elsewhere();
-        if exported.is_empty() && elsewhere.is_empty() {
+        // OC-52: the transactions of the owner's own outbox, with the coins
+        // each spends.
+        let outbox: Vec<(Txid, Vec<OutPoint>)> = self
+            .owner
+            .outbox()
+            .iter()
+            .filter_map(|d| match &d.what {
+                Delivery::Transaction { txid, tx, .. } => {
+                    let tx: Transaction = deserialize(tx).ok()?;
+                    Some((*txid, tx.input.iter().map(|i| i.previous_output).collect()))
+                }
+                _ => None,
+            })
+            .collect();
+        if exported.is_empty() && elsewhere.is_empty() && outbox.is_empty() {
             return Vec::new();
         }
         let Ok(block) = deserialize::<bitcoin::Block>(bytes) else {
@@ -2376,6 +2390,20 @@ impl<P: OwnerPort> OwnerNode<P> {
         // holds it.
         let in_block = |txid: &Txid| block.txdata.iter().find(|t| t.compute_txid() == *txid);
         let mut owed = Vec::new();
+        for (txid, inputs) in &outbox {
+            if !ids.contains(txid)
+                && inputs
+                    .iter()
+                    .any(|op| spent.get(op).is_some_and(|by| by != txid))
+            {
+                owed.push(Owed {
+                    kind: OwedKind::OutboxBeaten,
+                    txid: *txid,
+                    block: *hash,
+                    tx: None,
+                });
+            }
+        }
         // AS-105: an item whose file went to the shop's own wallet is beaten
         // when a block spends one of its coins in another transaction.
         for open in self.owner.own_exported_transactions() {
@@ -2450,18 +2478,57 @@ impl<P: OwnerPort> OwnerNode<P> {
 
     /// OC-52: the blocks that left the chain take what they owed with them.
     fn forget_owed_blocks(&mut self, blocks: &[BlockHash]) {
+        // An outbox transaction whose beating block left is not beaten: the
+        // view holds it again, as the block took it out.
+        let back: Vec<Txid> = self
+            .owed
+            .items()
+            .iter()
+            .filter(|o| o.kind == OwedKind::OutboxBeaten && blocks.contains(&o.block))
+            .map(|o| o.txid)
+            .collect();
         let next = self.owed.without_blocks(blocks);
         let dropped = self.owed.items().len().saturating_sub(next.items().len());
         if dropped == 0 {
             return;
         }
         match self.store_owed(next) {
-            Ok(()) => self.note(format!(
-                "{dropped} settlement(s) owed by a block that left the chain were dropped"
-            )),
+            Ok(()) => {
+                self.note(format!(
+                    "{dropped} settlement(s) owed by a block that left the chain were dropped"
+                ));
+                self.hold_again(&back);
+            }
             Err(e) => self.note(format!(
                 "settlements owed by a block that left the chain: {e}"
             )),
+        }
+    }
+
+    /// The view holds these outbox transactions as pending again.
+    fn hold_again(&mut self, txids: &[Txid]) {
+        let held: Vec<Transaction> = self
+            .owner
+            .outbox()
+            .iter()
+            .filter_map(|d| match &d.what {
+                Delivery::Transaction { txid, tx, .. } if txids.contains(txid) => {
+                    deserialize(tx).ok()
+                }
+                _ => None,
+            })
+            .collect();
+        let dir = self.dir.clone();
+        for tx in held {
+            if let Err(e) = self
+                .view
+                .add_pending(&tx, &self.scripts, |b| write_file(&dir, COINS_FILE, b))
+            {
+                self.note(format!(
+                    "{} could not be held again: {e:?}",
+                    tx.compute_txid()
+                ));
+            }
         }
     }
 
@@ -2495,6 +2562,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 OwedKind::ElsewherePaid => self.settle_elsewhere_paid(&item),
                 OwedKind::ElsewhereBeaten => self.settle_elsewhere_beaten(&item),
                 OwedKind::ExportedBeaten => self.settle_exported_beaten(&item),
+                OwedKind::OutboxBeaten => self.settle_outbox_beaten(&item),
             }
         }
     }
@@ -2664,6 +2732,49 @@ impl<P: OwnerPort> OwnerNode<P> {
                 self.forget_owed(item);
             }
             Err(e) => self.note(format!("{txid} could not be released: {e}")),
+        }
+    }
+
+    /// OC-52: another transaction spent a coin of one in the owner's own
+    /// outbox. It leaves the outbox and its entries go back to the queue for
+    /// a new approval; the item leaves the list once that is stored.
+    fn settle_outbox_beaten(&mut self, item: &Owed) {
+        let txid = item.txid;
+        let waiting = self
+            .owner
+            .outbox()
+            .iter()
+            .any(|d| matches!(&d.what, Delivery::Transaction { txid: t, .. } if *t == txid));
+        if !waiting {
+            return self.forget_owed(item);
+        }
+        if self.ready_for_queue_write().is_err() {
+            self.note(format!("{txid} replacement waits for key 1 recovery"));
+            return;
+        }
+        let dir = self.dir.clone();
+        match self
+            .owner
+            .mark_replaced(&txid, |b| write_queue_file(&dir, b))
+        {
+            Ok(()) => {
+                self.note(format!(
+                    "{txid} was replaced: another transaction spent its coins; its entries are \
+                     back in the queue and nothing is signed again by itself"
+                ));
+                self.unsend(&txid);
+                self.states.insert(txid, SendState::Replaced);
+                self.relays.remove(&txid);
+                if let Err(e) = self
+                    .view
+                    .drop_pending(&txid, |b| write_file(&dir, COINS_FILE, b))
+                {
+                    self.stop(format!("the coin view could not be stored: {e}"));
+                    return;
+                }
+                self.forget_owed(item);
+            }
+            Err(e) => self.note(format!("{txid} was replaced but could not be marked: {e}")),
         }
     }
 
@@ -2976,7 +3087,15 @@ impl<P: OwnerPort> OwnerNode<P> {
                     self.note(format!("{txid} is in block {hash}"));
                 }
                 for txid in effect.replaced {
-                    self.replaced(txid);
+                    // One in the outbox is settled from the owed list.
+                    let owed = self
+                        .owed
+                        .items()
+                        .iter()
+                        .any(|o| o.kind == OwedKind::OutboxBeaten && o.txid == txid);
+                    if !owed {
+                        self.replaced(txid);
+                    }
                 }
                 self.settle_owed();
             }

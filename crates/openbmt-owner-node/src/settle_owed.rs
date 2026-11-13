@@ -58,6 +58,9 @@ pub enum OwedKind {
     /// wallet, in a session that is still open, is spent in the block by
     /// another transaction.
     ExportedBeaten,
+    /// OC-52: a coin of a transaction in the owner's own outbox is spent in
+    /// the block by another transaction, so it can no longer confirm.
+    OutboxBeaten,
 }
 
 impl OwedKind {
@@ -67,6 +70,7 @@ impl OwedKind {
             Self::ElsewherePaid => 1,
             Self::ElsewhereBeaten => 2,
             Self::ExportedBeaten => 3,
+            Self::OutboxBeaten => 4,
         }
     }
 
@@ -81,6 +85,7 @@ impl OwedKind {
             1 => Some(Self::ElsewherePaid),
             2 => Some(Self::ElsewhereBeaten),
             3 => Some(Self::ExportedBeaten),
+            4 => Some(Self::OutboxBeaten),
             _ => None,
         }
     }
@@ -387,7 +392,7 @@ mod tests {
     fn oc_52_an_unknown_kind_a_repeat_or_a_disordered_list_is_refused() {
         let bytes = sample().to_bytes();
         let mut kind = bytes.clone();
-        kind[9] = 4;
+        kind[9] = 5;
         assert!(SettleOwed::from_bytes(&kind).is_err());
         // The first two items swapped.
         let mut swapped = bytes.clone();

@@ -232,6 +232,8 @@ struct Setup {
     own_wallet: Option<openbmt_core::wallet_single::ImportedWallet>,
     /// SS-43: the wallets pinned before a re-pin.
     former: Vec<crate::FormerParts>,
+    /// The customer pays the fee of a refund.
+    customer_fee: bool,
 }
 
 impl Default for Setup {
@@ -245,6 +247,7 @@ impl Default for Setup {
             own: None,
             own_wallet: None,
             former: Vec::new(),
+            customer_fee: false,
         }
     }
 }
@@ -313,6 +316,9 @@ fn start_at(dir: &Dir, setup: &Setup, chain: Vec<Block>) -> Result<Rig, NodeErro
         }
         None => OwnerParts::new(OWNER_SECRET, kit().wallet.clone(), approver_id(), policy())?,
     };
+    if setup.customer_fee {
+        parts.options.fee_payer = openbmt_owner::FeePayer::Customer;
+    }
     parts.refund_depth = setup.refund_depth;
     parts.former = setup.former.clone();
     parts.limits = setup.limits;

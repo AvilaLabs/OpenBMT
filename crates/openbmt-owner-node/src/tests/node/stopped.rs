@@ -551,3 +551,179 @@ fn oc_49_a_cash_out_of_everything_with_no_figure_is_not_logged_at_zero() {
         "{notes:?}"
     );
 }
+
+/// A refund that was built, signed and sent by the owner's own outbox, with
+/// a block that spends one of its coins in another transaction.
+fn sent_and_beaten(rig: &mut Rig) -> (Transaction, Transaction) {
+    rig.queue_refund(10_000);
+    rig.fund(300_000);
+    let txid = rig.spend();
+    let tx = rig.tx(&txid);
+    let other = tx_from(tx.input[0].previous_output, &[(&external(77), 1_000)]);
+    (tx, other)
+}
+
+#[test]
+fn oc_52_n13b_01_a_beaten_outbox_payment_is_settled_at_the_next_block_after_a_failed_write() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, other) = sent_and_beaten(&mut rig);
+    let txid = tx.compute_txid();
+    let blocked = block_writes(&dir, crate::QUEUE_FILE);
+    rig.mine(&[other]);
+    // The queue could not be written: the row is as it was, and the block's
+    // part is owed.
+    assert_eq!(refund_stage(&rig), Stage::Sent { txid });
+    let owed = owed_on_disk(&dir);
+    assert_eq!(owed.items().len(), 1);
+    assert_eq!(owed.items()[0].kind, OwedKind::OutboxBeaten);
+    assert_eq!(owed.items()[0].txid, txid);
+    // Still failing at the next block.
+    rig.mine_empty(1);
+    assert_eq!(refund_stage(&rig), Stage::Sent { txid });
+    fs::remove_dir(blocked).unwrap();
+    rig.mine_empty(1);
+    assert!(matches!(refund_stage(&rig), Stage::Returned { .. }));
+    assert!(rig.node.owner().outbox().is_empty());
+    assert!(owed_on_disk(&dir).is_empty());
+}
+
+#[test]
+fn oc_52_n13b_01_a_beaten_outbox_payment_is_settled_at_start() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, other) = sent_and_beaten(&mut rig);
+    let txid = tx.compute_txid();
+    let blocked = block_writes(&dir, crate::QUEUE_FILE);
+    rig.mine(&[other]);
+    assert_eq!(refund_stage(&rig), Stage::Sent { txid });
+    assert_eq!(owed_on_disk(&dir).items().len(), 1);
+    let chain = rig.chain.clone();
+    rig.node.shutdown();
+    drop(rig);
+    fs::remove_dir(blocked).unwrap();
+    let rig = start_at(&dir, &Setup::default(), chain).unwrap();
+    assert!(matches!(refund_stage(&rig), Stage::Returned { .. }));
+    assert!(rig.node.owner().outbox().is_empty());
+    assert!(owed_on_disk(&dir).is_empty());
+}
+
+#[test]
+fn oc_52_n13b_01_a_beaten_outbox_payment_waits_for_key_1_recovery_and_is_settled_after_it() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, other) = sent_and_beaten(&mut rig);
+    let txid = tx.compute_txid();
+    let mut rig = restart_with_journal(&dir, rig);
+    rig.mine(&[other]);
+    assert_eq!(refund_stage(&rig), Stage::Sent { txid });
+    assert_eq!(owed_on_disk(&dir).items().len(), 1);
+    recover(&mut rig);
+    assert!(matches!(refund_stage(&rig), Stage::Returned { .. }));
+    assert!(rig.node.owner().outbox().is_empty());
+    assert!(owed_on_disk(&dir).is_empty());
+}
+
+#[test]
+fn oc_52_n13b_01_a_beating_block_that_leaves_before_settlement_drops_the_item() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, other) = sent_and_beaten(&mut rig);
+    let txid = tx.compute_txid();
+    let blocked = block_writes(&dir, crate::QUEUE_FILE);
+    rig.mine(&[other]);
+    assert_eq!(owed_on_disk(&dir).items().len(), 1);
+    fs::remove_dir(blocked).unwrap();
+    replace_tip(&mut rig, &[]);
+    assert!(owed_on_disk(&dir).is_empty());
+    // Nothing was settled, and the view follows the transaction again.
+    assert_eq!(refund_stage(&rig), Stage::Sent { txid });
+    assert!(rig
+        .node
+        .view()
+        .pending()
+        .any(|p| p.tx.compute_txid() == txid));
+    assert!(!rig.node.owner().outbox().is_empty());
+}
+
+/// A refund of 10,000 whose fee the customer pays, built and exported for the
+/// signer.
+fn exported_customer_fee_refund(rig: &mut Rig) -> (Transaction, u32, [u8; 32]) {
+    let refund = rig.queue_refund(10_000);
+    rig.fund(300_000);
+    let (_, session) = rig.node.build_request_for_signer(1_000, NOW).unwrap();
+    let session = session.expect("the refund is a spend for the signer");
+    let mut signer = key1();
+    let file = rig
+        .node
+        .export_for_signer(
+            &session,
+            0,
+            &mut signer,
+            &kit().accounts[0],
+            NOW,
+            |_| Ok(()),
+        )
+        .unwrap();
+    let tx = bitcoin::psbt::Psbt::deserialize(&file.psbt)
+        .unwrap()
+        .unsigned_tx;
+    (tx, refund, session)
+}
+
+fn customer_fee_setup() -> Setup {
+    Setup {
+        customer_fee: true,
+        ..Setup::default()
+    }
+}
+
+fn paid_to(tx: &Transaction, script: &ScriptBuf) -> u64 {
+    tx.output
+        .iter()
+        .filter(|o| o.script_pubkey == *script)
+        .map(|o| o.value.to_sat())
+        .sum()
+}
+
+#[test]
+fn oc_49_n13_03_a_customer_fee_refund_finished_on_a_signer_is_logged_at_what_the_customer_got() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &customer_fee_setup()).unwrap();
+    let (tx, refund, _) = exported_customer_fee_refund(&mut rig);
+    let got = paid_to(&tx, &external(9));
+    assert!(got > 0 && got < 10_000, "{got}");
+    rig.mine(std::slice::from_ref(&tx));
+    let entry = rig
+        .node
+        .paid_log()
+        .iter()
+        .find(|e| e.number == refund)
+        .copied()
+        .unwrap();
+    assert_eq!(entry.sats, got);
+}
+
+#[test]
+fn oc_49_n13_03_the_same_for_a_customer_fee_refund_signed_elsewhere() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &customer_fee_setup()).unwrap();
+    let (tx, refund, session) = exported_customer_fee_refund(&mut rig);
+    let write = rig.node.queue_writer();
+    rig.node
+        .owner_mut()
+        .unwrap()
+        .abandon_session(&session, &write)
+        .unwrap();
+    let got = paid_to(&tx, &external(9));
+    assert!(got > 0 && got < 10_000, "{got}");
+    rig.mine(std::slice::from_ref(&tx));
+    let entry = rig
+        .node
+        .paid_log()
+        .iter()
+        .find(|e| e.number == refund)
+        .copied()
+        .unwrap();
+    assert_eq!(entry.sats, got);
+}
