@@ -1,73 +1,63 @@
 package org.openbmt.owner.app
 
 /**
- * App-authored float-screen words (`docs/FLOAT-RULES.md`). These entries are
- * placeholders until the owner-app wording is written. Library words continue
- * to come from the library.
+ * The owner app's own words on the float screens (`docs/FLOAT-RULES.md`).
  */
 object FloatWords {
-    private val registry = ArrayList<Pair<String, String>>()
+    val rowTitle = "Refund float"
+    val back = "Back"
+    val setupTitle = "Set up the refund float"
+    val childOnly = "The float has 12 words of its own, made from the shop's words on the stick. Only the float's words come to this phone, never the shop's."
+    val scanChild = "Scan the float's words"
+    val storageUnavailable = "This phone could not open its record of the float. Restart the app. If it keeps failing, check the phone's free space."
+    val childIndex = "The first time, make the float's words on the stick with number 0."
+    val nextIndex = "After a lost or replaced phone, make the next number on the stick. The new phone first moves what is left in the old float."
+    val scanUnavailable = "The float is not set up. Scanning its words comes in a later version."
+    val capSaved = "Cap saved. No money was moved."
+    val capLabel = "Most the float may hold, in sats"
+    val capInvalid = "Type a whole number of sats above zero."
+    val saveCap = "Save the cap"
+    val unavailable = "What the float holds is not known yet."
+    val statusReady = "The float is ready for refunds."
+    val statusLow = "The float is low. Refill it from the shop's savings."
+    val refillAction = "Refill the float"
+    val heldLabel = "The float holds"
+    val refillLinksSavings = "A refill is a payment from the shop's savings to the float. Anyone who looks at the chain can see that the two belong together."
+    val refundPay = "Pay a refund from the float"
+    val refundUnavailable = "Paying a refund from the float comes in a later version. Refunds in the queue can still be paid from savings."
+    val payConfirm = "Pay this refund"
+    val sweepTitle = "Turn the float off"
+    val sweepConfirm = "Move it all to savings"
+    val sweepConfirmationsUnknown = "Turning the float off moves all of it back to the shop's savings. That needs what the float holds, which is not known yet."
+    val floatUnavailable = "The refund float is off."
 
-    private fun need(name: String): String {
-        registry.add(name.removePrefix("WORDS_NEEDED_OA_") to name)
-        return name
-    }
-
-    const val WORDS_NEEDED_OA_FL01_ROW_TITLE = "WORDS_NEEDED_OA_FL01_ROW_TITLE"
-    val rowTitle = need(WORDS_NEEDED_OA_FL01_ROW_TITLE)
-    const val WORDS_NEEDED_OA_FL01_BACK = "WORDS_NEEDED_OA_FL01_BACK"
-    val back = need(WORDS_NEEDED_OA_FL01_BACK)
-    const val WORDS_NEEDED_OA_FL10_SETUP_TITLE = "WORDS_NEEDED_OA_FL10_SETUP_TITLE"
-    val setupTitle = need(WORDS_NEEDED_OA_FL10_SETUP_TITLE)
-    const val WORDS_NEEDED_OA_FL01_CHILD_ONLY = "WORDS_NEEDED_OA_FL01_CHILD_ONLY"
-    val childOnly = need(WORDS_NEEDED_OA_FL01_CHILD_ONLY)
-    const val WORDS_NEEDED_OA_FL01_SCAN_CHILD = "WORDS_NEEDED_OA_FL01_SCAN_CHILD"
-    val scanChild = need(WORDS_NEEDED_OA_FL01_SCAN_CHILD)
-    const val WORDS_NEEDED_OA_FL03_STORAGE_UNAVAILABLE = "WORDS_NEEDED_OA_FL03_STORAGE_UNAVAILABLE"
-    val storageUnavailable = need(WORDS_NEEDED_OA_FL03_STORAGE_UNAVAILABLE)
-    const val WORDS_NEEDED_OA_FL04_CHILD_INDEX = "WORDS_NEEDED_OA_FL04_CHILD_INDEX"
-    val childIndex = need(WORDS_NEEDED_OA_FL04_CHILD_INDEX)
-    const val WORDS_NEEDED_OA_FL04_NEXT_INDEX = "WORDS_NEEDED_OA_FL04_NEXT_INDEX"
-    val nextIndex = need(WORDS_NEEDED_OA_FL04_NEXT_INDEX)
-    const val WORDS_NEEDED_OA_FL01_SCAN_UNAVAILABLE = "WORDS_NEEDED_OA_FL01_SCAN_UNAVAILABLE"
-    val scanUnavailable = need(WORDS_NEEDED_OA_FL01_SCAN_UNAVAILABLE)
-    const val WORDS_NEEDED_OA_FL10_CAP_SAVED = "WORDS_NEEDED_OA_FL10_CAP_SAVED"
-    val capSaved = need(WORDS_NEEDED_OA_FL10_CAP_SAVED)
-    const val WORDS_NEEDED_OA_FL10_CAP_LABEL = "WORDS_NEEDED_OA_FL10_CAP_LABEL"
-    val capLabel = need(WORDS_NEEDED_OA_FL10_CAP_LABEL)
-    const val WORDS_NEEDED_OA_FL10_CAP_INVALID = "WORDS_NEEDED_OA_FL10_CAP_INVALID"
-    val capInvalid = need(WORDS_NEEDED_OA_FL10_CAP_INVALID)
-    const val WORDS_NEEDED_OA_FL10_SAVE_CAP = "WORDS_NEEDED_OA_FL10_SAVE_CAP"
-    val saveCap = need(WORDS_NEEDED_OA_FL10_SAVE_CAP)
-    const val WORDS_NEEDED_OA_FL10_BALANCE_UNAVAILABLE = "WORDS_NEEDED_OA_FL10_BALANCE_UNAVAILABLE"
-    val unavailable = need(WORDS_NEEDED_OA_FL10_BALANCE_UNAVAILABLE)
-    const val WORDS_NEEDED_OA_FL10_STATUS_READY = "WORDS_NEEDED_OA_FL10_STATUS_READY"
-    val statusReady = need(WORDS_NEEDED_OA_FL10_STATUS_READY)
-    const val WORDS_NEEDED_OA_FL12_STATUS_LOW = "WORDS_NEEDED_OA_FL12_STATUS_LOW"
-    val statusLow = need(WORDS_NEEDED_OA_FL12_STATUS_LOW)
-    const val WORDS_NEEDED_OA_FL30_REFILL_ACTION = "WORDS_NEEDED_OA_FL30_REFILL_ACTION"
-    val refillAction = need(WORDS_NEEDED_OA_FL30_REFILL_ACTION)
-    const val WORDS_NEEDED_OA_FL10_HELD_LABEL = "WORDS_NEEDED_OA_FL10_HELD_LABEL"
-    val heldLabel = need(WORDS_NEEDED_OA_FL10_HELD_LABEL)
-    const val WORDS_NEEDED_OA_FL31_REFILL_LINKS_SAVINGS = "WORDS_NEEDED_OA_FL31_REFILL_LINKS_SAVINGS"
-    val refillLinksSavings = need(WORDS_NEEDED_OA_FL31_REFILL_LINKS_SAVINGS)
-    const val WORDS_NEEDED_OA_FL20_REFUND_PAY = "WORDS_NEEDED_OA_FL20_REFUND_PAY"
-    val refundPay = need(WORDS_NEEDED_OA_FL20_REFUND_PAY)
-    const val WORDS_NEEDED_OA_FL20_REFUND_UNAVAILABLE = "WORDS_NEEDED_OA_FL20_REFUND_UNAVAILABLE"
-    val refundUnavailable = need(WORDS_NEEDED_OA_FL20_REFUND_UNAVAILABLE)
-    const val WORDS_NEEDED_OA_FL20_PAY_CONFIRM = "WORDS_NEEDED_OA_FL20_PAY_CONFIRM"
-    val payConfirm = need(WORDS_NEEDED_OA_FL20_PAY_CONFIRM)
-    const val WORDS_NEEDED_OA_FL35_SWEEP_TITLE = "WORDS_NEEDED_OA_FL35_SWEEP_TITLE"
-    val sweepTitle = need(WORDS_NEEDED_OA_FL35_SWEEP_TITLE)
-    const val WORDS_NEEDED_OA_FL35_SWEEP_CONFIRM = "WORDS_NEEDED_OA_FL35_SWEEP_CONFIRM"
-    val sweepConfirm = need(WORDS_NEEDED_OA_FL35_SWEEP_CONFIRM)
-    const val WORDS_NEEDED_OA_FL35_CONFIRMATIONS_UNKNOWN = "WORDS_NEEDED_OA_FL35_CONFIRMATIONS_UNKNOWN"
-    val sweepConfirmationsUnknown = need(WORDS_NEEDED_OA_FL35_CONFIRMATIONS_UNKNOWN)
-    const val WORDS_NEEDED_OA_FL03_FLOAT_UNAVAILABLE = "WORDS_NEEDED_OA_FL03_FLOAT_UNAVAILABLE"
-    val floatUnavailable = need(WORDS_NEEDED_OA_FL03_FLOAT_UNAVAILABLE)
-
-    /** Placeholder key and value pairs, in screen order. */
-    fun all(): List<Pair<String, String>> = registry.toList()
-
-    fun isPlaceholder(text: String): Boolean = text.startsWith("WORDS_NEEDED_OA_FL")
+    /** Every text, in screen order. */
+    fun all(): List<String> = listOf(
+        rowTitle,
+        back,
+        setupTitle,
+        childOnly,
+        scanChild,
+        storageUnavailable,
+        childIndex,
+        nextIndex,
+        scanUnavailable,
+        capSaved,
+        capLabel,
+        capInvalid,
+        saveCap,
+        unavailable,
+        statusReady,
+        statusLow,
+        refillAction,
+        heldLabel,
+        refillLinksSavings,
+        refundPay,
+        refundUnavailable,
+        payConfirm,
+        sweepTitle,
+        sweepConfirm,
+        sweepConfirmationsUnknown,
+        floatUnavailable,
+    )
 }

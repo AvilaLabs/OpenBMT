@@ -3,6 +3,7 @@ package org.openbmt.owner.app
 import android.text.InputType
 import android.view.View
 import java.io.IOException
+import org.openbmt.app.Format
 import org.openbmt.app.RowItem
 
 internal fun Controller.floatRow() = RowItem(FloatWords.rowTitle, FloatWords.unavailable) { showFloat() }
@@ -18,8 +19,8 @@ internal fun Controller.showFloat(notice: String? = null) {
     val body = ArrayList<View>()
     notice?.let { body.add(ui.text(it)) }
     body.add(ui.text(home.message))
-    record?.let { body.add(ui.labelled(FloatWords.capLabel, ui.text(it.capSats.toString()))) }
-    home.heldSats?.let { body.add(ui.labelled(FloatWords.heldLabel, ui.text(it.toString()))) }
+    record?.let { body.add(ui.labelled(FloatWords.capLabel, ui.text(Format.sats(it.capSats)))) }
+    home.heldSats?.let { body.add(ui.labelled(FloatWords.heldLabel, ui.text(Format.sats(it)))) }
     body.add(ui.rows(listOf(
         RowItem(FloatWords.setupTitle) { showFloatSetup() },
         RowItem(FloatWords.capLabel) { showFloatCap() },

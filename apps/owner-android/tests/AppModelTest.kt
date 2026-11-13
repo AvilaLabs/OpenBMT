@@ -3919,10 +3919,8 @@ object AppModelTest {
             dir.deleteRecursively()
         }
 
-        val placeholders = FloatWords.all()
-        ok(placeholders.isNotEmpty() && placeholders.map { it.first }.toSet().size == placeholders.size, "each float placeholder has one registry key")
-        for ((key, value) in placeholders) {
-            ok(value == "WORDS_NEEDED_OA_$key" && FloatWords.isPlaceholder(value), "$value is its own placeholder name")
-        }
+        val words = FloatWords.all()
+        ok(words.size == 26 && words.toSet().size == words.size, "each float text is written once")
+        ok(words.none { it.contains("WORDS_NEEDED") || it.isBlank() }, "no float text is left as a placeholder")
     }
 }
