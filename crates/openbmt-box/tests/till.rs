@@ -192,14 +192,30 @@ fn bx_70_with_till_listen_the_box_serves_json_and_says_where() {
     assert!(text.contains("\"error\":\"tillKeyWrong\""), "{text}");
     assert!(text.contains("Content-Type: application/json"));
     let reply = till_reply_key(&key_bytes);
-    let want = reply_mac(&reply, "GET", &path, nonce, 401, body_of(&text).as_bytes());
+    let want = reply_mac(
+        &reply,
+        "GET",
+        &path,
+        nonce,
+        b"",
+        401,
+        body_of(&text).as_bytes(),
+    );
     assert_eq!(mac_of(&text), Some(want));
     // The key itself is not the token; the token is, and the answer to it is
     // signed too.
     assert!(ask(&key).starts_with("HTTP/1.1 401 "));
     let text = ask(&hex(&till_bearer(&key_bytes)));
     assert!(text.starts_with("HTTP/1.1 503 "), "{text}");
-    let want = reply_mac(&reply, "GET", &path, nonce, 503, body_of(&text).as_bytes());
+    let want = reply_mac(
+        &reply,
+        "GET",
+        &path,
+        nonce,
+        b"",
+        503,
+        body_of(&text).as_bytes(),
+    );
     assert_eq!(mac_of(&text), Some(want));
     kill(child);
 }

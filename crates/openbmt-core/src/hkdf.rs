@@ -8,6 +8,11 @@ use bitcoin::hashes::{sha256, Hash, HashEngine, Hmac, HmacEngine};
 /// The longest output HKDF-SHA256 gives: 255 blocks of 32 bytes.
 pub const MAX_OUTPUT: usize = 255 * 32;
 
+/// SHA-256 of `message`.
+pub fn sha256_of(message: &[u8]) -> [u8; 32] {
+    sha256::Hash::hash(message).to_byte_array()
+}
+
 /// HMAC-SHA256 of `message` under `key`.
 pub fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
     let mut engine = HmacEngine::<sha256::Hash>::new(key);

@@ -143,8 +143,18 @@ test("waiting, opened, paid: polls every 2 s and resolves true", async () => {
     assert.strictEqual(r.calls.length, 1);
     await r.clk.advance(1);
     assert.strictEqual(r.calls.length, 2);
-    assert.deepEqual(r.calls[1].args, [[7], SALE]);
+    // Each poll names what was asked for, so the server can compare it with
+    // what the Box took.
+    assert.deepEqual(r.calls[1].args, [
+        [7],
+        SALE,
+        "12.50",
+        "EUR",
+        "Order 00012-003-0004",
+        "uuid-1",
+    ]);
     await r.clk.advance(2000);
+    assert.deepEqual(r.calls[2].args, r.calls[1].args);
     await r.clk.advance(2000);
     assert.strictEqual(await p, true);
     assert.strictEqual(r.line.transaction_id, SALE);
@@ -205,6 +215,30 @@ test("an error during polling stops polling", async () => {
     assert.strictEqual(await p, false);
     assert.strictEqual(r.clk.pending(), 0);
     assert.strictEqual(r.dialogs[0].title, "Lost");
+});
+
+test("a mismatch on a poll shows its words and fails the line", async () => {
+    const words = { heading: "H", what: "W", next: "N" };
+    const r = rig([
+        { state: "waiting", sale: SALE, words: null },
+        { error: "tillMismatch", words },
+    ]);
+    const p = r.iface.send_payment_request("uuid-1");
+    await flush();
+    await r.clk.advance(2000);
+    assert.strictEqual(await p, false);
+    assert.deepEqual(r.dialogs, [{ title: "H", body: "W\nN" }]);
+    assert.strictEqual(r.line.transaction_id, undefined);
+    assert.strictEqual(r.statuses.at(-1), "retry");
+    assert.strictEqual(r.clk.pending(), 0);
+});
+
+test("a mismatch on the first answer fails the line", async () => {
+    const r = rig([{ error: "tillMismatch", words: { heading: "H", what: "W", next: "N" } }]);
+    assert.strictEqual(await r.iface.send_payment_request("uuid-1"), false);
+    assert.strictEqual(r.line.transaction_id, undefined);
+    assert.strictEqual(r.statuses.at(-1), "retry");
+    assert.strictEqual(r.calls.length, 1);
 });
 
 test("cancel stops polling, calls cancel, request resolves false quietly", async () => {

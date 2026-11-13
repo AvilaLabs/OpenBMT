@@ -187,22 +187,24 @@ tagged() { # tag hex-message -> 64 hex
 }
 # The till holds the key; it sends the bearer token made from it, a fresh
 # nonce, and takes an answer only when its X-OBM-Reply is the mac of this
-# request (BX-71, BX-80). An answer that does not check is printed as
+# request, the SHA-256 of its body included (BX-71, BX-80). An answer that does not check is printed as
 # {"error":"replyNotChecked"}.
 till() { # method path [json]
-  local nonce hdr body status mac want
+  local nonce hdr body status mac want sent
   nonce=$(head -c 16 /dev/urandom | xxd -p)
   hdr=$(mktemp "$BASE/till-hdr-XXXXXX")
   body=$(mktemp "$BASE/till-body-XXXXXX")
   local args=(-s --max-time 10 -X "$1" -D "$hdr" -o "$body"
     -H "Authorization: Bearer $TILL_TOKEN" -H "X-OBM-Nonce: $nonce")
+  sent=$(printf '' | sha256sum | cut -d' ' -f1)
   if [ $# -ge 3 ]; then
+    sent=$(printf '%s' "$3" | sha256sum | cut -d' ' -f1)
     args+=(-H 'Content-Type: application/json' --data "$3")
   fi
   curl "${args[@]}" "http://127.0.0.1:$TILL_PORT$2"
   status=$(sed -nE '1s/^HTTP\/[0-9.]+ ([0-9]{3}).*/\1/p' "$hdr" | head -1)
   mac=$(tr -d '\r' <"$hdr" | sed -nE 's/^[Xx]-[Oo][Bb][Mm]-[Rr]eply: *([0-9a-f]{64})$/\1/p' | head -1)
-  want=$({ printf 'OBM-TILL-REPLY-1\n%s\n%s\n%s\n%s\n' "$1" "$2" "$nonce" "$status"; cat "$body"; } |
+  want=$({ printf 'OBM-TILL-REPLY-2\n%s\n%s\n%s\n%s\n%s\n' "$1" "$2" "$nonce" "$sent" "$status"; cat "$body"; } |
     openssl dgst -sha256 -mac HMAC -macopt "hexkey:$TILL_REPLY" -r | cut -d' ' -f1)
   if [ -n "$mac" ] && [ "$mac" = "$want" ]; then
     cat "$body"
@@ -241,6 +243,7 @@ ask() { # request-id reference
   local out
   out=$(till POST /till/v1/sales \
     "{\"counter\":\"$CTR\",\"amount\":\"5.00\",\"currency\":\"USD\",\"request\":\"$1\",\"reference\":\"$2\"}")
+  ASKED=$out
   SALE=$(jq -r '.sale // empty' <<<"$out")
   [ ${#SALE} = 32 ] && [ "$(jq -r .state <<<"$out")" = waiting ]
 }
@@ -260,7 +263,7 @@ pay_and_confirm() { # address sats
   HEIGHT=$((HEIGHT + 1))
   await_tip "$HEIGHT" 60
 }
-IDX=; SADDR=; SSATS=; SALE=
+IDX=; SADDR=; SSATS=; SALE=; ASKED=
 
 # ---- Core, the Box, the counter -------------------------------------------------
 
@@ -324,8 +327,13 @@ if ask req-one "ORDER-17" && await_waiting 1 40; then
   LINE=$(grep '^till sale=' <<<"$LAST" | head -1)
   note "$LINE"
   OK1=
+  # The answer names the amount (with the currency's two decimals), the
+  # currency, the request and the reference the Box took (BX-72).
+  ECHO1=$(jq -r '[.amount, .currency, .request, .reference] | join("|")' <<<"$ASKED")
+  [ "$ECHO1" = "5.00|USD|req-one|ORDER-17" ] || note "the create answer echoes '$ECHO1'"
   [ "$(kv "$LINE" sale)" = "$S1" ] && [ "$(kv "$LINE" amount)" = 500 ] &&
-    [ "$(kv "$LINE" reference)" = "ORDER-17" ] && [ "$(kv "$LINE" minutes_left)" -ge 4 ] && OK1=yes
+    [ "$(kv "$LINE" reference)" = "ORDER-17" ] && [ "$(kv "$LINE" minutes_left)" -ge 4 ] &&
+    [ "$ECHO1" = "5.00|USD|req-one|ORDER-17" ] && OK1=yes
   # The same request again is the same sale and sends nothing new.
   AGAIN=$(till POST /till/v1/sales \
     "{\"counter\":\"$CTR\",\"amount\":\"5.00\",\"currency\":\"USD\",\"request\":\"req-one\",\"reference\":\"ORDER-17\"}" |
@@ -336,7 +344,7 @@ if ask req-one "ORDER-17" && await_waiting 1 40; then
   SHOWN=$(grep '^till waiting=' <<<"$LAST")
   if [ -n "$OK1" ] && [ "$AGAIN" = "$S1" ] && [ "$HID" = 1 ] && [ "$SHOWN" = "till waiting=0" ] &&
     [ "$(till_state "$S1")" = waiting ]; then
-    pass 1 "the till's request waited on the counter with its amount, reference and minutes left, Not now hid it and sent nothing, the Box still read waiting"
+    pass 1 "the till's request waited on the counter with its amount, reference and minutes left, the answer named the amount, currency, request and reference the Box took, Not now hid it and sent nothing, the Box still read waiting"
   else
     bad 1 "the request did not wait as it should: line '$LINE', again '$AGAIN', not-now '$HID', shown '$SHOWN'"
   fi

@@ -8,7 +8,10 @@ there. Odoo marks the payment done only when the Box says the counter has
 signed that the sale is paid. The Box signs each answer with a key that only
 Odoo and the Box hold and that is never sent, so someone on the network
 between them cannot change an answer or make one up, even though the
-connection is plain HTTP (`docs/BOX-RULES.md` BX-80). Odoo cannot check the
+connection is plain HTTP (`docs/BOX-RULES.md` BX-80). The signature covers
+the request it answers, and each answer names the amount, currency, request
+and reference the Box took; Odoo cancels the sale and fails the payment if
+they are not the ones it sent. Odoo cannot check the
 counter's signature itself: a Box that has been taken over can say a sale is
 paid.
 

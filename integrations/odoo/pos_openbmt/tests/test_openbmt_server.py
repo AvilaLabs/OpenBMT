@@ -37,6 +37,10 @@ class TestOpenbmtServer(TransactionCase):
         return self.method.openbmt_start(
             amount, currency, 'Order 00012-003-0004', request)
 
+    def status(self, sale, request='req-1', amount='12.50', currency='EUR'):
+        return self.method.openbmt_status(
+            sale, amount, currency, 'Order 00012-003-0004', request)
+
     def test_terminal_is_offered(self):
         selection = self.env['pos.payment.method']._get_payment_terminal_selection()
         self.assertIn(('openbmt', 'OpenBMT'), selection)
@@ -47,16 +51,24 @@ class TestOpenbmtServer(TransactionCase):
         self.assertEqual(r['state'], 'waiting')
         sale = r['sale']
         self.box.set_state(sale, 'opened')
-        self.assertEqual(self.method.openbmt_status(sale)['state'], 'opened')
+        self.assertEqual(self.status(sale)['state'], 'opened')
         self.box.set_state(sale, 'paid')
-        paid = self.method.openbmt_status(sale)
+        paid = self.status(sale)
         self.assertEqual(paid['state'], 'paid')
         self.assertEqual(paid['words']['what'], 'Paid in bitcoin.')
         for state in ('unpaid', 'expired', 'cancelled'):
             other = self.start(request='r-' + state)['sale']
             self.box.set_state(other, state)
-            self.assertEqual(self.method.openbmt_status(other)['state'], state)
+            self.assertEqual(self.status(other, 'r-' + state)['state'], state)
         self.assertEqual(self.start()['sale'], sale)
+
+    def test_the_answer_must_name_what_was_asked(self):
+        sale = self.start(request='m1')['sale']
+        self.box.echo = {'amount': '1.00'}
+        self.addCleanup(setattr, self.box, 'echo', {})
+        r = self.status(sale, 'm1')
+        self.assertEqual(r['error'], 'tillMismatch')
+        self.assertEqual(self.box.sales[sale], 'cancelled')
 
     def test_cancel(self):
         sale = self.start(request='c1')['sale']
@@ -77,7 +89,7 @@ class TestOpenbmtServer(TransactionCase):
         other = self.make(openbmt_counter='00000000')
         self.assertEqual(other.openbmt_start('1.00', 'EUR', 'x', 'k2')['error'],
                          'tillUnknownCounter')
-        self.assertEqual(self.method.openbmt_status('0' * 32)['error'], 'tillLost')
+        self.assertEqual(self.status('0' * 32)['error'], 'tillLost')
         self.box.paired = False
         self.addCleanup(setattr, self.box, 'paired', True)
         self.assertEqual(self.start(request='k3')['error'], 'tillNotPaired')
@@ -88,7 +100,7 @@ class TestOpenbmtServer(TransactionCase):
         self.assertEqual(r['error'], 'tillTransport')
         self.assertEqual(self.method.openbmt_start('1e3', 'EUR', 'x', 'k5')['error'],
                          'tillNotSet')
-        self.assertEqual(self.method.openbmt_status('../..')['error'], 'tillNotSet')
+        self.assertEqual(self.status('../..')['error'], 'tillNotSet')
         self.box.mode = 'garbage'
         self.addCleanup(setattr, self.box, 'mode', 'normal')
         self.assertEqual(self.start(request='k6')['error'], 'tillBadAnswer')

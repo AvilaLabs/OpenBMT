@@ -24,7 +24,9 @@ use openbmt_core::say::{clean_foreign, Words};
 
 use crate::say::{TillAnswer, TILL_PAID};
 use crate::status_page::{head_end, head_is_clean, is_token_byte, response, Slot};
-use crate::till::{hex, reply_mac, request_id_ok, unhex, KeyCheck, SaleState, TillRefusal};
+use crate::till::{
+    hex, reply_mac, request_id_ok, unhex, KeyCheck, SaleInfo, SaleState, TillRefusal,
+};
 
 /// Most bytes of a whole request, head and body together (BX-70).
 pub const MAX_REQUEST: usize = 4 * 1024;
@@ -448,11 +450,11 @@ pub trait TillBackend: Send + Sync + 'static {
     /// key file (BX-71, BX-80).
     fn check_key(&self, presented: Option<&str>) -> KeyCheck;
     /// BX-72: ask a counter for a sale.
-    fn create(&self, body: CreateBody) -> Result<([u8; 16], SaleState), TillRefusal>;
+    fn create(&self, body: CreateBody) -> Result<([u8; 16], SaleInfo), TillRefusal>;
     /// BX-73: how a sale stands.
-    fn read(&self, sale: &[u8; 16]) -> Result<SaleState, TillRefusal>;
+    fn read(&self, sale: &[u8; 16]) -> Result<SaleInfo, TillRefusal>;
     /// BX-74: cancel a sale.
-    fn cancel(&self, sale: &[u8; 16]) -> Result<SaleState, TillRefusal>;
+    fn cancel(&self, sale: &[u8; 16]) -> Result<SaleInfo, TillRefusal>;
 }
 
 impl TillRefusal {
@@ -533,6 +535,7 @@ fn signed(request: &Request, reply_key: Option<&[u8; 32]>, status: u16, body: &s
             &request.method,
             &request.path,
             &request.nonce,
+            &request.body,
             status,
             body.as_bytes(),
         )
@@ -540,10 +543,24 @@ fn signed(request: &Request, reply_key: Option<&[u8; 32]>, status: u16, body: &s
     json(status, body, mac.as_deref())
 }
 
-/// The body that says how a sale stands (BX-73): the sale, the state, and
-/// for a sale that has ended the words.
-pub fn sale_body(sale: &[u8; 16], state: SaleState) -> String {
-    let words = match state {
+/// The start of a sale's body (BX-72, BX-73): the sale, the state and the
+/// fields as the Box took them, without the closing brace.
+fn sale_head(sale: &[u8; 16], info: &SaleInfo) -> String {
+    format!(
+        "{{\"sale\":\"{}\",\"state\":\"{}\",\"amount\":{},\"currency\":{},\"request\":{},\"reference\":{}",
+        hex(sale),
+        info.state.word(),
+        json_string(&info.amount),
+        json_string(&info.currency),
+        json_string(&info.request),
+        json_string(&info.reference)
+    )
+}
+
+/// The body that says how a sale stands (BX-73): the sale, the state, the
+/// fields the Box took, and for a sale that has ended the words.
+pub fn sale_body(sale: &[u8; 16], info: &SaleInfo) -> String {
+    let words = match info.state {
         SaleState::Waiting | SaleState::Opened => None,
         // The one plain line of the till's own, as it is shown.
         SaleState::Paid => Some(words_json("", TILL_PAID, "")),
@@ -551,11 +568,7 @@ pub fn sale_body(sale: &[u8; 16], state: SaleState) -> String {
         SaleState::Expired => Some(answer_json(&TillAnswer::Expired)),
         SaleState::Cancelled => Some(answer_json(&TillAnswer::Cancelled)),
     };
-    let head = format!(
-        "{{\"sale\":\"{}\",\"state\":\"{}\"",
-        hex(sale),
-        state.word()
-    );
+    let head = sale_head(sale, info);
     match words {
         Some(words) => format!("{head},\"words\":{words}}}"),
         None => format!("{head}}}"),
@@ -598,20 +611,16 @@ pub fn answer(backend: &dyn TillBackend, request: &Request) -> Vec<u8> {
             Some(body) => backend.create(body),
             None => Err(TillRefusal::BadRequest),
         },
-        Route::Read(Some(id)) => backend.read(&id).map(|state| (id, state)),
-        Route::Cancel(Some(id)) => backend.cancel(&id).map(|state| (id, state)),
+        Route::Read(Some(id)) => backend.read(&id).map(|info| (id, info)),
+        Route::Cancel(Some(id)) => backend.cancel(&id).map(|info| (id, info)),
         Route::Read(None) | Route::Cancel(None) => Err(TillRefusal::Lost),
     };
     match result {
-        Ok((id, state)) => {
+        Ok((id, info)) => {
             let body = match request.route {
-                // A new sale is told only as waiting, with no words.
-                Route::Create => format!(
-                    "{{\"sale\":\"{}\",\"state\":\"{}\"}}",
-                    hex(&id),
-                    state.word()
-                ),
-                _ => sale_body(&id, state),
+                // A new sale is told with no words.
+                Route::Create => format!("{}}}", sale_head(&id, &info)),
+                _ => sale_body(&id, &info),
             };
             signed(request, Some(&reply_key), 200, &body)
         }

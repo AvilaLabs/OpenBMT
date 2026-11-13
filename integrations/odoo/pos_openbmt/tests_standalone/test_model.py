@@ -44,6 +44,11 @@ class Base(unittest.TestCase):
         return (method or self.method).openbmt_start(
             amount, currency, 'Order 00012-003-0004', request)
 
+    def status(self, sale, request='req-1', amount='12.50', currency='EUR',
+               method=None):
+        return (method or self.method).openbmt_status(
+            sale, amount, currency, 'Order 00012-003-0004', request)
+
     def assert_clean(self, *results):
         blob = repr(results) + ' '.join(self.logs)
         self.assertNotIn(fake_box.KEY, blob)
@@ -74,11 +79,11 @@ class States(Base):
         self.assertEqual(r['state'], 'waiting')
         self.assertIsNone(r['words'])
         sale = r['sale']
-        self.assertEqual(self.method.openbmt_status(sale)['state'], 'waiting')
+        self.assertEqual(self.status(sale)['state'], 'waiting')
         self.box.set_state(sale, 'opened')
-        self.assertEqual(self.method.openbmt_status(sale)['state'], 'opened')
+        self.assertEqual(self.status(sale)['state'], 'opened')
         self.box.set_state(sale, 'paid')
-        paid = self.method.openbmt_status(sale)
+        paid = self.status(sale)
         self.assertEqual(paid['state'], 'paid')
         self.assertEqual(paid['words']['what'], 'Paid in bitcoin.')
         self.assert_clean(r, paid)
@@ -87,7 +92,7 @@ class States(Base):
         for state in ('unpaid', 'expired', 'cancelled'):
             sale = self.start(request='r-' + state)['sale']
             self.box.set_state(sale, state)
-            r = self.method.openbmt_status(sale)
+            r = self.status(sale, request='r-' + state)
             self.assertEqual(r['state'], state)
             self.assertEqual(set(r['words']), {'heading', 'what', 'next'})
             self.assertTrue(r['words']['heading'])
@@ -103,7 +108,7 @@ class States(Base):
         sale = self.start()['sale']
         r = self.method.openbmt_cancel(sale)
         self.assertEqual(r['state'], 'cancelled')
-        self.assertEqual(self.method.openbmt_status(sale)['state'], 'cancelled')
+        self.assertEqual(self.status(sale)['state'], 'cancelled')
 
     def test_cancel_keeps_paid(self):
         sale = self.start()['sale']
@@ -156,7 +161,7 @@ class Refusals(Base):
         self.refused(self.start(request='one-more'), 'tillBusy')
 
     def test_lost_sale(self):
-        self.refused(self.method.openbmt_status('0' * 32), 'tillLost')
+        self.refused(self.status('0' * 32), 'tillLost')
         self.refused(self.method.openbmt_cancel('0' * 32), 'tillLost')
 
     def test_bad_inputs_never_leave_the_server(self):
@@ -164,9 +169,11 @@ class Refusals(Base):
         for r in (self.start(amount='-1'), self.start(amount='1e3'),
                   self.start(currency='eur'), self.start(request='a b'),
                   self.start(request=''), self.start(request='x' * 65),
-                  self.method.openbmt_status('../..'),
+                  self.status('../..'),
                   self.method.openbmt_cancel('A' * 32),
-                  self.method.openbmt_status(None)):
+                  self.status(None),
+                  self.status('a' * 32, amount='1e3'),
+                  self.status('a' * 32, request='a b')):
             self.assertEqual(r['error'], mod.ERR_SETUP)
         self.assertEqual(len(self.box.seen), before)
 
@@ -220,6 +227,9 @@ class Transport(Base):
 
     def test_shapes_refused(self):
         sale = 'a' * 32
+        # The answer names what was asked for, so that only the shape differs.
+        echo = {'amount': '12.50', 'currency': 'EUR', 'request': 'req-1',
+                'reference': 'Order 00012-003-0004'}
         bad = [
             [], 'x', {}, {'sale': sale}, {'state': 'waiting'},
             {'sale': 'A' * 32, 'state': 'waiting'},
@@ -235,20 +245,25 @@ class Transport(Base):
         ]
         self.box.mode = 'shape'
         for shape in bad:
+            if isinstance(shape, dict):
+                shape = dict(shape, **echo)
             self.box.shape = shape
-            self.assertEqual(self.method.openbmt_status(sale),
+            self.assertEqual(self.status(sale),
                              {'error': mod.ERR_ANSWER, 'words': mod.LOCAL_WORDS[mod.ERR_ANSWER]}, shape)
 
     def test_oversize_answer_refused(self):
         self.box.mode = 'shape'
         self.box.shape = {'sale': 'a' * 32, 'state': 'waiting', 'pad': 'x' * 40000}
-        self.assertEqual(self.method.openbmt_status('a' * 32)['error'],
+        self.assertEqual(self.status('a' * 32)['error'],
                          mod.ERR_ANSWER)
 
     def test_good_shape_accepted(self):
         self.box.mode = 'shape'
-        self.box.shape = {'sale': 'a' * 32, 'state': 'opened'}
-        self.assertEqual(self.method.openbmt_status('a' * 32),
+        self.box.shape = {'sale': 'a' * 32, 'state': 'opened',
+                          'amount': '12.50', 'currency': 'EUR',
+                          'request': 'req-1',
+                          'reference': 'Order 00012-003-0004'}
+        self.assertEqual(self.status('a' * 32),
                          {'state': 'opened', 'sale': 'a' * 32, 'words': None})
 
     def test_error_body_shapes_refused(self):
@@ -302,9 +317,12 @@ class Vectors(unittest.TestCase):
         v = vectors()
         reply = bytes.fromhex(v['reply_key'])
         self.assertTrue(v['cases'])
+        # The first case is a create, which has a body.
+        self.assertTrue(v['cases'][0]['request_body'])
         for c in v['cases']:
             body = c['body'].encode('utf-8')
-            args = (c['method'], c['path'], c['nonce'], c['status'], body)
+            args = (c['method'], c['path'], c['nonce'],
+                    c['request_body'].encode('utf-8'), c['status'], body)
             self.assertEqual(mod.reply_mac(reply, *args), c['mac'])
             self.assertEqual(fake_box.mac_of(reply, *args), c['mac'])
             self.assertTrue(mod.reply_is_good(reply, *args, c['mac']))
@@ -313,10 +331,13 @@ class Vectors(unittest.TestCase):
         v = vectors()
         reply = bytes.fromhex(v['reply_key'])
         c = v['cases'][0]
-        base = [c['method'], c['path'], c['nonce'], c['status'],
+        base = [c['method'], c['path'], c['nonce'],
+                c['request_body'].encode('utf-8'), c['status'],
                 c['body'].encode('utf-8')]
+        # The request's body counts: one byte more is another mac.
         other = [('PUT', 0), ('/till/v1/sales/x', 1), ('f' * 32, 2),
-                 (c['status'] + 1, 3), (c['body'].encode('utf-8') + b' ', 4)]
+                 (c['request_body'].encode('utf-8') + b' ', 3),
+                 (c['status'] + 1, 4), (c['body'].encode('utf-8') + b' ', 5)]
         for value, at in other:
             args = list(base)
             args[at] = value
@@ -338,31 +359,32 @@ class Signed(Base):
     def test_a_good_answer_is_accepted(self):
         r = self.start()
         self.assertEqual(r['state'], 'waiting')
-        self.assertEqual(self.method.openbmt_status(r['sale'])['state'], 'waiting')
+        self.assertEqual(self.status(r['sale'])['state'], 'waiting')
 
     def test_a_refusal_the_box_signed_is_accepted_with_its_words(self):
-        r = self.method.openbmt_status('0' * 32)
+        r = self.status('0' * 32)
         self.assertEqual(r['error'], 'tillLost')
 
     def test_each_failure_of_the_mac_is_a_failed_call(self):
         for mode in ('missing', 'other_key', 'other_nonce', 'other_status',
-                     'other_body', 'other_path', 'other_method'):
+                     'other_body', 'other_path', 'other_method',
+                     'other_request'):
             self.box.signing = mode
             self.unsigned(self.start(request='r-' + mode))
-            self.unsigned(self.method.openbmt_status('0' * 32))
+            self.unsigned(self.status('0' * 32))
 
     def test_a_paid_answer_without_a_good_mac_is_never_paid(self):
         self.box.signing = 'good'
         sale = self.start()['sale']
         self.box.set_state(sale, 'paid')
         for mode in ('missing', 'other_key', 'other_nonce', 'other_status',
-                     'other_body'):
+                     'other_body', 'other_request'):
             self.box.signing = mode
-            r = self.method.openbmt_status(sale)
+            r = self.status(sale)
             self.assertNotIn('state', r, mode)
             self.unsigned(r)
         self.box.signing = 'good'
-        self.assertEqual(self.method.openbmt_status(sale)['state'], 'paid')
+        self.assertEqual(self.status(sale)['state'], 'paid')
 
     def test_an_answer_for_the_state_the_till_asked_about_elsewhere(self):
         # An answer made for one request is not good for another: the same
@@ -374,20 +396,20 @@ class Signed(Base):
                           'words': {'heading': '', 'what': 'Paid in bitcoin.',
                                     'next': ''}}).encode()
         mac = mod.reply_mac(reply, 'GET', '/till/v1/sales/' + sale, '1' * 32,
-                            200, raw)
+                            b'', 200, raw)
         self.assertTrue(mod.reply_is_good(
-            reply, 'GET', '/till/v1/sales/' + sale, '1' * 32, 200, raw, mac))
+            reply, 'GET', '/till/v1/sales/' + sale, '1' * 32, b'', 200, raw, mac))
         self.assertFalse(mod.reply_is_good(
-            reply, 'GET', '/till/v1/sales/' + 'b' * 32, '1' * 32, 200, raw, mac))
+            reply, 'GET', '/till/v1/sales/' + 'b' * 32, '1' * 32, b'', 200, raw, mac))
         self.assertFalse(mod.reply_is_good(
-            reply, 'GET', '/till/v1/sales/' + sale, '2' * 32, 200, raw, mac))
+            reply, 'GET', '/till/v1/sales/' + sale, '2' * 32, b'', 200, raw, mac))
 
     def test_an_answer_sent_again_for_a_later_request_is_refused(self):
         # What a path party holds after seeing one answer: its body, status
         # and mac. The next request has its own nonce.
         sale = self.start()['sale']
         self.box.signing = 'other_nonce'
-        self.unsigned(self.method.openbmt_status(sale))
+        self.unsigned(self.status(sale))
         self.assertEqual(len(set(self.box.nonces)), len(self.box.nonces))
 
     def test_every_request_has_a_fresh_nonce_and_the_token_not_the_key(self):
@@ -411,7 +433,7 @@ class Signed(Base):
                              (413, {'error': 'tillTooLarge'})):
             self.box.shape = body
             self.box.status_code = status
-            self.unsigned(self.method.openbmt_status('a' * 32))
+            self.unsigned(self.status('a' * 32))
 
     def test_the_key_is_checked_before_a_call_leaves(self):
         before = len(self.box.seen)
@@ -423,6 +445,139 @@ class Signed(Base):
     def test_a_key_with_spaces_around_it_works(self):
         m = self.make(openbmt_till_key=' ' + fake_box.KEY + '\n')
         self.assertEqual(self.start(method=m)['state'], 'waiting')
+
+
+class Bound(Base):
+    """The request is bound into the answer, and the answer names what the
+    Box took (BX-72, BX-73, BX-80)."""
+
+    def test_the_mac_covers_the_bytes_that_were_sent(self):
+        self.start()
+        sale = self.start()['sale']
+        self.status(sale)
+        # The create and the cancel carry bodies, the status poll none.
+        self.start(request='r-2')
+        self.method.openbmt_cancel(sale)
+        self.assertEqual([b[:1] for b in self.box.sent],
+                         [b'{', b'{', b'', b'{', b'{'])
+        self.assertEqual(self.box.sent[4], b'{}')
+        body = json.loads(self.box.sent[0])
+        self.assertEqual(body['amount'], '12.50')
+        # Each answer passed its mac check, which the fake Box makes over
+        # the bytes it received.
+        for call in (lambda: self.start(request='r-3'),
+                     lambda: self.status(sale),
+                     lambda: self.method.openbmt_cancel(sale)):
+            self.assertNotIn('error', call())
+
+    def test_a_request_changed_on_its_way_is_refused(self):
+        self.box.signing = 'other_request'
+        r = self.start()
+        self.assertEqual(r, {'error': mod.ERR_UNSIGNED,
+                             'words': mod.LOCAL_WORDS[mod.ERR_UNSIGNED]})
+
+    def test_a_mac_of_another_amount_does_not_verify(self):
+        reply = mod.till_reply_key(fake_box.KEY)
+        real = b'{"amount":"100.00"}'
+        changed = b'{"amount":"10.00"}'
+        answer = b'{"sale":"' + b'a' * 32 + b'","state":"waiting"}'
+        mac = mod.reply_mac(reply, 'POST', '/till/v1/sales', '1' * 32, changed,
+                            200, answer)
+        self.assertTrue(mod.reply_is_good(
+            reply, 'POST', '/till/v1/sales', '1' * 32, changed, 200, answer, mac))
+        self.assertFalse(mod.reply_is_good(
+            reply, 'POST', '/till/v1/sales', '1' * 32, real, 200, answer, mac))
+
+    def test_the_words_of_the_mismatch_are_placeholders(self):
+        words = mod.LOCAL_WORDS[mod.ERR_MISMATCH]
+        self.assertEqual(
+            words, {'heading': 'WORDS_NEEDED_BX80_MISMATCH_HEADING',
+                    'what': 'WORDS_NEEDED_BX80_MISMATCH_WHAT',
+                    'next': 'WORDS_NEEDED_BX80_MISMATCH_NEXT'})
+
+    def mismatch(self, r):
+        self.assertEqual(r, {'error': mod.ERR_MISMATCH,
+                             'words': mod.LOCAL_WORDS[mod.ERR_MISMATCH]})
+        self.assert_clean(r)
+
+    def test_a_create_that_echoes_another_amount_is_cancelled_and_failed(self):
+        for i, change in enumerate((
+                {'amount': '1.00'}, {'currency': 'USD'},
+                {'request': 'other'}, {'reference': 'Order 2'})):
+            self.box.echo = change
+            request = 'echo-%d' % i
+            self.mismatch(self.start(request=request))
+            self.box.echo = {}
+            sale = self.box.requests[request]
+            self.assertEqual(self.box.sales[sale], 'cancelled', change)
+
+    def test_a_create_that_leaves_a_field_out_is_a_mismatch(self):
+        for name in ('amount', 'currency', 'request', 'reference'):
+            self.box.mode = 'shape'
+            self.box.status_code = 200
+            sale = 'a' * 32
+            shape = {'sale': sale, 'state': 'waiting', 'amount': '12.50',
+                     'currency': 'EUR', 'request': 'req-1',
+                     'reference': 'Order 00012-003-0004'}
+            del shape[name]
+            self.box.shape = shape
+            self.mismatch(self.start())
+
+    def test_every_status_poll_is_compared(self):
+        sale = self.start()['sale']
+        self.assertEqual(self.status(sale)['state'], 'waiting')
+        for change in ({'amount': '1.00'}, {'amount': 'x'}, {'currency': 'USD'},
+                       {'request': 'other'}, {'reference': 'Order 2'},
+                       {'amount': 12.5}):
+            self.box.echo = change
+            self.mismatch(self.status(sale))
+            # The sale was cancelled at the Box.
+            self.assertEqual(self.box.sales[sale], 'cancelled', change)
+            self.box.echo = {}
+            self.box.set_state(sale, 'waiting')
+
+    def test_a_paid_answer_with_another_amount_is_not_paid(self):
+        sale = self.start()['sale']
+        self.box.set_state(sale, 'paid')
+        self.box.echo = {'amount': '10.00'}
+        r = self.status(sale)
+        self.mismatch(r)
+        self.assertNotIn('state', r)
+        # The Box keeps a paid sale paid when asked to cancel it.
+        self.assertEqual(self.box.sales[sale], 'paid')
+
+    def test_the_till_asks_with_what_it_sends_on_a_poll(self):
+        sale = self.start()['sale']
+        self.assertEqual(
+            self.status(sale, amount='13.50')['error'], mod.ERR_MISMATCH)
+        self.assertEqual(
+            self.status(sale, request='other')['error'], mod.ERR_MISMATCH)
+
+    def test_the_amount_is_compared_as_a_number_and_the_reference_as_cut(self):
+        r = self.start(amount='12.5')
+        self.assertEqual(r['state'], 'waiting')
+        long = 'R' * 60 + '\u00e9'
+        m = self.method
+        r = m.openbmt_start('3.00', 'EUR', long, 'long-1')
+        self.assertEqual(r['state'], 'waiting')
+        self.assertEqual(
+            m.openbmt_status(r['sale'], '3.00', 'EUR', long, 'long-1')['state'],
+            'waiting')
+
+    def test_a_cancel_that_fails_still_fails_the_payment(self):
+        # The answer to the cancel carries no good mac; the payment fails
+        # all the same.
+        orig = self.box.mac_for
+
+        def mac_for(h, status, raw):
+            if h.path.endswith('/cancel'):
+                return None
+            return orig(h, status, raw)
+
+        self.box.mac_for = mac_for
+        self.box.echo = {'amount': '1.00'}
+        self.mismatch(self.start(request='nocancel'))
+        self.assertTrue(self.box.seen[-1][1].endswith('/cancel'))
 
 
 class Files(unittest.TestCase):

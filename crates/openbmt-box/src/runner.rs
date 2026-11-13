@@ -57,7 +57,7 @@ use crate::state::{BoxCore, BoxError, BoxStatus};
 use crate::status_page::{Entered, PageBackend, PageConfig, PageView, StatusPage};
 use crate::till::{
     check_till_key, clean_reference, find_counter, make_till_key, parse_amount, KeyCheck, NewSale,
-    SaleState, TillRefusal, TillTable, TILL_KEY_FILE,
+    SaleInfo, TillRefusal, TillTable, TILL_KEY_FILE,
 };
 use crate::till_listener::{CreateBody, TillBackend, TillConfig, TillListener};
 use crate::vendor::{VendorConnector, VENDOR_POLL_SECS};
@@ -381,7 +381,7 @@ impl TillBackend for TillHandles {
         }
     }
 
-    fn create(&self, body: CreateBody) -> Result<([u8; 16], SaleState), TillRefusal> {
+    fn create(&self, body: CreateBody) -> Result<([u8; 16], SaleInfo), TillRefusal> {
         let (counters, money) = self.shop()?;
         let counter = find_counter(counters, &body.counter)
             .ok_or_else(|| TillRefusal::UnknownCounter(body.counter.clone()))?;
@@ -403,21 +403,29 @@ impl TillBackend for TillHandles {
             currency: openbmt_counter::Currency::of_shop(money),
             reference: clean_reference(&body.reference),
             request: body.request,
+            digits: money.minor_digits(),
         };
-        lock(&self.table).create(self.clock.now(), id, new)
+        let mut table = lock(&self.table);
+        let (id, _) = table.create(self.clock.now(), id, new)?;
+        let info = table.info(&id).ok_or(TillRefusal::Fault)?;
+        Ok((id, info))
     }
 
-    fn read(&self, sale: &[u8; 16]) -> Result<SaleState, TillRefusal> {
+    fn read(&self, sale: &[u8; 16]) -> Result<SaleInfo, TillRefusal> {
         self.shop()?;
-        lock(&self.table)
+        let mut table = lock(&self.table);
+        table
             .state(self.clock.now(), sale)
+            .and_then(|_| table.info(sale))
             .ok_or(TillRefusal::Lost)
     }
 
-    fn cancel(&self, sale: &[u8; 16]) -> Result<SaleState, TillRefusal> {
+    fn cancel(&self, sale: &[u8; 16]) -> Result<SaleInfo, TillRefusal> {
         self.shop()?;
-        lock(&self.table)
+        let mut table = lock(&self.table);
+        table
             .cancel(self.clock.now(), sale)
+            .and_then(|_| table.info(sale))
             .ok_or(TillRefusal::Lost)
     }
 }

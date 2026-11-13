@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use openbmt_core::hkdf::hmac_sha256;
+use openbmt_core::hkdf::{hmac_sha256, sha256_of};
 use openbmt_core::identity::{tagged_hash, DeviceId};
 use openbmt_core::settings::DeviceRole;
 use openbmt_counter::Currency;
@@ -32,7 +32,7 @@ pub const TAG_TILL_BEARER: &str = "OpenBMT/till-bearer/v1";
 /// The tag of the reply key made from the till key (BX-80).
 pub const TAG_TILL_REPLY: &str = "OpenBMT/till-reply/v1";
 /// The first line of what an answer's mac covers (BX-80).
-pub const REPLY_LABEL: &str = "OBM-TILL-REPLY-1";
+pub const REPLY_LABEL: &str = "OBM-TILL-REPLY-2";
 /// The version byte at the start of the till key file as it is now written.
 pub const KEY_FILE_VERSION: u8 = 2;
 /// The size of the till key file as it is now written: the version, the hash
@@ -155,18 +155,21 @@ pub fn till_reply_key(key: &[u8; 32]) -> [u8; 32] {
 }
 
 /// The mac of an answer (BX-80): HMAC-SHA256 under the reply key of the
-/// label, the request's method, path and nonce, the status as three digits
-/// and the body, joined by line feeds, as 64 lowercase hex.
+/// label, the request's method, path and nonce, the SHA-256 of the request's
+/// body as 64 lowercase hex, the status as three digits and the answer's
+/// body, joined by line feeds, as 64 lowercase hex.
 pub fn reply_mac(
     reply_key: &[u8; 32],
     method: &str,
     path: &str,
     nonce: &str,
+    request_body: &[u8],
     status: u16,
     body: &[u8],
 ) -> String {
+    let asked = hex(&sha256_of(request_body));
     let mut message =
-        format!("{REPLY_LABEL}\n{method}\n{path}\n{nonce}\n{status:03}\n").into_bytes();
+        format!("{REPLY_LABEL}\n{method}\n{path}\n{nonce}\n{asked}\n{status:03}\n").into_bytes();
     message.extend_from_slice(body);
     hex(&hmac_sha256(reply_key, &message))
 }
@@ -300,6 +303,17 @@ pub fn parse_amount(text: &str, digits: u32) -> Option<u64> {
     (total > 0).then_some(total)
 }
 
+/// BX-72, BX-73: an amount in minor units as the Box tells it: the whole
+/// part, then a point and exactly `digits` decimals when there are any.
+pub fn format_amount(minor: u64, digits: u32) -> String {
+    let unit = 10u64.checked_pow(digits).unwrap_or(1);
+    if digits == 0 || unit == 1 {
+        return minor.to_string();
+    }
+    let width = usize::try_from(digits).unwrap_or(0);
+    format!("{}.{:0width$}", minor / unit, minor % unit)
+}
+
 /// BX-72: the reference as the counter gets it: printable ASCII only, cut
 /// to [`MAX_TILL_REFERENCE`] characters.
 pub fn clean_reference(text: &str) -> String {
@@ -343,6 +357,8 @@ pub fn find_counter(counters: impl IntoIterator<Item = DeviceId>, code: &str) ->
 #[derive(Debug, Clone)]
 struct Sale {
     request: String,
+    reference: String,
+    digits: u32,
     counter: DeviceId,
     amount: u64,
     currency: Currency,
@@ -387,6 +403,24 @@ pub struct NewSale {
     pub reference: String,
     /// The till's own id for the request.
     pub request: String,
+    /// The minor-unit decimals of the shop's currency.
+    pub digits: u32,
+}
+
+/// A sale as the Box tells it to the till (BX-72, BX-73): how it stands and
+/// the fields as the Box took them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaleInfo {
+    /// How the sale stands.
+    pub state: SaleState,
+    /// The amount, with exactly the currency's minor-unit decimals.
+    pub amount: String,
+    /// The currency code.
+    pub currency: String,
+    /// The till's own id for the request.
+    pub request: String,
+    /// The reference after it was cut; empty when there is none.
+    pub reference: String,
 }
 
 /// Why a notice for a till sale was set aside; the note says it.
@@ -493,7 +527,7 @@ impl TillTable {
                 sale: id,
                 amount: openbmt_counter::Amount(new.amount),
                 currency: new.currency,
-                reference: new.reference,
+                reference: new.reference.clone(),
                 expires_at,
             }),
         });
@@ -502,6 +536,8 @@ impl TillTable {
             id,
             Sale {
                 request: new.request,
+                reference: new.reference,
+                digits: new.digits,
                 counter: new.counter,
                 amount: new.amount,
                 currency: new.currency,
@@ -518,6 +554,19 @@ impl TillTable {
     pub fn state(&mut self, now: u64, id: &[u8; 16]) -> Option<SaleState> {
         self.sweep(now);
         self.sales.get(id).map(|s| s.state)
+    }
+
+    /// BX-72, BX-73: the sale as the till is told it, or `None` when the Box
+    /// does not know it.
+    pub fn info(&self, id: &[u8; 16]) -> Option<SaleInfo> {
+        let sale = self.sales.get(id)?;
+        Some(SaleInfo {
+            state: sale.state,
+            amount: format_amount(sale.amount, sale.digits),
+            currency: String::from_utf8_lossy(&sale.currency.code()).into_owned(),
+            request: sale.request.clone(),
+            reference: sale.reference.clone(),
+        })
     }
 
     /// BX-74: cancel a sale unless it is paid, and tell its counter. A sale

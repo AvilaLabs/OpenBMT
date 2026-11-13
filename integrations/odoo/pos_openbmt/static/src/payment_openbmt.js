@@ -134,7 +134,13 @@ export class PaymentOpenBMT extends PaymentInterface {
             if (this.stopped) {
                 return false;
             }
-            result = await this._call("openbmt_status", [this.sale]);
+            result = await this._call("openbmt_status", [
+                this.sale,
+                amount,
+                this.pos.currency.name,
+                order.name,
+                uuid,
+            ]);
             if (this.stopped) {
                 return false;
             }

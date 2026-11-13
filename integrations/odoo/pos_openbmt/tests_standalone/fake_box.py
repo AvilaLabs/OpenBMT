@@ -58,9 +58,10 @@ def tagged_hash(tag, message):
     return hashlib.sha256(prefix + prefix + message).digest()
 
 
-def mac_of(reply_key, method, path, nonce, status, body):
-    message = ('OBM-TILL-REPLY-1\n%s\n%s\n%s\n%03d\n'
-               % (method, path, nonce, status)).encode() + body
+def mac_of(reply_key, method, path, nonce, sent, status, body):
+    message = ('OBM-TILL-REPLY-2\n%s\n%s\n%s\n%s\n%03d\n'
+               % (method, path, nonce, hashlib.sha256(sent).hexdigest(),
+                  status)).encode() + body
     return hmac.new(reply_key, message, hashlib.sha256).hexdigest()
 
 
@@ -77,10 +78,18 @@ class FakeBox:
             'OpenBMT/till-key/v1', tagged_hash('OpenBMT/till-bearer/v1', key))
         self.reply_key = tagged_hash('OpenBMT/till-reply/v1', key)
         # How answers are signed: good, missing, other_key, other_nonce,
-        # other_status, other_body, other_path or other_method.
+        # other_status, other_body, other_path, other_method or
+        # other_request (the mac of a request with another body).
         self.signing = 'good'
         self.paired = True
         self.sales = {}
+        # What the Box took for each sale: amount, currency, request and
+        # reference.
+        self.info = {}
+        # Fields of the answers told wrong, as a Box that lies would (the
+        # mac stays good), and the bodies the Box was sent.
+        self.echo = {}
+        self.sent = []
         self.requests = {}
         self.seen = []  # (method, path, authorization)
         self.nonces = []
@@ -123,7 +132,7 @@ class FakeBox:
             self.sales[sale] = state
 
     def mac_for(self, h, status, raw):
-        method, path, nonce = h.command, h.path, h.nonce
+        method, path, nonce, sent = h.command, h.path, h.nonce, h.sent
         key = self.reply_key
         mode = self.signing
         if mode == 'missing':
@@ -140,7 +149,9 @@ class FakeBox:
             path = '/till/v1/other'
         elif mode == 'other_method':
             method = 'PUT' if method != 'PUT' else 'GET'
-        return mac_of(key, method, path, nonce, status, raw)
+        elif mode == 'other_request':
+            sent = sent + b' '
+        return mac_of(key, method, path, nonce, sent, status, raw)
 
     def send(self, h, status, body, extra=None, signed=True):
         raw = body if isinstance(body, bytes) else json.dumps(body).encode()
@@ -155,6 +166,13 @@ class FakeBox:
         h.end_headers()
         h.wfile.write(raw)
 
+    def view(self, sale, state):
+        """A sale as the Box tells it, with what `echo` changes."""
+        body = {'sale': sale, 'state': state}
+        body.update(self.info.get(sale, {}))
+        body.update(self.echo)
+        return body
+
     def err(self, h, status, key):
         self.send(h, status, {'error': key, 'words': words(WORDS[key])})
 
@@ -162,13 +180,16 @@ class FakeBox:
         nonce = h.headers.get('X-OBM-Nonce')
         h.nonce = nonce if nonce and NONCE_RE.match(nonce) else None
         length = int(h.headers.get('Content-Length') or 0)
+        h.sent = b''
         if length > LIMIT:
             self.send(h, 413, {}, signed=False)
             return
         raw = h.rfile.read(length) if length else b''
+        h.sent = raw
         auth = h.headers.get('Authorization')
         with self.lock:
             self.seen.append((verb, h.path, auth))
+            self.sent.append(raw)
             self.nonces.append(nonce)
         if self.mode == 'redirect':
             self.send(h, 302, {}, {'Location': self.address + '/elsewhere'})
@@ -243,10 +264,18 @@ class FakeBox:
                     sale = hashlib.sha256(request.encode()).hexdigest()[:32]
                     self.requests[request] = sale
                     self.sales[sale] = 'waiting'
+                    self.info[sale] = {
+                        'amount': '%.2f' % float(amount),
+                        'currency': currency,
+                        'request': request,
+                        # Cut to 40 printable ASCII characters, as the Box does.
+                        'reference': ''.join(
+                            c for c in str(reference) if ' ' <= c <= '~')[:40],
+                    }
         if sale is None:
             self.err(h, 429, 'tillBusy')
             return
-        self.send(h, 200, {'sale': sale, 'state': 'waiting'})
+        self.send(h, 200, self.view(sale, 'waiting'))
 
     def status(self, h, sale):
         with self.lock:
@@ -257,7 +286,7 @@ class FakeBox:
         if state is None:
             self.err(h, 404, 'tillLost')
             return
-        body = {'sale': sale, 'state': state}
+        body = self.view(sale, state)
         if state in END_WORDS:
             body['words'] = words(END_WORDS[state])
         self.send(h, 200, body)
@@ -272,5 +301,6 @@ class FakeBox:
         if state is None:
             self.err(h, 404, 'tillLost')
             return
-        body = {'sale': sale, 'state': state, 'words': words(END_WORDS[state])}
+        body = self.view(sale, state)
+        body['words'] = words(END_WORDS[state])
         self.send(h, 200, body)

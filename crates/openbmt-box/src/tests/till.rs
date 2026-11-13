@@ -8,7 +8,7 @@ use std::net::{SocketAddr, TcpStream};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use openbmt_core::hkdf::hmac_sha256;
+use openbmt_core::hkdf::{hmac_sha256, sha256_of};
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::settings::DeviceRole;
 use openbmt_link::{open, Kind, Role};
@@ -25,10 +25,10 @@ use crate::say::{
     TILL_WAITING,
 };
 use crate::till::{
-    check_till_key, clean_reference, counter_code, find_counter, hex, key_file, make_till_key,
-    parse_amount, reply_mac, request_id_ok, till_bearer, till_key_hash, till_reply_key, KeyCheck,
-    NewSale, SaleState, TillRefusal, TillTable, KEEP_SECS, KEY_FILE_LEN, KEY_FILE_VERSION,
-    MAX_WAITING, OPEN_SECS, REQUEST_SECS, TILL_KEY_FILE,
+    check_till_key, clean_reference, counter_code, find_counter, format_amount, hex, key_file,
+    make_till_key, parse_amount, reply_mac, request_id_ok, till_bearer, till_key_hash,
+    till_reply_key, KeyCheck, NewSale, SaleInfo, SaleState, TillRefusal, TillTable, KEEP_SECS,
+    KEY_FILE_LEN, KEY_FILE_VERSION, MAX_WAITING, OPEN_SECS, REQUEST_SECS, TILL_KEY_FILE,
 };
 use crate::till_listener::{
     parse_object, parse_request, refusal_response, reject_response, sale_body, CreateBody, Reject,
@@ -421,41 +421,55 @@ fn bx_80_the_mac_is_hmac_sha256_over_the_lines_of_the_answer() {
         hex(&hmac_sha256(b"Jefe", b"what do ya want for nothing?")),
         "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
     );
+    // FIPS 180 vectors for the hash of the request body: of no bytes, and
+    // of "abc".
+    assert_eq!(
+        hex(&sha256_of(b"")),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+    assert_eq!(
+        hex(&sha256_of(b"abc")),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
     let key = [1u8; 32];
+    let none = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
     let want = hex(&hmac_sha256(
         &key,
-        format!("OBM-TILL-REPLY-1\nGET\n/till/v1/sales/{SALE}\n{NONCE}\n404\n{{\"a\":1}}")
+        format!("OBM-TILL-REPLY-2\nGET\n/till/v1/sales/{SALE}\n{NONCE}\n{none}\n404\n{{\"a\":1}}")
             .as_bytes(),
     ));
     let path = format!("/till/v1/sales/{SALE}");
     assert_eq!(
-        reply_mac(&key, "GET", &path, NONCE, 404, b"{\"a\":1}"),
+        reply_mac(&key, "GET", &path, NONCE, b"", 404, b"{\"a\":1}"),
         want
     );
-    // Each part counts.
+    // Each part counts, the request's body too.
     for other in [
-        reply_mac(&[2u8; 32], "GET", &path, NONCE, 404, b"{\"a\":1}"),
-        reply_mac(&key, "POST", &path, NONCE, 404, b"{\"a\":1}"),
-        reply_mac(&key, "GET", "/till/v1/sales", NONCE, 404, b"{\"a\":1}"),
+        reply_mac(&[2u8; 32], "GET", &path, NONCE, b"", 404, b"{\"a\":1}"),
+        reply_mac(&key, "POST", &path, NONCE, b"", 404, b"{\"a\":1}"),
+        reply_mac(&key, "GET", "/till/v1/sales", NONCE, b"", 404, b"{\"a\":1}"),
         reply_mac(
             &key,
             "GET",
             &path,
             &NONCE.replace('0', "1"),
+            b"",
             404,
             b"{\"a\":1}",
         ),
-        reply_mac(&key, "GET", &path, NONCE, 200, b"{\"a\":1}"),
-        reply_mac(&key, "GET", &path, NONCE, 404, b"{\"a\":2}"),
+        reply_mac(&key, "GET", &path, NONCE, b"x", 404, b"{\"a\":1}"),
+        reply_mac(&key, "GET", &path, NONCE, b"", 200, b"{\"a\":1}"),
+        reply_mac(&key, "GET", &path, NONCE, b"", 404, b"{\"a\":2}"),
     ] {
         assert_ne!(other, want);
     }
-    // The status is three digits.
+    // The status is three digits, and a body is hashed as its bytes.
+    let abc = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
     assert_eq!(
-        reply_mac(&key, "GET", &path, NONCE, 99, b""),
+        reply_mac(&key, "GET", &path, NONCE, b"abc", 99, b""),
         hex(&hmac_sha256(
             &key,
-            format!("OBM-TILL-REPLY-1\nGET\n{path}\n{NONCE}\n099\n").as_bytes()
+            format!("OBM-TILL-REPLY-2\nGET\n{path}\n{NONCE}\n{abc}\n099\n").as_bytes()
         ))
     );
 }
@@ -581,6 +595,7 @@ fn new_sale(by: &Identity, cents: u64, request: &str) -> NewSale {
         currency: usd(),
         reference: "Order 1".into(),
         request: request.into(),
+        digits: 2,
     }
 }
 
@@ -1015,16 +1030,26 @@ fn bx_78_a_number_is_used_once_and_notices_without_a_till_sale_are_not_the_tills
 fn bx_73_a_sale_is_told_with_its_state_and_for_the_ended_ones_its_words() {
     let id = [0xab; 16];
     let hexid = "ab".repeat(16);
+    let info = |state| SaleInfo {
+        state,
+        amount: "12.50".into(),
+        currency: "USD".into(),
+        request: "order-1".into(),
+        reference: "Order \"1\"".into(),
+    };
     for (state, word) in [
         (SaleState::Waiting, "waiting"),
         (SaleState::Opened, "opened"),
     ] {
         assert_eq!(
-            sale_body(&id, state),
-            format!("{{\"sale\":\"{hexid}\",\"state\":\"{word}\"}}")
+            sale_body(&id, &info(state)),
+            format!(
+                "{{\"sale\":\"{hexid}\",\"state\":\"{word}\",\"amount\":\"12.50\",\
+                 \"currency\":\"USD\",\"request\":\"order-1\",\"reference\":\"Order \\\"1\\\"\"}}"
+            )
         );
     }
-    let paid = sale_body(&id, SaleState::Paid);
+    let paid = sale_body(&id, &info(SaleState::Paid));
     assert!(paid.contains("\"state\":\"paid\""));
     assert!(
         paid.contains("\"words\":{\"heading\":\"\",\"what\":\"Paid in bitcoin.\",\"next\":\"\"}")
@@ -1035,7 +1060,7 @@ fn bx_73_a_sale_is_told_with_its_state_and_for_the_ended_ones_its_words() {
         (SaleState::Cancelled, TillAnswer::Cancelled),
     ] {
         let w = answer.words();
-        let body = sale_body(&id, state);
+        let body = sale_body(&id, &info(state));
         assert!(
             body.contains(&format!("\"state\":\"{}\"", state.word())),
             "{body}"
@@ -1361,6 +1386,7 @@ fn mac_is(
     method: &str,
     path: &str,
     nonce: &str,
+    request_body: &str,
     answer: &(u16, String, Option<String>),
 ) -> bool {
     answer.2.as_deref()
@@ -1369,6 +1395,7 @@ fn mac_is(
             method,
             path,
             nonce,
+            request_body.as_bytes(),
             answer.0,
             answer.1.as_bytes(),
         ))
@@ -1430,7 +1457,7 @@ impl Till {
     fn ask(&self, method: &str, path: &str, body: Option<&str>) -> (u16, String) {
         let answer = call_mac(self.addr, method, path, Some(&self.key), Some(NONCE), body);
         assert!(
-            mac_is(&self.key, method, path, NONCE, &answer),
+            mac_is(&self.key, method, path, NONCE, body.unwrap_or(""), &answer),
             "{method} {path}: {answer:?}"
         );
         (answer.0, answer.1)
@@ -1830,18 +1857,27 @@ fn bx_70_a_slow_connection_is_closed_and_the_connections_are_capped() {
     // The listener on its own, over a backend that answers at once, with
     // short limits.
     struct Fixed;
+    fn info(state: SaleState) -> SaleInfo {
+        SaleInfo {
+            state,
+            amount: "1.00".into(),
+            currency: "USD".into(),
+            request: "q".into(),
+            reference: String::new(),
+        }
+    }
     impl TillBackend for Fixed {
         fn check_key(&self, _: Option<&str>) -> KeyCheck {
             KeyCheck::Good([3u8; 32])
         }
-        fn create(&self, _: CreateBody) -> Result<([u8; 16], SaleState), TillRefusal> {
+        fn create(&self, _: CreateBody) -> Result<([u8; 16], SaleInfo), TillRefusal> {
             Err(TillRefusal::Busy)
         }
-        fn read(&self, _: &[u8; 16]) -> Result<SaleState, TillRefusal> {
-            Ok(SaleState::Waiting)
+        fn read(&self, _: &[u8; 16]) -> Result<SaleInfo, TillRefusal> {
+            Ok(info(SaleState::Waiting))
         }
-        fn cancel(&self, _: &[u8; 16]) -> Result<SaleState, TillRefusal> {
-            Ok(SaleState::Cancelled)
+        fn cancel(&self, _: &[u8; 16]) -> Result<SaleInfo, TillRefusal> {
+            Ok(info(SaleState::Cancelled))
         }
     }
     let cfg = TillConfig {
@@ -2273,9 +2309,10 @@ fn bx_80_every_answer_to_a_request_with_a_nonce_and_a_key_carries_the_mac() {
             Some(NONCE),
             body.as_deref(),
         );
+        let sent = body.as_deref().unwrap_or("");
         assert_eq!(answer.0, want, "{method} {path}: {}", answer.1);
         assert!(
-            mac_is(&t.key, method, &path, NONCE, &answer),
+            mac_is(&t.key, method, &path, NONCE, sent, &answer),
             "{method} {path}"
         );
         let mac = answer.2.as_deref().unwrap();
@@ -2285,19 +2322,27 @@ fn bx_80_every_answer_to_a_request_with_a_nonce_and_a_key_carries_the_mac() {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
         // Another nonce, another method or path, or another key does not
         // verify the same answer.
-        assert!(!mac_is(&t.key, method, &path, NONCE_B, &answer));
-        assert!(!mac_is(&t.key, "PUT", &path, NONCE, &answer));
+        assert!(!mac_is(&t.key, method, &path, NONCE_B, sent, &answer));
+        assert!(!mac_is(&t.key, "PUT", &path, NONCE, sent, &answer));
         assert!(
-            !mac_is(&t.key, method, "/till/v1/sales", NONCE, &answer) || path == "/till/v1/sales"
+            !mac_is(&t.key, method, "/till/v1/sales", NONCE, sent, &answer)
+                || path == "/till/v1/sales"
         );
-        assert!(!mac_is(&"5".repeat(64), method, &path, NONCE, &answer));
+        assert!(!mac_is(
+            &"5".repeat(64),
+            method,
+            &path,
+            NONCE,
+            sent,
+            &answer
+        ));
         // Changed status or body does not verify.
         let mut other = answer.clone();
         other.0 = if other.0 == 200 { 404 } else { 200 };
-        assert!(!mac_is(&t.key, method, &path, NONCE, &other));
+        assert!(!mac_is(&t.key, method, &path, NONCE, sent, &other));
         let mut other = answer.clone();
         other.1.push(' ');
-        assert!(!mac_is(&t.key, method, &path, NONCE, &other));
+        assert!(!mac_is(&t.key, method, &path, NONCE, sent, &other));
     }
 }
 
@@ -2309,9 +2354,9 @@ fn bx_80_the_same_request_with_another_nonce_gets_another_mac() {
     let b = call_mac(t.addr, "GET", &path, Some(&t.key), Some(NONCE_B), None);
     assert_eq!(a.1, b.1);
     assert_ne!(a.2, b.2);
-    assert!(mac_is(&t.key, "GET", &path, NONCE, &a));
-    assert!(!mac_is(&t.key, "GET", &path, NONCE, &b));
-    assert!(mac_is(&t.key, "GET", &path, NONCE_B, &b));
+    assert!(mac_is(&t.key, "GET", &path, NONCE, "", &a));
+    assert!(!mac_is(&t.key, "GET", &path, NONCE, "", &b));
+    assert!(mac_is(&t.key, "GET", &path, NONCE_B, "", &b));
 }
 
 #[test]
@@ -2329,7 +2374,7 @@ fn bx_80_a_wrong_token_is_refused_with_the_mac_of_the_reply_key() {
         let raw = http_mac(t.addr, &raw);
         assert_eq!(raw.0, 401, "{bearer}");
         assert_eq!(field(&raw.1, "error"), "tillKeyWrong");
-        assert!(mac_is(&t.key, "GET", &path, NONCE, &raw), "{bearer}");
+        assert!(mac_is(&t.key, "GET", &path, NONCE, "", &raw), "{bearer}");
         assert_eq!(answer.0 == 401, bearer != t.key);
     }
 }
@@ -2455,25 +2500,29 @@ fn till_vectors() -> String {
     let key: [u8; 32] = std::array::from_fn(|i| u8::try_from(i).unwrap());
     let reply = till_reply_key(&key);
     let sale = "00112233445566778899aabbccddeeff";
-    let cases: [(&str, String, &str, u16, &str); 5] = [
+    let created = "{\"counter\":\"1a2b3c4d\",\"amount\":\"12.50\",\"currency\":\"USD\",\"reference\":\"Order 1\",\"request\":\"order-1\"}";
+    let cases: [(&str, String, &str, &str, u16, &str); 5] = [
         (
             "POST",
             "/till/v1/sales".to_string(),
             "0123456789abcdef0123456789abcdef",
+            created,
             200,
-            "{\"sale\":\"00112233445566778899aabbccddeeff\",\"state\":\"waiting\"}",
+            "{\"sale\":\"00112233445566778899aabbccddeeff\",\"state\":\"waiting\",\"amount\":\"12.50\",\"currency\":\"USD\",\"request\":\"order-1\",\"reference\":\"Order 1\"}",
         ),
         (
             "GET",
             format!("/till/v1/sales/{sale}"),
             "fedcba9876543210fedcba9876543210",
+            "",
             200,
-            "{\"sale\":\"00112233445566778899aabbccddeeff\",\"state\":\"paid\",\"words\":{\"heading\":\"\",\"what\":\"Paid in bitcoin.\",\"next\":\"\"}}",
+            "{\"sale\":\"00112233445566778899aabbccddeeff\",\"state\":\"paid\",\"amount\":\"12.50\",\"currency\":\"USD\",\"request\":\"order-1\",\"reference\":\"Order 1\",\"words\":{\"heading\":\"\",\"what\":\"Paid in bitcoin.\",\"next\":\"\"}}",
         ),
         (
             "POST",
             format!("/till/v1/sales/{sale}/cancel"),
             "00000000000000000000000000000000",
+            "",
             404,
             "{\"error\":\"tillLost\"}",
         ),
@@ -2481,6 +2530,7 @@ fn till_vectors() -> String {
             "GET",
             format!("/till/v1/sales/{sale}"),
             "ffffffffffffffffffffffffffffffff",
+            "",
             401,
             "{\"error\":\"tillKeyWrong\"}",
         ),
@@ -2489,6 +2539,7 @@ fn till_vectors() -> String {
             "GET",
             format!("/till/v1/sales/{sale}"),
             "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+            "",
             200,
             "{\"a\":\"caf\u{e9}\"}\n",
         ),
@@ -2512,13 +2563,22 @@ fn till_vectors() -> String {
     out.push_str(&format!("  \"reply_key\": \"{}\",\n", hex(&reply)));
     out.push_str(&format!("  \"key_file\": \"{}\",\n", hex(&key_file(&key))));
     out.push_str("  \"cases\": [\n");
-    for (i, (method, path, nonce, status, body)) in cases.iter().enumerate() {
-        let mac = reply_mac(&reply, method, path, nonce, *status, body.as_bytes());
+    for (i, (method, path, nonce, sent, status, body)) in cases.iter().enumerate() {
+        let mac = reply_mac(
+            &reply,
+            method,
+            path,
+            nonce,
+            sent.as_bytes(),
+            *status,
+            body.as_bytes(),
+        );
         out.push_str(&format!(
-            "    {{\"method\": {}, \"path\": {}, \"nonce\": {}, \"status\": {status}, \"body\": {}, \"mac\": {}}}{}\n",
+            "    {{\"method\": {}, \"path\": {}, \"nonce\": {}, \"request_body\": {}, \"status\": {status}, \"body\": {}, \"mac\": {}}}{}\n",
             quote(method),
             quote(path),
             quote(nonce),
+            quote(sent),
             quote(body),
             quote(&mac),
             if i + 1 < cases.len() { "," } else { "" }
@@ -2544,4 +2604,105 @@ fn bx_80_the_vectors_file_is_what_the_code_makes() {
         have == want,
         "till_vectors.json is not what the Box makes: run this test with OPENBMT_BLESS_TILL=1 to write it again"
     );
+}
+
+// ---- the request is bound into the answer (BX-72, BX-73, BX-80) ---------
+
+#[test]
+fn bx_72_an_amount_is_told_with_exactly_the_minor_unit_decimals() {
+    assert_eq!(format_amount(1250, 2), "12.50");
+    assert_eq!(format_amount(5, 2), "0.05");
+    assert_eq!(format_amount(100, 2), "1.00");
+    assert_eq!(format_amount(0, 2), "0.00");
+    assert_eq!(format_amount(1250, 0), "1250");
+    assert_eq!(format_amount(u64::MAX, 2), "184467440737095516.15");
+    // What the till wrote comes back as the same number of minor units.
+    for (text, digits) in [("12.5", 2), ("12", 2), ("0.05", 2), ("700", 0)] {
+        let minor = parse_amount(text, digits).unwrap();
+        assert_eq!(
+            parse_amount(&format_amount(minor, digits), digits),
+            Some(minor)
+        );
+    }
+}
+
+#[test]
+fn bx_73_a_sale_is_told_with_the_amount_currency_request_and_reference_the_box_took() {
+    let t = till_box("tillfields");
+    // The amount is written in full and the reference is cut and cleaned.
+    let long = "R".repeat(60);
+    let (status, body) = t.ask(
+        "POST",
+        "/till/v1/sales",
+        Some(&sale_json(&counter1(), "7.5", "USD", &long, "q-1")),
+    );
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(field(&body, "amount"), "7.50");
+    assert_eq!(field(&body, "currency"), "USD");
+    assert_eq!(field(&body, "request"), "q-1");
+    assert_eq!(field(&body, "reference"), "R".repeat(40));
+    let sale = field(&body, "sale");
+    // A status poll and a cancel tell the same four.
+    let (_, polled) = t.state(&sale);
+    let (_, cancelled) = t.ask("POST", &format!("/till/v1/sales/{sale}/cancel"), None);
+    for text in [&polled, &cancelled] {
+        assert_eq!(field(text, "amount"), "7.50");
+        assert_eq!(field(text, "currency"), "USD");
+        assert_eq!(field(text, "request"), "q-1");
+        assert_eq!(field(text, "reference"), "R".repeat(40));
+    }
+    // A sale with no reference tells it empty.
+    let none = "{\"counter\":\"".to_string()
+        + &counter_code(&counter1().device_id())
+        + "\",\"amount\":\"1.00\",\"currency\":\"USD\",\"request\":\"q-2\"}";
+    let (_, body) = t.ask("POST", "/till/v1/sales", Some(&none));
+    assert_eq!(field(&body, "reference"), "");
+    // The same request again with another amount is told the first one, so
+    // a till that compares sees the difference.
+    let (_, again) = t.ask(
+        "POST",
+        "/till/v1/sales",
+        Some(&sale_json(&counter1(), "9.00", "USD", "x", "q-2")),
+    );
+    assert_eq!(field(&again, "amount"), "1.00");
+}
+
+#[test]
+fn bx_80_a_changed_request_body_changes_the_mac() {
+    let t = till_box("tillbodymac");
+    let path = "/till/v1/sales";
+    let real = sale_json(&counter1(), "100.00", "USD", "Order 7", "q-body");
+    let changed = sale_json(&counter1(), "10.00", "USD", "Order 7", "q-body");
+    let a = call_mac(t.addr, "POST", path, Some(&t.key), Some(NONCE), Some(&real));
+    // The same request again carries the same mac; one body in its place does
+    // not, and the mac of one does not verify for the other.
+    let again = call_mac(t.addr, "POST", path, Some(&t.key), Some(NONCE), Some(&real));
+    assert_eq!(a.2, again.2);
+    let b = call_mac(
+        t.addr,
+        "POST",
+        path,
+        Some(&t.key),
+        Some(NONCE),
+        Some(&changed),
+    );
+    assert_ne!(a.2, b.2);
+    assert!(mac_is(&t.key, "POST", path, NONCE, &real, &a));
+    assert!(mac_is(&t.key, "POST", path, NONCE, &changed, &b));
+    assert!(!mac_is(&t.key, "POST", path, NONCE, &changed, &a));
+    assert!(!mac_is(&t.key, "POST", path, NONCE, &real, &b));
+    // The bytes as received count, not the fields: the same fields in another
+    // order or with a space are another body and another mac.
+    let spaced = real.replace(",\"currency\"", ", \"currency\"");
+    let c = call_mac(
+        t.addr,
+        "POST",
+        path,
+        Some(&t.key),
+        Some(NONCE),
+        Some(&spaced),
+    );
+    assert_eq!(a.1, c.1);
+    assert_ne!(a.2, c.2);
+    assert!(mac_is(&t.key, "POST", path, NONCE, &spaced, &c));
 }
