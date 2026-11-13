@@ -107,7 +107,7 @@ pub fn choose_offer(
             outside += 1;
             continue;
         };
-        if best.as_ref().map_or(true, |b| fee_msat < b.fee_msat) {
+        if best.as_ref().is_none_or(|b| fee_msat < b.fee_msat) {
             best = Some(Offer {
                 params: p.clone(),
                 fee_msat,

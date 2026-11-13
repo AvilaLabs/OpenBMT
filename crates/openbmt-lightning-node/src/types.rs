@@ -4,7 +4,7 @@
 
 use crate::chain::{ChainFilter, CoreBroadcaster, CoreFees};
 use crate::logger::Logger;
-use crate::store::DualStore;
+use crate::store::{Background, DualStore};
 use bitcoin::secp256k1::{PublicKey, Secp256k1};
 use lightning::chain::chainmonitor::{AsyncPersister, ChainMonitor};
 use lightning::ln::channel_state::ChannelDetails;
@@ -127,7 +127,7 @@ pub type Liquidity = lightning_liquidity::LiquidityManager<
     Arc<KeysManager>,
     Arc<Manager>,
     Arc<ChainFilter>,
-    Arc<DualStore>,
+    Arc<Background>,
     DefaultTimeProvider,
     Arc<CoreBroadcaster>,
 >;

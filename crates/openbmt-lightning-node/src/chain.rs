@@ -207,8 +207,11 @@ impl FeeEstimator for CoreFees {
         let v = match target {
             ConfirmationTarget::MaximumFeeEstimate => &self.max_estimate,
             ConfirmationTarget::UrgentOnChainSweep => &self.urgent,
+            // The closing fee's lowest acceptable rate is the low one, so a
+            // provider that estimates less can still agree to a close.
             ConfirmationTarget::MinAllowedAnchorChannelRemoteFee
-            | ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee => &self.non_anchor_min,
+            | ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee
+            | ConfirmationTarget::ChannelCloseMinimum => &self.non_anchor_min,
             _ => &self.normal,
         };
         v.load(Ordering::Relaxed).max(FEE_FLOOR_SAT_PER_KW)

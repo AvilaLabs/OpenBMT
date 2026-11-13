@@ -15,6 +15,15 @@
 //! Writes to one name are applied in the order they were asked for, as the
 //! trait requires: each is given a number when it is asked for, and one that a
 //! later write has already replaced is skipped.
+//!
+//! The library's background loop writes the channel manager, the liquidity
+//! state and anything it keeps through [`Background`], not through the store
+//! above: its writes are the counter's own copy at once and the second
+//! device's in the background, the latest of a name winning. The loop must not
+//! wait for a device that is away, or it would stall the peer, as `ldk-node`
+//! does (SL-02). The channel manager may be older than its monitors, which the
+//! library reads; the monitors, which cannot be, go the strict way, the second
+//! device first (SL-24).
 
 use crate::device::{DeviceStatus, SecondDevice};
 use crate::logger::Logger;
@@ -69,6 +78,16 @@ struct Inner {
     // The number of the last write applied to each name. Held across the
     // second device's wait, so that writes go one at a time, in order.
     applied: tokio::sync::Mutex<HashMap<String, u64>>,
+    // What the background writes still owe the second device, by name.
+    lazy: std::sync::Mutex<HashMap<String, LazyOp>>,
+    lazy_wake: tokio::sync::Notify,
+}
+
+/// A change the second device has still to be given.
+#[derive(Clone)]
+enum LazyOp {
+    Write(Vec<u8>),
+    Remove,
 }
 
 /// Decrements the pending count when the write's future is done or dropped.
@@ -130,6 +149,58 @@ impl Inner {
         }
     }
 
+    /// Gives the second device what the background writes owe it, one name at
+    /// a time. Returns whether everything was given.
+    async fn flush_lazy_round(&self) -> bool {
+        loop {
+            let next = {
+                let lazy = self.lazy.lock().unwrap();
+                lazy.iter().next().map(|(n, op)| (n.clone(), op.clone()))
+            };
+            let Some((name, op)) = next else { return true };
+            let sealed = match &op {
+                LazyOp::Write(buf) => Some(seal(&self.key, nonce(&self.entropy), &name, buf)),
+                LazyOp::Remove => None,
+            };
+            let result = match &sealed {
+                Some(blob) => self.device.write(&name, blob.clone()).await,
+                None => self.device.remove(&name).await,
+            };
+            match result {
+                Ok(()) => {
+                    self.status.stored(now_unix());
+                    let mut lazy = self.lazy.lock().unwrap();
+                    // A newer change of the same name stays owed.
+                    let unchanged = match (lazy.get(&name), &op) {
+                        (Some(LazyOp::Write(a)), LazyOp::Write(b)) => a == b,
+                        (Some(LazyOp::Remove), LazyOp::Remove) => true,
+                        _ => false,
+                    };
+                    if unchanged {
+                        lazy.remove(&name);
+                    }
+                }
+                Err(_) => {
+                    self.status.failed();
+                    return false;
+                }
+            }
+        }
+    }
+
+    async fn flush_lazy_forever(&self) {
+        let mut delay = Duration::from_millis(200);
+        loop {
+            if self.flush_lazy_round().await {
+                delay = Duration::from_millis(200);
+                self.lazy_wake.notified().await;
+            } else {
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(Duration::from_secs(3));
+            }
+        }
+    }
+
     async fn apply(
         &self,
         ticket: u64,
@@ -180,8 +251,26 @@ impl DualStore {
                 logger,
                 tickets: AtomicU64::new(0),
                 applied: tokio::sync::Mutex::new(HashMap::new()),
+                lazy: std::sync::Mutex::new(HashMap::new()),
+                lazy_wake: tokio::sync::Notify::new(),
             }),
         }
+    }
+
+    /// Starts the task that gives the second device what the background
+    /// writes owe it. Call once.
+    pub fn spawn_lazy_flusher(
+        &self,
+        handle: &tokio::runtime::Handle,
+    ) -> tokio::task::JoinHandle<()> {
+        let inner = Arc::clone(&self.inner);
+        handle.spawn(async move { inner.flush_lazy_forever().await })
+    }
+
+    /// Gives the second device everything owed, once, if it can be reached.
+    /// For a stop: the loop of the flusher is done by then.
+    pub async fn flush_lazy_once(&self) -> bool {
+        self.inner.flush_lazy_round().await
     }
 
     fn queue(&self, p: &str, s: &str, k: &str, op: Op) -> AsyncResult<'static, (), io::Error> {
@@ -224,6 +313,58 @@ impl KVStore for DualStore {
 
     fn list(&self, p: &str, s: &str) -> AsyncResult<'static, Vec<String>, io::Error> {
         KVStore::list(&*self.inner.local, p, s)
+    }
+}
+
+/// The store the library's background loop writes through: the counter's own
+/// copy at once, the second device's as soon as it can be reached, without the
+/// loop waiting for it.
+#[derive(Clone)]
+pub struct Background(pub Arc<DualStore>);
+
+impl KVStore for Background {
+    fn read(&self, p: &str, s: &str, k: &str) -> AsyncResult<'static, Vec<u8>, io::Error> {
+        KVStore::read(&*self.0.inner.local, p, s, k)
+    }
+
+    fn write(
+        &self,
+        p: &str,
+        s: &str,
+        k: &str,
+        buf: Vec<u8>,
+    ) -> AsyncResult<'static, (), io::Error> {
+        let inner = Arc::clone(&self.0.inner);
+        let (p, s, k) = (p.to_string(), s.to_string(), k.to_string());
+        Box::pin(async move {
+            KVStore::write(&*inner.local, &p, &s, &k, buf.clone()).await?;
+            inner
+                .lazy
+                .lock()
+                .unwrap()
+                .insert(device_name(&p, &s, &k), LazyOp::Write(buf));
+            inner.lazy_wake.notify_one();
+            Ok(())
+        })
+    }
+
+    fn remove(&self, p: &str, s: &str, k: &str, lazy: bool) -> AsyncResult<'static, (), io::Error> {
+        let inner = Arc::clone(&self.0.inner);
+        let (p, s, k) = (p.to_string(), s.to_string(), k.to_string());
+        Box::pin(async move {
+            KVStore::remove(&*inner.local, &p, &s, &k, lazy).await?;
+            inner
+                .lazy
+                .lock()
+                .unwrap()
+                .insert(device_name(&p, &s, &k), LazyOp::Remove);
+            inner.lazy_wake.notify_one();
+            Ok(())
+        })
+    }
+
+    fn list(&self, p: &str, s: &str) -> AsyncResult<'static, Vec<String>, io::Error> {
+        KVStore::list(&*self.0.inner.local, p, s)
     }
 }
 
@@ -441,6 +582,47 @@ mod tests {
         );
         let sealed = r.device.read("~~manager").await.unwrap().unwrap();
         assert_eq!(open(&r.key, "~~manager", &sealed).unwrap(), b"second");
+    }
+
+    #[tokio::test]
+    async fn sl_23_the_background_writes_do_not_wait_for_a_device_that_is_away() {
+        let r = rig("store-background");
+        let _flusher = r
+            .store
+            .spawn_lazy_flusher(&tokio::runtime::Handle::current());
+        let bg = Background(Arc::new(r.store.clone()));
+        r.device.set_away(true);
+        // The write returns at once, with the counter's own copy written.
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            bg.write("", "", "manager", b"m1".to_vec()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            bg.write("", "", "manager", b"m2".to_vec()),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            KVStore::read(&*r.local, "", "", "manager").await.unwrap(),
+            b"m2"
+        );
+        settle(500).await;
+        assert!(r.device.inner().list().await.unwrap().is_empty());
+        // The device returns: it gets the latest, and only the latest matters.
+        r.device.set_away(false);
+        for _ in 0..50 {
+            settle(100).await;
+            if !r.device.inner().list().await.unwrap().is_empty() {
+                break;
+            }
+        }
+        let sealed = r.device.read("~~manager").await.unwrap().unwrap();
+        assert_eq!(open(&r.key, "~~manager", &sealed).unwrap(), b"m2");
     }
 
     #[tokio::test]

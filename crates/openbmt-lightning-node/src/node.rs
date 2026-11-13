@@ -19,7 +19,7 @@ use crate::provider::{choose_offer, Offer, ProviderConfig, Refusal};
 use crate::room::{decide, room_to_receive_msat, OnChainReason, ReceiveDecision, Situation};
 use crate::seal::SealKey;
 use crate::state::{self, StartFrom, StateError};
-use crate::store::{DeviceView, DualStore};
+use crate::store::{Background, DeviceView, DualStore};
 use crate::types::*;
 use bitcoin::bip32::Xpriv;
 use bitcoin::hashes::{sha256, Hash};
@@ -66,6 +66,14 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, Notify};
+
+/// A monitor with what it needs to be brought to the tip.
+type MonitorListener = (
+    ChannelMonitor<InMemorySigner>,
+    Arc<CoreBroadcaster>,
+    Arc<CoreFees>,
+    Arc<Logger>,
+);
 
 /// Whether Shop Lightning may run on `Network::Bitcoin`. Off until SL-60 is
 /// met: the library's async persistence out of beta or a review of its
@@ -232,7 +240,9 @@ struct Shared {
     peers: Arc<Peers>,
     liquidity: Arc<Liquidity>,
     keys: Arc<KeysManager>,
+    fees: Arc<CoreFees>,
     store: Arc<DualStore>,
+    background: Arc<Background>,
     device_status: Arc<DeviceStatus>,
     logger: Arc<Logger>,
     paid: mpsc::UnboundedSender<Paid>,
@@ -380,6 +390,8 @@ impl Node {
             Arc::clone(&status),
             Arc::clone(&logger),
         ));
+        let background = Arc::new(Background(Arc::clone(&store)));
+        let flusher = store.spawn_lazy_flusher(&handle);
         let persister = |store: &Arc<DualStore>| -> Persister {
             Persister::new(
                 Arc::clone(store),
@@ -444,15 +456,7 @@ impl Node {
                     <(BlockHash, Manager)>::read(&mut lightning::io::Cursor::new(bytes), read_args)
                         .map_err(|e| setup(format!("manager: {e:?}")))?;
                 // Bring the manager and each monitor to the tip, together.
-                let listeners: Vec<(
-                    BlockHash,
-                    (
-                        ChannelMonitor<InMemorySigner>,
-                        Arc<CoreBroadcaster>,
-                        Arc<CoreFees>,
-                        Arc<Logger>,
-                    ),
-                )> = monitors
+                let listeners: Vec<(BlockHash, MonitorListener)> = monitors
                     .into_iter()
                     .map(|(hash, m)| {
                         (
@@ -523,7 +527,7 @@ impl Node {
                     network: config.network,
                     best_block: chain_tip.to_best_block(),
                 }),
-                Arc::clone(&store),
+                Arc::clone(&background),
                 Arc::clone(&broadcaster),
                 None,
                 Some(LiquidityClientConfig {
@@ -561,7 +565,9 @@ impl Node {
             peers: Arc::clone(&peers),
             liquidity: Arc::clone(&liquidity),
             keys: Arc::clone(&keys),
+            fees: Arc::clone(&fees),
             store: Arc::clone(&store),
+            background: Arc::clone(&background),
             device_status: Arc::clone(&status),
             logger: Arc::clone(&logger),
             paid: paid_tx,
@@ -574,7 +580,7 @@ impl Node {
             spendable_counter: AtomicU64::new(0),
         });
 
-        let mut tasks = Vec::new();
+        let mut tasks = vec![flusher];
 
         // Chain: poll Core for the tip and feed the monitor and the manager.
         {
@@ -608,7 +614,7 @@ impl Node {
                             .line(Level::Warn, &format!("chain poll: {e:?}")),
                     }
                     ticks += 1;
-                    if ticks % 300 == 0 {
+                    if ticks.is_multiple_of(300) {
                         fees.refresh(&rpc).await;
                     }
                 }
@@ -635,7 +641,7 @@ impl Node {
             tokio::spawn(async move {
                 let stop_shared = Arc::clone(&shared);
                 lightning_background_processor::process_events_async(
-                    Arc::clone(&shared.store),
+                    Arc::clone(&shared.background),
                     move |event| {
                         let s = Arc::clone(&handler_shared);
                         async move { handle_event(s, event).await }
@@ -835,6 +841,52 @@ impl Node {
         tokio::spawn(lightning_net_tokio::setup_outbound(peers, id, stream));
     }
 
+    /// What the node holds and could move out now, in satoshis: the spendable
+    /// side of every channel.
+    pub fn balance_sat(&self) -> u64 {
+        self.shared
+            .manager
+            .list_channels()
+            .iter()
+            .map(|c| c.outbound_capacity_msat / 1000)
+            .sum()
+    }
+
+    /// Moves `amount_sat` out of the channel with the most to give, to `to`,
+    /// by a splice out (SL-33). `to` is an address the caller derived itself
+    /// from the pinned wallet; the node never takes one from another device.
+    /// The splice is begun; it is done when the new funding transaction is
+    /// locked by both sides.
+    pub fn sweep(&self, to: &Address, amount_sat: u64) -> Result<(), String> {
+        let s = &self.shared;
+        let channel = s
+            .manager
+            .list_usable_channels()
+            .into_iter()
+            .filter(|c| c.outbound_capacity_msat >= amount_sat * 1000)
+            .max_by_key(|c| c.outbound_capacity_msat)
+            .ok_or_else(|| "no channel holds that much".to_string())?;
+        let feerate = lightning::chain::chaininterface::FeeEstimator::get_est_sat_per_1000_weight(
+            &*s.fees,
+            lightning::chain::chaininterface::ConfirmationTarget::NonAnchorChannelFee,
+        );
+        let output = bitcoin::TxOut {
+            value: bitcoin::Amount::from_sat(amount_sat),
+            script_pubkey: to.script_pubkey(),
+        };
+        s.manager
+            .splice_channel(
+                &channel.channel_id,
+                &channel.counterparty.node_id,
+                lightning::ln::funding::SpliceContribution::SpliceOut {
+                    outputs: vec![output],
+                },
+                feerate,
+                None,
+            )
+            .map_err(|e| format!("{e:?}"))
+    }
+
     /// Closes every channel cooperatively to `to` (SL-36).
     pub fn close_all(&self, to: &Address) -> Result<usize, String> {
         crate::close::close_all(&self.shared.manager, to)
@@ -842,7 +894,17 @@ impl Node {
 
     /// Stops the node: the library's loop writes the state a last time, and
     /// the peers are let go.
-    pub async fn stop(self) {
+    pub async fn stop(&self) {
+        // Writes of the monitors still on their way finish first, so that the
+        // manager written at the end is not older than a monitor (a stale
+        // manager makes the library close the channel on the next start).
+        for _ in 0..200 {
+            if self.shared.device_status.snapshot().pending_writes == 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
         self.shared.stopping.store(true, Ordering::SeqCst);
         self.shared.stop.notify_waiters();
         // `notify_waiters` wakes only those waiting now; keep telling until
@@ -864,6 +926,9 @@ impl Node {
                 }
             }
         }
+        // What the background owes the second device, once more.
+        let _ =
+            tokio::time::timeout(Duration::from_secs(5), self.shared.store.flush_lazy_once()).await;
         self.shared.peers.disconnect_all_peers();
     }
 }
@@ -1158,6 +1223,29 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
                 format!("channel pending {channel_id} with {counterparty_node_id}"),
             );
         }
+        Event::FundingTransactionReadyForSigning {
+            channel_id,
+            counterparty_node_id,
+            unsigned_transaction,
+            ..
+        } => {
+            // A splice-out adds no input of the shop's own: the transaction
+            // goes back as it is and LDK signs the channel's input itself.
+            match shared.manager.funding_transaction_signed(
+                &channel_id,
+                &counterparty_node_id,
+                unsigned_transaction,
+            ) {
+                Ok(()) => log(Level::Info, format!("splice signed {channel_id}")),
+                Err(e) => log(Level::Warn, format!("splice not signed: {e:?}")),
+            }
+        }
+        Event::SplicePending { channel_id, .. } => {
+            log(Level::Info, format!("splice pending {channel_id}"));
+        }
+        Event::SpliceFailed { channel_id, .. } => {
+            log(Level::Warn, format!("splice failed {channel_id}"));
+        }
         Event::ChannelReady {
             channel_id,
             counterparty_node_id,
@@ -1188,7 +1276,7 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
                 blob.extend_from_slice(&bytes);
             }
             let key = format!("{}-{n}", now_secs());
-            if KVStore::write(&*shared.store, "spendable_outputs", "", &key, blob)
+            if KVStore::write(&*shared.background, "spendable_outputs", "", &key, blob)
                 .await
                 .is_err()
             {
@@ -1256,7 +1344,7 @@ mod tests {
 
     #[test]
     fn sl_60_mainnet_is_refused_until_the_conditions_are_met() {
-        assert!(!MAINNET_ALLOWED);
+        const { assert!(!MAINNET_ALLOWED) };
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()

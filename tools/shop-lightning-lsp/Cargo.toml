@@ -1,0 +1,17 @@
+[package]
+name = "shop-lightning-lsp"
+description = "An LSPS2 liquidity provider for the end-to-end test of Shop Lightning (scripts/shop-lightning-e2e-core.sh), on ldk-node. A test tool only: nothing of it is built into a program, and openbmt-lightning-node does not depend on it (SL-02)"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Its own workspace and lock file: ldk-node brings its own packages, which are
+# not in the lists of docs/DEPENDENCIES.md because no program ships with them.
+[workspace]
+
+[dependencies]
+ldk-node = "=0.7.1"
+
+# Optimise dependencies even in the dev profile so secp256k1 and BDK are not glacial.
+[profile.dev.package."*"]
+opt-level = 1

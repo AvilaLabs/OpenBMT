@@ -3,7 +3,7 @@
 
 use crate::chain::{ChainFilter, CoreBroadcaster, CoreFees};
 use crate::logger::Logger;
-use crate::store::DualStore;
+use crate::store::Background;
 use crate::types::Graph;
 use bitcoin::ScriptBuf;
 use lightning::routing::scoring::ProbabilisticScorer;
@@ -28,7 +28,7 @@ pub type NoSweeper = OutputSweeper<
     Arc<NoChange>,
     Arc<CoreFees>,
     Arc<ChainFilter>,
-    Arc<DualStore>,
+    Arc<Background>,
     Arc<Logger>,
     Arc<KeysManager>,
 >;
