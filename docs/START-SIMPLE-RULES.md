@@ -72,11 +72,14 @@ funds.**
 
 ## 3. Keeping the key
 
-- **SS-20. Wrapped by the phone's secure hardware.** The Rust core gives the
-  app the seed sealed with AES-256-GCM under a key of the Android Keystore
-  that the app made for it, in StrongBox when the phone has one. That key
-  never leaves the phone's secure hardware. The sealed seed is the only copy
-  on the phone.
+- **SS-20. Wrapped by the phone's secure hardware.** The Rust core seals
+  the seed with ChaCha20-Poly1305 under a random 32-byte data key and gives
+  the app only the sealed seed. The data key is itself sealed with
+  AES-256-GCM under a key of the Android Keystore that the app made for it,
+  in StrongBox when the phone has one; that key never leaves the phone's
+  secure hardware. To sign, the app opens the data key and hands it to the
+  Rust core as a byte array that it overwrites with zeros at once; the data
+  key is never a string and the seed never leaves the Rust core.
 - **SS-21. The owner, every time.** The Keystore key opens only after the
   owner proves they are there: on Android 11 and later for each use, by a
   strong fingerprint or face or the phone's own PIN; on Android 10 within 10
