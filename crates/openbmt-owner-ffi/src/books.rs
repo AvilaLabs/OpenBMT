@@ -19,7 +19,7 @@ use openbmt_books::{
 use openbmt_core::identity::DeviceId;
 use openbmt_core::records::Chain;
 use openbmt_counter::Currency;
-use openbmt_owner_node::{OwnerLink, OwnerNode, OwnerPort, PaidEntry, PaidWhat};
+use openbmt_owner_node::{standing, OwnerLink, OwnerNode, OwnerPort, PaidEntry, PaidWhat};
 
 use crate::codec::{wire_record, wire_record_get};
 use crate::error::{from_words, rule_in, AppError, Kind};
@@ -160,7 +160,9 @@ fn export_error(e: &ExportError, kind: ExportKind) -> AppError {
 /// What the owner paid out, as the disposals the books take (BK-12). A value
 /// the log does not know is left unknown, in the shop's currency.
 pub(crate) fn disposals(paid: &[PaidEntry], shop: Currency) -> Vec<Disposal> {
-    paid.iter()
+    // OC-50: a payment that a later entry undoes is left out with its undoing.
+    standing(paid)
+        .iter()
         .map(|e| {
             let currency = e
                 .value
@@ -175,7 +177,7 @@ pub(crate) fn disposals(paid: &[PaidEntry], shop: Currency) -> Vec<Disposal> {
                             index: sale.index,
                         },
                     },
-                    PaidWhat::CashOut => DisposalKind::CashOut,
+                    PaidWhat::CashOut | PaidWhat::Undone(_) => DisposalKind::CashOut,
                 },
                 currency,
                 sats: e.sats,

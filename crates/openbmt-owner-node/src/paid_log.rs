@@ -10,13 +10,15 @@
 //! the value. The file is only ever added to, and an entry is stored before
 //! the queue is told the transaction was sent.
 //!
-//! The file is `OBM&`, version 1, and then entries of a fixed length, each
+//! The file is `OBM&`, version 1 (version 2 when it holds an entry that undoes
+//! another, OC-50), and then entries of a fixed length, each
 //! ending in a check of its own (the first 8 bytes of the SHA-256 of the
 //! entry before it). It is read strictly: a length that is not a whole number
 //! of entries, a check that does not match, a flag that is not 0 or 1, a field
 //! that a kind does not use and is not zero, an entry that repeats an earlier
 //! one and a currency that is not three capital letters all refuse the whole
-//! file. Nothing is repaired.
+//! file, and so does an undoing that names no earlier entry. Nothing is
+//! repaired.
 
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::Txid;
@@ -50,6 +52,18 @@ pub enum PaidWhat {
         /// The request's number on the counter.
         request: Option<u64>,
     },
+    /// A cash-out.
+    CashOut,
+    /// OC-50: the payment of the earlier entry of this kind, number and
+    /// transaction did not happen. Its `sats` are 0 and it has no value.
+    Undone(Undone),
+}
+
+/// What kind of entry an [`PaidWhat::Undone`] undoes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Undone {
+    /// A refund.
+    Refund,
     /// A cash-out.
     CashOut,
 }
@@ -91,7 +105,41 @@ impl PaidEntry {
         match self.what {
             PaidWhat::Refund { .. } => 1,
             PaidWhat::CashOut => 2,
+            PaidWhat::Undone(Undone::Refund) => 3,
+            PaidWhat::Undone(Undone::CashOut) => 4,
         }
+    }
+
+    /// The kind byte of the entry an undoing names, or none for a payment.
+    fn undoes_kind(&self) -> Option<u8> {
+        match self.what {
+            PaidWhat::Undone(Undone::Refund) => Some(1),
+            PaidWhat::Undone(Undone::CashOut) => Some(2),
+            _ => None,
+        }
+    }
+
+    /// Whether this is an entry that undoes another.
+    pub fn is_undone(&self) -> bool {
+        self.undoes_kind().is_some()
+    }
+
+    /// OC-50: the entry that undoes this payment, at time `at`. None for an
+    /// entry that is itself an undoing.
+    pub fn undoing(&self, at: u64) -> Option<Self> {
+        let kind = match self.what {
+            PaidWhat::Refund { .. } => Undone::Refund,
+            PaidWhat::CashOut => Undone::CashOut,
+            PaidWhat::Undone(_) => return None,
+        };
+        Some(Self {
+            what: PaidWhat::Undone(kind),
+            number: self.number,
+            txid: self.txid,
+            sats: 0,
+            at,
+            value: None,
+        })
     }
 
     fn body(&self) -> Vec<u8> {
@@ -108,7 +156,9 @@ impl PaidEntry {
                 out.push(u8::from(request.is_some()));
                 out.extend_from_slice(&request.unwrap_or(0).to_le_bytes());
             }
-            PaidWhat::CashOut => out.extend_from_slice(&[0; 32 + 4 + 1 + 8]),
+            PaidWhat::CashOut | PaidWhat::Undone(_) => {
+                out.extend_from_slice(&[0; 32 + 4 + 1 + 8]);
+            }
         }
         match self.value {
             Some(v) => {
@@ -171,6 +221,22 @@ impl PaidEntry {
                 }
                 PaidWhat::CashOut
             }
+            3 | 4 => {
+                if counter != [0; 32]
+                    || index != 0
+                    || has_request
+                    || request_raw != 0
+                    || has_value
+                    || sats != 0
+                {
+                    return Err(DecodeError::NonCanonical("an unused field is not zero"));
+                }
+                PaidWhat::Undone(if kind == 3 {
+                    Undone::Refund
+                } else {
+                    Undone::CashOut
+                })
+            }
             k => return Err(DecodeError::UnknownKind(k)),
         };
         let value = if has_value {
@@ -202,6 +268,21 @@ impl PaidEntry {
     }
 }
 
+/// OC-50: the entries that stand: every payment that no later entry undoes,
+/// and no undoing. A refund paid, undone and paid again by another
+/// transaction is the last payment only.
+pub fn standing(entries: &[PaidEntry]) -> Vec<PaidEntry> {
+    let undone: std::collections::BTreeSet<(u8, u32, Txid)> = entries
+        .iter()
+        .filter_map(|e| e.undoes_kind().map(|k| (k, e.number, e.txid)))
+        .collect();
+    entries
+        .iter()
+        .filter(|e| !e.is_undone() && !undone.contains(&e.key()))
+        .copied()
+        .collect()
+}
+
 /// OC-49: what `sats` are worth at a price in minor units per bitcoin,
 /// rounded down, as the counter values satoshis (CR-06).
 pub fn value_at(sats: u64, minor_per_btc: u64) -> u64 {
@@ -226,7 +307,7 @@ impl PaidLog {
         if bytes.len() > MAX_PAID_LOG_BYTES {
             return Err(DecodeError::TooLarge);
         }
-        let mut r = Reader::framed(bytes, &MAGIC_PAID_LOG)?;
+        let (mut r, version) = Reader::framed_up_to(bytes, &MAGIC_PAID_LOG, 2)?;
         let rest = r.take(bytes.len().saturating_sub(5))?;
         let (chunks, tail) = rest.as_chunks::<PAID_ENTRY_LEN>();
         if !tail.is_empty() {
@@ -240,18 +321,49 @@ impl PaidLog {
             if !seen.insert(entry.key()) {
                 return Err(DecodeError::NonCanonical("an entry repeats an earlier one"));
             }
+            if let Some(kind) = entry.undoes_kind() {
+                // OC-50: an undoing names an entry that is before it.
+                if !seen.contains(&(kind, entry.number, entry.txid)) {
+                    return Err(DecodeError::NonCanonical(
+                        "an undoing names no earlier entry",
+                    ));
+                }
+            }
             entries.push(entry);
+        }
+        // Canonical form: version 2 only for a file that needs it.
+        if (version == 2) != entries.iter().any(PaidEntry::is_undone) {
+            return Err(DecodeError::NonCanonical(
+                "the version is not the one the file needs",
+            ));
         }
         Ok(Self { entries })
     }
 
-    /// The file for the log as it is.
+    /// The file for the log as it is: version 2 only when an entry undoes
+    /// another, so a reader that does not know them refuses it.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = wire::start(&MAGIC_PAID_LOG, self.entries.len() * PAID_ENTRY_LEN);
+        if self.entries.iter().any(PaidEntry::is_undone) {
+            if let Some(v) = out.get_mut(4) {
+                *v = 2;
+            }
+        }
         for e in &self.entries {
             e.write(&mut out);
         }
         out
+    }
+
+    /// OC-50: the undoings that the payments `txid` made, and that are not
+    /// undone yet, need: one for each entry of that transaction.
+    pub fn undoings_for(&self, txid: &Txid, at: u64) -> Vec<PaidEntry> {
+        self.entries
+            .iter()
+            .filter(|e| e.txid == *txid)
+            .filter_map(|e| e.undoing(at))
+            .filter(|u| !self.holds(u))
+            .collect()
     }
 
     /// The entries, oldest first.
@@ -271,7 +383,13 @@ impl PaidLog {
     pub fn with_added(&self, entries: &[PaidEntry]) -> Result<Option<Self>, usize> {
         let mut next = self.clone();
         for e in entries {
-            if !next.holds(e) {
+            // An undoing is only added for a payment the log holds.
+            let names_one = e.undoes_kind().is_none_or(|k| {
+                next.entries
+                    .iter()
+                    .any(|p| p.key() == (k, e.number, e.txid))
+            });
+            if names_one && !next.holds(e) {
                 next.entries.push(*e);
             }
         }
@@ -414,6 +532,104 @@ mod tests {
             log.with_added(&[again]).unwrap().unwrap().entries().len(),
             2
         );
+    }
+
+    fn undoing_of(e: &PaidEntry) -> PaidEntry {
+        e.undoing(1_700_000_500).unwrap()
+    }
+
+    #[test]
+    fn oc_50_an_undoing_round_trips_in_version_2_and_a_log_without_one_stays_version_1() {
+        let paid = refund(1, Some(7));
+        let log = log_of(&[paid, cash_out(3)]);
+        assert_eq!(log.to_bytes()[4], 1);
+        let undone = log.with_added(&[undoing_of(&paid)]).unwrap().unwrap();
+        let bytes = undone.to_bytes();
+        assert_eq!(bytes[4], 2);
+        assert_eq!(bytes.len(), 5 + 3 * PAID_ENTRY_LEN);
+        assert_eq!(PaidLog::from_bytes(&bytes).unwrap(), undone);
+        // The same undoing twice is written once.
+        assert_eq!(undone.with_added(&[undoing_of(&paid)]), Ok(None));
+        // A file in the old version still reads, byte for byte.
+        let old = log.to_bytes();
+        assert_eq!(PaidLog::from_bytes(&old).unwrap().to_bytes(), old);
+        // An older reader (version 1 only) would refuse the new file: the
+        // version byte is the only difference it can see.
+        assert_ne!(bytes[4], old[4]);
+    }
+
+    #[test]
+    fn oc_50_an_undoing_that_names_nothing_is_refused() {
+        // In the log API it is not added at all.
+        let log = log_of(&[refund(1, Some(7))]);
+        let stray = undoing_of(&cash_out(3));
+        assert_eq!(log.with_added(&[stray]), Ok(None));
+        // In a file, built by hand with a right check and version.
+        let mut file = log.to_bytes();
+        file[4] = 2;
+        stray.write(&mut file);
+        assert_eq!(
+            PaidLog::from_bytes(&file),
+            Err(DecodeError::NonCanonical(
+                "an undoing names no earlier entry"
+            ))
+        );
+        // Before the payment it names is not earlier.
+        let paid = refund(1, Some(7));
+        let mut file = wire::start(&MAGIC_PAID_LOG, 0);
+        file[4] = 2;
+        undoing_of(&paid).write(&mut file);
+        paid.write(&mut file);
+        assert!(PaidLog::from_bytes(&file).is_err());
+    }
+
+    #[test]
+    fn oc_50_the_version_is_the_one_the_entries_need() {
+        let paid = refund(1, Some(7));
+        let with = log_of(&[paid])
+            .with_added(&[undoing_of(&paid)])
+            .unwrap()
+            .unwrap();
+        let mut as_v1 = with.to_bytes();
+        as_v1[4] = 1;
+        assert!(PaidLog::from_bytes(&as_v1).is_err());
+        let mut as_v2 = log_of(&[paid]).to_bytes();
+        as_v2[4] = 2;
+        assert!(PaidLog::from_bytes(&as_v2).is_err());
+        let mut as_v3 = with.to_bytes();
+        as_v3[4] = 3;
+        assert_eq!(
+            PaidLog::from_bytes(&as_v3),
+            Err(DecodeError::UnsupportedVersion(3))
+        );
+    }
+
+    #[test]
+    fn oc_50_an_undoing_has_no_amount_value_or_sale() {
+        let paid = refund(1, Some(7));
+        let mut loud = undoing_of(&paid);
+        loud.sats = 5;
+        let mut file = wire::start(&MAGIC_PAID_LOG, 0);
+        file[4] = 2;
+        paid.write(&mut file);
+        loud.write(&mut file);
+        assert!(PaidLog::from_bytes(&file).is_err());
+    }
+
+    #[test]
+    fn oc_50_standing_leaves_out_a_payment_with_its_undoing_and_keeps_the_next_payment() {
+        let a = refund(1, Some(7));
+        let mut b = a;
+        b.txid = Txid::from_byte_array([99; 32]);
+        b.sats = 11_000;
+        b.at = 1_700_001_000;
+        let log = log_of(&[a, cash_out(3)])
+            .with_added(&[undoing_of(&a), b])
+            .unwrap()
+            .unwrap();
+        assert_eq!(standing(log.entries()), vec![cash_out(3), b]);
+        assert_eq!(log.undoings_for(&a.txid, 1), Vec::new());
+        assert_eq!(log.undoings_for(&b.txid, 1), vec![b.undoing(1).unwrap()]);
     }
 
     #[test]

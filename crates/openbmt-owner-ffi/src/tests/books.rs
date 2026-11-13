@@ -151,3 +151,28 @@ fn oa_103_what_was_paid_out_becomes_disposals_with_their_values_or_none() {
     assert_eq!((made[1].minor_value, made[1].currency), (None, usd));
     assert!(matches!(made[1].kind, openbmt_books::DisposalKind::CashOut));
 }
+
+#[test]
+fn oc_50_a_payment_that_was_undone_and_paid_again_is_one_disposal() {
+    let counter: DeviceId = counter();
+    let usd = Currency::new(*b"USD").unwrap();
+    let paid = |txid: u8, sats: u64, at: u64| PaidEntry {
+        what: PaidWhat::Refund {
+            sale: openbmt_owner::SaleKey { counter, index: 3 },
+            request: Some(2),
+        },
+        number: 1,
+        txid: bitcoin::Txid::from_raw_hash(bitcoin::hashes::Hash::from_byte_array([txid; 32])),
+        sats,
+        at,
+        value: None,
+    };
+    let a = paid(1, 10_000, 1_700_000_000);
+    let b = paid(2, 10_500, 1_700_009_000);
+    let log = [a, a.undoing(1_700_005_000).unwrap(), b];
+    let made = crate::books::disposals(&log, usd);
+    assert_eq!(made.len(), 1);
+    assert_eq!((made[0].sats, made[0].at), (10_500, 1_700_009_000));
+    // Undone and never paid again: no disposal.
+    assert!(crate::books::disposals(&log[..2], usd).is_empty());
+}

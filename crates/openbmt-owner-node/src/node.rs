@@ -1216,6 +1216,38 @@ impl<P: OwnerPort> OwnerNode<P> {
         }
     }
 
+    /// OC-50: the transaction `txid` is leaving the outbox, or its items are
+    /// going back to the queue, with no confirmation that holds. Each entry
+    /// of the log that it paid is undone by a later entry. It is written
+    /// after the queue is told and while the item is still owed, and writing
+    /// it twice is a no-op, so a restart between the two writes it once. It
+    /// is never written only because a block left (OC-05).
+    fn undo_logged(&mut self, txid: &Txid) -> Result<(), String> {
+        let at = self.watcher.now();
+        let undoings = self.paid_log.undoings_for(txid, at);
+        match self.paid_log.with_added(&undoings) {
+            Ok(None) => Ok(()),
+            Ok(Some(next)) => {
+                write_file(&self.dir, PAID_LOG_FILE, &next.to_bytes())?;
+                self.paid_log = next;
+                Ok(())
+            }
+            Err(max) => Err(format!("the log holds {max} entries already")),
+        }
+    }
+
+    /// [`OwnerNode::undo_logged`] for a settlement: true when it is stored,
+    /// and the item may leave the list.
+    fn undone_for_item(&mut self, txid: &Txid) -> bool {
+        match self.undo_logged(txid) {
+            Ok(()) => true,
+            Err(e) => {
+                self.note(format!("{txid} could not be undone in the log: {e}"));
+                false
+            }
+        }
+    }
+
     /// Archive paid rows whose transactions are no longer in the coin view's
     /// undo horizon. Rows tied to a still-reorgable transaction remain linked
     /// to it so a reorganization can reopen them.
@@ -2644,7 +2676,10 @@ impl<P: OwnerPort> OwnerNode<P> {
             .iter()
             .any(|e| e.txid == txid)
         {
-            return self.forget_owed(item);
+            if self.undone_for_item(&txid) {
+                self.forget_owed(item);
+            }
+            return;
         }
         if self.ready_for_queue_write().is_err() {
             self.note(format!("{txid} waits for key 1 recovery"));
@@ -2660,7 +2695,9 @@ impl<P: OwnerPort> OwnerNode<P> {
                     "{txid} was given to the wallet and another transaction spent its coins; \
                      its entries are back in the queue"
                 ));
-                self.forget_owed(item);
+                if self.undone_for_item(&txid) {
+                    self.forget_owed(item);
+                }
             }
             Err(e) => self.note(format!("{txid} could not be released: {e}")),
         }
@@ -2714,7 +2751,10 @@ impl<P: OwnerPort> OwnerNode<P> {
     fn settle_elsewhere_beaten(&mut self, item: &Owed) {
         let txid = item.txid;
         if !self.owner.signed_elsewhere().iter().any(|e| e.txid == txid) {
-            return self.forget_owed(item);
+            if self.undone_for_item(&txid) {
+                self.forget_owed(item);
+            }
+            return;
         }
         if self.ready_for_queue_write().is_err() {
             self.note(format!("{txid} waits for key 1 recovery"));
@@ -2729,7 +2769,9 @@ impl<P: OwnerPort> OwnerNode<P> {
                 self.note(format!(
                     "{txid} was signed elsewhere and another transaction spent its coins; it is no longer watched"
                 ));
-                self.forget_owed(item);
+                if self.undone_for_item(&txid) {
+                    self.forget_owed(item);
+                }
             }
             Err(e) => self.note(format!("{txid} could not be released: {e}")),
         }
@@ -2746,7 +2788,11 @@ impl<P: OwnerPort> OwnerNode<P> {
             .iter()
             .any(|d| matches!(&d.what, Delivery::Transaction { txid: t, .. } if *t == txid));
         if !waiting {
-            return self.forget_owed(item);
+            // The queue was told in an earlier try; the log may not be.
+            if self.undone_for_item(&txid) {
+                self.forget_owed(item);
+            }
+            return;
         }
         if self.ready_for_queue_write().is_err() {
             self.note(format!("{txid} replacement waits for key 1 recovery"));
@@ -2772,7 +2818,9 @@ impl<P: OwnerPort> OwnerNode<P> {
                     self.stop(format!("the coin view could not be stored: {e}"));
                     return;
                 }
-                self.forget_owed(item);
+                if self.undone_for_item(&txid) {
+                    self.forget_owed(item);
+                }
             }
             Err(e) => self.note(format!("{txid} was replaced but could not be marked: {e}")),
         }
@@ -2788,10 +2836,13 @@ impl<P: OwnerPort> OwnerNode<P> {
             .owner
             .mark_replaced(&txid, |b| write_queue_file(&dir, b))
         {
-            Ok(()) => self.note(format!(
-                "{txid} was replaced: another transaction spent its coins; its entries are back \
-                 in the queue and nothing is signed again by itself"
-            )),
+            Ok(()) => {
+                self.note(format!(
+                    "{txid} was replaced: another transaction spent its coins; its entries are \
+                     back in the queue and nothing is signed again by itself"
+                ));
+                self.undone_for_item(&txid);
+            }
             Err(e) => self.note(format!("{txid} was replaced but could not be marked: {e}")),
         }
         self.unsend(&txid);

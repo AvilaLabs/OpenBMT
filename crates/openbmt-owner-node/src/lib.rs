@@ -104,8 +104,8 @@ pub use own::{
     Watching, COINS_OF_FILE, OWN_STATE_FILE,
 };
 pub use paid_log::{
-    value_at, PaidEntry, PaidLog, PaidValue, PaidWhat, MAGIC_PAID_LOG, MAX_PAID_ENTRIES,
-    PAID_ENTRY_LEN, PAID_LOG_FILE,
+    standing, value_at, PaidEntry, PaidLog, PaidValue, PaidWhat, Undone, MAGIC_PAID_LOG,
+    MAX_PAID_ENTRIES, PAID_ENTRY_LEN, PAID_LOG_FILE,
 };
 pub use pos::{
     counter_facts, OwnerPos, PosMethod, PosPolled, PosRefused, PosRequest, PosSetup, PosVendor,

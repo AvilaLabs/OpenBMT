@@ -8,7 +8,7 @@ use openbmt_watch::HeaderChain;
 
 use super::*;
 use crate::facts::verified_facts;
-use crate::paid_log::{PaidValue, PaidWhat};
+use crate::paid_log::{PaidValue, PaidWhat, Undone, PAID_LOG_FILE};
 use crate::settle_owed::{Owed, OwedKind, SettleOwed};
 
 fn genesis_hash() -> BlockHash {
@@ -726,4 +726,119 @@ fn oc_49_n13_03_the_same_for_a_customer_fee_refund_signed_elsewhere() {
         .copied()
         .unwrap();
     assert_eq!(entry.sats, got);
+}
+
+/// The beaten refund goes back to the queue and is approved, built and sent
+/// again: the log holds the first payment, its undoing and the second.
+fn pay_again(rig: &mut Rig) -> Txid {
+    let id = rig.node.owner().refunds()[0].id;
+    let write = rig.node.queue_writer();
+    rig.node.owner_mut().unwrap().requeue(id, &write).unwrap();
+    rig.spend()
+}
+
+#[test]
+fn oc_50_a_refund_beaten_and_paid_again_is_one_disposal() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, other) = sent_and_beaten(&mut rig);
+    let first = tx.compute_txid();
+    assert_eq!(rig.node.paid_log().len(), 1);
+    rig.mine(&[other]);
+    assert!(matches!(refund_stage(&rig), Stage::Returned { .. }));
+    let log = rig.node.paid_log().to_vec();
+    assert_eq!(log.len(), 2);
+    assert_eq!(log[1].what, PaidWhat::Undone(Undone::Refund));
+    assert_eq!(
+        (log[1].number, log[1].txid, log[1].sats),
+        (log[0].number, first, 0)
+    );
+    assert!(crate::standing(&log).is_empty());
+    let second = pay_again(&mut rig);
+    assert_ne!(first, second);
+    let log = rig.node.paid_log().to_vec();
+    assert_eq!(log.len(), 3);
+    let standing = crate::standing(&log);
+    assert_eq!(standing.len(), 1);
+    assert_eq!(standing[0].txid, second);
+    // The file is the new version and reads back.
+    let bytes = fs::read(dir.path().join(PAID_LOG_FILE)).unwrap();
+    assert_eq!(bytes[4], 2);
+    assert_eq!(
+        crate::PaidLog::from_bytes(&bytes).unwrap().entries(),
+        log.as_slice()
+    );
+}
+
+#[test]
+fn oc_50_a_block_that_leaves_and_the_same_transaction_confirming_again_writes_no_undoing() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    rig.queue_refund(10_000);
+    rig.fund(300_000);
+    let txid = rig.spend();
+    let tx = rig.tx(&txid);
+    // Followed, in a block or not: the row still names the transaction.
+    let follows = |rig: &Rig| matches!(refund_stage(rig), Stage::Sent { txid: t } | Stage::Paid { txid: t } if t == txid);
+    rig.mine(std::slice::from_ref(&tx));
+    assert!(follows(&rig));
+    // The block leaves and the same bytes are in the block that replaces it.
+    replace_tip(&mut rig, std::slice::from_ref(&tx));
+    assert!(follows(&rig));
+    // The block leaves and the transaction is in none, then in the next.
+    replace_tip(&mut rig, &[]);
+    assert_eq!(refund_stage(&rig), Stage::Sent { txid });
+    rig.mine(std::slice::from_ref(&tx));
+    assert!(follows(&rig));
+    let log = rig.node.paid_log();
+    assert_eq!(log.len(), 1);
+    assert!(log.iter().all(|e| !e.is_undone()));
+    assert_eq!(crate::standing(log).len(), 1);
+}
+
+#[test]
+fn oc_50_a_restart_between_the_queue_write_and_the_undoing_writes_exactly_one() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (tx, other) = sent_and_beaten(&mut rig);
+    let txid = tx.compute_txid();
+    // The queue is told, the log cannot be written.
+    let blocked = block_writes(&dir, PAID_LOG_FILE);
+    rig.mine(&[other]);
+    assert!(matches!(refund_stage(&rig), Stage::Returned { .. }));
+    assert_eq!(rig.node.paid_log().len(), 1);
+    assert_eq!(owed_on_disk(&dir).items().len(), 1);
+    let chain = rig.chain.clone();
+    rig.node.shutdown();
+    drop(rig);
+    fs::remove_dir(blocked).unwrap();
+    let rig = start_at(&dir, &Setup::default(), chain).unwrap();
+    let log = rig.node.paid_log().to_vec();
+    assert_eq!(log.len(), 2);
+    assert_eq!(log.iter().filter(|e| e.is_undone()).count(), 1);
+    assert_eq!(log[1].txid, txid);
+    assert!(owed_on_disk(&dir).is_empty());
+    // Another start writes nothing more.
+    let chain = rig.chain.clone();
+    let mut rig = rig;
+    rig.node.shutdown();
+    drop(rig);
+    let rig = start_at(&dir, &Setup::default(), chain).unwrap();
+    assert_eq!(rig.node.paid_log(), log.as_slice());
+}
+
+#[test]
+fn oc_50_a_beaten_payment_that_waited_for_key_1_recovery_is_undone_once_after_it() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (_, other) = sent_and_beaten(&mut rig);
+    let mut rig = restart_with_journal(&dir, rig);
+    rig.mine(&[other]);
+    assert_eq!(rig.node.paid_log().len(), 1);
+    recover(&mut rig);
+    assert_eq!(rig.node.paid_log().len(), 2);
+    assert_eq!(
+        rig.node.paid_log().iter().filter(|e| e.is_undone()).count(),
+        1
+    );
 }

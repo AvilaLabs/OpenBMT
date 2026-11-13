@@ -22,6 +22,7 @@ fuzz_target!(|data: &[u8]| {
             at: 1_700_000_000,
             value,
         };
+        let undoing = entry(1, None).undoing(1_700_000_500);
         let valid = PaidLog::new()
             .with_added(&[
                 entry(1, None),
@@ -35,6 +36,7 @@ fuzz_target!(|data: &[u8]| {
             ])
             .ok()
             .flatten()
+            .and_then(|l| l.with_added(undoing.as_slice()).ok().flatten())
             .map(|l| l.to_bytes())
             .unwrap_or_default();
         let keep = usize::from(mode >> 1).min(valid.len());
