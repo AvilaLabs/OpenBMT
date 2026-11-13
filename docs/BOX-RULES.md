@@ -614,14 +614,15 @@ code and checks the payment.
 - **BX-71.** The till key is 32 bytes from the system's randomness.
   `openbmt-box till-key <data dir>` (or `till-key` on the console of a Box
   that runs) makes one, prints it once as 64 lowercase hex with the words
-  `tillKeyMade`, and stores only its tagged hash (`OpenBMT/till-key/v1`) in
-  `till-key` in the data directory, written whole with mode 0600 (BX-50). A
-  new key replaces the old one, which stops working at the next request.
-  Every request carries `Authorization: Bearer <key>`. The Box compares the
-  hash of what it was given with the stored hash in constant time. No key
-  file, no header, a header that is not a bearer token or a wrong key is a
-  401 with the words `tillKeyWrong`. The Box never prints, logs or stores the
-  key.
+  `tillKeyMade`, and stores in `till-key` in the data directory, written
+  whole with mode 0600 (BX-50), the tagged hash (`OpenBMT/till-key/v1`) of
+  its bearer token and its reply key (BX-80), never the key itself. A new
+  key replaces the old one, which stops working at the next request. Every
+  request carries `Authorization: Bearer <token>`, the token of BX-80. The
+  Box compares the hash of what it was given with the stored hash in
+  constant time. No key file, no header, a header that is not a bearer
+  token or a wrong token is a 401 with the words `tillKeyWrong`. The Box
+  never prints or logs the key or the token.
 - **BX-72.** `POST /till/v1/sales` takes `Content-Type: application/json`
   and an object of strings: `counter`, `amount`, `currency`, `request` and
   `reference` (the last may be left out). `counter` is the first 4 bytes of a
@@ -682,6 +683,22 @@ code and checks the payment.
 - **BX-79.** A till sale never closes a POS order by itself, and BX-43 is
   unchanged: the Box closes an order only as BX-43 says. The till closes its
   own order when it reads `paid`.
+- **BX-80. The Box's answers are signed.** The listener is plain HTTP
+  (BX-70), so whoever is on the path between the till's server and the Box
+  sees what is sent. The key the till holds is therefore never sent. The
+  till sends as its bearer token the tagged hash `OpenBMT/till-bearer/v1`
+  of the key, as 64 lowercase hex, and keeps the reply key, the tagged hash
+  `OpenBMT/till-reply/v1` of the key, which the Box keeps too. Every request
+  carries `X-OBM-Nonce`, 32 lowercase hex the till makes fresh for that
+  request; a request without one is a 400 `tillBadRequest`. Every answer,
+  refusals included, carries `X-OBM-Reply`: the HMAC-SHA256 under the reply
+  key of `OBM-TILL-REPLY-1`, the request's method, its path, its nonce, the
+  answer's status as three digits and the body, joined by line feeds, as 64
+  lowercase hex. The till takes an answer only when it carries the mac of
+  the request it sent, so an answer changed or made up on the path, or an
+  old one sent again, is refused: seeing the bearer token does not let
+  anyone sign. A `till-key` file of the earlier form, which holds no reply
+  key, is answered 401 `tillKeyOld` until a new key is made.
 
 What the code fixes. `till-key` takes no lock on the data directory (BX-02):
 it writes only that one file, by renaming a whole file over the old, and the
