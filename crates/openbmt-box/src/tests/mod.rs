@@ -3,6 +3,7 @@
 
 mod https;
 mod kit;
+mod lightning;
 mod meta;
 mod pos;
 mod pos_kit;

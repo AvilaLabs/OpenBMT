@@ -43,13 +43,14 @@ use openbmt_link::proto::{Refusal, Request, Response};
 use openbmt_link::relay::{sign_challenge, Action};
 use openbmt_link::{
     os_random, ClientError, DirStore, Fetched, Kind, Relay, RelayConfig, Role, Server,
-    ServerConfig, WelcomeAnswer,
+    ServerConfig, StoreAnswer, WelcomeAnswer,
 };
 use openbmt_net_io::env::{DirLock, LockError};
 use openbmt_net_io::Clock;
 
 use crate::files::{BoxFiles, DirFiles};
 use crate::https::{CurlRunner, Transport};
+use crate::lightning::ShopStore;
 use crate::pos::{BoxPos, PosOpenError, PosSetup, PosState};
 use crate::pos_config::{PosConfig, PosConfigError, POS_CONFIG_FILE};
 use crate::say::note_words;
@@ -120,6 +121,9 @@ type Core = Arc<Mutex<BoxCore<DirFiles>>>;
 type Notes = Arc<Mutex<VecDeque<String>>>;
 type View = Arc<Mutex<PosView>>;
 type Till = Arc<Mutex<TillTable>>;
+/// The store of Shop Lightning's state (BX-90); `None` when its files did
+/// not open, which the notes say.
+type Shop = Arc<Mutex<Option<ShopStore<DirFiles>>>>;
 
 /// What the console's `pos` command shows (BX-41): the POS side as the
 /// worker last saw it. It never holds the token.
@@ -290,6 +294,7 @@ fn enter_into(
 struct PageHandles {
     core: Core,
     relay: Relays,
+    shop: Shop,
     clock: Arc<dyn Clock + Send + Sync>,
     notes: Notes,
     relay_port: u16,
@@ -318,6 +323,7 @@ impl PageBackend for PageHandles {
             devices,
             shop,
             last_note,
+            store_full: lock(&self.shop).as_ref().is_some_and(ShopStore::is_full),
         }
     }
 
@@ -434,6 +440,7 @@ impl TillBackend for TillHandles {
 struct Worker {
     core: Core,
     relay: Relays,
+    shop: Shop,
     clock: Arc<dyn Clock + Send + Sync>,
     notes: Notes,
     dir: PathBuf,
@@ -496,6 +503,7 @@ impl Worker {
                 }
             }
         }
+        self.shop_step();
         let peers = self.peers();
         let Some(courier) = self.courier.as_mut() else {
             return;
@@ -538,6 +546,26 @@ impl Worker {
         }
         self.till_step(&paid_notices);
         self.pos_step(paid_notices);
+    }
+
+    /// BX-90, BX-94: serve the counter the settings name with this Box as
+    /// its second device, and the one they stopped naming for 30 days.
+    fn shop_step(&mut self) {
+        let now = self.clock.now();
+        let named = {
+            let core = lock(&self.core);
+            let me = core.device_id();
+            core.settings()
+                .and_then(|s| s.shop_lightning)
+                .filter(|sl| sl.second_device == me)
+                .map(|sl| sl.counter)
+        };
+        let mut shop = lock(&self.shop);
+        if let Some(store) = shop.as_mut() {
+            if let Err(e) = store.sync(named, now) {
+                note(&self.notes, format!("{e}"));
+            }
+        }
     }
 
     /// BX-76, BX-78: move the till's sales on what the counters' notices
@@ -697,6 +725,7 @@ impl Worker {
 pub struct BoxRunner {
     core: Core,
     relay: Relays,
+    shop: Shop,
     clock: Arc<dyn Clock + Send + Sync>,
     notes: Notes,
     view: View,
@@ -771,8 +800,34 @@ impl BoxRunner {
                 }
             })));
         }
+        let (shop, shop_error) = {
+            let identity = lock(&core).identity().map_err(StartFailure::State)?;
+            match ShopStore::open(DirFiles::new(&dir), &dir, identity) {
+                Ok(s) => (Some(s), None),
+                Err(e) => (None, Some(e)),
+            }
+        };
+        let shop: Shop = Arc::new(Mutex::new(shop));
+        {
+            // LK-82: a store request goes to the store, while the Box is
+            // paired and not turned off (BX-23).
+            let core = Arc::clone(&core);
+            let shop = Arc::clone(&shop);
+            relay.set_store_hook(Some(Box::new(move |sealed, now| {
+                if lock(&core).status(now) != BoxStatus::Paired {
+                    return StoreAnswer::Refused;
+                }
+                match lock(&shop).as_mut() {
+                    Some(store) => store.answer(sealed, now, &mut os_random),
+                    None => StoreAnswer::Refused,
+                }
+            })));
+        }
         let relay: Relays = Arc::new(Mutex::new(relay));
         let notes: Notes = Arc::new(Mutex::new(VecDeque::new()));
+        if let Some(e) = shop_error {
+            note(&notes, format!("Shop Lightning's store is off: {e}"));
+        }
         let erased = {
             let mut core = lock(&core);
             if core.turned_off() {
@@ -814,6 +869,7 @@ impl BoxRunner {
         let mut worker = Worker {
             core: Arc::clone(&core),
             relay: Arc::clone(&relay),
+            shop: Arc::clone(&shop),
             clock: Arc::clone(&clock),
             notes: Arc::clone(&notes),
             dir: dir.clone(),
@@ -850,6 +906,7 @@ impl BoxRunner {
         Ok(Self {
             core,
             relay,
+            shop,
             clock,
             notes,
             view,
@@ -902,6 +959,7 @@ impl BoxRunner {
         let backend = Arc::new(PageHandles {
             core: Arc::clone(&self.core),
             relay: Arc::clone(&self.relay),
+            shop: Arc::clone(&self.shop),
             clock: Arc::clone(&self.clock),
             notes: Arc::clone(&self.notes),
             relay_port: self.addr.port(),
@@ -959,6 +1017,12 @@ impl BoxRunner {
     /// The POS side as the worker last saw it, without the token (BX-41).
     pub fn pos_view(&self) -> PosView {
         lock(&self.view).clone()
+    }
+
+    /// Whether the Shop Lightning store is full (BX-92), as the status page
+    /// says it.
+    pub fn store_full(&self) -> bool {
+        lock(&self.shop).as_ref().is_some_and(ShopStore::is_full)
     }
 
     /// The notes the Box kept, oldest first.

@@ -25,6 +25,9 @@
 //!   requests from a till, the till key, and the sales it keeps in memory
 //!   (BX-70 to BX-79).
 //!
+//! - [`lightning`]: [`ShopStore`], the second copy of Shop Lightning's state
+//!   that the Box keeps for the Lightning counter (BX-90 to BX-95).
+//!
 //! The Box holds no bitcoin key and cannot move funds (BX-04); what it says
 //! is a hint to the other devices.
 //!
@@ -48,6 +51,7 @@
 
 pub mod files;
 pub mod https;
+pub mod lightning;
 pub mod pos;
 pub mod pos_config;
 pub mod runner;
@@ -63,6 +67,7 @@ mod tests;
 
 pub use files::{BoxFiles, DirFiles, MemFiles};
 pub use https::{CurlRunner, HttpsRefusal, HttpsReply, HttpsRequest, HttpsRunner, Transport};
+pub use lightning::{ShopStore, StoreError};
 pub use pos::{
     BoxPos, PosOpenError, PosSetup, PosState, Reading, LEDGER_FILE, NOTICES_FILE, POLL_SECS,
 };

@@ -398,6 +398,20 @@ pub struct PageView {
     pub shop: Option<[&'static str; 4]>,
     /// The Box's last note, in words.
     pub last_note: Option<Words>,
+    /// The store of Shop Lightning's state is full (BX-92).
+    pub store_full: bool,
+}
+
+/// The words of a full store (BX-92). Placeholders: the words are written by
+/// the rules' owner.
+pub fn store_full_words() -> Words {
+    Words::new(
+        Tone::Stop,
+        "WORDS_NEEDED_BX92_STORE_FULL_HEADING",
+        "WORDS_NEEDED_BX92_STORE_FULL_WHAT",
+        openbmt_core::say::Who::BoxKeeper,
+        "WORDS_NEEDED_BX92_STORE_FULL_NEXT",
+    )
 }
 
 /// What came of a posted invitation (BX-57).
@@ -505,6 +519,9 @@ pub fn render_home(view: &PageView, host: &str, outcome: Option<&Words>) -> Stri
         out.push_str(&words_section(words));
     }
     out.push_str(&words_section(&view.status.page_words()));
+    if view.store_full {
+        out.push_str(&words_section(&store_full_words()));
+    }
     if view.status == BoxStatus::Unpaired {
         out.push_str(&format!(
             "<form method=\"post\" action=\"/invitation\">\

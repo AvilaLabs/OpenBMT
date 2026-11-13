@@ -423,6 +423,7 @@ fn view(status: BoxStatus) -> PageView {
         shop: matches!(status, BoxStatus::Paired | BoxStatus::TurnedOff)
             .then(|| roots().owner.fingerprint_words()),
         last_note: None,
+        store_full: false,
     }
 }
 

@@ -686,7 +686,7 @@ fn lk_83_a_stored_with_anything_malformed_is_refused() {
     let mut b = build(Write, StoredBody::Refused(StoreCause::Storage));
     *b.last_mut().unwrap() = 0;
     assert!(StoredMessage::from_bytes(&b).is_err());
-    *b.last_mut().unwrap() = 8;
+    *b.last_mut().unwrap() = 9;
     assert!(StoredMessage::from_bytes(&b).is_err());
     // Names out of order, repeated, not names, and past the byte limit.
     let names = |names: Vec<&str>| {

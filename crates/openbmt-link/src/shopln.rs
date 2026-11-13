@@ -31,6 +31,9 @@ pub const MAX_BLOB_LEN: usize = 16 * 1024 * 1024;
 pub const MAX_PARTS: u32 = (MAX_BLOB_LEN.div_ceil(MAX_PART_LEN)) as u32;
 /// The longest name (LK-83).
 pub const MAX_NAME_LEN: usize = 255;
+/// The longest name the Box stores: its hexadecimal and the `.tmp` of a write
+/// in progress are a file name of at most 255 bytes (BX-93).
+pub const MAX_STORED_NAME_LEN: usize = 125;
 /// The most bytes of names in one answer to a list: each name and its
 /// length byte count.
 pub const MAX_LIST_BYTES: usize = 60_000;
@@ -288,11 +291,14 @@ pub enum StoreCause {
     BlobTooLarge,
     /// The Box could not write or read its files.
     Storage,
+    /// The name is too long to be a file name in hexadecimal (BX-93): more
+    /// than [`MAX_STORED_NAME_LEN`] bytes.
+    NameTooLong,
 }
 
 impl StoreCause {
     /// Every cause.
-    pub const ALL: [StoreCause; 7] = [
+    pub const ALL: [StoreCause; 8] = [
         StoreCause::TooManyWrites,
         StoreCause::StoreFull,
         StoreCause::TooManyNames,
@@ -300,6 +306,7 @@ impl StoreCause {
         StoreCause::PartOutOfOrder,
         StoreCause::BlobTooLarge,
         StoreCause::Storage,
+        StoreCause::NameTooLong,
     ];
 
     /// The code (never 0).
@@ -312,6 +319,7 @@ impl StoreCause {
             Self::PartOutOfOrder => 5,
             Self::BlobTooLarge => 6,
             Self::Storage => 7,
+            Self::NameTooLong => 8,
         }
     }
 
@@ -331,6 +339,7 @@ impl fmt::Display for StoreCause {
             Self::PartOutOfOrder => "LK-83: the part is not the one that follows",
             Self::BlobTooLarge => "LK-83: the blob is over 16 MiB",
             Self::Storage => "BX-91: the Box could not write its files",
+            Self::NameTooLong => "BX-93: the name is too long for a file name in hexadecimal",
         };
         write!(f, "{what}")
     }
