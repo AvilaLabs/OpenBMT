@@ -59,6 +59,9 @@ use crate::edit::sats_per_usd_at;
 use crate::error::Refusal;
 use crate::own_book::{AllocationBook, BookError};
 use crate::own_switch::{move_ready, Repin, RepinHold, SwitchStatus};
+use crate::own_waiting::{needs_confirmation, WaitingChange};
+use openbmt_core::approval::CounterConfirmation;
+use openbmt_core::confirmed::ConfirmedSettings;
 
 /// OA-105: the magic of the shop's state.
 pub const MAGIC_OWN_STATE: [u8; 4] = *b"OBM@";
@@ -279,6 +282,9 @@ pub struct Paired {
     /// Each counter's share of the instant limit in the settings, in basis
     /// points, in the order of the counters' keys.
     pub shares: Vec<(DeviceId, u16)>,
+    /// Whether the settings in the bundle are not in force on the owner
+    /// phone but wait for a counter's confirmation (OA-119, OA-122).
+    pub waiting: bool,
 }
 
 /// A counter whose bundle waits to be handed over (OA-111).
@@ -431,6 +437,9 @@ pub struct OwnShop {
     wallet: PinnedWallet,
     state: OwnState,
     recovered: bool,
+    /// The one change that waits for a counter's confirmation (OA-121). It
+    /// is kept in a file of its own, not in the state.
+    held: Option<WaitingChange>,
 }
 
 impl fmt::Debug for OwnShop {
@@ -450,6 +459,7 @@ impl OwnShop {
             wallet,
             state: OwnState::default(),
             recovered: false,
+            held: None,
         }
     }
 
@@ -563,6 +573,7 @@ impl OwnShop {
             wallet,
             state,
             recovered,
+            held: None,
         })
     }
 
@@ -752,15 +763,19 @@ impl OwnShop {
         counter: DeviceId,
         usd_per_btc: u64,
     ) -> Result<Settings, Refusal> {
-        let mut settings = match &self.state.known {
+        // A change that waits is built on: the next counter joins it, not
+        // the settings in force (OA-121).
+        let base = self
+            .held
+            .as_ref()
+            .map(|h| &h.signed)
+            .or(self.state.known.as_ref());
+        let mut settings = match base {
             Some(s) => s.settings.clone(),
             None if usd_per_btc == 0 => return Err(Refusal::NoSettingsRate),
             None => Settings::defaults(sats_per_usd_at(usd_per_btc)?),
         };
-        settings.version = self
-            .state
-            .known
-            .as_ref()
+        settings.version = base
             .map_or(0, |k| k.settings.version)
             .checked_add(1)
             .ok_or_else(|| Refusal::SettingsInvalid("no version is left".to_string()))?;
@@ -778,8 +793,10 @@ impl OwnShop {
     /// counter's share once `counter` is added.
     pub fn shares_with(&self, counter: DeviceId) -> Vec<(DeviceId, u16)> {
         let mut counters: BTreeSet<DeviceId> = self
-            .state
-            .known
+            .held
+            .as_ref()
+            .map(|h| &h.signed)
+            .or(self.state.known.as_ref())
             .iter()
             .flat_map(|k| k.settings.counters.keys().copied())
             .collect();
@@ -811,6 +828,36 @@ impl OwnShop {
         peers: Vec<String>,
         relay: Option<SignedRelayHint>,
         persist: impl Fn(&[u8]) -> Result<(), E>,
+    ) -> Result<Paired, OwnError<E>> {
+        self.confirm_with(
+            made,
+            now,
+            request,
+            usd_per_btc,
+            peers,
+            relay,
+            persist,
+            |_| Ok(()),
+        )
+    }
+
+    /// [`OwnShop::confirm`] for a caller that keeps the waiting change's
+    /// file: when the shop has a Box and the settings that add the counter
+    /// are of class Loosen (AP-01, AP-12), they are not put in force. They go
+    /// to `persist_waiting` first, as the shop's one waiting change, and
+    /// stay there until a counter confirms them (OA-119, OA-122); the new
+    /// counter's bundle holds them, so that it takes sales at once.
+    #[allow(clippy::too_many_arguments)]
+    pub fn confirm_with<E>(
+        &mut self,
+        made: &MadeOffer,
+        now: u64,
+        request: &[u8],
+        usd_per_btc: u64,
+        peers: Vec<String>,
+        relay: Option<SignedRelayHint>,
+        persist: impl Fn(&[u8]) -> Result<(), E>,
+        persist_waiting: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<Paired, OwnError<E>> {
         let (request, read) = self.read_checked(made, now, request)?;
         if self.state.book.has_device(&read.counter)
@@ -853,17 +900,32 @@ impl OwnShop {
             relay,
         )
         .map_err(OwnRefusal::Pairing)?;
+        let hold = self.holds(&settings);
+        let held = WaitingChange {
+            signed: signed_settings.clone(),
+            signed_at: now,
+        };
+        if hold {
+            // Written before anything is sent (OA-119).
+            persist_waiting(&held.to_bytes()).map_err(OwnError::Store)?;
+        }
         let mut next = self.state.clone();
-        next.known = Some(signed_settings);
+        if !hold {
+            next.known = Some(signed_settings);
+        }
         next.waiting.push(bundle.clone());
         next.waiting
             .sort_by_key(|b| b.pairing.entry.counter.to_bytes());
         self.commit(next, &persist)?;
+        if hold {
+            self.held = Some(held);
+        }
         Ok(Paired {
             bundle,
             first_range: range,
             settings_version: version,
             shares,
+            waiting: hold,
         })
     }
 
@@ -908,6 +970,120 @@ impl OwnShop {
         let mut next = self.state.clone();
         next.waiting.retain(|b| b.pairing.entry.counter != *counter);
         self.commit(next, persist)
+    }
+
+    /// OA-119: whether `new` waits for a counter's confirmation instead of
+    /// going in force: the shop has a Box in the settings in force, and the
+    /// change from them is of class Loosen.
+    pub fn holds(&self, new: &Settings) -> bool {
+        match &self.state.known {
+            Some(k) => !k.settings.boxes.is_empty() && needs_confirmation(&k.settings, new),
+            None => false,
+        }
+    }
+
+    /// The one change that waits for a counter's confirmation, if any
+    /// (OA-121).
+    pub fn waiting_change(&self) -> Option<&WaitingChange> {
+        self.held.as_ref()
+    }
+
+    /// Take the waiting change from its file, strictly. A change that is
+    /// already the settings in force is dropped, and the answer is `false`:
+    /// the caller deletes the file (OA-120). A change of a version that is
+    /// not above the one in force is refused as a file that does not read.
+    pub fn restore_waiting(&mut self, bytes: &[u8]) -> Result<bool, DecodeError> {
+        let change = WaitingChange::from_bytes(bytes)?;
+        if change.is_in_force(self.state.known.as_ref()) {
+            self.held = None;
+            return Ok(false);
+        }
+        let above = self
+            .state
+            .known
+            .as_ref()
+            .is_none_or(|k| change.signed.settings.version > k.settings.version);
+        if !above {
+            return Err(DecodeError::NonCanonical(
+                "the waiting settings are not above the ones in force",
+            ));
+        }
+        self.held = Some(change);
+        Ok(true)
+    }
+
+    /// Drop the waiting change from memory; the caller deletes its file.
+    pub fn drop_waiting(&mut self) {
+        self.held = None;
+    }
+
+    /// OA-120: the settings that wait, joined to `confirmation` as `OBM<`,
+    /// when the confirmation is for them and from a counter of the settings
+    /// in force. `None` otherwise.
+    pub fn join_confirmation(&self, confirmation: CounterConfirmation) -> Option<ConfirmedSettings> {
+        let held = self.held.as_ref()?;
+        let current = self.state.known.as_ref()?;
+        held.join(confirmation, &self.identity.device_id(), &current.settings)
+    }
+
+    /// OA-120: put the confirmed settings in force. They are stored before
+    /// they take effect; the waiting change leaves memory with them and the
+    /// caller deletes its file after.
+    pub fn put_in_force<E>(
+        &mut self,
+        confirmed: &ConfirmedSettings,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), OwnError<E>> {
+        let mut next = self.state.clone();
+        next.known = Some(confirmed.signed.clone());
+        self.commit(next, persist)?;
+        self.held = None;
+        Ok(())
+    }
+
+    /// [`OwnShop::change_settings`] for a caller that keeps the waiting
+    /// change's file: settings that wait for a confirmation (see
+    /// [`OwnShop::holds`]) are written to `persist_waiting` and replace the
+    /// change that waited, and are not put in force; the answer says which.
+    pub fn change_settings_with<E>(
+        &mut self,
+        settings: Settings,
+        now: u64,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+        persist_waiting: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(SignedSettings, bool), OwnError<E>> {
+        if !self.holds(&settings) {
+            return self.change_settings(settings, persist).map(|s| (s, false));
+        }
+        settings
+            .validate()
+            .map_err(|e| OwnRefusal::Settings(Refusal::SettingsInvalid(e.to_string())))?;
+        let above = self
+            .held
+            .as_ref()
+            .map(|h| &h.signed)
+            .or(self.state.known.as_ref())
+            .map_or(0, |k| k.settings.version);
+        if settings.version <= above {
+            return Err(OwnRefusal::Settings(Refusal::SettingsVersion {
+                known: above,
+                got: settings.version,
+            })
+            .into());
+        }
+        let signed = SignedSettings {
+            owner_sig: settings.sign(&self.identity),
+            approver_sig: None,
+            settings,
+        };
+        let held = WaitingChange {
+            signed: signed.clone(),
+            signed_at: now,
+        };
+        persist_waiting(&held.to_bytes()).map_err(OwnError::Store)?;
+        self.held = Some(held);
+        let _ = persist;
+        Ok((signed, true))
     }
 
     /// CR-236: the owner changes the settings. They are signed by the owner

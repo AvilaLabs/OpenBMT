@@ -1132,8 +1132,193 @@ fn bx_18_a_counters_key_is_no_box_and_a_counter_added_later_keeps_the_box() {
     let made2 = s.make_offer(T0 + 100).unwrap();
     let (_, r2) = counter_request(&made2, 4, "Back");
     confirm(&mut s, &disk, &made2, &r2, T0 + 130).unwrap();
+    // The second counter's settings wait for a confirmation (AP-12, OA-119):
+    // the settings in force keep the Box and the first counter.
     let held = s.known_settings().unwrap();
     assert!(held.settings.boxes.contains(&the_box));
-    assert_eq!(held.settings.counters.len(), 2);
-    assert_eq!(held.settings.version, 3);
+    assert_eq!(held.settings.counters.len(), 1);
+    assert_eq!(held.settings.version, 2);
+    let waiting = s.waiting_change().unwrap();
+    assert!(waiting.signed.settings.boxes.contains(&the_box));
+    assert_eq!(waiting.signed.settings.counters.len(), 2);
+    assert_eq!(waiting.signed.settings.version, 3);
+}
+
+// ---- OA-119 to OA-122: a change that waits for a counter's confirmation ----
+
+use openbmt_core::approval::CounterConfirmation;
+use openbmt_owner::own_waiting::{WaitingChange, WAIT_SECS};
+
+/// A shop with counter 3 in force and Box 9 added: later settings that add a
+/// counter are of class Loosen (AP-12).
+fn shop_with_counter_and_box(disk: &Disk) -> OwnShop {
+    let mut s = shop(SINGLE);
+    let made = s.make_offer(T0).unwrap();
+    let (_, r1) = counter_request(&made, 3, "Front");
+    confirm(&mut s, disk, &made, &r1, T0 + 30).unwrap();
+    s.add_box(id(9).device_id(), 0, |b| disk.put(b)).unwrap();
+    s
+}
+
+fn pair_second(
+    s: &mut OwnShop,
+    disk: &Disk,
+    waiting: &Disk,
+    n: u8,
+    at: u64,
+) -> openbmt_owner::own_shop::Paired {
+    let made = s.make_offer(at).unwrap();
+    let (_, r) = counter_request(&made, n, "Back");
+    s.confirm_with(
+        &made,
+        at + 30,
+        &r.to_bytes(),
+        USD,
+        Vec::new(),
+        None,
+        |b| disk.put(b),
+        |b| waiting.put(b),
+    )
+    .unwrap()
+}
+
+#[test]
+fn oa_119_a_counter_added_once_one_is_in_force_waits_and_is_not_put_in_force() {
+    let (disk, waiting) = (Disk::new(), Disk::new());
+    let mut s = shop_with_counter_and_box(&disk);
+    let before = s.known_settings().unwrap().clone();
+    let paired = pair_second(&mut s, &disk, &waiting, 4, T0 + 100);
+    assert!(paired.waiting);
+    assert_eq!(s.known_settings(), Some(&before), "the settings in force stay");
+    let held = s.waiting_change().unwrap();
+    assert_eq!(held.signed.settings.version, before.settings.version + 1);
+    assert!(held.signed.settings.counters.contains_key(&id(4).device_id()));
+    assert_eq!(held.signed_at, T0 + 130);
+    // It was written before anything was sent, and reads back strictly.
+    assert_eq!(WaitingChange::from_bytes(&waiting.get()).unwrap(), *held);
+    assert_eq!(held.loosened_fields(&before.settings), vec!["devices", "counters"]);
+    assert_eq!(held.words().len(), 4);
+}
+
+#[test]
+fn ap_12_the_first_counter_after_the_box_is_free_and_goes_in_force() {
+    let (disk, waiting) = (Disk::new(), Disk::new());
+    let mut s = shop(SINGLE);
+    s.add_box(id(9).device_id(), USD, |b| disk.put(b)).unwrap();
+    let paired = pair_second(&mut s, &disk, &waiting, 3, T0);
+    assert!(!paired.waiting && s.waiting_change().is_none() && waiting.get().is_empty());
+    assert!(s.known_settings().unwrap().settings.counters.contains_key(&id(3).device_id()));
+}
+
+#[test]
+fn oa_119_with_no_box_the_settings_go_in_force_as_before() {
+    let (disk, waiting) = (Disk::new(), Disk::new());
+    let mut s = shop(SINGLE);
+    let made = s.make_offer(T0).unwrap();
+    let (_, r1) = counter_request(&made, 3, "Front");
+    confirm(&mut s, &disk, &made, &r1, T0 + 30).unwrap();
+    let paired = pair_second(&mut s, &disk, &waiting, 4, T0 + 100);
+    assert!(!paired.waiting && s.waiting_change().is_none());
+    assert_eq!(s.known_settings().unwrap().settings.counters.len(), 2);
+}
+
+#[test]
+fn oa_119_a_waiting_file_that_cannot_be_written_changes_nothing_that_is_sent() {
+    let disk = Disk::new();
+    let mut s = shop_with_counter_and_box(&disk);
+    let made = s.make_offer(T0 + 100).unwrap();
+    let (_, r) = counter_request(&made, 4, "Back");
+    let before = s.known_settings().unwrap().clone();
+    let failing = s.confirm_with(
+        &made,
+        T0 + 130,
+        &r.to_bytes(),
+        USD,
+        Vec::new(),
+        None,
+        |b| disk.put(b),
+        |_: &[u8]| Err("disk full".to_string()),
+    );
+    assert!(matches!(failing, Err(OwnError::Store(_))));
+    assert!(s.waiting_change().is_none());
+    assert_eq!(s.known_settings(), Some(&before));
+    assert!(s.counters_waiting().iter().all(|w| w.counter != id(4).device_id()));
+}
+
+#[test]
+fn oa_120_the_first_confirmation_for_the_hash_from_a_counter_in_force_is_joined() {
+    let (disk, waiting) = (Disk::new(), Disk::new());
+    let mut s = shop_with_counter_and_box(&disk);
+    pair_second(&mut s, &disk, &waiting, 4, T0 + 100);
+    let hash = s.waiting_change().unwrap().hash();
+    // Another hash, a counter that is not in force (the new one), and a stranger are ignored.
+    assert!(s
+        .join_confirmation(CounterConfirmation::sign(&id(3), &[7u8; 32]))
+        .is_none());
+    assert!(s
+        .join_confirmation(CounterConfirmation::sign(&id(4), &hash))
+        .is_none());
+    assert!(s
+        .join_confirmation(CounterConfirmation::sign(&id(8), &hash))
+        .is_none());
+    assert!(s.waiting_change().is_some());
+    // The counter in force confirms.
+    let confirmed = s
+        .join_confirmation(CounterConfirmation::sign(&id(3), &hash))
+        .unwrap();
+    let current = s.known_settings().unwrap().settings.clone();
+    confirmed.verify(&id(1).device_id(), &current).unwrap();
+    s.put_in_force(&confirmed, |b| disk.put(b)).unwrap();
+    assert!(s.waiting_change().is_none());
+    assert_eq!(s.known_settings().unwrap().settings.hash(), hash);
+    assert!(s
+        .known_settings()
+        .unwrap()
+        .settings
+        .counters
+        .contains_key(&id(4).device_id()));
+}
+
+#[test]
+fn oa_121_a_newer_change_replaces_the_one_that_waits_and_builds_on_it() {
+    let (disk, waiting) = (Disk::new(), Disk::new());
+    let mut s = shop_with_counter_and_box(&disk);
+    pair_second(&mut s, &disk, &waiting, 4, T0 + 100);
+    let first = s.waiting_change().unwrap().clone();
+    pair_second(&mut s, &disk, &waiting, 5, T0 + 300);
+    let second = s.waiting_change().unwrap();
+    assert_eq!(second.signed.settings.version, first.signed.settings.version + 1);
+    assert!(second.signed.settings.counters.contains_key(&id(4).device_id()));
+    assert!(second.signed.settings.counters.contains_key(&id(5).device_id()));
+    assert_eq!(WaitingChange::from_bytes(&waiting.get()).unwrap(), *second);
+}
+
+#[test]
+fn oa_121_a_change_is_dropped_after_seven_days_and_the_file_is_read_strictly() {
+    let (disk, waiting) = (Disk::new(), Disk::new());
+    let mut s = shop_with_counter_and_box(&disk);
+    pair_second(&mut s, &disk, &waiting, 4, T0 + 100);
+    let held = s.waiting_change().unwrap().clone();
+    assert!(!held.expired(held.signed_at + WAIT_SECS - 1));
+    assert!(held.expired(held.signed_at + WAIT_SECS));
+    let bytes = waiting.get();
+    for cut in 0..bytes.len() {
+        assert!(WaitingChange::from_bytes(&bytes[..cut]).is_err(), "cut at {cut}");
+    }
+    let mut more = bytes.clone();
+    more.push(0);
+    assert!(WaitingChange::from_bytes(&more).is_err());
+    // A restart reads it back; a restart that finds it in force drops it.
+    let mut restored =
+        OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), &disk.get()).unwrap();
+    assert_eq!(restored.restore_waiting(&bytes), Ok(true));
+    assert_eq!(restored.waiting_change(), Some(&held));
+    let confirmed = restored
+        .join_confirmation(CounterConfirmation::sign(&id(3), &held.hash()))
+        .unwrap();
+    restored.put_in_force(&confirmed, |b| disk.put(b)).unwrap();
+    let mut again =
+        OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), &disk.get()).unwrap();
+    assert_eq!(again.restore_waiting(&bytes), Ok(false));
+    assert!(again.waiting_change().is_none());
 }
