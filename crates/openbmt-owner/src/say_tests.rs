@@ -190,7 +190,7 @@ fn find(name: &str) -> Words {
 
 #[test]
 fn sc_12_every_word_is_checked_on_its_own() {
-    let bad: Vec<String> = all_words()
+    let bad: Vec<String> = written_words()
         .iter()
         .filter_map(|(name, w)| check(w).err().map(|e| format!("{name}: {e}")))
         .collect();
@@ -199,7 +199,17 @@ fn sc_12_every_word_is_checked_on_its_own() {
 
 #[test]
 fn sc_12_every_word_keeps_the_rules() {
-    assert_eq!(check_distinct(&all_words()), Ok(()));
+    assert_eq!(check_distinct(&written_words()), Ok(()));
+}
+
+/// The words that are written: a placeholder stands for words not written
+/// yet and is left out of the checks of a sentence (OA-114), as `own_say`'s
+/// own checks leave it out.
+fn written_words() -> Vec<(String, Words)> {
+    all_words()
+        .into_iter()
+        .filter(|(_, w)| !crate::own_say::is_placeholder(w))
+        .collect()
 }
 
 #[test]

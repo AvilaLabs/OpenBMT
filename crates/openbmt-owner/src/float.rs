@@ -102,6 +102,9 @@ pub enum FloatRefusal {
     NothingToSweep,
     /// FL-35: the shop's address cannot be derived from its description.
     ShopAddress,
+    /// FL-06: the words scanned again are not the float's words the phone
+    /// recorded.
+    NotThisFloat,
 }
 
 impl fmt::Display for FloatRefusal {
@@ -127,6 +130,10 @@ impl fmt::Display for FloatRefusal {
             Self::Wallet => write!(f, "FL-30: the float's wallet cannot be read"),
             Self::NothingToSweep => write!(f, "FL-35: the float holds no coin"),
             Self::ShopAddress => write!(f, "FL-35: the shop's address cannot be derived"),
+            Self::NotThisFloat => write!(
+                f,
+                "FL-06: the words scanned are not the words of the float this phone recorded"
+            ),
         }
     }
 }
@@ -146,6 +153,7 @@ impl FloatRefusal {
             Self::NotEnough { .. } => "FL-23",
             Self::Wallet => "FL-30",
             Self::NothingToSweep | Self::ShopAddress => "FL-35",
+            Self::NotThisFloat => "FL-06",
         }
     }
 
@@ -238,6 +246,11 @@ impl FloatRefusal {
                 "Nothing was moved. Check the shop's wallet is connected, then try again.",
                 code,
             ),
+            Self::NotThisFloat => needed(
+                "WORDS_NEEDED_FL06_HEADING",
+                "WORDS_NEEDED_FL06_WHAT",
+                "WORDS_NEEDED_FL06_NEXT",
+            ),
         };
         match self {
             Self::Plan(why)
@@ -251,6 +264,13 @@ impl FloatRefusal {
 
 fn stop(heading: &str, what: &str, next: &str, code: &'static str) -> Words {
     Words::new(Tone::Stop, heading, what, Who::Owner, next).code(code)
+}
+
+/// Words that are still to be written: a placeholder for each of the heading
+/// and the two sentences, as `own_say::needed` does for the owner's own
+/// wallet (OA-114). [`crate::own_say::is_placeholder`] tells them.
+fn needed(heading: &'static str, what: &'static str, next: &'static str) -> Words {
+    Words::new(Tone::Stop, heading, what, Who::Owner, next).code("FL-06")
 }
 
 /// A value of each refusal, with the name of its variant, for the words of
@@ -283,6 +303,7 @@ pub fn all_refusals() -> Vec<(&'static str, FloatRefusal)> {
         ("Wallet", FloatRefusal::Wallet),
         ("NothingToSweep", FloatRefusal::NothingToSweep),
         ("ShopAddress", FloatRefusal::ShopAddress),
+        ("NotThisFloat", FloatRefusal::NotThisFloat),
     ]
 }
 
@@ -457,8 +478,33 @@ pub fn seal_compact_seedqr(
     entropy: &[u8],
     rng: &mut dyn KernelRandom,
 ) -> Result<FloatSealed, FloatSealError> {
+    seal_scan(entropy, None, rng)
+}
+
+/// FL-06: the 16 bytes of the Compact SeedQR the owner scanned again, read as
+/// FL-01 says and taken only when their wallet is `recorded`, the float's
+/// wallet the phone kept, exactly. They are then sealed as [`seal_compact_seedqr`]
+/// seals, under a new data key. Words of another index or of another shop make
+/// another wallet and are refused with [`FloatRefusal::NotThisFloat`], and
+/// nothing is sealed.
+pub fn restore_compact_seedqr(
+    entropy: &[u8],
+    recorded: &FloatWallet,
+    rng: &mut dyn KernelRandom,
+) -> Result<FloatSealed, FloatSealError> {
+    seal_scan(entropy, Some(recorded), rng)
+}
+
+fn seal_scan(
+    entropy: &[u8],
+    recorded: Option<&FloatWallet>,
+    rng: &mut dyn KernelRandom,
+) -> Result<FloatSealed, FloatSealError> {
     let words = FloatWords::from_compact_seedqr(entropy).map_err(FloatSealError::Float)?;
     let wallet = FloatWallet::from_words(&words).map_err(FloatSealError::Float)?;
+    if recorded.is_some_and(|r| *r != wallet) {
+        return Err(FloatSealError::Float(FloatRefusal::NotThisFloat));
+    }
     let mut bytes = <[u8; ENTROPY_BYTES]>::try_from(entropy)
         .map_err(|_| FloatSealError::Float(FloatRefusal::Words))?;
     let seed = Seed::from_entropy(bytes);

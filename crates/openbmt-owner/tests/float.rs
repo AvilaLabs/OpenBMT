@@ -742,9 +742,19 @@ fn fl_35_a_sweep_that_leaves_a_coin_out_fails_the_check() {
 #[test]
 fn fl_words_every_state_has_its_own_words_and_names_its_rule() {
     let all = all_float_words();
-    assert!(all.len() >= 18);
+    assert!(all.len() >= 19);
+    // FL-06 is a placeholder until its words are written (OA-114).
+    let placeholders: Vec<&str> = all
+        .iter()
+        .filter(|(_, w)| openbmt_owner::own_say::is_placeholder(w))
+        .map(|(n, _)| n.as_str())
+        .collect();
+    assert_eq!(placeholders, ["FloatRefusal/NotThisFloat"]);
+    let all: Vec<_> = all
+        .into_iter()
+        .filter(|(_, w)| !openbmt_owner::own_say::is_placeholder(w))
+        .collect();
     for (name, w) in &all {
-        assert!(!w.heading.starts_with("WORDS_NEEDED_"), "{name}");
         assert!(w.heading.chars().count() < 28, "{name}");
         assert_ne!(w.heading, w.what, "{name}");
         assert!(w.code.is_some_and(|c| c.starts_with("FL-")), "{name}");
@@ -835,6 +845,114 @@ fn ss_20_the_starter_path_refuses_a_sealed_float() {
         openbmt_owner::starter::wallet_of_sealed(&made.sealed.sealed, &made.sealed.data_key)
             .is_err()
     );
+}
+
+// ---- FL-06: the key brought back --------------------------------------------
+
+fn entropy_of(words: &str) -> Vec<u8> {
+    bip39::Mnemonic::parse_in_normalized(bip39::Language::English, words)
+        .unwrap()
+        .to_entropy()
+}
+
+#[test]
+fn fl_06_the_right_words_for_the_recorded_wallet_are_taken_and_sealed_anew() {
+    let recorded = float();
+    let first = seal_compact_seedqr(&entropy_of(BIP85_CHILD_0), &mut Steady(0)).unwrap();
+    // Scanned again, with another stream of random bytes: a new data key.
+    let again =
+        restore_compact_seedqr(&entropy_of(BIP85_CHILD_0), &recorded, &mut Steady(40)).unwrap();
+    assert_eq!(again.wallet, recorded);
+    assert_ne!(again.sealed.data_key.as_bytes(), first.sealed.data_key.as_bytes());
+    assert_ne!(again.sealed.sealed, first.sealed.sealed);
+    let opened = wallet_of_sealed(&again.sealed.sealed, &again.sealed.data_key).unwrap();
+    assert_eq!(opened, recorded);
+    // The old key does not open the new seal.
+    assert!(wallet_of_sealed(&again.sealed.sealed, &first.sealed.data_key).is_err());
+}
+
+#[test]
+fn fl_06_words_of_another_index_or_another_shop_are_refused() {
+    let recorded = float();
+    // The same shop, the next index.
+    let next = bip85_words(BIP85_MASTER, 1);
+    assert_ne!(next, BIP85_CHILD_0);
+    let refused = restore_compact_seedqr(&entropy_of(&next), &recorded, &mut Steady(0));
+    assert_eq!(
+        refused.unwrap_err(),
+        FloatSealError::Float(FloatRefusal::NotThisFloat)
+    );
+    // Another shop's words at the same index.
+    let other = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    assert_eq!(
+        restore_compact_seedqr(&entropy_of(other), &recorded, &mut Steady(0)).unwrap_err(),
+        FloatSealError::Float(FloatRefusal::NotThisFloat)
+    );
+    assert_eq!(FloatRefusal::NotThisFloat.rule(), "FL-06");
+    assert!(FloatRefusal::NotThisFloat.to_string().starts_with("FL-06"));
+    // A scan that is not 12 words is the setup's refusal, as before.
+    assert_eq!(
+        restore_compact_seedqr(&entropy_of(BIP85_CHILD_0)[..15], &recorded, &mut Steady(0))
+            .unwrap_err(),
+        FloatSealError::Float(FloatRefusal::Words)
+    );
+    // A scan with a kernel that gives nothing seals nothing.
+    struct Dry;
+    impl openbmt_owner::starter::KernelRandom for Dry {
+        fn read32(&mut self) -> Option<[u8; 32]> {
+            None
+        }
+    }
+    assert!(matches!(
+        restore_compact_seedqr(&entropy_of(BIP85_CHILD_0), &recorded, &mut Dry),
+        Err(FloatSealError::Seal(_))
+    ));
+}
+
+#[test]
+fn fl_06_the_words_of_the_refusal_are_the_placeholder_that_names_its_rule() {
+    let w = FloatRefusal::NotThisFloat.words();
+    assert!(openbmt_owner::own_say::is_placeholder(&w));
+    assert_eq!(w.heading, "WORDS_NEEDED_FL06_HEADING");
+    assert_eq!(w.what, "WORDS_NEEDED_FL06_WHAT");
+    assert_eq!(w.next, "WORDS_NEEDED_FL06_NEXT");
+    assert_eq!(w.code, Some("FL-06"));
+}
+
+#[test]
+fn fl_06_the_restored_seal_signs_a_refund() {
+    let recorded = float();
+    let made =
+        restore_compact_seedqr(&entropy_of(BIP85_CHILD_0), &recorded, &mut Steady(7)).unwrap();
+    let coins = [float_coin(1, Keychain::Receive, 0, 100_000, 6)];
+    let paid = pay_refund_sealed(
+        &made.sealed.sealed,
+        &made.sealed.data_key,
+        &coins,
+        &external(1),
+        40_000,
+        RATE,
+        0,
+        1,
+        0,
+    )
+    .unwrap();
+    assert_eq!(paid.paid, 40_000);
+    // The same payment as the one signed from the words themselves.
+    let direct = pay_refund(&float_words(), &coins, &external(1), 40_000, RATE, 0, 1, 0).unwrap();
+    assert_eq!(paid.txid, direct.txid);
+    // And the move of everything.
+    let moved = sweep_sealed(
+        &made.sealed.sealed,
+        &made.sealed.data_key,
+        &coins,
+        &external(5),
+        RATE,
+        1,
+        0,
+    )
+    .unwrap();
+    assert_eq!(moved.paid + moved.fee, 100_000);
 }
 
 // ---- FL-20, FL-21, FL-35: the outbox ----------------------------------------

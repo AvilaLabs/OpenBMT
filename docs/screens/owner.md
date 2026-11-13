@@ -196,6 +196,7 @@ with its name before the colon. Do not edit by hand: run the tests with
 | owner: FloatRefusal/Wallet | Cannot read the float | The refund float's description or address could not be read or made. | Nothing was changed. Make the float's code on the stick again and scan it. | Owner | FL-30 |
 | owner: FloatRefusal/NothingToSweep | The float is empty | The refund float holds nothing to move. | Nothing was moved. The float can be turned off as it is. | Owner | FL-35 |
 | owner: FloatRefusal/ShopAddress | No address to move it to | The shop's wallet address for the float's money could not be made. | Nothing was moved. Check the shop's wallet is connected, then try again. | Owner | FL-35 |
+| owner: FloatRefusal/NotThisFloat | WORDS_NEEDED_FL06_HEADING | WORDS_NEEDED_FL06_WHAT | WORDS_NEEDED_FL06_NEXT | Owner | FL-06 |
 | owner: FloatLow | Refund float low | The refund float holds less than a quarter of its cap. | Refill it from savings in Send from your wallet. | Owner | FL-12 |
 | owner: FloatNotWatching | Refund float not read yet | This phone has not finished reading what the refund float holds, or no float is set up, so nothing was signed. | Wait until this phone has caught up with the latest blocks, then try again. | Owner | FL-05 |
 | owner: FloatCoinUnreadable | Cannot read a float payment | A payment into the refund float could not be read on this phone. | Nothing was changed. Let the float's balance catch up, then try once more. | Owner | FL-20 |
