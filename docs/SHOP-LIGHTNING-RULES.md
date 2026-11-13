@@ -86,8 +86,15 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   stays in progress; nothing panics. The node logs it, the counter's Lightning
   stops offering invoices (SL-41), and the manager sees which device is
   missing. Payments already in flight finish when it returns.
-- **SL-24. Order of writes.** The second device first, then the counter's
-  own copy, so the second device is never behind.
+- **SL-24. Order of writes.** Each channel's monitor goes to the second
+  device first, then to the counter's own copy, so the second device never
+  holds an older monitor. The channel manager, the provider's state and the
+  spendable outputs go to the counter's copy first and then to the second
+  device, newest first, so that a second device that is away does not stop
+  the node. A start from the second device's copy alone can therefore find a
+  manager older than its monitors; the library then closes those channels on
+  the chain, and their money comes back to the shop's wallet after the
+  channel's wait (SL-30).
 - **SL-25. No old copy, ever.** On a start, the node reads the update
   numbers of both copies and starts only from the newer one. A copy behind
   the other is never used. Prototype E5b: an old copy makes the library stop

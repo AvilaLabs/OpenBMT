@@ -119,7 +119,7 @@ pub struct NodeConfig {
 /// Why the node did not start.
 #[derive(Debug)]
 pub enum StartError {
-    /// The network is `Bitcoin`, which is refused until SL-60 (`WORDS_NEEDED_SL_60`).
+    /// The network is `Bitcoin`, which is refused until SL-60 (`SL_60`).
     MainnetNotYet,
     /// The state is not safe to start from (SL-25).
     State(StateError),
@@ -134,14 +134,10 @@ pub enum StartError {
 impl std::fmt::Display for StartError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StartError::MainnetNotYet => f.write_str(crate::words::WORDS_NEEDED_SL_60),
-            StartError::State(StateError::OlderCopy(_)) => {
-                f.write_str(crate::words::WORDS_NEEDED_SL_25)
-            }
-            StartError::State(StateError::Diverged) => {
-                f.write_str(crate::words::WORDS_NEEDED_SL_25_DIVERGED)
-            }
-            StartError::DeviceAway(e) => write!(f, "{}: {e}", crate::words::WORDS_NEEDED_SL_23),
+            StartError::MainnetNotYet => f.write_str(crate::words::SL_60),
+            StartError::State(StateError::OlderCopy(_)) => f.write_str(crate::words::SL_25),
+            StartError::State(StateError::Diverged) => f.write_str(crate::words::SL_25_DIVERGED),
+            StartError::DeviceAway(e) => write!(f, "{}: {e}", crate::words::SL_23),
             StartError::Chain(e) | StartError::Setup(e) => f.write_str(e),
         }
     }
@@ -1354,7 +1350,7 @@ mod tests {
             .err()
             .unwrap();
         assert!(matches!(err, StartError::MainnetNotYet));
-        assert_eq!(err.to_string(), crate::words::WORDS_NEEDED_SL_60);
+        assert_eq!(err.to_string(), crate::words::SL_60);
         // Refused before anything was made on disk.
         assert!(!temp_dir("node-config").join("node").exists());
     }
