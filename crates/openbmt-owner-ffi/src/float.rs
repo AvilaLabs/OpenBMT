@@ -21,18 +21,13 @@ use openbmt_core::wallet_single::ImportedWallet;
 use openbmt_owner::float::{
     self, Coin, FloatPaid, FloatRefusal, FloatWallet, FloatWords, RefillError, RefillQueued,
 };
-use openbmt_owner::own_say::needed;
 
 use crate::codec::{wire_record, wire_record_get};
 use crate::error::{from_words, refused_by, AppError, Kind};
 
-/// The words of a refusal of this layer that no rule crate makes: the
-/// placeholder that is its own name, until the words are written (SC-12).
-const WORDS_NEEDED_FL_20_COIN: &str = "WORDS_NEEDED_FL_20_COIN";
-const WORDS_NEEDED_FL_35_SHOP: &str = "WORDS_NEEDED_FL_35_SHOP";
-
-fn placeholder(rule: &str, text: String, name: &'static str) -> AppError {
-    from_words(Kind::Refused, rule, text, needed(name))
+/// A refusal of this layer, with the library's words for it.
+fn refused_with(rule: &str, text: String, words: openbmt_core::say::Words) -> AppError {
+    from_words(Kind::Refused, rule, text, words)
 }
 use crate::views::OwnerNetwork;
 
@@ -92,10 +87,10 @@ fn coin_of(v: &FloatCoinView) -> Result<Coin, AppError> {
         .try_into()
         .map_err(|_| refused_by("id-length", "a coin's transaction ID is 32 bytes"))?;
     let prev_tx: Transaction = deserialize(&v.prev_tx).map_err(|e| {
-        placeholder(
+        refused_with(
             "float-coin",
             format!("a coin's transaction: {e}"),
-            WORDS_NEEDED_FL_20_COIN,
+            float::coin_unreadable_words(),
         )
     })?;
     Ok(Coin {
@@ -383,10 +378,10 @@ wire_record_get!(FloatSweepArgs {
 
 pub(crate) fn sweep(a: FloatSweepArgs) -> Result<FloatPaidView, AppError> {
     let shop = ImportedWallet::read(&a.shop).map_err(|e| {
-        placeholder(
+        refused_with(
             "float-shop-wallet",
             format!("the shop's wallet: {e:?}"),
-            WORDS_NEEDED_FL_35_SHOP,
+            float::shop_wallet_unreadable_words(),
         )
     })?;
     let to: ScriptBuf = float::shop_receive_script(&shop, a.shop_index).map_err(|e| refusal(&e))?;

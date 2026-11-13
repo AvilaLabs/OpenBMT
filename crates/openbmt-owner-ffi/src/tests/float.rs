@@ -83,8 +83,8 @@ fn fl_02_the_words_open_the_float_and_only_its_public_description_comes_back() {
     // Words that are not 12 English words are refused with the float's rule.
     let bad = Rd::error(&call(OP_OPEN, &W::new().string("girl mad pet").0)).expect("refused");
     assert_eq!(bad.rule, "FL-01");
-    assert_eq!(bad.words.heading, "WORDS_NEEDED_FL_01_WORDS");
-    assert_eq!(bad.words.what, bad.words.heading);
+    assert_eq!(bad.words.heading, "Not the float's words");
+    assert_ne!(bad.words.what, bad.words.heading);
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn fl_23_a_refund_larger_than_the_float_is_refused_with_its_words() {
     let response = call(OP_PAY, &pay_request(REFUND_TO, 59_950, &[(1, 0, 60_000)]));
     let fault = Rd::error(&response).expect("refused");
     assert_eq!(fault.rule, "FL-23");
-    assert_eq!(fault.words.heading, "WORDS_NEEDED_FL_23_SHORT");
+    assert_eq!(fault.words.heading, "Not enough in the float");
     // A bad address, and a coin that is not a transaction.
     let fault = Rd::error(&call(
         OP_PAY,
@@ -202,7 +202,7 @@ fn fl_23_a_refund_larger_than_the_float_is_refused_with_its_words() {
     ))
     .expect("refused");
     assert_eq!(fault.rule, "float-coin");
-    assert!(fault.words.heading.starts_with("WORDS_NEEDED_FL_"));
+    assert_eq!(fault.words.heading, "Cannot read a float payment");
 }
 
 #[test]

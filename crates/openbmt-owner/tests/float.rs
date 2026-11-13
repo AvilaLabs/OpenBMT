@@ -295,7 +295,7 @@ fn fl_12_low_is_below_a_quarter_of_the_cap() {
     assert!(!is_low(u64::MAX, u64::MAX, u64::MAX));
     let w = low_words();
     assert_eq!(w.code, Some("FL-12"));
-    assert_eq!(w.heading, WORDS_NEEDED_FL_12_LOW);
+    assert_eq!(w.heading, "Refund float low");
 }
 
 // ---- FL-22 --------------------------------------------------------------------
@@ -740,22 +740,27 @@ fn fl_35_a_sweep_that_leaves_a_coin_out_fails_the_check() {
 // ---- words ---------------------------------------------------------------------
 
 #[test]
-fn fl_words_every_refusal_is_a_placeholder_that_is_its_own_name() {
+fn fl_words_every_state_has_its_own_words_and_names_its_rule() {
     let all = all_float_words();
-    assert!(all.len() >= 16);
+    assert!(all.len() >= 18);
     for (name, w) in &all {
-        assert!(w.heading.starts_with("WORDS_NEEDED_FL_"), "{name}");
-        assert_eq!(w.heading, w.what, "{name}");
-        assert_eq!(w.heading, w.next, "{name}");
+        assert!(!w.heading.starts_with("WORDS_NEEDED_"), "{name}");
+        assert!(w.heading.chars().count() < 28, "{name}");
+        assert_ne!(w.heading, w.what, "{name}");
         assert!(w.code.is_some_and(|c| c.starts_with("FL-")), "{name}");
     }
+    for (i, (a, x)) in all.iter().enumerate() {
+        for (b, y) in all.iter().skip(i + 1) {
+            assert_ne!(x.heading, y.heading, "{a} and {b}");
+            assert_ne!(x.what, y.what, "{a} and {b}");
+        }
+    }
     for (name, r) in all_refusals() {
-        assert_eq!(r.words().heading, r.placeholder(), "{name}");
         assert!(r.to_string().starts_with(r.rule()), "{name}");
     }
     assert_eq!(
         refill_linked_words().heading,
-        WORDS_NEEDED_FL_31_LINKED,
+        "A refill links your wallets",
         "FL-31"
     );
 }

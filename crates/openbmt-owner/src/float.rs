@@ -17,11 +17,11 @@
 //! library has no network and no clock.
 //!
 //! Every refusal is a [`FloatRefusal`]. The words a person would see are
-//! placeholders that name themselves (`WORDS_NEEDED_FL_xx_...`) until they
-//! are written (SC-12), listed by [`all_float_words`].
+//! listed by [`all_float_words`] and checked as every other words are
+//! (SC-12).
 //!
-//! The cap of FL-10 is a number the caller gives each call. Where the signed
-//! settings carry it is not decided here: see the report of this build.
+//! The cap of FL-10 is a number the caller gives each call: the owner
+//! phone's own record, not a shop setting.
 
 use std::fmt;
 use std::str::FromStr;
@@ -43,7 +43,6 @@ use openbmt_spend::{
 pub use openbmt_spend::Coin;
 
 use crate::error::OwnerError;
-use crate::own_say::needed;
 use crate::state::Owner;
 use crate::types::CashAmount;
 
@@ -56,44 +55,6 @@ pub const LOW_DIVISOR: u64 = 4;
 pub const MIN_REFUND_RATE_PER_KVB: u64 = 1_000;
 /// FL-30: the label of a refill in the queue's cash-outs.
 pub const REFILL_LABEL: &str = "Refund float";
-
-/// FL-01: the 12 words are not 12 words of the English list with a right
-/// check word.
-pub const WORDS_NEEDED_FL_01_WORDS: &str = "WORDS_NEEDED_FL_01_WORDS";
-/// FL-10: the shop has set no cap, so the float is off.
-pub const WORDS_NEEDED_FL_10_NO_CAP: &str = "WORDS_NEEDED_FL_10_NO_CAP";
-/// FL-11: the float holds the cap or more, so there is nothing to refill.
-pub const WORDS_NEEDED_FL_11_NOTHING: &str = "WORDS_NEEDED_FL_11_NOTHING";
-/// FL-11: the refill would leave the float above the cap.
-pub const WORDS_NEEDED_FL_11_ABOVE_CAP: &str = "WORDS_NEEDED_FL_11_ABOVE_CAP";
-/// FL-11: the refill amount is zero or the sums overflow.
-pub const WORDS_NEEDED_FL_11_AMOUNT: &str = "WORDS_NEEDED_FL_11_AMOUNT";
-/// FL-12: the float is low (the home screen's line).
-pub const WORDS_NEEDED_FL_12_LOW: &str = "WORDS_NEEDED_FL_12_LOW";
-/// FL-20: the refund cannot be planned from the float's coins (the text is
-/// the detail).
-pub const WORDS_NEEDED_FL_20_PLAN: &str = "WORDS_NEEDED_FL_20_PLAN";
-/// FL-20: the float's key did not sign or the finish failed (the text is the
-/// detail).
-pub const WORDS_NEEDED_FL_20_SIGN: &str = "WORDS_NEEDED_FL_20_SIGN";
-/// FL-21: a coin is not one of the float's wallet.
-pub const WORDS_NEEDED_FL_21_COIN: &str = "WORDS_NEEDED_FL_21_COIN";
-/// FL-21: the finished transaction pays something other than the refund and
-/// the float's change, or spends a coin that is not the float's.
-pub const WORDS_NEEDED_FL_21_CHECK: &str = "WORDS_NEEDED_FL_21_CHECK";
-/// FL-22: there is no fee rate to use.
-pub const WORDS_NEEDED_FL_22_NO_RATE: &str = "WORDS_NEEDED_FL_22_NO_RATE";
-/// FL-23: the float cannot cover the refund and its fee; it stays queued.
-pub const WORDS_NEEDED_FL_23_SHORT: &str = "WORDS_NEEDED_FL_23_SHORT";
-/// FL-30: the float's description or its address cannot be read or made.
-pub const WORDS_NEEDED_FL_30_WALLET: &str = "WORDS_NEEDED_FL_30_WALLET";
-/// FL-31: said before a refill goes: it links the savings and the float on
-/// the chain.
-pub const WORDS_NEEDED_FL_31_LINKED: &str = "WORDS_NEEDED_FL_31_LINKED";
-/// FL-35: the float holds nothing to move.
-pub const WORDS_NEEDED_FL_35_NOTHING: &str = "WORDS_NEEDED_FL_35_NOTHING";
-/// FL-35: the shop's address for the sweep cannot be derived.
-pub const WORDS_NEEDED_FL_35_ADDRESS: &str = "WORDS_NEEDED_FL_35_ADDRESS";
 
 /// Why a step of the float was refused. Nothing was changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,30 +145,96 @@ impl FloatRefusal {
         }
     }
 
-    /// The placeholder that is the refusal's words.
-    pub fn placeholder(&self) -> &'static str {
-        match self {
-            Self::Words => WORDS_NEEDED_FL_01_WORDS,
-            Self::NoCap => WORDS_NEEDED_FL_10_NO_CAP,
-            Self::NothingToRefill => WORDS_NEEDED_FL_11_NOTHING,
-            Self::AboveCap { .. } => WORDS_NEEDED_FL_11_ABOVE_CAP,
-            Self::Amount => WORDS_NEEDED_FL_11_AMOUNT,
-            Self::Plan(_) => WORDS_NEEDED_FL_20_PLAN,
-            Self::Sign(_) => WORDS_NEEDED_FL_20_SIGN,
-            Self::NotFloatCoin(_) => WORDS_NEEDED_FL_21_COIN,
-            Self::NotOnlyFloat(_) => WORDS_NEEDED_FL_21_CHECK,
-            Self::NoFeeRate => WORDS_NEEDED_FL_22_NO_RATE,
-            Self::NotEnough { .. } => WORDS_NEEDED_FL_23_SHORT,
-            Self::Wallet => WORDS_NEEDED_FL_30_WALLET,
-            Self::NothingToSweep => WORDS_NEEDED_FL_35_NOTHING,
-            Self::ShopAddress => WORDS_NEEDED_FL_35_ADDRESS,
-        }
-    }
-
-    /// What the owner is told: the placeholder, with the library's own text
-    /// as the detail where it has one.
+    /// What the owner is told, with the library's own text as the detail
+    /// where it has one.
     pub fn words(&self) -> Words {
-        let words = needed(self.placeholder()).code(self.rule());
+        let code = self.rule();
+        let words = match self {
+            Self::Words => stop(
+                "Not the float's words",
+                "The code scanned is not 12 words of the list with a right check word.",
+                "Nothing was changed. Scan the refund float code on the stick again.",
+                code,
+            ),
+            Self::NoCap => stop(
+                "The float is off",
+                "No cap is set for the refund float, so it holds nothing and pays nothing.",
+                "Nothing was changed. Set a cap for the refund float to turn it on.",
+                code,
+            ),
+            Self::NothingToRefill => stop(
+                "The float is full",
+                "The refund float already holds its cap or more.",
+                "Nothing was changed. Refill it once refunds have used some of it.",
+                code,
+            ),
+            Self::AboveCap { .. } => stop(
+                "That is over the cap",
+                "That refill would leave the refund float holding more than its cap.",
+                "Nothing was changed. Refill the amount shown, or less.",
+                code,
+            ),
+            Self::Amount => stop(
+                "No amount to refill",
+                "The refill amount is zero, or too large to add up.",
+                "Nothing was changed. Enter an amount above zero.",
+                code,
+            ),
+            Self::Plan(_) => stop(
+                "Cannot make the refund",
+                "The refund could not be made from the refund float's money.",
+                "Nothing was changed. The refund is still waiting in Send from your wallet.",
+                code,
+            ),
+            Self::Sign(_) => stop(
+                "The float did not sign",
+                "The refund float's key could not sign or finish the payment.",
+                "Nothing was changed. Try again, or pay the refund from your wallet.",
+                code,
+            ),
+            Self::NotFloatCoin(_) => stop(
+                "Not the float's money",
+                "A payment picked for this is not in the refund float.",
+                "Nothing was changed. Let the float's balance catch up, then try again.",
+                code,
+            ),
+            Self::NotOnlyFloat(_) => stop(
+                "The refund failed a check",
+                "The finished payment would pay something other than the refund and the float's own change.",
+                "Nothing was sent. The refund is still waiting.",
+                code,
+            ),
+            Self::NoFeeRate => stop(
+                "No fee rate yet",
+                "The phone has no recent fee rate from the network, and none was typed.",
+                "Nothing was changed. Wait for the next block, or type a fee rate.",
+                code,
+            ),
+            Self::NotEnough { .. } => stop(
+                "Not enough in the float",
+                "The refund and its fee come to more than the refund float holds. A refund is never split.",
+                "Nothing was changed. Refill the float first, or pay the refund from your wallet.",
+                code,
+            ),
+            Self::Wallet => stop(
+                "Cannot read the float",
+                "The refund float's description or address could not be read or made.",
+                "Nothing was changed. Make the float's code on the stick again and scan it.",
+                code,
+            ),
+            Self::NothingToSweep => stop(
+                "The float is empty",
+                "The refund float holds nothing to move.",
+                "Nothing was moved. The float can be turned off as it is.",
+                code,
+            ),
+            Self::ShopAddress => stop(
+                "No address to move it to",
+                "The shop's wallet address for the float's money could not be made.",
+                "Nothing was moved. Check the shop's wallet is connected, then try again.",
+                code,
+            ),
+        };
         match self {
             Self::Plan(why)
             | Self::Sign(why)
@@ -216,6 +243,10 @@ impl FloatRefusal {
             _ => words,
         }
     }
+}
+
+fn stop(heading: &str, what: &str, next: &str, code: &'static str) -> Words {
+    Words::new(Tone::Stop, heading, what, Who::Owner, next).code(code)
 }
 
 /// A value of each refusal, with the name of its variant, for the words of
@@ -251,14 +282,34 @@ pub fn all_refusals() -> Vec<(&'static str, FloatRefusal)> {
     ]
 }
 
+/// FL-20: a coin handed in by the app could not be read.
+pub fn coin_unreadable_words() -> Words {
+    stop(
+        "Cannot read a float payment",
+        "A payment into the refund float could not be read on this phone.",
+        "Nothing was changed. Let the float's balance catch up, then try once more.",
+        "FL-20",
+    )
+}
+
+/// FL-35: the shop's pinned wallet description could not be read.
+pub fn shop_wallet_unreadable_words() -> Words {
+    stop(
+        "Cannot read the shop wallet",
+        "The shop's wallet description on this phone could not be read.",
+        "Nothing was moved. Connect the shop's wallet again, then turn the float off.",
+        "FL-35",
+    )
+}
+
 /// FL-12: the words of the home screen's line when the float is low.
 pub fn low_words() -> Words {
     Words::new(
         Tone::Info,
-        WORDS_NEEDED_FL_12_LOW,
-        WORDS_NEEDED_FL_12_LOW,
+        "Refund float low",
+        "The refund float holds less than a quarter of its cap.",
         Who::Owner,
-        WORDS_NEEDED_FL_12_LOW,
+        "Refill it from savings in Send from your wallet.",
     )
     .code("FL-12")
 }
@@ -267,10 +318,10 @@ pub fn low_words() -> Words {
 pub fn refill_linked_words() -> Words {
     Words::new(
         Tone::Info,
-        WORDS_NEEDED_FL_31_LINKED,
-        WORDS_NEEDED_FL_31_LINKED,
+        "A refill links your wallets",
+        "Anyone who looks at the chain can see that this payment joins your savings to the refund float.",
         Who::Owner,
-        WORDS_NEEDED_FL_31_LINKED,
+        "Send it if that is fine. It is the same for every refill.",
     )
     .code("FL-31")
 }
@@ -282,6 +333,11 @@ pub fn all_float_words() -> Vec<(String, Words)> {
         .map(|(n, r)| (format!("FloatRefusal/{n}"), r.words()))
         .collect();
     all.push(("FloatLow".to_string(), low_words()));
+    all.push(("FloatCoinUnreadable".to_string(), coin_unreadable_words()));
+    all.push((
+        "FloatShopWalletUnreadable".to_string(),
+        shop_wallet_unreadable_words(),
+    ));
     all.push(("FloatRefillLinked".to_string(), refill_linked_words()));
     all
 }
