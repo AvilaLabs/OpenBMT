@@ -457,7 +457,7 @@ fn refusal(r: &OwnRefusal) -> AppError {
 
 pub(crate) fn node_error(e: OwnNodeError) -> AppError {
     match &e {
-        OwnNodeError::Io(_) => from_words(Kind::Store, "OA-105", &e, shop_file_failed()),
+        OwnNodeError::Io(_) | OwnNodeError::NotCarried(_) => from_words(Kind::Store, "OA-105", &e, shop_file_failed()),
         OwnNodeError::State(_) => from_words(Kind::State, "OA-105", &e, shop_file_failed()),
         OwnNodeError::Switch(r) => refusal(r),
         OwnNodeError::DeskNoRoom => from_words(

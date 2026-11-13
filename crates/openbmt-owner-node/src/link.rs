@@ -64,12 +64,13 @@ use std::path::{Path, PathBuf};
 use openbmt_core::batch::PinnedRoots;
 use openbmt_core::batch::SignedBatch;
 use openbmt_core::command::SignedCommand;
+use openbmt_core::confirmed::{ConfirmedError, ConfirmedSettings};
 use openbmt_core::identity::DeviceId;
 use openbmt_core::pairing_own::SwitchOwn;
 use openbmt_core::pinned_wallet::SignedRange;
 use openbmt_core::records::{DeviceList, Record, RecordKind};
 use openbmt_core::settings::{Authority, Settings, SettingsError, SignedSettings};
-use openbmt_counter::{BatchHeld, Event, RangeHeld, SwitchedHeld};
+use openbmt_counter::{BatchHeld, ConfirmHeld, Event, RangeHeld, SwitchedHeld};
 use openbmt_counter_node::DriverPort;
 use openbmt_courier::{
     decode_records, received_content, Courier, Post, Received, RelayPost, SendError,
@@ -249,6 +250,8 @@ pub enum SettingsNotCarried {
     /// do not follow the settings before them, or lack a signature they
     /// need.
     Check(SettingsError),
+    /// CR-242: the settings joined to a counter's confirmation do not check.
+    Confirmed(ConfirmedError),
     /// LK-64: the link carries as many settings as it takes.
     Full,
 }
@@ -257,6 +260,7 @@ impl std::fmt::Display for SettingsNotCarried {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Check(e) => write!(f, "LK-64: the settings are not sent: {e}"),
+            Self::Confirmed(e) => write!(f, "LK-64: the confirmed settings are not sent: {e}"),
             Self::Full => write!(
                 f,
                 "LK-64: the link carries {MAX_CARRIED_SETTINGS} settings already"
@@ -286,6 +290,15 @@ impl SettingsWaiting {
             boxes,
         }
     }
+}
+
+/// Who a carried settings goes to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Carry {
+    /// Every device on the lists.
+    All,
+    /// The counters only (OA-119).
+    CountersOnly,
 }
 
 /// One signed settings the link carries.
@@ -322,6 +335,9 @@ struct IndexSeen {
     /// CR-262: the switched records the counter signed, in the order of its
     /// chain.
     switched: Vec<SwitchedHeld>,
+    /// CR-241: the confirmations of a change the counter wrote, in the order
+    /// of its chain. Whether one is right is for the one that joins it.
+    confirmed: Vec<ConfirmHeld>,
 }
 
 /// What a counter's records show of its indexes: the (start, end) of each
@@ -677,6 +693,8 @@ impl<R: Post> OwnerLink<R> {
                             if held.verify(&counter) {
                                 seen.switched.push(held);
                             }
+                        } else if let Ok(held) = ConfirmHeld::decode(&record.body) {
+                            seen.confirmed.push(held);
                         }
                     }
                     RecordKind::Sale => {
@@ -717,6 +735,15 @@ impl<R: Post> OwnerLink<R> {
     /// The switches that still wait for an answer, oldest first by counter.
     pub fn switches_waiting(&self) -> &[PendingSwitch] {
         self.switches.items()
+    }
+
+    /// OA-120, CR-241: the confirmations the counters' records hold, each
+    /// with the counter whose chain it is in, in the order of the chains.
+    pub fn confirmations(&self) -> Vec<(DeviceId, ConfirmHeld)> {
+        self.index_use
+            .iter()
+            .flat_map(|(counter, seen)| seen.confirmed.iter().map(|h| (*counter, *h)))
+            .collect()
     }
 
     /// CR-262: the switched records `counter`'s copy holds, with the
@@ -774,14 +801,94 @@ impl<R: Post> OwnerLink<R> {
             None => signed.verify_signatures_with(authority),
         }
         .map_err(SettingsNotCarried::Check)?;
+        self.carry_prepared(
+            id,
+            &signed.settings,
+            signed.to_bytes(),
+            *authority.owner(),
+            previous,
+            Carry::All,
+            now,
+        )
+    }
+
+    /// OA-119: take the settings that wait for a counter's confirmation, to
+    /// send as plain `OBMS` to the counters only. A counter holds them as its
+    /// change to confirm (CR-239); the Box is not sent a change it would
+    /// refuse. They are checked for the owner's signature alone. A change of
+    /// the same version carried before is replaced.
+    pub fn carry_held_settings(
+        &mut self,
+        id: u32,
+        signed: &SignedSettings,
+        authority: &Authority,
+        now: u64,
+    ) -> Result<(), SettingsNotCarried> {
+        signed
+            .verify_signatures_with(authority)
+            .map_err(SettingsNotCarried::Check)?;
+        self.carried.retain(|c| c.version != signed.settings.version);
+        self.carry_prepared(
+            id,
+            &signed.settings,
+            signed.to_bytes(),
+            *authority.owner(),
+            None,
+            Carry::CountersOnly,
+            now,
+        )
+    }
+
+    /// OA-120: take the settings joined to a counter's confirmation (`OBM<`,
+    /// CR-242) to send to every counter and to the Box. They replace the same
+    /// version carried as a change to confirm. `current` is the settings in
+    /// force, which the counter of the confirmation is one of (AP-05).
+    pub fn carry_confirmed(
+        &mut self,
+        id: u32,
+        confirmed: &ConfirmedSettings,
+        owner: &DeviceId,
+        current: &Settings,
+        now: u64,
+    ) -> Result<(), SettingsNotCarried> {
+        confirmed
+            .verify(owner, current)
+            .map_err(SettingsNotCarried::Confirmed)?;
+        let version = confirmed.signed.settings.version;
+        self.carried.retain(|c| c.version != version);
+        self.settings_sent.retain(|(_, v), _| *v != version);
+        self.boxes_sent.retain(|(_, v)| *v != version);
+        self.carry_prepared(
+            id,
+            &confirmed.signed.settings,
+            confirmed.to_bytes(),
+            *owner,
+            Some(current),
+            Carry::All,
+            now,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn carry_prepared(
+        &mut self,
+        id: u32,
+        settings: &Settings,
+        bytes: Vec<u8>,
+        owner: DeviceId,
+        previous: Option<&Settings>,
+        carry: Carry,
+        now: u64,
+    ) -> Result<(), SettingsNotCarried> {
+        let version = settings.version;
         if self.carried.len() >= MAX_CARRIED_SETTINGS {
             return Err(SettingsNotCarried::Full);
         }
         let mut targets = BTreeMap::new();
         let lists = [
             previous.map(roles_of),
-            Some(roles_of(&signed.settings)),
-            Some(self.last_targets.clone()),
+            Some(roles_of(settings)),
+            (carry == Carry::All).then(|| self.last_targets.clone()),
         ];
         for (device, role) in lists.into_iter().flatten().flatten() {
             targets.insert(device, role);
@@ -794,7 +901,10 @@ impl<R: Post> OwnerLink<R> {
             }
         }
         // The owner's own key is never a target.
-        targets.remove(authority.owner());
+        targets.remove(&owner);
+        if carry == Carry::CountersOnly {
+            targets.retain(|_, role| *role == Role::Counter);
+        }
         let entry = RosterEntry {
             id,
             version,
@@ -808,13 +918,15 @@ impl<R: Post> OwnerLink<R> {
         for (device, role) in &targets {
             self.courier.set_peer(*device, *role);
         }
-        self.last_targets = roles_of(&signed.settings);
+        if carry == Carry::All {
+            self.last_targets = roles_of(settings);
+        }
         self.carried.push(Carried {
             id,
             version,
-            bytes: signed.to_bytes(),
+            bytes,
             targets,
-            named: roles_of(&signed.settings).into_keys().collect(),
+            named: roles_of(settings).into_keys().collect(),
         });
         self.carried.sort_by_key(|c| c.version);
         self.send_settings(now);

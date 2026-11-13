@@ -110,7 +110,7 @@ pub use node::{
 };
 pub use own::{
     former_coins_file, own_approver, NotWatching, OwnNode, OwnNodeError, OwnTick, ToppedUp,
-    Watching, COINS_OF_FILE, OWN_STATE_FILE,
+    WaitingStep, WaitingView, Watching, COINS_OF_FILE, OWN_STATE_FILE, OWN_WAITING_FILE,
 };
 pub use paid_log::{
     standing, value_at, PaidEntry, PaidLog, PaidValue, PaidWhat, Undone, MAGIC_PAID_LOG,

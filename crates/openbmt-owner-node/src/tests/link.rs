@@ -2752,3 +2752,79 @@ fn ss_41_each_counter_is_switched_waiting_or_refused_and_ss_42_the_move_waits_fo
         .is_empty());
     assert!(w.link.switches_waiting().is_empty());
 }
+
+// ---- OA-119, OA-120: a change that waits for a counter's confirmation ----
+
+#[test]
+fn oa_119_a_change_that_waits_goes_to_the_counters_only_and_once() {
+    let mut b = with_box();
+    let waiting = signed_by_owner(listed(2, |s| s.light_per_sale.sats += 50));
+    let authority = openbmt_core::settings::Authority::OwnWallet { owner: owner() };
+    b.w.link
+        .carry_held_settings(2, &waiting, &authority, T0)
+        .unwrap();
+    assert_eq!(settings_in(&b.w.counter_gets()), vec![waiting.to_bytes()]);
+    assert!(
+        settings_in(&b.box_side.poll().unwrap()).is_empty(),
+        "the Box is not sent a change it would refuse"
+    );
+    // Settings that the owner did not sign are not taken.
+    let mut forged = signed_by_owner(listed(3, |s| s.light_per_sale.sats += 60));
+    forged.owner_sig = forged.settings.sign(&id(9));
+    assert!(b.w.link.carry_held_settings(3, &forged, &authority, T0).is_err());
+}
+
+#[test]
+fn oa_120_the_confirmed_settings_go_to_the_counter_and_the_box_in_place_of_the_waiting_ones() {
+    use openbmt_core::approval::CounterConfirmation;
+    use openbmt_core::confirmed::ConfirmedSettings;
+    let mut b = with_box();
+    let current = listed(1, |_| {});
+    let waiting = signed_by_owner(listed(2, |s| s.light_per_sale.sats += 50));
+    let authority = openbmt_core::settings::Authority::OwnWallet { owner: owner() };
+    b.w.link
+        .carry_held_settings(2, &waiting, &authority, T0)
+        .unwrap();
+    let _ = b.w.counter_gets();
+    let confirmation = CounterConfirmation::sign(&id(3), &waiting.settings.hash());
+    let confirmed = ConfirmedSettings::new(waiting.clone(), confirmation);
+    // A confirmation from a device that is not a counter of the settings in force is not carried.
+    let stranger = ConfirmedSettings::new(
+        waiting.clone(),
+        CounterConfirmation::sign(&id(8), &waiting.settings.hash()),
+    );
+    assert!(b
+        .w
+        .link
+        .carry_confirmed(2, &stranger, &owner(), &current, T0 + 100)
+        .is_err());
+    b.w.link
+        .carry_confirmed(2, &confirmed, &owner(), &current, T0 + 100)
+        .unwrap();
+    assert_eq!(settings_in(&b.w.counter_gets()), vec![confirmed.to_bytes()]);
+    assert_eq!(
+        settings_in(&b.box_side.poll().unwrap()),
+        vec![confirmed.to_bytes()]
+    );
+}
+
+#[test]
+fn oa_120_a_confirmation_in_a_counters_records_is_read_from_its_copy() {
+    use openbmt_core::approval::CounterConfirmation;
+    use openbmt_counter::ConfirmHeld;
+    let mut b = with_box();
+    let hash = [4u8; 32];
+    let held = ConfirmHeld {
+        settings_hash: hash,
+        sig: CounterConfirmation::sign(&id(3), &hash).sig,
+    };
+    let mut shown = Shown::new();
+    shown
+        .chain
+        .append(&id(3), RecordKind::Setting, held.encode())
+        .unwrap();
+    shown.flush(&mut b.w);
+    b.w.step(T0);
+    b.w.link.scan_index_use();
+    assert_eq!(b.w.link.confirmations(), vec![(counter(), held)]);
+}

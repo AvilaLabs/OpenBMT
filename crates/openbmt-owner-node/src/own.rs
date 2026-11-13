@@ -40,6 +40,9 @@ use crate::watcher::write_file;
 /// The shop's state, in the node's folder.
 pub const OWN_STATE_FILE: &str = "own-shop";
 
+/// The shop's one waiting change, in a file of its own (OA-119, OA-121).
+pub const OWN_WAITING_FILE: &str = "own-waiting";
+
 /// The checksum of the wallet the coin view file is for (SS-43).
 pub const COINS_OF_FILE: &str = "coins-of";
 
@@ -78,6 +81,9 @@ pub enum OwnNodeError {
     DeskNoRoom,
     /// The book of ranges is full (RQ-02, OA-106).
     DeskFull,
+    /// The link did not take the settings that wait or their confirmation
+    /// (OA-119, OA-120).
+    NotCarried(String),
 }
 
 impl fmt::Display for OwnNodeError {
@@ -93,6 +99,7 @@ impl fmt::Display for OwnNodeError {
                 "RQ-02: the live watch has no room for another range of the desk"
             ),
             Self::DeskFull => write!(f, "RQ-02: the allocation book holds no more ranges"),
+            Self::NotCarried(e) => write!(f, "OA-119: {e}"),
         }
     }
 }
@@ -144,6 +151,9 @@ pub struct ToppedUp {
 pub struct OwnNode {
     shop: OwnShop,
     dir: PathBuf,
+    /// The hash of the waiting change the link was last given, so that it is
+    /// handed over once and not at every turn.
+    waiting_carried: Option<[u8; 32]>,
 }
 
 impl fmt::Debug for OwnNode {
@@ -166,14 +176,30 @@ impl OwnNode {
         wallet: PinnedWallet,
     ) -> Result<Self, OwnNodeError> {
         fs::create_dir_all(dir).map_err(|e| OwnNodeError::Io(e.to_string()))?;
-        let shop = match fs::read(dir.join(OWN_STATE_FILE)) {
+        let mut shop = match fs::read(dir.join(OWN_STATE_FILE)) {
             Ok(bytes) => OwnShop::restore(identity, wallet, &bytes).map_err(OwnNodeError::State)?,
             Err(e) if e.kind() == io::ErrorKind::NotFound => OwnShop::new(identity, wallet),
             Err(e) => return Err(OwnNodeError::Io(format!("read: {e}"))),
         };
+        // OA-120, OA-121: the waiting change is read strictly; a start that
+        // finds the settings in force equal to it deletes the file.
+        match fs::read(dir.join(OWN_WAITING_FILE)) {
+            Ok(bytes) => match shop.restore_waiting(&bytes) {
+                Ok(true) => {}
+                Ok(false) => remove_file(dir, OWN_WAITING_FILE)?,
+                Err(_) => {
+                    return Err(OwnNodeError::State(OwnRestoreError::Corrupt(
+                        "the waiting change does not read back",
+                    )))
+                }
+            },
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(OwnNodeError::Io(format!("read: {e}"))),
+        }
         Ok(Self {
             shop,
             dir: dir.to_path_buf(),
+            waiting_carried: None,
         })
     }
 
@@ -191,6 +217,79 @@ impl OwnNode {
         (&mut self.shop, move |bytes: &[u8]| {
             write_file(&dir, OWN_STATE_FILE, bytes)
         })
+    }
+
+    /// The step that writes the waiting change's file (OA-119), for a call
+    /// that signs settings the shop holds for a confirmation.
+    pub fn waiting_writer(&self) -> impl Fn(&[u8]) -> Result<(), String> + 'static {
+        let dir = self.dir.clone();
+        move |bytes: &[u8]| write_file(&dir, OWN_WAITING_FILE, bytes)
+    }
+
+    /// OA-120, OA-121: the waiting change, with its four words and the
+    /// fields it loosens against the settings in force, for the screens.
+    pub fn waiting_view(&self) -> Option<WaitingView> {
+        let held = self.shop.waiting_change()?;
+        let current = self.shop.known_settings()?;
+        Some(WaitingView {
+            version: held.signed.settings.version,
+            words: held.words(),
+            fields: held.loosened_fields(&current.settings),
+            signed_at: held.signed_at,
+            ends_at: held.signed_at.saturating_add(openbmt_owner::own_waiting::WAIT_SECS),
+        })
+    }
+
+    /// OA-119 to OA-121: one turn for the waiting change. It is handed to the
+    /// link as plain settings for the counters, once. The first confirmation
+    /// that is for its hash and from a counter of the settings in force is
+    /// joined to it as `OBM<`, handed to the link for every counter and the
+    /// Box, and then the settings are put in force and the file is deleted,
+    /// in that order. A change that has waited seven days is dropped.
+    pub fn step_waiting<R: Post>(
+        &mut self,
+        link: &mut OwnerLink<R>,
+        now: u64,
+    ) -> Result<WaitingStep, OwnNodeError> {
+        let Some(held) = self.shop.waiting_change().cloned() else {
+            return Ok(WaitingStep::Idle);
+        };
+        if held.expired(now) {
+            self.shop.drop_waiting();
+            self.waiting_carried = None;
+            remove_file(&self.dir, OWN_WAITING_FILE)?;
+            return Ok(WaitingStep::Expired);
+        }
+        let owner = self.shop.owner_id();
+        let authority = Authority::OwnWallet { owner };
+        let hash = held.hash();
+        if self.waiting_carried != Some(hash) {
+            let version = held.signed.settings.version;
+            match link.carry_held_settings(version, &held.signed, &authority, now) {
+                Ok(()) => self.waiting_carried = Some(hash),
+                Err(e) => return Err(OwnNodeError::NotCarried(e.to_string())),
+            }
+        }
+        let found = link
+            .confirmations()
+            .into_iter()
+            .filter(|(_, rec)| rec.settings_hash == hash)
+            .find_map(|(counter, rec)| self.shop.join_confirmation(rec.confirmation(counter)));
+        let Some(confirmed) = found else {
+            return Ok(WaitingStep::Waiting);
+        };
+        let Some(current) = self.shop.known_settings().map(|k| k.settings.clone()) else {
+            return Ok(WaitingStep::Waiting);
+        };
+        let version = confirmed.signed.settings.version;
+        link.carry_confirmed(version, &confirmed, &owner, &current, now)
+            .map_err(|e| OwnNodeError::NotCarried(e.to_string()))?;
+        let (shop, store) = self.shop_and_store();
+        shop.put_in_force(&confirmed, store)
+            .map_err(|e| OwnNodeError::Io(format!("{e}")))?;
+        self.waiting_carried = None;
+        remove_file(&self.dir, OWN_WAITING_FILE)?;
+        Ok(WaitingStep::Joined(version))
     }
 
     /// OA-107: the index of a script the book covers, for a payment the
@@ -608,6 +707,13 @@ impl OwnNode {
             }
         }
         let topped_up = self.top_up_with(link, now, node)?;
+        let waiting = match self.step_waiting(link, now) {
+            Ok(step) => step,
+            Err(e) => {
+                notes.push(format!("OA-120: the waiting change: {e}"));
+                WaitingStep::Waiting
+            }
+        };
         let settings_taken = match self.carry_settings(link, carried, now) {
             Ok(taken) => taken,
             Err(e) => {
@@ -618,6 +724,7 @@ impl OwnNode {
         Ok(OwnTick {
             topped_up,
             settings_taken,
+            waiting,
             notes,
         })
     }
@@ -630,6 +737,45 @@ pub struct OwnTick {
     pub topped_up: Vec<ToppedUp>,
     /// Whether the link took up settings in this turn.
     pub settings_taken: bool,
+    /// What the turn did for the waiting change (OA-119 to OA-121).
+    pub waiting: WaitingStep,
     /// What the turn could not do, with the rule.
     pub notes: Vec<String>,
+}
+
+/// What [`OwnNode::step_waiting`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaitingStep {
+    /// No change waits.
+    Idle,
+    /// A change waits for a counter's confirmation.
+    Waiting,
+    /// The change waited seven days and was dropped (OA-121).
+    Expired,
+    /// A confirmation was joined, sent, and the settings of this version
+    /// were put in force (OA-120).
+    Joined(u32),
+}
+
+/// A waiting change as the screens show it (OA-119).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WaitingView {
+    /// The version of the settings that wait.
+    pub version: u32,
+    /// Their four words (AP-03).
+    pub words: [&'static str; 4],
+    /// The fields they loosen, against the settings in force.
+    pub fields: Vec<&'static str>,
+    /// When the owner signed them.
+    pub signed_at: u64,
+    /// When they are dropped if no counter confirmed them (OA-121).
+    pub ends_at: u64,
+}
+
+fn remove_file(dir: &Path, name: &str) -> Result<(), OwnNodeError> {
+    match fs::remove_file(dir.join(name)) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(OwnNodeError::Io(format!("remove {name}: {e}"))),
+    }
 }

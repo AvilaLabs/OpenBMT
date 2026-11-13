@@ -452,14 +452,18 @@ impl SettingsNotCarried {
     /// LK-64: the words of the outbox row of settings the link did not take.
     pub fn words(&self) -> Words {
         match self {
-            Self::Check(e) => Words::new(
+            Self::Check(_) | Self::Confirmed(_) => Words::new(
                 Tone::Stop,
                 "Settings not sent",
                 "The new settings are not signed as the counters need, so the phone did not send them.",
                 Who::Owner,
                 "Make the change again and approve it on the Key app if it asks.",
             )
-            .detail(e.to_string()),
+            .detail(match self {
+                Self::Check(e) => e.to_string(),
+                Self::Confirmed(e) => e.to_string(),
+                Self::Full => String::new(),
+            }),
             Self::Full => Words::new(
                 Tone::Info,
                 "Settings wait their turn",
