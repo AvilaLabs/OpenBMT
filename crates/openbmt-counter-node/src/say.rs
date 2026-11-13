@@ -21,6 +21,7 @@ use crate::paired::{PairRefused, RelayRefused};
 use crate::paired_own::OwnPairRefused;
 use crate::relaylink::LinkLine;
 use crate::settings::{SettingsFault, SettingsLine, SettingsRefused};
+use crate::switch::{SwitchNotice, SwitchRefused, SwitchStepRefused};
 
 impl DirStoreError {
     /// What the owner is told about a file of the counter's data folder.
@@ -95,8 +96,86 @@ impl StartError {
                 "Check the counter's internet connection and start it again. See Details.",
             )
             .detail(e.clone()),
+            Self::Switch(e) => needed(Tone::Stop, "WORDS_NEEDED_CR_261_START", Who::Owner)
+                .code("CR-261")
+                .detail(e.clone()),
         }
     }
+}
+
+/// Words of section 26 that are still to be written: the placeholder stands
+/// in the heading and both sentences, so that it shows wherever the words
+/// would (CR-264). Its value is its own name, which names the rule.
+pub fn needed(tone: Tone, placeholder: &'static str, who: Who) -> Words {
+    Words::new(tone, placeholder, placeholder, who, placeholder)
+}
+
+/// Whether these words are a placeholder (CR-264).
+pub fn is_placeholder(words: &Words) -> bool {
+    words.heading.starts_with("WORDS_NEEDED_")
+}
+
+impl SwitchRefused {
+    /// What is told about a switch that was not taken to be checked (CR-257,
+    /// CR-258, CR-259, CR-263). Nothing changed.
+    pub fn words(&self) -> Words {
+        let (placeholder, who) = match self {
+            Self::Frame(_) => ("WORDS_NEEDED_CR_257_NOT_A_SWITCH", Who::Owner),
+            Self::NotStarter => ("WORDS_NEEDED_CR_263_NOT_STARTER", Who::Owner),
+            Self::NotFromOwner => ("WORDS_NEEDED_CR_258_NOT_FROM_OWNER", Who::Owner),
+            Self::WrongCounter => ("WORDS_NEEDED_CR_258_WRONG_COUNTER", Who::Owner),
+            Self::WrongWallet => ("WORDS_NEEDED_CR_258_WRONG_WALLET", Who::Owner),
+            Self::NewWalletRefused => ("WORDS_NEEDED_CR_258_NEW_WALLET", Who::Owner),
+            Self::SameWallet => ("WORDS_NEEDED_CR_258_SAME_WALLET", Who::Owner),
+            Self::Range(_) => ("WORDS_NEEDED_CR_258_RANGE", Who::Owner),
+            Self::NotWritten(_) => ("WORDS_NEEDED_CR_259_NOT_SAVED", Who::Owner),
+        };
+        needed(Tone::Ended, placeholder, who)
+            .code(self.rule())
+            .detail(self.to_string())
+    }
+}
+
+impl SwitchStepRefused {
+    /// What a manager is told when the answer to a waiting switch did not go
+    /// through (CR-260, CR-261).
+    pub fn words(&self) -> Words {
+        let (tone, placeholder) = match self {
+            Self::NothingWaits => (Tone::Ended, "WORDS_NEEDED_CR_261_NOTHING_WAITS"),
+            Self::NoRecord => (Tone::Stop, "WORDS_NEEDED_CR_261_NO_RECORD"),
+            Self::Refused(e) => return e.words(),
+            Self::NotWritten(_) => (Tone::Stop, "WORDS_NEEDED_CR_261_NOT_WRITTEN"),
+        };
+        needed(tone, placeholder, Who::Manager)
+            .code(self.rule())
+            .detail(self.to_string())
+    }
+}
+
+impl SwitchNotice {
+    /// What a manager is told about a switch that came to nothing (CR-259,
+    /// CR-264).
+    pub fn words(&self) -> Words {
+        match self {
+            Self::Dropped => needed(Tone::Ended, "WORDS_NEEDED_CR_259_DROPPED", Who::Manager)
+                .code("CR-259"),
+        }
+    }
+}
+
+/// CR-261: what a manager is told when the counter switched.
+pub fn switched_words() -> Words {
+    needed(Tone::Good, "WORDS_NEEDED_CR_261_SWITCHED", Who::Nobody).code("CR-261")
+}
+
+/// CR-260: what a manager is told after "Different".
+pub fn switch_dropped_words() -> Words {
+    needed(Tone::Ended, "WORDS_NEEDED_CR_260_DIFFERENT", Who::Owner).code("CR-260")
+}
+
+/// CR-260: the line Home shows the manager while a switch waits.
+pub fn switch_home_line_words() -> Words {
+    needed(Tone::Info, "WORDS_NEEDED_CR_260_HOME_LINE", Who::Manager).code("CR-260")
 }
 
 impl SettingsRefused {
@@ -878,7 +957,67 @@ pub fn all_words() -> Vec<(String, Words)> {
         ChangeNotice::Dropped { version: 2 }.words(),
     ));
     all.push(("ChangeConfirmed".to_string(), change_confirmed_words()));
+    // CR-264: the states and refusals of a switch from the starter wallet.
+    all.push((
+        "StartError::Switch".to_string(),
+        StartError::Switch("the ranges are for another wallet".to_string()).words(),
+    ));
+    for (name, e) in every_switch_refused() {
+        all.push((format!("SwitchRefused::{name}"), e.words()));
+    }
+    for (name, e) in every_switch_step_refused() {
+        // The refusal that wraps another has the words of what it wraps.
+        if name != "Refused" {
+            all.push((format!("SwitchStepRefused::{name}"), e.words()));
+        }
+    }
+    all.push((
+        "SwitchNotice::Dropped".to_string(),
+        SwitchNotice::Dropped.words(),
+    ));
+    all.push(("SwitchHomeLine".to_string(), switch_home_line_words()));
+    all.push(("Switched".to_string(), switched_words()));
+    all.push(("SwitchDifferent".to_string(), switch_dropped_words()));
     all
+}
+
+/// One value for every variant of [`SwitchRefused`] (SC-12).
+pub fn every_switch_refused() -> Vec<(&'static str, SwitchRefused)> {
+    use openbmt_core::pinned_wallet::RangeError;
+    use openbmt_core::wire::DecodeError;
+    vec![
+        ("Frame", SwitchRefused::Frame(DecodeError::Truncated)),
+        ("NotStarter", SwitchRefused::NotStarter),
+        ("NotFromOwner", SwitchRefused::NotFromOwner),
+        ("WrongCounter", SwitchRefused::WrongCounter),
+        ("WrongWallet", SwitchRefused::WrongWallet),
+        ("NewWalletRefused", SwitchRefused::NewWalletRefused),
+        ("SameWallet", SwitchRefused::SameWallet),
+        (
+            "Range",
+            SwitchRefused::Range(OwnPairError::Range(RangeError::OverlapsUsed)),
+        ),
+        (
+            "NotWritten",
+            SwitchRefused::NotWritten("switch.bin: full".to_string()),
+        ),
+    ]
+}
+
+/// One value for every variant of [`SwitchStepRefused`] (SC-12).
+pub fn every_switch_step_refused() -> Vec<(&'static str, SwitchStepRefused)> {
+    vec![
+        ("NothingWaits", SwitchStepRefused::NothingWaits),
+        ("NoRecord", SwitchStepRefused::NoRecord),
+        (
+            "Refused",
+            SwitchStepRefused::Refused(SwitchRefused::NotStarter),
+        ),
+        (
+            "NotWritten",
+            SwitchStepRefused::NotWritten("ranges.bin: full".to_string()),
+        ),
+    ]
 }
 
 /// Whether the words of an own-wallet refusal are its own and not those of a

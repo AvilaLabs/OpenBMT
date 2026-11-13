@@ -321,6 +321,23 @@ by hand. To write it again, run the test
 | SettingsLine::RestartNeeded | Restart for settings | The owner changed Tor, a node the shop uses or how payments are checked, which only take effect when the counter starts again. | Nothing to do. The counter starts again by itself when no sale screen is open. | nobody | CR-164 |
 | ChangeNotice::Dropped | Change not confirmed in time | A change from the owner phone waited seven days and was dropped. Nothing changed. | Ask the owner to make the change again. | a manager | CR-239 |
 | ChangeConfirmed | Change confirmed | The owner phone sends the change to every counter. It applies once it arrives. | Nothing to do. | nobody | CR-241 |
+| StartError::Switch | WORDS_NEEDED_CR_261_START | WORDS_NEEDED_CR_261_START | WORDS_NEEDED_CR_261_START | the owner | CR-261 |
+| SwitchRefused::Frame | WORDS_NEEDED_CR_257_NOT_A_SWITCH | WORDS_NEEDED_CR_257_NOT_A_SWITCH | WORDS_NEEDED_CR_257_NOT_A_SWITCH | the owner | CR-257 |
+| SwitchRefused::NotStarter | WORDS_NEEDED_CR_263_NOT_STARTER | WORDS_NEEDED_CR_263_NOT_STARTER | WORDS_NEEDED_CR_263_NOT_STARTER | the owner | CR-263 |
+| SwitchRefused::NotFromOwner | WORDS_NEEDED_CR_258_NOT_FROM_OWNER | WORDS_NEEDED_CR_258_NOT_FROM_OWNER | WORDS_NEEDED_CR_258_NOT_FROM_OWNER | the owner | CR-258 |
+| SwitchRefused::WrongCounter | WORDS_NEEDED_CR_258_WRONG_COUNTER | WORDS_NEEDED_CR_258_WRONG_COUNTER | WORDS_NEEDED_CR_258_WRONG_COUNTER | the owner | CR-258 |
+| SwitchRefused::WrongWallet | WORDS_NEEDED_CR_258_WRONG_WALLET | WORDS_NEEDED_CR_258_WRONG_WALLET | WORDS_NEEDED_CR_258_WRONG_WALLET | the owner | CR-258 |
+| SwitchRefused::NewWalletRefused | WORDS_NEEDED_CR_258_NEW_WALLET | WORDS_NEEDED_CR_258_NEW_WALLET | WORDS_NEEDED_CR_258_NEW_WALLET | the owner | CR-258 |
+| SwitchRefused::SameWallet | WORDS_NEEDED_CR_258_SAME_WALLET | WORDS_NEEDED_CR_258_SAME_WALLET | WORDS_NEEDED_CR_258_SAME_WALLET | the owner | CR-258 |
+| SwitchRefused::Range | WORDS_NEEDED_CR_258_RANGE | WORDS_NEEDED_CR_258_RANGE | WORDS_NEEDED_CR_258_RANGE | the owner | CR-258 |
+| SwitchRefused::NotWritten | WORDS_NEEDED_CR_259_NOT_SAVED | WORDS_NEEDED_CR_259_NOT_SAVED | WORDS_NEEDED_CR_259_NOT_SAVED | the owner | CR-259 |
+| SwitchStepRefused::NothingWaits | WORDS_NEEDED_CR_261_NOTHING_WAITS | WORDS_NEEDED_CR_261_NOTHING_WAITS | WORDS_NEEDED_CR_261_NOTHING_WAITS | a manager | CR-261 |
+| SwitchStepRefused::NoRecord | WORDS_NEEDED_CR_261_NO_RECORD | WORDS_NEEDED_CR_261_NO_RECORD | WORDS_NEEDED_CR_261_NO_RECORD | a manager | CR-261 |
+| SwitchStepRefused::NotWritten | WORDS_NEEDED_CR_261_NOT_WRITTEN | WORDS_NEEDED_CR_261_NOT_WRITTEN | WORDS_NEEDED_CR_261_NOT_WRITTEN | a manager | CR-40 |
+| SwitchNotice::Dropped | WORDS_NEEDED_CR_259_DROPPED | WORDS_NEEDED_CR_259_DROPPED | WORDS_NEEDED_CR_259_DROPPED | a manager | CR-259 |
+| SwitchHomeLine | WORDS_NEEDED_CR_260_HOME_LINE | WORDS_NEEDED_CR_260_HOME_LINE | WORDS_NEEDED_CR_260_HOME_LINE | a manager | CR-260 |
+| Switched | WORDS_NEEDED_CR_261_SWITCHED | WORDS_NEEDED_CR_261_SWITCHED | WORDS_NEEDED_CR_261_SWITCHED | nobody | CR-261 |
+| SwitchDifferent | WORDS_NEEDED_CR_260_DIFFERENT | WORDS_NEEDED_CR_260_DIFFERENT | WORDS_NEEDED_CR_260_DIFFERENT | the owner | CR-260 |
 | NodeOnlyLine::Usable | Your node is checking | Your node is connected and up to date, and it alone checks this counter's payments. | Nothing to do. | nobody | WR-67 |
 | NodeOnlyLine::CheckingWithOthers | Checking with other nodes | Your node cannot be used right now, so this counter checks payments with other nodes until it is back. | Check that your node is running and that Tor works. | the owner | WR-67 |
 | NodeOnlyLine::NotUsable/Connecting | Connecting to your node | This counter is reaching your node over Tor, and checks payments once it answers. | Nothing to do. It takes up to two minutes. | nobody | WR-67 |

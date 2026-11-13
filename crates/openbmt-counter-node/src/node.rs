@@ -108,7 +108,8 @@ use openbmt_core::batch::{AddError, PinnedRoots, SignedBatch};
 use openbmt_core::command::SignedCommand;
 use openbmt_core::confirmed::{ConfirmedError, ConfirmedSettings};
 use openbmt_core::heartbeat::SignedHeartbeat;
-use openbmt_core::identity::Identity;
+use openbmt_core::identity::{DeviceId, Identity};
+use openbmt_core::pairing_own::{RangeLedger, SwitchOwn};
 use openbmt_core::pinned_wallet::SignedRange;
 use openbmt_core::records::Record;
 use openbmt_core::say::Words;
@@ -140,6 +141,11 @@ use openbmt_watch::{
 use crate::chainview::ChainView;
 use crate::confirm::{ChangeNotice, ConfirmRefused, Pending, PendingChange};
 use crate::dirstore::{DirStore, DirStoreError};
+use crate::paired_own::OwnPairingRecord;
+use crate::switch::{
+    check_switch, PendingSwitch, SwitchNotice, SwitchRefused, SwitchStepRefused, Waiting,
+    SWITCH_PENDING_SECS,
+};
 use crate::lightning::{
     Lightning, LightningStatus, LnEvent, LnRequest, LnTransport, SaleLightning, SetupRefused,
     SetupStep,
@@ -193,6 +199,9 @@ pub enum StartError {
     Settings(SettingsFault),
     /// The driver did not start.
     Driver(String),
+    /// CR-261: the range book is for another wallet than the pairing record
+    /// pins, and the folder holds no switch that explains it.
+    Switch(String),
 }
 
 impl fmt::Display for StartError {
@@ -206,6 +215,7 @@ impl fmt::Display for StartError {
             Self::Checked(e) => write!(f, "the checked height: {e}"),
             Self::Settings(e) => write!(f, "{e}"),
             Self::Driver(e) => write!(f, "the driver: {e}"),
+            Self::Switch(e) => write!(f, "CR-261: {e}"),
         }
     }
 }
@@ -360,6 +370,11 @@ pub struct NodeConfig {
     /// start after pairing records the settings it was paired with, as the
     /// owner looks for that record. Off unless the app has a link.
     pub announce_settings: bool,
+    /// CR-256, CR-261: the pairing record of a counter paired with the
+    /// shop's own wallet, as the app kept it. The node reads the starter flag
+    /// from it, and writes it again for the app to keep when the counter
+    /// switches. Without it the counter takes no switch.
+    pub own_record: Option<OwnPairingRecord>,
 }
 
 impl NodeConfig {
@@ -383,6 +398,7 @@ impl NodeConfig {
             health: Box::new(check_health),
             lightning: None,
             announce_settings: false,
+            own_record: None,
         }
     }
 
@@ -506,6 +522,19 @@ pub struct Node<P: DriverPort = Handle> {
     pending: Option<Pending>,
     /// CR-244: what the manager is told about a change that came to nothing.
     notice: Option<ChangeNotice>,
+    /// CR-256: the record of this counter has the starter flag.
+    starter: bool,
+    /// CR-261: the pairing record as the app keeps it now.
+    own_record: Option<OwnPairingRecord>,
+    /// CR-259: the one switch that waits for the manager.
+    switch: Option<Waiting>,
+    /// CR-264: what the manager is told about a switch that came to nothing.
+    switch_notice: Option<SwitchNotice>,
+    /// CR-261: the record the app must keep (step two), until it says so.
+    record_update: Option<Vec<u8>>,
+    /// CR-261: the hash of the wallet a switch is being finished for (steps
+    /// three and four are still to do).
+    switch_finishing: Option<[u8; 32]>,
     /// CR-103: the driver was started with an own node.
     own_configured: bool,
     /// What the driver last said about the own node (NR-102), or, before it
@@ -598,6 +627,80 @@ fn load_pending(
     })
 }
 
+/// What a start found of a switch that was being made (CR-261).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SwitchRecovery {
+    /// No switch is being finished.
+    None,
+    /// The book is for the new wallet and the record the app gave is for the
+    /// old: the record is made again (step two) for the app to keep, then
+    /// steps three and four follow.
+    RecordBehind {
+        /// The hash of the new wallet.
+        wallet: [u8; 32],
+        /// The record to keep; empty when the node was given none.
+        record: Vec<u8>,
+    },
+    /// The book and the record are for the new wallet: steps three and four.
+    Finish([u8; 32]),
+}
+
+/// CR-261: at start, a book whose open range is for a wallet that the record
+/// does not pin, while `switch.bin` holds the switch to that wallet, finishes
+/// the switch from the second step: the record is for the wallet of the
+/// switch. Any other mismatch is left for the counter's own check of the book
+/// to refuse (CR-234).
+fn recover_switch(
+    own: &mut Option<OwnPairing>,
+    record: &mut Option<OwnPairingRecord>,
+    ranges: Option<&[u8]>,
+    store: &DirStore,
+    me: &DeviceId,
+) -> Result<SwitchRecovery, StartError> {
+    let Some(own) = own.as_mut() else {
+        return Ok(SwitchRecovery::None);
+    };
+    let Some(hash) = ranges
+        .and_then(|b| RangeLedger::from_bytes(b, own.owner, *me).ok())
+        .and_then(|l| l.switched_to())
+    else {
+        return Ok(SwitchRecovery::None);
+    };
+    let file = store
+        .switch_file()
+        .ok()
+        .flatten()
+        .and_then(|b| SwitchOwn::from_bytes(&b).ok())
+        .filter(|sw| sw.verify(&own.owner) && sw.counter == *me && sw.wallet_hash() == hash);
+    if own.wallet.checksum32() == hash {
+        // The record is already the switched one.
+        return Ok(if file.is_some() {
+            SwitchRecovery::Finish(hash)
+        } else {
+            SwitchRecovery::None
+        });
+    }
+    let Some(sw) = file.filter(|sw| sw.from == own.wallet.checksum32()) else {
+        return Err(StartError::Switch(
+            "the ranges are for a wallet this counter does not pin, and no switch to it waits"
+                .to_string(),
+        ));
+    };
+    own.wallet = sw.wallet.clone();
+    let bytes = match record.as_mut() {
+        Some(r) => {
+            r.wallet = sw.wallet;
+            r.starter = false;
+            r.to_bytes()
+        }
+        None => Vec::new(),
+    };
+    Ok(SwitchRecovery::RecordBehind {
+        wallet: hash,
+        record: bytes,
+    })
+}
+
 impl Node<Handle> {
     /// Start the node on a real driver: the driver keeps its headers and its
     /// address book in the same directory.
@@ -630,7 +733,10 @@ impl<P: DriverPort> Node<P> {
             health,
             lightning,
             announce_settings,
+            own_record,
         } = config;
+        let mut own = own;
+        let mut own_record = own_record;
         // NR-79: before anything in the directory is read.
         let lock = DirLock::acquire(&dir).map_err(|e| StartError::Locked(e.to_string()))?;
         let mut notes = VecDeque::new();
@@ -671,6 +777,16 @@ impl<P: DriverPort> Node<P> {
             Some(own) => Authority::OwnWallet { owner: own.owner },
             None => Authority::KeyApp(pairing.roots),
         };
+        // CR-261: a book that is ahead of the record is finished before the
+        // counter starts.
+        let me = identity.device_id();
+        let recovery = recover_switch(
+            &mut own,
+            &mut own_record,
+            loaded.ranges.as_deref(),
+            &store,
+            &me,
+        )?;
         let mut counter = match &own {
             Some(own) => {
                 Counter::load_own(identity, own, settings.clone(), loaded.stored(), &store)
@@ -766,6 +882,12 @@ impl<P: DriverPort> Node<P> {
             setting_unrecorded,
             pending,
             notice: None,
+            starter: own_record.as_ref().is_some_and(|r| r.starter),
+            own_record,
+            switch: None,
+            switch_notice: None,
+            record_update: None,
+            switch_finishing: None,
             own_configured,
             own_input: (own_configured && !node_only).then_some(OwnNodeInput {
                 link: OwnNodeLink::Down { since: started_at },
@@ -830,6 +952,7 @@ impl<P: DriverPort> Node<P> {
             node.ln.sale_restored(index, &quotes, open, started_at);
         }
         node.take_ln_notes();
+        node.start_switch(recovery, started_at);
         node.restore_swaps(started_at);
         node.update_all_blocks();
         node.retry_setting_record();
@@ -1116,6 +1239,250 @@ impl<P: DriverPort> Node<P> {
         self.drop_pending_covered();
         self.retry_setting_record();
         Ok(Some(change))
+    }
+
+    // CR-256 to CR-264: a switch from the starter wallet.
+
+    /// CR-259, CR-261: what a start found of a switch. A switch being
+    /// finished goes on (steps two to four); a switch that waits is read
+    /// from its file and checked again, and dropped when it no longer passes,
+    /// when the counter answered it already, or when seven days have gone.
+    fn start_switch(&mut self, recovery: SwitchRecovery, now: u64) {
+        match recovery {
+            SwitchRecovery::RecordBehind { wallet, record } => {
+                self.starter = false;
+                self.switch_finishing = Some(wallet);
+                if record.is_empty() {
+                    self.finish_switch_quietly();
+                } else {
+                    self.record_update = Some(record);
+                }
+                self.note(
+                    "CR-261: a switch was begun and not finished: the record is written again"
+                        .to_string(),
+                );
+            }
+            SwitchRecovery::Finish(wallet) => {
+                self.starter = false;
+                self.switch_finishing = Some(wallet);
+                self.finish_switch_quietly();
+            }
+            SwitchRecovery::None => self.load_switch(now),
+        }
+    }
+
+    /// CR-259: the switch that waited at the last stop, read from its file.
+    fn load_switch(&mut self, now: u64) {
+        let bytes = match self.store.switch_file() {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => return,
+            Err(e) => {
+                self.note(format!(
+                    "CR-259: the file of the waiting switch was not read: {e}"
+                ));
+                return;
+            }
+        };
+        let arrived = self
+            .store
+            .switch_written_at()
+            .map_or(now, |t| t.min(now));
+        let kept = SwitchOwn::from_bytes(&bytes).ok().filter(|sw| {
+            // A wallet the counter already answered is not asked again.
+            self.counter.switched_record(&sw.wallet_hash()).is_none() && self.check(sw).is_ok()
+        });
+        match kept {
+            Some(switch) => {
+                self.switch = Some(Waiting {
+                    switch,
+                    bytes,
+                    arrived,
+                });
+            }
+            None => {
+                self.note("CR-259: the file of the waiting switch is of no use: removed".to_string());
+                self.remove_switch_file();
+            }
+        }
+    }
+
+    fn check(&self, sw: &SwitchOwn) -> Result<(), SwitchRefused> {
+        let Authority::OwnWallet { owner } = self.authority else {
+            return Err(SwitchRefused::NotStarter);
+        };
+        let me = self.counter.device_id();
+        let (Some(pinned), min) = (self.counter.own_wallet(), self.counter.own_min_count()) else {
+            return Err(SwitchRefused::NotStarter);
+        };
+        check_switch(sw, &owner, &me, self.starter, pinned, min, |a, b| {
+            self.counter.holds_sale_number_in(a, b)
+        })
+    }
+
+    fn remove_switch_file(&mut self) {
+        if let Err(e) = self.store.remove_switch() {
+            self.note(format!(
+                "CR-259: the file of the waiting switch was not removed: {e}"
+            ));
+        }
+    }
+
+    /// CR-258, CR-259: take a switch from the owner phone to check. It is
+    /// checked in the order CR-258 gives; one that passes is kept in the
+    /// folder (written whole, CR-161) and changes nothing yet: sales go on
+    /// into the wallet pinned now. A different switch replaces the one that
+    /// waits; the same one again changes nothing. Any other switch is
+    /// refused, and nothing changes.
+    pub fn take_switch(&mut self, bytes: &[u8]) -> Result<(), SwitchRefused> {
+        self.expire_switch();
+        let sw = SwitchOwn::from_bytes(bytes).map_err(SwitchRefused::Frame)?;
+        if let Err(e) = self.check(&sw) {
+            self.note(format!("{e}"));
+            return Err(e);
+        }
+        if self.switch.as_ref().is_some_and(|w| w.bytes == bytes) {
+            return Ok(());
+        }
+        self.store
+            .put_switch(bytes)
+            .map_err(|e| SwitchRefused::NotWritten(e.to_string()))?;
+        self.switch = Some(Waiting {
+            switch: sw,
+            bytes: bytes.to_vec(),
+            arrived: self.clock.now(),
+        });
+        self.switch_notice = None;
+        self.note("CR-259: a switch to a new wallet waits for the manager".to_string());
+        Ok(())
+    }
+
+    /// CR-259: drop the switch that waits when seven days have passed since
+    /// it arrived, and tell the manager so.
+    fn expire_switch(&mut self) {
+        let now = self.clock.now();
+        if self
+            .switch
+            .as_ref()
+            .is_some_and(|w| now >= w.arrived.saturating_add(SWITCH_PENDING_SECS))
+        {
+            self.switch = None;
+            self.remove_switch_file();
+            self.switch_notice = Some(SwitchNotice::Dropped);
+            self.note("CR-259: the switch was not answered in seven days: dropped".to_string());
+        }
+    }
+
+    /// CR-260: the switch that waits, with the new wallet's first address
+    /// and the kind of wallet, or `None`.
+    pub fn pending_switch(&mut self) -> Option<PendingSwitch> {
+        self.expire_switch();
+        self.switch.as_ref().and_then(PendingSwitch::of)
+    }
+
+    /// CR-264: what the manager is told about a switch that came to nothing,
+    /// if anything.
+    pub fn switch_notice(&self) -> Option<SwitchNotice> {
+        self.switch_notice
+    }
+
+    /// CR-261: the pairing record the app must keep now, until it says it
+    /// kept it ([`Node::switch_record_kept`]). It is the record as it was
+    /// with the new wallet pinned and the starter flag cleared.
+    pub fn record_update(&self) -> Option<&[u8]> {
+        self.record_update.as_deref()
+    }
+
+    /// CR-256: the record has the starter flag, so the counter takes a
+    /// switch.
+    pub fn is_starter(&self) -> bool {
+        self.starter
+    }
+
+    /// CR-261, "Same address" after the manager's PIN was right (CR-84; the
+    /// caller asks only then): step one, the range book, written again as
+    /// version 2 with the old wallet's ranges closed and the new wallet's
+    /// first range after them. Returns the record the app must keep (step
+    /// two) and then say so with [`Node::switch_record_kept`]. From here the
+    /// counter's sales go to the new wallet.
+    pub fn switch_same(&mut self) -> Result<Vec<u8>, SwitchStepRefused> {
+        self.expire_switch();
+        let Some(waiting) = self.switch.clone() else {
+            return Err(SwitchStepRefused::NothingWaits);
+        };
+        let Some(record) = self.own_record.clone() else {
+            return Err(SwitchStepRefused::NoRecord);
+        };
+        // The checks of CR-258 again: nothing changed since, or nothing is.
+        self.check(&waiting.switch)
+            .map_err(SwitchStepRefused::Refused)?;
+        let wallet = waiting.switch.wallet.clone();
+        self.counter
+            .switch_wallet(&wallet, &waiting.switch.first_range, &mut self.store)
+            .map_err(|e| match e {
+                RangeTakeRefused::Range(e) => {
+                    SwitchStepRefused::Refused(SwitchRefused::Range(e))
+                }
+                other => SwitchStepRefused::NotWritten(other.to_string()),
+            })?;
+        let mut next = record;
+        next.wallet = wallet;
+        next.starter = false;
+        let bytes = next.to_bytes();
+        self.own_record = Some(next);
+        self.starter = false;
+        self.switch = None;
+        self.switch_finishing = Some(waiting.switch.wallet_hash());
+        self.record_update = Some(bytes.clone());
+        self.note("CR-261: the ranges are written: sales go to the new wallet".to_string());
+        Ok(bytes)
+    }
+
+    /// CR-261, steps three and four: the app kept the record of
+    /// [`Node::record_update`]. The record the owner reads (CR-262) is
+    /// written, then `switch.bin` is removed. A failure leaves the rest to
+    /// the next start, which finishes the switch.
+    pub fn switch_record_kept(&mut self) -> Result<(), SwitchStepRefused> {
+        self.record_update = None;
+        self.finish_switch()
+    }
+
+    fn finish_switch(&mut self) -> Result<(), SwitchStepRefused> {
+        let Some(wallet) = self.switch_finishing else {
+            return Err(SwitchStepRefused::NothingWaits);
+        };
+        self.counter
+            .record_switched(wallet, true, &mut self.store)
+            .map_err(|e| SwitchStepRefused::NotWritten(e.to_string()))?;
+        self.store
+            .remove_switch()
+            .map_err(|e| SwitchStepRefused::NotWritten(e.to_string()))?;
+        self.switch_finishing = None;
+        self.note("CR-262: the owner is told that this counter switched".to_string());
+        Ok(())
+    }
+
+    fn finish_switch_quietly(&mut self) {
+        if let Err(e) = self.finish_switch() {
+            self.note(format!("{e}"));
+        }
+    }
+
+    /// CR-260, "Different": the switch is dropped and the record of CR-262
+    /// is written with the refusal byte. The old wallet stays pinned.
+    pub fn switch_different(&mut self) -> Result<(), SwitchStepRefused> {
+        self.expire_switch();
+        let Some(waiting) = self.switch.clone() else {
+            return Err(SwitchStepRefused::NothingWaits);
+        };
+        self.counter
+            .record_switched(waiting.switch.wallet_hash(), false, &mut self.store)
+            .map_err(|e| SwitchStepRefused::NotWritten(e.to_string()))?;
+        self.store
+            .remove_switch()
+            .map_err(|e| SwitchStepRefused::NotWritten(e.to_string()))?;
+        self.switch = None;
+        self.note("CR-260: the manager said the address is different: the switch is dropped".to_string());
+        Ok(())
     }
 
     // CR-239 to CR-244: a change that waits for a counter's confirmation.

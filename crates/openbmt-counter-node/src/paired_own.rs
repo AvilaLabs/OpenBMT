@@ -24,10 +24,15 @@
 //!   | first range ("OBM*", 109 bytes)
 //!   | peer count u8 | per peer: len u8 | "host:port"
 //!   | version 2 only: relay hint ([`openbmt_core::relay`])
+//!   | version 3 only: flags u8 (1: the wallet is a starter wallet), then the relay
+//!       hint if any bytes are left
 //! ```
 //!
 //! Version 2 is the version with a relay, as for the record of a counter
-//! paired with the Key app.
+//! paired with the Key app. Version 3 is the version of a starter wallet
+//! (CR-256): the flags byte, then the relay if there is one. A record with no
+//! flag is written as version 1 or 2, so a counter that switched
+//! (CR-261) writes its record as before.
 
 use std::fmt;
 
@@ -38,6 +43,7 @@ use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::pairing::{network_code, network_from_code, PAIRING_WINDOW_SECS};
 use openbmt_core::pairing_own::{
     check_range, OwnBundle, OwnCounterPairing, OwnOffer, OwnPairError, OwnSignedPairing,
+    RangeLedger,
 };
 use openbmt_core::pinned_wallet::{PinnedWallet, SignedRange, WalletKind};
 use openbmt_core::relay::{RelayHint, SignedRelayHint};
@@ -326,6 +332,7 @@ impl OwnCeremony {
             network: paired.offer.network(),
             wallet: paired.offer.wallet,
             settings_floor: floor,
+            starter: paired.offer.starter,
             pairing: paired.pairing,
             settings: bundle.settings,
             first_range: bundle.first_range,
@@ -355,6 +362,9 @@ pub struct OwnPairingRecord {
     pub wallet: PinnedWallet,
     /// The settings floor of the offer; the settings must pass it.
     pub settings_floor: u32,
+    /// CR-256: the pinned wallet is a starter wallet, so the counter may take
+    /// one switch (CR-257 to CR-263).
+    pub starter: bool,
     /// The pairing the owner root signed.
     pub pairing: OwnSignedPairing,
     /// The counter's first settings.
@@ -404,12 +414,41 @@ impl OwnPairingRecord {
     /// range is signed by the owner root, names this counter and holds at
     /// least `policy`'s smallest range, which is the counter's own.
     pub fn check(&self, policy: &BatchPolicy) -> Result<(), OwnPairRefused> {
+        self.check_for(policy, self.wallet.checksum32())
+    }
+
+    /// CR-261: [`OwnPairingRecord::check`] for a record that switched. Its
+    /// pairing still names the wallet the counter was paired with (it was
+    /// kept as it was), so the record is accepted with another wallet than
+    /// the pairing's only when the counter's own range book proves the
+    /// switch: the book is for the wallet the record pins and holds closed
+    /// ranges of the wallet the pairing names. A record with the starter
+    /// flag has not switched and is not accepted this way.
+    pub fn check_switched(
+        &self,
+        policy: &BatchPolicy,
+        ranges: &[u8],
+    ) -> Result<(), OwnPairRefused> {
+        let own: DeviceId = self.identity()?.device_id();
+        let proven = !self.starter
+            && RangeLedger::from_bytes(ranges, self.owner, own).is_ok_and(|l| {
+                l.switched_to() == Some(self.wallet.checksum32())
+                    && l.closed()
+                        .iter()
+                        .any(|c| c.wallet == self.pairing.entry.wallet)
+            });
+        if !proven {
+            return Err(OwnPairError::WrongWallet.into());
+        }
+        self.check_for(policy, self.pairing.entry.wallet)
+    }
+
+    fn check_for(&self, policy: &BatchPolicy, paired: [u8; 32]) -> Result<(), OwnPairRefused> {
         let own: DeviceId = self.identity()?.device_id();
         if self.network != Network::Bitcoin {
             return Err(OwnPairError::NotMainNetwork.into());
         }
-        self.pairing
-            .check(&self.owner, &self.wallet.checksum32(), &own)?;
+        self.pairing.check(&self.owner, &paired, &own)?;
         // `None` for the settings in force: the first settings are not a
         // change, so nothing is classified (CR-231).
         self.settings
@@ -455,10 +494,13 @@ impl OwnPairingRecord {
             &wire::MAGIC_OWN_PAIRING_RECORD,
             200 + wallet.len() + pairing.len() + settings.len() + self.peers.len() * 24,
         );
-        if self.relay.is_some() {
-            if let Some(version) = out.get_mut(4) {
-                *version = 2;
-            }
+        let version = match (self.starter, self.relay.is_some()) {
+            (true, _) => 3,
+            (false, true) => 2,
+            (false, false) => 1,
+        };
+        if let Some(v) = out.get_mut(4) {
+            *v = version;
         }
         out.extend_from_slice(&self.identity_secret);
         out.extend_from_slice(&self.owner.to_bytes());
@@ -484,6 +526,9 @@ impl OwnPairingRecord {
             out.push(u8::try_from(p.len()).unwrap_or(u8::MAX));
             out.extend_from_slice(p.as_bytes());
         }
+        if self.starter {
+            out.push(1);
+        }
         if let Some(relay) = &self.relay {
             out.extend_from_slice(&relay.to_bytes());
         }
@@ -496,7 +541,7 @@ impl OwnPairingRecord {
     /// ascending. This does not check signatures: [`OwnPairingRecord::check`]
     /// does. Version 1 has no relay and version 2 has one at the end.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let (mut r, version) = Reader::framed_up_to(bytes, &wire::MAGIC_OWN_PAIRING_RECORD, 2)?;
+        let (mut r, version) = Reader::framed_up_to(bytes, &wire::MAGIC_OWN_PAIRING_RECORD, 3)?;
         let identity_secret: [u8; 32] = r.array()?;
         if Identity::from_secret_bytes(&identity_secret).is_err() {
             return Err(DecodeError::NonCanonical(
@@ -542,7 +587,17 @@ impl OwnPairingRecord {
             }
             peers.push(text.to_owned());
         }
-        let relay = if version >= 2 {
+        let mut starter = false;
+        if version >= 3 {
+            // CR-256: only bit 0 is defined, and a version 3 record has it.
+            if r.u8()? != 1 {
+                return Err(DecodeError::NonCanonical(
+                    "the flags of a record are 1 or the record is version 1 or 2",
+                ));
+            }
+            starter = true;
+        }
+        let relay = if version == 2 || (version >= 3 && !r.is_empty()) {
             Some(RelayHint::read(&mut r)?)
         } else {
             None
@@ -554,6 +609,7 @@ impl OwnPairingRecord {
             network,
             wallet,
             settings_floor,
+            starter,
             pairing,
             settings,
             first_range,
@@ -629,9 +685,26 @@ impl PairedRecord {
 
     /// The checks of the record's own kind, again at start.
     pub fn check(&self, policy: &BatchPolicy) -> Result<(), RecordRefused> {
+        self.check_with_ranges(policy, None)
+    }
+
+    /// [`PairedRecord::check`], given the counter's range book as the
+    /// folder holds it: an own-wallet record that pins another wallet than
+    /// its pairing names is accepted when the book proves the switch
+    /// (CR-261).
+    pub fn check_with_ranges(
+        &self,
+        policy: &BatchPolicy,
+        ranges: Option<&[u8]>,
+    ) -> Result<(), RecordRefused> {
         match self {
             Self::KeyApp(r) => r.check(policy).map_err(RecordRefused::KeyApp),
-            Self::OwnWallet(r) => r.check(policy).map_err(RecordRefused::OwnWallet),
+            Self::OwnWallet(r) => match r.check(policy) {
+                Err(OwnPairRefused::Pair(OwnPairError::WrongWallet)) if ranges.is_some() => r
+                    .check_switched(policy, ranges.unwrap_or_default())
+                    .map_err(RecordRefused::OwnWallet),
+                other => other.map_err(RecordRefused::OwnWallet),
+            },
         }
     }
 

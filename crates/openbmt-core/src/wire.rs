@@ -289,6 +289,11 @@ impl<'a> Reader<'a> {
         }
     }
 
+    /// Whether every byte was read.
+    pub fn is_empty(&self) -> bool {
+        self.buf.is_empty()
+    }
+
     /// Succeed only if every byte was read.
     pub fn finish(self) -> Result<(), DecodeError> {
         if self.buf.is_empty() {

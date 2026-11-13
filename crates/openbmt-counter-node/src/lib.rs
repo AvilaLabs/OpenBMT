@@ -59,6 +59,7 @@ pub mod relaylink;
 pub mod say;
 pub mod settings;
 pub mod swap;
+pub mod switch;
 
 #[cfg(test)]
 mod tests;
@@ -68,7 +69,9 @@ pub use confirm::{
     loosened_fields, ChangeNotice, ChangedField, ConfirmRefused, FieldValue, Pending,
     PendingChange, PENDING_SECS,
 };
-pub use dirstore::{DirStore, DirStoreError, Loaded, TornTail, CONFIRM_FILE, SETTINGS_FILE};
+pub use dirstore::{
+    DirStore, DirStoreError, Loaded, TornTail, CONFIRM_FILE, SETTINGS_FILE, SWITCH_FILE,
+};
 pub use lightning::{
     Lightning, LightningOff, LightningRecord, LightningStatus, LnEvent, LnRequest, LnTransport,
     SaleLightning, SetupRefused, SetupStep, MAGIC_LIGHTNING_RECORD,
@@ -95,6 +98,10 @@ pub use settings::{
     decode_file as decode_settings_file, decode_frame as decode_settings_frame,
     effective as effective_settings, effective_of as effective_settings_of, Effective,
     SettingsFault, SettingsFrame, SettingsLine, SettingsRefused, MAX_SETTINGS_FILE_BYTES,
+};
+pub use switch::{
+    check_switch, PendingSwitch, SwitchNotice, SwitchRefused, SwitchStepRefused, Waiting,
+    SWITCH_PENDING_SECS,
 };
 pub use swap::{
     SaleSwap, SwapDriver, SwapRecord, SwapRequest, MAGIC_SWAP_RECORD, NOT_FOR_THIS_SALE,

@@ -7,7 +7,7 @@ use crate::paired::PairRefused;
 use crate::relaylink::LinkLine;
 use crate::say::{
     all_words, every_link_line, every_pair_error, every_pair_refused, every_relay_refused,
-    program_words, screens_markdown, PairStep,
+    is_placeholder, program_words, screens_markdown, PairStep,
 };
 use crate::RelayRefused;
 
@@ -108,8 +108,21 @@ fn cr_136_every_line_of_the_link_and_every_refused_relay_has_words() {
 
 #[test]
 fn sc_12_every_word_keeps_the_rules() {
-    assert_eq!(check_distinct(&all_words()), Ok(()));
-    assert_eq!(check_distinct(&program_words()), Ok(()));
+    // CR-264: a placeholder is not a sentence and is not read as one, but
+    // each stands for one state, so each differs from every other.
+    let written = |all: Vec<(String, openbmt_core::say::Words)>| {
+        let (placeholders, written): (Vec<_>, Vec<_>) =
+            all.into_iter().partition(|(_, w)| is_placeholder(w));
+        let mut seen = std::collections::BTreeSet::new();
+        for (name, w) in &placeholders {
+            assert!(seen.insert(w.heading.clone()), "{name} repeats a placeholder");
+            assert_eq!(w.heading, w.what, "{name}");
+            assert_eq!(w.heading, w.next, "{name}");
+        }
+        written
+    };
+    assert_eq!(check_distinct(&written(all_words())), Ok(()));
+    assert_eq!(check_distinct(&written(program_words())), Ok(()));
 }
 
 #[test]
@@ -170,7 +183,9 @@ fn sc_02_every_start_error_says_the_counter_did_not_start() {
         if name.starts_with("StartError::") {
             assert_eq!(w.tone, Tone::Stop, "{name}");
             assert_eq!(w.who, Who::Owner, "{name}");
-            assert_eq!(check(&w), Ok(()), "{name}");
+            if !is_placeholder(&w) {
+                assert_eq!(check(&w), Ok(()), "{name}");
+            }
         }
     }
 }

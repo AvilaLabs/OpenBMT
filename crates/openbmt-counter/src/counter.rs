@@ -737,6 +737,21 @@ impl Counter {
         self.held_switched.get(wallet)
     }
 
+    /// CR-232: the smallest range this counter takes, for a counter paired
+    /// with the shop's own wallet (0 for one paired with the Key app).
+    pub fn own_min_count(&self) -> u32 {
+        self.own.as_ref().map_or(0, |o| o.min_count)
+    }
+
+    /// CR-261: whether a sale of this counter, readable or not, has a number
+    /// in `start..end`. A sale is kept by its address index.
+    pub fn holds_sale_number_in(&self, start: u32, end: u32) -> bool {
+        self.sales
+            .keys()
+            .chain(self.unreadable.iter())
+            .any(|i| (start..end).contains(i))
+    }
+
     /// CR-261: the wallet a counter paired with the shop's own wallet pays
     /// into now.
     pub fn own_wallet(&self) -> Option<&openbmt_core::pinned_wallet::PinnedWallet> {
@@ -769,12 +784,7 @@ impl Counter {
         // not hold the number of any sale this counter already has, or the
         // sale of the old wallet and the new one would be one.
         let r = first.range;
-        if self
-            .sales
-            .keys()
-            .chain(self.unreadable.iter())
-            .any(|i| (r.start..r.end).contains(i))
-        {
+        if self.holds_sale_number_in(r.start, r.end) {
             return Err(RangeTakeRefused::Range(
                 openbmt_core::pairing_own::OwnPairError::Range(
                     openbmt_core::pinned_wallet::RangeError::OverlapsUsed,

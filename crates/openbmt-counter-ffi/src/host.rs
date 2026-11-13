@@ -245,7 +245,15 @@ fn check_start(
     // CR-94 to CR-96 and CR-230 to CR-232 again, on what was kept: the
     // settings' signatures, the lists, the version and the first batch or
     // range.
-    record.check(&policy).map_err(record_refused)?;
+    // CR-261: a record that switched pins another wallet than its pairing
+    // names, which the folder's range book proves.
+    let ranges = DirStore::open(&req.dir)
+        .ok()
+        .and_then(|store| store.load().ok())
+        .and_then(|loaded| loaded.ranges);
+    record
+        .check_with_ranges(&policy, ranges.as_deref())
+        .map_err(record_refused)?;
     let identity = record.identity().map_err(record_refused)?;
     // CR-163: the settings the owner sent after pairing, from the file, when
     // they are newer than the pairing's; a file that does not read is a fault.

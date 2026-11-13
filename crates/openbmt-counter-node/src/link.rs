@@ -457,6 +457,11 @@ impl<R: Post> CounterLink<R> {
                 }
                 Err(e) => self.refused_by_node(format!("range does not decode: {e}")),
             },
+            Kind::Switch => {
+                if let Err(e) = node.take_switch(&message.content) {
+                    self.refused_by_node(format!("switch not taken: {e}"));
+                }
+            }
             Kind::RecordsReceived => self.take_mark(node, &message.content),
             Kind::Settings => self.take_settings(node, &message.content),
             Kind::DeviceList => self.note(

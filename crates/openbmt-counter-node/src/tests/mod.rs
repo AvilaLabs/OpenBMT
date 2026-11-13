@@ -21,3 +21,4 @@ mod say;
 mod settings;
 mod settle;
 mod swap;
+mod switch;

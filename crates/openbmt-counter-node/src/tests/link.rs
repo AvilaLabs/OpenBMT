@@ -961,3 +961,58 @@ fn lk_77_a_range_is_given_to_an_own_wallet_counter_and_refused_by_a_key_app_one(
     assert_eq!(k.link.state().node_refusals, 1);
     assert!(k.notes().iter().any(|n| n.contains("range not taken")));
 }
+
+/// A node of a counter paired with a starter wallet (CR-256).
+fn starter_rig(dir: &std::path::Path) -> Rig {
+    let time = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(T0));
+    let record = super::switch::starter_record();
+    let mut config = crate::NodeConfig::new_own(
+        dir,
+        id(3),
+        record.own_pairing(super::paired_own::POLICY),
+        settings(),
+        openbmt_net_io::DriverConfig::new(bitcoin::Network::Bitcoin, 0),
+    );
+    config.clock = Box::new(TestClock(time.clone()));
+    config.health = Box::new(|_| healthy());
+    config.own_record = Some(record);
+    start_with(config, time)
+}
+
+#[test]
+fn lk_78_a_switch_is_given_to_a_starter_counter_and_refused_by_the_others() {
+    use openbmt_core::pairing_own::SwitchOwn;
+    use openbmt_core::pinned_wallet::{IndexRange, PinnedWallet, SignedRange};
+    let old = PinnedWallet::from_text(
+        "wpkh([818bc9b6/84h/0h/0h]xpub6CgURS1GrKZkAoRGBTKYX9FhLgkKnQVZ6vdNBUbiu24xtRJ6RzLKpdg4CqsVyBLzimcJsviP59hSoGJEpTJiXE8bdBLw1qPC1DXRatKehb8/<0;1>/*)#96yh9yhx",
+    )
+    .unwrap();
+    let new = PinnedWallet::from_text(
+        "wsh(sortedmulti(2,[73c5da0a/48h/0h/0h/2h]xpub6DkFAXWQ2dHxq2vatrt9qyA3bXYU4ToWQwCHbf5XB2mSTexcHZCeKS1VZYcPoBd5X8yVcbXFHJR9R8UCVpt82VX1VhR28mCyxUFL4r6KFrf/<0;1>/*,[b8688df1/48h/0h/0h/2h]xpub6FQya7zGhR92kacYsNnjreouvnHJMpXYsUXnW6NJJAJRCKsa26TzDy4LdnGhEurr3d6y1J8PJ7EEMKQp74XTqYvmGJNogYXSKDszYHtF8mX/<0;1>/*,[28645006/48h/0h/0h/2h]xpub6DnEBNkSJKBYQmsbhS1sP9cNdtU5c9PLFGCjTJmxicxc13WB8zNNGQazabQpyFAGW5bV9tMko4uBxDxjUKL6dSAcx1tEbgEHtgSqyRsekh6/<0;1>/*))#34zcp4yt",
+    )
+    .unwrap();
+    let first = SignedRange::sign(&id(1), IndexRange::new(counter(), 1_000, 2_000).unwrap()).unwrap();
+    let switch = SwitchOwn::sign(&id(1), counter(), old.checksum32(), new, first).to_bytes();
+    let mut w = world_on(config(), true, starter_rig);
+    w.send(Kind::Switch, &switch);
+    w.step(T0);
+    assert_eq!(w.link.state().node_refusals, 0);
+    assert!(w.rig.node.pending_switch().is_some());
+    // What is not a switch is refused and noted, and the step goes on.
+    w.send(Kind::Switch, b"junk");
+    w.step(T0 + 1);
+    assert_eq!(w.link.state().node_refusals, 1);
+    assert!(w.notes().iter().any(|n| n.contains("switch not taken")));
+    assert!(w.rig.node.pending_switch().is_some());
+    // A counter paired with the shop's own wallet with no flag refuses it.
+    let mut o = world_on(config(), true, own_rig);
+    o.send(Kind::Switch, &switch);
+    o.step(T0);
+    assert_eq!(o.link.state().node_refusals, 1);
+    assert!(o.rig.node.pending_switch().is_none());
+    // So does a counter paired with the Key app.
+    let mut k = world(config());
+    k.send(Kind::Switch, &switch);
+    k.step(T0);
+    assert_eq!(k.link.state().node_refusals, 1);
+}

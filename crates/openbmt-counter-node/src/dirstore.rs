@@ -55,6 +55,9 @@ pub const SETTINGS_FILE: &str = "settings.bin";
 /// The file of the one change that waits for a counter's confirmation
 /// (CR-239).
 pub const CONFIRM_FILE: &str = "confirm.bin";
+/// The file of the one switch from the starter wallet that waits for the
+/// manager (CR-259).
+pub const SWITCH_FILE: &str = "switch.bin";
 
 /// Why a file operation or a read failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -384,6 +387,41 @@ impl DirStore {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
             Err(e) => return Err(io_err(CONFIRM_FILE, "remove")(e)),
+        }
+        self.sync_dir()
+    }
+
+    /// CR-259: replace the stored switch that waits for the manager, written
+    /// whole. On an error the old file is as it was.
+    pub fn put_switch(&mut self, bytes: &[u8]) -> Result<(), DirStoreError> {
+        self.write_whole(SWITCH_FILE, bytes)
+    }
+
+    /// CR-259: the stored switch, or `None`. The bytes are not read here.
+    pub fn switch_file(&self) -> Result<Option<Vec<u8>>, DirStoreError> {
+        self.read(SWITCH_FILE)
+    }
+
+    /// CR-259: when the file of the waiting switch was last written, in
+    /// seconds since 1970, which is when the switch arrived. `None` when
+    /// there is no file or the system does not say.
+    pub fn switch_written_at(&self) -> Option<u64> {
+        let modified = fs::metadata(self.path(SWITCH_FILE))
+            .and_then(|m| m.modified())
+            .ok()?;
+        modified
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .map(|d| d.as_secs())
+    }
+
+    /// CR-259, CR-261: take the switch away: remove the file and flush the
+    /// directory. No file is nothing to remove.
+    pub fn remove_switch(&mut self) -> Result<(), DirStoreError> {
+        match fs::remove_file(self.path(SWITCH_FILE)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(io_err(SWITCH_FILE, "remove")(e)),
         }
         self.sync_dir()
     }
