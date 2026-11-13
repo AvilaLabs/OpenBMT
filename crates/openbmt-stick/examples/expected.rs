@@ -2,9 +2,11 @@
 //! `stick/test-qemu.sh` (SK-40). Prints `key value` lines.
 //!
 //!   expected dice <rolls as digits>      dice alone (SK-22)
-//!   expected words <12 words>            the public result of words (SK-26)
+//!   expected words <12 words>            the public result of words (SK-26),
+//!                                        and the keys of SK-32
 
 use openbmt_qr::{Ecc, QrCode};
+use openbmt_stick::bip85::{float_entropy, lightning_hex};
 use openbmt_stick::mix::{dice_alone, dice_values};
 use openbmt_stick::outputs::{public_of, words_of};
 use openbmt_stick::seedqr::compact_seedqr;
@@ -44,6 +46,17 @@ fn main() {
     println!("descriptor {}", p.descriptor);
     let q = openbmt_qr::encode_text(&p.descriptor, Ecc::M).expect("qr");
     rows("descriptorqr", &q);
+    // SK-32: the keys for the two everyday wallets, from the same words.
+    for index in [0u32, 1] {
+        let e = float_entropy(&words, index).expect("float");
+        rows(&format!("float{index}qr"), &compact_seedqr(&e).expect("qr"));
+    }
+    let hex = lightning_hex(&words).expect("lightning");
+    println!("lightninghex {hex}");
+    rows(
+        "lightningqr",
+        &openbmt_qr::encode_text(&hex, Ecc::M).expect("qr"),
+    );
     if args[0] == "words" {
         let m = bip39::Mnemonic::parse_normalized(&words.join(" ")).expect("words");
         let mut e = [0u8; 16];
