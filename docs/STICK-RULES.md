@@ -9,8 +9,9 @@ computer's own system never starts, no network is ever turned on, and
 nothing is written anywhere. The owner leaves with the wallet's words in
 their own hand and the wallet's public description on the owner phone.
 
-The stick makes the key. It does not sign: a shop signs with a hardware
-signer, or pays its refunds from a small capped wallet of its own.
+The stick makes the key, and signs the rare payment from savings: a refill
+of the refund float, a cash-out. Everyday refunds are paid by a hardware
+signer or from the refund float, a small capped wallet of the shop's own.
 
 **First build. No independent security audit has been done. Not for real
 funds.**
@@ -37,10 +38,14 @@ funds.**
   display drivers a PC needs to show the program, each a file of the same
   kernel package, unchanged and signed by the distribution. No network,
   wireless, Bluetooth, storage, sound, camera or file system module is
-  listed. A test reads the list and refuses any module under the kernel's
+  listed, except the camera modules of SK-51, which are loaded only in the
+  mode of section 8. A test reads both lists and refuses any module of the
+  first under the kernel's
   `drivers/net`, `net`, `drivers/bluetooth`, `drivers/usb/storage`,
   `drivers/scsi`, `drivers/ata`, `drivers/nvme`, `fs`, `sound` or
-  `drivers/media`.
+  `drivers/media`, and any module of the camera list outside
+  `drivers/media/usb/uvc`, `drivers/media/common/videobuf2`,
+  `drivers/media/v4l2-core` and `drivers/media/mc`.
 - **SK-05. Same input, same bytes.** Two builds of one commit with the same
   `inputs.lock` give byte-identical files: the archive's members sorted,
   every time and owner fixed, compressed with no name or time.
@@ -134,6 +139,25 @@ funds.**
 - **SK-29. Turn off.** Every screen after the words has "Turn off". It
   clears the program's memory of the words and powers the computer off.
 
+## 5a. Keys for the shop's everyday wallets
+
+- **SK-32. Made from the same words.** On the public result screen (SK-26),
+  after a new key or after "Check my words" (SK-28), the owner may ask for
+  the key of one of the shop's two small everyday wallets. Both are BIP-85
+  children of the 12 words, so there is nothing new to write down:
+  - **The refund float:** the BIP-85 BIP39 child of 12 English words at
+    `m/83696968'/39'/0'/12'/0'`, shown as a Compact SeedQR (SK-27).
+  - **Shop Lightning:** the BIP-85 HEX child of 64 bytes at
+    `m/83696968'/128169'/64'/0'` (`docs/SHOP-LIGHTNING-RULES.md` SL-10), shown
+    as a QR code of its 128 hexadecimal characters in lower case.
+- **SK-33. Said on the screen.** Each of the two screens says what the code
+  is, that it can spend that wallet's money and nothing else, that it is
+  scanned once by the owner phone or the Lightning counter, and that it is
+  never photographed.
+- **SK-34. Tested.** Both children equal the BIP-85 specification's test
+  vectors for the specification's own key, and the stick's QR codes decode
+  to the same bytes.
+
 ## 6. Checking the stick
 
 - **SK-30. Before the first start.** The release publishes `SHA256SUMS`
@@ -142,6 +166,55 @@ funds.**
 - **SK-31. On the screen.** The first screen shows the program's own
   version and the SHA-256 of `initrd.img` as the kernel loaded it, read from
   memory, for the owner to compare with the release page.
+
+## 8. Sign a payment
+
+- **SK-50. A fourth choice.** The first screen has "Sign a payment". It is
+  for the rare payment from savings, prepared by the owner phone's "Send
+  from your wallet" (`docs/OWNER-APP-RULES.md` OA-115 to OA-118). Nothing of
+  this mode runs unless the owner picks it.
+- **SK-51. The camera, only here.** Picking it loads the camera modules
+  named in `stick/modules-camera.list`: the USB video class driver and the
+  modules it needs, each a file of the same kernel package, unchanged and
+  signed. They are in `initrd.img` but never loaded otherwise. Still no
+  network, no disk and nothing written (SK-11 to SK-13).
+- **SK-52. Reading the payment.** The program reads frames from the first
+  camera as grey levels and decodes QR codes from them. The payment is a
+  PSBT (BIP 174, version 0) sent as an animated UR `crypto-psbt` or as BBQr,
+  the two forms the owner phone shows (`docs/UR-RULES.md`,
+  `docs/BBQR-RULES.md`), decoded by the repository's own code. The screen
+  shows the parts read out of the parts needed. No camera after a set time:
+  the screen says so and the owner can turn off.
+- **SK-53. The words.** Then the owner types the 12 words, as SK-28. A
+  payment whose inputs are not of the wallet of these words is refused
+  before anything is shown (SK-54).
+- **SK-54. What is refused.** The payment is refused, naming why, when: an
+  input lacks its previous output or its key path; an input's key path is
+  not `m/84'/0'/0'/0/i` or `m/84'/0'/0'/1/i` under the master fingerprint of
+  these words, or the key at that path is not the input's key; an input asks
+  for a signature other than SIGHASH_ALL; the payment is not for real
+  bitcoin; the outputs pay more than the inputs hold.
+- **SK-55. What is shown before signing.** Every output, with its address
+  and amount in bitcoin. An output is marked as the wallet's own only when
+  the program derives its address itself from these words; a claim in the
+  PSBT is not enough. Then the total sent away, the fee and the fee per
+  virtual byte. Enter signs; Esc refuses and nothing is signed.
+- **SK-56. What comes out.** The PSBT with this wallet's signatures added to
+  every input, not finalized, shown as an animated QR code in the form it
+  came in, for the owner phone to scan back. Nothing else of the PSBT is
+  changed.
+- **SK-57. Afterwards.** "Turn off" clears the words, the payment and the
+  frames, as SK-29.
+- **SK-58. Tested.** Unit tests: refusals of SK-54 one by one; own outputs
+  marked only when derived; the signatures are valid for the inputs and the
+  PSBT otherwise unchanged; decoding of UR and BBQr from frames that are
+  scaled, rotated, blurred and noisy grey images of the owner phone's codes.
+  In QEMU: the camera modules load only after the choice, and a whole run
+  signs a payment fed through a test-only feature `serial-frames` that
+  reads frames from the serial port instead of a camera, and that, like
+  `serial-echo`, no release contains. The signed PSBT is checked against
+  `crates/openbmt-owner`'s own-spend finishing. A real camera on a real PC
+  is tested by hand.
 
 ## 7. Tests
 
