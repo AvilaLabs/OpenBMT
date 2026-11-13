@@ -804,7 +804,7 @@ fn ss_41_a_repin_that_waits_comes_back_with_its_words_and_code_and_writes_nothin
         .bytes(&old_file);
     Rd::ok(&call(150, &shop_args.u64(T0).0)).bytes();
     let before = folder(&rig.dir());
-    waits(&repin(handle), "WORDS_NEEDED_SS41_PAIRING_HEADING");
+    waits(&repin(handle), "Upgrade waits for a pairing");
     assert_eq!(folder(&rig.dir()), before, "nothing is written");
     // "They differ" gives the offer up: the unsettled queue waits again.
     Rd::ok(&call(153, &[]));

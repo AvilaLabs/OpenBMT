@@ -349,23 +349,18 @@ impl StarterRefusal {
                 "Wait until that payment is in a block, then finish the upgrade.",
                 rule,
             ),
-            // The words are not written yet: the placeholders name the rule.
-            Self::PairingOpen => Words::new(
-                Tone::Stop,
-                "WORDS_NEEDED_SS41_PAIRING_HEADING",
-                "WORDS_NEEDED_SS41_PAIRING_WHAT",
-                Who::Owner,
-                "WORDS_NEEDED_SS41_PAIRING_NEXT",
-            )
-            .code(rule),
-            Self::PaymentPrepared => Words::new(
-                Tone::Stop,
-                "WORDS_NEEDED_SS41_PAYMENT_HEADING",
-                "WORDS_NEEDED_SS41_PAYMENT_WHAT",
-                Who::Owner,
-                "WORDS_NEEDED_SS41_PAYMENT_NEXT",
-            )
-            .code(rule),
+            Self::PairingOpen => stop(
+                "Upgrade waits for a pairing",
+                "A counter is being paired on this phone, so the shop does not move to the new wallet yet.",
+                "Finish or cancel that pairing, or wait 10 minutes for its code to end, then finish the upgrade.",
+                rule,
+            ),
+            Self::PaymentPrepared => stop(
+                "Finish the wallet payment",
+                "A payment from the shop's wallet is prepared and not finished, so the shop does not move to the new wallet yet.",
+                "Bring that payment back from your wallet, or give it up on Send from your wallet. Then finish the upgrade.",
+                rule,
+            ),
         };
         match self {
             Self::Plan(why)
@@ -421,6 +416,8 @@ pub fn all_refusals() -> Vec<(&'static str, StarterRefusal)> {
         ("NewAddress", StarterRefusal::NewAddress),
         ("Unconfirmed", StarterRefusal::Unconfirmed),
         ("Unsettled", StarterRefusal::Unsettled),
+        ("PairingOpen", StarterRefusal::PairingOpen),
+        ("PaymentPrepared", StarterRefusal::PaymentPrepared),
     ]
 }
 

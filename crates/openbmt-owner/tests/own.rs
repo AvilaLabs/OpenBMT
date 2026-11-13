@@ -965,22 +965,20 @@ fn ss_41_the_repin_waits_while_a_payment_from_the_wallet_is_prepared_and_says_wh
 }
 
 #[test]
-fn ss_41_the_words_of_the_two_waits_are_placeholders_that_name_the_rule() {
+fn ss_41_the_two_waits_have_words_of_their_own_with_the_rule() {
     use openbmt_owner::starter::StarterRefusal;
-    for (r, stem) in [
-        (StarterRefusal::PairingOpen, "WORDS_NEEDED_SS41_PAIRING_"),
-        (
-            StarterRefusal::PaymentPrepared,
-            "WORDS_NEEDED_SS41_PAYMENT_",
-        ),
-    ] {
-        let w = r.words();
-        assert_eq!(w.heading, format!("{stem}HEADING"));
-        assert_eq!(w.what, format!("{stem}WHAT"));
-        assert_eq!(w.next, format!("{stem}NEXT"));
+    let pairing = StarterRefusal::PairingOpen.words();
+    let payment = StarterRefusal::PaymentPrepared.words();
+    let unsettled = StarterRefusal::Unsettled.words();
+    for w in [&pairing, &payment] {
         assert_eq!(w.code, Some("SS-41"));
-        assert!(is_placeholder(&w));
+        assert!(!is_placeholder(w));
+        assert_eq!(check(w), Ok(()));
     }
+    assert_eq!(pairing.heading, "Upgrade waits for a pairing");
+    assert_eq!(payment.heading, "Finish the wallet payment");
+    assert_ne!(pairing.heading, unsettled.heading);
+    assert_ne!(payment.heading, unsettled.heading);
 }
 
 #[test]
