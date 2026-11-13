@@ -8,6 +8,9 @@
 //! counter as switched, waiting or refused. The one move of everything in
 //! the starter wallet (SS-42) waits until every counter in force is
 //! switched: [`move_ready`] is that check, a pure function of the statuses.
+//! The same check lets the owner's pinned wallet become the new wallet
+//! ([`Repin`], `OwnShop::repin`); the rules name no moment for that
+//! (`WORDS_NEEDED_RULE_SS_REPIN` under SS-41), so the caller chooses it.
 
 use std::fmt;
 
@@ -112,6 +115,19 @@ pub fn move_ready(counters: &[(DeviceId, SwitchStatus)]) -> Result<(), MoveNotRe
     } else {
         Err(MoveNotReady { waiting, refused })
     }
+}
+
+/// SS-41: what a call to re-pin the owner's own wallet did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Repin {
+    /// Every counter had switched: the pinned wallet is now the new wallet
+    /// and the state was stored for it.
+    Done,
+    /// The new wallet is the pinned wallet already (this call, or an earlier
+    /// one, did it): nothing was changed or stored.
+    AlreadyDone,
+    /// A counter has not switched: nothing was changed or stored.
+    NotReady(MoveNotReady),
 }
 
 /// The words of a state of this part, by the key of its rule.

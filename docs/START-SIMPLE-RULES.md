@@ -153,6 +153,7 @@ funds.**
   of the pinned wallet a counter accepts, and only once (CR-263). The owner
   phone shows each counter as switched, waiting or refused, from the
   counters' records (CR-262).
+  WORDS_NEEDED_RULE_SS_REPIN
 - **SS-42. One move.** Once every counter in the settings in force has the
   record of CR-262 with the switched byte for the new wallet, the owner phone
   moves everything in the starter wallet to the new wallet's next address,

@@ -653,3 +653,105 @@ fn cr_257_the_switch_names_the_new_wallet_and_a_range_above_every_range_given() 
     );
     assert_eq!(s.book().ranges_given(), 2);
 }
+
+fn switched_shop() -> (
+    OwnShop,
+    Disk,
+    openbmt_core::identity::DeviceId,
+    PinnedWallet,
+) {
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    let made = s.make_offer_as(T0, true).unwrap();
+    let (_, request) = counter_request(&made, 3, "Front");
+    let counter = request.counter;
+    confirm(&mut s, &disk, &made, &request, T0 + 30).unwrap();
+    let new = PinnedWallet::from_text(MULTI).unwrap();
+    s.make_switch(counter, &new, T0 + 60, |b| disk.put(b))
+        .unwrap();
+    (s, disk, counter, new)
+}
+
+#[test]
+fn ss_41_the_pinned_wallet_becomes_the_new_wallet_once_and_only_when_every_counter_switched() {
+    use openbmt_owner::own_switch::{Repin, SwitchStatus};
+    let (mut s, disk, counter, new) = switched_shop();
+    let old = s.wallet().clone();
+    let stored = disk.get();
+    let other_counter = id(2).device_id();
+    // A counter waiting or refused: nothing changes and nothing is stored.
+    for status in [SwitchStatus::Waiting, SwitchStatus::Refused] {
+        let rows = [(counter, SwitchStatus::Switched), (other_counter, status)];
+        let out = s
+            .repin(&new, &rows, |_: &[u8]| -> Result<(), String> {
+                panic!("stored")
+            })
+            .unwrap();
+        match out {
+            Repin::NotReady(n) => assert_eq!(n.waiting.len() + n.refused.len(), 1),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(s.wallet(), &old);
+    }
+    // A failed store changes nothing.
+    let rows = [(counter, SwitchStatus::Switched)];
+    let failed = s.repin(&new, &rows, |_: &[u8]| Err("disk full".to_string()));
+    assert!(matches!(failed, Err(OwnError::Store(_))));
+    assert_eq!(s.wallet(), &old);
+    assert_eq!(disk.get(), stored);
+    // Every counter switched: the new wallet is pinned, and stored for it.
+    assert_eq!(s.repin(&new, &rows, |b| disk.put(b)).unwrap(), Repin::Done);
+    assert_eq!(s.wallet(), &new);
+    assert_ne!(disk.get(), stored);
+    assert_eq!(s.to_bytes(), disk.get());
+    // The state reads back for the new wallet and no longer for the old one,
+    // and the book is the one it was.
+    let back = OwnShop::restore(id(1), new.clone(), &disk.get()).unwrap();
+    assert_eq!(back.wallet(), &new);
+    assert_eq!(back.book(), s.book());
+    assert!(matches!(
+        OwnShop::restore(id(1), old.clone(), &disk.get()),
+        Err(OwnRestoreError::NotThisShop)
+    ));
+    // Once: asking again stores nothing and changes nothing, whatever the
+    // counters say.
+    let again = s
+        .repin(&new, &[(counter, SwitchStatus::Waiting)], |_: &[u8]| {
+            Err("stored again".to_string())
+        })
+        .unwrap();
+    assert_eq!(again, Repin::AlreadyDone);
+    assert_eq!(s.wallet(), &new);
+    // The offer the shop makes now is for the new wallet.
+    assert_eq!(s.make_offer(T0 + 90).unwrap().offer.wallet, new);
+}
+
+#[test]
+fn ss_41_a_shop_with_no_counter_in_force_has_nothing_to_wait_for() {
+    use openbmt_owner::own_switch::Repin;
+    let mut s = shop(SINGLE);
+    let new = PinnedWallet::from_text(MULTI).unwrap();
+    let disk = Disk::new();
+    assert_eq!(s.repin(&new, &[], |b| disk.put(b)).unwrap(), Repin::Done);
+    assert_eq!(s.wallet(), &new);
+}
+
+#[test]
+fn ss_42_the_move_pays_an_index_of_a_new_range_above_every_range_given() {
+    let (mut s, disk, _, _) = switched_shop();
+    // The counter holds 0 to 1,000 and its switch range 1,000 to 2,000.
+    let first = s.move_index(T0 + 100, |b| disk.put(b)).unwrap();
+    assert_eq!(first, 2_000);
+    assert_eq!(s.book().next_start(), 3_000);
+    assert_eq!(s.book().device_of(first), Some(s.owner_id()));
+    let second = s.move_index(T0 + 110, |b| disk.put(b)).unwrap();
+    assert_eq!(second, 3_000);
+    // A failed store takes no range.
+    let before = s.book().clone();
+    let failed = s.move_index(T0 + 120, |_: &[u8]| Err("disk full".to_string()));
+    assert!(matches!(failed, Err(OwnError::Store(_))));
+    assert_eq!(s.book(), &before);
+    let back =
+        OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), &disk.get()).unwrap();
+    assert_eq!(back.book(), s.book());
+}

@@ -46,6 +46,7 @@ use crate::counter::equal_shares;
 use crate::edit::sats_per_usd_at;
 use crate::error::Refusal;
 use crate::own_book::{AllocationBook, BookError};
+use crate::own_switch::{move_ready, Repin, SwitchStatus};
 
 /// OA-105: the magic of the shop's state.
 pub const MAGIC_OWN_STATE: [u8; 4] = *b"OBM@";
@@ -775,6 +776,48 @@ impl OwnShop {
             new_wallet.clone(),
             range,
         ))
+    }
+
+    /// SS-41, SS-42: the receive index of the new wallet that the one move
+    /// of the starter wallet pays: the first index of a new range of the
+    /// owner's own, taken from the book after every range given so far (the
+    /// counters' switch ranges included), so that it was never a sale number
+    /// of the old wallet. The range is written to the book and stored
+    /// first. Each call takes a new range.
+    pub fn move_index<E>(
+        &mut self,
+        now: u64,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<u32, OwnError<E>> {
+        Ok(self.allocate_desk(now, persist)?.range.start)
+    }
+
+    /// SS-41: once every counter of the settings in force has switched to
+    /// `new_wallet` (`counters` is each one's status, as for
+    /// [`move_ready`]), the shop's pinned wallet becomes `new_wallet`, and
+    /// the state is stored for it before it takes effect (OA-105). The shop
+    /// restarts with the new wallet's file, so the owner node watches it from
+    /// then on. It happens once: with the new wallet already pinned nothing
+    /// changes, and with a counter not switched nothing changes. The
+    /// book and the settings stay as they are.
+    pub fn repin<E>(
+        &mut self,
+        new_wallet: &PinnedWallet,
+        counters: &[(DeviceId, SwitchStatus)],
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<Repin, OwnError<E>> {
+        if new_wallet.checksum32() == self.wallet.checksum32() {
+            return Ok(Repin::AlreadyDone);
+        }
+        if let Err(not_ready) = move_ready(counters) {
+            return Ok(Repin::NotReady(not_ready));
+        }
+        let bytes = self
+            .state
+            .encode(&self.identity.device_id(), &new_wallet.checksum32());
+        persist(&bytes).map_err(OwnError::Store)?;
+        self.wallet = new_wallet.clone();
+        Ok(Repin::Done)
     }
 
     /// The first range of the bundle that waits for a counter, or of the
