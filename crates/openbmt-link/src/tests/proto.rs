@@ -44,6 +44,10 @@ fn requests() -> Vec<Request> {
             welcome: vec![],
             settings: vec![],
         },
+        Request::Store {
+            sealed: vec![9; 400],
+        },
+        Request::Store { sealed: vec![] },
     ]
 }
 
@@ -69,6 +73,10 @@ fn responses() -> Vec<Response> {
             bytes: vec![7; 101],
         },
         Response::Welcomed,
+        Response::StoreAnswer {
+            sealed: vec![4; 300],
+        },
+        Response::StoreAnswer { sealed: vec![] },
     ];
     v.extend(Refusal::ALL.map(Response::Refused));
     v

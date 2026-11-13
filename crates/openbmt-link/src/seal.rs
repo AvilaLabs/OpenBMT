@@ -94,11 +94,19 @@ pub enum Kind {
     /// A switch from the starter wallet to a new one, from the owner to a
     /// counter paired with the starter wallet (LK-78).
     Switch,
+    /// A write, read, list or remove of Shop Lightning's stored state, from
+    /// the Lightning counter to the Box that keeps the second copy
+    /// (LK-80). Byte 13 is another kind's.
+    Store,
+    /// The Box's answer to a Store (LK-80).
+    Stored,
+    /// The Lightning counter's report to the owner (LK-84).
+    LightningReport,
 }
 
 impl Kind {
     /// Every kind.
-    pub const ALL: [Kind; 12] = [
+    pub const ALL: [Kind; 15] = [
         Kind::Heartbeat,
         Kind::Command,
         Kind::Settings,
@@ -111,6 +119,9 @@ impl Kind {
         Kind::RecordsReceived,
         Kind::Range,
         Kind::Switch,
+        Kind::Store,
+        Kind::Stored,
+        Kind::LightningReport,
     ];
 
     /// The byte that is signed.
@@ -128,7 +139,22 @@ impl Kind {
             Kind::RecordsReceived => 10,
             Kind::Range => 11,
             Kind::Switch => 12,
+            Kind::Store => 14,
+            Kind::Stored => 15,
+            Kind::LightningReport => 16,
         }
+    }
+
+    /// Whether messages of this kind take their numbers from a count of
+    /// their own for each sender and reader pair (LK-81).
+    pub fn counts_apart(self) -> bool {
+        matches!(self, Kind::Store | Kind::Stored)
+    }
+
+    /// Whether this kind is one of Shop Lightning's (LK-80), which only the
+    /// devices the settings name may send (see [`StoreParties`]).
+    pub fn is_shop_lightning(self) -> bool {
+        matches!(self, Kind::Store | Kind::Stored | Kind::LightningReport)
     }
 
     /// The kind for a byte; `None` for an unknown one (LK-08).
@@ -149,6 +175,54 @@ impl Kind {
             Kind::CheckIn | Kind::Records => from == Counter && to == Owner,
             Kind::PaidNotice => from == Counter && to == TheBox,
             Kind::PosNotice => from == TheBox && (to == Counter || to == Owner),
+            Kind::Store => from == Counter && to == TheBox,
+            Kind::Stored => from == TheBox && to == Counter,
+            Kind::LightningReport => from == Counter && to == Owner,
+        }
+    }
+}
+
+/// The two devices Shop Lightning's kinds are for (LK-80), taken from the
+/// settings in force: the Lightning counter and the Box that is its second
+/// device. The role table lets any counter and any Box send these kinds; a
+/// device that is not named here may not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoreParties {
+    /// The Lightning counter.
+    pub counter: DeviceId,
+    /// The Box that keeps its second copy.
+    pub second_device: DeviceId,
+}
+
+impl StoreParties {
+    /// The parties the settings name, or `None` with Shop Lightning off.
+    pub fn from_settings(settings: &openbmt_core::settings::Settings) -> Option<Self> {
+        settings.shop_lightning.as_ref().map(|sl| Self {
+            counter: sl.counter,
+            second_device: sl.second_device,
+        })
+    }
+
+    /// Whether `sender` may send a message of `kind` to `reader`, as far as
+    /// Shop Lightning goes (LK-80). A kind that is not Shop Lightning's is
+    /// not this check's: it passes. The reader of a report is the owner,
+    /// whom the role table names, so only its sender is checked.
+    pub fn allows(
+        parties: Option<&Self>,
+        kind: Kind,
+        sender: &DeviceId,
+        reader: &DeviceId,
+    ) -> bool {
+        if !kind.is_shop_lightning() {
+            return true;
+        }
+        let Some(p) = parties else {
+            return false;
+        };
+        match kind {
+            Kind::Store => *sender == p.counter && *reader == p.second_device,
+            Kind::Stored => *sender == p.second_device && *reader == p.counter,
+            _ => *sender == p.counter,
         }
     }
 }

@@ -1,20 +1,22 @@
 //! Ties the rules to the tests: every rule in `docs/LINK-RULES.md` has a
 //! test named for it, or an entry in `NOT_HERE` that says why not. The
-//! rules of section 6 (LK-50 and up) are the courier's and the nodes', and
-//! `crates/openbmt-courier` ties those.
+//! rules of section 6 (LK-50 to LK-79) are the courier's and the nodes', and
+//! `crates/openbmt-courier` ties those. Section 7 (LK-80 to LK-84) is this
+//! crate's again.
 
 use std::collections::BTreeSet;
 
 const RULES: &str = include_str!("../../../../docs/LINK-RULES.md");
-const ERRORS: [&str; 5] = [
+const ERRORS: [&str; 6] = [
     include_str!("../seal.rs"),
     include_str!("../proto.rs"),
     include_str!("../numbers.rs"),
     include_str!("../client.rs"),
     include_str!("../relay.rs"),
+    include_str!("../shopln.rs"),
 ];
 
-const TEST_SOURCES: [&str; 8] = [
+const TEST_SOURCES: [&str; 9] = [
     include_str!("seal.rs"),
     include_str!("numbers.rs"),
     include_str!("relay.rs"),
@@ -22,6 +24,7 @@ const TEST_SOURCES: [&str; 8] = [
     include_str!("net.rs"),
     include_str!("e2e.rs"),
     include_str!("proto.rs"),
+    include_str!("shopln.rs"),
     include_str!("kit.rs"),
 ];
 
@@ -34,15 +37,16 @@ fn defined() -> BTreeSet<String> {
         .lines()
         .filter_map(|l| l.strip_prefix("- **LK-"))
         .map(|rest| format!("LK-{}", &rest[..2]))
-        .filter(|id| id.as_str() < "LK-50")
+        .filter(|id| id.as_str() < "LK-50" || id.as_str() >= "LK-80")
         .collect()
 }
 
 #[test]
-fn the_rules_file_defines_twenty_six_rules() {
+fn the_rules_file_defines_thirty_one_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 26);
+    assert_eq!(ids.len(), 26 + 5);
     assert!(ids.contains("LK-01") && ids.contains("LK-41"));
+    assert!(ids.contains("LK-80") && ids.contains("LK-84"));
 }
 
 #[test]

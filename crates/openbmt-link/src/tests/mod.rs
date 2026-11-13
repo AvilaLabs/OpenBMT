@@ -9,4 +9,5 @@ mod numbers;
 mod proto;
 mod relay;
 mod seal;
+mod shopln;
 mod store;

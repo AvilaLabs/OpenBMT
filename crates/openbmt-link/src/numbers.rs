@@ -25,6 +25,13 @@ pub const MAGIC_INBOX: [u8; 4] = *b"OBMI";
 /// Magic of a stored [`Outbox`].
 pub const MAGIC_OUTBOX: [u8; 4] = *b"OBMU";
 
+/// The file of the numbers of the Store and Stored kinds a device has taken
+/// (LK-81), beside the device's `link-inbox`.
+pub const STORE_INBOX_FILE: &str = "link-store-inbox";
+/// The file of the numbers of the Store and Stored kinds a device has sent
+/// (LK-81), beside the device's `link-outbox`.
+pub const STORE_OUTBOX_FILE: &str = "link-store-outbox";
+
 /// The most peers a table holds. A shop has a handful of devices; the bound
 /// only keeps a hostile file from asking for memory.
 const MAX_PEERS: usize = 1024;
@@ -108,7 +115,9 @@ impl Inbox {
 
     /// Open `sealed` (LK-05), store the new last number for its sender, and
     /// only then return the content (LK-06, LK-40). If `persist` fails the
-    /// inbox is unchanged and nothing is returned.
+    /// inbox is unchanged and nothing is returned. A Store or Stored
+    /// message is refused here: its numbers are a count of their own
+    /// ([`Inbox::open_store`], LK-81).
     pub fn open<E>(
         &mut self,
         reader: &Identity,
@@ -117,8 +126,37 @@ impl Inbox {
         allowed: impl Fn(&DeviceId) -> Option<Role>,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<Opened, TakeError<E>> {
+        self.open_counted(reader, reader_role, sealed, allowed, persist, false)
+    }
+
+    /// [`Inbox::open`] for the inbox of the Store and Stored kinds, which is
+    /// a table of its own beside the other one (LK-81). Any other kind is
+    /// refused, so that the two counts never mix.
+    pub fn open_store<E>(
+        &mut self,
+        reader: &Identity,
+        reader_role: Role,
+        sealed: &[u8],
+        allowed: impl Fn(&DeviceId) -> Option<Role>,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<Opened, TakeError<E>> {
+        self.open_counted(reader, reader_role, sealed, allowed, persist, true)
+    }
+
+    fn open_counted<E>(
+        &mut self,
+        reader: &Identity,
+        reader_role: Role,
+        sealed: &[u8],
+        allowed: impl Fn(&DeviceId) -> Option<Role>,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+        apart: bool,
+    ) -> Result<Opened, TakeError<E>> {
         let opened = open(reader, reader_role, sealed, allowed, |s| self.last(s))
             .map_err(TakeError::Open)?;
+        if opened.kind.counts_apart() != apart {
+            return Err(TakeError::Open(OpenError::KindNotAllowed(opened.kind)));
+        }
         let mut next = self.last.clone();
         if !next.contains_key(&opened.sender) && next.len() >= MAX_PEERS {
             return Err(TakeError::Full);

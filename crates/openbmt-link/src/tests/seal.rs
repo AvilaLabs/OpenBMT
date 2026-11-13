@@ -530,7 +530,7 @@ fn lk_07_padding_that_is_not_zero_or_not_minimal_is_refused() {
 #[test]
 fn lk_08_the_table_of_kinds() {
     use Role::{Box as B, Counter as C, Owner as O, Watch as W};
-    let table: [(Kind, Role, Role); 16] = [
+    let table: [(Kind, Role, Role); 19] = [
         (Kind::Heartbeat, O, C),
         (Kind::Heartbeat, W, C),
         (Kind::Command, O, C),
@@ -547,6 +547,9 @@ fn lk_08_the_table_of_kinds() {
         (Kind::PaidNotice, C, B),
         (Kind::PosNotice, B, C),
         (Kind::PosNotice, B, O),
+        (Kind::Store, C, B),
+        (Kind::Stored, B, C),
+        (Kind::LightningReport, C, O),
     ];
     for kind in Kind::ALL {
         for from in [O, C, B, W] {

@@ -310,6 +310,18 @@ impl Client {
         }
     }
 
+    /// Hand a Box a sealed Store message and take its sealed Stored
+    /// answer (LK-82). A relay that is not a Box refuses.
+    pub fn store(&mut self, sealed: &[u8]) -> Result<Vec<u8>, ClientError> {
+        match self.call(&Request::Store {
+            sealed: sealed.to_vec(),
+        })? {
+            Response::StoreAnswer { sealed } => Ok(sealed),
+            Response::Refused(r) => Err(ClientError::Refused(r)),
+            _ => Err(ClientError::Unexpected),
+        }
+    }
+
     /// Hand a Box the welcome and the first settings (LK-27, BX-15).
     pub fn welcome(&mut self, welcome: &[u8], settings: &[u8]) -> Result<(), ClientError> {
         match self.call(&Request::Welcome {

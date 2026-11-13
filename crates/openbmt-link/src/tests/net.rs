@@ -503,3 +503,35 @@ fn lk_27_a_client_asks_for_a_claim_and_sends_a_welcome() {
     assert_eq!(client.claim(), Err(ClientError::Refused(Refusal::NoClaim)));
     assert_eq!(client.welcome(&[1, 2, 3], &[7]), Ok(()));
 }
+
+#[test]
+fn lk_82_a_client_sends_a_store_request_and_takes_the_answer() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let relay = Relay::new(relay_identity(), RelayConfig::default(), MemoryStore::new()).unwrap();
+    let relay = Arc::new(Mutex::new(relay));
+    let server = Server::start_shared(
+        listener,
+        Arc::clone(&relay),
+        Arc::new(SystemClock),
+        ServerConfig::default(),
+    )
+    .unwrap();
+    let mut client = connect(&server);
+    // No hook: refused.
+    assert_eq!(
+        client.store(&[1, 2, 3]),
+        Err(ClientError::Refused(Refusal::NoStore))
+    );
+    relay.lock().unwrap().set_store_hook(Some(Box::new(|m, _| {
+        if m == [1, 2, 3] {
+            crate::relay::StoreAnswer::Answer(vec![4, 5])
+        } else {
+            crate::relay::StoreAnswer::Refused
+        }
+    })));
+    assert_eq!(client.store(&[1, 2, 3]), Ok(vec![4, 5]));
+    assert_eq!(
+        client.store(&[9]),
+        Err(ClientError::Refused(Refusal::StoreRefused))
+    );
+}

@@ -203,6 +203,21 @@ pub enum WelcomeAnswer {
 /// welcome, the settings and the time, and decides.
 pub type WelcomeHook = Box<dyn FnMut(&[u8], &[u8], u64) -> WelcomeAnswer + Send>;
 
+/// What the hook of a store request says (LK-82).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoreAnswer {
+    /// The Box's sealed Stored message.
+    Answer(Vec<u8>),
+    /// Not taken: the message did not open, or is not from the counter the
+    /// Box keeps for.
+    Refused,
+}
+
+/// What a Box installs to take a store request (LK-82): it is given the
+/// sealed Store message and the time, and answers with the sealed Stored
+/// message.
+pub type StoreHook = Box<dyn FnMut(&[u8], u64) -> StoreAnswer + Send>;
+
 /// What a relay is asked and what it keeps.
 pub struct Relay<S: MailStore> {
     identity: Identity,
@@ -223,6 +238,9 @@ pub struct Relay<S: MailStore> {
     claim: Option<Vec<u8>>,
     /// Takes a welcome, when this relay is a Box (LK-27).
     welcome: Option<WelcomeHook>,
+    /// Takes a store request, when this relay is a Box that keeps Shop
+    /// Lightning's state (LK-82).
+    store_hook: Option<StoreHook>,
     /// With no members, give out no challenge either (BX-03).
     quiet_without_members: bool,
 }
@@ -287,6 +305,7 @@ impl<S: MailStore> Relay<S> {
             taken,
             claim: None,
             welcome: None,
+            store_hook: None,
             quiet_without_members: false,
         })
     }
@@ -306,6 +325,12 @@ impl<S: MailStore> Relay<S> {
     /// refuses every welcome request.
     pub fn set_welcome_hook(&mut self, hook: Option<WelcomeHook>) {
         self.welcome = hook;
+    }
+
+    /// Install the hook that takes a store request (LK-82). A relay with
+    /// none refuses every store request.
+    pub fn set_store_hook(&mut self, hook: Option<StoreHook>) {
+        self.store_hook = hook;
     }
 
     /// Whether a challenge is refused while the member list is empty
@@ -469,6 +494,7 @@ impl<S: MailStore> Relay<S> {
                 None => Response::Refused(Refusal::NoClaim),
             },
             Request::Welcome { welcome, settings } => self.take_welcome(&welcome, &settings, now),
+            Request::Store { sealed } => self.take_store(&sealed, now),
             Request::MakeMailbox {
                 reader,
                 challenge,
@@ -505,6 +531,19 @@ impl<S: MailStore> Relay<S> {
                 Err(why) => Response::Refused(why),
                 Ok(()) => self.ack(&reader, up_to),
             },
+        }
+    }
+
+    /// LK-82: hand the sealed Store message to the hook, which opens it and
+    /// answers. Nothing is put in a mailbox, and no challenge is needed: the
+    /// seal proves the sender and the number stops a replay.
+    fn take_store(&mut self, sealed: &[u8], now: u64) -> Response {
+        let Some(hook) = self.store_hook.as_mut() else {
+            return Response::Refused(Refusal::NoStore);
+        };
+        match hook(sealed, now) {
+            StoreAnswer::Answer(sealed) => Response::StoreAnswer { sealed },
+            StoreAnswer::Refused => Response::Refused(Refusal::StoreRefused),
         }
     }
 

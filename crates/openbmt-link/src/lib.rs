@@ -8,6 +8,7 @@
 //! - [`relay`] and [`store`]: the relay's state machine and where it keeps
 //!   its mailboxes (LK-20 to LK-26, LK-41). Pure apart from the store.
 //! - [`proto`]: the frames to a relay (LK-30).
+//! - [`shopln`]: what the Shop Lightning kinds carry (LK-83, LK-84).
 //! - [`client`] and [`server`]: blocking sockets over `std::net` (LK-30 to
 //!   LK-32).
 //!
@@ -45,6 +46,7 @@ pub mod random;
 pub mod relay;
 pub mod seal;
 pub mod server;
+pub mod shopln;
 pub mod store;
 
 #[cfg(test)]
@@ -56,7 +58,7 @@ pub use numbers::{Inbox, NextError, Outbox, TakeError};
 pub use openbmt_core::hkdf;
 pub use proto::{Refusal, Request, Response};
 pub use random::os_random;
-pub use relay::{Mailbox, Relay, RelayConfig, WelcomeAnswer, WelcomeHook};
-pub use seal::{open, seal, Kind, OpenError, Opened, Role, SealError};
+pub use relay::{Mailbox, Relay, RelayConfig, StoreAnswer, StoreHook, WelcomeAnswer, WelcomeHook};
+pub use seal::{open, seal, Kind, OpenError, Opened, Role, SealError, StoreParties};
 pub use server::{Server, ServerConfig};
 pub use store::{DirStore, Event, MailStore, MemoryStore};

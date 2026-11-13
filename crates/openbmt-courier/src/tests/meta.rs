@@ -1,7 +1,7 @@
-//! Ties the rules of section 6 of `docs/LINK-RULES.md` (LK-50 and up) to the
+//! Ties the rules of section 6 of `docs/LINK-RULES.md` (LK-50 to LK-79) to the
 //! tests: every one has a test named for it, in this crate or in the link
 //! tests of the two nodes, or an entry in `NOT_HERE` that says why not.
-//! Sections 1 to 5 are tied by `openbmt-link`.
+//! Sections 1 to 5 and 7 are tied by `openbmt-link`.
 
 use std::collections::BTreeSet;
 
@@ -28,7 +28,7 @@ fn defined() -> BTreeSet<String> {
         .lines()
         .filter_map(|l| l.strip_prefix("- **LK-"))
         .map(|rest| format!("LK-{}", &rest[..2]))
-        .filter(|id| id.as_str() >= "LK-50")
+        .filter(|id| ("LK-50".."LK-80").contains(&id.as_str()))
         .collect()
 }
 

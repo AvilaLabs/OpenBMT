@@ -9,8 +9,8 @@
 //! is what the encoder would have written, and the length is checked against
 //! the direction's limit before anything is read or allocated.
 //!
-//! Request types are 1 to 8 (7 and 8 are the claim and the welcome of a
-//! Box, LK-27). An answer to a request of type `t` has type
+//! Request types are 1 to 9 (7 and 8 are the claim and the welcome of a
+//! Box, LK-27; 9 is the Box's store request, LK-82). An answer to a request of type `t` has type
 //! `0x80 | t` and a body that starts with a status byte of 0; a refusal has
 //! type `0xFF` and a body of one status byte that is not 0 and names the
 //! rule.
@@ -49,6 +49,7 @@ const T_FETCH: u8 = 5;
 const T_ACK: u8 = 6;
 const T_CLAIM: u8 = 7;
 const T_WELCOME: u8 = 8;
+const T_STORE: u8 = 9;
 const T_ANSWER: u8 = 0x80;
 const T_REFUSED: u8 = 0xff;
 
@@ -138,11 +139,17 @@ pub enum Refusal {
     /// The welcome was not taken. One refusal for every cause, so that
     /// nothing about the invitation leaks (LK-27).
     WelcomeRefused,
+    /// This relay is not a Box that keeps Shop Lightning's state, so it
+    /// has no hook for a store request (LK-82).
+    NoStore,
+    /// The store request was not taken: it did not open, or it is not from
+    /// the counter the Box keeps for (LK-82, BX-90).
+    StoreRefused,
 }
 
 impl Refusal {
     /// Every refusal.
-    pub const ALL: [Refusal; 15] = [
+    pub const ALL: [Refusal; 17] = [
         Refusal::NotWellFormed,
         Refusal::BadSignature,
         Refusal::TooLarge,
@@ -158,6 +165,8 @@ impl Refusal {
         Refusal::AlreadyTaken,
         Refusal::NoClaim,
         Refusal::WelcomeRefused,
+        Refusal::NoStore,
+        Refusal::StoreRefused,
     ];
 
     /// The status byte (never 0).
@@ -178,6 +187,8 @@ impl Refusal {
             Self::AlreadyTaken => 13,
             Self::NoClaim => 14,
             Self::WelcomeRefused => 15,
+            Self::NoStore => 16,
+            Self::StoreRefused => 17,
         }
     }
 
@@ -203,6 +214,7 @@ impl Refusal {
             | Self::NoRandomness => "LK-23",
             Self::Storage => "LK-41",
             Self::NoClaim | Self::WelcomeRefused => "LK-27",
+            Self::NoStore | Self::StoreRefused => "LK-82",
         }
     }
 }
@@ -220,6 +232,8 @@ impl fmt::Display for Refusal {
             Self::AlreadyTaken => "a message with that number or a higher one was already taken",
             Self::NoClaim => "this relay holds no open invitation",
             Self::WelcomeRefused => "the welcome was not taken",
+            Self::NoStore => "this relay keeps no Shop Lightning state",
+            Self::StoreRefused => "the store request was not taken",
             Self::ChallengeUnknown => "the challenge is unknown or already used",
             Self::ChallengeExpired => "the challenge is too old",
             Self::ChallengeSignature => "the challenge signature is not the reader's",
@@ -287,6 +301,12 @@ pub enum Request {
         /// The signed settings (`SignedSettings::to_bytes`).
         settings: Vec<u8>,
     },
+    /// Take this sealed Store message and answer with the Box's sealed
+    /// Stored message (LK-82). It never waits in a mailbox.
+    Store {
+        /// The sealed Store message.
+        sealed: Vec<u8>,
+    },
 }
 
 /// What a relay answers.
@@ -330,6 +350,11 @@ pub enum Response {
     },
     /// The welcome was taken.
     Welcomed,
+    /// The Box's sealed Stored message (LK-82).
+    StoreAnswer {
+        /// The sealed Stored message.
+        sealed: Vec<u8>,
+    },
     /// Not done, and why.
     Refused(Refusal),
 }
@@ -421,6 +446,7 @@ impl Request {
                 b.extend_from_slice(settings);
                 frame(T_WELCOME, &b, d)
             }
+            Self::Store { sealed } => frame(T_STORE, sealed, d),
         }
     }
 
@@ -472,6 +498,11 @@ impl Request {
                 let rest = body.len().saturating_sub(4 + len);
                 let settings = r.take(rest)?.to_vec();
                 Self::Welcome { welcome, settings }
+            }
+            T_STORE => {
+                return Ok(Self::Store {
+                    sealed: body.to_vec(),
+                })
             }
             other => return Err(ProtoError::UnknownType(other)),
         };
@@ -540,6 +571,11 @@ impl Response {
                 frame(T_ANSWER | T_CLAIM, &b, d)
             }
             Self::Welcomed => frame(T_ANSWER | T_WELCOME, &[0], d),
+            Self::StoreAnswer { sealed } => {
+                let mut b = vec![0];
+                b.extend_from_slice(sealed);
+                frame(T_ANSWER | T_STORE, &b, d)
+            }
             Self::Refused(why) => frame(T_REFUSED, &[why.to_byte()], d),
         }
     }
@@ -597,6 +633,15 @@ impl Response {
                 }
             }
             Some(T_WELCOME) => Self::Welcomed,
+            Some(T_STORE) => {
+                let rest = body.len().saturating_sub(1);
+                if rest > MAX_SEALED_LEN {
+                    return Err(DecodeError::TooLarge.into());
+                }
+                Self::StoreAnswer {
+                    sealed: r.take(rest)?.to_vec(),
+                }
+            }
             _ => return Err(ProtoError::UnknownType(ty)),
         };
         r.finish()?;
