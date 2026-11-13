@@ -54,6 +54,7 @@ mod ceremony;
 mod codec;
 mod counter_views;
 mod error;
+mod float;
 pub mod host;
 mod import_view;
 #[cfg(any(target_os = "android", feature = "jni"))]
@@ -88,6 +89,10 @@ pub use counter_views::{
     CounterBundleView, CounterConfirmArgs, CounterQueuedView, CounterScanView, WaitingCounterView,
 };
 pub use error::{AppError, Kind};
+pub use float::{
+    FloatCoinView, FloatFeeArgs, FloatPaidView, FloatPayArgs, FloatRefillArgs, FloatRefillView,
+    FloatStatusArgs, FloatStatusView, FloatSweepArgs, FloatWalletView,
+};
 pub use host::{Entry, KEY1_FILE, MAX_WAIT_MS, SLICE_MS};
 pub use import_view::{ImportKind, ImportView};
 pub use own::{

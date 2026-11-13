@@ -162,6 +162,12 @@ private const val OP_OWN_SPEND_FILE = 161
 private const val OP_OWN_SPEND_TAKE = 162
 private const val OP_OWN_SPEND_ABANDON = 163
 private const val OP_OWN_MERGE = 164
+private const val OP_FLOAT_OPEN = 165
+private const val OP_FLOAT_STATUS = 166
+private const val OP_FLOAT_FEE_RATE = 167
+private const val OP_FLOAT_PAY = 168
+private const val OP_FLOAT_SWEEP = 169
+private const val OP_FLOAT_REFILL = 170
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -480,6 +486,37 @@ class OwnSpendFile(
 
 /** What taking the own wallet's answer did. */
 class OwnSpendTaken(val id: Long, val txid: ByteArray, val fee: Long, val sends: List<SendRow>)
+
+/** The refund float the 12 words open (FL-01, FL-02): [description] holds no secret and is what the app keeps. */
+class FloatWalletView(val description: String, val firstAddress: String)
+
+/** What the cap says of the float (FL-10 to FL-12): [refill] is null when there is no room or no cap. */
+class FloatStatus(val held: Long, val low: Boolean, val refill: Long?)
+
+/** One coin of the float, from the app's coin view (FL-20). [txid] is 32 bytes. */
+class FloatCoin(
+    val txid: ByteArray,
+    val vout: Long,
+    val prevTx: ByteArray,
+    val change: Boolean,
+    val index: Long,
+    val confirmations: Long,
+)
+
+/** A finished transaction of the float, for the outbox (FL-20, FL-35); [tx] is the consensus bytes. */
+class FloatPaid(
+    val tx: ByteArray,
+    val txid: String,
+    val fee: Long,
+    val vsize: Long,
+    val paid: Long,
+    val changeIndex: Long?,
+    val changeSats: Long?,
+    val destination: String,
+)
+
+/** What a refill of the float queued (FL-30). */
+class FloatRefillView(val id: Long, val sats: Long, val address: String)
 
 /** What taking the signer's answer did. */
 class SignerTaken(val id: Long, val txid: ByteArray, val fee: Long, val sends: List<SendRow>)
@@ -1474,6 +1511,12 @@ internal fun Reader.ownSpendFile(): OwnSpendFile =
         bytes(), bytes(), string(), list { signerLine() }, option { signerLine() }, u64(), words(),
     )
 
+private fun Reader.floatPaid(): FloatPaid =
+    FloatPaid(bytes(), string(), u64(), u64(), u64(), option { u32() }, option { u64() }, string())
+
+private fun Writer.floatCoin(c: FloatCoin): Writer =
+    bytes(c.txid).u32(c.vout).bytes(c.prevTx).bool(c.change).u32(c.index).u32(c.confirmations)
+
 private fun Reader.importKind(): Boolean =
     when (u8()) {
         TAG_IMPORT_KIND_SINGLE -> false
@@ -1864,6 +1907,26 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
     fun ownMerge(now: Long): OwnSpendBuilt {
         val r = call(OP_OWN_MERGE, handle) { it.u64(now) }
         return r.ownSpendBuilt().also { r.end() }
+    }
+
+    /**
+     * FL-11, FL-30: queue a refill of the refund float as a cash-out to its next receive address ([nextIndex]),
+     * for "Send from your wallet". [description] is the float's public description; [amount] is null for the cap
+     * less what the float holds.
+     */
+    fun floatRefill(
+        description: String,
+        nextIndex: Long,
+        cap: Long,
+        confirmed: Long,
+        unconfirmedIncoming: Long,
+        amount: Long?,
+    ): FloatRefillView {
+        val r = call(OP_FLOAT_REFILL, handle) { w ->
+            w.string(description).u32(nextIndex).u64(cap).u64(confirmed).u64(unconfirmedIncoming)
+                .option(amount) { w.u64(it) }
+        }
+        return FloatRefillView(r.u32(), r.u64(), r.string()).also { r.end() }
     }
 
     /** Hand the signed batches in the outbox to the link. */
@@ -2525,5 +2588,66 @@ object OwnerOwn {
             w.list(paid) { w.u32(it) }.option(highestGiven) { w.u32(it) }
         }
         return OwnGapView(r.u32(), r.bool()).also { r.end() }
+    }
+}
+
+/**
+ * The refund float of the owner phone (`docs/FLOAT-RULES.md` FL-01 to FL-35). The library keeps nothing: the
+ * calls that sign are given the 12 words from the app's keystore and give back the finished transaction and
+ * nothing secret. No node runs while they are called, so they name no handle.
+ */
+object OwnerFloat {
+    /** FL-01, FL-02: the float the [words] open: its public description and first address. */
+    fun open(words: String): FloatWalletView {
+        val r = call(OP_FLOAT_OPEN, 0) { it.string(words) }
+        return FloatWalletView(r.string(), r.string()).also { r.end() }
+    }
+
+    /** FL-10 to FL-12: what the cap says of a float holding [confirmed] and [unconfirmedIncoming] satoshis. */
+    fun status(cap: Long, confirmed: Long, unconfirmedIncoming: Long): FloatStatus {
+        val r = call(OP_FLOAT_STATUS, 0) { it.u64(cap).u64(confirmed).u64(unconfirmedIncoming) }
+        return FloatStatus(r.u64(), r.bool(), r.option { r.u64() }).also { r.end() }
+    }
+
+    /** FL-22: the fee rate of a refund, in satoshis per 1000 virtual bytes, shown before the owner confirms. */
+    fun feeRate(recent: Long?, typed: Long?): Long {
+        val r = call(OP_FLOAT_FEE_RATE, 0) { w -> w.option(recent) { w.u64(it) }.option(typed) { w.u64(it) } }
+        return r.u64().also { r.end() }
+    }
+
+    /** FL-20 to FL-23: pay a refund of [sats] to [address] from the float's [coins]. */
+    fun pay(
+        words: String,
+        network: OwnerNetwork,
+        address: String,
+        sats: Long,
+        feeRate: Long,
+        changeIndex: Long,
+        minConfirmations: Long,
+        lockHeight: Long,
+        coins: List<FloatCoin>,
+    ): FloatPaid {
+        val r = call(OP_FLOAT_PAY, 0) { w ->
+            w.string(words).network(network).string(address).u64(sats).u64(feeRate).u32(changeIndex)
+                .u32(minConfirmations).u32(lockHeight).list(coins) { w.floatCoin(it) }
+        }
+        return r.floatPaid().also { r.end() }
+    }
+
+    /** FL-35: move every coin of the float to the shop's receive address [shopIndex] of its pinned wallet. */
+    fun sweep(
+        words: String,
+        shop: String,
+        shopIndex: Long,
+        feeRate: Long,
+        minConfirmations: Long,
+        lockHeight: Long,
+        coins: List<FloatCoin>,
+    ): FloatPaid {
+        val r = call(OP_FLOAT_SWEEP, 0) { w ->
+            w.string(words).string(shop).u32(shopIndex).u64(feeRate).u32(minConfirmations).u32(lockHeight)
+                .list(coins) { w.floatCoin(it) }
+        }
+        return r.floatPaid().also { r.end() }
     }
 }

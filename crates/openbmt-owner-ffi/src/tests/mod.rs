@@ -7,6 +7,7 @@ mod call;
 mod ceremony;
 mod counter;
 mod e2e;
+mod float;
 mod import;
 pub(crate) mod kit;
 mod kotlin;

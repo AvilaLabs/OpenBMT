@@ -140,6 +140,12 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (162, "own_spend_take"),
         (163, "own_spend_abandon"),
         (164, "own_merge"),
+        (165, "float_open"),
+        (166, "float_status"),
+        (167, "float_fee_rate"),
+        (168, "float_pay"),
+        (169, "float_sweep"),
+        (170, "float_refill"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

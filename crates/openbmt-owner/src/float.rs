@@ -37,8 +37,10 @@ use openbmt_core::say::{Tone, Who, Words};
 use openbmt_core::wallet::Keychain;
 use openbmt_core::wallet_single::{ImportedWallet, SingleKeyWallet};
 use openbmt_spend::{
-    check_finished, finalize_plan, plan, ChangePosition, Coin, Plan, PlanError, SpendRequest,
+    check_finished, finalize_plan, plan, ChangePosition, Plan, PlanError, SpendRequest,
 };
+
+pub use openbmt_spend::Coin;
 
 use crate::error::OwnerError;
 use crate::own_say::needed;
@@ -82,7 +84,7 @@ pub const WORDS_NEEDED_FL_21_CHECK: &str = "WORDS_NEEDED_FL_21_CHECK";
 /// FL-22: there is no fee rate to use.
 pub const WORDS_NEEDED_FL_22_NO_RATE: &str = "WORDS_NEEDED_FL_22_NO_RATE";
 /// FL-23: the float cannot cover the refund and its fee; it stays queued.
-pub const WORDS_NEEDED_FL_23_NOT_ENOUGH: &str = "WORDS_NEEDED_FL_23_NOT_ENOUGH";
+pub const WORDS_NEEDED_FL_23_SHORT: &str = "WORDS_NEEDED_FL_23_SHORT";
 /// FL-30: the float's description or its address cannot be read or made.
 pub const WORDS_NEEDED_FL_30_WALLET: &str = "WORDS_NEEDED_FL_30_WALLET";
 /// FL-31: said before a refill goes: it links the savings and the float on
@@ -195,7 +197,7 @@ impl FloatRefusal {
             Self::NotFloatCoin(_) => WORDS_NEEDED_FL_21_COIN,
             Self::NotOnlyFloat(_) => WORDS_NEEDED_FL_21_CHECK,
             Self::NoFeeRate => WORDS_NEEDED_FL_22_NO_RATE,
-            Self::NotEnough { .. } => WORDS_NEEDED_FL_23_NOT_ENOUGH,
+            Self::NotEnough { .. } => WORDS_NEEDED_FL_23_SHORT,
             Self::Wallet => WORDS_NEEDED_FL_30_WALLET,
             Self::NothingToSweep => WORDS_NEEDED_FL_35_NOTHING,
             Self::ShopAddress => WORDS_NEEDED_FL_35_ADDRESS,

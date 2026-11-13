@@ -127,6 +127,10 @@ use crate::counter_views::{
     CounterBundleView, CounterConfirmArgs, CounterQueuedView, CounterScanView, WaitingCounterView,
 };
 use crate::error::{internal, refused_by, wrong_state, AppError};
+use crate::float::{
+    self as float_ops, FloatCoinView, FloatFeeArgs, FloatPaidView, FloatPayArgs, FloatRefillArgs,
+    FloatRefillView, FloatStatusArgs, FloatStatusView, FloatSweepArgs, FloatWalletView,
+};
 use crate::host::{real_spawn, Entry, Spawn};
 use crate::import_view::{self, ImportKind, ImportView};
 use crate::own::{
@@ -763,6 +767,24 @@ fn build_ops() -> Vec<Op> {
         op(164, "own_merge", Node, |c, now: u64| {
             c.entry()?.own_merge(now)
         }),
+        op(165, "float_open", Zero, |_, words: String| {
+            float_ops::open(words)
+        }),
+        op(166, "float_status", Zero, |_, a: FloatStatusArgs| {
+            float_ops::status(a)
+        }),
+        op(167, "float_fee_rate", Zero, |_, a: FloatFeeArgs| {
+            float_ops::fee_rate(a)
+        }),
+        op(168, "float_pay", Zero, |_, a: FloatPayArgs| {
+            float_ops::pay(a)
+        }),
+        op(169, "float_sweep", Zero, |_, a: FloatSweepArgs| {
+            float_ops::sweep(a)
+        }),
+        op(170, "float_refill", Node, |c, a: FloatRefillArgs| {
+            c.entry()?.float_refill(a)
+        }),
     ]
 }
 
@@ -1012,6 +1034,16 @@ fn definitions() -> Vec<TypeDef> {
         OwnSpendTakenView::define(),
         OwnSpendBuildArgs::define(),
         OwnSpendTakeArgs::define(),
+        FloatWalletView::define(),
+        FloatStatusArgs::define(),
+        FloatStatusView::define(),
+        FloatFeeArgs::define(),
+        FloatCoinView::define(),
+        FloatPayArgs::define(),
+        FloatPaidView::define(),
+        FloatSweepArgs::define(),
+        FloatRefillArgs::define(),
+        FloatRefillView::define(),
         SignerBuiltView::define(),
         SignerFileView::define(),
         SignerTakenView::define(),

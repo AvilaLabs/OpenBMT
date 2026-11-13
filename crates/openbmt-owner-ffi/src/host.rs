@@ -87,6 +87,7 @@ use crate::counter_views::{
 use crate::error::{
     from_words, internal, poisoned, refused_by, rule_in, store_by, wrong_state, AppError, Kind,
 };
+use crate::float::{self as float_ops, FloatRefillArgs, FloatRefillView};
 use crate::own::{self, OwnGapView};
 use crate::own_spend_views::{
     built_view as own_built_view, file_view as own_file_view, item_view as own_item_view,
@@ -2817,5 +2818,29 @@ fn outcome_view(item: u32, outcome: &ItemOutcome) -> OutcomeView {
         finished,
         reason,
         words: words(outcome.words()),
+    }
+}
+
+impl Entry {
+    /// FL-11, FL-30: queue a refill of the float as a cash-out to its next
+    /// receive address, in the queue of the shop's own wallet.
+    pub(crate) fn float_refill(&self, a: FloatRefillArgs) -> Result<FloatRefillView, AppError> {
+        let wallet = float_ops::wallet_of(&a.description)?;
+        self.run(None, move |st| {
+            let write = st.node.queue_writer();
+            let network = st.network;
+            let queued = openbmt_owner::float::prepare_refill(
+                st.node.owner_mut().map_err(|e| node_error(&e))?,
+                &wallet,
+                a.next_index,
+                a.cap,
+                a.confirmed,
+                a.unconfirmed_incoming,
+                a.amount,
+                &write,
+            )
+            .map_err(|e| float_ops::refill_error(e, queue_error))?;
+            Ok(float_ops::refill_view(&queued, network))
+        })
     }
 }

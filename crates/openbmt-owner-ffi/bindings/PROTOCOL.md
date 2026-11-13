@@ -163,6 +163,12 @@ ops run on another; it waits for at most 250 ms.
 162 own_spend_take   handle node  args OwnSpendTakeArgs -> OwnSpendTakenView
 163 own_spend_abandon handle node  args list<u8> -> ()
 164 own_merge        handle node  args u64 -> OwnSpendBuiltView
+165 float_open       handle zero  args string -> FloatWalletView
+166 float_status     handle zero  args FloatStatusArgs -> FloatStatusView
+167 float_fee_rate   handle zero  args FloatFeeArgs -> u64
+168 float_pay        handle zero  args FloatPayArgs -> FloatPaidView
+169 float_sweep      handle zero  args FloatSweepArgs -> FloatPaidView
+170 float_refill     handle node  args FloatRefillArgs -> FloatRefillView
 ```
 
 ## Types
@@ -312,6 +318,16 @@ OwnSpendFileView: record: psbt: list<u8>, txid: list<u8>, file_name: string, pay
 OwnSpendTakenView: record: id: u32, txid: list<u8>, fee: u64, sends: list<SendRow>
 OwnSpendBuildArgs: record: now: u64, fee_rate: u64, picked: list<u32>
 OwnSpendTakeArgs: record: now: u64, session: list<u8>, number: u32, returned: list<u8>
+FloatWalletView: record: description: string, first_address: string
+FloatStatusArgs: record: cap: u64, confirmed: u64, unconfirmed_incoming: u64
+FloatStatusView: record: held: u64, low: bool, refill: option<u64>
+FloatFeeArgs: record: recent: option<u64>, typed: option<u64>
+FloatCoinView: record: txid: list<u8>, vout: u32, prev_tx: list<u8>, change: bool, index: u32, confirmations: u32
+FloatPayArgs: record: words: string, network: OwnerNetwork, address: string, sats: u64, fee_rate: u64, change_index: u32, min_confirmations: u32, lock_height: u32, coins: list<FloatCoinView>
+FloatPaidView: record: tx: list<u8>, txid: string, fee: u64, vsize: u64, paid: u64, change_index: option<u32>, change_sats: option<u64>, destination: string
+FloatSweepArgs: record: words: string, shop: string, shop_index: u32, fee_rate: u64, min_confirmations: u32, lock_height: u32, coins: list<FloatCoinView>
+FloatRefillArgs: record: description: string, next_index: u32, cap: u64, confirmed: u64, unconfirmed_incoming: u64, amount: option<u64>
+FloatRefillView: record: id: u32, sats: u64, address: string
 SignerBuiltView: record: built: BuiltView, signer_session: option<list<u8>>
 SignerFileView: record: psbt: list<u8>, txid: list<u8>, file_name: string, payments: list<SignerLineView>, change: option<SignerLineView>, fee: u64, words: Words
 SignerTakenView: record: id: u32, txid: list<u8>, fee: u64, sends: list<SendRow>
