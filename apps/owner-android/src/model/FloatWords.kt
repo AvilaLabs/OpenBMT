@@ -4,6 +4,35 @@ package org.openbmt.owner.app
  * The owner app's own words on the float screens (`docs/FLOAT-RULES.md`).
  */
 object FloatWords {
+    private val registry = ArrayList<Pair<String, String>>()
+
+    /** A text not written yet: a `WORDS_NEEDED_OA_FLnn_...` placeholder that shows its own name. */
+    private fun need(name: String): String {
+        registry.add(name.removePrefix("WORDS_NEEDED_OA_") to name)
+        return name
+    }
+
+    // ---- not written yet ----
+    val needCapFirst = need("WORDS_NEEDED_OA_FL10_NEED_CAP_FIRST")
+    val scanPrompt = need("WORDS_NEEDED_OA_FL01_SCAN_PROMPT")
+    val scanNotSeedQr = need("WORDS_NEEDED_OA_FL01_SCAN_NOT_SEEDQR")
+    val scanFailed = need("WORDS_NEEDED_OA_FL01_SCAN_FAILED")
+    val sealFailed = need("WORDS_NEEDED_OA_FL03_SEAL_FAILED")
+    val unlockWhy = need("WORDS_NEEDED_OA_FL03_UNLOCK_WHY")
+    val setupDone = need("WORDS_NEEDED_OA_FL01_SETUP_DONE")
+    val statusNotWatched = need("WORDS_NEEDED_OA_FL10_STATUS_NOT_WATCHED")
+    val refillNoRoom = need("WORDS_NEEDED_OA_FL11_REFILL_NO_ROOM")
+    val refundListEmpty = need("WORDS_NEEDED_OA_FL20_REFUND_LIST_EMPTY")
+    val refundReadyHeading = need("WORDS_NEEDED_OA_FL20_REFUND_READY_HEADING")
+    val refundNotWired = need("WORDS_NEEDED_OA_FL20_REFUND_NOT_WIRED")
+    val sweepNotWired = need("WORDS_NEEDED_OA_FL35_SWEEP_NOT_WIRED")
+
+    /** The placeholders: key and name, in screen order. */
+    fun needed(): List<Pair<String, String>> = registry.toList()
+
+    fun isPlaceholder(text: String): Boolean = text.startsWith("WORDS_NEEDED_OA_FL")
+
+    // ---- written ----
     val rowTitle = "Refund float"
     val back = "Back"
     val setupTitle = "Set up the refund float"

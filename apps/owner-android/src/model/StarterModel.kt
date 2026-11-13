@@ -385,8 +385,8 @@ object StarterWrap {
  * made, the data key wrapped by the Keystore key, the public wallet, the owner's record, and a payment that is signed
  * and not yet confirmed. Nothing here is the seed or the data key in the clear.
  */
-class StarterStore(base: File) {
-    val dir = File(base, DIR)
+class StarterStore(base: File, folder: String = DIR) {
+    val dir = File(base, folder)
 
     private fun file(name: String) = File(dir, name)
 

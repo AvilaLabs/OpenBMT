@@ -33,11 +33,11 @@ class StarterKeyGone(cause: Throwable? = null) : Exception("the starter's Keysto
  * never exportable, usable only with the phone unlocked and only after the owner proves they are there (on Android 11
  * and later for every use, by a strong biometric or the phone's own PIN; on Android 10 within 10 seconds of the proof).
  */
-class StarterKeystore {
+class StarterKeystore(private val alias: String = ALIAS) {
     private val keystore: KeyStore = KeyStore.getInstance(PROVIDER).also { it.load(null) }
 
     fun exists(): Boolean = try {
-        keystore.containsAlias(ALIAS)
+        keystore.containsAlias(alias)
     } catch (_: java.security.KeyStoreException) {
         false
     }
@@ -54,7 +54,7 @@ class StarterKeystore {
     }
 
     private fun generate(strongBox: Boolean) {
-        val b = KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+        val b = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .setKeySize(256)
@@ -75,14 +75,14 @@ class StarterKeystore {
 
     /** SS-43: the key is deleted. True when it is gone. */
     fun delete(): Boolean = try {
-        if (keystore.containsAlias(ALIAS)) keystore.deleteEntry(ALIAS)
-        !keystore.containsAlias(ALIAS)
+        if (keystore.containsAlias(alias)) keystore.deleteEntry(alias)
+        !keystore.containsAlias(alias)
     } catch (_: java.security.KeyStoreException) {
         false
     }
 
     private fun key(): SecretKey = try {
-        keystore.getKey(ALIAS, null) as? SecretKey ?: throw StarterKeyGone()
+        keystore.getKey(alias, null) as? SecretKey ?: throw StarterKeyGone()
     } catch (e: UnrecoverableKeyException) {
         throw StarterKeyGone(e)
     } catch (e: java.security.KeyStoreException) {
@@ -159,16 +159,17 @@ internal fun Controller.starterAuthenticate(
     description: String,
     onOk: (Cipher?) -> Unit,
     onFail: () -> Unit,
+    title: String = StarterWords.authTitle,
 ) {
     if (Build.VERSION.SDK_INT < 30 && credentialOnly) {
         val keyguard = act.getSystemService(KeyguardManager::class.java)
         @Suppress("DEPRECATION")
-        val intent = keyguard?.createConfirmDeviceCredentialIntent(StarterWords.authTitle, description)
+        val intent = keyguard?.createConfirmDeviceCredentialIntent(title, description)
         if (intent == null) return onFail()
         return startCredential(intent) { ok -> if (ok) onOk(null) else onFail() }
     }
     val builder = BiometricPrompt.Builder(act)
-        .setTitle(StarterWords.authTitle)
+        .setTitle(title)
         .setSubtitle(StarterWords.authSubtitle)
         .setDescription(description)
     if (Build.VERSION.SDK_INT >= 30) {
@@ -204,17 +205,24 @@ internal fun Controller.hasStrongBox(): Boolean =
 
 /**
  * SS-20, SS-21: wraps the core's [dataKey] with the Keystore key after the owner proves they are there, and keeps the
- * wrapped key. [dataKey] is overwritten whatever happens. [done] says whether it was kept.
+ * wrapped key. [dataKey] is overwritten whatever happens. [done] says whether it was kept. The refund float wraps its data key
+ * the same way, with its own [keystore] key and its own [save].
  */
-internal fun Controller.starterWrapKey(dataKey: ByteArray, description: String, done: (Boolean) -> Unit) {
-    val keystore = starter.keystore
+internal fun Controller.starterWrapKey(
+    dataKey: ByteArray,
+    description: String,
+    keystore: StarterKeystore = starter.keystore,
+    save: (ByteArray) -> Unit = { starter.store.saveWrapped(it) },
+    title: String = StarterWords.authTitle,
+    done: (Boolean) -> Unit,
+) {
     try {
         keystore.make(hasStrongBox())
         val pre = if (Build.VERSION.SDK_INT >= 30) keystore.encryptCipher() else null
         starterAuthenticate(pre, false, description, { c ->
             try {
                 val cipher = c ?: keystore.encryptCipher()
-                starter.store.saveWrapped(StarterKeystore.wrap(cipher, dataKey))
+                save(StarterKeystore.wrap(cipher, dataKey))
                 done(true)
             } catch (_: GeneralSecurityException) {
                 done(false)
@@ -228,7 +236,7 @@ internal fun Controller.starterWrapKey(dataKey: ByteArray, description: String, 
         }, {
             dataKey.fill(0)
             done(false)
-        })
+        }, title)
     } catch (_: GeneralSecurityException) {
         dataKey.fill(0)
         done(false)
