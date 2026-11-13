@@ -1181,3 +1181,59 @@ fn oc_55_an_outbox_payment_beaten_by_a_block_is_held_and_settles_as_paid_if_it_c
         log.as_slice()
     );
 }
+
+#[test]
+fn ss_30_n13e_01_a_refund_whose_payment_left_the_chain_is_not_handed_to_the_outbox() {
+    let dir = Dir::new();
+    let setup = Setup {
+        refund_depth: 1,
+        ..Setup::default()
+    };
+    let mut rig = start(&dir, &setup).unwrap();
+    let refund = rig.queue_refund(10_000);
+    // A coin nothing owes, then the sale's payment with one confirmation.
+    let coin = tx_from(
+        OutPoint::new(Txid::from_byte_array([7; 32]), 0),
+        &[(&receive(0), 300_000)],
+    );
+    rig.mine(std::slice::from_ref(&coin));
+    let paid = tx_from(
+        OutPoint::new(Txid::from_byte_array([8; 32]), 0),
+        &[(&receive(1), 50_000)],
+    );
+    rig.mine(std::slice::from_ref(&paid));
+    assert!(rig.node.owner().refund_ready(refund));
+    let pay = serialize(&tx_from(
+        OutPoint::new(coin.compute_txid(), 0),
+        &[(&external(9), 10_000)],
+    ));
+    // The payment's block leaves and another takes its place.
+    replace_tip(&mut rig, &[]);
+    assert!(!rig.node.owner().refund_ready(refund));
+    assert!(rig.node.take_starter(&pay, &[refund]).is_err());
+    assert!(rig.node.owner().outbox().is_empty());
+    assert_eq!(refund_stage(&rig), Stage::Queued);
+}
+
+#[test]
+fn ss_30_n13e_01_a_ready_refund_is_handed_to_the_outbox() {
+    let dir = Dir::new();
+    let setup = Setup {
+        refund_depth: 1,
+        ..Setup::default()
+    };
+    let mut rig = start(&dir, &setup).unwrap();
+    let refund = rig.queue_refund(10_000);
+    let paid = tx_from(
+        OutPoint::new(Txid::from_byte_array([8; 32]), 0),
+        &[(&receive(1), 50_000)],
+    );
+    rig.mine(std::slice::from_ref(&paid));
+    assert!(rig.node.owner().refund_ready(refund));
+    let pay = tx_from(
+        OutPoint::new(Txid::from_byte_array([6; 32]), 0),
+        &[(&external(9), 10_000)],
+    );
+    let txid = rig.node.take_starter(&serialize(&pay), &[refund]).unwrap();
+    assert_eq!(refund_stage(&rig), Stage::Signed { txid });
+}

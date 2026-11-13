@@ -1128,6 +1128,16 @@ pub(crate) fn no_such_refund(id: u32) -> AppError {
     )
 }
 
+/// SS-30: the refund waits in the queue but is not ready: its sale's payment
+/// is not deep enough, or no longer covers the refunds counted.
+pub(crate) fn refund_not_ready(id: u32) -> AppError {
+    refused_with(
+        "starter-refund-ready",
+        format!("refund {id} is not ready: its sale's payment is not deep enough or no longer covers the refunds counted"),
+        starter::refund_not_ready_words(),
+    )
+}
+
 /// The refund `id`, as the queue holds it, paid from the node's coins
 /// (SS-30): the address and the amount are the refund's.
 pub(crate) fn pay_from_node(

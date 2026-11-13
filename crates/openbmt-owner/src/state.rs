@@ -578,6 +578,18 @@ impl Owner {
         Some(!crate::build::is_ready(&self.state, r))
     }
 
+    /// SS-30, AS-52, AS-53: whether the refund is ready to be signed now:
+    /// queued, its sale's payment at the refund depth and covering every
+    /// refund counted. The same check the session builder makes. `false` if
+    /// there is no such refund.
+    pub fn refund_ready(&self, id: u32) -> bool {
+        self.state
+            .refunds
+            .iter()
+            .find(|r| r.id == id)
+            .is_some_and(|r| crate::build::is_ready(&self.state, r))
+    }
+
     // ---- facts and options ----------------------------------------------------
 
     /// AS-52, AS-53: set what a sale received and whether it reached the

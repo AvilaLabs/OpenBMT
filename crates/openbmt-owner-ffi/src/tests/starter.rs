@@ -782,3 +782,141 @@ fn ss_36_ss_37_ss_43_the_core_words_cross_as_the_library_writes_them() {
     let fault = Rd::error(&call(&reg, OP_STATE_WORDS, &W::new().u8(9).0)).expect("refused");
     assert_eq!(fault.status, 1);
 }
+
+// ---- a refund is signed only when it is ready (SS-30) -------------------------------
+
+/// A node with a coin in its wallet that no sale paid, a sale paid at height
+/// 2 and buried to the refund depth, and a refund of it that is ready. The
+/// sealed seed and its data key come with it.
+fn node_with_ready_refund() -> (super::kit::Rig, u64, Vec<u8>, Vec<u8>, u32) {
+    use super::kit::{counter, receive, tx_from, Rig};
+    let rig = Rig::new();
+    *rig.registry().starter.rng.lock().unwrap() =
+        Some(Box::new(Fixed::new(&[counting(1), counting(77)])));
+    let (sealed, data_key, _) = sealed_wallet(rig.registry());
+    let handle = rig.start();
+    rig.queue_batch(handle);
+    // The coin nothing owes, then the sale's payment.
+    rig.mine(handle, &[tx_from(7, &[(&receive(0), 300_000)])]);
+    rig.mine(handle, &[tx_from(8, &[(&receive(1), 50_000)])]);
+    rig.mine_empty(handle, 5);
+    let sale = openbmt_owner::SaleKey {
+        counter: counter(),
+        index: 1,
+    };
+    let refund = rig
+        .registry()
+        .entry_for_test(handle)
+        .expect("an entry")
+        .node_for_test(move |node| {
+            let write = node.queue_writer();
+            let owner = node.owner_mut().unwrap();
+            let facts = openbmt_owner::SaleFacts {
+                received_sats: 50_000,
+                reached_refund_depth: true,
+            };
+            owner.set_sale_facts(sale, facts, &write).unwrap();
+            owner
+                .queue_refund(sale, "Mia", super::kit::external(9), 10_000, None, &write)
+                .unwrap()
+        });
+    // The next block works the sale's facts out from the owner's own view.
+    rig.mine_empty(handle, 1);
+    (rig, handle, sealed, data_key, refund)
+}
+
+fn refund_ready(rig: &super::kit::Rig, handle: u64, refund: u32) -> bool {
+    rig.registry()
+        .entry_for_test(handle)
+        .expect("an entry")
+        .node_for_test(move |node| node.owner().refund_ready(refund))
+}
+
+fn node_pay(
+    rig: &super::kit::Rig,
+    handle: u64,
+    sealed: &[u8],
+    data_key: &[u8],
+    refund: u32,
+) -> Vec<u8> {
+    rig.call(
+        209,
+        handle,
+        &W::new()
+            .bytes(sealed)
+            .bytes(data_key)
+            .u32(refund)
+            .u64(2_000)
+            .u32(1)
+            .0,
+    )
+}
+
+fn finished_tx(prev: u8) -> Vec<u8> {
+    serialize(&super::kit::tx_from(
+        prev,
+        &[(&super::kit::external(9), 10_000)],
+    ))
+}
+
+#[test]
+fn ss_30_n13e_01_a_refund_whose_payment_a_reorganization_took_is_not_signed_from_other_coins() {
+    let (rig, handle, sealed, data_key, refund) = node_with_ready_refund();
+    assert!(refund_ready(&rig, handle, refund));
+    // The payment's block leaves the chain; the refund stays queued.
+    rig.reorg_from(handle, 2);
+    assert!(!refund_ready(&rig, handle, refund));
+    // The wallet still holds the unrelated coin, yet nothing is signed.
+    let fault = Rd::error(&node_pay(&rig, handle, &sealed, &data_key, refund)).expect("refused");
+    assert_eq!(fault.rule, "starter-refund-ready");
+    assert_eq!(fault.words.code.as_deref(), Some("SS-30"));
+    assert!(fault.words.heading.starts_with("WORDS_NEEDED_SS30_"));
+    // A transaction handed to the outbox is refused too, and writes nothing.
+    let given = rig.call(
+        210,
+        handle,
+        &W::new().bytes(&finished_tx(5)).u32(1).u32(refund).0,
+    );
+    let fault = Rd::error(&given).expect("refused");
+    assert_eq!(fault.status, 1);
+    let (stage_queued, outbox) = rig
+        .registry()
+        .entry_for_test(handle)
+        .expect("an entry")
+        .node_for_test(move |node| {
+            let queued = node
+                .owner()
+                .refunds()
+                .iter()
+                .all(|r| r.stage == openbmt_owner::Stage::Queued);
+            (queued, node.owner().outbox().len())
+        });
+    assert!(stage_queued);
+    assert_eq!(outbox, 0);
+}
+
+#[test]
+fn ss_30_n13e_01_a_ready_refund_is_still_signed_and_handed_to_the_outbox() {
+    let (rig, handle, sealed, data_key, refund) = node_with_ready_refund();
+    // The check lets it through: whatever the signing says is not the
+    // refusal of readiness.
+    let said = node_pay(&rig, handle, &sealed, &data_key, refund);
+    if let Some(fault) = Rd::error(&said) {
+        assert_ne!(fault.rule, "starter-refund-ready");
+        assert_ne!(fault.rule, "starter-refund");
+    }
+    let tx = finished_tx(5);
+    let given = rig.call(210, handle, &W::new().bytes(&tx).u32(1).u32(refund).0);
+    assert!(Rd::error(&given).is_none());
+    let signed = rig
+        .registry()
+        .entry_for_test(handle)
+        .expect("an entry")
+        .node_for_test(move |node| {
+            matches!(
+                node.owner().refunds()[0].stage,
+                openbmt_owner::Stage::Signed { .. }
+            )
+        });
+    assert!(signed);
+}

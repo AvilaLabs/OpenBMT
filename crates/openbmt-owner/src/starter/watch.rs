@@ -57,8 +57,9 @@ impl Owner {
     /// other (AS-64). `refunds` are the queued refunds it pays, each
     /// marked signed; the move pays none. The queue is stored before the
     /// transaction is given to the outbox, and a refusal or a failed store
-    /// changes nothing. Giving the same transaction again changes nothing
-    /// and returns the same ID.
+    /// changes nothing. Every refund must be ready (AS-52, AS-53) at that
+    /// moment. Giving the same transaction again changes nothing and
+    /// returns the same ID.
     pub fn take_starter<E>(
         &mut self,
         tx: &[u8],
@@ -88,6 +89,16 @@ impl Owner {
                 .is_some_and(|r| r.stage == Stage::Queued);
             if !queued {
                 return Err(Refusal::UnknownEntry(*n).into());
+            }
+        }
+        // SS-30: ready now, by the same check the builder makes (AS-52,
+        // AS-53): a payment a reorganization took away is not refunded.
+        for n in refunds {
+            if !self.refund_ready(*n) {
+                return Err(Refusal::WrongStage(
+                    "a refund is signed only when it is ready: the payment is deep enough and covers every refund counted",
+                )
+                .into());
             }
         }
         for n in refunds {

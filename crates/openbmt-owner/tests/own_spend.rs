@@ -1503,3 +1503,36 @@ fn ss_30_a_transaction_of_the_starter_wallet_waits_in_the_outbox_with_its_refund
         .unwrap();
     assert_eq!(owner.outbox().len(), 2);
 }
+
+#[test]
+fn ss_30_n13e_01_a_refund_is_handed_to_the_outbox_only_while_it_is_ready() {
+    let own = single();
+    let mut owner = own_owner(&own, Options::default());
+    let r = refund_to(&mut owner, 1);
+    assert!(owner.refund_ready(r));
+    assert!(!owner.refund_ready(r + 50));
+    let tx = pays_wallet(&own, &own_coin(&own, 1, 0, 100_000), 1, 90_000);
+    let bytes = serialize(&tx);
+    // The payment is taken away: the facts fall to nothing, the refund stays
+    // queued and is not ready, and nothing is stored or changed.
+    set_facts(&mut owner, sale(1), shallow(0));
+    assert!(!owner.refund_ready(r));
+    assert_eq!(owner.waiting_for_depth(r), Some(true));
+    let before = owner.snapshot().unwrap();
+    let store = Store::default();
+    assert!(matches!(
+        owner.take_starter(&bytes, &[r], |b| store.put(b)),
+        Err(OwnerError::Refused(Refusal::WrongStage(_)))
+    ));
+    assert_eq!(store.calls(), 0);
+    assert_eq!(owner.snapshot().unwrap(), before);
+    assert!(owner.outbox().is_empty());
+    // The same facts but short of what the refunds count are not ready either.
+    set_facts(&mut owner, sale(1), deep(5_000));
+    assert!(!owner.refund_ready(r));
+    // Back to a covering payment at the depth: ready, and it is taken.
+    set_facts(&mut owner, sale(1), deep(BIG));
+    assert!(owner.refund_ready(r));
+    owner.take_starter(&bytes, &[r], |b| store.put(b)).unwrap();
+    assert_eq!(owner.outbox().len(), 1);
+}

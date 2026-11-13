@@ -246,7 +246,9 @@ internal fun Controller.showStarterPay() {
     val n = node ?: return begin()
     val msg = Slot(act)
     val queue = attempt(msg) { n.queue() }
-    val refunds = queue?.refunds.orEmpty().filter { it.stage.kind == StageKind.Queued }
+    // SS-30: only a refund that is ready is offered. The library makes the same check when the payment is made and again
+    // when it is handed to the outbox; this list is a convenience. `waitingForDepth` is false exactly when the refund is ready.
+    val refunds = queue?.refunds.orEmpty().filter { it.stage.kind == StageKind.Queued && it.waitingForDepth == false }
     val views = ArrayList<View>()
     if (refunds.isEmpty()) views.add(ui.text(StarterWords.payEmpty, 16f))
     else views.add(ui.rows(refunds.map { r -> RowItem(Format.sats(r.sats), r.address) { starterChecked(CheckStage.Paying, back = { showStarterPay() }) { starterPayConfirm(n, r) } } }))

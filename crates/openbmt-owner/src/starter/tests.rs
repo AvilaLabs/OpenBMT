@@ -1537,6 +1537,16 @@ fn ss_36_ss_30_the_watch_and_the_refund_queue_have_written_words() {
 }
 
 #[test]
+fn ss_30_the_refund_that_is_not_ready_has_a_placeholder_that_names_its_rule() {
+    let w = refund_not_ready_words();
+    assert!(crate::own_say::is_placeholder(&w));
+    assert_eq!(w.code, Some("SS-30"));
+    assert_eq!(w.heading, "WORDS_NEEDED_SS30_NOT_READY_HEADING");
+    assert_eq!(w.what, "WORDS_NEEDED_SS30_NOT_READY_WHAT");
+    assert_eq!(w.next, "WORDS_NEEDED_SS30_NOT_READY_NEXT");
+}
+
+#[test]
 fn ss_50_a_refusal_names_its_rule_and_carries_the_detail() {
     let w = StarterRefusal::Plan("no coin".to_string()).words();
     assert_eq!(w.code, Some("SS-30"));

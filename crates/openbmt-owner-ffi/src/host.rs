@@ -2815,6 +2815,9 @@ impl Entry {
                 .find(|r| r.id == a.refund && r.stage == openbmt_owner::Stage::Queued)
                 .cloned()
                 .ok_or_else(|| crate::starter::no_such_refund(a.refund))?;
+            if !st.node.owner().refund_ready(refund.id) {
+                return Err(crate::starter::refund_not_ready(a.refund));
+            }
             let (coins, tip, change) = st
                 .node
                 .starter_coins()
@@ -3068,6 +3071,17 @@ impl Entry {
                 .collect();
             Ok(rows)
         })
+    }
+
+    /// Run `f` on the node, on the node's thread, for a test that sets up
+    /// what the ops cannot.
+    #[cfg(test)]
+    pub(crate) fn node_for_test<R: Send + 'static>(
+        &self,
+        f: impl FnOnce(&mut OwnerNode<Port>) -> R + Send + 'static,
+    ) -> R {
+        self.run(None, move |st| Ok(f(&mut st.node)))
+            .expect("the node runs")
     }
 
     /// Run `f` as a call on the node's thread, for a test of what a panic

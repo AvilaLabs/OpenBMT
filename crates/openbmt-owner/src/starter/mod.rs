@@ -500,6 +500,21 @@ pub fn no_such_refund_words() -> Words {
     )
 }
 
+/// SS-30: the refund to pay is queued but not ready: its sale's payment is
+/// not deep enough, or no longer covers every refund counted. The words are
+/// still to be written, so each part is the placeholder that names the rule;
+/// the list of written words leaves it out until then.
+pub fn refund_not_ready_words() -> Words {
+    Words::new(
+        Tone::Stop,
+        "WORDS_NEEDED_SS30_NOT_READY_HEADING",
+        "WORDS_NEEDED_SS30_NOT_READY_WHAT",
+        Who::Owner,
+        "WORDS_NEEDED_SS30_NOT_READY_NEXT",
+    )
+    .code("SS-30")
+}
+
 /// Every state of this module that has words, by name.
 pub fn all_starter_words() -> Vec<(String, Words)> {
     let mut all: Vec<(String, Words)> = all_refusals()

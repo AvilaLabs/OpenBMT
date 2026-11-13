@@ -601,6 +601,36 @@ impl Rig {
         block
     }
 
+    /// A reorganization: every block from `height` up leaves the chain and
+    /// the same number of empty blocks take its place.
+    pub fn reorg_from(&self, handle: u64, height: u32) {
+        let (left, joined, blocks) = {
+            let mut chain = self.chain.lock().expect("lock");
+            let keep = usize::try_from(height).expect("fits") - 1;
+            let left: Vec<BlockHash> = chain.drain(keep..).map(|b| b.block_hash()).collect();
+            let mut joined = Vec::new();
+            let mut blocks = Vec::new();
+            for h in height..height + u32::try_from(left.len()).expect("fits") {
+                let prev = chain.last().map_or_else(genesis, Block::block_hash);
+                let block = mine_block(prev, h, &[]);
+                chain.push(block.clone());
+                joined.push((h, block.block_hash()));
+                blocks.push(block);
+            }
+            (left, joined, blocks)
+        };
+        let top = joined.last().map_or(0, |j| j.0);
+        let mut events = vec![AppEvent::Chain { joined, left }];
+        for block in &blocks {
+            events.push(AppEvent::Block {
+                hash: block.block_hash(),
+                bytes: serialize(block),
+            });
+        }
+        events.push(AppEvent::Checked(top));
+        self.feed(handle, events);
+    }
+
     pub fn mine_empty(&self, handle: u64, n: u32) {
         for _ in 0..n {
             self.mine(handle, &[]);
