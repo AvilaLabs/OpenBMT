@@ -137,8 +137,9 @@ an end, payments in parts, repeats and returns.
   and each request's state is worked out again from what remains (RQ-16).
   A payment in a block of the new chain is credited as any other. Where the
   returns of a request then come to more than it received, its queued
-  returns are taken off the queue, newest first, until they no longer do;
-  a return already in a spend or done stays, and the request shows that
+  returns are taken off the queue, newest first, until they no longer do,
+  and so is a return that goes back to the queue later because its spend
+  was replaced (RQ-29); a return already in a spend or done stays, and the request shows that
   more was returned than it now received, for the owner to decide. Nothing
   is paid or cancelled without the owner.
 

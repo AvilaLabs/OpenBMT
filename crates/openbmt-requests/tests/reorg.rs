@@ -3,7 +3,7 @@
 mod common;
 
 use common::*;
-use openbmt_requests::say::{over_returned_line, WORDS_NEEDED_RQ_37_OVER_RETURNED};
+use openbmt_requests::say::over_returned_line;
 use openbmt_requests::{After, Reorged, RequestBook, ReturnAmount, ReturnState, Status};
 
 fn status(book: &RequestBook, n: u64) -> Status {
@@ -199,7 +199,10 @@ fn rq_37_a_request_that_was_not_over_returned_reports_nothing() {
         .unwrap();
     give_back(&mut book, n, 100_000);
     assert_eq!(book.over_returned(n), None);
-    assert_eq!(over_returned_line(), WORDS_NEEDED_RQ_37_OVER_RETURNED);
+    assert_eq!(
+        over_returned_line("0.001 BTC"),
+        "Returned 0.001 BTC more than it received"
+    );
 }
 
 #[test]

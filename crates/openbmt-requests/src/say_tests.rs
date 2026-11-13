@@ -352,6 +352,8 @@ fn sc_12_the_dialogs_keep_the_lengths_the_rules_give() {
 }
 
 #[test]
-fn rq_37_the_over_returned_fact_has_a_placeholder_until_its_words_are_written() {
-    assert_eq!(over_returned_line(), "WORDS_NEEDED_RQ_37_OVER_RETURNED");
+fn rq_37_the_over_returned_line_names_the_excess() {
+    let line = over_returned_line("12,000 sats");
+    assert_eq!(line, "Returned 12,000 sats more than it received");
+    assert!(!line.contains("WORDS_NEEDED"));
 }

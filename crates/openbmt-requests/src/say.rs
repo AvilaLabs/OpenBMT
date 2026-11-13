@@ -240,8 +240,8 @@ pub fn return_refused(why: &ReturnRefused) -> Words {
         ReturnRefused::BadScript => address_refused(&AddressRefused::NotAnAddress),
         ReturnRefused::QueueFull => refused(
             "Too many returns waiting",
-            "99 returns are waiting, the most one payment can hold.",
-            "Pay the returns, then add this one.",
+            "99 returns are waiting or in a payment not yet confirmed, the most the queue holds.",
+            "Pay the returns, or wait for the last payment to confirm, then add this one.",
             "RQ-29",
         ),
         ReturnRefused::BookFull => book_full(),
@@ -456,14 +456,11 @@ pub fn due_fact(due: &str) -> String {
     format!("Due {due}")
 }
 
-/// RQ-37: the placeholder for the fact that more was returned from a request
-/// than it now received; the words are not written yet (RQ-36).
-pub const WORDS_NEEDED_RQ_37_OVER_RETURNED: &str = "WORDS_NEEDED_RQ_37_OVER_RETURNED";
-
 /// RQ-37: the line under a request's state when more was returned than it
-/// received (see `RequestBook::over_returned`).
-pub fn over_returned_line() -> &'static str {
-    WORDS_NEEDED_RQ_37_OVER_RETURNED
+/// received, after a block left the chain (see `RequestBook::over_returned`);
+/// `amount` is the excess as shown.
+pub fn over_returned_line(amount: &str) -> String {
+    format!("Returned {amount} more than it received")
 }
 
 /// RQ-29: the line of a return that is done.
