@@ -4,7 +4,8 @@
 //! ```text
 //! box_pair invite   <dir>                       make an invitation (BX-10)
 //! box_pair claim    <dir> <addr>                fetch the claim and check it (BX-13, BX-14)
-//! box_pair welcome  <dir> <addr>                send the welcome and first settings (BX-15)
+//! box_pair welcome  <dir> <addr> [with-rc]      send the welcome and first settings (BX-15);
+//!                                               `with-rc` adds the counter of `counter_regtest`
 //! box_pair badwelcome <dir> <addr>              a stranger's welcome (garbage)
 //! box_pair mailbox  <dir> <addr> <name>         make a device's mailbox
 //! box_pair send     <dir> <addr> <from> <to> <text>
@@ -71,6 +72,10 @@ use openbmt_pos::{
 };
 
 fn identity(name: &str) -> Result<Identity, String> {
+    // `rc` is the counter of `counter_regtest`, whose key is fixed bytes.
+    if name == "rc" {
+        return Identity::from_secret_bytes(&[0x13; 32]).map_err(|e| e.to_string());
+    }
     let secret = tagged_hash("OpenBMT/example/box-pair/v1", name.as_bytes());
     Identity::from_secret_bytes(&secret).map_err(|e| e.to_string())
 }
@@ -78,7 +83,7 @@ fn identity(name: &str) -> Result<Identity, String> {
 fn role_of(name: &str) -> Result<Role, String> {
     match name {
         "owner" => Ok(Role::Owner),
-        "c1" | "c2" | "stranger" => Ok(Role::Counter),
+        "c1" | "c2" | "rc" | "stranger" => Ok(Role::Counter),
         other => Err(format!("{other} is not a device of this example")),
     }
 }
@@ -116,11 +121,28 @@ fn read_claim(dir: &Path) -> Result<Claim, String> {
 
 /// First settings: two counters and the Box (BX-15, BX-20).
 fn first_settings(box_key: &DeviceId, version: u32) -> Result<Settings, String> {
+    first_settings_with(box_key, version, false)
+}
+
+/// The first settings, and with `with_rc` the regtest counter of
+/// `counter_regtest` as a third counter (`welcome ... with-rc`).
+fn first_settings_with(
+    box_key: &DeviceId,
+    version: u32,
+    with_rc: bool,
+) -> Result<Settings, String> {
     let (c1, c2) = (identity("c1")?.device_id(), identity("c2")?.device_id());
     let mut s = Settings::defaults(1_000);
     s.version = version;
     s.devices = [c1, c2, *box_key].into_iter().collect();
     s.counters = [(c1, 2_500u16), (c2, 2_500u16)].into_iter().collect();
+    if with_rc {
+        let rc = identity("rc")?.device_id();
+        s.devices.insert(rc);
+        s.counters = [(c1, 1_700u16), (c2, 1_700u16), (rc, 6_600u16)]
+            .into_iter()
+            .collect();
+    }
     s.boxes = [*box_key].into_iter().collect();
     Ok(s)
 }
@@ -409,7 +431,8 @@ fn run(args: &[String]) -> Result<(), String> {
             let inv = read_invitation(&dir)?;
             let _ = fs::remove_file(dir.join("invitation.txt"));
             let welcome = Welcome::make(&inv, &claim, roots()?);
-            let settings = signed(first_settings(&claim.box_key, 1)?, true)?;
+            let with_rc = arg(3).is_ok_and(|w| w == "with-rc");
+            let settings = signed(first_settings_with(&claim.box_key, 1, with_rc)?, true)?;
             let mut c = connect(arg(2)?, Some(&claim.box_key))?;
             c.welcome(&welcome.to_bytes(), &settings.to_bytes())
                 .map_err(|e| refused(&e))?;

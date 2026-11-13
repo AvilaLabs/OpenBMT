@@ -6,7 +6,7 @@
 //! counter_regtest <data dir> <node address> [--regtest-single-peer]
 //!     [--heartbeat-max-age <seconds>] [--customers-off-wifi]
 //!     [--regtest-own-node] [--own-wallet <description>]
-//!     [--relay <address> --relay-key <hex>]
+//!     [--relay <address> --relay-key <hex>] [--box-key <hex>]
 //! ```
 //!
 //! `scripts/counter-e2e-core.sh` uses this to check the whole receive path
@@ -25,6 +25,12 @@
 //! printed as usual. The two number files of the link (LK-53) are kept in the
 //! data directory: the start is a first start if neither is there, and any
 //! other start needs both.
+//!
+//! `--box-key <hex>` makes the relay a Box (BX-20): the Box is added to the
+//! signed settings as a device and a Box, to the courier's table as a Box,
+//! and the owner of the link is the owner `box_pair` paired the Box with;
+//! the counter sends it paid notices (BX-40) and takes its POS notices
+//! (CR-266). `scripts/till-e2e-core.sh` uses it for a sale from the till.
 //!
 //! `--heartbeat-max-age` sets the signed setting `heartbeat_max_age_secs`
 //! (60 to 3600; the default settings say 600), so that a check of an old
@@ -99,6 +105,13 @@
 //! - `switch-kept`: the app keeps that record in `own-record.bin`, and says
 //!   so: `switch kept` (CR-261, steps three and four)
 //! - `switch-different`: `switch different` (CR-260)
+//! - `till-waiting`: the requests the home screen shows, one line each
+//!   `till sale=<hex> amount=<minor> reference=<text> minutes_left=<n>`,
+//!   then `till waiting=<n>` (CR-267)
+//! - `till-start <sale hex> <rate>`: Start (CR-268); `opened ...` or `refused ...`
+//! - `till-not-now <sale hex>`: `till not-now ok` or `till not-now none`
+//! - `till-of <index>`: `till-of index=<i> sale=<hex|none> cancelled=<bool>`
+//!   (CR-269)
 //! - `limits`: the signed limits of the two checks
 //! - `settings <hex>`: signed settings the owner sent, taken as the link
 //!   takes them (CR-160 to CR-162): `settings taken version=<n>
@@ -193,8 +206,11 @@ use openbmt_watch::{
 const USAGE: &str = "usage: counter_regtest <data dir> <node address> [--regtest-single-peer] \
                      [--heartbeat-max-age <seconds>] [--customers-off-wifi] \
                      [--regtest-own-node] [--own-wallet <description>] \
-                     [--relay <address> --relay-key <hex>]";
+                     [--relay <address> --relay-key <hex>] [--box-key <hex>]";
 const ADDRESSES: u32 = 20;
+
+/// The Box that is the relay, from `--box-key`.
+static BOX_KEY: OnceLock<DeviceId> = OnceLock::new();
 
 /// TEST ONLY: the name the node is told its own node has (a valid v3 onion
 /// name; nothing is ever dialled at it).
@@ -408,6 +424,10 @@ fn setup(
     let mut settings = Settings::defaults(1_000);
     settings.devices.insert(counter.device_id());
     settings.counters.insert(counter.device_id(), 10_000);
+    if let Some(box_key) = BOX_KEY.get() {
+        settings.devices.insert(*box_key);
+        settings.boxes.insert(*box_key);
+    }
     if customers_off_wifi {
         settings.customer_wifi = false;
     }
@@ -803,6 +823,58 @@ fn command<P: DriverPort>(
                 Err(e) => say(format!("settings refused {e}")),
             }
         }
+        Some("till-waiting") => {
+            let now = now_secs();
+            let waiting = node.till_waiting();
+            for r in &waiting {
+                say(format!(
+                    "till sale={} amount={} reference={} minutes_left={}",
+                    hex(&r.sale),
+                    r.amount.0,
+                    r.reference,
+                    r.minutes_left(now)
+                ));
+            }
+            say(format!("till waiting={}", waiting.len()));
+        }
+        Some("till-start") => {
+            let sale: [u8; 16] = unhex(words.next())?
+                .try_into()
+                .map_err(|_| "the sale is not 16 bytes".to_string())?;
+            let rate: u64 = number(words.next(), "the rate")?;
+            let rate = Rate::new(rate).ok_or("the rate is zero")?;
+            let source = RateSource::new("regtest-fixed", now_secs()).map_err(|e| e.to_string())?;
+            match node.till_start(&sale, rate, &source, None) {
+                Ok(opened) => {
+                    let address = Address::from_script(&opened.script, Network::Regtest)
+                        .map_err(|e| e.to_string())?;
+                    say(format!(
+                        "opened index={} address={address} sats={}",
+                        opened.index, opened.needs_sats
+                    ));
+                }
+                Err(e) => say(format!("refused {e:?}")),
+            }
+        }
+        Some("till-not-now") => {
+            let sale: [u8; 16] = unhex(words.next())?
+                .try_into()
+                .map_err(|_| "the sale is not 16 bytes".to_string())?;
+            say(if node.till_not_now(&sale) {
+                "till not-now ok"
+            } else {
+                "till not-now none"
+            });
+        }
+        Some("till-of") => {
+            let index: u32 = number(words.next(), "the index")?;
+            say(format!(
+                "till-of index={index} sale={} cancelled={}",
+                node.sale_till(index)
+                    .map_or("none".to_string(), |s| hex(&s)),
+                node.till_cancelled(index)
+            ));
+        }
         Some("hbstate") => {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -992,7 +1064,14 @@ fn now_secs() -> u64 {
 /// The link to the owner through the relay. The owner is the fixed test key
 /// of `owner_regtest`.
 fn start_link(dir: &str, addr: SocketAddr, relay_key: DeviceId) -> Result<CounterLink, String> {
-    let owner = identity(&OWNER_SECRET)?.device_id();
+    // With a Box, the owner the link talks to is the owner of `box_pair`,
+    // the one the Box is paired with.
+    let owner = if BOX_KEY.get().is_some() {
+        let secret = openbmt_core::identity::tagged_hash("OpenBMT/example/box-pair/v1", b"owner");
+        identity(&secret)?.device_id()
+    } else {
+        identity(&OWNER_SECRET)?.device_id()
+    };
     let first = if ["link-inbox", "link-outbox"]
         .iter()
         .any(|f| Path::new(dir).join(f).exists())
@@ -1006,7 +1085,10 @@ fn start_link(dir: &str, addr: SocketAddr, relay_key: DeviceId) -> Result<Counte
             dir: dir.into(),
             identity: identity(&COUNTER_SECRET)?,
             role: Role::Counter,
-            peers: BTreeMap::from([(owner, Role::Owner)]),
+            peers: BTreeMap::from([(owner, Role::Owner)])
+                .into_iter()
+                .chain(BOX_KEY.get().map(|b| (*b, Role::Box)))
+                .collect(),
             route: Route::Direct(addr),
             relay: relay_key,
             client: ClientConfig::default(),
@@ -1041,6 +1123,13 @@ fn run(args: &[String]) -> Result<(), String> {
                 .try_into()
                 .map_err(|_| "the relay key is not 32 bytes".to_string())?;
             relay_key = Some(DeviceId::from_bytes(&bytes).map_err(|e| format!("relay key: {e}"))?);
+        } else if arg == "--box-key" {
+            let key = args.next().ok_or(USAGE)?;
+            let bytes: [u8; 32] = unhex(Some(key))?
+                .try_into()
+                .map_err(|_| "the Box key is not 32 bytes".to_string())?;
+            let key = DeviceId::from_bytes(&bytes).map_err(|e| format!("Box key: {e}"))?;
+            let _ = BOX_KEY.set(key);
         } else if arg == "--regtest-single-peer" {
             single_peer = true;
         } else if arg == "--customers-off-wifi" {
@@ -1127,6 +1216,10 @@ fn serve<P: DriverPort>(
         (Some(addr), Some(key)) => Some(start_link(dir, addr, key)?),
         _ => None,
     };
+    if let (Some(link), Some(_)) = (link.as_mut(), BOX_KEY.get()) {
+        link.enable_notices(identity(&COUNTER_SECRET)?, dir, &node)
+            .map_err(|e| format!("the notices: {e}"))?;
+    }
 
     let (lines, input) = channel();
     std::thread::spawn(move || {
