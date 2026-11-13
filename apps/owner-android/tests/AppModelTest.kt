@@ -2365,10 +2365,11 @@ object AppModelTest {
         for (bad in listOf("BOOT_COMPLETED", "<receiver", "<provider", "<activity-alias", "WAKE_LOCK", "SCHEDULE_EXACT_ALARM", "USE_EXACT_ALARM")) ok(!manifest.contains(bad), "no $bad")
         val check = source("tests/check-manifest.sh")
         ok(check.contains("foregroundServiceType.*0x40000000") && check.contains("PROPERTY_SPECIAL_USE_FGS_SUBTYPE") && check.contains("-eq 6 ]") && check.contains("for kind in receiver provider activity-alias"), "the script checks the built APK for all of it")
-        for (other in listOf("../key-android/AndroidManifest.xml", "../counter-android/AndroidManifest.xml")) {
-            val m = source(other)
-            ok(!m.contains("<service") && !m.contains("FOREGROUND_SERVICE") && !m.contains("POST_NOTIFICATIONS"), "$other is not changed")
-        }
+        val key = source("../key-android/AndroidManifest.xml")
+        ok(!key.contains("<service") && !key.contains("FOREGROUND_SERVICE") && !key.contains("POST_NOTIFICATIONS"), "the Key app has no service")
+        val counter = source("../counter-android/AndroidManifest.xml")
+        val services = Regex("<service\\s+android:name=\"([^\"]+)\"").findAll(counter).map { it.groupValues[1] }.toList()
+        ok(services == listOf("org.openbmt.counter.app.TapService") && !counter.contains("FOREGROUND_SERVICE") && !counter.contains("POST_NOTIFICATIONS"), "the counter has only its NFC tag service (TP-10), and no watch")
     }
 
     // ---- the look of the screens (OA-91 to OA-93), the currency (OA-95, OA-96) -------------------------------------------------------------
