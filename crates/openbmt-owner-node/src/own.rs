@@ -573,6 +573,15 @@ impl OwnNode {
             .unwrap_or_default()
     }
 
+    /// BX-18: the Boxes the shop's settings in force name, which the link
+    /// sends settings to as it does the counters.
+    pub fn boxes_of_settings(&self) -> Vec<DeviceId> {
+        self.shop
+            .known_settings()
+            .map(|s| s.settings.boxes.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
     /// One turn of the owner's side for a shop with its own wallet, after
     /// the link's step (OA-112): the live watch follows the book (OA-107,
     /// OC-22), the link follows the counters of the settings (LK-67), each
@@ -592,8 +601,9 @@ impl OwnNode {
             notes.push(format!("OA-107: the live watch did not take the book: {e}"));
         }
         let counters = self.counters_of_settings();
-        if !counters.is_empty() {
-            if let Err(e) = link.follow(&counters, &[]) {
+        let boxes = self.boxes_of_settings();
+        if !counters.is_empty() || !boxes.is_empty() {
+            if let Err(e) = link.follow(&counters, &boxes) {
                 notes.push(format!("LK-67: the link's counters: {e}"));
             }
         }

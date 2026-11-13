@@ -1043,4 +1043,97 @@ fn fl_35_the_float_off_index_is_taken_once_above_every_range_and_a_retry_gets_th
         .float_off_index(T0 + 1, |_: &[u8]| Err("disk full".to_string()));
     assert!(matches!(failed, Err(OwnError::Store(_))));
     let _ = &mut back;
+// ---- BX-18: a Box for a shop with its own wallet ----
+
+#[test]
+fn bx_18_the_settings_that_add_a_box_list_it_as_a_device_and_a_box_at_a_higher_version() {
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    let the_box = id(9).device_id();
+    // With no settings the first ones need a price.
+    assert!(matches!(
+        s.settings_with_box(the_box, 0),
+        Err(openbmt_owner::Refusal::NoSettingsRate)
+    ));
+    let settings = s.settings_with_box(the_box, USD).unwrap();
+    assert_eq!(settings.version, 1);
+    assert!(settings.devices.contains(&the_box) && settings.boxes.contains(&the_box));
+    assert!(settings.counters.is_empty());
+    // Nothing is stored by asking.
+    assert!(!s.knows_box(&the_box) && disk.get().is_empty());
+    // A counter paired first is kept, with its share.
+    let made = s.make_offer(T0).unwrap();
+    let (_, r1) = counter_request(&made, 3, "Front");
+    confirm(&mut s, &disk, &made, &r1, T0 + 30).unwrap();
+    let with_counter = s.settings_with_box(the_box, 0).unwrap();
+    assert_eq!(with_counter.version, 2);
+    assert!(with_counter.counters.contains_key(&id(3).device_id()));
+    assert!(with_counter.devices.contains(&id(3).device_id()));
+}
+
+#[test]
+fn bx_18_the_owner_root_is_not_a_box() {
+    let s = shop(SINGLE);
+    assert!(matches!(
+        s.settings_with_box(id(1).device_id(), USD),
+        Err(openbmt_owner::Refusal::BoxIsRoot)
+    ));
+}
+
+#[test]
+fn bx_18_adding_a_box_signs_with_the_owner_root_alone_and_stores_before_it_takes_effect() {
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    let the_box = id(9).device_id();
+    let failing = s.add_box(the_box, USD, |_: &[u8]| Err("disk full".to_string()));
+    assert!(matches!(failing, Err(OwnError::Store(_))));
+    assert!(!s.knows_box(&the_box), "a failed store changes nothing");
+    let signed = s.add_box(the_box, USD, |b| disk.put(b)).unwrap();
+    assert!(signed.approver_sig.is_none());
+    signed
+        .verify_signatures_with(&openbmt_core::settings::Authority::OwnWallet {
+            owner: id(1).device_id(),
+        })
+        .unwrap();
+    assert!(s.knows_box(&the_box));
+    assert_eq!(s.known_settings(), Some(&signed));
+    // It is a Free change for the settings before it (AP-01): the owner's
+    // signature alone is taken.
+    let back =
+        OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), &disk.get()).unwrap();
+    assert!(back.knows_box(&the_box));
+}
+
+#[test]
+fn bx_18_a_welcome_sent_again_carries_the_same_settings() {
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    let the_box = id(9).device_id();
+    let first = s.add_box(the_box, USD, |b| disk.put(b)).unwrap();
+    let stored = disk.get();
+    let again = s.add_box(the_box, 0, |b| disk.put(b)).unwrap();
+    assert_eq!(first.to_bytes(), again.to_bytes());
+    assert_eq!(disk.get(), stored, "nothing more was written");
+}
+
+#[test]
+fn bx_18_a_counters_key_is_no_box_and_a_counter_added_later_keeps_the_box() {
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    let made = s.make_offer(T0).unwrap();
+    let (_, r1) = counter_request(&made, 3, "Front");
+    confirm(&mut s, &disk, &made, &r1, T0 + 30).unwrap();
+    assert!(matches!(
+        refused(s.add_box(id(3).device_id(), 0, |b| disk.put(b))),
+        OwnRefusal::Settings(openbmt_owner::Refusal::BoxKnown)
+    ));
+    let the_box = id(9).device_id();
+    s.add_box(the_box, 0, |b| disk.put(b)).unwrap();
+    let made2 = s.make_offer(T0 + 100).unwrap();
+    let (_, r2) = counter_request(&made2, 4, "Back");
+    confirm(&mut s, &disk, &made2, &r2, T0 + 130).unwrap();
+    let held = s.known_settings().unwrap();
+    assert!(held.settings.boxes.contains(&the_box));
+    assert_eq!(held.settings.counters.len(), 2);
+    assert_eq!(held.settings.version, 3);
 }

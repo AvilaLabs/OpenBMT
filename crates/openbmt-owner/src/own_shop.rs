@@ -943,6 +943,76 @@ impl OwnShop {
         Ok(signed)
     }
 
+    /// BX-18, AS-84: whether the settings this phone signed list `key` as a
+    /// device or a Box, so that a Box already added is known.
+    pub fn knows_box(&self, key: &DeviceId) -> bool {
+        self.state
+            .known
+            .as_ref()
+            .is_some_and(|k| k.settings.devices.contains(key) || k.settings.boxes.contains(key))
+    }
+
+    /// BX-18, AS-84: the settings that add `box_key`: the settings in force
+    /// (or the starting values at `usd_per_btc` dollars to a bitcoin when
+    /// there are none), with the Box on the device list and among the Boxes,
+    /// the counters and their shares as they are, and the version one above
+    /// the one in force. The owner root is no Box, and no counter is.
+    pub fn settings_with_box(
+        &self,
+        box_key: DeviceId,
+        usd_per_btc: u64,
+    ) -> Result<Settings, Refusal> {
+        if box_key == self.identity.device_id() {
+            return Err(Refusal::BoxIsRoot);
+        }
+        let mut settings = match &self.state.known {
+            Some(s) => s.settings.clone(),
+            None if usd_per_btc == 0 => return Err(Refusal::NoSettingsRate),
+            None => Settings::defaults(sats_per_usd_at(usd_per_btc)?),
+        };
+        settings.version = self
+            .state
+            .known
+            .as_ref()
+            .map_or(0, |k| k.settings.version)
+            .checked_add(1)
+            .ok_or_else(|| Refusal::SettingsInvalid("no version is left".to_string()))?;
+        settings.devices.insert(box_key);
+        settings.boxes.insert(box_key);
+        settings
+            .validate()
+            .map_err(|e| Refusal::SettingsInvalid(e.to_string()))?;
+        Ok(settings)
+    }
+
+    /// BX-18: the settings a Box is handed with its welcome: the settings in
+    /// force when they already list `box_key` (a welcome that is sent again
+    /// carries the same settings, byte for byte, BX-16), and otherwise the
+    /// settings that add it ([`OwnShop::settings_with_box`]), signed by the
+    /// owner root alone and stored as the settings in force. A Box that is
+    /// added is a Free change (AP-01), so counters take it with the owner's
+    /// signature.
+    pub fn add_box<E>(
+        &mut self,
+        box_key: DeviceId,
+        usd_per_btc: u64,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<SignedSettings, OwnError<E>> {
+        if let Some(known) = &self.state.known {
+            if known.settings.boxes.contains(&box_key) {
+                return Ok(known.clone());
+            }
+            if known.settings.devices.contains(&box_key) {
+                // A counter's key, which is no Box.
+                return Err(OwnRefusal::Settings(Refusal::BoxKnown).into());
+            }
+        }
+        let settings = self
+            .settings_with_box(box_key, usd_per_btc)
+            .map_err(OwnRefusal::Settings)?;
+        self.change_settings(settings, persist)
+    }
+
     /// OA-106: the next range for `device` (a counter, or the owner root
     /// for the desk, RQ-02), written to the book and stored before it is
     /// signed, and signed before it is returned.
