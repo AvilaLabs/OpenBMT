@@ -160,9 +160,9 @@ funds.**
   of the pinned wallet a counter accepts, and only once (CR-263). The owner
   phone shows each counter as switched, waiting or refused, from the
   counters' records (CR-262). The owner phone itself stays pinned to the
-  starter wallet until the move of SS-42 has its confirmation and the key is
-  deleted (SS-43); it then pins the new wallet, once, and keeps watching the
-  addresses of the starter wallet up to the last one handed out. The owner's
+  starter wallet until the move of SS-42 has its confirmation; it then pins
+  the new wallet, once, and keeps watching the addresses of the starter
+  wallet up to the last one handed out. The owner's
   queue moves with it: the queued refunds, the paid log and the facts of
   the sales paid into the starter wallet are bound to the new wallet, and
   the re-pin waits until no transaction of the starter wallet other than
@@ -182,8 +182,11 @@ funds.**
   address, and a move to another wallet is refused until the first one's
   wallet is pinned.
 - **SS-43. Then the key is gone.** When that payment has one confirmation,
-  the app deletes the sealed seed and the Keystore key, and says that the
-  card of starter words is to be kept: it is the one way to open a payment
+  the owner phone pins the new wallet (SS-41), and only once that is done
+  does the app delete the sealed seed and the Keystore key. A re-pin that
+  is refused deletes nothing and says why. A key that is not deleted is
+  offered for deletion again, without a second re-pin. The app then says
+  that the card of starter words is to be kept: it is the one way to open a payment
   that arrives at the starter wallet later. Such a payment is shown on the
   home screen, with the offer to restore (SS-23) and move it.
 
