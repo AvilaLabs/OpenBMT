@@ -23,9 +23,9 @@
 # `--regtest-single-peer`, as in `scripts/link-e2e-core.sh`. Sales are
 # confirmed by blocks.
 #
-# The counter is paired before the Box, so that the first settings list it: a
-# counter added after the Box is a loosening, which the Box takes only inside a
-# counter's confirmation (CR-242), and the owner library does not make one yet.
+# In steps 1 to 5 the counter is paired before the Box, so that the first
+# settings list it. Steps 6 and 7 run the other order against a second real
+# Box (docs/APPROVAL-RULES.md AP-12, docs/OWNER-APP-RULES.md OA-119 to OA-122).
 #
 # The steps (printed as a table at the end):
 #   1. The Box is paired under the own-wallet kind: its stored roots name the
@@ -38,6 +38,20 @@
 #   4. The counter's check-in reaches the owner, and the owner's copy holds it
 #      at its place.
 #   5. The cashier's refund request reaches the owner's queue through the Box.
+#   6. A Box added with no counter, then a first counter paired: the Box's
+#      relay refuses the counter before and carries it after, and the Box
+#      took the settings with the owner's signature alone (AP-12).
+#   7. A second counter paired after: the change waits (the owner phone's
+#      settings stay as they were), the Box neither takes it nor relays the
+#      counter; the first counter's confirmation is joined, the settings go
+#      to the Box as `OBM<`, and then the Box relays the second counter and
+#      holds the new version.
+#
+# Steps 6 and 7 are driven by `own_box flow`, with the owner library's real
+# `OwnShop` and the real Box. The first counter's confirmation there is signed
+# with the core's `CounterConfirmation::sign`: `counter_regtest` has no counter
+# paired with an own wallet and a Box, so the counter's own CR-241 record is
+# not part of this run (it is covered by the counter node's tests).
 #
 # Environment:
 #   CORE_BIN       the folder of Bitcoin Core's binaries
@@ -67,6 +81,9 @@ C_DATA="$BASE/counter"
 O_DATA="$BASE/owner"
 B_DATA="$BASE/box"
 K_DATA="$BASE/shop"
+B2_DATA="$BASE/box2"
+K2_DATA="$BASE/shop2"
+BOX2_PORT=$((P0 + 2))
 SALE_AMOUNT=500       # $5.00 in cents
 SALE_RATE=10000000    # $100,000 per bitcoin, in cents
 HB_EVERY=3            # seconds between the owner's heartbeats
@@ -97,9 +114,10 @@ case "$VERSION" in
 esac
 say "$VERSION"
 
-mkdir -p "$A_DIR" "$C_DATA" "$O_DATA" "$B_DATA" "$K_DATA"
+mkdir -p "$A_DIR" "$C_DATA" "$O_DATA" "$B_DATA" "$K_DATA" "$B2_DATA" "$K2_DATA"
 A_PID=
 BOX_PID=
+BOX2_PID=
 declare -A PID LOG FDN COUNT
 PID[c]=; PID[o]=
 FDN[c]=3; FDN[o]=4
@@ -132,6 +150,7 @@ cleanup() {
   stop_pid "${PID[c]:-}"
   stop_pid "${PID[o]:-}"
   stop_pid "$BOX_PID"
+  stop_pid "$BOX2_PID"
   stop_core
   if [ "${DRILL_KEEP:-0}" != 1 ]; then rm -rf -- "$BASE"; fi
 }
@@ -418,11 +437,55 @@ else
   bad 5 "the owner's queue is not as expected: ${RLINE:-no refund line}"
 fi
 
+# ---- 6 and 7 ------------------------------------------------------------------------
+
+say "6. A Box added before any counter, then a first counter"
+"$PAIR_BIN" invite "$K2_DATA" >"$BASE/invitation2.txt" 2>&1 || die "no second invitation"
+"$BOX_BIN" "$B2_DATA" "127.0.0.1:$BOX2_PORT" --no-console --invitation-file "$BASE/invitation2.txt" \
+  </dev/null >"$BASE/box2.log" 2>&1 &
+BOX2_PID=$!
+for _ in $(seq 1 40); do
+  grep -q '^state: ' "$BASE/box2.log" && break
+  kill -0 "$BOX2_PID" 2>/dev/null || break
+  sleep 0.25
+done
+grep -q '^state: ' "$BASE/box2.log" || die "the second Box did not start: $(cat "$BASE/box2.log")"
+"$PAIR_BIN" claim "$K2_DATA" "127.0.0.1:$BOX2_PORT" >/dev/null 2>&1 || die "the second claim failed"
+FLOW=$("$OWNBOX_BIN" flow "$K2_DATA" "127.0.0.1:$BOX2_PORT" "$B2_DATA" 2>&1)
+printf '%s\n' "$FLOW" | while IFS= read -r l; do note "$l"; done
+L_WELCOME=$(grep '^welcomed ' <<<"$FLOW")
+L_FIRST=$(grep '^first ' <<<"$FLOW")
+L_SECOND=$(grep '^second ' <<<"$FLOW")
+L_CONFIRMED=$(grep '^confirmed ' <<<"$FLOW")
+if grep -q '^welcomed version [0-9]* counters 0$' <<<"$L_WELCOME" &&
+  grep -q '^relay first=refused$' <<<"$FLOW" &&
+  [ "$(kv "$L_FIRST" waiting)" = false ] && [ -n "$(kv "$L_FIRST" version)" ] &&
+  [ "$(kv "$L_FIRST" box_version)" = "$(kv "$L_FIRST" version)" ] &&
+  grep -q 'relay first=ok$' <<<"$L_FIRST"; then
+  pass 6 "the Box was added with no counter, which refused the first counter's relay; the first counter was a Free change, taken by the Box at version $(kv "$L_FIRST" box_version) with the owner's signature alone, and its relay then passed"
+else
+  bad 6 "the first counter did not pass the Box as expected: ${L_WELCOME:-no welcome} / ${L_FIRST:-no first line}"
+fi
+
+say "7. A second counter waits for the first counter's confirmation"
+if [ "$(kv "$L_SECOND" waiting)" = true ] &&
+  [ "$(kv "$L_SECOND" in_force)" = "$(kv "$L_FIRST" version)" ] &&
+  [ "$(kv "$L_SECOND" box_version)" = "$(kv "$L_FIRST" version)" ] &&
+  grep -q 'relay second=refused$' <<<"$L_SECOND" &&
+  [ "$(kv "$L_CONFIRMED" in_force)" = "$(kv "$L_SECOND" held_version)" ] &&
+  [ "$(kv "$L_CONFIRMED" waiting)" = false ] &&
+  [ "$(kv "$L_CONFIRMED" box_version)" = "$(kv "$L_SECOND" held_version)" ] &&
+  grep -q 'relay second=ok$' <<<"$L_CONFIRMED"; then
+  pass 7 "the second counter's change (version $(kv "$L_SECOND" held_version)) waited: the owner's settings and the Box's stayed at version $(kv "$L_FIRST" version) and the Box refused the counter; after the first counter's confirmation the owner and the Box hold version $(kv "$L_CONFIRMED" box_version), and the second counter's relay passes"
+else
+  bad 7 "the second counter's change did not go as expected: ${L_SECOND:-no second line} / ${L_CONFIRMED:-no confirmed line}"
+fi
+
 # ---- the table -----------------------------------------------------------------------
 
 say "Summary"
 FAILS=0
-for s in 1 2 3 4 5; do
+for s in 1 2 3 4 5 6 7; do
   printf '%-4s step %s: %s\n' "${RESULT[$s]:-NOT RUN}" "$s" "${MESSAGE[$s]:-}"
   [ "${RESULT[$s]:-}" = PASS ] || FAILS=$((FAILS + 1))
 done
