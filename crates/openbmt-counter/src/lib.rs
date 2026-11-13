@@ -64,6 +64,8 @@ pub mod screen;
 pub mod staff;
 pub mod store;
 pub mod switched_held;
+pub mod till;
+mod till_say;
 pub mod totals;
 
 #[cfg(test)]
@@ -98,13 +100,19 @@ pub use refusal::{
     BatchTakeRefused, BillRefused, BlockError, CancelRefused, CommandRefused, DestinationRefused,
     HeartbeatRefused, JudgeError, LightningRefused, LoadError, NoteRefused, OpenRefused,
     OverrideRefused, PartRefused, RangeTakeRefused, RefundRefused, RequoteRefused, SightingError,
-    StaffRefused, TotalsRefused, WithdrawRefused,
+    StaffRefused, TillStartRefused, TotalsRefused, WithdrawRefused,
 };
 pub use sale::{End, LightningPaid, OverrideMark, OwnCheck, PosState, RequestDays, Sale, Segment};
 pub use screen::{Color, Next, Report, Screen, State, Why};
 pub use staff::{StaffChange, StaffEvent};
 pub use store::{Slot, Store, StoreFault};
 pub use switched_held::{SwitchedHeld, SWITCHED_HELD_LEN};
+pub use till::{
+    TillCancelled, TillDropped, TillRequest, TillWaiting, MAX_TILL_REFERENCE, MAX_TILL_WAITING,
+};
+pub use till_say::{
+    all_till_words, till_cancelled_words, till_card_words, till_dropped_words, till_start_words,
+};
 pub use totals::{DayTotals, PersonLine, Tally, TipTally, TotalsError, MAX_PEOPLE};
 
 /// CR-04: most new addresses handed out in one hour **[to tune]**.

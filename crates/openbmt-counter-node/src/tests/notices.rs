@@ -5,12 +5,19 @@
 use bitcoin::Transaction;
 use openbmt_core::identity::DeviceId;
 use openbmt_core::records::{Chain, DeviceList};
-use openbmt_counter::Report;
+use openbmt_counter::{Amount, Report};
 use openbmt_courier::{Courier, FirstStart, MemoryPost, MemoryRelay, Received};
 use openbmt_link::{Kind, Role};
 use openbmt_net_io::AppEvent;
-use openbmt_pos::{facts_from_chain, facts_from_notices, NoticeState, PaidNotice};
+use openbmt_pos::{
+    facts_from_chain, facts_from_notices, NoticeState, PaidNotice, SaleCancel, SaleRequest,
+    TillMessage,
+};
 
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+
+use super::kit::config as config_in;
 use super::kit::*;
 use crate::notices::{NoticeOutbox, NOTICE_FILE};
 use crate::{CounterLink, CounterLinkConfig};
@@ -76,11 +83,24 @@ fn link_over(
 }
 
 fn world(boxes: bool) -> World {
+    world_with(boxes, false)
+}
+
+/// A world whose settings in force name the Box (BX-20) when `named` is set.
+fn world_with(boxes: bool, named: bool) -> World {
     let relay = MemoryRelay::new(id(99), &[owner(), counter(), the_box()]).unwrap();
     let node_dir = Scratch::new();
     let link_dir = Scratch::new();
     let box_dir = Scratch::new();
-    let mut rig = start(node_dir.path());
+    let mut rig = if named {
+        let time = Arc::new(AtomicU64::new(T0));
+        let mut config = config_in(node_dir.path(), &time);
+        config.settings.devices.insert(the_box());
+        config.settings.boxes.insert(the_box());
+        start_with(config, time)
+    } else {
+        start(node_dir.path())
+    };
     let mut link = link_over(&relay, &link_dir, FirstStart::Yes, boxes);
     link.enable_notices(id(3), link_dir.path(), &rig.node)
         .unwrap();
@@ -406,4 +426,262 @@ fn bx_40_a_queue_over_its_bound_drops_the_oldest_and_says_so() {
     out.mark_sent(&the_box(), 4_200);
     out.settle(&[the_box()]).unwrap();
     assert!(out.queue().is_empty());
+}
+
+// CR-266 to CR-270: a sale from the till.
+
+fn till_request(sale: u8, cents: u64, lapses_at: u64) -> Vec<u8> {
+    TillMessage::Request(SaleRequest {
+        sale: [sale; 16],
+        amount: Amount(cents),
+        currency: usd(),
+        reference: "POS/0001".to_string(),
+        expires_at: lapses_at,
+    })
+    .to_bytes()
+}
+
+fn till_cancel(sale: u8) -> Vec<u8> {
+    TillMessage::Cancel(SaleCancel { sale: [sale; 16] }).to_bytes()
+}
+
+impl World {
+    /// The Box sends the counter a POS notice and the link takes it.
+    fn box_sends(&mut self, content: &[u8]) {
+        self.box_side
+            .send(&counter(), Kind::PosNotice, content)
+            .unwrap();
+        self.step();
+    }
+
+    fn start_till_sale(&mut self, sale: u8) -> openbmt_counter::Opened {
+        self.rig
+            .node
+            .till_start(&[sale; 16], rate(), &source_at(&self.rig.time), None)
+            .unwrap()
+    }
+
+    fn notes(&mut self) -> Vec<String> {
+        self.link.take_notes()
+    }
+}
+
+#[test]
+fn cr_266_a_request_box_sends_of_the_settings_waits_for_the_cashier() {
+    let mut w = world_with(true, true);
+    w.box_sends(&till_request(1, 500, T0 + 300));
+    let waiting = w.rig.node.till_waiting();
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(waiting[0].amount, Amount(500));
+    assert_eq!(waiting[0].sale, [1; 16]);
+    // Nothing is sent to the Box for a request that only waits.
+    assert!(w.notices().is_empty());
+    assert_eq!(w.rig.node.sales().count(), 0);
+}
+
+#[test]
+fn cr_266_a_notice_from_a_key_that_is_not_the_box_of_the_settings_is_dropped_with_a_note() {
+    // The key is in the courier's table as a Box, but the settings in force
+    // do not name it.
+    let mut w = world_with(true, false);
+    w.box_sends(&till_request(1, 500, T0 + 300));
+    assert!(w.rig.node.till_waiting().is_empty());
+    assert!(w.notes().iter().any(|n| n.contains("CR-266")));
+    assert!(w.notices().is_empty());
+}
+
+#[test]
+fn cr_266_a_request_that_does_not_fit_or_does_not_read_is_dropped_with_a_note() {
+    let mut w = world_with(true, true);
+    // Not the shop's currency.
+    let eur = TillMessage::Request(SaleRequest {
+        sale: [1; 16],
+        amount: Amount(500),
+        currency: openbmt_counter::Currency::new(*b"EUR").unwrap(),
+        reference: String::new(),
+        expires_at: T0 + 300,
+    })
+    .to_bytes();
+    w.box_sends(&eur);
+    // A lapse time that is past.
+    w.box_sends(&till_request(2, 500, T0));
+    // Not a till message at all.
+    w.box_sends(b"nothing of the till");
+    assert!(w.rig.node.till_waiting().is_empty());
+    let notes = w.notes();
+    assert_eq!(notes.iter().filter(|n| n.contains("CR-266")).count(), 3);
+    assert!(w.notices().is_empty());
+}
+
+#[test]
+fn cr_266_at_most_eight_requests_wait() {
+    let mut w = world_with(true, true);
+    for n in 1..=9u8 {
+        w.box_sends(&till_request(n, 100 * u64::from(n), T0 + 300));
+    }
+    assert_eq!(w.rig.node.till_waiting().len(), 8);
+    assert!(w.notes().iter().any(|n| n.contains("8 requests")));
+}
+
+#[test]
+fn cr_267_not_now_hides_a_request_and_sends_nothing() {
+    let mut w = world_with(true, true);
+    w.box_sends(&till_request(1, 500, T0 + 300));
+    assert!(w.rig.node.till_not_now(&[1; 16]));
+    assert!(w.rig.node.till_waiting().is_empty());
+    w.step();
+    assert!(w.notices().is_empty());
+}
+
+#[test]
+fn cr_268_start_sends_the_opened_notice_naming_the_till_sale_and_every_later_one_does_too() {
+    let mut w = world_with(true, true);
+    w.box_sends(&till_request(1, 500, T0 + 300));
+    let opened = w.start_till_sale(1);
+    assert!(w.rig.node.till_waiting().is_empty());
+    assert_eq!(w.rig.node.sale_till(opened.index), Some([1; 16]));
+    w.step();
+    let got = w.notices();
+    assert_eq!(states(&got), vec![(1, opened.index, NoticeState::Opened)]);
+    assert_eq!(got[0].till_sale, Some([1; 16]));
+    assert!(got[0].verify());
+    assert_eq!((got[0].amount.0, got[0].currency), (500, usd()));
+
+    // Paid, unpaid again, paid and final: each names the till's sale.
+    let pay = spend(1, &[(&script_of(opened.index), 5_000)]);
+    w.rig.feed(vec![sighting(&pay)]);
+    let mut blocks = Blocks::default();
+    let first = blocks.extend(std::slice::from_ref(&pay)).clone();
+    w.rig.feed(vec![joined(1, &first), block_event(&first)]);
+    w.step();
+    let paid = w.notices();
+    assert_eq!(states(&paid), vec![(2, opened.index, NoticeState::Paid)]);
+    assert_eq!(paid[0].till_sale, Some([1; 16]));
+    let alt1 = mine(genesis(), 1, 1, &[]);
+    let alt2 = mine(alt1.block_hash(), 2, 1, &[]);
+    let reorg = AppEvent::Chain {
+        joined: vec![(1, alt1.block_hash()), (2, alt2.block_hash())],
+        left: vec![first.block_hash()],
+    };
+    w.rig.feed(vec![reorg]);
+    w.step();
+    let unpaid = w.notices();
+    assert_eq!(
+        states(&unpaid),
+        vec![(3, opened.index, NoticeState::Unpaid)]
+    );
+    assert_eq!(unpaid[0].till_sale, Some([1; 16]));
+    let again = mine(alt2.block_hash(), 3, 1, &[pay]);
+    w.rig.feed(vec![joined(3, &again), block_event(&again)]);
+    let mut tip = again;
+    let mut events = Vec::new();
+    for height in 4..=8 {
+        tip = mine(tip.block_hash(), height, 1, &[]);
+        events.push(joined(height, &tip));
+    }
+    w.rig.feed(events);
+    w.step();
+    let last = w.notices();
+    assert!(!last.is_empty());
+    for n in &last {
+        assert_eq!(n.till_sale, Some([1; 16]), "{:?}", n.state);
+        assert!(n.verify());
+    }
+    assert_eq!(last.last().map(|n| n.state), Some(NoticeState::Final));
+}
+
+#[test]
+fn cr_268_a_sale_typed_at_the_counter_names_no_till_sale() {
+    let mut w = world_with(true, true);
+    w.open_sale();
+    w.step();
+    let got = w.notices();
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].till_sale, None);
+    assert_eq!(got[0].to_bytes().len(), openbmt_pos::PAID_NOTICE_LEN);
+}
+
+#[test]
+fn cr_269_a_cancel_before_start_removes_the_request_and_sends_nothing() {
+    let mut w = world_with(true, true);
+    w.box_sends(&till_request(1, 500, T0 + 300));
+    w.box_sends(&till_cancel(1));
+    assert!(w.rig.node.till_waiting().is_empty());
+    assert!(w
+        .rig
+        .node
+        .till_start(&[1; 16], rate(), &source_at(&w.rig.time), None)
+        .is_err());
+    w.step();
+    assert!(w.notices().is_empty());
+    assert_eq!(w.rig.node.sales().count(), 0);
+}
+
+#[test]
+fn cr_269_a_cancel_after_start_marks_the_sale_and_a_payment_that_comes_anyway_is_told() {
+    let mut w = world_with(true, true);
+    w.box_sends(&till_request(1, 500, T0 + 300));
+    let opened = w.start_till_sale(1);
+    w.step();
+    assert_eq!(
+        states(&w.notices()),
+        vec![(1, opened.index, NoticeState::Opened)]
+    );
+    w.box_sends(&till_cancel(1));
+    assert!(w.rig.node.till_cancelled(opened.index));
+    // The sale is not ended and nothing is sent about the cancel.
+    assert!(w.notices().is_empty());
+    assert!(w.rig.node.counter().sale(opened.index).is_some());
+    // The payment arrives anyway: it is counted and told, naming the sale.
+    let pay = spend(1, &[(&script_of(opened.index), 5_000)]);
+    w.rig.feed(vec![sighting(&pay)]);
+    let mut blocks = Blocks::default();
+    let first = blocks.extend(std::slice::from_ref(&pay)).clone();
+    w.rig.feed(vec![joined(1, &first), block_event(&first)]);
+    w.step();
+    let paid = w.notices();
+    assert_eq!(states(&paid), vec![(2, opened.index, NoticeState::Paid)]);
+    assert_eq!(paid[0].till_sale, Some([1; 16]));
+    assert!(w.rig.node.till_cancelled(opened.index));
+}
+
+#[test]
+fn cr_270_a_restart_of_the_notices_goes_on_naming_the_till_sale() {
+    let mut w = world_with(true, true);
+    w.box_sends(&till_request(1, 500, T0 + 300));
+    let opened = w.start_till_sale(1);
+    w.step();
+    assert_eq!(w.notices().len(), 1);
+    // A new outbox over the same file folds the records again.
+    let mut outbox =
+        NoticeOutbox::open(id(3), w.link_dir.path(), &w.rig.node.record_source()).unwrap();
+    let pay = spend(1, &[(&script_of(opened.index), 5_000)]);
+    w.rig.feed(vec![sighting(&pay)]);
+    let mut blocks = Blocks::default();
+    let first = blocks.extend(std::slice::from_ref(&pay)).clone();
+    w.rig.feed(vec![joined(1, &first), block_event(&first)]);
+    outbox.collect(&w.rig.node.record_source()).unwrap();
+    let queued = outbox.queue();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(queued[0].state, NoticeState::Paid);
+    assert_eq!(queued[0].till_sale, Some([1; 16]));
+}
+
+#[test]
+fn bx_77_the_queue_file_keeps_a_notice_that_names_a_till_sale_and_one_that_does_not() {
+    let mut w = world_with(true, true);
+    w.open_sale();
+    w.box_sends(&till_request(1, 500, T0 + 300));
+    w.start_till_sale(1);
+    // A queue of one notice with no till sale and one with it, stored and
+    // read back whole.
+    let dir = Scratch::new();
+    let mut outbox = NoticeOutbox::open(id(3), dir.path(), &[][..]).unwrap();
+    outbox.collect(&w.rig.node.record_source()).unwrap();
+    let before: Vec<PaidNotice> = outbox.queue().to_vec();
+    assert_eq!(before.len(), 2);
+    assert_eq!(before[0].till_sale, None);
+    assert_eq!(before[1].till_sale, Some([1; 16]));
+    let again = NoticeOutbox::open(id(3), dir.path(), &w.rig.node.record_source()).unwrap();
+    assert_eq!(again.queue(), &before[..]);
 }

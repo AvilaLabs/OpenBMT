@@ -14,7 +14,21 @@ use crate::{Actor, RefundState, RefundView};
 
 #[test]
 fn sc_12_every_word_keeps_the_rules() {
-    assert_eq!(check_distinct(&all_words()), Ok(()));
+    // CR-271: a placeholder is not a sentence and is not read as one, but
+    // each stands for one state, so each differs from every other.
+    let (placeholders, written): (Vec<_>, Vec<_>) = all_words()
+        .into_iter()
+        .partition(|(_, w)| w.heading.starts_with("WORDS_NEEDED_"));
+    let mut seen = std::collections::BTreeSet::new();
+    for (name, w) in &placeholders {
+        assert!(
+            seen.insert(w.heading.clone()),
+            "{name} repeats a placeholder"
+        );
+        assert_eq!(w.heading, w.what, "{name}");
+        assert_eq!(w.heading, w.next, "{name}");
+    }
+    assert_eq!(check_distinct(&written), Ok(()));
 }
 
 #[test]

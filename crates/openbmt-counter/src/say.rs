@@ -2022,6 +2022,7 @@ pub fn all_words() -> Vec<(String, Words)> {
     all.push(("Screen::tipChoose".to_string(), tip_choose_words("$12.50")));
     all.push(("Screen::stuck".to_string(), stuck_words()));
     all.push(("Screen::late".to_string(), late_words()));
+    all.extend(crate::till_say::all_till_words());
 
     let w = write_fault;
     let open: Vec<(&str, OpenRefused<String>)> = vec![

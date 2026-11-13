@@ -215,6 +215,7 @@ impl Fold {
             // CR-245, CR-247: the till's reference and the records of a bill
             // are the books' and change no day's total.
             Event::Referenced { .. }
+            | Event::TillSale { .. }
             | Event::BillReferenced { .. }
             | Event::BillOpened { .. }
             | Event::BillAmount { .. }

@@ -19,7 +19,9 @@
 //!   dropped without a word.
 //! - Device lists: noted and dropped. The device list travels inside the
 //!   settings (CR-166).
-//! - POS notices from a Box: opened and dropped with a note.
+//! - POS notices from a Box: a sale request or a cancel from the till is
+//!   given to `Node::take_till_notice` (CR-266, CR-269); what is not taken is
+//!   dropped with a note.
 //!
 //! A refusal by the node, or a content that does not decode, is noted and the
 //! step goes on (LK-63).
@@ -469,7 +471,12 @@ impl<R: Post> CounterLink<R> {
                  dropped"
                     .to_string(),
             ),
-            Kind::PosNotice => self.note("a POS notice from the Box: dropped".to_string()),
+            Kind::PosNotice => {
+                // CR-266, CR-269: a sale request or a cancel from the till.
+                if let Err(e) = node.take_till_notice(&message.from, &message.content) {
+                    self.note(e.to_string());
+                }
+            }
             other => self.note(format!("a {other:?} message: not handled yet")),
         }
     }

@@ -52,14 +52,15 @@ use crate::refund::{
 use crate::refusal::{
     BatchTakeRefused, BillRefused, BlockError, CancelRefused, CommandRefused, HeartbeatRefused,
     JudgeError, LightningRefused, LoadError, NoteRefused, OpenRefused, OverrideRefused,
-    RangeTakeRefused, RefundRefused, RequoteRefused, SightingError, StaffRefused, TotalsRefused,
-    WithdrawRefused,
+    RangeTakeRefused, RefundRefused, RequoteRefused, SightingError, StaffRefused, TillStartRefused,
+    TotalsRefused, WithdrawRefused,
 };
 use crate::sale::{End, LightningPaid, OverrideMark, OwnCheck, PosState, RequestDays, Sale};
 use crate::screen::{Next, Report, Screen, State, Why};
 use crate::staff::StaffEvent;
 use crate::store::{Slot, Store, StoreFault};
 use crate::switched_held::SwitchedHeld;
+use crate::till::{TillCancelled, TillDropped, TillRequest, TillWaiting};
 use crate::totals::{fold_day, record_time, DayTotals, TOTALS_BLOCK, TOTALS_MAX_RECORDS};
 use crate::{
     DUST_SATS, MAX_LATE_PAYMENTS, MAX_QUOTES, MAX_SETTLE_PER_CALL, SETTLE_SECS, STUCK_SECS,
@@ -350,6 +351,15 @@ pub struct Counter {
     /// CR-245: the till's reference of each held sale, as the records say.
     /// Built from the records at start.
     references: BTreeMap<u32, String>,
+    /// CR-268: the till's sale of each held sale that came from the till, as
+    /// the records say. Built from the records at start.
+    till_sales: BTreeMap<u32, [u8; 16]>,
+    /// CR-269: the held sales the till cancelled. In memory only: a start
+    /// forgets it, as the Box forgets its sales.
+    till_cancelled: BTreeSet<u32>,
+    /// CR-266: the requests from the till that wait for the cashier. In
+    /// memory only (CR-270).
+    till_waiting: TillWaiting,
 }
 
 impl Counter {
@@ -392,6 +402,9 @@ impl Counter {
             swap_pending: BTreeSet::new(),
             bills: Bills::new(),
             references: BTreeMap::new(),
+            till_sales: BTreeMap::new(),
+            till_cancelled: BTreeSet::new(),
+            till_waiting: TillWaiting::new(),
         }
     }
 
@@ -501,10 +514,21 @@ impl Counter {
         if let Some(bytes) = stored.bills {
             counter.bills = Bills::from_bytes(bytes).map_err(LoadError::Bills)?;
         }
-        let (log, last, book, highest, setting, held, held_ranges, held_switched, references) =
-            Self::read_chain(me, store)?;
+        let (
+            log,
+            last,
+            book,
+            highest,
+            setting,
+            held,
+            held_ranges,
+            held_switched,
+            references,
+            till_sales,
+        ) = Self::read_chain(me, store)?;
         counter.held_switched = held_switched;
         counter.references = references;
+        counter.till_sales = till_sales;
         counter.records = log;
         counter.settings_recorded = setting;
         counter.held_batches = held;
@@ -526,6 +550,9 @@ impl Counter {
         counter.adopt_refunds();
         counter
             .references
+            .retain(|i, _| counter.sales.contains_key(i));
+        counter
+            .till_sales
             .retain(|i, _| counter.sales.contains_key(i));
         // CR-76: the newest record that names each sale the counter holds.
         counter.last_record = last;
@@ -555,6 +582,7 @@ impl Counter {
             BTreeMap<(u32, u32), [u8; 32]>,
             BTreeMap<[u8; 32], SwitchedHeld>,
             BTreeMap<u32, String>,
+            BTreeMap<u32, [u8; 16]>,
         ),
         LoadError,
     >
@@ -572,6 +600,7 @@ impl Counter {
         let mut held_ranges: BTreeMap<(u32, u32), [u8; 32]> = BTreeMap::new();
         let mut held_switched: BTreeMap<[u8; 32], SwitchedHeld> = BTreeMap::new();
         let mut references: BTreeMap<u32, String> = BTreeMap::new();
+        let mut till_sales: BTreeMap<u32, [u8; 16]> = BTreeMap::new();
         let keep = usize::try_from(MAX_UNSENT_IN_MEMORY).unwrap_or(usize::MAX);
         loop {
             let chunk = store
@@ -622,6 +651,10 @@ impl Counter {
                                 .entry(*index)
                                 .or_insert_with(|| reference.clone());
                         }
+                        if let Event::TillSale { index, sale, .. } = &event {
+                            // CR-268: the first stands.
+                            till_sales.entry(*index).or_insert(*sale);
+                        }
                         if record.kind == RecordKind::Refund {
                             fold_refund(&mut book, &mut highest, event);
                         }
@@ -644,6 +677,7 @@ impl Counter {
             held_ranges,
             held_switched,
             references,
+            till_sales,
         ))
     }
 
@@ -1270,6 +1304,8 @@ impl Counter {
             }
             self.last_record.remove(&index);
             self.references.remove(&index);
+            self.till_sales.remove(&index);
+            self.till_cancelled.remove(&index);
             self.refund_book.remove(&index);
             self.cancel_applied.remove(&index);
             self.refund_unsaved.remove(&index);
@@ -1555,6 +1591,29 @@ impl Counter {
         extras: SaleExtras<'_>,
         store: &mut S,
     ) -> Result<Opened, OpenRefused<S::Error>> {
+        self.open_sale(
+            amount, tip, _currency, rate, source, facts, by, extras, None, store,
+        )
+    }
+
+    /// The opening of a sale (CR-01 to CR-05). `till` is the till's sale
+    /// when the sale answers a request from the till (CR-268): it is written
+    /// as a `Sale` record before `Opened`, so that every notice of the sale
+    /// names it (BX-77).
+    #[allow(clippy::too_many_arguments)]
+    fn open_sale<S: Store>(
+        &mut self,
+        amount: Amount,
+        tip: Amount,
+        _currency: Currency,
+        rate: Rate,
+        source: &RateSource,
+        facts: OpenFacts,
+        by: Option<&Actor>,
+        extras: SaleExtras<'_>,
+        till: Option<[u8; 16]>,
+        store: &mut S,
+    ) -> Result<Opened, OpenRefused<S::Error>> {
         if by.is_some_and(|a| !refund_text_ok(&a.name)) {
             return Err(OpenRefused::BadName);
         }
@@ -1651,6 +1710,18 @@ impl Counter {
         sale.request = extras.request;
         sale.note = extras.note.map(str::to_string);
         self.put_sale(store, sale).map_err(OpenRefused::Store)?;
+        // CR-268: the till's sale is written before `Opened`, so that the
+        // first notice of the sale names it, and before the quote is shown.
+        if let Some(till) = till {
+            let event = Event::TillSale {
+                index,
+                at: now,
+                sale: till,
+            };
+            self.write_event(store, &event)
+                .map_err(OpenRefused::Store)?;
+            self.till_sales.insert(index, till);
+        }
         let event = Event::Opened {
             index,
             at: now,
@@ -1759,6 +1830,105 @@ impl Counter {
             .map_err(BillRefused::Store)?;
         self.references.insert(index, reference.to_string());
         Ok(())
+    }
+
+    /// CR-266: take a request from the till. The caller has checked that it
+    /// came from the Box of the settings in force. A request that does not
+    /// fit is dropped and the reason is returned; nothing is sent either
+    /// way.
+    pub fn till_take(&mut self, request: TillRequest, now: u64) -> Result<(), TillDropped> {
+        let shop = Currency::of_shop(self.settings.currency);
+        let started = self.till_sales.values().any(|s| *s == request.sale);
+        self.till_waiting.take(request, shop, started, now)
+    }
+
+    /// CR-267: the requests the home screen shows at `now`, oldest first.
+    pub fn till_waiting(&self, now: u64) -> Vec<&TillRequest> {
+        self.till_waiting.shown(now)
+    }
+
+    /// CR-267: Not now. The request is hidden and nothing is sent.
+    pub fn till_not_now(&mut self, sale: &[u8; 16]) -> bool {
+        self.till_waiting.not_now(sale)
+    }
+
+    /// CR-268: Start. Opens a sale for the request's amount as a sale typed
+    /// at the counter is opened (the counter's own rate, address and quote;
+    /// a request has no tip), with the request's reference as the sale's
+    /// till reference when it fits that rule, and writes the record that
+    /// names the till's sale. The request leaves the list once the sale is
+    /// opened; when opening is refused it stays and the cashier may try
+    /// again.
+    #[allow(clippy::too_many_arguments)]
+    pub fn till_start<S: Store>(
+        &mut self,
+        sale: &[u8; 16],
+        rate: Rate,
+        source: &RateSource,
+        facts: OpenFacts,
+        by: Option<&Actor>,
+        store: &mut S,
+    ) -> Result<Opened, TillStartRefused<S::Error>> {
+        let request = self
+            .till_waiting
+            .get(sale, facts.now)
+            .cloned()
+            .ok_or(TillStartRefused::NotWaiting)?;
+        let extras = SaleExtras {
+            reference: request.sale_reference(),
+            ..SaleExtras::default()
+        };
+        let currency = request.currency;
+        let opened = self
+            .open_sale(
+                request.amount,
+                Amount(0),
+                currency,
+                rate,
+                source,
+                facts,
+                by,
+                extras,
+                Some(request.sale),
+                store,
+            )
+            .map_err(TillStartRefused::Open)?;
+        self.till_waiting.remove(sale);
+        Ok(opened)
+    }
+
+    /// CR-269: the till cancelled this sale. A request not started is
+    /// removed and nothing is sent. A sale already started is only marked,
+    /// in memory: the cashier ends it as any sale is ended, and a payment
+    /// that arrives anyway is counted as any other. Nothing here ends a
+    /// sale or marks one paid.
+    pub fn till_cancel(&mut self, sale: &[u8; 16]) -> TillCancelled {
+        if self.till_waiting.remove(sale) {
+            return TillCancelled::Removed;
+        }
+        let started = self
+            .till_sales
+            .iter()
+            .find(|(_, s)| *s == sale)
+            .map(|(i, _)| *i);
+        match started {
+            Some(index) if self.sales.contains_key(&index) => {
+                self.till_cancelled.insert(index);
+                TillCancelled::Marked(index)
+            }
+            _ => TillCancelled::Unknown,
+        }
+    }
+
+    /// CR-268, CR-270: the till's sale a held sale came from, when it came
+    /// from the till.
+    pub fn sale_till(&self, index: u32) -> Option<&[u8; 16]> {
+        self.till_sales.get(&index)
+    }
+
+    /// CR-269: whether the till cancelled this sale.
+    pub fn till_cancelled(&self, index: u32) -> bool {
+        self.till_cancelled.contains(&index)
     }
 
     /// CR-245: the till's reference of a sale, when it has one.

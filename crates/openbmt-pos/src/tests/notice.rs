@@ -367,6 +367,45 @@ fn bx_40_a_sale_with_no_change_of_state_makes_no_notice() {
     assert!(maker.apply(&at_once(9, T0)).is_err());
 }
 
+#[test]
+fn cr_268_every_notice_of_a_sale_from_the_till_names_it() {
+    let me = identity(3);
+    let till = [9u8; 16];
+    let mut maker = NoticeMaker::new(me.device_id());
+    // The record that names the till's sale comes before the sale opens and
+    // makes no notice itself.
+    assert!(maker
+        .apply(&Event::TillSale {
+            index: 1,
+            at: T0,
+            sale: till
+        })
+        .unwrap()
+        .is_none());
+    let first = maker.apply(&opened(1, T0, 500)).unwrap().unwrap();
+    assert_eq!(first.state, NoticeState::Opened);
+    assert_eq!(first.till_sale, Some(till));
+    let paid = maker.apply(&at_once(1, T0 + 2)).unwrap().unwrap();
+    assert_eq!(paid.state, NoticeState::Paid);
+    assert_eq!(paid.till_sale, Some(till));
+    let unpaid = maker
+        .apply(&Event::Reopened {
+            index: 1,
+            at: T0 + 3,
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(unpaid.state, NoticeState::Unpaid);
+    assert_eq!(unpaid.till_sale, Some(till));
+    // Signed, the notice is version 2 and reads back with the sale.
+    let signed = PaidNotice::sign(&me, 1, &first).unwrap();
+    assert_eq!(signed.to_bytes().len(), PAID_NOTICE_LEN + 16);
+    assert_eq!(PaidNotice::from_bytes(&signed.to_bytes()).unwrap(), signed);
+    // A sale that was not asked for by a till names none.
+    let plain = maker.apply(&opened(2, T0, 700)).unwrap().unwrap();
+    assert_eq!(plain.till_sale, None);
+}
+
 fn a_match() -> PosItem {
     PosItem::Match {
         tender: tkey("o1", "t1"),

@@ -51,6 +51,15 @@ by hand. To write it again, run the test
 | Screen::tipChoose | Add a tip? | The sale is $12.50. A tip goes to the shop with it. | Choose a tip, or No tip. | the customer | CR-188 |
 | Screen::stuck | Slow to confirm | The payment was seen a long time ago and is still not in a block. | Tell the owner that this payment is slow; the owner can look at it on the owner's phone. | the cashier | CR-18 |
 | Screen::late | Late payment | A payment arrived after this sale had ended. | Nothing to do. The counter has told the owner, and the customer may be owed a refund. | nobody | CR-19 |
+| Till::card | WORDS_NEEDED_CR_267_FROM_THE_TILL | WORDS_NEEDED_CR_267_FROM_THE_TILL | WORDS_NEEDED_CR_267_FROM_THE_TILL | the cashier | CR-267 |
+| Till::cancelled | WORDS_NEEDED_CR_269_CANCELLED | WORDS_NEEDED_CR_269_CANCELLED | WORDS_NEEDED_CR_269_CANCELLED | the cashier | CR-269 |
+| TillDropped::OtherCurrency | WORDS_NEEDED_CR_266_OTHER_CURRENCY | WORDS_NEEDED_CR_266_OTHER_CURRENCY | WORDS_NEEDED_CR_266_OTHER_CURRENCY | the cashier | CR-266 |
+| TillDropped::BadAmount | WORDS_NEEDED_CR_266_BAD_AMOUNT | WORDS_NEEDED_CR_266_BAD_AMOUNT | WORDS_NEEDED_CR_266_BAD_AMOUNT | the cashier | CR-266 |
+| TillDropped::BadReference | WORDS_NEEDED_CR_266_BAD_REFERENCE | WORDS_NEEDED_CR_266_BAD_REFERENCE | WORDS_NEEDED_CR_266_BAD_REFERENCE | the cashier | CR-266 |
+| TillDropped::Lapsed | WORDS_NEEDED_CR_266_LAPSED | WORDS_NEEDED_CR_266_LAPSED | WORDS_NEEDED_CR_266_LAPSED | the cashier | CR-266 |
+| TillDropped::Full | WORDS_NEEDED_CR_266_FULL | WORDS_NEEDED_CR_266_FULL | WORDS_NEEDED_CR_266_FULL | the cashier | CR-266 |
+| TillDropped::Known | WORDS_NEEDED_CR_266_KNOWN | WORDS_NEEDED_CR_266_KNOWN | WORDS_NEEDED_CR_266_KNOWN | the cashier | CR-266 |
+| TillStartRefused::NotWaiting | WORDS_NEEDED_CR_266_NOT_WAITING | WORDS_NEEDED_CR_266_NOT_WAITING | WORDS_NEEDED_CR_266_NOT_WAITING | the cashier | CR-266 |
 | OpenRefused::Removed | This counter was removed | The owner removed this counter from the shop, so it cannot start a sale. | Take another kind of payment. Ask the owner: this counter is no longer on the shop's list. | the cashier | CR-165 |
 | OpenRefused::RescanPending | Bitcoin not ready yet | The counter is still looking back over the network for payments, so it cannot start a bitcoin sale. | Take another kind of payment. Tell the owner: the counter is still catching up. | the cashier | CR-09 |
 | OpenRefused::Unhealthy | Cannot take bitcoin now | This counter cannot check payments right now. | Take another kind of payment. Tell the owner: the counter cannot check payments. | the cashier | CR-01 |

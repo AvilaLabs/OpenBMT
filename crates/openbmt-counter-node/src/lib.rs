@@ -79,8 +79,8 @@ pub use lightning::{
 pub use link::{CounterLink, CounterLinkConfig, LinkState, Outgoing, Polled};
 pub use node::{
     DriverPort, HealthFn, HeartbeatNotTaken, HeartbeatTaken, Launch, Node, NodeConfig, StartError,
-    MAX_EVENTS_PER_PUMP, MAX_OWN_ASKS, MAX_OWN_EVENTS_PER_PUMP, NOTE_LOG, SETTLE_EVERY_SECS,
-    SETTLE_MIN_GAP_SECS, TX_CACHE,
+    TillNotTaken, TillTaken, MAX_EVENTS_PER_PUMP, MAX_OWN_ASKS, MAX_OWN_EVENTS_PER_PUMP, NOTE_LOG,
+    SETTLE_EVERY_SECS, SETTLE_MIN_GAP_SECS, TX_CACHE,
 };
 pub use notices::{NodeRecords, NoticeOutbox, NoticeStoreError, RecordSource};
 pub use ownnode::{

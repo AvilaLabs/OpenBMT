@@ -258,6 +258,10 @@ fn fold_event(
         );
         return Ok(());
     }
+    // CR-268: the till's sale is written before `Opened` and changes no fact.
+    if let Event::TillSale { .. } = event {
+        return Ok(());
+    }
     let s = sales
         .get_mut(&index)
         .ok_or(FactsError::UnknownSale { index })?;
@@ -307,6 +311,7 @@ fn fold_event(
         Event::Opened { .. }
         | Event::Requoted { .. }
         | Event::Noted { .. }
+        | Event::TillSale { .. }
         | Event::BillReferenced { .. }
         | Event::BillOpened { .. }
         | Event::BillAmount { .. }

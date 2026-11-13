@@ -34,7 +34,7 @@ use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::records::{Record, RecordKind};
 use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_counter::{Counter, Event};
-use openbmt_pos::{NoticeMaker, PaidNotice, PAID_NOTICE_LEN};
+use openbmt_pos::{NoticeMaker, PaidNotice, PAID_NOTICE_LEN, PAID_NOTICE_TILL_LEN};
 
 use crate::dirstore::DirStore;
 
@@ -88,6 +88,10 @@ impl RecordSource for NodeRecords<'_> {
 }
 
 const MAGIC_NOTICE_OUTBOX: [u8; 4] = *b"OBMb";
+/// Where the version byte of a paid notice is: after its four magic bytes.
+const MAGIC_NOTICE_LEN: usize = 4;
+/// The version of a paid notice that names a till sale (BX-77).
+const TILL_NOTICE_VERSION: u8 = 2;
 
 /// Why the notice file could not be opened or written.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,7 +163,7 @@ impl Held {
     fn to_bytes(&self) -> Vec<u8> {
         let mut out = wire::start(
             &MAGIC_NOTICE_OUTBOX,
-            16 + self.sent.len() * 40 + self.queue.len() * PAID_NOTICE_LEN,
+            16 + self.sent.len() * 40 + self.queue.len() * PAID_NOTICE_TILL_LEN,
         );
         out.extend_from_slice(&self.last_number.to_le_bytes());
         out.extend_from_slice(&self.scanned.to_le_bytes());
@@ -169,6 +173,9 @@ impl Held {
             out.extend_from_slice(&n.to_le_bytes());
         }
         out.extend_from_slice(&wire::len_u32(self.queue.len()).to_le_bytes());
+        // A notice that names a till sale is 16 bytes longer (BX-77); each
+        // says which it is in its own version byte, so the file is read
+        // either way.
         for n in &self.queue {
             out.extend_from_slice(&n.to_bytes());
         }
@@ -190,7 +197,13 @@ impl Held {
         }
         let mut queue: Vec<PaidNotice> = Vec::new();
         for _ in 0..r.count(MAX_QUEUED, PAID_NOTICE_LEN)? {
-            let n = PaidNotice::from_bytes(r.take(PAID_NOTICE_LEN)?)?;
+            let mut bytes = r.take(PAID_NOTICE_LEN)?.to_vec();
+            // The version byte comes after the magic: 2 names a till sale
+            // and adds 16 bytes (BX-77).
+            if bytes.get(MAGIC_NOTICE_LEN) == Some(&TILL_NOTICE_VERSION) {
+                bytes.extend_from_slice(r.take(PAID_NOTICE_TILL_LEN - PAID_NOTICE_LEN)?);
+            }
+            let n = PaidNotice::from_bytes(&bytes)?;
             if queue.last().is_some_and(|p| p.number >= n.number) || n.number > last_number {
                 return Err(DecodeError::NonCanonical("notice numbers are not rising"));
             }

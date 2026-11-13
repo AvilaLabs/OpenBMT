@@ -76,6 +76,38 @@ pub enum OpenRefused<E> {
     Store(StoreFault<E>),
 }
 
+/// Why a request from the till was not started (CR-268).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TillStartRefused<E> {
+    /// CR-266: no such request waits, or it lapsed.
+    NotWaiting,
+    /// CR-268: opening the sale was refused, for the reason of a sale typed
+    /// at the counter. The request still waits.
+    Open(OpenRefused<E>),
+}
+
+impl<E> TillStartRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::NotWaiting => "CR-266",
+            Self::Open(e) => e.rule(),
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for TillStartRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotWaiting => write!(
+                f,
+                "CR-266: no request from the till waits for this sale, or it lapsed"
+            ),
+            Self::Open(e) => write!(f, "{e}"),
+        }
+    }
+}
+
 impl<E> OpenRefused<E> {
     /// The rule the refusal belongs to.
     pub fn rule(&self) -> &'static str {

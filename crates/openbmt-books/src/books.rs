@@ -304,6 +304,8 @@ fn fold(sale: &mut Sale, pending: &mut Pending, event: &Event) -> Result<(), Boo
         Event::Referenced { reference, .. } => {
             sale.till_reference.get_or_insert_with(|| reference.clone());
         }
+        // CR-268: read before the sale opens, by the caller.
+        Event::TillSale { .. } => {}
         // The records of a bill are folded by `fold_bill`.
         Event::BillReferenced { .. }
         | Event::BillOpened { .. }
@@ -578,6 +580,11 @@ impl Books {
                     if books.bills.len().saturating_add(bills.len()) > MAX_BILLS {
                         return Err(BooksError::TooMany);
                     }
+                    continue;
+                }
+                // CR-268: the till's sale is written before the sale opens and
+                // changes nothing the books keep.
+                if let Event::TillSale { .. } = event {
                     continue;
                 }
                 let index = event.index();
@@ -858,6 +865,7 @@ fn event_time(event: &Event) -> Option<u64> {
         | Event::Requoted { at, .. }
         | Event::Noted { at, .. }
         | Event::Referenced { at, .. }
+        | Event::TillSale { at, .. }
         | Event::BillReferenced { at, .. }
         | Event::BillOpened { at, .. }
         | Event::BillAmount { at, .. }

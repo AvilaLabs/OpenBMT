@@ -54,6 +54,9 @@ const TAG_BILL_AMOUNT: u8 = 27;
 const TAG_BILL_PART_PAID: u8 = 28;
 const TAG_BILL_ENDED: u8 = 29;
 const TAG_BILL_PART_SALE: u8 = 30;
+/// Tags 31 to 37 belong to the records of staff, batches, ranges and the
+/// switch; the till's sale (CR-268) takes the next free one.
+const TAG_TILL_SALE: u8 = 38;
 /// The byte after the text of a reference that is a bill's, not a sale's.
 const REFERENCE_OF_BILL: u8 = 1;
 
@@ -120,6 +123,18 @@ pub enum Event {
         at: u64,
         /// The reference: 1 to 32 characters of `A-Z a-z 0-9 - _ / # .`.
         reference: String,
+    },
+    /// The sale is the one a till asked for (CR-268; kind `Sale`): the 16
+    /// bytes are the till's sale as the Box named it (BX-76). Written before
+    /// `Opened` of the same index, so that the first notice of the sale names
+    /// it too (BX-77).
+    TillSale {
+        /// The receive index.
+        index: u32,
+        /// When.
+        at: u64,
+        /// The till's sale.
+        sale: [u8; 16],
     },
     /// A bill was given the till's reference (CR-245; kind `Sale`). Written
     /// as tag 25 with a byte after the text that says it is a bill's.
@@ -612,6 +627,7 @@ impl Event {
             | Self::Requoted { index, .. }
             | Self::Noted { index, .. }
             | Self::Referenced { index, .. }
+            | Self::TillSale { index, .. }
             | Self::BillReferenced { number: index, .. }
             | Self::BillOpened { number: index, .. }
             | Self::BillAmount { number: index, .. }
@@ -646,6 +662,7 @@ impl Event {
             | Self::Requoted { at, .. }
             | Self::Noted { at, .. }
             | Self::Referenced { at, .. }
+            | Self::TillSale { at, .. }
             | Self::BillReferenced { at, .. }
             | Self::BillOpened { at, .. }
             | Self::BillAmount { at, .. }
@@ -670,6 +687,7 @@ impl Event {
             | Self::Requoted { .. }
             | Self::Noted { .. }
             | Self::Referenced { .. }
+            | Self::TillSale { .. }
             | Self::BillReferenced { .. }
             | Self::BillOpened { .. }
             | Self::BillAmount { .. }
@@ -710,6 +728,7 @@ impl Event {
             Self::Requoted { index, at, .. } => (TAG_REQUOTED, *index, *at),
             Self::Noted { index, at, .. } => (TAG_NOTED, *index, *at),
             Self::Referenced { index, at, .. } => (TAG_REFERENCED, *index, *at),
+            Self::TillSale { index, at, .. } => (TAG_TILL_SALE, *index, *at),
             Self::BillReferenced { number, at, .. } => (TAG_REFERENCED, *number, *at),
             Self::BillOpened { number, at, .. } => (TAG_BILL_OPENED, *number, *at),
             Self::BillAmount { number, at, .. } => (TAG_BILL_AMOUNT, *number, *at),
@@ -853,6 +872,7 @@ impl Event {
             }
             Self::Noted { note, .. } => write_text(&mut out, note),
             Self::Referenced { reference, .. } => write_reference(&mut out, reference),
+            Self::TillSale { sale, .. } => out.extend_from_slice(sale),
             Self::BillReferenced { reference, .. } => {
                 write_reference(&mut out, reference);
                 out.push(REFERENCE_OF_BILL);
@@ -1277,6 +1297,11 @@ impl Event {
                     Err(e) => return Err(e),
                 }
             }
+            TAG_TILL_SALE => Self::TillSale {
+                index,
+                at,
+                sale: r.array::<16>()?,
+            },
             TAG_BILL_OPENED => {
                 let kind = BillKind::from_u8(r.u8()?)
                     .ok_or(DecodeError::NonCanonical("a bill kind is not known"))?;

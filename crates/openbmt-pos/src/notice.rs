@@ -363,6 +363,7 @@ fn event_at(event: &Event) -> u64 {
         | Event::Requoted { at, .. }
         | Event::Noted { at, .. }
         | Event::Referenced { at, .. }
+        | Event::TillSale { at, .. }
         | Event::BillReferenced { at, .. }
         | Event::BillOpened { at, .. }
         | Event::BillAmount { at, .. }
@@ -415,6 +416,9 @@ fn state_of(fact: &SaleFact) -> NoticeState {
 pub struct NoticeMaker {
     fold: FactFold,
     sent: BTreeMap<u32, (NoticeState, Option<u64>)>,
+    /// CR-268: the till's sale of each sale that came from the till. Every
+    /// notice of such a sale names it (BX-77).
+    till: BTreeMap<u32, [u8; 16]>,
 }
 
 impl NoticeMaker {
@@ -423,12 +427,19 @@ impl NoticeMaker {
         Self {
             fold: FactFold::new(counter),
             sent: BTreeMap::new(),
+            till: BTreeMap::new(),
         }
     }
 
     /// Fold one event. Returns the notice it calls for, if any. An event
     /// the fold refuses is refused here and changes nothing.
     pub fn apply(&mut self, event: &Event) -> Result<Option<NoticeDraft>, FactsError> {
+        // CR-268: the record that names the till's sale comes before the
+        // sale opens and makes no notice itself.
+        if let Event::TillSale { index, sale, .. } = event {
+            self.till.entry(*index).or_insert(*sale);
+            return Ok(None);
+        }
         self.fold.apply(event)?;
         if event.bill_number().is_some() {
             return Ok(None);
@@ -456,7 +467,7 @@ impl NoticeMaker {
             opened_at: fact.opened_at,
             state,
             state_at,
-            till_sale: None,
+            till_sale: self.till.get(&fact.index).copied(),
         }))
     }
 }
