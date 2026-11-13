@@ -49,10 +49,13 @@ fn state(r: &mut Rd<'_>) -> State {
     }
 }
 
+/// A call of a step: its kind, url, headers, content type and body.
+type Call = (u8, String, Vec<(String, String)>, String, Vec<u8>);
+
 /// What a step gives: its kind, and the call for a call.
 struct Step {
     kind: u8,
-    call: Option<(u8, String, Vec<(String, String)>, String, Vec<u8>)>,
+    call: Option<Call>,
 }
 
 fn step(r: &mut Rd<'_>) -> Step {
