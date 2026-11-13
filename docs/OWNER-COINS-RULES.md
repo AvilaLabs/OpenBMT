@@ -549,8 +549,8 @@ the shop's currency, so the node keeps a log of its own.
   transaction for the same entries that spends other coins could then
   confirm beside it and pay them twice. So an entry whose transaction was
   beaten, whether of the outbox (OC-52) or signed elsewhere (AS-89), is held:
-  it is in no new transaction until the block that beat it is 100 blocks
-  deep, the depth below which the node undoes no block (OC-53). Until then
+  it is in no new transaction until the block that beat it is more than 100
+  blocks deep: at 100 the node can still undo it (OC-53). Until then
   the beaten transaction stays watched, and if it confirms after all its
   entries are paid with its ID as OC-52 settles a paid one, whatever stage
   they are in, and an approval or waiting transaction that holds one loses

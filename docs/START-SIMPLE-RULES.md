@@ -102,8 +102,13 @@ funds.**
 - **SS-30. Only to pay out.** Receiving never uses the key: the counters
   derive the wallet's addresses from its public description, pinned at
   pairing (`docs/COUNTER-RULES.md`). The key signs only refunds queued as
-  OA-115 says and the move of SS-42. The seed is opened in the Rust core for
-  one signing, then zeroed.
+  OA-115 says and the move of SS-42. A refund is signed only when it is
+  ready as `docs/SESSION-RULES.md` AS-52 and AS-53 say: the sale's payment
+  has reached the refund depth and still covers every refund counted
+  against the sale. The library checks this when the payment is made and
+  again when it is handed to the outbox, so a payment that a reorganization
+  took away is never refunded from other coins. The seed is opened in the
+  Rust core for one signing, then zeroed.
 - **SS-31. What the owner sees first.** Every payment shows each address in
   full and each amount before the owner proves they are there (SS-21).
 - **SS-32. Seen in the shop too.** Every payment from the starter wallet is
