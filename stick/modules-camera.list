@@ -1,0 +1,19 @@
+# SK-04, SK-51: the camera modules, one path a line, relative to
+# /lib/modules/7.0.0-42-generic in linux-modules-7.0.0-42-generic. Each file is
+# copied unchanged (it carries the distribution's signature). They are in
+# initrd.img under /lib/camera-modules and are loaded only when the owner picks
+# "Sign a payment" (SK-50).
+#
+# Worked out with `modinfo -F depends`: uvcvideo needs videodev,
+# videobuf2-v4l2, mc, uvc, videobuf2-common and videobuf2-vmalloc;
+# videobuf2-vmalloc needs videobuf2-memops. The USB core is built in.
+kernel/drivers/media/mc/mc.ko.zst
+kernel/drivers/media/v4l2-core/videodev.ko.zst
+kernel/drivers/media/common/videobuf2/videobuf2-common.ko.zst
+kernel/drivers/media/common/videobuf2/videobuf2-memops.ko.zst
+kernel/drivers/media/common/videobuf2/videobuf2-v4l2.ko.zst
+kernel/drivers/media/common/videobuf2/videobuf2-vmalloc.ko.zst
+# The one file outside the folders SK-04 names: the USB video class helper
+# (drivers/media/common/uvc.ko.zst) that uvcvideo cannot load without.
+kernel/drivers/media/common/uvc.ko.zst
+kernel/drivers/media/usb/uvc/uvcvideo.ko.zst

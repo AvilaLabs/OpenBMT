@@ -82,6 +82,21 @@ while read -r line; do
 done < "$here/modules.list"
 [ "${#modules[@]}" -gt 0 ] || fail "modules.list is empty"
 
+# SK-04, SK-51: the camera list may name only these folders (and one file).
+camera=()
+while read -r line; do
+    case "$line" in ''|'#'*) continue ;; esac
+    case "$line" in
+        kernel/drivers/media/usb/uvc/*|kernel/drivers/media/common/videobuf2/*|\
+        kernel/drivers/media/v4l2-core/*|kernel/drivers/media/mc/*|\
+        kernel/drivers/media/common/uvc.ko.zst) ;;
+        *) fail "modules-camera.list: $line is not allowed (SK-04)" ;;
+    esac
+    case "$line" in */../*|/*) fail "modules-camera.list: $line" ;; esac
+    camera+=("$line")
+done < "$here/modules-camera.list"
+[ "${#camera[@]}" -gt 0 ] || fail "modules-camera.list is empty"
+
 # ---- unpack what is needed (unchanged) --------------------------------------
 x="$work/x"
 mkdir -p "$x"
@@ -91,7 +106,7 @@ done
 modx="$x/modules"
 mkdir -p "$modx"
 want=()
-for m in "${modules[@]}"; do want+=("./usr/lib/modules/$kver/$m"); done
+for m in "${modules[@]}" "${camera[@]}"; do want+=("./usr/lib/modules/$kver/$m"); done
 dpkg-deb --fsys-tarfile "${deb_of[linux-modules-7.0.0-42-generic]}" | tar -x -C "$modx" -f - "${want[@]}"
 
 shim="$x/shim-signed/usr/lib/shim/shimx64.efi.signed.latest"
@@ -119,6 +134,10 @@ mkdir -p "$st/proc" "$st/sys" "$st/dev"
 install -m 0755 "$prog" "$st/init"
 for m in "${modules[@]}"; do
     install -D -m 0644 "$modx/usr/lib/modules/$kver/$m" "$st/lib/modules/$kver/$m"
+done
+# SK-51: the camera modules, in a folder the program loads from only on the choice.
+for m in "${camera[@]}"; do
+    install -D -m 0644 "$modx/usr/lib/modules/$kver/$m" "$st/lib/camera-modules/$kver/$m"
 done
 find "$st" -type d -exec chmod 0755 {} +
 find "$st" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +

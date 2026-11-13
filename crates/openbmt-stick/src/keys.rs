@@ -5,7 +5,8 @@
 /// A key the screens use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
-    /// A letter (lower case) or a digit.
+    /// A letter (lower case), a digit, or `+` or `-` (the main row's `=` and
+    /// `-` keys and the keypad's; a shifted key is not told apart).
     Char(char),
     Enter,
     Backspace,
@@ -28,6 +29,8 @@ pub fn key_from_code(code: u16) -> Option<Key> {
         28 | 96 => return Some(Key::Enter), // Enter and keypad Enter
         103 => return Some(Key::Up),
         108 => return Some(Key::Down),
+        12 | 74 => '-', // the main row's minus and the keypad's
+        13 | 78 => '+', // the main row's equals (plus, unshifted) and the keypad's
         2..=10 => char::from(b'1' + (code - 2) as u8), // 1 to 9
         11 => '0',
         16..=25 => char::from(TOP[usize::from(code - 16)]),

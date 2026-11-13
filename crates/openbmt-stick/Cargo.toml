@@ -12,11 +12,17 @@ publish.workspace = true
 # stick/test-qemu.sh, never in a release (SK-40).
 serial-echo = []
 
+# Takes the QR text of each frame of a payment from the serial port instead of
+# the camera (SK-58). Used only by stick/test-qemu.sh, never in a release.
+serial-frames = ["serial-echo"]
+
 # The same pins as openbmt-core, so the lock file gains no new package.
 # libc is the system call layer of the program that runs as process 1.
 [dependencies]
 openbmt-core = { path = "../openbmt-core" }
 openbmt-qr = { path = "../openbmt-qr" }
+openbmt-ur = { path = "../openbmt-ur" }
+openbmt-bbqr = { path = "../openbmt-bbqr" }
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
 bip39 = { version = "=2.2.2", default-features = false, features = ["alloc"] }
 libc = "=0.2.191"
@@ -28,3 +34,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "openbmt-stick"
 path = "src/main.rs"
+
+# Only the tests judge the signatures with the spend path's own code.
+[dev-dependencies]
+openbmt-spend = { path = "../openbmt-spend" }

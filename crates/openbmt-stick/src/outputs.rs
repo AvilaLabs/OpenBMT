@@ -35,15 +35,20 @@ pub fn words_of(entropy: &[u8; ENTROPY_BYTES]) -> Result<Vec<&'static str>, Outp
     Ok(m.words().collect())
 }
 
-/// SK-26: the public result of 12 words, no passphrase.
-pub fn public_of(words: &[&str]) -> Result<Public, OutputsError> {
+/// The master key of 12 words, no passphrase, for real bitcoin (SK-23).
+pub fn master_of(words: &[&str]) -> Result<Xpriv, OutputsError> {
     let m = bip39::Mnemonic::parse_normalized(&words.join(" ")).map_err(|_| OutputsError)?;
     if m.word_count() != 12 {
         return Err(OutputsError);
     }
     let seed = m.to_seed_normalized("");
+    Xpriv::new_master(NetworkKind::Main, &seed).map_err(|_| OutputsError)
+}
+
+/// SK-26: the public result of 12 words, no passphrase.
+pub fn public_of(words: &[&str]) -> Result<Public, OutputsError> {
     let secp = Secp256k1::new();
-    let master = Xpriv::new_master(NetworkKind::Main, &seed).map_err(|_| OutputsError)?;
+    let master = master_of(words)?;
     let path = DerivationPath::from_str(ACCOUNT_PATH).map_err(|_| OutputsError)?;
     let account = master.derive_priv(&secp, &path).map_err(|_| OutputsError)?;
     let xpub = Xpub::from_priv(&secp, &account);

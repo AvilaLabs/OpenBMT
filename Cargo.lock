@@ -650,8 +650,11 @@ dependencies = [
  "bip39",
  "bitcoin",
  "libc",
+ "openbmt-bbqr",
  "openbmt-core",
  "openbmt-qr",
+ "openbmt-spend",
+ "openbmt-ur",
 ]
 
 [[package]]

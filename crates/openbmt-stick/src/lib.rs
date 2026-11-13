@@ -9,9 +9,11 @@
 #![forbid(unsafe_code)]
 
 pub mod app;
+pub mod bip85;
 pub mod check;
 pub mod draw;
 pub mod font;
+pub mod frames;
 pub mod keys;
 pub mod mix;
 pub mod modlist;
@@ -19,5 +21,6 @@ pub mod mounts;
 pub mod outputs;
 pub mod screen;
 pub mod seedqr;
+pub mod sign;
 pub mod typed;
 pub mod words;

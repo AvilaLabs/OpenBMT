@@ -74,12 +74,24 @@ fn module_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 /// SK-04: loads every module file in `/lib/modules/<release>` (the files of
-/// `stick/modules.list`, signed by the distribution, unchanged). A module
-/// that needs another waits for it: the pass repeats while any load.
+/// `stick/modules.list`, signed by the distribution, unchanged).
 pub fn load_modules() {
+    load_from("/lib/modules");
+}
+
+/// SK-51: loads the camera modules, which the stick keeps apart in
+/// `/lib/camera-modules/<release>` (the files of `stick/modules-camera.list`).
+/// Called only when the owner picks "Sign a payment".
+pub fn load_camera_modules() {
+    load_from("/lib/camera-modules");
+}
+
+/// Loads every module file under `root/<release>`. A module that needs
+/// another waits for it: the pass repeats while any load.
+fn load_from(root: &str) {
     let Some(rel) = release() else { return };
     let mut pending = Vec::new();
-    module_files(&Path::new("/lib/modules").join(rel), &mut pending);
+    module_files(&Path::new(root).join(rel), &mut pending);
     pending.sort();
     loop {
         let before = pending.len();
@@ -237,6 +249,15 @@ impl Keyboards {
     /// Waits for the next key the program uses.
     pub fn next_key(&mut self) -> Key {
         loop {
+            if let Some(k) = self.poll_key(500) {
+                return k;
+            }
+        }
+    }
+
+    /// Waits at most `timeout_ms` for a key the program uses.
+    pub fn poll_key(&mut self, timeout_ms: i32) -> Option<Key> {
+        {
             self.rescan();
             let mut fds: Vec<libc::pollfd> = self
                 .open
@@ -248,9 +269,9 @@ impl Keyboards {
                 })
                 .collect();
             // SAFETY: `fds` is a valid array of `fds.len()` pollfd structs.
-            let n = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, 500) };
+            let n = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout_ms) };
             if n <= 0 {
-                continue;
+                return None;
             }
             for (i, pfd) in fds.iter().enumerate() {
                 if pfd.revents & libc::POLLIN == 0 {
@@ -262,10 +283,11 @@ impl Keyboards {
                 };
                 for ev in raw[..got].as_chunks::<EVENT_SIZE>().0 {
                     if let Some(k) = key_from_event(ev) {
-                        return k;
+                        return Some(k);
                     }
                 }
             }
+            None
         }
     }
 }
@@ -324,5 +346,81 @@ pub fn serial_note(line: &str) {
         .open("/dev/ttyS0")
     {
         let _ = writeln!(f, "OBM-ECHO {line}");
+    }
+}
+
+/// SK-58: the names of the modules the kernel has loaded, one line, for the
+/// test that the camera's are loaded only after the choice. Not in a
+/// release.
+#[cfg(feature = "serial-echo")]
+pub fn serial_modules(when: &str) {
+    let mut names: Vec<String> = fs::read_to_string("/proc/modules")
+        .map(|t| {
+            t.lines()
+                .filter_map(|l| l.split_whitespace().next().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    serial_note(&format!("MODULES {when} {}", names.join(" ")));
+}
+
+/// SK-58: the serial port as the source of frames in place of a camera: a
+/// line `OBM-FRAME <QR text>` is one frame's code. Present only with the
+/// `serial-frames` feature, which no release has.
+#[cfg(feature = "serial-frames")]
+pub struct SerialFrames {
+    file: Option<File>,
+    pending: Vec<u8>,
+}
+
+#[cfg(feature = "serial-frames")]
+impl SerialFrames {
+    pub fn open() -> Self {
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY)
+            .open("/dev/ttyS0")
+            .ok();
+        if let Some(f) = &file {
+            // SAFETY: `tcgetattr` fills a zeroed termios for an open
+            // descriptor; `cfmakeraw` and `tcsetattr` take that struct, so
+            // that no echo, no line editing and no 4096-byte line limit
+            // touch the frames.
+            unsafe {
+                let mut t: libc::termios = std::mem::zeroed();
+                if libc::tcgetattr(f.as_raw_fd(), &mut t) == 0 {
+                    libc::cfmakeraw(&mut t);
+                    libc::tcsetattr(f.as_raw_fd(), libc::TCSANOW, &t);
+                }
+            }
+        }
+        Self {
+            file,
+            pending: Vec::new(),
+        }
+    }
+
+    /// The texts of the frames that came in since the last call.
+    pub fn texts(&mut self) -> Vec<String> {
+        let mut out = Vec::new();
+        let Some(f) = self.file.as_ref() else {
+            return out;
+        };
+        let mut chunk = [0u8; 4096];
+        while let Ok(n) = (&*f).read(&mut chunk) {
+            if n == 0 {
+                break;
+            }
+            self.pending.extend_from_slice(&chunk[..n]);
+        }
+        while let Some(end) = self.pending.iter().position(|b| *b == b'\n') {
+            let line: Vec<u8> = self.pending.drain(..=end).collect();
+            let text = String::from_utf8_lossy(&line);
+            if let Some(t) = text.trim().strip_prefix("OBM-FRAME ") {
+                out.push(t.to_string());
+            }
+        }
+        out
     }
 }

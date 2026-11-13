@@ -3,6 +3,8 @@
 
 use std::path::PathBuf;
 
+mod common;
+
 use openbmt_core::wallet_single::SingleKeyWallet;
 use openbmt_qr::{decode_luma, Ecc};
 use openbmt_stick::app::{App, Chance, Facts, Outcome};
@@ -10,7 +12,7 @@ use openbmt_stick::check::{answer_matches, pick_positions};
 use openbmt_stick::draw::{pack, render, text_scale, wrap, write_row, Channel, PixelFormat};
 use openbmt_stick::keys::{key_from_code, key_from_event, Key, EVENT_SIZE};
 use openbmt_stick::mix::{dice_alone, dice_values, mix, MixError};
-use openbmt_stick::modlist::{check_list, FORBIDDEN};
+use openbmt_stick::modlist::{check_camera_list, check_list, CAMERA_ALLOWED, FORBIDDEN};
 use openbmt_stick::mounts::{MOUNTS, NEVER};
 use openbmt_stick::outputs::{public_of, words_of};
 use openbmt_stick::screen::Screen;
@@ -670,6 +672,8 @@ fn sk_15_every_word_is_distinct_and_some_screen_shows_each() {
     note(&App::new(f.clone(), Fixed::new(1)));
     f.secure_boot = "?".into();
     note(&App::new(f, Fixed::new(1)));
+    // The screens of the keys for the shop's wallets and of signing a payment.
+    seen.push_str(&common::walk_new_screens());
     for name in words::ALL {
         assert!(seen.contains(name), "no screen shows {name}");
         assert!(
@@ -677,9 +681,35 @@ fn sk_15_every_word_is_distinct_and_some_screen_shows_each() {
             "{name} listed twice"
         );
     }
-    // No placeholder is left.
+    // A placeholder is allowed only when its value is its own name: the words
+    // are written by the owner of the rules, not by the code.
     let src = std::fs::read_to_string(root().join("src/words.rs")).unwrap();
-    assert!(!src.contains(&["WORDS", "_NEEDED"].concat()));
+    let tag = ["WORDS", "_NEEDED"].concat();
+    for line in src
+        .lines()
+        .filter(|l| l.starts_with("pub const ") && l.contains(&tag))
+    {
+        let name = line
+            .trim_start_matches("pub const ")
+            .split(':')
+            .next()
+            .unwrap()
+            .to_string();
+        assert!(
+            line.contains(&format!("{name}: &str = \"{name}\";")),
+            "{line}"
+        );
+    }
+    // Every constant is named SK_ or is a placeholder of a rule.
+    for line in src
+        .lines()
+        .filter(|l| l.starts_with("pub const ") && !l.starts_with("pub const ALL"))
+    {
+        assert!(
+            line.starts_with("pub const SK_") || line.starts_with(&format!("pub const {tag}_SK_")),
+            "{line}"
+        );
+    }
 }
 
 fn source_files() -> Vec<(PathBuf, String)> {
@@ -949,6 +979,79 @@ fn sk_04_the_modules_list_is_the_usb_keyboard_drivers_and_nothing_forbidden() {
             "build.sh does not refuse {f}"
         );
     }
+}
+
+#[test]
+fn sk_04_the_camera_list_is_the_uvc_driver_and_what_it_needs_and_nothing_else() {
+    let text = stick_file("modules-camera.list");
+    let list = check_camera_list(&text).unwrap();
+    // The driver and, by `modinfo -F depends`, everything it needs.
+    for needed in [
+        "uvcvideo.ko.zst",
+        "uvc.ko.zst",
+        "videodev.ko.zst",
+        "mc.ko.zst",
+        "videobuf2-v4l2.ko.zst",
+        "videobuf2-common.ko.zst",
+        "videobuf2-vmalloc.ko.zst",
+        "videobuf2-memops.ko.zst",
+    ] {
+        assert!(
+            list.iter().any(|l| l.ends_with(&format!("/{needed}"))),
+            "{needed}"
+        );
+    }
+    assert_eq!(list.len(), 8, "{list:?}");
+    // No module is in both lists, and the first list holds nothing of the
+    // camera's folders.
+    let first_text = stick_file("modules.list");
+    let first = check_list(&first_text).unwrap();
+    for m in &list {
+        assert!(!first.contains(m), "{m}");
+    }
+    assert!(first
+        .iter()
+        .all(|m| !m.starts_with("kernel/drivers/media/")));
+    // The build refuses the same camera folders.
+    let build = stick_file("build.sh");
+    for f in CAMERA_ALLOWED {
+        let pattern = if f.ends_with('/') {
+            format!("{f}*")
+        } else {
+            f.to_string()
+        };
+        assert!(build.contains(&pattern), "build.sh does not allow {f}");
+    }
+    // They are in initrd.img, apart from the first list's folder, so that
+    // the loader's pass over /lib/modules never loads them.
+    assert!(build.contains("/lib/camera-modules/"));
+}
+
+#[test]
+fn sk_04_a_camera_list_with_any_other_module_is_refused() {
+    for bad in [
+        "kernel/drivers/media/usb/gspca/gspca_main.ko.zst",
+        "kernel/drivers/media/dvb-core/dvb-core.ko.zst",
+        "kernel/drivers/media/common/other.ko.zst",
+        "kernel/drivers/net/ethernet/intel/e1000e/e1000e.ko.zst",
+        "kernel/drivers/hid/hid.ko.zst",
+        "kernel/drivers/usb/storage/usb-storage.ko.zst",
+        "kernel/sound/core/snd.ko.zst",
+        "kernel/drivers/media/usb/uvc/../../../net/x.ko.zst",
+        "kernel/drivers/media/usb/uvc/uvcvideo.ko",
+    ] {
+        assert!(
+            check_camera_list(&format!(
+                "kernel/drivers/media/usb/uvc/uvcvideo.ko.zst\n{bad}\n"
+            ))
+            .is_err(),
+            "{bad}"
+        );
+    }
+    assert!(check_camera_list("").is_err());
+    assert!(check_camera_list("# only a comment\n").is_err());
+    // The camera modules are not allowed on the first list.
+    assert!(check_list("kernel/drivers/media/usb/uvc/uvcvideo.ko.zst").is_err());
 }
 
 #[test]

@@ -32,7 +32,7 @@ pub const SK_22_MENU_DICE: &str = "Make a wallet from dice alone";
 /// The first screen's choice: type 12 words to check them (SK-28).
 pub const SK_28_MENU_CHECK: &str = "Check words I wrote";
 /// On the first screen: how to choose (SK-10).
-pub const SK_10_MENU_KEYS: &str = "Press 1, 2 or 3.";
+pub const SK_10_MENU_KEYS: &str = "Press 1, 2, 3 or 4.";
 /// The title of the mixed-rolls screen, before the count of rolls (SK-21).
 pub const SK_21_ROLLS: &str = "Dice rolls so far:";
 /// On that screen: the computer's numbers are mixed in, and 50 rolls are enough alone (SK-20, SK-21).
@@ -95,6 +95,94 @@ pub const SK_28_KEYS: &str =
 /// After "Esc", on the first screen and every screen after the words (SK-29).
 pub const SK_29_TURN_OFF: &str = "to turn off. Nothing is kept.";
 
+// Placeholders: each is its own name until the words are written.
+/// The first screen's fourth choice: sign a payment (SK-50).
+pub const WORDS_NEEDED_SK_50_MENU_SIGN: &str = "WORDS_NEEDED_SK_50_MENU_SIGN";
+/// After "F" on the result screens: show the refund float's key (SK-32).
+pub const WORDS_NEEDED_SK_32_MENU_FLOAT: &str = "WORDS_NEEDED_SK_32_MENU_FLOAT";
+/// After "L" on the result screens: show Shop Lightning's key (SK-32).
+pub const WORDS_NEEDED_SK_32_MENU_LIGHTNING: &str = "WORDS_NEEDED_SK_32_MENU_LIGHTNING";
+/// The label before the refund float's index, 0 to 99, on its screen (SK-32).
+pub const WORDS_NEEDED_SK_32_FLOAT_INDEX: &str = "WORDS_NEEDED_SK_32_FLOAT_INDEX";
+/// After the keys + and - on the refund float's screen: they change the index (SK-32).
+pub const WORDS_NEEDED_SK_32_FLOAT_INDEX_KEYS: &str = "WORDS_NEEDED_SK_32_FLOAT_INDEX_KEYS";
+/// The refund float's screen: what the code is (SK-33).
+pub const WORDS_NEEDED_SK_33_FLOAT_WHAT: &str = "WORDS_NEEDED_SK_33_FLOAT_WHAT";
+/// The refund float's screen: it can spend the float's money and nothing else (SK-33).
+pub const WORDS_NEEDED_SK_33_FLOAT_SPENDS: &str = "WORDS_NEEDED_SK_33_FLOAT_SPENDS";
+/// The refund float's screen: it is scanned once by the owner phone (SK-33).
+pub const WORDS_NEEDED_SK_33_FLOAT_SCAN: &str = "WORDS_NEEDED_SK_33_FLOAT_SCAN";
+/// The refund float's screen: never photographed (SK-33).
+pub const WORDS_NEEDED_SK_33_FLOAT_NO_PHOTO: &str = "WORDS_NEEDED_SK_33_FLOAT_NO_PHOTO";
+/// Shop Lightning's screen: what the code is (SK-33).
+pub const WORDS_NEEDED_SK_33_LIGHTNING_WHAT: &str = "WORDS_NEEDED_SK_33_LIGHTNING_WHAT";
+/// Shop Lightning's screen: it can spend the node's money and nothing else (SK-33).
+pub const WORDS_NEEDED_SK_33_LIGHTNING_SPENDS: &str = "WORDS_NEEDED_SK_33_LIGHTNING_SPENDS";
+/// Shop Lightning's screen: it is scanned once by the Lightning counter (SK-33).
+pub const WORDS_NEEDED_SK_33_LIGHTNING_SCAN: &str = "WORDS_NEEDED_SK_33_LIGHTNING_SCAN";
+/// Shop Lightning's screen: never photographed (SK-33).
+pub const WORDS_NEEDED_SK_33_LIGHTNING_NO_PHOTO: &str = "WORDS_NEEDED_SK_33_LIGHTNING_NO_PHOTO";
+/// The title of the screen that reads the payment's QR codes (SK-52).
+pub const WORDS_NEEDED_SK_52_SCAN_TITLE: &str = "WORDS_NEEDED_SK_52_SCAN_TITLE";
+/// On that screen while no camera is open yet (SK-52).
+pub const WORDS_NEEDED_SK_52_LOOKING: &str = "WORDS_NEEDED_SK_52_LOOKING";
+/// The label before the parts read out of the parts needed (SK-52).
+pub const WORDS_NEEDED_SK_52_PARTS: &str = "WORDS_NEEDED_SK_52_PARTS";
+/// After "Esc" on that screen: back to the first screen (SK-52).
+pub const WORDS_NEEDED_SK_52_BACK: &str = "WORDS_NEEDED_SK_52_BACK";
+/// No camera was found in the set time (SK-52).
+pub const WORDS_NEEDED_SK_52_NO_CAMERA: &str = "WORDS_NEEDED_SK_52_NO_CAMERA";
+/// All parts were read and they are not a payment the stick takes (SK-52).
+pub const WORDS_NEEDED_SK_52_BAD_FILE: &str = "WORDS_NEEDED_SK_52_BAD_FILE";
+/// Above the typed-words screen of a payment: the wallet's 12 words are needed (SK-53).
+pub const WORDS_NEEDED_SK_53_WORDS: &str = "WORDS_NEEDED_SK_53_WORDS";
+/// The title of a refused payment (SK-54).
+pub const WORDS_NEEDED_SK_54_REFUSED: &str = "WORDS_NEEDED_SK_54_REFUSED";
+/// The label before the number of the input a refusal names (SK-54).
+pub const WORDS_NEEDED_SK_54_INPUT: &str = "WORDS_NEEDED_SK_54_INPUT";
+/// Refused: the payment is not for real bitcoin (SK-54).
+pub const WORDS_NEEDED_SK_54_NOT_MAINNET: &str = "WORDS_NEEDED_SK_54_NOT_MAINNET";
+/// Refused: an input lacks its previous output (SK-54).
+pub const WORDS_NEEDED_SK_54_NO_PREVOUT: &str = "WORDS_NEEDED_SK_54_NO_PREVOUT";
+/// Refused: an input's previous outputs disagree (SK-54).
+pub const WORDS_NEEDED_SK_54_PREVOUT_MISMATCH: &str = "WORDS_NEEDED_SK_54_PREVOUT_MISMATCH";
+/// Refused: an input lacks its key path (SK-54).
+pub const WORDS_NEEDED_SK_54_NO_PATH: &str = "WORDS_NEEDED_SK_54_NO_PATH";
+/// Refused: an input is not of the wallet of these words (SK-53, SK-54).
+pub const WORDS_NEEDED_SK_54_OTHER_WALLET: &str = "WORDS_NEEDED_SK_54_OTHER_WALLET";
+/// Refused: an input's key path is not of the wallet's two chains (SK-54).
+pub const WORDS_NEEDED_SK_54_PATH_NOT_WALLET: &str = "WORDS_NEEDED_SK_54_PATH_NOT_WALLET";
+/// Refused: the key at an input's path is not the input's key (SK-54).
+pub const WORDS_NEEDED_SK_54_KEY_MISMATCH: &str = "WORDS_NEEDED_SK_54_KEY_MISMATCH";
+/// Refused: an input asks for a signature other than SIGHASH_ALL (SK-54).
+pub const WORDS_NEEDED_SK_54_NOT_SIGHASH_ALL: &str = "WORDS_NEEDED_SK_54_NOT_SIGHASH_ALL";
+/// Refused: the outputs pay more than the inputs hold (SK-54).
+pub const WORDS_NEEDED_SK_54_OUTPUTS_EXCEED: &str = "WORDS_NEEDED_SK_54_OUTPUTS_EXCEED";
+/// The title of the review before signing (SK-55).
+pub const WORDS_NEEDED_SK_55_TITLE: &str = "WORDS_NEEDED_SK_55_TITLE";
+/// After an output the stick derived itself from these words (SK-55).
+pub const WORDS_NEEDED_SK_55_OWN: &str = "WORDS_NEEDED_SK_55_OWN";
+/// The label before the total sent away (SK-55).
+pub const WORDS_NEEDED_SK_55_SENT: &str = "WORDS_NEEDED_SK_55_SENT";
+/// The label before the fee (SK-55).
+pub const WORDS_NEEDED_SK_55_FEE: &str = "WORDS_NEEDED_SK_55_FEE";
+/// The label before the fee per virtual byte (SK-55).
+pub const WORDS_NEEDED_SK_55_FEE_RATE: &str = "WORDS_NEEDED_SK_55_FEE_RATE";
+/// After an amount: bitcoin (SK-55).
+pub const WORDS_NEEDED_SK_55_UNIT_BTC: &str = "WORDS_NEEDED_SK_55_UNIT_BTC";
+/// After the fee per virtual byte: satoshis per virtual byte (SK-55).
+pub const WORDS_NEEDED_SK_55_UNIT_RATE: &str = "WORDS_NEEDED_SK_55_UNIT_RATE";
+/// After "Up" and "Down" when the outputs fill more than one page: the page (SK-55).
+pub const WORDS_NEEDED_SK_55_PAGE: &str = "WORDS_NEEDED_SK_55_PAGE";
+/// After "Enter" on the review: sign (SK-55).
+pub const WORDS_NEEDED_SK_55_SIGN: &str = "WORDS_NEEDED_SK_55_SIGN";
+/// After "Esc" on the review: refuse, nothing is signed (SK-55).
+pub const WORDS_NEEDED_SK_55_REFUSE: &str = "WORDS_NEEDED_SK_55_REFUSE";
+/// The title of the signed payment's QR screen: scan it back with the owner phone (SK-56).
+pub const WORDS_NEEDED_SK_56_SHOW: &str = "WORDS_NEEDED_SK_56_SHOW";
+/// The label before the part shown out of the parts (SK-56).
+pub const WORDS_NEEDED_SK_56_PART: &str = "WORDS_NEEDED_SK_56_PART";
+
 /// Every constant above, for the test that each is distinct and shown.
 pub const ALL: &[&str] = &[
     SK_10_TITLE,
@@ -140,6 +228,49 @@ pub const ALL: &[&str] = &[
     SK_28_BAD_CHECKSUM,
     SK_28_KEYS,
     SK_29_TURN_OFF,
+    WORDS_NEEDED_SK_50_MENU_SIGN,
+    WORDS_NEEDED_SK_32_MENU_FLOAT,
+    WORDS_NEEDED_SK_32_MENU_LIGHTNING,
+    WORDS_NEEDED_SK_32_FLOAT_INDEX,
+    WORDS_NEEDED_SK_32_FLOAT_INDEX_KEYS,
+    WORDS_NEEDED_SK_33_FLOAT_WHAT,
+    WORDS_NEEDED_SK_33_FLOAT_SPENDS,
+    WORDS_NEEDED_SK_33_FLOAT_SCAN,
+    WORDS_NEEDED_SK_33_FLOAT_NO_PHOTO,
+    WORDS_NEEDED_SK_33_LIGHTNING_WHAT,
+    WORDS_NEEDED_SK_33_LIGHTNING_SPENDS,
+    WORDS_NEEDED_SK_33_LIGHTNING_SCAN,
+    WORDS_NEEDED_SK_33_LIGHTNING_NO_PHOTO,
+    WORDS_NEEDED_SK_52_SCAN_TITLE,
+    WORDS_NEEDED_SK_52_LOOKING,
+    WORDS_NEEDED_SK_52_PARTS,
+    WORDS_NEEDED_SK_52_BACK,
+    WORDS_NEEDED_SK_52_NO_CAMERA,
+    WORDS_NEEDED_SK_52_BAD_FILE,
+    WORDS_NEEDED_SK_53_WORDS,
+    WORDS_NEEDED_SK_54_REFUSED,
+    WORDS_NEEDED_SK_54_INPUT,
+    WORDS_NEEDED_SK_54_NOT_MAINNET,
+    WORDS_NEEDED_SK_54_NO_PREVOUT,
+    WORDS_NEEDED_SK_54_PREVOUT_MISMATCH,
+    WORDS_NEEDED_SK_54_NO_PATH,
+    WORDS_NEEDED_SK_54_OTHER_WALLET,
+    WORDS_NEEDED_SK_54_PATH_NOT_WALLET,
+    WORDS_NEEDED_SK_54_KEY_MISMATCH,
+    WORDS_NEEDED_SK_54_NOT_SIGHASH_ALL,
+    WORDS_NEEDED_SK_54_OUTPUTS_EXCEED,
+    WORDS_NEEDED_SK_55_TITLE,
+    WORDS_NEEDED_SK_55_OWN,
+    WORDS_NEEDED_SK_55_SENT,
+    WORDS_NEEDED_SK_55_FEE,
+    WORDS_NEEDED_SK_55_FEE_RATE,
+    WORDS_NEEDED_SK_55_UNIT_BTC,
+    WORDS_NEEDED_SK_55_UNIT_RATE,
+    WORDS_NEEDED_SK_55_PAGE,
+    WORDS_NEEDED_SK_55_SIGN,
+    WORDS_NEEDED_SK_55_REFUSE,
+    WORDS_NEEDED_SK_56_SHOW,
+    WORDS_NEEDED_SK_56_PART,
 ];
 
 /// What the first screen shows after [`SK_06_SECURE_BOOT`] for the

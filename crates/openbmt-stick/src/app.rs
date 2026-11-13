@@ -4,14 +4,17 @@
 
 use openbmt_qr::{Ecc, QrCode};
 
+use crate::bip85::{float_entropy, lightning_hex, FLOAT_INDEX_MAX};
 use crate::check::{answer_matches, pick_positions, ASKED};
+use crate::frames::{codes_of, Collector, Feed, Form};
 use crate::keys::Key;
 use crate::mix::{
     dice_alone, dice_values, mix, DICE_VALUES, ENOUGH_ROLLS, ENTROPY_BYTES, KERNEL_BYTES,
 };
-use crate::outputs::{public_of, words_of, Public};
+use crate::outputs::{master_of, public_of, words_of, Public};
 use crate::screen::Screen;
 use crate::seedqr::compact_seedqr;
+use crate::sign::{btc, hundredths, prepare, Prepared, Refusal};
 use crate::typed::{check_words, complete_word, TypedError, WORD_COUNT};
 use crate::words::*;
 
@@ -44,6 +47,10 @@ pub trait Chance {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
     Continue,
+    /// SK-51: the owner picked "Sign a payment"; load the camera modules
+    /// now (and only now), then report the camera with
+    /// [`App::camera_found`] once one is open.
+    LoadCamera,
     /// SK-29: the program has cleared what it holds; power the computer off.
     TurnOff,
 }
@@ -52,12 +59,30 @@ pub enum Outcome {
 const MAX_TYPED: usize = 8;
 /// Words shown on one screen (SK-25).
 const PER_PAGE: usize = 4;
+/// SK-52: how long to wait for a camera before saying there is none.
+pub const CAMERA_WAIT_MS: u64 = 15_000;
+/// SK-56: how long each part of the signed payment's animated code shows.
+pub const FRAME_MS: u64 = 300;
+/// SK-55: outputs shown on one page of the review.
+const OUTPUTS_PER_PAGE: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum View {
     Text,
     Qr,
     SeedQr,
+    /// SK-32: the refund float's key.
+    Float,
+    /// SK-32: Shop Lightning's key.
+    Lightning,
+}
+
+/// The payment read through the camera, and what was judged of it (SK-52 to
+/// SK-56).
+struct Job {
+    form: Form,
+    psbt: Vec<u8>,
+    prepared: Option<Prepared>,
 }
 
 #[derive(Debug)]
@@ -75,6 +100,8 @@ enum State {
         words: Vec<&'static str>,
         buf: String,
         error: Option<&'static str>,
+        /// True when the words are for signing a payment (SK-53).
+        sign: bool,
     },
     Words {
         page: usize,
@@ -86,6 +113,27 @@ enum State {
     },
     Result {
         view: View,
+    },
+    /// SK-52: reading the payment's frames.
+    Scan {
+        gathering: Box<Collector>,
+        waited_ms: u64,
+        camera: bool,
+    },
+    /// SK-52: no camera in the set time.
+    NoCamera,
+    /// SK-54: the payment is refused.
+    Refused {
+        why: Refusal,
+    },
+    /// SK-55: the payment is shown, waiting for Enter or Esc.
+    Review {
+        page: usize,
+    },
+    /// SK-56: the signed payment, shown as an animated code.
+    Out {
+        frame: usize,
+        ms: u64,
     },
 }
 
@@ -99,6 +147,11 @@ pub struct App<C: Chance> {
     public: Option<Public>,
     descriptor_qr: Option<QrCode>,
     seed_qr: Option<QrCode>,
+    float_index: u32,
+    float_qr: Option<QrCode>,
+    lightning_qr: Option<QrCode>,
+    job: Option<Job>,
+    out_codes: Vec<QrCode>,
 }
 
 /// Overwrites bytes with zeros, in a way the compiler may not drop.
@@ -121,6 +174,11 @@ impl<C: Chance> App<C> {
             public: None,
             descriptor_qr: None,
             seed_qr: None,
+            float_index: 0,
+            float_qr: None,
+            lightning_qr: None,
+            job: None,
+            out_codes: Vec::new(),
         }
     }
 
@@ -146,6 +204,15 @@ impl<C: Chance> App<C> {
         self.public = None;
         self.descriptor_qr = None;
         self.seed_qr = None;
+        self.float_index = 0;
+        self.float_qr = None;
+        self.lightning_qr = None;
+        // SK-57: the payment and the frames go with the words.
+        if let Some(job) = self.job.as_mut() {
+            wipe(&mut job.psbt);
+        }
+        self.job = None;
+        self.out_codes.clear();
         self.state = State::Start { selected: 0 };
     }
 
@@ -181,8 +248,17 @@ impl<C: Chance> App<C> {
                     qr: None,
                 }
             }
-            State::Type { words, buf, error } => {
-                let mut lines = vec![format!("{SK_28_TYPE} {}", words.len() + 1)];
+            State::Type {
+                words,
+                buf,
+                error,
+                sign,
+            } => {
+                let mut lines = Vec::new();
+                if *sign {
+                    lines.push(WORDS_NEEDED_SK_53_WORDS.to_string());
+                }
+                lines.push(format!("{SK_28_TYPE} {}", words.len() + 1));
                 if let Some(e) = error {
                     lines.push((*e).to_string());
                 }
@@ -232,6 +308,128 @@ impl<C: Chance> App<C> {
                 qr: None,
             },
             State::Result { view } => self.result_screen(*view),
+            State::Scan {
+                gathering, camera, ..
+            } => {
+                let (have, total) = gathering.progress();
+                let mut lines = vec![WORDS_NEEDED_SK_52_SCAN_TITLE.to_string()];
+                if !camera {
+                    lines.push(WORDS_NEEDED_SK_52_LOOKING.to_string());
+                }
+                lines.push(format!("{WORDS_NEEDED_SK_52_PARTS} {have}/{total}"));
+                lines.push(String::new());
+                lines.push(format!("Esc {WORDS_NEEDED_SK_52_BACK}"));
+                Screen {
+                    id: "sign-scan",
+                    lines,
+                    qr: None,
+                }
+            }
+            State::NoCamera => Screen {
+                id: "sign-nocamera",
+                lines: vec![
+                    WORDS_NEEDED_SK_52_NO_CAMERA.to_string(),
+                    format!("Esc {SK_29_TURN_OFF}"),
+                ],
+                qr: None,
+            },
+            State::Refused { why } => {
+                let (reason, input) = match why {
+                    // Cannot happen for 12 words of the list; no reason to name.
+                    Refusal::Internal => ("", None),
+                    Refusal::NotAPsbt => (WORDS_NEEDED_SK_52_BAD_FILE, None),
+                    Refusal::NotMainnet => (WORDS_NEEDED_SK_54_NOT_MAINNET, None),
+                    Refusal::NoPrevout(i) => (WORDS_NEEDED_SK_54_NO_PREVOUT, Some(*i)),
+                    Refusal::PrevoutMismatch(i) => (WORDS_NEEDED_SK_54_PREVOUT_MISMATCH, Some(*i)),
+                    Refusal::NoPath(i) => (WORDS_NEEDED_SK_54_NO_PATH, Some(*i)),
+                    Refusal::OtherWallet(i) => (WORDS_NEEDED_SK_54_OTHER_WALLET, Some(*i)),
+                    Refusal::PathNotWallet(i) => (WORDS_NEEDED_SK_54_PATH_NOT_WALLET, Some(*i)),
+                    Refusal::KeyMismatch(i) => (WORDS_NEEDED_SK_54_KEY_MISMATCH, Some(*i)),
+                    Refusal::SighashNotAll(i) => (WORDS_NEEDED_SK_54_NOT_SIGHASH_ALL, Some(*i)),
+                    Refusal::OutputsExceedInputs => (WORDS_NEEDED_SK_54_OUTPUTS_EXCEED, None),
+                };
+                let mut lines = vec![WORDS_NEEDED_SK_54_REFUSED.to_string(), reason.to_string()];
+                if let Some(i) = input {
+                    lines.push(format!("{WORDS_NEEDED_SK_54_INPUT} {}", i + 1));
+                }
+                lines.push(String::new());
+                lines.push(format!("Esc {SK_29_TURN_OFF}"));
+                Screen {
+                    id: "sign-refused",
+                    lines,
+                    qr: None,
+                }
+            }
+            State::Review { page } => self.review_screen(*page),
+            State::Out { frame, .. } => {
+                let n = self.out_codes.len();
+                Screen {
+                    id: "sign-out",
+                    lines: vec![
+                        WORDS_NEEDED_SK_56_SHOW.to_string(),
+                        format!("{WORDS_NEEDED_SK_56_PART} {}/{n}", frame + 1),
+                        format!("Esc {SK_29_TURN_OFF}"),
+                    ],
+                    qr: self.out_codes.get(*frame).cloned(),
+                }
+            }
+        }
+    }
+
+    /// SK-55: the payment's outputs, the total sent away, the fee and its rate.
+    fn review_screen(&self, page: usize) -> Screen {
+        let mut lines = vec![WORDS_NEEDED_SK_55_TITLE.to_string()];
+        if let Some(r) = self
+            .job
+            .as_ref()
+            .and_then(|j| j.prepared.as_ref())
+            .map(|p| p.review())
+        {
+            let pages = r.outputs.len().div_ceil(OUTPUTS_PER_PAGE);
+            for (i, o) in r
+                .outputs
+                .iter()
+                .enumerate()
+                .skip(page * OUTPUTS_PER_PAGE)
+                .take(OUTPUTS_PER_PAGE)
+            {
+                lines.push(format!("{} {}", i + 1, o.address));
+                let own = if o.own {
+                    format!(" {WORDS_NEEDED_SK_55_OWN}")
+                } else {
+                    String::new()
+                };
+                lines.push(format!(
+                    "{} {WORDS_NEEDED_SK_55_UNIT_BTC}{own}",
+                    btc(o.sats)
+                ));
+            }
+            lines.push(String::new());
+            lines.push(format!(
+                "{WORDS_NEEDED_SK_55_SENT} {} {WORDS_NEEDED_SK_55_UNIT_BTC}",
+                btc(r.sent_away)
+            ));
+            lines.push(format!(
+                "{WORDS_NEEDED_SK_55_FEE} {} {WORDS_NEEDED_SK_55_UNIT_BTC}",
+                btc(r.fee)
+            ));
+            lines.push(format!(
+                "{WORDS_NEEDED_SK_55_FEE_RATE} {} {WORDS_NEEDED_SK_55_UNIT_RATE}",
+                hundredths(r.fee_rate_hundredths())
+            ));
+            if pages > 1 {
+                lines.push(format!(
+                    "Up Down {WORDS_NEEDED_SK_55_PAGE} {}/{pages}",
+                    page + 1
+                ));
+            }
+        }
+        lines.push(format!("Enter {WORDS_NEEDED_SK_55_SIGN}"));
+        lines.push(format!("Esc {WORDS_NEEDED_SK_55_REFUSE}"));
+        Screen {
+            id: "sign-review",
+            lines,
+            qr: None,
         }
     }
 
@@ -260,6 +458,7 @@ impl<C: Chance> App<C> {
                 format!("{} 1 {SK_20_MENU_MIX}", mark(0)),
                 format!("{} 2 {SK_22_MENU_DICE}", mark(1)),
                 format!("{} 3 {SK_28_MENU_CHECK}", mark(2)),
+                format!("{} 4 {WORDS_NEEDED_SK_50_MENU_SIGN}", mark(3)),
                 SK_10_MENU_KEYS.to_string(),
                 format!("Esc {SK_29_TURN_OFF}"),
             ],
@@ -279,6 +478,8 @@ impl<C: Chance> App<C> {
                     format!("{SK_26_DESCRIPTOR} {}", p.descriptor),
                     format!("Enter {SK_26_SHOW_QR}"),
                     format!("S {SK_27_SEEDQR}"),
+                    format!("F {WORDS_NEEDED_SK_32_MENU_FLOAT}"),
+                    format!("L {WORDS_NEEDED_SK_32_MENU_LIGHTNING}"),
                     off,
                 ],
                 qr: None,
@@ -288,6 +489,8 @@ impl<C: Chance> App<C> {
                 lines: vec![
                     SK_26_SCAN.to_string(),
                     format!("Enter {SK_26_SHOW_TEXT}"),
+                    format!("F {WORDS_NEEDED_SK_32_MENU_FLOAT}"),
+                    format!("L {WORDS_NEEDED_SK_32_MENU_LIGHTNING}"),
                     off,
                 ],
                 qr: self.descriptor_qr.clone(),
@@ -301,6 +504,32 @@ impl<C: Chance> App<C> {
                 ],
                 qr: self.seed_qr.clone(),
             },
+            (View::Float, Some(_)) => Screen {
+                id: "float",
+                lines: vec![
+                    WORDS_NEEDED_SK_33_FLOAT_WHAT.to_string(),
+                    WORDS_NEEDED_SK_33_FLOAT_SPENDS.to_string(),
+                    WORDS_NEEDED_SK_33_FLOAT_SCAN.to_string(),
+                    WORDS_NEEDED_SK_33_FLOAT_NO_PHOTO.to_string(),
+                    format!("{WORDS_NEEDED_SK_32_FLOAT_INDEX} {}", self.float_index),
+                    format!("+ - {WORDS_NEEDED_SK_32_FLOAT_INDEX_KEYS}"),
+                    format!("Enter {SK_26_SHOW_TEXT}"),
+                    off,
+                ],
+                qr: self.float_qr.clone(),
+            },
+            (View::Lightning, Some(_)) => Screen {
+                id: "lightning",
+                lines: vec![
+                    WORDS_NEEDED_SK_33_LIGHTNING_WHAT.to_string(),
+                    WORDS_NEEDED_SK_33_LIGHTNING_SPENDS.to_string(),
+                    WORDS_NEEDED_SK_33_LIGHTNING_SCAN.to_string(),
+                    WORDS_NEEDED_SK_33_LIGHTNING_NO_PHOTO.to_string(),
+                    format!("Enter {SK_26_SHOW_TEXT}"),
+                    off,
+                ],
+                qr: self.lightning_qr.clone(),
+            },
             (_, None) => Screen {
                 id: "result",
                 lines: vec![off],
@@ -312,6 +541,7 @@ impl<C: Chance> App<C> {
     /// One key. Returns what to do next.
     pub fn key(&mut self, key: Key) -> Outcome {
         let state = std::mem::replace(&mut self.state, State::Start { selected: 0 });
+        let mut outcome = Outcome::Continue;
         self.state = match state {
             State::Start { selected } => match key {
                 Key::Escape => {
@@ -319,13 +549,21 @@ impl<C: Chance> App<C> {
                     return Outcome::TurnOff;
                 }
                 Key::Up => State::Start {
-                    selected: (selected + 2) % 3,
+                    selected: (selected + 3) % 4,
                 },
                 Key::Down => State::Start {
-                    selected: (selected + 1) % 3,
+                    selected: (selected + 1) % 4,
                 },
-                Key::Char(c @ '1'..='3') => self.start_choice(usize::from(c as u8 - b'1')),
-                Key::Enter => self.start_choice(selected),
+                Key::Char(c @ '1'..='4') => {
+                    let next = self.start_choice(usize::from(c as u8 - b'1'));
+                    outcome = Self::after_choice(&next);
+                    next
+                }
+                Key::Enter => {
+                    let next = self.start_choice(selected);
+                    outcome = Self::after_choice(&next);
+                    next
+                }
                 _ => State::Start { selected },
             },
             State::Mix { mut rolls } => match key {
@@ -380,7 +618,12 @@ impl<C: Chance> App<C> {
                     _ => State::Dice { rolls },
                 }
             }
-            State::Type { words, buf, error } => self.type_key(key, words, buf, error),
+            State::Type {
+                words,
+                buf,
+                error,
+                sign,
+            } => self.type_key(key, words, buf, error, sign),
             State::Words { page, wrong } => match key {
                 Key::Enter if (page + 1) * PER_PAGE >= WORD_COUNT => State::Check {
                     answers: Vec::new(),
@@ -431,20 +674,235 @@ impl<C: Chance> App<C> {
                     },
                 },
                 Key::Char('s') => State::Result { view: View::SeedQr },
+                Key::Char('f') => State::Result { view: View::Float },
+                Key::Char('l') => State::Result {
+                    view: View::Lightning,
+                },
+                Key::Char(c @ ('+' | '-')) if view == View::Float => {
+                    self.float_index = if c == '+' {
+                        (self.float_index + 1).min(FLOAT_INDEX_MAX)
+                    } else {
+                        self.float_index.saturating_sub(1)
+                    };
+                    self.make_float();
+                    State::Result { view }
+                }
                 _ => State::Result { view },
             },
+            State::Scan {
+                gathering,
+                waited_ms,
+                camera,
+            } => match key {
+                Key::Escape => State::Start { selected: 3 },
+                _ => State::Scan {
+                    gathering,
+                    waited_ms,
+                    camera,
+                },
+            },
+            State::NoCamera => match key {
+                Key::Escape => {
+                    self.clear();
+                    return Outcome::TurnOff;
+                }
+                _ => State::NoCamera,
+            },
+            State::Refused { why } => match key {
+                Key::Escape => {
+                    self.clear();
+                    return Outcome::TurnOff;
+                }
+                _ => State::Refused { why },
+            },
+            State::Review { page } => {
+                let pages = self
+                    .job
+                    .as_ref()
+                    .and_then(|j| j.prepared.as_ref())
+                    .map_or(1, |p| p.review().outputs.len().div_ceil(OUTPUTS_PER_PAGE));
+                match key {
+                    Key::Escape => {
+                        // SK-55: nothing is signed.
+                        self.clear();
+                        State::Start { selected: 3 }
+                    }
+                    Key::Down => State::Review {
+                        page: (page + 1).min(pages.saturating_sub(1)),
+                    },
+                    Key::Up => State::Review {
+                        page: page.saturating_sub(1),
+                    },
+                    Key::Enter => self.sign_now(page),
+                    _ => State::Review { page },
+                }
+            }
+            State::Out { frame, ms } => match key {
+                Key::Escape => {
+                    self.clear();
+                    return Outcome::TurnOff;
+                }
+                _ => State::Out { frame, ms },
+            },
         };
-        Outcome::Continue
+        outcome
+    }
+
+    /// SK-51: the choice that loads the camera modules.
+    fn after_choice(next: &State) -> Outcome {
+        if matches!(next, State::Scan { .. }) {
+            Outcome::LoadCamera
+        } else {
+            Outcome::Continue
+        }
+    }
+
+    /// Whether the program holds any of the owner's words, key, payment or
+    /// frames now: false after "Turn off" cleared them (SK-29, SK-57).
+    pub fn holds_anything(&self) -> bool {
+        self.entropy.is_some()
+            || self.public.is_some()
+            || self.descriptor_qr.is_some()
+            || self.seed_qr.is_some()
+            || self.float_qr.is_some()
+            || self.lightning_qr.is_some()
+            || self.job.is_some()
+            || !self.out_codes.is_empty()
+    }
+
+    /// Whether the loop should offer camera frames now (SK-52).
+    pub fn wants_frames(&self) -> bool {
+        matches!(self.state, State::Scan { .. })
+    }
+
+    /// Whether the screen changes with time: the loop should call
+    /// [`App::tick`] often.
+    pub fn animated(&self) -> bool {
+        matches!(self.state, State::Scan { .. } | State::Out { .. })
+    }
+
+    /// A camera is open (SK-52).
+    pub fn camera_found(&mut self) {
+        if let State::Scan { camera, .. } = &mut self.state {
+            *camera = true;
+        }
+    }
+
+    /// `ms` have passed. Returns true when the screen changed: the next part
+    /// of the signed payment (SK-56), or no camera in the set time (SK-52).
+    pub fn tick(&mut self, ms: u64) -> bool {
+        match &mut self.state {
+            State::Scan {
+                waited_ms, camera, ..
+            } if !*camera => {
+                *waited_ms += ms;
+                if *waited_ms >= CAMERA_WAIT_MS {
+                    self.state = State::NoCamera;
+                    return true;
+                }
+                false
+            }
+            State::Out { frame, ms: shown } => {
+                *shown += ms;
+                if *shown >= FRAME_MS && self.out_codes.len() > 1 {
+                    *shown = 0;
+                    *frame = (*frame + 1) % self.out_codes.len();
+                    return true;
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// One frame of the camera as grey levels (SK-52). Returns true when the
+    /// screen changed.
+    pub fn frame_luma(&mut self, width: usize, height: usize, luma: &[u8]) -> bool {
+        if !self.wants_frames() {
+            return false;
+        }
+        match openbmt_qr::decode_luma(width, height, luma) {
+            Ok(d) => match String::from_utf8(d.bytes) {
+                Ok(text) => self.frame_text(&text),
+                Err(_) => false,
+            },
+            Err(_) => false,
+        }
+    }
+
+    /// The text of one QR code read from a frame (SK-52), or, in the test
+    /// build, from the serial port. Returns true when the screen changed.
+    pub fn frame_text(&mut self, text: &str) -> bool {
+        let State::Scan { gathering, .. } = &mut self.state else {
+            return false;
+        };
+        let before = gathering.progress();
+        match gathering.feed(text) {
+            Feed::Progress { have, total } => (have, total) != before,
+            Feed::Done { form, psbt } => {
+                self.job = Some(Job {
+                    form,
+                    psbt,
+                    prepared: None,
+                });
+                self.state = State::Type {
+                    words: Vec::new(),
+                    buf: String::new(),
+                    error: None,
+                    sign: true,
+                };
+                true
+            }
+            Feed::Bad => {
+                self.state = State::Refused {
+                    why: Refusal::NotAPsbt,
+                };
+                true
+            }
+        }
+    }
+
+    /// SK-56: Enter on the review signs, shows the signed payment as codes
+    /// in the form it came in, and drops the words.
+    fn sign_now(&mut self, page: usize) -> State {
+        let signed = (|| {
+            let entropy = self.entropy?;
+            let words = words_of(&entropy).ok()?;
+            let mut master = master_of(&words).ok()?;
+            let job = self.job.as_ref()?;
+            let bytes = job.prepared.as_ref()?.sign(&master).ok();
+            master.private_key.non_secure_erase();
+            Some((job.form, bytes?))
+        })();
+        let codes = signed.and_then(|(form, bytes)| codes_of(form, &bytes));
+        match codes {
+            Some(codes) => {
+                if let Some(e) = self.entropy.as_mut() {
+                    wipe(e);
+                }
+                self.entropy = None;
+                self.out_codes = codes;
+                State::Out { frame: 0, ms: 0 }
+            }
+            None => State::Review { page },
+        }
     }
 
     fn start_choice(&mut self, i: usize) -> State {
         match i {
             0 => State::Mix { rolls: Vec::new() },
             1 => State::Dice { rolls: Vec::new() },
-            _ => State::Type {
+            2 => State::Type {
                 words: Vec::new(),
                 buf: String::new(),
                 error: None,
+                sign: false,
+            },
+            // SK-50
+            _ => State::Scan {
+                gathering: Box::new(Collector::new()),
+                waited_ms: 0,
+                camera: false,
             },
         }
     }
@@ -474,8 +932,30 @@ impl<C: Chance> App<C> {
         self.descriptor_qr =
             Some(openbmt_qr::encode_text(&public.descriptor, Ecc::M).map_err(|_| ())?);
         self.seed_qr = Some(compact_seedqr(&entropy).map_err(|_| ())?);
+        self.float_index = 0;
+        self.make_float();
+        let hex = lightning_hex(&words).map_err(|_| ())?;
+        self.lightning_qr = Some(openbmt_qr::encode_text(&hex, Ecc::M).map_err(|_| ())?);
+        let mut hex = hex.into_bytes();
+        wipe(&mut hex);
         self.public = Some(public);
+        if self.float_qr.is_none() {
+            return Err(());
+        }
         Ok(())
+    }
+
+    /// SK-32: the refund float's SeedQR at the index now.
+    fn make_float(&mut self) {
+        self.float_qr = self
+            .entropy
+            .and_then(|e| words_of(&e).ok())
+            .and_then(|words| float_entropy(&words, self.float_index).ok())
+            .and_then(|mut e| {
+                let qr = compact_seedqr(&e).ok();
+                wipe(&mut e);
+                qr
+            });
     }
 
     /// SK-25: right answers go on to the result, a wrong one shows the words
@@ -506,10 +986,14 @@ impl<C: Chance> App<C> {
         mut words: Vec<&'static str>,
         mut buf: String,
         mut error: Option<&'static str>,
+        sign: bool,
     ) -> State {
         match key {
             Key::Escape => {
                 words.clear();
+                if sign {
+                    self.clear();
+                }
                 return State::Start { selected: 0 };
             }
             Key::Char(c) if c.is_ascii_lowercase() && buf.len() < MAX_TYPED => {
@@ -532,6 +1016,11 @@ impl<C: Chance> App<C> {
                     error = None;
                     if words.len() == WORD_COUNT {
                         match check_words(&words) {
+                            Ok(entropy) if sign => {
+                                words.clear();
+                                self.entropy = Some(entropy);
+                                return self.judge_payment();
+                            }
                             Ok(entropy) => {
                                 words.clear();
                                 self.entropy = Some(entropy);
@@ -558,7 +1047,48 @@ impl<C: Chance> App<C> {
             },
             _ => {}
         }
-        State::Type { words, buf, error }
+        State::Type {
+            words,
+            buf,
+            error,
+            sign,
+        }
+    }
+
+    /// SK-53, SK-54, SK-55: judges the payment for the typed words.
+    fn judge_payment(&mut self) -> State {
+        let Some(entropy) = self.entropy else {
+            self.clear();
+            return State::Start { selected: 0 };
+        };
+        let judged = words_of(&entropy)
+            .ok()
+            .and_then(|words| master_of(&words).ok())
+            .map(|mut master| {
+                let r = self
+                    .job
+                    .as_ref()
+                    .map_or(Err(Refusal::NotAPsbt), |j| prepare(&j.psbt, &master));
+                master.private_key.non_secure_erase();
+                r
+            })
+            .unwrap_or(Err(Refusal::Internal));
+        match judged {
+            Ok(prepared) => {
+                if let Some(job) = self.job.as_mut() {
+                    job.prepared = Some(prepared);
+                }
+                State::Review { page: 0 }
+            }
+            Err(why) => {
+                // Refused: the words are not kept.
+                if let Some(e) = self.entropy.as_mut() {
+                    wipe(e);
+                }
+                self.entropy = None;
+                State::Refused { why }
+            }
+        }
     }
 }
 
