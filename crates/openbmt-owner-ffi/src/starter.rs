@@ -1,4 +1,4 @@
-//! The ops of the starter wallet (ops 180 to 196,
+//! The ops of the starter wallet (ops 180 to 196, 204 to 207,
 //! `docs/START-SIMPLE-RULES.md`, SS-01 to SS-43): make the wallet, draw its
 //! words as images, take the check-back on a keypad, seal the seed, restore
 //! it, sign a refund, make the move to the new wallet, and the limit and
@@ -29,7 +29,7 @@ use openbmt_owner::starter::{
 use crate::codec::{wire_record, wire_record_get, wire_unit_enum};
 use crate::error::{from_words, refused_by, AppError, Kind};
 use crate::float::{coin_with, FloatCoinView};
-use crate::views::OwnerNetwork;
+use crate::views::{OwnerNetwork, WordsView};
 
 fn refused_with(rule: &str, text: String, words: openbmt_core::say::Words) -> AppError {
     from_words(Kind::Refused, rule, text, words)
@@ -854,4 +854,34 @@ pub(crate) fn seed_may_go(confirmations: u32) -> Result<bool, AppError> {
 /// seconds: at most 7 days (SS-37).
 pub(crate) fn not_yet(a: (u64, u64)) -> Result<u64, AppError> {
     Ok(starter::not_yet_until(a.0, a.1))
+}
+
+// ---- the core's words -------------------------------------------------------
+
+/// Op 204: the words of the home line (SS-36).
+pub(crate) fn line_words() -> Result<WordsView, AppError> {
+    Ok(WordsView(starter::line_words()))
+}
+
+/// Op 205: the words of a state of the limit and the date (SS-37); none
+/// when the wallet is under its limit and before its date.
+pub(crate) fn state_words(kind: StarterLimitKind) -> Result<Option<WordsView>, AppError> {
+    use starter::LimitState;
+    let state = match kind {
+        StarterLimitKind::Under => LimitState::Under,
+        StarterLimitKind::AtLimit => LimitState::AtLimit,
+        StarterLimitKind::PastDate => LimitState::PastDate,
+        StarterLimitKind::NotYet => LimitState::NotYet { until: 0 },
+    };
+    Ok(starter::state_words(state).map(WordsView))
+}
+
+/// Op 206: the words said when a change of settings waits (SS-37).
+pub(crate) fn held_words() -> Result<WordsView, AppError> {
+    Ok(WordsView(starter::held_words()))
+}
+
+/// Op 207: the words said when the key is deleted (SS-43).
+pub(crate) fn deleted_words() -> Result<WordsView, AppError> {
+    Ok(WordsView(starter::deleted_words()))
 }

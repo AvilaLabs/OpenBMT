@@ -190,6 +190,10 @@ ops run on another; it waits for at most 250 ms.
 201 own_switch_send  handle node  args (list<u8>, u64) -> list<SwitchRowView>
 202 own_switch_status handle node  args list<u8> -> list<SwitchRowView>
 203 starter_move_switched handle node  args StarterMoveArgs -> StarterPaidView
+204 starter_line_words handle zero  args () -> Words
+205 starter_state_words handle zero  args StarterLimitKind -> option<Words>
+206 starter_held_words handle zero  args () -> Words
+207 starter_deleted_words handle zero  args () -> Words
 ```
 
 ## Types

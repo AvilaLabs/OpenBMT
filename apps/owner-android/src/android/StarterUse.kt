@@ -60,7 +60,7 @@ internal fun Controller.starterLine(n: OwnerNode): HomeLine? {
         return null
     }
     return try {
-        StarterHome.line(LibraryStarter, record, held, nowSecs(), StarterCoreWords.line) { StarterCoreWords.state(it) }
+        StarterHome.line(LibraryStarter, record, held, nowSecs(), StarterCoreWords.line(LibraryStarter)) { StarterCoreWords.state(LibraryStarter, it) }
     } catch (_: OwnerException) {
         null
     } catch (_: LinkageError) {
@@ -156,7 +156,7 @@ internal fun Controller.starterHolds(change: StarterChangeKind): Boolean {
 
 /** SS-37: the screen a change that waits shows, in the core's words. */
 internal fun Controller.showStarterHeld(back: () -> Unit) =
-    centre(StarterCoreWords.held, listOf(ui.button(StarterWords.backButton) { back() }), title = StarterWords.screenTitle, back = back)
+    centre(StarterCoreWords.held(LibraryStarter), listOf(ui.button(StarterWords.backButton) { back() }), title = StarterWords.screenTitle, back = back)
 
 // ---- the page of the starter wallet ----------------------------------------------------------------------------------------------
 
@@ -176,7 +176,7 @@ internal fun Controller.showStarterManage() {
 /** SS-43: after the key is deleted a payment that arrives later is shown with the offer to restore and move it (SS-23). */
 internal fun Controller.showStarterAfterMove() {
     centre(
-        StarterCoreWords.deleted,
+        StarterCoreWords.deleted(LibraryStarter),
         listOf(ui.primary(StarterWords.restoreButton) { starterChecked(CheckStage.Words) { showStarterRestore() } }, ui.button(StarterWords.backButton) { showHome() }),
         title = StarterWords.screenTitle, back = { showHome() },
     )
@@ -340,7 +340,7 @@ internal fun Controller.showStarterDelete() {
             ui.danger(StarterWords.deleteButton) {
                 starter.store.deleteKey()
                 starter.keystore.delete()
-                centre(StarterCoreWords.deleted, listOf(ui.primary(StarterWords.doneButton) { showHome() }), title = StarterWords.screenTitle)
+                centre(StarterCoreWords.deleted(LibraryStarter), listOf(ui.primary(StarterWords.doneButton) { showHome() }), title = StarterWords.screenTitle)
             },
         )
     }

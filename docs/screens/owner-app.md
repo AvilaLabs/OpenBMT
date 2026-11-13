@@ -606,12 +606,6 @@ core's own words, which the binding does not carry yet:
 | SS37_NOT_YET_CONFIRM | Wait |
 | SS37_NOT_YET_DIFFERS | That is not the sentence exactly. Check each word. |
 | SS37_NOT_YET_GRANTED | The upgrade waits until the date shown. Sales go on. |
-| SS36_CORE_LINE | WORDS_NEEDED_OA_SS36_CORE_LINE |
-| SS37_CORE_AT_LIMIT | WORDS_NEEDED_OA_SS37_CORE_AT_LIMIT |
-| SS37_CORE_PAST_DATE | WORDS_NEEDED_OA_SS37_CORE_PAST_DATE |
-| SS37_CORE_NOT_YET | WORDS_NEEDED_OA_SS37_CORE_NOT_YET |
-| SS37_CORE_HELD | WORDS_NEEDED_OA_SS37_CORE_HELD |
-| SS43_CORE_DELETED | WORDS_NEEDED_OA_SS43_CORE_DELETED |
 | SS30_TITLE | Pay from the starter wallet |
 | SS30_EMPTY | No refund waits. |
 | SS31_FEE_RATE | Fee rate |

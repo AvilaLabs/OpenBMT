@@ -8,12 +8,14 @@ import java.time.ZoneOffset
 import org.openbmt.app.DurableFile
 import org.openbmt.app.Format
 import org.openbmt.app.SayWords
+import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerStarter
 import org.openbmt.owner.StarterChangeKind
 import org.openbmt.owner.StarterLimit
 import org.openbmt.owner.StarterLimitKind
 import org.openbmt.owner.StarterPaid
 import org.openbmt.owner.StarterWalletView
+import org.openbmt.owner.Words
 
 // The starter wallet's rules that are the app's own and need no Android class (`docs/START-SIMPLE-RULES.md`): what
 // the phone is checked for (SS-33, SS-34), the limit and the date the owner sets (SS-35), what the home line and
@@ -215,6 +217,12 @@ interface StarterCore {
     fun offersBitcoin(stopAboveLimit: Boolean, held: Long, limit: Long): Boolean
     fun seedMayGo(moveConfirmations: Long): Boolean
     fun notYet(now: Long, askedSecs: Long): Long
+
+    /** The words the Rust core writes: the home line, a state of the limit, a change that waits, the deleted key. */
+    fun lineWords(): Words
+    fun stateWords(state: StarterLimitKind): Words?
+    fun heldWords(): Words
+    fun deletedWords(): Words
 }
 
 /** The Rust core, through the binding. */
@@ -226,6 +234,10 @@ object LibraryStarter : StarterCore {
     override fun offersBitcoin(stopAboveLimit: Boolean, held: Long, limit: Long) = OwnerStarter.offersBitcoin(stopAboveLimit, held, limit)
     override fun seedMayGo(moveConfirmations: Long) = OwnerStarter.seedMayGo(moveConfirmations)
     override fun notYet(now: Long, askedSecs: Long) = OwnerStarter.notYet(now, askedSecs)
+    override fun lineWords() = OwnerStarter.lineWords()
+    override fun stateWords(state: StarterLimitKind) = OwnerStarter.stateWords(state)
+    override fun heldWords() = OwnerStarter.heldWords()
+    override fun deletedWords() = OwnerStarter.deletedWords()
 }
 
 /** What the home line and the upgrade screen show (SS-36, SS-37). */
@@ -423,18 +435,27 @@ object StarterPayModel {
 
 /**
  * The words the Rust core has for the home line, the states of the limit, a change that waits and the deleted key
- * (`starter::line_words`, `state_words`, `held_words`, `deleted_words`). The binding carries only the words of a refusal,
- * so these are placeholders until an op carries the rest; each is the library's own words once it does.
+ * (`starter::line_words`, `state_words`, `held_words`, `deleted_words`), asked of a [StarterCore] and shown as they
+ * arrive. A call that fails is shown in the words of its failure.
  */
 object StarterCoreWords {
-    val line: SayWords get() = StarterWords.said(StarterWords.coreLine)
-    val held: SayWords get() = StarterWords.said(StarterWords.coreHeld)
-    val deleted: SayWords get() = StarterWords.said(StarterWords.coreDeleted, org.openbmt.app.Tones.GOOD)
+    private fun said(ask: () -> Words): SayWords = try {
+        ask().say()
+    } catch (e: OwnerException) {
+        e.sayWords()
+    } catch (e: LinkageError) {
+        AppWords.libraryMissing(e.message)
+    }
 
-    fun state(kind: StarterLimitKind): SayWords? = when (kind) {
-        StarterLimitKind.Under -> null
-        StarterLimitKind.AtLimit -> StarterWords.said(StarterWords.coreAtLimit)
-        StarterLimitKind.PastDate -> StarterWords.said(StarterWords.corePastDate)
-        StarterLimitKind.NotYet -> StarterWords.said(StarterWords.coreNotYet)
+    fun line(core: StarterCore): SayWords = said { core.lineWords() }
+    fun held(core: StarterCore): SayWords = said { core.heldWords() }
+    fun deleted(core: StarterCore): SayWords = said { core.deletedWords() }
+
+    fun state(core: StarterCore, kind: StarterLimitKind): SayWords? = try {
+        core.stateWords(kind)?.say()
+    } catch (e: OwnerException) {
+        e.sayWords()
+    } catch (e: LinkageError) {
+        AppWords.libraryMissing(e.message)
     }
 }

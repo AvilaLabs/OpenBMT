@@ -189,6 +189,10 @@ private const val OP_OWN_OFFER_STARTER = 200
 private const val OP_OWN_SWITCH_SEND = 201
 private const val OP_OWN_SWITCH_STATUS = 202
 private const val OP_STARTER_MOVE_SWITCHED = 203
+private const val OP_STARTER_LINE_WORDS = 204
+private const val OP_STARTER_STATE_WORDS = 205
+private const val OP_STARTER_HELD_WORDS = 206
+private const val OP_STARTER_DELETED_WORDS = 207
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -3023,6 +3027,30 @@ object OwnerStarter {
     fun seedMayGo(moveConfirmations: Long): Boolean {
         val r = call(OP_STARTER_SEED_MAY_GO, 0) { it.u32(moveConfirmations) }
         return r.bool().also { r.end() }
+    }
+
+    /** SS-36: the Rust core's words of the home line. */
+    fun lineWords(): Words {
+        val r = call(OP_STARTER_LINE_WORDS, 0)
+        return r.words().also { r.end() }
+    }
+
+    /** SS-37: the core's words of a state of the limit and the date; none when the wallet is under its limit and before its date. */
+    fun stateWords(state: StarterLimitKind): Words? {
+        val r = call(OP_STARTER_STATE_WORDS, 0) { it.starterLimitKind(state) }
+        return r.option { r.words() }.also { r.end() }
+    }
+
+    /** SS-37: the core's words said when a change of settings waits. */
+    fun heldWords(): Words {
+        val r = call(OP_STARTER_HELD_WORDS, 0)
+        return r.words().also { r.end() }
+    }
+
+    /** SS-43: the core's words said when the starter key is deleted. */
+    fun deletedWords(): Words {
+        val r = call(OP_STARTER_DELETED_WORDS, 0)
+        return r.words().also { r.end() }
     }
 
     /** SS-37: the end of a "Not yet" taken at [now] and asked for [askedSecs] seconds: at most 7 days. */

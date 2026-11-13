@@ -8,8 +8,7 @@ import org.openbmt.app.Who
  * Every text of the starter wallet's screens that the app writes itself (`docs/START-SIMPLE-RULES.md`), listed under
  * the rule of its screen. A text not written yet is a `WORDS_NEEDED_OA_SSnn_...` placeholder that shows its own name
  * (the same pattern as `OwnPairWords`, OA-114). The words of the Rust core (a
- * refusal, the home line, the states of the limit, SS-43) are shown as they arrive; the ones the binding does not
- * carry yet are the `core...` placeholders below, which a call of the library replaces. The list is written to
+ * refusal, the home line, the states of the limit, SS-43) are shown as they arrive. The list is written to
  * docs/screens/owner-app.md by [AppWords.screensMarkdown]. No Android class is used.
  */
 object StarterWords {
@@ -130,14 +129,6 @@ object StarterWords {
     val notYetConfirm = say("SS37_NOT_YET_CONFIRM", "Wait")
     val notYetDiffers = say("SS37_NOT_YET_DIFFERS", "That is not the sentence exactly. Check each word.")
     val notYetGranted = say("SS37_NOT_YET_GRANTED", "The upgrade waits until the date shown. Sales go on.")
-
-    // ---- what the core says that the binding does not carry yet (SS-36, SS-37, SS-43) ----
-    val coreLine = need("WORDS_NEEDED_OA_SS36_CORE_LINE")
-    val coreAtLimit = need("WORDS_NEEDED_OA_SS37_CORE_AT_LIMIT")
-    val corePastDate = need("WORDS_NEEDED_OA_SS37_CORE_PAST_DATE")
-    val coreNotYet = need("WORDS_NEEDED_OA_SS37_CORE_NOT_YET")
-    val coreHeld = need("WORDS_NEEDED_OA_SS37_CORE_HELD")
-    val coreDeleted = need("WORDS_NEEDED_OA_SS43_CORE_DELETED")
 
     // ---- paying a refund (SS-30, SS-31) and the move (SS-42) ----
     val payTitle = say("SS30_TITLE", "Pay from the starter wallet")

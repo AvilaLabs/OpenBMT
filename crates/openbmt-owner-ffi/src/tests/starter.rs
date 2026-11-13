@@ -36,6 +36,10 @@ const OP_CANCEL: u16 = 193;
 const OP_NOT_YET: u16 = 194;
 const OP_FEE: u16 = 195;
 const OP_OPEN: u16 = 196;
+const OP_LINE_WORDS: u16 = 204;
+const OP_STATE_WORDS: u16 = 205;
+const OP_HELD_WORDS: u16 = 206;
+const OP_DELETED_WORDS: u16 = 207;
 
 /// The words of the first vector (kernel bytes 1 to 32, no rolls).
 const WORDS: &str =
@@ -732,4 +736,49 @@ fn ss_11_the_ops_take_no_node_and_a_wrong_handle_is_refused() {
     let reg = Registry::new();
     let fault = Rd::error(&dispatch(&reg, &frame(OP_CANCEL, 7, &[]))).expect("refused");
     assert_eq!(fault.rule, "handle-unexpected");
+}
+
+#[test]
+fn ss_36_ss_37_ss_43_the_core_words_cross_as_the_library_writes_them() {
+    use openbmt_core::say::Words;
+    use openbmt_owner::starter as lib;
+    let reg = Registry::new();
+    let same = |got: super::wire::Words, want: &Words, code: &str| {
+        assert_eq!(got.heading, want.heading);
+        assert_eq!(got.what, want.what);
+        assert_eq!(got.next, want.next);
+        assert_eq!(got.code.as_deref(), Some(code));
+        assert!(!got.heading.starts_with("WORDS_NEEDED_"));
+    };
+    let response = call(&reg, OP_LINE_WORDS, &[]);
+    let mut r = Rd::ok(&response);
+    same(r.words(), &lib::line_words(), "SS-36");
+    r.done();
+    let response = call(&reg, OP_HELD_WORDS, &[]);
+    let mut r = Rd::ok(&response);
+    same(r.words(), &lib::held_words(), "SS-37");
+    r.done();
+    let response = call(&reg, OP_DELETED_WORDS, &[]);
+    let mut r = Rd::ok(&response);
+    same(r.words(), &lib::deleted_words(), "SS-43");
+    r.done();
+    // Each state of the limit has its words, and the wallet under its limit
+    // has none.
+    let state = |kind: u8, want: Option<lib::LimitState>| {
+        let response = call(&reg, OP_STATE_WORDS, &W::new().u8(kind).0);
+        let mut r = Rd::ok(&response);
+        let got = r.opt(|r| r.words());
+        r.done();
+        match (got, want.and_then(lib::state_words)) {
+            (None, None) => {}
+            (Some(got), Some(want)) => same(got, &want, "SS-37"),
+            other => panic!("kind {kind}: {other:?}"),
+        }
+    };
+    state(0, Some(lib::LimitState::Under));
+    state(1, Some(lib::LimitState::AtLimit));
+    state(2, Some(lib::LimitState::PastDate));
+    state(3, Some(lib::LimitState::NotYet { until: 0 }));
+    let fault = Rd::error(&call(&reg, OP_STATE_WORDS, &W::new().u8(9).0)).expect("refused");
+    assert_eq!(fault.status, 1);
 }

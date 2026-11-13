@@ -3543,6 +3543,16 @@ object AppModelTest {
         override fun offersBitcoin(stopAboveLimit: Boolean, held: Long, limit: Long) = !stopAboveLimit || held < limit
         override fun seedMayGo(moveConfirmations: Long) = moveConfirmations >= 1
         override fun notYet(now: Long, askedSecs: Long) = now + minOf(askedSecs, max)
+        private fun said(heading: String, code: String) = Words(Tones.INFO, Who.OWNER, heading, "$heading what", "$heading next", code, null, null, null)
+        override fun lineWords() = said("core line", "SS-36")
+        override fun stateWords(state: StarterLimitKind) = when (state) {
+            StarterLimitKind.Under -> null
+            StarterLimitKind.AtLimit -> said("core at limit", "SS-37")
+            StarterLimitKind.PastDate -> said("core past date", "SS-37")
+            StarterLimitKind.NotYet -> said("core not yet", "SS-37")
+        }
+        override fun heldWords() = said("core held", "SS-37")
+        override fun deletedWords() = said("core deleted", "SS-43")
     }
 
     private fun env(
@@ -3636,19 +3646,25 @@ object AppModelTest {
         // SS-36, SS-37, SS-38: the library's decisions, used as they are.
         val core = FakeCore()
         val r0 = StarterRecord(1_000, now + 10 * 86400, false, null)
-        val under = StarterHome.line(core, r0, 500, now, StarterCoreWords.line) { StarterCoreWords.state(it) }
-        ok(under.state == StarterLimitKind.Under && !under.opensUpgrade && under.words.heading == StarterWords.coreLine, "under the limit and before the date: the line's own words, nothing asked")
+        val under = StarterHome.line(core, r0, 500, now, StarterCoreWords.line(core)) { StarterCoreWords.state(core, it) }
+        ok(under.state == StarterLimitKind.Under && !under.opensUpgrade && under.words.heading == "core line", "under the limit and before the date: the line's own words, nothing asked")
         ok(under.facts.map { it.first } == listOf(StarterWords.lineHeld, StarterWords.lineLimit, StarterWords.lineMoveBy) && under.facts[0].second == "500 sats" && under.facts[1].second == "1,000 sats" && under.facts[2].second == StarterHome.date(now + 10 * 86400), "the line shows what it holds, the limit and the date, as numbers")
-        val atLimit = StarterHome.line(core, r0, 1_000, now, StarterCoreWords.line) { StarterCoreWords.state(it) }
-        ok(atLimit.state == StarterLimitKind.AtLimit && atLimit.opensUpgrade && atLimit.words.heading == StarterWords.coreAtLimit, "at the limit: the upgrade screen, with the state's words")
-        val past = StarterHome.line(core, StarterRecord(1_000, now - 1, false, null), 0, now, StarterCoreWords.line) { StarterCoreWords.state(it) }
-        ok(past.state == StarterLimitKind.PastDate && past.opensUpgrade && past.words.heading == StarterWords.corePastDate, "past the date: the upgrade screen")
-        val held = StarterHome.line(core, r0.withNotYet(now + 3600), 2_000, now, StarterCoreWords.line) { StarterCoreWords.state(it) }
+        val atLimit = StarterHome.line(core, r0, 1_000, now, StarterCoreWords.line(core)) { StarterCoreWords.state(core, it) }
+        ok(atLimit.state == StarterLimitKind.AtLimit && atLimit.opensUpgrade && atLimit.words.heading == "core at limit", "at the limit: the upgrade screen, with the state's words")
+        val past = StarterHome.line(core, StarterRecord(1_000, now - 1, false, null), 0, now, StarterCoreWords.line(core)) { StarterCoreWords.state(core, it) }
+        ok(past.state == StarterLimitKind.PastDate && past.opensUpgrade && past.words.heading == "core past date", "past the date: the upgrade screen")
+        val held = StarterHome.line(core, r0.withNotYet(now + 3600), 2_000, now, StarterCoreWords.line(core)) { StarterCoreWords.state(core, it) }
         ok(held.state == StarterLimitKind.NotYet && !held.opensUpgrade && held.facts.last().first == StarterWords.lineNotYetUntil, "Not yet in force: no upgrade screen, and when it ends")
-        ok(StarterHome.line(core, r0.withNotYet(now + 9 * 86400), 2_000, now, StarterCoreWords.line) { StarterCoreWords.state(it) }.state == StarterLimitKind.AtLimit, "a Not yet longer than 7 days holds nothing off")
+        ok(StarterHome.line(core, r0.withNotYet(now + 9 * 86400), 2_000, now, StarterCoreWords.line(core)) { StarterCoreWords.state(core, it) }.state == StarterLimitKind.AtLimit, "a Not yet longer than 7 days holds nothing off")
         ok(core.changeHeld(StarterLimitKind.AtLimit, StarterChangeKind.AddCounter) && !core.changeHeld(StarterLimitKind.Under, StarterChangeKind.AddCounter) && !core.changeHeld(StarterLimitKind.AtLimit, StarterChangeKind.LowerLimit), "changes that loosen wait, others go through")
         ok(core.offersBitcoin(false, 5, 1) && !core.offersBitcoin(true, 5, 1) && core.offersBitcoin(true, 0, 1), "sales never stop unless the owner said so")
-        ok(StarterCoreWords.state(StarterLimitKind.Under) == null && StarterCoreWords.state(StarterLimitKind.NotYet) != null, "the words of a state")
+        ok(StarterCoreWords.state(core, StarterLimitKind.Under) == null && StarterCoreWords.state(core, StarterLimitKind.NotYet)?.heading == "core not yet", "the words of a state")
+        ok(held.words.heading == "core not yet" && StarterCoreWords.held(core).heading == "core held" && StarterCoreWords.deleted(core).heading == "core deleted", "the core's words are shown as the core gives them")
+        ok(!StarterWords.isPlaceholder(StarterCoreWords.line(core)) && StarterCoreWords.line(core).code == "SS-36", "none of them is a placeholder")
+        val refusing = object : StarterCore by core {
+            override fun lineWords(): Words = throw OwnerException("SS-36", "refused")
+        }
+        ok(StarterCoreWords.line(refusing).heading.isNotEmpty(), "a call that fails is shown in the words of its failure")
         // "Not yet": the sentence exactly, at most 7 days.
         val sentence = StarterWords.notYetSentence
         ok(StarterNotYet.grant(core, sentence, sentence, now) == now + StarterNotYet.MAX_SECS, "the sentence typed exactly gives 7 days")

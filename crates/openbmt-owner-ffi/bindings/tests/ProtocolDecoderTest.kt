@@ -430,6 +430,12 @@ object ProtocolDecoderTest {
         check(!OwnerStarter.seedMayGo(0) && OwnerStarter.seedMayGo(1))
         check(OwnerStarter.feeRate(300, null) == 1_000L && OwnerStarter.feeRate(null, 2_500) == 2_500L)
         refusedBy("no fee rate", "SS-30") { OwnerStarter.feeRate(null, null) }
+        check(OwnerStarter.lineWords().code == "SS-36" && OwnerStarter.heldWords().code == "SS-37" && OwnerStarter.deletedWords().code == "SS-43")
+        check(OwnerStarter.stateWords(StarterLimitKind.Under) == null)
+        for (kind in listOf(StarterLimitKind.AtLimit, StarterLimitKind.PastDate, StarterLimitKind.NotYet)) {
+            val said = OwnerStarter.stateWords(kind)
+            check(said != null && said.code == "SS-37" && said.heading.isNotEmpty() && !said.heading.startsWith("WORDS_NEEDED_")) { "words of $kind" }
+        }
     }
 
     /**

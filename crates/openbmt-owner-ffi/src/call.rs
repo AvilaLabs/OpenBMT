@@ -60,6 +60,9 @@
 //!   SS-41, SS-42): the offer marked as a starter wallet's, the switches sent to
 //!   the counters, where each counter stands, and the one move once all have
 //!   switched.
+//! - 204 to 207: the words of the starter wallet's own screens that the Rust
+//!   core writes (SS-36, SS-37, SS-43): the home line, a state of the limit
+//!   and the date, a change that waits and the deleted key.
 //! - 100 to 103: the lock on the setup text the app stores
 //!   (`docs/LOCK-RULES.md`, `docs/OWNER-APP-RULES.md` OA-60 to OA-62):
 //!   whether stored bytes are a locked setup, lock a text under a PIN, open
@@ -884,6 +887,21 @@ fn build_ops() -> Vec<Op> {
             Node,
             |c, a: StarterMoveArgs| c.entry()?.starter_move_switched(a),
         ),
+        op(204, "starter_line_words", Zero, |_, _: ()| {
+            starter_ops::line_words()
+        }),
+        op(
+            205,
+            "starter_state_words",
+            Zero,
+            |_, kind: StarterLimitKind| starter_ops::state_words(kind),
+        ),
+        op(206, "starter_held_words", Zero, |_, _: ()| {
+            starter_ops::held_words()
+        }),
+        op(207, "starter_deleted_words", Zero, |_, _: ()| {
+            starter_ops::deleted_words()
+        }),
     ]
 }
 
