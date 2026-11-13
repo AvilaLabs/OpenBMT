@@ -19,7 +19,7 @@ $v = t_vectors( 'rates.json' );
 // RT-01: the table is the Rust table.
 t_eq( count( $v['table'] ), count( Rates::TABLE ), 'rt_01 the table has the same number of sources' );
 foreach ( $v['table'] as $i => $row ) {
-	t_eq( array( $row['id'], $row['initial'], $row['currency'], $row['url'] ), Rates::TABLE[ $i ], 'rt_01 the source ' . $row['id'] );
+	t_eq( array( $row['id'], $row['initial'], $row['currency'], $row['url'] ), array_slice( Rates::TABLE[ $i ], 0, 4 ), 'rt_01 the source ' . $row['id'] );
 }
 foreach ( array_keys( Rates::BAND_FACTOR ) as $code ) {
 	t_ok( count( Rates::sources_for( $code ) ) >= 2, "rt_01 $code has two sources at least" );

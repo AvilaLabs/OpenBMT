@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use openbmt_core::currency::ShopCurrency;
 use openbmt_counter::money::{sats_for, Amount, Rate};
 
-use crate::{combine, parse_price_minor, source, Sample, SOURCES};
-use crate::{PriceRefused, RatesRefused};
+use crate::{combine, parse_price_minor, parse_response, source, Sample, SOURCES};
+use crate::{ParseRefused, PriceRefused, RatesRefused};
 
 const NOW: u64 = 1_800_000_000;
 
@@ -356,13 +356,314 @@ fn sats() -> String {
     rows.join(",\n")
 }
 
+/// One letter for what the reader made of a reply: `+` for a price, a capital
+/// for a refusal of the reply, a lower case letter for one of the price text.
+fn code(result: &Result<u64, ParseRefused>) -> char {
+    match result {
+        Ok(_) => '+',
+        Err(ParseRefused::TooLong) => 'L',
+        Err(ParseRefused::TooDeep) => 'D',
+        Err(ParseRefused::NotUtf8) => 'U',
+        Err(ParseRefused::Malformed) => 'M',
+        Err(ParseRefused::TrailingBytes) => 'T',
+        Err(ParseRefused::DuplicateKey) => 'K',
+        Err(ParseRefused::MissingField) => 'F',
+        Err(ParseRefused::WrongShape) => 'S',
+        Err(ParseRefused::WrongCurrency) => 'C',
+        Err(ParseRefused::SourceError) => 'E',
+        Err(ParseRefused::Price(p)) => match p {
+            PriceRefused::Empty => 'a',
+            PriceRefused::Sign => 'b',
+            PriceRefused::Exponent => 'c',
+            PriceRefused::BadCharacter => 'd',
+            PriceRefused::TwoDots => 'e',
+            PriceRefused::BadShape => 'f',
+            PriceRefused::LeadingZero => 'g',
+            PriceRefused::TooManyDecimals => 'h',
+            PriceRefused::Zero => 'i',
+            PriceRefused::OutOfBand => 'j',
+        },
+    }
+}
+
+fn fixtures_folder() -> PathBuf {
+    PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets it when it runs tests"))
+        .join("tests/fixtures")
+}
+
+/// The real and documented replies of the fixtures, by the name of their
+/// source, in the order of the table.
+fn fixtures() -> Vec<(String, Vec<u8>)> {
+    SOURCES
+        .iter()
+        .filter_map(|s| {
+            std::fs::read(fixtures_folder().join(format!("{}.json", s.id)))
+                .ok()
+                .map(|b| (s.id.to_string(), b))
+        })
+        .collect()
+}
+
+fn replace_first(body: &[u8], from: &[u8], to: &[u8]) -> Option<Vec<u8>> {
+    let at = body.windows(from.len()).position(|w| w == from)?;
+    let mut out = body.get(..at)?.to_vec();
+    out.extend_from_slice(to);
+    out.extend_from_slice(body.get(at + from.len()..)?);
+    Some(out)
+}
+
+/// The replies the reader is tried on, each as a name, its bytes and the
+/// number of spaces added after them.
+fn replies() -> Vec<(String, Vec<u8>, usize)> {
+    let mut out: Vec<(String, Vec<u8>, usize)> = Vec::new();
+    let fixed = fixtures();
+    for (id, body) in &fixed {
+        out.push((format!("fixture {id}"), body.clone(), 0));
+    }
+    for (id, body) in &fixed {
+        let mut dup = b"{\"zz\":1,\"zz\":2,".to_vec();
+        dup.extend_from_slice(body.get(1..).unwrap_or(&[]));
+        if body.first() == Some(&b'{') {
+            out.push((format!("duplicate key before {id}"), dup, 0));
+        }
+        let mut trailing = body.clone();
+        trailing.extend_from_slice(b" x");
+        out.push((format!("trailing bytes after {id}"), trailing, 0));
+        let half = body.get(..body.len() / 2).unwrap_or(&[]).to_vec();
+        out.push((format!("half of {id}"), half, 0));
+        // A number shape with its price key spelled with an escape.
+        if let Some(src) = source(id) {
+            if let crate::Shape::Number { price, .. } = src.shape {
+                if let Some(crate::Step::Key(key)) = price.last() {
+                    let from = format!("\"{key}\"");
+                    let first = key.chars().next().unwrap_or('a');
+                    let to = format!("\"\\u{:04x}{}\"", u32::from(first), &key[1..]);
+                    if let Some(b) = replace_first(body, from.as_bytes(), to.as_bytes()) {
+                        out.push((format!("escaped price key in {id}"), b, 0));
+                    }
+                }
+            }
+        }
+    }
+    let plain: &[(&str, &[u8])] = &[
+        ("empty", b""),
+        ("open brace", b"{"),
+        ("empty object", b"{}"),
+        ("empty array", b"[]"),
+        ("null", b"null"),
+        ("half a literal", b"nul"),
+        ("a string", b"\"x\""),
+        ("a number", b"7"),
+        ("NaN", b"{\"last\":NaN}"),
+        ("Infinity", b"{\"last\":Infinity}"),
+        ("leading zero", b"{\"ltp\":01}"),
+        ("dot without digit", b"{\"ltp\":1.}"),
+        ("dot first", b"{\"ltp\":.5}"),
+        ("lone minus", b"{\"ltp\":-}"),
+        ("exponent without digit", b"{\"ltp\":1e}"),
+        ("single quotes", b"{'last':'1'}"),
+        ("trailing comma", b"{\"last\":\"73550.1\",}"),
+        ("missing colon", b"{\"last\" \"73550.1\"}"),
+        ("raw control byte", b"{\"last\":\"73\x0050\"}"),
+        ("bad escape", b"{\"last\":\"7\\x\"}"),
+        ("lone low surrogate", b"{\"last\":\"\\udc00\"}"),
+        ("lone high surrogate", b"{\"last\":\"\\ud800\"}"),
+        ("short unicode escape", b"{\"last\":\"\\u12\"}"),
+        ("good surrogate pair", b"{\"last\":\"\\ud83d\\ude00\"}"),
+        ("price with an escape", b"{\"last\":\"7\\u0033550.1\"}"),
+        ("invalid utf-8", b"{\"last\":\"73\xff\"}"),
+        ("overlong utf-8", b"{\"last\":\"\xc0\xaf\"}"),
+        ("surrogate in utf-8", b"{\"last\":\"\xed\xa0\x80\"}"),
+        ("byte order mark", b"\xef\xbb\xbf{\"last\":\"73550.1\"}"),
+        ("white space around", b" \t\r\n{\"last\":\"73550.1\"}\n "),
+        ("form feed as space", b"\x0c{\"last\":\"73550.1\"}"),
+        (
+            "duplicate key",
+            b"{\"last\":\"73550.1\",\"last\":\"73551.1\"}",
+        ),
+        (
+            "duplicate key by escape",
+            b"{\"last\":\"73550.1\",\"l\\u0061st\":\"1\"}",
+        ),
+        (
+            "nested duplicate key",
+            b"{\"last\":\"73550.1\",\"x\":{\"a\":1,\"a\":2}}",
+        ),
+        ("a number for a string", b"{\"last\":73550.1}"),
+        ("a string for a number", b"{\"ltp\":\"73550.1\"}"),
+        ("number price", b"{\"ltp\":11868632.5}"),
+        ("number with exponent", b"{\"ltp\":1e5}"),
+        ("negative number", b"{\"ltp\":-5}"),
+        ("zero number", b"{\"ltp\":0}"),
+        ("huge exponent", b"{\"ltp\":1.5e400}"),
+        (
+            "kraken with an error",
+            b"{\"error\":[\"EQuery\"],\"result\":{\"X\":{\"c\":[\"73550.1\",\"1\"]}}}",
+        ),
+        (
+            "kraken two entries",
+            b"{\"error\":[],\"result\":{\"X\":{\"c\":[\"73550.1\"]},\"Y\":{\"c\":[\"1\"]}}}",
+        ),
+        (
+            "kraken empty c",
+            b"{\"error\":[],\"result\":{\"X\":{\"c\":[]}}}",
+        ),
+        (
+            "kraken good",
+            b"{\"error\":[],\"result\":{\"X\":{\"c\":[\"73550.1\",\"1\"]}}}",
+        ),
+        (
+            "coinbase good",
+            b"{\"data\":{\"amount\":\"73552.175\",\"currency\":\"USD\"}}",
+        ),
+        (
+            "coinbase lower case currency",
+            b"{\"data\":{\"amount\":\"73552.175\",\"currency\":\"usd\"}}",
+        ),
+        ("last good", b"{\"last\":\"73550.1\"}"),
+        ("empty data array", b"{\"data\":[]}"),
+        ("ndax number", b"{\"LastTradedPx\":9500000.5}"),
+        ("ndax exponent", b"{\"LastTradedPx\":1e5}"),
+        ("ndax negative", b"{\"LastTradedPx\":-5}"),
+        ("ndax zero", b"{\"LastTradedPx\":0}"),
+        ("ndax zero fraction", b"{\"LastTradedPx\":0.004}"),
+        ("ndax huge exponent", b"{\"LastTradedPx\":1.5e400}"),
+        ("ndax nine decimals", b"{\"LastTradedPx\":73550.123456789}"),
+        ("ndax leading zero text", b"{\"LastTradedPx\":0.5}"),
+        ("ndax null", b"{\"LastTradedPx\":null}"),
+        ("ndax under the band", b"{\"LastTradedPx\":99.99}"),
+    ];
+    for (name, body) in plain {
+        out.push(((*name).to_string(), body.to_vec(), 0));
+    }
+    let digits = "9".repeat(3000);
+    out.push((
+        "huge number in a string".into(),
+        format!("{{\"last\":\"{digits}\"}}").into_bytes(),
+        0,
+    ));
+    out.push((
+        "huge fraction in a string".into(),
+        format!("{{\"last\":\"{digits}.5\"}}").into_bytes(),
+        0,
+    ));
+    out.push((
+        "huge number".into(),
+        format!("{{\"ltp\":{digits}}}").into_bytes(),
+        0,
+    ));
+    out.push((
+        "huge number with a fraction".into(),
+        format!("{{\"ltp\":{digits}.5}}").into_bytes(),
+        0,
+    ));
+    out.push((
+        "too many decimals".into(),
+        b"{\"last\":\"73550.123456789\"}".to_vec(),
+        0,
+    ));
+    out.push((
+        "nesting 16 deep".into(),
+        format!("{}{}", "[".repeat(16), "]".repeat(16)).into_bytes(),
+        0,
+    ));
+    out.push((
+        "nesting 17 deep".into(),
+        format!("{}{}", "[".repeat(17), "]".repeat(17)).into_bytes(),
+        0,
+    ));
+    out.push((
+        "nesting 16 deep beside a price".into(),
+        format!(
+            "{{\"x\":{}{},\"last\":\"73550.1\"}}",
+            "[".repeat(15),
+            "]".repeat(15)
+        )
+        .into_bytes(),
+        0,
+    ));
+    // The size limit of RT-10: 65,536 bytes are read, one more is refused.
+    out.push((
+        "exactly 64 KiB".into(),
+        b"{\"last\":\"73550.1\"}".to_vec(),
+        65_536 - 18,
+    ));
+    out.push((
+        "one byte over 64 KiB".into(),
+        b"{\"last\":\"73550.1\"}".to_vec(),
+        65_537 - 18,
+    ));
+    out
+}
+
+fn body_of(reply: &(String, Vec<u8>, usize)) -> Vec<u8> {
+    let mut body = reply.1.clone();
+    body.extend(std::iter::repeat_n(b' ', reply.2));
+    body
+}
+
+fn reader() -> String {
+    let all = replies();
+    let rows: Vec<String> = all
+        .iter()
+        .map(|reply| {
+            let body = body_of(reply);
+            let mut codes = String::new();
+            let mut minors = Vec::new();
+            for s in &SOURCES {
+                let r = parse_response(s, &body);
+                codes.push(code(&r));
+                if let Ok(minor) = r {
+                    minors.push(format!("{}:{minor}", q(s.id)));
+                }
+            }
+            format!(
+                "  {{\"name\":{},\"body\":{},\"pad\":{},\"codes\":{},\"minors\":{{{}}}}}",
+                q(&reply.0),
+                q(&hex(&reply.1)),
+                reply.2,
+                q(&codes),
+                minors.join(",")
+            )
+        })
+        .collect();
+    rows.join(",\n")
+}
+
+/// What the reader makes of every cut of each fixture, one letter for each
+/// length from nothing to the whole reply.
+fn truncations() -> String {
+    let rows: Vec<String> = fixtures()
+        .iter()
+        .map(|(id, body)| {
+            let src = source(id).expect("a source");
+            let codes: String = (0..=body.len())
+                .map(|n| code(&parse_response(src, body.get(..n).unwrap_or(&[]))))
+                .collect();
+            format!(
+                "  {{\"source\":{},\"body\":{},\"codes\":{}}}",
+                q(id),
+                q(&hex(body)),
+                q(&codes)
+            )
+        })
+        .collect();
+    rows.join(",\n")
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 fn file() -> String {
     format!(
-        "{{\n\"version\":1,\n\"table\":[\n{}\n],\n\"prices\":[\n{}\n],\n\"combine\":[\n{}\n],\n\"sats\":[\n{}\n]\n}}\n",
+        "{{\n\"version\":2,\n\"table\":[\n{}\n],\n\"prices\":[\n{}\n],\n\"combine\":[\n{}\n],\n\"sats\":[\n{}\n],\n\"replies\":[\n{}\n],\n\"truncations\":[\n{}\n]\n}}\n",
         table(),
         prices(),
         combines(),
-        sats()
+        sats(),
+        reader(),
+        truncations()
     )
 }
 
