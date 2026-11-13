@@ -2,8 +2,7 @@
 /**
  * WO-41: the texts the customer or the owner sees, each as a literal call
  * WordPress can extract, keyed as in src/Words.php. This is the only file
- * that holds a text. Each is a placeholder until the words are written
- * under docs/SCREEN-RULES.md.
+ * that holds a text, written under docs/SCREEN-RULES.md.
  *
  * @package OpenBmtPay
  */
@@ -23,40 +22,40 @@ final class OpenBmt_Pay_Words {
 	public static function all(): array {
 		if ( null === self::$texts ) {
 			self::$texts = array(
-				'WO_01_GATEWAY_TITLE' => __( 'WORDS_NEEDED_WO_01_GATEWAY_TITLE', 'openbmt-pay' ),
-				'WO_01_GATEWAY_DESCRIPTION' => __( 'WORDS_NEEDED_WO_01_GATEWAY_DESCRIPTION', 'openbmt-pay' ),
-				'WO_01_SETTINGS_ENABLE' => __( 'WORDS_NEEDED_WO_01_SETTINGS_ENABLE', 'openbmt-pay' ),
-				'WO_01_SETTINGS_HEADING' => __( 'WORDS_NEEDED_WO_01_SETTINGS_HEADING', 'openbmt-pay' ),
-				'WO_05_PAIRING_LABEL' => __( 'WORDS_NEEDED_WO_05_PAIRING_LABEL', 'openbmt-pay' ),
-				'WO_05_PAIRING_SAVE' => __( 'WORDS_NEEDED_WO_05_PAIRING_SAVE', 'openbmt-pay' ),
-				'WO_05_PAIRING_REFUSED' => __( 'WORDS_NEEDED_WO_05_PAIRING_REFUSED', 'openbmt-pay' ),
-				'WO_05_PAIRED_AS' => __( 'WORDS_NEEDED_WO_05_PAIRED_AS', 'openbmt-pay' ),
-				'WO_05_FINGERPRINT' => __( 'WORDS_NEEDED_WO_05_FINGERPRINT', 'openbmt-pay' ),
-				'WO_06_HTTPS_REQUIRED' => __( 'WORDS_NEEDED_WO_06_HTTPS_REQUIRED', 'openbmt-pay' ),
-				'WO_07_UNPAIR' => __( 'WORDS_NEEDED_WO_07_UNPAIR', 'openbmt-pay' ),
-				'WO_07_UNPAIRED' => __( 'WORDS_NEEDED_WO_07_UNPAIRED', 'openbmt-pay' ),
-				'WO_11_LOW' => __( 'WORDS_NEEDED_WO_11_LOW', 'openbmt-pay' ),
-				'WO_11_NONE' => __( 'WORDS_NEEDED_WO_11_NONE', 'openbmt-pay' ),
-				'WO_11_LEFT' => __( 'WORDS_NEEDED_WO_11_LEFT', 'openbmt-pay' ),
-				'WO_11_DAMAGED' => __( 'WORDS_NEEDED_WO_11_DAMAGED', 'openbmt-pay' ),
-				'WO_15_NO_QUOTE' => __( 'WORDS_NEEDED_WO_15_NO_QUOTE', 'openbmt-pay' ),
-				'WO_15_CURRENCY_UNSUPPORTED' => __( 'WORDS_NEEDED_WO_15_CURRENCY_UNSUPPORTED', 'openbmt-pay' ),
-				'WO_16_TITLE' => __( 'WORDS_NEEDED_WO_16_TITLE', 'openbmt-pay' ),
-				'WO_16_ADDRESS' => __( 'WORDS_NEEDED_WO_16_ADDRESS', 'openbmt-pay' ),
-				'WO_16_AMOUNT' => __( 'WORDS_NEEDED_WO_16_AMOUNT', 'openbmt-pay' ),
-				'WO_16_LINK' => __( 'WORDS_NEEDED_WO_16_LINK', 'openbmt-pay' ),
-				'WO_16_TIME_LEFT' => __( 'WORDS_NEEDED_WO_16_TIME_LEFT', 'openbmt-pay' ),
-				'WO_16_QUOTE_RAN_OUT' => __( 'WORDS_NEEDED_WO_16_QUOTE_RAN_OUT', 'openbmt-pay' ),
-				'WO_16_QR_LABEL' => __( 'WORDS_NEEDED_WO_16_QR_LABEL', 'openbmt-pay' ),
-				'WO_17_NOTE_ON_HOLD' => __( 'WORDS_NEEDED_WO_17_NOTE_ON_HOLD', 'openbmt-pay' ),
-				'WO_21_LAST_VISIT' => __( 'WORDS_NEEDED_WO_21_LAST_VISIT', 'openbmt-pay' ),
-				'WO_21_NEVER_VISITED' => __( 'WORDS_NEEDED_WO_21_NEVER_VISITED', 'openbmt-pay' ),
-				'WO_31_NOTE_PAID' => __( 'WORDS_NEEDED_WO_31_NOTE_PAID', 'openbmt-pay' ),
-				'WO_31_NOTE_PART_PAID' => __( 'WORDS_NEEDED_WO_31_NOTE_PART_PAID', 'openbmt-pay' ),
-				'WO_31_NOTE_PAID_LATE' => __( 'WORDS_NEEDED_WO_31_NOTE_PAID_LATE', 'openbmt-pay' ),
-				'WO_32_LOG_HEADING' => __( 'WORDS_NEEDED_WO_32_LOG_HEADING', 'openbmt-pay' ),
-				'WO_32_LOG_EMPTY' => __( 'WORDS_NEEDED_WO_32_LOG_EMPTY', 'openbmt-pay' ),
-				'WO_32_LOG_LINE' => __( 'WORDS_NEEDED_WO_32_LOG_LINE', 'openbmt-pay' ),
+				'WO_01_GATEWAY_TITLE' => __( 'Bitcoin', 'openbmt-pay' ),
+				'WO_01_GATEWAY_DESCRIPTION' => __( 'Pay from your own bitcoin wallet. The order goes ahead once the payment is confirmed on the Bitcoin network.', 'openbmt-pay' ),
+				'WO_01_SETTINGS_ENABLE' => __( 'Offer bitcoin at checkout', 'openbmt-pay' ),
+				'WO_01_SETTINGS_HEADING' => __( 'OpenBMT bitcoin payments', 'openbmt-pay' ),
+				'WO_05_PAIRING_LABEL' => __( 'Pairing code from the OpenBMT owner phone', 'openbmt-pay' ),
+				'WO_05_PAIRING_SAVE' => __( 'Pair', 'openbmt-pay' ),
+				'WO_05_PAIRING_REFUSED' => __( 'That pairing code was not accepted. Copy the whole code again from the owner phone and paste it here.', 'openbmt-pay' ),
+				'WO_05_PAIRED_AS' => __( 'Paired with the owner phone of %s.', 'openbmt-pay' ),
+				'WO_05_FINGERPRINT' => __( 'Key fingerprint, to compare with the one on the owner phone:', 'openbmt-pay' ),
+				'WO_06_HTTPS_REQUIRED' => __( 'This store\'s address does not start with https, so it cannot be paired. Turn on HTTPS for the store first.', 'openbmt-pay' ),
+				'WO_07_UNPAIR' => __( 'Unpair', 'openbmt-pay' ),
+				'WO_07_UNPAIRED' => __( 'Unpaired. Bitcoin is no longer offered at checkout. The owner phone keeps watching the addresses already given.', 'openbmt-pay' ),
+				'WO_11_LOW' => __( 'Few bitcoin addresses are left. Open the OpenBMT owner app so it sends more.', 'openbmt-pay' ),
+				'WO_11_NONE' => __( 'No bitcoin addresses are left, so bitcoin is not offered at checkout. Open the OpenBMT owner app so it sends more.', 'openbmt-pay' ),
+				'WO_11_LEFT' => __( 'Bitcoin addresses left: %s', 'openbmt-pay' ),
+				'WO_11_DAMAGED' => __( 'The stored pairing data is damaged, so bitcoin is not offered at checkout. Pair again with a new code from the owner phone.', 'openbmt-pay' ),
+				'WO_15_NO_QUOTE' => __( 'Bitcoin cannot be used for this order right now. Please choose another way to pay.', 'openbmt-pay' ),
+				'WO_15_CURRENCY_UNSUPPORTED' => __( 'There is no bitcoin price for the store\'s currency, so bitcoin is not offered at checkout.', 'openbmt-pay' ),
+				'WO_16_TITLE' => __( 'Pay with bitcoin', 'openbmt-pay' ),
+				'WO_16_ADDRESS' => __( 'Address:', 'openbmt-pay' ),
+				'WO_16_AMOUNT' => __( 'Amount:', 'openbmt-pay' ),
+				'WO_16_LINK' => __( 'Open in your wallet', 'openbmt-pay' ),
+				'WO_16_TIME_LEFT' => __( 'Minutes left at this price: %s', 'openbmt-pay' ),
+				'WO_16_QUOTE_RAN_OUT' => __( 'The time for this price has run out. If you have not paid yet, contact the shop before you pay.', 'openbmt-pay' ),
+				'WO_16_QR_LABEL' => __( 'Bitcoin payment code to scan with your wallet', 'openbmt-pay' ),
+				'WO_17_NOTE_ON_HOLD' => __( 'Waiting for the bitcoin payment to be confirmed.', 'openbmt-pay' ),
+				'WO_21_LAST_VISIT' => __( 'The owner phone last checked the store: %s', 'openbmt-pay' ),
+				'WO_21_NEVER_VISITED' => __( 'The owner phone has not checked the store yet.', 'openbmt-pay' ),
+				'WO_31_NOTE_PAID' => __( 'Bitcoin payment confirmed: %1$s received, %2$s asked, %4$s confirmations. Transactions: %3$s', 'openbmt-pay' ),
+				'WO_31_NOTE_PART_PAID' => __( 'Part of the bitcoin payment arrived: %1$s received, %2$s asked, %4$s confirmations. The order stays on hold for the owner to decide. Transactions: %3$s', 'openbmt-pay' ),
+				'WO_31_NOTE_PAID_LATE' => __( 'Bitcoin payment confirmed after its price ran out: %1$s received, %2$s asked, %4$s confirmations. The order stays on hold for the owner to decide. Transactions: %3$s', 'openbmt-pay' ),
+				'WO_32_LOG_HEADING' => __( 'Refused messages', 'openbmt-pay' ),
+				'WO_32_LOG_EMPTY' => __( 'No message has been refused.', 'openbmt-pay' ),
+				'WO_32_LOG_LINE' => __( '%1$s, refused: %2$s %3$s', 'openbmt-pay' ),
 			);
 		}
 		return self::$texts;

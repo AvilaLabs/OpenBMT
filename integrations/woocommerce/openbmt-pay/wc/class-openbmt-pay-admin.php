@@ -88,7 +88,11 @@ final class OpenBmt_Pay_Admin {
 		);
 		echo '<div class="wrap"><h1>' . esc_html( OpenBmt_Pay_Words::t( 'WO_01_SETTINGS_HEADING' ) ) . '</h1>';
 		if ( isset( $shown[ $result ] ) ) {
-			echo '<div class="notice notice-info"><p>' . esc_html( OpenBmt_Pay_Words::t( $shown[ $result ] ) ) . '</p></div>';
+			$text = OpenBmt_Pay_Words::t( $shown[ $result ] );
+			if ( 'paired' === $result ) {
+				$text = sprintf( $text, null === $pairing ? '' : $pairing['name'] );
+			}
+			echo '<div class="notice notice-info"><p>' . esc_html( $text ) . '</p></div>';
 		}
 		if ( null === OpenBmtPay\Rates::band( get_woocommerce_currency() ) ) {
 			echo '<div class="notice notice-warning"><p>' . esc_html( OpenBmt_Pay_Words::t( 'WO_15_CURRENCY_UNSUPPORTED' ) ) . '</p></div>';

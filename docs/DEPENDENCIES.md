@@ -13,12 +13,12 @@ for each program that ships. The lists themselves are in `deps/`.
 |---|---|---|
 | Signer and core rules | `deps/openbmt-signer.txt` | 19 |
 | Counter | `deps/openbmt-counter-node.txt` | 38 |
-| Owner | `deps/openbmt-owner-node.txt` | 38 |
+| Owner | `deps/openbmt-owner-node.txt` | 52 |
 | Box | `deps/openbmt-box.txt` | 38 |
 | Books export | `deps/openbmt-books.txt` | 42 |
 | Key app library | `deps/openbmt-key-ffi.txt` | 43 |
 | Counter app library | `deps/openbmt-counter-ffi.txt` | 39 |
-| Owner app library | `deps/openbmt-owner-ffi.txt` | 47 |
+| Owner app library | `deps/openbmt-owner-ffi.txt` | 59 |
 | QR code encoder | `deps/openbmt-qr.txt` | 0 |
 | Price sources | `deps/openbmt-rates.txt` | 19 |
 
@@ -33,7 +33,16 @@ Where they come from:
   the same `secp256k1` package, and adds no package to any list.
 - **The link between devices, about 16 more.** ChaCha20-Poly1305 from the
   RustCrypto project, used to seal messages (LK-02).
-- WORDS_NEEDED_DEPS_ED25519
+- **The web order key, 14 more for the owner.** `ed25519-dalek`, from the
+  dalek-cryptography project, signs what the owner phone sends a shop's
+  online store (`docs/WEB-ORDER-RULES.md`, WO-43), with its default features
+  off and only `zeroize` on. It brings `curve25519-dalek`, `ed25519`,
+  `signature`, `sha2`, `digest` and `block-buffer`, and at build time
+  `curve25519-dalek-derive` with `syn`, `quote`, `proc-macro2` and
+  `unicode-ident`, and `rustc_version` with `semver`. Ed25519 is used
+  because the store's PHP checks it with its own sodium functions, so the
+  plugin adds no library to the store; PHP has no such check for
+  secp256k1, the curve already in every list.
 - **Encrypted peer connections, 3 more.** The `bip324` crate and its two
   helpers, from the rust-bitcoin project, with no further dependencies.
 - **The books export, 4 more.** Argon2, for the passphrase (BK-24).
@@ -48,11 +57,12 @@ Where they come from:
   in about 40 packages.
 - **The counter app library, the same 1 more.** The counter's list and
   `jni-sys`, bound the same way by hand. It adds nothing else.
-- **The owner app library, 8 more.** The owner's list and `jni-sys`, bound
+- **The owner app library, 6 more.** The owner's list and `jni-sys`, bound
   the same way by hand, and the PIN lock on key 1 (OA-60): `openbmt-lock`
-  brings Argon2 and its 6 helpers that the Key app library already lists
-  (`argon2`, `base64ct`, `blake2`, `block-buffer`, `digest`, `password-hash`,
-  `rand_core`); ChaCha20-Poly1305 was in the list for the link. Every one
+  brings Argon2 and the helpers the Key app library already lists
+  (`argon2`, `base64ct`, `blake2`, `password-hash`, `rand_core`;
+  `block-buffer` and `digest` are in the owner's list for the web order
+  key); ChaCha20-Poly1305 was in the list for the link. Every one
   of them is in the lock file already, at the same version: this adds no
   package to it.
 - **The owner app library, the starter wallet's randomness, 1 more.**

@@ -11,7 +11,7 @@ namespace OpenBmtPay;
 
 final class Words {
 
-	/** The keys. The text of a key is WORDS_NEEDED_ and the key, until the words are written. */
+	/** The keys, in the order of the words file. */
 	const KEYS = array(
 		'WO_01_GATEWAY_TITLE',
 		'WO_01_GATEWAY_DESCRIPTION',

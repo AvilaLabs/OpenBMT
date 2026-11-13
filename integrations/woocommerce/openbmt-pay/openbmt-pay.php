@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       OpenBMT Pay
- * Description:       WORDS_NEEDED_WO_41_PLUGIN_DESCRIPTION
+ * Description:       Bitcoin at checkout, paid to the shop's own wallet and marked paid only by the shop's OpenBMT owner phone. No payment company, no account.
  * Version:           0.1.0
  * Requires PHP:      8.2
  * Requires at least: 6.5

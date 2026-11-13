@@ -140,7 +140,7 @@ class OpenBmt_Pay_Gateway extends WC_Payment_Gateway {
 			}
 		);
 		if ( ! is_array( $taken ) ) {
-			wc_add_notice( OpenBmt_Pay_Words::t( 'WO_11_NONE' ), 'error' );
+			wc_add_notice( OpenBmt_Pay_Words::t( 'WO_15_NO_QUOTE' ), 'error' );
 			return null;
 		}
 		$order->update_meta_data( '_openbmt_seq', (string) $order->get_id() );

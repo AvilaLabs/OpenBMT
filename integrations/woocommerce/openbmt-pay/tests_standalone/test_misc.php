@@ -71,12 +71,22 @@ t_eq( 'BITCOIN:' . strtoupper( $a ) . '?amount=0.001&label=Shop', PaymentUri::qr
 t_eq( count( Words::KEYS ), count( array_unique( Words::KEYS ) ), 'wo_41 the keys are distinct' );
 t_eq( 34, count( Words::KEYS ), 'wo_41 there are 34 keys' );
 $file = (string) file_get_contents( dirname( __DIR__ ) . '/wc/class-openbmt-pay-words.php' );
-preg_match_all( "/^\t+'(WO_[0-9A-Z_]+)' => __\( 'WORDS_NEEDED_(WO_[0-9A-Z_]+)', 'openbmt-pay' \),$/m", $file, $found, PREG_SET_ORDER );
+preg_match_all( "/^\t+'(WO_[0-9A-Z_]+)' => __\( '((?:[^'\\\\]|\\\\')+)', 'openbmt-pay' \),$/m", $file, $found, PREG_SET_ORDER );
 t_eq( count( Words::KEYS ), count( $found ), 'wo_41 every key has one literal call WordPress can extract' );
 $in_file = array();
+$texts   = array();
 foreach ( $found as $m ) {
-	t_eq( $m[1], $m[2], 'wo_41 the placeholder of ' . $m[1] . ' is named for its key' );
-	$in_file[] = $m[1];
+	t_ok( false === strpos( $m[2], 'WORDS_NEEDED' ), 'wo_41 the text of ' . $m[1] . ' is written' );
+	$texts[ $m[1] ] = $m[2];
+	$in_file[]      = $m[1];
+}
+t_eq( count( $texts ), count( array_unique( $texts ) ), 'wo_41 no two keys share a text' );
+// Each text takes the values the layer gives it, no more and no fewer.
+$takes = array( 'WO_05_PAIRED_AS' => 1, 'WO_11_LEFT' => 1, 'WO_16_TIME_LEFT' => 1, 'WO_21_LAST_VISIT' => 1, 'WO_31_NOTE_PAID' => 4, 'WO_31_NOTE_PART_PAID' => 4, 'WO_31_NOTE_PAID_LATE' => 4, 'WO_32_LOG_LINE' => 3 );
+foreach ( $texts as $key => $text ) {
+	preg_match_all( '/%(?:([0-9])\$)?s/', $text, $slots );
+	$n = count( array_unique( array_map( 'strval', array_keys( array_flip( array_map( static function ( $i, $p ) { return '' === $p ? 'p' . $i : $p; }, array_keys( $slots[0] ), $slots[1] ) ) ) ) ) );
+	t_eq( $takes[ $key ] ?? 0, $n, "wo_41 $key takes its values" );
 }
 t_eq( Words::KEYS, $in_file, 'wo_41 the file has the keys, in the order of the list' );
 t_eq( substr_count( $file, '__(' ), count( Words::KEYS ), 'wo_41 the file has no other call' );
