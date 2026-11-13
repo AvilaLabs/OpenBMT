@@ -65,6 +65,7 @@ import org.openbmt.counter.RefundState
 import org.openbmt.counter.RelayKind
 import org.openbmt.counter.SaleInfo
 import org.openbmt.counter.SaleState
+import org.openbmt.counter.SwitchState
 import org.openbmt.counter.Shop
 import org.openbmt.counter.ShopSettings
 import org.openbmt.counter.TipChoice
@@ -101,6 +102,8 @@ class Controller(private val act: MainActivity) {
 
     // What is saved, as read at the last start.
     private var record: ByteArray? = null
+    /** CR-261: the record of a half-done switch is being kept (off the screen thread), so the home tick does not start it twice. */
+    private var switchKeeping = false
     private var config: AppConfig? = null
     private var lightningRecord: ByteArray? = null
     private var lightningFault: SayWords? = null
@@ -1091,6 +1094,12 @@ class Controller(private val act: MainActivity) {
                 val change = changeState(n)
                 if (change?.pending?.confirmed == false) items.add(HomeLine("change", AppWords.changeWaits))
                 change?.notice?.let { items.add(HomeLine("change-notice", it.say())) }
+                // CR-260, CR-261, CR-264: a switch from the starter wallet that waits for a manager, the words of one that was
+                // dropped, and the new pairing record a half-done switch still needs kept.
+                val moved = switchState(n)
+                keepSwitchRecord(n, moved?.recordUpdate)
+                if (moved?.pending != null) items.add(HomeLine("switch", SwitchWords.homeLine))
+                moved?.notice?.let { items.add(HomeLine("switch-notice", it.say())) }
             }
             priceWords()?.let { items.add(HomeLine("price", it, priceNotes())) }
             val ls = items.joinToString("\u0002") { sig(it.words) + (it.extra ?: "") }
@@ -1171,6 +1180,29 @@ class Controller(private val act: MainActivity) {
             null
         }
 
+    /** CR-260, CR-264: the switch that waits for a manager and the words of one that came to nothing; null when the library has none to say. */
+    private fun switchState(n: CounterNode): SwitchState? =
+        try {
+            n.pendingSwitch(nowSecs())
+        } catch (e: CounterException) {
+            null
+        } catch (e: LinkageError) {
+            null
+        }
+
+    /** CR-261: the pairing record the library hands over for a switch begun and not finished is sealed and kept here, then the library is told. */
+    private fun keepSwitchRecord(n: CounterNode, update: ByteArray?) {
+        if (update == null || switchKeeping) return
+        switchKeeping = true
+        async({ ConfirmSwitch.finish(update, { keptRecord(it) }, { n.switchRecordKept(nowSecs()) }) }) { switchKeeping = false }
+    }
+
+    /** Seal and save the pairing record; what the app holds in memory is the new one from then on. */
+    private fun keptRecord(bytes: ByteArray) {
+        SealedFile(dir, KeystoreSealer(KEY_ALIAS), PAIRING_FILE).save(bytes)
+        record = bytes
+    }
+
     /** CR-107: the own node's health line, or the library's words for why there is none. */
     private fun ownNodeWords(n: CounterNode): SayWords =
         try {
@@ -1189,6 +1221,8 @@ class Controller(private val act: MainActivity) {
         if (cashiers.isEmpty()) items.add(RowItem("Your name", onClick = { showYourName() }))
         // CR-240: the change from the owner phone that waits, behind the manager's PIN on its own page.
         node?.let { n -> changeState(n)?.pending?.let { p -> items.add(RowItem(AppWords.CHANGE_BAR, ConfirmChange.menuSub(p), onClick = { showConfirmChange() })) } }
+        // CR-260: the new wallet to check, while a switch from the starter wallet waits.
+        node?.let { n -> switchState(n)?.pending?.let { items.add(RowItem(SwitchWords.BAR, onClick = { showConfirmSwitch() })) } }
         items.add(RowItem("Staff", onClick = { showStaffEntry() }))
         items.add(RowItem("Your own node", onClick = { showOwnNode() }))
         items.add(RowItem("Network", onClick = { showNetwork() }))
@@ -1235,6 +1269,57 @@ class Controller(private val act: MainActivity) {
             }
         }
         show(ui.bar(AppWords.CHANGE_BAR, back = { showSettings() }), views, listOf(confirm, ui.button(AppWords.CHANGE_NOT_NOW) { showSettings() }))
+    }
+
+    // ---- the new wallet to check (CR-259 to CR-262) -------------------------------------------------
+
+    /**
+     * The switch from the starter wallet: the new wallet's first address as the largest thing on the page, in groups of four,
+     * the kind of wallet beneath it, and the line that says to compare it with the new wallet's own screen. "Same address" asks
+     * for the manager's PIN and then keeps the new record; "Different" drops the switch.
+     */
+    private fun showConfirmSwitch() {
+        if (lockedOut()) return
+        val n = node ?: return render()
+        val pending = switchState(n)?.pending ?: return showSettings()
+        val msg = Slot(act)
+        val pinInput = pinField(act, "")
+        val views = ArrayList<View>()
+        views.add(ui.compactWords(WordsModel.of(SwitchWords.said(SwitchWords.COMPARE))))
+        views.add(ui.text(ConfirmSwitch.address(pending.address), 28f, bold = true, mono = true))
+        views.add(ui.text(FirstAddress.kindLine(pending.wallet), 16f))
+        views.add(ui.labelled(SwitchWords.PIN_LABEL, pinInput))
+        views.add(msg)
+        val same = ui.primary(SwitchWords.SAME) {
+            async({
+                ConfirmSwitch.same(pinInput.text.toString(), pin, { n.switchSame(nowSecs()) }, { keptRecord(it) }, { n.switchRecordKept(nowSecs()) })
+            }) { r ->
+                // CR-200: an answer that comes back after the app was hidden shows nothing.
+                if (!PinSteps.applies(visible)) return@async
+                val e = r.exceptionOrNull()
+                if (e != null) return@async msg.show(note(AppWords.fault(CounterException("pin", e.javaClass.simpleName, 4))))
+                when (val o = r.getOrNull()) {
+                    is ConfirmSwitch.Outcome.Switched -> showMessage(o.words, "Back") { showSettings() }
+                    is ConfirmSwitch.Outcome.PinRefused -> { Feedback.shake(pinInput); msg.show(note(o.words)) }
+                    is ConfirmSwitch.Outcome.Refused -> msg.show(note(o.words))
+                    is ConfirmSwitch.Outcome.NotKept -> msg.show(note(o.words))
+                    is ConfirmSwitch.Outcome.Dropped, null -> Unit
+                }
+            }
+        }
+        val different = ui.quiet(SwitchWords.DIFFERENT) {
+            async({ ConfirmSwitch.different { n.switchDifferent(nowSecs()) } }) { r ->
+                if (!PinSteps.applies(visible)) return@async
+                val e = r.exceptionOrNull()
+                if (e != null) return@async msg.show(note(AppWords.fault(CounterException("switch", e.javaClass.simpleName, 4))))
+                when (val o = r.getOrNull()) {
+                    is ConfirmSwitch.Outcome.Dropped -> showMessage(o.words, "Back") { showSettings() }
+                    is ConfirmSwitch.Outcome.Refused -> msg.show(note(o.words))
+                    else -> Unit
+                }
+            }
+        }
+        show(ui.bar(SwitchWords.BAR, back = { showSettings() }), views, listOf(same, different))
     }
 
     /** CR-146: the cashier's one name, kept in the config file. */

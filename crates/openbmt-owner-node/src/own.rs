@@ -28,7 +28,7 @@ use openbmt_core::pinned_wallet::PinnedWallet;
 use openbmt_core::settings::Authority;
 use openbmt_courier::Post;
 use openbmt_owner::own_book::{gap_limit, needs_range, unused_indexes, AllocationBook};
-use openbmt_owner::own_shop::{OwnError, OwnRestoreError, OwnShop};
+use openbmt_owner::own_shop::{OwnError, OwnRefusal, OwnRestoreError, OwnShop};
 use openbmt_owner::own_switch::{
     move_ready, switch_status, HeldSwitch, MoveNotReady, SwitchStatus,
 };
@@ -60,7 +60,7 @@ pub enum OwnNodeError {
     /// The key for the queue's missing Key app could not be made.
     NoApprover,
     /// A switch could not be made (SS-41).
-    Switch(String),
+    Switch(OwnRefusal),
 }
 
 impl fmt::Display for OwnNodeError {
@@ -70,7 +70,7 @@ impl fmt::Display for OwnNodeError {
             Self::State(e) => write!(f, "{e}"),
             Self::Derive(i) => write!(f, "OA-107: the wallet has no address at index {i}"),
             Self::NoApprover => write!(f, "OA-105: the queue's placeholder key could not be made"),
-            Self::Switch(why) => write!(f, "SS-41: {why}"),
+            Self::Switch(why) => write!(f, "{why}"),
         }
     }
 }
@@ -313,7 +313,7 @@ impl OwnNode {
             let switch = match shop.make_switch(counter, new, now, store) {
                 Ok(switch) => switch,
                 Err(OwnError::Store(e)) => return Err(OwnNodeError::Io(e)),
-                Err(OwnError::Refused(r)) => return Err(OwnNodeError::Switch(r.to_string())),
+                Err(OwnError::Refused(r)) => return Err(OwnNodeError::Switch(r)),
             };
             // A switch that could not be sent now is kept and sent again.
             let _ = link.send_switch(&switch, now);

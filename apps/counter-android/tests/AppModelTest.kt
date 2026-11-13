@@ -24,6 +24,8 @@ import org.openbmt.counter.ChangeField
 import org.openbmt.counter.ChangeValue
 import org.openbmt.counter.ChangeValueKind
 import org.openbmt.counter.PendingChange
+import org.openbmt.counter.PendingSwitch
+import org.openbmt.counter.SwitchSame
 import org.openbmt.counter.ActorRole
 import org.openbmt.counter.CounterException
 import org.openbmt.counter.DayTotals
@@ -104,7 +106,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1, "one row for each words and the header")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1, "one row for each words and the header, and for each text of the switch and its header")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -1319,6 +1321,64 @@ object AppModelTest {
         ok((205..216).all { rules.contains("- **CR-$it.**") }, "CR-205 to CR-216 are in the rules")
     }
 
+    // ---- the switch from the starter wallet (CR-259 to CR-264) -----------------------------
+
+    private fun cr260ConfirmSwitchTests(appDir: File?) {
+        ok(SwitchWords.BAR == "New wallet to check" && SwitchWords.SAME == "Same address" && SwitchWords.DIFFERENT == "Different", "CR-260: the menu row and the two buttons are as the rules name them")
+        ok(ConfirmSwitch.address("bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq") == "bc1q ar0s rrr7 xfkv y5l6 43ly dnw9 re59 gtzz wf5m dq", "CR-260: the address is shown in groups of four")
+        ok(FirstAddress.kindLine(OwnWalletKind.TwoOfThree) == "Wallet with 2 of 3 keys", "CR-260: the kind of wallet beneath the address")
+        ok(SwitchWords.placeholders.all { SwitchWords.isPlaceholder(SwitchWords.said(it)) && SwitchWords.said(it).heading == SwitchWords.said(it).what }, "CR-264: each unwritten text shows its own name")
+        ok(SwitchWords.placeholders.all { it.startsWith("WORDS_NEEDED_CR_26") } && SwitchWords.placeholders.toSet().size == SwitchWords.placeholders.size, "CR-264: the placeholders name their rule, once each")
+        ok(SwitchWords.homeLine.heading == SwitchWords.HOME_LINE, "CR-260: the home line is a placeholder until the words are written")
+
+        // The PIN first: a wrong or held PIN changes nothing; the right one switches once.
+        val dir = tempDir()
+        var now = 1_000L
+        val store = PinStore(dir, { now }, SecureRandom(), FakeHasher(), 1000)
+        store.set("123456")
+        val calls = ArrayList<String>()
+        val kept = ArrayList<ByteArray>()
+        val said = { calls.add("same"); SwitchSame(Words(1, 0, "WORDS_NEEDED_CR_261_SWITCHED", "x.", "y.", null, null, null, null), byteArrayOf(1, 2, 3)) }
+        val keep = { b: ByteArray -> calls.add("keep"); kept.add(b); Unit }
+        val tell = { calls.add("kept"); Words(1, 0, "WORDS_NEEDED_CR_261_SWITCHED", "x.", "y.", null, null, null, null) }
+        val wrong = ConfirmSwitch.same("000000", store, said, keep, tell)
+        ok(wrong is ConfirmSwitch.Outcome.PinRefused && calls.isEmpty(), "CR-261: a wrong PIN changes nothing")
+        val held = ConfirmSwitch.same("123456", store, said, keep, tell)
+        ok(held is ConfirmSwitch.Outcome.PinRefused && calls.isEmpty(), "CR-261: a held PIN changes nothing, even the right one")
+        now += 100
+        val done = ConfirmSwitch.same("123456", store, said, keep, tell)
+        ok(done is ConfirmSwitch.Outcome.Switched && calls == listOf("same", "keep", "kept") && kept.single().contentEquals(byteArrayOf(1, 2, 3)), "CR-261: the right PIN asks the library, keeps the record, then says it was kept")
+        // A record that cannot be kept is not reported kept: the library finishes at the next start.
+        calls.clear()
+        val lost = ConfirmSwitch.same("123456", store, said, { throw IOException("disk full") }, tell)
+        ok(lost is ConfirmSwitch.Outcome.NotKept && !calls.contains("kept"), "CR-261: a record that was not saved is not reported kept")
+        val refused = ConfirmSwitch.same("123456", store, { throw CounterException("CR-263", "no switch waits", 4) }, keep, tell)
+        ok(refused is ConfirmSwitch.Outcome.Refused, "CR-261: a refusal of the library is shown")
+        // The next start finishes a half-done switch from the record the library still holds.
+        calls.clear()
+        kept.clear()
+        ok(ConfirmSwitch.finish(null, keep, tell) == null && calls.isEmpty(), "CR-261: with no record waiting nothing is done")
+        val finished = ConfirmSwitch.finish(byteArrayOf(9), keep, tell)
+        ok(finished is ConfirmSwitch.Outcome.Switched && calls == listOf("keep", "kept") && kept.single().contentEquals(byteArrayOf(9)), "CR-261: a record left over is kept, then the library is told")
+        ok(ConfirmSwitch.finish(byteArrayOf(9), { throw IOException("disk full") }, tell) is ConfirmSwitch.Outcome.NotKept, "CR-261: a record that cannot be kept at start waits for the next look")
+        // "Different" needs no PIN and writes the refusal.
+        val dropped = ConfirmSwitch.different { Words(1, 0, "WORDS_NEEDED_CR_260_DIFFERENT", "x.", "y.", null, null, null, null) }
+        ok(dropped is ConfirmSwitch.Outcome.Dropped, "CR-260: Different drops the switch")
+        ok(ConfirmSwitch.different { throw CounterException("CR-260", "nothing waits", 4) } is ConfirmSwitch.Outcome.Refused, "CR-260: a refusal of the library is shown")
+        ok(PendingSwitch("bc1q", OwnWalletKind.SingleKey, 1, 2).address == "bc1q", "CR-260: the pending switch carries the address and the kind")
+        clean(dir)
+        if (appDir != null) {
+            val controller = File(appDir, "src/android/Controller.kt").readText()
+            ok(controller.contains("HomeLine(\"switch\", SwitchWords.homeLine)") && controller.contains("RowItem(SwitchWords.BAR") && controller.contains("private fun showConfirmSwitch()"), "CR-260: the Home line, the menu row and the page are there")
+            val page = controller.substringAfter("private fun showConfirmSwitch()").substringBefore("/** CR-146")
+            ok(page.contains("ConfirmSwitch.same(pinInput.text.toString(), pin,") && page.contains("n.switchSame(nowSecs())") && page.contains("n.switchRecordKept(nowSecs())"), "CR-261: the page switches only through the PIN check, and tells the library after the record is kept")
+            ok(page.contains("ConfirmSwitch.different") && page.contains("n.switchDifferent(nowSecs())"), "CR-260: Different drops the switch")
+            ok(page.contains("ConfirmSwitch.address(pending.address)") && page.contains("28f, bold = true, mono = true") && page.contains("FirstAddress.kindLine(pending.wallet)"), "CR-260: the address is the largest thing, with the kind of wallet beneath it")
+            ok(page.contains("PinSteps.applies(visible)"), "CR-200: an answer that comes back hidden shows nothing")
+            ok(controller.contains("ConfirmSwitch.finish(update,") && controller.contains("SealedFile(dir, KeystoreSealer(KEY_ALIAS), PAIRING_FILE).save(bytes)"), "CR-261: a half-done switch's record is kept at the next look at home")
+        }
+    }
+
     // ---- a change to confirm (CR-239 to CR-244) ------------------------------------------
 
     private fun cr240ConfirmChangeTests(appDir: File?) {
@@ -1496,6 +1556,7 @@ object AppModelTest {
         cr214ShareTests()
         cr213RequestsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr240ConfirmChangeTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        cr260ConfirmSwitchTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr245BillsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         println("AppModelTest (counter): $count checks passed")
     }

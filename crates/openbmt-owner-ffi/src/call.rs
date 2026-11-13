@@ -56,6 +56,10 @@
 //!   AS-99): the wallet written for it, the session built with the spends
 //!   apart, the file for the signer, taking what it returns, and the record
 //!   of the first address check.
+//! - 200 to 203: the switch from the starter wallet (`docs/START-SIMPLE-RULES.md`
+//!   SS-41, SS-42): the offer marked as a starter wallet's, the switches sent to
+//!   the counters, where each counter stands, and the one move once all have
+//!   switched.
 //! - 100 to 103: the lock on the setup text the app stores
 //!   (`docs/LOCK-RULES.md`, `docs/OWNER-APP-RULES.md` OA-60 to OA-62):
 //!   whether stored bytes are a locked setup, lock a text under a PIN, open
@@ -136,6 +140,7 @@ use crate::import_view::{self, ImportKind, ImportView};
 use crate::own::{
     self, OwnBundleView, OwnConfirmArgs, OwnCounterArgs, OwnGapArgs, OwnGapView, OwnMade,
     OwnOfferView, OwnOwnerMade, OwnRequestArgs, OwnRequestView, OwnShopArgs, OwnWalletView,
+    SwitchRowView, SwitchStateKind,
 };
 use crate::own_spend_views::{
     OwnSpendBuildArgs, OwnSpendBuiltView, OwnSpendFileView, OwnSpendItemView, OwnSpendSessionView,
@@ -858,6 +863,27 @@ fn build_ops() -> Vec<Op> {
         op(196, "starter_open", Zero, |_, a: StarterOpenArgs| {
             starter_ops::open(a)
         }),
+        op(
+            200,
+            "own_offer_starter",
+            Zero,
+            |_, (a, now): (OwnShopArgs, u64)| own::offer_starter(a, now),
+        ),
+        op(
+            201,
+            "own_switch_send",
+            Node,
+            |c, (new_wallet, now): (Vec<u8>, u64)| c.entry()?.own_switch_send(new_wallet, now),
+        ),
+        op(202, "own_switch_status", Node, |c, new_wallet: Vec<u8>| {
+            c.entry()?.own_switch_status(new_wallet)
+        }),
+        op(
+            203,
+            "starter_move_switched",
+            Node,
+            |c, a: StarterMoveArgs| c.entry()?.starter_move_switched(a),
+        ),
     ]
 }
 
@@ -1128,6 +1154,8 @@ fn definitions() -> Vec<TypeDef> {
         StarterPaidView::define(),
         StarterMoveArgs::define(),
         StarterOpenArgs::define(),
+        SwitchStateKind::define(),
+        SwitchRowView::define(),
         StarterFeeArgs::define(),
         StarterLimitKind::define(),
         StarterChangeKind::define(),

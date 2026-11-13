@@ -24,10 +24,11 @@ use openbmt_core::wallet_single::ImportedWallet;
 use openbmt_owner::own_book::{gap_limit, gap_needs_notice};
 use openbmt_owner::own_say::{shop_file_failed, they_differ, wallet_not_readable};
 use openbmt_owner::own_shop::{MadeOffer, OwnError, OwnRefusal};
+use openbmt_owner::own_switch::{status_words, SwitchStatus};
 use openbmt_owner_node::{OwnNode, OwnNodeError};
 use std::fmt;
 
-use crate::codec::{wire_record, wire_record_get};
+use crate::codec::{wire_record, wire_record_get, wire_unit_enum};
 use crate::counter_views::WaitingCounterView;
 use crate::error::{from_words, internal, AppError, Kind};
 use crate::views::{CounterShareView, WordsView};
@@ -259,6 +260,69 @@ wire_record!(OwnBundleView {
     shares
 });
 
+/// What a counter's records say of the switch to the new wallet (SS-41).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwitchStateKind {
+    /// The counter's record says it switched.
+    Switched,
+    /// The counter has no record for the new wallet yet.
+    Waiting,
+    /// The counter's record says it did not switch.
+    Refused,
+}
+
+wire_unit_enum!(SwitchStateKind {
+    Switched = 0,
+    Waiting = 1,
+    Refused = 2
+});
+
+/// One counter of the settings in force and where its switch stands (ops
+/// 200 to 202, SS-41).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SwitchRowView {
+    /// The counter's key.
+    pub counter: Vec<u8>,
+    /// The name the app's lists give the counter.
+    pub name: String,
+    /// Switched, waiting or refused.
+    pub state: SwitchStateKind,
+    /// The words of that state.
+    pub words: WordsView,
+}
+
+wire_record!(SwitchRowView {
+    counter,
+    name,
+    state,
+    words
+});
+
+/// The rows the app is shown, one for each counter in force.
+pub(crate) fn switch_rows_view(
+    rows: &[(DeviceId, SwitchStatus)],
+    label: impl Fn(&DeviceId) -> String,
+) -> Vec<SwitchRowView> {
+    rows.iter()
+        .map(|(counter, status)| SwitchRowView {
+            counter: counter.to_bytes().to_vec(),
+            name: label(counter),
+            state: match status {
+                SwitchStatus::Switched => SwitchStateKind::Switched,
+                SwitchStatus::Waiting => SwitchStateKind::Waiting,
+                SwitchStatus::Refused => SwitchStateKind::Refused,
+            },
+            words: WordsView(status_words(*status)),
+        })
+        .collect()
+}
+
+/// Op 200: the offer of a shop whose pinned wallet is the starter wallet
+/// (CR-256): as op 150, marked so that the counter that takes it may switch.
+pub(crate) fn offer_starter(a: OwnShopArgs, now: u64) -> Result<OwnOfferView, AppError> {
+    offer_as(a, now, true)
+}
+
 /// The arguments of `own_gap` (OA-113).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnGapArgs {
@@ -293,9 +357,10 @@ fn refusal(r: &OwnRefusal) -> AppError {
 }
 
 pub(crate) fn node_error(e: OwnNodeError) -> AppError {
-    match e {
+    match &e {
         OwnNodeError::Io(_) => from_words(Kind::Store, "OA-105", &e, shop_file_failed()),
         OwnNodeError::State(_) => from_words(Kind::State, "OA-105", &e, shop_file_failed()),
+        OwnNodeError::Switch(r) => refusal(r),
         OwnNodeError::Derive(_) | OwnNodeError::NoApprover => internal(e),
     }
 }
@@ -309,7 +374,7 @@ fn own_error(e: OwnError<String>) -> AppError {
 
 /// The wallet in its file, or the words of a file that does not read
 /// (OA-105): the bytes must decode and encode to the same bytes.
-fn wallet_of(file: &[u8]) -> Result<PinnedWallet, AppError> {
+pub(crate) fn wallet_of(file: &[u8]) -> Result<PinnedWallet, AppError> {
     let wallet = PinnedWallet::from_bytes(file)
         .map_err(|e| from_words(Kind::State, "OA-105", e, wallet_not_readable()))?;
     if wallet.to_bytes() != file {
@@ -466,8 +531,15 @@ pub(crate) fn wallet_read(file: Vec<u8>) -> Result<OwnWalletView, AppError> {
 
 /// Op 150: the offer (OA-108).
 pub(crate) fn offer(a: OwnShopArgs, now: u64) -> Result<OwnOfferView, AppError> {
+    offer_as(a, now, false)
+}
+
+fn offer_as(a: OwnShopArgs, now: u64, starter: bool) -> Result<OwnOfferView, AppError> {
     with_shop(a, |node| {
-        let made = node.shop().make_offer(now).map_err(|r| refusal(&r))?;
+        let made = node
+            .shop()
+            .make_offer_as(now, starter)
+            .map_err(|r| refusal(&r))?;
         let first_address = made
             .offer
             .first_address()

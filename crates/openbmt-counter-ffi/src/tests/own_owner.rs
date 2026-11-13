@@ -384,3 +384,123 @@ fn the_real_owner_pairs_the_real_counter_which_sells_from_the_wallet_and_takes_a
         );
     }
 }
+
+const OP_PENDING_SWITCH: u16 = 200;
+const OP_SWITCH_SAME: u16 = 201;
+const OP_SWITCH_RECORD_KEPT: u16 = 202;
+
+#[test]
+fn ss_41_the_real_owner_switches_the_real_counter_from_the_starter_wallet_and_ss_42_may_then_move()
+{
+    use openbmt_owner::own_switch::SwitchStatus;
+
+    let old = PinnedWallet::from_text(SINGLE).unwrap();
+    let new = PinnedWallet::from_text(MULTI).unwrap();
+    let mut owner = Owner::new(SINGLE);
+
+    // CR-256: the offer of a starter wallet is marked, and the counter that
+    // takes it is one that may switch.
+    let made = owner.node.shop().make_offer_as(T0, true).unwrap();
+    let rig = Rig::new();
+    begin(&rig, &made.offer.to_bytes()).expect("the counter reads it");
+    let (request, _) = same(&rig, T0 + 10).expect("same address");
+    let read = owner
+        .node
+        .shop()
+        .read_request(&made, T0 + 20, &request)
+        .unwrap();
+    matched(&rig, T0 + 30).expect("they match on the counter");
+    let paired = owner.confirm(&made, T0 + 30, &request);
+    let record = finish(&rig, &paired.bundle.to_bytes(), T0 + 40).expect("the counter pairs");
+    {
+        let (shop, store) = owner.node.shop_and_store();
+        shop.mark_delivered(&read.counter, &store).unwrap();
+    }
+    owner.start_link(read.counter);
+    let handle = rig.start_with(&StartConfig {
+        dir: rig.dir().to_str().unwrap().to_string(),
+        now: T0 + 100,
+        record,
+        proxy: None,
+        own_node: None,
+        lightning: None,
+        link_proxy: None,
+    });
+    rig.send(vec![peers_event()]);
+    Rd::ok(&rig.call(OP_PUMP, handle, &W::new().u64(T0 + 100).u32(50).0));
+    let first = open_sale(&rig, handle, T0 + 100);
+    assert_eq!(
+        first.payment.address,
+        old.receive_address(first.index).unwrap().to_string()
+    );
+
+    // SS-41: before the switch, the counter shows as waiting and SS-42's
+    // move is not ready.
+    let mut now = settle(&rig, handle, &mut owner, T0 + 100);
+    {
+        let shop = OwnNode::open(owner.dir.path(), id(1), owner.wallet.clone()).unwrap();
+        let link = owner.link.as_ref().unwrap();
+        assert_eq!(
+            shop.switch_rows(link, &new),
+            vec![(read.counter, SwitchStatus::Waiting)]
+        );
+        assert!(shop.move_ready(link, &new).is_err());
+    }
+
+    // CR-257: the owner makes the switch and sends it on the link.
+    {
+        let mut shop = OwnNode::open(owner.dir.path(), id(1), owner.wallet.clone()).unwrap();
+        let link = owner.link.as_mut().unwrap();
+        let made = shop.send_switches(link, &new, now + 1).unwrap();
+        assert_eq!(made, vec![read.counter]);
+    }
+    // The counter takes it on its next step and shows the new wallet's
+    // first address (CR-260).
+    let mut pending = None;
+    for _ in 0..40 {
+        now += 10;
+        let _ = turn(&rig, handle, &mut owner, now);
+        let response = rig.call(OP_PENDING_SWITCH, handle, &W::new().u64(now).0);
+        let mut r = Rd::ok(&response);
+        pending = r.opt(|r| (r.string(), r.u8(), r.u64(), r.u64()));
+        if pending.is_some() {
+            break;
+        }
+    }
+    let (address, kind, _, _) = pending.expect("the counter holds the switch");
+    assert_eq!(address, new.receive_address(0).unwrap().to_string());
+    assert_eq!(kind, 2, "two of three");
+
+    // CR-260, CR-261: the manager says "Same address".
+    Rd::ok(&rig.call(OP_SWITCH_SAME, handle, &W::new().u64(now + 1).0));
+    // The app keeps the new pairing record, then says so (CR-261).
+    Rd::ok(&rig.call(OP_SWITCH_RECORD_KEPT, handle, &W::new().u64(now + 2).0));
+    for _ in 0..40 {
+        now += 10;
+        let _ = turn(&rig, handle, &mut owner, now);
+        if owner.link.as_ref().unwrap().switches_waiting().is_empty() {
+            break;
+        }
+    }
+
+    // CR-262: the owner reads the counter's record: switched, nothing waits,
+    // and the move is ready (SS-42).
+    {
+        let shop = OwnNode::open(owner.dir.path(), id(1), owner.wallet.clone()).unwrap();
+        let link = owner.link.as_ref().unwrap();
+        assert!(link.switches_waiting().is_empty());
+        assert_eq!(
+            shop.switch_rows(link, &new),
+            vec![(read.counter, SwitchStatus::Switched)]
+        );
+        assert!(shop.move_ready(link, &new).is_ok());
+    }
+
+    // The next sale pays the new wallet, at an index above every old one.
+    let next = open_sale(&rig, handle, now + 100);
+    assert!(next.index >= 1_000, "{}", next.index);
+    assert_eq!(
+        next.payment.address,
+        new.receive_address(next.index).unwrap().to_string()
+    );
+}

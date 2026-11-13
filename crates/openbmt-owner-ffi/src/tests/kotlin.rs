@@ -243,6 +243,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "OwnBundleView: record: counter: list<u8>, code: list<u8>, first_start: u32, first_end: u32, settings_version: u32, shares: list<CounterShareView>",
         "OwnShopArgs: record: dir: string, owner_secret: list<u8>, wallet: list<u8>",
         "OwnGapView: record: needed: u32, notice: bool",
+        "SwitchRowView: record: counter: list<u8>, name: string, state: SwitchStateKind, words: Words",
         "OldAddressesView: record: kind: OldKind, count: u64, days_ago: u64, next: option<u64>, running: bool, words: option<Words>",
     ] {
         assert!(protocol.contains(line), "{line}");

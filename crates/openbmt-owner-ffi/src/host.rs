@@ -88,7 +88,7 @@ use crate::error::{
     from_words, internal, poisoned, refused_by, rule_in, store_by, wrong_state, AppError, Kind,
 };
 use crate::float::{self as float_ops, FloatRefillArgs, FloatRefillView};
-use crate::own::{self, OwnGapView};
+use crate::own::{self, OwnGapView, SwitchRowView};
 use crate::own_spend_views::{
     built_view as own_built_view, file_view as own_file_view, item_view as own_item_view,
     taken_view as own_taken_view, OwnSpendBuildArgs, OwnSpendBuiltView, OwnSpendFileView,
@@ -737,6 +737,23 @@ fn own_link_step(
     view.notes.extend(turn.notes);
     view.notes.truncate(openbmt_owner_node::NOTE_LOG);
     Ok(view)
+}
+
+/// A shop with its own wallet and its link, or why the call cannot be made.
+fn own_and_link<'a>(
+    own: &'a mut Option<OwnShop>,
+    link: &'a mut Option<OwnerLink>,
+) -> Result<(&'a mut OwnShop, &'a mut OwnerLink), AppError> {
+    let own = own.as_mut().ok_or_else(|| {
+        wrong_state(
+            "no-own-wallet",
+            "this shop has a Key app: it has no starter wallet to switch from",
+        )
+    })?;
+    let link = link
+        .as_mut()
+        .ok_or_else(|| wrong_state("link-none", "the node has no link to the counters"))?;
+    Ok((own, link))
 }
 
 /// The name an own-wallet shop gives a counter in its words: "Counter" and
@@ -2333,6 +2350,88 @@ impl Entry {
                 needed,
                 notice: openbmt_owner::own_book::gap_needs_notice(needed),
             })
+        })
+    }
+
+    /// SS-41, CR-257: make the switch to the new wallet (the file of op 149)
+    /// for each counter that has none, send it (LK-78), and say where each
+    /// counter of the settings in force stands.
+    pub(crate) fn own_switch_send(
+        &self,
+        new_wallet: Vec<u8>,
+        now: u64,
+    ) -> Result<Vec<SwitchRowView>, AppError> {
+        let new = own::wallet_of(&new_wallet)?;
+        self.run(Some(now), move |st| {
+            let State {
+                node,
+                link,
+                own,
+                dir,
+                ..
+            } = st;
+            let (own, link) = own_and_link(own, link)?;
+            let identity = node.owner_identity().map_err(|e| node_error(&e))?;
+            own::turn_on_shop(dir, identity, own.wallet.clone(), |shop| {
+                shop.send_switches(link, &new, now)?;
+                Ok(shop.switch_rows(link, &new))
+            })
+            .map_err(own::node_error)
+            .map(|rows| own::switch_rows_view(&rows, counter_label))
+        })
+    }
+
+    /// SS-41, CR-262: where each counter of the settings in force stands for
+    /// the new wallet, from the records the owner holds of it.
+    pub(crate) fn own_switch_status(
+        &self,
+        new_wallet: Vec<u8>,
+    ) -> Result<Vec<SwitchRowView>, AppError> {
+        let new = own::wallet_of(&new_wallet)?;
+        self.run(None, move |st| {
+            let State {
+                node,
+                link,
+                own,
+                dir,
+                ..
+            } = st;
+            let (own, link) = own_and_link(own, link)?;
+            let identity = node.owner_identity().map_err(|e| node_error(&e))?;
+            link.scan_index_use();
+            own::turn_on_shop(dir, identity, own.wallet.clone(), |shop| {
+                Ok(shop.switch_rows(link, &new))
+            })
+            .map_err(own::node_error)
+            .map(|rows| own::switch_rows_view(&rows, counter_label))
+        })
+    }
+
+    /// SS-42: the one move of the starter wallet, built only when every
+    /// counter of the settings in force is switched to the new wallet.
+    pub(crate) fn starter_move_switched(
+        &self,
+        a: crate::starter::StarterMoveArgs,
+    ) -> Result<crate::starter::StarterPaidView, AppError> {
+        let new = PinnedWallet::from_text(&a.new_wallet)
+            .map_err(crate::starter::new_wallet_unreadable)?;
+        self.run(None, move |st| {
+            let State {
+                node,
+                link,
+                own,
+                dir,
+                ..
+            } = st;
+            let (own, link) = own_and_link(own, link)?;
+            let identity = node.owner_identity().map_err(|e| node_error(&e))?;
+            link.scan_index_use();
+            let ready = own::turn_on_shop(dir, identity, own.wallet.clone(), |shop| {
+                Ok(shop.move_ready(link, &new))
+            })
+            .map_err(own::node_error)?;
+            ready.map_err(|e| crate::starter::not_ready(&e))?;
+            crate::starter::move_all(a)
         })
     }
 

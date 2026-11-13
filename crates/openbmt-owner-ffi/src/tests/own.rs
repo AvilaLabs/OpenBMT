@@ -430,3 +430,65 @@ fn as_103_a_bad_session_number_is_refused_by_length_and_an_unknown_one_by_name()
     let fault = Rd::error(&rig.call(163, handle, &W::new().bytes(&[9u8; 32]).0)).expect("refused");
     assert_eq!(fault.rule, "session-unknown");
 }
+
+#[test]
+fn cr_256_op_200_makes_the_offer_marked_as_a_starter_wallets_and_op_150_does_not() {
+    let dir = Scratch::new();
+    let file = wallet_file();
+    let code_of = |op: u16| {
+        let response = call(op, &shop(&dir, &file).u64(T0).0);
+        let mut r = Rd::ok(&response);
+        let (code, _, _, _, _) = (r.bytes(), r.u64(), r.u64(), r.u32(), r.string());
+        r.done();
+        OwnOffer::from_bytes(&code).unwrap()
+    };
+    let plain = code_of(150);
+    let starter = code_of(200);
+    assert!(!plain.starter);
+    assert!(starter.starter);
+    assert_eq!(plain.wallet, starter.wallet);
+}
+
+#[test]
+fn ss_41_the_switch_ops_say_why_when_there_is_no_own_wallet_or_no_link() {
+    let new = wallet_file();
+    // A shop with a Key app has no starter wallet to switch from.
+    let rig = super::kit::Rig::new();
+    let handle = rig.start();
+    for (op, fields) in [
+        (201u16, W::new().bytes(&new).u64(T0).0),
+        (202, W::new().bytes(&new).0),
+    ] {
+        let fault = Rd::error(&rig.call(op, handle, &fields)).expect("refused");
+        assert_eq!(fault.rule, "no-own-wallet", "op {op}");
+    }
+    // A shop with its own wallet and no link has no counters to ask.
+    let rig = super::kit::Rig::new();
+    let handle = Rd::ok(&rig.start_own(&new)).u64();
+    for (op, fields) in [
+        (201u16, W::new().bytes(&new).u64(T0).0),
+        (202, W::new().bytes(&new).0),
+    ] {
+        let fault = Rd::error(&rig.call(op, handle, &fields)).expect("refused");
+        assert_eq!(fault.rule, "link-none", "op {op}");
+    }
+    // A new wallet file that does not read gets the words of OA-105.
+    let fault = Rd::error(&rig.call(202, handle, &W::new().bytes(&[1, 2, 3]).0)).expect("refused");
+    assert_eq!(fault.rule, "OA-105");
+}
+
+#[test]
+fn ss_42_the_move_after_the_switch_is_refused_with_its_words_when_a_counter_waits() {
+    use openbmt_owner::own_switch::MoveNotReady;
+    let e = MoveNotReady {
+        waiting: vec![id(2).device_id()],
+        refused: Vec::new(),
+    };
+    let fault = crate::starter::not_ready(&e);
+    let text = format!("{fault:?}");
+    assert!(text.contains("starter-move-not-ready"), "{text}");
+    assert!(
+        text.contains("WORDS_NEEDED_OA_SWITCH_MOVE_NOT_READY"),
+        "{text}"
+    );
+}

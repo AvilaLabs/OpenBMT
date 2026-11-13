@@ -185,6 +185,10 @@ private const val OP_STARTER_CANCEL = 193
 private const val OP_STARTER_NOT_YET = 194
 private const val OP_STARTER_FEE_RATE = 195
 private const val OP_STARTER_OPEN = 196
+private const val OP_OWN_OFFER_STARTER = 200
+private const val OP_OWN_SWITCH_SEND = 201
+private const val OP_OWN_SWITCH_STATUS = 202
+private const val OP_STARTER_MOVE_SWITCHED = 203
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -286,6 +290,9 @@ private const val TAG_IMPORT_KIND_SINGLE = 1
 private const val TAG_IMPORT_KIND_MULTISIG = 2
 private const val TAG_FIRST_ADDRESS_KIND_CHECKED = 1
 private const val TAG_FIRST_ADDRESS_KIND_SKIPPED = 2
+private const val TAG_SWITCH_STATE_KIND_SWITCHED = 0
+private const val TAG_SWITCH_STATE_KIND_WAITING = 1
+private const val TAG_SWITCH_STATE_KIND_REFUSED = 2
 private const val TAG_OLD_KIND_NONE = 0
 private const val TAG_OLD_KIND_FIRST_CHECK_WAITING = 1
 private const val TAG_OLD_KIND_MONTHLY = 2
@@ -911,6 +918,15 @@ class CounterQueued(
     val words: Words,
 )
 
+/** What a counter's records say of the switch to the new wallet (SS-41). */
+enum class SwitchState { Switched, Waiting, Refused }
+
+/**
+ * One counter of the settings in force and where its switch stands. [name] is the label the app's lists give the
+ * counter; [words] are the words of the state.
+ */
+class SwitchRow(val counter: ByteArray, val name: String, val state: SwitchState, val words: Words)
+
 /** A counter whose finished pairing waits to be handed over. [name] is text from the counter. */
 class WaitingCounter(val counter: ByteArray, val name: String)
 
@@ -1495,6 +1511,16 @@ private fun Reader.noteKind(): NoteKind =
         else -> tag("NoteKindView")
     }
 
+private fun Reader.switchState(): SwitchState =
+    when (u8()) {
+        TAG_SWITCH_STATE_KIND_SWITCHED -> SwitchState.Switched
+        TAG_SWITCH_STATE_KIND_WAITING -> SwitchState.Waiting
+        TAG_SWITCH_STATE_KIND_REFUSED -> SwitchState.Refused
+        else -> tag("SwitchStateKind")
+    }
+
+private fun Reader.switchRow(): SwitchRow = SwitchRow(bytes(), string(), switchState(), words())
+
 private fun Reader.oldKind(): OldKind =
     when (u8()) {
         TAG_OLD_KIND_NONE -> OldKind.None
@@ -2031,6 +2057,44 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
     fun ownGap(): OwnGapView {
         val r = call(OP_OWN_GAP_NOW, handle)
         return OwnGapView(r.u32(), r.bool()).also { r.end() }
+    }
+
+    /**
+     * SS-41, CR-257: make the switch to the new wallet ([newWallet] is its file from [OwnerOwn.pin]) for each counter
+     * that has none and send it. Asking again allocates nothing more. Gives where each counter of the settings in
+     * force stands.
+     */
+    fun ownSwitchSend(newWallet: ByteArray, now: Long): List<SwitchRow> {
+        val r = call(OP_OWN_SWITCH_SEND, handle) { it.bytes(newWallet).u64(now) }
+        return r.list { r.switchRow() }.also { r.end() }
+    }
+
+    /** SS-41, CR-262: where each counter of the settings in force stands, from the records the owner holds of it. */
+    fun ownSwitchStatus(newWallet: ByteArray): List<SwitchRow> {
+        val r = call(OP_OWN_SWITCH_STATUS, handle) { it.bytes(newWallet) }
+        return r.list { r.switchRow() }.also { r.end() }
+    }
+
+    /**
+     * SS-42: as [OwnerStarter.move], built only when every counter of the settings in force is switched to the new
+     * wallet. Refused with the words of the move when one is waiting or refused.
+     */
+    fun starterMoveSwitched(
+        sealed: ByteArray,
+        dataKey: ByteArray,
+        newWallet: String,
+        newIndex: Long,
+        feeRate: Long,
+        minConfirmations: Long,
+        lockHeight: Long,
+        coins: List<StarterCoin>,
+    ): StarterPaid {
+        val r = callSecret(OP_STARTER_MOVE_SWITCHED, handle) { w ->
+            w.bytes(sealed).bytes(dataKey).string(newWallet).u32(newIndex).u64(feeRate).u32(minConfirmations)
+                .u32(lockHeight).list(coins) { w.floatCoin(it) }
+        }
+        java.util.Arrays.fill(dataKey, 0.toByte())
+        return r.starterPaid().also { r.end() }
     }
 
     /**
@@ -2699,6 +2763,12 @@ object OwnerOwn {
     /** The offer (OA-108); it lasts 10 minutes and is held in memory only. */
     fun offer(shop: OwnShopArgs, now: Long): OwnOfferView {
         val r = call(OP_OWN_OFFER, 0) { it.ownShop(shop).u64(now) }
+        return OwnOfferView(r.ownMade(), r.u64(), r.u32(), r.string()).also { r.end() }
+    }
+
+    /** The offer of a shop whose pinned wallet is the starter wallet (CR-256): as [offer], marked so a counter may switch. */
+    fun offerStarter(shop: OwnShopArgs, now: Long): OwnOfferView {
+        val r = call(OP_OWN_OFFER_STARTER, 0) { it.ownShop(shop).u64(now) }
         return OwnOfferView(r.ownMade(), r.u64(), r.u32(), r.string()).also { r.end() }
     }
 

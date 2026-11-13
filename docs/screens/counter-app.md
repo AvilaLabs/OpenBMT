@@ -102,3 +102,17 @@ These are the words of what the app decides itself.
 | UrWords.wrongKind | Not the code expected | This code carries something this step does not take, so nothing was used. | Cancel, then ask for the right code again, or use a file instead. | a manager |  |
 | UrWords.contentRefused | Code content not usable | The code was read in full, but what it holds is not in a form this step takes. | Ask for the code to be shown again, or use a file instead. | a manager |  |
 | UrWords.readerFailed | Code reader failed | The part of this app that reads codes gave no usable answer, so nothing was read. | Close the app and open it again. If it happens again, use a file. | a manager |  |
+
+## The switch from the starter wallet (CR-259 to CR-264)
+
+The labels the rules name, and the lines still to be written: a text named
+`WORDS_NEEDED_CR_26x_...` shows its own name until the words exist.
+
+| Key | Text |
+|---|---|
+| bar | New wallet to check |
+| same | Same address |
+| different | Different |
+| pinLabel | Manager's PIN |
+| homeLine | WORDS_NEEDED_CR_260_HOME_LINE |
+| compare | WORDS_NEEDED_CR_260_COMPARE |

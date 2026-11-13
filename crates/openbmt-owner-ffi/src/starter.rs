@@ -40,6 +40,24 @@ pub(crate) fn refusal(e: &StarterRefusal) -> AppError {
     from_words(Kind::Refused, e.rule(), e, e.words())
 }
 
+/// SS-42: the new wallet's description does not read.
+pub(crate) fn new_wallet_unreadable(why: impl fmt::Display) -> AppError {
+    refused_with(
+        "starter-new-wallet",
+        format!("the new wallet: {why}"),
+        starter::new_wallet_unreadable_words(),
+    )
+}
+
+/// SS-42: the move waits for the counters. Nothing was built.
+pub(crate) fn not_ready(e: &openbmt_owner::own_switch::MoveNotReady) -> AppError {
+    refused_with(
+        "starter-move-not-ready",
+        e.to_string(),
+        openbmt_owner::own_switch::not_ready_words(),
+    )
+}
+
 /// The kernel's bytes, from the `getrandom` system call (SS-01).
 struct Kernel;
 
