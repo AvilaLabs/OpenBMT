@@ -1,0 +1,13 @@
+[package]
+name = "openbmt-kernel-random"
+description = "The Linux kernel's own random bytes through the getrandom system call, the one place the owner phone's starter wallet asks for chance"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# libc is the system call layer, the same pin as the stick's. It is in the
+# lock file already.
+[dependencies]
+libc = "=0.2.191"

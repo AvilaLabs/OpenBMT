@@ -56,6 +56,7 @@ pub mod own_say;
 pub mod own_shop;
 pub mod own_spend;
 pub mod say;
+pub mod starter;
 mod state;
 mod take;
 mod types;

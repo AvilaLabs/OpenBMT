@@ -119,6 +119,58 @@ fn sk_20_a_change_in_either_source_changes_the_key() {
     assert_ne!(mix(&a, &[1, 2]).unwrap(), mix(&a, &[2, 1]).unwrap());
 }
 
+/// The same function as the owner phone's starter wallet's (SS-03,
+/// `docs/START-SIMPLE-RULES.md`): it lives in `openbmt-core` and takes the
+/// tag as an argument. The stick's call is that function with its own tag,
+/// and the starter's tag gives other bytes for the same inputs. The hex
+/// values were made by an independent Python implementation.
+#[test]
+fn ss_03_the_stick_and_the_starter_share_one_mix_and_differ_only_by_tag() {
+    let counting: [u8; 32] = std::array::from_fn(|i| 1 + i as u8);
+    let cases: [(&[u8], &str, &str); 2] = [
+        (
+            &[],
+            "26facc3ff21c5e14a39a1063d9acef02",
+            "68b9953e6f287a6ed3b277b92dcd754a",
+        ),
+        (
+            &[1, 2, 3, 4, 5, 6, 6, 5, 4, 3],
+            "50a3f3f19e2bd90a531c3aadde7f0226",
+            "7bd7c1fed9f5dd0a5c0e0920d36473ff",
+        ),
+    ];
+    for (rolls, stick, starter) in cases {
+        let theirs = mix(&counting, rolls).unwrap();
+        assert_eq!(hex(&theirs), stick);
+        assert_eq!(
+            theirs,
+            openbmt_core::mix::mix(openbmt_stick::mix::MIX_TAG, &counting, rolls).unwrap()
+        );
+        let starters = openbmt_core::mix::mix(b"OpenBMT/starter/v1", &counting, rolls).unwrap();
+        assert_eq!(hex(&starters), starter);
+        assert_ne!(theirs, starters);
+    }
+}
+
+/// The starter wallet's check-back (SS-10) picks its positions by the same
+/// byte rule (KM-16); `openbmt-owner` runs this table too.
+#[test]
+fn ss_10_the_positions_of_the_starter_are_the_sticks() {
+    let table: [(&[u8], [usize; 3]); 8] = [
+        (&[12, 24, 36, 5], [0, 1, 5]),
+        (&[255, 100, 255, 100, 200], [0, 4, 8]),
+        (&[0, 1, 2], [0, 1, 2]),
+        (&[11, 5, 7], [5, 7, 11]),
+        (&[251, 252, 253, 254, 255], [0, 1, 11]),
+        (&[13, 25, 37, 49], [0, 1, 2]),
+        (&[13, 14, 15, 16], [1, 2, 3]),
+        (&[], [0, 1, 2]),
+    ];
+    for (bytes, want) in table {
+        assert_eq!(pick_positions(bytes), want, "{bytes:?}");
+    }
+}
+
 #[test]
 fn sk_20_rolls_outside_one_to_six_are_refused() {
     let k = [0u8; 32];

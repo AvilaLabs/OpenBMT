@@ -15,8 +15,12 @@ openbmt-spend = { path = "../openbmt-spend" }
 openbmt-session = { path = "../openbmt-session" }
 openbmt-ur = { path = "../openbmt-ur" }
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
-# The same pin as openbmt-core: the 12 words of the refund float (FL-01).
+# The same pin as openbmt-core: the 12 words of the refund float (FL-01) and
+# of the starter wallet (SS-04).
 bip39 = { version = "=2.2.2", default-features = false, features = ["alloc"] }
+# The same pin and features as openbmt-link and openbmt-lock: the sealed
+# seed of the starter wallet (SS-20). It is in the lock file already.
+chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 openbmt-approver = { path = "../openbmt-approver" }
