@@ -3997,6 +3997,22 @@ object AppModelTest {
             ok(literals.isEmpty(), "$f writes no sentence of its own: $literals")
         }
 
+        // LK-79, SS-32, SS-38: the stop moves from setup to the starter page, which has it only with a Box link.
+        val record = StarterRecord(1_000, 2_000, true, null)
+        ok(!record.withStop(false).stopAboveLimit && record.withStop(false).limitSats == 1_000L && record.withStop(false).moveBy == 2_000L, "SS-38: the stop is switched off and the rest of the record is kept")
+        ok(StarterLineSettings.stopOptionShown(true) && !StarterLineSettings.stopOptionShown(false), "SS-38: the option is shown only for a shop with a Box link")
+        ok(StarterLineSettings.stopForNode(record, true) && !StarterLineSettings.stopForNode(record, false) && !StarterLineSettings.stopForNode(record.withStop(false), true), "SS-38: the node is told to stop only when the owner chose it and a Box link carries it")
+        ok(all.any { it.first == "SS32_BOX_ONLY" && it.second == "WORDS_NEEDED_OA_SS32_BOX_ONLY" }, "SS-32: the line on setup that payments show on counters only with a Box is a placeholder")
+        val setupSource = source("src/android/StarterScreens.kt")
+        val limitPage = setupSource.substringAfter("internal fun Controller.showStarterLimit").substringBefore("// ---- making the key")
+        ok(!limitPage.contains("stopLabel") && !limitPage.contains("CheckBox") && limitPage.contains("StarterWords.boxOnly"), "SS-38: setup has no stop option, and says what a Box is for")
+        ok(setupSource.contains("StarterRecord(draft.limitSats, draft.moveBy, false, null)"), "SS-38: a new record starts with the stop off")
+        val useSource = source("src/android/StarterUse.kt")
+        ok(useSource.contains("internal fun Controller.hasBoxLink(): Boolean = false"), "BX-18: the Box link is not wired in yet: the function says no")
+        val manage = useSource.substringAfter("internal fun Controller.showStarterManage").substringBefore("/** SS-43: after the key is deleted")
+        ok(manage.contains("StarterLineSettings.stopOptionShown(hasBoxLink())") && manage.contains("StarterWords.stopLabel") && manage.contains("record.withStop(on)") && manage.contains("starterLineGive(n)"), "SS-38: the starter page has the stop, saves it and gives it to the node")
+        ok(useSource.contains("n.starterLineSet(record.limitSats, StarterLineSettings.stopForNode(record, hasBoxLink()))") && source("src/android/Controller.kt").substringAfter("private fun adopt").substringBefore("val pump = Thread").contains("starterLineGive(n)"), "LK-79: the node is given the limit and the stop when it starts, before it takes blocks")
+
         // SS-33, SS-34: what is found, named, and what refuses.
         ok(StarterChecks.decide(env(), CheckStage.Making, today).verdict == CheckVerdict.Clear, "a clean phone is clear")
         ok(StarterChecks.decide(env(lock = false), CheckStage.Making, today).verdict == CheckVerdict.NoScreenLock, "SS-24: no screen lock, no wallet")

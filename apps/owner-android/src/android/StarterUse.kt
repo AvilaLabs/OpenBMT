@@ -1,6 +1,7 @@
 package org.openbmt.owner.app
 
 import android.view.View
+import android.widget.CheckBox
 import java.io.IOException
 import org.openbmt.app.Format
 import org.openbmt.app.RowItem
@@ -32,6 +33,27 @@ internal fun Controller.starterRecord(): StarterRecord? = try {
     starter.store.loadRecord()
 } catch (_: IOException) {
     null
+}
+
+/**
+ * Whether the shop has a link to a Box (LK-79, SS-38). The own-wallet Box link (BX-18) is built on another branch, so this
+ * says no until that is wired in; the stop option and the stop sent to the node follow it.
+ */
+internal fun Controller.hasBoxLink(): Boolean = false
+
+/**
+ * LK-79: the limit and the stop of the phone's own record, given to the node for the starter line it sends to the counters.
+ * Called when the node starts, before it takes blocks, and when either changes. Nothing is given when the shop is not
+ * pinned to the starter wallet or the record cannot be read.
+ */
+internal fun Controller.starterLineGive(n: OwnerNode) {
+    if (!starterPinned()) return
+    val record = starterRecord() ?: return
+    try {
+        n.starterLineSet(record.limitSats, StarterLineSettings.stopForNode(record, hasBoxLink()))
+    } catch (_: OwnerException) {
+    } catch (_: LinkageError) {
+    }
 }
 
 // ---- a payment that came late (SS-43) ---------------------------------------------------------------------------------------------
@@ -223,6 +245,20 @@ internal fun Controller.showStarterManage() {
     if (starterLate(n).isNotEmpty()) rows.add(RowItem(StarterWords.lateHeading) { showStarterLateMove() })
     if (starter.store.loadPendingTxid() != null) rows.add(RowItem(StarterWords.deleteTitle) { showStarterDelete() })
     views.add(ui.rows(rows))
+    // SS-38: the stop is the owner's choice on this page, and only a shop with a Box link has it.
+    val record = starterRecord()
+    if (record != null && StarterLineSettings.stopOptionShown(hasBoxLink())) {
+        val stop = CheckBox(act).apply { text = StarterWords.stopLabel; isChecked = record.stopAboveLimit }
+        stop.setOnCheckedChangeListener { _, on ->
+            try {
+                starter.store.saveRecord(record.withStop(on))
+                starterLineGive(n)
+            } catch (_: IOException) {
+                stop.isChecked = !on
+            }
+        }
+        views.add(stop)
+    }
     screen(StarterWords.screenTitle, views, listOf(ui.button(StarterWords.backButton) { showHome() }), back = { showHome() })
 }
 

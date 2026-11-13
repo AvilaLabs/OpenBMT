@@ -591,6 +591,7 @@ core's own words, which the binding does not carry yet:
 | SS35_LIMIT_LABEL | Most it may hold |
 | SS35_PRICE_LABEL | Price of one bitcoin |
 | SS35_DATE_LABEL | Move to a key made offline by |
+| SS32_BOX_ONLY | WORDS_NEEDED_OA_SS32_BOX_ONLY |
 | SS38_STOP_LABEL | Stop bitcoin sales above my limit |
 | SS35_LIMIT_INVALID | Type the most the starter wallet may hold, as a whole number. |
 | SS35_DATE_INVALID | Type a date after today. |

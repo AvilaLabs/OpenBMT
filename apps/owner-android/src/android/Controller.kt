@@ -464,6 +464,8 @@ class Controller(internal val act: MainActivity) {
     private fun adopt(id: Int, n: OwnerNode) {
         node = n
         if (setup == null) starterWalletFileFollows(n)
+        // LK-79: the limit and the stop are given before the node takes any block.
+        starterLineGive(n)
         // The service is started while the app is on screen, which Android allows; it waits for the hand-over (OA-82).
         if (watchStore.enabled()) WatchService.start(act)
         pumpFault = null

@@ -69,6 +69,7 @@ object StarterWords {
     val limitLabel = say("SS35_LIMIT_LABEL", "Most it may hold")
     val priceLabel = say("SS35_PRICE_LABEL", "Price of one bitcoin")
     val dateLabel = say("SS35_DATE_LABEL", "Move to a key made offline by")
+    val boxOnly = need("WORDS_NEEDED_OA_SS32_BOX_ONLY")
     val stopLabel = say("SS38_STOP_LABEL", "Stop bitcoin sales above my limit")
     val limitInvalid = say("SS35_LIMIT_INVALID", "Type the most the starter wallet may hold, as a whole number.")
     val dateInvalid = say("SS35_DATE_INVALID", "Type a date after today.")

@@ -2,7 +2,6 @@ package org.openbmt.owner.app
 
 import android.view.View
 import android.widget.Button
-import android.widget.CheckBox
 import android.widget.ImageView
 import android.widget.LinearLayout
 import java.io.File
@@ -24,7 +23,7 @@ import org.openbmt.owner.StarterWalletView
 // of `StarterWords`; what the core says is shown as it arrives. The use of the key is in `StarterUse.kt`.
 
 /** What the setup holds between its screens, in memory only. */
-internal class StarterDraft(val limitSats: Long, val moveBy: Long, val stopAbove: Boolean, val rolls: ByteArray) {
+internal class StarterDraft(val limitSats: Long, val moveBy: Long, val rolls: ByteArray) {
     var wallet: StarterWalletView? = null
     var positions: List<Long> = emptyList()
 
@@ -234,7 +233,6 @@ internal fun Controller.showStarterLimit(message: SayWords? = null) {
     val price = ui.field(StarterWords.priceLabel).also { it.inputType = android.text.InputType.TYPE_CLASS_NUMBER }
     val date = ui.field(StarterWords.dateLabel).also { it.setText(StarterSetup.suggestedDate(nowSecs())) }
     val dice = ui.field(StarterWords.diceLabel)
-    val stop = CheckBox(act).apply { text = StarterWords.stopLabel }
     val views = ArrayList<View>()
     views.add(ui.labelled(StarterWords.limitLabel, limit))
     if (!bitcoinStandard) {
@@ -243,7 +241,8 @@ internal fun Controller.showStarterLimit(message: SayWords? = null) {
         fillPriceIn(note, price, currency, StarterWords.said(StarterWords.priceLabel), { StarterWords.said(StarterWords.priceLabel) }, StarterWords.said(StarterWords.priceLabel))
     }
     views.add(ui.labelled(StarterWords.dateLabel, date))
-    views.add(stop)
+    // SS-32: what a payment from the starter wallet shows on a counter needs a Box; the stop option is on the starter page.
+    views.add(ui.text(StarterWords.boxOnly, 14f))
     views.add(ui.labelled(StarterWords.diceLabel, dice))
     views.add(msg)
     val go = ui.primary(StarterWords.limitContinue) {
@@ -256,7 +255,7 @@ internal fun Controller.showStarterLimit(message: SayWords? = null) {
             rolls == null -> msg.show(words(StarterWords.said(StarterWords.diceInvalid, Tones.STOP)))
             else -> {
                 starter.draft?.wipe()
-                starter.draft = StarterDraft(sats, by, stop.isChecked, rolls)
+                starter.draft = StarterDraft(sats, by, rolls)
                 makeStarter()
             }
         }
@@ -409,7 +408,7 @@ private fun Controller.sealStarter() {
     } catch (e: LinkageError) {
         return centre(AppWords.libraryMissing(e.message), listOf(ui.button(StarterWords.backButton) { starterCancel() }), title = StarterWords.screenTitle)
     }
-    keepSealed(sealed, wallet, StarterRecord(draft.limitSats, draft.moveBy, draft.stopAbove, null)) { ok ->
+    keepSealed(sealed, wallet, StarterRecord(draft.limitSats, draft.moveBy, false, null)) { ok ->
         if (ok) {
             starterLeave()
             // The key and the public wallet are kept; the shop's wallet is written last, and the first counter follows.

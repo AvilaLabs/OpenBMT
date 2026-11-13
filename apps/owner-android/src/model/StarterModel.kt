@@ -147,6 +147,9 @@ class StarterRecord(
 
     fun withNextChange() = StarterRecord(limitSats, moveBy, stopAboveLimit, notYetUntil, changeIndex + 1)
 
+    /** SS-38: the record with the stop switched on or off; the rest is kept. */
+    fun withStop(stop: Boolean) = StarterRecord(limitSats, moveBy, stop, notYetUntil, changeIndex)
+
     companion object {
         fun parse(text: String): StarterRecord {
             val map = HashMap<String, String>()
@@ -162,6 +165,18 @@ class StarterRecord(
             return StarterRecord(num("limit-sats"), num("move-by"), stop == "true", map["not-yet-until"]?.toLongOrNull(), map["change-index"]?.toLongOrNull()?.takeIf { it >= 0 } ?: 0)
         }
     }
+}
+
+/**
+ * What the starter line says of the limit and the stop (LK-79, SS-32, SS-38). A counter learns of the stop only through
+ * the Box, so the option is shown, and the stop is passed to the node, only for a shop with a Box link.
+ */
+object StarterLineSettings {
+    /** SS-38: whether the starter page offers the stop option. */
+    fun stopOptionShown(hasBoxLink: Boolean): Boolean = hasBoxLink
+
+    /** The stop the node is given: the owner's choice, and only while a Box link carries it to the counters. */
+    fun stopForNode(record: StarterRecord, hasBoxLink: Boolean): Boolean = record.stopAboveLimit && hasBoxLink
 }
 
 /** What the owner types at setup (SS-35): the limit, the date, and the die rolls that SS-03 allows. */
