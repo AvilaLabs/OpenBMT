@@ -507,10 +507,10 @@ pub fn no_such_refund_words() -> Words {
 pub fn refund_not_ready_words() -> Words {
     Words::new(
         Tone::Stop,
-        "WORDS_NEEDED_SS30_NOT_READY_HEADING",
-        "WORDS_NEEDED_SS30_NOT_READY_WHAT",
+        "Refund not ready yet",
+        "The customer's payment for this sale has not settled yet, or is no longer on record, so the starter wallet does not pay this refund.",
         Who::Owner,
-        "WORDS_NEEDED_SS30_NOT_READY_NEXT",
+        "Wait until the payment settles. If the sale no longer shows it, look into the sale before paying anything back.",
     )
     .code("SS-30")
 }
@@ -533,6 +533,10 @@ pub fn all_starter_words() -> Vec<(String, Words)> {
     }
     all.push(("StarterHeld".to_string(), held_words()));
     all.push(("StarterNoBitcoin".to_string(), no_bitcoin_words()));
+    all.push((
+        "StarterRefundNotReady".to_string(),
+        refund_not_ready_words(),
+    ));
     all.push(("StarterDeleted".to_string(), deleted_words()));
     all.push(("StarterNoSetup".to_string(), no_setup_words()));
     all.push(("StarterCoinUnreadable".to_string(), coin_unreadable_words()));

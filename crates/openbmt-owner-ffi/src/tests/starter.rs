@@ -870,7 +870,7 @@ fn ss_30_n13e_01_a_refund_whose_payment_a_reorganization_took_is_not_signed_from
     let fault = Rd::error(&node_pay(&rig, handle, &sealed, &data_key, refund)).expect("refused");
     assert_eq!(fault.rule, "starter-refund-ready");
     assert_eq!(fault.words.code.as_deref(), Some("SS-30"));
-    assert!(fault.words.heading.starts_with("WORDS_NEEDED_SS30_"));
+    assert_eq!(fault.words.heading, "Refund not ready yet");
     // A transaction handed to the outbox is refused too, and writes nothing.
     let given = rig.call(
         210,
