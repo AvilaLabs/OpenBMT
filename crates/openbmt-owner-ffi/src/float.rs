@@ -19,8 +19,10 @@ use bitcoin::{Address, Network, OutPoint, ScriptBuf, Transaction, Txid};
 use openbmt_core::wallet::Keychain;
 use openbmt_core::wallet_single::ImportedWallet;
 use openbmt_owner::float::{
-    self, Coin, FloatPaid, FloatRefusal, FloatWallet, FloatWords, RefillError, RefillQueued,
+    self, Coin, FloatPaid, FloatRefusal, FloatSealError, FloatWallet, FloatWords, RefillError,
+    RefillQueued,
 };
+use openbmt_owner::starter::KernelRandom;
 
 use crate::codec::{wire_record, wire_record_get};
 use crate::error::{from_words, refused_by, AppError, Kind};
@@ -150,6 +152,59 @@ pub(crate) fn open(words: String) -> Result<FloatWalletView, AppError> {
     let first = wallet.receive_address(0).map_err(|e| refusal(&e))?;
     Ok(FloatWalletView {
         description: wallet.description().to_string(),
+        first_address: first.to_string(),
+    })
+}
+
+/// The float, sealed (op 171, FL-01, FL-03): the sealed seed for the app to
+/// store, the data key that opens it for the app to wrap with its keystore
+/// key at once and overwrite, and the float's public side.
+#[derive(Clone, PartialEq, Eq)]
+pub struct FloatSealedView {
+    /// The sealed seed (the starter wallet's format, SS-20).
+    pub sealed: Vec<u8>,
+    /// The data key, 32 bytes.
+    pub data_key: Vec<u8>,
+    /// The description with its checksum; it holds no secret.
+    pub description: String,
+    /// The first receive address, mainnet.
+    pub first_address: String,
+}
+
+impl fmt::Debug for FloatSealedView {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "FloatSealedView(<hidden>)")
+    }
+}
+
+wire_record!(FloatSealedView {
+    sealed,
+    data_key,
+    description,
+    first_address
+});
+
+/// Op 171: the 16 bytes of the Compact SeedQR the owner scanned become the
+/// float's seed and are sealed in Rust (FL-01, FL-03). The bytes the app
+/// gave are overwritten here.
+pub(crate) fn seal(
+    mut scan: Vec<u8>,
+    rng: &mut dyn KernelRandom,
+) -> Result<FloatSealedView, AppError> {
+    let made = float::seal_compact_seedqr(&scan, rng);
+    for b in scan.iter_mut() {
+        *b = 0;
+    }
+    std::hint::black_box(&scan);
+    let made = made.map_err(|e| match e {
+        FloatSealError::Float(f) => refusal(&f),
+        FloatSealError::Seal(s) => crate::starter::refusal(&s),
+    })?;
+    let first = made.wallet.receive_address(0).map_err(|e| refusal(&e))?;
+    Ok(FloatSealedView {
+        sealed: made.sealed.sealed.clone(),
+        data_key: made.sealed.data_key.as_bytes().to_vec(),
+        description: made.wallet.description().to_string(),
         first_address: first.to_string(),
     })
 }

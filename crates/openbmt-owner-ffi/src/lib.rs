@@ -93,7 +93,7 @@ pub use counter_views::{
 pub use error::{AppError, Kind};
 pub use float::{
     FloatCoinView, FloatFeeArgs, FloatPaidView, FloatPayArgs, FloatRefillArgs, FloatRefillView,
-    FloatStatusArgs, FloatStatusView, FloatSweepArgs, FloatWalletView,
+    FloatSealedView, FloatStatusArgs, FloatStatusView, FloatSweepArgs, FloatWalletView,
 };
 pub use host::{Entry, KEY1_FILE, MAX_WAIT_MS, SLICE_MS};
 pub use import_view::{ImportKind, ImportView};

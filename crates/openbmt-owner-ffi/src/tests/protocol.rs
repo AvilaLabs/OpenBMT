@@ -146,6 +146,7 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (168, "float_pay"),
         (169, "float_sweep"),
         (170, "float_refill"),
+        (171, "float_seal"),
         (180, "starter_make"),
         (181, "starter_page"),
         (182, "starter_check_start"),

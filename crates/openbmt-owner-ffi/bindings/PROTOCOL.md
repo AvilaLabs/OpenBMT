@@ -169,6 +169,7 @@ ops run on another; it waits for at most 250 ms.
 168 float_pay        handle zero  args FloatPayArgs -> FloatPaidView
 169 float_sweep      handle zero  args FloatSweepArgs -> FloatPaidView
 170 float_refill     handle node  args FloatRefillArgs -> FloatRefillView
+171 float_seal       handle zero  args list<u8> -> FloatSealedView
 180 starter_make     handle zero  args StarterMakeArgs -> StarterWalletView
 181 starter_page     handle zero  args StarterPageArgs -> StarterImageView
 182 starter_check_start handle zero  args () -> StarterCheckView
@@ -363,6 +364,7 @@ OwnSpendTakenView: record: id: u32, txid: list<u8>, fee: u64, sends: list<SendRo
 OwnSpendBuildArgs: record: now: u64, fee_rate: u64, picked: list<u32>
 OwnSpendTakeArgs: record: now: u64, session: list<u8>, number: u32, returned: list<u8>
 FloatWalletView: record: description: string, first_address: string
+FloatSealedView: record: sealed: list<u8>, data_key: list<u8>, description: string, first_address: string
 FloatStatusArgs: record: cap: u64, confirmed: u64, unconfirmed_incoming: u64
 FloatStatusView: record: held: u64, low: bool, refill: option<u64>
 FloatFeeArgs: record: recent: option<u64>, typed: option<u64>

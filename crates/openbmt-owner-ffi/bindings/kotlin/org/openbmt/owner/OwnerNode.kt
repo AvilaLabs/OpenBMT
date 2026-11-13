@@ -168,6 +168,7 @@ private const val OP_FLOAT_FEE_RATE = 167
 private const val OP_FLOAT_PAY = 168
 private const val OP_FLOAT_SWEEP = 169
 private const val OP_FLOAT_REFILL = 170
+private const val OP_FLOAT_SEAL = 171
 private const val OP_STARTER_MAKE = 180
 private const val OP_STARTER_PAGE = 181
 private const val OP_STARTER_CHECK_START = 182
@@ -556,6 +557,17 @@ class OwnSpendTaken(val id: Long, val txid: ByteArray, val fee: Long, val sends:
 
 /** The refund float the 12 words open (FL-01, FL-02): [description] holds no secret and is what the app keeps. */
 class FloatWalletView(val description: String, val firstAddress: String)
+
+/**
+ * The float, sealed (FL-01, FL-03): [sealed] is stored by the app, [dataKey] is wrapped with the Keystore key at
+ * once and then [wipe]d, and [wallet] holds no secret.
+ */
+class FloatSealed(val sealed: ByteArray, val dataKey: ByteArray, val wallet: FloatWalletView) {
+    /** Overwrites the data key with zeros. */
+    fun wipe() {
+        java.util.Arrays.fill(dataKey, 0.toByte())
+    }
+}
 
 /** What the cap says of the float (FL-10 to FL-12): [refill] is null when there is no room or no cap. */
 class FloatStatus(val held: Long, val low: Boolean, val refill: Long?)
@@ -1869,6 +1881,16 @@ private fun Reader.starterSealed(): StarterSealed {
     return StarterSealed(sealed, key)
 }
 
+/** The sealed seed, data key and public side of a sealed float, copied out; the response that held the key is overwritten. */
+private fun Reader.floatSealed(): FloatSealed {
+    val sealed = bytes()
+    val key = bytes()
+    val wallet = FloatWalletView(string(), string())
+    end()
+    wipe()
+    return FloatSealed(sealed, key, wallet)
+}
+
 private fun Reader.importKind(): Boolean =
     when (u8()) {
         TAG_IMPORT_KIND_SINGLE -> false
@@ -3165,6 +3187,18 @@ object OwnerFloat {
     fun open(words: String): FloatWalletView {
         val r = call(OP_FLOAT_OPEN, 0) { it.string(words) }
         return FloatWalletView(r.string(), r.string()).also { r.end() }
+    }
+
+    /**
+     * FL-01, FL-03: the 16 bytes of the Compact SeedQR the owner scanned become the float's seed and are sealed
+     * in the library; no words cross as text. [scan] is overwritten as soon as the request is written.
+     */
+    fun seal(scan: ByteArray): FloatSealed {
+        try {
+            return callSecret(OP_FLOAT_SEAL, 0) { it.bytes(scan) }.floatSealed()
+        } finally {
+            java.util.Arrays.fill(scan, 0.toByte())
+        }
     }
 
     /** FL-10 to FL-12: what the cap says of a float holding [confirmed] and [unconfirmedIncoming] satoshis. */

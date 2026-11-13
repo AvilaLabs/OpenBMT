@@ -42,6 +42,7 @@ pub use openbmt_spend::Coin;
 
 use crate::error::OwnerError;
 use crate::single_key::{check_pays_only, sign_p2wpkh_inputs, Breach};
+use crate::starter::{seal_seed, KernelRandom, Sealed, Seed, StarterRefusal, ENTROPY_BYTES};
 use crate::state::Owner;
 use crate::types::CashAmount;
 
@@ -408,6 +409,47 @@ fn wipe(bytes: &mut [u8]) {
     }
     // Keep the writes from being dropped as dead stores.
     std::hint::black_box(&bytes);
+}
+
+/// FL-03: what [`seal_compact_seedqr`] gives: the sealed seed, which the
+/// app stores, with the data key that opens it, which the app wraps with its
+/// keystore key at once; and the float's public wallet, which holds no
+/// secret.
+#[derive(Debug)]
+pub struct FloatSealed {
+    /// The sealed seed and its data key.
+    pub sealed: Sealed,
+    /// The float's public wallet.
+    pub wallet: FloatWallet,
+}
+
+/// Why the words of a scan were not sealed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FloatSealError {
+    /// The scan is not the 16 bytes of a Compact SeedQR of 12 words (FL-01).
+    Float(FloatRefusal),
+    /// The sealing itself was refused: the kernel gave no usable bytes
+    /// (SS-02).
+    Seal(StarterRefusal),
+}
+
+/// FL-01, FL-03: the 16 bytes of a Compact SeedQR the owner scanned, turned
+/// into the float's seed here and sealed as the starter wallet's seed is
+/// sealed (SS-20): the words are never text outside this call. The sealed
+/// seed opens with `starter::wallet_of_sealed`, the data key is given back
+/// once, and the entropy of the scan is the caller's to overwrite.
+pub fn seal_compact_seedqr(
+    entropy: &[u8],
+    rng: &mut dyn KernelRandom,
+) -> Result<FloatSealed, FloatSealError> {
+    let words = FloatWords::from_compact_seedqr(entropy).map_err(FloatSealError::Float)?;
+    let wallet = FloatWallet::from_words(&words).map_err(FloatSealError::Float)?;
+    let mut bytes = <[u8; ENTROPY_BYTES]>::try_from(entropy)
+        .map_err(|_| FloatSealError::Float(FloatRefusal::Words))?;
+    let seed = Seed::from_entropy(bytes);
+    wipe(&mut bytes);
+    let sealed = seal_seed(&seed, rng).map_err(FloatSealError::Seal)?;
+    Ok(FloatSealed { sealed, wallet })
 }
 
 /// The float's wallet and its account key, only inside one call.

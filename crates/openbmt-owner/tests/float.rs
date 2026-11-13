@@ -770,3 +770,38 @@ fn fl_address_type_is_mainnet_native_segwit() {
     let a: Address = float().receive_address(0).unwrap();
     assert!(a.to_string().starts_with("bc1q"));
 }
+
+/// Kernel reads that are fixed, never weak and never repeated.
+struct Steady(u8);
+
+impl openbmt_owner::starter::KernelRandom for Steady {
+    fn read32(&mut self) -> Option<[u8; 32]> {
+        self.0 = self.0.wrapping_add(1);
+        let step = self.0;
+        Some(std::array::from_fn(|i| {
+            step.wrapping_mul(31).wrapping_add(i as u8)
+        }))
+    }
+}
+
+#[test]
+fn fl_03_a_scanned_seedqr_is_sealed_and_opens_to_the_floats_own_wallet() {
+    let entropy = bip39::Mnemonic::parse_in_normalized(bip39::Language::English, BIP85_CHILD_0)
+        .unwrap()
+        .to_entropy();
+    let made = seal_compact_seedqr(&entropy, &mut Steady(0)).unwrap();
+    let opened =
+        openbmt_owner::starter::wallet_of_sealed(&made.sealed.sealed, &made.sealed.data_key)
+            .unwrap();
+    let float = FloatWallet::from_words(&float_words()).unwrap();
+    assert_eq!(made.wallet, float);
+    assert_eq!(
+        opened.receive_address(0).unwrap().to_string(),
+        float.receive_address(0).unwrap().to_string()
+    );
+    // A scan of another length is refused, and a dry kernel seals nothing.
+    assert_eq!(
+        seal_compact_seedqr(&entropy[..15], &mut Steady(0)).unwrap_err(),
+        FloatSealError::Float(FloatRefusal::Words)
+    );
+}

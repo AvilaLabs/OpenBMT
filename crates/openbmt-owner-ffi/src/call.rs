@@ -148,7 +148,8 @@ use crate::counter_views::{
 use crate::error::{internal, refused_by, wrong_state, AppError};
 use crate::float::{
     self as float_ops, FloatCoinView, FloatFeeArgs, FloatPaidView, FloatPayArgs, FloatRefillArgs,
-    FloatRefillView, FloatStatusArgs, FloatStatusView, FloatSweepArgs, FloatWalletView,
+    FloatRefillView, FloatSealedView, FloatStatusArgs, FloatStatusView, FloatSweepArgs,
+    FloatWalletView,
 };
 use crate::host::{real_spawn, Entry, Spawn};
 use crate::import_view::{self, ImportKind, ImportView};
@@ -825,6 +826,9 @@ fn build_ops() -> Vec<Op> {
         op(170, "float_refill", Node, |c, a: FloatRefillArgs| {
             c.entry()?.float_refill(a)
         }),
+        op(171, "float_seal", Zero, |c, scan: Vec<u8>| {
+            c.starter().with_rng(|rng| float_ops::seal(scan, rng))
+        }),
         op(180, "starter_make", Zero, |c, a: StarterMakeArgs| {
             starter_ops::make(c.starter(), a)
         }),
@@ -1243,6 +1247,7 @@ fn definitions() -> Vec<TypeDef> {
         OwnSpendBuildArgs::define(),
         OwnSpendTakeArgs::define(),
         FloatWalletView::define(),
+        FloatSealedView::define(),
         FloatStatusArgs::define(),
         FloatStatusView::define(),
         FloatFeeArgs::define(),

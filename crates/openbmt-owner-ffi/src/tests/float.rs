@@ -11,6 +11,7 @@ use bitcoin::transaction::Version;
 use bitcoin::{Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid, Witness};
 use openbmt_core::wallet::Keychain;
 use openbmt_owner::float::{FloatWallet, FloatWords};
+use openbmt_owner::starter::{wallet_of_sealed, DataKey, KernelRandom};
 
 use super::import::descriptor;
 use super::kit::Rig;
@@ -24,6 +25,7 @@ const OP_FEE: u16 = 167;
 const OP_PAY: u16 = 168;
 const OP_SWEEP: u16 = 169;
 const OP_REFILL: u16 = 170;
+const OP_SEAL: u16 = 171;
 
 fn call(op: u16, fields: &[u8]) -> Vec<u8> {
     dispatch(&Registry::new(), &frame(op, 0, fields))
@@ -291,4 +293,90 @@ fn fl_30_a_refill_is_queued_through_the_node_and_refused_above_the_cap() {
     let w = W::new().string("nope").u32(0).u64(10).u64(0).u64(0).u8(0);
     let fault = Rd::error(&rig.call(OP_REFILL, handle, &w.0)).expect("refused");
     assert_eq!(fault.rule, "FL-30");
+}
+
+/// Kernel reads that are fixed and never weak or repeated.
+struct Steady(u8);
+
+impl KernelRandom for Steady {
+    fn read32(&mut self) -> Option<[u8; 32]> {
+        self.0 = self.0.wrapping_add(1);
+        let step = self.0;
+        Some(std::array::from_fn(|i| {
+            step.wrapping_mul(31).wrapping_add(i as u8)
+        }))
+    }
+}
+
+/// The 16 bytes of a Compact SeedQR of `WORDS`: the BIP-85 specification's
+/// entropy for its first 12-word child.
+fn scan_bytes() -> Vec<u8> {
+    let hex = "6250b68daf746d12a24d58b4787a714b";
+    let bytes: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+        .collect();
+    let words = FloatWords::from_compact_seedqr(&bytes).unwrap();
+    assert_eq!(words.as_str(), WORDS);
+    bytes
+}
+
+fn seal_registry() -> Registry {
+    let reg = Registry::new();
+    *reg.starter.rng.lock().unwrap() = Some(Box::new(Steady(0)));
+    reg
+}
+
+#[test]
+fn fl_03_a_scanned_seedqr_is_sealed_in_the_library_and_no_word_comes_back() {
+    let scan = scan_bytes();
+    let reg = seal_registry();
+    let response = dispatch(&reg, &frame(OP_SEAL, 0, &W::new().bytes(&scan).0));
+    let mut r = Rd::ok(&response);
+    let (sealed, key, description, first) = (r.bytes(), r.bytes(), r.string(), r.string());
+    r.done();
+    assert_eq!(key.len(), 32);
+    assert_eq!(description, float().description());
+    assert_eq!(first, float().receive_address(0).unwrap().to_string());
+    // The sealed seed opens, with the starter wallet's seal, to the float's own wallet.
+    let opened = wallet_of_sealed(&sealed, &DataKey::from_slice(&key).unwrap()).unwrap();
+    assert_eq!(
+        opened.receive_address(0).unwrap().to_string(),
+        float().receive_address(0).unwrap().to_string()
+    );
+    // Neither the entropy nor a word is in the sealed seed or the response.
+    assert!(!response.windows(scan.len()).any(|w| w == scan.as_slice()));
+    assert!(!String::from_utf8_lossy(&response).contains("galaxy"));
+    assert_eq!(sealed.len(), 1 + 12 + 16 + 16);
+}
+
+#[test]
+fn fl_01_a_scan_that_is_not_a_compact_seedqr_of_12_words_is_refused_and_seals_nothing() {
+    let reg = seal_registry();
+    for scan in [vec![], vec![7u8; 15], vec![7u8; 17], vec![7u8; 32]] {
+        let fault = Rd::error(&dispatch(
+            &reg,
+            &frame(OP_SEAL, 0, &W::new().bytes(&scan).0),
+        ))
+        .expect("refused");
+        assert_eq!(fault.rule, "FL-01");
+    }
+}
+
+#[test]
+fn fl_03_a_kernel_that_gives_nothing_usable_seals_nothing() {
+    struct Dry;
+    impl KernelRandom for Dry {
+        fn read32(&mut self) -> Option<[u8; 32]> {
+            None
+        }
+    }
+    let reg = Registry::new();
+    *reg.starter.rng.lock().unwrap() = Some(Box::new(Dry));
+    let fault = Rd::error(&dispatch(
+        &reg,
+        &frame(OP_SEAL, 0, &W::new().bytes(&scan_bytes()).0),
+    ))
+    .expect("refused");
+    assert!(fault.rule.starts_with("SS-"), "{}", fault.rule);
 }

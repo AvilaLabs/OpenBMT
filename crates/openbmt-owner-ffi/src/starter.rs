@@ -95,7 +95,7 @@ impl StarterSlot {
         self.session.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn with_rng<R>(&self, f: impl FnOnce(&mut dyn KernelRandom) -> R) -> R {
+    pub(crate) fn with_rng<R>(&self, f: impl FnOnce(&mut dyn KernelRandom) -> R) -> R {
         #[cfg(test)]
         {
             if let Some(rng) = self.rng.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
