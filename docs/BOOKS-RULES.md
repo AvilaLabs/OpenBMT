@@ -406,5 +406,5 @@ specification, written before the code.
 - **BK-48.** The library does the reading and the matching (`openbmt-books`,
   no network, no clock of its own). The owner app's part is picking the
   file, the mapping screen and showing the lists, with words under
-  `docs/SCREEN-RULES.md`; until they are written a placeholder constant
-  `WORDS_NEEDED_BK_xxx` names the rule.
+  `docs/SCREEN-RULES.md`. The library gives the words of a file that does
+  not read, one for each cause, naming the line (BK-46).

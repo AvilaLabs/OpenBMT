@@ -23,9 +23,7 @@ use openbmt_core::say::{sats, Quoted, Tone, Who, Words};
 use openbmt_watch::say::RefusalGroup;
 use openbmt_watch::Problem;
 
-use crate::bill_say::{
-    all_bill_words, needed, WORDS_NEEDED_CR_245_BAD, WORDS_NEEDED_CR_253_UNREAD,
-};
+use crate::bill_say::all_bill_words;
 use crate::desk::Role;
 use crate::heartbeat::{HeartbeatView, NotVerified};
 use crate::refund::{RefundState, RefundView};
@@ -51,7 +49,7 @@ const OTHER_PAYMENT_NEXT: &str =
     "Take another kind of payment. Tell the owner: the counter cannot check payments.";
 
 /// Words for a refusal: nothing happened, so the tone is neutral.
-fn refused(
+pub(crate) fn refused(
     heading: &str,
     what: impl Into<String>,
     who: Who,
@@ -64,7 +62,7 @@ fn refused(
 /// SC-10: the program's own fault, a write that did not happen. `undone`
 /// says which step was not done ("the sale was not started"), so the cases
 /// differ; the system's text goes in the detail.
-fn store_failed<E: Display>(
+pub(crate) fn store_failed<E: Display>(
     fault: &StoreFault<E>,
     heading: &str,
     undone: &str,
@@ -90,7 +88,7 @@ fn store_failed<E: Display>(
 }
 
 /// What to do after a failed write when the step can be tried once more.
-const RETRY_NEXT: &str =
+pub(crate) const RETRY_NEXT: &str =
     "Try once more. If it fails again, tell the owner: the counter cannot save. See Details.";
 /// The same, for a step that sells.
 const RETRY_OTHER_NEXT: &str = "Try once more. If it fails again, take another kind of payment and tell the owner: the counter cannot save. See Details.";
@@ -592,7 +590,13 @@ impl<E: Display> OpenRefused<E> {
                 "CR-61",
             ),
             Self::BadNote => note_not_read(),
-            Self::BadReference => needed(WORDS_NEEDED_CR_245_BAD).code("CR-245"),
+            Self::BadReference => refused(
+                "Sale not opened",
+                "The till reference has a sign or a space that is not allowed, or is over 32 characters, so the sale was not opened.",
+                Who::Cashier,
+                "Type the reference again as the till shows it, without spaces.",
+                "CR-245",
+            ),
             Self::AddressNotStored(fault) => store_failed(
                 fault,
                 "Payment code not saved",
@@ -1253,9 +1257,15 @@ impl LoadError {
             // addresses are the same case as saved batches, and are told the
             // same.
             Self::Bills(e) => {
-                return needed(WORDS_NEEDED_CR_253_UNREAD)
-                    .code("CR-253")
-                    .detail(e.to_string())
+                return Words::new(
+                    Tone::Stop,
+                    "Saved bills unreadable",
+                    "The counter's saved bills and tabs do not read back, so it did not start and nothing was changed.",
+                    Who::Owner,
+                    "Restart the counter. If it stays, the saved files need to be put back from a copy. See Details.",
+                )
+                .code("CR-253")
+                .detail(e.to_string())
             }
             Self::Batches(e) | Self::Ranges(e) => (
                 "Saved addresses unreadable",

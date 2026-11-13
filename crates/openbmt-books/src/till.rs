@@ -614,61 +614,85 @@ impl Books {
     }
 }
 
-/// BK-48: the placeholder of the words of a refusal of the till's file,
-/// until the words are written under `docs/SCREEN-RULES.md`.
-fn needed(placeholder: &'static str) -> Words {
-    Words::new(
-        Tone::Stop,
-        placeholder,
-        format!("{placeholder}_WHAT."),
-        Who::Owner,
-        format!("{placeholder}_NEXT."),
+/// BK-46: a line that is not written as a CSV file is.
+fn csv(what: String) -> (&'static str, String, &'static str) {
+    (
+        "Till file does not read",
+        what,
+        "Nothing was changed. Export the file from the till again as CSV, then open it. Do not change it in a spreadsheet first.",
     )
-    .code("BK-46")
 }
 
-/// BK-46: the placeholder constants of the words of the till's file.
-pub const WORDS_NEEDED_BK_46_MAP: &str = "WORDS_NEEDED_BK_46_MAP";
-/// BK-46: the file is more than 8 MiB.
-pub const WORDS_NEEDED_BK_46_SIZE: &str = "WORDS_NEEDED_BK_46_SIZE";
-/// BK-46: the file has more than 100,000 lines.
-pub const WORDS_NEEDED_BK_46_LINES: &str = "WORDS_NEEDED_BK_46_LINES";
-/// BK-46: a line is not UTF-8.
-pub const WORDS_NEEDED_BK_46_UTF8: &str = "WORDS_NEEDED_BK_46_UTF8";
-/// BK-46: a line breaks RFC 4180 (a quote or an empty line).
-pub const WORDS_NEEDED_BK_46_CSV: &str = "WORDS_NEEDED_BK_46_CSV";
-/// BK-46: a line has fewer fields than the mapping reaches.
-pub const WORDS_NEEDED_BK_46_FIELDS: &str = "WORDS_NEEDED_BK_46_FIELDS";
-/// BK-46: an amount is not a decimal number.
-pub const WORDS_NEEDED_BK_46_AMOUNT: &str = "WORDS_NEEDED_BK_46_AMOUNT";
-/// BK-46: a time is not a date or Unix seconds.
-pub const WORDS_NEEDED_BK_46_TIME: &str = "WORDS_NEEDED_BK_46_TIME";
-
 impl TillCsvError {
-    /// What the owner is told when the till's file is refused: the
-    /// placeholder of the cause, with the line in the details (BK-48).
+    /// What the owner is told when the till's file is refused, naming the
+    /// line (BK-46, BK-48). Nothing was read from it.
     pub fn words(&self) -> Words {
-        let placeholder = match self.problem {
-            TillCsvProblem::Mapping(_) => WORDS_NEEDED_BK_46_MAP,
-            TillCsvProblem::TooLarge => WORDS_NEEDED_BK_46_SIZE,
-            TillCsvProblem::TooManyLines => WORDS_NEEDED_BK_46_LINES,
-            TillCsvProblem::NotUtf8 => WORDS_NEEDED_BK_46_UTF8,
-            TillCsvProblem::UnclosedQuote
-            | TillCsvProblem::TextAfterQuote
-            | TillCsvProblem::QuoteInField
-            | TillCsvProblem::EmptyLine
-            | TillCsvProblem::FieldTooLong => WORDS_NEEDED_BK_46_CSV,
-            TillCsvProblem::TooFewFields => WORDS_NEEDED_BK_46_FIELDS,
-            TillCsvProblem::BadAmount => WORDS_NEEDED_BK_46_AMOUNT,
-            TillCsvProblem::BadTime => WORDS_NEEDED_BK_46_TIME,
+        let line = self.line;
+        let (heading, what, next) = match self.problem {
+            TillCsvProblem::Mapping(MappingError::SameColumn) => (
+                "Till columns not set right",
+                "Two of the till's columns were picked as the same column.".to_string(),
+                "Nothing was changed. Pick the till's columns again, each one once.",
+            ),
+            TillCsvProblem::Mapping(MappingError::BitcoinType) => (
+                "Till columns not set right",
+                "The till's name for a bitcoin payment is empty, too long or holds a sign that is not text.".to_string(),
+                "Nothing was changed. Type the payment type exactly as the till writes it for bitcoin.",
+            ),
+            TillCsvProblem::TooLarge => (
+                "Till file too large",
+                "The till's file is over 8 MiB, which is more than is read.".to_string(),
+                "Nothing was changed. Export a shorter period from the till, such as one week, and open that.",
+            ),
+            TillCsvProblem::TooManyLines => (
+                "Till file too long",
+                "The till's file has over 100,000 lines, which is more than is read.".to_string(),
+                "Nothing was changed. Export a shorter period from the till, such as one week, and open that.",
+            ),
+            TillCsvProblem::NotUtf8 => (
+                "Till file not plain text",
+                format!("Line {line} of the till's file is not plain text that this phone reads."),
+                "Nothing was changed. Export the file from the till again as plain-text CSV, then open it.",
+            ),
+            TillCsvProblem::UnclosedQuote => csv(format!(
+                "Line {line} of the till's file opens a quote that never closes."
+            )),
+            TillCsvProblem::TextAfterQuote => csv(format!(
+                "Line {line} of the till's file has text right after a closing quote."
+            )),
+            TillCsvProblem::QuoteInField => csv(format!(
+                "Line {line} of the till's file has a quote in the middle of a column."
+            )),
+            TillCsvProblem::EmptyLine => {
+                csv(format!("Line {line} of the till's file is empty."))
+            }
+            TillCsvProblem::FieldTooLong => csv(format!(
+                "A column on line {line} of the till's file is longer than is read."
+            )),
+            TillCsvProblem::TooFewFields => (
+                "Till line too short",
+                format!("Line {line} of the till's file has fewer columns than the ones picked."),
+                "Nothing was changed. Check that the right file is open and that the picked columns are this till's.",
+            ),
+            TillCsvProblem::BadAmount => (
+                "Till amount does not read",
+                format!("The amount on line {line} of the till's file is not a plain number."),
+                "Nothing was changed. Check that the picked amount column is right, and export the file from the till again.",
+            ),
+            TillCsvProblem::BadTime => (
+                "Till time does not read",
+                format!("The time on line {line} of the till's file is not a date this phone reads."),
+                "Nothing was changed. Check that the picked time column is right, and export the file from the till again.",
+            ),
         };
-        needed(placeholder).detail(self.to_string())
+        Words::new(Tone::Stop, heading, what, Who::Owner, next)
+            .code("BK-46")
+            .detail(self.to_string())
     }
 }
 
-/// SC-12: the words of every refusal of the till's file, one for each
-/// placeholder. Kept apart from [`crate::say::all_words`] until the words are
-/// written.
+/// SC-12: the words of every refusal of the till's file, one for each way
+/// it is refused.
 pub fn till_words() -> Vec<(String, Words)> {
     use TillCsvProblem as P;
     [

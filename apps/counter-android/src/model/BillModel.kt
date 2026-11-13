@@ -7,106 +7,105 @@ import org.openbmt.counter.PartWay
 import org.openbmt.counter.SaleInfo
 
 /**
- * CR-245 to CR-254: the labels of bills, tabs and the till's reference. No words are written yet (CR-255): every
- * label is the placeholder of its rule, which a person sees as it is until the words are written under
- * `docs/SCREEN-RULES.md`. A heading is under 28 characters.
+ * CR-245 to CR-254: the labels of bills, tabs and the till's reference (CR-255, `docs/SCREEN-RULES.md`). A label
+ * is under 28 characters.
  */
 object WordsOfBills {
     /** CR-246: the title of the list of bills, and the button on Home that opens it. */
-    const val BILLS = "WORDS_NEEDED_CR_246_BILLS"
+    const val BILLS = "Bills and tabs"
 
     /** CR-246: the button that opens a bill. */
-    const val NEW_BILL = "WORDS_NEEDED_CR_246_NEWBILL"
+    const val NEW_BILL = "New bill"
 
     /** CR-246: the button that opens a tab. */
-    const val NEW_TAB = "WORDS_NEEDED_CR_246_NEW_TAB"
+    const val NEW_TAB = "New tab"
 
     /** CR-246: the line of the list when no bill is open. */
-    const val NONE = "WORDS_NEEDED_CR_246_NONE"
+    const val NONE = "No bill or tab is open."
 
     /** CR-246: the label of the amount of a bill or a tab. */
-    const val AMOUNT = "WORDS_NEEDED_CR_246_AMOUNT"
+    const val AMOUNT = "Amount"
 
     /** CR-246: the state of a bill that is open. */
-    const val STATE_OPEN = "WORDS_NEEDED_CR_246_OPEN"
+    const val STATE_OPEN = "Open"
 
     /** CR-246: the state of a tab that is open. */
-    const val STATE_TAB = "WORDS_NEEDED_CR_246_TAB"
+    const val STATE_TAB = "Tab open"
 
     /** CR-246: the state of a bill that is settled. */
-    const val STATE_SETTLED = "WORDS_NEEDED_CR_246_SETTLED"
+    const val STATE_SETTLED = "Paid"
 
     /** CR-246: the state of a bill closed short. */
-    const val STATE_SHORT = "WORDS_NEEDED_CR_246_SHORT"
+    const val STATE_SHORT = "Closed short"
 
     /** CR-246: the state of a bill cancelled. */
-    const val STATE_CANCELLED = "WORDS_NEEDED_CR_246_CANCEL"
+    const val STATE_CANCELLED = "Cancelled"
 
     /** CR-245: the label of the till's reference. */
-    const val REFERENCE = "WORDS_NEEDED_CR_245_REF"
+    const val REFERENCE = "Till reference"
 
     /** CR-245: the hint of the reference field. */
-    const val REFERENCE_HINT = "WORDS_NEEDED_CR_245_HINT"
+    const val REFERENCE_HINT = "Check or receipt number"
 
     /** CR-245: the button that adds a reference to a sale or a bill that has none. */
-    const val ADD_REFERENCE = "WORDS_NEEDED_CR_245_ADD"
+    const val ADD_REFERENCE = "Add till reference"
 
     /** CR-249: the label of what a bill has received. */
-    const val RECEIVED = "WORDS_NEEDED_CR_249_GOT"
+    const val RECEIVED = "Paid so far"
 
     /** CR-249: the label of what is left of a bill. */
-    const val LEFT = "WORDS_NEEDED_CR_249_LEFT"
+    const val LEFT = "Left to pay"
 
     /** CR-249: the label of the parts that are not paid yet. */
-    const val PENDING = "WORDS_NEEDED_CR_249_PENDING"
+    const val PENDING = "On its way"
 
     /** CR-247: the button that takes a bitcoin part. */
-    const val PART_BITCOIN = "WORDS_NEEDED_CR_247_BITCOIN"
+    const val PART_BITCOIN = "Take a bitcoin payment"
 
     /** CR-247: the button that takes a part paid another way. */
-    const val PART_OTHER = "WORDS_NEEDED_CR_247_OTHER"
+    const val PART_OTHER = "Paid another way"
 
     /** CR-247: the labels of the ways a part was paid, in the order cash, card, other. */
-    val WAYS = listOf("WORDS_NEEDED_CR_247_CASH", "WORDS_NEEDED_CR_247_CARD", "WORDS_NEEDED_CR_247_ELSE")
+    val WAYS = listOf("Cash", "Card", "Other")
 
     /** CR-248: the button that joins a sale, such as a paid request, to a bill. */
-    const val JOIN = "WORDS_NEEDED_CR_248_JOIN"
+    const val JOIN = "Add a sale already taken"
 
     /** CR-248: the title of the list of sales that can be joined. */
-    const val JOIN_PICK = "WORDS_NEEDED_CR_248_PICK"
+    const val JOIN_PICK = "Pick the sale to add"
 
     /** CR-250: the button that splits what is left. */
-    const val SPLIT = "WORDS_NEEDED_CR_250_SPLIT"
+    const val SPLIT = "Split what is left"
 
     /** CR-250: the label of the number of people. */
-    const val PEOPLE = "WORDS_NEEDED_CR_250_PEOPLE"
+    const val PEOPLE = "Number of people"
 
     /** CR-250: the label of what each pays. */
-    const val EACH = "WORDS_NEEDED_CR_250_EACH"
+    const val EACH = "Each pays"
 
     /** CR-251: the button that raises or lowers a tab. */
-    const val CHANGE_TAB = "WORDS_NEEDED_CR_251_CHANGE"
+    const val CHANGE_TAB = "Change the tab"
 
     /** CR-251: the button that finishes a tab. */
-    const val FINISH_TAB = "WORDS_NEEDED_CR_251_FINISH"
+    const val FINISH_TAB = "Finish the tab"
 
     /** CR-252: the button that closes a bill short. */
-    const val CLOSE_SHORT = "WORDS_NEEDED_CR_252_CLOSE"
+    const val CLOSE_SHORT = "Close short"
 
     /** CR-252: the button that cancels a bill. */
-    const val CANCEL_BILL = "WORDS_NEEDED_CR_252_CANCEL"
+    const val CANCEL_BILL = "Cancel the bill"
 
     /** CR-252: the label of what was not paid when a bill was closed short. */
-    const val UNPAID = "WORDS_NEEDED_CR_252_UNPAID"
+    const val UNPAID = "Not paid"
 
     /** CR-254: the label of the sale's number on the Paid screen. */
-    const val SALE_NUMBER = "WORDS_NEEDED_CR_254_NUMBER"
+    const val SALE_NUMBER = "Sale number"
 
     /** CR-254: the label of the till's reference on the Paid screen. */
-    const val SALE_REFERENCE = "WORDS_NEEDED_CR_254_REF"
+    const val SALE_REFERENCE = "Reference for the till"
 
     /** CR-254: the label of the number of the bill the sale is a part of, on the Paid screen. */
-    const val SALE_BILL = "WORDS_NEEDED_CR_254_BILL"
+    const val SALE_BILL = "Bill number"
 
     /** Every label, for the test that checks them all. */
     fun all(): List<String> = listOf(

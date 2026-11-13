@@ -65,7 +65,7 @@ by hand. To write it again, run the test
 | OpenRefused::AddressInUse | Payment code in use | The next payment code is already used by another sale. | Take another kind of payment and tell the owner: a payment code was used twice. | the cashier | CR-02 |
 | OpenRefused::BadName | Sale not opened | The name of the person at the till must be plain text of 1 to 64 characters, so the sale was not opened. | Sign in again, or ask a manager to rename the cashier. | the cashier | CR-61 |
 | OpenRefused::BadNote | Note not accepted | A note must be plain text of 1 to 64 characters, so it was not saved. | Type it again, shorter. | the cashier | CR-206 |
-| OpenRefused::BadReference | WORDS_NEEDED_CR_245_BAD | WORDS_NEEDED_CR_245_BAD_WHAT. | WORDS_NEEDED_CR_245_BAD_NEXT. | the cashier | CR-245 |
+| OpenRefused::BadReference | Sale not opened | The till reference has a sign or a space that is not allowed, or is over 32 characters, so the sale was not opened. | Type the reference again as the till shows it, without spaces. | the cashier | CR-245 |
 | OpenRefused::AddressNotStored | Payment code not saved | The counter could not save it, so no payment code was handed out. | Try once more. If it fails again, take another kind of payment and tell the owner: the counter cannot save. See Details. | the cashier | CR-03 |
 | OpenRefused::Store | Sale not started | The counter could not save it, so the sale was not started. | Try once more. If it fails again, take another kind of payment and tell the owner: the counter cannot save. See Details. | the cashier | CR-40 |
 | OpenRefused::Store/Record | Sale not started | The counter could not write its record, so the sale was not started. | Try once more. If it fails again, take another kind of payment and tell the owner: the counter cannot save. See Details. | the cashier | CR-40 |
@@ -142,7 +142,7 @@ by hand. To write it again, run the test
 | LoadError::Exposure | Saved totals unreadable | The counter's saved total of payments accepted before a block does not read back, so it did not start. | Restart the counter. If it stays, the saved files need to be put back from a copy. See Details. | the owner | CR-42 |
 | LoadError::Pause | Saved pause unreadable | The counter's saved pause state does not read back, so it did not start and nothing was changed. | Restart the counter. If it stays, the saved files need to be put back from a copy. See Details. | the owner | CR-42 |
 | LoadError::Desk | Saved counter unreadable | The counter's own saved state does not read back, so it did not start and nothing was changed. | Restart the counter. If it stays, the saved files need to be put back from a copy. See Details. | the owner | CR-42 |
-| LoadError::Bills | WORDS_NEEDED_CR_253_UNREAD | WORDS_NEEDED_CR_253_UNREAD_WHAT. | WORDS_NEEDED_CR_253_UNREAD_NEXT. | the cashier | CR-253 |
+| LoadError::Bills | Saved bills unreadable | The counter's saved bills and tabs do not read back, so it did not start and nothing was changed. | Restart the counter. If it stays, the saved files need to be put back from a copy. See Details. | the owner | CR-253 |
 | LoadError::Records | Saved records do not match | The counter's saved sale records do not check out, so it did not start and nothing was changed. | Restart the counter. If it stays, the saved files need to be put back from a copy. See Details. | the owner | CR-42 |
 | LoadError::RecordsUnread | Saved records unreadable | The counter's saved sale records could not be read back, so it did not start and nothing was changed. | Restart the counter. If it stays, the saved files need to be put back from a copy. See Details. | the owner | CR-42 |
 | DestinationRefused::TooLong | Code is too long | The scanned code is too long to be an address. | Scan the code again, or ask the customer for an address from their own wallet. | the cashier | CR-62 |
@@ -182,31 +182,32 @@ by hand. To write it again, run the test
 | TotalsRefused::Overflow | Day too large to count | A sum of today's sales is too large to count, so nothing is shown. | Tell the owner. The owner's phone has the full books. | the cashier | CR-153 |
 | TotalsRefused::TooManyRecords | Too many records today | Today needs more of the counter's records than one count can read, so nothing is shown. | Tell the owner. The owner's phone has the full books. | the cashier | CR-152 |
 | TotalsRefused::Store | Totals not read | The counter could not save it, so today's totals could not be counted. | Try once more. If it fails again, tell the owner: the counter cannot save. See Details. | the cashier | CR-40 |
-| BillRefused::UnknownSale | WORDS_NEEDED_CR_248_NOSALE | WORDS_NEEDED_CR_248_NOSALE_WHAT. | WORDS_NEEDED_CR_248_NOSALE_NEXT. | the cashier | CR-11 |
-| BillRefused::UnknownBill | WORDS_NEEDED_CR_246_NOBILL | WORDS_NEEDED_CR_246_NOBILL_WHAT. | WORDS_NEEDED_CR_246_NOBILL_NEXT. | the cashier | CR-246 |
-| BillRefused::AlreadyReferenced | WORDS_NEEDED_CR_245_TWICE | WORDS_NEEDED_CR_245_TWICE_WHAT. | WORDS_NEEDED_CR_245_TWICE_NEXT. | the cashier | CR-245 |
-| BillRefused::BadAmount | WORDS_NEEDED_CR_246_AMOUNT | WORDS_NEEDED_CR_246_AMOUNT_WHAT. | WORDS_NEEDED_CR_246_AMOUNT_NEXT. | the cashier | CR-246 |
-| BillRefused::TooManyOpen | WORDS_NEEDED_CR_253_OPEN256 | WORDS_NEEDED_CR_253_OPEN256_WHAT. | WORDS_NEEDED_CR_253_OPEN256_NEXT. | the cashier | CR-253 |
-| BillRefused::TooManyParts | WORDS_NEEDED_CR_253_PARTS32 | WORDS_NEEDED_CR_253_PARTS32_WHAT. | WORDS_NEEDED_CR_253_PARTS32_NEXT. | the cashier | CR-253 |
-| BillRefused::NotOpen | WORDS_NEEDED_CR_246_ENDED | WORDS_NEEDED_CR_246_ENDED_WHAT. | WORDS_NEEDED_CR_246_ENDED_NEXT. | the cashier | CR-246 |
-| BillRefused::SaleInABill | WORDS_NEEDED_CR_248_INBILL | WORDS_NEEDED_CR_248_INBILL_WHAT. | WORDS_NEEDED_CR_248_INBILL_NEXT. | the cashier | CR-248 |
-| BillRefused::SaleEnded | WORDS_NEEDED_CR_248_SALEEND | WORDS_NEEDED_CR_248_SALEEND_WHAT. | WORDS_NEEDED_CR_248_SALEEND_NEXT. | the cashier | CR-248 |
-| BillRefused::OtherCurrency | WORDS_NEEDED_CR_248_CURR | WORDS_NEEDED_CR_248_CURR_WHAT. | WORDS_NEEDED_CR_248_CURR_NEXT. | the cashier | CR-248 |
-| BillRefused::NotATab | WORDS_NEEDED_CR_251_NOTTAB | WORDS_NEEDED_CR_251_NOTTAB_WHAT. | WORDS_NEEDED_CR_251_NOTTAB_NEXT. | the cashier | CR-251 |
-| BillRefused::BelowReceived | WORDS_NEEDED_CR_251_BELOW | WORDS_NEEDED_CR_251_BELOW_WHAT. | WORDS_NEEDED_CR_251_BELOW_NEXT. | the cashier | CR-251 |
-| BillRefused::NotReached | WORDS_NEEDED_CR_251_NOTYET | WORDS_NEEDED_CR_251_NOTYET_WHAT. | WORDS_NEEDED_CR_251_NOTYET_NEXT. | the cashier | CR-251 |
-| BillRefused::NotAFinishableBill | WORDS_NEEDED_CR_251_NOFIN | WORDS_NEEDED_CR_251_NOFIN_WHAT. | WORDS_NEEDED_CR_251_NOFIN_NEXT. | the cashier | CR-251 |
-| BillRefused::NothingShort | WORDS_NEEDED_CR_252_NOSHORT | WORDS_NEEDED_CR_252_NOSHORT_WHAT. | WORDS_NEEDED_CR_252_NOSHORT_NEXT. | the cashier | CR-252 |
-| BillRefused::NeedsManager | WORDS_NEEDED_CR_252_PIN | WORDS_NEEDED_CR_252_PIN_WHAT. | WORDS_NEEDED_CR_252_PIN_NEXT. | the cashier | CR-252 |
-| BillRefused::HasPart | WORDS_NEEDED_CR_252_HASPART | WORDS_NEEDED_CR_252_HASPART_WHAT. | WORDS_NEEDED_CR_252_HASPART_NEXT. | the cashier | CR-252 |
-| BillRefused::BadSplit/People | WORDS_NEEDED_CR_250_PEOPLE | WORDS_NEEDED_CR_250_PEOPLE_WHAT. | WORDS_NEEDED_CR_250_PEOPLE_NEXT. | the cashier | CR-250 |
-| BillRefused::BadSplit/TooLittle | WORDS_NEEDED_CR_250_LITTLE | WORDS_NEEDED_CR_250_LITTLE_WHAT. | WORDS_NEEDED_CR_250_LITTLE_NEXT. | the cashier | CR-250 |
-| BillRefused::Store | WORDS_NEEDED_CR_255_STORE | WORDS_NEEDED_CR_255_STORE_WHAT. | WORDS_NEEDED_CR_255_STORE_NEXT. | the cashier | CR-40 |
-| BillView::Open | WORDS_NEEDED_CR_246_OPEN | WORDS_NEEDED_CR_246_OPEN_WHAT. | WORDS_NEEDED_CR_246_OPEN_NEXT. | the cashier | CR-246 |
-| BillView::Tab | WORDS_NEEDED_CR_246_TAB | WORDS_NEEDED_CR_246_TAB_WHAT. | WORDS_NEEDED_CR_246_TAB_NEXT. | the cashier | CR-246 |
-| BillView::Settled | WORDS_NEEDED_CR_246_SETTLED | WORDS_NEEDED_CR_246_SETTLED_WHAT. | WORDS_NEEDED_CR_246_SETTLED_NEXT. | the cashier | CR-246 |
-| BillView::ClosedShort | WORDS_NEEDED_CR_246_SHORT | WORDS_NEEDED_CR_246_SHORT_WHAT. | WORDS_NEEDED_CR_246_SHORT_NEXT. | the cashier | CR-246 |
-| BillView::Cancelled | WORDS_NEEDED_CR_246_CANCEL | WORDS_NEEDED_CR_246_CANCEL_WHAT. | WORDS_NEEDED_CR_246_CANCEL_NEXT. | the cashier | CR-246 |
+| BillRefused::UnknownSale | No such sale | No sale on this counter has that number. | Check the sale's number and pick it again. | the cashier | CR-11 |
+| BillRefused::UnknownBill | No such bill | No bill on this counter has that number. | Pick the bill from the list of bills. | the cashier | CR-246 |
+| BillRefused::BadReference | Reference does not fit | The till reference has a sign or a space that is not allowed, or is over 32 characters. | Type the reference again as the till shows it, without spaces. | the cashier | CR-245 |
+| BillRefused::AlreadyReferenced | Reference already set | This already has a till reference, and it takes only one. | Nothing to change. If the reference is wrong, tell the manager. | the cashier | CR-245 |
+| BillRefused::BadAmount | Amount not possible | A bill's amount is above zero and no more than the largest amount a sale can be. | Check the amount and enter it again. | the cashier | CR-246 |
+| BillRefused::TooManyOpen | Too many open bills | 256 bills are open on this counter, which is the most it keeps. | Settle, close or cancel an old bill first, then open this one. | the cashier | CR-253 |
+| BillRefused::TooManyParts | Too many parts | This bill has 32 parts, which is the most a bill can have. | Take the rest of this bill as one payment. | the cashier | CR-253 |
+| BillRefused::NotOpen | Bill already ended | This bill is settled, closed or cancelled, so it takes no more parts or changes. | Open a new bill if the customer still owes something. | the cashier | CR-246 |
+| BillRefused::SaleInABill | Sale is in another bill | This sale is already a part of a bill, and a sale belongs to one bill only. | Pick another sale, or take a new payment for this bill. | the cashier | CR-248 |
+| BillRefused::SaleEnded | Sale ended unpaid | This sale ended with nothing received, so it cannot pay a bill. | Take a new payment for this bill. | the cashier | CR-248 |
+| BillRefused::OtherCurrency | Other currency | This sale was priced in another currency than the bill. | Take a new payment for this bill in the shop's currency. | the cashier | CR-248 |
+| BillRefused::NotATab | Only a tab changes | The amount of a bill is fixed when it opens. Only a tab's amount can change. | If the amount is wrong, cancel the bill and open a new one, or ask the manager. | the cashier | CR-251 |
+| BillRefused::BelowReceived | Below what was paid | A tab cannot be lowered below what it has already received. | Enter an amount at least as large as what was paid. See Details. | the cashier | CR-251 |
+| BillRefused::NotReached | Tab not fully paid | This tab has not yet received its whole amount, so it stays open. | Take a payment for what is left, or ask the manager to close it short. See Details. | the cashier | CR-251 |
+| BillRefused::NotAFinishableBill | Settles by itself | A bill that is not a tab is settled as soon as it has received its amount. | Nothing to do. Take a payment for what is left. | the cashier | CR-251 |
+| BillRefused::NothingShort | Nothing is short | This bill has received its whole amount, so there is nothing to close short. | Nothing to do. | the cashier | CR-252 |
+| BillRefused::NeedsManager | Manager's PIN needed | Closing a bill short leaves money unpaid, so only a manager can do it. | The manager enters their PIN to close it short. | a manager | CR-252 |
+| BillRefused::HasPart | Cannot cancel | This bill has received a payment or has one on its way, so it cannot be cancelled. | Ask the manager to close it short. Refund what was paid if it is to be given back. | the cashier | CR-252 |
+| BillRefused::BadSplit/People | Split for 2 to 20 | What is left is split between 2 and 20 people. | Enter a number of people from 2 to 20. | the cashier | CR-250 |
+| BillRefused::BadSplit/TooLittle | Too little to split | What is left is too small to give each person a share. | Split it between fewer people, or take it as one payment. | the cashier | CR-250 |
+| BillRefused::Store | Bill not saved | The counter could not save it, so the bill was not changed. | Try once more. If it fails again, tell the owner: the counter cannot save. See Details. | the cashier | CR-40 |
+| BillView::Open | Bill open | The bill is paid in parts. Each part is a payment of its own, in bitcoin or another way. | Take the next part when its customer is ready. | the cashier | CR-246 |
+| BillView::Tab | Tab open | The tab stays open, and its amount can be raised, until it is finished. | Add to it as the customer orders. Finish it when the customer has paid the whole amount. | the cashier | CR-246 |
+| BillView::Settled | Bill paid | The bill has received its whole amount. | Nothing to do. | nobody | CR-246 |
+| BillView::ClosedShort | Closed short | The manager closed this bill before its whole amount was paid. What was not paid is in the books. | Nothing to do. | nobody | CR-246 |
+| BillView::Cancelled | Bill cancelled | The bill was cancelled before any payment counted towards it. | Nothing to do. | nobody | CR-246 |
 | RefundState::Requested | Refund requested | The request went to the owner, and this counter is not told when it is paid. | Nothing to do here. The customer is paid from the owner's side; ask the owner to see if it is done. | the owner | CR-74 |
 | RefundView::Requested | Refund requested | The request for 5,000 sats went to the owner, and this counter is not told when it is paid. | Nothing to do here. The customer is paid from the owner's side; ask the owner to see if it is done. | the owner | CR-74 |
 | RefundState::WaitingForDepth | Refund waiting | The request is made, but the sale is not settled yet, so it cannot be paid yet. | Nothing to do. It can be paid when the sale is settled, or the request can be withdrawn. | nobody | CR-66 |

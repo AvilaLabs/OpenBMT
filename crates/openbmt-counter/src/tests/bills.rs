@@ -4,7 +4,6 @@ use openbmt_core::records::RecordKind;
 use openbmt_core::wire::DecodeError;
 
 use super::kit::*;
-use crate::bill_say::is_placeholder;
 use crate::bills::{reference_ok, split_shares, MAGIC_BILLS};
 use crate::say::all_words;
 use crate::{
@@ -1073,24 +1072,22 @@ fn cr_253_a_sale_that_is_a_part_of_an_open_bill_is_not_settled_away() {
 // CR-255.
 
 #[test]
-fn cr_255_every_state_and_refusal_has_a_placeholder_until_the_words_are_written() {
+fn cr_255_every_state_and_refusal_has_words_that_name_its_rule() {
     let all = all_words();
-    let placeholders: Vec<_> = all
+    let bills: Vec<_> = all
         .iter()
         .filter(|(name, _)| name.starts_with("BillRefused::") || name.starts_with("BillView::"))
         .collect();
-    assert_eq!(placeholders.len(), 26);
-    for (name, w) in placeholders {
-        assert!(is_placeholder(w), "{name}");
-        assert!(w.heading.starts_with("WORDS_NEEDED_CR_2"), "{name}");
-        assert!(w.heading.chars().count() < 28, "{name}");
-        assert!(w.what.ends_with('.') && w.next.ends_with('.'), "{name}");
+    assert_eq!(bills.len(), 26);
+    for (name, w) in bills {
+        assert!(!w.heading.starts_with("WORDS_NEEDED"), "{name}");
+        assert!(w.code.is_some(), "{name}");
     }
     let (_, w) = all
         .iter()
         .find(|(n, _)| n == "OpenRefused::BadReference")
         .unwrap();
-    assert_eq!(w.heading, "WORDS_NEEDED_CR_245_BAD");
+    assert_eq!(w.code, Some("CR-245"));
     let (_, w) = all.iter().find(|(n, _)| n == "LoadError::Bills").unwrap();
-    assert_eq!(w.heading, "WORDS_NEEDED_CR_253_UNREAD");
+    assert_eq!(w.code, Some("CR-253"));
 }

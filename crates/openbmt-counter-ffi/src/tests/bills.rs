@@ -1,6 +1,6 @@
 //! CR-245 to CR-254 through `dispatch`: the till's reference, bills and tabs,
 //! parts, the split helper, close short with a manager, and what the Paid
-//! screen reads (`sale_info`). The words are placeholders (CR-255).
+//! screen reads (`sale_info`), with the words of CR-255.
 
 use super::kit::*;
 use super::wire::{Rd, W};
@@ -114,7 +114,7 @@ fn refused(response: &[u8]) -> (u8, String) {
 }
 
 #[test]
-fn cr_246_a_bill_opens_with_a_number_and_is_listed_with_placeholder_words() {
+fn cr_246_a_bill_opens_with_a_number_and_is_listed_with_its_words() {
     let (rig, handle) = ready();
     assert!(bills(&rig, handle).is_empty());
     let first = open_bill(&rig, handle, 1, 1_200, Some("T-14"));
@@ -125,7 +125,7 @@ fn cr_246_a_bill_opens_with_a_number_and_is_listed_with_placeholder_words() {
     assert_eq!(rows[0].reference.as_deref(), Some("T-14"));
     assert_eq!((rows[0].kind, rows[0].state, rows[0].left), (1, 0, 1_200));
     assert_eq!((rows[1].kind, rows[1].amount), (2, 5_000));
-    assert!(rows[0].heading.starts_with("WORDS_NEEDED_"));
+    assert_eq!(rows[0].heading, "Bill open");
     // A bill of nothing is refused, with the rule.
     let response = rig.call(
         74,

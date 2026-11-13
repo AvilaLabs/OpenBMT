@@ -734,12 +734,17 @@ fn bk_48_the_library_reads_and_matches_and_its_refusals_carry_placeholders() {
         books.match_till(&lines, &mapping(), 0),
         books.match_till(&lines, &mapping(), 0)
     );
-    // The words of the refusals are placeholders until they are written, and
-    // none of them is in the list of the owner app's table.
+    // Every refusal of the till's file has words that name its line and its
+    // rule, and they are checked with the books' other words.
     let words = till_words();
     assert_eq!(words.len(), 13);
+    let names: Vec<String> = all_words().into_iter().map(|(n, _)| n).collect();
     for (name, w) in &words {
-        assert!(w.heading.starts_with("WORDS_NEEDED_BK_46_"), "{name}");
+        assert!(!w.heading.starts_with("WORDS_NEEDED_"), "{name}");
+        assert!(
+            names.contains(name),
+            "{name} is checked with the other words"
+        );
         assert!(w.heading.chars().count() < 28, "{name}");
         assert!(w.what.ends_with('.') && w.next.ends_with('.'), "{name}");
         assert_eq!(w.code, Some("BK-46"));

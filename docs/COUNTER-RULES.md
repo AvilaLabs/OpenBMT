@@ -1926,5 +1926,6 @@ till closed as bitcoin can be matched against what arrived
   payment note, because a fiscal till may need them on its receipt
   (`docs/BOOKS-RULES.md` §13).
 - **CR-255.** Every state and refusal of this section has words under
-  `docs/SCREEN-RULES.md`; until the words are written a placeholder constant
-  `WORDS_NEEDED_CR_xxx` names the rule.
+  `docs/SCREEN-RULES.md`, listed in `docs/screens/counter.md` and checked
+  as every other words are; the labels of the counter app's bill screens
+  are plain and under 28 characters.

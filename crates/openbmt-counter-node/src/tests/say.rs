@@ -1,8 +1,7 @@
 //! SC-01 to SC-12 for the words of the counter program.
 
 use openbmt_core::pairing::PairError;
-use openbmt_core::say::{check, check_distinct, Tone, Who, Words};
-use openbmt_counter::bill_say::is_placeholder;
+use openbmt_core::say::{check, check_distinct, Tone, Who};
 
 use crate::paired::PairRefused;
 use crate::relaylink::LinkLine;
@@ -109,15 +108,8 @@ fn cr_136_every_line_of_the_link_and_every_refused_relay_has_words() {
 
 #[test]
 fn sc_12_every_word_keeps_the_rules() {
-    // CR-255: the words of bills are placeholders until they are written;
-    // the counter's own test checks them.
-    let written = |all: Vec<(String, Words)>| -> Vec<(String, Words)> {
-        all.into_iter()
-            .filter(|(_, w)| !is_placeholder(w))
-            .collect()
-    };
-    assert_eq!(check_distinct(&written(all_words())), Ok(()));
-    assert_eq!(check_distinct(&written(program_words())), Ok(()));
+    assert_eq!(check_distinct(&all_words()), Ok(()));
+    assert_eq!(check_distinct(&program_words()), Ok(()));
 }
 
 #[test]

@@ -1,8 +1,5 @@
 //! What a cashier is told about bills, tabs and the till's reference
-//! (CR-255). The words are not written yet: each state and refusal carries
-//! the placeholder constant that names its rule, `WORDS_NEEDED_CR_xxx`, in
-//! its heading and both sentences, until the words are written under
-//! `docs/SCREEN-RULES.md`.
+//! (CR-255), under `docs/SCREEN-RULES.md`.
 
 use std::fmt::Display;
 
@@ -11,112 +8,172 @@ use openbmt_core::say::{Tone, Who, Words};
 use crate::bills::{BillEnd, BillKind, SplitError};
 use crate::counter::BillView;
 use crate::refusal::{BillRefused, PartRefused};
-
-/// CR-245: a reference that does not fit (it is also the words of a sale
-/// opened with one that does not fit).
-pub const WORDS_NEEDED_CR_245_BAD: &str = "WORDS_NEEDED_CR_245_BAD";
-/// CR-245: a sale or a bill that has a reference already.
-pub const WORDS_NEEDED_CR_245_TWICE: &str = "WORDS_NEEDED_CR_245_TWICE";
-/// CR-246: no bill with that number.
-pub const WORDS_NEEDED_CR_246_NOBILL: &str = "WORDS_NEEDED_CR_246_NOBILL";
-/// CR-246: an amount of nothing, or too large.
-pub const WORDS_NEEDED_CR_246_AMOUNT: &str = "WORDS_NEEDED_CR_246_AMOUNT";
-/// CR-246: the bill has ended.
-pub const WORDS_NEEDED_CR_246_ENDED: &str = "WORDS_NEEDED_CR_246_ENDED";
-/// CR-246: state of a bill: open.
-pub const WORDS_NEEDED_CR_246_OPEN: &str = "WORDS_NEEDED_CR_246_OPEN";
-/// CR-246: state of a tab: open.
-pub const WORDS_NEEDED_CR_246_TAB: &str = "WORDS_NEEDED_CR_246_TAB";
-/// CR-246: state of a bill: settled.
-pub const WORDS_NEEDED_CR_246_SETTLED: &str = "WORDS_NEEDED_CR_246_SETTLED";
-/// CR-246: state of a bill: closed short.
-pub const WORDS_NEEDED_CR_246_SHORT: &str = "WORDS_NEEDED_CR_246_SHORT";
-/// CR-246: state of a bill: cancelled.
-pub const WORDS_NEEDED_CR_246_CANCEL: &str = "WORDS_NEEDED_CR_246_CANCEL";
-/// CR-248: no sale with that index.
-pub const WORDS_NEEDED_CR_248_NOSALE: &str = "WORDS_NEEDED_CR_248_NOSALE";
-/// CR-248: the sale is a part of a bill already.
-pub const WORDS_NEEDED_CR_248_INBILL: &str = "WORDS_NEEDED_CR_248_INBILL";
-/// CR-248: the sale ended with nothing received.
-pub const WORDS_NEEDED_CR_248_SALEEND: &str = "WORDS_NEEDED_CR_248_SALEEND";
-/// CR-248: the sale is in another currency.
-pub const WORDS_NEEDED_CR_248_CURR: &str = "WORDS_NEEDED_CR_248_CURR";
-/// CR-250: the number of people is not from 2 to 20.
-pub const WORDS_NEEDED_CR_250_PEOPLE: &str = "WORDS_NEEDED_CR_250_PEOPLE";
-/// CR-250: too little left to split that way.
-pub const WORDS_NEEDED_CR_250_LITTLE: &str = "WORDS_NEEDED_CR_250_LITTLE";
-/// CR-251: only a tab's amount changes.
-pub const WORDS_NEEDED_CR_251_NOTTAB: &str = "WORDS_NEEDED_CR_251_NOTTAB";
-/// CR-251: a tab is not lowered below what it has received.
-pub const WORDS_NEEDED_CR_251_BELOW: &str = "WORDS_NEEDED_CR_251_BELOW";
-/// CR-251: a tab is finished only when it has received its amount.
-pub const WORDS_NEEDED_CR_251_NOTYET: &str = "WORDS_NEEDED_CR_251_NOTYET";
-/// CR-251: a bill that is not a tab is settled by what it receives.
-pub const WORDS_NEEDED_CR_251_NOFIN: &str = "WORDS_NEEDED_CR_251_NOFIN";
-/// CR-252: nothing is short, so there is nothing to close short.
-pub const WORDS_NEEDED_CR_252_NOSHORT: &str = "WORDS_NEEDED_CR_252_NOSHORT";
-/// CR-252: closing short needs the manager's PIN.
-pub const WORDS_NEEDED_CR_252_PIN: &str = "WORDS_NEEDED_CR_252_PIN";
-/// CR-252: a part counts or is pending, so the bill is not cancelled.
-pub const WORDS_NEEDED_CR_252_HASPART: &str = "WORDS_NEEDED_CR_252_HASPART";
-/// CR-253: 256 bills are open already.
-pub const WORDS_NEEDED_CR_253_OPEN256: &str = "WORDS_NEEDED_CR_253_OPEN256";
-/// CR-253: the bill has 32 parts already.
-pub const WORDS_NEEDED_CR_253_PARTS32: &str = "WORDS_NEEDED_CR_253_PARTS32";
-/// CR-255: a write of the bills failed.
-pub const WORDS_NEEDED_CR_255_STORE: &str = "WORDS_NEEDED_CR_255_STORE";
-/// CR-253: the saved bills do not read back.
-pub const WORDS_NEEDED_CR_253_UNREAD: &str = "WORDS_NEEDED_CR_253_UNREAD";
-
-/// Words that are still to be written: the placeholder stands in the heading
-/// and, as a sentence, in both lines, so that it shows wherever the words
-/// would.
-pub fn needed(placeholder: &'static str) -> Words {
-    Words::new(
-        Tone::Ended,
-        placeholder,
-        format!("{placeholder}_WHAT."),
-        Who::Cashier,
-        format!("{placeholder}_NEXT."),
-    )
-}
-
-/// Whether these words are a placeholder.
-pub fn is_placeholder(words: &Words) -> bool {
-    words.heading.starts_with("WORDS_NEEDED_")
-}
+use crate::say::{refused, store_failed, RETRY_NEXT};
 
 impl<E: Display> BillRefused<E> {
-    /// What the cashier is told when a bill, a tab or a reference is refused:
-    /// the placeholder of the rule (CR-255).
+    /// What the cashier is told when a bill, a tab or a reference is refused
+    /// (CR-255). Nothing was written.
     pub fn words(&self) -> Words {
-        needed(match self {
-            Self::UnknownSale(_) => WORDS_NEEDED_CR_248_NOSALE,
-            Self::UnknownBill(_) => WORDS_NEEDED_CR_246_NOBILL,
-            Self::BadReference => WORDS_NEEDED_CR_245_BAD,
-            Self::AlreadyReferenced => WORDS_NEEDED_CR_245_TWICE,
-            Self::BadAmount => WORDS_NEEDED_CR_246_AMOUNT,
-            Self::TooManyOpen => WORDS_NEEDED_CR_253_OPEN256,
-            Self::TooManyParts => WORDS_NEEDED_CR_253_PARTS32,
-            Self::NotOpen => WORDS_NEEDED_CR_246_ENDED,
-            Self::SaleInABill(_) => WORDS_NEEDED_CR_248_INBILL,
-            Self::SaleEnded => WORDS_NEEDED_CR_248_SALEEND,
-            Self::OtherCurrency => WORDS_NEEDED_CR_248_CURR,
-            Self::NotATab => WORDS_NEEDED_CR_251_NOTTAB,
-            Self::BelowReceived { .. } => WORDS_NEEDED_CR_251_BELOW,
-            Self::NotReached { .. } => WORDS_NEEDED_CR_251_NOTYET,
-            Self::NotAFinishableBill => WORDS_NEEDED_CR_251_NOFIN,
-            Self::NothingShort => WORDS_NEEDED_CR_252_NOSHORT,
-            Self::NeedsManager => WORDS_NEEDED_CR_252_PIN,
-            Self::HasPart => WORDS_NEEDED_CR_252_HASPART,
-            Self::BadSplit(SplitError::People) => WORDS_NEEDED_CR_250_PEOPLE,
-            Self::BadSplit(SplitError::TooLittle) => WORDS_NEEDED_CR_250_LITTLE,
-            Self::Store(_) => WORDS_NEEDED_CR_255_STORE,
-        })
-        .code(self.rule())
-        .detail(self.to_string())
+        let code = self.rule();
+        let c = Who::Cashier;
+        let words = match self {
+            Self::UnknownSale(_) => refused(
+                "No such sale",
+                "No sale on this counter has that number.",
+                c,
+                "Check the sale's number and pick it again.",
+                code,
+            ),
+            Self::UnknownBill(_) => refused(
+                "No such bill",
+                "No bill on this counter has that number.",
+                c,
+                "Pick the bill from the list of bills.",
+                code,
+            ),
+            Self::BadReference => refused(
+                "Reference does not fit",
+                "The till reference has a sign or a space that is not allowed, or is over 32 characters.",
+                c,
+                "Type the reference again as the till shows it, without spaces.",
+                code,
+            ),
+            Self::AlreadyReferenced => refused(
+                "Reference already set",
+                "This already has a till reference, and it takes only one.",
+                c,
+                "Nothing to change. If the reference is wrong, tell the manager.",
+                code,
+            ),
+            Self::BadAmount => refused(
+                "Amount not possible",
+                "A bill's amount is above zero and no more than the largest amount a sale can be.",
+                c,
+                CHECK_AMOUNT,
+                code,
+            ),
+            Self::TooManyOpen => refused(
+                "Too many open bills",
+                "256 bills are open on this counter, which is the most it keeps.",
+                c,
+                "Settle, close or cancel an old bill first, then open this one.",
+                code,
+            ),
+            Self::TooManyParts => refused(
+                "Too many parts",
+                "This bill has 32 parts, which is the most a bill can have.",
+                c,
+                "Take the rest of this bill as one payment.",
+                code,
+            ),
+            Self::NotOpen => refused(
+                "Bill already ended",
+                "This bill is settled, closed or cancelled, so it takes no more parts or changes.",
+                c,
+                "Open a new bill if the customer still owes something.",
+                code,
+            ),
+            Self::SaleInABill(_) => refused(
+                "Sale is in another bill",
+                "This sale is already a part of a bill, and a sale belongs to one bill only.",
+                c,
+                "Pick another sale, or take a new payment for this bill.",
+                code,
+            ),
+            Self::SaleEnded => refused(
+                "Sale ended unpaid",
+                "This sale ended with nothing received, so it cannot pay a bill.",
+                c,
+                "Take a new payment for this bill.",
+                code,
+            ),
+            Self::OtherCurrency => refused(
+                "Other currency",
+                "This sale was priced in another currency than the bill.",
+                c,
+                "Take a new payment for this bill in the shop's currency.",
+                code,
+            ),
+            Self::NotATab => refused(
+                "Only a tab changes",
+                "The amount of a bill is fixed when it opens. Only a tab's amount can change.",
+                c,
+                "If the amount is wrong, cancel the bill and open a new one, or ask the manager.",
+                code,
+            ),
+            Self::BelowReceived { .. } => refused(
+                "Below what was paid",
+                "A tab cannot be lowered below what it has already received.",
+                c,
+                "Enter an amount at least as large as what was paid. See Details.",
+                code,
+            ),
+            Self::NotReached { .. } => refused(
+                "Tab not fully paid",
+                "This tab has not yet received its whole amount, so it stays open.",
+                c,
+                "Take a payment for what is left, or ask the manager to close it short. See Details.",
+                code,
+            ),
+            Self::NotAFinishableBill => refused(
+                "Settles by itself",
+                "A bill that is not a tab is settled as soon as it has received its amount.",
+                c,
+                "Nothing to do. Take a payment for what is left.",
+                code,
+            ),
+            Self::NothingShort => refused(
+                "Nothing is short",
+                "This bill has received its whole amount, so there is nothing to close short.",
+                c,
+                "Nothing to do.",
+                code,
+            ),
+            Self::NeedsManager => refused(
+                "Manager's PIN needed",
+                "Closing a bill short leaves money unpaid, so only a manager can do it.",
+                Who::Manager,
+                "The manager enters their PIN to close it short.",
+                code,
+            ),
+            Self::HasPart => refused(
+                "Cannot cancel",
+                "This bill has received a payment or has one on its way, so it cannot be cancelled.",
+                c,
+                "Ask the manager to close it short. Refund what was paid if it is to be given back.",
+                code,
+            ),
+            Self::BadSplit(SplitError::People) => refused(
+                "Split for 2 to 20",
+                "What is left is split between 2 and 20 people.",
+                c,
+                "Enter a number of people from 2 to 20.",
+                code,
+            ),
+            Self::BadSplit(SplitError::TooLittle) => refused(
+                "Too little to split",
+                "What is left is too small to give each person a share.",
+                c,
+                "Split it between fewer people, or take it as one payment.",
+                code,
+            ),
+            Self::Store(fault) => {
+                return store_failed(
+                    fault,
+                    "Bill not saved",
+                    "the bill was not changed",
+                    Tone::Stop,
+                    c,
+                    RETRY_NEXT,
+                )
+            }
+        };
+        words.detail(self.to_string())
     }
 }
+
+/// What to do about an amount that is not possible.
+const CHECK_AMOUNT: &str = "Check the amount and enter it again.";
 
 impl<E: Display> PartRefused<E> {
     /// What the cashier is told when a part is not opened for a bill.
@@ -129,15 +186,46 @@ impl<E: Display> PartRefused<E> {
 }
 
 impl BillView {
-    /// The state of a bill (CR-255): the placeholder of the state.
+    /// The state of a bill (CR-246, CR-255).
     pub fn words(&self) -> Words {
-        needed(match (self.bill.ended().map(|e| e.how), self.bill.kind()) {
-            (None, BillKind::Bill) => WORDS_NEEDED_CR_246_OPEN,
-            (None, BillKind::Tab) => WORDS_NEEDED_CR_246_TAB,
-            (Some(BillEnd::Settled), _) => WORDS_NEEDED_CR_246_SETTLED,
-            (Some(BillEnd::ClosedShort), _) => WORDS_NEEDED_CR_246_SHORT,
-            (Some(BillEnd::Cancelled), _) => WORDS_NEEDED_CR_246_CANCEL,
-        })
+        let c = Who::Cashier;
+        match (self.bill.ended().map(|e| e.how), self.bill.kind()) {
+            (None, BillKind::Bill) => Words::new(
+                Tone::Info,
+                "Bill open",
+                "The bill is paid in parts. Each part is a payment of its own, in bitcoin or another way.",
+                c,
+                "Take the next part when its customer is ready.",
+            ),
+            (None, BillKind::Tab) => Words::new(
+                Tone::Info,
+                "Tab open",
+                "The tab stays open, and its amount can be raised, until it is finished.",
+                c,
+                "Add to it as the customer orders. Finish it when the customer has paid the whole amount.",
+            ),
+            (Some(BillEnd::Settled), _) => Words::new(
+                Tone::Good,
+                "Bill paid",
+                "The bill has received its whole amount.",
+                Who::Nobody,
+                "Nothing to do.",
+            ),
+            (Some(BillEnd::ClosedShort), _) => Words::new(
+                Tone::Ended,
+                "Closed short",
+                "The manager closed this bill before its whole amount was paid. What was not paid is in the books.",
+                Who::Nobody,
+                "Nothing to do.",
+            ),
+            (Some(BillEnd::Cancelled), _) => Words::new(
+                Tone::Ended,
+                "Bill cancelled",
+                "The bill was cancelled before any payment counted towards it.",
+                Who::Nobody,
+                "Nothing to do.",
+            ),
+        }
         .code("CR-246")
     }
 }

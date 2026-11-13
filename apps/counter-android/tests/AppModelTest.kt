@@ -1396,9 +1396,9 @@ object AppModelTest {
 
     private fun cr245BillsTests(appDir: File?) {
         val usd = Money("USD", 2)
-        // CR-255: every label is a placeholder named after a rule, and a heading is under 28 characters.
+        // CR-255: every label is written, and a heading is under 28 characters.
         val labels = WordsOfBills.all()
-        ok(labels.all { it.startsWith("WORDS_NEEDED_CR_24") || it.startsWith("WORDS_NEEDED_CR_25") }, "CR-255: every label is a placeholder of a rule")
+        ok(labels.none { it.startsWith("WORDS_NEEDED") } && labels.all { it.isNotBlank() }, "CR-255: every label is written")
         ok(labels.all { it.length < 28 }, "CR-255: every label is under 28 characters: ${labels.filter { it.length >= 28 }}")
         ok(labels.toSet().size == labels.size, "CR-255: no two labels are the same")
         // CR-246: the state of a bill, and a tab says it is a tab.
