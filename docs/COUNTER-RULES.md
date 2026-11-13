@@ -2020,3 +2020,45 @@ screen, and a manager's PIN confirms it. The codecs and checks are in
 - **CR-264.** Every state and refusal of this section has words under
   `docs/SCREEN-RULES.md`, listed in `docs/screens/counter.md`.
 
+
+## 27. A sale from the till
+
+A till that works with the Box (the Odoo module, `docs/BOX-RULES.md` §5c)
+asks one counter to take a payment of a set amount. The cashier starts it
+on that counter, and from then it is an ordinary sale with every rule of the
+sections above. These rules are the counter's side of BX-76 to BX-78.
+Status: specification, written before the code.
+
+- **CR-266. What is taken.** A POS notice from the Box (BX-76) that is a
+  sale request is taken only from the Box of the settings in force, sealed
+  to this counter, with the shop's currency, an amount above 0 and at most
+  the largest amount of CR-05, and a lapse time not past. Anything else is
+  dropped with a note and nothing sent. At most 8 requests wait; one more
+  is dropped with a note, and the Box's own limit and lapse (BX-76) tell
+  the till.
+- **CR-267. What the cashier sees.** While a request waits, the counter's
+  home screen shows "From the till" with its amount, its reference and the
+  minutes left, and the buttons Start and Not now. The oldest request not
+  lapsed is shown first. The amount cannot be changed at the counter. Not
+  now hides it from the screen and sends nothing; the request lapses at the
+  Box as BX-76 says.
+- **CR-268. Start.** Start opens a sale for that amount exactly as a sale
+  typed at the counter (sections 2 and 3: the counter's own rate, address
+  and quote), and writes a `Sale` record with the next free tag naming the
+  till's sale (its 16 bytes), stored before the sale's first quote is shown,
+  as CR-59 stores a quote. The request's reference becomes the sale's
+  till's reference (CR-245) if it fits that rule, and is otherwise only
+  shown. The counter then sends the Box a signed "opened" notice naming the
+  till's sale (BX-77). Every later notice of that sale names it too: paid,
+  final and unpaid again.
+- **CR-269. A cancel.** A cancel for a request not started removes it with
+  nothing sent. A cancel for a sale already started does not end it: the
+  counter shows "The till cancelled this sale" on that sale, and the cashier
+  ends it as any sale is ended. A payment that arrives anyway is a payment
+  as any other: it is counted, shown and can be refunded. The counter never
+  ends a sale, and never marks one paid, on the Box's word alone.
+- **CR-270. After a restart.** Waiting requests are kept in memory only, as
+  the Box keeps them (BX-76), so a restart forgets them. A sale already
+  started keeps its till's sale from its record and goes on naming it.
+- **CR-271.** Every state and refusal of this section has words under
+  `docs/SCREEN-RULES.md`, and the tests name these rules.
