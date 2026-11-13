@@ -126,8 +126,10 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   library asks for come from samples of blocks, taken as the owner's device
   takes them (`docs/FEE-RULES.md` FE-20, with the node's own `fee-history.bin`):
   the rates for a channel, a close and a spend are the recent rate (FE-13);
-  the urgent rate and the most a provider may set are twice the higher of the
-  recent and the usual rate (FE-17). No rate is ever below the fixed floor the
+  the urgent rate, and the highest the node proposes or counts for dust, are
+  twice the higher of the recent and the usual rate (FE-17). The library sets
+  no upper limit on the rate the provider sets; it refuses only one below the
+  floor. No rate is ever below the fixed floor the
   node uses with Core, and until the first sample the fixed rates are used.
 - **SL-27. What it watches.** The funding output of each channel and every
   output the library registers with `chain::Filter`. When a block that holds a
