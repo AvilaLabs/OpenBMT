@@ -41,9 +41,10 @@ funds.**
 
 ## 2. The cap
 
-- **FL-10. Set by the owner.** The cap is part of the shop's signed
-  settings. The app suggests about one week of the shop's refunds, from its
-  own history, and never decides it.
+- **FL-10. Set by the owner.** The cap is kept in the owner phone's own
+  records, not in the shop's settings that counters read, since no counter
+  knows of the float (FL-24). The app suggests about one week of the shop's
+  refunds, from its own history, and never decides it.
 - **FL-11. Never above the cap.** A refill pays the cap less what the float
   holds, counting payments into it that are not yet confirmed. A refill
   that would leave the float above the cap is refused. Lowering the cap
