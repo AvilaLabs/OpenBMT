@@ -43,6 +43,16 @@ class MainActivity : Activity() {
         controller.visible()
     }
 
+    override fun onResume() {
+        super.onResume()
+        controller.tapFront(true)
+    }
+
+    override fun onPause() {
+        controller.tapFront(false)
+        super.onPause()
+    }
+
     override fun onStop() {
         controller.hidden()
         super.onStop()

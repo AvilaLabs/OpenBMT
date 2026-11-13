@@ -1,19 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Two permissions. INTERNET: the counter connects to the Bitcoin network
+<!-- Three permissions. INTERNET: the counter connects to the Bitcoin network
      and fetches the price. CAMERA: asked for at run time only when the person
-     taps Scan, to read the pairing code (CR-90). Nothing else is asked for: no
-     notifications, no foreground service. The camera is not required, so the
-     app installs on a phone without one. One provider, not exported, hands the
-     share sheet the image of a request's code. tests/check-manifest.sh fails
-     the build if the list differs, or if anything but the launcher activity is
-     exported. -->
+     taps Scan, to read the pairing code (CR-90). NFC: lets the tag service
+     answer a reader (TP-10); it is not asked of the person. Nothing else is
+     asked for: no notifications, no foreground service. The camera and card
+     emulation are not required, so the app installs on a phone without them.
+     One provider, not exported, hands the share sheet the image of a
+     request's code. One service, the NFC tag of the payment request (TP-10):
+     exported, as Android's NFC service must reach it, and bound only by the
+     system (BIND_NFC_SERVICE). No filter for tags, tag technologies or NDEF
+     messages: the counter reads no tags (TP-23). tests/check-manifest.sh
+     fails the build if the list differs, or if anything but the launcher
+     activity and the tag service is exported. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.openbmt.counter.app">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.NFC" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.nfc.hce" android:required="false" />
 
     <application
         android:label="@string/app_name"
@@ -44,5 +51,18 @@
             android:authorities="org.openbmt.counter.app.share"
             android:exported="false"
             android:grantUriPermissions="true" />
+
+        <!-- TP-10: the NFC tag of the payment request. -->
+        <service
+            android:name="org.openbmt.counter.app.TapService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/tap_aid" />
+        </service>
     </application>
 </manifest>

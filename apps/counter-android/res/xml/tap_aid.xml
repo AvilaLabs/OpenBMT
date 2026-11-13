@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- TP-10, TP-21: the tag's one application ID, in the category "other": the counter is a tag, not a payment app,
+     and never asks to be the phone's default for payments. The service answers only with the device unlocked and
+     the screen on. -->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/tap_description"
+    android:requireDeviceUnlock="true"
+    android:requireDeviceScreenOn="true">
+    <aid-group
+        android:description="@string/tap_description"
+        android:category="other">
+        <aid-filter android:name="D2760000850101" />
+    </aid-group>
+</host-apdu-service>

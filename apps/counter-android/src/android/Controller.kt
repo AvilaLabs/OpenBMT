@@ -157,6 +157,20 @@ class Controller(private val act: MainActivity) {
     // What the open screen redraws as the node reports.
     private var tick: (() -> Unit)? = null
 
+    // TP-20: Android sends a reader's commands to the tag service only while a sale's payment screen is in front.
+    private val tapPreference = TapPreference { on -> TapPreferred.set(act, on) }
+
+    /** The activity came to the front or left it (TP-20). */
+    fun tapFront(front: Boolean) {
+        tapPreference.resumed(front)
+    }
+
+    /** TP-05: the tag of the sale on the screen, set with its code and again when the request changes; null clears it. */
+    private fun tapSet(tag: ByteArray?) {
+        TapTag.set(tag)
+        tapPreference.wanted(TapTag.current() != null)
+    }
+
     /** The tick of the Home screen: Home is showing when [tick] is this one (CR-164). */
     private var homeTick: (() -> Unit)? = null
 
@@ -201,6 +215,7 @@ class Controller(private val act: MainActivity) {
 
     fun hidden() {
         visible = false
+        tapSet(null)
         if (scan.asking) return
         locks.leftView()
         if (node != null) resumeTo = showing
@@ -644,6 +659,7 @@ class Controller(private val act: MainActivity) {
     private fun put(view: View, shown: Showing = Showing.Other) {
         dropSharedImage()
         tick = null
+        tapSet(null)
         showing = shown
         act.show(view)
     }
@@ -1967,6 +1983,8 @@ class Controller(private val act: MainActivity) {
                 // The library gives a code only while the sale is open: with none, the code and the copied request are
                 // cleared, so a sale that ended or has no code never shows an earlier one (CR-112).
                 payment = s.payment
+                // TP-01, TP-05: the tag changes with the code, and is empty when no code shows (TP-04).
+                tapSet(if (SaleModel.showsCode(s.state)) payment?.tag else null)
                 // CR-214: a request that is still open says its own words: ready when just made, waiting after.
                 val info = n.saleInfo(index)
                 val request = info.requestDays > 0
@@ -2118,6 +2136,7 @@ class Controller(private val act: MainActivity) {
                     if (outcomePlays.first(index, says.colour)) page.post { Feedback.outcome(page, says.colour) }
                 }
             } catch (e: CounterException) {
+                tapSet(null)
                 act.show(ui.page(ui.bar("Sale ${index + 1}"), listOf(note(e.sayWords()))))
                 lastSig = null
             }

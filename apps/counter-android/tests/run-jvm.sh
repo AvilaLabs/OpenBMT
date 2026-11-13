@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The tests of the counter app's pure parts, on the desktop JVM: its words
 # (and docs/screens/counter-app.md), the PIN store with a fake clock, the
-# pairing steps, the config, the keypad, the QR layout, the price schedule and
+# pairing steps, the manifest and the NFC tag's service file, the config, the keypad, the QR layout, the price schedule and
 # book with a fake clock and a fake fetcher, the Tor gate and the screen
 # choice, the Lightning transport against a local HTTPS server with a
 # self-signed certificate (made here with keytool) and the swap transport
@@ -39,10 +39,14 @@ trap 'rm -rf "$scratch/jvm-classes"' EXIT
     -classpath "$lib/kotlin-stdlib.jar:$lib/annotations-13.0.jar" \
     -d "$scratch/jvm-classes" \
     "$wrapper/Native.kt" "$wrapper/CounterNode.kt" \
-    "$common"/src/model/*.kt "$tor_part"/src/model/*.kt "$app"/src/model/*.kt "$app/tests/AppModelTest.kt" "$app/tests/LightningTransportTest.kt" "$app/tests/SwapTransportTest.kt"
+    "$common"/src/model/*.kt "$tor_part"/src/model/*.kt "$app"/src/model/*.kt "$app/tests/AppModelTest.kt" "$app/tests/TapManifestTest.kt" "$app/tests/LightningTransportTest.kt" "$app/tests/SwapTransportTest.kt"
 
 "$JAVA_HOME/bin/java" -Xmx2g -cp "$scratch/jvm-classes:$lib/kotlin-stdlib.jar" \
     org.openbmt.counter.app.AppModelTest "$repo/docs/screens/counter-app.md"
+
+# The manifest and the NFC tag's service file (TP-10, TP-21, TP-23, TP-50), read as source.
+"$JAVA_HOME/bin/java" -Xmx1g -cp "$scratch/jvm-classes:$lib/kotlin-stdlib.jar" \
+    org.openbmt.counter.app.TapManifestTest "$app" "$repo"
 
 # The transport of CR-114 against a local server: a certificate made for the run.
 "$JAVA_HOME/bin/keytool" -genkeypair -alias t -keyalg EC -groupname secp256r1 -dname "CN=localhost" \
