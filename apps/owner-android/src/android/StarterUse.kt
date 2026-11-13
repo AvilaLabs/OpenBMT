@@ -405,50 +405,78 @@ internal fun Controller.showStarterDelete() {
     views.add(ui.text(if (confirmations == null) StarterWords.deleteUnknown else StarterWords.deleteWaiting, 16f))
     val actions = ArrayList<android.widget.Button>()
     if (ready) {
-        actions.add(
-            ui.danger(StarterWords.deleteButton) {
-                starter.store.deleteKey()
-                starter.keystore.delete()
-                val refused = ArrayList<View>()
-                val repinned = starterRepin(n, refused)
-                // The node watches the wallet it was started with: after the re-pin it starts again with the new one.
-                centre(StarterCoreWords.deleted(LibraryStarter), listOf(ui.primary(StarterWords.doneButton) { if (repinned) { stopNode(); startNode() } else showHome() }), extra = refused, title = StarterWords.screenTitle)
-            },
-        )
+        actions.add(ui.danger(StarterWords.deleteButton) { starterRetire(n) })
     }
     actions.add(ui.button(StarterWords.backButton) { showStarter() })
     screen(StarterWords.deleteTitle, views, actions, back = { showStarter() })
 }
 
 /**
- * SS-41: once every counter has switched, the owner's pinned wallet becomes the new wallet, which the node watches from its
- * next start; the starter wallet stays watched as a former wallet (SS-43). It is asked after the move has its confirmation
- * and the key is gone, because until then the starter wallet's coins are read from the pinned wallet. A counter that has not
- * switched leaves it as it is. A stop between the shop's file and the wallet's file is finished at the next start
- * (`adopt`). The re-pin waits while a transaction of the starter wallet other than the confirmed move is waiting or
- * unconfirmed (SS-41): the library's words for it go to [refused], and it is asked again from the same screen. True when
- * the node is to start again.
+ * SS-41, SS-43: the upgrade's last step. The owner's pinned wallet becomes the new wallet first, and only when that
+ * succeeds are the sealed seed, the wrapped key and the Keystore key deleted. A re-pin that is refused (a transaction of
+ * the starter wallet other than the confirmed move is waiting or unconfirmed, or anything else) deletes nothing: the
+ * library's words are shown with the way back to the starter page, and the step is asked again from the delete screen.
  */
-private fun Controller.starterRepin(n: OwnerNode, refused: MutableList<View>): Boolean {
+private fun Controller.starterRetire(n: OwnerNode) {
+    when (val repin = starterRepin(n)) {
+        is Repin.Stopped -> {
+            val back = { showStarter() }
+            val views = if (repin.words == null) emptyList() else listOf(words(repin.words))
+            screen(StarterWords.deleteTitle, views, listOf(ui.button(StarterWords.backButton) { back() }), back = back)
+        }
+        is Repin.Done -> starterDeleteKey(repin.restart)
+    }
+}
+
+/**
+ * SS-43: the key goes after the re-pin. When it cannot be deleted the screen offers to delete again; the re-pin is not
+ * asked again. The node watches the wallet it was started with: after the re-pin it starts again with the new one.
+ */
+private fun Controller.starterDeleteKey(restart: Boolean) {
+    val files = starter.store.deleteKey()
+    val keystore = starter.keystore.delete()
+    if (!(files && keystore)) {
+        val back = { showStarter() }
+        return centre(
+            AppWords.fileNotSaved(null),
+            listOf(ui.danger(StarterWords.deleteButton) { starterDeleteKey(restart) }, ui.button(StarterWords.backButton) { back() }),
+            title = StarterWords.screenTitle, back = back,
+        )
+    }
+    centre(StarterCoreWords.deleted(LibraryStarter), listOf(ui.primary(StarterWords.doneButton) { if (restart) { stopNode(); startNode() } else showHome() }), title = StarterWords.screenTitle)
+}
+
+/** What the re-pin came to: [Done] (the key may go; [Done.restart] when the node is to start again) or [Stopped] with the words to show. */
+private sealed class Repin {
+    class Done(val restart: Boolean) : Repin()
+    class Stopped(val words: SayWords?) : Repin()
+}
+
+/**
+ * SS-41: once every counter has switched, the owner's pinned wallet becomes the new wallet, which the node watches from its
+ * next start; the starter wallet stays watched as a former wallet (SS-43), and the owner's queue moves with it. The core
+ * waits while a transaction of the starter wallet other than the confirmed move is waiting or unconfirmed (SS-41). A stop
+ * between the shop's file and the wallet's file is finished at the next start (`adopt`). With no new wallet recorded there
+ * is nothing to re-pin.
+ */
+private fun Controller.starterRepin(n: OwnerNode): Repin {
     val newWallet = try {
         starter.store.loadNewWallet()
-    } catch (_: IOException) {
-        null
-    } ?: return false
+    } catch (e: IOException) {
+        return Repin.Stopped(AppWords.fileNotRead(e.message))
+    } ?: return Repin.Done(false)
     return try {
         val done = n.ownRepin(newWallet)
-        if (done.kind != OwnRepinKind.NotReady) {
-            ownStore.saveWallet(done.wallet)
-            starter.pinned = null
-        }
-        done.kind == OwnRepinKind.Done
+        if (done.kind == OwnRepinKind.NotReady) return Repin.Stopped(null)
+        ownStore.saveWallet(done.wallet)
+        starter.pinned = null
+        Repin.Done(true)
     } catch (e: OwnerException) {
-        if (e.rule == "SS-41") refused.add(words(e.sayWords()))
-        false
-    } catch (_: IOException) {
-        false
-    } catch (_: LinkageError) {
-        false
+        Repin.Stopped(e.sayWords())
+    } catch (e: IOException) {
+        Repin.Stopped(AppWords.fileNotSaved(e.message))
+    } catch (e: LinkageError) {
+        Repin.Stopped(AppWords.libraryMissing(e.message))
     }
 }
 

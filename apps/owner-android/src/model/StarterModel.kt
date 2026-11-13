@@ -427,8 +427,8 @@ class StarterStore(base: File) {
 
     fun loadPendingTxid(): String? = read(PENDING)?.let { b -> String(b, 0, b.indexOf('\n'.code.toByte()).coerceAtLeast(0), Charsets.UTF_8).ifEmpty { null } }
 
-    /** SS-43: the sealed seed and the wrapped key are overwritten and deleted; the public wallet and the record stay. */
-    fun deleteKey() {
+    /** SS-43: the sealed seed and the wrapped key are overwritten and deleted; the public wallet and the record stay. True when both are gone. */
+    fun deleteKey(): Boolean {
         for (name in listOf(SEALED, WRAPPED)) {
             val f = file(name)
             if (f.isFile) {
@@ -439,6 +439,7 @@ class StarterStore(base: File) {
                 f.delete()
             }
         }
+        return !file(SEALED).exists() && !file(WRAPPED).exists()
     }
 
     companion object {

@@ -73,12 +73,12 @@ class StarterKeystore {
         gen.generateKey()
     }
 
-    /** SS-43: the key is deleted. */
-    fun delete() {
-        try {
-            if (keystore.containsAlias(ALIAS)) keystore.deleteEntry(ALIAS)
-        } catch (_: java.security.KeyStoreException) {
-        }
+    /** SS-43: the key is deleted. True when it is gone. */
+    fun delete(): Boolean = try {
+        if (keystore.containsAlias(ALIAS)) keystore.deleteEntry(ALIAS)
+        !keystore.containsAlias(ALIAS)
+    } catch (_: java.security.KeyStoreException) {
+        false
     }
 
     private fun key(): SecretKey = try {
