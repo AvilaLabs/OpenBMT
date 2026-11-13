@@ -321,6 +321,9 @@ pub fn walk_new_screens() -> String {
     a.key(Key::Enter);
     a.key(Key::Char('l'));
     note(&a);
+    // SK-35: the node's ID.
+    a.key(Key::Char('n'));
+    note(&a);
     // SK-52: reading, and no camera.
     let mut b = app();
     note(&b);

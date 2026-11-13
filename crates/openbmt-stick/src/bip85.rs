@@ -64,11 +64,25 @@ pub fn float_entropy(words: &[&str], index: u32) -> Result<[u8; ENTROPY_BYTES], 
     Ok(out)
 }
 
+/// The 64 bytes of the Shop Lightning child. The caller wipes them.
+pub fn lightning_child(words: &[&str]) -> Result<[u8; LIGHTNING_BYTES], OutputsError> {
+    let master = master_of(words)?;
+    entropy_at(&master, &lightning_path())
+}
+
 /// The 128 lower-case hexadecimal characters of the Shop Lightning child.
 pub fn lightning_hex(words: &[&str]) -> Result<String, OutputsError> {
-    let master = master_of(words)?;
-    let mut full = entropy_at(&master, &lightning_path())?;
+    let mut full = lightning_child(words)?;
     let text: String = full.iter().map(|b| format!("{b:02x}")).collect();
     full.fill(0);
     Ok(text)
+}
+
+/// The 66 lower-case hexadecimal characters of the Shop Lightning node's ID
+/// (SK-35, SL-72), made by `openbmt-core` as the counter makes it.
+pub fn lightning_node_id_hex(words: &[&str]) -> Result<String, OutputsError> {
+    let mut full = lightning_child(words)?;
+    let id = openbmt_core::shop_lightning::node_id(&full);
+    full.fill(0);
+    Ok(id.iter().map(|b| format!("{b:02x}")).collect())
 }

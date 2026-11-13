@@ -4,7 +4,7 @@
 
 use openbmt_qr::{Ecc, QrCode};
 
-use crate::bip85::{float_entropy, lightning_hex, FLOAT_INDEX_MAX};
+use crate::bip85::{float_entropy, lightning_hex, lightning_node_id_hex, FLOAT_INDEX_MAX};
 use crate::check::{answer_matches, pick_positions, ASKED};
 use crate::frames::{codes_of, Collector, Feed, Form};
 use crate::keys::Key;
@@ -75,6 +75,8 @@ enum View {
     Float,
     /// SK-32: Shop Lightning's key.
     Lightning,
+    /// SK-35: the Lightning node's ID.
+    NodeId,
 }
 
 /// The payment read through the camera, and what was judged of it (SK-52 to
@@ -150,6 +152,8 @@ pub struct App<C: Chance> {
     float_index: u32,
     float_qr: Option<QrCode>,
     lightning_qr: Option<QrCode>,
+    /// SK-35: the node's ID in hex and as a code.
+    node_id: Option<(String, QrCode)>,
     job: Option<Job>,
     out_codes: Vec<QrCode>,
 }
@@ -177,6 +181,7 @@ impl<C: Chance> App<C> {
             float_index: 0,
             float_qr: None,
             lightning_qr: None,
+            node_id: None,
             job: None,
             out_codes: Vec::new(),
         }
@@ -207,6 +212,7 @@ impl<C: Chance> App<C> {
         self.float_index = 0;
         self.float_qr = None;
         self.lightning_qr = None;
+        self.node_id = None;
         // SK-57: the payment and the frames go with the words.
         if let Some(job) = self.job.as_mut() {
             wipe(&mut job.psbt);
@@ -513,11 +519,33 @@ impl<C: Chance> App<C> {
                     SK_33_LIGHTNING_SPENDS.to_string(),
                     SK_33_LIGHTNING_SCAN.to_string(),
                     SK_33_LIGHTNING_NO_PHOTO.to_string(),
+                    format!("N {SK_35_MENU_NODE_ID}"),
                     format!("Enter {SK_26_SHOW_TEXT}"),
                     off,
                 ],
                 qr: self.lightning_qr.clone(),
             },
+            // SK-35: the ID is public. Its first and last 8 characters are
+            // lines of their own, so that they show in large type.
+            (View::NodeId, Some(_)) => {
+                let (hex, qr) = match &self.node_id {
+                    Some((h, q)) => (h.as_str(), Some(q.clone())),
+                    None => ("", None),
+                };
+                let (first, last) = (hex.get(..8).unwrap_or(""), hex.get(58..).unwrap_or(""));
+                Screen {
+                    id: "node-id",
+                    lines: vec![
+                        SK_35_PUBLIC.to_string(),
+                        SK_35_SCAN.to_string(),
+                        format!("{SK_35_FIRST} {first}"),
+                        format!("{SK_35_LAST} {last}"),
+                        format!("Enter {SK_26_SHOW_TEXT}"),
+                        off,
+                    ],
+                    qr,
+                }
+            }
             (_, None) => Screen {
                 id: "result",
                 lines: vec![off],
@@ -666,6 +694,7 @@ impl<C: Chance> App<C> {
                 Key::Char('l') => State::Result {
                     view: View::Lightning,
                 },
+                Key::Char('n') if view == View::Lightning => State::Result { view: View::NodeId },
                 Key::Char(c @ ('+' | '-')) if view == View::Float => {
                     self.float_index = if c == '+' {
                         (self.float_index + 1).min(FLOAT_INDEX_MAX)
@@ -754,6 +783,7 @@ impl<C: Chance> App<C> {
             || self.seed_qr.is_some()
             || self.float_qr.is_some()
             || self.lightning_qr.is_some()
+            || self.node_id.is_some()
             || self.job.is_some()
             || !self.out_codes.is_empty()
     }
@@ -926,6 +956,9 @@ impl<C: Chance> App<C> {
         self.lightning_qr = Some(openbmt_qr::encode_text(&hex, Ecc::M).map_err(|_| ())?);
         let mut hex = hex.into_bytes();
         wipe(&mut hex);
+        let id = lightning_node_id_hex(&words).map_err(|_| ())?;
+        let id_qr = openbmt_qr::encode_text(&id, Ecc::M).map_err(|_| ())?;
+        self.node_id = Some((id, id_qr));
         self.public = Some(public);
         if self.float_qr.is_none() {
             return Err(());

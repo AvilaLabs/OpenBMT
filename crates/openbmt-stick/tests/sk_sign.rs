@@ -197,7 +197,10 @@ use std::str::FromStr;
 
 use bitcoin::bip32::Xpriv;
 use openbmt_stick::app::Outcome;
-use openbmt_stick::bip85::{entropy_at, float_entropy, float_path, lightning_hex, lightning_path};
+use openbmt_stick::bip85::{
+    entropy_at, float_entropy, float_path, lightning_child, lightning_hex, lightning_node_id_hex,
+    lightning_path,
+};
 use openbmt_stick::keys::Key;
 use openbmt_stick::outputs::{master_of, words_of};
 use openbmt_stick::seedqr::compact_seedqr;
@@ -282,6 +285,96 @@ fn sk_32_lightning_is_128_lower_case_hex_characters_of_the_hex_child() {
         .bytes()
         .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
     assert_eq!(h, hex(&entropy_at(&master, &lightning_path()).unwrap()));
+}
+
+// ---- SK-35: the Lightning node's ID --------------------------------------
+
+/// The app at the node ID screen of the test words.
+fn node_id_app() -> openbmt_stick::app::App<common::Zero> {
+    let mut a = result_app();
+    a.key(Key::Char('l'));
+    assert_eq!(a.screen().id, "lightning");
+    a.key(Key::Char('n'));
+    a
+}
+
+#[test]
+fn sk_35_the_screen_follows_the_lightning_screen_and_enter_returns() {
+    let mut a = node_id_app();
+    assert_eq!(a.screen().id, "node-id");
+    a.key(Key::Enter);
+    assert_eq!(a.screen().id, "result");
+    // N opens it from the Lightning screen only.
+    a.key(Key::Char('n'));
+    assert_eq!(a.screen().id, "result");
+    a.key(Key::Char('f'));
+    a.key(Key::Char('n'));
+    assert_eq!(a.screen().id, "float");
+    // The Lightning screen lists the key.
+    let mut b = result_app();
+    b.key(Key::Char('l'));
+    assert!(text(&b).contains(&format!("N {}", words::SK_35_MENU_NODE_ID)));
+}
+
+#[test]
+fn sk_35_the_qr_decodes_to_the_cores_id_in_66_lower_case_hex_characters() {
+    let a = node_id_app();
+    let screen = a.screen();
+    let qr = screen.qr.as_ref().expect("a code on the screen");
+    let (w, h, luma) = luma_of(qr, 6);
+    let got = String::from_utf8(decode_luma(w, h, &luma).unwrap().bytes).unwrap();
+    let mut seed = lightning_child(&WORDS).unwrap();
+    let want = hex(&openbmt_core::shop_lightning::node_id(&seed));
+    seed.fill(0);
+    assert_eq!(got.len(), 66);
+    assert_eq!(got, want);
+    assert_eq!(got, lightning_node_id_hex(&WORDS).unwrap());
+    assert!(got
+        .bytes()
+        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+    // The ID is a point of the curve, not a key of the 64 bytes' own.
+    assert!(got.starts_with("02") || got.starts_with("03"));
+    assert_ne!(got, lightning_hex(&WORDS).unwrap()[..66]);
+}
+
+#[test]
+fn sk_35_the_first_and_last_8_characters_are_lines_of_their_own() {
+    let a = node_id_app();
+    let screen = a.screen();
+    let want = lightning_node_id_hex(&WORDS).unwrap();
+    assert!(screen
+        .lines
+        .iter()
+        .any(|l| l == &format!("{} {}", words::SK_35_FIRST, &want[..8])));
+    assert!(screen
+        .lines
+        .iter()
+        .any(|l| l == &format!("{} {}", words::SK_35_LAST, &want[58..])));
+    // The whole ID is not text on the screen: the code carries it.
+    assert!(!text(&a).contains(&want));
+}
+
+#[test]
+fn sk_35_turning_off_clears_the_screen_and_its_code() {
+    let mut a = node_id_app();
+    a.key(Key::Escape);
+    assert!(!a.holds_anything());
+}
+
+#[test]
+fn sk_35_the_placeholders_are_the_ones_listed() {
+    // Every new word is a placeholder until the owner of the rules writes
+    // it; this list is that to-do.
+    let want = [
+        "WORDS_NEEDED_SK35_MENU_NODE_ID",
+        "WORDS_NEEDED_SK35_PUBLIC",
+        "WORDS_NEEDED_SK35_SCAN",
+        "WORDS_NEEDED_SK35_FIRST",
+        "WORDS_NEEDED_SK35_LAST",
+    ];
+    assert_eq!(words::placeholders(), want);
+    assert!(words::is_placeholder(want[0]));
+    assert!(!words::is_placeholder(words::SK_33_LIGHTNING_WHAT));
 }
 
 /// The app standing at the public result of the test words.

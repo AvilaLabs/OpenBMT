@@ -129,6 +129,20 @@ pub const SK_33_LIGHTNING_SCAN: &str =
 /// Shop Lightning's screen: never photographed (SK-33).
 pub const SK_33_LIGHTNING_NO_PHOTO: &str =
     "Never take a photo of this code. Anyone with one can spend the Lightning money.";
+/// After "N" on Shop Lightning's screen: show the node's ID (SK-35).
+pub const SK_35_MENU_NODE_ID: &str = "WORDS_NEEDED_SK35_MENU_NODE_ID";
+/// The node ID screen: what the ID is, and that it is public and spends
+/// nothing (SK-35).
+pub const SK_35_PUBLIC: &str = "WORDS_NEEDED_SK35_PUBLIC";
+/// The node ID screen: the owner phone scans it to turn Shop Lightning on
+/// (SK-35).
+pub const SK_35_SCAN: &str = "WORDS_NEEDED_SK35_SCAN";
+/// The node ID screen: the label before the first 8 characters of the ID
+/// (SK-35).
+pub const SK_35_FIRST: &str = "WORDS_NEEDED_SK35_FIRST";
+/// The node ID screen: the label before the last 8 characters of the ID
+/// (SK-35).
+pub const SK_35_LAST: &str = "WORDS_NEEDED_SK35_LAST";
 /// The title of the screen that reads the payment's QR codes (SK-52).
 pub const SK_52_SCAN_TITLE: &str =
     "Hold the owner phone's payment code up to this computer's camera.";
@@ -251,6 +265,11 @@ pub const ALL: &[&str] = &[
     SK_33_LIGHTNING_SPENDS,
     SK_33_LIGHTNING_SCAN,
     SK_33_LIGHTNING_NO_PHOTO,
+    SK_35_MENU_NODE_ID,
+    SK_35_PUBLIC,
+    SK_35_SCAN,
+    SK_35_FIRST,
+    SK_35_LAST,
     SK_52_SCAN_TITLE,
     SK_52_LOOKING,
     SK_52_PARTS,
@@ -291,4 +310,17 @@ pub fn secure_boot_state(value: &str) -> &'static str {
         "0" => SK_06_OFF,
         _ => SK_06_UNKNOWN,
     }
+}
+
+/// Whether `text` is a placeholder for words the rules' owner has not yet
+/// written: `WORDS`, `_NEEDED_`, the rule's name and the text's name. The
+/// tag is built from pieces so that this file holds it only where a text
+/// is still a placeholder.
+pub fn is_placeholder(text: &str) -> bool {
+    text.starts_with(concat!("WORDS", "_NEEDED_"))
+}
+
+/// Every text of this file that is still a placeholder.
+pub fn placeholders() -> Vec<&'static str> {
+    ALL.iter().copied().filter(|t| is_placeholder(t)).collect()
 }
