@@ -447,6 +447,9 @@ pub(crate) struct FormerWatch {
     /// The pinned frame of a former wallet; `None` for the refund float,
     /// whose watch is kept in the same list and is fed by the same blocks.
     pinned: Option<PinnedWallet>,
+    /// The refund float's own wallet, for the scripts of a wider watch
+    /// (FL-05); `None` for a former wallet.
+    float: Option<ImportedWallet>,
     file: String,
     pub(crate) view: CoinView,
     pub(crate) scripts: ScriptSet,
@@ -481,6 +484,7 @@ impl FormerWatch {
         let scripts = former_scripts(parts.wallet.wallet(), &view);
         Ok(Self {
             pinned: Some(parts.wallet),
+            float: None,
             file: parts.file,
             view,
             scripts,
@@ -509,6 +513,7 @@ impl FormerWatch {
         let scripts = former_scripts(&parts.wallet, &view);
         Ok(Self {
             pinned: None,
+            float: Some(parts.wallet),
             file,
             view,
             scripts,
@@ -1709,6 +1714,69 @@ impl<P: OwnerPort> OwnerNode<P> {
             receive_next: f.view.receive_next(),
             change_next: f.view.change_next(),
         })
+    }
+
+    /// FL-05: the float's watch moves to [`GAP`] past `receive_end` and
+    /// `change_end` at once, without a restart: each is one past the highest
+    /// index used or handed out, as [`FloatParts`] says, and a watch that is
+    /// already wider is left as it is. The scripts that are new go to the
+    /// driver, and the blocks since the float was set up are read again for
+    /// them, with the node's own rescan (as [`OwnerNode::rescan`] does for the
+    /// shop's wallet), because a payment to an index just past the old watch
+    /// may be in a block that was read before. The float's coins wait for that
+    /// rescan, as those of the shop's wallet do. With no float watched it says
+    /// so.
+    pub fn raise_float_watch(&mut self, receive_end: u32, change_end: u32) -> Result<(), NodeError> {
+        if let Some(why) = &self.halted {
+            return Err(NodeError::NotReady(why.clone()));
+        }
+        let at = self
+            .former
+            .iter()
+            .position(FormerWatch::is_float)
+            .ok_or_else(|| NodeError::NotReady("the float is not watched".into()))?;
+        let dir = self.dir.clone();
+        let tip = self.watcher.chain().tip_height();
+        let f = &mut self.former[at];
+        let wallet = f
+            .float
+            .clone()
+            .ok_or_else(|| NodeError::NotReady("the float is not watched".into()))?;
+        let (receive, change) = (
+            receive_end.max(f.view.receive_next()),
+            change_end.max(f.view.change_next()),
+        );
+        if receive == f.view.receive_next() && change == f.view.change_next() {
+            return Ok(());
+        }
+        ensure_marks_fit_watch_budget(receive, change, 0)?;
+        let file = f.file.clone();
+        let from = f.view.birthday();
+        // The view starts again from the float's birthday, and the marks go
+        // up in the next write: a restart between the two reads the float
+        // again from the app's own record, which is the wider one.
+        f.view
+            .reset(|b| write_file(&dir, &file, b))
+            .map_err(NodeError::Files)?;
+        f.view
+            .watch_plan(receive, change, tip, &[], 0, |b| write_file(&dir, &file, b))
+            .map_err(NodeError::Files)?;
+        let new = former_scripts(&wallet, &f.view);
+        let added: Vec<ScriptBuf> = new
+            .keys()
+            .filter(|s| !f.scripts.contains_key(*s))
+            .cloned()
+            .collect();
+        f.scripts = new;
+        for script in added {
+            self.watcher.port().watch_script(script);
+        }
+        self.awaiting_rescan = self.awaiting_rescan.saturating_add(1);
+        self.watcher.port().rescan_from(from);
+        self.note(format!(
+            "new addresses of the refund float are watched; rechecking blocks after {from}"
+        ));
+        Ok(())
     }
 
     /// FL-20, FL-21, FL-35: a finished transaction of the float goes to the

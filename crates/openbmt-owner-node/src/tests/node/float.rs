@@ -82,6 +82,87 @@ fn fl_05_a_payment_to_a_float_address_is_the_floats_own_coin_and_no_total_of_the
 }
 
 #[test]
+fn fl_05_raising_the_watch_finds_a_payment_past_the_old_end_without_a_restart() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &float_setup()).unwrap();
+    // End 1: the watch goes to 21. A payment to index 40 is not seen, before
+    // or after the raise.
+    fund(&mut rig, 7, &float_script(Keychain::Receive, 3), 40_000);
+    fund(&mut rig, 10, &float_script(Keychain::Receive, 40), 7_000);
+    assert_eq!(rig.node.float_coins().unwrap().confirmed, 40_000);
+    let before = rig.calls();
+    let spawned = rig.spawned.lock().unwrap().len();
+    // The app handed out up to index 30: the end is 31, the watch 51.
+    rig.node.raise_float_watch(31, 1).unwrap();
+    let new = rig.calls()[before.len()..].to_vec();
+    // The 30 receive scripts that are new, and the float's own birthday read again.
+    assert_eq!(new.iter().filter(|c| *c == "main watch").count(), 30);
+    assert_eq!(new.iter().filter(|c| *c == "main rescan 0").count(), 1);
+    assert!(rig.node.float_coins().is_err(), "the coins wait for the rescan");
+    rig.rescan();
+    let held = rig.node.float_coins().unwrap();
+    // The payment mined before the raise is found by the rescan.
+    assert_eq!(held.confirmed, 47_000);
+    assert_eq!(held.receive_next, 31);
+    // And one mined after it, to the new end, with no restart.
+    fund(&mut rig, 11, &float_script(Keychain::Receive, 50), 3_000);
+    assert_eq!(rig.node.float_coins().unwrap().confirmed, 50_000);
+    assert_eq!(rig.spawned.lock().unwrap().len(), spawned, "no driver was started");
+    // Past the new end it is still not watched.
+    fund(&mut rig, 12, &float_script(Keychain::Receive, 52), 1_000);
+    assert_eq!(rig.node.float_coins().unwrap().confirmed, 50_000);
+    // The shop's wallet is untouched by all of it.
+    assert!(rig.node.coins().is_empty());
+    assert!(rig.node.former_held().is_empty());
+    // The wider watch is what a restart reads back.
+    let chain = rig.chain.clone();
+    drop(rig);
+    let rig = start_at(
+        &dir,
+        &Setup {
+            float: Some(FloatParts {
+                receive_end: 31,
+                ..float_setup().float.unwrap()
+            }),
+            ..float_setup()
+        },
+        chain,
+    )
+    .unwrap();
+    assert_eq!(rig.node.float_coins().unwrap().confirmed, 50_000);
+}
+
+#[test]
+fn fl_05_raising_the_change_end_watches_further_change_and_a_lower_end_changes_nothing() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &float_setup()).unwrap();
+    fund(&mut rig, 8, &float_script(Keychain::Change, 25), 5_000);
+    assert_eq!(rig.node.float_coins().unwrap().confirmed, 0);
+    // Not past what is watched: nothing is said and nothing is rescanned.
+    let before = rig.calls();
+    rig.node.raise_float_watch(1, 1).unwrap();
+    rig.node.raise_float_watch(0, 0).unwrap();
+    assert_eq!(rig.calls(), before);
+    rig.node.raise_float_watch(1, 10).unwrap();
+    rig.rescan();
+    let held = rig.node.float_coins().unwrap();
+    assert_eq!(held.confirmed, 5_000);
+    assert_eq!(held.change_next, 10);
+    // The receive end did not go down.
+    assert_eq!(held.receive_next, 1);
+}
+
+#[test]
+fn fl_05_a_node_with_no_float_cannot_raise_its_watch() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    assert!(matches!(
+        rig.node.raise_float_watch(5, 5),
+        Err(NodeError::NotReady(_))
+    ));
+}
+
+#[test]
 fn fl_05_a_node_with_no_float_says_so() {
     let dir = Dir::new();
     let rig = start(&dir, &Setup::default()).unwrap();
