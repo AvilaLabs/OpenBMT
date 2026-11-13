@@ -499,10 +499,12 @@ the shop's currency, so the node keeps a log of its own.
   rounded down; without a quote, none. A cash-out's value is the satoshis
   paid out at the price the owner confirmed when the cash-out was queued
   (OA-102); without one, none. A value that is none is never made up. The
-  satoshis of a cash-out of everything are those its transaction paid out,
-  read from the transaction itself, also when it was finished on a
-  hardware signer and settled from a block (OC-52); they are never logged
-  as zero.
+  satoshis of every entry are those its transaction paid out to that
+  entry's address, read from the transaction itself, also when it was
+  finished on a hardware signer and settled from a block (OC-52): a cash-out
+  of everything is never logged as zero, and a refund whose fee the
+  customer paid is logged at what the customer received, not at what was
+  asked.
 - **OC-50.** The log is `paid-log.bin`: `OBM&`, version 1, and then entries of
   118 bytes, each ending in the first 8 bytes of the SHA-256 of the 110 bytes
   before it. The file is only added to: a new file is built from the old
@@ -526,10 +528,14 @@ the shop's currency, so the node keeps a log of its own.
   queued entry. A queue with neither stays version 1 or 2, byte for byte as
   before.
 - **OC-52.** A block that pays or beats a transaction given to a hardware
-  signer is written down as owed before the wallet's coin view takes the
-  block, and the entries are settled from that record, again after every
-  block, after key 1 recovery and at start, until each is settled or its
-  block has left the chain. A settlement retried is not logged twice.
+  signer, or that beats a transaction of the owner's own outbox, is written
+  down as owed before the wallet's coin view takes the block, and the
+  entries are settled from that record, again after every block, after key
+  1 recovery and at start, until each is settled or its block has left the
+  chain. A settlement retried is not logged twice. An outbox transaction
+  beaten this way leaves the outbox and its entries go back to the queue
+  for a new approval, as OC-03 says, also when the first attempt to store
+  that failed.
 
 ## What these rules do not say
 
