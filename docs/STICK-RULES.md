@@ -66,8 +66,9 @@ funds.**
 - **SK-10. One program.** The kernel runs one static program as process 1,
   built from this repository (`crates/openbmt-stick`). There is no shell, no
   other program, no login and no way to start one.
-- **SK-11. What it mounts.** It mounts `proc`, `sysfs`, `devtmpfs` and
-  `efivarfs` (read only) and nothing else. It never mounts a disk, the stick
+- **SK-11. What it mounts.** It mounts `proc`, `sysfs`, `devtmpfs`,
+  `efivarfs` and `securityfs` (the last two read only; `securityfs` is the
+  only place the kernel shows its lockdown mode) and nothing else. It never mounts a disk, the stick
   included: the program runs from memory.
 - **SK-12. No network, checked.** It never brings an interface up, never
   sets an address and never opens a socket. On the first
@@ -80,9 +81,11 @@ funds.**
 - **SK-14. The screen and the keys.** It draws on the frame buffer the
   firmware or the kernel's display driver gives, in large text, and reads
   the keyboard through the kernel's input events. No mouse is needed.
-- **SK-15. The words of every screen** are under `docs/SCREEN-RULES.md`;
-  until they are written a placeholder constant `WORDS_NEEDED_SK_xxx` names
-  the rule.
+- **SK-15. The words of every screen** are the constants of
+  `crates/openbmt-stick/src/words.rs`, each distinct and each shown by some
+  screen. No other sentence is made by the program: a screen holds only those
+  words, the words of the list, numbers, hex and key names. The firmware's
+  Secure Boot value is shown as a word (on, off, unknown), never as a number.
 
 ## 4. Chance
 
@@ -96,9 +99,12 @@ funds.**
 - **SK-21. Die rolls with the computer's.** Any number of rolls from 0 is
   taken, each 1 to 6; the screen says that 50 rolls are enough on their own.
   Undo removes the last roll.
-- **SK-22. Dice alone.** The owner may choose dice alone: exactly 50 rolls,
-  turned into words as `docs/KEYMAKER-RULES.md` KM-30 and KM-31 say, with
-  no kernel bytes. The same rolls give the same words as the Key Maker page
+- **SK-22. Dice alone.** The owner may choose dice alone: rolls taken in
+  threes until 50 values are kept, as `docs/KEYMAKER-RULES.md` KM-30 says
+  (about 270 rolls, since a three with a number repeated is dropped), then
+  turned into words as KM-31 says, with no kernel bytes. The screen shows the
+  rolls made and the values kept out of 50; a roll after the 50th value is
+  refused. The same rolls give the same words as the Key Maker page
   and as the hand method of that page.
 - **SK-23. What is fixed.** 12 English BIP39 words, no passphrase, native
   SegWit with a single key (BIP84), account `m/84'/0'/0'`, real bitcoin
@@ -107,13 +113,17 @@ funds.**
 ## 5. What comes out
 
 - **SK-25. The words.** The 12 words are shown four at a time, numbered,
-  for the owner to write by hand. Then three positions among the 12, picked
-  from the kernel's random bytes, are asked back, as KM-16. A wrong answer
+  for the owner to write by hand. Then three positions among the 12 are asked
+  back. They are picked from 32 fresh kernel bytes by KM-16's byte rule (each
+  byte below 252, modulo 12, skipping repeats), also in a dice-alone run,
+  where kernel bytes pick only the positions and never touch the key. The
+  answers are checked as KM-16 says. A wrong answer
   shows the words again.
 - **SK-26. The public result.** Then the program shows the master
   fingerprint, the first receive address and the wallet's descriptor
   `wpkh([fp/84h/0h/0h]xpub/<0;1>/*)#checksum`, as text and as a QR code the
-  owner phone's "Connect your wallet" scans (`docs/OWNER-APP-RULES.md`). The
+  owner phone's "Connect your wallet" scans (`docs/OWNER-APP-RULES.md`).
+  The descriptor's QR code has a screen of its own. The
   outputs equal KM-06 for the same words.
 - **SK-27. SeedQR, if asked.** The owner may ask for the words as a Compact
   SeedQR (the SeedSigner standard) to copy onto steel. The screen says that

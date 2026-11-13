@@ -156,12 +156,12 @@ impl<C: Chance> App<C> {
             State::Mix { rolls } => Screen {
                 id: "mix",
                 lines: vec![
-                    format!("{WORDS_NEEDED_SK_21_ROLLS} {}", rolls.len()),
-                    WORDS_NEEDED_SK_21_ENOUGH.to_string(),
+                    format!("{SK_21_ROLLS} {}", rolls.len()),
+                    SK_21_ENOUGH.to_string(),
                     String::new(),
                     digits_of(rolls),
                     String::new(),
-                    WORDS_NEEDED_SK_21_KEYS.to_string(),
+                    SK_21_KEYS.to_string(),
                 ],
                 qr: None,
             },
@@ -170,24 +170,25 @@ impl<C: Chance> App<C> {
                 Screen {
                     id: "dice",
                     lines: vec![
-                        format!("{WORDS_NEEDED_SK_22_ROLLS} {}", rolls.len()),
-                        format!("{WORDS_NEEDED_SK_22_VALUES} {values} {DICE_VALUES}"),
+                        format!("{SK_22_ROLLS} {}", rolls.len()),
+                        format!("{SK_22_VALUES} {values}/{DICE_VALUES}"),
+                        SK_22_WHY.to_string(),
                         String::new(),
                         digits_of(rolls),
                         String::new(),
-                        WORDS_NEEDED_SK_22_KEYS.to_string(),
+                        SK_22_KEYS.to_string(),
                     ],
                     qr: None,
                 }
             }
             State::Type { words, buf, error } => {
-                let mut lines = vec![format!("{WORDS_NEEDED_SK_28_TYPE} {}", words.len() + 1)];
+                let mut lines = vec![format!("{SK_28_TYPE} {}", words.len() + 1)];
                 if let Some(e) = error {
                     lines.push((*e).to_string());
                 }
                 lines.push(format!("> {buf}"));
                 lines.push(String::new());
-                lines.push(WORDS_NEEDED_SK_28_KEYS.to_string());
+                lines.push(SK_28_KEYS.to_string());
                 Screen {
                     id: "type",
                     lines,
@@ -197,9 +198,10 @@ impl<C: Chance> App<C> {
             State::Words { page, wrong } => {
                 let mut lines = Vec::new();
                 if let Some(p) = wrong {
-                    lines.push(format!("{WORDS_NEEDED_SK_25_WRONG} {}", p + 1));
+                    lines.push(format!("{SK_25_WRONG} {}", p + 1));
                 }
-                lines.push(format!("{WORDS_NEEDED_SK_25_WORDS} {}", page + 1));
+                lines.push(format!("{SK_25_WORDS} {}", page + 1));
+                lines.push(SK_25_NO_PHOTO.to_string());
                 if let Some(words) = self.entropy.as_ref().and_then(|e| words_of(e).ok()) {
                     for (i, w) in words
                         .iter()
@@ -211,7 +213,7 @@ impl<C: Chance> App<C> {
                     }
                 }
                 lines.push(String::new());
-                lines.push(WORDS_NEEDED_SK_25_NEXT.to_string());
+                lines.push(SK_25_NEXT.to_string());
                 Screen {
                     id: "words",
                     lines,
@@ -221,14 +223,11 @@ impl<C: Chance> App<C> {
             State::Check { answers, buf } => Screen {
                 id: "check",
                 lines: vec![
-                    WORDS_NEEDED_SK_25_CHECK.to_string(),
-                    format!(
-                        "{WORDS_NEEDED_SK_25_ASK} {}",
-                        self.positions[answers.len()] + 1
-                    ),
+                    SK_25_CHECK.to_string(),
+                    format!("{SK_25_ASK} {}", self.positions[answers.len()] + 1),
                     format!("> {buf}"),
                     String::new(),
-                    WORDS_NEEDED_SK_25_TYPE.to_string(),
+                    SK_25_TYPE.to_string(),
                 ],
                 qr: None,
             },
@@ -240,40 +239,46 @@ impl<C: Chance> App<C> {
         let f = &self.facts;
         let mark = |i: usize| if i == selected { ">" } else { " " };
         let nets = if f.interfaces.is_empty() {
-            "-".to_string()
+            SK_12_NONE.to_string()
         } else {
             f.interfaces.join(" ")
         };
         Screen {
             id: "start",
             lines: vec![
-                format!("{WORDS_NEEDED_SK_06_SECURE_BOOT} {}", f.secure_boot),
-                format!("{WORDS_NEEDED_SK_06_LOCKDOWN} {}", f.lockdown),
-                format!("{WORDS_NEEDED_SK_12_INTERFACES} {nets}"),
-                format!("{WORDS_NEEDED_SK_31_VERSION} {}", f.version),
-                format!("{WORDS_NEEDED_SK_31_INITRD_HASH} {}", f.initrd_sha256),
+                SK_10_TITLE.to_string(),
+                format!(
+                    "{SK_06_SECURE_BOOT} {}",
+                    crate::words::secure_boot_state(&f.secure_boot)
+                ),
+                format!("{SK_06_LOCKDOWN} {}", f.lockdown),
+                format!("{SK_12_INTERFACES} {nets}"),
+                format!("{SK_31_VERSION} {}", f.version),
+                format!("{SK_31_INITRD_HASH} {}", f.initrd_sha256),
+                SK_31_COMPARE.to_string(),
                 String::new(),
-                format!("{} 1 {WORDS_NEEDED_SK_20_MENU_MIX}", mark(0)),
-                format!("{} 2 {WORDS_NEEDED_SK_22_MENU_DICE}", mark(1)),
-                format!("{} 3 {WORDS_NEEDED_SK_28_MENU_CHECK}", mark(2)),
-                format!("Esc {WORDS_NEEDED_SK_29_TURN_OFF}"),
+                format!("{} 1 {SK_20_MENU_MIX}", mark(0)),
+                format!("{} 2 {SK_22_MENU_DICE}", mark(1)),
+                format!("{} 3 {SK_28_MENU_CHECK}", mark(2)),
+                SK_10_MENU_KEYS.to_string(),
+                format!("Esc {SK_29_TURN_OFF}"),
             ],
             qr: None,
         }
     }
 
     fn result_screen(&self, view: View) -> Screen {
-        let off = format!("Esc {WORDS_NEEDED_SK_29_TURN_OFF}");
+        let off = format!("Esc {SK_29_TURN_OFF}");
         match (view, &self.public) {
             (View::Text, Some(p)) => Screen {
                 id: "result",
                 lines: vec![
-                    WORDS_NEEDED_SK_26_RESULT.to_string(),
-                    format!("{WORDS_NEEDED_SK_26_FINGERPRINT} {}", p.fingerprint),
-                    format!("{WORDS_NEEDED_SK_26_ADDRESS} {}", p.address),
-                    format!("{WORDS_NEEDED_SK_26_DESCRIPTOR} {}", p.descriptor),
-                    format!("Enter {WORDS_NEEDED_SK_26_SHOW_QR}"),
-                    format!("S {WORDS_NEEDED_SK_27_SEEDQR}"),
+                    SK_26_RESULT.to_string(),
+                    format!("{SK_26_FINGERPRINT} {}", p.fingerprint),
+                    format!("{SK_26_ADDRESS} {}", p.address),
+                    format!("{SK_26_DESCRIPTOR} {}", p.descriptor),
+                    format!("Enter {SK_26_SHOW_QR}"),
+                    format!("S {SK_27_SEEDQR}"),
                     off,
                 ],
                 qr: None,
@@ -281,8 +286,8 @@ impl<C: Chance> App<C> {
             (View::Qr, Some(_)) => Screen {
                 id: "result-qr",
                 lines: vec![
-                    WORDS_NEEDED_SK_26_DESCRIPTOR.to_string(),
-                    format!("Enter {WORDS_NEEDED_SK_26_SHOW_TEXT}"),
+                    SK_26_SCAN.to_string(),
+                    format!("Enter {SK_26_SHOW_TEXT}"),
                     off,
                 ],
                 qr: self.descriptor_qr.clone(),
@@ -290,8 +295,8 @@ impl<C: Chance> App<C> {
             (View::SeedQr, Some(_)) => Screen {
                 id: "seedqr",
                 lines: vec![
-                    WORDS_NEEDED_SK_27_WARNING.to_string(),
-                    format!("Enter {WORDS_NEEDED_SK_26_SHOW_TEXT}"),
+                    SK_27_WARNING.to_string(),
+                    format!("Enter {SK_26_SHOW_TEXT}"),
                     off,
                 ],
                 qr: self.seed_qr.clone(),
@@ -520,7 +525,7 @@ impl<C: Chance> App<C> {
                 }
             }
             Key::Enter => match complete_word(&buf) {
-                None => error = Some(WORDS_NEEDED_SK_28_BAD_WORD),
+                None => error = Some(SK_28_BAD_WORD),
                 Some(w) => {
                     words.push(w);
                     buf.clear();
@@ -543,8 +548,8 @@ impl<C: Chance> App<C> {
                                 words.pop();
                                 buf.push_str(w);
                                 error = Some(match e {
-                                    TypedError::BadChecksum => WORDS_NEEDED_SK_28_BAD_CHECKSUM,
-                                    _ => WORDS_NEEDED_SK_28_BAD_WORD,
+                                    TypedError::BadChecksum => SK_28_BAD_CHECKSUM,
+                                    _ => SK_28_BAD_WORD,
                                 });
                             }
                         }

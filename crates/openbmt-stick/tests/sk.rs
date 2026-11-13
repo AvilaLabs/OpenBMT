@@ -7,7 +7,7 @@ use openbmt_core::wallet_single::SingleKeyWallet;
 use openbmt_qr::{decode_luma, Ecc};
 use openbmt_stick::app::{App, Chance, Facts, Outcome};
 use openbmt_stick::check::{answer_matches, pick_positions};
-use openbmt_stick::draw::{pack, render, text_scale, write_row, Channel, PixelFormat};
+use openbmt_stick::draw::{pack, render, text_scale, wrap, write_row, Channel, PixelFormat};
 use openbmt_stick::keys::{key_from_code, key_from_event, Key, EVENT_SIZE};
 use openbmt_stick::mix::{dice_alone, dice_values, mix, MixError};
 use openbmt_stick::modlist::{check_list, FORBIDDEN};
@@ -129,20 +129,17 @@ fn sk_21_any_number_of_rolls_is_taken_and_undo_removes_the_last() {
     let mut a = app();
     a.key(Key::Char('1'));
     press(&mut a, "123");
-    assert!(text(&a.screen()).contains(&format!("{} 3", words::WORDS_NEEDED_SK_21_ROLLS)));
+    assert!(text(&a.screen()).contains(&format!("{} 3", words::SK_21_ROLLS)));
     a.key(Key::Char('6'));
     a.key(Key::Backspace);
     a.key(Key::Backspace);
     let t = text(&a.screen());
-    assert!(
-        t.contains(&format!("{} 2", words::WORDS_NEEDED_SK_21_ROLLS)),
-        "{t}"
-    );
+    assert!(t.contains(&format!("{} 2", words::SK_21_ROLLS)), "{t}");
     assert!(t.contains("\n12\n"), "{t}");
     // The screen says 50 rolls are enough, and a 7 or a 0 is not a roll.
-    assert!(t.contains(words::WORDS_NEEDED_SK_21_ENOUGH));
+    assert!(t.contains(words::SK_21_ENOUGH));
     press(&mut a, "07");
-    assert!(text(&a.screen()).contains(&format!("{} 2", words::WORDS_NEEDED_SK_21_ROLLS)));
+    assert!(text(&a.screen()).contains(&format!("{} 2", words::SK_21_ROLLS)));
     // Zero rolls goes on too.
     let mut b = app();
     b.key(Key::Char('1'));
@@ -198,13 +195,10 @@ fn sk_22_a_whole_dice_alone_run_on_the_screens_gives_the_page_words() {
         a.key(Key::Char(char::from(b'0' + d)));
     }
     let t = text(&a.screen());
-    assert!(
-        t.contains(&format!("{} 50 50", words::WORDS_NEEDED_SK_22_VALUES)),
-        "{t}"
-    );
+    assert!(t.contains(&format!("{} 50/50", words::SK_22_VALUES)), "{t}");
     // A further roll is not taken once 50 values are kept.
     a.key(Key::Char('4'));
-    assert!(text(&a.screen()).contains(&format!("{} 150", words::WORDS_NEEDED_SK_22_ROLLS)));
+    assert!(text(&a.screen()).contains(&format!("{} 150", words::SK_22_ROLLS)));
     a.key(Key::Enter);
     assert_eq!(a.screen().id, "words");
     let shown = shown_words(&mut a);
@@ -218,8 +212,8 @@ fn sk_22_undo_removes_the_last_roll() {
     press(&mut a, "1364");
     a.key(Key::Backspace);
     let t = text(&a.screen());
-    assert!(t.contains(&format!("{} 3", words::WORDS_NEEDED_SK_22_ROLLS)));
-    assert!(t.contains(&format!("{} 1 50", words::WORDS_NEEDED_SK_22_VALUES)));
+    assert!(t.contains(&format!("{} 3", words::SK_22_ROLLS)));
+    assert!(t.contains(&format!("{} 1/50", words::SK_22_VALUES)));
 }
 
 /// Pages through the words screens and returns the 12 words shown.
@@ -228,7 +222,7 @@ fn shown_words(a: &mut App<Fixed>) -> Vec<String> {
     for page in 0..3 {
         let s = a.screen();
         assert_eq!(s.id, "words");
-        let title = format!("{} {}", words::WORDS_NEEDED_SK_25_WORDS, page + 1);
+        let title = format!("{} {}", words::SK_25_WORDS, page + 1);
         assert!(s.lines.contains(&title), "{:?}", s.lines);
         let mut four = 0;
         for line in &s.lines {
@@ -305,7 +299,7 @@ fn asked_position(a: &App<Fixed>) -> usize {
     let s = a.screen();
     assert_eq!(s.id, "check");
     let line = &s.lines[1];
-    line.strip_prefix(words::WORDS_NEEDED_SK_25_ASK)
+    line.strip_prefix(words::SK_25_ASK)
         .unwrap()
         .trim()
         .parse()
@@ -333,7 +327,7 @@ fn sk_25_a_wrong_answer_shows_the_words_again_and_right_ones_go_on() {
     assert_eq!(s.id, "words");
     assert_eq!(
         s.lines[0],
-        format!("{} {}", words::WORDS_NEEDED_SK_25_WRONG, expected[1] + 1)
+        format!("{} {}", words::SK_25_WRONG, expected[1] + 1)
     );
     assert_eq!(shown_words(&mut a), w);
     for pos in expected {
@@ -402,15 +396,12 @@ fn sk_26_the_screen_shows_the_text_and_a_qr_of_the_descriptor() {
     let s = a.screen();
     assert_eq!(s.id, "result");
     let t = text(&s);
-    assert!(t.contains(&format!(
-        "{} 818bc9b6",
-        words::WORDS_NEEDED_SK_26_FINGERPRINT
-    )));
+    assert!(t.contains(&format!("{} 818bc9b6", words::SK_26_FINGERPRINT)));
     assert!(t.contains("bc1qyjassxtmzl02s8de8jw9365qmuvwg74udtp3vj"));
     let desc = s
         .lines
         .iter()
-        .find_map(|l| l.strip_prefix(&format!("{} ", words::WORDS_NEEDED_SK_26_DESCRIPTOR)))
+        .find_map(|l| l.strip_prefix(&format!("{} ", words::SK_26_DESCRIPTOR)))
         .unwrap()
         .to_string();
     assert!(desc.starts_with("wpkh([818bc9b6/84h/0h/0h]xpub6CgURS1GrKZk"));
@@ -492,7 +483,7 @@ fn sk_27_the_seedqr_screen_warns_and_shows_the_code() {
     a.key(Key::Char('s'));
     let s = a.screen();
     assert_eq!(s.id, "seedqr");
-    assert!(text(&s).contains(words::WORDS_NEEDED_SK_27_WARNING));
+    assert!(text(&s).contains(words::SK_27_WARNING));
     let qr = s.qr.unwrap();
     let (w, h, luma) = gray_of(&qr, 4);
     assert_eq!(
@@ -534,7 +525,7 @@ fn sk_28_the_screen_names_a_bad_word_and_a_bad_checksum_and_allows_a_fix() {
     a.key(Key::Char('3'));
     press(&mut a, "qqq");
     a.key(Key::Enter);
-    assert!(text(&a.screen()).contains(words::WORDS_NEEDED_SK_28_BAD_WORD));
+    assert!(text(&a.screen()).contains(words::SK_28_BAD_WORD));
     for _ in 0..3 {
         a.key(Key::Backspace);
     }
@@ -547,7 +538,7 @@ fn sk_28_the_screen_names_a_bad_word_and_a_bad_checksum_and_allows_a_fix() {
     press(&mut a, "abandon");
     a.key(Key::Enter);
     let t = text(&a.screen());
-    assert!(t.contains(words::WORDS_NEEDED_SK_28_BAD_CHECKSUM), "{t}");
+    assert!(t.contains(words::SK_28_BAD_CHECKSUM), "{t}");
     assert!(t.contains("> abandon"));
     for _ in 0..7 {
         a.key(Key::Backspace);
@@ -569,7 +560,7 @@ fn sk_29_every_screen_after_the_words_has_turn_off_and_it_clears_and_powers_off(
         a.key(key);
         let s = a.screen();
         assert!(
-            text(&s).contains(&format!("Esc {}", words::WORDS_NEEDED_SK_29_TURN_OFF)),
+            text(&s).contains(&format!("Esc {}", words::SK_29_TURN_OFF)),
             "{}",
             s.id
         );
@@ -587,19 +578,38 @@ fn sk_06_sk_12_sk_31_the_first_screen_shows_the_facts_and_the_interfaces() {
     let s = app().screen();
     assert_eq!(s.id, "start");
     let t = text(&s);
-    assert!(t.contains(&format!("{} 1", words::WORDS_NEEDED_SK_06_SECURE_BOOT)));
-    assert!(t.contains(&format!("{} integrity", words::WORDS_NEEDED_SK_06_LOCKDOWN)));
-    assert!(t.contains(&format!("{} lo", words::WORDS_NEEDED_SK_12_INTERFACES)));
-    assert!(t.contains(&format!("{} 0.1.0 test", words::WORDS_NEEDED_SK_31_VERSION)));
-    assert!(t.contains(&format!(
-        "{} {}",
-        words::WORDS_NEEDED_SK_31_INITRD_HASH,
-        "ab".repeat(32)
-    )));
+    assert!(t.contains(&format!("{} {}", words::SK_06_SECURE_BOOT, words::SK_06_ON)));
+    // The firmware's other answers are named, never shown as a bare number.
+    for (value, want) in [
+        ("0", words::SK_06_OFF),
+        ("?", words::SK_06_UNKNOWN),
+        ("7", words::SK_06_UNKNOWN),
+    ] {
+        let mut f = facts();
+        f.secure_boot = value.into();
+        f.interfaces.clear();
+        let t = text(&App::new(f, Fixed::new(1)).screen());
+        assert!(
+            t.contains(&format!("{} {want}", words::SK_06_SECURE_BOOT)),
+            "{t}"
+        );
+        assert!(
+            t.contains(&format!(
+                "{} {}",
+                words::SK_12_INTERFACES,
+                words::SK_12_NONE
+            )),
+            "{t}"
+        );
+    }
+    assert!(t.contains(&format!("{} integrity", words::SK_06_LOCKDOWN)));
+    assert!(t.contains(&format!("{} lo", words::SK_12_INTERFACES)));
+    assert!(t.contains(&format!("{} 0.1.0 test", words::SK_31_VERSION)));
+    assert!(t.contains(&format!("{} {}", words::SK_31_INITRD_HASH, "ab".repeat(32))));
 }
 
 #[test]
-fn sk_15_every_placeholder_is_its_own_name_and_some_screen_shows_each() {
+fn sk_15_every_word_is_distinct_and_some_screen_shows_each() {
     let mut seen = String::new();
     let mut note = |a: &App<Fixed>| {
         seen.push_str(&text(&a.screen()));
@@ -653,6 +663,13 @@ fn sk_15_every_placeholder_is_its_own_name_and_some_screen_shows_each() {
     b.key(Key::Enter);
     b.key(Key::Char('s'));
     note(&b);
+    // The first screen's other states (SK-06, SK-12).
+    let mut f = facts();
+    f.secure_boot = "0".into();
+    f.interfaces.clear();
+    note(&App::new(f.clone(), Fixed::new(1)));
+    f.secure_boot = "?".into();
+    note(&App::new(f, Fixed::new(1)));
     for name in words::ALL {
         assert!(seen.contains(name), "no screen shows {name}");
         assert!(
@@ -660,19 +677,9 @@ fn sk_15_every_placeholder_is_its_own_name_and_some_screen_shows_each() {
             "{name} listed twice"
         );
     }
-    // Every placeholder is its own name.
+    // No placeholder is left.
     let src = std::fs::read_to_string(root().join("src/words.rs")).unwrap();
-    for line in src
-        .lines()
-        .filter(|l| l.starts_with("pub const WORDS_NEEDED_"))
-    {
-        let name = line
-            .split(':')
-            .next()
-            .unwrap()
-            .trim_start_matches("pub const ");
-        assert!(line.ends_with(&format!("\"{name}\";")), "{line}");
-    }
+    assert!(!src.contains(&["WORDS", "_NEEDED"].concat()));
 }
 
 fn source_files() -> Vec<(PathBuf, String)> {
@@ -822,6 +829,32 @@ fn sk_14_the_keys_come_from_input_events() {
     assert_eq!(key_from_event(&ev(1, 28, 0)), None);
     assert_eq!(key_from_event(&ev(1, 28, 2)), None);
     assert_eq!(key_from_event(&ev(4, 28, 1)), None);
+}
+
+#[test]
+fn sk_14_long_lines_break_at_spaces_and_long_words_are_cut() {
+    assert_eq!(
+        wrap(
+            "Compare the version with the release page before you go on.",
+            20
+        ),
+        [
+            "Compare the version",
+            "with the release",
+            "page before you go",
+            "on."
+        ]
+    );
+    assert_eq!(
+        wrap("Fingerprint: 0123456789abcdef", 8),
+        ["Fingerpr", "int:", "01234567", "89abcdef"]
+    );
+    assert_eq!(wrap("ab 0123456789", 4), ["ab", "0123", "4567", "89"]);
+    assert_eq!(wrap("  2 Make", 20), ["  2 Make"]);
+    assert_eq!(wrap("", 20), [""]);
+    for line in wrap(&"word ".repeat(40), 13) {
+        assert!(line.chars().count() <= 13, "{line}");
+    }
 }
 
 #[test]

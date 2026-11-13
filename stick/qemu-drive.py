@@ -9,6 +9,8 @@ SK-20/21, with a wrong answer first), type (check my words, SK-28).
 Every check prints a line starting PASS; any failure exits 1.
 """
 import hashlib
+import os
+import re
 import socket
 import subprocess
 import sys
@@ -21,6 +23,13 @@ TRIPLETS = ("136 235 425 512 124 432 523 456 456 652 532 431 651 643 314 361 145
 DICE_WORDS = "dance summer quarter guitar magic arm response novel toe service light enough"
 
 scenario, mon_path, log_path, expected_bin, initrd = sys.argv[1:6]
+
+# The screens' words, read from the program's own source (SK-15), so the
+# checks follow the words as they are written.
+_words_rs = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "crates", "openbmt-stick", "src", "words.rs")
+W = {}
+for m in re.finditer(r'pub const (SK_\w+): &str =\s*"((?:[^"\\]|\\.)*)";', open(_words_rs).read()):
+    W[m.group(1)] = m.group(2).replace('\\"', '"')
 
 
 def fail(msg):
@@ -160,21 +169,21 @@ if scenario == "type":
 first = wait_screens(0, 120)[0]
 if first["id"] != "start":
     fail("first screen is " + first["id"])
-if field(first, "WORDS_NEEDED_SK_06_SECURE_BOOT") != "1":
-    fail("SecureBoot is not 1: %r" % first["lines"])
-ok("SK-06 first screen: SecureBoot " + field(first, "WORDS_NEEDED_SK_06_SECURE_BOOT"))
-if field(first, "WORDS_NEEDED_SK_06_LOCKDOWN") != "integrity":
+if field(first, W["SK_06_SECURE_BOOT"]) != W["SK_06_ON"]:
+    fail("SecureBoot is not on: %r" % first["lines"])
+ok("SK-06 first screen: SecureBoot " + field(first, W["SK_06_SECURE_BOOT"]))
+if field(first, W["SK_06_LOCKDOWN"]) != "integrity":
     fail("lockdown: %r" % first["lines"])
 ok("SK-06 first screen: lockdown integrity")
-nets = field(first, "WORDS_NEEDED_SK_12_INTERFACES")
+nets = field(first, W["SK_12_INTERFACES"])
 if nets != "lo":
     fail("interfaces: " + nets)
 ok("SK-12 first screen lists the interfaces: " + nets)
 want = hashlib.sha256(open(initrd, "rb").read()).hexdigest()
-if field(first, "WORDS_NEEDED_SK_31_INITRD_HASH") != want:
-    fail("initrd hash %s != %s" % (field(first, "WORDS_NEEDED_SK_31_INITRD_HASH"), want))
+if field(first, W["SK_31_INITRD_HASH"]) != want:
+    fail("initrd hash %s != %s" % (field(first, W["SK_31_INITRD_HASH"]), want))
 ok("SK-31 initrd.img SHA-256 as the kernel loaded it equals the file: " + want)
-ok("SK-31 version: " + field(first, "WORDS_NEEDED_SK_31_VERSION"))
+ok("SK-31 version: " + field(first, W["SK_31_VERSION"]))
 shot("start", 500)
 
 
@@ -200,7 +209,7 @@ def answer_check(words, wrong_first=False):
     s = screens()[-1]
     asked = []
     for i in range(3):
-        pos = int(field(s, "WORDS_NEEDED_SK_25_ASK"))
+        pos = int(field(s, W["SK_25_ASK"]))
         asked.append(pos)
         word = "zzzz" if (wrong_first and i == 0) else words[pos - 1][:4]
         type_text(word)
@@ -211,9 +220,9 @@ def answer_check(words, wrong_first=False):
 def check_result(s, words, exp):
     if s["id"] != "result":
         fail("expected the result screen, got " + s["id"] + " " + repr(s["lines"]))
-    for k, label in (("fingerprint", "WORDS_NEEDED_SK_26_FINGERPRINT"),
-                     ("address", "WORDS_NEEDED_SK_26_ADDRESS"),
-                     ("descriptor", "WORDS_NEEDED_SK_26_DESCRIPTOR")):
+    for k, label in (("fingerprint", W["SK_26_FINGERPRINT"]),
+                     ("address", W["SK_26_ADDRESS"]),
+                     ("descriptor", W["SK_26_DESCRIPTOR"])):
         if field(s, label) != exp[k]:
             fail("%s: screen %s, core %s" % (k, field(s, label), exp[k]))
     ok("SK-26 fingerprint %s, first address %s" % (exp["fingerprint"], exp["address"]))
@@ -228,7 +237,7 @@ def check_result(s, words, exp):
         fail("the SeedQR differs from the core's")
     ok("SK-27 Compact SeedQR equals the core's (%d x %d)" % (len(sq["qr"]), len(sq["qr"])))
     for sc in (s, q, sq):
-        if not any("WORDS_NEEDED_SK_29_TURN_OFF" in l for l in sc["lines"]):
+        if not any(W["SK_29_TURN_OFF"] in l for l in sc["lines"]):
             fail("no Turn off on " + sc["id"])
     ok("SK-29 every screen after the words has Turn off")
 
@@ -237,8 +246,8 @@ if scenario == "dice":
     press("2")
     rolls = TRIPLETS.replace(" ", "")
     s = type_text(rolls)
-    if field(s, "WORDS_NEEDED_SK_22_VALUES") != "50 50":
-        fail("values: " + field(s, "WORDS_NEEDED_SK_22_VALUES"))
+    if field(s, W["SK_22_VALUES"]) != "50/50":
+        fail("values: " + field(s, W["SK_22_VALUES"]))
     ok("SK-22 150 rolls keep 50 values")
     exp = expected("dice", rolls)
     s = press("ret")
@@ -253,13 +262,13 @@ elif scenario == "mix":
     press("1")
     type_text("1234")
     s = press("backspace")
-    if field(s, "WORDS_NEEDED_SK_21_ROLLS") != "3":
-        fail("undo: " + field(s, "WORDS_NEEDED_SK_21_ROLLS"))
+    if field(s, W["SK_21_ROLLS"]) != "3":
+        fail("undo: " + field(s, W["SK_21_ROLLS"]))
     ok("SK-21 undo removes the last roll")
     press("ret")
     words = read_words()
     asked, s = answer_check(words, wrong_first=True)
-    if s["id"] != "words" or field(s, "WORDS_NEEDED_SK_25_WRONG") != str(asked[0]):
+    if s["id"] != "words" or field(s, W["SK_25_WRONG"]) != str(asked[0]):
         fail("a wrong answer did not show the words again: %r" % s["lines"])
     ok("SK-25 a wrong answer shows the words again, naming position %d" % asked[0])
     again = read_words()
@@ -278,7 +287,7 @@ elif scenario == "type":
         s = press("ret")
     type_text("abandon")  # a word of the list, but not with this checksum
     s = press("ret")
-    if not any("WORDS_NEEDED_SK_28_BAD_CHECKSUM" in l for l in s["lines"]):
+    if not any(W["SK_28_BAD_CHECKSUM"] in l for l in s["lines"]):
         fail("a wrong 12th word was not refused: %r" % s["lines"])
     ok("SK-28 a wrong checksum is refused")
     for _ in range(7):

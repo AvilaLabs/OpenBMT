@@ -20,14 +20,34 @@ pub fn text_scale(width: usize) -> usize {
     wanted.min(fits).max(1)
 }
 
-/// Wraps `text` into lines of at most `cols` characters.
+/// Wraps `text` into lines of at most `cols` characters, breaking at spaces.
+/// A word longer than a line (a fingerprint, a description) is cut where the
+/// line ends. Spaces at the start of the text are kept.
 pub fn wrap(text: &str, cols: usize) -> Vec<String> {
-    if text.is_empty() {
-        return vec![String::new()];
-    }
     let cols = cols.max(1);
-    let chars: Vec<char> = text.chars().collect();
-    chars.chunks(cols).map(|c| c.iter().collect()).collect()
+    let mut lines = Vec::new();
+    let mut cur: Vec<char> = Vec::new();
+    for (i, word) in text.split(' ').enumerate() {
+        let word: Vec<char> = word.chars().collect();
+        if i > 0 && cur.len() + 1 + word.len() <= cols {
+            cur.push(' ');
+            cur.extend(&word);
+        } else if i == 0 {
+            cur = word;
+        } else {
+            if !cur.is_empty() {
+                lines.push(cur.iter().collect());
+            }
+            cur = word;
+        }
+        while cur.len() > cols {
+            let rest = cur.split_off(cols);
+            lines.push(cur.iter().collect());
+            cur = rest;
+        }
+    }
+    lines.push(cur.iter().collect());
+    lines
 }
 
 /// The pixels of a screen, `0x00RRGGBB` each, row by row.
