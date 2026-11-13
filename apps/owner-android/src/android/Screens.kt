@@ -140,6 +140,8 @@ internal fun Controller.showDevices() {
     rows.add(RowItem("Link and counters") { showLink() })
     rows.add(RowItem("Add a counter") { showAddCounter() })
     rows.add(RowItem("Connect your Box") { showConnectBox() })
+    // A change that waits for a counter's confirmation (OA-119).
+    if (OwnWaitingChange.of(ownStore.args()) != null) rows.add(RowItem(OwnPairWords.waitingRowTitle) { showOwnWaitingChange() })
     rows.add(RowItem("Till") { showTill() })
     if (key2Signer) rows.add(RowItem("Register the wallet on your signer") { showHardwareRegister { showHome() } })
     groupPage(OwnerLook.DEVICES, rows)

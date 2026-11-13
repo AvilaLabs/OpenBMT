@@ -64,6 +64,7 @@ import org.openbmt.owner.LinkState
 import org.openbmt.owner.OutboxKind
 import org.openbmt.owner.OutboxRow
 import org.openbmt.owner.OwnBundleView
+import org.openbmt.owner.OwnWaitingView
 import org.openbmt.owner.OwnGapView
 import org.openbmt.owner.OwnMade
 import org.openbmt.owner.OwnOfferView
@@ -2958,6 +2959,14 @@ object AppModelTest {
             calls.add("delivered")
         }
 
+        /** The change that waits for a counter's confirmation, when a test has one. */
+        var waitingView: OwnWaitingView? = null
+
+        override fun waitingChange(shop: OwnShopArgs): OwnWaitingView {
+            calls.add("waitingChange")
+            return waitingView ?: OwnWaitingView(false, 0, emptyList(), emptyList(), 0, 0)
+        }
+
         override fun gap(paid: List<Long>, highestGiven: Long?): OwnGapView = OwnGapView(highestGiven ?: 0, (highestGiven ?: 0) > 20)
     }
 
@@ -3341,7 +3350,7 @@ object AppModelTest {
         ok(headings.none { it in sentences } && headings.toSet().size == headings.size, "no heading repeats a sentence")
         // The placeholders are each named for a rule, hold nothing else and show their name in every part of the words.
         for (n in OwnPairWords.placeholders) {
-            ok(Regex("WORDS_NEEDED_OA_(\\d{3}|BX\\d{2})(_[A-Z_]+)?").matches(n), "$n is named for a rule")
+            ok(Regex("WORDS_NEEDED_OA_(\\d{3}|BX\\d{2}|OA\\d{3})(_[A-Z_]+)?").matches(n), "$n is named for a rule")
             val w = OwnPairWords.said(n)
             ok(OwnPairWords.isPlaceholder(w) && w.heading == n && w.what == n && w.next == n, "$n shows its name")
         }
@@ -3354,12 +3363,53 @@ object AppModelTest {
         ok(!Regex("(ui\\.(text|primary|button|danger)|heading|para|line|label)\\(\"[A-Za-z]").containsMatchIn(src.replace("\"Dollars for one bitcoin\"", "")), "OwnCounter.kt has no sentence of its own")
     }
 
+    private val waitingShop = OwnShopArgs("/shop", ByteArray(32) { 1 }, byteArrayOf(1, 2, 3))
+
+    private fun waitingOwn(): FakeOwn = FakeOwn(needsRate = false).also {
+        it.waitingView = OwnWaitingView(true, 3, listOf("able", "acid", "also", "apex"), listOf("counters", "devices"), 1_000, 1_000 + 7 * 86_400)
+    }
+
+    private fun oa_119_a_change_that_waits_is_shown_with_its_four_words_and_each_field() {
+        val none = FakeOwn(needsRate = false)
+        ok(OwnWaitingChange.of(waitingShop, none) == null && OwnWaitingChange.of(null, none) == null, "OA-119: nothing is shown when no change waits or no shop is kept")
+        val shown = OwnWaitingChange.of(waitingShop, waitingOwn())!!
+        ok(shown.version == 3L && OwnWaitingChange.wordsLine(shown).isNotBlank() && OwnWaitingChange.fieldLines(shown) == listOf("counters", "devices"), "OA-119: the four words and each loosened field are shown")
+        ok(source("src/android/Screens.kt").contains("OwnWaitingChange.of(ownStore.args())") && source("src/android/OwnCounter.kt").contains("showOwnWaitingChange"), "OA-119: the Devices page shows the waiting change")
+    }
+
+    private fun oa_121_a_change_ends_seven_days_after_it_was_signed_and_the_page_says_so() {
+        val shown = OwnWaitingChange.of(waitingShop, waitingOwn())!!
+        ok(shown.endsAt - shown.signedAt == 7L * 86_400, "OA-121: the change ends seven days after it was signed")
+        ok(OwnPairWords.placeholders.contains(OwnPairWords.waitingEnds) && OwnPairWords.placeholders.contains(OwnPairWords.waitingDropped), "OA-121: the words of the end and the drop are listed")
+    }
+
+    private fun oa_122_a_counter_paired_while_another_is_in_force_is_marked_as_waiting() {
+        val waits = FakeOwn(needsRate = false)
+        val later = OwnPairing({ waitingShop }, object : OwnLibrary by waits {
+            override fun confirm(shop: OwnShopArgs, made: OwnMade, now: Long, request: ByteArray, usdPerBtc: Long, relay: ByteArray?): OwnBundleView {
+                val b = waits.confirm(shop, made, now, request, usdPerBtc, relay)
+                return OwnBundleView(b.counter, b.code, 0, 1_000, 2, b.shares, true)
+            }
+        })
+        later.start(1_000)
+        later.readRequest(byteArrayOf(1), 1_010)
+        later.match(1_020, 0)
+        ok(later.pairedWaits() && !OwnPairing({ waitingShop }, waits).pairedWaits(), "OA-122: a counter paired while another is in force is marked as waiting")
+        ok(source("src/android/OwnCounter.kt").contains("if (p.pairedWaits()) views.add(para(OwnPairWords.pairedLater))"), "OA-122: the pairing's last screen says so")
+    }
+
+    private fun oa_123_every_text_of_the_waiting_change_is_listed() {
+        val plan = OwnPairWords.placeholders.filter { Regex("WORDS_NEEDED_OA_OA12[0-3]_.*|WORDS_NEEDED_OA_OA119_.*").matches(it) }
+        ok(plan.size == 8 && plan.all { n -> OwnPairWords.all().any { it.first == n } }, "OA-123: every text of the waiting change is listed: ${plan.size}")
+    }
+
     // ---- the rules and their tests -----------------------------------------------------------------------------
 
     /** Rules that have no test of this app, each with the reason. Every other rule has a test named for it. */
     private val notHere: Map<String, String> = mapOf(
         "OA-106" to "the allocation book is the library's (crates/openbmt-owner tests/own.rs oa_106_...); the app only shows the first range it holds",
         "OA-112" to "the top-up runs on the owner node and its link (oa_112_... in crates/openbmt-owner-node and the counter FFI's end-to-end test); the app starts the node for a shop with its own wallet (OA-107) but has no link to the counters for it yet, so no turn of the top-up runs here",
+        "OA-120" to "the confirmation is read, checked and joined by the owner node and the library (oa_120_... in crates/openbmt-owner-node and crates/openbmt-owner); the app only shows the change while it waits",
         "OA-90" to "the redraw after a change of light and dark is the activity's and the window's, and needs a device; the screens it draws are those of OA-62",
     )
 
@@ -3377,7 +3427,7 @@ object AppModelTest {
         val rules = Regex("^- \\*\\*OA-(\\d{2,3})\\.\\*\\*", RegexOption.MULTILINE).findAll(rulesMd.readText()).map { it.groupValues[1] }.toList()
         ok(rules.first() == "01" && rules.map { it.toInt() } == rules.map { it.toInt() }.sorted() && rules.toSet().size == rules.size, "the rules are numbered upward from 01, each once: $rules")
         // OA-36 to OA-39 are kept for other work, OA-49 to OA-59 for the next, and OA-66 to OA-69 and OA-75 to OA-79 for more.
-        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..118)
+        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..123)
         ok(rules.map { it.toInt() }.all { it in numbered } && rules.map { it.toInt() } == numbered.filter { it.toString().padStart(2, '0') in rules }, "the rules are numbered from 01 without a gap but the kept numbers: $rules")
         for (id in rules) {
             ok(id in ids || "OA-$id" in notHere, "OA-$id has a test named oa_${id}_... or a reason")

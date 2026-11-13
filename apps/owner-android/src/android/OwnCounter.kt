@@ -182,7 +182,12 @@ private fun Controller.showOwnBundle(r: OwnPairExit, p: OwnPairing, message: Say
 }
 
 private fun Controller.showOwnPaired(r: OwnPairExit, p: OwnPairing) {
-    val views = listOf(heading(OwnPairWords.paired(p.name())), para(OwnPairWords.pairedText), ui.text(OwnPairWords.pairedNext, 15f, bold = true))
+    val views = ArrayList<View>()
+    views.add(heading(OwnPairWords.paired(p.name())))
+    views.add(para(OwnPairWords.pairedText))
+    // A counter added while another is in force waits for a confirmation at that one (OA-122).
+    if (p.pairedWaits()) views.add(para(OwnPairWords.pairedLater))
+    views.add(ui.text(OwnPairWords.pairedNext, 15f, bold = true))
     val done = ui.primary(FirstRunWords.tillStepsDone) {
         ownPairing = null
         // A counter paired later is followed from the settings; the node starts again only if the kept link is not the one it has.
@@ -224,4 +229,21 @@ internal fun Controller.showOwnWallet(r: OwnPairExit) {
         msg.show(ui.words(AppWords.libraryMissing(e.message)))
     }
     stepScreen(OwnPairWords.walletTitle, views, listOf(ui.button(KeyGuideWords.kgBack) { back() }), back)
+}
+
+/** The change that waits for a counter's confirmation: its four words and each field it loosens (OA-119, OA-121). */
+internal fun Controller.showOwnWaitingChange() {
+    val change = OwnWaitingChange.of(ownStore.args())
+    val back: () -> Unit = { showDevices() }
+    val views = ArrayList<View>()
+    if (change == null) {
+        views.add(heading(OwnPairWords.waitingDropped))
+    } else {
+        views.add(heading(OwnPairWords.waitingHeading))
+        views.add(para(OwnPairWords.waitingText))
+        views.add(stack(label(OwnPairWords.waitingWordsLabel), wordCards(OwnWaitingChange.wordsLine(change))))
+        views.add(stack(label(OwnPairWords.waitingFieldsLabel), *OwnWaitingChange.fieldLines(change).map { line(it, mono = true) }.toTypedArray(), gap = 4))
+        views.add(line(OwnPairWords.waitingEnds, muted = true))
+    }
+    stepScreen(OwnPairWords.title, views, listOf(ui.button(KeyGuideWords.kgBack) { back() }), back)
 }

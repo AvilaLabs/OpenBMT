@@ -76,6 +76,16 @@ object OwnPairWords {
     const val boxRelayLater = "WORDS_NEEDED_OA_BX18_RELAY_LATER"
     const val boxLinkNotSaved = "WORDS_NEEDED_OA_BX18_LINK_NOT_SAVED"
 
+    // ---- a change confirmed at a counter (OA-119 to OA-122) ----
+    const val waitingRowTitle = "WORDS_NEEDED_OA_OA119_WAITING_ROW"
+    const val waitingHeading = "WORDS_NEEDED_OA_OA119_WAITING_HEADING"
+    const val waitingText = "WORDS_NEEDED_OA_OA119_WAITING_TEXT"
+    const val waitingWordsLabel = "WORDS_NEEDED_OA_OA119_WORDS_LABEL"
+    const val waitingFieldsLabel = "WORDS_NEEDED_OA_OA119_FIELDS_LABEL"
+    const val waitingEnds = "WORDS_NEEDED_OA_OA121_ENDS"
+    const val waitingDropped = "WORDS_NEEDED_OA_OA121_DROPPED"
+    const val pairedLater = "WORDS_NEEDED_OA_OA122_PAIRED_LATER"
+
     // ---- refusals of the app's own steps (OA-105, OA-108) ----
     val walletNotSaved = SayWords(
         Tones.STOP, Who.OWNER, "Wallet not saved",
@@ -118,6 +128,14 @@ object OwnPairWords {
         boxRelayTaken,
         boxRelayLater,
         boxLinkNotSaved,
+        waitingRowTitle,
+        waitingHeading,
+        waitingText,
+        waitingWordsLabel,
+        waitingFieldsLabel,
+        waitingEnds,
+        waitingDropped,
+        pairedLater,
     )
 
     /** Words that are still to be written: the placeholder stands in the heading and both sentences. */

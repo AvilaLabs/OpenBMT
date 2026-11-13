@@ -6,6 +6,7 @@ import org.openbmt.app.SayWords
 import org.openbmt.app.Sealer
 import org.openbmt.app.SealedFile
 import org.openbmt.owner.OwnBundleView
+import org.openbmt.owner.OwnWaitingView
 import org.openbmt.owner.OwnGapView
 import org.openbmt.owner.OwnMade
 import org.openbmt.owner.OwnOfferView
@@ -107,6 +108,9 @@ interface OwnLibrary {
 
     fun delivered(shop: OwnShopArgs, counter: ByteArray)
 
+    /** The change that waits for a counter's confirmation (OA-119). */
+    fun waitingChange(shop: OwnShopArgs): OwnWaitingView
+
     fun gap(paid: List<Long>, highestGiven: Long?): OwnGapView
 }
 
@@ -133,7 +137,30 @@ object NativeOwnLibrary : OwnLibrary {
 
     override fun delivered(shop: OwnShopArgs, counter: ByteArray) = OwnerOwn.delivered(shop, counter)
 
+    override fun waitingChange(shop: OwnShopArgs) = OwnerOwn.waitingChange(shop)
+
     override fun gap(paid: List<Long>, highestGiven: Long?) = OwnerOwn.gap(paid, highestGiven)
+}
+
+/** The change that waits for a counter's confirmation, as the Devices page shows it (OA-119, OA-121). */
+object OwnWaitingChange {
+    /** The waiting change of the shop, or null when none waits or the library cannot say (nothing is shown then). */
+    fun of(shop: OwnShopArgs?, library: OwnLibrary = NativeOwnLibrary): OwnWaitingView? {
+        if (shop == null) return null
+        return try {
+            library.waitingChange(shop).takeIf { it.present }
+        } catch (_: OwnerException) {
+            null
+        } catch (_: LinkageError) {
+            null
+        }
+    }
+
+    /** The four words, in the order the counter shows them (AP-03). */
+    fun wordsLine(view: OwnWaitingView): String = CounterModel.wordsLine(view.words)
+
+    /** The fields it loosens, one to a line; the library names them. */
+    fun fieldLines(view: OwnWaitingView): List<String> = view.fields
 }
 
 /** Which way "Add a counter" goes for a shop (OA-22, OA-108, CR-256). */
@@ -267,6 +294,9 @@ class OwnPairing(
             step = OwnPairStep.Paired
         }
     }
+
+    /** Whether the counter just paired was added as a change that waits for a confirmation (OA-122). */
+    fun pairedWaits(): Boolean = bundle?.waiting == true
 
     /** The counters whose bundle waits (OA-111). */
     fun waiting(): List<WaitingCounter> {
