@@ -41,6 +41,10 @@ import org.openbmt.owner.CashAmount
 import org.openbmt.owner.CounterShare
 import org.openbmt.owner.CounterState
 import org.openbmt.owner.EntryKind
+import org.openbmt.owner.FloatCoin
+import org.openbmt.owner.FloatPaid
+import org.openbmt.owner.FloatStatus
+import org.openbmt.owner.FloatWalletView
 import org.openbmt.owner.ImportedWalletView
 import org.openbmt.owner.Limit
 import org.openbmt.owner.LightningAction
@@ -3831,7 +3835,94 @@ object AppModelTest {
         connectTests()
         pictureTests()
         starterTests()
+        floatTests()
         ruleTests(rulesMd)
         println("AppModelTest (owner): $count checks passed")
+    }
+
+    private fun floatTests() {
+        val max = FloatLimits.MAX_SATS
+        ok(FloatModel.cap("1") == 1L && FloatModel.cap("2,100,000,000,000,000") == max, "the float cap is an integer within the Bitcoin supply")
+        ok(listOf("0", "-1", "+1", "1,,2", "12,34", "1,2345", (max + 1).toString(), "999999999999999999999", "1.5", "").all { FloatModel.cap(it) == null }, "a cap outside the supported whole-number range or grouping is refused")
+        ok(runCatching { FloatCoinView.Checked(emptyList(), max, 1) }.isFailure, "a checked float view cannot exceed the supported supply")
+
+        class FakeFloat : FloatCore {
+            var statusCalls = 0
+            var seenCap: Long? = null
+            var seenConfirmed: Long? = null
+            var seenIncoming: Long? = null
+            var view: FloatCoinView = FloatCoinView.Unavailable
+
+            override fun open(words: String) = FloatWalletView("descriptor", "address")
+            override fun status(cap: Long, confirmed: Long, unconfirmedIncoming: Long): FloatStatus {
+                statusCalls++
+                seenCap = cap
+                seenConfirmed = confirmed
+                seenIncoming = unconfirmedIncoming
+                val held = confirmed + unconfirmedIncoming
+                return FloatStatus(held, held < cap / 4, cap - held)
+            }
+            override fun feeRate(recent: Long?, typed: Long?) = typed ?: 0
+            override fun pay(
+                words: String, network: OwnerNetwork, address: String, sats: Long, feeRate: Long,
+                changeIndex: Long, minConfirmations: Long, lockHeight: Long, coins: List<FloatCoin>,
+            ) = FloatPaid(byteArrayOf(), "", 0, 0, sats, null, null, address)
+            override fun sweep(
+                words: String, shop: String, shopIndex: Long, feeRate: Long, minConfirmations: Long,
+                lockHeight: Long, coins: List<FloatCoin>,
+            ) = FloatPaid(byteArrayOf(), "", 0, 0, 0, null, null, "")
+            override fun coinView() = view
+        }
+
+        val checked = FloatCoinView.Checked(emptyList(), 80_000, 20_000)
+        val core = FakeFloat()
+        val draft = FloatModel.setupRecord("500,000")!!
+        val draftHome = FloatModel.home(core, draft, checked)
+        ok(draft.state == FloatState.NeedsSetup && draftHome.state == FloatState.NeedsSetup && draftHome.heldSats == null && core.statusCalls == 0, "a draft stays in setup even when a checked view is supplied")
+
+        val ready = FloatRecord(150_000, state = FloatState.Ready)
+        val unavailable = FloatModel.home(core, ready, FloatCoinView.Unavailable)
+        ok(unavailable.heldSats == null && unavailable.low == null && unavailable.refillSats == null && core.statusCalls == 0, "an unavailable view does not call status or become a zero balance")
+
+        val known = FloatModel.home(core, ready, checked)
+        ok(core.statusCalls == 1 && core.seenCap == 150_000L && core.seenConfirmed == 80_000L && core.seenIncoming == 20_000L, "checked status receives both confirmed and incoming coins")
+        ok(known.heldSats == 100_000L && known.refillSats == 50_000L && known.low == false, "the checked float home uses the core's status including incoming money")
+
+        val dir = tempDir()
+        try {
+            val store = FloatStore(dir)
+            val payId = "11".repeat(32)
+            val sweepId = "22".repeat(32)
+            val original = FloatRecord(90_000, 7, 9, payId, sweepId, FloatState.Ready)
+            store.save(original)
+            val loaded = store.load()!!
+            ok(loaded.capSats == original.capSats && loaded.nextReceiveIndex == 7L && loaded.nextChangeIndex == 9L && loaded.pendingPayId == payId && loaded.pendingSweepId == sweepId && loaded.state == FloatState.Ready, "the atomic float record round-trips its public state")
+
+            val stale = FloatRecord(1, 0, 0, state = FloatState.NeedsSetup)
+            val updated = store.updateCap(stale, 120_000)
+            ok(updated.capSats == 120_000L && updated.nextReceiveIndex == 7L && updated.nextChangeIndex == 9L && updated.pendingPayId == payId && updated.pendingSweepId == sweepId && updated.state == FloatState.Ready, "changing the cap retains the latest indices, pending sends and state")
+
+            val waiting = FloatRecord(120_000, 7, 9, payId, sweepId, FloatState.Ready)
+            for (depth in listOf(null, 0L)) {
+                val refused = runCatching { store.completeSweep(waiting, depth) }.exceptionOrNull()
+                val persisted = store.load()!!
+                ok(refused is IllegalStateException && persisted.state == FloatState.Ready && persisted.pendingSweepId == sweepId, "an unknown or zero-confirmation sweep does not disable the float")
+            }
+            store.completeSweep(waiting, 1)
+            ok(store.load()!!.state == FloatState.Disabled && store.load()!!.pendingSweepId == null, "a confirmed sweep can mark the float disabled")
+
+            File(store.dir, FloatStore.RECORD).writeText("cap-sats: nope\nstate: Ready\n")
+            throws("a malformed float store record") { store.load() }
+            File(store.dir, FloatStore.RECORD).writeText("cap-sats: 1\nreceive-index: 0\nchange-index: 0\nstate: Ready\nextra: field\n")
+            throws("a float store record with an unknown field") { store.load() }
+        } finally {
+            dir.deleteRecursively()
+        }
+
+        val placeholders = FloatWords.all()
+        ok(placeholders.isNotEmpty() && placeholders.map { it.first }.toSet().size == placeholders.size, "each float placeholder has one registry key")
+        for ((key, value) in placeholders) {
+            ok(value == "WORDS_NEEDED_OA_$key" && FloatWords.isPlaceholder(value), "$value is its own placeholder name")
+        }
     }
 }
