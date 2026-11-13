@@ -69,7 +69,34 @@ impl OwnSource {
                 ledger
             }
         };
+        // CR-261: a ledger that switched is for the wallet the counter pins
+        // now, or the start is a fault.
+        if ledger
+            .switched_to()
+            .is_some_and(|h| h != pairing.wallet.checksum32())
+        {
+            return Err(LoadError::Ranges(DecodeError::NonCanonical(
+                "the ranges are for another wallet than the pairing's",
+            )));
+        }
         let mut watched = Vec::new();
+        // CR-261: the old wallet's handed-out scripts stay watched from its
+        // closed ranges.
+        for closed in ledger.closed() {
+            let old = ledger
+                .closed_wallets()
+                .iter()
+                .find(|w| w.checksum32() == closed.wallet)
+                .ok_or(LoadError::Ranges(DecodeError::NonCanonical(
+                    "a closed range has no wallet",
+                )))?;
+            for index in closed.signed.range.start..closed.next {
+                let script = old.receive_script(index).map_err(|_| {
+                    LoadError::Ranges(DecodeError::NonCanonical("an index has no address"))
+                })?;
+                watched.push(script);
+            }
+        }
         for (range, next) in ledger.taken() {
             for index in range.start..next {
                 let script = pairing.wallet.receive_script(index).map_err(|_| {
@@ -96,6 +123,22 @@ impl OwnSource {
 
     fn owner(&self) -> DeviceId {
         self.ledger.owner()
+    }
+
+    /// CR-261: this source after a switch to `wallet`, whose first range is
+    /// `first`, on a copy. The old wallet's ranges are closed and its
+    /// handed-out scripts stay watched; the caller stores the copy and then
+    /// puts it in place.
+    pub(crate) fn switched(
+        &self,
+        wallet: &PinnedWallet,
+        first: &SignedRange,
+    ) -> Result<Self, RangeError> {
+        let mut next = self.clone();
+        next.ledger
+            .switch(&self.wallet, wallet.checksum32(), first)?;
+        next.wallet = wallet.clone();
+        Ok(next)
     }
 
     /// Hand out the next script on a copy: the copy, the index and the

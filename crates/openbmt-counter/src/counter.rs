@@ -35,6 +35,7 @@ use openbmt_watch::{
 use crate::batch_held::BatchHeld;
 use crate::bills::{reference_ok, Bills};
 use crate::confirm_held::ConfirmHeld;
+use crate::switched_held::SwitchedHeld;
 use crate::desk::{valid_name, Desk, OverrideEntry, Role};
 use crate::events::{final_payments, Event};
 use crate::heartbeat::{judge_heartbeat, HeartbeatView, NotVerified};
@@ -337,6 +338,9 @@ pub struct Counter {
     held_batches: BTreeMap<(u32, u32), [u8; 32]>,
     /// CR-235: the same for the ranges the counter's records say it took.
     held_ranges: BTreeMap<(u32, u32), [u8; 32]>,
+    /// CR-262: the records of the counter's own chain that tell the owner it
+    /// switched, or refused to, by the hash of the new wallet.
+    held_switched: BTreeMap<[u8; 32], SwitchedHeld>,
     /// CR-221: sales whose swap provider has locked the bitcoin and whose
     /// claim is not yet in a block. Such a sale does not expire. Not stored:
     /// the node says it again after a start.
@@ -384,6 +388,7 @@ impl Counter {
             settings_recorded: None,
             held_batches: BTreeMap::new(),
             held_ranges: BTreeMap::new(),
+            held_switched: BTreeMap::new(),
             swap_pending: BTreeSet::new(),
             bills: Bills::new(),
             references: BTreeMap::new(),
@@ -496,8 +501,9 @@ impl Counter {
         if let Some(bytes) = stored.bills {
             counter.bills = Bills::from_bytes(bytes).map_err(LoadError::Bills)?;
         }
-        let (log, last, book, highest, setting, held, held_ranges, references) =
+        let (log, last, book, highest, setting, held, held_ranges, held_switched, references) =
             Self::read_chain(me, store)?;
+        counter.held_switched = held_switched;
         counter.references = references;
         counter.records = log;
         counter.settings_recorded = setting;
@@ -547,6 +553,7 @@ impl Counter {
             Option<u32>,
             BTreeMap<(u32, u32), [u8; 32]>,
             BTreeMap<(u32, u32), [u8; 32]>,
+            BTreeMap<[u8; 32], SwitchedHeld>,
             BTreeMap<u32, String>,
         ),
         LoadError,
@@ -563,6 +570,7 @@ impl Counter {
         let mut setting: Option<u32> = None;
         let mut held: BTreeMap<(u32, u32), [u8; 32]> = BTreeMap::new();
         let mut held_ranges: BTreeMap<(u32, u32), [u8; 32]> = BTreeMap::new();
+        let mut held_switched: BTreeMap<[u8; 32], SwitchedHeld> = BTreeMap::new();
         let mut references: BTreeMap<u32, String> = BTreeMap::new();
         let keep = usize::try_from(MAX_UNSENT_IN_MEMORY).unwrap_or(usize::MAX);
         loop {
@@ -590,6 +598,13 @@ impl Counter {
                     } else if let Ok(range) = RangeHeld::decode(&record.body) {
                         // CR-235: or a range, with its own tag byte.
                         held_ranges.insert((range.start, range.end), range.digest);
+                    } else if let Ok(sw) = SwitchedHeld::decode(&record.body) {
+                        // CR-262: or a switch, 98 bytes, tag 37. A refusal
+                        // does not replace a switch of the same wallet.
+                        let keep = held_switched.get(&sw.wallet).is_some_and(|o| o.switched);
+                        if !keep {
+                            held_switched.insert(sw.wallet, sw);
+                        }
                     }
                 } else if !matches!(record.kind, RecordKind::CheckIn | RecordKind::Pairing) {
                     if let Ok(event) = Event::decode(&record.body) {
@@ -627,6 +642,7 @@ impl Counter {
             setting,
             held,
             held_ranges,
+            held_switched,
             references,
         ))
     }
@@ -693,6 +709,86 @@ impl Counter {
             sig: CounterConfirmation::sign(&self.identity, settings_hash).sig,
         };
         self.append_record(store, held.kind(), held.encode())
+    }
+
+    /// CR-262: write the record that tells the owner this counter switched
+    /// to the wallet with this hash (`switched`) or refused to ("Different").
+    /// The record is signed with the counter's identity key. A record the
+    /// chain already holds for that wallet with the same byte is not written
+    /// again. Returns whether a record was written.
+    pub fn record_switched<S: Store>(
+        &mut self,
+        wallet: [u8; 32],
+        switched: bool,
+        store: &mut S,
+    ) -> Result<bool, StoreFault<S::Error>> {
+        if self.held_switched.get(&wallet).map(|h| h.switched) == Some(switched) {
+            return Ok(false);
+        }
+        let held = SwitchedHeld::sign(&self.identity, switched, wallet);
+        self.append_record(store, held.kind(), held.encode())?;
+        self.held_switched.insert(wallet, held);
+        Ok(true)
+    }
+
+    /// CR-262: the record this counter wrote for the wallet with this hash,
+    /// if it wrote one.
+    pub fn switched_record(&self, wallet: &[u8; 32]) -> Option<&SwitchedHeld> {
+        self.held_switched.get(wallet)
+    }
+
+    /// CR-261: the wallet a counter paired with the shop's own wallet pays
+    /// into now.
+    pub fn own_wallet(&self) -> Option<&openbmt_core::pinned_wallet::PinnedWallet> {
+        self.own.as_ref().map(|o| &o.wallet)
+    }
+
+    /// CR-261, step one: close the ranges of the wallet the counter pays
+    /// into and start the ranges of `wallet` with `first`. The ledger is
+    /// written whole before anything uses it, and the wallet's old scripts
+    /// stay watched. The range must pass CR-232 for this counter and must
+    /// hold no number a sale of this counter already has (a sale is kept by
+    /// its address index). A ledger
+    /// that already holds this switch (the first step was done before a
+    /// restart) is left as it is. On an error nothing changed.
+    pub fn switch_wallet<S: Store>(
+        &mut self,
+        wallet: &openbmt_core::pinned_wallet::PinnedWallet,
+        first: &SignedRange,
+        store: &mut S,
+    ) -> Result<(), RangeTakeRefused<S::Error>> {
+        let me = self.identity.device_id();
+        let Some(own) = self.own.as_ref() else {
+            return Err(RangeTakeRefused::KeyApp);
+        };
+        if own.ledger.switched_to() == Some(wallet.checksum32()) {
+            return Ok(());
+        }
+        own.check(first, &me).map_err(RangeTakeRefused::Range)?;
+        // A sale is kept by its address index, so the new wallet's range must
+        // not hold the number of any sale this counter already has, or the
+        // sale of the old wallet and the new one would be one.
+        let r = first.range;
+        if self
+            .sales
+            .keys()
+            .chain(self.unreadable.iter())
+            .any(|i| (r.start..r.end).contains(i))
+        {
+            return Err(RangeTakeRefused::Range(
+                openbmt_core::pairing_own::OwnPairError::Range(
+                    openbmt_core::pinned_wallet::RangeError::OverlapsUsed,
+                ),
+            ));
+        }
+        let next = own
+            .switched(wallet, first)
+            .map_err(|e| RangeTakeRefused::Range(e.into()))?;
+        store
+            .put(Slot::Ranges, &next.ledger.to_bytes())
+            .map_err(RangeTakeRefused::Store)?;
+        self.own = Some(next);
+        Ok(())
     }
 
     /// Take a new signed batch of addresses. The batches as they will be are

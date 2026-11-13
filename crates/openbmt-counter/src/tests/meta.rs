@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 const RULES: &str = include_str!("../../../../docs/COUNTER-RULES.md");
 const REFUSALS: &str = include_str!("../refusal.rs");
 
-const TEST_SOURCES: [&str; 26] = [
+const TEST_SOURCES: [&str; 27] = [
     include_str!("bills.rs"),
     include_str!("currency.rs"),
     include_str!("encodings.rs"),
@@ -28,6 +28,7 @@ const TEST_SOURCES: [&str; 26] = [
     include_str!("staff.rs"),
     include_str!("states.rs"),
     include_str!("storage.rs"),
+    include_str!("switch.rs"),
     include_str!("swap.rs"),
     include_str!("tips.rs"),
     include_str!("totals.rs"),
@@ -38,7 +39,7 @@ const TEST_SOURCES: [&str; 26] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 95] = [
+const NOT_HERE: [(&str, &str); 102] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -498,6 +499,34 @@ const NOT_HERE: [(&str, &str); 95] = [
         "the words are listed in `openbmt-counter-node`, `openbmt-counter-ffi` and the app (SC-12)",
     ),
     (
+        "CR-256",
+        "the flag is in the offer and the record, which are `openbmt-core`'s (`pairing_own`) and the counter node's (`paired_own`); their tests are there",
+    ),
+    (
+        "CR-257",
+        "the frame is `openbmt-core`'s (`pairing_own`); its tests are there",
+    ),
+    (
+        "CR-258",
+        "the checks and their order are the counter node's (`switch`); their tests are there",
+    ),
+    (
+        "CR-259",
+        "the file and its seven days are the counter node's; their tests are there",
+    ),
+    (
+        "CR-260",
+        "the page is the Android app's and the manager's choices are the counter node's; their tests are in `openbmt-counter-node`, `openbmt-counter-ffi` and the app's JVM tests",
+    ),
+    (
+        "CR-263",
+        "a counter with no starter flag refuses every switch at the counter node's check; its tests are there",
+    ),
+    (
+        "CR-264",
+        "the words are listed in `openbmt-counter-node`, `openbmt-counter-ffi` and the app (SC-12)",
+    ),
+    (
         "CR-254",
         "the Paid screen is the Android app's; its tests are the app's JVM tests \
          (`apps/counter-android`), and the library gives it the reference (`openbmt-counter-ffi`)",
@@ -520,9 +549,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_two_hundred_and_six_rules() {
+fn the_rules_file_defines_two_hundred_and_fifteen_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 206);
+    assert_eq!(ids.len(), 215);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -564,6 +593,7 @@ fn the_rules_file_defines_two_hundred_and_six_rules() {
             && ids.contains("CR-217")
             && ids.contains("CR-226")
             && ids.contains("CR-255")
+            && ids.contains("CR-264")
     );
 }
 

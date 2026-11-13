@@ -63,6 +63,7 @@ pub mod say;
 pub mod screen;
 pub mod staff;
 pub mod store;
+pub mod switched_held;
 pub mod totals;
 
 #[cfg(test)]
@@ -88,6 +89,7 @@ pub use money::{
 };
 pub use own::OwnPairing;
 pub use range_held::{range_digest, RangeHeld};
+pub use switched_held::{SwitchedHeld, SWITCHED_HELD_LEN};
 pub use recordlog::{KEEP_RECORDS, MAX_READ, MAX_UNSENT_IN_MEMORY};
 pub use refund::{
     refund_destination, Ask, CashRefund, RefundAsk, RefundRequest, RefundState, RefundView,

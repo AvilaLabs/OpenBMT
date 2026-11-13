@@ -91,11 +91,14 @@ pub enum Kind {
     /// A signed index range from the owner, for a counter paired with the
     /// shop's own wallet (LK-77).
     Range,
+    /// A switch from the starter wallet to a new one, from the owner to a
+    /// counter paired with the starter wallet (LK-78).
+    Switch,
 }
 
 impl Kind {
     /// Every kind.
-    pub const ALL: [Kind; 11] = [
+    pub const ALL: [Kind; 12] = [
         Kind::Heartbeat,
         Kind::Command,
         Kind::Settings,
@@ -107,6 +110,7 @@ impl Kind {
         Kind::PosNotice,
         Kind::RecordsReceived,
         Kind::Range,
+        Kind::Switch,
     ];
 
     /// The byte that is signed.
@@ -123,6 +127,7 @@ impl Kind {
             Kind::PosNotice => 9,
             Kind::RecordsReceived => 10,
             Kind::Range => 11,
+            Kind::Switch => 12,
         }
     }
 
@@ -137,7 +142,11 @@ impl Kind {
         use Role::{Box as TheBox, Counter, Owner, Watch};
         match self {
             Kind::Heartbeat => (from == Owner || from == Watch) && to == Counter,
-            Kind::Command | Kind::Batch | Kind::RecordsReceived | Kind::Range => {
+            Kind::Command
+            | Kind::Batch
+            | Kind::RecordsReceived
+            | Kind::Range
+            | Kind::Switch => {
                 from == Owner && to == Counter
             }
             Kind::Settings | Kind::DeviceList => from == Owner && (to == Counter || to == TheBox),
