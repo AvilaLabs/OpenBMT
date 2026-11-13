@@ -131,7 +131,7 @@ private fun Controller.showMoney() {
     groupPage(OwnerLook.MONEY, rows + RowItem(OwnerLook.BOOKS, OwnerLook.BOOKS_SUB, onClick = { showBooks() }) + starterRows() + floatRow())
 }
 
-private fun Controller.showDevices() {
+internal fun Controller.showDevices() {
     val rows = ArrayList<RowItem>()
     rows.add(RowItem("Link and counters") { showLink() })
     rows.add(RowItem("Add a counter") { showAddCounter() })

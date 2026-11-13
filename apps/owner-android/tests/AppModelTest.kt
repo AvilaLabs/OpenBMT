@@ -2987,6 +2987,47 @@ object AppModelTest {
         ok(src.contains("AnimatedQrView.make(") && src.contains("ExchangeModel.TYPE_BYTES") && src.contains("OwnPairWords.offerScan"), "the offer is a ur:bytes code, as a bundle is")
     }
 
+    private fun addCounterOnDevicesTests() {
+        // The choice of path by the shop's kind (OA-22, OA-108, CR-256).
+        ok(AddCounterChoice.of(setupFile = true, ownWallet = false, starter = false) == AddCounterPath.KeyApp, "a shop with a setup file keeps the Key app's path")
+        ok(AddCounterChoice.of(setupFile = false, ownWallet = true, starter = false) == AddCounterPath.OwnWallet, "a shop with its own wallet pairs by the offer")
+        ok(AddCounterChoice.of(setupFile = false, ownWallet = true, starter = true) == AddCounterPath.Starter, "a starter shop pairs by the starter offer")
+        ok(AddCounterChoice.of(setupFile = false, ownWallet = false, starter = false) == AddCounterPath.KeyApp, "a shop with neither file is left to the Key app's path")
+        // The starter offer for a starter shop, the plain offer for another wallet.
+        val marked = FakeOwn()
+        ok(OwnPairing({ ownArgs }, marked, { true }).start(1_000) == null && marked.calls == listOf("offerStarter"), "a starter shop's Devices pairing makes the starter offer (op 200)")
+        // A second counter: a fresh pairing makes its own offer and asks the library again; the range is the library's, after the first's.
+        class Book(val inner: FakeOwn) : OwnLibrary by inner {
+            var taken = 0L
+            override fun confirm(shop: OwnShopArgs, made: OwnMade, now: Long, request: ByteArray, usdPerBtc: Long, relay: ByteArray?): OwnBundleView {
+                val b = inner.confirm(shop, made, now, request, usdPerBtc, relay)
+                val start = taken * 1_000
+                taken++
+                return OwnBundleView(b.counter, b.code, start, start + 1_000, b.settingsVersion, b.shares)
+            }
+        }
+        val lib = Book(FakeOwn(needsRate = false))
+        val first = OwnPairing({ ownArgs }, lib)
+        first.start(1_000)
+        first.readRequest(byteArrayOf(1), 1_010)
+        first.match(1_020, 0)
+        first.paired()
+        val second = OwnPairing({ ownArgs }, lib)
+        ok(second.start(2_000) == null && second.step == OwnPairStep.Offer && second.bundle == null && second.read == null, "the second pairing starts from a new offer")
+        second.readRequest(byteArrayOf(2), 2_010)
+        second.match(2_020, 0)
+        ok(first.bundle!!.firstStart == 0L && second.bundle!!.firstStart == 1_000L && second.bundle!!.firstStart >= first.bundle!!.firstEnd, "the second counter's range starts where the first's ended")
+        ok(lib.inner.calls.count { it == "offer" } == 2 && lib.inner.calls.count { it.startsWith("confirm:") } == 2, "each pairing asks the library for its own offer and range")
+        // The screens: shared by the first run and Devices, ending at Devices.
+        val src = source("src/android/OwnCounter.kt")
+        ok(src.contains("showOwnCounter(OwnPairExit(leave = { showDevices() }, done = { showDevices() }))"), "Done and Back from Devices' pairing return to Devices")
+        ok(src.contains("done = { r.next(); showFirstRun() }") && !src.contains("r: FirstRun, p:"), "the first run ends in its next step through the same screens")
+        ok(source("src/android/AddCounter.kt").contains("AddCounterChoice.of(") && source("src/android/AddCounter.kt").contains("showOwnAddCounter()"), "Add a counter chooses by the shop's kind")
+        // SS-37: the hold comes before the choice.
+        val add = source("src/android/AddCounter.kt").substringAfter("internal fun Controller.showAddCounter")
+        ok(add.indexOf("starterHolds(org.openbmt.owner.StarterChangeKind.AddCounter)") in 0 until add.indexOf("AddCounterChoice.of("), "SS-37: the hold waits before either path starts")
+    }
+
     private fun oa_109_the_counters_request_is_judged_by_the_library_and_shows_four_words() {
         val own = FakeOwn(needsRate = false)
         val p = OwnPairing({ ownArgs }, own)
@@ -3933,6 +3974,7 @@ object AppModelTest {
         pictureTests()
         starterTests()
         starterWiringTests()
+        addCounterOnDevicesTests()
         floatTests()
         ruleTests(rulesMd)
         println("AppModelTest (owner): $count checks passed")

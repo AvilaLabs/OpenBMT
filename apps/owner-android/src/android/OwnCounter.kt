@@ -14,7 +14,24 @@ import org.openbmt.app.Who
 // answers and carries the owner's choices. Every sentence is in OwnPairWords or the library's own words.
 
 /** The page the first run is at once the wallet is checked: the pairing step that [OwnPairing] is at. */
-internal fun Controller.showOwnCounter(r: FirstRun, message: SayWords? = null) {
+internal fun Controller.showOwnCounter(r: FirstRun, message: SayWords? = null) = showOwnCounter(firstRunExit(r), message)
+
+/** Where a pairing goes when it is left and when it is done: the first run's steps, or the Devices page (OA-22). */
+internal class OwnPairExit(val leave: () -> Unit, val done: () -> Unit)
+
+private fun Controller.firstRunExit(r: FirstRun) = OwnPairExit(
+    leave = { r.back(); showFirstRun() },
+    done = { r.next(); showFirstRun() },
+)
+
+/** "Add a counter" on the Devices page for a shop with its own wallet: the same screens as the first run's, ending at Devices. */
+internal fun Controller.showOwnAddCounter() {
+    ownPairing?.back()
+    ownPairing = null
+    showOwnCounter(OwnPairExit(leave = { showDevices() }, done = { showDevices() }))
+}
+
+internal fun Controller.showOwnCounter(r: OwnPairExit, message: SayWords? = null) {
     val p = ownPairing ?: OwnPairing({ ownStore.args() }, starter = { starterPinned() }).also { fresh ->
         ownPairing = fresh
         val said = fresh.start(nowSecs())
@@ -23,8 +40,7 @@ internal fun Controller.showOwnCounter(r: FirstRun, message: SayWords? = null) {
     val leave: () -> Unit = {
         ownPairing?.back()
         ownPairing = null
-        r.back()
-        showFirstRun()
+        r.leave()
     }
     val back: () -> Unit = { if (p.back()) showOwnCounter(r) else leave() }
     when (p.step) {
@@ -37,15 +53,14 @@ internal fun Controller.showOwnCounter(r: FirstRun, message: SayWords? = null) {
 }
 
 /** The words of a pairing that did not start or was stopped, and the way to start again. */
-private fun Controller.ownStopped(r: FirstRun, words: SayWords) {
+private fun Controller.ownStopped(r: OwnPairExit, words: SayWords) {
     val again = ui.primary(OwnPairWords.endedButton) {
         ownPairing = null
         showOwnCounter(r)
     }
     val back: () -> Unit = {
         ownPairing = null
-        r.back()
-        showFirstRun()
+        r.leave()
     }
     stepScreen(OwnPairWords.title, listOf(ui.words(words)), listOf(again), back, tone = ui.pal.stop)
 }
@@ -59,7 +74,7 @@ private fun Controller.codeCardOf(code: ByteArray): View {
     return shown.view?.let { ui.codeCard(it) } ?: ui.words(shown.words ?: UrWords.cannotShow(Who.OWNER))
 }
 
-private fun Controller.showOwnOffer(r: FirstRun, p: OwnPairing, message: SayWords?, back: () -> Unit) {
+private fun Controller.showOwnOffer(r: OwnPairExit, p: OwnPairing, message: SayWords?, back: () -> Unit) {
     val offer = p.offer
     val views = ArrayList<View>()
     views.add(heading(OwnPairWords.offerHeading))
@@ -93,13 +108,13 @@ private fun endedWords(): SayWords = SayWords(
     null, null, null, null,
 )
 
-private fun Controller.ownResume(r: FirstRun, p: OwnPairing, w: org.openbmt.owner.WaitingCounter) {
+private fun Controller.ownResume(r: OwnPairExit, p: OwnPairing, w: org.openbmt.owner.WaitingCounter) {
     val said = p.resume(w, nowSecs())
     showOwnCounter(r, said)
 }
 
 /** The counter's request, read by the camera, which is asked for only when the button is pressed. */
-private fun Controller.scanOwnCounter(r: FirstRun, p: OwnPairing) {
+private fun Controller.scanOwnCounter(r: OwnPairExit, p: OwnPairing) {
     fun give(result: SourceResult) = when (result) {
         is SourceResult.Bytes -> showOwnCounter(r, p.readRequest(result.bytes, nowSecs()))
         is SourceResult.Failed -> showOwnCounter(r, result.words)
@@ -113,7 +128,7 @@ private fun Controller.scanOwnCounter(r: FirstRun, p: OwnPairing) {
     )
 }
 
-private fun Controller.showOwnCompare(r: FirstRun, p: OwnPairing, message: SayWords?, back: () -> Unit) {
+private fun Controller.showOwnCompare(r: OwnPairExit, p: OwnPairing, message: SayWords?, back: () -> Unit) {
     val read = p.read ?: return showOwnCounter(r)
     val msg = Slot(act)
     val views = ArrayList<View>()
@@ -149,7 +164,7 @@ private fun Controller.showOwnCompare(r: FirstRun, p: OwnPairing, message: SayWo
     stepScreen(OwnPairWords.title, views, listOf(match, differ), back)
 }
 
-private fun Controller.showOwnBundle(r: FirstRun, p: OwnPairing, message: SayWords?, back: () -> Unit) {
+private fun Controller.showOwnBundle(r: OwnPairExit, p: OwnPairing, message: SayWords?, back: () -> Unit) {
     val bundle = p.bundle ?: return showOwnCounter(r)
     val msg = Slot(act)
     val views = ArrayList<View>()
@@ -166,19 +181,18 @@ private fun Controller.showOwnBundle(r: FirstRun, p: OwnPairing, message: SayWor
     stepScreen(OwnPairWords.title, views, listOf(done, again), back)
 }
 
-private fun Controller.showOwnPaired(r: FirstRun, p: OwnPairing) {
+private fun Controller.showOwnPaired(r: OwnPairExit, p: OwnPairing) {
     val views = listOf(heading(OwnPairWords.paired(p.name())), para(OwnPairWords.pairedText), ui.text(OwnPairWords.pairedNext, 15f, bold = true))
     val done = ui.primary(FirstRunWords.tillStepsDone) {
         ownPairing = null
-        r.next()
-        showFirstRun()
+        r.done()
     }
     val wallet = ui.button(OwnPairWords.walletButton) { showOwnWallet(r) }
     stepScreen(OwnPairWords.title, views, listOf(done, wallet), { }, tone = ui.pal.good)
 }
 
 /** The wallet page: the first address, the kind of wallet and how far the wallet must look ahead (OA-113). */
-internal fun Controller.showOwnWallet(r: FirstRun) {
+internal fun Controller.showOwnWallet(r: OwnPairExit) {
     val views = ArrayList<View>()
     val msg = Slot(act)
     views.add(msg)

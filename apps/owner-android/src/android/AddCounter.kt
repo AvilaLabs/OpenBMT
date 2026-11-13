@@ -25,6 +25,10 @@ internal fun Controller.showAddCounter(message: SayWords? = null) {
     }
     // SS-37: adding a counter waits while the starter wallet is at its limit or past its date.
     if (starterHolds(org.openbmt.owner.StarterChangeKind.AddCounter)) return showStarterHeld { showHome() }
+    // A shop with its own wallet pairs the counter by the own-wallet screens; only a shop with a setup file takes the Key app's path.
+    if (AddCounterChoice.of(hasSetupFile(), ownStore.hasWallet(), starterPinned()) != AddCounterPath.KeyApp) {
+        return showOwnAddCounter()
+    }
     val views = ArrayList<View>()
     message?.let { views.add(ui.words(it)) }
     for (line in CounterModel.explanation) views.add(ui.text(line, 16f))

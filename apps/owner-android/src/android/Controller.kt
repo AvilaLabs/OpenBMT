@@ -92,6 +92,9 @@ class Controller(internal val act: MainActivity) {
     internal val ownStore by lazy { OwnShopStore(dir, KeystoreSealer(AppFiles.OWN_KEY_ALIAS)) }
     internal var ownPairing: OwnPairing? = null
 
+    /** Whether the shop was set up from a Key app's setup file (OA-22): such a shop adds counters by the Key app's path. */
+    internal fun hasSetupFile(): Boolean = File(dir, AppFiles.SETUP_FILE).exists()
+
     // The starter wallet (`Starter*.kt`): what is kept, its Keystore key, the picture of words on show and the upgrade screen's turn.
     internal val starter by lazy { StarterRuntime(dir) }
 

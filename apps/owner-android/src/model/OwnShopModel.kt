@@ -126,6 +126,18 @@ object NativeOwnLibrary : OwnLibrary {
     override fun gap(paid: List<Long>, highestGiven: Long?) = OwnerOwn.gap(paid, highestGiven)
 }
 
+/** Which way "Add a counter" goes for a shop (OA-22, OA-108, CR-256). */
+enum class AddCounterPath { KeyApp, OwnWallet, Starter }
+
+object AddCounterChoice {
+    /** A shop with a setup file keeps the Key app's way; one with its own wallet pairs by the offer; a starter shop's offer is marked. */
+    fun of(setupFile: Boolean, ownWallet: Boolean, starter: Boolean): AddCounterPath = when {
+        setupFile || !ownWallet -> AddCounterPath.KeyApp
+        starter -> AddCounterPath.Starter
+        else -> AddCounterPath.OwnWallet
+    }
+}
+
 /** The screens of adding a counter, in the order they come. */
 enum class OwnPairStep { Offer, Compare, Bundle, Paired, Stopped }
 
