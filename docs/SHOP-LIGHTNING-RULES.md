@@ -77,7 +77,13 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   (`chain/chainmonitor.rs:778`) only once both copies are written, through
   `MonitorUpdatingPersisterAsync` (`util/persist.rs:782`) on
   `ChainMonitor::new_async_beta` (`chain/chainmonitor.rs:438`). A sale is
-  marked paid only on `Event::PaymentClaimed` after that.
+  marked paid only on `Event::PaymentClaimed` after that. The node claims a
+  payment only for an invoice it made and recorded (SL-29), not expired, and
+  fails back any other. Each paid event is stored before the counter hears
+  of it and is given again at every start until the counter says it has
+  recorded the sale; it is then marked, so the library giving it again after
+  a crash does not pay the sale twice, and the mark is dropped after 30
+  days.
 - **SL-22. The beta, said plainly.** The library marks `InProgress` and the
   async persister as beta, and its documents say this path "may lead to funds
   loss" in rare cases. This is why section 10 holds real funds back, and why
@@ -94,7 +100,11 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   the node. A start from the second device's copy alone can therefore find a
   manager older than its monitors; the library then closes those channels on
   the chain, and their money comes back to the shop's wallet after the
-  channel's wait (SL-30).
+  channel's wait (SL-30). The expectation of each invoice (SL-29) is written
+  as a monitor is, second device first, before the counter shows the
+  invoice; an invoice whose expectation could not be stored is not shown.
+  The paid events (SL-21) and the sweep address (SL-33) go to the counter's
+  copy first, as the manager does.
 - **SL-25. No old copy, ever.** On a start, the node reads the update
   numbers of both copies and starts only from the newer one. A copy behind
   the other is never used. Prototype E5b: an old copy makes the library stop
@@ -141,7 +151,10 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   transaction. The address is one the counter derives itself from the pinned
   wallet description, never one sent by another device. The provider must
   accept splices (`reject_inbound_splices` false on its side); one that does
-  not is swept by a close (SL-36).
+  not is swept by a close (SL-36). What a close leaves to the shop that the
+  library must spend itself (`SpendableOutputDescriptor`) is spent by the
+  library's `OutputSweeper` to an address derived the same way. The last
+  address the counter set is kept and used after a restart.
 - **SL-34. The cap.** Set by the owner, with a suggestion of one day's
   Lightning sales. The suggestion is never more than the counter's instant
   limit.
