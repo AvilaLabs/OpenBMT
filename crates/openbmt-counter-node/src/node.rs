@@ -141,18 +141,18 @@ use openbmt_watch::{
 use crate::chainview::ChainView;
 use crate::confirm::{ChangeNotice, ConfirmRefused, Pending, PendingChange};
 use crate::dirstore::{DirStore, DirStoreError};
-use crate::paired_own::OwnPairingRecord;
-use crate::switch::{
-    check_switch, PendingSwitch, SwitchNotice, SwitchRefused, SwitchStepRefused, Waiting,
-    SWITCH_PENDING_SECS,
-};
 use crate::lightning::{
     Lightning, LightningStatus, LnEvent, LnRequest, LnTransport, SaleLightning, SetupRefused,
     SetupStep,
 };
 use crate::notices::NodeRecords;
+use crate::paired_own::OwnPairingRecord;
 use crate::settings::{check_not_rolled, decode_file, SettingsFault, SettingsRefused};
 use crate::swap::{Effect, SaleSwap, SwapDriver, SwapRequest, Update};
+use crate::switch::{
+    check_switch, PendingSwitch, SwitchNotice, SwitchRefused, SwitchStepRefused, Waiting,
+    SWITCH_PENDING_SECS,
+};
 
 /// Most transactions the node keeps for later announcements.
 pub const TX_CACHE: usize = 256;
@@ -1283,10 +1283,7 @@ impl<P: DriverPort> Node<P> {
                 return;
             }
         };
-        let arrived = self
-            .store
-            .switch_written_at()
-            .map_or(now, |t| t.min(now));
+        let arrived = self.store.switch_written_at().map_or(now, |t| t.min(now));
         let kept = SwitchOwn::from_bytes(&bytes).ok().filter(|sw| {
             // A wallet the counter already answered is not asked again.
             self.counter.switched_record(&sw.wallet_hash()).is_none() && self.check(sw).is_ok()
@@ -1300,7 +1297,9 @@ impl<P: DriverPort> Node<P> {
                 });
             }
             None => {
-                self.note("CR-259: the file of the waiting switch is of no use: removed".to_string());
+                self.note(
+                    "CR-259: the file of the waiting switch is of no use: removed".to_string(),
+                );
                 self.remove_switch_file();
             }
         }
@@ -1419,9 +1418,7 @@ impl<P: DriverPort> Node<P> {
         self.counter
             .switch_wallet(&wallet, &waiting.switch.first_range, &mut self.store)
             .map_err(|e| match e {
-                RangeTakeRefused::Range(e) => {
-                    SwitchStepRefused::Refused(SwitchRefused::Range(e))
-                }
+                RangeTakeRefused::Range(e) => SwitchStepRefused::Refused(SwitchRefused::Range(e)),
                 other => SwitchStepRefused::NotWritten(other.to_string()),
             })?;
         let mut next = record;
@@ -1481,7 +1478,9 @@ impl<P: DriverPort> Node<P> {
             .remove_switch()
             .map_err(|e| SwitchStepRefused::NotWritten(e.to_string()))?;
         self.switch = None;
-        self.note("CR-260: the manager said the address is different: the switch is dropped".to_string());
+        self.note(
+            "CR-260: the manager said the address is different: the switch is dropped".to_string(),
+        );
         Ok(())
     }
 

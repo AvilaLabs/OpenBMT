@@ -3,9 +3,10 @@
 //! itself) with the encodings of [`codec`](crate::codec) and describes
 //! itself for `bindings/PROTOCOL.md`.
 
+use openbmt_core::pinned_wallet::WalletKind;
 use openbmt_core::say::Words;
 use openbmt_counter::{DayTotals, RefundState, Report, Role, State, Tally};
-use openbmt_counter_node::{FieldValue, LnRequest, LnTransport, PendingChange};
+use openbmt_counter_node::{FieldValue, LnRequest, LnTransport, PendingChange, PendingSwitch};
 use openbmt_lightning::request::Method;
 
 use crate::codec::{
@@ -547,6 +548,74 @@ pub struct ChangeStateView {
 }
 
 wire_record!(ChangeStateView { pending, notice });
+
+/// The switch from the starter wallet that waits for the manager (CR-259,
+/// CR-260): the new wallet's first receive address, the kind of wallet
+/// beneath it and when the switch is dropped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingSwitchView {
+    /// The new wallet's first receive address (receive chain, index 0).
+    pub address: String,
+    /// The kind of the new wallet.
+    pub wallet: OwnWalletKind,
+    /// When the switch arrived, in seconds since 1970.
+    pub arrived: u64,
+    /// When it is dropped if nobody answered it, in seconds since 1970.
+    pub expires_at: u64,
+}
+
+wire_record!(PendingSwitchView {
+    address,
+    wallet,
+    arrived,
+    expires_at
+});
+
+impl PendingSwitchView {
+    pub(crate) fn of(p: &PendingSwitch) -> Self {
+        Self {
+            address: p.address.clone(),
+            wallet: match p.kind {
+                WalletKind::SingleKey => OwnWalletKind::SingleKey,
+                WalletKind::TwoOfThree => OwnWalletKind::TwoOfThree,
+            },
+            arrived: p.arrived,
+            expires_at: p.expires_at,
+        }
+    }
+}
+
+/// What `pending_switch` returns (CR-259 to CR-261, CR-264): the switch that
+/// waits, if one does, the words of a switch that came to nothing, and the
+/// pairing record the app still has to keep, if a switch was begun and the
+/// record not kept (CR-261, step two).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitchStateView {
+    /// The switch that waits for the manager.
+    pub pending: Option<PendingSwitchView>,
+    /// What the manager is told about a switch that was dropped.
+    pub notice: Option<WordsView>,
+    /// The pairing record to seal and keep, then `switch_record_kept`.
+    pub record_update: Option<Vec<u8>>,
+}
+
+wire_record!(SwitchStateView {
+    pending,
+    notice,
+    record_update
+});
+
+/// What `switch_same` returns (CR-261): the words to show, and the pairing
+/// record the app seals and keeps before it asks `switch_record_kept`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitchSameView {
+    /// What the manager is told: the counter now pays into the new wallet.
+    pub words: WordsView,
+    /// The new pairing record: the new wallet pinned, no starter flag.
+    pub record: Vec<u8>,
+}
+
+wire_record!(SwitchSameView { words, record });
 
 /// One open request, for the list on Home (CR-215).
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -35,7 +35,6 @@ use openbmt_watch::{
 use crate::batch_held::BatchHeld;
 use crate::bills::{reference_ok, Bills};
 use crate::confirm_held::ConfirmHeld;
-use crate::switched_held::SwitchedHeld;
 use crate::desk::{valid_name, Desk, OverrideEntry, Role};
 use crate::events::{final_payments, Event};
 use crate::heartbeat::{judge_heartbeat, HeartbeatView, NotVerified};
@@ -60,6 +59,7 @@ use crate::sale::{End, LightningPaid, OverrideMark, OwnCheck, PosState, RequestD
 use crate::screen::{Next, Report, Screen, State, Why};
 use crate::staff::StaffEvent;
 use crate::store::{Slot, Store, StoreFault};
+use crate::switched_held::SwitchedHeld;
 use crate::totals::{fold_day, record_time, DayTotals, TOTALS_BLOCK, TOTALS_MAX_RECORDS};
 use crate::{
     DUST_SATS, MAX_LATE_PAYMENTS, MAX_QUOTES, MAX_SETTLE_PER_CALL, SETTLE_SECS, STUCK_SECS,

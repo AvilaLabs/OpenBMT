@@ -89,7 +89,6 @@ pub use money::{
 };
 pub use own::OwnPairing;
 pub use range_held::{range_digest, RangeHeld};
-pub use switched_held::{SwitchedHeld, SWITCHED_HELD_LEN};
 pub use recordlog::{KEEP_RECORDS, MAX_READ, MAX_UNSENT_IN_MEMORY};
 pub use refund::{
     refund_destination, Ask, CashRefund, RefundAsk, RefundRequest, RefundState, RefundView,
@@ -105,6 +104,7 @@ pub use sale::{End, LightningPaid, OverrideMark, OwnCheck, PosState, RequestDays
 pub use screen::{Color, Next, Report, Screen, State, Why};
 pub use staff::{StaffChange, StaffEvent};
 pub use store::{Slot, Store, StoreFault};
+pub use switched_held::{SwitchedHeld, SWITCHED_HELD_LEN};
 pub use totals::{DayTotals, PersonLine, Tally, TipTally, TotalsError, MAX_PEOPLE};
 
 /// CR-04: most new addresses handed out in one hour **[to tune]**.

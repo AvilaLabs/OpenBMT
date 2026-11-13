@@ -991,7 +991,8 @@ fn lk_78_a_switch_is_given_to_a_starter_counter_and_refused_by_the_others() {
         "wsh(sortedmulti(2,[73c5da0a/48h/0h/0h/2h]xpub6DkFAXWQ2dHxq2vatrt9qyA3bXYU4ToWQwCHbf5XB2mSTexcHZCeKS1VZYcPoBd5X8yVcbXFHJR9R8UCVpt82VX1VhR28mCyxUFL4r6KFrf/<0;1>/*,[b8688df1/48h/0h/0h/2h]xpub6FQya7zGhR92kacYsNnjreouvnHJMpXYsUXnW6NJJAJRCKsa26TzDy4LdnGhEurr3d6y1J8PJ7EEMKQp74XTqYvmGJNogYXSKDszYHtF8mX/<0;1>/*,[28645006/48h/0h/0h/2h]xpub6DnEBNkSJKBYQmsbhS1sP9cNdtU5c9PLFGCjTJmxicxc13WB8zNNGQazabQpyFAGW5bV9tMko4uBxDxjUKL6dSAcx1tEbgEHtgSqyRsekh6/<0;1>/*))#34zcp4yt",
     )
     .unwrap();
-    let first = SignedRange::sign(&id(1), IndexRange::new(counter(), 1_000, 2_000).unwrap()).unwrap();
+    let first =
+        SignedRange::sign(&id(1), IndexRange::new(counter(), 1_000, 2_000).unwrap()).unwrap();
     let switch = SwitchOwn::sign(&id(1), counter(), old.checksum32(), new, first).to_bytes();
     let mut w = world_on(config(), true, starter_rig);
     w.send(Kind::Switch, &switch);

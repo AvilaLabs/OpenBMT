@@ -99,10 +99,10 @@ pub use settings::{
     effective as effective_settings, effective_of as effective_settings_of, Effective,
     SettingsFault, SettingsFrame, SettingsLine, SettingsRefused, MAX_SETTINGS_FILE_BYTES,
 };
+pub use swap::{
+    SaleSwap, SwapDriver, SwapRecord, SwapRequest, MAGIC_SWAP_RECORD, NOT_FOR_THIS_SALE,
+};
 pub use switch::{
     check_switch, PendingSwitch, SwitchNotice, SwitchRefused, SwitchStepRefused, Waiting,
     SWITCH_PENDING_SECS,
-};
-pub use swap::{
-    SaleSwap, SwapDriver, SwapRecord, SwapRequest, MAGIC_SWAP_RECORD, NOT_FOR_THIS_SALE,
 };

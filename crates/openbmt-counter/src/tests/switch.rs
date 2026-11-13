@@ -10,8 +10,8 @@ use openbmt_core::settings::{Change, SettingNote};
 use super::kit::*;
 use super::own::{own_pairing, range, MULTI, SINGLE};
 use crate::{
-    BatchHeld, ConfirmHeld, Counter, Event, LoadError, RangeHeld, RangeTakeRefused,
-    Slot, StaffEvent, SwitchedHeld, SWITCHED_HELD_LEN,
+    BatchHeld, ConfirmHeld, Counter, Event, LoadError, RangeHeld, RangeTakeRefused, Slot,
+    StaffEvent, SwitchedHeld, SWITCHED_HELD_LEN,
 };
 
 fn world() -> (World, crate::OwnPairing) {
@@ -36,8 +36,7 @@ fn cr_261_after_the_switch_the_next_sale_is_the_new_wallets_first_index() {
     let old_sale = w.open_five();
     assert_eq!(old_sale.script, p.wallet.receive_script(0).unwrap());
     w.tick(60);
-    w.c.switch_wallet(&multi(), &new_range(), &mut w.m)
-        .unwrap();
+    w.c.switch_wallet(&multi(), &new_range(), &mut w.m).unwrap();
     let next = w.open_five();
     assert_eq!(next.index, 1_000);
     assert_eq!(next.script, multi().receive_script(1_000).unwrap());
@@ -49,8 +48,7 @@ fn cr_261_after_the_switch_the_next_sale_is_the_new_wallets_first_index() {
 fn cr_261_a_sale_opened_before_the_switch_still_ends_as_it_would() {
     let (mut w, p) = world();
     let before = w.open_five();
-    w.c.switch_wallet(&multi(), &new_range(), &mut w.m)
-        .unwrap();
+    w.c.switch_wallet(&multi(), &new_range(), &mut w.m).unwrap();
     // The sale keeps the old wallet's script, and the counter still knows it
     // as its own.
     assert_eq!(w.c.sale(before.index).unwrap().script(), &before.script);
@@ -66,8 +64,7 @@ fn cr_261_the_old_scripts_stay_watched_from_the_closed_ranges_after_a_restart() 
         w.open_five();
         w.tick(60);
     }
-    w.c.switch_wallet(&multi(), &new_range(), &mut w.m)
-        .unwrap();
+    w.c.switch_wallet(&multi(), &new_range(), &mut w.m).unwrap();
     w.open_five();
     // A restart with the record as the switch left it: the new wallet.
     let mut after = p.clone();
@@ -75,7 +72,10 @@ fn cr_261_the_old_scripts_stay_watched_from_the_closed_ranges_after_a_restart() 
     let c = Counter::load_own(id(3), &after, settings(), w.m.stored(), &w.m).unwrap();
     let watched = c.watched_scripts();
     for i in 0..3 {
-        assert!(watched.contains(&p.wallet.receive_script(i).unwrap()), "{i}");
+        assert!(
+            watched.contains(&p.wallet.receive_script(i).unwrap()),
+            "{i}"
+        );
     }
     assert!(watched.contains(&multi().receive_script(1_000).unwrap()));
     assert!(!watched.contains(&multi().receive_script(1_001).unwrap()));
@@ -87,8 +87,7 @@ fn cr_261_the_old_scripts_stay_watched_from_the_closed_ranges_after_a_restart() 
 #[test]
 fn cr_261_a_ledger_for_another_wallet_than_the_pairing_is_a_fault() {
     let (mut w, p) = world();
-    w.c.switch_wallet(&multi(), &new_range(), &mut w.m)
-        .unwrap();
+    w.c.switch_wallet(&multi(), &new_range(), &mut w.m).unwrap();
     // The record still names the old wallet: the node's recovery changes
     // that before the counter starts, so the counter itself refuses.
     let err = Counter::load_own(id(3), &p, settings(), w.m.stored(), &w.m).err();
@@ -100,8 +99,7 @@ fn cr_261_the_ledger_is_written_whole_by_the_first_step_and_a_second_is_nothing(
     let (mut w, _) = world();
     w.open_five();
     w.m.reset();
-    w.c.switch_wallet(&multi(), &new_range(), &mut w.m)
-        .unwrap();
+    w.c.switch_wallet(&multi(), &new_range(), &mut w.m).unwrap();
     assert_eq!(w.m.log, ["Ranges"]);
     assert_eq!(
         w.m.slots[&Slot::Ranges],
@@ -110,8 +108,7 @@ fn cr_261_the_ledger_is_written_whole_by_the_first_step_and_a_second_is_nothing(
     assert_eq!(&w.m.slots[&Slot::Ranges][..5], b"OBM;\x02");
     // The same switch again changes nothing and writes nothing.
     w.m.reset();
-    w.c.switch_wallet(&multi(), &new_range(), &mut w.m)
-        .unwrap();
+    w.c.switch_wallet(&multi(), &new_range(), &mut w.m).unwrap();
     assert!(w.m.log.is_empty());
 }
 
@@ -169,7 +166,10 @@ fn cr_261_a_range_that_fails_cr_232_or_a_failed_store_changes_nothing() {
         Err(RangeTakeRefused::Store(_))
     ));
     assert_eq!(w.c.range_ledger().unwrap().to_bytes(), before);
-    assert_eq!(w.c.own_wallet(), Some(&PinnedWallet::from_text(SINGLE).unwrap()));
+    assert_eq!(
+        w.c.own_wallet(),
+        Some(&PinnedWallet::from_text(SINGLE).unwrap())
+    );
 }
 
 #[test]
@@ -246,10 +246,7 @@ fn cr_262_a_body_of_98_bytes_is_read_as_this_kind_only() {
     }
     .encode();
     // CR-243's sizes now: 37, 41 (batch), 41 (range), 97 and 98.
-    assert_eq!(
-        (setting.len(), confirm.len(), held.len()),
-        (37, 97, 98)
-    );
+    assert_eq!((setting.len(), confirm.len(), held.len()), (37, 97, 98));
     let reads = |body: &[u8]| {
         [
             SettingNote::from_body(body).is_ok(),

@@ -157,8 +157,9 @@ impl SwitchNotice {
     /// CR-264).
     pub fn words(&self) -> Words {
         match self {
-            Self::Dropped => needed(Tone::Ended, "WORDS_NEEDED_CR_259_DROPPED", Who::Manager)
-                .code("CR-259"),
+            Self::Dropped => {
+                needed(Tone::Ended, "WORDS_NEEDED_CR_259_DROPPED", Who::Manager).code("CR-259")
+            }
         }
     }
 }

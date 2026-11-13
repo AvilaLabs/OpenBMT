@@ -30,22 +30,22 @@ use super::kit::{peers_event, Rig, Scratch, T0};
 use super::wire::{Rd, W};
 use crate::StartConfig;
 
-const SINGLE: &str = "wpkh([818bc9b6/84h/0h/0h]xpub6CgURS1GrKZkAoRGBTKYX9FhLgkKnQVZ6vdNBUbiu24xtRJ6RzLKpdg4CqsVyBLzimcJsviP59hSoGJEpTJiXE8bdBLw1qPC1DXRatKehb8/<0;1>/*)#96yh9yhx";
-const FLOOR: u32 = 4;
-const OP_PUMP: u16 = 10;
+pub(super) const SINGLE: &str = "wpkh([818bc9b6/84h/0h/0h]xpub6CgURS1GrKZkAoRGBTKYX9FhLgkKnQVZ6vdNBUbiu24xtRJ6RzLKpdg4CqsVyBLzimcJsviP59hSoGJEpTJiXE8bdBLw1qPC1DXRatKehb8/<0;1>/*)#96yh9yhx";
+pub(super) const FLOOR: u32 = 4;
+pub(super) const OP_PUMP: u16 = 10;
 const OP_LINK_STEP: u16 = 24;
 const OP_PENDING_CHANGE: u16 = 71;
 const OP_CONFIRM_CHANGE: u16 = 72;
 
-fn owner() -> Identity {
+pub(super) fn owner() -> Identity {
     Identity::from_secret_bytes(&[0x11; 32]).unwrap()
 }
 
-fn relay_key() -> Identity {
+pub(super) fn relay_key() -> Identity {
     Identity::from_secret_bytes(&[0x63; 32]).unwrap()
 }
 
-fn base(counter: &DeviceId, version: u32) -> Settings {
+pub(super) fn base(counter: &DeviceId, version: u32) -> Settings {
     let mut s = Settings::defaults(1_000);
     s.version = version;
     s.devices.insert(*counter);
@@ -53,7 +53,7 @@ fn base(counter: &DeviceId, version: u32) -> Settings {
     s
 }
 
-fn signed(s: Settings) -> SignedSettings {
+pub(super) fn signed(s: Settings) -> SignedSettings {
     SignedSettings {
         owner_sig: s.sign(&owner()),
         approver_sig: None,
@@ -64,6 +64,17 @@ fn signed(s: Settings) -> SignedSettings {
 /// The pairing record of a counter paired with the shop's own wallet whose
 /// relay is `addr`, and the counter's id.
 fn paired(rig: &Rig, addr: SocketAddr, members: &Relay<MemoryStore>) -> (Vec<u8>, DeviceId) {
+    paired_with(rig, addr, members, false)
+}
+
+/// [`paired`], with the offer marked as one for a starter wallet when
+/// `starter` is true (CR-256).
+pub(super) fn paired_with(
+    rig: &Rig,
+    addr: SocketAddr,
+    members: &Relay<MemoryStore>,
+    starter: bool,
+) -> (Vec<u8>, DeviceId) {
     let _ = members;
     let offer = OwnOffer::new(
         bitcoin::Network::Bitcoin,
@@ -71,7 +82,8 @@ fn paired(rig: &Rig, addr: SocketAddr, members: &Relay<MemoryStore>) -> (Vec<u8>
         FLOOR,
         PinnedWallet::from_text(SINGLE).unwrap(),
     )
-    .unwrap();
+    .unwrap()
+    .with_starter(starter);
     let response = rig.call(
         44,
         0,
@@ -106,13 +118,13 @@ fn paired(rig: &Rig, addr: SocketAddr, members: &Relay<MemoryStore>) -> (Vec<u8>
     (record.to_bytes(), counter)
 }
 
-struct World {
-    server: Server,
-    owner: Courier<RelayPost>,
+pub(super) struct World {
+    pub(super) server: Server,
+    pub(super) owner: Courier<RelayPost>,
     _owner_dir: Scratch,
 }
 
-fn config(rig: &Rig, record: &[u8]) -> StartConfig {
+pub(super) fn config(rig: &Rig, record: &[u8]) -> StartConfig {
     StartConfig {
         dir: rig.dir().to_str().unwrap().to_string(),
         now: T0 + 100,
@@ -124,7 +136,7 @@ fn config(rig: &Rig, record: &[u8]) -> StartConfig {
     }
 }
 
-fn step(rig: &Rig, handle: u64, now: u64) -> (u32, Vec<String>) {
+pub(super) fn step(rig: &Rig, handle: u64, now: u64) -> (u32, Vec<String>) {
     let response = rig.call(OP_LINK_STEP, handle, &W::new().u64(now).u8(0).0);
     let mut r = Rd::ok(&response);
     let link = r.link();
@@ -169,7 +181,7 @@ fn pending(rig: &Rig, handle: u64, now: u64) -> (Option<Pending>, Option<String>
     (p, notice)
 }
 
-fn world(addr_server: Option<(Server, Courier<RelayPost>, Scratch)>) -> World {
+pub(super) fn world(addr_server: Option<(Server, Courier<RelayPost>, Scratch)>) -> World {
     let (server, owner, dir) = addr_server.unwrap();
     World {
         server,
@@ -180,7 +192,7 @@ fn world(addr_server: Option<(Server, Courier<RelayPost>, Scratch)>) -> World {
 
 /// A relay whose members are the owner and `counter`, and the owner's
 /// courier past its first poll.
-fn relay_for(counter: &DeviceId) -> (Server, Courier<RelayPost>, Scratch) {
+pub(super) fn relay_for(counter: &DeviceId) -> (Server, Courier<RelayPost>, Scratch) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let mut relay = Relay::new(relay_key(), RelayConfig::default(), MemoryStore::new()).unwrap();
     relay
@@ -213,7 +225,7 @@ fn relay_for(counter: &DeviceId) -> (Server, Courier<RelayPost>, Scratch) {
 
 /// The counter's own records the owner holds so far, read as the owner phone
 /// reads them.
-fn owner_records(world: &mut World) -> Vec<openbmt_core::records::Record> {
+pub(super) fn owner_records(world: &mut World) -> Vec<openbmt_core::records::Record> {
     let mut all = Vec::new();
     for message in world.owner.poll().unwrap() {
         if message.kind == Kind::Records {

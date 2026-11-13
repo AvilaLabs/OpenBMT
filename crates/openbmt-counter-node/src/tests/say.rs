@@ -115,7 +115,10 @@ fn sc_12_every_word_keeps_the_rules() {
             all.into_iter().partition(|(_, w)| is_placeholder(w));
         let mut seen = std::collections::BTreeSet::new();
         for (name, w) in &placeholders {
-            assert!(seen.insert(w.heading.clone()), "{name} repeats a placeholder");
+            assert!(
+                seen.insert(w.heading.clone()),
+                "{name} repeats a placeholder"
+            );
             assert_eq!(w.heading, w.what, "{name}");
             assert_eq!(w.heading, w.next, "{name}");
         }

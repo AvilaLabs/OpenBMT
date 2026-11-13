@@ -123,6 +123,10 @@ ops run on another; it waits for at most 250 ms.
  82 close_short      handle node  args CloseShortArgs -> u64
  83 cancel_bill      handle node  args BillNumberArgs -> ()
  84 bills            handle node  args u64 -> list<BillRow>
+200 pending_switch   handle node  args u64 -> SwitchStateView
+201 switch_same      handle node  args u64 -> SwitchSameView
+202 switch_record_kept handle node  args u64 -> Words
+203 switch_different handle node  args u64 -> Words
 ```
 
 ## Types
@@ -224,4 +228,7 @@ ChangeValueView: record: kind: ChangeValueKind, number: u64, text: string
 ChangeFieldView: record: field: string, now: ChangeValueView, after: ChangeValueView
 PendingChangeView: record: version: u32, words: list<string>, fields: list<ChangeFieldView>, arrived: u64, expires_at: u64, confirmed: bool
 ChangeStateView: record: pending: option<PendingChangeView>, notice: option<Words>
+PendingSwitchView: record: address: string, wallet: OwnWalletKind, arrived: u64, expires_at: u64
+SwitchStateView: record: pending: option<PendingSwitchView>, notice: option<Words>, record_update: option<list<u8>>
+SwitchSameView: record: words: Words, record: list<u8>
 ```

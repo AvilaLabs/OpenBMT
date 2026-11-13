@@ -935,7 +935,11 @@ impl RangeLedger {
                 wallet: old_hash,
             });
         }
-        if !self.closed_wallets.iter().any(|w| w.checksum32() == old_hash) {
+        if !self
+            .closed_wallets
+            .iter()
+            .any(|w| w.checksum32() == old_hash)
+        {
             self.closed_wallets.push(old.clone());
         }
         self.book = book;
@@ -1021,7 +1025,9 @@ impl RangeLedger {
             out.push(u8::try_from(self.closed_wallets.len()).unwrap_or(u8::MAX));
             for w in &self.closed_wallets {
                 let bytes = w.to_bytes();
-                out.extend_from_slice(&u16::try_from(bytes.len()).unwrap_or(u16::MAX).to_le_bytes());
+                out.extend_from_slice(
+                    &u16::try_from(bytes.len()).unwrap_or(u16::MAX).to_le_bytes(),
+                );
                 out.extend_from_slice(&bytes);
             }
         }
@@ -1095,7 +1101,9 @@ impl RangeLedger {
                     .iter()
                     .zip(&closed_wallets)
                     .any(|(h, w)| *h != w.checksum32())
-                || closed_wallets.iter().any(|w| w.checksum32() == *open_wallet)
+                || closed_wallets
+                    .iter()
+                    .any(|w| w.checksum32() == *open_wallet)
             {
                 return Err(not_a_book());
             }
@@ -1122,8 +1130,7 @@ impl RangeLedger {
         } else {
             open_rows = rows.iter().map(|(s, n, _)| (*s, *n)).collect();
         }
-        let taken: Vec<(IndexRange, u32)> =
-            open_rows.iter().map(|(s, n)| (s.range, *n)).collect();
+        let taken: Vec<(IndexRange, u32)> = open_rows.iter().map(|(s, n)| (s.range, *n)).collect();
         let book = RangeBook::restore(counter, &taken).map_err(|_| not_a_book())?;
         Ok(Self {
             owner,
@@ -1168,7 +1175,11 @@ impl SwitchOwn {
         let mut out = Vec::with_capacity(SWITCH_HEAD + 2 + wallet.len() + RANGE_BYTES);
         out.extend_from_slice(&counter.to_bytes());
         out.extend_from_slice(from);
-        out.extend_from_slice(&u16::try_from(wallet.len()).unwrap_or(u16::MAX).to_le_bytes());
+        out.extend_from_slice(
+            &u16::try_from(wallet.len())
+                .unwrap_or(u16::MAX)
+                .to_le_bytes(),
+        );
         out.extend_from_slice(&wallet);
         out.extend_from_slice(&range.to_bytes());
         out

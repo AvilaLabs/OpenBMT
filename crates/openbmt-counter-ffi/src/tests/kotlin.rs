@@ -170,6 +170,9 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "PendingChange(u32(), strings(), list { changeField() }, u64(), u64(), bool())",
         "ChangeField(string(), changeValue(), changeValue())",
         "ChangeValue(changeValueKind(), u64(), string())",
+        "PendingSwitch(string(), ownWalletKind(), u64(), u64())",
+        "SwitchState(option { pendingSwitch() }, option { words() }, option { bytes() })",
+        "SwitchSame(words(), bytes())",
     ] {
         assert!(text.contains(needle), "{needle}");
     }
@@ -201,6 +204,9 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "ChangeFieldView: record: field: string, now: ChangeValueView, after: ChangeValueView",
         "PendingChangeView: record: version: u32, words: list<string>, fields: list<ChangeFieldView>, arrived: u64, expires_at: u64, confirmed: bool",
         "ChangeStateView: record: pending: option<PendingChangeView>, notice: option<Words>",
+        "PendingSwitchView: record: address: string, wallet: OwnWalletKind, arrived: u64, expires_at: u64",
+        "SwitchStateView: record: pending: option<PendingSwitchView>, notice: option<Words>, record_update: option<list<u8>>",
+        "SwitchSameView: record: words: Words, record: list<u8>",
         "SettingsView: record: version: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, currency: string, tips_on: bool, tip_percents: list<u8>",
     ] {
         assert!(protocol.contains(line), "{line}");

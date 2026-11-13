@@ -123,6 +123,10 @@ private const val OP_FINISH_TAB = 81
 private const val OP_CLOSE_SHORT = 82
 private const val OP_CANCEL_BILL = 83
 private const val OP_BILLS = 84
+private const val OP_PENDING_SWITCH = 200
+private const val OP_SWITCH_SAME = 201
+private const val OP_SWITCH_RECORD_KEPT = 202
+private const val OP_SWITCH_DIFFERENT = 203
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -323,6 +327,23 @@ class PendingChange(
 
 /** What [CounterNode.pendingChange] returns: the change that waits, and the words of one that came to nothing (CR-244). */
 class ChangeState(val pending: PendingChange?, val notice: Words?)
+
+/**
+ * The switch from the starter wallet that waits for the manager (CR-259, CR-260): the new wallet's first receive
+ * [address] (receive chain, index 0), the [wallet] kind beneath it, when it [arrived] and when it is dropped
+ * ([expiresAt]) if nobody answers it.
+ */
+class PendingSwitch(val address: String, val wallet: OwnWalletKind, val arrived: Long, val expiresAt: Long)
+
+/**
+ * What [CounterNode.pendingSwitch] returns: the switch that waits, the words of one that was dropped (CR-264), and
+ * the pairing record the app still has to keep ([recordUpdate]): seal it as the pairing record, then call
+ * [CounterNode.switchRecordKept] (CR-261).
+ */
+class SwitchState(val pending: PendingSwitch?, val notice: Words?, val recordUpdate: ByteArray?)
+
+/** What [CounterNode.switchSame] returns: the [words] to show and the new pairing [record] to seal and keep (CR-261). */
+class SwitchSame(val words: Words, val record: ByteArray)
 
 /** What a sale carries besides its amount: its note, and the days of a request to send (0 for a sale shown at the till) (CR-205, CR-206). */
 class SaleInfo(
@@ -894,6 +915,12 @@ private fun Reader.changeValue(): ChangeValue = ChangeValue(changeValueKind(), u
 
 private fun Reader.changeField(): ChangeField = ChangeField(string(), changeValue(), changeValue())
 
+private fun Reader.pendingSwitch(): PendingSwitch = PendingSwitch(string(), ownWalletKind(), u64(), u64())
+
+internal fun Reader.switchState(): SwitchState = SwitchState(option { pendingSwitch() }, option { words() }, option { bytes() })
+
+internal fun Reader.switchSame(): SwitchSame = SwitchSame(words(), bytes())
+
 private fun Reader.pendingChange(): PendingChange =
     PendingChange(u32(), strings(), list { changeField() }, u64(), u64(), bool())
 
@@ -1332,6 +1359,38 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
      */
     fun confirmChange(now: Long, version: Long): Words {
         val r = call(OP_CONFIRM_CHANGE, handle) { it.u64(now).u32(version) }
+        return r.words().also { r.end() }
+    }
+
+    /**
+     * CR-259 to CR-261, CR-264: the switch from the starter wallet that waits, with the new wallet's first address
+     * and the kind of wallet, the words of a switch that was dropped, and the pairing record the app still has to
+     * keep. Ask it after a start too: a switch begun and not finished is finished from the second step.
+     */
+    fun pendingSwitch(now: Long): SwitchState {
+        val r = call(OP_PENDING_SWITCH, handle) { it.u64(now) }
+        return r.switchState().also { r.end() }
+    }
+
+    /**
+     * CR-261, "Same address": the first step, written before the counter's sales go to the new wallet. The app asks
+     * only after the manager's PIN was right (CR-84): the library checks no PIN. Seal and keep the returned record
+     * as the pairing record, then call [switchRecordKept].
+     */
+    fun switchSame(now: Long): SwitchSame {
+        val r = call(OP_SWITCH_SAME, handle) { it.u64(now) }
+        return r.switchSame().also { r.end() }
+    }
+
+    /** CR-261, steps three and four: the app kept the record of [switchSame] (or of [pendingSwitch]). Returns the words to show. */
+    fun switchRecordKept(now: Long): Words {
+        val r = call(OP_SWITCH_RECORD_KEPT, handle) { it.u64(now) }
+        return r.words().also { r.end() }
+    }
+
+    /** CR-260, "Different": the switch is dropped and the refusal is written for the owner. Returns the words to show. */
+    fun switchDifferent(now: Long): Words {
+        val r = call(OP_SWITCH_DIFFERENT, handle) { it.u64(now) }
         return r.words().also { r.end() }
     }
 

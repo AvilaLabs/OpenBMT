@@ -870,7 +870,10 @@ fn cr_261_a_version_2_book_that_is_not_a_switched_book_is_refused() {
     let mut other = good.clone();
     let wallets_at = 9 + 2 * each + 1;
     let old = single().to_bytes();
-    other.splice(wallets_at + 2..wallets_at + 2 + old.len(), multi().to_bytes());
+    other.splice(
+        wallets_at + 2..wallets_at + 2 + old.len(),
+        multi().to_bytes(),
+    );
     assert!(RangeLedger::from_bytes(&other, owner_id, me).is_err());
     // A closed wallet named but not used: a count of two.
     let mut two = good.clone();

@@ -23,5 +23,6 @@ mod screen;
 mod staff;
 mod strict;
 mod swap;
+mod switch;
 mod tips;
 pub(crate) mod wire;

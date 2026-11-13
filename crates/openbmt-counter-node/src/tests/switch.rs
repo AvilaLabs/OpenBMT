@@ -140,7 +140,10 @@ fn cr_256_a_record_with_the_flag_is_version_3_and_reads_back_strictly() {
     assert!(back.check(&POLICY).is_ok());
     // Cut at every length, and a byte over.
     for n in 0..bytes.len() {
-        assert!(OwnPairingRecord::from_bytes(&bytes[..n]).is_err(), "cut {n}");
+        assert!(
+            OwnPairingRecord::from_bytes(&bytes[..n]).is_err(),
+            "cut {n}"
+        );
     }
     let mut longer = bytes.clone();
     longer.push(0);
@@ -228,9 +231,7 @@ fn cr_261_a_record_that_switched_is_accepted_only_when_the_book_proves_it() {
     assert!(kept.check_with_ranges(&POLICY, Some(b"junk")).is_err());
     let mut third = RangeLedger::new(owner, me);
     third.accept(&switched.first_range).unwrap();
-    third
-        .switch(&old(), [5; 32], &sw.first_range)
-        .unwrap();
+    third.switch(&old(), [5; 32], &sw.first_range).unwrap();
     assert!(kept
         .check_with_ranges(&POLICY, Some(&third.to_bytes()))
         .is_err());
@@ -386,13 +387,7 @@ fn cr_258_the_range_must_pass_cr_232_for_this_counter_and_hold_no_sale_number() 
         (range_for(3, 0, 1_000, 1), "sale"),
     ];
     for (range, why) in cases {
-        let sw = SwitchOwn::sign(
-            &id(1),
-            id(3).device_id(),
-            old().checksum32(),
-            new(),
-            range,
-        );
+        let sw = SwitchOwn::sign(&id(1), id(3).device_id(), old().checksum32(), new(), range);
         let dir = Scratch::new();
         let mut rig = fresh_rig(dir.path());
         open_one(&mut rig);
@@ -446,10 +441,7 @@ fn cr_258_the_checks_run_in_the_order_the_rule_gives() {
     let sw = signed(3, old().checksum32(), old(), range_for(3, 0, 10, 2));
     assert_eq!(refused_with(&sr, &sw), SwitchRefused::SameWallet);
     let sw = signed(3, old().checksum32(), new(), range_for(3, 0, 10, 2));
-    assert!(matches!(
-        refused_with(&sr, &sw),
-        SwitchRefused::Range(_)
-    ));
+    assert!(matches!(refused_with(&sr, &sw), SwitchRefused::Range(_)));
 }
 
 #[test]
@@ -483,7 +475,13 @@ fn cr_259_a_switch_that_passes_waits_in_its_file_and_changes_nothing_yet() {
     assert_eq!(rig.node.records_len(), before);
     assert!(rig.node.is_starter());
     assert_eq!(rig.node.counter().own_wallet(), Some(&old()));
-    assert!(rig.node.counter().range_ledger().unwrap().closed().is_empty());
+    assert!(rig
+        .node
+        .counter()
+        .range_ledger()
+        .unwrap()
+        .closed()
+        .is_empty());
     assert!(rig.node.record_update().is_none());
     // The sales go on into the wallet pinned now.
     let next = open_one(&mut rig);
@@ -500,7 +498,11 @@ fn cr_259_a_switch_that_passes_waits_in_its_file_and_changes_nothing_yet() {
     assert_eq!(waiting.wallet, new().checksum32());
     assert_eq!(waiting.arrived, T0);
     assert_eq!(waiting.expires_at, T0 + SWITCH_PENDING_SECS);
-    assert!(rig.node.take_notes().iter().any(|n| n.starts_with("CR-259")));
+    assert!(rig
+        .node
+        .take_notes()
+        .iter()
+        .any(|n| n.starts_with("CR-259")));
 }
 
 #[test]
@@ -509,7 +511,8 @@ fn cr_259_a_newer_switch_replaces_it_and_the_same_one_again_changes_nothing() {
     let mut rig = fresh_rig(dir.path());
     let first = good();
     rig.node.take_switch(&first.to_bytes()).unwrap();
-    rig.time.store(T0 + 100, std::sync::atomic::Ordering::SeqCst);
+    rig.time
+        .store(T0 + 100, std::sync::atomic::Ordering::SeqCst);
     // The same one again keeps its arrival.
     rig.node.take_switch(&first.to_bytes()).unwrap();
     assert_eq!(rig.node.pending_switch().unwrap().arrived, T0);
@@ -740,11 +743,7 @@ fn cr_261_the_next_sale_is_the_new_wallets_and_a_sale_opened_before_ends_as_it_w
         .counter()
         .watched_scripts()
         .contains(&before.script));
-    assert!(rig
-        .node
-        .counter()
-        .watched_scripts()
-        .contains(&after.script));
+    assert!(rig.node.counter().watched_scripts().contains(&after.script));
 }
 
 #[test]
@@ -756,10 +755,7 @@ fn cr_261_a_wrong_pin_is_the_apps_and_signs_nothing_so_nothing_is_written_before
     rig.node.take_switch(&good().to_bytes()).unwrap();
     let ledger = std::fs::read(dir.path().join("ranges.bin")).ok();
     assert!(rig.node.pending_switch().is_some());
-    assert_eq!(
-        std::fs::read(dir.path().join("ranges.bin")).ok(),
-        ledger
-    );
+    assert_eq!(std::fs::read(dir.path().join("ranges.bin")).ok(), ledger);
     assert!(rig.node.record_update().is_none());
     assert!(switched_records(dir.path()).is_empty());
 }
@@ -798,7 +794,11 @@ fn cr_261_a_stop_after_the_book_recovers_to_the_switched_state_at_start() {
     let mut rig = fresh_rig(dir.path());
     // The start finds the book ahead of the record and makes the record
     // again, from the switch.
-    let update = rig.node.record_update().expect("the record is made again").to_vec();
+    let update = rig
+        .node
+        .record_update()
+        .expect("the record is made again")
+        .to_vec();
     let kept = OwnPairingRecord::from_bytes(&update).unwrap();
     assert!(kept.wallet == new() && !kept.starter);
     assert!(rig.node.counter().own_wallet() == Some(&new()));
@@ -910,7 +910,11 @@ fn cr_262_the_record_the_owner_reads_is_the_countersigned_hash_and_byte() {
     })
     .unwrap();
     let rig = rig_for(dir.path(), &kept);
-    assert!(rig.node.counter().switched_record(&new().checksum32()).is_some());
+    assert!(rig
+        .node
+        .counter()
+        .switched_record(&new().checksum32())
+        .is_some());
 }
 
 // CR-263.

@@ -34,7 +34,7 @@ use openbmt_counter::{
     refund_destination, Actor, Amount, CashRefund, Currency, PosState, Rate, RateSource, RefundAsk,
     RefundRequest, Report, RequestDays, SaleExtras, Screen, StaffChange, StaffEvent,
 };
-use openbmt_counter_node::say::change_confirmed_words;
+use openbmt_counter_node::say::{change_confirmed_words, switch_dropped_words, switched_words};
 use openbmt_counter_node::{effective_settings_of, own_node_setting};
 use openbmt_counter_node::{
     DirStore, DriverPort, HeartbeatNotTaken, Launch, Node, NodeConfig, PairedRecord, RecordRefused,
@@ -59,9 +59,9 @@ use crate::views::{
     HealthView, HeartbeatOutcome, LightningSaleView, LightningStatusView, LinkStepView, LinkView,
     LnFailArgs, LnKind, LnReplyArgs, LnRequestView, LnSetupArgs, LnStepView, OpenArgs,
     OpenRequestArgs, OpenTipArgs, OpenedView, OverrideArgs, OwnNodeView, PendingChangeView,
-    PumpView, RefundArgs, RefundAskView, RefundRow, ReportView, RequestRow, RequoteArgs,
-    SaleInfoView, ScreenView, StaffArgs, StartConfig, StatusView, SwapReplyArgs, SwapRequestView,
-    TipChoiceView, WithdrawArgs, WordsView,
+    PendingSwitchView, PumpView, RefundArgs, RefundAskView, RefundRow, ReportView, RequestRow,
+    RequoteArgs, SaleInfoView, ScreenView, StaffArgs, StartConfig, StatusView, SwapReplyArgs,
+    SwapRequestView, SwitchSameView, SwitchStateView, TipChoiceView, WithdrawArgs, WordsView,
 };
 
 /// The longest a `pump` waits, whatever the app asks for, so that a call
@@ -196,6 +196,7 @@ fn start_error(e: &StartError) -> CounterError {
         StartError::FirstBatch(_) => ("start-first-batch", Kind::Refused),
         StartError::Checked(_) => ("start-checked", Kind::Store),
         StartError::Driver(_) => ("start-driver", Kind::Refused),
+        StartError::Switch(_) => ("CR-261", Kind::Refused),
     };
     let (text, words) = (e.to_string(), e.words());
     let rule = rule.to_string();
@@ -337,7 +338,12 @@ fn check_start(
             config
         }
         PairedRecord::OwnWallet(r) => {
-            NodeConfig::new_own(req.dir, identity, r.own_pairing(policy), settings, driver)
+            let mut config =
+                NodeConfig::new_own(req.dir, identity, r.own_pairing(policy), settings, driver);
+            // CR-256, CR-261: the starter flag and the record the node writes
+            // again when the counter switches.
+            config.own_record = Some(r.as_ref().clone());
+            config
         }
     };
     // CR-162: a counter paired with a relay tells the owner which settings it
@@ -568,6 +574,58 @@ impl Entry {
         self.run(Some(now), |node, _, _| {
             node.confirm_pending(version)
                 .map(|()| WordsView(change_confirmed_words()))
+                .map_err(|e| from_rule(e.rule(), &e, e.words()))
+        })
+    }
+
+    /// CR-259 to CR-261, CR-264: the switch from the starter wallet that
+    /// waits, with the new wallet's first address and the kind of wallet, the
+    /// words of a switch that was dropped, and the pairing record the app
+    /// still has to keep. A switch that has waited seven days is dropped
+    /// here, as in every call that looks at the time.
+    pub(crate) fn pending_switch(&self, now: u64) -> Result<SwitchStateView, CounterError> {
+        self.run(Some(now), |node, _, _| {
+            let pending = node.pending_switch().map(|p| PendingSwitchView::of(&p));
+            let notice = node.switch_notice().map(|n| WordsView(n.words()));
+            let record_update = node.record_update().map(<[u8]>::to_vec);
+            Ok(SwitchStateView {
+                pending,
+                notice,
+                record_update,
+            })
+        })
+    }
+
+    /// CR-261, "Same address": the first step, once the manager's PIN was
+    /// right (CR-84; the library checks no PIN). Returns the new pairing
+    /// record for the app to seal and keep, then `switch_record_kept`.
+    pub(crate) fn switch_same(&self, now: u64) -> Result<SwitchSameView, CounterError> {
+        self.run(Some(now), |node, _, _| {
+            node.switch_same()
+                .map(|record| SwitchSameView {
+                    words: WordsView(switched_words()),
+                    record,
+                })
+                .map_err(|e| from_rule(e.rule(), &e, e.words()))
+        })
+    }
+
+    /// CR-261, steps three and four: the app kept the record of
+    /// `switch_same` (or of `pending_switch`).
+    pub(crate) fn switch_record_kept(&self, now: u64) -> Result<WordsView, CounterError> {
+        self.run(Some(now), |node, _, _| {
+            node.switch_record_kept()
+                .map(|()| WordsView(switched_words()))
+                .map_err(|e| from_rule(e.rule(), &e, e.words()))
+        })
+    }
+
+    /// CR-260, "Different": the switch is dropped and the refusal is
+    /// written.
+    pub(crate) fn switch_different(&self, now: u64) -> Result<WordsView, CounterError> {
+        self.run(Some(now), |node, _, _| {
+            node.switch_different()
+                .map(|()| WordsView(switch_dropped_words()))
                 .map_err(|e| from_rule(e.rule(), &e, e.words()))
         })
     }

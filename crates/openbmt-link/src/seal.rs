@@ -142,11 +142,7 @@ impl Kind {
         use Role::{Box as TheBox, Counter, Owner, Watch};
         match self {
             Kind::Heartbeat => (from == Owner || from == Watch) && to == Counter,
-            Kind::Command
-            | Kind::Batch
-            | Kind::RecordsReceived
-            | Kind::Range
-            | Kind::Switch => {
+            Kind::Command | Kind::Batch | Kind::RecordsReceived | Kind::Range | Kind::Switch => {
                 from == Owner && to == Counter
             }
             Kind::Settings | Kind::DeviceList => from == Owner && (to == Counter || to == TheBox),

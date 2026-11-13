@@ -86,6 +86,14 @@
 //!   for a counter's confirmation, and 72 `confirm_change` signs it and
 //!   writes the record (CR-239 to CR-241). The PIN of CR-84 is the app's: it
 //!   asks `confirm_change` only after the manager's PIN was right.
+//! - 200 to 203 the switch from the starter wallet (CR-256 to CR-263):
+//!   `pending_switch` reads the switch that waits (the new wallet's first
+//!   address, the kind of wallet) and the pairing record the app still has to
+//!   keep, `switch_same` does the first step of CR-261 and returns the new
+//!   record for the app to seal and keep, `switch_record_kept` does the last
+//!   two steps once the app kept it, and `switch_different` drops the switch
+//!   (CR-260). The PIN of CR-84 is the app's: it asks `switch_same` only
+//!   after the manager's PIN was right.
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -124,10 +132,11 @@ use crate::views::{
     LinkStepView, LinkView, LnFailArgs, LnKind, LnMethod, LnReplyArgs, LnRequestView, LnSetupArgs,
     LnStepView, LnTransportView, OpenArgs, OpenRequestArgs, OpenTipArgs, OpenedView, OverrideArgs,
     OwnNodeCheckArgs, OwnNodeView, OwnWalletKind, PairBeginArgs, PairStartedView, PairingView,
-    PendingChangeView, PersonLineView, PumpView, RefundArgs, RefundAskView, RefundRow,
-    RefundStateView, RelayKind, ReportView, RequestRow, RequoteArgs, SaleInfoView, ScreenView,
-    StaffArgs, StartConfig, StateView, StatusView, SwapReplyArgs, SwapRequestView, TallyView,
-    TipChoiceView, TipTallyView, WithdrawArgs, WordsView,
+    PendingChangeView, PendingSwitchView, PersonLineView, PumpView, RefundArgs, RefundAskView,
+    RefundRow, RefundStateView, RelayKind, ReportView, RequestRow, RequoteArgs, SaleInfoView,
+    ScreenView, StaffArgs, StartConfig, StateView, StatusView, SwapReplyArgs, SwapRequestView,
+    SwitchSameView, SwitchStateView, TallyView, TipChoiceView, TipTallyView, WithdrawArgs,
+    WordsView,
 };
 
 /// The first four bytes of a request.
@@ -563,6 +572,18 @@ fn build_ops() -> Vec<Op> {
             c.entry()?.cancel_bill(a)
         }),
         op(84, "bills", Node, |c, now: u64| c.entry()?.bills(now)),
+        op(200, "pending_switch", Node, |c, now: u64| {
+            c.entry()?.pending_switch(now)
+        }),
+        op(201, "switch_same", Node, |c, now: u64| {
+            c.entry()?.switch_same(now)
+        }),
+        op(202, "switch_record_kept", Node, |c, now: u64| {
+            c.entry()?.switch_record_kept(now)
+        }),
+        op(203, "switch_different", Node, |c, now: u64| {
+            c.entry()?.switch_different(now)
+        }),
     ]
 }
 
@@ -770,6 +791,9 @@ fn definitions() -> Vec<TypeDef> {
         ChangeFieldView::define(),
         PendingChangeView::define(),
         ChangeStateView::define(),
+        PendingSwitchView::define(),
+        SwitchStateView::define(),
+        SwitchSameView::define(),
     ]
 }
 
