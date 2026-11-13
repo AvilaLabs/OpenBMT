@@ -727,6 +727,28 @@ code and checks the payment.
   asked for, and cancels the sale (BX-74) and fails the payment if they are
   not. A `till-key` file of the earlier form, which holds no reply key, is
   answered 401 `tillKeyOld` until a new key is made.
+
+What the code fixes. `till-key` takes no lock on the data directory (BX-02):
+it writes only that one file, by renaming a whole file over the old, and the
+Box reads the file at each request, so a key made while the Box runs works at
+once. The file holds a version byte, the tagged hash `OpenBMT/till-key/v1` of
+the token the till sends, and the reply key, each made as BIP340 tagged hashes
+are, so the Box needs no hashing code of its own. A file in the earlier form,
+which holds only a hash of the key, gets `tillKeyOld` until a new key is made.
+The shop's currency is named by its three letters, `SAT` for Bitcoin Standard
+(CR-196). A sale counts as waiting from BX-72 until
+the counter's "opened" notice; at most 32 do, and at most 4,096 sales of any
+state are kept, so that a till that makes and cancels sales cannot grow the
+table without limit. An opened sale that nothing comes of for an hour counts as
+`unpaid`. A "paid" or "final" notice moves a sale that is `unpaid`, `expired`
+or `cancelled` to `paid` while the Box still keeps it, because the counter's
+word that it was paid is what the till needs most; a till that cancelled a
+sale and then reads `paid` has been paid. The numbers of the counters' notices
+are checked for the till against the last till notice taken from the counter,
+in memory, because the till works on a Box that reads no POS.
+
+## 6. What these rules do not do
+
 - **They do not make the Box trusted.** A Box that lies can hold messages
   back (LK-26), report orders wrongly, and with a closing connector mark an
   order paid that was not. The owner's own matching is what catches the

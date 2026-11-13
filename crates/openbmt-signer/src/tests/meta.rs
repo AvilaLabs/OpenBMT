@@ -4,9 +4,9 @@ use crate::{Ceiling, ChangeRefusal, Refusal, RegisterError};
 use openbmt_core::wallet::WalletError;
 
 const RULES: &str = include_str!("../../../../docs/SIGNER-RULES.md");
-/// The tests of SR-71 to SR-79 and SR-84 to SR-90 are in the Key app library
-/// and in the Key app (`apps/key-android`), which own those rules.
-const TEST_SOURCES: [&str; 16] = [
+/// The tests of SR-71 to SR-79, SR-84 to SR-90 and SR-92 are in the Key app
+/// library and in the Key app (`apps/key-android`), which own those rules.
+const TEST_SOURCES: [&str; 17] = [
     include_str!("batch.rs"),
     include_str!("ceremony.rs"),
     include_str!("ceilings.rs"),
@@ -22,6 +22,7 @@ const TEST_SOURCES: [&str; 16] = [
     include_str!("../../../openbmt-key-ffi/src/tests/lock.rs"),
     include_str!("../../../openbmt-key-ffi/src/tests/allowlist.rs"),
     include_str!("../../../openbmt-key-ffi/src/tests/ceremony.rs"),
+    include_str!("../../../openbmt-key-ffi/src/tests/history.rs"),
     include_str!("../../../../apps/key-android/tests/AppModelTest.kt"),
 ];
 
@@ -43,8 +44,8 @@ fn rule_ids() -> Vec<String> {
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
     let ids = rule_ids();
-    assert_eq!(ids.len(), 74);
-    assert!(ids.contains(&"SR-01".to_string()) && ids.contains(&"SR-91".to_string()));
+    assert_eq!(ids.len(), 75);
+    assert!(ids.contains(&"SR-01".to_string()) && ids.contains(&"SR-92".to_string()));
 }
 
 #[test]
