@@ -1,0 +1,30 @@
+[package]
+name = "openbmt-lightning-node"
+description = "Shop Lightning: the shop's own receive-only Lightning node on the LDK library (docs/SHOP-LIGHTNING-RULES.md). The key from the shop's words by BIP-85, every change of state stored on two devices, chain data from the shop's own Bitcoin Core, channels from a provider the shop picks through LSPS2"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The LDK library, at exact versions and never forked or patched. ldk-node is
+# not used here (SL-02). lightning-block-sync 0.2.0 is the release that goes
+# with lightning 0.2.8 (there is no 0.2.8 of it). The bitcoin crate is at the
+# version the rest of the workspace pins. ChaCha20-Poly1305 is the package the
+# link and the lock already list, with the same features.
+[dependencies]
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std", "secp-recovery"] }
+chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
+lightning = { version = "=0.2.8", features = ["std"] }
+lightning-background-processor = { version = "=0.2.3" }
+lightning-block-sync = { version = "=0.2.0", features = ["rpc-client", "tokio"] }
+lightning-invoice = { version = "=0.34.2", features = ["std"] }
+lightning-liquidity = { version = "=0.2.8" }
+lightning-net-tokio = { version = "=0.2.0" }
+lightning-persister = { version = "=0.2.8", features = ["tokio"] }
+serde_json = { version = "=1.0.154", default-features = false, features = ["std"] }
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "net", "time", "io-util", "sync", "macros"] }
+
+[[bin]]
+name = "shop-lightning-device"
+path = "src/bin/device.rs"

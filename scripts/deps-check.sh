@@ -15,7 +15,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PROGRAMS="openbmt-signer openbmt-counter-node openbmt-owner-node openbmt-box \
-openbmt-books openbmt-key-ffi openbmt-counter-ffi openbmt-owner-ffi openbmt-qr openbmt-rates openbmt-stick"
+openbmt-books openbmt-key-ffi openbmt-counter-ffi openbmt-owner-ffi openbmt-qr openbmt-rates openbmt-stick \
+openbmt-lightning-node"
 write=0
 [ "${1:-}" = "--write" ] && write=1
 fail=0
