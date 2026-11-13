@@ -1383,3 +1383,123 @@ fn as_102_every_state_and_refusal_has_words_that_name_its_rule() {
     assert_eq!(headings.len(), all.len(), "each state has its own name");
     assert_eq!(all_refusals().len(), 11);
 }
+
+// ---- the starter wallet's watch (SS-36, SS-30, SS-42) --------------------------------
+
+/// A transaction that spends `from` and pays `to_wallet` `sats` at receive
+/// index `index`.
+fn pays_wallet(own: &Own, from: &Coin, index: u32, sats: u64) -> Transaction {
+    Transaction {
+        version: Version::TWO,
+        lock_time: LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: from.outpoint,
+            script_sig: ScriptBuf::new(),
+            sequence: Sequence::MAX,
+            witness: Witness::new(),
+        }],
+        output: vec![TxOut {
+            value: Amount::from_sat(sats),
+            script_pubkey: own.wallet.receive_script(index).unwrap(),
+        }],
+    }
+}
+
+#[test]
+fn ss_36_the_held_amount_is_the_confirmed_coins_and_the_payments_on_their_way_each_counted_once() {
+    use openbmt_owner::starter::{held_sats, IncomingCoin};
+    let own = single();
+    let confirmed = own_coin(&own, 1, 0, 40_000);
+    let other = own_coin(&own, 2, 1, 2_500);
+    assert_eq!(held_sats(&[], &[]), 0);
+    assert_eq!(held_sats(&[confirmed.clone(), other.clone()], &[]), 42_500);
+    // A payment into the wallet that no block holds yet counts.
+    let incoming_tx = pays_wallet(&own, &own_coin(&own, 9, 5, 1), 2, 7_000);
+    let incoming = IncomingCoin {
+        outpoint: OutPoint::new(incoming_tx.compute_txid(), 0),
+        sats: 7_000,
+    };
+    assert_eq!(
+        held_sats(std::slice::from_ref(&confirmed), &[incoming]),
+        47_000
+    );
+    // The change of the owner's own unconfirmed payment is offered as a coin
+    // at 0 confirmations: it counts once, whether or not it is also listed as
+    // incoming, and the coin that payment spent counts no more.
+    let change_tx = pays_wallet(&own, &confirmed, 3, 30_000);
+    let change = Coin {
+        outpoint: OutPoint::new(change_tx.compute_txid(), 0),
+        prev_tx: change_tx.clone(),
+        vout: 0,
+        chain: Keychain::Change,
+        index: 3,
+        confirmations: 0,
+    };
+    let listed_again = IncomingCoin {
+        outpoint: change.outpoint,
+        sats: 30_000,
+    };
+    assert_eq!(held_sats(&[other.clone(), change.clone()], &[]), 32_500);
+    assert_eq!(
+        held_sats(&[other.clone(), change.clone()], &[listed_again]),
+        32_500
+    );
+    // The same incoming output given twice counts once.
+    assert_eq!(held_sats(&[], &[incoming, incoming]), 7_000);
+}
+
+#[test]
+fn ss_30_a_transaction_of_the_starter_wallet_waits_in_the_outbox_with_its_refund_signed() {
+    let own = single();
+    let mut owner = own_owner(&own, Options::default());
+    let r = refund_to(&mut owner, 1);
+    let coin = own_coin(&own, 1, 0, 100_000);
+    let tx = pays_wallet(&own, &coin, 1, 90_000);
+    let bytes = serialize(&tx);
+    let store = Store::default();
+    // A refund that is not queued, a transaction that does not read and a
+    // failed store change nothing.
+    let before = owner.snapshot().unwrap();
+    assert!(matches!(
+        owner.take_starter(&bytes, &[r + 50], |b| store.put(b)),
+        Err(OwnerError::Refused(Refusal::UnknownEntry(_)))
+    ));
+    assert!(matches!(
+        owner.take_starter(&[1, 2, 3], &[], |b| store.put(b)),
+        Err(OwnerError::Refused(Refusal::WrongStage(_)))
+    ));
+    assert!(matches!(
+        owner.take_starter(&bytes, &[r], |_| Err("disk full".to_string())),
+        Err(OwnerError::Store(_))
+    ));
+    assert_eq!(owner.snapshot().unwrap(), before);
+    assert!(owner.outbox().is_empty());
+    // Taken: the refund is signed, the transaction is in the outbox, and it
+    // was stored first.
+    let txid = owner.take_starter(&bytes, &[r], |b| store.put(b)).unwrap();
+    assert_eq!(txid, tx.compute_txid());
+    assert_eq!(owner.outbox().len(), 1);
+    assert!(matches!(
+        &owner.outbox()[0].what,
+        Delivery::Transaction { txid: t, refunds, cash_out: None, .. } if *t == txid && refunds == &[r]
+    ));
+    let stage = &owner.refunds().iter().find(|e| e.id == r).unwrap().stage;
+    assert_eq!(*stage, Stage::Signed { txid });
+    let back = restore(&own, &store.last()).unwrap();
+    assert_eq!(back.outbox().len(), 1);
+    // The same transaction again changes nothing.
+    let calls = store.calls();
+    assert_eq!(
+        owner.take_starter(&bytes, &[r], |b| store.put(b)).unwrap(),
+        txid
+    );
+    assert_eq!(owner.outbox().len(), 1);
+    assert_eq!(store.calls(), calls);
+    // The move pays no refund: it is in the outbox on its own.
+    let other = own_coin(&own, 2, 2, 50_000);
+    let moved = pays_wallet(&own, &other, 9, 49_000);
+    owner
+        .take_starter(&serialize(&moved), &[], |b| store.put(b))
+        .unwrap();
+    assert_eq!(owner.outbox().len(), 2);
+}

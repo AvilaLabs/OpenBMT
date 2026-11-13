@@ -18,6 +18,8 @@
 //!   check.
 //! - [`limit`] (SS-35 to SS-38, SS-43): the limit and the date as pure
 //!   functions.
+//! - [`watch`] (SS-36, SS-42, SS-43): what the owner node's watch says the
+//!   wallet holds, and a signed transaction handed to the node's outbox.
 //!
 //! The library keeps nothing between calls but a [`Setup`] or a [`Restore`]
 //! that the caller holds. A call that signs takes the sealed seed and the
@@ -36,10 +38,13 @@ mod seal;
 mod setup;
 #[cfg(test)]
 mod tests;
+mod watch;
 
 use std::fmt;
 
 use openbmt_core::say::{Tone, Who, Words};
+
+use crate::own_say::needed;
 
 pub use chance::{
     checked_read, make_seed, KernelRandom, Seed, StarterWallet, ENTROPY_BYTES, KERNEL_BYTES,
@@ -55,6 +60,7 @@ pub use pay::{
 };
 pub use seal::{wallet_of_sealed, DataKey, Restore, Sealed, DATA_KEY_BYTES};
 pub use setup::{pick_positions, Image, Key, Setup, Typed, ASKED, PAGES, WORDS_PER_PAGE};
+pub use watch::{held_sats, IncomingCoin};
 
 pub use openbmt_spend::Coin;
 
@@ -473,6 +479,29 @@ pub fn new_wallet_unreadable_words() -> Words {
         "Connect the new wallet again from its own screen.",
         "SS-42",
     )
+}
+
+/// SS-36: the owner node's watch of the starter wallet is not ready, so
+/// what it holds is not known. The words are not written yet.
+pub fn not_watching_words() -> Words {
+    needed("WORDS_NEEDED_SS36_NOT_WATCHING")
+}
+
+/// SS-30: the refund to pay is not a refund that waits in the queue. The
+/// words are not written yet.
+pub fn no_such_refund_words() -> Words {
+    needed("WORDS_NEEDED_SS30_NO_SUCH_REFUND")
+}
+
+/// The words of this module that are not written yet, by name: each is the
+/// placeholder constant that names its rule, in the heading and both
+/// sentences. They are not in [`all_starter_words`], which holds written
+/// words only.
+pub fn all_needed_words() -> Vec<(String, Words)> {
+    vec![
+        ("StarterNotWatching".to_string(), not_watching_words()),
+        ("StarterNoSuchRefund".to_string(), no_such_refund_words()),
+    ]
 }
 
 /// Every state of this module that has words, by name.

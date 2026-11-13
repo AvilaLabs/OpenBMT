@@ -1521,6 +1521,24 @@ fn ss_50_every_state_has_its_own_words_and_names_its_rule() {
 }
 
 #[test]
+fn ss_50_the_words_not_written_yet_are_placeholders_that_name_their_rule() {
+    let needed = all_needed_words();
+    assert_eq!(needed.len(), 2);
+    for (name, w) in &needed {
+        assert!(crate::own_say::is_placeholder(w), "{name}");
+        assert!(
+            w.heading.starts_with("WORDS_NEEDED_SS") && w.heading == w.what && w.what == w.next,
+            "{name}"
+        );
+    }
+    // None of them is among the written words.
+    let written = all_starter_words();
+    assert!(needed
+        .iter()
+        .all(|(n, _)| written.iter().all(|(m, _)| m != n)));
+}
+
+#[test]
 fn ss_50_a_refusal_names_its_rule_and_carries_the_detail() {
     let w = StarterRefusal::Plan("no coin".to_string()).words();
     assert_eq!(w.code, Some("SS-30"));
