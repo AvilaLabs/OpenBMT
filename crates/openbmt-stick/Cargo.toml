@@ -1,0 +1,30 @@
+[package]
+name = "openbmt-stick"
+description = "The stick key maker: the one program that runs as process 1 on an ordinary PC started from the stick, and the core behind it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+# Copies the text of every screen to the first serial port. Used only by
+# stick/test-qemu.sh, never in a release (SK-40).
+serial-echo = []
+
+# The same pins as openbmt-core, so the lock file gains no new package.
+# libc is the system call layer of the program that runs as process 1.
+[dependencies]
+openbmt-core = { path = "../openbmt-core" }
+openbmt-qr = { path = "../openbmt-qr" }
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
+bip39 = { version = "=2.2.2", default-features = false, features = ["alloc"] }
+libc = "=0.2.191"
+
+[lib]
+name = "openbmt_stick"
+path = "src/lib.rs"
+
+[[bin]]
+name = "openbmt-stick"
+path = "src/main.rs"
