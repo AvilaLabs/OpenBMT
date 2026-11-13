@@ -6,7 +6,7 @@
 //! counter_regtest <data dir> <node address> [--regtest-single-peer]
 //!     [--heartbeat-max-age <seconds>] [--customers-off-wifi]
 //!     [--regtest-own-node] [--own-wallet <description>]
-//!     [--relay <address> --relay-key <hex>] [--box-key <hex>]
+//!     [--relay <address> --relay-key <hex>] [--box-key <hex>] [--box-owner-fixed]
 //! ```
 //!
 //! `scripts/counter-e2e-core.sh` uses this to check the whole receive path
@@ -31,6 +31,9 @@
 //! and the owner of the link is the owner `box_pair` paired the Box with;
 //! the counter sends it paid notices (BX-40) and takes its POS notices
 //! (CR-266). `scripts/till-e2e-core.sh` uses it for a sale from the till.
+//! `--box-owner-fixed` keeps the fixed key of `owner_regtest` as the owner of
+//! the link when there is a Box, for a Box that an own-wallet shop paired with
+//! that key (`scripts/own-box-e2e-core.sh`).
 //!
 //! `--heartbeat-max-age` sets the signed setting `heartbeat_max_age_secs`
 //! (60 to 3600; the default settings say 600), so that a check of an old
@@ -206,11 +209,14 @@ use openbmt_watch::{
 const USAGE: &str = "usage: counter_regtest <data dir> <node address> [--regtest-single-peer] \
                      [--heartbeat-max-age <seconds>] [--customers-off-wifi] \
                      [--regtest-own-node] [--own-wallet <description>] \
-                     [--relay <address> --relay-key <hex>] [--box-key <hex>]";
+                     [--relay <address> --relay-key <hex>] [--box-key <hex>] \
+                     [--box-owner-fixed]";
 const ADDRESSES: u32 = 20;
 
 /// The Box that is the relay, from `--box-key`.
 static BOX_KEY: OnceLock<DeviceId> = OnceLock::new();
+/// Set by `--box-owner-fixed`: the owner of the link is `owner_regtest`'s even with a Box.
+static BOX_OWNER_FIXED: OnceLock<()> = OnceLock::new();
 
 /// TEST ONLY: the name the node is told its own node has (a valid v3 onion
 /// name; nothing is ever dialled at it).
@@ -1066,7 +1072,7 @@ fn now_secs() -> u64 {
 fn start_link(dir: &str, addr: SocketAddr, relay_key: DeviceId) -> Result<CounterLink, String> {
     // With a Box, the owner the link talks to is the owner of `box_pair`,
     // the one the Box is paired with.
-    let owner = if BOX_KEY.get().is_some() {
+    let owner = if BOX_KEY.get().is_some() && BOX_OWNER_FIXED.get().is_none() {
         let secret = openbmt_core::identity::tagged_hash("OpenBMT/example/box-pair/v1", b"owner");
         identity(&secret)?.device_id()
     } else {
@@ -1130,6 +1136,8 @@ fn run(args: &[String]) -> Result<(), String> {
                 .map_err(|_| "the Box key is not 32 bytes".to_string())?;
             let key = DeviceId::from_bytes(&bytes).map_err(|e| format!("Box key: {e}"))?;
             let _ = BOX_KEY.set(key);
+        } else if arg == "--box-owner-fixed" {
+            let _ = BOX_OWNER_FIXED.set(());
         } else if arg == "--regtest-single-peer" {
             single_peer = true;
         } else if arg == "--customers-off-wifi" {
