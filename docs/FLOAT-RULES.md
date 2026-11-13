@@ -41,8 +41,7 @@ funds.**
   as SS-12 says. When the phone drops the float's key, as it does when the
   screen lock is removed, nothing can be paid from the float and the screen
   says so. The money stays in the float, and the stick makes its words
-  again from the shop's words. Scanning them back onto the same phone is
-  not built yet.
+  again from the shop's words; FL-06 brings them back.
 - **FL-04. A new float after a loss.** The index starts at 0. After a lost
   or replaced phone, the owner makes the next index on the stick, and the
   new phone first moves what is left in the old float to the new one
@@ -53,10 +52,20 @@ funds.**
   wallet as a wallet of its own, beside the pinned wallet and its former
   ones: its own coin view, kept in its own file, from the day the float was
   set up, over both chains up to 20 past the highest index used or handed
-  out when the node starts. An index used after that is watched from the
-  next start. Its coins are in no total of the shop's wallet, never pay anything
-  but a float payment, and are given to the float's calls as the checked
-  view that FL-10, FL-11 and FL-20 need. No sale's facts come from it.
+  out. When the phone uses or hands out an index past what is watched, the
+  node moves the watch to 20 past it at once, without a restart, and reads
+  the blocks since the float was set up for the new addresses. Its coins are
+  in no total of the shop's wallet, never pay anything but a float payment,
+  and are given to the float's calls as the checked view that FL-10, FL-11
+  and FL-20 need. No sale's facts come from it.
+- **FL-06. The key brought back.** When the phone has dropped the float's
+  key, the float's page offers to scan the float's words again, made on
+  the stick at the index the phone recorded (FL-04). The core reads them as
+  FL-01 says and takes them only when their wallet is the float's wallet
+  the phone recorded; other words are refused and nothing changes. It seals
+  them as FL-03 says, under a new data key and a new key of the phone's
+  keystore, and the float is ready again with its record, its coins and
+  its index as they were.
 
 ## 2. The cap
 
