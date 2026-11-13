@@ -168,10 +168,16 @@ Each step has a short looping picture.
   sees a flip or a word. A do-it-yourself signer (SeedSigner, Krux) is the
   second way, a hardware signer with dice the third. Then the flow continues
   as "Use my own wallet".
+- **Start simple.** For a shop that wants its first sale today and has no
+  signer and no computer for the stick: a small wallet made on the owner
+  phone, with a limit and a date the owner sets, that becomes the shop's
+  wallet and is paired with the first counter as a starter wallet
+  (`docs/START-SIMPLE-RULES.md`, `docs/COUNTER-RULES.md` CR-256). It is
+  offered after the cold wallet, and the move to a key made offline is
+  asked for at the limit or the date.
 - **Set up the rest now, add the wallet later.** Shop, till, counters, staff
   and settings are all set up, and staff can practise. The counter shows
-  "Not taking bitcoin yet" until a wallet is added. There is no starter
-  wallet on the phone.
+  "Not taking bitcoin yet" until a wallet is added.
 
 **Before the savings guide, the app says why, once:** keys made by any app
 can be stolen through that app, ours included, so the keys are made offline,
