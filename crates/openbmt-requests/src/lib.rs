@@ -18,7 +18,8 @@
 //!
 //! The desk's allocation of address indexes (RQ-02, RQ-04) belongs to the
 //! owner state: the book takes an index from the caller and refuses one
-//! already used. A `bitcoin:` link is not read here yet (RQ-28).
+//! already used. A `bitcoin:` link for a return address is read with the BIP 321
+//! reader of `openbmt-core` (RQ-28).
 
 #![forbid(unsafe_code)]
 
