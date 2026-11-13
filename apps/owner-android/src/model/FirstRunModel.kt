@@ -213,10 +213,10 @@ class MoneyTabs(start: ShopCurrency, private val guess: ShopCurrency) {
 }
 
 /** The screens of the first run, in the order they come. Back from each is [FirstRun.back]. */
-enum class FirstRunStep { Welcome, Shop, Till, Money, OwnAdvice, Connect, OwnCounter, Why, RealCases, Guide, NotYet }
+enum class FirstRunStep { Welcome, Shop, Till, Money, OwnAdvice, Connect, Starter, OwnCounter, Why, RealCases, Guide, NotYet }
 
-/** The three choices of where the money goes. */
-enum class MoneyChoice { Own, Make, Later }
+/** The four choices of where the money goes: Starter is "Start simple" (`docs/START-SIMPLE-RULES.md`). */
+enum class MoneyChoice { Own, Make, Later, Starter }
 
 /**
  * The first run's state in memory: the step, and what has been entered, kept when Back returns to a step. The
@@ -257,8 +257,11 @@ class FirstRun(start: ShopPrefs, locale: String) {
             FirstRunStep.Money -> when (money) {
                 MoneyChoice.Make -> FirstRunStep.Why
                 MoneyChoice.Own -> FirstRunStep.OwnAdvice
+                MoneyChoice.Starter -> FirstRunStep.Starter
                 else -> FirstRunStep.NotYet
             }
+            // The starter wallet, once made, is the shop's pinned wallet: the first counter follows, as after Connect.
+            FirstRunStep.Starter -> FirstRunStep.OwnCounter
             FirstRunStep.OwnAdvice -> if (money == MoneyChoice.Make) FirstRunStep.Why else {
                 connect = Connect()
                 FirstRunStep.Connect
@@ -316,7 +319,8 @@ class FirstRun(start: ShopPrefs, locale: String) {
             FirstRunStep.Money -> FirstRunStep.Till
             FirstRunStep.OwnAdvice -> FirstRunStep.Money
             FirstRunStep.Connect -> if (connect.back()) FirstRunStep.Connect else FirstRunStep.OwnAdvice
-            FirstRunStep.OwnCounter -> FirstRunStep.Connect
+            FirstRunStep.Starter -> FirstRunStep.Money
+            FirstRunStep.OwnCounter -> if (money == MoneyChoice.Starter) FirstRunStep.Starter else FirstRunStep.Connect
             FirstRunStep.Why -> FirstRunStep.Money
             FirstRunStep.RealCases -> if (realPage > 0) {
                 realPage--
@@ -328,6 +332,7 @@ class FirstRun(start: ShopPrefs, locale: String) {
             FirstRunStep.NotYet -> when (money) {
                 MoneyChoice.Make -> FirstRunStep.Why
                 MoneyChoice.Own -> FirstRunStep.Connect
+                MoneyChoice.Starter -> FirstRunStep.Starter
                 else -> FirstRunStep.Money
             }
         }

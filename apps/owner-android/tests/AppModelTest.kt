@@ -2860,8 +2860,11 @@ object AppModelTest {
         val needsRate: Boolean = true,
         val ended: Boolean = false,
         var refuse: Words? = null,
+        /** The file `pin` gives for a description, when a test needs two wallets apart. */
+        var pinFile: ((String) -> ByteArray)? = null,
     ) : OwnLibrary {
         val calls = ArrayList<String>()
+        val pinned = ArrayList<String>()
         val counter = ByteArray(32) { 7 }
         val code = ByteArray(40) { (it + 1).toByte() }
 
@@ -2876,11 +2879,17 @@ object AppModelTest {
 
         override fun pin(text: String): OwnWalletView {
             calls.add("pin")
-            return OwnWalletView(byteArrayOf(1, 2, 3), WL06_ADDRESS, false)
+            pinned.add(text)
+            return OwnWalletView(pinFile?.invoke(text) ?: byteArrayOf(1, 2, 3), WL06_ADDRESS, false)
         }
 
         override fun offer(shop: OwnShopArgs, now: Long): OwnOfferView {
             calls.add("offer")
+            return OwnOfferView(OwnMade(code, now), now + 600, 0, WL06_ADDRESS)
+        }
+
+        override fun offerStarter(shop: OwnShopArgs, now: Long): OwnOfferView {
+            calls.add("offerStarter")
             return OwnOfferView(OwnMade(code, now), now + 600, 0, WL06_ADDRESS)
         }
 
@@ -3565,6 +3574,93 @@ object AppModelTest {
         services: List<AccessibilityEntry> = emptyList(), patch: String? = "2026-10-05", lock: Boolean = true,
     ) = StarterEnvironment(adb, su, testKeys, overlays, services, patch, lock)
 
+    // ---- "Start simple" as the shop's own wallet (SS-30, SS-36, SS-37, SS-41, CR-256) -----------------------------------
+
+    private fun starterWiringTests() {
+        val desc = "wpkh([818bc9b6/84h/0h/0h]$WL06_XPUB/<0;1>/*)#96yh9yhx"
+        val wallet = StarterWalletView(desc, "818bc9b6", "bc1qfirst")
+        val files: (String) -> ByteArray = { it.toByteArray() }
+
+        // The first run: a fourth row, "Start simple", leads to the setup, then to the first counter as Connect does.
+        val r = FirstRun(ShopPrefs(), "DE")
+        r.next(); r.next(); r.next()
+        r.choose(MoneyChoice.Starter); ok(r.step == FirstRunStep.Starter, "Start simple on the money page goes to the starter setup")
+        r.back(); ok(r.step == FirstRunStep.Money && r.money == MoneyChoice.Starter, "back from the setup: the money page")
+        r.choose(MoneyChoice.Starter); r.next(); ok(r.step == FirstRunStep.OwnCounter, "the wallet made, the first counter follows")
+        r.back(); ok(r.step == FirstRunStep.Starter, "back from the first counter is the made wallet, not a second setup")
+        r.next(); r.next(); ok(r.step == FirstRunStep.NotYet, "after the counter: the notice, as after Connect")
+        r.back(); ok(r.step == FirstRunStep.Starter, "back from the notice: the starter step")
+        r.back(); r.choose(MoneyChoice.Own); r.next(); r.next(); r.back(); ok(r.step == FirstRunStep.OwnAdvice, "the own wallet path is as it was")
+        val run = source("src/android/FirstRun.kt").replace(Regex("//.*"), "")
+        val money = run.substringAfter("private fun Controller.showMoney(").substringBefore("stepScreen(")
+        ok(Regex("moneyOwn[\\s\\S]*moneyMake[\\s\\S]*StarterWords.rowTitle, StarterWords.rowSub\\) \\{ r.choose\\(MoneyChoice.Starter\\)[\\s\\S]*moneyLater").containsMatchIn(money), "the row has the starter's words, after \"Help me make a cold wallet\"")
+        ok(run.contains("FirstRunStep.Starter -> showStarterStep(r)"), "the step shows the starter setup")
+        val screens = source("src/android/StarterScreens.kt")
+        ok(screens.contains("starterChecked(CheckStage.Making) { showStarterLimit() }") && !screens.substringAfter("private fun Controller.sealStarter").substringBefore("private fun Controller.keepSealed").contains("OwnerOwn"), "every check of the setup still applies, in the same order")
+
+        // The wallet is kept as the own wallet from its public description: the library makes the file, the store seals it.
+        val own = FakeOwn(pinFile = files)
+        val dir = tempDir()
+        try {
+            val starter = StarterStore(dir)
+            val store = OwnShopStore(File(dir, "own").also { it.mkdirs() }, testSealer())
+            ok(!StarterShop.pinned(starter, store, own), "nothing is pinned before the starter wallet is made")
+            starter.saveSealed(byteArrayOf(5, 5, 5)); starter.saveWrapped(byteArrayOf(6, 6, 6)); starter.saveWallet(wallet)
+            ok(!StarterShop.pinned(starter, store, own), "a starter wallet with no shop is not a starter shop")
+            StarterShop.keep(wallet, store, own)
+            ok(own.pinned.first() == desc && store.loadWallet()!!.contentEquals(desc.toByteArray()) && store.loadOwner()!!.contentEquals(ByteArray(32) { 9 }), "the file the library made from the public description is the shop's wallet, with an owner root")
+            ok(store.args() != null && own.calls.count { it == "make" } == 1, "the node can start from it")
+            ok(StarterShop.pinned(starter, store, own), "the starter shop is known from the two files, with no flag of its own")
+            val ownFiles = File(dir, "own").walkTopDown().filter { it.isFile }.map { it.name }.toSet()
+            ok(ownFiles == setOf(AppFiles.OWN_WALLET_FILE, AppFiles.OWN_OWNER_FILE), "the own store holds the wallet and the owner root only")
+            ok(File(dir, "own").walkTopDown().filter { it.isFile }.none { f -> f.readBytes().toList().windowed(3).any { it == listOf<Byte>(5, 5, 5) || it == listOf<Byte>(6, 6, 6) } }, "no sealed seed and no wrapped key is in the own store")
+            // A shop with another wallet is not a starter shop; after the upgrade's re-pin it no longer is one.
+            store.saveWallet("another wallet".toByteArray())
+            ok(!StarterShop.pinned(starter, store, own), "a connected wallet pinned: not a starter shop, so no starter line and no second starter wallet")
+            ok(!StarterShop.pinned(StarterStore(File(dir, "empty")), store, own), "no starter wallet kept: not a starter shop")
+            // A stop between the writes: the starter wallet is whole and the shop is not; the next try finishes it, and a refusal keeps nothing.
+            val dir2 = tempDir()
+            try {
+                val starter2 = StarterStore(dir2)
+                val store2 = OwnShopStore(File(dir2, "own").also { it.mkdirs() }, testSealer())
+                starter2.saveSealed(byteArrayOf(1)); starter2.saveWrapped(byteArrayOf(2)); starter2.saveWallet(wallet); starter2.saveRecord(StarterRecord(1_000, 2_000, false, null))
+                val refusing = FakeOwn(pinFile = { throw OwnerException("WL-08", "refused", 1, null) })
+                var refused = false
+                try { StarterShop.keep(wallet, store2, refusing) } catch (_: OwnerException) { refused = true }
+                ok(refused, "a refused wallet is not kept")
+                ok(!store2.hasWallet() && store2.loadOwner() == null && starter2.hasSealed() && starter2.loadRecord() != null, "a stop before the own wallet leaves no half-made shop, and the starter wallet whole")
+                StarterShop.keep(wallet, store2, FakeOwn(pinFile = files))
+                ok(store2.hasWallet() && StarterShop.pinned(starter2, store2, FakeOwn(pinFile = files)), "the next try finishes the shop")
+            } finally {
+                clean(dir2)
+            }
+        } finally {
+            clean(dir)
+        }
+        val ordered = screens.substringAfter("private fun Controller.sealStarter")
+        ok(ordered.indexOf("keepSealed(sealed, wallet, StarterRecord(") in 0 until ordered.indexOf("starterKeepPinned(wallet)"), "the key, the public wallet and the record are written before the shop's wallet")
+        val keepSrc = source("src/android/StarterScreens.kt").substringAfter("private fun Controller.starterKeepPinned").substringBefore("/** The key is on the phone")
+        ok(keepSrc.contains("StarterShop.keep(wallet, ownStore, NativeOwnLibrary)") && !keepSrc.contains("loadSealed") && !keepSrc.contains("dataKey") && !keepSrc.contains("OwnerStarter"), "only the public wallet is given to the own store")
+        ok(!source("src/model/StarterModel.kt").substringAfter("object StarterShop").substringBefore("/** The wrapped data key").contains("Sealed"), "the shop's keeping never reads the sealed seed")
+        ok(screens.contains("if (first != null && !starterPinned()) showStarterFinish(first)"), "a key made and a shop not finished is finished when the step is shown again")
+
+        // The first counter: the starter offer when the pinned wallet is the starter wallet, the plain offer otherwise.
+        val args = OwnShopArgs("/shop", ByteArray(32) { 1 }, byteArrayOf(1, 2, 3))
+        val marked = FakeOwn()
+        ok(OwnPairing({ args }, marked, { true }).start(1_000) == null && marked.calls == listOf("offerStarter"), "CR-256: a starter shop's offer is the starter offer (op 200)")
+        val plain = FakeOwn()
+        ok(OwnPairing({ args }, plain, { false }).start(1_000) == null && plain.calls == listOf("offer"), "another wallet's shop makes the plain offer (op 150)")
+        ok(OwnPairing({ args }, FakeOwn()).also { it.start(1) }.offer != null, "a shop that says nothing of a starter makes the plain offer")
+        ok(source("src/android/OwnCounter.kt").contains("OwnPairing({ ownStore.args() }, starter = { starterPinned() })"), "the first counter asks whether the shop is a starter shop")
+
+        // The Money row, the home line and the gate read the shop's pinned wallet.
+        val money2 = source("src/android/StarterScreens.kt").substringAfter("internal fun Controller.starterRows()").substringBefore("/** SS-30, CR-256")
+        ok(money2.contains("if (starterPinned()) listOf(RowItem(StarterWords.rowTitle, StarterWords.rowSub) { showStarter() }) else emptyList()"), "the Money row is for a starter shop only: holdings, refunds and the upgrade")
+        val use = source("src/android/StarterUse.kt")
+        ok(use.substringAfter("internal fun Controller.starterLine").substringBefore("return try").contains("if (!starterPinned()) return null") && use.substringAfter("internal fun Controller.starterGate").contains("starterLine(n)"), "SS-36, SS-37: the home line and the gate show only for a shop pinned to the starter wallet")
+        ok(use.contains("starter.pinned = null") && source("src/android/Controller.kt").contains("starter.pinned = null"), "what is known of the pinned wallet is asked again after a re-pin and at each start")
+    }
+
     private fun starterTests() {
         val today = java.time.LocalDate.of(2026, 11, 13)
         val all = StarterWords.all()
@@ -3795,7 +3891,7 @@ object AppModelTest {
         ok(source("src/android/StarterUse.kt").contains("starterSign(n, msg, true, StarterWords.authMove") && source("src/android/StarterUse.kt").contains("starterSign(n, msg, false, StarterWords.authPay"), "the move asks for the PIN alone, a refund for the usual proof")
         ok(source("src/android/StarterUse.kt").contains("starter.store.deleteKey()") && source("src/android/StarterUse.kt").contains("starter.keystore.delete()") && source("src/android/StarterUse.kt").contains("StarterPayModel.mayDelete"), "SS-43: the files and the Keystore key go when the library allows")
         val gateSrc = source("src/android/Screens.kt")
-        ok(gateSrc.contains("starterGate(n)") && gateSrc.contains("starterLine(n)?.let { views.add(starterLineView(it)) }") && gateSrc.contains("starterRow()"), "the home line and the upgrade gate and the entry are wired")
+        ok(gateSrc.contains("starterGate(n)") && gateSrc.contains("starterLine(n)?.let { views.add(starterLineView(it)) }") && gateSrc.contains("starterRows()"), "the home line and the upgrade gate and the entry are wired")
         ok(source("src/android/AddCounter.kt").contains("starterHolds(") && source("src/android/SettingsEdit.kt").contains("starterHolds("), "adding counters and loosening settings wait (SS-37)")
 
         // SS-22: never backed up. The manifest and both rule files are read.
@@ -3836,6 +3932,7 @@ object AppModelTest {
         connectTests()
         pictureTests()
         starterTests()
+        starterWiringTests()
         floatTests()
         ruleTests(rulesMd)
         println("AppModelTest (owner): $count checks passed")

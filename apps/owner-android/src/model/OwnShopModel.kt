@@ -82,6 +82,9 @@ interface OwnLibrary {
 
     fun offer(shop: OwnShopArgs, now: Long): OwnOfferView
 
+    /** The offer of a shop whose pinned wallet is the starter wallet (CR-256). */
+    fun offerStarter(shop: OwnShopArgs, now: Long): OwnOfferView
+
     fun request(shop: OwnShopArgs, made: OwnMade, now: Long, request: ByteArray): OwnRequestView
 
     fun confirm(shop: OwnShopArgs, made: OwnMade, now: Long, request: ByteArray, usdPerBtc: Long, relay: ByteArray?): OwnBundleView
@@ -104,6 +107,8 @@ object NativeOwnLibrary : OwnLibrary {
     override fun pin(text: String) = OwnerOwn.pin(text)
 
     override fun offer(shop: OwnShopArgs, now: Long) = OwnerOwn.offer(shop, now)
+
+    override fun offerStarter(shop: OwnShopArgs, now: Long) = OwnerOwn.offerStarter(shop, now)
 
     override fun request(shop: OwnShopArgs, made: OwnMade, now: Long, request: ByteArray) = OwnerOwn.request(shop, made, now, request)
 
@@ -135,6 +140,8 @@ enum class OwnPairStep { Offer, Compare, Bundle, Paired, Stopped }
 class OwnPairing(
     private val shop: () -> OwnShopArgs?,
     private val library: OwnLibrary = NativeOwnLibrary,
+    /** Whether the shop's pinned wallet is the starter wallet: asked for each offer (CR-256, SS-41). */
+    private val starter: () -> Boolean = { false },
 ) {
     var step = OwnPairStep.Offer
         private set
@@ -169,7 +176,8 @@ class OwnPairing(
         stopped = null
         request?.fill(0)
         request = null
-        return call { offer = library.offer(args, now) }
+        // A shop pinned to the starter wallet marks its offer, so that the counter may take the switch of SS-41.
+        return call { offer = if (starter()) library.offerStarter(args, now) else library.offer(args, now) }
     }
 
     /**

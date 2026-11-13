@@ -15,7 +15,7 @@ import org.openbmt.app.Who
 
 /** The page the first run is at once the wallet is checked: the pairing step that [OwnPairing] is at. */
 internal fun Controller.showOwnCounter(r: FirstRun, message: SayWords? = null) {
-    val p = ownPairing ?: OwnPairing({ ownStore.args() }).also { fresh ->
+    val p = ownPairing ?: OwnPairing({ ownStore.args() }, starter = { starterPinned() }).also { fresh ->
         ownPairing = fresh
         val said = fresh.start(nowSecs())
         if (said != null) return ownStopped(r, said)

@@ -103,6 +103,8 @@ private fun Controller.starterLateConfirm(n: OwnerNode, late: StarterLate) {
 /** Where the wallet stands, from what it holds now (confirmed coins and payments on their way, as the node's watch counts them); null when there is no starter key on the phone. */
 internal fun Controller.starterLine(n: OwnerNode): HomeLine? {
     if (!starter.store.hasSealed()) return null
+    // The node watches the pinned wallet: its coins are the starter wallet's only when that is the pinned wallet.
+    if (!starterPinned()) return null
     val record = starterRecord() ?: return null
     val held = try {
         n.starterHeld()
@@ -432,7 +434,10 @@ private fun Controller.starterRepin(n: OwnerNode): Boolean {
     } ?: return false
     return try {
         val done = n.ownRepin(newWallet)
-        if (done.kind != OwnRepinKind.NotReady) ownStore.saveWallet(done.wallet)
+        if (done.kind != OwnRepinKind.NotReady) {
+            ownStore.saveWallet(done.wallet)
+            starter.pinned = null
+        }
         done.kind == OwnRepinKind.Done
     } catch (_: OwnerException) {
         false
@@ -451,7 +456,10 @@ private fun Controller.starterRepin(n: OwnerNode): Boolean {
 internal fun Controller.starterWalletFileFollows(n: OwnerNode) {
     try {
         val pinned = n.ownPinnedWallet()
-        if (!pinned.contentEquals(ownStore.loadWallet())) ownStore.saveWallet(pinned)
+        if (!pinned.contentEquals(ownStore.loadWallet())) {
+            ownStore.saveWallet(pinned)
+            starter.pinned = null
+        }
     } catch (_: OwnerException) {
     } catch (_: IOException) {
     } catch (_: LinkageError) {

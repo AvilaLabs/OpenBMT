@@ -49,6 +49,7 @@ internal fun Controller.showFirstRun() {
         FirstRunStep.Money -> showMoney(r)
         FirstRunStep.OwnAdvice -> showOwnAdvice(r)
         FirstRunStep.Connect -> showConnect(r)
+        FirstRunStep.Starter -> showStarterStep(r)
         FirstRunStep.OwnCounter -> showOwnCounter(r)
         FirstRunStep.Why -> showWhy(r)
         FirstRunStep.RealCases -> showRealCases(r)
@@ -255,6 +256,7 @@ private fun Controller.showMoney(r: FirstRun) {
     val rows = listOf(
         RowItem(FirstRunWords.moneyOwn, FirstRunWords.moneyOwnNote) { r.choose(MoneyChoice.Own); showFirstRun() },
         RowItem(FirstRunWords.moneyMake, FirstRunWords.moneyMakeNote) { r.choose(MoneyChoice.Make); showFirstRun() },
+        RowItem(StarterWords.rowTitle, StarterWords.rowSub) { r.choose(MoneyChoice.Starter); showFirstRun() },
         RowItem(FirstRunWords.moneyLater, FirstRunWords.moneyLaterNote) { r.choose(MoneyChoice.Later); showFirstRun() },
     )
     stepScreen(

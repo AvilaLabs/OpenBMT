@@ -45,6 +45,12 @@ internal class StarterRuntime(base: File) {
 
     /** Set when the app comes into view: the upgrade screen is the first screen once (SS-37). */
     var gate = false
+
+    /** The first run, while its "Start simple" step is the one on show: the setup leaves to its Money step, not to home. */
+    var firstRun: FirstRun? = null
+
+    /** Whether the shop's pinned wallet is the starter wallet; asked of the library once and kept until the pinned wallet may have changed. */
+    var pinned: Boolean? = null
 }
 
 /** SS-11: clears the picture of words, and drops a setup or restore that is open. */
@@ -73,8 +79,76 @@ private fun Controller.words(w: SayWords): View = ui.words(w)
 
 // ---- the entry ------------------------------------------------------------------------------------------------------
 
-/** The row of the Money page. */
-internal fun Controller.starterRow() = RowItem(StarterWords.rowTitle, StarterWords.rowSub) { showStarter() }
+/**
+ * The row of the Money page: only for a shop whose pinned wallet is the starter wallet, where it opens the page of its
+ * holdings, refunds and upgrade. A shop with another wallet is not offered a second starter wallet.
+ */
+internal fun Controller.starterRows(): List<RowItem> =
+    if (starterPinned()) listOf(RowItem(StarterWords.rowTitle, StarterWords.rowSub) { showStarter() }) else emptyList()
+
+/** SS-30, CR-256: whether the shop's pinned wallet is the starter wallet's, from the two files themselves. */
+internal fun Controller.starterPinned(): Boolean =
+    starter.pinned ?: StarterShop.pinned(starter.store, ownStore, NativeOwnLibrary).also { starter.pinned = it }
+
+/** The first run, when it is at its "Start simple" step. */
+private fun Controller.starterFirstRun(): FirstRun? = starter.firstRun?.takeIf { it.step == FirstRunStep.Starter }
+
+/** Where the setup leaves to: the Money step of the first run when it came from there, else home. */
+private fun Controller.starterHome() {
+    val r = starterFirstRun()
+    if (r == null) {
+        showHome()
+    } else {
+        r.back()
+        showFirstRun()
+    }
+}
+
+/** The "Start simple" step of the first run (`docs/OWNER-APP-RULES.md` first run): the setup of the starter wallet, with every check it has. */
+internal fun Controller.showStarterStep(r: FirstRun) {
+    starter.firstRun = r
+    showStarter()
+}
+
+/**
+ * The starter wallet's public description becomes the shop's pinned wallet, which the node starts from and watches. False
+ * when the library or the store refused; nothing private is given to either.
+ */
+private fun Controller.starterKeepPinned(wallet: StarterWalletView?): Boolean {
+    if (wallet == null) return false
+    return try {
+        if (!starterPinned()) StarterShop.keep(wallet, ownStore, NativeOwnLibrary)
+        starter.pinned = null
+        true
+    } catch (_: OwnerException) {
+        false
+    } catch (_: IOException) {
+        false
+    } catch (_: LinkageError) {
+        false
+    }
+}
+
+/** The key is on the phone and the wallet is the shop's: the first counter comes next, as after "Wallet checked". */
+private fun Controller.showStarterMade(r: FirstRun) =
+    centre(StarterWords.sealed, listOf(ui.primary(StarterWords.doneButton) { r.next(); showFirstRun() }), title = StarterWords.screenTitle)
+
+/**
+ * The key was made and locked in an earlier run of this step, and the shop's wallet was not kept (a stop between the two
+ * writes): the wallet is kept now.
+ */
+private fun Controller.showStarterFinish(r: FirstRun) {
+    val wallet = try {
+        starter.store.loadWallet()
+    } catch (_: IOException) {
+        null
+    }
+    if (starterKeepPinned(wallet)) {
+        showStarterMade(r)
+    } else {
+        centre(StarterWords.notSaved, listOf(ui.button(StarterWords.backButton) { showStarter() }), title = StarterWords.screenTitle)
+    }
+}
 
 /** What the phone has of the starter wallet decides what the entry shows (SS-20, SS-23, SS-43). */
 internal fun Controller.showStarter() {
@@ -82,11 +156,13 @@ internal fun Controller.showStarter() {
     val state = try {
         StarterState.of(store.hasSealed(), store.hasWrapped(), (store.hasSealed() && store.hasWrapped()) && starter.keystore.usable())
     } catch (e: IOException) {
-        return centre(AppWords.fileNotRead(e.message), listOf(ui.button(StarterWords.backButton) { showHome() }), title = StarterWords.screenTitle)
+        return centre(AppWords.fileNotRead(e.message), listOf(ui.button(StarterWords.backButton) { starterHome() }), title = StarterWords.screenTitle)
     }
+    val first = starterFirstRun()
     when (state) {
         StarterKeyState.None -> if (store.hasWallet()) showStarterAfterMove() else showStarterPlain()
-        StarterKeyState.Ready -> showStarterManage()
+        // In the first run a key that is ready is a setup that stopped before the wallet was kept as the shop's.
+        StarterKeyState.Ready -> if (first != null && !starterPinned()) showStarterFinish(first) else if (first != null) showStarterMade(first) else showStarterManage()
         StarterKeyState.KeyGone -> showStarterKeyGone()
     }
 }
@@ -106,8 +182,8 @@ internal fun Controller.showStarterPlain() {
     )
     screen(
         StarterWords.plainTitle, views,
-        listOf(ui.primary(StarterWords.plainContinue) { starterChecked(CheckStage.Making) { showStarterLimit() } }, ui.button(StarterWords.backButton) { showHome() }),
-        back = { showHome() },
+        listOf(ui.primary(StarterWords.plainContinue) { starterChecked(CheckStage.Making) { showStarterLimit() } }, ui.button(StarterWords.backButton) { starterHome() }),
+        back = { starterHome() },
     )
 }
 
@@ -336,7 +412,15 @@ private fun Controller.sealStarter() {
     keepSealed(sealed, wallet, StarterRecord(draft.limitSats, draft.moveBy, draft.stopAbove, null)) { ok ->
         if (ok) {
             starterLeave()
-            centre(StarterWords.sealed, listOf(ui.primary(StarterWords.doneButton) { showHome() }), title = StarterWords.screenTitle)
+            // The key and the public wallet are kept; the shop's wallet is written last, and the first counter follows.
+            val first = starterFirstRun()
+            if (first == null) {
+                centre(StarterWords.sealed, listOf(ui.primary(StarterWords.doneButton) { showHome() }), title = StarterWords.screenTitle)
+            } else if (starterKeepPinned(wallet)) {
+                showStarterMade(first)
+            } else {
+                centre(StarterWords.notSaved, listOf(ui.button(StarterWords.backButton) { showStarter() }), title = StarterWords.screenTitle)
+            }
         } else {
             // The core keeps the setup until it is dropped, so the owner can try the sealing again.
             centre(StarterWords.notSaved, listOf(ui.primary(StarterWords.authSeal) { sealStarter() }, ui.button(StarterWords.backButton) { starterCancel() }), title = StarterWords.screenTitle)
@@ -391,7 +475,7 @@ internal fun Controller.showStarterKeyGone() {
         } catch (_: LinkageError) {
         }
     }
-    centre(said, listOf(ui.primary(StarterWords.restoreButton) { starterChecked(CheckStage.Words) { showStarterRestore() } }, ui.button(StarterWords.backButton) { showHome() }), title = StarterWords.screenTitle, back = { showHome() })
+    centre(said, listOf(ui.primary(StarterWords.restoreButton) { starterChecked(CheckStage.Words) { showStarterRestore() } }, ui.button(StarterWords.backButton) { starterHome() }), title = StarterWords.screenTitle, back = { starterHome() })
 }
 
 /** The owner types the 12 words on the in-app keypad; the core checks them against the wallet's fingerprint and seals them again. */
@@ -400,7 +484,7 @@ internal fun Controller.showStarterRestore() {
         starter.store.loadWallet()
     } catch (_: IOException) {
         null
-    } ?: return centre(StarterWords.keyGoneFallback, listOf(ui.button(StarterWords.backButton) { showHome() }), title = StarterWords.screenTitle)
+    } ?: return centre(StarterWords.keyGoneFallback, listOf(ui.button(StarterWords.backButton) { starterHome() }), title = StarterWords.screenTitle)
     try {
         starter.coreOpen = true
         OwnerStarter.restoreStart()
@@ -436,15 +520,15 @@ private fun Controller.finishRestore(wallet: StarterWalletView) {
     } catch (e: OwnerException) {
         // A refusal (not 12 words, or another wallet's) is said in the core's words and nothing was sealed.
         starterLeave()
-        return centre(e.sayWords(), listOf(ui.primary(StarterWords.restoreButton) { starterChecked(CheckStage.Words) { showStarterRestore() } }, ui.button(StarterWords.backButton) { showHome() }), title = StarterWords.screenTitle)
+        return centre(e.sayWords(), listOf(ui.primary(StarterWords.restoreButton) { starterChecked(CheckStage.Words) { showStarterRestore() } }, ui.button(StarterWords.backButton) { starterHome() }), title = StarterWords.screenTitle)
     } catch (e: LinkageError) {
         starterLeave()
-        return centre(AppWords.libraryMissing(e.message), listOf(ui.button(StarterWords.backButton) { showHome() }), title = StarterWords.screenTitle)
+        return centre(AppWords.libraryMissing(e.message), listOf(ui.button(StarterWords.backButton) { starterHome() }), title = StarterWords.screenTitle)
     }
     // A new Keystore key is made for the sealed seed (the old one is gone); the record of the limit is kept.
     keepSealed(sealed, wallet, null) { ok ->
         starterLeave()
         if (ok) centre(StarterWords.restored, listOf(ui.primary(StarterWords.doneButton) { showStarter() }), title = StarterWords.screenTitle)
-        else centre(StarterWords.notSaved, listOf(ui.button(StarterWords.backButton) { showHome() }), title = StarterWords.screenTitle)
+        else centre(StarterWords.notSaved, listOf(ui.button(StarterWords.backButton) { starterHome() }), title = StarterWords.screenTitle)
     }
 }

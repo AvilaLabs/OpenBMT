@@ -128,7 +128,7 @@ private fun Controller.showMoney() {
         { showReceipts() }, { showCashOut() }, { showOld() }, { showRefundNotes() }, { showSessions() }, { showQueue() }, { showOutbox() },
     )
     val rows = OwnerLook.moneyTitles.zip(opens).map { (title, go) -> RowItem(title) { go() } }
-    groupPage(OwnerLook.MONEY, rows + RowItem(OwnerLook.BOOKS, OwnerLook.BOOKS_SUB, onClick = { showBooks() }) + starterRow() + floatRow())
+    groupPage(OwnerLook.MONEY, rows + RowItem(OwnerLook.BOOKS, OwnerLook.BOOKS_SUB, onClick = { showBooks() }) + starterRows() + floatRow())
 }
 
 private fun Controller.showDevices() {

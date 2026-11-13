@@ -260,6 +260,7 @@ class Controller(internal val act: MainActivity) {
     }
 
     internal fun begin() {
+        starter.pinned = null
         fault = null
         torBlocked = null
         ceremony = null

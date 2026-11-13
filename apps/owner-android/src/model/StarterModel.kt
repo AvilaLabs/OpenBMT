@@ -317,6 +317,52 @@ object StarterState {
     }
 }
 
+/**
+ * The starter wallet as the shop's pinned own wallet (SS-30, SS-41, CR-256). The library makes the wallet's file from the
+ * starter wallet's public description (`pin`); the own store keeps it sealed, with an owner root made the first time. Only
+ * the public description is used: no seed and no data key reaches the own store. Whether the shop is a starter shop is
+ * not kept apart: it is true when the pinned file is the file of the starter wallet's description.
+ */
+object StarterShop {
+    /**
+     * Keeps [wallet] as the shop's pinned wallet. Called after the starter store holds the sealed seed, the wrapped key, the
+     * public wallet and the record: the own wallet's file is the last write, and it is what makes the shop whole, so a stop
+     * before it leaves a starter wallet with no shop, which the first run finishes the next time "Start simple" is chosen,
+     * and never a shop with no starter wallet.
+     */
+    fun keep(wallet: StarterWalletView, own: OwnShopStore, library: OwnLibrary) {
+        val view = library.pin(wallet.description)
+        try {
+            own.keep(view.file, library)
+        } finally {
+            view.file.fill(0)
+        }
+    }
+
+    /** True when the pinned file of the shop is the starter wallet's. False with no starter wallet, no pinned wallet or a file that does not read. */
+    fun pinned(starter: StarterStore, own: OwnShopStore, library: OwnLibrary): Boolean = try {
+        val mine = starter.loadWallet()
+        if (mine == null || !own.hasWallet()) {
+            false
+        } else {
+            val held = own.loadWallet()
+            val view = library.pin(mine.description)
+            try {
+                held != null && held.contentEquals(view.file)
+            } finally {
+                held?.fill(0)
+                view.file.fill(0)
+            }
+        }
+    } catch (_: OwnerException) {
+        false
+    } catch (_: IOException) {
+        false
+    } catch (_: LinkageError) {
+        false
+    }
+}
+
 /** The wrapped data key as kept: one byte of IV length, the IV, then the ciphertext. */
 object StarterWrap {
     fun pack(iv: ByteArray, ciphertext: ByteArray): ByteArray {
