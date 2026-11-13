@@ -659,3 +659,224 @@ fn cr_236_the_key_app_authority_is_unchanged() {
         .verify_signatures_with(&Authority::KeyApp(roots))
         .is_ok());
 }
+
+// Section 26: switching from the starter wallet.
+
+fn starter_offer() -> OwnOffer {
+    offer(single()).with_starter(true)
+}
+
+#[test]
+fn cr_256_a_starter_offer_is_version_2_with_the_flag_last() {
+    let plain = offer(single());
+    let starter = starter_offer();
+    let v1 = plain.to_bytes();
+    let v2 = starter.to_bytes();
+    assert_eq!(&v1[..5], b"OBM-\x01");
+    assert_eq!(&v2[..5], b"OBM-\x02");
+    assert_eq!(v2.len(), v1.len() + 1);
+    assert_eq!(&v2[5..v2.len() - 1], &v1[5..]);
+    assert_eq!(v2.last(), Some(&1));
+    assert!(!OwnOffer::from_bytes(&v1).unwrap().starter);
+    let back = OwnOffer::from_bytes(&v2).unwrap();
+    assert!(back.starter);
+    assert_eq!(back, starter);
+    assert_eq!(back.to_bytes(), v2);
+}
+
+#[test]
+fn cr_256_the_flags_byte_is_strict() {
+    let v2 = starter_offer().to_bytes();
+    // Every other bit of the flags, and no flag in a version 2 offer, is
+    // refused.
+    for flags in 0..=255u8 {
+        let mut m = v2.clone();
+        *m.last_mut().unwrap() = flags;
+        assert_eq!(
+            OwnOffer::from_bytes(&m).is_ok(),
+            flags == 1,
+            "flags {flags:#04x}"
+        );
+    }
+    // Cut short or longer, in either version.
+    for n in 0..v2.len() {
+        assert!(OwnOffer::from_bytes(&v2[..n]).is_err(), "prefix {n}");
+    }
+    let mut longer = v2.clone();
+    longer.push(1);
+    assert!(OwnOffer::from_bytes(&longer).is_err());
+    // A version 3 offer is not read.
+    let mut v3 = v2.clone();
+    v3[4] = 3;
+    assert_eq!(
+        OwnOffer::from_bytes(&v3).err(),
+        Some(DecodeError::UnsupportedVersion(3))
+    );
+    // Whatever decodes encodes to the same bytes.
+    let mut m = v2.clone();
+    for i in 0..m.len() {
+        for bit in 0..8 {
+            m[i] ^= 1 << bit;
+            if let Ok(o) = OwnOffer::from_bytes(&m) {
+                assert_eq!(o.to_bytes(), m, "byte {i} bit {bit}");
+            }
+            m[i] ^= 1 << bit;
+        }
+    }
+}
+
+#[test]
+fn cr_256_the_flag_is_covered_by_the_binding_and_the_four_words() {
+    let plain = offer(single());
+    let starter = starter_offer();
+    assert_ne!(plain.binding(), starter.binding());
+    let counter_id = counter().device_id();
+    assert_ne!(
+        own_session_digest(&plain, &counter_id, &[9; 32]),
+        own_session_digest(&starter, &counter_id, &[9; 32])
+    );
+    // A request made for the plain offer does not pass the starter offer.
+    let (_, request) = begin(&plain);
+    assert_eq!(
+        check_own_request(&starter, &request).err(),
+        Some(OwnPairError::BindingMismatch)
+    );
+    // The version 1 binding is what it was: the body without a flag.
+    assert_eq!(
+        plain.binding(),
+        tagged_hash(TAG_PAIR_OWN_BINDING, &plain.to_bytes()[5..])
+    );
+}
+
+fn switch_for(from: &PinnedWallet, to: PinnedWallet) -> SwitchOwn {
+    SwitchOwn::sign(
+        &owner(),
+        counter().device_id(),
+        from.checksum32(),
+        to,
+        range(0, 1_000),
+    )
+}
+
+#[test]
+fn cr_257_the_switch_is_strict_and_signed_under_its_own_tag() {
+    let sw = switch_for(&single(), multi());
+    let bytes = sw.to_bytes();
+    assert_eq!(&bytes[..5], b"OBM]\x01");
+    assert_strict_decoding(&bytes, SwitchOwn::from_bytes, SwitchOwn::to_bytes);
+    let back = SwitchOwn::from_bytes(&bytes).unwrap();
+    assert!(back.verify(&owner().device_id()));
+    assert_eq!(back.wallet_hash(), multi().checksum32());
+    // Another root, and a changed part, fail the signature.
+    assert!(!back.verify(&identity(2).device_id()));
+    for part in 0..4 {
+        let mut other = back.clone();
+        match part {
+            0 => other.counter = identity(4).device_id(),
+            1 => other.from = [7; 32],
+            2 => other.wallet = single(),
+            _ => other.first_range = range(1, 1_001),
+        }
+        assert!(!other.verify(&owner().device_id()), "part {part}");
+    }
+    // Another tag over the same bytes does not verify.
+    let body = SwitchOwn::body(&sw.counter, &sw.from, &sw.wallet, &sw.first_range);
+    let other_tag = owner().sign_tagged(TAG_PAIRING_OWN, &body);
+    let mut forged = sw.clone();
+    forged.sig = other_tag;
+    assert!(!forged.verify(&owner().device_id()));
+}
+
+#[test]
+fn cr_257_the_wallet_in_the_switch_must_be_canonical() {
+    let sw = switch_for(&single(), multi());
+    let mut bytes = sw.to_bytes();
+    // Break the wallet's own checksum, which is its last 32 bytes.
+    let at = 5 + 64 + 2 + sw.wallet.to_bytes().len() - 1;
+    bytes[at] ^= 1;
+    assert!(SwitchOwn::from_bytes(&bytes).is_err());
+}
+
+fn switched_ledger() -> (RangeLedger, SwitchOwn) {
+    let owner_id = owner().device_id();
+    let me = counter().device_id();
+    let mut ledger = RangeLedger::new(owner_id, me);
+    ledger.accept(&range(0, 1_000)).unwrap();
+    for _ in 0..3 {
+        ledger.next().unwrap();
+    }
+    let sw = switch_for(&single(), multi());
+    ledger
+        .switch(&single(), sw.wallet_hash(), &sw.first_range)
+        .unwrap();
+    (ledger, sw)
+}
+
+#[test]
+fn cr_261_a_switch_closes_the_old_ranges_and_starts_the_new_ones() {
+    let (mut ledger, sw) = switched_ledger();
+    assert_eq!(ledger.closed().len(), 1);
+    assert_eq!(ledger.closed()[0].next, 3);
+    assert_eq!(ledger.closed()[0].wallet, single().checksum32());
+    assert_eq!(ledger.closed_wallets(), &[single()]);
+    assert_eq!(ledger.switched_to(), Some(sw.wallet_hash()));
+    // The new wallet's index 0 is handed out although the old wallet's index
+    // 0 was; no index of the closed range is handed out again.
+    assert_eq!(ledger.next(), Ok(0));
+    assert_eq!(ledger.remaining(), 999);
+    assert_eq!(ledger.closed()[0].next, 3);
+}
+
+#[test]
+fn cr_261_the_ledger_of_a_switched_counter_is_version_2_and_strict() {
+    let owner_id = owner().device_id();
+    let me = counter().device_id();
+    let (mut ledger, _) = switched_ledger();
+    ledger.next().unwrap();
+    let bytes = ledger.to_bytes();
+    assert_eq!(&bytes[..5], b"OBM;\x02");
+    assert_strict_decoding(
+        &bytes,
+        |b| RangeLedger::from_bytes(b, owner_id, me),
+        RangeLedger::to_bytes,
+    );
+    let mut back = RangeLedger::from_bytes(&bytes, owner_id, me).unwrap();
+    assert_eq!(back, ledger);
+    assert_eq!(back.next(), Ok(1));
+    // Version 1 of the book still reads, with no switch in it.
+    let mut plain = RangeLedger::new(owner_id, me);
+    plain.accept(&range(0, 1_000)).unwrap();
+    let v1 = plain.to_bytes();
+    assert_eq!(&v1[..5], b"OBM;\x01");
+    assert_eq!(RangeLedger::from_bytes(&v1, owner_id, me).unwrap(), plain);
+    assert_eq!(plain.switched_to(), None);
+}
+
+#[test]
+fn cr_261_a_version_2_book_that_is_not_a_switched_book_is_refused() {
+    let owner_id = owner().device_id();
+    let me = counter().device_id();
+    let (ledger, _) = switched_ledger();
+    let good = ledger.to_bytes();
+    assert!(RangeLedger::from_bytes(&good, owner_id, me).is_ok());
+    // Every wallet hash of a range changed to the same one: nothing closed.
+    let each = 109 + 4 + 32;
+    let mut same = good.clone();
+    let first = same[9 + 113..9 + 113 + 32].to_vec();
+    same[9 + 113..9 + 113 + 32].copy_from_slice(&[0; 32]);
+    assert!(RangeLedger::from_bytes(&same, owner_id, me).is_err());
+    same[9 + 113..9 + 113 + 32].copy_from_slice(&first);
+    // The closed wallet's text changed to another wallet.
+    let mut other = good.clone();
+    let wallets_at = 9 + 2 * each + 1;
+    let old = single().to_bytes();
+    other.splice(wallets_at + 2..wallets_at + 2 + old.len(), multi().to_bytes());
+    assert!(RangeLedger::from_bytes(&other, owner_id, me).is_err());
+    // A closed wallet named but not used: a count of two.
+    let mut two = good.clone();
+    two[wallets_at - 1] = 2;
+    assert!(RangeLedger::from_bytes(&two, owner_id, me).is_err());
+    // Another owner root or another counter.
+    assert!(RangeLedger::from_bytes(&good, identity(2).device_id(), me).is_err());
+    assert!(RangeLedger::from_bytes(&good, owner_id, identity(4).device_id()).is_err());
+}

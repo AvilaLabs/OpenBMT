@@ -47,6 +47,12 @@ pub const TAG_PAIR_OWN_BINDING: &str = "OpenBMT/pair-own-binding/v1";
 pub const TAG_PAIR_OWN_SESSION: &str = "OpenBMT/pair-own-session/v1";
 /// Tag for the counter's signature on its own-wallet pairing request.
 pub const TAG_PAIR_OWN_REQUEST: &str = "OpenBMT/pair-own-request/v1";
+/// The tag the owner root signs a switch from the starter wallet under
+/// (CR-257).
+pub const TAG_SWITCH_OWN: &str = "OpenBMT/switch-own/v1";
+/// The tag a counter signs the record that it switched, or refused the
+/// switch, under (CR-262).
+pub const TAG_SWITCHED_OWN: &str = "OpenBMT/switched-own/v1";
 /// Tag for owner-signed commands to a counter.
 pub const TAG_COMMAND: &str = "OpenBMT/command/v1";
 /// Tag for the owner's signed watcher heartbeat to a counter.

@@ -32,6 +32,8 @@
 //! ```text
 //! offer:   "OBM-" | 1 | network u8 (0 only) | owner (32) | settings floor u32 LE
 //!            | pinned wallet ("OBM)", to the end)
+//!          "OBM-" | 2 | the same, then one byte of flags (1: the wallet is the
+//!            starter wallet) at the very end (CR-256)
 //! request: "OBM." | 1 | counter (32) | name len u8 | name | nonce (32)
 //!            | binding (32) | sig (64)
 //! pairing: wallet hash (32) | counter (32) | name len u8 | name | nonce (32)
@@ -43,9 +45,16 @@
 //!            | peer count u8 | per peer: len u8 | "host:port" (ascending, no repeats)
 //!            | version 2 only: relay len u8 | the owner's signed relay ("OBMz")
 //! ledger:  "OBM;" | 1 | count u32 | per range: signed range ("OBM*") | next u32 LE
+//!          "OBM;" | 2 | count u32 | per range: signed range | next u32 LE | wallet hash (32)
+//!            | closed wallets: count u8 | per wallet: len u16 | pinned wallet ("OBM)")
+//! switch:  "OBM]" | 1 | counter (32) | hash of the wallet now pinned (32)
+//!            | wallet len u16 | new pinned wallet ("OBM)") | signed range ("OBM*")
+//!            | owner sig (64) (CR-257)
 //! ```
 //!
-//! The version of a bundle is 2 exactly when it carries a relay, as for
+//! The version of an offer is 2 exactly when it carries the starter flag,
+//! and the version of a ledger is 2 exactly when it holds a closed range
+//! (CR-261). The version of a bundle is 2 exactly when it carries a relay, as for
 //! [`crate::bundle::CounterBundle`]. Decoding only parses: signatures and
 //! the rules of the settings and the range are checked by the steps above
 //! and by the counter node.
@@ -58,7 +67,7 @@ use crate::batch::DEFAULT_MIN_COUNT;
 use crate::bundle::{peer_is_valid, BundleError, MAX_PEERS};
 use crate::identity::{
     tagged_hash, DeviceId, Identity, Sig, TAG_PAIRING_OWN, TAG_PAIR_OWN_BINDING,
-    TAG_PAIR_OWN_REQUEST, TAG_PAIR_OWN_SESSION,
+    TAG_PAIR_OWN_REQUEST, TAG_PAIR_OWN_SESSION, TAG_SWITCH_OWN,
 };
 use crate::pairing::{
     name_is_valid, network_code, network_from_code, put_name, read_name, PairingEntry,
@@ -207,7 +216,14 @@ pub struct OwnOffer {
     pub floor: u32,
     /// The wallet the counter pins.
     pub wallet: PinnedWallet,
+    /// CR-256: the pinned wallet is a starter wallet, so the counter may
+    /// later take one switch to another wallet (CR-257 to CR-263).
+    pub starter: bool,
 }
+
+/// CR-256: the bit of the flags byte that says the wallet is a starter
+/// wallet. Every other bit must be zero.
+pub const FLAG_STARTER: u8 = 1;
 
 impl OwnOffer {
     /// An offer. The network must be the main network, the one every pinned
@@ -225,7 +241,15 @@ impl OwnOffer {
             owner,
             floor,
             wallet,
+            starter: false,
         })
+    }
+
+    /// CR-256: the same offer, marked as one for a starter wallet when
+    /// `starter` is true.
+    pub fn with_starter(mut self, starter: bool) -> Self {
+        self.starter = starter;
+        self
     }
 
     /// The network of the offer: the main network.
@@ -238,11 +262,16 @@ impl OwnOffer {
     /// digest hash them.
     fn body(&self) -> Vec<u8> {
         let wallet = self.wallet.to_bytes();
-        let mut out = Vec::with_capacity(37 + wallet.len());
+        let mut out = Vec::with_capacity(38 + wallet.len());
         out.push(network_code(Network::Bitcoin).unwrap_or(u8::MAX));
         out.extend_from_slice(&self.owner.to_bytes());
         out.extend_from_slice(&self.floor.to_le_bytes());
         out.extend_from_slice(&wallet);
+        if self.starter {
+            // CR-256: the flags are part of what the binding and the four
+            // words are made from.
+            out.push(FLAG_STARTER);
+        }
         out
     }
 
@@ -263,10 +292,16 @@ impl OwnOffer {
     }
 
     /// Wire form: `OBM-`, version 1, network, owner root, floor, pinned
-    /// wallet.
+    /// wallet; version 2 with the flags byte after them when the wallet is a
+    /// starter wallet (CR-256).
     pub fn to_bytes(&self) -> Vec<u8> {
         let body = self.body();
         let mut out = wire::start(&wire::MAGIC_OWN_OFFER, body.len());
+        if self.starter {
+            if let Some(version) = out.get_mut(4) {
+                *version = 2;
+            }
+        }
         out.extend_from_slice(&body);
         out
     }
@@ -275,7 +310,7 @@ impl OwnOffer {
     /// main one, the owner root a key, and the pinned wallet decoded and
     /// re-encoded to the same bytes under WL-21 and WL-22.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut r = Reader::framed(bytes, &wire::MAGIC_OWN_OFFER)?;
+        let (mut r, version) = Reader::framed_up_to(bytes, &wire::MAGIC_OWN_OFFER, 2)?;
         let network = network_from_code(r.u8()?)
             .ok_or(DecodeError::NonCanonical("the network code is unknown"))?;
         if network != Network::Bitcoin {
@@ -285,8 +320,20 @@ impl OwnOffer {
         }
         let owner = r.device_id()?;
         let floor = r.u32_le()?;
-        // The pinned wallet runs to the end of the frame and is exact.
-        let wallet = bytes.get(5 + 1 + 32 + 4..).ok_or(DecodeError::Truncated)?;
+        // The pinned wallet runs to the end of the frame and is exact; in
+        // version 2 the flags byte is the last one (CR-256).
+        let mut wallet = bytes.get(5 + 1 + 32 + 4..).ok_or(DecodeError::Truncated)?;
+        let mut starter = false;
+        if version >= 2 {
+            let (flags, rest) = wallet.split_last().ok_or(DecodeError::Truncated)?;
+            if *flags != FLAG_STARTER {
+                return Err(DecodeError::NonCanonical(
+                    "the flags of an offer are 1 or the offer is version 1",
+                ));
+            }
+            starter = true;
+            wallet = rest;
+        }
         let pinned = PinnedWallet::from_bytes(wallet).map_err(pinned_decode_error)?;
         if pinned.to_bytes() != wallet {
             return Err(DecodeError::NonCanonical("the wallet is not canonical"));
@@ -295,6 +342,7 @@ impl OwnOffer {
             owner,
             floor,
             wallet: pinned,
+            starter,
         })
     }
 }
@@ -807,23 +855,54 @@ impl OwnBundle {
     }
 }
 
+/// CR-261: a range of a wallet the counter no longer pays into. The indexes
+/// it handed out stay watched; no index of it is handed out again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClosedRange {
+    /// The signed range, as it was taken.
+    pub signed: SignedRange,
+    /// The first index of the range that was not handed out.
+    pub next: u32,
+    /// The hash of the wallet the range is for ([`PinnedWallet::checksum32`]).
+    pub wallet: [u8; 32],
+}
+
 /// CR-234: the ranges a counter took and the indexes it used in them, as the
 /// `OBM;` slot keeps them. The book is the [`RangeBook`]; the signed ranges
 /// are kept beside it so that every range can be checked again at start.
+///
+/// After a switch (CR-261) the ranges of the wallet before it are kept
+/// closed, each naming its wallet, with the wallets themselves so that the
+/// scripts they handed out can still be watched; the book then holds the new
+/// wallet's ranges only. Indexes of two wallets are independent, so a range
+/// of the new wallet may overlap one of the old.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RangeLedger {
     owner: DeviceId,
+    counter: DeviceId,
     book: RangeBook,
     signed: Vec<SignedRange>,
+    /// The hash of the wallet the open ranges are for, once a switch made it
+    /// differ from the wallet the counter was paired with.
+    wallet: Option<[u8; 32]>,
+    closed: Vec<ClosedRange>,
+    closed_wallets: Vec<PinnedWallet>,
 }
+
+/// The most wallets a ledger keeps closed ranges for.
+const MAX_CLOSED_WALLETS: usize = 8;
 
 impl RangeLedger {
     /// An empty ledger for `counter` under the pinned `owner` root.
     pub fn new(owner: DeviceId, counter: DeviceId) -> Self {
         Self {
             owner,
+            counter,
             book: RangeBook::new(counter),
             signed: Vec::new(),
+            wallet: None,
+            closed: Vec::new(),
+            closed_wallets: Vec::new(),
         }
     }
 
@@ -833,6 +912,52 @@ impl RangeLedger {
         self.book.accept_signed(range, &self.owner)?;
         self.signed.push(*range);
         Ok(())
+    }
+
+    /// CR-261: close every range taken so far, as ranges of `old` (the
+    /// wallet the counter pays into now), and start the ranges of the wallet
+    /// whose hash is `new_wallet` with `first`. The first range must be
+    /// signed by the owner root and be for this counter. On refusal the
+    /// ledger is unchanged.
+    pub fn switch(
+        &mut self,
+        old: &PinnedWallet,
+        new_wallet: [u8; 32],
+        first: &SignedRange,
+    ) -> Result<(), RangeError> {
+        let mut book = RangeBook::new(self.counter);
+        book.accept_signed(first, &self.owner)?;
+        let old_hash = old.checksum32();
+        for (signed, (_, next)) in self.signed.iter().zip(self.book.taken()) {
+            self.closed.push(ClosedRange {
+                signed: *signed,
+                next,
+                wallet: old_hash,
+            });
+        }
+        if !self.closed_wallets.iter().any(|w| w.checksum32() == old_hash) {
+            self.closed_wallets.push(old.clone());
+        }
+        self.book = book;
+        self.signed = vec![*first];
+        self.wallet = Some(new_wallet);
+        Ok(())
+    }
+
+    /// The hash of the wallet the open ranges are for, once a switch made it
+    /// differ from the one the counter was paired with; `None` before.
+    pub fn switched_to(&self) -> Option<[u8; 32]> {
+        self.wallet
+    }
+
+    /// CR-261: the closed ranges, in the order they were taken.
+    pub fn closed(&self) -> &[ClosedRange] {
+        &self.closed
+    }
+
+    /// CR-261: the wallets the closed ranges are for.
+    pub fn closed_wallets(&self) -> &[PinnedWallet] {
+        &self.closed_wallets
     }
 
     /// The owner root the ledger checks ranges against.
@@ -862,47 +987,256 @@ impl RangeLedger {
         &self.signed
     }
 
-    /// Wire form: see the module docs.
+    /// Wire form: see the module docs. Version 1 while no range is closed,
+    /// version 2 after a switch.
     pub fn to_bytes(&self) -> Vec<u8> {
         let taken = self.book.taken();
-        let mut out = wire::start(&wire::MAGIC_RANGE_BOOK, 4 + taken.len() * (RANGE_BYTES + 4));
-        out.extend_from_slice(&wire::len_u32(self.signed.len()).to_le_bytes());
+        let version2 = !self.closed.is_empty();
+        let each = RANGE_BYTES + 4 + if version2 { 32 } else { 0 };
+        let mut out = wire::start(
+            &wire::MAGIC_RANGE_BOOK,
+            4 + (taken.len() + self.closed.len()) * each,
+        );
+        if version2 {
+            if let Some(version) = out.get_mut(4) {
+                *version = 2;
+            }
+        }
+        let count = self.closed.len() + self.signed.len();
+        out.extend_from_slice(&wire::len_u32(count).to_le_bytes());
+        for c in &self.closed {
+            out.extend_from_slice(&c.signed.to_bytes());
+            out.extend_from_slice(&c.next.to_le_bytes());
+            out.extend_from_slice(&c.wallet);
+        }
+        let open = self.wallet.unwrap_or([0; 32]);
         for (signed, (_, next)) in self.signed.iter().zip(taken) {
             out.extend_from_slice(&signed.to_bytes());
             out.extend_from_slice(&next.to_le_bytes());
+            if version2 {
+                out.extend_from_slice(&open);
+            }
+        }
+        if version2 {
+            out.push(u8::try_from(self.closed_wallets.len()).unwrap_or(u8::MAX));
+            for w in &self.closed_wallets {
+                let bytes = w.to_bytes();
+                out.extend_from_slice(&u16::try_from(bytes.len()).unwrap_or(u16::MAX).to_le_bytes());
+                out.extend_from_slice(&bytes);
+            }
         }
         out
     }
 
     /// CR-234: read the slot strictly, and check every range again against
     /// the pinned `owner` root and `counter`. A slot that does not read or
-    /// does not check is refused.
+    /// does not check is refused. Version 2 (CR-261) names a wallet for each
+    /// range: the ranges of the wallets before the last are closed, the last
+    /// wallet's are open, each wallet's ranges come together, and every
+    /// closed wallet is given whole and used by a range.
     pub fn from_bytes(
         bytes: &[u8],
         owner: DeviceId,
         counter: DeviceId,
     ) -> Result<Self, DecodeError> {
-        let mut r = Reader::framed(bytes, &wire::MAGIC_RANGE_BOOK)?;
-        let n = r.count(MAX_LEDGER_RANGES, RANGE_BYTES + 4)?;
-        let mut signed = Vec::with_capacity(n);
-        let mut taken = Vec::with_capacity(n);
+        let (mut r, version) = Reader::framed_up_to(bytes, &wire::MAGIC_RANGE_BOOK, 2)?;
+        let each = RANGE_BYTES + 4 + if version >= 2 { 32 } else { 0 };
+        let n = r.count(MAX_LEDGER_RANGES, each)?;
+        let mut rows: Vec<(SignedRange, u32, [u8; 32])> = Vec::with_capacity(n);
         for _ in 0..n {
             let range = SignedRange::from_bytes(r.take(RANGE_BYTES)?)?;
             let next = r.u32_le()?;
+            let wallet = if version >= 2 { r.array()? } else { [0; 32] };
             range
                 .verify(&owner)
                 .map_err(|_| DecodeError::NonCanonical("a range is not signed by the owner"))?;
-            signed.push(range);
-            taken.push((range.range, next));
+            rows.push((range, next, wallet));
+        }
+        let mut closed_wallets: Vec<PinnedWallet> = Vec::new();
+        if version >= 2 {
+            let count = usize::from(r.u8()?);
+            if count == 0 || count > MAX_CLOSED_WALLETS {
+                return Err(DecodeError::NonCanonical(
+                    "a ledger of version 2 holds one closed wallet or more",
+                ));
+            }
+            for _ in 0..count {
+                let len = usize::from(r.u16_le()?);
+                let bytes = r.take(len)?;
+                let wallet = PinnedWallet::from_bytes(bytes).map_err(pinned_decode_error)?;
+                if wallet.to_bytes() != bytes {
+                    return Err(DecodeError::NonCanonical("a wallet is not canonical"));
+                }
+                closed_wallets.push(wallet);
+            }
         }
         r.finish()?;
-        let book = RangeBook::restore(counter, &taken).map_err(|_| {
-            DecodeError::NonCanonical("the ranges are not a book this counter keeps")
-        })?;
+        let not_a_book =
+            || DecodeError::NonCanonical("the ranges are not a book this counter keeps");
+        let mut closed = Vec::new();
+        let mut open_rows: Vec<(SignedRange, u32)> = Vec::new();
+        let mut wallet = None;
+        if version >= 2 {
+            // Wallets come in groups, the last group is the open one, and a
+            // group's wallet is never named again after the next begins.
+            let mut groups: Vec<[u8; 32]> = Vec::new();
+            for (_, _, w) in &rows {
+                if groups.last() != Some(w) {
+                    if groups.contains(w) {
+                        return Err(not_a_book());
+                    }
+                    groups.push(*w);
+                }
+            }
+            let (open_wallet, closed_hashes) = groups.split_last().ok_or_else(not_a_book)?;
+            if closed_hashes.is_empty()
+                || closed_hashes.len() != closed_wallets.len()
+                || closed_hashes
+                    .iter()
+                    .zip(&closed_wallets)
+                    .any(|(h, w)| *h != w.checksum32())
+                || closed_wallets.iter().any(|w| w.checksum32() == *open_wallet)
+            {
+                return Err(not_a_book());
+            }
+            for (signed, next, w) in &rows {
+                if w == open_wallet {
+                    open_rows.push((*signed, *next));
+                } else {
+                    closed.push(ClosedRange {
+                        signed: *signed,
+                        next: *next,
+                        wallet: *w,
+                    });
+                }
+            }
+            for h in closed_hashes {
+                let taken: Vec<(IndexRange, u32)> = closed
+                    .iter()
+                    .filter(|c| c.wallet == *h)
+                    .map(|c| (c.signed.range, c.next))
+                    .collect();
+                RangeBook::restore(counter, &taken).map_err(|_| not_a_book())?;
+            }
+            wallet = Some(*open_wallet);
+        } else {
+            open_rows = rows.iter().map(|(s, n, _)| (*s, *n)).collect();
+        }
+        let taken: Vec<(IndexRange, u32)> =
+            open_rows.iter().map(|(s, n)| (s.range, *n)).collect();
+        let book = RangeBook::restore(counter, &taken).map_err(|_| not_a_book())?;
         Ok(Self {
             owner,
+            counter,
             book,
-            signed,
+            signed: open_rows.iter().map(|(s, _)| *s).collect(),
+            wallet,
+            closed,
+            closed_wallets,
+        })
+    }
+}
+
+/// Bytes of a switch before the wallet: the counter and the hash.
+const SWITCH_HEAD: usize = 64;
+
+/// CR-257: the owner's message that moves a counter from the starter wallet
+/// to a new one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SwitchOwn {
+    /// The counter the switch is for.
+    pub counter: DeviceId,
+    /// The hash of the wallet the counter pins now.
+    pub from: [u8; 32],
+    /// The new pinned wallet.
+    pub wallet: PinnedWallet,
+    /// The first signed range for the new wallet.
+    pub first_range: SignedRange,
+    /// The owner root's signature over all of the above under
+    /// [`TAG_SWITCH_OWN`].
+    pub sig: Sig,
+}
+
+impl SwitchOwn {
+    fn body(
+        counter: &DeviceId,
+        from: &[u8; 32],
+        wallet: &PinnedWallet,
+        range: &SignedRange,
+    ) -> Vec<u8> {
+        let wallet = wallet.to_bytes();
+        let mut out = Vec::with_capacity(SWITCH_HEAD + 2 + wallet.len() + RANGE_BYTES);
+        out.extend_from_slice(&counter.to_bytes());
+        out.extend_from_slice(from);
+        out.extend_from_slice(&u16::try_from(wallet.len()).unwrap_or(u16::MAX).to_le_bytes());
+        out.extend_from_slice(&wallet);
+        out.extend_from_slice(&range.to_bytes());
+        out
+    }
+
+    /// Sign a switch with the owner root.
+    pub fn sign(
+        owner: &Identity,
+        counter: DeviceId,
+        from: [u8; 32],
+        wallet: PinnedWallet,
+        first_range: SignedRange,
+    ) -> Self {
+        let sig = owner.sign_tagged(
+            TAG_SWITCH_OWN,
+            &Self::body(&counter, &from, &wallet, &first_range),
+        );
+        Self {
+            counter,
+            from,
+            wallet,
+            first_range,
+            sig,
+        }
+    }
+
+    /// Whether the signature is `owner`'s over every part.
+    pub fn verify(&self, owner: &DeviceId) -> bool {
+        let body = Self::body(&self.counter, &self.from, &self.wallet, &self.first_range);
+        owner.verify_tagged(TAG_SWITCH_OWN, &body, &self.sig)
+    }
+
+    /// The hash of the new wallet ([`PinnedWallet::checksum32`]).
+    pub fn wallet_hash(&self) -> [u8; 32] {
+        self.wallet.checksum32()
+    }
+
+    /// Wire form: see the module docs.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let body = Self::body(&self.counter, &self.from, &self.wallet, &self.first_range);
+        let mut out = wire::start(&wire::MAGIC_SWITCH_OWN, body.len() + 64);
+        out.extend_from_slice(&body);
+        out.extend_from_slice(&self.sig.0);
+        out
+    }
+
+    /// Parse the wire form strictly (CR-257): exact length, the wallet and
+    /// the range each decoded by their own strict decoder and encoding to
+    /// the same bytes. The signature is not checked here.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
+        let mut r = Reader::framed(bytes, &wire::MAGIC_SWITCH_OWN)?;
+        let counter = r.device_id()?;
+        let from: [u8; 32] = r.array()?;
+        let n = usize::from(r.u16_le()?);
+        let wallet_bytes = r.take(n)?;
+        let wallet = PinnedWallet::from_bytes(wallet_bytes).map_err(pinned_decode_error)?;
+        if wallet.to_bytes() != wallet_bytes {
+            return Err(DecodeError::NonCanonical("the wallet is not canonical"));
+        }
+        let first_range = SignedRange::from_bytes(r.take(RANGE_BYTES)?)?;
+        let sig = r.sig()?;
+        r.finish()?;
+        Ok(Self {
+            counter,
+            from,
+            wallet,
+            first_range,
+            sig,
         })
     }
 }
