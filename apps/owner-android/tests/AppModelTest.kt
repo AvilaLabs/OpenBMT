@@ -3743,8 +3743,8 @@ object AppModelTest {
         ok(helper.contains("FLAG_SECURE") && helper.contains("setHideOverlayWindows(true)") && helper.contains("SDK_INT >= 31") && helper.contains("filterTouchesWhenObscured = true") && helper.contains("setAccessibilityDataSensitive(View.ACCESSIBILITY_DATA_SENSITIVE_YES)") && helper.contains("SDK_INT >= 34"), "the helper sets every flag")
         val screens = source("src/android/StarterScreens.kt")
         val builder = screens.substringAfter("private fun Controller.starterWordsScreen(").substringBefore("/** One screen of four numbered words")
-        ok(builder.contains("StarterWindow.secure(act, page)") && builder.indexOf("act.show(page)") in 0 until builder.indexOf("StarterWindow.secure(act, page)"), "the builder applies the helper once the page is on show")
-        ok(occurs(screens, "StarterWindow.secure(") == 1 && occurs(screens, "act.show(") == 1, "nothing else of the setup shows a page or applies flags on its own")
+        ok(builder.contains("StarterWindow.protect(act, page)") && builder.indexOf("act.show(page)") in 0 until builder.indexOf("StarterWindow.protect(act, page)"), "the builder applies the helper once the page is on show")
+        ok(occurs(screens, "StarterWindow.protect(") == 1 && occurs(screens, "act.show(") == 1, "nothing else of the setup shows a page or applies flags on its own")
         for (name in listOf("showStarterPage", "showStarterCheck", "showStarterRestore")) {
             val body = screens.substringAfter("internal fun Controller.$name(").substringBefore("\n}\n")
             ok(body.contains("starterWordsScreen("), "$name builds its screen with the helper")

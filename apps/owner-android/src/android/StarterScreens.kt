@@ -221,7 +221,7 @@ private fun Controller.starterWordsScreen(title: String, body: List<View>, actio
     tick = null
     val page = ui.page(ui.bar(title, null, back), body, actions)
     act.show(page)
-    StarterWindow.secure(act, page)
+    StarterWindow.protect(act, page)
 }
 
 /** One screen of four numbered words, drawn by the core, shown as a picture and cleared when the owner leaves it. */

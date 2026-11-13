@@ -30,7 +30,7 @@ internal object StarterWindow {
      * `FLAG_SECURE` (no screenshot, no recording, blank in recent apps), other apps' overlay windows hidden (Android 12 and
      * later), and touches made through an overlay dropped on every view of [root].
      */
-    fun secure(act: Activity, root: View) {
+    fun protect(act: Activity, root: View) {
         act.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         if (Build.VERSION.SDK_INT >= 31) act.window.setHideOverlayWindows(true)
         filterTouches(root)
