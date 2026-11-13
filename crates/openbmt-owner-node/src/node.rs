@@ -681,6 +681,9 @@ pub struct OwnerNode<P: OwnerPort = Handle> {
     /// what the view holds is the old wallet's: nothing is read from it as
     /// the wallet in force until the node starts again.
     repinned: bool,
+    /// RQ-04: with `repinned`, the wallet pinned now, which new requests are
+    /// made from.
+    pub(crate) pinned_now: Option<ImportedWallet>,
     pub(crate) dir: PathBuf,
     refund_depth: u32,
     random: Box<dyn Randomness>,
@@ -931,6 +934,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             own,
             former: former_watches,
             repinned: false,
+            pinned_now: None,
             dir,
             refund_depth,
             random,
@@ -1433,8 +1437,12 @@ impl<P: OwnerPort> OwnerNode<P> {
 
     /// SS-41: the shop's wallet was re-pinned: the node reads nothing more
     /// of the view as the wallet in force, and the app starts it again.
-    pub fn mark_repinned(&mut self) {
+    /// `wallet` is the wallet pinned now: the requests made from here on take
+    /// their addresses from it (RQ-04), the earlier ones from the wallet they
+    /// were made from.
+    pub fn mark_repinned(&mut self, wallet: ImportedWallet) {
         self.repinned = true;
+        self.pinned_now = Some(wallet);
     }
 
     /// SS-43: the former wallets that hold a coin the node saw, each with

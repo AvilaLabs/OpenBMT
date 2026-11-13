@@ -416,16 +416,27 @@ impl<P: OwnerPort> OwnerNode<P> {
             .map_or_else(|_| String::new(), |a| a.to_string())
     }
 
-    /// RQ-04: the checksum of the wallet pinned now.
-    fn current_wallet(&self) -> [u8; 32] {
-        PinnedWallet::new(self.wallet.clone()).checksum32()
+    /// RQ-04: the wallet pinned now: the one a re-pin gave while the node
+    /// runs, else the one the node started with.
+    fn pinned_now(&self) -> &ImportedWallet {
+        self.pinned_now.as_ref().unwrap_or(&self.wallet)
     }
 
-    /// RQ-04: the wallet a request was made from: the one in force or one
-    /// the shop pinned before, which the node still follows.
+    /// RQ-04: the checksum of the wallet pinned now.
+    fn current_wallet(&self) -> [u8; 32] {
+        PinnedWallet::new(self.pinned_now().clone()).checksum32()
+    }
+
+    /// RQ-04: the wallet a request was made from: the one pinned now, the
+    /// one the node started with (before a re-pin it ran under) or one the
+    /// shop pinned before, which the node still follows.
     fn wallet_of(&self, wallet: Option<[u8; 32]>) -> Option<ImportedWallet> {
         let wanted = wallet.unwrap_or_else(|| self.current_wallet());
+        let sum = |w: &ImportedWallet| PinnedWallet::new(w.clone()).checksum32();
         if wanted == self.current_wallet() {
+            return Some(self.pinned_now().clone());
+        }
+        if wanted == sum(&self.wallet) {
             return Some(self.wallet.clone());
         }
         self.former
@@ -465,6 +476,9 @@ impl<P: OwnerPort> OwnerNode<P> {
             .as_ref()
             .map_err(|e| RequestError::Off(e.clone()))?;
         let mut next = loaded.clone();
+        // RQ-04: a request made now takes the wallet pinned now, also after
+        // a re-pin the node has not been restarted for.
+        next.book.use_wallet(Some(self.current_wallet()));
         let done = change(&mut next.book, &mut next.pending)?;
         let arrivals_changed = loaded.pending != next.pending;
         self.store_requests(&next, arrivals_changed)

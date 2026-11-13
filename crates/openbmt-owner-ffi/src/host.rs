@@ -2596,7 +2596,7 @@ impl Entry {
                     own.wallet = new.clone();
                     // What the node holds is the old wallet's: it reads
                     // nothing as the wallet in force until it starts again.
-                    node.mark_repinned();
+                    node.mark_repinned(new.wallet().clone());
                     view(OwnRepinKind::Done, new.to_bytes(), 0, 0)
                 }
                 Repin::AlreadyDone => view(OwnRepinKind::AlreadyDone, new.to_bytes(), 0, 0),

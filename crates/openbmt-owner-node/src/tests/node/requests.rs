@@ -596,6 +596,34 @@ fn rq_04_a_request_made_before_a_repin_is_still_credited_after_it_and_a_new_one_
 }
 
 #[test]
+fn rq_04_a_request_made_after_a_re_pin_without_a_restart_uses_the_new_wallet() {
+    let dir = Dir::new();
+    let (mut rig, _book, _setup) = old_wallet_rig(&dir);
+    let old_sum = PinnedWallet::new(old_wallet()).checksum32();
+    let new_sum = PinnedWallet::new(own_wallet()).checksum32();
+    rig.node.make_request(&deposit(100_000), 0, START).unwrap();
+    // The shop is re-pinned while the node runs.
+    rig.node.mark_repinned(own_wallet());
+    let made = rig.node.make_request(&deposit(7_000), 1, START).unwrap();
+    assert_eq!(
+        made.address,
+        bitcoin::Address::from_script(&own_receive(1), bitcoin::Network::Bitcoin)
+            .unwrap()
+            .to_string()
+    );
+    let book = rig.node.requests().unwrap();
+    assert_eq!(book.request(1).unwrap().wallet, Some(old_sum));
+    assert_eq!(book.request(2).unwrap().wallet, Some(new_sum));
+    // The request made before is still credited from the old wallet.
+    rig.mine(&[pay_to_script(&old_script(0), 7, 100_000)]);
+    rig.mine_empty(1);
+    assert_eq!(status(&rig, 1), Status::Paid);
+    // The stored book has both wallets.
+    let on_disk = openbmt_requests::RequestBook::open(dir.path()).unwrap();
+    assert_eq!(on_disk.request(2).unwrap().wallet, Some(new_sum));
+}
+
+#[test]
 fn rq_04_a_book_of_version_1_reads_and_its_requests_take_the_wallet_pinned_when_it_was_read() {
     let dir = Dir::new();
     let (mut rig, book, setup) = desk_rig(&dir, 1);
