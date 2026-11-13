@@ -98,6 +98,11 @@ use crate::pos_views::{
     PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
     PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
 };
+use crate::requests::{
+    self, RequestAsk, RequestListView, RequestMadeView, RequestMakeArgs, RequestNumberArgs,
+    RequestRepeatsView, RequestReturnAddedView, RequestReturnArgs, RequestShareArgs,
+    RequestSharedView, RequestStateView,
+};
 use crate::say::{counter_words, link_alert_words, own_alert_words, words_for};
 use crate::settings_edit::{preview_view, to_edit, SettingsEditArgs, SettingsPreviewView};
 use crate::signer_views::{
@@ -764,6 +769,61 @@ fn own_only(own: &mut Option<OwnShop>) -> Result<&mut OwnShop, AppError> {
             "this shop has a Key app: it has no starter wallet to switch from",
         )
     })
+}
+
+/// RQ-12, RQ-17: give the node the shop's settings, its time zone and the
+/// rate. A shop with its own wallet keeps its settings in its own state,
+/// which is read from the folder; a shop with a Key app has requests off.
+fn request_prepare(st: &mut State, ask: &RequestAsk) -> Result<(), AppError> {
+    let facts = match &st.own {
+        Some(own) => {
+            let identity = st.node.owner_identity().map_err(|e| node_error(&e))?;
+            own::turn_on_shop(&st.dir, identity, own.wallet.clone(), |shop| {
+                Ok(shop.shop().known_settings().map(|s| requests::ShopFacts {
+                    currency: s.settings.currency,
+                    min_sale_sats: s.settings.min_sale_sats,
+                    min_confirmations: s.settings.min_confirmations,
+                }))
+            })
+            .map_err(own::node_error)?
+        }
+        None => st
+            .node
+            .owner()
+            .known_settings()
+            .map(|s| requests::ShopFacts {
+                currency: s.currency,
+                min_sale_sats: s.min_sale_sats,
+                min_confirmations: s.min_confirmations,
+            }),
+    };
+    requests::prepare(&mut st.node, facts, ask)
+}
+
+/// RQ-02, RQ-03: `n` unused indexes of the desk, taken from its ranges, with
+/// a new range from the book when they run out. A new range is stored
+/// before its first index is given, and the node watches it at once.
+fn desk_indexes(
+    node: &mut OwnerNode<Port>,
+    own: &mut Option<OwnShop>,
+    dir: &std::path::Path,
+    now: u64,
+    n: usize,
+) -> Result<Vec<u32>, AppError> {
+    let own = own_only(own)?;
+    let mut taken = node.request_indexes();
+    let identity = node.owner_identity().map_err(|e| node_error(&e))?;
+    let wallet = own.wallet.clone();
+    own::turn_on_shop(dir, identity, wallet, |shop| {
+        let mut got = Vec::new();
+        for _ in 0..n {
+            let index = shop.desk_index(&|i| taken.contains(&i), now, node)?;
+            taken.insert(index);
+            got.push(index);
+        }
+        Ok(got)
+    })
+    .map_err(own::node_error)
 }
 
 /// The name an own-wallet shop gives a counter in its words: "Counter" and
@@ -2616,6 +2676,118 @@ impl Entry {
                 a.min_confirmations,
                 tip,
             )
+        })
+    }
+
+    /// RQ-03: make a request at the desk's next unused index.
+    pub(crate) fn request_make(&self, a: RequestMakeArgs) -> Result<RequestMadeView, AppError> {
+        self.run(Some(a.ask.now), move |st| {
+            request_prepare(st, &a.ask)?;
+            let State { node, own, dir, .. } = st;
+            requests::ready(node)?;
+            let index = desk_indexes(node, own, dir, a.ask.now, 1)?
+                .first()
+                .copied()
+                .ok_or_else(|| internal("the desk gave no index"))?;
+            requests::make(node, &a, index)
+        })
+    }
+
+    /// RQ-21, RQ-22, RQ-25: the list of requests in its parts.
+    pub(crate) fn request_list(&self, ask: RequestAsk) -> Result<RequestListView, AppError> {
+        self.run(Some(ask.now), move |st| {
+            request_prepare(st, &ask)?;
+            requests::list(&st.node, &ask)
+        })
+    }
+
+    /// RQ-12, RQ-13: share a request: the quote and the link.
+    pub(crate) fn request_share(&self, a: RequestShareArgs) -> Result<RequestSharedView, AppError> {
+        self.run(Some(a.ask.now), move |st| {
+            request_prepare(st, &a.ask)?;
+            requests::share(&mut st.node, &a)
+        })
+    }
+
+    /// RQ-19: cancel a request that received nothing.
+    pub(crate) fn request_cancel(&self, a: RequestNumberArgs) -> Result<(), AppError> {
+        self.run(Some(a.ask.now), move |st| {
+            request_prepare(st, &a.ask)?;
+            st.node
+                .cancel_request(a.number, a.ask.now)
+                .map_err(requests::request_error)
+        })
+    }
+
+    /// RQ-20: close a part paid request as it stands.
+    pub(crate) fn request_close(&self, a: RequestNumberArgs) -> Result<(), AppError> {
+        self.run(Some(a.ask.now), move |st| {
+            request_prepare(st, &a.ask)?;
+            st.node
+                .close_request(a.number, a.ask.now)
+                .map_err(requests::request_error)
+        })
+    }
+
+    /// RQ-16: count an almost paid request as paid.
+    pub(crate) fn request_count_paid(&self, a: RequestNumberArgs) -> Result<(), AppError> {
+        self.run(Some(a.ask.now), move |st| {
+            request_prepare(st, &a.ask)?;
+            st.node
+                .count_request_as_paid(a.number, a.ask.now)
+                .map_err(requests::request_error)
+        })
+    }
+
+    /// RQ-25: stop the series a request belongs to.
+    pub(crate) fn request_stop_repeating(&self, a: RequestNumberArgs) -> Result<(), AppError> {
+        self.run(Some(a.ask.now), move |st| {
+            request_prepare(st, &a.ask)?;
+            st.node
+                .stop_request_repeating(a.number)
+                .map_err(requests::request_error)
+        })
+    }
+
+    /// RQ-26 to RQ-29: add a return to the owner's queue.
+    pub(crate) fn request_add_return(
+        &self,
+        a: RequestReturnArgs,
+    ) -> Result<RequestReturnAddedView, AppError> {
+        self.run(Some(a.ask.now), move |st| {
+            request_prepare(st, &a.ask)?;
+            requests::add_return(&mut st.node, &a)
+        })
+    }
+
+    /// RQ-27: the line that asks a customer for an address.
+    pub(crate) fn request_return_ask(&self, a: RequestReturnArgs) -> Result<String, AppError> {
+        self.run(Some(a.ask.now), move |st| {
+            request_prepare(st, &a.ask)?;
+            requests::return_ask(&st.node, &a)
+        })
+    }
+
+    /// RQ-25: make the requests of the repeats that are due today.
+    pub(crate) fn request_repeats(&self, ask: RequestAsk) -> Result<RequestRepeatsView, AppError> {
+        self.run(Some(ask.now), move |st| {
+            request_prepare(st, &ask)?;
+            let State { node, own, dir, .. } = st;
+            requests::ready(node)?;
+            let due = requests::repeats_due(node, &ask)?;
+            if due.is_empty() {
+                return Ok(RequestRepeatsView { made: Vec::new() });
+            }
+            let indexes = desk_indexes(node, own, dir, ask.now, due.len())?;
+            requests::make_repeats(node, &ask, &due, &indexes)
+        })
+    }
+
+    /// RQ-22, RQ-29, RQ-31: what Home shows of the requests.
+    pub(crate) fn request_state(&self, ask: RequestAsk) -> Result<RequestStateView, AppError> {
+        self.run(Some(ask.now), move |st| {
+            request_prepare(st, &ask)?;
+            Ok(requests::state(&st.node, &ask))
         })
     }
 

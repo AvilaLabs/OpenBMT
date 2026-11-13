@@ -24,6 +24,10 @@ fn oa_103_a_node_that_holds_no_settings_has_empty_books() {
     assert!(r
         .list(|r| (r.string(), r.u64(), r.u64(), r.string()))
         .is_empty());
+    assert!(
+        r.list(|r| (r.string(), r.u64())).is_empty(),
+        "no request days"
+    );
     assert!(r.list(|r| (r.string(), r.bytes())).is_empty());
     assert!(r.opt(|r| r.words()).is_none());
     r.done();
@@ -139,7 +143,7 @@ fn oa_103_what_was_paid_out_becomes_disposals_with_their_values_or_none() {
         ),
         entry(PaidWhat::CashOut, None),
     ];
-    let made = crate::books::disposals(&paid, usd);
+    let made = crate::books::disposals(&paid, usd, None);
     assert_eq!(made.len(), 2);
     assert_eq!(made[0].minor_value, Some(912));
     assert_eq!(made[0].sats, 10_000);
@@ -170,9 +174,9 @@ fn oc_50_a_payment_that_was_undone_and_paid_again_is_one_disposal() {
     let a = paid(1, 10_000, 1_700_000_000);
     let b = paid(2, 10_500, 1_700_009_000);
     let log = [a, a.undoing(1_700_005_000).unwrap(), b];
-    let made = crate::books::disposals(&log, usd);
+    let made = crate::books::disposals(&log, usd, None);
     assert_eq!(made.len(), 1);
     assert_eq!((made[0].sats, made[0].at), (10_500, 1_700_009_000));
     // Undone and never paid again: no disposal.
-    assert!(crate::books::disposals(&log[..2], usd).is_empty());
+    assert!(crate::books::disposals(&log[..2], usd, None).is_empty());
 }

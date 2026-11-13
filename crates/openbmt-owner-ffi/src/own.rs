@@ -361,6 +361,18 @@ pub(crate) fn node_error(e: OwnNodeError) -> AppError {
         OwnNodeError::Io(_) => from_words(Kind::Store, "OA-105", &e, shop_file_failed()),
         OwnNodeError::State(_) => from_words(Kind::State, "OA-105", &e, shop_file_failed()),
         OwnNodeError::Switch(r) => refusal(r),
+        OwnNodeError::DeskNoRoom => from_words(
+            Kind::Refused,
+            "RQ-02",
+            &e,
+            openbmt_owner::own_say::needed("WORDS_NEEDED_RQ_02_NO_ROOM"),
+        ),
+        OwnNodeError::DeskFull => from_words(
+            Kind::Refused,
+            "RQ-02",
+            &e,
+            openbmt_owner::own_say::needed("WORDS_NEEDED_RQ_02_RANGES_FULL"),
+        ),
         OwnNodeError::Derive(_) | OwnNodeError::NoApprover => internal(e),
     }
 }

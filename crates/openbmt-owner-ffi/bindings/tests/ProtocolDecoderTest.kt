@@ -51,6 +51,7 @@ object ProtocolDecoderTest {
         starterThroughTheLibrary()
         priceThroughTheLibrary()
         importThroughTheLibrary()
+        requestFrames()
         println("ProtocolDecoderTest: ok")
     }
 
@@ -534,6 +535,70 @@ object ProtocolDecoderTest {
         check(hex(edit) == EDIT_FRAME_HEX) { hex(edit) }
         val reply = requestFrame(74, 1) { it.u64(5).u32(200).bytes(byteArrayOf(9)) }
         check(hex(reply) == "4f424d6b014a000100000000000000" + "0500000000000000" + "c8000000" + "0100000009") { hex(reply) }
+    }
+
+    // ---- the owner's requests ----
+
+    private fun requestFrames() {
+        val ask = RequestAsk(1_700_000_000L, -300, RequestRate(6_000_000L, "rates-a", 1_699_999_900L))
+        val make = requestFrame(216, 1) {
+            it.requestAsk(ask).string("Rent").u64(5_000).requestPriceIn(RequestPriceIn.ShopCurrency)
+                .requestDay(RequestDay(2026, 12, 1)).option(RequestEvery.Month) { e -> it.requestEvery(e) }
+        }
+        check(
+            hex(make) == "4f424d6b01d8000100000000000000" + "00f1536500000000" + "d4feffff" +
+                "01" + "808d5b0000000000" + "07000000" + "72617465732d61" + "9cf0536500000000" +
+                "04000000" + "52656e74" + "8813000000000000" + "01" + "ea070000" + "0c000000" + "01000000" + "01" + "01",
+        ) { hex(make) }
+        val none = requestFrame(217, 1) { it.requestAsk(RequestAsk(7, 0)) }
+        check(hex(none) == "4f424d6b01d9000100000000000000" + "0700000000000000" + "00000000" + "00") { hex(none) }
+
+        val made = decodeResponse(header(0, Writer().u64(3).u32(41).string("bc1qdesk").toByteArray()))
+        made.requestMade().also { check(it.number == 3L && it.index == 41L && it.address == "bc1qdesk") }.let { made.end() }
+
+        val shared = decodeResponse(
+            header(
+                0,
+                Writer().u64(3).u64(1_850).u64(30_000).u8(1).u64(6_000_000L).u8(0).string("bc1qdesk")
+                    .string("bitcoin:bc1qdesk").string("line").toByteArray(),
+            ),
+        )
+        shared.requestShared().also {
+            check(it.number == 3L && it.owed == 1_850L && it.sats == 30_000L && it.rate == 6_000_000L)
+            check(it.until == null && it.address == "bc1qdesk" && it.link == "bitcoin:bc1qdesk" && it.line == "line")
+        }
+        shared.end()
+        rejects("a shared request that ends early") {
+            decodeResponse(header(0, Writer().u64(3).u64(1_850).toByteArray())).requestShared()
+        }
+
+        val added = decodeResponse(header(0, Writer().u64(2).u32(7).u64(500).string("bc1q 0000").toByteArray().plus(wordsBytes())))
+        added.requestReturnAdded().also { check(it.id == 2L && it.refund == 7L && it.sats == 500L && it.groups == "bc1q 0000") }
+        added.end()
+
+        val listBytes = ByteArrayOutputStream()
+        for (part in 0 until 5) {
+            if (part == 3) {
+                listBytes.write(Writer().u32(1).u64(3).string("Rent").u64(1_850).u32(2026).u32(12).u32(1).string("line").string("state").u32(1).string("Paid late").bool(true).toByteArray())
+            } else {
+                listBytes.write(Writer().u32(0).toByteArray())
+            }
+        }
+        listBytes.write(Writer().u8(1).string("1 overdue").toByteArray())
+        val list = decodeResponse(header(0, listBytes.toByteArray())).let { it.requestList().also { _ -> it.end() } }
+        check(list.waiting.size == 1 && list.waiting[0].marks == listOf("Paid late") && list.waiting[0].repeats)
+        check(list.waiting[0].due.year == 2026L && list.overdueRow == "1 overdue" && list.finished.isEmpty())
+        rejects("a list with a bool that is not 0 or 1") {
+            val bad = listBytes.toByteArray().copyOf()
+            bad[bad.size - 12] = 2
+            decodeResponse(header(0, bad)).requestList()
+        }
+
+        val state = ByteArrayOutputStream()
+        state.write(Writer().u8(0).bool(true).u32(4).u32(1).u32(0).u8(1).string("1 overdue").u32(2).u32(3).u64(9_000).u8(0).toByteArray())
+        val read = decodeResponse(header(0, state.toByteArray())).let { it.requestState().also { _ -> it.end() } }
+        check(read.off == null && read.ready && read.open == 4L && read.overdue == 1L && read.overdueRow == "1 overdue")
+        check(read.arrivalsWaiting == 2L && read.returnsQueued == 3L && read.returnsSats == 9_000L && read.returns == null)
     }
 
     private fun sampleConfig() =

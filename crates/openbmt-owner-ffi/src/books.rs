@@ -60,6 +60,17 @@ wire_record!(BooksDayView {
     amount
 });
 
+/// One shop-local day of the payments that arrived for requests (RQ-32).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestDayView {
+    /// The day, `YYYY-MM-DD`.
+    pub date: String,
+    /// The satoshis that arrived on the day of their block.
+    pub sats: u64,
+}
+
+wire_record!(RequestDayView { date, sats });
+
 /// One file of the accounting export: a calendar month.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BooksFileView {
@@ -79,6 +90,10 @@ pub struct BooksView {
     pub currency: String,
     /// The days, newest first, at most [`MAX_DAYS`].
     pub days: Vec<BooksDayView>,
+    /// The satoshis that arrived for requests on each day, newest first, at
+    /// most [`MAX_DAYS`] (RQ-32). They are not sales, and no total above
+    /// counts them.
+    pub request_days: Vec<RequestDayView>,
     /// The accounting export, a file for each month, oldest first.
     pub accounting: Vec<BooksFileView>,
     /// Why an export was not made, in the library's words. The days are
@@ -89,6 +104,7 @@ pub struct BooksView {
 wire_record!(BooksView {
     currency,
     days,
+    request_days,
     accounting,
     refusal
 });
@@ -98,6 +114,7 @@ impl BooksView {
         Self {
             currency,
             days: Vec::new(),
+            request_days: Vec::new(),
             accounting: Vec::new(),
             refusal: None,
         }
@@ -159,10 +176,22 @@ fn export_error(e: &ExportError, kind: ExportKind) -> AppError {
 
 /// What the owner paid out, as the disposals the books take (BK-12). A value
 /// the log does not know is left unknown, in the shop's currency.
-pub(crate) fn disposals(paid: &[PaidEntry], shop: Currency) -> Vec<Disposal> {
+///
+/// The refunds of a sale of `desk`, the owner's own device, are left out when
+/// it is given: those are returns of requests, which the request ledger
+/// lines carry (RQ-32) and the books have no sale for.
+pub(crate) fn disposals(
+    paid: &[PaidEntry],
+    shop: Currency,
+    desk: Option<DeviceId>,
+) -> Vec<Disposal> {
     // OC-50: a payment that a later entry undoes is left out with its undoing.
     standing(paid)
         .iter()
+        .filter(|e| match (&e.what, desk) {
+            (PaidWhat::Refund { sale, .. }, Some(desk)) => sale.counter != desk,
+            _ => true,
+        })
         .map(|e| {
             let currency = e
                 .value
@@ -212,7 +241,13 @@ fn make_books<P: OwnerPort>(
         .collect();
     let refs: Vec<(DeviceId, &Chain)> = chains.iter().map(|(c, ch)| (*c, ch)).collect();
     let books = Books::from_chains(link.devices(), &refs)
-        .and_then(|b| b.with_disposals(disposals(node.paid_log(), currency)))
+        .and_then(|b| {
+            b.with_disposals(disposals(
+                node.paid_log(),
+                currency,
+                Some(node.owner().owner_id()),
+            ))
+        })
         .map_err(|e| books_error(&e))?;
     Ok(Some((books, code, currency)))
 }
@@ -229,7 +264,9 @@ pub(crate) fn build<P: OwnerPort>(
         return Ok(BooksView::empty(String::new()));
     };
     let Some((books, code, currency)) = make_books(node, link)? else {
-        return Ok(BooksView::empty(shop.code().to_string()));
+        let mut view = BooksView::empty(shop.code().to_string());
+        view.request_days = request_days(node, args.offset_minutes);
+        return Ok(view);
     };
     let totals = books
         .local_day_totals(args.offset_minutes)
@@ -247,6 +284,7 @@ pub(crate) fn build<P: OwnerPort>(
         .collect();
     let mut view = BooksView::empty(code);
     view.days = days;
+    view.request_days = request_days(node, args.offset_minutes);
     match books
         .accounting_export()
         .map_err(|e| export_error(&e, ExportKind::Accounting))
@@ -286,10 +324,136 @@ pub(crate) fn ledger<P: OwnerPort>(
             words_for(Kind::Refused, "BK-19"),
         ));
     }
-    let Some((books, _, _)) = make_books(node, link)? else {
-        return Ok(Vec::new());
+    let mut bytes = match make_books(node, link)? {
+        Some((books, _, _)) => full_ledger_bytes(&books)?,
+        None => Vec::new(),
     };
-    full_ledger_bytes(&books)
+    bytes.extend(request_lines(node));
+    Ok(bytes)
+}
+
+/// RQ-32: the payments that arrived for requests on each shop-local day,
+/// newest first.
+fn request_days<P: OwnerPort>(node: &OwnerNode<P>, offset_minutes: i32) -> Vec<RequestDayView> {
+    let Ok(book) = node.requests() else {
+        return Vec::new();
+    };
+    book.payments_by_day(offset_minutes.saturating_mul(60))
+        .iter()
+        .rev()
+        .take(MAX_DAYS)
+        .map(|(day, sats)| RequestDayView {
+            date: date_text(*day),
+            sats: *sats,
+        })
+        .collect()
+}
+
+fn date_text(day: openbmt_requests::Day) -> String {
+    let (y, m, d) = day.civil();
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// BK-20, BK-21: one cell as the books write a text: a `\'` before one a
+/// spreadsheet could run, and quotes when it needs them.
+fn csv_text(s: &str) -> String {
+    let guarded = if s.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        format!("'{s}")
+    } else {
+        s.to_string()
+    };
+    if guarded.contains([',', '"', '\r', '\n']) {
+        format!("\"{}\"", guarded.replace('"', "\"\""))
+    } else {
+        guarded
+    }
+}
+
+fn time_text(secs: u64) -> String {
+    openbmt_books::date::iso_time(secs).unwrap_or_default()
+}
+
+/// RQ-32: each request as a line, after the books' own ledger. The columns
+/// and the way a request ended are placeholders for words that are still to
+/// be written.
+fn request_lines<P: OwnerPort>(node: &OwnerNode<P>) -> Vec<u8> {
+    let Ok(book) = node.requests() else {
+        return Vec::new();
+    };
+    let lines = book.ledger_lines();
+    if lines.is_empty() {
+        return Vec::new();
+    }
+    let mut out = String::from("\r\n");
+    let header = [
+        "NUMBER",
+        "NOTE",
+        "MADE",
+        "DUE",
+        "PRICED_IN",
+        "AMOUNT",
+        "PAYMENTS",
+        "MARKS",
+        "ENDED",
+        "ENDED_AT",
+        "RETURNS",
+    ];
+    let cells: Vec<String> = header
+        .iter()
+        .map(|h| format!("WORDS_NEEDED_RQ_32_{h}"))
+        .collect();
+    out.push_str(&cells.join(","));
+    out.push_str("\r\n");
+    for l in lines {
+        let priced = match l.priced_in {
+            openbmt_requests::Pricing::Bitcoin => "SAT".to_string(),
+            openbmt_requests::Pricing::Currency(c) => c.code().to_string(),
+        };
+        let payments: Vec<String> = l
+            .payments
+            .iter()
+            .map(|p| format!("{}|{}|{}", time_text(p.block_time), p.sats, p.credit))
+            .collect();
+        let returns: Vec<String> = l
+            .returns
+            .iter()
+            .map(|r| {
+                format!(
+                    "{}|{}|{}",
+                    time_text(r.queued_at),
+                    r.sats,
+                    r.done_at.map(time_text).unwrap_or_default()
+                )
+            })
+            .collect();
+        let (ended, ended_at) = match l.ended {
+            Some((end, at)) => (
+                match end {
+                    openbmt_requests::End::Cancelled => "WORDS_NEEDED_RQ_32_ENDED_CANCELLED",
+                    openbmt_requests::End::Closed => "WORDS_NEEDED_RQ_32_ENDED_CLOSED",
+                    openbmt_requests::End::CountedPaid => "WORDS_NEEDED_RQ_32_ENDED_COUNTED_PAID",
+                },
+                time_text(at),
+            ),
+            None => ("", String::new()),
+        };
+        let row = [
+            l.number.to_string(),
+            csv_text(&l.note),
+            time_text(l.made_at),
+            date_text(l.due),
+            priced,
+            l.amount.to_string(),
+            csv_text(&payments.join(";")),
+            csv_text(&openbmt_requests::say::mark_lines(&l.marks).join(";")),
+            ended.to_string(),
+            ended_at,
+            csv_text(&returns.join(";")),
+        ];
+        out.push_str(&row.join(","));
+        out.push_str("\r\n");
+    }
+    out.into_bytes()
 }
 
 pub(crate) fn full_ledger_bytes(books: &Books) -> Result<Vec<u8>, AppError> {

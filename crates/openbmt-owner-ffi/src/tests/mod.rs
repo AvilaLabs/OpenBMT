@@ -16,6 +16,7 @@ mod own;
 mod pos;
 mod price;
 mod protocol;
+mod requests;
 mod screen;
 mod settings;
 mod setup_lock;

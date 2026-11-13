@@ -201,6 +201,17 @@ private const val OP_OWN_REPIN = 212
 private const val OP_OWN_PINNED_WALLET = 213
 private const val OP_STARTER_LATE = 214
 private const val OP_STARTER_LATE_MOVE = 215
+private const val OP_REQUEST_MAKE = 216
+private const val OP_REQUEST_LIST = 217
+private const val OP_REQUEST_SHARE = 218
+private const val OP_REQUEST_CANCEL = 219
+private const val OP_REQUEST_CLOSE = 220
+private const val OP_REQUEST_COUNT_PAID = 221
+private const val OP_REQUEST_ADD_RETURN = 222
+private const val OP_REQUEST_REPEATS = 223
+private const val OP_REQUEST_STOP_REPEATING = 224
+private const val OP_REQUEST_STATE = 225
+private const val OP_REQUEST_RETURN_ASK = 226
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -208,6 +219,11 @@ private const val TAG_OWNER_NETWORK_MAINNET = 0
 private const val TAG_OWNER_NETWORK_TESTNET = 1
 private const val TAG_OWNER_NETWORK_SIGNET = 2
 private const val TAG_OWNER_NETWORK_REGTEST = 3
+private const val TAG_REQUEST_PRICE_IN_BITCOIN = 0
+private const val TAG_REQUEST_PRICE_IN_SHOP_CURRENCY = 1
+private const val TAG_REQUEST_EVERY_WEEK = 0
+private const val TAG_REQUEST_EVERY_MONTH = 1
+private const val TAG_REQUEST_EVERY_YEAR = 2
 private const val TAG_OWN_REPIN_KIND_DONE = 0
 private const val TAG_OWN_REPIN_KIND_ALREADY_DONE = 1
 private const val TAG_OWN_REPIN_KIND_NOT_READY = 2
@@ -1046,11 +1062,14 @@ class AgreedPriceIn(val wholePerBtc: Long, val minorPerBtc: Long, val sourceLabe
 /** One shop-local day of the books (OA-103): [amount] is a decimal in the shop's currency, as the books write an amount. */
 class BooksDay(val date: String, val sales: Long, val waiting: Long, val amount: String)
 
+/** The satoshis that arrived for requests on one shop-local day (RQ-32). They are not sales and no total counts them. */
+class BooksRequestDay(val date: String, val sats: Long)
+
 /** One month of the accounting export: [month] is `YYYY-MM` and [csv] is what the library made. */
 class BooksFile(val month: String, val csv: ByteArray)
 
 /**
- * The books (OA-103): the days newest first, the accounting export (a file for each month, oldest first) and, when
+ * The books (OA-103): the days newest first, [requestDays] (the satoshis that arrived for requests, newest first), the accounting export (a file for each month, oldest first) and, when
  * an export was not made, the library's words for why. The full ledger is not here: [OwnerNode.booksLedger] makes
  * it. [currency] is empty when the phone holds no settings.
  */
@@ -1059,6 +1078,76 @@ class Books(
     val days: List<BooksDay>,
     val accounting: List<BooksFile>,
     val refusal: Words?,
+    val requestDays: List<BooksRequestDay> = emptyList(),
+)
+
+/** A rate the app checked: minor units of the shop's currency to a bitcoin, the label of its source (CR-57) and when it was fetched, in Unix seconds. */
+class RequestRate(val perBtc: Long, val source: String, val fetchedAt: Long)
+
+/** What every request call is given: [now] in Unix seconds, the shop's offset from UTC in minutes east, and the newest rate the app has checked, if any. */
+class RequestAsk(val now: Long, val offsetMinutes: Int, val rate: RequestRate? = null)
+
+/** A day of the shop's calendar. */
+class RequestDay(val year: Long, val month: Long, val day: Long)
+
+/** How a request is priced (RQ-07). */
+enum class RequestPriceIn { Bitcoin, ShopCurrency }
+
+/** How often a request repeats (RQ-24). */
+enum class RequestEvery { Week, Month, Year }
+
+/** A request that was made (RQ-03): its [number], the [index] and the [address] on the desk. */
+class RequestMade(val number: Long, val index: Long, val address: String)
+
+/** A shared request (RQ-12, RQ-13): the quote, the BIP 321 [link] and the [line] above it. */
+class RequestShared(
+    val number: Long,
+    val owed: Long,
+    val sats: Long,
+    val rate: Long?,
+    val until: Long?,
+    val address: String,
+    val link: String,
+    val line: String,
+)
+
+/** One row of the list (RQ-21, RQ-35): [line] is its second line, [state] the big line of its page, [marks] the small lines under it. */
+class RequestRow(
+    val number: Long,
+    val note: String,
+    val owed: Long,
+    val due: RequestDay,
+    val line: String,
+    val state: String,
+    val marks: List<String>,
+    val repeats: Boolean,
+)
+
+/** The list of requests in its parts (RQ-21, RQ-22, RQ-25), and the ones that ended, newest first. */
+class RequestList(
+    val readyToSend: List<RequestRow>,
+    val overdue: List<RequestRow>,
+    val dueSoon: List<RequestRow>,
+    val waiting: List<RequestRow>,
+    val finished: List<RequestRow>,
+    val overdueRow: String?,
+)
+
+/** A return that was queued (RQ-29): its number in the book, the refund's number in the owner's queue, the address in groups of four. */
+class RequestReturnAdded(val id: Long, val refund: Long, val sats: Long, val groups: String, val words: Words)
+
+/** What Home shows of the requests (RQ-22, RQ-29, RQ-31): [off] is the words for why there are none. */
+class RequestState(
+    val off: Words?,
+    val ready: Boolean,
+    val open: Long,
+    val overdue: Long,
+    val readyToSend: Long,
+    val overdueRow: String?,
+    val arrivalsWaiting: Long,
+    val returnsQueued: Long,
+    val returnsSats: Long,
+    val returns: Words?,
 )
 
 /** The code a counter takes: [code] is the bundle to show, [withBatch] says the first addresses are in it. */
@@ -1380,6 +1469,58 @@ internal class Reader(private val data: ByteArray) {
 
     fun fail(what: String): Nothing = bad(what)
 }
+
+internal fun Writer.requestAsk(v: RequestAsk): Writer =
+    u64(v.now).u32(v.offsetMinutes.toLong() and 0xffffffffL)
+        .option(v.rate) { r -> u64(r.perBtc).string(r.source).u64(r.fetchedAt) }
+
+internal fun Writer.requestDay(v: RequestDay): Writer = u32(v.year).u32(v.month).u32(v.day)
+
+internal fun Writer.requestPriceIn(v: RequestPriceIn): Writer =
+    u8(
+        when (v) {
+            RequestPriceIn.Bitcoin -> TAG_REQUEST_PRICE_IN_BITCOIN
+            RequestPriceIn.ShopCurrency -> TAG_REQUEST_PRICE_IN_SHOP_CURRENCY
+        },
+    )
+
+internal fun Writer.requestEvery(v: RequestEvery): Writer =
+    u8(
+        when (v) {
+            RequestEvery.Week -> TAG_REQUEST_EVERY_WEEK
+            RequestEvery.Month -> TAG_REQUEST_EVERY_MONTH
+            RequestEvery.Year -> TAG_REQUEST_EVERY_YEAR
+        },
+    )
+
+internal fun Reader.requestMade(): RequestMade = RequestMade(u64(), u32(), string())
+
+internal fun Reader.requestShared(): RequestShared =
+    RequestShared(u64(), u64(), u64(), option { u64() }, option { u64() }, string(), string(), string())
+
+internal fun Reader.requestList(): RequestList =
+    RequestList(
+        list { requestRow() },
+        list { requestRow() },
+        list { requestRow() },
+        list { requestRow() },
+        list { requestRow() },
+        option { string() },
+    )
+
+internal fun Reader.requestReturnAdded(): RequestReturnAdded =
+    RequestReturnAdded(u64(), u32(), u64(), string(), words())
+
+internal fun Reader.requestState(): RequestState =
+    RequestState(
+        option { words() }, bool(), u32(), u32(), u32(), option { string() },
+        u32(), u32(), u64(), option { words() },
+    )
+
+internal fun Reader.requestRow(): RequestRow =
+    RequestRow(
+        u64(), string(), u64(), RequestDay(u32(), u32(), u32()), string(), string(), strings(), bool(),
+    )
 
 private fun Writer.network(v: OwnerNetwork): Writer =
     u8(
@@ -2613,22 +2754,100 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
      */
     fun books(offsetMinutes: Int): Books {
         val r = call(OP_BOOKS, handle) { it.u32(offsetMinutes.toLong() and 0xffffffffL) }
-        return Books(
-            r.string(),
-            r.list { BooksDay(r.string(), r.u64(), r.u64(), r.string()) },
-            r.list { BooksFile(r.string(), r.bytes()) },
-            r.option { r.words() },
-        ).also { r.end() }
+        val currency = r.string()
+        val days = r.list { BooksDay(r.string(), r.u64(), r.u64(), r.string()) }
+        val requestDays = r.list { BooksRequestDay(r.string(), r.u64()) }
+        val accounting = r.list { BooksFile(r.string(), r.bytes()) }
+        return Books(currency, days, accounting, r.option { r.words() }, requestDays).also { r.end() }
     }
 
     /**
-     * The full ledger (BK-19): every sale with its transaction. [acknowledged] is the person's answer to the
+     * The full ledger (BK-19): every sale with its transaction, then a line for each request (RQ-32). [acknowledged] is the person's answer to the
      * warning, passed only after it was shown on the app's own screen and accepted; `false` is refused. Empty
      * when the phone holds no books.
      */
     fun booksLedger(acknowledged: Boolean): ByteArray {
         val r = call(OP_BOOKS_LEDGER, handle) { it.bool(acknowledged) }
         return r.bytes().also { r.end() }
+    }
+
+    /** RQ-03: make a request at the desk's next unused index. A request in the shop's currency is worked out at each share. */
+    fun requestMake(
+        ask: RequestAsk,
+        note: String,
+        amount: Long,
+        priceIn: RequestPriceIn,
+        due: RequestDay,
+        repeat: RequestEvery?,
+    ): RequestMade {
+        val r = call(OP_REQUEST_MAKE, handle) { w ->
+            w.requestAsk(ask).string(note).u64(amount).requestPriceIn(priceIn).requestDay(due)
+                .option(repeat) { w.requestEvery(it) }
+        }
+        return r.requestMade().also { r.end() }
+    }
+
+    /** RQ-21, RQ-22, RQ-25: the list of requests in its parts. */
+    fun requestList(ask: RequestAsk): RequestList {
+        val r = call(OP_REQUEST_LIST, handle) { it.requestAsk(ask) }
+        return r.requestList().also { r.end() }
+    }
+
+    /** RQ-12, RQ-13, RQ-22: write the quote of request [number] and give the BIP 321 link and the line above it. */
+    fun requestShare(ask: RequestAsk, number: Long, shopName: String): RequestShared {
+        val r = call(OP_REQUEST_SHARE, handle) { it.requestAsk(ask).u64(number).string(shopName) }
+        return r.requestShared().also { r.end() }
+    }
+
+    /** RQ-19: cancel request [number], which has received nothing. */
+    fun requestCancel(ask: RequestAsk, number: Long) {
+        call(OP_REQUEST_CANCEL, handle) { it.requestAsk(ask).u64(number) }.end()
+    }
+
+    /** RQ-20: close request [number] as it stands, while part paid. */
+    fun requestClose(ask: RequestAsk, number: Long) {
+        call(OP_REQUEST_CLOSE, handle) { it.requestAsk(ask).u64(number) }.end()
+    }
+
+    /** RQ-16: count the almost paid request [number] as paid. It cannot be undone. */
+    fun requestCountPaid(ask: RequestAsk, number: Long) {
+        call(OP_REQUEST_COUNT_PAID, handle) { it.requestAsk(ask).u64(number) }.end()
+    }
+
+    /**
+     * RQ-26 to RQ-29: queue a return from request [number] to [address], as pasted or scanned. [amount] is minor units
+     * of the shop's currency when [inCurrency], else satoshis. The return waits with the owner's other refunds; nothing is paid.
+     */
+    fun requestAddReturn(ask: RequestAsk, number: Long, inCurrency: Boolean, amount: Long, address: String): RequestReturnAdded {
+        val r = call(OP_REQUEST_ADD_RETURN, handle) { w ->
+            w.requestAsk(ask).u64(number).bool(inCurrency).u64(amount).string(address).string("")
+        }
+        return r.requestReturnAdded().also { r.end() }
+    }
+
+    /** RQ-25: make the requests of the repeats that are due today. They are ready to send. */
+    fun requestRepeats(ask: RequestAsk): List<RequestMade> {
+        val r = call(OP_REQUEST_REPEATS, handle) { it.requestAsk(ask) }
+        return r.list { r.requestMade() }.also { r.end() }
+    }
+
+    /** RQ-25: stop the series request [number] belongs to. */
+    fun requestStopRepeating(ask: RequestAsk, number: Long) {
+        call(OP_REQUEST_STOP_REPEATING, handle) { it.requestAsk(ask).u64(number) }.end()
+    }
+
+    /** RQ-22, RQ-29, RQ-31: what Home shows of the requests. */
+    fun requestState(ask: RequestAsk): RequestState {
+        val r = call(OP_REQUEST_STATE, handle) { it.requestAsk(ask) }
+        return r.requestState().also { r.end() }
+    }
+
+    /** RQ-27: the line that asks a customer for a bitcoin address, for a return of [amount] from request [number]. */
+    fun requestReturnAsk(ask: RequestAsk, number: Long, inCurrency: Boolean, amount: Long, shopName: String): String {
+        val r = call(OP_REQUEST_RETURN_ASK, handle) { w ->
+            w.requestAsk(ask).u64(number).bool(inCurrency).u64(amount).string("").string(shopName)
+        }
+        return r.string().also { r.end() }
     }
 
     /** What the till screen shows: the connection, the open alerts and the counts. */

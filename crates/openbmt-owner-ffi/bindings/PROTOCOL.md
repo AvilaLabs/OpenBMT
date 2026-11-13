@@ -202,6 +202,17 @@ ops run on another; it waits for at most 250 ms.
 213 own_pinned_wallet handle node  args () -> list<u8>
 214 starter_late     handle node  args () -> list<StarterLateView>
 215 starter_late_move handle node  args StarterLateMoveArgs -> StarterPaidView
+216 request_make     handle node  args RequestMakeArgs -> RequestMadeView
+217 request_list     handle node  args RequestAsk -> RequestListView
+218 request_share    handle node  args RequestShareArgs -> RequestSharedView
+219 request_cancel   handle node  args RequestNumberArgs -> ()
+220 request_close    handle node  args RequestNumberArgs -> ()
+221 request_count_paid handle node  args RequestNumberArgs -> ()
+222 request_add_return handle node  args RequestReturnArgs -> RequestReturnAddedView
+223 request_repeats  handle node  args RequestAsk -> RequestRepeatsView
+224 request_stop_repeating handle node  args RequestNumberArgs -> ()
+225 request_state    handle node  args RequestAsk -> RequestStateView
+226 request_return_ask handle node  args RequestReturnArgs -> string
 ```
 
 ## Types
@@ -410,9 +421,28 @@ PriceForArgs: record: currency: string, replies: list<PriceReplyView>, now: u64
 AgreedPriceInView: record: whole_per_btc: u64, minor_per_btc: u64, source_label: string
 BooksArgs: record: offset_minutes: i32
 BooksDayView: record: date: string, sales: u64, waiting: u64, amount: string
+RequestDayView: record: date: string, sats: u64
 BooksFileView: record: month: string, csv: list<u8>
-BooksView: record: currency: string, days: list<BooksDayView>, accounting: list<BooksFileView>, refusal: option<Words>
+BooksView: record: currency: string, days: list<BooksDayView>, request_days: list<RequestDayView>, accounting: list<BooksFileView>, refusal: option<Words>
 ImportKind: enum, one tag byte
     tags Single=1 Multisig=2
 ImportView: record: kind: ImportKind, fingerprint: option<string>, first_address: string
+RequestRateView: record: per_btc: u64, source: string, fetched_at: u64
+RequestAsk: record: now: u64, offset_minutes: i32, rate: option<RequestRateView>
+DayView: record: year: u32, month: u32, day: u32
+RequestPriceIn: enum, one tag byte
+    tags Bitcoin=0 ShopCurrency=1
+RequestEvery: enum, one tag byte
+    tags Week=0 Month=1 Year=2
+RequestMakeArgs: record: ask: RequestAsk, note: string, amount: u64, price_in: RequestPriceIn, due: DayView, repeat: option<RequestEvery>
+RequestMadeView: record: number: u64, index: u32, address: string
+RequestNumberArgs: record: ask: RequestAsk, number: u64
+RequestShareArgs: record: ask: RequestAsk, number: u64, shop_name: string
+RequestSharedView: record: number: u64, owed: u64, sats: u64, rate: option<u64>, until: option<u64>, address: string, link: string, line: string
+RequestRowView: record: number: u64, note: string, owed: u64, due: DayView, line: string, state: string, marks: list<string>, repeats: bool
+RequestListView: record: ready_to_send: list<RequestRowView>, overdue: list<RequestRowView>, due_soon: list<RequestRowView>, waiting: list<RequestRowView>, finished: list<RequestRowView>, overdue_row: option<string>
+RequestReturnArgs: record: ask: RequestAsk, number: u64, in_currency: bool, amount: u64, address: string, shop_name: string
+RequestReturnAddedView: record: id: u64, refund: u32, sats: u64, groups: string, words: Words
+RequestRepeatsView: record: made: list<RequestMadeView>
+RequestStateView: record: off: option<Words>, ready: bool, open: u32, overdue: u32, ready_to_send: u32, overdue_row: option<string>, arrivals_waiting: u32, returns_queued: u32, returns_sats: u64, returns: option<Words>
 ```

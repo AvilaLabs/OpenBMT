@@ -63,6 +63,7 @@ mod own;
 mod own_spend_views;
 mod pos_views;
 mod price;
+mod requests;
 mod say;
 mod settings_edit;
 mod setup_lock;
@@ -106,6 +107,11 @@ pub use pos_views::{
     PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
 };
 pub use price::{AgreedPriceView, PriceArgs, PriceReplyView, PriceSourceView};
+pub use requests::{
+    DayView, RequestAsk, RequestEvery, RequestListView, RequestMadeView, RequestMakeArgs,
+    RequestNumberArgs, RequestPriceIn, RequestRateView, RequestRepeatsView, RequestReturnAddedView,
+    RequestReturnArgs, RequestRowView, RequestShareArgs, RequestSharedView, RequestStateView,
+};
 pub use say::{all_words, words_for};
 pub use settings_edit::{
     CurrencyAction, LightningAction, SettingChangeView, SettingsEditArgs, SettingsPreviewView,

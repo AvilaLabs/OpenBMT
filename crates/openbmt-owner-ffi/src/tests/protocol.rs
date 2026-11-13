@@ -179,6 +179,17 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (213, "own_pinned_wallet"),
         (214, "starter_late"),
         (215, "starter_late_move"),
+        (216, "request_make"),
+        (217, "request_list"),
+        (218, "request_share"),
+        (219, "request_cancel"),
+        (220, "request_close"),
+        (221, "request_count_paid"),
+        (222, "request_add_return"),
+        (223, "request_repeats"),
+        (224, "request_stop_repeating"),
+        (225, "request_state"),
+        (226, "request_return_ask"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

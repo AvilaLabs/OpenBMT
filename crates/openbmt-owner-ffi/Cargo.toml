@@ -37,6 +37,8 @@ openbmt-owner = { path = "../openbmt-owner" }
 openbmt-owner-node = { path = "../openbmt-owner-node" }
 # The table of price sources the app fetches, the same as the counter's.
 openbmt-rates = { path = "../openbmt-rates" }
+# The request book's own types, for the ops that carry its words (RQ-36).
+openbmt-requests = { path = "../openbmt-requests" }
 openbmt-signer = { path = "../openbmt-signer" }
 openbmt-watch = { path = "../openbmt-watch" }
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }

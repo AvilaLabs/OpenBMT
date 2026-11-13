@@ -853,6 +853,7 @@ dependencies = [
  "openbmt-owner",
  "openbmt-owner-node",
  "openbmt-rates",
+ "openbmt-requests",
  "openbmt-signer",
  "openbmt-watch",
 ]

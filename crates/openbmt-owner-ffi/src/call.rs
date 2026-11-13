@@ -68,6 +68,13 @@
 //!   to the node's outbox, a transaction's confirmations by its ID, and the
 //!   owner's pinned wallet becoming the new wallet once every counter has
 //!   switched (SS-30, SS-36, SS-41 to SS-43).
+//! - 216 to 226: the owner's requests (`docs/REQUEST-RULES.md`, RQ-01 to
+//!   RQ-37): make one at the desk's next address, the list in its parts,
+//!   share one as a BIP 321 link, cancel, close, count an almost paid one
+//!   as paid, add a return to the owner's queue, make the repeats that are
+//!   due, stop a series, the state Home shows, and the line that asks a
+//!   customer for an address. Every call is given the time, the shop's
+//!   offset from UTC and the newest rate.
 //! - 100 to 103: the lock on the setup text the app stores
 //!   (`docs/LOCK-RULES.md`, `docs/OWNER-APP-RULES.md` OA-60 to OA-62):
 //!   whether stored bytes are a locked setup, lock a text under a PIN, open
@@ -124,7 +131,7 @@ use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
-use crate::books::{BooksArgs, BooksDayView, BooksFileView, BooksView};
+use crate::books::{BooksArgs, BooksDayView, BooksFileView, BooksView, RequestDayView};
 use crate::boxnet::{
     self, BoxDeliverArgs, BoxDeliveredView, BoxFoundView, BoxLinkArgs, BoxOwnCheckArgs,
     BoxOwnCheckView, BoxOwnInvitationView, BoxQueueArgs, BoxQueuedView, PendingBoxView,
@@ -161,6 +168,11 @@ use crate::pos_views::{
 use crate::price::{
     self, AgreedPriceInView, AgreedPriceView, PriceArgs, PriceForArgs, PriceReplyView,
     PriceSourceView,
+};
+use crate::requests::{
+    DayView, RequestAsk, RequestEvery, RequestListView, RequestMadeView, RequestMakeArgs,
+    RequestNumberArgs, RequestPriceIn, RequestRateView, RequestRepeatsView, RequestReturnAddedView,
+    RequestReturnArgs, RequestRowView, RequestShareArgs, RequestSharedView, RequestStateView,
 };
 use crate::say::{TONES, WHOS};
 use crate::settings_edit::{
@@ -936,6 +948,51 @@ fn build_ops() -> Vec<Op> {
             Node,
             |c, a: StarterLateMoveArgs| c.entry()?.starter_late_move(a),
         ),
+        op(216, "request_make", Node, |c, a: RequestMakeArgs| {
+            c.entry()?.request_make(a)
+        }),
+        op(217, "request_list", Node, |c, a: RequestAsk| {
+            c.entry()?.request_list(a)
+        }),
+        op(218, "request_share", Node, |c, a: RequestShareArgs| {
+            c.entry()?.request_share(a)
+        }),
+        op(219, "request_cancel", Node, |c, a: RequestNumberArgs| {
+            c.entry()?.request_cancel(a)
+        }),
+        op(220, "request_close", Node, |c, a: RequestNumberArgs| {
+            c.entry()?.request_close(a)
+        }),
+        op(
+            221,
+            "request_count_paid",
+            Node,
+            |c, a: RequestNumberArgs| c.entry()?.request_count_paid(a),
+        ),
+        op(
+            222,
+            "request_add_return",
+            Node,
+            |c, a: RequestReturnArgs| c.entry()?.request_add_return(a),
+        ),
+        op(223, "request_repeats", Node, |c, a: RequestAsk| {
+            c.entry()?.request_repeats(a)
+        }),
+        op(
+            224,
+            "request_stop_repeating",
+            Node,
+            |c, a: RequestNumberArgs| c.entry()?.request_stop_repeating(a),
+        ),
+        op(225, "request_state", Node, |c, a: RequestAsk| {
+            c.entry()?.request_state(a)
+        }),
+        op(
+            226,
+            "request_return_ask",
+            Node,
+            |c, a: RequestReturnArgs| c.entry()?.request_return_ask(a),
+        ),
     ]
 }
 
@@ -1239,10 +1296,27 @@ fn definitions() -> Vec<TypeDef> {
         AgreedPriceInView::define(),
         BooksArgs::define(),
         BooksDayView::define(),
+        RequestDayView::define(),
         BooksFileView::define(),
         BooksView::define(),
         ImportKind::define(),
         ImportView::define(),
+        RequestRateView::define(),
+        RequestAsk::define(),
+        DayView::define(),
+        RequestPriceIn::define(),
+        RequestEvery::define(),
+        RequestMakeArgs::define(),
+        RequestMadeView::define(),
+        RequestNumberArgs::define(),
+        RequestShareArgs::define(),
+        RequestSharedView::define(),
+        RequestRowView::define(),
+        RequestListView::define(),
+        RequestReturnArgs::define(),
+        RequestReturnAddedView::define(),
+        RequestRepeatsView::define(),
+        RequestStateView::define(),
     ]
 }
 
