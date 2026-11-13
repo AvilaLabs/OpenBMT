@@ -107,12 +107,18 @@ fn fault(heading: &str, what: impl Into<String>, code: &'static str) -> Words {
 }
 
 /// OC-55: what the owner is told about an entry that is held, with the
-/// blocks left until the block that beat its payment is deep. The words are
-/// still to be written.
+/// blocks left until the block that beat its payment is deep.
 pub fn held_words(blocks_left: u32) -> Words {
-    crate::own_say::needed("WORDS_NEEDED_OC_55_HELD")
-        .code("OC-55")
-        .detail(blocks_left.to_string())
+    info(
+        "Held while a payment settles",
+        "An earlier payment of this was beaten by another and could still come back, so paying it \
+         again now could pay it twice.",
+        Who::Owner,
+        "Nothing to do. It goes back to the queue by itself in about a day, or is marked paid if \
+         the earlier payment comes back.",
+    )
+    .code("OC-55")
+    .detail(blocks_left.to_string())
 }
 
 impl Stage {

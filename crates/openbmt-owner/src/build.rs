@@ -180,7 +180,7 @@ fn plan_refunds(
 }
 
 /// OC-55: why an entry whose beaten transaction may still confirm is left out.
-const HELD: &str = "OC-55: WORDS_NEEDED_OC_55_HELD";
+const HELD: &str = "OC-55: held while an earlier payment of it could still come back";
 
 /// OC-55: what a new transaction may do for an entry that is held.
 enum HeldWay {

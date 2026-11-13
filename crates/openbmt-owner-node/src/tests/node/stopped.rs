@@ -848,7 +848,7 @@ fn oc_50_a_beaten_payment_that_waited_for_key_1_recovery_is_undone_once_after_it
 
 // ---- OC-55: a beaten transaction can come back ---------------------------------------------
 
-const HELD_WORDS: &str = "WORDS_NEEDED_OC_55_HELD";
+const HELD_WHY: &str = "OC-55: held while";
 
 /// Two refunds in one transaction, C, that was given to a hardware signer
 /// and abandoned, so that it is signed elsewhere; and a coin Y that C does
@@ -980,14 +980,15 @@ fn oc_55_n13c_01_while_the_beating_block_is_shallow_the_entries_are_in_no_new_pa
     let (inputs, skipped) = try_build(&mut rig);
     assert!(inputs.is_empty(), "{inputs:?}");
     assert_eq!(skipped.len(), 2);
-    assert!(skipped.iter().all(|(_, why)| why.contains(HELD_WORDS)));
+    assert!(skipped.iter().all(|(_, why)| why.contains(HELD_WHY)));
     assert!(matches!(rig.node.owner().refunds()[0].stage, Stage::Queued));
     // Cancelling one is refused too while it is held.
     let write = rig.node.queue_writer();
     assert!(rig.node.owner_mut().unwrap().cancel(r2, &write).is_err());
     // The words are a placeholder with the count of blocks left.
     let words = openbmt_owner::say::held_words(rig.node.held()[0].1);
-    assert_eq!(words.heading, HELD_WORDS);
+    assert_eq!(words.heading, "Held while a payment settles");
+    assert_eq!(openbmt_core::say::check(&words), Ok(()));
     assert_eq!(words.detail.as_deref(), Some("99"));
 }
 

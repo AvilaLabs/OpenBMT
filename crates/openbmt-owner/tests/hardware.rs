@@ -1279,7 +1279,7 @@ fn oc_55_a_held_entry_is_built_only_with_a_coin_that_conflicts_with_the_beaten_t
     let (skipped, signer) = build(&mut f, &[coin(3, 0, 500_000)]);
     assert!(signer.is_none());
     assert_eq!(skipped.len(), 1);
-    assert!(skipped[0].reason.contains("WORDS_NEEDED_OC_55_HELD"));
+    assert!(skipped[0].reason.contains("OC-55: held while"));
     // A coin of the transaction that beat it is enough.
     let (skipped, signer) = build(&mut f, &[coin(3, 0, 500_000), by_coin.clone()]);
     assert!(skipped.is_empty(), "{skipped:?}");
