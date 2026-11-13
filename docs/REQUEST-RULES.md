@@ -101,9 +101,10 @@ an end, payments in parts, repeats and returns.
   as CR-83 writes a sale's, and nothing else: no note, no number, no
   message. "Share the link" gives the link to Android's share sheet as
   text, with one line above it from the words ("{shop} asks for {amount}.
-  Request No. {n}, due {date}."). "Share the code" gives the code as a PNG,
-  made and revoked as CR-214's images are. The owner phone sends nothing
-  itself.
+  Request No. {n}, due {date}."). "Show the code" shows the same link as a
+  code on the screen, for a customer who is there to scan it. The owner
+  phone gives no image file to other apps, so that it keeps no file
+  provider (OA-03), and it sends nothing itself.
 - **RQ-14.** Sharing again makes a fresh quote of what is still owed. An
   older link of the same request still pays the same address, and whatever
   arrives is counted (RQ-15); the older amount is simply no longer asked.
