@@ -33,6 +33,7 @@ Where they come from:
   the same `secp256k1` package, and adds no package to any list.
 - **The link between devices, about 16 more.** ChaCha20-Poly1305 from the
   RustCrypto project, used to seal messages (LK-02).
+- WORDS_NEEDED_DEPS_ED25519
 - **Encrypted peer connections, 3 more.** The `bip324` crate and its two
   helpers, from the rust-bitcoin project, with no further dependencies.
 - **The books export, 4 more.** Argon2, for the passphrase (BK-24).
