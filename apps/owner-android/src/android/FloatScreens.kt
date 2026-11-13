@@ -8,6 +8,7 @@ import org.openbmt.app.Format
 import org.openbmt.app.RowItem
 import org.openbmt.app.Tones
 import org.openbmt.owner.FloatPaid
+import org.openbmt.owner.FloatWalletView
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
 import org.openbmt.owner.ReceiptsKind
@@ -100,9 +101,83 @@ private fun Controller.recentRate(n: OwnerNode): Long? = try {
     null
 }
 
-/** FL-03: the float's key is gone from the phone (or never was): nothing can be signed. */
-private fun Controller.floatKeyGone() {
-    screen(FloatWords.rowTitle, listOf(ui.text(FloatWords.keyGone)), listOf(ui.button(FloatWords.back) { showFloat() }), back = { showFloat() })
+/**
+ * FL-03, FL-06: the float's key is gone from the phone (or never was): nothing can be signed. The page offers to scan the float's
+ * words again, made on the stick at the index the phone recorded, when the phone has the float's record and public wallet.
+ */
+private fun Controller.floatKeyGone(notice: View? = null) {
+    val store = FloatStore(appDir)
+    val record = record(store)
+    val wallet = try { store.loadWallet() } catch (_: IOException) { null }
+    val body = ArrayList<View>()
+    notice?.let { body.add(it) }
+    body.add(ui.text(FloatWords.keyGone))
+    val actions = ArrayList<Button>()
+    if (wallet != null && FloatModel.canRestore(record, wallet)) {
+        body.add(ui.text(FloatWords.restoreWhat))
+        actions.add(ui.primary(FloatWords.restoreScan) { floatRestoreScan(store, wallet) })
+    } else {
+        body.add(ui.text(FloatWords.restoreNeedsFloat))
+    }
+    actions.add(ui.button(FloatWords.back) { showFloat() })
+    floatWordsScreen(FloatWords.rowTitle, body, actions, back = { showFloat() })
+}
+
+/** FL-06: the camera reads one plain code, as for the setup; the scan page sets the window flags of SS-12 and the bytes go to the library. */
+private fun Controller.floatRestoreScan(store: FloatStore, wallet: FloatWalletView) {
+    scan.begin(
+        show = { v ->
+            showScan(v)
+            StarterWindow.protect(act, act.window.decorView)
+        },
+        onBytes = { bytes -> floatRestoreSeal(store, wallet, bytes) },
+        onFailed = { floatKeyGone(ui.text(FloatWords.scanFailed)) },
+        onCancel = { floatKeyGone() },
+    )
+}
+
+/**
+ * FL-06: the library takes the scan only when its wallet is the recorded float's wallet, and seals it under a new data key. Then the
+ * old Keystore key goes, the new sealed seed is kept, and the new data key is wrapped by a new Keystore key (after the owner proves
+ * they are there) and kept. The record is not touched: the float is ready again as it was. Whatever fails leaves no key behind, as
+ * the setup's undo does.
+ */
+private fun Controller.floatRestoreSeal(store: FloatStore, wallet: FloatWalletView, scanned: ByteArray) {
+    val sealed = try {
+        LibraryFloat.restore(scanned, wallet.description)
+    } catch (e: OwnerException) {
+        return floatKeyGone(ui.words(e.sayWords()))
+    } catch (e: LinkageError) {
+        return floatKeyGone(ui.words(AppWords.libraryMissing(e.message)))
+    }
+    val keystore = floatKeystore()
+    fun undo() {
+        store.deleteKey()
+        keystore.delete()
+    }
+    keystore.delete()
+    try {
+        store.saveSealed(sealed.sealed)
+    } catch (_: IOException) {
+        sealed.wipe()
+        undo()
+        return floatKeyGone(ui.text(FloatWords.storageUnavailable))
+    }
+    starterWrapKey(sealed.dataKey, FloatWords.unlockWhy, floatKeystore(), { store.saveWrapped(it) }, FloatWords.rowTitle) { kept ->
+        if (!kept) {
+            undo()
+            return@starterWrapKey floatKeyGone(ui.text(FloatWords.sealFailed))
+        }
+        showFloat(FloatWords.restoreDone)
+    }
+}
+
+/**
+ * FL-05: the phone just recorded a new refill index or change index, so the node moves its watch of the float to 20 past it at once,
+ * without a restart, and reads the blocks since the float was set up for the new addresses.
+ */
+private fun Controller.floatWatchRaise(store: FloatStore) {
+    record(store)?.let { NodeFloat(node).raiseWatch(it) }
 }
 
 /**
@@ -268,6 +343,7 @@ private fun Controller.showFloatRefill() {
             val queued = n.floatRefill(wallet.description, record.nextReceiveIndex, record.capSats, checked.confirmedSats, checked.unconfirmedIncomingSats, null)
             // The next address is used up as soon as the payment to it is queued.
             store.save(FloatModel.afterRefill(store.load() ?: record))
+            floatWatchRaise(store)
             showOwnSpend(listOf(queued.id))
         } catch (e: OwnerException) {
             msg.show(ui.words(e.sayWords()))
@@ -332,6 +408,8 @@ private fun Controller.floatPaySigned(n: OwnerNode, store: FloatStore, paid: Flo
         try {
             record(store)?.let { rec -> paid.changeIndex?.let { store.changeUsed(rec, it) } }
             n.floatSend(paid.tx, listOf(r.id), false)
+            // The node reads the float's coins to send; its watch moves only once the payment is in its outbox.
+            floatWatchRaise(store)
             centre(
                 StarterWords.said(FloatWords.payDoneHeading, FloatWords.payDoneWhat, FloatWords.payDoneNext, Tones.GOOD),
                 listOf(ui.primary(StarterWords.doneButton) { showFloat() }),

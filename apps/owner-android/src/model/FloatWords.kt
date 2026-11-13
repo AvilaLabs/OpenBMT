@@ -50,6 +50,13 @@ object FloatWords {
     val sweepDeletedWhat = "All the float held is back in the shop's savings, and its key is gone from this phone."
     val sweepDeletedNext = "Keep the stick and the shop's words as they are."
 
+    // FL-06: scanning the float's words again, to bring back the key the phone dropped. Not written yet (OA-114): each is a
+    // placeholder that shows its own name where the words will be.
+    val restoreScan = "WORDS_NEEDED_OA_FL06_SCAN"
+    val restoreWhat = "WORDS_NEEDED_OA_FL06_WHAT"
+    val restoreDone = "WORDS_NEEDED_OA_FL06_DONE"
+    val restoreNeedsFloat = "WORDS_NEEDED_OA_FL06_NO_FLOAT"
+
     /** Every text, in screen order. */
     fun all(): List<String> = listOf(
         rowTitle,
@@ -97,5 +104,12 @@ object FloatWords {
         sweepDeletedHeading,
         sweepDeletedWhat,
         sweepDeletedNext,
+        restoreScan,
+        restoreWhat,
+        restoreDone,
+        restoreNeedsFloat,
     )
+
+    /** FL-06: the texts not written yet, each named after its rule. */
+    fun placeholders(): List<String> = all().filter { it.startsWith("WORDS_NEEDED_") }
 }

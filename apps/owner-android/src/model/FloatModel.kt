@@ -37,6 +37,10 @@ interface FloatCore {
 /** Direct forwarding to the owner library; it does not retain or store the words. */
 object LibraryFloat : FloatCore {
     override fun seal(scan: ByteArray) = OwnerFloat.seal(scan)
+
+    /** FL-06: the scan of the float's words again, sealed anew only when it is the recorded float's wallet. */
+    fun restore(scan: ByteArray, description: String) = OwnerFloat.restore(scan, description)
+
     override fun status(cap: Long, confirmed: Long, unconfirmedIncoming: Long) =
         OwnerFloat.status(cap, confirmed, unconfirmedIncoming)
     override fun feeRate(recent: Long?, typed: Long?) = OwnerFloat.feeRate(recent, typed)
@@ -47,6 +51,20 @@ object LibraryFloat : FloatCore {
  * that is not watching yet, or a view that does not read, the view is [FloatCoinView.Unavailable]: no balance is guessed.
  */
 class NodeFloat(private val node: OwnerNode?) : FloatCore by LibraryFloat {
+    /**
+     * FL-05: tells the node to move its watch of the float to 20 past the indexes [record] holds, at once. A node that is not
+     * watching the float, or is not there, is left as it is: the next start reads the same record (FloatModel.watch).
+     */
+    fun raiseWatch(record: FloatRecord) {
+        val n = node ?: return
+        val (receiveEnd, changeEnd) = FloatModel.watchEnds(record)
+        try {
+            n.floatWatch(receiveEnd, changeEnd)
+        } catch (_: OwnerException) {
+        } catch (_: LinkageError) {
+        }
+    }
+
     override fun coinView(): FloatCoinView {
         val n = node ?: return FloatCoinView.Unavailable
         return try {
@@ -337,6 +355,16 @@ object FloatModel {
         FloatRecord(record.capSats, record.nextReceiveIndex + 1, record.nextChangeIndex, record.pendingPayId,
             record.pendingSweepId, record.state, record.childIndex, record.watchFrom, record.offAt)
 
+    /** FL-05: where each chain's watch ends, one past the last index used or handed out; the node adds 20 (FL-05). */
+    fun watchEnds(record: FloatRecord): Pair<Long, Long> = Pair(record.nextReceiveIndex + 1, record.nextChangeIndex + 1)
+
+    /**
+     * FL-06: the float's words can be scanned again when the phone has its record and its public wallet, whether or not
+     * the key is there: the page offers it when the key was dropped.
+     */
+    fun canRestore(record: FloatRecord?, wallet: FloatWalletView?): Boolean =
+        record != null && record.state == FloatState.Ready && wallet != null
+
     /** FL-35: how long the node keeps watching a float that was turned off, in seconds. */
     const val WATCH_AFTER_OFF_SECS = 86_400L
 
@@ -353,10 +381,11 @@ object FloatModel {
             FloatState.NeedsSetup -> false
         }
         if (!live) return null
+        val (receiveEnd, changeEnd) = watchEnds(record)
         return FloatWatchConfig(
             wallet.description,
-            record.nextReceiveIndex + 1,
-            record.nextChangeIndex + 1,
+            receiveEnd,
+            changeEnd,
             if (record.watchFrom > 0) record.watchFrom else fallbackBirthday,
         )
     }

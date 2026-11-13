@@ -4092,6 +4092,9 @@ object AppModelTest {
         val base = org.openbmt.owner.StartConfig("d", OwnerNetwork.Regtest, 1, byteArrayOf(1), byteArrayOf(2), "w", byteArrayOf(3), null, 4, 5, 6, "p", listOf("a"), null, true, null)
         val started = FloatModel.withWatch(base, watch)
         ok(started.float === watch && started.dir == "d" && started.birthday == 6L && started.wallet == "w" && started.fixedPeers == listOf("a") && started.withoutTor, "the float's watch is added and the rest of the start is the same")
+        ok(FloatModel.watchEnds(used) == Pair(4L, 6L) && watch.receiveEnd == 4L && watch.changeEnd == 6L, "the watch the node starts with and the one it is raised to are one past the last index used or handed out (FL-05)")
+        ok(runCatching { NodeFloat(null).raiseWatch(used) }.isSuccess, "with no node a raise of the watch does nothing (FL-05)")
+        ok(FloatModel.canRestore(used, wallet) && !FloatModel.canRestore(null, wallet) && !FloatModel.canRestore(used, null) && !FloatModel.canRestore(FloatRecord(100_000, state = FloatState.Disabled), wallet) && !FloatModel.canRestore(FloatRecord(100_000, state = FloatState.NeedsSetup), wallet), "the key can be brought back only for a float that is on, with its record and wallet (FL-06)")
         ok(NodeFloat(null).coinView() === FloatCoinView.Unavailable, "with no node the float's coin view is unavailable")
         val rec = FloatRecord(100_000, 1, 2, null, null, FloatState.Ready, 4, 123, 99)
         val read = FloatRecord.parse(rec.text())
@@ -4135,6 +4138,17 @@ object AppModelTest {
         ok(screens.contains("keystore = floatKeystore()") && screens.contains("loadWrapped = { store.loadWrapped() }"), "the unlock uses the float's own Keystore key and wrapped key")
         ok(screens.indexOf("store.pendingSweep(record, paid.txid)") < screens.indexOf("n.floatSend(paid.tx, emptyList(), true)"), "the move is recorded before the outbox takes it")
         ok(screens.indexOf("store.deleteKey()") < screens.indexOf("store.completeSweep(") && screens.contains("FloatModel.sweepMayDeleteWords(confirmations)") && screens.contains("n.starterConfirmations(txid)"), "the key is deleted only after the move has a known confirmation")
+        // FL-06: the float's words scanned again bring the key back.
+        ok(screens.contains("FloatModel.canRestore(record, wallet)") && screens.contains("floatRestoreScan(store, wallet)"), "the page that says the key is gone offers to scan the float's words again when the phone has the float's record and wallet (FL-06)")
+        ok(screens.contains("LibraryFloat.restore(scanned, wallet.description)") && !screens.contains("OwnerFloat.restore(") && screens.indexOf("private fun Controller.floatRestoreScan") < screens.indexOf("private fun Controller.floatRestoreSeal"), "the scan goes to the library as bytes with the recorded description and no words are made as text (FL-06)")
+        val restoreScan = screens.substring(screens.indexOf("private fun Controller.floatRestoreScan"), screens.indexOf("private fun Controller.floatRestoreSeal"))
+        ok(restoreScan.contains("StarterWindow.protect(act, act.window.decorView)") && screens.indexOf("private fun Controller.floatKeyGone") < screens.indexOf("floatWordsScreen(FloatWords.rowTitle, body, actions"), "the scan page and the page that offers it set the window flags of SS-12 (FL-06)")
+        val restoreSeal = screens.substring(screens.indexOf("private fun Controller.floatRestoreSeal"), screens.indexOf("private fun Controller.floatWatchRaise"))
+        ok(restoreSeal.indexOf("LibraryFloat.restore(") < restoreSeal.indexOf("keystore.delete()") && restoreSeal.indexOf("keystore.delete()") < restoreSeal.indexOf("store.saveSealed(") && restoreSeal.indexOf("store.saveSealed(") < restoreSeal.indexOf("starterWrapKey(") && restoreSeal.indexOf("starterWrapKey(") < restoreSeal.indexOf("showFloat(FloatWords.restoreDone)"), "the library takes the words first, then the old Keystore key goes, the sealed seed is kept, the new data key is wrapped, and only then the float is shown ready (FL-06)")
+        ok(restoreSeal.contains("floatKeystore()") && restoreSeal.contains("{ store.saveWrapped(it) }") && restoreSeal.indexOf("fun undo()") < restoreSeal.indexOf("store.deleteKey()") && !restoreSeal.contains("store.save(") && !restoreSeal.contains("finishSetup"), "the new data key is wrapped by the float's own Keystore key, a failure undoes both and the record is left as it was (FL-06)")
+        // FL-05: the node moves its watch whenever the phone records a new index.
+        ok(screens.indexOf("store.save(FloatModel.afterRefill(") < screens.indexOf("floatWatchRaise(store)\n            showOwnSpend") && screens.indexOf("store.changeUsed(rec, it)") < screens.indexOf("n.floatSend(paid.tx, listOf(r.id), false)") && screens.indexOf("n.floatSend(paid.tx, listOf(r.id), false)") < screens.indexOf("// The node reads the float's coins to send"), "the watch is raised after a refill index is recorded and after a payment's change index is, once the payment is in the outbox (FL-05)")
+        ok(screens.contains("NodeFloat(node).raiseWatch(it)"), "the raise goes through the node's float call (FL-05)")
         ok(source("src/android/Controller.kt").contains("OwnerNode.start(floatWatching(start))"), "the node is started with the float's watch")
         ok(screens.contains("sealed.wipe()") && screens.contains("FloatWords.rowTitle)"), "the data key is overwritten when the seal cannot be kept, and the unlock prompt is the float's own")
 
@@ -4212,7 +4226,8 @@ object AppModelTest {
         }
 
         val words = FloatWords.all()
-        ok(words.size == 45 && words.toSet().size == words.size, "each float text is written once")
-        ok(words.none { it.contains("WORDS_NEEDED") || it.isBlank() }, "no float text is left as a placeholder")
+        ok(words.size == 49 && words.toSet().size == words.size, "each float text is written once")
+        ok(words.none { it.isBlank() }, "no float text is empty")
+        ok(FloatWords.placeholders().size == 4 && FloatWords.placeholders().all { it.startsWith("WORDS_NEEDED_OA_FL06_") }, "the only float texts not written yet are the four of FL-06, each named after its rule")
     }
 }
