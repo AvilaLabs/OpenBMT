@@ -300,3 +300,28 @@ jobs:
           python3 -I -m py_compile tests/__init__.py tests/test_openbmt_server.py tests/test_openbmt_tour.py
       - name: Polling tests
         run: node --test tests_standalone/payment_openbmt.test.js
+
+  woocommerce-plugin:
+    name: WooCommerce plugin tests (no WordPress needed)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: integrations/woocommerce/openbmt-pay
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      # The runner's own PHP is used, and nothing is downloaded. The image is
+      # expected to have PHP 8.2 or later with sodium; this step fails at once
+      # if it does not, and a setup step would then be added here.
+      - name: The runner's PHP
+        run: |
+          php -v
+          php -r 'exit(PHP_VERSION_ID >= 80200 && function_exists("sodium_crypto_sign_verify_detached") ? 0 : 1);'
+      - name: Syntax check of every file
+        run: |
+          for f in openbmt-pay.php src/*.php wc/*.php tests_standalone/*.php; do
+            php -l "$f"
+          done
+      - name: Standalone tests against the vectors of the Rust side
+        run: tests_standalone/run.sh
