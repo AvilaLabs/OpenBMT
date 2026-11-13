@@ -307,6 +307,40 @@ fn rq_37_the_read_takes_more_returned_than_received_only_with_none_queued() {
 }
 
 #[test]
+fn rq_30_a_quote_in_the_currency_asks_what_its_amount_and_rate_give() {
+    assert_eq!(book().requests()[1].quotes[0].sats, 250_000);
+    refused(|b| b.requests[1].quotes[0].sats += 1);
+    refused(|b| b.requests[1].quotes[0].sats -= 1);
+    // The amount and the rate, changed without the satoshis, are caught too.
+    refused(|b| b.requests[1].quotes[0].owed -= 1);
+    refused(|b| b.requests[1].quotes[0].rate = Rate::new(RATE * 2));
+}
+
+#[test]
+fn rq_30_a_repeat_is_of_a_series_that_starts_with_a_first_request_the_same() {
+    let b = book();
+    assert!(b.requests()[5].repeat.is_some_and(|r| r.index > 0));
+    // A member whose lead differs from the root's.
+    refused(|b| b.requests[5].repeat.as_mut().unwrap().lead ^= 1);
+    // A member with another first due day, its own due date made to agree.
+    refused(|b| {
+        let rep = b.requests[5].repeat.as_mut().unwrap();
+        rep.first_due = Day(rep.first_due.0 + 1);
+        b.requests[5].due = rep.every.due(rep.first_due, rep.index).unwrap();
+    });
+    // A member with another cadence, its own due date made to agree.
+    refused(|b| {
+        let rep = b.requests[5].repeat.as_mut().unwrap();
+        rep.every = Every::Month;
+        b.requests[5].due = rep.every.due(rep.first_due, rep.index).unwrap();
+    });
+    // A member that names a member, not the first request, as its series.
+    refused(|b| b.requests[6].repeat.as_mut().unwrap().series = 6);
+    // A member that names a request that does not repeat.
+    refused(|b| b.requests[5].repeat.as_mut().unwrap().series = 1);
+}
+
+#[test]
 fn rq_34_the_wide_note_of_64_characters_is_read_back() {
     let mut b = RequestBook::new();
     let note = "\u{1f600}".repeat(64);

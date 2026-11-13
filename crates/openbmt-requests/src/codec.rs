@@ -35,7 +35,7 @@ use std::collections::HashSet;
 use bitcoin::ScriptBuf;
 use openbmt_core::currency::ShopCurrency;
 use openbmt_core::wire::{self, DecodeError, Reader};
-use openbmt_counter::money::{value_of, Rate, MAX_SATS};
+use openbmt_counter::money::{sats_for, value_of, Amount, Rate, MAX_SATS};
 use openbmt_counter::refund::{dust_limit, is_payment_script, MAX_SCRIPT_BYTES};
 
 use crate::book::{RequestBook, MAX_REQUESTS, MAX_RETURNS};
@@ -139,6 +139,24 @@ impl RequestBook {
             if let Some(rep) = request.repeat {
                 if rep.index > 0 && rep.series >= request.number {
                     return bad("a repeat names a series that has not begun");
+                }
+                if rep.index > 0 {
+                    // The series starts with a first request of the same
+                    // cadence, first due day and lead.
+                    let root = usize::try_from(rep.series)
+                        .ok()
+                        .and_then(|s| s.checked_sub(1))
+                        .and_then(|s| requests.get(s))
+                        .and_then(|r| r.repeat);
+                    let same = root.is_some_and(|root| {
+                        root.index == 0
+                            && root.every == rep.every
+                            && root.first_due == rep.first_due
+                            && root.lead == rep.lead
+                    });
+                    if !same {
+                        return bad("a repeat is not of the series it names");
+                    }
                 }
             }
         }
@@ -405,6 +423,10 @@ fn decode_request(r: &mut Reader<'_>) -> Result<Request, BookError> {
         };
         if !held || owed == 0 || owed > amount || sats > MAX_SATS {
             return bad("a quote does not fit its request");
+        }
+        // A quote in the currency asks what its amount and rate give.
+        if rate != 0 && rate_of(rate).and_then(|rt| sats_for(Amount(owed), rt)) != Some(sats) {
+            return bad("a quote's satoshis are not what its amount and rate give");
         }
         if quotes.last().is_some_and(|l| l.made_at > made_at) {
             return bad("the quotes are not in the order they were made");
