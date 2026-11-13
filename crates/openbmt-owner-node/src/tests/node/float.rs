@@ -98,7 +98,10 @@ fn fl_05_raising_the_watch_finds_a_payment_past_the_old_end_without_a_restart() 
     // The 30 receive scripts that are new, and the float's own birthday read again.
     assert_eq!(new.iter().filter(|c| *c == "main watch").count(), 30);
     assert_eq!(new.iter().filter(|c| *c == "main rescan 0").count(), 1);
-    assert!(rig.node.float_coins().is_err(), "the coins wait for the rescan");
+    assert!(
+        rig.node.float_coins().is_err(),
+        "the coins wait for the rescan"
+    );
     rig.rescan();
     let held = rig.node.float_coins().unwrap();
     // The payment mined before the raise is found by the rescan.
@@ -107,7 +110,11 @@ fn fl_05_raising_the_watch_finds_a_payment_past_the_old_end_without_a_restart() 
     // And one mined after it, to the new end, with no restart.
     fund(&mut rig, 11, &float_script(Keychain::Receive, 50), 3_000);
     assert_eq!(rig.node.float_coins().unwrap().confirmed, 50_000);
-    assert_eq!(rig.spawned.lock().unwrap().len(), spawned, "no driver was started");
+    assert_eq!(
+        rig.spawned.lock().unwrap().len(),
+        spawned,
+        "no driver was started"
+    );
     // Past the new end it is still not watched.
     fund(&mut rig, 12, &float_script(Keychain::Receive, 52), 1_000);
     assert_eq!(rig.node.float_coins().unwrap().confirmed, 50_000);

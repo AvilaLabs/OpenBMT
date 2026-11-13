@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The refund float against Bitcoin Core, on regtest (docs/FLOAT-RULES.md,
-# FL-02, FL-11, FL-20 to FL-23, FL-35).
+# FL-02, FL-06, FL-11, FL-20 to FL-23, FL-35).
 #
 # Question: does a refund that the `float` module of `openbmt-owner` builds
 # from the float's own coins, signs and finishes get accepted by Bitcoin
@@ -31,6 +31,17 @@
 #   6. The refill amount at Core's own balance of the float (FL-11).
 #   7. Turning the float off (FL-35): every coin goes to the shop's receive
 #      address 3; the float is empty and the shop's wallet holds the coin.
+#   8. The sealed paths (FL-03): the float's Compact SeedQR is sealed as the
+#      owner phone's setup seals it, and a refund signed from the sealed seed
+#      is the same transaction as the one signed from the words, and Core
+#      takes it.
+#   9. The key brought back (FL-06): the same scan again is taken and sealed
+#      anew under a new data key, and the new seal signs a refund Core takes;
+#      the words of the next index and of another shop are refused with the
+#      rule FL-06 and leave the sealed seed and the data key byte for byte as
+#      they were.
+#  10. Turning the float off from the sealed seed (FL-35, FL-03): the move
+#      pays the shop's receive address 4 from every coin, and Core takes it.
 #
 # Needs: Bitcoin Core 32.1 in ~/.local/opt/bitcoin-core-32.1/bin (put first on
 # PATH; set CORE_BIN to use another; the bitcoind in /usr/local/bin is never
@@ -304,6 +315,106 @@ chk "the float holds nothing" [ "$(cli -rpcwallet=float listunspent 0 | jq -r 'l
 chk "the shop's wallet holds the coin at receive index 3" \
   [ "$(cli -rpcwallet=shop listunspent 1 | jq -r --arg t "$SWEEP_TXID" '[.[] | select(.txid == $t) | .desc | capture("/(?<c>[01])/(?<i>[0-9]+)\\]") | "\(.c)/\(.i)"] | tostring')" = '["0/3"]' ]
 rule FL-35 "$mark" "turning the float off pays the shop's own address from every coin, and the float is empty"
+
+# ---- the sealed paths ----------------------------------------------------------------
+say "8. The float's scan is sealed, and a refund is signed from the sealed seed"
+mark=$FAILS
+DESCRIPTION=$(sed -n 's/^descriptor //p' "$WORK/float-keys.txt")
+SCAN=$(fact scan "$(ex scan --which float)")
+out=$(ex seal --scan "$SCAN" --sealed "$WORK/sealed.hex" --key "$WORK/key.hex")
+code=$?
+sed 's/^/      /' <<<"$out"
+chk "the library sealed the float's scan" [ "$code" = 0 ]
+chk "the sealed float is the same wallet: its description is the float's" [ "$(fact description "$out")" = "$DESCRIPTION" ]
+chk "its first address is the float's receive address 0" [ "$(fact address0 "$out")" = "${FADDR[0]}" ]
+chk "the data key is 32 bytes and the sealed seed is 45 bytes" bash -c '[ "$(wc -c <"$1")" = 64 ] && [ "$(wc -c <"$2")" = 90 ]' _ "$WORK/key.hex" "$WORK/sealed.hex"
+for pair in "4 90000" "5 50000"; do
+  set -- $pair
+  cli -rpcwallet=miner sendtoaddress "${FADDR[$1]}" "$(btc "$2")" >/dev/null || die "funding $1 failed"
+done
+cli generatetoaddress 1 "$MINE" >/dev/null
+make_coins "$WORK/coins5.txt" float
+chk "the float holds 140000 sat in two coins again" \
+  [ "$(cli -rpcwallet=float listunspent 1 | jq -c '[.[] | .amount * 100000000 | round] | sort')" = "[50000,90000]" ]
+BEFORE=$(cli -rpcwallet=float listunspent 1 | jq -c '[.[] | "\(.txid):\(.vout)"] | sort')
+DEST3=$(cli -rpcwallet=miner getnewaddress)
+TIP=$(cli getblockcount)
+ex_pay_args=(--coins "$WORK/coins5.txt" --addr "$DEST3" --sats 30000 --rate "$RATE" --change-index 2 --lock-height "$TIP")
+out=$(ex pay-sealed --sealed "$WORK/sealed.hex" --key "$WORK/key.hex" "${ex_pay_args[@]}" --out "$WORK/refund3.hex")
+code=$?
+sed 's/^/      /' <<<"$out"
+chk "the library paid the refund from the sealed seed" [ "$code" = 0 ]
+direct=$(ex pay "${ex_pay_args[@]}" --out "$WORK/refund3-direct.hex")
+chk "it is the transaction that the words themselves sign" [ "$(fact txid "$direct")" = "$(fact txid "$out")" ]
+HEX=$(cat "$WORK/refund3.hex")
+DEC=$(cli decoderawtransaction "$HEX")
+chk "every input is a coin the float held, and the outputs are the refund and the float's change address 2" \
+  [ "$(jq -n --argjson d "$DEC" --argjson b "$BEFORE" --arg a "$DEST3" --arg c "${FCHANGE[2]}" \
+    '([$d.vin[] | "\(.txid):\(.vout)"] | all(. as $x | $b | index($x) != null)) and ([$d.vout[].scriptPubKey.address] | sort == ([$a, $c] | sort))')" = true ]
+accept_send "$HEX" "$(fact txid "$out")" "$RATE"
+chk "the refund's destination holds 30000 sat" \
+  [ "$(cli -rpcwallet=miner getreceivedbyaddress "$DEST3" | jq -r '. * 100000000 | round')" = 30000 ]
+rule FL-03 "$mark" "a refund signed from the sealed seed is the words' own transaction, and Core takes it"
+
+say "9. The key brought back: the same words again are taken, others are refused"
+mark=$FAILS
+sha() { sha256sum "$1" | cut -d' ' -f1; }
+SEALED_BEFORE=$(sha "$WORK/sealed.hex")
+KEY_BEFORE=$(sha "$WORK/key.hex")
+out=$(ex restore --scan "$SCAN" --description "$DESCRIPTION" --sealed "$WORK/sealed2.hex" --key "$WORK/key2.hex")
+code=$?
+sed 's/^/      /' <<<"$out"
+chk "the library took the float's words scanned again" [ "$code" = 0 ]
+chk "the restored wallet is the recorded float" [ "$(fact description "$out")" = "$DESCRIPTION" ]
+chk "the new data key is not the old one, and the new sealed seed is not the old" \
+  bash -c '[ "$1" != "$2" ] && [ "$3" != "$4" ]' _ "$(sha "$WORK/key2.hex")" "$KEY_BEFORE" "$(sha "$WORK/sealed2.hex")" "$SEALED_BEFORE"
+chk "the old data key does not open the new sealed seed" bash -c '
+  out=$("$1" pay-sealed --sealed "$2" --key "$3" --coins "$4" --addr "$5" --sats 1000 --rate "$6" --change-index 3 --lock-height 0 --out "$7")
+  [ "$?" = 2 ] && grep -q "^refused SS-" <<<"$out"' _ "$FLOAT_BIN" "$WORK/sealed2.hex" "$WORK/key.hex" "$WORK/coins5.txt" "$DEST3" "$RATE" "$WORK/nope.hex"
+for which in index1 shop; do
+  wrong=$(fact scan "$(ex scan --which "$which")")
+  out=$(ex restore --scan "$wrong" --description "$DESCRIPTION" --sealed "$WORK/sealed.hex" --key "$WORK/key.hex")
+  code=$?
+  note "$which: $out"
+  chk "the words of $which are refused with the rule FL-06 (exit 2)" bash -c '[ "$1" = 2 ] && grep -q "^refused FL-06" <<<"$2"' _ "$code" "$out"
+  chk "the sealed seed and the data key are byte for byte as they were" \
+    [ "$(sha "$WORK/sealed.hex")" = "$SEALED_BEFORE" -a "$(sha "$WORK/key.hex")" = "$KEY_BEFORE" ]
+done
+out=$(ex restore --scan "$(fact scan "$(ex scan --which index1)")" --description "$DESCRIPTION" --sealed "$WORK/sealed3.hex" --key "$WORK/key3.hex")
+chk "a refusal writes no file" [ ! -e "$WORK/sealed3.hex" -a ! -e "$WORK/key3.hex" ]
+# The new seal signs a refund of the float's coins.
+make_coins "$WORK/coins6.txt" float
+DEST4=$(cli -rpcwallet=miner getnewaddress)
+TIP=$(cli getblockcount)
+out=$(ex pay-sealed --sealed "$WORK/sealed2.hex" --key "$WORK/key2.hex" --coins "$WORK/coins6.txt" --addr "$DEST4" --sats 25000 \
+  --rate "$RATE" --change-index 3 --lock-height "$TIP" --out "$WORK/refund4.hex")
+code=$?
+sed 's/^/      /' <<<"$out"
+chk "the restored seal signs a refund" [ "$code" = 0 ]
+accept_send "$(cat "$WORK/refund4.hex")" "$(fact txid "$out")" "$RATE"
+chk "the refund's destination holds 25000 sat" \
+  [ "$(cli -rpcwallet=miner getreceivedbyaddress "$DEST4" | jq -r '. * 100000000 | round')" = 25000 ]
+rule FL-06 "$mark" "the float's words scanned again are taken and sealed anew, other words are refused and change nothing, and the new seal signs"
+
+say "10. Turning the float off from the restored seal: every coin to the shop's receive address 4"
+mark=$FAILS
+make_coins "$WORK/coins7.txt" float
+N=$(grep -c . "$WORK/coins7.txt")
+TIP=$(cli getblockcount)
+out=$(ex sweep-sealed --sealed "$WORK/sealed2.hex" --key "$WORK/key2.hex" --coins "$WORK/coins7.txt" --shop-index 4 \
+  --rate "$RATE" --lock-height "$TIP" --out "$WORK/sweep2.hex")
+code=$?
+sed 's/^/      /' <<<"$out"
+chk "the library swept the float from the sealed seed" [ "$code" = 0 ]
+chk "the destination is the shop's receive address 4" [ "$(fact to "$out")" = "${SADDR[4]}" ]
+chk "every coin of the float is spent ($N)" [ "$(fact inputs "$out")" = "$N" ]
+chk "there is no change" [ "$(fact change "$out")" = none ]
+SWEEP2_TXID=$(fact txid "$out")
+accept_send "$(cat "$WORK/sweep2.hex")" "$SWEEP2_TXID" "$RATE"
+chk "the float holds nothing" [ "$(cli -rpcwallet=float listunspent 0 | jq -r 'length')" = 0 ]
+chk "the shop's wallet holds the coin at receive index 4" \
+  [ "$(cli -rpcwallet=shop listunspent 1 | jq -r --arg t "$SWEEP2_TXID" '[.[] | select(.txid == $t) | .desc | capture("/(?<c>[01])/(?<i>[0-9]+)\\]") | "\(.c)/\(.i)"] | tostring')" = '["0/4"]' ]
+rule FL-35 "$mark" "turning the float off from the sealed seed pays the shop's own address from every coin"
 
 echo
 if [ "$FAILS" = 0 ]; then

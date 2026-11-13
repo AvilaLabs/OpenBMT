@@ -427,7 +427,11 @@ fn restore_call(reg: &Registry, scan: &[u8], description: &str) -> Vec<u8> {
 fn fl_06_the_words_of_the_recorded_float_are_sealed_anew_and_no_word_comes_back() {
     let reg = seal_registry();
     let scan = scan_bytes();
-    let first = Rd::ok(&dispatch(&reg, &frame(OP_SEAL, 0, &W::new().bytes(&scan).0))).bytes();
+    let first = Rd::ok(&dispatch(
+        &reg,
+        &frame(OP_SEAL, 0, &W::new().bytes(&scan).0),
+    ))
+    .bytes();
     let response = restore_call(&reg, &scan, float().description());
     let mut r = Rd::ok(&response);
     let (sealed, key, description, address) = (r.bytes(), r.bytes(), r.string(), r.string());
@@ -445,8 +449,12 @@ fn fl_06_the_words_of_the_recorded_float_are_sealed_anew_and_no_word_comes_back(
 #[test]
 fn fl_06_words_of_another_index_are_refused_with_the_rule_and_seal_nothing() {
     let reg = seal_registry();
-    let fault = Rd::error(&restore_call(&reg, &other_scan_bytes(), float().description()))
-        .expect("refused");
+    let fault = Rd::error(&restore_call(
+        &reg,
+        &other_scan_bytes(),
+        float().description(),
+    ))
+    .expect("refused");
     assert_eq!(fault.rule, "FL-06");
     assert!(fault.words.heading.starts_with("WORDS_NEEDED_FL06_"));
     // A scan that is not 12 words keeps the setup's rule; a description that

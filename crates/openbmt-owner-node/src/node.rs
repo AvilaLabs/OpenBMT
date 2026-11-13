@@ -1726,7 +1726,11 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// may be in a block that was read before. The float's coins wait for that
     /// rescan, as those of the shop's wallet do. With no float watched it says
     /// so.
-    pub fn raise_float_watch(&mut self, receive_end: u32, change_end: u32) -> Result<(), NodeError> {
+    pub fn raise_float_watch(
+        &mut self,
+        receive_end: u32,
+        change_end: u32,
+    ) -> Result<(), NodeError> {
         if let Some(why) = &self.halted {
             return Err(NodeError::NotReady(why.clone()));
         }

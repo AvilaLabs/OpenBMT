@@ -17,7 +17,21 @@
 //!     --lock-height N --out FILE
 //! float sweep --coins FILE --shop-index N --rate N --lock-height N --out FILE
 //! float refill --cap N --confirmed N --unconfirmed N [--amount N] --index N
+//! float scan --which float|index1|shop
+//! float seal --scan HEX --sealed FILE --key FILE
+//! float restore --scan HEX --description TEXT --sealed FILE --key FILE
+//! float pay-sealed --sealed FILE --key FILE --coins FILE --addr A --sats N --rate N
+//!     --change-index N --lock-height N --out FILE
+//! float sweep-sealed --sealed FILE --key FILE --coins FILE --shop-index N --rate N
+//!     --lock-height N --out FILE
 //! ```
+//!
+//! The last five are the sealed paths of the owner phone (FL-03, FL-06): `scan`
+//! gives the 16 bytes of a Compact SeedQR (the float's, the next index's of
+//! the BIP-85 specification's master, or another shop's); `seal` seals one as
+//! the setup does and writes the sealed seed and the data key as hex;
+//! `restore` takes a scan again only for the recorded float and writes
+//! nothing when it refuses; the two that pay sign from the sealed seed.
 //!
 //! The output is one fact per line. Exit code 0 is success, 2 a refusal by
 //! the library, 1 any other problem.
@@ -34,12 +48,16 @@ use bitcoin::{Address, Network, NetworkKind, OutPoint, Transaction, Txid};
 use openbmt_core::wallet::Keychain;
 use openbmt_core::wallet_single::{ImportedWallet, SingleKeyWallet};
 use openbmt_owner::float::{
-    pay_refund, refill_amount, shop_receive_script, sweep, Coin, FloatPaid, FloatRefusal,
+    pay_refund, pay_refund_sealed, refill_amount, restore_compact_seedqr, seal_compact_seedqr,
+    shop_receive_script, sweep, sweep_sealed, Coin, FloatPaid, FloatRefusal, FloatSealError,
     FloatWallet, FloatWords,
 };
+use openbmt_owner::starter::{DataKey, KernelRandom};
 
 const NETWORK: Network = Network::Regtest;
 const WORDS: &str = "girl mad pet galaxy egg matter matrix prison refuse sense ordinary nose";
+/// The BIP-85 specification's master key, whose index 0 child is `WORDS`.
+const BIP85_MASTER: &str = "xprv9s21ZrQH143K2LBWUUQRFXhucrQqBpKdRRxNVq2zBqsx8HVqFk2uYo8kmbaLLHRdqtQpUm98uKfu3vca1LqdGhUtyoFnCNkfmXRyPXLjbKb";
 
 struct Args(HashMap<String, String>);
 
@@ -263,10 +281,184 @@ fn cmd_refill(args: &[String]) -> Result<ExitCode, String> {
     }
 }
 
+/// The kernel's bytes, as the starter wallet's example reads them.
+struct Kernel;
+
+impl KernelRandom for Kernel {
+    fn read32(&mut self) -> Option<[u8; 32]> {
+        openbmt_kernel_random::read32().ok()
+    }
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn from_hex(text: &str) -> Result<Vec<u8>, String> {
+    let text = text.trim();
+    if text.len() % 2 != 0 || !text.is_ascii() {
+        return Err("hex of whole bytes is needed".to_string());
+    }
+    (0..text.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&text[i..i + 2], 16).map_err(|e| e.to_string()))
+        .collect()
+}
+
+/// BIP-85 for 12 BIP39 words, `m/83696968'/39'/0'/12'/<index>'` of the
+/// specification's master: the 16 bytes of entropy.
+fn bip85_entropy(secp: &Secp256k1<bitcoin::secp256k1::All>, index: u32) -> Result<Vec<u8>, String> {
+    use bitcoin::hashes::{hmac, sha512, Hash, HashEngine};
+    let master = Xpriv::from_str(BIP85_MASTER).map_err(|e| e.to_string())?;
+    let path = DerivationPath::from_str(&format!("m/83696968'/39'/0'/12'/{index}'"))
+        .map_err(|e| e.to_string())?;
+    let child = master.derive_priv(secp, &path).map_err(|e| e.to_string())?;
+    let mut engine = hmac::HmacEngine::<sha512::Hash>::new(b"bip-entropy-from-k");
+    engine.input(&child.private_key.secret_bytes());
+    let digest = hmac::Hmac::<sha512::Hash>::from_engine(engine).to_byte_array();
+    Ok(digest[..16].to_vec())
+}
+
+fn cmd_scan(args: &[String]) -> Result<ExitCode, String> {
+    let secp = Secp256k1::new();
+    let a = parse_args(args)?;
+    let entropy = match a.one("which")? {
+        "float" => bip85_entropy(&secp, 0)?,
+        "index1" => bip85_entropy(&secp, 1)?,
+        // Another shop's words: the 12 words of all zero entropy.
+        "shop" => vec![0u8; 16],
+        other => return Err(format!("--which {other}")),
+    };
+    println!("scan {}", to_hex(&entropy));
+    Ok(ExitCode::SUCCESS)
+}
+
+/// A refusal of the sealed paths, as one line: the library's rule and text.
+fn sealed_refused(e: &FloatSealError) -> Result<ExitCode, String> {
+    match e {
+        FloatSealError::Float(f) => refused(f),
+        FloatSealError::Seal(s) => {
+            println!("refused {} {s:?}", s.rule());
+            Ok(ExitCode::from(2))
+        }
+    }
+}
+
+fn write_sealed(a: &Args, made: &openbmt_owner::float::FloatSealed) -> Result<(), String> {
+    fs::write(a.one("sealed")?, to_hex(&made.sealed.sealed)).map_err(|e| e.to_string())?;
+    fs::write(a.one("key")?, to_hex(made.sealed.data_key.as_bytes())).map_err(|e| e.to_string())?;
+    println!("description {}", made.wallet.description());
+    println!(
+        "address0 {}",
+        Address::from_script(
+            &made
+                .wallet
+                .script(Keychain::Receive, 0)
+                .map_err(|e| e.to_string())?,
+            NETWORK
+        )
+        .map_err(|e| e.to_string())?
+    );
+    Ok(())
+}
+
+fn cmd_seal(args: &[String]) -> Result<ExitCode, String> {
+    let a = parse_args(args)?;
+    let scan = from_hex(a.one("scan")?)?;
+    match seal_compact_seedqr(&scan, &mut Kernel) {
+        Ok(made) => {
+            write_sealed(&a, &made)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Err(e) => sealed_refused(&e),
+    }
+}
+
+/// FL-06: nothing is written unless the scan is the recorded float's.
+fn cmd_restore(args: &[String]) -> Result<ExitCode, String> {
+    let a = parse_args(args)?;
+    let scan = from_hex(a.one("scan")?)?;
+    let recorded = FloatWallet::parse(a.one("description")?).map_err(|e| e.to_string())?;
+    match restore_compact_seedqr(&scan, &recorded, &mut Kernel) {
+        Ok(made) => {
+            write_sealed(&a, &made)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Err(e) => sealed_refused(&e),
+    }
+}
+
+fn read_sealed(a: &Args) -> Result<(Vec<u8>, DataKey), String> {
+    let sealed = from_hex(&fs::read_to_string(a.one("sealed")?).map_err(|e| e.to_string())?)?;
+    let key = from_hex(&fs::read_to_string(a.one("key")?).map_err(|e| e.to_string())?)?;
+    let key = DataKey::from_slice(&key).map_err(|e| format!("{e:?}"))?;
+    Ok((sealed, key))
+}
+
+fn cmd_pay_sealed(args: &[String]) -> Result<ExitCode, String> {
+    let a = parse_args(args)?;
+    let coins = read_coins(a.one("coins")?)?;
+    let (sealed, key) = read_sealed(&a)?;
+    let to = Address::from_str(a.one("addr")?)
+        .map_err(|e| e.to_string())?
+        .require_network(NETWORK)
+        .map_err(|e| e.to_string())?;
+    match pay_refund_sealed(
+        &sealed,
+        &key,
+        &coins,
+        &to.script_pubkey(),
+        a.number("sats")?,
+        a.number("rate")?,
+        a.small("change-index")?,
+        1,
+        a.small("lock-height")?,
+    ) {
+        Ok(paid) => {
+            report(&paid, a.one("out")?)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Err(e) => sealed_refused(&e),
+    }
+}
+
+fn cmd_sweep_sealed(args: &[String]) -> Result<ExitCode, String> {
+    let secp = Secp256k1::new();
+    let a = parse_args(args)?;
+    let coins = read_coins(a.one("coins")?)?;
+    let (sealed, key) = read_sealed(&a)?;
+    let (shop_wallet, _) = shop(&secp)?;
+    let pinned =
+        ImportedWallet::read(shop_wallet.canonical_string()).map_err(|e| format!("{e:?}"))?;
+    let to = match shop_receive_script(&pinned, a.small("shop-index")?) {
+        Ok(s) => s,
+        Err(e) => return refused(&e),
+    };
+    println!(
+        "to {}",
+        Address::from_script(&to, NETWORK).map_err(|e| e.to_string())?
+    );
+    match sweep_sealed(
+        &sealed,
+        &key,
+        &coins,
+        &to,
+        a.number("rate")?,
+        1,
+        a.small("lock-height")?,
+    ) {
+        Ok(paid) => {
+            report(&paid, a.one("out")?)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Err(e) => sealed_refused(&e),
+    }
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some((cmd, rest)) = args.split_first() else {
-        eprintln!("float keys|pay|sweep|refill ...");
+        eprintln!("float keys|pay|sweep|refill|scan|seal|restore|pay-sealed|sweep-sealed ...");
         return ExitCode::from(1);
     };
     let result = match cmd.as_str() {
@@ -274,6 +466,11 @@ fn main() -> ExitCode {
         "pay" => cmd_pay(rest),
         "sweep" => cmd_sweep(rest),
         "refill" => cmd_refill(rest),
+        "scan" => cmd_scan(rest),
+        "seal" => cmd_seal(rest),
+        "restore" => cmd_restore(rest),
+        "pay-sealed" => cmd_pay_sealed(rest),
+        "sweep-sealed" => cmd_sweep_sealed(rest),
         other => Err(format!("unknown command {other}")),
     };
     match result {

@@ -863,7 +863,10 @@ fn fl_06_the_right_words_for_the_recorded_wallet_are_taken_and_sealed_anew() {
     let again =
         restore_compact_seedqr(&entropy_of(BIP85_CHILD_0), &recorded, &mut Steady(40)).unwrap();
     assert_eq!(again.wallet, recorded);
-    assert_ne!(again.sealed.data_key.as_bytes(), first.sealed.data_key.as_bytes());
+    assert_ne!(
+        again.sealed.data_key.as_bytes(),
+        first.sealed.data_key.as_bytes()
+    );
     assert_ne!(again.sealed.sealed, first.sealed.sealed);
     let opened = wallet_of_sealed(&again.sealed.sealed, &again.sealed.data_key).unwrap();
     assert_eq!(opened, recorded);
