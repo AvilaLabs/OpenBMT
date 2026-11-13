@@ -100,7 +100,8 @@ an end, payments in parts, repeats and returns.
 ## 4. Matching what arrives
 
 - **RQ-15.** Every output paid to a request's address in a checked block is
-  a payment to that request, in the order of the blocks. Each payment is
+  a payment to that request, in the order of the blocks. An output of zero
+  satoshis is not a payment and is not recorded. Each payment is
   credited as follows, and what is still owed is the amount less every
   credit, never below zero.
   - **In bitcoin:** its satoshis.
@@ -131,6 +132,15 @@ an end, payments in parts, repeats and returns.
   in the books, nothing more is asked, and it leaves the list of open
   requests. A later payment to it is listed as "Paid after it was closed"
   and offered for return.
+- **RQ-37. A block that leaves the chain.** When the shop's checked chain
+  drops blocks, every payment recorded from a dropped block is taken back,
+  and each request's state is worked out again from what remains (RQ-16).
+  A payment in a block of the new chain is credited as any other. Where the
+  returns of a request then come to more than it received, its queued
+  returns are taken off the queue, newest first, until they no longer do;
+  a return already in a spend or done stays, and the request shows that
+  more was returned than it now received, for the owner to decide. Nothing
+  is paid or cancelled without the owner.
 
 ## 5. Due, overdue and asking again
 
@@ -187,7 +197,9 @@ an end, payments in parts, repeats and returns.
   for the shop's wallet to sign (SP-80 to SP-87 for a wallet with one key).
   A return is marked done when the spend that pays it is confirmed, and goes
   back to the queue if the spend is replaced without it (OC-03). The books
-  record each return against its request.
+  record each return against its request. A return is accepted only while
+  fewer than 99 returns are queued or in a spend not yet confirmed, so a
+  spend replaced without them never brings the queue above 99.
 
 ## 8. The request book
 
@@ -197,7 +209,11 @@ an end, payments in parts, repeats and returns.
   atomic steps (new file, sync, rename, sync of the folder). The read is
   strict: another magic or version, a count over its limit, a field out of
   range or bytes left over is refused, and what decodes encodes to the same
-  bytes.
+  bytes. The read also refuses a book that contradicts itself: a quote whose
+  satoshis are not what its amount and rate give, a credit of zero
+  satoshis, more than 99 returns queued or in a spend, and a repeat whose
+  series does not start with a first request of the same cadence, first
+  due day and lead.
 - **RQ-31.** A book that cannot be read is not replaced: the owner app
   shows the words of RQ-36 and makes no new request until it can be read,
   so an index is never handed out twice.
