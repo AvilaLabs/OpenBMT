@@ -33,6 +33,8 @@ internal fun Controller.showConnectBox(message: SayWords? = null, prefill: Strin
         begin()
         return
     }
+    // A shop with its own wallet has no Key app: the Box is connected by the phone's own invitation (BX-18).
+    if (ConnectBoxChoice.of(hasSetupFile(), ownStore.hasWallet()) != ConnectBoxPath.KeyApp) return showOwnConnectBox()
     val msg = Slot(act)
     val views = ArrayList<View>()
     message?.let { views.add(ui.words(it)) }

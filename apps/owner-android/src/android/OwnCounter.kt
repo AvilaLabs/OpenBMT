@@ -32,7 +32,7 @@ internal fun Controller.showOwnAddCounter() {
 }
 
 internal fun Controller.showOwnCounter(r: OwnPairExit, message: SayWords? = null) {
-    val p = ownPairing ?: OwnPairing({ ownStore.args() }, starter = { starterPinned() }).also { fresh ->
+    val p = ownPairing ?: OwnPairing({ ownStore.args() }, starter = { starterPinned() }, relay = { OwnBoxLink.relayOf(ownStore) }).also { fresh ->
         ownPairing = fresh
         val said = fresh.start(nowSecs())
         if (said != null) return ownStopped(r, said)
@@ -66,7 +66,7 @@ private fun Controller.ownStopped(r: OwnPairExit, words: SayWords) {
 }
 
 /** A code of the library's, drawn as the animated code of the shared view; the words when it cannot be shown. */
-private fun Controller.codeCardOf(code: ByteArray): View {
+internal fun Controller.codeCardOf(code: ByteArray): View {
     val shown = AnimatedQrView.make(
         act, ExchangeModel.WHO, ExchangeModel.TYPE_BYTES, code,
         ExchangeModel.codeHeight(act.resources.displayMetrics.heightPixels),
@@ -185,7 +185,8 @@ private fun Controller.showOwnPaired(r: OwnPairExit, p: OwnPairing) {
     val views = listOf(heading(OwnPairWords.paired(p.name())), para(OwnPairWords.pairedText), ui.text(OwnPairWords.pairedNext, 15f, bold = true))
     val done = ui.primary(FirstRunWords.tillStepsDone) {
         ownPairing = null
-        r.done()
+        // A counter paired later is followed from the settings; the node starts again only if the kept link is not the one it has.
+        if (!restartIfLinkChanged()) r.done()
     }
     val wallet = ui.button(OwnPairWords.walletButton) { showOwnWallet(r) }
     stepScreen(OwnPairWords.title, views, listOf(done, wallet), { }, tone = ui.pal.good)

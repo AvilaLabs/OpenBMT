@@ -2892,6 +2892,7 @@ object AppModelTest {
         var pinFile: ((String) -> ByteArray)? = null,
     ) : OwnLibrary {
         val calls = ArrayList<String>()
+        val relays = ArrayList<ByteArray?>()
         val pinned = ArrayList<String>()
         val counter = ByteArray(32) { 7 }
         val code = ByteArray(40) { (it + 1).toByte() }
@@ -2932,6 +2933,7 @@ object AppModelTest {
 
         override fun confirm(shop: OwnShopArgs, made: OwnMade, now: Long, request: ByteArray, usdPerBtc: Long, relay: ByteArray?): OwnBundleView {
             calls.add("confirm:$usdPerBtc")
+            relays.add(relay)
             refuseIfAsked()
             return OwnBundleView(counter, ByteArray(50) { 5 }, 0, 1_000, 1, listOf(CounterShare(counter, 10_000)))
         }
@@ -3013,6 +3015,167 @@ object AppModelTest {
         // The screen draws the offer as the shared animated code of OA-24 and gives it a scan button.
         val src = source("src/android/OwnCounter.kt")
         ok(src.contains("AnimatedQrView.make(") && src.contains("ExchangeModel.TYPE_BYTES") && src.contains("OwnPairWords.offerScan"), "the offer is a ur:bytes code, as a bundle is")
+    }
+
+    /** A library that stands in for the Box calls of a shop with its own wallet (BX-17, BX-18). */
+    private class FakeBox(var refuse: Words? = null, val counters: List<ByteArray> = listOf(ByteArray(32) { 3 }, ByteArray(32) { 4 })) : OwnBoxLibrary {
+        val calls = ArrayList<String>()
+        val boxKey = ByteArray(32) { 6 }
+
+        private fun refuseIfAsked() {
+            refuse?.let { throw OwnerException("BX-14", "refused", 1, it) }
+        }
+
+        override fun invitation(now: Long): org.openbmt.owner.BoxOwnInvitation {
+            calls.add("invitation")
+            return org.openbmt.owner.BoxOwnInvitation("AAAA-BBBB-CCCC", now + 1_800)
+        }
+
+        override fun check(invitation: String, claim: ByteArray): org.openbmt.owner.BoxOwnCheck {
+            calls.add("check")
+            refuseIfAsked()
+            return org.openbmt.owner.BoxOwnCheck(boxKey, listOf("able", "acid", "also", "apex"))
+        }
+
+        override fun welcome(shop: OwnShopArgs, link: org.openbmt.owner.BoxLink, invitation: String, claim: ByteArray, usdPerBtc: Long): org.openbmt.owner.BoxDelivered {
+            calls.add("welcome:${link.address}:${link.proxy}:$usdPerBtc")
+            refuseIfAsked()
+            return org.openbmt.owner.BoxDelivered(boxKey, counters, 2)
+        }
+
+        override fun relay(ownerSecret: ByteArray, address: String, relayKey: ByteArray): ByteArray {
+            calls.add("relay:$address")
+            return byteArrayOf(0x4f, 0x42, 0x4d, 0x7a)
+        }
+    }
+
+    private fun bx_18_ownBoxTests() {
+        val key = ByteArray(32) { 6 }
+        val counters = listOf(ByteArray(32) { 3 }, ByteArray(32) { 4 })
+        // The link: its bytes read back, a cut or a stray file is refused, and it names the Box and its address.
+        val link = OwnLink("192.168.1.20:8080", key, counters)
+        val back = OwnLink.decode(link.encode())
+        ok(back.address == link.address && back.relayKey.contentEquals(key) && back.needsRelay.size == 2 && back.needsRelay[1].contentEquals(counters[1]), "BX-18: the link reads back as it was kept")
+        for (bad in listOf(ByteArray(0), link.encode().copyOf(20), link.encode() + byteArrayOf(0), byteArrayOf(1) + link.encode().copyOfRange(1, link.encode().size))) {
+            var refused = false
+            try { OwnLink.decode(bad) } catch (_: IOException) { refused = true }
+            ok(refused, "BX-18: a file that is not a link is refused")
+        }
+        ok(link.id() != OwnLink("192.168.1.21:8080", key, counters).id() && link.id() == back.id(), "BX-18: a link is named by its address and its key")
+        ok(link.without(counters[0]).needsRelay.size == 1 && link.without(counters[0]).needsRelay[0].contentEquals(counters[1]), "BX-18: a counter that took the relay leaves the list")
+        val direct = link.config("127.0.0.1:9050")
+        ok(direct.route is org.openbmt.owner.Route.Direct && (direct.route as org.openbmt.owner.Route.Direct).addr == "192.168.1.20:8080" && direct.counters.isEmpty() && direct.relayKey.contentEquals(key), "BX-18: a local address is reached directly, and the counters come from the settings")
+        val onion = OwnLink("abcdefghijklmnop.onion:8080", key, emptyList()).config("127.0.0.1:9050").route as org.openbmt.owner.Route.Onion
+        ok(onion.proxy == "127.0.0.1:9050" && onion.host == "abcdefghijklmnop.onion" && onion.port == 8080L, "BX-18: an onion address goes through the proxy")
+
+        // The store keeps the link sealed, in its own file, beside the wallet and the owner root.
+        val dir = tempDir()
+        try {
+            val store = OwnShopStore(dir, testSealer())
+            ok(!store.hasLink() && store.loadLink() == null, "BX-18: no link before a Box is connected")
+            store.saveLink(link)
+            ok(store.hasLink() && store.loadLink()!!.id() == link.id(), "BX-18: the link is kept and read back")
+            val raw = File(dir, AppFiles.OWN_LINK_FILE).readBytes()
+            ok(raw.toList().windowed(8).none { w -> w == link.address.toByteArray().take(8) } && raw.toList().windowed(4).none { it == key.take(4) }, "BX-18: the address and the key are not in the file in the clear")
+            File(dir, AppFiles.OWN_LINK_FILE).writeBytes(raw.copyOf(raw.size - 1))
+            var refused = false
+            try { store.loadLink() } catch (_: IOException) { refused = true }
+            ok(refused, "BX-18: a link file that does not open is refused, not read as none")
+        } finally {
+            dir.deleteRecursively()
+        }
+
+        // The node is started with the link; without one it is as before (OA-107).
+        val shop = OwnShopArgs("/shop/own", ByteArray(32) { 7 }, byteArrayOf(1, 2, 3))
+        val defaults = org.openbmt.owner.CeremonyDefaults(3, 6, 481_824)
+        val started = OwnStart.config(shop, defaults, OwnerNetwork.Mainnet, 1_000, "127.0.0.1:9050", link)
+        ok(started.link != null && started.link!!.relayKey.contentEquals(key) && started.link!!.heartbeatEverySecs == 0L, "BX-18: the config carries the link, with the default intervals")
+        ok(OwnStart.config(shop, defaults, OwnerNetwork.Mainnet, 1_000, "127.0.0.1:9050").link == null, "BX-18: a shop with no Box starts with no link")
+
+        // The way is chosen by the shop's kind.
+        ok(ConnectBoxChoice.of(setupFile = true, ownWallet = false) == ConnectBoxPath.KeyApp && ConnectBoxChoice.of(setupFile = true, ownWallet = true) == ConnectBoxPath.KeyApp, "BX-18: a shop with a setup file keeps the Key app's way")
+        ok(ConnectBoxChoice.of(setupFile = false, ownWallet = true) == ConnectBoxPath.OwnWallet && ConnectBoxChoice.of(setupFile = false, ownWallet = false) == ConnectBoxPath.KeyApp, "BX-18: a shop with its own wallet connects by its own invitation")
+
+        // The ceremony: invitation, the Box's claim, the words, the rest, the welcome, the link kept.
+        val dir2 = tempDir()
+        try {
+            val store = OwnShopStore(dir2, testSealer())
+            val lib = FakeBox()
+            ok(OwnBoxPairing(store, lib).start(1_000)!!.heading == OwnPairWords.noWallet.heading && lib.calls.isEmpty(), "BX-18: with no wallet kept no invitation is made")
+            store.saveWallet(byteArrayOf(1, 2, 3)); store.saveOwner(ByteArray(32) { 1 })
+            val p = OwnBoxPairing(store, lib)
+            ok(p.start(1_000) == null && p.step == OwnBoxStep.Invitation && p.invitation!!.text == "AAAA-BBBB-CCCC" && !p.ended(1_100) && p.ended(3_000), "BX-18: the invitation is shown, for 30 minutes")
+            p.toAddress()
+            ok(p.step == OwnBoxStep.Address && p.back() && p.step == OwnBoxStep.Invitation, "BX-18: Back from the address is the invitation")
+            p.toAddress()
+            lib.refuse = Words(Tones.STOP, Who.OWNER, "Not this invitation", "The claim does not answer it.", "Start again.", "BX-14", null, null, null)
+            val claim = org.openbmt.owner.BoxFound(ByteArray(40) { 9 }, key, true)
+            ok(p.found("192.168.1.20:8080", claim)!!.heading == "Not this invitation" && p.step == OwnBoxStep.Address, "BX-18: a claim that does not answer the invitation is refused with the library's words")
+            lib.refuse = null
+            ok(p.found("192.168.1.20:8080", claim) == null && p.step == OwnBoxStep.Words && p.checked!!.words.size == 4 && p.needsRate, "BX-18: the four words are shown and the price is asked for")
+            ok(p.send(1, "") == null && p.step == OwnBoxStep.Words && lib.calls.none { it.startsWith("welcome") }, "BX-18: nothing is sent before the words are compared")
+            p.match()
+            ok(p.step == OwnBoxStep.Rest, "BX-18: the words matched, the statement follows")
+            val said = p.send(65_000, "127.0.0.1:9050")
+            ok(said == null && p.step == OwnBoxStep.Sent && lib.calls.last() == "welcome:192.168.1.20:8080::65000", "BX-18: the welcome is sent to a local address with no proxy")
+            val kept = store.loadLink()!!
+            ok(kept.address == "192.168.1.20:8080" && kept.relayKey.contentEquals(key) && kept.needsRelay.size == 2, "BX-18: the link is kept, with the counters that were paired before the Box")
+            ok(p.needsRelay().size == 2 && p.relayCode()!!.size == 4 && lib.calls.last() == "relay:192.168.1.20:8080", "BX-18: the relay code is the owner's, for the kept link")
+            p.relayTaken(counters[0])
+            ok(p.needsRelay().size == 1 && store.loadLink()!!.needsRelay[0].contentEquals(counters[1]), "BX-18: a counter that took the relay leaves the list, and that is kept")
+            p.relayTaken(counters[1])
+            ok(p.needsRelay().isEmpty(), "BX-18: no counter waits")
+            ok(!p.back(), "BX-18: Back after the welcome only leaves")
+
+            // A refusal of the welcome keeps no link; the same call can be made again.
+            val dir3 = tempDir()
+            try {
+                val store3 = OwnShopStore(dir3, testSealer())
+                store3.saveWallet(byteArrayOf(1)); store3.saveOwner(ByteArray(32) { 1 })
+                val lib3 = FakeBox()
+                val q = OwnBoxPairing(store3, lib3)
+                q.start(1_000); q.toAddress(); q.found("host.example:80", claim); q.match()
+                lib3.refuse = Words(Tones.STOP, Who.OWNER, "Box not reached", "It did not answer.", "Try again.", "BX-15", null, null, null)
+                ok(q.send(1, "")!!.heading == "Box not reached" && q.step == OwnBoxStep.Rest && !store3.hasLink(), "BX-18: a Box that did not take the welcome leaves no link")
+                lib3.refuse = null
+                ok(q.send(1, "") == null && store3.hasLink(), "BX-18: the welcome again keeps it")
+                // They differ: nothing is kept.
+                val r = OwnBoxPairing(store3, lib3)
+                r.start(2_000); r.toAddress(); r.found("host.example:80", claim)
+                ok(r.differ(OwnPairWords.said(OwnPairWords.boxDifferStopped)).heading == OwnPairWords.boxDifferStopped && r.step == OwnBoxStep.Stopped && r.checked == null, "BX-18: when the words differ nothing is sent")
+            } finally {
+                dir3.deleteRecursively()
+            }
+
+            // The relay of the kept link goes into the bundle of a counter paired after the Box (CR-130).
+            val own = FakeOwn()
+            val shopArgs = store.args()!!
+            store.saveLink(link)
+            val pairing = OwnPairing({ shopArgs }, own, relay = { OwnBoxLink.relayOf(store, lib) })
+            pairing.start(1_000); pairing.readRequest(ByteArray(10), 1_001); pairing.match(1_002, 0)
+            ok(own.relays.size == 1 && own.relays[0]!!.toList() == listOf<Byte>(0x4f, 0x42, 0x4d, 0x7a), "BX-18: a counter paired after the Box gets the relay in its bundle")
+            val bare = FakeOwn()
+            val noBox = OwnShopStore(tempDir().also { it.deleteOnExit() }, testSealer())
+            noBox.saveWallet(byteArrayOf(1)); noBox.saveOwner(ByteArray(32) { 1 })
+            val pairing2 = OwnPairing({ noBox.args() }, bare, relay = { OwnBoxLink.relayOf(noBox, lib) })
+            pairing2.start(1_000); pairing2.readRequest(ByteArray(10), 1_001); pairing2.match(1_002, 0)
+            ok(bare.relays.size == 1 && bare.relays[0] == null, "BX-18: with no Box the bundle has no relay")
+        } finally {
+            dir2.deleteRecursively()
+        }
+
+        // The node reads the link once, when it starts: a Box connected or changed needs a start, a counter does not.
+        ok(OwnBoxLink.restartNeeded(null, link) && OwnBoxLink.restartNeeded(link.id(), OwnLink("other.example:80", key, emptyList())) && !OwnBoxLink.restartNeeded(link.id(), link.without(counters[0])) && !OwnBoxLink.restartNeeded(null, null) && OwnBoxLink.restartNeeded(link.id(), null), "BX-18: the node starts again when the kept link is not the one it started with")
+
+        // The words are placeholders named for BX-18, each in the list; the screens write no sentence of their own.
+        val bx = OwnPairWords.placeholders.filter { it.startsWith("WORDS_NEEDED_OA_BX18_") }
+        ok(bx.size == 23 && bx.toSet().size == bx.size && bx.all { n -> OwnPairWords.all().any { it.first == n } }, "BX-18: every text of connecting a Box that is not written is listed: ${bx.size}")
+        val box = source("src/android/OwnBox.kt")
+        ok(!Regex("(ui\\.(text|primary|button|danger|field)|heading|para|line|label)\\(\"[A-Za-z]").containsMatchIn(box.replace("\"Dollars for one bitcoin\"", "")), "OwnBox.kt has no sentence of its own")
+        val controller = source("src/android/Controller.kt")
+        ok(controller.contains("ownStore.loadLink()") && controller.contains("setup?.link != null || ownLinkId != null"), "the node starts with the kept link, and the link thread runs for it")
+        ok(source("src/android/ConnectBox.kt").contains("ConnectBoxChoice.of(hasSetupFile(), ownStore.hasWallet())") && box.contains("restartIfLinkChanged"), "Connect your Box chooses by the shop's kind and starts the node again for a changed link")
+        ok(source("src/android/OwnCounter.kt").contains("relay = { OwnBoxLink.relayOf(ownStore) }") && source("src/android/OwnCounter.kt").contains("restartIfLinkChanged()"), "a pairing carries the relay and checks the node's link")
     }
 
     private fun addCounterOnDevicesTests() {
@@ -3178,7 +3341,7 @@ object AppModelTest {
         ok(headings.none { it in sentences } && headings.toSet().size == headings.size, "no heading repeats a sentence")
         // The placeholders are each named for a rule, hold nothing else and show their name in every part of the words.
         for (n in OwnPairWords.placeholders) {
-            ok(Regex("WORDS_NEEDED_OA_\\d{3}(_[A-Z_]+)?").matches(n), "$n is named for a rule")
+            ok(Regex("WORDS_NEEDED_OA_(\\d{3}|BX\\d{2})(_[A-Z_]+)?").matches(n), "$n is named for a rule")
             val w = OwnPairWords.said(n)
             ok(OwnPairWords.isPlaceholder(w) && w.heading == n && w.what == n && w.next == n, "$n shows its name")
         }
@@ -3720,7 +3883,7 @@ object AppModelTest {
         val plain = FakeOwn()
         ok(OwnPairing({ args }, plain, { false }).start(1_000) == null && plain.calls == listOf("offer"), "another wallet's shop makes the plain offer (op 150)")
         ok(OwnPairing({ args }, FakeOwn()).also { it.start(1) }.offer != null, "a shop that says nothing of a starter makes the plain offer")
-        ok(source("src/android/OwnCounter.kt").contains("OwnPairing({ ownStore.args() }, starter = { starterPinned() })"), "the first counter asks whether the shop is a starter shop")
+        ok(source("src/android/OwnCounter.kt").contains("OwnPairing({ ownStore.args() }, starter = { starterPinned() }, relay ="), "the first counter asks whether the shop is a starter shop")
 
         // The Money row, the home line and the gate read the shop's pinned wallet.
         val money2 = source("src/android/StarterScreens.kt").substringAfter("internal fun Controller.starterRows()").substringBefore("/** SS-30, CR-256")
@@ -4012,6 +4175,7 @@ object AppModelTest {
         starterTests()
         starterWiringTests()
         addCounterOnDevicesTests()
+        bx_18_ownBoxTests()
         floatTests()
         floatWiringTests()
         requestTests()

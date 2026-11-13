@@ -55,6 +55,9 @@ object ConnectBoxModel {
     /** A short name for a Box in lists: the first four bytes of its key. */
     fun boxLabel(key: ByteArray): String = "Box " + hex(key.copyOf(4))
 
+    /** A short name for a counter in lists: the first four bytes of its key. */
+    fun shortKey(key: ByteArray): String = hex(key.copyOf(4))
+
     /** The lines of the link a paired Box adds: its route, its key and the counters the settings name. */
     fun linkLines(address: String, boxKey: ByteArray, counters: List<ByteArray>): List<String> =
         listOf("relay-route: ${routeLine(address)}", "relay-key: ${hex(boxKey)}") +

@@ -49,6 +49,33 @@ object OwnPairWords {
     const val walletButton = "Your wallet"
     const val waitingLabel = "Waiting for their code"
 
+    // ---- connecting the shop's Box, with no Key app (BX-17, BX-18, CR-130, CR-132) ----
+    const val boxTitle = "Connect your Box"
+    const val boxAddressHint = "host:port or name.onion:port"
+    const val boxInviteHeading = "WORDS_NEEDED_OA_BX18_INVITE_HEADING"
+    const val boxInviteText = "WORDS_NEEDED_OA_BX18_INVITE_TEXT"
+    const val boxInviteNext = "WORDS_NEEDED_OA_BX18_INVITE_NEXT"
+    const val boxAddressLabel = "WORDS_NEEDED_OA_BX18_ADDRESS_LABEL"
+    const val boxAddressScan = "WORDS_NEEDED_OA_BX18_ADDRESS_SCAN"
+    const val boxAddressLook = "WORDS_NEEDED_OA_BX18_ADDRESS_LOOK"
+    const val boxWordsHeading = "WORDS_NEEDED_OA_BX18_WORDS_HEADING"
+    const val boxWordsText = "WORDS_NEEDED_OA_BX18_WORDS_TEXT"
+    const val boxWordsMatch = "WORDS_NEEDED_OA_BX18_WORDS_MATCH"
+    const val boxWordsDiffer = "WORDS_NEEDED_OA_BX18_WORDS_DIFFER"
+    const val boxDifferStopped = "WORDS_NEEDED_OA_BX18_DIFFER_STOPPED"
+    const val boxRestHeading = "WORDS_NEEDED_OA_BX18_REST_HEADING"
+    const val boxRestText = "WORDS_NEEDED_OA_BX18_REST_TEXT"
+    const val boxSend = "WORDS_NEEDED_OA_BX18_SEND"
+    const val boxPairedHeading = "WORDS_NEEDED_OA_BX18_PAIRED_HEADING"
+    const val boxPairedText = "WORDS_NEEDED_OA_BX18_PAIRED_TEXT"
+    const val boxPairedNext = "WORDS_NEEDED_OA_BX18_PAIRED_NEXT"
+    const val boxRelayHeading = "WORDS_NEEDED_OA_BX18_RELAY_HEADING"
+    const val boxRelayText = "WORDS_NEEDED_OA_BX18_RELAY_TEXT"
+    const val boxRelayList = "WORDS_NEEDED_OA_BX18_RELAY_LIST"
+    const val boxRelayTaken = "WORDS_NEEDED_OA_BX18_RELAY_TAKEN"
+    const val boxRelayLater = "WORDS_NEEDED_OA_BX18_RELAY_LATER"
+    const val boxLinkNotSaved = "WORDS_NEEDED_OA_BX18_LINK_NOT_SAVED"
+
     // ---- refusals of the app's own steps (OA-105, OA-108) ----
     val walletNotSaved = SayWords(
         Tones.STOP, Who.OWNER, "Wallet not saved",
@@ -66,8 +93,32 @@ object OwnPairWords {
         "Start again from Add a counter.", "OA-108", null, null, null,
     )
 
-    /** No text of this part is a placeholder now; the list stays for the test that would catch a new one. */
-    val placeholders: List<String> = emptyList()
+    /** The texts of connecting a Box that are not written yet, each named for BX-18 and its place (OA-114). */
+    val placeholders: List<String> = listOf(
+        boxInviteHeading,
+        boxInviteText,
+        boxInviteNext,
+        boxAddressLabel,
+        boxAddressScan,
+        boxAddressLook,
+        boxWordsHeading,
+        boxWordsText,
+        boxWordsMatch,
+        boxWordsDiffer,
+        boxDifferStopped,
+        boxRestHeading,
+        boxRestText,
+        boxSend,
+        boxPairedHeading,
+        boxPairedText,
+        boxPairedNext,
+        boxRelayHeading,
+        boxRelayText,
+        boxRelayList,
+        boxRelayTaken,
+        boxRelayLater,
+        boxLinkNotSaved,
+    )
 
     /** Words that are still to be written: the placeholder stands in the heading and both sentences. */
     fun said(placeholder: String): SayWords =
@@ -98,6 +149,7 @@ object OwnPairWords {
         for ((k, w) in listOf("walletNotSaved" to walletNotSaved, "noWallet" to noWallet, "codeNotShown" to codeNotShown)) {
             add("$k.heading", w.heading); add("$k.what", w.what); add("$k.next", w.next)
         }
+        add("boxTitle", boxTitle); add("boxAddressHint", boxAddressHint)
         for (n in placeholders) add(n, n)
         return out
     }

@@ -26,6 +26,7 @@ import org.openbmt.owner.WaitingCounter
 class OwnShopStore(private val dir: File, sealer: Sealer) {
     private val wallet = SealedFile(dir, sealer, AppFiles.OWN_WALLET_FILE)
     private val owner = SealedFile(dir, sealer, AppFiles.OWN_OWNER_FILE)
+    private val link = SealedFile(dir, sealer, AppFiles.OWN_LINK_FILE)
 
     /** True when a wallet is kept. */
     fun hasWallet(): Boolean = File(dir, AppFiles.OWN_WALLET_FILE).exists()
@@ -41,6 +42,15 @@ class OwnShopStore(private val dir: File, sealer: Sealer) {
 
     /** Keeps the owner root's secret, sealed and written atomically. */
     fun saveOwner(secret: ByteArray) = owner.save(secret)
+
+    /** True when a link to a Box is kept. */
+    fun hasLink(): Boolean = File(dir, AppFiles.OWN_LINK_FILE).exists()
+
+    /** The link to the shop's Box, or null when none is kept. A file that does not read or does not open throws (BX-18). */
+    fun loadLink(): OwnLink? = link.load()?.let { OwnLink.decode(it) }
+
+    /** Keeps the link to the shop's Box, sealed and written atomically; the node reads it when it starts (BX-18). */
+    fun saveLink(value: OwnLink) = link.save(value.encode())
 
     /** The folder of the library's state for this shop, made when it is first needed. */
     fun stateDir(): File = File(dir, AppFiles.OWN_DIR).also {
@@ -154,6 +164,8 @@ class OwnPairing(
     private val library: OwnLibrary = NativeOwnLibrary,
     /** Whether the shop's pinned wallet is the starter wallet: asked for each offer (CR-256, SS-41). */
     private val starter: () -> Boolean = { false },
+    /** The owner's signed relay for the shop's Box when it has one: it goes into each bundle (CR-130, BX-18). */
+    private val relay: () -> ByteArray? = { null },
 ) {
     var step = OwnPairStep.Offer
         private set
@@ -214,7 +226,7 @@ class OwnPairing(
         val bytes = request ?: return OwnPairWords.codeNotShown
         if (step != OwnPairStep.Compare) return null
         return call {
-            bundle = library.confirm(args, made, now, bytes, usdPerBtc, null)
+            bundle = library.confirm(args, made, now, bytes, usdPerBtc, relay())
             step = OwnPairStep.Bundle
             request?.fill(0)
             request = null
@@ -309,7 +321,15 @@ class OwnPairing(
  * to the counters until the shop has one.
  */
 object OwnStart {
-    fun config(shop: OwnShopArgs, defaults: org.openbmt.owner.CeremonyDefaults, network: OwnerNetwork, now: Long, proxy: String): StartConfig =
+    fun config(
+        shop: OwnShopArgs,
+        defaults: org.openbmt.owner.CeremonyDefaults,
+        network: OwnerNetwork,
+        now: Long,
+        proxy: String,
+        /** The link to the shop's Box, when it has one (BX-18): the node follows the counters of the settings through it. */
+        link: OwnLink? = null,
+    ): StartConfig =
         StartConfig(
             dir = shop.dir,
             network = network,
@@ -326,7 +346,7 @@ object OwnStart {
             fixedPeers = emptyList(),
             broadcastProxy = proxy,
             withoutTor = false,
-            link = null,
+            link = link?.config(proxy),
             ownWallet = shop.wallet,
         )
 }

@@ -134,6 +134,9 @@ object AppFiles {
     /** The sealed secret of the owner root of a shop with its own wallet: 32 random bytes drawn by the library (OA-105). */
     const val OWN_OWNER_FILE = "own-owner.obks"
 
+    /** The sealed link of a shop with its own wallet to its Box: the Box's address and key, and the counters that still wait for the relay code (BX-18). */
+    const val OWN_LINK_FILE = "own-link.obks"
+
     /** The folder of the own-wallet shop's state (the library's `own-shop` file, the allocation book and the range outbox are kept in it). */
     const val OWN_DIR = "own-shop-dir"
 

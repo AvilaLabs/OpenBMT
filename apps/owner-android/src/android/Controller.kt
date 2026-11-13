@@ -92,6 +92,10 @@ class Controller(internal val act: MainActivity) {
     // progress, which holds nothing but what is on the screen (OA-105, OA-108 to OA-111).
     internal val ownStore by lazy { OwnShopStore(dir, KeystoreSealer(AppFiles.OWN_KEY_ALIAS)) }
     internal var ownPairing: OwnPairing? = null
+    internal var ownBoxPairing: OwnBoxPairing? = null
+
+    /** The link the running own-shop node was started with (BX-18): the node reads it once, at its start. */
+    @Volatile internal var ownLinkId: String? = null
 
     /** Whether the shop was set up from a Key app's setup file (OA-22): such a shop adds counters by the Key app's path. */
     internal fun hasSetupFile(): Boolean = File(dir, AppFiles.SETUP_FILE).exists()
@@ -423,12 +427,20 @@ class Controller(internal val act: MainActivity) {
                 synchronized(startLock) {
                     if (id != runId) return@Thread
                     nodeDir.mkdirs()
+                    ownLinkId = null
                     // The secrets are handed over for this start and kept nowhere but in the sealed file (OA-01).
                     val start = if (s != null) {
                         s.startConfig(nodeDir.path, nowSecs(), proxy)
                     } else {
                         val shop = ownStore.args() ?: return@Thread
-                        OwnStart.config(shop, OwnerCeremony.defaults(AppConfig.NETWORK), AppConfig.NETWORK, nowSecs(), proxy)
+                        // The link to the shop's Box, when it keeps one; a file that does not read starts the node without it.
+                        val link = try {
+                            ownStore.loadLink()
+                        } catch (_: java.io.IOException) {
+                            null
+                        }
+                        ownLinkId = link?.id()
+                        OwnStart.config(shop, OwnerCeremony.defaults(AppConfig.NETWORK), AppConfig.NETWORK, nowSecs(), proxy, link)
                     }
                     val n = OwnerNode.start(floatWatching(start))
                     if (id != runId) {
@@ -484,7 +496,7 @@ class Controller(internal val act: MainActivity) {
         pump.isDaemon = true
         pumpThread = pump
         pump.start()
-        if (setup?.link != null) {
+        if (setup?.link != null || ownLinkId != null) {
             val link = Thread {
                 while (runId == id) {
                     try {
