@@ -6,6 +6,13 @@ import java.time.ZoneOffset
 import org.openbmt.app.Format
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.RequestAsk
+import org.openbmt.owner.RequestDetail
+import org.openbmt.owner.RequestEnd
+import org.openbmt.owner.RequestPayment
+import org.openbmt.owner.RequestQuote
+import org.openbmt.owner.RequestReturn
+import org.openbmt.owner.RequestStatus
+import org.openbmt.owner.ReturnState
 import org.openbmt.owner.RequestDay
 import org.openbmt.owner.RequestEvery
 import org.openbmt.owner.RequestList
@@ -86,19 +93,64 @@ object RequestModel {
     fun find(list: RequestList, number: Long): Pair<RequestPart, RequestRow>? =
         sections(list).firstNotNullOfOrNull { s -> s.rows.firstOrNull { it.number == number }?.let { s.part to it } }
 
-    /** What the page of a request in [part] offers: what an open request can do, and the return and the end of a series for any. */
-    fun actions(part: RequestPart, row: RequestRow): PageActions {
-        val open = isOpen(part)
-        return PageActions(
-            share = open,
-            sendAgain = part == RequestPart.Overdue,
-            cancel = open,
-            close = open,
-            countPaid = open,
-            returnMoney = true,
-            stopRepeating = row.repeats,
-        )
+    /** RQ-19: a request that has received nothing counted can be cancelled; one that ended cannot. */
+    fun canCancel(end: RequestEnd?, payments: List<RequestPayment>): Boolean = end == null && payments.none { it.confirmed }
+
+    /** RQ-20: a part paid or almost paid request that has not ended can be closed as it is. */
+    fun canClose(end: RequestEnd?, status: RequestStatus): Boolean =
+        end == null && (status == RequestStatus.PartPaid || status == RequestStatus.Almost)
+
+    /** RQ-16: only an almost paid request that has not ended can be counted as paid. */
+    fun canCountPaid(end: RequestEnd?, status: RequestStatus): Boolean = end == null && status == RequestStatus.Almost
+
+    /** RQ-26: money can be returned while less has been returned than arrived. */
+    fun canReturn(receivedSats: Long, returnedSats: Long): Boolean = receivedSats > returnedSats
+
+    /** What the page of a request offers, from what the book holds. [overdue] is the part of the list it is in (RQ-22). The library judges each again. */
+    fun actions(d: RequestDetail, overdue: Boolean): PageActions = PageActions(
+        // RQ-14: a request that has ended or owes nothing is not shared again.
+        share = d.end == null && d.row.owed > 0,
+        sendAgain = overdue,
+        cancel = canCancel(d.end, d.payments),
+        close = canClose(d.end, d.status),
+        countPaid = canCountPaid(d.end, d.status),
+        returnMoney = canReturn(d.receivedSats, d.returnedSats),
+        stopRepeating = d.repeat != null,
+    )
+
+    /** An amount in the request's unit, written to be read: satoshis for a request in bitcoin, else the shop's currency. */
+    fun amountIn(d: RequestDetail, n: Long): String {
+        val currency = ShopCurrency.values().firstOrNull { it.code == d.unit }
+        return if (d.priceIn == RequestPriceIn.Bitcoin || currency == null) Format.sats(n) else money(currency, n)
     }
+
+    /** One quote for the page: when it was made, and what it asked for (RQ-12). */
+    fun quoteRow(d: RequestDetail, q: RequestQuote): Pair<String, String> {
+        val until = q.until?.let { " \u00b7 " + RequestWords.quoteUntilLabel + " " + Format.localTime(it) } ?: ""
+        return Format.localTime(q.madeAt) to (amountIn(d, q.owed) + " \u00b7 " + Format.sats(q.sats) + until)
+    }
+
+    /** One payment for the page (RQ-15): the satoshis, then the start of the transaction and where it is. */
+    fun paymentRow(d: RequestDetail, p: RequestPayment): Pair<String, String> {
+        val where = if (p.confirmed) RequestWords.paymentBlock + " " + p.height else RequestWords.paymentWaiting
+        val credit = when {
+            !p.confirmed -> ""
+            p.credit > 0 -> " \u00b7 " + amountIn(d, p.credit)
+            else -> " \u00b7 " + RequestWords.paymentNotCredited
+        }
+        return Format.sats(p.sats) to (p.txid.take(12) + " \u00b7 " + where + credit)
+    }
+
+    /** The words that name where a return stands (RQ-29). */
+    fun returnStateWords(state: ReturnState): String = when (state) {
+        ReturnState.Queued -> RequestWords.returnQueued
+        ReturnState.Sent -> RequestWords.returnSent
+        ReturnState.Done -> RequestWords.returnDone
+        ReturnState.Cancelled -> RequestWords.returnCancelled
+    }
+
+    /** One return for the page: the satoshis and where it stands, then the customer's address (RQ-29). */
+    fun returnRow(r: RequestReturn): Pair<String, String> = (Format.sats(r.sats) + " \u00b7 " + returnStateWords(r.state)) to r.address
 
     /** The label of the button that shares a request again: "Send again" for an overdue one (RQ-22), "Share again" for the rest (RQ-14). */
     fun shareLabel(part: RequestPart): String =

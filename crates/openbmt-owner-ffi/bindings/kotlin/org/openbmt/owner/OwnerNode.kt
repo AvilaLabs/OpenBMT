@@ -219,6 +219,7 @@ private const val OP_REQUEST_REPEATS = 223
 private const val OP_REQUEST_STOP_REPEATING = 224
 private const val OP_REQUEST_STATE = 225
 private const val OP_REQUEST_RETURN_ASK = 226
+private const val OP_REQUEST_READ = 227
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -231,6 +232,20 @@ private const val TAG_REQUEST_PRICE_IN_SHOP_CURRENCY = 1
 private const val TAG_REQUEST_EVERY_WEEK = 0
 private const val TAG_REQUEST_EVERY_MONTH = 1
 private const val TAG_REQUEST_EVERY_YEAR = 2
+private const val TAG_REQUEST_STATUS_VIEW_WAITING = 0
+private const val TAG_REQUEST_STATUS_VIEW_PART_PAID = 1
+private const val TAG_REQUEST_STATUS_VIEW_PAID = 2
+private const val TAG_REQUEST_STATUS_VIEW_OVERPAID = 3
+private const val TAG_REQUEST_STATUS_VIEW_ALMOST = 4
+private const val TAG_REQUEST_END_VIEW_CANCELLED = 0
+private const val TAG_REQUEST_END_VIEW_CLOSED = 1
+private const val TAG_REQUEST_END_VIEW_COUNTED_PAID = 2
+private const val TAG_PAYMENT_AFTER_VIEW_CANCEL = 0
+private const val TAG_PAYMENT_AFTER_VIEW_CLOSE = 1
+private const val TAG_RETURN_STATE_VIEW_QUEUED = 0
+private const val TAG_RETURN_STATE_VIEW_SENT = 1
+private const val TAG_RETURN_STATE_VIEW_DONE = 2
+private const val TAG_RETURN_STATE_VIEW_CANCELLED = 3
 private const val TAG_OWN_REPIN_KIND_DONE = 0
 private const val TAG_OWN_REPIN_KIND_ALREADY_DONE = 1
 private const val TAG_OWN_REPIN_KIND_NOT_READY = 2
@@ -1172,6 +1187,81 @@ class RequestList(
     val waiting: List<RequestRow>,
     val finished: List<RequestRow>,
     val overdueRow: String?,
+    /** The heading and the text of the empty list (RQ-35). */
+    val emptyHeading: String,
+    val emptyWhat: String,
+)
+
+/** Where a request stands (RQ-16). */
+enum class RequestStatus { Waiting, PartPaid, Paid, Overpaid, Almost }
+
+/** How a request ended (RQ-16, RQ-19, RQ-20). */
+enum class RequestEnd { Cancelled, Closed, CountedPaid }
+
+/** A payment that came after the request ended (RQ-19, RQ-20). */
+enum class PaymentAfter { Cancel, Close }
+
+/** Where a return stands (RQ-29). */
+enum class ReturnState { Queued, Sent, Done, Cancelled }
+
+/** A question before something is done, in the library's words: the [title], the [text] and the two buttons. */
+class RequestConfirm(val title: String, val text: String, val yes: String, val no: String)
+
+/** One quote written for a request (RQ-12): [rate] and [until] are there for a request in the currency. */
+class RequestQuote(val madeAt: Long, val owed: Long, val sats: Long, val rate: Long?, val until: Long?)
+
+/**
+ * One payment to a request's address (RQ-15): [credit] is what it was credited in the request's unit, 0 when it was not.
+ * A payment that is not [confirmed] waits for its block to reach the confirmation depth and is not in the book yet.
+ */
+class RequestPayment(
+    val txid: String,
+    val vout: Long,
+    val sats: Long,
+    val height: Long,
+    val blockTime: Long,
+    val credit: Long,
+    val confirmed: Boolean,
+    val late: Boolean,
+    val oldPrice: Boolean,
+    val after: PaymentAfter?,
+)
+
+/** One return from a request (RQ-29): [txid] is the spend that pays it once there is one, [at] when it was confirmed or cancelled. */
+class RequestReturn(
+    val id: Long,
+    val sats: Long,
+    val state: ReturnState,
+    val address: String,
+    val queuedAt: Long,
+    val txid: String?,
+    val at: Long?,
+)
+
+/** One request as the book keeps it (RQ-35): its [row], where it stands, what it holds and the words of its questions. */
+class RequestDetail(
+    val row: RequestRow,
+    val status: RequestStatus,
+    val end: RequestEnd?,
+    val endAt: Long?,
+    val priceIn: RequestPriceIn,
+    /** The code of the unit of its amounts: SAT for a request in bitcoin. */
+    val unit: String,
+    val amount: Long,
+    val paid: Long,
+    val receivedSats: Long,
+    val returnedSats: Long,
+    val madeAt: Long,
+    val made: RequestDay,
+    val repeat: RequestEvery?,
+    val quotes: List<RequestQuote>,
+    val payments: List<RequestPayment>,
+    val returns: List<RequestReturn>,
+    /** RQ-37: the line for more returned than it received. */
+    val overReturned: String?,
+    val cancel: RequestConfirm,
+    val close: RequestConfirm,
+    val countPaid: RequestConfirm,
 )
 
 /** A return that was queued (RQ-29): its number in the book, the refund's number in the owner's queue, the address in groups of four. */
@@ -1547,7 +1637,83 @@ internal fun Reader.requestList(): RequestList =
         list { requestRow() },
         list { requestRow() },
         option { string() },
+        string(),
+        string(),
     )
+
+internal fun Reader.requestConfirm(): RequestConfirm = RequestConfirm(string(), string(), string(), string())
+
+internal fun Reader.requestDetail(): RequestDetail {
+    val row = requestRow()
+    val status = when (u8()) {
+        TAG_REQUEST_STATUS_VIEW_WAITING -> RequestStatus.Waiting
+        TAG_REQUEST_STATUS_VIEW_PART_PAID -> RequestStatus.PartPaid
+        TAG_REQUEST_STATUS_VIEW_PAID -> RequestStatus.Paid
+        TAG_REQUEST_STATUS_VIEW_OVERPAID -> RequestStatus.Overpaid
+        TAG_REQUEST_STATUS_VIEW_ALMOST -> RequestStatus.Almost
+        else -> tag("RequestStatusView")
+    }
+    val end = option {
+        when (u8()) {
+            TAG_REQUEST_END_VIEW_CANCELLED -> RequestEnd.Cancelled
+            TAG_REQUEST_END_VIEW_CLOSED -> RequestEnd.Closed
+            TAG_REQUEST_END_VIEW_COUNTED_PAID -> RequestEnd.CountedPaid
+            else -> tag("RequestEndView")
+        }
+    }
+    val endAt = option { u64() }
+    val priceIn = when (u8()) {
+        TAG_REQUEST_PRICE_IN_BITCOIN -> RequestPriceIn.Bitcoin
+        TAG_REQUEST_PRICE_IN_SHOP_CURRENCY -> RequestPriceIn.ShopCurrency
+        else -> tag("RequestPriceIn")
+    }
+    val unit = string()
+    val amount = u64()
+    val paid = u64()
+    val receivedSats = u64()
+    val returnedSats = u64()
+    val madeAt = u64()
+    val made = RequestDay(u32(), u32(), u32())
+    val repeat = option {
+        when (u8()) {
+            TAG_REQUEST_EVERY_WEEK -> RequestEvery.Week
+            TAG_REQUEST_EVERY_MONTH -> RequestEvery.Month
+            TAG_REQUEST_EVERY_YEAR -> RequestEvery.Year
+            else -> tag("RequestEvery")
+        }
+    }
+    val quotes = list { RequestQuote(u64(), u64(), u64(), option { u64() }, option { u64() }) }
+    val payments = list {
+        RequestPayment(
+            string(), u32(), u64(), u32(), u64(), u64(), bool(), bool(), bool(),
+            option {
+                when (u8()) {
+                    TAG_PAYMENT_AFTER_VIEW_CANCEL -> PaymentAfter.Cancel
+                    TAG_PAYMENT_AFTER_VIEW_CLOSE -> PaymentAfter.Close
+                    else -> tag("PaymentAfterView")
+                }
+            },
+        )
+    }
+    val returns = list {
+        RequestReturn(
+            u64(), u64(),
+            when (u8()) {
+                TAG_RETURN_STATE_VIEW_QUEUED -> ReturnState.Queued
+                TAG_RETURN_STATE_VIEW_SENT -> ReturnState.Sent
+                TAG_RETURN_STATE_VIEW_DONE -> ReturnState.Done
+                TAG_RETURN_STATE_VIEW_CANCELLED -> ReturnState.Cancelled
+                else -> tag("ReturnStateView")
+            },
+            string(), u64(), option { string() }, option { u64() },
+        )
+    }
+    val overReturned = option { string() }
+    return RequestDetail(
+        row, status, end, endAt, priceIn, unit, amount, paid, receivedSats, returnedSats, madeAt, made, repeat,
+        quotes, payments, returns, overReturned, requestConfirm(), requestConfirm(), requestConfirm(),
+    )
+}
 
 internal fun Reader.requestReturnAdded(): RequestReturnAdded =
     RequestReturnAdded(u64(), u32(), u64(), string(), words())
@@ -2892,6 +3058,12 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
     fun requestList(ask: RequestAsk): RequestList {
         val r = call(OP_REQUEST_LIST, handle) { it.requestAsk(ask) }
         return r.requestList().also { r.end() }
+    }
+
+    /** RQ-35: request [number] as the book keeps it: what it holds and the words of its questions. */
+    fun requestRead(ask: RequestAsk, number: Long): RequestDetail {
+        val r = call(OP_REQUEST_READ, handle) { it.requestAsk(ask).u64(number) }
+        return r.requestDetail().also { r.end() }
     }
 
     /** RQ-12, RQ-13, RQ-22: write the quote of request [number] and give the BIP 321 link and the line above it. */

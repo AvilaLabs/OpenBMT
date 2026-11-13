@@ -30,8 +30,6 @@ object RequestWords {
     val partDueSoon = need("WORDS_NEEDED_RQ_21_PART_DUE_SOON")
     val partWaiting = need("WORDS_NEEDED_RQ_21_PART_WAITING")
     val partFinished = need("WORDS_NEEDED_RQ_35_PART_FINISHED")
-    val emptyHeading = need("WORDS_NEEDED_RQ_35_LIST_EMPTY_HEADING")
-    val emptyWhat = need("WORDS_NEEDED_RQ_35_LIST_EMPTY_WHAT")
     val back = need("WORDS_NEEDED_RQ_35_BACK")
     val payReturns = need("WORDS_NEEDED_RQ_29_PAY_RETURNS")
 
@@ -44,18 +42,20 @@ object RequestWords {
     val countPaid = need("WORDS_NEEDED_RQ_16_COUNT_PAID")
     val stopRepeating = need("WORDS_NEEDED_RQ_25_STOP_REPEATING")
     val returnMoney = need("WORDS_NEEDED_RQ_26_RETURN")
-    val cancelTitle = need("WORDS_NEEDED_RQ_19_CANCEL_TITLE")
-    val cancelText = need("WORDS_NEEDED_RQ_19_CANCEL_TEXT")
-    val cancelYes = need("WORDS_NEEDED_RQ_19_CANCEL_YES")
-    val cancelNo = need("WORDS_NEEDED_RQ_19_CANCEL_NO")
-    val closeTitle = need("WORDS_NEEDED_RQ_20_CLOSE_TITLE")
-    val closeText = need("WORDS_NEEDED_RQ_20_CLOSE_TEXT")
-    val closeYes = need("WORDS_NEEDED_RQ_20_CLOSE_YES")
-    val closeNo = need("WORDS_NEEDED_RQ_20_CLOSE_NO")
-    val countPaidTitle = need("WORDS_NEEDED_RQ_16_COUNT_PAID_TITLE")
-    val countPaidText = need("WORDS_NEEDED_RQ_16_COUNT_PAID_TEXT")
-    val countPaidYes = need("WORDS_NEEDED_RQ_16_COUNT_PAID_YES")
-    val countPaidNo = need("WORDS_NEEDED_RQ_16_COUNT_PAID_NO")
+
+    // ---- what the page holds (RQ-15, RQ-12, RQ-26, RQ-29) ----
+    val owedLabel = need("WORDS_NEEDED_RQ_15_OWED_LABEL")
+    val paidLabel = need("WORDS_NEEDED_RQ_15_PAID_LABEL")
+    val quotesLabel = need("WORDS_NEEDED_RQ_12_QUOTES_LABEL")
+    val paymentsLabel = need("WORDS_NEEDED_RQ_15_PAYMENTS_LABEL")
+    val paymentBlock = need("WORDS_NEEDED_RQ_15_PAYMENT_BLOCK")
+    val paymentWaiting = need("WORDS_NEEDED_RQ_15_PAYMENT_WAITING")
+    val paymentNotCredited = need("WORDS_NEEDED_RQ_15_PAYMENT_NOT_CREDITED")
+    val returnsLabel = need("WORDS_NEEDED_RQ_29_RETURNS_LABEL")
+    val returnQueued = need("WORDS_NEEDED_RQ_29_RETURN_QUEUED")
+    val returnSent = need("WORDS_NEEDED_RQ_29_RETURN_SENT")
+    val returnDone = need("WORDS_NEEDED_RQ_29_RETURN_DONE")
+    val returnCancelled = need("WORDS_NEEDED_RQ_29_RETURN_CANCELLED")
 
     // ---- the form (RQ-05 to RQ-09, RQ-24) ----
     val formTitle = need("WORDS_NEEDED_RQ_05_FORM_TITLE")
@@ -88,6 +88,8 @@ object RequestWords {
     val quoteUntilLabel = need("WORDS_NEEDED_RQ_12_QUOTE_UNTIL_LABEL")
     val shareLink = need("WORDS_NEEDED_RQ_13_SHARE_LINK")
     val sendsNothing = need("WORDS_NEEDED_RQ_13_SENDS_NOTHING")
+    val showCode = need("WORDS_NEEDED_RQ_13_SHOW_CODE")
+    val codeTitle = need("WORDS_NEEDED_RQ_13_CODE_TITLE")
 
     // ---- returning money (RQ-26 to RQ-29) ----
     val returnTitle = need("WORDS_NEEDED_RQ_26_RETURN_TITLE")

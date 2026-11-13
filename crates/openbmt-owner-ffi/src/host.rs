@@ -102,9 +102,9 @@ use crate::pos_views::{
     PosRequestView, PosSetupView, PosStateView, PosSubjectView, PosVendorView,
 };
 use crate::requests::{
-    self, RequestAsk, RequestListView, RequestMadeView, RequestMakeArgs, RequestNumberArgs,
-    RequestRepeatsView, RequestReturnAddedView, RequestReturnArgs, RequestShareArgs,
-    RequestSharedView, RequestStateView,
+    self, RequestAsk, RequestDetailView, RequestListView, RequestMadeView, RequestMakeArgs,
+    RequestNumberArgs, RequestRepeatsView, RequestReturnAddedView, RequestReturnArgs,
+    RequestShareArgs, RequestSharedView, RequestStateView,
 };
 use crate::say::{counter_words, link_alert_words, own_alert_words, words_for};
 use crate::settings_edit::{preview_view, to_edit, SettingsEditArgs, SettingsPreviewView};
@@ -2829,6 +2829,14 @@ impl Entry {
         self.run(Some(ask.now), move |st| {
             request_prepare(st, &ask)?;
             Ok(requests::state(&st.node, &ask))
+        })
+    }
+
+    /// RQ-35: one request as the book keeps it, for its page.
+    pub(crate) fn request_read(&self, a: RequestNumberArgs) -> Result<RequestDetailView, AppError> {
+        self.run(Some(a.ask.now), move |st| {
+            request_prepare(st, &a.ask)?;
+            requests::read(&st.node, &a)
         })
     }
 

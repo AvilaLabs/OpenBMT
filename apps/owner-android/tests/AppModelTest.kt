@@ -84,7 +84,16 @@ import org.openbmt.owner.SettingsEditArgs
 import org.openbmt.owner.SettingsHeld
 import org.openbmt.owner.SettingsPreview
 import org.openbmt.owner.SetupFields
+import org.openbmt.owner.PaymentAfter
+import org.openbmt.owner.RequestConfirm
 import org.openbmt.owner.RequestDay
+import org.openbmt.owner.RequestDetail
+import org.openbmt.owner.RequestEnd
+import org.openbmt.owner.RequestPayment
+import org.openbmt.owner.RequestQuote
+import org.openbmt.owner.RequestReturn
+import org.openbmt.owner.RequestStatus
+import org.openbmt.owner.ReturnState
 import org.openbmt.owner.RequestEvery
 import org.openbmt.owner.RequestList
 import org.openbmt.owner.RequestPriceIn
@@ -4194,25 +4203,60 @@ object AppModelTest {
             waiting = listOf(row(8, day(2027, 1, 1)), row(7, day(2026, 12, 20))),
             finished = listOf(row(12, day(2026, 10, 1)), row(1, day(2026, 9, 1))),
             overdueRow = "3 overdue",
+            emptyHeading = "No open requests",
+            emptyWhat = "Requests you make show here.",
         )
         val sections = RequestModel.sections(list)
         ok(sections.map { it.part } == listOf(RequestPart.ReadyToSend, RequestPart.Overdue, RequestPart.DueSoon, RequestPart.Waiting, RequestPart.Finished), "RQ-21: ready to send, overdue, due soon, waiting, then the ones that ended")
         ok(sections[1].rows.map { it.number } == listOf(2L, 3L, 4L), "RQ-21: the newest due date last, equal dates by number")
         ok(sections[2].rows.map { it.number } == listOf(5L, 6L) && sections[3].rows.map { it.number } == listOf(7L, 8L), "RQ-21: each part by due date")
         ok(sections[4].rows.map { it.number } == listOf(12L, 1L), "the ones that ended keep the library's order, newest first")
-        ok(RequestModel.sections(RequestList(emptyList(), emptyList(), emptyList(), listOf(row(1, day(2026, 12, 1))), emptyList(), null)).map { it.part } == listOf(RequestPart.Waiting), "a part with no rows is left out")
-        ok(RequestModel.sections(RequestList(emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), null)).isEmpty(), "no requests, no part")
+        ok(RequestModel.sections(RequestList(emptyList(), emptyList(), emptyList(), listOf(row(1, day(2026, 12, 1))), emptyList(), null, "", "")).map { it.part } == listOf(RequestPart.Waiting), "a part with no rows is left out")
+        ok(RequestModel.sections(RequestList(emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), null, "", "")).isEmpty(), "no requests, no part")
         ok(RequestModel.dayKey(day(2026, 11, 13)) == 20_261_113L, "a day sorts as a number")
         ok(RequestModel.find(list, 5)?.first == RequestPart.DueSoon && RequestModel.find(list, 12)?.first == RequestPart.Finished && RequestModel.find(list, 99) == null, "a request is found in its part")
         ok(RequestModel.partTitle(RequestPart.Overdue) == RequestWords.partOverdue && RequestModel.partTitle(RequestPart.DueSoon) == RequestWords.partDueSoon && RequestModel.partTitle(RequestPart.Waiting) == RequestWords.partWaiting && RequestModel.partTitle(RequestPart.ReadyToSend) == RequestWords.partReady, "each part has its words")
 
         // States and the page (RQ-14, RQ-16, RQ-19, RQ-20, RQ-22, RQ-25, RQ-26).
-        val open = RequestModel.actions(RequestPart.Waiting, row(1, day(2026, 12, 1)))
-        ok(open.share && !open.sendAgain && open.cancel && open.close && open.countPaid && open.returnMoney && !open.stopRepeating, "an open request can be shared, ended and returned from")
-        val late = RequestModel.actions(RequestPart.Overdue, row(1, day(2026, 11, 1), repeats = true))
+        fun pay(confirmed: Boolean = true) = RequestPayment("aa", 0, 1_000, 800_000, 1_700_000_000L, if (confirmed) 1_000 else 0, confirmed, false, false, null)
+        fun detail(status: RequestStatus, end: RequestEnd? = null, payments: List<RequestPayment> = emptyList(), owed: Long = 5_000, received: Long = 0, returned: Long = 0, repeat: RequestEvery? = null) =
+            RequestDetail(
+                RequestRow(1, "Booking", owed, day(2026, 12, 1), "line", "state", emptyList(), repeat != null), status, end, null, RequestPriceIn.Bitcoin, "SAT", 5_000, 0, received, returned,
+                1_700_000_000L, day(2026, 11, 13), repeat, emptyList(), payments, emptyList(), null,
+                RequestConfirm("t", "x", "y", "n"), RequestConfirm("t", "x", "y", "n"), RequestConfirm("t", "x", "y", "n"),
+            )
+        val waiting = RequestModel.actions(detail(RequestStatus.Waiting), false)
+        ok(waiting.share && !waiting.sendAgain && waiting.cancel && !waiting.close && !waiting.countPaid && !waiting.returnMoney && !waiting.stopRepeating, "RQ-19: a request that has received nothing can be shared and cancelled, and nothing is closed or returned")
+        val late = RequestModel.actions(detail(RequestStatus.Waiting, repeat = RequestEvery.Week), true)
         ok(late.sendAgain && late.stopRepeating && late.share, "an overdue request is sent again, and a series can be stopped")
-        val ended = RequestModel.actions(RequestPart.Finished, row(1, day(2026, 11, 1), repeats = true))
-        ok(!ended.share && !ended.cancel && !ended.close && !ended.countPaid && ended.returnMoney && ended.stopRepeating, "an ended request is not shared or ended again, but money can be returned from it and its series stopped")
+        val part = RequestModel.actions(detail(RequestStatus.PartPaid, payments = listOf(pay()), received = 1_000), false)
+        ok(part.share && !part.cancel && part.close && !part.countPaid && part.returnMoney, "RQ-19, RQ-20: a part paid request cannot be cancelled but can be closed, and money can be returned")
+        val almost = RequestModel.actions(detail(RequestStatus.Almost, payments = listOf(pay()), received = 1_000), false)
+        ok(almost.close && almost.countPaid && !almost.cancel, "RQ-16: an almost paid request can be counted as paid, and closed")
+        val paid = RequestModel.actions(detail(RequestStatus.Paid, payments = listOf(pay()), owed = 0, received = 5_000), false)
+        ok(!paid.share && !paid.cancel && !paid.close && !paid.countPaid && paid.returnMoney, "a paid request is not shared or ended, and money can be returned from it")
+        val over = RequestModel.actions(detail(RequestStatus.Overpaid, payments = listOf(pay()), owed = 0, received = 6_000), false)
+        ok(!over.close && !over.countPaid && over.returnMoney, "an overpaid request is not closed; the excess can be returned")
+        val ended = RequestModel.actions(detail(RequestStatus.PartPaid, RequestEnd.Closed, listOf(pay()), owed = 0, received = 1_000, returned = 1_000, repeat = RequestEvery.Month), false)
+        ok(!ended.share && !ended.cancel && !ended.close && !ended.countPaid && !ended.returnMoney && ended.stopRepeating, "an ended request offers nothing but ending its series; all that arrived was returned")
+        val cancelled = RequestModel.actions(detail(RequestStatus.Waiting, RequestEnd.Cancelled, owed = 0), false)
+        ok(!cancelled.share && !cancelled.cancel, "a cancelled request is not shared or cancelled again")
+        ok(RequestModel.canCancel(null, listOf(pay(confirmed = false))), "RQ-19: a payment still waiting for its depth is not in the book, so the library lets the request be cancelled")
+        ok(!RequestModel.canCancel(null, listOf(pay())) && !RequestModel.canCancel(RequestEnd.Cancelled, emptyList()), "RQ-19: nothing received counts, nothing ended")
+        ok(RequestModel.canClose(null, RequestStatus.PartPaid) && RequestModel.canClose(null, RequestStatus.Almost) && !RequestModel.canClose(null, RequestStatus.Waiting) && !RequestModel.canClose(null, RequestStatus.Paid) && !RequestModel.canClose(RequestEnd.Closed, RequestStatus.PartPaid), "RQ-20: part paid or almost paid, not ended")
+        ok(RequestModel.canCountPaid(null, RequestStatus.Almost) && !RequestModel.canCountPaid(null, RequestStatus.PartPaid) && !RequestModel.canCountPaid(RequestEnd.CountedPaid, RequestStatus.Almost), "RQ-16: only almost paid, not ended")
+        ok(RequestModel.canReturn(10, 9) && !RequestModel.canReturn(10, 10) && !RequestModel.canReturn(0, 0), "RQ-26: money can be returned while less went back than arrived")
+        // What the page holds (RQ-12, RQ-15, RQ-29, RQ-37): numbers and the library's words, with the placeholders around them.
+        val d = detail(RequestStatus.PartPaid, payments = listOf(pay(), pay(confirmed = false)), received = 1_000)
+        ok(RequestModel.amountIn(d, 5_000) == "5,000 sats", "an amount of a request in bitcoin")
+        val eur = RequestDetail(d.row, d.status, d.end, d.endAt, RequestPriceIn.ShopCurrency, "EUR", 5_000, 3_000, 1_000, 0, 1L, d.made, null, emptyList(), emptyList(), emptyList(), null, d.cancel, d.close, d.countPaid)
+        ok(RequestModel.amountIn(eur, 123_450) == "1,234.50 EUR", "an amount of a request in the currency")
+        val q = RequestModel.quoteRow(eur, RequestQuote(1_700_000_000L, 5_000, 30_000, 6_000_000L, 1_700_086_400L))
+        ok(q.second.startsWith("50.00 EUR \u00b7 30,000 sats \u00b7 " + RequestWords.quoteUntilLabel + " "), "a quote: what it asked for, and until when")
+        ok(RequestModel.quoteRow(d, RequestQuote(1_700_000_000L, 5_000, 5_000, null, null)).second == "5,000 sats \u00b7 5,000 sats", "a quote in bitcoin has no end")
+        ok(RequestModel.paymentRow(d, pay()).second == "aa \u00b7 " + RequestWords.paymentBlock + " 800000 \u00b7 1,000 sats" && RequestModel.paymentRow(d, pay(confirmed = false)).second == "aa \u00b7 " + RequestWords.paymentWaiting, "a payment: its block, or that it waits")
+        ok(RequestModel.paymentRow(d, RequestPayment("aa", 0, 1_000, 5, 1L, 0, true, false, false, PaymentAfter.Cancel)).second.endsWith(RequestWords.paymentNotCredited), "a payment that was not credited says so")
+        ok(RequestModel.returnRow(RequestReturn(2, 1_000, ReturnState.Done, "bc1qback", 1L, "cc", 2L)) == ("1,000 sats \u00b7 " + RequestWords.returnDone to "bc1qback") && ReturnState.values().map { RequestModel.returnStateWords(it) }.toSet().size == 4, "a return: where it stands, and its address")
         ok(RequestModel.shareLabel(RequestPart.Overdue) == RequestWords.sendAgain && RequestModel.shareLabel(RequestPart.Waiting) == RequestWords.shareAgain, "RQ-22, RQ-14: Send again for an overdue request, Share again for the rest")
         ok(RequestModel.isOpen(RequestPart.ReadyToSend) && RequestModel.isOpen(RequestPart.Overdue) && !RequestModel.isOpen(RequestPart.Finished), "which parts are open")
 
@@ -4289,7 +4333,7 @@ object AppModelTest {
         ok(screens.indexOf("withRate(currency, true, msg)") in screens.indexOf("private fun Controller.shareRequest(") until screens.indexOf("n.requestShare("), "RQ-12: the rate is fetched first for a request in the currency")
         ok(share.contains("requestAsk(rate)"), "the quote is made at the rate of the moment (RQ-14)")
         // RQ-22: Send again makes a fresh quote and opens the sheet at once.
-        ok(share.contains("if (openNow) openShareSheet(RequestShare.text(shared))") && screens.contains("shareRequest(n, row.number, a.sendAgain, msg)"), "RQ-22: Send again opens the sheet after its quote")
+        ok(share.contains("if (openNow) openShareSheet(RequestShare.text(shared))") && screens.contains("shareRequest(n, number, a.sendAgain, msg)"), "RQ-22: Send again opens the sheet after its quote")
         // RQ-13: the app sends nothing itself. The one way out is Android's share sheet, as text, through a chooser.
         val sheet = screens.substringAfter("private fun Controller.openShareSheet(").substringBefore("// ---- returning money")
         ok(occurs(screens, "startActivity(") == 1 && sheet.contains("Intent.ACTION_SEND") && sheet.contains("setType(\"text/plain\")") && sheet.contains("Intent.createChooser("), "RQ-13: the link goes to the share sheet as text through a chooser")
@@ -4307,8 +4351,20 @@ object AppModelTest {
         ok(screens.indexOf("n.requestRepeats(ask)") in 0 until screens.indexOf("n.requestState(ask)") && screens.contains("requestsChecked !== n"), "RQ-25: the due repeats are made once for each start of the node, before the state is read")
         ok(screens.contains("ui.words(e.sayWords())") || source("src/android/Screens.kt").contains("ui.words(e.sayWords())"), "the library's refusal words are shown as they arrive")
         ok(screens.contains("state.off?.let { return listOf(ui.words(it.say())) }"), "RQ-31: a book that cannot be read shows the library's words and no row")
-        ok(screens.contains("RequestWords.cancelYes") && screens.contains("EndKind.CountPaid -> n.requestCountPaid(ask, number)"), "RQ-16, RQ-19, RQ-20: ending a request asks first")
-        // The code as a picture needs a provider in the manifest, which OA-03 and OA-89 forbid: it is not built here.
+        ok(screens.contains("ui.danger(question.yes)") && screens.contains("EndKind.CountPaid -> n.requestCountPaid(ask, number)") && screens.contains("confirmEnd(number, EndKind.Cancel, d.cancel)"), "RQ-16, RQ-19, RQ-20: ending a request asks first, in the library's words")
+        ok(words.none { (k, _) -> k.contains("CANCEL_") || k.contains("CLOSE_") || k.contains("COUNT_PAID_") || k.contains("LIST_EMPTY") }, "the library's words for the questions and the empty list are shown, so their placeholders are gone")
+        ok(screens.contains("list.emptyHeading") && screens.contains("list.emptyWhat") && screens.contains("d.overReturned?.let"), "RQ-35, RQ-37: the empty list and the over-returned line are the library's")
+        ok(RequestWords.all().any { (k, _) -> k == "RQ_13_SHOW_CODE" } && screens.contains("RequestWords.showCode"), "RQ-13: Show the code has its placeholder")
+        // RQ-13: the code is drawn on the screen with the view of the other code screens; nothing is made as a picture or given away.
+        val showCode = screens.substringAfter("private fun Controller.showCode(").substringBefore("/** RQ-13: gives")
+        ok(showCode.contains("AnimatedQrView.makePlain(act, Who.OWNER, shared.link, codeHeight())") && showCode.contains("codeScreen(") && !showCode.contains("requestShare(") && !showCode.contains("startActivity("), "RQ-13: the code is the link of the quote just written, drawn by the shared code view")
+        for (bad in listOf("Bitmap", "compress(", "FileProvider", "ContentProvider", "ShareImage", "FLAG_GRANT")) ok(!screens.contains(bad), "RQ-13: no picture is made: no $bad")
+        val shareScreen = screens.substringAfter("private fun Controller.showShare(").substringBefore("/**\n * RQ-13: the same link as a code")
+        ok(shareScreen.indexOf("RequestWords.shareLink") in 0 until shareScreen.indexOf("RequestWords.showCode"), "RQ-13: Show the code is beside the link")
+        ok(share.indexOf("n.requestShare(") < share.indexOf("showShare(") && screens.indexOf("n.requestShare(") < screens.indexOf("private fun Controller.showCode("), "RQ-12: the quote is written before the code can be shown")
+        val activity = source("src/android/MainActivity.kt").substringAfter("override fun onCreate").substringBefore("override fun onStart")
+        ok(activity.contains("FLAG_SECURE"), "OA-04: the window that shows the code takes no screenshot or recording")
+        // RQ-13: no picture goes to other apps, so the manifest keeps no provider (OA-03, OA-89).
         ok(!source("AndroidManifest.xml").contains("<provider") && !screens.contains("ACTION_SEND\").setType(\"image"), "the manifest is as OA-03 and OA-89 say, and no picture is shared")
     }
 

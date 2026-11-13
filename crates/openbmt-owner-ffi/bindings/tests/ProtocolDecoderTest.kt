@@ -52,6 +52,7 @@ object ProtocolDecoderTest {
         priceThroughTheLibrary()
         importThroughTheLibrary()
         requestFrames()
+        requestDetailFrame()
         println("ProtocolDecoderTest: ok")
     }
 
@@ -584,13 +585,15 @@ object ProtocolDecoderTest {
                 listBytes.write(Writer().u32(0).toByteArray())
             }
         }
-        listBytes.write(Writer().u8(1).string("1 overdue").toByteArray())
+        val listTail = Writer().u8(1).string("1 overdue").string("No open requests").string("Requests you make show here.").toByteArray()
+        listBytes.write(listTail)
         val list = decodeResponse(header(0, listBytes.toByteArray())).let { it.requestList().also { _ -> it.end() } }
         check(list.waiting.size == 1 && list.waiting[0].marks == listOf("Paid late") && list.waiting[0].repeats)
         check(list.waiting[0].due.year == 2026L && list.overdueRow == "1 overdue" && list.finished.isEmpty())
+        check(list.emptyHeading == "No open requests" && list.emptyWhat == "Requests you make show here.")
         rejects("a list with a bool that is not 0 or 1") {
             val bad = listBytes.toByteArray().copyOf()
-            bad[bad.size - 12] = 2
+            bad[bad.size - listTail.size - 4 - 1] = 2
             decodeResponse(header(0, bad)).requestList()
         }
 
@@ -599,6 +602,37 @@ object ProtocolDecoderTest {
         val read = decodeResponse(header(0, state.toByteArray())).let { it.requestState().also { _ -> it.end() } }
         check(read.off == null && read.ready && read.open == 4L && read.overdue == 1L && read.overdueRow == "1 overdue")
         check(read.arrivalsWaiting == 2L && read.returnsQueued == 3L && read.returnsSats == 9_000L && read.returns == null)
+    }
+
+    private fun requestDetailFrame() {
+        val w = Writer()
+        w.u64(3).string("Rent").u64(1_850).u32(2026).u32(12).u32(1).string("line").string("state").u32(0).bool(false)
+        w.u8(4).u8(1).u8(1).u8(1).u64(99).u8(1).string("USD").u64(5_000).u64(3_150).u64(40_000).u64(1_000).u64(1_700_000_000L).u32(2026).u32(11).u32(13)
+        w.u8(1).u8(1)
+        w.u32(1).u64(5).u64(5_000).u64(30_000).u8(1).u64(6_000_000L).u8(1).u64(1_700_086_400L)
+        w.u32(2)
+        w.string("aa").u32(0).u64(25_000).u32(800_000).u64(1_700_000_100L).u64(3_000).bool(true).bool(true).bool(false).u8(1).u8(1)
+        w.string("bb").u32(1).u64(15_000).u32(800_001).u64(1_700_000_200L).u64(0).bool(false).bool(false).bool(false).u8(0)
+        w.u32(1).u64(2).u64(1_000).u8(2).string("bc1qback").u64(1_700_000_300L).u8(1).string("cc").u8(1).u64(1_700_000_400L)
+        w.u8(1).string("Returned 10 SAT more than it received")
+        for (c in listOf("a", "b", "c")) w.string("$c title").string("$c text").string("$c yes").string("$c no")
+        val frame = decodeResponse(header(0, w.toByteArray()))
+        val d = frame.requestDetail().also { frame.end() }
+        check(d.row.number == 3L && d.status == RequestStatus.Almost && d.end == RequestEnd.Closed && d.endAt == 99L)
+        check(d.priceIn == RequestPriceIn.ShopCurrency && d.unit == "USD" && d.amount == 5_000L && d.paid == 3_150L)
+        check(d.receivedSats == 40_000L && d.returnedSats == 1_000L && d.made.month == 11L && d.repeat == RequestEvery.Month)
+        check(d.quotes.size == 1 && d.quotes[0].sats == 30_000L && d.quotes[0].rate == 6_000_000L && d.quotes[0].until == 1_700_086_400L)
+        check(d.payments.size == 2 && d.payments[0].confirmed && d.payments[0].late && d.payments[0].after == PaymentAfter.Close)
+        check(!d.payments[1].confirmed && d.payments[1].credit == 0L && d.payments[1].after == null)
+        check(d.returns.size == 1 && d.returns[0].state == ReturnState.Done && d.returns[0].txid == "cc" && d.returns[0].at == 1_700_000_400L)
+        check(d.overReturned == "Returned 10 SAT more than it received" && d.cancel.yes == "a yes" && d.countPaid.no == "c no")
+        rejects("a status that is not defined") {
+            val bad = w.toByteArray().copyOf()
+            // The status byte follows the row: 8 + 4+4 + 8 + 12 + 4+4 + 4+5 + 4+5 + 4 + 1... found by search.
+            val at = Writer().u64(3).string("Rent").u64(1_850).u32(2026).u32(12).u32(1).string("line").string("state").u32(0).bool(false).toByteArray().size
+            bad[at] = 9
+            decodeResponse(header(0, bad)).requestDetail()
+        }
     }
 
     private fun sampleConfig() =

@@ -131,6 +131,9 @@ fn rq_03_rq_21_rq_13_a_request_is_made_listed_shared_and_cancelled() {
         .collect();
     assert_eq!(counts, vec![0, 0, 0, 1, 0]);
     assert!(r.opt(|r| r.string()).is_none());
+    // The words of the empty list come with the list (RQ-35).
+    assert_eq!(r.string(), "No open requests");
+    assert!(!r.string().is_empty());
     r.done();
 
     // Sharing writes the quote and gives the link.
@@ -267,4 +270,89 @@ fn rq_32_the_ledger_carries_a_line_for_each_request_and_the_days_stay_apart() {
         .list(|r| (r.string(), r.u64(), r.u64(), r.string()))
         .is_empty());
     assert!(r.list(|r| (r.string(), r.u64())).is_empty());
+}
+
+/// The row a detail starts with: number and note read, the rest left.
+fn detail_head(r: &mut Rd<'_>) -> (u64, String) {
+    row(r)
+}
+
+#[test]
+fn rq_35_rq_12_rq_19_one_request_is_read_with_its_quotes_and_the_words_of_its_questions() {
+    let rig = Rig::new();
+    let file = wallet_file(&rig);
+    settle(&rig, &file);
+    let handle = Rd::ok(&rig.start_own(&file)).u64();
+    Rd::ok(&rig.call(216, handle, &make_args(T0, "Rent", 5_000, 0, (1970, 1, 22))));
+    let one = ask(T0).u64(1).0;
+
+    // Before any share: waiting, nothing paid, no quote, no payment, no return.
+    let response = rig.call(227, handle, &one);
+    let mut r = Rd::ok(&response);
+    assert_eq!(detail_head(&mut r), (1, "Rent".to_string()));
+    assert_eq!(r.u8(), 0, "waiting");
+    assert!(r.opt(|r| r.u8()).is_none(), "not ended");
+    assert!(r.opt(|r| r.u64()).is_none());
+    assert_eq!(r.u8(), 0, "priced in bitcoin");
+    assert_eq!(r.string(), "SAT");
+    assert_eq!((r.u64(), r.u64(), r.u64(), r.u64()), (5_000, 0, 0, 0));
+    assert_eq!(r.u64(), T0, "made at");
+    assert_eq!((r.u32(), r.u32(), r.u32()), (1970, 1, 12));
+    assert!(r.opt(|r| r.u8()).is_none(), "no repeat");
+    assert!(r.list(|r| r.u64()).is_empty(), "no quote yet");
+    assert!(r.list(|r| r.u64()).is_empty(), "no payment");
+    assert!(r.list(|r| r.u64()).is_empty(), "no return");
+    assert!(r.opt(|r| r.string()).is_none(), "nothing over-returned");
+    for _ in 0..3 {
+        let (title, text) = (r.string(), r.string());
+        let (yes, no) = (r.string(), r.string());
+        assert!(!title.is_empty() && !text.is_empty() && !yes.is_empty() && !no.is_empty());
+    }
+    r.done();
+
+    // A share writes a quote, and the read shows it.
+    Rd::ok(&rig.call(218, handle, &ask(T0 + 1).u64(1).string("Corner Cafe").0));
+    let response = rig.call(227, handle, &one);
+    let mut r = Rd::ok(&response);
+    detail_head(&mut r);
+    let _ = (
+        r.u8(),
+        r.opt(|r| r.u8()),
+        r.opt(|r| r.u64()),
+        r.u8(),
+        r.string(),
+    );
+    let _ = (r.u64(), r.u64(), r.u64(), r.u64(), r.u64());
+    let _ = (r.u32(), r.u32(), r.u32(), r.opt(|r| r.u8()));
+    let quotes = r.list(|r| {
+        (
+            r.u64(),
+            r.u64(),
+            r.u64(),
+            r.opt(|r| r.u64()),
+            r.opt(|r| r.u64()),
+        )
+    });
+    assert_eq!(quotes, vec![(T0 + 1, 5_000, 5_000, None, None)]);
+
+    // Cancelling ends it; the read says how, and when.
+    Rd::ok(&rig.call(219, handle, &ask(T0 + 5).u64(1).0));
+    let response = rig.call(227, handle, &one);
+    let mut r = Rd::ok(&response);
+    detail_head(&mut r);
+    assert_eq!(r.u8(), 0);
+    assert_eq!(r.opt(|r| r.u8()), Some(0), "cancelled");
+    assert_eq!(r.opt(|r| r.u64()), Some(T0 + 5));
+
+    // A request that is not there is refused with the library's words.
+    let fault = Rd::error(&rig.call(227, handle, &ask(T0).u64(9).0)).expect("refused");
+    assert!(fault.rule.starts_with("RQ-"), "{}", fault.rule);
+}
+
+#[test]
+fn rq_01_a_shop_with_a_key_app_reads_no_request() {
+    let rig = Rig::new();
+    let handle = rig.start();
+    let fault = Rd::error(&rig.call(227, handle, &ask(T0).u64(1).0)).expect("refused");
+    assert!(fault.rule.starts_with("RQ-"), "{}", fault.rule);
 }

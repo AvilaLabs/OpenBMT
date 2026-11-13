@@ -7,13 +7,16 @@ import android.widget.LinearLayout
 import android.widget.RadioGroup
 import android.widget.TextView
 import java.util.TimeZone
+import org.openbmt.app.AnimatedQrView
 import org.openbmt.app.Format
 import org.openbmt.app.RowItem
 import org.openbmt.app.SayWords
 import org.openbmt.app.Tones
+import org.openbmt.app.Who
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
 import org.openbmt.owner.RequestAsk
+import org.openbmt.owner.RequestConfirm
 import org.openbmt.owner.RequestEvery
 import org.openbmt.owner.RequestPriceIn
 import org.openbmt.owner.RequestRate
@@ -88,8 +91,9 @@ internal fun Controller.showRequests(message: SayWords? = null) {
     if (list != null) {
         val sections = RequestModel.sections(list)
         if (sections.isEmpty()) {
-            views.add(ui.text(RequestWords.emptyHeading, 16f, bold = true))
-            views.add(para(RequestWords.emptyWhat))
+            // RQ-35: the empty list's words are the library's.
+            views.add(ui.text(list.emptyHeading, 16f, bold = true))
+            views.add(para(list.emptyWhat))
         }
         for (s in sections) {
             views.add(label(RequestModel.partTitle(s.part)))
@@ -110,47 +114,58 @@ internal fun Controller.showRequestPage(number: Long, message: SayWords? = null)
     val msg = Slot(act)
     message?.let { msg.show(ui.words(it)) }
     val list = attempt(msg) { n.requestList(requestAsk()) }
-    val found = list?.let { RequestModel.find(it, number) }
-    if (found == null) {
-        // A request the list does not hold, or a list that did not read: the words of the call, and the way back.
+    val part = list?.let { RequestModel.find(it, number) }?.first
+    val d = if (part == null) null else attempt(msg) { n.requestRead(requestAsk(), number) }
+    if (d == null) {
+        // A request the list does not hold, or a call that did not read: the words of the call, and the way back.
         return screen(RequestWords.listTitle, listOf(msg), listOf(ui.button(RequestWords.back) { showRequests() }), back = { showRequests() })
     }
-    val (part, row) = found
-    val a = RequestModel.actions(part, row)
+    val a = RequestModel.actions(d, part == RequestPart.Overdue)
     val views = ArrayList<View>()
     views.add(msg)
-    views.add(ui.text(row.state, 20f, bold = true))
-    for (mark in row.marks) views.add(line(mark, muted = true))
-    if (row.repeats) views.add(line(RequestWords.repeatsLine, muted = true))
-    if (a.returnMoney) views.add(ui.button(RequestWords.returnMoney) { showReturn(row.number) })
-    if (a.countPaid) views.add(ui.button(RequestWords.countPaid) { confirmEnd(row.number, EndKind.CountPaid) })
-    if (a.close) views.add(ui.button(RequestWords.closeRequest) { confirmEnd(row.number, EndKind.Close) })
-    if (a.cancel) views.add(ui.button(RequestWords.cancelRequest) { confirmEnd(row.number, EndKind.Cancel) })
+    views.add(ui.text(d.row.state, 20f, bold = true))
+    for (mark in d.row.marks) views.add(line(mark, muted = true))
+    // RQ-37: more was returned than the request received.
+    d.overReturned?.let { views.add(line(it, muted = true)) }
+    if (d.repeat != null) views.add(line(RequestWords.repeatsLine, muted = true))
+    views.add(ui.labelled(RequestWords.owedLabel, ui.text(RequestModel.amountIn(d, d.row.owed))))
+    views.add(ui.labelled(RequestWords.paidLabel, ui.text(RequestModel.amountIn(d, d.paid))))
+    if (d.quotes.isNotEmpty()) {
+        views.add(label(RequestWords.quotesLabel))
+        views.add(ui.rows(d.quotes.reversed().map { q -> RequestModel.quoteRow(d, q).let { (t, sub) -> RowItem(t, sub) } }))
+    }
+    if (d.payments.isNotEmpty()) {
+        views.add(label(RequestWords.paymentsLabel))
+        views.add(ui.rows(d.payments.map { p -> RequestModel.paymentRow(d, p).let { (t, sub) -> RowItem(t, sub) } }))
+    }
+    if (d.returns.isNotEmpty()) {
+        views.add(label(RequestWords.returnsLabel))
+        views.add(ui.rows(d.returns.map { r -> RequestModel.returnRow(r).let { (t, sub) -> RowItem(t, sub) } }))
+    }
+    if (a.returnMoney) views.add(ui.button(RequestWords.returnMoney) { showReturn(number) })
+    if (a.countPaid) views.add(ui.button(RequestWords.countPaid) { confirmEnd(number, EndKind.CountPaid, d.countPaid) })
+    if (a.close) views.add(ui.button(RequestWords.closeRequest) { confirmEnd(number, EndKind.Close, d.close) })
+    if (a.cancel) views.add(ui.button(RequestWords.cancelRequest) { confirmEnd(number, EndKind.Cancel, d.cancel) })
     if (a.stopRepeating) {
         views.add(
             ui.button(RequestWords.stopRepeating) {
-                if (attempt(msg) { n.requestStopRepeating(requestAsk(), row.number) } != null) showRequestPage(row.number)
+                if (attempt(msg) { n.requestStopRepeating(requestAsk(), number) } != null) showRequestPage(number)
             },
         )
     }
     val footer = ArrayList<android.widget.Button>()
-    if (a.share) footer.add(ui.primary(RequestModel.shareLabel(part)) { shareRequest(n, row.number, a.sendAgain, msg) })
+    if (a.share) footer.add(ui.primary(RequestModel.shareLabel(part!!)) { shareRequest(n, number, a.sendAgain, msg) })
     footer.add(ui.button(RequestWords.back) { showRequests() })
-    screen(row.note, views, footer, back = { showRequests() }, sub = row.line)
+    screen(d.row.note, views, footer, back = { showRequests() }, sub = d.row.line)
 }
 
 private enum class EndKind { Cancel, Close, CountPaid }
 
-/** RQ-16, RQ-19, RQ-20: the question before a request ends or is counted as paid. The library refuses what the request cannot do. */
-private fun Controller.confirmEnd(number: Long, kind: EndKind) {
+/** RQ-16, RQ-19, RQ-20: the library's question before a request ends or is counted as paid. The library refuses what the request cannot do. */
+private fun Controller.confirmEnd(number: Long, kind: EndKind, question: RequestConfirm) {
     val n = node ?: return begin()
     val msg = Slot(act)
-    val (title, text, yes, no) = when (kind) {
-        EndKind.Cancel -> listOf(RequestWords.cancelTitle, RequestWords.cancelText, RequestWords.cancelYes, RequestWords.cancelNo)
-        EndKind.Close -> listOf(RequestWords.closeTitle, RequestWords.closeText, RequestWords.closeYes, RequestWords.closeNo)
-        EndKind.CountPaid -> listOf(RequestWords.countPaidTitle, RequestWords.countPaidText, RequestWords.countPaidYes, RequestWords.countPaidNo)
-    }
-    val go = ui.danger(yes) {
+    val go = ui.danger(question.yes) {
         val ask = requestAsk()
         val done = attempt(msg) {
             when (kind) {
@@ -161,7 +176,7 @@ private fun Controller.confirmEnd(number: Long, kind: EndKind) {
         }
         if (done != null) showRequests()
     }
-    screen(title, listOf(ui.text(text), msg), listOf(go, ui.button(no) { showRequestPage(number) }), back = { showRequestPage(number) })
+    screen(question.title, listOf(ui.text(question.text), msg), listOf(go, ui.button(question.no) { showRequestPage(number) }), back = { showRequestPage(number) })
 }
 
 // ---- the form (RQ-05 to RQ-09, RQ-24) ---------------------------------------------------------------------------
@@ -250,8 +265,29 @@ private fun Controller.showShare(number: Long, shared: RequestShared, currency: 
     views.add(para(RequestWords.sendsNothing))
     screen(
         RequestWords.shareTitle, views,
-        listOf(ui.primary(RequestWords.shareLink) { openShareSheet(RequestShare.text(shared)) }, ui.button(RequestWords.back) { showRequestPage(number) }),
+        listOf(
+            ui.primary(RequestWords.shareLink) { openShareSheet(RequestShare.text(shared)) },
+            ui.button(RequestWords.showCode) { showCode(number, shared, currency) },
+            ui.button(RequestWords.back) { showRequestPage(number) },
+        ),
         back = { showRequestPage(number) },
+    )
+}
+
+/**
+ * RQ-13: the same link as a code on the screen, for a customer who is there to scan it. It is the shared code view of
+ * the other code screens, on the window that no screenshot or recording can take (OA-04). No image is made or given
+ * to another app.
+ */
+private fun Controller.showCode(number: Long, shared: RequestShared, currency: ShopCurrency) {
+    val made = AnimatedQrView.makePlain(act, Who.OWNER, shared.link, codeHeight())
+    val below = ArrayList<View>()
+    below.add(ui.text(RequestShare.owed(shared, currency), 20f, bold = true))
+    below.addAll(codeFallback(made))
+    codeScreen(
+        RequestWords.codeTitle, RequestWords.said(RequestWords.codeTitle), made.view, below,
+        listOf(ui.button(RequestWords.back) { showShare(number, shared, currency) }),
+        back = { showShare(number, shared, currency) },
     )
 }
 

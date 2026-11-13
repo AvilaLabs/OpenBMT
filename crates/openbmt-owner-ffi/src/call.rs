@@ -172,9 +172,11 @@ use crate::price::{
     PriceSourceView,
 };
 use crate::requests::{
-    DayView, RequestAsk, RequestEvery, RequestListView, RequestMadeView, RequestMakeArgs,
+    ConfirmView, DayView, PaymentAfterView, PaymentView, QuoteView, RequestAsk, RequestDetailView,
+    RequestEndView, RequestEvery, RequestListView, RequestMadeView, RequestMakeArgs,
     RequestNumberArgs, RequestPriceIn, RequestRateView, RequestRepeatsView, RequestReturnAddedView,
     RequestReturnArgs, RequestRowView, RequestShareArgs, RequestSharedView, RequestStateView,
+    RequestStatusView, ReturnStateView, ReturnView,
 };
 use crate::say::{TONES, WHOS};
 use crate::settings_edit::{
@@ -1017,6 +1019,9 @@ fn build_ops() -> Vec<Op> {
             Node,
             |c, a: RequestReturnArgs| c.entry()?.request_return_ask(a),
         ),
+        op(227, "request_read", Node, |c, a: RequestNumberArgs| {
+            c.entry()?.request_read(a)
+        }),
     ]
 }
 
@@ -1349,6 +1354,15 @@ fn definitions() -> Vec<TypeDef> {
         RequestReturnAddedView::define(),
         RequestRepeatsView::define(),
         RequestStateView::define(),
+        RequestStatusView::define(),
+        RequestEndView::define(),
+        PaymentAfterView::define(),
+        ReturnStateView::define(),
+        ConfirmView::define(),
+        QuoteView::define(),
+        PaymentView::define(),
+        ReturnView::define(),
+        RequestDetailView::define(),
     ]
 }
 

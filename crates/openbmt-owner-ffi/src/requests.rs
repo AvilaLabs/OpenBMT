@@ -9,6 +9,8 @@
 //! `openbmt_requests::say`; a text that library does not have is a
 //! placeholder that names its rule.
 
+use bitcoin::hashes::Hash;
+use bitcoin::{Address, Network, Txid};
 use openbmt_books::format_minor;
 use openbmt_core::currency::ShopCurrency;
 use openbmt_counter::{Currency, Rate, RateSource};
@@ -19,6 +21,7 @@ use openbmt_requests::{
     day_of, say, CheckedRate, Day, DueRepeat, Every, NewRequest, PriceIn, Pricing, Request,
     RequestBook, ReturnAmount, ReturnState, Row,
 };
+use openbmt_requests::{After, End, Status};
 
 use crate::codec::{wire_record, wire_record_get, wire_unit_enum};
 use crate::error::{from_words, rule_in, AppError, Kind};
@@ -331,6 +334,10 @@ pub struct RequestListView {
     pub finished: Vec<RequestRowView>,
     /// Home's row when some are overdue.
     pub overdue_row: Option<String>,
+    /// The heading of the empty list (RQ-35).
+    pub empty_heading: String,
+    /// The text of the empty list (RQ-35).
+    pub empty_what: String,
 }
 
 wire_record!(RequestListView {
@@ -339,7 +346,9 @@ wire_record!(RequestListView {
     due_soon,
     waiting,
     finished,
-    overdue_row
+    overdue_row,
+    empty_heading,
+    empty_what
 });
 
 /// The arguments of `request_add_return` and `request_return_ask`
@@ -673,6 +682,8 @@ pub(crate) fn list<P: OwnerPort>(
         waiting: part(&parts.waiting, min),
         finished,
         overdue_row: (!parts.overdue.is_empty()).then(|| say::overdue_row(parts.overdue.len())),
+        empty_heading: say::empty_list().0.to_string(),
+        empty_what: say::empty_list().1.to_string(),
     })
 }
 
@@ -782,6 +793,424 @@ pub(crate) fn state<P: OwnerPort>(node: &OwnerNode<P>, ask: &RequestAsk) -> Requ
             ))
         }),
     }
+}
+
+/// Where a request stands (RQ-16).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestStatusView {
+    /// Nothing counted yet.
+    Waiting,
+    /// Something arrived and something is still owed.
+    PartPaid,
+    /// Nothing is owed.
+    Paid,
+    /// More arrived than was owed.
+    Overpaid,
+    /// In the currency: a shortfall under the smallest bitcoin sale.
+    Almost,
+}
+
+wire_unit_enum!(RequestStatusView {
+    Waiting = 0,
+    PartPaid = 1,
+    Paid = 2,
+    Overpaid = 3,
+    Almost = 4
+});
+
+/// How a request ended (RQ-16, RQ-19, RQ-20).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestEndView {
+    /// Cancelled with nothing received.
+    Cancelled,
+    /// Closed as it stood.
+    Closed,
+    /// Almost paid, counted as paid.
+    CountedPaid,
+}
+
+wire_unit_enum!(RequestEndView {
+    Cancelled = 0,
+    Closed = 1,
+    CountedPaid = 2
+});
+
+/// A payment that came after the request ended (RQ-19, RQ-20).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaymentAfterView {
+    /// After it was cancelled.
+    Cancel,
+    /// After it was closed or counted as paid.
+    Close,
+}
+
+wire_unit_enum!(PaymentAfterView {
+    Cancel = 0,
+    Close = 1
+});
+
+/// Where a return stands (RQ-29).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReturnStateView {
+    /// Waiting with the other returns.
+    Queued,
+    /// In a spend not yet confirmed.
+    Sent,
+    /// The spend that pays it is confirmed.
+    Done,
+    /// The owner cancelled its payment in the queue.
+    Cancelled,
+}
+
+wire_unit_enum!(ReturnStateView {
+    Queued = 0,
+    Sent = 1,
+    Done = 2,
+    Cancelled = 3
+});
+
+/// A question before something is done, with the library's words (RQ-16,
+/// RQ-19, RQ-20).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfirmView {
+    /// The title.
+    pub title: String,
+    /// What happens.
+    pub text: String,
+    /// The button that does it.
+    pub yes: String,
+    /// The button that does not.
+    pub no: String,
+}
+
+wire_record!(ConfirmView {
+    title,
+    text,
+    yes,
+    no
+});
+
+impl From<say::Confirm> for ConfirmView {
+    fn from(c: say::Confirm) -> Self {
+        Self {
+            title: c.title,
+            text: c.text,
+            yes: c.yes.to_string(),
+            no: c.no.to_string(),
+        }
+    }
+}
+
+/// One quote that was written for a request (RQ-12).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuoteView {
+    /// When it was made, in Unix seconds.
+    pub made_at: u64,
+    /// What was owed then, in the request's unit.
+    pub owed: u64,
+    /// The satoshis asked for.
+    pub sats: u64,
+    /// The rate, minor units per bitcoin, for a request in the currency.
+    pub rate: Option<u64>,
+    /// When it runs out, in Unix seconds, for a request in the currency.
+    pub until: Option<u64>,
+}
+
+wire_record!(QuoteView {
+    made_at,
+    owed,
+    sats,
+    rate,
+    until
+});
+
+/// One payment to a request's address (RQ-15).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaymentView {
+    /// The transaction, as hex text.
+    pub txid: String,
+    /// Which output of it.
+    pub vout: u32,
+    /// The satoshis.
+    pub sats: u64,
+    /// The height of its block.
+    pub height: u32,
+    /// The block's time, in Unix seconds.
+    pub block_time: u64,
+    /// What it was credited, in the request's unit; 0 when it was not.
+    pub credit: u64,
+    /// The block has reached the confirmation depth and the payment is in
+    /// the book; false for a payment still waiting for its depth.
+    pub confirmed: bool,
+    /// RQ-17: after the end of the due day.
+    pub late: bool,
+    /// RQ-18: credited at a price that had run out.
+    pub old_price: bool,
+    /// RQ-19, RQ-20: it came after the request ended.
+    pub after: Option<PaymentAfterView>,
+}
+
+wire_record!(PaymentView {
+    txid,
+    vout,
+    sats,
+    height,
+    block_time,
+    credit,
+    confirmed,
+    late,
+    old_price,
+    after
+});
+
+/// One return from a request (RQ-26 to RQ-29).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReturnView {
+    /// Its number in the book.
+    pub id: u64,
+    /// The satoshis.
+    pub sats: u64,
+    /// Where it stands.
+    pub state: ReturnStateView,
+    /// The customer's address.
+    pub address: String,
+    /// When it was queued, in Unix seconds.
+    pub queued_at: u64,
+    /// The spend that pays it, as hex text, once there is one.
+    pub txid: Option<String>,
+    /// When it was confirmed or cancelled, in Unix seconds.
+    pub at: Option<u64>,
+}
+
+wire_record!(ReturnView {
+    id,
+    sats,
+    state,
+    address,
+    queued_at,
+    txid,
+    at
+});
+
+/// What `request_read` gives: one request as the book keeps it (RQ-35).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestDetailView {
+    /// The row of the list: note, state line, marks.
+    pub row: RequestRowView,
+    /// Where it stands.
+    pub status: RequestStatusView,
+    /// How it ended, if it did.
+    pub end: Option<RequestEndView>,
+    /// When it ended, in Unix seconds.
+    pub end_at: Option<u64>,
+    /// How it is priced.
+    pub price_in: RequestPriceIn,
+    /// The code of the unit of its amounts: `SAT` for a request in bitcoin.
+    pub unit: String,
+    /// The amount, in its unit.
+    pub amount: u64,
+    /// What the payments came to, in its unit.
+    pub paid: u64,
+    /// The satoshis that arrived, whatever happened to the request.
+    pub received_sats: u64,
+    /// The satoshis of the returns that count.
+    pub returned_sats: u64,
+    /// When it was made, in Unix seconds.
+    pub made_at: u64,
+    /// The day it was made.
+    pub made: DayView,
+    /// How often it repeats.
+    pub repeat: Option<RequestEvery>,
+    /// The quotes, oldest first.
+    pub quotes: Vec<QuoteView>,
+    /// The payments, in the order of the blocks, then those waiting for
+    /// their depth.
+    pub payments: Vec<PaymentView>,
+    /// The returns, oldest first.
+    pub returns: Vec<ReturnView>,
+    /// RQ-37: the line for more returned than it received.
+    pub over_returned: Option<String>,
+    /// The question before it is cancelled.
+    pub cancel: ConfirmView,
+    /// The question before it is closed.
+    pub close: ConfirmView,
+    /// The question before it is counted as paid.
+    pub count_paid: ConfirmView,
+}
+
+wire_record!(RequestDetailView {
+    row,
+    status,
+    end,
+    end_at,
+    price_in,
+    unit,
+    amount,
+    paid,
+    received_sats,
+    returned_sats,
+    made_at,
+    made,
+    repeat,
+    quotes,
+    payments,
+    returns,
+    over_returned,
+    cancel,
+    close,
+    count_paid
+});
+
+fn status_view(s: Status) -> RequestStatusView {
+    match s {
+        Status::Waiting => RequestStatusView::Waiting,
+        Status::PartPaid { .. } => RequestStatusView::PartPaid,
+        Status::Paid => RequestStatusView::Paid,
+        Status::Overpaid { .. } => RequestStatusView::Overpaid,
+        Status::Almost { .. } => RequestStatusView::Almost,
+    }
+}
+
+fn txid_text(txid: [u8; 32]) -> String {
+    Txid::from_byte_array(txid).to_string()
+}
+
+fn return_view(r: &openbmt_requests::Return, network: Network) -> ReturnView {
+    let (state, txid, at) = match r.state {
+        ReturnState::Queued => (ReturnStateView::Queued, None, None),
+        ReturnState::Sent { txid } => (ReturnStateView::Sent, Some(txid_text(txid)), None),
+        ReturnState::Done { txid, at } => (ReturnStateView::Done, Some(txid_text(txid)), Some(at)),
+        ReturnState::Cancelled { at } => (ReturnStateView::Cancelled, None, Some(at)),
+    };
+    ReturnView {
+        id: r.id,
+        sats: r.sats,
+        state,
+        address: Address::from_script(&r.script, network)
+            .map_or_else(|_| String::new(), |a| a.to_string()),
+        queued_at: r.queued_at,
+        txid,
+        at,
+    }
+}
+
+/// RQ-35: one request as the book keeps it, for its page.
+pub(crate) fn read<P: OwnerPort>(
+    node: &OwnerNode<P>,
+    a: &RequestNumberArgs,
+) -> Result<RequestDetailView, AppError> {
+    let book = node
+        .requests()
+        .map_err(|e| request_error(RequestError::Off(e.clone())))?;
+    let request = book.request(a.number).ok_or_else(|| {
+        request_error(RequestError::Return(
+            openbmt_requests::ReturnRefused::NoSuchRequest,
+        ))
+    })?;
+    let min = node.request_context().map_or(0, |c| c.min_sale_sats);
+    let unit = unit_of(request);
+    let write = |n: u64| amount_text(unit, n);
+    let network = node.network();
+    let returns: Vec<ReturnView> = book
+        .returns()
+        .iter()
+        .filter(|r| r.request == request.number)
+        .map(|r| return_view(r, network))
+        .collect();
+    let returned_sats = book
+        .returns()
+        .iter()
+        .filter(|r| r.request == request.number && r.state.counts())
+        .fold(0u64, |t, r| t.saturating_add(r.sats));
+    let mut payments: Vec<PaymentView> = request
+        .credits
+        .iter()
+        .map(|c| PaymentView {
+            txid: txid_text(c.txid),
+            vout: c.vout,
+            sats: c.sats,
+            height: c.height,
+            block_time: c.block_time,
+            credit: c.value,
+            confirmed: true,
+            late: c.late,
+            old_price: c.old_price,
+            after: c.after.map(|x| match x {
+                After::Cancel => PaymentAfterView::Cancel,
+                After::Close => PaymentAfterView::Close,
+            }),
+        })
+        .collect();
+    payments.extend(
+        node.request_arrivals()
+            .iter()
+            .filter(|p| p.index == request.address_index)
+            .map(|p| PaymentView {
+                txid: txid_text(p.txid),
+                vout: p.vout,
+                sats: p.sats,
+                height: p.height,
+                block_time: p.block_time,
+                credit: 0,
+                confirmed: false,
+                late: false,
+                old_price: false,
+                after: None,
+            }),
+    );
+    let credited = request.credited();
+    Ok(RequestDetailView {
+        row: row(request, request.owed(), min),
+        status: status_view(request.status(min)),
+        end: request.end.map(|(e, _)| match e {
+            End::Cancelled => RequestEndView::Cancelled,
+            End::Closed => RequestEndView::Closed,
+            End::CountedPaid => RequestEndView::CountedPaid,
+        }),
+        end_at: request.end.map(|(_, at)| at),
+        price_in: match request.pricing {
+            Pricing::Bitcoin => RequestPriceIn::Bitcoin,
+            Pricing::Currency(_) => RequestPriceIn::ShopCurrency,
+        },
+        unit: match unit {
+            Some(c) if !c.is_sats() => Currency::of_shop(c).to_string(),
+            _ => "SAT".to_string(),
+        },
+        amount: request.amount,
+        paid: credited,
+        received_sats: request.received_sats(),
+        returned_sats,
+        made_at: request.made_at,
+        made: DayView::of(request.made),
+        repeat: request.repeat.map(|r| match r.every {
+            Every::Week => RequestEvery::Week,
+            Every::Month => RequestEvery::Month,
+            Every::Year => RequestEvery::Year,
+        }),
+        quotes: request
+            .quotes
+            .iter()
+            .map(|q| QuoteView {
+                made_at: q.made_at,
+                owed: q.owed,
+                sats: q.sats,
+                rate: q.rate.map(|r| r.minor_per_btc()),
+                until: q.until,
+            })
+            .collect(),
+        payments,
+        returns,
+        over_returned: book
+            .over_returned(request.number)
+            .map(|over| say::over_returned_line(&amount_text(None, over))),
+        cancel: say::cancel_confirm(request.number).into(),
+        close: say::close_confirm(request.number, &write(credited)).into(),
+        count_paid: say::count_as_paid_confirm(
+            request.number,
+            &write(request.amount.saturating_sub(credited)),
+        )
+        .into(),
+    })
 }
 
 fn off_state(off: &RequestsOff, ready: bool) -> RequestStateView {

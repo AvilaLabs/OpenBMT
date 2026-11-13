@@ -220,6 +220,7 @@ ops run on another; it waits for at most 250 ms.
 224 request_stop_repeating handle node  args RequestNumberArgs -> ()
 225 request_state    handle node  args RequestAsk -> RequestStateView
 226 request_return_ask handle node  args RequestReturnArgs -> string
+227 request_read     handle node  args RequestNumberArgs -> RequestDetailView
 ```
 
 ## Types
@@ -455,9 +456,22 @@ RequestNumberArgs: record: ask: RequestAsk, number: u64
 RequestShareArgs: record: ask: RequestAsk, number: u64, shop_name: string
 RequestSharedView: record: number: u64, owed: u64, sats: u64, rate: option<u64>, until: option<u64>, address: string, link: string, line: string
 RequestRowView: record: number: u64, note: string, owed: u64, due: DayView, line: string, state: string, marks: list<string>, repeats: bool
-RequestListView: record: ready_to_send: list<RequestRowView>, overdue: list<RequestRowView>, due_soon: list<RequestRowView>, waiting: list<RequestRowView>, finished: list<RequestRowView>, overdue_row: option<string>
+RequestListView: record: ready_to_send: list<RequestRowView>, overdue: list<RequestRowView>, due_soon: list<RequestRowView>, waiting: list<RequestRowView>, finished: list<RequestRowView>, overdue_row: option<string>, empty_heading: string, empty_what: string
 RequestReturnArgs: record: ask: RequestAsk, number: u64, in_currency: bool, amount: u64, address: string, shop_name: string
 RequestReturnAddedView: record: id: u64, refund: u32, sats: u64, groups: string, words: Words
 RequestRepeatsView: record: made: list<RequestMadeView>
 RequestStateView: record: off: option<Words>, ready: bool, open: u32, overdue: u32, ready_to_send: u32, overdue_row: option<string>, arrivals_waiting: u32, returns_queued: u32, returns_sats: u64, returns: option<Words>
+RequestStatusView: enum, one tag byte
+    tags Waiting=0 PartPaid=1 Paid=2 Overpaid=3 Almost=4
+RequestEndView: enum, one tag byte
+    tags Cancelled=0 Closed=1 CountedPaid=2
+PaymentAfterView: enum, one tag byte
+    tags Cancel=0 Close=1
+ReturnStateView: enum, one tag byte
+    tags Queued=0 Sent=1 Done=2 Cancelled=3
+ConfirmView: record: title: string, text: string, yes: string, no: string
+QuoteView: record: made_at: u64, owed: u64, sats: u64, rate: option<u64>, until: option<u64>
+PaymentView: record: txid: string, vout: u32, sats: u64, height: u32, block_time: u64, credit: u64, confirmed: bool, late: bool, old_price: bool, after: option<PaymentAfterView>
+ReturnView: record: id: u64, sats: u64, state: ReturnStateView, address: string, queued_at: u64, txid: option<string>, at: option<u64>
+RequestDetailView: record: row: RequestRowView, status: RequestStatusView, end: option<RequestEndView>, end_at: option<u64>, price_in: RequestPriceIn, unit: string, amount: u64, paid: u64, received_sats: u64, returned_sats: u64, made_at: u64, made: DayView, repeat: option<RequestEvery>, quotes: list<QuoteView>, payments: list<PaymentView>, returns: list<ReturnView>, over_returned: option<string>, cancel: ConfirmView, close: ConfirmView, count_paid: ConfirmView
 ```
