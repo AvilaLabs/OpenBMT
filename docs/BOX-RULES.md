@@ -110,7 +110,9 @@ merchant types it into the Box.
   as BX-17 says. After them, a Free change is taken with the owner's
   signature; a Loosen change is taken only with a counter's confirmation
   (`docs/APPROVAL-RULES.md` AP-04, AP-05) by a counter of the settings in
-  force; a Redirect change is refused. The mark is pinned with the roots
+  force, joined by the owner phone as `docs/OWNER-APP-RULES.md` section 19
+  says; counters added while none is in force are Free (AP-12); a Redirect
+  change is refused. The mark is pinned with the roots
   (BX-16): a Box never moves between the two kinds, and a welcome of the
   other kind is refused as a welcome for other roots. The owner phone keeps
   the Box's address and relay key with the shop's own wallet, hands the

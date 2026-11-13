@@ -1082,3 +1082,37 @@ the wallet's own screen. Status: specification, written before the code.
   `docs/SCREEN-RULES.md`: the library's refusals of AS-100 to AS-104 and
   the app's own steps, listed in `docs/screens/owner.md` and
   `docs/screens/owner-app.md` and checked as every other words are.
+
+## 19. A change confirmed at a counter
+
+A shop with its own wallet has no Key app to sign a loosening of its
+settings. Once it has a Box, the counters and the Box take such a change
+only with a counter's confirmation (`docs/APPROVAL-RULES.md`, CR-239 to
+CR-242, BX-18). The owner phone carries the change to the counters and
+the confirmation back. A shop without a Box has no link to carry either,
+and its settings change on the owner phone alone, as before. Status:
+specification, written before the code.
+
+- **OA-119.** When the owner phone of a shop with its own wallet and a Box
+  signs settings whose class is Loosen (AP-01, AP-12), it sends them as
+  `OBMS` to every counter through the link, where each keeps them as its
+  change to confirm (CR-239). The owner phone shows the change as waiting
+  for a counter, with its four words (AP-03) and each field it loosens. The
+  settings in force stay as they were, on the owner phone too.
+- **OA-120.** The owner phone reads the confirmations of CR-241 from the
+  counters' records. The first one that verifies under AP-04 for the
+  waiting settings' hash, from a counter of the settings in force (AP-05),
+  is joined to them as `OBM<` (CR-242), which goes to every counter and to
+  the Box; the owner phone then puts the settings in force itself. A
+  confirmation for another hash, or from a counter not in force, is
+  ignored, and the change keeps waiting.
+- **OA-121.** One change waits at a time. Signing a newer one replaces it,
+  as the counters replace theirs (CR-239). A change that waits for seven
+  days is dropped, on the owner phone as on the counters, and says so.
+- **OA-122.** Adding a counter is such a change once the shop has a
+  counter in force (AP-12). The new counter is paired at once and takes
+  sales on its own; it reaches the other devices through the Box once the
+  change is in force. The pairing's last screen says so and names "Change
+  to confirm" on a counter the shop already has.
+- **OA-123.** Every state and refusal of this section has words under
+  `docs/SCREEN-RULES.md`, checked as every other words are.

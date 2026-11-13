@@ -31,6 +31,12 @@ signature for every loosening change, unchanged.
   turning `node_only` or `light_fallback` off, are Free. Setting or
   changing `own_node` while `node_only` is off is Free: the node is then a
   second check only (NR-98 to NR-103, WR-60 to WR-65).
+- **AP-12. No counter yet.** When the settings in force name no counter, a
+  change whose only loosening is counters added, with their shares, is
+  Free: no counter can confirm it, and a confirmation has nothing yet to
+  protect. Any other loosening in the same change keeps its class. Once one
+  counter is in force, every counter added is Loosen (AP-01), so that a
+  counter added by the owner phone alone can never confirm the next change.
 
 - **AP-13. Shop Lightning.** Setting `shop_lightning`
   (`docs/SHOP-LIGHTNING-RULES.md` SL-71), or changing its node's ID or its
