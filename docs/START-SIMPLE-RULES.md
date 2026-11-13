@@ -130,7 +130,8 @@ funds.**
 - **SS-35. Both the owner's.** At setup the owner sets the most the starter
   wallet may hold, in the shop's currency, and the date to move to a key
   made offline. The app suggests a date 30 days away and never suggests an
-  amount. Both are in the shop's signed settings.
+  amount. Both are the owner phone's own record, beside the starter
+  wallet, and bind only the owner phone: no counter checks them (SS-38).
 - **SS-36. Every day.** The owner phone's home screen shows, in a line that
   cannot be dismissed, what the starter wallet holds, the limit and the
   date. What it holds is its confirmed coins and the change of the owner
@@ -166,7 +167,10 @@ funds.**
   queue moves with it: the queued refunds, the paid log and the facts of
   the sales paid into the starter wallet are bound to the new wallet, and
   the re-pin waits until no transaction of the starter wallet other than
-  the confirmed move is waiting or unconfirmed. The owner phone's record of
+  the confirmed move is waiting or unconfirmed, while a counter's pairing
+  is open on the owner phone, and while a payment from the shop's wallet is
+  prepared and not finished (AS-101); the words say which. A pairing
+  started after the re-pin offers the new wallet. The owner phone's record of
   this change is written before the queue bound to the new wallet, and that
   before the new wallet's file, and a start that finds the record finishes
   the change, so the node always starts. After it, the owner
