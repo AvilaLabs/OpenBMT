@@ -462,9 +462,21 @@ if [ "$SHOP_CHAIN" = filters ]; then
   check "SL-26: the node follows the other branch to its tip, $TIP" $?
   grep -q "Funding transaction was un-confirmed" "$SHOP_DIR/node.log"
   check "SL-26: the library closes a channel that was ready when its funding left the chain (its own rule), so the node was told" $?
-  CLOSE_TX=$(sed -n 's/.*closed by funding output spend in txid \([0-9a-f]*\).*/\1/p' "$SHOP_DIR/node.log" | head -1)
-  grep -q "broadcast $CLOSE_TX to peers" "$SHOP_DIR/node.log"
-  check "SL-26: the closing transaction $CLOSE_TX was handed to the peers, not to RPC" $?
+  CLOSE_TX=
+  for _ in $(seq 1 30); do
+    CLOSE_TX=$(sed -n 's/.*INFO  broadcast \([0-9a-f]\{64\}\) to peers.*/\1/p' "$SHOP_DIR/node.log" | head -1)
+    [ -n "$CLOSE_TX" ] && break
+    sleep 1
+  done
+  # Core asks for it over the peer connection (it may then refuse it: the
+  # provider closes at the same moment and the two spend the same output).
+  FETCHED=1
+  for _ in $(seq 1 60); do
+    grep -Eq "relayed $CLOSE_TX: asked [1-9][0-9]*, fetched [1-9]" "$SHOP_DIR/node.log" && { FETCHED=0; break; }
+    sleep 1
+  done
+  [ -n "$CLOSE_TX" ] && [ "$FETCHED" = 0 ]
+  check "SL-26: the closing transaction $CLOSE_TX was handed to the peers and Core fetched it from the node over the peer connection, with no RPC call" $?
   mine 2
   [ "$(bcli getrawtransaction "$FTX" true 2>/dev/null | jq -r '.blockhash // "none"')" != none ]
   check "the funding transaction is mined again (Core)" $?
@@ -474,15 +486,9 @@ if [ "$SHOP_CHAIN" = filters ]; then
   done
   [ "$(grep -c "given $FTX at" "$SHOP_DIR/node.log")" -ge 2 ]
   check "SL-26: the funding transaction, mined again, is given to transactions_confirmed again" $?
-  CONFIRMED=0
-  for _ in $(seq 1 60); do
-    [ "$(bcli getrawtransaction "$CLOSE_TX" true 2>/dev/null | jq -r '.confirmations // 0')" -ge 1 ] && { CONFIRMED=1; break; }
-    mine 1
-    sleep 1
-  done
-  note "the node's closing transaction confirmed in Core: $CONFIRMED (the provider also closes, and one of the two wins)"
+  mine 3
   TIP=$(bcli getblockcount)
-  await_status "chain_ok=true height=$TIP channels=0" 150
+  await_status "chain_ok=true height=$TIP .*channels=0" 150
   check "SL-26: the node follows to the tip, $TIP, with the channel closed" $?
   # A new payment opens a new channel through the provider.
   shop_invoice 50000
@@ -491,7 +497,7 @@ if [ "$SHOP_CHAIN" = filters ]; then
   check "a payment after the reorganization opens a new channel and is paid" $?
   mine 3
   TIP=$(bcli getblockcount)
-  await_status "chain_ok=true height=$TIP channels=1 usable=1" 150
+  await_status "chain_ok=true height=$TIP .*channels=1 usable=1" 150
   check "the new channel is usable and the node is at the tip" $?
 
   say "Stopped for blocks, started again"
@@ -529,7 +535,7 @@ if [ "$SHOP_CHAIN" = filters ]; then
   awk -v g="$GOT" 'BEGIN { exit !(g > 0) }' && is_pinned "$SHOP_ADDR"
   check "SL-36: the close paid the pinned wallet's address of index 11 ($BEFORE -> $AFTER)" $?
   TIP=$(bcli getblockcount)
-  await_status "chain_ok=true height=$TIP channels=0" 150
+  await_status "chain_ok=true height=$TIP .*channels=0" 150
   check "SL-26: the node saw the close confirmed (the channel is gone from the library)" $?
   grep -q "to peers" "$SHOP_DIR/node.log"
   if [ $? = 0 ]; then note "the node sent a transaction through the peers"; else note "no transaction of the node's went through the peers in this run (the provider sent the close)"; fi
@@ -553,8 +559,6 @@ if [ "$SHOP_CHAIN" = filters ]; then
   RC=$?
   [ "$RC" = 3 ] && grep -q "TorUnreachable" "$BASE/tor-refused.out" && [ ! -e "$TOR_SHOP" ]
   check "SL-32: with Tor on and no proxy, the node does not start, and nothing is made on disk" $?
-  grep -q "WORDS_NEEDED_SL_32_TOR_UNREACHABLE" "$BASE/tor-refused.out"
-  check "SL-32: it says so with the placeholder of the rule's words" $?
 
   say "Tor on (SL-32): something listens at the proxy that is not a proxy"
   "$DEVICE_BIN" "$TOR_FAKE" "$BASE/fakeproxy-dir" >>"$BASE/fakeproxy.log" 2>&1 &

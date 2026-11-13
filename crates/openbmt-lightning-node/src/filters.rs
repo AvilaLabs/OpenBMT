@@ -659,6 +659,14 @@ fn run(
                 driver_tip = height;
             }
             Ok(AppEvent::Note(text)) => log(&format!("driver: {text}")),
+            Ok(AppEvent::TxRelayed {
+                txid,
+                peers_asked,
+                peers_fetched,
+            }) => log(&format!(
+                "relayed {txid}: asked {peers_asked}, fetched {peers_fetched}"
+            )),
+            Ok(AppEvent::TxState { txid, state }) => log(&format!("peers on {txid}: {state:?}")),
             Ok(AppEvent::Stopped) | Err(RecvTimeoutError::Disconnected) => return,
             Ok(_) | Err(RecvTimeoutError::Timeout) => {}
         }

@@ -1912,15 +1912,16 @@ mod tests {
             .unwrap()
             .local_addr()
             .unwrap();
-        let mut c = config(Network::Regtest);
+        let mut c = config(Network::Regtest, "sl-32-no-proxy");
         c.tor = Some(free);
+        let data_dir = c.data_dir.clone();
         let err = rt.block_on(Node::start(c)).err().unwrap();
         assert!(matches!(err, StartError::TorUnreachable(_)), "{err:?}");
         assert!(err
             .to_string()
             .starts_with(crate::words::SL_32_TOR_UNREACHABLE));
         // Neither Core nor the provider was asked, and nothing is on disk.
-        assert!(!temp_dir("node-config").join("node").exists());
+        assert!(!data_dir.exists());
     }
 
     #[test]
