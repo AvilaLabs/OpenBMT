@@ -5,9 +5,12 @@
 # pos_payment_method.py line 41 extends it the same way. The fields the POS
 # frontend loads are the fixed list in _load_pos_data_fields (same file, line
 # 72), so none of the openbmt_* fields reach the browser.
+import hashlib
+import hmac
 import json
 import logging
 import re
+import secrets
 from urllib.parse import urlsplit
 
 import requests
@@ -26,12 +29,55 @@ AMOUNT_RE = re.compile(r'^[0-9]+(\.[0-9]+)?$')
 CURRENCY_RE = re.compile(r'^[A-Z]{3}$')
 STATES = ('waiting', 'opened', 'paid', 'unpaid', 'expired', 'cancelled')
 ENDED = ('paid', 'unpaid', 'expired', 'cancelled')
+KEY_RE = re.compile(r'^[0-9a-f]{64}$')
+
+# The till key is never sent (docs/BOX-RULES.md BX-80): the module sends a
+# token made from it and checks the mac of each answer under a reply key made
+# from it. Tagged hashes are made as BIP340 makes them.
+TAG_BEARER = 'OpenBMT/till-bearer/v1'
+TAG_REPLY = 'OpenBMT/till-reply/v1'
+REPLY_LABEL = 'OBM-TILL-REPLY-1'
+REPLY_HEADER = 'X-OBM-Reply'
+NONCE_HEADER = 'X-OBM-Nonce'
+
+
+def tagged_hash(tag, message):
+    prefix = hashlib.sha256(tag.encode('ascii')).digest()
+    return hashlib.sha256(prefix + prefix + message).digest()
+
+
+def till_token(key_hex):
+    """The bearer token for a till key: 64 lowercase hex."""
+    return tagged_hash(TAG_BEARER, bytes.fromhex(key_hex)).hex()
+
+
+def till_reply_key(key_hex):
+    """The key the Box signs its answers with, as 32 bytes."""
+    return tagged_hash(TAG_REPLY, bytes.fromhex(key_hex))
+
+
+def reply_mac(reply_key, method, path, nonce, status, body):
+    """The mac of an answer: 64 lowercase hex. `body` is bytes."""
+    head = '%s\n%s\n%s\n%s\n%03d\n' % (
+        REPLY_LABEL, method, path, nonce, status)
+    return hmac.new(reply_key, head.encode('utf-8') + body,
+                    hashlib.sha256).hexdigest()
+
+
+def reply_is_good(reply_key, method, path, nonce, status, body, header):
+    """Whether `header` is the mac of this answer to this request."""
+    if not isinstance(header, str):
+        return False
+    want = reply_mac(reply_key, method, path, nonce, status, body)
+    return hmac.compare_digest(header.encode('utf-8'), want.encode('ascii'))
+
 
 # Errors this module finds itself, before or instead of an answer from the
 # Box, with the words the cashier sees.
 ERR_TRANSPORT = 'tillTransport'
 ERR_ANSWER = 'tillBadAnswer'
 ERR_SETUP = 'tillNotSet'
+ERR_UNSIGNED = 'tillNotSigned'
 LOCAL_WORDS = {
     ERR_TRANSPORT: {
         'heading': 'The till cannot reach the Box',
@@ -54,6 +100,11 @@ LOCAL_WORDS = {
         'what': 'The Box address, till key or counter code is missing or '
                 "wrong, or the sale's amount cannot be sent.",
         'next': 'Check the three OpenBMT fields of this payment method.',
+    },
+    ERR_UNSIGNED: {
+        'heading': 'WORDS_NEEDED_BX_80_UNSIGNED',
+        'what': 'WORDS_NEEDED_BX_80_UNSIGNED',
+        'next': 'WORDS_NEEDED_BX_80_UNSIGNED',
     },
 }
 
@@ -124,14 +175,16 @@ class PosPaymentMethod(models.Model):
 
     def _openbmt_call(self, verb, path, body, sale=None):
         base = self._openbmt_base()
-        key = self.sudo().openbmt_till_key
-        if base is None or not key:
+        key = (self.sudo().openbmt_till_key or '').strip()
+        if base is None or not KEY_RE.match(key):
             return {'error': ERR_SETUP, 'words': LOCAL_WORDS[ERR_SETUP]}
+        nonce = secrets.token_hex(16)
         try:
             response = requests.request(
                 verb, base + path, json=body, timeout=TIMEOUT,
                 allow_redirects=False, stream=True,
-                headers={'Authorization': 'Bearer ' + key,
+                headers={'Authorization': 'Bearer ' + till_token(key),
+                         NONCE_HEADER: nonce,
                          'Accept': 'application/json'})
             raw = self._openbmt_read(response)
         except requests.RequestException as exc:
@@ -141,6 +194,13 @@ class PosPaymentMethod(models.Model):
             return {'error': ERR_TRANSPORT, 'words': LOCAL_WORDS[ERR_TRANSPORT]}
         if raw is None:
             return {'error': ERR_ANSWER, 'words': LOCAL_WORDS[ERR_ANSWER]}
+        # An answer counts only when it carries the mac of this request, so an
+        # answer that is missing it, changed, made up or sent again is a call
+        # that failed.
+        if not reply_is_good(till_reply_key(key), verb, path, nonce,
+                             response.status_code, raw,
+                             response.headers.get(REPLY_HEADER)):
+            return {'error': ERR_UNSIGNED, 'words': LOCAL_WORDS[ERR_UNSIGNED]}
         return self._openbmt_parse(response.status_code, raw, sale)
 
     def _openbmt_base(self):

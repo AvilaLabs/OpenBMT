@@ -30,9 +30,10 @@
 //! (BX-54 to BX-61). The page is off without the argument.
 //!
 //! With `--till-listen` the Box also takes sale requests from a till on that
-//! address, as JSON over plain HTTP, each with the till key (BX-70 to
-//! BX-79). `openbmt-box till-key <data dir>` makes the till key, prints it
-//! once and stores only its hash; the console command `till-key` does the
+//! address, as JSON over plain HTTP, each with a token made from the
+//! till key, and every answer signed (BX-70 to BX-80). `openbmt-box till-key
+//! <data dir>` makes the till key, prints it once and stores only the hash of
+//! its token and its reply key; the console command `till-key` does the
 //! same on a Box that is running. The listener is off without the argument.
 //!
 //! With `--no-console` the Box reads no standard input (a service has none)

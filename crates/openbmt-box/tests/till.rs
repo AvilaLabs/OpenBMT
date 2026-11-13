@@ -1,4 +1,4 @@
-//! `openbmt-box till-key` and `--till-listen` as a process (BX-70, BX-71).
+//! `openbmt-box till-key` and `--till-listen` as a process (BX-70, BX-71, BX-80).
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -6,6 +6,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
+
+use openbmt_box::till::{hex, reply_mac, till_bearer, till_reply_key};
 
 struct Dir(PathBuf);
 
@@ -64,11 +66,13 @@ fn bx_71_the_till_key_command_prints_the_key_once_and_stores_only_its_hash() {
     assert_eq!(key.len(), 64);
     // Printed on one line only.
     assert_eq!(lines.iter().filter(|l| l.contains(&key)).count(), 1);
-    // Stored as 32 bytes that are not the key, with mode 0600, and nothing
-    // else is left in the directory.
+    // Stored as the version, the hash of the token and the reply key, none of
+    // them the key, with mode 0600, and nothing else is left in the
+    // directory.
     let file = dir.0.join("till-key");
     let stored = std::fs::read(&file).unwrap();
-    assert_eq!(stored.len(), 32);
+    assert_eq!(stored.len(), 65);
+    assert_eq!(stored[0], 2);
     assert!(!String::from_utf8_lossy(&stored).contains(&key));
     assert_eq!(
         std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
@@ -144,31 +148,59 @@ fn bx_70_the_till_listener_is_off_unless_the_box_is_asked() {
 #[test]
 fn bx_70_with_till_listen_the_box_serves_json_and_says_where() {
     let dir = Dir::new("on");
-    let (_, ok) = till_key(&dir.0);
+    let (key_lines, ok) = till_key(&dir.0);
     assert!(ok);
+    let key = key_of(&key_lines);
+    let key_bytes: [u8; 32] = (0..32)
+        .map(|i| u8::from_str_radix(&key[i * 2..i * 2 + 2], 16).unwrap())
+        .collect::<Vec<u8>>()
+        .try_into()
+        .unwrap();
     let mut child = spawn(&dir.0, &["--till-listen", "127.0.0.1:0"]);
     let lines = startup(&mut child);
     let addr = lines
         .iter()
         .find_map(|l| l.strip_prefix("till listener: "))
         .expect("the till listener line");
-    let mut s = TcpStream::connect(addr).unwrap();
-    s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-    // A key that is not the Box's: 401 and the words.
-    s.write_all(
-        format!(
-            "GET /till/v1/sales/{} HTTP/1.1\r\nHost: b\r\nAuthorization: Bearer {}\r\n\r\n",
-            "0".repeat(32),
-            "0".repeat(64)
+    let nonce = "0123456789abcdef0123456789abcdef";
+    let path = format!("/till/v1/sales/{}", "0".repeat(32));
+    let ask = |bearer: &str| {
+        let mut s = TcpStream::connect(addr).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        s.write_all(
+            format!(
+                "GET {path} HTTP/1.1\r\nHost: b\r\nX-OBM-Nonce: {nonce}\r\n\
+                 Authorization: Bearer {bearer}\r\n\r\n"
+            )
+            .as_bytes(),
         )
-        .as_bytes(),
-    )
-    .unwrap();
-    let mut text = String::new();
-    s.read_to_string(&mut text).unwrap();
+        .unwrap();
+        let mut text = String::new();
+        s.read_to_string(&mut text).unwrap();
+        text
+    };
+    let mac_of = |text: &str| {
+        text.lines()
+            .find_map(|l| l.strip_prefix("X-OBM-Reply: "))
+            .map(str::to_string)
+    };
+    let body_of = |text: &str| text.split_once("\r\n\r\n").unwrap().1.to_string();
+    // A token that is not the Box's: 401 and the words, signed under the
+    // reply key made from the key.
+    let text = ask(&"0".repeat(64));
     assert!(text.starts_with("HTTP/1.1 401 "), "{text}");
     assert!(text.contains("\"error\":\"tillKeyWrong\""), "{text}");
     assert!(text.contains("Content-Type: application/json"));
+    let reply = till_reply_key(&key_bytes);
+    let want = reply_mac(&reply, "GET", &path, nonce, 401, body_of(&text).as_bytes());
+    assert_eq!(mac_of(&text), Some(want));
+    // The key itself is not the token; the token is, and the answer to it is
+    // signed too.
+    assert!(ask(&key).starts_with("HTTP/1.1 401 "));
+    let text = ask(&hex(&till_bearer(&key_bytes)));
+    assert!(text.starts_with("HTTP/1.1 503 "), "{text}");
+    let want = reply_mac(&reply, "GET", &path, nonce, 503, body_of(&text).as_bytes());
+    assert_eq!(mac_of(&text), Some(want));
     kill(child);
 }
 

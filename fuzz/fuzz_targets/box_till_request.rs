@@ -10,6 +10,7 @@ fuzz_target!(|data: &[u8]| {
     match parse_request(data) {
         Ok(Some(request)) => {
             assert!(request.body.len() <= MAX_REQUEST);
+            assert_eq!(request.nonce.len(), 32);
             let end = data.windows(4).position(|w| w == b"\r\n\r\n");
             assert!(end.is_some_and(|e| e + 4 + request.body.len() <= MAX_REQUEST));
             if request.route != Route::Create {

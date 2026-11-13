@@ -5,7 +5,9 @@
 //! like the status page and with the same kind of bounds, but it is its own
 //! listener on its own threads and it answers JSON only. It takes a sale
 //! request from a till, says how the sale stands, and cancels it. Every
-//! request carries the till key as a bearer token (BX-71).
+//! request carries a bearer token made from the till key and a nonce, and
+//! every answer to one with a key carries a mac under the reply key (BX-71,
+//! BX-80).
 //!
 //! [`parse_request`] and [`parse_object`] are the readers of the bytes of one
 //! request and of its JSON body; they are what the fuzz target calls.
@@ -22,7 +24,7 @@ use openbmt_core::say::{clean_foreign, Words};
 
 use crate::say::{TillAnswer, TILL_PAID};
 use crate::status_page::{head_end, head_is_clean, is_token_byte, response, Slot};
-use crate::till::{hex, request_id_ok, unhex, SaleState, TillRefusal};
+use crate::till::{hex, reply_mac, request_id_ok, unhex, KeyCheck, SaleState, TillRefusal};
 
 /// Most bytes of a whole request, head and body together (BX-70).
 pub const MAX_REQUEST: usize = 4 * 1024;
@@ -75,6 +77,12 @@ pub enum Route {
 pub struct Request {
     /// Which route.
     pub route: Route,
+    /// The method, as sent.
+    pub method: String,
+    /// The path, as sent.
+    pub path: String,
+    /// The nonce of the request: 32 lowercase hex (BX-80).
+    pub nonce: String,
     /// The bearer token, if the request carried one.
     pub key: Option<String>,
     /// The body (empty unless the route is `Create`).
@@ -130,6 +138,9 @@ fn route_of(method: &str, target: &str) -> Option<Route> {
 
 struct Head {
     route: Route,
+    method: String,
+    path: String,
+    nonce: String,
     key: Option<String>,
     content_length: usize,
 }
@@ -156,6 +167,7 @@ fn parse_head(head: &[u8], head_len: usize) -> Result<Head, Reject> {
     let route = route_of(method, target).ok_or(Reject::NotFound)?;
 
     let mut key = None;
+    let mut nonce: Option<String> = None;
     let mut content_length = None;
     let mut json = false;
     let mut count = 0usize;
@@ -184,6 +196,12 @@ fn parse_head(head: &[u8], head_len: usize) -> Result<Head, Reject> {
                     _ => "",
                 };
                 key = Some(token.to_string());
+            }
+            "x-obm-nonce" => {
+                if nonce.is_some() || unhex::<16>(value).is_none() {
+                    return Err(Reject::BadRequest);
+                }
+                nonce = Some(value.to_string());
             }
             "content-length" => {
                 if content_length.is_some()
@@ -217,8 +235,14 @@ fn parse_head(head: &[u8], head_len: usize) -> Result<Head, Reject> {
         (_, None | Some(0)) => 0,
         (_, Some(_)) => return Err(Reject::BadRequest),
     };
+    // The nonce is looked for after the path and before the key (BX-75,
+    // BX-80).
+    let nonce = nonce.ok_or(Reject::BadRequest)?;
     Ok(Head {
         route,
+        method: method.to_string(),
+        path: target.to_string(),
+        nonce,
         key,
         content_length,
     })
@@ -249,6 +273,9 @@ pub fn parse_request(buf: &[u8]) -> Result<Option<Request>, Reject> {
     let body = buf.get(body_at..body_end).ok_or(Reject::BadRequest)?;
     Ok(Some(Request {
         route: head.route,
+        method: head.method,
+        path: head.path,
+        nonce: head.nonce,
         key: head.key,
         body: body.to_vec(),
     }))
@@ -417,8 +444,9 @@ pub struct CreateBody {
 /// The Box as the till listener sees it. Each call takes the state's locks
 /// only for itself, after a whole request was read (BX-60 applies here too).
 pub trait TillBackend: Send + Sync + 'static {
-    /// Whether `presented` is the till key (BX-71).
-    fn key_ok(&self, presented: Option<&str>) -> bool;
+    /// What the bearer token the till presented comes to against the till
+    /// key file (BX-71, BX-80).
+    fn check_key(&self, presented: Option<&str>) -> KeyCheck;
     /// BX-72: ask a counter for a sale.
     fn create(&self, body: CreateBody) -> Result<([u8; 16], SaleState), TillRefusal>;
     /// BX-73: how a sale stands.
@@ -432,6 +460,7 @@ impl TillRefusal {
     pub fn answer(&self) -> Option<TillAnswer> {
         Some(match self {
             Self::KeyWrong => TillAnswer::KeyWrong,
+            Self::KeyOld => TillAnswer::KeyOld,
             Self::NotPaired => TillAnswer::NotPaired,
             Self::UnknownCounter(code) => {
                 TillAnswer::UnknownCounter(clean_foreign(code).chars().take(16).collect())
@@ -456,22 +485,25 @@ impl TillRefusal {
     }
 }
 
-fn json(status: u16, body: &str) -> Vec<u8> {
-    response(status, "application/json", "", body)
+fn json(status: u16, body: &str, mac: Option<&str>) -> Vec<u8> {
+    let extra = mac.map_or(String::new(), |mac| format!("X-OBM-Reply: {mac}\r\n"));
+    response(status, "application/json", &extra, body)
 }
 
 /// The answer to a refused request: the status and a fixed body with no
-/// words (BX-75).
+/// words (BX-75). The request had no nonce or no key to sign under, so the
+/// answer carries no mac (BX-80).
 pub fn reject_response(reject: Reject) -> Vec<u8> {
     json(
         reject.status(),
         &format!("{{\"error\":\"{}\"}}", reject.key()),
+        None,
     )
 }
 
-/// The answer to a refusal of the till's request: the status, the key and,
+/// The status and body of a refusal of the till's request: the key and,
 /// when there are any, the words (BX-75).
-pub fn refusal_response(refusal: &TillRefusal) -> Vec<u8> {
+fn refusal_parts(refusal: &TillRefusal) -> (u16, String) {
     let body = match refusal.answer() {
         Some(answer) => {
             let w: Words = answer.words();
@@ -483,7 +515,29 @@ pub fn refusal_response(refusal: &TillRefusal) -> Vec<u8> {
         }
         None => format!("{{\"error\":\"{}\"}}", refusal.key()),
     };
-    json(refusal.status(), &body)
+    (refusal.status(), body)
+}
+
+/// The answer to a refusal of the till's request, without a mac.
+pub fn refusal_response(refusal: &TillRefusal) -> Vec<u8> {
+    let (status, body) = refusal_parts(refusal);
+    json(status, &body, None)
+}
+
+/// The answer to `request`: `status` and `body`, with the mac of BX-80 when
+/// there is a reply key to sign under.
+fn signed(request: &Request, reply_key: Option<&[u8; 32]>, status: u16, body: &str) -> Vec<u8> {
+    let mac = reply_key.map(|key| {
+        reply_mac(
+            key,
+            &request.method,
+            &request.path,
+            &request.nonce,
+            status,
+            body.as_bytes(),
+        )
+    });
+    json(status, body, mac.as_deref())
 }
 
 /// The body that says how a sale stands (BX-73): the sale, the state, and
@@ -525,11 +579,20 @@ fn create_body(fields: &BTreeMap<String, String>) -> Option<CreateBody> {
     request_id_ok(&body.request).then_some(body)
 }
 
-/// The answer to a request that passed the reader.
+/// The answer to a request that passed the reader. Every answer after the
+/// nonce carries the mac of BX-80 when the Box holds a reply key.
 pub fn answer(backend: &dyn TillBackend, request: &Request) -> Vec<u8> {
-    if !backend.key_ok(request.key.as_deref()) {
-        return refusal_response(&TillRefusal::KeyWrong);
-    }
+    let reply_key = match backend.check_key(request.key.as_deref()) {
+        KeyCheck::Good(reply) => reply,
+        KeyCheck::Wrong(reply) => {
+            let (status, body) = refusal_parts(&TillRefusal::KeyWrong);
+            return signed(request, reply.as_ref(), status, &body);
+        }
+        KeyCheck::Old => {
+            let (status, body) = refusal_parts(&TillRefusal::KeyOld);
+            return signed(request, None, status, &body);
+        }
+    };
     let result = match request.route {
         Route::Create => match parse_object(&request.body).as_ref().and_then(create_body) {
             Some(body) => backend.create(body),
@@ -550,9 +613,12 @@ pub fn answer(backend: &dyn TillBackend, request: &Request) -> Vec<u8> {
                 ),
                 _ => sale_body(&id, state),
             };
-            json(200, &body)
+            signed(request, Some(&reply_key), 200, &body)
         }
-        Err(refusal) => refusal_response(&refusal),
+        Err(refusal) => {
+            let (status, body) = refusal_parts(&refusal);
+            signed(request, Some(&reply_key), status, &body)
+        }
     }
 }
 

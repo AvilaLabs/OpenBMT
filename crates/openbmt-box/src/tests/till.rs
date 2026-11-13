@@ -8,6 +8,7 @@ use std::net::{SocketAddr, TcpStream};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use openbmt_core::hkdf::hmac_sha256;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::settings::DeviceRole;
 use openbmt_link::{open, Kind, Role};
@@ -24,8 +25,9 @@ use crate::say::{
     TILL_WAITING,
 };
 use crate::till::{
-    clean_reference, counter_code, find_counter, hex, make_till_key, parse_amount, request_id_ok,
-    till_key_hash, till_key_matches, NewSale, SaleState, TillRefusal, TillTable, KEEP_SECS,
+    check_till_key, clean_reference, counter_code, find_counter, hex, key_file, make_till_key,
+    parse_amount, reply_mac, request_id_ok, till_bearer, till_key_hash, till_reply_key, KeyCheck,
+    NewSale, SaleState, TillRefusal, TillTable, KEEP_SECS, KEY_FILE_LEN, KEY_FILE_VERSION,
     MAX_WAITING, OPEN_SECS, REQUEST_SECS, TILL_KEY_FILE,
 };
 use crate::till_listener::{
@@ -36,9 +38,13 @@ use crate::BoxRunner;
 
 // ---- the reader (BX-70, BX-75) -----------------------------------------
 
+/// A nonce and the header that carries it (BX-80).
+const NONCE: &str = "0123456789abcdef0123456789abcdef";
+const NONCE_HEADER: &str = "X-OBM-Nonce: 0123456789abcdef0123456789abcdef\r\n";
+
 fn post_sales(extra: &str, body: &str) -> Vec<u8> {
     format!(
-        "POST /till/v1/sales HTTP/1.1\r\nHost: box\r\n{extra}\
+        "POST /till/v1/sales HTTP/1.1\r\nHost: box\r\n{NONCE_HEADER}{extra}\
          Content-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
         body.len()
     )
@@ -46,7 +52,7 @@ fn post_sales(extra: &str, body: &str) -> Vec<u8> {
 }
 
 fn get_sale(path: &str, extra: &str) -> Vec<u8> {
-    format!("GET {path} HTTP/1.1\r\nHost: box\r\n{extra}\r\n").into_bytes()
+    format!("GET {path} HTTP/1.1\r\nHost: box\r\n{NONCE_HEADER}{extra}\r\n").into_bytes()
 }
 
 fn read(bytes: &[u8]) -> Result<Option<Request>, Reject> {
@@ -62,6 +68,10 @@ fn bx_70_the_reader_reads_the_three_routes() {
     let r = read(&post_sales(&auth, "{\"a\":\"b\"}")).unwrap().unwrap();
     assert_eq!(r.route, Route::Create);
     assert_eq!(r.key.as_deref(), Some(key.as_str()));
+    assert_eq!(
+        (r.method.as_str(), r.path.as_str(), r.nonce.as_str()),
+        ("POST", "/till/v1/sales", NONCE)
+    );
     assert_eq!(r.body, b"{\"a\":\"b\"}");
     let want = [0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77];
     let r = read(&get_sale(&format!("/till/v1/sales/{SALE}"), &auth))
@@ -71,8 +81,10 @@ fn bx_70_the_reader_reads_the_three_routes() {
         Route::Read(Some(id)) => assert_eq!(id.get(..8), Some(&want[..])),
         other => panic!("{other:?}"),
     }
-    let cancel = format!("POST /till/v1/sales/{SALE}/cancel HTTP/1.1\r\nHost: box\r\n{auth}\r\n")
-        .into_bytes();
+    let cancel = format!(
+        "POST /till/v1/sales/{SALE}/cancel HTTP/1.1\r\nHost: box\r\n{NONCE_HEADER}{auth}\r\n"
+    )
+    .into_bytes();
     let r = read(&cancel).unwrap().unwrap();
     assert!(matches!(r.route, Route::Cancel(Some(_))));
     // An id that is not 32 lowercase hex still reaches the route, as no
@@ -105,8 +117,10 @@ fn bx_70_the_reader_holds_a_request_to_four_kib() {
     // A body that would pass the limit is refused from its length alone.
     let long = post_sales("", &"x".repeat(MAX_REQUEST));
     assert_eq!(read(&long), Err(Reject::TooLarge));
-    let head = "POST /till/v1/sales HTTP/1.1\r\nHost: box\r\nContent-Type: application/json\r\n\
-                Content-Length: 3000\r\n\r\n";
+    let head = format!(
+        "POST /till/v1/sales HTTP/1.1\r\nHost: box\r\n{NONCE_HEADER}\
+         Content-Type: application/json\r\nContent-Length: 3000\r\n\r\n"
+    );
     assert_eq!(read(head.as_bytes()), Ok(None));
     // A body that fits, up to the last byte of the limit, and one more.
     let room = (1..MAX_REQUEST)
@@ -149,11 +163,11 @@ fn bx_70_the_reader_refuses_what_is_not_a_clean_request() {
         Reject::BadRequest
     );
     assert_eq!(
-        refused(b"GET /till/v1/sales/x HTTP/1.1\r\nHost: b\x01\r\n\r\n"),
+        refused(b"GET /till/v1/sales/x HTTP/1.1\r\nX-OBM-Nonce: 0123456789abcdef0123456789abcdef\r\nHost: b\x01\r\n\r\n"),
         Reject::BadRequest
     );
     assert_eq!(
-        refused(b"GET /till/v1/sales/x HTTP/1.1\r\nHost: b\r\n folded\r\n\r\n"),
+        refused(b"GET /till/v1/sales/x HTTP/1.1\r\nX-OBM-Nonce: 0123456789abcdef0123456789abcdef\r\nHost: b\r\n folded\r\n\r\n"),
         Reject::BadRequest
     );
     assert_eq!(
@@ -177,26 +191,26 @@ fn bx_70_the_reader_refuses_what_is_not_a_clean_request() {
         Reject::BadRequest
     );
     assert_eq!(
-        refused(b"POST /till/v1/sales HTTP/1.1\r\nContent-Type: application/json\r\nContent-Length: x\r\n\r\n"),
+        refused(b"POST /till/v1/sales HTTP/1.1\r\nX-OBM-Nonce: 0123456789abcdef0123456789abcdef\r\nContent-Type: application/json\r\nContent-Length: x\r\n\r\n"),
         Reject::BadRequest
     );
     // A create with no body, no type or the wrong one; a get with a body.
     assert_eq!(
-        refused(b"POST /till/v1/sales HTTP/1.1\r\nContent-Type: application/json\r\n\r\n"),
+        refused(b"POST /till/v1/sales HTTP/1.1\r\nX-OBM-Nonce: 0123456789abcdef0123456789abcdef\r\nContent-Type: application/json\r\n\r\n"),
         Reject::BadRequest
     );
     assert_eq!(
-        refused(b"POST /till/v1/sales HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}"),
+        refused(b"POST /till/v1/sales HTTP/1.1\r\nX-OBM-Nonce: 0123456789abcdef0123456789abcdef\r\nContent-Length: 2\r\n\r\n{}"),
         Reject::BadRequest
     );
     assert_eq!(
         refused(
-            b"POST /till/v1/sales HTTP/1.1\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\n{}"
+            b"POST /till/v1/sales HTTP/1.1\r\nX-OBM-Nonce: 0123456789abcdef0123456789abcdef\r\nContent-Type: text/plain\r\nContent-Length: 2\r\n\r\n{}"
         ),
         Reject::BadRequest
     );
     assert_eq!(
-        refused(b"GET /till/v1/sales/x HTTP/1.1\r\nContent-Length: 2\r\n\r\n{}"),
+        refused(b"GET /till/v1/sales/x HTTP/1.1\r\nX-OBM-Nonce: 0123456789abcdef0123456789abcdef\r\nContent-Length: 2\r\n\r\n{}"),
         Reject::BadRequest
     );
 }
@@ -271,6 +285,19 @@ fn bx_72_the_body_is_an_object_of_strings() {
 
 // ---- the key (BX-71) ----------------------------------------------------
 
+/// A key as 64 lowercase hex, as 32 bytes.
+fn key_bytes(key: &str) -> [u8; 32] {
+    let bytes: Vec<u8> = (0..32)
+        .map(|i| u8::from_str_radix(&key[i * 2..i * 2 + 2], 16).unwrap())
+        .collect();
+    bytes.try_into().unwrap()
+}
+
+/// The bearer token a till sends for a key, as 64 lowercase hex.
+fn token_of(key: &str) -> String {
+    hex(&till_bearer(&key_bytes(key)))
+}
+
 #[test]
 fn bx_71_a_till_key_is_stored_only_as_a_hash_and_a_new_one_replaces_it() {
     let mut files = MemFiles::new();
@@ -280,45 +307,157 @@ fn bx_71_a_till_key_is_stored_only_as_a_hash_and_a_new_one_replaces_it() {
         .bytes()
         .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
     let stored = files.read(TILL_KEY_FILE).unwrap().unwrap();
-    assert_eq!(stored.len(), 32);
-    // The file does not hold the key, in either form.
-    let key_bytes: Vec<u8> = (0..32)
-        .map(|i| u8::from_str_radix(&first[i * 2..i * 2 + 2], 16).unwrap())
-        .collect();
-    assert_ne!(stored, key_bytes);
+    assert_eq!(stored.len(), KEY_FILE_LEN);
+    // The file does not hold the key, in either form, nor the token.
+    let first_bytes = key_bytes(&first);
+    assert!(!stored.windows(32).any(|w| w == first_bytes));
+    assert!(!stored.windows(32).any(|w| w == till_bearer(&first_bytes)));
     assert!(!String::from_utf8_lossy(&stored).contains(&first));
+    assert_eq!(stored, key_file(&first_bytes));
     assert_eq!(
-        stored,
-        till_key_hash(&key_bytes.clone().try_into().unwrap())
+        check_till_key(Some(&stored), Some(&token_of(&first))),
+        KeyCheck::Good(till_reply_key(&first_bytes))
     );
-    assert!(till_key_matches(&stored, &first));
     // A new key replaces the old, which stops matching.
     let second = make_till_key(&mut files).unwrap();
     assert_ne!(first, second);
     let stored = files.read(TILL_KEY_FILE).unwrap().unwrap();
-    assert!(till_key_matches(&stored, &second));
-    assert!(!till_key_matches(&stored, &first));
+    assert!(matches!(
+        check_till_key(Some(&stored), Some(&token_of(&second))),
+        KeyCheck::Good(_)
+    ));
+    assert!(matches!(
+        check_till_key(Some(&stored), Some(&token_of(&first))),
+        KeyCheck::Wrong(Some(_))
+    ));
 }
 
 #[test]
 fn bx_71_a_key_that_is_not_the_key_never_matches() {
     let mut files = MemFiles::new();
     let key = make_till_key(&mut files).unwrap();
+    let token = token_of(&key);
     let stored = files.read(TILL_KEY_FILE).unwrap().unwrap();
+    let reply = till_reply_key(&key_bytes(&key));
     for wrong in [
         String::new(),
-        key[..63].to_string(),
-        format!("{key}0"),
-        key.to_uppercase(),
+        token[..63].to_string(),
+        format!("{token}0"),
+        token.to_uppercase(),
         "g".repeat(64),
         "0".repeat(64),
-        format!(" {key}"),
+        format!(" {token}"),
+        // The key itself is not the token.
+        key.clone(),
     ] {
-        assert!(!till_key_matches(&stored, &wrong), "{wrong}");
+        assert_eq!(
+            check_till_key(Some(&stored), Some(&wrong)),
+            KeyCheck::Wrong(Some(reply)),
+            "{wrong}"
+        );
     }
-    // A stored hash of the wrong length matches nothing.
-    assert!(!till_key_matches(&[], &key));
-    assert!(!till_key_matches(&stored[..31], &key));
+    assert_eq!(
+        check_till_key(Some(&stored), None),
+        KeyCheck::Wrong(Some(reply))
+    );
+    // No file, and a file of a shape that is not either form, match nothing
+    // and hold no reply key to sign with.
+    assert_eq!(check_till_key(None, Some(&token)), KeyCheck::Wrong(None));
+    assert_eq!(
+        check_till_key(Some(&[]), Some(&token)),
+        KeyCheck::Wrong(None)
+    );
+    assert_eq!(
+        check_till_key(Some(&stored[..64]), Some(&token)),
+        KeyCheck::Wrong(None)
+    );
+    let mut other_version = stored.clone();
+    other_version[0] = 3;
+    assert_eq!(
+        check_till_key(Some(&other_version), Some(&token)),
+        KeyCheck::Wrong(None)
+    );
+}
+
+#[test]
+fn bx_80_a_key_file_of_the_earlier_form_is_old_whatever_the_token() {
+    let key = [9u8; 32];
+    let old = till_key_hash(&till_bearer(&key));
+    for presented in [None, Some(hex(&till_bearer(&key))), Some("x".to_string())] {
+        assert_eq!(
+            check_till_key(Some(&old), presented.as_deref()),
+            KeyCheck::Old
+        );
+    }
+}
+
+#[test]
+fn bx_80_the_token_and_the_reply_key_are_tagged_hashes_of_the_key() {
+    let key = [7u8; 32];
+    assert_eq!(
+        till_bearer(&key),
+        openbmt_core::identity::tagged_hash("OpenBMT/till-bearer/v1", &key)
+    );
+    assert_eq!(
+        till_reply_key(&key),
+        openbmt_core::identity::tagged_hash("OpenBMT/till-reply/v1", &key)
+    );
+    assert_ne!(till_bearer(&key), till_reply_key(&key));
+    assert_ne!(till_bearer(&key), key);
+    // The stored form is the version, the hash of the token, the reply key.
+    let file = key_file(&key);
+    assert_eq!(file.first(), Some(&KEY_FILE_VERSION));
+    assert_eq!(
+        file.get(1..33),
+        Some(&till_key_hash(&till_bearer(&key))[..])
+    );
+    assert_eq!(file.get(33..), Some(&till_reply_key(&key)[..]));
+}
+
+#[test]
+fn bx_80_the_mac_is_hmac_sha256_over_the_lines_of_the_answer() {
+    // RFC 4231, case 2, for the HMAC itself.
+    assert_eq!(
+        hex(&hmac_sha256(b"Jefe", b"what do ya want for nothing?")),
+        "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+    );
+    let key = [1u8; 32];
+    let want = hex(&hmac_sha256(
+        &key,
+        format!("OBM-TILL-REPLY-1\nGET\n/till/v1/sales/{SALE}\n{NONCE}\n404\n{{\"a\":1}}")
+            .as_bytes(),
+    ));
+    let path = format!("/till/v1/sales/{SALE}");
+    assert_eq!(
+        reply_mac(&key, "GET", &path, NONCE, 404, b"{\"a\":1}"),
+        want
+    );
+    // Each part counts.
+    for other in [
+        reply_mac(&[2u8; 32], "GET", &path, NONCE, 404, b"{\"a\":1}"),
+        reply_mac(&key, "POST", &path, NONCE, 404, b"{\"a\":1}"),
+        reply_mac(&key, "GET", "/till/v1/sales", NONCE, 404, b"{\"a\":1}"),
+        reply_mac(
+            &key,
+            "GET",
+            &path,
+            &NONCE.replace('0', "1"),
+            404,
+            b"{\"a\":1}",
+        ),
+        reply_mac(&key, "GET", &path, NONCE, 200, b"{\"a\":1}"),
+        reply_mac(&key, "GET", &path, NONCE, 404, b"{\"a\":2}"),
+    ] {
+        assert_ne!(other, want);
+    }
+    // The status is three digits.
+    assert_eq!(
+        reply_mac(&key, "GET", &path, NONCE, 99, b""),
+        hex(&hmac_sha256(
+            &key,
+            format!("OBM-TILL-REPLY-1\nGET\n{path}\n{NONCE}\n099\n").as_bytes()
+        ))
+    );
 }
 
 #[test]
@@ -331,7 +470,7 @@ fn bx_71_the_key_file_is_written_whole_with_mode_0600_and_the_words_name_no_key(
         Some(0o600)
     );
     let on_disk = std::fs::read(dir.path().join(TILL_KEY_FILE)).unwrap();
-    assert_eq!(on_disk.len(), 32);
+    assert_eq!(on_disk.len(), KEY_FILE_LEN);
     assert!(!dir.path().join(format!("{TILL_KEY_FILE}.tmp")).exists());
     // The words tell the keeper to keep it out of sight and print the key on
     // its own line, after them.
@@ -1089,6 +1228,7 @@ fn sc_01_every_till_answer_is_in_the_list_and_the_key_is_its_name() {
         // The match is exhaustive: a new variant fails to compile here.
         match a {
             TillAnswer::KeyWrong
+            | TillAnswer::KeyOld
             | TillAnswer::Off
             | TillAnswer::NotPaired
             | TillAnswer::UnknownCounter(_)
@@ -1102,7 +1242,7 @@ fn sc_01_every_till_answer_is_in_the_list_and_the_key_is_its_name() {
             | TillAnswer::KeyMade => {}
         }
     }
-    assert_eq!(till_samples().len(), 12);
+    assert_eq!(till_samples().len(), 13);
     // No two of them say the same.
     let mut seen = std::collections::BTreeSet::new();
     for a in till_samples() {
@@ -1129,6 +1269,13 @@ fn sc_01_every_till_answer_is_in_the_list_and_the_key_is_its_name() {
 
 /// A raw request and the status and body of the answer.
 fn http(addr: SocketAddr, raw: &str) -> (u16, String) {
+    let (status, body, _) = http_mac(addr, raw);
+    (status, body)
+}
+
+/// A raw request and the status, the body and the `X-OBM-Reply` header of
+/// the answer, if it has one.
+fn http_mac(addr: SocketAddr, raw: &str) -> (u16, String, Option<String>) {
     let mut s = TcpStream::connect(addr).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
     s.write_all(raw.as_bytes()).unwrap();
@@ -1143,7 +1290,47 @@ fn http(addr: SocketAddr, raw: &str) -> (u16, String) {
         head.contains(&format!("Content-Length: {}", body.len())),
         "{head}"
     );
-    (status, body.to_string())
+    let mac = head.split("\r\n").find_map(|line| {
+        line.strip_prefix("X-OBM-Reply: ")
+            .map(std::string::ToString::to_string)
+    });
+    assert!(
+        head.matches("X-OBM-Reply").count() <= 1,
+        "one mac at most: {head}"
+    );
+    (status, body.to_string(), mac)
+}
+
+/// A request of the till for the till key as the Box printed it: the bearer
+/// token is made from the key, as the till makes it. A string that is not a
+/// key is sent as it is. The nonce is the one given, or a fixed one.
+fn request_text(
+    method: &str,
+    path: &str,
+    key: Option<&str>,
+    nonce: Option<&str>,
+    body: Option<&str>,
+) -> String {
+    let auth = key.map_or(String::new(), |k| {
+        let token = if k.len() == 64
+            && k.bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        {
+            token_of(k)
+        } else {
+            k.to_string()
+        };
+        format!("Authorization: Bearer {token}\r\n")
+    });
+    let nonce = nonce.map_or(String::new(), |n| format!("X-OBM-Nonce: {n}\r\n"));
+    match body {
+        Some(b) => format!(
+            "{method} {path} HTTP/1.1\r\nHost: box\r\n{nonce}{auth}Content-Type: application/json\r\n\
+             Content-Length: {}\r\n\r\n{b}",
+            b.len()
+        ),
+        None => format!("{method} {path} HTTP/1.1\r\nHost: box\r\n{nonce}{auth}\r\n"),
+    }
 }
 
 fn call(
@@ -1153,16 +1340,38 @@ fn call(
     key: Option<&str>,
     body: Option<&str>,
 ) -> (u16, String) {
-    let auth = key.map_or(String::new(), |k| format!("Authorization: Bearer {k}\r\n"));
-    let raw = match body {
-        Some(b) => format!(
-            "{method} {path} HTTP/1.1\r\nHost: box\r\n{auth}Content-Type: application/json\r\n\
-             Content-Length: {}\r\n\r\n{b}",
-            b.len()
-        ),
-        None => format!("{method} {path} HTTP/1.1\r\nHost: box\r\n{auth}\r\n"),
-    };
-    http(addr, &raw)
+    let (status, body, _) = call_mac(addr, method, path, key, Some(NONCE), body);
+    (status, body)
+}
+
+fn call_mac(
+    addr: SocketAddr,
+    method: &str,
+    path: &str,
+    key: Option<&str>,
+    nonce: Option<&str>,
+    body: Option<&str>,
+) -> (u16, String, Option<String>) {
+    http_mac(addr, &request_text(method, path, key, nonce, body))
+}
+
+/// Whether the mac is the one the reply key makes for the answer.
+fn mac_is(
+    key: &str,
+    method: &str,
+    path: &str,
+    nonce: &str,
+    answer: &(u16, String, Option<String>),
+) -> bool {
+    answer.2.as_deref()
+        == Some(&reply_mac(
+            &till_reply_key(&key_bytes(key)),
+            method,
+            path,
+            nonce,
+            answer.0,
+            answer.1.as_bytes(),
+        ))
 }
 
 /// The text of a string field of a flat JSON body.
@@ -1219,7 +1428,12 @@ fn till_box(name: &str) -> Till {
 
 impl Till {
     fn ask(&self, method: &str, path: &str, body: Option<&str>) -> (u16, String) {
-        call(self.addr, method, path, Some(&self.key), body)
+        let answer = call_mac(self.addr, method, path, Some(&self.key), Some(NONCE), body);
+        assert!(
+            mac_is(&self.key, method, path, NONCE, &answer),
+            "{method} {path}: {answer:?}"
+        );
+        (answer.0, answer.1)
     }
 
     fn sale(&self, request: &str) -> String {
@@ -1438,7 +1652,7 @@ fn bx_71_a_request_without_the_till_key_is_refused_with_words() {
     }
     // A scheme other than Bearer.
     let raw = format!(
-        "GET /till/v1/sales/{SALE} HTTP/1.1\r\nHost: b\r\nAuthorization: Basic {}\r\n\r\n",
+        "GET /till/v1/sales/{SALE} HTTP/1.1\r\nHost: b\r\n{NONCE_HEADER}Authorization: Basic {}\r\n\r\n",
         t.key
     );
     assert_eq!(http(t.addr, &raw).0, 401);
@@ -1617,8 +1831,8 @@ fn bx_70_a_slow_connection_is_closed_and_the_connections_are_capped() {
     // short limits.
     struct Fixed;
     impl TillBackend for Fixed {
-        fn key_ok(&self, _: Option<&str>) -> bool {
-            true
+        fn check_key(&self, _: Option<&str>) -> KeyCheck {
+            KeyCheck::Good([3u8; 32])
         }
         fn create(&self, _: CreateBody) -> Result<([u8; 16], SaleState), TillRefusal> {
             Err(TillRefusal::Busy)
@@ -1660,7 +1874,10 @@ fn bx_70_a_slow_connection_is_closed_and_the_connections_are_capped() {
     }
     assert!(started.elapsed() < Duration::from_secs(3));
     // The slots are free again.
-    let (status, _) = http(addr, &format!("GET /till/v1/sales/{SALE} HTTP/1.1\r\n\r\n"));
+    let (status, _) = http(
+        addr,
+        &format!("GET /till/v1/sales/{SALE} HTTP/1.1\r\n{NONCE_HEADER}\r\n"),
+    );
     assert_eq!(status, 200);
     // A request that trickles in, a byte at a time, is cut off the same way.
     let mut slow = TcpStream::connect(addr).unwrap();
@@ -2023,4 +2240,308 @@ fn bx_77_a_till_sale_that_was_changed_after_signing_is_refused_by_the_pos_side()
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(lines[0].contains("signature"), "{lines:?}");
     assert!(p.sales().is_empty());
+}
+
+// ---- the signed answers (BX-80) -----------------------------------------
+
+const NONCE_B: &str = "fedcba9876543210fedcba9876543210";
+
+#[test]
+fn bx_80_every_answer_to_a_request_with_a_nonce_and_a_key_carries_the_mac() {
+    let t = till_box("tillmac");
+    let sale = t.sale("order-1");
+    let sale_path = format!("/till/v1/sales/{sale}");
+    let lost_path = format!("/till/v1/sales/{SALE}");
+    let good = sale_json(&counter1(), "1.00", "USD", "r", "q");
+    let wrong_money = sale_json(&counter1(), "1.00", "EUR", "r", "q2");
+    let bad_json = "{\"a\":1}".to_string();
+    let cases: Vec<(&str, String, Option<String>, u16)> = vec![
+        ("POST", "/till/v1/sales".into(), Some(good), 200),
+        ("POST", "/till/v1/sales".into(), Some(wrong_money), 409),
+        ("POST", "/till/v1/sales".into(), Some(bad_json), 400),
+        ("GET", sale_path.clone(), None, 200),
+        ("GET", lost_path.clone(), None, 404),
+        ("POST", format!("{sale_path}/cancel"), None, 200),
+        ("POST", format!("{lost_path}/cancel"), None, 404),
+    ];
+    for (method, path, body, want) in cases {
+        let answer = call_mac(
+            t.addr,
+            method,
+            &path,
+            Some(&t.key),
+            Some(NONCE),
+            body.as_deref(),
+        );
+        assert_eq!(answer.0, want, "{method} {path}: {}", answer.1);
+        assert!(
+            mac_is(&t.key, method, &path, NONCE, &answer),
+            "{method} {path}"
+        );
+        let mac = answer.2.as_deref().unwrap();
+        assert_eq!(mac.len(), 64);
+        assert!(mac
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+        // Another nonce, another method or path, or another key does not
+        // verify the same answer.
+        assert!(!mac_is(&t.key, method, &path, NONCE_B, &answer));
+        assert!(!mac_is(&t.key, "PUT", &path, NONCE, &answer));
+        assert!(
+            !mac_is(&t.key, method, "/till/v1/sales", NONCE, &answer) || path == "/till/v1/sales"
+        );
+        assert!(!mac_is(&"5".repeat(64), method, &path, NONCE, &answer));
+        // Changed status or body does not verify.
+        let mut other = answer.clone();
+        other.0 = if other.0 == 200 { 404 } else { 200 };
+        assert!(!mac_is(&t.key, method, &path, NONCE, &other));
+        let mut other = answer.clone();
+        other.1.push(' ');
+        assert!(!mac_is(&t.key, method, &path, NONCE, &other));
+    }
+}
+
+#[test]
+fn bx_80_the_same_request_with_another_nonce_gets_another_mac() {
+    let t = till_box("tillnonce");
+    let path = format!("/till/v1/sales/{SALE}");
+    let a = call_mac(t.addr, "GET", &path, Some(&t.key), Some(NONCE), None);
+    let b = call_mac(t.addr, "GET", &path, Some(&t.key), Some(NONCE_B), None);
+    assert_eq!(a.1, b.1);
+    assert_ne!(a.2, b.2);
+    assert!(mac_is(&t.key, "GET", &path, NONCE, &a));
+    assert!(!mac_is(&t.key, "GET", &path, NONCE, &b));
+    assert!(mac_is(&t.key, "GET", &path, NONCE_B, &b));
+}
+
+#[test]
+fn bx_80_a_wrong_token_is_refused_with_the_mac_of_the_reply_key() {
+    let t = till_box("tillwrongmac");
+    let path = format!("/till/v1/sales/{SALE}");
+    // The key itself is not the bearer token.
+    for bearer in [t.key.clone(), "0".repeat(64), "x".to_string()] {
+        let answer = call_mac(t.addr, "GET", &path, Some(&bearer), Some(NONCE), None);
+        // `request_text` turns a key into its token, so send the text as it
+        // is.
+        let raw = format!(
+            "GET {path} HTTP/1.1\r\nHost: b\r\n{NONCE_HEADER}Authorization: Bearer {bearer}\r\n\r\n"
+        );
+        let raw = http_mac(t.addr, &raw);
+        assert_eq!(raw.0, 401, "{bearer}");
+        assert_eq!(field(&raw.1, "error"), "tillKeyWrong");
+        assert!(mac_is(&t.key, "GET", &path, NONCE, &raw), "{bearer}");
+        assert_eq!(answer.0 == 401, bearer != t.key);
+    }
+}
+
+#[test]
+fn bx_80_a_request_without_a_good_nonce_is_a_400_with_no_mac_and_says_nothing_of_the_key() {
+    let t = till_box("tillnonce400");
+    let path = format!("/till/v1/sales/{SALE}");
+    let body = sale_json(&counter1(), "1.00", "USD", "r", "q");
+    for nonce in [
+        None,
+        Some(""),
+        Some(&NONCE[..31]),
+        Some(&format!("{NONCE}0")[..]),
+        Some(&NONCE.to_uppercase()[..]),
+        Some("g123456789abcdef0123456789abcdef"),
+    ] {
+        for key in [None, Some("x"), Some(t.key.as_str())] {
+            for (method, path, b) in [
+                ("POST", "/till/v1/sales", Some(body.as_str())),
+                ("GET", path.as_str(), None),
+                ("POST", &format!("{path}/cancel")[..], None),
+            ] {
+                let (status, answer, mac) = call_mac(t.addr, method, path, key, nonce, b);
+                assert_eq!(status, 400, "{method} {path} {nonce:?} {key:?}");
+                assert_eq!(answer, "{\"error\":\"tillBadRequest\"}");
+                assert_eq!(mac, None);
+            }
+        }
+    }
+    // Twice is no nonce.
+    let raw = format!(
+        "GET {path} HTTP/1.1\r\n{NONCE_HEADER}{NONCE_HEADER}Authorization: Bearer {}\r\n\r\n",
+        token_of(&t.key)
+    );
+    assert_eq!(
+        http_mac(t.addr, &raw),
+        (400, "{\"error\":\"tillBadRequest\"}".to_string(), None)
+    );
+    // A path that does not exist is still a 404, with or without a nonce.
+    let (status, answer, mac) = call_mac(t.addr, "GET", "/nope", Some(&t.key), None, None);
+    assert_eq!(
+        (status, answer.as_str(), mac),
+        (404, "{\"error\":\"tillNotFound\"}", None)
+    );
+}
+
+#[test]
+fn bx_80_an_answer_with_no_nonce_or_no_key_to_sign_under_carries_no_mac() {
+    let t = till_box("tillnomac");
+    // 404 not found, 400 that does not read, 413 over the limit.
+    let (status, _, mac) = call_mac(t.addr, "GET", "/", Some(&t.key), Some(NONCE), None);
+    assert_eq!((status, mac), (404, None));
+    let raw = format!(
+        "GET /till/v1/sales/{SALE} HTTP/1.1\r\nHost: b\r\n{NONCE_HEADER}Bad Header\r\n\r\n"
+    );
+    let (status, _, mac) = http_mac(t.addr, &raw);
+    assert_eq!((status, mac), (400, None));
+    let raw = format!(
+        "POST /till/v1/sales HTTP/1.1\r\nHost: b\r\n{NONCE_HEADER}Content-Type: application/json\r\n\
+         Content-Length: {MAX_REQUEST}\r\n\r\n"
+    );
+    let (status, _, mac) = http_mac(t.addr, &raw);
+    assert_eq!((status, mac), (413, None));
+}
+
+#[test]
+fn bx_80_a_box_with_no_till_key_made_signs_nothing() {
+    let dir = TempDir::new("tillnokeymac");
+    let (mut r, _) = start(&dir);
+    pair_ok(&r);
+    let addr = r
+        .serve_till("127.0.0.1:0".parse().unwrap(), TillConfig::default())
+        .unwrap();
+    let path = format!("/till/v1/sales/{SALE}");
+    let (status, body, mac) =
+        call_mac(addr, "GET", &path, Some(&"0".repeat(64)), Some(NONCE), None);
+    assert_eq!(
+        (status, field(&body, "error").as_str(), mac),
+        (401, "tillKeyWrong", None)
+    );
+}
+
+#[test]
+fn bx_80_a_key_file_of_the_earlier_form_is_a_401_key_old_and_signs_nothing() {
+    let dir = TempDir::new("tillkeyold");
+    let (mut r, _) = start(&dir);
+    pair_ok(&r);
+    let addr = r
+        .serve_till("127.0.0.1:0".parse().unwrap(), TillConfig::default())
+        .unwrap();
+    let key = [4u8; 32];
+    // The file as it was written before: the hash of the key alone.
+    std::fs::write(
+        dir.path().join(TILL_KEY_FILE),
+        openbmt_core::identity::tagged_hash("OpenBMT/till-key/v1", &key),
+    )
+    .unwrap();
+    let path = format!("/till/v1/sales/{SALE}");
+    for bearer in [hex(&key), hex(&till_bearer(&key)), "x".to_string()] {
+        let raw = format!(
+            "GET {path} HTTP/1.1\r\nHost: b\r\n{NONCE_HEADER}Authorization: Bearer {bearer}\r\n\r\n"
+        );
+        let (status, body, mac) = http_mac(addr, &raw);
+        assert_eq!(status, 401, "{bearer}");
+        assert_eq!(field(&body, "error"), "tillKeyOld");
+        assert_eq!(field(&body, "heading"), "WORDS_NEEDED_BX_80_KEY_OLD");
+        assert_eq!(mac, None);
+    }
+    // A new key makes the file whole again, at the next request.
+    let new = r.make_till_key().unwrap();
+    let (status, _, mac) = call_mac(addr, "GET", &path, Some(&new), Some(NONCE), None);
+    assert_eq!(status, 404);
+    assert!(mac.is_some());
+}
+
+// ---- the vectors the Odoo module's tests read (BX-80) -------------------
+
+/// The text of `integrations/odoo/pos_openbmt/tests_standalone/
+/// till_vectors.json`: a fixed key with its token, its reply key and its
+/// file, and some requests with the answer and the mac the Box makes.
+fn till_vectors() -> String {
+    let key: [u8; 32] = std::array::from_fn(|i| u8::try_from(i).unwrap());
+    let reply = till_reply_key(&key);
+    let sale = "00112233445566778899aabbccddeeff";
+    let cases: [(&str, String, &str, u16, &str); 5] = [
+        (
+            "POST",
+            "/till/v1/sales".to_string(),
+            "0123456789abcdef0123456789abcdef",
+            200,
+            "{\"sale\":\"00112233445566778899aabbccddeeff\",\"state\":\"waiting\"}",
+        ),
+        (
+            "GET",
+            format!("/till/v1/sales/{sale}"),
+            "fedcba9876543210fedcba9876543210",
+            200,
+            "{\"sale\":\"00112233445566778899aabbccddeeff\",\"state\":\"paid\",\"words\":{\"heading\":\"\",\"what\":\"Paid in bitcoin.\",\"next\":\"\"}}",
+        ),
+        (
+            "POST",
+            format!("/till/v1/sales/{sale}/cancel"),
+            "00000000000000000000000000000000",
+            404,
+            "{\"error\":\"tillLost\"}",
+        ),
+        (
+            "GET",
+            format!("/till/v1/sales/{sale}"),
+            "ffffffffffffffffffffffffffffffff",
+            401,
+            "{\"error\":\"tillKeyWrong\"}",
+        ),
+        // Bytes that are not plain ASCII, and a line feed at the end.
+        (
+            "GET",
+            format!("/till/v1/sales/{sale}"),
+            "0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+            200,
+            "{\"a\":\"caf\u{e9}\"}\n",
+        ),
+    ];
+    let quote = |text: &str| {
+        let mut out = String::from("\"");
+        for c in text.chars() {
+            match c {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                c => out.push(c),
+            }
+        }
+        out.push('"');
+        out
+    };
+    let mut out = String::from("{\n");
+    out.push_str(&format!("  \"key\": \"{}\",\n", hex(&key)));
+    out.push_str(&format!("  \"token\": \"{}\",\n", hex(&till_bearer(&key))));
+    out.push_str(&format!("  \"reply_key\": \"{}\",\n", hex(&reply)));
+    out.push_str(&format!("  \"key_file\": \"{}\",\n", hex(&key_file(&key))));
+    out.push_str("  \"cases\": [\n");
+    for (i, (method, path, nonce, status, body)) in cases.iter().enumerate() {
+        let mac = reply_mac(&reply, method, path, nonce, *status, body.as_bytes());
+        out.push_str(&format!(
+            "    {{\"method\": {}, \"path\": {}, \"nonce\": {}, \"status\": {status}, \"body\": {}, \"mac\": {}}}{}\n",
+            quote(method),
+            quote(path),
+            quote(nonce),
+            quote(body),
+            quote(&mac),
+            if i + 1 < cases.len() { "," } else { "" }
+        ));
+    }
+    out.push_str("  ]\n}\n");
+    out
+}
+
+#[test]
+fn bx_80_the_vectors_file_is_what_the_code_makes() {
+    let path = std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR")
+            .expect("cargo sets CARGO_MANIFEST_DIR when it runs tests"),
+    )
+    .join("../../integrations/odoo/pos_openbmt/tests_standalone/till_vectors.json");
+    let want = till_vectors();
+    if std::env::var_os("OPENBMT_BLESS_TILL").is_some() {
+        std::fs::write(&path, &want).expect("write till_vectors.json");
+    }
+    let have = std::fs::read_to_string(&path).unwrap_or_default();
+    assert!(
+        have == want,
+        "till_vectors.json is not what the Box makes: run this test with OPENBMT_BLESS_TILL=1 to write it again"
+    );
 }

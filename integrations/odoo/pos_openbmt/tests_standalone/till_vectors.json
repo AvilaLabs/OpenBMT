@@ -1,0 +1,13 @@
+{
+  "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "token": "18afb3f3c19008f87028822e6976ca211c1932569789322755b2cf0d5f28d9d3",
+  "reply_key": "b7bc0e874f9bb0d479211f75d07eb0440274ee5b407f047dcfdc71f427a254f9",
+  "key_file": "0250e033af1fda010f7d8d6b964573c5766d786fb782322b7f2802340b01b62bf6b7bc0e874f9bb0d479211f75d07eb0440274ee5b407f047dcfdc71f427a254f9",
+  "cases": [
+    {"method": "POST", "path": "/till/v1/sales", "nonce": "0123456789abcdef0123456789abcdef", "status": 200, "body": "{\"sale\":\"00112233445566778899aabbccddeeff\",\"state\":\"waiting\"}", "mac": "9f24ac05b4f2c1d28f8b1ba50f1dcf2cc29e078bb5ad735dab6aba176791e764"},
+    {"method": "GET", "path": "/till/v1/sales/00112233445566778899aabbccddeeff", "nonce": "fedcba9876543210fedcba9876543210", "status": 200, "body": "{\"sale\":\"00112233445566778899aabbccddeeff\",\"state\":\"paid\",\"words\":{\"heading\":\"\",\"what\":\"Paid in bitcoin.\",\"next\":\"\"}}", "mac": "ed3f3b97d1a1dfda157d094eb9c6cf0162cf547be7808431dab98a2124085d4e"},
+    {"method": "POST", "path": "/till/v1/sales/00112233445566778899aabbccddeeff/cancel", "nonce": "00000000000000000000000000000000", "status": 404, "body": "{\"error\":\"tillLost\"}", "mac": "c104c92af672b89f79502d183293807abfd03ccbbace891abbb4e504e969a053"},
+    {"method": "GET", "path": "/till/v1/sales/00112233445566778899aabbccddeeff", "nonce": "ffffffffffffffffffffffffffffffff", "status": 401, "body": "{\"error\":\"tillKeyWrong\"}", "mac": "e66d4063709c82962d7e789d4b6027104e07e1d923ada7233564625184d75212"},
+    {"method": "GET", "path": "/till/v1/sales/00112233445566778899aabbccddeeff", "nonce": "0f1e2d3c4b5a69788796a5b4c3d2e1f0", "status": 200, "body": "{\"a\":\"café\"}\n", "mac": "87d357d251803c66b2fac7edd4d0dc31c1d6c8397f3294bcd455d14f394f6e89"}
+  ]
+}

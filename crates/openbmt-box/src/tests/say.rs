@@ -15,9 +15,9 @@ use crate::pos::{PosOpenError, PosState, Reading};
 use crate::pos_config::PosConfigError;
 use crate::runner::{PosView, StartFailure};
 use crate::say::{
-    all_words, invite_lines, iso_utc, members_lines, note_words, notes_lines, pos_lines,
-    pos_token_lines, render, screens_markdown, state_lines, unknown_lines, ConsoleAnswer, NoteKind,
-    NoticeWhy, PageAnswer,
+    all_words, invite_lines, is_placeholder, iso_utc, members_lines, note_words, notes_lines,
+    pos_lines, pos_token_lines, render, screens_markdown, state_lines, unknown_lines,
+    ConsoleAnswer, NoteKind, NoticeWhy, PageAnswer,
 };
 use crate::state::{BoxError, BoxStatus};
 
@@ -53,7 +53,25 @@ fn state(reading: Reading) -> PosState {
 
 #[test]
 fn sc_12_every_word_keeps_the_rules() {
-    assert_eq!(check_distinct(&all_words()), Ok(()));
+    // A placeholder is not a sentence and is not read as one, but each stands
+    // for one state, so each differs from every other.
+    let (placeholders, written): (Vec<_>, Vec<_>) = all_words()
+        .into_iter()
+        .partition(|(_, w)| is_placeholder(w));
+    let mut seen = BTreeSet::new();
+    for (name, w) in &placeholders {
+        assert!(
+            seen.insert(w.heading.clone()),
+            "{name} repeats a placeholder"
+        );
+        assert_eq!(w.heading, w.what, "{name}");
+        assert_eq!(w.heading, w.next, "{name}");
+    }
+    assert_eq!(
+        seen.into_iter().collect::<Vec<_>>(),
+        vec!["WORDS_NEEDED_BX_80_KEY_OLD".to_string()]
+    );
+    assert_eq!(check_distinct(&written), Ok(()));
 }
 
 #[test]

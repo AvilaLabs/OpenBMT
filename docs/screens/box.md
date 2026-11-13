@@ -78,6 +78,7 @@ environment variable `OPENBMT_WRITE_SCREENS=1` to write it again.
 | ConsoleAnswer::BadArguments | Wrong arguments | The Box needs a data folder and an address to listen on, and may take a till address and other options. | Type the data folder and the address, then add --invitation-file, --status-page, --till-listen or --no-console as needed. | the Box keeper |  |
 | ConsoleAnswer::BadAddress | Address not understood | The address to listen on is not an address and a port. | Give it as an address, a colon and a port, such as 127.0.0.1:8080. | the Box keeper |  |
 | TillAnswer::tillKeyWrong | Wrong till key | The key in this payment method is not the Box's till key. | Copy the till key from the Box again into this payment method. | the Box keeper | BX-71 |
+| TillAnswer::tillKeyOld | WORDS_NEEDED_BX_80_KEY_OLD | WORDS_NEEDED_BX_80_KEY_OLD | WORDS_NEEDED_BX_80_KEY_OLD | the Box keeper | BX-80 |
 | TillAnswer::tillOff | Till listener is off | The Box was started without its till listener. | Start the Box with the till listener on. The handbook shows how. | the Box keeper | BX-70 |
 | TillAnswer::tillNotPaired | The Box is not set up yet | The Box has not joined the shop, so it cannot reach a counter. | Finish setting up the Box from the owner app. | the owner | BX-72 |
 | TillAnswer::tillUnknownCounter | Counter not found | The shop has no counter with the code 1a2b3c4d. | Check the counter code in this payment method. The owner app shows it after the word Counter. | the Box keeper | BX-72 |

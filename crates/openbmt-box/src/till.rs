@@ -13,6 +13,7 @@
 
 use std::collections::BTreeMap;
 
+use openbmt_core::hkdf::hmac_sha256;
 use openbmt_core::identity::{tagged_hash, DeviceId};
 use openbmt_core::settings::DeviceRole;
 use openbmt_counter::Currency;
@@ -24,8 +25,22 @@ use crate::state::BoxError;
 
 /// The file that holds the hash of the till key (BX-71).
 pub const TILL_KEY_FILE: &str = "till-key";
-/// The tag of the hash the till key is stored under.
+/// The tag of the hash the bearer token is stored under.
 pub const TAG_TILL_KEY: &str = "OpenBMT/till-key/v1";
+/// The tag of the bearer token made from the till key (BX-80).
+pub const TAG_TILL_BEARER: &str = "OpenBMT/till-bearer/v1";
+/// The tag of the reply key made from the till key (BX-80).
+pub const TAG_TILL_REPLY: &str = "OpenBMT/till-reply/v1";
+/// The first line of what an answer's mac covers (BX-80).
+pub const REPLY_LABEL: &str = "OBM-TILL-REPLY-1";
+/// The version byte at the start of the till key file as it is now written.
+pub const KEY_FILE_VERSION: u8 = 2;
+/// The size of the till key file as it is now written: the version, the hash
+/// of the bearer token and the reply key.
+pub const KEY_FILE_LEN: usize = 65;
+/// The size of the till key file as it was written before BX-80: the hash of
+/// the key alone.
+pub const KEY_FILE_LEN_V1: usize = 32;
 /// Seconds a request waits for the cashier to press Start (BX-76).
 pub const REQUEST_SECS: u64 = 300;
 /// Seconds an ended sale is kept before it is dropped (BX-76).
@@ -82,6 +97,8 @@ impl SaleState {
 pub enum TillRefusal {
     /// 401: no till key, or not the Box's.
     KeyWrong,
+    /// 401: the till key file is of the form before BX-80.
+    KeyOld,
     /// 503: the Box has not joined the shop.
     NotPaired,
     /// 404: no counter has this code; the code.
@@ -109,7 +126,7 @@ impl TillRefusal {
     /// The status code of the answer.
     pub fn status(&self) -> u16 {
         match self {
-            Self::KeyWrong => 401,
+            Self::KeyWrong | Self::KeyOld => 401,
             Self::NotPaired => 503,
             Self::UnknownCounter(_) | Self::Lost => 404,
             Self::WrongMoney { .. } => 409,
@@ -122,9 +139,58 @@ impl TillRefusal {
 
 // ---- the till key ----------------------------------------------------
 
-/// What the Box stores of a till key: the tagged hash of its 32 bytes.
-pub fn till_key_hash(key: &[u8; 32]) -> [u8; 32] {
-    tagged_hash(TAG_TILL_KEY, key)
+/// What the Box stores of the bearer token: its tagged hash.
+pub fn till_key_hash(token: &[u8; 32]) -> [u8; 32] {
+    tagged_hash(TAG_TILL_KEY, token)
+}
+
+/// The bearer token the till sends for a till key (BX-80).
+pub fn till_bearer(key: &[u8; 32]) -> [u8; 32] {
+    tagged_hash(TAG_TILL_BEARER, key)
+}
+
+/// The reply key that both sides derive from a till key (BX-80).
+pub fn till_reply_key(key: &[u8; 32]) -> [u8; 32] {
+    tagged_hash(TAG_TILL_REPLY, key)
+}
+
+/// The mac of an answer (BX-80): HMAC-SHA256 under the reply key of the
+/// label, the request's method, path and nonce, the status as three digits
+/// and the body, joined by line feeds, as 64 lowercase hex.
+pub fn reply_mac(
+    reply_key: &[u8; 32],
+    method: &str,
+    path: &str,
+    nonce: &str,
+    status: u16,
+    body: &[u8],
+) -> String {
+    let mut message =
+        format!("{REPLY_LABEL}\n{method}\n{path}\n{nonce}\n{status:03}\n").into_bytes();
+    message.extend_from_slice(body);
+    hex(&hmac_sha256(reply_key, &message))
+}
+
+/// The till key file as the Box writes it: the version, the hash of the
+/// bearer token and the reply key.
+pub fn key_file(key: &[u8; 32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(KEY_FILE_LEN);
+    out.push(KEY_FILE_VERSION);
+    out.extend_from_slice(&till_key_hash(&till_bearer(key)));
+    out.extend_from_slice(&till_reply_key(key));
+    out
+}
+
+/// What a till key file and a presented token come to (BX-71, BX-80).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyCheck {
+    /// The token is the Box's; the reply key signs the answer.
+    Good([u8; 32]),
+    /// The token is not the Box's, or there is no key. The reply key is
+    /// there when the file holds one, and then signs the refusal.
+    Wrong(Option<[u8; 32]>),
+    /// The file is of the form before BX-80 and holds no reply key.
+    Old,
 }
 
 /// A key as 64 lowercase hex.
@@ -157,26 +223,40 @@ fn same_bytes(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
 }
 
-/// BX-71: whether `presented` (64 lowercase hex) is the key whose hash is
-/// `stored`. The comparison is of the hashes, in constant time.
-pub fn till_key_matches(stored: &[u8], presented: &str) -> bool {
-    match unhex::<32>(presented) {
-        Some(key) => {
-            let hash = till_key_hash(&key);
-            same_bytes(stored, &hash)
-        }
-        None => false,
+/// BX-71, BX-80: whether `presented` (64 lowercase hex) is the bearer token
+/// whose hash is in `stored`, the contents of the till key file, if there is
+/// one. The comparison is of the hashes, in constant time.
+pub fn check_till_key(stored: Option<&[u8]>, presented: Option<&str>) -> KeyCheck {
+    let Some(stored) = stored else {
+        return KeyCheck::Wrong(None);
+    };
+    if stored.len() == KEY_FILE_LEN_V1 {
+        return KeyCheck::Old;
+    }
+    let (Some(&KEY_FILE_VERSION), Some(hash), Some(reply)) = (
+        stored.first(),
+        stored.get(1..33),
+        stored.get(33..).and_then(|r| <[u8; 32]>::try_from(r).ok()),
+    ) else {
+        return KeyCheck::Wrong(None);
+    };
+    if stored.len() != KEY_FILE_LEN {
+        return KeyCheck::Wrong(None);
+    }
+    match presented.and_then(unhex::<32>) {
+        Some(token) if same_bytes(hash, &till_key_hash(&token)) => KeyCheck::Good(reply),
+        _ => KeyCheck::Wrong(Some(reply)),
     }
 }
 
-/// BX-71: make a till key from the system's randomness and store its hash in
-/// `files`, replacing any earlier one. Returns the key as 64 lowercase hex,
+/// BX-71, BX-80: make a till key from the system's randomness and store the
+/// hash of its bearer token and its reply key in `files`, replacing any earlier one. Returns the key as 64 lowercase hex,
 /// which is the only place it ever exists.
 pub fn make_till_key(files: &mut impl BoxFiles) -> Result<String, BoxError> {
     let mut key = [0u8; 32];
     os_random(&mut key).map_err(|_| BoxError::NoRandomness)?;
     files
-        .write(TILL_KEY_FILE, &till_key_hash(&key))
+        .write(TILL_KEY_FILE, &key_file(&key))
         .map_err(|e| BoxError::Io {
             file: TILL_KEY_FILE,
             op: "write",

@@ -1,5 +1,6 @@
 """A Box till listener built from the HTTP contract, on http.server."""
 import hashlib
+import hmac
 import json
 import re
 import threading
@@ -47,8 +48,20 @@ END_WORDS = {
                   'The till cancelled this sale before it was paid.',
                   'Nothing to do.'),
 }
+NONCE_RE = re.compile(r'^[0-9a-f]{32}$')
 ID_RE = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
 AMOUNT_RE = re.compile(r'^[0-9]+(\.[0-9]{1,2})?$')
+
+
+def tagged_hash(tag, message):
+    prefix = hashlib.sha256(tag.encode('ascii')).digest()
+    return hashlib.sha256(prefix + prefix + message).digest()
+
+
+def mac_of(reply_key, method, path, nonce, status, body):
+    message = ('OBM-TILL-REPLY-1\n%s\n%s\n%s\n%03d\n'
+               % (method, path, nonce, status)).encode() + body
+    return hmac.new(reply_key, message, hashlib.sha256).hexdigest()
 
 
 def words(trio):
@@ -57,14 +70,24 @@ def words(trio):
 
 class FakeBox:
     def __init__(self):
-        self.key_hash = hashlib.sha256(bytes.fromhex(KEY)).digest()
+        key = bytes.fromhex(KEY)
+        # What the Box keeps of the till key: the hash of the bearer token,
+        # and the reply key.
+        self.key_hash = tagged_hash(
+            'OpenBMT/till-key/v1', tagged_hash('OpenBMT/till-bearer/v1', key))
+        self.reply_key = tagged_hash('OpenBMT/till-reply/v1', key)
+        # How answers are signed: good, missing, other_key, other_nonce,
+        # other_status, other_body, other_path or other_method.
+        self.signing = 'good'
         self.paired = True
         self.sales = {}
         self.requests = {}
         self.seen = []  # (method, path, authorization)
+        self.nonces = []
         self.mode = 'normal'  # normal, redirect, garbage, slow, shape
         self.delay = 0.0
         self.shape = None
+        self.status_code = 200
         self.currency = 'EUR'
         # When set, each status read moves a sale one step: waiting, opened, paid.
         self.advance = False
@@ -99,11 +122,34 @@ class FakeBox:
         with self.lock:
             self.sales[sale] = state
 
-    def send(self, h, status, body, extra=None):
+    def mac_for(self, h, status, raw):
+        method, path, nonce = h.command, h.path, h.nonce
+        key = self.reply_key
+        mode = self.signing
+        if mode == 'missing':
+            return None
+        if mode == 'other_key':
+            key = bytes(32)
+        elif mode == 'other_nonce':
+            nonce = '0' * 32 if nonce != '0' * 32 else '1' * 32
+        elif mode == 'other_status':
+            status = 200 if status != 200 else 404
+        elif mode == 'other_body':
+            raw = raw + b' '
+        elif mode == 'other_path':
+            path = '/till/v1/other'
+        elif mode == 'other_method':
+            method = 'PUT' if method != 'PUT' else 'GET'
+        return mac_of(key, method, path, nonce, status, raw)
+
+    def send(self, h, status, body, extra=None, signed=True):
         raw = body if isinstance(body, bytes) else json.dumps(body).encode()
         h.send_response(status)
         h.send_header('Content-Type', 'application/json')
         h.send_header('Content-Length', str(len(raw)))
+        mac = self.mac_for(h, status, raw) if signed and h.nonce else None
+        if mac:
+            h.send_header('X-OBM-Reply', mac)
         for k, v in (extra or {}).items():
             h.send_header(k, v)
         h.end_headers()
@@ -113,14 +159,17 @@ class FakeBox:
         self.send(h, status, {'error': key, 'words': words(WORDS[key])})
 
     def handle(self, h, verb):
+        nonce = h.headers.get('X-OBM-Nonce')
+        h.nonce = nonce if nonce and NONCE_RE.match(nonce) else None
         length = int(h.headers.get('Content-Length') or 0)
         if length > LIMIT:
-            self.send(h, 413, {})
+            self.send(h, 413, {}, signed=False)
             return
         raw = h.rfile.read(length) if length else b''
         auth = h.headers.get('Authorization')
         with self.lock:
             self.seen.append((verb, h.path, auth))
+            self.nonces.append(nonce)
         if self.mode == 'redirect':
             self.send(h, 302, {}, {'Location': self.address + '/elsewhere'})
             return
@@ -130,7 +179,7 @@ class FakeBox:
             self.send(h, 200, b'<html>not json</html>')
             return
         if self.mode == 'shape':
-            self.send(h, 200, self.shape)
+            self.send(h, self.status_code, self.shape)
             return
         path = h.path
         m_sale = re.match(r'^/till/v1/sales/([0-9a-f]{32})$', path)
@@ -138,13 +187,16 @@ class FakeBox:
         known = (path == '/till/v1/sales' and verb == 'POST') \
             or (m_sale and verb == 'GET') or (m_cancel and verb == 'POST')
         if not known:
-            self.send(h, 404, {})
+            self.send(h, 404, {}, signed=False)
+            return
+        if h.nonce is None:
+            self.send(h, 400, {'error': 'tillBadRequest'}, signed=False)
             return
         if auth is None or not auth.startswith('Bearer '):
             self.err(h, 401, 'tillKeyWrong')
             return
-        digest = hashlib.sha256(bytes.fromhex(auth[7:]) if re.match(
-            r'^[0-9a-f]{64}$', auth[7:]) else b'x').digest()
+        digest = tagged_hash('OpenBMT/till-key/v1', bytes.fromhex(auth[7:])
+                             if re.match(r'^[0-9a-f]{64}$', auth[7:]) else b'x')
         if digest != self.key_hash:
             self.err(h, 401, 'tillKeyWrong')
             return

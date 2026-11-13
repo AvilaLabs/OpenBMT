@@ -56,7 +56,7 @@ use crate::say::note_words;
 use crate::state::{BoxCore, BoxError, BoxStatus};
 use crate::status_page::{Entered, PageBackend, PageConfig, PageView, StatusPage};
 use crate::till::{
-    clean_reference, find_counter, make_till_key, parse_amount, till_key_matches, NewSale,
+    check_till_key, clean_reference, find_counter, make_till_key, parse_amount, KeyCheck, NewSale,
     SaleState, TillRefusal, TillTable, TILL_KEY_FILE,
 };
 use crate::till_listener::{CreateBody, TillBackend, TillConfig, TillListener};
@@ -373,11 +373,11 @@ impl TillHandles {
 }
 
 impl TillBackend for TillHandles {
-    fn key_ok(&self, presented: Option<&str>) -> bool {
+    fn check_key(&self, presented: Option<&str>) -> KeyCheck {
         let stored = lock(&self.core).files().read(TILL_KEY_FILE);
-        match (stored, presented) {
-            (Ok(Some(stored)), Some(presented)) => till_key_matches(&stored, presented),
-            _ => false,
+        match stored {
+            Ok(Some(stored)) => check_till_key(Some(&stored), presented),
+            _ => KeyCheck::Wrong(None),
         }
     }
 

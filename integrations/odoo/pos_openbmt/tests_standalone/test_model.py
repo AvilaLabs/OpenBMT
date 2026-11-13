@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import logging
 import os
 import sys
@@ -112,7 +113,8 @@ class States(Base):
     def test_bearer_header_sent(self):
         self.start()
         self.assertEqual(self.box.seen[-1],
-                         ('POST', '/till/v1/sales', 'Bearer ' + fake_box.KEY))
+                         ('POST', '/till/v1/sales',
+                          'Bearer ' + mod.till_token(fake_box.KEY)))
 
     def test_trailing_slash_address(self):
         m = self.make(openbmt_box_address=self.box.address + '/')
@@ -126,8 +128,11 @@ class Refusals(Base):
         self.assert_clean(r)
 
     def test_wrong_key(self):
+        # The Box signs its refusal under the reply key of its own key, which
+        # the module cannot check with another key, so the answer is not
+        # taken.
         m = self.make(openbmt_till_key='cd' * 32)
-        self.refused(self.start(method=m), 'tillKeyWrong')
+        self.refused(self.start(method=m), mod.ERR_UNSIGNED)
         self.assertNotIn('cd' * 32, repr(self.logs))
 
     def test_not_paired(self):
@@ -167,6 +172,9 @@ class Refusals(Base):
 
     def test_setup_missing(self):
         for over in ({'openbmt_till_key': ''}, {'openbmt_counter': 'bad'},
+                     {'openbmt_till_key': 'ab' * 31},
+                     {'openbmt_till_key': 'AB' * 32},
+                     {'openbmt_till_key': 'zz' * 32},
                      {'openbmt_box_address': ''},
                      {'openbmt_box_address': 'ftp://127.0.0.1:1'},
                      {'openbmt_box_address': 'file:///etc/passwd'},
@@ -260,6 +268,161 @@ class Transport(Base):
         self.assertTrue(self.logs)
         self.assertTrue(all('ConnectionError' in line for line in self.logs))
         self.assert_clean()
+
+
+def vectors():
+    with open(os.path.join(HERE, 'till_vectors.json'), encoding='utf-8') as f:
+        return json.load(f)
+
+
+class Vectors(unittest.TestCase):
+    """What the Box's own code makes, written by its test (BX-80)."""
+
+    def test_token_and_reply_key_of_the_key(self):
+        v = vectors()
+        self.assertEqual(mod.till_token(v['key']), v['token'])
+        self.assertEqual(mod.till_reply_key(v['key']).hex(), v['reply_key'])
+        # The stored file: version, hash of the token, reply key.
+        stored = bytes.fromhex(v['key_file'])
+        self.assertEqual(stored[0], 2)
+        self.assertEqual(
+            stored[1:33],
+            mod.tagged_hash('OpenBMT/till-key/v1', bytes.fromhex(v['token'])))
+        self.assertEqual(stored[33:].hex(), v['reply_key'])
+
+    def test_fake_box_derives_the_same(self):
+        v = vectors()
+        key = bytes.fromhex(v['key'])
+        self.assertEqual(
+            fake_box.tagged_hash('OpenBMT/till-bearer/v1', key).hex(), v['token'])
+        self.assertEqual(
+            fake_box.tagged_hash('OpenBMT/till-reply/v1', key).hex(), v['reply_key'])
+
+    def test_macs_of_the_cases(self):
+        v = vectors()
+        reply = bytes.fromhex(v['reply_key'])
+        self.assertTrue(v['cases'])
+        for c in v['cases']:
+            body = c['body'].encode('utf-8')
+            args = (c['method'], c['path'], c['nonce'], c['status'], body)
+            self.assertEqual(mod.reply_mac(reply, *args), c['mac'])
+            self.assertEqual(fake_box.mac_of(reply, *args), c['mac'])
+            self.assertTrue(mod.reply_is_good(reply, *args, c['mac']))
+
+    def test_a_case_changed_in_any_part_is_not_good(self):
+        v = vectors()
+        reply = bytes.fromhex(v['reply_key'])
+        c = v['cases'][0]
+        base = [c['method'], c['path'], c['nonce'], c['status'],
+                c['body'].encode('utf-8')]
+        other = [('PUT', 0), ('/till/v1/sales/x', 1), ('f' * 32, 2),
+                 (c['status'] + 1, 3), (c['body'].encode('utf-8') + b' ', 4)]
+        for value, at in other:
+            args = list(base)
+            args[at] = value
+            self.assertFalse(mod.reply_is_good(reply, *args, c['mac']), at)
+        self.assertFalse(mod.reply_is_good(bytes(32), *base, c['mac']))
+        for header in (None, '', c['mac'].upper(), c['mac'][:-1], c['mac'] + '0',
+                       c['mac'] + ' ', '\u00e9' * 64):
+            self.assertFalse(mod.reply_is_good(reply, *base, header), header)
+
+
+class Signed(Base):
+    """An answer counts only with the mac of its own request (BX-80)."""
+
+    def unsigned(self, r):
+        self.assertEqual(r, {'error': mod.ERR_UNSIGNED,
+                             'words': mod.LOCAL_WORDS[mod.ERR_UNSIGNED]})
+        self.assert_clean(r)
+
+    def test_a_good_answer_is_accepted(self):
+        r = self.start()
+        self.assertEqual(r['state'], 'waiting')
+        self.assertEqual(self.method.openbmt_status(r['sale'])['state'], 'waiting')
+
+    def test_a_refusal_the_box_signed_is_accepted_with_its_words(self):
+        r = self.method.openbmt_status('0' * 32)
+        self.assertEqual(r['error'], 'tillLost')
+
+    def test_each_failure_of_the_mac_is_a_failed_call(self):
+        for mode in ('missing', 'other_key', 'other_nonce', 'other_status',
+                     'other_body', 'other_path', 'other_method'):
+            self.box.signing = mode
+            self.unsigned(self.start(request='r-' + mode))
+            self.unsigned(self.method.openbmt_status('0' * 32))
+
+    def test_a_paid_answer_without_a_good_mac_is_never_paid(self):
+        self.box.signing = 'good'
+        sale = self.start()['sale']
+        self.box.set_state(sale, 'paid')
+        for mode in ('missing', 'other_key', 'other_nonce', 'other_status',
+                     'other_body'):
+            self.box.signing = mode
+            r = self.method.openbmt_status(sale)
+            self.assertNotIn('state', r, mode)
+            self.unsigned(r)
+        self.box.signing = 'good'
+        self.assertEqual(self.method.openbmt_status(sale)['state'], 'paid')
+
+    def test_an_answer_for_the_state_the_till_asked_about_elsewhere(self):
+        # An answer made for one request is not good for another: the same
+        # paid answer, signed for the sale's own path, does not pass as the
+        # answer to a request for another path.
+        reply = mod.till_reply_key(fake_box.KEY)
+        sale = 'a' * 32
+        raw = json.dumps({'sale': sale, 'state': 'paid',
+                          'words': {'heading': '', 'what': 'Paid in bitcoin.',
+                                    'next': ''}}).encode()
+        mac = mod.reply_mac(reply, 'GET', '/till/v1/sales/' + sale, '1' * 32,
+                            200, raw)
+        self.assertTrue(mod.reply_is_good(
+            reply, 'GET', '/till/v1/sales/' + sale, '1' * 32, 200, raw, mac))
+        self.assertFalse(mod.reply_is_good(
+            reply, 'GET', '/till/v1/sales/' + 'b' * 32, '1' * 32, 200, raw, mac))
+        self.assertFalse(mod.reply_is_good(
+            reply, 'GET', '/till/v1/sales/' + sale, '2' * 32, 200, raw, mac))
+
+    def test_an_answer_sent_again_for_a_later_request_is_refused(self):
+        # What a path party holds after seeing one answer: its body, status
+        # and mac. The next request has its own nonce.
+        sale = self.start()['sale']
+        self.box.signing = 'other_nonce'
+        self.unsigned(self.method.openbmt_status(sale))
+        self.assertEqual(len(set(self.box.nonces)), len(self.box.nonces))
+
+    def test_every_request_has_a_fresh_nonce_and_the_token_not_the_key(self):
+        for i in range(5):
+            self.start(request='n%d' % i)
+        self.assertEqual(len(set(self.box.nonces)), 5)
+        for n in self.box.nonces:
+            self.assertRegex(n, r'^[0-9a-f]{32}$')
+        for _, _, auth in self.box.seen:
+            self.assertEqual(auth, 'Bearer ' + mod.till_token(fake_box.KEY))
+            self.assertNotIn(fake_box.KEY, auth)
+
+    def test_an_unsigned_refusal_is_not_taken_either(self):
+        # The Box's 401 for a key file of the earlier form, and its 404, 400
+        # and 413 answers, carry no mac.
+        w = {'heading': 'h', 'what': 'w', 'next': 'n'}
+        self.box.mode = 'shape'
+        self.box.signing = 'missing'
+        for status, body in ((401, {'error': 'tillKeyOld', 'words': w}),
+                             (404, {}), (400, {'error': 'tillBadRequest'}),
+                             (413, {'error': 'tillTooLarge'})):
+            self.box.shape = body
+            self.box.status_code = status
+            self.unsigned(self.method.openbmt_status('a' * 32))
+
+    def test_the_key_is_checked_before_a_call_leaves(self):
+        before = len(self.box.seen)
+        for key in ('', 'ab' * 31, 'AB' * 32, 'zz' * 32, 'ab' * 33):
+            r = self.start(method=self.make(openbmt_till_key=key))
+            self.assertEqual(r['error'], mod.ERR_SETUP, key)
+        self.assertEqual(len(self.box.seen), before)
+
+    def test_a_key_with_spaces_around_it_works(self):
+        m = self.make(openbmt_till_key=' ' + fake_box.KEY + '\n')
+        self.assertEqual(self.start(method=m)['state'], 'waiting')
 
 
 class Files(unittest.TestCase):

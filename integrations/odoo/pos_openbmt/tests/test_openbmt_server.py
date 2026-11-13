@@ -70,7 +70,9 @@ class TestOpenbmtServer(TransactionCase):
         self.assertEqual(self.start(amount='0.00')['error'], 'tillBadAmount')
         wrong = self.make(openbmt_till_key='cd' * 32)
         r = wrong.openbmt_start('1.00', 'EUR', 'x', 'k1')
-        self.assertEqual(r['error'], 'tillKeyWrong')
+        # The Box signs its refusal under the reply key of its own key, so
+        # an answer to another key does not check.
+        self.assertEqual(r['error'], 'tillNotSigned')
         self.assertNotIn('cd' * 32, repr(r))
         other = self.make(openbmt_counter='00000000')
         self.assertEqual(other.openbmt_start('1.00', 'EUR', 'x', 'k2')['error'],

@@ -92,6 +92,11 @@ fn stop(heading: &str, what: String, who: Who, next: impl Into<String>) -> Words
     Words::new(Tone::Stop, heading, what, who, next)
 }
 
+/// Whether these words are a placeholder, a text still to be written.
+pub fn is_placeholder(words: &Words) -> bool {
+    words.heading.starts_with("WORDS_NEEDED_")
+}
+
 /// The words for a file that is damaged: the Box did not start over it and
 /// did not replace it (SC-10).
 fn damaged_words(file: &str, why: &str) -> Words {
@@ -1028,6 +1033,8 @@ impl ConsoleAnswer {
 pub enum TillAnswer {
     /// The till's key is not the Box's till key.
     KeyWrong,
+    /// The till key file is of the form before BX-80: a new key is needed.
+    KeyOld,
     /// The Box was started without its till listener.
     Off,
     /// The Box has not joined the shop.
@@ -1069,6 +1076,7 @@ impl TillAnswer {
     pub fn key(&self) -> &'static str {
         match self {
             Self::KeyWrong => "tillKeyWrong",
+            Self::KeyOld => "tillKeyOld",
             Self::Off => "tillOff",
             Self::NotPaired => "tillNotPaired",
             Self::UnknownCounter(_) => "tillUnknownCounter",
@@ -1093,6 +1101,14 @@ impl TillAnswer {
                 "Copy the till key from the Box again into this payment method.",
             )
             .code("BX-71"),
+            Self::KeyOld => Words::new(
+                Tone::Stop,
+                "WORDS_NEEDED_BX_80_KEY_OLD",
+                "WORDS_NEEDED_BX_80_KEY_OLD",
+                Who::BoxKeeper,
+                "WORDS_NEEDED_BX_80_KEY_OLD",
+            )
+            .code("BX-80"),
             Self::Off => stop(
                 "Till listener is off",
                 "The Box was started without its till listener.".into(),
@@ -2100,6 +2116,7 @@ pub fn all_words() -> Vec<(String, Words)> {
 pub fn till_samples() -> Vec<TillAnswer> {
     vec![
         TillAnswer::KeyWrong,
+        TillAnswer::KeyOld,
         TillAnswer::Off,
         TillAnswer::NotPaired,
         TillAnswer::UnknownCounter("1a2b3c4d".into()),
