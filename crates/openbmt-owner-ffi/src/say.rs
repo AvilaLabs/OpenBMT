@@ -264,9 +264,9 @@ const RULES: &[Entry] = &[
         "float-no-move",
         Kind::State,
         "Float move not signed",
-        "The refund float's move was not signed, so there is no address of the shop's own wallet to take it to.",
+        "This phone did not sign this move of the float, so it does not send it.",
         Who::Owner,
-        "Turn the float off from its page; the phone signs the move first.",
+        "Turn the float off again from its page. This phone signs the move, then sends it.",
     ),
     (
         "start-key1",

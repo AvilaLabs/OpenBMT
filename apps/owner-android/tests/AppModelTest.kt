@@ -4138,10 +4138,6 @@ object AppModelTest {
         ok(source("src/android/Controller.kt").contains("OwnerNode.start(floatWatching(start))"), "the node is started with the float's watch")
         ok(screens.contains("sealed.wipe()") && screens.contains("FloatWords.rowTitle)"), "the data key is overwritten when the seal cannot be kept, and the unlock prompt is the float's own")
 
-        // The placeholders are named for their rule and written once.
-        val needed = FloatWords.needed()
-        ok(needed.isNotEmpty() && needed.all { (k, n) -> n == "WORDS_NEEDED_OA_$k" && Regex("WORDS_NEEDED_OA_FL\\d{2}_[A-Z_]+").matches(n) } && needed.map { it.first }.toSet().size == needed.size, "each float placeholder is named for a float rule and its own key")
-        ok(needed.all { FloatWords.isPlaceholder(it.second) } && FloatWords.all().none { FloatWords.isPlaceholder(it) }, "placeholders are kept apart from the written float texts")
     }
 
     private fun floatTests() {
@@ -4216,7 +4212,7 @@ object AppModelTest {
         }
 
         val words = FloatWords.all()
-        ok(words.size == 26 && words.toSet().size == words.size, "each float text is written once")
+        ok(words.size == 45 && words.toSet().size == words.size, "each float text is written once")
         ok(words.none { it.contains("WORDS_NEEDED") || it.isBlank() }, "no float text is left as a placeholder")
     }
 }

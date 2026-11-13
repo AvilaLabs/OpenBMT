@@ -333,7 +333,7 @@ private fun Controller.floatPaySigned(n: OwnerNode, store: FloatStore, paid: Flo
             record(store)?.let { rec -> paid.changeIndex?.let { store.changeUsed(rec, it) } }
             n.floatSend(paid.tx, listOf(r.id), false)
             centre(
-                StarterWords.said(FloatWords.payDone),
+                StarterWords.said(FloatWords.payDoneHeading, FloatWords.payDoneWhat, FloatWords.payDoneNext, Tones.GOOD),
                 listOf(ui.primary(StarterWords.doneButton) { showFloat() }),
                 extra = listOf(ui.text(paid.txid, 14f, mono = true)), title = FloatWords.rowTitle,
             )
@@ -431,7 +431,7 @@ private fun Controller.showFloatSweepDelete() {
                     floatKeystore().delete()
                     store.completeSweep(record, confirmations, nowSecs())
                     centre(
-                        StarterWords.said(FloatWords.sweepDeleted),
+                        StarterWords.said(FloatWords.sweepDeletedHeading, FloatWords.sweepDeletedWhat, FloatWords.sweepDeletedNext, Tones.GOOD),
                         listOf(ui.primary(StarterWords.doneButton) { showFloat() }), title = FloatWords.rowTitle,
                     )
                 } catch (_: IOException) {

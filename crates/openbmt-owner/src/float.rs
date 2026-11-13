@@ -310,8 +310,8 @@ pub fn shop_wallet_unreadable_words() -> Words {
 pub fn not_watching_words() -> Words {
     stop(
         "Refund float not read yet",
-        "The phone has not finished reading the refund float's coins, or no float is set up.",
-        "Nothing was changed. Wait for the shop to catch up with the chain, then try once more.",
+        "This phone has not finished reading what the refund float holds, or no float is set up, so nothing was signed.",
+        "Wait until this phone has caught up with the latest blocks, then try again.",
         "FL-05",
     )
 }

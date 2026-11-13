@@ -4,39 +4,6 @@ package org.openbmt.owner.app
  * The owner app's own words on the float screens (`docs/FLOAT-RULES.md`).
  */
 object FloatWords {
-    private val registry = ArrayList<Pair<String, String>>()
-
-    /** A text not written yet: a `WORDS_NEEDED_OA_FLnn_...` placeholder that shows its own name. */
-    private fun need(name: String): String {
-        registry.add(name.removePrefix("WORDS_NEEDED_OA_") to name)
-        return name
-    }
-
-    // ---- not written yet ----
-    val needCapFirst = need("WORDS_NEEDED_OA_FL10_NEED_CAP_FIRST")
-    val scanFailed = need("WORDS_NEEDED_OA_FL01_SCAN_FAILED")
-    val sealFailed = need("WORDS_NEEDED_OA_FL03_SEAL_FAILED")
-    val unlockWhy = need("WORDS_NEEDED_OA_FL03_UNLOCK_WHY")
-    val setupDone = need("WORDS_NEEDED_OA_FL01_SETUP_DONE")
-    val statusNotWatched = need("WORDS_NEEDED_OA_FL10_STATUS_NOT_WATCHED")
-    val refillNoRoom = need("WORDS_NEEDED_OA_FL11_REFILL_NO_ROOM")
-    val refundListEmpty = need("WORDS_NEEDED_OA_FL20_REFUND_LIST_EMPTY")
-    val refundReadyHeading = need("WORDS_NEEDED_OA_FL20_REFUND_READY_HEADING")
-    val refundTooBig = need("WORDS_NEEDED_OA_FL23_REFUND_TOO_BIG")
-    val keyGone = need("WORDS_NEEDED_OA_FL03_KEY_GONE")
-    val payDone = need("WORDS_NEEDED_OA_FL20_PAY_DONE")
-    val sweepBefore = need("WORDS_NEEDED_OA_FL35_SWEEP_BEFORE")
-    val sweepNothing = need("WORDS_NEEDED_OA_FL35_NOTHING_TO_MOVE")
-    val sweepWaiting = need("WORDS_NEEDED_OA_FL35_WAITING")
-    val sweepDepthUnknown = need("WORDS_NEEDED_OA_FL35_DEPTH_UNKNOWN")
-    val sweepDeleted = need("WORDS_NEEDED_OA_FL35_DELETED")
-
-    /** The placeholders: key and name, in screen order. */
-    fun needed(): List<Pair<String, String>> = registry.toList()
-
-    fun isPlaceholder(text: String): Boolean = text.startsWith("WORDS_NEEDED_OA_FL")
-
-    // ---- written ----
     val rowTitle = "Refund float"
     val back = "Back"
     val setupTitle = "Set up the refund float"
@@ -45,7 +12,7 @@ object FloatWords {
     val storageUnavailable = "This phone could not open its record of the float. Restart the app. If it keeps failing, check the phone's free space."
     val childIndex = "The first time, make the float's words on the stick with number 0."
     val nextIndex = "After a lost or replaced phone, make the next number on the stick. The new phone first moves what is left in the old float."
-    val scanUnavailable = "The float is not set up. Scanning its words comes in a later version."
+    val scanUnavailable = "The float is not set up yet. Scan its words from the stick to finish."
     val capSaved = "Cap saved. No money was moved."
     val capLabel = "Most the float may hold, in sats"
     val capInvalid = "Type a whole number of sats above zero."
@@ -57,12 +24,31 @@ object FloatWords {
     val heldLabel = "The float holds"
     val refillLinksSavings = "A refill is a payment from the shop's savings to the float. Anyone who looks at the chain can see that the two belong together."
     val refundPay = "Pay a refund from the float"
-    val refundUnavailable = "Paying a refund from the float comes in a later version. Refunds in the queue can still be paid from savings."
     val payConfirm = "Pay this refund"
     val sweepTitle = "Turn the float off"
     val sweepConfirm = "Move it all to savings"
     val sweepConfirmationsUnknown = "Turning the float off moves all of it back to the shop's savings. That needs what the float holds, which is not known yet."
     val floatUnavailable = "The refund float is off."
+    val needCapFirst = "Save a cap for the float first. Then scan its words."
+    val scanFailed = "The float's words were not read, so nothing was kept. Scan the code on the stick again."
+    val sealFailed = "The float's key was not locked on this phone, so nothing was kept. Try again."
+    val unlockWhy = "Your fingerprint, face or phone PIN locks the float's key on this phone."
+    val statusNotWatched = "What the float holds shows once this phone has caught up with the latest blocks."
+    val refillNoRoom = "The float already holds its cap, so it needs no refill."
+    val refundListEmpty = "No refund is waiting to be paid."
+    val refundReadyHeading = "These refunds are ready. Tap one to pay it from the float."
+    val refundTooBig = "Some ready refunds are more than the float holds. Pay those from the shop's savings, or refill the float first."
+    val keyGone = "The float's key is no longer on this phone, so nothing can be paid from it. The money in the float is safe: the stick makes the float's words again from the shop's words."
+    val payDoneHeading = "Refund on its way"
+    val payDoneWhat = "The float paid this refund, and this phone is sending it to the customer's address."
+    val payDoneNext = "Nothing to do."
+    val sweepBefore = "Turning the float off moves all it holds back to the shop's savings in one payment. Then the float's key is deleted from this phone."
+    val sweepNothing = "The float is empty, so there is nothing to move."
+    val sweepWaiting = "The float's key can be deleted once a block holds the move to savings."
+    val sweepDepthUnknown = "This phone cannot tell yet whether the move to savings went out. Wait, or sign it again: it spends the same coins to the same address, so nothing is paid twice."
+    val sweepDeletedHeading = "Refund float off"
+    val sweepDeletedWhat = "All the float held is back in the shop's savings, and its key is gone from this phone."
+    val sweepDeletedNext = "Keep the stick and the shop's words as they are."
 
     /** Every text, in screen order. */
     fun all(): List<String> = listOf(
@@ -86,11 +72,30 @@ object FloatWords {
         heldLabel,
         refillLinksSavings,
         refundPay,
-        refundUnavailable,
         payConfirm,
         sweepTitle,
         sweepConfirm,
         sweepConfirmationsUnknown,
         floatUnavailable,
+        needCapFirst,
+        scanFailed,
+        sealFailed,
+        unlockWhy,
+        statusNotWatched,
+        refillNoRoom,
+        refundListEmpty,
+        refundReadyHeading,
+        refundTooBig,
+        keyGone,
+        payDoneHeading,
+        payDoneWhat,
+        payDoneNext,
+        sweepBefore,
+        sweepNothing,
+        sweepWaiting,
+        sweepDepthUnknown,
+        sweepDeletedHeading,
+        sweepDeletedWhat,
+        sweepDeletedNext,
     )
 }

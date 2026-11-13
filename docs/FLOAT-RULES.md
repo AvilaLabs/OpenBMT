@@ -38,7 +38,11 @@ funds.**
   presence (SS-21). The core opens the seed for one signing and then zeroes
   it. The words are never sent to a counter, a Box or anywhere else, and
   never shown again on the phone. The screen that scans them is protected
-  as SS-12 says.
+  as SS-12 says. When the phone drops the float's key, as it does when the
+  screen lock is removed, nothing can be paid from the float and the screen
+  says so. The money stays in the float, and the stick makes its words
+  again from the shop's words. Scanning them back onto the same phone is
+  not built yet.
 - **FL-04. A new float after a loss.** The index starts at 0. After a lost
   or replaced phone, the owner makes the next index on the stick, and the
   new phone first moves what is left in the old float to the new one
@@ -49,7 +53,8 @@ funds.**
   wallet as a wallet of its own, beside the pinned wallet and its former
   ones: its own coin view, kept in its own file, from the day the float was
   set up, over both chains up to 20 past the highest index used or handed
-  out. Its coins are in no total of the shop's wallet, never pay anything
+  out when the node starts. An index used after that is watched from the
+  next start. Its coins are in no total of the shop's wallet, never pay anything
   but a float payment, and are given to the float's calls as the checked
   view that FL-10, FL-11 and FL-20 need. No sale's facts come from it.
 
