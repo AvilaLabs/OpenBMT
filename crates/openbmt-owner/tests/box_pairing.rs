@@ -233,6 +233,7 @@ fn as_85_an_approved_claim_waits_in_the_outbox_with_a_welcome_the_box_accepts() 
     let c = Claim::from_bytes(&bytes[..101]).unwrap();
     let w = Welcome::from_bytes(&bytes[101..]).unwrap();
     let pinned = w.verify(&invitation(), &c.box_key, &c.nonce).unwrap();
+    let pinned = pinned.key_app().unwrap();
     assert_eq!(pinned.owner, owner_id());
     assert_eq!(pinned.approver, approver_id());
     // The claim and its entry left the queue.

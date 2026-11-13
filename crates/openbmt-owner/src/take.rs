@@ -291,7 +291,7 @@ impl Owner {
                     // AS-85: the welcome names this owner phone and the
                     // pinned Key app, and no other roots.
                     if welcome.owner != self.identity.device_id()
-                        || welcome.approver != self.roots.approver
+                        || welcome.approver != Some(self.roots.approver)
                     {
                         Err("AS-85: the welcome names other roots than this shop's".to_string())
                     } else {

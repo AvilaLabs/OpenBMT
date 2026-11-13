@@ -106,6 +106,7 @@ fn error_name(e: &BoxError) -> &'static str {
         BoxError::WelcomeMac => "BoxError::WelcomeMac",
         BoxError::BadSettings(_) => "BoxError::BadSettings",
         BoxError::Settings(_) => "BoxError::Settings",
+        BoxError::Confirmed(_) => "BoxError::Confirmed",
         BoxError::NotListed => "BoxError::NotListed",
         BoxError::TooManyMembers => "BoxError::TooManyMembers",
         BoxError::NotPaired => "BoxError::NotPaired",
@@ -298,6 +299,9 @@ fn sc_01_no_variant_is_missing() {
         BoxError::WelcomeMac,
         BoxError::BadSettings(DecodeError::Truncated),
         BoxError::Settings(SettingsError::ApproverRequired),
+        BoxError::Confirmed(openbmt_core::confirmed::ConfirmedError::Confirmation(
+            openbmt_core::approval::ConfirmError::NotACounter,
+        )),
         BoxError::NotListed,
         BoxError::TooManyMembers,
         BoxError::NotPaired,

@@ -15,6 +15,7 @@
 use std::io;
 
 use openbmt_core::boxpair::InviteTextError;
+use openbmt_core::confirmed::ConfirmedError;
 use openbmt_core::identity::DeviceId;
 use openbmt_core::say::{Quoted, Tone, Who, Words};
 use openbmt_core::settings::SettingsError;
@@ -339,6 +340,13 @@ impl BoxError {
             .code("BX-15")
             .detail(e.to_string()),
             Self::Settings(e) => settings_words(e),
+            // BX-18: no words of their own yet; the reasons are the same
+            // ones (a signature, a version, a rule, or a confirmation that
+            // is not a counter's of the settings in force).
+            Self::Confirmed(ConfirmedError::Settings(e)) => settings_words(e),
+            Self::Confirmed(e @ ConfirmedError::Confirmation(_)) => {
+                settings_break_a_rule().code("BX-18").detail(e.to_string())
+            }
             Self::NotListed => stop(
                 "Box not in the settings",
                 "The settings the owner sent do not list this Box as a Box, so pairing did not finish.".into(),
@@ -432,17 +440,25 @@ fn settings_words(e: &SettingsError) -> Words {
             Who::Owner,
             "Send the newest settings from the owner's phone.",
         ),
-        // A Box is paired with the Key app: a change that needs a counter's
-        // confirmation is not asked of it, and if one came it breaks a rule.
-        SettingsError::Invalid(_) | SettingsError::ConfirmationRequired(_) => stop(
-            "Settings break a rule",
-            "The new settings break one of the rules every settings must keep.".into(),
-            Who::Owner,
-            "Change the settings on the owner's phone and send them again.",
-        ),
+        // A Box paired with the Key app is not asked for a counter's
+        // confirmation, and if one came it breaks a rule. A Box of a shop
+        // with its own wallet (BX-18) gets these words until its own are
+        // written.
+        SettingsError::Invalid(_) | SettingsError::ConfirmationRequired(_) => {
+            settings_break_a_rule()
+        }
     }
     .code("BX-21")
     .detail(detail)
+}
+
+fn settings_break_a_rule() -> Words {
+    stop(
+        "Settings break a rule",
+        "The new settings break one of the rules every settings must keep.".into(),
+        Who::Owner,
+        "Change the settings on the owner's phone and send them again.",
+    )
 }
 
 /// What a person is told about POS settings that are not valid.
@@ -1900,7 +1916,9 @@ pub fn all_words() -> Vec<(String, Words)> {
             SettingsError::StaleVersion { current: 5, got: 3 },
         ),
         (
-            "SettingsError::Invalid",
+            // BX-18: a confirmation that is not a counter's of the settings
+            // in force has these words too.
+            "SettingsError::Invalid and BoxError::Confirmed",
             SettingsError::Invalid("a device is listed twice"),
         ),
     ];

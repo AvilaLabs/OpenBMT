@@ -1074,3 +1074,267 @@ fn bx_16_o13_01_any_other_welcome_or_settings_are_refused_by_a_paired_box() {
         Err(BoxError::AlreadyPaired)
     );
 }
+
+// ---- BX-18: a shop with its own wallet ----
+
+mod own_wallet {
+    use openbmt_core::approval::CounterConfirmation;
+    use openbmt_core::boxpair::{BoxRoots, Claim, Invitation, Welcome};
+    use openbmt_core::confirmed::ConfirmedSettings;
+    use openbmt_core::identity::{DeviceId, Identity};
+    use openbmt_core::settings::{Limit, Settings, SettingsError, SignedSettings};
+
+    use super::super::kit::*;
+    use super::{reopen, snapshot, BoxCore, BoxError, BoxStatus, ROOTS_FILE};
+    use crate::files::{BoxFiles, MemFiles};
+
+    fn own_welcome(inv: &Invitation, claim: &[u8]) -> Vec<u8> {
+        let claim = Claim::from_bytes(claim).unwrap();
+        Welcome::make_own(inv, &claim, owner().device_id()).to_bytes()
+    }
+
+    fn own_core() -> BoxCore<MemFiles> {
+        let mut core = fresh_core();
+        let inv = invitation(5);
+        enter(&mut core, &inv, 0x31);
+        let claim = core.claim(NOW + 1).unwrap();
+        let w = own_welcome(&inv, &claim);
+        let s = sign_owner(settings_with(1, &core.device_id())).to_bytes();
+        core.take_welcome(&w, &s, NOW + 2).unwrap();
+        core
+    }
+
+    fn confirmed(s: Settings, counter: &Identity) -> Vec<u8> {
+        let signed = sign_owner(s);
+        let c = CounterConfirmation::sign(counter, &signed.settings.hash());
+        ConfirmedSettings::new(signed, c).to_bytes()
+    }
+
+    fn raised(version: u32, me: &DeviceId) -> Settings {
+        let mut s = settings_with(version, me);
+        s.light_per_sale = Limit::from_usd(s.light_per_sale.display_usd + 5, 1_000);
+        s
+    }
+
+    #[test]
+    fn bx_18_the_first_settings_rest_on_the_owners_signature_alone() {
+        let mut core = own_core();
+        assert_eq!(
+            core.pinned(),
+            Some(BoxRoots::OwnWallet {
+                owner: owner().device_id()
+            })
+        );
+        assert_eq!(core.roots(), None);
+        assert_eq!(core.owner_root(), Some(owner().device_id()));
+        assert_eq!(core.status(NOW + 3), BoxStatus::Paired);
+        assert!(core.members().contains(&owner().device_id()));
+        // The kind is stored with the roots and read back at a start.
+        let again = reopen(core).unwrap();
+        assert_eq!(
+            again.pinned(),
+            Some(BoxRoots::OwnWallet {
+                owner: owner().device_id()
+            })
+        );
+    }
+
+    #[test]
+    fn bx_18_first_settings_with_a_key_app_signature_or_by_a_stranger_pair_nothing() {
+        let both = |me: &DeviceId| sign_both(settings_with(1, me));
+        let by_stranger = |me: &DeviceId| {
+            let s = settings_with(1, me);
+            SignedSettings {
+                owner_sig: s.sign(&stranger()),
+                approver_sig: None,
+                settings: s,
+            }
+        };
+        for make in [&both as &dyn Fn(&DeviceId) -> SignedSettings, &by_stranger] {
+            let mut core = fresh_core();
+            let inv = invitation(5);
+            enter(&mut core, &inv, 0x31);
+            let claim = core.claim(NOW + 1).unwrap();
+            let w = own_welcome(&inv, &claim);
+            let s = make(&core.device_id()).to_bytes();
+            assert!(matches!(
+                core.take_welcome(&w, &s, NOW + 2),
+                Err(BoxError::Settings(_))
+            ));
+            assert_eq!(core.status(NOW + 3), BoxStatus::Unpaired);
+            assert!(core.files().read(ROOTS_FILE).unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn bx_18_a_free_change_is_taken_with_the_owners_signature() {
+        let mut core = own_core();
+        let me = core.device_id();
+        let mut tight = settings_with(2, &me);
+        tight.tor_on = true;
+        let taken = core.take_settings(&sign_owner(tight).to_bytes()).unwrap();
+        assert!(!taken.turned_off);
+        assert_eq!(core.settings().unwrap().version, 2);
+        // What was stored reads back under the owner root alone.
+        let again = reopen(core).unwrap();
+        assert_eq!(again.settings().unwrap().version, 2);
+    }
+
+    #[test]
+    fn bx_18_a_loosen_change_is_refused_without_a_confirmation() {
+        let mut core = own_core();
+        let me = core.device_id();
+        let before = snapshot(&core);
+        let r = core.take_settings(&sign_owner(raised(2, &me)).to_bytes());
+        assert!(matches!(
+            r,
+            Err(BoxError::Settings(SettingsError::ConfirmationRequired(_)))
+        ));
+        assert_eq!(snapshot(&core), before);
+        assert_eq!(core.settings().unwrap().version, 1);
+    }
+
+    #[test]
+    fn bx_18_a_loosen_change_is_taken_with_a_counters_confirmation() {
+        let mut core = own_core();
+        let me = core.device_id();
+        core.take_settings(&confirmed(raised(2, &me), &counter1()))
+            .unwrap();
+        assert_eq!(core.settings().unwrap().version, 2);
+        let again = reopen(core).unwrap();
+        assert_eq!(again.settings().unwrap().version, 2);
+    }
+
+    #[test]
+    fn bx_18_a_confirmation_that_is_not_a_counters_of_the_settings_in_force_is_refused() {
+        let mut core = own_core();
+        let me = core.device_id();
+        let before = snapshot(&core);
+        // A stranger, the owner root, the Box itself and a counter that is
+        // only in the new settings (AP-05) all fail.
+        let mut with_new = raised(2, &me);
+        with_new.devices.insert(id(40).device_id());
+        with_new.counters.insert(id(40).device_id(), 100);
+        for bytes in [
+            confirmed(raised(2, &me), &stranger()),
+            confirmed(raised(2, &me), &owner()),
+            confirmed(raised(2, &me), &the_box()),
+            confirmed(with_new, &id(40)),
+        ] {
+            assert!(matches!(
+                core.take_settings(&bytes),
+                Err(BoxError::Confirmed(_))
+            ));
+            assert_eq!(snapshot(&core), before);
+        }
+        // A confirmation for other settings does not carry over.
+        let other = raised(2, &me);
+        let mut different = raised(2, &me);
+        different.light_per_sale = Limit::from_usd(different.light_per_sale.display_usd + 1, 1_000);
+        let c = CounterConfirmation::sign(&counter1(), &other.hash());
+        let swapped = ConfirmedSettings::new(sign_owner(different), c).to_bytes();
+        assert!(matches!(
+            core.take_settings(&swapped),
+            Err(BoxError::Confirmed(_))
+        ));
+        assert_eq!(snapshot(&core), before);
+    }
+
+    #[test]
+    fn bx_18_a_redirect_change_is_refused_even_with_a_confirmation() {
+        let mut core = own_core();
+        let me = core.device_id();
+        let before = snapshot(&core);
+        let mut redirect = settings_with(2, &me);
+        redirect.lightning_node = Some([2u8; 33]);
+        assert!(core
+            .take_settings(&sign_owner(redirect.clone()).to_bytes())
+            .is_err());
+        assert!(core
+            .take_settings(&confirmed(redirect, &counter1()))
+            .is_err());
+        assert_eq!(snapshot(&core), before);
+    }
+
+    #[test]
+    fn bx_18_a_welcome_of_the_other_kind_is_refused_by_a_paired_box() {
+        // Paired as an own wallet, offered a Key app's welcome, and the
+        // reverse.
+        let mut own = own_core();
+        let inv = invitation(5);
+        let claim = Claim::make(&inv, own.device_id(), [0x31; 32]);
+        let key_app = Welcome::make(&inv, &claim, roots()).to_bytes();
+        let s = sign_both(settings_with(1, &own.device_id())).to_bytes();
+        let before = snapshot(&own);
+        assert_eq!(
+            own.take_welcome(&key_app, &s, NOW + 3),
+            Err(BoxError::AlreadyPaired)
+        );
+        assert_eq!(snapshot(&own), before);
+
+        let (mut key, inv) = paired_core();
+        let claim = Claim::make(&inv, key.device_id(), [0x31; 32]);
+        let own_w = Welcome::make_own(&inv, &claim, owner().device_id()).to_bytes();
+        let s = sign_owner(settings_with(1, &key.device_id())).to_bytes();
+        let before = snapshot(&key);
+        assert_eq!(
+            key.take_welcome(&own_w, &s, NOW + 3),
+            Err(BoxError::AlreadyPaired)
+        );
+        assert_eq!(snapshot(&key), before);
+        assert_eq!(key.pinned(), Some(BoxRoots::KeyApp(roots())));
+    }
+
+    #[test]
+    fn bx_18_the_welcome_it_was_paired_with_is_answered_again() {
+        let mut core = fresh_core();
+        let inv = invitation(5);
+        enter(&mut core, &inv, 0x31);
+        let claim = core.claim(NOW + 1).unwrap();
+        let w = own_welcome(&inv, &claim);
+        let s = sign_owner(settings_with(1, &core.device_id())).to_bytes();
+        core.take_welcome(&w, &s, NOW + 2).unwrap();
+        assert_eq!(core.take_welcome(&w, &s, NOW + 3), Ok(()));
+    }
+
+    #[test]
+    fn bx_18_a_key_app_box_takes_no_confirmation_frame_in_place_of_the_two_roots() {
+        let (mut core, _) = paired_core();
+        let me = core.device_id();
+        let before = snapshot(&core);
+        assert!(core
+            .take_settings(&confirmed(raised(2, &me), &counter1()))
+            .is_err());
+        assert_eq!(snapshot(&core), before);
+    }
+
+    #[test]
+    fn bx_18_the_kind_in_the_roots_file_is_read_strictly() {
+        let core = own_core();
+        let mut files = core.into_files();
+        let good = files.read(ROOTS_FILE).unwrap().unwrap();
+        assert_eq!(&good[..6], b"OBMh\x02\x01");
+        for (at, value) in [(5usize, 0u8), (5, 2), (4, 3)] {
+            let mut bad = good.clone();
+            bad[at] = value;
+            files.write(ROOTS_FILE, &bad).unwrap();
+            assert!(reopen_files(files_clone(&files)).is_err(), "{at} {value}");
+        }
+        let mut long = good.clone();
+        long.push(0);
+        files.write(ROOTS_FILE, &long).unwrap();
+        assert!(reopen_files(files_clone(&files)).is_err());
+        let mut cut = good;
+        cut.pop();
+        files.write(ROOTS_FILE, &cut).unwrap();
+        assert!(reopen_files(files_clone(&files)).is_err());
+    }
+
+    fn files_clone(files: &MemFiles) -> MemFiles {
+        files.clone()
+    }
+
+    fn reopen_files(files: MemFiles) -> Result<BoxCore<MemFiles>, BoxError> {
+        BoxCore::open(files, &mut fixed_random)
+    }
+}

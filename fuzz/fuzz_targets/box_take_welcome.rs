@@ -27,6 +27,10 @@ fn fixed_random(buf: &mut [u8; 32]) -> io::Result<()> {
 struct Fixture {
     welcome: Vec<u8>,
     settings: Vec<u8>,
+    /// BX-18: the welcome of a shop with its own wallet and settings signed
+    /// by the owner root alone.
+    own_welcome: Vec<u8>,
+    own_settings: Vec<u8>,
 }
 
 fn invitation() -> Invitation {
@@ -60,13 +64,25 @@ fn fixture() -> &'static Fixture {
             .collect();
         s.counters = counters.into_iter().map(|c| (c, 2_500u16)).collect();
         s.boxes = [core.device_id()].into_iter().collect();
+        let own_welcome = Welcome::make_own(&invitation(), &claim, id(1).device_id()).to_bytes();
+        let own_settings = SignedSettings {
+            owner_sig: s.sign(&id(1)),
+            approver_sig: None,
+            settings: s.clone(),
+        }
+        .to_bytes();
         let settings = SignedSettings {
             owner_sig: s.sign(&id(1)),
             approver_sig: Some(s.sign(&id(2))),
             settings: s,
         }
         .to_bytes();
-        Fixture { welcome, settings }
+        Fixture {
+            welcome,
+            settings,
+            own_welcome,
+            own_settings,
+        }
     })
 }
 
@@ -78,10 +94,17 @@ fuzz_target!(|data: &[u8]| {
     // The rest is cut in two at a place the first byte gives: the welcome
     // and the settings. Bit 0 swaps the welcome for the valid one and bit 1
     // the settings, so that each is tried with the other right.
-    let cut = usize::from(mode >> 2).min(rest.len());
+    // Bit 7 takes the valid pair of a shop with its own wallet instead.
+    let cut = usize::from((mode >> 2) & 0x1f).min(rest.len());
     let (w, s) = rest.split_at(cut);
-    let welcome: &[u8] = if mode & 1 == 1 { &f.welcome } else { w };
-    let settings: &[u8] = if mode & 2 == 2 { &f.settings } else { s };
+    let own = mode & 0x80 != 0;
+    let (good_welcome, good_settings) = if own {
+        (&f.own_welcome, &f.own_settings)
+    } else {
+        (&f.welcome, &f.settings)
+    };
+    let welcome: &[u8] = if mode & 1 == 1 { good_welcome } else { w };
+    let settings: &[u8] = if mode & 2 == 2 { good_settings } else { s };
     let (mut core, _) = waiting_core();
     let taken = core.take_welcome(welcome, settings, NOW + 2);
     if taken.is_ok() {

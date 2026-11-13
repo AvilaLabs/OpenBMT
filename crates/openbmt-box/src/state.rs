@@ -12,7 +12,7 @@
 //! |---|---|
 //! | `box.key` | `OBMf`, 1, the 32 secret bytes of the Box's identity |
 //! | `invitation` | `OBMg`, 1, the invitation (17), its nonce (32), the time it was entered (8, LE) |
-//! | `roots` | `OBMh`, 1, owner root (32), approver root (32) |
+//! | `roots` | `OBMh`, 1, owner root (32), approver root (32); or `OBMh`, 2, kind 1, owner root (32) for a shop with its own wallet (BX-18) |
 //! | `settings` | the signed settings in force (`OBMS`) |
 //! | `paired-with` | `OBM~`, 1, the welcome and the first settings the Box was paired with, each as a length (4, LE) and its bytes (BX-16) |
 //! | `link-inbox`, `link-outbox` | the message numbers (LK-40) |
@@ -27,7 +27,10 @@ use std::fmt;
 use std::io;
 
 use openbmt_core::batch::PinnedRoots;
-use openbmt_core::boxpair::{Claim, Invitation, InviteTextError, Welcome};
+use openbmt_core::boxpair::{
+    BoxRoots, Claim, Invitation, InviteTextError, Welcome, WELCOME_KIND_OWN_WALLET,
+};
+use openbmt_core::confirmed::{ConfirmedError, ConfirmedSettings};
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::settings::{DeviceRole, Settings, SettingsError, SignedSettings};
 use openbmt_core::wire::{self, DecodeError, Reader};
@@ -126,6 +129,9 @@ pub enum BoxError {
     /// The settings do not check under the pinned roots, or do not replace
     /// the ones in force (BX-15, BX-21).
     Settings(SettingsError),
+    /// Settings of a shop with its own wallet joined to a counter's
+    /// confirmation do not check (BX-18, CR-242).
+    Confirmed(ConfirmedError),
     /// The first settings do not list this Box as a Box (BX-15).
     NotListed,
     /// The device list and the owner come to more members than the relay
@@ -169,6 +175,7 @@ impl fmt::Display for BoxError {
             ),
             Self::BadSettings(e) => write!(f, "BX-15: the settings are not valid: {e}"),
             Self::Settings(e) => write!(f, "BX-21: the settings are refused: {e}"),
+            Self::Confirmed(e) => write!(f, "BX-18: the settings are refused: {e}"),
             Self::NotListed => write!(f, "BX-15: the settings do not list this Box as a Box"),
             Self::TooManyMembers => write!(
                 f,
@@ -225,7 +232,7 @@ struct OpenInvitation {
 }
 
 struct Pairing {
-    roots: PinnedRoots,
+    roots: BoxRoots,
     signed: SignedSettings,
     /// BX-16: the welcome and the first settings, as they arrived, when the
     /// Box has them.
@@ -252,7 +259,13 @@ impl<F: BoxFiles> fmt::Debug for BoxCore<F> {
 /// and may be a tightening that only the owner signed, so they are checked
 /// as the change from themselves at the version before: the signatures and
 /// `validate`, and nothing that needs the earlier settings.
-fn check_stored(signed: &SignedSettings, roots: &PinnedRoots) -> Result<(), SettingsError> {
+fn check_stored(signed: &SignedSettings, roots: &BoxRoots) -> Result<(), SettingsError> {
+    // BX-18: under the owner root alone a change was classified when it was
+    // taken; what is kept needs its signature and its values.
+    let roots = match roots {
+        BoxRoots::KeyApp(roots) => roots,
+        BoxRoots::OwnWallet { .. } => return signed.verify_signatures_with(&roots.authority()),
+    };
     let mut basis = signed.settings.clone();
     basis.version = basis.version.saturating_sub(1);
     signed.verify(roots, Some(&basis)).map(|_| ())
@@ -290,13 +303,45 @@ fn read_key(bytes: &[u8]) -> Result<[u8; 32], DecodeError> {
     Ok(secret)
 }
 
-fn read_roots(bytes: &[u8]) -> Result<PinnedRoots, BoxError> {
+fn read_roots(bytes: &[u8]) -> Result<BoxRoots, BoxError> {
     let bad = |_| damaged(ROOTS_FILE, "not the two roots");
-    let mut r = Reader::framed(bytes, &MAGIC_ROOTS).map_err(bad)?;
+    let (mut r, version) = Reader::framed_up_to(bytes, &MAGIC_ROOTS, 2).map_err(bad)?;
+    if version == 2 {
+        // BX-18: the kind is pinned with the roots; 1 is the own wallet.
+        if r.u8().map_err(bad)? != WELCOME_KIND_OWN_WALLET {
+            return Err(damaged(ROOTS_FILE, "not a kind of shop"));
+        }
+        let owner = r.device_id().map_err(bad)?;
+        r.finish().map_err(bad)?;
+        return Ok(BoxRoots::OwnWallet { owner });
+    }
     let owner = r.device_id().map_err(bad)?;
     let approver = r.device_id().map_err(bad)?;
     r.finish().map_err(bad)?;
-    PinnedRoots::new(owner, approver).map_err(|_| damaged(ROOTS_FILE, "two roots that are one key"))
+    PinnedRoots::new(owner, approver)
+        .map(BoxRoots::KeyApp)
+        .map_err(|_| damaged(ROOTS_FILE, "two roots that are one key"))
+}
+
+/// The `roots` file for `roots` (BX-16, BX-18): version 1 for a Key app's
+/// shop, as it always was, and version 2 with the kind for an own wallet's.
+fn roots_bytes(roots: &BoxRoots) -> Vec<u8> {
+    match roots {
+        BoxRoots::KeyApp(roots) => {
+            let mut out = wire::start(&MAGIC_ROOTS, 64);
+            out.extend_from_slice(&roots.owner.to_bytes());
+            out.extend_from_slice(&roots.approver.to_bytes());
+            out
+        }
+        BoxRoots::OwnWallet { owner } => {
+            let mut out = Vec::with_capacity(38);
+            out.extend_from_slice(&MAGIC_ROOTS);
+            out.push(2);
+            out.push(WELCOME_KIND_OWN_WALLET);
+            out.extend_from_slice(&owner.to_bytes());
+            out
+        }
+    }
 }
 
 /// The welcome and settings in `paired-with`; a file that does not read is
@@ -440,9 +485,21 @@ impl<F: BoxFiles> BoxCore<F> {
         self.files
     }
 
-    /// The pinned roots, once paired (BX-16).
+    /// The pinned roots of a shop with a Key app, once paired (BX-16). A
+    /// shop with its own wallet pins only the owner root: see
+    /// [`BoxCore::pinned`].
     pub fn roots(&self) -> Option<PinnedRoots> {
+        self.pairing.as_ref().and_then(|p| p.roots.key_app())
+    }
+
+    /// What is pinned, with its kind, once paired (BX-16, BX-18).
+    pub fn pinned(&self) -> Option<BoxRoots> {
         self.pairing.as_ref().map(|p| p.roots)
+    }
+
+    /// The owner root, once paired, of either kind of shop.
+    pub fn owner_root(&self) -> Option<DeviceId> {
+        self.pairing.as_ref().map(|p| *p.roots.owner())
     }
 
     /// The settings in force, once paired.
@@ -576,11 +633,15 @@ impl<F: BoxFiles> BoxCore<F> {
             .remove(INVITATION_FILE)
             .map_err(io_err(INVITATION_FILE, "remove"))?;
         let signed = SignedSettings::from_bytes(settings).map_err(BoxError::BadSettings)?;
-        signed.verify(&roots, None).map_err(BoxError::Settings)?;
+        // BX-18: first settings rest on the owner's signature alone for a
+        // shop with its own wallet, as BX-17 says.
+        signed
+            .verify_with(&roots.authority(), None)
+            .map_err(BoxError::Settings)?;
         if !signed.settings.boxes.contains(&self.id) {
             return Err(BoxError::NotListed);
         }
-        if member_list(&signed.settings, &roots.owner).len() > MAX_MEMBERS {
+        if member_list(&signed.settings, roots.owner()).len() > MAX_MEMBERS {
             return Err(BoxError::TooManyMembers);
         }
         // The roots go last: they are what makes the Box paired, so a stop
@@ -603,11 +664,8 @@ impl<F: BoxFiles> BoxCore<F> {
         self.files
             .write(PAIRED_WITH_FILE, &first)
             .map_err(io_err(PAIRED_WITH_FILE, "write"))?;
-        let mut out = wire::start(&MAGIC_ROOTS, 64);
-        out.extend_from_slice(&roots.owner.to_bytes());
-        out.extend_from_slice(&roots.approver.to_bytes());
         self.files
-            .write(ROOTS_FILE, &out)
+            .write(ROOTS_FILE, &roots_bytes(&roots))
             .map_err(io_err(ROOTS_FILE, "write"))?;
         self.pairing = Some(Pairing {
             roots,
@@ -623,12 +681,39 @@ impl<F: BoxFiles> BoxCore<F> {
     /// it off and erase its POS token (BX-23).
     pub fn take_settings(&mut self, settings: &[u8]) -> Result<SettingsTaken, BoxError> {
         let pairing = self.pairing.as_ref().ok_or(BoxError::NotPaired)?;
-        let signed = SignedSettings::from_bytes(settings).map_err(BoxError::BadSettings)?;
-        signed
-            .verify(&pairing.roots, Some(&pairing.signed.settings))
-            .map_err(BoxError::Settings)?;
+        let current = &pairing.signed.settings;
+        let signed = match &pairing.roots {
+            BoxRoots::KeyApp(roots) => {
+                let signed = SignedSettings::from_bytes(settings).map_err(BoxError::BadSettings)?;
+                signed
+                    .verify(roots, Some(current))
+                    .map_err(BoxError::Settings)?;
+                signed
+            }
+            // BX-18: the owner root alone, as a counter checks (CR-236):
+            // a Free change is taken with the owner's signature, a Loosen
+            // change only inside a counter's confirmation (CR-242, AP-04,
+            // AP-05), a Redirect change never.
+            BoxRoots::OwnWallet { owner } => match ConfirmedSettings::from_bytes(settings) {
+                Ok(confirmed) => {
+                    confirmed
+                        .verify(owner, current)
+                        .map_err(BoxError::Confirmed)?;
+                    confirmed.signed
+                }
+                Err(DecodeError::BadMagic) => {
+                    let signed =
+                        SignedSettings::from_bytes(settings).map_err(BoxError::BadSettings)?;
+                    signed
+                        .verify_with(&pairing.roots.authority(), Some(current))
+                        .map_err(BoxError::Settings)?;
+                    signed
+                }
+                Err(e) => return Err(BoxError::BadSettings(e)),
+            },
+        };
         let listed = signed.settings.boxes.contains(&self.id);
-        if listed && member_list(&signed.settings, &pairing.roots.owner).len() > MAX_MEMBERS {
+        if listed && member_list(&signed.settings, pairing.roots.owner()).len() > MAX_MEMBERS {
             return Err(BoxError::TooManyMembers);
         }
         self.files
@@ -701,7 +786,7 @@ impl<F: BoxFiles> BoxCore<F> {
     /// (BX-03) and when it is turned off (BX-23).
     pub fn members(&self) -> Vec<DeviceId> {
         match &self.pairing {
-            Some(p) if !self.turned_off() => member_list(&p.signed.settings, &p.roots.owner),
+            Some(p) if !self.turned_off() => member_list(&p.signed.settings, p.roots.owner()),
             _ => Vec::new(),
         }
     }
@@ -712,7 +797,7 @@ impl<F: BoxFiles> BoxCore<F> {
         if self.turned_off() {
             return None;
         }
-        p.signed.settings.role_of(&p.roots.owner, key)
+        p.signed.settings.role_of(p.roots.owner(), key)
     }
 
     /// Every device the Box talks to, with its role (BX-24), without the

@@ -305,7 +305,7 @@ impl PageBackend for PageHandles {
         let (status, shop, devices) = {
             let mut core = lock(&self.core);
             let status = core.status(self.clock.now());
-            let shop = core.roots().map(|r| r.owner.fingerprint_words());
+            let shop = core.owner_root().map(|o| o.fingerprint_words());
             (status, shop, core.members().len())
         };
         // Only the words of the last note: its detail may carry text from
@@ -647,7 +647,7 @@ impl Worker {
             (
                 core.roles(),
                 core.read_pos_token().map_err(|e| e.to_string()),
-                core.roots().map(|r| r.owner),
+                core.owner_root(),
                 // A Box that cannot tell goes through Tor (BX-47).
                 core.settings().is_none_or(|s| s.tor_on),
             )

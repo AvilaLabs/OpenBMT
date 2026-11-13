@@ -315,13 +315,63 @@ impl Claim {
     }
 }
 
-/// What the Key app sends a Box once the owner approved its claim (BX-15).
+/// The kind byte of a welcome of version 2 for a shop with its own wallet
+/// (BX-18). A welcome of version 1 has no kind byte and is a Key app's.
+pub const WELCOME_KIND_OWN_WALLET: u8 = 1;
+/// Length of a welcome of version 2 (BX-18) in bytes.
+pub const WELCOME_OWN_LEN: usize = 4 + 1 + 1 + 32 + 32;
+/// The latest version of the welcome frame.
+const WELCOME_LATEST: u8 = 2;
+
+/// What a Box pins at pairing (BX-16, BX-18): the two roots of a shop with a
+/// Key app, or the owner root alone of a shop with its own wallet. The kind
+/// is pinned with the roots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoxRoots {
+    /// The owner and Key app roots (BX-15).
+    KeyApp(PinnedRoots),
+    /// The owner root alone (BX-18).
+    OwnWallet {
+        /// The owner root.
+        owner: DeviceId,
+    },
+}
+
+impl BoxRoots {
+    /// The owner root.
+    pub fn owner(&self) -> &DeviceId {
+        match self {
+            Self::KeyApp(roots) => &roots.owner,
+            Self::OwnWallet { owner } => owner,
+        }
+    }
+
+    /// Who may sign settings for this shop: the two roots, or the owner
+    /// root alone with CR-236's classes (BX-18).
+    pub fn authority(&self) -> crate::settings::Authority {
+        match self {
+            Self::KeyApp(roots) => crate::settings::Authority::KeyApp(*roots),
+            Self::OwnWallet { owner } => crate::settings::Authority::OwnWallet { owner: *owner },
+        }
+    }
+
+    /// The two roots, for a shop with a Key app.
+    pub fn key_app(&self) -> Option<PinnedRoots> {
+        match self {
+            Self::KeyApp(roots) => Some(*roots),
+            Self::OwnWallet { .. } => None,
+        }
+    }
+}
+
+/// What the Key app sends a Box once the owner approved its claim (BX-15),
+/// or what the owner phone sends for a shop with its own wallet (BX-18).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Welcome {
     /// The owner phone's root.
     pub owner: DeviceId,
-    /// The Key app's root.
-    pub approver: DeviceId,
+    /// The Key app's root. `None` for a shop with its own wallet (BX-18).
+    pub approver: Option<DeviceId>,
     /// HMAC-SHA256 under the welcome key, which also covers the Box's key
     /// and nonce.
     pub mac: [u8; 32],
@@ -333,19 +383,34 @@ impl Welcome {
         box_key: &DeviceId,
         nonce: &[u8; 32],
         owner: &DeviceId,
-        approver: &DeviceId,
+        approver: Option<&DeviceId>,
     ) -> [u8; 32] {
-        mac(
-            &invitation.welcome_key(),
-            &[
-                &wire::MAGIC_BOX_WELCOME,
-                &[wire::VERSION],
-                &box_key.to_bytes(),
-                nonce,
-                &owner.to_bytes(),
-                &approver.to_bytes(),
-            ],
-        )
+        let box_key = box_key.to_bytes();
+        let owner = owner.to_bytes();
+        match approver {
+            Some(approver) => mac(
+                &invitation.welcome_key(),
+                &[
+                    &wire::MAGIC_BOX_WELCOME,
+                    &[wire::VERSION],
+                    &box_key,
+                    nonce,
+                    &owner,
+                    &approver.to_bytes(),
+                ],
+            ),
+            None => mac(
+                &invitation.welcome_key(),
+                &[
+                    &wire::MAGIC_BOX_WELCOME,
+                    &[WELCOME_LATEST],
+                    &[WELCOME_KIND_OWN_WALLET],
+                    &box_key,
+                    nonce,
+                    &owner,
+                ],
+            ),
+        }
     }
 
     /// The welcome for the Box that made `claim`, naming `roots`.
@@ -356,28 +421,63 @@ impl Welcome {
                 &claim.box_key,
                 &claim.nonce,
                 &roots.owner,
-                &roots.approver,
+                Some(&roots.approver),
             ),
             owner: roots.owner,
-            approver: roots.approver,
+            approver: Some(roots.approver),
         }
     }
 
-    /// `OBMM`, version 1, owner root, approver root, MAC. The Box's key and
-    /// nonce are in the MAC and not in the frame.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = wire::start(&wire::MAGIC_BOX_WELCOME, 96);
-        out.extend_from_slice(&self.owner.to_bytes());
-        out.extend_from_slice(&self.approver.to_bytes());
-        out.extend_from_slice(&self.mac);
-        out
+    /// The welcome of a shop with its own wallet for the Box that made
+    /// `claim` (BX-18): it names the owner root and marks the kind.
+    pub fn make_own(invitation: &Invitation, claim: &Claim, owner: DeviceId) -> Self {
+        Self {
+            mac: Self::mac_of(invitation, &claim.box_key, &claim.nonce, &owner, None),
+            owner,
+            approver: None,
+        }
     }
 
-    /// Read a welcome strictly. This does not check the MAC.
+    /// A shop with a Key app: `OBMM`, version 1, owner root, approver root,
+    /// MAC, byte for byte as before. A shop with its own wallet (BX-18):
+    /// `OBMM`, version 2, kind 1, owner root, MAC. The Box's key and nonce
+    /// are in the MAC and not in the frame.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match &self.approver {
+            Some(approver) => {
+                let mut out = wire::start(&wire::MAGIC_BOX_WELCOME, 96);
+                out.extend_from_slice(&self.owner.to_bytes());
+                out.extend_from_slice(&approver.to_bytes());
+                out.extend_from_slice(&self.mac);
+                out
+            }
+            None => {
+                let mut out = Vec::with_capacity(WELCOME_OWN_LEN);
+                out.extend_from_slice(&wire::MAGIC_BOX_WELCOME);
+                out.push(WELCOME_LATEST);
+                out.push(WELCOME_KIND_OWN_WALLET);
+                out.extend_from_slice(&self.owner.to_bytes());
+                out.extend_from_slice(&self.mac);
+                out
+            }
+        }
+    }
+
+    /// Read a welcome strictly. Version 1 reads as a Key app's; version 2
+    /// has a kind byte, and the only kind is 1, an own wallet's. This does
+    /// not check the MAC.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut r = Reader::framed(bytes, &wire::MAGIC_BOX_WELCOME)?;
-        let owner = r.device_id()?;
-        let approver = r.device_id()?;
+        let (mut r, version) =
+            Reader::framed_up_to(bytes, &wire::MAGIC_BOX_WELCOME, WELCOME_LATEST)?;
+        let (owner, approver) = if version == 1 {
+            let owner = r.device_id()?;
+            (owner, Some(r.device_id()?))
+        } else {
+            if r.u8()? != WELCOME_KIND_OWN_WALLET {
+                return Err(DecodeError::NonCanonical("BX-18: the kind is not defined"));
+            }
+            (r.device_id()?, None)
+        };
         let mac = r.array()?;
         r.finish()?;
         Ok(Self {
@@ -388,19 +488,31 @@ impl Welcome {
     }
 
     /// The roots to pin, if the MAC is the one for `invitation`, this Box
-    /// key and this Box nonce (BX-15), compared in constant time, and the
-    /// two roots are different keys.
+    /// key and this Box nonce (BX-15), compared in constant time, and, for a
+    /// Key app's welcome, the two roots are different keys. A welcome of
+    /// version 2 pins the owner root and the own-wallet kind (BX-18).
     pub fn verify(
         &self,
         invitation: &Invitation,
         box_key: &DeviceId,
         nonce: &[u8; 32],
-    ) -> Option<PinnedRoots> {
-        let expected = Self::mac_of(invitation, box_key, nonce, &self.owner, &self.approver);
+    ) -> Option<BoxRoots> {
+        let expected = Self::mac_of(
+            invitation,
+            box_key,
+            nonce,
+            &self.owner,
+            self.approver.as_ref(),
+        );
         if !fixed_time_eq(&expected, &self.mac) {
             return None;
         }
-        PinnedRoots::new(self.owner, self.approver).ok()
+        match self.approver {
+            Some(approver) => PinnedRoots::new(self.owner, approver)
+                .ok()
+                .map(BoxRoots::KeyApp),
+            None => Some(BoxRoots::OwnWallet { owner: self.owner }),
+        }
     }
 }
 
@@ -727,7 +839,10 @@ mod tests {
         assert_eq!(&bytes[..5], b"OBMM\x01");
         let back = Welcome::from_bytes(&bytes).unwrap();
         assert_eq!(back, w);
-        assert_eq!(back.verify(&i, &c.box_key, &c.nonce), Some(roots()));
+        assert_eq!(
+            back.verify(&i, &c.box_key, &c.nonce),
+            Some(BoxRoots::KeyApp(roots()))
+        );
     }
 
     #[test]
@@ -756,8 +871,8 @@ mod tests {
         let c = Claim::make(&i, box_key(), [3u8; 32]);
         let w = Welcome::make(&i, &c, roots());
         let swapped = Welcome {
-            owner: w.approver,
-            approver: w.owner,
+            owner: w.approver.unwrap(),
+            approver: Some(w.owner),
             ..w
         };
         assert_eq!(swapped.verify(&i, &c.box_key, &c.nonce), None);
@@ -775,8 +890,8 @@ mod tests {
         let k = identity(1).device_id();
         let w = Welcome {
             owner: k,
-            approver: k,
-            mac: Welcome::mac_of(&i, &c.box_key, &c.nonce, &k, &k),
+            approver: Some(k),
+            mac: Welcome::mac_of(&i, &c.box_key, &c.nonce, &k, Some(&k)),
         };
         assert_eq!(w.verify(&i, &c.box_key, &c.nonce), None);
     }
@@ -818,6 +933,105 @@ mod tests {
         let c = Claim::make(&i, box_key(), [0x42; 32]);
         let w = Welcome::make(&i, &c, roots());
         assert_eq!(hex(&w.to_bytes()), VECTOR_WELCOME);
+    }
+
+    // ---- BX-18: a shop with its own wallet ----
+
+    fn own_owner() -> DeviceId {
+        identity(1).device_id()
+    }
+
+    #[test]
+    fn bx_18_an_own_wallet_welcome_names_the_owner_and_the_kind() {
+        let i = sample();
+        let c = Claim::make(&i, box_key(), [3u8; 32]);
+        let w = Welcome::make_own(&i, &c, own_owner());
+        let bytes = w.to_bytes();
+        assert_eq!(bytes.len(), WELCOME_OWN_LEN);
+        assert_eq!(&bytes[..6], b"OBMM\x02\x01");
+        assert_eq!(&bytes[6..38], &own_owner().to_bytes());
+        assert_eq!(Welcome::from_bytes(&bytes), Ok(w));
+        assert_eq!(
+            w.verify(&i, &c.box_key, &c.nonce),
+            Some(BoxRoots::OwnWallet { owner: own_owner() })
+        );
+    }
+
+    #[test]
+    fn bx_18_version_1_reads_as_a_key_app_welcome() {
+        let i = sample();
+        let c = Claim::make(&i, box_key(), [3u8; 32]);
+        let bytes = Welcome::make(&i, &c, roots()).to_bytes();
+        assert_eq!(bytes.len(), WELCOME_LEN);
+        assert_eq!(bytes[4], 1);
+        let w = Welcome::from_bytes(&bytes).unwrap();
+        assert_eq!(w.approver, Some(roots().approver));
+        assert_eq!(
+            w.verify(&i, &c.box_key, &c.nonce),
+            Some(BoxRoots::KeyApp(roots()))
+        );
+    }
+
+    #[test]
+    fn bx_18_the_kind_is_in_the_mac_and_never_changes() {
+        let i = sample();
+        let c = Claim::make(&i, box_key(), [3u8; 32]);
+        let own = Welcome::make_own(&i, &c, own_owner());
+        // The MAC of an own-wallet welcome does not pass as a Key app's,
+        // whatever second root is put in, and the reverse.
+        let as_key_app = Welcome {
+            approver: Some(identity(2).device_id()),
+            ..own
+        };
+        assert_eq!(as_key_app.verify(&i, &c.box_key, &c.nonce), None);
+        let key_app = Welcome::make(&i, &c, roots());
+        let as_own = Welcome {
+            approver: None,
+            ..key_app
+        };
+        assert_eq!(as_own.verify(&i, &c.box_key, &c.nonce), None);
+        // Another invitation, Box key or nonce fails as for version 1.
+        assert_eq!(own.verify(&other(), &c.box_key, &c.nonce), None);
+        assert_eq!(own.verify(&i, &identity(8).device_id(), &c.nonce), None);
+        assert_eq!(own.verify(&i, &c.box_key, &[4u8; 32]), None);
+    }
+
+    #[test]
+    fn bx_18_own_welcome_decoding_is_strict() {
+        let i = sample();
+        let c = Claim::make(&i, box_key(), [3u8; 32]);
+        let good = Welcome::make_own(&i, &c, own_owner()).to_bytes();
+        crate::testutil::assert_strict_decoding(&good, Welcome::from_bytes, Welcome::to_bytes);
+        // A kind that is not defined, a version that is not defined.
+        for kind in [0u8, 2, 255] {
+            let mut b = good.clone();
+            b[5] = kind;
+            assert!(Welcome::from_bytes(&b).is_err(), "kind {kind}");
+        }
+        let mut v3 = good.clone();
+        v3[4] = 3;
+        assert_eq!(
+            Welcome::from_bytes(&v3),
+            Err(DecodeError::UnsupportedVersion(3))
+        );
+        // A version 2 frame the length of a version 1 frame is no welcome.
+        let mut long = good.clone();
+        long.extend_from_slice(&[0u8; 32]);
+        assert!(Welcome::from_bytes(&long).is_err());
+    }
+
+    #[test]
+    fn bx_18_any_flipped_bit_fails_the_own_welcome_or_the_decode() {
+        let i = sample();
+        let c = Claim::make(&i, box_key(), [3u8; 32]);
+        let good = Welcome::make_own(&i, &c, own_owner()).to_bytes();
+        for bit in 0..good.len() * 8 {
+            let mut b = good.clone();
+            b[bit / 8] ^= 1 << (bit % 8);
+            if let Ok(w) = Welcome::from_bytes(&b) {
+                assert_eq!(w.verify(&i, &c.box_key, &c.nonce), None, "bit {bit}");
+            }
+        }
     }
 
     // ---- BX-12, BX-15: the keys ----
