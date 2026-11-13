@@ -519,6 +519,32 @@ impl Rig {
         dispatch(&self.registry, &frame(1, 0, &W::new().start(&config).0))
     }
 
+    /// Start the node for a Key-app shop with the refund float watched
+    /// (FL-05), and return the handle.
+    pub fn start_float(&self, float: crate::FloatWatchConfig) -> u64 {
+        let mut config = start_config(self.dir().to_str().expect("UTF-8"));
+        config.float = Some(float);
+        Rd::ok(&dispatch(
+            &self.registry,
+            &frame(1, 0, &W::new().start(&config).0),
+        ))
+        .u64()
+    }
+
+    /// Start the node for a shop with its own wallet and the refund float
+    /// watched, and return the response.
+    pub fn start_own_float(&self, wallet: &[u8], float: crate::FloatWatchConfig) -> Vec<u8> {
+        let mut config = start_config(self.dir().to_str().expect("UTF-8"));
+        config.network = OwnerNetwork::Mainnet;
+        config.own_wallet = Some(wallet.to_vec());
+        config.approver_root = Vec::new();
+        config.wallet = String::new();
+        config.key1_account = Vec::new();
+        config.key3_xpub = None;
+        config.float = Some(float);
+        dispatch(&self.registry, &frame(1, 0, &W::new().start(&config).0))
+    }
+
     /// Take the events that are waiting, without waiting for more.
     pub fn pump(&self, handle: u64) -> (Vec<String>, bool) {
         let response = self.call(10, handle, &W::new().u64(T0).u32(0).0);

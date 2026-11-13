@@ -31,7 +31,7 @@ fn id(n: u8) -> Identity {
 }
 
 /// The wallet's file, made through op 148.
-fn wallet_file() -> Vec<u8> {
+pub(super) fn wallet_file() -> Vec<u8> {
     let response = call(148, &W::new().string(&descriptor()).0);
     let mut r = Rd::ok(&response);
     let (file, _, _) = (r.bytes(), r.string(), r.bool());

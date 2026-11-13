@@ -306,6 +306,16 @@ pub fn shop_wallet_unreadable_words() -> Words {
     )
 }
 
+/// FL-05: the node's watch of the float is not ready, or the shop has no float.
+pub fn not_watching_words() -> Words {
+    stop(
+        "Refund float not read yet",
+        "The phone has not finished reading the refund float's coins, or no float is set up.",
+        "Nothing was changed. Wait for the shop to catch up with the chain, then try once more.",
+        "FL-05",
+    )
+}
+
 /// FL-12: the words of the home screen's line when the float is low.
 pub fn low_words() -> Words {
     Words::new(
@@ -337,6 +347,7 @@ pub fn all_float_words() -> Vec<(String, Words)> {
         .map(|(n, r)| (format!("FloatRefusal/{n}"), r.words()))
         .collect();
     all.push(("FloatLow".to_string(), low_words()));
+    all.push(("FloatNotWatching".to_string(), not_watching_words()));
     all.push(("FloatCoinUnreadable".to_string(), coin_unreadable_words()));
     all.push((
         "FloatShopWalletUnreadable".to_string(),
@@ -816,7 +827,7 @@ impl Owner {
                 if !refunds.is_empty() {
                     return Err(Refusal::WrongStage("the float's move pays no refund").into());
                 }
-                if left.len() != 1 || left[0].script_pubkey != *to {
+                if !matches!(left.as_slice(), [only] if only.script_pubkey == *to) {
                     return Err(Refusal::WrongStage(
                         "the float's move pays only the shop's address",
                     )

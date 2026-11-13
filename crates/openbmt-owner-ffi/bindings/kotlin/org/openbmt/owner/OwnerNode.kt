@@ -169,6 +169,10 @@ private const val OP_FLOAT_PAY = 168
 private const val OP_FLOAT_SWEEP = 169
 private const val OP_FLOAT_REFILL = 170
 private const val OP_FLOAT_SEAL = 171
+private const val OP_FLOAT_COINS = 172
+private const val OP_FLOAT_PAY_NODE = 173
+private const val OP_FLOAT_SWEEP_NODE = 174
+private const val OP_FLOAT_SEND = 175
 private const val OP_STARTER_MAKE = 180
 private const val OP_STARTER_PAGE = 181
 private const val OP_STARTER_CHECK_START = 182
@@ -402,6 +406,19 @@ class StartConfig(
     val link: LinkConfig?,
     /** A shop with its own wallet: the wallet's file as the app keeps it (`OBM)`); there is no Key app then. */
     val ownWallet: ByteArray? = null,
+    /** FL-05: the float to watch as a wallet of its own, when the shop has one. */
+    val float: FloatWatchConfig? = null,
+)
+
+/**
+ * FL-05: what the node needs to watch the float: its public description, how far each chain is watched (one past
+ * the last index used or handed out, the node adds 20), and the height the float was set up at.
+ */
+class FloatWatchConfig(
+    val description: String,
+    val receiveEnd: Long,
+    val changeEnd: Long,
+    val birthday: Long,
 )
 
 /** A refund to queue. The facts it is queued on come from the wallet's own view. */
@@ -612,6 +629,16 @@ class StarterSealed(val sealed: ByteArray, val dataKey: ByteArray) {
 
 /** One coin of the starter wallet, from the app's coin view (SS-30): the same record as one of the float's. */
 typealias StarterCoin = FloatCoin
+
+/** FL-05: the float's coins as the node's watch of it sees them, with what the float holds and where each chain stands. */
+class FloatCoins(
+    val coins: List<FloatCoin>,
+    val confirmed: Long,
+    val unconfirmedIncoming: Long,
+    val tip: Long,
+    val receiveNext: Long,
+    val changeNext: Long,
+)
 
 /** A finished transaction of the float, for the outbox (FL-20, FL-35); [tx] is the consensus bytes. */
 class FloatPaid(
@@ -1562,6 +1589,7 @@ private fun Writer.start(c: StartConfig): Writer =
         .u32(c.batchMinCount).u32(c.refundDepth).u32(c.birthday).option(c.proxy) { string(it) }
         .list(c.fixedPeers) { string(it) }.option(c.broadcastProxy) { string(it) }
         .bool(c.withoutTor).option(c.link) { link(it) }.option(c.ownWallet) { bytes(it) }
+        .option(c.float) { string(it.description).u32(it.receiveEnd).u32(it.changeEnd).u32(it.birthday) }
 
 private fun Writer.cashAmount(v: CashAmount): Writer {
     when (v) {
@@ -1826,6 +1854,11 @@ private fun Reader.floatPaid(): FloatPaid =
 
 private fun Writer.floatCoin(c: FloatCoin): Writer =
     bytes(c.txid).u32(c.vout).bytes(c.prevTx).bool(c.change).u32(c.index).u32(c.confirmations)
+
+private fun Reader.floatCoin(): FloatCoin = FloatCoin(bytes(), u32(), bytes(), bool(), u32(), u32())
+
+private fun Reader.floatCoins(): FloatCoins =
+    FloatCoins(list { floatCoin() }, u64(), u64(), u32(), u32(), u32())
 
 
 private fun Reader.starterPaid(): StarterPaid =
@@ -2429,6 +2462,43 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
                 .option(amount) { w.u64(it) }
         }
         return FloatRefillView(r.u32(), r.u64(), r.string()).also { r.end() }
+    }
+
+    /** FL-05: the float's coins from the node's watch of it; refused while the watch is not ready or there is no float. */
+    fun floatCoins(): FloatCoins {
+        val r = call(OP_FLOAT_COINS, handle)
+        return r.floatCoins().also { r.end() }
+    }
+
+    /**
+     * FL-20, FL-22: sign the queued refund number [refund] from the float's own coins in the node's watch. The
+     * float is given sealed with the data key opened from its Keystore key for this call only; [dataKey] is
+     * overwritten. The payment is not sent: [floatSend] gives it to the outbox.
+     */
+    fun floatPay(sealed: ByteArray, dataKey: ByteArray, refund: Long, feeRate: Long, minConfirmations: Long): FloatPaid {
+        val r = callSecret(OP_FLOAT_PAY_NODE, handle) { w ->
+            w.bytes(sealed).bytes(dataKey).u32(refund).u64(feeRate).u32(minConfirmations)
+        }
+        java.util.Arrays.fill(dataKey, 0.toByte())
+        return r.floatPaid().also { r.end() }
+    }
+
+    /**
+     * FL-35: sign the move of every float coin to an address of the owner phone's own range, taken once from its
+     * book. [dataKey] is overwritten. [floatSend] with `sweep` gives it to the outbox, with no refund.
+     */
+    fun floatSweep(sealed: ByteArray, dataKey: ByteArray, now: Long, feeRate: Long, minConfirmations: Long): FloatPaid {
+        val r = callSecret(OP_FLOAT_SWEEP_NODE, handle) { w ->
+            w.bytes(sealed).bytes(dataKey).u64(now).u64(feeRate).u32(minConfirmations)
+        }
+        java.util.Arrays.fill(dataKey, 0.toByte())
+        return r.floatPaid().also { r.end() }
+    }
+
+    /** FL-20, FL-35: give the signed float transaction [tx] to the outbox; the library refuses all but the float's own coins and ready refunds. Gives its ID. */
+    fun floatSend(tx: ByteArray, refunds: List<Long>, sweep: Boolean): String {
+        val r = call(OP_FLOAT_SEND, handle) { w -> w.bytes(tx).list(refunds) { w.u32(it) }.bool(sweep) }
+        return r.string().also { r.end() }
     }
 
     /** Hand the signed batches in the outbox to the link. */

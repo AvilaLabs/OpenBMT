@@ -147,8 +147,9 @@ use crate::counter_views::{
 };
 use crate::error::{internal, refused_by, wrong_state, AppError};
 use crate::float::{
-    self as float_ops, FloatCoinView, FloatFeeArgs, FloatPaidView, FloatPayArgs, FloatRefillArgs,
-    FloatCoinsView, FloatNodePayArgs, FloatNodeSweepArgs, FloatRefillView, FloatSealedView, FloatSendArgs, FloatStatusArgs, FloatStatusView, FloatSweepArgs,
+    self as float_ops, FloatCoinView, FloatCoinsView, FloatFeeArgs, FloatNodePayArgs,
+    FloatNodeSweepArgs, FloatPaidView, FloatPayArgs, FloatRefillArgs, FloatRefillView,
+    FloatSealedView, FloatSendArgs, FloatStatusArgs, FloatStatusView, FloatSweepArgs,
     FloatWalletView,
 };
 use crate::host::{real_spawn, Entry, Spawn};
@@ -196,12 +197,13 @@ use crate::starter::{
 use crate::views::{
     put_words, AlertKind, AlertView, BatchArgs, BatchWaitingView, BuiltView, CashAmountView,
     CashOutArgs, CashOutRow, CashPriceView, ClearArgs, CounterShareView, CounterView,
-    DeepRequestView, DeliverView, EntryKindView, EntryRow, HaltedView, HealthView, LimitView,
-    FloatWatchConfig, LinkConfig, LinkStepView, LinkView, MergeOfferView, NoteKindView, OldAddressesView, OldKind,
-    OutboxKind, OutboxRow, OutcomeKind, OutcomeView, OwnerNetwork, PumpView, QueueView,
-    QueuedRefund, ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView,
-    SendKind, SendRow, SettingsHeldView, SettingsQueuedView, ShopCurrencyView, SkippedView,
-    StageKind, StageView, StartConfig, StatusView, SwapHeldView, TakenView, ViewKind, WordsView,
+    DeepRequestView, DeliverView, EntryKindView, EntryRow, FloatWatchConfig, HaltedView,
+    HealthView, LimitView, LinkConfig, LinkStepView, LinkView, MergeOfferView, NoteKindView,
+    OldAddressesView, OldKind, OutboxKind, OutboxRow, OutcomeKind, OutcomeView, OwnerNetwork,
+    PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView,
+    RefundRow, RouteView, SendKind, SendRow, SettingsHeldView, SettingsQueuedView,
+    ShopCurrencyView, SkippedView, StageKind, StageView, StartConfig, StatusView, SwapHeldView,
+    TakenView, ViewKind, WordsView,
 };
 use crate::watch::{self, WatchEntry, WatchStart, WatchStepView};
 
@@ -826,7 +828,12 @@ fn build_ops() -> Vec<Op> {
         op(170, "float_refill", Node, |c, a: FloatRefillArgs| {
             c.entry()?.float_refill(a)
         }),
-        op(172, "float_coins", Node, |c, _: ()| c.entry()?.float_coins()),
+        op(171, "float_seal", Zero, |c, scan: Vec<u8>| {
+            c.starter().with_rng(|rng| float_ops::seal(scan, rng))
+        }),
+        op(172, "float_coins", Node, |c, _: ()| {
+            c.entry()?.float_coins()
+        }),
         op(173, "float_pay_node", Node, |c, a: FloatNodePayArgs| {
             c.entry()?.float_pay_node(a)
         }),
@@ -835,9 +842,6 @@ fn build_ops() -> Vec<Op> {
         }),
         op(175, "float_send", Node, |c, a: FloatSendArgs| {
             c.entry()?.float_send(a)
-        }),
-        op(171, "float_seal", Zero, |c, scan: Vec<u8>| {
-            c.starter().with_rng(|rng| float_ops::seal(scan, rng))
         }),
         op(180, "starter_make", Zero, |c, a: StarterMakeArgs| {
             starter_ops::make(c.starter(), a)

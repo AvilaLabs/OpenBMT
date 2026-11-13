@@ -26,6 +26,7 @@ use openbmt_owner::{Delivery, SaleFacts, SaleKey, Stage};
 use openbmt_signer::SignerState;
 use openbmt_spend::Coin;
 
+mod float;
 mod former;
 mod live;
 mod own;
@@ -234,6 +235,8 @@ struct Setup {
     own_wallet: Option<openbmt_core::wallet_single::ImportedWallet>,
     /// SS-43: the wallets pinned before a re-pin.
     former: Vec<crate::FormerParts>,
+    /// FL-05: the refund float, watched as a wallet of its own.
+    float: Option<crate::FloatParts>,
     /// The customer pays the fee of a refund.
     customer_fee: bool,
 }
@@ -249,6 +252,7 @@ impl Default for Setup {
             own: None,
             own_wallet: None,
             former: Vec::new(),
+            float: None,
             customer_fee: false,
         }
     }
@@ -323,6 +327,7 @@ fn start_at(dir: &Dir, setup: &Setup, chain: Vec<Block>) -> Result<Rig, NodeErro
     }
     parts.refund_depth = setup.refund_depth;
     parts.former = setup.former.clone();
+    parts.float = setup.float.clone();
     parts.limits = setup.limits;
     parts.random = Box::new(Counter(1));
     let (l, s, sn) = (log.clone(), spawned.clone(), senders.clone());

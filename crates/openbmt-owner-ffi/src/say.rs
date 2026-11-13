@@ -261,6 +261,14 @@ const RULES: &[Entry] = &[
         "Nothing to do. This phone already watches every address of the shop.",
     ),
     (
+        "float-no-move",
+        Kind::State,
+        "Float move not signed",
+        "The refund float's move was not signed, so there is no address of the shop's own wallet to take it to.",
+        Who::Owner,
+        "Turn the float off from its page; the phone signs the move first.",
+    ),
+    (
         "start-key1",
         Kind::Refused,
         "Key 1 not usable",

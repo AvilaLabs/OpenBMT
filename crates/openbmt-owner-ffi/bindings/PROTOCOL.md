@@ -170,6 +170,10 @@ ops run on another; it waits for at most 250 ms.
 169 float_sweep      handle zero  args FloatSweepArgs -> FloatPaidView
 170 float_refill     handle node  args FloatRefillArgs -> FloatRefillView
 171 float_seal       handle zero  args list<u8> -> FloatSealedView
+172 float_coins      handle node  args () -> FloatCoinsView
+173 float_pay_node   handle node  args FloatNodePayArgs -> FloatPaidView
+174 float_sweep_node handle node  args FloatNodeSweepArgs -> FloatPaidView
+175 float_send       handle node  args FloatSendArgs -> string
 180 starter_make     handle zero  args StarterMakeArgs -> StarterWalletView
 181 starter_page     handle zero  args StarterPageArgs -> StarterImageView
 182 starter_check_start handle zero  args () -> StarterCheckView
@@ -224,7 +228,8 @@ OwnerNetwork: enum, one tag byte
 RouteView: enum, a tag byte, then: Direct(addr: string) | Onion(proxy: string, host: string, port: u32)
     tags Direct=0 Onion=1
 LinkConfig: record: route: RouteView, relay_key: list<u8>, counters: list<list<u8>>, heartbeat_every_secs: u64, check_in_grace_secs: u64
-StartConfig: record: dir: string, network: OwnerNetwork, now: u64, owner_secret: list<u8>, approver_root: list<u8>, wallet: string, key1_account: list<u8>, key3_xpub: option<string>, batch_min_count: u32, refund_depth: u32, birthday: u32, proxy: option<string>, fixed_peers: list<string>, broadcast_proxy: option<string>, without_tor: bool, link: option<LinkConfig>, own_wallet: option<list<u8>>
+FloatWatchConfig: record: description: string, receive_end: u32, change_end: u32, birthday: u32
+StartConfig: record: dir: string, network: OwnerNetwork, now: u64, owner_secret: list<u8>, approver_root: list<u8>, wallet: string, key1_account: list<u8>, key3_xpub: option<string>, batch_min_count: u32, refund_depth: u32, birthday: u32, proxy: option<string>, fixed_peers: list<string>, broadcast_proxy: option<string>, without_tor: bool, link: option<LinkConfig>, own_wallet: option<list<u8>>, float: option<FloatWatchConfig>
 WatchStart: record: dir: string, network: OwnerNetwork, secret: list<u8>, proxy: option<string>, fixed_peers: list<string>, route: RouteView, relay_key: list<u8>, counters: list<list<u8>>, heartbeat_every_secs: u64
 WatchStepView: record: sent: u64, reached: bool, relay_refused: bool, notes: list<string>
 RefundArgs: record: counter: list<u8>, sale: u32, cashier: string, address: string, sats: u64
@@ -365,6 +370,10 @@ OwnSpendBuildArgs: record: now: u64, fee_rate: u64, picked: list<u32>
 OwnSpendTakeArgs: record: now: u64, session: list<u8>, number: u32, returned: list<u8>
 FloatWalletView: record: description: string, first_address: string
 FloatSealedView: record: sealed: list<u8>, data_key: list<u8>, description: string, first_address: string
+FloatCoinsView: record: coins: list<FloatCoinView>, confirmed: u64, unconfirmed_incoming: u64, tip: u32, receive_next: u32, change_next: u32
+FloatNodePayArgs: record: sealed: list<u8>, data_key: list<u8>, refund: u32, fee_rate: u64, min_confirmations: u32
+FloatNodeSweepArgs: record: sealed: list<u8>, data_key: list<u8>, now: u64, fee_rate: u64, min_confirmations: u32
+FloatSendArgs: record: tx: list<u8>, refunds: list<u32>, sweep: bool
 FloatStatusArgs: record: cap: u64, confirmed: u64, unconfirmed_incoming: u64
 FloatStatusView: record: held: u64, low: bool, refill: option<u64>
 FloatFeeArgs: record: recent: option<u64>, typed: option<u64>

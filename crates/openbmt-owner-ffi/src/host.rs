@@ -972,7 +972,11 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
             wallet: wallet.imported(),
             receive_end: f.receive_end,
             change_end: f.change_end,
-            birthday: if f.birthday == 0 { req.birthday } else { f.birthday },
+            birthday: if f.birthday == 0 {
+                req.birthday
+            } else {
+                f.birthday
+            },
         });
     }
     let mut node = OwnerNode::start_with(config, parts, spawn).map_err(|e| node_error(&e))?;
@@ -3411,7 +3415,7 @@ impl Entry {
             st.node
                 .float_coins()
                 .map(|c| float_ops::coins_view(&c))
-                .map_err(crate::starter::not_watching)
+                .map_err(float_ops::not_watching)
         })
     }
 
@@ -3431,24 +3435,32 @@ impl Entry {
             if !st.node.owner().refund_ready(refund.id) {
                 return Err(crate::starter::refund_not_ready(a.refund));
             }
-            let held = st
-                .node
-                .float_coins()
-                .map_err(crate::starter::not_watching)?;
+            let held = st.node.float_coins().map_err(float_ops::not_watching)?;
             float_ops::pay_from_node(a, &refund, network, &held.coins, held.change_next, held.tip)
         })
     }
 
     /// FL-35: the move of everything the float holds to the first address of a
     /// range of the owner phone's own, taken once.
-    pub(crate) fn float_sweep_node(&self, a: FloatNodeSweepArgs) -> Result<FloatPaidView, AppError> {
+    pub(crate) fn float_sweep_node(
+        &self,
+        a: FloatNodeSweepArgs,
+    ) -> Result<FloatPaidView, AppError> {
         self.run(Some(a.now), move |st| {
-            let State { node, own, dir, network, .. } = st;
+            let State {
+                node,
+                own,
+                dir,
+                network,
+                ..
+            } = st;
             let network = *network;
             let own = own_only(own)?;
-            let held = node.float_coins().map_err(crate::starter::not_watching)?;
+            let held = node.float_coins().map_err(float_ops::not_watching)?;
             if held.coins.is_empty() {
-                return Err(float_ops::refusal(&openbmt_owner::float::FloatRefusal::NothingToSweep));
+                return Err(float_ops::refusal(
+                    &openbmt_owner::float::FloatRefusal::NothingToSweep,
+                ));
             }
             // Nothing is taken from the book unless there is a coin to move.
             let index = own::turn_on_shop(
@@ -3478,9 +3490,7 @@ impl Entry {
                     |shop| Ok(shop.float_off_plan()),
                 )
                 .map_err(own::node_error)?
-                .ok_or_else(|| {
-                    wrong_state("float-no-move", "the float's move was never signed")
-                })?;
+                .ok_or_else(|| wrong_state("float-no-move", "the float's move was never signed"))?;
                 Some(
                     openbmt_owner::float::shop_receive_script(own.wallet.wallet(), index)
                         .map_err(|e| float_ops::refusal(&e))?,

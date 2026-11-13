@@ -215,6 +215,16 @@ pub(crate) fn seal_error(e: FloatSealError) -> AppError {
     }
 }
 
+/// FL-05: the node's watch of the float is not ready, or there is none.
+pub(crate) fn not_watching(e: impl std::fmt::Display) -> AppError {
+    from_words(
+        Kind::State,
+        "float-not-watching",
+        format!("the node's watch of the float is not ready: {e}"),
+        float::not_watching_words(),
+    )
+}
+
 /// The data key the app handed over, wiped here as the starter's is.
 fn key_of(bytes: &mut [u8]) -> Result<openbmt_owner::starter::DataKey, AppError> {
     crate::starter::data_key_of(bytes)
@@ -355,8 +365,7 @@ pub struct FloatNodeSweepArgs {
 
 impl fmt::Debug for FloatNodeSweepArgs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("FloatNodeSweepArgs")
-            .finish_non_exhaustive()
+        f.debug_struct("FloatNodeSweepArgs").finish_non_exhaustive()
     }
 }
 

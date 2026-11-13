@@ -286,7 +286,7 @@ fn oc_53_an_owed_settlement_from_a_block_off_the_chain_is_dropped_at_any_tip_hei
 
 /// The block of the transaction `tx` is replaced by `with` (or by nothing)
 /// as the driver tells it: the chain event, the new block and its check.
-fn replace_tip(rig: &mut Rig, with: &[Transaction]) -> Block {
+pub(super) fn replace_tip(rig: &mut Rig, with: &[Transaction]) -> Block {
     let left = rig.chain.pop().unwrap();
     let height = u32::try_from(rig.chain.len()).unwrap() + 1;
     let other = mine(rig.tip_hash(), height, 7, with);

@@ -419,7 +419,10 @@ impl OwnNode {
         now: u64,
         watching: &mut dyn Watching,
     ) -> Result<u32, OwnNodeError> {
-        let skip = [self.shop.move_plan_index(), self.shop.float_off_plan_index()];
+        let skip = [
+            self.shop.move_plan_index(),
+            self.shop.float_off_plan_index(),
+        ];
         let free = |ranges: Vec<openbmt_core::pinned_wallet::IndexRange>| {
             ranges
                 .iter()

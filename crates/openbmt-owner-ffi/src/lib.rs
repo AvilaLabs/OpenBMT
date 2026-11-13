@@ -92,8 +92,8 @@ pub use counter_views::{
 };
 pub use error::{AppError, Kind};
 pub use float::{
-    FloatCoinView, FloatFeeArgs, FloatPaidView, FloatPayArgs, FloatRefillArgs, FloatRefillView,
-    FloatCoinsView, FloatNodePayArgs, FloatNodeSweepArgs, FloatSealedView, FloatSendArgs,
+    FloatCoinView, FloatCoinsView, FloatFeeArgs, FloatNodePayArgs, FloatNodeSweepArgs,
+    FloatPaidView, FloatPayArgs, FloatRefillArgs, FloatRefillView, FloatSealedView, FloatSendArgs,
     FloatStatusArgs, FloatStatusView, FloatSweepArgs, FloatWalletView,
 };
 pub use host::{Entry, KEY1_FILE, MAX_WAIT_MS, SLICE_MS};
@@ -130,10 +130,10 @@ pub use starter::{
 pub use views::{
     AlertKind, AlertView, BatchArgs, BatchWaitingView, BuiltView, CashAmountView, CashOutArgs,
     CashOutRow, ClearArgs, CounterShareView, CounterView, DeepRequestView, DeliverView,
-    EntryKindView, EntryRow, HaltedView, HealthView, FloatWatchConfig, LimitView, LinkConfig, LinkStepView, LinkView,
-    MergeOfferView, NoteKindView, OldAddressesView, OldKind, OutboxKind, OutboxRow, OutcomeKind,
-    OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView,
-    RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind, SendRow, SettingsHeldView,
-    SettingsQueuedView, ShopCurrencyView, SkippedView, StageKind, StageView, StartConfig,
-    StatusView, SwapHeldView, TakenView, ViewKind, WordsView,
+    EntryKindView, EntryRow, FloatWatchConfig, HaltedView, HealthView, LimitView, LinkConfig,
+    LinkStepView, LinkView, MergeOfferView, NoteKindView, OldAddressesView, OldKind, OutboxKind,
+    OutboxRow, OutcomeKind, OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund,
+    ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind,
+    SendRow, SettingsHeldView, SettingsQueuedView, ShopCurrencyView, SkippedView, StageKind,
+    StageView, StartConfig, StatusView, SwapHeldView, TakenView, ViewKind, WordsView,
 };

@@ -75,11 +75,11 @@ impl KernelRandom for Fixed {
     }
 }
 
-fn counting(start: u8) -> [u8; 32] {
+pub(super) fn counting(start: u8) -> [u8; 32] {
     std::array::from_fn(|i| start.wrapping_add(i as u8))
 }
 
-fn registry(given: &[[u8; 32]]) -> Registry {
+pub(super) fn registry(given: &[[u8; 32]]) -> Registry {
     let reg = Registry::new();
     *reg.starter.rng.lock().unwrap() = Some(Box::new(Fixed::new(given)));
     reg
@@ -140,7 +140,7 @@ fn no_words_in(response: &[u8]) {
 
 /// Makes the wallet, passes the check-back and seals: the sealed seed, the
 /// data key and the wallet's description.
-fn sealed_wallet(reg: &Registry) -> (Vec<u8>, Vec<u8>, String) {
+pub(super) fn sealed_wallet(reg: &Registry) -> (Vec<u8>, Vec<u8>, String) {
     let (description, _, _) = wallet_view(&make(reg, &[]));
     let positions = positions_of(&call(reg, OP_CHECK, &[]));
     assert_eq!(positions.len(), 3);
