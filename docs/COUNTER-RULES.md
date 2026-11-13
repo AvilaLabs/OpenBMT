@@ -1929,3 +1929,86 @@ till closed as bitcoin can be matched against what arrived
   `docs/SCREEN-RULES.md`, listed in `docs/screens/counter.md` and checked
   as every other words are; the labels of the counter app's bill screens
   are plain and under 28 characters.
+
+## 26. Switching from the starter wallet
+
+A shop that started simple (`docs/START-SIMPLE-RULES.md`) takes its first
+payments into a starter wallet whose key is on the owner phone. When the
+shop moves to a key made offline, each counter has to start paying into the
+new wallet. A counter pins its wallet at pairing and refuses any change that
+sends payments somewhere new (CR-236), so this section is the one way
+through, and it is open only once and only to a counter that pinned a
+starter wallet. It cannot trust the owner phone alone, since a taken or
+hacked owner phone would send a wallet of its own: the person at the
+counter checks the new wallet's first address on the new wallet's own
+screen, and a manager's PIN confirms it. The codecs and checks are in
+`crates/openbmt-core` (`pairing_own`) and `crates/openbmt-counter-node`
+(`paired`); the screens are the app's.
+
+- **CR-256. Marked at pairing.** The owner phone's offer of CR-227 may be
+  version 2: version 1's fields, then one byte of flags, of which only bit 0
+  is defined (the pinned wallet is a starter wallet) and every other bit must
+  be zero. The binding and the four words of CR-229 are made from the whole
+  offer, so the flag is covered by the person's check of the four words.
+  The record of CR-233 becomes version 2 with the same byte after the relay.
+  A version 1 offer or record has no flag. A counter whose record has no
+  flag refuses every switch.
+- **CR-257. The switch.** The owner sends the switch as a message of kind
+  Switch (`docs/LINK-RULES.md` LK-78), the frame `OBM]`, version 1: this
+  counter's id (32 bytes), the hash of the wallet now pinned (32 bytes), the
+  new pinned wallet (`OBM)`, WL-21) whole, the first signed range for the
+  new wallet (`OBM*`, WL-24), and the owner root's signature over all of
+  them under the tag `OpenBMT/switch-own/v1`. It is decoded strictly (exact
+  length, no trailing bytes, every part decoded and re-encoded to the same
+  bytes).
+- **CR-258. Checked before it waits.** The counter takes a switch to check
+  only when all of these hold, in this order: its record has the starter
+  flag (CR-256); the signature is the pinned owner root's; the counter id is
+  its own; the hash is that of the wallet it pins now; the new wallet passes
+  WL-21 and WL-22, is for the same network and is not the wallet pinned now;
+  the range passes CR-232 for this counter and the new wallet. Any other
+  switch is refused with a note naming the rule, and nothing changes.
+- **CR-259. One switch waits.** A switch that passes is kept in the node's
+  folder (`switch.bin`, the `OBM]` frame and nothing else, written as CR-161)
+  and changes nothing yet. Sales go on into the wallet pinned now. A newer
+  switch replaces it. It is dropped seven days after it arrived, and the
+  owner phone may send it again.
+- **CR-260. The manager checks the address.** While a switch waits, home
+  shows a line for the manager and the manager's menu has "New wallet to
+  check". It shows the new wallet's first receive address (receive chain,
+  index 0, WL-20) as the largest thing on the screen, in groups of four
+  characters, the kind of wallet beneath it, and a line saying to compare it
+  with the new wallet's own screen (the stick's result screen, its "Check
+  words I wrote" mode, or the signer's screen), not with the owner phone. It
+  has two buttons, "Same address" and "Different". "Different" drops the
+  switch and writes the record of CR-262 with the refusal byte.
+- **CR-261. The manager's PIN, then the switch.** "Same address" asks for
+  the manager's PIN (CR-84). A wrong PIN changes nothing and counts toward
+  CR-84's lockout. With the right PIN the counter, in this order: writes the
+  range book of CR-234 again as version 2, which names for each range the
+  hash of the wallet it is for, with the old wallet's ranges kept and closed
+  (no index of them is handed out again) and the new wallet's first range
+  after them; writes the record of CR-233 again with the new wallet pinned,
+  the starter flag cleared and everything else as it was; writes the record
+  of CR-262; deletes `switch.bin`. At start, a book whose open range is for a
+  wallet that the record does not pin, while `switch.bin` holds the switch to
+  that wallet, finishes the switch from the second step; any other mismatch
+  of book and record is a fault, as CR-234 says. Every later sale's address
+  is the new wallet's. A sale already showing an address of the old wallet
+  ends as it would have, and the old wallet's handed-out scripts stay
+  watched from the closed ranges as a batch's are.
+- **CR-262. Told to the owner.** The switch is a `Setting` record of the
+  counter's own chain: one tag byte (37), one byte (1 switched, 0 refused at
+  "Different"), the hash of the new pinned wallet (32 bytes) and the
+  counter's signature with its identity key over the tag, the byte and the
+  hash under the tag `OpenBMT/switched-own/v1` (64 bytes), 98 bytes. It is
+  read as strictly as CR-243 says, and a body of 98 bytes is read as this
+  kind only. The owner phone reads it from the counter's records, as it
+  reads every record.
+- **CR-263. Only once.** A counter whose record has no starter flag,
+  including every counter that has switched, refuses every switch as
+  CR-258 says. To change a wallet in any other case, the counter is paired
+  again.
+- **CR-264.** Every state and refusal of this section has words under
+  `docs/SCREEN-RULES.md`, listed in `docs/screens/counter.md`.
+

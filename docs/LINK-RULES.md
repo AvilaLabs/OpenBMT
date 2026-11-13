@@ -80,6 +80,8 @@ what arrives as if it came from an enemy.
   | Records received | owner | counter |
   | Paid notice | counter | Box |
   | POS notice | Box | counter, owner |
+  | Range | owner | counter |
+  | Switch | owner | counter |
 
   The watcher is the owner phone's background watcher (LK-74). It sends
   heartbeats and nothing else. A kind from a sender whose role may not send
@@ -470,6 +472,11 @@ merged).
   as LK-70 and LK-71 say for a batch, and drops it from the pending list when
   the copy of the counter's chain holds the counter's record of it (CR-235),
   or a later range held.
+- **LK-78.** A message of kind Switch (byte 12) carries one switch from the
+  starter wallet (`OBM]`, `docs/COUNTER-RULES.md` CR-257) for one counter.
+  The owner keeps and sends it again as LK-70 and LK-71 say for a batch, and
+  drops it from the pending list when the copy of the counter's chain holds
+  the counter's record of CR-262 for that new wallet, either byte.
 
 The two kinds that involve the Box are carried the same way. A counter sends
 a Paid notice to each Box on its device list when a sale changes state, and

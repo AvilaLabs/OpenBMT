@@ -142,14 +142,19 @@ funds.**
 
 - **SS-40. A strong key.** The owner makes a key offline (the stick, a
   signer) and connects it as any shop connects its wallet.
-- **SS-41. The counters switch.** Each counter shows the new wallet's first
-  address. The manager checks it against the new wallet's own screen (the
-  stick's result or "check my words" screen, or the signer), not against
-  the owner phone, and confirms with the manager PIN. From then on that
-  counter's sales go to the new wallet. Until then it keeps paying into the
-  starter wallet. This is the one change of the pinned wallet a counter
-  accepts (`docs/COUNTER-RULES.md`).
-- **SS-42. One move.** Once every counter has switched, the owner phone
+- **SS-41. The counters switch.** A counter paired with a starter wallet
+  knows it from its pairing (`docs/COUNTER-RULES.md` CR-256). The owner phone
+  sends each such counter the new wallet (CR-257). Each counter shows the new
+  wallet's first address; the manager checks it against the new wallet's own
+  screen (the stick's result or "Check words I wrote" screen, or the
+  signer), not against the owner phone, and confirms with the manager PIN
+  (CR-260, CR-261). From then on that counter's sales go to the new wallet.
+  Until then it keeps paying into the starter wallet. This is the one change
+  of the pinned wallet a counter accepts, and only once (CR-263). The owner
+  phone shows each counter as switched, waiting or refused, from the
+  counters' records (CR-262).
+- **SS-42. One move.** Once every counter in the settings in force has the
+  record of CR-262 with the switched byte for the new wallet, the owner phone
   moves everything in the starter wallet to the new wallet's next address,
   derived by the owner phone from the new description, in one payment, at
   the fee of `docs/FEE-RULES.md` for a cash-out. The owner sees it and
