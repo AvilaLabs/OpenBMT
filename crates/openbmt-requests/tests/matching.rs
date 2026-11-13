@@ -566,3 +566,49 @@ fn rq_16_the_words_of_each_state_and_mark_come_from_the_table() {
     assert_eq!(mark_lines(&marks), ["Paid late"]);
     let _: Option<Shop> = None;
 }
+
+#[test]
+fn rq_15_an_output_of_zero_satoshis_is_not_a_payment_and_the_book_stays_readable() {
+    let mut book = RequestBook::new();
+    let n = make_btc(&mut book, 0, 100_000, 7);
+    let counted = book
+        .credit(n, &[arrival(1, 10, T0, 0)], T0, &shop(), None)
+        .unwrap();
+    assert_eq!(counted, 0);
+    assert!(book.request(n).unwrap().credits.is_empty());
+    assert_eq!(book.request(n).unwrap().status(5_000), Status::Waiting);
+    assert_eq!(RequestBook::from_bytes(&book.to_bytes()).unwrap(), book);
+    // Mixed with a real payment, only the real one is recorded.
+    let counted = book
+        .credit(
+            n,
+            &[arrival(2, 11, T0, 0), arrival(3, 11, T0, 40_000)],
+            T0,
+            &shop(),
+            None,
+        )
+        .unwrap();
+    assert_eq!(counted, 1);
+    assert_eq!(book.request(n).unwrap().credits.len(), 1);
+    assert_eq!(RequestBook::from_bytes(&book.to_bytes()).unwrap(), book);
+}
+
+#[test]
+fn rq_15_a_zero_output_after_a_cancel_or_a_close_is_not_recorded_either() {
+    let mut book = RequestBook::new();
+    let a = make_btc(&mut book, 0, 100_000, 7);
+    book.cancel(a, T0).unwrap();
+    let b = make_btc(&mut book, 1, 100_000, 7);
+    book.credit(b, &[arrival(5, 10, T0, 30_000)], T0, &shop(), None)
+        .unwrap();
+    book.close(b, T0 + 1, &shop()).unwrap();
+    for n in [a, b] {
+        let before = book.request(n).unwrap().credits.len();
+        assert_eq!(
+            book.credit(n, &[arrival(9, 12, T0 + 9, 0)], T0 + 9, &shop(), None),
+            Ok(0)
+        );
+        assert_eq!(book.request(n).unwrap().credits.len(), before);
+    }
+    assert_eq!(RequestBook::from_bytes(&book.to_bytes()).unwrap(), book);
+}

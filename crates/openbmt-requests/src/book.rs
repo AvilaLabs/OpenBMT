@@ -296,7 +296,9 @@ impl RequestBook {
     /// RQ-15 to RQ-18: count the outputs paid to a request's address, in the
     /// order of the blocks. An output already counted (the same transaction
     /// and output number) is skipped, so the owner app may hand over the
-    /// whole of what it has seen each time. Returns how many were counted.
+    /// whole of what it has seen each time. An output of zero satoshis is
+    /// skipped the same way: it is not a payment, nothing is recorded and it
+    /// is not an error. Returns how many were counted.
     /// Nothing changes on a refusal.
     ///
     /// `rate` values a payment in the currency when the request has no quote
@@ -322,6 +324,10 @@ impl RequestBook {
         let mut credits = request.credits.clone();
         let mut counted = 0usize;
         for a in arrivals {
+            // An output of zero satoshis is not a payment (RQ-15).
+            if a.sats == 0 {
+                continue;
+            }
             if credits.iter().any(|c| c.txid == a.txid && c.vout == a.vout) {
                 continue;
             }
