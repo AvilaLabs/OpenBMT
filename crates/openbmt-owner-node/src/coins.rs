@@ -604,6 +604,12 @@ impl CoinView {
             .map(|(h, _)| *h)
     }
 
+    /// OC-55: whether the view still keeps the undo of the block at
+    /// `height`, so that a reorganization can take it.
+    pub fn holds_undo(&self, height: u32) -> bool {
+        self.undo.contains_key(&height)
+    }
+
     /// Transaction IDs whose confirmation and transaction evidence is still
     /// inside the retained undo horizon.
     pub fn retained_confirmations(&self) -> BTreeSet<Txid> {

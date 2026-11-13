@@ -2826,7 +2826,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             Ok(()) => {
                 self.note(format!(
                     "{txid} was signed elsewhere and another transaction spent its coins; its \
-                     entries are held until block {} is {UNDO_BLOCKS} deep",
+                     entries are held until block {} is more than {UNDO_BLOCKS} deep",
                     item.block
                 ));
                 if self.undone_for_item(&txid) {
@@ -2847,9 +2847,10 @@ impl<P: OwnerPort> OwnerNode<P> {
     }
 
     /// OC-55: a transaction that was beaten is no longer watched, and its
-    /// entries are no longer held, when the block that beat it is deep on
-    /// the best chain. One whose block has left stays held and watched.
-    /// Idempotent: a release that was stored leaves nothing to release.
+    /// entries are no longer held, when the block that beat it is more than
+    /// [`UNDO_BLOCKS`] deep on the best chain: at [`UNDO_BLOCKS`] the coin
+    /// view still holds its undo and a reorganization can take it. One whose
+    /// block has left stays held and watched. Idempotent: a release that was stored leaves nothing to release.
     fn release_holds(&mut self) {
         if self.halted.is_some() {
             return;
@@ -2864,7 +2865,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                         self.watcher.chain(),
                         &BlockHash::from_byte_array(h.block),
                     )
-                    .is_some_and(|n| n >= UNDO_BLOCKS)
+                    .is_some_and(|n| n > UNDO_BLOCKS)
                 })
             })
             .map(|e| e.txid)
@@ -2880,7 +2881,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 .release_held(&txid, |b| write_queue_file(&dir, b))
             {
                 Ok(()) => self.note(format!(
-                    "{txid} is no longer watched: the block that beat it is {UNDO_BLOCKS} deep; \
+                    "{txid} is no longer watched: the block that beat it is more than {UNDO_BLOCKS} deep; \
                      its entries are back in the queue"
                 )),
                 Err(e) => self.note(format!("{txid} could not be released: {e}")),
@@ -2889,7 +2890,8 @@ impl<P: OwnerPort> OwnerNode<P> {
     }
 
     /// OC-55: the entries that are held, with the blocks left until the block
-    /// that beat their payment is deep.
+    /// that beat their payment is more than [`UNDO_BLOCKS`] deep: 0 at the
+    /// tip where they are released.
     pub fn held(&self) -> Vec<(openbmt_owner::HeldEntry, u32)> {
         self.owner
             .held_entries()
@@ -2900,7 +2902,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                     &BlockHash::from_byte_array(h.block),
                 )
                 .unwrap_or(0);
-                (h, UNDO_BLOCKS.saturating_sub(deep))
+                (h, (UNDO_BLOCKS + 1).saturating_sub(deep))
             })
             .collect()
     }
@@ -2935,7 +2937,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             Ok(()) => {
                 self.note(format!(
                     "{txid} was replaced: another transaction spent its coins; its entries are \
-                     held until block {} is {UNDO_BLOCKS} deep, and nothing is signed again by \
+                     held until block {} is more than {UNDO_BLOCKS} deep, and nothing is signed again by \
                      itself",
                     item.block
                 ));

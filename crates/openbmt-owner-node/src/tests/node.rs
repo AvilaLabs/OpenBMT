@@ -1477,7 +1477,7 @@ fn as_89_an_abandoned_approval_whose_coin_another_transaction_spent_is_released(
     assert_eq!(rig.node.owner().signed_elsewhere().len(), 1);
     assert!(matches!(rig.node.owner().refunds()[0].stage, Stage::Queued));
     assert!(rig.node.paid_log().is_empty());
-    rig.mine_empty(98);
+    rig.mine_empty(99);
     assert_eq!(rig.node.owner().signed_elsewhere().len(), 1);
     rig.mine_empty(1);
     assert!(rig.node.owner().signed_elsewhere().is_empty());

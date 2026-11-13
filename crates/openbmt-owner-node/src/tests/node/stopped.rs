@@ -7,6 +7,7 @@ use openbmt_owner::{CashAmount, RateNote};
 use openbmt_watch::HeaderChain;
 
 use super::*;
+use crate::coins::UNDO_BLOCKS;
 use crate::facts::verified_facts;
 use crate::paid_log::{PaidValue, PaidWhat, Undone, PAID_LOG_FILE};
 use crate::settle_owed::{Owed, OwedKind, SettleOwed};
@@ -975,7 +976,7 @@ fn oc_55_n13c_01_while_the_beating_block_is_shallow_the_entries_are_in_no_new_pa
     assert_eq!(held.iter().map(|h| h.id).collect::<Vec<_>>(), vec![r1, r2]);
     assert!(held.iter().all(|h| h.txid == c.compute_txid()));
     assert_eq!(rig.node.held().len(), 2);
-    assert_eq!(rig.node.held()[0].1, 99);
+    assert_eq!(rig.node.held()[0].1, 100);
     // B, from Y, cannot pay R2 (nor R1): nothing is built, and each says why.
     let (inputs, skipped) = try_build(&mut rig);
     assert!(inputs.is_empty(), "{inputs:?}");
@@ -989,7 +990,7 @@ fn oc_55_n13c_01_while_the_beating_block_is_shallow_the_entries_are_in_no_new_pa
     let words = openbmt_owner::say::held_words(rig.node.held()[0].1);
     assert_eq!(words.heading, "Held while a payment settles");
     assert_eq!(openbmt_core::say::check(&words), Ok(()));
-    assert_eq!(words.detail.as_deref(), Some("99"));
+    assert_eq!(words.detail.as_deref(), Some("100"));
 }
 
 #[test]
@@ -1052,15 +1053,15 @@ fn oc_55_a_restart_in_the_middle_keeps_the_hold_and_the_depth_releases_it() {
     let mut rig = start_at(&dir, &Setup::default(), chain).unwrap();
     let held = rig.node.owner().held_entries();
     assert_eq!(held.iter().map(|h| h.id).collect::<Vec<_>>(), vec![r1, r2]);
-    assert_eq!(rig.node.held()[0].1, 59);
+    assert_eq!(rig.node.held()[0].1, 60);
     rig.rescan();
     let (inputs, skipped) = try_build(&mut rig);
     assert!(
         inputs.is_empty() && skipped.len() == 2,
         "{inputs:?} {skipped:?}"
     );
-    // At 100 deep it is let go, and the entries are built as free ones.
-    rig.mine_empty(58);
+    // Past 100 deep it is let go, and the entries are built as free ones.
+    rig.mine_empty(59);
     assert_eq!(rig.node.owner().held_entries().len(), 2);
     rig.mine_empty(1);
     assert!(rig.node.owner().held_entries().is_empty());
@@ -1077,6 +1078,30 @@ fn oc_55_a_restart_in_the_middle_keeps_the_hold_and_the_depth_releases_it() {
 }
 
 #[test]
+fn oc_55_n13e_02_the_hold_ends_at_101_deep_the_tip_where_the_view_drops_the_undo() {
+    let dir = Dir::new();
+    let mut rig = start(&dir, &Setup::default()).unwrap();
+    let (c, _) = signed_elsewhere_pair(&mut rig);
+    let a = replacement_a_without_change(&c);
+    rig.mine(std::slice::from_ref(&a));
+    let beating = rig.node.owner().held_entries()[0].height;
+    // At exactly 100 confirmations the view can still undo the beating
+    // block, so the hold stays and the count shows one block left.
+    rig.mine_empty(99);
+    let depth = u32::try_from(rig.chain.len()).unwrap() - beating + 1;
+    assert_eq!(depth, UNDO_BLOCKS);
+    assert!(rig.node.view().holds_undo(beating));
+    assert_eq!(rig.node.held()[0].1, 1);
+    assert_eq!(rig.node.owner().held_entries().len(), 2);
+    assert_eq!(rig.node.owner().signed_elsewhere().len(), 1);
+    // At 101 the undo is gone, the hold is released and the count was 0.
+    rig.mine_empty(1);
+    assert!(!rig.node.view().holds_undo(beating));
+    assert!(rig.node.owner().held_entries().is_empty());
+    assert!(rig.node.owner().signed_elsewhere().is_empty());
+}
+
+#[test]
 fn oc_55_a_reorganization_before_depth_100_keeps_the_hold_and_watches_c_again() {
     let dir = Dir::new();
     let mut rig = start(&dir, &Setup::default()).unwrap();
@@ -1084,7 +1109,7 @@ fn oc_55_a_reorganization_before_depth_100_keeps_the_hold_and_watches_c_again() 
     let a = replacement_a_without_change(&c);
     rig.mine(std::slice::from_ref(&a));
     rig.mine_empty(98);
-    assert_eq!(rig.node.held()[0].1, 1);
+    assert_eq!(rig.node.held()[0].1, 2);
     // The beating block and everything above it leave, and other blocks
     // take their place: the hold stays and does not count blocks of a chain
     // that is gone.
@@ -1108,7 +1133,7 @@ fn oc_55_a_reorganization_before_depth_100_keeps_the_hold_and_watches_c_again() 
     all.extend(events);
     all.push(AppEvent::Checked(top));
     rig.feed(all);
-    assert_eq!(rig.node.held()[0].1, 100);
+    assert_eq!(rig.node.held()[0].1, 101);
     assert_eq!(rig.node.owner().held_entries().len(), 2);
     assert_eq!(rig.node.owner().signed_elsewhere().len(), 1);
     // A later block that beats it again takes the hold over.
