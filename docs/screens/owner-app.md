@@ -449,8 +449,7 @@ Connect your wallet, after the advice on an own wallet, in `ConnectWords`:
 
 Adding a counter to a shop with its own wallet (OA-105 to OA-114), in
 `OwnPairWords`. `{name}` is the counter's name and `{n}` a number of
-addresses. A text named `WORDS_NEEDED_OA_...` is not written yet and shows
-its own name:
+addresses:
 
 | Key | Text |
 |---|---|
@@ -491,37 +490,42 @@ its own name:
 | codeNotShown.next | Start again from Add a counter. |
 | boxTitle | Connect your Box |
 | boxAddressHint | host:port or name.onion:port |
-| WORDS_NEEDED_OA_BX18_INVITE_HEADING | WORDS_NEEDED_OA_BX18_INVITE_HEADING |
-| WORDS_NEEDED_OA_BX18_INVITE_TEXT | WORDS_NEEDED_OA_BX18_INVITE_TEXT |
-| WORDS_NEEDED_OA_BX18_INVITE_NEXT | WORDS_NEEDED_OA_BX18_INVITE_NEXT |
-| WORDS_NEEDED_OA_BX18_ADDRESS_LABEL | WORDS_NEEDED_OA_BX18_ADDRESS_LABEL |
-| WORDS_NEEDED_OA_BX18_ADDRESS_SCAN | WORDS_NEEDED_OA_BX18_ADDRESS_SCAN |
-| WORDS_NEEDED_OA_BX18_ADDRESS_LOOK | WORDS_NEEDED_OA_BX18_ADDRESS_LOOK |
-| WORDS_NEEDED_OA_BX18_WORDS_HEADING | WORDS_NEEDED_OA_BX18_WORDS_HEADING |
-| WORDS_NEEDED_OA_BX18_WORDS_TEXT | WORDS_NEEDED_OA_BX18_WORDS_TEXT |
-| WORDS_NEEDED_OA_BX18_WORDS_MATCH | WORDS_NEEDED_OA_BX18_WORDS_MATCH |
-| WORDS_NEEDED_OA_BX18_WORDS_DIFFER | WORDS_NEEDED_OA_BX18_WORDS_DIFFER |
-| WORDS_NEEDED_OA_BX18_DIFFER_STOPPED | WORDS_NEEDED_OA_BX18_DIFFER_STOPPED |
-| WORDS_NEEDED_OA_BX18_REST_HEADING | WORDS_NEEDED_OA_BX18_REST_HEADING |
-| WORDS_NEEDED_OA_BX18_REST_TEXT | WORDS_NEEDED_OA_BX18_REST_TEXT |
-| WORDS_NEEDED_OA_BX18_SEND | WORDS_NEEDED_OA_BX18_SEND |
-| WORDS_NEEDED_OA_BX18_PAIRED_HEADING | WORDS_NEEDED_OA_BX18_PAIRED_HEADING |
-| WORDS_NEEDED_OA_BX18_PAIRED_TEXT | WORDS_NEEDED_OA_BX18_PAIRED_TEXT |
-| WORDS_NEEDED_OA_BX18_PAIRED_NEXT | WORDS_NEEDED_OA_BX18_PAIRED_NEXT |
-| WORDS_NEEDED_OA_BX18_RELAY_HEADING | WORDS_NEEDED_OA_BX18_RELAY_HEADING |
-| WORDS_NEEDED_OA_BX18_RELAY_TEXT | WORDS_NEEDED_OA_BX18_RELAY_TEXT |
-| WORDS_NEEDED_OA_BX18_RELAY_LIST | WORDS_NEEDED_OA_BX18_RELAY_LIST |
-| WORDS_NEEDED_OA_BX18_RELAY_TAKEN | WORDS_NEEDED_OA_BX18_RELAY_TAKEN |
-| WORDS_NEEDED_OA_BX18_RELAY_LATER | WORDS_NEEDED_OA_BX18_RELAY_LATER |
-| WORDS_NEEDED_OA_BX18_LINK_NOT_SAVED | WORDS_NEEDED_OA_BX18_LINK_NOT_SAVED |
-| WORDS_NEEDED_OA_OA119_WAITING_ROW | WORDS_NEEDED_OA_OA119_WAITING_ROW |
-| WORDS_NEEDED_OA_OA119_WAITING_HEADING | WORDS_NEEDED_OA_OA119_WAITING_HEADING |
-| WORDS_NEEDED_OA_OA119_WAITING_TEXT | WORDS_NEEDED_OA_OA119_WAITING_TEXT |
-| WORDS_NEEDED_OA_OA119_WORDS_LABEL | WORDS_NEEDED_OA_OA119_WORDS_LABEL |
-| WORDS_NEEDED_OA_OA119_FIELDS_LABEL | WORDS_NEEDED_OA_OA119_FIELDS_LABEL |
-| WORDS_NEEDED_OA_OA121_ENDS | WORDS_NEEDED_OA_OA121_ENDS |
-| WORDS_NEEDED_OA_OA121_DROPPED | WORDS_NEEDED_OA_OA121_DROPPED |
-| WORDS_NEEDED_OA_OA122_PAIRED_LATER | WORDS_NEEDED_OA_OA122_PAIRED_LATER |
+| boxInviteHeading | Enter this on the Box |
+| boxInviteText | Enter this invitation on the Box, on its status page or in its invitation file. Only someone at the Box can pair it. |
+| boxInviteNext | The Box has it |
+| boxAddressLabel | The Box's address |
+| boxAddressScan | Scan the Box's address |
+| boxAddressLook | Find the Box |
+| boxWordsHeading | Check the Box's four words |
+| boxWordsText | The Box's status page shows four words. If they are not these same four, another device is answering in its place. |
+| boxWordsMatch | They are the same |
+| boxWordsDiffer | They are not the same |
+| boxRestHeading | Before the Box joins |
+| boxRestText | Connecting the Box rests on this phone alone. After it, a change that loosens the shop's settings needs a counter to confirm it. |
+| boxSend | Connect the Box |
+| boxPairedHeading | Box connected |
+| boxPairedText | The Box took its welcome and this phone saved the link. Counters paired from now on reach the shop through it. |
+| boxPairedNext | Counters paired before the Box take its relay code next. |
+| boxRelayHeading | Give counters the relay code |
+| boxRelayText | On each counter paired before the Box, open its relay screen and scan this code. Mark each one here once it has. |
+| boxRelayList | Counters still to scan it |
+| boxRelayTaken | Taken by |
+| boxRelayLater | Do the rest later |
+| waitingRowTitle | Change waiting for a counter |
+| waitingHeading | Confirm it at a counter |
+| waitingText | This change loosens the shop's settings, so it waits. On a counter the shop already has, open Change to confirm and check these words. |
+| waitingWordsLabel | The four words |
+| waitingFieldsLabel | What it loosens |
+| waitingEnds | If no counter confirms it within seven days, it is dropped and the settings stay as they are. |
+| waitingDropped | No change is waiting |
+| pairedLater | This counter takes sales now. It joins the other devices through the Box once a counter the shop already has confirms the change. |
+| boxStartAgain | Start again |
+| boxDifferStopped.heading | Box not connected |
+| boxDifferStopped.what | The four words differ, so the device that answered may not be your Box, and nothing was sent to it. |
+| boxDifferStopped.next | Check the Box's address, enter a new invitation on it and start again. |
+| boxLinkNotSaved.heading | Link to the Box not saved |
+| boxLinkNotSaved.what | The Box took its welcome, but this phone could not save the link to it, so it cannot reach the Box yet. |
+| boxLinkNotSaved.next | Free some storage on this phone, then tap Connect the Box again. |
 
 The key map at the top of the key-setup screens. `{k1}`, `{k2}` and `{k3}` are
 the state words in lower case:

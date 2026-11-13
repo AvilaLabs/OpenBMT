@@ -225,7 +225,7 @@ class OwnBoxPairing(
             step = OwnBoxStep.Sent
             null
         } catch (_: IOException) {
-            OwnPairWords.said(OwnPairWords.boxLinkNotSaved)
+            OwnPairWords.boxLinkNotSaved
         }
     }
 

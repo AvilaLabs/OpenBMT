@@ -6,11 +6,9 @@ import org.openbmt.app.Who
 
 /**
  * The words of adding a counter to a shop with its own wallet (`docs/OWNER-APP-RULES.md` OA-105 to OA-114): the
- * offer, the counter's request, the bundle, and the wallet page's gap-limit row. They are the approved texts of the
- * design file, pasted as they are; the library's refusals are the library's own words (SC-01 to SC-12). A text that
- * is not written yet, or that does not pass SC-12, is a `WORDS_NEEDED_OA_xxx` constant that shows its own name
- * wherever the words would be, until the words exist (OA-114). The list is written to docs/screens/owner-app.md by
- * [AppWords.screensMarkdown]. No Android class is used.
+ * offer, the counter's request, the bundle, the wallet page's gap-limit row, connecting the Box (BX-18) and the
+ * change that waits for a counter (OA-119 to OA-123). The library's refusals are the library's own words (SC-01 to
+ * SC-12). The list is written to docs/screens/owner-app.md by [AppWords.screensMarkdown]. No Android class is used.
  */
 object OwnPairWords {
     // ---- the offer (OA-108) ----
@@ -52,39 +50,38 @@ object OwnPairWords {
     // ---- connecting the shop's Box, with no Key app (BX-17, BX-18, CR-130, CR-132) ----
     const val boxTitle = "Connect your Box"
     const val boxAddressHint = "host:port or name.onion:port"
-    const val boxInviteHeading = "WORDS_NEEDED_OA_BX18_INVITE_HEADING"
-    const val boxInviteText = "WORDS_NEEDED_OA_BX18_INVITE_TEXT"
-    const val boxInviteNext = "WORDS_NEEDED_OA_BX18_INVITE_NEXT"
-    const val boxAddressLabel = "WORDS_NEEDED_OA_BX18_ADDRESS_LABEL"
-    const val boxAddressScan = "WORDS_NEEDED_OA_BX18_ADDRESS_SCAN"
-    const val boxAddressLook = "WORDS_NEEDED_OA_BX18_ADDRESS_LOOK"
-    const val boxWordsHeading = "WORDS_NEEDED_OA_BX18_WORDS_HEADING"
-    const val boxWordsText = "WORDS_NEEDED_OA_BX18_WORDS_TEXT"
-    const val boxWordsMatch = "WORDS_NEEDED_OA_BX18_WORDS_MATCH"
-    const val boxWordsDiffer = "WORDS_NEEDED_OA_BX18_WORDS_DIFFER"
-    const val boxDifferStopped = "WORDS_NEEDED_OA_BX18_DIFFER_STOPPED"
-    const val boxRestHeading = "WORDS_NEEDED_OA_BX18_REST_HEADING"
-    const val boxRestText = "WORDS_NEEDED_OA_BX18_REST_TEXT"
-    const val boxSend = "WORDS_NEEDED_OA_BX18_SEND"
-    const val boxPairedHeading = "WORDS_NEEDED_OA_BX18_PAIRED_HEADING"
-    const val boxPairedText = "WORDS_NEEDED_OA_BX18_PAIRED_TEXT"
-    const val boxPairedNext = "WORDS_NEEDED_OA_BX18_PAIRED_NEXT"
-    const val boxRelayHeading = "WORDS_NEEDED_OA_BX18_RELAY_HEADING"
-    const val boxRelayText = "WORDS_NEEDED_OA_BX18_RELAY_TEXT"
-    const val boxRelayList = "WORDS_NEEDED_OA_BX18_RELAY_LIST"
-    const val boxRelayTaken = "WORDS_NEEDED_OA_BX18_RELAY_TAKEN"
-    const val boxRelayLater = "WORDS_NEEDED_OA_BX18_RELAY_LATER"
-    const val boxLinkNotSaved = "WORDS_NEEDED_OA_BX18_LINK_NOT_SAVED"
+    const val boxInviteHeading = "Enter this on the Box"
+    const val boxInviteText = "Enter this invitation on the Box, on its status page or in its invitation file. Only someone at the Box can pair it."
+    const val boxInviteNext = "The Box has it"
+    const val boxAddressLabel = "The Box's address"
+    const val boxAddressScan = "Scan the Box's address"
+    const val boxAddressLook = "Find the Box"
+    const val boxWordsHeading = "Check the Box's four words"
+    const val boxWordsText = "The Box's status page shows four words. If they are not these same four, another device is answering in its place."
+    const val boxWordsMatch = "They are the same"
+    const val boxWordsDiffer = "They are not the same"
+    const val boxStartAgain = "Start again"
+    const val boxRestHeading = "Before the Box joins"
+    const val boxRestText = "Connecting the Box rests on this phone alone. After it, a change that loosens the shop's settings needs a counter to confirm it."
+    const val boxSend = "Connect the Box"
+    const val boxPairedHeading = "Box connected"
+    const val boxPairedText = "The Box took its welcome and this phone saved the link. Counters paired from now on reach the shop through it."
+    const val boxPairedNext = "Counters paired before the Box take its relay code next."
+    const val boxRelayHeading = "Give counters the relay code"
+    const val boxRelayText = "On each counter paired before the Box, open its relay screen and scan this code. Mark each one here once it has."
+    const val boxRelayList = "Counters still to scan it"
+    const val boxRelayTaken = "Taken by"
+    const val boxRelayLater = "Do the rest later"
 
     // ---- a change confirmed at a counter (OA-119 to OA-122) ----
-    const val waitingRowTitle = "WORDS_NEEDED_OA_OA119_WAITING_ROW"
-    const val waitingHeading = "WORDS_NEEDED_OA_OA119_WAITING_HEADING"
-    const val waitingText = "WORDS_NEEDED_OA_OA119_WAITING_TEXT"
-    const val waitingWordsLabel = "WORDS_NEEDED_OA_OA119_WORDS_LABEL"
-    const val waitingFieldsLabel = "WORDS_NEEDED_OA_OA119_FIELDS_LABEL"
-    const val waitingEnds = "WORDS_NEEDED_OA_OA121_ENDS"
-    const val waitingDropped = "WORDS_NEEDED_OA_OA121_DROPPED"
-    const val pairedLater = "WORDS_NEEDED_OA_OA122_PAIRED_LATER"
+    const val waitingRowTitle = "Change waiting for a counter"
+    const val waitingHeading = "Confirm it at a counter"
+    const val waitingText = "This change loosens the shop's settings, so it waits. On a counter the shop already has, open Change to confirm and check these words."
+    const val waitingWordsLabel = "The four words"
+    const val waitingFieldsLabel = "What it loosens"
+    const val waitingEnds = "If no counter confirms it within seven days, it is dropped and the settings stay as they are."
+    const val waitingDropped = "No change is waiting"
+    const val pairedLater = "This counter takes sales now. It joins the other devices through the Box once a counter the shop already has confirms the change."
 
     // ---- refusals of the app's own steps (OA-105, OA-108) ----
     val walletNotSaved = SayWords(
@@ -103,47 +100,19 @@ object OwnPairWords {
         "Start again from Add a counter.", "OA-108", null, null, null,
     )
 
-    /** The texts of connecting a Box that are not written yet, each named for BX-18 and its place (OA-114). */
-    val placeholders: List<String> = listOf(
-        boxInviteHeading,
-        boxInviteText,
-        boxInviteNext,
-        boxAddressLabel,
-        boxAddressScan,
-        boxAddressLook,
-        boxWordsHeading,
-        boxWordsText,
-        boxWordsMatch,
-        boxWordsDiffer,
-        boxDifferStopped,
-        boxRestHeading,
-        boxRestText,
-        boxSend,
-        boxPairedHeading,
-        boxPairedText,
-        boxPairedNext,
-        boxRelayHeading,
-        boxRelayText,
-        boxRelayList,
-        boxRelayTaken,
-        boxRelayLater,
-        boxLinkNotSaved,
-        waitingRowTitle,
-        waitingHeading,
-        waitingText,
-        waitingWordsLabel,
-        waitingFieldsLabel,
-        waitingEnds,
-        waitingDropped,
-        pairedLater,
+    /** The four words of the Box differ: nothing was sent to it (BX-18). */
+    val boxDifferStopped = SayWords(
+        Tones.STOP, Who.OWNER, "Box not connected",
+        "The four words differ, so the device that answered may not be your Box, and nothing was sent to it.",
+        "Check the Box's address, enter a new invitation on it and start again.", "BX-18", null, null, null,
     )
 
-    /** Words that are still to be written: the placeholder stands in the heading and both sentences. */
-    fun said(placeholder: String): SayWords =
-        SayWords(Tones.STOP, Who.OWNER, placeholder, placeholder, placeholder, null, null, null, null)
-
-    /** Whether these words are a placeholder (OA-114). */
-    fun isPlaceholder(words: SayWords): Boolean = words.heading.startsWith("WORDS_NEEDED_")
+    /** The Box took its welcome and the link could not be saved (BX-18). */
+    val boxLinkNotSaved = SayWords(
+        Tones.STOP, Who.OWNER, "Link to the Box not saved",
+        "The Box took its welcome, but this phone could not save the link to it, so it cannot reach the Box yet.",
+        "Free some storage on this phone, then tap Connect the Box again.", "BX-18", null, null, null,
+    )
 
     fun compare(name: String): String = compareText.replace("{name}", name)
 
@@ -168,7 +137,39 @@ object OwnPairWords {
             add("$k.heading", w.heading); add("$k.what", w.what); add("$k.next", w.next)
         }
         add("boxTitle", boxTitle); add("boxAddressHint", boxAddressHint)
-        for (n in placeholders) add(n, n)
+        add("boxInviteHeading", boxInviteHeading)
+        add("boxInviteText", boxInviteText)
+        add("boxInviteNext", boxInviteNext)
+        add("boxAddressLabel", boxAddressLabel)
+        add("boxAddressScan", boxAddressScan)
+        add("boxAddressLook", boxAddressLook)
+        add("boxWordsHeading", boxWordsHeading)
+        add("boxWordsText", boxWordsText)
+        add("boxWordsMatch", boxWordsMatch)
+        add("boxWordsDiffer", boxWordsDiffer)
+        add("boxRestHeading", boxRestHeading)
+        add("boxRestText", boxRestText)
+        add("boxSend", boxSend)
+        add("boxPairedHeading", boxPairedHeading)
+        add("boxPairedText", boxPairedText)
+        add("boxPairedNext", boxPairedNext)
+        add("boxRelayHeading", boxRelayHeading)
+        add("boxRelayText", boxRelayText)
+        add("boxRelayList", boxRelayList)
+        add("boxRelayTaken", boxRelayTaken)
+        add("boxRelayLater", boxRelayLater)
+        add("waitingRowTitle", waitingRowTitle)
+        add("waitingHeading", waitingHeading)
+        add("waitingText", waitingText)
+        add("waitingWordsLabel", waitingWordsLabel)
+        add("waitingFieldsLabel", waitingFieldsLabel)
+        add("waitingEnds", waitingEnds)
+        add("waitingDropped", waitingDropped)
+        add("pairedLater", pairedLater)
+        add("boxStartAgain", boxStartAgain)
+        for ((k, w) in listOf("boxDifferStopped" to boxDifferStopped, "boxLinkNotSaved" to boxLinkNotSaved)) {
+            add("$k.heading", w.heading); add("$k.what", w.what); add("$k.next", w.next)
+        }
         return out
     }
 }

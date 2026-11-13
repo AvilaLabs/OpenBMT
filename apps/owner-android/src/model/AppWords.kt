@@ -1317,8 +1317,7 @@ object AppWords {
         out.append(
             "\nAdding a counter to a shop with its own wallet (OA-105 to OA-114), in\n" +
                 "`OwnPairWords`. `{name}` is the counter's name and `{n}` a number of\n" +
-                "addresses. A text named `WORDS_NEEDED_OA_...` is not written yet and shows\n" +
-                "its own name:\n\n" +
+                "addresses:\n\n" +
                 "| Key | Text |\n" +
                 "|---|---|\n",
         )

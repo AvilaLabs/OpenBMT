@@ -3173,7 +3173,7 @@ object AppModelTest {
                 // They differ: nothing is kept.
                 val r = OwnBoxPairing(store3, lib3)
                 r.start(2_000); r.toAddress(); r.found("host.example:80", claim)
-                ok(r.differ(OwnPairWords.said(OwnPairWords.boxDifferStopped)).heading == OwnPairWords.boxDifferStopped && r.step == OwnBoxStep.Stopped && r.checked == null, "BX-18: when the words differ nothing is sent")
+                ok(r.differ(OwnPairWords.boxDifferStopped).heading == OwnPairWords.boxDifferStopped.heading && r.step == OwnBoxStep.Stopped && r.checked == null, "BX-18: when the words differ nothing is sent")
             } finally {
                 dir3.deleteRecursively()
             }
@@ -3198,9 +3198,9 @@ object AppModelTest {
         // The node reads the link once, when it starts: a Box connected or changed needs a start, a counter does not.
         ok(OwnBoxLink.restartNeeded(null, link) && OwnBoxLink.restartNeeded(link.id(), OwnLink("other.example:80", key, emptyList())) && !OwnBoxLink.restartNeeded(link.id(), link.without(counters[0])) && !OwnBoxLink.restartNeeded(null, null) && OwnBoxLink.restartNeeded(link.id(), null), "BX-18: the node starts again when the kept link is not the one it started with")
 
-        // The words are placeholders named for BX-18, each in the list; the screens write no sentence of their own.
-        val bx = OwnPairWords.placeholders.filter { it.startsWith("WORDS_NEEDED_OA_BX18_") }
-        ok(bx.size == 23 && bx.toSet().size == bx.size && bx.all { n -> OwnPairWords.all().any { it.first == n } }, "BX-18: every text of connecting a Box that is not written is listed: ${bx.size}")
+        // The words of connecting a Box are written, each in the list; the screens write no sentence of their own.
+        val bx = OwnPairWords.all().filter { it.first.startsWith("box") && it.first != "boxTitle" && it.first != "boxAddressHint" }
+        ok(bx.size == 28 && bx.none { it.second.contains("WORDS_NEEDED") || it.second.isBlank() }, "BX-18: every text of connecting a Box is written and listed: ${bx.size}")
         val box = source("src/android/OwnBox.kt")
         ok(!Regex("(ui\\.(text|primary|button|danger|field)|heading|para|line|label)\\(\"[A-Za-z]").containsMatchIn(box.replace("\"Dollars for one bitcoin\"", "")), "OwnBox.kt has no sentence of its own")
         val controller = source("src/android/Controller.kt")
@@ -3365,18 +3365,17 @@ object AppModelTest {
         val sentences = listOf(
             OwnPairWords.offerText, OwnPairWords.endedText, OwnPairWords.endedNext, OwnPairWords.compareText, OwnPairWords.bundleText,
             OwnPairWords.pairedText, OwnPairWords.pairedNext, OwnPairWords.gapUsual, OwnPairWords.gapMore, OwnPairWords.gapMoreNext,
+            OwnPairWords.boxInviteText, OwnPairWords.boxWordsText, OwnPairWords.boxRestText, OwnPairWords.boxPairedText,
+            OwnPairWords.boxPairedNext, OwnPairWords.boxRelayText, OwnPairWords.waitingText, OwnPairWords.waitingEnds,
+            OwnPairWords.pairedLater,
+            OwnPairWords.boxDifferStopped.what, OwnPairWords.boxDifferStopped.next, OwnPairWords.boxLinkNotSaved.what, OwnPairWords.boxLinkNotSaved.next,
         )
         for (t in sentences) ok(t.length <= 140 && t.endsWith("."), "at most 140 characters, ends with a full stop: $t")
         ok(sentences.toSet().size == sentences.size, "no two sentences alike")
         val headings = listOf(OwnPairWords.offerHeading, OwnPairWords.endedHeading, OwnPairWords.compareHeading, OwnPairWords.bundleHeading, OwnPairWords.pairedHeading, OwnPairWords.gapTitle)
         ok(headings.none { it in sentences } && headings.toSet().size == headings.size, "no heading repeats a sentence")
-        // The placeholders are each named for a rule, hold nothing else and show their name in every part of the words.
-        for (n in OwnPairWords.placeholders) {
-            ok(Regex("WORDS_NEEDED_OA_(\\d{3}|BX\\d{2}|OA\\d{3})(_[A-Z_]+)?").matches(n), "$n is named for a rule")
-            val w = OwnPairWords.said(n)
-            ok(OwnPairWords.isPlaceholder(w) && w.heading == n && w.what == n && w.next == n, "$n shows its name")
-        }
-        ok(OwnPairWords.placeholders.toSet().size == OwnPairWords.placeholders.size, "each placeholder once")
+        // No text is left as a placeholder.
+        ok(OwnPairWords.all().none { it.second.contains("WORDS_NEEDED") || it.second.isBlank() }, "no text is a placeholder")
         // The list in docs/screens has every text and every placeholder.
         val md = AppWords.screensMarkdown()
         ok(OwnPairWords.all().all { (k, _) -> md.contains("| $k |") } && md.contains("| walletTitle |"), "the screens list has them")
@@ -3402,7 +3401,7 @@ object AppModelTest {
     private fun oa_121_a_change_ends_seven_days_after_it_was_signed_and_the_page_says_so() {
         val shown = OwnWaitingChange.of(waitingShop, waitingOwn())!!
         ok(shown.endsAt - shown.signedAt == 7L * 86_400, "OA-121: the change ends seven days after it was signed")
-        ok(OwnPairWords.placeholders.contains(OwnPairWords.waitingEnds) && OwnPairWords.placeholders.contains(OwnPairWords.waitingDropped), "OA-121: the words of the end and the drop are listed")
+        ok(OwnPairWords.all().any { it.first == "waitingEnds" } && OwnPairWords.all().any { it.first == "waitingDropped" }, "OA-121: the words of the end and the drop are listed")
     }
 
     private fun oa_122_a_counter_paired_while_another_is_in_force_is_marked_as_waiting() {
@@ -3421,8 +3420,8 @@ object AppModelTest {
     }
 
     private fun oa_123_every_text_of_the_waiting_change_is_listed() {
-        val plan = OwnPairWords.placeholders.filter { Regex("WORDS_NEEDED_OA_OA12[0-3]_.*|WORDS_NEEDED_OA_OA119_.*").matches(it) }
-        ok(plan.size == 8 && plan.all { n -> OwnPairWords.all().any { it.first == n } }, "OA-123: every text of the waiting change is listed: ${plan.size}")
+        val plan = listOf("waitingRowTitle", "waitingHeading", "waitingText", "waitingWordsLabel", "waitingFieldsLabel", "waitingEnds", "waitingDropped", "pairedLater")
+        ok(plan.all { n -> OwnPairWords.all().any { it.first == n && !it.second.contains("WORDS_NEEDED") } }, "OA-123: every text of the waiting change is written and listed")
     }
 
     // ---- the rules and their tests -----------------------------------------------------------------------------

@@ -67,7 +67,7 @@ private fun Controller.showOwnBox(message: SayWords? = null) {
 
 /** The words of a connection that did not start or was stopped, and the way to start again. */
 private fun Controller.ownBoxStopped(words: SayWords) {
-    val again = ui.primary(OwnPairWords.boxInviteNext) {
+    val again = ui.primary(OwnPairWords.boxStartAgain) {
         ownBoxPairing = null
         showOwnBox()
     }
@@ -143,7 +143,7 @@ private fun Controller.showOwnBoxWords(p: OwnBoxPairing, message: SayWords?, bac
         showOwnBox()
     }
     val differ = ui.danger(OwnPairWords.boxWordsDiffer) {
-        p.differ(OwnPairWords.said(OwnPairWords.boxDifferStopped))
+        p.differ(OwnPairWords.boxDifferStopped)
         showOwnBox()
     }
     stepScreen(OwnPairWords.boxTitle, views, listOf(match, differ), back)
