@@ -131,7 +131,12 @@ impl Inner {
     }
 
     async fn apply(
-        &self, ticket: u64, p: String, s: String, k: String, op: Op,
+        &self,
+        ticket: u64,
+        p: String,
+        s: String,
+        k: String,
+        op: Op,
     ) -> Result<(), io::Error> {
         let name = device_name(&p, &s, &k);
         let mut applied = self.applied.lock().await;
@@ -158,8 +163,12 @@ pub struct DualStore {
 impl DualStore {
     /// A store of the counter's own disk at `local` and the second device.
     pub fn new(
-        local: Arc<FilesystemStore>, device: Arc<dyn SecondDevice>, key: SealKey,
-        entropy: Arc<KeysManager>, status: Arc<DeviceStatus>, logger: Arc<Logger>,
+        local: Arc<FilesystemStore>,
+        device: Arc<dyn SecondDevice>,
+        key: SealKey,
+        entropy: Arc<KeysManager>,
+        status: Arc<DeviceStatus>,
+        logger: Arc<Logger>,
     ) -> Self {
         DualStore {
             inner: Arc::new(Inner {
@@ -200,14 +209,16 @@ impl KVStore for DualStore {
     }
 
     fn write(
-        &self, p: &str, s: &str, k: &str, buf: Vec<u8>,
+        &self,
+        p: &str,
+        s: &str,
+        k: &str,
+        buf: Vec<u8>,
     ) -> AsyncResult<'static, (), io::Error> {
         self.queue(p, s, k, Op::Write(buf))
     }
 
-    fn remove(
-        &self, p: &str, s: &str, k: &str, lazy: bool,
-    ) -> AsyncResult<'static, (), io::Error> {
+    fn remove(&self, p: &str, s: &str, k: &str, lazy: bool) -> AsyncResult<'static, (), io::Error> {
         self.queue(p, s, k, Op::Remove { lazy })
     }
 
@@ -228,7 +239,11 @@ pub struct DeviceView {
 impl DeviceView {
     /// A view of `device` with the node's key.
     pub fn new(device: Arc<dyn SecondDevice>, key: SealKey, entropy: Arc<KeysManager>) -> Self {
-        Self { device, key, entropy }
+        Self {
+            device,
+            key,
+            entropy,
+        }
     }
 
     /// Every name on the device.
@@ -239,7 +254,11 @@ impl DeviceView {
 
 impl KVStore for DeviceView {
     fn read(&self, p: &str, s: &str, k: &str) -> AsyncResult<'static, Vec<u8>, io::Error> {
-        let (device, key, name) = (Arc::clone(&self.device), self.key.clone(), device_name(p, s, k));
+        let (device, key, name) = (
+            Arc::clone(&self.device),
+            self.key.clone(),
+            device_name(p, s, k),
+        );
         Box::pin(async move {
             match device.read(&name).await {
                 Ok(Some(sealed)) => open(&key, &name, &sealed).map_err(|_| other("seal")),
@@ -250,7 +269,11 @@ impl KVStore for DeviceView {
     }
 
     fn write(
-        &self, p: &str, s: &str, k: &str, buf: Vec<u8>,
+        &self,
+        p: &str,
+        s: &str,
+        k: &str,
+        buf: Vec<u8>,
     ) -> AsyncResult<'static, (), io::Error> {
         let (device, name) = (Arc::clone(&self.device), device_name(p, s, k));
         let sealed = seal(&self.key, nonce(&self.entropy), &name, &buf);
@@ -258,7 +281,11 @@ impl KVStore for DeviceView {
     }
 
     fn remove(
-        &self, p: &str, s: &str, k: &str, _lazy: bool,
+        &self,
+        p: &str,
+        s: &str,
+        k: &str,
+        _lazy: bool,
     ) -> AsyncResult<'static, (), io::Error> {
         let (device, name) = (Arc::clone(&self.device), device_name(p, s, k));
         Box::pin(async move { device.remove(&name).await.map_err(|e| other(&e.0)) })
@@ -273,5 +300,214 @@ impl KVStore for DeviceView {
                 .filter_map(|n| n.strip_prefix(&prefix).map(str::to_string))
                 .collect())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bip85::NodeSeed;
+    use crate::device::{DeviceState, DirDevice, GatedDevice};
+    use crate::testutil::temp_dir;
+    use lightning::util::logger::Level;
+
+    struct Rig {
+        store: DualStore,
+        device: GatedDevice<DirDevice>,
+        local: Arc<FilesystemStore>,
+        local_dir: std::path::PathBuf,
+        status: Arc<DeviceStatus>,
+        key: SealKey,
+    }
+
+    fn rig(name: &str) -> Rig {
+        let dir = temp_dir(name);
+        let local_dir = dir.join("local");
+        let device = GatedDevice::new(DirDevice::new(dir.join("device")).unwrap());
+        let local = Arc::new(FilesystemStore::new(local_dir.clone()));
+        let seed = NodeSeed([5; 64]);
+        let key = SealKey::from_seed(&seed);
+        let keys = Arc::new(KeysManager::new(&[1; 32], 1, 1, true));
+        let status = Arc::new(DeviceStatus::new());
+        let logger = Arc::new(Logger::open(&dir.join("log"), Level::Debug).unwrap());
+        let store = DualStore::new(
+            Arc::clone(&local),
+            Arc::new(device.clone()),
+            key.clone(),
+            keys,
+            Arc::clone(&status),
+            logger,
+        );
+        Rig {
+            store,
+            device,
+            local,
+            local_dir,
+            status,
+            key,
+        }
+    }
+
+    async fn settle(ms: u64) {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+    }
+
+    #[tokio::test]
+    async fn sl_21_a_write_is_done_only_when_both_copies_are_written() {
+        let r = rig("store-both");
+        r.store
+            .write("monitors", "", "a_0", b"v1".to_vec())
+            .await
+            .unwrap();
+        // The device has the sealed blob, and it is not the plain one.
+        let sealed = r.device.read("monitors~~a_0").await.unwrap().unwrap();
+        assert_ne!(sealed, b"v1");
+        assert_eq!(open(&r.key, "monitors~~a_0", &sealed).unwrap(), b"v1");
+        assert_eq!(
+            KVStore::read(&*r.local, "monitors", "", "a_0")
+                .await
+                .unwrap(),
+            b"v1"
+        );
+        assert_eq!(r.status.snapshot().stored_writes, 1);
+        assert_eq!(r.status.snapshot().pending_writes, 0);
+    }
+
+    #[tokio::test]
+    async fn sl_24_the_second_device_is_written_first_and_a_device_away_holds_the_write() {
+        let r = rig("store-order");
+        r.device.set_away(true);
+        let store = r.store.clone();
+        let write = tokio::spawn(async move {
+            store
+                .write("monitor_updates", "a_0", "0000000001", b"u".to_vec())
+                .await
+        });
+        settle(700).await;
+        // Still in progress, nothing panicked, and the counter's own copy is
+        // not written ahead of the device's.
+        assert!(!write.is_finished());
+        assert!(!r.local_dir.join("monitor_updates/a_0/0000000001").exists());
+        let snap = r.status.snapshot();
+        assert_eq!(snap.state, DeviceState::Away);
+        assert_eq!(snap.pending_writes, 1);
+        // The device returns: the write finishes, device first then local.
+        r.device.set_away(false);
+        tokio::time::timeout(Duration::from_secs(10), write)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(r.local_dir.join("monitor_updates/a_0/0000000001").exists());
+        assert!(r
+            .device
+            .inner()
+            .dir()
+            .join("monitor_updates~a_0~0000000001")
+            .exists());
+        let snap = r.status.snapshot();
+        assert_eq!(snap.state, DeviceState::Reachable);
+        assert_eq!(snap.pending_writes, 0);
+        assert!(snap.last_stored_unix > 0);
+    }
+
+    #[tokio::test]
+    async fn sl_23_a_long_absence_is_not_an_error() {
+        let r = rig("store-long");
+        r.device.set_away(true);
+        let store = r.store.clone();
+        let write =
+            tokio::spawn(async move { store.write("", "", "manager", b"m".to_vec()).await });
+        settle(1500).await;
+        assert!(!write.is_finished());
+        r.device.set_away(false);
+        tokio::time::timeout(Duration::from_secs(10), write)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn sl_21_a_later_write_to_a_name_is_never_overwritten_by_an_earlier_one() {
+        let r = rig("store-order-same");
+        let first = r.store.write("", "", "manager", b"first".to_vec());
+        let second = r.store.write("", "", "manager", b"second".to_vec());
+        second.await.unwrap();
+        first.await.unwrap();
+        assert_eq!(
+            KVStore::read(&*r.local, "", "", "manager").await.unwrap(),
+            b"second"
+        );
+        let sealed = r.device.read("~~manager").await.unwrap().unwrap();
+        assert_eq!(open(&r.key, "~~manager", &sealed).unwrap(), b"second");
+    }
+
+    #[tokio::test]
+    async fn sl_20_removes_go_to_both_copies() {
+        let r = rig("store-remove");
+        r.store
+            .write("monitor_updates", "a_0", "1", b"u".to_vec())
+            .await
+            .unwrap();
+        r.store
+            .remove("monitor_updates", "a_0", "1", false)
+            .await
+            .unwrap();
+        assert!(r
+            .device
+            .read("monitor_updates~a_0~1")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(KVStore::read(&*r.local, "monitor_updates", "a_0", "1")
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn sl_20_the_device_view_opens_what_the_store_wrote_and_pull_and_push_agree() {
+        let r = rig("store-view");
+        r.store
+            .write("monitors", "", "a_0", b"mon".to_vec())
+            .await
+            .unwrap();
+        r.store
+            .write("monitor_updates", "a_0", "2", b"upd".to_vec())
+            .await
+            .unwrap();
+        r.store
+            .write("", "", "manager", b"mgr".to_vec())
+            .await
+            .unwrap();
+        let keys = Arc::new(KeysManager::new(&[1; 32], 1, 1, true));
+        let view = DeviceView::new(Arc::new(r.device.clone()), r.key.clone(), keys);
+        assert_eq!(view.read("monitors", "", "a_0").await.unwrap(), b"mon");
+        assert_eq!(
+            view.list("monitor_updates", "a_0").await.unwrap(),
+            vec!["2".to_string()]
+        );
+        // A wiped counter is brought back from the device alone.
+        let wiped = temp_dir("store-view-wiped");
+        let fresh = FilesystemStore::new(wiped.clone());
+        let n = crate::state::pull(&wiped, &fresh, &view).await.unwrap();
+        assert_eq!(n, 3);
+        assert_eq!(
+            KVStore::read(&fresh, "monitor_updates", "a_0", "2")
+                .await
+                .unwrap(),
+            b"upd"
+        );
+        assert_eq!(
+            KVStore::read(&fresh, "", "", "manager").await.unwrap(),
+            b"mgr"
+        );
+        // And a device that is behind is brought up to the counter's copy.
+        fresh
+            .write("monitors", "", "b_1", b"newer".to_vec())
+            .await
+            .unwrap();
+        crate::state::push(&wiped, &fresh, &view).await.unwrap();
+        assert_eq!(view.read("monitors", "", "b_1").await.unwrap(), b"newer");
     }
 }

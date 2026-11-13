@@ -35,7 +35,10 @@ pub struct CoreRpc {
 impl CoreRpc {
     pub(crate) fn client(&self) -> RpcClient {
         let credentials = base64(format!("{}:{}", self.user, self.password).as_bytes());
-        RpcClient::new(&credentials, HttpEndpoint::for_host(self.host.clone()).with_port(self.port))
+        RpcClient::new(
+            &credentials,
+            HttpEndpoint::for_host(self.host.clone()).with_port(self.port),
+        )
     }
 }
 
@@ -105,9 +108,15 @@ pub struct CoreBroadcaster {
 
 impl CoreBroadcaster {
     pub(crate) fn new(
-        client: Arc<RpcClient>, handle: tokio::runtime::Handle, logger: Arc<Logger>,
+        client: Arc<RpcClient>,
+        handle: tokio::runtime::Handle,
+        logger: Arc<Logger>,
     ) -> Self {
-        Self { client, handle, logger }
+        Self {
+            client,
+            handle,
+            logger,
+        }
     }
 }
 
@@ -119,8 +128,9 @@ impl BroadcasterInterface for CoreBroadcaster {
             let txid = tx.compute_txid();
             self.handle.spawn(async move {
                 let params = [serde_json::json!(hex)];
-                let result =
-                    client.call_method::<serde_json::Value>("sendrawtransaction", &params).await;
+                let result = client
+                    .call_method::<serde_json::Value>("sendrawtransaction", &params)
+                    .await;
                 match result {
                     Ok(_) => logger.line(Level::Info, &format!("broadcast {txid}")),
                     // A transaction that is already known, or that double-spends one,
@@ -163,18 +173,23 @@ impl CoreFees {
     pub async fn refresh(&self, client: &RpcClient) {
         async fn estimate(client: &RpcClient, blocks: u32) -> Option<u32> {
             let params = [serde_json::json!(blocks)];
-            let r = client.call_method::<serde_json::Value>("estimatesmartfee", &params).await.ok()?;
+            let r = client
+                .call_method::<serde_json::Value>("estimatesmartfee", &params)
+                .await
+                .ok()?;
             // BTC per kvB to sat per kw: x 1e8 / 4.
             let per_kvb = r.get("feerate")?.as_f64()?;
             Some(((per_kvb * 100_000_000.0 / 4.0).round() as u32).max(FEE_FLOOR_SAT_PER_KW))
         }
         if let Some(v) = estimate(client, 6).await {
             self.normal.store(v, Ordering::Relaxed);
-            self.non_anchor_min.store((v / 2).max(FEE_FLOOR_SAT_PER_KW), Ordering::Relaxed);
+            self.non_anchor_min
+                .store((v / 2).max(FEE_FLOOR_SAT_PER_KW), Ordering::Relaxed);
         }
         if let Some(v) = estimate(client, 2).await {
             self.urgent.store(v, Ordering::Relaxed);
-            self.max_estimate.store(v.saturating_mul(5), Ordering::Relaxed);
+            self.max_estimate
+                .store(v.saturating_mul(5), Ordering::Relaxed);
         }
     }
 

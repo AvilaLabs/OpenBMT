@@ -15,8 +15,14 @@ pub struct Logger {
 impl Logger {
     /// Opens (appending) `path`, keeping records at `min` and above.
     pub fn open(path: &Path, min: Level) -> std::io::Result<Self> {
-        let file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
-        Ok(Self { file: Mutex::new(file), min })
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        Ok(Self {
+            file: Mutex::new(file),
+            min,
+        })
     }
 
     /// One line of the node's own.

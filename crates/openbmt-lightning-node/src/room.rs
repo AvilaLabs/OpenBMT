@@ -31,6 +31,12 @@ pub enum OnChainReason {
     NoRoom,
     /// The amount is zero.
     NoAmount,
+    /// The provider is not connected or does not answer (SL-41).
+    ProviderAway,
+    /// The provider's fee for the opening is above the owner's limit (SL-29).
+    FeeAboveMax,
+    /// The provider's window to be back online is under a week (SL-30).
+    WindowTooShort,
 }
 
 /// What the counter does for an amount.
@@ -84,16 +90,27 @@ mod tests {
     use super::*;
 
     fn situation(room_msat: u64) -> Situation {
-        Situation { room_msat, device_ok: true, chain_ok: true, provider_can_open: true }
+        Situation {
+            room_msat,
+            device_ok: true,
+            chain_ok: true,
+            provider_can_open: true,
+        }
     }
 
     #[test]
     fn sl_40_room_is_the_sum_of_inbound_less_the_margin() {
         assert_eq!(room_to_receive_msat([]), 0);
         assert_eq!(room_to_receive_msat([ROOM_MARGIN_MSAT]), 0);
-        assert_eq!(room_to_receive_msat([10_000_000, 5_000_000]), 15_000_000 - ROOM_MARGIN_MSAT);
+        assert_eq!(
+            room_to_receive_msat([10_000_000, 5_000_000]),
+            15_000_000 - ROOM_MARGIN_MSAT
+        );
         assert_eq!(room_to_receive_msat([ROOM_MARGIN_MSAT - 1]), 0);
-        assert_eq!(room_to_receive_msat([u64::MAX, u64::MAX]), u64::MAX - ROOM_MARGIN_MSAT);
+        assert_eq!(
+            room_to_receive_msat([u64::MAX, u64::MAX]),
+            u64::MAX - ROOM_MARGIN_MSAT
+        );
     }
 
     #[test]
@@ -108,7 +125,10 @@ mod tests {
     fn sl_40_above_the_room_without_a_provider_it_is_on_chain() {
         let mut s = situation(9_000_000);
         s.provider_can_open = false;
-        assert_eq!(decide(9_000_001, &s), ReceiveDecision::OnChainOnly(OnChainReason::NoRoom));
+        assert_eq!(
+            decide(9_000_001, &s),
+            ReceiveDecision::OnChainOnly(OnChainReason::NoRoom)
+        );
         assert_eq!(decide(9_000_000, &s), ReceiveDecision::Invoice);
     }
 
@@ -122,10 +142,19 @@ mod tests {
     fn sl_41_the_device_away_or_the_chain_behind_shows_on_chain_alone() {
         let mut s = situation(9_000_000);
         s.device_ok = false;
-        assert_eq!(decide(1_000, &s), ReceiveDecision::OnChainOnly(OnChainReason::SecondDeviceAway));
+        assert_eq!(
+            decide(1_000, &s),
+            ReceiveDecision::OnChainOnly(OnChainReason::SecondDeviceAway)
+        );
         s.device_ok = true;
         s.chain_ok = false;
-        assert_eq!(decide(1_000, &s), ReceiveDecision::OnChainOnly(OnChainReason::ChainBehind));
-        assert_eq!(decide(0, &situation(9_000_000)), ReceiveDecision::OnChainOnly(OnChainReason::NoAmount));
+        assert_eq!(
+            decide(1_000, &s),
+            ReceiveDecision::OnChainOnly(OnChainReason::ChainBehind)
+        );
+        assert_eq!(
+            decide(0, &situation(9_000_000)),
+            ReceiveDecision::OnChainOnly(OnChainReason::NoAmount)
+        );
     }
 }

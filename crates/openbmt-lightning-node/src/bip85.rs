@@ -39,7 +39,10 @@ pub fn entropy_at(master: &Xpriv, path: &[u32]) -> Result<[u8; 64], bitcoin::bip
     for step in path {
         steps.push(ChildNumber::from_hardened_idx(*step)?);
     }
-    let key = master.derive_priv(&secp, &DerivationPath::from(steps))?.private_key.secret_bytes();
+    let key = master
+        .derive_priv(&secp, &DerivationPath::from(steps))?
+        .private_key
+        .secret_bytes();
     let mut engine = HmacEngine::<sha512::Hash>::new(HMAC_KEY);
     engine.input(&key);
     Ok(Hmac::from_engine(engine).to_byte_array())
@@ -47,7 +50,10 @@ pub fn entropy_at(master: &Xpriv, path: &[u32]) -> Result<[u8; 64], bitcoin::bip
 
 /// The node's seed: `m/83696968'/128169'/64'/{index}'`, 64 bytes.
 pub fn node_seed(master: &Xpriv, index: u32) -> Result<NodeSeed, bitcoin::bip32::Error> {
-    Ok(NodeSeed(entropy_at(master, &[HEX_APPLICATION, SEED_LEN as u32, index])?))
+    Ok(NodeSeed(entropy_at(
+        master,
+        &[HEX_APPLICATION, SEED_LEN as u32, index],
+    )?))
 }
 
 #[cfg(test)]

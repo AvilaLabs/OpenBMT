@@ -51,7 +51,13 @@ pub enum SealError {
 pub fn seal(key: &SealKey, nonce: [u8; NONCE_LEN], name: &str, content: &[u8]) -> Vec<u8> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&key.0));
     let body = cipher
-        .encrypt(Nonce::from_slice(&nonce), Payload { msg: content, aad: name.as_bytes() })
+        .encrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: content,
+                aad: name.as_bytes(),
+            },
+        )
         .expect("encryption of a blob in memory does not fail");
     let mut out = Vec::with_capacity(NONCE_LEN + body.len());
     out.extend_from_slice(&nonce);
@@ -67,7 +73,13 @@ pub fn open(key: &SealKey, name: &str, sealed: &[u8]) -> Result<Vec<u8>, SealErr
     let (nonce, body) = sealed.split_at(NONCE_LEN);
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&key.0));
     cipher
-        .decrypt(Nonce::from_slice(nonce), Payload { msg: body, aad: name.as_bytes() })
+        .decrypt(
+            Nonce::from_slice(nonce),
+            Payload {
+                msg: body,
+                aad: name.as_bytes(),
+            },
+        )
         .map_err(|_| SealError::BadTag)
 }
 
@@ -89,11 +101,20 @@ mod tests {
     #[test]
     fn sl_20_the_device_cannot_read_it_and_a_moved_blob_does_not_open() {
         let sealed = seal(&key(1), [7; NONCE_LEN], "monitors~~a", b"state");
-        assert_eq!(open(&key(2), "monitors~~a", &sealed), Err(SealError::BadTag));
-        assert_eq!(open(&key(1), "monitors~~b", &sealed), Err(SealError::BadTag));
+        assert_eq!(
+            open(&key(2), "monitors~~a", &sealed),
+            Err(SealError::BadTag)
+        );
+        assert_eq!(
+            open(&key(1), "monitors~~b", &sealed),
+            Err(SealError::BadTag)
+        );
         let mut flipped = sealed.clone();
         *flipped.last_mut().unwrap() ^= 1;
-        assert_eq!(open(&key(1), "monitors~~a", &flipped), Err(SealError::BadTag));
+        assert_eq!(
+            open(&key(1), "monitors~~a", &flipped),
+            Err(SealError::BadTag)
+        );
         assert_eq!(open(&key(1), "x", &sealed[..10]), Err(SealError::TooShort));
         assert!(!sealed.windows(5).any(|w| w == b"state"));
     }

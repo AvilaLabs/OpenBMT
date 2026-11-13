@@ -40,7 +40,10 @@ const REPLY_TIMEOUT: Duration = Duration::from_secs(20);
 async fn read_frame(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
     let len = stream.read_u32().await? as usize;
     if len > MAX_FRAME {
-        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "frame"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "frame",
+        ));
     }
     let mut body = vec![0u8; len];
     stream.read_exact(&mut body).await?;
@@ -236,7 +239,10 @@ mod tests {
         dev.write("z", vec![]).await.unwrap();
         assert_eq!(dev.read("k~x").await.unwrap().unwrap().len(), 100_000);
         assert_eq!(dev.read("z").await.unwrap(), Some(vec![]));
-        assert_eq!(dev.list().await.unwrap(), vec!["k~x".to_string(), "z".to_string()]);
+        assert_eq!(
+            dev.list().await.unwrap(),
+            vec!["k~x".to_string(), "z".to_string()]
+        );
         dev.remove("k~x").await.unwrap();
         assert_eq!(dev.list().await.unwrap(), vec!["z".to_string()]);
         assert!(dev.write("../x", vec![1]).await.is_err());
@@ -276,7 +282,9 @@ mod tests {
     async fn sl_20_a_request_without_the_magic_is_refused() {
         let (addr, server) = start("tcp-magic").await;
         let mut s = TcpStream::connect(addr).await.unwrap();
-        write_frame(&mut s, b"GET / HTTP/1.1\r\n\r\n").await.unwrap();
+        write_frame(&mut s, b"GET / HTTP/1.1\r\n\r\n")
+            .await
+            .unwrap();
         let reply = read_frame(&mut s).await.unwrap();
         assert_eq!(reply[0], ST_REFUSED);
         server.abort();

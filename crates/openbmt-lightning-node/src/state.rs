@@ -104,7 +104,9 @@ pub fn action(found: CopyOrder, from: StartFrom) -> Result<Action, StateError> {
         (CopyOrder::Diverged, _) => Err(StateError::Diverged),
         (CopyOrder::BothEmpty | CopyOrder::Same, _) => Ok(Action::Go),
         (CopyOrder::LocalNewer, StartFrom::Newer | StartFrom::Local) => Ok(Action::PushToDevice),
-        (CopyOrder::DeviceNewer, StartFrom::Newer | StartFrom::Device) => Ok(Action::PullFromDevice),
+        (CopyOrder::DeviceNewer, StartFrom::Newer | StartFrom::Device) => {
+            Ok(Action::PullFromDevice)
+        }
         (found, _) => Err(StateError::OlderCopy(found)),
     }
 }
@@ -134,7 +136,8 @@ impl FutureSpawner for NoSpawn {
 /// The latest update number of every channel monitor in `store`, the monitor
 /// with its stored updates applied.
 pub async fn update_numbers<K: KVStore + Send + Sync + 'static>(
-    store: Arc<K>, env: &ReadEnv,
+    store: Arc<K>,
+    env: &ReadEnv,
 ) -> Result<UpdateNumbers, io::Error> {
     let persister = MonitorUpdatingPersisterAsync::new(
         store,
@@ -147,7 +150,10 @@ pub async fn update_numbers<K: KVStore + Send + Sync + 'static>(
         Arc::clone(&env.fees),
     );
     let monitors = persister.read_all_channel_monitors_with_updates().await?;
-    Ok(monitors.iter().map(|(_, m)| (m.channel_id(), m.get_latest_update_id())).collect())
+    Ok(monitors
+        .iter()
+        .map(|(_, m)| (m.channel_id(), m.get_latest_update_id()))
+        .collect())
 }
 
 /// Every key in a directory store, as (primary, secondary, key).
@@ -194,7 +200,9 @@ pub fn local_keys(dir: &Path) -> std::io::Result<Vec<(String, String, String)>> 
 
 /// Makes the second device hold exactly what the counter's copy holds.
 pub async fn push<K: KVStore>(
-    local_dir: &Path, local: &K, device: &DeviceView,
+    local_dir: &Path,
+    local: &K,
+    device: &DeviceView,
 ) -> Result<usize, io::Error> {
     let keys = local_keys(local_dir)?;
     let mut names = BTreeSet::new();
@@ -215,12 +223,16 @@ pub async fn push<K: KVStore>(
 
 /// Makes the counter's copy hold exactly what the second device holds.
 pub async fn pull<K: KVStore>(
-    local_dir: &Path, local: &K, device: &DeviceView,
+    local_dir: &Path,
+    local: &K,
+    device: &DeviceView,
 ) -> Result<usize, io::Error> {
     let names = device.names().await?;
     let mut wanted = BTreeSet::new();
     for name in &names {
-        let Some((p, s, k)) = split_device_name(name) else { continue };
+        let Some((p, s, k)) = split_device_name(name) else {
+            continue;
+        };
         let blob = device.read(p, s, k).await?;
         local.write(p, s, k, blob).await?;
         wanted.insert(name.clone());
@@ -252,7 +264,10 @@ mod tests {
         assert_eq!(order(&a, &a), CopyOrder::Same);
         assert_eq!(order(&nums(&[(1, 6), (2, 7)]), &a), CopyOrder::LocalNewer);
         assert_eq!(order(&a, &nums(&[(1, 5), (2, 9)])), CopyOrder::DeviceNewer);
-        assert_eq!(order(&nums(&[(1, 6), (2, 7)]), &nums(&[(1, 5), (2, 9)])), CopyOrder::Diverged);
+        assert_eq!(
+            order(&nums(&[(1, 6), (2, 7)]), &nums(&[(1, 5), (2, 9)])),
+            CopyOrder::Diverged
+        );
     }
 
     #[test]
@@ -261,7 +276,10 @@ mod tests {
         assert_eq!(order(&a, &nums(&[])), CopyOrder::LocalNewer);
         assert_eq!(order(&nums(&[]), &a), CopyOrder::DeviceNewer);
         assert_eq!(order(&nums(&[(1, 0)]), &nums(&[])), CopyOrder::LocalNewer);
-        assert_eq!(order(&nums(&[(1, 5)]), &nums(&[(2, 1)])), CopyOrder::Diverged);
+        assert_eq!(
+            order(&nums(&[(1, 5)]), &nums(&[(2, 1)])),
+            CopyOrder::Diverged
+        );
     }
 
     #[test]
@@ -272,10 +290,16 @@ mod tests {
         assert_eq!(action(BothEmpty, StartFrom::Local), Ok(Go));
         assert_eq!(action(LocalNewer, StartFrom::Newer), Ok(PushToDevice));
         assert_eq!(action(LocalNewer, StartFrom::Local), Ok(PushToDevice));
-        assert_eq!(action(LocalNewer, StartFrom::Device), Err(StateError::OlderCopy(LocalNewer)));
+        assert_eq!(
+            action(LocalNewer, StartFrom::Device),
+            Err(StateError::OlderCopy(LocalNewer))
+        );
         assert_eq!(action(DeviceNewer, StartFrom::Newer), Ok(PullFromDevice));
         assert_eq!(action(DeviceNewer, StartFrom::Device), Ok(PullFromDevice));
-        assert_eq!(action(DeviceNewer, StartFrom::Local), Err(StateError::OlderCopy(DeviceNewer)));
+        assert_eq!(
+            action(DeviceNewer, StartFrom::Local),
+            Err(StateError::OlderCopy(DeviceNewer))
+        );
         for from in [StartFrom::Newer, StartFrom::Local, StartFrom::Device] {
             assert_eq!(action(Diverged, from), Err(StateError::Diverged));
         }
@@ -295,7 +319,11 @@ mod tests {
             keys,
             vec![
                 (String::new(), String::new(), "manager".to_string()),
-                ("monitor_updates".into(), "abc_0".into(), "00000000000000000001".into()),
+                (
+                    "monitor_updates".into(),
+                    "abc_0".into(),
+                    "00000000000000000001".into()
+                ),
                 ("monitors".into(), String::new(), "abc_0".into()),
             ]
         );

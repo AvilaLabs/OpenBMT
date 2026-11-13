@@ -78,7 +78,10 @@ pub fn to_self_delay(provider_max: u32) -> Option<u16> {
 /// being `now_unix`; or why none can (SL-29, SL-30). `max_fee_msat` is what
 /// the owner allows for one opening.
 pub fn choose_offer(
-    menu: &[LSPS2OpeningFeeParams], amount_msat: u64, max_fee_msat: u64, now_unix: i64,
+    menu: &[LSPS2OpeningFeeParams],
+    amount_msat: u64,
+    max_fee_msat: u64,
+    now_unix: i64,
 ) -> Result<Offer, Refusal> {
     if menu.is_empty() {
         return Err(Refusal::NoOffer);
@@ -98,19 +101,24 @@ pub fn choose_offer(
             short += 1;
             continue;
         };
-        let Some(fee_msat) = compute_opening_fee(amount_msat, p.min_fee_msat, p.proportional as u64)
+        let Some(fee_msat) =
+            compute_opening_fee(amount_msat, p.min_fee_msat, p.proportional as u64)
         else {
             outside += 1;
             continue;
         };
         if best.as_ref().map_or(true, |b| fee_msat < b.fee_msat) {
-            best = Some(Offer { params: p.clone(), fee_msat, to_self_delay: delay });
+            best = Some(Offer {
+                params: p.clone(),
+                fee_msat,
+                to_self_delay: delay,
+            });
         }
     }
     match best {
-        Some(offer) if offer.fee_msat > max_fee_msat => {
-            Err(Refusal::FeeAboveMax { fee_msat: offer.fee_msat })
-        }
+        Some(offer) if offer.fee_msat > max_fee_msat => Err(Refusal::FeeAboveMax {
+            fee_msat: offer.fee_msat,
+        }),
         Some(offer) => Ok(offer),
         None if short > 0 => Err(Refusal::WindowTooShort),
         None if outside > 0 => Err(Refusal::AmountOutsideLimits),
@@ -157,7 +165,10 @@ mod tests {
         assert_eq!(to_self_delay(1007), None);
         assert_eq!(to_self_delay(144), None);
         let menu = [params(1_000_000, 10_000, 144)];
-        assert_eq!(choose_offer(&menu, 50_000_000, u64::MAX, NOW), Err(Refusal::WindowTooShort));
+        assert_eq!(
+            choose_offer(&menu, 50_000_000, u64::MAX, NOW),
+            Err(Refusal::WindowTooShort)
+        );
     }
 
     #[test]
@@ -174,14 +185,20 @@ mod tests {
         let menu = [params(1_000_000, 10_000, 1008)];
         assert_eq!(
             choose_offer(&menu, 50_000_000, 999_999, NOW),
-            Err(Refusal::FeeAboveMax { fee_msat: 1_000_000 })
+            Err(Refusal::FeeAboveMax {
+                fee_msat: 1_000_000
+            })
         );
         assert!(choose_offer(&menu, 50_000_000, 1_000_000, NOW).is_ok());
     }
 
     #[test]
     fn sl_29_the_cheapest_offer_that_can_be_taken_wins() {
-        let menu = [params(2_000_000, 10_000, 1008), params(1_000_000, 10_000, 2016), params(1, 1, 144)];
+        let menu = [
+            params(2_000_000, 10_000, 1008),
+            params(1_000_000, 10_000, 2016),
+            params(1, 1, 144),
+        ];
         let o = choose_offer(&menu, 50_000_000, u64::MAX, NOW).unwrap();
         assert_eq!(o.fee_msat, 1_000_000);
         assert_eq!(o.to_self_delay, 2016);
@@ -189,10 +206,19 @@ mod tests {
 
     #[test]
     fn sl_28_an_empty_menu_an_expired_offer_and_a_wrong_size_are_refused() {
-        assert_eq!(choose_offer(&[], 50_000_000, u64::MAX, NOW), Err(Refusal::NoOffer));
+        assert_eq!(
+            choose_offer(&[], 50_000_000, u64::MAX, NOW),
+            Err(Refusal::NoOffer)
+        );
         let menu = [params(1_000_000, 10_000, 1008)];
-        assert_eq!(choose_offer(&menu, 50_000_000, u64::MAX, NOW + 7200), Err(Refusal::Expired));
-        assert_eq!(choose_offer(&menu, 999_999, u64::MAX, NOW), Err(Refusal::AmountOutsideLimits));
+        assert_eq!(
+            choose_offer(&menu, 50_000_000, u64::MAX, NOW + 7200),
+            Err(Refusal::Expired)
+        );
+        assert_eq!(
+            choose_offer(&menu, 999_999, u64::MAX, NOW),
+            Err(Refusal::AmountOutsideLimits)
+        );
         assert_eq!(
             choose_offer(&menu, 1_000_000_001, u64::MAX, NOW),
             Err(Refusal::AmountOutsideLimits)

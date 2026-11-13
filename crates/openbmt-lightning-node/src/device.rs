@@ -45,7 +45,9 @@ pub trait SecondDevice: Send + Sync + 'static {
 pub fn name_is_valid(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 255
-        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || b == b'~')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || b == b'~')
 }
 
 /// A device that is a directory.
@@ -84,7 +86,9 @@ fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, DeviceError> + Send + 'static,
 ) -> DeviceFuture<T> {
     Box::pin(async move {
-        tokio::task::spawn_blocking(f).await.map_err(|e| DeviceError(e.to_string()))?
+        tokio::task::spawn_blocking(f)
+            .await
+            .map_err(|e| DeviceError(e.to_string()))?
     })
 }
 
@@ -96,7 +100,9 @@ fn write_atomic(dir: &Path, name: &str, blob: &[u8]) -> Result<(), DeviceError> 
     file.sync_all().map_err(io_err)?;
     std::fs::rename(&tmp, dir.join(name)).map_err(io_err)?;
     // The rename is only kept once the directory is flushed.
-    std::fs::File::open(dir).and_then(|d| d.sync_all()).map_err(io_err)
+    std::fs::File::open(dir)
+        .and_then(|d| d.sync_all())
+        .map_err(io_err)
 }
 
 impl SecondDevice for DirDevice {
@@ -127,7 +133,11 @@ impl SecondDevice for DirDevice {
         blocking(move || {
             let mut names = Vec::new();
             for entry in std::fs::read_dir(dir).map_err(io_err)? {
-                let name = entry.map_err(io_err)?.file_name().to_string_lossy().into_owned();
+                let name = entry
+                    .map_err(io_err)?
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned();
                 if name_is_valid(&name) {
                     names.push(name);
                 }
@@ -160,7 +170,10 @@ pub struct GatedDevice<D: SecondDevice> {
 impl<D: SecondDevice> GatedDevice<D> {
     /// Wraps `inner`; it starts reachable.
     pub fn new(inner: D) -> Self {
-        Self { inner: Arc::new(inner), away: Arc::new(AtomicBool::new(false)) }
+        Self {
+            inner: Arc::new(inner),
+            away: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     /// Makes the device away or back.
@@ -283,7 +296,10 @@ mod tests {
         dev.write("a~~b", b"two".to_vec()).await.unwrap();
         dev.write("c", b"x".to_vec()).await.unwrap();
         assert_eq!(dev.read("a~~b").await.unwrap(), Some(b"two".to_vec()));
-        assert_eq!(dev.list().await.unwrap(), vec!["a~~b".to_string(), "c".to_string()]);
+        assert_eq!(
+            dev.list().await.unwrap(),
+            vec!["a~~b".to_string(), "c".to_string()]
+        );
         dev.remove("c").await.unwrap();
         dev.remove("c").await.unwrap();
         assert_eq!(dev.list().await.unwrap(), vec!["a~~b".to_string()]);

@@ -702,6 +702,7 @@ dependencies = [
  "lightning-liquidity",
  "lightning-net-tokio",
  "lightning-persister",
+ "lightning-rapid-gossip-sync",
  "serde_json",
  "tokio",
 ]

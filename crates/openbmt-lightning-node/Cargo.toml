@@ -21,6 +21,7 @@ lightning-block-sync = { version = "=0.2.0", features = ["rpc-client", "tokio"] 
 lightning-invoice = { version = "=0.34.2", features = ["std"] }
 lightning-liquidity = { version = "=0.2.8" }
 lightning-net-tokio = { version = "=0.2.0" }
+lightning-rapid-gossip-sync = { version = "=0.2.3" }
 lightning-persister = { version = "=0.2.8", features = ["tokio"] }
 serde_json = { version = "=1.0.154", default-features = false, features = ["std"] }
 tokio = { version = "=1.54.1", features = ["rt-multi-thread", "net", "time", "io-util", "sync", "macros"] }
