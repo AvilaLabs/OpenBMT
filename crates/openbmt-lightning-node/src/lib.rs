@@ -76,8 +76,9 @@
 //! - Nothing here listens: the node makes one connection, to the provider.
 //! - With the filter watcher the node reads blocks from the peers whose
 //!   filters match what it watches, sends transactions through the same peers,
-//!   and has no fee source: the fee rates stay at the fixed values of
-//!   [`chain::CoreFees`]. The set it watches is made again at each start from
+//!   and has no fee source of its own: the fee rates come from the blocks it
+//!   downloads (the history of [`feehistory`], SL-26a), and stay at the fixed
+//!   values of [`chain::CoreFees`] until there are samples. The set it watches is made again at each start from
 //!   the monitors and the sweeper ([`filters`]).
 //! - With Tor on (`NodeConfig::tor`) the connection to the provider and every
 //!   connection of the filter watcher go through the SOCKS5 proxy, and a proxy
@@ -97,6 +98,7 @@ pub mod close;
 pub mod device;
 pub mod device_tcp;
 pub mod expect;
+pub mod feehistory;
 pub mod filters;
 pub mod logger;
 pub mod node;

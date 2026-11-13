@@ -17,6 +17,7 @@ use lightning::chain::{Filter, WatchedOutput};
 use lightning::util::logger::Level;
 use lightning_block_sync::http::HttpEndpoint;
 use lightning_block_sync::rpc::RpcClient;
+use openbmt_watch::FeeHistory;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, RwLock};
@@ -198,6 +199,9 @@ pub struct CoreFees {
     normal: AtomicU32,
     urgent: AtomicU32,
     max_estimate: AtomicU32,
+    /// With the filter watcher: the samples of blocks and the tip they are
+    /// read at (SL-26a).
+    history: RwLock<Option<(FeeHistory, u32)>>,
 }
 
 /// The floor the library enforces, in sat per 1000 weight units.
@@ -212,11 +216,52 @@ impl Default for CoreFees {
             normal: AtomicU32::new(FEE_FALLBACK_NORMAL),
             urgent: AtomicU32::new(FEE_FALLBACK_URGENT),
             max_estimate: AtomicU32::new(FEE_FALLBACK_URGENT * 5),
+            history: RwLock::new(None),
         }
     }
 }
 
+/// Satoshis per 1000 weight units from thousandths of a satoshi per virtual
+/// byte, the unit of the fee history (`openbmt_watch::FeeSample`): a virtual
+/// byte is 4 weight units, so a satoshi per virtual byte (1000 in the history)
+/// is 250 per 1000 weight units, and the history's value divided by 4 is the
+/// rate. Rounded up; never below the floor.
+pub fn sat_per_kw_from_milli_per_vb(milli: u64) -> u32 {
+    u32::try_from(milli.div_ceil(4))
+        .unwrap_or(u32::MAX)
+        .max(FEE_FLOOR_SAT_PER_KW)
+}
+
 impl CoreFees {
+    /// Reads the rates from the samples of blocks, at this tip (SL-26a). A
+    /// target the history cannot answer keeps the fixed rate.
+    pub fn use_history(&self, history: FeeHistory, tip: u32) {
+        *self.history.write().unwrap() = Some((history, tip));
+    }
+
+    /// What the history says for a target, if it says anything: the recent
+    /// rate for the channel, the close and the spends (FE-13); twice the
+    /// higher of the recent and the usual rate for the urgent rate and the
+    /// most a provider may set (FE-17). The lowest a provider may set is not
+    /// read from it.
+    fn rate_from_history(&self, target: ConfirmationTarget) -> Option<u32> {
+        let guard = self.history.read().unwrap();
+        let (history, tip) = guard.as_ref()?;
+        let recent = history.recent_rate(*tip);
+        match target {
+            ConfirmationTarget::MinAllowedAnchorChannelRemoteFee
+            | ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee => None,
+            ConfirmationTarget::UrgentOnChainSweep | ConfirmationTarget::MaximumFeeEstimate => {
+                let high = recent.max(history.usual_rate(*tip))?;
+                Some(sat_per_kw_from_milli_per_vb(high.saturating_mul(2)))
+            }
+            ConfirmationTarget::AnchorChannelFee
+            | ConfirmationTarget::NonAnchorChannelFee
+            | ConfirmationTarget::ChannelCloseMinimum
+            | ConfirmationTarget::OutputSpendingFee => recent.map(sat_per_kw_from_milli_per_vb),
+        }
+    }
+
     /// Asks Core for estimates and keeps them; a target Core cannot estimate
     /// keeps its last value.
     pub async fn refresh(&self, client: &RpcClient) {
@@ -253,6 +298,9 @@ impl CoreFees {
 
 impl FeeEstimator for CoreFees {
     fn get_est_sat_per_1000_weight(&self, target: ConfirmationTarget) -> u32 {
+        if let Some(rate) = self.rate_from_history(target) {
+            return rate.max(FEE_FLOOR_SAT_PER_KW);
+        }
         let v = match target {
             ConfirmationTarget::MaximumFeeEstimate => &self.max_estimate,
             ConfirmationTarget::UrgentOnChainSweep => &self.urgent,
@@ -270,6 +318,8 @@ impl FeeEstimator for CoreFees {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bitcoin::hashes::Hash;
+    use bitcoin::BlockHash;
 
     #[test]
     fn sl_26_credentials_are_base64_of_user_and_password() {
@@ -291,5 +341,137 @@ mod tests {
         ] {
             assert!(fees.get_est_sat_per_1000_weight(t) >= FEE_FLOOR_SAT_PER_KW);
         }
+    }
+
+    use openbmt_watch::FeeSample;
+
+    fn sample(height: u32, rate_milli: u64) -> FeeSample {
+        FeeSample {
+            height,
+            block: BlockHash::from_byte_array([height as u8; 32]),
+            fees_sats: 1,
+            vsize: 1000,
+            claimed_less: false,
+            rate_milli: Some(rate_milli),
+        }
+    }
+
+    fn history(samples: &[(u32, u64)]) -> FeeHistory {
+        let mut h = FeeHistory::new();
+        for (height, rate) in samples {
+            h.insert(sample(*height, *rate));
+        }
+        h
+    }
+
+    fn rate(fees: &CoreFees, t: ConfirmationTarget) -> u32 {
+        fees.get_est_sat_per_1000_weight(t)
+    }
+
+    #[test]
+    fn sl_26a_the_history_unit_is_four_times_the_weight_unit() {
+        // 1 sat/vB is 250 sat/kw, 4 sat/vB is 1000, 40 sat/vB is 10,000.
+        assert_eq!(sat_per_kw_from_milli_per_vb(4_000), 1_000);
+        assert_eq!(sat_per_kw_from_milli_per_vb(40_000), 10_000);
+        assert_eq!(sat_per_kw_from_milli_per_vb(10_000), 2_500);
+        // Rounded up: 4,001 thousandths is 1,000.25 sat/kw.
+        assert_eq!(sat_per_kw_from_milli_per_vb(4_001), 1_001);
+        // 1 sat/vB is under the floor of 253.
+        assert_eq!(sat_per_kw_from_milli_per_vb(1_000), FEE_FLOOR_SAT_PER_KW);
+        assert_eq!(sat_per_kw_from_milli_per_vb(u64::MAX), u32::MAX);
+    }
+
+    #[test]
+    fn sl_26a_the_targets_read_the_recent_and_the_usual_rate() {
+        let fees = CoreFees::default();
+        // Three samples in the last 144 blocks: the recent rate is the median,
+        // 12,000 thousandths, 3,000 sat/kw. No usual rate (fewer than 20).
+        fees.use_history(history(&[(98, 8_000), (99, 12_000), (100, 16_000)]), 100);
+        for t in [
+            ConfirmationTarget::NonAnchorChannelFee,
+            ConfirmationTarget::AnchorChannelFee,
+            ConfirmationTarget::ChannelCloseMinimum,
+            ConfirmationTarget::OutputSpendingFee,
+        ] {
+            assert_eq!(rate(&fees, t), 3_000, "{t:?}");
+        }
+        // Twice the higher of the recent and the usual rate: here the recent.
+        assert_eq!(rate(&fees, ConfirmationTarget::UrgentOnChainSweep), 6_000);
+        assert_eq!(rate(&fees, ConfirmationTarget::MaximumFeeEstimate), 6_000);
+        // The lowest a provider may set stays at the floor.
+        assert_eq!(
+            rate(
+                &fees,
+                ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee
+            ),
+            FEE_FLOOR_SAT_PER_KW
+        );
+        assert_eq!(
+            rate(&fees, ConfirmationTarget::MinAllowedAnchorChannelRemoteFee),
+            FEE_FLOOR_SAT_PER_KW
+        );
+    }
+
+    #[test]
+    fn sl_26a_the_urgent_and_the_most_take_the_usual_rate_when_it_is_higher() {
+        let fees = CoreFees::default();
+        let mut samples: Vec<(u32, u64)> = (100..120).map(|h| (h, 40_000)).collect();
+        samples.extend((3_900..3_906).map(|h| (h, 4_000)));
+        fees.use_history(history(&samples), 3_905);
+        // Recent: 4,000 (1,000 sat/kw). Usual: the 26 samples' lower median,
+        // 40,000. The urgent rate is twice that, 80,000: 20,000 sat/kw.
+        assert_eq!(rate(&fees, ConfirmationTarget::NonAnchorChannelFee), 1_000);
+        assert_eq!(rate(&fees, ConfirmationTarget::UrgentOnChainSweep), 20_000);
+        assert_eq!(rate(&fees, ConfirmationTarget::MaximumFeeEstimate), 20_000);
+    }
+
+    #[test]
+    fn sl_26a_no_rate_is_below_the_floor() {
+        let fees = CoreFees::default();
+        fees.use_history(history(&[(98, 100), (99, 100), (100, 100)]), 100);
+        for t in [
+            ConfirmationTarget::MaximumFeeEstimate,
+            ConfirmationTarget::UrgentOnChainSweep,
+            ConfirmationTarget::MinAllowedAnchorChannelRemoteFee,
+            ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee,
+            ConfirmationTarget::AnchorChannelFee,
+            ConfirmationTarget::NonAnchorChannelFee,
+            ConfirmationTarget::ChannelCloseMinimum,
+            ConfirmationTarget::OutputSpendingFee,
+        ] {
+            assert_eq!(rate(&fees, t), FEE_FLOOR_SAT_PER_KW, "{t:?}");
+        }
+    }
+
+    #[test]
+    fn sl_26a_with_no_samples_the_fixed_rates_are_used() {
+        let plain = CoreFees::default();
+        let empty = CoreFees::default();
+        empty.use_history(FeeHistory::new(), 500);
+        // Two samples are too few for a recent rate.
+        let few = CoreFees::default();
+        few.use_history(history(&[(99, 40_000), (100, 40_000)]), 100);
+        for t in [
+            ConfirmationTarget::MaximumFeeEstimate,
+            ConfirmationTarget::UrgentOnChainSweep,
+            ConfirmationTarget::NonAnchorChannelFee,
+            ConfirmationTarget::ChannelCloseMinimum,
+            ConfirmationTarget::OutputSpendingFee,
+            ConfirmationTarget::MinAllowedNonAnchorChannelRemoteFee,
+        ] {
+            assert_eq!(rate(&empty, t), rate(&plain, t), "{t:?}");
+            assert_eq!(rate(&few, t), rate(&plain, t), "{t:?}");
+        }
+        assert_eq!(rate(&plain, ConfirmationTarget::NonAnchorChannelFee), 2_500);
+    }
+
+    #[test]
+    fn sl_26a_old_samples_leave_the_recent_window_as_the_tip_moves() {
+        let fees = CoreFees::default();
+        fees.use_history(history(&[(98, 8_000), (99, 12_000), (100, 16_000)]), 100);
+        assert_eq!(rate(&fees, ConfirmationTarget::NonAnchorChannelFee), 3_000);
+        // 144 blocks later the samples are outside the window.
+        fees.use_history(history(&[(98, 8_000), (99, 12_000), (100, 16_000)]), 250);
+        assert_eq!(rate(&fees, ConfirmationTarget::NonAnchorChannelFee), 2_500);
     }
 }

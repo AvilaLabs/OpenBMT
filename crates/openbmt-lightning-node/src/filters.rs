@@ -35,7 +35,8 @@
 //! `transaction_unconfirmed`. The blocks of the new chain that matter come
 //! from the driver as blocks again and are given to `transactions_confirmed`.
 
-use crate::chain::FilterWatcher;
+use crate::chain::{CoreFees, FilterWatcher};
+use crate::feehistory::FeeKeeper;
 use bitcoin::block::Header;
 use bitcoin::consensus::deserialize;
 use bitcoin::{Block, BlockHash, Network, OutPoint, Script, ScriptBuf, Transaction, Txid};
@@ -217,6 +218,21 @@ impl Follower {
     /// The height of the last best block the library was given.
     pub fn tip_given(&self) -> Option<(u32, BlockHash)> {
         self.tip_given
+    }
+
+    /// The height of a block of the best chain, as the driver told it.
+    pub fn height_of(&self, hash: &BlockHash) -> Option<u32> {
+        self.heights.get(hash).copied()
+    }
+
+    /// The hash of the block at a height of the best chain.
+    pub fn hash_at(&self, height: u32) -> Option<BlockHash> {
+        self.chain.get(&height).copied()
+    }
+
+    /// The newest block the driver has told of.
+    pub fn chain_tip(&self) -> Option<(u32, BlockHash)> {
+        self.chain.iter().next_back().map(|(h, b)| (*h, *b))
     }
 
     /// The lowest height the scan starts from.
@@ -509,6 +525,22 @@ impl Storage for TapStorage {
     }
 }
 
+/// A fee sample from a block the driver handed over, at its height.
+fn sample(
+    keeper: &mut FeeKeeper,
+    follower: &Follower,
+    hash: &BlockHash,
+    bytes: &[u8],
+    log: &Arc<dyn Fn(&str) + Send + Sync>,
+) {
+    let (Some(height), Some((tip, _))) = (follower.height_of(hash), follower.chain_tip()) else {
+        return;
+    };
+    for note in keeper.take(hash, height, bytes, tip) {
+        log(&note);
+    }
+}
+
 /// What the thread tells the node as it goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Progress {
@@ -535,6 +567,11 @@ pub struct FilterStart {
     pub follower: Follower,
     /// Transactions the library sends, to go to the peers.
     pub broadcasts: Receiver<Vec<u8>>,
+    /// The fee rates the library reads (SL-26a): the watcher keeps their
+    /// samples.
+    pub fees: Arc<CoreFees>,
+    /// The node's directory, where `fee-history.bin` is kept.
+    pub data_dir: PathBuf,
     /// Told after each event.
     pub progress: Arc<dyn Fn(Progress) + Send + Sync>,
     /// The node's log.
@@ -550,6 +587,8 @@ impl FilterRun {
             network,
             mut follower,
             broadcasts,
+            fees,
+            data_dir,
             progress,
             log,
         } = start;
@@ -566,6 +605,14 @@ impl FilterRun {
             }
         }
         let scripts = follower.begin();
+        let tip_now = follower.chain_tip().map_or(follower.floor(), |(h, _)| h);
+        let (mut keeper, notes) = FeeKeeper::load(&data_dir, network, fees, tip_now);
+        for note in notes {
+            log(&note);
+        }
+        for note in keeper.prune(|h| follower.hash_at(h), tip_now) {
+            log(&note);
+        }
         let tap = Arc::new(HeaderTap::default());
         let mut driver = config.driver;
         driver.network = network;
@@ -588,7 +635,7 @@ impl FilterRun {
             .spawn(move || {
                 let _lock = lock;
                 run(
-                    handle, follower, tap, broadcasts, flag, network, progress, log,
+                    handle, follower, keeper, tap, broadcasts, flag, network, progress, log,
                 );
             })
             .map_err(|e| e.to_string())?;
@@ -617,6 +664,7 @@ impl Drop for FilterRun {
 fn run(
     mut handle: Handle,
     mut follower: Follower,
+    mut keeper: FeeKeeper,
     tap: Arc<HeaderTap>,
     broadcasts: Receiver<Vec<u8>>,
     stop: Arc<AtomicBool>,
@@ -625,6 +673,7 @@ fn run(
     log: Arc<dyn Fn(&str) + Send + Sync>,
 ) {
     let mut driver_tip = 0u32;
+    let mut fee_tip = 0u32;
     let mut peers_ready = false;
     let mut last_progress: Option<Progress> = None;
     loop {
@@ -648,10 +697,27 @@ fn run(
         }
         match handle.events().recv_timeout(WAIT) {
             Ok(AppEvent::Chain { joined, left }) => {
+                if !left.is_empty() {
+                    let lowest_left = left.iter().filter_map(|h| follower.height_of(h)).min();
+                    let from = lowest_left
+                        .into_iter()
+                        .chain(joined.first().map(|(h, _)| *h))
+                        .min();
+                    if let Some(from) = from {
+                        let tip = joined.last().map_or(from, |(h, _)| *h);
+                        for note in keeper.forget_from(from, &left, tip) {
+                            log(&note);
+                        }
+                    }
+                }
                 effects.extend(follower.on_chain(&joined, &left));
             }
             Ok(AppEvent::Block { hash, bytes }) => {
-                effects.extend(follower.on_block(hash, bytes));
+                effects.extend(follower.on_block(hash, bytes.clone()));
+                sample(&mut keeper, &follower, &hash, &bytes, &log);
+            }
+            Ok(AppEvent::FeeBlock { hash, bytes }) => {
+                sample(&mut keeper, &follower, &hash, &bytes, &log);
             }
             Ok(AppEvent::Checked(height)) => effects.extend(follower.on_checked(height)),
             Ok(AppEvent::Peers(peers, ahead, (height, _))) => {
@@ -669,6 +735,21 @@ fn run(
             Ok(AppEvent::TxState { txid, state }) => log(&format!("peers on {txid}: {state:?}")),
             Ok(AppEvent::Stopped) | Err(RecvTimeoutError::Disconnected) => return,
             Ok(_) | Err(RecvTimeoutError::Timeout) => {}
+        }
+        // The fee history: the windows move with the tip, and a block is asked
+        // for when none was sampled for 24 blocks (FE-20).
+        if let (Some((height, hash)), Some((given, _))) =
+            (follower.chain_tip(), follower.tip_given())
+        {
+            if given == height {
+                if height != fee_tip {
+                    fee_tip = height;
+                    keeper.tip_moved(height);
+                }
+                if let Some(ask) = keeper.want_block(height, hash) {
+                    handle.fetch_block(ask);
+                }
+            }
         }
         // What the library registered meanwhile, and a header that came late.
         effects.extend(follower.on_headers(Vec::new()));

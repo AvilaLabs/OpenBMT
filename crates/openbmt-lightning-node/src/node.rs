@@ -857,6 +857,8 @@ impl Node {
                     network: config.network,
                     follower,
                     broadcasts: broadcasts.ok_or_else(|| setup("no broadcast queue"))?,
+                    fees: Arc::clone(&fees),
+                    data_dir: config.data_dir.clone(),
                     progress: Arc::new(move |p: Progress| {
                         progress_shared
                             .chain_height
