@@ -23,7 +23,6 @@ use bitcoin::hashes::Hash;
 use bitcoin::{Address, OutPoint, ScriptBuf, Transaction, Txid};
 use openbmt_core::wallet::Keychain;
 use openbmt_core::wallet_single::ImportedWallet;
-use openbmt_owner::own_say::needed;
 use openbmt_owner::starter::{
     self, Coin, DataKey, KernelRandom, Key, Restore, Sealed, Setup, StarterRefusal, StarterWallet,
     Typed, KERNEL_BYTES,
@@ -33,14 +32,8 @@ use crate::codec::{wire_record, wire_record_get, wire_unit_enum};
 use crate::error::{from_words, refused_by, AppError, Kind};
 use crate::views::OwnerNetwork;
 
-/// The words of a refusal of this layer that no rule crate makes: the
-/// placeholder that is its own name, until the words are written (SC-12).
-const WORDS_NEEDED_SS_30_COIN_VIEW: &str = "WORDS_NEEDED_SS_30_COIN_VIEW";
-const WORDS_NEEDED_SS_42_NEW_WALLET: &str = "WORDS_NEEDED_SS_42_NEW_WALLET";
-const WORDS_NEEDED_SS_10_NO_SETUP: &str = "WORDS_NEEDED_SS_10_NO_SETUP";
-
-fn placeholder(rule: &str, text: String, name: &'static str) -> AppError {
-    from_words(Kind::Refused, rule, text, needed(name))
+fn refused_with(rule: &str, text: String, words: openbmt_core::say::Words) -> AppError {
+    from_words(Kind::Refused, rule, text, words)
 }
 
 /// A refusal of the starter wallet as the error that crosses the boundary.
@@ -113,7 +106,7 @@ fn no_setup() -> AppError {
         Kind::State,
         "starter-no-setup",
         "there is no starter wallet being made: begin one first",
-        needed(WORDS_NEEDED_SS_10_NO_SETUP),
+        starter::no_setup_words(),
     )
 }
 
@@ -428,10 +421,10 @@ fn coin_of(v: &StarterCoinView) -> Result<Coin, AppError> {
         .map_err(|_| refused_by("id-length", "a coin's transaction ID is 32 bytes"))?;
     let prev_tx: Transaction =
         bitcoin::consensus::encode::deserialize(&v.prev_tx).map_err(|e| {
-            placeholder(
+            refused_with(
                 "starter-coin",
                 format!("a coin's transaction: {e}"),
-                WORDS_NEEDED_SS_30_COIN_VIEW,
+                starter::coin_unreadable_words(),
             )
         })?;
     Ok(Coin {
@@ -649,10 +642,10 @@ wire_record_get!(StarterMoveArgs {
 pub(crate) fn move_all(mut a: StarterMoveArgs) -> Result<StarterPaidView, AppError> {
     let key = data_key_of(&mut a.data_key)?;
     let new = ImportedWallet::read(&a.new_wallet).map_err(|e| {
-        placeholder(
+        refused_with(
             "starter-new-wallet",
             format!("the new wallet: {e:?}"),
-            WORDS_NEEDED_SS_42_NEW_WALLET,
+            starter::new_wallet_unreadable_words(),
         )
     })?;
     let to: ScriptBuf = starter::receive_script_of(&new, a.new_index).map_err(|e| refusal(&e))?;

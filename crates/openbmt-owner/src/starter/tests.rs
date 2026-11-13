@@ -1503,41 +1503,21 @@ fn ss_43_the_seed_may_go_with_one_confirmation_of_the_move() {
 // ---- the words ----------------------------------------------------------------------
 
 #[test]
-fn ss_50_every_state_has_a_placeholder_for_its_words_and_each_is_its_own() {
+fn ss_50_every_state_has_its_own_words_and_names_its_rule() {
     let all = all_starter_words();
-    assert!(all.len() >= 30);
-    let mut seen = std::collections::BTreeSet::new();
+    assert!(all.len() >= 33);
+    let mut headings = std::collections::BTreeSet::new();
     for (name, w) in &all {
-        assert!(crate::own_say::is_placeholder(w), "{name}");
-        assert!(w.heading.starts_with("WORDS_NEEDED_SS_"), "{name}");
-        assert_eq!(w.heading, w.what, "{name}");
-        assert!(w.code.is_some() || name.starts_with("Starter"), "{name}");
-        seen.insert(w.heading.clone());
+        assert!(!crate::own_say::is_placeholder(w), "{name}");
+        assert!(w.heading.len() < 28, "{name}: {}", w.heading);
+        assert_ne!(w.heading, w.what, "{name}");
+        assert!(w.code.is_some_and(|c| c.starts_with("SS-")), "{name}");
+        assert!(headings.insert(w.heading.clone()), "{name}: heading twice");
     }
-    // Refusals with their own placeholder are all different.
-    let refusals: std::collections::BTreeSet<&str> = all_refusals()
-        .iter()
-        .map(|(_, r)| r.placeholder())
-        .collect();
-    assert_eq!(refusals.len(), all_refusals().len());
-    // Every constant of the module is some state's words.
-    let source = std::fs::read_to_string(
-        std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
-            .join("src/starter/mod.rs"),
-    )
-    .unwrap();
-    let declared: std::collections::BTreeSet<String> = source
-        .lines()
-        .filter_map(|l| l.strip_prefix("pub const WORDS_NEEDED_SS_"))
-        .filter_map(|l| l.split(':').next())
-        .map(|n| format!("WORDS_NEEDED_SS_{n}"))
-        .collect();
-    assert!(declared.len() >= 30);
-    // The SS-13 screen and the SS-37 typed sentence are the app's.
-    assert_eq!(
-        declared, seen,
-        "a constant that no state uses, or the reverse"
-    );
+    // Every refusal's words name the refusal's own rule.
+    for (name, r) in all_refusals() {
+        assert_eq!(r.words().code, Some(r.rule()), "{name}");
+    }
 }
 
 #[test]

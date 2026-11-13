@@ -180,7 +180,7 @@ fn ss_02_a_weak_or_repeated_read_is_refused_and_makes_no_setup() {
         let reg = registry(&given);
         let fault = Rd::error(&make(&reg, &[])).expect("refused");
         assert_eq!(fault.rule, "SS-02");
-        assert!(fault.words.heading.starts_with("WORDS_NEEDED_SS_02_"));
+        assert!(fault.words.heading.starts_with("Random numbers "));
         // There is no setup to draw or to type on.
         let fault = Rd::error(&call(&reg, OP_PAGE, &W::new().u32(0).u32(2).0)).expect("refused");
         assert_eq!(fault.rule, "starter-no-setup");
@@ -194,7 +194,7 @@ fn ss_03_a_roll_that_is_not_a_die_face_is_refused() {
     let reg = registry(&[counting(1), counting(77)]);
     let fault = Rd::error(&make(&reg, &[1, 7])).expect("refused");
     assert_eq!(fault.rule, "SS-03");
-    assert_eq!(fault.words.heading, "WORDS_NEEDED_SS_03_ROLLS");
+    assert_eq!(fault.words.heading, "Not a die roll");
 }
 
 // ---- the words as images -----------------------------------------------------------
@@ -329,11 +329,11 @@ fn ss_20_the_seed_is_sealed_after_the_check_and_opens_with_the_data_key_alone() 
     );
     let fault = Rd::error(&open(&sealed, &data_key[..31])).expect("refused");
     assert_eq!(fault.rule, "SS-20");
-    assert_eq!(fault.words.heading, "WORDS_NEEDED_SS_20_KEY");
+    assert_eq!(fault.words.heading, "Cannot open the key");
     let mut bad = sealed.clone();
     bad[20] ^= 1;
     let fault = Rd::error(&open(&bad, &data_key)).expect("refused");
-    assert_eq!(fault.words.heading, "WORDS_NEEDED_SS_20_OPEN");
+    assert_eq!(fault.words.heading, "The key will not open");
 }
 
 #[test]
@@ -376,7 +376,7 @@ fn ss_23_the_typed_words_are_checked_against_the_wallet_and_sealed_again() {
     // The wrong wallet is refused, and the words stay typed.
     let fault = Rd::error(&restore_finish(&reg, &descriptor())).expect("refused");
     assert_eq!(fault.rule, "SS-23");
-    assert_eq!(fault.words.heading, "WORDS_NEEDED_SS_23_OTHER");
+    assert_eq!(fault.words.heading, "Not this wallet's words");
     let response = restore_finish(&reg, &description);
     let mut r = Rd::ok(&response);
     let (sealed, data_key) = (r.bytes(), r.bytes());
@@ -544,7 +544,7 @@ fn ss_30_a_wrong_data_key_a_bad_address_and_a_refund_too_large_are_refused() {
     ))
     .expect("refused");
     assert_eq!(fault.rule, "SS-30");
-    assert_eq!(fault.words.heading, "WORDS_NEEDED_SS_30_SHORT");
+    assert_eq!(fault.words.heading, "Not enough in the wallet");
     // A coin that is not a transaction.
     let fault = Rd::error(&call(
         &reg,
@@ -629,7 +629,7 @@ fn ss_42_the_move_pays_the_new_wallets_address_from_every_coin() {
     );
     let fault =
         Rd::error(&call(&reg, OP_MOVE, &request(&new, 0, &[(1, 0, 60_000)]))).expect("refused");
-    assert_eq!(fault.words.heading, "WORDS_NEEDED_SS_42_UNCONFIRMED");
+    assert_eq!(fault.words.heading, "Wait for a payment");
     let fault = Rd::error(&call(
         &reg,
         OP_MOVE,

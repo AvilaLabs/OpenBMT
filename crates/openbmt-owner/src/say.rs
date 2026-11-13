@@ -1382,6 +1382,9 @@ pub fn all_words() -> Vec<(String, Words)> {
     for (n, w) in crate::float::all_float_words() {
         add(&n, w);
     }
+    for (n, w) in crate::starter::all_starter_words() {
+        add(&n, w);
+    }
     all.extend(crate::ceremony::all_words());
     all
 }

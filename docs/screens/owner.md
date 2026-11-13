@@ -200,6 +200,39 @@ with its name before the colon. Do not edit by hand: run the tests with
 | owner: FloatCoinUnreadable | Cannot read a float payment | A payment into the refund float could not be read on this phone. | Nothing was changed. Let the float's balance catch up, then try once more. | Owner | FL-20 |
 | owner: FloatShopWalletUnreadable | Cannot read the shop wallet | The shop's wallet description on this phone could not be read. | Nothing was moved. Connect the shop's wallet again, then turn the float off. | Owner | FL-35 |
 | owner: FloatRefillLinked | A refill links your wallets | Anyone who looks at the chain can see that this payment joins your savings to the refund float. | Send it if that is fine. It is the same for every refill. | Owner | FL-31 |
+| owner: StarterRefusal/Random | No random numbers | The phone's system gave no random numbers, so no wallet was made. | Restart the phone and try again. | Owner | SS-01 |
+| owner: StarterRefusal/RandomRepeat | Random numbers repeated | The phone gave the same random numbers twice, so no wallet was made. | Make the key on the stick instead. These random numbers cannot be trusted. | Owner | SS-02 |
+| owner: StarterRefusal/RandomWeak | Random numbers look wrong | The phone's random numbers were one byte over and over, so no wallet was made. | Make the key on the stick instead. This phone's random numbers cannot be trusted. | Owner | SS-02 |
+| owner: StarterRefusal/Rolls | Not a die roll | Each roll is a number from 1 to 6. | Type the roll again. | Owner | SS-03 |
+| owner: StarterRefusal/Words | Not 12 good words | These are not 12 words of the list, or one of them is wrong or out of order. | Check each word against the card. | Owner | SS-04 |
+| owner: StarterRefusal/Page | No such page of words | The words are on three pages of four. | Go back and show the words again. | Owner | SS-10 |
+| owner: StarterRefusal/Stage | Not at this step | The steps go in order: the words, then the check. | Go back to the words. | Owner | SS-10 |
+| owner: StarterRefusal/Wrong | That word is not right | The word typed is not the word with that number on the card. | The words are shown again. Check the card, then answer again. | Owner | SS-10 |
+| owner: StarterRefusal/Key | Not a key here | Only letters, Backspace and Enter work here. | Type the word's letters. | Owner | SS-11 |
+| owner: StarterRefusal/DataKey | Cannot open the key | The phone's key store gave back a key of the wrong size, so nothing was signed. | Try again. If it happens again, restore from the card of starter words. | Owner | SS-20 |
+| owner: StarterRefusal/Open | The key will not open | This phone no longer opens the starter wallet's key. Removing the screen lock does this. | Restore it by typing the 12 words from the card. | Owner | SS-20 |
+| owner: StarterRefusal/Incomplete | Not all 12 words yet | The restore needs all 12 words from the card. | Type the rest of the words. | Owner | SS-23 |
+| owner: StarterRefusal/OtherWallet | Not this wallet's words | These 12 words make a different wallet from the starter wallet. | Check the card, then type the starter wallet's words. | Owner | SS-23 |
+| owner: StarterRefusal/Plan | Cannot make this payment | The starter wallet's coins do not make this payment. | Check the amount and try again. | Owner | SS-30 |
+| owner: StarterRefusal/Sign | The payment was not signed | The starter wallet's key did not sign this payment, so nothing was sent. | Try again. If it happens again, restore from the card of starter words. | Owner | SS-30 |
+| owner: StarterRefusal/NotStarterCoin | Not the starter's money | A coin handed in is not the starter wallet's, so nothing was signed. | Refresh the wallet and try again. | Owner | SS-30 |
+| owner: StarterRefusal/NotOnlyThese | The payment failed a check | The finished payment did not pay only what was asked, so it was not sent. | Nothing left the wallet. Try again. | Owner | SS-30 |
+| owner: StarterRefusal/NoFeeRate | No fee rate to pay | The phone has no recent fee rate and none was typed. | Wait for the phone to connect, or type a fee rate. | Owner | SS-30 |
+| owner: StarterRefusal/NotEnough | Not enough in the wallet | The starter wallet holds less than this payment and its fee. | It stays in the queue for the shop's other wallet. | Owner | SS-30 |
+| owner: StarterRefusal/Wallet | Cannot read the wallet | The starter wallet's description does not read on this phone. | Restore from the card of starter words. | Owner | SS-30 |
+| owner: StarterRefusal/NothingToMove | Nothing to move | The starter wallet holds no money, so there is nothing to move. | No payment is needed. | Owner | SS-42 |
+| owner: StarterRefusal/NewAddress | No address in new wallet | This phone cannot work out an address from the new wallet's description. | Connect the new wallet again from its own screen. | Owner | SS-42 |
+| owner: StarterRefusal/Unconfirmed | Wait for a payment | A payment into the starter wallet is not confirmed yet. The move waits so that it takes everything at once. | Try again after its first confirmation. | Owner | SS-42 |
+| owner: StarterLine | Starter wallet | What it holds, the limit you set and your date to move to a key made offline. | Move before the limit or the date, from Upgrade now. | Owner | SS-36 |
+| owner: StarterState/AtLimit | Starter wallet at limit | The starter wallet holds as much as the limit you set. Sales go on. | Upgrade now to a key made offline, or choose Not yet. | Owner | SS-37 |
+| owner: StarterState/PastDate | Time to upgrade | The date you set to move to a key made offline has come. Sales go on. | Upgrade now, or choose Not yet. | Owner | SS-37 |
+| owner: StarterState/NotYet | Upgrade put off | You chose Not yet. Until it ends, raising the limit, adding counters and other changes wait. | Upgrade when you can. Not yet lasts at most 7 days. | Owner | SS-37 |
+| owner: StarterHeld | This change waits | While the starter wallet is at its limit or past its date, changes that let it hold more wait. | Upgrade to a key made offline, then make the change. | Owner | SS-37 |
+| owner: StarterNoBitcoin | Bitcoin paused | The shop's starter wallet is full, so this counter takes no bitcoin for now. | Take another way to pay. | Cashier | SS-38 |
+| owner: StarterDeleted | Starter key deleted | The starter wallet's key is gone from this phone. Its money is in the new wallet. | The card of starter words is no longer needed. Destroy it. | Owner | SS-43 |
+| owner: StarterNoSetup | No wallet being made | This step belongs to making a starter wallet, and none is being made. | Start again from Start simple. | Owner | SS-10 |
+| owner: StarterCoinUnreadable | Cannot read a payment | A payment into the starter wallet does not read on this phone, so nothing was signed. | Refresh the wallet and try again. | Owner | SS-30 |
+| owner: StarterNewWalletUnreadable | Cannot read new wallet | The new wallet's description does not read on this phone, so nothing was moved. | Connect the new wallet again from its own screen. | Owner | SS-42 |
 | owner: Setup::KeyMade | Key 1 made on this phone | This phone made key 1 and keeps it. The wallet needs the other two keys. | Scan the Key app's answer with this phone, then build the wallet. | Owner |  |
 | owner: Setup::WalletBuilt | Compare on every device | The wallet is built. Every device must show the same four words and the same three short codes. | Compare them on the Key app and on this phone. Confirm only if they match. | Owner |  |
 | owner: Setup::Finished | Owner phone is set up | This phone has its key, the wallet and the Key app's identity, and can start. | Nothing to do. Go on with the recovery kit. | Nobody |  |
