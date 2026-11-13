@@ -12,7 +12,13 @@ publish.workspace = true
 # with lightning 0.2.8 (there is no 0.2.8 of it). The bitcoin crate is at the
 # version the rest of the workspace pins. ChaCha20-Poly1305 is the package the
 # link and the lock already list, with the same features.
+#
+# openbmt-core is here for the shop's pinned wallet (`PinnedWallet`, WL-20): the
+# node derives the address the sweep, the splice out and the close pay to
+# from the shop's wallet description, the way the counter does (SL-33). It
+# adds miniscript and bip39, which the counter's list already has.
 [dependencies]
+openbmt-core = { path = "../openbmt-core" }
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std", "secp-recovery"] }
 chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
 lightning = { version = "=0.2.8", features = ["std"] }

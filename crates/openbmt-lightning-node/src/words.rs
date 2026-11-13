@@ -30,4 +30,5 @@ pub const SL_20_INVOICE_NOT_STORED: &str = "The Lightning invoice could not be s
 /// Money from a closed channel is waiting to be moved to the shop's wallet (SL-33, SL-36).
 pub const SL_33_OUTPUTS_WAITING: &str = "Money from a closed Lightning channel is waiting to come back to the shop's wallet. It moves by itself once the channel's wait is over.";
 /// The address the swept money goes to is not usable (SL-33).
-pub const SL_33_DESTINATION_REFUSED: &str = "That address is not one of the shop's wallet, so Lightning money is not sent there.";
+pub const SL_33_DESTINATION_REFUSED: &str =
+    "That address is not one of the shop's wallet, so Lightning money is not sent there.";

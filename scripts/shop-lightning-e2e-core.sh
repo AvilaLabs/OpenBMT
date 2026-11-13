@@ -38,8 +38,17 @@
 #          paid event again with the same payment hash, and not after the
 #          acknowledgement (SL-21)
 #        - a channel force-closed by the provider: the node's sweeper spends
-#          the shop's output, after the shop's wait, to the address the caller
-#          last gave, and Core sees it confirmed (SL-24, SL-33)
+#          the shop's output, after the shop's wait, to the address of the
+#          index the caller last gave, and Core sees it confirmed at that
+#          address of the pinned wallet (SL-24, SL-33)
+#        - the addresses of the sweep, the splice out and the close are the
+#          pinned wallet's, derived by the node from the wallet description
+#          (a Core descriptor wallet is imported from the same description);
+#          a description that does not read is refused (SL-33)
+#        - a payment that needs a new channel, with a channel already open
+#          and its room too small, is paid with the provider's skim at or
+#          under the recorded maximum; one whose skim is above the recorded
+#          maximum is failed back (SL-21, SL-29)
 #   The script ends `ALL PASS` only if every check printed PASS.
 #
 # Needs: Bitcoin Core 32.1 in ~/.local/opt/bitcoin-core-32.1/bin, LND in
@@ -261,7 +270,7 @@ note "provider $LSP_ID"
 start_shop() { # [extra arguments]; returns 0 once the control port answers
   : >"$BASE/shop.out"
   "$SHOP_BIN" ctl="$SHOP_CTL" data="$SHOP_DIR" rpc="$BTC_RPC" user="$RPC_USER" pass="$RPC_PASS" \
-    provider_id="$LSP_ID" provider_addr="127.0.0.1:$LSP_P2P" device="$DEV_PORT" sweep_to="$SWEEP0" "$@" \
+    provider_id="$LSP_ID" provider_addr="127.0.0.1:$LSP_P2P" device="$DEV_PORT" sweep_index="$SWEEP0" "$@" \
     >"$BASE/shop.out" 2>"$BASE/shop.err" &
   PIDS[shop]=$!
   local i
@@ -322,14 +331,40 @@ shop_invoice() { # sats -> sets INVOICE and the reply
 }
 lsp_channels_with_shop() { ctl "$LSP_CTL" channels | grep -c "cp=$SHOP_ID"; }
 
+say "The shop's pinned wallet: a description that does not read is refused"
+SWEEP0=5
+"$SHOP_BIN" ctl="$SHOP_CTL" data="$SHOP_DIR" rpc="$BTC_RPC" user="$RPC_USER" pass="$RPC_PASS" \
+  provider_id="$LSP_ID" provider_addr="127.0.0.1:$LSP_P2P" device="$DEV_PORT" sweep_index="$SWEEP0" \
+  wallet="not-a-wallet" >"$BASE/refused.out" 2>&1
+RC=$?
+[ "$RC" = 3 ] && grep -q "WalletRefused" "$BASE/refused.out" && [ ! -e "$SHOP_DIR/state" ]
+check "SL-33: a wallet description that does not read is refused, and nothing is made on disk" $?
+
 say "Start the shop's node"
-SWEEP0=$(bw shop getnewaddress)
 start_shop max_fee_msat=3000000 || die "the node did not start: $(cat "$BASE/shop.out" "$BASE/shop.err" | tail -3)"
 SHOP_ID=$(ctl "$SHOP_CTL" nodeid)
 [ "$SHOP_ID" = "$EXPECTED_ID" ]
 check "SL-10: the node id is the one the BIP-85 child of the text's master key gives" $?
 await_status "provider=true" 60 || die "the node did not connect to the provider"
 note "node $SHOP_ID"
+
+# A Core descriptor wallet from the same description (the test-network spelling
+# of its key), so that Core can say whether an address is the wallet's.
+DESC=$(ctl "$SHOP_CTL" descriptor)
+bcli -named createwallet wallet_name=pinned blank=true disable_private_keys=true descriptors=true >/dev/null || die "no pinned wallet in Core"
+RES=$(bw pinned importdescriptors "[{\"desc\":\"$DESC\",\"timestamp\":\"now\",\"active\":true,\"range\":[0,100]}]")
+[ "$(jq -r 'all(.[]; .success)' <<<"$RES")" = true ] || die "Core did not take the description: $RES"
+# The address of an index of the pinned wallet, as the node derives it.
+addr_at() { ctl "$SHOP_CTL" address "$1"; }
+is_pinned() { # address: Core says it is the pinned wallet's
+  [ "$(bw pinned getaddressinfo "$1" | jq -r .ismine)" = true ]
+}
+A0=$(addr_at 0)
+A5=$(addr_at 5)
+[ "$A0" = "$(bcli deriveaddresses "$DESC" "[0,0]" | jq -r '.[0]')" ] && [ "$A5" = "$(bcli deriveaddresses "$DESC" "[5,5]" | jq -r '.[0]')" ] && is_pinned "$A5"
+check "SL-33: the node derives the pinned wallet's addresses itself (index 0 and 5 agree with Core's): $A5" $?
+[ "$(ctl "$SHOP_CTL" address 2147483648 | cut -c1-3)" = ERR ]
+check "SL-33: an index with no address is refused" $?
 
 # ---- the first payment opens a channel -----------------------------------------
 
@@ -521,22 +556,24 @@ check "a payment after the 150 blocks is paid" $?
 # ---- the sweep -----------------------------------------------------------------
 
 say "Sweep to the shop's wallet"
-SWEEP_ADDR=$(bw shop getnewaddress)
-BEFORE=$(bw shop getbalance)
-R=$(ctl "$SHOP_CTL" sweep "$SWEEP_ADDR" 20000)
+SWEEP_ADDR=$(addr_at 10)
+BEFORE=$(bw pinned getbalance)
+R=$(ctl "$SHOP_CTL" sweep 10 20000)
 note "sweep: $R"
 [ "$R" = "Ok(())" ]
-check "SL-33: the splice out of 20,000 sat to the counter's own address was begun" $?
+check "SL-33: the splice out of 20,000 sat to the address the node derives at index 10 was begun" $?
 for _ in $(seq 1 40); do
   mine 1
   sleep 1
-  [ "$(bw shop getbalance)" != "$BEFORE" ] && break
+  [ "$(bw pinned getbalance)" != "$BEFORE" ] && break
 done
 mine 6
-AFTER=$(bw shop getbalance)
+AFTER=$(bw pinned getbalance)
 note "shop wallet: $BEFORE -> $AFTER"
 [ "$AFTER" = "$(awk -v b="$BEFORE" 'BEGIN { printf "%.8f", b + 0.0002 }')" ]
-check "SL-33: the shop's wallet received 20,000 sat by one transaction" $?
+check "SL-33: the pinned wallet received 20,000 sat by one transaction" $?
+[ "$(bw pinned getreceivedbyaddress "$SWEEP_ADDR" 1)" = 0.00020000 ] && is_pinned "$SWEEP_ADDR"
+check "SL-33: and it arrived at the address of index 10, which Core says is the pinned wallet's" $?
 await_status "provider=true channels=1 usable=1" 60
 check "SL-33: the channel is usable after the splice" $?
 shop_invoice 1000
@@ -547,22 +584,30 @@ check "SL-33: a payment after the splice is paid" $?
 # ---- the close -----------------------------------------------------------------
 
 say "Close to the shop's wallet"
-SHOP_ADDR=$(bw shop getnewaddress)
-BEFORE=$(bw shop getbalance)
-R=$(ctl "$SHOP_CTL" close "$SHOP_ADDR")
+SHOP_ADDR=$(addr_at 11)
+BEFORE=$(bw pinned getbalance)
+# A close is refused while a monitor update is still on its way: try again.
+for _ in $(seq 1 30); do
+  R=$(ctl "$SHOP_CTL" close 11)
+  [ "$R" = "Ok(1)" ] && break
+  sleep 1
+done
 note "close: $R"
 [ "$R" = "Ok(1)" ]
 check "SL-36: the close of the channel was begun" $?
 for _ in $(seq 1 30); do
   mine 1
   sleep 1
-  [ "$(bw shop getbalance)" != "$BEFORE" ] && break
+  [ "$(bw pinned getbalance)" != "$BEFORE" ] && break
 done
 mine 3
-AFTER=$(bw shop getbalance)
-note "shop wallet: $BEFORE -> $AFTER"
+AFTER=$(bw pinned getbalance)
+note "pinned wallet: $BEFORE -> $AFTER"
 awk -v a="$AFTER" -v b="$BEFORE" 'BEGIN { exit !(a > b) }'
-check "SL-36: the shop's wallet was paid by the close" $?
+check "SL-36: the pinned wallet was paid by the close" $?
+GOT=$(bw pinned getreceivedbyaddress "$SHOP_ADDR" 1)
+awk -v g="$GOT" 'BEGIN { exit !(g > 0) }' && is_pinned "$SHOP_ADDR"
+check "SL-36: the close paid the address of index 11 that the node derives ($GOT BTC)" $?
 
 # ---- an invoice made before a restart ------------------------------------------
 
@@ -627,15 +672,20 @@ await_status "provider=true channels=1 usable=1" 60
 # ---- the sweeper ---------------------------------------------------------------
 
 say "Force close by the provider, and the sweeper"
-SWEEP1=$(bw shop getnewaddress)
-SWEEP2=$(bw shop getnewaddress)
-[ "$(ctl "$SHOP_CTL" sweep_to "$SWEEP1")" = "Ok(())" ]
-check "SL-33: the caller sets a destination for the sweeper" $?
+SWEEP1_INDEX=20
+SWEEP2_INDEX=21
+SWEEP1=$(addr_at $SWEEP1_INDEX)
+SWEEP2=$(addr_at $SWEEP2_INDEX)
+[ "$(ctl "$SHOP_CTL" sweep_index $SWEEP1_INDEX)" = "Ok(())" ]
+check "SL-33: the caller sets an index for the sweeper, the node derives its address" $?
 stop_shop
 start_shop max_fee_msat=3000000
 await_status "provider=true channels=1" 60
-[ "$(ctl "$SHOP_CTL" sweep_to "$SWEEP2")" = "Ok(())" ]
+[ "$(ctl "$SHOP_CTL" sweep_index $SWEEP2_INDEX)" = "Ok(())" ]
 check "SL-33: and changes it again after a restart" $?
+R=$(ctl "$SHOP_CTL" sweep_index 2147483648)
+[ "$R" = "Err(\"That address is not one of the shop's wallet, so Lightning money is not sent there.\")" ] && [ "$(ctl "$SHOP_CTL" sweep_index $SWEEP2_INDEX)" = "Ok(())" ]
+check "SL-33: an index with no address is refused with the rule's words, and the last index stays: $R" $?
 R=$(ctl "$LSP_CTL" forceclose "$SHOP_ID")
 note "provider force-close: $R"
 [ "$R" = "Ok(())" ]
@@ -656,14 +706,72 @@ GOT=0
 for _ in $(seq 1 60); do
   mine 1
   sleep 2
-  GOT=$(bw shop getreceivedbyaddress "$SWEEP2" 1)
+  GOT=$(bw pinned getreceivedbyaddress "$SWEEP2" 1)
   awk -v g="$GOT" 'BEGIN { exit !(g > 0) }' && break
 done
 note "received at the destination: $GOT"
 awk -v g="$GOT" 'BEGIN { exit !(g > 0) }'
-check "SL-33: the sweeper spent the shop's output to the address the caller gave last, and Core sees it confirmed ($GOT BTC)" $?
-[ "$(bw shop getreceivedbyaddress "$SWEEP1" 0)" = 0.00000000 ]
+check "SL-33: the sweeper spent the shop's output to the address of the index the caller gave last, and Core sees it confirmed at that address of the pinned wallet ($GOT BTC)" $?
+is_pinned "$SWEEP2"
+check "SL-33: that address is the pinned wallet's by Core's own reading" $?
+[ "$(bw pinned getreceivedbyaddress "$SWEEP1" 0)" = 0.00000000 ]
 check "SL-33: nothing went to the destination that was replaced" $?
+stop_shop
+
+# ---- a payment that needs a new channel, on top of one that is open -----------
+
+say "A new channel on top of an open one"
+# A limit high enough for the larger amounts here (20,000 sat).
+start_shop max_fee_msat=20000000 || die "the node did not start: $(cat "$BASE/shop.out" "$BASE/shop.err" | tail -3)"
+await_status "provider=true channels=0" 60 || die "the node still holds a channel"
+shop_invoice 20000
+H12=$(hash_of "$INVOICE")
+pay "$INVOICE" 90s && await_paid "$H12" 30
+check "a payment with no channel opens the one that is open from here on" $?
+stop_shop
+start_shop max_fee_msat=20000000 || die "the node did not start"
+await_status "provider=true channels=1 usable=1" 60 || die "no channel after the restart"
+S=$(shop_status)
+ROOM=$(field room_msat "$S")
+AMT=$((ROOM / 1000 + 100))
+Q=$(ctl "$SHOP_CTL" quote "$AMT")
+note "room $ROOM msat; $AMT sat quotes: $Q"
+CH_BEFORE=$(lsp_channels_with_shop)
+grep -q '^newchannel' <<<"$Q"
+check "SL-40: an amount above the room of the open channel needs a new one: $Q" $?
+shop_invoice "$AMT"
+H13=$(hash_of "$INVOICE")
+FEE13=$(field fee_msat "$REPLY")
+note "fee shown: $FEE13 msat"
+pay "$INVOICE" 90s && await_paid "$H13" 30
+check "SL-21, SL-29: with a channel already open, the payment that needs a new one is paid" $?
+GOT_MSAT=$(sed -n "s/^paid $H13 amount_msat=\([0-9]*\).*/\1/p" "$PAID_LOG" | head -1)
+SKIM=$((AMT * 1000 - ${GOT_MSAT:-0}))
+[ -n "$GOT_MSAT" ] && [ "$SKIM" -gt 0 ] && [ "$SKIM" -le "$FEE13" ]
+check "SL-29: the skim, $SKIM msat, is at or under the recorded maximum, $FEE13 msat" $?
+[ "$(lsp_channels_with_shop)" = $((CH_BEFORE + 1)) ]
+check "SL-28: the provider opened a new channel besides the open one" $?
+
+# A recorded maximum below what the provider takes: the payment is failed back.
+S=$(shop_status)
+ROOM=$(field room_msat "$S")
+AMT2=$((ROOM / 1000 + 100))
+Q=$(ctl "$SHOP_CTL" quote "$AMT2")
+note "room $ROOM msat; $AMT2 sat quotes: $Q"
+grep -q '^newchannel' <<<"$Q" || die "the second amount does not need a new channel: $Q"
+REPLY=$(ctl "$SHOP_CTL" invoice_capped "$AMT2" 1)
+INVOICE=$(sed -n 's/^invoice \([^ ]*\) .*/\1/p' <<<"$REPLY")
+H14=$(hash_of "$INVOICE")
+[ -n "$INVOICE" ]
+check "an invoice is made that records a maximum of 1 msat for the skim" $?
+pay "$INVOICE" 60s
+[ "$(pay_status "$H14")" = FAILED ]
+check "SL-29: a payment whose skim is above the recorded maximum is failed back: $(pay_status "$H14")" $?
+ctl "$SHOP_CTL" paid >>"$PAID_LOG"
+! grep -q "paid $H14" "$PAID_LOG"
+check "SL-21: and it is not reported paid" $?
+grep -q "SkimAboveMax" "$SHOP_DIR/node.log"
+check "SL-29: the node's log says the refusal was for the skim" $?
 stop_shop
 
 echo

@@ -8,18 +8,30 @@
 //! `shop_regtest ctl=<port> data=<dir> rpc=<port> user=<u> pass=<p>
 //!  provider_id=<pubkey> provider_addr=<host:port> device=<port>
 //!  [start_from=newer|local|device] [max_fee_msat=<n>] [index=<n>]
-//!  [sweep_to=<address>]`
+//!  [sweep_index=<n>] [wallet=<description>]`
 //!
-//! Commands: `nodeid`, `status`, `quote <sats>`, `invoice <sats>`, `paid`,
-//! `ack <hash>`, `sweep <address> <sats>`, `sweep_to <address>`,
-//! `close <address>`, `stop`.
+//! The shop's pinned wallet is a single-key wallet made from the same master
+//! key (account 0), unless `wallet=` gives a description. The node derives
+//! every address it pays to from it (SL-33); the commands give indexes.
+//!
+//! Commands: `nodeid`, `status`, `quote <sats>`, `invoice <sats>`,
+//! `invoice_capped <sats> <max_fee_msat>`, `paid`, `ack <hash>`,
+//! `sweep <index> <sats>`, `sweep_index <index>`, `address <index>`,
+//! `descriptor`, `close <index>`, `tracked`, `stop`.
+//!
+//! `invoice_capped` records a lower maximum for the provider's skim than the
+//! provider will take, to see a payment refused for it (SL-29). `descriptor`
+//! prints the wallet's receive descriptor with the test-network key prefix,
+//! for a Core wallet that must agree on the addresses.
 //!
 //! `paid` lists the paid events waiting; each stays kept, and is given again
 //! after a restart, until `ack` with its hash.
 
-use bitcoin::bip32::Xpriv;
-use bitcoin::secp256k1::PublicKey;
-use bitcoin::{Address, Network};
+use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
+use bitcoin::secp256k1::{PublicKey, Secp256k1};
+use bitcoin::{Network, NetworkKind};
+use openbmt_core::wallet::descriptor_checksum;
+use openbmt_core::wallet_single::SingleKeyWallet;
 use openbmt_lightning_node::bip85::node_seed;
 use openbmt_lightning_node::chain::CoreRpc;
 use openbmt_lightning_node::device_tcp::TcpDevice;
@@ -76,10 +88,14 @@ async fn main() {
             .map(|v| v.parse().unwrap())
             .unwrap_or(3_000_000),
         start_from,
-        sweep_to: match args.get("sweep_to") {
-            Some(a) => regtest_address(a).unwrap().script_pubkey(),
-            None => bitcoin::ScriptBuf::new_op_return([0u8; 1]),
-        },
+        wallet: args
+            .get("wallet")
+            .cloned()
+            .unwrap_or_else(|| wallet_text(&master)),
+        sweep_index: args
+            .get("sweep_index")
+            .map(|v| v.parse().unwrap())
+            .unwrap_or(0),
     };
     let node = match Node::start(config).await {
         Ok(n) => Arc::new(n),
@@ -140,9 +156,12 @@ async fn handle(node: &Node, p: &[&str]) -> String {
             )
         }
         "quote" => describe(&node.quote(sats(1) * 1000).await),
-        "invoice" => {
+        "invoice" | "invoice_capped" => {
             let amount_msat = sats(1) * 1000;
-            let quote = node.quote(amount_msat).await;
+            let mut quote = node.quote(amount_msat).await;
+            if let (Some(cap), Receive::NewChannel { fee_msat, .. }) = (p.get(2), &mut quote) {
+                *fee_msat = cap.parse().unwrap();
+            }
             match node.invoice(amount_msat, &quote, "shop").await {
                 Ok(made) => format!(
                     "invoice {} fee_msat={}",
@@ -180,29 +199,44 @@ async fn handle(node: &Node, p: &[&str]) -> String {
                 None => "ERR ack <hash>".into(),
             }
         }
-        "sweep_to" => match regtest_address(p.get(1).copied().unwrap_or("")) {
-            Ok(a) => format!("{:?}", node.set_sweep_destination(a.script_pubkey()).await),
+        "sweep_index" => format!("{:?}", node.set_sweep_index(sats(1) as u32).await),
+        "address" => match node.wallet_address(sats(1) as u32) {
+            Ok(a) => a.to_string(),
             Err(e) => format!("ERR {e}"),
         },
-        "sweep" => {
-            match Address::from_str(p[1]).and_then(|a| a.require_network(Network::Regtest)) {
-                Ok(a) => format!("{:?}", node.sweep(&a, sats(2))),
-                Err(e) => format!("ERR {e}"),
-            }
-        }
+        "sweep" => format!("{:?}", node.sweep(sats(1) as u32, sats(2))),
         "tracked" => node.tracked_outputs().to_string(),
-        "close" => {
-            match Address::from_str(p[1]).and_then(|a| a.require_network(Network::Regtest)) {
-                Ok(a) => format!("{:?}", node.close_all(&a)),
-                Err(e) => format!("ERR {e}"),
-            }
-        }
+        "close" => format!("{:?}", node.close_all(sats(1) as u32)),
+        "descriptor" => test_prefix_descriptor(&wallet_text(&Xpriv::from_str(XPRV).unwrap())),
         _ => "ERR unknown command".into(),
     }
 }
 
-fn regtest_address(a: &str) -> Result<Address, bitcoin::address::ParseError> {
-    Address::from_str(a)?.require_network(Network::Regtest)
+/// The pinned wallet text of a single-key wallet at `84h/0h/0h` under `master`.
+fn wallet_text(master: &Xpriv) -> String {
+    let secp = Secp256k1::new();
+    let path = DerivationPath::from_str("m/84h/0h/0h").unwrap();
+    let account = master.derive_priv(&secp, &path).unwrap();
+    SingleKeyWallet::new(
+        master.fingerprint(&secp),
+        0,
+        Xpub::from_priv(&secp, &account),
+    )
+    .unwrap()
+    .canonical_string()
+    .to_string()
+}
+
+/// The receive descriptor of a wallet text with the test-network spelling of
+/// the key, which is what Core on regtest reads, and the checksum.
+fn test_prefix_descriptor(text: &str) -> String {
+    let body = text.split('#').next().unwrap();
+    let start = body.find(']').unwrap() + 1;
+    let end = body[start..].find('/').unwrap() + start;
+    let mut xpub = Xpub::from_str(&body[start..end]).unwrap();
+    xpub.network = NetworkKind::Test;
+    let body = format!("{}{}{}", &body[..start], xpub, &body[end..]).replace("/<0;1>/", "/0/");
+    format!("{body}#{}", descriptor_checksum(&body).unwrap())
 }
 
 fn describe(r: &Receive) -> String {

@@ -710,6 +710,7 @@ dependencies = [
  "lightning-net-tokio",
  "lightning-persister",
  "lightning-rapid-gossip-sync",
+ "openbmt-core",
  "serde_json",
  "tokio",
 ]

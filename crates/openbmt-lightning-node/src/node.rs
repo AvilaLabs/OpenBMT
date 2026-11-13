@@ -13,7 +13,8 @@
 //!   The paid event is kept in the store until the caller acknowledges it
 //!   (`paid.rs`), and what is expected of each invoice survives a restart
 //!   (`expect.rs`).
-//! - Spendable outputs are swept to the address the caller gave (`sweep.rs`).
+//! - Spendable outputs are swept to an address the node derives from the shop's
+//!   pinned wallet, at an index the caller gives (`sweep.rs`).
 
 use crate::bip85::NodeSeed;
 use crate::chain::{ChainFilter, CoreBroadcaster, CoreFees, CoreRpc};
@@ -31,7 +32,7 @@ use crate::types::*;
 use bitcoin::bip32::Xpriv;
 use bitcoin::hashes::{sha256, Hash};
 use bitcoin::secp256k1::{PublicKey, Secp256k1};
-use bitcoin::{Address, BlockHash, Network, ScriptBuf};
+use bitcoin::{Address, BlockHash, Network};
 use lightning::chain::chainmonitor::ChainMonitor;
 use lightning::chain::channelmonitor::ChannelMonitor;
 use lightning::chain::{BestBlock, Listen, Watch};
@@ -65,6 +66,7 @@ use lightning_liquidity::lsps2::client::LSPS2ClientConfig;
 use lightning_liquidity::lsps2::event::LSPS2ClientEvent;
 use lightning_liquidity::lsps2::msgs::LSPS2OpeningFeeParams;
 use lightning_liquidity::LiquidityClientConfig;
+use openbmt_core::pinned_wallet::PinnedWallet;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -120,11 +122,15 @@ pub struct NodeConfig {
     pub max_opening_fee_msat: u64,
     /// Which copy of the state to start from (SL-25).
     pub start_from: StartFrom,
-    /// Where the sweeper sends spendable outputs: the shop wallet's next
-    /// address, as a script. Used on a first start; after the caller has
-    /// changed it with [`Node::set_sweep_destination`] the changed one is kept
-    /// and used.
-    pub sweep_to: ScriptBuf,
+    /// The shop's pinned wallet description, as the counter pins it (WL-20,
+    /// WL-22). The node derives the addresses the sweep, the splice out and
+    /// the close pay to from it (SL-33); an address is never handed in. One
+    /// that does not read is refused (`words::SL_33_DESTINATION_REFUSED`).
+    pub wallet: String,
+    /// The receive index the sweeper pays to on a first start. After the
+    /// caller has changed it with [`Node::set_sweep_index`] the changed one is
+    /// kept and used.
+    pub sweep_index: u32,
 }
 
 /// Why the node did not start.
@@ -140,6 +146,9 @@ pub enum StartError {
     Chain(String),
     /// A disk, the keys or the library's own error.
     Setup(String),
+    /// The shop's wallet description does not read, or the sweep index has no
+    /// address in it (SL-33).
+    WalletRefused,
 }
 
 impl std::fmt::Display for StartError {
@@ -149,6 +158,7 @@ impl std::fmt::Display for StartError {
             StartError::State(StateError::OlderCopy(_)) => f.write_str(crate::words::SL_25),
             StartError::State(StateError::Diverged) => f.write_str(crate::words::SL_25_DIVERGED),
             StartError::DeviceAway(e) => write!(f, "{}: {e}", crate::words::SL_23),
+            StartError::WalletRefused => f.write_str(crate::words::SL_33_DESTINATION_REFUSED),
             StartError::Chain(e) | StartError::Setup(e) => f.write_str(e),
         }
     }
@@ -339,7 +349,44 @@ pub fn user_config() -> UserConfig {
     c.accept_forwards_to_priv_channels = false;
     c.accept_intercept_htlcs = false;
     c.reject_inbound_splices = false;
+    // The provider takes its fee out of a payment on any channel it has with
+    // the shop, not only the one that was opened for it: every channel the
+    // node accepts is the provider's (SL-31), so every one takes underpaying
+    // HTLCs (SL-29). What the node claims is still judged by `expect.rs`.
+    c.channel_config.accept_underpaying_htlcs = true;
     c
+}
+
+/// Sets `accept_underpaying_htlcs` on every channel with the provider that
+/// is already open. A channel made now has it from [`user_config`] and from
+/// the accept; one made before it, or by an older build, gets it here, so a
+/// payment that makes the provider open another channel can be forwarded over
+/// it less the provider's fee.
+fn accept_underpaying_on_open_channels(manager: &Manager, provider: &PublicKey, logger: &Logger) {
+    let ids: Vec<_> = manager
+        .list_channels()
+        .into_iter()
+        .filter(|c| {
+            c.counterparty.node_id == *provider
+                && !c.config.is_some_and(|c| c.accept_underpaying_htlcs)
+        })
+        .map(|c| c.channel_id)
+        .collect();
+    if ids.is_empty() {
+        return;
+    }
+    let update = ChannelConfigUpdate {
+        accept_underpaying_htlcs: Some(true),
+        ..Default::default()
+    };
+    let result = manager.update_partial_channel_config(provider, &ids, &update);
+    logger.line(
+        Level::Info,
+        &format!(
+            "underpaying HTLCs accepted on {} open channel(s): {result:?}",
+            ids.len()
+        ),
+    );
 }
 
 fn network_name_ok(network: Network, chain: &str) -> bool {
@@ -360,6 +407,12 @@ impl Node {
         if config.network == Network::Bitcoin && !MAINNET_ALLOWED {
             return Err(StartError::MainnetNotYet);
         }
+        // The shop's wallet (SL-33), before anything is made on disk.
+        let wallet =
+            PinnedWallet::from_text(&config.wallet).map_err(|_| StartError::WalletRefused)?;
+        wallet
+            .receive_script(config.sweep_index)
+            .map_err(|_| StartError::WalletRefused)?;
         let handle = tokio::runtime::Handle::current();
         std::fs::create_dir_all(&config.data_dir).map_err(setup)?;
         let logger =
@@ -450,9 +503,14 @@ impl Node {
             .map_err(setup)?;
         let paid_log = PaidLog::new(Arc::clone(&background));
         let destination = Arc::new(
-            SweepDestination::load(Arc::clone(&background), config.sweep_to.clone())
-                .await
-                .map_err(setup)?,
+            SweepDestination::load(
+                Arc::clone(&background),
+                wallet,
+                config.network,
+                config.sweep_index,
+            )
+            .await
+            .map_err(setup)?,
         );
         let sweeper_parts = SweeperParts {
             broadcaster: Arc::clone(&broadcaster),
@@ -678,6 +736,10 @@ impl Node {
             stop: Notify::new(),
         });
 
+        // Channels the provider opened before the setting was made take
+        // underpaying HTLCs too (SL-29, SL-31).
+        accept_underpaying_on_open_channels(&manager, &config.provider.node_id, &logger);
+
         let mut tasks = vec![flusher];
 
         // Chain: poll Core for the tip and feed the monitor and the manager.
@@ -827,19 +889,40 @@ impl Node {
             .map_err(|e| e.to_string())
     }
 
-    /// Changes where swept outputs go: the shop wallet's next address, as a
-    /// script. Kept, and used after a restart. An empty script is refused.
-    pub async fn set_sweep_destination(&self, script: ScriptBuf) -> Result<(), String> {
+    /// Changes where swept outputs go: the receive address of the shop's
+    /// pinned wallet at `index`, derived by the node (SL-33). The index is
+    /// kept, and used after a restart. An index with no address is refused
+    /// with `words::SL_33_DESTINATION_REFUSED`.
+    pub async fn set_sweep_index(&self, index: u32) -> Result<(), String> {
         self.shared
             .destination
-            .set(script)
+            .set(index)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| match e.kind() {
+                lightning::io::ErrorKind::InvalidInput => {
+                    crate::words::SL_33_DESTINATION_REFUSED.to_string()
+                }
+                _ => e.to_string(),
+            })
     }
 
-    /// Where swept outputs go now.
-    pub fn sweep_destination(&self) -> ScriptBuf {
-        self.shared.destination.get()
+    /// The index swept outputs go to now.
+    pub fn sweep_index(&self) -> u32 {
+        self.shared.destination.index()
+    }
+
+    /// The address swept outputs go to now.
+    pub fn sweep_destination(&self) -> Result<Address, String> {
+        let d = &self.shared.destination;
+        d.address_at(d.index()).map_err(|e| e.to_string())
+    }
+
+    /// The shop wallet's receive address at `index`, the one the node derives.
+    pub fn wallet_address(&self, index: u32) -> Result<Address, String> {
+        self.shared
+            .destination
+            .address_at(index)
+            .map_err(|_| crate::words::SL_33_DESTINATION_REFUSED.to_string())
     }
 
     /// How many spendable outputs the sweeper still tracks: those not yet
@@ -986,12 +1069,13 @@ impl Node {
     }
 
     /// Moves `amount_sat` out of the channel with the most to give, to `to`,
-    /// by a splice out (SL-33). `to` is an address the caller derived itself
-    /// from the pinned wallet; the node never takes one from another device.
-    /// The splice is begun; it is done when the new funding transaction is
-    /// locked by both sides.
-    pub fn sweep(&self, to: &Address, amount_sat: u64) -> Result<(), String> {
+    /// by a splice out (SL-33), to the pinned wallet's receive address at
+    /// `index`, which the node derives itself; it never takes an address from
+    /// another device. The splice is begun; it is done when the new funding
+    /// transaction is locked by both sides.
+    pub fn sweep(&self, index: u32, amount_sat: u64) -> Result<(), String> {
         let s = &self.shared;
+        let to = self.wallet_address(index)?;
         let channel = s
             .manager
             .list_usable_channels()
@@ -1020,9 +1104,11 @@ impl Node {
             .map_err(|e| format!("{e:?}"))
     }
 
-    /// Closes every channel cooperatively to `to` (SL-36).
-    pub fn close_all(&self, to: &Address) -> Result<usize, String> {
-        crate::close::close_all(&self.shared.manager, to)
+    /// Closes every channel cooperatively to the pinned wallet's receive
+    /// address at `index`, which the node derives itself (SL-36).
+    pub fn close_all(&self, index: u32) -> Result<usize, String> {
+        let to = self.wallet_address(index)?;
+        crate::close::close_all(&self.shared.manager, &to)
     }
 
     /// Stops the node: the library's loop writes the state a last time, and
@@ -1519,7 +1605,8 @@ mod tests {
             },
             max_opening_fee_msat: 1_000_000,
             start_from: StartFrom::Newer,
-            sweep_to: ScriptBuf::new(),
+            wallet: crate::testutil::wallet_text(),
+            sweep_index: 0,
         }
     }
 
@@ -1563,6 +1650,41 @@ mod tests {
         assert!(c.manually_accept_inbound_channels);
         assert!(!c.accept_forwards_to_priv_channels);
         assert!(!c.accept_intercept_htlcs);
+    }
+
+    #[test]
+    fn sl_29_every_channel_takes_underpaying_htlcs_and_the_claim_checks_stay() {
+        // The provider's fee is taken from a payment on any channel with it.
+        assert!(user_config().channel_config.accept_underpaying_htlcs);
+        // What is claimed is still judged by the recorded invoice.
+        assert!(!user_config().accept_intercept_htlcs);
+        assert!(user_config().manually_accept_inbound_channels);
+    }
+
+    #[test]
+    fn sl_33_a_wallet_that_does_not_read_is_refused_before_anything_is_made() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        for bad in [
+            "",
+            "not a descriptor",
+            // A test-network key is refused as the counter's import refuses it.
+            "wpkh([00000000/84h/1h/0h]tpubD6NzVbkrYhZ4XgiXtGrdW5XDAPFCL9h7we1vwNCpn8tGbBcgfVYjXyhWo4E1xkh56hjod1RhGjxbaTLV3X4FyWuejifB9jusQ46QzG87VKp/<0;1>/*)",
+        ] {
+            let mut c = config(Network::Regtest);
+            c.wallet = bad.to_string();
+            let err = rt.block_on(Node::start(c)).err().unwrap();
+            assert!(matches!(err, StartError::WalletRefused), "{err}");
+            assert_eq!(err.to_string(), crate::words::SL_33_DESTINATION_REFUSED);
+        }
+        // An index with no address in the wallet is refused the same way.
+        let mut c = config(Network::Regtest);
+        c.sweep_index = 1 << 31;
+        let err = rt.block_on(Node::start(c)).err().unwrap();
+        assert!(matches!(err, StartError::WalletRefused), "{err}");
+        assert!(!temp_dir("node-config").join("node").exists());
     }
 
     #[test]

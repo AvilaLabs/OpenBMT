@@ -2,21 +2,23 @@
 //!
 //! When a channel is closed on the chain, the library gives the node outputs
 //! it can spend. `lightning::util::sweep::OutputSweeper` tracks them, spends
-//! them to the address the caller gave and keeps its state in the store, the
+//! them to the address the node derives and keeps its state in the store, the
 //! way the manager is kept: the counter's copy at once and the second
 //! device's as soon as it can be reached, the latest write of a name winning
 //! (SL-24).
 //!
-//! The address is the shop wallet's next address, given in the node's
-//! configuration as a script and changed by the caller with
-//! [`SweepDestination::set`]. What was set last is kept in the store and used
-//! after a restart.
+//! The address is the shop's pinned wallet's receive address at an index. The
+//! node derives it itself from the wallet description (SL-33, WL-20); the
+//! caller gives only the index, in the node's configuration and later with
+//! [`SweepDestination::set`]. The index set last is kept in the store and used
+//! after a restart. The splice out and the close take their addresses from
+//! the same derivation ([`SweepDestination::address_at`]).
 
 use crate::chain::{ChainFilter, CoreBroadcaster, CoreFees};
 use crate::logger::Logger;
 use crate::store::Background;
 use crate::types::Graph;
-use bitcoin::ScriptBuf;
+use bitcoin::{Address, Network, ScriptBuf};
 use lightning::chain::BestBlock;
 use lightning::io;
 use lightning::routing::scoring::ProbabilisticScorer;
@@ -29,67 +31,103 @@ use lightning::util::persist::{
 };
 use lightning::util::ser::ReadableArgs;
 use lightning::util::sweep::OutputSweeper;
+use openbmt_core::pinned_wallet::PinnedWallet;
 use std::sync::{Arc, Mutex};
 
-/// Where the destination script is kept.
+/// Where the destination index is kept.
 pub const DESTINATION_PRIMARY: &str = "sweep_destination";
-const DESTINATION_KEY: &str = "script";
+const DESTINATION_KEY: &str = "index";
 
-/// Where the sweeper sends what it spends: the shop wallet's address, kept in
-/// the store.
+/// Where the sweeper sends what it spends: the shop wallet's receive address
+/// at an index, derived here, the index kept in the store.
 pub struct SweepDestination {
-    script: Mutex<ScriptBuf>,
+    wallet: PinnedWallet,
+    network: Network,
+    index: Mutex<u32>,
     store: Arc<Background>,
 }
 
+fn refused() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "no receive address of the pinned wallet at that index",
+    )
+}
+
 impl SweepDestination {
-    /// The destination after a start: the one the caller set last if there is
-    /// one in the store, otherwise `configured`, which is then kept.
-    pub async fn load(store: Arc<Background>, configured: ScriptBuf) -> Result<Self, io::Error> {
+    /// The destination after a start: the index the caller set last if there
+    /// is one in the store, otherwise `configured`, which is then kept. An
+    /// index with no address in `wallet` is refused.
+    pub async fn load(
+        store: Arc<Background>,
+        wallet: PinnedWallet,
+        network: Network,
+        configured: u32,
+    ) -> Result<Self, io::Error> {
         let kept = match KVStore::read(&*store, DESTINATION_PRIMARY, "", DESTINATION_KEY).await {
-            Ok(bytes) if !bytes.is_empty() => Some(ScriptBuf::from_bytes(bytes)),
-            Ok(_) => None,
+            Ok(bytes) => Some(
+                <[u8; 4]>::try_from(bytes.as_slice())
+                    .map(u32::from_be_bytes)
+                    .map_err(|_| {
+                        io::Error::new(io::ErrorKind::InvalidData, "sweep destination index")
+                    })?,
+            ),
             Err(e) if e.kind() == io::ErrorKind::NotFound => None,
             Err(e) => return Err(e),
         };
         let me = SweepDestination {
-            script: Mutex::new(kept.clone().unwrap_or_else(|| configured.clone())),
+            wallet,
+            network,
+            index: Mutex::new(kept.unwrap_or(configured)),
             store,
         };
+        me.script_at(kept.unwrap_or(configured))?;
         if kept.is_none() {
-            me.keep(&configured).await?;
+            me.keep(configured).await?;
         }
         Ok(me)
     }
 
-    async fn keep(&self, script: &ScriptBuf) -> Result<(), io::Error> {
+    async fn keep(&self, index: u32) -> Result<(), io::Error> {
         KVStore::write(
             &*self.store,
             DESTINATION_PRIMARY,
             "",
             DESTINATION_KEY,
-            script.to_bytes(),
+            index.to_be_bytes().to_vec(),
         )
         .await
     }
 
-    /// Changes the destination. An empty script is refused. Returns when the
-    /// counter's copy holds it; a sweep that comes after uses it.
-    pub async fn set(&self, script: ScriptBuf) -> Result<(), io::Error> {
-        if script.is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "an empty script is not a destination",
-            ));
-        }
-        self.keep(&script).await?;
-        *self.script.lock().unwrap() = script;
+    /// The receive script of the pinned wallet at `index`.
+    pub fn script_at(&self, index: u32) -> Result<ScriptBuf, io::Error> {
+        self.wallet.receive_script(index).map_err(|_| refused())
+    }
+
+    /// The receive address of the pinned wallet at `index`, on the node's
+    /// network.
+    pub fn address_at(&self, index: u32) -> Result<Address, io::Error> {
+        Address::from_script(&self.script_at(index)?, self.network).map_err(|_| refused())
+    }
+
+    /// Changes the destination to the address at `index`. An index with no
+    /// address is refused. Returns when the counter's copy holds it; a sweep
+    /// that comes after uses it.
+    pub async fn set(&self, index: u32) -> Result<(), io::Error> {
+        self.script_at(index)?;
+        self.keep(index).await?;
+        *self.index.lock().unwrap() = index;
         Ok(())
     }
 
-    /// The destination now.
-    pub fn get(&self) -> ScriptBuf {
-        self.script.lock().unwrap().clone()
+    /// The index of the destination now.
+    pub fn index(&self) -> u32 {
+        *self.index.lock().unwrap()
+    }
+
+    /// The destination script now.
+    pub fn get(&self) -> Result<ScriptBuf, io::Error> {
+        self.script_at(self.index())
     }
 }
 
@@ -97,8 +135,8 @@ impl ChangeDestinationSource for SweepDestination {
     fn get_change_destination_script<'a>(
         &'a self,
     ) -> lightning::util::async_poll::AsyncResult<'a, ScriptBuf, ()> {
-        let script = self.get();
-        Box::pin(async move { Ok(script) })
+        let script = self.get().map_err(|_| ());
+        Box::pin(async move { script })
     }
 }
 
@@ -254,42 +292,82 @@ mod tests {
         ScriptBuf::from_bytes(b)
     }
 
-    #[tokio::test]
-    async fn sl_33_the_sweep_destination_is_the_configured_one_until_it_is_changed_and_then_the_changed_one(
-    ) {
-        let d = disks("sweep-dest");
-        let (store, flusher) = start(&d);
-        let dest = SweepDestination::load(Arc::clone(&store), script(1))
+    fn wallet() -> PinnedWallet {
+        PinnedWallet::from_text(&crate::testutil::wallet_text()).unwrap()
+    }
+
+    async fn load(store: Arc<Background>, configured: u32) -> SweepDestination {
+        SweepDestination::load(store, wallet(), Network::Regtest, configured)
             .await
-            .unwrap();
-        assert_eq!(dest.get(), script(1));
-        assert_eq!(
-            dest.get_change_destination_script().await.unwrap(),
-            script(1)
-        );
-        dest.set(script(2)).await.unwrap();
-        assert_eq!(
-            dest.get_change_destination_script().await.unwrap(),
-            script(2)
-        );
-        assert!(dest.set(ScriptBuf::new()).await.is_err());
-        assert_eq!(dest.get(), script(2));
-        // A restart with the first configured script in the config again: what
-        // the caller set last is kept.
-        flusher.abort();
-        let (store, _flusher) = start(&d);
-        let again = SweepDestination::load(store, script(1)).await.unwrap();
-        assert_eq!(again.get(), script(2));
+            .unwrap()
     }
 
     #[tokio::test]
-    async fn sl_33_a_first_start_keeps_the_configured_destination() {
+    async fn sl_33_the_sweep_destination_is_the_configured_index_until_it_is_changed_and_then_the_changed_one(
+    ) {
+        let d = disks("sweep-dest");
+        let (store, flusher) = start(&d);
+        let dest = load(Arc::clone(&store), 1).await;
+        let w = wallet();
+        // The address is the pinned wallet's own, derived here.
+        assert_eq!(dest.index(), 1);
+        assert_eq!(dest.get().unwrap(), w.receive_script(1).unwrap());
+        assert_eq!(
+            dest.get_change_destination_script().await.unwrap(),
+            w.receive_script(1).unwrap()
+        );
+        dest.set(2).await.unwrap();
+        assert_eq!(
+            dest.get_change_destination_script().await.unwrap(),
+            w.receive_script(2).unwrap()
+        );
+        // An index with no address (2^31 and up) is refused and changes nothing.
+        assert!(dest.set(1 << 31).await.is_err());
+        assert_eq!(dest.index(), 2);
+        // A restart with the first index in the config again: what the caller
+        // set last is kept.
+        flusher.abort();
+        let (store, _flusher) = start(&d);
+        let again = load(store, 1).await;
+        assert_eq!(again.index(), 2);
+        assert_eq!(again.get().unwrap(), w.receive_script(2).unwrap());
+    }
+
+    #[tokio::test]
+    async fn sl_33_the_addresses_are_the_wallets_on_the_nodes_network() {
+        let d = disks("sweep-addr");
+        let (store, _flusher) = start(&d);
+        let dest = load(store, 0).await;
+        let w = wallet();
+        for i in [0u32, 1, 999] {
+            let a = dest.address_at(i).unwrap();
+            assert_eq!(a.script_pubkey(), w.receive_script(i).unwrap());
+            assert!(a.to_string().starts_with("bcrt1q"));
+            // The mainnet spelling of the same script is the wallet's own.
+            assert_eq!(
+                Address::from_script(&a.script_pubkey(), Network::Bitcoin).unwrap(),
+                w.receive_address(i).unwrap()
+            );
+        }
+        assert!(dest.address_at(1 << 31).is_err());
+    }
+
+    #[tokio::test]
+    async fn sl_33_a_configured_index_with_no_address_is_refused() {
+        let d = disks("sweep-bad-index");
+        let (store, _flusher) = start(&d);
+        let r = SweepDestination::load(store, wallet(), Network::Regtest, 1 << 31).await;
+        assert!(r.is_err());
+    }
+
+    #[tokio::test]
+    async fn sl_33_a_first_start_keeps_the_configured_index() {
         let d = disks("sweep-dest-first");
         let (store, flusher) = start(&d);
-        SweepDestination::load(store, script(7)).await.unwrap();
+        load(store, 7).await;
         flusher.abort();
-        let kept = std::fs::read(d.dir.join("local/sweep_destination/script")).unwrap();
-        assert_eq!(kept, script(7).to_bytes());
+        let kept = std::fs::read(d.dir.join("local/sweep_destination/index")).unwrap();
+        assert_eq!(kept, 7u32.to_be_bytes());
     }
 
     async fn parts(d: &Disks) -> (SweeperParts, tokio::task::JoinHandle<()>) {
@@ -313,11 +391,7 @@ mod tests {
             fees: Arc::new(CoreFees::default()),
             filter: Arc::new(ChainFilter::default()),
             keys: Arc::new(KeysManager::new(&[1; 32], 1, 1, true)),
-            destination: Arc::new(
-                SweepDestination::load(Arc::clone(&store), script(1))
-                    .await
-                    .unwrap(),
-            ),
+            destination: Arc::new(load(Arc::clone(&store), 1).await),
             store,
             logger,
         };

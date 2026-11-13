@@ -3,6 +3,7 @@ arrayvec v0.7.8
 autocfg v1.5.1
 base58ck v0.1.101
 bech32 v0.11.1
+bip39 v2.2.2
 bitcoin v0.32.8
 bitcoin-internals v0.3.0
 bitcoin-io v0.1.101
@@ -40,6 +41,7 @@ lightning-persister v0.2.8
 lightning-rapid-gossip-sync v0.2.3
 lightning-types v0.3.5
 memchr v2.8.3
+miniscript v12.3.5
 mio v1.2.4
 num-traits v0.2.19
 opaque-debug v0.3.1
@@ -59,10 +61,12 @@ socket2 v0.6.5
 subtle v2.6.1
 syn v2.0.119
 syn v3.0.10
+tinyvec v1.13.3
 tokio v1.54.1
 tokio-macros v2.7.2
 typenum v1.20.1
 unicode-ident v1.0.27
+unicode-normalization v0.1.26
 universal-hash v0.5.1
 version_check v0.9.5
 zeroize v1.9.1
