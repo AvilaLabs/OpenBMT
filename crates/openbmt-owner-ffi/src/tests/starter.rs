@@ -920,3 +920,17 @@ fn ss_30_n13e_01_a_ready_refund_is_still_signed_and_handed_to_the_outbox() {
         });
     assert!(signed);
 }
+
+#[test]
+fn lk_79_ss_38_the_app_gives_the_node_the_limit_and_the_stop_and_nothing_else_is_taken() {
+    let rig = super::kit::Rig::new();
+    let handle = rig.start();
+    let set = |limit: u64, stop: u8| rig.call(227, handle, &W::new().u64(limit).u8(stop).0);
+    Rd::ok(&set(100_000, 1)).done();
+    // Again, with other values: the app gives them when they change.
+    Rd::ok(&set(0, 0)).done();
+    // A stop byte that is not 0 or 1 is refused, and so is a short frame.
+    assert_eq!(Rd::error(&set(5, 2)).expect("refused").status, 1);
+    let short = rig.call(227, handle, &W::new().u64(5).0);
+    assert!(Rd::error(&short).is_some());
+}

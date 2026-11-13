@@ -231,6 +231,7 @@ ops run on another; it waits for at most 250 ms.
 232 web_reply        handle node  args WebReplyArgs -> WebStateView
 233 web_code_read    handle zero  args string -> WebCodeView
 234 request_read     handle node  args RequestNumberArgs -> RequestDetailView
+227 starter_line_set handle node  args StarterLineSetArgs -> ()
 ```
 
 ## Types
@@ -420,6 +421,7 @@ OwnRepinKind: enum, one tag byte
     tags Done=0 AlreadyDone=1 NotReady=2
 OwnRepinView: record: kind: OwnRepinKind, wallet: list<u8>, waiting: u32, refused: u32
 StarterLateMoveArgs: record: sealed: list<u8>, data_key: list<u8>, wallet: list<u8>, now: u64, fee_rate: u64, min_confirmations: u32
+StarterLineSetArgs: record: limit_sats: u64, stop: bool
 StarterLateView: record: wallet: list<u8>, sats: u64, coins: u32
 SwitchStateKind: enum, one tag byte
     tags Switched=0 Waiting=1 Refused=2

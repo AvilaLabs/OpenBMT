@@ -81,6 +81,9 @@
 //!   step of a visit (which the app sends to the store) and the store's
 //!   answer to it. 233 reads a pairing code to show what is compared; it
 //!   works on no node.
+//! - 227: the limit and the stop the owner phone's own record holds, given to
+//!   the node for the starter line it sends to the counters (LK-79, SS-32,
+//!   SS-38).
 //! - 100 to 103: the lock on the setup text the app stores
 //!   (`docs/LOCK-RULES.md`, `docs/OWNER-APP-RULES.md` OA-60 to OA-62):
 //!   whether stored bytes are a locked setup, lock a text under a PIN, open
@@ -199,10 +202,10 @@ use crate::signer_views::{
 use crate::starter::{
     self as starter_ops, OwnRepinKind, OwnRepinView, StarterChangeKind, StarterCheckView,
     StarterFeeArgs, StarterHeldArgs, StarterImageView, StarterLateMoveArgs, StarterLateView,
-    StarterLimitArgs, StarterLimitKind, StarterLimitView, StarterMakeArgs, StarterMoveArgs,
-    StarterNodeMoveArgs, StarterNodePayArgs, StarterOfferArgs, StarterOpenArgs, StarterPageArgs,
-    StarterPaidView, StarterPayArgs, StarterSealedView, StarterSendArgs, StarterSlot,
-    StarterTypedView, StarterWalletView,
+    StarterLimitArgs, StarterLimitKind, StarterLimitView, StarterLineSetArgs, StarterMakeArgs,
+    StarterMoveArgs, StarterNodeMoveArgs, StarterNodePayArgs, StarterOfferArgs, StarterOpenArgs,
+    StarterPageArgs, StarterPaidView, StarterPayArgs, StarterSealedView, StarterSendArgs,
+    StarterSlot, StarterTypedView, StarterWalletView,
 };
 use crate::views::{
     put_words, AlertKind, AlertView, BatchArgs, BatchWaitingView, BuiltView, CashAmountView,
@@ -1063,6 +1066,8 @@ fn build_ops() -> Vec<Op> {
             web_orders::read_code(text)
         op(234, "request_read", Node, |c, a: RequestNumberArgs| {
             c.entry()?.request_read(a)
+        op(227, "starter_line_set", Node, |c, a: StarterLineSetArgs| {
+            c.entry()?.starter_line_set(a)
         }),
     ]
 }
@@ -1352,6 +1357,7 @@ fn definitions() -> Vec<TypeDef> {
         OwnRepinKind::define(),
         OwnRepinView::define(),
         StarterLateMoveArgs::define(),
+        StarterLineSetArgs::define(),
         StarterLateView::define(),
         SwitchStateKind::define(),
         SwitchRowView::define(),

@@ -230,6 +230,7 @@ private const val OP_WEB_STEP = 231
 private const val OP_WEB_REPLY = 232
 private const val OP_WEB_CODE_READ = 233
 private const val OP_REQUEST_READ = 234
+private const val OP_STARTER_LINE_SET = 227
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -2689,6 +2690,15 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
         }
         java.util.Arrays.fill(dataKey, 0.toByte())
         return r.starterPaid().also { r.end() }
+    }
+
+    /**
+     * LK-79: give the node the limit (satoshis, zero for none) and the stop the owner phone's own record holds, for
+     * the starter line it sends to the counters. Call it at start, before the node takes blocks, and when either changes.
+     */
+    fun starterLineSet(limitSats: Long, stop: Boolean) {
+        val r = call(OP_STARTER_LINE_SET, handle) { w -> w.u64(limitSats).bool(stop) }
+        r.end()
     }
 
     /** SS-36: what the starter wallet holds, in satoshis, from the node's watch of it: confirmed coins and payments on their way. */

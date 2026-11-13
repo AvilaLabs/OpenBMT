@@ -1041,6 +1041,20 @@ wire_record_get!(StarterLateMoveArgs {
     min_confirmations
 });
 
+/// The arguments of `starter_line_set` (LK-79, SS-32, SS-38): what the
+/// owner phone's own record says of the starter wallet, for the line the
+/// node builds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StarterLineSetArgs {
+    /// The limit, in satoshis; zero when the owner set none.
+    pub limit_sats: u64,
+    /// Whether the owner asked for bitcoin to stop above the limit.
+    pub stop: bool,
+}
+
+wire_record!(StarterLineSetArgs { limit_sats, stop });
+wire_record_get!(StarterLineSetArgs { limit_sats, stop });
+
 /// A former wallet that holds a coin the node saw (SS-43).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StarterLateView {

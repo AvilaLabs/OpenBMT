@@ -125,10 +125,10 @@ pub use setup_lock::PinChangeArgs;
 pub use starter::{
     OwnRepinKind, OwnRepinView, StarterChangeKind, StarterCheckView, StarterCoinView,
     StarterFeeArgs, StarterHeldArgs, StarterImageView, StarterLateMoveArgs, StarterLateView,
-    StarterLimitArgs, StarterLimitKind, StarterLimitView, StarterMakeArgs, StarterMoveArgs,
-    StarterNodeMoveArgs, StarterNodePayArgs, StarterOfferArgs, StarterOpenArgs, StarterPageArgs,
-    StarterPaidView, StarterPayArgs, StarterSealedView, StarterSendArgs, StarterTypedView,
-    StarterWalletView,
+    StarterLimitArgs, StarterLimitKind, StarterLimitView, StarterLineSetArgs, StarterMakeArgs,
+    StarterMoveArgs, StarterNodeMoveArgs, StarterNodePayArgs, StarterOfferArgs, StarterOpenArgs,
+    StarterPageArgs, StarterPaidView, StarterPayArgs, StarterSealedView, StarterSendArgs,
+    StarterTypedView, StarterWalletView,
 };
 pub use views::{
     AlertKind, AlertView, BatchArgs, BatchWaitingView, BuiltView, CashAmountView, CashOutArgs,

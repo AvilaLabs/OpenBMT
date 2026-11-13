@@ -750,6 +750,13 @@ fn own_link_step(
         ));
     }
     view.notes.extend(turn.notes);
+    let line = node.starter_line_step(link, now);
+    if line.failed > 0 {
+        view.notes.push(format!(
+            "LK-79: the starter line did not reach {} counter(s); it is sent again at the next step",
+            line.failed
+        ));
+    }
     view.notes.truncate(openbmt_owner_node::NOTE_LOG);
     Ok(view)
 }
@@ -2932,6 +2939,16 @@ impl Entry {
         self.run(Some(a.ask.now), move |st| {
             request_prepare(st, &a.ask)?;
             requests::read(&st.node, &a)
+    /// LK-79: the limit and the stop the app's own record holds, for the
+    /// starter line the node builds. The app gives them at start, before
+    /// the node takes blocks, and when they change.
+    pub(crate) fn starter_line_set(
+        &self,
+        a: crate::starter::StarterLineSetArgs,
+    ) -> Result<(), AppError> {
+        self.run(None, move |st| {
+            st.node.set_starter_line(a.limit_sats, a.stop);
+            Ok(())
         })
     }
 
