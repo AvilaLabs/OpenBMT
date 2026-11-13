@@ -8,7 +8,7 @@ use openbmt_core::currency::ShopCurrency;
 use openbmt_owner::own_book::AllocationBook;
 use openbmt_owner::starter::{KernelRandom, KERNEL_BYTES};
 use openbmt_owner::web_order::{
-    pairing_id_of, Notice, NoticeState, PairingCode, Range, SignedRequest, WebOrderKey, HEADER_MAC,
+    pairing_id_of, Notice, NoticeState, PairingCode, Range, SignedRequest, HEADER_MAC,
     HEADER_NONCE, HEADER_TIME, ROUTE_NOTICE, ROUTE_ORDERS, ROUTE_RANGE,
 };
 use openbmt_requests::Status;
@@ -17,7 +17,9 @@ use super::live::{pay_to_script, START};
 use super::own::{own_receive, own_setup};
 use super::*;
 use crate::requests::{RequestContext, RequestsOff};
-use crate::web_orders::{check_store_url, decode, encode, WebError, MAGIC_WEB_ORDERS};
+use crate::web_orders::{
+    check_store_url, decode, encode, web_key_seed, WebError, MAGIC_WEB_ORDERS,
+};
 use crate::web_visit::{WebCall, WebCallKind, WebFailure, WebStep};
 use crate::{RefusedWhy, WEB_ORDERS_FILE};
 
@@ -837,9 +839,44 @@ fn wo_43_the_key_a_pairing_makes_signs_for_the_code_it_shows() {
     let bytes = std::fs::read(dir.path().join(WEB_ORDERS_FILE)).unwrap();
     let state = decode(&bytes).unwrap();
     let pairing = state.pairing.unwrap();
-    assert_eq!(
-        WebOrderKey::from_seed(&pairing.seed).public(),
-        *code.public()
-    );
+    assert_eq!(pairing.key(&rig.node.owner_secret).public(), *code.public());
     assert_eq!(pairing.secret, *code.secret());
+}
+
+#[test]
+fn wo_43_the_key_is_made_from_the_owner_secret_and_the_file_holds_no_seed() {
+    let dir = Dir::new();
+    let (mut rig, book, setup) = desk_rig(&dir, 1);
+    let shown = rig
+        .node
+        .web_pair_start(STORE, "Corner Shop", START, &mut Bytes(1))
+        .unwrap();
+    let owner_secret = rig.node.owner_secret;
+    let bytes = std::fs::read(dir.path().join(WEB_ORDERS_FILE)).unwrap();
+    let pairing = decode(&bytes).unwrap().pairing.unwrap();
+    let seed = web_key_seed(&owner_secret, &pairing.secret);
+    assert!(
+        !bytes.windows(32).any(|w| w == seed),
+        "the file holds the seed"
+    );
+    // The same owner secret gives the same key after a restart.
+    let rig = restart(rig, &dir, book, &setup);
+    let state = rig.node.web_state();
+    assert_eq!(state.fingerprint, shown.fingerprint);
+    let again = decode(&std::fs::read(dir.path().join(WEB_ORDERS_FILE)).unwrap())
+        .unwrap()
+        .pairing
+        .unwrap();
+    assert_eq!(
+        again.key(&owner_secret).public(),
+        pairing.key(&owner_secret).public()
+    );
+    // Another owner secret gives another key.
+    let mut other = owner_secret;
+    other[0] ^= 1;
+    assert_ne!(web_key_seed(&other, &pairing.secret), seed);
+    assert_ne!(
+        again.key(&other).public(),
+        again.key(&owner_secret).public()
+    );
 }

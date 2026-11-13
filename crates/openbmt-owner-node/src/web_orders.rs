@@ -9,9 +9,9 @@
 //!   strictly: a file that does not read, that is not in the order it is
 //!   written in or that does not encode to the same bytes is refused whole,
 //!   left as it is, and web orders are off until the owner acts (as RQ-31).
-//! - **It holds the web order key's seed** and the pairing secret, as the
-//!   node's other files hold what the node signs with. The data folder is the
-//!   app's own and out of backups.
+//! - **It holds the pairing secret, not the web order key.** The key's seed
+//!   is made again each time from the owner secret the node holds and the
+//!   pairing's id ([`web_key_seed`]), so the file carries nothing that signs.
 //! - **The addresses** a range holds are desk indexes of the request chain
 //!   (RQ-03), kept in the live watch from the moment the range is written,
 //!   whether an order uses them or not (WO-12, RQ-04).
@@ -22,8 +22,8 @@
 //!   kept here and never sent.
 //!
 //! Layout: the magic, the version byte 1, the pairing (a byte 0 for none, 1
-//! for one the owner has not confirmed, 2 for a confirmed one, then the key's
-//! seed, the secret, the shop's name and the store's address, and when it was
+//! for one the owner has not confirmed, 2 for a confirmed one, then the
+//! secret, the shop's name and the store's address, and when it was
 //! made), the number of the last order taken, the sequence of the next range,
 //! when the store was last visited, the addresses the store said it had left,
 //! the store's last refusal of a range, the ranges, the orders and the
@@ -182,6 +182,20 @@ pub fn check_store_url(text: &str) -> Result<String, WebError> {
     Ok(format!("https://{}{port}{path}", host.to_ascii_lowercase()))
 }
 
+/// The tag of the web order key's seed.
+const TAG_WEB_KEY: &str = "OpenBMT/web-order-key/v1";
+
+/// The Ed25519 seed of the web order key of the pairing with `secret`: the
+/// tagged hash of the owner secret and the pairing's id (WO-10). The same
+/// owner secret gives the same key after a restart; another gives another.
+pub(crate) fn web_key_seed(owner_secret: &[u8; 32], secret: &[u8; SECRET_BYTES]) -> [u8; 32] {
+    let id = openbmt_owner::web_order::pairing_id_of(secret);
+    let mut msg = Vec::with_capacity(32 + id.len());
+    msg.extend_from_slice(owner_secret);
+    msg.extend_from_slice(&id);
+    openbmt_core::identity::tagged_hash(TAG_WEB_KEY, &msg)
+}
+
 /// How far a pairing has come (WO-05).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PairState {
@@ -194,7 +208,6 @@ pub enum PairState {
 /// The pairing with a store (WO-05).
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Pairing {
-    pub(crate) seed: [u8; 32],
     pub(crate) secret: [u8; SECRET_BYTES],
     pub(crate) shop_name: String,
     pub(crate) url: String,
@@ -213,8 +226,9 @@ impl fmt::Debug for Pairing {
 }
 
 impl Pairing {
-    pub(crate) fn key(&self) -> WebOrderKey {
-        WebOrderKey::from_seed(&self.seed)
+    /// The web order key of this pairing, made from the owner secret.
+    pub(crate) fn key(&self, owner_secret: &[u8; 32]) -> WebOrderKey {
+        WebOrderKey::from_seed(&web_key_seed(owner_secret, &self.secret))
     }
 
     pub(crate) fn state(&self) -> PairState {
@@ -442,7 +456,6 @@ pub(crate) fn encode(state: &WebState) -> Vec<u8> {
         None => out.push(0),
         Some(p) => {
             out.push(if p.confirmed { 2 } else { 1 });
-            out.extend_from_slice(&p.seed);
             out.extend_from_slice(&p.secret);
             put_text(&mut out, &p.shop_name);
             put_text(&mut out, &p.url);
@@ -537,7 +550,6 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<WebState, &'static str> {
     let pairing = match r.u8().map_err(corrupt)? {
         0 => None,
         kind @ (1 | 2) => {
-            let seed = r.array::<32>().map_err(corrupt)?;
             let secret = r.array::<SECRET_BYTES>().map_err(corrupt)?;
             let shop_name = get_text(&mut r, MAX_SHOP_NAME_BYTES)?;
             let url = get_text(&mut r, MAX_STORE_URL_BYTES)?;
@@ -548,7 +560,6 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<WebState, &'static str> {
                 return Err("the pairing is not one");
             }
             Some(Pairing {
-                seed,
                 secret,
                 shop_name,
                 url,

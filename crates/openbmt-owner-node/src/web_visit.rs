@@ -33,19 +33,21 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use bitcoin::ScriptBuf;
-use openbmt_owner::starter::KernelRandom;
+use openbmt_owner::starter::{checked_read, KernelRandom};
 use openbmt_owner::web_order::{
     orders_request_body, Notice, NoticeAction, NoticeState, OrdersReply, PairingCode, Range,
-    RangeReply, RangeResult, SignedRequest, StoreOrder, WebOrderKey, HEADER_MAC, HEADER_NONCE,
-    HEADER_TIME, MAX_NOTICE_TXIDS, RANGE_SIZE, ROUTE_NOTICE, ROUTE_ORDERS, ROUTE_RANGE,
+    RangeReply, RangeResult, SignedRequest, StoreOrder, WebOrderKey, WebOrderRefusal, HEADER_MAC,
+    HEADER_NONCE, HEADER_TIME, MAX_NOTICE_TXIDS, RANGE_SIZE, ROUTE_NOTICE, ROUTE_ORDERS,
+    ROUTE_RANGE,
 };
 use openbmt_requests::{day_of, NewRequest, PriceIn, Request, Status};
 use openbmt_watch::HeaderChain;
 
 use crate::node::{OwnerNode, OwnerPort};
 use crate::web_orders::{
-    check_store_url, open, store, Loaded, NoticeKey, OrderRec, PairState, Pairing, RefusedOrder,
-    RefusedWhy, SentBlock, WebError, LOW_ADDRESSES, MAX_ORDERS, MAX_RANGES, MAX_REFUSALS,
+    check_store_url, open, store, web_key_seed, Loaded, NoticeKey, OrderRec, PairState, Pairing,
+    RefusedOrder, RefusedWhy, SentBlock, WebError, LOW_ADDRESSES, MAX_ORDERS, MAX_RANGES,
+    MAX_REFUSALS,
 };
 
 /// The seconds the first failure waits before the next visit.
@@ -402,7 +404,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         }
         let s = &loaded.state;
         if let Some(p) = &s.pairing {
-            let key = p.key();
+            let key = p.key(&self.owner_secret);
             info.pairing = Some(p.state());
             info.shop_name = p.shop_name.clone();
             info.url = p.url.clone();
@@ -489,10 +491,10 @@ impl<P: OwnerPort> OwnerNode<P> {
     ) -> Result<WebPairShown, WebError> {
         self.web_ready()?;
         let url = check_store_url(url)?;
-        let key = WebOrderKey::generate(rng).map_err(WebError::Library)?;
-        let code = PairingCode::generate(&key, shop_name, rng).map_err(WebError::Library)?;
+        let secret = checked_read(rng).map_err(|_| WebError::Library(WebOrderRefusal::Random))?;
+        let key = WebOrderKey::from_seed(&web_key_seed(&self.owner_secret, &secret));
+        let code = PairingCode::new(key.public(), secret, shop_name).map_err(WebError::Library)?;
         let pairing = Pairing {
-            seed: key.seed(),
             secret: *code.secret(),
             shop_name: code.shop_name().to_string(),
             url: url.clone(),
@@ -725,7 +727,9 @@ impl<P: OwnerPort> OwnerNode<P> {
                         self.web.run.visit = None;
                         return Ok(WebStep::Idle);
                     };
-                    let signed = notice.sign(&pairing.key()).map_err(WebError::Library)?;
+                    let signed = notice
+                        .sign(&pairing.key(&self.owner_secret))
+                        .map_err(WebError::Library)?;
                     let call = self.web_make_call(
                         &pairing,
                         WebCallKind::Notice,
@@ -787,7 +791,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         let addresses: Vec<String> = block.entries.iter().map(|(_, a)| a.clone()).collect();
         let range = Range::new(block.seq, addresses).map_err(WebError::Library)?;
         let id = openbmt_owner::web_order::pairing_id_of(&pairing.secret);
-        let signed = range.sign(&pairing.key(), &id);
+        let signed = range.sign(&pairing.key(&self.owner_secret), &id);
         self.web_make_call(
             pairing,
             WebCallKind::Range,
