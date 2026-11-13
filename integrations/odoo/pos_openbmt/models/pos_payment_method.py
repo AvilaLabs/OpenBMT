@@ -102,9 +102,15 @@ LOCAL_WORDS = {
         'next': 'Check the three OpenBMT fields of this payment method.',
     },
     ERR_UNSIGNED: {
-        'heading': 'WORDS_NEEDED_BX_80_UNSIGNED',
-        'what': 'WORDS_NEEDED_BX_80_UNSIGNED',
-        'next': 'WORDS_NEEDED_BX_80_UNSIGNED',
+        'heading': "The till cannot trust the Box's answer",
+        'what': "The answer did not carry the Box's signature for the till "
+                'key in this payment method. The till key may be wrong or '
+                'made before a Box update, or something between Odoo\'s '
+                'server and the Box changed the answer.',
+        'next': 'Copy the till key from the Box again into this payment '
+                'method. If the Box was updated, make a new key on it first. '
+                'Until then, take the payment on the counter and pick '
+                'Bitcoin by hand.',
     },
 }
 

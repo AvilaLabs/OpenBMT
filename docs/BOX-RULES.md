@@ -703,10 +703,12 @@ code and checks the payment.
 What the code fixes. `till-key` takes no lock on the data directory (BX-02):
 it writes only that one file, by renaming a whole file over the old, and the
 Box reads the file at each request, so a key made while the Box runs works at
-once. The key is stored as the tagged hash `OpenBMT/till-key/v1` of its bytes,
-which is SHA-256 made as BIP340 tagged hashes are, so the Box needs no
-hashing code of its own. The shop's currency is named by its three letters,
-`SAT` for Bitcoin Standard (CR-196). A sale counts as waiting from BX-72 until
+once. The file holds a version byte, the tagged hash `OpenBMT/till-key/v1` of
+the token the till sends, and the reply key, each made as BIP340 tagged hashes
+are, so the Box needs no hashing code of its own. A file in the earlier form,
+which holds only a hash of the key, gets `tillKeyOld` until a new key is made.
+The shop's currency is named by its three letters, `SAT` for Bitcoin Standard
+(CR-196). A sale counts as waiting from BX-72 until
 the counter's "opened" notice; at most 32 do, and at most 4,096 sales of any
 state are kept, so that a till that makes and cancels sales cannot grow the
 table without limit. An opened sale that nothing comes of for an hour counts as

@@ -68,8 +68,8 @@ fn sc_12_every_word_keeps_the_rules() {
         assert_eq!(w.heading, w.next, "{name}");
     }
     assert_eq!(
-        seen.into_iter().collect::<Vec<_>>(),
-        vec!["WORDS_NEEDED_BX_80_KEY_OLD".to_string()]
+        seen.into_iter().collect::<Vec<String>>(),
+        Vec::<String>::new()
     );
     assert_eq!(check_distinct(&written), Ok(()));
 }

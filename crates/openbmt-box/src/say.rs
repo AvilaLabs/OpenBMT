@@ -1101,12 +1101,14 @@ impl TillAnswer {
                 "Copy the till key from the Box again into this payment method.",
             )
             .code("BX-71"),
-            Self::KeyOld => Words::new(
-                Tone::Stop,
-                "WORDS_NEEDED_BX_80_KEY_OLD",
-                "WORDS_NEEDED_BX_80_KEY_OLD",
+            Self::KeyOld => stop(
+                "Till key too old",
+                "The Box's till key was made by an earlier version of the Box, \
+                 which did not sign its answers to the till."
+                    .into(),
                 Who::BoxKeeper,
-                "WORDS_NEEDED_BX_80_KEY_OLD",
+                "Make a new till key on the Box with openbmt-box till-key and copy it \
+                 into this payment method.",
             )
             .code("BX-80"),
             Self::Off => stop(

@@ -2436,7 +2436,7 @@ fn bx_80_a_key_file_of_the_earlier_form_is_a_401_key_old_and_signs_nothing() {
         let (status, body, mac) = http_mac(addr, &raw);
         assert_eq!(status, 401, "{bearer}");
         assert_eq!(field(&body, "error"), "tillKeyOld");
-        assert_eq!(field(&body, "heading"), "WORDS_NEEDED_BX_80_KEY_OLD");
+        assert_eq!(field(&body, "heading"), "Till key too old");
         assert_eq!(mac, None);
     }
     // A new key makes the file whole again, at the next request.
