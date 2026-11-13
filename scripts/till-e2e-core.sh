@@ -14,9 +14,10 @@
 # listed in its first settings (`welcome ... with-rc`). The counter is the
 # `counter_regtest` example with `--box-key`: the Box is its relay, a Box of
 # its settings and a Box in its courier's table. The till is played by curl,
-# with the till key from `openbmt-box till-key`. The script carries nothing
-# between the devices: the sale request, the notices and the cancels all go
-# through the Box's own port.
+# with the till key from `openbmt-box till-key`, sent as the bearer token and
+# nonce of BX-71 and BX-80, each answer checked by its reply mac. The script
+# carries nothing between the devices: the sale request, the notices and the
+# cancels all go through the Box's own port.
 #
 # THE HEALTH RULES ARE NOT CHECKED HERE. The counter is started with
 # `--regtest-single-peer`, as in `scripts/link-e2e-core.sh`. Sales are
@@ -177,16 +178,38 @@ await_tip() { # height seconds
 kv() { # line key
   sed -nE "s/^(.* )?$2=([^ ]*).*/\2/p" <<<"$1" | head -1
 }
+# A tagged hash as BIP340 makes it (BX-80): SHA-256 of the SHA-256 of the
+# tag twice, then the message; the message is given as hex.
+tagged() { # tag hex-message -> 64 hex
+  local t
+  t=$(printf '%s' "$1" | sha256sum | cut -d' ' -f1)
+  { printf '%s%s%s' "$t" "$t" "$2" | xxd -r -p; } | sha256sum | cut -d' ' -f1
+}
+# The till holds the key; it sends the bearer token made from it, a fresh
+# nonce, and takes an answer only when its X-OBM-Reply is the mac of this
+# request (BX-71, BX-80). An answer that does not check is printed as
+# {"error":"replyNotChecked"}.
 till() { # method path [json]
-  local out
+  local nonce hdr body status mac want
+  nonce=$(head -c 16 /dev/urandom | xxd -p)
+  hdr=$(mktemp "$BASE/till-hdr-XXXXXX")
+  body=$(mktemp "$BASE/till-body-XXXXXX")
+  local args=(-s --max-time 10 -X "$1" -D "$hdr" -o "$body"
+    -H "Authorization: Bearer $TILL_TOKEN" -H "X-OBM-Nonce: $nonce")
   if [ $# -ge 3 ]; then
-    out=$(curl -s --max-time 10 -X "$1" -H "Authorization: Bearer $TILL_KEY" \
-      -H 'Content-Type: application/json' --data "$3" "http://127.0.0.1:$TILL_PORT$2")
-  else
-    out=$(curl -s --max-time 10 -X "$1" -H "Authorization: Bearer $TILL_KEY" \
-      "http://127.0.0.1:$TILL_PORT$2")
+    args+=(-H 'Content-Type: application/json' --data "$3")
   fi
-  printf '%s' "$out"
+  curl "${args[@]}" "http://127.0.0.1:$TILL_PORT$2"
+  status=$(sed -nE '1s/^HTTP\/[0-9.]+ ([0-9]{3}).*/\1/p' "$hdr" | head -1)
+  mac=$(tr -d '\r' <"$hdr" | sed -nE 's/^[Xx]-[Oo][Bb][Mm]-[Rr]eply: *([0-9a-f]{64})$/\1/p' | head -1)
+  want=$({ printf 'OBM-TILL-REPLY-1\n%s\n%s\n%s\n%s\n' "$1" "$2" "$nonce" "$status"; cat "$body"; } |
+    openssl dgst -sha256 -mac HMAC -macopt "hexkey:$TILL_REPLY" -r | cut -d' ' -f1)
+  if [ -n "$mac" ] && [ "$mac" = "$want" ]; then
+    cat "$body"
+  else
+    printf '{"error":"replyNotChecked"}'
+  fi
+  rm -f "$hdr" "$body"
 }
 till_state() { # sale
   till GET "/till/v1/sales/$1" | jq -r '.state // .error'
@@ -270,6 +293,8 @@ BOX_KEY=$(sed -n 's/^key: //p' "$LOG_BOX" | head -1)
 [ ${#BOX_KEY} = 64 ] || die "no Box key"
 TILL_KEY=$("$BOX_BIN" till-key "$B_DATA" 2>&1 | grep -Eo '[0-9a-f]{64}' | head -1)
 [ ${#TILL_KEY} = 64 ] || die "no till key"
+TILL_TOKEN=$(tagged OpenBMT/till-bearer/v1 "$TILL_KEY")
+TILL_REPLY=$(tagged OpenBMT/till-reply/v1 "$TILL_KEY")
 RC_KEY=$("$PAIR_BIN" key "$K_DATA" rc) || die "no counter key"
 CTR=${RC_KEY:0:8}
 say "A Box paired with the counter $CTR, the till listener on 127.0.0.1:$TILL_PORT"
