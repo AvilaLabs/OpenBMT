@@ -350,6 +350,29 @@ fun Ui.healthCard(words: SayWords): View {
 }
 
 /**
+ * CR-267: the card of one request from the till: its heading, the amount, the reference and the minutes left, and
+ * the buttons Start and Not now. The amount is shown and cannot be changed here.
+ */
+fun Ui.tillCard(lines: List<TillLine>, start: () -> Unit, notNow: () -> Unit): View {
+    val card = surfaceCard()
+    val col = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(px(16), px(16), px(16), px(16))
+    }
+    col.addView(text(WordsOfTill.CARD, 15f, bold = true))
+    for (l in lines) {
+        col.addView(text(l.label, 13f, colour = pal.secondary, medium = true), matchWide().also { it.topMargin = px(10) })
+        col.addView(text(l.value, 20f, bold = true).also { it.fontFeatureSettings = "tnum" }, matchWide().also { it.topMargin = px(2) })
+    }
+    val buttons = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+    buttons.addView(primary(WordsOfTill.START) { start() }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).also { it.rightMargin = px(6) })
+    buttons.addView(secondary(WordsOfTill.NOT_NOW) { notNow() }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).also { it.leftMargin = px(6) })
+    col.addView(buttons, matchWide().also { it.topMargin = px(14) })
+    card.addView(col, matchWide())
+    return card
+}
+
+/**
  * The other lines of home in one surface card: each shows its heading with a tone dot. A line that is good shows
  * only its heading, and a tap shows its what and its next; any other line shows its words at once, with its
  * "Try again" button under it. [open] holds the keys of the lines a tap has opened.

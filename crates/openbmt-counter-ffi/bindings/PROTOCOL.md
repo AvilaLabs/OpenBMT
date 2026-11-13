@@ -123,6 +123,10 @@ ops run on another; it waits for at most 250 ms.
  82 close_short      handle node  args CloseShortArgs -> u64
  83 cancel_bill      handle node  args BillNumberArgs -> ()
  84 bills            handle node  args u64 -> list<BillRow>
+ 85 till_waiting     handle node  args u64 -> list<TillRow>
+ 86 till_start       handle node  args TillStartArgs -> OpenedView
+ 87 till_not_now     handle node  args (u64, list<u8>) -> ()
+ 88 till_of_sale     handle node  args u32 -> TillSaleView
 200 pending_switch   handle node  args u64 -> SwitchStateView
 201 switch_same      handle node  args u64 -> SwitchSameView
 202 switch_record_kept handle node  args u64 -> Words
@@ -224,6 +228,9 @@ BillNumberArgs: record: now: u64, number: u32
 CloseShortArgs: record: now: u64, number: u32, actor: ActorView
 BillPartView: record: sale: option<u32>, amount_minor: u64, way: option<PartWayView>, counts: bool
 BillRow: record: number: u32, kind: BillKindView, amount_minor: u64, reference: option<string>, opened_at: u64, state: BillStateView, ended_at: u64, unpaid_minor: u64, received_bitcoin: u64, received_other: u64, pending: u32, left: u64, parts: list<BillPartView>, words: Words
+TillRow: record: sale: list<u8>, amount_minor: u64, reference: string, lapses_at: u64, minutes_left: u64, words: Words
+TillStartArgs: record: now: u64, sale: list<u8>, rate: u64, source_label: string, source_fetched_at: u64, actor: option<ActorView>
+TillSaleView: record: sale: option<list<u8>>, cancelled: bool, words: option<Words>
 ChangeValueView: record: kind: ChangeValueKind, number: u64, text: string
 ChangeFieldView: record: field: string, now: ChangeValueView, after: ChangeValueView
 PendingChangeView: record: version: u32, words: list<string>, fields: list<ChangeFieldView>, arrived: u64, expires_at: u64, confirmed: bool

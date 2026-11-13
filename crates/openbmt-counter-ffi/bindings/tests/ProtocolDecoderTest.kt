@@ -48,6 +48,7 @@ object ProtocolDecoderTest {
         days()
         requestsToSend()
         bills()
+        till()
     }
 
     // ---- bills, tabs and the till's reference (CR-245 to CR-254) ----
@@ -95,6 +96,47 @@ object ProtocolDecoderTest {
             val p = Writer().u32(1).u32(1).u8(1).u64(1).u8(0).u64(0).u8(0).u64(0).u64(0).u64(0).u64(0).u32(0).u64(0)
             p.u32(1).u8(0).u64(5).u8(1).u8(9).u8(1)
             decodeResponse(header(0, p.toByteArray())).let { r -> r.list { r.bill() } }
+        }
+    }
+
+    // ---- a sale from the till (CR-266 to CR-271) ----
+
+    private fun till() {
+        val sale = ByteArray(16) { 4 }
+        // till_start (86): the time, the till's sale as bytes, the rate, the source, when it was fetched and no person.
+        val start = requestFrame(86, 1) { it.u64(7).bytes(sale).u64(10_000_000).string("test-fixed").u64(5).option(null as Actor?) { } }
+        check(
+            hex(start).endsWith(
+                "0700000000000000" + "10000000" + "04".repeat(16) + "8096980000000000" + "0a000000" + "746573742d6669786564" +
+                    "0500000000000000" + "00",
+            ),
+        ) { hex(start) }
+        // till_not_now (87): the time and the till's sale.
+        check(hex(requestFrame(87, 1) { it.u64(9).bytes(sale) }).endsWith("0900000000000000" + "10000000" + "04".repeat(16)))
+        // till_waiting (85): one request with 5 minutes left.
+        val w = Writer().u32(1).bytes(sale).u64(500).string("POS/0007").u64(1_300).u64(5)
+        w.raw(wordsBytes())
+        decodeResponse(header(0, w.toByteArray())).let { r ->
+            val list = r.list { r.tillRequest() }
+            r.end()
+            check(list.size == 1 && list[0].sale.contentEquals(sale) && list[0].amountMinor == 500L)
+            check(list[0].reference == "POS/0007" && list[0].lapsesAt == 1_300L && list[0].minutesLeft == 5L)
+            check(list[0].words.heading == "WORDS_NEEDED_X")
+        }
+        // till_of_sale (88): a sale the till cancelled, with its line; and a sale that did not come from the till.
+        val cancelled = Writer().u8(1).bytes(sale).u8(1).u8(1).raw(wordsBytes())
+        decodeResponse(header(0, cancelled.toByteArray())).let { r ->
+            val v = r.tillOfSale()
+            r.end()
+            check(v.sale!!.contentEquals(sale) && v.cancelled && v.words?.heading == "WORDS_NEEDED_X")
+        }
+        decodeResponse(header(0, Writer().u8(0).u8(0).u8(0).toByteArray())).let { r ->
+            val v = r.tillOfSale()
+            r.end()
+            check(v.sale == null && !v.cancelled && v.words == null)
+        }
+        rejects("a flag that is not 0 or 1 in a sale of the till") {
+            decodeResponse(header(0, Writer().u8(0).u8(7).u8(0).toByteArray())).let { r -> r.tillOfSale() }
         }
     }
 

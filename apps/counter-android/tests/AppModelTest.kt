@@ -26,6 +26,8 @@ import org.openbmt.counter.ChangeValueKind
 import org.openbmt.counter.PendingChange
 import org.openbmt.counter.PendingSwitch
 import org.openbmt.counter.SwitchSame
+import org.openbmt.counter.TillOfSale
+import org.openbmt.counter.TillRequest
 import org.openbmt.counter.ActorRole
 import org.openbmt.counter.CounterException
 import org.openbmt.counter.DayTotals
@@ -106,7 +108,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1, "one row for each words and the header, and for each text of the switch and its header")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1 + WordsOfTill.all().size + 1, "one row for each words and the header, and for each text of the switch and of the till and their headers")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -1525,6 +1527,47 @@ object AppModelTest {
         }
     }
 
+    // ---- a sale from the till (CR-266 to CR-271) -------------------------------------------------
+
+    private fun tillRequest(sale: Int, amount: Long, reference: String, minutes: Long) =
+        TillRequest(ByteArray(16) { sale.toByte() }, amount, reference, 1_000, minutes, Words(0, 2, "WORDS_NEEDED_CR_267_FROM_THE_TILL", "x.", "y.", null, null, null, null))
+
+    private fun cr266TillTests(appDir: File?) {
+        val usd = Money("USD", 2)
+        // CR-271: each unwritten text is the placeholder of its rule, named once.
+        ok(WordsOfTill.placeholders.all { WordsOfTill.isPlaceholder(it) && it.startsWith("WORDS_NEEDED_CR_26") }, "CR-271: the placeholders name their rule")
+        ok(WordsOfTill.placeholders.toSet().size == WordsOfTill.placeholders.size, "CR-271: each placeholder once")
+        ok(WordsOfTill.all().map { it.second }.toSet() == WordsOfTill.placeholders.toSet(), "CR-271: the list of the screens holds every placeholder")
+        ok(WordsOfTill.all().map { it.first }.toSet().size == WordsOfTill.all().size, "CR-271: each key once")
+        // CR-267: the card shows the amount, the reference and the minutes; a request with no reference shows none.
+        val r = tillRequest(1, 1_250, "POS/0007", 4)
+        ok(TillModel.lines(usd, r).map { it.label to it.value } == listOf(WordsOfTill.AMOUNT to "12.50 USD", WordsOfTill.REFERENCE to "POS/0007", WordsOfTill.MINUTES_LEFT to "4"), "CR-267: amount, reference, minutes: ${TillModel.lines(usd, r).map { it.value }}")
+        ok(TillModel.lines(usd, tillRequest(2, 500, "", 1)).map { it.label } == listOf(WordsOfTill.AMOUNT, WordsOfTill.MINUTES_LEFT), "CR-267: a request with no reference shows none")
+        // CR-267: the oldest is first as the library lists them; one with no minutes left is not shown.
+        val listed = listOf(tillRequest(1, 100, "", 3), tillRequest(2, 200, "", 0), tillRequest(3, 300, "", 1))
+        ok(TillModel.shown(listed).map { it.amountMinor } == listOf(100L, 300L), "CR-267: the oldest first, none that lapsed")
+        ok(TillModel.signature(listed) != TillModel.signature(listed.take(2)) && TillModel.signature(emptyList()) == "", "CR-267: the card is made again only when what it shows changes")
+        ok(TillModel.signature(listOf(tillRequest(1, 100, "", 3))) != TillModel.signature(listOf(tillRequest(1, 100, "", 2))), "CR-267: the minutes count down on the card")
+        // CR-269: the line on a started sale that the till cancelled.
+        val sale = ByteArray(16) { 1 }
+        ok(TillModel.cancelledLine(TillOfSale(sale, true, null)) == WordsOfTill.CANCELLED, "CR-269: a sale the till cancelled says so")
+        ok(TillModel.cancelledLine(TillOfSale(sale, false, null)) == null && TillModel.cancelledLine(TillOfSale(null, false, null)) == null && TillModel.cancelledLine(null) == null, "CR-269: a sale the till did not cancel says nothing")
+        if (appDir != null) {
+            val controller = File(appDir, "src/android/Controller.kt").readText()
+            val home = controller.substringAfter("private fun showHome()").substringBefore("/** What a words shows")
+            ok(home.contains("TillModel.shown(tillWaiting(n))") && home.contains("ui.tillCard(TillModel.lines(m, r)"), "CR-267: Home shows a card for each request, from the model")
+            ok(home.contains("n.tillNotNow(nowSecs(), r.sale)") && home.contains("startTillSale(n, r)"), "CR-267: the card has Start and Not now")
+            val start = controller.substringAfter("private fun startTillSale(").substringBefore("/** What a words shows")
+            ok(start.contains("n.tillStart(nowSecs(), request.sale, rate.rate, rate.sourceLabel, rate.sourceFetchedAt, atTheTill())") && start.contains("showSale(o.index, o.payment, null)"), "CR-268: Start opens the sale at the counter's own price and shows it as any sale")
+            ok(start.contains("val (rate, words) = quote()"), "CR-268: the rate is the counter's own, from the same price as a sale typed here")
+            val sale = controller.substringAfter("private fun showSale(").substringBefore("private fun requote(")
+            ok(sale.contains("n.tillOfSale(index)") && sale.contains("tillCancelled?.let { extra.add"), "CR-269: the sale screen shows the line when the till cancelled it")
+            val views = File(appDir, "src/android/CounterViews.kt").readText()
+            ok(views.contains("fun Ui.tillCard(") && views.contains("primary(WordsOfTill.START)") && views.contains("secondary(WordsOfTill.NOT_NOW)"), "CR-267: the card's two buttons are Start and Not now")
+            ok(!views.substringAfter("fun Ui.tillCard(").substringBefore("fun Ui.homeLines").contains("EditText"), "CR-267: the amount is not changed at the counter")
+        }
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         val screensMd = args.firstOrNull()?.let { File(it) }
@@ -1558,6 +1601,7 @@ object AppModelTest {
         cr240ConfirmChangeTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr260ConfirmSwitchTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr245BillsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        cr266TillTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         println("AppModelTest (counter): $count checks passed")
     }
 }

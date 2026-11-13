@@ -73,6 +73,7 @@ pub mod rates;
 mod relay;
 mod say;
 pub mod shop;
+mod till;
 mod views;
 
 #[cfg(test)]
@@ -93,6 +94,7 @@ pub use pay::{btc_amount, request_link, request_texts, Payment};
 pub use rates::{RateCombineArgs, RateParseArgs, RateSourceView, RateView, SampleView};
 pub use say::{all_words, words_for};
 pub use shop::SettingsView;
+pub use till::{TillRow, TillSaleView, TillStartArgs};
 pub use views::{
     ActorRole, ActorView, AddNoteArgs, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome,
     LinkStepView, LinkView, OpenArgs, OpenRequestArgs, OpenTipArgs, OpenedView, OverrideArgs,

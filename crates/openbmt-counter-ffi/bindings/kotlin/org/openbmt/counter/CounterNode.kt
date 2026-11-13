@@ -123,6 +123,10 @@ private const val OP_FINISH_TAB = 81
 private const val OP_CLOSE_SHORT = 82
 private const val OP_CANCEL_BILL = 83
 private const val OP_BILLS = 84
+private const val OP_TILL_WAITING = 85
+private const val OP_TILL_START = 86
+private const val OP_TILL_NOT_NOW = 87
+private const val OP_TILL_OF_SALE = 88
 private const val OP_PENDING_SWITCH = 200
 private const val OP_SWITCH_SAME = 201
 private const val OP_SWITCH_RECORD_KEPT = 202
@@ -386,6 +390,23 @@ class Bill(
     val parts: List<BillPart>,
     val words: Words,
 )
+
+/**
+ * One request from the till that waits for the cashier (CR-267): the till's [sale] (16 bytes), the amount in minor
+ * units, the reference the till sent (empty when none), when it lapses and the whole minutes left. The [words] are the
+ * library's card; they are placeholders until written (CR-271).
+ */
+class TillRequest(
+    val sale: ByteArray,
+    val amountMinor: Long,
+    val reference: String,
+    val lapsesAt: Long,
+    val minutesLeft: Long,
+    val words: Words,
+)
+
+/** What a sale carries of the till (CR-268, CR-269): its [sale] when it came from the till, and whether the till cancelled it. */
+class TillOfSale(val sale: ByteArray?, val cancelled: Boolean, val words: Words?)
 
 /** One open request to send, for the list on Home (CR-215). */
 class OpenRequest(
@@ -978,6 +999,10 @@ internal fun Reader.bill(): Bill =
         list { billPart() }, words(),
     )
 
+internal fun Reader.tillRequest(): TillRequest = TillRequest(bytes(), u64(), string(), u64(), u64(), words())
+
+internal fun Reader.tillOfSale(): TillOfSale = TillOfSale(option { bytes() }, bool(), option { words() })
+
 internal fun Reader.openRequest(): OpenRequest =
     OpenRequest(u32(), option { string() }, u64(), u64(), u64(), u64())
 
@@ -1495,6 +1520,44 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
     fun bills(now: Long): List<Bill> {
         val r = call(OP_BILLS, handle) { it.u64(now) }
         return r.list { r.bill() }.also { r.end() }
+    }
+
+    /** CR-267: the requests from the till that wait, oldest first, not lapsed and not hidden by Not now. */
+    fun tillWaiting(now: Long): List<TillRequest> {
+        val r = call(OP_TILL_WAITING, handle) { it.u64(now) }
+        return r.list { r.tillRequest() }.also { r.end() }
+    }
+
+    /**
+     * CR-268: Start. Opens the sale for the request's amount at the counter's own rate; the payment is what the
+     * customer scans. A refusal is a [CounterException] with its words and the request stays.
+     */
+    fun tillStart(
+        now: Long,
+        sale: ByteArray,
+        rate: Long,
+        sourceLabel: String,
+        sourceFetchedAt: Long,
+        actor: Actor? = null,
+    ): Opened {
+        val r =
+            call(OP_TILL_START, handle) {
+                it.u64(now).bytes(sale).u64(rate).string(sourceLabel).u64(sourceFetchedAt)
+                    .option(actor) { a -> it.actor(a) }
+            }
+        return r.opened().also { r.end() }
+    }
+
+    /** CR-267: Not now. The request is hidden and nothing is sent. */
+    fun tillNotNow(now: Long, sale: ByteArray) {
+        val r = call(OP_TILL_NOT_NOW, handle) { it.u64(now).bytes(sale) }
+        r.end()
+    }
+
+    /** CR-268, CR-269: whether a sale came from the till and whether the till cancelled it. */
+    fun tillOfSale(index: Long): TillOfSale {
+        val r = call(OP_TILL_OF_SALE, handle) { it.u32(index) }
+        return r.tillOfSale().also { r.end() }
     }
 
     /** Work out the state of a sale now. */

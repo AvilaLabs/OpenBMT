@@ -78,6 +78,10 @@
 //!   `set_tab_amount`, 81 `finish_tab`, 82 `close_short` and 83
 //!   `cancel_bill` work a bill or a tab, and 84 `bills` lists them
 //!   (CR-246 to CR-253).
+//! - 85 `till_waiting` lists the requests from the till that wait for the
+//!   cashier, 86 `till_start` opens the sale for one, 87 `till_not_now` hides
+//!   one and 88 `till_of_sale` says whether a sale came from the till and
+//!   whether the till cancelled it (CR-266 to CR-271).
 //! - 66 to 68 Lightning through a swap provider (CR-219, CR-225):
 //!   `swap_next` hands out the next request for the provider's onion name,
 //!   `swap_reply` takes the bytes that came back and `swap_failed` says there
@@ -125,6 +129,7 @@ use crate::rates::{
 use crate::relay::take_relay;
 use crate::say::{TONES, WHOS};
 use crate::shop::{own_node_check, pairing_read, SettingsView};
+use crate::till::{TillRow, TillSaleView, TillStartArgs};
 use crate::views::{
     put_words, ActorRole, ActorView, AddNoteArgs, CancelArgs, CashArgs, ChangeFieldView,
     ChangeStateView, ChangeValueKind, ChangeValueView, CounterNetwork, DayTotalsArgs,
@@ -572,6 +577,21 @@ fn build_ops() -> Vec<Op> {
             c.entry()?.cancel_bill(a)
         }),
         op(84, "bills", Node, |c, now: u64| c.entry()?.bills(now)),
+        op(85, "till_waiting", Node, |c, now: u64| {
+            c.entry()?.till_waiting(now)
+        }),
+        op(86, "till_start", Node, |c, a: TillStartArgs| {
+            c.entry()?.till_start(a)
+        }),
+        op(
+            87,
+            "till_not_now",
+            Node,
+            |c, (now, sale): (u64, Vec<u8>)| c.entry()?.till_not_now(now, &sale),
+        ),
+        op(88, "till_of_sale", Node, |c, index: u32| {
+            c.entry()?.till_of_sale(index)
+        }),
         op(200, "pending_switch", Node, |c, now: u64| {
             c.entry()?.pending_switch(now)
         }),
@@ -787,6 +807,9 @@ fn definitions() -> Vec<TypeDef> {
         CloseShortArgs::define(),
         BillPartView::define(),
         BillRow::define(),
+        TillRow::define(),
+        TillStartArgs::define(),
+        TillSaleView::define(),
         ChangeValueView::define(),
         ChangeFieldView::define(),
         PendingChangeView::define(),

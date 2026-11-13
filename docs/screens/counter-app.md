@@ -115,3 +115,18 @@ The labels the rules name and the lines of the page.
 | pinLabel | Manager's PIN |
 | homeLine | A new wallet waits |
 | compare | Compare this address with the first address on the new wallet's own screen: the stick's result, its Check words I wrote mode, or the signer. Not with the owner phone. |
+
+## A sale from the till (CR-266 to CR-271)
+
+The labels of the card on Home and of the line on a started sale. A text
+named `WORDS_NEEDED_CR_26x_...` is not written yet and shows its own name.
+
+| Key | Text |
+|---|---|
+| card | WORDS_NEEDED_CR_267_FROM_THE_TILL |
+| amount | WORDS_NEEDED_CR_267_AMOUNT |
+| reference | WORDS_NEEDED_CR_267_REFERENCE |
+| minutesLeft | WORDS_NEEDED_CR_267_MINUTES |
+| start | WORDS_NEEDED_CR_267_START |
+| notNow | WORDS_NEEDED_CR_267_NOT_NOW |
+| cancelled | WORDS_NEEDED_CR_269_CANCELLED |

@@ -66,6 +66,7 @@ import org.openbmt.counter.RelayKind
 import org.openbmt.counter.SaleInfo
 import org.openbmt.counter.SaleState
 import org.openbmt.counter.SwitchState
+import org.openbmt.counter.TillRequest
 import org.openbmt.counter.Shop
 import org.openbmt.counter.ShopSettings
 import org.openbmt.counter.TipChoice
@@ -1029,6 +1030,7 @@ class Controller(private val act: MainActivity) {
         val lines = Slot(act)
         val noteSlot = Slot(act)
         val requestsSlot = Slot(act)
+        val tillSlot = Slot(act)
         val linked = hasLink(n)
         // CR-147: who is at the till, and a way to lock it.
         val who = locks.who?.takeIf { cashiers.isNotEmpty() }
@@ -1052,10 +1054,11 @@ class Controller(private val act: MainActivity) {
         tiles.addView(pair, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.topMargin = ui.px(12) })
         // CR-246: bills and tabs, one tile under the others.
         tiles.addView(ui.tile(WordsOfBills.BILLS, Glyph.List, false) { showBills() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.px(104)).also { it.topMargin = ui.px(12) })
-        show(bar, listOf(health, lines, noteSlot, tiles, requestsSlot), emptyList(), Showing.Home)
+        show(bar, listOf(health, tillSlot, lines, noteSlot, tiles, requestsSlot), emptyList(), Showing.Home)
         var healthSig: String? = null
         var linesSig: String? = null
         var requestsSig: String? = null
+        var tillSig: String? = null
         tick = {
             val h = healthWords(n)
             val hs = sig(h)
@@ -1107,6 +1110,29 @@ class Controller(private val act: MainActivity) {
                 linesSig = ls
                 lines.show(ui.homeLines(items, openLines))
             }
+            // CR-267: the requests from the till, oldest first, each on its own card above the other lines.
+            val tillRequests = TillModel.shown(tillWaiting(n))
+            val ts = TillModel.signature(tillRequests)
+            if (ts != tillSig) {
+                tillSig = ts
+                val m = money
+                if (tillRequests.isEmpty() || m == null) {
+                    tillSlot.show()
+                } else {
+                    val cards = tillRequests.map { r ->
+                        ui.tillCard(TillModel.lines(m, r), start = { startTillSale(n, r) { w -> noteSlot.show(note(w)) } }, notNow = {
+                            try {
+                                n.tillNotNow(nowSecs(), r.sale)
+                            } catch (e: CounterException) {
+                                noteSlot.show(note(e.sayWords()))
+                            }
+                            tillSig = null
+                            tick?.invoke()
+                        }).also { it.layoutParams = ui.margins(bottom = 12) }
+                    }
+                    tillSlot.show(*cards.toTypedArray())
+                }
+            }
             // CR-215: the open requests, newest first, under their own heading.
             val open = try {
                 n.requests(nowSecs())
@@ -1131,6 +1157,32 @@ class Controller(private val act: MainActivity) {
         }
         homeTick = tick
         tick?.invoke()
+    }
+
+    /** CR-267: the requests from the till that wait; none when the library has none to list. */
+    private fun tillWaiting(n: CounterNode): List<TillRequest> =
+        try {
+            n.tillWaiting(nowSecs())
+        } catch (e: CounterException) {
+            emptyList()
+        } catch (e: LinkageError) {
+            emptyList()
+        }
+
+    /**
+     * CR-268: Start. The counter opens the sale for the request's amount at its own price, and the sale's screen is
+     * shown as for a sale typed here. A refusal is shown on Home and the request stays.
+     */
+    private fun startTillSale(n: CounterNode, request: TillRequest, refused: (SayWords) -> Unit) {
+        val (rate, words) = quote()
+        if (rate == null) return refused(words ?: AppWords.stopped)
+        try {
+            val o = n.tillStart(nowSecs(), request.sale, rate.rate, rate.sourceLabel, rate.sourceFetchedAt, atTheTill())
+            amounts[o.index] = request.amountMinor
+            showSale(o.index, o.payment, null)
+        } catch (e: CounterException) {
+            refused(e.sayWords())
+        }
     }
 
     /** What a words shows, as one text: a screen redraws only when it changes. */
@@ -1926,6 +1978,15 @@ class Controller(private val act: MainActivity) {
                     },
                 )
                 val extra = ArrayList<WordsModel>()
+                // CR-269: a sale the till cancelled goes on; the line says so and the cashier ends it as any sale is ended.
+                val tillCancelled = try {
+                    n.tillOfSale(index).takeIf { it.cancelled }?.words
+                } catch (e: CounterException) {
+                    null
+                } catch (e: LinkageError) {
+                    null
+                }
+                tillCancelled?.let { extra.add(WordsModel.of(it.say())) }
                 s.check?.let { extra.add(WordsModel.of(it.say())) }
                 for (f in s.flags) extra.add(WordsModel.of(f.say()))
                 // CR-113: the line that says Lightning is not available for this sale, or that its code is on the way.
