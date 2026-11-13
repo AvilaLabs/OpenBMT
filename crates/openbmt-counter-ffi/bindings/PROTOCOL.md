@@ -132,6 +132,8 @@ ops run on another; it waits for at most 250 ms.
 201 switch_same      handle node  args u64 -> SwitchSameView
 202 switch_record_kept handle node  args u64 -> Words
 203 switch_different handle node  args u64 -> Words
+204 starter_state    handle node  args u64 -> StarterStateView
+205 starter_seen     handle node  args StarterSeenArgs -> ()
 ```
 
 ## Types
@@ -241,4 +243,9 @@ ChangeStateView: record: pending: option<PendingChangeView>, notice: option<Word
 PendingSwitchView: record: address: string, wallet: OwnWalletKind, arrived: u64, expires_at: u64
 SwitchStateView: record: pending: option<PendingSwitchView>, notice: option<Words>, record_update: option<list<u8>>
 SwitchSameView: record: words: Words, record: list<u8>
+StarterDecisionView: enum, one tag byte
+    tags Open=0 Stopped=1 Unchecked=2
+StarterPaymentView: record: txid: list<u8>, sats: u64, time: u64, by_owner: bool, seen: bool
+StarterStateView: record: decision: StarterDecisionView, words: option<Words>, cards: option<Words>, held_sats: option<u64>, limit_sats: option<u64>, line_time: option<u64>, payments: list<StarterPaymentView>
+StarterSeenArgs: record: now: u64, txid: list<u8>
 ```

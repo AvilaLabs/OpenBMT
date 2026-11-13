@@ -132,6 +132,8 @@ private const val OP_PENDING_SWITCH = 200
 private const val OP_SWITCH_SAME = 201
 private const val OP_SWITCH_RECORD_KEPT = 202
 private const val OP_SWITCH_DIFFERENT = 203
+private const val OP_STARTER_STATE = 204
+private const val OP_STARTER_SEEN = 205
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -142,6 +144,9 @@ private const val TAG_COUNTER_NETWORK_REGTEST = 3
 private const val TAG_RELAY_KIND_NONE = 0
 private const val TAG_RELAY_KIND_DIRECT = 1
 private const val TAG_RELAY_KIND_ONION = 2
+private const val TAG_STARTER_DECISION_VIEW_OPEN = 0
+private const val TAG_STARTER_DECISION_VIEW_STOPPED = 1
+private const val TAG_STARTER_DECISION_VIEW_UNCHECKED = 2
 private const val TAG_OWN_WALLET_KIND_NONE = 0
 private const val TAG_OWN_WALLET_KIND_SINGLE_KEY = 1
 private const val TAG_OWN_WALLET_KIND_TWO_OF_THREE = 2
@@ -352,6 +357,27 @@ class SwitchState(val pending: PendingSwitch?, val notice: Words?, val recordUpd
 
 /** What [CounterNode.switchSame] returns: the [words] to show and the new pairing [record] to seal and keep (CR-261). */
 class SwitchSame(val words: Words, val record: ByteArray)
+
+/** What "New sale" does with the last starter line (CR-273): offer bitcoin, offer none and say why, or offer it and say the limit cannot be checked. */
+enum class StarterDecision { Open, Stopped, Unchecked }
+
+/** One payment out of the starter wallet (CR-274): its [txid], [sats], [time], whether the owner phone made it, and whether someone at the counter has [seen] it. */
+class StarterPayment(val txid: ByteArray, val sats: Long, val time: Long, val byOwner: Boolean, val seen: Boolean)
+
+/**
+ * What [CounterNode.starterState] returns (CR-273, CR-274): the [decision] with its [words] (none when open), the
+ * heading of the [cards] of Home when a payment is unseen, what the last line said ([heldSats], [limitSats],
+ * [lineTime]) and every payment kept, newest first.
+ */
+class StarterState(
+    val decision: StarterDecision,
+    val words: Words?,
+    val cards: Words?,
+    val heldSats: Long?,
+    val limitSats: Long?,
+    val lineTime: Long?,
+    val payments: List<StarterPayment>,
+)
 
 /** What a sale carries besides its amount: its note, and the days of a request to send (0 for a sale shown at the till) (CR-205, CR-206). */
 class SaleInfo(
@@ -946,6 +972,19 @@ internal fun Reader.switchState(): SwitchState = SwitchState(option { pendingSwi
 
 internal fun Reader.switchSame(): SwitchSame = SwitchSame(words(), bytes())
 
+internal fun Reader.starterDecision(): StarterDecision =
+    when (val t = u8()) {
+        TAG_STARTER_DECISION_VIEW_OPEN -> StarterDecision.Open
+        TAG_STARTER_DECISION_VIEW_STOPPED -> StarterDecision.Stopped
+        TAG_STARTER_DECISION_VIEW_UNCHECKED -> StarterDecision.Unchecked
+        else -> tag("StarterDecision $t")
+    }
+
+private fun Reader.starterPayment(): StarterPayment = StarterPayment(bytes(), u64(), u64(), bool(), bool())
+
+internal fun Reader.starterState(): StarterState =
+    StarterState(starterDecision(), option { words() }, option { words() }, option { u64() }, option { u64() }, option { u64() }, list { starterPayment() })
+
 private fun Reader.pendingChange(): PendingChange =
     PendingChange(u32(), strings(), list { changeField() }, u64(), u64(), bool())
 
@@ -1443,6 +1482,21 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
     fun switchDifferent(now: Long): Words {
         val r = call(OP_SWITCH_DIFFERENT, handle) { it.u64(now) }
         return r.words().also { r.end() }
+    }
+
+    /**
+     * CR-273, CR-274: whether "New sale" offers bitcoin, what the last starter line said and the starter payments the
+     * counter keeps, newest first. The line itself comes through the link.
+     */
+    fun starterState(now: Long): StarterState {
+        val r = call(OP_STARTER_STATE, handle) { it.u64(now) }
+        return r.starterState().also { r.end() }
+    }
+
+    /** CR-274: someone at the counter has seen the payment with this [txid] (32 bytes). */
+    fun starterSeen(now: Long, txid: ByteArray) {
+        val r = call(OP_STARTER_SEEN, handle) { it.u64(now).bytes(txid) }
+        r.end()
     }
 
     /** The open requests, newest first (CR-215). */

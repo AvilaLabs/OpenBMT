@@ -75,6 +75,7 @@ pub mod rates;
 mod relay;
 mod say;
 pub mod shop;
+mod starter;
 pub mod tap;
 mod till;
 mod views;

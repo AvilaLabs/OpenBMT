@@ -32,7 +32,7 @@ const OP_SWITCH_SAME: u16 = 201;
 const OP_SWITCH_RECORD_KEPT: u16 = 202;
 const OP_SWITCH_DIFFERENT: u16 = 203;
 /// Seconds between two sales (CR-04).
-const GAP: u64 = 31;
+pub(super) const GAP: u64 = 31;
 
 const NEW: &str = "wsh(sortedmulti(2,[73c5da0a/48h/0h/0h/2h]xpub6DkFAXWQ2dHxq2vatrt9qyA3bXYU4ToWQwCHbf5XB2mSTexcHZCeKS1VZYcPoBd5X8yVcbXFHJR9R8UCVpt82VX1VhR28mCyxUFL4r6KFrf/<0;1>/*,[b8688df1/48h/0h/0h/2h]xpub6FQya7zGhR92kacYsNnjreouvnHJMpXYsUXnW6NJJAJRCKsa26TzDy4LdnGhEurr3d6y1J8PJ7EEMKQp74XTqYvmGJNogYXSKDszYHtF8mX/<0;1>/*,[28645006/48h/0h/0h/2h]xpub6DnEBNkSJKBYQmsbhS1sP9cNdtU5c9PLFGCjTJmxicxc13WB8zNNGQazabQpyFAGW5bV9tMko4uBxDxjUKL6dSAcx1tEbgEHtgSqyRsekh6/<0;1>/*))#34zcp4yt";
 
@@ -57,7 +57,7 @@ fn state(rig: &Rig, handle: u64, now: u64) -> State {
     }
 }
 
-fn open_sale(rig: &Rig, handle: u64, now: u64) -> super::wire::Opened {
+pub(super) fn open_sale(rig: &Rig, handle: u64, now: u64) -> super::wire::Opened {
     let response = rig.call(
         OP_OPEN,
         handle,
@@ -78,15 +78,15 @@ fn new() -> PinnedWallet {
 
 /// A counter paired with a starter wallet and started on a relay, and the
 /// owner's courier.
-struct Shop {
-    rig: Rig,
-    w: World,
-    handle: u64,
-    record: Vec<u8>,
-    counter: openbmt_core::identity::DeviceId,
+pub(super) struct Shop {
+    pub(super) rig: Rig,
+    pub(super) w: World,
+    pub(super) handle: u64,
+    pub(super) record: Vec<u8>,
+    pub(super) counter: openbmt_core::identity::DeviceId,
 }
 
-fn shop() -> Shop {
+pub(super) fn shop() -> Shop {
     let rig = Rig::new();
     let placeholder: SocketAddr = "127.0.0.1:9".parse().unwrap();
     let members = Relay::new(relay_key(), RelayConfig::default(), MemoryStore::new()).unwrap();
@@ -118,7 +118,7 @@ fn shop() -> Shop {
 }
 
 impl Shop {
-    fn switch(&self, first: (u32, u32)) -> SwitchOwn {
+    pub(super) fn switch(&self, first: (u32, u32)) -> SwitchOwn {
         let range = SignedRange::sign(
             &owner(),
             IndexRange::new(self.counter, first.0, first.1).unwrap(),
@@ -127,7 +127,7 @@ impl Shop {
         SwitchOwn::sign(&owner(), self.counter, old().checksum32(), new(), range)
     }
 
-    fn send(&mut self, sw: &SwitchOwn, now: u64) {
+    pub(super) fn send(&mut self, sw: &SwitchOwn, now: u64) {
         self.w
             .owner
             .send(&self.counter, Kind::Switch, &sw.to_bytes())
@@ -135,7 +135,7 @@ impl Shop {
         step(&self.rig, self.handle, now);
     }
 
-    fn restart(&mut self, record: &[u8], now: u64) {
+    pub(super) fn restart(&mut self, record: &[u8], now: u64) {
         let _ = self.rig.call(OP_STOP, self.handle, &[]);
         self.rig.arm();
         let cfg: StartConfig = config(&self.rig, record);

@@ -101,6 +101,11 @@
 //!   two steps once the app kept it, and `switch_different` drops the switch
 //!   (CR-260). The PIN of CR-84 is the app's: it asks `switch_same` only
 //!   after the manager's PIN was right.
+//! - 204 and 205 the starter line (CR-272 to CR-275): `starter_state` says
+//!   whether "New sale" offers bitcoin (CR-273), with its words, what the
+//!   last line said and every starter payment kept, newest first (CR-274);
+//!   `starter_seen` marks one payment seen. The line itself comes through
+//!   the link and no op takes it.
 //!
 //! The handle names the node an op works on (from `start`), or must be 0 for
 //! `start`. Handles start at 1 and are never reused in a process. A
@@ -132,6 +137,7 @@ use crate::rates::{
 use crate::relay::take_relay;
 use crate::say::{TONES, WHOS};
 use crate::shop::{own_node_check, pairing_read, SettingsView};
+use crate::starter::{StarterDecisionView, StarterPaymentView, StarterSeenArgs, StarterStateView};
 use crate::tap::{tap_op, TapArgs, TapView};
 use crate::till::{TillRow, TillSaleView, TillStartArgs};
 use crate::views::{
@@ -609,6 +615,12 @@ fn build_ops() -> Vec<Op> {
         op(203, "switch_different", Node, |c, now: u64| {
             c.entry()?.switch_different(now)
         }),
+        op(204, "starter_state", Node, |c, now: u64| {
+            c.entry()?.starter_state(now)
+        }),
+        op(205, "starter_seen", Node, |c, a: StarterSeenArgs| {
+            c.entry()?.starter_seen(a)
+        }),
     ]
 }
 
@@ -824,6 +836,10 @@ fn definitions() -> Vec<TypeDef> {
         PendingSwitchView::define(),
         SwitchStateView::define(),
         SwitchSameView::define(),
+        StarterDecisionView::define(),
+        StarterPaymentView::define(),
+        StarterStateView::define(),
+        StarterSeenArgs::define(),
     ]
 }
 

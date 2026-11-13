@@ -50,6 +50,7 @@ object ProtocolDecoderTest {
         requestsToSend()
         bills()
         till()
+        starter()
     }
 
     // ---- bills, tabs and the till's reference (CR-245 to CR-254) ----
@@ -138,6 +139,39 @@ object ProtocolDecoderTest {
         }
         rejects("a flag that is not 0 or 1 in a sale of the till") {
             decodeResponse(header(0, Writer().u8(0).u8(7).u8(0).toByteArray())).let { r -> r.tillOfSale() }
+        }
+    }
+
+    // ---- the starter line (CR-273, CR-274) ----
+
+    private fun starter() {
+        val txid = ByteArray(32) { 6 }
+        // starter_seen (205): the time and the transaction ID.
+        check(hex(requestFrame(205, 1) { it.u64(9).bytes(txid) }).endsWith("0900000000000000" + "20000000" + "06".repeat(32)))
+        // starter_state (204): a stop with its words, no cards heading, the line's three numbers and one payment.
+        val stopped = Writer().u8(1).u8(1).raw(wordsBytes()).u8(0)
+        stopped.u8(1).u64(300).u8(1).u64(200).u8(1).u64(1_700_000_000)
+        stopped.u32(1).bytes(txid).u64(21_000).u64(1_699_999_000).u8(1).u8(0)
+        decodeResponse(header(0, stopped.toByteArray())).let { r ->
+            val v = r.starterState()
+            r.end()
+            check(v.decision == StarterDecision.Stopped && v.words?.heading == "WORDS_NEEDED_X" && v.cards == null)
+            check(v.heldSats == 300L && v.limitSats == 200L && v.lineTime == 1_700_000_000L)
+            check(v.payments.size == 1 && v.payments[0].txid.contentEquals(txid) && v.payments[0].sats == 21_000L)
+            check(v.payments[0].time == 1_699_999_000L && v.payments[0].byOwner && !v.payments[0].seen)
+        }
+        // No line: open, nothing said, no numbers and no payments.
+        decodeResponse(header(0, Writer().u8(0).u8(0).u8(0).u8(0).u8(0).u8(0).u32(0).toByteArray())).let { r ->
+            val v = r.starterState()
+            r.end()
+            check(v.decision == StarterDecision.Open && v.words == null && v.heldSats == null && v.payments.isEmpty())
+        }
+        rejects("a decision that is not defined") {
+            decodeResponse(header(0, Writer().u8(3).u8(0).u8(0).u8(0).u8(0).u8(0).u32(0).toByteArray())).let { r -> r.starterState() }
+        }
+        rejects("a flag that is not 0 or 1 in a payment") {
+            val w = Writer().u8(0).u8(0).u8(0).u8(0).u8(0).u8(0).u32(1).bytes(txid).u64(1).u64(1).u8(2).u8(0)
+            decodeResponse(header(0, w.toByteArray())).let { r -> r.starterState() }
         }
     }
 

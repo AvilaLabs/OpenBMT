@@ -110,6 +110,8 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (201, "switch_same"),
         (202, "switch_record_kept"),
         (203, "switch_different"),
+        (204, "starter_state"),
+        (205, "starter_seen"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

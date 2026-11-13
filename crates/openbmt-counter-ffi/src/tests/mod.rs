@@ -21,6 +21,7 @@ mod rates;
 mod requests;
 mod screen;
 mod staff;
+mod starter;
 mod strict;
 mod swap;
 mod switch;
