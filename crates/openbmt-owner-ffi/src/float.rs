@@ -36,7 +36,8 @@ pub(crate) fn refusal(e: &FloatRefusal) -> AppError {
     from_words(Kind::Refused, e.rule(), e, e.words())
 }
 
-/// One coin of the float, as the app's coin view gives it.
+/// One coin of the float or of the starter wallet, as the app's coin view
+/// gives it.
 #[derive(Clone, PartialEq, Eq)]
 pub struct FloatCoinView {
     /// The transaction ID, 32 bytes in the order of the ID's hash.
@@ -81,18 +82,28 @@ wire_record_get!(FloatCoinView {
 });
 
 fn coin_of(v: &FloatCoinView) -> Result<Coin, AppError> {
-    let txid: [u8; 32] = v
-        .txid
-        .as_slice()
-        .try_into()
-        .map_err(|_| refused_by("id-length", "a coin's transaction ID is 32 bytes"))?;
-    let prev_tx: Transaction = deserialize(&v.prev_tx).map_err(|e| {
+    coin_with(v, |e| {
         refused_with(
             "float-coin",
             format!("a coin's transaction: {e}"),
             float::coin_unreadable_words(),
         )
-    })?;
+    })
+}
+
+/// A coin of the app's coin view, read the same way for the float and the
+/// starter wallet; `unreadable` makes each one's own refusal when the
+/// previous transaction does not read.
+pub(crate) fn coin_with(
+    v: &FloatCoinView,
+    unreadable: impl FnOnce(String) -> AppError,
+) -> Result<Coin, AppError> {
+    let txid: [u8; 32] = v
+        .txid
+        .as_slice()
+        .try_into()
+        .map_err(|_| refused_by("id-length", "a coin's transaction ID is 32 bytes"))?;
+    let prev_tx: Transaction = deserialize(&v.prev_tx).map_err(|e| unreadable(e.to_string()))?;
     Ok(Coin {
         outpoint: OutPoint {
             txid: Txid::from_byte_array(txid),

@@ -19,9 +19,7 @@ use std::str::FromStr;
 use std::sync::{Mutex, MutexGuard};
 
 use bitcoin::consensus::encode::serialize;
-use bitcoin::hashes::Hash;
-use bitcoin::{Address, OutPoint, ScriptBuf, Transaction, Txid};
-use openbmt_core::wallet::Keychain;
+use bitcoin::{Address, ScriptBuf};
 use openbmt_core::wallet_single::ImportedWallet;
 use openbmt_owner::starter::{
     self, Coin, DataKey, KernelRandom, Key, Restore, Sealed, Setup, StarterRefusal, StarterWallet,
@@ -30,6 +28,7 @@ use openbmt_owner::starter::{
 
 use crate::codec::{wire_record, wire_record_get, wire_unit_enum};
 use crate::error::{from_words, refused_by, AppError, Kind};
+use crate::float::{coin_with, FloatCoinView};
 use crate::views::OwnerNetwork;
 
 fn refused_with(rule: &str, text: String, words: openbmt_core::say::Words) -> AppError {
@@ -369,78 +368,17 @@ pub(crate) fn cancel(slot: &StarterSlot) -> Result<(), AppError> {
 
 // ---- using the key ---------------------------------------------------------
 
-/// One coin of the starter wallet, as the app's coin view gives it.
-#[derive(Clone, PartialEq, Eq)]
-pub struct StarterCoinView {
-    /// The transaction ID, 32 bytes in the order of the ID's hash.
-    pub txid: Vec<u8>,
-    /// The output index.
-    pub vout: u32,
-    /// The whole previous transaction, consensus bytes.
-    pub prev_tx: Vec<u8>,
-    /// Whether the coin is on the change chain (else the receive chain).
-    pub change: bool,
-    /// The index on that chain.
-    pub index: u32,
-    /// How many blocks deep the coin is; 0 is unconfirmed.
-    pub confirmations: u32,
-}
-
-impl fmt::Debug for StarterCoinView {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StarterCoinView")
-            .field("vout", &self.vout)
-            .field("change", &self.change)
-            .field("index", &self.index)
-            .finish_non_exhaustive()
-    }
-}
-
-wire_record!(StarterCoinView {
-    txid,
-    vout,
-    prev_tx,
-    change,
-    index,
-    confirmations
-});
-wire_record_get!(StarterCoinView {
-    txid,
-    vout,
-    prev_tx,
-    change,
-    index,
-    confirmations
-});
+/// One coin of the starter wallet: the same record, on the wire and in the
+/// app, as one coin of the refund float.
+pub type StarterCoinView = FloatCoinView;
 
 fn coin_of(v: &StarterCoinView) -> Result<Coin, AppError> {
-    let txid: [u8; 32] = v
-        .txid
-        .as_slice()
-        .try_into()
-        .map_err(|_| refused_by("id-length", "a coin's transaction ID is 32 bytes"))?;
-    let prev_tx: Transaction =
-        bitcoin::consensus::encode::deserialize(&v.prev_tx).map_err(|e| {
-            refused_with(
-                "starter-coin",
-                format!("a coin's transaction: {e}"),
-                starter::coin_unreadable_words(),
-            )
-        })?;
-    Ok(Coin {
-        outpoint: OutPoint {
-            txid: Txid::from_byte_array(txid),
-            vout: v.vout,
-        },
-        prev_tx,
-        vout: v.vout,
-        chain: if v.change {
-            Keychain::Change
-        } else {
-            Keychain::Receive
-        },
-        index: v.index,
-        confirmations: v.confirmations,
+    coin_with(v, |e| {
+        refused_with(
+            "starter-coin",
+            format!("a coin's transaction: {e}"),
+            starter::coin_unreadable_words(),
+        )
     })
 }
 

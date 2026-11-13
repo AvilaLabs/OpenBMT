@@ -352,10 +352,9 @@ StarterImageView: record: width: u32, height: u32, pixels: list<u8>
 StarterCheckView: record: positions: list<u32>
 StarterTypedView: record: typed: u32, accepted: bool, step: u32, finished: bool, failed: bool
 StarterSealedView: record: sealed: list<u8>, data_key: list<u8>
-StarterCoinView: record: txid: list<u8>, vout: u32, prev_tx: list<u8>, change: bool, index: u32, confirmations: u32
-StarterPayArgs: record: sealed: list<u8>, data_key: list<u8>, network: OwnerNetwork, address: string, sats: u64, fee_rate: u64, change_index: u32, min_confirmations: u32, lock_height: u32, coins: list<StarterCoinView>
+StarterPayArgs: record: sealed: list<u8>, data_key: list<u8>, network: OwnerNetwork, address: string, sats: u64, fee_rate: u64, change_index: u32, min_confirmations: u32, lock_height: u32, coins: list<FloatCoinView>
 StarterPaidView: record: tx: list<u8>, txid: string, fee: u64, vsize: u64, paid: u64, change_index: option<u32>, change_sats: option<u64>, destination: string
-StarterMoveArgs: record: sealed: list<u8>, data_key: list<u8>, new_wallet: string, new_index: u32, fee_rate: u64, min_confirmations: u32, lock_height: u32, coins: list<StarterCoinView>
+StarterMoveArgs: record: sealed: list<u8>, data_key: list<u8>, new_wallet: string, new_index: u32, fee_rate: u64, min_confirmations: u32, lock_height: u32, coins: list<FloatCoinView>
 StarterOpenArgs: record: sealed: list<u8>, data_key: list<u8>
 StarterFeeArgs: record: recent: option<u64>, typed: option<u64>
 StarterLimitKind: enum, one tag byte

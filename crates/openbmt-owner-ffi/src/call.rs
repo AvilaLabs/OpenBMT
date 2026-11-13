@@ -160,11 +160,10 @@ use crate::signer_views::{
     SignerExportArgs, SignerFileView, SignerLineView, SignerTakeArgs, SignerTakenView,
 };
 use crate::starter::{
-    self as starter_ops, StarterChangeKind, StarterCheckView, StarterCoinView, StarterFeeArgs,
-    StarterHeldArgs, StarterImageView, StarterLimitArgs, StarterLimitKind, StarterLimitView,
-    StarterMakeArgs, StarterMoveArgs, StarterOfferArgs, StarterOpenArgs, StarterPageArgs,
-    StarterPaidView, StarterPayArgs, StarterSealedView, StarterSlot, StarterTypedView,
-    StarterWalletView,
+    self as starter_ops, StarterChangeKind, StarterCheckView, StarterFeeArgs, StarterHeldArgs,
+    StarterImageView, StarterLimitArgs, StarterLimitKind, StarterLimitView, StarterMakeArgs,
+    StarterMoveArgs, StarterOfferArgs, StarterOpenArgs, StarterPageArgs, StarterPaidView,
+    StarterPayArgs, StarterSealedView, StarterSlot, StarterTypedView, StarterWalletView,
 };
 use crate::views::{
     put_words, AlertKind, AlertView, BatchArgs, BatchWaitingView, BuiltView, CashAmountView,
@@ -1125,7 +1124,6 @@ fn definitions() -> Vec<TypeDef> {
         StarterCheckView::define(),
         StarterTypedView::define(),
         StarterSealedView::define(),
-        StarterCoinView::define(),
         StarterPayArgs::define(),
         StarterPaidView::define(),
         StarterMoveArgs::define(),

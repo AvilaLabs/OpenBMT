@@ -560,15 +560,8 @@ class StarterSealed(val sealed: ByteArray, val dataKey: ByteArray) {
     }
 }
 
-/** One coin of the starter wallet, from the app's coin view (SS-30). [txid] is 32 bytes. */
-class StarterCoin(
-    val txid: ByteArray,
-    val vout: Long,
-    val prevTx: ByteArray,
-    val change: Boolean,
-    val index: Long,
-    val confirmations: Long,
-)
+/** One coin of the starter wallet, from the app's coin view (SS-30): the same record as one of the float's. */
+typealias StarterCoin = FloatCoin
 
 /** A finished transaction of the float, for the outbox (FL-20, FL-35); [tx] is the consensus bytes. */
 class FloatPaid(
@@ -1627,9 +1620,6 @@ private fun Writer.floatCoin(c: FloatCoin): Writer =
 
 private fun Reader.starterPaid(): StarterPaid =
     StarterPaid(bytes(), string(), u64(), u64(), u64(), option { u32() }, option { u64() }, string())
-
-private fun Writer.starterCoin(c: StarterCoin): Writer =
-    bytes(c.txid).u32(c.vout).bytes(c.prevTx).bool(c.change).u32(c.index).u32(c.confirmations)
 
 private fun Writer.starterLimitKind(v: StarterLimitKind): Writer =
     u8(
@@ -2911,7 +2901,7 @@ object OwnerStarter {
     ): StarterPaid {
         val r = callSecret(OP_STARTER_PAY, 0) { w ->
             w.bytes(sealed).bytes(dataKey).network(network).string(address).u64(sats).u64(feeRate).u32(changeIndex)
-                .u32(minConfirmations).u32(lockHeight).list(coins) { w.starterCoin(it) }
+                .u32(minConfirmations).u32(lockHeight).list(coins) { w.floatCoin(it) }
         }
         java.util.Arrays.fill(dataKey, 0.toByte())
         return r.starterPaid().also { r.end() }
@@ -2933,7 +2923,7 @@ object OwnerStarter {
     ): StarterPaid {
         val r = callSecret(OP_STARTER_MOVE, 0) { w ->
             w.bytes(sealed).bytes(dataKey).string(newWallet).u32(newIndex).u64(feeRate).u32(minConfirmations)
-                .u32(lockHeight).list(coins) { w.starterCoin(it) }
+                .u32(lockHeight).list(coins) { w.floatCoin(it) }
         }
         java.util.Arrays.fill(dataKey, 0.toByte())
         return r.starterPaid().also { r.end() }
