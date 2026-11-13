@@ -75,6 +75,17 @@ pub fn field_class(old: &Settings, new: &Settings, field: &str) -> ChangeClass {
         // A watch key and a new Box are named in the settings but move
         // no money and lift no limit (AP-01).
         "watch_key" | "boxes" => ChangeClass::Free,
+        // AP-12: while the settings in force name no counter, counters added
+        // with their shares are Free: no counter can confirm the change.
+        "counters" if old.counters.is_empty() => ChangeClass::Free,
+        "devices"
+            if old.counters.is_empty()
+                && new.devices.difference(&old.devices).all(|d| {
+                    new.counters.contains_key(d) || (new.boxes.contains(d) && !old.boxes.contains(d))
+                }) =>
+        {
+            ChangeClass::Free
+        }
         // AP-11: the own node decides which node every device trusts for
         // its payments, but only while node-only is on in the new
         // settings; as a second check it moves nothing.
@@ -573,8 +584,8 @@ mod tests {
                 }),
             ),
             (
-                "counter added",
-                Loosen,
+                "counter added while none is in force (AP-12)",
+                Free,
                 Box::new(|s| {
                     s.counters.insert(identity(40).device_id(), 5_000);
                 }),
@@ -681,6 +692,64 @@ mod tests {
         s.node_only = node_only;
         s.light_fallback = fallback;
         s
+    }
+
+    #[test]
+    fn ap_12_no_counter_in_force_and_a_counter_added_is_free() {
+        let mut old = base();
+        old.devices.clear();
+        let c = identity(41).device_id();
+        let mut new = next(&old);
+        new.devices.insert(c);
+        new.counters.insert(c, 10_000);
+        assert_eq!(classify(&old, &new), ChangeClass::Free);
+    }
+
+    #[test]
+    fn ap_12_any_other_loosening_in_the_same_change_keeps_its_class() {
+        let mut old = base();
+        old.devices.clear();
+        let c = identity(41).device_id();
+        let mut new = next(&old);
+        new.devices.insert(c);
+        new.counters.insert(c, 10_000);
+        new.min_sale_sats = 1_000;
+        assert_eq!(classify(&old, &new), ChangeClass::Loosen);
+    }
+
+    #[test]
+    fn ap_12_once_a_counter_is_in_force_a_counter_added_is_loosen() {
+        let mut old = base();
+        old.devices.clear();
+        let (c1, c2) = (identity(41).device_id(), identity(42).device_id());
+        old.devices.insert(c1);
+        old.counters.insert(c1, 10_000);
+        let mut new = next(&old);
+        new.devices.insert(c2);
+        new.counters.insert(c1, 5_000);
+        new.counters.insert(c2, 5_000);
+        assert_eq!(classify(&old, &new), ChangeClass::Loosen);
+    }
+
+    #[test]
+    fn ap_12_no_counter_in_force_and_two_counters_added_is_free() {
+        let mut old = base();
+        old.devices.clear();
+        let (c1, c2) = (identity(41).device_id(), identity(42).device_id());
+        let mut new = next(&old);
+        new.devices.extend([c1, c2]);
+        new.counters.insert(c1, 5_000);
+        new.counters.insert(c2, 5_000);
+        assert_eq!(classify(&old, &new), ChangeClass::Free);
+    }
+
+    #[test]
+    fn ap_12_a_device_that_is_no_counter_is_still_a_loosening() {
+        let mut old = base();
+        old.devices.clear();
+        let mut new = next(&old);
+        new.devices.insert(identity(43).device_id());
+        assert_eq!(classify(&old, &new), ChangeClass::Loosen);
     }
 
     #[test]
@@ -1107,7 +1176,7 @@ mod tests {
         // the file is not the order of the numbers.
         let mut ids = rule_ids();
         ids.sort();
-        assert_eq!(ids.len(), 12);
+        assert_eq!(ids.len(), 13);
         assert_eq!(ids.first().map(String::as_str), Some("AP-01"));
         assert_eq!(ids.last().map(String::as_str), Some("AP-13"));
     }

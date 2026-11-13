@@ -30,17 +30,12 @@ const TEST_SOURCES: [&str; 10] = [
 ];
 
 /// Rules this crate does not test, each with the reason.
-const NOT_HERE: [(&str, &str); 2] = [
+const NOT_HERE: [(&str, &str); 1] = [
     (
         "BX-17",
         "what the owner phone's screen says when there is no Key app is the \
          phone's; the bytes are the same as with one (bx_17 shows the pairing \
          does not depend on the Key app's identity)",
-    ),
-    (
-        "BX-18",
-        "a Box of a shop with its own wallet is not built yet; its tests come \
-         with it",
     ),
 ];
 
