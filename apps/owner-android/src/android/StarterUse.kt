@@ -409,9 +409,10 @@ internal fun Controller.showStarterDelete() {
             ui.danger(StarterWords.deleteButton) {
                 starter.store.deleteKey()
                 starter.keystore.delete()
-                val repinned = starterRepin(n)
+                val refused = ArrayList<View>()
+                val repinned = starterRepin(n, refused)
                 // The node watches the wallet it was started with: after the re-pin it starts again with the new one.
-                centre(StarterCoreWords.deleted(LibraryStarter), listOf(ui.primary(StarterWords.doneButton) { if (repinned) { stopNode(); startNode() } else showHome() }), title = StarterWords.screenTitle)
+                centre(StarterCoreWords.deleted(LibraryStarter), listOf(ui.primary(StarterWords.doneButton) { if (repinned) { stopNode(); startNode() } else showHome() }), extra = refused, title = StarterWords.screenTitle)
             },
         )
     }
@@ -424,9 +425,11 @@ internal fun Controller.showStarterDelete() {
  * next start; the starter wallet stays watched as a former wallet (SS-43). It is asked after the move has its confirmation
  * and the key is gone, because until then the starter wallet's coins are read from the pinned wallet. A counter that has not
  * switched leaves it as it is. A stop between the shop's file and the wallet's file is finished at the next start
- * (`adopt`). True when the node is to start again.
+ * (`adopt`). The re-pin waits while a transaction of the starter wallet other than the confirmed move is waiting or
+ * unconfirmed (SS-41): the library's words for it go to [refused], and it is asked again from the same screen. True when
+ * the node is to start again.
  */
-private fun Controller.starterRepin(n: OwnerNode): Boolean {
+private fun Controller.starterRepin(n: OwnerNode, refused: MutableList<View>): Boolean {
     val newWallet = try {
         starter.store.loadNewWallet()
     } catch (_: IOException) {
@@ -439,7 +442,8 @@ private fun Controller.starterRepin(n: OwnerNode): Boolean {
             starter.pinned = null
         }
         done.kind == OwnRepinKind.Done
-    } catch (_: OwnerException) {
+    } catch (e: OwnerException) {
+        if (e.rule == "SS-41") refused.add(words(e.sayWords()))
         false
     } catch (_: IOException) {
         false

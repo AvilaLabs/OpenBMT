@@ -45,7 +45,12 @@ struct Own {
 
 /// The wallet with one key, from fixed bytes.
 fn single() -> Own {
-    let master = Xpriv::new_master(bitcoin::Network::Bitcoin, &[0x77; 32]).unwrap();
+    single_seeded(0x77)
+}
+
+/// A wallet with one key, from the seed byte `seed` repeated.
+fn single_seeded(seed: u8) -> Own {
+    let master = Xpriv::new_master(bitcoin::Network::Bitcoin, &[seed; 32]).unwrap();
     let path: bitcoin::bip32::DerivationPath = "m/84'/0'/0'".parse().unwrap();
     let account = master.derive_priv(secp(), &path).unwrap();
     let wallet = SingleKeyWallet::new(
@@ -1535,4 +1540,119 @@ fn ss_30_n13e_01_a_refund_is_handed_to_the_outbox_only_while_it_is_ready() {
     assert!(owner.refund_ready(r));
     owner.take_starter(&bytes, &[r], |b| store.put(b)).unwrap();
     assert_eq!(owner.outbox().len(), 1);
+}
+
+/// A queue with a refund that stays queued, a refund that was paid, and a
+/// move of the starter wallet in the outbox: the shop's queue at the usual
+/// retirement point. Returns the owner, the queued refund and the move.
+fn retiring_queue(own: &Own) -> (Owner, u32, bitcoin::Txid) {
+    let mut owner = own_owner(own, Options::default());
+    let queued = refund_to(&mut owner, 1);
+    let paid = refund_to(&mut owner, 2);
+    let pay = pays_wallet(own, &own_coin(own, 1, 0, 100_000), 1, 90_000);
+    let pay_id = owner.take_starter(&serialize(&pay), &[paid], nop).unwrap();
+    owner.mark_broadcast(&pay_id, nop).unwrap();
+    owner.mark_confirmed(&pay_id, nop).unwrap();
+    let moved = pays_wallet(own, &own_coin(own, 2, 2, 50_000), 9, 49_000);
+    let move_id = owner.take_starter(&serialize(&moved), &[], nop).unwrap();
+    owner.mark_broadcast(&move_id, nop).unwrap();
+    (owner, queued, move_id)
+}
+
+#[test]
+fn ss_41_the_queue_moves_to_the_new_wallet_with_its_refunds_and_the_confirmed_move() {
+    use openbmt_owner::RestoreError;
+    let (old, new) = (single(), multi());
+    let (mut owner, queued, move_id) = retiring_queue(&old);
+    let before = owner.refunds().to_vec();
+    let store = Store::default();
+    owner
+        .rebind_wallet(new.wallet.clone(), |t| *t == move_id, |b| store.put(b))
+        .unwrap();
+    assert_eq!(store.calls(), 1);
+    // The new wallet reads the queue back whole; the old wallet and a third
+    // one do not.
+    let back = restore(&new, &store.last()).unwrap();
+    assert_eq!(back.refunds(), before.as_slice());
+    assert!(back
+        .refunds()
+        .iter()
+        .any(|r| r.id == queued && r.stage == Stage::Queued));
+    assert!(back
+        .refunds()
+        .iter()
+        .any(|r| matches!(r.stage, Stage::Paid { .. })));
+    assert_eq!(back.outbox().len(), 1);
+    assert_eq!(
+        restore(&old, &store.last()).err(),
+        Some(RestoreError::WrongWallet)
+    );
+    assert_eq!(
+        restore(&single_seeded(0x31), &store.last()).err(),
+        Some(RestoreError::WrongWallet)
+    );
+}
+
+#[test]
+fn ss_41_the_queue_stays_while_a_transaction_other_than_the_confirmed_move_is_unsettled() {
+    use openbmt_owner::starter::{RebindError, StarterRefusal};
+    let (old, new) = (single(), multi());
+    let (mut owner, queued, move_id) = retiring_queue(&old);
+    let store = Store::default();
+    // The move has no confirmation yet.
+    let before = owner.snapshot().unwrap();
+    assert!(owner.rebind_blocker(|_| false).is_some());
+    assert_eq!(
+        owner.rebind_wallet(new.wallet.clone(), |_| false, |b| store.put(b)),
+        Err(RebindError::Refused(StarterRefusal::Unsettled))
+    );
+    // A refund's transaction waits, even with a confirmed move beside it.
+    let pay = pays_wallet(&old, &own_coin(&old, 3, 3, 100_000), 4, 90_000);
+    let pay_id = owner
+        .take_starter(&serialize(&pay), &[queued], nop)
+        .unwrap();
+    let before_refund = owner.snapshot().unwrap();
+    assert_ne!(before, before_refund);
+    for sent in [false, true] {
+        if sent {
+            owner.mark_broadcast(&pay_id, nop).unwrap();
+        }
+        let after = owner.snapshot().unwrap();
+        assert_eq!(
+            owner.rebind_wallet(new.wallet.clone(), |t| *t == move_id, |b| store.put(b)),
+            Err(RebindError::Refused(StarterRefusal::Unsettled))
+        );
+        // Nothing was stored or changed.
+        assert_eq!(store.calls(), 0);
+        assert_eq!(owner.snapshot().unwrap(), after);
+    }
+    // The refund's transaction is confirmed: the queue may move.
+    owner.mark_confirmed(&pay_id, nop).unwrap();
+    assert!(owner.rebind_blocker(|t| *t == move_id).is_none());
+    // A store that fails changes nothing.
+    store.fail_next(true);
+    let kept = owner.snapshot().unwrap();
+    assert!(matches!(
+        owner.rebind_wallet(new.wallet.clone(), |t| *t == move_id, |b| store.put(b)),
+        Err(RebindError::Store(_))
+    ));
+    assert_eq!(owner.snapshot().unwrap(), kept);
+    store.fail_next(false);
+    owner
+        .rebind_wallet(new.wallet.clone(), |t| *t == move_id, |b| store.put(b))
+        .unwrap();
+    assert!(restore(&new, &store.last()).is_ok());
+}
+
+#[test]
+fn ss_41_a_start_finishes_the_rebind_whatever_waits() {
+    let (old, new) = (single(), multi());
+    let (mut owner, _, _) = retiring_queue(&old);
+    // The move is still unconfirmed, which a start does not wait for.
+    let store = Store::default();
+    owner
+        .finish_rebind(new.wallet.clone(), |b| store.put(b))
+        .unwrap();
+    let back = restore(&new, &store.last()).unwrap();
+    assert_eq!(back.outbox().len(), 1);
 }

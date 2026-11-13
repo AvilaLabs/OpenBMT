@@ -31,6 +31,7 @@ mod live;
 mod own;
 mod own_spend;
 mod paid_log;
+mod queue;
 mod receipts;
 mod requests;
 mod stopped;

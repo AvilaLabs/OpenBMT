@@ -34,6 +34,7 @@
 mod chance;
 mod limit;
 mod pay;
+mod rebind;
 mod seal;
 mod setup;
 #[cfg(test)]
@@ -56,6 +57,7 @@ pub use pay::{
     check_only_these, fee_rate, move_all, pay_refund, receive_script_of, StarterPaid,
     MIN_RATE_PER_KVB,
 };
+pub use rebind::{RebindError, RebindFinish};
 pub use seal::{wallet_of_sealed, DataKey, Restore, Sealed, DATA_KEY_BYTES};
 pub use setup::{pick_positions, Image, Key, Setup, Typed, ASKED, PAGES, WORDS_PER_PAGE};
 pub use watch::{held_sats, IncomingCoin};
@@ -117,6 +119,10 @@ pub enum StarterRefusal {
     NewAddress,
     /// SS-42: a coin is not confirmed to the depth asked.
     Unconfirmed,
+    /// SS-41: a transaction of the starter wallet other than the confirmed
+    /// move is waiting or unconfirmed, so the owner's queue stays with the
+    /// starter wallet and the re-pin waits.
+    Unsettled,
 }
 
 impl fmt::Display for StarterRefusal {
@@ -148,6 +154,10 @@ impl fmt::Display for StarterRefusal {
             Self::NothingToMove => write!(f, "SS-42: the wallet holds no coin"),
             Self::NewAddress => write!(f, "SS-42: the new wallet's address cannot be derived"),
             Self::Unconfirmed => write!(f, "SS-42: a coin is not confirmed yet"),
+            Self::Unsettled => write!(
+                f,
+                "SS-41: a transaction of the starter wallet is waiting or unconfirmed"
+            ),
         }
     }
 }
@@ -174,6 +184,7 @@ impl StarterRefusal {
             | Self::NotEnough { .. }
             | Self::Wallet => "SS-30",
             Self::NothingToMove | Self::NewAddress | Self::Unconfirmed => "SS-42",
+            Self::Unsettled => "SS-41",
         }
     }
 
@@ -320,6 +331,15 @@ impl StarterRefusal {
                 "Try again after its first confirmation.",
                 rule,
             ),
+            // The words are not written yet: the placeholder names the rule.
+            Self::Unsettled => Words::new(
+                Tone::Stop,
+                "WORDS_NEEDED_SS41_UNSETTLED_HEADING",
+                "WORDS_NEEDED_SS41_UNSETTLED_WHAT",
+                Who::Owner,
+                "WORDS_NEEDED_SS41_UNSETTLED_NEXT",
+            )
+            .code(rule),
         };
         match self {
             Self::Plan(why)

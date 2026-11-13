@@ -83,8 +83,10 @@ use openbmt_net_io::{
 };
 use openbmt_owner::own_book::AllocationBook;
 use openbmt_owner::own_spend::{OwnBuilt, OwnFile, OwnTaken};
-use openbmt_owner::starter::{held_sats, IncomingCoin};
-use openbmt_owner::{Built, Delivery, Held, IssuedRange, Options, Owner, OwnerError, Stage, Taken};
+use openbmt_owner::starter::{held_sats, IncomingCoin, RebindError};
+use openbmt_owner::{
+    Built, Delivery, Held, IssuedRange, Options, Owner, OwnerError, RestoreError, Stage, Taken,
+};
 use openbmt_signer::SignerState;
 use openbmt_watch::{FeeHistory, HeaderChain, Refusal, WellFormedBlock};
 
@@ -828,8 +830,35 @@ impl<P: OwnerPort> OwnerNode<P> {
             fs::read(dir.join(QUEUE_FILE))
         };
         let owner = match queue_bytes {
-            Ok(bytes) => Owner::restore(&owner_secret, wallet.clone(), approver, policy, &bytes)
-                .map_err(|e| NodeError::Files(format!("{QUEUE_FILE}: {e}")))?,
+            Ok(bytes) => {
+                match Owner::restore(&owner_secret, wallet.clone(), approver, policy, &bytes) {
+                    Ok(owner) => owner,
+                    // SS-41: a queue still stored for the wallet the last
+                    // re-pin replaced (the start came before the queue was
+                    // stored for the new wallet): the change is finished
+                    // here, and only that wallet's queue is taken.
+                    Err(RestoreError::WrongWallet)
+                        if take_journal.is_none() && !former.is_empty() =>
+                    {
+                        let old = former.last().map(|f| f.wallet.wallet().clone());
+                        let mut owner = old
+                            .and_then(|old| {
+                                Owner::restore(&owner_secret, old, approver, policy, &bytes).ok()
+                            })
+                            .ok_or_else(|| {
+                                NodeError::Files(format!(
+                                    "{QUEUE_FILE}: {}",
+                                    RestoreError::WrongWallet
+                                ))
+                            })?;
+                        owner
+                            .finish_rebind(wallet.clone(), |b| write_queue_file(&dir, b))
+                            .map_err(|e| NodeError::Files(format!("{QUEUE_FILE}: {e:?}")))?;
+                        owner
+                    }
+                    Err(e) => return Err(NodeError::Files(format!("{QUEUE_FILE}: {e}"))),
+                }
+            }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 Owner::new(&owner_secret, wallet.clone(), approver, policy, options)
                     .map_err(|e| NodeError::Config(e.to_string()))?
@@ -1443,6 +1472,46 @@ impl<P: OwnerPort> OwnerNode<P> {
     pub fn mark_repinned(&mut self, wallet: ImportedWallet) {
         self.repinned = true;
         self.pinned_now = Some(wallet);
+    }
+
+    /// SS-41: the outbox transactions that have a confirmation: what a
+    /// move may be among when the queue moves to the new wallet.
+    fn confirmed_in_outbox(&self) -> std::collections::BTreeSet<Txid> {
+        self.owner
+            .outbox()
+            .iter()
+            .filter_map(|d| match &d.what {
+                Delivery::Transaction { txid, .. } => Some(*txid),
+                _ => None,
+            })
+            .filter(|txid| self.starter_confirmations(txid).is_some_and(|c| c >= 1))
+            .collect()
+    }
+
+    /// SS-41: whether the queue may move to the new wallet now: no
+    /// transaction of the starter wallet other than a confirmed move is
+    /// waiting or unconfirmed.
+    pub fn starter_queue_may_move(&self) -> bool {
+        let confirmed = self.confirmed_in_outbox();
+        self.owner
+            .rebind_blocker(|t| confirmed.contains(t))
+            .is_none()
+    }
+
+    /// SS-41: the owner's queue, stored for `new` the way the node stores
+    /// it, so that the node started with the new wallet reads it. Called
+    /// after the shop's record of the re-pin and before the new wallet's
+    /// file is written.
+    pub fn rebind_queue(&mut self, new: ImportedWallet) -> Result<(), RebindError<NodeError>> {
+        self.ready_for_queue_write().map_err(RebindError::Store)?;
+        let confirmed = self.confirmed_in_outbox();
+        let write = self.queue_writer();
+        self.owner
+            .rebind_wallet(new, |t| confirmed.contains(t), |b| write(b))
+            .map_err(|e| match e {
+                RebindError::Refused(r) => RebindError::Refused(r),
+                RebindError::Store(why) => RebindError::Store(NodeError::Files(why)),
+            })
     }
 
     /// SS-43: the former wallets that hold a coin the node saw, each with

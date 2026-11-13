@@ -4,9 +4,12 @@
 //! counter is the core's `OwnCounterPairing`; the counter node itself is in
 //! the counter FFI's end-to-end test.
 
+use openbmt_core::batch::BatchPolicy;
 use openbmt_core::identity::Identity;
 use openbmt_core::pairing_own::{OwnCounterPairing, OwnOffer};
 use openbmt_core::pinned_wallet::PinnedWallet;
+use openbmt_owner::own_shop::own_approver;
+use openbmt_owner::{Options, Owner};
 
 use super::import::descriptor;
 use super::kit::{tx_from, Scratch};
@@ -656,6 +659,19 @@ fn ss_41_a_start_between_the_repin_and_its_wallet_file_finishes_the_repin() {
     let (shop, store) = node.shop_and_store();
     shop.repin(&new, &[], store).unwrap();
     drop(node);
+    // The owner's queue is still bound to the old wallet (N13F-03).
+    let approver = own_approver(&super::kit::OWNER_SECRET).unwrap();
+    let policy = BatchPolicy { min_count: 1 };
+    let queue = rig.dir().join("owner-queue.bin");
+    let queued = Owner::new(
+        &super::kit::OWNER_SECRET,
+        old.wallet().clone(),
+        approver,
+        policy,
+        Options::default(),
+    )
+    .unwrap();
+    std::fs::write(&queue, queued.snapshot().unwrap()).unwrap();
     // The old file finishes the re-pin: the pinned wallet is the new one, to
     // be written, and asking again gives the same.
     let handle = Rd::ok(&rig.start_own(&old_file)).u64();
@@ -670,6 +686,19 @@ fn ss_41_a_start_between_the_repin_and_its_wallet_file_finishes_the_repin() {
     let mut r = Rd::ok(&response);
     assert!(r.list(|r| r.bytes()).is_empty());
     r.done();
+    // The start stored the queue for the new wallet, so the node starts
+    // again with it.
+    let bound = |wallet: &PinnedWallet| {
+        Owner::restore(
+            &super::kit::OWNER_SECRET,
+            wallet.wallet().clone(),
+            approver,
+            policy,
+            &std::fs::read(&queue).unwrap(),
+        )
+    };
+    assert!(bound(&new).is_ok());
+    assert!(bound(&old).is_err());
 }
 
 #[test]

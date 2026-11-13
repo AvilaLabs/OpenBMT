@@ -2578,6 +2578,14 @@ impl Entry {
             } = st;
             let (own, link) = own_and_link(own, link)?;
             link.scan_index_use();
+            // SS-41: the queue moves with the re-pin, and it moves only when
+            // no transaction of the starter wallet other than the confirmed
+            // move is waiting or unconfirmed. Nothing is stored before.
+            if new.checksum32() != own.wallet.checksum32() && !node.starter_queue_may_move() {
+                return Err(crate::starter::refusal(
+                    &openbmt_owner::starter::StarterRefusal::Unsettled,
+                ));
+            }
             let done = own::turn_on_shop(
                 dir,
                 node.owner_identity().map_err(|e| node_error(&e))?,
@@ -2597,6 +2605,17 @@ impl Entry {
                     // What the node holds is the old wallet's: it reads
                     // nothing as the wallet in force until it starts again.
                     node.mark_repinned(new.wallet().clone());
+                    // SS-41: the shop's record is stored; now the queue
+                    // bound to the new wallet, and only then does the app
+                    // write the new wallet's file. A failure here leaves
+                    // the record, and the next start finishes the change.
+                    node.rebind_queue(new.wallet().clone())
+                        .map_err(|e| match e {
+                            openbmt_owner::starter::RebindError::Refused(r) => {
+                                crate::starter::refusal(&r)
+                            }
+                            openbmt_owner::starter::RebindError::Store(e) => node_error(&e),
+                        })?;
                     view(OwnRepinKind::Done, new.to_bytes(), 0, 0)
                 }
                 Repin::AlreadyDone => view(OwnRepinKind::AlreadyDone, new.to_bytes(), 0, 0),
