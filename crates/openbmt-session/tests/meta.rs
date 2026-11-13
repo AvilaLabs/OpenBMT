@@ -11,7 +11,7 @@ fn rule_ids() -> Vec<u32> {
     let mut ids = Vec::new();
     for line in RULES.lines() {
         if let Some(rest) = line.trim_start().strip_prefix("- **AS-") {
-            let id: String = rest.chars().take(2).collect();
+            let id: String = rest.chars().take_while(char::is_ascii_digit).collect();
             if let Ok(n) = id.parse::<u32>() {
                 ids.push(n);
             }
