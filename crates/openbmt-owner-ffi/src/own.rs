@@ -365,13 +365,13 @@ pub(crate) fn node_error(e: OwnNodeError) -> AppError {
             Kind::Refused,
             "RQ-02",
             &e,
-            openbmt_owner::own_say::needed("WORDS_NEEDED_RQ_02_NO_ROOM"),
+            openbmt_core::say::Words::new(openbmt_core::say::Tone::Stop, "Too many addresses watched", "This phone already watches as many addresses as it can, so it cannot take more for requests.", openbmt_core::say::Who::Owner, "Ask for this payment at a counter for now."),
         ),
         OwnNodeError::DeskFull => from_words(
             Kind::Refused,
             "RQ-02",
             &e,
-            openbmt_owner::own_say::needed("WORDS_NEEDED_RQ_02_RANGES_FULL"),
+            openbmt_core::say::Words::new(openbmt_core::say::Tone::Stop, "No more address ranges", "The shop has used every range of addresses its wallet allows.", openbmt_core::say::Who::Owner, "Move the shop to a new wallet to make more requests."),
         ),
         OwnNodeError::Derive(_) | OwnNodeError::NoApprover => internal(e),
     }

@@ -75,14 +75,14 @@ fn rq_01_a_shop_with_a_key_app_has_no_requests() {
     let response = rig.call(225, handle, &ask(T0).0);
     let mut r = Rd::ok(&response);
     let off = r.opt(|r| r.words()).expect("requests are off");
-    assert_eq!(off.heading, "WORDS_NEEDED_RQ_01_KEY_APP_SHOP");
+    assert_eq!(off.heading, "Requests need own wallet");
     assert!(!r.bool(), "no settings given");
     assert_eq!(r.u32(), 0);
     let fault = Rd::error(&rig.call(216, handle, &make_args(T0, "Rent", 5_000, 0, (2027, 1, 1))))
         .expect("refused");
     assert_eq!(fault.status, 3, "a state, not a rule");
     assert!(fault.text.starts_with("RQ-01"), "{}", fault.text);
-    assert_eq!(fault.words.heading, "WORDS_NEEDED_RQ_01_KEY_APP_SHOP");
+    assert_eq!(fault.words.heading, "Requests need own wallet");
 }
 
 #[test]
@@ -254,7 +254,7 @@ fn rq_32_the_ledger_carries_a_line_for_each_request_and_the_days_stay_apart() {
     assert!(lines
         .next()
         .expect("header")
-        .starts_with("WORDS_NEEDED_RQ_32_NUMBER,"));
+        .starts_with("Number,Note,Made,Due,Priced in,"));
     let line = lines.next().expect("a line");
     assert!(line.starts_with("1,\"Rent, march\",1970-01-12T13:46:40Z,1970-01-22,SAT,5000,"));
     assert_eq!(lines.next(), Some(""));

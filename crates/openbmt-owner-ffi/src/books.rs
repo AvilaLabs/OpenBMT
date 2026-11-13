@@ -400,7 +400,7 @@ fn request_lines<P: OwnerPort>(node: &OwnerNode<P>) -> Vec<u8> {
     ];
     let cells: Vec<String> = header
         .iter()
-        .map(|h| format!("WORDS_NEEDED_RQ_32_{h}"))
+        .map(|h| request_heading(h).to_string())
         .collect();
     out.push_str(&cells.join(","));
     out.push_str("\r\n");
@@ -429,9 +429,9 @@ fn request_lines<P: OwnerPort>(node: &OwnerNode<P>) -> Vec<u8> {
         let (ended, ended_at) = match l.ended {
             Some((end, at)) => (
                 match end {
-                    openbmt_requests::End::Cancelled => "WORDS_NEEDED_RQ_32_ENDED_CANCELLED",
-                    openbmt_requests::End::Closed => "WORDS_NEEDED_RQ_32_ENDED_CLOSED",
-                    openbmt_requests::End::CountedPaid => "WORDS_NEEDED_RQ_32_ENDED_COUNTED_PAID",
+                    openbmt_requests::End::Cancelled => "Cancelled",
+                    openbmt_requests::End::Closed => "Closed as it is",
+                    openbmt_requests::End::CountedPaid => "Counted as paid",
                 },
                 time_text(at),
             ),
@@ -461,4 +461,21 @@ pub(crate) fn full_ledger_bytes(books: &Books) -> Result<Vec<u8>, AppError> {
         .full_ledger(RevealsPayments::Acknowledged)
         .map(String::into_bytes)
         .map_err(|e| export_error(&e, ExportKind::FullLedger))
+}
+
+/// RQ-32: the heading of each column of the requests in the full ledger.
+fn request_heading(key: &str) -> &'static str {
+    match key {
+        "NUMBER" => "Number",
+        "NOTE" => "Note",
+        "MADE" => "Made",
+        "DUE" => "Due",
+        "PRICED_IN" => "Priced in",
+        "AMOUNT" => "Amount",
+        "PAYMENTS" => "Payments",
+        "MARKS" => "Marks",
+        "ENDED" => "Ended",
+        "ENDED_AT" => "Ended at",
+        _ => "Returns",
+    }
 }

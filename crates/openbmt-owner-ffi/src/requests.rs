@@ -12,7 +12,6 @@
 use openbmt_books::format_minor;
 use openbmt_core::currency::ShopCurrency;
 use openbmt_counter::{Currency, Rate, RateSource};
-use openbmt_owner::own_say::needed;
 use openbmt_owner_node::{
     MadeRequest, OwnerNode, OwnerPort, RequestContext, RequestError, RequestsOff,
 };
@@ -103,7 +102,13 @@ impl DayView {
                     "RQ-09: {}-{}-{} is not a day the shop's calendar has",
                     self.year, self.month, self.day
                 ),
-                needed("WORDS_NEEDED_RQ_09_DAY_NOT_REAL"),
+                openbmt_core::say::Words::new(
+                    openbmt_core::say::Tone::Ended,
+                    "That day does not exist",
+                    "The due date is not a day of the shop's calendar.",
+                    openbmt_core::say::Who::Owner,
+                    "Pick the due date again.",
+                ),
             )
         })
     }
@@ -462,7 +467,13 @@ fn checked_rate(rate: &RequestRateView) -> Result<CheckedRate, AppError> {
             Kind::Refused,
             "RQ-12",
             format!("RQ-12: the rate is refused: {text}"),
-            needed("WORDS_NEEDED_RQ_12_RATE_REFUSED"),
+            openbmt_core::say::Words::new(
+                openbmt_core::say::Tone::Ended,
+                "Price not usable",
+                "The bitcoin price this phone fetched cannot be used to work out the amount.",
+                openbmt_core::say::Who::Owner,
+                "Fetch the price again, or ask for the amount in bitcoin.",
+            ),
         )
     };
     Ok(CheckedRate {

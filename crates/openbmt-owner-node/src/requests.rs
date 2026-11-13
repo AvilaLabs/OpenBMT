@@ -41,7 +41,6 @@ use openbmt_core::currency::ShopCurrency;
 use openbmt_core::say::Words;
 use openbmt_core::wallet::Keychain;
 use openbmt_core::wire::{self, DecodeError, Reader};
-use openbmt_owner::own_say::needed;
 use openbmt_owner::{SaleFacts, SaleKey, Stage};
 use openbmt_requests::say;
 use openbmt_requests::{
@@ -182,16 +181,16 @@ impl RequestError {
     /// them, and a placeholder that names the rule where it has none.
     pub fn words(&self) -> Words {
         match self {
-            Self::Off(RequestsOff::KeyApp) => needed("WORDS_NEEDED_RQ_01_KEY_APP_SHOP"),
+            Self::Off(RequestsOff::KeyApp) => openbmt_core::say::Words::new(openbmt_core::say::Tone::Ended, "Requests need own wallet", "This shop is still paired through the Key app, so its requests are made at the counters.", openbmt_core::say::Who::Owner, "Make the request at a counter, or move the shop to its own wallet."),
             Self::Off(RequestsOff::Unreadable(e)) | Self::Store(e) => say::book_unreadable(e),
-            Self::NoContext => needed("WORDS_NEEDED_RQ_35_SETTINGS_NOT_GIVEN"),
+            Self::NoContext => openbmt_core::say::Words::new(openbmt_core::say::Tone::Stop, "Shop settings not read yet", "Payments to requests are counted only once the shop's settings and time zone are read.", openbmt_core::say::Who::Owner, "Open the app again once the shop's settings are in place."),
             Self::Make(e) => say::make_refused(e),
             Self::Share(e) => say::share_refused(e),
             Self::End(e) => say::end_refused(e),
             Self::Repeat(e) => say::repeat_refused(e),
             Self::Return(e) => say::return_refused(e),
             Self::Address(e) => say::address_refused(e),
-            Self::Queue(_) => needed("WORDS_NEEDED_RQ_29_RETURN_NOT_QUEUED"),
+            Self::Queue(_) => openbmt_core::say::Words::new(openbmt_core::say::Tone::Stop, "Return not taken", "The return could not be stored in the queue of payments, so nothing will be paid.", openbmt_core::say::Who::Owner, "Try again. If it keeps failing, check the phone's free space."),
         }
     }
 

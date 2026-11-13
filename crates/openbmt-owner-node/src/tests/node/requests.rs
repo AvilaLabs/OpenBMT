@@ -101,7 +101,7 @@ fn rq_01_a_shop_with_a_key_app_has_no_requests_of_the_owner() {
         .unwrap_err()
         .words()
         .heading
-        .starts_with("WORDS_NEEDED_RQ_01"));
+        .starts_with("Requests need own wallet"));
     assert!(!dir.path().join(REQUEST_BOOK_FILE).exists());
 }
 
