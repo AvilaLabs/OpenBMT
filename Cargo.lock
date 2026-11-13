@@ -510,6 +510,7 @@ dependencies = [
 name = "openbmt-owner"
 version = "0.1.0"
 dependencies = [
+ "bip39",
  "bitcoin",
  "openbmt-approver",
  "openbmt-bbqr",

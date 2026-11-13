@@ -48,6 +48,7 @@ mod codec;
 mod counter;
 mod edit;
 mod error;
+pub mod float;
 mod follow;
 pub mod hardware;
 pub mod own_book;
