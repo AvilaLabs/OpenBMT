@@ -17,8 +17,15 @@ publish.workspace = true
 # node derives the address the sweep, the splice out and the close pay to
 # from the shop's wallet description, the way the counter does (SL-33). It
 # adds miniscript and bip39, which the counter's list already has.
+#
+# openbmt-net-io, openbmt-net and openbmt-watch are the counter's own peer
+# layer: the compact-filter watcher of SL-26 runs on the driver and its header
+# store, and the Tor stream of SL-32 is made by its SOCKS5 client. They add no
+# package the counter's list does not have.
 [dependencies]
 openbmt-core = { path = "../openbmt-core" }
+openbmt-net-io = { path = "../openbmt-net-io" }
+openbmt-watch = { path = "../openbmt-watch" }
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std", "secp-recovery"] }
 chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
 lightning = { version = "=0.2.8", features = ["std"] }

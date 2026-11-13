@@ -9,7 +9,9 @@
 //! - [`expect`]: what is expected of each invoice, across a restart; [`paid`]:
 //!   the paid events kept until acknowledged; [`sweep`]: the spendable outputs
 //!   swept to the shop's address.
-//! - [`chain`]: chain data from the shop's own Bitcoin Core (SL-26).
+//! - [`chain`]: chain data from the shop's own Bitcoin Core (SL-26);
+//!   [`filters`]: the same from the compact-filter watcher on the counter's
+//!   peer layer (SL-26, SL-27).
 //! - [`provider`]: the choice among a provider's offers (SL-29, SL-30);
 //!   [`room`]: the room to receive and the decision for an amount (SL-40,
 //!   SL-41).
@@ -72,7 +74,15 @@
 //!   with the same payment hash ([`paid`]). The counter treats a repeat as the
 //!   same payment.
 //! - Nothing here listens: the node makes one connection, to the provider.
-//! - The compact-filter watcher is a seam only ([`chain::FilterWatcher`]).
+//! - With the filter watcher the node reads blocks from the peers whose
+//!   filters match what it watches, sends transactions through the same peers,
+//!   and has no fee source: the fee rates stay at the fixed values of
+//!   [`chain::CoreFees`]. The set it watches is made again at each start from
+//!   the monitors and the sweeper ([`filters`]).
+//! - With Tor on (`NodeConfig::tor`) the connection to the provider and every
+//!   connection of the filter watcher go through the SOCKS5 proxy, and a proxy
+//!   that cannot be reached is a stop: nothing is sent over the clear net
+//!   instead (SL-32, `StartError::TorUnreachable`).
 //!
 //! First build. No independent security audit has been done, and the library's
 //! async persistence is marked beta by its authors. It runs only on regtest
@@ -87,6 +97,7 @@ pub mod close;
 pub mod device;
 pub mod device_tcp;
 pub mod expect;
+pub mod filters;
 pub mod logger;
 pub mod node;
 pub mod paid;

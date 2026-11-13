@@ -51,13 +51,34 @@
 #          maximum is failed back (SL-21, SL-29)
 #   The script ends `ALL PASS` only if every check printed PASS.
 #
+#   With SHOP_CHAIN=filters the run is another one, on the same network: the
+#   node's chain data comes from the compact-filter watcher on the counter's
+#   peer layer (SL-26, SL-27), not from RPC (Core is started to serve filters
+#   and given no RPC login by the node). It checks:
+#        - the node reaches Core's tip with no RPC
+#        - a first payment opens a channel, the funding transaction is seen
+#          confirmed through a filter-matched block, a second payment uses it
+#        - a reorganization that takes the funding transaction out of the best
+#          chain: the node unconfirms it (the library then closes the ready
+#          channel, as it does for any such reorganization), the closing
+#          transaction goes out through the peers, the funding transaction
+#          mined again is given again, and a payment opens a new channel
+#        - the node stopped for blocks and started again catches up
+#        - a close pays the pinned wallet
+#        - with Tor on (SL-32) and nothing listening at the proxy, the node
+#          does not start and nothing reaches the provider; with something at
+#          the proxy that is not a SOCKS proxy, the node starts, never reaches
+#          the provider, and no connection to the provider is made at all
+#
 # Needs: Bitcoin Core 32.1 in ~/.local/opt/bitcoin-core-32.1/bin, LND in
 # ~/.local/opt/lnd-0.21.8, jq, and cargo (through ~/.cache/openbmt/guard.sh).
 #
 # Environment:
 #   CORE_BIN       directory with bitcoind and bitcoin-cli
 #   LND_DIR        directory with lnd and lncli
-#   DRILL_PORTS    first of eleven free ports on 127.0.0.1 (default 19700)
+#   SHOP_CHAIN     `filters` for the run of the filter watcher (default: Core's
+#                  RPC, the run above)
+#   DRILL_PORTS    first of fourteen free ports on 127.0.0.1 (default 19700)
 #   DRILL_DIR      scratch directory (default a new one under ~/.cache/openbmt)
 #   DRILL_KEEP=1   keep the scratch directory afterwards
 #   SHOP_BIN       the `shop_regtest` example binary
@@ -88,6 +109,12 @@ DEV_PORT=$((P0 + 7))
 LND_P2P=$((P0 + 8))
 LND_RPC=$((P0 + 9))
 LND_REST=$((P0 + 10))
+# The Tor run of the filter watcher's run: nothing listens at the first, a
+# program that is no proxy listens at the second, and a second device of its own.
+TOR_FREE=$((P0 + 11))
+TOR_FAKE=$((P0 + 12))
+TOR_DEV=$((P0 + 13))
+SHOP_CHAIN=${SHOP_CHAIN:-core}
 RPC_USER=shopln
 RPC_PASS=shopln_pw
 # The node id the BIP-85 child at index 0 of the text's master key gives
@@ -167,6 +194,8 @@ stop_pid() { # name
 cleanup() {
   stop_pid shop
   stop_pid device
+  stop_pid fakeproxy
+  stop_pid tordevice
   stop_pid lsp
   stop_pid lnd
   if [ -n "${PIDS[bitcoind]:-}" ]; then
@@ -206,8 +235,16 @@ done
 # ---- the network ---------------------------------------------------------------
 
 say "Start Bitcoin Core, the payer, the provider and the second device"
+# The filter watcher's run needs Core to serve filters to a peer on this machine.
+if [ "$SHOP_CHAIN" = filters ]; then
+  CORE_NET=(-listen=1 -bind="127.0.0.1:$BTC_P2P" -blockfilterindex=1 -peerblockfilters=1)
+  CHAIN_ARGS=(chain=filters p2p="$BTC_P2P")
+else
+  CORE_NET=(-listen=0)
+  CHAIN_ARGS=(rpc="$BTC_RPC" user="$RPC_USER" pass="$RPC_PASS")
+fi
 bitcoind -regtest -datadir="$BTC_DIR" -port="$BTC_P2P" -rpcport="$BTC_RPC" -rpcuser="$RPC_USER" \
-  -rpcpassword="$RPC_PASS" -fallbackfee=0.0002 -txindex=1 -listen=0 -dnsseed=0 \
+  -rpcpassword="$RPC_PASS" -fallbackfee=0.0002 -txindex=1 "${CORE_NET[@]}" -dnsseed=0 \
   -zmqpubrawblock="tcp://127.0.0.1:$ZMQ_BLK" -zmqpubrawtx="tcp://127.0.0.1:$ZMQ_TX" \
   -pid="$BASE/bitcoind.pid" >/dev/null 2>&1 &
 PIDS[bitcoind]=$!
@@ -269,7 +306,7 @@ note "provider $LSP_ID"
 
 start_shop() { # [extra arguments]; returns 0 once the control port answers
   : >"$BASE/shop.out"
-  "$SHOP_BIN" ctl="$SHOP_CTL" data="$SHOP_DIR" rpc="$BTC_RPC" user="$RPC_USER" pass="$RPC_PASS" \
+  "$SHOP_BIN" ctl="$SHOP_CTL" data="$SHOP_DIR" "${CHAIN_ARGS[@]}" \
     provider_id="$LSP_ID" provider_addr="127.0.0.1:$LSP_P2P" device="$DEV_PORT" sweep_index="$SWEEP0" "$@" \
     >"$BASE/shop.out" 2>"$BASE/shop.err" &
   PIDS[shop]=$!
@@ -333,7 +370,7 @@ lsp_channels_with_shop() { ctl "$LSP_CTL" channels | grep -c "cp=$SHOP_ID"; }
 
 say "The shop's pinned wallet: a description that does not read is refused"
 SWEEP0=5
-"$SHOP_BIN" ctl="$SHOP_CTL" data="$SHOP_DIR" rpc="$BTC_RPC" user="$RPC_USER" pass="$RPC_PASS" \
+"$SHOP_BIN" ctl="$SHOP_CTL" data="$SHOP_DIR" "${CHAIN_ARGS[@]}" \
   provider_id="$LSP_ID" provider_addr="127.0.0.1:$LSP_P2P" device="$DEV_PORT" sweep_index="$SWEEP0" \
   wallet="not-a-wallet" >"$BASE/refused.out" 2>&1
 RC=$?
@@ -365,6 +402,191 @@ A5=$(addr_at 5)
 check "SL-33: the node derives the pinned wallet's addresses itself (index 0 and 5 agree with Core's): $A5" $?
 [ "$(ctl "$SHOP_CTL" address 2147483648 | cut -c1-3)" = ERR ]
 check "SL-33: an index with no address is refused" $?
+
+
+# ---- the filter watcher's run --------------------------------------------------
+
+if [ "$SHOP_CHAIN" = filters ]; then
+  say "Filter watcher: the node's chain data comes from a peer's compact filters"
+  # The node saves what it needs from the driver at most once a minute, so
+  # the first reach of the tip can take that long.
+  TIP=$(bcli getblockcount)
+  await_status "chain_ok=true height=$TIP " 150
+  check "SL-26: the node reaches Core's tip, $TIP, with no RPC login given to it" $?
+
+  shop_invoice 50000
+  H1=$(hash_of "$INVOICE")
+  [ -n "$INVOICE" ] && [ "$(field fee_msat "$REPLY")" = 1000000 ]
+  check "SL-29: the provider's fee is named before the invoice is made" $?
+  pay "$INVOICE" 90s && await_paid "$H1" 30
+  check "SL-21, SL-28: the first payment opens a channel and is reported paid" $?
+  FUNDING=$(ctl "$LSP_CTL" channels | grep "cp=$SHOP_ID" | sed -n 's/.*funding_txo=Some(OutPoint { txid: \([0-9a-f]*\), vout: \([0-9]*\) }).*/\1:\2/p')
+  FTX=${FUNDING%%:*}
+  [ -n "$FTX" ]
+  check "the channel's funding transaction is $FTX" $?
+  for _ in $(seq 1 30); do bcli getmempoolentry "$FTX" >/dev/null 2>&1 && break; sleep 1; done
+  mine 3
+  CONF=
+  for _ in $(seq 1 150); do
+    CONF=$(ctl "$SHOP_CTL" confirmations)
+    case "$CONF" in *"Some("[1-9]*) break ;; esac
+    sleep 1
+  done
+  note "confirmations: $CONF"
+  case "$CONF" in *"Some("[1-9]*) true ;; *) false ;; esac
+  check "SL-26, SL-27: the funding transaction is seen confirmed through a block the filter matched" $?
+  FBLOCK=$(bcli getrawtransaction "$FTX" true | jq -r .blockhash)
+  FHEIGHT=$(bcli getblockheader "$FBLOCK" | jq -r .height)
+  note "funding in block $FBLOCK at height $FHEIGHT"
+
+  shop_invoice 10000
+  H2=$(hash_of "$INVOICE")
+  pay "$INVOICE" 60s && await_paid "$H2" 30
+  check "the second payment uses the channel" $?
+
+  say "A reorganization takes the funding transaction out of the best chain"
+  TIP_BEFORE=$(bcli getblockcount)
+  bcli invalidateblock "$FBLOCK"
+  # The other branch has no funding transaction: blocks with a coinbase only,
+  # one more than the branch that left.
+  for _ in $(seq 1 $((TIP_BEFORE - FHEIGHT + 2))); do
+    bw miner generateblock "$(cat "$BASE/miner.addr")" '[]' >/dev/null
+  done
+  TIP=$(bcli getblockcount)
+  [ "$(bcli getrawtransaction "$FTX" true 2>/dev/null | jq -r '.blockhash // "none"')" = none ]
+  check "Core's best chain holds no funding transaction now (height $TIP)" $?
+  for _ in $(seq 1 150); do grep -q "unconfirmed $FTX" "$SHOP_DIR/node.log" && break; sleep 1; done
+  grep -q "unconfirmed $FTX" "$SHOP_DIR/node.log"
+  check "SL-26: the node gave the funding transaction to transaction_unconfirmed" $?
+  await_status "chain_ok=true height=$TIP " 150
+  check "SL-26: the node follows the other branch to its tip, $TIP" $?
+  grep -q "Funding transaction was un-confirmed" "$SHOP_DIR/node.log"
+  check "SL-26: the library closes a channel that was ready when its funding left the chain (its own rule), so the node was told" $?
+  CLOSE_TX=$(sed -n 's/.*closed by funding output spend in txid \([0-9a-f]*\).*/\1/p' "$SHOP_DIR/node.log" | head -1)
+  grep -q "broadcast $CLOSE_TX to peers" "$SHOP_DIR/node.log"
+  check "SL-26: the closing transaction $CLOSE_TX was handed to the peers, not to RPC" $?
+  mine 2
+  [ "$(bcli getrawtransaction "$FTX" true 2>/dev/null | jq -r '.blockhash // "none"')" != none ]
+  check "the funding transaction is mined again (Core)" $?
+  for _ in $(seq 1 150); do
+    [ "$(grep -c "given $FTX at" "$SHOP_DIR/node.log")" -ge 2 ] && break
+    sleep 1
+  done
+  [ "$(grep -c "given $FTX at" "$SHOP_DIR/node.log")" -ge 2 ]
+  check "SL-26: the funding transaction, mined again, is given to transactions_confirmed again" $?
+  CONFIRMED=0
+  for _ in $(seq 1 60); do
+    [ "$(bcli getrawtransaction "$CLOSE_TX" true 2>/dev/null | jq -r '.confirmations // 0')" -ge 1 ] && { CONFIRMED=1; break; }
+    mine 1
+    sleep 1
+  done
+  note "the node's closing transaction confirmed in Core: $CONFIRMED (the provider also closes, and one of the two wins)"
+  TIP=$(bcli getblockcount)
+  await_status "chain_ok=true height=$TIP channels=0" 150
+  check "SL-26: the node follows to the tip, $TIP, with the channel closed" $?
+  # A new payment opens a new channel through the provider.
+  shop_invoice 50000
+  H3=$(hash_of "$INVOICE")
+  pay "$INVOICE" 90s && await_paid "$H3" 30
+  check "a payment after the reorganization opens a new channel and is paid" $?
+  mine 3
+  TIP=$(bcli getblockcount)
+  await_status "chain_ok=true height=$TIP channels=1 usable=1" 150
+  check "the new channel is usable and the node is at the tip" $?
+
+  say "Stopped for blocks, started again"
+  stop_shop
+  mine 12
+  start_shop max_fee_msat=3000000
+  check "the node starts again" $?
+  TIP=$(bcli getblockcount)
+  await_status "chain_ok=true height=$TIP " 150
+  check "SL-26: the node catches up to Core's tip, $TIP, from where the library had reached" $?
+  await_status "provider=true channels=1 usable=1" 60
+  shop_invoice 2000
+  H4=$(hash_of "$INVOICE")
+  pay "$INVOICE" 60s && await_paid "$H4" 30
+  check "a payment after the catch-up is paid" $?
+
+  say "Close to the shop's wallet, on the filter watcher"
+  SHOP_ADDR=$(addr_at 11)
+  BEFORE=$(bw pinned getbalance)
+  for _ in $(seq 1 30); do
+    R=$(ctl "$SHOP_CTL" close 11)
+    [ "$R" = "Ok(1)" ] && break
+    sleep 1
+  done
+  [ "$R" = "Ok(1)" ]
+  check "SL-36: the close of the channel was begun" $?
+  for _ in $(seq 1 30); do
+    mine 1
+    sleep 1
+    [ "$(bw pinned getbalance)" != "$BEFORE" ] && break
+  done
+  mine 3
+  AFTER=$(bw pinned getbalance)
+  GOT=$(bw pinned getreceivedbyaddress "$SHOP_ADDR" 1)
+  awk -v g="$GOT" 'BEGIN { exit !(g > 0) }' && is_pinned "$SHOP_ADDR"
+  check "SL-36: the close paid the pinned wallet's address of index 11 ($BEFORE -> $AFTER)" $?
+  TIP=$(bcli getblockcount)
+  await_status "chain_ok=true height=$TIP channels=0" 150
+  check "SL-26: the node saw the close confirmed (the channel is gone from the library)" $?
+  grep -q "to peers" "$SHOP_DIR/node.log"
+  if [ $? = 0 ]; then note "the node sent a transaction through the peers"; else note "no transaction of the node's went through the peers in this run (the provider sent the close)"; fi
+  stop_shop
+
+  # ---- Tor ----------------------------------------------------------------------
+
+  say "Tor on (SL-32): nothing listens at the proxy"
+  TOR_SHOP=$BASE/shop-tor
+  TOR_DEVDIR=$BASE/device-tor
+  mkdir -p "$TOR_DEVDIR"
+  "$DEVICE_BIN" "$TOR_DEV" "$TOR_DEVDIR" >>"$BASE/device-tor.log" 2>&1 &
+  PIDS[tordevice]=$!
+  wait_port "$TOR_DEV" 20 || die "the second device of the Tor run did not start"
+  tor_conns() { # connections of the node's process to the provider's port
+    ss -tnp 2>/dev/null | grep "pid=${PIDS[shop]}," | grep -c ":$LSP_P2P " 
+  }
+  "$SHOP_BIN" ctl="$SHOP_CTL" data="$TOR_SHOP" "${CHAIN_ARGS[@]}" \
+    provider_id="$LSP_ID" provider_addr="127.0.0.1:$LSP_P2P" device="$TOR_DEV" sweep_index=0 \
+    tor="127.0.0.1:$TOR_FREE" >"$BASE/tor-refused.out" 2>&1
+  RC=$?
+  [ "$RC" = 3 ] && grep -q "TorUnreachable" "$BASE/tor-refused.out" && [ ! -e "$TOR_SHOP" ]
+  check "SL-32: with Tor on and no proxy, the node does not start, and nothing is made on disk" $?
+  grep -q "WORDS_NEEDED_SL_32_TOR_UNREACHABLE" "$BASE/tor-refused.out"
+  check "SL-32: it says so with the placeholder of the rule's words" $?
+
+  say "Tor on (SL-32): something listens at the proxy that is not a proxy"
+  "$DEVICE_BIN" "$TOR_FAKE" "$BASE/fakeproxy-dir" >>"$BASE/fakeproxy.log" 2>&1 &
+  PIDS[fakeproxy]=$!
+  wait_port "$TOR_FAKE" 20 || die "the stand-in for the proxy did not start"
+  SHOP_DIR_MAIN=$SHOP_DIR
+  DEV_PORT_MAIN=$DEV_PORT
+  SHOP_DIR=$TOR_SHOP
+  DEV_PORT=$TOR_DEV
+  : >"$BASE/shop.out"
+  "$SHOP_BIN" ctl="$SHOP_CTL" data="$SHOP_DIR" "${CHAIN_ARGS[@]}" \
+    provider_id="$LSP_ID" provider_addr="127.0.0.1:$LSP_P2P" device="$DEV_PORT" sweep_index=0 \
+    tor="127.0.0.1:$TOR_FAKE" >"$BASE/shop.out" 2>"$BASE/shop.err" &
+  PIDS[shop]=$!
+  wait_port "$SHOP_CTL" 90
+  check "with Tor on and something at the proxy's address, the node starts" $?
+  sleep 25
+  S=$(shop_status)
+  [ "$(field provider "$S")" = false ]
+  check "SL-32: the provider is not reached while the proxy does not carry the connection: $(field provider "$S")" $?
+  [ "$(tor_conns)" = 0 ]
+  check "SL-32: and the node made no connection to the provider's port itself, not even once" $?
+  grep -q "tor: the provider not reached" "$SHOP_DIR/node.log"
+  check "SL-32: the node's log says the proxy failed, and the node went on waiting" $?
+  stop_shop
+  SHOP_DIR=$SHOP_DIR_MAIN
+  DEV_PORT=$DEV_PORT_MAIN
+
+  echo
+  if [ "$FAILED" = 0 ]; then echo "ALL PASS"; else echo "FAILED"; exit 1; fi
+  exit 0
+fi
 
 # ---- the first payment opens a channel -----------------------------------------
 

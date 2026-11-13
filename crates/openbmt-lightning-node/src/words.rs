@@ -32,3 +32,8 @@ pub const SL_33_OUTPUTS_WAITING: &str = "Money from a closed Lightning channel i
 /// The address the swept money goes to is not usable (SL-33).
 pub const SL_33_DESTINATION_REFUSED: &str =
     "That address is not one of the shop's wallet, so Lightning money is not sent there.";
+
+/// Tor is on and the proxy cannot be reached, so nothing is connected (SL-32).
+pub const SL_32_TOR_UNREACHABLE: &str = "WORDS_NEEDED_SL_32_TOR_UNREACHABLE";
+/// The chain data from the peers could not be started (SL-26).
+pub const SL_26_FILTERS_NOT_STARTED: &str = "WORDS_NEEDED_SL_26_FILTERS_NOT_STARTED";

@@ -4,7 +4,8 @@
 //!   opened by the provider alone.
 //! - The seed is the 64 bytes of SL-10; the library never takes the words.
 //! - State on two devices (SL-20 to SL-25), through `store.rs`.
-//! - Chain data from the shop's own Bitcoin Core (SL-26), `chain.rs`.
+//! - Chain data from the shop's own Bitcoin Core (SL-26), `chain.rs`, or from
+//!   the compact-filter watcher, `filters.rs`.
 //! - Channels from the one provider the shop picked, by LSPS2 (SL-28 to
 //!   SL-31), `provider.rs`.
 //! - A sale is paid only on `Event::PaymentClaimed` (SL-21): the library gives
@@ -17,9 +18,10 @@
 //!   pinned wallet, at an index the caller gives (`sweep.rs`).
 
 use crate::bip85::NodeSeed;
-use crate::chain::{ChainFilter, CoreBroadcaster, CoreFees, CoreRpc};
+use crate::chain::{ChainFilter, ChainSource, CoreBroadcaster, CoreFees};
 use crate::device::{DeviceSnapshot, DeviceState, DeviceStatus, SecondDevice};
 use crate::expect::{Claim, Expectation, Expectations};
+use crate::filters::{Confirmable, FilterQueue, FilterRun, FilterStart, Follower, Progress};
 use crate::logger::Logger;
 use crate::paid::{PaidLog, PaidRecord};
 use crate::provider::{choose_offer, Offer, ProviderConfig, Refusal};
@@ -67,6 +69,7 @@ use lightning_liquidity::lsps2::event::LSPS2ClientEvent;
 use lightning_liquidity::lsps2::msgs::LSPS2OpeningFeeParams;
 use lightning_liquidity::LiquidityClientConfig;
 use openbmt_core::pinned_wallet::PinnedWallet;
+use openbmt_watch::HeaderStore;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -112,8 +115,14 @@ pub struct NodeConfig {
     pub seed: NodeSeed,
     /// The counter's own directory for the node.
     pub data_dir: PathBuf,
-    /// The shop's Bitcoin Core.
-    pub core: CoreRpc,
+    /// Where the chain data comes from (SL-26): the shop's Bitcoin Core or the
+    /// compact-filter watcher.
+    pub chain: ChainSource,
+    /// With Tor on, the SOCKS5 proxy of Tor. The connection to the provider
+    /// and the watcher's peers then go through it, and a proxy that cannot be
+    /// reached stops the node: nothing is sent over the clear net instead
+    /// (SL-32).
+    pub tor: Option<SocketAddr>,
     /// The second device (SL-20).
     pub device: Arc<dyn SecondDevice>,
     /// The provider (SL-28).
@@ -146,6 +155,11 @@ pub enum StartError {
     Chain(String),
     /// A disk, the keys or the library's own error.
     Setup(String),
+    /// Tor is on and its proxy cannot be reached (SL-32). Nothing is
+    /// connected, and nothing is made on disk.
+    TorUnreachable(String),
+    /// The filter watcher could not be started (SL-26).
+    Filters(String),
     /// The shop's wallet description does not read, or the sweep index has no
     /// address in it (SL-33).
     WalletRefused,
@@ -159,6 +173,10 @@ impl std::fmt::Display for StartError {
             StartError::State(StateError::Diverged) => f.write_str(crate::words::SL_25_DIVERGED),
             StartError::DeviceAway(e) => write!(f, "{}: {e}", crate::words::SL_23),
             StartError::WalletRefused => f.write_str(crate::words::SL_33_DESTINATION_REFUSED),
+            StartError::TorUnreachable(e) => {
+                write!(f, "{}: {e}", crate::words::SL_32_TOR_UNREACHABLE)
+            }
+            StartError::Filters(e) => write!(f, "{}: {e}", crate::words::SL_26_FILTERS_NOT_STARTED),
             StartError::Chain(e) | StartError::Setup(e) => f.write_str(e),
         }
     }
@@ -281,6 +299,7 @@ struct Shared {
     paid_log: PaidLog,
     sweeper: Arc<Sweeper>,
     destination: Arc<SweepDestination>,
+    tor: Option<SocketAddr>,
     chain_height: AtomicU64,
     last_poll_ok: AtomicU64,
     stopping: AtomicBool,
@@ -329,6 +348,7 @@ pub struct Node {
     shared: Arc<Shared>,
     paid_rx: tokio::sync::Mutex<mpsc::UnboundedReceiver<Paid>>,
     tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    filters: Mutex<Option<FilterRun>>,
     processor: Mutex<Option<tokio::task::JoinHandle<Result<(), lightning::io::Error>>>>,
 }
 
@@ -413,6 +433,13 @@ impl Node {
         wallet
             .receive_script(config.sweep_index)
             .map_err(|_| StartError::WalletRefused)?;
+        // Tor is on: a proxy that cannot be reached is a stop, before anything
+        // is made or connected (SL-32).
+        if let Some(proxy) = config.tor {
+            tor_reachable(proxy)
+                .await
+                .map_err(StartError::TorUnreachable)?;
+        }
         let handle = tokio::runtime::Handle::current();
         std::fs::create_dir_all(&config.data_dir).map_err(setup)?;
         let logger =
@@ -434,19 +461,34 @@ impl Node {
         let seal_key = SealKey::from_seed(&config.seed);
 
         // Chain data (SL-26).
-        let rpc = Arc::new(config.core.client());
-        let chain_name = rpc_chain(&rpc).await.map_err(StartError::Chain)?;
-        if !network_name_ok(config.network, &chain_name) {
-            return Err(StartError::Chain(format!("core is on {chain_name}")));
-        }
         let fees = Arc::new(CoreFees::default());
-        fees.refresh(&rpc).await;
-        let broadcaster = Arc::new(CoreBroadcaster::new(
-            Arc::clone(&rpc),
-            handle.clone(),
-            Arc::clone(&logger),
-        ));
         let filter = Arc::new(ChainFilter::default());
+        let filter_queue = Arc::new(FilterQueue::default());
+        let (rpc, broadcaster, broadcasts) = match &config.chain {
+            ChainSource::Core(core) => {
+                let rpc = Arc::new(core.client());
+                let chain_name = rpc_chain(&rpc).await.map_err(StartError::Chain)?;
+                if !network_name_ok(config.network, &chain_name) {
+                    return Err(StartError::Chain(format!("core is on {chain_name}")));
+                }
+                fees.refresh(&rpc).await;
+                let broadcaster = Arc::new(CoreBroadcaster::new(
+                    Arc::clone(&rpc),
+                    handle.clone(),
+                    Arc::clone(&logger),
+                ));
+                (Some(rpc), broadcaster, None)
+            }
+            ChainSource::Filters(_) => {
+                // The library registers what it wants to see in a queue the
+                // watcher reads (SL-27); transactions go out through the peers.
+                filter.set_watcher(Arc::clone(&filter_queue) as _);
+                let (sender, receiver) = std::sync::mpsc::channel();
+                let broadcaster =
+                    Arc::new(CoreBroadcaster::through_peers(sender, Arc::clone(&logger)));
+                (None, broadcaster, Some(receiver))
+            }
+        };
 
         // The two copies (SL-20, SL-25).
         let state_dir = config.data_dir.join("state");
@@ -565,7 +607,10 @@ impl Node {
             Err(e) => return Err(setup(e)),
         };
         let mut cache = UnboundedCache::new();
-        let (manager, chain_tip, monitors) = match manager_bytes {
+        // The manager, where the library has reached (`start_best`), the tip
+        // of Core's chain when Core is the source, the monitors, and the lowest
+        // height any part of the library has reached.
+        let (manager, start_best, core_tip, monitors, floor) = match manager_bytes {
             Some(bytes) => {
                 let refs: Vec<&ChannelMonitor<InMemorySigner>> =
                     monitors.iter().map(|(_, m)| m).collect();
@@ -585,53 +630,93 @@ impl Node {
                 let (manager_hash, manager) =
                     <(BlockHash, Manager)>::read(&mut lightning::io::Cursor::new(bytes), read_args)
                         .map_err(|e| setup(format!("manager: {e:?}")))?;
-                // Bring the manager and each monitor to the tip, together.
-                let listeners: Vec<(BlockHash, MonitorListener)> = monitors
-                    .into_iter()
-                    .map(|(hash, m)| {
+                match &rpc {
+                    Some(rpc) => {
+                        // Bring the manager and each monitor to the tip, together.
+                        let listeners: Vec<(BlockHash, MonitorListener)> = monitors
+                            .into_iter()
+                            .map(|(hash, m)| {
+                                (
+                                    hash,
+                                    (
+                                        m,
+                                        Arc::clone(&broadcaster),
+                                        Arc::clone(&fees),
+                                        Arc::clone(&logger),
+                                    ),
+                                )
+                            })
+                            .collect();
+                        let mut set: Vec<(BlockHash, &dyn Listen)> =
+                            vec![(manager_hash, &manager as &dyn Listen)];
+                        if let Some((best, sweeper)) = &kept_sweeper {
+                            set.push((best.block_hash, &**sweeper as &dyn Listen));
+                        }
+                        for (hash, l) in &listeners {
+                            set.push((*hash, l as &dyn Listen));
+                        }
+                        let tip =
+                            synchronize_listeners(Arc::clone(rpc), config.network, &mut cache, set)
+                                .await
+                                .map_err(|e| StartError::Chain(format!("{e:?}")))?;
                         (
-                            hash,
-                            (
-                                m,
-                                Arc::clone(&broadcaster),
-                                Arc::clone(&fees),
-                                Arc::clone(&logger),
-                            ),
+                            manager,
+                            tip.to_best_block(),
+                            Some(tip),
+                            listeners.into_iter().map(|(_, l)| l.0).collect::<Vec<_>>(),
+                            tip.height,
                         )
-                    })
-                    .collect();
-                let mut set: Vec<(BlockHash, &dyn Listen)> =
-                    vec![(manager_hash, &manager as &dyn Listen)];
-                if let Some((best, sweeper)) = &kept_sweeper {
-                    set.push((best.block_hash, &**sweeper as &dyn Listen));
+                    }
+                    None => {
+                        // The watcher brings each part from where it was.
+                        let best = manager.current_best_block();
+                        let floor = monitors
+                            .iter()
+                            .map(|(_, m)| m.current_best_block().height)
+                            .chain(kept_sweeper.as_ref().map(|(b, _)| b.height))
+                            .fold(best.height, u32::min);
+                        (
+                            manager,
+                            best,
+                            None,
+                            monitors.into_iter().map(|(_, m)| m).collect(),
+                            floor,
+                        )
+                    }
                 }
-                for (hash, l) in &listeners {
-                    set.push((*hash, l as &dyn Listen));
-                }
-                let tip = synchronize_listeners(Arc::clone(&rpc), config.network, &mut cache, set)
-                    .await
-                    .map_err(|e| StartError::Chain(format!("{e:?}")))?;
-                (
-                    manager,
-                    tip,
-                    listeners.into_iter().map(|(_, l)| l.0).collect::<Vec<_>>(),
-                )
             }
             None => {
-                let tip = match &kept_sweeper {
-                    // Spendable outputs are tracked: the sweeper is brought to
-                    // the tip, the manager is new there.
-                    Some((best, sweeper)) => synchronize_listeners(
-                        Arc::clone(&rpc),
-                        config.network,
-                        &mut cache,
-                        vec![(best.block_hash, &**sweeper as &dyn Listen)],
-                    )
-                    .await
-                    .map_err(|e| StartError::Chain(format!("{e:?}")))?,
-                    None => validate_best_block_header(Arc::clone(&rpc))
-                        .await
-                        .map_err(|e| StartError::Chain(format!("{e:?}")))?,
+                let (tip, core_tip, start_floor) = match &rpc {
+                    Some(rpc) => {
+                        let tip = match &kept_sweeper {
+                            // Spendable outputs are tracked: the sweeper is brought to
+                            // the tip, the manager is new there.
+                            Some((best, sweeper)) => synchronize_listeners(
+                                Arc::clone(rpc),
+                                config.network,
+                                &mut cache,
+                                vec![(best.block_hash, &**sweeper as &dyn Listen)],
+                            )
+                            .await
+                            .map_err(|e| StartError::Chain(format!("{e:?}")))?,
+                            None => validate_best_block_header(Arc::clone(rpc))
+                                .await
+                                .map_err(|e| StartError::Chain(format!("{e:?}")))?,
+                        };
+                        (tip.to_best_block(), Some(tip), tip.height)
+                    }
+                    None => {
+                        // A new manager starts at the first block the watcher's
+                        // header store trusts (WR-04), and the watcher feeds it
+                        // forward from there.
+                        let store = HeaderStore::new(config.network)
+                            .map_err(|e| StartError::Filters(e.to_string()))?;
+                        let best = BestBlock::new(store.start_hash(), store.start_height());
+                        let floor = kept_sweeper
+                            .as_ref()
+                            .map_or(best.height, |(b, _)| b.height.min(best.height));
+                        (best, None, floor)
+                    }
                 };
                 let manager = Manager::new(
                     Arc::clone(&fees),
@@ -646,17 +731,23 @@ impl Node {
                     user_config(),
                     ChainParameters {
                         network: config.network,
-                        best_block: tip.to_best_block(),
+                        best_block: tip,
                     },
                     now.as_secs() as u32,
                 );
-                (manager, tip, monitors.into_iter().map(|(_, m)| m).collect())
+                (
+                    manager,
+                    tip,
+                    core_tip,
+                    monitors.into_iter().map(|(_, m)| m).collect(),
+                    start_floor,
+                )
             }
         };
         let manager = Arc::new(manager);
         let sweeper = match kept_sweeper {
             Some((_, sweeper)) => sweeper,
-            None => sweeper_parts.new_at(chain_tip.to_best_block()),
+            None => sweeper_parts.new_at(start_best),
         };
         for m in monitors {
             let id = m.channel_id();
@@ -674,7 +765,7 @@ impl Node {
                 Some(Arc::clone(&filter)),
                 Some(ChainParameters {
                     network: config.network,
-                    best_block: chain_tip.to_best_block(),
+                    best_block: start_best,
                 }),
                 Arc::clone(&background),
                 Arc::clone(&broadcaster),
@@ -730,8 +821,10 @@ impl Node {
             paid_log,
             sweeper: Arc::clone(&sweeper),
             destination: Arc::clone(&destination),
-            chain_height: AtomicU64::new(chain_tip.height as u64),
-            last_poll_ok: AtomicU64::new(now_secs()),
+            tor: config.tor,
+            chain_height: AtomicU64::new(start_best.height as u64),
+            // The watcher says when it is up to date; Core is polled at once.
+            last_poll_ok: AtomicU64::new(if rpc.is_some() { now_secs() } else { 0 }),
             stopping: AtomicBool::new(false),
             stop: Notify::new(),
         });
@@ -742,46 +835,84 @@ impl Node {
 
         let mut tasks = vec![flusher];
 
-        // Chain: poll Core for the tip and feed the monitor and the manager.
-        {
-            let (shared, rpc, fees, network) = (
-                Arc::clone(&shared),
-                Arc::clone(&rpc),
-                Arc::clone(&fees),
-                config.network,
-            );
-            let listener = Listeners {
-                monitor: Arc::clone(&monitor),
-                manager: Arc::clone(&manager),
-                sweeper: Arc::clone(&sweeper),
-            };
-            tasks.push(tokio::spawn(async move {
-                let poller = ChainPoller::new(Arc::clone(&rpc), network);
-                let mut spv = SpvClient::new(chain_tip, poller, &mut cache, &listener);
-                let mut ticks = 0u64;
-                loop {
-                    tokio::select! {
-                        _ = shared.stop.notified() => return,
-                        _ = tokio::time::sleep(POLL_EVERY) => {}
-                    }
-                    match spv.poll_best_tip().await {
-                        Ok((_, changed)) => {
-                            shared.last_poll_ok.store(now_secs(), Ordering::SeqCst);
-                            if changed {
-                                let h = listener.manager.current_best_block().height;
-                                shared.chain_height.store(h as u64, Ordering::SeqCst);
-                            }
-                        }
-                        Err(e) => shared
-                            .logger
-                            .line(Level::Warn, &format!("chain poll: {e:?}")),
-                    }
-                    ticks += 1;
-                    if ticks.is_multiple_of(300) {
-                        fees.refresh(&rpc).await;
-                    }
+        // Chain: Core's tip polled and fed to the monitor and the manager, or
+        // the compact-filter watcher following the driver (SL-26).
+        let mut filter_run = None;
+        match (&config.chain, rpc, core_tip) {
+            (ChainSource::Filters(filters), _, _) => {
+                let mut filters = filters.clone();
+                if let Some(proxy) = config.tor {
+                    filters.driver.proxy = Some(proxy);
                 }
-            }));
+                let confirmables: Vec<Confirmable> = vec![
+                    Arc::clone(&manager) as _,
+                    Arc::clone(&monitor) as _,
+                    Arc::clone(&sweeper) as _,
+                ];
+                let follower = Follower::new(confirmables, Arc::clone(&filter_queue), floor);
+                let progress_shared = Arc::clone(&shared);
+                let log = Arc::clone(&logger);
+                let run = FilterRun::start(FilterStart {
+                    config: filters,
+                    network: config.network,
+                    follower,
+                    broadcasts: broadcasts.ok_or_else(|| setup("no broadcast queue"))?,
+                    progress: Arc::new(move |p: Progress| {
+                        progress_shared
+                            .chain_height
+                            .store(p.height as u64, Ordering::SeqCst);
+                        if p.in_sync {
+                            progress_shared
+                                .last_poll_ok
+                                .store(now_secs(), Ordering::SeqCst);
+                        }
+                    }),
+                    log: Arc::new(move |line: &str| log.line(Level::Info, line)),
+                })
+                .map_err(StartError::Filters)?;
+                filter_run = Some(run);
+            }
+            (ChainSource::Core(_), Some(rpc), Some(chain_tip)) => {
+                let (shared, rpc, fees, network) = (
+                    Arc::clone(&shared),
+                    Arc::clone(&rpc),
+                    Arc::clone(&fees),
+                    config.network,
+                );
+                let listener = Listeners {
+                    monitor: Arc::clone(&monitor),
+                    manager: Arc::clone(&manager),
+                    sweeper: Arc::clone(&sweeper),
+                };
+                tasks.push(tokio::spawn(async move {
+                    let poller = ChainPoller::new(Arc::clone(&rpc), network);
+                    let mut spv = SpvClient::new(chain_tip, poller, &mut cache, &listener);
+                    let mut ticks = 0u64;
+                    loop {
+                        tokio::select! {
+                            _ = shared.stop.notified() => return,
+                            _ = tokio::time::sleep(POLL_EVERY) => {}
+                        }
+                        match spv.poll_best_tip().await {
+                            Ok((_, changed)) => {
+                                shared.last_poll_ok.store(now_secs(), Ordering::SeqCst);
+                                if changed {
+                                    let h = listener.manager.current_best_block().height;
+                                    shared.chain_height.store(h as u64, Ordering::SeqCst);
+                                }
+                            }
+                            Err(e) => shared
+                                .logger
+                                .line(Level::Warn, &format!("chain poll: {e:?}")),
+                        }
+                        ticks += 1;
+                        if ticks.is_multiple_of(300) {
+                            fees.refresh(&rpc).await;
+                        }
+                    }
+                }));
+            }
+            _ => return Err(setup("chain source")),
         }
 
         // The provider: stay connected to it, and only to it (SL-31).
@@ -853,6 +984,7 @@ impl Node {
             shared,
             paid_rx: tokio::sync::Mutex::new(paid_rx),
             tasks: Mutex::new(tasks),
+            filters: Mutex::new(filter_run),
             processor: Mutex::new(Some(processor)),
         })
     }
@@ -1057,6 +1189,18 @@ impl Node {
         tokio::spawn(lightning_net_tokio::setup_outbound(peers, id, stream));
     }
 
+    /// The confirmations of each channel's funding transaction as the library
+    /// counts them from the chain data it was given (SL-26); `None` while it is
+    /// not confirmed.
+    pub fn funding_confirmations(&self) -> Vec<Option<u32>> {
+        self.shared
+            .manager
+            .list_channels()
+            .iter()
+            .map(|c| c.confirmations)
+            .collect()
+    }
+
     /// What the node holds and could move out now, in satoshis: the spendable
     /// side of every channel.
     pub fn balance_sat(&self) -> u64 {
@@ -1144,6 +1288,11 @@ impl Node {
                     break;
                 }
             }
+        }
+        // The watcher's thread, and the driver with it, which saves its headers.
+        let filters = self.filters.lock().unwrap().take();
+        if let Some(mut run) = filters {
+            let _ = tokio::task::spawn_blocking(move || run.stop()).await;
         }
         // What the background owes the second device, once more.
         let _ =
@@ -1278,17 +1427,76 @@ async fn rpc_chain(rpc: &RpcClient) -> Result<String, String> {
         .ok_or_else(|| "chain".to_string())
 }
 
+/// How long the proxy of Tor may take to accept a connection.
+const TOR_CONNECT: Duration = Duration::from_secs(10);
+
+/// Whether something listens at the proxy's address (SL-32).
+async fn tor_reachable(proxy: SocketAddr) -> Result<(), String> {
+    match tokio::time::timeout(TOR_CONNECT, tokio::net::TcpStream::connect(proxy)).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(e)) => Err(format!("{proxy}: {e}")),
+        Err(_) => Err(format!("{proxy}: no answer")),
+    }
+}
+
+/// One connection to the provider through the SOCKS5 proxy of Tor, with a
+/// token of its own so that it rides a circuit of its own (SL-32). The stream
+/// is the one the counter's peer layer makes; it is handed to the library as
+/// it is.
+async fn tor_stream(
+    proxy: SocketAddr,
+    target: SocketAddr,
+    token: u64,
+) -> Result<std::net::TcpStream, String> {
+    tokio::task::spawn_blocking(move || {
+        openbmt_net_io::socks::connect_isolated(
+            proxy,
+            &openbmt_net_io::Target::Addr(target),
+            TOR_CONNECT,
+            Duration::from_secs(openbmt_net_io::socks::HANDSHAKE_SECS),
+            Some(token),
+        )
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Keeps one connection to the provider up. Nothing listens: the node takes
-/// no inbound connection (SL-31).
+/// no inbound connection (SL-31). With Tor on the connection is made through
+/// the proxy only; when that fails the node waits and tries the proxy again,
+/// and never connects over the clear net instead (SL-32).
 async fn keep_provider_connected(shared: Arc<Shared>) {
     let addr: SocketAddr = shared.provider.addr;
     let id = shared.provider.node_id;
     loop {
         if shared.peers.peer_by_node_id(&id).is_none() {
-            if let Some(connection) =
-                lightning_net_tokio::connect_outbound(Arc::clone(&shared.peers), id, addr).await
-            {
-                tokio::spawn(connection);
+            match shared.tor {
+                None => {
+                    if let Some(connection) =
+                        lightning_net_tokio::connect_outbound(Arc::clone(&shared.peers), id, addr)
+                            .await
+                    {
+                        tokio::spawn(connection);
+                    }
+                }
+                Some(proxy) => {
+                    let entropy: [u8; 32] =
+                        lightning::sign::EntropySource::get_secure_random_bytes(&*shared.keys);
+                    let token = u64::from_le_bytes(entropy[..8].try_into().unwrap_or([0; 8]));
+                    match tor_stream(proxy, addr, token).await {
+                        Ok(stream) => {
+                            tokio::spawn(lightning_net_tokio::setup_outbound(
+                                Arc::clone(&shared.peers),
+                                id,
+                                stream,
+                            ));
+                        }
+                        Err(e) => shared
+                            .logger
+                            .line(Level::Warn, &format!("tor: the provider not reached: {e}")),
+                    }
+                }
             }
         }
         tokio::select! {
@@ -1575,6 +1783,7 @@ fn event_name(e: &Event) -> &'static str {
 mod tests {
     use super::*;
     use crate::bip85::node_seed;
+    use crate::chain::CoreRpc;
     use crate::device::DirDevice;
     use crate::testutil::temp_dir;
     use lightning::routing::router::Router;
@@ -1589,12 +1798,13 @@ mod tests {
             seed: NodeSeed([3; 64]),
             data_dir: dir.join("node"),
             // Nothing listens here: a start that gets as far as Core fails.
-            core: CoreRpc {
+            chain: ChainSource::Core(CoreRpc {
                 host: "127.0.0.1".into(),
                 port: 1,
                 user: "u".into(),
                 password: "p".into(),
-            },
+            }),
+            tor: None,
             device: Arc::new(DirDevice::new(dir.join("device")).unwrap()),
             provider: ProviderConfig {
                 node_id: PublicKey::from_str(
@@ -1626,6 +1836,91 @@ mod tests {
         assert_eq!(err.to_string(), crate::words::SL_60);
         // Refused before anything was made on disk.
         assert!(!data_dir.exists());
+    }
+
+    /// A SOCKS5 proxy that takes one connection, signs it in with any name,
+    /// and answers a connect request for an IPv4 address with success. What
+    /// it was asked to connect to is sent on `asked`.
+    fn fake_proxy(
+        asked: std::sync::mpsc::Sender<SocketAddr>,
+    ) -> (SocketAddr, std::thread::JoinHandle<()>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let thread = std::thread::spawn(move || {
+            let (mut c, _) = listener.accept().unwrap();
+            let mut greeting = [0u8; 4];
+            c.read_exact(&mut greeting).unwrap();
+            // The name-and-password method is offered; it is taken.
+            assert_eq!(greeting, [5, 2, 0, 2]);
+            c.write_all(&[5, 2]).unwrap();
+            let mut head = [0u8; 2];
+            c.read_exact(&mut head).unwrap();
+            let mut rest = vec![0u8; 16 + 1 + 16];
+            c.read_exact(&mut rest).unwrap();
+            c.write_all(&[1, 0]).unwrap();
+            let mut request = [0u8; 10];
+            c.read_exact(&mut request).unwrap();
+            assert_eq!(request[..4], [5, 1, 0, 1]);
+            let ip = std::net::Ipv4Addr::new(request[4], request[5], request[6], request[7]);
+            let port = u16::from_be_bytes([request[8], request[9]]);
+            asked.send(SocketAddr::from((ip, port))).unwrap();
+            c.write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0]).unwrap();
+        });
+        (addr, thread)
+    }
+
+    #[test]
+    fn sl_32_with_tor_on_the_provider_is_reached_through_the_proxy_with_the_stream_it_makes() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (asked_tx, asked_rx) = std::sync::mpsc::channel();
+        let (proxy, thread) = fake_proxy(asked_tx);
+        let provider: SocketAddr = "127.0.0.1:9735".parse().unwrap();
+        let stream = rt.block_on(tor_stream(proxy, provider, 7)).unwrap();
+        thread.join().unwrap();
+        // The proxy was asked for the provider, and the stream is the proxy's.
+        assert_eq!(asked_rx.recv().unwrap(), provider);
+        assert_eq!(stream.peer_addr().unwrap(), proxy);
+    }
+
+    #[test]
+    fn sl_32_a_proxy_that_refuses_gives_an_error_and_no_stream() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let proxy = listener.local_addr().unwrap();
+        // The proxy takes the connection and closes it.
+        let thread = std::thread::spawn(move || drop(listener.accept().unwrap()));
+        let provider: SocketAddr = "127.0.0.1:9735".parse().unwrap();
+        assert!(rt.block_on(tor_stream(proxy, provider, 7)).is_err());
+        thread.join().unwrap();
+    }
+
+    #[test]
+    fn sl_32_with_tor_on_and_no_proxy_the_node_stops_before_anything_is_made() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        // Nothing listens at the proxy's address: a port that was just free.
+        let free = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let mut c = config(Network::Regtest);
+        c.tor = Some(free);
+        let err = rt.block_on(Node::start(c)).err().unwrap();
+        assert!(matches!(err, StartError::TorUnreachable(_)), "{err:?}");
+        assert!(err
+            .to_string()
+            .starts_with(crate::words::SL_32_TOR_UNREACHABLE));
+        // Neither Core nor the provider was asked, and nothing is on disk.
+        assert!(!temp_dir("node-config").join("node").exists());
     }
 
     #[test]

@@ -767,6 +767,8 @@ dependencies = [
  "lightning-persister",
  "lightning-rapid-gossip-sync",
  "openbmt-core",
+ "openbmt-net-io",
+ "openbmt-watch",
  "serde_json",
  "tokio",
 ]

@@ -4,9 +4,11 @@
 //!
 //! Core gives whole blocks, so every output the library would register with
 //! `chain::Filter` is seen without being asked for. The compact-filter watcher
-//! of `docs/WATCHER-RULES.md` is the second source; [`FilterWatcher`] is the
-//! seam it plugs into, and nothing in stage 1 implements it.
+//! of `docs/WATCHER-RULES.md` is the second source ([`crate::filters`]);
+//! [`FilterWatcher`] is the seam it plugs into, and [`ChainSource`] says which
+//! of the two a node is given.
 
+use crate::filters::FilterConfig;
 use crate::logger::Logger;
 use bitcoin::consensus::encode::serialize_hex;
 use bitcoin::{Script, Transaction, Txid};
@@ -16,8 +18,21 @@ use lightning::util::logger::Level;
 use lightning_block_sync::http::HttpEndpoint;
 use lightning_block_sync::rpc::RpcClient;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
+
+/// Where the node's chain data comes from (SL-26): the shop's own Bitcoin
+/// Core over RPC, or the compact-filter watcher on the counter's peer layer.
+#[derive(Debug, Clone)]
+pub enum ChainSource {
+    /// The shop's Bitcoin Core: blocks, fee rates and sending transactions.
+    Core(CoreRpc),
+    /// The filter watcher: blocks come from peers whose filters matched, and
+    /// transactions go out through the same peers. No fee source is behind it
+    /// yet, so the fee rates stay at their fixed values.
+    Filters(FilterConfig),
+}
 
 /// Where Bitcoin Core's RPC is, and how to log in.
 #[derive(Debug, Clone)]
@@ -60,10 +75,10 @@ fn base64(input: &[u8]) -> String {
     out
 }
 
-/// The seam for the compact-filter watcher (stage 2): what it is told of the
-/// transactions and outputs the node wants to see. A watcher that fetches
-/// only the blocks its filters match needs these; Bitcoin Core's whole
-/// blocks do not.
+/// The seam for the compact-filter watcher ([`crate::filters::FilterQueue`]):
+/// what it is told of the transactions and outputs the node wants to see. A
+/// watcher that fetches only the blocks its filters match needs these;
+/// Bitcoin Core's whole blocks do not.
 pub trait FilterWatcher: Send + Sync {
     /// A transaction with this output script is of interest.
     fn register_tx(&self, txid: &Txid, script_pubkey: &Script);
@@ -99,11 +114,21 @@ impl Filter for ChainFilter {
     }
 }
 
-/// Sends transactions through Core's `sendrawtransaction`.
+/// Sends transactions through Core's `sendrawtransaction`, or, with the filter
+/// watcher, through the peers the watcher is connected to.
 pub struct CoreBroadcaster {
-    client: Arc<RpcClient>,
-    handle: tokio::runtime::Handle,
+    via: Via,
     logger: Arc<Logger>,
+}
+
+enum Via {
+    Core {
+        client: Arc<RpcClient>,
+        handle: tokio::runtime::Handle,
+    },
+    /// The raw transaction goes to the watcher's thread, which gives it to
+    /// the driver.
+    Peers(Mutex<Sender<Vec<u8>>>),
 }
 
 impl CoreBroadcaster {
@@ -113,8 +138,14 @@ impl CoreBroadcaster {
         logger: Arc<Logger>,
     ) -> Self {
         Self {
-            client,
-            handle,
+            via: Via::Core { client, handle },
+            logger,
+        }
+    }
+
+    pub(crate) fn through_peers(sender: Sender<Vec<u8>>, logger: Arc<Logger>) -> Self {
+        Self {
+            via: Via::Peers(Mutex::new(sender)),
             logger,
         }
     }
@@ -122,22 +153,40 @@ impl CoreBroadcaster {
 
 impl BroadcasterInterface for CoreBroadcaster {
     fn broadcast_transactions(&self, txs: &[&Transaction]) {
-        for tx in txs {
-            let (client, logger) = (Arc::clone(&self.client), Arc::clone(&self.logger));
-            let hex = serialize_hex(*tx);
-            let txid = tx.compute_txid();
-            self.handle.spawn(async move {
-                let params = [serde_json::json!(hex)];
-                let result = client
-                    .call_method::<serde_json::Value>("sendrawtransaction", &params)
-                    .await;
-                match result {
-                    Ok(_) => logger.line(Level::Info, &format!("broadcast {txid}")),
-                    // A transaction that is already known, or that double-spends one,
-                    // is not a failure the library needs told about.
-                    Err(e) => logger.line(Level::Debug, &format!("broadcast {txid}: {e}")),
+        match &self.via {
+            Via::Core { client, handle } => {
+                for tx in txs {
+                    let (client, logger) = (Arc::clone(client), Arc::clone(&self.logger));
+                    let hex = serialize_hex(*tx);
+                    let txid = tx.compute_txid();
+                    handle.spawn(async move {
+                        let params = [serde_json::json!(hex)];
+                        let result = client
+                            .call_method::<serde_json::Value>("sendrawtransaction", &params)
+                            .await;
+                        match result {
+                            Ok(_) => logger.line(Level::Info, &format!("broadcast {txid}")),
+                            // A transaction that is already known, or that double-spends one,
+                            // is not a failure the library needs told about.
+                            Err(e) => logger.line(Level::Debug, &format!("broadcast {txid}: {e}")),
+                        }
+                    });
                 }
-            });
+            }
+            Via::Peers(sender) => {
+                let sender = sender.lock().unwrap();
+                for tx in txs {
+                    let txid = tx.compute_txid();
+                    match sender.send(bitcoin::consensus::encode::serialize(*tx)) {
+                        Ok(()) => self
+                            .logger
+                            .line(Level::Info, &format!("broadcast {txid} to peers")),
+                        Err(_) => self
+                            .logger
+                            .line(Level::Debug, &format!("broadcast {txid}: watcher stopped")),
+                    }
+                }
+            }
         }
     }
 }

@@ -5,10 +5,15 @@
 //! time, so the node id is the same every time. One command per connection on
 //! 127.0.0.1; the reply ends when the connection closes.
 //!
-//! `shop_regtest ctl=<port> data=<dir> rpc=<port> user=<u> pass=<p>
+//! `shop_regtest ctl=<port> data=<dir> [rpc=<port> user=<u> pass=<p>]
 //!  provider_id=<pubkey> provider_addr=<host:port> device=<port>
 //!  [start_from=newer|local|device] [max_fee_msat=<n>] [index=<n>]
-//!  [sweep_index=<n>] [wallet=<description>]`
+//!  [sweep_index=<n>] [wallet=<description>] [chain=filters p2p=<port>]
+//!  [tor=<host:port>]`
+//!
+//! With `chain=filters` the node reads the chain from the peer at
+//! `127.0.0.1:<p2p>` through compact filters, in `<data>/chain`, and uses no
+//! RPC. With `tor=` the provider is reached through that SOCKS5 proxy only.
 //!
 //! The shop's pinned wallet is a single-key wallet made from the same master
 //! key (account 0), unless `wallet=` gives a description. The node derives
@@ -17,6 +22,7 @@
 //! Commands: `nodeid`, `status`, `quote <sats>`, `invoice <sats>`,
 //! `invoice_capped <sats> <max_fee_msat>`, `paid`, `ack <hash>`,
 //! `sweep <index> <sats>`, `sweep_index <index>`, `address <index>`,
+//! `confirmations` (the funding transaction's, per channel),
 //! `descriptor`, `close <index>`, `tracked`, `stop`.
 //!
 //! `invoice_capped` records a lower maximum for the provider's skim than the
@@ -33,11 +39,13 @@ use bitcoin::{Network, NetworkKind};
 use openbmt_core::wallet::descriptor_checksum;
 use openbmt_core::wallet_single::SingleKeyWallet;
 use openbmt_lightning_node::bip85::node_seed;
-use openbmt_lightning_node::chain::CoreRpc;
+use openbmt_lightning_node::chain::{ChainSource, CoreRpc};
 use openbmt_lightning_node::device_tcp::TcpDevice;
+use openbmt_lightning_node::filters::FilterConfig;
 use openbmt_lightning_node::node::{Node, NodeConfig, Receive};
 use openbmt_lightning_node::provider::ProviderConfig;
 use openbmt_lightning_node::state::StartFrom;
+use openbmt_net_io::DriverConfig;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -68,12 +76,23 @@ async fn main() {
         network: Network::Regtest,
         seed: node_seed(&master, index).unwrap(),
         data_dir: get("data").into(),
-        core: CoreRpc {
-            host: "127.0.0.1".into(),
-            port: get("rpc").parse().unwrap(),
-            user: get("user"),
-            password: get("pass"),
+        chain: if args.get("chain").map(String::as_str) == Some("filters") {
+            let mut driver = DriverConfig::new(Network::Regtest, 0);
+            driver.allow_local = true;
+            driver.fixed_peers = vec![format!("127.0.0.1:{}", get("p2p")).parse().unwrap()];
+            ChainSource::Filters(FilterConfig {
+                dir: std::path::PathBuf::from(get("data")).join("chain"),
+                driver,
+            })
+        } else {
+            ChainSource::Core(CoreRpc {
+                host: "127.0.0.1".into(),
+                port: get("rpc").parse().unwrap(),
+                user: get("user"),
+                password: get("pass"),
+            })
         },
+        tor: args.get("tor").map(|v| v.parse().unwrap()),
         device: Arc::new(TcpDevice::new(
             format!("127.0.0.1:{}", get("device")).parse().unwrap(),
         )),
@@ -155,6 +174,7 @@ async fn handle(node: &Node, p: &[&str]) -> String {
                 s.room_msat
             )
         }
+        "confirmations" => format!("{:?}", node.funding_confirmations()),
         "quote" => describe(&node.quote(sats(1) * 1000).await),
         "invoice" | "invoice_capped" => {
             let amount_msat = sats(1) * 1000;
