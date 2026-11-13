@@ -6,9 +6,10 @@ desk's addresses, credits payments at the confirmation depth, takes them
 back when their block leaves the chain and queues returns on the owner's
 queue (`crates/openbmt-owner-node/src/requests.rs`); the owner library
 carries them to the app as ops 216 to 226 and adds them to the books
-(RQ-32). The owner app has no screens for them yet. A `bitcoin:` link
-pasted or scanned as a return address is read with the BIP 321 reader of
-`docs/URI-RULES.md`, and only its address is used (RQ-28).
+(RQ-32). The owner app has the screens of RQ-35 with placeholder words
+(RQ-36, `RequestWords`). A `bitcoin:` link pasted or scanned as a return
+address is read with the BIP 321 reader of `docs/URI-RULES.md`, and only
+its address is used (RQ-28).
 
 A shop often needs to be paid by someone who is not at the till: a deposit
 for a booking, an invoice to a business, a stall fee, a customer abroad, a

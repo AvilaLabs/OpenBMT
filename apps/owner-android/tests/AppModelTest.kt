@@ -84,6 +84,14 @@ import org.openbmt.owner.SettingsEditArgs
 import org.openbmt.owner.SettingsHeld
 import org.openbmt.owner.SettingsPreview
 import org.openbmt.owner.SetupFields
+import org.openbmt.owner.RequestDay
+import org.openbmt.owner.RequestEvery
+import org.openbmt.owner.RequestList
+import org.openbmt.owner.RequestPriceIn
+import org.openbmt.owner.RequestRate
+import org.openbmt.owner.RequestRow
+import org.openbmt.owner.RequestShared
+import org.openbmt.owner.RequestState
 import org.openbmt.owner.ShopCurrency
 import org.openbmt.owner.WaitingCounter
 import org.openbmt.owner.StarterChangeKind
@@ -184,7 +192,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + OwnPairWords.all().size + 1 + AppWords.keyMapAll().size + 1 + StarterWords.all().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's, of the key map's and of the starter wallet's")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + OwnPairWords.all().size + 1 + AppWords.keyMapAll().size + 1 + StarterWords.all().size + 1 + RequestWords.all().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's, of the key map's, of the starter wallet's and of the payment requests'")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -3987,6 +3995,7 @@ object AppModelTest {
         addCounterOnDevicesTests()
         floatTests()
         floatWiringTests()
+        requestTests()
         ruleTests(rulesMd)
         println("AppModelTest (owner): $count checks passed")
     }
@@ -4152,6 +4161,155 @@ object AppModelTest {
         ok(source("src/android/Controller.kt").contains("OwnerNode.start(floatWatching(start))"), "the node is started with the float's watch")
         ok(screens.contains("sealed.wipe()") && screens.contains("FloatWords.rowTitle)"), "the data key is overwritten when the seal cannot be kept, and the unlock prompt is the float's own")
 
+    // ---- the owner's payment requests (docs/REQUEST-RULES.md, RQ-35, RQ-36) ------------------------------------------
+
+    private fun day(y: Int, m: Int, d: Int) = RequestDay(y.toLong(), m.toLong(), d.toLong())
+
+    private fun row(number: Long, due: RequestDay, repeats: Boolean = false, note: String = "Booking") =
+        RequestRow(number, note, 5_000, due, "No. $number", "Waiting for payment", emptyList(), repeats)
+
+    private fun requestTests() {
+        // Words (RQ-36): every text is a placeholder named for its rule, listed under its own key, and shows its name.
+        val words = RequestWords.all()
+        ok(words.isNotEmpty() && words.map { it.first }.toSet().size == words.size, "each request text is listed once")
+        for ((k, n) in words) {
+            ok(Regex("RQ_\\d{2}_[A-Z_]+").matches(k) && n == "WORDS_NEEDED_$k", "$n is named for its rule and is its own key")
+            val w = RequestWords.said(n)
+            ok(RequestWords.isPlaceholder(w) && w.heading == n && w.what == n && w.next == n, "$n shows its name")
+            ok(RequestWords.refusal(n).tone == Tones.STOP, "$n as a refusal is a stop")
+        }
+        ok(words.none { (_, n) -> !n.startsWith("WORDS_NEEDED_RQ_") }, "no request text is written yet, and none is written by the app")
+        val md = AppWords.screensMarkdown()
+        ok(words.all { (k, _) -> md.contains("| ${k} |") }, "the screens list has every request text")
+        // The app writes no sentence of its own on these screens: every string a person reads is a RequestWords name or the library's words.
+        val screens = source("src/android/RequestScreens.kt")
+        ok(!Regex("(ui\\.(text|primary|button|danger)|heading|para|line|label|textInput|numberInput)\\(\"[A-Za-z]").containsMatchIn(screens), "RequestScreens.kt has no sentence of its own")
+        ok(!Regex("RowItem\\(\"").containsMatchIn(screens) && !Regex("chips\\(listOf\\(\"").containsMatchIn(screens), "no row or pill is written in the file")
+
+        // The list (RQ-21, RQ-25): the parts in their order, the empty ones left out, each by due date and then number.
+        val list = RequestList(
+            readyToSend = listOf(row(9, day(2026, 12, 1))),
+            overdue = listOf(row(4, day(2026, 11, 10)), row(2, day(2026, 11, 1)), row(3, day(2026, 11, 1))),
+            dueSoon = listOf(row(6, day(2026, 11, 15)), row(5, day(2026, 11, 14))),
+            waiting = listOf(row(8, day(2027, 1, 1)), row(7, day(2026, 12, 20))),
+            finished = listOf(row(12, day(2026, 10, 1)), row(1, day(2026, 9, 1))),
+            overdueRow = "3 overdue",
+        )
+        val sections = RequestModel.sections(list)
+        ok(sections.map { it.part } == listOf(RequestPart.ReadyToSend, RequestPart.Overdue, RequestPart.DueSoon, RequestPart.Waiting, RequestPart.Finished), "RQ-21: ready to send, overdue, due soon, waiting, then the ones that ended")
+        ok(sections[1].rows.map { it.number } == listOf(2L, 3L, 4L), "RQ-21: the newest due date last, equal dates by number")
+        ok(sections[2].rows.map { it.number } == listOf(5L, 6L) && sections[3].rows.map { it.number } == listOf(7L, 8L), "RQ-21: each part by due date")
+        ok(sections[4].rows.map { it.number } == listOf(12L, 1L), "the ones that ended keep the library's order, newest first")
+        ok(RequestModel.sections(RequestList(emptyList(), emptyList(), emptyList(), listOf(row(1, day(2026, 12, 1))), emptyList(), null)).map { it.part } == listOf(RequestPart.Waiting), "a part with no rows is left out")
+        ok(RequestModel.sections(RequestList(emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), null)).isEmpty(), "no requests, no part")
+        ok(RequestModel.dayKey(day(2026, 11, 13)) == 20_261_113L, "a day sorts as a number")
+        ok(RequestModel.find(list, 5)?.first == RequestPart.DueSoon && RequestModel.find(list, 12)?.first == RequestPart.Finished && RequestModel.find(list, 99) == null, "a request is found in its part")
+        ok(RequestModel.partTitle(RequestPart.Overdue) == RequestWords.partOverdue && RequestModel.partTitle(RequestPart.DueSoon) == RequestWords.partDueSoon && RequestModel.partTitle(RequestPart.Waiting) == RequestWords.partWaiting && RequestModel.partTitle(RequestPart.ReadyToSend) == RequestWords.partReady, "each part has its words")
+
+        // States and the page (RQ-14, RQ-16, RQ-19, RQ-20, RQ-22, RQ-25, RQ-26).
+        val open = RequestModel.actions(RequestPart.Waiting, row(1, day(2026, 12, 1)))
+        ok(open.share && !open.sendAgain && open.cancel && open.close && open.countPaid && open.returnMoney && !open.stopRepeating, "an open request can be shared, ended and returned from")
+        val late = RequestModel.actions(RequestPart.Overdue, row(1, day(2026, 11, 1), repeats = true))
+        ok(late.sendAgain && late.stopRepeating && late.share, "an overdue request is sent again, and a series can be stopped")
+        val ended = RequestModel.actions(RequestPart.Finished, row(1, day(2026, 11, 1), repeats = true))
+        ok(!ended.share && !ended.cancel && !ended.close && !ended.countPaid && ended.returnMoney && ended.stopRepeating, "an ended request is not shared or ended again, but money can be returned from it and its series stopped")
+        ok(RequestModel.shareLabel(RequestPart.Overdue) == RequestWords.sendAgain && RequestModel.shareLabel(RequestPart.Waiting) == RequestWords.shareAgain, "RQ-22, RQ-14: Send again for an overdue request, Share again for the rest")
+        ok(RequestModel.isOpen(RequestPart.ReadyToSend) && RequestModel.isOpen(RequestPart.Overdue) && !RequestModel.isOpen(RequestPart.Finished), "which parts are open")
+
+        // Home (RQ-01, RQ-22).
+        ok(RequestModel.offered(true) && !RequestModel.offered(false), "RQ-01: requests are offered to a shop with its own wallet only")
+        val withOverdue = RequestState(null, true, 4, 3, 1, "3 overdue", 0, 0, 0, null)
+        val without = RequestState(null, true, 4, 0, 0, null, 0, 0, 0, null)
+        ok(RequestModel.homeSub(withOverdue) == "3 overdue" && RequestModel.homeSub(without) == RequestWords.homeRowSub, "RQ-22: Home shows the library's overdue line, else the words for none")
+
+        // The form (RQ-05 to RQ-09, RQ-24).
+        val today = java.time.LocalDate.of(2026, 11, 13)
+        ok(RequestForm.note("Deposit, room 4") == "Deposit, room 4" && RequestForm.note("  Deposit  ") == "Deposit", "RQ-06: a note is kept, the ends trimmed")
+        ok(RequestForm.note("") == null && RequestForm.note("   ") == null && RequestForm.note("a\nb") == null && RequestForm.note("a\u0007") == null, "RQ-06: an empty note and a control character are refused")
+        ok(RequestForm.note("x".repeat(64)) != null && RequestForm.note("x".repeat(65)) == null, "RQ-06: at most 64 characters")
+        ok(RequestForm.note("\uD83D\uDE00".repeat(64)) != null && RequestForm.note("\uD83D\uDE00".repeat(65)) == null, "RQ-06: characters, not code units")
+        ok(RequestForm.amount("50000", RequestPriceIn.Bitcoin, ShopCurrency.Usd) == 50_000L && RequestForm.amount("50,000", RequestPriceIn.Bitcoin, ShopCurrency.Usd) == 50_000L, "RQ-08: an amount in satoshis")
+        ok(RequestForm.amount("0", RequestPriceIn.Bitcoin, ShopCurrency.Usd) == null && RequestForm.amount("1.5", RequestPriceIn.Bitcoin, ShopCurrency.Usd) == null && RequestForm.amount("", RequestPriceIn.Bitcoin, ShopCurrency.Usd) == null, "RQ-08: zero, a fraction of a satoshi and nothing are refused")
+        ok(RequestForm.amount("2100000000000000", RequestPriceIn.Bitcoin, ShopCurrency.Usd) != null && RequestForm.amount("2100000000000001", RequestPriceIn.Bitcoin, ShopCurrency.Usd) == null, "RQ-08: at most 21,000,000 bitcoin")
+        ok(RequestForm.amount("12.34", RequestPriceIn.ShopCurrency, ShopCurrency.Usd) == 1_234L && RequestForm.amount("12", RequestPriceIn.ShopCurrency, ShopCurrency.Usd) == 1_200L && RequestForm.amount("12.3", RequestPriceIn.ShopCurrency, ShopCurrency.Usd) == 1_230L, "RQ-07: an amount in the shop's currency, in minor units")
+        ok(RequestForm.amount("1500", RequestPriceIn.ShopCurrency, ShopCurrency.Jpy) == 1_500L && RequestForm.amount("1500.5", RequestPriceIn.ShopCurrency, ShopCurrency.Jpy) == null, "RQ-07: yen have no digits after the point")
+        ok(RequestForm.amount("12.345", RequestPriceIn.ShopCurrency, ShopCurrency.Usd) == null && RequestForm.amount("1.2.3", RequestPriceIn.ShopCurrency, ShopCurrency.Usd) == null && RequestForm.amount("abc", RequestPriceIn.ShopCurrency, ShopCurrency.Usd) == null, "RQ-07: a third digit, two points and letters are refused")
+        ok(RequestForm.amount("1000000", RequestPriceIn.ShopCurrency, ShopCurrency.Usd) == 100_000_000L && RequestForm.amount("1000000.01", RequestPriceIn.ShopCurrency, ShopCurrency.Usd) == null && RequestForm.amount("0", RequestPriceIn.ShopCurrency, ShopCurrency.Usd) == null, "RQ-08: at most 1,000,000 units of the currency")
+        ok(RequestForm.amount("1000000", RequestPriceIn.ShopCurrency, ShopCurrency.Jpy) == 1_000_000L && RequestForm.amount("1000001", RequestPriceIn.ShopCurrency, ShopCurrency.Jpy) == null, "RQ-08: the limit of a currency with no digits after the point")
+        ok(RequestForm.amount("5", RequestPriceIn.ShopCurrency, ShopCurrency.Sats) == null && RequestForm.pricings(ShopCurrency.Sats) == listOf(RequestPriceIn.Bitcoin) && RequestForm.pricings(ShopCurrency.Eur) == listOf(RequestPriceIn.Bitcoin, RequestPriceIn.ShopCurrency), "RQ-07: Bitcoin Standard has only bitcoin")
+        ok(RequestForm.day("2026-12-01") == java.time.LocalDate.of(2026, 12, 1) && RequestForm.day("2026-02-30") == null && RequestForm.day("1 Dec") == null && RequestForm.day("2026-1-1") == null && RequestForm.day("") == null, "RQ-09: a day is written 2026-12-01 and is a day of the calendar")
+        ok(RequestForm.inRange(today, today) && RequestForm.inRange(today.plusDays(366), today) && !RequestForm.inRange(today.plusDays(367), today) && !RequestForm.inRange(today.minusDays(1), today), "RQ-09: from the day it is made to 366 days later")
+        ok(RequestForm.dayText(RequestForm.asDay(today)) == "2026-11-13", "a day goes to the call and back")
+        fun draft(note: String = "Deposit", amount: String = "50000", priceIn: RequestPriceIn = RequestPriceIn.Bitcoin, due: String = "2026-12-01", repeat: RequestEvery? = null) = RequestDraft(note, amount, priceIn, due, repeat)
+        val made = RequestForm.check(draft(repeat = RequestEvery.Month), ShopCurrency.Usd, today) as Form.Ok
+        ok(made.value.note == "Deposit" && made.value.amount == 50_000L && made.value.priceIn == RequestPriceIn.Bitcoin && RequestForm.dayText(made.value.due) == "2026-12-01" && made.value.repeat == RequestEvery.Month, "RQ-24: a form that is right becomes the arguments, with its repeat")
+        fun refused(f: Form<RequestMake>): String? = (f as? Form.Refused)?.words?.heading
+        ok(refused(RequestForm.check(draft(note = ""), ShopCurrency.Usd, today)) == RequestWords.noteRefused, "RQ-06: no note is refused with the note's words")
+        ok(refused(RequestForm.check(draft(amount = "x"), ShopCurrency.Usd, today)) == RequestWords.amountRefused, "RQ-08: an amount that is not one is refused with the amount's words")
+        ok(refused(RequestForm.check(draft(priceIn = RequestPriceIn.ShopCurrency), ShopCurrency.Sats, today)) == RequestWords.amountRefused, "RQ-07: a shop in Bitcoin Standard cannot price in its currency")
+        ok(refused(RequestForm.check(draft(due = "soon"), ShopCurrency.Usd, today)) == RequestWords.dueRefused, "RQ-09: a due date that is not a day is refused")
+        ok(refused(RequestForm.check(draft(due = "2026-11-12"), ShopCurrency.Usd, today)) == RequestWords.dueRange && refused(RequestForm.check(draft(due = "2027-12-01"), ShopCurrency.Usd, today)) == RequestWords.dueRange, "RQ-09: a day before today or more than 366 days on is refused")
+        ok(RequestForm.check(draft(due = "2027-11-14"), ShopCurrency.Usd, today) is Form.Ok && RequestForm.check(draft(due = "2027-11-15"), ShopCurrency.Usd, today) is Form.Refused, "RQ-09: the 366th day is the last")
+        ok(RequestModel.today(1_700_000_000L, 0).toString() == "2023-11-14" && RequestModel.today(1_700_000_000L, 480).toString() == "2023-11-15" && RequestModel.today(1_700_000_000L, -300).toString() == "2023-11-14", "RQ-09: the day in the shop's time zone")
+        ok(RequestModel.offsetMinutes(-18_000_000) == -300 && RequestModel.ask(5, 3_600_000, null).offsetMinutes == 60, "the offset goes to the library in minutes")
+        ok(RequestModel.money(ShopCurrency.Usd, 123_450) == "1,234.50 USD" && RequestModel.money(ShopCurrency.Jpy, 1_500) == "1,500 JPY" && RequestModel.money(ShopCurrency.Usd, 5) == "0.05 USD", "an amount in the currency, to be read")
+
+        // A return (RQ-26, RQ-28): the shape only.
+        val back = ReturnForm.check(ReturnDraft(false, "25,000", " bc1qexample "), ShopCurrency.Usd) as Form.Ok
+        ok(!back.value.inCurrency && back.value.amount == 25_000L && back.value.address == "bc1qexample", "a return in satoshis, the address trimmed")
+        val cur = ReturnForm.check(ReturnDraft(true, "10.50", "bc1q"), ShopCurrency.Usd) as Form.Ok
+        ok(cur.value.inCurrency && cur.value.amount == 1_050L, "a return in the currency, in minor units")
+        ok(!(ReturnForm.check(ReturnDraft(true, "100", "bc1q"), ShopCurrency.Sats) as Form.Ok).value.inCurrency, "Bitcoin Standard returns in satoshis")
+        ok((ReturnForm.check(ReturnDraft(false, "0", "bc1q"), ShopCurrency.Usd) as Form.Refused).words.heading == RequestWords.returnAmountRefused, "no amount, no return")
+        ok((ReturnForm.check(ReturnDraft(false, "5", "  "), ShopCurrency.Usd) as Form.Refused).words.heading == RequestWords.addressNeeded, "RQ-27: the address is asked for, never guessed")
+        ok(ReturnForm.amount(ReturnDraft(false, "5", ""), ShopCurrency.Usd) is Form.Ok, "the line that asks for an address needs the amount only")
+
+        // Sharing (RQ-13): the line, then the link, and nothing else.
+        val shared = RequestShared(3, 5_000, 6_100, 91_000L, 1_700_086_400L, "bc1qaddr", "bitcoin:bc1qaddr?amount=0.000061&label=Shop", "Shop asks for 50.00 USD. Request No. 3, due 2026-12-01.")
+        ok(RequestShare.text(shared) == "Shop asks for 50.00 USD. Request No. 3, due 2026-12-01.\nbitcoin:bc1qaddr?amount=0.000061&label=Shop", "RQ-13: the text for the sheet is the line and the link")
+        ok(RequestShare.owed(shared, ShopCurrency.Usd) == "50.00 USD" && RequestShare.owed(RequestShared(3, 5_000, 5_000, null, null, "a", "l", "x"), ShopCurrency.Usd) == "5,000 sats", "the quote in the currency, or in satoshis")
+        ok(RequestShare.until(shared) != null && RequestShare.until(RequestShared(3, 5_000, 5_000, null, null, "a", "l", "x")) == null, "only a quote in the currency runs out (RQ-12)")
+
+        // The rate for a request in the currency (RQ-12): the library's, with the age of the oldest reply.
+        val port = FakePrice(listOf("kraken", "coinbase"))
+        var tick = 1_000L
+        val rate = RequestRates.fetch(ShopCurrency.Eur, port, { RateFetch.Body("{}".toByteArray()) }) { tick++ }
+        ok(rate != null && rate.perBtc == 9_100_000L && rate.source == "med.kc" && port.asked == "EUR" && rate.fetchedAt == port.got.minOf { it.fetchedAt }, "the rate is the library's, in minor units, as old as the oldest reply")
+        ok(RequestRates.fetch(ShopCurrency.Sats, port, { RateFetch.NotAnswered }) { 1L } == null, "a shop in Bitcoin Standard asks for no rate")
+        ok(RequestRates.fetch(ShopCurrency.Eur, FakePrice(listOf("kraken", "coinbase"), refuse = true), { RateFetch.Body("{}".toByteArray()) }) { 1L } == null && RequestRates.fetch(ShopCurrency.Eur, FakePrice(listOf("kraken", "coinbase")), { RateFetch.NotAnswered }) { 1L } == null, "sources that disagree or do not answer give no rate; the library then refuses with the words of a stale rate")
+        val cached = RequestRate(9_100_000L, "med.kc", 1_000L)
+        ok(RequestRates.usable(cached, 1_100L) === cached && RequestRates.usable(cached, 1_121L) == null && RequestRates.usable(cached, 999L) == null && RequestRates.usable(null, 5L) == null, "a rate is used again for two minutes")
+
+        // RQ-12: the quote is written before anything is shared. The page's share calls the library first; the screen of the link and the sheet follow.
+        val share = screens.substringAfter("private fun Controller.shareRequest(").substringBefore("/** The quote that was written")
+        ok(share.indexOf("n.requestShare(") in 0 until share.indexOf("showShare(") && share.indexOf("n.requestShare(") < share.indexOf("openShareSheet("), "RQ-12: the quote is written before the screen of the link and the sheet")
+        ok(share.indexOf("if (shared != null)") in share.indexOf("n.requestShare(") until share.indexOf("showShare("), "RQ-12: nothing is shared when the quote was refused")
+        ok(occurs(screens, "n.requestShare(") == 1 && occurs(screens, "openShareSheet(") == 4 && occurs(screens, "RequestShare.text(") == 2, "the link is given only from a quote that was just written")
+        ok(screens.substringAfter("private fun Controller.showShare(").substringBefore("/** RQ-13: gives").contains("RequestShare.text(shared)") && !screens.substringAfter("private fun Controller.showShare(").substringBefore("/** RQ-13: gives").contains("requestShare("), "the screen of the link only gives what the quote made")
+        ok(screens.indexOf("withRate(currency, true, msg)") in screens.indexOf("private fun Controller.shareRequest(") until screens.indexOf("n.requestShare("), "RQ-12: the rate is fetched first for a request in the currency")
+        ok(share.contains("requestAsk(rate)"), "the quote is made at the rate of the moment (RQ-14)")
+        // RQ-22: Send again makes a fresh quote and opens the sheet at once.
+        ok(share.contains("if (openNow) openShareSheet(RequestShare.text(shared))") && screens.contains("shareRequest(n, row.number, a.sendAgain, msg)"), "RQ-22: Send again opens the sheet after its quote")
+        // RQ-13: the app sends nothing itself. The one way out is Android's share sheet, as text, through a chooser.
+        val sheet = screens.substringAfter("private fun Controller.openShareSheet(").substringBefore("// ---- returning money")
+        ok(occurs(screens, "startActivity(") == 1 && sheet.contains("Intent.ACTION_SEND") && sheet.contains("setType(\"text/plain\")") && sheet.contains("Intent.createChooser("), "RQ-13: the link goes to the share sheet as text through a chooser")
+        for (bad in listOf("HttpURLConnection", "java.net", "Socket", "SmsManager", "sendTextMessage", "sendBroadcast", "ACTION_SENDTO", "ACTION_SEND_MULTIPLE", "mailto", "ACTION_VIEW", "Uri.parse", "EXTRA_EMAIL", "EXTRA_PHONE", "EXTRA_STREAM")) ok(!screens.contains(bad), "RQ-13: RequestScreens.kt has no $bad")
+        ok(occurs(screens, "Intent.ACTION_SEND") == 1, "RQ-13: one kind of intent is made")
+        ok(screens.contains("n.requestReturnAsk(") && screens.substringAfter("n.requestReturnAsk(").take(200).contains("?.let { openShareSheet(it) }"), "RQ-27: the line that asks for an address goes to the same sheet")
+        // The return steps (RQ-27 to RQ-29): the address is never taken from a payment, and the returns are paid in the existing spend.
+        ok(screens.contains("n.requestAddReturn(") && screens.contains("showSpend()") && !screens.contains("payment.address") && !screens.contains("from.address"), "RQ-29: a return is queued, and paying the returns is the spend of the queue")
+        ok(screens.substringAfter("private fun Controller.scanReturnAddress(").substringBefore("/** RQ-28, RQ-29").contains("draft.address"), "RQ-28: a scan fills the field and nothing else")
+        ok(screens.contains("added.groups") && screens.contains("RequestWords.checkTitle"), "RQ-28: the accepted address is shown in groups, to compare")
+        // RQ-01 and the wiring on Home.
+        val home = source("src/android/Screens.kt").substringAfter("internal fun Controller.showHome()").substringBefore("/** The screen a row of the waiting card opens. */")
+        ok(home.contains("if (RequestModel.offered(ownStore.hasWallet())) footer.add(ui.button(RequestWords.homeButton) { showRequestForm() })") && home.contains("views.addAll(requestsHomeViews(n))"), "RQ-35: Request a payment is on Home for a shop with its own wallet, and its row")
+        ok(screens.contains("if (!RequestModel.offered(ownStore.hasWallet())) return emptyList()"), "RQ-01: a shop paired through the Key app sees no request on Home")
+        ok(screens.indexOf("n.requestRepeats(ask)") in 0 until screens.indexOf("n.requestState(ask)") && screens.contains("requestsChecked !== n"), "RQ-25: the due repeats are made once for each start of the node, before the state is read")
+        ok(screens.contains("ui.words(e.sayWords())") || source("src/android/Screens.kt").contains("ui.words(e.sayWords())"), "the library's refusal words are shown as they arrive")
+        ok(screens.contains("state.off?.let { return listOf(ui.words(it.say())) }"), "RQ-31: a book that cannot be read shows the library's words and no row")
+        ok(screens.contains("RequestWords.cancelYes") && screens.contains("EndKind.CountPaid -> n.requestCountPaid(ask, number)"), "RQ-16, RQ-19, RQ-20: ending a request asks first")
+        // The code as a picture needs a provider in the manifest, which OA-03 and OA-89 forbid: it is not built here.
+        ok(!source("AndroidManifest.xml").contains("<provider") && !screens.contains("ACTION_SEND\").setType(\"image"), "the manifest is as OA-03 and OA-89 say, and no picture is shared")
     }
 
     private fun floatTests() {

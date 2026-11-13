@@ -112,7 +112,7 @@ object PriceModel {
         }
     }
 
-    private fun ask(sources: List<PriceSource>, fetcher: RateFetcher, clockSecs: () -> Long): List<PriceReply> {
+    internal fun ask(sources: List<PriceSource>, fetcher: RateFetcher, clockSecs: () -> Long): List<PriceReply> {
         val replies = java.util.Collections.synchronizedList(ArrayList<PriceReply>())
         val threads = sources.map { source ->
             Thread {

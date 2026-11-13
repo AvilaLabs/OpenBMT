@@ -54,7 +54,10 @@ internal fun Controller.showHome(): Unit = withNode { n ->
     if (starterGate(n)) return@withNode
     val content = Slot(act, 14)
     homeTint = null
-    screen("Owner", listOf(content), listOf(ui.primary("Spend") { showSpend() }), logo = true)
+    // RQ-35: "Request a payment" is on Home for a shop paid to its own wallet (RQ-01).
+    val footer = arrayListOf(ui.primary("Spend") { showSpend() })
+    if (RequestModel.offered(ownStore.hasWallet())) footer.add(ui.button(RequestWords.homeButton) { showRequestForm() })
+    screen("Owner", listOf(content), footer, logo = true)
     tick = tick@{
         try {
             val s = n.status()
@@ -95,6 +98,7 @@ internal fun Controller.showHome(): Unit = withNode { n ->
                 Triple(r.title, r.count, { open(r.title) })
             }
             waitingCard(rows)?.let { views.add(it) }
+            views.addAll(requestsHomeViews(n))
             val groups = listOf(
                 GroupRow(OwnerIcon.Kind.Money, false, OwnerLook.MONEY, OwnerLook.moneySub(inProgress, OwnerModel.sendsLine(inProgress))) { showMoney() },
                 GroupRow(OwnerIcon.Kind.Devices, false, OwnerLook.DEVICES, OwnerModel.linkLine(link, link?.counters?.size ?: 0)) { showDevices() },

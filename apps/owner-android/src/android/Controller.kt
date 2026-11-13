@@ -129,6 +129,10 @@ class Controller(internal val act: MainActivity) {
     /** The tint of the network status on home as it was last drawn, so that a change of tone fades (OA-91). */
     internal var homeTint: Int? = null
 
+    /** The node whose due repeats of payment requests were made (RQ-25), and the newest rate fetched for a request (RQ-12). */
+    internal var requestsChecked: OwnerNode? = null
+    internal var requestRate: org.openbmt.owner.RequestRate? = null
+
     // The till (OA-16 to OA-19): its sealed token, how its last read went, and the screen's call for a read now.
     internal val posTokens = PosTokenQueue(PosTokenStore(dir, KeystoreSealer(AppFiles.POS_KEY_ALIAS))) { main.post(it) }
     internal val tillEpoch = TillEpoch()
