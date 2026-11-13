@@ -91,6 +91,32 @@ fn event(
     None
 }
 
+/// As [`event`], and also whether a note holding `note` was among the app
+/// events read while waiting, since those are read to keep the driver going.
+fn event_noting(
+    handle: &Handle,
+    secs: u64,
+    want: impl Fn(&NodeOnlyInput) -> bool,
+    note: &str,
+) -> (Option<NodeOnlyInput>, bool) {
+    let mut noted = false;
+    let end = Instant::now() + Duration::from_secs(secs);
+    while let Some(left) = end.checked_duration_since(Instant::now()) {
+        while let Ok(e) = handle.events().try_recv() {
+            noted |= matches!(&e, AppEvent::Note(n) if n.contains(note));
+        }
+        match handle
+            .own_node_events()
+            .recv_timeout(left.min(Duration::from_millis(100)))
+        {
+            Ok(OwnNodeEvent::NodeOnly(input)) if want(&input) => return (Some(input), noted),
+            Ok(OwnNodeEvent::State(_)) => panic!("a State event with the mode on"),
+            _ => {}
+        }
+    }
+    (None, noted)
+}
+
 fn connected(input: &NodeOnlyInput) -> bool {
     input.node.link == OwnNodeLink::Connected && input.fault.is_none()
 }
@@ -435,17 +461,21 @@ fn nr_110_with_light_fallback_the_random_peers_start_with_a_note_and_stop_after_
     let clock = TestClock::at(T0);
     let handle = start(c, MemStorage::default(), net, &clock);
     // The node cannot be used: the random peers run, and the state says so.
-    let input = event(&handle, 10, |i| i.fallback_running).expect("the fallback starts");
+    const START_NOTE: &str = "checking with other nodes";
+    let (input, noted) = event_noting(&handle, 10, |i| i.fallback_running, START_NOTE);
+    let input = input.expect("the fallback starts");
     assert!(input.light_fallback);
     assert!(until(10, || other.accept_count() == 1));
     let health = NodeOnlyTracker::new().check(Some(&input), 0, T0 + 1);
     assert!(matches!(health.line(), NodeOnlyLine::CheckingWithOthers(_)));
-    let notes = wait_for(
-        &handle,
-        5,
-        |e| matches!(e, AppEvent::Note(n) if n.contains("checking with other nodes")),
-    );
-    assert!(notes.is_some(), "the start is said in a note");
+    let noted = noted
+        || wait_for(
+            &handle,
+            5,
+            |e| matches!(e, AppEvent::Note(n) if n.contains(START_NOTE)),
+        )
+        .is_some();
+    assert!(noted, "the start is said in a note");
     // The node comes up; the random peers stay for two minutes more.
     up.store(true, Ordering::SeqCst);
     clock.set(T0 + 10);
