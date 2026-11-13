@@ -377,7 +377,27 @@ pub struct OwnerParts {
     /// SS-43: the wallets the shop pinned before a re-pin, each watched up
     /// to the index its book had reached. Empty for any other shop.
     pub former: Vec<FormerParts>,
+    /// FL-05: the refund float's wallet, watched as a wallet of its own with
+    /// its own coin view. `None` when the shop has no float.
+    pub float: Option<FloatParts>,
 }
+
+/// FL-05: the refund float as the node watches it.
+#[derive(Debug, Clone)]
+pub struct FloatParts {
+    /// The float's public wallet (it holds no key).
+    pub wallet: ImportedWallet,
+    /// One past the highest receive index handed out: the watch goes
+    /// [`GAP`](crate::coins::GAP) past it.
+    pub receive_end: u32,
+    /// One past the highest change index used, watched the same way.
+    pub change_end: u32,
+    /// The height the float was set up at: its view starts there.
+    pub birthday: u32,
+}
+
+/// FL-05: the file of the float's coin view, under the node's folder.
+pub const FLOAT_COINS_FILE: &str = "float-coins.bin";
 
 /// SS-43: a wallet pinned before the re-pin, which the node keeps watching
 /// so that a payment that arrives later is seen.
@@ -389,6 +409,25 @@ pub struct FormerParts {
     pub end: u32,
     /// The file its coin view is kept in, under the node's folder.
     pub file: String,
+}
+
+/// FL-05: what the node's watch of the float says: its checked coins, what
+/// is on its way into it, the tip they are counted from and the next indexes.
+#[derive(Debug, Clone)]
+pub struct FloatCoins {
+    /// The float's coins, as a spend takes them.
+    pub coins: Vec<openbmt_spend::Coin>,
+    /// What the coins that no block holds yet and the payments into the float
+    /// add up to, beyond the confirmed coins, in sats.
+    pub unconfirmed_incoming: u64,
+    /// What the confirmed coins add up to, in sats.
+    pub confirmed: u64,
+    /// The height of the tip the coins are counted from.
+    pub tip: u32,
+    /// One past the highest receive index the watch has seen used.
+    pub receive_next: u32,
+    /// The next change index.
+    pub change_next: u32,
 }
 
 /// SS-43: what a former wallet holds that the node saw.
@@ -405,7 +444,9 @@ pub struct FormerHeld {
 /// A former wallet as the node follows it: its own coin view, apart from the
 /// wallet in force, fed by the same blocks.
 pub(crate) struct FormerWatch {
-    wallet: PinnedWallet,
+    /// The pinned frame of a former wallet; `None` for the refund float,
+    /// whose watch is kept in the same list and is fed by the same blocks.
+    pinned: Option<PinnedWallet>,
     file: String,
     pub(crate) view: CoinView,
     pub(crate) scripts: ScriptSet,
@@ -439,20 +480,54 @@ impl FormerWatch {
         .map_err(NodeError::Files)?;
         let scripts = former_scripts(parts.wallet.wallet(), &view);
         Ok(Self {
-            wallet: parts.wallet,
+            pinned: Some(parts.wallet),
             file: parts.file,
             view,
             scripts,
         })
     }
 
-    pub(crate) fn has_script(&self, script: &ScriptBuf) -> bool {
-        self.scripts.contains_key(script)
+    /// FL-05: the float's watch: its own view from its own birthday, over
+    /// both chains up to [`GAP`] past the highest index used or handed out.
+    fn open_float(dir: &Path, parts: FloatParts, chain: &ChainView) -> Result<Self, NodeError> {
+        let file = FLOAT_COINS_FILE.to_string();
+        let mut view = match fs::read(dir.join(&file)) {
+            Ok(bytes) => CoinView::from_bytes(&bytes)
+                .map_err(|e| NodeError::Files(format!("{file} does not read back: {e}")))?,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => CoinView::new(parts.birthday),
+            Err(e) => return Err(NodeError::Files(format!("{file}: {e}"))),
+        };
+        if let Some((left, fork)) = view.left_while_stopped(|h| chain.hash_at(h)) {
+            view.reorganize(&left, fork, |b| write_file(dir, &file, b))
+                .map_err(|e| NodeError::Files(format!("{file}: {e}")))?;
+        }
+        let through = view.checked();
+        view.watch_plan(parts.receive_end, parts.change_end, through, &[], 0, |b| {
+            write_file(dir, &file, b)
+        })
+        .map_err(NodeError::Files)?;
+        let scripts = former_scripts(&parts.wallet, &view);
+        Ok(Self {
+            pinned: None,
+            file,
+            view,
+            scripts,
+        })
     }
 
-    /// The wallet this watch follows.
-    pub(crate) fn pinned(&self) -> &PinnedWallet {
-        &self.wallet
+    /// Whether this is the refund float's watch.
+    pub(crate) fn is_float(&self) -> bool {
+        self.pinned.is_none()
+    }
+
+    /// FL-05: the float's scripts are in no total of the shop's wallet.
+    pub(crate) fn has_script(&self, script: &ScriptBuf) -> bool {
+        !self.is_float() && self.scripts.contains_key(script)
+    }
+
+    /// The pinned wallet of a former wallet's watch.
+    pub(crate) fn pinned(&self) -> Option<&PinnedWallet> {
+        self.pinned.as_ref()
     }
 
     fn knows(&self, op: &OutPoint) -> bool {
@@ -500,6 +575,7 @@ impl OwnerParts {
             limits: WatchLimits::default(),
             own_book: None,
             former: Vec::new(),
+            float: None,
         })
     }
 }
@@ -766,6 +842,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             limits,
             own_book,
             former,
+            float,
         } = parts;
         limits.check().map_err(NodeError::Config)?;
         let now = clock.now();
@@ -905,6 +982,9 @@ impl<P: OwnerPort> OwnerNode<P> {
         let mut former_watches = Vec::with_capacity(former.len());
         for f in former {
             former_watches.push(FormerWatch::open(&dir, f, birthday, &chain)?);
+        }
+        if let Some(f) = float {
+            former_watches.push(FormerWatch::open_float(&dir, f, &chain)?);
         }
         // The blocks are read again from the lowest position of any view: a
         // former wallet whose marks grew has its own to catch up.
@@ -1521,14 +1601,14 @@ impl<P: OwnerPort> OwnerNode<P> {
         let tip = self.watcher.chain().tip_height();
         self.former
             .iter()
-            .filter(|f| f.view.ready() && f.view.checked() >= tip)
+            .filter(|f| !f.is_float() && f.view.ready() && f.view.checked() >= tip)
             .filter_map(|f| {
                 let coins = f.view.coins(tip);
                 let sats = coins.iter().fold(0u64, |sum, coin| {
                     sum.saturating_add(coin.output().map_or(0, |o| o.value.to_sat()))
                 });
                 (!coins.is_empty()).then(|| FormerHeld {
-                    wallet: f.wallet.checksum32(),
+                    wallet: f.pinned().map_or([0; 32], PinnedWallet::checksum32),
                     sats,
                     coins: u32::try_from(coins.len()).unwrap_or(u32::MAX),
                 })
@@ -1554,7 +1634,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         let f = self
             .former
             .iter()
-            .find(|f| f.wallet.checksum32() == *wallet)
+            .find(|f| f.pinned().is_some_and(|p| p.checksum32() == *wallet))
             .ok_or_else(|| NodeError::NotReady("no such former wallet".into()))?;
         if !f.view.ready() {
             return Err(NodeError::NotReady(f.view.state().to_string()));
@@ -1567,6 +1647,102 @@ impl<P: OwnerPort> OwnerNode<P> {
             )));
         }
         Ok((f.view.coins(tip), tip))
+    }
+
+    fn float_watch(&self) -> Option<&FormerWatch> {
+        self.former.iter().find(|f| f.is_float())
+    }
+
+    /// FL-05: the float's coins as the node's own watch of its wallet gives
+    /// them. The view must be ready and have checked every block up to the
+    /// tip, as for [`OwnerNode::starter_coins`]; with no float watched it says
+    /// so.
+    pub fn float_coins(&self) -> Result<FloatCoins, NodeError> {
+        if let Some(why) = &self.halted {
+            return Err(NodeError::NotReady(why.clone()));
+        }
+        if self.awaiting_rescan > 0 {
+            return Err(NodeError::NotReady(
+                "waiting for the script rescan to start".into(),
+            ));
+        }
+        let f = self
+            .float_watch()
+            .ok_or_else(|| NodeError::NotReady("the float is not watched".into()))?;
+        if !f.view.ready() {
+            return Err(NodeError::NotReady(f.view.state().to_string()));
+        }
+        let tip = self.watcher.chain().tip_height();
+        if f.view.checked() < tip {
+            return Err(NodeError::NotReady(format!(
+                "the coin view has checked blocks up to {} and the chain is at {tip}",
+                f.view.checked()
+            )));
+        }
+        let coins = f.view.coins(tip);
+        let incoming: Vec<IncomingCoin> = f
+            .view
+            .pending()
+            .flat_map(|p| {
+                let txid = p.tx.compute_txid();
+                p.own.iter().filter_map(move |(vout, _, _)| {
+                    let at = usize::try_from(*vout).ok()?;
+                    Some(IncomingCoin {
+                        outpoint: OutPoint::new(txid, *vout),
+                        sats: p.tx.output.get(at)?.value.to_sat(),
+                    })
+                })
+            })
+            .collect();
+        let confirmed = coins
+            .iter()
+            .filter(|c| c.confirmations > 0)
+            .fold(0u64, |sum, c| {
+                sum.saturating_add(c.output().map_or(0, |o| o.value.to_sat()))
+            });
+        let held = held_sats(&coins, &incoming);
+        Ok(FloatCoins {
+            coins,
+            unconfirmed_incoming: held.saturating_sub(confirmed),
+            confirmed,
+            tip,
+            receive_next: f.view.receive_next(),
+            change_next: f.view.change_next(),
+        })
+    }
+
+    /// FL-20, FL-21, FL-35: a finished transaction of the float goes to the
+    /// outbox, and the node sends it, watches it and settles it as it does
+    /// any other payment. The library takes it only when it spends only coins
+    /// of the float's view and pays only ready, still-queued `refunds` and the
+    /// float's change (`sweep_to` is the one address a move of everything
+    /// may pay, with no refund).
+    pub fn take_float(
+        &mut self,
+        tx: &[u8],
+        refunds: &[u32],
+        sweep_to: Option<&ScriptBuf>,
+    ) -> Result<Txid, NodeError> {
+        let (outpoints, scripts) = {
+            let f = self
+                .float_watch()
+                .ok_or_else(|| NodeError::NotReady("the float is not watched".into()))?;
+            let tip = self.watcher.chain().tip_height();
+            let outpoints: Vec<OutPoint> = f.view.coins(tip).iter().map(|c| c.outpoint).collect();
+            (outpoints, f.scripts.clone())
+        };
+        let write = self.queue_writer();
+        let txid = self.owner_mut()?.take_float(
+            tx,
+            refunds,
+            &outpoints,
+            &|s| scripts.contains_key(s),
+            sweep_to,
+            write,
+        )?;
+        self.refresh_marks();
+        self.reconcile();
+        Ok(txid)
     }
 
     /// The height of the block that holds `txid`, in the view of the wallet

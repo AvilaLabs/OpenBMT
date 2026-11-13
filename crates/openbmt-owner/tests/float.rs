@@ -836,3 +836,280 @@ fn ss_20_the_starter_path_refuses_a_sealed_float() {
             .is_err()
     );
 }
+
+// ---- FL-20, FL-21, FL-35: the outbox ----------------------------------------
+
+fn float_points(coins: &[Coin]) -> Vec<OutPoint> {
+    coins.iter().map(|c| c.outpoint).collect()
+}
+
+fn float_scripts() -> impl Fn(&ScriptBuf) -> bool {
+    let all: Vec<ScriptBuf> = (0..4)
+        .flat_map(|i| [Keychain::Receive, Keychain::Change].map(|c| float().script(c, i).unwrap()))
+        .collect();
+    move |s| all.contains(s)
+}
+
+#[test]
+fn fl_20_the_outbox_takes_a_float_payment_of_a_ready_refund_and_marks_it_signed() {
+    let mut o = new_owner(openbmt_owner::Options::default());
+    let r = refund(&mut o, 1, 100_000, 40_000);
+    let coins = [float_coin(1, Keychain::Receive, 0, 100_000, 6)];
+    let paid = pay_refund(&float_words(), &coins, &external(1), 40_000, RATE, 0, 1, 0).unwrap();
+    let bytes = bitcoin::consensus::serialize(&paid.tx);
+    let store = Store::default();
+    let txid = o
+        .take_float(
+            &bytes,
+            &[r],
+            &float_points(&coins),
+            &float_scripts(),
+            None,
+            |b| store.put(b),
+        )
+        .unwrap();
+    assert_eq!(txid, paid.txid);
+    assert!(matches!(
+        o.refunds().iter().find(|x| x.id == r).unwrap().stage,
+        openbmt_owner::Stage::Signed { .. }
+    ));
+    assert_eq!(o.outbox().len(), 1);
+    // Giving it again changes nothing.
+    let calls = store.calls();
+    assert_eq!(
+        o.take_float(
+            &bytes,
+            &[r],
+            &float_points(&coins),
+            &float_scripts(),
+            None,
+            |b| store.put(b)
+        )
+        .unwrap(),
+        txid
+    );
+    assert_eq!(store.calls(), calls);
+}
+
+#[test]
+fn fl_21_the_outbox_refuses_a_float_payment_that_spends_a_coin_outside_the_float() {
+    let mut o = new_owner(openbmt_owner::Options::default());
+    let r = refund(&mut o, 1, 100_000, 40_000);
+    let coins = [float_coin(1, Keychain::Receive, 0, 100_000, 6)];
+    let paid = pay_refund(&float_words(), &coins, &external(1), 40_000, RATE, 0, 1, 0).unwrap();
+    let bytes = bitcoin::consensus::serialize(&paid.tx);
+    // The view holds another coin only: the spent one is not the float's.
+    let other = [float_coin(2, Keychain::Receive, 1, 100_000, 6)];
+    let e = o.take_float(
+        &bytes,
+        &[r],
+        &float_points(&other),
+        &float_scripts(),
+        None,
+        nop,
+    );
+    assert!(e.is_err());
+    assert!(o.outbox().is_empty());
+}
+
+#[test]
+fn fl_21_the_outbox_refuses_a_float_payment_that_pays_something_else() {
+    let mut o = new_owner(openbmt_owner::Options::default());
+    let r = refund(&mut o, 1, 100_000, 40_000);
+    let coins = [float_coin(1, Keychain::Receive, 0, 100_000, 6)];
+    let paid = pay_refund(&float_words(), &coins, &external(1), 40_000, RATE, 0, 1, 0).unwrap();
+    let mut tx = paid.tx.clone();
+    tx.output.push(TxOut {
+        value: Amount::from_sat(1_000),
+        script_pubkey: external(99),
+    });
+    let e = o.take_float(
+        &bitcoin::consensus::serialize(&tx),
+        &[r],
+        &float_points(&coins),
+        &float_scripts(),
+        None,
+        nop,
+    );
+    assert!(e.is_err());
+    // A refund of another amount than the one paid is not that refund.
+    let mut o2 = new_owner(openbmt_owner::Options::default());
+    let r2 = refund(&mut o2, 1, 100_000, 39_000);
+    let e = o2.take_float(
+        &bitcoin::consensus::serialize(&paid.tx),
+        &[r2],
+        &float_points(&coins),
+        &float_scripts(),
+        None,
+        nop,
+    );
+    assert!(e.is_err());
+    assert!(o.outbox().is_empty() && o2.outbox().is_empty());
+}
+
+#[test]
+fn fl_20_the_outbox_refuses_a_float_payment_of_a_refund_that_is_not_ready_or_not_queued() {
+    let mut o = new_owner(openbmt_owner::Options::default());
+    let r = refund(&mut o, 1, 100_000, 40_000);
+    // The payment is no longer at the refund depth.
+    set_facts(&mut o, sale(1), shallow(100_000));
+    let coins = [float_coin(1, Keychain::Receive, 0, 100_000, 6)];
+    let paid = pay_refund(&float_words(), &coins, &external(1), 40_000, RATE, 0, 1, 0).unwrap();
+    let bytes = bitcoin::consensus::serialize(&paid.tx);
+    assert!(o
+        .take_float(
+            &bytes,
+            &[r],
+            &float_points(&coins),
+            &float_scripts(),
+            None,
+            nop
+        )
+        .is_err());
+    assert!(o
+        .take_float(
+            &bytes,
+            &[r + 50],
+            &float_points(&coins),
+            &float_scripts(),
+            None,
+            nop
+        )
+        .is_err());
+    assert!(o
+        .take_float(
+            &bytes,
+            &[],
+            &float_points(&coins),
+            &float_scripts(),
+            None,
+            nop
+        )
+        .is_err());
+    assert!(o.outbox().is_empty());
+    // Ready again: taken; and once signed it is not queued, so a second
+    // transaction for the same refund is refused.
+    set_facts(&mut o, sale(1), deep(100_000));
+    o.take_float(
+        &bytes,
+        &[r],
+        &float_points(&coins),
+        &float_scripts(),
+        None,
+        nop,
+    )
+    .unwrap();
+    let coins2 = [float_coin(3, Keychain::Receive, 1, 100_000, 6)];
+    let paid2 = pay_refund(&float_words(), &coins2, &external(1), 40_000, RATE, 0, 1, 0).unwrap();
+    assert!(o
+        .take_float(
+            &bitcoin::consensus::serialize(&paid2.tx),
+            &[r],
+            &float_points(&coins2),
+            &float_scripts(),
+            None,
+            nop
+        )
+        .is_err());
+}
+
+#[test]
+fn fl_35_the_outbox_takes_the_move_only_to_the_one_address_and_with_no_refund() {
+    let mut o = new_owner(openbmt_owner::Options::default());
+    let r = refund(&mut o, 1, 100_000, 40_000);
+    let coins = [
+        float_coin(1, Keychain::Receive, 0, 100_000, 6),
+        float_coin(2, Keychain::Change, 0, 50_000, 6),
+    ];
+    let shop = external(200);
+    let moved = sweep(&float_words(), &coins, &shop, RATE, 1, 0).unwrap();
+    let bytes = bitcoin::consensus::serialize(&moved.tx);
+    let points = float_points(&coins);
+    // Another address, or a refund with it, is refused.
+    assert!(o
+        .take_float(
+            &bytes,
+            &[],
+            &points,
+            &float_scripts(),
+            Some(&external(201)),
+            nop
+        )
+        .is_err());
+    assert!(o
+        .take_float(&bytes, &[r], &points, &float_scripts(), Some(&shop), nop)
+        .is_err());
+    // A float payment is not a move: without `sweep_to` it pays a refund.
+    assert!(o
+        .take_float(&bytes, &[], &points, &float_scripts(), None, nop)
+        .is_err());
+    assert!(o.outbox().is_empty());
+    let txid = o
+        .take_float(&bytes, &[], &points, &float_scripts(), Some(&shop), nop)
+        .unwrap();
+    assert_eq!(txid, moved.txid);
+    assert_eq!(o.outbox().len(), 1);
+    // The refund stays queued.
+    assert_eq!(
+        o.refunds().iter().find(|x| x.id == r).unwrap().stage,
+        openbmt_owner::Stage::Queued
+    );
+}
+
+#[test]
+fn fl_03_the_sealed_pay_and_sweep_open_only_the_floats_own_seed() {
+    let entropy = bip39::Mnemonic::parse_in_normalized(bip39::Language::English, BIP85_CHILD_0)
+        .unwrap()
+        .to_entropy();
+    let made = seal_compact_seedqr(&entropy, &mut Steady(0)).unwrap();
+    let coins = [float_coin(1, Keychain::Receive, 0, 100_000, 6)];
+    let sealed_paid = pay_refund_sealed(
+        &made.sealed.sealed,
+        &made.sealed.data_key,
+        &coins,
+        &external(1),
+        40_000,
+        RATE,
+        0,
+        1,
+        0,
+    )
+    .unwrap();
+    let words_paid =
+        pay_refund(&float_words(), &coins, &external(1), 40_000, RATE, 0, 1, 0).unwrap();
+    assert_eq!(sealed_paid.txid, words_paid.txid);
+    let swept = sweep_sealed(
+        &made.sealed.sealed,
+        &made.sealed.data_key,
+        &coins,
+        &external(2),
+        RATE,
+        1,
+        0,
+    )
+    .unwrap();
+    assert_eq!(swept.paid + swept.fee, 100_000);
+    let starter = starter_blob();
+    assert!(pay_refund_sealed(
+        &starter.sealed,
+        &starter.data_key,
+        &coins,
+        &external(1),
+        40_000,
+        RATE,
+        0,
+        1,
+        0
+    )
+    .is_err());
+    assert!(sweep_sealed(
+        &starter.sealed,
+        &starter.data_key,
+        &coins,
+        &external(2),
+        RATE,
+        1,
+        0
+    )
+    .is_err());
+}

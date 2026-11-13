@@ -441,8 +441,9 @@ impl<P: OwnerPort> OwnerNode<P> {
         }
         self.former
             .iter()
-            .find(|f| f.pinned().checksum32() == wanted)
-            .map(|f| f.pinned().wallet().clone())
+            .filter_map(|f| f.pinned())
+            .find(|p| p.checksum32() == wanted)
+            .map(|p| p.wallet().clone())
     }
 
     /// RQ-04: the script of a request's address, from its own wallet.

@@ -148,7 +148,7 @@ use crate::counter_views::{
 use crate::error::{internal, refused_by, wrong_state, AppError};
 use crate::float::{
     self as float_ops, FloatCoinView, FloatFeeArgs, FloatPaidView, FloatPayArgs, FloatRefillArgs,
-    FloatRefillView, FloatSealedView, FloatStatusArgs, FloatStatusView, FloatSweepArgs,
+    FloatCoinsView, FloatNodePayArgs, FloatNodeSweepArgs, FloatRefillView, FloatSealedView, FloatSendArgs, FloatStatusArgs, FloatStatusView, FloatSweepArgs,
     FloatWalletView,
 };
 use crate::host::{real_spawn, Entry, Spawn};
@@ -197,7 +197,7 @@ use crate::views::{
     put_words, AlertKind, AlertView, BatchArgs, BatchWaitingView, BuiltView, CashAmountView,
     CashOutArgs, CashOutRow, CashPriceView, ClearArgs, CounterShareView, CounterView,
     DeepRequestView, DeliverView, EntryKindView, EntryRow, HaltedView, HealthView, LimitView,
-    LinkConfig, LinkStepView, LinkView, MergeOfferView, NoteKindView, OldAddressesView, OldKind,
+    FloatWatchConfig, LinkConfig, LinkStepView, LinkView, MergeOfferView, NoteKindView, OldAddressesView, OldKind,
     OutboxKind, OutboxRow, OutcomeKind, OutcomeView, OwnerNetwork, PumpView, QueueView,
     QueuedRefund, ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView,
     SendKind, SendRow, SettingsHeldView, SettingsQueuedView, ShopCurrencyView, SkippedView,
@@ -826,6 +826,16 @@ fn build_ops() -> Vec<Op> {
         op(170, "float_refill", Node, |c, a: FloatRefillArgs| {
             c.entry()?.float_refill(a)
         }),
+        op(172, "float_coins", Node, |c, _: ()| c.entry()?.float_coins()),
+        op(173, "float_pay_node", Node, |c, a: FloatNodePayArgs| {
+            c.entry()?.float_pay_node(a)
+        }),
+        op(174, "float_sweep_node", Node, |c, a: FloatNodeSweepArgs| {
+            c.entry()?.float_sweep_node(a)
+        }),
+        op(175, "float_send", Node, |c, a: FloatSendArgs| {
+            c.entry()?.float_send(a)
+        }),
         op(171, "float_seal", Zero, |c, scan: Vec<u8>| {
             c.starter().with_rng(|rng| float_ops::seal(scan, rng))
         }),
@@ -1126,6 +1136,7 @@ fn definitions() -> Vec<TypeDef> {
         OwnerNetwork::define(),
         RouteView::define(),
         LinkConfig::define(),
+        FloatWatchConfig::define(),
         StartConfig::define(),
         WatchStart::define(),
         WatchStepView::define(),
@@ -1248,6 +1259,10 @@ fn definitions() -> Vec<TypeDef> {
         OwnSpendTakeArgs::define(),
         FloatWalletView::define(),
         FloatSealedView::define(),
+        FloatCoinsView::define(),
+        FloatNodePayArgs::define(),
+        FloatNodeSweepArgs::define(),
+        FloatSendArgs::define(),
         FloatStatusArgs::define(),
         FloatStatusView::define(),
         FloatFeeArgs::define(),

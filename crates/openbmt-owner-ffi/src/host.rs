@@ -87,7 +87,10 @@ use crate::counter_views::{
 use crate::error::{
     from_words, internal, poisoned, refused_by, rule_in, store_by, wrong_state, AppError, Kind,
 };
-use crate::float::{self as float_ops, FloatRefillArgs, FloatRefillView};
+use crate::float::{
+    self as float_ops, FloatCoinsView, FloatNodePayArgs, FloatNodeSweepArgs, FloatPaidView,
+    FloatRefillArgs, FloatRefillView, FloatSendArgs,
+};
 use crate::own::{self, OwnGapView, SwitchRowView};
 use crate::own_spend_views::{
     built_view as own_built_view, file_view as own_file_view, item_view as own_item_view,
@@ -962,6 +965,16 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
     // ranges the live watch follows, from the file the shop's ops keep.
     parts.own_book = own_book;
     parts.former = former;
+    // FL-05: the float is watched as a wallet of its own, with its own view.
+    if let Some(f) = &req.float {
+        let wallet = float_ops::wallet_of(&f.description)?;
+        parts.float = Some(openbmt_owner_node::FloatParts {
+            wallet: wallet.imported(),
+            receive_end: f.receive_end,
+            change_end: f.change_end,
+            birthday: if f.birthday == 0 { req.birthday } else { f.birthday },
+        });
+    }
     let mut node = OwnerNode::start_with(config, parts, spawn).map_err(|e| node_error(&e))?;
     // From here on a failure lets the node go before it is reported.
     let rest = (|| {
@@ -3387,6 +3400,97 @@ impl Entry {
             )
             .map_err(|e| float_ops::refill_error(e, queue_error))?;
             Ok(float_ops::refill_view(&queued, network))
+        })
+    }
+}
+
+impl Entry {
+    /// FL-05: the float's coins, from the node's own watch of its wallet.
+    pub(crate) fn float_coins(&self) -> Result<FloatCoinsView, AppError> {
+        self.run(None, |st| {
+            st.node
+                .float_coins()
+                .map(|c| float_ops::coins_view(&c))
+                .map_err(crate::starter::not_watching)
+        })
+    }
+
+    /// FL-20 to FL-22: sign the queued refund `a.refund` from the float's
+    /// coins, from the sealed seed. The refund must be queued and ready.
+    pub(crate) fn float_pay_node(&self, a: FloatNodePayArgs) -> Result<FloatPaidView, AppError> {
+        self.run(None, move |st| {
+            let network = st.network;
+            let refund = st
+                .node
+                .owner()
+                .refunds()
+                .iter()
+                .find(|r| r.id == a.refund && r.stage == openbmt_owner::Stage::Queued)
+                .cloned()
+                .ok_or_else(|| crate::starter::no_such_refund(a.refund))?;
+            if !st.node.owner().refund_ready(refund.id) {
+                return Err(crate::starter::refund_not_ready(a.refund));
+            }
+            let held = st
+                .node
+                .float_coins()
+                .map_err(crate::starter::not_watching)?;
+            float_ops::pay_from_node(a, &refund, network, &held.coins, held.change_next, held.tip)
+        })
+    }
+
+    /// FL-35: the move of everything the float holds to the first address of a
+    /// range of the owner phone's own, taken once.
+    pub(crate) fn float_sweep_node(&self, a: FloatNodeSweepArgs) -> Result<FloatPaidView, AppError> {
+        self.run(Some(a.now), move |st| {
+            let State { node, own, dir, network, .. } = st;
+            let network = *network;
+            let own = own_only(own)?;
+            let held = node.float_coins().map_err(crate::starter::not_watching)?;
+            if held.coins.is_empty() {
+                return Err(float_ops::refusal(&openbmt_owner::float::FloatRefusal::NothingToSweep));
+            }
+            // Nothing is taken from the book unless there is a coin to move.
+            let index = own::turn_on_shop(
+                dir,
+                node.owner_identity().map_err(|e| node_error(&e))?,
+                own.wallet.clone(),
+                |shop| shop.float_off_index(a.now),
+            )
+            .map_err(own::node_error)?;
+            let to = openbmt_owner::float::shop_receive_script(own.wallet.wallet(), index)
+                .map_err(|e| float_ops::refusal(&e))?;
+            float_ops::sweep_from_node(a, &to, network, &held.coins, held.tip)
+        })
+    }
+
+    /// FL-20, FL-35: give a signed transaction of the float to the node's
+    /// outbox. The node and the library check it (FL-21).
+    pub(crate) fn float_send(&self, a: FloatSendArgs) -> Result<String, AppError> {
+        self.run(None, move |st| {
+            let State { node, own, dir, .. } = st;
+            let to = if a.sweep {
+                let own = own_only(own)?;
+                let index = own::turn_on_shop(
+                    dir,
+                    node.owner_identity().map_err(|e| node_error(&e))?,
+                    own.wallet.clone(),
+                    |shop| Ok(shop.float_off_plan()),
+                )
+                .map_err(own::node_error)?
+                .ok_or_else(|| {
+                    wrong_state("float-no-move", "the float's move was never signed")
+                })?;
+                Some(
+                    openbmt_owner::float::shop_receive_script(own.wallet.wallet(), index)
+                        .map_err(|e| float_ops::refusal(&e))?,
+                )
+            } else {
+                None
+            };
+            node.take_float(&a.tx, &a.refunds, to.as_ref())
+                .map(|txid| txid.to_string())
+                .map_err(|e| node_error(&e))
         })
     }
 }

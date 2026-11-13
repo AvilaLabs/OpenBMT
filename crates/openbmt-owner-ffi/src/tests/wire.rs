@@ -93,7 +93,16 @@ impl W {
                 w.u64(l.heartbeat_every_secs).u64(l.check_in_grace_secs)
             }
         };
-        w.opt_bytes(c.own_wallet.as_deref())
+        let w = w.opt_bytes(c.own_wallet.as_deref());
+        match &c.float {
+            None => w.u8(0),
+            Some(f) => w
+                .u8(1)
+                .string(&f.description)
+                .u32(f.receive_end)
+                .u32(f.change_end)
+                .u32(f.birthday),
+        }
     }
 
     /// The fields of `queue_refund`.

@@ -40,14 +40,15 @@ use openbmt_spend::{
 
 pub use openbmt_spend::Coin;
 
-use crate::error::OwnerError;
+use crate::error::{OwnerError, Refusal};
 use crate::single_key::{check_pays_only, sign_p2wpkh_inputs, Breach};
 use crate::starter::{
     open_seed_with, seal_seed_with, DataKey, KernelRandom, Sealed, Seed, StarterRefusal,
     ENTROPY_BYTES, FLOAT_SEAL_AAD,
 };
 use crate::state::Owner;
-use crate::types::CashAmount;
+use crate::types::{CashAmount, Deliverable, Delivery, Stage};
+use crate::MAX_OUTBOX;
 
 /// FL-01: the number of words of the float.
 pub const FLOAT_WORDS: usize = 12;
@@ -700,6 +701,186 @@ pub fn sweep(
         change_position: ChangePosition::Last,
     };
     spend(&opened, coins, &request, None)
+}
+
+/// FL-03, FL-20: [`pay_refund`] from the sealed float seed: the seed is opened
+/// for this call under the float's own label and is wiped when the call ends.
+#[allow(clippy::too_many_arguments)]
+pub fn pay_refund_sealed(
+    sealed: &[u8],
+    key: &DataKey,
+    coins: &[Coin],
+    pay_to: &ScriptBuf,
+    sats: u64,
+    fee_rate: u64,
+    change_index: u32,
+    min_confirmations: u32,
+    lock_height: u32,
+) -> Result<FloatPaid, FloatSealError> {
+    let words = words_of_sealed(sealed, key)?;
+    pay_refund(
+        &words,
+        coins,
+        pay_to,
+        sats,
+        fee_rate,
+        change_index,
+        min_confirmations,
+        lock_height,
+    )
+    .map_err(FloatSealError::Float)
+}
+
+/// FL-03, FL-35: [`sweep`] from the sealed float seed.
+pub fn sweep_sealed(
+    sealed: &[u8],
+    key: &DataKey,
+    coins: &[Coin],
+    shop_to: &ScriptBuf,
+    fee_rate: u64,
+    min_confirmations: u32,
+    lock_height: u32,
+) -> Result<FloatPaid, FloatSealError> {
+    let words = words_of_sealed(sealed, key)?;
+    sweep(
+        &words,
+        coins,
+        shop_to,
+        fee_rate,
+        min_confirmations,
+        lock_height,
+    )
+    .map_err(FloatSealError::Float)
+}
+
+fn words_of_sealed(sealed: &[u8], key: &DataKey) -> Result<FloatWords, FloatSealError> {
+    let seed = open_seed_with(sealed, key, FLOAT_SEAL_AAD).map_err(FloatSealError::Seal)?;
+    let mnemonic = seed.mnemonic().map_err(FloatSealError::Seal)?;
+    FloatWords::new(&mnemonic.words().collect::<Vec<_>>().join(" ")).map_err(FloatSealError::Float)
+}
+
+impl Owner {
+    /// FL-20, FL-21, FL-35: a finished transaction of the float goes to the
+    /// outbox, where the node sends it and follows it as any other (AS-64).
+    /// It is taken only when it spends only the `coins` of the float's view,
+    /// and pays only
+    ///
+    /// - the queued, ready `refunds` (AS-52, AS-53), each exactly once at its
+    ///   own script and amount, and the float's own change (`is_float_script`),
+    ///   or
+    /// - with `sweep_to` and no refund, that one script and nothing else.
+    ///
+    /// Each refund is marked signed. The queue is stored before the
+    /// transaction is given to the outbox, and a refusal or a failed store
+    /// changes nothing. Giving the same transaction again returns the same ID.
+    pub fn take_float<E>(
+        &mut self,
+        tx: &[u8],
+        refunds: &[u32],
+        coins: &[OutPoint],
+        is_float_script: &dyn Fn(&ScriptBuf) -> bool,
+        sweep_to: Option<&ScriptBuf>,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<Txid, OwnerError<E>> {
+        let parsed: Transaction = bitcoin::consensus::deserialize(tx)
+            .map_err(|_| Refusal::WrongStage("the finished transaction does not read"))?;
+        let txid = parsed.compute_txid();
+        if self
+            .state
+            .outbox
+            .iter()
+            .any(|d| matches!(&d.what, Delivery::Transaction { txid: t, .. } if *t == txid))
+        {
+            return Ok(txid);
+        }
+        if self.state.outbox.len() >= MAX_OUTBOX {
+            return Err(Refusal::OutboxFull.into());
+        }
+        // FL-21: only coins of the float's view, each once.
+        let mut seen = std::collections::BTreeSet::new();
+        if parsed.input.is_empty()
+            || !parsed
+                .input
+                .iter()
+                .all(|i| coins.contains(&i.previous_output) && seen.insert(i.previous_output))
+        {
+            return Err(Refusal::WrongStage(
+                "the transaction spends a coin that is not the float's",
+            )
+            .into());
+        }
+        let mut next = self.state.clone();
+        let mut left: Vec<&bitcoin::TxOut> = parsed.output.iter().collect();
+        match sweep_to {
+            Some(to) => {
+                if !refunds.is_empty() {
+                    return Err(Refusal::WrongStage("the float's move pays no refund").into());
+                }
+                if left.len() != 1 || left[0].script_pubkey != *to {
+                    return Err(Refusal::WrongStage(
+                        "the float's move pays only the shop's address",
+                    )
+                    .into());
+                }
+            }
+            None => {
+                if refunds.is_empty() {
+                    return Err(Refusal::WrongStage("a float payment pays a refund").into());
+                }
+                let mut ids = std::collections::BTreeSet::new();
+                for n in refunds {
+                    if !ids.insert(*n) {
+                        return Err(Refusal::UnknownEntry(*n).into());
+                    }
+                    let refund = next
+                        .refunds
+                        .iter()
+                        .find(|r| r.id == *n)
+                        .filter(|r| r.stage == Stage::Queued)
+                        .ok_or(Refusal::UnknownEntry(*n))?;
+                    // AS-52, AS-53: ready now, by the check the builder makes.
+                    if !self.refund_ready(*n) {
+                        return Err(Refusal::WrongStage(
+                            "a refund is paid only when it is ready: the payment is deep enough and covers every refund counted",
+                        )
+                        .into());
+                    }
+                    let at = left
+                        .iter()
+                        .position(|o| {
+                            o.script_pubkey == refund.script && o.value.to_sat() == refund.sats
+                        })
+                        .ok_or(Refusal::WrongStage(
+                            "a refund is not paid at its address and amount",
+                        ))?;
+                    left.remove(at);
+                }
+                if left.len() > 1 || left.iter().any(|o| !is_float_script(&o.script_pubkey)) {
+                    return Err(Refusal::WrongStage(
+                        "the transaction pays something besides the refunds and the float's change",
+                    )
+                    .into());
+                }
+            }
+        }
+        for n in refunds {
+            if let Some(stage) = next.stage_mut(*n) {
+                *stage = Stage::Signed { txid };
+            }
+        }
+        let id = next.take_id()?;
+        next.outbox.push(Deliverable {
+            id,
+            what: Delivery::Transaction {
+                txid,
+                tx: tx.to_vec(),
+                refunds: refunds.to_vec(),
+                cash_out: None,
+            },
+        });
+        self.commit(next, persist)?;
+        Ok(txid)
+    }
 }
 
 /// FL-35: the script of the shop's wallet at `index` on its receive chain,

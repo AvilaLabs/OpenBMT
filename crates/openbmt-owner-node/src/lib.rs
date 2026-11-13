@@ -103,7 +103,7 @@ pub use live::{
     OWNER_LIVE_WATCH, QUIET_SECS,
 };
 pub use node::{
-    FormerHeld, FormerParts, NodeError, OwnerNode, OwnerParts, OwnerPort, SendRefused, SendState,
+    FloatCoins, FloatParts, FormerHeld, FormerParts, NodeError, OwnerNode, OwnerParts, OwnerPort, SendRefused, SendState,
     BROADCAST_DIR, COINS_FILE, NO_TOR, QUEUE_FILE, TAKE_JOURNAL_FILE,
 };
 pub use own::{

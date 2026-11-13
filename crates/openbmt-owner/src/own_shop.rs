@@ -304,6 +304,16 @@ struct MovePlan {
     index: u32,
 }
 
+/// FL-35: the index of the shop's wallet that turning the float off pays,
+/// taken once, as the starter's move takes its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FloatOffPlan {
+    /// The hash of the wallet it is for.
+    wallet: [u8; 32],
+    /// The index in that wallet.
+    index: u32,
+}
+
 /// SS-41: the re-pin that was made, kept so that a start between the state
 /// and the wallet's file can finish it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -333,6 +343,7 @@ struct OwnState {
     /// Ascending by counter.
     waiting: Vec<OwnBundle>,
     move_plan: Option<MovePlan>,
+    float_off: Option<FloatOffPlan>,
     repin: Option<RepinRecord>,
     /// Oldest first.
     former: Vec<FormerWallet>,
@@ -361,7 +372,11 @@ impl OwnState {
             out.extend_from_slice(&wire::len_u32(bytes.len()).to_le_bytes());
             out.extend_from_slice(&bytes);
         }
-        if self.move_plan.is_some() || self.repin.is_some() || !self.former.is_empty() {
+        if self.move_plan.is_some()
+            || self.repin.is_some()
+            || !self.former.is_empty()
+            || self.float_off.is_some()
+        {
             out.push(1);
             match &self.move_plan {
                 Some(p) => {
@@ -383,6 +398,11 @@ impl OwnState {
             for f in &self.former {
                 put_wallet(&mut out, &f.wallet);
                 out.extend_from_slice(&f.end.to_le_bytes());
+            }
+            if let Some(p) = &self.float_off {
+                out.push(1);
+                out.extend_from_slice(&p.wallet);
+                out.extend_from_slice(&p.index.to_le_bytes());
             }
         }
         out
@@ -475,7 +495,7 @@ impl OwnShop {
             }
             waiting.push(bundle);
         }
-        let (mut move_plan, mut repin, mut former) = (None, None, Vec::new());
+        let (mut move_plan, mut repin, mut former, mut float_off) = (None, None, Vec::new(), None);
         if !r.is_empty() {
             if r.u8().map_err(corrupt)? != 1 {
                 return Err(OwnRestoreError::Corrupt("the tail is of another kind"));
@@ -498,6 +518,18 @@ impl OwnShop {
                 let end = r.u32_le().map_err(corrupt)?;
                 former.push(FormerWallet { wallet, end });
             }
+            // FL-35: a plan of turning the float off, after the former wallets.
+            if !r.is_empty() {
+                if r.u8().map_err(corrupt)? != 1 {
+                    return Err(OwnRestoreError::Corrupt(
+                        "the float's plan is of another kind",
+                    ));
+                }
+                float_off = Some(FloatOffPlan {
+                    wallet: r.array::<32>().map_err(corrupt)?,
+                    index: r.u32_le().map_err(corrupt)?,
+                });
+            }
         }
         r.finish().map_err(corrupt)?;
         let state = OwnState {
@@ -505,6 +537,7 @@ impl OwnShop {
             book,
             waiting,
             move_plan,
+            float_off,
             repin,
             former,
         };
@@ -576,6 +609,41 @@ impl OwnShop {
     /// range of the owner's own, so the desk (RQ-02) leaves it alone.
     pub fn move_plan_index(&self) -> Option<u32> {
         self.state.move_plan.as_ref().map(|plan| plan.index)
+    }
+
+    /// FL-35: the index of the shop's own wallet that turning the float off
+    /// pays, if one was taken. It is the first index of a range of the
+    /// owner's own, so the desk (RQ-02) leaves it alone.
+    pub fn float_off_plan_index(&self) -> Option<u32> {
+        let hash = self.wallet.checksum32();
+        self.state
+            .float_off
+            .as_ref()
+            .filter(|p| p.wallet == hash)
+            .map(|p| p.index)
+    }
+
+    /// FL-35: the receive index of the shop's wallet that turning the float
+    /// off pays: the first index of a new range of the owner's own, taken
+    /// from the book after every range given so far, stored first. It is
+    /// taken once for a wallet: asking again gives the same index and takes
+    /// nothing, so signing the move again pays the same address.
+    pub fn float_off_index<E>(
+        &mut self,
+        now: u64,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<u32, OwnError<E>> {
+        if let Some(index) = self.float_off_plan_index() {
+            return Ok(index);
+        }
+        let mut next = self.state.clone();
+        let range = next.book.allocate(self.identity.device_id(), now)?;
+        next.float_off = Some(FloatOffPlan {
+            wallet: self.wallet.checksum32(),
+            index: range.start,
+        });
+        self.commit(next, persist)?;
+        Ok(range.start)
     }
 
     /// Store `next`, and take it into memory only if the store worked.

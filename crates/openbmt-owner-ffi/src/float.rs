@@ -196,10 +196,7 @@ pub(crate) fn seal(
         *b = 0;
     }
     std::hint::black_box(&scan);
-    let made = made.map_err(|e| match e {
-        FloatSealError::Float(f) => refusal(&f),
-        FloatSealError::Seal(s) => crate::starter::refusal(&s),
-    })?;
+    let made = made.map_err(seal_error)?;
     let first = made.wallet.receive_address(0).map_err(|e| refusal(&e))?;
     Ok(FloatSealedView {
         sealed: made.sealed.sealed.clone(),
@@ -208,6 +205,215 @@ pub(crate) fn seal(
         first_address: first.to_string(),
     })
 }
+
+/// A refusal of sealing or opening a sealed float, as the error that crosses
+/// the boundary.
+pub(crate) fn seal_error(e: FloatSealError) -> AppError {
+    match e {
+        FloatSealError::Float(f) => refusal(&f),
+        FloatSealError::Seal(s) => crate::starter::refusal(&s),
+    }
+}
+
+/// The data key the app handed over, wiped here as the starter's is.
+fn key_of(bytes: &mut [u8]) -> Result<openbmt_owner::starter::DataKey, AppError> {
+    crate::starter::data_key_of(bytes)
+}
+
+/// The float's coins as the node's watch gives them (op 172, FL-05): the
+/// checked view that `float_status` and the signing need.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FloatCoinsView {
+    /// The coins.
+    pub coins: Vec<FloatCoinView>,
+    /// What the confirmed coins add up to.
+    pub confirmed: u64,
+    /// What is on its way into the float, beyond that.
+    pub unconfirmed_incoming: u64,
+    /// The height of the tip they are counted from.
+    pub tip: u32,
+    /// One past the highest receive index the watch has seen used.
+    pub receive_next: u32,
+    /// The next change index.
+    pub change_next: u32,
+}
+
+wire_record!(FloatCoinsView {
+    coins,
+    confirmed,
+    unconfirmed_incoming,
+    tip,
+    receive_next,
+    change_next
+});
+
+pub(crate) fn coins_view(c: &openbmt_owner_node::FloatCoins) -> FloatCoinsView {
+    FloatCoinsView {
+        coins: c
+            .coins
+            .iter()
+            .map(|k| FloatCoinView {
+                txid: k.outpoint.txid.to_byte_array().to_vec(),
+                vout: k.vout,
+                prev_tx: serialize(&k.prev_tx),
+                change: k.chain == Keychain::Change,
+                index: k.index,
+                confirmations: k.confirmations,
+            })
+            .collect(),
+        confirmed: c.confirmed,
+        unconfirmed_incoming: c.unconfirmed_incoming,
+        tip: c.tip,
+        receive_next: c.receive_next,
+        change_next: c.change_next,
+    }
+}
+
+/// The arguments of `float_pay_node` (FL-20 to FL-22): a queued refund to
+/// pay from the node's coins of the float, signed from the sealed seed.
+#[derive(Clone, PartialEq, Eq)]
+pub struct FloatNodePayArgs {
+    /// The sealed seed the app stores.
+    pub sealed: Vec<u8>,
+    /// The data key, opened from the Keystore for this call only.
+    pub data_key: Vec<u8>,
+    /// The refund's number in the queue.
+    pub refund: u32,
+    /// The fee rate in satoshis per 1000 virtual bytes (`float_fee_rate`).
+    pub fee_rate: u64,
+    /// The fewest confirmations a coin needs.
+    pub min_confirmations: u32,
+}
+
+impl fmt::Debug for FloatNodePayArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FloatNodePayArgs")
+            .field("refund", &self.refund)
+            .finish_non_exhaustive()
+    }
+}
+
+wire_record!(FloatNodePayArgs {
+    sealed,
+    data_key,
+    refund,
+    fee_rate,
+    min_confirmations
+});
+wire_record_get!(FloatNodePayArgs {
+    sealed,
+    data_key,
+    refund,
+    fee_rate,
+    min_confirmations
+});
+
+/// The refund, paid from the node's coins of the float, signed from the
+/// sealed seed; the address and the amount are the refund's.
+pub(crate) fn pay_from_node(
+    mut a: FloatNodePayArgs,
+    refund: &openbmt_owner::Refund,
+    network: Network,
+    coins: &[Coin],
+    change_index: u32,
+    lock_height: u32,
+) -> Result<FloatPaidView, AppError> {
+    let key = key_of(&mut a.data_key)?;
+    let paid = float::pay_refund_sealed(
+        &a.sealed,
+        &key,
+        coins,
+        &refund.script,
+        refund.sats,
+        a.fee_rate,
+        change_index,
+        a.min_confirmations,
+        lock_height,
+    )
+    .map_err(seal_error)?;
+    let destination = Address::from_script(&refund.script, network)
+        .map(|x| x.to_string())
+        .unwrap_or_default();
+    Ok(paid_view(&paid, destination))
+}
+
+/// The arguments of `float_sweep_node` (FL-35): everything the node's watch
+/// holds to the one address of the shop's wallet that the move was given.
+#[derive(Clone, PartialEq, Eq)]
+pub struct FloatNodeSweepArgs {
+    /// The sealed seed the app stores.
+    pub sealed: Vec<u8>,
+    /// The data key, opened for this call only.
+    pub data_key: Vec<u8>,
+    /// The time, to take the address from the book.
+    pub now: u64,
+    /// The fee rate in satoshis per 1000 virtual bytes.
+    pub fee_rate: u64,
+    /// The fewest confirmations a coin needs.
+    pub min_confirmations: u32,
+}
+
+impl fmt::Debug for FloatNodeSweepArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FloatNodeSweepArgs")
+            .finish_non_exhaustive()
+    }
+}
+
+wire_record!(FloatNodeSweepArgs {
+    sealed,
+    data_key,
+    now,
+    fee_rate,
+    min_confirmations
+});
+wire_record_get!(FloatNodeSweepArgs {
+    sealed,
+    data_key,
+    now,
+    fee_rate,
+    min_confirmations
+});
+
+/// FL-35: the move of every coin to `to`, signed from the sealed seed.
+pub(crate) fn sweep_from_node(
+    mut a: FloatNodeSweepArgs,
+    to: &ScriptBuf,
+    network: Network,
+    coins: &[Coin],
+    lock_height: u32,
+) -> Result<FloatPaidView, AppError> {
+    let key = key_of(&mut a.data_key)?;
+    let paid = float::sweep_sealed(
+        &a.sealed,
+        &key,
+        coins,
+        to,
+        a.fee_rate,
+        a.min_confirmations,
+        lock_height,
+    )
+    .map_err(seal_error)?;
+    let destination = Address::from_script(to, network)
+        .map(|x| x.to_string())
+        .unwrap_or_default();
+    Ok(paid_view(&paid, destination))
+}
+
+/// The arguments of `float_send` (FL-20, FL-35): a signed transaction of the
+/// float for the node's outbox.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FloatSendArgs {
+    /// The finished transaction, consensus bytes.
+    pub tx: Vec<u8>,
+    /// The queued refunds it pays; none for the move.
+    pub refunds: Vec<u32>,
+    /// Whether it is the move of everything (FL-35).
+    pub sweep: bool,
+}
+
+wire_record!(FloatSendArgs { tx, refunds, sweep });
+wire_record_get!(FloatSendArgs { tx, refunds, sweep });
 
 /// The arguments of `float_status` (FL-10 to FL-12): the cap and what the
 /// float holds, in satoshis.

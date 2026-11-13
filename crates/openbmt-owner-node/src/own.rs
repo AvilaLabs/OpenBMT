@@ -389,10 +389,26 @@ impl OwnNode {
         })
     }
 
+    /// FL-35: the receive index of the shop's wallet that turning the float
+    /// off pays, from a new range of the owner's own in the book, stored first
+    /// and taken once for the wallet in force.
+    pub fn float_off_index(&mut self, now: u64) -> Result<u32, OwnNodeError> {
+        let (shop, store) = self.shop_and_store();
+        shop.float_off_index(now, store).map_err(|e| match e {
+            OwnError::Store(why) => OwnNodeError::Io(why),
+            OwnError::Refused(r) => OwnNodeError::Switch(r),
+        })
+    }
+
+    /// FL-35: the index turning the float off was given, if it was taken.
+    pub fn float_off_plan(&self) -> Option<u32> {
+        self.shop.float_off_plan_index()
+    }
+
     /// RQ-02, RQ-03: the next unused index of the desk, the owner root's own
     /// device in the book. `used` says which indexes a request already has.
     /// The unused indexes of the desk's ranges come first, in order, leaving
-    /// the one the starter move plans (SS-42). When none is left a new range
+    /// the one the starter move plans (SS-42) and the one turning the float off plans (FL-35). When none is left a new range
     /// is taken from the book and stored before its first index is given
     /// (RQ-02), after `watching` says the live watch can follow it, and
     /// `watching` is told of it so that every address of the desk is watched
@@ -403,12 +419,12 @@ impl OwnNode {
         now: u64,
         watching: &mut dyn Watching,
     ) -> Result<u32, OwnNodeError> {
-        let skip = self.shop.move_plan_index();
+        let skip = [self.shop.move_plan_index(), self.shop.float_off_plan_index()];
         let free = |ranges: Vec<openbmt_core::pinned_wallet::IndexRange>| {
             ranges
                 .iter()
                 .flat_map(|r| r.start..r.end)
-                .find(|i| !used(*i) && Some(*i) != skip)
+                .find(|i| !used(*i) && !skip.contains(&Some(*i)))
         };
         if let Some(index) = free(self.shop.book().ranges_of(&self.shop.owner_id())) {
             return Ok(index);

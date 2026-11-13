@@ -1013,3 +1013,34 @@ fn ss_41_an_offer_or_bundle_made_after_the_repin_is_for_the_new_wallet() {
     assert!(!offer_open_at(T0, T0 + OFFER_WINDOW_SECS + 1));
     assert!(offer_open_at(T0, T0 - 1));
 }
+
+#[test]
+fn fl_35_the_float_off_index_is_taken_once_above_every_range_and_a_retry_gets_the_same() {
+    let (mut s, disk, _, _) = switched_shop();
+    assert_eq!(s.float_off_plan_index(), None);
+    let first = s.float_off_index(T0 + 100, |b| disk.put(b)).unwrap();
+    // The counter holds 0 to 1,000 and its switch range 1,000 to 2,000.
+    assert_eq!(first, 2_000);
+    assert_eq!(s.book().device_of(first), Some(s.owner_id()));
+    assert_eq!(s.float_off_plan_index(), Some(first));
+    let book = s.book().clone();
+    let stored = disk.get();
+    let again = s
+        .float_off_index(T0 + 900, |_: &[u8]| -> Result<(), String> {
+            panic!("stored")
+        })
+        .unwrap();
+    assert_eq!(again, first);
+    assert_eq!(s.book(), &book);
+    assert_eq!(disk.get(), stored);
+    // The plan is in the stored state, and the starter's move still takes its own.
+    let mut back =
+        OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), &stored).unwrap();
+    assert_eq!(back.float_off_plan_index(), Some(first));
+    assert_eq!(back.book(), s.book());
+    let failed = switched_shop()
+        .0
+        .float_off_index(T0 + 1, |_: &[u8]| Err("disk full".to_string()));
+    assert!(matches!(failed, Err(OwnError::Store(_))));
+    let _ = &mut back;
+}

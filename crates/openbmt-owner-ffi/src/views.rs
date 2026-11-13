@@ -146,6 +146,34 @@ wire_record_get!(LinkConfig {
     check_in_grace_secs
 });
 
+/// FL-05: the refund float for the node to watch as a wallet of its own: the
+/// public description (it holds no key), how far its receive and change
+/// chains have been used or handed out, and the height it was set up at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FloatWatchConfig {
+    /// The float's description (`float_open`, `float_seal`).
+    pub description: String,
+    /// One past the highest receive index handed out.
+    pub receive_end: u32,
+    /// One past the highest change index used.
+    pub change_end: u32,
+    /// The height the float was set up at; 0 takes the wallet's birthday.
+    pub birthday: u32,
+}
+
+wire_record!(FloatWatchConfig {
+    description,
+    receive_end,
+    change_end,
+    birthday
+});
+wire_record_get!(FloatWatchConfig {
+    description,
+    receive_end,
+    change_end,
+    birthday
+});
+
 /// What `start` is given. The owner's secret, the Key app's root, the wallet
 /// and Key 1's account key are what the shop was set up with; the app keeps
 /// them and hands them over at each start.
@@ -189,6 +217,8 @@ pub struct StartConfig {
     /// one the shop's state (`own-shop`) is kept in. `None` for a shop with
     /// a Key app.
     pub own_wallet: Option<Vec<u8>>,
+    /// FL-05: the refund float to watch, or none.
+    pub float: Option<FloatWatchConfig>,
 }
 
 wire_record!(StartConfig {
@@ -208,7 +238,8 @@ wire_record!(StartConfig {
     broadcast_proxy,
     without_tor,
     link,
-    own_wallet
+    own_wallet,
+    float
 });
 wire_record_get!(StartConfig {
     dir,
@@ -227,7 +258,8 @@ wire_record_get!(StartConfig {
     broadcast_proxy,
     without_tor,
     link,
-    own_wallet
+    own_wallet,
+    float
 });
 
 /// The arguments of `queue_refund`.

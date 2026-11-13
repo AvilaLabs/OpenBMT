@@ -349,6 +349,7 @@ fn sample() -> StartConfig {
             check_in_grace_secs: 10,
         }),
         own_wallet: None,
+        float: None,
     }
 }
 

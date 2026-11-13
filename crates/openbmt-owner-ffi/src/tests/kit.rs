@@ -142,6 +142,7 @@ pub fn start_config(dir: &str) -> StartConfig {
         without_tor: true,
         link: None,
         own_wallet: None,
+        float: None,
     }
 }
 
