@@ -173,12 +173,12 @@ impl RequestBook {
             return bad("the next return is not the one after the last");
         }
         r.finish().map_err(corrupt)?;
-        let queued = returns
+        let in_flight = returns
             .iter()
-            .filter(|r| r.state == ReturnState::Queued)
+            .filter(|r| matches!(r.state, ReturnState::Queued | ReturnState::Sent { .. }))
             .count();
-        if queued > MAX_QUEUED_RETURNS {
-            return bad("more returns wait than one payment takes");
+        if in_flight > MAX_QUEUED_RETURNS {
+            return bad("more returns are queued or in a spend than one payment takes");
         }
         let book = Self {
             next_number,

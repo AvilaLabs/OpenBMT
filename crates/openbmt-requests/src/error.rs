@@ -120,7 +120,8 @@ pub enum ReturnRefused {
     StaleRate,
     /// RQ-28: the script is not one of a standard kind.
     BadScript,
-    /// RQ-29: as many returns are waiting as one spend takes.
+    /// RQ-29: as many returns are queued or in a spend not yet confirmed as one
+    /// spend takes.
     QueueFull,
     /// RQ-30: the book holds as many returns as a book may.
     BookFull,

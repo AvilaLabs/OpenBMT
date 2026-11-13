@@ -8,8 +8,8 @@ use crate::error::ReturnRefused;
 use crate::model::{sats_floor, CheckedRate, Return, ReturnState};
 use openbmt_counter::money::MAX_SATS;
 
-/// Most returns that wait at once: the most outputs a spend takes (100),
-/// less one for the change (RQ-29).
+/// Most returns that are queued or in a spend not yet confirmed at once:
+/// the most outputs a spend takes (100), less one for the change (RQ-29).
 pub const MAX_QUEUED_RETURNS: usize = 99;
 
 /// How the owner chooses the amount of a return (RQ-26).
@@ -68,12 +68,12 @@ impl RequestBook {
         if sats < min_sats {
             return Err(ReturnRefused::TooSmall { min_sats });
         }
-        let queued = self
+        let in_flight = self
             .returns
             .iter()
-            .filter(|r| r.state == ReturnState::Queued)
+            .filter(|r| matches!(r.state, ReturnState::Queued | ReturnState::Sent { .. }))
             .count();
-        if queued >= MAX_QUEUED_RETURNS {
+        if in_flight >= MAX_QUEUED_RETURNS {
             return Err(ReturnRefused::QueueFull);
         }
         if self.returns.len() >= MAX_RETURNS {

@@ -514,12 +514,41 @@ fn rq_29_no_more_returns_wait_than_one_spend_takes() {
     );
     // Under the 100 outputs a spend takes, with one left for the change.
     assert_eq!(MAX_QUEUED_RETURNS, 99);
-    // Once some are in a spend the queue has room again.
+    // A return in a spend not yet confirmed still counts.
     let ids = book.queued_return_ids();
     book.mark_returns_sent(&ids[..10], [1; 32]);
+    assert_eq!(
+        book.queue_return(n, ReturnAmount::Sats(1_000), script_of(P2WPKH), T0, None),
+        Err(ReturnRefused::QueueFull)
+    );
+    // Once a spend is confirmed its returns are done and leave the count.
+    book.mark_returns_done([1; 32], T0);
     assert!(book
         .queue_return(n, ReturnAmount::Sats(1_000), script_of(P2WPKH), T0, None)
         .is_ok());
+}
+
+#[test]
+fn rq_29_two_batches_in_spends_replaced_without_them_never_pass_99() {
+    let mut book = RequestBook::new();
+    let n = make_btc(&mut book, 0, 60_000, 7);
+    book.credit(n, &[arrival(1, 10, T0, 5_000_000)], T0, &shop(), None)
+        .unwrap();
+    for _ in 0..MAX_QUEUED_RETURNS {
+        book.queue_return(n, ReturnAmount::Sats(1_000), script_of(P2WPKH), T0, None)
+            .unwrap();
+    }
+    let ids = book.queued_return_ids();
+    book.mark_returns_sent(&ids, [1; 32]);
+    // The second batch of the review is refused at the 100th return.
+    assert_eq!(
+        book.queue_return(n, ReturnAmount::Sats(1_000), script_of(P2WPKH), T0, None),
+        Err(ReturnRefused::QueueFull)
+    );
+    // After a replacement the batch is requeued and the book reads back.
+    assert_eq!(book.requeue_returns([1; 32]), MAX_QUEUED_RETURNS);
+    assert_eq!(book.returns_to_pay().len(), MAX_QUEUED_RETURNS);
+    assert_eq!(RequestBook::from_bytes(&book.to_bytes()).unwrap(), book);
 }
 
 #[test]

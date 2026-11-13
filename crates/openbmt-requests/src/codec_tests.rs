@@ -245,6 +245,40 @@ fn rq_30_no_more_than_99_returns_wait_in_the_file() {
 }
 
 #[test]
+fn rq_30_returns_queued_or_in_a_spend_together_are_at_most_99_in_the_file() {
+    let mut b = RequestBook::new();
+    b.make(&new("x", 60_000, false, None), 0, T0, &shop(), None)
+        .unwrap();
+    b.credit(1, &[arrival(1, 10, T0, 5_000_000)], T0, &shop(), None)
+        .unwrap();
+    for _ in 0..99 {
+        b.queue_return(1, ReturnAmount::Sats(1_000), script(), T0, None)
+            .unwrap();
+    }
+    let ids = b.queued_return_ids();
+    b.mark_returns_sent(&ids[..50], [1; 32]);
+    assert_eq!(RequestBook::from_bytes(&b.to_bytes()).unwrap(), b);
+    let r = b.returns[0].clone();
+    let mut hundred = b.clone();
+    hundred.returns.push(Return {
+        id: 100,
+        state: ReturnState::Sent { txid: [2; 32] },
+        ..r
+    });
+    hundred.next_return = 101;
+    assert!(RequestBook::from_bytes(&hundred.to_bytes()).is_err());
+    // The same hundred with one of them done reads.
+    hundred.returns[99].state = ReturnState::Done {
+        txid: [2; 32],
+        at: T0,
+    };
+    assert_eq!(
+        RequestBook::from_bytes(&hundred.to_bytes()).unwrap(),
+        hundred
+    );
+}
+
+#[test]
 fn rq_34_the_wide_note_of_64_characters_is_read_back() {
     let mut b = RequestBook::new();
     let note = "\u{1f600}".repeat(64);
