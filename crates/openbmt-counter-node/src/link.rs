@@ -464,6 +464,11 @@ impl<R: Post> CounterLink<R> {
                     self.refused_by_node(format!("switch not taken: {e}"));
                 }
             }
+            Kind::Starter => {
+                if let Err(e) = node.take_starter_line(&message.content) {
+                    self.refused_by_node(format!("starter line not taken: {e}"));
+                }
+            }
             Kind::RecordsReceived => self.take_mark(node, &message.content),
             Kind::Settings => self.take_settings(node, &message.content),
             Kind::DeviceList => self.note(

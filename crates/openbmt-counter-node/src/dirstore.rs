@@ -64,6 +64,12 @@ pub const CONFIRM_FILE: &str = "confirm.bin";
 /// The file of the one switch from the starter wallet that waits for the
 /// manager (CR-259).
 pub const SWITCH_FILE: &str = "switch.bin";
+/// The file of the last starter line taken: the `OBM_` frame and nothing
+/// else (CR-272).
+pub const STARTER_LINE_FILE: &str = "starter-line.bin";
+/// The file of the starter payments shown at the counter and which of them
+/// were seen (CR-274).
+pub const STARTER_CARDS_FILE: &str = "starter-cards.bin";
 
 /// Why a file operation or a read failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -446,6 +452,47 @@ impl DirStore {
             Err(e) => return Err(io_err(SWITCH_FILE, "remove")(e)),
         }
         self.sync_dir()
+    }
+
+    /// CR-272: replace the stored starter line, written whole (CR-161). On an
+    /// error the old file is as it was.
+    pub fn put_starter_line(&mut self, bytes: &[u8]) -> Result<(), DirStoreError> {
+        self.write_whole(STARTER_LINE_FILE, bytes)
+    }
+
+    /// CR-272: the stored starter line, or `None`. The bytes are not read
+    /// here.
+    pub fn starter_line_file(&self) -> Result<Option<Vec<u8>>, DirStoreError> {
+        self.read(STARTER_LINE_FILE)
+    }
+
+    /// CR-274: replace the stored starter payments, written whole.
+    pub fn put_starter_cards(&mut self, bytes: &[u8]) -> Result<(), DirStoreError> {
+        self.write_whole(STARTER_CARDS_FILE, bytes)
+    }
+
+    /// CR-274: the stored starter payments, or `None`. The bytes are not
+    /// read here.
+    pub fn starter_cards_file(&self) -> Result<Option<Vec<u8>>, DirStoreError> {
+        self.read(STARTER_CARDS_FILE)
+    }
+
+    /// CR-275: take the starter line and the starter payments away: remove
+    /// both files and flush the directory. No file is nothing to remove.
+    pub fn remove_starter(&mut self) -> Result<(), DirStoreError> {
+        let mut removed = false;
+        for name in [STARTER_LINE_FILE, STARTER_CARDS_FILE] {
+            match fs::remove_file(self.path(name)) {
+                Ok(()) => removed = true,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(io_err(name, "remove")(e)),
+            }
+        }
+        if removed {
+            self.sync_dir()
+        } else {
+            Ok(())
+        }
     }
 
     /// Read everything back. A cut-short last record is cut off the file

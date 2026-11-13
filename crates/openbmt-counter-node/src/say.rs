@@ -21,6 +21,7 @@ use crate::paired::{PairRefused, RelayRefused};
 use crate::paired_own::OwnPairRefused;
 use crate::relaylink::LinkLine;
 use crate::settings::{SettingsFault, SettingsLine, SettingsRefused};
+use crate::starter::StarterRefused;
 use crate::switch::{SwitchNotice, SwitchRefused, SwitchStepRefused};
 
 impl DirStoreError {
@@ -128,6 +129,13 @@ fn said(tone: Tone, key: &'static str, who: Who) -> Words {
     Words::new(tone, heading, what, who, next)
 }
 
+/// Words of section 26 that are still to be written: the placeholder stands
+/// in the heading and both sentences, so that it shows wherever the words
+/// would (CR-276). Its value is its own name, which names the rule.
+fn needed(tone: Tone, placeholder: &'static str, who: Who) -> Words {
+    Words::new(tone, placeholder, placeholder, who, placeholder)
+}
+
 /// Whether these words are a placeholder (CR-264).
 pub fn is_placeholder(words: &Words) -> bool {
     words.heading.starts_with("WORDS_NEEDED_")
@@ -193,6 +201,44 @@ pub fn switch_dropped_words() -> Words {
 /// CR-260: the line Home shows the manager while a switch waits.
 pub fn switch_home_line_words() -> Words {
     said(Tone::Info, "CR_260_HOME_LINE", Who::Manager).code("CR-260")
+}
+
+impl StarterRefused {
+    /// What is told about a starter line that was not taken, or a payment
+    /// that was not marked seen (CR-272, CR-274, CR-276). Nothing changed.
+    pub fn words(&self) -> Words {
+        let (placeholder, who) = match self {
+            Self::Frame(_) => ("WORDS_NEEDED_CR272_NOT_A_LINE", Who::Owner),
+            Self::NotStarter => ("WORDS_NEEDED_CR272_NOT_STARTER", Who::Owner),
+            Self::NotFromOwner => ("WORDS_NEEDED_CR272_NOT_FROM_OWNER", Who::Owner),
+            Self::Old { .. } => ("WORDS_NEEDED_CR272_OLD", Who::Owner),
+            Self::NotWritten(_) => ("WORDS_NEEDED_CR272_NOT_SAVED", Who::Owner),
+            Self::NoSuchPayment => ("WORDS_NEEDED_CR274_NO_SUCH_PAYMENT", Who::Cashier),
+        };
+        needed(Tone::Ended, placeholder, who)
+            .code(self.rule())
+            .detail(self.to_string())
+    }
+}
+
+/// CR-273, SS-38: what "New sale" says when it offers no bitcoin because the
+/// starter wallet holds the limit and the owner asked to stop above it. (The
+/// owner phone's `no_bitcoin_words` in `openbmt-owner` are words for this
+/// place.)
+pub fn starter_stopped_words() -> Words {
+    needed(Tone::Info, "WORDS_NEEDED_CR273_STOPPED", Who::Cashier).code("CR-273")
+}
+
+/// CR-273: the line Home shows when the last starter line said stop and is
+/// too old to say whether the wallet is over the limit.
+pub fn starter_unchecked_words() -> Words {
+    needed(Tone::Info, "WORDS_NEEDED_CR273_UNCHECKED", Who::Manager).code("CR-273")
+}
+
+/// CR-274: the heading of the cards of Home that show the starter wallet's
+/// payments.
+pub fn starter_cards_words() -> Words {
+    needed(Tone::Info, "WORDS_NEEDED_CR274_CARDS", Who::Manager).code("CR-274")
 }
 
 impl SettingsRefused {
@@ -993,6 +1039,13 @@ pub fn all_words() -> Vec<(String, Words)> {
         SwitchNotice::Dropped.words(),
     ));
     all.push(("SwitchHomeLine".to_string(), switch_home_line_words()));
+    // CR-276: the states and refusals of the starter line.
+    for (name, e) in every_starter_refused() {
+        all.push((format!("StarterRefused::{name}"), e.words()));
+    }
+    all.push(("StarterStopped".to_string(), starter_stopped_words()));
+    all.push(("StarterUnchecked".to_string(), starter_unchecked_words()));
+    all.push(("StarterCards".to_string(), starter_cards_words()));
     all.push(("Switched".to_string(), switched_words()));
     all.push(("SwitchDifferent".to_string(), switch_dropped_words()));
     all
@@ -1018,6 +1071,22 @@ pub fn every_switch_refused() -> Vec<(&'static str, SwitchRefused)> {
             "NotWritten",
             SwitchRefused::NotWritten("switch.bin: full".to_string()),
         ),
+    ]
+}
+
+/// One value for every variant of [`StarterRefused`] (SC-12).
+pub fn every_starter_refused() -> Vec<(&'static str, StarterRefused)> {
+    use openbmt_core::wire::DecodeError;
+    vec![
+        ("Frame", StarterRefused::Frame(DecodeError::Truncated)),
+        ("NotStarter", StarterRefused::NotStarter),
+        ("NotFromOwner", StarterRefused::NotFromOwner),
+        ("Old", StarterRefused::Old { last: 5, got: 4 }),
+        (
+            "NotWritten",
+            StarterRefused::NotWritten("starter-line.bin: full".to_string()),
+        ),
+        ("NoSuchPayment", StarterRefused::NoSuchPayment),
     ]
 }
 

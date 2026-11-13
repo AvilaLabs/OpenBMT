@@ -118,6 +118,7 @@ use openbmt_core::settings::{
     Authority, Change, OwnNode as SettingsOwnNode, SettingNote, Settings, SettingsError,
     SignedSettings, SwapProvider, LIGHTNING_NODE_BYTES,
 };
+use openbmt_core::starter_line::StarterLine;
 use openbmt_core::wire::DecodeError;
 use openbmt_counter::{
     Actor, Amount, BatchTakeRefused, BillKind, BillRefused, BillView, BlockError, CancelRefused,
@@ -151,6 +152,7 @@ use crate::lightning::{
 use crate::notices::NodeRecords;
 use crate::paired_own::OwnPairingRecord;
 use crate::settings::{check_not_rolled, decode_file, SettingsFault, SettingsRefused};
+use crate::starter::{stop_decision, Cards, StarterCard, StarterRefused, StopDecision};
 use crate::swap::{Effect, SaleSwap, SwapDriver, SwapRequest, Update};
 use crate::switch::{
     check_switch, PendingSwitch, SwitchNotice, SwitchRefused, SwitchStepRefused, Waiting,
@@ -611,6 +613,10 @@ pub struct Node<P: DriverPort = Handle> {
     /// CR-261: the hash of the wallet a switch is being finished for (steps
     /// three and four are still to do).
     switch_finishing: Option<[u8; 32]>,
+    /// CR-272: the last starter line taken.
+    starter_line: Option<StarterLine>,
+    /// CR-274: the starter payments shown at the counter and which were seen.
+    starter_cards: Cards,
     /// CR-103: the driver was started with an own node.
     own_configured: bool,
     /// What the driver last said about the own node (NR-102), or, before it
@@ -981,6 +987,8 @@ impl<P: DriverPort> Node<P> {
             switch_notice: None,
             record_update: None,
             switch_finishing: None,
+            starter_line: None,
+            starter_cards: Cards::default(),
             own_configured,
             own_input: (own_configured && !node_only).then_some(OwnNodeInput {
                 link: OwnNodeLink::Down { since: started_at },
@@ -1046,6 +1054,7 @@ impl<P: DriverPort> Node<P> {
         }
         node.take_ln_notes();
         node.start_switch(recovery, started_at);
+        node.start_starter();
         node.restore_swaps(started_at);
         node.update_all_blocks();
         node.retry_setting_record();
@@ -1520,6 +1529,7 @@ impl<P: DriverPort> Node<P> {
         let bytes = next.to_bytes();
         self.own_record = Some(next);
         self.starter = false;
+        self.drop_starter();
         self.switch = None;
         self.switch_finishing = Some(waiting.switch.wallet_hash());
         self.record_update = Some(bytes.clone());
@@ -1574,6 +1584,148 @@ impl<P: DriverPort> Node<P> {
         self.note(
             "CR-260: the manager said the address is different: the switch is dropped".to_string(),
         );
+        Ok(())
+    }
+
+    // CR-272 to CR-276: the starter line.
+
+    /// CR-272, CR-274, CR-275: what a start finds of the starter line and the
+    /// starter payments. A counter that is not a starter counter (it never
+    /// was, or it switched) drops both files; one that is reads them
+    /// strictly, and a file that does not read or does not check is of no
+    /// use and is removed with a note.
+    fn start_starter(&mut self) {
+        if !self.starter {
+            self.drop_starter();
+            return;
+        }
+        let line = match self.store.starter_line_file() {
+            Ok(Some(bytes)) => match StarterLine::from_bytes(&bytes) {
+                Ok(line) if self.starter_signed(&line) => Some(line),
+                _ => {
+                    self.note(
+                        "CR-272: the file of the starter line is of no use: removed".to_string(),
+                    );
+                    None
+                }
+            },
+            Ok(None) => None,
+            Err(e) => {
+                self.note(format!(
+                    "CR-272: the file of the starter line was not read: {e}"
+                ));
+                None
+            }
+        };
+        let cards = match self.store.starter_cards_file() {
+            Ok(Some(bytes)) => match Cards::from_bytes(&bytes) {
+                Ok(cards) => cards,
+                Err(e) => {
+                    self.note(format!(
+                        "CR-274: the file of the starter payments does not read: {e}: removed"
+                    ));
+                    Cards::default()
+                }
+            },
+            Ok(None) => Cards::default(),
+            Err(e) => {
+                self.note(format!(
+                    "CR-274: the file of the starter payments was not read: {e}"
+                ));
+                Cards::default()
+            }
+        };
+        self.starter_line = line;
+        self.starter_cards = cards;
+    }
+
+    fn starter_signed(&self, line: &StarterLine) -> bool {
+        matches!(self.authority, Authority::OwnWallet { owner } if line.verify(&owner))
+    }
+
+    /// CR-275: drop the starter line and the starter payments, in memory and
+    /// on the disk.
+    fn drop_starter(&mut self) {
+        self.starter_line = None;
+        self.starter_cards = Cards::default();
+        if let Err(e) = self.store.remove_starter() {
+            self.note(format!("CR-275: the starter files were not removed: {e}"));
+        }
+    }
+
+    /// CR-272: take a starter line from the owner phone. Only while the
+    /// counter is paired with the starter wallet and has not switched, only
+    /// with the pinned owner root's signature, and only with a number above
+    /// the last one taken. The payments are kept first (CR-274) and the line
+    /// after them, each written whole (CR-161); if a write fails the line is
+    /// refused and nothing changes.
+    pub fn take_starter_line(&mut self, bytes: &[u8]) -> Result<(), StarterRefused> {
+        let line = StarterLine::from_bytes(bytes).map_err(StarterRefused::Frame)?;
+        if !self.starter {
+            return Err(StarterRefused::NotStarter);
+        }
+        if !self.starter_signed(&line) {
+            return Err(StarterRefused::NotFromOwner);
+        }
+        if let Some(last) = self.starter_line.as_ref().map(|l| l.number) {
+            if line.number <= last {
+                return Err(StarterRefused::Old {
+                    last,
+                    got: line.number,
+                });
+            }
+        }
+        let mut cards = self.starter_cards.clone();
+        if cards.add(&line.payments) {
+            self.store
+                .put_starter_cards(&cards.to_bytes())
+                .map_err(|e| StarterRefused::NotWritten(e.to_string()))?;
+        }
+        self.store
+            .put_starter_line(bytes)
+            .map_err(|e| StarterRefused::NotWritten(e.to_string()))?;
+        self.starter_cards = cards;
+        self.starter_line = Some(line);
+        Ok(())
+    }
+
+    /// CR-273: whether "New sale" offers bitcoin, from the last line taken,
+    /// the time now and the heartbeat age limit of the settings in force.
+    pub fn starter_decision(&self) -> StopDecision {
+        stop_decision(
+            self.starter_line.as_ref(),
+            self.clock.now(),
+            u64::from(self.settings.heartbeat_max_age_secs),
+        )
+    }
+
+    /// CR-272: the last starter line taken.
+    pub fn starter_line(&self) -> Option<&StarterLine> {
+        self.starter_line.as_ref()
+    }
+
+    /// CR-274: the payments of the starter wallet kept, newest first.
+    pub fn starter_payments(&self) -> Vec<StarterCard> {
+        self.starter_cards.newest_first()
+    }
+
+    /// CR-274: the payments of the starter wallet with a time in `from..to`,
+    /// newest first.
+    pub fn starter_payments_between(&self, from: u64, to: u64) -> Vec<StarterCard> {
+        self.starter_cards.between(from, to)
+    }
+
+    /// CR-274: someone at the counter has seen this payment. The file is
+    /// written whole before the card goes.
+    pub fn starter_seen(&mut self, txid: &[u8; 32]) -> Result<(), StarterRefused> {
+        let mut cards = self.starter_cards.clone();
+        if !cards.mark_seen(txid) {
+            return Err(StarterRefused::NoSuchPayment);
+        }
+        self.store
+            .put_starter_cards(&cards.to_bytes())
+            .map_err(|e| StarterRefused::NotWritten(e.to_string()))?;
+        self.starter_cards = cards;
         Ok(())
     }
 

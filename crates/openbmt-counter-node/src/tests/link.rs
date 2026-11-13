@@ -1017,3 +1017,44 @@ fn lk_78_a_switch_is_given_to_a_starter_counter_and_refused_by_the_others() {
     k.step(T0);
     assert_eq!(k.link.state().node_refusals, 1);
 }
+
+#[test]
+fn lk_79_a_starter_line_is_given_to_a_starter_counter_and_refused_by_the_others() {
+    use openbmt_core::starter_line::{LinePayment, StarterLine};
+    let payment = LinePayment {
+        txid: [4; 32],
+        sats: 21_000,
+        time: T0 - 5,
+        by_owner: true,
+    };
+    let line =
+        |number| StarterLine::sign(&id(1), number, T0, 300, 200, true, &[payment]).to_bytes();
+    let mut w = world_on(config(), true, starter_rig);
+    w.send(Kind::Starter, &line(1));
+    w.step(T0);
+    assert_eq!(w.link.state().node_refusals, 0);
+    assert_eq!(w.rig.node.starter_line().map(|l| l.number), Some(1));
+    assert_eq!(w.rig.node.starter_payments().len(), 1);
+    // The same number again, and what is not a line, are refused and noted;
+    // the step goes on.
+    w.send(Kind::Starter, &line(1));
+    w.send(Kind::Starter, b"junk");
+    w.step(T0 + 1);
+    assert_eq!(w.link.state().node_refusals, 2);
+    assert!(w
+        .notes()
+        .iter()
+        .any(|n| n.contains("starter line not taken")));
+    assert_eq!(w.rig.node.starter_line().map(|l| l.number), Some(1));
+    // A counter paired with the shop's own wallet with no flag refuses it,
+    // and so does one paired with the Key app.
+    let mut o = world_on(config(), true, own_rig);
+    o.send(Kind::Starter, &line(1));
+    o.step(T0);
+    assert_eq!(o.link.state().node_refusals, 1);
+    assert!(o.rig.node.starter_line().is_none());
+    let mut k = world(config());
+    k.send(Kind::Starter, &line(1));
+    k.step(T0);
+    assert_eq!(k.link.state().node_refusals, 1);
+}

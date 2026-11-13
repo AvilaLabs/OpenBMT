@@ -27,6 +27,10 @@ fn old() -> PinnedWallet {
     PinnedWallet::from_text(OLD).unwrap()
 }
 
+pub(super) fn new_wallet() -> PinnedWallet {
+    new()
+}
+
 fn new() -> PinnedWallet {
     PinnedWallet::from_text(NEW).unwrap()
 }
@@ -49,7 +53,7 @@ fn range_for(counter: u8, start: u32, end: u32, signer: u8) -> SignedRange {
 /// A good switch: counter 3, the owner root 1, from the old wallet to the new
 /// one, with a first range above the first range of the pairing, since a
 /// sale is kept by its address index.
-fn good() -> SwitchOwn {
+pub(super) fn good() -> SwitchOwn {
     SwitchOwn::sign(
         &id(1),
         id(3).device_id(),
@@ -77,7 +81,7 @@ fn config_for(
     config
 }
 
-fn rig_for(dir: &std::path::Path, record: &OwnPairingRecord) -> Rig {
+pub(super) fn rig_for(dir: &std::path::Path, record: &OwnPairingRecord) -> Rig {
     let time = Arc::new(AtomicU64::new(T0));
     let mut rig = start_with(config_for(dir, &time, record), time);
     assert!(rig.feed(vec![Rig::peers()]).is_empty());
@@ -89,7 +93,7 @@ fn try_rig_for(dir: &std::path::Path, record: &OwnPairingRecord) -> Result<Rig, 
     try_start_with(config_for(dir, &time, record), time)
 }
 
-fn fresh_rig(dir: &std::path::Path) -> Rig {
+pub(super) fn fresh_rig(dir: &std::path::Path) -> Rig {
     rig_for(dir, &starter_record())
 }
 
@@ -121,7 +125,7 @@ fn switched_records(dir: &std::path::Path) -> Vec<SwitchedHeld> {
         .collect()
 }
 
-fn switch_path(dir: &std::path::Path) -> std::path::PathBuf {
+pub(super) fn switch_path(dir: &std::path::Path) -> std::path::PathBuf {
     dir.join(SWITCH_FILE)
 }
 
