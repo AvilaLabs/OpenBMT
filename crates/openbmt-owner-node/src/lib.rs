@@ -125,8 +125,8 @@ pub use refunds::{
     Applied, CashRefundSeen, Evidence, IntakeError, NoteKind, RefundIntake, RefundNote, Stopped,
 };
 pub use requests::{
-    return_label, MadeRequest, PendingArrival, RequestContext, RequestError, RequestsOff, ReturnAdded,
-    Shared, MAX_ARRIVALS, REQUEST_ARRIVALS_FILE, REQUEST_BOOK_FILE,
+    return_label, MadeRequest, PendingArrival, RequestContext, RequestError, RequestsOff,
+    ReturnAdded, Shared, MAX_ARRIVALS, REQUEST_ARRIVALS_FILE, REQUEST_BOOK_FILE,
 };
 pub use settings_roster::{RosterEntry, RosterError, SettingsRoster};
 pub use settle_owed::{

@@ -45,9 +45,9 @@ use openbmt_owner::own_say::needed;
 use openbmt_owner::{SaleFacts, SaleKey, Stage};
 use openbmt_requests::say;
 use openbmt_requests::{
-    check_return_address, share_link, AddressRefused, Arrival, BookError, CheckedRate, CreditRefused,
-    Day, DueRepeat, EndRefused, MakeRefused, NewRequest, Quote, RepeatRefused, RequestBook,
-    ReturnAmount, ReturnRefused, ShareRefused, Shop,
+    check_return_address, share_link, AddressRefused, Arrival, BookError, CheckedRate,
+    CreditRefused, Day, DueRepeat, EndRefused, MakeRefused, NewRequest, Quote, RepeatRefused,
+    RequestBook, ReturnAmount, ReturnRefused, ShareRefused, Shop,
 };
 use openbmt_watch::HeaderChain;
 
@@ -121,7 +121,10 @@ pub enum RequestsOff {
 impl fmt::Display for RequestsOff {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::KeyApp => write!(f, "RQ-01: a shop with a Key app has no requests of the owner"),
+            Self::KeyApp => write!(
+                f,
+                "RQ-01: a shop with a Key app has no requests of the owner"
+            ),
             Self::Unreadable(e) => write!(f, "{e}"),
         }
     }
@@ -194,10 +197,7 @@ impl RequestError {
 
     /// Whether the refusal is the store's (a file), not a rule's.
     pub fn is_store(&self) -> bool {
-        matches!(
-            self,
-            Self::Store(_) | Self::Off(RequestsOff::Unreadable(_))
-        )
+        matches!(self, Self::Store(_) | Self::Off(RequestsOff::Unreadable(_)))
     }
 }
 
@@ -405,7 +405,8 @@ impl<P: OwnerPort> OwnerNode<P> {
     }
 
     fn address_of(&self, script: &ScriptBuf) -> String {
-        Address::from_script(script, self.network()).map_or_else(|_| String::new(), |a| a.to_string())
+        Address::from_script(script, self.network())
+            .map_or_else(|_| String::new(), |a| a.to_string())
     }
 
     fn desk_script(&self, index: u32) -> Option<ScriptBuf> {
@@ -615,8 +616,8 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// RQ-28, RQ-33: the script behind a pasted or scanned return address,
     /// or why it was refused, and the address in groups of four.
     pub fn check_return(&self, text: &str) -> Result<(ScriptBuf, String), RequestError> {
-        let script = check_return_address(text, |s| self.is_own_script(s))
-            .map_err(RequestError::Address)?;
+        let script =
+            check_return_address(text, |s| self.is_own_script(s)).map_err(RequestError::Address)?;
         let groups = openbmt_requests::address_in_groups(&script).unwrap_or_default();
         Ok((script, groups))
     }
@@ -715,9 +716,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             .map_err(|e| queue_error(e.to_string()))?;
         let sale = self.desk_sale(index);
         let write = self.queue_writer();
-        let owner = self
-            .owner_mut()
-            .map_err(|e| queue_error(e.to_string()))?;
+        let owner = self.owner_mut().map_err(|e| queue_error(e.to_string()))?;
         owner
             .set_sale_facts(
                 sale,
@@ -729,14 +728,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             )
             .map_err(|e| queue_error(e.to_string()))?;
         owner
-            .queue_refund(
-                sale,
-                &return_label(number, id),
-                script,
-                sats,
-                None,
-                &write,
-            )
+            .queue_refund(sale, &return_label(number, id), script, sats, None, &write)
             .map_err(|e| queue_error(e.to_string()))
     }
 
@@ -774,7 +766,8 @@ impl<P: OwnerPort> OwnerNode<P> {
                 let Some((Keychain::Receive, index)) = self.scripts.get(&out.script_pubkey) else {
                     continue;
                 };
-                let (Some(vout), true) = (u32::try_from(vout).ok(), by_index.contains(index)) else {
+                let (Some(vout), true) = (u32::try_from(vout).ok(), by_index.contains(index))
+                else {
                     continue;
                 };
                 if sats == 0 {
@@ -799,10 +792,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 if pending.len() >= MAX_ARRIVALS {
                     break;
                 }
-                if !pending
-                    .iter()
-                    .any(|p| p.txid == a.txid && p.vout == a.vout)
-                {
+                if !pending.iter().any(|p| p.txid == a.txid && p.vout == a.vout) {
                     pending.push(a);
                 }
             }
@@ -859,18 +849,24 @@ impl<P: OwnerPort> OwnerNode<P> {
             .owner
             .refunds()
             .iter()
-            .find(|r| r.cashier == label && matches!(r.stage, Stage::Queued | Stage::Returned { .. }))
+            .find(|r| {
+                r.cashier == label && matches!(r.stage, Stage::Queued | Stage::Returned { .. })
+            })
             .map(|r| r.id)
         else {
             return;
         };
         if self.ready_for_queue_write().is_err() {
-            self.note(format!("the refund of {label} waits to be taken off the queue"));
+            self.note(format!(
+                "the refund of {label} waits to be taken off the queue"
+            ));
             return;
         }
         let write = self.queue_writer();
         if let Err(e) = self.owner.cancel(refund, &write) {
-            self.note(format!("the refund of {label} was not taken off the queue: {e}"));
+            self.note(format!(
+                "the refund of {label} was not taken off the queue: {e}"
+            ));
         }
     }
 
@@ -1031,7 +1027,9 @@ impl<P: OwnerPort> OwnerNode<P> {
             Ok(())
         });
         if let Err(e) = result {
-            self.note(format!("the returns of requests could not be followed: {e}"));
+            self.note(format!(
+                "the returns of requests could not be followed: {e}"
+            ));
         }
     }
 }

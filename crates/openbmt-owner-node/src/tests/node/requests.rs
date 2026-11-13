@@ -93,8 +93,15 @@ fn rq_01_a_shop_with_a_key_app_has_no_requests_of_the_owner() {
     assert_eq!(rig.node.requests().unwrap_err(), &RequestsOff::KeyApp);
     rig.node.set_request_context(context(1), None);
     let refused = rig.node.make_request(&deposit(100_000), 0, START);
-    assert!(matches!(refused, Err(RequestError::Off(RequestsOff::KeyApp))));
-    assert!(refused.unwrap_err().words().heading.starts_with("WORDS_NEEDED_RQ_01"));
+    assert!(matches!(
+        refused,
+        Err(RequestError::Off(RequestsOff::KeyApp))
+    ));
+    assert!(refused
+        .unwrap_err()
+        .words()
+        .heading
+        .starts_with("WORDS_NEEDED_RQ_01"));
     assert!(!dir.path().join(REQUEST_BOOK_FILE).exists());
 }
 
@@ -117,9 +124,18 @@ fn rq_03_the_book_is_stored_before_the_address_is_given_and_a_restart_reads_it()
     let before = std::fs::read(dir.path().join(REQUEST_BOOK_FILE)).unwrap();
     let again = rig.node.make_request(&deposit(5_000), 0, START);
     assert!(matches!(again, Err(RequestError::Make(_))));
-    assert_eq!(std::fs::read(dir.path().join(REQUEST_BOOK_FILE)).unwrap(), before);
+    assert_eq!(
+        std::fs::read(dir.path().join(REQUEST_BOOK_FILE)).unwrap(),
+        before
+    );
     // The next request takes the next number and index.
-    assert_eq!(rig.node.make_request(&deposit(5_000), 1, START).unwrap().number, 2);
+    assert_eq!(
+        rig.node
+            .make_request(&deposit(5_000), 1, START)
+            .unwrap()
+            .number,
+        2
+    );
     let chain = rig.chain.clone();
     rig.node.shutdown();
     drop(rig);
@@ -141,7 +157,10 @@ fn rq_31_a_book_that_does_not_read_back_is_not_replaced_and_makes_no_request() {
         RequestsOff::Unreadable(_)
     ));
     rig.node.set_request_context(context(1), None);
-    let refused = rig.node.make_request(&deposit(100_000), 0, START).unwrap_err();
+    let refused = rig
+        .node
+        .make_request(&deposit(100_000), 0, START)
+        .unwrap_err();
     assert!(refused.is_store());
     assert_eq!(refused.words().code, Some("RQ-31"));
     assert_eq!(
@@ -207,11 +226,24 @@ fn rq_10_rq_15_a_request_is_credited_from_checked_blocks_only_at_the_depth() {
     rig.mine(&[payment(0, 8, 60_000)]);
     rig.mine_empty(2);
     assert_eq!(status(&rig, 1), Status::Paid);
-    let credits = rig.node.requests().unwrap().request(1).unwrap().credits.len();
+    let credits = rig
+        .node
+        .requests()
+        .unwrap()
+        .request(1)
+        .unwrap()
+        .credits
+        .len();
     assert_eq!(credits, 2);
     rig.node.pump(Duration::ZERO);
     assert_eq!(
-        rig.node.requests().unwrap().request(1).unwrap().credits.len(),
+        rig.node
+            .requests()
+            .unwrap()
+            .request(1)
+            .unwrap()
+            .credits
+            .len(),
         2
     );
 }
@@ -269,7 +301,10 @@ fn rq_37_a_block_that_leaves_takes_the_credit_back_and_the_new_chain_credits_aga
     rig.chain.push(after.clone());
     rig.feed(vec![
         AppEvent::Chain {
-            joined: vec![(height, other.block_hash()), (height + 1, after.block_hash())],
+            joined: vec![
+                (height, other.block_hash()),
+                (height + 1, after.block_hash()),
+            ],
             left: vec![
                 rig.node.watcher().chain().hash_at(height + 1).unwrap(),
                 block.block_hash(),
@@ -290,7 +325,12 @@ fn rq_37_a_block_that_leaves_takes_the_credit_back_and_the_new_chain_credits_aga
     let on_disk = openbmt_requests::RequestBook::open(dir.path()).unwrap();
     assert!(on_disk.request(1).unwrap().credits.is_empty());
     // The payment is mined again in the new chain, and is credited at depth.
-    let again = mine(after.block_hash(), height + 2, 9, std::slice::from_ref(&pay));
+    let again = mine(
+        after.block_hash(),
+        height + 2,
+        9,
+        std::slice::from_ref(&pay),
+    );
     rig.chain.push(again.clone());
     rig.feed(vec![
         AppEvent::Chain {
@@ -438,7 +478,12 @@ fn rq_29_a_return_follows_its_refund_to_sent_back_to_the_queue_and_done() {
     let label = return_label(1, added.id);
     let at = |stage: Stage| BTreeMap::from([(label.clone(), stage)]);
     rig.node.follow_returns_from(&at(Stage::Sent { txid }));
-    assert_eq!(state(&rig), ReturnState::Sent { txid: txid.to_byte_array() });
+    assert_eq!(
+        state(&rig),
+        ReturnState::Sent {
+            txid: txid.to_byte_array()
+        }
+    );
     // The spend is replaced without it: back to the queue.
     rig.node.follow_returns_from(&at(Stage::Queued));
     assert_eq!(state(&rig), ReturnState::Queued);
@@ -448,7 +493,10 @@ fn rq_29_a_return_follows_its_refund_to_sent_back_to_the_queue_and_done() {
     assert!(matches!(state(&rig), ReturnState::Done { .. }));
     // It is stored.
     let on_disk = openbmt_requests::RequestBook::open(dir.path()).unwrap();
-    assert!(matches!(on_disk.returns()[0].state, ReturnState::Done { .. }));
+    assert!(matches!(
+        on_disk.returns()[0].state,
+        ReturnState::Done { .. }
+    ));
 }
 
 #[test]
@@ -465,7 +513,10 @@ fn rq_21_rq_22_the_repeats_are_made_on_the_calls_the_app_makes_with_the_time_pas
     let due = rig.node.repeats_due(later).unwrap();
     assert!(!due.is_empty() && due.len() <= 12);
     let indexes: Vec<u32> = (1..=u32::try_from(due.len()).unwrap()).collect();
-    let made = rig.node.make_repeats(&due, &indexes, START + 30 * DAY).unwrap();
+    let made = rig
+        .node
+        .make_repeats(&due, &indexes, START + 30 * DAY)
+        .unwrap();
     assert_eq!(made.len(), due.len());
     assert_eq!(made[0].number, 2);
     assert!(rig.node.request_indexes().contains(&indexes[0]));
@@ -485,14 +536,20 @@ fn rq_02_the_desk_takes_the_next_unused_index_and_a_new_range_when_the_last_is_u
     .unwrap();
     let mut used: BTreeSet<u32> = BTreeSet::new();
     // The first call takes a range of the desk: index 0.
-    let first = node.desk_index(&|i| used.contains(&i), START, &mut NotWatching).unwrap();
+    let first = node
+        .desk_index(&|i| used.contains(&i), START, &mut NotWatching)
+        .unwrap();
     assert_eq!(first, 0);
-    assert_eq!(node.shop().book().ranges_of(&node.shop().owner_id()).len(), 1);
+    assert_eq!(
+        node.shop().book().ranges_of(&node.shop().owner_id()).len(),
+        1
+    );
     // An index in use is not given twice; the next unused is.
     used.insert(0);
     used.insert(1);
     assert_eq!(
-        node.desk_index(&|i| used.contains(&i), START, &mut NotWatching).unwrap(),
+        node.desk_index(&|i| used.contains(&i), START, &mut NotWatching)
+            .unwrap(),
         2
     );
     // A counter's range between does not change the desk's.
@@ -500,7 +557,9 @@ fn rq_02_the_desk_takes_the_next_unused_index_and_a_new_range_when_the_last_is_u
     shop.allocate(counter(), START, store).unwrap();
     // When the range is used up a new one is taken, after the counter's.
     used.extend(0..RANGE_LEN);
-    let next = node.desk_index(&|i| used.contains(&i), START, &mut NotWatching).unwrap();
+    let next = node
+        .desk_index(&|i| used.contains(&i), START, &mut NotWatching)
+        .unwrap();
     assert_eq!(next, 2 * RANGE_LEN);
     // It is in the file before it is given.
     let again = OwnNode::open(
@@ -509,7 +568,14 @@ fn rq_02_the_desk_takes_the_next_unused_index_and_a_new_range_when_the_last_is_u
         openbmt_core::pinned_wallet::PinnedWallet::new(own::single()),
     )
     .unwrap();
-    assert_eq!(again.shop().book().ranges_of(&again.shop().owner_id()).len(), 2);
+    assert_eq!(
+        again
+            .shop()
+            .book()
+            .ranges_of(&again.shop().owner_id())
+            .len(),
+        2
+    );
 }
 
 #[test]
@@ -546,7 +612,9 @@ fn rq_30_the_arrivals_file_reads_strictly_and_encodes_to_the_same_bytes() {
     assert!(crate::requests::decode_arrivals(&twice).is_err());
     let mut nothing = a(5, 1);
     nothing.sats = 0;
-    assert!(crate::requests::decode_arrivals(&crate::requests::encode_arrivals(&[nothing])).is_err());
+    assert!(
+        crate::requests::decode_arrivals(&crate::requests::encode_arrivals(&[nothing])).is_err()
+    );
     // Any bytes at all are answered, never a panic.
     for n in 0..bytes.len() {
         let _ = crate::requests::decode_arrivals(&bytes[..n]);
