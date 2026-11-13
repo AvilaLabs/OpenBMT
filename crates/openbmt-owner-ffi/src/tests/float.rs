@@ -456,7 +456,7 @@ fn fl_06_words_of_another_index_are_refused_with_the_rule_and_seal_nothing() {
     ))
     .expect("refused");
     assert_eq!(fault.rule, "FL-06");
-    assert!(fault.words.heading.starts_with("WORDS_NEEDED_FL06_"));
+    assert_eq!(fault.words.heading, "Not this float's words");
     // A scan that is not 12 words keeps the setup's rule; a description that
     // does not read is the float's wallet refusal.
     let short = Rd::error(&restore_call(&reg, &[7u8; 15], float().description())).expect("refused");
