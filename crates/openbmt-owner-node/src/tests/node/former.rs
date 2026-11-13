@@ -28,7 +28,7 @@ fn old_wallet() -> ImportedWallet {
     )
 }
 
-fn old_script(index: u32) -> ScriptBuf {
+pub(super) fn old_script(index: u32) -> ScriptBuf {
     old_wallet().receive_script(index).unwrap()
 }
 
@@ -38,7 +38,7 @@ fn new_script(index: u32) -> ScriptBuf {
 
 const END: u32 = 1_000;
 
-fn former_setup() -> Setup {
+pub(super) fn former_setup() -> Setup {
     let parts = FormerParts {
         wallet: PinnedWallet::new(old_wallet()),
         end: END,
@@ -53,7 +53,7 @@ fn former_setup() -> Setup {
     }
 }
 
-fn pay(rig: &mut Rig, from: u8, script: &ScriptBuf, sats: u64) -> Transaction {
+pub(super) fn pay(rig: &mut Rig, from: u8, script: &ScriptBuf, sats: u64) -> Transaction {
     let tx = tx_from(
         OutPoint::new(Txid::from_byte_array([from; 32]), 0),
         &[(script, sats)],

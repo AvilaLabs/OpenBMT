@@ -75,7 +75,7 @@ use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::pinned_wallet::PinnedWallet;
 use openbmt_core::wallet::Keychain;
 use openbmt_core::wallet_single::ImportedWallet;
-use openbmt_counter_node::{DriverPort, MAX_EVENTS_PER_PUMP};
+use openbmt_counter_node::{ChainView, DriverPort, MAX_EVENTS_PER_PUMP};
 use openbmt_net_io::{
     AppEvent, DirLock, Driver, DriverConfig, FileStorage, Handle, OsRandomness, Randomness,
     RelayState, SystemClock, MAX_WATCHED_SCRIPTS,
@@ -88,7 +88,8 @@ use openbmt_signer::SignerState;
 use openbmt_watch::{FeeHistory, HeaderChain, Refusal, WellFormedBlock};
 
 use crate::coins::{
-    ApplyError, CoinView, PendingError, ScriptSet, ViewState, GAP, INDEX_LIMIT, UNDO_BLOCKS,
+    ApplyError, CoinView, PendingError, ReorgEffect, ScriptSet, ViewState, GAP, INDEX_LIMIT,
+    UNDO_BLOCKS,
 };
 use crate::deep::{DeepRun, DeepSpawn};
 use crate::live::{plan_release, WatchLimits, REBALANCE_SECS};
@@ -407,7 +408,12 @@ pub(crate) struct FormerWatch {
 }
 
 impl FormerWatch {
-    fn open(dir: &Path, parts: FormerParts, birthday: u32) -> Result<Self, NodeError> {
+    fn open(
+        dir: &Path,
+        parts: FormerParts,
+        birthday: u32,
+        chain: &ChainView,
+    ) -> Result<Self, NodeError> {
         let mut view = match fs::read(dir.join(&parts.file)) {
             Ok(bytes) => CoinView::from_bytes(&bytes)
                 .map_err(|e| NodeError::Files(format!("{} does not read back: {e}", parts.file)))?,
@@ -415,6 +421,12 @@ impl FormerWatch {
             Err(e) => return Err(NodeError::Files(format!("{}: {e}", parts.file))),
         };
         let file = parts.file.clone();
+        // OC-53: what left the chain while the node was stopped is undone
+        // before the view is used.
+        if let Some((left, fork)) = view.left_while_stopped(|h| chain.hash_at(h)) {
+            view.reorganize(&left, fork, |b| write_file(dir, &file, b))
+                .map_err(|e| NodeError::Files(format!("{file}: {e}")))?;
+        }
         let change = view.change_next();
         let through = view.checked();
         view.watch_plan(parts.end, change, through, &[], 0, |b| {
@@ -747,12 +759,25 @@ impl<P: OwnerPort> OwnerNode<P> {
             .map_err(|e| NodeError::Start(OwnerStartError::Locked(e.to_string())))?;
         fs::create_dir_all(&dir).map_err(|e| NodeError::Files(e.to_string()))?;
 
+        // OC-53: the header chain the node holds is read before the coin view
+        // is used.
+        let (chain, header_notes) =
+            crate::watcher::load_chain(&dir, driver.network).map_err(NodeError::Start)?;
         let mut view = match fs::read(dir.join(COINS_FILE)) {
             Ok(bytes) => CoinView::from_bytes(&bytes)
                 .map_err(|e| NodeError::Files(format!("{COINS_FILE} does not read back: {e}")))?,
             Err(e) if e.kind() == io::ErrorKind::NotFound => CoinView::new(birthday),
             Err(e) => return Err(NodeError::Files(format!("{COINS_FILE}: {e}"))),
         };
+        // What left the chain while the node was stopped is undone as a
+        // reorganization it saw is; the rest follows once the node exists.
+        let mut stopped_reorg = None;
+        if let Some((left, fork)) = view.left_while_stopped(|h| chain.hash_at(h)) {
+            let effect = view
+                .reorganize(&left, fork, |b| write_file(&dir, COINS_FILE, b))
+                .map_err(|e| NodeError::Files(format!("{COINS_FILE}: {e}")))?;
+            stopped_reorg = Some((left, fork, effect));
+        }
         // OC-28: a log that is nearly full is pruned before anything else
         // reads it; the position the view reflects stands for the tip.
         let position = view.checked();
@@ -822,7 +847,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         let scripts = live_scripts(&wallet, &view)?;
         let mut former_watches = Vec::with_capacity(former.len());
         for f in former {
-            former_watches.push(FormerWatch::open(&dir, f, birthday)?);
+            former_watches.push(FormerWatch::open(&dir, f, birthday, &chain)?);
         }
         // The blocks are read again from the lowest position of any view: a
         // former wallet whose marks grew has its own to catch up.
@@ -848,7 +873,10 @@ impl<P: OwnerPort> OwnerNode<P> {
             .chain(former_watches.iter().flat_map(|f| f.scripts.keys()))
             .cloned()
             .collect();
-        let watcher = OwnerWatcher::start_with_lock(main_config, lock, |d, p| spawn(d, p, initial))
+        let watcher =
+            OwnerWatcher::start_with_chain(main_config, lock, chain, header_notes, |d, p| {
+                spawn(d, p, initial)
+            })
             .map_err(NodeError::Start)?;
         // The owner node asks for no unconfirmed transaction: only a
         // checked block makes a coin.
@@ -904,6 +932,15 @@ impl<P: OwnerPort> OwnerNode<P> {
             node.note(line);
         }
         node.prune_fee_samples();
+        if let Some((left, fork, effect)) = stopped_reorg {
+            node.note(format!(
+                "the chain changed while the node was stopped: {} block(s) left",
+                left.len()
+            ));
+            node.forget_owed_blocks(&left);
+            node.forget_fee_samples_from(fork.saturating_add(1), &left);
+            node.after_reorg(effect);
+        }
         if node.take_journal.is_none() {
             node.reconcile();
         } else {
@@ -1072,9 +1109,10 @@ impl<P: OwnerPort> OwnerNode<P> {
     }
 
     /// AS-89: [`OwnerNode::log_paid`] for the entries of a transaction that
-    /// was signed elsewhere. The node never held its bytes, so each amount is
-    /// the entry's own.
-    fn log_paid_elsewhere(&mut self, txid: &Txid) -> Result<(), String> {
+    /// was signed elsewhere. The node never held its bytes: `tx` is the
+    /// transaction as the block holds it (OC-54), and without it each amount
+    /// is the entry's own.
+    fn log_paid_elsewhere(&mut self, txid: &Txid, tx: Option<&Transaction>) -> Result<(), String> {
         let Some((refunds, cash_out)) = self
             .owner
             .signed_elsewhere()
@@ -1084,7 +1122,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         else {
             return Ok(());
         };
-        self.log_paid_entries(txid, None, refunds, cash_out)
+        self.log_paid_entries(txid, tx, refunds, cash_out)
     }
 
     fn log_paid_entries(
@@ -1097,25 +1135,23 @@ impl<P: OwnerPort> OwnerNode<P> {
         let at = self.watcher.now();
         let outputs: &[bitcoin::TxOut] = tx.map_or(&[], |t| t.output.as_slice());
         let mut used = vec![false; outputs.len()];
-        let mut paid = |script: &ScriptBuf, fallback: u64| -> u64 {
+        let mut paid = |script: &ScriptBuf| -> Option<u64> {
             let found = outputs
                 .iter()
                 .zip(used.iter_mut())
                 .find(|(o, u)| !**u && o.script_pubkey == *script);
-            match found {
-                Some((o, u)) => {
-                    *u = true;
-                    o.value.to_sat()
-                }
-                None => fallback,
-            }
+            found.map(|(o, u)| {
+                *u = true;
+                o.value.to_sat()
+            })
         };
+        let mut unknown_cash_out = false;
         let mut added = Vec::new();
         for id in refunds {
             let Some(r) = self.owner.refunds().iter().find(|r| r.id == id) else {
                 continue;
             };
-            let sats = paid(&r.script, r.sats);
+            let sats = paid(&r.script).unwrap_or(r.sats);
             let value = match (r.shop_value, r.books.and_then(|b| b.last_quote)) {
                 (Some(v), _) => Some(PaidValue {
                     currency: v.currency,
@@ -1141,23 +1177,33 @@ impl<P: OwnerPort> OwnerNode<P> {
         }
         if let Some(id) = cash_out {
             if let Some(c) = self.owner.cash_outs().iter().find(|c| c.id == id) {
-                let fallback = match c.amount {
-                    openbmt_owner::CashAmount::Sats(n) => n,
-                    openbmt_owner::CashAmount::All => 0,
+                // OC-49: a cash-out of everything is logged at what its
+                // transaction paid; without that figure it is not logged at
+                // all, never at zero.
+                let found = match c.amount {
+                    openbmt_owner::CashAmount::Sats(n) => Some(paid(&c.script).unwrap_or(n)),
+                    openbmt_owner::CashAmount::All => paid(&c.script),
                 };
-                let sats = paid(&c.script, fallback);
-                added.push(PaidEntry {
-                    what: PaidWhat::CashOut,
-                    number: id,
-                    txid: *txid,
-                    sats,
-                    at,
-                    value: c.price.map(|p| PaidValue {
-                        currency: p.currency,
-                        minor: value_at(sats, p.minor_per_btc),
+                match found {
+                    Some(sats) => added.push(PaidEntry {
+                        what: PaidWhat::CashOut,
+                        number: id,
+                        txid: *txid,
+                        sats,
+                        at,
+                        value: c.price.map(|p| PaidValue {
+                            currency: p.currency,
+                            minor: value_at(sats, p.minor_per_btc),
+                        }),
                     }),
-                });
+                    None => unknown_cash_out = true,
+                }
             }
+        }
+        if unknown_cash_out {
+            self.note(format!(
+                "{txid} paid the cash-out of everything but its amount is not known; it is not logged"
+            ));
         }
         match self.paid_log.with_added(&added) {
             Ok(None) => Ok(()),
@@ -2326,6 +2372,9 @@ impl<P: OwnerPort> OwnerNode<P> {
                 spent.insert(input.previous_output, id);
             }
         }
+        // OC-54: what a block paid is kept with the transaction as the block
+        // holds it.
+        let in_block = |txid: &Txid| block.txdata.iter().find(|t| t.compute_txid() == *txid);
         let mut owed = Vec::new();
         // AS-105: an item whose file went to the shop's own wallet is beaten
         // when a block spends one of its coins in another transaction.
@@ -2340,6 +2389,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                     kind: OwedKind::ExportedBeaten,
                     txid: open.txid,
                     block: *hash,
+                    tx: None,
                 });
             }
         }
@@ -2349,18 +2399,19 @@ impl<P: OwnerPort> OwnerNode<P> {
                     kind: OwedKind::ExportedPaid,
                     txid: open.txid,
                     block: *hash,
+                    tx: in_block(&open.txid).cloned(),
                 });
             }
         }
         for entry in elsewhere {
-            let kind = if ids.contains(&entry.txid) {
-                OwedKind::ElsewherePaid
+            let (kind, tx) = if ids.contains(&entry.txid) {
+                (OwedKind::ElsewherePaid, in_block(&entry.txid).cloned())
             } else if entry
                 .inputs
                 .iter()
                 .any(|op| spent.get(op).is_some_and(|by| *by != entry.txid))
             {
-                OwedKind::ElsewhereBeaten
+                (OwedKind::ElsewhereBeaten, None)
             } else {
                 continue;
             };
@@ -2368,6 +2419,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 kind,
                 txid: entry.txid,
                 block: *hash,
+                tx,
             });
         }
         owed
@@ -2428,10 +2480,9 @@ impl<P: OwnerPort> OwnerNode<P> {
             if self.halted.is_some() {
                 return;
             }
-            // The chain has passed the wallet's position and does not hold
-            // the block: it has left.
-            let chain = self.watcher.chain();
-            if chain.height_of(&item.block).is_none() && chain.tip_height() > self.view.checked() {
+            // OC-53: a block the chain does not hold has left, whatever the
+            // chain's height.
+            if self.watcher.chain().height_of(&item.block).is_none() {
                 self.note(format!(
                     "{} was owed by block {}, which is not on the best chain; dropped",
                     item.txid, item.block
@@ -2465,10 +2516,14 @@ impl<P: OwnerPort> OwnerNode<P> {
             return;
         }
         let dir = self.dir.clone();
-        if let Err(e) = self.log_paid_entries(&txid, None, open.refunds, open.cash_out) {
+        if let Err(e) = self.log_paid_entries(&txid, item.tx.as_ref(), open.refunds, open.cash_out)
+        {
             self.note(format!(
                 "{txid} is in block {block} but could not be logged: {e}"
             ));
+            return;
+        }
+        if !self.keep_confirmed(item) {
             return;
         }
         match self
@@ -2482,6 +2537,31 @@ impl<P: OwnerPort> OwnerNode<P> {
                 self.forget_owed(item);
             }
             Err(e) => self.note(format!("{txid} could not be marked paid: {e}")),
+        }
+    }
+
+    /// OC-54: the transaction a block paid, taken from that block, goes into
+    /// the view's undo record of the block, so that a reorganization that
+    /// removes the block reopens its entries and follows the transaction.
+    /// False when that could not be stored: the item stays owed.
+    fn keep_confirmed(&mut self, item: &Owed) -> bool {
+        let Some(tx) = &item.tx else {
+            return true;
+        };
+        let dir = self.dir.clone();
+        match self
+            .view
+            .keep_confirmed(&item.block, tx, self.watcher.chain(), &self.scripts, |b| {
+                write_file(&dir, COINS_FILE, b)
+            }) {
+            Ok(_) => true,
+            Err(e) => {
+                self.note(format!(
+                    "{} is in block {} but the coin view could not be stored: {e}",
+                    item.txid, item.block
+                ));
+                false
+            }
         }
     }
 
@@ -2528,10 +2608,13 @@ impl<P: OwnerPort> OwnerNode<P> {
             return;
         }
         let dir = self.dir.clone();
-        if let Err(e) = self.log_paid_elsewhere(&txid) {
+        if let Err(e) = self.log_paid_elsewhere(&txid, item.tx.as_ref()) {
             self.note(format!(
                 "{txid} is in block {block} but could not be logged: {e}"
             ));
+            return;
+        }
+        if !self.keep_confirmed(item) {
             return;
         }
         match self
@@ -2741,67 +2824,69 @@ impl<P: OwnerPort> OwnerNode<P> {
             .view
             .reorganize(left, fork, |b| write_file(&dir, COINS_FILE, b))
         {
-            Ok(effect) => {
-                if self.view.state() == ViewState::DeepReorg {
-                    self.note("deep reorg: rescan".to_string());
-                }
-                // OC-47: the facts of every queued refund follow the receipts
-                // that left, in the same step as the coin view.
-                match self.ready_for_queue_write() {
-                    Ok(()) => {
-                        let dir = self.dir.clone();
-                        let tip = self.view.checked();
-                        if let Err(e) =
-                            self.refresh_refund_facts(tip, &mut |b| write_queue_file(&dir, b))
-                        {
-                            self.stop(format!("the refunds' facts could not be stored: {e}"));
-                        }
-                    }
-                    Err(e) => self.note(format!("the refunds' facts wait to be refreshed: {e}")),
-                }
-                for txid in effect.reopened {
-                    let tx = self
-                        .view
-                        .pending()
-                        .find(|p| p.tx.compute_txid() == txid)
-                        .map(|p| p.tx.clone());
-                    let Some(tx) = tx else {
-                        self.stop(format!(
-                            "{txid} left the chain but its signed transaction is missing"
-                        ));
-                        continue;
-                    };
-                    if self.take_recovery_pending() {
-                        self.note(format!(
-                            "{txid} waits to reopen after the owner's key 1 state recovery"
-                        ));
-                        continue;
-                    }
-                    if let Err(e) = self.ready_for_queue_write() {
-                        self.note(format!("{txid} waits to reopen: {e}"));
-                        continue;
-                    }
-                    let dir = self.dir.clone();
-                    match self.owner.reopen_paid(&tx, |b| write_queue_file(&dir, b)) {
-                        Ok(had_rows) => {
-                            if had_rows {
-                                self.note(format!(
-                                    "{txid} left the chain; its paid entries are open again"
-                                ));
-                            } else {
-                                self.note(format!(
-                                    "{txid} left the chain; its signed transaction is sent again"
-                                ));
-                            }
-                            self.dispatch(txid, &bitcoin::consensus::serialize(&tx));
-                        }
-                        Err(e) => self.stop(format!(
-                            "{txid} left the chain but its paid entries could not be reopened: {e}"
-                        )),
-                    }
+            Ok(effect) => self.after_reorg(effect),
+            Err(e) => self.stop(format!("the coin view could not be stored: {e}")),
+        }
+    }
+
+    /// What follows the coin view's reorganization: the facts of the queued
+    /// refunds, and the transactions the blocks that left had confirmed.
+    fn after_reorg(&mut self, effect: ReorgEffect) {
+        if self.view.state() == ViewState::DeepReorg {
+            self.note("deep reorg: rescan".to_string());
+        }
+        // OC-47: the facts of every queued refund follow the receipts
+        // that left, in the same step as the coin view.
+        match self.ready_for_queue_write() {
+            Ok(()) => {
+                let dir = self.dir.clone();
+                let tip = self.view.checked();
+                if let Err(e) = self.refresh_refund_facts(tip, &mut |b| write_queue_file(&dir, b)) {
+                    self.stop(format!("the refunds' facts could not be stored: {e}"));
                 }
             }
-            Err(e) => self.stop(format!("the coin view could not be stored: {e}")),
+            Err(e) => self.note(format!("the refunds' facts wait to be refreshed: {e}")),
+        }
+        for txid in effect.reopened {
+            let tx = self
+                .view
+                .pending()
+                .find(|p| p.tx.compute_txid() == txid)
+                .map(|p| p.tx.clone());
+            let Some(tx) = tx else {
+                self.stop(format!(
+                    "{txid} left the chain but its signed transaction is missing"
+                ));
+                continue;
+            };
+            if self.take_recovery_pending() {
+                self.note(format!(
+                    "{txid} waits to reopen after the owner's key 1 state recovery"
+                ));
+                continue;
+            }
+            if let Err(e) = self.ready_for_queue_write() {
+                self.note(format!("{txid} waits to reopen: {e}"));
+                continue;
+            }
+            let dir = self.dir.clone();
+            match self.owner.reopen_paid(&tx, |b| write_queue_file(&dir, b)) {
+                Ok(had_rows) => {
+                    if had_rows {
+                        self.note(format!(
+                            "{txid} left the chain; its paid entries are open again"
+                        ));
+                    } else {
+                        self.note(format!(
+                            "{txid} left the chain; its signed transaction is sent again"
+                        ));
+                    }
+                    self.dispatch(txid, &bitcoin::consensus::serialize(&tx));
+                }
+                Err(e) => self.stop(format!(
+                    "{txid} left the chain but its paid entries could not be reopened: {e}"
+                )),
+            }
         }
     }
 
@@ -2944,9 +3029,10 @@ impl<P: OwnerPort> OwnerNode<P> {
         if height >= tip || caught_up || height.saturating_sub(self.view.checked()) >= CHECKED_EVERY
         {
             let dir = self.dir.clone();
+            let hash = self.watcher.chain().hash_at(height);
             if let Err(e) = self
                 .view
-                .set_checked(height, |b| write_file(&dir, COINS_FILE, b))
+                .set_checked_at(height, hash, |b| write_file(&dir, COINS_FILE, b))
             {
                 self.stop(format!("the coin view could not be stored: {e}"));
             }
@@ -2956,7 +3042,11 @@ impl<P: OwnerPort> OwnerNode<P> {
         for f in &mut self.former {
             let caught = matches!(f.view.state(), ViewState::Rescanning { to } if height >= to);
             if height >= tip || caught || height.saturating_sub(f.view.checked()) >= CHECKED_EVERY {
-                if let Err(e) = f.view.set_checked(height, |b| write_file(&dir, &f.file, b)) {
+                let hash = self.watcher.chain().hash_at(height);
+                if let Err(e) = f
+                    .view
+                    .set_checked_at(height, hash, |b| write_file(&dir, &f.file, b))
+                {
                     notes.push(format!("a former wallet's view could not be stored: {e}"));
                 }
             }

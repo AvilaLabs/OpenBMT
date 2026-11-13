@@ -36,6 +36,7 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
 use bitcoin::hashes::Hash;
+use bitcoin::Network;
 use openbmt_core::heartbeat::WatcherHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_counter_node::{ChainView, DriverPort, HealthFn, MAX_EVENTS_PER_PUMP};
@@ -154,6 +155,35 @@ pub struct OwnerWatcher<P: DriverPort = Handle> {
     _lock: DirLock,
 }
 
+/// The best header chain the directory holds, and the lines to log about
+/// reading it. A stored form that does not read back is a note and a chain
+/// of the first header alone.
+pub(crate) fn load_chain(
+    dir: &Path,
+    network: Network,
+) -> Result<(ChainView, VecDeque<String>), OwnerStartError> {
+    let mut notes = VecDeque::new();
+    let mut files = FileStorage::new(dir).map_err(|e| OwnerStartError::Headers(e.to_string()))?;
+    let stored = files
+        .load(Key::Headers)
+        .map_err(|e| OwnerStartError::Headers(e.to_string()))?;
+    let new_store =
+        || HeaderStore::new(network).map_err(|e| OwnerStartError::Headers(e.to_string()));
+    let headers = match stored {
+        None => new_store()?,
+        Some(bytes) => match HeaderStore::from_bytes(network, &bytes) {
+            Ok(headers) => headers,
+            Err(e) => {
+                notes.push_back(format!(
+                    "the stored headers do not read back ({e}); starting from the first header"
+                ));
+                new_store()?
+            }
+        },
+    };
+    Ok((ChainView::from_store(&headers), notes))
+}
+
 impl OwnerWatcher<Handle> {
     /// Start the watcher on a real driver that keeps its headers and its
     /// address book in the watcher's directory.
@@ -186,6 +216,28 @@ impl<P: DriverPort> OwnerWatcher<P> {
         lock: DirLock,
         spawn: impl FnOnce(DriverConfig, PathBuf) -> Result<P, String>,
     ) -> Result<Self, OwnerStartError> {
+        if lock.dir() != config.dir {
+            return Err(OwnerStartError::Locked(
+                "the pre-acquired directory lock does not match the watcher directory".to_string(),
+            ));
+        }
+        fs::create_dir_all(&config.dir).map_err(|e| OwnerStartError::Dir(e.to_string()))?;
+        // The headers the driver will start from, read here before it is
+        // spawned, so that the view is the driver's.
+        let (view, notes) = load_chain(&config.dir, config.driver.network)?;
+        Self::start_with_chain(config, lock, view, notes, spawn)
+    }
+
+    /// Start with the chain `view` that [`load_chain`] read from the
+    /// directory, which an owner node reads first to check its coin view
+    /// against it (OC-53).
+    pub(crate) fn start_with_chain(
+        config: OwnerConfig,
+        lock: DirLock,
+        view: ChainView,
+        mut notes: VecDeque<String>,
+        spawn: impl FnOnce(DriverConfig, PathBuf) -> Result<P, String>,
+    ) -> Result<Self, OwnerStartError> {
         let OwnerConfig {
             dir,
             identity,
@@ -196,39 +248,8 @@ impl<P: DriverPort> OwnerWatcher<P> {
             watch_from,
             ..
         } = config;
-        if lock.dir() != dir {
-            return Err(OwnerStartError::Locked(
-                "the pre-acquired directory lock does not match the watcher directory".to_string(),
-            ));
-        }
-        fs::create_dir_all(&dir).map_err(|e| OwnerStartError::Dir(e.to_string()))?;
-        let mut notes = VecDeque::new();
-
-        // The headers the driver will start from, read here before it is
-        // spawned, so that the view is the driver's.
-        let network = driver.network;
-        let mut files =
-            FileStorage::new(&dir).map_err(|e| OwnerStartError::Headers(e.to_string()))?;
-        let stored = files
-            .load(Key::Headers)
-            .map_err(|e| OwnerStartError::Headers(e.to_string()))?;
-        let new_store =
-            || HeaderStore::new(network).map_err(|e| OwnerStartError::Headers(e.to_string()));
-        let headers = match stored {
-            None => new_store()?,
-            Some(bytes) => match HeaderStore::from_bytes(network, &bytes) {
-                Ok(headers) => headers,
-                Err(e) => {
-                    notes.push_back(format!(
-                        "the stored headers do not read back ({e}); starting from the first header"
-                    ));
-                    new_store()?
-                }
-            },
-        };
-        let view = ChainView::from_store(&headers);
         // With nothing watched there are no blocks to check below the tip.
-        driver.watch_from = watch_from.unwrap_or_else(|| headers.tip_height());
+        driver.watch_from = watch_from.unwrap_or_else(|| view.tip_height());
 
         let last_seq = match read_seq(&dir) {
             Ok(seq) => seq.unwrap_or(0),

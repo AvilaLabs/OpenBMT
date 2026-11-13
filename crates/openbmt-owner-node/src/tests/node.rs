@@ -20,7 +20,7 @@ use openbmt_core::batch::{AddressBatch, BatchBuilder, BatchPolicy};
 use openbmt_core::identity::DeviceId;
 use openbmt_core::wallet::{KeySlot, WalletDescription};
 use openbmt_counter_node::DriverPort;
-use openbmt_net_io::{AppEvent, DriverConfig, EventReceiver, Randomness};
+use openbmt_net_io::{AppEvent, DriverConfig, EventReceiver, Randomness, Storage};
 use openbmt_owner::own_book::AllocationBook;
 use openbmt_owner::{Delivery, SaleFacts, SaleKey, Stage};
 use openbmt_signer::SignerState;
@@ -32,6 +32,7 @@ mod own;
 mod own_spend;
 mod paid_log;
 mod receipts;
+mod stopped;
 
 use super::coins::{mine, tx_from};
 use super::{id, Dir, TestClock};
@@ -266,7 +267,24 @@ fn start(dir: &Dir, setup: &Setup) -> Result<Rig, NodeError> {
     start_at(dir, setup, Vec::new())
 }
 
+/// What a driver that kept the chain in the node's directory leaves there:
+/// the headers of `chain`.
+fn save_headers(dir: &Dir, chain: &[Block]) {
+    let mut store = openbmt_watch::HeaderStore::new(NET).unwrap();
+    for block in chain {
+        store.accept(&block.header, 2_000_000_000).unwrap();
+    }
+    openbmt_net_io::FileStorage::new(dir.path())
+        .unwrap()
+        .save(openbmt_net_io::Key::Headers, &store.to_bytes())
+        .unwrap();
+}
+
 fn start_at(dir: &Dir, setup: &Setup, chain: Vec<Block>) -> Result<Rig, NodeError> {
+    // The driver of a node that stopped keeps its headers.
+    if !chain.is_empty() {
+        save_headers(dir, &chain);
+    }
     let log: Log = Arc::default();
     let spawned: Arc<Mutex<Vec<Spawned>>> = Arc::default();
     let senders: Arc<Mutex<Vec<Sender<AppEvent>>>> = Arc::default();

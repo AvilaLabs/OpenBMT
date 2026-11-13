@@ -78,12 +78,21 @@
 //!
 //! ## The stored form
 //!
-//! `OBMe`, version 1, strict like the other stored forms: sorted lists, no
+//! `OBMe`, versions 1 and 2, strict like the other stored forms: sorted lists, no
 //! repeats, pruned index ranges sorted and apart, every length checked before anything is reserved, every coin
 //! must be an output of the transaction it carries, and, unless the receipt
 //! log is full, every unspent receive coin has its receipt. The chain position
 //! (`checked`) is in the same bytes as the coins it reflects, so a restart
-//! sees both or neither.
+//! sees both or neither. Version 2 also holds the hash of the block at that
+//! position (OC-53); version 1, and a view that does not know the hash, is
+//! written without it as version 1 and read as "hash unknown".
+//!
+//! ## A reorganization while the node was stopped
+//!
+//! At start the hash of the block last checked is looked up in the chain the
+//! node holds ([`CoinView::left_while_stopped`], OC-53). A block of the view
+//! that is not there has left, and the caller undoes it with
+//! [`CoinView::reorganize`] as it does a reorganization it saw.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -308,6 +317,8 @@ struct Undo {
 pub struct CoinView {
     birthday: u32,
     checked: u32,
+    /// OC-53: the hash of the block at `checked`, when the view knows it.
+    checked_block: Option<BlockHash>,
     receive_next: u32,
     change_next: u32,
     state: ViewState,
@@ -354,6 +365,7 @@ impl CoinView {
         Self {
             birthday,
             checked: birthday,
+            checked_block: None,
             receive_next: 0,
             change_next: 0,
             state: ViewState::Ready,
@@ -380,6 +392,13 @@ impl CoinView {
     /// up to here has been checked for the scripts watched.
     pub fn checked(&self) -> u32 {
         self.checked
+    }
+
+    /// OC-53: the hash of the block at the checked position, if the view
+    /// knows it. A view read from the first version of the stored form, or
+    /// one whose position was moved without a block, does not.
+    pub fn checked_block(&self) -> Option<BlockHash> {
+        self.checked_block
     }
 
     /// The highest receive index handed out, plus one.
@@ -665,6 +684,7 @@ impl CoinView {
             let safe = next.checked.saturating_sub(1).max(next.birthday);
             let to = through.max(next.checked);
             next.checked = safe;
+            next.checked_block = None;
             next.state = if to > safe {
                 ViewState::Rescanning { to }
             } else {
@@ -725,6 +745,7 @@ impl CoinView {
             let safe = rewind_to.max(next.birthday);
             let to = through.max(next.checked);
             next.checked = safe;
+            next.checked_block = None;
             next.state = if to > safe {
                 ViewState::Rescanning { to }
             } else {
@@ -823,6 +844,7 @@ impl CoinView {
             next.deep.failed = false;
         }
         next.checked = next.birthday;
+        next.checked_block = None;
         next.state = if to > next.birthday {
             ViewState::Rescanning { to }
         } else {
@@ -841,8 +863,23 @@ impl CoinView {
         height: u32,
         persist: impl FnOnce(&[u8]) -> Result<(), E>,
     ) -> Result<(), E> {
+        self.set_checked_at(height, None, persist)
+    }
+
+    /// [`CoinView::set_checked`] with the hash of the block at `height`
+    /// (OC-53). A position that moves with no hash leaves the view not
+    /// knowing it; one that stays keeps what the view knew.
+    pub fn set_checked_at<E>(
+        &mut self,
+        height: u32,
+        hash: Option<BlockHash>,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<(), E> {
         let mut next = self.clone();
         let position = height.max(next.checked);
+        if position > next.checked || (position == height && hash.is_some()) {
+            next.checked_block = if position == height { hash } else { None };
+        }
         next.checked = position;
         if let ViewState::Rescanning { to } = next.state {
             if position >= to {
@@ -1039,6 +1076,59 @@ impl CoinView {
             },
         );
         persist(&encode(&next)).map_err(PendingError::Store)?;
+        *self = next;
+        Ok(true)
+    }
+
+    /// OC-54: keep a transaction the owner did not hold, which a block of the
+    /// best chain confirmed (a payment finished on a hardware signer), in the
+    /// undo record of that block as the owner's own confirmed transactions
+    /// are. `tx` is taken from that block. When the block leaves the chain
+    /// [`CoinView::reorganize`] holds it again and names it in `reopened`.
+    /// Giving it again changes nothing. Returns whether it is kept now: it is
+    /// not when the block is not on the chain, is outside the undo horizon,
+    /// or already holds [`MAX_PENDING`] transactions.
+    pub fn keep_confirmed<C: HeaderChain + ?Sized, E>(
+        &mut self,
+        block: &BlockHash,
+        tx: &Transaction,
+        chain: &C,
+        scripts: &ScriptSet,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<bool, E> {
+        let Some(height) = chain.height_of(block) else {
+            return Ok(false);
+        };
+        if height.saturating_add(UNDO_BLOCKS) <= chain.tip_height() {
+            return Ok(false);
+        }
+        let txid = tx.compute_txid();
+        if self.confirmed_height(&txid).is_some() {
+            return Ok(false);
+        }
+        let mut next = self.clone();
+        let entry = next.undo.entry(height).or_insert_with(|| Undo {
+            block: *block,
+            spent: Vec::new(),
+            confirmed: Vec::new(),
+        });
+        if entry.block != *block || entry.confirmed.len() >= MAX_PENDING {
+            return Ok(false);
+        }
+        let own = tx
+            .output
+            .iter()
+            .enumerate()
+            .filter_map(|(vout, out)| {
+                let (chain, index) = scripts.get(&out.script_pubkey)?;
+                Some((u32::try_from(vout).ok()?, *chain, *index))
+            })
+            .collect();
+        entry.confirmed.push(PendingTx {
+            tx: tx.clone(),
+            own,
+        });
+        persist(&encode(&next))?;
         *self = next;
         Ok(true)
     }
@@ -1296,8 +1386,13 @@ impl CoinView {
         if deep {
             // The position stays where it was: a reset rescans up to it.
             next.state = ViewState::DeepReorg;
+            next.checked_block = None;
         } else {
-            next.checked = next.checked.min(fork).max(next.birthday);
+            let lowered = next.checked.min(fork).max(next.birthday);
+            if lowered != next.checked {
+                next.checked_block = None;
+            }
+            next.checked = lowered;
             if !next.released.is_empty() {
                 next.deep.from = next.deep.from.min(next.checked);
             }
@@ -1305,6 +1400,67 @@ impl CoinView {
         persist(&encode(&next))?;
         *self = next;
         Ok(effect)
+    }
+
+    /// OC-53: what left the chain while the node was stopped, from the chain
+    /// the node holds now. `at` gives the hash of the block of the best chain
+    /// at a height, or none where the node's headers do not reach.
+    ///
+    /// The block last checked is looked up first. When it is on the chain
+    /// nothing left. When it is not, when the node's headers do not reach its
+    /// height, or when the view does not know its hash (it was read from
+    /// version 1 of the stored form), the blocks the view
+    /// holds that are not on the chain are those that left: the blocks of its
+    /// undo records, and the blocks of its coins and receipts, which a
+    /// reorganization with no undo record for them turns into the deep
+    /// reorganization of OC-06. Returns them, old tip first, with the height
+    /// of the highest block of an undo record that is on the chain, or one
+    /// undo horizon below the lowest that left when none is: the new chain
+    /// may differ from the old one anywhere above that height. None when
+    /// nothing is known to have left, and for a view that is in the deep
+    /// reorganization state already.
+    pub fn left_while_stopped(
+        &self,
+        at: impl Fn(u32) -> Option<BlockHash>,
+    ) -> Option<(Vec<BlockHash>, u32)> {
+        if self.state == ViewState::DeepReorg {
+            return None;
+        }
+        let gone = |height: u32, block: &BlockHash| at(height).is_some_and(|b| b != *block);
+        let last_gone = self.checked_block.is_some_and(|b| gone(self.checked, &b));
+        if self.checked_block.is_some() && at(self.checked) == self.checked_block {
+            return None;
+        }
+        let mut left: BTreeMap<BlockHash, u32> = BTreeMap::new();
+        let mut on_chain: Option<u32> = None;
+        for (height, undo) in &self.undo {
+            if gone(*height, &undo.block) {
+                left.insert(undo.block, *height);
+            } else if at(*height) == Some(undo.block) {
+                on_chain = on_chain.max(Some(*height));
+            }
+        }
+        for coin in self.coins.values() {
+            if gone(coin.height, &coin.block) {
+                left.entry(coin.block).or_insert(coin.height);
+            }
+        }
+        for receipt in self.receipts.values().flatten() {
+            if gone(receipt.height, &receipt.block) {
+                left.entry(receipt.block).or_insert(receipt.height);
+            }
+        }
+        if left.is_empty() && !last_gone {
+            return None;
+        }
+        let lowest = left.values().copied().min().unwrap_or(self.checked);
+        let fork = on_chain
+            .filter(|h| *h < lowest)
+            .unwrap_or_else(|| lowest.saturating_sub(UNDO_BLOCKS))
+            .max(self.birthday);
+        let mut ordered: Vec<(BlockHash, u32)> = left.into_iter().collect();
+        ordered.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        Some((ordered.into_iter().map(|(b, _)| b).collect(), fork))
     }
 
     // ---- stored form ---------------------------------------------------------
@@ -1372,6 +1528,14 @@ fn encode(v: &CoinView) -> Vec<u8> {
     let mut out = wire::start(&MAGIC_OWNER_COINS, 256);
     out.extend_from_slice(&v.birthday.to_le_bytes());
     out.extend_from_slice(&v.checked.to_le_bytes());
+    // OC-53: version 2 is the version with the hash of the block at the
+    // position; a view that does not know it is written as version 1.
+    if let Some(hash) = v.checked_block {
+        if let Some(version) = out.get_mut(4) {
+            *version = 2;
+        }
+        out.extend_from_slice(&hash.to_byte_array());
+    }
     out.extend_from_slice(&v.receive_next.to_le_bytes());
     out.extend_from_slice(&v.change_next.to_le_bytes());
     match v.state {
@@ -1510,9 +1674,14 @@ fn decode(bytes: &[u8]) -> Result<CoinView, DecodeError> {
     if bytes.len() > MAX_VIEW_BYTES {
         return Err(DecodeError::TooLarge);
     }
-    let mut r = Reader::framed(bytes, &MAGIC_OWNER_COINS)?;
+    let (mut r, version) = Reader::framed_up_to(bytes, &MAGIC_OWNER_COINS, 2)?;
     let birthday = r.u32_le()?;
     let checked = r.u32_le()?;
+    let checked_block = if version >= 2 {
+        Some(BlockHash::from_byte_array(r.array()?))
+    } else {
+        None
+    };
     let receive_next = r.u32_le()?;
     let change_next = r.u32_le()?;
     if receive_next > INDEX_LIMIT || change_next > INDEX_LIMIT {
@@ -1682,6 +1851,7 @@ fn decode(bytes: &[u8]) -> Result<CoinView, DecodeError> {
     Ok(CoinView {
         birthday,
         checked,
+        checked_block,
         receive_next,
         change_next,
         state,

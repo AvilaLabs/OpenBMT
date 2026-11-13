@@ -18,6 +18,7 @@ fuzz_target!(|data: &[u8]| {
             kind,
             txid: Txid::from_byte_array([n; 32]),
             block: BlockHash::from_byte_array([n.wrapping_add(1); 32]),
+            tx: None,
         };
         let valid = SettleOwed::new()
             .merged(&[

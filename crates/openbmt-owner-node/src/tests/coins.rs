@@ -1498,3 +1498,191 @@ fn oc_28_the_same_reorganization_into_a_full_log_takes_the_named_state() {
     let bytes = view.to_bytes();
     assert_eq!(CoinView::from_bytes(&bytes).unwrap().to_bytes(), bytes);
 }
+
+#[test]
+fn oc_53_the_stored_form_has_a_version_with_the_hash_and_reads_the_first_as_unknown() {
+    let (mut view, chain) = rich_view();
+    let v1 = view.to_bytes();
+    assert_eq!(v1[4], 1);
+    assert_eq!(CoinView::from_bytes(&v1).unwrap().checked_block(), None);
+    let hash = chain.view.hash_at(2).unwrap();
+    view.set_checked_at(2, Some(hash), ok).unwrap();
+    assert_eq!(view.checked_block(), Some(hash));
+    let v2 = view.to_bytes();
+    assert_eq!(v2[4], 2);
+    assert_eq!(&v2[13..45], &hash.to_byte_array());
+    // The version 2 bytes are the version 1 bytes with the hash after the
+    // position.
+    let mut without = [&v2[..13], &v2[45..]].concat();
+    without[4] = 1;
+    assert_eq!(without, v1);
+    let back = CoinView::from_bytes(&v2).unwrap();
+    assert_eq!(back, view);
+    assert_eq!(back.to_bytes(), v2);
+    // Every cut is refused, and so is a version that is not read.
+    for cut in 0..v2.len() {
+        assert!(CoinView::from_bytes(&v2[..cut]).is_err(), "cut at {cut}");
+    }
+    let mut three = v2;
+    three[4] = 3;
+    assert!(CoinView::from_bytes(&three).is_err());
+}
+
+#[test]
+fn oc_53_the_hash_follows_the_position_and_is_not_kept_when_the_position_moves_without_it() {
+    let (mut view, chain) = rich_view();
+    let two = chain.view.hash_at(2).unwrap();
+    view.set_checked_at(2, Some(two), ok).unwrap();
+    // A lower height changes nothing, and the same height with no hash
+    // keeps what the view knew.
+    view.set_checked_at(1, Some(chain.view.hash_at(1).unwrap()), ok)
+        .unwrap();
+    view.set_checked(2, ok).unwrap();
+    assert_eq!(view.checked_block(), Some(two));
+    // Moving up with no hash leaves it unknown.
+    view.set_checked(5, ok).unwrap();
+    assert_eq!((view.checked(), view.checked_block()), (5, None));
+    // A reorganization that lowers the position, and a rewind of the
+    // position for new scripts, leave it unknown too.
+    view.set_checked_at(5, Some(two), ok).unwrap();
+    view.reorganize(&[], 3, ok).unwrap();
+    assert_eq!((view.checked(), view.checked_block()), (3, None));
+    view.set_checked_at(3, Some(two), ok).unwrap();
+    view.raise_marks_and_rescan(9, 9, 3, ok).unwrap();
+    assert_eq!(view.checked(), 2);
+    assert_eq!(view.checked_block(), None);
+}
+
+#[test]
+fn oc_53_a_block_of_the_view_that_the_chain_no_longer_holds_is_found_with_or_without_the_hash() {
+    let (mut view, mut chain) = rich_view();
+    view.set_checked_at(2, Some(chain.view.hash_at(2).unwrap()), ok)
+        .unwrap();
+    let at = |chain: &Chain| {
+        let view = chain.view.clone();
+        move |h: u32| view.hash_at(h)
+    };
+    // The chain the view reflects: nothing left.
+    assert_eq!(view.left_while_stopped(at(&chain)), None);
+    let old_two = chain.blocks[1].block_hash();
+    // Block 2 is replaced and the chain has grown past the view's position.
+    chain.reorg(1, &[vec![], vec![], vec![]]);
+    let known = view.left_while_stopped(at(&chain));
+    assert_eq!(known, Some((vec![old_two], 1)));
+    // A view that does not know the hash finds the same blocks from its
+    // undo records.
+    let mut unknown = view.clone();
+    unknown.set_checked(3, ok).unwrap();
+    assert_eq!(unknown.checked_block(), None);
+    assert_eq!(unknown.left_while_stopped(at(&chain)), known);
+    // Headers that do not reach the view's blocks say nothing.
+    assert_eq!(view.left_while_stopped(|_| None), None);
+    // The undo that follows is the one a reorganization the node saw has.
+    let (left, fork) = known.unwrap();
+    let effect = view.reorganize(&left, fork, ok).unwrap();
+    assert_eq!(effect.restored, 1);
+    assert_eq!(view.checked(), 1);
+    assert_eq!(view.checked_block(), None);
+    assert_eq!(view.balance(), 70_000);
+}
+
+#[test]
+fn oc_53_with_no_undo_record_on_the_chain_the_fork_is_an_undo_horizon_below() {
+    let mut chain = Chain::new();
+    let mut view = CoinView::new(0);
+    let pay = foreign(1, &[(&script(1), 50_000)]);
+    let b1 = chain.push(std::slice::from_ref(&pay));
+    apply(&mut view, &chain, &b1);
+    for _ in 0..30 {
+        chain.push(&[]);
+    }
+    view.set_checked_at(31, Some(chain.view.hash_at(31).unwrap()), ok)
+        .unwrap();
+    // Every block is replaced.
+    chain.reorg(0, &vec![vec![]; 32]);
+    let (left, fork) = view
+        .left_while_stopped(|h| chain.view.hash_at(h))
+        .expect("the blocks left");
+    assert_eq!(left, vec![b1.block_hash()]);
+    assert_eq!(fork, 0);
+    // The coin's block has an undo record, so this is not the deep state.
+    view.reorganize(&left, fork, ok).unwrap();
+    assert_eq!(view.state(), ViewState::Ready);
+    assert_eq!(view.balance(), 0);
+}
+
+#[test]
+fn oc_53_a_view_in_the_deep_reorganization_state_is_not_checked_again() {
+    let mut chain = Chain::new();
+    let mut view = CoinView::new(0);
+    let pay = foreign(1, &[(&script(1), 50_000)]);
+    let b1 = chain.push(std::slice::from_ref(&pay));
+    apply(&mut view, &chain, &b1);
+    view.reorganize(&[b1.block_hash(); 101], 0, ok).unwrap();
+    assert_eq!(view.state(), ViewState::DeepReorg);
+    chain.reorg(0, &[vec![], vec![]]);
+    assert_eq!(view.left_while_stopped(|h| chain.view.hash_at(h)), None);
+}
+
+#[test]
+fn oc_54_a_transaction_kept_for_a_block_is_held_again_when_the_block_leaves() {
+    let mut chain = Chain::new();
+    let mut view = CoinView::new(0);
+    let pay = foreign(1, &[(&script(1), 50_000)]);
+    let b1 = chain.push(std::slice::from_ref(&pay));
+    apply(&mut view, &chain, &b1);
+    // A payment that was finished elsewhere: the view never held it.
+    let tx = tx_from(op(&pay, 0), &[(&script(77), 40_000), (&script(9), 9_000)]);
+    let txid = tx.compute_txid();
+    let b2 = chain.push(std::slice::from_ref(&tx));
+    apply(&mut view, &chain, &b2);
+    assert!(view.confirmed_height(&txid).is_none());
+    assert!(!view.retained_confirmations().contains(&txid));
+    let kept = view
+        .keep_confirmed(&b2.block_hash(), &tx, &chain.view, &scripts(), ok)
+        .unwrap();
+    assert!(kept);
+    assert_eq!(view.confirmed_height(&txid), Some(2));
+    assert!(view.retained_confirmations().contains(&txid));
+    // Giving it again changes nothing.
+    let before = view.clone();
+    assert!(!view
+        .keep_confirmed(&b2.block_hash(), &tx, &chain.view, &scripts(), ok)
+        .unwrap());
+    assert_eq!(view, before);
+    // The block leaves: the transaction is held again with its change, and
+    // the coin it spent is put back.
+    let (left, _) = chain.reorg(1, &[vec![]]);
+    let effect = view.reorganize(&left, 1, ok).unwrap();
+    assert_eq!(effect.reopened, vec![txid]);
+    let held = view.pending().next().unwrap();
+    assert_eq!(held.tx, tx);
+    assert_eq!(held.own, vec![(1, Keychain::Change, 0)]);
+    assert_eq!(view.owned().count(), 1);
+    assert!(view.confirmed_height(&txid).is_none());
+}
+
+#[test]
+fn oc_54_a_transaction_is_kept_only_for_a_block_of_the_chain_inside_the_undo_horizon() {
+    let mut chain = Chain::new();
+    let mut view = CoinView::new(0);
+    let tx = foreign(3, &[(&script(77), 1_000)]);
+    let b1 = chain.push(std::slice::from_ref(&tx));
+    // A block the chain does not hold.
+    let stray = mine(chain.tip_hash(), 2, 99, &[]);
+    assert!(!view
+        .keep_confirmed(&stray.block_hash(), &tx, &chain.view, &scripts(), ok)
+        .unwrap());
+    // A block in the horizon, then the same block once the tip is an undo
+    // horizon above it.
+    assert!(view
+        .keep_confirmed(&b1.block_hash(), &tx, &chain.view, &scripts(), ok)
+        .unwrap());
+    let mut late = CoinView::new(0);
+    for _ in 0..UNDO_BLOCKS {
+        chain.push(&[]);
+    }
+    assert!(!late
+        .keep_confirmed(&b1.block_hash(), &tx, &chain.view, &scripts(), ok)
+        .unwrap());
+}
