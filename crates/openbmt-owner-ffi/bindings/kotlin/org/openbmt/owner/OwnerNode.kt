@@ -123,6 +123,8 @@ private const val OP_BOX_OWN_INVITATION = 108
 private const val OP_BOX_OWN_CHECK = 109
 private const val OP_BOXES_PENDING = 110
 private const val OP_BOX_FORGET = 111
+private const val OP_OWN_BOX_WELCOME = 112
+private const val OP_OWN_RELAY_SIGN = 113
 private const val OP_SIGNER_REGISTRATION = 120
 private const val OP_SIGNER_BUILD = 121
 private const val OP_SIGNER_EXPORT = 122
@@ -3373,6 +3375,29 @@ object OwnerBoxes {
     fun ownCheck(invitation: String, claim: ByteArray): BoxOwnCheck {
         val r = call(OP_BOX_OWN_CHECK, 0) { it.string(invitation).bytes(claim) }
         return BoxOwnCheck(r.bytes(), r.strings()).also { r.end() }
+    }
+
+    /**
+     * Hand a Box of a shop with its own wallet its welcome (BX-18): the claim is checked against the
+     * invitation again, the settings that add the Box are signed by the owner root alone and stored, and
+     * the welcome and the settings are sent to the Box at [link]. [usdPerBtc] starts the settings when the
+     * phone holds none and is ignored when it does. A call made again for the same Box and claim sends the
+     * same welcome and settings.
+     */
+    fun ownWelcome(shop: OwnShopArgs, link: BoxLink, invitation: String, claim: ByteArray, usdPerBtc: Long): BoxDelivered {
+        val r = call(OP_OWN_BOX_WELCOME, 0) {
+            it.ownShop(shop).string(link.address).string(link.proxy).string(invitation).bytes(claim).u64(usdPerBtc)
+        }
+        return r.boxDelivered().also { r.end() }
+    }
+
+    /**
+     * The owner's signed relay (`OBMz`, CR-132) for the Box at [address] with key [relayKey]: the bytes of a
+     * bundle's relay (CR-130), and of the code a counter paired before the Box scans.
+     */
+    fun ownRelay(ownerSecret: ByteArray, address: String, relayKey: ByteArray): ByteArray {
+        val r = call(OP_OWN_RELAY_SIGN, 0) { it.bytes(ownerSecret).string(address).bytes(relayKey) }
+        return r.bytes().also { r.end() }
     }
 }
 

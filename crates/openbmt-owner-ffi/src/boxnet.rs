@@ -332,12 +332,15 @@ pub(crate) fn own_invitation(now: u64) -> Result<BoxOwnInvitationView, AppError>
     })
 }
 
-/// BX-17: check a Box's claim against this phone's own invitation, in
-/// constant time, and give the Box's key and its four words.
-pub(crate) fn own_check(a: BoxOwnCheckArgs) -> Result<BoxOwnCheckView, AppError> {
-    let invitation = Invitation::from_text(&a.invitation)
+/// BX-17, BX-18: read this phone's own invitation and a Box's claim, and
+/// check the claim against the invitation in constant time (BX-14).
+pub(crate) fn check_own_claim(
+    invitation: &str,
+    claim: &[u8],
+) -> Result<(Invitation, Claim), AppError> {
+    let invitation = Invitation::from_text(invitation)
         .map_err(|e| refused_by("box-own-invitation", format!("BX-10: {e}")))?;
-    let claim = Claim::from_bytes(&a.claim)
+    let claim = Claim::from_bytes(claim)
         .map_err(|e| refused_by("box-not-a-box", format!("the claim does not read: {e}")))?;
     if !claim.verify(&invitation) {
         return Err(refused_by(
@@ -345,6 +348,13 @@ pub(crate) fn own_check(a: BoxOwnCheckArgs) -> Result<BoxOwnCheckView, AppError>
             "BX-14: the claim was not made with this invitation",
         ));
     }
+    Ok((invitation, claim))
+}
+
+/// BX-17: check a Box's claim against this phone's own invitation, in
+/// constant time, and give the Box's key and its four words.
+pub(crate) fn own_check(a: BoxOwnCheckArgs) -> Result<BoxOwnCheckView, AppError> {
+    let (_, claim) = check_own_claim(&a.invitation, &a.claim)?;
     Ok(BoxOwnCheckView {
         box_key: claim.box_key.to_bytes().to_vec(),
         words: claim

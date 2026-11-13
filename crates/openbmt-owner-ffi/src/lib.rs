@@ -100,9 +100,9 @@ pub use float::{
 pub use host::{Entry, KEY1_FILE, MAX_WAIT_MS, SLICE_MS};
 pub use import_view::{ImportKind, ImportView};
 pub use own::{
-    OwnBundleView, OwnConfirmArgs, OwnCounterArgs, OwnGapArgs, OwnGapView, OwnMade, OwnOfferView,
-    OwnOwnerMade, OwnRequestArgs, OwnRequestView, OwnShopArgs, OwnWalletView, SwitchRowView,
-    SwitchStateKind,
+    OwnBoxDeliveredView, OwnBoxWelcomeArgs, OwnBundleView, OwnConfirmArgs, OwnCounterArgs,
+    OwnGapArgs, OwnGapView, OwnMade, OwnOfferView, OwnOwnerMade, OwnRelayArgs, OwnRequestArgs,
+    OwnRequestView, OwnShopArgs, OwnWalletView, SwitchRowView, SwitchStateKind,
 };
 pub use pos_views::{
     PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,

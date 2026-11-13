@@ -96,7 +96,9 @@
 //!   Boxes waiting for their welcome, and the welcome itself. 108 and 109
 //!   are the owner phone's own invitation and check when there is no Key
 //!   app (BX-17); they work on no node. 110 lists the Boxes with a claim
-//!   queued or a welcome waiting, and 111 forgets one of them (AS-87).
+//!   queued or a welcome waiting, and 111 forgets one of them (AS-87). 112
+//!   hands a Box of a shop with its own wallet its welcome, and 113 signs the
+//!   owner's relay for the Box's stored address and key (BX-18, CR-132).
 //!
 //! - 140 and 141: the price of a bitcoin from the sources
 //!   (`docs/OWNER-APP-RULES.md` OA-101): the table of sources the app fetches
@@ -161,9 +163,9 @@ use crate::float::{
 use crate::host::{real_spawn, Entry, Spawn};
 use crate::import_view::{self, ImportKind, ImportView};
 use crate::own::{
-    self, OwnBundleView, OwnConfirmArgs, OwnCounterArgs, OwnGapArgs, OwnGapView, OwnMade,
-    OwnOfferView, OwnOwnerMade, OwnRequestArgs, OwnRequestView, OwnShopArgs, OwnWalletView,
-    SwitchRowView, SwitchStateKind,
+    self, OwnBoxDeliveredView, OwnBoxWelcomeArgs, OwnBundleView, OwnConfirmArgs, OwnCounterArgs,
+    OwnGapArgs, OwnGapView, OwnMade, OwnOfferView, OwnOwnerMade, OwnRelayArgs, OwnRequestArgs,
+    OwnRequestView, OwnShopArgs, OwnWalletView, SwitchRowView, SwitchStateKind,
 };
 use crate::own_spend_views::{
     OwnSpendBuildArgs, OwnSpendBuiltView, OwnSpendFileView, OwnSpendItemView, OwnSpendSessionView,
@@ -699,6 +701,12 @@ fn build_ops() -> Vec<Op> {
         }),
         op(111, "box_forget", Node, |c, key: Vec<u8>| {
             c.entry()?.box_forget(key)
+        }),
+        op(112, "own_box_welcome", Zero, |_, a: OwnBoxWelcomeArgs| {
+            own::box_welcome(a)
+        }),
+        op(113, "own_relay_sign", Zero, |_, a: OwnRelayArgs| {
+            own::relay_sign(a)
         }),
         op(120, "signer_registration", Node, |c, shop: String| {
             c.entry()?.signer_registration(shop)
@@ -1281,6 +1289,9 @@ fn definitions() -> Vec<TypeDef> {
         OwnConfirmArgs::define(),
         OwnCounterArgs::define(),
         OwnBundleView::define(),
+        OwnBoxWelcomeArgs::define(),
+        OwnBoxDeliveredView::define(),
+        OwnRelayArgs::define(),
         OwnGapArgs::define(),
         OwnGapView::define(),
         PinChangeArgs::define(),

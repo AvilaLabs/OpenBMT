@@ -51,6 +51,7 @@ object ProtocolDecoderTest {
         starterThroughTheLibrary()
         priceThroughTheLibrary()
         importThroughTheLibrary()
+        ownBoxThroughTheLibrary()
         requestFrames()
         requestDetailFrame()
         webFrames()
@@ -348,6 +349,30 @@ object ProtocolDecoderTest {
         refusedBy("a bad checksum", "WL-10") { OwnerImport.read(text.dropLast(1) + "y") }
         refusedBy("a test network", "WL-11") { OwnerImport.read("wpkh([818bc9b6/84h/1h/0h]tpubDC5FSnBiZDMmhiuCmWAYsLwgLYrrT9rAqvTySfuCCrgsWz8wxMXUS9Tb9iVMvcRbvFcAHGkMD5Kx8koh4GquNGNTfohfk7pgjhaPCdXpoba/0/*)") }
         refusedBy("text that is not a description", "WL-10") { OwnerImport.read("hello") }
+    }
+
+    /**
+     * The calls for a Box of a shop with its own wallet through the real library (BX-18, CR-132): the owner's
+     * relay is the `OBMz` frame, the same for the same address and key, and what cannot be a relay or a welcome
+     * is refused with the rule and the words.
+     */
+    private fun ownBoxThroughTheLibrary() {
+        val secret = ByteArray(32) { 0x11 }
+        val key = OwnerOwn.make().root
+        val relay = OwnerBoxes.ownRelay(secret, "192.168.1.20:7000", key)
+        check(String(relay.copyOf(4), Charsets.ISO_8859_1) == "OBMz") { "the relay is not an OBMz frame" }
+        check(OwnerBoxes.ownRelay(secret, "192.168.1.20:7000", key).contentEquals(relay)) { "the same relay again" }
+        refusedBy("an address that is not one", "box-address") { OwnerBoxes.ownRelay(secret, "somewhere", key) }
+        refusedBy("a port of 0", "box-address") { OwnerBoxes.ownRelay(secret, "192.168.1.20:0", key) }
+        refusedBy("a key that is not 32 bytes", "id-length") { OwnerBoxes.ownRelay(secret, "192.168.1.20:7000", key.copyOf(5)) }
+        refusedBy("a secret that is not 32 bytes", "id-length") { OwnerBoxes.ownRelay(ByteArray(3), "192.168.1.20:7000", key) }
+        val shop = OwnShopArgs("/nonexistent", secret, ByteArray(0))
+        refusedBy("an invitation that is not one", "box-own-invitation") {
+            OwnerBoxes.ownWelcome(shop, BoxLink("192.168.1.20:7000", ""), "not-an-invitation", ByteArray(0), 100_000L)
+        }
+        refusedBy("a welcome for an address that is not one", "box-address") {
+            OwnerBoxes.ownWelcome(shop, BoxLink("somewhere", ""), "not-an-invitation", ByteArray(0), 100_000L)
+        }
     }
 
     /**

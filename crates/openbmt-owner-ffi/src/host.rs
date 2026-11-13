@@ -778,6 +778,27 @@ fn own_only(own: &mut Option<OwnShop>) -> Result<&mut OwnShop, AppError> {
     })
 }
 
+/// AS-83, BX-18: whether the shop already knows the Box `key`, and whether it
+/// holds no settings yet (so that adding a Box needs today's rate). A shop
+/// with a Key app asks its owner queue; a shop with its own wallet asks the
+/// settings it signed, in its own state.
+fn box_standing(st: &mut State, key: &DeviceId) -> Result<(bool, bool), AppError> {
+    match &st.own {
+        Some(own) => {
+            let identity = st.node.owner_identity().map_err(|e| node_error(&e))?;
+            own::turn_on_shop(&st.dir, identity, own.wallet.clone(), |shop| {
+                let shop = shop.shop();
+                Ok((shop.knows_box(key), !shop.has_settings_base()))
+            })
+            .map_err(own::node_error)
+        }
+        None => {
+            let owner = st.node.owner();
+            Ok((owner.knows_box(key), !owner.has_settings_base()))
+        }
+    }
+}
+
 /// RQ-12, RQ-17: give the node the shop's settings, its time zone and the
 /// rate. A shop with its own wallet keeps its settings in its own state,
 /// which is read from the folder; a shop with a Key app has requests off.
@@ -1895,15 +1916,12 @@ impl Entry {
         let fetched = boxnet::fetch(&route)?;
         let relay = fetched.relay;
         let Some(bytes) = fetched.claim.clone() else {
-            let known = self.run(None, move |st| Ok(st.node.owner().knows_box(&relay)))?;
+            let known = self.run(None, move |st| Ok(box_standing(st, &relay)?.0))?;
             return Err(boxnet::no_claim(known));
         };
         let claim = boxnet::read_claim(&fetched, &bytes)?;
         let key = claim.box_key;
-        let (known, needs_rate) = self.run(None, move |st| {
-            let owner = st.node.owner();
-            Ok((owner.knows_box(&key), !owner.has_settings_base()))
-        })?;
+        let (known, needs_rate) = self.run(None, move |st| box_standing(st, &key))?;
         if known {
             return Err(boxnet::already_paired());
         }

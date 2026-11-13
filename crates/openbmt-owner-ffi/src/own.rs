@@ -17,9 +17,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use openbmt_core::boxpair::Welcome;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::pinned_wallet::{PinnedWallet, WalletKind};
-use openbmt_core::relay::SignedRelayHint;
+use openbmt_core::relay::{RelayHint, RelayRoute, SignedRelayHint};
 use openbmt_core::wallet_single::ImportedWallet;
 use openbmt_owner::own_book::{gap_limit, gap_needs_notice};
 use openbmt_owner::own_say::{shop_file_failed, they_differ, wallet_not_readable};
@@ -28,6 +29,7 @@ use openbmt_owner::own_switch::{status_words, SwitchStatus};
 use openbmt_owner_node::{OwnNode, OwnNodeError};
 use std::fmt;
 
+use crate::boxnet::{self, BoxLinkArgs};
 use crate::codec::{wire_record, wire_record_get, wire_unit_enum};
 use crate::counter_views::WaitingCounterView;
 use crate::error::{from_words, internal, AppError, Kind};
@@ -238,6 +240,85 @@ wire_record_get!(OwnConfirmArgs {
     request,
     usd_per_btc,
     relay
+});
+
+/// The arguments of `own_box_welcome` (BX-18).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnBoxWelcomeArgs {
+    /// The shop.
+    pub shop: OwnShopArgs,
+    /// Where the Box is, and the proxy for an onion name.
+    pub link: BoxLinkArgs,
+    /// The invitation's text, as `box_own_invitation` gave it.
+    pub invitation: String,
+    /// The claim (`OBM5`) the Box offered, as `box_own_check` read it.
+    pub claim: Vec<u8>,
+    /// Today's price of one bitcoin in whole dollars, for the first
+    /// settings; ignored when the phone holds settings.
+    pub usd_per_btc: u64,
+}
+
+wire_record!(OwnBoxWelcomeArgs {
+    shop,
+    link,
+    invitation,
+    claim,
+    usd_per_btc
+});
+wire_record_get!(OwnBoxWelcomeArgs {
+    shop,
+    link,
+    invitation,
+    claim,
+    usd_per_btc
+});
+
+/// A Box of a shop with its own wallet that took its welcome (BX-18).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnBoxDeliveredView {
+    /// The Box's key, 32 bytes: the relay key the shop's link is made for.
+    pub box_key: Vec<u8>,
+    /// The counters the settings name, 32 bytes each, in key order. Each
+    /// one that was paired before the Box needs its relay code (CR-132).
+    pub counters: Vec<Vec<u8>>,
+    /// The version of the settings the Box holds now.
+    pub settings_version: u32,
+}
+
+wire_record!(OwnBoxDeliveredView {
+    box_key,
+    counters,
+    settings_version
+});
+
+/// The arguments of `own_relay_sign` (CR-132, BX-18).
+#[derive(Clone, PartialEq, Eq)]
+pub struct OwnRelayArgs {
+    /// The owner root's secret, 32 bytes.
+    pub owner_secret: Vec<u8>,
+    /// `host:port` of the Box, or a v3 `.onion` name and its port.
+    pub address: String,
+    /// The Box's key, 32 bytes: the relay's key.
+    pub relay_key: Vec<u8>,
+}
+
+impl fmt::Debug for OwnRelayArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OwnRelayArgs")
+            .field("address", &self.address)
+            .finish_non_exhaustive()
+    }
+}
+
+wire_record!(OwnRelayArgs {
+    owner_secret,
+    address,
+    relay_key
+});
+wire_record_get!(OwnRelayArgs {
+    owner_secret,
+    address,
+    relay_key
 });
 
 /// The arguments of the ops that name a counter.
@@ -727,4 +808,85 @@ pub(crate) fn gap(a: OwnGapArgs) -> Result<OwnGapView, AppError> {
         needed,
         notice: gap_needs_notice(needed),
     })
+}
+
+/// Op 112: hand a Box of a shop with its own wallet its welcome (BX-18).
+/// The claim is checked against the invitation again, the settings that
+/// add the Box are signed by the owner root alone and stored (a welcome
+/// sent again carries the same ones), and the welcome and the settings are
+/// sent to the Box at the address, which must answer with the key the claim
+/// names. The shop's file is not held during the call to the Box.
+pub(crate) fn box_welcome(a: OwnBoxWelcomeArgs) -> Result<OwnBoxDeliveredView, AppError> {
+    let OwnBoxWelcomeArgs {
+        shop,
+        link,
+        invitation,
+        claim,
+        usd_per_btc,
+    } = a;
+    let route = boxnet::route_for(&link.address, &link.proxy)?;
+    let (invitation, claim) = boxnet::check_own_claim(&invitation, &claim)?;
+    let (welcome, settings, version, counters) = with_shop(shop, |node| {
+        let owner = node.shop().owner_id();
+        let (shop, store) = node.shop_and_store();
+        let signed = shop
+            .add_box(claim.box_key, usd_per_btc, &store)
+            .map_err(own_error)?;
+        let counters: Vec<Vec<u8>> = signed
+            .settings
+            .counters
+            .keys()
+            .map(|c| c.to_bytes().to_vec())
+            .collect();
+        Ok((
+            Welcome::make_own(&invitation, &claim, owner).to_bytes(),
+            signed.to_bytes(),
+            signed.settings.version,
+            counters,
+        ))
+    })?;
+    boxnet::send_welcome(&route, &claim.box_key, &welcome, &settings)?;
+    Ok(OwnBoxDeliveredView {
+        box_key: claim.box_key.to_bytes().to_vec(),
+        counters,
+        settings_version: version,
+    })
+}
+
+/// Op 113: the owner's signed relay (`OBMz`, CR-132) for the Box at the
+/// stored address and key: the bytes of a bundle's relay (CR-130) and of the
+/// code a counter paired before the Box scans. The proxy is no part of it.
+pub(crate) fn relay_sign(a: OwnRelayArgs) -> Result<Vec<u8>, AppError> {
+    let OwnRelayArgs {
+        mut owner_secret,
+        address,
+        relay_key,
+    } = a;
+    let identity = <[u8; 32]>::try_from(owner_secret.as_slice())
+        .map_err(|_| crate::error::refused_by("id-length", "the owner secret must be 32 bytes"))
+        .and_then(|s| {
+            Identity::from_secret_bytes(&s)
+                .map_err(|e| crate::error::refused_by("id-length", format!("the owner key: {e}")))
+        });
+    owner_secret.fill(0);
+    std::hint::black_box(&mut owner_secret);
+    let identity = identity?;
+    let key = <[u8; 32]>::try_from(relay_key.as_slice())
+        .map_err(|_| crate::error::refused_by("id-length", "the relay key must be 32 bytes"))?;
+    let route = match boxnet::route_for(&address, "127.0.0.1:9050")? {
+        openbmt_link::Route::Direct(addr) => RelayRoute::Direct(addr),
+        openbmt_link::Route::Onion { host, port, .. } => RelayRoute::Onion {
+            name: host.strip_suffix(".onion").unwrap_or(&host).to_string(),
+            port,
+        },
+        openbmt_link::Route::Proxied { .. } => {
+            return Err(crate::error::refused_by(
+                "box-address",
+                "CR-133: the relay is an address or an onion name",
+            ))
+        }
+    };
+    let hint = RelayHint::new(route, key)
+        .map_err(|e| crate::error::refused_by("box-address", e.to_string()))?;
+    Ok(SignedRelayHint::sign(hint, &identity).to_bytes())
 }
