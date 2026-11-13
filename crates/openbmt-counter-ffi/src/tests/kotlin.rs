@@ -144,7 +144,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
     // Each reader, with the fields in the order of the Rust record.
     for needle in [
         "Opened(u32(), u64(), u64(), u64(), u64(), payment())",
-        "Payment(string(), string(), string(), u32(), bytes())",
+        "Payment(string(), string(), string(), u32(), bytes(), bytes())",
         "saleState(), words(), list { words() }, option { words() }, u64(), u64(), bool(), bool(),",
         "bool(), bool(),",
         "reports(), option { payment() },",
@@ -180,7 +180,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
     let protocol = read(bindings("PROTOCOL.md"));
     for line in [
         "OpenedView: record: index: u32, needs_sats: u64, quote_rate: u64, quote_from: u64, quote_until: u64, payment: Payment",
-        "Payment: record: address: string, uri: string, copy_uri: string, qr_size: u32, qr_bits: list<u8>",
+        "Payment: record: address: string, uri: string, copy_uri: string, qr_size: u32, qr_bits: list<u8>, tag: list<u8>",
         "PumpView: record: reports: list<ReportView>, notes: list<string>, stopped: bool",
         "HeartbeatOutcome: record: verified: bool, sent_at: option<u64>, words: Words, reports: list<ReportView>",
         "StatusView: record: checked_height: u32, tip_height: u32, health: option<HealthView>, own_node: option<OwnNodeView>, sales: list<u32>, refused_below_minimum: u64, stopped: bool, lightning: option<LightningStatusView>",
@@ -315,6 +315,8 @@ fn the_ln_reply_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
     assert_eq!(kotlin_hex, LN_REPLY_FRAME_HEX);
 }
 
+const TAP_ANSWER_HEX: &str =
+    "4f424d6d01590000000000000000000000000001030000000001020400000000a40400";
 const RATE_PARSE_HEX: &str =
     "4f424d6d0129000000000000000000060000006b72616b656e020000007b7d0900000000000000";
 const RATE_COMBINE_HEX: &str =
@@ -366,6 +368,22 @@ fn the_price_requests_are_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
     assert_eq!(hex(&combine), RATE_COMBINE_HEX);
     assert_eq!(harness_hex("RATE_PARSE_HEX"), RATE_PARSE_HEX);
     assert_eq!(harness_hex("RATE_COMBINE_HEX"), RATE_COMBINE_HEX);
+}
+
+#[test]
+fn the_tap_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
+    let tap = frame(
+        89,
+        0,
+        &W::new()
+            .bytes(&[])
+            .u8(1)
+            .bytes(&[0, 1, 2])
+            .bytes(&[0, 0xA4, 4, 0])
+            .0,
+    );
+    assert_eq!(hex(&tap), TAP_ANSWER_HEX);
+    assert_eq!(harness_hex("TAP_ANSWER_HEX"), TAP_ANSWER_HEX);
 }
 
 /// The counter app's fetch limits are the library's (RT-40, RT-43, RT-10).

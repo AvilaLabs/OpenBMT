@@ -16,6 +16,8 @@
 //!   node and why a screen call never waits longer than a pump slice.
 //! - [`pay`] makes the payment request the customer scans (CR-83): the BIP
 //!   21 URI of a sale and its QR modules from `openbmt-qr`.
+//! - [`tap`] makes the NFC tag of the payment request (`tag_content`) and
+//!   answers a reader's commands from it (`tap_answer`, TP-01 to TP-15).
 //! - [`rates`] converts the price of bitcoin: the table of sources, the
 //!   reading of one reply and one rate made from samples. The app fetches
 //!   (`docs/RATE-RULES.md`, RT-40 to RT-45); the library decides.
@@ -73,6 +75,7 @@ pub mod rates;
 mod relay;
 mod say;
 pub mod shop;
+pub mod tap;
 mod till;
 mod views;
 
@@ -94,6 +97,7 @@ pub use pay::{btc_amount, request_link, request_texts, Payment};
 pub use rates::{RateCombineArgs, RateParseArgs, RateSourceView, RateView, SampleView};
 pub use say::{all_words, words_for};
 pub use shop::SettingsView;
+pub use tap::{tag_content, tap_answer, TapArgs, TapView};
 pub use till::{TillRow, TillSaleView, TillStartArgs};
 pub use views::{
     ActorRole, ActorView, AddNoteArgs, CashArgs, CounterNetwork, HealthView, HeartbeatOutcome,

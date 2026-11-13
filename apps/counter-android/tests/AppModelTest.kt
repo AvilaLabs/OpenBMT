@@ -432,7 +432,7 @@ object AppModelTest {
         throws("no modules") { QrLayout.box(0, 100, 100) }
         // The module mapping of the library's payment, as the view reads it.
         val bits = byteArrayOf(0b1010_0001.toByte(), 0)
-        val p = Payment("a", "A", "a", 3L, bits)
+        val p = Payment("a", "A", "a", 3L, bits, byteArrayOf())
         val dark = ArrayList<Pair<Int, Int>>()
         for (y in 0 until 3) for (x in 0 until 3) if (p.module(x, y)) dark.add(x to y)
         ok(dark == listOf(0 to 0, 2 to 0, 1 to 2), "rows first, most significant bit first: $dark")

@@ -24,6 +24,7 @@ mod staff;
 mod strict;
 mod swap;
 mod switch;
+mod tap;
 mod till;
 mod tips;
 pub(crate) mod wire;

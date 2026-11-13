@@ -846,3 +846,10 @@ path = "fuzz_targets/books_till_csv.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "tap_answer"
+path = "fuzz_targets/tap_answer.rs"
+test = false
+doc = false
+bench = false

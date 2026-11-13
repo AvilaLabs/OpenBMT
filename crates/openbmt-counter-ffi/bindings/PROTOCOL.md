@@ -127,6 +127,7 @@ ops run on another; it waits for at most 250 ms.
  86 till_start       handle node  args TillStartArgs -> OpenedView
  87 till_not_now     handle node  args (u64, list<u8>) -> ()
  88 till_of_sale     handle node  args u32 -> TillSaleView
+ 89 tap_answer       handle zero  args TapArgs -> TapView
 200 pending_switch   handle node  args u64 -> SwitchStateView
 201 switch_same      handle node  args u64 -> SwitchSameView
 202 switch_record_kept handle node  args u64 -> Words
@@ -180,7 +181,7 @@ RefundStateView: enum, one tag byte
     tags Requested=0 WaitingForDepth=1 Withdrawn=2 PaidInCash=3
 ReportView: enum, a tag byte, then: PosPaid(index: u32) | PosUnpaid(index: u32) | BooksFinal(index: u32, amount_minor: u64, currency: string, received_sats: u64) | SurplusOwed(index: u32, sats: u64) | LatePayment(index: u32, sats: u64) | Alarm(index: u32) | Dust(index: u32, sats: u64)
     tags PosPaid=0 PosUnpaid=1 BooksFinal=2 SurplusOwed=3 LatePayment=4 Alarm=5 Dust=6
-Payment: record: address: string, uri: string, copy_uri: string, qr_size: u32, qr_bits: list<u8>
+Payment: record: address: string, uri: string, copy_uri: string, qr_size: u32, qr_bits: list<u8>, tag: list<u8>
 OpenedView: record: index: u32, needs_sats: u64, quote_rate: u64, quote_from: u64, quote_until: u64, payment: Payment
 ScreenView: record: state: StateView, words: Words, flags: list<Words>, check: option<Words>, received_sats: u64, needs_sats: u64, stuck: bool, late: bool, reopened: bool, conflict_seen: bool, reports: list<ReportView>, payment: option<Payment>, lightning: option<LightningSaleView>
 PumpView: record: reports: list<ReportView>, notes: list<string>, stopped: bool
@@ -231,6 +232,8 @@ BillRow: record: number: u32, kind: BillKindView, amount_minor: u64, reference: 
 TillRow: record: sale: list<u8>, amount_minor: u64, reference: string, lapses_at: u64, minutes_left: u64, words: Words
 TillStartArgs: record: now: u64, sale: list<u8>, rate: u64, source_label: string, source_fetched_at: u64, actor: option<ActorView>
 TillSaleView: record: sale: option<list<u8>>, cancelled: bool, words: option<Words>
+TapArgs: record: session: list<u8>, content: option<list<u8>>, apdu: list<u8>
+TapView: record: session: list<u8>, response: list<u8>
 ChangeValueView: record: kind: ChangeValueKind, number: u64, text: string
 ChangeFieldView: record: field: string, now: ChangeValueView, after: ChangeValueView
 PendingChangeView: record: version: u32, words: list<string>, fields: list<ChangeFieldView>, arrived: u64, expires_at: u64, confirmed: bool

@@ -288,7 +288,7 @@ impl<'a> Rd<'a> {
         }
     }
 
-    /// A payment: address, uri, copy uri, size, modules.
+    /// A payment: address, uri, copy uri, size, modules, tag.
     pub fn payment(&mut self) -> Payment {
         Payment {
             address: self.string(),
@@ -296,6 +296,7 @@ impl<'a> Rd<'a> {
             copy_uri: self.string(),
             size: self.u32(),
             bits: self.bytes(),
+            tag: self.bytes(),
         }
     }
 
@@ -443,6 +444,7 @@ pub struct Payment {
     pub copy_uri: String,
     pub size: u32,
     pub bits: Vec<u8>,
+    pub tag: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -15,6 +15,7 @@ object ProtocolDecoderTest {
     /** The `rate_parse` and `rate_combine` requests, as the Rust test of the same name writes them. */
     private const val RATE_PARSE_HEX =
         "4f424d6d0129000000000000000000060000006b72616b656e020000007b7d0900000000000000"
+    private const val TAP_ANSWER_HEX = "4f424d6d01590000000000000000000000000001030000000001020400000000a40400"
     private const val RATE_COMBINE_HEX =
         "4f424d6d012a00000000000000000002000000060000006b72616b656e01000000000000003a3c70" +
             "000000000008000000636f696e626173650200000000000000523b70000000000003000000000000" +
@@ -259,6 +260,7 @@ object ProtocolDecoderTest {
         rejects("trailing bytes in a rate") {
             decodeResponse(header(0, Writer().u64(1).string("a").u64(5).u8(0).toByteArray())).let { it.rate(); it.end() }
         }
+        check(hex(tapAnswerFrame(byteArrayOf(), byteArrayOf(0, 1, 2), byteArrayOf(0, 0xa4.toByte(), 4, 0))) == TAP_ANSWER_HEX)
         check(hex(rateParseFrame("kraken", byteArrayOf(0x7b, 0x7d), 9)) == RATE_PARSE_HEX) { hex(rateParseFrame("kraken", byteArrayOf(0x7b, 0x7d), 9)) }
         val samples = listOf(Sample("kraken", 1, 7_355_450), Sample("coinbase", 2, 7_355_218))
         check(hex(rateCombineFrame(samples, 3)) == RATE_COMBINE_HEX) { hex(rateCombineFrame(samples, 3)) }
@@ -286,6 +288,7 @@ object ProtocolDecoderTest {
         val payment = screen.payment ?: error("a payment")
         check(payment.address == "bc1qaddress" && payment.uri == "BITCOIN:BC1QADDRESS")
         check(payment.copyUri == "bitcoin:bc1qaddress" && payment.qrSize == 2L)
+        check(payment.tag.contentEquals(byteArrayOf(0, 3, 0xd1.toByte())))
         // Bits 1, 0, 1, 0: the first column is dark.
         check(payment.module(0, 0) && !payment.module(1, 0) && payment.module(0, 1) && !payment.module(1, 1))
 
@@ -597,7 +600,7 @@ object ProtocolDecoderTest {
         if (payment) {
             out.write(1)
             val p = Writer().string("bc1qaddress").string("BITCOIN:BC1QADDRESS").string("bitcoin:bc1qaddress")
-                .u32(2).bytes(ByteArray(bitsLength) { 0xa0.toByte() })
+                .u32(2).bytes(ByteArray(bitsLength) { 0xa0.toByte() }).bytes(byteArrayOf(0, 3, 0xd1.toByte()))
             out.write(p.toByteArray())
         } else {
             out.write(0)

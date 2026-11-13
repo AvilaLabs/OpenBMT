@@ -15,6 +15,7 @@ use openbmt_qr::{encode_text, Ecc};
 
 use crate::codec::wire_record;
 use crate::error::{refused_by, CounterError};
+use crate::tap::tag_content;
 
 /// What the cashier's screen shows the customer for one sale.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +32,9 @@ pub struct Payment {
     /// stream, row by row: module `(x, y)` is bit `7 - (n % 8)` of byte
     /// `n / 8` for `n = y * qr_size + x`. The last byte is padded with 0.
     pub qr_bits: Vec<u8>,
+    /// The NDEF file of the NFC tag for the same request (TP-01), made from
+    /// `copy_uri`; empty when it does not fit (TP-03).
+    pub tag: Vec<u8>,
 }
 
 wire_record!(Payment {
@@ -38,7 +42,8 @@ wire_record!(Payment {
     uri,
     copy_uri,
     qr_size,
-    qr_bits
+    qr_bits,
+    tag
 });
 
 /// An amount in satoshis as BIP 21 writes it: bitcoin, a decimal point and
@@ -140,11 +145,13 @@ fn finish(address: String, uri: String, copy_uri: String) -> Result<Payment, Cou
             }
         }
     }
+    let tag = tag_content(&copy_uri).unwrap_or_default();
     Ok(Payment {
         address,
         uri,
         copy_uri,
         qr_size: u32::try_from(size).map_err(|_| refused_by("pay-code", "the code is too big"))?,
         qr_bits,
+        tag,
     })
 }

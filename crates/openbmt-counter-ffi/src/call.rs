@@ -90,6 +90,9 @@
 //!   for a counter's confirmation, and 72 `confirm_change` signs it and
 //!   writes the record (CR-239 to CR-241). The PIN of CR-84 is the app's: it
 //!   asks `confirm_change` only after the manager's PIN was right.
+//! - 89 `tap_answer` answers one command of an NFC reader from the tag's
+//!   bytes and the session the app keeps (TP-10 to TP-15); it works on no
+//!   node and keeps nothing.
 //! - 200 to 203 the switch from the starter wallet (CR-256 to CR-263):
 //!   `pending_switch` reads the switch that waits (the new wallet's first
 //!   address, the kind of wallet) and the pairing record the app still has to
@@ -129,6 +132,7 @@ use crate::rates::{
 use crate::relay::take_relay;
 use crate::say::{TONES, WHOS};
 use crate::shop::{own_node_check, pairing_read, SettingsView};
+use crate::tap::{tap_op, TapArgs, TapView};
 use crate::till::{TillRow, TillSaleView, TillStartArgs};
 use crate::views::{
     put_words, ActorRole, ActorView, AddNoteArgs, CancelArgs, CashArgs, ChangeFieldView,
@@ -592,6 +596,7 @@ fn build_ops() -> Vec<Op> {
         op(88, "till_of_sale", Node, |c, index: u32| {
             c.entry()?.till_of_sale(index)
         }),
+        op(89, "tap_answer", Zero, |_, a: TapArgs| Ok(tap_op(a))),
         op(200, "pending_switch", Node, |c, now: u64| {
             c.entry()?.pending_switch(now)
         }),
@@ -810,6 +815,8 @@ fn definitions() -> Vec<TypeDef> {
         TillRow::define(),
         TillStartArgs::define(),
         TillSaleView::define(),
+        TapArgs::define(),
+        TapView::define(),
         ChangeValueView::define(),
         ChangeFieldView::define(),
         PendingChangeView::define(),

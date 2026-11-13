@@ -49,6 +49,7 @@ exactly the input bytes.
 | `counter_swap_record_decode` | `SwapRecord::from_bytes` (the counter's record of a swap through a provider, magic `OBM(`, CR-220), with re-encode equality; the machine inside reads by SW-73 |
 | `relay_for_counters_decode` | `SignedRelayHint::from_bytes` (the owner's relay for counters, magic `OBMz`, CR-132), with re-encode equality, on the input as it is and behind the frame header; a hint that decoded must be made again by `RelayHint::new`, and the signature check must not panic |
 | `counter_link_dispatch` | the counter library's calls 24 `link_step`, 25 `link_state` and 56 `take_relay` through `dispatch` with arbitrary fields and a handle no node has, and the input as a whole request; every answer must be a response frame and none may panic |
+| `tap_answer` | the counter's NFC tag (`tap_answer`, TP-14) with an arbitrary session blob, content (none, made from text, or raw bytes) and command bytes, and as a whole tap on the session each command returns; every answer ends with a status word and holds at most 255 bytes before it, no sale answers 6A82 and drops the session, and a command over 261 bytes is refused with 6700 and changes nothing |
 | `signed_pairing_decode` | `SignedPairing::from_bytes` |
 | `owner_command_decode` | `SignedCommand::from_bytes` |
 | `owner_paid_log_decode` | `PaidLog::from_bytes` of `openbmt-owner-node` (the log of what the owner paid out, magic `OBM&`, OC-50), on the input as it is and behind the start of a valid log of two entries; on success the log must encode back to exactly those bytes |

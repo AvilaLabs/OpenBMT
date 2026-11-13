@@ -127,6 +127,7 @@ private const val OP_TILL_WAITING = 85
 private const val OP_TILL_START = 86
 private const val OP_TILL_NOT_NOW = 87
 private const val OP_TILL_OF_SALE = 88
+private const val OP_TAP_ANSWER = 89
 private const val OP_PENDING_SWITCH = 200
 private const val OP_SWITCH_SAME = 201
 private const val OP_SWITCH_RECORD_KEPT = 202
@@ -266,7 +267,9 @@ sealed class RefundAsk {
  * What the customer scans for one sale. [qrBits] holds [qrSize] times
  * [qrSize] modules, dark as 1, in one stream most significant bit first, row
  * by row; [module] reads one. [uri] is the text the code holds; [copyUri] is
- * the same request in lower case, for "copy".
+ * the same request in lower case, for "copy". [tag] is the NDEF file of the
+ * NFC tag for the same request (TP-01), empty when it does not fit; the app
+ * hands it on and never reads or changes it.
  */
 class Payment(
     val address: String,
@@ -274,6 +277,7 @@ class Payment(
     val copyUri: String,
     val qrSize: Long,
     val qrBits: ByteArray,
+    val tag: ByteArray,
 ) {
     fun module(x: Int, y: Int): Boolean {
         val n = y.toLong() * qrSize + x
@@ -911,7 +915,7 @@ private fun Reader.report(): Report =
 
 private fun Reader.reports(): List<Report> = list { report() }
 
-private fun Reader.payment(): Payment = Payment(string(), string(), string(), u32(), bytes()).also {
+private fun Reader.payment(): Payment = Payment(string(), string(), string(), u32(), bytes(), bytes()).also {
     if (it.qrBits.size.toLong() != (it.qrSize * it.qrSize + 7) / 8) {
         fail("the modules of a payment are not qrSize squared bits")
     }
@@ -1126,6 +1130,28 @@ internal fun rateCombineFrame(samples: List<Sample>, now: Long): ByteArray =
     requestFrame(OP_RATE_COMBINE, 0) {
         it.list(samples) { s -> it.string(s.source).u64(s.fetchedAt).u64(s.minorPerBtc) }.u64(now)
     }
+
+/** The request frame of `tap_answer`. */
+internal fun tapAnswerFrame(session: ByteArray, content: ByteArray?, apdu: ByteArray): ByteArray =
+    requestFrame(OP_TAP_ANSWER, 0) { it.bytes(session).option(content) { c -> it.bytes(c) }.bytes(apdu) }
+
+/** What [Tap.answer] gives back: the session to pass with the next command and the response for the reader. */
+class TapAnswer(val session: ByteArray, val response: ByteArray)
+
+/**
+ * The NFC tag of the payment request (TP-10 to TP-15). It works on no node and keeps nothing: the app keeps the
+ * [TapAnswer.session] between the commands of one tap and drops it when the reader goes away.
+ */
+object Tap {
+    /**
+     * The answer to one command [apdu] of a reader. [content] is the tag's bytes while a sale waits on the payment
+     * screen and null otherwise; [session] is empty at the start of a tap.
+     */
+    fun answer(session: ByteArray, content: ByteArray?, apdu: ByteArray): TapAnswer {
+        val r = decodeResponse(send(tapAnswerFrame(session, content, apdu)))
+        return TapAnswer(r.bytes(), r.bytes()).also { r.end() }
+    }
+}
 
 /**
  * The price ops work on no node: the app fetches the replies itself on the
