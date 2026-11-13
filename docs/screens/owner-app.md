@@ -736,3 +736,54 @@ link) are shown as they arrive:
 | RQ_28_CHECK_TITLE | Check it with the customer |
 | RQ_28_CHECK_TEXT | Compare these groups with the customer by another way than the message the address came in, such as a call or in person. |
 | RQ_28_CHECK_NEXT | Someone who can change your messages can change an address in them. The return waits in the queue until you pay the returns. |
+The web store (`docs/WEB-ORDER-RULES.md`, WO-01 to WO-32), in
+`WebOrderWords`. A text named `WORDS_NEEDED_WO_<rule>_<SUFFIX>` is not
+written yet and shows its own name. What the library says of a refusal
+or a failed visit is `WORDS_NEEDED_WO_<rule>_HEADING`, `_WHAT` and
+`_NEXT`:
+
+| Key | Text |
+|---|---|
+| rowTitle | WORDS_NEEDED_WO_05_ROW_TITLE |
+| rowSub | WORDS_NEEDED_WO_05_ROW_SUB |
+| pageTitle | WORDS_NEEDED_WO_05_PAGE_TITLE |
+| back | WORDS_NEEDED_WO_05_BACK |
+| whatItIs | WORDS_NEEDED_WO_01_WHAT |
+| noStore | WORDS_NEEDED_WO_05_NO_STORE |
+| start | WORDS_NEEDED_WO_05_START |
+| pairTitle | WORDS_NEEDED_WO_05_PAIR_TITLE |
+| addressLabel | WORDS_NEEDED_WO_06_ADDRESS_LABEL |
+| addressHint | WORDS_NEEDED_WO_06_ADDRESS_HINT |
+| nameLabel | WORDS_NEEDED_WO_05_NAME_LABEL |
+| fieldsMissing | WORDS_NEEDED_WO_06_FIELDS_MISSING |
+| makeCode | WORDS_NEEDED_WO_05_MAKE_CODE |
+| codeTitle | WORDS_NEEDED_WO_05_CODE_TITLE |
+| codePaste | WORDS_NEEDED_WO_05_CODE_PASTE |
+| codeCopy | WORDS_NEEDED_WO_05_CODE_COPY |
+| codeCopied | WORDS_NEEDED_WO_05_CODE_COPIED |
+| fingerprintLabel | WORDS_NEEDED_WO_05_FINGERPRINT_LABEL |
+| compare | WORDS_NEEDED_WO_05_COMPARE |
+| match | WORDS_NEEDED_WO_05_MATCH |
+| differ | WORDS_NEEDED_WO_05_DIFFER |
+| waiting | WORDS_NEEDED_WO_05_WAITING |
+| continuePairing | WORDS_NEEDED_WO_05_CONTINUE |
+| shopLabel | WORDS_NEEDED_WO_05_SHOP_LABEL |
+| storeLabel | WORDS_NEEDED_WO_06_STORE_LABEL |
+| lastVisitLabel | WORDS_NEEDED_WO_21_LAST_VISIT_LABEL |
+| neverVisited | WORDS_NEEDED_WO_21_NEVER |
+| nextVisitLabel | WORDS_NEEDED_WO_21_NEXT_VISIT_LABEL |
+| visitNow | WORDS_NEEDED_WO_21_VISIT_NOW |
+| noSender | WORDS_NEEDED_WO_02_NO_SENDER |
+| sentLabel | WORDS_NEEDED_WO_12_SENT_LABEL |
+| leftLabel | WORDS_NEEDED_WO_11_LEFT_LABEL |
+| ordersLabel | WORDS_NEEDED_WO_20_ORDERS_LABEL |
+| waitingLabel | WORDS_NEEDED_WO_20_WAITING_LABEL |
+| toldLabel | WORDS_NEEDED_WO_30_TOLD_LABEL |
+| noticesLabel | WORDS_NEEDED_WO_32_NOTICES_LABEL |
+| refusedTitle | WORDS_NEEDED_WO_22_REFUSED_TITLE |
+| refusedOrderLabel | WORDS_NEEDED_WO_22_REFUSED_ORDER_LABEL |
+| unpair | WORDS_NEEDED_WO_07_UNPAIR |
+| unpairTitle | WORDS_NEEDED_WO_07_UNPAIR_TITLE |
+| unpairWhat | WORDS_NEEDED_WO_07_UNPAIR_WHAT |
+| unpairConfirm | WORDS_NEEDED_WO_07_UNPAIR_CONFIRM |
+| unpairKeep | WORDS_NEEDED_WO_07_UNPAIR_KEEP |

@@ -50,6 +50,16 @@ import org.openbmt.owner.ImportedWalletView
 import org.openbmt.owner.Limit
 import org.openbmt.owner.LightningAction
 import org.openbmt.owner.SwapAction
+import org.openbmt.owner.RequestAsk
+import org.openbmt.owner.WebCall
+import org.openbmt.owner.WebCallKind
+import org.openbmt.owner.WebOutcome
+import org.openbmt.owner.WebPair
+import org.openbmt.owner.WebPairing
+import org.openbmt.owner.WebRefused
+import org.openbmt.owner.WebState
+import org.openbmt.owner.WebStep
+import org.openbmt.owner.WebStepKind
 import org.openbmt.owner.LinkState
 import org.openbmt.owner.OutboxKind
 import org.openbmt.owner.OutboxRow
@@ -201,7 +211,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + OwnPairWords.all().size + 1 + AppWords.keyMapAll().size + 1 + StarterWords.all().size + 1 + RequestWords.all().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's, of the key map's, of the starter wallet's and of the payment requests'")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + OwnPairWords.all().size + 1 + AppWords.keyMapAll().size + 1 + StarterWords.all().size + 1 + RequestWords.all().size + 1 + WebOrderWords.all().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's, of the key map's, of the starter wallet's and of the payment requests'")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -4005,6 +4015,7 @@ object AppModelTest {
         floatTests()
         floatWiringTests()
         requestTests()
+        webOrderTests()
         ruleTests(rulesMd)
         println("AppModelTest (owner): $count checks passed")
     }
@@ -4375,6 +4386,82 @@ object AppModelTest {
         ok(activity.contains("FLAG_SECURE"), "OA-04: the window that shows the code takes no screenshot or recording")
         // RQ-13: no picture goes to other apps, so the manifest keeps no provider (OA-03, OA-89).
         ok(!source("AndroidManifest.xml").contains("<provider") && !screens.contains("ACTION_SEND\").setType(\"image"), "the manifest is as OA-03 and OA-89 say, and no picture is shared")
+    private fun webState(
+        pairing: WebPairing = WebPairing.Paired,
+        off: Words? = null,
+        left: Long? = 100,
+        refused: List<WebRefused> = emptyList(),
+        lastVisit: Long? = 5,
+    ) = WebState(off, pairing, "Shop", "https://shop.example", "abcd-1234-abcd-1234", null, lastVisit, null, null, left, 100, null, 1, 1, 0, 0, refused)
+
+    private class FakeWebPort(val steps: MutableList<WebStep>) : WebPort {
+        val forces = ArrayList<Boolean>()
+        val replies = ArrayList<Triple<WebOutcome, Long, Int>>()
+        var state = WebState(null, WebPairing.None, "", "", "", null, null, null, null, null, 0, null, 0, 0, 0, 0, emptyList())
+
+        override fun pairStart(ask: RequestAsk, url: String, shopName: String) = WebPair("CODE", "abcd-1234-abcd-1234", shopName, url)
+        override fun pairConfirm(ask: RequestAsk) = state
+        override fun unpair(ask: RequestAsk) = state
+        override fun state(ask: RequestAsk) = state
+        override fun step(ask: RequestAsk, force: Boolean): WebStep {
+            forces.add(force)
+            return if (steps.isEmpty()) WebStep(WebStepKind.Idle, null) else steps.removeAt(0)
+        }
+        override fun reply(ask: RequestAsk, outcome: WebOutcome, status: Long, body: ByteArray): WebState {
+            replies.add(Triple(outcome, status, body.size))
+            return state
+        }
+    }
+
+    private fun webCall(kind: WebCallKind) = WebCall(kind, "https://shop.example/wp-json/openbmt/v1/orders", listOf("X-OBM-Mac" to "00"), "application/json", "{}".toByteArray())
+
+    private fun webOrderTests() {
+        // The words: every text is the placeholder of a rule of docs/WEB-ORDER-RULES.md, and none is used twice.
+        val all = WebOrderWords.all()
+        ok(all.map { it.first }.toSet().size == all.size && all.map { it.second }.toSet().size == all.size, "each web store text is written once")
+        ok(all.all { (_, text) -> Regex("WORDS_NEEDED_WO_\\d{2}_[A-Z_]+").matches(text) && WebOrderWords.isPlaceholder(text) }, "each web store text is a placeholder that names its rule")
+        val rules = Regex("WO-(\\d{2})").findAll(File(appDir, "../../docs/WEB-ORDER-RULES.md").readText()).map { it.groupValues[1] }.toSet()
+        ok(all.all { (_, text) -> text.removePrefix("WORDS_NEEDED_WO_").take(2) in rules }, "the rule of each placeholder is a rule of the web order rules")
+        val screens = source("src/android/WebStore.kt")
+        val literals = Regex("\"([^\"\\\\]*)\"").findAll(screens.lines().filter { !it.trimStart().startsWith("//") && !it.trimStart().startsWith("import") }.joinToString("\n")).map { it.groupValues[1] }.toList()
+        ok(literals.all { it.isEmpty() || it.startsWith("\$") }, "the web store screens write no text of their own: $literals")
+        ok(source("src/android/Screens.kt").contains("webRow()"), "the web store is a row under Settings and this phone")
+
+        // The page.
+        ok(WebModel.page(webState(WebPairing.None)) == WebModel.Page.NoStore, "no store")
+        ok(WebModel.page(webState(WebPairing.Waiting)) == WebModel.Page.Waiting, "a code that waits")
+        ok(WebModel.page(webState()) == WebModel.Page.Paired, "a store that is paired")
+        ok(WebModel.fieldsReady("https://shop.example", "Shop") && !WebModel.fieldsReady(" ", "Shop") && !WebModel.fieldsReady("https://shop.example", ""), "both fields are needed")
+        ok(WebModel.runningLow(webState(left = 19)) && !WebModel.runningLow(webState(left = 20)) && !WebModel.runningLow(webState(left = null)), "the store is low below 20 addresses (WO-11)")
+        ok(WebModel.canVisit(webState()) && !WebModel.canVisit(webState(WebPairing.Waiting)) && !WebModel.canVisit(webState(off = words())), "a visit is asked for only of a paired store that is on")
+        ok(WebModel.shownKey(webState()) != WebModel.shownKey(webState(lastVisit = 6)) && WebModel.shownKey(webState()) == WebModel.shownKey(webState()), "the page is made again when a visit changed it")
+
+        // A visit: each call is sent as it is and its answer handed back; the owner's force holds for the first step only.
+        val calls = mutableListOf(WebStep(WebStepKind.Call, webCall(WebCallKind.Orders)), WebStep(WebStepKind.Call, webCall(WebCallKind.Notice)), WebStep(WebStepKind.Idle, null))
+        val port = FakeWebPort(calls)
+        val sent = ArrayList<WebCall>()
+        val fetcher = WebFetcher { call -> sent.add(call); WebFetch.Answer(200, "{}".toByteArray()) }
+        val n = WebVisit.run(port, fetcher, { RequestAsk(1, 0) }, true)
+        ok(n == 2 && sent.size == 2 && sent[0].kind == WebCallKind.Orders, "a visit sends each call the node gives")
+        ok(port.forces == listOf(true, false, false), "a visit the owner asked for waits for nothing, and only the first step says so: ${port.forces}")
+        ok(port.replies == listOf(Triple(WebOutcome.Answered, 200L, 2), Triple(WebOutcome.Answered, 200L, 2)), "each answer is handed back")
+        // A call with no answer ends the visit and says why.
+        for ((fetch, outcome) in listOf(WebFetch.NotReached to WebOutcome.NotReached, WebFetch.TorMissing to WebOutcome.TorMissing, WebFetch.TooLong to WebOutcome.TooLong)) {
+            val p = FakeWebPort(mutableListOf(WebStep(WebStepKind.Call, webCall(WebCallKind.Orders)), WebStep(WebStepKind.Call, webCall(WebCallKind.Orders))))
+            val sentOne = WebVisit.run(p, { fetch }, { RequestAsk(1, 0) }, false)
+            ok(sentOne == 1 && p.replies == listOf(Triple(outcome, 0L, 0)), "a call that got no answer ($outcome) ends the visit")
+        }
+        // The sender that is not built reaches no one, and says so.
+        val none = FakeWebPort(mutableListOf(WebStep(WebStepKind.Call, webCall(WebCallKind.Orders))))
+        WebVisit.run(none, NoWebFetcher, { RequestAsk(1, 0) }, false)
+        ok(none.replies.single().first == WebOutcome.NotReached, "no sender is built yet: the visit says the store was not reached")
+        // A step that is busy or idle sends nothing, and a node that never stops is cut off.
+        val busy = FakeWebPort(mutableListOf(WebStep(WebStepKind.Busy, null)))
+        ok(WebVisit.run(busy, fetcher, { RequestAsk(1, 0) }, false) == 0, "a call in the air is waited for")
+        val endless = object : WebPort by FakeWebPort(mutableListOf()) {
+            override fun step(ask: RequestAsk, force: Boolean) = WebStep(WebStepKind.Call, webCall(WebCallKind.Orders))
+        }
+        ok(WebVisit.run(endless, fetcher, { RequestAsk(1, 0) }, false) == WebVisit.MAX_CALLS, "a visit is at most ${WebVisit.MAX_CALLS} calls")
     }
 
     private fun floatTests() {

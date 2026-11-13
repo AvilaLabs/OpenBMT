@@ -142,12 +142,16 @@ class Controller(internal val act: MainActivity) {
     internal val watchStore = WatchStore(dir, KeystoreSealer(AppFiles.WATCH_KEY_ALIAS))
     private val posWake = LinkedBlockingQueue<Boolean>()
 
+    /** The visits to the store (WO-21): a wake with true is the owner's own request, which does not wait after a failure. */
+    private val webWake = LinkedBlockingQueue<Boolean>()
+
     /** Whether a till is connected, as the screen thread last saw it. The till thread reads nothing else of the screens. */
     @Volatile
     internal var posConnected = false
     private var pumpThread: Thread? = null
     private var linkThread: Thread? = null
     private var posThread: Thread? = null
+    private var webThread: Thread? = null
     private val startLock = Any()
 
     // A hardware signer as key 2 (OA-70 to OA-74, `Hardware.kt`): whether the saved setup has one, read at each start,
@@ -454,6 +458,7 @@ class Controller(internal val act: MainActivity) {
         linkFault = null
         posFault = null
         posWake.clear()
+        webWake.clear()
         posConnected = try {
             n.posState().setup != null
         } catch (_: OwnerException) {
@@ -534,6 +539,30 @@ class Controller(internal val act: MainActivity) {
             posThread = till
             till.start()
         }
+        // WO-21: the store is visited on opening the app and as the node asks, while the app is open (the node says when:
+        // after every new block, and when a notice is waiting). A shop that has no web orders gets a refusal, which is dropped.
+        val web = Thread {
+            var first = true
+            while (runId == id) {
+                try {
+                    WebVisit.run(LibraryWeb(n), webFetcher, { webAsk() }, first)
+                    first = false
+                    main.post { if (id == runId) tick?.invoke() }
+                } catch (_: OwnerException) {
+                    first = false
+                } catch (_: LinkageError) {
+                    first = false
+                }
+                try {
+                    first = webWake.poll(WEB_EVERY_MS, TimeUnit.MILLISECONDS) == true
+                } catch (_: InterruptedException) {
+                    return@Thread
+                }
+            }
+        }
+        web.isDaemon = true
+        webThread = web
+        web.start()
         if (registerNext && key2Signer) {
             registerNext = false
             showHardwareRegister { showHome() }
@@ -558,6 +587,11 @@ class Controller(internal val act: MainActivity) {
         return outcome
     }
 
+    /** The owner asks for a visit to the store now, which does not wait after a failure (WO-21). */
+    internal fun webVisitNow() {
+        webWake.offer(true)
+    }
+
     /** The screen asks for a read now; it starts at once if the last one began more than a minute ago, and not before (OA-18). */
     internal fun readTillNow() {
         posWake.offer(true)
@@ -577,10 +611,13 @@ class Controller(internal val act: MainActivity) {
         tick = null
         linkThread?.interrupt()
         posThread?.interrupt()
+        webThread?.interrupt()
         linkThread?.let { try { it.join(1500) } catch (_: InterruptedException) { } }
         linkThread = null
         posThread?.let { try { it.join(1500) } catch (_: InterruptedException) { } }
         posThread = null
+        webThread?.let { try { it.join(1500) } catch (_: InterruptedException) { } }
+        webThread = null
         pumpThread?.let { try { it.join(1500) } catch (_: InterruptedException) { } }
         pumpThread = null
         node?.let {
@@ -925,6 +962,9 @@ class Controller(internal val act: MainActivity) {
 
         /** How long the till thread waits before it looks again at whether a till is connected. */
         const val POS_IDLE_MS = 5_000L
+
+        /** The seconds between the looks at whether a visit to the store is due; the node decides (WO-21). */
+        const val WEB_EVERY_MS = 5_000L
     }
 }
 

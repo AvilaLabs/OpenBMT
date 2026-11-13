@@ -53,6 +53,7 @@ object ProtocolDecoderTest {
         importThroughTheLibrary()
         requestFrames()
         requestDetailFrame()
+        webFrames()
         println("ProtocolDecoderTest: ok")
     }
 
@@ -632,6 +633,35 @@ object ProtocolDecoderTest {
             val at = Writer().u64(3).string("Rent").u64(1_850).u32(2026).u32(12).u32(1).string("line").string("state").u32(0).bool(false).toByteArray().size
             bad[at] = 9
             decodeResponse(header(0, bad)).requestDetail()
+    // ---- the store's web orders ----
+
+    private fun webFrames() {
+        val state = Writer().u8(0).u8(2).string("Shop").string("https://shop.example").string("ab12 cd34")
+            .u8(0).u8(1).u64(1_700_000_000L).u8(0).u8(0).u8(1).u64(40).u32(100).u8(0)
+            .u32(5).u32(1).u32(3).u32(0).u32(1).u64(9).string("bc1qweb").u64(2_500).u64(7).toByteArray()
+        val read = decodeResponse(header(0, state + wordsBytes())).let { it.webState().also { _ -> it.end() } }
+        check(read.off == null && read.pairing == WebPairing.Paired && read.shopName == "Shop")
+        check(read.url == "https://shop.example" && read.fingerprint == "ab12 cd34" && read.code == null)
+        check(read.lastVisit == 1_700_000_000L && read.failure == null && read.retryAt == null && read.left == 40L)
+        check(read.addressesSent == 100L && read.trouble == null && read.orders == 5L && read.waiting == 1L)
+        check(read.told == 3L && read.noticesWaiting == 0L && read.refused.size == 1)
+        check(read.refused[0].order == 9L && read.refused[0].sats == 2_500L && read.refused[0].address == "bc1qweb")
+        rejects("a pairing that is not defined") {
+            decodeResponse(header(0, Writer().u8(0).u8(9).toByteArray())).webState()
+        }
+
+        val call = Writer().u8(2).u8(1).u8(1).string("https://shop.example/wp-json/openbmt/v1/range")
+            .u32(1).string("X-OBM-Mac").string("00ff").string("text/plain").bytes(byteArrayOf(1, 2, 3)).toByteArray()
+        val step = decodeResponse(header(0, call)).let { it.webStep().also { _ -> it.end() } }
+        check(step.step == WebStepKind.Call && step.call!!.kind == WebCallKind.Range)
+        check(step.call!!.headers == listOf("X-OBM-Mac" to "00ff") && step.call!!.body.size == 3)
+        val idle = decodeResponse(header(0, Writer().u8(0).u8(0).toByteArray())).webStep()
+        check(idle.step == WebStepKind.Idle && idle.call == null)
+        rejects("a call step without a call") {
+            decodeResponse(header(0, Writer().u8(2).u8(0).toByteArray())).webStep()
+        }
+        rejects("an idle step with a call") {
+            decodeResponse(header(0, Writer().u8(0).u8(1).u8(0).string("u").u32(0).string("t").bytes(ByteArray(0)).toByteArray())).webStep()
         }
     }
 
