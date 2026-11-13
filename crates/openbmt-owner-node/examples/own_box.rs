@@ -50,7 +50,8 @@ fn owner() -> Result<Identity, String> {
 }
 
 fn address(text: &str) -> Result<SocketAddr, String> {
-    text.parse().map_err(|_| format!("{text} is not an address"))
+    text.parse()
+        .map_err(|_| format!("{text} is not an address"))
 }
 
 fn welcome(dir: &str, addr: &str) -> Result<(), String> {
@@ -117,10 +118,14 @@ fn welcome(dir: &str, addr: &str) -> Result<(), String> {
 }
 
 fn mailbox(addr: &str) -> Result<(), String> {
-    Client::connect(&Route::Direct(address(addr)?), None, &ClientConfig::default())
-        .map_err(|e| e.to_string())?
-        .make_mailbox(&owner()?)
-        .map_err(|e| format!("refused: {e}"))?;
+    Client::connect(
+        &Route::Direct(address(addr)?),
+        None,
+        &ClientConfig::default(),
+    )
+    .map_err(|e| e.to_string())?
+    .make_mailbox(&owner()?)
+    .map_err(|e| format!("refused: {e}"))?;
     println!("mailbox made for the owner");
     Ok(())
 }
@@ -132,7 +137,10 @@ fn run(args: &[String]) -> Result<(), String> {
         "mailbox" => mailbox(arg(1)?),
         "key" => {
             let key = owner()?.device_id().to_bytes();
-            println!("{}", key.iter().map(|b| format!("{b:02x}")).collect::<String>());
+            println!(
+                "{}",
+                key.iter().map(|b| format!("{b:02x}")).collect::<String>()
+            );
             Ok(())
         }
         other => Err(format!("{other} is not a command")),
