@@ -105,8 +105,7 @@ These are the words of what the app decides itself.
 
 ## The switch from the starter wallet (CR-259 to CR-264)
 
-The labels the rules name, and the lines still to be written: a text named
-`WORDS_NEEDED_CR_26x_...` shows its own name until the words exist.
+The labels the rules name and the lines of the page.
 
 | Key | Text |
 |---|---|
@@ -114,5 +113,5 @@ The labels the rules name, and the lines still to be written: a text named
 | same | Same address |
 | different | Different |
 | pinLabel | Manager's PIN |
-| homeLine | WORDS_NEEDED_CR_260_HOME_LINE |
-| compare | WORDS_NEEDED_CR_260_COMPARE |
+| homeLine | A new wallet waits |
+| compare | Compare this address with the first address on the new wallet's own screen: the stick's result, its Check words I wrote mode, or the signer. Not with the owner phone. |

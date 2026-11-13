@@ -96,18 +96,36 @@ impl StartError {
                 "Check the counter's internet connection and start it again. See Details.",
             )
             .detail(e.clone()),
-            Self::Switch(e) => needed(Tone::Stop, "WORDS_NEEDED_CR_261_START", Who::Owner)
+            Self::Switch(e) => said(Tone::Stop, "CR_261_START", Who::Owner)
                 .code("CR-261")
                 .detail(e.clone()),
         }
     }
 }
 
-/// Words of section 26 that are still to be written: the placeholder stands
-/// in the heading and both sentences, so that it shows wherever the words
-/// would (CR-264). Its value is its own name, which names the rule.
-pub fn needed(tone: Tone, placeholder: &'static str, who: Who) -> Words {
-    Words::new(tone, placeholder, placeholder, who, placeholder)
+/// The words of section 26 (CR-264), by the key of their rule.
+fn said(tone: Tone, key: &'static str, who: Who) -> Words {
+    let (heading, what, next) = match key {
+        "CR_261_START" => ("Switch not finished at start", "The counter stopped in the middle of switching to the new wallet and could not finish it, so it did not start.", "Start the counter again. If it stops again, see Details."),
+        "CR_257_NOT_A_SWITCH" => ("Not a wallet switch", "The message from the owner phone is not a switch this counter can read, so nothing changed.", "Send the switch again from the owner phone."),
+        "CR_263_NOT_STARTER" => ("Not a starter counter", "This counter was not paired with a starter wallet, so it takes no switch. Nothing changed.", "To pay into another wallet, pair this counter again."),
+        "CR_258_NOT_FROM_OWNER" => ("Switch not from the owner", "The switch is not signed by the owner phone this counter was paired with, so nothing changed.", "Send the switch from the shop's own owner phone."),
+        "CR_258_WRONG_COUNTER" => ("Switch for another counter", "The switch names another counter, so nothing changed here.", "Send each counter its own switch from the owner phone."),
+        "CR_258_WRONG_WALLET" => ("Switch from another wallet", "The switch starts from a wallet this counter does not pay into, so nothing changed.", "Send the switch again from the owner phone."),
+        "CR_258_NEW_WALLET" => ("New wallet does not read", "The new wallet in the switch is not one this counter can use, so nothing changed.", "Connect the new wallet on the owner phone again, then send the switch."),
+        "CR_258_SAME_WALLET" => ("Already this wallet", "The switch names the wallet this counter already pays into, so nothing changed.", "No switch is needed."),
+        "CR_258_RANGE" => ("Switch addresses refused", "The addresses that come with the switch are not ones this counter may use, so nothing changed.", "Send the switch again from the owner phone. See Details."),
+        "CR_259_NOT_SAVED" => ("Switch not saved", "The counter could not save the switch, so nothing changed.", "Check that the counter has room, then send the switch again."),
+        "CR_261_NOTHING_WAITS" => ("No switch waits", "There is no new wallet to check on this counter.", "Nothing to do."),
+        "CR_261_NO_RECORD" => ("Pairing not readable", "The counter has no pairing record to update, so nothing changed.", "Pair this counter again with the shop's owner phone."),
+        "CR_261_NOT_WRITTEN" => ("Switch not finished yet", "The counter could not write every part of the switch. It finishes the switch at its next start.", "Restart the counter."),
+        "CR_259_DROPPED" => ("Wallet check expired", "The new wallet waited seven days without a check, so it was dropped. Sales still go to the starter wallet.", "Send the switch again from the owner phone when a manager can check it."),
+        "CR_261_SWITCHED" => ("Switched to the new wallet", "From now on this counter's sales go to the new wallet.", "Nothing more to do on this counter."),
+        "CR_260_DIFFERENT" => ("New wallet not taken", "The manager said the address on the counter differs from the new wallet's own screen, so this counter keeps paying into the starter wallet.", "Check that the right wallet was connected on the owner phone. If it was, the owner phone may not be safe to use."),
+        "CR_260_HOME_LINE" => ("A new wallet waits", "The owner phone sent a new wallet for this counter's sales.", "Open New wallet to check in the manager's menu."),
+        _ => (key, key, key),
+    };
+    Words::new(tone, heading, what, who, next)
 }
 
 /// Whether these words are a placeholder (CR-264).
@@ -120,17 +138,17 @@ impl SwitchRefused {
     /// CR-258, CR-259, CR-263). Nothing changed.
     pub fn words(&self) -> Words {
         let (placeholder, who) = match self {
-            Self::Frame(_) => ("WORDS_NEEDED_CR_257_NOT_A_SWITCH", Who::Owner),
-            Self::NotStarter => ("WORDS_NEEDED_CR_263_NOT_STARTER", Who::Owner),
-            Self::NotFromOwner => ("WORDS_NEEDED_CR_258_NOT_FROM_OWNER", Who::Owner),
-            Self::WrongCounter => ("WORDS_NEEDED_CR_258_WRONG_COUNTER", Who::Owner),
-            Self::WrongWallet => ("WORDS_NEEDED_CR_258_WRONG_WALLET", Who::Owner),
-            Self::NewWalletRefused => ("WORDS_NEEDED_CR_258_NEW_WALLET", Who::Owner),
-            Self::SameWallet => ("WORDS_NEEDED_CR_258_SAME_WALLET", Who::Owner),
-            Self::Range(_) => ("WORDS_NEEDED_CR_258_RANGE", Who::Owner),
-            Self::NotWritten(_) => ("WORDS_NEEDED_CR_259_NOT_SAVED", Who::Owner),
+            Self::Frame(_) => ("CR_257_NOT_A_SWITCH", Who::Owner),
+            Self::NotStarter => ("CR_263_NOT_STARTER", Who::Owner),
+            Self::NotFromOwner => ("CR_258_NOT_FROM_OWNER", Who::Owner),
+            Self::WrongCounter => ("CR_258_WRONG_COUNTER", Who::Owner),
+            Self::WrongWallet => ("CR_258_WRONG_WALLET", Who::Owner),
+            Self::NewWalletRefused => ("CR_258_NEW_WALLET", Who::Owner),
+            Self::SameWallet => ("CR_258_SAME_WALLET", Who::Owner),
+            Self::Range(_) => ("CR_258_RANGE", Who::Owner),
+            Self::NotWritten(_) => ("CR_259_NOT_SAVED", Who::Owner),
         };
-        needed(Tone::Ended, placeholder, who)
+        said(Tone::Ended, placeholder, who)
             .code(self.rule())
             .detail(self.to_string())
     }
@@ -141,12 +159,12 @@ impl SwitchStepRefused {
     /// through (CR-260, CR-261).
     pub fn words(&self) -> Words {
         let (tone, placeholder) = match self {
-            Self::NothingWaits => (Tone::Ended, "WORDS_NEEDED_CR_261_NOTHING_WAITS"),
-            Self::NoRecord => (Tone::Stop, "WORDS_NEEDED_CR_261_NO_RECORD"),
+            Self::NothingWaits => (Tone::Ended, "CR_261_NOTHING_WAITS"),
+            Self::NoRecord => (Tone::Stop, "CR_261_NO_RECORD"),
             Self::Refused(e) => return e.words(),
-            Self::NotWritten(_) => (Tone::Stop, "WORDS_NEEDED_CR_261_NOT_WRITTEN"),
+            Self::NotWritten(_) => (Tone::Stop, "CR_261_NOT_WRITTEN"),
         };
-        needed(tone, placeholder, Who::Manager)
+        said(tone, placeholder, Who::Manager)
             .code(self.rule())
             .detail(self.to_string())
     }
@@ -157,26 +175,24 @@ impl SwitchNotice {
     /// CR-264).
     pub fn words(&self) -> Words {
         match self {
-            Self::Dropped => {
-                needed(Tone::Ended, "WORDS_NEEDED_CR_259_DROPPED", Who::Manager).code("CR-259")
-            }
+            Self::Dropped => said(Tone::Ended, "CR_259_DROPPED", Who::Manager).code("CR-259"),
         }
     }
 }
 
 /// CR-261: what a manager is told when the counter switched.
 pub fn switched_words() -> Words {
-    needed(Tone::Good, "WORDS_NEEDED_CR_261_SWITCHED", Who::Nobody).code("CR-261")
+    said(Tone::Good, "CR_261_SWITCHED", Who::Nobody).code("CR-261")
 }
 
 /// CR-260: what a manager is told after "Different".
 pub fn switch_dropped_words() -> Words {
-    needed(Tone::Ended, "WORDS_NEEDED_CR_260_DIFFERENT", Who::Owner).code("CR-260")
+    said(Tone::Ended, "CR_260_DIFFERENT", Who::Owner).code("CR-260")
 }
 
 /// CR-260: the line Home shows the manager while a switch waits.
 pub fn switch_home_line_words() -> Words {
-    needed(Tone::Info, "WORDS_NEEDED_CR_260_HOME_LINE", Who::Manager).code("CR-260")
+    said(Tone::Info, "CR_260_HOME_LINE", Who::Manager).code("CR-260")
 }
 
 impl SettingsRefused {

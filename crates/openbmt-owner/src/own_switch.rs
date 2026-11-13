@@ -114,26 +114,30 @@ pub fn move_ready(counters: &[(DeviceId, SwitchStatus)]) -> Result<(), MoveNotRe
     }
 }
 
-/// Words still to be written, for a state or refusal of this part: the
-/// placeholder stands in the heading and both sentences.
-fn needed(placeholder: &'static str, tone: Tone) -> Words {
-    Words::new(tone, placeholder, placeholder, Who::Owner, placeholder)
+/// The words of a state of this part, by the key of its rule.
+fn said(key: &'static str, tone: Tone) -> Words {
+    let (heading, what, next) = match key {
+        "OA_SWITCH_SWITCHED" => ("Counter switched", "This counter's sales go to the new wallet now.", "Nothing more to do for this counter."),
+        "OA_SWITCH_WAITING" => ("Waiting for the counter", "This counter has the new wallet, but a manager has not checked it yet. Its sales still go to the starter wallet.", "At the counter, open New wallet to check and compare the address with the new wallet's own screen."),
+        "OA_SWITCH_REFUSED" => ("Counter said different", "The manager at this counter said its address differs from the new wallet's own screen, so it keeps paying into the starter wallet.", "Check the new wallet, then send the switch again. If the addresses truly differ, this phone may not be safe."),
+        "OA_SWITCH_MOVE_NOT_READY" => ("Not every counter switched", "The starter wallet's money moves only once every counter pays into the new wallet.", "Switch the counters that still wait, then move it."),
+        _ => (key, key, key),
+    };
+    Words::new(tone, heading, what, Who::Owner, next)
 }
 
-/// SS-41: the words of a counter's status, a placeholder until they are
-/// written.
+/// SS-41: the words of a counter's status.
 pub fn status_words(status: SwitchStatus) -> Words {
     match status {
-        SwitchStatus::Switched => needed("WORDS_NEEDED_OA_SWITCH_SWITCHED", Tone::Info),
-        SwitchStatus::Waiting => needed("WORDS_NEEDED_OA_SWITCH_WAITING", Tone::Info),
-        SwitchStatus::Refused => needed("WORDS_NEEDED_OA_SWITCH_REFUSED", Tone::Stop),
+        SwitchStatus::Switched => said("OA_SWITCH_SWITCHED", Tone::Info),
+        SwitchStatus::Waiting => said("OA_SWITCH_WAITING", Tone::Info),
+        SwitchStatus::Refused => said("OA_SWITCH_REFUSED", Tone::Stop),
     }
 }
 
-/// SS-42: the words of a move that is not ready, a placeholder until they
-/// are written.
+/// SS-42: the words of a move that is not ready.
 pub fn not_ready_words() -> Words {
-    needed("WORDS_NEEDED_OA_SWITCH_MOVE_NOT_READY", Tone::Stop)
+    said("OA_SWITCH_MOVE_NOT_READY", Tone::Stop)
 }
 
 #[cfg(test)]
@@ -187,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn ss_41_the_status_codes_round_trip_and_the_words_are_placeholders() {
+    fn ss_41_the_status_codes_round_trip_and_each_has_its_words() {
         for s in [
             SwitchStatus::Switched,
             SwitchStatus::Waiting,
@@ -195,10 +199,10 @@ mod tests {
         ] {
             assert_eq!(SwitchStatus::from_code(s.code()), Some(s));
             let w = status_words(s);
-            assert!(w.heading.starts_with("WORDS_NEEDED_OA_"));
-            assert!(w.heading == w.what && w.what == w.next);
+            assert!(!w.heading.starts_with("WORDS_NEEDED_") && w.heading != w.what);
+            assert!(w.heading.len() < 28 && w.what != w.next);
         }
         assert_eq!(SwitchStatus::from_code(3), None);
-        assert!(not_ready_words().heading.starts_with("WORDS_NEEDED_OA_"));
+        assert_eq!(not_ready_words().heading, "Not every counter switched");
     }
 }

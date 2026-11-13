@@ -211,7 +211,13 @@ impl OwnRefusal {
                 "Finish pairing a waiting counter, then add this one.",
             )
             .code("OA-111"),
-            Self::SwitchSameWallet => needed("WORDS_NEEDED_OA_SWITCH_SAME_WALLET"),
+            Self::SwitchSameWallet => stop(
+                "Already the counters' wallet",
+                "The wallet given is the one the counters already pay into, so no switch was made.",
+                Who::Owner,
+                "Connect the wallet made offline instead.",
+            )
+            .code("SS-41"),
             Self::UnknownCounter => stop(
                 "Counter not in the shop",
                 "Addresses were asked for a counter this phone did not pair, so none were given.",

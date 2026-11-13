@@ -487,8 +487,5 @@ fn ss_42_the_move_after_the_switch_is_refused_with_its_words_when_a_counter_wait
     let fault = crate::starter::not_ready(&e);
     let text = format!("{fault:?}");
     assert!(text.contains("starter-move-not-ready"), "{text}");
-    assert!(
-        text.contains("WORDS_NEEDED_OA_SWITCH_MOVE_NOT_READY"),
-        "{text}"
-    );
+    assert!(text.contains("Not every counter switched"), "{text}");
 }

@@ -188,7 +188,7 @@ fn cr_256_to_cr_262_the_manager_confirms_the_new_wallet_and_the_owner_reads_the_
     let words = r.words();
     let record = r.bytes();
     r.done();
-    assert_eq!(words.heading, "WORDS_NEEDED_CR_261_SWITCHED");
+    assert_eq!(words.heading, "Switched to the new wallet");
     let kept = OwnPairingRecord::from_bytes(&record).unwrap();
     assert!(kept.wallet == new() && !kept.starter);
     let st = state(&s.rig, s.handle, T0 + 221);
@@ -253,7 +253,7 @@ fn cr_260_different_drops_the_switch_and_the_owner_reads_the_refusal() {
         .rig
         .call(OP_SWITCH_DIFFERENT, s.handle, &W::new().u64(T0 + 220).0);
     let mut r = Rd::ok(&response);
-    assert_eq!(r.words().heading, "WORDS_NEEDED_CR_260_DIFFERENT");
+    assert_eq!(r.words().heading, "New wallet not taken");
     r.done();
     assert!(state(&s.rig, s.handle, T0 + 221).pending.is_none());
     assert!(!s.rig.dir().join("switch.bin").exists());

@@ -709,8 +709,7 @@ object AppWords {
         }
         out.append(
             "\n## The switch from the starter wallet (CR-259 to CR-264)\n\n" +
-                "The labels the rules name, and the lines still to be written: a text named\n" +
-                "`WORDS_NEEDED_CR_26x_...` shows its own name until the words exist.\n\n" +
+                "The labels the rules name and the lines of the page.\n\n" +
                 "| Key | Text |\n" +
                 "|---|---|\n",
         )

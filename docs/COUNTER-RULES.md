@@ -1950,8 +1950,9 @@ screen, and a manager's PIN confirms it. The codecs and checks are in
   is defined (the pinned wallet is a starter wallet) and every other bit must
   be zero. The binding and the four words of CR-229 are made from the whole
   offer, so the flag is covered by the person's check of the four words.
-  The record of CR-233 becomes version 2 with the same byte after the relay.
-  A version 1 offer or record has no flag. A counter whose record has no
+  The record of CR-233 becomes version 3 with the same byte after the
+  peers and the relay (version 2 is the record with a relay). A version 1
+  or 2 record, and a version 1 offer, has no flag. A counter whose record has no
   flag refuses every switch.
 - **CR-257. The switch.** The owner sends the switch as a message of kind
   Switch (`docs/LINK-RULES.md` LK-78), the frame `OBM]`, version 1: this
@@ -1984,19 +1985,26 @@ screen, and a manager's PIN confirms it. The codecs and checks are in
   switch and writes the record of CR-262 with the refusal byte.
 - **CR-261. The manager's PIN, then the switch.** "Same address" asks for
   the manager's PIN (CR-84). A wrong PIN changes nothing and counts toward
-  CR-84's lockout. With the right PIN the counter, in this order: writes the
-  range book of CR-234 again as version 2, which names for each range the
-  hash of the wallet it is for, with the old wallet's ranges kept and closed
-  (no index of them is handed out again) and the new wallet's first range
-  after them; writes the record of CR-233 again with the new wallet pinned,
-  the starter flag cleared and everything else as it was; writes the record
-  of CR-262; deletes `switch.bin`. At start, a book whose open range is for a
-  wallet that the record does not pin, while `switch.bin` holds the switch to
-  that wallet, finishes the switch from the second step; any other mismatch
-  of book and record is a fault, as CR-234 says. Every later sale's address
-  is the new wallet's. A sale already showing an address of the old wallet
-  ends as it would have, and the old wallet's handed-out scripts stay
-  watched from the closed ranges as a batch's are.
+  CR-84's lockout; "Different" needs no PIN, since it changes nothing. With
+  the right PIN the counter, in this order: writes the range book of CR-234
+  again as version 2, which holds the old wallet's ranges closed (no index
+  of them is handed out again), each naming its wallet, the old wallet's
+  description so that its handed-out scripts stay watched, and the new
+  wallet's first range; writes the record of CR-233 again with the starter
+  flag cleared, the pairing itself kept as it was made; writes the record of
+  CR-262; deletes `switch.bin`. From then on the wallet in force is the one
+  the book's open range is for. At start, a book whose open range is for a
+  new wallet while the record still has the starter flag and `switch.bin`
+  holds the switch to that wallet finishes the switch from the second step;
+  any other mismatch of book and record is a fault, as CR-234 says. Every
+  later sale's address is the new wallet's. A sale already showing an
+  address of the old wallet ends as it would have. A sale is kept by its
+  address index, so the new wallet's first range starts above every index
+  the owner phone has given out for the old wallet, and a counter refuses a
+  range that holds the number of a sale it already has. The new wallet's
+  first sale is therefore not at its index 0: a wallet program that opens
+  the new wallet from its words needs a gap limit above that index, as the
+  handbook says for any shop with more than one counter.
 - **CR-262. Told to the owner.** The switch is a `Setting` record of the
   counter's own chain: one tag byte (37), one byte (1 switched, 0 refused at
   "Different"), the hash of the new pinned wallet (32 bytes) and the
