@@ -217,5 +217,78 @@ as worked examples published by others. Not yet released, and not yet tried
 by a person on a real computer. The phone's side of these steps is built
 and has been tried on an emulator, but not yet with a real scan.
 
+<a id="start-simple"></a>
+
+## Start simple: a starter wallet on the owner phone
+
+A shop that wants its first bitcoin sale today, with no signer and no
+computer to make a key on, can let the owner phone make a small wallet: the
+starter wallet. It is for the first weeks, not for savings.
+
+**The key is on an everyday phone.** Malware that controls the phone at the
+moment the owner unlocks a payment can take what the wallet holds, and
+nothing on a phone prevents that. The starter wallet is built around that
+fact: it has a limit, and every rule below makes the key harder to take,
+harder to use without the owner, or worth less.
+
+**The limit and the date.** The owner sets the most the starter wallet may
+hold and the date to move to a key made offline. The app suggests a date
+30 days away and never suggests an amount. The owner phone's home screen
+shows what the wallet holds against both, every day. At the limit or the
+date, the app opens on the upgrade screen every time; "Not yet" needs a
+sentence typed exactly and lasts at most seven days. Sales never stop: the
+counters keep taking payments, unless the owner chose at setup to stop
+bitcoin sales above the limit, which is off unless chosen.
+
+**How the key is made and kept.**
+
+- The randomness comes straight from the phone's Linux kernel and is
+  checked before use. The owner may add die rolls, mixed the same way as
+  on the stick; either source alone, honest, makes the key unguessable.
+- The 12 words are shown once, four at a time, to write on a card in pen,
+  and three of them are asked back. The app never shows them again. Those
+  screens block screenshots and screen recording and hide other apps
+  drawn on top of them. No app or person will ever ask for the words; any
+  that does is a thief.
+- The key is sealed under a key that the phone's key hardware holds and
+  opens only when the owner proves they are there, by fingerprint, face or
+  the phone's PIN. It is never in the phone's cloud backup. Removing the
+  phone's screen lock makes Android delete that key; the card of words then
+  restores the wallet.
+- The key only pays out: refunds, and the final move to the new wallet.
+  Receiving never uses it. Every payment shows each address in full and
+  each amount before the owner unlocks it. Before making the key and before
+  each payment, the app looks for signs that another app could watch the
+  screen or act for the owner, names each one it finds, and will not make
+  the key or show the words while an unknown accessibility service is on.
+
+**Moving to a key made offline.** Once the owner has made the shop's key
+offline, on the stick or a signer, each counter is switched to the new
+wallet, once. The counter shows the new wallet's first address, and the
+manager compares it with the new wallet's own screen, never with the owner
+phone, then confirms with the manager PIN. Once every counter has switched,
+the owner phone moves everything in the starter wallet to the new wallet
+in one payment. When that payment has one confirmation, the phone deletes
+the starter key.
+
+Keep the card of starter words after that. A payment that reaches the
+starter wallet later can only be opened with it. The owner phone keeps
+watching the starter wallet's addresses, shows such a payment on its home
+screen, and offers to restore the key from the card and move the payment.
+
+The new wallet's first sale is not at its address number 0: each counter's
+addresses go on past the ones it gave out for the starter wallet. A wallet
+program that opens the new wallet from its words needs to look further
+ahead than usual, as [How far the wallet looks ahead](#how-far-the-wallet-looks-ahead)
+explains.
+
+### What is built
+
+The starter wallet, its limit and date, the switch of each counter and the
+move to the new wallet are built in the owner phone, the counter and their
+apps, and tested against Bitcoin Core on a test network. The setup screens
+do not offer the starter wallet yet, and none of it has been run on a
+phone. Its rules are in `docs/START-SIMPLE-RULES.md`.
+
 > **OpenBMT has had no independent security audit. Do not use it with real
 > funds.**

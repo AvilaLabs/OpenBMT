@@ -29,7 +29,7 @@ funds.**
 - **SS-01. The kernel's own randomness, read directly.** The Rust core asks
   the Linux kernel for 32 bytes with the `getrandom` system call, which
   waits until the kernel's generator is ready. Nothing else makes or
-  changes randomness: no Java generator, no pool of our own. The owner app
+  changes randomness: no Java generator, no pool kept by OpenBMT. The owner app
   needs Android 10 or later, and `getrandom` is there from Android 9.
 - **SS-02. Checked before use.** Two separate reads must differ, and a read
   that is all zero bytes, or one byte repeated, is refused. A refusal makes
@@ -72,12 +72,12 @@ funds.**
 
 ## 3. Keeping the key
 
-- **SS-20. Wrapped by the phone's secure hardware.** The Rust core seals
+- **SS-20. Wrapped by the phone's key hardware.** The Rust core seals
   the seed with ChaCha20-Poly1305 under a random 32-byte data key and gives
   the app only the sealed seed. The data key is itself sealed with
   AES-256-GCM under a key of the Android Keystore that the app made for it,
   in StrongBox when the phone has one; that key never leaves the phone's
-  secure hardware. To sign, the app opens the data key and hands it to the
+  key hardware. To sign, the app opens the data key and hands it to the
   Rust core as a byte array that it overwrites with zeros at once; the data
   key is never a string and the seed never leaves the Rust core.
 - **SS-21. The owner, every time.** The Keystore key opens only after the
