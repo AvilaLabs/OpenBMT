@@ -111,9 +111,13 @@ funds.**
   Rust core for one signing, then zeroed.
 - **SS-31. What the owner sees first.** Every payment shows each address in
   full and each amount before the owner proves they are there (SS-21).
-- **SS-32. Seen in the shop too.** Every payment from the starter wallet is
-  shown on the shop's counters with its amount and time, so a payment the
-  owner did not make is noticed by someone in the shop.
+- **SS-32. Seen in the shop too.** Every payment from the starter wallet,
+  whether the owner phone made it or only saw it in a block, is shown on the
+  shop's counters with its amount and time, so a payment the owner did not
+  make is noticed by someone in the shop. It travels in the starter line of
+  `docs/LINK-RULES.md` LK-79, so it needs the shop's Box (BX-18). Until the
+  shop has one, the owner phone alone shows these payments, and the setup
+  says so.
 - **SS-33. Warnings, and one refusal.** Before making the key and before
   every payment, the app checks for USB debugging, signs of root, other
   apps' overlays and enabled accessibility services. Each one found is
@@ -143,8 +147,12 @@ funds.**
   the limit, adding counters and other changes to settings wait.
 - **SS-38. Sales never stop.** The counters keep taking payments to the
   starter wallet. Unless the owner turned on "Stop bitcoin sales above my
-  limit", offered at setup and off by default, in which case a counter
-  offers bitcoin only while the wallet is under the limit.
+  limit", off by default, in which case a counter offers bitcoin only while
+  the wallet is under the limit. A counter knows what the wallet holds only
+  from the starter line (LK-79), so the option is offered on the starter
+  page once the shop has a Box, and not before. A counter whose last line is
+  older than the heartbeat age limit keeps offering bitcoin and says that it
+  cannot check the limit (CR-273).
 
 ## 6. The upgrade
 

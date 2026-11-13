@@ -480,6 +480,17 @@ merged).
   The owner keeps and sends it again as LK-70 and LK-71 say for a batch, and
   drops it from the pending list when the copy of the counter's chain holds
   the counter's record of CR-262 for that new wallet, either byte.
+- **LK-79.** A message of kind Starter (byte 13) carries the starter line
+  (`docs/START-SIMPLE-RULES.md` SS-32, SS-38), from the owner to each
+  counter paired with the starter wallet and not yet switched (CR-256,
+  CR-261). The line is one frame signed by the owner root under the tag
+  `OpenBMT/starter-line/v1`: a number that rises with each line, the time,
+  what the starter wallet holds (SS-36), the limit, the stop setting of
+  SS-38, and the last 16 payments from the starter wallet, each with its
+  transaction ID, amount, time and whether the owner phone made it. The
+  owner node sends a new line when any of these changes, including a spend
+  of the starter wallet it did not make, and at least once every heartbeat
+  interval. A line is not kept for sending again: the next one replaces it.
 
 The two kinds that involve the Box are carried the same way. A counter sends
 a Paid notice to each Box on its device list when a sale changes state, and

@@ -2064,3 +2064,35 @@ Status: specification, written before the code.
   started keeps its till's sale from its record and goes on naming it.
 - **CR-271.** Every state and refusal of this section has words under
   `docs/SCREEN-RULES.md`, and the tests name these rules.
+
+## 26. The starter line
+
+A counter paired with the starter wallet is told by the owner phone what
+that wallet holds, its limit, whether the owner asked to stop bitcoin sales
+above it, and every payment out of it (`docs/START-SIMPLE-RULES.md` SS-32,
+SS-38, `docs/LINK-RULES.md` LK-79). The line needs the shop's Box.
+
+- **CR-272. Taking a line.** A counter takes a starter line only while it is
+  paired with the starter wallet and not switched (CR-256, CR-261), only
+  when the owner root's signature verifies, and only when its number is
+  higher than the last one taken. The last line taken is kept in the node's
+  folder in a file of its own, written as CR-161 and read strictly at
+  start. A line that fails any check is dropped with a note and changes
+  nothing.
+- **CR-273. The stop.** When the last line taken says stop, holds at least
+  the limit, and is not older than the heartbeat age limit of the settings
+  in force, "New sale" offers no bitcoin and says why (SS-38). With no line,
+  or a line older than that, the counter offers bitcoin as before, and,
+  when the last line said stop, Home says that the limit cannot be checked.
+  The counter takes no other meaning from the line: a sale already open is
+  not changed.
+- **CR-274. The payments.** Each payment in a line that the counter has not
+  shown before goes on Home as a card with its amount and time, and says
+  whether the owner phone made it, until someone at the counter taps that
+  they have seen it. The cards and what was seen are kept across a
+  restart. "Today" lists the day's payments from the starter wallet.
+- **CR-275. After the switch.** A counter that has switched (CR-261) drops
+  its starter line and its cards, and takes no more lines.
+- **CR-276.** Every state and refusal of this section has words under
+  `docs/SCREEN-RULES.md`.
+
