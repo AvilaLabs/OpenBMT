@@ -4,6 +4,8 @@
 //!
 //! TEST ONLY, NEVER USE: the words are a published BIP-85 test vector.
 
+use std::str::FromStr;
+
 use bitcoin::absolute::LockTime;
 use bitcoin::consensus::encode::{deserialize, serialize};
 use bitcoin::hashes::Hash;
@@ -27,6 +29,8 @@ const OP_PAY: u16 = 168;
 const OP_SWEEP: u16 = 169;
 const OP_REFILL: u16 = 170;
 const OP_SEAL: u16 = 171;
+const OP_RESTORE: u16 = 176;
+const OP_WATCH: u16 = 177;
 
 fn call(op: u16, fields: &[u8]) -> Vec<u8> {
     dispatch(&Registry::new(), &frame(op, 0, fields))
@@ -394,6 +398,65 @@ fn ss_20_the_starter_ops_refuse_a_sealed_float() {
     assert!(fault.rule.starts_with("SS-"), "{}", fault.rule);
 }
 
+// ---- FL-06: the key brought back ------------------------------------------------
+
+/// The 16 bytes of a Compact SeedQR of the BIP-85 child at index 1 of the same master.
+fn other_scan_bytes() -> Vec<u8> {
+    let m = "xprv9s21ZrQH143K2LBWUUQRFXhucrQqBpKdRRxNVq2zBqsx8HVqFk2uYo8kmbaLLHRdqtQpUm98uKfu3vca1LqdGhUtyoFnCNkfmXRyPXLjbKb";
+    let master = bitcoin::bip32::Xpriv::from_str(m).unwrap();
+    let path = bitcoin::bip32::DerivationPath::from_str("m/83696968'/39'/0'/12'/1'").unwrap();
+    let secp = bitcoin::secp256k1::Secp256k1::new();
+    let child = master.derive_priv(&secp, &path).unwrap();
+    let mut engine = bitcoin::hashes::hmac::HmacEngine::<bitcoin::hashes::sha512::Hash>::new(
+        b"bip-entropy-from-k",
+    );
+    bitcoin::hashes::HashEngine::input(&mut engine, &child.private_key.secret_bytes());
+    let digest = bitcoin::hashes::hmac::Hmac::<bitcoin::hashes::sha512::Hash>::from_engine(engine)
+        .to_byte_array();
+    digest[..16].to_vec()
+}
+
+fn restore_call(reg: &Registry, scan: &[u8], description: &str) -> Vec<u8> {
+    dispatch(
+        reg,
+        &frame(OP_RESTORE, 0, &W::new().bytes(scan).string(description).0),
+    )
+}
+
+#[test]
+fn fl_06_the_words_of_the_recorded_float_are_sealed_anew_and_no_word_comes_back() {
+    let reg = seal_registry();
+    let scan = scan_bytes();
+    let first = Rd::ok(&dispatch(&reg, &frame(OP_SEAL, 0, &W::new().bytes(&scan).0))).bytes();
+    let response = restore_call(&reg, &scan, float().description());
+    let mut r = Rd::ok(&response);
+    let (sealed, key, description, address) = (r.bytes(), r.bytes(), r.string(), r.string());
+    r.done();
+    assert_eq!(key.len(), 32);
+    assert_eq!(description, float().description());
+    assert_eq!(address, float().receive_address(0).unwrap().to_string());
+    assert_ne!(sealed, first, "a new data key and a new nonce");
+    let opened = wallet_of_sealed(&sealed, &DataKey::from_slice(&key).unwrap()).unwrap();
+    assert_eq!(opened, float());
+    assert!(!response.windows(scan.len()).any(|w| w == scan.as_slice()));
+    assert!(!String::from_utf8_lossy(&response).contains("galaxy"));
+}
+
+#[test]
+fn fl_06_words_of_another_index_are_refused_with_the_rule_and_seal_nothing() {
+    let reg = seal_registry();
+    let fault = Rd::error(&restore_call(&reg, &other_scan_bytes(), float().description()))
+        .expect("refused");
+    assert_eq!(fault.rule, "FL-06");
+    assert!(fault.words.heading.starts_with("WORDS_NEEDED_FL06_"));
+    // A scan that is not 12 words keeps the setup's rule; a description that
+    // does not read is the float's wallet refusal.
+    let short = Rd::error(&restore_call(&reg, &[7u8; 15], float().description())).expect("refused");
+    assert_eq!(short.rule, "FL-01");
+    let bad = Rd::error(&restore_call(&reg, &scan_bytes(), "not a wallet")).expect("refused");
+    assert_eq!(bad.rule, "FL-30");
+}
+
 // ---- FL-05, FL-20, FL-21, FL-35 through the node ------------------------------
 
 fn watch_config() -> crate::FloatWatchConfig {
@@ -599,4 +662,31 @@ fn fl_35_the_move_waits_for_the_float_view_and_is_never_taken_unsigned() {
     let handle = rig.start_float(watch_config());
     let given = rig.call(175, handle, &W::new().bytes(&tx).u32(0).u8(1).0);
     assert_eq!(Rd::error(&given).expect("refused").rule, "no-own-wallet");
+}
+
+#[test]
+fn fl_05_the_watch_is_raised_through_the_node_and_finds_a_payment_past_the_old_end() {
+    let rig = Rig::new();
+    let none = rig.start();
+    let fault = Rd::error(&rig.call(OP_WATCH, none, &W::new().u32(5).u32(5).0)).expect("refused");
+    assert_eq!(fault.rule, "float-not-watching");
+    let rig = Rig::new();
+    let handle = rig.start_float(watch_config());
+    rig.mine(
+        handle,
+        &[super::kit::tx_from(7, &[(&float_receive(40), 7_000)])],
+    );
+    rig.mine_empty(handle, 2);
+    assert_eq!(coins_now(&rig, handle), (Vec::new(), 0, 0));
+    Rd::ok(&rig.call(OP_WATCH, handle, &W::new().u32(31).u32(1).0));
+    rig.mine_empty(handle, 1);
+    let (coins, confirmed, _) = coins_now(&rig, handle);
+    assert_eq!((coins.len(), confirmed), (1, 7_000));
+    // And one to the new end, with no restart.
+    rig.mine(
+        handle,
+        &[super::kit::tx_from(8, &[(&float_receive(50), 3_000)])],
+    );
+    rig.mine_empty(handle, 2);
+    assert_eq!(coins_now(&rig, handle).1, 10_000);
 }

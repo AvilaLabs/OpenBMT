@@ -89,7 +89,7 @@ use crate::error::{
 };
 use crate::float::{
     self as float_ops, FloatCoinsView, FloatNodePayArgs, FloatNodeSweepArgs, FloatPaidView,
-    FloatRefillArgs, FloatRefillView, FloatSendArgs,
+    FloatRefillArgs, FloatRefillView, FloatSendArgs, FloatWatchArgs,
 };
 use crate::own::{self, OwnGapView, SwitchRowView};
 use crate::own_spend_views::{
@@ -3415,6 +3415,17 @@ impl Entry {
             st.node
                 .float_coins()
                 .map(|c| float_ops::coins_view(&c))
+                .map_err(float_ops::not_watching)
+        })
+    }
+
+    /// FL-05: the node's watch of the float moves to 20 past the indexes the
+    /// phone used or handed out, at once, and reads the blocks since the float
+    /// was set up for the new addresses.
+    pub(crate) fn float_watch(&self, a: FloatWatchArgs) -> Result<(), AppError> {
+        self.run(None, move |st| {
+            st.node
+                .raise_float_watch(a.receive_end, a.change_end)
                 .map_err(float_ops::not_watching)
         })
     }

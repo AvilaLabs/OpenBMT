@@ -149,8 +149,8 @@ use crate::error::{internal, refused_by, wrong_state, AppError};
 use crate::float::{
     self as float_ops, FloatCoinView, FloatCoinsView, FloatFeeArgs, FloatNodePayArgs,
     FloatNodeSweepArgs, FloatPaidView, FloatPayArgs, FloatRefillArgs, FloatRefillView,
-    FloatSealedView, FloatSendArgs, FloatStatusArgs, FloatStatusView, FloatSweepArgs,
-    FloatWalletView,
+    FloatRestoreArgs, FloatSealedView, FloatSendArgs, FloatStatusArgs, FloatStatusView,
+    FloatSweepArgs, FloatWalletView, FloatWatchArgs,
 };
 use crate::host::{real_spawn, Entry, Spawn};
 use crate::import_view::{self, ImportKind, ImportView};
@@ -843,6 +843,12 @@ fn build_ops() -> Vec<Op> {
         op(175, "float_send", Node, |c, a: FloatSendArgs| {
             c.entry()?.float_send(a)
         }),
+        op(176, "float_restore", Zero, |c, a: FloatRestoreArgs| {
+            c.starter().with_rng(|rng| float_ops::restore(a, rng))
+        }),
+        op(177, "float_watch", Node, |c, a: FloatWatchArgs| {
+            c.entry()?.float_watch(a)
+        }),
         op(180, "starter_make", Zero, |c, a: StarterMakeArgs| {
             starter_ops::make(c.starter(), a)
         }),
@@ -1263,6 +1269,8 @@ fn definitions() -> Vec<TypeDef> {
         OwnSpendTakeArgs::define(),
         FloatWalletView::define(),
         FloatSealedView::define(),
+        FloatRestoreArgs::define(),
+        FloatWatchArgs::define(),
         FloatCoinsView::define(),
         FloatNodePayArgs::define(),
         FloatNodeSweepArgs::define(),

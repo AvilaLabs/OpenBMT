@@ -151,6 +151,8 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (173, "float_pay_node"),
         (174, "float_sweep_node"),
         (175, "float_send"),
+        (176, "float_restore"),
+        (177, "float_watch"),
         (180, "starter_make"),
         (181, "starter_page"),
         (182, "starter_check_start"),

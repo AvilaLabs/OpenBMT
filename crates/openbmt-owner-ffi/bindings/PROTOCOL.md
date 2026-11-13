@@ -174,6 +174,8 @@ ops run on another; it waits for at most 250 ms.
 173 float_pay_node   handle node  args FloatNodePayArgs -> FloatPaidView
 174 float_sweep_node handle node  args FloatNodeSweepArgs -> FloatPaidView
 175 float_send       handle node  args FloatSendArgs -> string
+176 float_restore    handle zero  args FloatRestoreArgs -> FloatSealedView
+177 float_watch      handle node  args FloatWatchArgs -> ()
 180 starter_make     handle zero  args StarterMakeArgs -> StarterWalletView
 181 starter_page     handle zero  args StarterPageArgs -> StarterImageView
 182 starter_check_start handle zero  args () -> StarterCheckView
@@ -370,6 +372,8 @@ OwnSpendBuildArgs: record: now: u64, fee_rate: u64, picked: list<u32>
 OwnSpendTakeArgs: record: now: u64, session: list<u8>, number: u32, returned: list<u8>
 FloatWalletView: record: description: string, first_address: string
 FloatSealedView: record: sealed: list<u8>, data_key: list<u8>, description: string, first_address: string
+FloatRestoreArgs: record: scan: list<u8>, description: string
+FloatWatchArgs: record: receive_end: u32, change_end: u32
 FloatCoinsView: record: coins: list<FloatCoinView>, confirmed: u64, unconfirmed_incoming: u64, tip: u32, receive_next: u32, change_next: u32
 FloatNodePayArgs: record: sealed: list<u8>, data_key: list<u8>, refund: u32, fee_rate: u64, min_confirmations: u32
 FloatNodeSweepArgs: record: sealed: list<u8>, data_key: list<u8>, now: u64, fee_rate: u64, min_confirmations: u32

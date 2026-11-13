@@ -173,6 +173,8 @@ private const val OP_FLOAT_COINS = 172
 private const val OP_FLOAT_PAY_NODE = 173
 private const val OP_FLOAT_SWEEP_NODE = 174
 private const val OP_FLOAT_SEND = 175
+private const val OP_FLOAT_RESTORE = 176
+private const val OP_FLOAT_WATCH = 177
 private const val OP_STARTER_MAKE = 180
 private const val OP_STARTER_PAGE = 181
 private const val OP_STARTER_CHECK_START = 182
@@ -2501,6 +2503,13 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
         return r.string().also { r.end() }
     }
 
+    /**
+     * FL-05: move the node's watch of the float to 20 past [receiveEnd] and [changeEnd] at once, each one past the
+     * highest index used or handed out, and read the blocks since the float was set up for the new addresses. Refused
+     * while the node watches no float.
+     */
+    fun floatWatch(receiveEnd: Long, changeEnd: Long) = callUnit(OP_FLOAT_WATCH, handle) { it.u32(receiveEnd).u32(changeEnd) }
+
     /** Hand the signed batches in the outbox to the link. */
     fun deliver(now: Long): Deliver {
         val r = call(OP_DELIVER, handle) { it.u64(now) }
@@ -3266,6 +3275,19 @@ object OwnerFloat {
     fun seal(scan: ByteArray): FloatSealed {
         try {
             return callSecret(OP_FLOAT_SEAL, 0) { it.bytes(scan) }.floatSealed()
+        } finally {
+            java.util.Arrays.fill(scan, 0.toByte())
+        }
+    }
+
+    /**
+     * FL-06: the 16 bytes of the Compact SeedQR the owner scanned again, taken only when their wallet is the float's
+     * wallet the phone recorded ([description], from the setup), and sealed anew under a new data key. Words of another
+     * index or another shop are refused and nothing is sealed. [scan] is overwritten as soon as the request is written.
+     */
+    fun restore(scan: ByteArray, description: String): FloatSealed {
+        try {
+            return callSecret(OP_FLOAT_RESTORE, 0) { it.bytes(scan).string(description) }.floatSealed()
         } finally {
             java.util.Arrays.fill(scan, 0.toByte())
         }

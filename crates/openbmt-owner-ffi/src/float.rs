@@ -206,6 +206,69 @@ pub(crate) fn seal(
     })
 }
 
+/// The arguments of `float_restore` (FL-06): the Compact SeedQR the owner
+/// scanned again, and the float's public description the phone recorded.
+#[derive(Clone, PartialEq, Eq)]
+pub struct FloatRestoreArgs {
+    /// The 16 bytes of the scan; overwritten here.
+    pub scan: Vec<u8>,
+    /// The recorded float's description (`float_open`, `float_seal`).
+    pub description: String,
+}
+
+impl fmt::Debug for FloatRestoreArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "FloatRestoreArgs(<hidden>)")
+    }
+}
+
+wire_record!(FloatRestoreArgs { scan, description });
+wire_record_get!(FloatRestoreArgs { scan, description });
+
+/// Op 176: the scan of the float's words again is sealed anew (FL-06), only
+/// when its wallet is the recorded float's wallet exactly. The result is the
+/// one of op 171; the bytes the app gave are overwritten here.
+pub(crate) fn restore(
+    mut a: FloatRestoreArgs,
+    rng: &mut dyn KernelRandom,
+) -> Result<FloatSealedView, AppError> {
+    let recorded = wallet_of(&a.description);
+    let made = recorded.and_then(|recorded| {
+        float::restore_compact_seedqr(&a.scan, &recorded, rng).map_err(seal_error)
+    });
+    for b in a.scan.iter_mut() {
+        *b = 0;
+    }
+    std::hint::black_box(&a.scan);
+    let made = made?;
+    let first = made.wallet.receive_address(0).map_err(|e| refusal(&e))?;
+    Ok(FloatSealedView {
+        sealed: made.sealed.sealed.clone(),
+        data_key: made.sealed.data_key.as_bytes().to_vec(),
+        description: made.wallet.description().to_string(),
+        first_address: first.to_string(),
+    })
+}
+
+/// The arguments of `float_watch` (FL-05): how far the node's watch of the
+/// float goes on each chain, as [`crate::FloatWatchConfig`] says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FloatWatchArgs {
+    /// One past the highest receive index handed out.
+    pub receive_end: u32,
+    /// One past the highest change index used.
+    pub change_end: u32,
+}
+
+wire_record!(FloatWatchArgs {
+    receive_end,
+    change_end
+});
+wire_record_get!(FloatWatchArgs {
+    receive_end,
+    change_end
+});
+
 /// A refusal of sealing or opening a sealed float, as the error that crosses
 /// the boundary.
 pub(crate) fn seal_error(e: FloatSealError) -> AppError {
