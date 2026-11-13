@@ -769,7 +769,7 @@ class Controller(private val act: MainActivity) {
         views.add(ui.labelled("Manager's name", name))
         val pins = ui.pinPair("Manager's PIN, 6 to 12 digits", "PIN again")
         views.add(pins.view)
-        val pair = ui.primary("Pair with the Key app") {
+        val pair = ui.primary("Pair with the shop") {
             draftCounterName = counterName.text.toString().trim()
             draftName = name.text.toString().trim()
             startPairing(draftCounterName, draftName, pins.first.text.toString(), pins.second.text.toString())
@@ -779,7 +779,7 @@ class Controller(private val act: MainActivity) {
 
     /**
      * What was typed is checked and kept first (the PIN and the config; the pairing is what completes the
-     * setup), then the pairing begins with the camera for the Key app's offer.
+     * setup), then the pairing begins with the camera for the offer of the owner phone or the Key app.
      */
     private fun startPairing(counterName: String, managerName: String, pin1: String, pin2: String) {
         FirstStartCheck.problem(counterName, managerName, pin1, pin2)?.let { return showFirstStart(it) }

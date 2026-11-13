@@ -397,7 +397,7 @@ object AppWords {
         Tones.INFO, "Pair a counter",
         "The code below names this shop's two keys, its wallet and its network, for a counter to read.",
         Who.KEY_HOLDER,
-        "Scan this with the counter: open the counter app, tap Pair with the Key app, and hold its camera to this code.",
+        "Scan this with the counter: open the counter app, tap Pair with the shop, and hold its camera to this code.",
     )
 
     // ---- pairing a Box (docs/SIGNER-RULES.md SR-81, SR-82) -----------------------

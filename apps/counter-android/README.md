@@ -14,7 +14,7 @@ local test key; release signing is a separate step (see "Signing").
 
 | Screen | What it shows |
 |---|---|
-| First start | The counter's name, the manager's name and PIN, and Pair with the Key app. |
+| First start | The counter's name, the manager's name and PIN, and Pair with the shop. |
 | Network | The address of Orbot (`127.0.0.1:9050` unless changed), saved behind the manager's PIN (CR-87). Reached from home, and from the screen that says Orbot did not answer. |
 | Change to confirm | Only while a change from the owner phone that loosens the shop's settings waits (CR-239, CR-240): a line on Home and a row in Settings, then a page with each field now and after, the four words, and Confirm with manager PIN. The PIN is checked before the counter signs (CR-241); a wrong or held PIN signs nothing. The owner phone then sends the change with the counter's confirmation. |
 | New wallet to check | Only while the owner moves the shop off the starter wallet and a switch waits (CR-259, CR-260): a line on Home and a row in Settings, then a page with the new wallet's first address as the largest thing on it, in groups of four, the kind of wallet beneath it, and a line to compare it with the new wallet's own screen, not with the owner phone. "Same address" asks for the manager's PIN first (CR-261); a wrong or held PIN changes nothing. The counter then writes its books, hands the app the new pairing record, which the app seals and keeps before it says so, and from then on sells to the new wallet; a switch stopped half way is finished at the next start. "Different" drops the switch and tells the owner phone. |
