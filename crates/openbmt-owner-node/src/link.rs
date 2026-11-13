@@ -65,10 +65,11 @@ use openbmt_core::batch::PinnedRoots;
 use openbmt_core::batch::SignedBatch;
 use openbmt_core::command::SignedCommand;
 use openbmt_core::identity::DeviceId;
+use openbmt_core::pairing_own::SwitchOwn;
 use openbmt_core::pinned_wallet::SignedRange;
 use openbmt_core::records::{DeviceList, Record, RecordKind};
 use openbmt_core::settings::{Authority, Settings, SettingsError, SignedSettings};
-use openbmt_counter::{BatchHeld, Event, RangeHeld};
+use openbmt_counter::{BatchHeld, Event, RangeHeld, SwitchedHeld};
 use openbmt_counter_node::DriverPort;
 use openbmt_courier::{
     decode_records, received_content, Courier, Post, Received, RelayPost, SendError,
@@ -80,6 +81,7 @@ use crate::batch_outbox::{BatchOutbox, BatchOutboxError, PendingBatch};
 use crate::copy::{CheckInTaken, CopyError, CounterCopy, Stop};
 use crate::range_outbox::{PendingRange, RangeOutbox, RangeOutboxError};
 use crate::settings_roster::{RosterEntry, RosterError, SettingsRoster};
+use crate::switch_outbox::{PendingSwitch, SwitchOutbox, SwitchOutboxError};
 use crate::watcher::OwnerWatcher;
 
 /// Most lines the link's own notes keep; the oldest goes first.
@@ -220,6 +222,8 @@ pub enum OwnerLinkError {
     Roster(RosterError),
     /// The file of ranges that wait could not be opened (LK-77, OA-112).
     Ranges(RangeOutboxError),
+    /// The file of switches that wait could not be opened (LK-78, SS-41).
+    Switches(SwitchOutboxError),
 }
 
 impl std::fmt::Display for OwnerLinkError {
@@ -231,6 +235,7 @@ impl std::fmt::Display for OwnerLinkError {
             Self::Batches(error) => write!(f, "{error}"),
             Self::Roster(error) => write!(f, "{error}"),
             Self::Ranges(error) => write!(f, "{error}"),
+            Self::Switches(error) => write!(f, "{error}"),
         }
     }
 }
@@ -314,6 +319,9 @@ struct IndexSeen {
     looked_at: u64,
     ranges: BTreeSet<RangeHeld>,
     opened: BTreeSet<u32>,
+    /// CR-262: the switched records the counter signed, in the order of its
+    /// chain.
+    switched: Vec<SwitchedHeld>,
 }
 
 /// What a counter's records show of its indexes: the (start, end) of each
@@ -363,6 +371,10 @@ pub struct OwnerLink<R: Post = RelayPost> {
     batches: BatchOutbox,
     /// OA-112, LK-77: the ranges sent and not yet shown as held.
     ranges: RangeOutbox,
+    /// SS-41, LK-78: the switches sent and not yet answered in a record.
+    switches: SwitchOutbox,
+    /// LK-78: when the pending switches of a counter were last sent.
+    switches_sent_at: BTreeMap<DeviceId, u64>,
     /// OA-112: what each copy shows of the indexes of its counter.
     index_use: BTreeMap<DeviceId, IndexSeen>,
     /// LK-71, LK-77: when the pending ranges of a counter were last sent.
@@ -411,6 +423,7 @@ impl<R: Post> OwnerLink<R> {
         }
         let batches = BatchOutbox::open(&root).map_err(OwnerLinkError::Batches)?;
         let ranges = RangeOutbox::open(&root).map_err(OwnerLinkError::Ranges)?;
+        let switches = SwitchOutbox::open(&root).map_err(OwnerLinkError::Switches)?;
         let roster = SettingsRoster::open(&root).map_err(OwnerLinkError::Roster)?;
         Ok(Self {
             courier,
@@ -434,6 +447,8 @@ impl<R: Post> OwnerLink<R> {
             boxes_sent: BTreeSet::new(),
             batches,
             ranges,
+            switches,
+            switches_sent_at: BTreeMap::new(),
             index_use: BTreeMap::new(),
             ranges_sent_at: BTreeMap::new(),
             roster,
@@ -657,6 +672,11 @@ impl<R: Post> OwnerLink<R> {
                     RecordKind::Setting => {
                         if let Ok(range) = RangeHeld::decode(&record.body) {
                             seen.ranges.insert(range);
+                        } else if let Ok(held) = SwitchedHeld::decode(&record.body) {
+                            // CR-262: only a record the counter signed.
+                            if held.verify(&counter) {
+                                seen.switched.push(held);
+                            }
                         }
                     }
                     RecordKind::Sale => {
@@ -669,6 +689,44 @@ impl<R: Post> OwnerLink<R> {
             }
             seen.looked_at = copy.len();
         }
+    }
+
+    /// SS-41, LK-78: send a switch to its counter as a message of kind
+    /// Switch, and keep it until the counter's records answer it, either
+    /// way. `now` is the time of the first send; the link sends the switch
+    /// again by itself. The switch is kept, in its file, before the first
+    /// send.
+    pub fn send_switch(&mut self, switch: &SwitchOwn, now: u64) -> Result<(), SendError> {
+        let counter = switch.counter;
+        if self.copies.contains_key(&counter) {
+            let kept = self.switches.push(PendingSwitch {
+                switch: switch.clone(),
+                queued_at: now,
+            });
+            if let Err(e) = kept {
+                self.note(format!(
+                    "the switch for {counter:?} could not be kept for sending again: {e}"
+                ));
+            }
+        }
+        self.send_now(&counter, Kind::Switch, &switch.to_bytes())?;
+        self.switches_sent_at.insert(counter, now);
+        Ok(())
+    }
+
+    /// The switches that still wait for an answer, oldest first by counter.
+    pub fn switches_waiting(&self) -> &[PendingSwitch] {
+        self.switches.items()
+    }
+
+    /// CR-262: the switched records `counter`'s copy holds, with the
+    /// counter's signature checked, in the order of its chain. Empty for a
+    /// counter the link does not follow.
+    pub fn switch_records(&self, counter: &DeviceId) -> Vec<SwitchedHeld> {
+        self.index_use
+            .get(counter)
+            .map(|seen| seen.switched.clone())
+            .unwrap_or_default()
     }
 
     fn send_now(&mut self, to: &DeviceId, kind: Kind, content: &[u8]) -> Result<(), SendError> {
@@ -974,6 +1032,7 @@ impl<R: Post> OwnerLink<R> {
         self.check_missed(now, started);
         self.scan_index_use();
         self.settle_ranges();
+        self.settle_switches();
         self.settle_batches(now);
         if now < self.next_relay_at {
             return;
@@ -1000,10 +1059,14 @@ impl<R: Post> OwnerLink<R> {
             // Taking records may have shown a batch or a range held.
             self.scan_index_use();
             self.settle_ranges();
+            self.settle_switches();
             self.settle_batches(now);
             reached = self.resend_batches(now);
             if reached {
                 reached = self.resend_ranges(now);
+            }
+            if reached {
+                reached = self.resend_switches(now);
             }
         }
         if reached {
@@ -1163,6 +1226,69 @@ impl<R: Post> OwnerLink<R> {
         if let Err(e) = dropped {
             self.note(format!("the pending ranges could not be saved: {e}"));
         }
+    }
+
+    /// LK-78: drop the pending switches the copies answer: the counter's
+    /// chain holds its record for the new wallet, whichever byte it says.
+    fn settle_switches(&mut self) {
+        if self.switches.is_empty() {
+            return;
+        }
+        let uses = &self.index_use;
+        let dropped = self.switches.retain(|p| {
+            let Some(seen) = uses.get(&p.switch.counter) else {
+                return true;
+            };
+            let wallet = p.switch.wallet_hash();
+            !seen.switched.iter().any(|h| h.wallet == wallet)
+        });
+        if let Err(e) = dropped {
+            self.note(format!("the pending switches could not be saved: {e}"));
+        }
+    }
+
+    /// LK-71, LK-78: send the switches that still wait to each counter, at
+    /// most once in `batch_resend_secs` for each counter. `false` if the
+    /// relay could not be reached.
+    fn resend_switches(&mut self, now: u64) -> bool {
+        for counter in self.counters.clone() {
+            let due = self
+                .switches_sent_at
+                .get(&counter)
+                .is_none_or(|at| now >= at.saturating_add(self.cfg.batch_resend_secs));
+            if !due {
+                continue;
+            }
+            let mine: Vec<SwitchOwn> = self
+                .switches
+                .items()
+                .iter()
+                .filter(|p| p.switch.counter == counter)
+                .map(|p| p.switch.clone())
+                .collect();
+            if mine.is_empty() {
+                continue;
+            }
+            self.switches_sent_at.insert(counter, now);
+            for switch in mine {
+                match self
+                    .courier
+                    .send(&counter, Kind::Switch, &switch.to_bytes())
+                {
+                    Ok(()) => {}
+                    Err(e) if e.is_retryable() => {
+                        // Tried again at the next step.
+                        self.switches_sent_at.remove(&counter);
+                        return false;
+                    }
+                    Err(e) => {
+                        self.note(format!("a switch for {counter:?} was not sent again: {e}"));
+                        break;
+                    }
+                }
+            }
+        }
+        true
     }
 
     /// LK-71, LK-77: send the ranges that still wait to each counter, oldest

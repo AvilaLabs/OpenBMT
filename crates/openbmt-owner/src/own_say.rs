@@ -9,6 +9,7 @@
 use openbmt_core::say::{Tone, Who, Words};
 
 use crate::own_shop::OwnRefusal;
+use crate::own_switch::{not_ready_words, status_words, SwitchStatus};
 use crate::say::stop;
 
 /// Words that are still to be written: the placeholder stands in the
@@ -100,6 +101,7 @@ impl OwnRefusal {
             | Self::OwnKey
             | Self::BadName => "OA-109",
             Self::AlreadyAdded | Self::Pairing(_) | Self::Settings(_) => "OA-110",
+            Self::SwitchSameWallet => "SS-41",
             Self::Book(_) => "OA-106",
             Self::NoBundle | Self::TooManyWaiting => "OA-111",
             Self::UnknownCounter => "OA-112",
@@ -209,6 +211,7 @@ impl OwnRefusal {
                 "Finish pairing a waiting counter, then add this one.",
             )
             .code("OA-111"),
+            Self::SwitchSameWallet => needed("WORDS_NEEDED_OA_SWITCH_SAME_WALLET"),
             Self::UnknownCounter => stop(
                 "Counter not in the shop",
                 "Addresses were asked for a counter this phone did not pair, so none were given.",
@@ -262,6 +265,7 @@ pub fn all_own_words() -> Vec<(String, Words)> {
             "OwnRefusal::Book(Corrupt)",
             OwnRefusal::Book(BookError::Corrupt("a sample")),
         ),
+        ("OwnRefusal::SwitchSameWallet", OwnRefusal::SwitchSameWallet),
         ("OwnRefusal::NoBundle", OwnRefusal::NoBundle),
         ("OwnRefusal::UnknownCounter", OwnRefusal::UnknownCounter),
         ("OwnRefusal::TooManyWaiting", OwnRefusal::TooManyWaiting),
@@ -273,6 +277,14 @@ pub fn all_own_words() -> Vec<(String, Words)> {
     for (name, refusal) in refusals {
         add(name, refusal.words());
     }
+    for status in [
+        SwitchStatus::Switched,
+        SwitchStatus::Waiting,
+        SwitchStatus::Refused,
+    ] {
+        add(&format!("switch_status::{status:?}"), status_words(status));
+    }
+    add("switch_move_not_ready", not_ready_words());
     all
 }
 
@@ -320,6 +332,7 @@ mod tests {
                 OwnRefusal::OwnKey => "OwnRefusal::OwnKey",
                 OwnRefusal::BadName => "OwnRefusal::BadName",
                 OwnRefusal::AlreadyAdded => "OwnRefusal::AlreadyAdded",
+                OwnRefusal::SwitchSameWallet => "OwnRefusal::SwitchSameWallet",
                 OwnRefusal::Settings(_) => "OwnRefusal::Settings",
                 OwnRefusal::Book(_) => "OwnRefusal::Book(Full)",
                 OwnRefusal::NoBundle => "OwnRefusal::NoBundle",
@@ -339,6 +352,7 @@ mod tests {
             OwnRefusal::OwnKey,
             OwnRefusal::BadName,
             OwnRefusal::AlreadyAdded,
+            OwnRefusal::SwitchSameWallet,
             OwnRefusal::NoBundle,
             OwnRefusal::UnknownCounter,
             OwnRefusal::TooManyWaiting,

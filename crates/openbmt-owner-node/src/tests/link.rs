@@ -2568,3 +2568,187 @@ fn cr_236_cr_239_the_owners_change_is_signed_by_the_owner_root_alone_and_a_loose
     let (shop, store) = node.shop_and_store();
     assert!(shop.change_settings(looser, &store).is_err());
 }
+
+// ---- the switch from the starter wallet (SS-41, SS-42, LK-78) ----
+
+use openbmt_core::pairing_own::SwitchOwn;
+use openbmt_counter::SwitchedHeld;
+use openbmt_owner::own_switch::SwitchStatus;
+
+const NEW_WALLET: &str = "wsh(sortedmulti(2,[73c5da0a/48h/0h/0h/2h]xpub6DkFAXWQ2dHxq2vatrt9qyA3bXYU4ToWQwCHbf5XB2mSTexcHZCeKS1VZYcPoBd5X8yVcbXFHJR9R8UCVpt82VX1VhR28mCyxUFL4r6KFrf/<0;1>/*,[b8688df1/48h/0h/0h/2h]xpub6FQya7zGhR92kacYsNnjreouvnHJMpXYsUXnW6NJJAJRCKsa26TzDy4LdnGhEurr3d6y1J8PJ7EEMKQp74XTqYvmGJNogYXSKDszYHtF8mX/<0;1>/*,[28645006/48h/0h/0h/2h]xpub6DnEBNkSJKBYQmsbhS1sP9cNdtU5c9PLFGCjTJmxicxc13WB8zNNGQazabQpyFAGW5bV9tMko4uBxDxjUKL6dSAcx1tEbgEHtgSqyRsekh6/<0;1>/*))#34zcp4yt";
+
+fn switch_messages(got: &[Received]) -> Vec<SwitchOwn> {
+    got.iter()
+        .filter(|r| r.kind == Kind::Switch)
+        .map(|r| SwitchOwn::from_bytes(&r.content).unwrap())
+        .collect()
+}
+
+fn new_wallet() -> PinnedWallet {
+    PinnedWallet::from_text(NEW_WALLET).unwrap()
+}
+
+fn a_switch() -> SwitchOwn {
+    SwitchOwn::sign(
+        &id(1),
+        counter(),
+        PinnedWallet::from_text(SINGLE).unwrap().checksum32(),
+        new_wallet(),
+        range_at(1_000),
+    )
+}
+
+/// A chain of `n` sales and then a switched record signed by `who`.
+fn chain_with_switched(who: u8, switched: bool, wallet: [u8; 32]) -> Chain {
+    let mut c = chain(3, 1);
+    let held = SwitchedHeld::sign(&id(who), switched, wallet);
+    c.append(&id(3), held.kind(), held.encode()).unwrap();
+    c
+}
+
+#[test]
+fn lk_78_a_switch_is_kept_and_sent_again_until_the_counters_record_answers_it_either_way() {
+    for switched in [true, false] {
+        let mut w = world();
+        let sw = a_switch();
+        w.link.send_switch(&sw, T0).unwrap();
+        assert_eq!(w.link.switches_waiting().len(), 1);
+        assert_eq!(switch_messages(&w.counter_gets()), vec![sw.clone()]);
+        // The file is written before the send: a link opened again has it.
+        assert!(w.dir.path().join(crate::SWITCH_OUTBOX_FILE).exists());
+        // Records that say nothing of it leave it pending, and it is sent
+        // again once in the resend interval.
+        w.send_records(chain(3, 1).records());
+        w.step(T0 + 1);
+        assert_eq!(w.link.switches_waiting().len(), 1);
+        assert!(switch_messages(&w.counter_gets()).is_empty());
+        w.step(T0 + 120);
+        assert_eq!(switch_messages(&w.counter_gets()), vec![sw.clone()]);
+        // A record for another wallet, and one the counter did not sign, do
+        // not answer it.
+        let other = chain_with_switched(3, true, [9; 32]);
+        w.send_records(&other.records()[3..]);
+        w.step(T0 + 121);
+        assert_eq!(w.link.switches_waiting().len(), 1);
+        // The counter's own record for this wallet answers it, whichever
+        // byte it holds.
+        let held = SwitchedHeld::sign(&id(3), switched, sw.wallet_hash());
+        // The copy holds the sales and the other wallet's record already:
+        // send the whole chain the counter now has.
+        let mut full = chain(3, 1);
+        let other_held = SwitchedHeld::sign(&id(3), true, [9; 32]);
+        full.append(&id(3), other_held.kind(), other_held.encode())
+            .unwrap();
+        full.append(&id(3), held.kind(), held.encode()).unwrap();
+        w.send_records(&full.records()[4..]);
+        w.step(T0 + 122);
+        assert!(w.link.switches_waiting().is_empty(), "switched {switched}");
+        assert_eq!(
+            w.link
+                .switch_records(&counter())
+                .iter()
+                .map(|h| (h.switched, h.wallet))
+                .collect::<Vec<_>>(),
+            vec![(true, [9; 32]), (switched, sw.wallet_hash())]
+        );
+        // Nothing is sent again.
+        w.counter_gets();
+        w.step(T0 + 1_000);
+        assert!(switch_messages(&w.counter_gets()).is_empty());
+    }
+}
+
+#[test]
+fn lk_78_a_switched_record_not_signed_by_the_counter_is_not_read() {
+    let mut w = world();
+    let sw = a_switch();
+    w.link.send_switch(&sw, T0).unwrap();
+    w.send_records(chain_with_switched(7, true, sw.wallet_hash()).records());
+    w.step(T0 + 1);
+    assert!(w.link.switch_records(&counter()).is_empty());
+    assert_eq!(w.link.switches_waiting().len(), 1);
+}
+
+#[test]
+fn lk_78_a_pending_switch_is_still_there_after_the_link_is_opened_again() {
+    let mut w = world();
+    let sw = a_switch();
+    w.link.send_switch(&sw, T0).unwrap();
+    let dir = w.dir.path().to_path_buf();
+    let again = crate::SwitchOutbox::open(&dir).unwrap();
+    assert_eq!(again.items().len(), 1);
+    assert_eq!(again.items()[0].switch, sw);
+    assert_eq!(again.items()[0].queued_at, T0);
+}
+
+#[test]
+fn ss_41_each_counter_is_switched_waiting_or_refused_and_ss_42_the_move_waits_for_all() {
+    let dir = Dir::new();
+    let mut node = paired_node(&dir);
+    let mut w = world();
+    let new = new_wallet();
+    // Nothing is answered: the counter waits and the move is not ready.
+    assert_eq!(
+        node.switch_rows(&w.link, &new),
+        vec![(counter(), SwitchStatus::Waiting)]
+    );
+    let not_ready = node.move_ready(&w.link, &new).unwrap_err();
+    assert_eq!(not_ready.waiting, vec![counter()]);
+    // The switch is made for the counter, from a range above the first, and
+    // sent once.
+    let made = node.send_switches(&mut w.link, &new, T0 + 1).unwrap();
+    assert_eq!(made, vec![counter()]);
+    let sent = switch_messages(&w.counter_gets());
+    assert_eq!(sent.len(), 1);
+    assert!(sent[0].verify(&id(1).device_id()));
+    assert_eq!(
+        (
+            sent[0].first_range.range.start,
+            sent[0].first_range.range.end
+        ),
+        (1_000, 2_000)
+    );
+    assert_eq!(sent[0].wallet, new);
+    // Asking again allocates nothing more.
+    assert!(node
+        .send_switches(&mut w.link, &new, T0 + 2)
+        .unwrap()
+        .is_empty());
+    assert_eq!(node.shop().book().next_start(), 2_000);
+    assert_eq!(
+        node.switch_rows(&w.link, &new),
+        vec![(counter(), SwitchStatus::Waiting)]
+    );
+    // The counter refused: it shows refused, and the move is not ready.
+    w.send_records(chain_with_switched(3, false, new.checksum32()).records());
+    w.step(T0 + 3);
+    assert_eq!(
+        node.switch_rows(&w.link, &new),
+        vec![(counter(), SwitchStatus::Refused)]
+    );
+    assert_eq!(
+        node.move_ready(&w.link, &new).unwrap_err().refused,
+        vec![counter()]
+    );
+    // A record for another wallet says nothing of this one.
+    let other = PinnedWallet::from_text(SINGLE).unwrap();
+    assert_eq!(
+        node.switch_rows(&w.link, &other),
+        vec![(counter(), SwitchStatus::Waiting)]
+    );
+    // Another world: the counter switched, and the move is ready.
+    let mut w = world();
+    w.send_records(chain_with_switched(3, true, new.checksum32()).records());
+    w.step(T0 + 4);
+    assert_eq!(
+        node.switch_rows(&w.link, &new),
+        vec![(counter(), SwitchStatus::Switched)]
+    );
+    assert!(node.move_ready(&w.link, &new).is_ok());
+    // A counter that already answered is given no new switch.
+    assert!(node
+        .send_switches(&mut w.link, &new, T0 + 5)
+        .unwrap()
+        .is_empty());
+    assert!(w.link.switches_waiting().is_empty());
+}

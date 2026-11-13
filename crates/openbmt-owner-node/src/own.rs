@@ -29,6 +29,9 @@ use openbmt_core::settings::Authority;
 use openbmt_courier::Post;
 use openbmt_owner::own_book::{gap_limit, needs_range, unused_indexes, AllocationBook};
 use openbmt_owner::own_shop::{OwnError, OwnRestoreError, OwnShop};
+use openbmt_owner::own_switch::{
+    move_ready, switch_status, HeldSwitch, MoveNotReady, SwitchStatus,
+};
 
 use crate::link::{OwnerLink, SettingsNotCarried};
 use crate::node::{OwnerNode, OwnerPort};
@@ -56,6 +59,8 @@ pub enum OwnNodeError {
     Derive(u32),
     /// The key for the queue's missing Key app could not be made.
     NoApprover,
+    /// A switch could not be made (SS-41).
+    Switch(String),
 }
 
 impl fmt::Display for OwnNodeError {
@@ -65,6 +70,7 @@ impl fmt::Display for OwnNodeError {
             Self::State(e) => write!(f, "{e}"),
             Self::Derive(i) => write!(f, "OA-107: the wallet has no address at index {i}"),
             Self::NoApprover => write!(f, "OA-105: the queue's placeholder key could not be made"),
+            Self::Switch(why) => write!(f, "SS-41: {why}"),
         }
     }
 }
@@ -269,6 +275,85 @@ impl OwnNode {
             });
         }
         Ok(done)
+    }
+
+    /// SS-41, CR-257: make the switch to `new` for each counter this shop
+    /// paired that has no record for `new` and no switch waiting for it, and
+    /// send it as a message of kind Switch (LK-78). Each switch takes a new
+    /// range from the book, written and stored before it is signed, so it is
+    /// above every index any counter handed out. A counter that answered or
+    /// whose switch waits is left as it is, so asking again allocates
+    /// nothing more. Returns the counters a switch was made for.
+    pub fn send_switches<R: Post>(
+        &mut self,
+        link: &mut OwnerLink<R>,
+        new: &PinnedWallet,
+        now: u64,
+    ) -> Result<Vec<DeviceId>, OwnNodeError> {
+        link.scan_index_use();
+        let hash = new.checksum32();
+        let counters: Vec<DeviceId> = self.shop.book().devices().copied().collect();
+        let mut made = Vec::new();
+        for counter in counters {
+            if counter == self.shop.owner_id() {
+                continue;
+            }
+            let answered = link
+                .switch_records(&counter)
+                .iter()
+                .any(|h| h.wallet == hash);
+            let waits = link
+                .switches_waiting()
+                .iter()
+                .any(|p| p.switch.counter == counter && p.switch.wallet_hash() == hash);
+            if answered || waits {
+                continue;
+            }
+            let (shop, store) = self.shop_and_store();
+            let switch = match shop.make_switch(counter, new, now, store) {
+                Ok(switch) => switch,
+                Err(OwnError::Store(e)) => return Err(OwnNodeError::Io(e)),
+                Err(OwnError::Refused(r)) => return Err(OwnNodeError::Switch(r.to_string())),
+            };
+            // A switch that could not be sent now is kept and sent again.
+            let _ = link.send_switch(&switch, now);
+            made.push(counter);
+        }
+        Ok(made)
+    }
+
+    /// SS-41, CR-262: each counter of the settings in force as switched,
+    /// waiting or refused for `new`, from the records its copy holds.
+    pub fn switch_rows<R: Post>(
+        &self,
+        link: &OwnerLink<R>,
+        new: &PinnedWallet,
+    ) -> Vec<(DeviceId, SwitchStatus)> {
+        let hash = new.checksum32();
+        self.counters_of_settings()
+            .into_iter()
+            .map(|counter| {
+                let held: Vec<HeldSwitch> = link
+                    .switch_records(&counter)
+                    .iter()
+                    .map(|h| HeldSwitch {
+                        switched: h.switched,
+                        wallet: h.wallet,
+                    })
+                    .collect();
+                (counter, switch_status(&held, &hash))
+            })
+            .collect()
+    }
+
+    /// SS-42: whether the move of the starter wallet may be built: every
+    /// counter of the settings in force is switched to `new`.
+    pub fn move_ready<R: Post>(
+        &self,
+        link: &OwnerLink<R>,
+        new: &PinnedWallet,
+    ) -> Result<(), MoveNotReady> {
+        move_ready(&self.switch_rows(link, new))
     }
 
     /// OA-113: how far ahead the wallet must look, from the indexes that

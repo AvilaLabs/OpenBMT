@@ -33,7 +33,8 @@ use std::fmt;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::pairing::PAIRING_WINDOW_SECS;
 use openbmt_core::pairing_own::{
-    check_own_request, OwnBundle, OwnOffer, OwnPairError, OwnRequest, FIRST_RANGE_MIN_COUNT,
+    check_own_request, OwnBundle, OwnOffer, OwnPairError, OwnRequest, SwitchOwn,
+    FIRST_RANGE_MIN_COUNT,
 };
 use openbmt_core::pinned_wallet::{IndexRange, PinnedWallet, SignedRange};
 use openbmt_core::relay::SignedRelayHint;
@@ -101,6 +102,8 @@ pub enum OwnRefusal {
     BadName,
     /// The counter has a range or a bundle waiting already.
     AlreadyAdded,
+    /// SS-41: the new wallet is the shop's own wallet.
+    SwitchSameWallet,
     /// The settings could not be made, as [`Refusal`] says.
     Settings(Refusal),
     /// OA-106, OA-107: the book gave no range.
@@ -128,6 +131,7 @@ impl fmt::Display for OwnRefusal {
             Self::OwnKey => write!(f, "OA-109: the counter's key is the owner's own"),
             Self::BadName => write!(f, "OA-109: the counter's name is not plain text"),
             Self::AlreadyAdded => write!(f, "OA-110: the counter is added already"),
+            Self::SwitchSameWallet => write!(f, "SS-41: the new wallet is the wallet in use"),
             Self::Settings(r) => write!(f, "{r}"),
             Self::Book(e) => write!(f, "{e}"),
             Self::NoBundle => write!(f, "OA-111: no bundle waits for this counter"),
@@ -421,6 +425,13 @@ impl OwnShop {
     /// OA-108: the offer for a new counter: the owner root, the version of
     /// the settings in force (0 when there are none) and the wallet.
     pub fn make_offer(&self, now: u64) -> Result<MadeOffer, OwnRefusal> {
+        self.make_offer_as(now, false)
+    }
+
+    /// OA-108, CR-256: the offer, marked as a starter wallet's when the
+    /// pinned wallet is the starter wallet, so that the counter that takes it
+    /// is one that may switch (SS-41).
+    pub fn make_offer_as(&self, now: u64, starter: bool) -> Result<MadeOffer, OwnRefusal> {
         let floor = self.state.known.as_ref().map_or(0, |k| k.settings.version);
         let offer = OwnOffer::new(
             bitcoin::Network::Bitcoin,
@@ -428,7 +439,8 @@ impl OwnShop {
             floor,
             self.wallet.clone(),
         )
-        .map_err(OwnRefusal::Pairing)?;
+        .map_err(OwnRefusal::Pairing)?
+        .with_starter(starter);
         Ok(MadeOffer {
             offer,
             made_at: now,
@@ -733,6 +745,36 @@ impl OwnShop {
             return Err(OwnRefusal::UnknownCounter.into());
         }
         self.allocate(counter, now, persist)
+    }
+
+    /// SS-41, CR-257: the switch message for a counter paired with this
+    /// shop's wallet (the starter wallet): the new wallet and a first range
+    /// for it, taken from the book after every range given so far, so that no
+    /// index of it was ever a sale number of the old wallet. The range is
+    /// written to the book and stored before it is signed (OA-106). The new
+    /// wallet must not be the wallet in use, and the counter must be one the
+    /// book knows.
+    pub fn make_switch<E>(
+        &mut self,
+        counter: DeviceId,
+        new_wallet: &PinnedWallet,
+        now: u64,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<SwitchOwn, OwnError<E>> {
+        if new_wallet.checksum32() == self.wallet.checksum32() {
+            return Err(OwnRefusal::SwitchSameWallet.into());
+        }
+        if counter == self.identity.device_id() || !self.state.book.has_device(&counter) {
+            return Err(OwnRefusal::UnknownCounter.into());
+        }
+        let range = self.allocate(counter, now, persist)?;
+        Ok(SwitchOwn::sign(
+            &self.identity,
+            counter,
+            self.wallet.checksum32(),
+            new_wallet.clone(),
+            range,
+        ))
     }
 
     /// The first range of the bundle that waits for a counter, or of the

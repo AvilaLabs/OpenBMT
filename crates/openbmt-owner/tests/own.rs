@@ -583,3 +583,73 @@ fn oa_114_every_state_and_refusal_has_words_or_the_placeholder_that_names_its_ru
         }
     }
 }
+
+#[test]
+fn cr_256_the_offer_of_a_starter_wallet_carries_the_flag_and_another_does_not() {
+    let s = shop(SINGLE);
+    let plain = s.make_offer(T0).unwrap();
+    assert!(!plain.offer.starter);
+    assert_eq!(plain.offer.to_bytes()[4], 1, "version 1");
+    let starter = s.make_offer_as(T0, true).unwrap();
+    assert!(starter.offer.starter);
+    assert_eq!(starter.offer.to_bytes()[4], 2, "version 2");
+    // The counter that takes it knows the pairing came from a starter wallet.
+    let (counter, request) = counter_request(&starter, 3, "Front");
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    let paired = confirm(&mut s, &disk, &starter, &request, T0 + 30).unwrap();
+    let kept = counter
+        .finish(&paired.bundle.pairing, true, T0 + 40)
+        .unwrap();
+    assert!(kept.offer.starter);
+}
+
+#[test]
+fn cr_257_the_switch_names_the_new_wallet_and_a_range_above_every_range_given() {
+    let disk = Disk::new();
+    let mut s = shop(SINGLE);
+    let made = s.make_offer_as(T0, true).unwrap();
+    let (_, request) = counter_request(&made, 3, "Front");
+    let counter = request.counter;
+    confirm(&mut s, &disk, &made, &request, T0 + 30).unwrap();
+    let new = PinnedWallet::from_text(MULTI).unwrap();
+    // A failed store changes nothing and makes no message.
+    let failing = s.make_switch(counter, &new, T0 + 60, |_: &[u8]| {
+        Err("disk full".to_string())
+    });
+    assert!(matches!(failing, Err(OwnError::Store(_))));
+    assert_eq!(s.book().ranges_given(), 1);
+    let sw = s
+        .make_switch(counter, &new, T0 + 60, |b| disk.put(b))
+        .unwrap();
+    assert_eq!(sw.counter, counter);
+    assert_eq!(sw.from, s.wallet().checksum32());
+    assert_eq!(sw.wallet, new);
+    // The range comes after the first range and is the book's.
+    assert_eq!(
+        (sw.first_range.range.start, sw.first_range.range.end),
+        (1_000, 2_000)
+    );
+    assert_eq!(sw.first_range.range.counter, counter);
+    assert!(sw.verify(&s.owner_id()));
+    assert_eq!(s.book().ranges_given(), 2);
+    let back =
+        OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), &disk.get()).unwrap();
+    assert_eq!(back.book(), s.book());
+    // The same wallet, and a counter the book does not know, are refused with
+    // nothing allocated.
+    let same = PinnedWallet::from_text(SINGLE).unwrap();
+    assert_eq!(
+        refused(s.make_switch(counter, &same, T0 + 70, |b| disk.put(b))),
+        OwnRefusal::SwitchSameWallet
+    );
+    assert_eq!(
+        refused(s.make_switch(id(9).device_id(), &new, T0 + 70, |b| disk.put(b))),
+        OwnRefusal::UnknownCounter
+    );
+    assert_eq!(
+        refused(s.make_switch(s.owner_id(), &new, T0 + 70, |b| disk.put(b))),
+        OwnRefusal::UnknownCounter
+    );
+    assert_eq!(s.book().ranges_given(), 2);
+}
