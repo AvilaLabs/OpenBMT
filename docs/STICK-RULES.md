@@ -146,7 +146,10 @@ funds.**
   the key of one of the shop's two small everyday wallets. Both are BIP-85
   children of the 12 words, so there is nothing new to write down:
   - **The refund float:** the BIP-85 BIP39 child of 12 English words at
-    `m/83696968'/39'/0'/12'/0'`, shown as a Compact SeedQR (SK-27).
+    `m/83696968'/39'/0'/12'/<index>'`, shown as a Compact SeedQR (SK-27).
+    The index starts at 0 and the owner may change it from 0 to 99 on the
+    screen, which shows it; a new float after a lost phone uses the next
+    index (`docs/FLOAT-RULES.md` FL-04).
   - **Shop Lightning:** the BIP-85 HEX child of 64 bytes at
     `m/83696968'/128169'/64'/0'` (`docs/SHOP-LIGHTNING-RULES.md` SL-10), shown
     as a QR code of its 128 hexadecimal characters in lower case.
