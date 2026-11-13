@@ -38,6 +38,7 @@ exactly the input bytes.
 | `own_offer_decode` | `OwnOffer::from_bytes` (CR-227): re-encode equality, the main network only, and the first address and the binding of any offer that decodes, on the input as it is and behind the frame header |
 | `own_request_decode` | `OwnRequest::from_bytes` (CR-229), with re-encode equality, on the input as it is and behind the frame header |
 | `own_bundle_decode` | `OwnBundle::from_bytes` (versions 1 and 2, the second with a relay, CR-230), with re-encode equality and the version that matches the relay, on the input as it is and behind each version's frame header |
+| `starter_line_decode` | `StarterLine::from_bytes` (LK-79), with re-encode equality, at most 16 payments and none twice, on the input as it is and behind the frame header |
 | `range_ledger_decode` | `RangeLedger::from_bytes` (the `OBM;` slot, CR-234) under a fixed owner root and counter: re-encode equality, and a ledger of no range hands out no index |
 | `counter_own_pairing_record_decode` | `OwnPairingRecord::from_bytes` (the `OBM:` record, versions 1 and 2, the second with a relay, CR-233), with re-encode equality and the version that matches the relay, and `PairedRecord::from_bytes` taking it as the own-wallet kind, on the input as it is and behind each version's frame header |
 | `pair_request_decode` | `PairRequest::from_bytes` |

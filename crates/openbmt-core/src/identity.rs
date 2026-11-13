@@ -53,6 +53,8 @@ pub const TAG_SWITCH_OWN: &str = "OpenBMT/switch-own/v1";
 /// The tag a counter signs the record that it switched, or refused the
 /// switch, under (CR-262).
 pub const TAG_SWITCHED_OWN: &str = "OpenBMT/switched-own/v1";
+/// The tag the owner root signs the starter line under (LK-79).
+pub const TAG_STARTER_LINE: &str = "OpenBMT/starter-line/v1";
 /// Tag for owner-signed commands to a counter.
 pub const TAG_COMMAND: &str = "OpenBMT/command/v1";
 /// Tag for the owner's signed watcher heartbeat to a counter.

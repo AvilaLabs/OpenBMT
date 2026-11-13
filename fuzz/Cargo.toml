@@ -771,6 +771,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "starter_line_decode"
+path = "fuzz_targets/starter_line_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "range_ledger_decode"
 path = "fuzz_targets/range_ledger_decode.rs"
 test = false

@@ -34,6 +34,7 @@ pub mod say_policy;
 pub mod settings;
 pub mod sha3;
 pub mod shop_lightning;
+pub mod starter_line;
 pub mod wallet;
 pub mod wallet_single;
 pub mod wire;

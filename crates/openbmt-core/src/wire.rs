@@ -101,6 +101,9 @@ pub const MAGIC_CONFIRMED_SETTINGS: [u8; 4] = *b"OBM<";
 /// Magic of a [`SwitchOwn`](crate::pairing_own::SwitchOwn), the owner's
 /// message that moves a counter from the starter wallet (CR-257).
 pub const MAGIC_SWITCH_OWN: [u8; 4] = *b"OBM]";
+/// Magic of a [`StarterLine`](crate::starter_line::StarterLine), the owner
+/// phone's line to the counters of a starter wallet (LK-79).
+pub const MAGIC_STARTER_LINE: [u8; 4] = *b"OBM_";
 /// Magic of a [`SignedRelayHint`](crate::relay::SignedRelayHint), the relay
 /// for counters (CR-132).
 pub const MAGIC_RELAY_FOR_COUNTERS: [u8; 4] = *b"OBMz";
