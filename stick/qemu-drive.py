@@ -242,6 +242,27 @@ def check_result(s, words, exp):
     if sq["id"] != "seedqr" or sq["qr"] != exp["seedqrrow"]:
         fail("the SeedQR differs from the core's")
     ok("SK-27 Compact SeedQR equals the core's (%d x %d)" % (len(sq["qr"]), len(sq["qr"])))
+    # SK-32: the refund float's SeedQR at index 0 and, after "+", at index 1,
+    # and Shop Lightning's QR of 128 hex characters; all equal the core's.
+    fl = press("f")
+    if fl["id"] != "float" or fl["qr"] != exp["float0qrrow"]:
+        fail("the refund float's code at index 0 differs from the core's")
+    if field(fl, W["WORDS_NEEDED_SK_32_FLOAT_INDEX"]) != "0":
+        fail("the float index shown is not 0: %r" % fl["lines"])
+    fl1 = press("equal")
+    if fl1["qr"] != exp["float1qrrow"] or field(fl1, W["WORDS_NEEDED_SK_32_FLOAT_INDEX"]) != "1":
+        fail("the refund float's code at index 1 differs from the core's")
+    if fl1["qr"] == fl["qr"]:
+        fail("index 1 gives the same code as index 0")
+    ok("SK-32 refund float: index 0 and index 1 SeedQR codes equal the core's (%d x %d) and differ" % (len(fl["qr"]), len(fl["qr"])))
+    press("ret")
+    lt = press("l")
+    if lt["id"] != "lightning" or lt["qr"] != exp["lightningqrrow"]:
+        fail("Shop Lightning's code differs from the core's")
+    ok("SK-32 Shop Lightning: QR of the 128 hex characters equals the core's (%d x %d); hex %s..." % (len(lt["qr"]), len(lt["qr"]), exp["lightninghex"][:16]))
+    for sc in (fl, lt):
+        if not any(W["SK_29_TURN_OFF"] in l for l in sc["lines"]):
+            fail("no Turn off on " + sc["id"])
     for sc in (s, q, sq):
         if not any(W["SK_29_TURN_OFF"] in l for l in sc["lines"]):
             fail("no Turn off on " + sc["id"])
