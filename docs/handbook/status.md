@@ -30,6 +30,11 @@ engineering tests. The current results are not an independent audit.
 | Key app signing rules | Built |
 | Counter sale handling and Bitcoin peer client | Built; tested against Bitcoin Core on a test network |
 | Owner coin view, refund queue, spending and approval session | Built; tested against Bitcoin Core on a test network |
+| Refund float (a small, capped wallet on the owner phone for paying refunds at once) | Built in the owner library; tested against Bitcoin Core on a test network; the owner app has no screens for it yet |
+| Start simple (a capped starter wallet the owner phone makes, and the later move to a key made offline) | Built, with the owner app's screens and each counter's switch to the new wallet; tested against Bitcoin Core on a test network; not run on a phone |
+| The stick (the shop's key made, and a payment from savings signed, on an ordinary PC started from a USB stick) | Built; making the key and signing run in a virtual machine; signing through the PC's camera not yet tried on a real PC |
+| Payment requests (an amount asked of a customer by link or code, and money returned) | Built as a library and tested; the owner app does not use it yet |
+| Bitcoin at checkout in the shop's own WooCommerce store | The plugin's logic is built and tested without WordPress; the owner phone's side has no screens or connection yet; not run inside WordPress |
 | Counter, Owner and Key Android apps | First builds; started on an emulator, not run on a phone |
 | Box and its container, Umbrel and StartOS packages | Built; container image smoke-tested, Umbrel and StartOS packages not run on a device |
 | NFC tap to pay | Not built yet |
@@ -37,6 +42,7 @@ engineering tests. The current results are not an independent audit.
 | Lightspeed and Hike | Manual Bitcoin payment type only; no automatic connection planned while it would need a server on the internet |
 | Closing an Odoo sale from the till through the Box | Built; tested in Odoo 18 against a stand-in Box, the counter's side still to be joined |
 | Lightning through the shop's own node | Built at the counter; not run against a real node |
+| Shop Lightning (a small Lightning node built into OpenBMT, on the LDK library) | Built as a library; channels from a test provider, payments, restarts and the sweep to the shop's wallet tested against Bitcoin Core on a test network; Tor and the compact-filter chain source not finished; not yet in the counter app; test networks only |
 | Lightning through a swap service the owner names | Built at the counter; tested against a test swap service on a test network, not a real service |
 | Books and exports | Built; the owner app has a Books page that saves the files |
 | Key maker page (a wallet from coin flips or die rolls, offline) | Built; tested in a Tails virtual machine, not yet released |

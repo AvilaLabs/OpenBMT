@@ -57,9 +57,10 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   supports BIP-85. It is shown once as a QR code and scanned by the
   Lightning counter. OpenBMT never asks for the 12 words on a counter or a
   phone.
-- **SL-12. The one exception.** "No key on any phone" has two exceptions: this
-  key, only while Shop Lightning is on, and the refund float. Both hold a
-  capped amount. Turning Shop Lightning off (SL-36) deletes the key from the
+- **SL-12. The one exception.** "No key on any phone" has three exceptions:
+  this key, only while Shop Lightning is on, the refund float
+  (`docs/FLOAT-RULES.md`) and the starter wallet
+  (`docs/START-SIMPLE-RULES.md`). Each holds a capped amount. Turning Shop Lightning off (SL-36) deletes the key from the
   counter after the close.
 - **SL-13. Another counter.** Moving Shop Lightning to another counter is a
   close (SL-36) and a fresh start on the new one. The key is never copied
