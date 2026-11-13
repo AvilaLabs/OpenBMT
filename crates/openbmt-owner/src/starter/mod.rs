@@ -44,8 +44,6 @@ use std::fmt;
 
 use openbmt_core::say::{Tone, Who, Words};
 
-use crate::own_say::needed;
-
 pub use chance::{
     checked_read, make_seed, KernelRandom, Seed, StarterWallet, ENTROPY_BYTES, KERNEL_BYTES,
     STARTER_TAG, STARTER_WORDS,
@@ -446,7 +444,7 @@ pub fn deleted_words() -> Words {
         "Starter key deleted",
         "The starter wallet's key is gone from this phone. Its money is in the new wallet.",
         Who::Owner,
-        "The card of starter words is no longer needed. Destroy it.",
+        "Keep the card of starter words. It is the one way to open a payment that comes to the starter wallet later.",
     )
     .code("SS-43")
 }
@@ -482,26 +480,24 @@ pub fn new_wallet_unreadable_words() -> Words {
 }
 
 /// SS-36: the owner node's watch of the starter wallet is not ready, so
-/// what it holds is not known. The words are not written yet.
+/// what it holds is not known.
 pub fn not_watching_words() -> Words {
-    needed("WORDS_NEEDED_SS36_NOT_WATCHING")
+    stop(
+        "Starter wallet not read yet",
+        "The owner phone is still reading the Bitcoin network, so it does not know yet what the starter wallet holds. Nothing was paid.",
+        "Keep the owner phone online for a few minutes, then try again.",
+        "SS-36",
+    )
 }
 
-/// SS-30: the refund to pay is not a refund that waits in the queue. The
-/// words are not written yet.
+/// SS-30: the refund to pay is not a refund that waits in the queue.
 pub fn no_such_refund_words() -> Words {
-    needed("WORDS_NEEDED_SS30_NO_SUCH_REFUND")
-}
-
-/// The words of this module that are not written yet, by name: each is the
-/// placeholder constant that names its rule, in the heading and both
-/// sentences. They are not in [`all_starter_words`], which holds written
-/// words only.
-pub fn all_needed_words() -> Vec<(String, Words)> {
-    vec![
-        ("StarterNotWatching".to_string(), not_watching_words()),
-        ("StarterNoSuchRefund".to_string(), no_such_refund_words()),
-    ]
+    stop(
+        "Refund no longer waiting",
+        "This refund is not in the queue of refunds any more, so nothing was paid.",
+        "Go back to the refunds and choose one that waits.",
+        "SS-30",
+    )
 }
 
 /// Every state of this module that has words, by name.
@@ -529,6 +525,8 @@ pub fn all_starter_words() -> Vec<(String, Words)> {
         "StarterNewWalletUnreadable".to_string(),
         new_wallet_unreadable_words(),
     ));
+    all.push(("StarterNotWatching".to_string(), not_watching_words()));
+    all.push(("StarterNoSuchRefund".to_string(), no_such_refund_words()));
     all
 }
 

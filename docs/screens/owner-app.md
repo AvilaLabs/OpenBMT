@@ -626,7 +626,7 @@ core's own words, which the binding does not carry yet:
 | SS43_TITLE | Delete the starter key |
 | SS43_WAITING | The move is not confirmed yet. The key is deleted once it has one confirmation. |
 | SS43_DELETE_BUTTON | Delete the key |
-| SS43_LATE_PAYMENT_HEADING | WORDS_NEEDED_OA_SS43_LATE_PAYMENT_HEADING |
-| SS43_LATE_PAYMENT_WHAT | WORDS_NEEDED_OA_SS43_LATE_PAYMENT_WHAT |
-| SS43_LATE_PAYMENT_NEXT | WORDS_NEEDED_OA_SS43_LATE_PAYMENT_NEXT |
+| SS43_LATE_PAYMENT_HEADING | Paid to the starter wallet |
+| SS43_LATE_PAYMENT_WHAT | A payment came to the starter wallet after its money was moved. |
+| SS43_LATE_PAYMENT_NEXT | Move it to the new wallet. If this phone has no starter key, restore it from the card of starter words first. |
 | SS43_CONFIRMATIONS_UNKNOWN | The phone does not know yet whether the move is confirmed. |

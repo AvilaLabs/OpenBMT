@@ -219,7 +219,13 @@ impl OwnRefusal {
                 "Connect the wallet made offline instead.",
             )
             .code("SS-41"),
-            Self::OtherNewWallet => needed("WORDS_NEEDED_SS42_OTHER_NEW_WALLET"),
+            Self::OtherNewWallet => stop(
+                "Another move is planned",
+                "A move to a different new wallet was already planned, so nothing was moved.",
+                Who::Owner,
+                "Connect the same new wallet the counters switched to.",
+            )
+            .code("SS-42"),
             Self::UnknownCounter => stop(
                 "Counter not in the shop",
                 "Addresses were asked for a counter this phone did not pair, so none were given.",

@@ -3735,8 +3735,8 @@ object AppModelTest {
         ok(use.contains("stopNode()") && use.contains("startNode()"), "the node starts again after the re-pin")
         val wordsText = source("src/model/StarterWords.kt")
         ok(!wordsText.contains("NO_COIN_VIEW") && !wordsText.contains("noCoinView"), "the old coin-view placeholders are gone")
-        ok(listOf("HEADING", "WHAT", "NEXT").all { StarterWords.all().any { (k, n) -> k == "SS43_LATE_PAYMENT_$it" && n == "WORDS_NEEDED_OA_SS43_LATE_PAYMENT_$it" } }, "the late payment has its three placeholders")
-        ok(StarterWords.isPlaceholder(StarterWords.late) && StarterWords.late.heading == "WORDS_NEEDED_OA_SS43_LATE_PAYMENT_HEADING", "its words show the name")
+        ok(listOf("HEADING", "WHAT", "NEXT").all { k -> StarterWords.all().any { (key, _) -> key == "SS43_LATE_PAYMENT_$k" } }, "the late payment has its three words")
+        ok(!StarterWords.isPlaceholder(StarterWords.late) && StarterWords.late.heading == "Paid to the starter wallet", "its words are written")
 
         // SS-12: every screen that shows or takes words goes through the one helper.
         val helper = source("src/android/StarterWindow.kt")

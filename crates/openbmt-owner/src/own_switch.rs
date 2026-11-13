@@ -9,8 +9,8 @@
 //! the starter wallet (SS-42) waits until every counter in force is
 //! switched: [`move_ready`] is that check, a pure function of the statuses.
 //! The same check lets the owner's pinned wallet become the new wallet
-//! ([`Repin`], `OwnShop::repin`); the rules name no moment for that
-//! (`WORDS_NEEDED_RULE_SS_REPIN` under SS-41), so the caller chooses it.
+//! ([`Repin`], `OwnShop::repin`); SS-41 has the app ask for it once the
+//! move has its confirmation and the key is deleted (SS-43).
 
 use std::fmt;
 

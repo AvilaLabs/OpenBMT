@@ -128,7 +128,9 @@ funds.**
   amount. Both are in the shop's signed settings.
 - **SS-36. Every day.** The owner phone's home screen shows, in a line that
   cannot be dismissed, what the starter wallet holds, the limit and the
-  date.
+  date. What it holds is its confirmed coins and the change of the owner
+  phone's own payments before a block holds them; a payment from anyone
+  else counts once a block holds it.
 - **SS-37. At the limit or the date.** The owner phone opens on the upgrade
   screen every time, with "Upgrade now" and "Not yet". "Not yet" needs a
   sentence typed exactly and lasts at most 7 days. While it lasts, raising
@@ -152,19 +154,28 @@ funds.**
   Until then it keeps paying into the starter wallet. This is the one change
   of the pinned wallet a counter accepts, and only once (CR-263). The owner
   phone shows each counter as switched, waiting or refused, from the
-  counters' records (CR-262).
-  WORDS_NEEDED_RULE_SS_REPIN
+  counters' records (CR-262). The owner phone itself stays pinned to the
+  starter wallet until the move of SS-42 has its confirmation and the key is
+  deleted (SS-43); it then pins the new wallet, once, and keeps watching the
+  addresses of the starter wallet up to the last one handed out. The owner
+  phone's record of this change is written before the new wallet's file,
+  and a start between the two finishes the change. After it, the owner
+  phone reads the new wallet's coins from its birthday.
 - **SS-42. One move.** Once every counter in the settings in force has the
   record of CR-262 with the switched byte for the new wallet, the owner phone
   moves everything in the starter wallet to the new wallet's next address,
   derived by the owner phone from the new description, in one payment, at
   the fee of `docs/FEE-RULES.md` for a cash-out. The owner sees it and
-  proves they are there with the phone's PIN (SS-21).
+  proves they are there with the phone's PIN (SS-21). The address is the
+  first of a range of the owner phone's own, taken once for the new wallet
+  above every range given out; signing the move again pays the same
+  address, and a move to another wallet is refused until the first one's
+  wallet is pinned.
 - **SS-43. Then the key is gone.** When that payment has one confirmation,
   the app deletes the sealed seed and the Keystore key, and says that the
-  card of starter words is no longer needed and can be destroyed. A
-  payment that arrives at the starter wallet later is shown, with the offer
-  to restore (SS-23) and move it.
+  card of starter words is to be kept: it is the one way to open a payment
+  that arrives at the starter wallet later. Such a payment is shown on the
+  home screen, with the offer to restore (SS-23) and move it.
 
 ## 7. Tests
 

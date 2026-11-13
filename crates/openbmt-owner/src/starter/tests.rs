@@ -1521,21 +1521,19 @@ fn ss_50_every_state_has_its_own_words_and_names_its_rule() {
 }
 
 #[test]
-fn ss_50_the_words_not_written_yet_are_placeholders_that_name_their_rule() {
-    let needed = all_needed_words();
-    assert_eq!(needed.len(), 2);
-    for (name, w) in &needed {
-        assert!(crate::own_say::is_placeholder(w), "{name}");
-        assert!(
-            w.heading.starts_with("WORDS_NEEDED_SS") && w.heading == w.what && w.what == w.next,
-            "{name}"
-        );
+fn ss_36_ss_30_the_watch_and_the_refund_queue_have_written_words() {
+    for (w, code) in [
+        (not_watching_words(), "SS-36"),
+        (no_such_refund_words(), "SS-30"),
+    ] {
+        assert!(!crate::own_say::is_placeholder(&w));
+        assert_eq!(w.code, Some(code));
+        assert!(w.heading.len() < 28 && w.what != w.next);
     }
-    // None of them is among the written words.
     let written = all_starter_words();
-    assert!(needed
-        .iter()
-        .all(|(n, _)| written.iter().all(|(m, _)| m != n)));
+    for name in ["StarterNotWatching", "StarterNoSuchRefund"] {
+        assert!(written.iter().any(|(n, _)| n == name), "{name}");
+    }
 }
 
 #[test]

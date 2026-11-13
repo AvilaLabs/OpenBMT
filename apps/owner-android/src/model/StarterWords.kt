@@ -151,9 +151,9 @@ object StarterWords {
     val deleteTitle = say("SS43_TITLE", "Delete the starter key")
     val deleteWaiting = say("SS43_WAITING", "The move is not confirmed yet. The key is deleted once it has one confirmation.")
     val deleteButton = say("SS43_DELETE_BUTTON", "Delete the key")
-    val lateHeading = need("WORDS_NEEDED_OA_SS43_LATE_PAYMENT_HEADING")
-    val lateWhat = need("WORDS_NEEDED_OA_SS43_LATE_PAYMENT_WHAT")
-    val lateNext = need("WORDS_NEEDED_OA_SS43_LATE_PAYMENT_NEXT")
+    val lateHeading = say("SS43_LATE_PAYMENT_HEADING", "Paid to the starter wallet")
+    val lateWhat = say("SS43_LATE_PAYMENT_WHAT", "A payment came to the starter wallet after its money was moved.")
+    val lateNext = say("SS43_LATE_PAYMENT_NEXT", "Move it to the new wallet. If this phone has no starter key, restore it from the card of starter words first.")
     val deleteUnknown = say("SS43_CONFIRMATIONS_UNKNOWN", "The phone does not know yet whether the move is confirmed.")
 
     /** Words that are still to be written: the placeholder stands in the heading and both sentences. */
