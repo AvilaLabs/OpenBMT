@@ -4,37 +4,30 @@ import org.openbmt.counter.TillOfSale
 import org.openbmt.counter.TillRequest
 
 /**
- * CR-266 to CR-271: the labels of a sale from the till (`docs/SCREEN-RULES.md`). None is written yet: each is the
- * placeholder of its rule, `WORDS_NEEDED_CR_<rule>_<what>`, which a person sees as it is until the words exist. The
- * list is written to docs/screens/counter-app.md by [AppWords.screensMarkdown]. No Android class is used.
+ * CR-266 to CR-271: the labels of a sale from the till (`docs/SCREEN-RULES.md`). The list is written to
+ * docs/screens/counter-app.md by [AppWords.screensMarkdown]. No Android class is used.
  */
 object WordsOfTill {
     /** CR-267: the heading of the card on Home. */
-    const val CARD = "WORDS_NEEDED_CR_267_FROM_THE_TILL"
+    const val CARD = "From the till"
 
     /** CR-267: the label of the request's amount. */
-    const val AMOUNT = "WORDS_NEEDED_CR_267_AMOUNT"
+    const val AMOUNT = "Amount"
 
     /** CR-267: the label of the request's reference. */
-    const val REFERENCE = "WORDS_NEEDED_CR_267_REFERENCE"
+    const val REFERENCE = "Till reference"
 
     /** CR-267: the label of the minutes left. */
-    const val MINUTES_LEFT = "WORDS_NEEDED_CR_267_MINUTES"
+    const val MINUTES_LEFT = "Minutes left"
 
     /** CR-267: the button that starts the sale. */
-    const val START = "WORDS_NEEDED_CR_267_START"
+    const val START = "Start"
 
     /** CR-267: the button that hides the request. */
-    const val NOT_NOW = "WORDS_NEEDED_CR_267_NOT_NOW"
+    const val NOT_NOW = "Not now"
 
     /** CR-269: the line on a started sale that the till cancelled. */
-    const val CANCELLED = "WORDS_NEEDED_CR_269_CANCELLED"
-
-    /** Every text of this part that is not written yet. */
-    val placeholders: List<String> = listOf(CARD, AMOUNT, REFERENCE, MINUTES_LEFT, START, NOT_NOW, CANCELLED)
-
-    /** Whether [text] is a placeholder (CR-271). */
-    fun isPlaceholder(text: String): Boolean = text.startsWith("WORDS_NEEDED_")
+    const val CANCELLED = "The till cancelled this sale"
 
     /** Every key and its text, for docs/screens/counter-app.md. */
     fun all(): List<Pair<String, String>> = listOf(

@@ -387,9 +387,8 @@ fn cr_271_every_state_and_refusal_of_the_section_has_words_and_names_its_rule() 
     assert!(till.len() >= 9, "{}", till.len());
     let mut seen = std::collections::BTreeSet::new();
     for (name, w) in till {
-        assert!(w.heading.starts_with("WORDS_NEEDED_CR_26"), "{name}");
-        assert_eq!(w.heading, w.what, "{name}");
-        assert_eq!(w.heading, w.next, "{name}");
+        assert!(!w.heading.starts_with("WORDS_NEEDED"), "{name}");
+        assert_eq!(openbmt_core::say::check(w), Ok(()), "{name}");
         assert!(seen.insert(w.heading.clone()), "{name} repeats");
         assert!(w.code.is_some_and(|c| c.starts_with("CR-26")), "{name}");
     }

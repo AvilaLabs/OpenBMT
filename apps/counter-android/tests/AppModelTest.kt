@@ -1534,10 +1534,9 @@ object AppModelTest {
 
     private fun cr266TillTests(appDir: File?) {
         val usd = Money("USD", 2)
-        // CR-271: each unwritten text is the placeholder of its rule, named once.
-        ok(WordsOfTill.placeholders.all { WordsOfTill.isPlaceholder(it) && it.startsWith("WORDS_NEEDED_CR_26") }, "CR-271: the placeholders name their rule")
-        ok(WordsOfTill.placeholders.toSet().size == WordsOfTill.placeholders.size, "CR-271: each placeholder once")
-        ok(WordsOfTill.all().map { it.second }.toSet() == WordsOfTill.placeholders.toSet(), "CR-271: the list of the screens holds every placeholder")
+        // CR-271: every text is written, and each is said once.
+        ok(WordsOfTill.all().none { it.second.startsWith("WORDS_NEEDED") || it.second.isBlank() }, "CR-271: every text is written")
+        ok(WordsOfTill.all().map { it.second }.toSet().size == WordsOfTill.all().size, "CR-271: each text once")
         ok(WordsOfTill.all().map { it.first }.toSet().size == WordsOfTill.all().size, "CR-271: each key once")
         // CR-267: the card shows the amount, the reference and the minutes; a request with no reference shows none.
         val r = tillRequest(1, 1_250, "POS/0007", 4)

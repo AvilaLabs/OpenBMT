@@ -2032,7 +2032,9 @@ Status: specification, written before the code.
 - **CR-266. What is taken.** A POS notice from the Box (BX-76) that is a
   sale request is taken only from the Box of the settings in force, sealed
   to this counter, with the shop's currency, an amount above 0 and at most
-  the largest amount of CR-05, and a lapse time not past. Anything else is
+  the largest amount of CR-05, a reference of at most 40 printable ASCII
+  characters, a lapse time not past, and a till's sale the counter does not
+  already hold. Anything else is
   dropped with a note and nothing sent. At most 8 requests wait; one more
   is dropped with a note, and the Box's own limit and lapse (BX-76) tell
   the till.

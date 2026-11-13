@@ -117,7 +117,7 @@ fn cr_267_the_waiting_request_is_listed_with_its_amount_reference_and_minutes() 
     assert_eq!(rows[0].amount, 500);
     assert_eq!(rows[0].reference, "POS/0007");
     assert_eq!((rows[0].lapses_at, rows[0].minutes_left), (T0 + 300, 5));
-    assert_eq!(rows[0].heading, "WORDS_NEEDED_CR_267_FROM_THE_TILL");
+    assert_eq!(rows[0].heading, "From the till");
     // The minutes count down and the request leaves when it lapses.
     assert_eq!(waiting(&rig, handle, T0 + 241)[0].minutes_left, 1);
     assert!(waiting(&rig, handle, T0 + 300).is_empty());
@@ -193,7 +193,7 @@ fn cr_269_a_cancel_after_start_marks_the_sale_and_the_sale_goes_on() {
     let (till, cancelled, words) = of_sale(&rig, handle, index);
     assert_eq!(till, Some(SALE.to_vec()));
     assert!(cancelled);
-    assert_eq!(words.as_deref(), Some("WORDS_NEEDED_CR_269_CANCELLED"));
+    assert_eq!(words.as_deref(), Some("The till cancelled this sale"));
     // The sale is still open: judging it says so.
     let response = rig.call(12, handle, &W::new().u64(T0).u32(index).0);
     let mut r = Rd::ok(&response);

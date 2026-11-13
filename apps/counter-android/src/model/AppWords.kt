@@ -716,8 +716,7 @@ object AppWords {
         for ((key, text) in SwitchWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         out.append(
             "\n## A sale from the till (CR-266 to CR-271)\n\n" +
-                "The labels of the card on Home and of the line on a started sale. A text\n" +
-                "named `WORDS_NEEDED_CR_26x_...` is not written yet and shows its own name.\n\n" +
+                "The labels of the card on Home and of the line on a started sale.\n\n" +
                 "| Key | Text |\n" +
                 "|---|---|\n",
         )
