@@ -203,7 +203,10 @@ impl Owner {
         let link = self.link.as_mut().unwrap();
         link.step(runner.watcher_mut(), now);
         let mut shop = OwnNode::open(self.dir.path(), id(1), self.wallet.clone()).unwrap();
-        shop.tick(runner, link, &mut self.carried, now).unwrap()
+        let tick = shop.tick(runner, link, &mut self.carried, now).unwrap();
+        // LK-79: the owner node's turn on the starter line.
+        runner.starter_line_step(link, now);
+        tick
     }
 }
 
@@ -503,4 +506,91 @@ fn ss_41_the_real_owner_switches_the_real_counter_from_the_starter_wallet_and_ss
         next.payment.address,
         new.receive_address(next.index).unwrap().to_string()
     );
+}
+
+const OP_STARTER_STATE: u16 = 204;
+
+#[test]
+fn lk_79_the_real_owner_node_sends_the_real_counter_its_starter_line_through_the_relay() {
+    let mut owner = Owner::new(SINGLE);
+    let made = owner.node.shop().make_offer_as(T0, true).unwrap();
+    let rig = Rig::new();
+    begin(&rig, &made.offer.to_bytes()).expect("the counter reads it");
+    let (request, _) = same(&rig, T0 + 10).expect("same address");
+    let read = owner
+        .node
+        .shop()
+        .read_request(&made, T0 + 20, &request)
+        .unwrap();
+    matched(&rig, T0 + 30).expect("they match on the counter");
+    let paired = owner.confirm(&made, T0 + 30, &request);
+    let record = finish(&rig, &paired.bundle.to_bytes(), T0 + 40).expect("the counter pairs");
+    {
+        let (shop, store) = owner.node.shop_and_store();
+        shop.mark_delivered(&read.counter, &store).unwrap();
+    }
+    owner.start_link(read.counter);
+    let handle = rig.start_with(&StartConfig {
+        dir: rig.dir().to_str().unwrap().to_string(),
+        now: T0 + 100,
+        record,
+        proxy: None,
+        own_node: None,
+        lightning: None,
+        link_proxy: None,
+    });
+    rig.send(vec![peers_event()]);
+    Rd::ok(&rig.call(OP_PUMP, handle, &W::new().u64(T0 + 100).u32(50).0));
+    let state = |now: u64| {
+        let response = rig.call(OP_STARTER_STATE, handle, &W::new().u64(now).0);
+        let mut r = Rd::ok(&response);
+        let decision = r.u8();
+        let _words = r.opt(|r| r.words().heading);
+        let _cards = r.opt(|r| r.words().heading);
+        let held = r.opt(Rd::u64);
+        let limit = r.opt(Rd::u64);
+        let _time = r.opt(Rd::u64);
+        let payments = r.list(|r| (r.bytes(), r.u64(), r.u64(), r.bool(), r.bool()));
+        r.done();
+        (decision, held, limit, payments)
+    };
+    // Until the app gives the limit, the owner node makes no line and the
+    // counter offers bitcoin as before.
+    let mut now = settle(&rig, handle, &mut owner, T0 + 100);
+    assert_eq!(state(now), (0, None, None, Vec::new()));
+    let runner = owner.runner.as_mut().unwrap();
+    assert_eq!(
+        runner.starter_held(),
+        Some(0),
+        "the new wallet holds nothing"
+    );
+
+    // The app gives the limit and the stop setting: the next turns carry a
+    // line through the relay and the counter takes it (CR-272). The wallet
+    // holds nothing, which is under any limit, so bitcoin is still offered.
+    runner.set_starter_line(100_000, true);
+    for _ in 0..40 {
+        now += 10;
+        let _ = turn(&rig, handle, &mut owner, now);
+        if state(now).1.is_some() {
+            break;
+        }
+    }
+    assert_eq!(state(now), (0, Some(0), Some(100_000), Vec::new()));
+    assert!(rig.dir().join("starter-line.bin").exists());
+    // The app lowers the limit to nothing: the wallet holds as much as the
+    // limit, and the counter offers no bitcoin (CR-273) once the new line
+    // arrives.
+    owner.runner.as_mut().unwrap().set_starter_line(0, true);
+    for _ in 0..40 {
+        now += 10;
+        let _ = turn(&rig, handle, &mut owner, now);
+        if state(now).0 == 1 {
+            break;
+        }
+    }
+    assert_eq!(state(now), (1, Some(0), Some(0), Vec::new()));
+    // The line ages: with no turn of the owner's side the limit cannot be
+    // checked, and bitcoin is offered again.
+    assert_eq!(state(now + 1_000).0, 2);
 }
