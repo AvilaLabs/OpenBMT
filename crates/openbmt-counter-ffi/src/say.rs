@@ -72,19 +72,19 @@ type Entry = (
     &'static str,
 );
 
-const WORDS_NEEDED_CR_268_NOTICES_HEADING: &str = "WORDS_NEEDED_CR_268_NOTICES_HEADING";
-const WORDS_NEEDED_CR_268_NOTICES_WHAT: &str = "WORDS_NEEDED_CR_268_NOTICES_WHAT";
-const WORDS_NEEDED_CR_268_NOTICES_NEXT: &str = "WORDS_NEEDED_CR_268_NOTICES_NEXT";
+const NOTICES_HEADING: &str = "Box notices not started";
+const NOTICES_WHAT: &str = "This counter could not open its file of notices to the Box, so it did not start.";
+const NOTICES_NEXT: &str = "Restart the app. If it keeps failing, check the phone's free space.";
 
 /// The rule strings this layer makes, each with its own words.
 const RULES: &[Entry] = &[
     (
         "BX-40",
         Kind::Refused,
-        WORDS_NEEDED_CR_268_NOTICES_HEADING,
-        WORDS_NEEDED_CR_268_NOTICES_WHAT,
+        NOTICES_HEADING,
+        NOTICES_WHAT,
         Who::Owner,
-        WORDS_NEEDED_CR_268_NOTICES_NEXT,
+        NOTICES_NEXT,
     ),
     (
         "request-too-long",

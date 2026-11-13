@@ -263,9 +263,9 @@ fn corrupt_notice_outbox_refuses_start_with_the_notice_placeholders() {
     let response = rig.call(1, 0, &W::new().start(&config).0);
     let fault = Rd::error(&response).expect("notice outbox is refused");
     assert_eq!(fault.rule, "BX-40");
-    assert_eq!(fault.words.heading, "WORDS_NEEDED_CR_268_NOTICES_HEADING");
-    assert_eq!(fault.words.what, "WORDS_NEEDED_CR_268_NOTICES_WHAT");
-    assert_eq!(fault.words.next, "WORDS_NEEDED_CR_268_NOTICES_NEXT");
+    assert_eq!(fault.words.heading, "Box notices not started");
+    assert_eq!(fault.words.what, "This counter could not open its file of notices to the Box, so it did not start.");
+    assert_eq!(fault.words.next, "Restart the app. If it keeps failing, check the phone's free space.");
 }
 
 #[test]
