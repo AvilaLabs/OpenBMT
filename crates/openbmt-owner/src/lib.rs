@@ -62,6 +62,7 @@ pub mod starter;
 mod state;
 mod take;
 mod types;
+pub mod web_order;
 
 pub use boxes::{BoxHandover, BoxQueued, BoxRequest, PendingBox, WaitingBox};
 pub use counter::{

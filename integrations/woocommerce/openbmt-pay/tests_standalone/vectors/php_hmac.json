@@ -1,0 +1,9 @@
+{
+    "secret": "606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f",
+    "method": "POST",
+    "route": "/openbmt/v1/notice",
+    "time": 1800000123,
+    "nonce": "3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c",
+    "body": "php made é",
+    "mac": "74789986d850d8a2c7d394aecddc55d206d5680b5c3e337f93141343dade3222"
+}
