@@ -1476,5 +1476,5 @@ object AppWords {
         "cameraOff" to CameraWords.off(Who.OWNER),
         "cameraNotStarted" to CameraWords.notStarted(Who.OWNER, "a problem"),
     ) + editFields.map { (id, words) -> "editField_$id" to words } + BoxWords.all() + UrWords.forReading(Who.OWNER) +
-        HardwareWords.all()
+        HardwareWords.all() + OwnSpendWords.all()
 }

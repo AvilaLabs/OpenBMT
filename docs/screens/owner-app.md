@@ -202,6 +202,15 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | hardwareFirstAddressSkipped | First address not checked | Nothing yet shows that the signer holds the same wallet as this phone. | Check it from the wallet screen before the shop takes money. | the owner |  |
 | hardwareReturnedNeeded | Bring the payment back | The signer has the payment. Its signature has to come back to this phone before the payment can be sent. | Scan the code the signer shows, or open the file it saved. A payment the signer finished itself works too. | the owner |  |
 | hardwareFileSaved | File saved | The payment for the signer is in the file named below. | Put the file on the signer's memory card and sign it there. Then bring the signed file back. | the owner |  |
+| ownSpendList | Send from your wallet | These refunds and cash-outs wait to be paid. They are paid from the shop's own wallet, which signs them. | Pick the ones to send now, then tap Prepare. | the owner |  |
+| ownSpendEmpty | Nothing to send | No refund or cash-out is waiting to be paid from the shop's wallet. | Nothing to do. | nobody |  |
+| ownSpendCompare | What the wallet will show | Each payment below is one transaction. The wallet shows each address, each amount and the fee. | Keep this screen at hand. Approve in the wallet only if every line there matches these. | the owner |  |
+| ownSpendTransport | Give it to the wallet | The payment goes to the wallet as moving codes on this screen or as a file. Nothing on this phone can sign it. | Scan the code or open the file in the wallet, check every line, and sign there. | the owner |  |
+| ownSpendReturn | Bring the payment back | The wallet has the payment. What it signed has to come back to this phone unless the wallet sent the payment itself. | Scan the code the wallet shows, or open the file it saved. A payment the wallet finished works too. | the owner |  |
+| ownSpendTaken | Payment taken | The signed payment matches the one prepared here, and it goes out to the network. | Nothing to do. The queue shows it as paid once it is in a block. | nobody |  |
+| ownSpendWaiting | Waiting for the wallet | This payment was given to the wallet. If the wallet sends it itself, this phone sees it and marks it paid once it is in a block. | Bring back what the wallet signed, or do nothing if the wallet sent it. | the owner |  |
+| ownSpendNotGiven | Not given to the wallet | This payment is prepared, but its file has not been given to the wallet yet. | Open it and give the file to the wallet, or give it up to put it back in the queue. | the owner |  |
+| ownSpendAbandoned | Payment given up | The prepared payment was given up, and its refunds and cash-outs are back in the queue. | Nothing to do. If the wallet still sends the copy it signed, they are marked paid, and a new payment for them can never pay them twice. | nobody |  |
 
 What Android shows for the background watch, which is not a screen of the app:
 

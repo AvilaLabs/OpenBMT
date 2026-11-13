@@ -2130,7 +2130,7 @@ object AppModelTest {
         ok(OwnSpendModel.itemTitle(ownItem(false, listOf(1, 2), 3), 1, 1) == "Payment 1 of 1: 2 refunds and a cash-out", "a mixed title")
         val c = source("src/android/OwnSpend.kt")
         ok(c.contains("showOwnCompare(OwnRun(session") && c.indexOf("showOwnCompare(OwnRun(session") < c.indexOf("pickOwnTransport(run) }, ui.button(\"Later\")"), "Prepare freezes, then the lines are listed before the file leaves")
-        ok(c.contains("OwnSpendModel.compareLines(item)") && c.contains("WORDS_NEEDED_OA_115_COMPARE"), "every payment's lines are listed")
+        ok(c.contains("OwnSpendModel.compareLines(item)") && c.contains("OwnSpendWords.compare"), "every payment's lines are listed")
         ok(source("src/android/Screens.kt").contains("showOwnSpend()"), "Spend of an own wallet shop opens this screen")
     }
 
@@ -2151,7 +2151,7 @@ object AppModelTest {
         ok(OwnSpendModel.afterRefusal(listOf(1L, 3L), ByteArray(1)).first == listOf(1L, 3L), "nothing else changes after a refusal")
         ok(OwnSpendModel.state(ownItem(false)) == OwnSendState.NotFiled && OwnSpendModel.state(ownItem(true)) == OwnSendState.Waiting, "given or not")
         ok(!OwnSpendModel.showsWaiting(ownItem(false)) && OwnSpendModel.showsWaiting(ownItem(true)), "the waiting words show once the file was given")
-        ok(OwnSpendModel.waitingWords(OwnSendState.Waiting).heading == OwnSpendModel.WORDS_NEEDED_OA_117_WAITING, "the waiting state names its rule until its words are written")
+        ok(OwnSpendModel.waitingWords(OwnSendState.Waiting) == OwnSpendWords.waiting && OwnSpendWords.waiting.what.contains("sends it itself"), "the waiting words say a wallet that sent it needs nothing more")
         val sessions = listOf(
             org.openbmt.owner.OwnSpendSession(ByteArray(32) { 1 }, listOf(ownItem(false), ownItem(true))),
             org.openbmt.owner.OwnSpendSession(ByteArray(32) { 2 }, listOf(ownItem(true))),
@@ -2160,13 +2160,16 @@ object AppModelTest {
         ok(c.contains("OwnSpendModel.waitingWords("), "the screen shows it")
     }
 
-    private fun oa_118_every_state_and_refusal_of_the_section_has_a_placeholder_until_its_words_are_written() {
-        val names = OwnSpendModel.PLACEHOLDERS
-        ok(names.size == names.toSet().size && names.all { it.startsWith("WORDS_NEEDED_OA_11") }, "each names its rule: $names")
-        ok(names.all { OwnSpendModel.placeholder(it).heading == it && it.length < 40 }, "a placeholder stands for each part")
-        ok(AppWords.all().none { (_, w) -> w.heading.startsWith("WORDS_NEEDED") || w.what.startsWith("WORDS_NEEDED") }, "a placeholder is not in the words that are checked and written")
+    private fun oa_118_every_state_of_the_section_has_words_that_pass_the_checks() {
+        val all = OwnSpendWords.all()
+        ok(all.size == 9 && all.map { it.first }.toSet().size == all.size, "nine words, each with its own name")
+        ok(all.all { SayCheck.problem(it.second) == null }, "every words of the section pass the checks")
+        ok(AppWords.all().map { it.first }.containsAll(all.map { it.first }), "they are in the list that is checked and written")
+        ok(AppWords.all().none { (_, w) -> w.heading.startsWith("WORDS_NEEDED") || w.what.startsWith("WORDS_NEEDED") }, "no placeholder is left in the words")
         val c = source("src/android/OwnSpend.kt")
-        for (n in listOf("OA_115_LIST", "OA_116_TRANSPORT", "OA_116_RETURN", "OA_117_ABANDON")) ok(c.contains("WORDS_NEEDED_$n"), "the screen uses WORDS_NEEDED_$n")
+        ok(c.contains("offer.words.say()"), "the offer to merge shows the library's words of OC-19")
+        ok(!c.contains("WORDS_NEEDED") && !source("src/model/OwnSpendModel.kt").contains("WORDS_NEEDED"), "no placeholder is left on the screens")
+        for (n in listOf("list", "transport", "returnNeeded", "abandoned", "taken", "empty")) ok(c.contains("OwnSpendWords.$n"), "the screen uses OwnSpendWords.$n")
     }
 
     // ---- watching in the background (OA-80 to OA-89) --------------------------------------------------------------

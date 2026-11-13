@@ -12,8 +12,8 @@
 //! (`hardware`): `psbt_for_signer`, `finalize`, `check_finished` and
 //! `transaction_of_final_file` of the spend crate.
 //!
-//! The words of every state here are placeholders that name their rule,
-//! `WORDS_NEEDED_AS_1xx`, until the words are written (SC-12).
+//! Every refusal here has words of its own, listed by
+//! [`all_own_spend_words`] for the checks of SC-12.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -108,56 +108,96 @@ impl<E> From<OwnSpendRefusal> for OwnerError<E> {
     }
 }
 
-/// Words that are still to be written: the placeholder that names the rule
-/// stands in the heading (under 28 characters), and a sentence made from it
-/// in each of the two sentences.
-pub fn needed(rule: &'static str) -> Words {
-    Words::new(
-        Tone::Stop,
-        rule,
-        format!("{rule}_WHAT."),
-        Who::Owner,
-        format!("{rule}_NEXT."),
+fn stop(heading: &str, what: &str, next: &str, code: &'static str) -> Words {
+    Words::new(Tone::Stop, heading, what, Who::Owner, next).code(code)
+}
+
+/// AS-100: the words of a queue call that needs the Key app, in a shop whose
+/// money goes to its own wallet (`Refusal::NoKeyApp`).
+pub fn no_key_app_words() -> Words {
+    stop(
+        "Sign this in your wallet",
+        "This shop has no Key app. Its refunds, cash-outs and merges are signed in the shop's own wallet.",
+        "Nothing was changed. Open Send from your wallet and pick the payment there.",
+        "AS-100",
     )
 }
 
-/// Whether these words are a placeholder of this module.
-pub fn is_placeholder(words: &Words) -> bool {
-    words.heading.starts_with("WORDS_NEEDED_")
-}
-
-/// The placeholder for a refusal of AS-100, which any queue call that needs
-/// the Key app gives (`Refusal::NoKeyApp`).
-pub const WORDS_NEEDED_AS_100: &str = "WORDS_NEEDED_AS_100";
-
 impl OwnSpendRefusal {
-    /// The placeholder that names the rule of the refusal.
-    pub fn placeholder(&self) -> &'static str {
-        match self {
-            Self::NotOwnWallet => "WORDS_NEEDED_AS_100_OWN",
-            Self::NothingPicked => "WORDS_NEEDED_AS_101_NONE",
-            Self::NotQueued(_) => "WORDS_NEEDED_AS_101_QUEUE",
-            Self::NotAnOwnSpend => "WORDS_NEEDED_AS_102_ITEM",
-            Self::File(_) => "WORDS_NEEDED_AS_102_FILE",
-            Self::NotFiled => "WORDS_NEEDED_AS_104_FILED",
-            Self::Unreadable(_) => "WORDS_NEEDED_AS_103_READ",
-            Self::DifferentTransaction => "WORDS_NEEDED_AS_103_OTHER",
-            Self::NotSigned(_) => "WORDS_NEEDED_AS_103_SIGN",
-            Self::Finished(_) => "WORDS_NEEDED_AS_103_CHECK",
-            Self::OutboxFull => "WORDS_NEEDED_AS_104_FULL",
-        }
-    }
-
-    /// What the owner is told: the placeholder, with the library's own text
-    /// as the detail where it has one.
+    /// What the owner is told, with the library's own text as the detail
+    /// where it has one.
     pub fn words(&self) -> Words {
-        let words = needed(self.placeholder());
         match self {
-            Self::File(why) | Self::NotSigned(why) | Self::Finished(why) => {
-                words.detail(why.clone())
-            }
-            Self::Unreadable(why) => words.detail((*why).to_string()),
-            _ => words,
+            Self::NotOwnWallet => stop(
+                "This shop uses the Key app",
+                "The payments of this shop are signed on the Key app, not in a wallet of the owner's.",
+                "Nothing was changed. Send the payment from the queue as for the Key app.",
+                "AS-100",
+            ),
+            Self::NothingPicked => stop(
+                "Nothing picked",
+                "No refund or cash-out was picked to send.",
+                "Nothing was changed. Pick at least one payment from the list.",
+                "AS-101",
+            ),
+            Self::NotQueued(_) => stop(
+                "No longer waiting",
+                "A picked payment is no longer a refund or cash-out waiting in the queue.",
+                "Nothing was changed. Go back to the list, which shows what still waits.",
+                "AS-101",
+            ),
+            Self::NotAnOwnSpend => stop(
+                "Not for your wallet",
+                "This item is not a payment to sign in the shop's own wallet.",
+                "Nothing was changed. Pick a payment from Send from your wallet.",
+                "AS-102",
+            ),
+            Self::File(why) => stop(
+                "Cannot make the file",
+                "The file for the wallet cannot be made from this payment.",
+                "Nothing was changed. Report this to the OpenBMT project with the details.",
+                "AS-102",
+            )
+            .detail(why.clone()),
+            Self::NotFiled => stop(
+                "Nothing given to the wallet",
+                "The file of this payment has not been given to the wallet yet.",
+                "Nothing was changed. Give the file to the wallet first, then bring back what it signs.",
+                "AS-104",
+            ),
+            Self::Unreadable(why) => stop(
+                "That is not from the wallet",
+                "What was read is not a signing file or a finished payment in a form this phone takes.",
+                "Nothing was changed. Scan or open what the wallet made again, or look in the wallet's help for how it gives back a signed payment.",
+                "AS-103",
+            )
+            .detail((*why).to_string()),
+            Self::DifferentTransaction => stop(
+                "Another payment came back",
+                "What came back is a different payment from the one given to the wallet.",
+                "Nothing was changed. Do not send it. Sign the payment shown here in the wallet, and bring that back.",
+                "AS-103",
+            ),
+            Self::NotSigned(why) => stop(
+                "The wallet did not sign",
+                "What came back is missing a valid signature of this shop's keys on an input.",
+                "Nothing was changed. Check that the wallet holds the shop's keys, then sign again. A 2-of-3 wallet needs two of them.",
+                "AS-103",
+            )
+            .detail(why.clone()),
+            Self::Finished(why) => stop(
+                "The payment failed a check",
+                "The finished payment is not exactly the one prepared on this phone, or its signatures do not check out.",
+                "Nothing was changed and nothing was sent. Sign again in the wallet and bring that back.",
+                "AS-103",
+            )
+            .detail(why.clone()),
+            Self::OutboxFull => stop(
+                "Too many payments waiting",
+                "Too many finished payments wait to go out to the network, so this one was not taken.",
+                "Nothing was changed. Let the waiting payments go out first, then bring this back.",
+                "AS-104",
+            ),
         }
     }
 }
@@ -197,9 +237,16 @@ pub fn all_refusals() -> Vec<(&'static str, OwnSpendRefusal)> {
 
 /// AS-102: the words beside the file for the wallet: what its screen shows,
 /// and that the payment must not be approved there unless every line
-/// matches. A placeholder until the words are written.
+/// matches.
 pub fn compare_words() -> Words {
-    needed("WORDS_NEEDED_AS_102_COMPARE").code("AS-102")
+    Words::new(
+        Tone::Info,
+        "Check it in your wallet",
+        "The wallet shows each address, each amount and the fee; compare every one with this screen.",
+        Who::Owner,
+        "Approve in the wallet only if they all match.",
+    )
+    .code("AS-102")
 }
 
 /// Every state of this module that has words, by name: the refusals, the
@@ -209,7 +256,7 @@ pub fn all_own_spend_words() -> Vec<(String, Words)> {
         .into_iter()
         .map(|(n, r)| (format!("Refusal::OwnSpend/{n}"), r.words()))
         .collect();
-    all.push(("Refusal::NoKeyApp".to_string(), needed(WORDS_NEEDED_AS_100)));
+    all.push(("Refusal::NoKeyApp".to_string(), no_key_app_words()));
     all.push(("OwnSpendCompare".to_string(), compare_words()));
     all
 }

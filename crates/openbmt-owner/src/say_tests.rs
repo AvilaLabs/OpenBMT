@@ -344,6 +344,13 @@ fn sc_01_no_variant_is_missing() {
             .map(|(n, _)| format!("Refusal::Hardware/{n}")),
     );
     wanted.push("HardwareCompare".to_string());
+    wanted.extend(
+        crate::own_spend::all_refusals()
+            .into_iter()
+            .map(|(n, _)| format!("Refusal::OwnSpend/{n}")),
+    );
+    wanted.push("Refusal::NoKeyApp".to_string());
+    wanted.push("OwnSpendCompare".to_string());
     for name in &wanted {
         assert!(names.contains(name), "{name} has no words");
     }

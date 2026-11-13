@@ -25,8 +25,8 @@ use openbmt_core::wallet::Keychain;
 use openbmt_core::wallet_single::{ImportedWallet, SingleKeyWallet};
 use openbmt_owner::own_shop::own_approver;
 use openbmt_owner::own_spend::{
-    all_own_spend_words, all_refusals, compare_words, is_placeholder, OwnBuilt, OwnFile,
-    OwnSpendRefusal, TAG_OWN_SPEND,
+    all_own_spend_words, all_refusals, compare_words, OwnBuilt, OwnFile, OwnSpendRefusal,
+    TAG_OWN_SPEND,
 };
 use openbmt_owner::{
     CashAmount, Delivery, Options, Owner, OwnerError, RefundPacking, Refusal, Stage,
@@ -636,7 +636,7 @@ fn as_102_the_file_is_described_for_the_person_and_the_words_say_to_compare() {
             assert!(file.summary.fee > 0);
         }
         let words = compare_words();
-        assert!(is_placeholder(&words));
+        assert!(words.what.contains("each address, each amount and the fee"));
         assert_eq!(words.code, Some("AS-102"));
     }
 }
@@ -1368,12 +1368,12 @@ fn as_107_a_queue_that_would_not_restore_is_not_written() {
 // ---- the words -----------------------------------------------------------------------------
 
 #[test]
-fn as_102_every_state_and_refusal_has_a_placeholder_that_names_its_rule() {
+fn as_102_every_state_and_refusal_has_words_that_name_its_rule() {
     let all = all_own_spend_words();
     assert!(all.len() >= 13);
     for (name, w) in &all {
-        assert!(is_placeholder(w), "{name}");
-        assert!(w.heading.starts_with("WORDS_NEEDED_AS_1"), "{name}");
+        assert!(!w.heading.starts_with("WORDS_NEEDED"), "{name}");
+        assert!(w.code.is_some_and(|c| c.starts_with("AS-10")), "{name}");
         assert!(w.heading.chars().count() < 28, "{name}: {}", w.heading);
         assert!(w.what.ends_with('.') && w.next.ends_with('.'), "{name}");
     }

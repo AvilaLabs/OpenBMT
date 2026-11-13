@@ -18,8 +18,7 @@ import org.openbmt.owner.OwnerNode
 // "Send from your wallet" for a shop with its own wallet (OA-115 to OA-118): the refunds and cash-outs that are
 // queued, the compare screen, the file for the wallet by the person's pick of OA-70, what comes back, and the
 // state of a payment that waits. The library freezes, files and judges (`docs/SESSION-RULES.md` AS-100 to AS-107);
-// the picks and the words of `OwnSpendModel` are this file's. The words are not written yet (OA-118), so each
-// state shows the constant that names its rule.
+// the picks are this file's and the words are `OwnSpendWords`.
 
 /** What one payment's way to the wallet holds in memory: the session, the item and where the owner came from. */
 private class OwnRun(val session: ByteArray, val number: Long, val back: () -> Unit) {
@@ -41,7 +40,7 @@ internal fun Controller.showOwnSpend(picked: List<Long> = emptyList(), message: 
     val rows = if (queue == null) emptyList() else OwnSpendModel.rows(queue)
     val views = ArrayList<View>()
     if (rows.isEmpty()) {
-        views.add(words(OwnSpendModel.placeholder(OwnSpendModel.WORDS_NEEDED_OA_115_EMPTY)))
+        views.add(words(OwnSpendWords.empty))
     } else {
         views.add(
             ui.rows(
@@ -61,8 +60,9 @@ internal fun Controller.showOwnSpend(picked: List<Long> = emptyList(), message: 
     if (OwnSpendModel.canPrepare(rows, picked)) {
         actions.add(ui.primary("Prepare") { prepared(n, msg, picked) { attempt(msg) { n.ownSpendBuild(nowSecs(), ownFeeRate(n), picked) } } })
     }
-    if (OwnSpendModel.showMerge(offer, rows)) {
-        views.add(words(OwnSpendModel.placeholder(OwnSpendModel.WORDS_NEEDED_OA_115_MERGE)))
+    if (offer != null && OwnSpendModel.showMerge(offer, rows)) {
+        // OC-19: the offer's own words give the cost now and at the usual fee, and what a merge shows.
+        views.add(words(offer.words.say()))
         actions.add(ui.button("Prepare the merge") { prepared(n, msg, picked) { attempt(msg) { n.ownMerge(nowSecs()) } } })
     }
     // A payment that was prepared stays until it is taken or given up (OA-117).
@@ -87,7 +87,7 @@ internal fun Controller.showOwnSpend(picked: List<Long> = emptyList(), message: 
     }
     views.add(msg)
     actions.add(ui.button("Back") { showHome() })
-    screen("Send from your wallet", views, actions, back = { showHome() }, words = OwnSpendModel.placeholder(OwnSpendModel.WORDS_NEEDED_OA_115_LIST))
+    screen("Send from your wallet", views, actions, back = { showHome() }, words = OwnSpendWords.list)
 }
 
 private fun Controller.ownFeeRate(n: OwnerNode): Long = try {
@@ -103,7 +103,7 @@ private fun Controller.prepared(n: OwnerNode, msg: Slot, picked: List<Long>, bui
     val session = built.session
     if (session == null) {
         // Nothing was frozen: what stayed in the queue says why, in the library's words.
-        val why = built.skipped.firstOrNull()?.words?.say() ?: OwnSpendModel.placeholder(OwnSpendModel.WORDS_NEEDED_OA_115_EMPTY)
+        val why = built.skipped.firstOrNull()?.words?.say() ?: OwnSpendWords.empty
         return showOwnSpend(picked, why)
     }
     showOwnCompare(OwnRun(session, built.items.first().number) { showOwnSpend() }, built.items)
@@ -115,7 +115,7 @@ private fun Controller.prepared(n: OwnerNode, msg: Slot, picked: List<Long>, bui
  */
 private fun Controller.showOwnCompare(run: OwnRun, items: List<OwnSpendItem>) {
     val views = ArrayList<View>()
-    views.add(words(OwnSpendModel.placeholder(OwnSpendModel.WORDS_NEEDED_OA_115_COMPARE)))
+    views.add(words(OwnSpendWords.compare))
     for ((i, item) in items.withIndex()) {
         views.add(ui.text(OwnSpendModel.itemTitle(item, i + 1, items.size), 15f, bold = true))
         views.add(ui.text(OwnSpendModel.compareLines(item).joinToString("\n\n"), 14f, mono = true))
@@ -171,14 +171,14 @@ private fun Controller.showOwnFile(run: OwnRun, chosen: Boolean = false, message
     actions.add(
         ui.danger("Give it up") {
             if (attempt(msg) { n.ownSpendAbandon(run.session) } != null) {
-                centre(OwnSpendModel.placeholder(OwnSpendModel.WORDS_NEEDED_OA_117_ABANDON), listOf(ui.primary("Done") { showOwnSpend() }), title = "Send from your wallet")
+                centre(OwnSpendWords.abandoned, listOf(ui.primary("Done") { showOwnSpend() }), title = "Send from your wallet")
             }
         },
     )
     actions.add(ui.button("Back") { back() })
     screen(
         "Send from your wallet", views, actions, back = back,
-        words = OwnSpendModel.placeholder(OwnSpendModel.WORDS_NEEDED_OA_116_TRANSPORT),
+        words = OwnSpendWords.transport,
     )
 }
 
@@ -203,7 +203,7 @@ private fun Controller.showOwnReturn(run: OwnRun, message: SayWords?) {
     screen(
         "Send from your wallet", views,
         listOf(ui.primary("Scan the wallet's code") { scanOwn(n, run) }, ui.button("Back") { showOwnFile(run, chosen = true) }),
-        back = { showOwnFile(run, chosen = true) }, words = OwnSpendModel.placeholder(OwnSpendModel.WORDS_NEEDED_OA_116_RETURN),
+        back = { showOwnFile(run, chosen = true) }, words = OwnSpendWords.returnNeeded,
     )
 }
 
@@ -230,7 +230,7 @@ private fun Controller.takeOwn(n: OwnerNode, run: OwnRun, bytes: ByteArray) {
         return showOwnReturn(run, refusal(e))
     }
     val views = ArrayList<View>()
-    views.add(words(OwnSpendModel.placeholder(OwnSpendModel.WORDS_NEEDED_OA_116_TAKEN)))
+    views.add(words(OwnSpendWords.taken))
     for (s in taken.sends) {
         views.add(stack(ui.words(s.words.say()), line("Transaction ${s.txid}", muted = true, mono = true)))
     }

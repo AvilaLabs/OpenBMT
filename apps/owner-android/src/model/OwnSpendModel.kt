@@ -88,8 +88,8 @@ object OwnSpendModel {
 
     /** OA-117: the words under a payment that waits: a wallet that sent it itself needs nothing more. */
     fun waitingWords(state: OwnSendState): SayWords = when (state) {
-        OwnSendState.NotFiled -> placeholder(WORDS_NEEDED_OA_117_NOT_GIVEN)
-        OwnSendState.Waiting -> placeholder(WORDS_NEEDED_OA_117_WAITING)
+        OwnSendState.NotFiled -> OwnSpendWords.notGiven
+        OwnSendState.Waiting -> OwnSpendWords.waiting
     }
 
     /** OA-117: the screen shows the waiting words with a payment given to the wallet and not yet taken. */
@@ -97,27 +97,90 @@ object OwnSpendModel {
 
     /** OA-117: after a refusal nothing else changes: the same picks, the same session, the same file. */
     fun afterRefusal(picked: List<Long>, session: ByteArray?): Pair<List<Long>, ByteArray?> = picked to session
+}
 
-    // The words are not written yet (`docs/SCREEN-RULES.md`): each state names the rule it needs (OA-118).
-    const val WORDS_NEEDED_OA_115_LIST = "WORDS_NEEDED_OA_115_LIST"
-    const val WORDS_NEEDED_OA_115_EMPTY = "WORDS_NEEDED_OA_115_EMPTY"
-    const val WORDS_NEEDED_OA_115_MERGE = "WORDS_NEEDED_OA_115_MERGE"
-    const val WORDS_NEEDED_OA_115_COMPARE = "WORDS_NEEDED_OA_115_COMPARE"
-    const val WORDS_NEEDED_OA_116_TRANSPORT = "WORDS_NEEDED_OA_116_TRANSPORT"
-    const val WORDS_NEEDED_OA_116_RETURN = "WORDS_NEEDED_OA_116_RETURN"
-    const val WORDS_NEEDED_OA_116_TAKEN = "WORDS_NEEDED_OA_116_TAKEN"
-    const val WORDS_NEEDED_OA_117_WAITING = "WORDS_NEEDED_OA_117_WAITING"
-    const val WORDS_NEEDED_OA_117_NOT_GIVEN = "WORDS_NEEDED_OA_117_NOT_GIVEN"
-    const val WORDS_NEEDED_OA_117_ABANDON = "WORDS_NEEDED_OA_117_ABANDON"
+/**
+ * The words of "Send from your wallet" (OA-115 to OA-118). Refusals come from the library with their own words
+ * (`docs/screens/owner.md`: AS-100 to AS-104); these are the app's own steps.
+ */
+object OwnSpendWords {
+    private fun w(tone: Int, heading: String, what: String, who: Int, next: String) =
+        SayWords(tone, who, heading, what, next, null, null, null, null)
 
-    /** OA-118: every placeholder this section uses, in the order of the rules. */
-    val PLACEHOLDERS: List<String> = listOf(
-        WORDS_NEEDED_OA_115_LIST, WORDS_NEEDED_OA_115_EMPTY, WORDS_NEEDED_OA_115_MERGE, WORDS_NEEDED_OA_115_COMPARE,
-        WORDS_NEEDED_OA_116_TRANSPORT, WORDS_NEEDED_OA_116_RETURN, WORDS_NEEDED_OA_116_TAKEN,
-        WORDS_NEEDED_OA_117_WAITING, WORDS_NEEDED_OA_117_NOT_GIVEN, WORDS_NEEDED_OA_117_ABANDON,
+    val list = w(
+        Tones.INFO, "Send from your wallet",
+        "These refunds and cash-outs wait to be paid. They are paid from the shop's own wallet, which signs them.",
+        Who.OWNER,
+        "Pick the ones to send now, then tap Prepare.",
     )
 
-    /** OA-118: the words of a state whose words are not written: the constant stands for each part. */
-    fun placeholder(name: String): SayWords =
-        SayWords(Tones.INFO, Who.OWNER, name, "$name.", "$name.", null, null, null, null)
+    val empty = w(
+        Tones.GOOD, "Nothing to send",
+        "No refund or cash-out is waiting to be paid from the shop's wallet.",
+        Who.NOBODY,
+        "Nothing to do.",
+    )
+
+
+    val compare = w(
+        Tones.INFO, "What the wallet will show",
+        "Each payment below is one transaction. The wallet shows each address, each amount and the fee.",
+        Who.OWNER,
+        "Keep this screen at hand. Approve in the wallet only if every line there matches these.",
+    )
+
+    val transport = w(
+        Tones.INFO, "Give it to the wallet",
+        "The payment goes to the wallet as moving codes on this screen or as a file. Nothing on this phone can sign it.",
+        Who.OWNER,
+        "Scan the code or open the file in the wallet, check every line, and sign there.",
+    )
+
+    val returnNeeded = w(
+        Tones.INFO, "Bring the payment back",
+        "The wallet has the payment. What it signed has to come back to this phone unless the wallet sent the payment itself.",
+        Who.OWNER,
+        "Scan the code the wallet shows, or open the file it saved. A payment the wallet finished works too.",
+    )
+
+    val taken = w(
+        Tones.GOOD, "Payment taken",
+        "The signed payment matches the one prepared here, and it goes out to the network.",
+        Who.NOBODY,
+        "Nothing to do. The queue shows it as paid once it is in a block.",
+    )
+
+    val waiting = w(
+        Tones.INFO, "Waiting for the wallet",
+        "This payment was given to the wallet. If the wallet sends it itself, this phone sees it and marks it paid once it is in a block.",
+        Who.OWNER,
+        "Bring back what the wallet signed, or do nothing if the wallet sent it.",
+    )
+
+    val notGiven = w(
+        Tones.INFO, "Not given to the wallet",
+        "This payment is prepared, but its file has not been given to the wallet yet.",
+        Who.OWNER,
+        "Open it and give the file to the wallet, or give it up to put it back in the queue.",
+    )
+
+    val abandoned = w(
+        Tones.INFO, "Payment given up",
+        "The prepared payment was given up, and its refunds and cash-outs are back in the queue.",
+        Who.NOBODY,
+        "Nothing to do. If the wallet still sends the copy it signed, they are marked paid, and a new payment for them can never pay them twice.",
+    )
+
+    /** OA-118: every words of this section, by name, for the checks and docs/screens/owner-app.md. */
+    fun all(): List<Pair<String, SayWords>> = listOf(
+        "ownSpendList" to list,
+        "ownSpendEmpty" to empty,
+        "ownSpendCompare" to compare,
+        "ownSpendTransport" to transport,
+        "ownSpendReturn" to returnNeeded,
+        "ownSpendTaken" to taken,
+        "ownSpendWaiting" to waiting,
+        "ownSpendNotGiven" to notGiven,
+        "ownSpendAbandoned" to abandoned,
+    )
 }

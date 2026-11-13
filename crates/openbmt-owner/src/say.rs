@@ -813,7 +813,7 @@ impl Refusal {
             )
             .code("AS-62"),
             Self::Hardware(h) => h.words(),
-            Self::NoKeyApp => crate::own_spend::needed(crate::own_spend::WORDS_NEEDED_AS_100),
+            Self::NoKeyApp => crate::own_spend::no_key_app_words(),
             Self::OwnSpend(r) => r.words(),
         }
     }
@@ -1376,6 +1376,9 @@ pub fn all_words() -> Vec<(String, Words)> {
         );
     }
     add("HardwareCompare", crate::hardware::compare_words());
+    for (n, w) in crate::own_spend::all_own_spend_words() {
+        add(&n, w);
+    }
     all.extend(crate::ceremony::all_words());
     all
 }

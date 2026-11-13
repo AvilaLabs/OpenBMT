@@ -1077,5 +1077,6 @@ the wallet's own screen. Status: specification, written before the code.
   screen says that a wallet which sent the payment itself needs nothing
   more, because the payment is followed until it confirms (AS-105).
 - **OA-118.** Every state and refusal of this section has words under
-  `docs/SCREEN-RULES.md`; until the words are written a placeholder
-  constant `WORDS_NEEDED_OA_xxx` names the rule.
+  `docs/SCREEN-RULES.md`: the library's refusals of AS-100 to AS-104 and
+  the app's own steps, listed in `docs/screens/owner.md` and
+  `docs/screens/owner-app.md` and checked as every other words are.
