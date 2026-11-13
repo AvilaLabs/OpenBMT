@@ -1,5 +1,5 @@
 //! Approvals for a shop that uses its own wallet (`docs/APPROVAL-RULES.md`,
-//! AP-01 to AP-11).
+//! AP-01 to AP-13).
 //!
 //! A shop without a Key app still needs a second approval for any change
 //! that can let money leave or be taken at risk. What kind of approval is
@@ -62,6 +62,16 @@ pub fn classify(old: &Settings, new: &Settings) -> ChangeClass {
 pub fn field_class(old: &Settings, new: &Settings, field: &str) -> ChangeClass {
     match field {
         "lightning_node" => ChangeClass::Redirect,
+        // AP-13: setting Shop Lightning, or changing its node's ID or its
+        // counter, redirects; the provider, the second device and higher
+        // limits loosen.
+        "shop_lightning" => match (&old.shop_lightning, &new.shop_lightning) {
+            (None, Some(_)) => ChangeClass::Redirect,
+            (Some(a), Some(b)) if a.node_id != b.node_id || a.counter != b.counter => {
+                ChangeClass::Redirect
+            }
+            _ => ChangeClass::Loosen,
+        },
         // A watch key and a new Box are named in the settings but move
         // no money and lift no limit (AP-01).
         "watch_key" | "boxes" => ChangeClass::Free,
@@ -178,6 +188,18 @@ pub fn wallet_message(
         "OpenBMT settings change\nShop settings version {version}\nLightning node {node}\nSettings {}",
         hex(settings_hash)
     )
+}
+
+/// The message the owner's wallet signs for a redirect of these settings
+/// (AP-06, AP-13): the "Lightning node" line gives the node's ID of Shop
+/// Lightning when it is set, else the shop's Lightning node.
+pub fn wallet_message_for(settings: &Settings) -> String {
+    let node = settings
+        .shop_lightning
+        .as_ref()
+        .map(|sl| &sl.node_id)
+        .or(settings.lightning_node.as_ref());
+    wallet_message(settings.version, node, &settings.hash())
 }
 
 /// Why a wallet signature was refused. Every wrong signature names the
@@ -479,7 +501,7 @@ mod tests {
     use super::test_signing::*;
     use super::*;
     use crate::settings::{classify_change, OwnNode};
-    use crate::testutil::identity;
+    use crate::testutil::{identity, node_key, with_shop_lightning};
     use std::str::FromStr;
 
     const RULES: &str = include_str!("../../../docs/APPROVAL-RULES.md");
@@ -741,6 +763,110 @@ mod tests {
         assert_eq!(classify(&old, &new), ChangeClass::Free);
     }
 
+    fn sl_pair(f: impl FnOnce(&mut crate::settings::ShopLightning)) -> (Settings, Settings) {
+        let old = with_shop_lightning(base());
+        let mut new = next(&old);
+        f(new.shop_lightning.as_mut().unwrap());
+        (old, new)
+    }
+
+    #[test]
+    fn ap_13_setting_the_field_or_changing_its_node_or_counter_redirects() {
+        let with = with_shop_lightning(base());
+        assert_eq!(classify(&base(), &next(&with)), ChangeClass::Redirect);
+        let (old, new) = sl_pair(|sl| sl.node_id = node_key(9));
+        assert_eq!(classify(&old, &new), ChangeClass::Redirect);
+        assert_eq!(
+            field_class(&old, &new, "shop_lightning"),
+            ChangeClass::Redirect
+        );
+        let other = identity(62).device_id();
+        let mut old = with_shop_lightning(base());
+        old.devices.insert(other);
+        old.counters.insert(other, 100);
+        let mut new = next(&old);
+        new.shop_lightning.as_mut().unwrap().counter = other;
+        assert_eq!(classify(&old, &new), ChangeClass::Redirect);
+    }
+
+    #[test]
+    fn ap_13_the_provider_the_second_device_and_higher_limits_loosen() {
+        type Case = (
+            &'static str,
+            Box<dyn FnOnce(&mut crate::settings::ShopLightning)>,
+        );
+        let cases: Vec<Case> = vec![
+            (
+                "provider id",
+                Box::new(|sl| sl.provider_node_id = node_key(9)),
+            ),
+            (
+                "provider address",
+                Box::new(|sl| sl.provider_addr = "198.51.100.1:9735".parse().unwrap()),
+            ),
+            ("cap up", Box::new(|sl| sl.cap_sats += 1)),
+            ("fee up", Box::new(|sl| sl.max_opening_fee_sats += 1)),
+        ];
+        for (what, f) in cases {
+            let (old, new) = sl_pair(f);
+            assert_eq!(classify(&old, &new), ChangeClass::Loosen, "{what}");
+        }
+        let second = identity(63).device_id();
+        let mut old = with_shop_lightning(base());
+        old.devices.insert(second);
+        old.boxes.insert(second);
+        let mut new = next(&old);
+        new.shop_lightning.as_mut().unwrap().second_device = second;
+        assert_eq!(classify(&old, &new), ChangeClass::Loosen);
+    }
+
+    #[test]
+    fn ap_13_lower_limits_and_taking_the_field_away_are_free() {
+        let (old, new) = sl_pair(|sl| sl.cap_sats -= 1);
+        assert_eq!(classify(&old, &new), ChangeClass::Free);
+        let (old, new) = sl_pair(|sl| sl.max_opening_fee_sats -= 1);
+        assert_eq!(classify(&old, &new), ChangeClass::Free);
+        let (old, new) = sl_pair(|sl| {
+            sl.cap_sats -= 1;
+            sl.max_opening_fee_sats -= 1;
+        });
+        assert_eq!(classify(&old, &new), ChangeClass::Free);
+        let old = with_shop_lightning(base());
+        let mut gone = next(&old);
+        gone.shop_lightning = None;
+        assert_eq!(classify(&old, &gone), ChangeClass::Free);
+        assert_eq!(classify(&old, &next(&old)), ChangeClass::Free);
+        // A lower cap with a changed provider is the higher class.
+        let (old, new) = sl_pair(|sl| {
+            sl.cap_sats -= 1;
+            sl.provider_node_id = node_key(9);
+        });
+        assert_eq!(classify(&old, &new), ChangeClass::Loosen);
+    }
+
+    #[test]
+    fn ap_13_the_wallet_message_gives_the_shop_lightning_node() {
+        let s = with_shop_lightning(base());
+        let sl = s.shop_lightning.unwrap();
+        let m = wallet_message_for(&s);
+        assert_eq!(
+            m,
+            format!(
+                "OpenBMT settings change\nShop settings version {}\nLightning node {}\nSettings {}",
+                s.version,
+                hex(&sl.node_id),
+                hex(&s.hash())
+            )
+        );
+        // Without the field the line is as before.
+        let mut plain = base();
+        assert!(wallet_message_for(&plain).contains("Lightning node none\n"));
+        plain.lightning_node = Some([2u8; LIGHTNING_NODE_BYTES]);
+        assert!(
+            wallet_message_for(&plain).contains(&format!("Lightning node {}\n", "02".repeat(33)))
+        );
+    }
+
     #[test]
     fn ap_03_confirm_words_follow_the_hash() {
         let h = [7u8; 32];
@@ -981,9 +1107,9 @@ mod tests {
         // the file is not the order of the numbers.
         let mut ids = rule_ids();
         ids.sort();
-        assert_eq!(ids.len(), 11);
+        assert_eq!(ids.len(), 12);
         assert_eq!(ids.first().map(String::as_str), Some("AP-01"));
-        assert_eq!(ids.last().map(String::as_str), Some("AP-11"));
+        assert_eq!(ids.last().map(String::as_str), Some("AP-13"));
     }
 
     #[test]
