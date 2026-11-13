@@ -39,9 +39,9 @@ $secret = sodium_crypto_sign_secretkey( $pair );
 
 // Pairing, a range, an order.
 $code = Pairing::from_text( $v['pairing']['text'] );
-$open = AddressRange::open( Bytes::from_hex( $v['range']['frame'] ), $code->public );
-$pool = new AddressPool();
-t_eq( AddressPool::ACCEPTED, $pool->add( $open['start'], $open['addresses'] ), 'wo_10 the range of the pairing is accepted' );
+$open = AddressRange::open( Bytes::from_hex( $v['range']['frame'] ), $code->public, $code->id() );
+$pool = new AddressPool( $code->id() );
+t_eq( AddressPool::ACCEPTED, $pool->add( $open['start'], $open['addresses'], $code->id() ), 'wo_10 the range of the pairing is accepted' );
 
 $now   = 1800000000;
 $quote = Quote::make( 'USD', 2500, array( array( 'kraken', $now, '73550.1' ), array( 'coinbase', $now, '73552.175' ) ), $now );
@@ -157,8 +157,8 @@ foreach ( array( $flipped, $forged, 'junk', '' ) as $i => $bad ) {
 }
 
 // WO-11: an address is never given twice, over a whole run of orders.
-$pool = new AddressPool();
-$pool->add( 0, array_map( static function ( int $i ): string { return 'addr' . $i; }, range( 0, 49 ) ) );
+$pool = new AddressPool( 'idididid' );
+$pool->add( 0, array_map( static function ( int $i ): string { return 'addr' . $i; }, range( 0, 49 ) ), 'idididid' );
 $given = array();
 for ( $order = 1; $order <= 50; $order++ ) {
 	$entry = $pool->take( $order );

@@ -1,9 +1,9 @@
 <?php
 /**
- * WO-10: a signed range of addresses. Bytes: the magic, the version, the
- * index of the first address (u32), the number of addresses (1 byte), each
- * address as a length byte and its ASCII bytes, and the 64-byte signature of
- * everything before it.
+ * WO-10: a signed range of addresses. Bytes: the magic, the version, the id
+ * of the pairing (8 bytes), the index of the first address (u32), the number
+ * of addresses (1 byte), each address as a length byte and its ASCII bytes,
+ * and the 64-byte signature of everything before it.
  */
 
 declare(strict_types=1);
@@ -23,10 +23,11 @@ final class AddressRange {
 	 *
 	 * @param string $frame  The bytes sent.
 	 * @param string $public The owner phone's public key.
+	 * @param string $id     The id of the pairing the store holds (8 bytes).
 	 * @return array{start:int,addresses:string[]}
-	 * @throws Refusal 'Range' when the bytes are not a range, 'Signature' when the signature does not match.
+	 * @throws Refusal 'Range' when the bytes are not a range, 'Signature' when the signature does not match, 'Pairing' when it is for another pairing.
 	 */
-	public static function open( string $frame, string $public ): array {
+	public static function open( string $frame, string $public, string $id ): array {
 		if ( strlen( $frame ) <= SODIUM_CRYPTO_SIGN_BYTES || SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES !== strlen( $public ) ) {
 			throw new Refusal( 'Range' );
 		}
@@ -36,11 +37,17 @@ final class AddressRange {
 		if ( ! sodium_crypto_sign_verify_detached( $signature, $body, $public ) ) {
 			throw new Refusal( 'Signature' );
 		}
-		return $range;
+		if ( 8 !== strlen( $id ) || ! hash_equals( $id, $range['pairing_id'] ) ) {
+			throw new Refusal( 'Pairing' );
+		}
+		return array(
+			'start'     => $range['start'],
+			'addresses' => $range['addresses'],
+		);
 	}
 
 	/**
-	 * @return array{start:int,addresses:string[]}
+	 * @return array{pairing_id:string,start:int,addresses:string[]}
 	 * @throws Refusal When the bytes are not a range.
 	 */
 	private static function read_body( string $body ): array {
@@ -49,6 +56,7 @@ final class AddressRange {
 			if ( self::MAGIC !== $reader->take( 4 ) || self::VERSION !== $reader->u8() ) {
 				throw new Refusal( 'Range' );
 			}
+			$pairing   = $reader->take( 8 );
 			$start     = $reader->u32();
 			$count     = $reader->u8();
 			$addresses = array();
@@ -70,8 +78,9 @@ final class AddressRange {
 			}
 		}
 		return array(
-			'start'     => $start,
-			'addresses' => $addresses,
+			'pairing_id' => $pairing,
+			'start'      => $start,
+			'addresses'  => $addresses,
 		);
 	}
 }

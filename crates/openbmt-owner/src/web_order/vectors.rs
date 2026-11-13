@@ -9,8 +9,8 @@ use bitcoin::hashes::{sha256, Hash};
 use bitcoin::{Address, KnownHrp, WitnessProgram, WitnessVersion};
 
 use super::{
-    hex, Notice, NoticeState, PairingCode, Range, SignedRequest, WebOrderKey, NONCE_BYTES,
-    ROUTE_ORDERS,
+    hex, pairing_id_of, Notice, NoticeState, PairingCode, Range, SignedRequest, WebOrderKey,
+    NONCE_BYTES, ROUTE_ORDERS,
 };
 
 /// The folder the vectors are in.
@@ -148,19 +148,23 @@ pub(super) fn vector_file() -> String {
     let code = PairingCode::new(public, secret(), SHOP_NAME).expect("a code");
 
     let range = range();
-    let range_frame = range.sign(&key);
-    let first_address = 4 + 1 + 4 + 1 + 1;
+    let id = pairing_id_of(&secret());
+    let range_frame = range.sign(&key, &id);
+    let first_address = 4 + 1 + 8 + 4 + 1 + 1;
     let mut range_bad = tampered_frames(
         &range_frame,
         &[
             ("magic", 0),
             ("version", 4),
-            ("start", 8),
-            ("count", 9),
+            ("pairing_id", 5),
+            ("start", 16),
+            ("count", 17),
             ("address", first_address + 3),
         ],
     );
-    range_bad.push(("other_key".into(), hex(&range.sign(&other))));
+    range_bad.push(("other_key".into(), hex(&range.sign(&other, &id))));
+    let other_id = pairing_id_of(&seed(0x90));
+    range_bad.push(("other_pairing".into(), hex(&range.sign(&key, &other_id))));
     let range_bad: Vec<(&str, String)> = range_bad
         .iter()
         .map(|(n, v)| (n.as_str(), v.clone()))
@@ -275,7 +279,7 @@ pub(super) fn vector_file() -> String {
     format!(
         "{{\n\"version\":1,\n\
          \"key\":{{\"seed\":{},\"public\":{},\"fingerprint\":{}}},\n\
-         \"pairing\":{{\"secret\":{},\"shop_name\":{},\"bytes\":{},\"text\":{}}},\n\
+         \"pairing\":{{\"secret\":{},\"id\":{},\"shop_name\":{},\"bytes\":{},\"text\":{}}},\n\
          \"range\":{{\"start\":{},\"addresses\":[{}],\n \"frame\":{},\n \"tampered\":{}}},\n\
          \"notice\":{{\"order\":{},\"address\":{},\"state\":{},\"counted_sats\":{},\"depth\":{},\"txids\":[{}],\n \"frame\":{},\n \"tampered\":{}}},\n\
          \"request\":{},\n\
@@ -284,6 +288,7 @@ pub(super) fn vector_file() -> String {
         q(&hex(&public)),
         q(&key.fingerprint()),
         q(&hex(&secret)),
+        q(&hex(&id)),
         q(SHOP_NAME),
         q(&hex(&code.to_bytes())),
         q(&code.to_text()),

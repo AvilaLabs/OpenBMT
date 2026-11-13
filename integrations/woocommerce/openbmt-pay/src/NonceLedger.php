@@ -50,18 +50,21 @@ final class NonceLedger {
 	}
 
 	/**
-	 * A ledger from plain data; anything else gives an empty one.
+	 * A ledger from plain data. Anything that is not what to_array makes is
+	 * damaged and gives null.
 	 *
 	 * @param mixed $data What was stored.
 	 */
-	public static function from_array( $data ): self {
+	public static function from_array( $data ): ?self {
+		if ( ! is_array( $data ) || count( $data ) > self::MAX ) {
+			return null;
+		}
 		$ledger = new self();
-		if ( is_array( $data ) ) {
-			foreach ( $data as $nonce => $at ) {
-				if ( is_int( $at ) && 1 === preg_match( '/^[0-9a-f]{32}$/', (string) $nonce ) ) {
-					$ledger->seen[ (string) $nonce ] = $at;
-				}
+		foreach ( $data as $nonce => $at ) {
+			if ( ! is_int( $at ) || 1 !== preg_match( '/^[0-9a-f]{32}$/', (string) $nonce ) ) {
+				return null;
 			}
+			$ledger->seen[ (string) $nonce ] = $at;
 		}
 		return $ledger;
 	}

@@ -18,6 +18,9 @@ pub const SECRET_BYTES: usize = 32;
 /// The longest shop name, in bytes.
 pub const MAX_SHOP_NAME_BYTES: usize = 64;
 
+/// The bytes of a pairing id: the start of the SHA-256 of the secret.
+pub const PAIRING_ID_BYTES: usize = 8;
+
 const CHECK_BYTES: usize = 4;
 const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
@@ -36,6 +39,18 @@ impl std::fmt::Debug for PairingCode {
             .field("shop_name", &self.shop_name)
             .finish_non_exhaustive()
     }
+}
+
+/// WO-10: the id of a pairing, the first 8 bytes of the SHA-256 of its secret.
+/// A range carries it, signed, so that a store accepts only the ranges of the
+/// pairing it holds.
+pub fn pairing_id_of(secret: &[u8; SECRET_BYTES]) -> [u8; PAIRING_ID_BYTES] {
+    let digest = sha256::Hash::hash(secret).to_byte_array();
+    let mut out = [0u8; PAIRING_ID_BYTES];
+    for (o, d) in out.iter_mut().zip(digest.iter()) {
+        *o = *d;
+    }
+    out
 }
 
 /// WO-05: a name of 1 to 64 bytes with no byte below 0x20 and no 0x7F.
@@ -85,6 +100,11 @@ impl PairingCode {
     /// The shop's name.
     pub fn shop_name(&self) -> &str {
         &self.shop_name
+    }
+
+    /// The id of this pairing (WO-10).
+    pub fn id(&self) -> [u8; PAIRING_ID_BYTES] {
+        pairing_id_of(&self.secret)
     }
 
     /// The fingerprint of the key in the code (WO-05).

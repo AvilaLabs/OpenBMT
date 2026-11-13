@@ -96,6 +96,21 @@ final class Pairing {
 	}
 
 	/**
+	 * WO-10: the id of a pairing, the first 8 bytes of the SHA-256 of its
+	 * secret. A range carries it, signed.
+	 */
+	public static function id_of( string $secret ): string {
+		return substr( hash( 'sha256', $secret, true ), 0, 8 );
+	}
+
+	/**
+	 * The id of this pairing.
+	 */
+	public function id(): string {
+		return self::id_of( $this->secret );
+	}
+
+	/**
 	 * The fingerprint of the key of this code.
 	 */
 	public function fingerprint(): string {

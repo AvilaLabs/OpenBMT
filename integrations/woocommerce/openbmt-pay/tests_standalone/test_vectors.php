@@ -61,7 +61,10 @@ t_any_refusal( static function () use ( $p ) {
 // WO-10: the signed range.
 $r     = $v['range'];
 $frame = Bytes::from_hex( $r['frame'] );
-$open  = AddressRange::open( $frame, $public );
+$id    = Bytes::from_hex( $p['id'] );
+t_eq( $id, Pairing::id_of( Bytes::from_hex( $p['secret'] ) ), 'wo_10 the pairing id is the start of the hash of the secret' );
+t_eq( $id, $code->id(), 'wo_10 the id of the code' );
+$open  = AddressRange::open( $frame, $public, $id );
 t_eq( $r['start'], $open['start'], 'wo_10 the start of the range' );
 t_eq( $r['addresses'], $open['addresses'], 'wo_10 the addresses of the range' );
 t_eq(
@@ -71,17 +74,26 @@ t_eq(
 );
 foreach ( $r['tampered'] as $t ) {
 	$bad = Bytes::from_hex( $t['frame'] );
-	t_any_refusal( static function () use ( $bad, $public ) {
-		AddressRange::open( $bad, $public );
+	t_any_refusal( static function () use ( $bad, $public, $id ) {
+		AddressRange::open( $bad, $public, $id );
 	}, 'wo_10 tampered range: ' . $t['name'] );
 }
 t_ok( count( $r['tampered'] ) >= 8, 'wo_10 there are tampered ranges' );
+foreach ( $r['tampered'] as $t ) {
+	if ( 'other_pairing' === $t['name'] ) {
+		$bad = Bytes::from_hex( $t['frame'] );
+		t_refused( static function () use ( $bad, $public, $id ) {
+			AddressRange::open( $bad, $public, $id );
+		}, 'Pairing', 'wo_10 a range signed for another pairing is refused for its pairing' );
+		t_eq( array( 'start' => $r['start'], 'addresses' => $r['addresses'] ), AddressRange::open( $bad, $public, substr( $bad, 5, 8 ) ), 'wo_10 and is a good range for the pairing it names' );
+	}
+}
 $other = sodium_crypto_sign_publickey( sodium_crypto_sign_seed_keypair( str_repeat( "\x07", 32 ) ) );
-t_refused( static function () use ( $frame, $other ) {
-	AddressRange::open( $frame, $other );
+t_refused( static function () use ( $frame, $other, $id ) {
+	AddressRange::open( $frame, $other, $id );
 }, 'Signature', 'wo_10 a range under another key is refused' );
-t_any_refusal( static function () use ( $frame ) {
-	AddressRange::open( $frame, 'short' );
+t_any_refusal( static function () use ( $frame, $id ) {
+	AddressRange::open( $frame, 'short', $id );
 }, 'wo_10 a key of the wrong size is refused' );
 
 // WO-30: the signed notice.

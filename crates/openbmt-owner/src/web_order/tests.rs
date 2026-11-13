@@ -24,6 +24,10 @@ fn public() -> [u8; PUBLIC_BYTES] {
     vectors::key().public()
 }
 
+fn id() -> [u8; PAIRING_ID_BYTES] {
+    pairing_id_of(&vectors::secret())
+}
+
 fn order(n: u64, address: &str) -> StoreOrder {
     StoreOrder {
         order: n,
@@ -144,11 +148,11 @@ fn wo_05_text_with_other_characters_or_loose_bits_is_refused() {
 #[test]
 fn wo_10_a_range_is_signed_and_opens_under_the_key() {
     let range = vectors::range();
-    let frame = range.sign(&vectors::key());
+    let frame = range.sign(&vectors::key(), &id());
     assert_eq!(frame.get(..4), Some(&RANGE_MAGIC[..]));
-    assert_eq!(Range::open(&frame, &public()).expect("opens"), range);
+    assert_eq!(Range::open(&frame, &public(), &id()).expect("opens"), range);
     // The same range signed twice is the same bytes.
-    assert_eq!(frame, range.sign(&vectors::key()));
+    assert_eq!(frame, range.sign(&vectors::key(), &id()));
 }
 
 #[test]
@@ -179,28 +183,54 @@ fn wo_10_an_address_that_is_not_a_lower_case_segwit_address_is_refused() {
 
 #[test]
 fn wo_10_every_changed_byte_of_a_signed_range_is_refused() {
-    let frame = vectors::range().sign(&vectors::key());
+    let frame = vectors::range().sign(&vectors::key(), &id());
     for at in 0..frame.len() {
         let mut changed = frame.clone();
         changed[at] ^= 1;
-        assert!(Range::open(&changed, &public()).is_err(), "byte {at}");
+        assert!(
+            Range::open(&changed, &public(), &id()).is_err(),
+            "byte {at}"
+        );
     }
     for cut in 0..frame.len() {
-        assert!(Range::open(&frame[..cut], &public()).is_err(), "cut {cut}");
+        assert!(
+            Range::open(&frame[..cut], &public(), &id()).is_err(),
+            "cut {cut}"
+        );
     }
     let mut longer = frame.clone();
     longer.push(0);
-    assert!(Range::open(&longer, &public()).is_err());
+    assert!(Range::open(&longer, &public(), &id()).is_err());
 }
 
 #[test]
 fn wo_10_a_range_signed_by_another_key_is_refused() {
     let other = WebOrderKey::from_seed(&vectors::seed(0x80));
-    let frame = vectors::range().sign(&other);
+    let frame = vectors::range().sign(&other, &id());
     assert_eq!(
-        Range::open(&frame, &public()).unwrap_err(),
+        Range::open(&frame, &public(), &id()).unwrap_err(),
         WebOrderRefusal::Signature
     );
+}
+
+#[test]
+fn wo_10_a_range_of_another_pairing_is_refused() {
+    let other = pairing_id_of(&vectors::seed(0x90));
+    assert_ne!(other, id());
+    let frame = vectors::range().sign(&vectors::key(), &other);
+    assert_eq!(
+        Range::open(&frame, &public(), &id()).unwrap_err(),
+        WebOrderRefusal::PairingId
+    );
+    assert!(Range::open(&frame, &public(), &other).is_ok());
+}
+
+#[test]
+fn wo_10_the_id_of_a_pairing_is_the_start_of_the_hash_of_its_secret() {
+    let code = PairingCode::new(public(), vectors::secret(), "Shop").expect("a code");
+    assert_eq!(code.id(), id());
+    let again = PairingCode::new(public(), vectors::seed(0x41), "Shop").expect("a code");
+    assert_ne!(again.id(), id());
 }
 
 #[test]
@@ -544,7 +574,10 @@ fn wo_50_every_tampered_vector_is_refused_here_too() {
             .collect()
     };
     for (name, frame) in frames("range") {
-        assert!(Range::open(&frame, &public()).is_err(), "range {name}");
+        assert!(
+            Range::open(&frame, &public(), &id()).is_err(),
+            "range {name}"
+        );
     }
     for (name, frame) in frames("notice") {
         assert!(Notice::open(&frame, &public()).is_err(), "notice {name}");

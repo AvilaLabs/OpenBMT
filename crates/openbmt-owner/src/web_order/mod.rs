@@ -23,7 +23,9 @@ mod vectors;
 pub use check::{OrderCheck, OrderRefusal, SentRanges, StoreOrder};
 pub use key::{WebOrderKey, FINGERPRINT_BYTES, PUBLIC_BYTES, SIGNATURE_BYTES};
 pub use notice::{Notice, NoticeState, MAX_NOTICE_TXIDS, NOTICE_MAGIC};
-pub use pairing::{PairingCode, MAX_SHOP_NAME_BYTES, PAIRING_MAGIC, SECRET_BYTES};
+pub use pairing::{
+    pairing_id_of, PairingCode, MAX_SHOP_NAME_BYTES, PAIRING_ID_BYTES, PAIRING_MAGIC, SECRET_BYTES,
+};
 pub use range::{Range, MAX_ADDRESS_BYTES, MIN_ADDRESS_BYTES, RANGE_MAGIC, RANGE_SIZE};
 pub use request::{
     orders_request_body, SignedRequest, HEADER_MAC, HEADER_NONCE, HEADER_TIME, NONCE_BYTES,
@@ -43,6 +45,8 @@ pub enum WebOrderRefusal {
     PairingCode,
     /// WO-05: the shop's name is empty, too long or has a control byte.
     ShopName,
+    /// WO-10: a range is signed for another pairing than the store's.
+    PairingId,
     /// WO-10: a range is not what the format says, or holds no address, too
     /// many, or one that is not a bitcoin address.
     Range,
@@ -62,7 +66,7 @@ impl WebOrderRefusal {
         match self {
             Self::Random => "WO-43",
             Self::PairingCode | Self::ShopName => "WO-05",
-            Self::Range => "WO-10",
+            Self::Range | Self::PairingId => "WO-10",
             Self::Notice => "WO-30",
             Self::Signature => "WO-30",
             Self::Request => "WO-20",

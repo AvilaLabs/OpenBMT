@@ -143,5 +143,33 @@ t_refused( static function () use ( $ledger, $now ) {
 }, 'Full', 'wo_20 a full ledger refuses' );
 $copy = NonceLedger::from_array( json_decode( json_encode( $ledger->to_array() ), true ) );
 t_eq( NonceLedger::MAX, count( $copy->to_array() ), 'wo_20 the ledger survives storage' );
-t_eq( array(), NonceLedger::from_array( array( 'zz' => 1, str_repeat( 'a', 32 ) => 'x' ) )->to_array(), 'wo_20 damaged ledger data is dropped' );
+t_eq( array(), NonceLedger::from_array( array() )->to_array(), 'wo_20 an empty ledger is not damaged' );
+foreach ( array( 'x', null, array( 'zz' => 1 ), array( str_repeat( 'a', 32 ) => 'x' ), array( str_repeat( 'A', 32 ) => 1 ) ) as $i => $bad ) {
+	t_eq( null, NonceLedger::from_array( $bad ), "wo_11 damaged ledger data $i is not a ledger" );
+}
+t_eq( null, NonceLedger::from_array( array_fill_keys( array_map( static function ( int $i ): string { return str_pad( dechex( $i ), 32, '0', STR_PAD_LEFT ); }, range( 0, NonceLedger::MAX ) ), 1 ) ), 'wo_11 a ledger over the cap is damaged' );
+
+// Old numbers are forgotten before the cap is looked at: a busy store is never refused for them.
+$ledger = new NonceLedger();
+$base   = 1800000000;
+for ( $i = 0; $i < 3000; $i++ ) {
+	$time = $base + $i;
+	$r    = t_request( $secret, $route, $body, $time, $i % 200 );
+	// Each request has its own number: the nonce is made of the counter.
+	$nonce_hex = str_pad( dechex( $i ), 32, '0', STR_PAD_LEFT );
+	$mac       = RequestChecker::mac( $secret, 'POST', $route, (string) $time, $nonce_hex, $body );
+	RequestChecker::check( $secret, 'POST', $route, (string) $time, $nonce_hex, $mac, $body, $time, $ledger );
+}
+t_ok( true, 'wo_20 3000 requests over 3000 seconds all pass' );
+t_ok( count( $ledger->to_array() ) <= RequestChecker::WINDOW_SECS + 1, 'wo_20 the ledger holds only the window' );
+// A burst that fills the ledger within the window is refused at the cap, and is accepted again once the window has passed.
+$ledger = new NonceLedger();
+for ( $i = 0; $i < NonceLedger::MAX; $i++ ) {
+	$ledger->use_once( str_pad( dechex( $i ), 32, '0', STR_PAD_LEFT ), $base, $base );
+}
+t_refused( static function () use ( $ledger, $base ) {
+	$ledger->use_once( str_repeat( 'b', 32 ), $base + 1, $base + 1 );
+}, 'Full', 'wo_20 a burst inside the window fills the ledger' );
+$ledger->use_once( str_repeat( 'b', 32 ), $base + 301, $base + 301 );
+t_eq( 1, count( $ledger->to_array() ), 'wo_20 after the window every old number is forgotten and the request passes' );
 t_done();

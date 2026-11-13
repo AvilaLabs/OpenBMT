@@ -21,7 +21,12 @@ final class AddressPool {
 
 	const DUPLICATE = 'duplicate';
 
+	const WRONG_PAIRING = 'wrong_pairing';
+
 	const LOW = 20;
+
+	/** @var string The id of the pairing the pool belongs to (8 bytes); only its ranges are taken. */
+	private $pairing_id;
 
 	/** @var int|null The index the next range must start at; null before the first. */
 	private $next_index = null;
@@ -33,15 +38,29 @@ final class AddressPool {
 	private $used = array();
 
 	/**
+	 * An empty pool for a pairing: it takes the first range of that pairing
+	 * and no range of another.
+	 *
+	 * @param string $pairing_id The id of the pairing (8 bytes).
+	 */
+	public function __construct( string $pairing_id ) {
+		$this->pairing_id = $pairing_id;
+	}
+
+	/**
 	 * Adds a range that has been opened. It must start where the last ended;
 	 * the first one starts anywhere. A range that is already held changes
 	 * nothing and is "stale".
 	 *
 	 * @param int      $start     The index of the first address.
 	 * @param string[] $addresses The addresses.
+	 * @param string   $pairing_id The id of the pairing the range was signed for.
 	 * @return string One of the constants of this class.
 	 */
-	public function add( int $start, array $addresses ): string {
+	public function add( int $start, array $addresses, string $pairing_id ): string {
+		if ( ! hash_equals( $this->pairing_id, $pairing_id ) ) {
+			return self::WRONG_PAIRING;
+		}
 		$count = count( $addresses );
 		if ( null !== $this->next_index ) {
 			if ( $start + $count <= $this->next_index ) {
@@ -131,6 +150,7 @@ final class AddressPool {
 	 */
 	public function to_array(): array {
 		return array(
+			'pairing_id' => bin2hex( $this->pairing_id ),
 			'next_index' => $this->next_index,
 			'queue'      => $this->queue,
 			'used'       => $this->used,
@@ -138,33 +158,62 @@ final class AddressPool {
 	}
 
 	/**
-	 * A pool from plain data; anything that is not a pool as to_array makes
-	 * it gives an empty one.
+	 * A pool from plain data. Data that is not exactly what to_array makes is
+	 * damaged and gives null: the pool is never guessed at.
 	 *
 	 * @param mixed $data What was stored.
 	 */
-	public static function from_array( $data ): self {
-		$pool = new self();
-		if ( ! is_array( $data ) || ! isset( $data['queue'], $data['used'] ) || ! is_array( $data['queue'] ) || ! is_array( $data['used'] ) ) {
-			return $pool;
+	public static function from_array( $data ): ?self {
+		if ( ! is_array( $data ) || array( 'next_index', 'pairing_id', 'queue', 'used' ) !== self::sorted_keys( $data ) ) {
+			return null;
 		}
-		$next = $data['next_index'] ?? null;
-		if ( null !== $next && ! is_int( $next ) ) {
-			return $pool;
+		if ( ! is_string( $data['pairing_id'] ) || 1 !== preg_match( '/^[0-9a-f]{16}$/', $data['pairing_id'] ) ) {
+			return null;
 		}
-		foreach ( $data['queue'] as $entry ) {
-			if ( ! is_array( $entry ) || 2 !== count( $entry ) || ! is_int( $entry[0] ?? null ) || ! is_string( $entry[1] ?? null ) ) {
-				return new self();
+		$next = $data['next_index'];
+		if ( null !== $next && ( ! is_int( $next ) || $next < 0 || $next > 0xffffffff ) ) {
+			return null;
+		}
+		if ( ! is_array( $data['queue'] ) || ! is_array( $data['used'] ) || ( null === $next && ( array() !== $data['queue'] || array() !== $data['used'] ) ) ) {
+			return null;
+		}
+		$pool             = new self( (string) hex2bin( $data['pairing_id'] ) );
+		$pool->next_index = $next;
+		$seen             = array();
+		$expect           = null;
+		foreach ( $data['queue'] as $position => $entry ) {
+			if ( ! is_int( $position ) || ! is_array( $entry ) || array( 0, 1 ) !== array_keys( $entry ) || ! is_int( $entry[0] ) || ! is_string( $entry[1] ) ) {
+				return null;
 			}
-			$pool->queue[] = array( $entry[0], $entry[1] );
+			$length = strlen( $entry[1] );
+			if ( $length < 1 || $length > 90 || isset( $seen[ $entry[1] ] ) || ( null !== $expect && $entry[0] !== $expect ) ) {
+				return null;
+			}
+			$seen[ $entry[1] ] = true;
+			$expect            = $entry[0] + 1;
+			$pool->queue[]     = array( $entry[0], $entry[1] );
+		}
+		if ( null !== $expect && $expect !== $next ) {
+			return null;
 		}
 		foreach ( $data['used'] as $address => $order ) {
-			if ( ! is_int( $order ) ) {
-				return new self();
+			if ( ! is_int( $order ) || $order < 0 || isset( $seen[ (string) $address ] ) ) {
+				return null;
 			}
 			$pool->used[ (string) $address ] = $order;
 		}
-		$pool->next_index = $next;
 		return $pool;
+	}
+
+	/**
+	 * The keys of an array in order, to compare with what a pool has.
+	 *
+	 * @param array<mixed> $data An array.
+	 * @return array<int,int|string>
+	 */
+	private static function sorted_keys( array $data ): array {
+		$keys = array_keys( $data );
+		sort( $keys );
+		return $keys;
 	}
 }
