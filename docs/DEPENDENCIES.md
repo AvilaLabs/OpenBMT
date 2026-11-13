@@ -18,7 +18,7 @@ for each program that ships. The lists themselves are in `deps/`.
 | Books export | `deps/openbmt-books.txt` | 42 |
 | Key app library | `deps/openbmt-key-ffi.txt` | 43 |
 | Counter app library | `deps/openbmt-counter-ffi.txt` | 39 |
-| Owner app library | `deps/openbmt-owner-ffi.txt` | 46 |
+| Owner app library | `deps/openbmt-owner-ffi.txt` | 47 |
 | QR code encoder | `deps/openbmt-qr.txt` | 0 |
 | Price sources | `deps/openbmt-rates.txt` | 19 |
 
@@ -54,6 +54,14 @@ Where they come from:
   `rand_core`); ChaCha20-Poly1305 was in the list for the link. Every one
   of them is in the lock file already, at the same version: this adds no
   package to it.
+- **The owner app library, the starter wallet's randomness, 1 more.**
+  `libc`, the system call layer, for the one `getrandom` call that gives
+  the starter wallet's key its 32 bytes (`docs/START-SIMPLE-RULES.md`,
+  SS-01). The call is in the workspace crate `openbmt-kernel-random`, the only
+  place that holds the `unsafe` block, in place of the `getrandom` crate,
+  which is not in the lock file. `libc` is in the lock file already, at the
+  same version as the stick's: this adds no package to it. The sealed seed
+  (SS-20) is ChaCha20-Poly1305 from the link's list: no package.
 
 - **The QR code encoder, none.** `openbmt-qr` has no dependencies of its
   own, not even for tests. The counter, the owner and the Key apps show

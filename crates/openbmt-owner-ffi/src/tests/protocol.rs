@@ -146,6 +146,23 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (168, "float_pay"),
         (169, "float_sweep"),
         (170, "float_refill"),
+        (180, "starter_make"),
+        (181, "starter_page"),
+        (182, "starter_check_start"),
+        (183, "starter_key"),
+        (184, "starter_seal"),
+        (185, "starter_restore_start"),
+        (186, "starter_restore_finish"),
+        (187, "starter_pay"),
+        (188, "starter_move"),
+        (189, "starter_limit_state"),
+        (190, "starter_change_held"),
+        (191, "starter_offers_bitcoin"),
+        (192, "starter_seed_may_go"),
+        (193, "starter_cancel"),
+        (194, "starter_not_yet"),
+        (195, "starter_fee_rate"),
+        (196, "starter_open"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

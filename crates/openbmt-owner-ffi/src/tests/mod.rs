@@ -19,6 +19,7 @@ mod protocol;
 mod screen;
 mod settings;
 mod setup_lock;
+mod starter;
 mod strict;
 mod watch;
 pub(crate) mod wire;

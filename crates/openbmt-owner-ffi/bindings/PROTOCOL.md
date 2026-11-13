@@ -169,6 +169,23 @@ ops run on another; it waits for at most 250 ms.
 168 float_pay        handle zero  args FloatPayArgs -> FloatPaidView
 169 float_sweep      handle zero  args FloatSweepArgs -> FloatPaidView
 170 float_refill     handle node  args FloatRefillArgs -> FloatRefillView
+180 starter_make     handle zero  args StarterMakeArgs -> StarterWalletView
+181 starter_page     handle zero  args StarterPageArgs -> StarterImageView
+182 starter_check_start handle zero  args () -> StarterCheckView
+183 starter_key      handle zero  args u8 -> StarterTypedView
+184 starter_seal     handle zero  args () -> StarterSealedView
+185 starter_restore_start handle zero  args () -> ()
+186 starter_restore_finish handle zero  args string -> StarterSealedView
+187 starter_pay      handle zero  args StarterPayArgs -> StarterPaidView
+188 starter_move     handle zero  args StarterMoveArgs -> StarterPaidView
+189 starter_limit_state handle zero  args StarterLimitArgs -> StarterLimitView
+190 starter_change_held handle zero  args StarterHeldArgs -> bool
+191 starter_offers_bitcoin handle zero  args StarterOfferArgs -> bool
+192 starter_seed_may_go handle zero  args u32 -> bool
+193 starter_cancel   handle zero  args () -> ()
+194 starter_not_yet  handle zero  args (u64, u64) -> u64
+195 starter_fee_rate handle zero  args StarterFeeArgs -> u64
+196 starter_open     handle zero  args StarterOpenArgs -> StarterWalletView
 ```
 
 ## Types
@@ -328,6 +345,27 @@ FloatPaidView: record: tx: list<u8>, txid: string, fee: u64, vsize: u64, paid: u
 FloatSweepArgs: record: words: string, shop: string, shop_index: u32, fee_rate: u64, min_confirmations: u32, lock_height: u32, coins: list<FloatCoinView>
 FloatRefillArgs: record: description: string, next_index: u32, cap: u64, confirmed: u64, unconfirmed_incoming: u64, amount: option<u64>
 FloatRefillView: record: id: u32, sats: u64, address: string
+StarterWalletView: record: description: string, fingerprint: string, first_address: string
+StarterMakeArgs: record: rolls: list<u8>
+StarterPageArgs: record: page: u32, scale: u32
+StarterImageView: record: width: u32, height: u32, pixels: list<u8>
+StarterCheckView: record: positions: list<u32>
+StarterTypedView: record: typed: u32, accepted: bool, step: u32, finished: bool, failed: bool
+StarterSealedView: record: sealed: list<u8>, data_key: list<u8>
+StarterCoinView: record: txid: list<u8>, vout: u32, prev_tx: list<u8>, change: bool, index: u32, confirmations: u32
+StarterPayArgs: record: sealed: list<u8>, data_key: list<u8>, network: OwnerNetwork, address: string, sats: u64, fee_rate: u64, change_index: u32, min_confirmations: u32, lock_height: u32, coins: list<StarterCoinView>
+StarterPaidView: record: tx: list<u8>, txid: string, fee: u64, vsize: u64, paid: u64, change_index: option<u32>, change_sats: option<u64>, destination: string
+StarterMoveArgs: record: sealed: list<u8>, data_key: list<u8>, new_wallet: string, new_index: u32, fee_rate: u64, min_confirmations: u32, lock_height: u32, coins: list<StarterCoinView>
+StarterOpenArgs: record: sealed: list<u8>, data_key: list<u8>
+StarterFeeArgs: record: recent: option<u64>, typed: option<u64>
+StarterLimitKind: enum, one tag byte
+    tags Under=0 AtLimit=1 PastDate=2 NotYet=3
+StarterChangeKind: enum, one tag byte
+    tags RaiseLimit=0 LaterDate=1 AddCounter=2 StopAboveOff=3 Other=4 LowerLimit=5 EarlierDate=6 StopAboveOn=7
+StarterLimitArgs: record: held: u64, limit: u64, now: u64, move_by: u64, not_yet_until: option<u64>
+StarterLimitView: record: state: StarterLimitKind, until: option<u64>
+StarterHeldArgs: record: state: StarterLimitKind, change: StarterChangeKind
+StarterOfferArgs: record: stop_above_limit: bool, held: u64, limit: u64
 SignerBuiltView: record: built: BuiltView, signer_session: option<list<u8>>
 SignerFileView: record: psbt: list<u8>, txid: list<u8>, file_name: string, payments: list<SignerLineView>, change: option<SignerLineView>, fee: u64, words: Words
 SignerTakenView: record: id: u32, txid: list<u8>, fee: u64, sends: list<SendRow>

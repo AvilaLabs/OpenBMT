@@ -364,8 +364,9 @@ impl Setup {
     }
 
     /// SS-20: seal the seed under a new random data key. Only after the
-    /// check is passed; the setup is used up.
-    pub fn seal(self, rng: &mut dyn KernelRandom) -> Result<Sealed, StarterRefusal> {
+    /// check is passed. The setup is kept (the caller drops it once the sealed
+    /// seed is stored), so a refusal of the sealing loses nothing.
+    pub fn seal(&self, rng: &mut dyn KernelRandom) -> Result<Sealed, StarterRefusal> {
         if self.stage != Stage::Passed {
             return Err(StarterRefusal::Stage);
         }

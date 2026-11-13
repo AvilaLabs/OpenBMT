@@ -67,6 +67,7 @@ mod say;
 mod settings_edit;
 mod setup_lock;
 mod signer_views;
+mod starter;
 mod views;
 pub mod watch;
 
@@ -110,6 +111,12 @@ pub use settings_edit::{
     SwapAction,
 };
 pub use setup_lock::PinChangeArgs;
+pub use starter::{
+    StarterChangeKind, StarterCheckView, StarterCoinView, StarterFeeArgs, StarterHeldArgs,
+    StarterImageView, StarterLimitArgs, StarterLimitKind, StarterLimitView, StarterMakeArgs,
+    StarterMoveArgs, StarterOfferArgs, StarterOpenArgs, StarterPageArgs, StarterPaidView,
+    StarterPayArgs, StarterSealedView, StarterTypedView, StarterWalletView,
+};
 pub use views::{
     AlertKind, AlertView, BatchArgs, BatchWaitingView, BuiltView, CashAmountView, CashOutArgs,
     CashOutRow, ClearArgs, CounterShareView, CounterView, DeepRequestView, DeliverView,

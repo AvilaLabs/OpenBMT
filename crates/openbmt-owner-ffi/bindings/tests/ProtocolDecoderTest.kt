@@ -48,6 +48,7 @@ object ProtocolDecoderTest {
         ceremonyFrames()
         ceremonyThroughTheLibrary()
         setupLockThroughTheLibrary()
+        starterThroughTheLibrary()
         priceThroughTheLibrary()
         importThroughTheLibrary()
         println("ProtocolDecoderTest: ok")
@@ -377,6 +378,58 @@ object ProtocolDecoderTest {
         refusedBy("a bare text", "OBMx") { OwnerLock.unlock(text, "482913") }
         val flipped = locked.copyOf().also { it[it.size - 1] = (it[it.size - 1].toInt() xor 1).toByte() }
         refusedBy("a changed ciphertext", "pin-wrong") { OwnerLock.unlock(flipped, "482913") }
+    }
+
+    /**
+     * The starter wallet through the real library (SS-01 to SS-43), on the host's kernel: the words are made and
+     * drawn as images that hold no text, the keypad answers with counts, a restore with no words is refused, a
+     * seal before the check is refused, and the limit and the date are answered by the library.
+     */
+    private fun starterThroughTheLibrary() {
+        val wallet = OwnerStarter.make()
+        check(wallet.description.startsWith("wpkh(") && wallet.fingerprint.length == 8)
+        check(wallet.firstAddress.startsWith("bc1q"))
+        for (n in 0 until OwnerStarter.PAGES) {
+            val image = OwnerStarter.page(n.toLong(), 1)
+            check(image.pixels.size.toLong() == image.width * image.height)
+            check(image.pixels.any { it.toInt() == 0 } && image.pixels.all { it.toInt() == 0 || it.toInt() == -1 })
+            image.wipe()
+            check(image.pixels.all { it.toInt() == -1 })
+        }
+        refusedBy("a third screen too many", "SS-10") { OwnerStarter.page(3, 1) }
+        refusedBy("a seal before the check", "SS-10") { OwnerStarter.seal() }
+        val positions = OwnerStarter.checkStart()
+        check(positions.size == 3 && positions == positions.sorted() && positions.all { it in 1..12 })
+        val typed = OwnerStarter.key('z'.code)
+        check(typed.typed == 1L && !typed.accepted && typed.step == 0L && !typed.finished && !typed.failed)
+        check(OwnerStarter.key(8).typed == 0L)
+        refusedBy("a digit on the keypad", "SS-11") { OwnerStarter.key('1'.code) }
+        OwnerStarter.cancel()
+        val noSetup = try {
+            OwnerStarter.page(0, 1)
+            error("accepted: a screen with no setup")
+        } catch (e: OwnerException) {
+            e
+        }
+        check(noSetup.status == 3 && noSetup.rule == "starter-no-setup") { "no setup: ${noSetup.status} ${noSetup.rule}" }
+        OwnerStarter.restoreStart()
+        check(OwnerStarter.key('a'.code).typed == 1L)
+        refusedBy("a restore with no words", "SS-23") { OwnerStarter.restoreFinish(wallet.description) }
+        OwnerStarter.cancel()
+        refusedBy("a data key that is not 32 bytes", "SS-20") { OwnerStarter.open(ByteArray(45), ByteArray(5)) }
+        val day = 86_400L
+        check(OwnerStarter.notYet(1_000, 30 * day) == 1_000 + 7 * day)
+        check(OwnerStarter.limitState(5, 100, 10, 1_000, null).state == StarterLimitKind.Under)
+        check(OwnerStarter.limitState(100, 100, 10, 1_000, null).state == StarterLimitKind.AtLimit)
+        check(OwnerStarter.limitState(5, 100, 2_000, 1_000, null).state == StarterLimitKind.PastDate)
+        val notYet = OwnerStarter.limitState(100, 100, 10, 1_000, 500)
+        check(notYet.state == StarterLimitKind.NotYet && notYet.until == 500L)
+        check(OwnerStarter.changeHeld(StarterLimitKind.NotYet, StarterChangeKind.RaiseLimit))
+        check(!OwnerStarter.changeHeld(StarterLimitKind.NotYet, StarterChangeKind.LowerLimit))
+        check(OwnerStarter.offersBitcoin(false, 500, 100) && !OwnerStarter.offersBitcoin(true, 100, 100))
+        check(!OwnerStarter.seedMayGo(0) && OwnerStarter.seedMayGo(1))
+        check(OwnerStarter.feeRate(300, null) == 1_000L && OwnerStarter.feeRate(null, 2_500) == 2_500L)
+        refusedBy("no fee rate", "SS-30") { OwnerStarter.feeRate(null, null) }
     }
 
     /**

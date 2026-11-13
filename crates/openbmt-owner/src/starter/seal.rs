@@ -177,9 +177,10 @@ impl Restore {
 
     /// SS-23: check the 12 words (the list and the check word) against the
     /// starter wallet's stored `description` (its fingerprint and key), and
-    /// seal them again under a new data key.
+    /// seal them again under a new data key. The words stay typed when they are
+    /// refused.
     pub fn finish(
-        self,
+        &self,
         description: &str,
         rng: &mut dyn KernelRandom,
     ) -> Result<Sealed, StarterRefusal> {

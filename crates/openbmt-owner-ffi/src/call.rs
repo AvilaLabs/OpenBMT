@@ -159,6 +159,13 @@ use crate::signer_views::{
     FirstAddressArgs, FirstAddressKind, FirstAddressView, RegistrationView, SignerBuiltView,
     SignerExportArgs, SignerFileView, SignerLineView, SignerTakeArgs, SignerTakenView,
 };
+use crate::starter::{
+    self as starter_ops, StarterChangeKind, StarterCheckView, StarterCoinView, StarterFeeArgs,
+    StarterHeldArgs, StarterImageView, StarterLimitArgs, StarterLimitKind, StarterLimitView,
+    StarterMakeArgs, StarterMoveArgs, StarterOfferArgs, StarterOpenArgs, StarterPageArgs,
+    StarterPaidView, StarterPayArgs, StarterSealedView, StarterSlot, StarterTypedView,
+    StarterWalletView,
+};
 use crate::views::{
     put_words, AlertKind, AlertView, BatchArgs, BatchWaitingView, BuiltView, CashAmountView,
     CashOutArgs, CashOutRow, CashPriceView, ClearArgs, CounterShareView, CounterView,
@@ -218,6 +225,8 @@ struct RegState {
 /// reference; a platform binding keeps one in a static.
 pub struct Registry {
     state: Mutex<RegState>,
+    /// The starter wallet being made or restored, if one (SS-10, SS-23).
+    pub(crate) starter: StarterSlot,
     /// The way the next node starts its driver, in tests.
     #[cfg(test)]
     pub(crate) spawner: Mutex<Option<Spawn>>,
@@ -238,6 +247,7 @@ impl Registry {
                 nodes: BTreeMap::new(),
                 watches: BTreeMap::new(),
             }),
+            starter: StarterSlot::new(),
             #[cfg(test)]
             spawner: Mutex::new(None),
         }
@@ -418,6 +428,10 @@ impl Ctx<'_> {
         self.watch
             .as_ref()
             .ok_or_else(|| internal("the op has no watcher"))
+    }
+
+    fn starter(&self) -> &StarterSlot {
+        &self.registry.starter
     }
 
     fn entry(&self) -> Result<&Arc<Entry>, AppError> {
@@ -785,6 +799,66 @@ fn build_ops() -> Vec<Op> {
         op(170, "float_refill", Node, |c, a: FloatRefillArgs| {
             c.entry()?.float_refill(a)
         }),
+        op(180, "starter_make", Zero, |c, a: StarterMakeArgs| {
+            starter_ops::make(c.starter(), a)
+        }),
+        op(181, "starter_page", Zero, |c, a: StarterPageArgs| {
+            starter_ops::page(c.starter(), a)
+        }),
+        op(182, "starter_check_start", Zero, |c, _: ()| {
+            starter_ops::check_start(c.starter())
+        }),
+        op(183, "starter_key", Zero, |c, key: u8| {
+            starter_ops::key(c.starter(), key)
+        }),
+        op(184, "starter_seal", Zero, |c, _: ()| {
+            starter_ops::seal(c.starter())
+        }),
+        op(185, "starter_restore_start", Zero, |c, _: ()| {
+            starter_ops::restore_start(c.starter())
+        }),
+        op(
+            186,
+            "starter_restore_finish",
+            Zero,
+            |c, description: String| starter_ops::restore_finish(c.starter(), description),
+        ),
+        op(187, "starter_pay", Zero, |_, a: StarterPayArgs| {
+            starter_ops::pay(a)
+        }),
+        op(188, "starter_move", Zero, |_, a: StarterMoveArgs| {
+            starter_ops::move_all(a)
+        }),
+        op(
+            189,
+            "starter_limit_state",
+            Zero,
+            |_, a: StarterLimitArgs| starter_ops::limit_state(a),
+        ),
+        op(190, "starter_change_held", Zero, |_, a: StarterHeldArgs| {
+            starter_ops::change_held(a)
+        }),
+        op(
+            191,
+            "starter_offers_bitcoin",
+            Zero,
+            |_, a: StarterOfferArgs| starter_ops::offers_bitcoin(a),
+        ),
+        op(192, "starter_seed_may_go", Zero, |_, confirmations: u32| {
+            starter_ops::seed_may_go(confirmations)
+        }),
+        op(193, "starter_cancel", Zero, |c, _: ()| {
+            starter_ops::cancel(c.starter())
+        }),
+        op(194, "starter_not_yet", Zero, |_, a: (u64, u64)| {
+            starter_ops::not_yet(a)
+        }),
+        op(195, "starter_fee_rate", Zero, |_, a: StarterFeeArgs| {
+            starter_ops::fee_rate(a)
+        }),
+        op(196, "starter_open", Zero, |_, a: StarterOpenArgs| {
+            starter_ops::open(a)
+        }),
     ]
 }
 
@@ -1044,6 +1118,25 @@ fn definitions() -> Vec<TypeDef> {
         FloatSweepArgs::define(),
         FloatRefillArgs::define(),
         FloatRefillView::define(),
+        StarterWalletView::define(),
+        StarterMakeArgs::define(),
+        StarterPageArgs::define(),
+        StarterImageView::define(),
+        StarterCheckView::define(),
+        StarterTypedView::define(),
+        StarterSealedView::define(),
+        StarterCoinView::define(),
+        StarterPayArgs::define(),
+        StarterPaidView::define(),
+        StarterMoveArgs::define(),
+        StarterOpenArgs::define(),
+        StarterFeeArgs::define(),
+        StarterLimitKind::define(),
+        StarterChangeKind::define(),
+        StarterLimitArgs::define(),
+        StarterLimitView::define(),
+        StarterHeldArgs::define(),
+        StarterOfferArgs::define(),
         SignerBuiltView::define(),
         SignerFileView::define(),
         SignerTakenView::define(),

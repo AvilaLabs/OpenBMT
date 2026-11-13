@@ -783,6 +783,7 @@ dependencies = [
  "openbmt-counter",
  "openbmt-counter-node",
  "openbmt-courier",
+ "openbmt-kernel-random",
  "openbmt-key-ffi",
  "openbmt-link",
  "openbmt-lock",

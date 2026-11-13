@@ -30,6 +30,8 @@ openbmt-counter-node = { path = "../openbmt-counter-node" }
 openbmt-courier = { path = "../openbmt-courier" }
 openbmt-link = { path = "../openbmt-link" }
 openbmt-lock = { path = "../openbmt-lock" }
+# The kernel's random bytes for the starter wallet's key (SS-01).
+openbmt-kernel-random = { path = "../openbmt-kernel-random" }
 openbmt-net-io = { path = "../openbmt-net-io" }
 openbmt-owner = { path = "../openbmt-owner" }
 openbmt-owner-node = { path = "../openbmt-owner-node" }

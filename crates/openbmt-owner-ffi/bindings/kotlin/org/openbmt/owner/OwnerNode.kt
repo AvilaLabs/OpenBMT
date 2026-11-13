@@ -168,6 +168,23 @@ private const val OP_FLOAT_FEE_RATE = 167
 private const val OP_FLOAT_PAY = 168
 private const val OP_FLOAT_SWEEP = 169
 private const val OP_FLOAT_REFILL = 170
+private const val OP_STARTER_MAKE = 180
+private const val OP_STARTER_PAGE = 181
+private const val OP_STARTER_CHECK_START = 182
+private const val OP_STARTER_KEY = 183
+private const val OP_STARTER_SEAL = 184
+private const val OP_STARTER_RESTORE_START = 185
+private const val OP_STARTER_RESTORE_FINISH = 186
+private const val OP_STARTER_PAY = 187
+private const val OP_STARTER_MOVE = 188
+private const val OP_STARTER_LIMIT_STATE = 189
+private const val OP_STARTER_CHANGE_HELD = 190
+private const val OP_STARTER_OFFERS_BITCOIN = 191
+private const val OP_STARTER_SEED_MAY_GO = 192
+private const val OP_STARTER_CANCEL = 193
+private const val OP_STARTER_NOT_YET = 194
+private const val OP_STARTER_FEE_RATE = 195
+private const val OP_STARTER_OPEN = 196
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -175,6 +192,18 @@ private const val TAG_OWNER_NETWORK_MAINNET = 0
 private const val TAG_OWNER_NETWORK_TESTNET = 1
 private const val TAG_OWNER_NETWORK_SIGNET = 2
 private const val TAG_OWNER_NETWORK_REGTEST = 3
+private const val TAG_STARTER_LIMIT_KIND_UNDER = 0
+private const val TAG_STARTER_LIMIT_KIND_AT_LIMIT = 1
+private const val TAG_STARTER_LIMIT_KIND_PAST_DATE = 2
+private const val TAG_STARTER_LIMIT_KIND_NOT_YET = 3
+private const val TAG_STARTER_CHANGE_KIND_RAISE_LIMIT = 0
+private const val TAG_STARTER_CHANGE_KIND_LATER_DATE = 1
+private const val TAG_STARTER_CHANGE_KIND_ADD_COUNTER = 2
+private const val TAG_STARTER_CHANGE_KIND_STOP_ABOVE_OFF = 3
+private const val TAG_STARTER_CHANGE_KIND_OTHER = 4
+private const val TAG_STARTER_CHANGE_KIND_LOWER_LIMIT = 5
+private const val TAG_STARTER_CHANGE_KIND_EARLIER_DATE = 6
+private const val TAG_STARTER_CHANGE_KIND_STOP_ABOVE_ON = 7
 private const val TAG_ROUTE_VIEW_DIRECT = 0
 private const val TAG_ROUTE_VIEW_ONION = 1
 private const val TAG_CASH_AMOUNT_VIEW_SATS = 0
@@ -503,6 +532,44 @@ class FloatCoin(
     val confirmations: Long,
 )
 
+/** The starter wallet's public side (SS-04): it holds no secret and is what the app keeps and shows. */
+class StarterWalletView(val description: String, val fingerprint: String, val firstAddress: String)
+
+/**
+ * A screen of four numbered words, drawn by the library (SS-11): one byte for each pixel, row by row, 0 black
+ * and 255 white. The app shows it and then calls [wipe]; it is never text.
+ */
+class StarterImage(val width: Long, val height: Long, val pixels: ByteArray) {
+    /** Overwrites the pixels with white. */
+    fun wipe() {
+        java.util.Arrays.fill(pixels, 255.toByte())
+    }
+}
+
+/** What one key of the keypad did (SS-11): counts and yes or no, never a letter. */
+class StarterTyped(val typed: Long, val accepted: Boolean, val step: Long, val finished: Boolean, val failed: Boolean)
+
+/**
+ * The sealed seed and the data key that opens it (SS-20). The app stores [sealed], wraps [dataKey] with its
+ * Keystore key at once and then calls [wipe].
+ */
+class StarterSealed(val sealed: ByteArray, val dataKey: ByteArray) {
+    /** Overwrites the data key with zeros. */
+    fun wipe() {
+        java.util.Arrays.fill(dataKey, 0.toByte())
+    }
+}
+
+/** One coin of the starter wallet, from the app's coin view (SS-30). [txid] is 32 bytes. */
+class StarterCoin(
+    val txid: ByteArray,
+    val vout: Long,
+    val prevTx: ByteArray,
+    val change: Boolean,
+    val index: Long,
+    val confirmations: Long,
+)
+
 /** A finished transaction of the float, for the outbox (FL-20, FL-35); [tx] is the consensus bytes. */
 class FloatPaid(
     val tx: ByteArray,
@@ -515,8 +582,30 @@ class FloatPaid(
     val destination: String,
 )
 
+/** A finished transaction of the starter wallet, for the outbox (SS-30, SS-42); [tx] is the consensus bytes. */
+class StarterPaid(
+    val tx: ByteArray,
+    val txid: String,
+    val fee: Long,
+    val vsize: Long,
+    val paid: Long,
+    val changeIndex: Long?,
+    val changeSats: Long?,
+    val destination: String,
+)
+
 /** What a refill of the float queued (FL-30). */
 class FloatRefillView(val id: Long, val sats: Long, val address: String)
+/** Where the starter wallet stands against its limit and its date (SS-37). */
+enum class StarterLimitKind { Under, AtLimit, PastDate, NotYet }
+
+/** Where the starter wallet stands; [until] is when a "Not yet" ends, in that state only. */
+class StarterLimit(val state: StarterLimitKind, val until: Long?)
+
+/** A change of the settings, as SS-37 sorts them. */
+enum class StarterChangeKind {
+    RaiseLimit, LaterDate, AddCounter, StopAboveOff, Other, LowerLimit, EarlierDate, StopAboveOn
+}
 
 /** What taking the signer's answer did. */
 class SignerTaken(val id: Long, val txid: ByteArray, val fee: Long, val sends: List<SendRow>)
@@ -1077,9 +1166,22 @@ class CeremonyDefaults(val batchMinCount: Long, val refundDepth: Long, val birth
 
 // ---- the encoding ----------------------------------------------------------------------
 
+/** A byte stream whose buffer can be overwritten with zeros. */
+private class WipingStream : ByteArrayOutputStream() {
+    fun wipe() {
+        java.util.Arrays.fill(buf, 0.toByte())
+        reset()
+    }
+}
+
 /** Writes the fields of a request: integers little-endian, lengths as u32. */
 internal class Writer {
-    private val out = ByteArrayOutputStream()
+    private val out = WipingStream()
+
+    /** Overwrites everything written so far, for a request that carried a secret. */
+    fun wipe() {
+        out.wipe()
+    }
 
     fun raw(bytes: ByteArray): Writer {
         out.write(bytes, 0, bytes.size)
@@ -1227,6 +1329,11 @@ internal class Reader(private val data: ByteArray) {
 
     fun end() {
         if (remaining() != 0) bad("bytes are left over")
+    }
+
+    /** Overwrites the response with zeros, for a result that carried a secret. */
+    fun wipe() {
+        java.util.Arrays.fill(data, 0.toByte())
     }
 
     fun tag(what: String): Nothing = bad("a tag of $what is not defined")
@@ -1516,6 +1623,55 @@ private fun Reader.floatPaid(): FloatPaid =
 
 private fun Writer.floatCoin(c: FloatCoin): Writer =
     bytes(c.txid).u32(c.vout).bytes(c.prevTx).bool(c.change).u32(c.index).u32(c.confirmations)
+
+
+private fun Reader.starterPaid(): StarterPaid =
+    StarterPaid(bytes(), string(), u64(), u64(), u64(), option { u32() }, option { u64() }, string())
+
+private fun Writer.starterCoin(c: StarterCoin): Writer =
+    bytes(c.txid).u32(c.vout).bytes(c.prevTx).bool(c.change).u32(c.index).u32(c.confirmations)
+
+private fun Writer.starterLimitKind(v: StarterLimitKind): Writer =
+    u8(
+        when (v) {
+            StarterLimitKind.Under -> TAG_STARTER_LIMIT_KIND_UNDER
+            StarterLimitKind.AtLimit -> TAG_STARTER_LIMIT_KIND_AT_LIMIT
+            StarterLimitKind.PastDate -> TAG_STARTER_LIMIT_KIND_PAST_DATE
+            StarterLimitKind.NotYet -> TAG_STARTER_LIMIT_KIND_NOT_YET
+        },
+    )
+
+private fun Reader.starterLimitKind(): StarterLimitKind =
+    when (u8()) {
+        TAG_STARTER_LIMIT_KIND_UNDER -> StarterLimitKind.Under
+        TAG_STARTER_LIMIT_KIND_AT_LIMIT -> StarterLimitKind.AtLimit
+        TAG_STARTER_LIMIT_KIND_PAST_DATE -> StarterLimitKind.PastDate
+        TAG_STARTER_LIMIT_KIND_NOT_YET -> StarterLimitKind.NotYet
+        else -> tag("StarterLimitKind")
+    }
+
+private fun Writer.starterChangeKind(v: StarterChangeKind): Writer =
+    u8(
+        when (v) {
+            StarterChangeKind.RaiseLimit -> TAG_STARTER_CHANGE_KIND_RAISE_LIMIT
+            StarterChangeKind.LaterDate -> TAG_STARTER_CHANGE_KIND_LATER_DATE
+            StarterChangeKind.AddCounter -> TAG_STARTER_CHANGE_KIND_ADD_COUNTER
+            StarterChangeKind.StopAboveOff -> TAG_STARTER_CHANGE_KIND_STOP_ABOVE_OFF
+            StarterChangeKind.Other -> TAG_STARTER_CHANGE_KIND_OTHER
+            StarterChangeKind.LowerLimit -> TAG_STARTER_CHANGE_KIND_LOWER_LIMIT
+            StarterChangeKind.EarlierDate -> TAG_STARTER_CHANGE_KIND_EARLIER_DATE
+            StarterChangeKind.StopAboveOn -> TAG_STARTER_CHANGE_KIND_STOP_ABOVE_ON
+        },
+    )
+
+/** The sealed seed and data key of a result, copied out; the response that held the key is overwritten. */
+private fun Reader.starterSealed(): StarterSealed {
+    val sealed = bytes()
+    val key = bytes()
+    end()
+    wipe()
+    return StarterSealed(sealed, key)
+}
 
 private fun Reader.importKind(): Boolean =
     when (u8()) {
@@ -1809,6 +1965,24 @@ private fun call(op: Int, handle: Long, fill: (Writer) -> Unit = {}): Reader {
     val response = Native.call(requestFrame(op, handle, fill))
         ?: throw OwnerException("response-null", "the library gave no response", 4)
     return decodeResponse(response)
+}
+
+/**
+ * A call whose request carries a secret (the starter wallet's data key): the request frame and the bytes the
+ * writer held are overwritten with zeros once the library has answered.
+ */
+private fun callSecret(op: Int, handle: Long, fill: (Writer) -> Unit): Reader {
+    val w = Writer().raw(REQUEST_MAGIC).u8(1).u16(op).u64(handle)
+    fill(w)
+    val frame = w.toByteArray()
+    w.wipe()
+    try {
+        val response = Native.call(frame)
+            ?: throw OwnerException("response-null", "the library gave no response", 4)
+        return decodeResponse(response)
+    } finally {
+        java.util.Arrays.fill(frame, 0.toByte())
+    }
 }
 
 /** A call whose result is nothing. */
@@ -2649,5 +2823,151 @@ object OwnerFloat {
                 .list(coins) { w.floatCoin(it) }
         }
         return r.floatPaid().also { r.end() }
+    }
+}
+
+/**
+ * The starter wallet of the owner phone (`docs/START-SIMPLE-RULES.md` SS-01 to SS-43). The words are made, kept
+ * and used inside the library and cross to the app only as images (SS-11); the library holds the one setup or
+ * restore that is open, so these calls name no handle. A call that signs is given the sealed seed and the data
+ * key opened from the Keystore for that call only (SS-20); the data key array is overwritten with zeros as soon
+ * as the request is written and the library has answered, and the app must not keep a copy.
+ */
+object OwnerStarter {
+    /** Screens of four words (SS-10). */
+    const val PAGES = 3
+
+    /**
+     * SS-01 to SS-04: make the words from the kernel's random bytes and the [rolls] of a die (each 1 to 6, none
+     * is allowed). The library holds them; only the public wallet comes back.
+     */
+    fun make(rolls: ByteArray = ByteArray(0)): StarterWalletView {
+        val r = call(OP_STARTER_MAKE, 0) { it.bytes(rolls) }
+        return StarterWalletView(r.string(), r.string(), r.string()).also { r.end() }
+    }
+
+    /** SS-11: screen [page] (0 to 2) of four numbered words as an image, at [scale] (1 to 16) times the 10 x 20 font. */
+    fun page(page: Long, scale: Long): StarterImage {
+        val r = call(OP_STARTER_PAGE, 0) { it.u32(page).u32(scale) }
+        return StarterImage(r.u32(), r.u32(), r.bytes()).also {
+            r.end()
+            r.wipe()
+        }
+    }
+
+    /** SS-10: pick the three positions of the check-back from fresh kernel bytes; 1 to 12, ascending. */
+    fun checkStart(): List<Long> {
+        val r = call(OP_STARTER_CHECK_START, 0)
+        return r.list { r.u32() }.also { r.end() }
+    }
+
+    /**
+     * SS-11: one key of the keypad: a letter (`a` to `z`, either case), 8 for backspace, 10 or 13 for enter. It
+     * goes to the check-back or to the restore, whichever is open, and only counts come back.
+     */
+    fun key(key: Int): StarterTyped {
+        val r = call(OP_STARTER_KEY, 0) { it.u8(key) }
+        return StarterTyped(r.u32(), r.bool(), r.u32(), r.bool(), r.bool()).also { r.end() }
+    }
+
+    /** SS-20: seal the seed once the check-back is passed. */
+    fun seal(): StarterSealed = call(OP_STARTER_SEAL, 0).starterSealed()
+
+    /** SS-23: begin the restore, which only the owner starts; the words are typed with [key]. */
+    fun restoreStart() = callUnit(OP_STARTER_RESTORE_START, 0)
+
+    /** SS-23: check the 12 typed words against the starter wallet's stored [description] and seal them again. */
+    fun restoreFinish(description: String): StarterSealed =
+        call(OP_STARTER_RESTORE_FINISH, 0) { it.string(description) }.starterSealed()
+
+    /** Drop the setup or the restore that is open; its words are wiped. */
+    fun cancel() = callUnit(OP_STARTER_CANCEL, 0)
+
+    /** SS-20: the public wallet inside [sealed], opened with [dataKey]; a refusal is the cue for the restore (SS-23). */
+    fun open(sealed: ByteArray, dataKey: ByteArray): StarterWalletView {
+        val r = callSecret(OP_STARTER_OPEN, 0) { it.bytes(sealed).bytes(dataKey) }
+        java.util.Arrays.fill(dataKey, 0.toByte())
+        return StarterWalletView(r.string(), r.string(), r.string()).also { r.end() }
+    }
+
+    /** SS-30: the fee rate of a payment, in satoshis per 1000 virtual bytes, shown before the owner confirms. */
+    fun feeRate(recent: Long?, typed: Long?): Long {
+        val r = call(OP_STARTER_FEE_RATE, 0) { w -> w.option(recent) { w.u64(it) }.option(typed) { w.u64(it) } }
+        return r.u64().also { r.end() }
+    }
+
+    /** SS-30, SS-31: sign a queued refund of [sats] to [address] from the starter wallet's [coins]. */
+    fun pay(
+        sealed: ByteArray,
+        dataKey: ByteArray,
+        network: OwnerNetwork,
+        address: String,
+        sats: Long,
+        feeRate: Long,
+        changeIndex: Long,
+        minConfirmations: Long,
+        lockHeight: Long,
+        coins: List<StarterCoin>,
+    ): StarterPaid {
+        val r = callSecret(OP_STARTER_PAY, 0) { w ->
+            w.bytes(sealed).bytes(dataKey).network(network).string(address).u64(sats).u64(feeRate).u32(changeIndex)
+                .u32(minConfirmations).u32(lockHeight).list(coins) { w.starterCoin(it) }
+        }
+        java.util.Arrays.fill(dataKey, 0.toByte())
+        return r.starterPaid().also { r.end() }
+    }
+
+    /**
+     * SS-42: move every coin of the starter wallet to the new wallet's receive address [newIndex], derived from
+     * its description [newWallet], in one payment.
+     */
+    fun move(
+        sealed: ByteArray,
+        dataKey: ByteArray,
+        newWallet: String,
+        newIndex: Long,
+        feeRate: Long,
+        minConfirmations: Long,
+        lockHeight: Long,
+        coins: List<StarterCoin>,
+    ): StarterPaid {
+        val r = callSecret(OP_STARTER_MOVE, 0) { w ->
+            w.bytes(sealed).bytes(dataKey).string(newWallet).u32(newIndex).u64(feeRate).u32(minConfirmations)
+                .u32(lockHeight).list(coins) { w.starterCoin(it) }
+        }
+        java.util.Arrays.fill(dataKey, 0.toByte())
+        return r.starterPaid().also { r.end() }
+    }
+
+    /** SS-35 to SS-37: where the wallet stands. The limit and the date are the phone's own records. */
+    fun limitState(held: Long, limit: Long, now: Long, moveBy: Long, notYetUntil: Long?): StarterLimit {
+        val r = call(OP_STARTER_LIMIT_STATE, 0) { w ->
+            w.u64(held).u64(limit).u64(now).u64(moveBy).option(notYetUntil) { w.u64(it) }
+        }
+        return StarterLimit(r.starterLimitKind(), r.option { r.u64() }).also { r.end() }
+    }
+
+    /** SS-37: whether a [change] of the settings waits in [state]. */
+    fun changeHeld(state: StarterLimitKind, change: StarterChangeKind): Boolean {
+        val r = call(OP_STARTER_CHANGE_HELD, 0) { it.starterLimitKind(state).starterChangeKind(change) }
+        return r.bool().also { r.end() }
+    }
+
+    /** SS-38: whether a counter may offer bitcoin. */
+    fun offersBitcoin(stopAboveLimit: Boolean, held: Long, limit: Long): Boolean {
+        val r = call(OP_STARTER_OFFERS_BITCOIN, 0) { it.bool(stopAboveLimit).u64(held).u64(limit) }
+        return r.bool().also { r.end() }
+    }
+
+    /** SS-43: whether the sealed seed and the Keystore key may be deleted: the move has one confirmation. */
+    fun seedMayGo(moveConfirmations: Long): Boolean {
+        val r = call(OP_STARTER_SEED_MAY_GO, 0) { it.u32(moveConfirmations) }
+        return r.bool().also { r.end() }
+    }
+
+    /** SS-37: the end of a "Not yet" taken at [now] and asked for [askedSecs] seconds: at most 7 days. */
+    fun notYet(now: Long, askedSecs: Long): Long {
+        val r = call(OP_STARTER_NOT_YET, 0) { it.u64(now).u64(askedSecs) }
+        return r.u64().also { r.end() }
     }
 }
