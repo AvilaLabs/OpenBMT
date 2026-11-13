@@ -514,10 +514,10 @@ the shop's currency, so the node keeps a log of its own.
   the node notes it. An entry whose payment did not happen is never
   removed: it is undone by a later entry of the kind "undone" that names the
   same kind, number and transaction. That entry is appended when the
-  transaction leaves the outbox without a confirmation that holds (it was
-  replaced, beaten, or left the chain and was not sent again), never only
-  because its block left, since the same bytes are sent again (OC-05) and
-  usually confirm. The books leave an entry and its undoing both out, so a
+  transaction is replaced, or beaten by a block that spends one of its
+  inputs, never only because its block left or because it cannot be found:
+  the same bytes are sent again (OC-05) and usually confirm, and an undoing
+  written in error would drop a real payment from the books. The books leave an entry and its undoing both out, so a
   refund paid again by a new transaction is one disposal, not two. It is
   read strictly: a length that is not a whole number
   of entries, a check that does not match, a flag that is not 0 or 1, a field
