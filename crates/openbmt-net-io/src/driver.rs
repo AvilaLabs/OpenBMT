@@ -1514,9 +1514,7 @@ where
         }
         let mut next = words.into_iter();
         Some((
-            TransportChoice::V2(V2Entropy::from_words(|| {
-                next.next().unwrap_or_default()
-            })),
+            TransportChoice::V2(V2Entropy::from_words(|| next.next().unwrap_or_default())),
             false,
         ))
     }
@@ -1572,7 +1570,9 @@ where
 
     /// A socket is open: give it to the manager, or close it at once.
     fn adopt(&mut self, id: PeerId, target: Target, stream: TcpStream, own: bool, now: u64) {
-        let (Some(nonce), Some((transport, v2_fallback))) = (self.draw(), self.transport_for(&target, now)) else {
+        let (Some(nonce), Some((transport, v2_fallback))) =
+            (self.draw(), self.transport_for(&target, now))
+        else {
             // No random numbers: the socket is closed and the dial counts as
             // failed.
             let _ = stream.shutdown(Shutdown::Both);

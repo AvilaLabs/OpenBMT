@@ -770,6 +770,7 @@ dependencies = [
  "openbmt-core",
  "openbmt-counter",
  "openbmt-courier",
+ "openbmt-kernel-random",
  "openbmt-lightning",
  "openbmt-lightning-node",
  "openbmt-link",
@@ -852,6 +853,7 @@ dependencies = [
  "bitcoin",
  "chacha20poly1305",
  "openbmt-core",
+ "openbmt-kernel-random",
  "openbmt-net-io",
 ]
 
@@ -933,6 +935,7 @@ dependencies = [
  "openbmt-counter",
  "openbmt-counter-node",
  "openbmt-courier",
+ "openbmt-kernel-random",
  "openbmt-link",
  "openbmt-net-io",
  "openbmt-owner",
