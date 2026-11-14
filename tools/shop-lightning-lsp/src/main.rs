@@ -13,8 +13,8 @@
 //! has no LSPS1 service: the library's own is behind `cfg(lsps1_service)`,
 //! which is not to be enabled, and the node gives no hook for the LSPS0
 //! messages of the lsps1 methods (its liquidity manager answers them
-//! itself, with nothing, as a peer without the service). A service of our
-//! own needs the provider to be made on the library, not on ldk-node, which
+//! itself, with nothing, as a peer without the service). A service in this
+//! tool needs the provider to be made on the library, not on ldk-node, which
 //! is a change of this tool's dependencies. So the flag is refused here
 //! rather than taken and ignored: a run that asked for LSPS1 does not go on
 //! against a provider that has none.
