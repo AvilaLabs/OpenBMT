@@ -756,8 +756,10 @@ limits in the signed settings: these rules only say when the counter uses it.
   (WR-61). The node asks the own node about the unconfirmed payments of the
   live sales when it starts, when the own node connects, and after each
   sighting of the light client that a sale took (WR-65), at most 256 at a
-  time. It never reads the own node's reports as sightings, and it takes no
-  header, block or transaction from it (NR-101, NR-102).
+  time. With `node_only` off it never reads the own node's reports as
+  sightings. With `node_only` on, a transaction the own node announced is
+  offered to the sales once more as a sighting of the source `OwnNode`
+  (WR-66). It takes no header or block from the own node (NR-101, NR-102).
 - **CR-104.** Every sale is judged with the own node's health line
   (`Counter::judge_with_own_node`, `override_sale_with_own_node`). The
   instant decision uses the own-node tier, with the limits of the signed

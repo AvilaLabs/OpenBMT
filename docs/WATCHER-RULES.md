@@ -229,7 +229,8 @@ that.
   standing again (WR-33) and the conflict flag stays set.
 - **WR-44.** "Seen by the light client" means that peers from at least 3
   network groups **[to tune]** reported the same transaction. Fewer groups
-  is "reported" and gives no instant label.
+  is "reported" and gives no instant label. The Box and the own node are in
+  no group.
 - **WR-45.** The check mode handed to the instant decision follows from the
   evidence, never from what a source says about itself:
   - reported by the Box and seen by the light client:
@@ -294,13 +295,17 @@ library keeps that apart from what the random peers report.
   not in the peers of the health check (WR-50 to WR-52), so its state never
   turns the light client's health on or off. The library does not check who
   the node is: the driver names it, and only a connection made to the
-  configured Tor v3 address is named (NR-98, NR-99).
+  configured Tor v3 address is named (NR-98, NR-99). With `node_only` on,
+  WR-66 adds one exception.
 - **WR-61.** A report from the own node names a transaction it holds. If the
   sale knows that transaction the report is recorded on it, and
   `SaleStatus::own_node_saw` is true while the weakest standing unconfirmed
   payment (WR-45) has been reported. If the sale does not know the
   transaction nothing is recorded and the call says so; the caller asks the
-  node again when the light client has sighted it (WR-65).
+  node again when the light client has sighted it (WR-65). With `node_only`
+  on, an announcement from the own node is also offered to the sales as a
+  sighting of the source `OwnNode` (WR-66), so the sale learns the
+  transaction from the node alone.
 - **WR-62.** The own-node check mode is `NodeAlsoSeenByLight` through the
   own node only when all three hold: the own node has reported the
   transaction (WR-61), the light client has seen it (WR-44), and the own node
@@ -355,6 +360,12 @@ library keeps that apart from what the random peers report.
   holds. The conflict watch of section 6 reads the own node's
   announcements in place of the peers'. A payment the node does not hold
   has no mode and waits for a confirmation, as WR-45's last case.
+  An announcement from the own node is a sighting of the source `OwnNode`:
+  it adds the transaction to the sale and counts toward its amounts
+  (WR-31, WR-40 to WR-43) and toward conflicts, as a peer's sighting does.
+  It records the node's report as WR-61 does. It adds no network group and
+  starts no WR-46 clock. With `node_only` off the node's announcement is no
+  sighting, as WR-60 says.
 - **WR-67.** In this mode the health line is the own node's alone: usable,
   connecting, not reachable, behind, silent, missing compact filters
   (NR-107), lacking an old block (NR-108), or checking with other nodes

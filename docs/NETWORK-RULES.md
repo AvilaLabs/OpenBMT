@@ -97,7 +97,10 @@ thin driver that owns the sockets.
   (other than for an unknown parent), sends a block that WR-20 or WR-21
   refuses, sends a filter that is proven false (NR-43), sends a block,
   transaction or filter that was not asked of it, or claims a height it
-  sends no headers for (NR-33).
+  sends no headers for (NR-33). A peer reached with v1 only because v2
+  failed with it lately (NR-81) is not banned for such a fault: a path that
+  broke v2 can break v1 as well. The connection is dropped and counts as a
+  failed dial, and the peer keeps its place as an anchor.
 - **NR-26.** With Tor on, every connection goes through the SOCKS5 proxy
   the caller names, and no name reaches the system's resolver. The seeds'
   filter names are looked up through Tor itself (NR-72). Peers reached by
@@ -216,7 +219,9 @@ thin driver that owns the sockets.
 - **NR-53.** A fetched transaction is handed to the watcher as a sighting
   from every peer that announced it (WR-40), at most 8. A later
   announcement of the same transaction by another peer is a further
-  sighting, reported by itself.
+  sighting, reported by itself. The own node is never in that list; the
+  sighting says by a flag of its own (`own`) whether the own node announced
+  the transaction too.
 - **NR-54.** This crate keeps no transaction: a fetched one is handed on
   and forgotten. The counter remembers each announced transaction ID for
   30 minutes from its first announcement, and at most 20,000 IDs, so that
@@ -393,6 +398,7 @@ writes none of it.
   no ban and no mark against it (NR-25 does not apply), just closed. An
   attacker on the path can force v1 this way, as BIP324 itself says:
   v2 here protects against a passive listener, not against an active one.
+  So a fault on such a v1 connection bans nobody (NR-25).
   Which transport each peer uses is shown to the app (NR-82), so that the
   shop's screen can say so.
 - **NR-82.** The list of peers the app is given (`health_peers` and the
@@ -593,9 +599,11 @@ and what the node reports is kept apart from what they report
   let go, and the node is not dropped for it. No answer is not a "no": a
   node does not serve a transaction it has not yet announced to the counter,
   so the counter takes only a positive report and says nothing about the
-  rest. A transaction from the own node is never a sighting (NR-53): the
-  manager does not fetch what it announces (NR-51), and the light client's
-  sightings come from the random peers alone.
+  rest. The own node is never in a sighting's list of peers (NR-53), so the
+  light client's sightings come from the random peers alone. The counter
+  fetches what the own node announces as from any peer (NR-51), and the
+  sighting then says by its `own` flag that the node announced it. With
+  `node_only` on that makes the sighting a source of its own (WR-66).
 - **NR-102.** The own node's tip is the best height it has shown: its
   statement in `version`, and then every block it announced or sent a header
   for that the counter's chain holds (a block the chain does not hold yet is
