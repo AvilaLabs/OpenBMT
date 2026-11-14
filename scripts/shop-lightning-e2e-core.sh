@@ -821,7 +821,9 @@ done
 note "close: $R"
 [ "$R" = "Ok(1)" ]
 check "SL-36: the close of the channel was begun" $?
-for _ in $(seq 1 30); do
+# The close is negotiated with the provider before it is sent: on a slow
+# machine that takes more than half a minute.
+for _ in $(seq 1 120); do
   mine 1
   sleep 1
   [ "$(bw pinned getbalance)" != "$BEFORE" ] && break

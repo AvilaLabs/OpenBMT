@@ -600,8 +600,8 @@ fn lk_08_seal_and_open_refuse_a_kind_the_role_may_not_send() {
         open_as_counter(&unknown).unwrap_err(),
         OpenError::UnknownKind(0)
     );
-    unknown[77] = 14;
-    assert_eq!(inspect(&unknown).unwrap_err(), OpenError::UnknownKind(14));
+    unknown[77] = 17;
+    assert_eq!(inspect(&unknown).unwrap_err(), OpenError::UnknownKind(17));
 }
 
 #[test]
@@ -759,7 +759,7 @@ fn lk_08_a_range_is_sent_by_the_owner_to_a_counter_and_is_kind_11() {
 fn kind_12_lk_78_a_switch_is_sent_by_the_owner_to_a_counter_and_is_kind_12() {
     assert_eq!(Kind::Switch.to_byte(), 12);
     assert_eq!(Kind::from_byte(12), Some(Kind::Switch));
-    assert_eq!(Kind::from_byte(14), None);
+    assert_eq!(Kind::from_byte(17), None);
     let m = owner_to_counter(1, Kind::Switch, b"x");
     assert_eq!(open_as_counter(&m).unwrap().kind, Kind::Switch);
     // Not from a counter to the owner, not from a box or a watcher, and not
@@ -775,7 +775,7 @@ fn kind_12_lk_78_a_switch_is_sent_by_the_owner_to_a_counter_and_is_kind_12() {
 fn kind_13_lk_79_a_starter_line_is_sent_by_the_owner_to_a_counter_and_is_kind_13() {
     assert_eq!(Kind::Starter.to_byte(), 13);
     assert_eq!(Kind::from_byte(13), Some(Kind::Starter));
-    assert_eq!(Kind::from_byte(14), None);
+    assert_eq!(Kind::from_byte(17), None);
     let m = owner_to_counter(1, Kind::Starter, b"x");
     assert_eq!(open_as_counter(&m).unwrap().kind, Kind::Starter);
     // Not from a counter to the owner, not from a box or a watcher, and not

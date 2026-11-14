@@ -114,8 +114,10 @@ jobs:
       - name: Android SDK packages
         shell: bash
         run: |
-          sdkmanager --sdk_root="$ANDROID_HOME" --licenses < <(yes) > /dev/null
-          sdkmanager --sdk_root="$ANDROID_HOME" \
+          sdk="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$sdk" ] || sdk=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -n 1)
+          "$sdk" --sdk_root="$ANDROID_HOME" --licenses < <(yes) > /dev/null || true
+          "$sdk" --sdk_root="$ANDROID_HOME" \
             "ndk;26.3.11579264" "build-tools;36.0.0" "platforms;android-36"
           echo "ANDROID_SDK=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264" >> "$GITHUB_ENV"

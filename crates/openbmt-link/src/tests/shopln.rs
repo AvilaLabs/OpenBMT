@@ -199,11 +199,12 @@ fn strict<T>(
 // ---- LK-80 ---------------------------------------------------------------
 
 #[test]
-fn lk_80_the_bytes_of_the_kinds_are_14_15_and_16_and_not_13() {
+fn lk_80_the_bytes_of_the_kinds_are_14_15_and_16_after_the_starter_line() {
     assert_eq!(Kind::Store.to_byte(), 14);
     assert_eq!(Kind::Stored.to_byte(), 15);
     assert_eq!(Kind::LightningReport.to_byte(), 16);
-    assert_eq!(Kind::from_byte(13), None);
+    assert_eq!(Kind::from_byte(13), Some(Kind::Starter));
+    assert_eq!(Kind::from_byte(17), None);
     for k in [Kind::Store, Kind::Stored, Kind::LightningReport] {
         assert_eq!(Kind::from_byte(k.to_byte()), Some(k));
         assert!(k.is_shop_lightning());

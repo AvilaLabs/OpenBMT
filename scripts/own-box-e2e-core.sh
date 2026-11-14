@@ -158,6 +158,7 @@ trap cleanup EXIT
 
 guard=$HOME/.cache/openbmt/guard.sh
 TARGET=${CARGO_TARGET_DIR:-$HOME/.cache/openbmt/target}
+export CARGO_TARGET_DIR="$TARGET"
 build() { # cargo args
   if [ -x "$guard" ]; then
     "$guard" cargo build --quiet --locked --manifest-path "$ROOT/Cargo.toml" "$@" || die "the build failed: $*"
