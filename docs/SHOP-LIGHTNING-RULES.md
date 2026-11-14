@@ -153,17 +153,32 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
 - **SL-27. What it watches.** The funding output of each channel and every
   output the library registers with `chain::Filter`. When a block that holds a
   channel's funding leaves the chain, the library closes that channel by
-  force, since it uses a channel only on a confirmed funding, and the shop's
-  money comes back as from any close (SL-33, SL-36); a later payment opens a
-  new channel (SL-29).
+  force, and the shop's money comes back as from any close (SL-33, SL-36);
+  a later payment opens a new channel (SL-29). A channel the provider opened
+  for a payment is used before its funding confirms (SL-40). If that
+  funding is beaten by another transaction, or has no confirmation within
+  144 blocks **[to tune]**, the money in the channel may never come: the
+  counter tells the manager, and the owner phone lists the sales paid
+  through it.
 
 ## 5. The provider
 
 - **SL-28. Any provider, the shop's choice.** The first channel and every
   later one come from a liquidity provider the shop picks, through LSPS2
   (`lightning-liquidity` 0.2.8: `request_opening_params`,
-  `select_opening_params`) with `client_trusts_lsp` false. The provider can
-  be changed at any time. OpenBMT runs none and takes nothing.
+  `select_opening_params`). `client_trusts_lsp` is the provider's own
+  setting: with it false the provider sends the funding before the payment,
+  and with it true it may hold the funding back until the shop has taken
+  the payment; SL-27 and SL-40 cover a funding that does not come. The
+  provider can be changed at any time. OpenBMT runs none and takes nothing. When the
+  provider also offers LSPS1 (bLIP-51), the node buys room ahead: once the
+  room to receive (SL-40) is under half the cap, it orders a channel that
+  brings the room up to the cap, asks that the channel be used only after
+  its funding has a confirmation (`required_channel_confirmations` 1), and
+  pays the provider's invoice from the Lightning balance, only when the fee
+  is at most what the owner allows for one opening (SL-29). A provider
+  without LSPS1 is taken all the same; room then comes only with a payment
+  too big for it.
 - **SL-29. The fee before the payment.** A payment that opens a channel
   shows the provider's fee to the customer's amount before the invoice is
   made, and the owner sets the most the shop will pay for one opening. Above
@@ -206,8 +221,9 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   limit.
 - **SL-35. Room to receive.** A sweep does not give back room to receive: the
   channel shrinks (prototype E6). Room comes back only when the provider adds
-  coins, by a new channel at the next payment too big for the room, at its
-  fee. The owner phone says so plainly, and shows the room left.
+  coins: bought ahead when the provider offers LSPS1 (SL-28), or by a new
+  channel at the next payment too big for the room, at its fee. The owner
+  phone says so plainly, and shows the room left.
 - **SL-36. Closing for a while.** Before the shop closes for longer than half
   the window of SL-30, and whenever Shop Lightning is turned off, the node
   closes every channel cooperatively to the shop's wallet. A provider that
@@ -220,7 +236,17 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   above that sum less a margin is on-chain only, or opens a new channel
   (SL-29). A payment bigger than the room is held by the payer for about two
   minutes and then fails (prototype E7, `MPP_TIMEOUT_TICKS` = 3), which a
-  customer at a counter must never see.
+  customer at a counter must never see. A payment over channels whose
+  funding has a confirmation is final at once. A payment that came through
+  a channel the provider opened for it, before that channel's funding has a
+  confirmation, rests on a transaction not yet in a block, as an on-chain
+  payment seen and not yet confirmed does, and is decided the same way, as
+  a swap is (CR-221): within the shop's instant limits for a payment the
+  light client has seen (`Light`, WR-45) and with room in the exposure
+  ledger, the sale is Paid at once, and the amount stays in the ledger until
+  the funding confirms. Above them the sale waits for that confirmation,
+  and the manager can accept it as any waiting sale (CR-20). SL-27 says
+  what happens if the funding never confirms.
 - **SL-41. When Lightning is not offered.** With the second device away, the
   chain data behind, no usable channel and no provider answering, the
   counter shows the on-chain code alone and the manager sees why.
