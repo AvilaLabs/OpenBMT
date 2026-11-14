@@ -4,7 +4,7 @@
 use crate::bytewords::encode_minimal;
 use crate::error::UrError;
 use crate::fountain::{
-    choose_fragments, encode_part, nominal_fragment_len, partition, xor_into, MAX_FRAGMENT_LEN,
+    encode_part, nominal_fragment_len, partition, xor_into, Chooser, MAX_FRAGMENT_LEN,
     MAX_MESSAGE_LEN, MAX_SEQ_LEN, MIN_FRAGMENT_LEN,
 };
 use crate::hash::crc32;
@@ -33,6 +33,8 @@ pub struct Encoder {
     seq_len: usize,
     checksum: u32,
     seq_num: u32,
+    /// Which fragments each part mixes, for this sequence.
+    chooser: Chooser,
 }
 
 impl Encoder {
@@ -72,6 +74,7 @@ impl Encoder {
                 seq_len: 1,
                 checksum,
                 seq_num: 0,
+                chooser: Chooser::new(1, checksum),
             });
         }
         let fragment_len = nominal_fragment_len(message.len(), min_fragment_len, max_fragment_len);
@@ -88,6 +91,7 @@ impl Encoder {
             ur_type: ur_type.to_string(),
             message,
             seq_len: fragments.len(),
+            chooser: Chooser::new(fragments.len(), checksum),
             fragments,
             checksum,
             seq_num: 0,
@@ -112,7 +116,7 @@ impl Encoder {
             return format!("ur:{}/{}", self.ur_type, encode_minimal(&self.message));
         }
         self.seq_num = self.seq_num.checked_add(1).unwrap_or(1);
-        let indexes = choose_fragments(self.seq_num, self.seq_len, self.checksum);
+        let indexes = self.chooser.choose(self.seq_num);
         let fragment_len = self.fragments.first().map_or(0, Vec::len);
         let mut data = vec![0u8; fragment_len];
         for i in indexes {

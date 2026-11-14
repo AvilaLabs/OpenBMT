@@ -7,7 +7,7 @@ use crate::bytewords::decode_minimal;
 use crate::encoder::check_type;
 use crate::error::UrError;
 use crate::fountain::{
-    choose_fragments, decode_part, xor_into, MAX_FRAGMENT_LEN, MAX_MESSAGE_LEN, MAX_SEQ_LEN,
+    decode_part, xor_into, Chooser, MAX_FRAGMENT_LEN, MAX_MESSAGE_LEN, MAX_SEQ_LEN,
     MIN_FRAGMENT_LEN,
 };
 use crate::hash::crc32;
@@ -28,10 +28,24 @@ pub struct Progress {
     pub estimated_fraction: f64,
 }
 
-/// A part that is a mix of several fragments, with the ones not yet known.
+/// UR-11: the index entries all held mixed parts may carry together, per
+/// fragment of the sequence. An entry is 8 bytes in the part and 4 in the
+/// watch list of its fragment, so at the largest sequence length (10,000)
+/// the budget of 1,000,000 entries is 12 MB whatever the parts' degrees.
+/// An honest sequence of that length holds parts of degree 100 on average.
+const HELD_ENTRIES_PER_FRAGMENT: usize = 100;
+
+/// UR-11: a mixed part with more fragments than half the sequence length
+/// (but at least this many) is not held. Such parts are rare in an honest
+/// sequence and the fragments one by one come anyway.
+const MIN_HELD_DEGREE: usize = 64;
+
+/// A part that is a mix of several fragments. Its `indexes` are the ones
+/// not known when it came; `left` counts those still unknown.
 struct Mixed {
     indexes: Vec<usize>,
     data: Vec<u8>,
+    left: usize,
 }
 
 /// What the first accepted part fixed, and what has come since.
@@ -42,7 +56,18 @@ struct State {
     checksum: u32,
     fragment_len: usize,
     known: Vec<Option<Vec<u8>>>,
-    mixed: Vec<Mixed>,
+    chooser: Chooser,
+    /// Held mixed parts by slot; a freed slot is `None` and listed in `free`.
+    mixed: Vec<Option<Mixed>>,
+    free: Vec<usize>,
+    /// For each fragment, the slots of the held parts that carry it.
+    watch: Vec<Vec<u32>>,
+    held: usize,
+    /// The index entries of the held parts.
+    held_entries: usize,
+    /// Parts looked at by `learn`, for the tests.
+    #[cfg(test)]
+    work: usize,
     seen: BTreeSet<u32>,
     processed: usize,
 }
@@ -152,7 +177,15 @@ impl Decoder {
     /// Mixed parts held now (for the tests of UR-11).
     #[cfg(test)]
     pub(crate) fn held_mixed(&self) -> usize {
-        self.state.as_ref().map_or(0, |s| s.mixed.len())
+        self.state.as_ref().map_or(0, |s| s.held)
+    }
+
+    /// Index entries held now, and the parts `learn` has looked at.
+    #[cfg(test)]
+    pub(crate) fn held_entries_and_work(&self) -> (usize, usize) {
+        self.state
+            .as_ref()
+            .map_or((0, 0), |s| (s.held_entries, s.work))
     }
 
     fn single(&mut self, parsed: Parsed) -> Result<Progress, UrError> {
@@ -245,7 +278,14 @@ impl Decoder {
                     checksum,
                     fragment_len,
                     known: vec![None; seq_len],
+                    chooser: Chooser::new(seq_len, checksum),
                     mixed: Vec::new(),
+                    free: Vec::new(),
+                    watch: vec![Vec::new(); seq_len],
+                    held: 0,
+                    held_entries: 0,
+                    #[cfg(test)]
+                    work: 0,
                     seen: BTreeSet::new(),
                     processed: 0,
                 });
@@ -308,7 +348,7 @@ impl State {
             return Ok(None);
         }
         // Reduce by what is known, without changing anything yet.
-        let mut indexes = choose_fragments(seq_num, self.seq_len, self.checksum);
+        let mut indexes = self.chooser.choose(seq_num);
         let mut data = data.to_vec();
         indexes.retain(|&i| match self.known.get(i) {
             Some(Some(f)) => {
@@ -317,8 +357,27 @@ impl State {
             }
             _ => true,
         });
-        let hold = indexes.len() > 1 && !self.mixed.iter().any(|m| m.indexes == indexes);
-        if hold && self.mixed.len() >= 2 * self.seq_len {
+        let mixed = indexes.len() > 1;
+        if mixed && indexes.len() > (self.seq_len / 2).max(MIN_HELD_DEGREE) {
+            // Never held, and not counted: the decoder keeps waiting.
+            return Ok(None);
+        }
+        let dup = mixed
+            && indexes.first().is_some_and(|&first| {
+                self.watch.get(first).is_some_and(|ids| {
+                    ids.iter().any(|&id| {
+                        self.mixed
+                            .get(id as usize)
+                            .and_then(Option::as_ref)
+                            .is_some_and(|m| m.indexes == indexes)
+                    })
+                })
+            });
+        let hold = mixed && !dup;
+        if hold
+            && (self.held >= 2 * self.seq_len
+                || self.held_entries + indexes.len() > HELD_ENTRIES_PER_FRAGMENT * self.seq_len)
+        {
             return Err(UrError::MixedFull);
         }
         if self.seen.len() < 4 * self.seq_len {
@@ -330,15 +389,36 @@ impl State {
             [one] => self.learn(*one, data),
             _ => {
                 if hold {
-                    self.mixed.push(Mixed { indexes, data });
+                    self.hold(indexes, data);
                 }
                 Ok(None)
             }
         }
     }
 
-    /// A fragment becomes known; the mixed parts that held it shrink, and
-    /// any that reach one fragment become known in turn.
+    fn hold(&mut self, indexes: Vec<usize>, data: Vec<u8>) {
+        let id = self.free.pop().unwrap_or(self.mixed.len());
+        for &i in &indexes {
+            if let Some(w) = self.watch.get_mut(i) {
+                w.push(id as u32);
+            }
+        }
+        self.held += 1;
+        self.held_entries += indexes.len();
+        let part = Some(Mixed {
+            left: indexes.len(),
+            indexes,
+            data,
+        });
+        match self.mixed.get_mut(id) {
+            Some(slot) => *slot = part,
+            None => self.mixed.push(part),
+        }
+    }
+
+    /// A fragment becomes known; the held parts that carry it shrink, and
+    /// any that reach one fragment become known in turn. Each entry of a
+    /// held part is looked at once, when its fragment is learned.
     fn learn(&mut self, index: usize, data: Vec<u8>) -> Result<Option<Vec<u8>>, UrError> {
         let mut work = vec![(index, data)];
         while let Some((i, d)) = work.pop() {
@@ -346,20 +426,46 @@ impl State {
                 Some(None) => {}
                 _ => continue,
             }
-            let held = std::mem::take(&mut self.mixed);
-            for mut m in held {
-                if let Ok(at) = m.indexes.binary_search(&i) {
-                    xor_into(&mut m.data, &d);
-                    m.indexes.remove(at);
-                }
-                match m.indexes.as_slice() {
-                    [] => {}
-                    [one] => work.push((*one, m.data)),
-                    _ => self.mixed.push(m),
-                }
-            }
+            let ids = self
+                .watch
+                .get_mut(i)
+                .map(std::mem::take)
+                .unwrap_or_default();
             if let Some(slot) = self.known.get_mut(i) {
-                *slot = Some(d);
+                *slot = Some(d.clone());
+            }
+            for id in ids {
+                #[cfg(test)]
+                {
+                    self.work += 1;
+                }
+                let Some(m) = self.mixed.get_mut(id as usize).and_then(Option::as_mut) else {
+                    continue;
+                };
+                xor_into(&mut m.data, &d);
+                m.left = m.left.saturating_sub(1);
+                if m.left > 1 {
+                    continue;
+                }
+                let Some(done) = self.mixed.get_mut(id as usize).and_then(Option::take) else {
+                    continue;
+                };
+                self.free.push(id as usize);
+                self.held -= 1;
+                self.held_entries = self.held_entries.saturating_sub(done.indexes.len());
+                let known = &self.known;
+                let rest = done
+                    .indexes
+                    .iter()
+                    .copied()
+                    .find(|&k| matches!(known.get(k), Some(None)));
+                if let Some(one) = rest {
+                    // The slot may be reused: no stale entry may stay.
+                    if let Some(w) = self.watch.get_mut(one) {
+                        w.retain(|&w| w != id);
+                    }
+                    work.push((one, done.data));
+                }
             }
         }
         if self.known.iter().any(Option::is_none) {

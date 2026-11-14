@@ -44,6 +44,7 @@ pub(crate) fn partition(message: &[u8], fragment_len: usize) -> Vec<Vec<u8>> {
 }
 
 /// Walker's alias method as Vose gave it, over the weights 1, 1/2, ... 1/n.
+#[derive(Debug, Clone)]
 struct Sampler {
     probs: Vec<f64>,
     aliases: Vec<usize>,
@@ -108,39 +109,101 @@ impl Sampler {
     }
 }
 
-/// The degree of a mixed part: 1 to `seq_len`, with weight 1/degree.
-pub(crate) fn choose_degree(seq_len: usize, rng: &mut Xoshiro256) -> usize {
+/// The sampler of the degree of a mixed part: 1 to `seq_len`, with weight
+/// 1/degree.
+fn degree_sampler(seq_len: usize) -> Sampler {
     let weights: Vec<f64> = (1..=seq_len).map(|i| 1.0 / i as f64).collect();
-    Sampler::new(&weights).sample(rng) + 1
+    Sampler::new(&weights)
 }
 
-/// The fragments (their indexes, ascending) that part `seq_num` is made
-/// of. Parts 1 to `seq_len` are the fragments one by one; later parts are
-/// seeded from the sequence number and the checksum, both four bytes
-/// big-endian.
+/// Chooses the fragments of parts for one sequence length and checksum.
+/// The degree sampler and the counting tree are built once, so a part
+/// costs `degree * log(seq_len)` and not a rebuild of `seq_len` entries.
+#[derive(Debug, Clone)]
+pub(crate) struct Chooser {
+    seq_len: usize,
+    checksum: u32,
+    sampler: Sampler,
+    /// A Fenwick tree over `seq_len` ones: the fresh state of a shuffle.
+    fresh: Vec<u32>,
+}
+
+impl Chooser {
+    pub(crate) fn new(seq_len: usize, checksum: u32) -> Self {
+        let fresh = (1..=seq_len)
+            .map(|i| (i & i.wrapping_neg()) as u32)
+            .collect();
+        Self {
+            seq_len,
+            checksum,
+            sampler: degree_sampler(seq_len),
+            fresh,
+        }
+    }
+
+    /// The fragments (their indexes, ascending) that part `seq_num` is made
+    /// of. Parts 1 to `seq_len` are the fragments one by one; later parts
+    /// are seeded from the sequence number and the checksum, both four
+    /// bytes big-endian.
+    pub(crate) fn choose(&self, seq_num: u32) -> Vec<usize> {
+        let seq_len = self.seq_len;
+        if seq_len == 0 {
+            return Vec::new();
+        }
+        if usize::try_from(seq_num).is_ok_and(|n| n <= seq_len) {
+            return vec![usize::try_from(seq_num).unwrap_or(1).saturating_sub(1)];
+        }
+        let mut seed = [0u8; 8];
+        if let Some((a, b)) = seed.split_at_mut_checked(4) {
+            a.copy_from_slice(&seq_num.to_be_bytes());
+            b.copy_from_slice(&self.checksum.to_be_bytes());
+        }
+        let mut rng = Xoshiro256::from_bytes(&seed);
+        let degree = self.sampler.sample(&mut rng) + 1;
+        // A partial shuffle: the first `degree` draws of the full one, each
+        // taking the `at`-th of the fragments not yet taken.
+        let mut tree = self.fresh.clone();
+        let mut chosen = Vec::with_capacity(degree);
+        for left in (seq_len - degree + 1..=seq_len).rev() {
+            let at = rng.next_int(0, (left as u64).saturating_sub(1)) as usize;
+            let index = take_nth(&mut tree, at);
+            chosen.push(index);
+        }
+        chosen.sort_unstable();
+        chosen
+    }
+}
+
+/// Removes the `at`-th (from 0) entry still present in the Fenwick tree of
+/// ones and gives its position.
+fn take_nth(tree: &mut [u32], at: usize) -> usize {
+    let n = tree.len();
+    let mut pos = 0usize;
+    let mut rest = at as u32;
+    let mut step = n.checked_next_power_of_two().unwrap_or(1);
+    while step > 0 {
+        let next = pos + step;
+        if let Some(&count) = next.checked_sub(1).and_then(|i| tree.get(i)) {
+            if count <= rest {
+                pos = next;
+                rest -= count;
+            }
+        }
+        step >>= 1;
+    }
+    // `pos` entries precede the one taken, which is at position `pos`.
+    let mut i = pos + 1;
+    while let Some(slot) = i.checked_sub(1).and_then(|k| tree.get_mut(k)) {
+        *slot = slot.saturating_sub(1);
+        i += i & i.wrapping_neg();
+    }
+    pos
+}
+
+/// The fragments of part `seq_num`, for one-off use (the tests).
+#[cfg(test)]
 pub(crate) fn choose_fragments(seq_num: u32, seq_len: usize, checksum: u32) -> Vec<usize> {
-    if seq_len == 0 {
-        return Vec::new();
-    }
-    if usize::try_from(seq_num).is_ok_and(|n| n <= seq_len) {
-        return vec![usize::try_from(seq_num).unwrap_or(1).saturating_sub(1)];
-    }
-    let mut seed = [0u8; 8];
-    if let Some((a, b)) = seed.split_at_mut_checked(4) {
-        a.copy_from_slice(&seq_num.to_be_bytes());
-        b.copy_from_slice(&checksum.to_be_bytes());
-    }
-    let mut rng = Xoshiro256::from_bytes(&seed);
-    let degree = choose_degree(seq_len, &mut rng);
-    // A partial shuffle: the first `degree` draws of the full one.
-    let mut remaining: Vec<usize> = (0..seq_len).collect();
-    let mut chosen = Vec::with_capacity(degree);
-    for _ in 0..degree {
-        let at = rng.next_int(0, (remaining.len() as u64).saturating_sub(1)) as usize;
-        chosen.push(remaining.remove(at));
-    }
-    chosen.sort_unstable();
-    chosen
+    Chooser::new(seq_len, checksum).choose(seq_num)
 }
 
 /// `into` made the exclusive or with `other` (the shorter is padded).

@@ -335,11 +335,12 @@ fn ur_11_mixed_parts_held_are_at_most_twice_the_sequence_length() {
     let mut d = Decoder::new();
     let mut held = 0;
     let mut refused = false;
-    // Parts of degree two or more, so that nothing is ever learned.
+    // Parts of degree two to half the sequence (no more is held), so that
+    // nothing is ever learned.
     let mut seen = Vec::new();
     for n in (seq_len as u32 + 1)..400_000 {
         let idx = choose_fragments(n, seq_len, checksum);
-        if idx.len() < 2 || seen.contains(&idx) {
+        if idx.len() < 2 || idx.len() > seq_len / 2 || seen.contains(&idx) {
             continue;
         }
         seen.push(idx);
@@ -455,4 +456,91 @@ fn ur_16_text_is_at_most_the_longest_ur_within_the_bounds() {
     );
     assert!(whole.len() <= MAX_TEXT_LEN);
     assert!(Decoder::new().receive(&whole).is_ok());
+}
+
+/// Parts of the stream of `seq_len` (checksum `checksum`) with a degree in
+/// `degrees`, as many as `want`, from the sequence numbers after the pure ones.
+fn parts_of_degree(
+    seq_len: usize,
+    checksum: u32,
+    degrees: std::ops::RangeInclusive<usize>,
+    want: usize,
+) -> Vec<u32> {
+    let chooser = crate::fountain::Chooser::new(seq_len, checksum);
+    (seq_len as u32 + 1..)
+        .filter(|&n| degrees.contains(&chooser.choose(n).len()))
+        .take(want)
+        .collect()
+}
+
+#[test]
+fn ur_11_hostile_high_degree_parts_hold_bounded_entries_and_work() {
+    // The proportions of the largest stream (10,000 parts of 105 bytes, a
+    // message of about 1 MiB), at a tenth of the size.
+    let seq_len = 1000;
+    let fragment_len = 105;
+    let message_len = seq_len * fragment_len - 3;
+    let checksum = 0x0bad_f00d;
+    let data = vec![9u8; fragment_len];
+    let budget = 100 * seq_len;
+    // Degrees above half the sequence are never held, however many come.
+    let mut d = Decoder::new();
+    for n in parts_of_degree(seq_len, checksum, seq_len / 2 + 1..=seq_len, 2 * seq_len) {
+        let text = part_text("bytes", n, seq_len, message_len, checksum, &data);
+        d.receive(&text).expect("dropped, not refused");
+    }
+    assert_eq!(d.held_mixed(), 0);
+    assert_eq!(d.held_entries_and_work(), (0, 0));
+    // Degrees just under the cap fill the entry budget, and no more.
+    let mut refused = false;
+    for n in parts_of_degree(seq_len, checksum, seq_len / 4..=seq_len / 2, 2 * seq_len) {
+        let text = part_text("bytes", n, seq_len, message_len, checksum, &data);
+        match d.receive(&text) {
+            Ok(_) => {}
+            Err(e) => {
+                assert_eq!(e.rule(), "UR-11");
+                refused = true;
+            }
+        }
+        assert!(d.held_entries_and_work().0 <= budget);
+    }
+    assert!(refused, "the entry budget was never reached");
+    // The pure fragments then reduce every held part, each entry once.
+    let (entries, _) = d.held_entries_and_work();
+    assert!(entries > budget / 2, "{entries}");
+    let mut work = 0;
+    for n in 1..=seq_len as u32 {
+        let text = part_text("bytes", n, seq_len, message_len, checksum, &data);
+        // The last one completes a message that fails its checksum.
+        let _ = d.receive(&text);
+        work = work.max(d.held_entries_and_work().1);
+    }
+    assert!(work <= budget, "{work} looks at held entries");
+}
+
+#[test]
+fn ur_11_an_honest_stream_of_the_largest_length_decodes_within_the_budget() {
+    // 10,000 fragments of 104 bytes: the longest sequence UR-03 allows.
+    let message = make_message(10_000 * 104 - 20, "largest");
+    let payload = crate::cbor::encode_bytes(&message);
+    let mut e = Encoder::new("bytes", &payload, 104, 10).expect("ok");
+    assert_eq!(e.seq_len(), 10_000);
+    // 30% of the parts lost, in order.
+    let mut d = Decoder::new();
+    let mut max_entries = 0;
+    for i in 0..40_000 {
+        let p = e.next_part();
+        if i % 10 < 3 {
+            continue;
+        }
+        // A part refused for the bound is dropped; the decoder keeps waiting.
+        let _ = d.receive(&p);
+        max_entries = max_entries.max(d.held_entries_and_work().0);
+        if d.is_complete() {
+            break;
+        }
+    }
+    assert!(d.is_complete(), "not complete");
+    assert!(max_entries <= 100 * 10_000);
+    assert_eq!(d.result().map(|r| r.1), Some(payload));
 }

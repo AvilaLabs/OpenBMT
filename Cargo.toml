@@ -16,3 +16,7 @@ opt-level = 2
 # The QR reader's round-trip tests draw and read hundreds of codes.
 [profile.dev.package.openbmt-qr]
 opt-level = 2
+
+# The largest honest sequence (10,000 fragments) is encoded and decoded in a test.
+[profile.dev.package.openbmt-ur]
+opt-level = 2
