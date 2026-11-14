@@ -123,7 +123,15 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   server that would learn the shop's addresses. On compact filters the newest
   block reaches the library once its header is stored, which can be about a
   minute after the block arrives; the library keeps its deadlines in blocks,
-  so a minute is far inside every one.
+  so a minute is far inside every one. After a reorganization the newest
+  block reaches the library only once the watcher has checked the new branch
+  from the fork, so every transaction of the new branch is given before the
+  library hears that the chain moved; the watcher reports its checked height
+  again from the fork even where it does not pass the height it reported
+  before. At start and at every change of the chain, each transaction the
+  library holds as confirmed is read against the chain the node knows: one
+  whose block is not the chain's block at that height, or that lies above
+  the newest block known, is given back as unconfirmed.
 - **SL-26a. Fee rates without Core.** On compact filters the fee rates the
   library asks for come from samples of blocks, taken as the owner's device
   takes them (`docs/FEE-RULES.md` FE-20, with the node's own `fee-history.bin`):
