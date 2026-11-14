@@ -109,14 +109,19 @@ order of the rules, so that the refusal names the first that fails.
   other network.
 - **SW-27.** The timeout is a block height (below 500,000,000) at least
   `MIN_CLAIM_BLOCKS` above the height of the chain tip the caller gives, so
-  that the claim has time to confirm. This floor is for the claim only: it
-  is not the time a customer is made to wait.
+  that the claim has time to confirm. This floor is for the claim only: it is
+  not the time a customer is made to wait. The first claim, which shows the
+  preimage, is built only while at least `CLAIM_MARGIN_BLOCKS` (18) blocks are
+  left before the timeout (SW-44).
 - **SW-28.** The amount on chain is at least `MIN_ONCHAIN_SATS` and at most
   the invoice amount. With the quote the caller gives (the service's
   percentage in parts per million of the invoice amount, rounded up, and its
   lockup fee in satoshis), it is at least the invoice amount less those two.
-  The service may promise more than the quote, never less. The quote is
-  made from the service's live terms (`Quote::from_pairs`, SW-60, SW-63).
+  The service may promise more than the quote, never less. It is also at least
+  `MIN_ONCHAIN_PPM` (900,000 parts per million) of the invoice amount, rounded
+  up, so the service never keeps more than a tenth; a reply under it is
+  refused on its own, after the quote's floor. The quote is made from the
+  service's live terms (`Quote::from_pairs`, SW-60, SW-63).
 
 ## 4. The lockup
 
@@ -146,9 +151,17 @@ order of the rules, so that the refusal names the first that fails.
   control block commits to the output key, the preimage satisfies the hash
   and the signature verifies. A transaction that does not pass is not
   returned.
-- **SW-44.** No claim is built at or after the timeout: when the chain tip
-  the caller gives is at or above it, the service may already have taken its
-  lockup back.
+- **SW-44.** No first claim is built at or after the timeout, with fewer than
+  `CLAIM_MARGIN_BLOCKS` blocks before it, or while the chain is behind (a
+  header is known above the height checked in full, WR-54): the service may
+  already have taken its lockup back, or may before the claim confirms. With
+  too few blocks left the swap ends as timed out and the preimage is never
+  shown. A claim already sent has shown the preimage, and its spend has no
+  timelock: it is built again at a higher fee (SW-46), or sent again after it
+  left the chain, at and past the timeout too, until it or another spend of
+  the lockup is in a block. A swap is lost when its lockup is spent, in a
+  block of the best chain, by a transaction that is not one of the shop's
+  claims.
 - **SW-45.** The claim is by the script path only. The cooperative key-path
   signature of MuSig2 is not built here: the packages the project allows
   have no MuSig2 signing code, and the one part of BIP 327 that is needed to
@@ -192,11 +205,12 @@ order of the rules, so that the refusal names the first that fails.
 ## 7. The live terms
 
 - **SW-60.** The reply of `GET /v2/swap/reverse` is read for the BTC to BTC
-  pair only, within `MAX_HTTP_BYTES` and 8 levels. It gives the least and
-  the most invoice amount, the percentage fee as parts per million, and the
-  claim and lockup miner fees in satoshis. The least is not zero and not
-  above the most. A reply with no BTC to BTC pair, or with a member of it
-  missing or mistyped, is refused. Every other pair is ignored.
+  pair only, within `MAX_HTTP_BYTES` and 8 levels. It gives the least and the
+  most invoice amount, the percentage fee as parts per million, and the claim
+  and lockup miner fees in satoshis. The least is not zero and not above the
+  most. A lockup fee above `MAX_LOCKUP_FEE_SATS` (25,000) is refused, so no
+  swap is asked of such a service. A reply with no BTC to BTC pair, or with a
+  member of it missing or mistyped, is refused. Every other pair is ignored.
 - **SW-61.** A percentage is turned into parts per million from the text of
   the number, with no floating point: `0.6` is 6000 and `0.25` is 2500. More
   than 4 decimal places, an exponent, a negative number and more than 10
@@ -225,17 +239,21 @@ order of the rules, so that the refusal names the first that fails.
   a new value. A failed swap shows no preimage: after a status that says the
   swap failed, or at the timeout, no claim is built. After the claim is
   sent a status changes nothing.
-- **SW-72.** The machine does not believe the service about money. A lockup
-  is believed only after SW-30 has checked the bytes of the transaction,
-  and bytes in a status are always taken as not yet in a block. The swap is
-  paid only when the caller reports that the shop's own claim, by its id,
-  was seen in a block; another transaction is refused.
+- **SW-72.** The machine does not believe the service about money. A lockup is
+  believed only after SW-30 has checked the bytes of the transaction, and
+  bytes in a status are always taken as not yet in a block. Once the shop's
+  own watch holds a lockup of the swap, no status ends the swap, nor do status
+  bytes that are refused: only the chain or the timeout does. The swap is paid
+  only when the caller reports that the shop's own claim, by its id, is at the
+  shop's refund depth; another transaction is refused.
 - **SW-73.** The machine is saved and restored in a file of one framed
   encoding: the magic `OBM'`, one version byte (1), the stage and its fields,
   and the swap's state file (SW-50) with its length. The decoder reads the
   exact length, refuses an unknown version or stage, a stage that does not
   agree with the phase of the state, and a lockup of less than the promised
-  amount, and a file that decodes encodes back to the same bytes.
+  amount, and a file that decodes encodes back to the same bytes. The failures
+  are numbered 1 to 7; 7 is a lost swap (SW-44), which may hold a claim or
+  not.
 - **SW-74.** The decoder of the machine's file is fuzzed (`fuzz/fuzz_targets/`
   `swap_follow_decode.rs`): any bytes give a refusal or a machine that
   encodes back to the same bytes.

@@ -1669,54 +1669,67 @@ own, as the driver of section 12 has none.
   on-chain and one small line says "Lightning is not available for this
   sale." A provider that cannot be reached, or that refuses, is "Lightning off for now" in the sale's
   details, and never a state of the sale.
-- **CR-220.** One swap is followed by the machine of SW-71, one per swap,
-  and each is saved through the store (a slot of its own, `swap-N-M.bin`) in
-  the counter's folder before its invoice is shown, so that a restart can
-  never lose a lockup it could claim. The secrets are made in memory only,
-  and the file is the framed encoding of the swap library with the counter's
-  own record of the lockup and the claims (magic `OBM(`, version 1). The
-  status is asked for as the machine says (SW-71). A lockup is taken from the
-  status bytes or from the counter's own watch of the lockup address, a sighting
-  of a peer or a block, and is checked by SW-30 before it is believed; the
-  counter's own watch alone tells whether it is in a block (SW-72).
-- **CR-221.** When the lockup is in the mempool and the sale's quote is
-  within the instant limits of the check that saw it (the same policy as
-  CR-13: the heartbeat, the conflict watch, the groups of peers, the slice)
-  and the exposure ledger has room, the sale is paid at once over Lightning
-  (`Counter::swap_paid`): the counter claims at once, the amount at risk is
-  counted in the ledger as for an instant on-chain sale and leaves it when
-  the lockup is in a block (CR-15). Otherwise the sale waits for the lockup's
-  first confirmation, shows "Waiting for one block", then claims and is paid.
-  The sale keeps the payment hash and what the claim pays its address, as
-  CR-110 keeps what the node received, and is final and told to the POS and
-  the books as in CR-109. The stored sale is version 6 when it holds a swap
-  payment. A sale whose lockup is on the way does not expire. What the
-  claim pays the sale's address is the sale's own payment and never a late
-  one (CR-19). A sale paid before its lockup was in a block whose lockup is
-  then replaced, or whose swap fails before the claim is in a block, is a
-  cancel (CR-14): `Counter::swap_cancelled`.
-- **CR-222.** The claim pays the sale's address at a fee rate that starts
-  at 2 sat/vB or at the recent rate of the blocks the counter has checked
-  (FE-13, from the fee samples it makes of them and keeps in memory only),
-  whichever is higher, and at 2 sat/vB when the higher rate would be refused
-  by SW-41 or no sample has been made. It signals replacement (SW-40) and is
-  built again at a higher fee (SW-46) every block it stays out of a block:
-  50% more, and at least 2 sat/vB more. It is never built at or after the
-  provider's timeout (SW-44), and never above the limit of SW-41. A claim
-  still unconfirmed `MIN_CLAIM_BLOCKS / 2` blocks before the timeout is
-  told to the owner (words "Lightning claim waiting"). The swap is done
-  when the shop's own claim, or an earlier one it built, is in a block
-  (SW-72, SW-75).
+- **CR-220.** One swap is followed by the machine of SW-71, one per swap, and
+  each is saved through the store (a slot of its own, `swap-N-M.bin`) in the
+  counter's folder before its invoice is shown, so that a restart can never
+  lose a lockup it could claim. The secrets are made in memory only, and the
+  file is the framed encoding of the swap library with the counter's own
+  record of the lockup and the claims (magic `OBM(`, version 1). The status is
+  asked for as the machine says (SW-71). A lockup is taken from the status
+  bytes or from the counter's own watch of the lockup address, a sighting of a
+  peer or a block, and is checked by SW-30 before it is believed; the
+  counter's own watch alone tells whether it is in a block (SW-72). The
+  record's claims agree with the phase of the machine's state, and a lost swap
+  keeps its claims.
+- **CR-221.** When the lockup is in the mempool and the sale's quote is within
+  the instant limits of the check that saw it (the same policy as CR-13: the
+  heartbeat, the conflict watch, the groups of peers, the slice) and the
+  exposure ledger has room, the sale is paid at once over Lightning
+  (`Counter::swap_paid`): the counter claims at once, and the amount at risk,
+  what the claim pays, is counted in the ledger as for an instant on-chain
+  sale and leaves it at the claim's first confirmation. Otherwise the sale
+  waits for the lockup's first confirmation, shows "Waiting for one block",
+  then claims, and holds the payment until the claim has the shop's depth. The
+  sale keeps the payment hash and what the claim pays its address, and is
+  judged by the claim's confirmations as an on-chain payment is: paid at once,
+  confirmed at the shop's depth, final at its refund depth (CR-109). The
+  stored sale is version 6 when it holds a swap payment; it may hold that
+  payment before it is final, and a cancel with no acceptance. A sale whose
+  lockup is on the way does not expire. What the claim pays the sale's address
+  is the sale's own payment and never a late one (CR-19). A claim that leaves
+  the chain takes the sale back (do not hand over, the POS told unpaid) until
+  it is back, and is sent again. A sale paid at once or reported paid whose
+  lockup is then replaced, whose swap fails before the claim is in a block, or
+  whose swap is lost (SW-44), is a cancel (CR-14): `Counter::swap_cancelled`
+  raises the alarm and the pause and tells the POS unpaid (CR-30). One not yet
+  reported paid is taken back with no alarm.
+- **CR-222.** The claim pays the sale's address at a fee rate that starts at 2
+  sat/vB or at the recent rate of the blocks the counter has checked (FE-13,
+  from the fee samples it makes of them and keeps in memory only), whichever
+  is higher, and at 2 sat/vB when the higher rate would be refused by SW-41 or
+  no sample has been made. It signals replacement (SW-40) and is built again
+  at a higher fee (SW-46) every block it stays out of a block: 50% more, and
+  at least 2 sat/vB more, never above the limit of SW-41. The first claim is
+  never built at or after the provider's timeout, with fewer than 18 blocks
+  before it, or while the chain is behind (SW-44). A claim already sent is
+  built again, and sent again when it left the chain, past the timeout too,
+  until it or the provider's refund is in a block. A claim still unconfirmed
+  `MIN_CLAIM_BLOCKS / 2` blocks before the timeout is told to the owner (words
+  "Lightning claim waiting"). The swap is done when the shop's own claim, or
+  an earlier one it built, is at the shop's refund depth (SW-72, SW-75).
 - **CR-223.** A swap that fails before the claim (the invoice ran out, the
   provider could not lock, the lockup is refused by SW-30, the provider took
   it back, the timeout) leaves the sale unpaid and shows "Lightning payment
-  unfinished". The sale itself goes on: the same code takes bitcoin
-  on-chain, and the cashier may take another payment.
-- **CR-224.** A bitcoin refund of a sale paid through a swap is open as
-  for any sale that arrived on-chain: the claim is on the chain, to the
-  shop's own address. It is limited, as CR-67 says, to what the sale
-  received, which is what the claim pays; a sale paid through the shop's own
-  node stays cash only (CR-217).
+  unfinished". The sale itself goes on: the same code takes bitcoin on-chain,
+  and the cashier may take another payment. A swap lost after the claim was
+  sent, because the provider's refund was in a block first, leaves a sale not
+  yet reported paid unpaid and shows "Lightning payment lost": the customer's
+  payment is not given back, and the owner takes it up with the provider.
+- **CR-224.** A bitcoin refund of a sale paid through a swap is open as for
+  any sale that arrived on-chain: the claim is on the chain, to the shop's own
+  address. It is limited, as CR-67 says, to what the sale received, which is
+  what the claim pays, counted once and judged by the claim's confirmations; a
+  sale paid through the shop's own node stays cash only (CR-217).
 - **CR-225.** The app reaches the provider over plain HTTP/1.1 (the codec of
   SW-80) to its onion name, through the counter's own Tor, as it reaches
   the other onion services, and never around it: with no Tor, nothing is
@@ -1726,11 +1739,11 @@ own, as the driver of section 12 has none.
   bytes that came back.
 - **CR-226.** Every state and refusal of this section has words under
   `docs/SCREEN-RULES.md`. The cashier is told: "Waiting for one block",
-  "Lightning payment unfinished" and "Lightning off for now", and sees the
-  line of CR-219. The owner is told "Lightning claim waiting" and has the
-  settings row "Lightning through a swap provider" (CR-218): a provider, an
-  onion address, the largest sale over Lightning, and "Turn on" and "Turn
-  off".
+  "Lightning payment unfinished", "Lightning payment lost" and "Lightning off
+  for now", and sees the line of CR-219. The owner is told "Lightning claim
+  waiting" and has the settings row "Lightning through a swap provider"
+  (CR-218): a provider, an onion address, the largest sale over Lightning, and
+  "Turn on" and "Turn off".
 
 ## 23. Pairing with the shop's own wallet
 
