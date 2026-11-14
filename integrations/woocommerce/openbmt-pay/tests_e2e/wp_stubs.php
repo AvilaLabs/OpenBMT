@@ -61,6 +61,79 @@ function delete_option( string $name ): bool {
 	return true;
 }
 
+/**
+ * The database object, for the three statements of the store's lock, each
+ * with the semantics of MySQL on the options table: INSERT IGNORE changes a
+ * row only when the name is free, UPDATE and DELETE change the rows that
+ * match the name and the value. A statement is one step that nothing can
+ * interleave with, which is what a database gives. Anything else is refused.
+ *
+ * Tests can set $before, called with the statement before it runs, to play
+ * another request between two statements of one request, and read $inserts,
+ * the number of INSERT IGNORE statements, as the number of tries at the lock.
+ */
+final class Obm_E2e_Wpdb {
+	public $options = 'wp_options';
+	public $inserts = 0;
+	public $before  = null;
+	/** Quotes the arguments into the %s places, as $wpdb->prepare does. */
+	public function prepare( string $query, ...$args ): string {
+		$args = array_map(
+			static function ( $a ) {
+				return "'" . addslashes( (string) $a ) . "'";
+			},
+			$args
+		);
+		return vsprintf( $query, $args );
+	}
+	private function unquote( string $q ): string {
+		return stripslashes( substr( $q, 1, -1 ) );
+	}
+	public function get_var( string $sql ) {
+		if ( null !== $this->before ) {
+			( $this->before )( $sql );
+		}
+		if ( 1 !== preg_match( "/^SELECT option_value FROM wp_options WHERE option_name = ('(?:[^'\\\\]|\\\\.)*')$/", $sql, $m ) ) {
+			throw new RuntimeException( 'statement not modelled: ' . $sql );
+		}
+		$name = $this->unquote( $m[1] );
+		return array_key_exists( $name, $GLOBALS['obm_e2e_options'] ) ? $GLOBALS['obm_e2e_options'][ $name ] : null;
+	}
+	public function query( string $sql ) {
+		if ( null !== $this->before ) {
+			( $this->before )( $sql );
+		}
+		$q = "('(?:[^'\\\\]|\\\\.)*')";
+		if ( 1 === preg_match( "/^INSERT IGNORE INTO wp_options \\(option_name, option_value, autoload\\) VALUES \\($q, $q, 'no'\\)$/", $sql, $m ) ) {
+			++$this->inserts;
+			$name = $this->unquote( $m[1] );
+			if ( array_key_exists( $name, $GLOBALS['obm_e2e_options'] ) ) {
+				return 0;
+			}
+			$GLOBALS['obm_e2e_options'][ $name ] = $this->unquote( $m[2] );
+			return 1;
+		}
+		if ( 1 === preg_match( "/^UPDATE wp_options SET option_value = $q WHERE option_name = $q AND option_value = $q$/", $sql, $m ) ) {
+			$name = $this->unquote( $m[2] );
+			if ( ( $GLOBALS['obm_e2e_options'][ $name ] ?? null ) !== $this->unquote( $m[3] ) ) {
+				return 0;
+			}
+			$GLOBALS['obm_e2e_options'][ $name ] = $this->unquote( $m[1] );
+			return 1;
+		}
+		if ( 1 === preg_match( "/^DELETE FROM wp_options WHERE option_name = $q AND option_value = $q$/", $sql, $m ) ) {
+			$name = $this->unquote( $m[1] );
+			if ( ( $GLOBALS['obm_e2e_options'][ $name ] ?? null ) !== $this->unquote( $m[2] ) ) {
+				return 0;
+			}
+			unset( $GLOBALS['obm_e2e_options'][ $name ] );
+			return 1;
+		}
+		throw new RuntimeException( 'statement not modelled: ' . $sql );
+	}
+}
+$GLOBALS['wpdb'] = new Obm_E2e_Wpdb();
+
 function is_ssl(): bool {
 	return true;
 }
@@ -141,6 +214,14 @@ final class Obm_E2e_Order {
 		$row['meta'][ $key ] = $value;
 	}
 	public function save(): void {
+	}
+	public function get_currency(): string {
+		$row = &$this->row();
+		return (string) ( $row['currency'] ?? 'USD' );
+	}
+	public function get_total( string $context = 'view' ): string {
+		$row = &$this->row();
+		return (string) ( $row['total'] ?? '0' );
 	}
 	public function get_payment_method(): string {
 		$row = &$this->row();

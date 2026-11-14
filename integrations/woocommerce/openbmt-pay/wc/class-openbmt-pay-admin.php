@@ -3,7 +3,8 @@
  * The admin page (WO-05, WO-07, WO-11, WO-21, WO-32): paste the pairing code,
  * see its fingerprint, the addresses left, the last visit and the log of what
  * was refused, and unpair. Every action checks the user's capability and a
- * nonce.
+ * nonce. Only an administrator pairs or unpairs, as the pairing decides where
+ * every later order's address comes from (WO-05).
  *
  * @package OpenBmtPay
  */
@@ -17,7 +18,7 @@ use OpenBmtPay\Refusal;
 final class OpenBmt_Pay_Admin {
 
 	const PAGE       = 'openbmt-pay';
-	const CAPABILITY = 'manage_woocommerce';
+	const CAPABILITY = 'manage_options';
 
 	public static function register(): void {
 		add_action( 'admin_menu', array( __CLASS__, 'menu' ) );
@@ -54,6 +55,10 @@ final class OpenBmt_Pay_Admin {
 			self::back( 'https' );
 		}
 		$text = isset( $_POST['openbmt_pay_code'] ) ? sanitize_text_field( wp_unslash( $_POST['openbmt_pay_code'] ) ) : '';
+		// A pairing that is in use is not replaced: the owner unpairs first. Damaged data may be paired over, as no unpair button is shown for it.
+		if ( null !== OpenBmt_Pay_Store::pairing() && Health::DAMAGED !== OpenBmt_Pay_Store::health()['state'] ) {
+			self::back( 'paired-already' );
+		}
 		try {
 			OpenBmt_Pay_Store::pair( Pairing::from_text( $text ) );
 		} catch ( Refusal $e ) {
@@ -81,10 +86,11 @@ final class OpenBmt_Pay_Admin {
 		$pairing = OpenBmt_Pay_Store::pairing();
 		$result  = isset( $_GET['result'] ) ? sanitize_key( wp_unslash( $_GET['result'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 		$shown   = array(
-			'bad'      => 'WO_05_PAIRING_REFUSED',
-			'https'    => 'WO_06_HTTPS_REQUIRED',
-			'paired'   => 'WO_05_PAIRED_AS',
-			'unpaired' => 'WO_07_UNPAIRED',
+			'bad'            => 'WO_05_PAIRING_REFUSED',
+			'paired-already' => 'WO_05_PAIR_WHILE_PAIRED',
+			'https'          => 'WO_06_HTTPS_REQUIRED',
+			'paired'         => 'WO_05_PAIRED_AS',
+			'unpaired'       => 'WO_07_UNPAIRED',
 		);
 		echo '<div class="wrap"><h1>' . esc_html( OpenBmt_Pay_Words::t( 'WO_01_SETTINGS_HEADING' ) ) . '</h1>';
 		if ( isset( $shown[ $result ] ) ) {

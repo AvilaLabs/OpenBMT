@@ -15,6 +15,7 @@ use OpenBmtPay\AddressRange;
 use OpenBmtPay\Bytes;
 use OpenBmtPay\Health;
 use OpenBmtPay\Pairing;
+use OpenBmtPay\NonceLedger;
 use OpenBmtPay\NoticeDecision;
 use OpenBmtPay\Refusal;
 use OpenBmtPay\RequestChecker;
@@ -52,7 +53,8 @@ final class OpenBmt_Pay_Rest {
 	}
 
 	/**
-	 * WO-20: the HMAC, the time window and the number used once. Nothing is
+	 * WO-20: the HMAC, the time window and the number used once. The first two
+	 * are checked before the lock is taken; the lock is for the number. Nothing is
 	 * answered to a request that fails, but the status; the reason goes to
 	 * no one.
 	 *
@@ -64,6 +66,22 @@ final class OpenBmt_Pay_Rest {
 		$pairing = OpenBmt_Pay_Store::pairing();
 		$body    = $request->get_body();
 		if ( null === $pairing || ! is_ssl() || strlen( $body ) > self::BODY_MAX || Health::READY !== OpenBmt_Pay_Store::health()['state'] ) {
+			return $denied;
+		}
+		// The HMAC and the time window need no shared state: a request that fails them never takes the lock.
+		try {
+			RequestChecker::check(
+				$pairing['secret'],
+				$request->get_method(),
+				$request->get_route(),
+				(string) $request->get_header( 'x_obm_time' ),
+				(string) $request->get_header( 'x_obm_nonce' ),
+				(string) $request->get_header( 'x_obm_mac' ),
+				$body,
+				time(),
+				new NonceLedger()
+			);
+		} catch ( Refusal $e ) {
 			return $denied;
 		}
 		$result = OpenBmt_Pay_Store::with_lock(

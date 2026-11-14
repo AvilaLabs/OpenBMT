@@ -121,6 +121,13 @@ class OpenBmt_Pay_Gateway extends WC_Payment_Gateway {
 			if ( ! $order || null === OpenBmt_Pay_Store::pairing() ) {
 				throw new Refusal( 'Unpaired' );
 			}
+			if ( '' !== (string) $order->get_meta( '_openbmt_address' ) ) {
+				// The order has its address already (paid again through its order-pay link): nothing is taken or changed.
+				return array(
+					'result'   => 'success',
+					'redirect' => $this->get_return_url( $order ),
+				);
+			}
 			$quote = $this->quote( $currency, (string) $order->get_total( 'edit' ) );
 		} catch ( Refusal $e ) {
 			wc_add_notice( OpenBmt_Pay_Words::t( 'WO_15_NO_QUOTE' ), 'error' );

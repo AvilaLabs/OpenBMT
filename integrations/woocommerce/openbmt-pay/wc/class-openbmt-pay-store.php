@@ -33,33 +33,71 @@ final class OpenBmt_Pay_Store {
 	/**
 	 * Runs a step with the store's lock held, so that two requests do not
 	 * change the pool, the numbers used once or an order at the same time.
-	 * add_option fails when the option exists, which makes it the lock.
 	 *
 	 * @param callable $step The step.
 	 * @return mixed What the step returns; null when the lock could not be had.
 	 */
 	public static function with_lock( callable $step ) {
-		$have = false;
+		$mine = null;
 		for ( $try = 0; $try < 100; $try++ ) {
-			if ( add_option( self::OPT_LOCK, (string) time(), '', false ) ) {
-				$have = true;
+			$mine = self::lock_try();
+			if ( null !== $mine ) {
 				break;
-			}
-			$since = (int) get_option( self::OPT_LOCK, '0' );
-			if ( time() - $since > self::LOCK_SECS ) {
-				delete_option( self::OPT_LOCK );
-				continue;
 			}
 			usleep( 100000 );
 		}
-		if ( ! $have ) {
+		if ( null === $mine ) {
 			return null;
 		}
 		try {
 			return $step();
 		} finally {
-			delete_option( self::OPT_LOCK );
+			self::lock_release( $mine );
 		}
+	}
+
+	/**
+	 * One try at the lock. The lock is a row of the options table that one
+	 * INSERT IGNORE can create: the request whose insert changed a row holds
+	 * it. A lock older than LOCK_SECS is taken over with an UPDATE that only
+	 * changes the row while it still has the value that was read, so that two
+	 * requests cannot both take it over. The row's value is a random token and
+	 * the time.
+	 *
+	 * @return string|null The value this request wrote, or null when another holds the lock.
+	 */
+	public static function lock_try(): ?string {
+		global $wpdb;
+		$mine = bin2hex( random_bytes( 8 ) ) . ':' . time();
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery
+		$made = $wpdb->query( $wpdb->prepare( "INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')", self::OPT_LOCK, $mine ) );
+		if ( 1 === $made ) {
+			return $mine;
+		}
+		$old = $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", self::OPT_LOCK ) );
+		if ( null === $old ) {
+			return null;
+		}
+		$since = (int) substr( (string) $old, (int) strrpos( (string) $old, ':' ) + 1 );
+		if ( time() - $since <= self::LOCK_SECS ) {
+			return null;
+		}
+		$took = $wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s", $mine, self::OPT_LOCK, $old ) );
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery
+		return 1 === $took ? $mine : null;
+	}
+
+	/**
+	 * Lets go of the lock, but only while the row still has the value this
+	 * request wrote: a request whose lock was taken over leaves the new
+	 * holder's lock alone.
+	 *
+	 * @param string $mine The value lock_try returned.
+	 */
+	public static function lock_release( string $mine ): void {
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name = %s AND option_value = %s", self::OPT_LOCK, $mine ) );
 	}
 
 	/**

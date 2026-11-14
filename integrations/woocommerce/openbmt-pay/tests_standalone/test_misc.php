@@ -69,7 +69,7 @@ t_eq( 'BITCOIN:' . strtoupper( $a ) . '?amount=0.001&label=Shop', PaymentUri::qr
 
 // WO-41: the keys of the words, and the one file that holds the texts.
 t_eq( count( Words::KEYS ), count( array_unique( Words::KEYS ) ), 'wo_41 the keys are distinct' );
-t_eq( 34, count( Words::KEYS ), 'wo_41 there are 34 keys' );
+t_eq( 35, count( Words::KEYS ), 'wo_41 there are 35 keys' );
 $file = (string) file_get_contents( dirname( __DIR__ ) . '/wc/class-openbmt-pay-words.php' );
 preg_match_all( "/^\t+'(WO_[0-9A-Z_]+)' => __\( '((?:[^'\\\\]|\\\\')+)', 'openbmt-pay' \),$/m", $file, $found, PREG_SET_ORDER );
 t_eq( count( Words::KEYS ), count( $found ), 'wo_41 every key has one literal call WordPress can extract' );
