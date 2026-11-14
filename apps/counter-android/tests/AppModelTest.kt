@@ -111,7 +111,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1 + WordsOfTill.all().size + 1 + WordsOfStarter.all().size + 1, "one row for each words and the header, and for each text of the switch, of the till and of the starter line and their headers")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1 + WordsOfTill.all().size + 1 + WordsOfStarter.all().size + 1 + ShopLightningWords.all().size + 1, "one row for each words and the header, and for each text of the switch, of the till, of the starter line and of the Lightning key and their headers")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -1370,6 +1370,10 @@ object AppModelTest {
     // ---- the switch from the starter wallet (CR-259 to CR-264) -----------------------------
 
     private fun cr260ConfirmSwitchTests(appDir: File?) {
+        ok(ShopLightningWords.placeholders.all { it.startsWith("WORDS_NEEDED_SL76_") } && ShopLightningWords.placeholders.toSet().size == ShopLightningWords.placeholders.size, "SL-76: the texts of the Lightning key page are placeholders that name their rule, once each")
+        ok(ShopLightningWords.placeholders.all { ShopLightningWords.isPlaceholder(ShopLightningWords.said(it)) && ShopLightningWords.said(it).heading == ShopLightningWords.said(it).what }, "SL-76: each unwritten text shows its own name")
+        ok(ShopLightningWords.all().map { it.second }.toSet() == ShopLightningWords.placeholders.toSet(), "SL-76: the list of the page is the list of placeholders")
+        ok(ShopLightningWords.FILE != LightningSetup.FILE && ShopLightningWords.KEY_ALIAS != LightningSetup.KEY_ALIAS, "SL-76: the seed has its own file and its own Keystore key")
         ok(SwitchWords.BAR == "New wallet to check" && SwitchWords.SAME == "Same address" && SwitchWords.DIFFERENT == "Different", "CR-260: the menu row and the two buttons are as the rules name them")
         ok(ConfirmSwitch.address("bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq") == "bc1q ar0s rrr7 xfkv y5l6 43ly dnw9 re59 gtzz wf5m dq", "CR-260: the address is shown in groups of four")
         ok(FirstAddress.kindLine(OwnWalletKind.TwoOfThree) == "Wallet with 2 of 3 keys", "CR-260: the kind of wallet beneath the address")

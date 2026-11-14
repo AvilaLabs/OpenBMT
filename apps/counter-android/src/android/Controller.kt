@@ -72,6 +72,7 @@ import org.openbmt.counter.Shop
 import org.openbmt.counter.ShopSettings
 import org.openbmt.counter.TipChoice
 import org.openbmt.counter.OwnNodeSetting
+import org.openbmt.counter.ShopLightningStatus
 import org.openbmt.counter.StartConfig
 
 /**
@@ -109,6 +110,9 @@ class Controller(private val act: MainActivity) {
     private var config: AppConfig? = null
     private var lightningRecord: ByteArray? = null
     private var lightningFault: SayWords? = null
+    /** SL-76: the sealed seed record of Shop Lightning, when one is kept; given to the library at each start. */
+    private var shopSeedRecord: ByteArray? = null
+    private var shopSeedDeleting = false
 
     // What the Lightning screen holds while the camera has the screen.
     private var draftLnCode = ""
@@ -285,6 +289,15 @@ class Controller(private val act: MainActivity) {
             lightningFault = AppWords.storageUnavailable(e.message)
             null
         }
+        // SL-76: the Lightning key, sealed by its own key; a file that does not read is as no key, and the library asks for it again.
+        shopSeedRecord = try {
+            SealedFile(dir, KeystoreSealer(ShopLightningWords.KEY_ALIAS), ShopLightningWords.FILE).load()
+        } catch (e: IOException) {
+            null
+        } catch (e: GeneralSecurityException) {
+            null
+        }
+        shopSeedDeleting = false
         dropSharedImage()
         startNode()
     }
@@ -329,6 +342,7 @@ class Controller(private val act: MainActivity) {
         val rec = record ?: return
         val cfg = config ?: return
         val lightning = lightningRecord
+        val shopSeed = shopSeedRecord
         val thread = Thread {
             try {
                 val sources = Rates.sources()
@@ -374,7 +388,7 @@ class Controller(private val act: MainActivity) {
                     // CR-134: an onion relay with Tor off in the settings goes through Orbot, when it answers.
                     val linkProxy = LinkProxy.pick(pairing.relay == RelayKind.Onion, torOn, cfg.proxy, Socks5Probe())
                     val n = CounterNode.start(
-                        StartConfig(nodeDir.path, nowSecs(), rec, gate.proxy, cfg.ownNode.ifEmpty { null }, lightning, linkProxy),
+                        StartConfig(nodeDir.path, nowSecs(), rec, gate.proxy, cfg.ownNode.ifEmpty { null }, lightning, linkProxy, shopSeed),
                     )
                     if (id != runId) {
                         n.close()
@@ -1088,6 +1102,12 @@ class Controller(private val act: MainActivity) {
             val items = ArrayList<HomeLine>()
             // CR-116: the Lightning line is there only while a connection is saved.
             lightningWords(n)?.let { items.add(HomeLine("lightning", it)) }
+            // SL-41, SL-76, SL-77: on the Lightning counter only, the reason Lightning is not offered and the call for the key.
+            shopLightning(n)?.let { sl ->
+                sl.why?.let { items.add(HomeLine("shop-lightning-why", it.say())) }
+                if (sl.needsSeed) items.add(HomeLine("shop-lightning-key", sl.scan.say()))
+                if (sl.deleteSeed) deleteShopSeed()
+            }
             if (cfg.ownNode.isNotEmpty()) {
                 // CR-107: the own node's line, and a way to ask the driver to dial it again.
                 items.add(
@@ -1244,6 +1264,22 @@ class Controller(private val act: MainActivity) {
         }
     }
 
+    /** SL-41, SL-76, SL-77: what the library says of Shop Lightning, or null when it says nothing or cannot be read. */
+    private fun shopLightning(n: CounterNode): ShopLightningStatus? =
+        try {
+            n.shopLightning().takeIf { it.needsSeed || it.deleteSeed || it.why != null }
+        } catch (e: CounterException) {
+            null
+        }
+
+    /** SL-77: the library has no channel and no output left to sweep, so the sealed seed is deleted, once. */
+    private fun deleteShopSeed() {
+        if (shopSeedDeleting) return
+        shopSeedDeleting = true
+        val file = File(dir, ShopLightningWords.FILE)
+        if (!file.exists() || file.delete()) shopSeedRecord = null else shopSeedDeleting = false
+    }
+
     /** CR-116: the Lightning line, or null when no connection is saved. */
     private fun lightningWords(n: CounterNode): SayWords? =
         try {
@@ -1327,6 +1363,8 @@ class Controller(private val act: MainActivity) {
         // CR-203: the choice of Tor is there only while the shop's settings have Tor on.
         if (torOnNow) items.add(RowItem("Tor", onClick = { showTor() }))
         items.add(RowItem("Lightning", onClick = { showLightning(null) }))
+        // SL-76: the Lightning key, only on the Lightning counter while no seed is kept.
+        node?.let { n -> if (shopLightning(n)?.needsSeed == true) items.add(RowItem(ShopLightningWords.BAR, onClick = { showShopLightningKey() })) }
         items.add(RowItem("About", onClick = { showAbout() }))
         items.add(RowItem("Sounds", SOUNDS_SENTENCE, onClick = { showSounds() }))
         show(ui.bar("Settings", back = { showHome() }), listOf(ui.rows(items)))
@@ -1743,6 +1781,52 @@ class Controller(private val act: MainActivity) {
             return msg.show(note(e.sayWords()))
         }
         showMessage(AppWords.lightningRemoved, "Back") { showSettings() }
+    }
+
+    // ---- the Lightning key of Shop Lightning (SL-72, SL-76) -----------------------------------------
+
+    /** The page that reads the stick's code: the camera, then the library checks the seed against the node ID the settings pin. */
+    private fun showShopLightningKey() {
+        if (lockedOut()) return
+        val n = node ?: return render()
+        val words = try {
+            n.shopLightning().scan.say()
+        } catch (e: CounterException) {
+            return showMessage(e.sayWords(), "Back") { showSettings() }
+        }
+        show(
+            ui.bar(ShopLightningWords.BAR, back = { showSettings() }),
+            listOf(ui.titleBlock(WordsModel.of(words), ShopLightningWords.BAR)),
+            listOf(
+                ui.primary(ShopLightningWords.SCAN) {
+                    scan.begin(
+                        show = { v -> showScanner(v) },
+                        onBytes = { bytes -> takeShopSeed(n, String(bytes, Charsets.UTF_8)) },
+                        onFailed = { f -> showMessage(f.words ?: if (f.off) AppWords.cameraOff else AppWords.cameraNotStarted(f.problem), "Back") { showShopLightningKey() } },
+                        onCancel = { showShopLightningKey() },
+                    )
+                },
+                ui.button(ShopLightningWords.BACK) { showSettings() },
+            ),
+        )
+    }
+
+    /** SL-72: the library refuses a seed of another node and stores nothing; one that passes is sealed here and the node starts again with it. */
+    private fun takeShopSeed(n: CounterNode, text: String) {
+        val kept = try {
+            n.shopLightningSeed(text)
+        } catch (e: CounterException) {
+            return showMessage(e.sayWords(), ShopLightningWords.BACK) { showShopLightningKey() }
+        }
+        try {
+            SealedFile(dir, KeystoreSealer(ShopLightningWords.KEY_ALIAS), ShopLightningWords.FILE).save(kept)
+        } catch (e: IOException) {
+            return showMessage(AppWords.fileNotSaved(e.message), ShopLightningWords.BACK) { showShopLightningKey() }
+        } catch (e: GeneralSecurityException) {
+            return showMessage(AppWords.fileNotSaved(e.message), ShopLightningWords.BACK) { showShopLightningKey() }
+        }
+        shopSeedRecord = kept
+        showMessage(ShopLightningWords.kept, ShopLightningWords.KEPT_BUTTON) { begin() }
     }
 
     /** The price as home and the keypad give it: the words, or null while there is no book or currency. */

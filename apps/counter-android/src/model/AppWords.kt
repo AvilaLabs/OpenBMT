@@ -729,6 +729,14 @@ object AppWords {
                 "|---|---|\n",
         )
         for ((key, text) in WordsOfStarter.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
+        out.append(
+            "\n## The Lightning key of Shop Lightning (SL-72, SL-76)\n\n" +
+                "The texts of the page that reads the stick's code. Every one is a\n" +
+                "placeholder until it is written.\n\n" +
+                "| Key | Text |\n" +
+                "|---|---|\n",
+        )
+        for ((key, text) in ShopLightningWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         return out.toString()
     }
 
