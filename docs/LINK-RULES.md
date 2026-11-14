@@ -101,9 +101,11 @@ one. A merchant with no Box can use any relay: it sees ciphertext.
 
 - **LK-20.** A relay has a member list, set by whoever runs it: the
   identity keys of the shop's devices. It takes a sealed message only if
-  it is well formed and the signature is valid (LK-04), is at most the
-  largest size step plus the header, both the sender and the reader are
-  members, the reader's mailbox exists (a leaving mailbox does not take
+  it is well formed, is at most the largest size step plus the header, both
+  the sender and the reader are members, the signature is valid (LK-04;
+  the two keys are looked up first, so a key outside the list costs no
+  signature check and gets the refusal of a key that is not a member), the
+  reader's mailbox exists (a leaving mailbox does not take
   messages, LK-28), and its number is above the
   highest the relay has taken from that sender for that reader. The last
   point stops a copy of an old message from pushing new ones out of a
@@ -123,7 +125,13 @@ one. A merchant with no Box can use any relay: it sees ciphertext.
   the Box pairing that is still open (section 5); until then it is put
   there by hand.
 - **LK-22.** A mailbox holds at most 256 messages and 4 MiB. When full,
-  the oldest message goes. A relay promises nothing about delivery.
+  the oldest message of the sender that holds the most bytes in it goes
+  (between equals, the sender with more messages, then the sender of the
+  oldest message). One member cannot push another member's messages out:
+  a counter that floods a mailbox loses only its own, and the owner's
+  settings that remove it still arrive. The sender is read from the sealed
+  bytes, so nothing more is kept (LK-25). A relay promises nothing about
+  delivery.
 - **LK-23.** To fetch or to make a mailbox, the reader signs a fresh
   32-byte challenge from the relay (BIP340, tag `OpenBMT/link-fetch/v1`,
   over the challenge, the relay's own key, the action and the action's
