@@ -221,8 +221,7 @@ Nobody has to open either.
     could show a false Paid, so the owner phone checks every Paid against
     the payments it sees itself and raises the alarm when one is missing
     (§2.7, `docs/OWNER-COINS-RULES.md` OC-60 to OC-63). Then the steps for
-    the chosen till, with a cue
-    card for staff to print.
+    the chosen till, with a cue card for staff to print.
 12. **Instant payments.** Two sentences and one choice: "Small payments
     count at once. Bigger ones wait about ten minutes, until the payment is
     in a block." The owner picks the amount, shown beside the price of a
