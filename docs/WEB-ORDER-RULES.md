@@ -44,7 +44,11 @@ funds.**
   by the owner phone. It holds the owner phone's public key for web orders,
   a secret of 32 random bytes for the requests of WO-20 and the shop's name.
   The plugin keeps them and shows the key's short fingerprint, which the
-  owner checks against the owner phone.
+  owner checks against the owner phone. Only a site administrator (the
+  `manage_options` capability) pairs or unpairs; a shop manager cannot. A
+  store that is paired refuses a new code until it is unpaired (WO-07), so
+  that no one can swap the owner phone's key quietly; a pairing whose stored
+  data is damaged can be paired over.
 - **WO-06. The store's address.** The owner phone asks for the store's web
   address and reaches the plugin only there, over HTTPS with a certificate
   the phone's own trust store accepts. A store without HTTPS is refused.
@@ -61,7 +65,11 @@ funds.**
 - **WO-11. Running low.** With fewer than 20 left the plugin says so in its
   admin page, and the owner phone sends the next range at its next visit
   (WO-20). With none left, Bitcoin is hidden at checkout. An address is
-  never used twice.
+  never used twice. The pool, the numbers used once and an order are changed
+  only under the store's lock, which is taken by one atomic insert into the
+  options table. A lock never released is taken over after 30 seconds, by an
+  update that succeeds only on the value that was read, and a request
+  releases only the lock it wrote.
 - **WO-12. Watched forever.** Every address in a range the plugin accepted is
   watched by the owner phone from the moment it is sent, used or not
   (RQ-04).
@@ -72,7 +80,9 @@ funds.**
   currency into bitcoin at a quote it makes itself from the shop's rate
   sources, by the rules of `docs/RATE-RULES.md` for a counter's quote, and
   shares that file's test vectors. A quote it cannot make hides Bitcoin at
-  checkout. The quote lasts 30 minutes.
+  checkout. The quote lasts 30 minutes. An order that already has its
+  address takes no new one: paying again through its order-pay link shows
+  the same payment page, with the same address, amount and quote.
 - **WO-16. The payment page.** After "Place order" the customer sees a BIP 321
   code and link with the address, the amount in bitcoin and the shop's name
   as label (RQ-13), the amount as text, and the time left on the quote. The
@@ -90,7 +100,11 @@ funds.**
 - **WO-20. Asking for orders.** The owner phone asks the plugin for orders
   made since its last visit, by an HTTPS request authenticated with an
   HMAC-SHA256 of the request under the pairing secret, with a time and a
-  number used once. Each order gives the order number, the address, the
+  number used once. The plugin checks the HMAC and that the time is within
+  300 seconds of its own before it takes the store's lock (WO-11), so a
+  request that fails either never holds up a checkout; the lock is taken
+  only to check and record the number used once. Each order gives the order
+  number, the address, the
   amount in bitcoin, the quote's time and the order total in the store's
   currency. The owner phone records each as a request.
 - **WO-21. When.** On opening the app, after every new block while the app

@@ -30,7 +30,7 @@ final class OpenBmt_Pay_Words {
 				'WO_05_PAIRING_SAVE' => __( 'Pair', 'openbmt-pay' ),
 				'WO_05_PAIRING_REFUSED' => __( 'That pairing code was not accepted. Copy the whole code again from the owner phone and paste it here.', 'openbmt-pay' ),
 				'WO_05_PAIRED_AS' => __( 'Paired with the owner phone of %s.', 'openbmt-pay' ),
-				'WO_05_PAIR_WHILE_PAIRED' => __( 'WORDS_NEEDED pair while paired', 'openbmt-pay' ),
+				'WO_05_PAIR_WHILE_PAIRED' => __( 'This store is already paired with an owner phone. Unpair it first, then paste the new code.', 'openbmt-pay' ),
 				'WO_05_FINGERPRINT' => __( 'Key fingerprint, to compare with the one on the owner phone:', 'openbmt-pay' ),
 				'WO_06_HTTPS_REQUIRED' => __( 'This store\'s address does not start with https, so it cannot be paired. Turn on HTTPS for the store first.', 'openbmt-pay' ),
 				'WO_07_UNPAIR' => __( 'Unpair', 'openbmt-pay' ),
