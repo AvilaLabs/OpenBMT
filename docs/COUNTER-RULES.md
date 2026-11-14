@@ -1839,10 +1839,14 @@ not in this section; it stays refused as CR-236 says.
   removal of the last counter in force (AP-12). A limit is shown in
   satoshis, the number the counter enforces, whenever its satoshis change;
   in the shop's currency only when the satoshis stay the same, so a change
-  cannot show a lower amount while it raises the limit. A change of Shop
-  Lightning (AP-13) shows the provider's key in short and its address, the
-  device that keeps the second copy in short, the cap and the most for one
-  opening. Then come the settings version and the four words
+  cannot show a lower amount while it raises the limit. A change of the
+  counters or of the devices shows, before and after, each entry that is not
+  the same on the other side: the device's key in full, in groups of four
+  as the Key app writes it (AS-39), and a counter's share as a percent, or
+  "None". A counter swapped for another or given a larger share thus never
+  reads as no change. A change of Shop Lightning (AP-13) shows the
+  provider's key in full and its address, the key of the device that keeps
+  the second copy in full, the cap and the most for one opening. Then come the settings version and the four words
   of AP-03 for the settings' hash, large. It has two buttons, "Confirm with
   manager PIN" and "Not now". Home shows a line that a change waits, for the
   manager.
