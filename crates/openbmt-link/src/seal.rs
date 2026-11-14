@@ -652,13 +652,13 @@ pub struct Seen {
     pub step: usize,
 }
 
-/// What a relay does with a message (LK-20): the frame, the kind byte, the
-/// signature and the hash, and no decryption. Nothing about the sender or
-/// the number is checked against any list.
-pub fn inspect(sealed: &[u8]) -> Result<Seen, OpenError> {
+/// The frame and the kind byte of a message, and nothing else: no signature
+/// is checked, so the sender and the reader are only what the message
+/// claims. A relay reads this to look the two up in its member list before
+/// it pays for [`inspect`] (LK-20).
+pub fn peek(sealed: &[u8]) -> Result<Seen, OpenError> {
     let p = parse(sealed)?;
     let kind = Kind::from_byte(p.kind).ok_or(OpenError::UnknownKind(p.kind))?;
-    p.check_signature()?;
     Ok(Seen {
         reader: p.reader,
         sender: p.sender,
@@ -666,6 +666,15 @@ pub fn inspect(sealed: &[u8]) -> Result<Seen, OpenError> {
         kind,
         step: p.ciphertext.len().saturating_sub(AEAD_TAG_LEN),
     })
+}
+
+/// What a relay does with a message (LK-20): the frame, the kind byte, the
+/// signature and the hash, and no decryption. Nothing about the sender or
+/// the number is checked against any list.
+pub fn inspect(sealed: &[u8]) -> Result<Seen, OpenError> {
+    let seen = peek(sealed)?;
+    parse(sealed)?.check_signature()?;
+    Ok(seen)
 }
 
 /// Open a sealed message (LK-05), checking in this order and stopping at the

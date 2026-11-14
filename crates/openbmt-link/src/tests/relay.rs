@@ -483,6 +483,140 @@ fn lk_22_a_mailbox_holds_4_mib_and_the_oldest_goes() {
     assert_eq!(mb.messages().next().unwrap().0, 8);
 }
 
+fn to_box(from: &Identity, role: Role, n: u64, kind: Kind, content: &[u8]) -> Vec<u8> {
+    let mut rng = Counting(0);
+    seal(
+        from,
+        role,
+        &the_box().device_id(),
+        Role::Box,
+        n,
+        kind,
+        content,
+        &mut |b| rng.fill(b),
+    )
+    .unwrap()
+}
+
+fn rig_with_box_mailbox(cfg: RelayConfig) -> Rig {
+    let mut rig = Rig::with(cfg);
+    assert_eq!(rig.make(&the_box()), Response::Made);
+    rig
+}
+
+fn box_ids(rig: &mut Rig) -> Vec<u64> {
+    ids(rig.fetch(&the_box(), 0))
+}
+
+#[test]
+fn lk_22_a_member_flooding_a_mailbox_cannot_push_out_another_senders_message() {
+    let mut rig = rig_with_box_mailbox(RelayConfig::default());
+    let settings = to_box(&owner(), Role::Owner, 1, Kind::Settings, b"settings");
+    assert_eq!(rig.put(settings), Response::Stored { id: 1 });
+    for n in 1..=256u64 {
+        let beat = to_box(&counter(), Role::Counter, n, Kind::PaidNotice, b"x");
+        assert!(matches!(rig.put(beat), Response::Stored { .. }));
+    }
+    let mb = rig.relay.mailbox(&the_box().device_id()).unwrap();
+    assert_eq!(mb.len(), 256);
+    // The owner's message is still there, and the counter's oldest went.
+    let held = box_ids(&mut rig);
+    assert_eq!(held.first(), Some(&1));
+    assert_eq!(held.get(1), Some(&3));
+    // The counter keeps flooding and the owner's message stays.
+    for n in 257..=600u64 {
+        let beat = to_box(&counter(), Role::Counter, n, Kind::PaidNotice, b"x");
+        assert!(matches!(rig.put(beat), Response::Stored { .. }));
+    }
+    assert_eq!(box_ids(&mut rig).first(), Some(&1));
+}
+
+#[test]
+fn lk_22_a_sender_filling_its_own_share_loses_its_own_oldest() {
+    let mut rig = rig_with_box_mailbox(RelayConfig::default());
+    for n in 1..=257u64 {
+        let beat = to_box(&counter(), Role::Counter, n, Kind::PaidNotice, b"x");
+        assert!(matches!(rig.put(beat), Response::Stored { .. }));
+    }
+    let mb = rig.relay.mailbox(&the_box().device_id()).unwrap();
+    assert_eq!(mb.len(), 256);
+    assert_eq!(mb.messages().next().map(|(id, _)| id), Some(2));
+}
+
+#[test]
+fn lk_22_the_byte_limit_also_takes_from_the_sender_holding_the_most() {
+    let mut rig = rig_with_box_mailbox(RelayConfig::default());
+    let settings = to_box(&owner(), Role::Owner, 1, Kind::Settings, b"settings");
+    assert_eq!(rig.put(settings), Response::Stored { id: 1 });
+    for n in 1..=70u64 {
+        let big = to_box(
+            &counter(),
+            Role::Counter,
+            n,
+            Kind::PaidNotice,
+            &vec![7u8; MAX_CONTENT_LEN],
+        );
+        assert!(matches!(rig.put(big), Response::Stored { .. }));
+    }
+    let mb = rig.relay.mailbox(&the_box().device_id()).unwrap();
+    assert!(mb.bytes() <= 4 * 1024 * 1024);
+    let held = box_ids(&mut rig);
+    assert_eq!(held.first(), Some(&1));
+    // The counter's oldest went, in order.
+    assert!(!held.contains(&2));
+}
+
+#[test]
+fn lk_22_equal_shares_lose_the_oldest_message_overall() {
+    let cfg = RelayConfig {
+        max_messages: 1,
+        ..RelayConfig::default()
+    };
+    let mut rig = rig_with_box_mailbox(cfg);
+    let a = to_box(&owner(), Role::Owner, 1, Kind::Settings, b"x");
+    let b = to_box(&counter(), Role::Counter, 1, Kind::PaidNotice, b"x");
+    assert_eq!(rig.put(a), Response::Stored { id: 1 });
+    assert_eq!(rig.put(b), Response::Stored { id: 2 });
+    assert_eq!(box_ids(&mut rig), vec![2]);
+}
+
+#[test]
+fn lk_20_membership_is_checked_before_the_signature() {
+    let mut rig = rig_with_box_mailbox(RelayConfig::default());
+    let flip = |mut m: Vec<u8>| {
+        m[PREFIX_SIG] ^= 1;
+        m
+    };
+    // A key outside the list with a bad signature: the member refusal.
+    let from_stranger = flip(to_box(&stranger(), Role::Owner, 1, Kind::Settings, b"x"));
+    assert_eq!(
+        rig.put(from_stranger),
+        Response::Refused(Refusal::SenderNotMember)
+    );
+    // A member to a reader outside the list, bad signature.
+    let mut rng = Counting(0);
+    let to_stranger = flip(
+        seal(
+            &owner(),
+            Role::Owner,
+            &stranger().device_id(),
+            Role::Box,
+            1,
+            Kind::Settings,
+            b"x",
+            &mut |b| rng.fill(b),
+        )
+        .unwrap(),
+    );
+    assert_eq!(
+        rig.put(to_stranger),
+        Response::Refused(Refusal::ReaderNotMember)
+    );
+    // Members on both ends: the signature is checked.
+    let bad = flip(to_box(&owner(), Role::Owner, 1, Kind::Settings, b"x"));
+    assert_eq!(rig.put(bad), Response::Refused(Refusal::BadSignature));
+}
+
 #[test]
 fn lk_23_nobody_can_read_list_or_empty_a_mailbox_without_a_challenge() {
     let mut rig = rig_with_counter_mailbox();

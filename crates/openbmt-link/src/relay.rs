@@ -19,7 +19,7 @@ use std::fmt;
 use openbmt_core::identity::{DeviceId, Identity, Sig};
 
 use crate::proto::{Refusal, Request, Response, FETCH_BATCH, FETCH_BYTES};
-use crate::seal::{inspect, OpenError, MAX_SEALED_LEN};
+use crate::seal::{inspect, peek, OpenError, MAX_SEALED_LEN};
 use crate::store::{Event, Loaded, MailStore};
 
 /// The tag of a reader's signature over a challenge (LK-23).
@@ -114,7 +114,9 @@ impl Default for RelayConfig {
 /// One reader's mailbox.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Mailbox {
-    messages: VecDeque<(u64, Vec<u8>)>,
+    /// Number, sender and sealed bytes. The sender is the one in the sealed
+    /// header, kept so that eviction need not parse each message.
+    messages: VecDeque<(u64, Option<DeviceId>, Vec<u8>)>,
     bytes: usize,
     /// The number the next message gets.
     next_id: u64,
@@ -146,25 +148,53 @@ impl Mailbox {
 
     /// The held messages, oldest first, with their numbers.
     pub fn messages(&self) -> impl Iterator<Item = (u64, &[u8])> {
-        self.messages.iter().map(|(id, m)| (*id, m.as_slice()))
+        self.messages.iter().map(|(id, _, m)| (*id, m.as_slice()))
     }
 
     fn push(&mut self, id: u64, sealed: Vec<u8>, cfg: &RelayConfig) {
+        let sender = peek(&sealed).ok().map(|seen| seen.sender);
         self.bytes = self.bytes.saturating_add(sealed.len());
-        self.messages.push_back((id, sealed));
+        self.messages.push_back((id, sender, sealed));
         self.next_id = self.next_id.max(id.saturating_add(1));
         while self.messages.len() > cfg.max_messages || self.bytes > cfg.max_bytes {
-            match self.messages.pop_front() {
-                Some((_, m)) => self.bytes = self.bytes.saturating_sub(m.len()),
-                None => break,
+            if !self.evict() {
+                break;
             }
+        }
+    }
+
+    /// Drop the oldest message of the sender that holds the most bytes here
+    /// (LK-22). Ties go to the sender with more messages, then to the sender
+    /// of the oldest message. Messages whose sender cannot be read (not
+    /// possible for what a put stored) count as one sender. Returns false when nothing is held.
+    fn evict(&mut self) -> bool {
+        // Per sender: bytes, messages, and the position of its oldest message.
+        let mut shares: BTreeMap<Option<DeviceId>, (usize, usize, usize)> = BTreeMap::new();
+        for (at, (_, sender, m)) in self.messages.iter().enumerate() {
+            let share = shares.entry(*sender).or_insert((0, 0, at));
+            share.0 = share.0.saturating_add(m.len());
+            share.1 = share.1.saturating_add(1);
+        }
+        let Some(at) = shares
+            .values()
+            .max_by_key(|(bytes, count, oldest)| (*bytes, *count, std::cmp::Reverse(*oldest)))
+            .map(|(_, _, oldest)| *oldest)
+        else {
+            return false;
+        };
+        match self.messages.remove(at) {
+            Some((_, _, m)) => {
+                self.bytes = self.bytes.saturating_sub(m.len());
+                true
+            }
+            None => false,
         }
     }
 
     fn drop_through(&mut self, up_to: u64) -> usize {
         let mut dropped = 0usize;
-        while self.messages.front().is_some_and(|(id, _)| *id <= up_to) {
-            if let Some((_, m)) = self.messages.pop_front() {
+        while self.messages.front().is_some_and(|(id, _, _)| *id <= up_to) {
+            if let Some((_, _, m)) = self.messages.pop_front() {
                 self.bytes = self.bytes.saturating_sub(m.len());
                 dropped = dropped.saturating_add(1);
             }
@@ -634,11 +664,12 @@ impl<S: MailStore> Relay<S> {
         if sealed.len() > MAX_SEALED_LEN {
             return Response::Refused(Refusal::TooLarge);
         }
-        let seen = match inspect(&sealed) {
+        // The member lists are checked before the signature: a lookup is
+        // cheap and a verify is not, and a key outside the list must not be
+        // able to make the relay verify. A message that is not well formed
+        // is refused first, as before.
+        let seen = match peek(&sealed) {
             Ok(seen) => seen,
-            Err(OpenError::BadSignature | OpenError::CiphertextHash) => {
-                return Response::Refused(Refusal::BadSignature)
-            }
             Err(_) => return Response::Refused(Refusal::NotWellFormed),
         };
         if !self.members.contains(&seen.sender) {
@@ -646,6 +677,12 @@ impl<S: MailStore> Relay<S> {
         }
         if !self.members.contains(&seen.reader) {
             return Response::Refused(Refusal::ReaderNotMember);
+        }
+        if let Err(e) = inspect(&sealed) {
+            return Response::Refused(match e {
+                OpenError::BadSignature | OpenError::CiphertextHash => Refusal::BadSignature,
+                _ => Refusal::NotWellFormed,
+            });
         }
         let Some(mailbox) = self.mailboxes.get_mut(&seen.reader) else {
             return Response::Refused(Refusal::NoMailbox);
