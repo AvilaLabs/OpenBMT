@@ -31,7 +31,7 @@
 # Needs: Bitcoin Core 32.1 in ~/.local/opt/bitcoin-core-32.1/bin, LND in
 # ~/.local/opt/lnd-0.21.8, Core Lightning in ~/.local/opt/cln-26.06.10 (with
 # libpq for the library path), curl, openssl, jq, and cargo (through
-# ~/.cache/openbmt/guard.sh). The JVM part needs JAVA_HOME and KOTLIN_HOME as
+# ~/.cache/openbmt/guard.sh when it exists). The JVM part needs JAVA_HOME and KOTLIN_HOME as
 # for apps/counter-android/tests/run-jvm.sh and is skipped with a notice
 # when they are not set (set LNREAL_NO_JVM=1 to skip it on purpose).
 #
@@ -155,7 +155,9 @@ wait_for() { # seconds description command...
 if [ -z "${NODE_BIN:-}" ]; then
   say "Build the example"
   TARGET=${CARGO_TARGET_DIR:-$HOME/.cache/openbmt/target/lnreal}
-  OPENBMT_NO_SCCACHE=1 CARGO_BUILD_JOBS=3 "$HOME/.cache/openbmt/guard.sh" env CARGO_TARGET_DIR="$TARGET" \
+  BUILD_GUARD=(env)
+  [ -x "$HOME/.cache/openbmt/guard.sh" ] && BUILD_GUARD=("$HOME/.cache/openbmt/guard.sh" env)
+  OPENBMT_NO_SCCACHE=1 CARGO_BUILD_JOBS=3 "${BUILD_GUARD[@]}" CARGO_TARGET_DIR="$TARGET" \
     cargo build --quiet --locked --manifest-path "$ROOT/Cargo.toml" -p openbmt-lightning \
     --example lightning_regtest || die "the build failed"
   NODE_BIN="$TARGET/debug/examples/lightning_regtest"

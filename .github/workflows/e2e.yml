@@ -1,0 +1,302 @@
+name: End to end
+
+on:
+  push:
+    branches: [main, 'train/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  app-jvm-tests:
+    name: App JVM tests and screens docs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Download verified Kotlin compiler 2.2.20
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/kotlin-compiler-2.2.20.zip"
+          curl --fail --location --retry 3 \
+            --output "$archive" \
+            https://github.com/JetBrains/kotlin/releases/download/v2.2.20/kotlin-compiler-2.2.20.zip
+          # SHA-256 published in JetBrains' v2.2.20 release asset metadata.
+          echo "81f0264c9073b5cbbdb3ff8418cf2c5dac076879fc156fa1a6462f5a5acc4420  $archive" \
+            | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/kotlin"
+          unzip -q "$archive" -d "$RUNNER_TEMP/kotlin"
+          kotlin_home="$RUNNER_TEMP/kotlin/kotlinc"
+          test -f "$kotlin_home/lib/annotations-13.0.jar"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          echo "KOTLIN_HOME=$kotlin_home" >> "$GITHUB_ENV"
+          echo "KOTLIN_COMPILER_CP=$kotlin_home/lib/*" >> "$GITHUB_ENV"
+          echo "KOTLIN_STDLIB_JAR=$kotlin_home/lib/kotlin-stdlib.jar" >> "$GITHUB_ENV"
+          echo "KOTLIN_ANNOTATIONS_JAR=$kotlin_home/lib/annotations-13.0.jar" >> "$GITHUB_ENV"
+      # The scripts run heavy steps through a memory guard that is a laptop
+      # tool; here the guard is a plain pass-through.
+      - name: Pass-through memory guard
+        run: |
+          mkdir -p "$HOME/.cache/openbmt/tmp"
+          printf '#!/usr/bin/env bash\nexec "$@"\n' > "$RUNNER_TEMP/guard.sh"
+          chmod +x "$RUNNER_TEMP/guard.sh"
+          echo "OPENBMT_GUARD=$RUNNER_TEMP/guard.sh" >> "$GITHUB_ENV"
+      - name: Owner app tests
+        run: OPENBMT_WRITE_SCREENS=1 apps/owner-android/tests/run-jvm.sh
+      - name: Key app tests
+        run: OPENBMT_WRITE_SCREENS=1 apps/key-android/tests/run-jvm.sh
+      - name: Counter app tests
+        run: OPENBMT_WRITE_SCREENS=1 apps/counter-android/tests/run-jvm.sh
+      - name: Screens docs are up to date
+        run: git diff --exit-code -- docs/screens
+      - name: QR library through JNI
+        run: apps/android-common/tests/qr-jni-test.sh
+
+  apk:
+    name: APK build (${{ matrix.app }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: owner
+            script: owner-apk-build.sh
+            tor: true
+          - app: key
+            script: key-apk-build.sh
+          - app: counter
+            script: counter-apk-build.sh
+            tor: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust with the Android targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android x86_64-linux-android
+      - name: Download verified Kotlin compiler 2.2.20
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/kotlin-compiler-2.2.20.zip"
+          curl --fail --location --retry 3 \
+            --output "$archive" \
+            https://github.com/JetBrains/kotlin/releases/download/v2.2.20/kotlin-compiler-2.2.20.zip
+          # SHA-256 published in JetBrains' v2.2.20 release asset metadata.
+          echo "81f0264c9073b5cbbdb3ff8418cf2c5dac076879fc156fa1a6462f5a5acc4420  $archive" \
+            | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/kotlin"
+          unzip -q "$archive" -d "$RUNNER_TEMP/kotlin"
+          kotlin_home="$RUNNER_TEMP/kotlin/kotlinc"
+          test -f "$kotlin_home/lib/annotations-13.0.jar"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          echo "KOTLIN_HOME=$kotlin_home" >> "$GITHUB_ENV"
+          echo "KOTLIN_COMPILER_CP=$kotlin_home/lib/*" >> "$GITHUB_ENV"
+          echo "KOTLIN_STDLIB_JAR=$kotlin_home/lib/kotlin-stdlib.jar" >> "$GITHUB_ENV"
+          echo "KOTLIN_ANNOTATIONS_JAR=$kotlin_home/lib/annotations-13.0.jar" >> "$GITHUB_ENV"
+      - name: Android SDK packages
+        shell: bash
+        run: |
+          sdkmanager --sdk_root="$ANDROID_HOME" --licenses < <(yes) > /dev/null
+          sdkmanager --sdk_root="$ANDROID_HOME" \
+            "ndk;26.3.11579264" "build-tools;36.0.0" "platforms;android-36"
+          echo "ANDROID_SDK=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264" >> "$GITHUB_ENV"
+      - name: Download verified tor-android 0.4.9.14
+        if: matrix.tor
+        shell: bash
+        run: |
+          aar="$RUNNER_TEMP/tor-android-0.4.9.14.aar"
+          curl --fail --location --retry 3 \
+            --output "$aar" \
+            https://raw.githubusercontent.com/guardianproject/gpmaven/master/info/guardianproject/tor-android/0.4.9.14/tor-android-0.4.9.14.aar
+          # SHA-256 pinned in docs/DEPENDENCIES.md and tor-library.sh.
+          echo "28ff2bb6d4d42eabe57183dedd7a97fce77e8ce4b6f5af6fa03993b3ca054edd  $aar" \
+            | sha256sum --check --strict
+          echo "TORANDROID_AAR=$aar" >> "$GITHUB_ENV"
+      # The scripts run heavy steps through a memory guard that is a laptop
+      # tool; here the guard is a plain pass-through.
+      - name: Pass-through memory guard
+        run: |
+          mkdir -p "$HOME/.cache/openbmt/tmp"
+          printf '#!/usr/bin/env bash\nexec "$@"\n' > "$RUNNER_TEMP/guard.sh"
+          chmod +x "$RUNNER_TEMP/guard.sh"
+          echo "OPENBMT_GUARD=$RUNNER_TEMP/guard.sh" >> "$GITHUB_ENV"
+      # No plain RUSTFLAGS here: the build scripts set per-triple flags.
+      - name: Build the APK
+        shell: bash
+        run: |
+          scripts/${{ matrix.script }} 2>&1 | tee "$RUNNER_TEMP/apk.log"
+          if grep -E '^(FAIL|NOT RUN)' "$RUNNER_TEMP/apk.log"; then
+            echo "a check in the build did not pass"
+            exit 1
+          fi
+
+  e2e:
+    name: End to end (${{ matrix.label }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Box
+            script: box-e2e.sh
+          - label: link against Core
+            script: link-e2e-core.sh
+          - label: Counter against Core
+            script: counter-e2e-core.sh
+          - label: hardware key against Core
+            script: hw-key2-e2e-core.sh
+          - label: Owner own spend against Core
+            script: owner-own-spend-e2e-core.sh
+          - label: Lightning against Core, LND and Core Lightning
+            script: lightning-e2e-core.sh
+            lnd: true
+            cln: true
+            kotlin: true
+          - label: float against Core
+            script: float-e2e-core.sh
+          - label: shop Lightning against Core and LND
+            script: shop-lightning-e2e-core.sh
+            lnd: true
+          - label: shop Lightning with compact filters
+            script: shop-lightning-e2e-core.sh
+            shop_chain: filters
+            lnd: true
+          - label: starter against Core
+            script: starter-e2e-core.sh
+          - label: switch against Core
+            script: switch-e2e-core.sh
+          - label: Till against Core
+            script: till-e2e-core.sh
+          - label: requests against Core
+            script: requests-e2e-core.sh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Download verified Bitcoin Core 32.1
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/bitcoin-32.1-x86_64-linux-gnu.tar.gz"
+          curl --fail --location --retry 3 \
+            --output "$archive" \
+            https://bitcoincore.org/bin/bitcoin-core-32.1/bitcoin-32.1-x86_64-linux-gnu.tar.gz
+          # SHA-256 from the release's SHA256SUMS.
+          echo "61545c17c3120fb7412f896d248b11993af04ec8817aad3649c55b2afb044963  $archive" \
+            | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/bitcoin-core"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/bitcoin-core" --strip-components=1
+          test -x "$RUNNER_TEMP/bitcoin-core/bin/bitcoind"
+          echo "CORE_BIN=$RUNNER_TEMP/bitcoin-core/bin" >> "$GITHUB_ENV"
+      - name: Download verified LND v0.21.8-beta
+        if: matrix.lnd
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/lnd-linux-amd64-v0.21.8-beta.tar.gz"
+          curl --fail --location --retry 3 \
+            --output "$archive" \
+            https://github.com/lightningnetwork/lnd/releases/download/v0.21.8-beta/lnd-linux-amd64-v0.21.8-beta.tar.gz
+          # SHA-256 from the release's signed manifest.
+          echo "4910a14801e10164ca2ea67f5935e2486874331d56bbd0638a68c6158a8e82c9  $archive" \
+            | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/lnd"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/lnd" --strip-components=1
+          test -x "$RUNNER_TEMP/lnd/lnd"
+          echo "LND_DIR=$RUNNER_TEMP/lnd" >> "$GITHUB_ENV"
+      # The Ubuntu 24.04 build of the release: the runner image is Ubuntu
+      # 24.04, and no 26.04 runner is in use.
+      - name: Download verified Core Lightning v26.06.10
+        if: matrix.cln
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/clightning-v26.06.10-Ubuntu-24.04-amd64.tar.xz"
+          curl --fail --location --retry 3 \
+            --output "$archive" \
+            https://github.com/ElementsProject/lightning/releases/download/v26.06.10/clightning-v26.06.10-Ubuntu-24.04-amd64.tar.xz
+          # SHA-256 from the release's SHA256SUMS.
+          echo "dbfb97c2a42f4446f4ac5217fff9274a3fda9996e3ea37c9c8a3e7bd8b17d200  $archive" \
+            | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/cln"
+          tar -xJf "$archive" -C "$RUNNER_TEMP/cln"
+          test -x "$RUNNER_TEMP/cln/usr/bin/lightningd"
+          sudo apt-get update
+          sudo apt-get install -y libpq5 libsodium23
+          echo "CLN_DIR=$RUNNER_TEMP/cln" >> "$GITHUB_ENV"
+          echo "CLN_LIBS=/usr/lib/x86_64-linux-gnu" >> "$GITHUB_ENV"
+      - name: Download verified Kotlin compiler 2.2.20
+        if: matrix.kotlin
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/kotlin-compiler-2.2.20.zip"
+          curl --fail --location --retry 3 \
+            --output "$archive" \
+            https://github.com/JetBrains/kotlin/releases/download/v2.2.20/kotlin-compiler-2.2.20.zip
+          # SHA-256 published in JetBrains' v2.2.20 release asset metadata.
+          echo "81f0264c9073b5cbbdb3ff8418cf2c5dac076879fc156fa1a6462f5a5acc4420  $archive" \
+            | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/kotlin"
+          unzip -q "$archive" -d "$RUNNER_TEMP/kotlin"
+          kotlin_home="$RUNNER_TEMP/kotlin/kotlinc"
+          test -f "$kotlin_home/lib/annotations-13.0.jar"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          echo "KOTLIN_HOME=$kotlin_home" >> "$GITHUB_ENV"
+          echo "KOTLIN_COMPILER_CP=$kotlin_home/lib/*" >> "$GITHUB_ENV"
+          echo "KOTLIN_STDLIB_JAR=$kotlin_home/lib/kotlin-stdlib.jar" >> "$GITHUB_ENV"
+          echo "KOTLIN_ANNOTATIONS_JAR=$kotlin_home/lib/annotations-13.0.jar" >> "$GITHUB_ENV"
+      # Each script builds the binaries it needs when none are given, and
+      # runs its ports at the defaults: every job has a machine of its own.
+      - name: Run the script
+        env:
+          SHOP_CHAIN: ${{ matrix.shop_chain }}
+        run: scripts/${{ matrix.script }}
+
+  woocommerce-php:
+    name: "End to end: WooCommerce plugin tests"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The runner's PHP
+        run: php --version
+      - name: Standalone tests against the vectors of the Rust side
+        run: integrations/woocommerce/openbmt-pay/tests_standalone/run.sh
+
+  fuzz-build:
+    name: Fuzz targets build (nightly)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No nightly is pinned anywhere in the repository, so the current one
+      # is used.
+      - name: Install Rust nightly
+        run: rustup toolchain install nightly --profile minimal
+      - name: Check the fuzz targets
+        run: cargo +nightly check --locked --manifest-path fuzz/Cargo.toml --bins
