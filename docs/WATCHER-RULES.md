@@ -212,12 +212,15 @@ that.
   the sale already knows:
   - if it is a fee bump in the sense of
     `openbmt_core::policy::classify_replacement` (it pays the sale's script
-    at least as much), it takes the earlier one's place. The sale's
+    at least as much) for every transaction it conflicts with, and none of
+    those was ever in a block, it takes their place. The sale's
     "first seen" time starts again from this sighting, and the peer count
     starts again from the peers that reported the new one. The sale
-    remembers the ID of the one replaced (up to 64) and ignores later
-    unconfirmed sightings of it: a peer that is slow to hear of the bump
-    still relays the old one, and that is not a new conflict. If the old
+    remembers the IDs of the ones replaced, the first 64 only, and ignores
+    later unconfirmed sightings of them: a peer that is slow to hear of the
+    bump still relays the old one, and that is not a new conflict. One
+    replaced after the first 64 is not remembered, so a late sighting of it
+    is a conflict. If the old
     one turns up in a block on the chain it is taken as a confirmation
     like any other, and a conflict is set;
   - otherwise the sale has a conflict. The conflict flag is set and it

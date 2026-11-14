@@ -286,11 +286,12 @@ rules are what it decides where the rules above are silent.
   keeps that in memory, because the address book does not hold addresses on
   this machine.
 - **NR-71.** The next address to dial is, in this order: a stored anchor
-  (NR-24), a fixed peer, an address drawn from the book (NR-23), and
-  last the seeds (NR-72). At most 4 connections are being opened at once
-  and at most the target number of peers plus 4 sockets exist. The groups
-  of connections being opened count as connected for the draw. A
-  connection that the manager refuses (NR-20) is closed at once.
+  (NR-24), a fixed peer, an address drawn from the book (NR-23), and last the
+  seeds (NR-72). At most 4 connections are being opened at once, and those
+  being opened count toward the target number of peers, so no more sockets
+  exist than that number; the own node is not counted (NR-100). The groups of
+  connections being opened count as connected for the draw. A connection that
+  the manager refuses (NR-20) is closed at once.
 - **NR-72.** The seeds are asked when the book has nothing to dial, and
   also while filters are wanted (fewer than two ready filter peers in
   different groups) and the book holds no address that can be dialed now

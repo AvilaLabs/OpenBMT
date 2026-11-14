@@ -50,9 +50,6 @@ use crate::socks::{ReplyCode, SocksError, Target};
 
 /// Most dials in flight at once.
 pub const MAX_DIALS_IN_FLIGHT: usize = 4;
-/// Sockets the driver may hold beyond the target number of peers: the
-/// connections being opened.
-pub const EXTRA_SOCKETS: usize = 4;
 /// The largest target number of peers the driver accepts.
 pub const MAX_TARGET_PEERS: usize = 64;
 /// NR-70: seconds an address that closed or failed is not dialed again.
@@ -1753,10 +1750,8 @@ where
                 .filter(|c| !c.own)
                 .count()
                 .saturating_add(dialing);
-            if dialing >= MAX_DIALS_IN_FLIGHT
-                || sockets >= self.config.target_peers
-                || sockets >= self.config.target_peers.saturating_add(EXTRA_SOCKETS)
-            {
+            // NR-71: connections being opened count toward the target.
+            if dialing >= MAX_DIALS_IN_FLIGHT || sockets >= self.config.target_peers {
                 return;
             }
             let Some(mut wanted) = self.manager.wanted() else {
