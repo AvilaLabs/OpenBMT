@@ -74,8 +74,9 @@ Where they come from:
   same version as the stick's: this adds no package to it. The sealed seed
   (SS-20) is ChaCha20-Poly1305 from the link's list: no package. The same
   call, with the checks of SS-02, now makes every other key of the Rust side
-  (the Key app's key 2, identity, salt and nonce; key 1; the owner root), so
-  `libc` is also in the lists of the programs that hold those.
+  (the Key app's key 2, identity, salt and nonce; key 1; the owner root) and
+  the random numbers of the link, the counter's node and the network driver,
+  so `libc` is also in the lists of the programs that hold those.
 
 - **The QR code encoder, none.** `openbmt-qr` has no dependencies of its
   own, not even for tests. The counter, the owner and the Key apps show
