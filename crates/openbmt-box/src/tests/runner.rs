@@ -363,7 +363,7 @@ fn bx_15_every_failed_welcome_has_the_one_refusal_and_only_a_checked_mac_spends(
         // Each case starts from a fresh invitation and its claim.
         r.enter_invitation(&inv.to_text()).unwrap();
         let mut c = connect(&r);
-        let claim_bytes = c.claim().unwrap();
+        let claim_bytes = c.claim().unwrap_or_else(|e| panic!("case {n}: {e:?}"));
         let claim = Claim::from_bytes(&claim_bytes).unwrap();
         let (w, s, spends) = match n {
             // Made for another invitation.
@@ -409,6 +409,52 @@ fn bx_15_every_failed_welcome_has_the_one_refusal_and_only_a_checked_mac_spends(
         assert!(r.members().is_empty());
         clock.advance(2);
     }
+}
+
+#[test]
+fn bx_15_a_sync_racing_a_new_invitation_never_hides_its_claim() {
+    // The worker syncs the relay with the core every step. A sync that read
+    // the clock just before the time moved on and a new invitation was
+    // entered would find the invitation entered in its future, which counts
+    // as expired, and forget it.
+    let inv = invitation(5);
+    let dir = TempDir::new("syncrace");
+    let (r, clock) = start(&dir);
+    let other_roots =
+        openbmt_core::batch::PinnedRoots::new(stranger().device_id(), approver().device_id())
+            .unwrap();
+    let settings = sign_both(settings_with(1, &r.device_id())).to_bytes();
+    // Stops the spinning threads however the loop ends, a panic included.
+    struct Stop<'a>(&'a std::sync::atomic::AtomicBool);
+    impl Drop for Stop<'_> {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+    let done = std::sync::atomic::AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let _stop = Stop(&done);
+        for _ in 0..4 {
+            scope.spawn(|| {
+                while !done.load(Ordering::SeqCst) {
+                    r.sync_now();
+                }
+            });
+        }
+        for n in 0..300 {
+            clock.advance(1);
+            r.enter_invitation(&inv.to_text()).unwrap();
+            let mut c = connect(&r);
+            let claim_bytes = c.claim().unwrap_or_else(|e| panic!("round {n}: {e:?}"));
+            let claim = Claim::from_bytes(&claim_bytes).unwrap();
+            // Right MAC for roots the settings were not signed by: spends.
+            let w = Welcome::make(&inv, &claim, other_roots).to_bytes();
+            assert_eq!(
+                refused(c.welcome(&w, &settings).unwrap_err()),
+                Refusal::WelcomeRefused
+            );
+        }
+    });
 }
 
 #[test]

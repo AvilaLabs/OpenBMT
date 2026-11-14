@@ -257,12 +257,17 @@ impl Post for LocalPost {
 /// Make the relay's member list and its claim what the core says (BX-03,
 /// BX-12, BX-22). The list is stored first by the relay itself (LK-21).
 fn sync_relay(core: &Core, relay: &Relays, clock: &dyn Clock, notes: &Notes) {
-    let now = clock.now();
-    let (members, claim) = {
-        let mut core = lock(core);
-        (core.members(), core.claim(now))
-    };
+    // The relay is locked before the core, the order the welcome hook takes
+    // the locks in, and the clock is read under the core's lock. A time read
+    // before the lock can be older than the entry of an invitation made in
+    // between, and the core counts an invitation entered in the future as
+    // expired and forgets it (BX-12).
     let mut relay = lock(relay);
+    let (now, members, claim) = {
+        let mut core = lock(core);
+        let now = clock.now();
+        (now, core.members(), core.claim(now))
+    };
     let held: Vec<DeviceId> = relay.members().copied().collect();
     if held != members {
         if let Err(e) = relay.set_members(&members, now) {
@@ -283,8 +288,11 @@ fn enter_into(
 ) -> Result<(), BoxError> {
     let mut nonce = [0u8; 32];
     os_random(&mut nonce).map_err(|_| BoxError::NoRandomness)?;
-    let now = clock.now();
-    lock(core).enter_invitation(text, now, nonce)?;
+    {
+        let mut core = lock(core);
+        let now = clock.now();
+        core.enter_invitation(text, now, nonce)?;
+    }
     sync_relay(core, relay, clock, notes);
     Ok(())
 }
@@ -334,9 +342,9 @@ impl PageBackend for PageHandles {
         if os_random(&mut nonce).is_err() {
             return Entered::Refused(BoxError::NoRandomness);
         }
-        let now = self.clock.now();
         let result = {
             let mut core = lock(&self.core);
+            let now = self.clock.now();
             match core.status(now) {
                 BoxStatus::Unpaired => core.enter_invitation(text, now, nonce),
                 BoxStatus::InvitationOpen => return Entered::Held,
@@ -940,6 +948,12 @@ impl BoxRunner {
     /// The relay's member list now (BX-22).
     pub fn members(&self) -> Vec<DeviceId> {
         lock(&self.relay).members().copied().collect()
+    }
+
+    /// One sync of the relay with the core, as the worker does each step.
+    #[cfg(test)]
+    pub(crate) fn sync_now(&self) {
+        sync_relay(&self.core, &self.relay, &*self.clock, &self.notes);
     }
 
     /// Take the invitation a person typed (BX-12) and offer its claim at
