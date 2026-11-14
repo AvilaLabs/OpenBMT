@@ -143,6 +143,10 @@ class Controller(internal val act: MainActivity) {
     /** The tint of the network status on home as it was last drawn, so that a change of tone fades (OA-91). */
     internal var homeTint: Int? = null
 
+    /** The home checklist's memory: whether a paid sale was seen, and when the books were last asked (`FirstRun.kt`). */
+    internal var checklistSaleSeen = false
+    internal var checklistAt = 0L
+
     /** The node whose due repeats of payment requests were made (RQ-25), and the newest rate fetched for a request (RQ-12). */
     internal var requestsChecked: OwnerNode? = null
     internal var requestRate: org.openbmt.owner.RequestRate? = null

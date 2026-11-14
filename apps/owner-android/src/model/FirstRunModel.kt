@@ -4,6 +4,8 @@ import java.io.File
 import java.io.IOException
 import org.openbmt.app.DurableFile
 import org.openbmt.app.Format
+import org.openbmt.owner.Books
+import org.openbmt.owner.SettingsEditArgs
 import org.openbmt.owner.ShopCurrency
 
 /**
@@ -213,10 +215,16 @@ class MoneyTabs(start: ShopCurrency, private val guess: ShopCurrency) {
 }
 
 /** The screens of the first run, in the order they come. Back from each is [FirstRun.back]. */
-enum class FirstRunStep { Welcome, Shop, Till, Money, OwnAdvice, Connect, Starter, OwnCounter, Why, RealCases, Guide, NotYet }
+enum class FirstRunStep {
+    Welcome, Before, Shop, Till, Money, Hardware, Helper, OwnAdvice, Connect, Starter, OwnCounter, Instant, FirstSale, Why, RealCases, Guide, NotYet,
+}
 
-/** The four choices of where the money goes: Starter is "Start simple" (`docs/START-SIMPLE-RULES.md`). */
-enum class MoneyChoice { Own, Make, Later, Starter }
+/**
+ * Where the money goes (docs/DESIGN.md section 2.1 step 6): Plan is the starter wallet now and a hardware wallet
+ * later, Own is a wallet the owner already holds, Make is the key maker on a spare laptop and Diy is a signer the
+ * owner builds (the last two sit under "Other ways to make one"), Later adds the wallet after the rest.
+ */
+enum class MoneyChoice { Plan, Own, Make, Diy, Later }
 
 /**
  * The first run's state in memory: the step, and what has been entered, kept when Back returns to a step. The
@@ -246,20 +254,30 @@ class FirstRun(start: ShopPrefs, locale: String) {
     fun prefs(stepsShown: Boolean): ShopPrefs = ShopPrefs(ShopPrefs.clean(name), currency, till, stepsShown)
 
     /**
-     * The step after [step]; the Money step goes on to Why for the cold wallet, to OwnAdvice for the own wallet and to
-     * NotYet for the others. OwnAdvice goes on to Connect (and Connect, once checked, to adding the first counter, then NotYet), or to Why once the choice is changed to the cold wallet.
+     * The step after [step]; the Money step goes on to Hardware for the plan, to Connect for a wallet the owner holds,
+     * to Why for the key maker, to OwnAdvice for a signer built by the owner and to NotYet for the others. The plan's
+     * Hardware goes on to Starter. Starter and Connect (once checked) go on to adding the first counter, then to Instant,
+     * then to FirstSale, then NotYet. OwnAdvice goes on to Connect, or to Why once the choice is changed to the key maker.
      */
     fun next() {
         step = when (step) {
-            FirstRunStep.Welcome -> FirstRunStep.Shop
+            FirstRunStep.Welcome -> FirstRunStep.Before
+            FirstRunStep.Before -> FirstRunStep.Shop
             FirstRunStep.Shop -> FirstRunStep.Till
             FirstRunStep.Till -> FirstRunStep.Money
             FirstRunStep.Money -> when (money) {
                 MoneyChoice.Make -> FirstRunStep.Why
-                MoneyChoice.Own -> FirstRunStep.OwnAdvice
-                MoneyChoice.Starter -> FirstRunStep.Starter
+                MoneyChoice.Diy -> FirstRunStep.OwnAdvice
+                MoneyChoice.Own -> {
+                    connect = Connect()
+                    FirstRunStep.Connect
+                }
+                MoneyChoice.Plan -> FirstRunStep.Hardware
                 else -> FirstRunStep.NotYet
             }
+            // The buying guide goes on to the starter wallet; the helper's page returns to the guide.
+            FirstRunStep.Hardware -> FirstRunStep.Starter
+            FirstRunStep.Helper -> FirstRunStep.Hardware
             // The starter wallet, once made, is the shop's pinned wallet: the first counter follows, as after Connect.
             FirstRunStep.Starter -> FirstRunStep.OwnCounter
             FirstRunStep.OwnAdvice -> if (money == MoneyChoice.Make) FirstRunStep.Why else {
@@ -267,7 +285,12 @@ class FirstRun(start: ShopPrefs, locale: String) {
                 FirstRunStep.Connect
             }
             FirstRunStep.Connect -> if (connect.step == ConnectStep.Checked) FirstRunStep.OwnCounter else FirstRunStep.Connect
-            FirstRunStep.OwnCounter -> FirstRunStep.NotYet
+            FirstRunStep.OwnCounter -> FirstRunStep.Instant
+            FirstRunStep.Instant -> {
+                firstSale = FirstSale()
+                FirstRunStep.FirstSale
+            }
+            FirstRunStep.FirstSale -> FirstRunStep.NotYet
             FirstRunStep.Why -> {
                 guide = KeyGuide()
                 FirstRunStep.Guide
@@ -300,12 +323,41 @@ class FirstRun(start: ShopPrefs, locale: String) {
         if (step == FirstRunStep.RealCases) step = FirstRunStep.Why
     }
 
+    /** The helper's page, one tap from the buying guide; from no other step. */
+    fun openHelper() {
+        if (step == FirstRunStep.Hardware) step = FirstRunStep.Helper
+    }
+
+    /** What the owner typed for the instant limit, kept when Back returns to the step; null until something was typed. */
+    var instantTyped: String? = null
+
+    /** What the owner typed for a typical sale: shown beside the limit for comparison, and never written. */
+    var typicalTyped = ""
+
+    /** The first sale watch of the FirstSale step, made new each time the step is entered. */
+    var firstSale = FirstSale()
+        private set
+
+    /**
+     * Instant, Next: the limit typed is written with [write] as whole units of the shop's money, 0 allowed, and the
+     * step goes on. False, with nothing written and the step kept, when the text is not a whole number. [write]
+     * may throw; then the step stays too.
+     */
+    fun saveInstant(text: String, write: (Long) -> Unit): Boolean {
+        if (step != FirstRunStep.Instant) return false
+        val v = InstantStep.parse(text) ?: return false
+        write(v)
+        instantTyped = text
+        next()
+        return true
+    }
+
     fun choose(choice: MoneyChoice) {
         money = choice
         next()
     }
 
-    /** From the advice on an own wallet: the owner would rather make a cold wallet, so the cold wallet path follows. */
+    /** From the advice on a signer built by the owner: the owner would rather have the key maker, so its path follows. */
     fun makeInstead() {
         if (step == FirstRunStep.OwnAdvice) choose(MoneyChoice.Make)
     }
@@ -314,13 +366,18 @@ class FirstRun(start: ShopPrefs, locale: String) {
     fun back() {
         step = when (step) {
             FirstRunStep.Welcome -> FirstRunStep.Welcome
-            FirstRunStep.Shop -> FirstRunStep.Welcome
+            FirstRunStep.Before -> FirstRunStep.Welcome
+            FirstRunStep.Shop -> FirstRunStep.Before
             FirstRunStep.Till -> FirstRunStep.Shop
             FirstRunStep.Money -> FirstRunStep.Till
+            FirstRunStep.Hardware -> FirstRunStep.Money
+            FirstRunStep.Helper -> FirstRunStep.Hardware
             FirstRunStep.OwnAdvice -> FirstRunStep.Money
-            FirstRunStep.Connect -> if (connect.back()) FirstRunStep.Connect else FirstRunStep.OwnAdvice
-            FirstRunStep.Starter -> FirstRunStep.Money
-            FirstRunStep.OwnCounter -> if (money == MoneyChoice.Starter) FirstRunStep.Starter else FirstRunStep.Connect
+            FirstRunStep.Connect -> if (connect.back()) FirstRunStep.Connect else if (money == MoneyChoice.Diy) FirstRunStep.OwnAdvice else FirstRunStep.Money
+            FirstRunStep.Starter -> FirstRunStep.Hardware
+            FirstRunStep.OwnCounter -> if (money == MoneyChoice.Plan) FirstRunStep.Starter else FirstRunStep.Connect
+            FirstRunStep.Instant -> FirstRunStep.OwnCounter
+            FirstRunStep.FirstSale -> FirstRunStep.Instant
             FirstRunStep.Why -> FirstRunStep.Money
             FirstRunStep.RealCases -> if (realPage > 0) {
                 realPage--
@@ -331,8 +388,7 @@ class FirstRun(start: ShopPrefs, locale: String) {
             FirstRunStep.Guide -> if (guide.back()) FirstRunStep.Guide else FirstRunStep.Why
             FirstRunStep.NotYet -> when (money) {
                 MoneyChoice.Make -> FirstRunStep.Why
-                MoneyChoice.Own -> FirstRunStep.Connect
-                MoneyChoice.Starter -> FirstRunStep.Starter
+                MoneyChoice.Own, MoneyChoice.Diy, MoneyChoice.Plan -> FirstRunStep.FirstSale
                 else -> FirstRunStep.Money
             }
         }
@@ -346,6 +402,127 @@ class FirstRun(start: ShopPrefs, locale: String) {
     companion object {
         /** The four cases and the page on the owner's own bitcoin. */
         const val REAL_PAGES = 5
+    }
+}
+
+/** The page for the owner's helper (DESIGN 2.1 step 7): the four rules for buying and the numbered steps for when it arrives. */
+object HelperPage {
+    val rules = listOf(FirstRunWords.hwRule1, FirstRunWords.hwRule2, FirstRunWords.hwRule3, FirstRunWords.hwRule4)
+
+    /** The steps, each with its number. */
+    val steps: List<String> get() = FirstRunWords.helperSteps.mapIndexed { i, t -> "${i + 1}. $t" }
+
+    /** The whole page as plain text, for the share sheet. */
+    fun text(): String = buildString {
+        append(FirstRunWords.helperTitle).append("\n\n")
+        append(FirstRunWords.helperIntro).append("\n\n")
+        append(FirstRunWords.helperBuy).append('\n')
+        rules.forEach { append("- ").append(it).append('\n') }
+        append('\n').append(FirstRunWords.helperArrives).append('\n')
+        steps.forEach { append(it).append('\n') }
+    }
+}
+
+/** The instant step (DESIGN 2.1 step 12): the shop's light-client limit for one sale. */
+object InstantStep {
+    /** What the library's policy starts the limit at (policy::LIGHT_PER_SALE_USD), for a shop whose settings are not held yet. */
+    const val DEFAULT_PER_SALE = 10L
+
+    /** The limit typed: whole units of the shop's money, 0 allowed (CR-194); null when it is not that. */
+    fun parse(text: String): Long? = SettingsEditModel.dollars(text)
+
+    /** The text the field starts with: what the settings hold, else the policy's start. */
+    fun initial(held: Long?): String = (held ?: DEFAULT_PER_SALE).toString()
+
+    /** The edit the settings screen would make for [limit]: this one field, as SettingsEdit builds it. */
+    fun edit(limit: Long): SettingsEditArgs = SettingsEditArgs(lightPerSale = limit)
+}
+
+/**
+ * The first sale step (DESIGN 2.1): waiting until the owner phone records a paid sale of the shop, then paid. The
+ * count is the books' own (sales that received funds, from the counter's records); nothing here asks the network.
+ */
+class FirstSale {
+    var paid = false
+        private set
+
+    /** The payment's ID once the owner asked to see it and the ledger gave it; null when it is not known. */
+    var txid: String? = null
+        private set
+
+    /** True once the owner pressed "See it yourself". */
+    var seeing = false
+        private set
+
+    /** The books' count of paid sales: true, once, when it shows the first. */
+    fun observe(paidSales: Long): Boolean {
+        if (paid || paidSales < 1) return false
+        paid = true
+        return true
+    }
+
+    fun see(id: String?) {
+        if (!paid) return
+        seeing = true
+        txid = id
+    }
+
+    companion object {
+        /** The paid sales of a books view: every sale that received funds. */
+        fun paidSales(b: Books): Long = b.days.sumOf { it.sales }
+
+        /**
+         * The ID of the first paid sale in the full ledger's bytes (the "Txid" column), or null when there is none.
+         * A sale paid by more than one payment gives the first of them.
+         */
+        fun firstTxid(ledger: ByteArray): String? {
+            val lines = String(ledger, Charsets.UTF_8).split('\n')
+            val head = lines.firstOrNull()?.let { cells(it) } ?: return null
+            val at = head.indexOf("Txid")
+            if (at < 0) return null
+            for (line in lines.drop(1)) {
+                val id = cells(line).getOrNull(at)?.let { Regex("[0-9a-f]{64}").find(it)?.value }
+                if (id != null) return id
+            }
+            return null
+        }
+
+        /** One line of the ledger split at its commas, with the quotes of a cell taken off. */
+        private fun cells(line: String): List<String> {
+            val out = ArrayList<String>()
+            val cur = StringBuilder()
+            var quoted = false
+            var i = 0
+            while (i < line.length) {
+                val c = line[i]
+                when {
+                    quoted && c == '"' && line.getOrNull(i + 1) == '"' -> { cur.append('"'); i++ }
+                    c == '"' -> quoted = !quoted
+                    c == ',' && !quoted -> { out.add(cur.toString()); cur.setLength(0) }
+                    else -> cur.append(c)
+                }
+                i++
+            }
+            out.add(cur.toString().trimEnd('\r'))
+            return out
+        }
+    }
+}
+
+/** One item of the home checklist: its words and, for the first sale, the note under it. */
+class ChecklistItem(val text: String, val note: String? = null)
+
+/** The home checklist (DESIGN 2.1): what is still to do, and gone when nothing is. */
+object Checklist {
+    /**
+     * The items for a shop: a first sale until one is paid, and a second copy of the starter words only when the
+     * owner skipped it. Empty when both are done.
+     */
+    fun items(salePaid: Boolean, copySkipped: Boolean): List<ChecklistItem> {
+        val out = ArrayList<ChecklistItem>()
+        if (!salePaid) out.add(ChecklistItem(FirstRunWords.checklistSale, FirstRunWords.checklistNotTested))
+        if (copySkipped) out.add(ChecklistItem(FirstRunWords.checklistCopy))
+        return out
     }
 }
 

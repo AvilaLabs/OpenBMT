@@ -1,7 +1,9 @@
 package org.openbmt.owner.app
 
 import android.graphics.drawable.GradientDrawable
+import android.content.Intent
 import android.text.Editable
+import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
@@ -19,10 +21,12 @@ import org.openbmt.app.Space
 import org.openbmt.app.Type
 import org.openbmt.app.UrWords
 import org.openbmt.app.Who
+import org.openbmt.owner.OwnerException
+import org.openbmt.owner.OwnerNode
 import org.openbmt.owner.ShopCurrency
 
 // The first run of the owner app (docs/DESIGN.md section 2.1): the welcome, the practice shop, the shop, the
-// till and where the money goes. Every sentence is in FirstRunWords. The practice shop lives in memory only: it
+// till, where the money goes, the hardware wallet's guide, the instant limit and the first sale. Every sentence is in FirstRunWords. The practice shop lives in memory only: it
 // writes no file, sends nothing and calls nothing in the library. The shop's screens keep the name, the money and
 // the till in the shop file of the app's folder, which holds no secret. Back on every screen returns to the
 // step before, with what was entered.
@@ -44,13 +48,18 @@ internal fun Controller.showFirstRun() {
     val r = run()
     when (r.step) {
         FirstRunStep.Welcome -> showWelcome()
+        FirstRunStep.Before -> showBefore(r)
         FirstRunStep.Shop -> showShop(r)
         FirstRunStep.Till -> showTillChoice(r)
         FirstRunStep.Money -> showMoney(r)
+        FirstRunStep.Hardware -> showHardware(r)
+        FirstRunStep.Helper -> showHelper(r)
         FirstRunStep.OwnAdvice -> showOwnAdvice(r)
         FirstRunStep.Connect -> showConnect(r)
         FirstRunStep.Starter -> showStarterStep(r)
         FirstRunStep.OwnCounter -> showOwnCounter(r)
+        FirstRunStep.Instant -> showInstant(r)
+        FirstRunStep.FirstSale -> showFirstSale(r)
         FirstRunStep.Why -> showWhy(r)
         FirstRunStep.RealCases -> showRealCases(r)
         FirstRunStep.Guide -> showKeyGuide(r)
@@ -76,9 +85,20 @@ private fun Controller.showWelcome() {
     views.add(0, ui.welcomePicture())
     views.add(heading(FirstRunWords.welcomeTitle))
     views.add(para(FirstRunWords.welcomeText))
+    views.add(line(FirstRunWords.welcomeLine, bold = true))
+    views.add(line(FirstRunWords.welcomeNew, muted = true))
     val tryIt = ui.button(FirstRunWords.welcomeTry) { startPractice() }
     views.add(stack(tryIt, line(FirstRunWords.welcomeTryNote, muted = true), gap = 6))
     screen("Owner", views, listOf(ui.primary(FirstRunWords.welcomeSetup) { run().next(); showFirstRun() }), logo = true)
+}
+
+// ---- before starting -------------------------------------------------------------------------------------------------------
+
+private fun Controller.showBefore(r: FirstRun) {
+    stepScreen(
+        FirstRunWords.shopTitle, listOf(heading(FirstRunWords.beforeTitle), para(FirstRunWords.beforeText), line(FirstRunWords.beforeResume, muted = true)),
+        listOf(ui.primary(FirstRunWords.beforeGo) { r.next(); showFirstRun() }), { r.back(); showFirstRun() },
+    )
 }
 
 // ---- the practice shop -----------------------------------------------------------------------------------------------
@@ -245,7 +265,7 @@ private fun Controller.showTillChoice(r: FirstRun) {
         }
     }
     stepScreen(
-        FirstRunWords.shopTitle, listOf(ui.tillPicture(), heading(FirstRunWords.tillTitle), para(FirstRunWords.tillText), search, list, msg),
+        FirstRunWords.shopTitle, listOf(ui.tillPicture(), heading(FirstRunWords.tillTitle), para(FirstRunWords.tillText), line(FirstRunWords.tillReads, muted = true), search, list, msg),
         listOf(next), { r.back(); showFirstRun() },
     )
 }
@@ -253,17 +273,234 @@ private fun Controller.showTillChoice(r: FirstRun) {
 // ---- where the money goes ----------------------------------------------------------------------------------------------------
 
 private fun Controller.showMoney(r: FirstRun) {
-    val rows = listOf(
-        RowItem(FirstRunWords.moneyOwn, FirstRunWords.moneyOwnNote) { r.choose(MoneyChoice.Own); showFirstRun() },
-        RowItem(FirstRunWords.moneyMake, FirstRunWords.moneyMakeNote) { r.choose(MoneyChoice.Make); showFirstRun() },
-        RowItem(StarterWords.rowTitle, StarterWords.rowSub) { r.choose(MoneyChoice.Starter); showFirstRun() },
-        RowItem(FirstRunWords.moneyLater, FirstRunWords.moneyLaterNote) { r.choose(MoneyChoice.Later); showFirstRun() },
+    fun pick(c: MoneyChoice): () -> Unit = { r.choose(c); showFirstRun() }
+    val main = listOf(
+        RowItem(FirstRunWords.moneyPlan, FirstRunWords.moneyPlanToday + "\n" + FirstRunWords.moneyPlanLater, onClick = pick(MoneyChoice.Plan)),
+        RowItem(FirstRunWords.moneyOwn, FirstRunWords.moneyOwnNote, onClick = pick(MoneyChoice.Own)),
     )
+    val other = ui.rows(
+        listOf(
+            RowItem(FirstRunWords.moneyMake, FirstRunWords.moneyMakeNote, onClick = pick(MoneyChoice.Make)),
+            RowItem(FirstRunWords.moneyDiy, FirstRunWords.moneyDiyNote, onClick = pick(MoneyChoice.Diy)),
+        ),
+    )
+    val later = listOf(RowItem(FirstRunWords.moneyLater, FirstRunWords.moneyLaterNote, onClick = pick(MoneyChoice.Later)))
     stepScreen(
-        FirstRunWords.shopTitle, listOf(ui.moneyPicture(), heading(FirstRunWords.moneyTitle), para(FirstRunWords.moneyText), ui.rows(rows)),
+        FirstRunWords.shopTitle,
+        listOf(ui.moneyPicture(), heading(FirstRunWords.moneyTitle), para(FirstRunWords.moneyText), ui.rows(main)) +
+            fold(FirstRunWords.moneyOther, other) + ui.rows(later),
         back = { r.back(); showFirstRun() },
     )
 }
+
+/** A title that opens and closes [content], closed at first: the first layers of a screen stay short (DESIGN 2.1). */
+private fun Controller.fold(title: String, content: View): List<View> {
+    content.visibility = View.GONE
+    val toggle = ui.text("\u25B8 $title", Type.SECONDARY, bold = true, colour = ui.pal.info.ink)
+    toggle.minimumHeight = ui.px(Space.TOUCH)
+    toggle.gravity = Gravity.CENTER_VERTICAL
+    toggle.setOnClickListener {
+        val open = content.visibility != View.VISIBLE
+        content.visibility = if (open) View.VISIBLE else View.GONE
+        toggle.text = (if (open) "\u25BE " else "\u25B8 ") + title
+    }
+    return listOf(toggle, content)
+}
+
+// ---- getting a hardware wallet ---------------------------------------------------------------------------------------------
+
+private fun Controller.showHardware(r: FirstRun) {
+    val views = ArrayList<View>()
+    views.add(heading(FirstRunWords.hwTitle))
+    views.add(para(FirstRunWords.hwText))
+    for (rule in HelperPage.rules) views.add(ui.text("\u2022 $rule", 15f))
+    views.add(line(FirstRunWords.hwNoBrand, muted = true))
+    views.add(stack(ui.button(FirstRunWords.hwHelper) { r.openHelper(); showFirstRun() }, line(FirstRunWords.hwHelperNote, muted = true), gap = 6))
+    views.add(para(FirstRunWords.hwArrives))
+    // The same call as the start of the starter wallet's setup has always had: the next step is Starter.
+    stepScreen(FirstRunWords.shopTitle, views, listOf(ui.primary(FirstRunWords.hwNext) { r.next(); showFirstRun() }), { r.back(); showFirstRun() })
+}
+
+/** The page for the helper: the rules and the steps, and the same as plain text through Android's share sheet. */
+private fun Controller.showHelper(r: FirstRun) {
+    val views = ArrayList<View>()
+    views.add(heading(FirstRunWords.helperTitle))
+    views.add(para(FirstRunWords.helperIntro))
+    views.add(label(FirstRunWords.helperBuy))
+    for (rule in HelperPage.rules) views.add(ui.text("\u2022 $rule", 15f))
+    views.add(label(FirstRunWords.helperArrives))
+    for (step in HelperPage.steps) views.add(ui.text(step, 15f))
+    val share = ui.primary(FirstRunWords.hwHelper) {
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, HelperPage.text())
+        act.startActivity(Intent.createChooser(send, null))
+    }
+    stepScreen(FirstRunWords.helperTitle, views, listOf(share), { r.back(); showFirstRun() })
+}
+
+// ---- instant payments --------------------------------------------------------------------------------------------------------
+
+/** The limit the shop's settings hold for one light-checked sale, in whole units of its money; null when the node holds none yet. */
+private fun Controller.heldInstant(): Long? = try {
+    node?.settings()?.lightPerSale?.displayUsd
+} catch (_: OwnerException) {
+    null
+} catch (_: LinkageError) {
+    null
+}
+
+private fun Controller.showInstant(r: FirstRun) {
+    val limit = ui.field(FirstRunWords.instantLabel).also {
+        it.inputType = InputType.TYPE_CLASS_NUMBER
+        it.setText(r.instantTyped ?: InstantStep.initial(heldInstant()))
+    }
+    val typical = ui.field(FirstRunWords.instantTypical).also {
+        it.inputType = InputType.TYPE_CLASS_NUMBER
+        it.setText(r.typicalTyped)
+    }
+    val msg = Slot(act)
+    fun capture() {
+        r.instantTyped = limit.text.toString()
+        r.typicalTyped = typical.text.toString()
+    }
+    val how = stack(para(FirstRunWords.instantHow1), para(FirstRunWords.instantHow2))
+    val details = stack(para(FirstRunWords.instantDetails))
+    val body = ArrayList<View>()
+    body.add(heading(FirstRunWords.instantTitle))
+    body.add(para(FirstRunWords.instantText))
+    body.add(ui.labelled(FirstRunWords.instantLabel, limit))
+    body.add(ui.labelled(FirstRunWords.instantTypical, typical))
+    body.add(line(FirstRunWords.instantZero, muted = true))
+    body.add(msg)
+    body.addAll(fold(FirstRunWords.howThisWorks, how))
+    body.addAll(fold(FirstRunWords.details, details))
+    stepScreen(
+        FirstRunWords.shopTitle, body,
+        listOf(ui.primary(FirstRunWords.instantNext) { capture(); writeInstant(r, msg) }),
+        { capture(); r.back(); showFirstRun() },
+    )
+}
+
+/**
+ * Writes the limit the way the settings screen does (SettingsEdit.kt): the node judges the one-field edit, and what it
+ * would change is queued with the bytes it gave. The first run holds no settings of its own, so there is no other place
+ * to write it. Nothing is queued when the settings already hold the number. A tightening takes effect when delivered; a
+ * raise waits for the Key app like any loosening. With no node or no settings yet the step stays, with the library's words.
+ */
+private fun Controller.writeInstant(r: FirstRun, msg: Slot) {
+    val typed = r.instantTyped ?: ""
+    if (InstantStep.parse(typed) == null) {
+        msg.show(ui.words(AppWords.editValueNotRead(FieldKind.Dollars, FirstRunWords.instantLabel, shopFile.load().currency ?: ShopCurrency.Usd)))
+        return
+    }
+    val n = node
+    val held = try {
+        n?.settings()
+    } catch (e: OwnerException) {
+        return msg.show(ui.words(e.sayWords()))
+    } catch (e: LinkageError) {
+        return msg.show(ui.words(AppWords.libraryMissing(e.message)))
+    }
+    if (n == null || held == null) return msg.show(ui.words(AppWords.noSettingsYet))
+    val ok = try {
+        r.saveInstant(typed) { v ->
+            val p = n.previewSettings(InstantStep.edit(v))
+            if (!p.nothingChanged) n.queueSettings(p.settings)
+        }
+    } catch (e: OwnerException) {
+        return msg.show(ui.words(e.sayWords()))
+    } catch (e: LinkageError) {
+        return msg.show(ui.words(AppWords.libraryMissing(e.message)))
+    }
+    if (ok) showFirstRun()
+}
+
+// ---- a first real sale ---------------------------------------------------------------------------------------------------------
+
+private fun Controller.showFirstSale(r: FirstRun) {
+    val sale = r.firstSale
+    val back = { r.back(); showFirstRun() }
+    val body = ArrayList<View>()
+    val actions = ArrayList<Button>()
+    if (!sale.paid) {
+        body.add(heading(FirstRunWords.firstSaleTitle))
+        body.add(para(FirstRunWords.firstSaleText))
+        body.add(line(FirstRunWords.firstSaleWaiting, muted = true))
+        actions.add(ui.secondary(FirstRunWords.firstSaleSkip) { r.next(); showFirstRun() })
+    } else {
+        body.add(heading(FirstRunWords.firstSalePaid))
+        if (sale.seeing) {
+            body.add(para(FirstRunWords.firstSaleSeeText))
+            sale.txid?.let { body.add(ui.text(it, 13f, mono = true)) }
+        } else {
+            body.add(ui.button(FirstRunWords.firstSaleSee) { seeFirstSale(r) })
+        }
+        actions.add(ui.primary(FirstRunWords.firstSaleDone) { r.next(); showFirstRun() })
+    }
+    stepScreen(FirstRunWords.shopTitle, body, actions, back)
+    if (!sale.paid) {
+        // The link's turns call this every few seconds: the first paid sale of the books ends the waiting.
+        tick = { if (node?.let { n -> sale.observe(paidSalesOf(n)) } == true) showFirstRun() }
+        tick?.invoke()
+    }
+}
+
+/** The shop's paid sales as the books count them; 0 when the node cannot say. */
+internal fun Controller.paidSalesOf(n: OwnerNode): Long = try {
+    FirstSale.paidSales(n.books(java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60_000))
+} catch (_: OwnerException) {
+    0L
+} catch (_: LinkageError) {
+    0L
+}
+
+/**
+ * "See it yourself": the payment's ID, read from the full ledger, which the books keep behind their own warning (BK-19),
+ * so the warning is shown first. No network is asked and no link is made.
+ */
+private fun Controller.seeFirstSale(r: FirstRun) {
+    val n = node ?: return begin()
+    val msg = Slot(act)
+    val ask = BooksModel.LedgerAsk("", { n.booksLedger(it) })
+    ask.ask()
+    val leave = { ask.cancel(); showFirstRun() }
+    val accept = ui.primary(ask.acceptLabel) {
+        val bytes = attempt(msg) { n.booksLedger(true) } ?: return@primary
+        r.firstSale.see(FirstSale.firstTxid(bytes))
+        showFirstRun()
+    }
+    stepScreen(ask.title, listOf(para(ask.text), msg), listOf(accept, ui.button(ask.cancelLabel) { leave() }), leave)
+}
+
+// ---- the home checklist ---------------------------------------------------------------------------------------------------------
+
+/**
+ * The small checklist of the owner home screen (DESIGN 2.1): a first sale until one is paid, and the second copy of the
+ * starter words when the owner skipped it. Null when nothing is left. The books are read at most every 15 seconds, and a
+ * paid sale stays seen.
+ */
+internal fun Controller.homeChecklist(n: OwnerNode): View? {
+    val now = System.currentTimeMillis()
+    if (!checklistSaleSeen && now - checklistAt >= CHECKLIST_EVERY_MS) {
+        checklistAt = now
+        checklistSaleSeen = paidSalesOf(n) >= 1
+    }
+    val items = Checklist.items(checklistSaleSeen, secondCopySkipped())
+    if (items.isEmpty()) return null
+    return stack(
+        label(FirstRunWords.checklistTitle),
+        ui.rows(items.map { RowItem(it.text, it.note) }),
+        gap = 6,
+    )
+}
+
+private const val CHECKLIST_EVERY_MS = 15_000L
+
+/** The owner has a starter wallet and did not write the second copy of its words: read from the starter record. */
+private fun Controller.secondCopySkipped(): Boolean = starterRecord()?.let { !it.secondCopyMade } ?: false
+
+// Stub for `StarterRecord.secondCopyMade`, which the starter wallet's branch adds as a member. Delete this line when
+// the branches join: the member then wins and the compiler flags the extension as shadowed.
+private val StarterRecord.secondCopyMade: Boolean get() = true
 
 /** The advice on an own wallet: a cold wallet is recommended; the owner may make one, or go on with the wallet they have. */
 private fun Controller.showOwnAdvice(r: FirstRun) {
