@@ -855,8 +855,14 @@ impl BoxRunner {
         let core: Core = Arc::new(Mutex::new(core));
         {
             let core = Arc::clone(&core);
-            relay.set_welcome_hook(Some(Box::new(move |welcome, settings, now| {
+            let clock = Arc::clone(&clock);
+            // The time the relay passes was read before this hook waited for
+            // the core's lock. An invitation entered in that wait would be
+            // entered in its future and count as expired (BX-12), so the
+            // clock is read again under the lock.
+            relay.set_welcome_hook(Some(Box::new(move |welcome, settings, _| {
                 let mut core = lock(&core);
+                let now = clock.now();
                 match core.take_welcome(welcome, settings, now) {
                     Ok(()) => WelcomeAnswer::Welcomed(core.members()),
                     // A welcome that did not spend the invitation leaves the
@@ -879,10 +885,18 @@ impl BoxRunner {
             // paired and not turned off (BX-23).
             let core = Arc::clone(&core);
             let shop = Arc::clone(&shop);
-            relay.set_store_hook(Some(Box::new(move |sealed, now| {
-                if lock(&core).status(now) != BoxStatus::Paired {
-                    return StoreAnswer::Refused;
-                }
+            let clock = Arc::clone(&clock);
+            relay.set_store_hook(Some(Box::new(move |sealed, _| {
+                // The clock is read under the core's lock, as in the welcome
+                // hook.
+                let now = {
+                    let mut core = lock(&core);
+                    let now = clock.now();
+                    if core.status(now) != BoxStatus::Paired {
+                        return StoreAnswer::Refused;
+                    }
+                    now
+                };
                 match lock(&shop).as_mut() {
                     Some(store) => store.answer(sealed, now, &mut os_random),
                     None => StoreAnswer::Refused,
@@ -1007,6 +1021,12 @@ impl BoxRunner {
     /// The relay's member list now (BX-22).
     pub fn members(&self) -> Vec<DeviceId> {
         lock(&self.relay).members().copied().collect()
+    }
+
+    /// Run `f` on the core while holding its lock.
+    #[cfg(test)]
+    pub(crate) fn with_core<R>(&self, f: impl FnOnce(&mut BoxCore<DirFiles>) -> R) -> R {
+        f(&mut lock(&self.core))
     }
 
     /// One sync of the relay with the core, as the worker does each step.

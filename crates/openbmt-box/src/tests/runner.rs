@@ -458,6 +458,34 @@ fn bx_15_a_sync_racing_a_new_invitation_never_hides_its_claim() {
 }
 
 #[test]
+fn bx_15_a_welcome_waiting_for_the_core_never_withdraws_an_invitation_entered_meanwhile() {
+    // The relay reads the time before the hook waits for the core's lock. A
+    // hook that used that time would find an invitation entered during the
+    // wait in its future, count it as expired and withdraw its claim.
+    let inv = invitation(6);
+    let dir = TempDir::new("welcomewait");
+    let (r, clock) = start(&dir);
+    r.enter_invitation(&inv.to_text()).unwrap();
+    std::thread::scope(|scope| {
+        r.with_core(|core| {
+            // A welcome that is not for any invitation, now waiting in the
+            // hook for this lock with the time it was sent at.
+            scope.spawn(|| {
+                let mut c = connect(&r);
+                c.welcome(&[1, 2, 3], &[4])
+            });
+            std::thread::sleep(Duration::from_millis(400));
+            clock.advance(1);
+            core.enter_invitation(&inv.to_text(), clock.now(), [9u8; 32])
+                .unwrap();
+        });
+    });
+    eventually("the new claim is still on offer", || {
+        connect(&r).claim().is_ok()
+    });
+}
+
+#[test]
 fn bx_15_a_stranger_welcoming_over_the_wire_cannot_stop_the_real_pairing() {
     let dir = TempDir::new("strangerwelcome");
     let (r, clock) = start(&dir);
