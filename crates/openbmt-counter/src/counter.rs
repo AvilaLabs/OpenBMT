@@ -1384,6 +1384,29 @@ impl Counter {
             .map_err(|e| OpenRefused::AddressNotStored(StoreFault::Write(e)))
     }
 
+    /// SL-33: the next index of the ranges, for the node of Shop Lightning
+    /// (its sweeps, its closes and its output sweeper) rather than for a
+    /// sale. It is taken as a sale takes its address: the whole ledger is
+    /// written before the index is handed back, so no sale is ever given it
+    /// and no two calls return the same one. `None` when the counter holds no
+    /// wallet of its own or no range has a free index.
+    pub fn take_own_index<S: Store>(
+        &mut self,
+        store: &mut S,
+    ) -> Result<Option<u32>, StoreFault<S::Error>> {
+        let Some(own) = &self.own else {
+            return Ok(None);
+        };
+        let Some((next, index, _)) = own.issue() else {
+            return Ok(None);
+        };
+        store
+            .put(Slot::Ranges, &next.ledger.to_bytes())
+            .map_err(StoreFault::Write)?;
+        self.own = Some(next);
+        Ok(Some(index))
+    }
+
     fn install(&mut self, sale: Sale) {
         if !sale.is_live() {
             self.archived.insert(sale.script.clone(), sale.index);

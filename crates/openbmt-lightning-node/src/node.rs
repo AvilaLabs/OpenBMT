@@ -197,6 +197,10 @@ pub struct Paid {
     /// What arrived, in millisatoshis: the amount of the invoice less the
     /// provider's fee if the payment opened a channel.
     pub amount_msat: u64,
+    /// What the provider skimmed off this payment, in millisatoshis: 0 when
+    /// no channel was opened for it. The customer paid `amount_msat` plus
+    /// this.
+    pub skimmed_msat: u64,
     /// What the payer sent, if the library knows it.
     pub sender_intended_msat: Option<u64>,
     /// When the claim was seen, in seconds since the epoch. A repeat of the
@@ -209,6 +213,7 @@ impl From<PaidRecord> for Paid {
         Paid {
             payment_hash: r.payment_hash,
             amount_msat: r.amount_msat,
+            skimmed_msat: r.skimmed_msat,
             sender_intended_msat: r.sender_intended_msat,
             received_unix: r.received_unix,
         }
@@ -1023,6 +1028,17 @@ impl Node {
             .map_err(|e| e.to_string())
     }
 
+    /// The invoice with this payment hash is cancelled: the node no longer
+    /// claims a payment to it, and one that arrives is failed back to the
+    /// payer. Cancelling one that is not kept is not an error.
+    pub async fn cancel_invoice(&self, payment_hash: [u8; 32]) -> Result<(), String> {
+        self.shared
+            .expectations
+            .forget(&payment_hash, now_secs())
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     /// Changes where swept outputs go: the receive address of the shop's
     /// pinned wallet at `index`, derived by the node (SL-33). The index is
     /// kept, and used after a restart. An index with no address is refused
@@ -1063,6 +1079,32 @@ impl Node {
     /// spent, and those spent but not yet buried deep enough to forget.
     pub fn tracked_outputs(&self) -> usize {
         self.shared.sweeper.tracked_spendable_outputs().len()
+    }
+
+    /// The transactions the sweeper has made to spend outputs and not yet
+    /// forgotten, as transaction IDs. A new one is a transaction that paid
+    /// the sweep address, so the caller moves on to a new address.
+    pub fn sweeper_spends(&self) -> Vec<[u8; 32]> {
+        use bitcoin::hashes::Hash;
+        use lightning::util::sweep::OutputSpendStatus;
+        let mut out: Vec<[u8; 32]> = self
+            .shared
+            .sweeper
+            .tracked_spendable_outputs()
+            .into_iter()
+            .filter_map(|o| match o.status {
+                OutputSpendStatus::PendingInitialBroadcast { .. } => None,
+                OutputSpendStatus::PendingFirstConfirmation {
+                    latest_spending_tx, ..
+                }
+                | OutputSpendStatus::PendingThresholdConfirmations {
+                    latest_spending_tx, ..
+                } => Some(latest_spending_tx.compute_txid().to_byte_array()),
+            })
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
     }
 
     /// How many balances the channel monitors still hold: money that is
@@ -1653,6 +1695,7 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
             payment_hash,
             amount_msat,
             sender_intended_total_msat,
+            htlcs,
             ..
         } => {
             // Both copies hold the claim: the library gave this event only
@@ -1666,6 +1709,10 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
                 .record(PaidRecord {
                     payment_hash: payment_hash.0,
                     amount_msat,
+                    skimmed_msat: htlcs
+                        .iter()
+                        .map(|h| h.counterparty_skimmed_fee_msat)
+                        .fold(0, u64::saturating_add),
                     sender_intended_msat: sender_intended_total_msat,
                     received_unix: now,
                 })

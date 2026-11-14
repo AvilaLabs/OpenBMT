@@ -27,8 +27,11 @@ pub const PRIMARY: &str = "paid_events";
 /// How long the mark of an acknowledged event is kept, in seconds: thirty
 /// days, far longer than the library can owe a repeat of an event.
 pub const ACKED_KEPT_SECS: u64 = 30 * 24 * 3600;
-const VERSION: u8 = 1;
-const LEN: usize = 1 + 8 + 8 + 1 + 8 + 1 + 8;
+const VERSION: u8 = 2;
+/// The first version, which had no skimmed fee: read with a skim of 0.
+const VERSION_1: u8 = 1;
+const LEN_1: usize = 1 + 8 + 8 + 1 + 8 + 1 + 8;
+const LEN: usize = LEN_1 + 8;
 
 /// A paid sale as it is kept.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +40,9 @@ pub struct PaidRecord {
     pub payment_hash: [u8; 32],
     /// What arrived, in millisatoshis.
     pub amount_msat: u64,
+    /// What the provider skimmed off this payment, in millisatoshis: 0 when
+    /// no channel was opened for it.
+    pub skimmed_msat: u64,
     /// What the payer sent, if the library knew it.
     pub sender_intended_msat: Option<u64>,
     /// When the claim was seen, in seconds since the epoch. A repeat carries
@@ -80,19 +86,29 @@ fn encode(k: &Kept) -> Vec<u8> {
     out.extend_from_slice(&r.sender_intended_msat.unwrap_or(0).to_be_bytes());
     out.push(k.acked_unix.is_some() as u8);
     out.extend_from_slice(&k.acked_unix.unwrap_or(0).to_be_bytes());
+    out.extend_from_slice(&r.skimmed_msat.to_be_bytes());
     out
 }
 
 fn decode(hash: [u8; 32], bytes: &[u8]) -> Result<Kept, io::Error> {
-    if bytes.len() != LEN || bytes[0] != VERSION {
+    let ok = match bytes.first() {
+        Some(&VERSION) => bytes.len() == LEN,
+        Some(&VERSION_1) => bytes.len() == LEN_1,
+        _ => false,
+    };
+    if !ok {
         return Err(invalid("paid event"));
     }
+    let skimmed = bytes
+        .get(LEN_1..LEN)
+        .map_or(0, |b| u64::from_be_bytes(b.try_into().unwrap()));
     let sender = u64::from_be_bytes(bytes[18..26].try_into().unwrap());
     let acked = u64::from_be_bytes(bytes[27..35].try_into().unwrap());
     Ok(Kept {
         record: PaidRecord {
             payment_hash: hash,
             amount_msat: u64::from_be_bytes(bytes[1..9].try_into().unwrap()),
+            skimmed_msat: skimmed,
             received_unix: u64::from_be_bytes(bytes[9..17].try_into().unwrap()),
             sender_intended_msat: (bytes[17] == 1).then_some(sender),
         },
@@ -228,6 +244,7 @@ mod tests {
         PaidRecord {
             payment_hash: [n; 32],
             amount_msat: 49_000_000,
+            skimmed_msat: 1_000_000,
             sender_intended_msat: Some(50_000_000),
             received_unix: at,
         }
@@ -334,5 +351,13 @@ mod tests {
             acked_unix: Some(9),
         };
         assert_eq!(decode([1; 32], &encode(&none)).unwrap(), none);
+        // The first version has no skim: it reads as none.
+        let mut old = encode(&none);
+        old.truncate(LEN_1);
+        old[0] = VERSION_1;
+        let read = decode([1; 32], &old).unwrap();
+        assert_eq!(read.record.skimmed_msat, 0);
+        assert_eq!(read.record.amount_msat, none.record.amount_msat);
+        assert!(decode([1; 32], &old[..LEN_1 - 1]).is_err());
     }
 }

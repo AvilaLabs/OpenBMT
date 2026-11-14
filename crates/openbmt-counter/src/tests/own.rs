@@ -106,6 +106,32 @@ fn cr_234_if_the_store_fails_no_address_is_shown_and_the_index_is_not_used() {
 }
 
 #[test]
+fn sl_33_an_index_taken_for_the_node_is_never_given_to_a_sale_or_taken_twice() {
+    let (mut w, p) = own_world(SINGLE, range(0, 1_200));
+    let a = w.c.take_own_index(&mut w.m).unwrap().unwrap();
+    let b = w.c.take_own_index(&mut w.m).unwrap().unwrap();
+    assert_eq!((a, b), (0, 1));
+    // The ledger is stored whole before the index is given.
+    assert_eq!(
+        w.m.slots[&Slot::Ranges],
+        w.c.range_ledger().unwrap().to_bytes()
+    );
+    for _ in 0..1_000 {
+        let o = w.open_five();
+        assert!(o.index != a && o.index != b);
+        w.tick(60);
+    }
+    // A restart goes on after what was taken.
+    restart(&mut w, &p);
+    assert_eq!(w.c.take_own_index(&mut w.m).unwrap(), Some(1_002));
+    let (mut w, _) = own_world(SINGLE, range(0, 1_000));
+    w.m.fail_on = Some(1);
+    assert!(w.c.take_own_index(&mut w.m).is_err());
+    w.m.reset();
+    assert_eq!(w.c.take_own_index(&mut w.m).unwrap(), Some(0));
+}
+
+#[test]
 fn cr_234_a_restart_reads_the_ranges_slot_and_continues_at_the_right_index() {
     let (mut w, p) = own_world(SINGLE, range(10, 1_010));
     for want in 10..13 {
