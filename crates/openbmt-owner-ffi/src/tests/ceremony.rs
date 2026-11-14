@@ -44,9 +44,12 @@ impl KeyStore for Store {
         Some(*block.as_byte_array())
     }
     fn now(&self) -> u64 {
-        T0
+        KEY_APP_NOW
     }
 }
+
+/// The Key app's clock: the first second it accepts (SR-31).
+const KEY_APP_NOW: u64 = 1_793_491_200;
 
 /// A Key app with key 2 made.
 pub(super) fn key_app_with_key2() -> Arc<KeyApp> {
