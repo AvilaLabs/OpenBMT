@@ -737,52 +737,50 @@ link) are shown as they arrive:
 | RQ_28_CHECK_TEXT | Compare these groups with the customer by another way than the message the address came in, such as a call or in person. |
 | RQ_28_CHECK_NEXT | Someone who can change your messages can change an address in them. The return waits in the queue until you pay the returns. |
 The web store (`docs/WEB-ORDER-RULES.md`, WO-01 to WO-32), in
-`WebOrderWords`. A text named `WORDS_NEEDED_WO_<rule>_<SUFFIX>` is not
-written yet and shows its own name. What the library says of a refusal
-or a failed visit is `WORDS_NEEDED_WO_<rule>_HEADING`, `_WHAT` and
-`_NEXT`:
+`WebOrderWords`. What the library says of a refusal or a failed visit
+is in `crates/openbmt-owner/src/web_order/say.rs`:
 
 | Key | Text |
 |---|---|
-| rowTitle | WORDS_NEEDED_WO_05_ROW_TITLE |
-| rowSub | WORDS_NEEDED_WO_05_ROW_SUB |
-| pageTitle | WORDS_NEEDED_WO_05_PAGE_TITLE |
-| back | WORDS_NEEDED_WO_05_BACK |
-| whatItIs | WORDS_NEEDED_WO_01_WHAT |
-| noStore | WORDS_NEEDED_WO_05_NO_STORE |
-| start | WORDS_NEEDED_WO_05_START |
-| pairTitle | WORDS_NEEDED_WO_05_PAIR_TITLE |
-| addressLabel | WORDS_NEEDED_WO_06_ADDRESS_LABEL |
-| addressHint | WORDS_NEEDED_WO_06_ADDRESS_HINT |
-| nameLabel | WORDS_NEEDED_WO_05_NAME_LABEL |
-| fieldsMissing | WORDS_NEEDED_WO_06_FIELDS_MISSING |
-| makeCode | WORDS_NEEDED_WO_05_MAKE_CODE |
-| codeTitle | WORDS_NEEDED_WO_05_CODE_TITLE |
-| codePaste | WORDS_NEEDED_WO_05_CODE_PASTE |
-| codeCopy | WORDS_NEEDED_WO_05_CODE_COPY |
-| codeCopied | WORDS_NEEDED_WO_05_CODE_COPIED |
-| fingerprintLabel | WORDS_NEEDED_WO_05_FINGERPRINT_LABEL |
-| compare | WORDS_NEEDED_WO_05_COMPARE |
-| match | WORDS_NEEDED_WO_05_MATCH |
-| differ | WORDS_NEEDED_WO_05_DIFFER |
-| waiting | WORDS_NEEDED_WO_05_WAITING |
-| continuePairing | WORDS_NEEDED_WO_05_CONTINUE |
-| shopLabel | WORDS_NEEDED_WO_05_SHOP_LABEL |
-| storeLabel | WORDS_NEEDED_WO_06_STORE_LABEL |
-| lastVisitLabel | WORDS_NEEDED_WO_21_LAST_VISIT_LABEL |
-| neverVisited | WORDS_NEEDED_WO_21_NEVER |
-| nextVisitLabel | WORDS_NEEDED_WO_21_NEXT_VISIT_LABEL |
-| visitNow | WORDS_NEEDED_WO_21_VISIT_NOW |
-| sentLabel | WORDS_NEEDED_WO_12_SENT_LABEL |
-| leftLabel | WORDS_NEEDED_WO_11_LEFT_LABEL |
-| ordersLabel | WORDS_NEEDED_WO_20_ORDERS_LABEL |
-| waitingLabel | WORDS_NEEDED_WO_20_WAITING_LABEL |
-| toldLabel | WORDS_NEEDED_WO_30_TOLD_LABEL |
-| noticesLabel | WORDS_NEEDED_WO_32_NOTICES_LABEL |
-| refusedTitle | WORDS_NEEDED_WO_22_REFUSED_TITLE |
-| refusedOrderLabel | WORDS_NEEDED_WO_22_REFUSED_ORDER_LABEL |
-| unpair | WORDS_NEEDED_WO_07_UNPAIR |
-| unpairTitle | WORDS_NEEDED_WO_07_UNPAIR_TITLE |
-| unpairWhat | WORDS_NEEDED_WO_07_UNPAIR_WHAT |
-| unpairConfirm | WORDS_NEEDED_WO_07_UNPAIR_CONFIRM |
-| unpairKeep | WORDS_NEEDED_WO_07_UNPAIR_KEEP |
+| rowTitle | Web store |
+| rowSub | Bitcoin at checkout in your own online store |
+| pageTitle | Your web store |
+| back | Back |
+| whatItIs | Customers of your WooCommerce store can pay in bitcoin at checkout. Each order gets a new address of the shop's wallet, and this phone tells the store when the order is paid. |
+| noStore | No store is paired with this phone yet. |
+| start | Pair a store |
+| pairTitle | Pair your store |
+| addressLabel | The store's web address |
+| addressHint | https://shop.example.com |
+| nameLabel | Shop name shown at checkout |
+| fieldsMissing | Type the store's address and the shop's name first. |
+| makeCode | Make the pairing code |
+| codeTitle | Pairing code |
+| codePaste | On a computer, open the store's admin pages, then the OpenBMT payment settings in WooCommerce, and paste this code there. |
+| codeCopy | Copy the code |
+| codeCopied | Copied. Paste it in the store's settings. |
+| fingerprintLabel | Key check |
+| compare | Once the code is in, the store shows a key check. It must be the same as the one here. |
+| match | They are the same |
+| differ | They differ |
+| waiting | A pairing was started and not finished. |
+| continuePairing | Finish the pairing |
+| shopLabel | Shop name |
+| storeLabel | Store address |
+| lastVisitLabel | Last visit |
+| neverVisited | Not visited yet |
+| nextVisitLabel | Next try |
+| visitNow | Visit the store now |
+| sentLabel | Addresses given to the store |
+| leftLabel | Addresses not used yet |
+| ordersLabel | Orders taken |
+| waitingLabel | Orders waiting for payment |
+| toldLabel | Orders the store was told are paid |
+| noticesLabel | Paid notices still to send |
+| refusedTitle | Orders this phone refused. Do not ship them before you have checked them in the store. |
+| refusedOrderLabel | Refused order |
+| unpair | Unpair the store |
+| unpairTitle | Unpairing the store |
+| unpairWhat | This phone stops taking the store's orders. Unpair it in the store's settings too, so that it stops offering bitcoin at checkout. |
+| unpairConfirm | Unpair |
+| unpairKeep | Addresses already given to the store stay watched, so a late payment is still seen. |

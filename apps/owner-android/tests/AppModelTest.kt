@@ -4416,12 +4416,10 @@ object AppModelTest {
     private fun webCall(kind: WebCallKind) = WebCall(kind, "https://shop.example/wp-json/openbmt/v1/orders", listOf("X-OBM-Mac" to "00"), "application/json", "{}".toByteArray())
 
     private fun webOrderTests() {
-        // The words: every text is the placeholder of a rule of docs/WEB-ORDER-RULES.md, and none is used twice.
+        // The words: every text is written, and none is used twice.
         val all = WebOrderWords.all()
         ok(all.map { it.first }.toSet().size == all.size && all.map { it.second }.toSet().size == all.size, "each web store text is written once")
-        ok(all.all { (_, text) -> Regex("WORDS_NEEDED_WO_\\d{2}_[A-Z_]+").matches(text) && WebOrderWords.isPlaceholder(text) }, "each web store text is a placeholder that names its rule")
-        val rules = Regex("WO-(\\d{2})").findAll(File(appDir, "../../docs/WEB-ORDER-RULES.md").readText()).map { it.groupValues[1] }.toSet()
-        ok(all.all { (_, text) -> text.removePrefix("WORDS_NEEDED_WO_").take(2) in rules }, "the rule of each placeholder is a rule of the web order rules")
+        ok(all.none { (_, text) -> text.contains("WORDS_NEEDED") || text.isBlank() }, "no web store text is left as a placeholder")
         val screens = source("src/android/WebStore.kt")
         val literals = Regex("\"([^\"\\\\]*)\"").findAll(screens.lines().filter { !it.trimStart().startsWith("//") && !it.trimStart().startsWith("import") }.joinToString("\n")).map { it.groupValues[1] }.toList()
         ok(literals.all { it.isEmpty() || it.startsWith("\$") }, "the web store screens write no text of their own: $literals")

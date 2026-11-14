@@ -139,18 +139,22 @@ impl WebFailure {
     /// The words for a failed visit, shown on the store's page: the
     /// placeholder of the rule where no words are written yet.
     pub fn words(self) -> openbmt_core::say::Words {
-        use openbmt_owner::web_order::say::needed;
-        match self {
-            Self::NotReached | Self::TorMissing | Self::TooLong => needed("06"),
-            Self::Denied | Self::Status | Self::BadAnswer => needed("20"),
-            Self::NotReady => needed("22"),
-        }
+        use openbmt_owner::web_order::say::{visit_words, VisitTrouble};
+        visit_words(match self {
+            Self::NotReached => VisitTrouble::NotReached,
+            Self::TorMissing => VisitTrouble::TorMissing,
+            Self::TooLong => VisitTrouble::TooLong,
+            Self::Denied => VisitTrouble::Denied,
+            Self::Status => VisitTrouble::Status,
+            Self::BadAnswer => VisitTrouble::BadAnswer,
+            Self::NotReady => VisitTrouble::NotReady,
+        })
     }
 }
 
 /// WO-10: the words for the store's refusal of a range.
-pub fn trouble_words(_result: RangeResult) -> openbmt_core::say::Words {
-    openbmt_owner::web_order::say::needed("10")
+pub fn trouble_words(result: RangeResult) -> openbmt_core::say::Words {
+    openbmt_owner::web_order::say::range_words(result)
 }
 
 /// The call in the air.

@@ -92,12 +92,12 @@ fn wo_05_a_pairing_code_is_read_back_with_what_the_owner_compares() {
     let mut r = Rd::ok(&response);
     assert_eq!((r.string(), r.string()), (fingerprint.clone(), shop));
     r.done();
-    // A code that is not one is refused with the rule's placeholder words.
+    // A code that is not one is refused with the rule's words.
     let mut bent = code.clone();
     bent.replace_range(10..11, if &code[10..11] == "A" { "B" } else { "A" });
     let fault = Rd::error(&rig.call(233, 0, &W::new().string(&bent).0)).expect("refused");
     assert_eq!(fault.rule, "WO-05");
-    assert_eq!(fault.words.heading, "WORDS_NEEDED_WO_05_HEADING");
+    assert_eq!(fault.words.heading, "Pairing code not readable");
     // The state waits for the owner's word, and shows the code again.
     let response = rig.call(230, handle, &ask(T0).0);
     let state = state(&mut Rd::ok(&response));
@@ -130,7 +130,7 @@ fn wo_06_a_store_without_https_is_refused_and_nothing_is_kept() {
     let fault = Rd::error(&rig.call(227, handle, &pair_args("http://shop.example", "Shop")))
         .expect("refused");
     assert_eq!(fault.rule, "WO-06");
-    assert_eq!(fault.words.heading, "WORDS_NEEDED_WO_06_HEADING");
+    assert_eq!(fault.words.heading, "Store address not usable");
     let response = rig.call(230, handle, &ask(T0).0);
     assert_eq!(state(&mut Rd::ok(&response)).pairing, 0);
 }
@@ -217,7 +217,7 @@ fn wo_21_a_call_that_got_no_answer_is_shown_as_a_failed_visit_and_waits() {
     // The app could not reach the store (outcome 1).
     let response = rig.call(232, handle, &ask(T0 + 3).u8(1).u32(0).bytes(&[]).0);
     let now = state(&mut Rd::ok(&response));
-    assert_eq!(now.failure.as_deref(), Some("WORDS_NEEDED_WO_06_HEADING"));
+    assert_eq!(now.failure.as_deref(), Some("Store not reached"));
     // The next visit waits 30 seconds; the owner's own does not.
     let response = rig.call(231, handle, &ask(T0 + 10).u8(0).0);
     assert_eq!(step(&mut Rd::ok(&response)).kind, 0);

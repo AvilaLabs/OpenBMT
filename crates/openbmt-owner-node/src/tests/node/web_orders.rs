@@ -420,11 +420,10 @@ fn wo_20_wo_22_an_order_becomes_a_request_at_its_address_and_bad_ones_are_shown(
             (10, RefusedWhy::NoAmount),
         ]
     );
-    assert!(info.refused[0]
-        .why
-        .words()
-        .heading
-        .starts_with("WORDS_NEEDED_WO_22_"));
+    assert_eq!(
+        info.refused[0].why.words().heading,
+        "Order to an unknown address"
+    );
     // The same orders asked for again make nothing more.
     rig.node.web_visit_soon();
     visit(&mut rig, &mut store, START + 6, false);

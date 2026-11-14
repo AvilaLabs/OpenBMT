@@ -36,6 +36,7 @@ use std::path::Path;
 use openbmt_core::say::Words;
 use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_owner::web_order::say as words;
+use openbmt_owner::web_order::say::StoreTrouble;
 use openbmt_owner::web_order::{
     OrderRefusal, Range, RangeResult, SentRanges, StoreOrder, WebOrderKey, WebOrderRefusal,
     MAX_SHOP_NAME_BYTES, RANGE_SIZE, SECRET_BYTES,
@@ -126,12 +127,14 @@ impl WebError {
     pub fn words(&self) -> Words {
         match self {
             Self::Off(why) => crate::requests::RequestError::Off(why.clone()).words(),
-            Self::File(_) | Self::TooMany => words::needed("12"),
-            Self::Url => words::needed("06"),
-            Self::AlreadyPaired | Self::NotPaired => words::needed("05"),
+            Self::File(_) => words::store_words(StoreTrouble::File),
+            Self::TooMany => words::store_words(StoreTrouble::TooMany),
+            Self::Url => words::store_words(StoreTrouble::Url),
+            Self::AlreadyPaired => words::store_words(StoreTrouble::AlreadyPaired),
+            Self::NotPaired => words::store_words(StoreTrouble::NotPaired),
             Self::Library(r) => words::refusal_words(r),
-            Self::Indexes => words::needed("10"),
-            Self::Sequence => words::needed("20"),
+            Self::Indexes => words::store_words(StoreTrouble::Indexes),
+            Self::Sequence => words::visit_words(words::VisitTrouble::Sequence),
         }
     }
 }
@@ -323,7 +326,7 @@ impl RefusedWhy {
             Self::AddressUsedBefore => words::order_refusal_words(&OrderRefusal::AddressUsedBefore),
             Self::OrderChanged => words::order_refusal_words(&OrderRefusal::OrderChanged),
             Self::NoAmount => words::order_refusal_words(&OrderRefusal::NoAmount),
-            Self::NoRequest => words::needed("22"),
+            Self::NoRequest => words::no_request_words(),
         }
     }
 

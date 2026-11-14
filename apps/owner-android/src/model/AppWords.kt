@@ -1352,10 +1352,8 @@ object AppWords {
         for ((key, text) in RequestWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         out.append(
             "\nThe web store (`docs/WEB-ORDER-RULES.md`, WO-01 to WO-32), in\n" +
-                "`WebOrderWords`. A text named `WORDS_NEEDED_WO_<rule>_<SUFFIX>` is not\n" +
-                "written yet and shows its own name. What the library says of a refusal\n" +
-                "or a failed visit is `WORDS_NEEDED_WO_<rule>_HEADING`, `_WHAT` and\n" +
-                "`_NEXT`:\n\n" +
+                "`WebOrderWords`. What the library says of a refusal or a failed visit\n" +
+                "is in `crates/openbmt-owner/src/web_order/say.rs`:\n\n" +
                 "| Key | Text |\n" +
                 "|---|---|\n",
         )
