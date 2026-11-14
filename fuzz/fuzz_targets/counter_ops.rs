@@ -551,6 +551,7 @@ impl Run {
                 let source = RateSource::new("fuzz", self.now).unwrap();
                 let _ = self.counter.requote(
                     index,
+                    Currency::new(*b"USD").unwrap(),
                     rate,
                     &source,
                     self.now,
@@ -720,6 +721,7 @@ impl Run {
                 } else {
                     RefundAsk::Value {
                         minor: sats / 7,
+                        currency: Currency::new(*b"USD").unwrap(),
                         rate: Rate::new((1 + u64::from(input.byte())) * 100_000).unwrap(),
                         source: RateSource::new("fuzz", self.now).unwrap(),
                     }
@@ -789,6 +791,7 @@ impl Run {
                         name: "bob".to_string(),
                     },
                     minor: Amount(u64::from(input.word())),
+                    currency: Currency::new(*b"USD").unwrap(),
                     reason: "fuzz".to_string(),
                 };
                 let _ = self.counter.refund_in_cash(

@@ -70,6 +70,8 @@ fn valid() -> &'static Vec<Vec<u8>> {
             now_secs: 1_800_000_000,
             tip_height: 250_000,
             accept_unconfirmed: true,
+            behind: false,
+            lockup_on_chain: false,
         };
         let lockup = Transaction {
             version: Version::TWO,
