@@ -80,7 +80,10 @@ an end, payments in parts, repeats and returns.
     node keeps its newest rate with its currency and uses it only while that
     is the currency of the settings in force. Making a request, sharing it, a
     return and crediting a payment all need such a rate; without one they
-    are refused, or wait, as with a stale rate.
+    are refused, or wait, as with a stale rate. A request made in a currency
+    the shop no longer uses keeps it: it is not shared again ("Request in
+    another currency"), a return from it is only in satoshis, payments to it
+    count at its own last price, and it can still be cancelled or closed.
 - **RQ-08.** The amount in satoshis, or worked out from the currency, is at
   least the shop's smallest bitcoin sale (CR-75) and at least the dust line
   (CR-17). A smaller one is refused with nothing written. The currency amount

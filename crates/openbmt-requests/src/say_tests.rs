@@ -5,12 +5,6 @@ use super::*;
 use openbmt_core::currency::ShopCurrency;
 use openbmt_core::say::{check, check_distinct, MAX_HEADING, MAX_SENTENCE};
 
-/// The placeholders for words still to be written, exempt from the check.
-const EXEMPT: [&str; 2] = [
-    WORDS_NEEDED_RQ07_SHARE_OTHER_CURRENCY,
-    WORDS_NEEDED_RQ07_RETURN_OTHER_CURRENCY,
-];
-
 /// What the samples gave: words, and the names that share words.
 type Sampled = (Vec<(String, Words)>, Vec<&'static str>);
 
@@ -198,20 +192,8 @@ fn sc_12_every_refusal_and_state_has_words_that_pass_the_check() {
     let (words, shared) = samples();
     assert!(shared.len() >= 3);
     assert!(words.len() >= 30);
-    let written: Vec<(String, Words)> = words
-        .iter()
-        .filter(|(_, w)| !EXEMPT.contains(&w.heading.as_str()))
-        .cloned()
-        .collect();
-    assert_eq!(words.len() - written.len(), EXEMPT.len());
-    check_distinct(&written).unwrap();
+    check_distinct(&words).unwrap();
     for (name, w) in &words {
-        // Words still to be written (RQ-07) are exempt from the check.
-        if EXEMPT.contains(&w.heading.as_str()) {
-            assert_eq!(w.heading, w.what, "{name}");
-            assert_eq!(w.heading, w.next, "{name}");
-            continue;
-        }
         check(w).unwrap_or_else(|e| panic!("{name}: {e}"));
         let code = w.code.unwrap_or_else(|| panic!("{name} has no rule"));
         assert!(code.starts_with("RQ-"), "{name}: {code}");

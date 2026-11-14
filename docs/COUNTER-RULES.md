@@ -1461,15 +1461,18 @@ RT-03, RT-24).
   refund given by value (CR-61) and a refund in cash (CR-71) each name the
   currency of their amount or rate. It must be the currency the sale was
   opened in, or the counter refuses it with nothing written. The currency
-  named is a label: nothing ties the number to it. The counter app's library
-  refuses a sale in another currency than the settings' (`sale-currency`), and
-  refuses a new quote or a refund when the sale and the settings in force are
-  not both in Bitcoin Standard or both not. The app takes the currency from
-  the settings in force, not from its price sources: its keypad has the
-  currency's minor digits, its words name the currency by its code, its price
-  is the one of the sources of that currency (RT-40), and when the settings in
-  force name another currency than the one it started with, it starts the node
-  again.
+  named is a label: nothing ties the number to it, so a new quote and a refund
+  by value are also refused when the sale's currency is not the one of the
+  settings in force; a refund in cash, at the sale's own last quote, is not.
+  The counter app's library refuses a sale in another currency than the
+  settings' (`sale-currency`), and refuses a new quote or a refund by value of
+  a sale in another currency than the settings in force, and a refund in cash
+  when the sale and the settings in force are not both in Bitcoin Standard or
+  both not. The app takes the currency from the settings in force, not from
+  its price sources: its keypad has the currency's minor digits, its words
+  name the currency by its code, its price is the one of the sources of that
+  currency (RT-40), and when the settings in force name another currency than
+  the one it started with, it starts the node again.
 - **CR-197.** With Bitcoin Standard the amount typed is satoshis and the
   quote is the amount: the rate is exactly 100,000,000 minor units (of a
   satoshi) per bitcoin, no source is asked, and the rate and source the

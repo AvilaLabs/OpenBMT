@@ -54,15 +54,25 @@ pub fn stale_rate() -> Words {
     )
 }
 
-/// RQ-07: words still to be written for a request that is not in the
-/// currency of the settings now; the placeholder stands in the heading and
-/// both sentences, so that it shows wherever the words would.
-pub const WORDS_NEEDED_RQ07_SHARE_OTHER_CURRENCY: &str = "WORDS_NEEDED_RQ07_SHARE_OTHER_CURRENCY";
-/// RQ-07: the same, for a return valued by rate.
-pub const WORDS_NEEDED_RQ07_RETURN_OTHER_CURRENCY: &str = "WORDS_NEEDED_RQ07_RETURN_OTHER_CURRENCY";
+/// RQ-07: a request priced in another currency than the shop's now is not
+/// priced at today's rate.
+fn share_other_currency() -> Words {
+    refused(
+        "Request in another currency",
+        "This request is priced in another currency than the shop's now, so it cannot be priced at today's exchange price.",
+        "Cancel or close it, or make a new request in the shop's currency; payments to it still count at its last price.",
+        "RQ-07",
+    )
+}
 
-fn words_needed(name: &str) -> Words {
-    refused(name, name, name, "RQ-07")
+/// RQ-07: the same, for a return valued by rate.
+fn return_other_currency() -> Words {
+    refused(
+        "Return in another currency",
+        "This request is priced in another currency than the shop's now, so an amount in the shop's currency cannot be worked out for it.",
+        "Return an exact number of sats instead.",
+        "RQ-07",
+    )
 }
 
 /// The same fault from whichever call met it.
@@ -143,7 +153,7 @@ pub fn share_refused(why: &ShareRefused) -> Words {
             "RQ-12",
         ),
         ShareRefused::StaleRate => stale_rate(),
-        ShareRefused::OtherCurrency { .. } => words_needed(WORDS_NEEDED_RQ07_SHARE_OTHER_CURRENCY),
+        ShareRefused::OtherCurrency { .. } => share_other_currency(),
     }
 }
 
@@ -249,9 +259,7 @@ pub fn return_refused(why: &ReturnRefused) -> Words {
             "RQ-26",
         ),
         ReturnRefused::StaleRate => stale_rate(),
-        ReturnRefused::OtherCurrency { .. } => {
-            words_needed(WORDS_NEEDED_RQ07_RETURN_OTHER_CURRENCY)
-        }
+        ReturnRefused::OtherCurrency { .. } => return_other_currency(),
         ReturnRefused::BadScript => address_refused(&AddressRefused::NotAnAddress),
         ReturnRefused::QueueFull => refused(
             "Too many returns waiting",
