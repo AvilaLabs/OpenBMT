@@ -60,6 +60,11 @@ pub struct PaidRecord {
     /// only the first are listed, and it is never final at once. Only with
     /// [`MAX_FUNDINGS`] listed.
     pub more_fundings: bool,
+    /// An HTLC of the payment came through a channel that was no longer
+    /// listed at the claim, and its funding is not known (SL-27): the payment
+    /// is one through a lost funding. Kept as the second bit of the flag
+    /// after the count of fundings.
+    pub lost_unknown: bool,
 }
 
 pub(crate) fn hex(hash: &[u8; 32]) -> String {
@@ -100,7 +105,7 @@ fn encode(k: &Kept) -> Vec<u8> {
     out.extend_from_slice(&k.acked_unix.unwrap_or(0).to_be_bytes());
     out.extend_from_slice(&r.skimmed_msat.to_be_bytes());
     out.push(r.unconfirmed_fundings.len() as u8);
-    out.push(r.more_fundings as u8);
+    out.push(r.more_fundings as u8 | (r.lost_unknown as u8) << 1);
     for txid in &r.unconfirmed_fundings {
         out.extend_from_slice(txid);
     }
@@ -143,13 +148,13 @@ fn decode(hash: [u8; 32], bytes: &[u8]) -> Result<Kept, io::Error> {
         return Err(invalid("paid event: unused bytes"));
     }
     let skimmed = be_u64(bytes, LEN_1).unwrap_or(0);
-    // The fundings: a count of at most [`MAX_FUNDINGS`], a flag that is 1
-    // only for a full list, and the fundings, each once.
-    let (fundings, more) = match bytes
+    // The fundings: a count of at most [`MAX_FUNDINGS`], a flag whose first
+    // bit is set only for a full list and whose second says a funding is lost, and the fundings, each once.
+    let (fundings, flags) = match bytes
         .get(LEN_2..)
         .filter(|_| bytes.first() == Some(&VERSION))
     {
-        None => (Vec::new(), false),
+        None => (Vec::new(), 0),
         Some(b) => {
             // The length was checked against the count: no bytes are left over.
             let (Some(&flag), Some(rest)) = (b.get(1), b.get(2..)) else {
@@ -159,7 +164,7 @@ fn decode(hash: [u8; 32], bytes: &[u8]) -> Result<Kept, io::Error> {
             if list.len() > MAX_FUNDINGS {
                 return Err(invalid("paid event: too many fundings"));
             }
-            if flag > 1 || (flag == 1 && list.len() != MAX_FUNDINGS) {
+            if flag > 3 || (flag & 1 == 1 && list.len() != MAX_FUNDINGS) {
                 return Err(invalid("paid event: flag"));
             }
             if list
@@ -169,7 +174,7 @@ fn decode(hash: [u8; 32], bytes: &[u8]) -> Result<Kept, io::Error> {
             {
                 return Err(invalid("paid event: a funding twice"));
             }
-            (list, flag == 1)
+            (list, flag)
         }
     };
     Ok(Kept {
@@ -180,7 +185,8 @@ fn decode(hash: [u8; 32], bytes: &[u8]) -> Result<Kept, io::Error> {
             received_unix: received,
             sender_intended_msat: (sender_flag == 1).then_some(sender),
             unconfirmed_fundings: fundings,
-            more_fundings: more,
+            more_fundings: flags & 1 == 1,
+            lost_unknown: flags & 2 == 2,
         },
         acked_unix: (acked_flag == 1).then_some(acked),
     })
@@ -308,6 +314,7 @@ mod tests {
             received_unix: at,
             unconfirmed_fundings: Vec::new(),
             more_fundings: false,
+            lost_unknown: false,
         }
     }
 
@@ -537,17 +544,33 @@ mod tests {
             .record
             .unconfirmed_fundings
             .is_empty());
-        // The count is at most 8; the flag is 0 or 1 and 1 only with a full list.
+        // The count is at most 8; the flag is 0 to 3, its first bit only with a full list.
         let eight = encode(&Kept {
             record: with_fundings(1, &[1, 2, 3, 4, 5, 6, 7, 8], true),
             acked_unix: None,
         });
         assert!(decode([1; 32], &eight).unwrap().record.more_fundings);
+        // A lost funding with no name is the second bit, with any list; the
+        // first bit still needs a full list.
+        let lost = encode(&Kept {
+            record: PaidRecord {
+                lost_unknown: true,
+                ..rec(1, 5)
+            },
+            acked_unix: None,
+        });
+        assert_eq!(lost[LEN_2 + 1], 2);
+        let got = decode([1; 32], &lost).unwrap();
+        assert!(got.record.lost_unknown && !got.record.more_fundings);
+        assert_eq!(reencode_for_test([1; 32], &lost).unwrap(), lost);
+        let mut b = lost.clone();
+        b[LEN_2 + 1] = 3;
+        assert!(decode([1; 32], &b).is_err());
         let mut nine = eight.clone();
         nine[LEN_2] = 9;
         nine.extend_from_slice(&[9; 32]);
         assert!(decode([1; 32], &nine).is_err());
-        for flag in [2u8, 255] {
+        for flag in [4u8, 255] {
             let mut b = bytes.clone();
             b[LEN_2 + 1] = flag;
             assert!(decode([1; 32], &b).is_err());

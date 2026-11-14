@@ -228,10 +228,17 @@ async fn handle(node: &Node, p: &[&str]) -> String {
                     .map(|t| bitcoin::Txid::from_byte_array(*t).to_string())
                     .collect::<Vec<_>>()
                     .join(",");
-                if funding.is_empty() {
+                if funding.is_empty() && !paid.lost_unknown {
                     funding = "confirmed".to_string();
                 } else if paid.more_fundings {
                     funding.push_str(",more");
+                }
+                if paid.lost_unknown {
+                    funding.push_str(if funding.is_empty() {
+                        "lost-unknown"
+                    } else {
+                        ",lost-unknown"
+                    });
                 }
                 out.push(format!(
                     "paid {hash} amount_msat={} at={} funding={funding}",

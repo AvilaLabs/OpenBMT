@@ -1525,13 +1525,16 @@ impl ShopLn {
     /// What the counter is told of the fundings a paid event names: every
     /// funding confirmed makes the payment final at once, one that is lost
     /// makes it a payment through a lost funding, and else the fundings
-    /// still not confirmed are listed.
+    /// still not confirmed are listed. A payment through a channel that
+    /// closed before the claim, with no funding known, is one through a lost
+    /// funding (SL-27).
     fn paid_funding(&self, p: &Paid) -> Option<PaidFunding> {
-        if p.unconfirmed_fundings.is_empty() && !p.more_fundings {
+        if p.unconfirmed_fundings.is_empty() && !p.more_fundings && !p.lost_unknown {
             return None;
         }
         let mut open = Vec::new();
-        let mut lost = false;
+        // A channel gone at the claim, its funding not known, is a lost one.
+        let mut lost = p.lost_unknown;
         for txid in &p.unconfirmed_fundings {
             match self.funding_known(txid) {
                 FundingState::Confirmed => {}
@@ -2605,6 +2608,7 @@ mod tests {
             received_unix: 50,
             unconfirmed_fundings: Vec::new(),
             more_fundings: false,
+            lost_unknown: false,
         }
     }
 
@@ -2681,6 +2685,39 @@ mod tests {
             paid[0].funding,
             Some(PaidFunding::Lost {
                 txids: vec![[0xf1; 32]],
+                more: false
+            })
+        );
+        cleanup(&l);
+    }
+
+    #[test]
+    fn sl_27_a_payment_through_a_channel_gone_with_no_funding_known_is_a_lost_funding() {
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        lock(&l.shared.book).invoices = vec![invoice(1, 4, 0)];
+        l.pending = vec![Paid {
+            lost_unknown: true,
+            ..pending(1, 50_000_000, 0)
+        }];
+        // Never final at once, and no event waits for it: a lost funding
+        // with nothing to name.
+        assert_eq!(
+            l.settle_pending(100)[0].funding,
+            Some(PaidFunding::Lost {
+                txids: vec![],
+                more: false
+            })
+        );
+        // The fundings the payment names that are confirmed do not change that.
+        l.pending[0].unconfirmed_fundings = vec![[0xf1; 32]];
+        l.funding_events = vec![FundingEvent {
+            txid: [0xf1; 32],
+            outcome: Outcome::Confirmed,
+        }];
+        assert_eq!(
+            l.settle_pending(100)[0].funding,
+            Some(PaidFunding::Lost {
+                txids: vec![],
                 more: false
             })
         );

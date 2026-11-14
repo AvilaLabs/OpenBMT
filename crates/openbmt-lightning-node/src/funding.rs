@@ -31,7 +31,7 @@ pub const PRIMARY: &str = "funding_events";
 /// funding with no confirmation is lost (SL-27): a day. **[to tune]**
 pub const LOST_AFTER_BLOCKS: u32 = 144;
 const VERSION: u8 = 1;
-const LEN: usize = 1 + 4 + 1 + 1 + 8;
+const LEN: usize = 1 + 4 + 4 + 1 + 1 + 8;
 
 /// What the node reads of a channel to judge a funding: the state of the
 /// library's `ChannelDetails` that matters here.
@@ -68,26 +68,46 @@ pub struct Unconfirmed {
     /// More such fundings than [`MAX_FUNDINGS`] came: the payment is never
     /// final at once.
     pub more: bool,
+    /// An HTLC came through a channel that is no longer listed, and its
+    /// funding is not known (SL-27): the payment is one through a lost
+    /// funding.
+    pub lost_unknown: bool,
 }
 
 /// SL-40: every funding transaction of a channel that carried an HTLC of the
 /// payment and whose funding has fewer than `depth` confirmations (at least
-/// one is needed). A channel that is not in `channels` (it closed) is not
-/// one.
+/// one is needed). A channel that is not in `channels` (it closed between the
+/// HTLC and the claim) has lost its funding (SL-27): `last_known` gives the
+/// funding the node last saw for such a channel and its confirmations then;
+/// that funding is named unless it had the depth, and with none known the
+/// payment is flagged [`Unconfirmed::lost_unknown`].
 pub fn unconfirmed_fundings(
     htlc_channels: &[[u8; 32]],
     channels: &[ChannelFunding],
     depth: u32,
+    last_known: impl Fn(&[u8; 32]) -> Option<([u8; 32], u32)>,
 ) -> Unconfirmed {
     let depth = depth.max(1);
     let mut out = Unconfirmed::default();
     for id in htlc_channels {
-        let Some(txid) = channels
-            .iter()
-            .find(|c| &c.channel_id == id && c.confirmations < depth)
-            .and_then(|c| c.funding_txid)
-        else {
-            continue;
+        let txid = if channels.iter().any(|c| &c.channel_id == id) {
+            let Some(txid) = channels
+                .iter()
+                .find(|c| &c.channel_id == id && c.confirmations < depth)
+                .and_then(|c| c.funding_txid)
+            else {
+                continue;
+            };
+            txid
+        } else {
+            match last_known(id) {
+                Some((_, confirmations)) if confirmations >= depth => continue,
+                Some((txid, _)) => txid,
+                None => {
+                    out.lost_unknown = true;
+                    continue;
+                }
+            }
         };
         if out.txids.contains(&txid) {
             continue;
@@ -101,20 +121,17 @@ pub fn unconfirmed_fundings(
     out
 }
 
-/// The channels whose funding is `txid`, as the library lists them: the ID
-/// and the counterparty of each, to be closed when the funding is lost.
-pub fn channels_of(
-    txid: &[u8; 32],
-    channels: &[lightning::ln::channel_state::ChannelDetails],
-) -> Vec<(
-    lightning::ln::types::ChannelId,
-    bitcoin::secp256k1::PublicKey,
-)> {
-    use bitcoin::hashes::Hash;
+/// The channels listed whose funding the log holds as lost, either way: each
+/// is force closed at every pass until it is gone, so that a close that
+/// failed, or was not reached before a stop, is tried again (SL-27).
+pub fn lost_channels(
+    channels: &[ChannelFunding],
+    is_lost: impl Fn(&[u8; 32]) -> bool,
+) -> Vec<[u8; 32]> {
     channels
         .iter()
-        .filter(|c| c.funding_txo.map(|o| o.txid.to_byte_array()).as_ref() == Some(txid))
-        .map(|c| (c.channel_id, c.counterparty.node_id))
+        .filter(|c| c.funding_txid.as_ref().is_some_and(&is_lost))
+        .map(|c| c.channel_id)
         .collect()
 }
 
@@ -161,16 +178,26 @@ impl Outcome {
     }
 }
 
+/// The height of the block a funding is in, from a channel's confirmations
+/// seen with the tip at `height`: `None` while it has none.
+pub fn block_height(height: u32, confirmations: u32) -> Option<u32> {
+    (confirmations >= 1).then(|| height.saturating_sub(confirmations - 1).max(1))
+}
+
 /// The state of a funding claimed at `claimed_height`, with the node at
 /// `height` and `channels` as the library lists them (SL-27): confirmed when
 /// a channel of that funding has `depth` confirmations, the shop's depth (at
-/// least one); lost when no channel has it any more, or when
-/// [`LOST_AFTER_BLOCKS`] have passed since the claim and it has none. One in a
-/// block with fewer than `depth` is watched on, and one whose confirmations
-/// fall back to none is watched as before.
+/// least one); lost when no channel has it any more and it was never seen in
+/// a block (`seen`, the height of that block), or when [`LOST_AFTER_BLOCKS`]
+/// have passed since the claim and it has none. One in a block with fewer
+/// than `depth` is watched on, and one whose confirmations fall back to none
+/// is watched as before. With its channel gone, one that was seen in a block
+/// is confirmed once the tip is `depth` blocks deep over it: the channel
+/// closed after the funding, not instead of it.
 pub fn judge(
     txid: &[u8; 32],
     claimed_height: u32,
+    seen: Option<u32>,
     height: u32,
     channels: &[ChannelFunding],
     depth: u32,
@@ -189,7 +216,11 @@ pub fn judge(
         in_a_block |= c.confirmations >= 1;
     }
     if !any {
-        return Outcome::Lost(LostWhy::Closed);
+        return match seen {
+            None => Outcome::Lost(LostWhy::Closed),
+            Some(s) if height >= s.saturating_add(depth - 1) => Outcome::Confirmed,
+            Some(_) => Outcome::Watching,
+        };
     }
     if !in_a_block && height >= claimed_height.saturating_add(LOST_AFTER_BLOCKS) {
         return Outcome::Lost(LostWhy::TimedOut);
@@ -223,6 +254,8 @@ pub struct FundingEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Kept {
     claimed_height: u32,
+    /// The height of the block the funding was first seen in, if it was.
+    seen_height: Option<u32>,
     outcome: Outcome,
     acked_unix: Option<u64>,
 }
@@ -231,6 +264,8 @@ fn encode(k: &Kept) -> Vec<u8> {
     let mut out = Vec::with_capacity(LEN);
     out.push(VERSION);
     out.extend_from_slice(&k.claimed_height.to_be_bytes());
+    // A height of 0 is not a seen one: 0 is none.
+    out.extend_from_slice(&k.seen_height.unwrap_or(0).to_be_bytes());
     out.push(k.outcome.to_byte());
     out.push(k.acked_unix.is_some() as u8);
     out.extend_from_slice(&k.acked_unix.unwrap_or(0).to_be_bytes());
@@ -244,12 +279,13 @@ fn decode(bytes: &[u8]) -> Result<Kept, io::Error> {
             return None;
         }
         let height = u32::from_be_bytes(bytes.get(1..5)?.try_into().ok()?);
-        let outcome = *bytes.get(5)?;
-        let flag = *bytes.get(6)?;
-        let acked = u64::from_be_bytes(bytes.get(7..15)?.try_into().ok()?);
-        Some((height, outcome, flag, acked))
+        let seen = u32::from_be_bytes(bytes.get(5..9)?.try_into().ok()?);
+        let outcome = *bytes.get(9)?;
+        let flag = *bytes.get(10)?;
+        let acked = u64::from_be_bytes(bytes.get(11..19)?.try_into().ok()?);
+        Some((height, seen, outcome, flag, acked))
     })();
-    let Some((claimed_height, outcome, flag, acked)) = fields else {
+    let Some((claimed_height, seen, outcome, flag, acked)) = fields else {
         return Err(invalid("funding event"));
     };
     let outcome = Outcome::from_byte(outcome).ok_or_else(|| invalid("funding event: outcome"))?;
@@ -266,6 +302,7 @@ fn decode(bytes: &[u8]) -> Result<Kept, io::Error> {
     }
     Ok(Kept {
         claimed_height,
+        seen_height: (seen != 0).then_some(seen),
         outcome,
         acked_unix: (flag == 1).then_some(acked),
     })
@@ -360,6 +397,7 @@ impl FundingLog {
             &txid,
             &Kept {
                 claimed_height: height,
+                seen_height: None,
                 outcome: Outcome::Watching,
                 acked_unix: None,
             },
@@ -370,16 +408,24 @@ impl FundingLog {
 
     /// The fundings still watched, with the height of their claim.
     pub async fn watching(&self) -> Result<Vec<([u8; 32], u32)>, io::Error> {
+        let kept = self.watching_kept().await?;
+        Ok(kept
+            .into_iter()
+            .map(|(t, k)| (t, k.claimed_height))
+            .collect())
+    }
+
+    async fn watching_kept(&self) -> Result<Vec<([u8; 32], Kept)>, io::Error> {
         let mut out = Vec::new();
         for name in KVStore::list(&*self.store, PRIMARY, "").await? {
             let Some(txid) = unhex(&name) else { continue };
             if let Some(k) = self.read(&txid).await? {
                 if k.outcome == Outcome::Watching {
-                    out.push((txid, k.claimed_height));
+                    out.push((txid, k));
                 }
             }
         }
-        out.sort();
+        out.sort_by_key(|(t, _)| *t);
         Ok(out)
     }
 
@@ -410,8 +456,28 @@ impl FundingLog {
         // watched must not each write an outcome.
         let _one = self.gate.lock().await;
         let mut out = Vec::new();
-        for (txid, claimed) in self.watching().await? {
-            let outcome = judge(&txid, claimed, height, channels, depth);
+        for (txid, kept) in self.watching_kept().await? {
+            // The first block the funding is seen in is kept, so that a
+            // channel that closes after it is not a funding that was lost.
+            let mut seen = kept.seen_height;
+            if seen.is_none() {
+                seen = channels
+                    .iter()
+                    .filter(|c| c.funding_txid.as_ref() == Some(&txid))
+                    .filter_map(|c| block_height(height, c.confirmations))
+                    .min();
+                if seen.is_some() {
+                    self.write(
+                        &txid,
+                        &Kept {
+                            seen_height: seen,
+                            ..kept
+                        },
+                    )
+                    .await?;
+                }
+            }
+            let outcome = judge(&txid, kept.claimed_height, seen, height, channels, depth);
             if self.settle(&txid, outcome).await? {
                 out.push(FundingEvent { txid, outcome });
             }
@@ -495,27 +561,30 @@ mod tests {
             chan(4, Some(44), 0),
         ];
         // Through the confirmed channel: none.
-        let none = unconfirmed_fundings(&[[1; 32]], &channels, 1);
+        let none = unconfirmed_fundings(&[[1; 32]], &channels, 1, |_| None);
         assert_eq!((none.txids.len(), none.more), (0, false));
         // Through the other, or through both: the unconfirmed one.
-        let one = unconfirmed_fundings(&[[2; 32]], &channels, 1);
+        let one = unconfirmed_fundings(&[[2; 32]], &channels, 1, |_| None);
         assert_eq!(one.txids, ids(&[22]));
-        let two = unconfirmed_fundings(&[[1; 32], [2; 32], [2; 32], [4; 32]], &channels, 1);
+        let two = unconfirmed_fundings(&[[1; 32], [2; 32], [2; 32], [4; 32]], &channels, 1, |_| {
+            None
+        });
         assert_eq!((two.txids, two.more), (ids(&[22, 44]), false));
-        // A channel the node no longer lists, or with no funding yet, is not one.
-        assert!(unconfirmed_fundings(&[[9; 32]], &channels, 1)
+        // A channel with no funding yet is not one.
+        assert!(
+            unconfirmed_fundings(&[[3; 32]], &[chan(3, None, 0)], 1, |_| None)
+                .txids
+                .is_empty()
+        );
+        assert!(unconfirmed_fundings(&[], &channels, 1, |_| None)
             .txids
             .is_empty());
-        assert!(unconfirmed_fundings(&[[3; 32]], &[chan(3, None, 0)], 1)
-            .txids
-            .is_empty());
-        assert!(unconfirmed_fundings(&[], &channels, 1).txids.is_empty());
         // The shop's depth: 3 confirmations are not 4.
-        assert!(unconfirmed_fundings(&[[1; 32]], &channels, 3)
+        assert!(unconfirmed_fundings(&[[1; 32]], &channels, 3, |_| None)
             .txids
             .is_empty());
         assert_eq!(
-            unconfirmed_fundings(&[[1; 32]], &channels, 4).txids,
+            unconfirmed_fundings(&[[1; 32]], &channels, 4, |_| None).txids,
             ids(&[11])
         );
     }
@@ -524,12 +593,12 @@ mod tests {
     fn sl_40_more_than_eight_unconfirmed_fundings_are_listed_eight_and_say_more() {
         let channels: Vec<ChannelFunding> = (1..=10).map(|i| chan(i, Some(100 + i), 0)).collect();
         let all: Vec<[u8; 32]> = (1..=10).map(|i| [i; 32]).collect();
-        let got = unconfirmed_fundings(&all, &channels, 1);
+        let got = unconfirmed_fundings(&all, &channels, 1, |_| None);
         assert_eq!(got.txids.len(), MAX_FUNDINGS);
         assert_eq!(got.txids[7], [108; 32]);
         assert!(got.more);
         // Exactly eight is not more.
-        let got = unconfirmed_fundings(&all[..8], &channels, 1);
+        let got = unconfirmed_fundings(&all[..8], &channels, 1, |_| None);
         assert_eq!((got.txids.len(), got.more), (8, false));
     }
 
@@ -537,15 +606,15 @@ mod tests {
     fn sl_27_a_funding_is_confirmed_at_its_first_confirmation() {
         let t = [22; 32];
         let waiting = [chan(2, Some(22), 0)];
-        assert_eq!(judge(&t, 100, 100, &waiting, 1), Outcome::Watching);
-        assert_eq!(judge(&t, 100, 130, &waiting, 1), Outcome::Watching);
+        assert_eq!(judge(&t, 100, None, 100, &waiting, 1), Outcome::Watching);
+        assert_eq!(judge(&t, 100, None, 130, &waiting, 1), Outcome::Watching);
         assert_eq!(
-            judge(&t, 100, 130, &[chan(2, Some(22), 1)], 1),
+            judge(&t, 100, None, 130, &[chan(2, Some(22), 1)], 1),
             Outcome::Confirmed
         );
         // A confirmation after the deadline is still a confirmation.
         assert_eq!(
-            judge(&t, 100, 999, &[chan(2, Some(22), 1)], 1),
+            judge(&t, 100, None, 999, &[chan(2, Some(22), 1)], 1),
             Outcome::Confirmed
         );
     }
@@ -556,14 +625,17 @@ mod tests {
         let waiting = [chan(2, Some(22), 0), chan(1, Some(11), 5)];
         // The channel closed: the funding was spent or beaten.
         assert_eq!(
-            judge(&t, 100, 101, &[chan(1, Some(11), 5)], 1),
+            judge(&t, 100, None, 101, &[chan(1, Some(11), 5)], 1),
             Outcome::Lost(LostWhy::Closed)
         );
-        assert_eq!(judge(&t, 100, 101, &[], 1), Outcome::Lost(LostWhy::Closed));
-        // 143 blocks after the claim is still waiting; 144 is lost.
-        assert_eq!(judge(&t, 100, 243, &waiting, 1), Outcome::Watching);
         assert_eq!(
-            judge(&t, 100, 100 + LOST_AFTER_BLOCKS, &waiting, 1),
+            judge(&t, 100, None, 101, &[], 1),
+            Outcome::Lost(LostWhy::Closed)
+        );
+        // 143 blocks after the claim is still waiting; 144 is lost.
+        assert_eq!(judge(&t, 100, None, 243, &waiting, 1), Outcome::Watching);
+        assert_eq!(
+            judge(&t, 100, None, 100 + LOST_AFTER_BLOCKS, &waiting, 1),
             Outcome::Lost(LostWhy::TimedOut)
         );
     }
@@ -685,29 +757,43 @@ mod tests {
         // 1 and 2 confirmations are not 3: still watched, and not lost by
         // the deadline, for it is in a block.
         assert_eq!(
-            judge(&t, 100, 101, &[chan(2, Some(22), 1)], 3),
+            judge(&t, 100, None, 101, &[chan(2, Some(22), 1)], 3),
             Outcome::Watching
         );
         assert_eq!(
-            judge(&t, 100, 100 + LOST_AFTER_BLOCKS, &[chan(2, Some(22), 2)], 3),
+            judge(
+                &t,
+                100,
+                None,
+                100 + LOST_AFTER_BLOCKS,
+                &[chan(2, Some(22), 2)],
+                3
+            ),
             Outcome::Watching
         );
         assert_eq!(
-            judge(&t, 100, 101, &[chan(2, Some(22), 3)], 3),
+            judge(&t, 100, None, 101, &[chan(2, Some(22), 3)], 3),
             Outcome::Confirmed
         );
         // After a reorg it is back to none: watched as before, lost at the deadline.
         assert_eq!(
-            judge(&t, 100, 130, &[chan(2, Some(22), 0)], 3),
+            judge(&t, 100, None, 130, &[chan(2, Some(22), 0)], 3),
             Outcome::Watching
         );
         assert_eq!(
-            judge(&t, 100, 100 + LOST_AFTER_BLOCKS, &[chan(2, Some(22), 0)], 3),
+            judge(
+                &t,
+                100,
+                None,
+                100 + LOST_AFTER_BLOCKS,
+                &[chan(2, Some(22), 0)],
+                3
+            ),
             Outcome::Lost(LostWhy::TimedOut)
         );
         // A depth of 0 is 1.
         assert_eq!(
-            judge(&t, 100, 101, &[chan(2, Some(22), 1)], 0),
+            judge(&t, 100, None, 101, &[chan(2, Some(22), 1)], 0),
             Outcome::Confirmed
         );
     }
@@ -795,9 +881,112 @@ mod tests {
     }
 
     #[test]
+    fn sl_27_a_channel_gone_at_the_claim_is_a_payment_through_a_lost_funding() {
+        let channels = [chan(1, Some(11), 3)];
+        // Not listed, its funding not known: flagged, and no funding named.
+        let got = unconfirmed_fundings(&[[9; 32]], &channels, 1, |_| None);
+        assert!(got.txids.is_empty() && got.lost_unknown && !got.more);
+        // Not listed, but its funding was seen not confirmed: named.
+        let known = |id: &[u8; 32]| (id == &[9; 32]).then_some(([99; 32], 0));
+        let got = unconfirmed_fundings(&[[9; 32], [9; 32]], &channels, 1, known);
+        assert_eq!((got.txids, got.lost_unknown), (ids(&[99]), false));
+        // Seen with the depth: still confirmed, nothing is lost.
+        let deep = |_: &[u8; 32]| Some(([99; 32], 6));
+        let got = unconfirmed_fundings(&[[9; 32]], &channels, 6, deep);
+        assert!(got.txids.is_empty() && !got.lost_unknown);
+        // Not as deep as the shop asks: named.
+        let got = unconfirmed_fundings(&[[9; 32]], &channels, 7, deep);
+        assert_eq!(got.txids, ids(&[99]));
+    }
+
+    #[test]
+    fn sl_27_every_pass_closes_the_listed_channels_of_a_lost_funding() {
+        let channels = [
+            chan(1, Some(11), 0),
+            chan(2, Some(22), 0),
+            chan(3, None, 0),
+            chan(4, Some(44), 2),
+        ];
+        let lost = |t: &[u8; 32]| t == &[11; 32] || t == &[44; 32];
+        assert_eq!(lost_channels(&channels, lost), vec![[1; 32], [4; 32]]);
+        // Asked again with the channel still listed: the same, until it is gone.
+        assert_eq!(lost_channels(&channels, lost), vec![[1; 32], [4; 32]]);
+        assert!(lost_channels(&channels[1..3], lost).is_empty());
+    }
+
+    #[tokio::test]
+    async fn sl_27_a_lost_funding_stays_lost_in_the_log_for_every_pass() {
+        let d = disks("funding-lost-state");
+        let (log, flusher) = start(&d);
+        log.watch([1; 32], 100).await.unwrap();
+        let channels = [chan(1, Some(1), 0)];
+        log.check(&channels, 100 + LOST_AFTER_BLOCKS, 1)
+            .await
+            .unwrap();
+        let lost = |t: &[u8; 32]| log.state(t) == FundingState::Lost;
+        assert_eq!(lost_channels(&channels, lost), vec![[1; 32]]);
+        // The next pass, and a start, still hold it lost.
+        log.check(&channels, 100 + LOST_AFTER_BLOCKS + 1, 1)
+            .await
+            .unwrap();
+        assert_eq!(lost_channels(&channels, lost), vec![[1; 32]]);
+        flusher.abort();
+        drop(log);
+        let (log, _f) = start(&d);
+        log.load().await.unwrap();
+        let lost = |t: &[u8; 32]| log.state(t) == FundingState::Lost;
+        assert_eq!(lost_channels(&channels, lost), vec![[1; 32]]);
+    }
+
+    #[tokio::test]
+    async fn sl_27_a_funding_seen_in_a_block_is_confirmed_when_its_channel_closes_after_it() {
+        let d = disks("funding-seen");
+        let (log, _f) = start(&d);
+        log.watch([1; 32], 100).await.unwrap();
+        log.watch([2; 32], 100).await.unwrap();
+        // Funding 1 is seen with one confirmation at 110; 2 is in no block.
+        let channels = [chan(1, Some(1), 1), chan(2, Some(2), 0)];
+        assert!(log.check(&channels, 110, 3).await.unwrap().is_empty());
+        // Both channels close. The depth is 3: 1 waits until 112 (110 + 3 - 1),
+        // 2 was never in a block.
+        let got = log.check(&[], 111, 3).await.unwrap();
+        assert_eq!(
+            got,
+            vec![FundingEvent {
+                txid: [2; 32],
+                outcome: Outcome::Lost(LostWhy::Closed)
+            }]
+        );
+        assert_eq!(log.state(&[1; 32]), FundingState::Watching);
+        let got = log.check(&[], 112, 3).await.unwrap();
+        assert_eq!(
+            got,
+            vec![FundingEvent {
+                txid: [1; 32],
+                outcome: Outcome::Confirmed
+            }]
+        );
+    }
+
+    #[test]
+    fn sl_27_a_funding_gone_with_its_channel_is_judged_by_where_it_was_seen() {
+        let t = [22; 32];
+        assert_eq!(judge(&t, 100, Some(105), 106, &[], 3), Outcome::Watching);
+        assert_eq!(judge(&t, 100, Some(105), 107, &[], 3), Outcome::Confirmed);
+        assert_eq!(
+            judge(&t, 100, None, 107, &[], 3),
+            Outcome::Lost(LostWhy::Closed)
+        );
+        assert_eq!(block_height(110, 1), Some(110));
+        assert_eq!(block_height(110, 3), Some(108));
+        assert_eq!(block_height(110, 0), None);
+    }
+
+    #[test]
     fn sl_27_the_blob_is_read_strictly() {
         let k = Kept {
             claimed_height: 700_000,
+            seen_height: Some(699_999),
             outcome: Outcome::Lost(LostWhy::Closed),
             acked_unix: Some(9),
         };
@@ -812,11 +1001,11 @@ mod tests {
         b[0] = 2;
         assert!(decode(&b).is_err());
         let mut b = good.clone();
-        b[5] = 4;
+        b[9] = 4;
         assert!(decode(&b).is_err());
         for flag in [2u8, 255] {
             let mut b = good.clone();
-            b[6] = flag;
+            b[10] = flag;
             assert!(decode(&b).is_err());
         }
         // Bytes behind a flag of 0.
@@ -825,11 +1014,11 @@ mod tests {
             ..k
         });
         assert!(decode(&b).is_ok());
-        b[10] = 1;
+        b[14] = 1;
         assert!(decode(&b).is_err());
         // An acknowledgment of a funding still watched.
         let mut b = good;
-        b[5] = 0;
+        b[9] = 0;
         assert!(decode(&b).is_err());
     }
 }

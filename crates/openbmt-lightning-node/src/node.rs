@@ -109,6 +109,8 @@ const MAX_PENDING_UPDATES: u64 = 100;
 const PROVIDER_ANSWER: Duration = Duration::from_secs(15);
 /// How often the chain tip is polled.
 const POLL_EVERY: Duration = Duration::from_secs(1);
+/// A channel's funding transaction and its confirmations when last seen.
+type LastFunding = ([u8; 32], u32);
 /// How often the fundings watched for the counter are judged (SL-27).
 const FUNDING_CHECK_EVERY: Duration = Duration::from_secs(5);
 /// A chain poll older than this counts as the chain data being behind (SL-41).
@@ -234,6 +236,10 @@ pub struct Paid {
     /// More such channels than are listed: the payment is never final at
     /// once.
     pub more_fundings: bool,
+    /// An HTLC of the payment came through a channel that was no longer
+    /// listed at the claim and whose funding the node did not know (SL-27):
+    /// the payment is one through a lost funding.
+    pub lost_unknown: bool,
 }
 
 impl From<PaidRecord> for Paid {
@@ -246,6 +252,7 @@ impl From<PaidRecord> for Paid {
             received_unix: r.received_unix,
             unconfirmed_fundings: r.unconfirmed_fundings,
             more_fundings: r.more_fundings,
+            lost_unknown: r.lost_unknown,
         }
     }
 }
@@ -381,6 +388,10 @@ struct Shared {
     orders: Orders,
     lsps1: Mutex<Lsps1State>,
     funding_log: FundingLog,
+    /// The funding and its confirmations last seen for each channel, to name
+    /// the funding of a channel that closed before the claim (SL-27). Kept in
+    /// memory only; a channel not here is a funding not known.
+    last_fundings: Mutex<HashMap<[u8; 32], LastFunding>>,
     confirm_depth: u32,
     sweeper: Arc<Sweeper>,
     destination: Arc<SweepDestination>,
@@ -954,6 +965,7 @@ impl Node {
                 last_poll: 0,
             }),
             funding_log,
+            last_fundings: Mutex::new(HashMap::new()),
             confirm_depth: config.confirm_depth.max(1),
             sweeper: Arc::clone(&sweeper),
             destination: Arc::clone(&destination),
@@ -1557,6 +1569,7 @@ impl Shared {
     async fn check_fundings(&self) -> Result<(), lightning::io::Error> {
         let details = self.manager.list_channels();
         let channels: Vec<ChannelFunding> = details.iter().map(ChannelFunding::of).collect();
+        self.note_fundings(&channels);
         let height = self.manager.current_best_block().height;
         for event in self
             .funding_log
@@ -1565,21 +1578,49 @@ impl Shared {
         {
             self.logger
                 .line(Level::Info, &format!("funding {:?}", event.outcome));
-            // A funding lost to the timeout leaves its channel open, and the
-            // provider may still send through it: the channel is closed at
-            // once, so that no more payments come through it (SL-27).
-            if event.outcome == funding::Outcome::Lost(funding::LostWhy::TimedOut) {
-                for id in funding::channels_of(&event.txid, &details) {
-                    let _ = self.manager.force_close_broadcasting_latest_txn(
-                        &id.0,
-                        &id.1,
-                        "its funding has no confirmation".to_string(),
-                    );
-                }
-            }
             let _ = self.funding.send(event);
         }
+        // A funding lost leaves its channel open, and the provider may still
+        // send through it: every pass closes each channel listed whose
+        // funding is lost, so that a close that failed, or was cut short by
+        // a stop, is tried again and no more payments come through it
+        // (SL-27).
+        let lost = funding::lost_channels(&channels, |t| {
+            self.funding_log.state(t) == funding::FundingState::Lost
+        });
+        for id in lost {
+            let Some(c) = details.iter().find(|c| c.channel_id.0 == id) else {
+                continue;
+            };
+            if let Err(e) = self.manager.force_close_broadcasting_latest_txn(
+                &c.channel_id,
+                &c.counterparty.node_id,
+                "its funding is lost".to_string(),
+            ) {
+                self.logger.line(
+                    Level::Warn,
+                    &format!(
+                        "channel {} of a lost funding not closed: {e:?}",
+                        c.channel_id
+                    ),
+                );
+            }
+        }
         Ok(())
+    }
+
+    /// Keeps the funding and confirmations of each channel listed, for the
+    /// claim of a payment through a channel that has closed since (SL-27).
+    fn note_fundings(&self, channels: &[ChannelFunding]) {
+        /// More channels than a node has in its life: the rest are not kept.
+        const MAX_KEPT: usize = 4096;
+        let mut last = self.last_fundings.lock_recover();
+        for c in channels {
+            let Some(txid) = c.funding_txid else { continue };
+            if last.len() < MAX_KEPT || last.contains_key(&c.channel_id) {
+                last.insert(c.channel_id, (txid, c.confirmations));
+            }
+        }
     }
 
     fn chain_ok(&self) -> bool {
@@ -2568,9 +2609,14 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
                 .iter()
                 .map(ChannelFunding::of)
                 .collect();
+            shared.note_fundings(&channels);
             let htlc_channels: Vec<[u8; 32]> = htlcs.iter().map(|h| h.channel_id.0).collect();
-            let unconfirmed =
-                funding::unconfirmed_fundings(&htlc_channels, &channels, shared.confirm_depth);
+            let unconfirmed = funding::unconfirmed_fundings(
+                &htlc_channels,
+                &channels,
+                shared.confirm_depth,
+                |id| shared.last_fundings.lock_recover().get(id).copied(),
+            );
             let record = match shared
                 .paid_log
                 .record(PaidRecord {
@@ -2584,6 +2630,7 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
                     received_unix: now,
                     unconfirmed_fundings: unconfirmed.txids,
                     more_fundings: unconfirmed.more,
+                    lost_unknown: unconfirmed.lost_unknown,
                 })
                 .await
             {
@@ -2616,6 +2663,13 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
                             log(Level::Warn, format!("funding not watched: {e}"));
                             return Err(ReplayEvent());
                         }
+                    }
+                }
+                // A funding named for a channel already gone is judged now, not
+                // at the next pass: lost, unless it was seen in a block.
+                if !record.unconfirmed_fundings.is_empty() {
+                    if let Err(e) = shared.check_fundings().await {
+                        log(Level::Warn, format!("fundings not checked: {e}"));
                     }
                 }
                 let _ = shared.paid.send(Paid::from(record));
