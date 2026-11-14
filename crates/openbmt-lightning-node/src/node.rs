@@ -1309,10 +1309,16 @@ impl Node {
     }
 
     /// Closes every channel cooperatively to the pinned wallet's receive
-    /// address at `index`, which the node derives itself (SL-36).
+    /// address at `index`, which the node derives itself (SL-36). It is
+    /// refused while a splice is not locked yet.
     pub fn close_all(&self, index: u32) -> Result<usize, String> {
         let to = self.wallet_address(index)?;
-        crate::close::close_all(&self.shared.manager, &to)
+        crate::close::close_all(
+            &self.shared.manager,
+            &self.shared.monitor,
+            &self.shared.logger,
+            &to,
+        )
     }
 
     /// Stops the node: the library's loop writes the state a last time, and

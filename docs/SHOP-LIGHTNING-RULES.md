@@ -237,6 +237,10 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   the window of SL-30, and whenever Shop Lightning is turned off, the node
   closes every channel cooperatively to the shop's wallet. A provider that
   will not close is closed on, and the money arrives after the window.
+  While a channel has a splice that is not locked yet (SL-33), no close is
+  begun, since its closing transaction would spend the funding the splice
+  spends and could never confirm. The close is tried again after the
+  splice locks.
 
 ## 7. At the counter
 

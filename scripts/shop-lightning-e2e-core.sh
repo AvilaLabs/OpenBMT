@@ -812,10 +812,13 @@ check "SL-33: a payment after the splice is paid" $?
 say "Close to the shop's wallet"
 SHOP_ADDR=$(addr_at 11)
 BEFORE=$(bw pinned getbalance)
-# A close is refused while a monitor update is still on its way: try again.
-for _ in $(seq 1 30); do
+# A close is refused while a monitor update is still on its way, and while
+# the splice is not locked: blocks are mined until it is, then it is tried
+# again.
+for _ in $(seq 1 60); do
   R=$(ctl "$SHOP_CTL" close 11)
   [ "$R" = "Ok(1)" ] && break
+  case "$R" in *"not locked"*) mine 1 ;; esac
   sleep 1
 done
 note "close: $R"
