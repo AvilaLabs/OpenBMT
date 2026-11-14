@@ -1065,6 +1065,13 @@ impl Node {
         self.shared.sweeper.tracked_spendable_outputs().len()
     }
 
+    /// How many balances the channel monitors still hold: money that is
+    /// claimable on the chain or waits for a confirmation. A closed channel
+    /// whose money is back in the shop's wallet has none (SL-77).
+    pub fn claimable_balances(&self) -> usize {
+        self.shared.monitor.get_claimable_balances(&[]).len()
+    }
+
     /// What the manager reads.
     pub fn status(&self) -> NodeStatus {
         let s = &self.shared;

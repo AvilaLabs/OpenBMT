@@ -763,7 +763,8 @@ mod tests {
             };
             checked += 1;
             assert!(!text.contains("tcp-device"), "{}", dir.display());
-            if text.contains("openbmt-lightning-node") {
+            // The counter runs the node (SL-70); no other program does.
+            if text.contains("openbmt-lightning-node") && !dir.ends_with("openbmt-counter-node") {
                 panic!("{} depends on the node crate", dir.display());
             }
         }
