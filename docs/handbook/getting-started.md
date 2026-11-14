@@ -15,7 +15,7 @@ built.
 
 | Part | What it is and does |
 |---|---|
-| **Your wallet** | A hardware signer, such as a Coldcard or a Passport, or a computer kept offline, with 12 recovery words on steel. It holds the keys: every payment lands here, and only it can send money out. |
+| **Your wallet** | A hardware wallet, or a computer kept offline, with its recovery words written by hand and later kept on steel. It holds the keys: every payment lands here, and only it can send money out. |
 | **Owner phone** | Your own Android phone with the OpenBMT Owner app. It sets up the shop, shows every payment, keeps the books, and prepares refunds and cash-outs for your wallet to sign. It cannot spend. |
 | **Counter** | An Android phone or tablet at the till with the OpenBMT Counter app. It shows the customer a payment code for each sale and says when it is paid. It cannot spend. |
 

@@ -17,7 +17,7 @@ object ConnectWords {
         "Find Export or Settings, then Output descriptor.",
         "Show it as a code, then scan it with this phone.",
     )
-    const val introNote = "Sparrow and Coldcard can show one. A wallet that shows only an xpub or zpub cannot be used yet."
+    const val introNote = "Most wallet apps and hardware wallets can show one, often under Export or Descriptor. A wallet that shows only an xpub or zpub cannot be used yet."
     const val introScan = "Scan the code"
     const val introPaste = "Paste the text"
 

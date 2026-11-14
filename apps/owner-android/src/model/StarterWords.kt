@@ -26,9 +26,9 @@ object StarterWords {
     }
 
     // ---- the entry (SS-24, the Money page) ----
-    val rowTitle = say("SS00_ROW_TITLE", "Start simple")
-    val rowSub = say("SS00_ROW_SUB", "A small wallet on this phone, for a shop's first sales")
-    val screenTitle = say("SS00_SCREEN_TITLE", "Start simple")
+    val rowTitle = say("SS00_ROW_TITLE", "Starter wallet")
+    val rowSub = say("SS00_ROW_SUB", "A small wallet on this phone, until your hardware wallet arrives")
+    val screenTitle = say("SS00_SCREEN_TITLE", "Starter wallet")
     val startButton = say("SS00_START_BUTTON", "Start")
     val backButton = say("SS00_BACK_BUTTON", "Back")
     val doneButton = say("SS00_DONE_BUTTON", "Done")
@@ -37,7 +37,10 @@ object StarterWords {
     val noLockNext = say("SS24_NO_LOCK_NEXT", "Set a PIN, pattern or password in the phone's settings, then come back.")
 
     // ---- the plain words before the words (SS-13) ----
-    val plainTitle = say("SS13_TITLE", "Before the words")
+    val plainTitle = say("SS13_TITLE", "Your 12 words")
+    val plainIntro = say("SS13_INTRO", "These 12 words are your bitcoin. Whoever has them can spend it, so they stay with you, on paper. If this phone is lost, stolen or broken, they bring your money back on a new phone.")
+    val plainKeep = say("SS13_KEEP", "Keep the card somewhere dry and safe, not in the shop.")
+    val plainHow = say("SS13_HOW", "A photo or a note on a phone can be read by any app that gets into the phone; paper cannot. The words are on this screen only while they are shown, and an infected phone could read them then. That is why the starter wallet has a limit.")
     val plainPen = say("SS13_PEN", "Write the 12 words on the card, in pen.")
     val plainNoPhoto = say("SS13_NO_PHOTO", "Never take a photo or a screenshot of them. Apps that steal bitcoin read people's photos for exactly this.")
     val plainNobodyAsks = say("SS13_NOBODY_ASKS", "No app and no person will ever ask you for these words. Anyone who does is a thief.")
@@ -66,9 +69,13 @@ object StarterWords {
 
     // ---- the limit and the date (SS-35) ----
     val limitTitle = say("SS35_TITLE", "Your limit and your date")
+    val limitWhy = say("SS35_WHY", "If this phone is stolen or infected, someone could take what the starter wallet holds, and never more than your limit. Choose the most you would be OK losing.")
+    val limitExample = say("SS35_EXAMPLE", "For example, a day's takings or less.")
+    val dateNote = say("SS35_DATE_NOTE", "30 days from today unless you change it, and at most 90.")
+    val dateTooLate = say("SS35_DATE_TOO_LATE", "Choose a date at most 90 days from today.")
     val limitLabel = say("SS35_LIMIT_LABEL", "Most it may hold")
     val priceLabel = say("SS35_PRICE_LABEL", "Price of one bitcoin")
-    val dateLabel = say("SS35_DATE_LABEL", "Move to a key made offline by")
+    val dateLabel = say("SS35_DATE_LABEL", "Move to a wallet kept offline by")
     val boxOnly = say("SS32_BOX_ONLY", "Payments from the starter wallet show on the counters only once the shop has a Box. Until then, this phone alone shows them.")
     val stopLabel = say("SS38_STOP_LABEL", "Stop bitcoin sales above my limit")
     val limitInvalid = say("SS35_LIMIT_INVALID", "Type the most the starter wallet may hold, as a whole number.")
@@ -90,6 +97,9 @@ object StarterWords {
     val keyEnter = say("SS11_KEY_ENTER", "Enter")
     val checkWrong = say("SS10_CHECK_WRONG", "That is not the word on the card at that number. The words are shown again.")
     val madeHeading = say("SS10_MADE_HEADING", "Starter wallet made")
+    val copyOffer = say("SS10_COPY_OFFER", "Make a second copy")
+    val copyOfferNote = say("SS10_COPY_OFFER_NOTE", "Write the words again on a second card, and keep it in another place. They can be shown again only now, before you finish.")
+    val copyLater = say("SS10_COPY_LATER", "Not now")
 
     // ---- keeping the key, the owner each time (SS-20, SS-21) ----
     val authTitle = say("SS21_AUTH_TITLE", "Unlock the starter wallet")
@@ -101,6 +111,7 @@ object StarterWords {
     val sealedHeading = say("SS20_SEALED_HEADING", "The key is on this phone")
     val sealedWhat = say("SS20_SEALED_WHAT", "The starter wallet's key is locked by this phone's key hardware and opens only with your fingerprint, face or PIN.")
     val sealedNext = say("SS20_SEALED_NEXT", "Keep the card with the 12 words somewhere safe, away from the phone.")
+    val sealedSend = say("SS21_SEND_LINE", "Taking payments never needs this. Sending money out always does.")
     val notSavedHeading = say("SS20_NOT_SAVED_HEADING", "The key was not kept")
     val notSavedWhat = say("SS20_NOT_SAVED_WHAT", "The phone could not lock the key, so nothing was kept and no wallet was made.")
     val notSavedNext = say("SS20_NOT_SAVED_NEXT", "Try again. If it happens again, make the key on the stick instead.")
@@ -122,10 +133,17 @@ object StarterWords {
     val lineLimit = say("SS36_LIMIT", "Limit")
     val lineMoveBy = say("SS36_MOVE_BY", "Move by")
     val lineNotYetUntil = say("SS37_NOT_YET_UNTIL", "Not yet, until")
-    val upgradeTitle = say("SS37_TITLE", "Upgrade your wallet")
-    val upgradeNow = say("SS37_UPGRADE_NOW", "Upgrade now")
+    val lineDaysLeft = say("SS36_DAYS_LEFT", "{days} days left")
+    val lineLastDay = say("SS36_LAST_DAY", "Last day")
+    val cardTitle = say("SS36_CARD_TITLE", "Time to move your bitcoin offline")
+    val cardText = say("SS36_CARD_TEXT", "Your starter wallet holds {held} of your {limit} limit, and {days} days are left. A hardware wallet keeps your bitcoin away from the internet.")
+    val cardGo = say("SS36_CARD_GO", "Set up my hardware wallet")
+    val cardNotNow = say("SS36_CARD_NOT_NOW", "Not now")
+    val homeMove = say("SS36_HOME_MOVE", "Move to my hardware wallet")
+    val upgradeTitle = say("SS37_TITLE", "Move to your hardware wallet")
+    val upgradeNow = say("SS37_UPGRADE_NOW", "Move now")
     val notYet = say("SS37_NOT_YET", "Not yet")
-    val notYetSentence = say("SS37_NOT_YET_SENTENCE", "My shop's money stays on a wallet made on my everyday phone.")
+    val notYetSentence = say("SS37_NOT_YET_SENTENCE", "My shop's bitcoin stays on my everyday phone for now.")
     val notYetAsk = say("SS37_NOT_YET_ASK", "To wait up to 7 more days, type this:")
     val notYetConfirm = say("SS37_NOT_YET_CONFIRM", "Wait")
     val notYetDiffers = say("SS37_NOT_YET_DIFFERS", "That is not the sentence exactly. Check each word.")

@@ -58,9 +58,12 @@ object AppWords {
         "Type a name for the counter, the manager's name and a PIN. Then tap Pair with the shop and scan the code on the owner phone or the Key app.",
     )
 
+    /** The counter's own line (DESIGN 2.1): shown large once it is paired, and under the first sale. */
+    const val COUNTER_LINE = "This device takes payments for you. Only your keys can send."
+
     val pairingSaved = w(
         Tones.GOOD, "Counter set up",
-        "The counter is paired with the shop, and the pairing and the PIN are saved on this phone.",
+        "The counter is paired with the shop. This device takes payments for you. Only your keys can send.",
         Who.CASHIER,
         "Keep the app open at the counter. It starts looking for the network now.",
     )

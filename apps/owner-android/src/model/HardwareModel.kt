@@ -26,9 +26,9 @@ object HardwareModel {
      * them.
      */
     val transports: List<TransportChoice> = listOf(
-        TransportChoice(Transport.Ur, "Moving QR codes (UR)", "For example Keystone, Passport, Jade, Krux and SeedSigner."),
-        TransportChoice(Transport.Bbqr, "Moving QR codes (BBQr)", "For example Coldcard Q and SeedSigner."),
-        TransportChoice(Transport.File, "A file on a memory card", "For example Coldcard Mk4 with a microSD card."),
+        TransportChoice(Transport.Ur, "Moving QR codes (UR)", "The wallet shows a code that changes several times a second, and calls it UR or an animated QR."),
+        TransportChoice(Transport.Bbqr, "Moving QR codes (BBQr)", "The wallet calls its moving codes BBQr."),
+        TransportChoice(Transport.File, "A file on a memory card", "The wallet saves a file to a memory card, such as a microSD card."),
     )
 
     /** OA-70: the type a UR of a signer file has. */

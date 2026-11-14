@@ -116,79 +116,144 @@ It is three pieces of software:
 
 These flows are the spec. The architecture exists to make them true.
 
-### 2.1 First run: try it, set up the shop, then add the wallet
+### 2.1 First run: sell today, then move to a cold wallet
 
-Decided 2026-11-12 (D6). This replaces the 7-step key ceremony of draft 3.2.
-OpenBMT never makes a key. The owner phone and the counter hold nothing that
-can spend.
+Decided 2026-11-14 (D8), after walk-throughs of the setup in the place of
+six kinds of shop. It keeps D6 (2026-11-12, which replaced the 7-step key
+ceremony of draft 3.2) and changes its order: the starter wallet is the
+first half of a plan whose second half is a hardware wallet, and a wallet
+the owner already holds is one tap away.
 
-A new owner should be able to try every screen in the first minute, have the
-whole shop set up in about ten, and go live once they have a wallet. Every
-screen has one thing to do and leads to the next. The hard truths (lose the
-words, lose the money; a phone is not a vault) are said once, plainly, at the
-moment they matter.
+OpenBMT never holds the shop's money, and never makes the key that holds
+its savings. A new owner should be able to try every screen in the first
+minute and take a first sale in about ten. The hard truths are said once,
+plainly, where they matter: whoever has the words can spend the money; a
+phone is not a vault; OpenBMT is new and has not been checked by an outside
+security firm.
 
-1. **Welcome.** "Take bitcoin in your shop. It goes straight to your own
-   wallet." Two buttons: Try it first, and Set up my shop.
-2. **Try it first** (optional). A practice shop on this phone only, offline,
-   marked Practice on every screen. It runs one sale (ring up, the customer
-   pays, Paid), the books and a refund, in the shop's own till flow. One tap
-   deletes it. No keys, no second device, nothing to buy.
-3. **Your shop.** Name and currency (guessed from the phone).
-4. **How you take payments now.** A searchable list of tills, plus "No till"
-   and "Another till" (§5.6).
-5. **Where the money goes.** Three choices, below.
-6. **Check the wallet.** The first receive address is compared on the
-   wallet's own screen. It can wait if the owner chose "Add the wallet
-   later".
-7. **Connect the counter.** The counter app on the shop's phone or tablet
-   scans the owner phone. Then the steps for the chosen till, for example
-   "In Square: add a payment type called Bitcoin".
-8. **A first sale.** A small real sale from any wallet.
+**Three lines, the same everywhere.**
 
-Each step has a short looping picture.
+- "Your keys. Your bitcoin. Your shop."
+- On the counter: "This device takes payments for you. Only your keys can
+  send."
+- At the first sale: "Paid to you, person to person. No bank, no
+  processor."
 
-**Where the money goes.**
+None is said where it would not be true. On a phone that is both the owner
+phone and the counter, the counter's line is "Sales are taken here. Sending
+needs your fingerprint or PIN."
 
-- **Use my own wallet.** For anyone who already holds their own keys: an
-  offline laptop with Sparrow or Electrum, a do-it-yourself signer
-  (SeedSigner, Krux), a hardware signer, or a multisig. OpenBMT takes only the
-  wallet's public description, by QR or file. The first receive address is
-  compared on the wallet's own screen, and this cannot be skipped. OpenBMT
-  does not judge how the wallet was made, because it cannot see that. It
-  refuses only a description that holds a private key or words (and says that
-  key is now exposed), a wallet type it cannot derive or check, and a wallet
-  whose first address was not confirmed. A short checklist comes before the
-  confirmation: made offline, words on steel, used only for the shop. A fresh
-  account used only for the shop is suggested.
-- **Help me make a savings wallet.** The OpenBMT Key Maker (§5.4.1): the
-  owner's own coin flips, the laptop they already have started from a Tails
-  USB stick with networking off, and Electrum in Tails as an independent
-  check. About an hour, guided step by step on the phone. The owner app never
-  sees a flip or a word. A do-it-yourself signer (SeedSigner, Krux) is the
-  second way, a hardware signer with dice the third. Then the flow continues
-  as "Use my own wallet".
-- **Start simple.** For a shop that wants its first sale today and has no
-  signer and no computer for the stick: a small wallet made on the owner
-  phone, with a limit and a date the owner sets, that becomes the shop's
-  wallet and is paired with the first counter as a starter wallet
-  (`docs/START-SIMPLE-RULES.md`, `docs/COUNTER-RULES.md` CR-256). It is
-  offered after the cold wallet, and the move to a key made offline is
-  asked for at the limit or the date.
-- **Set up the rest now, add the wallet later.** Shop, till, counters, staff
-  and settings are all set up, and staff can practise. The counter shows
-  "Not taking bitcoin yet" until a wallet is added.
+**Every screen in three layers.** One thing to do, with a short looping
+picture. One line on why it is safe. Then "How this works", a picture
+explanation of about 30 seconds, and under it "Details", with the
+technical words (descriptor, xpub, multisig, the exact instant rules).
+Nobody has to open either.
 
-**Before the savings guide, the app says why, once:** keys made by any app
-can be stolen through that app, ours included, so the keys are made offline,
-from a coin, and nobody can move the bitcoin without the words. The
-inconvenience happens once.
+1. **Before starting.** "About 10 minutes. You'll need this phone, a pen,
+   and the phone or tablet for your till, if you use one." Setup stops and
+   resumes at any step.
+2. **Welcome.** "Take bitcoin in your shop. It goes straight to your own
+   wallet." Under it, once: "OpenBMT is new. No outside security firm has
+   checked it yet. Start with small amounts." Two buttons: Try it first,
+   and Set up my shop.
+3. **Try it first** (optional). A practice shop on this phone only,
+   offline, marked Practice on every screen: a sale (ring up, the customer
+   pays, Paid), the books and a refund. One tap deletes it.
+4. **Your shop.** Name and currency, the currency guessed from the phone.
+5. **Your till.** A searchable list of tills, plus "No till" and "Another
+   till" (§5.6), and one line on what OpenBMT reads from the till and what
+   it never sees.
+6. **Your wallet.** Two choices of equal size, and a third under them:
+   - **Sell today, then move to a hardware wallet.** The plan in two lines:
+     "Today: a starter wallet on this phone, with a limit you choose. When
+     your hardware wallet arrives: everything moves to it in one step." It
+     goes on to the buying guide (step 7) and the starter wallet (steps 8
+     to 10).
+   - **I already have a wallet.** A hardware wallet, a multisig, or any
+     wallet that can show its public description, by QR or file. The first
+     receive address is compared on the wallet's own screen, and this
+     cannot be skipped. OpenBMT refuses a description that holds a private
+     key or words (and says that key is now exposed), a wallet type it
+     cannot derive or check, and a wallet whose first address was not
+     confirmed. Behind this choice, "Other ways to make one": the Key Maker
+     on a spare laptop (§5.4.1), and a signer built from parts and free
+     software.
+   - **Set up the rest now, add the wallet later.** The counter says "Not
+     taking bitcoin yet" until a wallet is added.
+7. **Getting a hardware wallet.** No brand is named or recommended. Four
+   rules, each one line:
+   - Buy it only from the maker's own website: never a marketplace, a
+     reseller or second-hand.
+   - It makes new words in front of you. One that arrives with words, or a
+     card already filled in, is a theft in the making: send it back.
+   - Its software is open for anyone to check.
+   - The box arrives sealed.
+
+   The typical cost is given as a range. "A page for your helper" shows or
+   prints the same rules and the steps for when the device arrives, for a
+   relative or a friend who knows bitcoin. "When it arrives" is a guided
+   step on the phone, the upgrade of `docs/START-SIMPLE-RULES.md` section
+   6.
+8. **The starter wallet's limit and date.** "If this phone is stolen or
+   infected, someone could take what the starter wallet holds, and never
+   more than your limit. Choose the most you would be OK losing." Beside
+   the field, examples and no recommendation: "a day's takings or less",
+   and three round amounts in the shop's money. The field starts empty.
+   The date is 30 days from today unless the owner changes it, and at most
+   90.
+9. **The 12 words.** "These 12 words are your bitcoin. Whoever has them can
+   spend it, so they stay with you, on paper. If this phone is lost,
+   stolen or broken, they bring your money back on a new phone." Then the
+   plain rules (SS-13), the words four at a time and three asked back
+   (SS-10). The card is kept somewhere dry and safe, not in the shop. "Make
+   a second copy" is offered, to keep in another place. "How this works":
+   why paper and not a photo; that the words are on the screen only while
+   they are shown, and an infected phone could read them then, which is
+   why the limit matters; that steel plates keep words through fire and
+   water, with a picture, for the hardware wallet's words later.
+10. **Only you can send.** The screen lock (SS-24): "Taking payments never
+    needs this. Sending money out always does."
+11. **The counter.** The counter app on the till's phone or tablet scans
+    the owner phone, or, for someone who sells alone, "Use this phone as
+    the counter too" **[to build]**. The counter then shows its line,
+    large. "How this works": a stolen counter cannot take any money, and
+    shows the shop's past payments to whoever opens it; a tampered counter
+    could show a false Paid, so the owner phone checks every Paid against
+    the payments it sees itself and raises the alarm when one is missing
+    (§2.7) **[to build]**. Then the steps for the chosen till, with a cue
+    card for staff to print.
+12. **Instant payments.** Two sentences and one choice: "Small payments
+    count at once. Bigger ones wait about ten minutes, until the payment is
+    in a block." The owner picks the amount, shown beside the price of a
+    typical sale; it starts at the shop's instant limit per sale (§6), and
+    0 makes every payment wait. "How this works" gives the risk in one
+    picture (§2.7); "Details" gives the exact rules (§6).
+13. **A first real sale.** A tiny amount from any bitcoin wallet, or "Skip,
+    I'll try it later", and the home screen says "Not tested yet" until a
+    sale is paid. The owner phone shows the payment in the owner's own
+    wallet, with the first-sale line, and an optional "See it yourself".
+
+Everything not needed for a first sale (the second copy of the words, the
+staff cue card, the first sale itself) can wait on a checklist on the home
+screen. A test counts the taps from Welcome to a counter that takes sales
+on each path, so that the count only goes down **[to measure]**.
+
+**The starter wallet stays temporary.** The app says so with weight that
+grows with what it holds and the days left (`docs/START-SIMPLE-RULES.md`
+SS-36, SS-37):
+
+- Always: one line on the home screen that cannot be dismissed, with what
+  it holds, the limit and the days left.
+- Weekly: a card, "Set up my hardware wallet" or "Not now", and "Not now"
+  holds for a week.
+- Daily, in the last 7 days, or once it holds half its limit.
+- At every start of the app, once it holds 80% of its limit.
+- At the date or the limit: the app opens on the move every time, and
+  waiting needs a sentence typed out (SS-37). Sales never stop (SS-38).
 
 **The words.** Never printed, by OpenBMT or by anyone it guides: written by
-hand on a card headed "TEMPORARY. PUT THIS ON STEEL." Steel as soon as
-possible, not when sales grow: plain steel washers and a letter-punch set, or
-a ready-made steel kit. Never a photo, a notes app, cloud storage, a password
-manager or email.
+hand. Never a photo, a notes app, cloud storage, a password manager or
+email.
 
 **Addresses.** The counter derives its own receive addresses from the public
 description, pinned at pairing after the first address is compared on the
@@ -204,10 +269,10 @@ wallet software. **New phone:** install, scan the public description, compare
 the first address, pair each counter again.
 
 The words "xpub", "descriptor" and "multisig" never appear on the main
-screens. They appear under Advanced, for people who want them. A wallet's own
+screens. They appear under Details, for people who want them. A wallet's own
 screen may use its own words; the app says what to expect before it does.
 
-Counts, honestly: setup without the wallet has not been timed **[to
+Counts, honestly: the first run has not been timed with a person **[to
 measure]**. The savings guide was walked through in a Tails 7.17 virtual
 machine with networking off; a timed run with a person has not been done
 **[to measure]**.
@@ -1933,6 +1998,15 @@ Each gets a written protocol before it runs.
   provider the shop picks, off by default, over Tor, no account, no cut for
   OpenBMT; a sale paid through a provider is refunded in bitcoin or in cash,
   one paid over the shop's own node in cash (§8).
+- **D8. Sell today, then move to a cold wallet.** Decided 2026-11-14. The
+  first run offers two equal choices: a plan whose first half is the starter
+  wallet on the owner phone (`docs/START-SIMPLE-RULES.md`), with a limit the
+  owner sets as the most they would be OK losing and a date at most 90 days
+  away, and whose second half is a hardware wallet; or a wallet the owner
+  already holds. The starter wallet is the one key a shop phone makes, and the
+  app presses for the move with more weight as the wallet fills and the date
+  nears (SS-36, SS-37). No hardware wallet brand is named or recommended: four
+  rules for buying one are given instead (§2.1).
 
 **Security-review decisions (Q1–Q4).** Decided on 2026-11-09.
 

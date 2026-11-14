@@ -53,12 +53,13 @@ funds.**
 
 ## 2. The words
 
-- **SS-10. Once, by hand.** The words are shown once, four at a time, for
-  the owner to write on the card in pen. Then three positions, picked from
-  fresh kernel bytes by KM-16's byte rule, are asked back. A wrong answer
-  shows the words again. After setup the app never shows them again, and
-  never asks for them except in the restore of SS-23, which only the owner
-  starts.
+- **SS-10. Once, by hand.** The words are shown once, four at a time, for the
+  owner to write on the card in pen. Then three positions, picked from fresh
+  kernel bytes by KM-16's byte rule, are asked back. A wrong answer shows the
+  words again. Once they are checked, and before the key is sealed, the owner
+  may have them shown once more, the same way, to write a second card kept in
+  another place. After setup the app never shows them again, and never asks
+  for them except in the restore of SS-23, which only the owner starts.
 - **SS-11. Never through Kotlin as text.** The words are made, kept and used
   in the Rust core. They cross to the app only to be drawn: as one image per
   screen of four words, drawn by the Rust core, which the app shows and
@@ -140,15 +141,25 @@ funds.**
 ## 5. The limit and the date
 
 - **SS-35. Both the owner's.** At setup the owner sets the most the starter
-  wallet may hold, in the shop's currency, and the date to move to a key
-  made offline. The app suggests a date 30 days away and never suggests an
-  amount. Both are the owner phone's own record, beside the starter
-  wallet, and bind only the owner phone: no counter checks them (SS-38).
-- **SS-36. Every day.** The owner phone's home screen shows, in a line that
-  cannot be dismissed, what the starter wallet holds, the limit and the
-  date. What it holds is its confirmed coins and the change of the owner
-  phone's own payments before a block holds them; a payment from anyone
-  else counts once a block holds it.
+  wallet may hold, in the shop's currency, and the date to move to a key made
+  offline. The screen says that a thief of the phone could take what the
+  wallet holds and never more than the limit, and asks for the most the owner
+  would be OK losing; it gives "a day's takings or less" as an example, and
+  the field starts empty: the app never suggests an amount. The date is 30
+  days away unless the owner changes it, and a date more than 90 days away is
+  refused. Both are the owner phone's own record, beside the starter wallet,
+  and bind only the owner phone: no counter checks them (SS-38).
+- **SS-36. Every day, and more as it fills.** The owner phone's home screen
+  shows, in a line that cannot be dismissed, what the starter wallet holds,
+  the limit and the days left, and a button to move to a hardware wallet. On
+  top of it, a card asks for the move ("Set up my hardware wallet" or "Not
+  now"): at most once a week; at most once a day in the last 7 days before the
+  date, or once the wallet holds half its limit; and at every start of the app
+  once it holds 80% of its limit. "Not now" holds until the next time the card
+  is due. The times are the owner phone's own record, kept beside the starter
+  wallet. What it holds is its confirmed coins and the change of the owner
+  phone's own payments before a block holds them; a payment from anyone else
+  counts once a block holds it.
 - **SS-37. At the limit or the date.** The owner phone opens on the upgrade
   screen every time, with "Upgrade now" and "Not yet". "Not yet" needs a
   sentence typed exactly and lasts at most 7 days. While it lasts, raising
