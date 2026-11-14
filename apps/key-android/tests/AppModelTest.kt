@@ -449,6 +449,7 @@ object AppModelTest {
         ok(CeremonyModel.usableSavedAnswer { good.copyOf(100) } == null, "a cut saved answer is not offered")
         ok(CeremonyModel.usableSavedAnswer { good.copyOf(good.size + 1) } == null, "a saved answer with extra bytes is not offered")
         ok(CeremonyModel.usableSavedAnswer { ByteArray(0) } == null, "an empty saved answer is not offered")
+        ok(CeremonyModel.usableSavedAnswer { good.copyOf().also { it[4] = 2 } } == null, "a saved answer of another version is not offered")
         ok(CeremonyModel.usableSavedAnswer { null } == null, "a missing saved answer is not offered")
         ok(CeremonyModel.usableSavedAnswer { throw IOException("unreadable") } == null, "a saved answer that does not read is not offered")
         val dir = tempDir()

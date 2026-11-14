@@ -71,13 +71,13 @@ object CeremonyModel {
     fun looksLikeAnswer(bytes: ByteArray): Boolean = hasFrame(bytes, ANSWER)
 
     /**
-     * Whether [bytes] are a whole answer in the shape SR-68 fixes: the frame, a network byte 0 to 3, the
+     * Whether [bytes] are a whole answer in the shape SR-68 fixes: the frame, version 1, a network byte 0 to 3, the
      * key 2 flag 0 or 1, then the exact length (key 2's 82 bytes only with flag 1, key 3's 82, the root's 32).
      * A copy cut by a crash is shorter and fails.
      */
     fun isWholeAnswer(bytes: ByteArray): Boolean {
         if (!looksLikeAnswer(bytes) || bytes.size < 7) return false
-        if (bytes[5].toInt() !in 0..3) return false
+        if (bytes[4].toInt() != 1 || bytes[5].toInt() !in 0..3) return false
         val key2 = when (bytes[6].toInt()) {
             0 -> 0
             1 -> 82
