@@ -54,6 +54,14 @@ pub enum ShareRefused {
     NotOpen,
     /// RQ-12: the request is in the currency and there is no fresh rate.
     StaleRate,
+    /// RQ-07: the request is priced in a currency other than the shop's
+    /// settings now, so no rate of now can quote it. Nothing was written.
+    OtherCurrency {
+        /// The currency the request is priced in.
+        request: ShopCurrency,
+        /// The currency of the shop's settings now.
+        shop: ShopCurrency,
+    },
 }
 
 /// Why payments were not counted (RQ-15).
@@ -118,6 +126,14 @@ pub enum ReturnRefused {
     },
     /// RQ-26: the amount is in the currency and there is no fresh rate.
     StaleRate,
+    /// RQ-07: the request is priced in a currency other than the shop's
+    /// settings now, so the amount cannot be valued at the rate of now.
+    OtherCurrency {
+        /// The currency the request is priced in.
+        request: ShopCurrency,
+        /// The currency of the shop's settings now.
+        shop: ShopCurrency,
+    },
     /// RQ-28: the script is not one of a standard kind.
     BadScript,
     /// RQ-29: as many returns are queued or in a spend not yet confirmed as one
@@ -173,6 +189,10 @@ impl fmt::Display for ShareRefused {
             Self::NoSuchRequest => write!(f, "RQ-12: there is no such request"),
             Self::NotOpen => write!(f, "RQ-12: the request is not open, so nothing is asked"),
             Self::StaleRate => write!(f, "RQ-12: there is no fresh rate to quote with"),
+            Self::OtherCurrency { request, shop } => write!(
+                f,
+                "RQ-07: the request is in {request:?} and the shop's settings are in {shop:?}"
+            ),
         }
     }
 }
@@ -225,6 +245,10 @@ impl fmt::Display for ReturnRefused {
                 write!(f, "RQ-26: the address takes at least {min_sats} sats")
             }
             Self::StaleRate => write!(f, "RQ-26: there is no fresh rate to value the amount at"),
+            Self::OtherCurrency { request, shop } => write!(
+                f,
+                "RQ-07: the request is in {request:?} and the shop's settings are in {shop:?}"
+            ),
             Self::BadScript => write!(f, "RQ-28: the address is not of a standard kind"),
             Self::QueueFull => write!(f, "RQ-29: as many returns wait as one payment takes"),
             Self::BookFull => write!(f, "RQ-30: the book holds no more returns"),

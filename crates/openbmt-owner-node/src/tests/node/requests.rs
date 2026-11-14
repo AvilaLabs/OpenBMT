@@ -30,6 +30,8 @@ use crate::requests::{
 };
 use crate::{former_coins_file, FormerParts, NotWatching, OwnNode, REQUEST_BOOK_FILE};
 use openbmt_core::pinned_wallet::PinnedWallet;
+use openbmt_counter::money::value_of;
+use openbmt_requests::{ReturnRefused, ShareRefused};
 
 fn context(depth: u8) -> RequestContext {
     RequestContext {
@@ -1064,4 +1066,73 @@ fn rq_07_a_rate_kept_in_another_currency_is_not_used_after_the_context_changes()
     assert_eq!(received(&rig, 1), 10_000);
     assert!(rig.node.share_request(1, START, "shop").is_ok());
     assert!(rig.node.make_request(&in_currency(5_000), 1, START).is_ok());
+}
+
+/// A rate of `currency` of `minor_per_btc`, fetched at `START`.
+fn kept_at(currency: ShopCurrency, minor_per_btc: u64) -> CurrencyRate {
+    let mut rate = kept(currency);
+    rate.rate.rate = openbmt_counter::money::Rate::new(minor_per_btc).unwrap();
+    rate
+}
+
+#[test]
+fn rq_07_a_request_in_the_old_currency_is_not_quoted_or_returned_at_the_new_rate() {
+    let dir = Dir::new();
+    let (mut rig, _book, _setup) = desk_rig(&dir, 1);
+    let euros = RequestContext {
+        currency: ShopCurrency::Eur,
+        ..context(1)
+    };
+    rig.node
+        .set_request_context(euros, Some(kept_at(ShopCurrency::Eur, 10_000_000)));
+    rig.node
+        .make_request(&in_currency(5_000), 0, START)
+        .unwrap();
+    rig.node
+        .make_request(&in_currency(5_000), 1, START)
+        .unwrap();
+    let quote = rig.node.share_request(1, START + 1, "shop").unwrap().quote;
+    // The settings change to dollars, with a fresh rate of dollars.
+    rig.node
+        .set_request_context(context(1), Some(kept_at(ShopCurrency::Usd, 20_000_000)));
+    let before = std::fs::read(dir.path().join(REQUEST_BOOK_FILE)).unwrap();
+    assert!(matches!(
+        rig.node.share_request(1, START + 2, "shop"),
+        Err(RequestError::Share(ShareRefused::OtherCurrency {
+            request: ShopCurrency::Eur,
+            shop: ShopCurrency::Usd,
+        }))
+    ));
+    assert_eq!(
+        std::fs::read(dir.path().join(REQUEST_BOOK_FILE)).unwrap(),
+        before,
+        "nothing was written"
+    );
+    // A payment is credited at the last quote, in euros.
+    rig.mine(&[payment(0, 7, 10_000)]);
+    rig.tick();
+    let credit = rig.node.requests().unwrap().request(1).unwrap().credits[0];
+    assert_eq!(credit.rate, quote.rate);
+    assert_eq!(
+        credit.value,
+        quote.rate.map_or(0, |r| value_of(10_000, r).0)
+    );
+    // A return valued by rate is refused the same way, and queues nothing.
+    let refused = rig
+        .node
+        .add_return(1, ReturnAmount::Units(100), &external_address(1), START + 2)
+        .unwrap_err();
+    assert!(matches!(
+        refused,
+        RequestError::Return(ReturnRefused::OtherCurrency { .. })
+    ));
+    assert!(rig.node.requests().unwrap().returns().is_empty());
+    // A request made in dollars after the change shares normally.
+    rig.node
+        .make_request(&in_currency(5_000), 2, START + 2)
+        .unwrap();
+    assert!(rig.node.share_request(3, START + 2, "shop").is_ok());
+    // The old request can still be cancelled (the other one, with nothing
+    // received).
+    rig.node.cancel_request(2, START + 3).unwrap();
 }

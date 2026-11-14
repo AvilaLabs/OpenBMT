@@ -288,3 +288,87 @@ fn cr_196_a_requote_named_in_another_currency_than_the_sales_is_refused() {
     assert_eq!(w.c.sale(o.index).unwrap().quotes().len(), 1);
     assert!(w.requote(o.index, 20_000_000).is_ok());
 }
+
+/// The settings of `w` become `currency`'s, as when the owner changes them
+/// and the counter takes the new ones (the sales already open stay as they
+/// are).
+fn change_currency(w: &mut World, currency: ShopCurrency) {
+    let mut s = w.c.settings().clone();
+    s.currency = currency;
+    if currency.is_sats() {
+        for l in [
+            &mut s.light_per_sale,
+            &mut s.light_budget,
+            &mut s.node_per_sale,
+            &mut s.node_budget,
+            &mut s.box_per_sale,
+            &mut s.box_budget,
+            &mut s.refund_cap,
+            &mut s.refund_daily_cap,
+            &mut s.cashier_override_daily_cap,
+            &mut s.manager_override_ceiling,
+        ] {
+            *l = Limit {
+                sats: 10_000,
+                display_usd: 10_000,
+            };
+        }
+    }
+    w.c.set_settings(s);
+}
+
+#[test]
+fn cr_196_a_requote_of_a_sale_in_another_currency_than_the_settings_now_is_refused() {
+    // A dollar sale, the shop now on Bitcoin Standard: not valued at the
+    // satoshi's rate.
+    let mut w = World::new();
+    let o = w.open(5_000);
+    w.tick(60);
+    change_currency(&mut w, ShopCurrency::Sats);
+    let written = w.m.events().len();
+    let err =
+        w.c.requote(
+            o.index,
+            usd(),
+            Rate::new(20_000_000).unwrap(),
+            &fresh(w.now),
+            w.now,
+            &w.chain,
+            &mut w.m,
+        )
+        .unwrap_err();
+    assert_eq!(
+        err,
+        RequoteRefused::WrongCurrency {
+            sale: usd(),
+            named: sat()
+        }
+    );
+    assert_eq!(w.m.events().len(), written);
+    // A satoshi sale, the shop now in dollars: not priced at a fiat rate.
+    let mut w = world_in(ShopCurrency::Sats);
+    let o = w.open(5_000);
+    w.tick(60);
+    change_currency(&mut w, ShopCurrency::Usd);
+    let written = w.m.events().len();
+    let err =
+        w.c.requote(
+            o.index,
+            sat(),
+            Rate::new(20_000_000).unwrap(),
+            &fresh(w.now),
+            w.now,
+            &w.chain,
+            &mut w.m,
+        )
+        .unwrap_err();
+    assert_eq!(
+        err,
+        RequoteRefused::WrongCurrency {
+            sale: sat(),
+            named: usd()
+        }
+    );
+    assert_eq!(w.m.events().len(), written);
+    assert_eq!(w.c.sale(o.index).unwrap().quotes().len(), 1);
+}

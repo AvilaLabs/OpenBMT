@@ -218,6 +218,28 @@ fn same_kind(node: &Node<Port>, index: u32) -> Result<(), CounterError> {
     Ok(())
 }
 
+/// CR-196, CR-197: a sale priced again or refunded by value is in the
+/// currency of the settings in force, not only of its kind: a euro sale is
+/// not valued at a dollar rate. A cash refund has its own path (the sale's
+/// last quote) and does not need this.
+fn same_currency(node: &Node<Port>, index: u32) -> Result<(), CounterError> {
+    same_kind(node, index)?;
+    let shop = Currency::of_shop(node.settings().currency);
+    if let Some(sale) = node.counter().sale(index) {
+        if sale.currency() != shop {
+            return Err(refused_by(
+                "sale-currency",
+                format!(
+                    "the sale is in {}, and the shop prices in {}",
+                    sale.currency(),
+                    shop
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// CR-196, CR-197: the currency named and the rate to price sale `index` at
 /// again, for `requote` and for a refund by value. Bitcoin Standard has no
 /// price: the rate and the source of the call are not read, as for `open`.
@@ -229,7 +251,7 @@ fn rate_for_sale(
     (rate, label, fetched_at): (u64, &str, u64),
 ) -> Result<(Currency, Rate, RateSource), CounterError> {
     let named = named_currency(named)?;
-    same_kind(node, index)?;
+    same_currency(node, index)?;
     let (rate, source) = if node.settings().currency.is_sats() {
         (Rate::sats(), RateSource::sats(now))
     } else {

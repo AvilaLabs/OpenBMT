@@ -2109,6 +2109,16 @@ impl Counter {
                 named: currency,
             });
         }
+        // CR-196, CR-197: and the currency of the settings in force, so that a
+        // sale in satoshis is never priced at a fiat rate and a fiat sale is
+        // never valued at the satoshi's.
+        let shop = Currency::of_shop(self.settings.currency);
+        if sale.currency() != shop {
+            return Err(RequoteRefused::WrongCurrency {
+                sale: sale.currency(),
+                named: shop,
+            });
+        }
         if !sale.is_live() {
             return Err(RequoteRefused::SaleEnded);
         }
@@ -4560,6 +4570,14 @@ impl Counter {
                     return Err(RefundRefused::WrongCurrency {
                         sale: base.currency(),
                         named: currency,
+                    });
+                }
+                // CR-196, CR-197: and the currency of the settings in force.
+                let shop = Currency::of_shop(self.settings.currency);
+                if base.currency() != shop {
+                    return Err(RefundRefused::WrongCurrency {
+                        sale: base.currency(),
+                        named: shop,
                     });
                 }
                 let (rate, source) = self.priced_at(rate, &source, now);

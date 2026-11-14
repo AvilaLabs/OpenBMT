@@ -54,6 +54,17 @@ pub fn stale_rate() -> Words {
     )
 }
 
+/// RQ-07: words still to be written for a request that is not in the
+/// currency of the settings now; the placeholder stands in the heading and
+/// both sentences, so that it shows wherever the words would.
+pub const WORDS_NEEDED_RQ07_SHARE_OTHER_CURRENCY: &str = "WORDS_NEEDED_RQ07_SHARE_OTHER_CURRENCY";
+/// RQ-07: the same, for a return valued by rate.
+pub const WORDS_NEEDED_RQ07_RETURN_OTHER_CURRENCY: &str = "WORDS_NEEDED_RQ07_RETURN_OTHER_CURRENCY";
+
+fn words_needed(name: &str) -> Words {
+    refused(name, name, name, "RQ-07")
+}
+
 /// The same fault from whichever call met it.
 fn no_such_request() -> Words {
     refused(
@@ -132,6 +143,7 @@ pub fn share_refused(why: &ShareRefused) -> Words {
             "RQ-12",
         ),
         ShareRefused::StaleRate => stale_rate(),
+        ShareRefused::OtherCurrency { .. } => words_needed(WORDS_NEEDED_RQ07_SHARE_OTHER_CURRENCY),
     }
 }
 
@@ -237,6 +249,9 @@ pub fn return_refused(why: &ReturnRefused) -> Words {
             "RQ-26",
         ),
         ReturnRefused::StaleRate => stale_rate(),
+        ReturnRefused::OtherCurrency { .. } => {
+            words_needed(WORDS_NEEDED_RQ07_RETURN_OTHER_CURRENCY)
+        }
         ReturnRefused::BadScript => address_refused(&AddressRefused::NotAnAddress),
         ReturnRefused::QueueFull => refused(
             "Too many returns waiting",

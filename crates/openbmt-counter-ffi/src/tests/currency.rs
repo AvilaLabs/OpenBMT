@@ -287,3 +287,62 @@ fn cr_196_a_cash_refund_in_another_currency_than_the_sales_is_refused() {
     let f = Rd::error(&rig.call(18, handle, &cash("EUR"))).expect("a refusal");
     assert_ne!(f.rule, "CR-196");
 }
+
+/// A node that was started in euros, has a euro sale open, and is started
+/// again on the same folder with the shop in dollars: the sale is in euros,
+/// the settings in force are in dollars.
+fn euro_sale_under_dollar_settings() -> (Rig, u64) {
+    let (rig, handle) = ready_in(ShopCurrency::Eur);
+    rig.call(
+        11,
+        handle,
+        &W::new().open(T0, 500, "EUR", RATE, "test-fixed").0,
+    );
+    let _ = rig.call(2, handle, &[]);
+    let mut config = start_config(rig.dir().to_str().expect("UTF-8"));
+    config.record = record_with(signed_in(ShopCurrency::Usd)).to_bytes();
+    let handle = rig.start_with(&config);
+    (rig, handle)
+}
+
+#[test]
+fn cr_196_a_requote_of_a_sale_in_the_old_currency_is_refused_after_the_shop_changes() {
+    let (rig, handle) = euro_sale_under_dollar_settings();
+    // The sale is in euros, the caller names euros, and the rate is dollars.
+    let f = Rd::error(&rig.call(
+        13,
+        handle,
+        &requote_args(T0 + 1, "EUR", RATE * 2, "test-fixed"),
+    ))
+    .expect("a refusal");
+    assert_eq!(f.rule, "sale-currency");
+}
+
+#[test]
+fn cr_196_a_refund_by_value_of_a_sale_in_the_old_currency_is_refused_after_the_shop_changes() {
+    let (rig, handle) = euro_sale_under_dollar_settings();
+    let destination = Address::from_script(&p2wsh(0x77), Network::Regtest)
+        .expect("an address")
+        .to_string();
+    let f = Rd::error(
+        &rig.call(
+            16,
+            handle,
+            &W::new()
+                .u64(T0)
+                .u32(0)
+                .u8(1)
+                .u64(100)
+                .string("EUR")
+                .u64(RATE)
+                .string("test-fixed")
+                .u64(T0)
+                .string(&destination)
+                .actor(true, "mia")
+                .string("changed mind")
+                .0,
+        ),
+    )
+    .expect("a refusal");
+    assert_eq!(f.rule, "sale-currency");
+}

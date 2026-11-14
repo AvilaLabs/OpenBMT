@@ -1785,3 +1785,38 @@ fn cr_196_a_refund_by_value_or_in_cash_named_in_another_currency_is_refused() {
     // In the sale's currency both go on.
     assert!(ask_cash(&mut w, i, 100, ann()).is_ok());
 }
+
+#[test]
+fn cr_196_a_refund_by_value_of_a_sale_in_another_currency_than_the_settings_now_is_refused() {
+    let mut w = World::new();
+    let i = final_sale(&mut w);
+    // The shop moves to euros; the sale stays in dollars, and the caller
+    // names dollars with a rate of dollars.
+    let mut s = w.c.settings().clone();
+    s.currency = openbmt_core::currency::ShopCurrency::Eur;
+    w.c.set_settings(s);
+    let written = w.m.events().len();
+    let by_value = RefundRequest {
+        ask: RefundAsk::Value {
+            minor: 100,
+            currency: usd(),
+            rate: rate(),
+            source: fresh(w.now),
+        },
+        destination: dest(),
+        actor: ann(),
+        reason: "wrong size".to_string(),
+    };
+    let err =
+        w.c.request_refund(i, by_value, w.now, &w.chain, &mut w.m)
+            .unwrap_err();
+    assert_eq!(
+        err,
+        RefundRefused::WrongCurrency {
+            sale: usd(),
+            named: eur(),
+        }
+    );
+    assert_eq!(w.m.events().len(), written);
+    assert!(w.c.refund_views(i).is_empty());
+}

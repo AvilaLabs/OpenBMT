@@ -46,8 +46,8 @@ use openbmt_owner::{SaleFacts, SaleKey, Stage};
 use openbmt_requests::say;
 use openbmt_requests::{
     check_return_address, share_link, AddressRefused, Arrival, BookError, CheckedRate,
-    CreditRefused, Day, DueRepeat, EndRefused, MakeRefused, NewRequest, Quote, RepeatRefused,
-    Request, RequestBook, ReturnAmount, ReturnRefused, ShareRefused, Shop,
+    CreditRefused, Day, DueRepeat, EndRefused, MakeRefused, NewRequest, Pricing, Quote,
+    RepeatRefused, Request, RequestBook, ReturnAmount, ReturnRefused, ShareRefused, Shop,
 };
 use openbmt_watch::HeaderChain;
 
@@ -462,6 +462,30 @@ impl<P: OwnerPort> OwnerNode<P> {
             .map(|kept| kept.rate.clone())
     }
 
+    /// RQ-07: the kept rate for the request `number`, when the request is
+    /// priced in the currency of the kept rate (and of the context). A
+    /// request priced in another currency gets no rate: the rate of now is
+    /// not its currency's. `Err` carries the two currencies, the request's
+    /// and the shop's, for a refusal.
+    pub(crate) fn kept_rate_for(
+        &self,
+        number: u64,
+    ) -> Result<Option<CheckedRate>, (ShopCurrency, ShopCurrency)> {
+        let rate = self.kept_rate();
+        let Some(context) = self.requests.context.as_ref() else {
+            return Ok(rate);
+        };
+        let pricing = self
+            .requests()
+            .ok()
+            .and_then(|b| b.request(number))
+            .map(|r| r.pricing);
+        match pricing {
+            Some(Pricing::Currency(c)) if c != context.currency => Err((c, context.currency)),
+            _ => Ok(rate),
+        }
+    }
+
     pub(crate) fn address_of(&self, script: &ScriptBuf) -> String {
         Address::from_script(script, self.network())
             .map_or_else(|_| String::new(), |a| a.to_string())
@@ -650,7 +674,9 @@ impl<P: OwnerPort> OwnerNode<P> {
             .map(|s| self.address_of(&s))
             .filter(|a| !a.is_empty())
             .ok_or(RequestError::NoAddress)?;
-        let rate = self.kept_rate();
+        let rate = self.kept_rate_for(number).map_err(|(request, shop)| {
+            RequestError::Share(ShareRefused::OtherCurrency { request, shop })
+        })?;
         let quote = self.edit(|book, _| {
             let quote = book
                 .share(number, now, rate.as_ref())
@@ -738,7 +764,17 @@ impl<P: OwnerPort> OwnerNode<P> {
     ) -> Result<ReturnAdded, RequestError> {
         self.request_ready()?;
         let (script, groups) = self.check_return(text)?;
-        let rate = self.kept_rate();
+        let rate = match self.kept_rate_for(number) {
+            Ok(rate) => rate,
+            // Only an amount valued by rate needs the rate of now.
+            Err((request, shop)) if matches!(amount, ReturnAmount::Units(_)) => {
+                return Err(RequestError::Return(ReturnRefused::OtherCurrency {
+                    request,
+                    shop,
+                }));
+            }
+            Err(_) => None,
+        };
         let before = self.requests.state.clone();
         let (id, sats, index, received) = self.edit(|book, _| {
             let id = book
@@ -1058,7 +1094,6 @@ impl<P: OwnerPort> OwnerNode<P> {
             }
         }
         let now = self.watcher.now();
-        let rate = self.kept_rate();
         let shop = context.shop();
         let mut next = loaded.clone();
         let mut waiting: Vec<PendingArrival> = rest;
@@ -1087,6 +1122,9 @@ impl<P: OwnerPort> OwnerNode<P> {
                 }
                 now_credit.push(*a);
             }
+            // RQ-07: the rate of now only for a request in its currency; a
+            // request in another currency is credited at its own quotes.
+            let rate = self.kept_rate_for(*number).unwrap_or(None);
             match next
                 .book
                 .credit(*number, &now_credit, now, &shop, rate.as_ref())
