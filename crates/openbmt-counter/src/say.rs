@@ -50,10 +50,6 @@ const CHECK_AMOUNT_NEXT: &str = "Check the amount and enter it again.";
 const OTHER_PAYMENT_NEXT: &str =
     "Take another kind of payment. Tell the owner: the counter cannot check payments.";
 
-/// CR-196: the words of a sale named in another currency than the shop's
-/// are not written yet (CR-271).
-const WRONG_CURRENCY_WORDS: &str = "WORDS_NEEDED_CR196_WRONG_CURRENCY";
-
 /// Words for a refusal: nothing happened, so the tone is neutral.
 pub(crate) fn refused(
     heading: &str,
@@ -589,10 +585,10 @@ impl<E: Display> OpenRefused<E> {
                 "CR-02",
             ),
             Self::WrongCurrency { .. } => refused(
-                WRONG_CURRENCY_WORDS,
-                WRONG_CURRENCY_WORDS,
+                "Price in another currency",
+                "The sale was priced in another currency than the shop's, so it was not opened.",
                 Who::Cashier,
-                WRONG_CURRENCY_WORDS,
+                "Start the sale again. If it is refused again, tell the owner: the price list and the shop's currency differ.",
                 "CR-196",
             ),
             Self::BadName => refused(

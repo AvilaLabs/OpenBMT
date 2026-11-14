@@ -1432,17 +1432,20 @@ RT-03, RT-24).
   the old currency, and settings that carry one are refused when they
   replace those in force, naming it. A limit that is off is not a value.
   The field `currency` is listed by `changed_fields`.
-- **CR-196.** A sale is in the currency of the settings in force: the sale
-  and its `Opened` record carry that currency's code, whatever currency the
-  caller names. The amount is in the minor units of that currency (ISO
-  4217: yen and won have none), and the rate is in minor units per bitcoin.
-  The counter app's library refuses a sale in another currency than the
-  settings' (`sale-currency`). The app takes the currency from the settings
-  in force, not from its price sources: its keypad has the currency's
-  minor digits, its words name the currency by its code, its price is the
-  one of the sources of that currency (RT-40), and when the settings in
-  force name another currency than the one it started with, it starts the
-  node again.
+- **CR-196.** A sale is in the currency of the settings in force: the sale and
+  its `Opened` record carry that currency's code. A sale named in another
+  currency is refused with nothing written (`OpenRefused::WrongCurrency`). The
+  amount is in the minor units of that currency (ISO 4217: yen and won have
+  none), and the rate is in minor units per bitcoin. The counter app's library
+  refuses a sale in another currency than the settings' (`sale-currency`). It
+  refuses the same way a new quote (CR-05) or a refund given by value (CR-61)
+  whose rate names another currency than the one the sale was opened in, or
+  whose sale and settings in force are not both in Bitcoin Standard or both
+  not. The app takes the currency from the settings in force, not from its
+  price sources: its keypad has the currency's minor digits, its words name
+  the currency by its code, its price is the one of the sources of that
+  currency (RT-40), and when the settings in force name another currency than
+  the one it started with, it starts the node again.
 - **CR-197.** With Bitcoin Standard the amount typed is satoshis and the
   quote is the amount: the rate is exactly 100,000,000 minor units (of a
   satoshi) per bitcoin, no source is asked, and the rate and source the

@@ -72,7 +72,11 @@ an end, payments in parts, repeats and returns.
     the price does. A shop in Bitcoin Standard mode has only this way.
   - **In the shop's currency.** The amount is in the currency of the shop's
     settings (CR-193) and is what is owed. The satoshis asked for are worked
-    out each time the request is shared (RQ-12).
+    out each time the request is shared (RQ-12). The rate used names its
+    currency: a rate in another currency than the settings in force is
+    refused, whatever is being done to the request, with the words of a
+    price that cannot be used, and nothing is written. The phone does not use
+    a rate it kept from before the shop's currency changed.
 - **RQ-08.** The amount in satoshis, or worked out from the currency, is at
   least the shop's smallest bitcoin sale (CR-75) and at least the dust line
   (CR-17). A smaller one is refused with nothing written. The currency amount
