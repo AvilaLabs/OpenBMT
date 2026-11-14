@@ -447,15 +447,20 @@ says so when one is missing.
   (DESIGN §2.6). After that, a verified amount below the recorded one is a
   mismatch. Nothing is judged while the view is not ready or has not checked
   the chain to its tip (OC-14); a sale too old for facts (OC-14) is listed as
-  not checkable, never as a mismatch or as checked.
-- **OC-62.** The mismatch. The owner phone raises an alarm with the counter's
-  name, the sale's number, the cashier, the amount the counter recorded, the
-  amount seen and the time of the Paid, in words that say the counter showed
-  Paid and this phone sees no payment, or less, and that the counter may have
-  been tampered with. Only the owner clears it, on the owner phone; the
-  acknowledgement is kept in the phone's own ledger as OC-36 says, and a sale
-  whose payment later arrives in full clears itself, with a line that says so.
-  A mismatch is raised once per sale.
+  not checkable, never as a mismatch or as checked. A Paid at an address the
+  owner never issued to that counter (OC-14, "not this counter's address") is
+  a mismatch at once, with nothing seen: no payment there is the shop's. The
+  check runs each time the owner's view checks a new tip, and when the app
+  starts.
+- **OC-62.** The mismatch. The owner phone raises an alarm, as it raises a
+  cancel (DESIGN §2.7), so that it reaches the owner without the owner looking
+  for it, with the counter's name, the sale's number, the cashier, the amount
+  the counter recorded, the amount seen and the time of the Paid, in words
+  that say the counter showed Paid and this phone sees no payment, or less,
+  and that the counter may have been tampered with. Only the owner clears it,
+  on the owner phone; the acknowledgement is kept in the phone's own ledger as
+  OC-36 says, and a sale whose payment later arrives in full clears itself,
+  with a line that says so. A mismatch is raised once per sale.
 - **OC-63.** The day. The owner phone's day summary shows, for each counter,
   the number and total of its sales paid on chain, and how many of them this
   phone has seen in a block, is waiting for, could not check and found
