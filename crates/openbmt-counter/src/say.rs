@@ -48,12 +48,6 @@ const CHECK_AMOUNT_NEXT: &str = "Check the amount and enter it again.";
 const OTHER_PAYMENT_NEXT: &str =
     "Take another kind of payment. Tell the owner: the counter cannot check payments.";
 
-/// CR-276: a placeholder for words that are not written yet. Its name is in
-/// the heading and both sentences, and names the rule.
-fn needed(placeholder: &'static str, who: Who, code: &'static str) -> Words {
-    Words::new(Tone::Ended, placeholder, placeholder, who, placeholder).code(code)
-}
-
 /// Words for a refusal: nothing happened, so the tone is neutral.
 pub(crate) fn refused(
     heading: &str,
@@ -1518,9 +1512,24 @@ impl<E: Display> RefundRefused<E> {
                 "Give the refund in cash from the till.",
                 "CR-217",
             ),
-            Self::NotSettled { .. } => needed(
-                "WORDS_NEEDED_CR_71_NOT_SETTLED",
+            Self::NotSettled {
+                received, settled, ..
+            } => refused(
+                "Payment not confirmed yet",
+                if *settled == 0 {
+                    format!(
+                        "None of the {} paid is confirmed yet. Cash is refunded only against confirmed bitcoin.",
+                        sats(*received)
+                    )
+                } else {
+                    format!(
+                        "Only {} of the {} paid is confirmed. Cash is refunded only against confirmed bitcoin.",
+                        sats(*settled),
+                        sats(*received)
+                    )
+                },
                 Who::Cashier,
+                "Wait for the payment to confirm, then try again.",
                 "CR-71",
             ),
             Self::NeedsManagerSingle {

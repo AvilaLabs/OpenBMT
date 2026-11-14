@@ -175,7 +175,11 @@ carries two texts: why it is in this state, and what happens next (§2.6).
   hours past the cashier's daily cap. A manager's is refused when it
   would take that manager's overrides of the last 24 hours past the
   manager's ceiling. The caller says who the person is and has already
-  checked the PIN.
+  checked the PIN. The last 24 hours are a day by the clock and, when the
+  heights are known, 144 blocks as well: an override counts until both have
+  passed, so moving the date forward frees no cap. While no cashier is listed
+  (CR-146) a name proves nobody, so the overrides of every cashier name count
+  against one daily cap; with cashiers listed each person has their own.
 - **CR-22.** An override is recorded with who, when and how much. It
   does not clear a cancel alarm and does not make the sale `Confirmed`.
 
@@ -337,7 +341,9 @@ has been made).
   refunds) past the settings' daily refund cap. The refusal says a manager
   is needed. A manager's request is not held to either; it is held to CR-67
   and to the owner's and the Key app's own limits. The caller says who the
-  person is and has checked the PIN, as for an override (CR-21).
+  person is and has checked the PIN, as for an override (CR-21). The daily
+  refund cap is shared by every cashier name while no cashier is listed, and
+  is each person's own once cashiers are listed, as the override cap is.
 - **CR-70.** A cashier or a manager can withdraw a request. A
   `RefundWithdrawn` record is written, naming the request number. The
   counter cannot know whether the owner has taken the request, so the
@@ -353,7 +359,12 @@ has been made).
   for CR-67, rounded up to a whole satoshi, and for the cashier's cap
   (CR-69). It asks the owner for nothing: the bitcoin is kept. For CR-67 a
   cashier's cash refund counts the withdrawn requests too (CR-119); a
-  manager's does not.
+  manager's does not. Cash goes out only against bitcoin at the shop's
+  `min_confirmations` or deeper: the amount is checked against what of the
+  sale is that deep, and a cash refund of a sale paid only by an unconfirmed
+  payment is refused, for a manager too, until it confirms. Satoshis paid
+  over Lightning count as confirmed. A bitcoin refund is not changed by this:
+  it already waits for the final depth (CR-66).
 - **CR-72.** For each sale the counter gives a `RefundView` for each entry:
   the sale, what was asked in satoshis, the state (`Requested`,
   `WaitingForDepth`, `Withdrawn` or `PaidInCash`), who asked and when. The
@@ -1080,7 +1091,13 @@ records and the totals are the library's (`crates/openbmt-counter`,
   The first cashier added turns the till lock on; removing the last turns it
   off. The change takes effect at once, and a person signed in when the lock
   turns off is forgotten. The manager who adds the first cashier is signed in,
-  since the manager's PIN has just been checked.
+  since the manager's PIN has just been checked. With no cashier listed the
+  cashier's daily caps are shared by every name (CR-21, CR-69), so a new name
+  brings no new cap, and changing the name the counter shows needs the
+  manager's PIN. The counter keeps the number of cashiers listed from the
+  staff records (CR-143); a counter that had cashiers listed before it kept
+  that number starts with none counted, the stricter side, until the next
+  change of staff.
 - **CR-147.** While cashiers are listed, the first screen after the node
   starts, and the first after a lock, is "Who is at the till?": the cashiers'
   names and the manager's. A name, then that person's PIN, opens home. Home
