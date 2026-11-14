@@ -774,6 +774,7 @@ dependencies = [
  "openbmt-core",
  "openbmt-link",
  "openbmt-net-io",
+ "openbmt-stick",
  "openbmt-watch",
  "serde_json",
  "tokio",

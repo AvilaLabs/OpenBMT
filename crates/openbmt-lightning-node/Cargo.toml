@@ -46,6 +46,8 @@ tokio = { version = "=1.54.1", features = ["rt-multi-thread", "net", "time", "io
 
 [dev-dependencies]
 openbmt-box = { path = "../openbmt-box" }
+# Only the key test (SL-51) judges the stick's child with the node's own code.
+openbmt-stick = { path = "../openbmt-stick" }
 
 # The plain TCP device is for tests and for the end-to-end script, never for
 # an app (SL-74). Only the two tools below turn it on.
