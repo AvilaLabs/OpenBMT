@@ -503,6 +503,10 @@ struct Follow {
     /// Blocks seen in this run that spend the coins of the watched lockups
     /// by a transaction the watch holds: who, and in which block.
     displaced_in: Vec<(Txid, BlockHash)>,
+    /// The block that spent the held lockup by a transaction that is not one
+    /// of the claims, seen in this run: for a lost swap that still sends the
+    /// claim of an underpaying lockup.
+    held_spent_in: Option<BlockHash>,
     last_status: Option<u64>,
     poll_after: u32,
     /// The lockup, as the light client sees it.
@@ -693,12 +697,14 @@ impl SwapDriver {
                 spent_told: None,
                 lockup_seen: false,
                 displaced_in: Vec::new(),
+                held_spent_in: None,
                 last_status: None,
                 poll_after: 0,
             };
             // A claim that was sent is sent again after a start, at the same
             // fee: the signature is the same, and so is the transaction.
-            if matches!(follow.record.machine.stage(), Stage::ClaimSent) {
+            if matches!(follow.record.machine.stage(), Stage::ClaimSent) || follow.underpaid_open()
+            {
                 follow.resend(claim_ctx(0, 0, false));
             }
             let sale = me.sales.entry(*index).or_insert_with(|| SaleSwaps {
@@ -739,7 +745,7 @@ impl SwapDriver {
         for sale in self.sales.values() {
             for swap in &sale.swaps {
                 if let Phase::Have(f) = &swap.phase {
-                    if !f.ended() {
+                    if !f.ended() || f.underpaid_open() {
                         out.push(f.lockup_script.clone());
                     }
                 }
@@ -1157,6 +1163,7 @@ impl SwapDriver {
                 spent_told: None,
                 lockup_seen: false,
                 displaced_in: Vec::new(),
+                held_spent_in: None,
                 last_status: Some(now),
                 poll_after: openbmt_swap::POLL_WAITING_SECS,
             })
@@ -1238,10 +1245,14 @@ impl SwapDriver {
                 }
                 // A block that spends the lockup with a transaction that is
                 // not one of the claims: the provider's refund, or another.
-                if let Some(lockup) = f.record.lockup.filter(|_| !f.ended()) {
+                if let Some(lockup) = f.record.lockup.filter(|_| !f.ended() || f.underpaid_open()) {
                     if let Ok(list) = block.spends(headers, &[lockup.outpoint]) {
                         for (_, txid, hash) in list {
-                            if !f.record.claims.contains(&txid) && f.record.spent_in != Some(hash) {
+                            if f.record.claims.contains(&txid) {
+                                continue;
+                            }
+                            f.held_spent_in = Some(hash);
+                            if !f.ended() && f.record.spent_in != Some(hash) {
                                 f.record.spent_in = Some(hash);
                                 f.dirty = true;
                             }
@@ -1254,7 +1265,17 @@ impl SwapDriver {
                     if let Ok(list) = block.spends(headers, &f.watch.watched_outpoints()) {
                         for (outpoint, by, hash) in list {
                             f.watch.spent_elsewhere(outpoint, by, hash);
-                            if !f.displaced_in.contains(&(by, hash)) && f.displaced_in.len() < 16 {
+                            if !f.displaced_in.contains(&(by, hash)) {
+                                // The list is bounded: a block that left the
+                                // chain goes first, else the oldest.
+                                if f.displaced_in.len() >= 16 {
+                                    let gone = f
+                                        .displaced_in
+                                        .iter()
+                                        .position(|(_, h)| headers.height_of(h).is_none())
+                                        .unwrap_or(0);
+                                    f.displaced_in.remove(gone);
+                                }
                                 f.displaced_in.push((by, hash));
                             }
                         }
@@ -1576,6 +1597,9 @@ impl Follow {
     /// what the record holds of it, and what the watch learned. The record
     /// keeps it while it stands, and lets it go when it leaves the chain.
     fn spent_height<C: HeaderChain + ?Sized>(&mut self, chain: &C) -> Option<u32> {
+        if self.holds_underpaid() {
+            return self.underpaid_height(chain);
+        }
         let held = self.record.spent_in;
         let mut found = None;
         // A replacement of the lockup's inputs by the lockup the swap holds
@@ -1619,6 +1643,44 @@ impl Follow {
             self.dirty = true;
         }
         found.map(|(_, height)| height)
+    }
+
+    /// The height of the loss while the held lockup is the underpaying one:
+    /// the block of the best chain that holds that lockup, or else the block
+    /// the record names, if it is on the chain. The loss rests on the
+    /// underpaying lockup too, since the block that displaced the first may
+    /// leave the chain and the lockup be mined again in another. The record
+    /// is not cleared while either block stands.
+    fn underpaid_height<C: HeaderChain + ?Sized>(&mut self, chain: &C) -> Option<u32> {
+        let held = self.record.lockup?.outpoint.txid;
+        let stored = self.record.spent_in;
+        let own = self
+            .watch
+            .standing_depths(chain)
+            .into_iter()
+            .find(|(t, _)| *t == held)
+            .map(|(_, d)| d)
+            .filter(|d| *d >= 1)
+            .map(|d| chain.tip_height().saturating_sub(d).saturating_add(1));
+        let own_hash = self
+            .displaced_in
+            .iter()
+            .find(|(by, h)| *by == held && chain.height_of(h).is_some())
+            .map(|(_, h)| *h);
+        let stored_height = stored.and_then(|h| chain.height_of(&h));
+        let height = own.or(stored_height);
+        let now = match (own_hash, stored_height) {
+            (Some(hash), _) => Some(hash),
+            (None, Some(_)) => stored,
+            // The lockup stands in a block the record does not name yet.
+            (None, None) if own.is_some() => stored,
+            (None, None) => None,
+        };
+        if now != stored {
+            self.record.spent_in = now;
+            self.dirty = true;
+        }
+        height
     }
 
     /// The lockup the claim is built from: a transaction the watch holds
@@ -1748,6 +1810,13 @@ impl Follow {
         if spent && stage == Stage::ClaimSent {
             self.claim_underpaid(chain, tip, now, start_rate, notes);
         }
+        // A swap lost after its claim was sent still claims the underpaying
+        // output, and sends that claim until it is in a block.
+        if self.record.machine.stage() == Stage::Failed(Failure::Lost)
+            && !self.record.claims.is_empty()
+        {
+            self.keep_underpaid(index, chain, tip, now, start_rate, env, notes);
+        }
         // 2. The claim, when its time has come.
         if let (Stage::Locked(l), false, false) = (stage, spent, other_claimed) {
             let accept = l.confirmed || (env.decide)(index, sats, &status);
@@ -1818,22 +1887,8 @@ impl Follow {
                     // lost only when the lockup is spent by another.
                     if spent && !self.holds_underpaid() {
                         // The lockup is spent, and the claim spends nothing.
-                    } else if env.behind {
-                        // Wait for the blocks: the claim may be in one. It is
-                        // not built again, but sent again at each block: the
-                        // same transaction, which does no harm.
-                        if tip > self.record.claim_tip {
-                            self.resend_now(lockup, tip, now, notes);
-                        }
-                    } else if self.record.claim_in_block {
-                        // The claim was in a block and left it: sent again,
-                        // the same transaction.
-                        self.record.claim_in_block = false;
-                        self.dirty = true;
-                        self.resend_now(lockup, tip, now, notes);
-                    } else if tip > self.record.claim_tip {
-                        // CR-222: a block came and the claim is not in it.
-                        self.bump(lockup, tip, now, start_rate, notes);
+                    } else {
+                        self.send_again(lockup, env.behind, tip, now, start_rate, notes);
                     }
                 }
                 if !self.stuck_told
@@ -1856,7 +1911,10 @@ impl Follow {
                     });
                 }
                 // The sale is told of the claim only while the swap stands.
-                if !self.record.told && self.record.machine.stage() == Stage::ClaimSent {
+                if !self.record.told
+                    && self.record.machine.stage() == Stage::ClaimSent
+                    && !self.holds_underpaid()
+                {
                     updates.push(Update::Claimed {
                         index,
                         n,
@@ -1910,6 +1968,15 @@ impl Follow {
         let Some(txid) = seen else {
             return;
         };
+        // The claim of the underpaying lockup does not pay the sale: the loss
+        // stands, and the claim in a block ends only its sending.
+        if self.holds_underpaid() && self.claim_spends_held(&txid) {
+            if let Ok(lost) = self.record.machine.lost() {
+                self.record.machine = lost;
+                self.dirty = true;
+            }
+            return;
+        }
         let earlier = self.record.claims.clone();
         if let Ok(done) = self
             .record
@@ -2008,6 +2075,99 @@ impl Follow {
         }
     }
 
+    /// The claim `txid`, as far as the watch of the sale's address holds it,
+    /// spends the lockup the swap holds. A claim the watch does not hold is
+    /// taken for the last one built.
+    fn claim_spends_held(&self, txid: &Txid) -> bool {
+        let Some(l) = self.record.lockup else {
+            return false;
+        };
+        match self
+            .claim_watch
+            .transactions()
+            .find(|t| t.compute_txid() == *txid)
+        {
+            Some(tx) => tx.input.iter().any(|i| i.previous_output == l.outpoint),
+            None => self.record.claims.last() == Some(txid),
+        }
+    }
+
+    /// The swap was lost with its claim sent, and the lockup it holds is an
+    /// underpaying one: that claim is still sent (CR-222) until it, or
+    /// another spend of that lockup, is in a block.
+    fn underpaid_open(&self) -> bool {
+        self.record.machine.stage() == Stage::Failed(Failure::Lost)
+            && !self.record.claims.is_empty()
+            && self.holds_underpaid()
+    }
+
+    /// CR-222 for a lost swap: the claim of the underpaying output is looked
+    /// for if it was not built, and sent again or built again at a block that
+    /// does not hold it, as for a swap that stands. It stops once the claim,
+    /// or another spend of the lockup, is in a block of the chain.
+    #[allow(clippy::too_many_arguments)]
+    fn keep_underpaid<C: HeaderChain + ?Sized>(
+        &mut self,
+        index: u32,
+        chain: &C,
+        tip: u32,
+        now: u64,
+        start_rate: u64,
+        env: &mut StepEnv<'_>,
+        notes: &mut Vec<String>,
+    ) {
+        if !self.holds_underpaid() {
+            self.claim_underpaid(chain, tip, now, start_rate, notes);
+        }
+        let Some(lockup) = self.record.lockup.filter(|_| self.holds_underpaid()) else {
+            return;
+        };
+        let cst = self.claim_watch.status(chain, now);
+        let conf = cst
+            .min_confirmations
+            .max((env.claim_seen)(index, &self.record.claims));
+        if conf >= 1 {
+            if !self.record.claim_in_block {
+                self.record.claim_in_block = true;
+                self.dirty = true;
+            }
+            return;
+        }
+        if self
+            .held_spent_in
+            .is_some_and(|h| chain.height_of(&h).is_some())
+        {
+            return;
+        }
+        self.send_again(lockup, env.behind, tip, now, start_rate, notes);
+    }
+
+    /// The claim is not in a block (CR-222). While the chain is behind it is
+    /// not built again, but sent again at each block: the same transaction,
+    /// which does no harm. If it was in a block and left, it is sent again.
+    /// Else a block that does not hold it bumps it.
+    fn send_again(
+        &mut self,
+        lockup: LockupSeen,
+        behind: bool,
+        tip: u32,
+        now: u64,
+        start_rate: u64,
+        notes: &mut Vec<String>,
+    ) {
+        if behind {
+            if tip > self.record.claim_tip {
+                self.resend_now(lockup, tip, now, notes);
+            }
+        } else if self.record.claim_in_block {
+            self.record.claim_in_block = false;
+            self.dirty = true;
+            self.resend_now(lockup, tip, now, notes);
+        } else if tip > self.record.claim_tip {
+            self.bump(lockup, tip, now, start_rate, notes);
+        }
+    }
+
     /// The lockup the claim spends pays the script less than was promised:
     /// it is the one that displaced the lockup the swap held.
     fn holds_underpaid(&self) -> bool {
@@ -2035,14 +2195,43 @@ impl Follow {
             return;
         };
         let promised = self.record.machine.state().onchain_sats();
+        // The transactions of the watch that are in a block of the chain: the
+        // ones seen to displace the lockup in this run, and every standing one
+        // the watch holds, which a restart leaves in the watch only.
+        let mut ids: Vec<Txid> = self
+            .displaced_in
+            .iter()
+            .filter(|(_, hash)| chain.height_of(hash).is_some())
+            .map(|(by, _)| *by)
+            .collect();
+        let standing = self.watch.standing_depths(chain);
+        ids.extend(standing.iter().filter(|(_, d)| *d >= 1).map(|(t, _)| *t));
+        // The inputs of the held lockup, if the watch holds it: what a
+        // replacement spends.
+        let inputs: Option<Vec<OutPoint>> = self
+            .watch
+            .transactions()
+            .find(|t| t.compute_txid() == held.outpoint.txid)
+            .map(|t| t.input.iter().map(|i| i.previous_output).collect());
+        let held_in_block = standing
+            .iter()
+            .any(|(t, d)| *t == held.outpoint.txid && *d >= 1);
         let mut found = None;
-        for (by, hash) in &self.displaced_in {
-            if *by == held.outpoint.txid || chain.height_of(hash).is_none() {
+        for by in ids {
+            if by == held.outpoint.txid {
                 continue;
             }
-            let Some(tx) = self.watch.transactions().find(|t| t.compute_txid() == *by) else {
+            let Some(tx) = self.watch.transactions().find(|t| t.compute_txid() == by) else {
                 continue;
             };
+            let replaces = match &inputs {
+                Some(own) => tx.input.iter().any(|i| own.contains(&i.previous_output)),
+                // The held lockup is not in the watch: it is not in a block.
+                None => !held_in_block,
+            };
+            if !replaces {
+                continue;
+            }
             // Exactly one output pays the script (SW-30), in a block.
             if let Ok(seen) = check_lockup(tx, &self.lockup_script, 0, Seen::Block) {
                 if seen.value_sats < promised {

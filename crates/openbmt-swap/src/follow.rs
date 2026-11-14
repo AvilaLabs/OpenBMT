@@ -378,12 +378,14 @@ impl ReverseSwap {
         fee_rate_per_kvb: u64,
         ctx: &Ctx,
     ) -> Result<(Self, Transaction), Refused> {
-        if self.stage != Stage::ClaimSent {
+        // A swap that was lost after its claim was sent may still send a
+        // claim of another lockup of its own (SW-44): the stage stays.
+        if !matches!(self.stage, Stage::ClaimSent | Stage::Failed(Failure::Lost)) {
             return Err(Refused::NotReady("no claim is waiting"));
         }
         let tx = rebuild_claim(&self.state, lockup, fee_rate_per_kvb, ctx.tip_height)?;
         let state = self.state.reclaimed(tx.compute_txid())?;
-        Ok((self.with_state(state, Stage::ClaimSent), tx))
+        Ok((self.with_state(state, self.stage), tx))
     }
 
     /// SW-44: the lockup was spent by a transaction that is not the shop's

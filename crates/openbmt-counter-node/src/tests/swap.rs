@@ -2252,3 +2252,145 @@ fn cr_221_an_underpaying_output_that_would_be_dust_after_the_fee_is_not_claimed(
         w.rig.node.notes().collect::<Vec<_>>()
     );
 }
+
+/// The lockup replaced by one that pays the script `less` satoshis less.
+fn underpaying_by(lockup: &Transaction, less: u64) -> Transaction {
+    let mut tx = lockup.clone();
+    let paid = tx.output[0].value.to_sat();
+    tx.output[0].value = bitcoin::Amount::from_sat(paid - less);
+    tx
+}
+
+/// Blocks until the swap is lost, at most `most`.
+fn until_lost(w: &mut World, dir: &Scratch, index: u32, most: u32) {
+    for _ in 0..most {
+        if stage_of(dir, index) == Stage::Failed(Failure::Lost) {
+            return;
+        }
+        w.block(&[]);
+    }
+    assert_eq!(stage_of(dir, index), Stage::Failed(Failure::Lost));
+}
+
+#[test]
+fn cr_221_a_reorg_of_the_displacing_block_with_the_underpaying_lockup_mined_again_keeps_the_loss() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, lockup, claim) = instant_sale(&mut w);
+    let displacing = underpaying_by(&lockup, 1_000);
+    let reports = w.block(std::slice::from_ref(&displacing));
+    assert!(reports.contains(&Report::Alarm { index }), "{reports:?}");
+    assert_eq!(w.rig.node.counter().sale(index).unwrap().taken_back(), 1);
+    // The block leaves the chain and the same lockup is mined again in
+    // another: the loss is not undone.
+    let leaving = w.blocks.at(1).block_hash();
+    let base = w.blocks.at(1).header.prev_blockhash;
+    let (reports, _) = branch_on(
+        &mut w,
+        base,
+        1,
+        std::slice::from_ref(&displacing),
+        3,
+        vec![leaving],
+    );
+    assert!(!reports.contains(&Report::PosPaid { index }), "{reports:?}");
+    assert_eq!(w.rig.node.counter().sale(index).unwrap().taken_back(), 1);
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::DoNotHandOver);
+    assert!(record_of(&dir, index).spent_in.is_some());
+    // The claim of the first lockup in a block does not pay the sale either:
+    // the coins it spends are gone.
+    for _ in 0..8 {
+        let reports = w.block(&[]);
+        assert!(!reports.contains(&Report::PosPaid { index }), "{reports:?}");
+        assert_eq!(w.rig.node.judge(index).unwrap().state, State::DoNotHandOver);
+    }
+    assert_eq!(stage_of(&dir, index), Stage::Failed(Failure::Lost));
+    let _ = claim;
+}
+
+#[test]
+fn cr_222_the_claim_of_an_underpaying_lockup_is_sent_after_the_loss_is_final_until_it_is_in_a_block(
+) {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, lockup, _) = instant_sale(&mut w);
+    let displacing = underpaying_by(&lockup, 1_000);
+    w.block(std::slice::from_ref(&displacing));
+    until_lost(&mut w, &dir, index, 12);
+    let claims = record_of(&dir, index).claims;
+    assert_eq!(claims.len(), 2);
+    // Sent again at each block, and built again when the estimate rises.
+    let before = w.sent().len();
+    w.block(&[]);
+    assert_eq!(w.sent().len(), before + 1, "sent again");
+    assert_eq!(w.sent().last().unwrap().compute_txid(), claims[1]);
+    for n in 1..=3 {
+        w.block_paying(n, 10);
+    }
+    let record = record_of(&dir, index);
+    assert_eq!(record.machine.stage(), Stage::Failed(Failure::Lost));
+    assert!(record.claims.len() > 2, "built again at a higher fee");
+    let last = w.sent().last().unwrap().clone();
+    assert_eq!(last.compute_txid(), *record.claims.last().unwrap());
+    assert!(spends_outpoint(&last, displacing.compute_txid()));
+    // It is mined: nothing is sent after that, and the sale stays taken back.
+    w.block(std::slice::from_ref(&last));
+    let after = w.sent().len();
+    for _ in 0..4 {
+        w.block(&[]);
+    }
+    assert_eq!(w.sent().len(), after);
+    assert_eq!(
+        record_of(&dir, index).machine.stage(),
+        Stage::Failed(Failure::Lost)
+    );
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::DoNotHandOver);
+}
+
+#[test]
+fn cr_222_a_restart_after_the_loss_is_final_sends_the_underpaying_claim_again_until_it_is_in_a_block(
+) {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, lockup, _) = instant_sale(&mut w);
+    let displacing = underpaying_by(&lockup, 1_000);
+    w.block(std::slice::from_ref(&displacing));
+    until_lost(&mut w, &dir, index, 12);
+    let claim = w.sent().last().unwrap().clone();
+    let World { rig, pretend, .. } = w;
+    drop(rig);
+    let mut w = world(&dir);
+    w.pretend = pretend;
+    w.block(&[]);
+    assert_eq!(
+        w.sent().last().unwrap().compute_txid(),
+        claim.compute_txid(),
+        "sent again after the start"
+    );
+    w.block(std::slice::from_ref(&claim));
+    let after = w.sent().len();
+    for _ in 0..3 {
+        w.block(&[]);
+    }
+    assert_eq!(w.sent().len(), after);
+    assert_eq!(stage_of(&dir, index), Stage::Failed(Failure::Lost));
+}
+
+#[test]
+fn cr_221_after_a_restart_an_underpaying_lockup_in_a_block_is_claimed() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, lockup, _) = instant_sale(&mut w);
+    let World { rig, pretend, .. } = w;
+    drop(rig);
+    let mut w = world(&dir);
+    w.pretend = pretend;
+    // The coins are replaced in a block after the start: the run has seen
+    // neither lockup before, and the watch holds the new one.
+    let displacing = underpaying_by(&lockup, 1_000);
+    let reports = w.block(std::slice::from_ref(&displacing));
+    assert!(reports.contains(&Report::Alarm { index }), "{reports:?}");
+    let new = w.sent().last().unwrap().clone();
+    assert!(spends_outpoint(&new, displacing.compute_txid()));
+    assert_eq!(record_of(&dir, index).claims.len(), 2);
+}
