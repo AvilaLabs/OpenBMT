@@ -31,7 +31,7 @@ private fun Controller.stateOrNull(): ShopLightningState? = try {
 }
 
 /** The node and its Shop Lightning state, or the first screen again, or the words of why not. */
-private inline fun Controller.withState(back: () -> Unit, block: (OwnerNode, ShopLightningState) -> Unit) {
+private fun Controller.withState(back: () -> Unit, block: (OwnerNode, ShopLightningState) -> Unit) {
     val n = node
     if (n == null) {
         begin()
