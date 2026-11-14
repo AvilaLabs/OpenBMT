@@ -128,6 +128,13 @@ impl RequestBook {
             .map(|at| &self.requests[at])
     }
 
+    /// How many more payments a request can take: the most a request holds
+    /// less those it holds. `None` for a number that is not in the book.
+    pub fn credit_room(&self, number: u64) -> Option<usize> {
+        self.request(number)
+            .map(|r| MAX_CREDITS.saturating_sub(r.credits.len()))
+    }
+
     pub(crate) fn request_mut(&mut self, number: u64) -> Option<&mut Request> {
         let at = self
             .requests

@@ -853,3 +853,37 @@ fn rq_30_the_arrivals_file_reads_strictly_and_encodes_to_the_same_bytes() {
         let _ = crate::requests::decode_arrivals(&bytes[..n]);
     }
 }
+
+#[test]
+fn rq_15_a_request_takes_the_most_payments_it_holds_and_the_rest_wait() {
+    let dir = Dir::new();
+    let (mut rig, _book, _setup) = desk_rig(&dir, 1);
+    rig.node
+        .make_request(&deposit(10_000_000), 0, START)
+        .unwrap();
+    let outputs = vec![(own_receive(0), 600u64); 1_001];
+    let refs: Vec<(&ScriptBuf, u64)> = outputs.iter().map(|(s, v)| (s, *v)).collect();
+    let tx = tx_from(OutPoint::new(Txid::from_byte_array([7; 32]), 0), &refs);
+    rig.mine(&[tx]);
+    let credits = |rig: &Rig| {
+        rig.node
+            .requests()
+            .unwrap()
+            .request(1)
+            .unwrap()
+            .credits
+            .len()
+    };
+    assert_eq!(credits(&rig), 1_000);
+    assert_eq!(rig.node.request_arrivals().len(), 1);
+    // Another pass changes nothing: the one waits, nothing is lost.
+    rig.mine_empty(1);
+    assert_eq!(credits(&rig), 1_000);
+    assert_eq!(rig.node.request_arrivals().len(), 1);
+    assert!(rig
+        .node
+        .watcher_mut()
+        .take_notes()
+        .iter()
+        .any(|n| n.contains("holds the most payments")));
+}

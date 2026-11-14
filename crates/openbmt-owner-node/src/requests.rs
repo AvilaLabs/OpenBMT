@@ -1010,13 +1010,52 @@ impl<P: OwnerPort> OwnerNode<P> {
         let shop = context.shop();
         let mut next = loaded.clone();
         let mut waiting: Vec<PendingArrival> = rest;
+        let mut full: Vec<String> = Vec::new();
         waiting.extend(orphans);
         for (number, arrivals) in &by_request {
+            // RQ-15: a request holds a limited number of payments; the book
+            // refuses the whole call past it, so only as many as there is
+            // room for go in, in their order, and the rest wait.
+            let mut room = next.book.credit_room(*number).unwrap_or(0);
+            let held: &[openbmt_requests::Credit] = next
+                .book
+                .request(*number)
+                .map_or(&[], |r| r.credits.as_slice());
+            let mut now_credit: Vec<Arrival> = Vec::with_capacity(arrivals.len());
+            let mut over: Vec<Arrival> = Vec::new();
+            for a in arrivals {
+                let counts =
+                    a.sats > 0 && !held.iter().any(|c| c.txid == a.txid && c.vout == a.vout);
+                if counts && room == 0 {
+                    over.push(*a);
+                    continue;
+                }
+                if counts {
+                    room -= 1;
+                }
+                now_credit.push(*a);
+            }
             match next
                 .book
-                .credit(*number, arrivals, now, &shop, rate.as_ref())
+                .credit(*number, &now_credit, now, &shop, rate.as_ref())
             {
-                Ok(_) => {}
+                Ok(_) => {
+                    // What did not fit stays pending for the request.
+                    waiting.extend(
+                        due.iter()
+                            .filter(|p| {
+                                by_index.get(&p.index) == Some(number)
+                                    && over.iter().any(|a| a.txid == p.txid && a.vout == p.vout)
+                            })
+                            .copied(),
+                    );
+                    if !over.is_empty() {
+                        full.push(format!(
+                            "request No. {number} holds the most payments; {} more wait",
+                            over.len()
+                        ));
+                    }
+                }
                 Err(CreditRefused::NoRate | CreditRefused::TooManyPayments) => {
                     // Kept, to be tried again with a rate; the arrival is not
                     // lost.
@@ -1031,6 +1070,12 @@ impl<P: OwnerPort> OwnerNode<P> {
         }
         waiting.sort_by_key(PendingArrival::key);
         next.pending = waiting;
+        for line in full {
+            self.note(line);
+        }
+        let Ok(loaded) = &self.requests.state else {
+            return;
+        };
         if next == *loaded {
             return;
         }
