@@ -3,7 +3,7 @@
 //! claim and the transport (CR-218 to CR-220, CR-222, CR-223, CR-225) belong
 //! to the settings, the node and the app, and are tested there.
 
-use openbmt_core::policy::CheckMode;
+use openbmt_core::policy::{CheckMode, PauseStatus};
 use openbmt_watch::{SaleStatus, SaleWatch};
 
 use super::kit::*;
@@ -1125,4 +1125,110 @@ fn sl_40_a_swap_payment_that_replaces_a_wait_clears_it_and_a_funding_loss_leaves
     assert!(crate::Sale::from_bytes(&bytes).is_ok());
     w.restart();
     assert!(w.c.sale(big.index).unwrap().paid_via_swap());
+}
+
+#[test]
+fn cr_20_a_claim_still_in_a_block_at_a_lower_depth_is_no_loss_for_a_sale_a_manager_accepted() {
+    let mut w = World::new();
+    let mut s = settings();
+    s.min_confirmations = 3;
+    w.c.set_settings(s);
+    let big = w.open(2_000);
+    w.swap_paid(&big, None).unwrap().unwrap();
+    w.override_sale(big.index, Role::Manager, "max").unwrap();
+    let (depth, _) = w.c.swap_depths();
+    assert_eq!(depth, 3);
+    let mut reports = w.claim_depth(&big, depth);
+    assert_eq!(w.judge(big.index).state, State::Confirmed);
+    // The claim is still in a block, at a lower depth than the shop's.
+    reports.extend(w.claim_depth(&big, 1));
+    for _ in 0..10 {
+        let screen = w.judge(big.index);
+        assert_eq!(screen.state, State::Overridden, "{screen:?}");
+        reports.extend(screen.reports);
+    }
+    assert_eq!(alarms(&reports), 0, "{reports:?}");
+    assert_eq!(replaced(&w), 0);
+    assert!(!w.c.alarm());
+    assert_eq!(w.c.pause_status(w.now), PauseStatus::Running);
+    assert_eq!(w.c.sale(big.index).unwrap().taken_back(), 0);
+}
+
+#[test]
+fn cr_20_after_a_start_a_sale_taken_back_for_a_claim_out_of_the_chain_waits_for_the_nodes_depth() {
+    let mut w = World::new();
+    let big = w.open(2_000);
+    w.swap_paid(&big, None).unwrap().unwrap();
+    w.override_sale(big.index, Role::Manager, "max").unwrap();
+    w.claim_depth(&big, 1);
+    assert_eq!(alarms(&w.claim_depth(&big, 0)), 1);
+    assert_eq!(w.c.sale(big.index).unwrap().taken_back(), 2);
+    // The counter starts again: no depth is told yet.
+    w.restart();
+    for _ in 0..2 {
+        let screen = w.judge(big.index);
+        assert_eq!(screen.state, State::DoNotHandOver, "{screen:?}");
+        assert!(screen.reports.is_empty(), "{:?}", screen.reports);
+    }
+    assert_eq!(replaced(&w), 1);
+    assert_eq!(w.c.sale(big.index).unwrap().taken_back(), 2);
+    // The node tells the claim is in a block: undone, the POS told paid, and
+    // the alarm stays.
+    let reports = w.claim_depth(&big, 1);
+    assert!(
+        reports.contains(&Report::PosPaid { index: big.index }),
+        "{reports:?}"
+    );
+    assert_eq!(alarms(&reports), 0);
+    assert_eq!(w.judge(big.index).state, State::Confirmed);
+    assert_eq!(replaced(&w), 1);
+    assert!(w.c.alarm());
+}
+
+#[test]
+fn cr_221_a_spend_told_before_the_payment_takes_the_sale_back_when_it_is_recorded() {
+    let mut w = World::new();
+    let o = w.open_five();
+    let st = w.lockup_status(3, 9);
+    assert!(w.spent(&o, true).is_empty());
+    // Taken at once on that footing, it is not: held, taken back, never
+    // shown paid, nothing counted.
+    let screen = w.swap_paid(&o, Some(&st)).unwrap().unwrap();
+    assert_eq!(screen.state, State::DoNotHandOver, "{screen:?}");
+    assert_eq!(alarms(&screen.reports), 0, "{:?}", screen.reports);
+    assert!(!screen.reports.contains(&Report::PosPaid { index: o.index }));
+    assert_eq!(w.c.exposure_outstanding(), 0);
+    assert!(!w.c.alarm());
+    assert_eq!(replaced(&w), 1);
+    assert!(!w
+        .m
+        .events()
+        .iter()
+        .any(|e| matches!(e, Event::PosPaid { .. } | Event::PaidAtOnce { .. })));
+    assert_eq!(w.c.sale(o.index).unwrap().taken_back(), 1);
+    // The spend leaves the chain: judged by its claim.
+    w.spent(&o, false);
+    assert!(!w.c.sale(o.index).unwrap().cancel_recorded());
+    assert_eq!(w.judge(o.index).state, State::Waiting);
+    let (depth, _) = w.c.swap_depths();
+    w.claim_depth(&o, depth);
+    assert_eq!(w.judge(o.index).state, State::Confirmed);
+}
+
+#[test]
+fn cr_20_a_spend_that_leaves_the_chain_and_a_claim_that_comes_back_is_one_alarm() {
+    let mut w = World::new();
+    let big = w.open(2_000);
+    w.swap_paid(&big, None).unwrap().unwrap();
+    w.override_sale(big.index, Role::Manager, "max").unwrap();
+    let mut reports = w.claim_depth(&big, 1);
+    reports.extend(w.spent(&big, true));
+    reports.extend(w.claim_depth(&big, 0));
+    // The reorg removes the spend and brings the claim back: the node tells
+    // the spend gone first and the depth after.
+    reports.extend(w.spent(&big, false));
+    reports.extend(w.claim_depth(&big, 1));
+    assert_eq!(alarms(&reports), 1, "{reports:?}");
+    assert_eq!(w.judge(big.index).state, State::Confirmed);
+    assert_eq!(replaced(&w), 1);
 }

@@ -123,8 +123,10 @@ const SALE_VERSION_SWAP: u8 = 6;
 /// The version byte of a sale paid over the shop's own Lightning node through
 /// channels whose fundings are not all confirmed yet (SL-40), or of a sale
 /// that waits for such fundings: the fields of version 6, then the wait
-/// (`u8`: 0 none, 1 the fundings are not confirmed, 2 one is lost), the flag
-/// of more fundings than listed, the count of fundings (`u8`, at most
+/// (`u8`: 0 none, 1 the fundings are not confirmed, 2 one is lost), the
+/// more byte (bit 0 more fundings than listed; bit 1 a person accepted the
+/// payment with a funding of it lost, which needs an override), the count of
+/// fundings (`u8`, at most
 /// [`MAX_FUNDINGS`]) and the fundings, 32 bytes each. Written for a sale
 /// that holds such a payment, whose fundings are listed until each is
 /// confirmed, and for a sale that waits for them, which holds no payment
@@ -310,6 +312,11 @@ pub struct Sale {
     pub(crate) funding_more: bool,
     /// What the sale waits for while it holds no payment (SL-40).
     pub(crate) funding_wait: FundingWait,
+    /// A person accepted the payment of this sale with a funding of it lost
+    /// (CR-20): the loss is not held against the sale. Written as bit 1 of
+    /// the more-fundings byte of version 7; held only by an overridden sale
+    /// that lists fundings or waits with one lost.
+    pub(crate) funding_lost_accepted: bool,
     /// Why a swap sale was taken back, if it can be undone (CR-221): 1 the
     /// lockup is spent in a block by another than the shop's claim, 2 the
     /// claim of a sale a person accepted left the chain, 3 a person accepted
@@ -374,6 +381,7 @@ impl Sale {
             funding: Vec::new(),
             funding_more: false,
             funding_wait: FundingWait::No,
+            funding_lost_accepted: false,
             request: None,
             note: None,
         }
@@ -850,7 +858,7 @@ impl Sale {
             }
             if funded {
                 out.push(self.funding_wait.to_byte());
-                out.push(u8::from(self.funding_more));
+                out.push(u8::from(self.funding_more) | (u8::from(self.funding_lost_accepted) << 1));
                 out.push(u8::try_from(self.funding.len()).unwrap_or(u8::MAX));
                 for txid in &self.funding {
                     out.extend_from_slice(txid);
@@ -1175,6 +1183,7 @@ impl Sale {
         let mut funding = Vec::new();
         let mut funding_more = false;
         let mut funding_wait = FundingWait::No;
+        let mut funding_lost_accepted = false;
         if funded {
             funding_wait = match r.u8()? {
                 0 => FundingWait::No,
@@ -1182,7 +1191,12 @@ impl Sale {
                 2 => FundingWait::Lost,
                 _ => return Err(bad("the wait for a funding is not known")),
             };
-            funding_more = r.flag()?;
+            let more_byte = r.u8()?;
+            funding_more = more_byte & 1 != 0;
+            funding_lost_accepted = more_byte & 2 != 0;
+            if more_byte > 3 {
+                return Err(bad("the more-fundings byte is not known"));
+            }
             let n = usize::from(r.u8()?);
             if n > MAX_FUNDINGS {
                 return Err(bad("a sale lists more fundings than it may"));
@@ -1199,6 +1213,12 @@ impl Sale {
             let rests = n > 0 || funding_more;
             if !rests || (lightning.is_some() != (funding_wait == FundingWait::No)) {
                 return Err(bad("version 7 is a payment on fundings or a wait for them"));
+            }
+            if funding_lost_accepted
+                && (overridden.is_none()
+                    || (lightning.is_none() && funding_wait != FundingWait::Lost))
+            {
+                return Err(bad("a funding lost is accepted by a person who did not"));
             }
         }
         r.finish()?;
@@ -1272,6 +1292,7 @@ impl Sale {
             funding,
             funding_more,
             funding_wait,
+            funding_lost_accepted,
             request,
             note,
         })

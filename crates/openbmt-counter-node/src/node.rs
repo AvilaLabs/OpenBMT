@@ -2680,9 +2680,13 @@ impl<P: DriverPort> Node<P> {
                         .swap_lockup_spent(index, spent, &facts, &mut self.store)
                     {
                         Ok(r) => reports.extend(r),
-                        Err(e) => self.note(format!(
-                            "sale {index}: the spent lockup was not recorded: {e:?}"
-                        )),
+                        Err(e) => {
+                            // Told again at the next step.
+                            self.swap.forget_spent_told(index);
+                            self.note(format!(
+                                "sale {index}: the spent lockup was not recorded: {e:?}"
+                            ));
+                        }
                     }
                 }
                 Update::Claims { index, ids } => self.counter.set_swap_claims(index, &ids),

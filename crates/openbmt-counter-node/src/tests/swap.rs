@@ -1706,6 +1706,28 @@ fn cr_220_a_cancel_that_was_not_stored_is_put_again_until_it_is() {
 }
 
 #[test]
+fn cr_220_a_spent_lockup_that_was_not_stored_is_told_again_until_it_is() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, lockup, _) = instant_sale(&mut w);
+    // The sale cannot be written: a directory is where its file is.
+    let sale_file = dir.path().join(format!("sale-{index}.bin"));
+    let saved = std::fs::read(&sale_file).unwrap();
+    std::fs::remove_file(&sale_file).unwrap();
+    std::fs::create_dir(&sale_file).unwrap();
+    // The spend is told and not stored: the sale is not taken back.
+    w.block(&[spending_lockup(&lockup)]);
+    assert_eq!(w.rig.node.counter().sale(index).unwrap().taken_back(), 0);
+    // The next pump tells it again, and it is stored.
+    std::fs::remove_dir(&sale_file).unwrap();
+    std::fs::write(&sale_file, saved).unwrap();
+    let reports = w.block(&[]);
+    assert!(reports.contains(&Report::Alarm { index }), "{reports:?}");
+    assert_eq!(w.rig.node.counter().sale(index).unwrap().taken_back(), 1);
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::DoNotHandOver);
+}
+
+#[test]
 fn cr_220_the_record_keeps_what_the_swap_was_told_and_reads_it_strictly() {
     let dir = Scratch::new();
     let mut w = world(&dir);

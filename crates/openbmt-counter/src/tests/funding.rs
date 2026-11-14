@@ -722,7 +722,8 @@ fn cr_71_a_cash_refund_is_refused_on_a_payment_whose_funding_is_lost() {
 }
 
 #[test]
-fn cr_20_an_override_of_a_sale_that_lost_its_funding_shows_it_paid_and_a_later_loss_is_a_cancel() {
+fn cr_20_an_override_of_a_sale_that_lost_its_funding_shows_it_paid_and_the_loss_is_not_held_against_it(
+) {
     let mut w = World::new();
     let o = w.open_five();
     w.funded(&o, 1, several(&[FUNDING, OTHER]))
@@ -745,25 +746,14 @@ fn cr_20_an_override_of_a_sale_that_lost_its_funding_shows_it_paid_and_a_later_l
         assert_eq!(screen.state, State::Overridden, "{screen:?}");
         assert!(screen.reports.is_empty(), "{:?}", screen.reports);
     }
-    // Another funding is lost: one cancel, and the screen is red.
-    let (_, reports) = w.lose(&OTHER);
-    assert_eq!(
-        reports
-            .iter()
-            .filter(|r| matches!(r, Report::Alarm { .. }))
-            .count(),
-        1,
-        "{reports:?}"
-    );
-    assert!(
-        reports.contains(&Report::PosUnpaid { index: o.index }),
-        "{reports:?}"
-    );
-    assert_eq!(w.judge(o.index).state, State::DoNotHandOver);
-    // And it stays red when asked again, and after a restart.
-    assert!(w.lose(&OTHER).1.is_empty());
+    // The person accepted it with a funding of it lost (CR-20): another one
+    // told lost is not held against it either, now or after a start.
+    let (named, reports) = w.lose(&OTHER);
+    assert_eq!(named, vec![o.index]);
+    assert!(reports.is_empty(), "{reports:?}");
+    assert_eq!(w.judge(o.index).state, State::Overridden);
     w.restart();
-    assert_eq!(w.judge(o.index).state, State::DoNotHandOver);
+    assert_eq!(w.judge(o.index).state, State::Overridden);
 }
 
 #[test]
@@ -865,4 +855,90 @@ fn cr_07_a_sale_that_waits_for_a_funding_is_not_cancelled_or_requoted() {
         matches!(err, crate::RequoteRefused::AlreadyEnough),
         "{err:?}"
     );
+}
+
+#[test]
+fn cr_20_a_manager_who_accepted_a_sale_with_its_funding_lost_does_not_have_it_cancelled_for_that() {
+    let mut w = World::new();
+    let o = w.open_five();
+    assert!(w.funded(&o, 1, lost(FUNDING)).unwrap().is_none());
+    w.override_sale(o.index, Role::Manager, "max").unwrap();
+    // The node records the payment through the lost funding and names it.
+    let screen = w.funded(&o, 1, lost(FUNDING)).unwrap().unwrap();
+    assert_eq!(screen.state, State::Overridden);
+    let (named, reports) = w.lose(&FUNDING);
+    assert_eq!(named, vec![o.index]);
+    assert!(reports.is_empty(), "{reports:?}");
+    assert!(!w.c.alarm());
+    assert_eq!(w.c.pause_status(w.now), PauseStatus::Running);
+    assert!(!w.m.events().iter().any(|e| matches!(
+        e,
+        crate::Event::PosUnpaid { .. } | crate::Event::Replaced { .. }
+    )));
+    assert_eq!(w.judge(o.index).state, State::Overridden);
+    // It survives a start, and the funding still bars cash against it.
+    w.restart();
+    assert!(w.lose(&FUNDING).1.is_empty());
+    assert_eq!(w.judge(o.index).state, State::Overridden);
+    let bytes = w.c.sale(o.index).unwrap().to_bytes();
+    assert_eq!(Sale::from_bytes(&bytes).unwrap().to_bytes(), bytes);
+    let err =
+        w.c.refund_in_cash(o.index, cashier_cash(100), w.now, &w.chain, &mut w.m)
+            .unwrap_err();
+    assert!(matches!(err, RefundRefused::NotSettled { .. }), "{err:?}");
+}
+
+#[test]
+fn cr_20_a_loss_told_again_after_a_manager_cleared_it_is_not_a_second_cancel() {
+    let mut w = World::new();
+    let o = w.open_five();
+    w.funded(&o, 1, unconfirmed(FUNDING)).unwrap().unwrap();
+    let (_, reports) = w.lose(&FUNDING);
+    assert!(reports.contains(&Report::Alarm { index: o.index }));
+    w.override_sale(o.index, Role::Manager, "max").unwrap();
+    // The write of the first telling is retried: told again.
+    for _ in 0..2 {
+        let (named, reports) = w.lose(&FUNDING);
+        assert_eq!(named, vec![o.index]);
+        assert!(reports.is_empty(), "{reports:?}");
+        assert_eq!(w.judge(o.index).state, State::Overridden);
+        w.restart();
+    }
+    assert_eq!(
+        w.m.events()
+            .iter()
+            .filter(|e| matches!(e, crate::Event::Replaced { .. }))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn cr_20_the_stored_mark_of_a_funding_lost_that_a_person_accepted_is_read_strictly() {
+    let mut w = World::new();
+    let o = w.open_five();
+    w.funded(&o, 1, lost(FUNDING)).unwrap();
+    let waiting = w.c.sale(o.index).unwrap().to_bytes();
+    w.override_sale(o.index, Role::Manager, "max").unwrap();
+    w.funded(&o, 1, lost(FUNDING)).unwrap().unwrap();
+    let accepted = w.c.sale(o.index).unwrap().to_bytes();
+    // One funding: the bytes are the wait, the more byte, 1, the funding.
+    let at = accepted.len() - 34;
+    let with = |bytes: &[u8], at: usize, byte: u8| {
+        let mut b = bytes.to_vec();
+        b[at] = byte;
+        Sale::from_bytes(&b)
+    };
+    assert_eq!(accepted[at], 2);
+    assert!(with(&accepted, at, 2).is_ok());
+    assert!(with(&accepted, at, 0).is_ok());
+    assert!(with(&accepted, at, 4).is_err());
+    // Without an override, the mark is refused: a wait for a lost funding...
+    assert!(with(&waiting, waiting.len() - 34, 2).is_err());
+    // ...and a payment taken at once.
+    let mut v = World::new();
+    let p = v.open_five();
+    v.funded(&p, 1, unconfirmed(FUNDING)).unwrap().unwrap();
+    let paid_bytes = v.c.sale(p.index).unwrap().to_bytes();
+    assert!(with(&paid_bytes, paid_bytes.len() - 34, 2).is_err());
 }

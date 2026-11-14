@@ -1348,6 +1348,19 @@ impl SwapDriver {
         }
     }
 
+    /// The counter did not take what was told about the lockup of a sale's
+    /// swaps being spent: they forget that they told it, so the next step
+    /// tells it again.
+    pub fn forget_spent_told(&mut self, index: u32) {
+        if let Some(sale) = self.sales.get_mut(&index) {
+            for w in &mut sale.swaps {
+                if let Phase::Have(f) = &mut w.phase {
+                    f.spent_told = None;
+                }
+            }
+        }
+    }
+
     /// Go through every swap with what the chain and the provider have
     /// shown: the lockup is read from the watch, the claim built when its
     /// time has come, built again when it did not confirm, and what the node

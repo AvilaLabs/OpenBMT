@@ -359,6 +359,10 @@ pub struct Counter {
     /// told them (CR-221). Memory only: the node tells them again after a
     /// start, and until then a sale that was reported paid or final stays so.
     swap_claims: BTreeMap<u32, u32>,
+    /// The sales whose swap lockup the node last told is spent, whether the
+    /// sale was paid yet or not. Memory only: the node tells it again after
+    /// a start, before it tells the claim.
+    swap_lockup_spent: BTreeSet<u32>,
     /// CR-221: the ids of the claims the node built for a sale, as the node
     /// last told: the sale's own payments, which are not late ones.
     swap_claim_ids: BTreeMap<u32, Vec<Txid>>,
@@ -449,6 +453,7 @@ impl Counter {
             pause_unsaved: false,
             cancel_applied: BTreeSet::new(),
             swap_claims: BTreeMap::new(),
+            swap_lockup_spent: BTreeSet::new(),
             swap_claim_ids: BTreeMap::new(),
             refund_unsaved: BTreeSet::new(),
             records: RecordLog::new(),
@@ -1389,6 +1394,7 @@ impl Counter {
             self.refund_book.remove(&index);
             self.cancel_applied.remove(&index);
             self.swap_claims.remove(&index);
+            self.swap_lockup_spent.remove(&index);
             self.swap_claim_ids.remove(&index);
             self.refund_unsaved.remove(&index);
             count += 1;
@@ -2558,6 +2564,7 @@ impl Counter {
         sale.funding.clear();
         sale.funding_more = false;
         sale.funding_wait = FundingWait::No;
+        sale.funding_lost_accepted = false;
         let mut events = vec![Event::PaidByLightning {
             index,
             at: now,
@@ -2714,6 +2721,10 @@ impl Counter {
         // What the swap's own claims pay the address is the sale's payment,
         // not a surplus.
         let received = received.saturating_sub(self.claims_paid(&sale));
+        // The lockup is spent already: the payment is held but taken back at
+        // once, never shown paid, and no exposure is counted for it.
+        let spent = self.swap_lockup_spent.contains(&index);
+        let instant = if spent { None } else { instant };
         if instant.is_none() && !sale.exposure_counted {
             // An earlier try counted the exposure and then did not store the
             // sale: this one holds the payment without it, so none is left.
@@ -2759,6 +2770,7 @@ impl Counter {
         sale.funding.clear();
         sale.funding_more = false;
         sale.funding_wait = FundingWait::No;
+        sale.funding_lost_accepted = false;
         let mut events = vec![Event::PaidByLightning {
             index,
             at: now,
@@ -2779,6 +2791,11 @@ impl Counter {
                 index,
                 sats: received,
             });
+        }
+        if spent {
+            events.push(Event::Replaced { index, at: now });
+            sale.cancel_recorded = true;
+            sale.taken_back = 1;
         }
         self.swap_pending.remove(&index);
         if let Err(e) = self.finish(store, sale, &events) {
@@ -2912,6 +2929,15 @@ impl Counter {
         facts: &Facts<'_, C>,
         store: &mut S,
     ) -> Result<Vec<Report>, JudgeError<S::Error>> {
+        if !self.sales.contains_key(&index) {
+            return Ok(Vec::new());
+        }
+        // Kept for a sale not paid yet: its payment is taken back at once.
+        if spent {
+            self.swap_lockup_spent.insert(index);
+        } else {
+            self.swap_lockup_spent.remove(&index);
+        }
         let Some(base) = self.sales.get(&index) else {
             return Ok(Vec::new());
         };
@@ -2949,6 +2975,8 @@ impl Counter {
         sale.cancel_recorded = false;
         sale.taken_back = 0;
         self.finish(store, sale, &[]).map_err(JudgeError::Store)?;
+        // The depth told before the spend is stale: the node tells it again.
+        self.swap_claims.remove(&index);
         let own = OwnCheck::Mixed(OwnNodeHealth::not_configured());
         Ok(self.judge_checked(index, facts, &own, store)?.reports)
     }
@@ -3203,6 +3231,9 @@ impl Counter {
                 sale.funding = txids;
                 sale.funding_more = more;
                 sale.funding_wait = FundingWait::No;
+                if by_person && lost {
+                    sale.funding_lost_accepted = true;
+                }
             }
             PaidFunding::Confirmed => {
                 if sale.exposure_counted && !sale.exposure_released {
@@ -3213,6 +3244,7 @@ impl Counter {
                 sale.funding.clear();
                 sale.funding_more = false;
                 sale.funding_wait = FundingWait::No;
+                sale.funding_lost_accepted = false;
             }
         }
         let valued = match sale.rate_of(sale.quote_index_at(now)) {
@@ -3303,6 +3335,7 @@ impl Counter {
                 self.release_exposure(index, store)?;
             }
             sale.exposure_released = true;
+            sale.funding_lost_accepted = false;
             self.put_sale(store, sale)?;
             done.push(index);
         }
@@ -3351,8 +3384,12 @@ impl Counter {
                 }
                 continue;
             }
-            // A sale a person accepted is a cancel as one accepted at once.
-            if sale.cancel_recorded || (sale.accepted.is_none() && sale.overridden.is_none()) {
+            // A sale a person accepted is a cancel as one accepted at once,
+            // unless the person accepted it with this loss (CR-20).
+            if sale.cancel_recorded
+                || sale.funding_lost_accepted
+                || (sale.accepted.is_none() && sale.overridden.is_none())
+            {
                 continue;
             }
             if let Err(fault) = self.raise_cancel(index, now, store) {
@@ -3992,7 +4029,11 @@ impl Counter {
             .get(&sale.index)
             .copied()
             .unwrap_or_else(|| {
-                if sale.books_final {
+                if sale.taken_back == 2 {
+                    // Taken back for a claim out of the chain: it stays so
+                    // until the node tells a depth.
+                    0
+                } else if sale.books_final {
                     self.final_depth()
                 } else if sale.confirmed_logged && sale.pos == PosState::Paid {
                     self.depth()
@@ -4032,16 +4073,20 @@ impl Counter {
         let mut reports: Vec<Report> = Vec::new();
         // The claim back in a block undoes the taking back of a sale a
         // person accepted whose claim had left the chain.
-        if sale.taken_back == 2 && conf >= 1 {
+        let told = self.swap_claims.contains_key(&index);
+        if sale.taken_back == 2 && told && conf >= 1 {
             sale.cancel_recorded = false;
             sale.taken_back = 0;
         }
         let left_the_chain = (conf == 0 && sale.exposure_released)
             || (sale.confirmed_logged && (conf == 0 || sale.accepted.is_none()));
+        // A sale a person accepted loses its payment only when the claim is
+        // out of the chain: a claim still in a block, at any depth, is none.
+        let out_of_chain = told && conf == 0 && (sale.exposure_released || sale.confirmed_logged);
         let mut raised = false;
         if !sale.cancel_recorded
             && sale.overridden.is_some()
-            && left_the_chain
+            && out_of_chain
             && !(sale.books_final || conf >= depth)
         {
             // A claim that left the chain after a person accepted the sale is
@@ -4415,6 +4460,16 @@ impl Counter {
         });
         sale.exposure_counted = true;
         sale.exposure_released = false;
+        // A funding of the payment is lost and the person accepts it as it
+        // is: the loss is not held against the sale (CR-20).
+        if sale.funding_wait == FundingWait::Lost
+            || (sale.lightning.is_some()
+                && !sale.via_swap
+                && sale.cancel_recorded
+                && sale.rests_on_fundings())
+        {
+            sale.funding_lost_accepted = true;
+        }
         if sale.lightning.is_some() {
             // The override accepts the sale as it is: what had taken it back
             // is not held against it. A later loss is a cancel of its own.
