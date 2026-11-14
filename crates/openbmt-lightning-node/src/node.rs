@@ -109,7 +109,8 @@ const MAX_PENDING_UPDATES: u64 = 100;
 const PROVIDER_ANSWER: Duration = Duration::from_secs(15);
 /// How often the chain tip is polled.
 const POLL_EVERY: Duration = Duration::from_secs(1);
-/// A channel's funding transaction and its confirmations when last seen.
+/// A channel's funding transaction, its confirmations when last seen and the
+/// tip height they were read at.
 type LastFunding = ([u8; 32], u32, u32);
 /// How often the fundings watched for the counter are judged (SL-27).
 const FUNDING_CHECK_EVERY: Duration = Duration::from_secs(5);
@@ -389,9 +390,9 @@ struct Shared {
     lsps1: Mutex<Lsps1State>,
     funding_log: FundingLog,
     /// The funding, its confirmations and the tip height they were read at,
-    /// last seen for each channel, to name
-    /// the funding of a channel that closed before the claim (SL-27). Kept in
-    /// memory only; a channel not here is a funding not known.
+    /// last seen for each channel, to name the funding of a channel that
+    /// closed before the claim (SL-27). Kept in memory only; a channel not
+    /// here is a funding not known.
     last_fundings: Mutex<HashMap<[u8; 32], LastFunding>>,
     confirm_depth: u32,
     sweeper: Arc<Sweeper>,
