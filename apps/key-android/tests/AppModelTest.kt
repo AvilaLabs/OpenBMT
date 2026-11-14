@@ -4,6 +4,7 @@ import java.io.File
 import java.io.IOException
 import java.nio.file.Files
 import java.security.MessageDigest
+import org.openbmt.app.DurableFile
 import org.openbmt.app.Format
 import org.openbmt.app.KeyTextOutcome
 import org.openbmt.app.PickedUri
@@ -433,6 +434,30 @@ object AppModelTest {
         ok(AppWords.Text.ON_OWNER_PHONE == "On the owner phone, choose Scan the Key app.", "the line for the owner phone")
     }
 
+    private fun wholeAnswer(key2: Boolean): ByteArray {
+        val n = if (key2) 203 else 121
+        return ByteArray(n) { 7 }.also {
+            "OBMv".forEachIndexed { i, c -> it[i] = c.code.toByte() }
+            it[4] = 1; it[5] = 2; it[6] = if (key2) 1 else 0
+        }
+    }
+
+    private fun savedAnswerTests() {
+        val good = wholeAnswer(true)
+        ok(CeremonyModel.usableSavedAnswer { good }?.contentEquals(good) == true, "a good saved answer is offered")
+        ok(CeremonyModel.usableSavedAnswer { wholeAnswer(false) } != null, "a good saved answer without key 2 is offered")
+        ok(CeremonyModel.usableSavedAnswer { good.copyOf(100) } == null, "a cut saved answer is not offered")
+        ok(CeremonyModel.usableSavedAnswer { good.copyOf(good.size + 1) } == null, "a saved answer with extra bytes is not offered")
+        ok(CeremonyModel.usableSavedAnswer { ByteArray(0) } == null, "an empty saved answer is not offered")
+        ok(CeremonyModel.usableSavedAnswer { null } == null, "a missing saved answer is not offered")
+        ok(CeremonyModel.usableSavedAnswer { throw IOException("unreadable") } == null, "a saved answer that does not read is not offered")
+        val dir = tempDir()
+        val f = File(dir, "last-answer.bin")
+        DurableFile.write(dir, f, good)
+        ok(CeremonyModel.usableSavedAnswer { f.readBytes() }?.contentEquals(good) == true && !File(dir, "last-answer.bin.tmp").exists(), "a durable write reads back whole")
+        dir.deleteRecursively()
+    }
+
     private fun walletTests() {
         val view = WalletView(
             checksumWords = listOf("alpha", "bravo", "charlie", "delta"),
@@ -792,6 +817,7 @@ object AppModelTest {
         key3Tests()
         sr_64_key_3_by_a_key_code()
         answerTests()
+        savedAnswerTests()
         walletTests()
         refusalTests()
         screenPartsTests()

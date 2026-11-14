@@ -19,6 +19,7 @@ import java.io.IOException
 import org.openbmt.app.AnimatedQrMade
 import org.openbmt.app.AnimatedQrView
 import org.openbmt.app.Colour
+import org.openbmt.app.DurableFile
 import org.openbmt.app.Feedback
 import org.openbmt.app.HoldButton
 import org.openbmt.app.ExternalWait
@@ -1192,9 +1193,10 @@ class Controller(private val act: MainActivity) {
         views.add(ui.status(listOf(StatusItem(words.colour, words.heading, "${words.what}\n${words.next}"))))
         val items = ArrayList<RowItem>()
         items.add(RowItem("Scan a request code from the owner's phone") { scanRequest() })
-        if (answerFile.isFile) {
-            items.add(RowItem("Save the last answer again") { saveAnswer(answerFile.readBytes()) })
-            items.add(RowItem("Show the last answer as a code") { showAnswerCode(answerFile.readBytes()) { refresh() } })
+        val savedAnswer = CeremonyModel.usableSavedAnswer { if (answerFile.isFile) answerFile.readBytes() else null }
+        if (savedAnswer != null) {
+            items.add(RowItem("Save the last answer again") { saveAnswer(savedAnswer) })
+            items.add(RowItem("Show the last answer as a code") { showAnswerCode(savedAnswer) { refresh() } })
         }
         items.add(RowItem("Pair a counter") { showPairOffer() })
         items.add(RowItem("Pair a Box") { showPairBox(null) })
@@ -1642,7 +1644,7 @@ class Controller(private val act: MainActivity) {
             // The answer holds signatures only. A copy is kept so that a lost file
             // can be saved again: the state was stored before the answer was made.
             try {
-                answerFile.writeBytes(bytes)
+                DurableFile.write(act.noBackupFilesDir, answerFile, bytes)
             } catch (_: IOException) {
             }
             dropSession()

@@ -1,5 +1,6 @@
 package org.openbmt.key.app
 
+import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
@@ -68,6 +69,36 @@ object CeremonyModel {
 
     /** Whether [bytes] begin with the frame of the Key app's answer: only these are drawn as a code. */
     fun looksLikeAnswer(bytes: ByteArray): Boolean = hasFrame(bytes, ANSWER)
+
+    /**
+     * Whether [bytes] are a whole answer in the shape SR-68 fixes: the frame, a network byte 0 to 3, the
+     * key 2 flag 0 or 1, then the exact length (key 2's 82 bytes only with flag 1, key 3's 82, the root's 32).
+     * A copy cut by a crash is shorter and fails.
+     */
+    fun isWholeAnswer(bytes: ByteArray): Boolean {
+        if (!looksLikeAnswer(bytes) || bytes.size < 7) return false
+        if (bytes[5].toInt() !in 0..3) return false
+        val key2 = when (bytes[6].toInt()) {
+            0 -> 0
+            1 -> 82
+            else -> return false
+        }
+        return bytes.size == 7 + key2 + 82 + 32
+    }
+
+    /**
+     * The saved copy of the last answer, or null when it is missing, does not read, or is not a whole
+     * answer: then neither "Save the last answer again" nor "Show as code" is offered. [read] gives the
+     * file's bytes, null for no file, and may throw [IOException].
+     */
+    fun usableSavedAnswer(read: () -> ByteArray?): ByteArray? {
+        val bytes = try {
+            read()
+        } catch (_: IOException) {
+            null
+        } ?: return null
+        return if (isWholeAnswer(bytes)) bytes else null
+    }
 
     /** Whether [bytes] begin with the frame of the owner phone's wallet setup. */
     fun looksLikeSetup(bytes: ByteArray): Boolean = hasFrame(bytes, SETUP)
