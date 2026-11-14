@@ -110,7 +110,7 @@ const PROVIDER_ANSWER: Duration = Duration::from_secs(15);
 /// How often the chain tip is polled.
 const POLL_EVERY: Duration = Duration::from_secs(1);
 /// A channel's funding transaction and its confirmations when last seen.
-type LastFunding = ([u8; 32], u32);
+type LastFunding = ([u8; 32], u32, u32);
 /// How often the fundings watched for the counter are judged (SL-27).
 const FUNDING_CHECK_EVERY: Duration = Duration::from_secs(5);
 /// A chain poll older than this counts as the chain data being behind (SL-41).
@@ -388,7 +388,8 @@ struct Shared {
     orders: Orders,
     lsps1: Mutex<Lsps1State>,
     funding_log: FundingLog,
-    /// The funding and its confirmations last seen for each channel, to name
+    /// The funding, its confirmations and the tip height they were read at,
+    /// last seen for each channel, to name
     /// the funding of a channel that closed before the claim (SL-27). Kept in
     /// memory only; a channel not here is a funding not known.
     last_fundings: Mutex<HashMap<[u8; 32], LastFunding>>,
@@ -1569,8 +1570,8 @@ impl Shared {
     async fn check_fundings(&self) -> Result<(), lightning::io::Error> {
         let details = self.manager.list_channels();
         let channels: Vec<ChannelFunding> = details.iter().map(ChannelFunding::of).collect();
-        self.note_fundings(&channels);
         let height = self.manager.current_best_block().height;
+        self.note_fundings(&channels, height);
         for event in self
             .funding_log
             .check(&channels, height, self.confirm_depth)
@@ -1611,14 +1612,14 @@ impl Shared {
 
     /// Keeps the funding and confirmations of each channel listed, for the
     /// claim of a payment through a channel that has closed since (SL-27).
-    fn note_fundings(&self, channels: &[ChannelFunding]) {
+    fn note_fundings(&self, channels: &[ChannelFunding], height: u32) {
         /// More channels than a node has in its life: the rest are not kept.
         const MAX_KEPT: usize = 4096;
         let mut last = self.last_fundings.lock_recover();
         for c in channels {
             let Some(txid) = c.funding_txid else { continue };
             if last.len() < MAX_KEPT || last.contains_key(&c.channel_id) {
-                last.insert(c.channel_id, (txid, c.confirmations));
+                last.insert(c.channel_id, (txid, c.confirmations, height));
             }
         }
     }
@@ -2609,13 +2610,20 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
                 .iter()
                 .map(ChannelFunding::of)
                 .collect();
-            shared.note_fundings(&channels);
+            let height = shared.manager.current_best_block().height;
+            shared.note_fundings(&channels, height);
             let htlc_channels: Vec<[u8; 32]> = htlcs.iter().map(|h| h.channel_id.0).collect();
             let unconfirmed = funding::unconfirmed_fundings(
                 &htlc_channels,
                 &channels,
                 shared.confirm_depth,
-                |id| shared.last_fundings.lock_recover().get(id).copied(),
+                |id| {
+                    shared
+                        .last_fundings
+                        .lock_recover()
+                        .get(id)
+                        .map(|&(txid, confirmations, _)| (txid, confirmations))
+                },
             );
             let record = match shared
                 .paid_log
@@ -2647,9 +2655,13 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
             // None: the caller has acknowledged this sale already, and this is
             // the library's repeat of its event after a crash.
             if let Some(record) = record {
-                let height = shared.manager.current_best_block().height;
                 for txid in &record.unconfirmed_fundings {
-                    match shared.funding_log.watch(*txid, height).await {
+                    // A funding whose channel is gone but was last seen in a
+                    // block is watched with that block (SL-27).
+                    let seen = funding::last_seen_height(txid, &htlc_channels, &channels, |id| {
+                        shared.last_fundings.lock_recover().get(id).copied()
+                    });
+                    match shared.funding_log.watch_seen(*txid, height, seen).await {
                         // One settled already: the counter is told again, so
                         // that it always hears it (SL-27, SL-40).
                         Ok(Some(outcome)) => {

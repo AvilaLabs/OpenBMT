@@ -121,6 +121,46 @@ pub fn unconfirmed_fundings(
     out
 }
 
+/// The height of the block a funding is seen in now: from its listed
+/// channels when it has any, else the `kept` one.
+fn seen_height(
+    txid: &[u8; 32],
+    kept: Option<u32>,
+    channels: &[ChannelFunding],
+    height: u32,
+) -> Option<u32> {
+    let mut listed = channels
+        .iter()
+        .filter(|c| c.funding_txid.as_ref() == Some(txid))
+        .peekable();
+    if listed.peek().is_none() {
+        return kept;
+    }
+    listed
+        .filter_map(|c| block_height(height, c.confirmations))
+        .min()
+}
+
+/// The height of the block a funding was first seen in, for one named by
+/// [`unconfirmed_fundings`] whose channel (one of `htlc_channels`) is no
+/// longer in `channels`: from the confirmations `last_known` holds and the tip
+/// height they were read at. `None` when it was last seen with none, or not
+/// known (SL-27).
+pub fn last_seen_height(
+    txid: &[u8; 32],
+    htlc_channels: &[[u8; 32]],
+    channels: &[ChannelFunding],
+    last_known: impl Fn(&[u8; 32]) -> Option<([u8; 32], u32, u32)>,
+) -> Option<u32> {
+    htlc_channels
+        .iter()
+        .filter(|id| !channels.iter().any(|c| &c.channel_id == *id))
+        .filter_map(last_known)
+        .filter(|(t, _, _)| t == txid)
+        .filter_map(|(_, confirmations, read)| block_height(read, confirmations))
+        .min()
+}
+
 /// The channels listed whose funding the log holds as lost, either way: each
 /// is force closed at every pass until it is gone, so that a close that
 /// failed, or was not reached before a stop, is tried again (SL-27).
@@ -389,6 +429,18 @@ impl FundingLog {
     /// is returned, to be given to the counter again: the counter may have
     /// acknowledged the event before the payment that names it came.
     pub async fn watch(&self, txid: [u8; 32], height: u32) -> Result<Option<Outcome>, io::Error> {
+        self.watch_seen(txid, height, None).await
+    }
+
+    /// [`FundingLog::watch`] for a funding already known to have been in a
+    /// block: `seen` is the height of that block, kept as its first-seen
+    /// height when the funding is not kept yet (SL-27).
+    pub async fn watch_seen(
+        &self,
+        txid: [u8; 32],
+        height: u32,
+        seen: Option<u32>,
+    ) -> Result<Option<Outcome>, io::Error> {
         let _one = self.gate.lock().await;
         if let Some(kept) = self.read(&txid).await? {
             return Ok((kept.outcome != Outcome::Watching).then_some(kept.outcome));
@@ -397,7 +449,7 @@ impl FundingLog {
             &txid,
             &Kept {
                 claimed_height: height,
-                seen_height: None,
+                seen_height: seen,
                 outcome: Outcome::Watching,
                 acked_unix: None,
             },
@@ -457,25 +509,21 @@ impl FundingLog {
         let _one = self.gate.lock().await;
         let mut out = Vec::new();
         for (txid, kept) in self.watching_kept().await? {
-            // The first block the funding is seen in is kept, so that a
-            // channel that closes after it is not a funding that was lost.
-            let mut seen = kept.seen_height;
-            if seen.is_none() {
-                seen = channels
-                    .iter()
-                    .filter(|c| c.funding_txid.as_ref() == Some(&txid))
-                    .filter_map(|c| block_height(height, c.confirmations))
-                    .min();
-                if seen.is_some() {
-                    self.write(
-                        &txid,
-                        &Kept {
-                            seen_height: seen,
-                            ..kept
-                        },
-                    )
-                    .await?;
-                }
+            // The block the funding is seen in is kept, so that a channel
+            // that closes after it is not a funding that was lost. While a
+            // channel of the funding is listed it is worked out again at
+            // every pass, since a reorg can move the block or remove it; the
+            // kept height is used only when no channel of it is listed.
+            let seen = seen_height(&txid, kept.seen_height, channels, height);
+            if seen != kept.seen_height {
+                self.write(
+                    &txid,
+                    &Kept {
+                        seen_height: seen,
+                        ..kept
+                    },
+                )
+                .await?;
             }
             let outcome = judge(&txid, kept.claimed_height, seen, height, channels, depth);
             if self.settle(&txid, outcome).await? {
@@ -980,6 +1028,109 @@ mod tests {
         assert_eq!(block_height(110, 1), Some(110));
         assert_eq!(block_height(110, 3), Some(108));
         assert_eq!(block_height(110, 0), None);
+    }
+
+    async fn seen_of(log: &FundingLog, t: u8) -> Option<u32> {
+        log.read(&[t; 32]).await.unwrap().unwrap().seen_height
+    }
+
+    #[tokio::test]
+    async fn sl_27_a_listed_funding_that_drops_to_no_confirmation_clears_its_seen_height() {
+        let d = disks("funding-seen-cleared");
+        let (log, _bg) = start(&d);
+        log.watch([1; 32], 100).await.unwrap();
+        // Seen with one confirmation at 110; depth 3.
+        assert!(log
+            .check(&[chan(1, Some(1), 1)], 110, 3)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(seen_of(&log, 1).await, Some(110));
+        // A reorg removes the block: the channel is listed with none.
+        assert!(log
+            .check(&[chan(1, Some(1), 0)], 111, 3)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(seen_of(&log, 1).await, None);
+        // The funding is beaten and the channel closes: a loss, however
+        // deep the tip is.
+        let got = log.check(&[], 130, 3).await.unwrap();
+        assert_eq!(
+            got,
+            vec![FundingEvent {
+                txid: [1; 32],
+                outcome: Outcome::Lost(LostWhy::Closed)
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn sl_27_a_seen_height_moves_when_the_block_changes_in_a_reorg() {
+        let d = disks("funding-seen-moves");
+        let (log, _bg) = start(&d);
+        log.watch([1; 32], 100).await.unwrap();
+        log.check(&[chan(1, Some(1), 1)], 110, 4).await.unwrap();
+        assert_eq!(seen_of(&log, 1).await, Some(110));
+        // The funding is in another block, one higher.
+        log.check(&[chan(1, Some(1), 1)], 111, 4).await.unwrap();
+        assert_eq!(seen_of(&log, 1).await, Some(111));
+        // The same block at the same height is not written again.
+        log.check(&[chan(1, Some(1), 2)], 112, 4).await.unwrap();
+        assert_eq!(seen_of(&log, 1).await, Some(111));
+        // Not listed: the kept height stands.
+        log.check(&[], 113, 4).await.unwrap();
+        assert_eq!(seen_of(&log, 1).await, Some(111));
+    }
+
+    #[tokio::test]
+    async fn sl_27_a_channel_gone_at_the_claim_is_watched_by_where_it_was_last_seen() {
+        let d = disks("funding-seen-at-claim");
+        let (log, _bg) = start(&d);
+        let last = |id: &[u8; 32]| match id[0] {
+            // Last seen with one confirmation at the tip 110.
+            1 => Some(([1; 32], 1, 110)),
+            // Last seen with none.
+            2 => Some(([2; 32], 0, 110)),
+            _ => None,
+        };
+        let seen1 = last_seen_height(&[1; 32], &[[1; 32]], &[], last);
+        let seen2 = last_seen_height(&[2; 32], &[[2; 32]], &[], last);
+        assert_eq!(seen1, Some(110));
+        assert_eq!(seen2, None);
+        // A channel still listed gives no height here: the check does.
+        let listed = [chan(1, Some(1), 1)];
+        assert_eq!(last_seen_height(&[1; 32], &[[1; 32]], &listed, last), None);
+        log.watch_seen([1; 32], 115, seen1).await.unwrap();
+        log.watch_seen([2; 32], 115, seen2).await.unwrap();
+        // Depth 3: the funding seen at 110 is confirmed at 112; the other
+        // was in no block and is lost.
+        let got = log.check(&[], 115, 3).await.unwrap();
+        assert_eq!(
+            got,
+            vec![
+                FundingEvent {
+                    txid: [1; 32],
+                    outcome: Outcome::Confirmed
+                },
+                FundingEvent {
+                    txid: [2; 32],
+                    outcome: Outcome::Lost(LostWhy::Closed)
+                }
+            ]
+        );
+        // With the tip not yet deep enough, it is watched.
+        log.watch_seen([3; 32], 111, Some(110)).await.unwrap();
+        assert!(log.check(&[], 111, 3).await.unwrap().is_empty());
+        assert_eq!(log.state(&[3; 32]), FundingState::Watching);
+        let got = log.check(&[], 112, 3).await.unwrap();
+        assert_eq!(
+            got,
+            vec![FundingEvent {
+                txid: [3; 32],
+                outcome: Outcome::Confirmed
+            }]
+        );
     }
 
     #[test]
