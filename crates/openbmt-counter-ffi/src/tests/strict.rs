@@ -52,6 +52,7 @@ fn corpus(handle: u64) -> Vec<Vec<u8>> {
             &W::new()
                 .u64(T0)
                 .u32(1)
+                .string("USD")
                 .u64(RATE)
                 .string("test-fixed")
                 .u64(T0)

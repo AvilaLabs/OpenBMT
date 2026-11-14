@@ -2291,10 +2291,11 @@ class Controller(private val act: MainActivity) {
 
     private fun requote(index: Long, refused: (SayWords) -> Unit) {
         val n = node ?: return render()
+        val m = money ?: return render()
         val (rate, words) = quote()
         if (rate == null) return refused(words ?: AppWords.stopped)
         try {
-            val o = n.requote(nowSecs(), index, rate.rate, rate.sourceLabel, rate.sourceFetchedAt)
+            val o = n.requote(nowSecs(), index, m.code, rate.rate, rate.sourceLabel, rate.sourceFetchedAt)
             showSale(index, o.payment, null)
         } catch (e: CounterException) {
             refused(e.sayWords())
@@ -2591,7 +2592,7 @@ class Controller(private val act: MainActivity) {
                             msg.show(note(words ?: AppWords.stopped))
                             null
                         } else {
-                            minor?.let { RefundAsk.Value(it, rate.rate, rate.sourceLabel, rate.sourceFetchedAt) }
+                            minor?.let { RefundAsk.Value(it, m.code, rate.rate, rate.sourceLabel, rate.sourceFetchedAt) }
                         }
                     }
                     if (asked != null) {

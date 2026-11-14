@@ -187,6 +187,57 @@ pub(crate) fn rate_and_source(
     Ok((rate, source))
 }
 
+/// A currency the caller names, three capital letters.
+fn named_currency(text: &str) -> Result<Currency, CounterError> {
+    let code: [u8; 3] = text
+        .as_bytes()
+        .try_into()
+        .map_err(|_| refused_by("sale-currency", "a currency is three letters"))?;
+    Currency::new(code)
+        .ok_or_else(|| refused_by("sale-currency", "a currency is three capital letters"))
+}
+
+/// CR-196, CR-197: the rate to price sale `index` at again, for `requote`
+/// and for a refund by value. The currency named is the rate's, and must be
+/// the one the sale was opened in; a sale that is not in the currency of the
+/// settings in force any more (Bitcoin Standard on one side only) is not
+/// priced here, since the amount and the rate would not be of one currency.
+/// Bitcoin Standard has no price: the rate and the source of the call are
+/// not read, as for `open`.
+fn rate_for_sale(
+    node: &Node<Port>,
+    index: u32,
+    named: &str,
+    now: u64,
+    (rate, label, fetched_at): (u64, &str, u64),
+) -> Result<(Rate, RateSource), CounterError> {
+    let named = named_currency(named)?;
+    let shop = node.settings().currency;
+    if let Some(sale) = node.counter().sale(index) {
+        if named != sale.currency() {
+            return Err(refused_by(
+                "sale-currency",
+                format!("the sale is in {}, not {named}", sale.currency()),
+            ));
+        }
+        if shop.is_sats() != (Currency::new(*b"SAT") == Some(sale.currency())) {
+            return Err(refused_by(
+                "sale-currency",
+                format!(
+                    "the sale is in {}, and the shop prices in {}",
+                    sale.currency(),
+                    shop.code()
+                ),
+            ));
+        }
+    }
+    if shop.is_sats() {
+        Ok((Rate::sats(), RateSource::sats(now)))
+    } else {
+        rate_and_source(rate, label, fetched_at)
+    }
+}
+
 fn start_error(e: &StartError) -> CounterError {
     let (rule, kind) = match e {
         StartError::Locked(_) => ("NR-79", Kind::Refused),
@@ -723,13 +774,7 @@ impl Entry {
         note: Option<String>,
         request: Option<RequestDays>,
     ) -> Result<OpenedView, CounterError> {
-        let code: [u8; 3] = a
-            .currency
-            .as_bytes()
-            .try_into()
-            .map_err(|_| refused_by("sale-currency", "a currency is three letters"))?;
-        let currency = Currency::new(code)
-            .ok_or_else(|| refused_by("sale-currency", "a currency is three capital letters"))?;
+        let currency = named_currency(&a.currency)?;
         let by = a.actor.map(actor);
         self.run(Some(a.now), |node, _, network| {
             // CR-196: a sale is in the currency of the settings in force.
@@ -888,8 +933,14 @@ impl Entry {
     }
 
     pub(crate) fn requote(&self, a: RequoteArgs) -> Result<OpenedView, CounterError> {
-        let (rate, source) = rate_and_source(a.rate, &a.source_label, a.source_fetched_at)?;
         self.run(Some(a.now), |node, _, _| {
+            let (rate, source) = rate_for_sale(
+                node,
+                a.index,
+                &a.currency,
+                a.now,
+                (a.rate, &a.source_label, a.source_fetched_at),
+            )?;
             let quote = node
                 .requote(a.index, rate, &source)
                 .map_err(|e| from_rule(e.rule(), &e, e.words()))?;
@@ -957,23 +1008,30 @@ impl Entry {
     }
 
     pub(crate) fn request_refund(&self, a: RefundArgs) -> Result<u64, CounterError> {
-        let ask = match a.ask {
-            RefundAskView::Sats { sats } => RefundAsk::Sats(sats),
-            RefundAskView::Value {
-                minor,
-                rate,
-                source_label,
-                source_fetched_at,
-            } => {
-                let (rate, source) = rate_and_source(rate, &source_label, source_fetched_at)?;
-                RefundAsk::Value {
-                    minor,
-                    rate,
-                    source,
-                }
-            }
-        };
         self.run(Some(a.now), |node, _, network| {
+            let ask = match a.ask {
+                RefundAskView::Sats { sats } => RefundAsk::Sats(sats),
+                RefundAskView::Value {
+                    minor,
+                    currency,
+                    rate,
+                    source_label,
+                    source_fetched_at,
+                } => {
+                    let (rate, source) = rate_for_sale(
+                        node,
+                        a.index,
+                        &currency,
+                        a.now,
+                        (rate, &source_label, source_fetched_at),
+                    )?;
+                    RefundAsk::Value {
+                        minor,
+                        rate,
+                        source,
+                    }
+                }
+            };
             let destination = refund_destination(&a.destination, network)
                 .map_err(|e| from_rule(e.rule(), e.to_string(), e.words()))?;
             let request = RefundRequest {

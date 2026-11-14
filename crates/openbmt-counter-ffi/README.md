@@ -53,7 +53,7 @@ text in `text`.
 | 10 | pump | now, wait ms (cut to 250) | reports, notes, stopped |
 | 11 | open | now, amount, currency, rate, source | sale, payment code |
 | 12 | judge | now, index | screen, payment code |
-| 13 | requote | now, index, rate, source | screen |
+| 13 | requote | now, index, currency, rate, source | screen |
 | 14 | cancel | now, index | screen |
 | 15 | override | now, index, actor | screen |
 | 16 | request refund | now, index, ask, actor, reason | rows |

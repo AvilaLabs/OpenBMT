@@ -194,6 +194,7 @@ fn pump_open_judge_requote_and_cancel() {
         &W::new()
             .u64(T0 + 1)
             .u32(0)
+            .string("USD")
             .u64(RATE * 2)
             .string("test-fixed")
             .u64(T0 + 1)
@@ -215,17 +216,35 @@ fn pump_open_judge_requote_and_cancel() {
     assert_eq!(judge(&rig, handle, 0).needs, 2_500);
 
     // A bad rate and a bad label are refused before the node is asked.
-    let f = fault(&rig.call(
-        13,
-        handle,
-        &W::new().u64(T0).u32(0).u64(0).string("x").u64(T0).0,
-    ));
+    let f = fault(
+        &rig.call(
+            13,
+            handle,
+            &W::new()
+                .u64(T0)
+                .u32(0)
+                .string("USD")
+                .u64(0)
+                .string("x")
+                .u64(T0)
+                .0,
+        ),
+    );
     assert_eq!(f.rule, "sale-rate");
-    let f = fault(&rig.call(
-        13,
-        handle,
-        &W::new().u64(T0).u32(0).u64(RATE).string("").u64(T0).0,
-    ));
+    let f = fault(
+        &rig.call(
+            13,
+            handle,
+            &W::new()
+                .u64(T0)
+                .u32(0)
+                .string("USD")
+                .u64(RATE)
+                .string("")
+                .u64(T0)
+                .0,
+        ),
+    );
     assert_eq!(f.rule, "sale-source");
     let f = fault(&rig.call(
         11,
@@ -305,6 +324,7 @@ fn refunds_are_asked_listed_withdrawn_and_paid_in_cash() {
         .u32(0)
         .u8(1)
         .u64(100)
+        .string("USD")
         .u64(RATE)
         .string("test-fixed")
         .u64(T0)

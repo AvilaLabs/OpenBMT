@@ -308,6 +308,7 @@ fn cr_205_a_request_screen_has_its_code_and_a_requote_is_refused_with_words() {
             &W::new()
                 .u64(T0 + 1_000)
                 .u32(opened.index)
+                .string("USD")
                 .u64(RATE)
                 .string("test-fixed")
                 .u64(T0 + 1_000)

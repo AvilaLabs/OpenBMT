@@ -195,6 +195,7 @@ fn cr_191_cr_192_a_paid_tip_is_in_the_totals_and_in_the_refund_rows() {
         .u32(opened.index)
         .u8(1)
         .u64(550)
+        .string("USD")
         .u64(RATE)
         .string("test-fixed")
         .u64(T0)

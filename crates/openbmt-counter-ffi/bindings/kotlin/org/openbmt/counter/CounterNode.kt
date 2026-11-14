@@ -266,6 +266,7 @@ sealed class RefundAsk {
     class Sats(val sats: Long) : RefundAsk()
     class Value(
         val minor: Long,
+        val currency: String,
         val rate: Long,
         val sourceLabel: String,
         val sourceFetchedAt: Long,
@@ -858,7 +859,7 @@ private fun Writer.refundAsk(v: RefundAsk): Writer {
     when (v) {
         is RefundAsk.Sats -> u8(TAG_REFUND_ASK_VIEW_SATS).u64(v.sats)
         is RefundAsk.Value ->
-            u8(TAG_REFUND_ASK_VIEW_VALUE).u64(v.minor).u64(v.rate).string(v.sourceLabel)
+            u8(TAG_REFUND_ASK_VIEW_VALUE).u64(v.minor).string(v.currency).u64(v.rate).string(v.sourceLabel)
                 .u64(v.sourceFetchedAt)
     }
     return this
@@ -1675,11 +1676,11 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
         return r.screen().also { r.end() }
     }
 
-    /** Give a sale a new quote. */
-    fun requote(now: Long, index: Long, rate: Long, sourceLabel: String, sourceFetchedAt: Long): Opened {
+    /** Give a sale a new quote; [currency] is the sale's, the rate's own. */
+    fun requote(now: Long, index: Long, currency: String, rate: Long, sourceLabel: String, sourceFetchedAt: Long): Opened {
         val r =
             call(OP_REQUOTE, handle) {
-                it.u64(now).u32(index).u64(rate).string(sourceLabel).u64(sourceFetchedAt)
+                it.u64(now).u32(index).string(currency).u64(rate).string(sourceLabel).u64(sourceFetchedAt)
             }
         return r.opened().also { r.end() }
     }

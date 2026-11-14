@@ -1,6 +1,7 @@
 //! CR-196, CR-197 through `dispatch`: a sale is in the currency of the
 //! settings, and Bitcoin Standard asks no price.
 
+use bitcoin::{Address, Network};
 use openbmt_core::currency::ShopCurrency;
 use openbmt_core::settings::{Limit, SignedSettings};
 
@@ -119,4 +120,128 @@ fn cr_197_a_bitcoin_standard_sale_takes_no_price_and_no_source() {
     ))
     .expect("a refusal");
     assert_eq!(f.rule, "sale-currency");
+}
+
+/// The arguments of `requote` for sale 0.
+fn requote_args(now: u64, currency: &str, rate: u64, label: &str) -> Vec<u8> {
+    W::new()
+        .u64(now)
+        .u32(0)
+        .string(currency)
+        .u64(rate)
+        .string(label)
+        .u64(now)
+        .0
+}
+
+#[test]
+fn cr_196_a_requote_in_another_currency_than_the_sales_is_refused() {
+    let (rig, handle) = ready_in(ShopCurrency::Eur);
+    let sale = rig.call(
+        11,
+        handle,
+        &W::new().open(T0, 500, "EUR", RATE, "test-fixed").0,
+    );
+    let mut r = Rd::ok(&sale);
+    let opened = r.opened();
+    r.done();
+    assert_eq!(opened.needs_sats, 5_000);
+    // A rate of dollars, or of nothing, is not the sale's.
+    for named in ["USD", "SAT", "eur", "EU"] {
+        let f = Rd::error(&rig.call(
+            13,
+            handle,
+            &requote_args(T0 + 1, named, RATE * 2, "test-fixed"),
+        ))
+        .expect("a refusal");
+        assert_eq!(f.rule, "sale-currency", "{named}");
+    }
+    // The sale still needs what it did; the sale's own currency requotes.
+    let response = rig.call(
+        13,
+        handle,
+        &requote_args(T0 + 1, "EUR", RATE * 2, "test-fixed"),
+    );
+    let mut r = Rd::ok(&response);
+    let quote = r.opened();
+    r.done();
+    assert_eq!(quote.needs_sats, 2_500);
+}
+
+#[test]
+fn cr_196_a_refund_by_value_in_another_currency_than_the_sales_is_refused() {
+    let (rig, handle) = ready_in(ShopCurrency::Eur);
+    rig.call(
+        11,
+        handle,
+        &W::new().open(T0, 500, "EUR", RATE, "test-fixed").0,
+    );
+    let destination = Address::from_script(&p2wsh(0x77), Network::Regtest)
+        .expect("an address")
+        .to_string();
+    let ask = |currency: &str| {
+        W::new()
+            .u64(T0)
+            .u32(0)
+            .u8(1)
+            .u64(100)
+            .string(currency)
+            .u64(RATE)
+            .string("test-fixed")
+            .u64(T0)
+            .string(&destination)
+            .actor(true, "mia")
+            .string("changed mind")
+            .0
+    };
+    for named in ["USD", "SAT"] {
+        let f = Rd::error(&rig.call(16, handle, &ask(named))).expect("a refusal");
+        assert_eq!(f.rule, "sale-currency", "{named}");
+    }
+    // In the sale's currency the ask goes on to the refund rules, which
+    // refuse it for a sale that has not been paid, not for its currency.
+    let f = Rd::error(&rig.call(16, handle, &ask("EUR"))).expect("a refusal");
+    assert_ne!(f.rule, "sale-currency");
+}
+
+#[test]
+fn cr_197_a_requote_in_bitcoin_standard_takes_no_price_and_no_source() {
+    let (rig, handle) = ready_in(ShopCurrency::Sats);
+    let response = rig.call(11, handle, &W::new().open(T0, 7_500, "SAT", 0, "").0);
+    let mut r = Rd::ok(&response);
+    let opened = r.opened();
+    r.done();
+    assert_eq!(opened.needs_sats, 7_500);
+    // The app sends a rate of zero and a blank source, as for `open`.
+    let response = rig.call(13, handle, &requote_args(T0 + 1, "SAT", 0, ""));
+    let mut r = Rd::ok(&response);
+    let quote = r.opened();
+    r.done();
+    assert_eq!(quote.needs_sats, 7_500);
+    assert_eq!(quote.quote_rate, 100_000_000);
+    // A rate that is made up is not read either.
+    let response = rig.call(13, handle, &requote_args(T0 + 2, "SAT", RATE * 2, "x"));
+    let mut r = Rd::ok(&response);
+    assert_eq!(r.opened().quote_rate, 100_000_000);
+    r.done();
+    // The currency is still the sale's.
+    let f =
+        Rd::error(&rig.call(13, handle, &requote_args(T0 + 3, "USD", 0, ""))).expect("a refusal");
+    assert_eq!(f.rule, "sale-currency");
+}
+
+#[test]
+fn cr_05_a_requote_of_a_rate_of_zero_in_a_shop_with_a_price_is_still_refused() {
+    let (rig, handle) = ready_in(ShopCurrency::Eur);
+    rig.call(
+        11,
+        handle,
+        &W::new().open(T0, 500, "EUR", RATE, "test-fixed").0,
+    );
+    let f = Rd::error(&rig.call(13, handle, &requote_args(T0 + 1, "EUR", 0, "test-fixed")))
+        .expect("a refusal");
+    assert_eq!(f.rule, "sale-rate");
+    let f = Rd::error(&rig.call(13, handle, &requote_args(T0 + 1, "EUR", RATE, "")))
+        .expect("a refusal");
+    assert_eq!(f.rule, "sale-source");
 }

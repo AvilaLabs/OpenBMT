@@ -171,9 +171,9 @@ DayTotalsArgs: record: from: u64, to: u64, people: bool
 TallyView: record: count: u32, minor: u64, sats: u64
 PersonLineView: record: role: ActorRole, name: string, sales: u32, overrides: u32, refunds: u32, cash_refunds: u32, tips_minor: u64
 DayTotalsView: record: from: u64, to: u64, currency: option<string>, paid: TallyView, on_chain: TallyView, lightning: TallyView, waiting: TallyView, stopped: u32, ended: u32, overrides: TallyView, refunds: TallyView, refunds_withdrawn: u32, cash_refunds: TallyView, tips: TipTallyView, unnamed_sales: u32, people: list<PersonLineView>, people_left_out: u32
-RequoteArgs: record: now: u64, index: u32, rate: u64, source_label: string, source_fetched_at: u64
+RequoteArgs: record: now: u64, index: u32, currency: string, rate: u64, source_label: string, source_fetched_at: u64
 OverrideArgs: record: now: u64, index: u32, actor: ActorView
-RefundAskView: enum, a tag byte, then: Sats(sats: u64) | Value(minor: u64, rate: u64, source_label: string, source_fetched_at: u64)
+RefundAskView: enum, a tag byte, then: Sats(sats: u64) | Value(minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64)
     tags Sats=0 Value=1
 RefundArgs: record: now: u64, index: u32, ask: RefundAskView, destination: string, actor: ActorView, reason: string
 WithdrawArgs: record: now: u64, index: u32, number: u64, actor: ActorView

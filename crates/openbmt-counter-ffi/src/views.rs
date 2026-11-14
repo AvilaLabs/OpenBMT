@@ -723,6 +723,8 @@ pub struct RequoteArgs {
     pub now: u64,
     /// The sale.
     pub index: u32,
+    /// The currency of the rate, three capital letters: the sale's.
+    pub currency: String,
     /// The rate, minor units per bitcoin.
     pub rate: u64,
     /// Where the rate came from.
@@ -734,6 +736,7 @@ pub struct RequoteArgs {
 wire_record!(RequoteArgs {
     now,
     index,
+    currency,
     rate,
     source_label,
     source_fetched_at
@@ -741,6 +744,7 @@ wire_record!(RequoteArgs {
 wire_record_get!(RequoteArgs {
     now,
     index,
+    currency,
     rate,
     source_label,
     source_fetched_at
@@ -772,6 +776,8 @@ pub enum RefundAskView {
     Value {
         /// The amount in minor units.
         minor: u64,
+        /// The currency of the rate, three capital letters: the sale's.
+        currency: String,
         /// The rate, minor units per bitcoin.
         rate: u64,
         /// Where the rate came from.
@@ -796,12 +802,14 @@ impl Put for RefundAskView {
             }
             Self::Value {
                 minor,
+                currency,
                 rate,
                 source_label,
                 source_fetched_at,
             } => {
                 out.push(1);
                 minor.put(out);
+                currency.put(out);
                 rate.put(out);
                 source_label.put(out);
                 source_fetched_at.put(out);
@@ -816,6 +824,7 @@ impl Get for RefundAskView {
             0 => Ok(Self::Sats { sats: u64::get(r)? }),
             1 => Ok(Self::Value {
                 minor: u64::get(r)?,
+                currency: String::get(r)?,
                 rate: u64::get(r)?,
                 source_label: String::get(r)?,
                 source_fetched_at: u64::get(r)?,
@@ -829,8 +838,8 @@ impl Define for RefundAskView {
     fn define() -> TypeDef {
         TypeDef {
             name: "RefundAskView",
-            body: "enum, a tag byte, then: Sats(sats: u64) | Value(minor: u64, rate: u64, \
-                   source_label: string, source_fetched_at: u64)"
+            body: "enum, a tag byte, then: Sats(sats: u64) | Value(minor: u64, currency: string, \
+                   rate: u64, source_label: string, source_fetched_at: u64)"
                 .to_string(),
             tags: vec![("Sats", 0), ("Value", 1)],
         }
