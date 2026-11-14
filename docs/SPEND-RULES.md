@@ -209,7 +209,8 @@ out silently.
   unsigned transaction and its signatures. The unsigned transaction must
   equal the one sent (inputs, outputs, amounts, version, lock time); the
   rest of the file, which signers rewrite in their own ways, is not read.
-  Every signature goes through `combine` (SP-50 to SP-54), so each is
+  A file with bytes after its last map is refused, as the signer refuses
+  one. Every signature goes through `combine` (SP-50 to SP-54), so each is
   verified against its BIP 143 hash. The joined file must hold a signature
   of the signer's own key (the slot's key at the input's place) on every
   input, or the signer did not sign it.
