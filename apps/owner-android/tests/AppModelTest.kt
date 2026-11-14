@@ -4861,11 +4861,7 @@ object AppModelTest {
         val all = ShopLightningWords.all()
         ok(all.map { it.first }.toSet().size == all.size, "each Shop Lightning text is listed once")
         // The words for the cap's suggestion (SL-34) and the room's note (SL-35) are not written yet: each shows its own name.
-        val unwritten = mapOf(
-            "capSuggestionWhat" to "WORDS_NEEDED_SL34_SUGGESTION {sats}",
-            "capSuggestionFill" to "WORDS_NEEDED_SL34_FILL",
-            "roomNote" to "WORDS_NEEDED_SL35_ROOM_NOTE",
-        )
+        val unwritten = mapOf<String, String>()
         ok(all.all { (k, text) -> text.isNotBlank() && text.trim() == text && (!text.contains("WORDS_NEEDED") || unwritten[k] == text) }, "each Shop Lightning text is written, but the placeholders named here")
         ok(all.count { (_, text) -> text.contains("WORDS_NEEDED") } == unwritten.size, "no other Shop Lightning text is a placeholder")
         for ((k, w) in ShopLightningWords.messages()) ok(SayCheck.problem(w) == null && w.code?.startsWith("SL-") == true, "words of $k: ${SayCheck.problem(w)}")

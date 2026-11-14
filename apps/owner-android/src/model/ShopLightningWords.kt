@@ -54,9 +54,9 @@ object ShopLightningWords {
     const val queuedDone = "The change is queued and goes to the counters at their next check-in."
     // ---- the suggestion for the cap (SL-34) ----
     /** SL-34: what the suggestion is (one day's Lightning sales); `{sats}` is the amount, in satoshis, it is replaced by. */
-    const val capSuggestionWhat = "WORDS_NEEDED_SL34_SUGGESTION {sats}"
+    const val capSuggestionWhat = "Suggested: {sats} sats, the most taken over Lightning in one day this past week, kept within the instant limit."
     /** SL-34: the button that puts the suggestion in the cap field. */
-    const val capSuggestionFill = "WORDS_NEEDED_SL34_FILL"
+    const val capSuggestionFill = "Use the suggestion"
     const val buildRequest = "Make the request for the Key app"
     const val later = "Later"
     // ---- the page when it is on: the facts of the newest report and the settings (SL-41, SL-45, SL-78) ----
@@ -66,7 +66,7 @@ object ShopLightningWords {
     const val balanceLabel = "Balance and cap"
     const val roomLabel = "Room to receive"
     /** SL-35: that a sweep does not give back room and the channel shrinks. No number. */
-    const val roomNote = "WORDS_NEEDED_SL35_ROOM_NOTE"
+    const val roomNote = "A move to the wallet does not give this back: the channel stays smaller. Room comes back only when the provider adds a channel."
     const val providerLabel = "Provider"
     const val feesPaidLabel = "Opening fees paid"
     const val boxLabel = "Second copy on"
