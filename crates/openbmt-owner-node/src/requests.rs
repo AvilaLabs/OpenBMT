@@ -297,11 +297,21 @@ pub(crate) struct Loaded {
     pub(crate) pending: Vec<PendingArrival>,
 }
 
+/// A rate with the currency it is in (RQ-07): the node keeps one, and it
+/// is used only while that is the currency of the shop's context.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CurrencyRate {
+    /// The currency the rate is in.
+    pub currency: ShopCurrency,
+    /// The rate, with where it came from.
+    pub rate: CheckedRate,
+}
+
 /// What the node keeps of the requests.
 pub(crate) struct Requests {
     pub(crate) state: Result<Loaded, RequestsOff>,
     pub(crate) context: Option<RequestContext>,
-    pub(crate) rate: Option<CheckedRate>,
+    pub(crate) rate: Option<CurrencyRate>,
 }
 
 impl Requests {
@@ -422,11 +432,34 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// The app gives the shop's settings, its time zone and the newest rate
     /// it has checked, if any. Payments are not credited before the first
     /// call, because the due day and the lateness are the shop's (RQ-17).
-    pub fn set_request_context(&mut self, context: RequestContext, rate: Option<CheckedRate>) {
+    ///
+    /// RQ-07: a kept rate whose currency is not the context's is dropped,
+    /// whether or not a new rate comes with the call.
+    pub fn set_request_context(&mut self, context: RequestContext, rate: Option<CurrencyRate>) {
         self.requests.context = Some(context);
         if rate.is_some() {
             self.requests.rate = rate;
         }
+        if self
+            .requests
+            .rate
+            .as_ref()
+            .is_some_and(|kept| kept.currency != context.currency)
+        {
+            self.requests.rate = None;
+        }
+    }
+
+    /// RQ-07: the kept rate, when it is in the currency of the context now.
+    /// Every use of the rate (make, share, a return, crediting) goes through
+    /// this.
+    pub(crate) fn kept_rate(&self) -> Option<CheckedRate> {
+        let context = self.requests.context.as_ref()?;
+        self.requests
+            .rate
+            .as_ref()
+            .filter(|kept| kept.currency == context.currency)
+            .map(|kept| kept.rate.clone())
     }
 
     pub(crate) fn address_of(&self, script: &ScriptBuf) -> String {
@@ -539,7 +572,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         now: u64,
     ) -> Result<MadeRequest, RequestError> {
         let (_, context) = self.request_ready()?;
-        let rate = self.requests.rate.clone();
+        let rate = self.kept_rate();
         let number = self.edit(|book, _| {
             book.make(new, index, now, &context.shop(), rate.as_ref())
                 .map_err(RequestError::Make)
@@ -617,7 +650,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             .map(|s| self.address_of(&s))
             .filter(|a| !a.is_empty())
             .ok_or(RequestError::NoAddress)?;
-        let rate = self.requests.rate.clone();
+        let rate = self.kept_rate();
         let quote = self.edit(|book, _| {
             let quote = book
                 .share(number, now, rate.as_ref())
@@ -705,7 +738,7 @@ impl<P: OwnerPort> OwnerNode<P> {
     ) -> Result<ReturnAdded, RequestError> {
         self.request_ready()?;
         let (script, groups) = self.check_return(text)?;
-        let rate = self.requests.rate.clone();
+        let rate = self.kept_rate();
         let before = self.requests.state.clone();
         let (id, sats, index, received) = self.edit(|book, _| {
             let id = book
@@ -1025,7 +1058,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             }
         }
         let now = self.watcher.now();
-        let rate = self.requests.rate.clone();
+        let rate = self.kept_rate();
         let shop = context.shop();
         let mut next = loaded.clone();
         let mut waiting: Vec<PendingArrival> = rest;

@@ -25,7 +25,8 @@ use super::live::{pay_to_script, DAY, START};
 use super::own::{counter, own_receive, own_setup, single as own_wallet};
 use super::*;
 use crate::requests::{
-    return_label, PendingArrival, RequestContext, RequestError, RequestsOff, REQUEST_ARRIVALS_FILE,
+    return_label, CurrencyRate, PendingArrival, RequestContext, RequestError, RequestsOff,
+    REQUEST_ARRIVALS_FILE,
 };
 use crate::{former_coins_file, FormerParts, NotWatching, OwnNode, REQUEST_BOOK_FILE};
 use openbmt_core::pinned_wallet::PinnedWallet;
@@ -1000,4 +1001,67 @@ fn rq_12_a_request_whose_address_cannot_be_derived_is_not_quoted_and_its_book_is
         std::fs::read(dir.path().join(REQUEST_BOOK_FILE)).unwrap(),
         before
     );
+}
+
+/// A rate of `currency`, fetched at `START`.
+fn kept(currency: ShopCurrency) -> CurrencyRate {
+    CurrencyRate {
+        currency,
+        rate: openbmt_requests::CheckedRate {
+            rate: openbmt_counter::money::Rate::new(10_000_000).unwrap(),
+            source: openbmt_counter::money::RateSource::new("test", START).unwrap(),
+        },
+    }
+}
+
+fn in_currency(amount: u64) -> NewRequest {
+    NewRequest {
+        price_in: PriceIn::ShopCurrency,
+        ..deposit(amount)
+    }
+}
+
+#[test]
+fn rq_07_a_rate_kept_in_another_currency_is_not_used_after_the_context_changes() {
+    let dir = Dir::new();
+    let (mut rig, _book, _setup) = desk_rig(&dir, 1);
+    // A request in dollars, made at a rate of dollars.
+    rig.node
+        .set_request_context(context(1), Some(kept(ShopCurrency::Usd)));
+    rig.node
+        .make_request(&in_currency(5_000), 0, START)
+        .unwrap();
+    // The shop changes to euros and a euro rate is kept, then to dollars
+    // again with no rate given (the app could not fetch one).
+    let euros = RequestContext {
+        currency: ShopCurrency::Eur,
+        ..context(1)
+    };
+    rig.node
+        .set_request_context(euros, Some(kept(ShopCurrency::Eur)));
+    rig.node.set_request_context(context(1), None);
+    let before = std::fs::read(dir.path().join(REQUEST_BOOK_FILE)).unwrap();
+    // Neither a new request nor a share is priced at the rate of euros.
+    assert!(matches!(
+        rig.node.make_request(&in_currency(5_000), 1, START),
+        Err(RequestError::Make(_))
+    ));
+    assert!(rig.node.share_request(1, START, "shop").is_err());
+    assert_eq!(
+        std::fs::read(dir.path().join(REQUEST_BOOK_FILE)).unwrap(),
+        before,
+        "nothing was written"
+    );
+    // Crediting does not use it either: the payment waits.
+    rig.mine(&[payment(0, 7, 10_000)]);
+    rig.tick();
+    assert_eq!(status(&rig, 1), Status::Waiting);
+    assert_eq!(received(&rig, 1), 0);
+    // A rate of dollars then works for all three.
+    rig.node
+        .set_request_context(context(1), Some(kept(ShopCurrency::Usd)));
+    rig.tick();
+    assert_eq!(received(&rig, 1), 10_000);
+    assert!(rig.node.share_request(1, START, "shop").is_ok());
+    assert!(rig.node.make_request(&in_currency(5_000), 1, START).is_ok());
 }

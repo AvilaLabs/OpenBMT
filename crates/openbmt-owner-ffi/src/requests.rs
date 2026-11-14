@@ -15,7 +15,7 @@ use openbmt_books::format_minor;
 use openbmt_core::currency::ShopCurrency;
 use openbmt_counter::{Currency, Rate, RateSource};
 use openbmt_owner_node::{
-    MadeRequest, OwnerNode, OwnerPort, RequestContext, RequestError, RequestsOff,
+    CurrencyRate, MadeRequest, OwnerNode, OwnerPort, RequestContext, RequestError, RequestsOff,
 };
 use openbmt_requests::{
     day_of, say, CheckedRate, Day, DueRepeat, Every, NewRequest, PriceIn, Pricing, Request,
@@ -569,6 +569,11 @@ pub(crate) fn prepare<P: OwnerPort>(
         min_confirmations: settings.min_confirmations,
         tz_offset_secs: tz_secs(ask),
     };
+    // The rate was checked above to be in the currency of these settings.
+    let rate = rate.map(|rate| CurrencyRate {
+        currency: settings.currency,
+        rate,
+    });
     node.set_request_context(context, rate);
     Ok(())
 }
