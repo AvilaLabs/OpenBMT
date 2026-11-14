@@ -34,3 +34,9 @@ test data.
 PHP 8.2 or later: no WordPress and no web server. The test data in
 `tests_standalone/vectors/` is made by the Rust side; `OPENBMT_BLESS_WEB_ORDER=1`
 with the Rust tests writes it again.
+
+`tests_e2e/` holds the stubs and entries that `scripts/web-orders-e2e-core.sh`
+uses to play a store: the plugin's own REST callbacks are called with a few
+stand-ins for WordPress's options and requests. It is a test of this
+repository, not part of the plugin a store installs; `.distignore` lists it
+with `tests_standalone` as left out of a release.
