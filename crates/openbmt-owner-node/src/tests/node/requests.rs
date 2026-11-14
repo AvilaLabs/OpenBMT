@@ -973,3 +973,31 @@ fn rq_15_a_request_takes_the_most_payments_it_holds_and_the_rest_wait() {
         .iter()
         .any(|n| n.contains("holds the most payments")));
 }
+
+#[test]
+fn rq_12_a_request_whose_address_cannot_be_derived_is_not_quoted_and_its_book_is_unchanged() {
+    let dir = Dir::new();
+    let (mut rig, book, _setup) = old_wallet_rig(&dir);
+    rig.node.make_request(&deposit(100_000), 0, START).unwrap();
+    // The normal path: the quote is written and the link has the address.
+    let shared = rig.node.share_request(1, START, "shop").unwrap();
+    assert!(!shared.address.is_empty());
+    assert!(shared.link.contains(&shared.address));
+    let chain = rig.chain.clone();
+    rig.node.shutdown();
+    drop(rig);
+    // The same shop with the old wallet no longer followed.
+    let setup = Setup {
+        own: Some(book),
+        ..Setup::default()
+    };
+    let mut rig = start_at(&dir, &setup, chain).unwrap();
+    rig.node.set_request_context(context(1), None);
+    let before = std::fs::read(dir.path().join(REQUEST_BOOK_FILE)).unwrap();
+    let again = rig.node.share_request(1, START + 10, "shop");
+    assert!(matches!(again, Err(RequestError::NoAddress)));
+    assert_eq!(
+        std::fs::read(dir.path().join(REQUEST_BOOK_FILE)).unwrap(),
+        before
+    );
+}

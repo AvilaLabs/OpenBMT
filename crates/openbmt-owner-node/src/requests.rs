@@ -151,6 +151,9 @@ pub enum RequestError {
     Address(AddressRefused),
     /// RQ-29: the owner's queue did not take the return.
     Queue(String),
+    /// RQ-12: the request's address cannot be derived (its wallet is not
+    /// followed or the script has no address); nothing was written.
+    NoAddress,
     /// RQ-30: the book could not be stored; nothing changed.
     Store(BookError),
 }
@@ -170,6 +173,10 @@ impl fmt::Display for RequestError {
             Self::Return(e) => write!(f, "{e}"),
             Self::Address(e) => write!(f, "{e}"),
             Self::Queue(e) => write!(f, "RQ-29: the owner's queue did not take the return: {e}"),
+            Self::NoAddress => write!(
+                f,
+                "RQ-12: the request's address cannot be derived, so nothing was shared"
+            ),
             Self::Store(e) => write!(f, "{e}"),
         }
     }
@@ -191,6 +198,7 @@ impl RequestError {
             Self::Repeat(e) => say::repeat_refused(e),
             Self::Return(e) => say::return_refused(e),
             Self::Address(e) => say::address_refused(e),
+            Self::NoAddress => openbmt_core::say::Words::new(openbmt_core::say::Tone::Stop, "WORDS_NEEDED_RQ12_NO_ADDRESS", "WORDS_NEEDED_RQ12_NO_ADDRESS", openbmt_core::say::Who::Owner, "WORDS_NEEDED_RQ12_NO_ADDRESS"),
             Self::Queue(_) => openbmt_core::say::Words::new(openbmt_core::say::Tone::Stop, "Return not taken", "The return could not be stored in the queue of payments, so nothing will be paid.", openbmt_core::say::Who::Owner, "Try again. If it keeps failing, check the phone's free space."),
         }
     }
@@ -600,6 +608,15 @@ impl<P: OwnerPort> OwnerNode<P> {
         shop_name: &str,
     ) -> Result<Shared, RequestError> {
         self.request_ready()?;
+        // The address first: a request with none is not quoted.
+        let address = self
+            .requests()
+            .ok()
+            .and_then(|b| b.request(number))
+            .and_then(|r| self.request_script(r))
+            .map(|s| self.address_of(&s))
+            .filter(|a| !a.is_empty())
+            .ok_or(RequestError::NoAddress)?;
         let rate = self.requests.rate.clone();
         let quote = self.edit(|book, _| {
             let quote = book
@@ -607,12 +624,6 @@ impl<P: OwnerPort> OwnerNode<P> {
                 .map_err(RequestError::Share)?;
             Ok(quote)
         })?;
-        let address = self
-            .requests()
-            .ok()
-            .and_then(|b| b.request(number))
-            .and_then(|r| self.request_script(r))
-            .map_or_else(String::new, |s| self.address_of(&s));
         let link = share_link(&address, quote.sats, shop_name);
         Ok(Shared {
             quote,
