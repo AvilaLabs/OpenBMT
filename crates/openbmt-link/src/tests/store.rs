@@ -299,3 +299,37 @@ fn lk_42_the_leaving_list_reads_back_to_the_same_bytes() {
     longer.push(0);
     assert!(decode_leaving(&longer).is_none());
 }
+
+#[cfg(unix)]
+#[test]
+fn lk_41_the_directory_and_every_file_in_it_are_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |p: &std::path::Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    let dir = TempDir::new("private");
+    let inner = dir.0.join("relay/mail");
+    // A stale temporary of the list and of the log, left with a wider mode.
+    fs::create_dir_all(&inner).unwrap();
+    let list_tmp = inner.join("members.set.tmp");
+    fs::write(&list_tmp, b"stale").unwrap();
+    fs::set_permissions(&list_tmp, fs::Permissions::from_mode(0o644)).unwrap();
+    let mut rig = Rig::with_store(RelayConfig::default(), DirStore::new(&inner).unwrap());
+    rig.make(&counter());
+    for n in 1..=10u64 {
+        rig.put(msg(n));
+    }
+    rig.fetch(&counter(), 0);
+    let log = DirStore::new(&inner).unwrap().path(&counter().device_id());
+    let log_tmp = log.with_extension("mbx.tmp");
+    fs::write(&log_tmp, b"stale").unwrap();
+    fs::set_permissions(&log_tmp, fs::Permissions::from_mode(0o666)).unwrap();
+    // Over half acknowledged: the log is rewritten through the temporary.
+    rig.ack(&counter(), 8);
+    assert_eq!(mode(&log), 0o600);
+    assert_eq!(mode(&inner.join("members.set")), 0o600);
+    assert!(!list_tmp.exists() && !log_tmp.exists());
+    // A directory made fresh is 0700, parents included.
+    let fresh = dir.0.join("new/deeper");
+    DirStore::new(&fresh).unwrap();
+    assert_eq!(mode(&fresh), 0o700);
+    assert_eq!(mode(&dir.0.join("new")), 0o700);
+}

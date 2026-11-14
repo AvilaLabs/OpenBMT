@@ -216,3 +216,23 @@ fn nr_79_the_lock_file_is_made_empty_and_other_files_are_not_touched() {
     assert!(dir.0.join(LOCK_FILE).is_file());
     assert_eq!(fs::read(dir.0.join(LOCK_FILE)).unwrap(), Vec::<u8>::new());
 }
+
+#[cfg(unix)]
+#[test]
+fn nr_73_the_files_and_the_folder_are_private_even_over_a_wider_temporary() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |p: &std::path::Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    let dir = TempDir::new("private");
+    let mut storage = FileStorage::new(dir.0.join("nested/deeper")).unwrap();
+    assert_eq!(mode(storage.dir()), 0o700);
+    assert_eq!(mode(&dir.0.join("nested")), 0o700);
+    let tmp = storage.dir().join("headers.bin.tmp");
+    fs::write(&tmp, b"stale").unwrap();
+    fs::set_permissions(&tmp, fs::Permissions::from_mode(0o644)).unwrap();
+    storage.save(Key::Headers, b"one").unwrap();
+    assert_eq!(mode(&storage.path(Key::Headers)), 0o600);
+    let lock = DirLock::acquire(dir.0.join("other/lockdir")).unwrap();
+    assert_eq!(mode(&dir.0.join("other/lockdir")), 0o700);
+    assert_eq!(mode(&dir.0.join("other/lockdir").join(LOCK_FILE)), 0o600);
+    drop(lock);
+}

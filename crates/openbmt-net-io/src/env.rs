@@ -5,7 +5,7 @@
 //! platform passes its own, and so that the tests pass fakes.
 
 use std::fmt::{self, Display};
-use std::fs::{self, File, OpenOptions, TryLockError};
+use std::fs::{self, File, TryLockError};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -142,7 +142,7 @@ impl FileStorage {
     /// Keep files in this directory, which is created if it is missing.
     pub fn new(dir: impl Into<PathBuf>) -> io::Result<Self> {
         let dir = dir.into();
-        fs::create_dir_all(&dir)?;
+        crate::private::create_dir_all(&dir)?;
         Ok(Self { dir })
     }
 
@@ -170,7 +170,7 @@ impl FileStorage {
     /// The first half of a save: the new value in the temporary file, on
     /// disk. The old file is untouched.
     pub(crate) fn write_temp(&self, key: Key, bytes: &[u8]) -> io::Result<()> {
-        let mut file = File::create(self.temp_path(key))?;
+        let mut file = crate::private::create_file(&self.temp_path(key))?;
         file.write_all(bytes)?;
         file.sync_all()
     }
@@ -244,14 +244,8 @@ impl DirLock {
     pub fn acquire(dir: impl Into<PathBuf>) -> Result<Self, LockError> {
         let dir = dir.into();
         let io = |e: io::Error| LockError::Io(format!("{}: {e}", dir.display()));
-        fs::create_dir_all(&dir).map_err(io)?;
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(dir.join(LOCK_FILE))
-            .map_err(io)?;
+        crate::private::create_dir_all(&dir).map_err(io)?;
+        let file = crate::private::open_file(&dir.join(LOCK_FILE)).map_err(io)?;
         match file.try_lock() {
             Ok(()) => Ok(Self { dir, _file: file }),
             Err(TryLockError::WouldBlock) => Err(LockError::Busy(dir)),

@@ -399,7 +399,7 @@ impl DirStore {
     fn write_list(&self, name: &str, body: Vec<u8>) -> io::Result<()> {
         let path = self.dir.join(name);
         let temp = self.dir.join(format!("{name}.tmp"));
-        let mut file = File::create(&temp)?;
+        let mut file = openbmt_net_io::private::create_file(&temp)?;
         file.write_all(&body)?;
         file.sync_all()?;
         fs::rename(&temp, &path)?;
@@ -409,7 +409,7 @@ impl DirStore {
     /// Keep logs in this directory, which is created if it is missing.
     pub fn new(dir: impl Into<PathBuf>) -> io::Result<Self> {
         let dir = dir.into();
-        fs::create_dir_all(&dir)?;
+        openbmt_net_io::private::create_dir_all(&dir)?;
         Ok(Self {
             dir,
             sizes: HashMap::new(),
@@ -482,7 +482,7 @@ impl MailStore for DirStore {
     }
 
     fn create(&mut self, reader: &DeviceId) -> io::Result<()> {
-        File::create(self.path(reader))?.sync_all()?;
+        openbmt_net_io::private::create_file(&self.path(reader))?.sync_all()?;
         self.sync_dir()?;
         self.sizes.insert(*reader, 0);
         Ok(())
@@ -519,7 +519,7 @@ impl MailStore for DirStore {
         }
         let path = self.path(reader);
         let temp = path.with_extension("mbx.tmp");
-        let mut file = File::create(&temp)?;
+        let mut file = openbmt_net_io::private::create_file(&temp)?;
         file.write_all(&fresh)?;
         file.sync_all()?;
         fs::rename(&temp, &path)?;

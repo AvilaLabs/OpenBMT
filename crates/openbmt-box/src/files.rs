@@ -9,9 +9,9 @@
 //! writes.
 
 use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File};
 use std::io::{self, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 /// The operations the Box's state needs from its storage.
@@ -61,12 +61,7 @@ impl BoxFiles for DirFiles {
 
     fn write(&mut self, name: &str, bytes: &[u8]) -> io::Result<()> {
         let temp = self.dir.join(format!("{name}.tmp"));
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&temp)?;
+        let mut file = openbmt_link::private::create_file(&temp)?;
         file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);

@@ -1338,3 +1338,21 @@ mod own_wallet {
         BoxCore::open(files, &mut fixed_random)
     }
 }
+
+#[test]
+fn bx_50_a_write_over_a_wider_stale_temporary_still_makes_a_0600_file() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new("staletmp");
+    let tmp = dir.path().join("note.tmp");
+    std::fs::write(&tmp, b"left behind by an earlier run").unwrap();
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o666)).unwrap();
+    let mut files = DirFiles::new(dir.path());
+    files.write("note", b"new").unwrap();
+    assert!(!tmp.exists());
+    let mode = std::fs::metadata(dir.path().join("note"))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o600);
+    assert_eq!(files.read("note").unwrap().unwrap(), b"new");
+}

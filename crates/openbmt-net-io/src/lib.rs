@@ -57,6 +57,7 @@
 pub mod dial;
 pub mod driver;
 pub mod env;
+pub mod private;
 pub mod socks;
 
 #[cfg(test)]

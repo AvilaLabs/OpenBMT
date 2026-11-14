@@ -282,7 +282,7 @@ fn write_whole(dir: &Path, file: &'static str, bytes: &[u8]) -> Result<(), Store
         }
     };
     let temp = dir.join(format!("{file}.tmp"));
-    File::create(&temp)
+    openbmt_link::private::create_file(&temp)
         .and_then(|mut f| {
             f.write_all(bytes)?;
             f.sync_all()
