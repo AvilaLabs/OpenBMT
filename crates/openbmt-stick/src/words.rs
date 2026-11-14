@@ -171,7 +171,7 @@ pub const SK_54_NOT_MAINNET: &str = "It is for a test network, not real bitcoin.
 pub const SK_54_NO_PREVOUT: &str = "It does not say what one of its coins holds.";
 /// Refused: an input carries its previous output alone, without the whole previous transaction (SK-54).
 pub const SK_54_NO_PREVIOUS_TX: &str =
-    "WORDS_NEEDED: the payment gives only the amount of one of its coins, not the whole earlier transaction that made it, so the amount cannot be trusted";
+    "It leaves out the payment that made one of its coins, so that coin's amount cannot be checked.";
 /// Refused: an input's previous outputs disagree (SK-54).
 pub const SK_54_PREVOUT_MISMATCH: &str = "It says two different things about one of its coins.";
 /// Refused: an input lacks its key path (SK-54).
@@ -186,11 +186,10 @@ pub const SK_54_KEY_MISMATCH: &str = "The key it asks for does not match the coi
 pub const SK_54_NOT_SIGHASH_ALL: &str =
     "It asks for a kind of signature that would let the payment be changed afterward.";
 /// The label before the number of the output a refusal names (SK-54).
-pub const SK_54_OUTPUT: &str =
-    "WORDS_NEEDED: the label before an output's number, as 'Coin number' is for an input";
+pub const SK_54_OUTPUT: &str = "Recipient number";
 /// Refused: an output pays to a script that is not an ordinary address (SK-54).
 pub const SK_54_OUTPUT_NOT_ADDRESS: &str =
-    "WORDS_NEEDED: one of its outputs does not pay to an ordinary address (a script that cannot be shown as an address)";
+    "It pays one recipient in a form that is not an ordinary address.";
 /// Refused: the outputs pay more than the inputs hold (SK-54).
 pub const SK_54_OUTPUTS_EXCEED: &str = "It pays out more than its coins hold.";
 /// The title of the review before signing (SK-55).
@@ -212,8 +211,7 @@ pub const SK_55_PAGE: &str = "to see more. Page";
 /// After "Enter" on the review: sign (SK-55).
 pub const SK_55_SIGN: &str = "to sign it";
 /// After "Enter" on a page of the review that is not the last one not yet shown: go to the next page, nothing is signed (SK-55).
-pub const SK_55_NEXT: &str =
-    "WORDS_NEEDED: to see the next page (it signs only after every page has been shown)";
+pub const SK_55_NEXT: &str = "to see the next page. It signs only after every page is shown.";
 /// After "Esc" on the review: refuse, nothing is signed (SK-55).
 pub const SK_55_REFUSE: &str = "to refuse. Nothing is signed.";
 /// The title of the signed payment's QR screen: scan it back with the owner phone (SK-56).

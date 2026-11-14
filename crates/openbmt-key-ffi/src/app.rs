@@ -337,7 +337,7 @@ impl Inner {
         if now < CLOCK_FLOOR_SECS {
             return Err(wrong_state(
                 "clock",
-                "WORDS_NEEDED: the clock cannot be read, so nothing that needs the time is done",
+                "the clock cannot be read or is before November 2026: nothing that needs the time is done",
             ));
         }
         Ok(now)

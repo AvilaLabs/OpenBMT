@@ -163,6 +163,10 @@ Every output is exactly one of three kinds.
   things stricter: the latest time seen becomes the clock's time, every
   allowlist entry enrolled after that time starts its 24-hour wait again,
   and every spend-log entry dated after that time is re-dated to it.
+  The Key app refuses a clock that cannot be read or reads before
+  1 November 2026 (1,793,491,200): no enrollment, no clock correction, no
+  request opened and no Box invitation made, and it says the date and time
+  are not right. A clock that fails would otherwise read as 0.
 - **SR-32.** The day total covers the last 24 hours and the week total the
   last 7 days, both measured back from the current time (SR-31). A signature
   is in the day total while the current time is less than 86,400 seconds

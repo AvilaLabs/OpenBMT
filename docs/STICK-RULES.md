@@ -203,18 +203,25 @@ funds.**
   payment whose inputs are not of the wallet of these words is refused
   before anything is shown (SK-54).
 - **SK-54. What is refused.** The payment is refused, naming why, when: an
-  input lacks its previous output or its key path; an input's key path is
+  input lacks its key path, or lacks the whole previous transaction, which
+  must hash to the coin it spends (an amount from the previous output alone
+  is not trusted, as SR-10 says; when both are given they must agree); an
+  output pays to a script that is not P2PKH, P2SH, P2WPKH, P2WSH or P2TR;
+  an input's key path is
   not `m/84'/0'/0'/0/i` or `m/84'/0'/0'/1/i` under the master fingerprint of
   these words, or the key at that path is not the input's key; an input asks
   for a signature other than SIGHASH_ALL; the payment is not for real
   bitcoin; the outputs pay more than the inputs hold; the file is over
   8 MiB or has bytes after its last map, as the signer refuses
   (`docs/SIGNER-RULES.md`).
-- **SK-55. What is shown before signing.** Every output, with its address
-  and amount in bitcoin. An output is marked as the wallet's own only when
-  the program derives its address itself from these words; a claim in the
-  PSBT is not enough. Then the total sent away, the fee and the fee per
-  virtual byte. Enter signs; Esc refuses and nothing is signed.
+- **SK-55. What is shown before signing.** First the total sent away, the
+  fee and the fee per virtual byte, at the top of every page. Then every
+  output, with its address and amount in bitcoin, three to a page. An
+  output is marked as the wallet's own only when the program derives its
+  address itself from these words; a claim in the PSBT is not enough.
+  Until every page has been shown, Enter goes to the next page and the
+  screen says so; after that Enter signs. Esc refuses and nothing is
+  signed.
 - **SK-56. What comes out.** The PSBT with this wallet's signatures added to
   every input, not finalized, shown as an animated QR code in the form it
   came in, for the owner phone to scan back. Nothing else of the PSBT is
@@ -222,8 +229,9 @@ funds.**
 - **SK-57. Afterwards.** "Turn off" clears the words, the payment and the
   frames, as SK-29.
 - **SK-58. Tested.** Unit tests: refusals of SK-54 one by one; own outputs
-  marked only when derived; the signatures are valid for the inputs and the
-  PSBT otherwise unchanged; decoding of UR and BBQr from frames that are
+  marked only when derived; the totals above the outputs; Enter signing
+  only after every page was shown; the signatures are valid for the inputs
+  and the PSBT otherwise unchanged; decoding of UR and BBQr from frames that are
   scaled, rotated, blurred and noisy grey images of the owner phone's codes.
   In QEMU: the camera modules load only after the choice, and a whole run
   signs a payment fed through a test-only feature `serial-frames` that

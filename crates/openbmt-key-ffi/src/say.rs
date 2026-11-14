@@ -385,10 +385,10 @@ fn state_words(rule: &str, text: &str) -> Option<Words> {
         .detail(text),
         "clock" => Words::new(
             Tone::Info,
-            "WORDS_NEEDED: clock",
-            "WORDS_NEEDED: the clock cannot be read, nothing was done.",
+            "Date and time not right",
+            "This phone's date and time cannot be read or are before November 2026. Nothing was done.",
             Who::KeyHolder,
-            "WORDS_NEEDED: check the date and time and try again.",
+            "Set the phone's date and time, then try again.",
         )
         .detail(text),
         "session-closed" => Words::new(
