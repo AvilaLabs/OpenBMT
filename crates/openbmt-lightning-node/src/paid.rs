@@ -562,7 +562,7 @@ mod tests {
         assert_eq!(lost[LEN_2 + 1], 2);
         let got = decode([1; 32], &lost).unwrap();
         assert!(got.record.lost_unknown && !got.record.more_fundings);
-        assert_eq!(reencode_for_test([1; 32], &lost).unwrap(), lost);
+        assert_eq!(encode(&got), lost);
         let mut b = lost.clone();
         b[LEN_2 + 1] = 3;
         assert!(decode([1; 32], &b).is_err());
