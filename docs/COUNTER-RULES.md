@@ -325,8 +325,11 @@ has been made).
   `final_confirmations`) is not a refusal. The request is recorded and is
   shown as "waiting for depth" until the sale is final (DESIGN §2.4). It is
   one stored state with a flag: the view works the flag out again from the
-  sale each time it is asked for, as CR-11 does for the screen. A reorg
-  that undoes the payment puts the flag back.
+  sale each time it is asked for, as CR-11 does for the screen. A reorg that
+  undoes the payment puts the flag back, and it stays back until the payment
+  has the refund depth again, not only the shop's depth. Until then a sale
+  that was final takes blocks and sightings again, wherever the payment is
+  mined the second time, and it is not settled (CR-76).
 - **CR-67.** A request is refused when its amount is zero, or when it
   would take what is asked for the sale past what was received for it.
   What is asked is the sum of the earlier requests that are not withdrawn
