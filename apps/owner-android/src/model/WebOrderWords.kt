@@ -42,7 +42,6 @@ object WebOrderWords {
     const val neverVisited = "WORDS_NEEDED_WO_21_NEVER"
     const val nextVisitLabel = "WORDS_NEEDED_WO_21_NEXT_VISIT_LABEL"
     const val visitNow = "WORDS_NEEDED_WO_21_VISIT_NOW"
-    const val noSender = "WORDS_NEEDED_WO_02_NO_SENDER"
     const val sentLabel = "WORDS_NEEDED_WO_12_SENT_LABEL"
     const val leftLabel = "WORDS_NEEDED_WO_11_LEFT_LABEL"
     const val ordersLabel = "WORDS_NEEDED_WO_20_ORDERS_LABEL"
@@ -90,7 +89,6 @@ object WebOrderWords {
         "neverVisited" to neverVisited,
         "nextVisitLabel" to nextVisitLabel,
         "visitNow" to visitNow,
-        "noSender" to noSender,
         "sentLabel" to sentLabel,
         "leftLabel" to leftLabel,
         "ordersLabel" to ordersLabel,

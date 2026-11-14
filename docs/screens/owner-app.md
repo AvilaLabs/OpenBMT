@@ -773,7 +773,6 @@ or a failed visit is `WORDS_NEEDED_WO_<rule>_HEADING`, `_WHAT` and
 | neverVisited | WORDS_NEEDED_WO_21_NEVER |
 | nextVisitLabel | WORDS_NEEDED_WO_21_NEXT_VISIT_LABEL |
 | visitNow | WORDS_NEEDED_WO_21_VISIT_NOW |
-| noSender | WORDS_NEEDED_WO_02_NO_SENDER |
 | sentLabel | WORDS_NEEDED_WO_12_SENT_LABEL |
 | leftLabel | WORDS_NEEDED_WO_11_LEFT_LABEL |
 | ordersLabel | WORDS_NEEDED_WO_20_ORDERS_LABEL |
