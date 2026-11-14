@@ -588,7 +588,10 @@ own; the library judges sales and prices and knows nothing of them.
   for 1 second, then 2, 4, 8 and so on, up to 5 minutes. While it is held
   the PIN is not looked at, and the screen says how long to wait. The count
   is written before the answer is given, so closing the app does not reset
-  it. The answer is acted on only while the app is shown (CR-200).
+  it. The answer is acted on only while the app is shown (CR-200). The wait
+  is measured by the time since the phone started, not by its date, so
+  moving the date ends no wait; after a restart of the phone the wait starts
+  again in full.
 - **CR-86.** A cashier's action needs no PIN: opening, requoting and
   cancelling a sale, asking for or withdrawing a refund, and a cash refund.
   The actions of CR-21 (an override) and of CR-67 to CR-69 (a refund asked
@@ -911,7 +914,9 @@ counter holds is not, and never leaves the counter.
   node yet. The credential is saved only after the test passes, sealed like
   the counter's other secrets (CR-98) in the app's `noBackupFilesDir`,
   and removing it deletes it at once. It is never part of the pairing record
-  or the settings, and is never in a log or a screen.
+  or the settings, and is never in a log or a screen. The screen where it is
+  typed is kept out of screenshots, recordings and recent apps
+  (`FLAG_SECURE`).
 - **CR-116.** The counter's status shows a Lightning line only when a
   credential is saved: "Lightning ready", or why not: the node cannot be
   reached, it refused the key, or the settings name another node now. The

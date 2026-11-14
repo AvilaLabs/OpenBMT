@@ -2070,7 +2070,7 @@ object AppModelTest {
         ok(h.contains("HardwareModel.RETURN_UR_TYPES") && h.contains("HardwareModel.RETURN_BBQR_KINDS") && h.contains("n.signerTake("), "what is read goes to the library as bytes")
         ok(h.contains("MAX_RETURNED + 1"), "a file one byte over the library's limit is handed over to be refused")
         ok(h.contains("HardwareModel.UR_PSBT") && h.contains("HardwareModel.BBQR_PSBT") && h.contains("file.fileName"), "the payment's codes and its file name")
-        ok(h.contains("TODO(OA-60)"), "the relock across the scan and the pickers is named as not done")
+        ok(!h.contains("TODO(OA-60)") && h.contains("counts toward the 60 seconds"), "the scan and the pickers count toward the relock")
         val screens = source("src/android/Screens.kt")
         ok(screens.contains("if (key2Signer) {") && screens.contains("n.signerBuild(nowSecs(), f.value)") && screens.contains("n.buildRequest(nowSecs(), f.value)"), "a spend goes to the signer only when key 2 is one")
         ok(screens.contains("RowItem(\"Register the wallet on your signer\")"), "the wallet screen's row")

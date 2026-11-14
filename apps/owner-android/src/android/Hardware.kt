@@ -27,10 +27,8 @@ import org.openbmt.owner.SignerTaken
 // (`docs/SESSION-RULES.md`, AS-90 to AS-99); the choices of the person and the words of `HardwareModel` are
 // this file's. The phone signs with key 1 only, and the signer's answer is bytes the library reads.
 //
-// TODO(OA-60): the camera scan and the file pickers below leave the app for the system's screens. The time
-// spent there is to count toward the 60 seconds before the PIN is asked for again; the review fixes that make
-// the wait count are not in this tree yet, so the pickers and the scan keep the present rule of
-// `Controller.visible` and `hidden`.
+// The camera scan and the file pickers below leave the app for the system's screens; the time spent there
+// counts toward the 60 seconds before the PIN is asked for again (OA-62, `Controller`).
 
 /** What one payment's way to the signer holds in memory: the spends' session, the item, and where the owner came from. */
 internal class SignerRun(val session: ByteArray, val number: Long, val built: org.openbmt.owner.Built?, val back: () -> Unit) {

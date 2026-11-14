@@ -636,8 +636,9 @@ keys (the setup text has no line for it), so a setup that is pasted has no
 signer screens. The ceremony's last screen offers "Register the wallet on
 your signer" as its main button when key 2 is one, and the open approvals
 list a session of spends with "Continue on the signer". The camera scan and
-the pickers are not yet counted in the 60 seconds of OA-62 (the review fixes
-for that are not in this tree: see the TODO(OA-60) in `Hardware.kt`).
+the pickers count toward the 60 seconds of OA-62. A picked file is read or
+written only when it is a `content` address of another app's provider,
+never a file address and never the app's own files.
 
 - **OA-70.** The person picks how a payment reaches the signer, from a
   list that names animated codes of a UR (`crypto-psbt`, in fragments of at

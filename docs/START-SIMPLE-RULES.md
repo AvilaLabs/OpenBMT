@@ -130,7 +130,10 @@ funds.**
   enabled accessibility service that is not marked as an accessibility tool
   stops the making of the key and the showing of the words until it is
   turned off. Real seed-stealing apps for Android work through such
-  services and overlays.
+  services and overlays. The screens of a payment, a return, the refund
+  queue, a cash-out, the hardware signer and the float hide other apps'
+  overlay windows as SS-12's screens do, and their hold to approve ignores a
+  touch made through an overlay.
 - **SS-34. Old updates.** A phone whose security patch is more than six
   months old gets a warning before the key is made. It is not refused.
 

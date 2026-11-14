@@ -20,7 +20,12 @@ Some protections belong to the app around this library and are not listed
 here: refusing to run under root, USB debugging, accessibility services or
 screen overlays, and labeling every figure that came from the owner phone (a
 dollar amount, a sale number) as the owner phone's claim. The library takes
-no such figures at all. The PIN lock, the wipe after too many wrong tries
+no such figures at all. Every screen of the Key app hides other apps'
+overlay windows, and the hold that approves ignores a touch made through an
+overlay that covers the window in whole or in part, letting go of a hold
+already begun. A file the person picks is read or written only when it is a
+`content` address of another app's provider, never a file address and never
+the app's own files. The PIN lock, the wipe after too many wrong tries
 and the enrolment screens are in section 12.
 
 ## 1. What the signer keeps
