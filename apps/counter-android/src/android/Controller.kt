@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -95,9 +96,10 @@ class Controller(private val act: MainActivity) {
     private val main = Handler(Looper.getMainLooper())
     private val dir: File = act.noBackupFilesDir
     private val nodeDir = File(dir, "node")
-    private val pin = PinStore(dir, { nowSecs() })
+    // A wrong PIN's hold is told by the time since the phone started and its boot count, not by the date (CR-85).
+    private val pin = PinStore(dir, { SystemClock.elapsedRealtime() }, boot = { bootCount() })
     private val configFile = ConfigFile(dir)
-    private val staff = StaffStore(dir, { nowSecs() }, { config?.manager ?: "" })
+    private val staff = StaffStore(dir, { SystemClock.elapsedRealtime() }, { config?.manager ?: "" }, boot = { bootCount() })
 
     // Who is at the till: in memory only (CR-149), with the list of cashiers as read at the last start.
     private val locks = TillLock { SystemClock.elapsedRealtime() / 1000 }
@@ -207,6 +209,13 @@ class Controller(private val act: MainActivity) {
     private val amounts = HashMap<Long, Long>()
 
     private fun nowSecs(): Long = System.currentTimeMillis() / 1000
+
+    /** How many times the phone has started; -1 when the phone does not say. */
+    private fun bootCount(): Long = try {
+        Settings.Global.getInt(act.contentResolver, Settings.Global.BOOT_COUNT).toLong()
+    } catch (_: Settings.SettingNotFoundException) {
+        -1L
+    }
 
     // ---- visible, hidden -------------------------------------------------------------------------
 
@@ -1716,6 +1725,8 @@ class Controller(private val act: MainActivity) {
                 ui.button("Back") { forgetLightningDraft(); showSettings() },
             ),
         )
+        // The code, the rune and the certificate are typed or pasted here: never in a screenshot, a recording or the recent-apps preview.
+        act.keepOutOfCapture()
     }
 
     private fun forgetLightningDraft() {

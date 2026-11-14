@@ -150,7 +150,7 @@ object AppModelTest {
         val dir = tempDir()
         var now = 1_000L
         val hasher = FakeHasher()
-        val store = PinStore(dir, { now }, SecureRandom(), hasher, 1000)
+        val store = PinStore(dir, { now * 1000 }, SecureRandom(), hasher, 1000)
         ok(!store.isSet(), "no PIN at first")
         throws("a check with no PIN") { store.check("123456") }
         throws("a PIN of 5 digits") { store.set("12345") }
@@ -177,7 +177,7 @@ object AppModelTest {
         ok(store.check("999999") is PinResult.Locked, "locked")
         ok(hasher.calls == callsBefore, "a locked try is not compared")
         // The count and the hold survive a restart of the app.
-        val reopened = PinStore(dir, { now }, SecureRandom(), hasher, 1000)
+        val reopened = PinStore(dir, { now * 1000 }, SecureRandom(), hasher, 1000)
         ok(reopened.check("123456") is PinResult.Locked, "the hold is kept in the file")
         ok(reopened.heldFor() == 1L, "held for the rest of the second: ${reopened.heldFor()}")
         now += 1
@@ -207,22 +207,22 @@ object AppModelTest {
         val good = File(dir, "pin.obcp").readBytes()
         for (cut in listOf(0, 4, 5, 20, good.size - 1)) {
             File(dir, "pin.obcp").writeBytes(good.copyOf(cut))
-            throws("a PIN file cut to $cut") { PinStore(dir, { now }, SecureRandom(), hasher, 1000).check("654321") }
+            throws("a PIN file cut to $cut") { PinStore(dir, { now * 1000 }, SecureRandom(), hasher, 1000).check("654321") }
         }
         File(dir, "pin.obcp").writeBytes(good + byteArrayOf(0))
-        throws("a trailing byte") { PinStore(dir, { now }, SecureRandom(), hasher, 1000).check("654321") }
+        throws("a trailing byte") { PinStore(dir, { now * 1000 }, SecureRandom(), hasher, 1000).check("654321") }
         for (at in listOf(0, 3, 4)) {
             File(dir, "pin.obcp").writeBytes(good.copyOf().also { it[at] = (it[at].toInt() xor 1).toByte() })
-            throws("a changed header byte $at") { PinStore(dir, { now }, SecureRandom(), hasher, 1000).check("654321") }
+            throws("a changed header byte $at") { PinStore(dir, { now * 1000 }, SecureRandom(), hasher, 1000).check("654321") }
         }
         File(dir, "pin.obcp").writeBytes(good.copyOf().also { it[5] = 0; it[6] = 0; it[7] = 0; it[8] = 0 })
-        throws("an iteration count of zero") { PinStore(dir, { now }, SecureRandom(), hasher, 1000).check("654321") }
+        throws("an iteration count of zero") { PinStore(dir, { now * 1000 }, SecureRandom(), hasher, 1000).check("654321") }
         File(dir, "pin.obcp").writeBytes(good)
-        ok(PinStore(dir, { now }, SecureRandom(), hasher, 1000).check("654321") == PinResult.Ok, "the good file reads")
+        ok(PinStore(dir, { now * 1000 }, SecureRandom(), hasher, 1000).check("654321") == PinResult.Ok, "the good file reads")
 
         // A store that cannot write: nothing is compared.
         val gone = tempDir()
-        val lone = PinStore(gone, { now }, SecureRandom(), hasher, 1000)
+        val lone = PinStore(gone, { now * 1000 }, SecureRandom(), hasher, 1000)
         lone.set("123456")
         val before = hasher.calls
         File(gone, "pin.obcp").setReadOnly()
@@ -238,7 +238,7 @@ object AppModelTest {
         clean(gone)
 
         // The real parameters: 600,000 iterations, a real salt, the platform's PBKDF2.
-        val real = PinStore(dir, { now })
+        val real = PinStore(dir, { now * 1000 })
         real.set("246810")
         val bytes = File(dir, "pin.obcp").readBytes()
         ok(java.nio.ByteBuffer.wrap(bytes, 5, 4).order(java.nio.ByteOrder.LITTLE_ENDIAN).int == 600_000, "600,000 iterations are written")
@@ -752,7 +752,7 @@ object AppModelTest {
         val dir = tempDir()
         var now = 1_000L
         val hasher = FakeHasher()
-        fun store() = StaffStore(dir, { now }, { "Max" }, SecureRandom(), hasher, 1000)
+        fun store() = StaffStore(dir, { now * 1000 }, { "Max" }, SecureRandom(), hasher, 1000)
         val file = File(dir, "cashiers.txt")
         val s = store()
         ok(s.names().isEmpty() && !file.exists(), "no file is an empty list")
@@ -761,7 +761,7 @@ object AppModelTest {
         ok(s.names() == listOf("Ann", "Bob"), "CR-140: the cashiers, in the order added")
         ok(dir.list()!!.sorted() == listOf("cashiers.txt"), "CR-140: the file is written whole and no temporary file is left")
         val text = file.readText()
-        ok(text.startsWith("openbmt-cashiers 1\n") && text.lines().size == 4 && text.endsWith("\n"), "CR-140: a version line, then one line for each cashier")
+        ok(text.startsWith("openbmt-cashiers 2\n") && text.lines().size == 4 && text.endsWith("\n"), "CR-140: a version line, then one line for each cashier")
         ok(!text.contains("1234") && !text.contains("87654321"), "CR-141: no PIN is in the file")
         ok(text.lines()[1].endsWith(" Ann") && text.lines()[2].endsWith(" Bob"), "the name is the rest of the line")
         ok(text.lines()[1].split(' ').first() == "1000", "the iteration count is written with the entry")
@@ -805,7 +805,7 @@ object AppModelTest {
         // The last one removed leaves an empty list, which is the lock turned off (CR-146).
         store().remove("Ann")
         store().remove("Bob")
-        ok(store().names().isEmpty() && file.readText() == "openbmt-cashiers 1\n", "CR-146: removing the last leaves a file with the version line only")
+        ok(store().names().isEmpty() && file.readText() == "openbmt-cashiers 2\n", "CR-146: removing the last leaves a file with the version line only")
         store().add("Ann", "1234")
 
         // CR-140: the file is read whole and refused whole when any line is not exact.
@@ -813,7 +813,7 @@ object AppModelTest {
         store().add("Bob", "4321")
         val two = file.readText()
         val line = good.lines()[1]
-        val fields = line.split(' ', limit = 6)
+        val fields = line.split(' ', limit = 7)
         fun refused(content: ByteArray, what: String) {
             file.writeBytes(content)
             var failed = false
@@ -828,29 +828,30 @@ object AppModelTest {
         file.writeText(two)
         ok(store().names() == listOf("Ann", "Bob"), "the good file reads")
         refused("", "an empty file")
-        refused("openbmt-cashiers 1", "a version line with no line end")
-        refused("openbmt-cashiers 2\n", "another version")
-        refused("openbmt-cashiers 1\n$line", "a last line with no line end")
+        refused("openbmt-cashiers 2", "a version line with no line end")
+        refused("openbmt-cashiers 3\n", "another version")
+        refused("openbmt-cashiers 2\n$line", "a last line with no line end")
         refused(good + "\n", "an empty line")
-        refused(good.replace("openbmt-cashiers 1", "openbmt-cashiers  1"), "a version line spaced another way")
-        refused("openbmt-cashiers 1\n" + fields.take(5).joinToString(" ") + "\n", "five fields")
-        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[0] = "01000" }.joinToString(" ") + "\n", "a number with a leading zero")
-        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[0] = "0" }.joinToString(" ") + "\n", "an iteration count of zero")
-        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[0] = "+1000" }.joinToString(" ") + "\n", "a number with a sign")
-        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[1] = it[1].uppercase() }.joinToString(" ") + "\n", "a salt in capital letters")
-        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[1] = it[1].drop(2) }.joinToString(" ") + "\n", "a short salt")
-        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[2] = it[2] + "00" }.joinToString(" ") + "\n", "a long hash")
-        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[3] = "4294967296" }.joinToString(" ") + "\n", "a count past 32 bits")
-        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[4] = "-1" }.joinToString(" ") + "\n", "a negative time")
-        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[4] = "99999999999999999999" }.joinToString(" ") + "\n", "a time past 64 bits")
-        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[5] = "Ann " }.joinToString(" ") + "\n", "a name with a space at the end")
-        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[5] = "A\u0007" }.joinToString(" ") + "\n", "a name with a control character")
-        refused("openbmt-cashiers 1\n" + fields.toMutableList().also { it[5] = "x".repeat(25) }.joinToString(" ") + "\n", "a name of 25 characters")
+        refused(good.replace("openbmt-cashiers 2", "openbmt-cashiers  2"), "a version line spaced another way")
+        refused("openbmt-cashiers 2\n" + fields.take(5).joinToString(" ") + "\n", "five fields")
+        refused("openbmt-cashiers 2\n" + fields.toMutableList().also { it[0] = "01000" }.joinToString(" ") + "\n", "a number with a leading zero")
+        refused("openbmt-cashiers 2\n" + fields.toMutableList().also { it[0] = "0" }.joinToString(" ") + "\n", "an iteration count of zero")
+        refused("openbmt-cashiers 2\n" + fields.toMutableList().also { it[0] = "+1000" }.joinToString(" ") + "\n", "a number with a sign")
+        refused("openbmt-cashiers 2\n" + fields.toMutableList().also { it[1] = it[1].uppercase() }.joinToString(" ") + "\n", "a salt in capital letters")
+        refused("openbmt-cashiers 2\n" + fields.toMutableList().also { it[1] = it[1].drop(2) }.joinToString(" ") + "\n", "a short salt")
+        refused("openbmt-cashiers 2\n" + fields.toMutableList().also { it[2] = it[2] + "00" }.joinToString(" ") + "\n", "a long hash")
+        refused("openbmt-cashiers 2\n" + fields.toMutableList().also { it[3] = "4294967296" }.joinToString(" ") + "\n", "a count past 32 bits")
+        refused("openbmt-cashiers 2\n" + fields.toMutableList().also { it[4] = "-1" }.joinToString(" ") + "\n", "a negative time")
+        refused("openbmt-cashiers 2\n" + fields.toMutableList().also { it[4] = "99999999999999999999" }.joinToString(" ") + "\n", "a time past 64 bits")
+        refused("openbmt-cashiers 2\n" + fields.toMutableList().also { it[5] = "4294967296" }.joinToString(" ") + "\n", "a boot count past 32 bits")
+        refused("openbmt-cashiers 2\n" + fields.toMutableList().also { it[6] = "Ann " }.joinToString(" ") + "\n", "a name with a space at the end")
+        refused("openbmt-cashiers 2\n" + fields.toMutableList().also { it[6] = "A\u0007" }.joinToString(" ") + "\n", "a name with a control character")
+        refused("openbmt-cashiers 2\n" + fields.toMutableList().also { it[6] = "x".repeat(25) }.joinToString(" ") + "\n", "a name of 25 characters")
         refused(two + two.lines()[2] .replace("Bob", "BOB") + "\n", "two names that are the same ignoring case")
         refused(good.replace("Ann", "max"), "the manager's name")
-        refused("openbmt-cashiers 1\n" + (1..31).joinToString("") { fields.toMutableList().also { f -> f[5] = "c$it" }.joinToString(" ") + "\n" }, "31 cashiers")
+        refused("openbmt-cashiers 2\n" + (1..31).joinToString("") { fields.toMutableList().also { f -> f[6] = "c$it" }.joinToString(" ") + "\n" }, "31 cashiers")
         refused(good.toByteArray(Charsets.UTF_8) + byteArrayOf(0xff.toByte(), 0x0a), "bytes that are not UTF-8")
-        refused("openbmt-cashiers 1\n" + "x".repeat(20_000) + "\n", "a file far too long")
+        refused("openbmt-cashiers 2\n" + "x".repeat(20_000) + "\n", "a file far too long")
         // The first start of the app reads it the same way: a file that does not read is a fault, never an empty list.
         file.writeText(two)
         ok(store().names() == listOf("Ann", "Bob"), "the good file reads again")
@@ -885,6 +886,124 @@ object AppModelTest {
     }
 
     // ---- the till lock (CR-147 to CR-150) -----------------------------------------------------------
+
+    // ---- the hold of wrong tries is told by the time since the phone started (CR-85) ----------------
+
+    private fun cr85HoldClockTests(appDir: File?) {
+        // The pure rule: the start, the boot count, the time and boot count now, the length.
+        ok(PinHold.check(PinHold.NONE, 0, 5_000, 1, 4).remainingSecs == 0L, "no hold started: nothing to wait")
+        ok(PinHold.check(10_000, 7, 11_000, 7, 0).remainingSecs == 0L, "a hold of no length is no hold")
+        val early = PinHold.check(10_000, 7, 10_500, 7, 4)
+        ok(early.remainingSecs == 4L && !early.restart, "half a second in: 4 seconds are left, rounded up")
+        ok(PinHold.check(10_000, 7, 13_999, 7, 4).remainingSecs == 1L && PinHold.check(10_000, 7, 14_000, 7, 4).remainingSecs == 0L && PinHold.check(10_000, 7, 90_000, 7, 4).remainingSecs == 0L, "the hold is over when its length has passed on the same start of the phone")
+        val reboot = PinHold.check(10_000, 7, 20_000, 8, 4)
+        ok(reboot.remainingSecs == 4L && reboot.restart, "after a restart of the phone the hold begins again at full length, even when more time has passed by the count")
+        val backwards = PinHold.check(10_000, 7, 2_000, 7, 300)
+        ok(backwards.remainingSecs == 300L && backwards.restart, "a time since start that went backwards begins the hold again")
+
+        // The store: only the time since start and the boot count are read, so no date can shorten a hold.
+        val dir = tempDir()
+        var elapsed = 1_000_000L
+        var boot = 5L
+        val hasher = FakeHasher()
+        fun open() = PinStore(dir, { elapsed }, SecureRandom(), hasher, 1000, boot = { boot })
+        val store = open()
+        store.set("123456")
+        val first = store.check("000000")
+        ok(first is PinResult.Wrong && first.waitSecs == 1L, "a wrong try holds for a second")
+        // The date moved a year on changes neither counter: the hold stays.
+        ok(open().check("123456") is PinResult.Locked && open().heldFor() == 1L, "moving the date forward does not end a hold")
+        elapsed += 999
+        ok(open().check("123456") is PinResult.Locked, "still held a millisecond early")
+        elapsed += 1
+        ok(open().check("123456") == PinResult.Ok, "the hold is over when its length has passed")
+        // Normal expiry of a longer hold.
+        store.check("000000")
+        elapsed += 1_000
+        val second = store.check("000000")
+        ok(second is PinResult.Wrong && second.waitSecs == 2L, "the second wrong try holds for 2 seconds")
+        elapsed += 1_999
+        ok(open().heldFor() == 1L, "a second is left")
+        // A restart of the phone: the hold begins again, in full, at the first check after it.
+        boot = 6L
+        elapsed = 400
+        ok(open().heldFor() == 2L, "after a restart the hold is its full length again")
+        elapsed += 1_000
+        ok(open().heldFor() == 1L, "and it runs from that first check, not from the old one")
+        elapsed += 1_000
+        ok(open().heldFor() == 0L && open().check("123456") == PinResult.Ok, "and ends after its length on the new start")
+        // The time since start going backwards on the same start counts as a restart too.
+        elapsed = 5_000_000
+        store.check("000000")
+        elapsed = 100
+        ok(open().check("123456") is PinResult.Locked && open().heldFor() == 1L, "a time that went backwards holds again in full")
+        elapsed += 1_000
+        ok(open().check("123456") == PinResult.Ok, "and ends after its length")
+        // The cap stays at 5 minutes.
+        for (i in 1..14) { elapsed += 400_000; open().check("000000") }
+        elapsed += 400_000
+        val capped = open().check("000000")
+        ok(capped is PinResult.Wrong && capped.waitSecs == 300L, "the hold is capped at 5 minutes")
+        boot = 9L
+        ok(open().heldFor() == 300L, "after a restart the longest hold is still 5 minutes")
+
+        // A cashier's PIN is held the same way.
+        val staffDir = tempDir()
+        elapsed = 2_000_000L
+        boot = 1L
+        fun staff() = StaffStore(staffDir, { elapsed }, { "Max" }, SecureRandom(), hasher, 1000, boot = { boot })
+        staff().add("Ann", "1234")
+        staff().check("Ann", "0000")
+        ok(staff().check("Ann", "1234") is PinResult.Locked && staff().heldFor("Ann") == 1L, "a cashier's hold stands while only the date moves")
+        boot = 2L
+        elapsed = 10
+        ok(staff().heldFor("Ann") == 1L, "after a restart the cashier's hold is its full length")
+        elapsed += 1_000
+        ok(staff().heldFor("Ann") == 0L && staff().check("Ann", "1234") == PinResult.Ok, "and ends after its length")
+
+        // Files of the first version, which kept the date a hold ends, still read: with no hold.
+        val pinFile = File(dir, "pin.obcp")
+        val v2 = pinFile.readBytes()
+        ok(v2.size == PinStore.SIZE && v2[4].toInt() == 2, "the file is version 2")
+        pinFile.writeBytes(v2.copyOf(PinStore.SIZE - 4).also { it[4] = 1 })
+        ok(open().check("123456") == PinResult.Ok, "a PIN file of version 1 reads, with no hold")
+        val staffFile = File(staffDir, "cashiers.txt")
+        val text = staffFile.readText()
+        val legacyLines = text.lines().map { l ->
+            if (l.startsWith("openbmt-cashiers")) "openbmt-cashiers 1" else l.split(' ', limit = 7).let { f -> if (f.size == 7) (f.take(5) + f[6]).joinToString(" ") else l }
+        }
+        staffFile.writeText(legacyLines.joinToString("\n"))
+        ok(staff().names() == listOf("Ann") && staff().check("Ann", "1234") == PinResult.Ok, "a cashier file of version 1 reads, with no hold")
+        ok(staffFile.readText().startsWith("openbmt-cashiers 2\n"), "and is written as version 2 at the next change")
+        clean(dir)
+        clean(staffDir)
+
+        if (appDir == null) return
+        val controller = File(appDir, "src/android/Controller.kt").readText()
+        ok(controller.contains("PinStore(dir, { SystemClock.elapsedRealtime() }, boot = { bootCount() })") && controller.contains("StaffStore(dir, { SystemClock.elapsedRealtime() }, { config?.manager ?: \"\" }, boot = { bootCount() })"), "the manager's and the cashiers' PINs are held by the time since start and the boot count")
+        ok(controller.contains("Settings.Global.BOOT_COUNT"), "the boot count is the phone's")
+        ok(!controller.contains("PinStore(dir, { nowSecs() }") && !controller.contains("StaffStore(dir, { nowSecs() }"), "no PIN hold is told by the date")
+        val model = File(appDir, "src/model").listFiles { f -> f.name == "PinStore.kt" || f.name == "StaffStore.kt" || f.name == "PinHold.kt" }!!
+        ok(model.none { it.readText().replace(Regex("//.*"), "").contains("currentTimeMillis") }, "the PIN files read no date")
+    }
+
+    // ---- the Lightning credentials are never on a screenshot (CR-115) --------------------------------
+
+    private fun cr115LightningCaptureTests(appDir: File?) {
+        if (appDir == null) return
+        val controller = File(appDir, "src/android/Controller.kt").readText()
+        val lightning = controller.substringAfter("private fun showLightning(").substringBefore("private fun forgetLightningDraft(")
+        ok(lightning.contains("act.keepOutOfCapture()") && lightning.indexOf("act.keepOutOfCapture()") > lightning.lastIndexOf("show("), "the Lightning page keeps itself out of captures once it is on show")
+        val activity = File(appDir, "src/android/MainActivity.kt").readText()
+        val show = activity.substringAfter("fun show(page: View)").substringBefore("/** Keeps the screen")
+        ok(show.contains("clearFlags(WindowManager.LayoutParams.FLAG_SECURE)") && show.indexOf("clearFlags(") < show.indexOf("setContentView("), "every screen shown clears the flag, so that it is on the Lightning page only")
+        ok(activity.contains("fun keepOutOfCapture()") && activity.substringAfter("fun keepOutOfCapture()").contains("addFlags(WindowManager.LayoutParams.FLAG_SECURE)"), "the flag is added by the one call")
+        ok(controller.split("keepOutOfCapture()").size == 2, "no other screen of the counter sets the flag")
+        ok(!activity.substringAfter("override fun onCreate").substringBefore("override fun onStart").contains("FLAG_SECURE"), "the window does not start with the flag")
+        // The counter takes no picker's result: nothing is read from or written to a picked address.
+        val sources = File(appDir, "src/android").listFiles { f -> f.name.endsWith(".kt") }!!
+        ok(sources.none { f -> f.readText().let { it.contains("openInputStream(") || it.contains("openOutputStream(") || it.contains("ACTION_OPEN_DOCUMENT") || it.contains("ACTION_CREATE_DOCUMENT") || it.contains("ACTION_GET_CONTENT") || it.contains("onActivityResult") } }, "the counter takes no picker's result")
+    }
 
     private fun cr149TillLockTests() {
         var t = 100L
@@ -1387,7 +1506,7 @@ object AppModelTest {
         // The PIN first: a wrong or held PIN changes nothing; the right one switches once.
         val dir = tempDir()
         var now = 1_000L
-        val store = PinStore(dir, { now }, SecureRandom(), FakeHasher(), 1000)
+        val store = PinStore(dir, { now * 1000 }, SecureRandom(), FakeHasher(), 1000)
         store.set("123456")
         val calls = ArrayList<String>()
         val kept = ArrayList<ByteArray>()
@@ -1466,7 +1585,7 @@ object AppModelTest {
         // The PIN first: a wrong or held PIN signs nothing; the right one signs once.
         val dir = tempDir()
         var now = 1_000L
-        val store = PinStore(dir, { now }, SecureRandom(), FakeHasher(), 1000)
+        val store = PinStore(dir, { now * 1000 }, SecureRandom(), FakeHasher(), 1000)
         store.set("123456")
         var signed = 0
         val sign = { signed++; Words(1, 0, "Change confirmed", "The owner phone sends the change to every counter. It applies once it arrives.", "Nothing to do.", null, null, null, null) }
@@ -1653,6 +1772,8 @@ object AppModelTest {
         cr245BillsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr266TillTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr273StarterTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        cr85HoldClockTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        cr115LightningCaptureTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         println("AppModelTest (counter): $count checks passed")
     }
 }

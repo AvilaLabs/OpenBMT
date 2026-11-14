@@ -17,12 +17,14 @@ class Cashier(val name: String, val pin: PinRecord)
  * The list of cashiers (docs/COUNTER-RULES.md CR-140, CR-141): at most 30, in
  * one text file of the app's `noBackupFilesDir`, written through [DurableFile]
  * (a new file, a sync, a rename, a sync of the folder; CR-40). The first line
- * is `openbmt-cashiers 1`, then one line for each cashier:
- * `iterations salt hash wrong heldUntil name`, the numbers in canonical decimal,
+ * is `openbmt-cashiers 2`, then one line for each cashier:
+ * `iterations salt hash wrong holdStart holdBoot name`, the numbers in canonical decimal,
  * the salt (16 bytes) and the hash (32 bytes) in lower-case hex, and the name
  * the rest of the line. The PIN is kept as the manager's is (PBKDF2-HMAC-SHA256,
  * 600,000 iterations, a random salt; [PinCheck]) and each cashier has a count of
- * wrong tries and a hold of their own (CR-85). The file is read whole and
+ * wrong tries and a hold of their own (CR-85), measured as the manager's is ([PinHold]).
+ * The file of version 1 (the date a hold ends in place of `holdStart holdBoot`)
+ * is read as cashiers with no hold. The file is read whole and
  * refused whole when any line is not exactly so, when two names are the same
  * ignoring case, when a name is the manager's or when there are more than 30.
  * A missing file is an empty list. The file is not backed up and does not move
@@ -36,8 +38,11 @@ class StaffStore(
     private val hasher: PinHasher = Pbkdf2Hasher,
     private val iterations: Int = PinStore.ITERATIONS,
     name: String = FILE,
+    private val boot: () -> Long = { 0L },
 ) {
     private val file = File(dir, name)
+
+    private fun now() = PinNow(clock(), boot() and 0xffffffffL)
 
     /** The names, in the order they were added. */
     @Synchronized
@@ -76,14 +81,21 @@ class StaffStore(
     @Synchronized
     fun check(name: String, pin: String): PinResult {
         val rec = read().firstOrNull { it.name == name } ?: throw IOException("no such cashier")
-        return PinCheck.attempt(rec.pin, pin, clock(), hasher) { changed -> save(name, changed) }
+        return PinCheck.attempt(rec.pin, pin, now(), hasher) { changed -> save(name, changed) }
     }
 
-    /** The seconds this cashier's PIN is held for, or 0. */
+    /** The seconds this cashier's PIN is held for, or 0. A hold that the phone's restart cut off begins again here. */
     @Synchronized
     fun heldFor(name: String): Long {
         val rec = read().firstOrNull { it.name == name } ?: return 0
-        return maxOf(0, rec.pin.heldUntil - clock())
+        val held = PinCheck.held(rec.pin, now())
+        if (held.restart) {
+            try {
+                save(name, PinCheck.stamped(rec.pin, now()))
+            } catch (_: IOException) {
+            }
+        }
+        return held.remainingSecs
     }
 
     private fun save(name: String, changed: PinRecord) {
@@ -100,29 +112,34 @@ class StaffStore(
         }
         if (!text.endsWith("\n")) throw StaffFormatException("the cashier file does not end with a line end")
         val lines = text.dropLast(1).split('\n')
-        if (lines[0] != HEADER) throw StaffFormatException("the cashier file has another version line")
+        val legacy = lines[0] == LEGACY_HEADER
+        if (lines[0] != HEADER && !legacy) throw StaffFormatException("the cashier file has another version line")
         if (lines.size - 1 > MAX_CASHIERS) throw StaffFormatException("the cashier file has more than $MAX_CASHIERS cashiers")
         val out = ArrayList<Cashier>()
         for ((i, line) in lines.drop(1).withIndex()) {
-            val c = parse(line, i + 2)
+            val c = parse(line, i + 2, legacy)
             if (taken(c.name, out.map { it.name }, manager())) throw StaffFormatException("line ${i + 2} repeats a name or has the manager's")
             out.add(c)
         }
         return out
     }
 
-    private fun parse(line: String, number: Int): Cashier {
-        val parts = line.split(' ', limit = 6)
-        if (parts.size != 6) throw StaffFormatException("line $number does not have six fields")
+    private fun parse(line: String, number: Int, legacy: Boolean): Cashier {
+        val fields = if (legacy) 6 else 7
+        val parts = line.split(' ', limit = fields)
+        if (parts.size != fields) throw StaffFormatException("line $number does not have $fields fields")
         val iter = canonical(parts[0], number)
         if (iter < MIN_ITERATIONS || iter > MAX_ITERATIONS) throw StaffFormatException("line $number has an iteration count out of range")
         val salt = hex(parts[1], PinStore.SALT_LEN, number)
         val hash = hex(parts[2], PinStore.HASH_LEN, number)
         val wrong = canonical(parts[3], number)
         if (wrong > 0xffffffffL) throw StaffFormatException("line $number has a count out of range")
-        val held = canonical(parts[4], number)
-        if (!validName(parts[5])) throw StaffFormatException("line $number has a name that is not a name")
-        return Cashier(parts[5], PinRecord(iter.toInt(), salt, hash, wrong, held))
+        val start = canonical(parts[4], number)
+        val boot = if (legacy) 0L else canonical(parts[5], number)
+        if (boot > 0xffffffffL) throw StaffFormatException("line $number has a boot count out of range")
+        val name = parts[fields - 1]
+        if (!validName(name)) throw StaffFormatException("line $number has a name that is not a name")
+        return Cashier(name, PinRecord(iter.toInt(), salt, hash, wrong, if (legacy) PinHold.NONE else start, boot))
     }
 
     private fun canonical(text: String, number: Int): Long {
@@ -140,7 +157,7 @@ class StaffStore(
         for (c in list) {
             val r = c.pin
             out.append(r.iterations).append(' ').append(hex(r.salt)).append(' ').append(hex(r.hash)).append(' ')
-                .append(minOf(r.wrong, 0xffffffffL)).append(' ').append(r.heldUntil).append(' ').append(c.name).append('\n')
+                .append(minOf(r.wrong, 0xffffffffL)).append(' ').append(r.holdStart).append(' ').append(r.holdBoot).append(' ').append(c.name).append('\n')
         }
         DurableFile.write(dir, file, out.toString().toByteArray(Charsets.UTF_8))
     }
@@ -149,7 +166,8 @@ class StaffStore(
 
     companion object {
         const val FILE = "cashiers.txt"
-        const val HEADER = "openbmt-cashiers 1"
+        const val HEADER = "openbmt-cashiers 2"
+        private const val LEGACY_HEADER = "openbmt-cashiers 1"
         const val MAX_CASHIERS = 30
         const val MAX_NAME = 24
         const val MIN_DIGITS = 4
