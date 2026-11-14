@@ -21,8 +21,8 @@ use crate::paired::{PairRefused, RelayRefused};
 use crate::paired_own::OwnPairRefused;
 use crate::relaylink::LinkLine;
 use crate::settings::{SettingsFault, SettingsLine, SettingsRefused};
-use crate::starter::StarterRefused;
 use crate::shopln::{SeedNotTaken, Why};
+use crate::starter::StarterRefused;
 use crate::switch::{SwitchNotice, SwitchRefused, SwitchStepRefused};
 use openbmt_lightning_node::room::OnChainReason;
 
@@ -138,13 +138,6 @@ fn said(tone: Tone, key: &'static str, who: Who) -> Words {
         _ => (key, key, key),
     };
     Words::new(tone, heading, what, who, next)
-}
-
-/// Words of section 26 that are still to be written: the placeholder stands
-/// in the heading and both sentences, so that it shows wherever the words
-/// would (CR-276). Its value is its own name, which names the rule.
-fn needed(tone: Tone, placeholder: &'static str, who: Who) -> Words {
-    Words::new(tone, placeholder, placeholder, who, placeholder)
 }
 
 /// Shop Lightning's words (SL-20 to SL-77), by the name of their state.

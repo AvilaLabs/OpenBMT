@@ -61,9 +61,9 @@ pub mod paired_own;
 pub mod relaylink;
 pub mod say;
 pub mod settings;
-pub mod starter;
 pub mod shopln;
 pub mod shopln_node;
+pub mod starter;
 pub mod swap;
 pub mod switch;
 
@@ -105,11 +105,11 @@ pub use settings::{
     effective as effective_settings, effective_of as effective_settings_of, Effective,
     SettingsFault, SettingsFrame, SettingsLine, SettingsRefused, MAX_SETTINGS_FILE_BYTES,
 };
+pub use shopln::{role, Book, Role, SeedNotTaken, SeedRecord, Why};
+pub use shopln_node::{PaidSale, ShopLn, ShopLnArgs, ShopLnConfig, ShopLnStatus};
 pub use starter::{
     stop_decision, Cards, StarterCard, StarterRefused, StopDecision, MAGIC_STARTER_CARDS, MAX_CARDS,
 };
-pub use shopln::{role, Book, Role, SeedNotTaken, SeedRecord, Why};
-pub use shopln_node::{PaidSale, ShopLn, ShopLnArgs, ShopLnConfig, ShopLnStatus};
 pub use swap::{
     SaleSwap, SwapDriver, SwapRecord, SwapRequest, MAGIC_SWAP_RECORD, NOT_FOR_THIS_SALE,
 };

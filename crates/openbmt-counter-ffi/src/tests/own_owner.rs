@@ -550,6 +550,7 @@ fn lk_79_the_real_owner_node_sends_the_real_counter_its_starter_line_through_the
         own_node: None,
         lightning: None,
         link_proxy: None,
+        shop_seed: None,
     });
     rig.send(vec![peers_event()]);
     Rd::ok(&rig.call(OP_PUMP, handle, &W::new().u64(T0 + 100).u32(50).0));

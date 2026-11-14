@@ -152,9 +152,9 @@ use crate::lightning::{
 use crate::notices::NodeRecords;
 use crate::paired_own::OwnPairingRecord;
 use crate::settings::{check_not_rolled, decode_file, SettingsFault, SettingsRefused};
-use crate::starter::{stop_decision, Cards, StarterCard, StarterRefused, StopDecision};
 use crate::shopln::SeedNotTaken;
 use crate::shopln_node::{ShopLn, ShopLnArgs, ShopLnConfig, ShopLnStatus};
+use crate::starter::{stop_decision, Cards, StarterCard, StarterRefused, StopDecision};
 use crate::swap::{Effect, SaleSwap, SwapDriver, SwapRequest, Update};
 use crate::switch::{
     check_switch, PendingSwitch, SwitchNotice, SwitchRefused, SwitchStepRefused, Waiting,
