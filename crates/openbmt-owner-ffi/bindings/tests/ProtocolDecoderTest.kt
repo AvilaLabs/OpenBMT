@@ -55,6 +55,7 @@ object ProtocolDecoderTest {
         requestFrames()
         requestDetailFrame()
         webFrames()
+        shopLightningFrames()
         println("ProtocolDecoderTest: ok")
     }
 
@@ -690,6 +691,68 @@ object ProtocolDecoderTest {
         }
         rejects("an idle step with a call") {
             decodeResponse(header(0, Writer().u8(0).u8(1).u8(0).string("u").u32(0).string("t").bytes(ByteArray(0)).toByteArray())).webStep()
+        }
+    }
+
+    // ---- Shop Lightning on the owner phone ----
+
+    /** The `shop_lightning_preview` request of [shopLightningEdit], as the Rust test of the same name writes it. */
+    private const val SHOP_LIGHTNING_FRAME_HEX =
+        "4f424d6b01ed00010000000000000000" + "01" + "20000000" + "07".repeat(32) + "01" + "02000000" + "6162" + "00" +
+            "01" + "02000000" + "6364" + "01" + "09000000" + "312e322e332e343a35" + "01" + "0500000000000000" +
+            "01" + "0600000000000000"
+
+    private fun shopLightningFrames() {
+        val edit = ShopLightningEditArgs(
+            ShopLightningAction.Set,
+            counter = ByteArray(32) { 7 },
+            nodeId = "ab",
+            providerNodeId = "cd",
+            providerAddr = "1.2.3.4:5",
+            capSats = 5,
+            maxOpeningFeeSats = 6,
+        )
+        val frame = requestFrame(237, 1) { it.shopLightningEdit(edit) }
+        check(hex(frame) == SHOP_LIGHTNING_FRAME_HEX) { hex(frame) }
+        val remove = requestFrame(237, 1) { it.shopLightningEdit(ShopLightningEditArgs(ShopLightningAction.Remove)) }
+        check(hex(remove) == "4f424d6b01ed000100000000000000" + "02" + "00".repeat(7)) { hex(remove) }
+
+        val held = Writer().bytes(ByteArray(32) { 1 }).bytes(ByteArray(33) { 2 }).bytes(ByteArray(32) { 3 })
+            .bytes(ByteArray(33) { 4 }).string("203.0.113.7:9735").u64(5_000_000).u64(20_000).toByteArray()
+        val report = Writer().u64(1_000).u64(11).u64(22).u64(33).u64(44).u64(55).u8(2).toByteArray()
+        val off = Writer().bool(false).bool(false).u32(1).bytes(ByteArray(32) { 1 }).u32(0).u8(0).u8(0).toByteArray()
+        val offState = decodeResponse(header(0, off)).let { it.shopLightningState().also { _ -> it.end() } }
+        check(!offState.on && !offState.ownWallet && offState.counters.size == 1 && offState.boxes.isEmpty())
+        check(offState.held == null && offState.report == null)
+        val on = Writer().bool(true).bool(false).u32(0).u32(0).u8(1).toByteArray() + held + byteArrayOf(1) + report
+        val state = decodeResponse(header(0, on)).let { it.shopLightningState().also { _ -> it.end() } }
+        val h = state.held!!
+        check(state.on && h.counter.size == 32 && h.nodeId.size == 33 && h.providerAddr == "203.0.113.7:9735")
+        check(h.capSats == 5_000_000L && h.maxOpeningFeeSats == 20_000L)
+        val r = state.report!!
+        check(r.takenAt == 1_000L && r.balanceSats == 11L && r.receiveRoomSats == 22L && r.openingFeesPaidSats == 33L)
+        check(r.lastStoredAt == 44L && r.lastSweepAt == 55L && r.notOffered == NotOffered.ChainBehind)
+        for ((tag, cause) in listOf(0 to NotOffered.Offered, 1 to NotOffered.SecondDeviceAway, 3 to NotOffered.NoUsableChannel, 4 to NotOffered.ProviderSilent)) {
+            val one = Writer().bool(false).bool(false).u32(0).u32(0).u8(0).u8(1).u64(1).u64(2).u64(3).u64(4).u64(5).u64(6).u8(tag).toByteArray()
+            val got = decodeResponse(header(0, one)).let { it.shopLightningState().also { _ -> it.end() } }
+            check(got.report!!.notOffered == cause)
+        }
+        rejects("a cause that is not defined") {
+            val bad = Writer().bool(false).bool(false).u32(0).u32(0).u8(0).u8(1).u64(1).u64(2).u64(3).u64(4).u64(5).u64(6).u8(5).toByteArray()
+            decodeResponse(header(0, bad)).shopLightningState()
+        }
+        rejects("a report that ends early") {
+            decodeResponse(header(0, on.copyOf(on.size - 1))).shopLightningState()
+        }
+
+        for ((tag, class_) in listOf(0 to ShopLightningClass.Free, 1 to ShopLightningClass.Loosen, 2 to ShopLightningClass.Redirect)) {
+            val body = Writer().u32(7).u8(tag).bool(tag != 0).bool(false).u8(1).toByteArray() + held + Writer().bytes(byteArrayOf(9)).toByteArray()
+            val preview = decodeResponse(header(0, body)).let { it.shopLightningPreview().also { _ -> it.end() } }
+            check(preview.version == 7L && preview.changeClass == class_ && preview.needsKeyApp == (tag != 0))
+            check(!preview.nothingChanged && preview.after!!.capSats == 5_000_000L && preview.settings.contentEquals(byteArrayOf(9)))
+        }
+        rejects("a class that is not defined") {
+            decodeResponse(header(0, Writer().u32(7).u8(3).bool(true).bool(false).u8(0).bytes(byteArrayOf()).toByteArray())).shopLightningPreview()
         }
     }
 

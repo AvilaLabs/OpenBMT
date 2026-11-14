@@ -75,7 +75,8 @@ use openbmt_counter_node::DriverPort;
 use openbmt_courier::{
     decode_records, received_content, Courier, Post, Received, RelayPost, SendError,
 };
-use openbmt_link::{Kind, Role};
+use openbmt_link::shopln::LightningReport;
+use openbmt_link::{Kind, Role, StoreParties};
 use openbmt_pos::PosNotice;
 
 use crate::batch_outbox::{BatchOutbox, BatchOutboxError, PendingBatch};
@@ -83,7 +84,7 @@ use crate::copy::{CheckInTaken, CopyError, CounterCopy, Stop};
 use crate::range_outbox::{PendingRange, RangeOutbox, RangeOutboxError};
 use crate::settings_roster::{RosterEntry, RosterError, SettingsRoster};
 use crate::switch_outbox::{PendingSwitch, SwitchOutbox, SwitchOutboxError};
-use crate::watcher::OwnerWatcher;
+use crate::watcher::{write_file, OwnerWatcher};
 
 /// Most lines the link's own notes keep; the oldest goes first.
 pub const NOTE_LOG: usize = 64;
@@ -100,6 +101,45 @@ pub const BATCH_RESEND_SECS: u64 = 120;
 
 /// Seconds a batch may wait before the owner is told (LK-73): 24 hours.
 pub const BATCH_ALERT_SECS: u64 = 24 * 60 * 60;
+
+/// The file the newest Lightning report is kept in, under the link's
+/// directory (SL-78).
+pub const LIGHTNING_REPORT_FILE: &str = "lightning-report.bin";
+
+/// The newest report of the Lightning counter and when it came (SL-78,
+/// LK-84). It is not a record: the next report replaces it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TakenReport {
+    /// The Lightning counter that sent it.
+    pub from: DeviceId,
+    /// When the link took it, by the clock the steps were given.
+    pub taken_at: u64,
+    /// What it says.
+    pub report: LightningReport,
+}
+
+impl TakenReport {
+    /// The file's bytes: the sender, the time as `u64` and the report's
+    /// content.
+    fn to_bytes(self) -> Vec<u8> {
+        let mut out = self.from.to_bytes().to_vec();
+        out.extend_from_slice(&self.taken_at.to_le_bytes());
+        out.extend_from_slice(&self.report.to_bytes());
+        out
+    }
+
+    /// Read the file's bytes strictly.
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let from = DeviceId::from_bytes(bytes.get(..32)?.try_into().ok()?).ok()?;
+        let taken_at = u64::from_le_bytes(bytes.get(32..40)?.try_into().ok()?);
+        let report = LightningReport::from_bytes(bytes.get(40..)?).ok()?;
+        Some(Self {
+            from,
+            taken_at,
+            report,
+        })
+    }
+}
 
 /// One thing the Box reported (BX-42): shown as the Box's, never as the
 /// owner's own finding.
@@ -406,6 +446,11 @@ pub struct OwnerLink<R: Post = RelayPost> {
     held: BTreeMap<DeviceId, HeldBatches>,
     /// LK-71: when the pending batches of a counter were last sent.
     batches_sent_at: BTreeMap<DeviceId, u64>,
+    /// LK-80: the Lightning counter and the Box of the settings in force,
+    /// when they name Shop Lightning. Only that counter's reports are taken.
+    shop_lightning: Option<StoreParties>,
+    /// SL-78: the newest report of the Lightning counter.
+    lightning_report: Option<TakenReport>,
 }
 
 impl<R: Post> OwnerLink<R> {
@@ -444,6 +489,10 @@ impl<R: Post> OwnerLink<R> {
         let ranges = RangeOutbox::open(&root).map_err(OwnerLinkError::Ranges)?;
         let switches = SwitchOutbox::open(&root).map_err(OwnerLinkError::Switches)?;
         let roster = SettingsRoster::open(&root).map_err(OwnerLinkError::Roster)?;
+        // A report that does not read is dropped: the next one replaces it.
+        let lightning_report = std::fs::read(root.join(LIGHTNING_REPORT_FILE))
+            .ok()
+            .and_then(|bytes| TakenReport::from_bytes(&bytes));
         Ok(Self {
             courier,
             root,
@@ -473,6 +522,8 @@ impl<R: Post> OwnerLink<R> {
             roster,
             held: BTreeMap::new(),
             batches_sent_at: BTreeMap::new(),
+            shop_lightning: None,
+            lightning_report,
         })
     }
 
@@ -521,6 +572,23 @@ impl<R: Post> OwnerLink<R> {
             }),
             last_check_in_at: self.last_check_in_at.get(counter).copied(),
         })
+    }
+
+    /// LK-80: name the parties of Shop Lightning in the settings in force,
+    /// or `None` when they do not name it. A report is taken only from the
+    /// Lightning counter they name.
+    pub fn set_shop_lightning(&mut self, parties: Option<StoreParties>) {
+        self.shop_lightning = parties;
+    }
+
+    /// SL-78, LK-84: the newest report of the Lightning counter of the
+    /// settings in force, and when it came. A report of a counter the
+    /// settings no longer name is not given.
+    pub fn lightning_report(&self) -> Option<&TakenReport> {
+        let parties = self.shop_lightning.as_ref()?;
+        self.lightning_report
+            .as_ref()
+            .filter(|r| r.from == parties.counter)
     }
 
     /// The alerts that are raised now (LK-62). Each is in the list once.
@@ -1495,6 +1563,7 @@ impl<R: Post> OwnerLink<R> {
             Kind::Records => self.take_records(message.from, &message.content, reply_due),
             Kind::CheckIn => self.take_check_in(message.from, &message.content, now),
             Kind::PosNotice => self.take_pos_notice(&message, now),
+            Kind::LightningReport => self.take_lightning_report(&message, now),
             Kind::DeviceList => self.note(
                 "CR-166: a device list: it travels inside the settings, so it is dropped"
                     .to_string(),
@@ -1584,6 +1653,45 @@ impl<R: Post> OwnerLink<R> {
             notice,
             taken_at: now,
         });
+    }
+
+    /// LK-80, LK-84: keep the Lightning counter's report, whole in a file of
+    /// its own, in place of the one before. A report from any other sender,
+    /// or with Shop Lightning not named by the settings, is refused with a
+    /// note, as is one that does not decode.
+    fn take_lightning_report(&mut self, message: &Received, now: u64) {
+        let from = message.from;
+        if !StoreParties::allows(
+            self.shop_lightning.as_ref(),
+            Kind::LightningReport,
+            &from,
+            &self.courier.device_id(),
+        ) {
+            self.note(format!(
+                "LK-80: a Lightning report from {from:?}, which is not the Lightning counter: \
+                 refused"
+            ));
+            return;
+        }
+        let report = match LightningReport::from_bytes(&message.content) {
+            Ok(report) => report,
+            Err(e) => {
+                self.note(format!(
+                    "LK-84: a Lightning report from {from:?} does not decode: {e}"
+                ));
+                return;
+            }
+        };
+        let taken = TakenReport {
+            from,
+            taken_at: now,
+            report,
+        };
+        if let Err(e) = write_file(&self.root, LIGHTNING_REPORT_FILE, &taken.to_bytes()) {
+            self.note(format!("SL-78: the Lightning report was not kept: {e}"));
+            return;
+        }
+        self.lightning_report = Some(taken);
     }
 
     /// LK-60.

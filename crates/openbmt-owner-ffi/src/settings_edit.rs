@@ -388,6 +388,7 @@ pub(crate) fn to_edit(
         lightning_node,
         swap,
         watch_key: None,
+        shop_lightning: None,
     })
 }
 

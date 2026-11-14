@@ -67,6 +67,7 @@ mod requests;
 mod say;
 mod settings_edit;
 mod setup_lock;
+mod shop_lightning;
 mod signer_views;
 mod starter;
 mod views;
@@ -122,6 +123,10 @@ pub use settings_edit::{
     SwapAction,
 };
 pub use setup_lock::PinChangeArgs;
+pub use shop_lightning::{
+    LightningReportView, NotOfferedView, ShopLightningAction, ShopLightningClass,
+    ShopLightningEditArgs, ShopLightningHeldView, ShopLightningPreviewView, ShopLightningView,
+};
 pub use starter::{
     OwnRepinKind, OwnRepinView, StarterChangeKind, StarterCheckView, StarterCoinView,
     StarterFeeArgs, StarterHeldArgs, StarterImageView, StarterLateMoveArgs, StarterLateView,

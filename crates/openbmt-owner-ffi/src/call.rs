@@ -126,6 +126,11 @@
 //!   OA-115 to OA-118): build them from the queue, the open sessions, the
 //!   file for the shop's wallet, taking what it returns, abandoning one, and
 //!   the merge of the offer.
+//! - 236 and 237: Shop Lightning on the owner phone (`docs/SHOP-LIGHTNING-RULES.md`
+//!   SL-45, SL-76 to SL-78): what the settings name and the newest report of
+//!   the Lightning counter, and the preview of turning it on, changing it or
+//!   turning it off, which stores nothing and gives the bytes `queue_settings`
+//!   takes.
 //! - 146: the full ledger (`docs/BOOKS-RULES.md` BK-19), made only when the
 //!   request says the person accepted the warning; `false` refuses. The
 //!   books call (144) never holds it.
@@ -195,6 +200,10 @@ use crate::settings_edit::{
     SwapAction,
 };
 use crate::setup_lock::{self, PinChangeArgs};
+use crate::shop_lightning::{
+    LightningReportView, NotOfferedView, ShopLightningAction, ShopLightningClass,
+    ShopLightningEditArgs, ShopLightningHeldView, ShopLightningPreviewView, ShopLightningView,
+};
 use crate::signer_views::{
     FirstAddressArgs, FirstAddressKind, FirstAddressView, RegistrationView, SignerBuiltView,
     SignerExportArgs, SignerFileView, SignerLineView, SignerTakeArgs, SignerTakenView,
@@ -1071,6 +1080,15 @@ fn build_ops() -> Vec<Op> {
         op(235, "starter_line_set", Node, |c, a: StarterLineSetArgs| {
             c.entry()?.starter_line_set(a)
         }),
+        op(236, "shop_lightning_report", Node, |c, _: ()| {
+            c.entry()?.shop_lightning_report()
+        }),
+        op(
+            237,
+            "shop_lightning_preview",
+            Node,
+            |c, a: ShopLightningEditArgs| c.entry()?.shop_lightning_preview(a),
+        ),
     ]
 }
 
@@ -1257,6 +1275,14 @@ fn definitions() -> Vec<TypeDef> {
         SettingsEditArgs::define(),
         SettingChangeView::define(),
         SettingsPreviewView::define(),
+        NotOfferedView::define(),
+        ShopLightningHeldView::define(),
+        LightningReportView::define(),
+        ShopLightningView::define(),
+        ShopLightningAction::define(),
+        ShopLightningEditArgs::define(),
+        ShopLightningClass::define(),
+        ShopLightningPreviewView::define(),
         DeliverView::define(),
         AlertView::define(),
         CounterView::define(),

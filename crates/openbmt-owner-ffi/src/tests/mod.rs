@@ -21,6 +21,7 @@ mod requests;
 mod screen;
 mod settings;
 mod setup_lock;
+mod shop_lightning;
 mod starter;
 mod strict;
 mod watch;

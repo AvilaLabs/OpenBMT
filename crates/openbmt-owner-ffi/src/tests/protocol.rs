@@ -209,6 +209,8 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (233, "web_code_read"),
         (234, "request_read"),
         (235, "starter_line_set"),
+        (236, "shop_lightning_report"),
+        (237, "shop_lightning_preview"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

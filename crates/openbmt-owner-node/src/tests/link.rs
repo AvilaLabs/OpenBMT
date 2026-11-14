@@ -16,7 +16,8 @@ use openbmt_counter_node::{CounterLink, CounterLinkConfig, Node, NodeConfig};
 use openbmt_courier::{
     decode_received, records_content, Courier, FirstStart, MemoryPost, MemoryRelay, Received,
 };
-use openbmt_link::{Kind, Role};
+use openbmt_link::shopln::{LightningReport, NotOffered};
+use openbmt_link::{Kind, Role, StoreParties};
 
 use super::*;
 use crate::copy::{CheckInTaken, CopyError, CounterCopy, Stop};
@@ -2859,4 +2860,128 @@ fn lk_79_a_starter_line_goes_to_a_counter_that_has_not_switched_and_is_not_kept_
     w.send_records(&full.records()[4..]);
     w.step(T0 + 1_002);
     assert!(w.link.starter_targets().is_empty());
+}
+
+fn report(balance: u64, not_offered: NotOffered) -> LightningReport {
+    LightningReport {
+        balance_sats: balance,
+        receive_room_sats: 4_000_000,
+        opening_fees_paid_sats: 1_200,
+        last_stored_at: 9_000,
+        last_sweep_at: 0,
+        not_offered,
+    }
+}
+
+fn parties(counter: DeviceId) -> Option<StoreParties> {
+    Some(StoreParties {
+        counter,
+        second_device: id(90).device_id(),
+    })
+}
+
+impl World {
+    fn send_report(&mut self, bytes: &[u8]) {
+        self.counter_side
+            .send(&owner(), Kind::LightningReport, bytes)
+            .unwrap();
+    }
+}
+
+#[test]
+fn lk_84_the_newest_report_of_the_lightning_counter_is_kept_whole_in_a_file() {
+    let mut w = world();
+    w.link.set_shop_lightning(parties(counter()));
+    assert!(w.link.lightning_report().is_none());
+    w.send_report(&report(100, NotOffered::Offered).to_bytes());
+    w.step(T0);
+    let first = *w.link.lightning_report().expect("kept");
+    assert_eq!(first.from, counter());
+    assert_eq!(first.taken_at, T0);
+    assert_eq!(first.report, report(100, NotOffered::Offered));
+    // The next one replaces it.
+    w.send_report(&report(250, NotOffered::SecondDeviceAway).to_bytes());
+    w.step(T0 + 30);
+    let second = *w.link.lightning_report().unwrap();
+    assert_eq!(second.taken_at, T0 + 30);
+    assert_eq!(second.report, report(250, NotOffered::SecondDeviceAway));
+    assert!(w.notes().is_empty());
+    // One file, whole: no temporary file is left.
+    let file = w.dir.path().join(crate::LIGHTNING_REPORT_FILE);
+    let bytes = fs::read(&file).unwrap();
+    assert_eq!(
+        bytes.len(),
+        32 + 8 + report(0, NotOffered::Offered).to_bytes().len()
+    );
+    assert!(!w.dir.path().join("lightning-report.bin.tmp").exists());
+    // A link started again reads the newest.
+    let again_dir = Dir::new();
+    let mut again = OwnerLink::new(
+        courier(
+            &w.relay,
+            id(1),
+            Role::Owner,
+            (counter(), Role::Counter),
+            &again_dir,
+            FirstStart::Yes,
+        ),
+        w.dir.path(),
+        devices(),
+        vec![counter()],
+        config(),
+    )
+    .unwrap();
+    assert!(again.lightning_report().is_none());
+    again.set_shop_lightning(parties(counter()));
+    assert_eq!(again.lightning_report(), Some(&second));
+}
+
+#[test]
+fn lk_80_a_report_is_taken_from_the_lightning_counter_only() {
+    let mut w = world();
+    // Shop Lightning is off: no sender is the Lightning counter.
+    w.send_report(&report(1, NotOffered::Offered).to_bytes());
+    w.step(T0);
+    assert!(w.link.lightning_report().is_none());
+    assert_eq!(w.notes().len(), 1);
+    // Another counter is the Lightning counter: this one is refused.
+    w.link.set_shop_lightning(parties(id(50).device_id()));
+    w.send_report(&report(2, NotOffered::Offered).to_bytes());
+    w.step(T0 + 1);
+    assert!(w.link.lightning_report().is_none());
+    let notes = w.notes();
+    assert_eq!(notes.len(), 1);
+    assert!(notes[0].contains("LK-80"), "{notes:?}");
+    assert!(!w.dir.path().join(crate::LIGHTNING_REPORT_FILE).exists());
+}
+
+#[test]
+fn lk_84_a_report_that_does_not_decode_is_refused_and_the_old_one_stays() {
+    let mut w = world();
+    w.link.set_shop_lightning(parties(counter()));
+    w.send_report(&report(7, NotOffered::ChainBehind).to_bytes());
+    w.step(T0);
+    let kept = *w.link.lightning_report().unwrap();
+    let mut cut = report(8, NotOffered::Offered).to_bytes();
+    cut.pop();
+    w.send_report(&cut);
+    let mut long = report(8, NotOffered::Offered).to_bytes();
+    long.push(0);
+    w.send_report(&long);
+    w.step(T0 + 1);
+    assert_eq!(w.link.lightning_report(), Some(&kept));
+    assert_eq!(w.notes().len(), 2);
+}
+
+#[test]
+fn sl_78_a_report_of_a_counter_the_settings_no_longer_name_is_not_shown() {
+    let mut w = world();
+    w.link.set_shop_lightning(parties(counter()));
+    w.send_report(&report(7, NotOffered::Offered).to_bytes());
+    w.step(T0);
+    assert!(w.link.lightning_report().is_some());
+    w.link.set_shop_lightning(parties(id(50).device_id()));
+    assert!(w.link.lightning_report().is_none());
+    w.link.set_shop_lightning(None);
+    assert!(w.link.lightning_report().is_none());
 }

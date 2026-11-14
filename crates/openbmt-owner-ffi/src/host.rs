@@ -51,7 +51,7 @@ use openbmt_core::wallet::WalletDescription;
 use openbmt_core::wallet_single::ImportedWallet;
 use openbmt_counter_node::{DriverPort, BATCH_MIN_COUNT};
 use openbmt_courier::{Courier, CourierConfig, FirstStart};
-use openbmt_link::{ClientConfig, Role, Route};
+use openbmt_link::{ClientConfig, Role, Route, StoreParties};
 use openbmt_net_io::{
     Clock, Driver, DriverConfig, EventReceiver, FileStorage, OsRandomness, SystemClock,
 };
@@ -108,6 +108,9 @@ use crate::requests::{
 };
 use crate::say::{counter_words, link_alert_words, own_alert_words, words_for};
 use crate::settings_edit::{preview_view, to_edit, SettingsEditArgs, SettingsPreviewView};
+use crate::shop_lightning::{
+    self, ShopLightningEditArgs, ShopLightningPreviewView, ShopLightningView,
+};
 use crate::signer_views::{
     file_view, record_view, registration_view, taken_view, FirstAddressArgs, FirstAddressView,
     RegistrationView, SignerBuiltView, SignerFileView, SignerTakenView,
@@ -708,6 +711,13 @@ fn follow_settings(
     if counters.is_empty() && boxes.is_empty() && node.owner().known_settings().is_none() {
         return Ok(());
     }
+    // LK-80: a report is taken from the Lightning counter the settings in
+    // force name.
+    link.set_shop_lightning(
+        node.owner()
+            .known_settings()
+            .and_then(StoreParties::from_settings),
+    );
     link.follow(&counters, &boxes)
 }
 
@@ -1699,6 +1709,38 @@ impl Entry {
                 .settings_preview(&edit)
                 .map_err(|r| queue_error(&OwnerError::Refused(r)))?;
             Ok(preview_view(&preview))
+        })
+    }
+
+    /// SL-45, SL-78: what the settings in force name of Shop Lightning, and
+    /// the newest report of its Lightning counter.
+    pub(crate) fn shop_lightning_report(&self) -> Result<ShopLightningView, AppError> {
+        self.run(None, |st| {
+            let owner = st.node.owner();
+            let report = st.link.as_ref().and_then(|l| l.lightning_report());
+            Ok(shop_lightning::view(
+                owner.is_own_wallet(),
+                owner.known_settings(),
+                report,
+            ))
+        })
+    }
+
+    /// SL-76, SL-77, AP-13: what turning Shop Lightning on, changing it or
+    /// turning it off would do to the settings, with its class. Nothing is
+    /// stored.
+    pub(crate) fn shop_lightning_preview(
+        &self,
+        args: ShopLightningEditArgs,
+    ) -> Result<ShopLightningPreviewView, AppError> {
+        let edit = shop_lightning::to_edit(args)?;
+        self.run(None, move |st| {
+            let preview = st
+                .node
+                .owner()
+                .settings_preview(&edit)
+                .map_err(|r| queue_error(&OwnerError::Refused(r)))?;
+            Ok(shop_lightning::preview_view(&preview))
         })
     }
 

@@ -231,6 +231,8 @@ private const val OP_WEB_REPLY = 232
 private const val OP_WEB_CODE_READ = 233
 private const val OP_REQUEST_READ = 234
 private const val OP_STARTER_LINE_SET = 235
+private const val OP_SHOP_LIGHTNING_REPORT = 236
+private const val OP_SHOP_LIGHTNING_PREVIEW = 237
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -270,6 +272,17 @@ private const val TAG_RETURN_STATE_VIEW_QUEUED = 0
 private const val TAG_RETURN_STATE_VIEW_SENT = 1
 private const val TAG_RETURN_STATE_VIEW_DONE = 2
 private const val TAG_RETURN_STATE_VIEW_CANCELLED = 3
+private const val TAG_NOT_OFFERED_VIEW_OFFERED = 0
+private const val TAG_NOT_OFFERED_VIEW_SECOND_DEVICE_AWAY = 1
+private const val TAG_NOT_OFFERED_VIEW_CHAIN_BEHIND = 2
+private const val TAG_NOT_OFFERED_VIEW_NO_USABLE_CHANNEL = 3
+private const val TAG_NOT_OFFERED_VIEW_PROVIDER_SILENT = 4
+private const val TAG_SHOP_LIGHTNING_ACTION_SET = 0
+private const val TAG_SHOP_LIGHTNING_ACTION_CHANGE = 1
+private const val TAG_SHOP_LIGHTNING_ACTION_REMOVE = 2
+private const val TAG_SHOP_LIGHTNING_CLASS_FREE = 0
+private const val TAG_SHOP_LIGHTNING_CLASS_LOOSEN = 1
+private const val TAG_SHOP_LIGHTNING_CLASS_REDIRECT = 2
 private const val TAG_OWN_REPIN_KIND_DONE = 0
 private const val TAG_OWN_REPIN_KIND_ALREADY_DONE = 1
 private const val TAG_OWN_REPIN_KIND_NOT_READY = 2
@@ -998,6 +1011,85 @@ class SettingsPreview(
     val settings: ByteArray,
     /** The shop's currency after the change. */
     val currency: ShopCurrency = ShopCurrency.Usd,
+)
+
+/** Why Lightning is not offered, as the Lightning counter's report says it (LK-84, SL-41). */
+enum class NotOffered { Offered, SecondDeviceAway, ChainBehind, NoUsableChannel, ProviderSilent }
+
+/** The Shop Lightning the settings in force name (SL-71): the cap and the provider the page shows are these (SL-78). */
+class ShopLightningHeld(
+    /** The Lightning counter, 32 bytes. */
+    val counter: ByteArray,
+    /** The node's ID, 33 bytes. */
+    val nodeId: ByteArray,
+    /** The Box that keeps the second copy, 32 bytes. */
+    val secondDevice: ByteArray,
+    /** The provider's node ID, 33 bytes. */
+    val providerNodeId: ByteArray,
+    /** The provider's IP address and port as text. */
+    val providerAddr: String,
+    val capSats: Long,
+    val maxOpeningFeeSats: Long,
+)
+
+/** The newest report of the Lightning counter and when it came (SL-78, LK-84). Times are seconds since 1970; 0 is never. */
+class LightningReport(
+    val takenAt: Long,
+    val balanceSats: Long,
+    val receiveRoomSats: Long,
+    val openingFeesPaidSats: Long,
+    val lastStoredAt: Long,
+    val lastSweepAt: Long,
+    val notOffered: NotOffered,
+)
+
+/**
+ * What the Shop Lightning page shows (SL-45, SL-78): whether the settings in force name it, whether the shop uses its
+ * own wallet (no way to carry a change, SL-76), the counters and Boxes to pick from, what the settings name and the
+ * newest report.
+ */
+class ShopLightningState(
+    val on: Boolean,
+    val ownWallet: Boolean,
+    val counters: List<ByteArray>,
+    val boxes: List<ByteArray>,
+    val held: ShopLightningHeld?,
+    val report: LightningReport?,
+)
+
+/** What an edit of Shop Lightning does. */
+enum class ShopLightningAction { Set, Change, Remove }
+
+/**
+ * An edit of Shop Lightning. Set (a turn-on) needs [counter], [nodeId], the provider's two fields, [capSats] and
+ * [maxOpeningFeeSats]; [secondDevice] absent takes the shop's Box. Change takes only what it changes; the provider's
+ * two fields go together. Remove takes none.
+ */
+class ShopLightningEditArgs(
+    val action: ShopLightningAction,
+    val counter: ByteArray? = null,
+    /** The node's ID as the stick's code gives it: 66 lower-case hexadecimal digits. */
+    val nodeId: String? = null,
+    val secondDevice: ByteArray? = null,
+    val providerNodeId: String? = null,
+    /** The provider's IP address and port. */
+    val providerAddr: String? = null,
+    val capSats: Long? = null,
+    val maxOpeningFeeSats: Long? = null,
+)
+
+/** The class of a change of the settings (AP-13). */
+enum class ShopLightningClass { Free, Loosen, Redirect }
+
+/** What [OwnerNode.shopLightningPreview] found; [settings] are the bytes [OwnerNode.queueSettings] takes. */
+class ShopLightningPreview(
+    val version: Long,
+    val changeClass: ShopLightningClass,
+    val needsKeyApp: Boolean,
+    val nothingChanged: Boolean,
+    /** What Shop Lightning would be after the change; null when it would be off. */
+    val after: ShopLightningHeld?,
+    val settings: ByteArray,
 )
 
 enum class OutboxKind { Transaction, Batch, Settings, Pairing, BoxWelcome }
@@ -2408,6 +2500,60 @@ internal fun Reader.settingsPreview(): SettingsPreview =
         shopCurrency(),
     )
 
+private fun Reader.notOffered(): NotOffered =
+    when (u8()) {
+        TAG_NOT_OFFERED_VIEW_OFFERED -> NotOffered.Offered
+        TAG_NOT_OFFERED_VIEW_SECOND_DEVICE_AWAY -> NotOffered.SecondDeviceAway
+        TAG_NOT_OFFERED_VIEW_CHAIN_BEHIND -> NotOffered.ChainBehind
+        TAG_NOT_OFFERED_VIEW_NO_USABLE_CHANNEL -> NotOffered.NoUsableChannel
+        TAG_NOT_OFFERED_VIEW_PROVIDER_SILENT -> NotOffered.ProviderSilent
+        else -> tag("NotOfferedView")
+    }
+
+private fun Reader.shopLightningHeld(): ShopLightningHeld =
+    ShopLightningHeld(bytes(), bytes(), bytes(), bytes(), string(), u64(), u64())
+
+private fun Reader.lightningReport(): LightningReport =
+    LightningReport(u64(), u64(), u64(), u64(), u64(), u64(), notOffered())
+
+internal fun Reader.shopLightningState(): ShopLightningState =
+    ShopLightningState(
+        bool(), bool(), list { bytes() }, list { bytes() }, option { shopLightningHeld() },
+        option { lightningReport() },
+    )
+
+private fun Writer.shopLightningAction(v: ShopLightningAction): Writer =
+    u8(
+        when (v) {
+            ShopLightningAction.Set -> TAG_SHOP_LIGHTNING_ACTION_SET
+            ShopLightningAction.Change -> TAG_SHOP_LIGHTNING_ACTION_CHANGE
+            ShopLightningAction.Remove -> TAG_SHOP_LIGHTNING_ACTION_REMOVE
+        },
+    )
+
+internal fun Writer.shopLightningEdit(v: ShopLightningEditArgs): Writer =
+    shopLightningAction(v.action)
+        .option(v.counter) { bytes(it) }
+        .option(v.nodeId) { string(it) }
+        .option(v.secondDevice) { bytes(it) }
+        .option(v.providerNodeId) { string(it) }
+        .option(v.providerAddr) { string(it) }
+        .option(v.capSats) { u64(it) }
+        .option(v.maxOpeningFeeSats) { u64(it) }
+
+private fun Reader.shopLightningClass(): ShopLightningClass =
+    when (u8()) {
+        TAG_SHOP_LIGHTNING_CLASS_FREE -> ShopLightningClass.Free
+        TAG_SHOP_LIGHTNING_CLASS_LOOSEN -> ShopLightningClass.Loosen
+        TAG_SHOP_LIGHTNING_CLASS_REDIRECT -> ShopLightningClass.Redirect
+        else -> tag("ShopLightningClass")
+    }
+
+internal fun Reader.shopLightningPreview(): ShopLightningPreview =
+    ShopLightningPreview(
+        u32(), shopLightningClass(), bool(), bool(), option { shopLightningHeld() }, bytes(),
+    )
+
 private fun Writer.swapAction(v: SwapAction): Writer =
     u8(
         when (v) {
@@ -3022,6 +3168,21 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
     fun previewSettings(edit: SettingsEditArgs): SettingsPreview {
         val r = call(OP_SETTINGS_PREVIEW, handle) { it.settingsEdit(edit) }
         return r.settingsPreview().also { r.end() }
+    }
+
+    /** SL-45, SL-78: what the settings in force name of Shop Lightning, and the newest report of its Lightning counter. */
+    fun shopLightningReport(): ShopLightningState {
+        val r = call(OP_SHOP_LIGHTNING_REPORT, handle)
+        return r.shopLightningState().also { r.end() }
+    }
+
+    /**
+     * SL-76, SL-77, AP-13: what turning Shop Lightning on, changing it or turning it off would do to the settings,
+     * with the change's class. Nothing is stored; [queueSettings] takes the bytes of the preview.
+     */
+    fun shopLightningPreview(edit: ShopLightningEditArgs): ShopLightningPreview {
+        val r = call(OP_SHOP_LIGHTNING_PREVIEW, handle) { it.shopLightningEdit(edit) }
+        return r.shopLightningPreview().also { r.end() }
     }
 
     /** The watch key the settings in force name (32 bytes), or null when they name none (CR-185). */

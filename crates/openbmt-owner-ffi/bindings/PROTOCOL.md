@@ -232,6 +232,8 @@ ops run on another; it waits for at most 250 ms.
 233 web_code_read    handle zero  args string -> WebCodeView
 234 request_read     handle node  args RequestNumberArgs -> RequestDetailView
 235 starter_line_set handle node  args StarterLineSetArgs -> ()
+236 shop_lightning_report handle node  args () -> ShopLightningView
+237 shop_lightning_preview handle node  args ShopLightningEditArgs -> ShopLightningPreviewView
 ```
 
 ## Types
@@ -311,6 +313,17 @@ ShopCurrencyView: enum, one tag byte
 SettingsEditArgs: record: usd_per_btc: option<u64>, light_per_sale: option<u32>, light_budget: option<u32>, node_per_sale: option<u32>, node_budget: option<u32>, box_per_sale: option<u32>, box_budget: option<u32>, underpayment_tolerance_bps: option<u32>, refund_cap: option<u32>, refund_daily_cap: option<u32>, cashier_override_daily_cap: option<u32>, manager_override_ceiling: option<u32>, min_confirmations: option<u8>, final_confirmations: option<u8>, heartbeat_max_age_secs: option<u32>, tor_on: option<bool>, customer_wifi: option<bool>, min_sale_sats: option<u64>, tips_on: option<bool>, tip_percents: option<list<u8>>, shares: list<CounterShareView>, lightning: LightningAction, lightning_text: string, currency: CurrencyAction, swap: SwapAction, swap_name: string, swap_onion: string, swap_prefix: string, swap_max_sats: u64
 SettingChangeView: record: field: string, label: string, counter: option<list<u8>>, old: string, new: string, loosening: bool
 SettingsPreviewView: record: version: u32, changes: list<SettingChangeView>, needs_key_app: bool, nothing_changed: bool, shares_total_bps: u32, usd_per_btc: option<u64>, sats_per_usd: option<u64>, settings: list<u8>, currency: ShopCurrencyView
+NotOfferedView: enum, one tag byte
+    tags Offered=0 SecondDeviceAway=1 ChainBehind=2 NoUsableChannel=3 ProviderSilent=4
+ShopLightningHeldView: record: counter: list<u8>, node_id: list<u8>, second_device: list<u8>, provider_node_id: list<u8>, provider_addr: string, cap_sats: u64, max_opening_fee_sats: u64
+LightningReportView: record: taken_at: u64, balance_sats: u64, receive_room_sats: u64, opening_fees_paid_sats: u64, last_stored_at: u64, last_sweep_at: u64, not_offered: NotOfferedView
+ShopLightningView: record: on: bool, own_wallet: bool, counters: list<list<u8>>, boxes: list<list<u8>>, held: option<ShopLightningHeldView>, report: option<LightningReportView>
+ShopLightningAction: enum, one tag byte
+    tags Set=0 Change=1 Remove=2
+ShopLightningEditArgs: record: action: ShopLightningAction, counter: option<list<u8>>, node_id: option<string>, second_device: option<list<u8>>, provider_node_id: option<string>, provider_addr: option<string>, cap_sats: option<u64>, max_opening_fee_sats: option<u64>
+ShopLightningClass: enum, one tag byte
+    tags Free=0 Loosen=1 Redirect=2
+ShopLightningPreviewView: record: version: u32, class: ShopLightningClass, needs_key_app: bool, nothing_changed: bool, after: option<ShopLightningHeldView>, settings: list<u8>
 DeliverView: record: sent: u32, waiting: u32, notes: list<string>
 AlertView: record: kind: AlertKind, counter: list<u8>, value: u64, words: Words
 CounterView: record: counter: list<u8>, records: u64, head: list<u8>, check_in_seq: option<u64>, check_in_held: option<bool>, last_check_in_at: option<u64>, words: Words
