@@ -174,7 +174,8 @@ nothing: filters have false positives, and a peer can serve a false filter.
 - **WR-32.** A sale is confirmed at depth `d` when transactions with at
   least `d` confirmations each (WR-02) pay it at least the sale amount less
   the shop's tolerance. The tolerance is the settings' value in basis
-  points of the sale amount, rounded down.
+  points of the sale amount, rounded down; a value above 10,000 counts as
+  10,000.
 - **WR-33.** Confirmation is worked out again whenever the chain is asked
   about. If a block leaves the best chain, the payments confirmed in it go
   back to "seen", and the sale's status goes back with them. The library
@@ -318,8 +319,10 @@ library keeps that apart from what the random peers report.
   can be used now (WR-63). The own node alone gives no mode, however many
   times it reports. The Box's rules (WR-45) are as before; the own node adds
   a second way to the same mode and never lowers one the Box gave.
-  `SaleStatus::own_node_counted` is true exactly when the own node is what
-  makes the mode.
+  `SaleStatus::own_node_counted` is true when the own node has reported the
+  transaction, can be used now, and the mode stands with it: in node-only
+  mode always, otherwise once the light client has the transaction from 3
+  groups (WR-44). It can be true when the Box also gives the mode.
 - **WR-63.** The own node can be used when it is connected after its
   handshake, has shown a best height and has been heard from, and none of
   these fails, checked in this order. **[to tune]**
