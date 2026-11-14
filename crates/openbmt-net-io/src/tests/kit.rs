@@ -105,9 +105,9 @@ impl Clock for TestClock {
 pub struct CountingRandomness(pub u64);
 
 impl Randomness for CountingRandomness {
-    fn next_u64(&mut self) -> u64 {
+    fn next_u64(&mut self) -> Result<u64, crate::RandomError> {
         self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
-        self.0
+        Ok(self.0)
     }
 }
 

@@ -360,7 +360,7 @@ fn nr_80_with_the_encrypted_transport_off_the_old_one_is_used_at_once() {
 struct Guessable(CountingRandomness);
 
 impl crate::env::Randomness for Guessable {
-    fn next_u64(&mut self) -> u64 {
+    fn next_u64(&mut self) -> Result<u64, crate::RandomError> {
         self.0.next_u64()
     }
 
@@ -384,6 +384,32 @@ fn nr_80_randomness_that_may_be_guessed_gets_no_key() {
     let seen = wait_for(&handle, 10, has_peer).expect("no ready peer");
     assert_eq!(seen.last().and_then(transport_of), Some(PeerTransport::V1));
     assert_eq!(peer.accept_count(), 1);
+    handle.shutdown();
+}
+
+/// Randomness that gives nothing.
+struct Dry;
+
+impl crate::env::Randomness for Dry {
+    fn next_u64(&mut self) -> Result<u64, crate::RandomError> {
+        Err(crate::RandomError)
+    }
+}
+
+#[test]
+fn nr_23_a_dry_random_source_makes_no_connection() {
+    let peer = FakePeer::start(Behavior::Serve(Vec::new()));
+    let cfg = config_for(peer.addr, 2);
+    let mut handle =
+        Driver::spawn(cfg, MemStorage::default(), SystemClock, Dry, Vec::new()).unwrap();
+    let seen = wait_for(
+        &handle,
+        5,
+        |e| matches!(e, AppEvent::Note(t) if t.contains("random source")),
+    )
+    .expect("the driver says the source gave nothing");
+    assert!(seen.iter().all(|e| !has_peer(e)));
+    assert_eq!(peer.accept_count(), 0);
     handle.shutdown();
 }
 

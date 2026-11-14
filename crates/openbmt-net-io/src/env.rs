@@ -10,8 +10,6 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use bitcoin::hashes::{sha256, Hash};
-
 /// The two things the driver keeps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Key {
@@ -40,16 +38,30 @@ pub trait Clock {
     fn now(&self) -> u64;
 }
 
+/// The random source gave no numbers. Nothing is made from a number that was
+/// not drawn: the caller refuses the step that needed it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RandomError;
+
+impl Display for RandomError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("the system's random source gave no numbers")
+    }
+}
+
+impl std::error::Error for RandomError {}
+
 /// A source of random numbers, for the nonce of each connection (NR-11) and
 /// for the draw of the next address (NR-23). It must not repeat.
 pub trait Randomness {
-    /// The next number.
-    fn next_u64(&mut self) -> u64;
+    /// The next number, or an error when the source gave none. There is no
+    /// stand-in number.
+    fn next_u64(&mut self) -> Result<u64, RandomError>;
 
     /// Whether the numbers can be used for a secret key (NR-80). A source
-    /// that has fallen back to numbers an observer could guess says no, and
-    /// the driver then does not offer the encrypted transport. A source that
-    /// does not know says yes.
+    /// that knows its numbers could be guessed says no, and the driver then
+    /// does not offer the encrypted transport. A source that does not know
+    /// says yes.
     fn unpredictable(&self) -> bool {
         true
     }
@@ -72,15 +84,11 @@ impl Clock for SystemClock {
 /// An Android app passes its own [`Randomness`] (for example one over
 /// `SecureRandom`) instead.
 ///
-/// If a read from the file ever fails, the numbers that follow come from a
-/// hash of the clock and a counter. They do not repeat, which is all a nonce
-/// needs, but they are not unpredictable, and the failure is counted in
-/// [`OsRandomness::fallbacks`].
+/// If a read from the file fails, the call returns [`RandomError`]. No other
+/// numbers take the place of the ones that were not read.
 #[derive(Debug)]
 pub struct OsRandomness {
     file: File,
-    counter: u64,
-    fallbacks: u64,
 }
 
 impl OsRandomness {
@@ -88,43 +96,30 @@ impl OsRandomness {
     pub fn new() -> io::Result<Self> {
         Ok(Self {
             file: File::open("/dev/urandom")?,
-            counter: 0,
-            fallbacks: 0,
         })
     }
+}
 
-    /// How many numbers came from the fallback because a read failed.
-    pub fn fallbacks(&self) -> u64 {
-        self.fallbacks
+#[cfg(test)]
+impl OsRandomness {
+    /// A source over any file, for the tests.
+    pub(crate) fn with_file(file: File) -> Self {
+        Self { file }
     }
 }
 
 impl Randomness for OsRandomness {
-    fn unpredictable(&self) -> bool {
-        self.fallbacks == 0
+    fn next_u64(&mut self) -> Result<u64, RandomError> {
+        read_word(&mut self.file)
     }
+}
 
-    fn next_u64(&mut self) -> u64 {
-        let mut bytes = [0u8; 8];
-        self.counter = self.counter.wrapping_add(1);
-        if self.file.read_exact(&mut bytes).is_ok() {
-            return u64::from_le_bytes(bytes);
-        }
-        self.fallbacks = self.fallbacks.saturating_add(1);
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let mut input = Vec::with_capacity(24);
-        input.extend_from_slice(&nanos.to_le_bytes());
-        input.extend_from_slice(&self.counter.to_le_bytes());
-        let hash = sha256::Hash::hash(&input).to_byte_array();
-        let mut word = [0u8; 8];
-        for (slot, byte) in word.iter_mut().zip(hash.iter()) {
-            *slot = *byte;
-        }
-        u64::from_le_bytes(word)
-    }
+/// One number from a reader, or [`RandomError`] when it gives fewer than 8
+/// bytes.
+fn read_word(source: &mut impl Read) -> Result<u64, RandomError> {
+    let mut bytes = [0u8; 8];
+    source.read_exact(&mut bytes).map_err(|_| RandomError)?;
+    Ok(u64::from_le_bytes(bytes))
 }
 
 /// Values kept as files in one directory.

@@ -1470,15 +1470,35 @@ where
     /// old one when the settings say so, when the randomness may be
     /// predictable (a key from it would be no protection), or when NR-81 or
     /// the address book says so.
-    fn transport_for(&mut self, target: &Target, now: u64) -> TransportChoice {
+    /// `None` when the randomness gave no numbers for the key.
+    fn transport_for(&mut self, target: &Target, now: u64) -> Option<TransportChoice> {
         let remembered = self.v2.v1_until.get(target).is_some_and(|t| *t > now);
         let own = self.own.target.as_ref() == Some(target);
         let book_says_v1 =
             !own && book_key(target).is_some_and(|(a, p)| !self.book.v2_first(&a, p, now));
         if !self.config.v2 || remembered || book_says_v1 || !self.rng.unpredictable() {
-            return TransportChoice::V1;
+            return Some(TransportChoice::V1);
         }
-        TransportChoice::V2(V2Entropy::from_words(|| self.rng.next_u64()))
+        let mut words = [0u64; 8];
+        for word in &mut words {
+            *word = self.draw()?;
+        }
+        let mut next = words.into_iter();
+        Some(TransportChoice::V2(V2Entropy::from_words(|| {
+            next.next().unwrap_or_default()
+        })))
+    }
+
+    /// The next random number. If the source gave none, the driver says so
+    /// and the step that needed the number is not taken.
+    fn draw(&mut self) -> Option<u64> {
+        match self.rng.next_u64() {
+            Ok(n) => Some(n),
+            Err(e) => {
+                self.emit(AppEvent::Note(e.to_string()));
+                None
+            }
+        }
     }
 
     fn pause_target(&mut self, target: &Target, now: u64) {
@@ -1520,8 +1540,17 @@ where
 
     /// A socket is open: give it to the manager, or close it at once.
     fn adopt(&mut self, id: PeerId, target: Target, stream: TcpStream, own: bool, now: u64) {
-        let nonce = self.rng.next_u64();
-        let transport = self.transport_for(&target, now);
+        let (Some(nonce), Some(transport)) = (self.draw(), self.transport_for(&target, now)) else {
+            // No random numbers: the socket is closed and the dial counts as
+            // failed.
+            let _ = stream.shutdown(Shutdown::Both);
+            if own {
+                self.own_failed(false, now);
+            } else {
+                self.dial_failed(&target, now);
+            }
+            return;
+        };
         // NR-106: nobody but the own node is taken while the random peers
         // are not running.
         if self.node_only() && !own && !self.own.fallback {
@@ -1758,7 +1787,9 @@ where
             self.start_round_if_due(now);
         }
         for _ in 0..PICK_TRIES {
-            let random = self.rng.next_u64();
+            let Some(random) = self.draw() else {
+                break;
+            };
             let Some(picked) =
                 self.book
                     .pick_with(&wanted.avoid, wanted.want_filters, random, now, onion)
@@ -1869,7 +1900,14 @@ where
         let proxy = self.config.proxy;
         let to = target.clone();
         // NR-78: a fresh number for each connection.
-        let token = self.rng.next_u64();
+        let Some(token) = self.draw() else {
+            if own {
+                self.own_failed(false, now);
+            } else {
+                self.dial_failed(&target, now);
+            }
+            return;
+        };
         let spawned = thread::Builder::new()
             .name("net-dial".to_string())
             .spawn(move || {
@@ -1981,7 +2019,15 @@ where
             };
             let id = round.id;
             // NR-78: a fresh number for each lookup.
-            let token = self.rng.next_u64();
+            let Some(token) = self.draw() else {
+                // No random number: this lookup is not made and counts as
+                // failed.
+                if let Some(round) = self.round.as_mut() {
+                    round.outstanding = round.outstanding.saturating_sub(1);
+                    round.failed = round.failed.saturating_add(1);
+                }
+                continue;
+            };
             let net = self.net.clone();
             let tx = self.inbound_tx.clone();
             let asked = name.clone();

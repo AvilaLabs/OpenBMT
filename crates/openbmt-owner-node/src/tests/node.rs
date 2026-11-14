@@ -217,9 +217,9 @@ struct Spawned {
 struct Counter(u64);
 
 impl Randomness for Counter {
-    fn next_u64(&mut self) -> u64 {
+    fn next_u64(&mut self) -> Result<u64, openbmt_net_io::RandomError> {
         self.0 += 1;
-        self.0
+        Ok(self.0)
     }
 }
 

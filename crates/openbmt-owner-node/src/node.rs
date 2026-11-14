@@ -2160,14 +2160,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 .map_err(NodeError::Files)?;
         }
         let coins = pick(self.view.coins(tip));
-        let mut random = [0u8; 96];
-        for chunk in random.chunks_mut(8) {
-            let word = self.random.next_u64().to_le_bytes();
-            let n = chunk.len();
-            if let Some(src) = word.get(..n) {
-                chunk.copy_from_slice(src);
-            }
-        }
+        let random = self.random_bytes::<96>()?;
         let change_index = self.view.change_next();
         let dir = self.dir.clone();
         let built = if for_signer {
@@ -2250,14 +2243,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 .map_err(NodeError::Files)?;
         }
         let coins = pick(self.view.coins(tip));
-        let mut random = [0u8; 32];
-        for chunk in random.chunks_mut(8) {
-            let word = self.random.next_u64().to_le_bytes();
-            let n = chunk.len();
-            if let Some(src) = word.get(..n) {
-                chunk.copy_from_slice(src);
-            }
-        }
+        let random = self.random_bytes::<32>()?;
         let change_index = self.view.change_next();
         let dir = self.dir.clone();
         let built = self.owner.build_own_spend(
@@ -3520,6 +3506,24 @@ impl<P: OwnerPort> OwnerNode<P> {
                 )),
             }
         }
+    }
+
+    /// `N` bytes from the node's random source. If the source gives none,
+    /// nothing is built.
+    fn random_bytes<const N: usize>(&mut self) -> Result<[u8; N], NodeError> {
+        let mut out = [0u8; N];
+        for chunk in out.chunks_mut(8) {
+            let word = self
+                .random
+                .next_u64()
+                .map_err(|e| NodeError::NotReady(e.to_string()))?
+                .to_le_bytes();
+            let n = chunk.len();
+            if let Some(src) = word.get(..n) {
+                chunk.copy_from_slice(src);
+            }
+        }
+        Ok(out)
     }
 
     /// OC-47: work out again, from the coin view as it is, the facts of

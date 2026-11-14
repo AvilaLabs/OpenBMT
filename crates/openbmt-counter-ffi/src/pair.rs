@@ -35,13 +35,14 @@ pub(crate) fn refused_own(e: OwnPairRefused) -> CounterError {
 }
 
 /// A key's secret and a number of 32 bytes each, from the system's random
-/// source. A source that fell back to anything that can be guessed is
-/// refused.
+/// source. A source that gives no numbers, or that says its numbers can be
+/// guessed, is refused.
 fn draw() -> Result<([u8; 32], [u8; 32]), PairRefused> {
     let mut random = OsRandomness::new().map_err(|_| PairRefused::NoRandomness)?;
     let mut bytes = [0u8; 64];
     for chunk in bytes.chunks_mut(8) {
-        chunk.copy_from_slice(&random.next_u64().to_le_bytes());
+        let word = random.next_u64().map_err(|_| PairRefused::NoRandomness)?;
+        chunk.copy_from_slice(&word.to_le_bytes());
     }
     if !random.unpredictable() {
         return Err(PairRefused::NoRandomness);

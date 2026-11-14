@@ -89,11 +89,32 @@ fn nr_73_a_value_that_is_a_directory_is_an_error_not_an_empty_value() {
 fn nr_23_the_system_clock_and_urandom_give_changing_values() {
     assert!(SystemClock.now() > 1_700_000_000);
     let mut rng = OsRandomness::new().unwrap();
-    let a = rng.next_u64();
-    let b = rng.next_u64();
-    let c = rng.next_u64();
+    let a = rng.next_u64().unwrap();
+    let b = rng.next_u64().unwrap();
+    let c = rng.next_u64().unwrap();
     assert!(a != b || b != c);
-    assert_eq!(rng.fallbacks(), 0);
+    assert!(rng.unpredictable());
+}
+
+#[test]
+fn nr_23_a_source_that_gives_no_bytes_gives_an_error_never_a_number() {
+    // `/dev/null` reads as the end of the file at once.
+    let mut rng = OsRandomness::with_file(fs::File::open("/dev/null").unwrap());
+    for _ in 0..3 {
+        assert_eq!(rng.next_u64(), Err(crate::RandomError));
+    }
+    // A write-only file cannot be read at all.
+    let dir = TempDir::new("random-unreadable");
+    fs::create_dir_all(&dir.0).unwrap();
+    let path = dir.0.join("w");
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    let mut rng = OsRandomness::with_file(file);
+    assert_eq!(rng.next_u64(), Err(crate::RandomError));
 }
 
 #[test]
