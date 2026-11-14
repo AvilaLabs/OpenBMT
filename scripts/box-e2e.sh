@@ -526,7 +526,9 @@ note "$N1 / $N2"
 if await_line 2 pos 'pos: matches:' 'matches: 1' 15; then MATCHED=yes; else MATCHED=no; fi
 RECV11=$(pair posrecv "$K4" "$A3")
 note "$RECV11"
-# A device that is not on the list sends a notice.
+# A device that is not on the list sends a notice, once both of the
+# counter's notices are counted.
+await_line 2 pos 'pos: notices:' '2 taken' 15 || true
 TAKEN_BEFORE=$(ask 2 pos 'pos: notices:' && printf '%s' "$LAST")
 STRANGER11=$(pair notice "$K4" "$A3" stranger 9 paid 500)
 sleep 1
