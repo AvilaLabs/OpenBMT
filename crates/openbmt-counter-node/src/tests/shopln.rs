@@ -287,11 +287,7 @@ fn sl_77_a_plan_whose_seed_is_gone_is_forgotten() {
 
 #[test]
 fn sl_41_every_reason_has_written_words_of_its_own() {
-    // The reason of no address to sweep to has only its placeholder so far.
-    let (placeholders, all): (Vec<_>, Vec<_>) = all_shopln_words()
-        .into_iter()
-        .partition(|(name, _)| name == "ShopLightning::NoSweepAddress");
-    assert!(placeholders.iter().all(|(_, w)| is_placeholder(w)));
+    let all = all_shopln_words();
     let mut seen = std::collections::BTreeSet::new();
     for (name, words) in &all {
         assert!(!is_placeholder(words), "{name}");

@@ -86,7 +86,11 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   of it and is given again at every start until the counter says it has
   recorded the sale; it is then marked, so the library giving it again after
   a crash does not pay the sale twice, and the mark is dropped after 30
-  days.
+  days. A claimed payment is never dropped: it is credited to its sale, or
+  recorded as a late payment of the sale, or, when no sale can be found for
+  it, kept in the counter's Lightning book (at most 512; past that the node
+  keeps giving it). An invoice leaves the book when its sale is closed,
+  cancelled or quoted again, and a payment to it is then failed back.
 - **SL-22. The beta, said plainly.** The library marks `InProgress` and the
   async persister as beta, and its documents say this path "may lead to funds
   loss" in rare cases. This is why section 10 holds real funds back, and why
@@ -94,7 +98,10 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
 - **SL-23. When the second device is away.** A write that cannot reach it
   stays in progress; nothing panics. The node logs it, the counter's Lightning
   stops offering invoices (SL-41), and the manager sees which device is
-  missing. Payments already in flight finish when it returns.
+  missing. Payments already in flight finish when it returns. One node runs
+  on a node's folder at a time: the folder is locked before the node is
+  built and released only once it has stopped, so a change of settings
+  during a start never gives two nodes the same seed.
 - **SL-24. Order of writes.** Each channel's monitor goes to the second
   device first, then to the counter's own copy, so the second device never
   holds an older monitor. The channel manager, the provider's state and the
@@ -158,7 +165,9 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
 - **SL-29. The fee before the payment.** A payment that opens a channel
   shows the provider's fee to the customer's amount before the invoice is
   made, and the owner sets the most the shop will pay for one opening. Above
-  it, the sale is on-chain.
+  it, the sale is on-chain. A sale is credited with what arrived plus the
+  fee the provider took from it, and the opening fees paid so far count
+  what was taken, not what was quoted.
 - **SL-30. The window to be back online.** The node asks for
   `our_to_self_delay` of 2016 blocks (about two weeks), or the provider's
   `max_client_to_self_delay` if lower. A provider offering under 1008 blocks
@@ -180,11 +189,15 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   everything above half the cap to the shop's wallet by a splice out
   (`splice_channel`, `ln/channelmanager.rs:4828`, beta), in one
   transaction. The address is one the counter derives itself from the pinned
-  wallet description, never one sent by another device. The provider must
+  wallet description, never one sent by another device. It comes from the
+  counter's own address ranges, as a sale's address does, so it is never a
+  sale's, and a new one is taken after each transaction that pays it; with
+  none free there is no sweep and the counter says why. The wallet is read
+  again at each use, and a new wallet restarts the node. The provider must
   accept splices (`reject_inbound_splices` false on its side); one that does
   not is swept by a close (SL-36). What a close leaves to the shop that the
   library must spend itself (`SpendableOutputDescriptor`) is spent by the
-  library's `OutputSweeper` to an address derived the same way. The last
+  library's `OutputSweeper` to an address taken the same way. The last
   address the counter set is kept and used after a restart.
 - **SL-34. The cap.** Set by the owner, with a suggestion of one day's
   Lightning sales. The suggestion is never more than the counter's instant
@@ -297,14 +310,20 @@ section widens it.
   ID, make the counter close every channel of the node it runs (SL-36). It
   offers no invoice from then on. It keeps the seed, and keeps storing
   twice, until every channel is closed and its money is in the shop's
-  wallet; then it deletes the seed (SL-12, SL-13).
+  wallet; then it deletes the seed (SL-12, SL-13). The seed is deleted only
+  when the running node holds no channel, no balance still to claim, no
+  output still to sweep and no write still in progress. A Lightning book
+  that is there but cannot be read stops the node from starting and keeps
+  the seed; it is read again every 10 seconds.
 - **SL-78. What the owner sees.** With each check-in, the Lightning counter
   sends the owner a message of kind Lightning report (`docs/LINK-RULES.md`
   LK-84) with the facts of SL-45: the balance, the room to receive, the
   opening fees paid so far, when the Box last stored the state, the time of
   the last sweep, and why Lightning is not offered when it is not (SL-41).
   The owner phone shows the newest report and when it came. The cap and the
-  provider it shows are those of the settings.
+  provider it shows are those of the settings. While the counter still
+  holds the seed it goes on sending reports after the settings stop naming
+  it, so the owner can follow the closing until the money is back.
 - **SL-79. Tested.** The core's ID equals the library's (SL-72); settings
   with `shop_lightning` round-trip, and each broken case of SL-71 is refused;
   a counter given a seed of another ID stores nothing; a write the Box did
