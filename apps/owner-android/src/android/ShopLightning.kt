@@ -79,7 +79,10 @@ private fun Controller.showSlOn(state: ShopLightningState) {
     val body = ArrayList<View>()
     body.add(ui.text(ShopLightningWords.onTitle))
     ShopLightningModel.lostFundingNote(state.report)?.let { body.add(ui.text(it)) }
-    for (line in ShopLightningModel.lines(held, state.report)) body.add(ui.labelled(line.label, ui.text(line.value)))
+    for (line in ShopLightningModel.lines(held, state.report)) {
+        body.add(ui.labelled(line.label, ui.text(line.value)))
+        line.note?.let { body.add(ui.text(it)) }
+    }
     body.add(
         ui.rows(
             listOf(
@@ -99,6 +102,19 @@ private fun Controller.showSlOn(state: ShopLightningState) {
 private fun Controller.showSlLimits(held: ShopLightningHeld) {
     val msg = Slot(act)
     val cap = ui.field(ShopLightningWords.capLabel).also { it.inputType = android.text.InputType.TYPE_CLASS_NUMBER; it.setText(held.capSats.toString()) }
+    // SL-34: one day's Lightning sales, when the node has them; the button only fills the field, the owner still confirms.
+    val suggestion = try {
+        node?.shopLightningCapSuggestion(System.currentTimeMillis() / 1000, java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 1000)
+    } catch (_: OwnerException) {
+        null
+    } catch (_: LinkageError) {
+        null
+    }
+    val suggest = ArrayList<View>()
+    ShopLightningModel.suggestionLine(suggestion)?.let { line ->
+        suggest.add(ui.text(line))
+        suggest.add(ui.button(ShopLightningWords.capSuggestionFill) { cap.setText(ShopLightningModel.fillCap(suggestion!!)) })
+    }
     val fee = ui.field(ShopLightningWords.feeLabel).also { it.inputType = android.text.InputType.TYPE_CLASS_NUMBER; it.setText(held.maxOpeningFeeSats.toString()) }
     val save = ui.primary(ShopLightningWords.save) {
         when (val r = ShopLightningModel.limits(cap.text.toString(), fee.text.toString(), held)) {
@@ -108,7 +124,7 @@ private fun Controller.showSlLimits(held: ShopLightningHeld) {
     }
     screen(
         ShopLightningWords.changeLimits,
-        listOf(ui.text(ShopLightningWords.capWhat), ui.labelled(ShopLightningWords.capLabel, cap), ui.text(ShopLightningWords.feeWhat), ui.labelled(ShopLightningWords.feeLabel, fee), msg),
+        listOf(ui.text(ShopLightningWords.capWhat), ui.labelled(ShopLightningWords.capLabel, cap)) + suggest + listOf(ui.text(ShopLightningWords.feeWhat), ui.labelled(ShopLightningWords.feeLabel, fee), msg),
         listOf(save, ui.button(ShopLightningWords.back) { showShopLightning() }),
         back = { showShopLightning() },
     )

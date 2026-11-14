@@ -234,6 +234,7 @@ ops run on another; it waits for at most 250 ms.
 235 starter_line_set handle node  args StarterLineSetArgs -> ()
 236 shop_lightning_report handle node  args () -> ShopLightningView
 237 shop_lightning_preview handle node  args ShopLightningEditArgs -> ShopLightningPreviewView
+238 shop_lightning_cap_suggestion handle node  args (u64, i32) -> option<u64>
 ```
 
 ## Types

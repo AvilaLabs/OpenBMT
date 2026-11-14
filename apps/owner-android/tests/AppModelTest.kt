@@ -4860,7 +4860,14 @@ object AppModelTest {
         // The words: every text is written and listed once; the app's own messages pass the checks and read apart.
         val all = ShopLightningWords.all()
         ok(all.map { it.first }.toSet().size == all.size, "each Shop Lightning text is listed once")
-        ok(all.all { (_, text) -> text.isNotBlank() && text.trim() == text && !text.contains("WORDS_NEEDED") }, "each Shop Lightning text is written")
+        // The words for the cap's suggestion (SL-34) and the room's note (SL-35) are not written yet: each shows its own name.
+        val unwritten = mapOf(
+            "capSuggestionWhat" to "WORDS_NEEDED_SL34_SUGGESTION {sats}",
+            "capSuggestionFill" to "WORDS_NEEDED_SL34_FILL",
+            "roomNote" to "WORDS_NEEDED_SL35_ROOM_NOTE",
+        )
+        ok(all.all { (k, text) -> text.isNotBlank() && text.trim() == text && (!text.contains("WORDS_NEEDED") || unwritten[k] == text) }, "each Shop Lightning text is written, but the placeholders named here")
+        ok(all.count { (_, text) -> text.contains("WORDS_NEEDED") } == unwritten.size, "no other Shop Lightning text is a placeholder")
         for ((k, w) in ShopLightningWords.messages()) ok(SayCheck.problem(w) == null && w.code?.startsWith("SL-") == true, "words of $k: ${SayCheck.problem(w)}")
         ok(SayCheck.distinctProblem(ShopLightningWords.messages()) == null, "no two Shop Lightning messages read the same")
         ok(NotOffered.values().map { ShopLightningWords.cause(it) }.toSet().size == NotOffered.values().size, "each cause the report gives has words of its own")
@@ -4943,6 +4950,15 @@ object AppModelTest {
         val past = LightningReport(1_000, 11, 22, 33, 0, 55, NotOffered.Offered, Lsps1Offer.Unknown, OrderState.None, OrderWhy.None, 0, listOf(3, 12), 70)
         ok(ShopLightningModel.lines(held, past).any { it.label == ShopLightningWords.lostFundingTotalLabel && it.value == "70" }, "SL-27: past the list the page says how many sales in all")
         ok(ShopLightningModel.lostFundingNote(lost) == ShopLightningWords.lostFundingWhat && ShopLightningModel.lostFundingNote(null) == null, "SL-27: the page says what the list is")
+        // SL-35: the room to receive is followed by the line that says a sweep does not give room back.
+        ok(ShopLightningModel.lines(held, report).single { it.label == ShopLightningWords.roomLabel }.note == ShopLightningWords.roomNote, "SL-35: the room to receive carries the note about a sweep")
+        ok(ShopLightningModel.lines(held, null).none { it.note != null }, "SL-35: with no report there is no room shown and no note")
+        ok(ShopLightningModel.lines(held, lost).filter { it.note != null }.map { it.label } == listOf(ShopLightningWords.roomLabel), "SL-35: only the room has a note")
+        // SL-34: the suggestion is offered when there is one, and fills the cap field with its number.
+        ok(ShopLightningModel.suggestionLine(null) == null, "SL-34: no suggestion, no line")
+        ok(ShopLightningModel.suggestionLine(150_000)!!.contains(Format.sats(150_000)) && !ShopLightningModel.suggestionLine(150_000)!!.contains("{sats}"), "SL-34: the line shows the suggested amount")
+        ok(ShopLightningModel.fillCap(150_000) == "150000" && (ShopLightningModel.limits(ShopLightningModel.fillCap(150_000), "20000", held) as Form.Ok).value.capSats == 150_000L, "SL-34: the filled cap is read as the number, and is still a change to confirm")
+        ok(screens.contains("shopLightningCapSuggestion") && screens.contains("capSuggestionFill") && screens.contains("fillCap("), "SL-34: the limits screen asks for the suggestion and offers to fill the cap")
         ok(ShopLightningModel.Step.values().map { ShopLightningModel.stepLine(it) } == (1..5).map { "Step $it of 5" }, "SL-76: each step says where it stands among the five")
     }
 

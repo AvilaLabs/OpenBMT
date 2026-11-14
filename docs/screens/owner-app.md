@@ -869,6 +869,8 @@ library's own:
 | queue | Queue the change |
 | queuedKeyApp | The change is queued. It takes effect once the Key app approves it. |
 | queuedDone | The change is queued and goes to the counters at their next check-in. |
+| capSuggestionWhat | WORDS_NEEDED_SL34_SUGGESTION {sats} |
+| capSuggestionFill | WORDS_NEEDED_SL34_FILL |
 | buildRequest | Make the request for the Key app |
 | later | Later |
 | onTitle | Shop Lightning is on |
@@ -876,6 +878,7 @@ library's own:
 | nodeLabel | Node's ID |
 | balanceLabel | Balance and cap |
 | roomLabel | Room to receive |
+| roomNote | WORDS_NEEDED_SL35_ROOM_NOTE |
 | providerLabel | Provider |
 | feesPaidLabel | Opening fees paid |
 | boxLabel | Second copy on |

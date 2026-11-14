@@ -52,6 +52,11 @@ object ShopLightningWords {
     const val queue = "Queue the change"
     const val queuedKeyApp = "The change is queued. It takes effect once the Key app approves it."
     const val queuedDone = "The change is queued and goes to the counters at their next check-in."
+    // ---- the suggestion for the cap (SL-34) ----
+    /** SL-34: what the suggestion is (one day's Lightning sales); `{sats}` is the amount, in satoshis, it is replaced by. */
+    const val capSuggestionWhat = "WORDS_NEEDED_SL34_SUGGESTION {sats}"
+    /** SL-34: the button that puts the suggestion in the cap field. */
+    const val capSuggestionFill = "WORDS_NEEDED_SL34_FILL"
     const val buildRequest = "Make the request for the Key app"
     const val later = "Later"
     // ---- the page when it is on: the facts of the newest report and the settings (SL-41, SL-45, SL-78) ----
@@ -60,6 +65,8 @@ object ShopLightningWords {
     const val nodeLabel = "Node's ID"
     const val balanceLabel = "Balance and cap"
     const val roomLabel = "Room to receive"
+    /** SL-35: that a sweep does not give back room and the channel shrinks. No number. */
+    const val roomNote = "WORDS_NEEDED_SL35_ROOM_NOTE"
     const val providerLabel = "Provider"
     const val feesPaidLabel = "Opening fees paid"
     const val boxLabel = "Second copy on"
@@ -241,6 +248,8 @@ object ShopLightningWords {
         "queue" to queue,
         "queuedKeyApp" to queuedKeyApp,
         "queuedDone" to queuedDone,
+        "capSuggestionWhat" to capSuggestionWhat,
+        "capSuggestionFill" to capSuggestionFill,
         "buildRequest" to buildRequest,
         "later" to later,
         "onTitle" to onTitle,
@@ -248,6 +257,7 @@ object ShopLightningWords {
         "nodeLabel" to nodeLabel,
         "balanceLabel" to balanceLabel,
         "roomLabel" to roomLabel,
+        "roomNote" to roomNote,
         "providerLabel" to providerLabel,
         "feesPaidLabel" to feesPaidLabel,
         "boxLabel" to boxLabel,

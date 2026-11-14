@@ -61,6 +61,7 @@ use openbmt_owner::{
     SettingsQueued, Stage, WatchEdit,
 };
 use openbmt_owner_node::coins::ViewState;
+use openbmt_owner_node::lightning_day;
 use openbmt_owner_node::live::DeepLine;
 use openbmt_owner_node::pos::{
     AlertKind as PosKind, PosAlertRef, PosId, PosSaleKey, PosSubject, TenderKey,
@@ -1722,6 +1723,37 @@ impl Entry {
                 owner.is_own_wallet(),
                 owner.known_settings(),
                 report,
+            ))
+        })
+    }
+
+    /// SL-34: the suggestion for the cap, one day's Lightning sales of the
+    /// Lightning counter over the last seven days, at most the limit of
+    /// instant payments, as satoshis, or none. `now` is Unix seconds and
+    /// `offset_secs` the phone's zone offset from UTC.
+    pub(crate) fn shop_lightning_cap_suggestion(
+        &self,
+        now: u64,
+        offset_secs: i32,
+    ) -> Result<Option<u64>, AppError> {
+        self.run(None, move |st| {
+            let Some(settings) = st.node.owner().known_settings() else {
+                return Ok(None);
+            };
+            let (Some(held), Some(link)) = (settings.shop_lightning.as_ref(), st.link.as_ref())
+            else {
+                return Ok(None);
+            };
+            let Some(copy) = link.copy(&held.counter) else {
+                return Ok(None);
+            };
+            let chain = openbmt_core::records::Chain::from_records(copy.records().to_vec());
+            let sales = lightning_day::lightning_sales(&chain, link.devices(), &held.counter);
+            Ok(lightning_day::suggest_cap(
+                &sales,
+                now,
+                offset_secs,
+                lightning_day::instant_limit(settings),
             ))
         })
     }

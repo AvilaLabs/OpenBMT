@@ -294,6 +294,31 @@ fn ap_13_the_cap_and_the_fee_loosen_when_raised_and_are_free_when_lowered() {
     assert_eq!(p.after.unwrap().provider_addr, "198.51.100.2:9735");
 }
 
+/// The request of op 238 and its answer: the time and the zone's offset in,
+/// the suggestion out.
+fn cap_suggestion(rig: &Rig, handle: u64, now: u64, offset: i32) -> Option<u64> {
+    let response = rig.call(238, handle, &W::new().u64(now).u32(offset as u32).0);
+    let mut r = Rd::ok(&response);
+    let out = r.opt(Rd::u64);
+    r.done();
+    out
+}
+
+#[test]
+fn sl_34_the_suggestion_for_the_cap_is_none_without_lightning_sales() {
+    let (rig, handle) = held(true);
+    // Off: there is no Lightning counter to read.
+    assert_eq!(cap_suggestion(&rig, handle, T0, 3_600), None);
+    let p = preview(&rig, handle, &Edit::set()).expect("a preview");
+    queue(&rig, handle, &p.settings);
+    approve(&rig, handle, 2);
+    assert!(page(&rig, handle).on);
+    // On, with no record of a Lightning sale held: still none, with an offset
+    // either side of UTC.
+    assert_eq!(cap_suggestion(&rig, handle, T0, 3_600), None);
+    assert_eq!(cap_suggestion(&rig, handle, T0, -18_000), None);
+}
+
 #[test]
 fn sl_77_turning_it_off_is_free_and_signed_by_the_owner_alone() {
     let (rig, handle) = held(true);

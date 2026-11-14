@@ -126,11 +126,12 @@
 //!   OA-115 to OA-118): build them from the queue, the open sessions, the
 //!   file for the shop's wallet, taking what it returns, abandoning one, and
 //!   the merge of the offer.
-//! - 236 and 237: Shop Lightning on the owner phone (`docs/SHOP-LIGHTNING-RULES.md`
+//! - 236 to 238: Shop Lightning on the owner phone (`docs/SHOP-LIGHTNING-RULES.md`
 //!   SL-45, SL-76 to SL-78): what the settings name and the newest report of
 //!   the Lightning counter, and the preview of turning it on, changing it or
 //!   turning it off, which stores nothing and gives the bytes `queue_settings`
-//!   takes.
+//!   takes, and the suggestion for the cap (SL-34): one day's Lightning sales
+//!   of the last seven, at most the limit of instant payments.
 //! - 146: the full ledger (`docs/BOOKS-RULES.md` BK-19), made only when the
 //!   request says the person accepted the warning; `false` refuses. The
 //!   books call (144) never holds it.
@@ -1089,6 +1090,14 @@ fn build_ops() -> Vec<Op> {
             "shop_lightning_preview",
             Node,
             |c, a: ShopLightningEditArgs| c.entry()?.shop_lightning_preview(a),
+        ),
+        op(
+            238,
+            "shop_lightning_cap_suggestion",
+            Node,
+            |c, (now, offset_secs): (u64, i32)| {
+                c.entry()?.shop_lightning_cap_suggestion(now, offset_secs)
+            },
         ),
     ]
 }

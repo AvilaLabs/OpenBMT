@@ -68,6 +68,7 @@ pub mod coins;
 pub mod copy;
 pub mod deep;
 pub mod facts;
+pub mod lightning_day;
 pub mod link;
 pub mod live;
 pub mod node;

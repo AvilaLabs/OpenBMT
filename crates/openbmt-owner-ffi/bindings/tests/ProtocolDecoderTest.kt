@@ -717,6 +717,13 @@ object ProtocolDecoderTest {
         val remove = requestFrame(237, 1) { it.shopLightningEdit(ShopLightningEditArgs(ShopLightningAction.Remove)) }
         check(hex(remove) == "4f424d6b01ed000100000000000000" + "02" + "00".repeat(7)) { hex(remove) }
 
+        // SL-34: the suggestion for the cap asks with the time and the zone's offset, which may be below zero.
+        val ask = requestFrame(238, 1) { it.u64(5).u32(-3_600L) }
+        check(hex(ask) == "4f424d6b01ee000100000000000000" + "0500000000000000" + "f0f1ffff") { hex(ask) }
+        val some = decodeResponse(header(0, Writer().u8(1).u64(9).toByteArray())).let { r -> r.option { r.u64() }.also { r.end() } }
+        val nothing = decodeResponse(header(0, Writer().u8(0).toByteArray())).let { r -> r.option { r.u64() }.also { r.end() } }
+        check(some == 9L && nothing == null)
+
         val held = Writer().bytes(ByteArray(32) { 1 }).bytes(ByteArray(33) { 2 }).bytes(ByteArray(32) { 3 })
             .bytes(ByteArray(33) { 4 }).string("203.0.113.7:9735").u64(5_000_000).u64(20_000).toByteArray()
         val report = Writer().u64(1_000).u64(11).u64(22).u64(33).u64(44).u64(55).u8(2).u8(1).u8(4).u8(1).u64(9_000).u32(2).u32(4).u32(9).u32(70).toByteArray()

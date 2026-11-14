@@ -25,8 +25,8 @@ object ShopLightningModel {
     fun stepLine(step: Step): String =
         ShopLightningWords.stepOf.replace("{n}", (step.ordinal + 1).toString()).replace("{of}", Step.values().size.toString())
 
-    /** One labelled fact of the page. */
-    class Line(val label: String, val value: String)
+    /** One labelled fact of the page, with a plain line under it when it needs one. */
+    class Line(val label: String, val value: String, val note: String? = null)
 
     /** What the steps have gathered. The app keeps it between screens and forgets it when the page is left. */
     class Draft {
@@ -111,6 +111,13 @@ object ShopLightningModel {
     /** Turning off: the field is taken away, and the Lightning counter closes the channels (SL-77). */
     fun turnOff(): ShopLightningEditArgs = ShopLightningEditArgs(ShopLightningAction.Remove)
 
+    /** SL-34: the line that offers the suggestion for the cap, or null when there is none. */
+    fun suggestionLine(suggestion: Long?): String? =
+        suggestion?.let { ShopLightningWords.capSuggestionWhat.replace("{sats}", Format.sats(it)) }
+
+    /** SL-34: what the cap field holds once the suggestion is taken; the owner still confirms the change. */
+    fun fillCap(suggestion: Long): String = suggestion.toString()
+
     /** SL-27: what the page says above the sales of a lost funding, when the report names any. */
     fun lostFundingNote(report: LightningReport?): String? =
         ShopLightningWords.lostFundingWhat.takeIf { report != null && report.lostFundingSales.isNotEmpty() }
@@ -129,7 +136,8 @@ object ShopLightningModel {
             return out
         }
         out.add(Line(ShopLightningWords.balanceLabel, Format.sats(report.balanceSats)))
-        out.add(Line(ShopLightningWords.roomLabel, Format.sats(report.receiveRoomSats)))
+        // SL-35: wherever the room is shown, it says that a sweep does not give room back.
+        out.add(Line(ShopLightningWords.roomLabel, Format.sats(report.receiveRoomSats), ShopLightningWords.roomNote))
         out.add(Line(ShopLightningWords.feesPaidLabel, Format.sats(report.openingFeesPaidSats)))
         out.add(Line(ShopLightningWords.roomAheadLabel, ShopLightningWords.roomAhead(report.lsps1)))
         ShopLightningWords.order(report.orderState)?.let { state ->

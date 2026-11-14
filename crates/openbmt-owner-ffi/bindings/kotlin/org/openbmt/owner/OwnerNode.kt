@@ -233,6 +233,7 @@ private const val OP_REQUEST_READ = 234
 private const val OP_STARTER_LINE_SET = 235
 private const val OP_SHOP_LIGHTNING_REPORT = 236
 private const val OP_SHOP_LIGHTNING_PREVIEW = 237
+private const val OP_SHOP_LIGHTNING_CAP_SUGGESTION = 238
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -3256,6 +3257,16 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
     fun shopLightningPreview(edit: ShopLightningEditArgs): ShopLightningPreview {
         val r = call(OP_SHOP_LIGHTNING_PREVIEW, handle) { it.shopLightningEdit(edit) }
         return r.shopLightningPreview().also { r.end() }
+    }
+
+    /**
+     * SL-34: the most the Lightning counter took over Lightning in one day of the last seven, in satoshis, at most the
+     * limit of instant payments the settings allow; null when there is no such sale to base it on. A day runs from
+     * midnight in the zone [offsetSecs] seconds from UTC; [now] is in seconds.
+     */
+    fun shopLightningCapSuggestion(now: Long, offsetSecs: Int): Long? {
+        val r = call(OP_SHOP_LIGHTNING_CAP_SUGGESTION, handle) { it.u64(now).u32(offsetSecs.toLong()) }
+        return r.option { r.u64() }.also { r.end() }
     }
 
     /** The watch key the settings in force name (32 bytes), or null when they name none (CR-185). */
