@@ -105,6 +105,7 @@ impl OwnRefusal {
             Self::OtherNewWallet => "SS-42",
             Self::Book(_) => "OA-106",
             Self::NoBundle | Self::TooManyWaiting => "OA-111",
+            Self::BoxWaits => "OA-119",
             Self::UnknownCounter => "OA-112",
         }
     }
@@ -212,6 +213,13 @@ impl OwnRefusal {
                 "Finish pairing a waiting counter, then add this one.",
             )
             .code("OA-111"),
+            Self::BoxWaits => Words::new(
+                Tone::Stop,
+                "WORDS_NEEDED_OA_OA123_BOX_WAITS_HEADING",
+                "WORDS_NEEDED_OA_OA123_BOX_WAITS_WHAT",
+                Who::Owner,
+                "WORDS_NEEDED_OA_OA123_BOX_WAITS_NEXT",
+            ),
             Self::SwitchSameWallet => stop(
                 "Already the counters' wallet",
                 "The wallet given is the one the counters already pay into, so no switch was made.",
@@ -284,6 +292,7 @@ pub fn all_own_words() -> Vec<(String, Words)> {
         ("OwnRefusal::NoBundle", OwnRefusal::NoBundle),
         ("OwnRefusal::UnknownCounter", OwnRefusal::UnknownCounter),
         ("OwnRefusal::TooManyWaiting", OwnRefusal::TooManyWaiting),
+        ("OwnRefusal::BoxWaits", OwnRefusal::BoxWaits),
         (
             "OwnRefusal::Pairing",
             OwnRefusal::Pairing(OwnPairError::NotTheOwner),
@@ -325,10 +334,9 @@ mod tests {
         openbmt_core::say::check_distinct(&written).unwrap();
         for (name, w) in all.iter().filter(|(_, w)| is_placeholder(w)) {
             assert!(
-                w.heading == w.what
-                    && w.what == w.next
-                    && (w.heading.starts_with("WORDS_NEEDED_OA_")
-                        || w.heading.starts_with("WORDS_NEEDED_SS")),
+                [&w.heading, &w.what, &w.next]
+                    .iter()
+                    .all(|t| t.starts_with("WORDS_NEEDED_OA_") || t.starts_with("WORDS_NEEDED_SS")),
                 "{name}"
             );
         }
@@ -355,6 +363,7 @@ mod tests {
                 OwnRefusal::NoBundle => "OwnRefusal::NoBundle",
                 OwnRefusal::UnknownCounter => "OwnRefusal::UnknownCounter",
                 OwnRefusal::TooManyWaiting => "OwnRefusal::TooManyWaiting",
+                OwnRefusal::BoxWaits => "OwnRefusal::BoxWaits",
                 OwnRefusal::Pairing(_) => "OwnRefusal::Pairing",
             }
         };
@@ -374,6 +383,7 @@ mod tests {
             OwnRefusal::NoBundle,
             OwnRefusal::UnknownCounter,
             OwnRefusal::TooManyWaiting,
+            OwnRefusal::BoxWaits,
         ] {
             assert!(names.iter().any(|n| n == covered(&r)), "{r:?}");
         }

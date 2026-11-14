@@ -3146,6 +3146,10 @@ object AppModelTest {
                 q.start(1_000); q.toAddress(); q.found("host.example:80", claim); q.match()
                 lib3.refuse = Words(Tones.STOP, Who.OWNER, "Box not reached", "It did not answer.", "Try again.", "BX-15", null, null, null)
                 ok(q.send(1, "")!!.heading == "Box not reached" && q.step == OwnBoxStep.Rest && !store3.hasLink(), "BX-18: a Box that did not take the welcome leaves no link")
+                // OA-123: a change that waits refuses the Box with the library's words, shown as they come.
+                val waits = "WORDS_NEEDED_OA_OA123_BOX_WAITS_HEADING"
+                lib3.refuse = Words(Tones.STOP, Who.OWNER, waits, "WORDS_NEEDED_OA_OA123_BOX_WAITS_WHAT", "WORDS_NEEDED_OA_OA123_BOX_WAITS_NEXT", "OA-119", null, null, null)
+                ok(q.send(1, "")!!.heading == waits && q.step == OwnBoxStep.Rest && !store3.hasLink(), "OA-123: a Box is not added while a change waits, and the words say so")
                 lib3.refuse = null
                 ok(q.send(1, "") == null && store3.hasLink(), "BX-18: the welcome again keeps it")
                 // They differ: nothing is kept.

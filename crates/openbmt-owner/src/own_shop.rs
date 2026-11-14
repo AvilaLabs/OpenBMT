@@ -136,6 +136,9 @@ pub enum OwnRefusal {
     /// A step of the ceremony failed that the checks before it should have
     /// caught.
     Pairing(OwnPairError),
+    /// OA-119, OA-123: a Box cannot be added while a change waits for a
+    /// counter's confirmation.
+    BoxWaits,
 }
 
 impl fmt::Display for OwnRefusal {
@@ -163,6 +166,10 @@ impl fmt::Display for OwnRefusal {
                 write!(f, "OA-111: {MAX_WAITING} bundles wait for their counters")
             }
             Self::Pairing(e) => write!(f, "OA-110: {e}"),
+            Self::BoxWaits => write!(
+                f,
+                "OA-119: a change waits for a counter's confirmation, so no Box is added"
+            ),
         }
     }
 }
@@ -1262,6 +1269,11 @@ impl OwnShop {
         ))
     }
 
+        // One change waits at a time, and a Box added now would be built on
+        // the settings in force, not on the ones that wait (OA-121).
+        if self.held.is_some() {
+            return Err(OwnRefusal::BoxWaits.into());
+        }
     /// SS-41, SS-42: the receive index of `new_wallet` that the move of the
     /// starter wallet pays: the first index of a new range of the owner's
     /// own, taken from the book after every range given so far (the

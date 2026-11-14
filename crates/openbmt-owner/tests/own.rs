@@ -1355,3 +1355,34 @@ fn oa_121_a_change_is_dropped_after_seven_days_and_the_file_is_read_strictly() {
     assert_eq!(again.restore_waiting(&bytes), Ok(false));
     assert!(again.waiting_change().is_none());
 }
+
+#[test]
+fn oa_123_a_box_is_not_added_while_a_change_waits_and_is_after_it_is_in_force_or_dropped() {
+    let (disk, waiting) = (Disk::new(), Disk::new());
+    let mut s = shop_with_counter_and_box(&disk);
+    pair_second(&mut s, &disk, &waiting, 4, T0 + 100);
+    let state = s.to_bytes();
+    let held = s.waiting_change().unwrap().clone();
+    // Refused with the typed refusal, and nothing changes or is stored.
+    let stored = disk.get();
+    let refusal = refused(s.add_box(id(10).device_id(), USD, |b| disk.put(b)));
+    assert_eq!(refusal, OwnRefusal::BoxWaits);
+    assert_eq!(refusal.rule(), "OA-119");
+    assert!(refusal.words().heading.starts_with("WORDS_NEEDED_OA_OA123_BOX_WAITS_"));
+    assert_eq!(s.to_bytes(), state);
+    assert_eq!(disk.get(), stored);
+    assert_eq!(s.waiting_change(), Some(&held));
+    // In force: a Box is added.
+    let confirmed = s
+        .join_confirmation(CounterConfirmation::sign(&id(3), &held.hash()))
+        .unwrap();
+    s.put_in_force(&confirmed, |b| disk.put(b)).unwrap();
+    let signed = s.add_box(id(10).device_id(), USD, |b| disk.put(b)).unwrap();
+    assert!(signed.settings.boxes.contains(&id(10).device_id()));
+    // Dropped: a Box is added.
+    let (disk, waiting) = (Disk::new(), Disk::new());
+    let mut s = shop_with_counter_and_box(&disk);
+    pair_second(&mut s, &disk, &waiting, 4, T0 + 100);
+    s.drop_waiting();
+    assert!(s.add_box(id(10).device_id(), USD, |b| disk.put(b)).is_ok());
+}
