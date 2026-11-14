@@ -55,9 +55,9 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   the same child gives the same node key on two fresh rebuilds.
 - **SL-11. Made offline.** The child is made where the words are: the stick
   (`docs/STICK-RULES.md`, a step after the public result) or a signer that
-  supports BIP-85. It is shown once as a QR code and scanned by the
-  Lightning counter. OpenBMT never asks for the 12 words on a counter or a
-  phone.
+  supports BIP-85; OpenBMT's own signer does not make it yet. It is shown once
+  as a QR code and scanned by the Lightning counter. OpenBMT never asks for
+  the 12 words on a counter or a phone.
 - **SL-12. The one exception.** "No key on any phone" has three exceptions:
   this key, only while Shop Lightning is on, the refund float
   (`docs/FLOAT-RULES.md`) and the starter wallet
@@ -335,8 +335,11 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   blocks offline then back is safe; a payment through a channel whose funding
   Core is told never to mine is claimed, and 144 blocks later the funding is
   reported lost and the channel is closed by force (SL-27).
-- **SL-51. The key.** BIP-85 vectors (SL-10), and a stick or signer child
-  equals the core's.
+- **SL-51. The key.** BIP-85 vectors (SL-10), on the stick and on the node.
+  For three roots, the vector's and two sets of words, and indexes from 0 up
+  to the highest, 2,147,483,647, the stick's child equals the node's byte for
+  byte, and the stick's node ID equals the core's (SL-72). A signer's child is
+  tested when a signer makes one.
 
 ## 10. Before real funds
 
