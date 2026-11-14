@@ -776,6 +776,10 @@ fn report() -> LightningReport {
         last_stored_at: 1_700_000_000,
         last_sweep_at: 0,
         not_offered: NotOffered::SecondDeviceAway,
+        lsps1: Lsps1Offer::Offered,
+        order_state: OrderState::Failed,
+        order_why: OrderWhy::FeeAboveMax,
+        order_fee_sats: 9_000,
     }
 }
 
@@ -804,23 +808,121 @@ fn lk_84_the_report_round_trips_and_decodes_strictly() {
 }
 
 #[test]
-fn lk_84_the_report_is_five_u64_and_a_u16_after_the_frame() {
+fn lk_84_the_report_is_five_u64_four_u16_and_a_u64_after_the_frame() {
     let bytes = report().to_bytes();
-    assert_eq!(bytes.len(), 4 + 1 + 5 * 8 + 2);
+    assert_eq!(bytes.len(), 4 + 1 + 5 * 8 + 4 * 2 + 8);
     assert_eq!(&bytes[..4], b"OBM\x1f");
+    assert_eq!(bytes[4], 2);
     assert_eq!(&bytes[5..13], &123_456u64.to_le_bytes());
     assert_eq!(&bytes[13..21], &4_000_000u64.to_le_bytes());
     assert_eq!(&bytes[21..29], &2_500u64.to_le_bytes());
     assert_eq!(&bytes[29..37], &1_700_000_000u64.to_le_bytes());
     assert_eq!(&bytes[37..45], &0u64.to_le_bytes());
-    assert_eq!(&bytes[45..], &1u16.to_le_bytes());
+    assert_eq!(&bytes[45..47], &1u16.to_le_bytes());
+    assert_eq!(&bytes[47..49], &1u16.to_le_bytes());
+    assert_eq!(&bytes[49..51], &4u16.to_le_bytes());
+    assert_eq!(&bytes[51..53], &1u16.to_le_bytes());
+    assert_eq!(&bytes[53..], &9_000u64.to_le_bytes());
+}
+
+#[test]
+fn lk_84_the_lsps1_and_order_facts_round_trip_and_decode_strictly() {
+    for (lsps1, state, why, fee) in [
+        (Lsps1Offer::Unknown, OrderState::None, OrderWhy::None, 0),
+        (Lsps1Offer::NotOffered, OrderState::None, OrderWhy::None, 0),
+        (Lsps1Offer::Offered, OrderState::Open, OrderWhy::None, 2_000),
+        (Lsps1Offer::Offered, OrderState::Paid, OrderWhy::None, 2_000),
+        (Lsps1Offer::Offered, OrderState::Done, OrderWhy::None, 2_000),
+        (
+            Lsps1Offer::Offered,
+            OrderState::Failed,
+            OrderWhy::CannotPay,
+            2_000,
+        ),
+        (
+            Lsps1Offer::Offered,
+            OrderState::Failed,
+            OrderWhy::NoChannel,
+            0,
+        ),
+    ] {
+        let r = LightningReport {
+            lsps1,
+            order_state: state,
+            order_why: why,
+            order_fee_sats: fee,
+            ..report()
+        };
+        let bytes = r.to_bytes();
+        assert_eq!(LightningReport::from_bytes(&bytes).unwrap(), r);
+        strict(
+            &bytes,
+            LightningReport::from_bytes,
+            LightningReport::to_bytes,
+        );
+    }
+    for code in 0..9 {
+        assert_eq!(OrderWhy::from_code(code).map(OrderWhy::to_code), Some(code));
+    }
+    assert_eq!(OrderWhy::from_code(9), None);
+    assert_eq!(OrderState::from_code(5), None);
+    assert_eq!(Lsps1Offer::from_code(3), None);
+}
+
+#[test]
+fn lk_84_a_cause_without_a_failure_a_failure_without_a_cause_and_a_fee_without_an_order_are_refused(
+) {
+    let bad = |r: LightningReport| LightningReport::from_bytes(&r.to_bytes()).is_err();
+    assert!(bad(LightningReport {
+        order_state: OrderState::Open,
+        order_why: OrderWhy::Refused,
+        ..report()
+    }));
+    assert!(bad(LightningReport {
+        order_state: OrderState::Failed,
+        order_why: OrderWhy::None,
+        ..report()
+    }));
+    assert!(bad(LightningReport {
+        order_state: OrderState::None,
+        order_why: OrderWhy::None,
+        order_fee_sats: 1,
+        ..report()
+    }));
+    // A code that is not a choice, in each of the three places.
+    for (at, code) in [(47usize, 3u16), (49, 5), (51, 9)] {
+        let mut b = report().to_bytes();
+        b[at..at + 2].copy_from_slice(&code.to_le_bytes());
+        assert!(LightningReport::from_bytes(&b).is_err(), "{at}");
+    }
+}
+
+#[test]
+fn lk_84_a_report_of_version_1_still_reads_with_the_new_facts_unknown() {
+    let mut v1 = report().to_bytes()[..47].to_vec();
+    v1[4] = 1;
+    let r = LightningReport::from_bytes(&v1).unwrap();
+    assert_eq!(r.balance_sats, 123_456);
+    assert_eq!(r.not_offered, NotOffered::SecondDeviceAway);
+    assert_eq!(r.lsps1, Lsps1Offer::Unknown);
+    assert_eq!(r.order_state, OrderState::None);
+    assert_eq!(r.order_why, OrderWhy::None);
+    assert_eq!(r.order_fee_sats, 0);
+    // Version 1 has nothing after its six fields, and version 3 is not read.
+    let mut long = v1.clone();
+    long.push(0);
+    assert!(LightningReport::from_bytes(&long).is_err());
+    let mut v3 = report().to_bytes();
+    v3[4] = 3;
+    assert!(LightningReport::from_bytes(&v3).is_err());
+    // A version 2 report cut short is refused.
+    assert!(LightningReport::from_bytes(&report().to_bytes()[..47]).is_err());
 }
 
 #[test]
 fn lk_84_a_cause_that_is_not_a_choice_and_another_magic_are_refused() {
     let mut b = report().to_bytes();
-    let n = b.len();
-    b[n - 2..].copy_from_slice(&99u16.to_le_bytes());
+    b[45..47].copy_from_slice(&99u16.to_le_bytes());
     assert!(LightningReport::from_bytes(&b).is_err());
     assert_eq!(NotOffered::from_code(5), None);
     let mut b = report().to_bytes();

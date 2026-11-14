@@ -277,6 +277,23 @@ private const val TAG_NOT_OFFERED_VIEW_SECOND_DEVICE_AWAY = 1
 private const val TAG_NOT_OFFERED_VIEW_CHAIN_BEHIND = 2
 private const val TAG_NOT_OFFERED_VIEW_NO_USABLE_CHANNEL = 3
 private const val TAG_NOT_OFFERED_VIEW_PROVIDER_SILENT = 4
+private const val TAG_LSPS1_OFFER_VIEW_UNKNOWN = 0
+private const val TAG_LSPS1_OFFER_VIEW_OFFERED = 1
+private const val TAG_LSPS1_OFFER_VIEW_NOT_OFFERED = 2
+private const val TAG_ORDER_STATE_VIEW_NONE = 0
+private const val TAG_ORDER_STATE_VIEW_OPEN = 1
+private const val TAG_ORDER_STATE_VIEW_PAID = 2
+private const val TAG_ORDER_STATE_VIEW_DONE = 3
+private const val TAG_ORDER_STATE_VIEW_FAILED = 4
+private const val TAG_ORDER_WHY_VIEW_NONE = 0
+private const val TAG_ORDER_WHY_VIEW_FEE_ABOVE_MAX = 1
+private const val TAG_ORDER_WHY_VIEW_CANNOT_PAY = 2
+private const val TAG_ORDER_WHY_VIEW_REFUSED = 3
+private const val TAG_ORDER_WHY_VIEW_EXPIRED = 4
+private const val TAG_ORDER_WHY_VIEW_PAYMENT_FAILED = 5
+private const val TAG_ORDER_WHY_VIEW_REFUNDED = 6
+private const val TAG_ORDER_WHY_VIEW_NOT_POSSIBLE = 7
+private const val TAG_ORDER_WHY_VIEW_NO_CHANNEL = 8
 private const val TAG_SHOP_LIGHTNING_ACTION_SET = 0
 private const val TAG_SHOP_LIGHTNING_ACTION_CHANGE = 1
 private const val TAG_SHOP_LIGHTNING_ACTION_REMOVE = 2
@@ -1016,6 +1033,17 @@ class SettingsPreview(
 /** Why Lightning is not offered, as the Lightning counter's report says it (LK-84, SL-41). */
 enum class NotOffered { Offered, SecondDeviceAway, ChainBehind, NoUsableChannel, ProviderSilent }
 
+/** Whether the provider offers LSPS1, so that room to receive is bought ahead (SL-28, SL-45, LK-84). */
+enum class Lsps1Offer { Unknown, Offered, NotOffered }
+
+/** Where the last order for room is (SL-45, LK-84). */
+enum class OrderState { None, Open, Paid, Done, Failed }
+
+/** Why the last order failed or was not paid; None unless it failed (SL-45, LK-84). */
+enum class OrderWhy {
+    None, FeeAboveMax, CannotPay, Refused, Expired, PaymentFailed, Refunded, NotPossible, NoChannel,
+}
+
 /** The Shop Lightning the settings in force name (SL-71): the cap and the provider the page shows are these (SL-78). */
 class ShopLightningHeld(
     /** The Lightning counter, 32 bytes. */
@@ -1041,6 +1069,11 @@ class LightningReport(
     val lastStoredAt: Long,
     val lastSweepAt: Long,
     val notOffered: NotOffered,
+    val lsps1: Lsps1Offer,
+    val orderState: OrderState,
+    val orderWhy: OrderWhy,
+    /** What the last order costs, in sats; 0 with no order. */
+    val orderFeeSats: Long,
 )
 
 /**
@@ -2510,11 +2543,43 @@ private fun Reader.notOffered(): NotOffered =
         else -> tag("NotOfferedView")
     }
 
+private fun Reader.lsps1Offer(): Lsps1Offer =
+    when (u8()) {
+        TAG_LSPS1_OFFER_VIEW_UNKNOWN -> Lsps1Offer.Unknown
+        TAG_LSPS1_OFFER_VIEW_OFFERED -> Lsps1Offer.Offered
+        TAG_LSPS1_OFFER_VIEW_NOT_OFFERED -> Lsps1Offer.NotOffered
+        else -> tag("Lsps1OfferView")
+    }
+
+private fun Reader.orderState(): OrderState =
+    when (u8()) {
+        TAG_ORDER_STATE_VIEW_NONE -> OrderState.None
+        TAG_ORDER_STATE_VIEW_OPEN -> OrderState.Open
+        TAG_ORDER_STATE_VIEW_PAID -> OrderState.Paid
+        TAG_ORDER_STATE_VIEW_DONE -> OrderState.Done
+        TAG_ORDER_STATE_VIEW_FAILED -> OrderState.Failed
+        else -> tag("OrderStateView")
+    }
+
+private fun Reader.orderWhy(): OrderWhy =
+    when (u8()) {
+        TAG_ORDER_WHY_VIEW_NONE -> OrderWhy.None
+        TAG_ORDER_WHY_VIEW_FEE_ABOVE_MAX -> OrderWhy.FeeAboveMax
+        TAG_ORDER_WHY_VIEW_CANNOT_PAY -> OrderWhy.CannotPay
+        TAG_ORDER_WHY_VIEW_REFUSED -> OrderWhy.Refused
+        TAG_ORDER_WHY_VIEW_EXPIRED -> OrderWhy.Expired
+        TAG_ORDER_WHY_VIEW_PAYMENT_FAILED -> OrderWhy.PaymentFailed
+        TAG_ORDER_WHY_VIEW_REFUNDED -> OrderWhy.Refunded
+        TAG_ORDER_WHY_VIEW_NOT_POSSIBLE -> OrderWhy.NotPossible
+        TAG_ORDER_WHY_VIEW_NO_CHANNEL -> OrderWhy.NoChannel
+        else -> tag("OrderWhyView")
+    }
+
 private fun Reader.shopLightningHeld(): ShopLightningHeld =
     ShopLightningHeld(bytes(), bytes(), bytes(), bytes(), string(), u64(), u64())
 
 private fun Reader.lightningReport(): LightningReport =
-    LightningReport(u64(), u64(), u64(), u64(), u64(), u64(), notOffered())
+    LightningReport(u64(), u64(), u64(), u64(), u64(), u64(), notOffered(), lsps1Offer(), orderState(), orderWhy(), u64())
 
 internal fun Reader.shopLightningState(): ShopLightningState =
     ShopLightningState(

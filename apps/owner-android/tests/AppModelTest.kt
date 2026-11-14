@@ -63,6 +63,9 @@ import org.openbmt.owner.WebState
 import org.openbmt.owner.WebStep
 import org.openbmt.owner.WebStepKind
 import org.openbmt.owner.LinkState
+import org.openbmt.owner.Lsps1Offer
+import org.openbmt.owner.OrderState
+import org.openbmt.owner.OrderWhy
 import org.openbmt.owner.OutboxKind
 import org.openbmt.owner.OutboxRow
 import org.openbmt.owner.OwnBundleView
@@ -4855,7 +4858,8 @@ object AppModelTest {
         // The words: every text is written and listed once; the app's own messages pass the checks and read apart.
         val all = ShopLightningWords.all()
         ok(all.map { it.first }.toSet().size == all.size, "each Shop Lightning text is listed once")
-        ok(all.all { (_, text) -> text.isNotBlank() && text.trim() == text && !text.contains("WORDS_NEEDED") }, "each Shop Lightning text is written")
+        ok(all.all { (_, text) -> text.isNotBlank() && text.trim() == text && (!text.contains("WORDS_NEEDED") || text.startsWith("WORDS_NEEDED_SL28_")) }, "each Shop Lightning text is written, or is a placeholder of the room bought ahead (SL-28)")
+        ok(all.filter { it.second.startsWith("WORDS_NEEDED_") }.all { (k, text) -> text == "WORDS_NEEDED_SL28_" + k.replace(Regex("([A-Z])"), "_$1").uppercase() }, "each placeholder is named for its key")
         for ((k, w) in ShopLightningWords.messages()) ok(SayCheck.problem(w) == null && w.code?.startsWith("SL-") == true, "words of $k: ${SayCheck.problem(w)}")
         ok(SayCheck.distinctProblem(ShopLightningWords.messages()) == null, "no two Shop Lightning messages read the same")
         ok(NotOffered.values().map { ShopLightningWords.cause(it) }.toSet().size == NotOffered.values().size, "each cause the report gives has words of its own")
@@ -4912,14 +4916,24 @@ object AppModelTest {
         // The facts of SL-45 and the report's time and cause (SL-78).
         val none = ShopLightningModel.lines(held, null)
         ok(none.last().label == ShopLightningWords.cameLabel && none.last().value == ShopLightningWords.noReport, "with no report the page says none came")
-        val report = LightningReport(1_000, 11, 22, 33, 0, 55, NotOffered.SecondDeviceAway)
+        val report = LightningReport(1_000, 11, 22, 33, 0, 55, NotOffered.SecondDeviceAway, Lsps1Offer.Offered, OrderState.Failed, OrderWhy.FeeAboveMax, 2_000)
         val shown = ShopLightningModel.lines(held, report).associate { it.label to it.value }
         ok(shown[ShopLightningWords.capLabel] == Format.sats(5_000_000) && shown[ShopLightningWords.balanceLabel] == Format.sats(11), "the cap is the settings' and the balance the report's")
         ok(shown[ShopLightningWords.roomLabel] == Format.sats(22) && shown[ShopLightningWords.feesPaidLabel] == Format.sats(33), "the room to receive and the fees paid")
         ok(shown[ShopLightningWords.lastStoredLabel] == ShopLightningWords.neverStored && shown[ShopLightningWords.lastSweepLabel] == Format.localTime(55), "a store that never came and a sweep that did")
         ok(shown[ShopLightningWords.whyLabel] == ShopLightningWords.secondDeviceAway && shown[ShopLightningWords.cameLabel] == Format.localTime(1_000), "why it is not offered and when the report came")
         ok(shown[ShopLightningWords.providerLabel]!!.endsWith(" 203.0.113.7:9735") && shown[ShopLightningWords.nodeLabel]!!.contains("\u2026"), "the provider's ID and address, and the node's ID cut at both ends")
-        ok(ShopLightningModel.lines(held, LightningReport(1, 1, 1, 9, 0, 0, NotOffered.Offered)).any { it.label == ShopLightningWords.lastSweepLabel && it.value == ShopLightningWords.noSweep }, "a sweep that never was")
+        ok(ShopLightningModel.lines(held, LightningReport(1, 1, 1, 9, 0, 0, NotOffered.Offered, Lsps1Offer.Unknown, OrderState.None, OrderWhy.None, 0)).any { it.label == ShopLightningWords.lastSweepLabel && it.value == ShopLightningWords.noSweep }, "a sweep that never was")
+        // SL-28, SL-45: whether room is bought ahead and the last order, with why it failed and its fee.
+        ok(shown[ShopLightningWords.roomAheadLabel] == ShopLightningWords.roomAheadOffered, "the page says the provider offers LSPS1")
+        ok(shown[ShopLightningWords.orderLabel] == ShopLightningWords.orderFailed && shown[ShopLightningWords.orderWhyLabel] == ShopLightningWords.orderWhyFeeAboveMax, "a refused order says it failed and why")
+        ok(shown[ShopLightningWords.orderFeeLabel] == Format.sats(2_000), "and what it costs")
+        val quiet = ShopLightningModel.lines(held, LightningReport(1, 1, 1, 9, 0, 0, NotOffered.Offered, Lsps1Offer.NotOffered, OrderState.None, OrderWhy.None, 0)).associate { it.label to it.value }
+        ok(quiet[ShopLightningWords.roomAheadLabel] == ShopLightningWords.roomAheadNotOffered && ShopLightningWords.orderLabel !in quiet && ShopLightningWords.orderFeeLabel !in quiet, "a provider without LSPS1 and no order shows no order")
+        for ((state, text) in listOf(OrderState.Open to ShopLightningWords.orderOpen, OrderState.Paid to ShopLightningWords.orderPaid, OrderState.Done to ShopLightningWords.orderDone)) {
+            val one = ShopLightningModel.lines(held, LightningReport(1, 1, 1, 9, 0, 0, NotOffered.Offered, Lsps1Offer.Offered, state, OrderWhy.None, 500)).associate { it.label to it.value }
+            ok(one[ShopLightningWords.orderLabel] == text && ShopLightningWords.orderWhyLabel !in one, "an order that did not fail gives no cause: $state")
+        }
         ok(ShopLightningModel.Step.values().map { ShopLightningModel.stepLine(it) } == (1..5).map { "Step $it of 5" }, "SL-76: each step says where it stands among the five")
     }
 

@@ -91,7 +91,7 @@ use openbmt_lightning_node::provider::ProviderConfig;
 use openbmt_lightning_node::room::OnChainReason;
 use openbmt_lightning_node::state::StartFrom;
 use openbmt_link::numbers::{STORE_INBOX_FILE, STORE_OUTBOX_FILE};
-use openbmt_link::shopln::{LightningReport, NotOffered};
+use openbmt_link::shopln::{LightningReport, Lsps1Offer, NotOffered, OrderState, OrderWhy};
 use openbmt_link::{Client, ClientConfig, Inbox, Outbox, Route};
 use openbmt_net_io::DriverConfig;
 use tokio::runtime::{Builder, Runtime};
@@ -349,6 +349,41 @@ pub struct PaidSale {
     pub sale: u32,
     /// What the counter is told, in the form its Lightning path takes.
     pub facts: PaidFacts,
+}
+
+/// The provider's LSPS1 and the last order, as the report says them (SL-28,
+/// SL-45, LK-84).
+fn order_facts(
+    offered: openbmt_lightning_node::lsps1::Offer,
+    order: Option<&openbmt_lightning_node::lsps1::OrderRecord>,
+) -> (Lsps1Offer, OrderState, OrderWhy, u64) {
+    use openbmt_lightning_node::lsps1 as ln;
+    let offer = match offered {
+        ln::Offer::Unknown => Lsps1Offer::Unknown,
+        ln::Offer::Offered => Lsps1Offer::Offered,
+        ln::Offer::NotOffered => Lsps1Offer::NotOffered,
+    };
+    let Some(o) = order else {
+        return (offer, OrderState::None, OrderWhy::None, 0);
+    };
+    let state = match o.state {
+        ln::OrderState::Open => OrderState::Open,
+        ln::OrderState::Paid => OrderState::Paid,
+        ln::OrderState::Done => OrderState::Done,
+        ln::OrderState::Failed => OrderState::Failed,
+    };
+    let why = match o.why {
+        ln::OrderWhy::None => OrderWhy::None,
+        ln::OrderWhy::FeeAboveMax => OrderWhy::FeeAboveMax,
+        ln::OrderWhy::CannotPay => OrderWhy::CannotPay,
+        ln::OrderWhy::Refused => OrderWhy::Refused,
+        ln::OrderWhy::Expired => OrderWhy::Expired,
+        ln::OrderWhy::PaymentFailed => OrderWhy::PaymentFailed,
+        ln::OrderWhy::Refunded => OrderWhy::Refunded,
+        ln::OrderWhy::NotPossible => OrderWhy::NotPossible,
+        ln::OrderWhy::NoChannel => OrderWhy::NoChannel,
+    };
+    (offer, state, why, o.fee_sat)
 }
 
 /// What Home and the app read about Shop Lightning.
@@ -1455,12 +1490,26 @@ impl ShopLn {
             not_offered: self
                 .offer_blocked()
                 .map_or(NotOffered::Offered, |w| w.not_offered()),
+            lsps1: Lsps1Offer::Unknown,
+            order_state: OrderState::None,
+            order_why: OrderWhy::None,
+            order_fee_sats: 0,
         };
         if let Some(node) = self.node() {
             let status = node.status();
             report.balance_sats = node.balance_sat();
             report.receive_room_sats = status.room_msat / 1000;
             report.last_stored_at = status.device.last_stored_unix;
+            // SL-45: the fees of rooms bought ahead count with the openings'.
+            report.opening_fees_paid_sats = report
+                .opening_fees_paid_sats
+                .saturating_add(status.lsps1_fees_paid_sat);
+            (
+                report.lsps1,
+                report.order_state,
+                report.order_why,
+                report.order_fee_sats,
+            ) = order_facts(status.lsps1, status.last_order.as_ref());
             report.not_offered = if self
                 .inst
                 .as_ref()
@@ -2311,6 +2360,63 @@ mod tests {
         l.sale_closed(3);
         assert_eq!(lock(&l.shared.book).invoices.len(), 1);
         cleanup(&l);
+    }
+
+    #[test]
+    fn sl_45_the_report_says_whether_room_is_bought_ahead_and_the_last_order() {
+        use openbmt_lightning_node::lsps1 as ln;
+        let record = |state, why| ln::OrderRecord {
+            id: "o".to_string(),
+            state,
+            why,
+            fee_sat: 2_000,
+            payment_hash: [1; 32],
+            created_unix: 1,
+            updated_unix: 2,
+        };
+        assert_eq!(
+            order_facts(ln::Offer::Unknown, None),
+            (Lsps1Offer::Unknown, OrderState::None, OrderWhy::None, 0)
+        );
+        assert_eq!(
+            order_facts(ln::Offer::NotOffered, None),
+            (Lsps1Offer::NotOffered, OrderState::None, OrderWhy::None, 0)
+        );
+        let paid = record(ln::OrderState::Paid, ln::OrderWhy::None);
+        assert_eq!(
+            order_facts(ln::Offer::Offered, Some(&paid)),
+            (Lsps1Offer::Offered, OrderState::Paid, OrderWhy::None, 2_000)
+        );
+        let refused = record(ln::OrderState::Failed, ln::OrderWhy::FeeAboveMax);
+        assert_eq!(
+            order_facts(ln::Offer::Offered, Some(&refused)),
+            (
+                Lsps1Offer::Offered,
+                OrderState::Failed,
+                OrderWhy::FeeAboveMax,
+                2_000
+            )
+        );
+        // Every state and cause of the node has its own in the report.
+        for (state, expect) in [
+            (ln::OrderState::Open, OrderState::Open),
+            (ln::OrderState::Done, OrderState::Done),
+        ] {
+            let r = record(state, ln::OrderWhy::None);
+            assert_eq!(order_facts(ln::Offer::Offered, Some(&r)).1, expect);
+        }
+        for (why, expect) in [
+            (ln::OrderWhy::CannotPay, OrderWhy::CannotPay),
+            (ln::OrderWhy::Refused, OrderWhy::Refused),
+            (ln::OrderWhy::Expired, OrderWhy::Expired),
+            (ln::OrderWhy::PaymentFailed, OrderWhy::PaymentFailed),
+            (ln::OrderWhy::Refunded, OrderWhy::Refunded),
+            (ln::OrderWhy::NotPossible, OrderWhy::NotPossible),
+            (ln::OrderWhy::NoChannel, OrderWhy::NoChannel),
+        ] {
+            let r = record(ln::OrderState::Failed, why);
+            assert_eq!(order_facts(ln::Offer::Offered, Some(&r)).2, expect);
+        }
     }
 
     #[test]

@@ -315,8 +315,14 @@ SettingChangeView: record: field: string, label: string, counter: option<list<u8
 SettingsPreviewView: record: version: u32, changes: list<SettingChangeView>, needs_key_app: bool, nothing_changed: bool, shares_total_bps: u32, usd_per_btc: option<u64>, sats_per_usd: option<u64>, settings: list<u8>, currency: ShopCurrencyView
 NotOfferedView: enum, one tag byte
     tags Offered=0 SecondDeviceAway=1 ChainBehind=2 NoUsableChannel=3 ProviderSilent=4
+Lsps1OfferView: enum, one tag byte
+    tags Unknown=0 Offered=1 NotOffered=2
+OrderStateView: enum, one tag byte
+    tags None=0 Open=1 Paid=2 Done=3 Failed=4
+OrderWhyView: enum, one tag byte
+    tags None=0 FeeAboveMax=1 CannotPay=2 Refused=3 Expired=4 PaymentFailed=5 Refunded=6 NotPossible=7 NoChannel=8
 ShopLightningHeldView: record: counter: list<u8>, node_id: list<u8>, second_device: list<u8>, provider_node_id: list<u8>, provider_addr: string, cap_sats: u64, max_opening_fee_sats: u64
-LightningReportView: record: taken_at: u64, balance_sats: u64, receive_room_sats: u64, opening_fees_paid_sats: u64, last_stored_at: u64, last_sweep_at: u64, not_offered: NotOfferedView
+LightningReportView: record: taken_at: u64, balance_sats: u64, receive_room_sats: u64, opening_fees_paid_sats: u64, last_stored_at: u64, last_sweep_at: u64, not_offered: NotOfferedView, lsps1: Lsps1OfferView, order_state: OrderStateView, order_why: OrderWhyView, order_fee_sats: u64
 ShopLightningView: record: on: bool, own_wallet: bool, counters: list<list<u8>>, boxes: list<list<u8>>, held: option<ShopLightningHeldView>, report: option<LightningReportView>
 ShopLightningAction: enum, one tag byte
     tags Set=0 Change=1 Remove=2

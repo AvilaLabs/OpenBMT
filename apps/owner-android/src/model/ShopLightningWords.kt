@@ -75,6 +75,26 @@ object ShopLightningWords {
     const val chainBehind = "Not offered: the counter is behind the chain"
     const val noUsableChannel = "Not offered: no channel can take a payment"
     const val providerSilent = "Not offered: the provider does not answer"
+    // ---- room bought ahead from a provider that offers LSPS1 (SL-28, SL-35, SL-45); the words are still to be written ----
+    const val roomAheadLabel = "WORDS_NEEDED_SL28_ROOM_AHEAD_LABEL"
+    const val roomAheadUnknown = "WORDS_NEEDED_SL28_ROOM_AHEAD_UNKNOWN"
+    const val roomAheadOffered = "WORDS_NEEDED_SL28_ROOM_AHEAD_OFFERED"
+    const val roomAheadNotOffered = "WORDS_NEEDED_SL28_ROOM_AHEAD_NOT_OFFERED"
+    const val orderLabel = "WORDS_NEEDED_SL28_ORDER_LABEL"
+    const val orderOpen = "WORDS_NEEDED_SL28_ORDER_OPEN"
+    const val orderPaid = "WORDS_NEEDED_SL28_ORDER_PAID"
+    const val orderDone = "WORDS_NEEDED_SL28_ORDER_DONE"
+    const val orderFailed = "WORDS_NEEDED_SL28_ORDER_FAILED"
+    const val orderWhyLabel = "WORDS_NEEDED_SL28_ORDER_WHY_LABEL"
+    const val orderFeeLabel = "WORDS_NEEDED_SL28_ORDER_FEE_LABEL"
+    const val orderWhyFeeAboveMax = "WORDS_NEEDED_SL28_ORDER_WHY_FEE_ABOVE_MAX"
+    const val orderWhyCannotPay = "WORDS_NEEDED_SL28_ORDER_WHY_CANNOT_PAY"
+    const val orderWhyRefused = "WORDS_NEEDED_SL28_ORDER_WHY_REFUSED"
+    const val orderWhyExpired = "WORDS_NEEDED_SL28_ORDER_WHY_EXPIRED"
+    const val orderWhyPaymentFailed = "WORDS_NEEDED_SL28_ORDER_WHY_PAYMENT_FAILED"
+    const val orderWhyRefunded = "WORDS_NEEDED_SL28_ORDER_WHY_REFUNDED"
+    const val orderWhyNotPossible = "WORDS_NEEDED_SL28_ORDER_WHY_NOT_POSSIBLE"
+    const val orderWhyNoChannel = "WORDS_NEEDED_SL28_ORDER_WHY_NO_CHANNEL"
     const val changeLimits = "Change the limits"
     const val changeProvider = "Change the provider"
     const val save = "Save"
@@ -145,6 +165,35 @@ object ShopLightningWords {
         org.openbmt.owner.NotOffered.ProviderSilent -> providerSilent
     }
 
+    /** The text that says whether the provider offers LSPS1, so that room is bought ahead (SL-28, SL-45). */
+    fun roomAhead(o: org.openbmt.owner.Lsps1Offer): String = when (o) {
+        org.openbmt.owner.Lsps1Offer.Unknown -> roomAheadUnknown
+        org.openbmt.owner.Lsps1Offer.Offered -> roomAheadOffered
+        org.openbmt.owner.Lsps1Offer.NotOffered -> roomAheadNotOffered
+    }
+
+    /** The text for where the last order is; an order that was never made has none (SL-45). */
+    fun order(s: org.openbmt.owner.OrderState): String? = when (s) {
+        org.openbmt.owner.OrderState.None -> null
+        org.openbmt.owner.OrderState.Open -> orderOpen
+        org.openbmt.owner.OrderState.Paid -> orderPaid
+        org.openbmt.owner.OrderState.Done -> orderDone
+        org.openbmt.owner.OrderState.Failed -> orderFailed
+    }
+
+    /** The text for why the last order failed; an order that did not fail has none (SL-45). */
+    fun orderWhy(w: org.openbmt.owner.OrderWhy): String? = when (w) {
+        org.openbmt.owner.OrderWhy.None -> null
+        org.openbmt.owner.OrderWhy.FeeAboveMax -> orderWhyFeeAboveMax
+        org.openbmt.owner.OrderWhy.CannotPay -> orderWhyCannotPay
+        org.openbmt.owner.OrderWhy.Refused -> orderWhyRefused
+        org.openbmt.owner.OrderWhy.Expired -> orderWhyExpired
+        org.openbmt.owner.OrderWhy.PaymentFailed -> orderWhyPaymentFailed
+        org.openbmt.owner.OrderWhy.Refunded -> orderWhyRefunded
+        org.openbmt.owner.OrderWhy.NotPossible -> orderWhyNotPossible
+        org.openbmt.owner.OrderWhy.NoChannel -> orderWhyNoChannel
+    }
+
     /** Every text with the name it is listed under, in screen order, for the screens table and the checks. */
     fun all(): List<Pair<String, String>> = listOf(
         "rowTitle" to rowTitle,
@@ -208,6 +257,25 @@ object ShopLightningWords {
         "chainBehind" to chainBehind,
         "noUsableChannel" to noUsableChannel,
         "providerSilent" to providerSilent,
+        "roomAheadLabel" to roomAheadLabel,
+        "roomAheadUnknown" to roomAheadUnknown,
+        "roomAheadOffered" to roomAheadOffered,
+        "roomAheadNotOffered" to roomAheadNotOffered,
+        "orderLabel" to orderLabel,
+        "orderOpen" to orderOpen,
+        "orderPaid" to orderPaid,
+        "orderDone" to orderDone,
+        "orderFailed" to orderFailed,
+        "orderWhyLabel" to orderWhyLabel,
+        "orderFeeLabel" to orderFeeLabel,
+        "orderWhyFeeAboveMax" to orderWhyFeeAboveMax,
+        "orderWhyCannotPay" to orderWhyCannotPay,
+        "orderWhyRefused" to orderWhyRefused,
+        "orderWhyExpired" to orderWhyExpired,
+        "orderWhyPaymentFailed" to orderWhyPaymentFailed,
+        "orderWhyRefunded" to orderWhyRefunded,
+        "orderWhyNotPossible" to orderWhyNotPossible,
+        "orderWhyNoChannel" to orderWhyNoChannel,
         "changeLimits" to changeLimits,
         "changeProvider" to changeProvider,
         "save" to save,

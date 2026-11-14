@@ -891,6 +891,25 @@ library's own:
 | chainBehind | Not offered: the counter is behind the chain |
 | noUsableChannel | Not offered: no channel can take a payment |
 | providerSilent | Not offered: the provider does not answer |
+| roomAheadLabel | WORDS_NEEDED_SL28_ROOM_AHEAD_LABEL |
+| roomAheadUnknown | WORDS_NEEDED_SL28_ROOM_AHEAD_UNKNOWN |
+| roomAheadOffered | WORDS_NEEDED_SL28_ROOM_AHEAD_OFFERED |
+| roomAheadNotOffered | WORDS_NEEDED_SL28_ROOM_AHEAD_NOT_OFFERED |
+| orderLabel | WORDS_NEEDED_SL28_ORDER_LABEL |
+| orderOpen | WORDS_NEEDED_SL28_ORDER_OPEN |
+| orderPaid | WORDS_NEEDED_SL28_ORDER_PAID |
+| orderDone | WORDS_NEEDED_SL28_ORDER_DONE |
+| orderFailed | WORDS_NEEDED_SL28_ORDER_FAILED |
+| orderWhyLabel | WORDS_NEEDED_SL28_ORDER_WHY_LABEL |
+| orderFeeLabel | WORDS_NEEDED_SL28_ORDER_FEE_LABEL |
+| orderWhyFeeAboveMax | WORDS_NEEDED_SL28_ORDER_WHY_FEE_ABOVE_MAX |
+| orderWhyCannotPay | WORDS_NEEDED_SL28_ORDER_WHY_CANNOT_PAY |
+| orderWhyRefused | WORDS_NEEDED_SL28_ORDER_WHY_REFUSED |
+| orderWhyExpired | WORDS_NEEDED_SL28_ORDER_WHY_EXPIRED |
+| orderWhyPaymentFailed | WORDS_NEEDED_SL28_ORDER_WHY_PAYMENT_FAILED |
+| orderWhyRefunded | WORDS_NEEDED_SL28_ORDER_WHY_REFUNDED |
+| orderWhyNotPossible | WORDS_NEEDED_SL28_ORDER_WHY_NOT_POSSIBLE |
+| orderWhyNoChannel | WORDS_NEEDED_SL28_ORDER_WHY_NO_CHANNEL |
 | changeLimits | Change the limits |
 | changeProvider | Change the provider |
 | save | Save |

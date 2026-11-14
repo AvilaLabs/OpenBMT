@@ -719,7 +719,7 @@ object ProtocolDecoderTest {
 
         val held = Writer().bytes(ByteArray(32) { 1 }).bytes(ByteArray(33) { 2 }).bytes(ByteArray(32) { 3 })
             .bytes(ByteArray(33) { 4 }).string("203.0.113.7:9735").u64(5_000_000).u64(20_000).toByteArray()
-        val report = Writer().u64(1_000).u64(11).u64(22).u64(33).u64(44).u64(55).u8(2).toByteArray()
+        val report = Writer().u64(1_000).u64(11).u64(22).u64(33).u64(44).u64(55).u8(2).u8(1).u8(4).u8(1).u64(9_000).toByteArray()
         val off = Writer().bool(false).bool(false).u32(1).bytes(ByteArray(32) { 1 }).u32(0).u8(0).u8(0).toByteArray()
         val offState = decodeResponse(header(0, off)).let { it.shopLightningState().also { _ -> it.end() } }
         check(!offState.on && !offState.ownWallet && offState.counters.size == 1 && offState.boxes.isEmpty())
@@ -732,14 +732,22 @@ object ProtocolDecoderTest {
         val r = state.report!!
         check(r.takenAt == 1_000L && r.balanceSats == 11L && r.receiveRoomSats == 22L && r.openingFeesPaidSats == 33L)
         check(r.lastStoredAt == 44L && r.lastSweepAt == 55L && r.notOffered == NotOffered.ChainBehind)
+        check(r.lsps1 == Lsps1Offer.Offered && r.orderState == OrderState.Failed && r.orderWhy == OrderWhy.FeeAboveMax && r.orderFeeSats == 9_000L)
         for ((tag, cause) in listOf(0 to NotOffered.Offered, 1 to NotOffered.SecondDeviceAway, 3 to NotOffered.NoUsableChannel, 4 to NotOffered.ProviderSilent)) {
-            val one = Writer().bool(false).bool(false).u32(0).u32(0).u8(0).u8(1).u64(1).u64(2).u64(3).u64(4).u64(5).u64(6).u8(tag).toByteArray()
+            val one = Writer().bool(false).bool(false).u32(0).u32(0).u8(0).u8(1).u64(1).u64(2).u64(3).u64(4).u64(5).u64(6).u8(tag).u8(0).u8(0).u8(0).u64(0).toByteArray()
             val got = decodeResponse(header(0, one)).let { it.shopLightningState().also { _ -> it.end() } }
             check(got.report!!.notOffered == cause)
         }
         rejects("a cause that is not defined") {
-            val bad = Writer().bool(false).bool(false).u32(0).u32(0).u8(0).u8(1).u64(1).u64(2).u64(3).u64(4).u64(5).u64(6).u8(5).toByteArray()
+            val bad = Writer().bool(false).bool(false).u32(0).u32(0).u8(0).u8(1).u64(1).u64(2).u64(3).u64(4).u64(5).u64(6).u8(5).u8(0).u8(0).u8(0).u64(0).toByteArray()
             decodeResponse(header(0, bad)).shopLightningState()
+        }
+        for ((what, tags) in listOf("an offer" to listOf(3, 0, 0), "an order state" to listOf(0, 5, 0), "an order cause" to listOf(0, 0, 9))) {
+            rejects("$what that is not defined") {
+                val bad = Writer().bool(false).bool(false).u32(0).u32(0).u8(0).u8(1).u64(1).u64(2).u64(3).u64(4).u64(5).u64(6).u8(0)
+                    .u8(tags[0]).u8(tags[1]).u8(tags[2]).u64(0).toByteArray()
+                decodeResponse(header(0, bad)).shopLightningState()
+            }
         }
         rejects("a report that ends early") {
             decodeResponse(header(0, on.copyOf(on.size - 1))).shopLightningState()

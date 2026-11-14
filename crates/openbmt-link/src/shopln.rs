@@ -3,7 +3,7 @@
 //! ```text
 //! Store:   OBM 0x1e | version | request ID 16 | action u8 | body
 //! Stored:  OBM_ | version | request ID 16 | action u8 | result u8 | data
-//! Report:  OBM 0x1f | version | six fields (LK-84)
+//! Report:  OBM 0x1f | version | six fields (LK-84), version 2 with four more
 //! ```
 //!
 //! Decoding is strict, as in [`openbmt_core::wire`]: bytes decode only if
@@ -560,6 +560,132 @@ impl NotOffered {
     }
 }
 
+/// Whether the provider offers LSPS1, so that room to receive is bought ahead
+/// (SL-28), as the report says it (LK-84).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lsps1Offer {
+    /// Not asked yet, or the provider is away.
+    Unknown,
+    /// The provider offers it.
+    Offered,
+    /// The provider does not.
+    NotOffered,
+}
+
+impl Lsps1Offer {
+    /// The `u16` code.
+    pub fn to_code(self) -> u16 {
+        match self {
+            Self::Unknown => 0,
+            Self::Offered => 1,
+            Self::NotOffered => 2,
+        }
+    }
+
+    /// The offer for a code.
+    pub fn from_code(code: u16) -> Option<Self> {
+        [Self::Unknown, Self::Offered, Self::NotOffered]
+            .into_iter()
+            .find(|c| c.to_code() == code)
+    }
+}
+
+/// Where the last order for room is, as the report says it (LK-84, SL-45).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrderState {
+    /// No order was made.
+    None,
+    /// Made, not paid yet.
+    Open,
+    /// Paid, the channel not opened yet.
+    Paid,
+    /// The channel is opened.
+    Done,
+    /// Not paid, not opened, or given up; the report says why.
+    Failed,
+}
+
+impl OrderState {
+    /// The `u16` code.
+    pub fn to_code(self) -> u16 {
+        match self {
+            Self::None => 0,
+            Self::Open => 1,
+            Self::Paid => 2,
+            Self::Done => 3,
+            Self::Failed => 4,
+        }
+    }
+
+    /// The state for a code.
+    pub fn from_code(code: u16) -> Option<Self> {
+        [Self::None, Self::Open, Self::Paid, Self::Done, Self::Failed]
+            .into_iter()
+            .find(|c| c.to_code() == code)
+    }
+}
+
+/// Why the last order failed or was not paid, as the report says it (LK-84).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrderWhy {
+    /// The order did not fail.
+    None,
+    /// The provider's fee is above the most the owner allows for one opening.
+    FeeAboveMax,
+    /// The node could not pay it from its channels.
+    CannotPay,
+    /// The provider refused the order or answered with what cannot be used.
+    Refused,
+    /// The provider's invoice ran out before it was paid.
+    Expired,
+    /// The payment failed.
+    PaymentFailed,
+    /// The provider gave the payment back.
+    Refunded,
+    /// The order cannot be made or paid as the node pays.
+    NotPossible,
+    /// Paid, and no channel came in two days.
+    NoChannel,
+}
+
+impl OrderWhy {
+    /// The `u16` code.
+    pub fn to_code(self) -> u16 {
+        match self {
+            Self::None => 0,
+            Self::FeeAboveMax => 1,
+            Self::CannotPay => 2,
+            Self::Refused => 3,
+            Self::Expired => 4,
+            Self::PaymentFailed => 5,
+            Self::Refunded => 6,
+            Self::NotPossible => 7,
+            Self::NoChannel => 8,
+        }
+    }
+
+    /// The cause for a code.
+    pub fn from_code(code: u16) -> Option<Self> {
+        [
+            Self::None,
+            Self::FeeAboveMax,
+            Self::CannotPay,
+            Self::Refused,
+            Self::Expired,
+            Self::PaymentFailed,
+            Self::Refunded,
+            Self::NotPossible,
+            Self::NoChannel,
+        ]
+        .into_iter()
+        .find(|c| c.to_code() == code)
+    }
+}
+
+/// The version of the report that adds the provider's LSPS1 and the last
+/// order. Version 1, with the six first fields, still reads.
+pub const REPORT_VERSION: u8 = 2;
+
 /// The facts the Lightning counter reports with each check-in (LK-84,
 /// SL-78). The cap and the provider are not in it: the owner phone shows
 /// those of its own settings.
@@ -569,7 +695,8 @@ pub struct LightningReport {
     pub balance_sats: u64,
     /// The room to receive, in satoshis.
     pub receive_room_sats: u64,
-    /// The opening fees paid so far, in satoshis.
+    /// The opening fees paid so far, in satoshis, the orders for room bought
+    /// ahead included (SL-29, SL-45).
     pub opening_fees_paid_sats: u64,
     /// When the Box last stored the state, in seconds since 1970; 0 if it
     /// never has.
@@ -579,12 +706,21 @@ pub struct LightningReport {
     pub last_sweep_at: u64,
     /// Why Lightning is not offered, or that it is.
     pub not_offered: NotOffered,
+    /// Whether the provider offers LSPS1 (SL-28, SL-45).
+    pub lsps1: Lsps1Offer,
+    /// Where the last order for room is.
+    pub order_state: OrderState,
+    /// Why the last order failed; [`OrderWhy::None`] unless it did.
+    pub order_why: OrderWhy,
+    /// What the last order costs, in satoshis; 0 with no order.
+    pub order_fee_sats: u64,
 }
 
 impl LightningReport {
-    /// The content bytes.
+    /// The content bytes, in version 2.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = wire::start(&MAGIC_LIGHTNING_REPORT, 48);
+        let mut out = wire::start(&MAGIC_LIGHTNING_REPORT, 66);
+        out[4] = REPORT_VERSION;
         for n in [
             self.balance_sats,
             self.receive_room_sats,
@@ -595,13 +731,20 @@ impl LightningReport {
             out.extend_from_slice(&n.to_le_bytes());
         }
         out.extend_from_slice(&self.not_offered.to_code().to_le_bytes());
+        out.extend_from_slice(&self.lsps1.to_code().to_le_bytes());
+        out.extend_from_slice(&self.order_state.to_code().to_le_bytes());
+        out.extend_from_slice(&self.order_why.to_code().to_le_bytes());
+        out.extend_from_slice(&self.order_fee_sats.to_le_bytes());
         out
     }
 
-    /// Read the content strictly.
+    /// Read the content strictly: version 2, or version 1 with the LSPS1 and
+    /// order facts unknown. An order that failed says why, nothing else does,
+    /// and no order has no fee.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut r = Reader::framed(bytes, &MAGIC_LIGHTNING_REPORT)?;
-        let report = Self {
+        let (mut r, version) =
+            Reader::framed_up_to(bytes, &MAGIC_LIGHTNING_REPORT, REPORT_VERSION)?;
+        let mut report = Self {
             balance_sats: r.u64_le()?,
             receive_room_sats: r.u64_le()?,
             opening_fees_paid_sats: r.u64_le()?,
@@ -609,7 +752,30 @@ impl LightningReport {
             last_sweep_at: r.u64_le()?,
             not_offered: NotOffered::from_code(r.u16_le()?)
                 .ok_or(DecodeError::NonCanonical("the cause code is not a choice"))?,
+            lsps1: Lsps1Offer::Unknown,
+            order_state: OrderState::None,
+            order_why: OrderWhy::None,
+            order_fee_sats: 0,
         };
+        if version >= 2 {
+            report.lsps1 = Lsps1Offer::from_code(r.u16_le()?)
+                .ok_or(DecodeError::NonCanonical("the LSPS1 code is not a choice"))?;
+            report.order_state = OrderState::from_code(r.u16_le()?).ok_or(
+                DecodeError::NonCanonical("the order state code is not a choice"),
+            )?;
+            report.order_why = OrderWhy::from_code(r.u16_le()?).ok_or(
+                DecodeError::NonCanonical("the order cause code is not a choice"),
+            )?;
+            report.order_fee_sats = r.u64_le()?;
+            if (report.order_state == OrderState::Failed) != (report.order_why != OrderWhy::None) {
+                return Err(DecodeError::NonCanonical(
+                    "only an order that failed has a cause",
+                ));
+            }
+            if report.order_state == OrderState::None && report.order_fee_sats != 0 {
+                return Err(DecodeError::NonCanonical("no order has no fee"));
+            }
+        }
         r.finish()?;
         Ok(report)
     }

@@ -127,6 +127,12 @@ object ShopLightningModel {
         out.add(Line(ShopLightningWords.balanceLabel, Format.sats(report.balanceSats)))
         out.add(Line(ShopLightningWords.roomLabel, Format.sats(report.receiveRoomSats)))
         out.add(Line(ShopLightningWords.feesPaidLabel, Format.sats(report.openingFeesPaidSats)))
+        out.add(Line(ShopLightningWords.roomAheadLabel, ShopLightningWords.roomAhead(report.lsps1)))
+        ShopLightningWords.order(report.orderState)?.let { state ->
+            out.add(Line(ShopLightningWords.orderLabel, state))
+            ShopLightningWords.orderWhy(report.orderWhy)?.let { out.add(Line(ShopLightningWords.orderWhyLabel, it)) }
+            if (report.orderFeeSats > 0) out.add(Line(ShopLightningWords.orderFeeLabel, Format.sats(report.orderFeeSats)))
+        }
         out.add(Line(ShopLightningWords.lastStoredLabel, if (report.lastStoredAt == 0L) ShopLightningWords.neverStored else Format.localTime(report.lastStoredAt)))
         out.add(Line(ShopLightningWords.lastSweepLabel, if (report.lastSweepAt == 0L) ShopLightningWords.noSweep else Format.localTime(report.lastSweepAt)))
         out.add(Line(ShopLightningWords.whyLabel, ShopLightningWords.cause(report.notOffered)))

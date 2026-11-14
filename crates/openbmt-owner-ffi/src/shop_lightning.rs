@@ -8,7 +8,7 @@
 use openbmt_core::approval::{classify, ChangeClass};
 use openbmt_core::identity::DeviceId;
 use openbmt_core::settings::{ShopLightning, SignedSettings};
-use openbmt_link::shopln::NotOffered;
+use openbmt_link::shopln::{Lsps1Offer, NotOffered, OrderState, OrderWhy};
 use openbmt_owner::{
     SettingsEdit, SettingsPreview, ShopLightningChange, ShopLightningEdit, ShopLightningSet,
 };
@@ -48,6 +48,120 @@ impl NotOfferedView {
             NotOffered::ChainBehind => Self::ChainBehind,
             NotOffered::NoUsableChannel => Self::NoUsableChannel,
             NotOffered::ProviderSilent => Self::ProviderSilent,
+        }
+    }
+}
+
+/// Whether the provider offers LSPS1, so that room is bought ahead (SL-28,
+/// SL-45, LK-84).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lsps1OfferView {
+    /// Not asked yet, or the provider is away.
+    Unknown,
+    /// The provider offers it.
+    Offered,
+    /// The provider does not.
+    NotOffered,
+}
+
+wire_unit_enum!(Lsps1OfferView {
+    Unknown = 0,
+    Offered = 1,
+    NotOffered = 2
+});
+
+impl Lsps1OfferView {
+    fn of(o: Lsps1Offer) -> Self {
+        match o {
+            Lsps1Offer::Unknown => Self::Unknown,
+            Lsps1Offer::Offered => Self::Offered,
+            Lsps1Offer::NotOffered => Self::NotOffered,
+        }
+    }
+}
+
+/// Where the last order for room is (SL-45, LK-84).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrderStateView {
+    /// No order was made.
+    None,
+    /// Made, not paid yet.
+    Open,
+    /// Paid, the channel not opened yet.
+    Paid,
+    /// The channel is opened.
+    Done,
+    /// Not paid, not opened, or given up.
+    Failed,
+}
+
+wire_unit_enum!(OrderStateView {
+    None = 0,
+    Open = 1,
+    Paid = 2,
+    Done = 3,
+    Failed = 4
+});
+
+impl OrderStateView {
+    fn of(o: OrderState) -> Self {
+        match o {
+            OrderState::None => Self::None,
+            OrderState::Open => Self::Open,
+            OrderState::Paid => Self::Paid,
+            OrderState::Done => Self::Done,
+            OrderState::Failed => Self::Failed,
+        }
+    }
+}
+
+/// Why the last order failed or was not paid (SL-45, LK-84).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrderWhyView {
+    /// The order did not fail.
+    None,
+    /// The provider's fee is above the most for one opening.
+    FeeAboveMax,
+    /// The node could not pay it from its channels.
+    CannotPay,
+    /// The provider refused the order or answered with what cannot be used.
+    Refused,
+    /// The provider's invoice ran out before it was paid.
+    Expired,
+    /// The payment failed.
+    PaymentFailed,
+    /// The provider gave the payment back.
+    Refunded,
+    /// The order cannot be made or paid as the node pays.
+    NotPossible,
+    /// Paid, and no channel came in two days.
+    NoChannel,
+}
+
+wire_unit_enum!(OrderWhyView {
+    None = 0,
+    FeeAboveMax = 1,
+    CannotPay = 2,
+    Refused = 3,
+    Expired = 4,
+    PaymentFailed = 5,
+    Refunded = 6,
+    NotPossible = 7,
+    NoChannel = 8
+});
+
+impl OrderWhyView {
+    fn of(o: OrderWhy) -> Self {
+        match o {
+            OrderWhy::None => Self::None,
+            OrderWhy::FeeAboveMax => Self::FeeAboveMax,
+            OrderWhy::CannotPay => Self::CannotPay,
+            OrderWhy::Refused => Self::Refused,
+            OrderWhy::Expired => Self::Expired,
+            OrderWhy::PaymentFailed => Self::PaymentFailed,
+            OrderWhy::Refunded => Self::Refunded,
+            OrderWhy::NotPossible => Self::NotPossible,
+            OrderWhy::NoChannel => Self::NoChannel,
         }
     }
 }
@@ -114,6 +228,14 @@ pub struct LightningReportView {
     pub last_sweep_at: u64,
     /// Why Lightning is not offered, or that it is.
     pub not_offered: NotOfferedView,
+    /// Whether the provider offers LSPS1, so that room is bought ahead.
+    pub lsps1: Lsps1OfferView,
+    /// Where the last order for room is.
+    pub order_state: OrderStateView,
+    /// Why the last order failed; none unless it did.
+    pub order_why: OrderWhyView,
+    /// What the last order costs, in satoshis; 0 with no order.
+    pub order_fee_sats: u64,
 }
 
 wire_record!(LightningReportView {
@@ -123,7 +245,11 @@ wire_record!(LightningReportView {
     opening_fees_paid_sats,
     last_stored_at,
     last_sweep_at,
-    not_offered
+    not_offered,
+    lsps1,
+    order_state,
+    order_why,
+    order_fee_sats
 });
 
 impl LightningReportView {
@@ -136,6 +262,10 @@ impl LightningReportView {
             last_stored_at: t.report.last_stored_at,
             last_sweep_at: t.report.last_sweep_at,
             not_offered: NotOfferedView::of(t.report.not_offered),
+            lsps1: Lsps1OfferView::of(t.report.lsps1),
+            order_state: OrderStateView::of(t.report.order_state),
+            order_why: OrderWhyView::of(t.report.order_why),
+            order_fee_sats: t.report.order_fee_sats,
         }
     }
 }

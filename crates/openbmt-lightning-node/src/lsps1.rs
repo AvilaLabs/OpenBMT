@@ -468,7 +468,7 @@ pub fn order_params(
         funding_confirms_within_blocks: options
             .min_funding_confirms_within_blocks
             .max(WANTED_FUNDING_WITHIN_BLOCKS),
-        channel_expiry_blocks: options.max_channel_expiry_blocks.min(u32::MAX).max(1),
+        channel_expiry_blocks: options.max_channel_expiry_blocks,
         token: token.map(str::to_string),
         announce_channel: false,
     })

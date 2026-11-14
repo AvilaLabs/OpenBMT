@@ -16,7 +16,7 @@ use openbmt_counter_node::{CounterLink, CounterLinkConfig, Node, NodeConfig};
 use openbmt_courier::{
     decode_received, records_content, Courier, FirstStart, MemoryPost, MemoryRelay, Received,
 };
-use openbmt_link::shopln::{LightningReport, NotOffered};
+use openbmt_link::shopln::{LightningReport, Lsps1Offer, NotOffered, OrderState, OrderWhy};
 use openbmt_link::{Kind, Role, StoreParties};
 
 use super::*;
@@ -2870,6 +2870,10 @@ fn report(balance: u64, not_offered: NotOffered) -> LightningReport {
         last_stored_at: 9_000,
         last_sweep_at: 0,
         not_offered,
+        lsps1: Lsps1Offer::Unknown,
+        order_state: OrderState::None,
+        order_why: OrderWhy::None,
+        order_fee_sats: 0,
     }
 }
 

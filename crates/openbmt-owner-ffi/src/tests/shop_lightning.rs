@@ -10,7 +10,7 @@
 use std::collections::BTreeSet;
 
 use openbmt_core::settings::{Settings, SignedSettings};
-use openbmt_link::shopln::{LightningReport, NotOffered};
+use openbmt_link::shopln::{LightningReport, Lsps1Offer, NotOffered, OrderState, OrderWhy};
 use openbmt_owner_node::TakenReport;
 
 use super::kit::*;
@@ -370,6 +370,10 @@ fn sl_78_the_view_gives_the_newest_report_with_its_time_and_cause() {
             last_stored_at: 44,
             last_sweep_at: 55,
             not_offered: NotOffered::ChainBehind,
+            lsps1: Lsps1Offer::Offered,
+            order_state: OrderState::Failed,
+            order_why: OrderWhy::FeeAboveMax,
+            order_fee_sats: 66,
         },
     };
     let view = shop_lightning::view(false, Some(&settings), Some(&report));
@@ -386,6 +390,10 @@ fn sl_78_the_view_gives_the_newest_report_with_its_time_and_cause() {
         [1_234, 11, 22, 33, 44, 55]
     );
     assert_eq!(r.not_offered, shop_lightning::NotOfferedView::ChainBehind);
+    assert_eq!(r.lsps1, shop_lightning::Lsps1OfferView::Offered);
+    assert_eq!(r.order_state, shop_lightning::OrderStateView::Failed);
+    assert_eq!(r.order_why, shop_lightning::OrderWhyView::FeeAboveMax);
+    assert_eq!(r.order_fee_sats, 66);
     assert!(!view.on && view.held.is_none());
     let names: BTreeSet<_> = view.counters.iter().collect();
     assert_eq!(names.len(), 1);
