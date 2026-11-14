@@ -2,46 +2,34 @@ package org.openbmt.counter.app
 
 import org.openbmt.app.Format
 import org.openbmt.app.SayWords
-import org.openbmt.app.Tones
-import org.openbmt.app.Who
 import org.openbmt.counter.StarterDecision
 import org.openbmt.counter.StarterPayment
 import org.openbmt.counter.StarterState
 
 /**
  * The labels of the starter line's cards and of the day's starter payments (docs/COUNTER-RULES.md CR-273, CR-274). The
- * words are not written yet: each text is a placeholder that names its rule (docs/SCREEN-RULES.md). The words of the stop
+ * words of the stop
  * and of the line that cannot be checked come from the library with the decision. The list is written to
  * docs/screens/counter-app.md by [AppWords.screensMarkdown]. No Android class is used.
  */
 object WordsOfStarter {
     /** CR-274: the button of a card that says someone at the counter has seen the payment. */
-    const val SEEN = "WORDS_NEEDED_CR274_SEEN"
+    const val SEEN = "Seen"
 
     /** CR-274: the label of a payment's amount. */
-    const val AMOUNT = "WORDS_NEEDED_CR274_AMOUNT"
+    const val AMOUNT = "Amount"
 
     /** CR-274: the label of a payment's time. */
-    const val TIME = "WORDS_NEEDED_CR274_TIME"
+    const val TIME = "Time"
 
     /** CR-274: what a payment the owner phone made says. */
-    const val BY_OWNER = "WORDS_NEEDED_CR274_BY_OWNER"
+    const val BY_OWNER = "Made on the owner phone"
 
     /** CR-274: what a payment the owner phone did not make says. */
-    const val NOT_BY_OWNER = "WORDS_NEEDED_CR274_NOT_BY_OWNER"
+    const val NOT_BY_OWNER = "Not made on the owner phone"
 
     /** CR-274: the heading of the day's payments from the starter wallet on Today. */
-    const val TODAY = "WORDS_NEEDED_CR274_TODAY"
-
-    /** Every text of this part that is not written yet. */
-    val placeholders: List<String> = listOf(SEEN, AMOUNT, TIME, BY_OWNER, NOT_BY_OWNER, TODAY)
-
-    /** Words that are still to be written: the placeholder stands in the heading and both sentences. */
-    fun said(placeholder: String): SayWords =
-        SayWords(Tones.INFO, Who.MANAGER, placeholder, placeholder, placeholder, null, null, null, null)
-
-    /** Whether these words are a placeholder. */
-    fun isPlaceholder(words: SayWords): Boolean = words.heading.startsWith("WORDS_NEEDED_")
+    const val TODAY = "Payments from the starter wallet"
 
     /** Every key and its text, for docs/screens/counter-app.md. */
     fun all(): List<Pair<String, String>> = listOf(

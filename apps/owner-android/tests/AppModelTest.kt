@@ -4007,7 +4007,7 @@ object AppModelTest {
         ok(!record.withStop(false).stopAboveLimit && record.withStop(false).limitSats == 1_000L && record.withStop(false).moveBy == 2_000L, "SS-38: the stop is switched off and the rest of the record is kept")
         ok(StarterLineSettings.stopOptionShown(true) && !StarterLineSettings.stopOptionShown(false), "SS-38: the option is shown only for a shop with a Box link")
         ok(StarterLineSettings.stopForNode(record, true) && !StarterLineSettings.stopForNode(record, false) && !StarterLineSettings.stopForNode(record.withStop(false), true), "SS-38: the node is told to stop only when the owner chose it and a Box link carries it")
-        ok(all.any { it.first == "SS32_BOX_ONLY" && it.second == "WORDS_NEEDED_OA_SS32_BOX_ONLY" }, "SS-32: the line on setup that payments show on counters only with a Box is a placeholder")
+        ok(all.any { it.first == "SS32_BOX_ONLY" && it.second == StarterWords.boxOnly && !StarterWords.boxOnly.contains("WORDS_NEEDED") }, "SS-32: the line on setup says payments show on counters only with a Box")
         val setupSource = source("src/android/StarterScreens.kt")
         val limitPage = setupSource.substringAfter("internal fun Controller.showStarterLimit").substringBefore("// ---- making the key")
         ok(!limitPage.contains("stopLabel") && !limitPage.contains("CheckBox") && limitPage.contains("StarterWords.boxOnly"), "SS-38: setup has no stop option, and says what a Box is for")

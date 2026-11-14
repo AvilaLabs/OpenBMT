@@ -115,8 +115,8 @@ fn cr_272_to_cr_274_the_app_reads_the_stop_and_the_cards_and_marks_a_card_seen()
     assert!(s.rig.dir().join("starter-cards.bin").exists());
     let st = state(&s, T0 + 211);
     assert_eq!(st.decision, 1, "stopped");
-    assert!(st.words.unwrap().starts_with("WORDS_NEEDED_CR273_"));
-    assert!(st.cards.unwrap().starts_with("WORDS_NEEDED_CR274_"));
+    assert_eq!(st.words.unwrap(), "No bitcoin sales now");
+    assert_eq!(st.cards.unwrap(), "Starter wallet payments");
     assert_eq!(
         (st.held, st.limit, st.line_time),
         (Some(300), Some(200), Some(T0 + 210))
@@ -141,7 +141,7 @@ fn cr_272_to_cr_274_the_app_reads_the_stop_and_the_cards_and_marks_a_card_seen()
     // and Home says so.
     let st = state(&s, T0 + 210 + 601);
     assert_eq!(st.decision, 2);
-    assert!(st.words.unwrap().starts_with("WORDS_NEEDED_CR273_"));
+    assert_eq!(st.words.unwrap(), "Limit cannot be checked");
 
     // Someone at the counter has seen the newest payment.
     seen(&s, T0 + 300, &[2; 32]).unwrap();

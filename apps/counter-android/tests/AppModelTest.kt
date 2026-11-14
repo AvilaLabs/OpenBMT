@@ -1354,9 +1354,8 @@ object AppModelTest {
         ok(StarterModel.lines(a).map { it.label } == listOf(WordsOfStarter.AMOUNT, WordsOfStarter.TIME, WordsOfStarter.BY_OWNER), "CR-274: a card says that the owner phone made the payment")
         ok(StarterModel.lines(c).last().label == WordsOfStarter.NOT_BY_OWNER, "CR-274: and when it did not")
         ok(StarterModel.signature(listOf(a)) != StarterModel.signature(listOf(a, c)) && StarterModel.signature(emptyList()) == "", "CR-274: the cards are made again only when they change")
-        ok(WordsOfStarter.placeholders.all { WordsOfStarter.isPlaceholder(WordsOfStarter.said(it)) && WordsOfStarter.said(it).heading == WordsOfStarter.said(it).what }, "CR-276: each unwritten text shows its own name")
-        ok(WordsOfStarter.placeholders.all { it.startsWith("WORDS_NEEDED_CR274_") } && WordsOfStarter.placeholders.toSet().size == WordsOfStarter.placeholders.size, "CR-276: the placeholders name their rule, once each")
-        ok(WordsOfStarter.all().map { it.second }.toSet() == WordsOfStarter.placeholders.toSet(), "CR-276: every text of the list is a placeholder of the list")
+        val starterTexts = WordsOfStarter.all().map { it.second }
+        ok(starterTexts.all { it.isNotBlank() && it.trim() == it && !it.contains("WORDS_NEEDED") } && starterTexts.toSet().size == starterTexts.size, "CR-276: every text of the starter cards is written, once each")
         if (appDir != null) {
             val controller = File(appDir, "src/android/Controller.kt").readText()
             val sale = controller.substringAfter("private fun showNewSale()").substringBefore("/** CR-213")

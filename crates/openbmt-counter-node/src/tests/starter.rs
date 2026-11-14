@@ -524,13 +524,28 @@ fn cr_275_a_start_after_the_switch_drops_what_a_stop_left() {
 // CR-276.
 
 #[test]
-fn cr_276_every_state_and_refusal_has_words_that_are_placeholders_for_now() {
+fn cr_276_every_state_and_refusal_has_written_words_that_pass_the_checks() {
+    let mut seen = Vec::new();
     for (name, e) in every_starter_refused() {
         let w = e.words();
-        assert!(is_placeholder(&w), "{name}");
-        assert!(w.heading.starts_with("WORDS_NEEDED_CR27"), "{name}");
+        assert!(!is_placeholder(&w), "{name}");
+        assert_eq!(openbmt_core::say::check(&w), Ok(()), "{name}");
         assert_eq!(w.code, Some(e.rule()), "{name}");
+        seen.push((w.heading.clone(), w.what.clone()));
     }
+    for w in [
+        crate::say::starter_stopped_words(),
+        crate::say::starter_unchecked_words(),
+        crate::say::starter_cards_words(),
+    ] {
+        assert!(!is_placeholder(&w), "{}", w.heading);
+        assert_eq!(openbmt_core::say::check(&w), Ok(()), "{}", w.heading);
+        seen.push((w.heading.clone(), w.what.clone()));
+    }
+    let n = seen.len();
+    seen.sort();
+    seen.dedup();
+    assert_eq!(seen.len(), n, "no two starter words read the same");
     let names: Vec<String> = all_words().into_iter().map(|(n, _)| n).collect();
     for name in ["StarterStopped", "StarterUnchecked", "StarterCards"] {
         assert!(names.iter().any(|n| n == name), "{name}");

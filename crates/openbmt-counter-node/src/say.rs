@@ -126,6 +126,15 @@ fn said(tone: Tone, key: &'static str, who: Who) -> Words {
         "CR_261_SWITCHED" => ("Switched to the new wallet", "From now on this counter's sales go to the new wallet.", "Nothing more to do on this counter."),
         "CR_260_DIFFERENT" => ("New wallet not taken", "The manager said the address on the counter differs from the new wallet's own screen, so this counter keeps paying into the starter wallet.", "Check that the right wallet was connected on the owner phone. If it was, the owner phone may not be safe to use."),
         "CR_260_HOME_LINE" => ("A new wallet waits", "The owner phone sent a new wallet for this counter's sales.", "Open New wallet to check in the manager's menu."),
+        "CR_272_NOT_A_LINE" => ("Starter line not read", "A message from the owner phone is not a starter line this counter can read, so nothing changed.", "Nothing to do. The owner phone sends a new line soon."),
+        "CR_272_NOT_STARTER" => ("No starter wallet here", "This counter is not paired with the starter wallet, so it takes no starter line. Nothing changed.", "Nothing to do on this counter."),
+        "CR_272_NOT_FROM_OWNER" => ("Line not from the owner", "The starter line is not signed by the owner phone this counter was paired with, so it was not taken.", "Check that only the shop's own owner phone is linked to this counter."),
+        "CR_272_OLD" => ("Older starter line", "This counter already has a newer starter line than this one, so it was not taken.", "Nothing to do."),
+        "CR_272_NOT_SAVED" => ("Starter line not saved", "The counter could not save the starter line, so it keeps the last one it had.", "Check that the counter has room. The owner phone sends a new line soon."),
+        "CR_274_NO_SUCH_PAYMENT" => ("Payment not on this counter", "That payment is not among the starter wallet's payments this counter shows, so nothing was marked.", "Go back to Home and tap Seen on a card that is there."),
+        "CR_273_STOPPED" => ("No bitcoin sales now", "The starter wallet holds as much as the owner's limit, and the owner asked to stop bitcoin sales above it.", "Take another way to pay. Bitcoin sales come back when the owner moves the money or raises the limit."),
+        "CR_273_UNCHECKED" => ("Limit cannot be checked", "The owner phone's last word on the starter wallet is too old to say whether it holds more than the limit.", "Bitcoin sales go on. Open the owner app so the counter hears from it again."),
+        "CR_274_CARDS" => ("Starter wallet payments", "Money left the starter wallet. Each card shows a payment until someone here taps Seen.", "Check each one with the owner. A payment the owner phone did not make needs a look now."),
         _ => (key, key, key),
     };
     Words::new(tone, heading, what, who, next)
@@ -370,15 +379,15 @@ impl StarterRefused {
     /// What is told about a starter line that was not taken, or a payment
     /// that was not marked seen (CR-272, CR-274, CR-276). Nothing changed.
     pub fn words(&self) -> Words {
-        let (placeholder, who) = match self {
-            Self::Frame(_) => ("WORDS_NEEDED_CR272_NOT_A_LINE", Who::Owner),
-            Self::NotStarter => ("WORDS_NEEDED_CR272_NOT_STARTER", Who::Owner),
-            Self::NotFromOwner => ("WORDS_NEEDED_CR272_NOT_FROM_OWNER", Who::Owner),
-            Self::Old { .. } => ("WORDS_NEEDED_CR272_OLD", Who::Owner),
-            Self::NotWritten(_) => ("WORDS_NEEDED_CR272_NOT_SAVED", Who::Owner),
-            Self::NoSuchPayment => ("WORDS_NEEDED_CR274_NO_SUCH_PAYMENT", Who::Cashier),
+        let (key, who) = match self {
+            Self::Frame(_) => ("CR_272_NOT_A_LINE", Who::Owner),
+            Self::NotStarter => ("CR_272_NOT_STARTER", Who::Owner),
+            Self::NotFromOwner => ("CR_272_NOT_FROM_OWNER", Who::Owner),
+            Self::Old { .. } => ("CR_272_OLD", Who::Owner),
+            Self::NotWritten(_) => ("CR_272_NOT_SAVED", Who::Owner),
+            Self::NoSuchPayment => ("CR_274_NO_SUCH_PAYMENT", Who::Cashier),
         };
-        needed(Tone::Ended, placeholder, who)
+        said(Tone::Ended, key, who)
             .code(self.rule())
             .detail(self.to_string())
     }
@@ -389,19 +398,19 @@ impl StarterRefused {
 /// owner phone's `no_bitcoin_words` in `openbmt-owner` are words for this
 /// place.)
 pub fn starter_stopped_words() -> Words {
-    needed(Tone::Info, "WORDS_NEEDED_CR273_STOPPED", Who::Cashier).code("CR-273")
+    said(Tone::Info, "CR_273_STOPPED", Who::Cashier).code("CR-273")
 }
 
 /// CR-273: the line Home shows when the last starter line said stop and is
 /// too old to say whether the wallet is over the limit.
 pub fn starter_unchecked_words() -> Words {
-    needed(Tone::Info, "WORDS_NEEDED_CR273_UNCHECKED", Who::Manager).code("CR-273")
+    said(Tone::Info, "CR_273_UNCHECKED", Who::Manager).code("CR-273")
 }
 
 /// CR-274: the heading of the cards of Home that show the starter wallet's
 /// payments.
 pub fn starter_cards_words() -> Words {
-    needed(Tone::Info, "WORDS_NEEDED_CR274_CARDS", Who::Manager).code("CR-274")
+    said(Tone::Info, "CR_274_CARDS", Who::Manager).code("CR-274")
 }
 
 impl SettingsRefused {
