@@ -4,8 +4,8 @@
 # For each shipped program, the external packages it is built from (normal
 # and build dependencies, with versions) must be exactly the list in
 # deps/<program>.txt. Every package in both lock files must come from
-# crates.io, and every external package's licence must be on the list in
-# deps/licences.txt.
+# crates.io, every path package must be inside this folder, and every
+# external package's licence must be on the list in deps/licences.txt.
 #
 #   scripts/deps-check.sh           check; exit 1 on any difference
 #   scripts/deps-check.sh --write   rewrite the lists from the lock file
@@ -72,6 +72,28 @@ for lock in Cargo.lock fuzz/Cargo.lock; do
         fail=1
     else
         echo "PASS  $lock: every package is from crates.io"
+    fi
+done
+
+# A package with no source is a path package: it must be inside this folder,
+# or a path or [patch] entry could bring in code that no list shows.
+root="$(pwd -P)"
+for manifest in Cargo.toml fuzz/Cargo.toml; do
+    outside="$(cargo metadata --locked --offline --format-version 1 \
+        --manifest-path "$manifest" 2>/dev/null |
+        python3 -I -c '
+import json, os, sys
+root = os.path.realpath(sys.argv[1]) + os.sep
+for p in json.load(sys.stdin)["packages"]:
+    if p["source"] is None and not os.path.realpath(p["manifest_path"]).startswith(root):
+        print("%s %s: %s" % (p["name"], p["version"], p["manifest_path"]))
+' "$root")" || { echo "FAIL  $manifest: cargo metadata could not be read"; fail=1; continue; }
+    if [ -n "$outside" ]; then
+        echo "FAIL  $manifest: a path package is outside this folder:"
+        echo "$outside"
+        fail=1
+    else
+        echo "PASS  $manifest: every path package is inside this folder"
     fi
 done
 

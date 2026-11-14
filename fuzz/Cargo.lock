@@ -771,11 +771,13 @@ dependencies = [
  "openbmt-counter",
  "openbmt-courier",
  "openbmt-lightning",
+ "openbmt-lightning-node",
  "openbmt-link",
  "openbmt-net-io",
  "openbmt-pos",
  "openbmt-swap",
  "openbmt-watch",
+ "tokio",
 ]
 
 [[package]]
