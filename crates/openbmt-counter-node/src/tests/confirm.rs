@@ -405,11 +405,9 @@ fn cr_240_the_fields_the_change_loosens_come_with_their_values_now_and_after() {
     let fields = rig.node.pending_change().unwrap().fields;
     let find = |name: &str| fields.iter().find(|f| f.field == name);
     let lp = find("light_per_sale").unwrap();
-    assert_eq!(lp.now, FieldValue::Units(now.light_per_sale.display_usd));
-    assert_eq!(
-        lp.after,
-        FieldValue::Units(now.light_per_sale.display_usd + 7)
-    );
+    // The satoshis differ, so they are shown (CR-240).
+    assert_eq!(lp.now, FieldValue::Sats(now.light_per_sale.sats));
+    assert_eq!(lp.after, FieldValue::Sats(now.light_per_sale.sats + 7_000));
     let nb = find("node_budget").unwrap();
     assert_eq!(nb.now, FieldValue::Sats(now.node_budget.sats));
     assert_eq!(nb.after, FieldValue::Sats(now.node_budget.sats + 5));
@@ -667,4 +665,92 @@ fn cr_163_a_confirmed_frame_with_a_bad_signature_or_for_a_key_app_counter_is_a_f
     }));
     let e = crate::settings::effective_of(&store, &key_app).unwrap_err();
     assert!(matches!(e, SettingsFault::Verify(_)), "{e}");
+}
+
+#[test]
+fn cr_240_dollars_down_and_satoshis_up_shows_the_satoshis() {
+    let dir = Scratch::new();
+    let mut rig = own_rig(dir.path());
+    let now = settings();
+    let change = signed(2, |s| {
+        s.light_per_sale.display_usd = now.light_per_sale.display_usd.saturating_sub(1);
+        s.light_per_sale.sats += 1_000_000;
+    });
+    rig.node.take_settings(&change).unwrap();
+    let fields = rig.node.pending_change().unwrap().fields;
+    let lp = fields.iter().find(|f| f.field == "light_per_sale").unwrap();
+    assert_eq!(lp.now, FieldValue::Sats(now.light_per_sale.sats));
+    assert_eq!(
+        lp.after,
+        FieldValue::Sats(now.light_per_sale.sats + 1_000_000)
+    );
+}
+
+#[test]
+fn cr_240_units_are_shown_only_when_the_satoshis_are_equal() {
+    use crate::confirm::loosened_fields;
+    let old = settings();
+    let mut new = old.clone();
+    new.version += 1;
+    new.light_per_sale.display_usd += 3;
+    let fields = loosened_fields(&old, &new);
+    let lp = fields.iter().find(|f| f.field == "light_per_sale").unwrap();
+    assert_eq!(lp.now, FieldValue::Units(old.light_per_sale.display_usd));
+    assert_eq!(
+        lp.after,
+        FieldValue::Units(old.light_per_sale.display_usd + 3)
+    );
+}
+
+#[test]
+fn cr_240_a_changed_provider_lists_shop_lightning() {
+    use crate::confirm::loosened_fields;
+    let mut old = settings();
+    let boxed = id(61).device_id();
+    old.devices.insert(id(60).device_id());
+    old.counters.insert(id(60).device_id(), 500);
+    old.devices.insert(boxed);
+    old.boxes.insert(boxed);
+    old.shop_lightning = Some(openbmt_core::settings::ShopLightning {
+        counter: id(60).device_id(),
+        node_id: [7u8; 33],
+        second_device: boxed,
+        provider_node_id: [8u8; 33],
+        provider_addr: "203.0.113.5:9735".parse().unwrap(),
+        cap_sats: 5_000_000,
+        max_opening_fee_sats: 20_000,
+    });
+    let mut new = old.clone();
+    new.version += 1;
+    let sl = new.shop_lightning.as_mut().unwrap();
+    sl.provider_node_id = [9u8; 33];
+    sl.provider_addr = "198.51.100.1:9735".parse().unwrap();
+    sl.cap_sats += 1;
+    let fields = loosened_fields(&old, &new);
+    let f = fields.iter().find(|f| f.field == "shop_lightning").unwrap();
+    let (FieldValue::Code(now), FieldValue::Code(after)) = (&f.now, &f.after) else {
+        panic!("not text");
+    };
+    assert!(now.contains("08080808") && now.contains("203.0.113.5:9735"));
+    assert!(now.contains("5000000") && now.contains("20000"));
+    assert!(after.contains("09090909") && after.contains("198.51.100.1:9735"));
+    assert!(after.contains("5000001"));
+    assert!(now.contains(&format!("{:02x}", boxed.to_bytes()[0])));
+}
+
+#[test]
+fn ap_12_the_last_counters_removal_is_listed_for_the_manager() {
+    use crate::confirm::loosened_fields;
+    let old = settings();
+    assert!(!old.counters.is_empty());
+    let mut new = old.clone();
+    new.version += 1;
+    for c in old.counters.keys() {
+        new.devices.remove(c);
+    }
+    new.counters.clear();
+    let fields = loosened_fields(&old, &new);
+    let f = fields.iter().find(|f| f.field == "counters").unwrap();
+    assert_eq!(f.now, FieldValue::Count(old.counters.len() as u32));
+    assert_eq!(f.after, FieldValue::Count(0));
 }

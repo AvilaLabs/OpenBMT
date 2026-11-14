@@ -43,6 +43,7 @@ object ConfirmChange {
         "own_node" -> "Your node"
         "node_only" -> "Check with your node only"
         "light_fallback" -> "Other nodes when yours is down"
+        "shop_lightning" -> "WORDS_NEEDED shop lightning field"
         else -> AppWords.OTHER_SETTING
     }
 

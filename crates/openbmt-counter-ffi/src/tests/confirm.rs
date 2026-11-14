@@ -293,13 +293,14 @@ fn cr_239_to_cr_242_a_loosening_is_confirmed_at_the_counter_and_applied_with_the
     assert_eq!(waiting.arrived, T0 + 110);
     assert_eq!(waiting.expires_at, T0 + 110 + 7 * 86_400);
     assert!(!waiting.confirmed);
-    // Its one loosened field, with the values now and after (Units = 0).
+    // Its one loosened field, with the values now and after: the satoshis,
+    // which differ (Sats = 1, CR-240).
     assert_eq!(
         waiting.fields,
         vec![(
             "light_per_sale".to_string(),
-            (0, u64::from(before), String::new()),
-            (0, u64::from(before + 3), String::new())
+            (1, u64::from(before) * 1_000, String::new()),
+            (1, u64::from(before + 3) * 1_000, String::new())
         )]
     );
 

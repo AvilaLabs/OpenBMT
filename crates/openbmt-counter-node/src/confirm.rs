@@ -15,7 +15,7 @@
 //! waiting change, its fields with their values now and after, and the
 //! notices that follow a change that was dropped or refused.
 
-use openbmt_core::approval::{confirm_words, field_class, ChangeClass};
+use openbmt_core::approval::{confirm_words, drops_last_counter, field_class, ChangeClass};
 use openbmt_core::settings::{changed_fields, Change, Limit, Settings, SignedSettings};
 use openbmt_core::words::WORD_COUNT;
 
@@ -58,10 +58,11 @@ fn count(n: usize) -> FieldValue {
     FieldValue::Count(u32::try_from(n).unwrap_or(u32::MAX))
 }
 
-/// The value of a limit: the shown units when they differ, else the
-/// satoshis.
+/// The value of a limit (CR-240): the satoshis when they differ, since a
+/// counter enforces satoshis and the shown units can move the other way; the
+/// units only when the satoshis are the same.
 fn limit(old: &Limit, new: &Limit) -> (FieldValue, FieldValue) {
-    if old.display_usd != new.display_usd {
+    if old.sats == new.sats && old.display_usd != new.display_usd {
         (
             FieldValue::Units(old.display_usd),
             FieldValue::Units(new.display_usd),
@@ -76,6 +77,30 @@ fn own_node_text(s: &Settings) -> String {
     s.own_node.as_ref().map_or_else(
         || "Not set".to_string(),
         |n| format!("{}:{}", n.name, n.port),
+    )
+}
+
+/// The first four bytes of `bytes` as hex.
+fn hex_prefix(bytes: &[u8]) -> String {
+    bytes.iter().take(4).map(|b| format!("{b:02x}")).collect()
+}
+
+/// Shop Lightning of `s` as text, or "Not set" (AP-13): the provider's key
+/// prefix and address, the second device's id prefix, and the cap and the most
+/// for one opening in satoshis.
+fn shop_lightning_text(s: &Settings) -> String {
+    s.shop_lightning.as_ref().map_or_else(
+        || "Not set".to_string(),
+        |sl| {
+            format!(
+                "provider {} at {}, second device {}, cap {} sats, opening {} sats",
+                hex_prefix(&sl.provider_node_id),
+                sl.provider_addr,
+                hex_prefix(&sl.second_device.to_bytes()),
+                sl.cap_sats,
+                sl.max_opening_fee_sats
+            )
+        },
     )
 }
 
@@ -124,6 +149,11 @@ fn values(field: &str, old: &Settings, new: &Settings) -> Option<(FieldValue, Fi
         // AP-11: the node every device trusts for its payments, as
         // `<name>:<port>`, or "Not set".
         "own_node" => (Code(own_node_text(old)), Code(own_node_text(new))),
+        // AP-13: the provider, the second device and the limits.
+        "shop_lightning" => (
+            Code(shop_lightning_text(old)),
+            Code(shop_lightning_text(new)),
+        ),
         "node_only" => (Flag(old.node_only), Flag(new.node_only)),
         "light_fallback" => (Flag(old.light_fallback), Flag(new.light_fallback)),
         "currency" => (
@@ -142,7 +172,8 @@ pub fn loosened_fields(old: &Settings, new: &Settings) -> Vec<ChangedField> {
     let mut out: Vec<ChangedField> = Vec::new();
     for c in changed_fields(old, new) {
         // A limit that changes in satoshis and in units is named twice.
-        if c.direction != Change::Loosening
+        let last_counter = c.field == "counters" && drops_last_counter(old, new);
+        if !(c.direction == Change::Loosening || last_counter)
             || field_class(old, new, c.field) != ChangeClass::Loosen
             || out.iter().any(|f| f.field == c.field)
         {
