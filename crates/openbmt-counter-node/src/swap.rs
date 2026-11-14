@@ -70,7 +70,7 @@ use openbmt_lightning::bolt11::{self, Checked};
 use openbmt_swap::follow::{Ctx, Failure, Next, ReverseSwap, Stage};
 use openbmt_swap::{
     check, check_lockup, parse_response, Expect, LockupSeen, Pairs, Provider, Quote, Refused,
-    Reply, Request, Secrets, Seen, Status, SwapState, MIN_CLAIM_BLOCKS,
+    Reply, Request, Secrets, Seen, Status, SwapState, FEE_ESCALATE_BLOCKS, MIN_CLAIM_BLOCKS,
 };
 use openbmt_watch::{
     block_fee_sample, FeeHistory, HeaderChain, SaleStatus, SaleWatch, Source, WellFormedBlock,
@@ -104,6 +104,9 @@ pub const RETRY_AFTER_SECS: u64 = 30;
 pub const DESCRIPTION: &str = "Lightning payment";
 /// The most claims a swap record keeps the ids of.
 const MAX_CLAIMS: usize = 32;
+/// The slots of the claims kept for a replacement of the lockup: a bump
+/// stops this many short of the limit (CR-222).
+const REPLACEMENT_SLOTS: usize = 4;
 
 #[cfg(test)]
 thread_local! {
@@ -1740,6 +1743,11 @@ impl Follow {
             self.spent_told = Some(spent);
         }
         let spent = spent_height.is_some();
+        // The lockup displaced by one that pays the script less than was
+        // promised: the loss stands, and the coins are claimed all the same.
+        if spent && stage == Stage::ClaimSent {
+            self.claim_underpaid(chain, tip, now, start_rate, notes);
+        }
         // 2. The claim, when its time has come.
         if let (Stage::Locked(l), false, false) = (stage, spent, other_claimed) {
             let accept = l.confirmed || (env.decide)(index, sats, &status);
@@ -1808,7 +1816,7 @@ impl Follow {
                     // At and past the timeout the claim is still bumped: the
                     // preimage is out, so it races the refund. The swap is
                     // lost only when the lockup is spent by another.
-                    if spent {
+                    if spent && !self.holds_underpaid() {
                         // The lockup is spent, and the claim spends nothing.
                     } else if env.behind {
                         // Wait for the blocks: the claim may be in one. It is
@@ -1825,7 +1833,7 @@ impl Follow {
                         self.resend_now(lockup, tip, now, notes);
                     } else if tip > self.record.claim_tip {
                         // CR-222: a block came and the claim is not in it.
-                        self.bump(lockup, tip, now, notes);
+                        self.bump(lockup, tip, now, start_rate, notes);
                     }
                 }
                 if !self.stuck_told
@@ -1837,6 +1845,7 @@ impl Follow {
                 }
                 // The sale holds the newest claim's amount.
                 if self.record.told
+                    && !self.holds_underpaid()
                     && self.claim_sats != self.claim_amount_told
                     && self.claim_sats > 0
                 {
@@ -1945,6 +1954,7 @@ impl Follow {
         if next.outpoint == held.outpoint {
             return;
         }
+        // The slots kept back from the bumps are for this (CR-222).
         if self.record.claims.len() >= claim_limit() {
             notes.push("CR-222: the lockup was replaced: the limit of claims".to_string());
             return;
@@ -1998,12 +2008,113 @@ impl Follow {
         }
     }
 
-    fn bump(&mut self, lockup: LockupSeen, tip: u32, now: u64, notes: &mut Vec<String>) {
-        let old = self.record.fee_per_kvb;
-        let fee = old.saturating_add((old / 2).max(BUMP_MIN_PER_KVB));
-        let ctx = claim_ctx(now, tip, true);
-        // No claim id is dropped: at the limit the last claim is sent again.
+    /// The lockup the claim spends pays the script less than was promised:
+    /// it is the one that displaced the lockup the swap held.
+    fn holds_underpaid(&self) -> bool {
+        let promised = self.record.machine.state().onchain_sats();
+        self.record.lockup.is_some_and(|l| l.value_sats < promised)
+    }
+
+    /// The held lockup was displaced in a block of the chain by a transaction
+    /// that pays the lockup script in exactly one output, less than was
+    /// promised. The loss stands (the sale is taken back, the swap is lost at
+    /// the refund depth), but the preimage is out and the coins are the
+    /// provider's at the timeout, so that output is claimed too, at the rate
+    /// of a fresh claim. Only the amount of SW-30 is not asked; the claim
+    /// passes the fee and the dust checks of SW-41. Past the timeout and
+    /// while behind it is built as well.
+    fn claim_underpaid<C: HeaderChain + ?Sized>(
+        &mut self,
+        chain: &C,
+        tip: u32,
+        now: u64,
+        start_rate: u64,
+        notes: &mut Vec<String>,
+    ) {
+        let Some(held) = self.record.lockup else {
+            return;
+        };
+        let promised = self.record.machine.state().onchain_sats();
+        let mut found = None;
+        for (by, hash) in &self.displaced_in {
+            if *by == held.outpoint.txid || chain.height_of(hash).is_none() {
+                continue;
+            }
+            let Some(tx) = self.watch.transactions().find(|t| t.compute_txid() == *by) else {
+                continue;
+            };
+            // Exactly one output pays the script (SW-30), in a block.
+            if let Ok(seen) = check_lockup(tx, &self.lockup_script, 0, Seen::Block) {
+                if seen.value_sats < promised {
+                    found = Some(seen);
+                    break;
+                }
+            }
+        }
+        let Some(next) = found else {
+            return;
+        };
         if self.record.claims.len() >= claim_limit() {
+            notes.push("CR-222: the lockup was displaced: the limit of claims".to_string());
+            return;
+        }
+        let ctx = claim_ctx(now, tip, true);
+        let mut rate = start_rate;
+        let mut built = self.record.machine.reclaim(&next, rate, &ctx);
+        if matches!(built, Err(Refused::FeeTooHigh)) && rate > CLAIM_FEE_PER_KVB {
+            rate = CLAIM_FEE_PER_KVB;
+            built = self.record.machine.reclaim(&next, rate, &ctx);
+        }
+        match built {
+            Ok((machine, claim)) => {
+                self.record.machine = machine;
+                self.record.lockup = Some(next);
+                self.record.fee_per_kvb = rate;
+                self.record.claim_tip = tip;
+                self.record.claim_in_block = false;
+                self.record.claims.push(claim.compute_txid());
+                self.claim_sats = claim.output.first().map_or(0, |o| o.value.to_sat());
+                self.pending_claim = Some(serialize(&claim));
+                self.dirty = true;
+            }
+            Err(e) => notes.push(format!(
+                "{}: the claim of the underpaying lockup was not built: {e}",
+                e.rule()
+            )),
+        }
+    }
+
+    /// CR-222: a block came and the claim is not in it. Far from the timeout
+    /// (more than `FEE_ESCALATE_BLOCKS` blocks left) the claim follows the
+    /// estimate: it is built again at the rate of a fresh claim when that is
+    /// at least the least bump above the current rate, and else sent again
+    /// as it is. With that many blocks or fewer left, at the timeout and past
+    /// it, the rate goes up by half or the least bump, or to the estimate
+    /// when that is higher.
+    fn bump(
+        &mut self,
+        lockup: LockupSeen,
+        tip: u32,
+        now: u64,
+        start_rate: u64,
+        notes: &mut Vec<String>,
+    ) {
+        let old = self.record.fee_per_kvb;
+        let left = self.record.machine.state().timeout().saturating_sub(tip);
+        let fee = if left > FEE_ESCALATE_BLOCKS {
+            if start_rate < old.saturating_add(BUMP_MIN_PER_KVB) {
+                self.resend_now(lockup, tip, now, notes);
+                return;
+            }
+            start_rate
+        } else {
+            old.saturating_add((old / 2).max(BUMP_MIN_PER_KVB))
+                .max(start_rate)
+        };
+        let ctx = claim_ctx(now, tip, true);
+        // No claim id is dropped: four slots are kept for a replacement of
+        // the lockup, and at the limit the last claim is sent again.
+        if self.record.claims.len() >= claim_limit().saturating_sub(REPLACEMENT_SLOTS) {
             notes.push("CR-222: the claim was not built again: the limit of claims".to_string());
             self.resend_now(lockup, tip, now, notes);
             return;

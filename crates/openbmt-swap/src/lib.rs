@@ -94,6 +94,11 @@ pub const MAX_LOCKUP_FEE_SATS: u64 = 25_000;
 /// SW-44: the least blocks between the chain tip and the timeout for the
 /// claim, which shows the preimage, to be built and sent. **[to tune]**
 pub const CLAIM_MARGIN_BLOCKS: u64 = 18;
+/// CR-222: while more blocks than this are left before the swap's timeout,
+/// a claim that is not in a block is built again only when the estimate of
+/// the fee rate has risen; with this many or fewer left, at the timeout and
+/// past it, the fee rate rises at each block. **[to tune]**
+pub const FEE_ESCALATE_BLOCKS: u32 = 9;
 
 /// SW-63: the most seconds the service's terms are used after they were
 /// read. **[to tune]**

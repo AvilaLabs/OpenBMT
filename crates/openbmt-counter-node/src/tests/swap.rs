@@ -464,10 +464,22 @@ fn cr_221_a_claim_that_leaves_the_chain_is_sent_again_and_the_sale_is_paid_again
     assert_eq!(w.sent().len(), 2, "nothing more is sent");
 }
 
+/// Empty blocks until 10 blocks are left before the swap's timeout: the next
+/// block is the first where a claim not in a block is built again at a
+/// higher fee (CR-222). The swap must have been made with
+/// `w.pretend.timeout_blocks = 40`.
+fn until_escalation(w: &mut World, dir: &Scratch, index: u32) {
+    let timeout = record_of(dir, index).machine.state().timeout();
+    while timeout.saturating_sub(w.tip.0) > 10 {
+        w.block(&[]);
+    }
+}
+
 #[test]
 fn cr_222_a_claim_that_stays_out_of_a_block_is_built_again_at_a_higher_fee() {
     let dir = Scratch::new();
     let mut w = world(&dir);
+    w.pretend.timeout_blocks = 40;
     let index = w.open();
     w.serve();
     let lockup = w.lockup_in_mempool();
@@ -475,10 +487,14 @@ fn cr_222_a_claim_that_stays_out_of_a_block_is_built_again_at_a_higher_fee() {
     w.block(std::slice::from_ref(&lockup));
     let first = w.sent();
     assert_eq!(first.len(), 1);
-    // Blocks that do not hold the claim: each makes a claim with more fee.
+    // Blocks that do not hold the claim, far from the timeout: it is sent
+    // again as it is. Within 9 blocks of it, each makes a claim with more
+    // fee.
+    until_escalation(&mut w, &dir, index);
+    let base = w.sent().len();
     w.block(&[]);
     w.block(&[]);
-    let sent = w.sent();
+    let sent = w.sent().split_off(base - 1);
     assert_eq!(sent.len(), 3, "one more at each block");
     let fee = |t: &Transaction| lockup.output[0].value.to_sat() - t.output[0].value.to_sat();
     assert!(fee(&sent[1]) > fee(&sent[0]));
@@ -487,8 +503,7 @@ fn cr_222_a_claim_that_stays_out_of_a_block_is_built_again_at_a_higher_fee() {
     // Then a block with the last one: done, and nothing more is built.
     w.block(std::slice::from_ref(&sent[2]));
     w.block(&[]);
-    assert_eq!(w.sent().len(), 3);
-    assert!(w.rig.node.swap_status().is_none());
+    assert_eq!(w.sent().len(), base + 2);
     let _ = index;
 }
 
@@ -1587,13 +1602,16 @@ fn cr_221_a_lockup_replaced_in_a_block_takes_the_sale_back_and_the_claim_is_not_
 fn cr_221_a_claim_refused_at_a_higher_fee_is_sent_again_at_every_block() {
     let dir = Scratch::new();
     let mut w = world(&dir);
+    w.pretend.timeout_blocks = 40;
     let (index, _, _) = instant_sale(&mut w);
+    until_escalation(&mut w, &dir, index);
+    let base = w.sent().len();
     for _ in 0..14 {
         w.block(&[]);
     }
     // One claim at the start and one at each block: built again at a higher
     // fee until the fee is too much of the lockup, and the same bytes after.
-    let sent = w.sent();
+    let sent = w.sent().split_off(base - 1);
     assert_eq!(sent.len(), 15);
     let ids: Vec<_> = sent.iter().map(Transaction::compute_txid).collect();
     let last = ids[14];
@@ -1607,10 +1625,14 @@ fn cr_221_a_claim_refused_at_a_higher_fee_is_sent_again_at_every_block() {
 
 #[test]
 fn cr_222_no_claim_id_is_dropped_at_the_limit_and_the_last_claim_is_sent_again() {
-    crate::swap::set_claim_limit(3);
+    // Bumps stop four short of the limit: at three claims.
+    crate::swap::set_claim_limit(7);
     let dir = Scratch::new();
     let mut w = world(&dir);
+    w.pretend.timeout_blocks = 40;
     let (index, _, first) = instant_sale(&mut w);
+    until_escalation(&mut w, &dir, index);
+    let base = w.sent().len();
     for _ in 0..6 {
         w.block(&[]);
     }
@@ -1618,9 +1640,9 @@ fn cr_222_no_claim_id_is_dropped_at_the_limit_and_the_last_claim_is_sent_again()
     assert_eq!(record.claims.len(), 3);
     assert_eq!(record.claims[0], first.compute_txid());
     let sent = w.sent();
-    assert_eq!(sent.len(), 7);
+    assert_eq!(sent.len(), base + 6);
     assert_eq!(
-        sent[6].compute_txid(),
+        sent[base + 5].compute_txid(),
         *record.claims.last().unwrap(),
         "the last claim again"
     );
@@ -1906,7 +1928,9 @@ fn cr_220_a_restart_after_the_replacing_lockup_was_adopted_keeps_it() {
 fn cr_220_a_claim_amount_that_was_not_stored_is_told_again() {
     let dir = Scratch::new();
     let mut w = world(&dir);
+    w.pretend.timeout_blocks = 40;
     let (index, _, claim) = instant_sale(&mut w);
+    until_escalation(&mut w, &dir, index);
     let sale_file = dir.path().join(format!("sale-{index}.bin"));
     let saved = std::fs::read(&sale_file).unwrap();
     std::fs::remove_file(&sale_file).unwrap();
@@ -1914,10 +1938,11 @@ fn cr_220_a_claim_amount_that_was_not_stored_is_told_again() {
     // A block without the claim: it is built again at a higher fee, and what
     // the sale holds cannot be written.
     let held = held_sats(&w, index);
+    let base = w.sent().len();
     w.block(&[]);
     let sent = w.sent();
-    assert_eq!(sent.len(), 2);
-    let newest = sent[1].output[0].value.to_sat();
+    assert_eq!(sent.len(), base + 1);
+    let newest = sent[base].output[0].value.to_sat();
     assert_ne!(newest, claim.output[0].value.to_sat());
     assert_eq!(held_sats(&w, index), held, "not stored");
     // Once it can be written, the next step tells it again.
@@ -2016,7 +2041,14 @@ fn cr_221_a_lockup_displaced_in_a_block_by_one_that_pays_too_little_is_a_loss_un
     for _ in 0..3 {
         w.block(&[]);
     }
-    assert_eq!(w.sent().len(), before, "no bump and no resend");
+    // The claim of the underpaying output is the one built, and it is sent
+    // again at each block; the first claim is not sent again.
+    assert_eq!(w.sent().len(), before + 4, "one claim, of the new output");
+    assert_eq!(
+        w.sent()[before].compute_txid(),
+        w.sent()[before + 3].compute_txid()
+    );
+    assert_eq!(record_of(&dir, index).claims.len(), 2);
     assert!(record_of(&dir, index).spent_in.is_some());
     // A reorg that removes the block: the loss is undone.
     let displacing = w.blocks.at(1).block_hash();
@@ -2052,4 +2084,171 @@ fn cr_221_a_lockup_displaced_in_the_mempool_only_is_not_a_loss() {
     }
     assert_eq!(w.rig.node.counter().sale(index).unwrap().taken_back(), 0);
     assert_eq!(record_of(&dir, index).spent_in, None);
+}
+
+/// The timeout of the swap's record.
+fn timeout_of(dir: &Scratch, index: u32) -> u32 {
+    record_of(dir, index).machine.state().timeout()
+}
+
+#[test]
+fn cr_222_far_from_the_timeout_with_a_flat_estimate_the_claim_is_sent_again_not_built_again() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, _, first) = instant_sale(&mut w);
+    assert!(timeout_of(&dir, index) > w.tip.0 + 100);
+    for _ in 0..3 {
+        w.block(&[]);
+    }
+    let sent = w.sent();
+    assert_eq!(sent.len(), 4, "sent again at each block");
+    assert!(sent
+        .iter()
+        .all(|t| t.compute_txid() == first.compute_txid()));
+    assert_eq!(record_of(&dir, index).claims, vec![first.compute_txid()]);
+}
+
+#[test]
+fn cr_222_far_from_the_timeout_a_rising_estimate_builds_the_claim_again_at_that_rate() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, _, first) = instant_sale(&mut w);
+    // Three blocks paying 10 sat/vB: the estimate rises by more than the
+    // least bump, once there are three samples.
+    for n in 1..=3 {
+        w.block_paying(n, 10);
+    }
+    let record = record_of(&dir, index);
+    assert_eq!(record.claims.len(), 2, "one new claim");
+    assert_eq!(record.claims[0], first.compute_txid());
+    assert!(
+        (9_000..=11_000).contains(&record.fee_per_kvb),
+        "{}",
+        record.fee_per_kvb
+    );
+    let sent = w.sent();
+    assert_eq!(
+        sent.last().unwrap().compute_txid(),
+        record.claims[1],
+        "sent"
+    );
+}
+
+#[test]
+fn cr_222_with_nine_blocks_left_or_fewer_the_rate_goes_up_at_each_block() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    w.pretend.timeout_blocks = 40;
+    let (index, _, _) = instant_sale(&mut w);
+    let timeout = timeout_of(&dir, index);
+    while timeout - w.tip.0 > 10 {
+        w.block(&[]);
+    }
+    assert_eq!(record_of(&dir, index).claims.len(), 1, "flat until then");
+    // 9 blocks left: the rate goes up by the least bump (2 to 4 sat/vB),
+    // then by half or the least bump at each block.
+    w.block(&[]);
+    assert_eq!(timeout - w.tip.0, 9);
+    let first_rate = record_of(&dir, index).fee_per_kvb;
+    assert_eq!(record_of(&dir, index).claims.len(), 2);
+    assert_eq!(first_rate, 4_000);
+    w.block(&[]);
+    assert_eq!(record_of(&dir, index).claims.len(), 3);
+    assert_eq!(record_of(&dir, index).fee_per_kvb, 6_000);
+    // Past the timeout too.
+    for _ in 0..12 {
+        w.block(&[]);
+    }
+    assert!(w.tip.0 > timeout);
+    assert!(record_of(&dir, index).claims.len() > 3);
+}
+
+#[test]
+fn cr_222_bumps_stop_four_short_of_the_limit_and_a_replacement_is_claimed_in_the_slots_left() {
+    crate::swap::set_claim_limit(8);
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    w.pretend.timeout_blocks = 40;
+    let (index, lockup, _) = instant_sale(&mut w);
+    let timeout = timeout_of(&dir, index);
+    while w.tip.0 + 3 < timeout {
+        w.block(&[]);
+    }
+    assert_eq!(record_of(&dir, index).claims.len(), 4, "four short of 8");
+    let sent_before = w.sent().len();
+    w.block(&[]);
+    assert_eq!(record_of(&dir, index).claims.len(), 4);
+    assert_eq!(w.sent().len(), sent_before + 1, "sent again");
+    // The provider's replacement is claimed.
+    let replacement = replaced_lockup(&lockup);
+    w.block(std::slice::from_ref(&replacement));
+    let record = record_of(&dir, index);
+    assert_eq!(record.claims.len(), 5);
+    assert_eq!(
+        record.lockup.unwrap().outpoint.txid,
+        replacement.compute_txid()
+    );
+    assert!(spends_outpoint(
+        w.sent().last().unwrap(),
+        replacement.compute_txid()
+    ));
+}
+
+#[test]
+fn cr_221_a_lockup_displaced_by_one_that_pays_too_little_is_taken_back_and_its_coins_claimed() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, lockup, first) = instant_sale(&mut w);
+    let displacing = underpaying_replacement(&lockup);
+    let reports = w.block(std::slice::from_ref(&displacing));
+    assert!(reports.contains(&Report::Alarm { index }), "{reports:?}");
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::DoNotHandOver);
+    // A claim of the underpaying output was built, persisted and sent.
+    let sent = w.sent();
+    let new = sent.last().unwrap().clone();
+    assert!(spends_outpoint(&new, displacing.compute_txid()));
+    assert!(new.output[0].value.to_sat() < 1_000);
+    let record = record_of(&dir, index);
+    assert_eq!(
+        record.claims,
+        vec![first.compute_txid(), new.compute_txid()]
+    );
+    assert_eq!(record.lockup.unwrap().value_sats, 1_000);
+    assert!(record.spent_in.is_some());
+    assert_eq!(w.rig.node.counter().sale(index).unwrap().taken_back(), 1);
+    // It is mined: the sale stays taken back, and the alarm is raised once.
+    let mut alarms = 0;
+    let mut reports = w.block(std::slice::from_ref(&new));
+    for _ in 0..8 {
+        alarms += reports
+            .iter()
+            .filter(|r| **r == Report::Alarm { index })
+            .count();
+        assert_eq!(w.rig.node.judge(index).unwrap().state, State::DoNotHandOver);
+        reports = w.block(&[]);
+    }
+    assert_eq!(alarms, 0, "the alarm was raised by the block of the loss");
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::DoNotHandOver);
+}
+
+#[test]
+fn cr_221_an_underpaying_output_that_would_be_dust_after_the_fee_is_not_claimed() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, lockup, _) = instant_sale(&mut w);
+    let mut displacing = underpaying_replacement(&lockup);
+    displacing.output[0].value = bitcoin::Amount::from_sat(400);
+    let before = w.sent().len();
+    let reports = w.block(&[displacing]);
+    assert!(reports.contains(&Report::Alarm { index }), "{reports:?}");
+    assert_eq!(w.sent().len(), before, "no claim");
+    assert_eq!(record_of(&dir, index).claims.len(), 1);
+    assert!(
+        w.rig
+            .node
+            .notes()
+            .any(|n| n.contains("the claim of the underpaying lockup was not built")),
+        "{:?}",
+        w.rig.node.notes().collect::<Vec<_>>()
+    );
 }
