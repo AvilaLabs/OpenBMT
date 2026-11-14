@@ -124,10 +124,13 @@ one. A merchant with no Box can use any relay: it sees ciphertext.
   the list reaches a Box from the owner (a signed device list) is part of
   the Box pairing that is still open (section 5); until then it is put
   there by hand.
-- **LK-22.** A mailbox holds at most 256 messages and 4 MiB. When full,
-  the oldest message of the sender that holds the most bytes in it goes
-  (between equals, the sender with more messages, then the sender of the
-  oldest message). One member cannot push another member's messages out:
+- **LK-22.** A mailbox holds at most 256 messages and 4 MiB. When it holds
+  too many messages, the oldest message of the sender that holds the most
+  messages in it goes (between equals, the sender with more bytes, then the
+  sender of the oldest message); when it holds too many bytes, the oldest
+  message of the sender that holds the most bytes goes (between equals, the
+  sender with more messages, then the sender of the oldest message). Many
+  small messages thus cannot push out a few large ones. One member cannot push another member's messages out:
   a counter that floods a mailbox loses only its own, and the owner's
   settings that remove it still arrive. The sender is read from the sealed
   bytes, so nothing more is kept (LK-25). A relay promises nothing about
