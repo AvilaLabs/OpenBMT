@@ -128,6 +128,16 @@ impl Ctx {
     fn margin_left(&self, timeout: u32) -> bool {
         u64::from(self.tip_height).saturating_add(CLAIM_MARGIN_BLOCKS) <= u64::from(timeout)
     }
+
+    /// Whether a lockup that is in the next block would still leave the
+    /// claim `CLAIM_MARGIN_BLOCKS` before `timeout`.
+    fn margin_left_next_block(&self, timeout: u32) -> bool {
+        Self {
+            tip_height: self.tip_height.saturating_add(1),
+            ..*self
+        }
+        .margin_left(timeout)
+    }
 }
 
 /// What to do next.
@@ -207,13 +217,20 @@ impl ReverseSwap {
             Stage::Created if ctx.now_secs > self.state.invoice_expires_at() => {
                 fail(Failure::InvoiceExpired)
             }
+            Stage::Announced if late => fail(Failure::TimedOut),
+            // SW-44: a lockup in the next block would leave no margin to
+            // claim, so the invoice is not shown any more.
+            Stage::Created | Stage::Announced
+                if !ctx.margin_left_next_block(self.state.timeout()) =>
+            {
+                fail(Failure::InvoiceExpired)
+            }
             Stage::Created => (
                 self.clone(),
                 Next::Wait {
                     poll_after_secs: POLL_WAITING_SECS,
                 },
             ),
-            Stage::Announced if late => fail(Failure::TimedOut),
             Stage::Announced => (self.clone(), Next::CheckLockup),
             Stage::Locked(_) if late => fail(Failure::TimedOut),
             // SW-44: too few blocks are left to claim and show the preimage.

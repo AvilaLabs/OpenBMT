@@ -497,6 +497,9 @@ struct Follow {
     spent_told: Option<bool>,
     /// The lockup watch holds a lockup of the swap now.
     lockup_seen: bool,
+    /// Blocks seen in this run that spend the coins of the watched lockups
+    /// by a transaction the watch holds: who, and in which block.
+    displaced_in: Vec<(Txid, BlockHash)>,
     last_status: Option<u64>,
     poll_after: u32,
     /// The lockup, as the light client sees it.
@@ -686,6 +689,7 @@ impl SwapDriver {
                 depth_told: None,
                 spent_told: None,
                 lockup_seen: false,
+                displaced_in: Vec::new(),
                 last_status: None,
                 poll_after: 0,
             };
@@ -1149,6 +1153,7 @@ impl SwapDriver {
                 depth_told: None,
                 spent_told: None,
                 lockup_seen: false,
+                displaced_in: Vec::new(),
                 last_status: Some(now),
                 poll_after: openbmt_swap::POLL_WAITING_SECS,
             })
@@ -1246,6 +1251,9 @@ impl SwapDriver {
                     if let Ok(list) = block.spends(headers, &f.watch.watched_outpoints()) {
                         for (outpoint, by, hash) in list {
                             f.watch.spent_elsewhere(outpoint, by, hash);
+                            if !f.displaced_in.contains(&(by, hash)) && f.displaced_in.len() < 16 {
+                                f.displaced_in.push((by, hash));
+                            }
                         }
                     }
                 }
@@ -1356,6 +1364,30 @@ impl SwapDriver {
             for w in &mut sale.swaps {
                 if let Phase::Have(f) = &mut w.phase {
                     f.spent_told = None;
+                }
+            }
+        }
+    }
+
+    /// The counter did not store the claim's amount of a sale: its swaps
+    /// forget that they told it, so the next step tells it again.
+    pub fn forget_claim_amount_told(&mut self, index: u32) {
+        if let Some(sale) = self.sales.get_mut(&index) {
+            for w in &mut sale.swaps {
+                if let Phase::Have(f) = &mut w.phase {
+                    f.claim_amount_told = 0;
+                }
+            }
+        }
+    }
+
+    /// The counter did not take the claim's depth of a sale: its swaps
+    /// forget that they told it, so the next step tells it again.
+    pub fn forget_depth_told(&mut self, index: u32) {
+        if let Some(sale) = self.sales.get_mut(&index) {
+            for w in &mut sale.swaps {
+                if let Phase::Have(f) = &mut w.phase {
+                    f.depth_told = None;
                 }
             }
         }
@@ -1543,7 +1575,35 @@ impl Follow {
     fn spent_height<C: HeaderChain + ?Sized>(&mut self, chain: &C) -> Option<u32> {
         let held = self.record.spent_in;
         let mut found = None;
-        let others = self.watch.spent_elsewhere_in().iter().map(|(_, _, h)| *h);
+        // A replacement of the lockup's inputs by the lockup the swap holds
+        // now (adopted, SW-30 checked) is not a loss.
+        let adopted = self.record.lockup.map(|l| l.outpoint.txid);
+        // The held lockup displaced in a block by a transaction the watch
+        // holds, and no lockup that passes SW-30 left: no lockup is left.
+        let gone: Vec<BlockHash> = match adopted {
+            Some(held)
+                if !self
+                    .watch
+                    .standing_depths(chain)
+                    .iter()
+                    .any(|(t, _)| *t == held)
+                    && self.lockup_candidate(chain).is_none() =>
+            {
+                self.displaced_in
+                    .iter()
+                    .filter(|(by, _)| *by != held)
+                    .map(|(_, h)| *h)
+                    .collect()
+            }
+            _ => Vec::new(),
+        };
+        let others = self
+            .watch
+            .spent_elsewhere_in()
+            .iter()
+            .filter(|(_, by, _)| Some(*by) != adopted)
+            .map(|(_, _, h)| *h)
+            .chain(gone);
         for hash in held.into_iter().chain(others) {
             if let Some(height) = chain.height_of(&hash) {
                 found = Some((hash, height));
@@ -1638,6 +1698,11 @@ impl Follow {
                     }
                 }
             }
+        }
+        // The claim is sent and the lockup it spends was replaced by another
+        // that passes SW-30: the claim is built from that one at once.
+        if stage == Stage::ClaimSent {
+            self.adopt_replacement(chain, tip, now, start_rate, notes);
         }
         // A swap past the timeout or the invoice's end has failed.
         if matches!(
@@ -1743,9 +1808,15 @@ impl Follow {
                     // At and past the timeout the claim is still bumped: the
                     // preimage is out, so it races the refund. The swap is
                     // lost only when the lockup is spent by another.
-                    if env.behind || spent {
-                        // Wait for the blocks: the claim may be in one. Or
-                        // the lockup is spent, and the claim spends nothing.
+                    if spent {
+                        // The lockup is spent, and the claim spends nothing.
+                    } else if env.behind {
+                        // Wait for the blocks: the claim may be in one. It is
+                        // not built again, but sent again at each block: the
+                        // same transaction, which does no harm.
+                        if tip > self.record.claim_tip {
+                            self.resend_now(lockup, tip, now, notes);
+                        }
                     } else if self.record.claim_in_block {
                         // The claim was in a block and left it: sent again,
                         // the same transaction.
@@ -1841,6 +1912,68 @@ impl Follow {
             self.record.claims.push(txid);
             self.record.machine = done;
             self.dirty = true;
+        }
+    }
+
+    /// The lockup the claim spends is displaced (the provider replaced its
+    /// transaction) and the watch holds another that passes SW-30, with
+    /// another outpoint: the swap's lockup is that one, and a claim is built
+    /// from it at the rate of a fresh claim. The preimage is out, so the
+    /// timeout does not refuse it (SW-46); the earlier claims stay listed.
+    fn adopt_replacement<C: HeaderChain + ?Sized>(
+        &mut self,
+        chain: &C,
+        tip: u32,
+        now: u64,
+        start_rate: u64,
+        notes: &mut Vec<String>,
+    ) {
+        let Some(held) = self.record.lockup else {
+            return;
+        };
+        let standing = self.watch.standing_depths(chain);
+        if standing.iter().any(|(t, _)| *t == held.outpoint.txid) {
+            return;
+        }
+        let Some((tx, seen)) = self.lockup_candidate(chain) else {
+            return;
+        };
+        let promised = self.record.machine.state().onchain_sats();
+        let Ok(next) = check_lockup(&tx, &self.lockup_script, promised, seen) else {
+            return;
+        };
+        if next.outpoint == held.outpoint {
+            return;
+        }
+        if self.record.claims.len() >= claim_limit() {
+            notes.push("CR-222: the lockup was replaced: the limit of claims".to_string());
+            return;
+        }
+        let ctx = claim_ctx(now, tip, true);
+        let mut rate = start_rate;
+        let mut built = self.record.machine.reclaim(&next, rate, &ctx);
+        if matches!(built, Err(Refused::FeeTooHigh)) && rate > CLAIM_FEE_PER_KVB {
+            rate = CLAIM_FEE_PER_KVB;
+            built = self.record.machine.reclaim(&next, rate, &ctx);
+        }
+        match built {
+            Ok((machine, claim)) => {
+                self.record.machine = machine;
+                self.record.lockup = Some(next);
+                self.record.fee_per_kvb = rate;
+                self.record.claim_tip = tip;
+                self.record.claim_in_block = false;
+                // The spend that took the old lockup's place is not a loss.
+                self.record.spent_in = None;
+                self.record.claims.push(claim.compute_txid());
+                self.claim_sats = claim.output.first().map_or(0, |o| o.value.to_sat());
+                self.pending_claim = Some(serialize(&claim));
+                self.dirty = true;
+            }
+            Err(e) => notes.push(format!(
+                "{}: the claim of the replacing lockup was not built: {e}",
+                e.rule()
+            )),
         }
     }
 

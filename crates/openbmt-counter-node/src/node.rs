@@ -2637,9 +2637,13 @@ impl<P: DriverPort> Node<P> {
                         &mut self.store,
                     ) {
                         Ok(r) => reports.extend(r),
-                        Err(e) => self.note(format!(
-                            "sale {index}: the claim's depth was not recorded: {e:?}"
-                        )),
+                        Err(e) => {
+                            // Told again at the next step.
+                            self.swap.forget_depth_told(index);
+                            self.note(format!(
+                                "sale {index}: the claim's depth was not recorded: {e:?}"
+                            ));
+                        }
                     }
                 }
                 Update::Cancel { index, n } => {
@@ -2662,6 +2666,8 @@ impl<P: DriverPort> Node<P> {
                         self.counter
                             .swap_claim_amount(index, received_sats, &mut self.store)
                     {
+                        // Told again at the next step.
+                        self.swap.forget_claim_amount_told(index);
                         self.note(format!(
                             "sale {index}: the claim's amount was not stored: {e}"
                         ));
