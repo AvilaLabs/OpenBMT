@@ -300,20 +300,23 @@ has been made).
   refund there only after the owner's device has checked it. Nothing is
   paid until an approval session.
 - **CR-61.** A request names: the sale's receive index; the amount, in
-  satoshis or in the shop's currency, one of the two; the destination
-  script; the cashier's name and role, as an override does (CR-21); the
-  reason; the time; the satoshis the counter saw received for the sale
-  at that time; whether the sale had reached the refund depth; and a
-  request number, rising per counter from 1. Numbers rise and may skip: a
-  number the desk gave out for a request that was never written (CR-73) is
-  not used again, and the owner does not need them to follow one another.
-  The signed settings have no
-  "refund at the dollar price or at the bitcoin amount" choice, so the
-  caller passes the choice with each call. A name and a reason are 1 to 64
+  satoshis or in the shop's currency, one of the two; the destination script;
+  the cashier's name and role, as an override does (CR-21); the reason; the
+  time; the satoshis the counter saw received for the sale at that time;
+  whether the sale had reached the refund depth; and a request number, rising
+  per counter from 1. Numbers rise and may skip: a number the desk gave out
+  for a request that was never written (CR-73) is not used again, and the
+  owner does not need them to follow one another. The signed settings have no
+  "refund at the dollar price or at the bitcoin amount" choice, so the caller
+  passes the choice with each call. A name and a reason are 1 to 64
   characters, at most 255 bytes, with no control character: the labels of
-  AS-07. A value in the shop's currency comes with a rate and its source
-  and is turned into satoshis at that rate, rounded down in the shop's
-  favour; the rate is as fresh as CR-58 asks.
+  AS-07. A value in the shop's currency comes with a rate and its source and
+  is turned into satoshis at that rate, rounded down in the shop's favour; the
+  rate is as fresh as CR-58 asks. The value names its currency, which must be
+  the one the sale was opened in (CR-196). The counter app offers a refund by
+  value only for a sale in the currency of the settings in force, since it has
+  a price in that currency only; another sale is refunded in satoshis or in
+  cash.
 - **CR-62.** The destination comes from the customer's QR code and only a
   plain on-chain address is taken from it. `refund_destination` accepts a
   bare address or a `bitcoin:` URI and takes the address and nothing else.
@@ -375,18 +378,20 @@ has been made).
   but it still counts when a cashier gives cash (CR-71, CR-119), and it
   still counts for the cap (CR-69). A request that is withdrawn, or does
   not exist, cannot be withdrawn again.
-- **CR-71.** A cash refund from the till (the shop's option, DESIGN §2.4) is
-  a record `RefundPaidInCash` with the amount in the shop's currency, the
-  cashier and the reason. It is valued at the sale's last quote and counts
-  for CR-67, rounded up to a whole satoshi, and for the cashier's cap
-  (CR-69). It asks the owner for nothing: the bitcoin is kept. For CR-67 a
-  cashier's cash refund counts the withdrawn requests too (CR-119); a
-  manager's does not. Cash goes out only against bitcoin at the shop's
-  `min_confirmations` or deeper: the amount is checked against what of the
-  sale is that deep, and a cash refund of a sale paid only by an unconfirmed
-  payment is refused, for a manager too, until it confirms. Satoshis paid
-  over Lightning count as confirmed. A bitcoin refund is not changed by this:
-  it already waits for the final depth (CR-66).
+- **CR-71.** A cash refund from the till (the shop's option, DESIGN §2.4) is a
+  record `RefundPaidInCash` with the amount in the sale's own currency, which
+  the refund names (CR-196), the cashier and the reason. The counter app's
+  cash refund takes the keypad and the code of the sale's currency, not the
+  settings'. It is valued at the sale's last quote and counts for CR-67,
+  rounded up to a whole satoshi, and for the cashier's cap (CR-69). It asks
+  the owner for nothing: the bitcoin is kept. For CR-67 a cashier's cash
+  refund counts the withdrawn requests too (CR-119); a manager's does not.
+  Cash goes out only against bitcoin at the shop's `min_confirmations` or
+  deeper: the amount is checked against what of the sale is that deep, and a
+  cash refund of a sale paid only by an unconfirmed payment is refused, for a
+  manager too, until it confirms. Satoshis paid over Lightning count as
+  confirmed. A bitcoin refund is not changed by this: it already waits for the
+  final depth (CR-66).
 - **CR-72.** For each sale the counter gives a `RefundView` for each entry:
   the sale, what was asked in satoshis, the state (`Requested`,
   `WaitingForDepth`, `Withdrawn` or `PaidInCash`), who asked and when. The
@@ -1436,16 +1441,19 @@ RT-03, RT-24).
   its `Opened` record carry that currency's code. A sale named in another
   currency is refused with nothing written (`OpenRefused::WrongCurrency`). The
   amount is in the minor units of that currency (ISO 4217: yen and won have
-  none), and the rate is in minor units per bitcoin. The counter app's library
-  refuses a sale in another currency than the settings' (`sale-currency`). It
-  refuses the same way a new quote (CR-05) or a refund given by value (CR-61)
-  whose rate names another currency than the one the sale was opened in, or
-  whose sale and settings in force are not both in Bitcoin Standard or both
-  not. The app takes the currency from the settings in force, not from its
-  price sources: its keypad has the currency's minor digits, its words name
-  the currency by its code, its price is the one of the sources of that
-  currency (RT-40), and when the settings in force name another currency than
-  the one it started with, it starts the node again.
+  none), and the rate is in minor units per bitcoin. A new quote (CR-05), a
+  refund given by value (CR-61) and a refund in cash (CR-71) each name the
+  currency of their amount or rate. It must be the currency the sale was
+  opened in, or the counter refuses it with nothing written. The currency
+  named is a label: nothing ties the number to it. The counter app's library
+  refuses a sale in another currency than the settings' (`sale-currency`), and
+  refuses a new quote or a refund when the sale and the settings in force are
+  not both in Bitcoin Standard or both not. The app takes the currency from
+  the settings in force, not from its price sources: its keypad has the
+  currency's minor digits, its words name the currency by its code, its price
+  is the one of the sources of that currency (RT-40), and when the settings in
+  force name another currency than the one it started with, it starts the node
+  again.
 - **CR-197.** With Bitcoin Standard the amount typed is satoshis and the
   quote is the amount: the rate is exactly 100,000,000 minor units (of a
   satoshi) per bitcoin, no source is asked, and the rate and source the

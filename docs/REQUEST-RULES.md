@@ -76,7 +76,11 @@ an end, payments in parts, repeats and returns.
     currency: a rate in another currency than the settings in force is
     refused, whatever is being done to the request, with the words of a
     price that cannot be used, and nothing is written. The phone does not use
-    a rate it kept from before the shop's currency changed.
+    a rate it kept from before the shop's currency changed, and the owner
+    node keeps its newest rate with its currency and uses it only while that
+    is the currency of the settings in force. Making a request, sharing it, a
+    return and crediting a payment all need such a rate; without one they
+    are refused, or wait, as with a stale rate.
 - **RQ-08.** The amount in satoshis, or worked out from the currency, is at
   least the shop's smallest bitcoin sale (CR-75) and at least the dust line
   (CR-17). A smaller one is refused with nothing written. The currency amount

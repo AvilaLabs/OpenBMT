@@ -50,11 +50,6 @@ const CHECK_AMOUNT_NEXT: &str = "Check the amount and enter it again.";
 const OTHER_PAYMENT_NEXT: &str =
     "Take another kind of payment. Tell the owner: the counter cannot check payments.";
 
-/// CR-196: the words of a new price or a refund named in another currency
-/// than the sale's are not written yet (CR-271).
-const REQUOTE_CURRENCY_WORDS: &str = "WORDS_NEEDED_CR196_REQUOTE_CURRENCY";
-const REFUND_CURRENCY_WORDS: &str = "WORDS_NEEDED_CR196_REFUND_CURRENCY";
-
 /// Words for a refusal: nothing happened, so the tone is neutral.
 pub(crate) fn refused(
     heading: &str,
@@ -742,10 +737,10 @@ impl<E: Display> RequoteRefused<E> {
             )
             .detail(format!("Sale number {i}.")),
             Self::WrongCurrency { .. } => refused(
-                REQUOTE_CURRENCY_WORDS,
-                REQUOTE_CURRENCY_WORDS,
+                "Sale in another currency",
+                "This sale was opened in another currency than the new price, so it takes no new price.",
                 Who::Cashier,
-                REQUOTE_CURRENCY_WORDS,
+                "End this sale and start it again in the shop's currency.",
                 "CR-196",
             ),
             Self::SaleEnded => refused(
@@ -1463,10 +1458,10 @@ impl<E: Display> RefundRefused<E> {
                 "CR-63",
             ),
             Self::WrongCurrency { .. } => refused(
-                REFUND_CURRENCY_WORDS,
-                REFUND_CURRENCY_WORDS,
+                "Refund in another currency",
+                "This sale was paid in another currency than the refund names, so no refund was made.",
                 Who::Cashier,
-                REFUND_CURRENCY_WORDS,
+                "Give the refund in the sale's own currency, or in satoshis.",
                 "CR-196",
             ),
             Self::UnknownSale(i) => refused(
