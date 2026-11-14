@@ -116,13 +116,13 @@ exactly the input bytes.
 | `lightning_decode` | `openbmt-lightning`, by the first byte: a BOLT 11 invoice (`decode`, the same text in lower case reads the same, and an invoice that passes `check` names the amount, the hash and the signer asked for), a Core Lightning rune (`check_rune`), an `lndconnect` address, or a node reply read as the answer to a lookup and to an invoice request on both kinds of node; none may panic, the same bytes give the same answer, and a payment is only paid for at least the amount asked |
 | `owner_range_outbox_decode` | `RangeOutbox::from_bytes` (the `OBM>` file of ranges waiting to be seen held); on success the list must encode back to exactly those bytes; half of the inputs follow the start of a valid file |
 | `owner_allocation_book_decode` | `AllocationBook::from_bytes` (the `OBM?` book of ranges given to counters); on success the book must encode back to exactly those bytes; half of the inputs follow the start of a valid book |
-| `stick_prepare` | WORDS_NEEDED |
-| `owner_hardware_return` | WORDS_NEEDED |
-| `owner_web_order_reply` | WORDS_NEEDED |
-| `lightning_expect_paid_decode` | WORDS_NEEDED |
-| `owner_ffi_call` | WORDS_NEEDED |
-| `link_numbers_shopln_decode` | WORDS_NEEDED |
-| `ur_long_stream` | WORDS_NEEDED |
+| `stick_prepare` | `prepare` of the Stick (SK-54) on any bytes as the payment file; it must never panic |
+| `owner_hardware_return` | `FirstAddressRecord::from_bytes` with re-encode equality, and `read_returned` on a binary PSBT; a file that reads must be exactly the PSBT it holds, with no bytes after it |
+| `owner_web_order_reply` | the store's replies to the owner phone, picked by the first byte: the order list, the orders reply, the range reply, the notice reply and the pairing code; a pairing code that reads encodes back to the same bytes, and an orders reply gives the same orders as the list |
+| `lightning_expect_paid_decode` | the Lightning node's stored expectations and paid events, bare and behind their version byte and count; each that reads encodes back to exactly those bytes |
+| `owner_ffi_call` | the owner library's calls through `dispatch`, with the op from the first two bytes (defined or not), handles 0, 1 and the largest, and the input as a whole request; every answer must be a response frame and none may panic |
+| `link_numbers_shopln_decode` | the link's inbox and outbox numbers and the Shop Lightning contents (Store, Stored, Lightning report), bare and behind each magic and version |
+| `ur_long_stream` | the UR decoder fed up to 300 parts of a stream of 100 to 10,000 fragments, with sequence numbers up to four times the length so that mixed parts of high degree come in; it must never panic, a refusal names its UR rule, and a finished message has the length the parts give |
 
 ## Running
 
