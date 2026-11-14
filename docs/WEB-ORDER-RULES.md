@@ -94,8 +94,12 @@ funds.**
   amount in bitcoin, the quote's time and the order total in the store's
   currency. The owner phone records each as a request.
 - **WO-21. When.** On opening the app, after every new block while the app
-  is open, and in the background as often as the phone allows. The owner
-  phone shows when it last visited the store.
+  is open, and every few seconds while it stays open. Never in the
+  background: a visit signs with the owner phone's key and makes requests
+  from the shop's wallet, and the background watcher holds neither
+  (`docs/OWNER-APP-RULES.md` OA-81). An order made while the app is closed
+  waits on hold in the store (WO-17) until the next visit, and its payment
+  is counted then. The owner phone shows when it last visited the store.
 - **WO-22. What the owner phone checks.** An order whose address was not in a
   range it sent, or was used before, is refused and shown to the owner.
 
