@@ -24,6 +24,7 @@
 #   TORANDROID_AAR    the tor-android AAR (default: ~/.cache/openbmt/deps/tor-android/tor-android-0.4.9.14.aar)
 #   OWNERAPK_SKIP_RUST  set to 1 to reuse the .so files of an earlier run
 #   OWNERAPK_CARGO_TARGET  the cargo target directory (default: ~/.cache/openbmt/target/ownerapk)
+#   OWNERAPK_KEYDIR    where the test key is kept (default: ~/.cache/openbmt/tmp/ownerapk)
 
 set -euo pipefail
 
@@ -37,7 +38,7 @@ ndk="${ANDROID_NDK_HOME:-$sdk/ndk/26.3.11579264}"
 export KOTLIN_HOME="${KOTLIN_HOME:-$cache/tools/kotlinc}"
 out="${OWNERAPK_OUT:-$cache/target/ownerapk/apk}"
 cargo_target="${OWNERAPK_CARGO_TARGET:-$cache/target/ownerapk}"
-keydir="$cache/tmp/ownerapk"
+keydir="${OWNERAPK_KEYDIR:-$cache/tmp/ownerapk}"
 bt="$sdk/build-tools/36.0.0"
 platform="$sdk/platforms/android-36/android.jar"
 stdlib="$KOTLIN_HOME/lib/kotlin-stdlib.jar"
@@ -93,9 +94,13 @@ heavy "$here/tests/run-jvm.sh" "$out/jvm"
 
 step "Rust library"
 if [ "${OWNERAPK_SKIP_RUST:-0}" != 1 ]; then
-    # Page size 16 KiB for the segments, so the library loads on 16 KiB devices.
-    export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS="-C link-arg=-Wl,-z,max-page-size=16384"
-    export CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS="-C link-arg=-Wl,-z,max-page-size=16384"
+    # Page size 16 KiB for the segments, so the library loads on 16 KiB devices. The path
+    # prefixes are mapped to fixed names so that no home or checkout directory ends up in the
+    # library (the later mapping wins, so the narrower paths come last). These variables beat
+    # RUSTFLAGS, so everything the Android libraries need is set here.
+    remap="--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo --remap-path-prefix=$repo=/openbmt --remap-path-prefix=$cargo_target=/target"
+    export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS="-C link-arg=-Wl,-z,max-page-size=16384 $remap"
+    export CARGO_TARGET_X86_64_LINUX_ANDROID_RUSTFLAGS="-C link-arg=-Wl,-z,max-page-size=16384 $remap"
     ANDROID_NDK_HOME="$ndk" OPENBMT_OWNER_TARGET="$cargo_target" "$repo/scripts/owner-ffi-build.sh" | tee "$out/ffi-build.log"
     grep -q -E '^(FAIL|NOT RUN)' "$out/ffi-build.log" && die "the Rust library did not build"
     # The QR reader and drawing both apps use for the camera and the screen (the same target directory, the same page size).
@@ -155,6 +160,13 @@ ls -l "$out"/dex/*.dex
 step "assemble"
 cp "$out/base.apk" "$out/unaligned.apk"
 cp "$out"/dex/*.dex "$out/stage/"
+# Reproducible zip entries: the commit's time (SOURCE_DATE_EPOCH wins when set), the same
+# permissions, UTC, and the entries in byte order.
+epoch="${SOURCE_DATE_EPOCH:-$(git -C "$repo" log -1 --format=%ct 2>/dev/null || true)}"
+[ -n "$epoch" ] || die "no commit time and no SOURCE_DATE_EPOCH: the APK would not be reproducible"
+find "$out/stage" -type f -exec chmod 644 {} +
+find "$out/stage" -exec touch -h -d "@$epoch" {} +
+export TZ=UTC LC_ALL=C
 (
     cd "$out/stage"
     # Libraries are stored, not compressed, so that they can be mapped from the APK
@@ -173,7 +185,7 @@ if [ ! -f "$ks" ]; then
     umask 077
     head -c 18 /dev/urandom | base64 | tr -d '/+=\n' > "$pass_file"
     keytool -genkeypair -keystore "$ks" -storetype PKCS12 -storepass:file "$pass_file" -keypass:file "$pass_file" \
-        -alias ownerapk-test -keyalg EC -groupname secp256r1 -validity 3650 \
+        -alias ownerapk-test -keyalg RSA -keysize 3072 -validity 3650 \
         -dname "CN=OpenBMT Owner local test key, O=test only" >/dev/null 2>&1 || die "keytool could not make the test key"
     echo "made a local test key at $ks (not a release key; never committed)"
 fi
