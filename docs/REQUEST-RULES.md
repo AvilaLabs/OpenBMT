@@ -7,6 +7,8 @@ back when their block leaves the chain and queues returns on the owner's
 queue (`crates/openbmt-owner-node/src/requests.rs`); the owner library
 carries them to the app as ops 216 to 226, reads one request with op
 234 and adds them to the books (RQ-32). The owner app has the screens
+carries them to the app as ops 216 to 226, reads one request with op
+234 and adds them to the books (RQ-32). The owner app has the screens
 of RQ-35, with the words of `RequestWords` for what the library does not
 say (RQ-36). A `bitcoin:` link pasted or scanned as a return address is
 read with the BIP 321 reader of `docs/URI-RULES.md`, and only its address

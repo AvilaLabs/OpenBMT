@@ -20,6 +20,8 @@
 //! - `share <number>`: write a quote and print the link
 //! - `status <number>`: where the request stands
 //! - `return <number> <sats> <address>`: queue a return to a regtest address
+//! - `read <number>`: the request as the owner library's `request_read` (op
+//!   234) gives it to the app
 //! - `queue`: the owner's queue
 //! - `state`: the book's counts
 //! - `rescan`, `pump <seconds>`, `quit`
@@ -32,6 +34,13 @@
 //! - `request <number> <status> credited=<sats> pending=<n>`
 //! - `returned id=<n> refund=<n> sats=<n>`
 //! - `entry <id> <stage>`, `return <id> <state>`
+//! - `read <number> <status> unit=<code> address=<regtest> raw=<as read>
+//!   amount=<n> paid=<n> received=<n> returned=<n> payments=<n> returns=<n>`,
+//!   then one
+//!   `payment <txid> vout=<n> sats=<n> confirmed=<bool> credit=<n>` for each
+//!   payment and one `returnview <id> <state> sats=<n> address=<regtest>`
+//!   for each return (the library writes the wallet's main network form; the
+//!   example shows the regtest form of the same script, and `raw` as read)
 //! - `state open=<n> arrivals=<n> returns=<n> view=<text>`
 //! - `refused <text>`, `status tip=<h> checked=<h> view=<text>`
 //!
@@ -53,6 +62,7 @@ use openbmt_core::identity::Identity;
 use openbmt_core::pinned_wallet::PinnedWallet;
 use openbmt_core::wallet_single::{ImportedWallet, SingleKeyWallet};
 use openbmt_net_io::DriverConfig;
+use openbmt_owner_ffi::{read_request, RequestAsk, RequestNumberArgs};
 use openbmt_owner_node::{
     own_approver, OwnNode, OwnerConfig, OwnerNode, OwnerParts, RequestContext,
 };
@@ -291,6 +301,44 @@ fn command(node: &mut OwnerNode, dir: &Path, line: &str) -> Result<bool, String>
                 "returned id={} refund={} sats={}",
                 added.id, added.refund, added.sats
             ));
+        }
+        Some("read") => {
+            let n: u64 = number(words.next(), "the number")?;
+            let ask = RequestAsk {
+                now: now_secs(),
+                offset_minutes: 0,
+                rate: None,
+            };
+            let d = read_request(node, &RequestNumberArgs { ask, number: n })
+                .map_err(|e| e.text().to_string())?;
+            say(format!(
+                "read {n} {:?} unit={} address={} raw={} amount={} paid={} received={} returned={} payments={} returns={}",
+                d.status,
+                d.unit,
+                rewrite(&d.address, Network::Regtest)?,
+                d.address,
+                d.amount,
+                d.paid,
+                d.received_sats,
+                d.returned_sats,
+                d.payments.len(),
+                d.returns.len()
+            ));
+            for p in &d.payments {
+                say(format!(
+                    "payment {} vout={} sats={} confirmed={} credit={}",
+                    p.txid, p.vout, p.sats, p.confirmed, p.credit
+                ));
+            }
+            for r in &d.returns {
+                say(format!(
+                    "returnview {} {:?} sats={} address={}",
+                    r.id,
+                    r.state,
+                    r.sats,
+                    rewrite(&r.address, Network::Regtest)?
+                ));
+            }
         }
         Some("queue") => {
             for r in node.owner().refunds() {

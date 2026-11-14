@@ -390,6 +390,13 @@ impl<P: OwnerPort> OwnerNode<P> {
         }
     }
 
+    /// The address of a request, on the node's network; `None` for a
+    /// number that is not in the book or a wallet the node does not hold.
+    pub fn request_address(&self, number: u64) -> Option<String> {
+        let request = self.requests().ok()?.request(number)?;
+        Some(self.address_of(&self.request_script(request)?))
+    }
+
     /// The shop's context the app gave last, if it gave one.
     pub fn request_context(&self) -> Option<RequestContext> {
         self.requests.context

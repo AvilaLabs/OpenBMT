@@ -1019,7 +1019,7 @@ fn build_ops() -> Vec<Op> {
             Node,
             |c, a: RequestReturnArgs| c.entry()?.request_return_ask(a),
         ),
-        op(227, "request_read", Node, |c, a: RequestNumberArgs| {
+        op(234, "request_read", Node, |c, a: RequestNumberArgs| {
             c.entry()?.request_read(a)
         }),
     ]

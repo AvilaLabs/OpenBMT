@@ -4193,6 +4193,7 @@ object AppModelTest {
         // The app writes no sentence of its own on these screens: every string a person reads is a RequestWords name or the library's words.
         val screens = source("src/android/RequestScreens.kt")
         ok(!Regex("(ui\\.(text|primary|button|danger)|heading|para|line|label|textInput|numberInput)\\(\"[A-Za-z]").containsMatchIn(screens), "RequestScreens.kt has no sentence of its own")
+        ok(screens.contains("RequestWords.requestAddressLabel") && screens.contains("d.address"), "RQ-15: the page shows the request's own address under its label")
         ok(!Regex("RowItem\\(\"").containsMatchIn(screens) && !Regex("chips\\(listOf\\(\"").containsMatchIn(screens), "no row or pill is written in the file")
 
         // The list (RQ-21, RQ-25): the parts in their order, the empty ones left out, each by due date and then number.
@@ -4221,7 +4222,7 @@ object AppModelTest {
         fun pay(confirmed: Boolean = true) = RequestPayment("aa", 0, 1_000, 800_000, 1_700_000_000L, if (confirmed) 1_000 else 0, confirmed, false, false, null)
         fun detail(status: RequestStatus, end: RequestEnd? = null, payments: List<RequestPayment> = emptyList(), owed: Long = 5_000, received: Long = 0, returned: Long = 0, repeat: RequestEvery? = null) =
             RequestDetail(
-                RequestRow(1, "Booking", owed, day(2026, 12, 1), "line", "state", emptyList(), repeat != null), status, end, null, RequestPriceIn.Bitcoin, "SAT", 5_000, 0, received, returned,
+                RequestRow(1, "Booking", owed, day(2026, 12, 1), "line", "state", emptyList(), repeat != null), status, end, null, RequestPriceIn.Bitcoin, "SAT", "bc1qrequest", 5_000, 0, received, returned,
                 1_700_000_000L, day(2026, 11, 13), repeat, emptyList(), payments, emptyList(), null,
                 RequestConfirm("t", "x", "y", "n"), RequestConfirm("t", "x", "y", "n"), RequestConfirm("t", "x", "y", "n"),
             )
@@ -4249,7 +4250,7 @@ object AppModelTest {
         // What the page holds (RQ-12, RQ-15, RQ-29, RQ-37): numbers and the library's words, with the placeholders around them.
         val d = detail(RequestStatus.PartPaid, payments = listOf(pay(), pay(confirmed = false)), received = 1_000)
         ok(RequestModel.amountIn(d, 5_000) == "5,000 sats", "an amount of a request in bitcoin")
-        val eur = RequestDetail(d.row, d.status, d.end, d.endAt, RequestPriceIn.ShopCurrency, "EUR", 5_000, 3_000, 1_000, 0, 1L, d.made, null, emptyList(), emptyList(), emptyList(), null, d.cancel, d.close, d.countPaid)
+        val eur = RequestDetail(d.row, d.status, d.end, d.endAt, RequestPriceIn.ShopCurrency, "EUR", d.address, 5_000, 3_000, 1_000, 0, 1L, d.made, null, emptyList(), emptyList(), emptyList(), null, d.cancel, d.close, d.countPaid)
         ok(RequestModel.amountIn(eur, 123_450) == "1,234.50 EUR", "an amount of a request in the currency")
         val q = RequestModel.quoteRow(eur, RequestQuote(1_700_000_000L, 5_000, 30_000, 6_000_000L, 1_700_086_400L))
         ok(q.second.startsWith("50.00 EUR \u00b7 30,000 sats \u00b7 " + RequestWords.quoteUntilLabel + " "), "a quote: what it asked for, and until when")

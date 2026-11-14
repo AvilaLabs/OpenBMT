@@ -46,6 +46,7 @@ object RequestWords {
     // ---- what the page holds (RQ-15, RQ-12, RQ-26, RQ-29) ----
     val owedLabel = need("WORDS_NEEDED_RQ_15_OWED_LABEL")
     val paidLabel = need("WORDS_NEEDED_RQ_15_PAID_LABEL")
+    val requestAddressLabel = need("WORDS_NEEDED_RQ_15_ADDRESS_LABEL")
     val quotesLabel = need("WORDS_NEEDED_RQ_12_QUOTES_LABEL")
     val paymentsLabel = need("WORDS_NEEDED_RQ_15_PAYMENTS_LABEL")
     val paymentBlock = need("WORDS_NEEDED_RQ_15_PAYMENT_BLOCK")

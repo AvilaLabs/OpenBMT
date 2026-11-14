@@ -197,7 +197,7 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (224, "request_stop_repeating"),
         (225, "request_state"),
         (226, "request_return_ask"),
-        (227, "request_read"),
+        (234, "request_read"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

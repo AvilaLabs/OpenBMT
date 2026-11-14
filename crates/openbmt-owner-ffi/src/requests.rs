@@ -1007,6 +1007,9 @@ pub struct RequestDetailView {
     pub price_in: RequestPriceIn,
     /// The code of the unit of its amounts: `SAT` for a request in bitcoin.
     pub unit: String,
+    /// Its address, on the shop's network; empty if the node does not hold
+    /// its wallet.
+    pub address: String,
     /// The amount, in its unit.
     pub amount: u64,
     /// What the payments came to, in its unit.
@@ -1045,6 +1048,7 @@ wire_record!(RequestDetailView {
     end_at,
     price_in,
     unit,
+    address,
     amount,
     paid,
     received_sats,
@@ -1094,8 +1098,9 @@ fn return_view(r: &openbmt_requests::Return, network: Network) -> ReturnView {
     }
 }
 
-/// RQ-35: one request as the book keeps it, for its page.
-pub(crate) fn read<P: OwnerPort>(
+/// RQ-35: one request as the book keeps it, for its page. This is what op
+/// `request_read` answers with, before it is framed.
+pub fn read<P: OwnerPort>(
     node: &OwnerNode<P>,
     a: &RequestNumberArgs,
 ) -> Result<RequestDetailView, AppError> {
@@ -1176,6 +1181,7 @@ pub(crate) fn read<P: OwnerPort>(
             Some(c) if !c.is_sats() => Currency::of_shop(c).to_string(),
             _ => "SAT".to_string(),
         },
+        address: node.request_address(request.number).unwrap_or_default(),
         amount: request.amount,
         paid: credited,
         received_sats: request.received_sats(),

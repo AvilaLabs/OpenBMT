@@ -219,7 +219,7 @@ private const val OP_REQUEST_REPEATS = 223
 private const val OP_REQUEST_STOP_REPEATING = 224
 private const val OP_REQUEST_STATE = 225
 private const val OP_REQUEST_RETURN_ASK = 226
-private const val OP_REQUEST_READ = 227
+private const val OP_REQUEST_READ = 234
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -1247,6 +1247,8 @@ class RequestDetail(
     val priceIn: RequestPriceIn,
     /** The code of the unit of its amounts: SAT for a request in bitcoin. */
     val unit: String,
+    /** Its address, on the shop's network; empty if the node does not hold its wallet. */
+    val address: String,
     val amount: Long,
     val paid: Long,
     val receivedSats: Long,
@@ -1668,6 +1670,7 @@ internal fun Reader.requestDetail(): RequestDetail {
         else -> tag("RequestPriceIn")
     }
     val unit = string()
+    val address = string()
     val amount = u64()
     val paid = u64()
     val receivedSats = u64()
@@ -1710,7 +1713,7 @@ internal fun Reader.requestDetail(): RequestDetail {
     }
     val overReturned = option { string() }
     return RequestDetail(
-        row, status, end, endAt, priceIn, unit, amount, paid, receivedSats, returnedSats, madeAt, made, repeat,
+        row, status, end, endAt, priceIn, unit, address, amount, paid, receivedSats, returnedSats, madeAt, made, repeat,
         quotes, payments, returns, overReturned, requestConfirm(), requestConfirm(), requestConfirm(),
     )
 }

@@ -130,6 +130,7 @@ internal fun Controller.showRequestPage(number: Long, message: SayWords? = null)
     if (d.repeat != null) views.add(line(RequestWords.repeatsLine, muted = true))
     views.add(ui.labelled(RequestWords.owedLabel, ui.text(RequestModel.amountIn(d, d.row.owed))))
     views.add(ui.labelled(RequestWords.paidLabel, ui.text(RequestModel.amountIn(d, d.paid))))
+    if (d.address.isNotEmpty()) views.add(ui.labelled(RequestWords.requestAddressLabel, ui.text(d.address, mono = true)))
     if (d.quotes.isNotEmpty()) {
         views.add(label(RequestWords.quotesLabel))
         views.add(ui.rows(d.quotes.reversed().map { q -> RequestModel.quoteRow(d, q).let { (t, sub) -> RowItem(t, sub) } }))

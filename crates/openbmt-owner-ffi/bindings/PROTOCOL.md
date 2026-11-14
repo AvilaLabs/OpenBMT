@@ -220,7 +220,7 @@ ops run on another; it waits for at most 250 ms.
 224 request_stop_repeating handle node  args RequestNumberArgs -> ()
 225 request_state    handle node  args RequestAsk -> RequestStateView
 226 request_return_ask handle node  args RequestReturnArgs -> string
-227 request_read     handle node  args RequestNumberArgs -> RequestDetailView
+234 request_read     handle node  args RequestNumberArgs -> RequestDetailView
 ```
 
 ## Types
@@ -473,5 +473,5 @@ ConfirmView: record: title: string, text: string, yes: string, no: string
 QuoteView: record: made_at: u64, owed: u64, sats: u64, rate: option<u64>, until: option<u64>
 PaymentView: record: txid: string, vout: u32, sats: u64, height: u32, block_time: u64, credit: u64, confirmed: bool, late: bool, old_price: bool, after: option<PaymentAfterView>
 ReturnView: record: id: u64, sats: u64, state: ReturnStateView, address: string, queued_at: u64, txid: option<string>, at: option<u64>
-RequestDetailView: record: row: RequestRowView, status: RequestStatusView, end: option<RequestEndView>, end_at: option<u64>, price_in: RequestPriceIn, unit: string, amount: u64, paid: u64, received_sats: u64, returned_sats: u64, made_at: u64, made: DayView, repeat: option<RequestEvery>, quotes: list<QuoteView>, payments: list<PaymentView>, returns: list<ReturnView>, over_returned: option<string>, cancel: ConfirmView, close: ConfirmView, count_paid: ConfirmView
+RequestDetailView: record: row: RequestRowView, status: RequestStatusView, end: option<RequestEndView>, end_at: option<u64>, price_in: RequestPriceIn, unit: string, address: string, amount: u64, paid: u64, received_sats: u64, returned_sats: u64, made_at: u64, made: DayView, repeat: option<RequestEvery>, quotes: list<QuoteView>, payments: list<PaymentView>, returns: list<ReturnView>, over_returned: option<string>, cancel: ConfirmView, close: ConfirmView, count_paid: ConfirmView
 ```

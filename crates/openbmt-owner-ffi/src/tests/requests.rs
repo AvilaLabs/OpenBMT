@@ -283,11 +283,16 @@ fn rq_35_rq_12_rq_19_one_request_is_read_with_its_quotes_and_the_words_of_its_qu
     let file = wallet_file(&rig);
     settle(&rig, &file);
     let handle = Rd::ok(&rig.start_own(&file)).u64();
-    Rd::ok(&rig.call(216, handle, &make_args(T0, "Rent", 5_000, 0, (1970, 1, 22))));
+    let made = rig.call(216, handle, &make_args(T0, "Rent", 5_000, 0, (1970, 1, 22)));
+    let made_address = {
+        let mut m = Rd::ok(&made);
+        let _ = (m.u64(), m.u32());
+        m.string()
+    };
     let one = ask(T0).u64(1).0;
 
     // Before any share: waiting, nothing paid, no quote, no payment, no return.
-    let response = rig.call(227, handle, &one);
+    let response = rig.call(234, handle, &one);
     let mut r = Rd::ok(&response);
     assert_eq!(detail_head(&mut r), (1, "Rent".to_string()));
     assert_eq!(r.u8(), 0, "waiting");
@@ -295,6 +300,7 @@ fn rq_35_rq_12_rq_19_one_request_is_read_with_its_quotes_and_the_words_of_its_qu
     assert!(r.opt(|r| r.u64()).is_none());
     assert_eq!(r.u8(), 0, "priced in bitcoin");
     assert_eq!(r.string(), "SAT");
+    assert_eq!(r.string(), made_address, "the address the make gave");
     assert_eq!((r.u64(), r.u64(), r.u64(), r.u64()), (5_000, 0, 0, 0));
     assert_eq!(r.u64(), T0, "made at");
     assert_eq!((r.u32(), r.u32(), r.u32()), (1970, 1, 12));
@@ -312,7 +318,7 @@ fn rq_35_rq_12_rq_19_one_request_is_read_with_its_quotes_and_the_words_of_its_qu
 
     // A share writes a quote, and the read shows it.
     Rd::ok(&rig.call(218, handle, &ask(T0 + 1).u64(1).string("Corner Cafe").0));
-    let response = rig.call(227, handle, &one);
+    let response = rig.call(234, handle, &one);
     let mut r = Rd::ok(&response);
     detail_head(&mut r);
     let _ = (
@@ -320,6 +326,7 @@ fn rq_35_rq_12_rq_19_one_request_is_read_with_its_quotes_and_the_words_of_its_qu
         r.opt(|r| r.u8()),
         r.opt(|r| r.u64()),
         r.u8(),
+        r.string(),
         r.string(),
     );
     let _ = (r.u64(), r.u64(), r.u64(), r.u64(), r.u64());
@@ -337,7 +344,7 @@ fn rq_35_rq_12_rq_19_one_request_is_read_with_its_quotes_and_the_words_of_its_qu
 
     // Cancelling ends it; the read says how, and when.
     Rd::ok(&rig.call(219, handle, &ask(T0 + 5).u64(1).0));
-    let response = rig.call(227, handle, &one);
+    let response = rig.call(234, handle, &one);
     let mut r = Rd::ok(&response);
     detail_head(&mut r);
     assert_eq!(r.u8(), 0);
@@ -345,7 +352,7 @@ fn rq_35_rq_12_rq_19_one_request_is_read_with_its_quotes_and_the_words_of_its_qu
     assert_eq!(r.opt(|r| r.u64()), Some(T0 + 5));
 
     // A request that is not there is refused with the library's words.
-    let fault = Rd::error(&rig.call(227, handle, &ask(T0).u64(9).0)).expect("refused");
+    let fault = Rd::error(&rig.call(234, handle, &ask(T0).u64(9).0)).expect("refused");
     assert!(fault.rule.starts_with("RQ-"), "{}", fault.rule);
 }
 
@@ -353,6 +360,6 @@ fn rq_35_rq_12_rq_19_one_request_is_read_with_its_quotes_and_the_words_of_its_qu
 fn rq_01_a_shop_with_a_key_app_reads_no_request() {
     let rig = Rig::new();
     let handle = rig.start();
-    let fault = Rd::error(&rig.call(227, handle, &ask(T0).u64(1).0)).expect("refused");
+    let fault = Rd::error(&rig.call(234, handle, &ask(T0).u64(1).0)).expect("refused");
     assert!(fault.rule.starts_with("RQ-"), "{}", fault.rule);
 }

@@ -607,7 +607,7 @@ object ProtocolDecoderTest {
     private fun requestDetailFrame() {
         val w = Writer()
         w.u64(3).string("Rent").u64(1_850).u32(2026).u32(12).u32(1).string("line").string("state").u32(0).bool(false)
-        w.u8(4).u8(1).u8(1).u8(1).u64(99).u8(1).string("USD").u64(5_000).u64(3_150).u64(40_000).u64(1_000).u64(1_700_000_000L).u32(2026).u32(11).u32(13)
+        w.u8(4).u8(1).u8(1).u8(1).u64(99).u8(1).string("USD").string("bc1qrequest").u64(5_000).u64(3_150).u64(40_000).u64(1_000).u64(1_700_000_000L).u32(2026).u32(11).u32(13)
         w.u8(1).u8(1)
         w.u32(1).u64(5).u64(5_000).u64(30_000).u8(1).u64(6_000_000L).u8(1).u64(1_700_086_400L)
         w.u32(2)
@@ -619,7 +619,7 @@ object ProtocolDecoderTest {
         val frame = decodeResponse(header(0, w.toByteArray()))
         val d = frame.requestDetail().also { frame.end() }
         check(d.row.number == 3L && d.status == RequestStatus.Almost && d.end == RequestEnd.Closed && d.endAt == 99L)
-        check(d.priceIn == RequestPriceIn.ShopCurrency && d.unit == "USD" && d.amount == 5_000L && d.paid == 3_150L)
+        check(d.priceIn == RequestPriceIn.ShopCurrency && d.unit == "USD" && d.address == "bc1qrequest" && d.amount == 5_000L && d.paid == 3_150L)
         check(d.receivedSats == 40_000L && d.returnedSats == 1_000L && d.made.month == 11L && d.repeat == RequestEvery.Month)
         check(d.quotes.size == 1 && d.quotes[0].sats == 30_000L && d.quotes[0].rate == 6_000_000L && d.quotes[0].until == 1_700_086_400L)
         check(d.payments.size == 2 && d.payments[0].confirmed && d.payments[0].late && d.payments[0].after == PaymentAfter.Close)

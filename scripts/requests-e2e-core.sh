@@ -13,6 +13,8 @@
 # wallet is a single key of fixed test words on the main network's path, so
 # the addresses the example prints are the regtest form of the same scripts
 # (the example converts in both directions). The confirmation depth is 2.
+# The example is in the owner library's crate, and its `read` command prints
+# a request as the library's `request_read` (op 234) gives it to the app.
 #
 # What it does (the steps are numbered as in the printed table):
 #   1. The example starts and syncs. A request for 100000 sat is made: its
@@ -24,11 +26,14 @@
 #   4. The block with the second payment is invalidated and a longer chain
 #      without it is mined: the credit is taken back, the request is part
 #      paid again. The payment is mined again and the request is paid again.
+#      The library's read of the request holds both payments (txid, amount,
+#      confirmed, credit), the request's address and its unit.
 #   5. A return of 20000 sat to an address of the customer is accepted: it is
 #      queued on the owner's queue and nothing is paid, and Core's mempool
-#      stays empty.
+#      stays empty. The read holds the return (state, amount, address).
 #   6. The example is stopped and started again on the same directory: the
-#      request, its credits and the queued return are as they were.
+#      request, its credits and the queued return are as they were, in the
+#      read as well.
 #
 # Needs: Bitcoin Core 32.1 in ~/.local/opt/bitcoin-core-32.1/bin (put first on
 # PATH; set CORE_BIN to use another), jq, and cargo unless REQUESTS_BIN names a
@@ -123,11 +128,11 @@ if [ -z "${REQUESTS_BIN:-}" ]; then
   GUARD=$HOME/.cache/openbmt/guard.sh
   if [ -x "$GUARD" ]; then
     "$GUARD" env CARGO_TARGET_DIR="$TARGET" cargo build --quiet --locked \
-      --manifest-path "$ROOT/Cargo.toml" -p openbmt-owner-node --example requests_regtest ||
+      --manifest-path "$ROOT/Cargo.toml" -p openbmt-owner-ffi --example requests_regtest ||
       die "the build failed"
   else
     CARGO_TARGET_DIR="$TARGET" cargo build --quiet --locked \
-      --manifest-path "$ROOT/Cargo.toml" -p openbmt-owner-node --example requests_regtest ||
+      --manifest-path "$ROOT/Cargo.toml" -p openbmt-owner-ffi --example requests_regtest ||
       die "the build failed"
   fi
   REQUESTS_BIN="$TARGET/debug/examples/requests_regtest"
@@ -238,13 +243,19 @@ done_step 1 "a request is made, its address is a regtest address of the wallet, 
 # ---- 2 ----------------------------------------------------------------------
 
 say "2. 40000 sat: counted at the second confirmation, not at the first"
-cli -rpcwallet=miner sendtoaddress "$ADDR" 0.0004 >/dev/null || die "no payment"
+TX1=$(cli -rpcwallet=miner sendtoaddress "$ADDR" 0.0004) || die "no payment"
 mine 1
 await_synced 60 || BAD[2]=1
 cmd "status 1"
 note "$(grep '^request' <<<"$LAST")"
 chk 2 "at one confirmation the request is still waiting, the payment is held" \
   grep -q '^request 1 waiting credited=0 pending=1$' <<<"$LAST"
+cmd "read 1"
+note "$(tr '\n' ';' <<<"$LAST")"
+chk 2 "the read shows the held payment as not confirmed, credited 0, with its txid and 40000 sat" \
+  grep -q "^payment $TX1 vout=[0-9]* sats=40000 confirmed=false credit=0\$" <<<"$LAST"
+chk 2 "the read says waiting, in sat, at the request's own address (the wallet's main network form as read)" \
+  grep -Eq "^read 1 Waiting unit=SAT address=$ADDR raw=bc1q[a-z0-9]+ amount=100000 paid=0 received=0 returned=0 payments=1 returns=0\$" <<<"$LAST"
 mine 1
 await_request 1 'partpaid-60000 credited=40000' 60
 chk 2 "at two confirmations 40000 sat is counted and 60000 sat is still owed" [ $? = 0 ]
@@ -278,6 +289,14 @@ chk 4 "the second payment's credit is taken back" [ $? = 0 ]
 mine 2
 await_request 1 'paid credited=100000' 90
 chk 4 "mined again, it is counted again and the request is paid" [ $? = 0 ]
+cmd "read 1"
+note "$(tr '\n' ';' <<<"$LAST")"
+chk 4 "the read says paid: 100000 credited, 100000 received, two payments" \
+  grep -Eq "^read 1 Paid unit=SAT address=$ADDR raw=bc1q[a-z0-9]+ amount=100000 paid=100000 received=100000 returned=0 payments=2 returns=0\$" <<<"$LAST"
+chk 4 "the read holds the first payment: its txid, 40000 sat, confirmed, credited 40000" \
+  grep -q "^payment $TX1 vout=[0-9]* sats=40000 confirmed=true credit=40000\$" <<<"$LAST"
+chk 4 "the read holds the second payment: its txid, 60000 sat, confirmed, credited 60000" \
+  grep -q "^payment $TX2 vout=[0-9]* sats=60000 confirmed=true credit=60000\$" <<<"$LAST"
 done_step 4 "a payment whose block left the chain is taken back and counted again when it is mined again"
 
 # ---- 5 ----------------------------------------------------------------------
@@ -291,6 +310,12 @@ cmd queue
 note "$(tr '\n' ';' <<<"$LAST")"
 chk 5 "the refund waits on the owner's queue" grep -q '^entry [0-9]* Queued$' <<<"$LAST"
 chk 5 "the book holds the return as queued" grep -q '^return 1 queued$' <<<"$LAST"
+cmd "read 1"
+note "$(tr '\n' ';' <<<"$LAST")"
+chk 5 "the read holds the return: queued, 20000 sat, to the customer's address" \
+  grep -q "^returnview 1 Queued sats=20000 address=$CUSTOMER\$" <<<"$LAST"
+chk 5 "the read counts the 20000 sat as returned" \
+  grep -q '^read 1 Paid .* received=100000 returned=20000 payments=2 returns=1$' <<<"$LAST"
 sleep 2
 chk 5 "nothing was paid: Core's mempool is as it was" \
   [ "$(cli getmempoolinfo | jq -r '.size')" = "$MEMPOOL" ]
@@ -312,6 +337,9 @@ chk 6 "the request and its credits are as they were" \
 cmd queue
 chk 6 "the refund is still queued" grep -q '^entry [0-9]* Queued$' <<<"$LAST"
 chk 6 "the return is still in the book" grep -q '^return 1 queued$' <<<"$LAST"
+cmd "read 1"
+chk 6 "the read still holds both payments and the queued return" \
+  bash -c 'grep -q "^payment $1 .*confirmed=true credit=40000\$" <<<"$3" && grep -q "^payment $2 .*confirmed=true credit=60000\$" <<<"$3" && grep -q "^returnview 1 Queued sats=20000 address=$4\$" <<<"$3"' _ "$TX1" "$TX2" "$LAST" "$CUSTOMER"
 cmd "make 5000 Second"
 chk 6 "a new request takes a new index" grep -q '^made 2 ' <<<"$LAST"
 done_step 6 "the book, the credits and the queued return survive a restart"
