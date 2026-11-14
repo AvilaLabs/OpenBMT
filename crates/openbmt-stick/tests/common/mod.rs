@@ -241,6 +241,13 @@ pub fn refused_payments() -> Vec<(&'static str, Vec<u8>)> {
                 p.inputs[1].non_witness_utxo = None;
             }),
         ),
+        (
+            "OutputNotAddress",
+            change(&|p| {
+                p.unsigned_tx.output[0].script_pubkey =
+                    ScriptBuf::from_bytes(vec![0x6a, 0x01, 0x00]);
+            }),
+        ),
     ]
 }
 

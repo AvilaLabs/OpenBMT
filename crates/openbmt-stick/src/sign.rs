@@ -59,6 +59,9 @@ pub enum Refusal {
     KeyMismatch(usize),
     /// An input asks for a signature other than `SIGHASH_ALL`.
     SighashNotAll(usize),
+    /// An output pays to a script that is not a standard address (P2PKH,
+    /// P2SH, P2WPKH, P2WSH or P2TR).
+    OutputNotAddress(usize),
     /// The outputs pay more than the inputs hold.
     OutputsExceedInputs,
     /// The words or keys could not be worked out. Cannot happen for 12
@@ -69,7 +72,7 @@ pub enum Refusal {
 /// One output as the owner sees it before signing (SK-55).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewOutput {
-    /// The address, or the script in hex when it has none.
+    /// The address of a standard script (SK-54 refuses any other).
     pub address: String,
     /// The amount in satoshis.
     pub sats: u64,
@@ -161,6 +164,16 @@ fn prevout(psbt: &Psbt, i: usize) -> Result<TxOut, Refusal> {
         Some(b) if b != out => Err(Refusal::PrevoutMismatch(i)),
         _ => Ok(out.clone()),
     }
+}
+
+/// Whether `script` is a standard address kind: P2PKH, P2SH, P2WPKH, P2WSH
+/// or P2TR (SK-54).
+fn is_standard(script: &ScriptBuf) -> bool {
+    script.is_p2pkh()
+        || script.is_p2sh()
+        || script.is_p2wpkh()
+        || script.is_p2wsh()
+        || script.is_p2tr()
 }
 
 /// SK-53, SK-54, SK-55: judges the payment `bytes` for the wallet of
@@ -286,20 +299,17 @@ pub fn prepare(bytes: &[u8], master: &Xpriv) -> Result<Prepared, Refusal> {
     }
     let mut outputs = Vec::with_capacity(n_out);
     let mut sent_away = 0u64;
-    for o in &psbt.unsigned_tx.output {
+    for (n, o) in psbt.unsigned_tx.output.iter().enumerate() {
+        if !is_standard(&o.script_pubkey) {
+            return Err(Refusal::OutputNotAddress(n));
+        }
         let is_own = own.contains_key(&o.script_pubkey);
         if !is_own {
             sent_away += o.value.to_sat();
         }
         let address = Address::from_script(&o.script_pubkey, Network::Bitcoin)
             .map(|a| a.to_string())
-            .unwrap_or_else(|_| {
-                o.script_pubkey
-                    .as_bytes()
-                    .iter()
-                    .map(|b| format!("{b:02x}"))
-                    .collect()
-            });
+            .map_err(|_| Refusal::OutputNotAddress(n))?;
         outputs.push(ReviewOutput {
             address,
             sats: o.value.to_sat(),

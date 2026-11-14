@@ -185,6 +185,12 @@ pub const SK_54_KEY_MISMATCH: &str = "The key it asks for does not match the coi
 /// Refused: an input asks for a signature other than SIGHASH_ALL (SK-54).
 pub const SK_54_NOT_SIGHASH_ALL: &str =
     "It asks for a kind of signature that would let the payment be changed afterward.";
+/// The label before the number of the output a refusal names (SK-54).
+pub const SK_54_OUTPUT: &str =
+    "WORDS_NEEDED: the label before an output's number, as 'Coin number' is for an input";
+/// Refused: an output pays to a script that is not an ordinary address (SK-54).
+pub const SK_54_OUTPUT_NOT_ADDRESS: &str =
+    "WORDS_NEEDED: one of its outputs does not pay to an ordinary address (a script that cannot be shown as an address)";
 /// Refused: the outputs pay more than the inputs hold (SK-54).
 pub const SK_54_OUTPUTS_EXCEED: &str = "It pays out more than its coins hold.";
 /// The title of the review before signing (SK-55).
@@ -205,6 +211,9 @@ pub const SK_55_UNIT_RATE: &str = "sat/vB";
 pub const SK_55_PAGE: &str = "to see more. Page";
 /// After "Enter" on the review: sign (SK-55).
 pub const SK_55_SIGN: &str = "to sign it";
+/// After "Enter" on a page of the review that is not the last one not yet shown: go to the next page, nothing is signed (SK-55).
+pub const SK_55_NEXT: &str =
+    "WORDS_NEEDED: to see the next page (it signs only after every page has been shown)";
 /// After "Esc" on the review: refuse, nothing is signed (SK-55).
 pub const SK_55_REFUSE: &str = "to refuse. Nothing is signed.";
 /// The title of the signed payment's QR screen: scan it back with the owner phone (SK-56).
@@ -293,6 +302,8 @@ pub const ALL: &[&str] = &[
     SK_54_PATH_NOT_WALLET,
     SK_54_KEY_MISMATCH,
     SK_54_NOT_SIGHASH_ALL,
+    SK_54_OUTPUT,
+    SK_54_OUTPUT_NOT_ADDRESS,
     SK_54_OUTPUTS_EXCEED,
     SK_55_TITLE,
     SK_55_OWN,
@@ -303,6 +314,7 @@ pub const ALL: &[&str] = &[
     SK_55_UNIT_RATE,
     SK_55_PAGE,
     SK_55_SIGN,
+    SK_55_NEXT,
     SK_55_REFUSE,
     SK_56_SHOW,
     SK_56_PART,

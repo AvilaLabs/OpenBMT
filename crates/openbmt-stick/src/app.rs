@@ -131,6 +131,9 @@ enum State {
     /// SK-55: the payment is shown, waiting for Enter or Esc.
     Review {
         page: usize,
+        /// How many pages have been shown so far: pages are reached one at a
+        /// time from the first, so this is the furthest page plus one.
+        seen: usize,
     },
     /// SK-56: the signed payment, shown as an animated code.
     Out {
@@ -342,19 +345,26 @@ impl<C: Chance> App<C> {
                     Refusal::Internal => ("", None),
                     Refusal::NotAPsbt => (SK_52_BAD_FILE, None),
                     Refusal::NotMainnet => (SK_54_NOT_MAINNET, None),
-                    Refusal::NoPrevout(i) => (SK_54_NO_PREVOUT, Some(*i)),
-                    Refusal::NoPreviousTransaction(i) => (SK_54_NO_PREVIOUS_TX, Some(*i)),
-                    Refusal::PrevoutMismatch(i) => (SK_54_PREVOUT_MISMATCH, Some(*i)),
-                    Refusal::NoPath(i) => (SK_54_NO_PATH, Some(*i)),
-                    Refusal::OtherWallet(i) => (SK_54_OTHER_WALLET, Some(*i)),
-                    Refusal::PathNotWallet(i) => (SK_54_PATH_NOT_WALLET, Some(*i)),
-                    Refusal::KeyMismatch(i) => (SK_54_KEY_MISMATCH, Some(*i)),
-                    Refusal::SighashNotAll(i) => (SK_54_NOT_SIGHASH_ALL, Some(*i)),
+                    Refusal::NoPrevout(i) => (SK_54_NO_PREVOUT, Some((SK_54_INPUT, *i))),
+                    Refusal::NoPreviousTransaction(i) => {
+                        (SK_54_NO_PREVIOUS_TX, Some((SK_54_INPUT, *i)))
+                    }
+                    Refusal::PrevoutMismatch(i) => {
+                        (SK_54_PREVOUT_MISMATCH, Some((SK_54_INPUT, *i)))
+                    }
+                    Refusal::NoPath(i) => (SK_54_NO_PATH, Some((SK_54_INPUT, *i))),
+                    Refusal::OtherWallet(i) => (SK_54_OTHER_WALLET, Some((SK_54_INPUT, *i))),
+                    Refusal::PathNotWallet(i) => (SK_54_PATH_NOT_WALLET, Some((SK_54_INPUT, *i))),
+                    Refusal::KeyMismatch(i) => (SK_54_KEY_MISMATCH, Some((SK_54_INPUT, *i))),
+                    Refusal::SighashNotAll(i) => (SK_54_NOT_SIGHASH_ALL, Some((SK_54_INPUT, *i))),
+                    Refusal::OutputNotAddress(i) => {
+                        (SK_54_OUTPUT_NOT_ADDRESS, Some((SK_54_OUTPUT, *i)))
+                    }
                     Refusal::OutputsExceedInputs => (SK_54_OUTPUTS_EXCEED, None),
                 };
                 let mut lines = vec![SK_54_REFUSED.to_string(), reason.to_string()];
-                if let Some(i) = input {
-                    lines.push(format!("{SK_54_INPUT} {}", i + 1));
+                if let Some((label, i)) = input {
+                    lines.push(format!("{label} {}", i + 1));
                 }
                 lines.push(String::new());
                 lines.push(format!("Esc {SK_29_TURN_OFF}"));
@@ -364,7 +374,7 @@ impl<C: Chance> App<C> {
                     qr: None,
                 }
             }
-            State::Review { page } => self.review_screen(*page),
+            State::Review { page, seen } => self.review_screen(*page, *seen),
             State::Out { frame, .. } => {
                 let n = self.out_codes.len();
                 Screen {
@@ -381,8 +391,9 @@ impl<C: Chance> App<C> {
     }
 
     /// SK-55: the payment's outputs, the total sent away, the fee and its rate.
-    fn review_screen(&self, page: usize) -> Screen {
+    fn review_screen(&self, page: usize, seen: usize) -> Screen {
         let mut lines = vec![SK_55_TITLE.to_string()];
+        let mut all_seen = true;
         if let Some(r) = self
             .job
             .as_ref()
@@ -390,6 +401,18 @@ impl<C: Chance> App<C> {
             .map(|p| p.review())
         {
             let pages = r.outputs.len().div_ceil(OUTPUTS_PER_PAGE);
+            // The totals come before the list, so no page can push them off
+            // the screen (SK-55).
+            lines.push(format!(
+                "{SK_55_SENT} {} {SK_55_UNIT_BTC}",
+                btc(r.sent_away)
+            ));
+            lines.push(format!("{SK_55_FEE} {} {SK_55_UNIT_BTC}", btc(r.fee)));
+            lines.push(format!(
+                "{SK_55_FEE_RATE} {} {SK_55_UNIT_RATE}",
+                hundredths(r.fee_rate_hundredths())
+            ));
+            lines.push(String::new());
             for (i, o) in r
                 .outputs
                 .iter()
@@ -405,21 +428,16 @@ impl<C: Chance> App<C> {
                 };
                 lines.push(format!("{} {SK_55_UNIT_BTC}{own}", btc(o.sats)));
             }
-            lines.push(String::new());
-            lines.push(format!(
-                "{SK_55_SENT} {} {SK_55_UNIT_BTC}",
-                btc(r.sent_away)
-            ));
-            lines.push(format!("{SK_55_FEE} {} {SK_55_UNIT_BTC}", btc(r.fee)));
-            lines.push(format!(
-                "{SK_55_FEE_RATE} {} {SK_55_UNIT_RATE}",
-                hundredths(r.fee_rate_hundredths())
-            ));
             if pages > 1 {
                 lines.push(format!("Up Down {SK_55_PAGE} {}/{pages}", page + 1));
             }
+            all_seen = seen >= pages;
         }
-        lines.push(format!("Enter {SK_55_SIGN}"));
+        if all_seen {
+            lines.push(format!("Enter {SK_55_SIGN}"));
+        } else {
+            lines.push(format!("Enter {SK_55_NEXT}"));
+        }
         lines.push(format!("Esc {SK_55_REFUSE}"));
         Screen {
             id: "sign-review",
@@ -733,7 +751,7 @@ impl<C: Chance> App<C> {
                 }
                 _ => State::Refused { why },
             },
-            State::Review { page } => {
+            State::Review { page, seen } => {
                 let pages = self
                     .job
                     .as_ref()
@@ -745,14 +763,28 @@ impl<C: Chance> App<C> {
                         self.clear();
                         State::Start { selected: 3 }
                     }
-                    Key::Down => State::Review {
-                        page: (page + 1).min(pages.saturating_sub(1)),
-                    },
+                    Key::Down => {
+                        let next = (page + 1).min(pages.saturating_sub(1));
+                        State::Review {
+                            page: next,
+                            seen: seen.max(next + 1),
+                        }
+                    }
                     Key::Up => State::Review {
                         page: page.saturating_sub(1),
+                        seen,
                     },
-                    Key::Enter => self.sign_now(page),
-                    _ => State::Review { page },
+                    // SK-55: Enter signs only once every page has been
+                    // shown; before that it goes to the next page.
+                    Key::Enter if seen < pages => {
+                        let next = (page + 1).min(pages.saturating_sub(1));
+                        State::Review {
+                            page: next,
+                            seen: seen.max(next + 1),
+                        }
+                    }
+                    Key::Enter => self.sign_now(page, seen),
+                    _ => State::Review { page, seen },
                 }
             }
             State::Out { frame, ms } => match key {
@@ -883,7 +915,7 @@ impl<C: Chance> App<C> {
 
     /// SK-56: Enter on the review signs, shows the signed payment as codes
     /// in the form it came in, and drops the words.
-    fn sign_now(&mut self, page: usize) -> State {
+    fn sign_now(&mut self, page: usize, seen: usize) -> State {
         let signed = (|| {
             let entropy = self.entropy?;
             let words = words_of(&entropy).ok()?;
@@ -903,7 +935,7 @@ impl<C: Chance> App<C> {
                 self.out_codes = codes;
                 State::Out { frame: 0, ms: 0 }
             }
-            None => State::Review { page },
+            None => State::Review { page, seen },
         }
     }
 
@@ -1100,7 +1132,7 @@ impl<C: Chance> App<C> {
                 if let Some(job) = self.job.as_mut() {
                     job.prepared = Some(prepared);
                 }
-                State::Review { page: 0 }
+                State::Review { page: 0, seen: 1 }
             }
             Err(why) => {
                 // Refused: the words are not kept.

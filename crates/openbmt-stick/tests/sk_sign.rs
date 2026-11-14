@@ -633,6 +633,7 @@ fn expected_refusal(name: &str) -> Refusal {
         "SighashNotAll" => Refusal::SighashNotAll(1),
         "OutputsExceedInputs" => Refusal::OutputsExceedInputs,
         "NoPreviousTransaction" => Refusal::NoPreviousTransaction(1),
+        "OutputNotAddress" => Refusal::OutputNotAddress(0),
         other => panic!("{other}"),
     }
 }
@@ -646,7 +647,7 @@ fn sk_54_the_good_payment_passes() {
 fn sk_54_each_refusal_names_why_one_by_one() {
     let master = common::master();
     let cases = common::refused_payments();
-    assert_eq!(cases.len(), 11);
+    assert_eq!(cases.len(), 12);
     for (name, bytes) in cases {
         let got = prepare(&bytes, &master).map(|_| ()).unwrap_err();
         assert_eq!(got, expected_refusal(name), "{name}");
@@ -731,6 +732,7 @@ fn sk_54_the_screen_names_each_refusal_and_its_input() {
         words::SK_54_NOT_SIGHASH_ALL,
         words::SK_54_OUTPUTS_EXCEED,
         words::SK_54_NO_PREVIOUS_TX,
+        words::SK_54_OUTPUT_NOT_ADDRESS,
     ];
     for ((name, bytes), reason) in common::refused_payments().into_iter().zip(want) {
         let mut a = scanned(&bytes, Form::Ur);
@@ -884,7 +886,11 @@ fn sk_55_more_than_three_outputs_take_pages() {
     // The totals are on every page.
     assert!(second.contains(words::SK_55_SENT));
     a.key(Key::Up);
-    assert_eq!(text(&a), first);
+    // The same page, but every page has now been shown, so Enter signs.
+    let again = text(&a);
+    let sign = format!("Enter {}", words::SK_55_SIGN);
+    let next = format!("Enter {}", words::SK_55_NEXT);
+    assert_eq!(again.replace(&sign, &next), first);
 }
 
 #[test]
@@ -913,6 +919,90 @@ fn sk_54_an_amount_from_the_output_alone_is_refused_and_the_whole_transaction_si
         i.witness_utxo = None;
     }
     prepare(&q.serialize(), &master).unwrap();
+}
+
+#[test]
+fn sk_54_an_output_that_is_not_an_ordinary_address_is_refused() {
+    use bitcoin::ScriptBuf;
+    let master = common::master();
+    let long = {
+        let mut b = vec![0x6a, 0x4d, 0xff, 0x00];
+        b.extend(vec![0xab; 255]);
+        ScriptBuf::from_bytes(b)
+    };
+    for script in [
+        ScriptBuf::from_bytes(vec![0x6a, 0x01, 0x00]),
+        ScriptBuf::new(),
+        long,
+        // A witness version 2 program: not one of the five kinds.
+        ScriptBuf::from_bytes([vec![0x52, 0x20], vec![7; 32]].concat()),
+    ] {
+        let mut p = common::payment();
+        p.unsigned_tx.output[0].script_pubkey = script;
+        assert_eq!(
+            prepare(&p.serialize(), &master).map(|_| ()).unwrap_err(),
+            Refusal::OutputNotAddress(0)
+        );
+    }
+    // The five kinds pass.
+    use bitcoin::hashes::Hash;
+    use bitcoin::{PubkeyHash, ScriptHash, WPubkeyHash, WScriptHash, XOnlyPublicKey};
+    let x = XOnlyPublicKey::from_slice(&[
+        0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac, 0x55, 0xa0, 0x62, 0x95, 0xce, 0x87, 0x0b,
+        0x07, 0x02, 0x9b, 0xfc, 0xdb, 0x2d, 0xce, 0x28, 0xd9, 0x59, 0xf2, 0x81, 0x5b, 0x16, 0xf8,
+        0x17, 0x98,
+    ])
+    .unwrap();
+    for script in [
+        ScriptBuf::new_p2pkh(&PubkeyHash::from_byte_array([1; 20])),
+        ScriptBuf::new_p2sh(&ScriptHash::from_byte_array([2; 20])),
+        ScriptBuf::new_p2wpkh(&WPubkeyHash::from_byte_array([3; 20])),
+        ScriptBuf::new_p2wsh(&WScriptHash::from_byte_array([4; 32])),
+        ScriptBuf::new_p2tr_tweaked(bitcoin::key::TweakedPublicKey::dangerous_assume_tweaked(x)),
+    ] {
+        let mut p = common::payment();
+        p.unsigned_tx.output[0].script_pubkey = script;
+        assert!(prepare(&p.serialize(), &master).is_ok());
+    }
+}
+
+#[test]
+fn sk_55_the_totals_come_before_the_outputs_on_the_first_page() {
+    let mut a = scanned(&common::many_outputs_payment().serialize(), Form::Ur);
+    type_words(&mut a, &WORDS);
+    let first = text(&a);
+    let sent = first.find(words::SK_55_SENT).unwrap();
+    let fee = first.find(words::SK_55_FEE).unwrap();
+    let rate = first.find(words::SK_55_FEE_RATE).unwrap();
+    let first_output = first.find("\n1 ").unwrap();
+    assert!(sent < first_output && fee < first_output && rate < first_output);
+}
+
+#[test]
+fn sk_55_enter_signs_only_after_every_page_was_shown() {
+    let mut a = scanned(&common::many_outputs_payment().serialize(), Form::Ur);
+    type_words(&mut a, &WORDS);
+    let first = text(&a);
+    assert!(first.contains(&format!("Enter {}", words::SK_55_NEXT)));
+    assert!(!first.contains(&format!("Enter {}", words::SK_55_SIGN)));
+    // Enter on page 1 goes to page 2 and signs nothing.
+    a.key(Key::Enter);
+    assert_eq!(a.screen().id, "sign-review");
+    let second = text(&a);
+    assert!(second.contains(&format!("{} 2/2", words::SK_55_PAGE)));
+    assert!(second.contains(&format!("Enter {}", words::SK_55_SIGN)));
+    assert!(a.holds_anything());
+    // Back to page 1: every page was shown, so Enter signs from here.
+    a.key(Key::Up);
+    assert_eq!(a.screen().id, "sign-review");
+    a.key(Key::Enter);
+    assert_eq!(a.screen().id, "sign-out");
+    // Down then Enter on the last page signs as well.
+    let mut b = scanned(&common::many_outputs_payment().serialize(), Form::Ur);
+    type_words(&mut b, &WORDS);
+    b.key(Key::Down);
+    b.key(Key::Enter);
+    assert_eq!(b.screen().id, "sign-out");
 }
 
 #[test]
