@@ -7,7 +7,7 @@ use openbmt_owner::{SaleFacts, SaleKey};
 use super::refunds::{new_owner, new_owner_for, view_with, DEPTH, TIP};
 use super::*;
 use crate::coins::CoinView;
-use crate::facts::{verified_facts, FactsRefused};
+use crate::facts::{verified_facts, verified_facts_across, FactsRefused};
 
 fn sale(index: u32) -> SaleKey {
     SaleKey {
@@ -132,4 +132,37 @@ fn oc_14_the_refund_depth_needs_every_payment_at_the_index_to_be_deep() {
     assert!(!at(&[DEPTH + 10, 1]), "one shallow payment");
     assert!(!at(&[DEPTH, DEPTH, DEPTH - 1]));
     assert!(!at(&[]), "nothing received");
+}
+
+#[test]
+fn oc_47_a_sale_whose_receipt_is_in_a_former_wallets_view_gets_its_facts_from_it() {
+    let owner = new_owner();
+    // The wallet in force has no receipt of the sale; the former wallet's
+    // view has, deep enough.
+    let current = view_with(&[(7, 1_000, DEPTH)]);
+    let former = view_with(&[(0, 5_000, DEPTH)]);
+    let alone = verified_facts(&current, &owner, sale(0), TIP, DEPTH).unwrap();
+    assert_eq!(alone.received_sats, 0);
+    assert!(!alone.reached_refund_depth);
+    let across = verified_facts_across([&current, &former], &owner, sale(0), TIP, DEPTH).unwrap();
+    assert_eq!(across.received_sats, 5_000);
+    assert!(across.reached_refund_depth);
+    // The view in force gives its own when it has the receipt.
+    let both = verified_facts_across([&former, &current], &owner, sale(0), TIP, DEPTH).unwrap();
+    assert_eq!(both.received_sats, 5_000);
+    // An error of the first view does not stop the search; with nothing
+    // anywhere the first answer stands.
+    let behind = CoinView::new(0);
+    let across = verified_facts_across([&behind, &former], &owner, sale(0), TIP, DEPTH).unwrap();
+    assert_eq!(across.received_sats, 5_000);
+    assert_eq!(
+        verified_facts_across([&behind, &current], &owner, sale(0), TIP, DEPTH),
+        Err(FactsRefused::ViewNotReady)
+    );
+    assert_eq!(
+        verified_facts_across([&current, &behind], &owner, sale(0), TIP, DEPTH)
+            .unwrap()
+            .received_sats,
+        0
+    );
 }

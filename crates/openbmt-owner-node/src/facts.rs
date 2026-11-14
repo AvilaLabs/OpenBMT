@@ -108,3 +108,26 @@ pub fn verified_facts(
         reached_refund_depth: received > 0 && deep,
     })
 }
+
+/// [`verified_facts`] over the views of a shop that moved wallets, the one
+/// in force first and the former ones after it, newest first. A sale's
+/// receipt is in the view of the wallet that was in force when it was paid.
+/// The first view that shows something received gives the facts; when none
+/// does, what the first gave (a refusal included) stands.
+pub fn verified_facts_across<'a>(
+    views: impl IntoIterator<Item = &'a CoinView>,
+    owner: &Owner,
+    sale: SaleKey,
+    tip: u32,
+    refund_depth: u32,
+) -> Result<SaleFacts, FactsRefused> {
+    let mut first = None;
+    for view in views {
+        let facts = verified_facts(view, owner, sale, tip, refund_depth);
+        if matches!(&facts, Ok(f) if f.received_sats > 0) {
+            return facts;
+        }
+        first.get_or_insert(facts);
+    }
+    first.unwrap_or(Err(FactsRefused::ViewNotReady))
+}

@@ -3546,8 +3546,18 @@ impl<P: OwnerPort> OwnerNode<P> {
             // what it received is what the book credited at the depth.
             let fresh = match self.desk_facts(&sale) {
                 Some(facts) => facts,
-                None => match crate::facts::verified_facts(
-                    &self.view,
+                // A sale of a wallet the shop moved off has its receipt in
+                // that wallet's view: the current view first, then the
+                // former ones, newest first. The float's indexes are its
+                // own, not a sale's.
+                None => match crate::facts::verified_facts_across(
+                    std::iter::once(&self.view).chain(
+                        self.former
+                            .iter()
+                            .rev()
+                            .filter(|f| !f.is_float())
+                            .map(|f| &f.view),
+                    ),
                     &self.owner,
                     sale,
                     tip,
