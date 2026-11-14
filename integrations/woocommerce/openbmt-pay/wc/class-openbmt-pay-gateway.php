@@ -133,32 +133,46 @@ class OpenBmt_Pay_Gateway extends WC_Payment_Gateway {
 			wc_add_notice( OpenBmt_Pay_Words::t( 'WO_15_NO_QUOTE' ), 'error' );
 			return null;
 		}
+		// WO-11: the address is taken, written to the order and saved with the lock held, so that a second submit of the order, which waits for the lock, finds the address and takes none.
 		$taken = OpenBmt_Pay_Store::with_lock(
-			static function () use ( $order ) {
+			static function () use ( $order, $quote, $currency ) {
+				// The order object was read before the lock: read its fields again from the database, past the object cache.
+				$order->read_meta_data( true );
+				if ( '' !== (string) $order->get_meta( '_openbmt_address' ) ) {
+					return true;
+				}
 				$pool = OpenBmt_Pay_Store::health()['pool'];
 				if ( null === $pool ) {
 					return null;
 				}
 				$taken = $pool->take( $order->get_id() );
-				if ( null !== $taken ) {
-					OpenBmt_Pay_Store::save_pool( $pool );
+				if ( null === $taken ) {
+					return null;
 				}
+				OpenBmt_Pay_Store::save_pool( $pool );
+				$order->update_meta_data( '_openbmt_seq', (string) $order->get_id() );
+				$order->update_meta_data( '_openbmt_index', (string) $taken[0] );
+				$order->update_meta_data( '_openbmt_address', $taken[1] );
+				$order->update_meta_data( '_openbmt_sats', (string) $quote['sats'] );
+				$order->update_meta_data( '_openbmt_quoted_at', (string) $quote['quoted_at'] );
+				$order->update_meta_data( '_openbmt_expires_at', (string) $quote['expires_at'] );
+				$order->update_meta_data( '_openbmt_total_minor', (string) Money::minor_from_decimal( wc_format_decimal( (string) $order->get_total( 'edit' ), Rates::minor_digits( $currency ) ), $currency ) );
+				$order->update_meta_data( '_openbmt_currency', $currency );
+				$order->save();
 				return $taken;
 			}
 		);
+		if ( true === $taken ) {
+			// Another submit of the order took its address while this one waited: nothing is taken or changed.
+			return array(
+				'result'   => 'success',
+				'redirect' => $this->get_return_url( $order ),
+			);
+		}
 		if ( ! is_array( $taken ) ) {
 			wc_add_notice( OpenBmt_Pay_Words::t( 'WO_15_NO_QUOTE' ), 'error' );
 			return null;
 		}
-		$order->update_meta_data( '_openbmt_seq', (string) $order->get_id() );
-		$order->update_meta_data( '_openbmt_index', (string) $taken[0] );
-		$order->update_meta_data( '_openbmt_address', $taken[1] );
-		$order->update_meta_data( '_openbmt_sats', (string) $quote['sats'] );
-		$order->update_meta_data( '_openbmt_quoted_at', (string) $quote['quoted_at'] );
-		$order->update_meta_data( '_openbmt_expires_at', (string) $quote['expires_at'] );
-		$order->update_meta_data( '_openbmt_total_minor', (string) Money::minor_from_decimal( wc_format_decimal( (string) $order->get_total( 'edit' ), Rates::minor_digits( $currency ) ), $currency ) );
-		$order->update_meta_data( '_openbmt_currency', $currency );
-		$order->save();
 		$order->update_status( 'on-hold', OpenBmt_Pay_Words::t( 'WO_17_NOTE_ON_HOLD' ) );
 		return array(
 			'result'   => 'success',

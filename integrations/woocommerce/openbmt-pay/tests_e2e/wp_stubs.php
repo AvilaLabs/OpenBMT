@@ -196,8 +196,16 @@ final class WP_REST_Request {
 /** An order: fields in a bag, saved in the state file. */
 final class Obm_E2e_Order {
 	private $id;
+	/** The meta as this object read it: like WooCommerce's, it goes stale until read again. */
+	private $meta = array();
 	public function __construct( int $id ) {
 		$this->id = $id;
+		$this->read_meta_data();
+	}
+	/** Reads the meta from the "database" (the rows); WooCommerce's takes $force_read to pass its object cache. */
+	public function read_meta_data( bool $force_read = false ): void {
+		$row        = &$this->row();
+		$this->meta = $row['meta'] ?? array();
 	}
 	private function &row(): array {
 		return $GLOBALS['obm_e2e_orders'][ (string) $this->id ];
@@ -206,12 +214,12 @@ final class Obm_E2e_Order {
 		return $this->id;
 	}
 	public function get_meta( string $key ) {
-		$row = &$this->row();
-		return $row['meta'][ $key ] ?? '';
+		return $this->meta[ $key ] ?? '';
 	}
 	public function update_meta_data( string $key, $value ): void {
 		$row                  = &$this->row();
 		$row['meta'][ $key ] = $value;
+		$this->meta[ $key ]   = $value;
 	}
 	public function save(): void {
 	}

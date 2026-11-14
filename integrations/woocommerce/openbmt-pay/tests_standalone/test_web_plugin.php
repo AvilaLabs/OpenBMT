@@ -132,6 +132,7 @@ class WC_Payment_Gateway {
 		return 'return:' . $order->get_id();
 	}
 }
+require_once dirname( __DIR__ ) . '/wc/class-openbmt-pay-rates.php';
 require_once dirname( __DIR__ ) . '/wc/class-openbmt-pay-gateway.php';
 $gateway = ( new ReflectionClass( 'OpenBmt_Pay_Gateway' ) )->newInstanceWithoutConstructor();
 t_reset();
@@ -156,6 +157,65 @@ t_eq( $meta, $GLOBALS['obm_e2e_orders']['7']['meta'], 'wo_11 its address, index,
 t_eq( $pool_before, $opts[ OpenBmt_Pay_Store::OPT_POOL ], 'wo_11 the pool is unchanged' );
 t_eq( 0, $wpdb->inserts, 'wo_11 the lock was not even tried' );
 t_eq( 'pending', $GLOBALS['obm_e2e_orders']['7']['status'], 'wo_11 the order is not touched' );
+
+// WO-10, WO-11: an order with no address takes one, the fields written with the lock held.
+// The stubs of the quote: two sources that agree, and the notices kept.
+function get_transient( string $key ) {
+	$now = time();
+	return array( array( 'kraken', $now, '73550.1' ), array( 'coinbase', $now, '73552.175' ) );
+}
+function set_transient( string $key, $value, int $secs ) {
+}
+function wc_format_decimal( $value, $places = null ) {
+	return (string) $value;
+}
+function wc_add_notice( string $text, string $type = 'success' ) {
+	$GLOBALS['t_notices'][] = $text;
+}
+$fresh_order = static function (): void {
+	$GLOBALS['obm_e2e_orders']['8'] = array(
+		'payment_method' => 'openbmt',
+		'status'         => 'pending',
+		'currency'       => 'USD',
+		'total'          => '25.00',
+		'meta'           => array(),
+	);
+};
+t_reset();
+t_pair_store( $id, $secret );
+$fresh_order();
+$answer = $gateway->process_payment( 8 );
+t_eq( array( 'result' => 'success', 'redirect' => 'return:8' ), $answer, 'wo_10 an order with none takes an address and goes to its payment page' );
+t_eq( 'a0', $GLOBALS['obm_e2e_orders']['8']['meta']['_openbmt_address'], 'wo_10 the first address of the pool is its address' );
+t_eq( '2500', $GLOBALS['obm_e2e_orders']['8']['meta']['_openbmt_total_minor'], 'wo_10 its total and quote are recorded' );
+t_eq( 'on-hold', $GLOBALS['obm_e2e_orders']['8']['status'], 'wo_10 and it is on hold' );
+
+// WO-11: another submit of the order takes its address between this one's check and its lock; this one takes none.
+t_reset();
+t_pair_store( $id, $secret );
+$fresh_order();
+$pool_start = $opts[ OpenBmt_Pay_Store::OPT_POOL ];
+$other      = array(
+	'_openbmt_seq'     => '8',
+	'_openbmt_index'   => '0',
+	'_openbmt_address' => 'a0',
+	'_openbmt_sats'    => '12345',
+);
+$fired = false;
+$wpdb->before = static function ( string $sql ) use ( &$fired, $other ) {
+	if ( ! $fired && 0 === strpos( $sql, 'INSERT IGNORE' ) ) {
+		$fired = true;
+		$GLOBALS['obm_e2e_orders']['8']['meta'] = $other;
+	}
+};
+$answer = $gateway->process_payment( 8 );
+$wpdb->before = null;
+t_ok( $fired, 'wo_11 the other submit came between the check and the lock' );
+t_eq( array( 'result' => 'success', 'redirect' => 'return:8' ), $answer, 'wo_11 the waiting submit goes to the payment page' );
+t_eq( $other, $GLOBALS['obm_e2e_orders']['8']['meta'], 'wo_11 the first submit\'s address and quote are not overwritten' );
+t_eq( $pool_start, $opts[ OpenBmt_Pay_Store::OPT_POOL ], 'wo_11 the waiting submit took no second address' );
+t_eq( 'pending', $GLOBALS['obm_e2e_orders']['8']['status'], 'wo_11 and left the order alone' );
+t_ok( ! array_key_exists( $lock, $opts ), 'wo_11 the lock is free after' );
 
 // WO-05: only an administrator pairs or unpairs, and a pairing in use is not replaced.
 function current_user_can( string $cap ): bool {
