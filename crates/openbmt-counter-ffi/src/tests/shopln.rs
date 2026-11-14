@@ -65,6 +65,8 @@ fn state(rig: &Rig, handle: u64) -> (bool, bool, Option<String>, String) {
         r.opt(Rd::words).map(|w| w.heading),
         r.words().heading,
     );
+    // SL-27: no funding is lost on a fresh counter.
+    assert!(r.opt(Rd::words).is_none());
     r.done();
     out
 }

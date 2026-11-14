@@ -78,6 +78,7 @@ private fun Controller.showSlOn(state: ShopLightningState) {
     val held = state.held ?: return showSettingsAndPhone()
     val body = ArrayList<View>()
     body.add(ui.text(ShopLightningWords.onTitle))
+    ShopLightningModel.lostFundingNote(state.report)?.let { body.add(ui.text(it)) }
     for (line in ShopLightningModel.lines(held, state.report)) body.add(ui.labelled(line.label, ui.text(line.value)))
     body.add(
         ui.rows(

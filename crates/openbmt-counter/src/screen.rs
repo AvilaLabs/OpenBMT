@@ -124,6 +124,17 @@ pub enum Why {
     FinalAt(u32),
     /// The shop's own node says the Lightning invoice was paid (CR-109).
     PaidByLightning,
+    /// The payment came over Lightning through a channel whose funding is
+    /// not in a block yet, and is more than the shop takes on that
+    /// footing (SL-40).
+    FundingNotConfirmed,
+    /// The payment came over Lightning through a channel whose funding is
+    /// lost, and the sale waits: the money may never come, and a manager may
+    /// still accept it (SL-27).
+    FundingLostWait,
+    /// The sale was paid at once through a channel whose funding is now
+    /// lost: the money may never come (SL-27).
+    FundingLost,
     /// A person accepted it.
     OverriddenBy {
         /// Cashier or manager.
@@ -341,6 +352,18 @@ impl Why {
             Self::ConfirmedAt(depth) => format!("Confirmed ({depth} confirmations)."),
             Self::FinalAt(depth) => format!("Final ({depth} confirmations)."),
             Self::PaidByLightning => "Paid over Lightning. It is final.".to_string(),
+            Self::FundingNotConfirmed => {
+                "Paid over Lightning through a channel whose funding is not confirmed yet."
+                    .to_string()
+            }
+            Self::FundingLostWait => {
+                "The funding of the channel the payment came through is lost. A manager may accept the sale."
+                    .to_string()
+            }
+            Self::FundingLost => {
+                "The funding of the channel the payment came through is lost, so the money may never come."
+                    .to_string()
+            }
             Self::OverriddenBy { role } => {
                 format!("Accepted by a {}. It is not confirmed.", role.text())
             }

@@ -780,6 +780,8 @@ fn report() -> LightningReport {
         order_state: OrderState::Failed,
         order_why: OrderWhy::FeeAboveMax,
         order_fee_sats: 9_000,
+        lost_funding_sales: Vec::new(),
+        lost_funding_total: 0,
     }
 }
 
@@ -808,9 +810,9 @@ fn lk_84_the_report_round_trips_and_decodes_strictly() {
 }
 
 #[test]
-fn lk_84_the_report_is_five_u64_four_u16_and_a_u64_after_the_frame() {
+fn lk_84_the_report_is_five_u64_four_u16_a_u64_a_list_and_a_total_after_the_frame() {
     let bytes = report().to_bytes();
-    assert_eq!(bytes.len(), 4 + 1 + 5 * 8 + 4 * 2 + 8);
+    assert_eq!(bytes.len(), 4 + 1 + 5 * 8 + 4 * 2 + 8 + 4 + 4);
     assert_eq!(&bytes[..4], b"OBM\x1f");
     assert_eq!(bytes[4], 2);
     assert_eq!(&bytes[5..13], &123_456u64.to_le_bytes());
@@ -822,7 +824,9 @@ fn lk_84_the_report_is_five_u64_four_u16_and_a_u64_after_the_frame() {
     assert_eq!(&bytes[47..49], &1u16.to_le_bytes());
     assert_eq!(&bytes[49..51], &4u16.to_le_bytes());
     assert_eq!(&bytes[51..53], &1u16.to_le_bytes());
-    assert_eq!(&bytes[53..], &9_000u64.to_le_bytes());
+    assert_eq!(&bytes[53..61], &9_000u64.to_le_bytes());
+    assert_eq!(&bytes[61..65], &0u32.to_le_bytes());
+    assert_eq!(&bytes[65..], &0u32.to_le_bytes());
 }
 
 #[test]
@@ -958,4 +962,111 @@ fn lk_84_a_report_is_no_record_and_travels_in_the_main_count() {
     assert_eq!(LightningReport::from_bytes(&o.content).unwrap(), report());
     assert!(!Kind::LightningReport.counts_apart());
     assert!(Kind::Store.counts_apart() && Kind::Stored.counts_apart());
+}
+
+#[test]
+fn sl_27_a_report_carries_all_five_facts_in_the_one_version_2() {
+    let r = LightningReport {
+        lost_funding_sales: vec![3, 9, 4_000_000_000],
+        lost_funding_total: 3,
+        ..report()
+    };
+    let bytes = r.to_bytes();
+    assert_eq!(bytes[4], 2);
+    assert_eq!(bytes.len(), 4 + 1 + 5 * 8 + 4 * 2 + 8 + 4 + 3 * 4 + 4);
+    assert_eq!(&bytes[61..65], &3u32.to_le_bytes());
+    assert_eq!(&bytes[65..69], &3u32.to_le_bytes());
+    assert_eq!(&bytes[69..73], &9u32.to_le_bytes());
+    assert_eq!(&bytes[73..77], &4_000_000_000u32.to_le_bytes());
+    assert_eq!(&bytes[77..], &3u32.to_le_bytes());
+    assert_eq!(LightningReport::from_bytes(&bytes).unwrap(), r);
+    strict(
+        &bytes,
+        LightningReport::from_bytes,
+        LightningReport::to_bytes,
+    );
+    // The encoder always writes version 2, with no sale as a count of 0 and a
+    // total of 0.
+    assert_eq!(report().to_bytes()[4], 2);
+    // Version 1 still reads: the new facts are unknown or empty.
+    let mut v1 = bytes[..47].to_vec();
+    v1[4] = 1;
+    let r1 = LightningReport::from_bytes(&v1).unwrap();
+    assert_eq!(r1.lsps1, Lsps1Offer::Unknown);
+    assert_eq!(r1.order_state, OrderState::None);
+    assert!(r1.lost_funding_sales.is_empty());
+    assert_eq!(r1.lost_funding_total, 0);
+    // Version 1 with the version 2 tail behind it, and version 3, are refused.
+    let mut b = bytes.clone();
+    b[4] = 1;
+    assert!(LightningReport::from_bytes(&b).is_err());
+    let mut b = bytes.clone();
+    b[4] = 3;
+    assert!(LightningReport::from_bytes(&b).is_err());
+    // The list: a count past the limit or past the bytes, sales that do not
+    // rise or repeat, bytes behind the total, a list or a total cut short.
+    let head = &bytes[..61];
+    let with = |count: u32, sales: &[u32], total: u32| {
+        let mut b = head.to_vec();
+        b.extend_from_slice(&count.to_le_bytes());
+        for s in sales {
+            b.extend_from_slice(&s.to_le_bytes());
+        }
+        b.extend_from_slice(&total.to_le_bytes());
+        b
+    };
+    assert!(LightningReport::from_bytes(&with(0, &[], 0)).is_ok());
+    assert!(LightningReport::from_bytes(&with(1, &[5], 1)).is_ok());
+    assert!(LightningReport::from_bytes(&with(65, &[5], 65)).is_err());
+    assert!(LightningReport::from_bytes(&with(2, &[5], 2)).is_err());
+    assert!(LightningReport::from_bytes(&with(2, &[5, 5], 2)).is_err());
+    assert!(LightningReport::from_bytes(&with(2, &[6, 5], 2)).is_err());
+    let mut long = with(1, &[5], 1);
+    long.push(0);
+    assert!(LightningReport::from_bytes(&long).is_err());
+    let many: Vec<u32> = (0..64).collect();
+    assert!(LightningReport::from_bytes(&with(64, &many, 64)).is_ok());
+    let over: Vec<u32> = (0..65).collect();
+    assert!(LightningReport::from_bytes(&with(65, &over, 65)).is_err());
+    // Version 2 cut before the list or the total is refused.
+    assert!(LightningReport::from_bytes(&bytes[..61]).is_err());
+    assert!(LightningReport::from_bytes(&bytes[..bytes.len() - 1]).is_err());
+    // The total is at least the sales listed, and more when the list kept
+    // only the newest.
+    assert!(LightningReport::from_bytes(&with(2, &[1, 2], 1)).is_err());
+    assert!(LightningReport::from_bytes(&with(0, &[], 5)).is_ok());
+    assert!(LightningReport::from_bytes(&with(64, &many, 1_000)).is_ok());
+    let past = LightningReport::from_bytes(&with(64, &many, 1_000)).unwrap();
+    assert_eq!(
+        (past.lost_funding_sales.len(), past.lost_funding_total),
+        (64, 1_000)
+    );
+    // The other strictness rules hold with sales named.
+    let bad = |r: LightningReport| LightningReport::from_bytes(&r.to_bytes()).is_err();
+    let sales = vec![1, 2];
+    assert!(bad(LightningReport {
+        order_state: OrderState::Open,
+        order_why: OrderWhy::Refused,
+        lost_funding_sales: sales.clone(),
+        lost_funding_total: 2,
+        ..report()
+    }));
+    assert!(bad(LightningReport {
+        order_state: OrderState::None,
+        order_why: OrderWhy::None,
+        order_fee_sats: 1,
+        lost_funding_sales: sales,
+        lost_funding_total: 2,
+        ..report()
+    }));
+    assert!(bad(LightningReport {
+        lost_funding_sales: vec![4, 4],
+        lost_funding_total: 2,
+        ..report()
+    }));
+    assert!(bad(LightningReport {
+        lost_funding_sales: vec![4, 5],
+        lost_funding_total: 1,
+        ..report()
+    }));
 }

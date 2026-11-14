@@ -6,6 +6,7 @@ mod bills;
 mod confirm_held;
 mod currency;
 mod encodings;
+mod funding;
 mod heartbeat;
 mod kit;
 mod lightning;

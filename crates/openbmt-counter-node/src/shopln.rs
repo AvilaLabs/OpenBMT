@@ -12,7 +12,8 @@
 //!   being closed needs it after the settings stopped naming it, SL-77), the
 //!   invoices it made for sales, the opening fees paid, the time of the
 //!   last sweep, the address index the sweeps and closes pay to and the
-//!   payments that found no sale.
+//!   payments that found no sale, and the sales paid through a channel whose
+//!   funding was lost (SL-27).
 //! - [`Why`]: why a sale shows the on-chain code alone (SL-41).
 //!
 //! The node itself, its runtime and its link to the Box are in
@@ -32,8 +33,13 @@ use openbmt_link::shopln::NotOffered;
 
 /// The magic of the seed record, which the app seals (version 1).
 pub const MAGIC_SEED_RECORD: [u8; 4] = *b"OBM\x19";
-/// The magic of the book (version 1).
+/// The magic of the book (versions 1 and 2).
 pub const MAGIC_BOOK: [u8; 4] = *b"OBM\x1a";
+/// The version of a book that lists sales paid through a lost funding.
+const BOOK_VERSION_LOST: u8 = 2;
+/// The most sales the book keeps as paid through a lost funding; the report
+/// carries them as they are.
+pub const MAX_LOST_FUNDING_SALES: usize = openbmt_link::shopln::MAX_LOST_FUNDING_SALES;
 /// The file of the book, in the node's own folder.
 pub const BOOK_FILE: &str = "book";
 /// The most invoices the book keeps: past it no new invoice is made.
@@ -258,6 +264,13 @@ pub struct Book {
     pub sweep: Option<SweepAddress>,
     /// The claimed payments no sale took.
     pub unmatched: Vec<Unmatched>,
+    /// The sales paid through a channel whose funding was lost (SL-27),
+    /// rising, the newest [`MAX_LOST_FUNDING_SALES`]. Empty is the book of
+    /// version 1; a list makes version 2.
+    pub lost_funding_sales: Vec<u32>,
+    /// How many sales were named lost in all: at least those listed, more
+    /// when the list kept only the newest. Version 2 has it after the list.
+    pub lost_funding_total: u32,
 }
 
 fn put_plan(out: &mut Vec<u8>, sl: &ShopLightning) {
@@ -351,12 +364,22 @@ impl Book {
             out.extend_from_slice(&u.amount_msat.to_le_bytes());
             out.extend_from_slice(&u.at.to_le_bytes());
         }
+        if !self.lost_funding_sales.is_empty() {
+            if let Some(version) = out.get_mut(4) {
+                *version = BOOK_VERSION_LOST;
+            }
+            out.extend_from_slice(&wire::len_u32(self.lost_funding_sales.len()).to_le_bytes());
+            for sale in &self.lost_funding_sales {
+                out.extend_from_slice(&sale.to_le_bytes());
+            }
+            out.extend_from_slice(&self.lost_funding_total.to_le_bytes());
+        }
         out
     }
 
     /// Read the book back, strictly.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
-        let mut r = Reader::framed(bytes, &MAGIC_BOOK)?;
+        let (mut r, version) = Reader::framed_up_to(bytes, &MAGIC_BOOK, BOOK_VERSION_LOST)?;
         let plan = if r.flag()? {
             Some(read_plan(&mut r)?)
         } else {
@@ -401,6 +424,29 @@ impl Book {
                 at: r.u64_le()?,
             });
         }
+        let mut lost_funding_sales: Vec<u32> = Vec::new();
+        let mut lost_funding_total = 0;
+        if version == BOOK_VERSION_LOST {
+            let n = r.count(MAX_LOST_FUNDING_SALES, 4)?;
+            if n == 0 {
+                return Err(DecodeError::NonCanonical(
+                    "version 2 names at least one sale",
+                ));
+            }
+            for _ in 0..n {
+                let sale = r.u32_le()?;
+                if lost_funding_sales.last().is_some_and(|p| *p >= sale) {
+                    return Err(DecodeError::NonCanonical("the sales are not rising"));
+                }
+                lost_funding_sales.push(sale);
+            }
+            lost_funding_total = r.u32_le()?;
+            if (lost_funding_total as usize) < lost_funding_sales.len() {
+                return Err(DecodeError::NonCanonical(
+                    "the total of lost sales is less than those listed",
+                ));
+            }
+        }
         r.finish()?;
         Ok(Self {
             plan,
@@ -409,6 +455,8 @@ impl Book {
             invoices,
             sweep,
             unmatched,
+            lost_funding_sales,
+            lost_funding_total,
         })
     }
 
@@ -462,6 +510,35 @@ impl Book {
             !drop
         });
         gone
+    }
+
+    /// SL-27: keeps the sales paid through a channel whose funding was lost.
+    /// Only the newest [`MAX_LOST_FUNDING_SALES`] are kept, and the total
+    /// counts every sale named once: one older than the oldest of a full list
+    /// was counted when it was dropped. `true` when the list or the total
+    /// changed.
+    pub fn keep_lost_funding_sales(&mut self, sales: &[u32]) -> bool {
+        let before = (self.lost_funding_sales.clone(), self.lost_funding_total);
+        let floor = (self.lost_funding_sales.len() >= MAX_LOST_FUNDING_SALES)
+            .then(|| self.lost_funding_sales.first().copied())
+            .flatten();
+        for &sale in sales {
+            if self.lost_funding_sales.contains(&sale) || floor.is_some_and(|f| sale < f) {
+                continue;
+            }
+            self.lost_funding_sales.push(sale);
+            self.lost_funding_total = self.lost_funding_total.saturating_add(1);
+        }
+        self.lost_funding_sales.sort_unstable();
+        let extra = self
+            .lost_funding_sales
+            .len()
+            .saturating_sub(MAX_LOST_FUNDING_SALES);
+        self.lost_funding_sales.drain(..extra);
+        self.lost_funding_total = self
+            .lost_funding_total
+            .max(self.lost_funding_sales.len() as u32);
+        (self.lost_funding_sales.clone(), self.lost_funding_total) != before
     }
 
     /// Keeps a claimed payment no sale took. `false` when the book is full
@@ -666,6 +743,8 @@ mod tests {
                     at: 6,
                 },
             ],
+            lost_funding_sales: Vec::new(),
+            lost_funding_total: 0,
         };
         assert_eq!(Book::from_bytes(&book.to_bytes()).unwrap(), book);
         let mut v6 = book.clone();
@@ -756,5 +835,80 @@ mod tests {
             NotOffered::NoUsableChannel
         );
         assert_eq!(Why::NotStored.not_offered(), NotOffered::SecondDeviceAway);
+    }
+
+    #[test]
+    fn sl_27_the_sales_paid_through_a_lost_funding_are_kept_rising_and_limited() {
+        let mut book = Book::default();
+        assert!(book.keep_lost_funding_sales(&[9, 3]));
+        assert_eq!(book.lost_funding_sales, vec![3, 9]);
+        // The same again, or nothing, changes nothing.
+        assert!(!book.keep_lost_funding_sales(&[3, 9]));
+        assert!(!book.keep_lost_funding_sales(&[]));
+        assert!(book.keep_lost_funding_sales(&[5]));
+        assert_eq!(book.lost_funding_sales, vec![3, 5, 9]);
+        // Only the newest are kept.
+        let many: Vec<u32> = (100..100 + MAX_LOST_FUNDING_SALES as u32 + 5).collect();
+        assert!(book.keep_lost_funding_sales(&many));
+        assert_eq!(book.lost_funding_sales.len(), MAX_LOST_FUNDING_SALES);
+        assert_eq!(book.lost_funding_sales.first(), Some(&105));
+        // The total counts all of them: 3 + 69 named.
+        assert_eq!(book.lost_funding_total, 3 + many.len() as u32);
+        // A sale older than the list is already counted, and is not again.
+        assert!(!book.keep_lost_funding_sales(&[3, 100]));
+        assert_eq!(book.lost_funding_total, 3 + many.len() as u32);
+    }
+
+    #[test]
+    fn sl_27_the_book_with_lost_sales_is_version_2_and_version_1_still_reads() {
+        let plain = Book {
+            plan: Some(sl(1)),
+            ..Book::default()
+        };
+        let v1 = plain.to_bytes();
+        assert_eq!(v1[4], 1);
+        let book = Book {
+            lost_funding_sales: vec![2, 7, 4_000_000_000],
+            lost_funding_total: 9,
+            ..plain.clone()
+        };
+        let bytes = book.to_bytes();
+        assert_eq!(bytes[4], 2);
+        assert_eq!(&bytes[5..v1.len()], &v1[5..]);
+        assert_eq!(&bytes[bytes.len() - 4..], &9u32.to_le_bytes());
+        assert_eq!(Book::from_bytes(&bytes).unwrap(), book);
+        assert_eq!(Book::from_bytes(&v1).unwrap(), plain);
+        let with = |count: u32, sales: &[u32], total: u32| {
+            let mut b = v1.clone();
+            b[4] = 2;
+            b.extend_from_slice(&count.to_le_bytes());
+            for s in sales {
+                b.extend_from_slice(&s.to_le_bytes());
+            }
+            b.extend_from_slice(&total.to_le_bytes());
+            b
+        };
+        assert!(Book::from_bytes(&with(1, &[5], 1)).is_ok());
+        // No sale, too many, not rising, repeated, short, and bytes behind.
+        assert!(Book::from_bytes(&with(0, &[], 0)).is_err());
+        assert!(Book::from_bytes(&with(65, &[5], 65)).is_err());
+        assert!(Book::from_bytes(&with(2, &[6, 5], 2)).is_err());
+        assert!(Book::from_bytes(&with(2, &[5, 5], 2)).is_err());
+        assert!(Book::from_bytes(&with(2, &[5], 2)).is_err());
+        let mut long = with(1, &[5], 1);
+        long.push(0);
+        assert!(Book::from_bytes(&long).is_err());
+        // The total is at least the sales listed, and may be more.
+        assert!(Book::from_bytes(&with(2, &[5, 6], 1)).is_err());
+        assert!(Book::from_bytes(&with(1, &[5], 70)).is_ok());
+        let cut = with(1, &[5], 1);
+        assert!(Book::from_bytes(&cut[..cut.len() - 1]).is_err());
+        // A list behind version 1, and version 3.
+        let mut b = with(1, &[5], 1);
+        b[4] = 1;
+        assert!(Book::from_bytes(&b).is_err());
+        let mut b = with(1, &[5], 1);
+        b[4] = 3;
+        assert!(Book::from_bytes(&b).is_err());
     }
 }

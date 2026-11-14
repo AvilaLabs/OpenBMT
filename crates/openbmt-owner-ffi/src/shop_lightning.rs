@@ -241,6 +241,12 @@ pub struct LightningReportView {
     pub order_why: OrderWhyView,
     /// What the last order costs, in satoshis; 0 with no order.
     pub order_fee_sats: u64,
+    /// The numbers of the sales paid through a channel whose funding was
+    /// lost, rising (SL-27): the money of each may never come.
+    pub lost_funding_sales: Vec<u32>,
+    /// How many sales were named lost in all: more than listed when the list
+    /// kept only the newest.
+    pub lost_funding_total: u32,
 }
 
 wire_record!(LightningReportView {
@@ -254,7 +260,9 @@ wire_record!(LightningReportView {
     lsps1,
     order_state,
     order_why,
-    order_fee_sats
+    order_fee_sats,
+    lost_funding_sales,
+    lost_funding_total
 });
 
 impl LightningReportView {
@@ -271,6 +279,8 @@ impl LightningReportView {
             order_state: OrderStateView::of(t.report.order_state),
             order_why: OrderWhyView::of(t.report.order_why),
             order_fee_sats: t.report.order_fee_sats,
+            lost_funding_sales: t.report.lost_funding_sales.clone(),
+            lost_funding_total: t.report.lost_funding_total,
         }
     }
 }

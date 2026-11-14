@@ -75,6 +75,7 @@ use bitcoin::Network;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::relay::RelayHint;
 use openbmt_core::settings::{Settings, ShopLightning};
+use openbmt_counter::PaidFunding;
 use openbmt_lightning::bolt11::Checked;
 use openbmt_lightning::PaidFacts;
 use openbmt_lightning_node::bip85::NodeSeed;
@@ -83,6 +84,7 @@ use openbmt_lightning_node::chain::ChainSource;
 use openbmt_lightning_node::device::{DeviceError, DeviceFuture, DeviceState, SecondDevice};
 use openbmt_lightning_node::device_link::{LinkDevice, Persist, StoreTransport};
 use openbmt_lightning_node::filters::FilterConfig;
+use openbmt_lightning_node::funding::{FundingEvent, FundingState, Outcome};
 use openbmt_lightning_node::node::{
     InvoiceError, Node as LnNode, NodeConfig as LnConfig, Paid, Receive, StartError,
     MAINNET_ALLOWED,
@@ -343,12 +345,17 @@ struct Instance {
 }
 
 /// A paid sale for the counter to record (SL-21).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaidSale {
     /// The sale.
     pub sale: u32,
     /// What the counter is told, in the form its Lightning path takes.
     pub facts: PaidFacts,
+    /// `None` for a payment through channels whose funding was confirmed at
+    /// the claim; otherwise what is known of the fundings of the channels it
+    /// came through (SL-40, SL-27): all confirmed since, some still not, or
+    /// one lost.
+    pub funding: Option<PaidFunding>,
 }
 
 /// The provider's LSPS1 and the last order, as the report says them (SL-28,
@@ -405,6 +412,9 @@ pub struct ShopLnStatus {
     pub delete_seed: bool,
     /// The reason Lightning is not offered, if it is not.
     pub why: Option<Why>,
+    /// The sales paid through a channel whose funding was lost, rising
+    /// (SL-27): the manager is told.
+    pub funding_lost: Vec<u32>,
 }
 
 /// Shop Lightning at the counter.
@@ -426,7 +436,17 @@ pub struct ShopLn {
     rt: Option<Runtime>,
     slots: HashMap<u32, SaleSlot>,
     pending: Vec<Paid>,
+    /// SL-27, SL-40: what the node said of the fundings of the channels
+    /// payments came through, not yet acknowledged to it.
+    funding_events: Vec<FundingEvent>,
+    /// The confirmations a funding needs to count as confirmed: the
+    /// counter's own (SL-40), read from its settings at every pump and given
+    /// to the node at its start.
+    confirm_depth: u32,
     notes: Vec<String>,
+    /// What the node would say of a funding named in a paid event.
+    #[cfg(test)]
+    node_funding_states: HashMap<[u8; 32], FundingState>,
     /// Whether the settings in force name this counter (SL-70).
     named: bool,
     /// Why no instance runs while the settings name this counter, or while a
@@ -480,6 +500,10 @@ impl ShopLn {
             rt: None,
             slots: HashMap::new(),
             pending: Vec::new(),
+            funding_events: Vec::new(),
+            confirm_depth: 1,
+            #[cfg(test)]
+            node_funding_states: HashMap::new(),
             notes,
             named: false,
             blocked: None,
@@ -545,6 +569,7 @@ impl ShopLn {
             _ => None,
         };
         self.named = want.is_some();
+        self.confirm_depth = u32::from(settings.min_confirmations).max(1);
         // SL-33: the wallet is read from the counter at every pump. A node
         // that runs with another wallet is stopped and started again.
         let wallet = src.wallet().map(|w| wallet_hash(&w));
@@ -959,6 +984,7 @@ impl ShopLn {
                 start_from: StartFrom::Newer,
                 wallet,
                 sweep_index,
+                confirm_depth: self.confirm_depth,
             },
             hash,
         ))
@@ -1348,6 +1374,144 @@ impl ShopLn {
         }
     }
 
+    /// SL-27, SL-40: takes what the node says of the fundings into the list of
+    /// those the counter has not dealt with yet.
+    fn drain_funding(&mut self) {
+        let Some(node) = self.node() else {
+            return;
+        };
+        while let Some(e) = node.try_funding() {
+            if !self.funding_events.iter().any(|k| k.txid == e.txid) {
+                self.funding_events.push(e);
+            }
+        }
+    }
+
+    /// SL-27, SL-40: the fundings the node has settled and the counter has
+    /// not acknowledged. Each comes again at every call until
+    /// [`ShopLn::funding_handled`]. Call it before [`ShopLn::take_paid`], so
+    /// that a payment held for a funding that is confirmed now is taken as
+    /// one through a confirmed channel.
+    pub fn take_funding(&mut self) -> Vec<FundingEvent> {
+        if self.node().is_none() {
+            return Vec::new();
+        }
+        self.drain_funding();
+        self.funding_events.clone()
+    }
+
+    /// What is known of a funding named in a paid event (SL-27, SL-40): the
+    /// node's event if one is waiting, which is the newest word; otherwise the
+    /// node is asked, so that a sale is never left unconfirmed for an event
+    /// that was acknowledged before the payment came. A funding the node does
+    /// not know is taken as not confirmed.
+    fn funding_known(&self, txid: &[u8; 32]) -> FundingState {
+        if let Some(e) = self.funding_events.iter().find(|e| &e.txid == txid) {
+            return match e.outcome {
+                Outcome::Watching => FundingState::Watching,
+                Outcome::Confirmed => FundingState::Confirmed,
+                Outcome::Lost(_) => FundingState::Lost,
+            };
+        }
+        #[cfg(test)]
+        if let Some(state) = self.node_funding_states.get(txid) {
+            return *state;
+        }
+        self.node()
+            .map_or(FundingState::Unknown, |node| node.funding_state(txid))
+    }
+
+    /// What the counter is told of the fundings a paid event names: every
+    /// funding confirmed makes the payment final at once, one that is lost
+    /// makes it a payment through a lost funding, and else the fundings
+    /// still not confirmed are listed.
+    fn paid_funding(&self, p: &Paid) -> Option<PaidFunding> {
+        if p.unconfirmed_fundings.is_empty() && !p.more_fundings {
+            return None;
+        }
+        let mut open = Vec::new();
+        let mut lost = false;
+        for txid in &p.unconfirmed_fundings {
+            match self.funding_known(txid) {
+                FundingState::Confirmed => {}
+                FundingState::Lost => {
+                    lost = true;
+                    open.push(*txid);
+                }
+                FundingState::Watching | FundingState::Unknown => open.push(*txid),
+            }
+        }
+        Some(if lost {
+            PaidFunding::Lost {
+                txids: open,
+                more: p.more_fundings,
+            }
+        } else if open.is_empty() && !p.more_fundings {
+            PaidFunding::Confirmed
+        } else {
+            PaidFunding::Unconfirmed {
+                txids: open,
+                more: p.more_fundings,
+            }
+        })
+    }
+
+    /// SL-27: the funding of a channel is lost, and these are the sales the
+    /// counter holds as paid through it. They are kept in the book, for the
+    /// report to the owner, before the manager is told. `false` when the book
+    /// could not be written, so the event comes again.
+    pub fn funding_lost(&mut self, sales: &[u32]) -> bool {
+        let mut book = lock(&self.shared.book);
+        let before = (book.lost_funding_sales.clone(), book.lost_funding_total);
+        if !book.keep_lost_funding_sales(sales) {
+            // A funding lost with no sale to name still tells the manager,
+            // once: its event is dealt with here.
+            if !sales.is_empty() {
+                return true;
+            }
+            drop(book);
+            self.notes.push(
+                "SL-27: the funding of a Lightning channel is lost; no sale was paid through it"
+                    .to_string(),
+            );
+            return true;
+        }
+        if let Err(e) = self.shared.save(&book) {
+            (book.lost_funding_sales, book.lost_funding_total) = before;
+            drop(book);
+            self.notes
+                .push(format!("SL-77: the book was not written: {e}"));
+            return false;
+        }
+        drop(book);
+        self.notes.push(format!(
+            "SL-27: the funding of a Lightning channel is lost; {} sales were paid through it",
+            sales.len()
+        ));
+        true
+    }
+
+    /// The counter has dealt with the event of this funding: the node is told,
+    /// so that it is not given again, unless a payment held for it is not
+    /// recorded yet (SL-21, SL-27): the node's word on the funding is what
+    /// decides that payment.
+    pub fn funding_handled(&mut self, txid: &[u8; 32]) {
+        if self
+            .pending
+            .iter()
+            .any(|p| p.unconfirmed_fundings.contains(txid))
+        {
+            return;
+        }
+        self.funding_events.retain(|e| &e.txid != txid);
+        if let (Some(node), Some(rt)) = (self.node(), self.rt.as_ref()) {
+            let txid = *txid;
+            rt.spawn(async move {
+                let _ = node.ack_funding(txid).await;
+            });
+        }
+    }
+
     /// SL-21: the sales the node says are paid, after both copies of the
     /// state are stored. Each comes again at every call until
     /// [`ShopLn::recorded`] says the counter has it.
@@ -1381,6 +1545,7 @@ impl ShopLn {
                             amount_received_msat: p.amount_msat.saturating_add(p.skimmed_msat),
                             settled_at: Some(p.received_unix),
                         },
+                        funding: self.paid_funding(p),
                     }),
                     None => {
                         unknown.push((p.payment_hash, p.amount_msat.saturating_add(p.skimmed_msat)))
@@ -1503,6 +1668,8 @@ impl ShopLn {
             order_state: OrderState::None,
             order_why: OrderWhy::None,
             order_fee_sats: 0,
+            lost_funding_sales: book.lost_funding_sales.clone(),
+            lost_funding_total: book.lost_funding_total,
         };
         if let Some(node) = self.node() {
             let status = node.status();
@@ -1555,6 +1722,7 @@ impl ShopLn {
             needs_seed: self.named && self.inst.is_none() && self.seed.is_none(),
             delete_seed: self.seed_wiped && self.seed.is_none(),
             why,
+            funding_lost: lock(&self.shared.book).lost_funding_sales.clone(),
         }
     }
 
@@ -2276,6 +2444,8 @@ mod tests {
             skimmed_msat,
             sender_intended_msat: None,
             received_unix: 50,
+            unconfirmed_fundings: Vec::new(),
+            more_fundings: false,
         }
     }
 
@@ -2311,6 +2481,182 @@ mod tests {
         // Recording twice counts once.
         l.recorded(&[1; 32]);
         assert_eq!(lock(&l.shared.book).opening_fees_paid_sats, 1_500);
+        cleanup(&l);
+    }
+
+    fn unconfirmed_of(txids: &[[u8; 32]], more: bool) -> PaidFunding {
+        PaidFunding::Unconfirmed {
+            txids: txids.to_vec(),
+            more,
+        }
+    }
+
+    #[test]
+    fn sl_40_a_payment_through_an_unconfirmed_funding_says_so_until_the_node_says_it_is_confirmed()
+    {
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        lock(&l.shared.book).invoices = vec![invoice(1, 4, 0), invoice(2, 5, 0)];
+        let funded = |hash: u8| Paid {
+            unconfirmed_fundings: vec![[0xf1; 32]],
+            ..pending(hash, 50_000_000, 0)
+        };
+        l.pending = vec![funded(1), pending(2, 50_000_000, 0)];
+        let paid = l.settle_pending(100);
+        assert_eq!(paid[0].funding, Some(unconfirmed_of(&[[0xf1; 32]], false)));
+        assert_eq!(paid[1].funding, None);
+        // The node says the funding is confirmed: the same payment is taken
+        // as one through a confirmed channel.
+        l.funding_events = vec![FundingEvent {
+            txid: [0xf1; 32],
+            outcome: Outcome::Confirmed,
+        }];
+        let paid = l.settle_pending(100);
+        assert_eq!(paid[0].funding, Some(PaidFunding::Confirmed));
+        // A loss is not a confirmation: it is a payment through a lost funding.
+        l.funding_events = vec![FundingEvent {
+            txid: [0xf1; 32],
+            outcome: Outcome::Lost(openbmt_lightning_node::funding::LostWhy::Closed),
+        }];
+        let paid = l.settle_pending(100);
+        assert_eq!(
+            paid[0].funding,
+            Some(PaidFunding::Lost {
+                txids: vec![[0xf1; 32]],
+                more: false
+            })
+        );
+        cleanup(&l);
+    }
+
+    #[test]
+    fn sl_40_a_payment_through_several_fundings_is_confirmed_only_when_all_are() {
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        lock(&l.shared.book).invoices = vec![invoice(1, 4, 0)];
+        let two = Paid {
+            unconfirmed_fundings: vec![[0xf1; 32], [0xf2; 32]],
+            ..pending(1, 50_000_000, 0)
+        };
+        l.pending = vec![two];
+        let confirmed = |t: u8| FundingEvent {
+            txid: [t; 32],
+            outcome: Outcome::Confirmed,
+        };
+        l.funding_events = vec![confirmed(0xf1)];
+        // One confirmed, one not: the one left is listed.
+        assert_eq!(
+            l.settle_pending(100)[0].funding,
+            Some(unconfirmed_of(&[[0xf2; 32]], false))
+        );
+        l.funding_events = vec![confirmed(0xf1), confirmed(0xf2)];
+        assert_eq!(
+            l.settle_pending(100)[0].funding,
+            Some(PaidFunding::Confirmed)
+        );
+        // More fundings than listed are never all confirmed.
+        l.pending[0].more_fundings = true;
+        assert_eq!(
+            l.settle_pending(100)[0].funding,
+            Some(unconfirmed_of(&[], true))
+        );
+        // One lost among them is a loss, whatever the others did.
+        l.pending[0].more_fundings = false;
+        l.funding_events = vec![
+            confirmed(0xf1),
+            FundingEvent {
+                txid: [0xf2; 32],
+                outcome: Outcome::Lost(openbmt_lightning_node::funding::LostWhy::TimedOut),
+            },
+        ];
+        assert_eq!(
+            l.settle_pending(100)[0].funding,
+            Some(PaidFunding::Lost {
+                txids: vec![[0xf2; 32]],
+                more: false
+            })
+        );
+        cleanup(&l);
+    }
+
+    #[test]
+    fn sl_27_a_paid_event_with_no_funding_event_asks_the_node_for_the_state() {
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        lock(&l.shared.book).invoices = vec![invoice(1, 4, 0)];
+        l.pending = vec![Paid {
+            unconfirmed_fundings: vec![[0xf1; 32]],
+            ..pending(1, 50_000_000, 0)
+        }];
+        // No event is waiting (it was acknowledged before the payment came);
+        // the node holds the funding as confirmed, lost, watched or not known.
+        assert!(l.funding_events.is_empty());
+        for (state, want) in [
+            (FundingState::Confirmed, PaidFunding::Confirmed),
+            (
+                FundingState::Lost,
+                PaidFunding::Lost {
+                    txids: vec![[0xf1; 32]],
+                    more: false,
+                },
+            ),
+            (FundingState::Watching, unconfirmed_of(&[[0xf1; 32]], false)),
+            (FundingState::Unknown, unconfirmed_of(&[[0xf1; 32]], false)),
+        ] {
+            l.node_funding_states.insert([0xf1; 32], state);
+            assert_eq!(l.settle_pending(100)[0].funding, Some(want), "{state:?}");
+        }
+        cleanup(&l);
+    }
+
+    #[test]
+    fn sl_40_the_counters_depth_is_given_to_the_node_at_its_start() {
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        let mut src = Fake::new(Some(wallet()));
+        let mut settings = Settings::defaults(1_000);
+        settings.min_confirmations = 3;
+        l.reconcile(&settings, 1_000, &mut src);
+        assert_eq!(l.confirm_depth, 3);
+        let (config, _) = l.prepare(&sl(), &mut src).unwrap();
+        assert_eq!(config.confirm_depth, 3);
+        settings.min_confirmations = 0;
+        l.reconcile(&settings, 1_001, &mut src);
+        assert_eq!(l.confirm_depth, 1);
+        cleanup(&l);
+    }
+
+    #[test]
+    fn sl_27_the_event_of_a_funding_stays_while_a_payment_held_for_it_is_not_recorded() {
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        let event = FundingEvent {
+            txid: [0xf1; 32],
+            outcome: Outcome::Confirmed,
+        };
+        l.funding_events = vec![event];
+        l.pending = vec![Paid {
+            unconfirmed_fundings: vec![[0xf9; 32], [0xf1; 32]],
+            ..pending(1, 50_000_000, 0)
+        }];
+        l.funding_handled(&[0xf1; 32]);
+        assert_eq!(l.funding_events, vec![event], "the payment is held for it");
+        // The payment is recorded: the event is dealt with.
+        l.recorded(&[1; 32]);
+        l.funding_handled(&[0xf1; 32]);
+        assert!(l.funding_events.is_empty());
+        cleanup(&l);
+    }
+
+    #[test]
+    fn sl_27_the_sales_of_a_lost_funding_are_kept_in_the_book_and_in_the_report() {
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        assert!(l.status().funding_lost.is_empty());
+        assert!(l.report().unwrap().lost_funding_sales.is_empty());
+        assert!(l.funding_lost(&[7, 3]));
+        assert_eq!(l.status().funding_lost, vec![3, 7]);
+        assert_eq!(l.report().unwrap().lost_funding_sales, vec![3, 7]);
+        // On disk, and said once.
+        assert_eq!(Book::load(&l.dir).unwrap().lost_funding_sales, vec![3, 7]);
+        assert_eq!(l.take_notes().len(), 1);
+        assert!(l.funding_lost(&[3, 7]));
+        assert!(l.take_notes().is_empty());
+        assert_eq!(l.report().unwrap().lost_funding_total, 2);
         cleanup(&l);
     }
 

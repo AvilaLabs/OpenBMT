@@ -9,7 +9,8 @@
 //! - [`store`]: the store that writes both copies, the second device first
 //!   (SL-21, SL-23, SL-24); [`state`]: which copy is newer (SL-25).
 //! - [`expect`]: what is expected of each invoice, across a restart; [`paid`]:
-//!   the paid events kept until acknowledged; [`sweep`]: the spendable outputs
+//!   the paid events kept until acknowledged; [`funding`]: a channel's funding
+//!   with no confirmation at the claim, watched for the counter (SL-27, SL-40); [`sweep`]: the spendable outputs
 //!   swept to the shop's address.
 //! - [`chain`]: chain data from the shop's own Bitcoin Core (SL-26);
 //!   [`filters`]: the same from the compact-filter watcher on the counter's
@@ -116,6 +117,7 @@ pub mod device_tcp;
 pub mod expect;
 pub mod feehistory;
 pub mod filters;
+pub mod funding;
 mod locks;
 pub mod logger;
 pub mod lsps1;

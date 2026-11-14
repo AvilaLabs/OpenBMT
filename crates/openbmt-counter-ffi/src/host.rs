@@ -1351,6 +1351,10 @@ impl Entry {
     pub(crate) fn shop_lightning(&self) -> Result<ShopLightningView, CounterError> {
         self.run(None, |node, _, _| {
             let status = node.shop_lightning_status();
+            let funding_lost = status
+                .as_ref()
+                .map(|s| s.funding_lost.clone())
+                .unwrap_or_default();
             Ok(ShopLightningView {
                 needs_seed: status.as_ref().is_some_and(|s| s.needs_seed),
                 delete_seed: status.as_ref().is_some_and(|s| s.delete_seed),
@@ -1358,6 +1362,11 @@ impl Entry {
                     .and_then(|s| s.why)
                     .map(|w| WordsView(openbmt_counter_node::say::shopln_words(&w))),
                 scan: WordsView(openbmt_counter_node::say::shopln_scan_words()),
+                funding_lost: (!funding_lost.is_empty()).then(|| {
+                    WordsView(openbmt_counter_node::say::shopln_funding_lost_words(
+                        &funding_lost,
+                    ))
+                }),
             })
         })
     }

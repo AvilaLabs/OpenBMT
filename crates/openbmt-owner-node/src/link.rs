@@ -108,7 +108,7 @@ pub const LIGHTNING_REPORT_FILE: &str = "lightning-report.bin";
 
 /// The newest report of the Lightning counter and when it came (SL-78,
 /// LK-84). It is not a record: the next report replaces it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TakenReport {
     /// The Lightning counter that sent it.
     pub from: DeviceId,
@@ -121,7 +121,7 @@ pub struct TakenReport {
 impl TakenReport {
     /// The file's bytes: the sender, the time as `u64` and the report's
     /// content.
-    fn to_bytes(self) -> Vec<u8> {
+    fn to_bytes(&self) -> Vec<u8> {
         let mut out = self.from.to_bytes().to_vec();
         out.extend_from_slice(&self.taken_at.to_le_bytes());
         out.extend_from_slice(&self.report.to_bytes());

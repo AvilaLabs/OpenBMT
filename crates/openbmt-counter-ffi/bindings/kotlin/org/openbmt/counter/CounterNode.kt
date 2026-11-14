@@ -545,9 +545,16 @@ class LightningStatus(val ready: Boolean, val words: Words)
  * SL-41, SL-76, SL-77: what Shop Lightning shows on this counter. [needsSeed]: this is the Lightning counter and
  * holds no key, so the screen that scans it is offered. [deleteSeed]: the key is gone from the counter, so what
  * the app sealed is deleted. [why]: the reason Lightning is not offered, for a manager, or null. [scan]: the
- * words of the scan screen.
+ * words of the scan screen. [fundingLost]: the funding of a channel was lost and sales were paid through it (SL-27),
+ * for a manager, with the sales named in the detail, or null.
  */
-class ShopLightningStatus(val needsSeed: Boolean, val deleteSeed: Boolean, val why: Words?, val scan: Words)
+class ShopLightningStatus(
+    val needsSeed: Boolean,
+    val deleteSeed: Boolean,
+    val why: Words?,
+    val scan: Words,
+    val fundingLost: Words?,
+)
 
 /** The kind of node a connection is for (LN-01). */
 enum class LnKind { Lnd, Cln }
@@ -1526,7 +1533,7 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
     /** SL-41, SL-76, SL-77: what Shop Lightning shows; call it where the status is read. */
     fun shopLightning(): ShopLightningStatus {
         val r = call(OP_SHOP_LIGHTNING, handle)
-        return ShopLightningStatus(r.bool(), r.bool(), r.option { r.words() }, r.words()).also { r.end() }
+        return ShopLightningStatus(r.bool(), r.bool(), r.option { r.words() }, r.words(), r.option { r.words() }).also { r.end() }
     }
 
     /** The open requests, newest first (CR-215). */

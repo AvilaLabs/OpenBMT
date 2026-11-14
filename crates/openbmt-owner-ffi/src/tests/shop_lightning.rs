@@ -374,10 +374,15 @@ fn sl_78_the_view_gives_the_newest_report_with_its_time_and_cause() {
             order_state: OrderState::Failed,
             order_why: OrderWhy::FeeAboveMax,
             order_fee_sats: 66,
+            lost_funding_sales: vec![4, 9],
+            lost_funding_total: 70,
         },
     };
     let view = shop_lightning::view(false, Some(&settings), Some(&report));
     let r = view.report.expect("a report");
+    // SL-27: the sales paid through a lost funding reach the owner's view.
+    assert_eq!(r.lost_funding_sales, vec![4, 9]);
+    assert_eq!(r.lost_funding_total, 70);
     assert_eq!(
         [
             r.taken_at,

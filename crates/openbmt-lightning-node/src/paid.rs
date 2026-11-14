@@ -27,14 +27,18 @@ pub const PRIMARY: &str = "paid_events";
 /// How long the mark of an acknowledged event is kept, in seconds: thirty
 /// days, far longer than the library can owe a repeat of an event.
 pub const ACKED_KEPT_SECS: u64 = 30 * 24 * 3600;
-const VERSION: u8 = 2;
+const VERSION: u8 = 3;
+/// The second version, which had no funding: read with none.
+const VERSION_2: u8 = 2;
 /// The first version, which had no skimmed fee: read with a skim of 0.
 const VERSION_1: u8 = 1;
 const LEN_1: usize = 1 + 8 + 8 + 1 + 8 + 1 + 8;
-const LEN: usize = LEN_1 + 8;
+const LEN_2: usize = LEN_1 + 8;
+/// The most fundings a record keeps (SL-40).
+pub const MAX_FUNDINGS: usize = 8;
 
 /// A paid sale as it is kept.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaidRecord {
     /// The payment hash of the invoice.
     pub payment_hash: [u8; 32],
@@ -48,13 +52,21 @@ pub struct PaidRecord {
     /// When the claim was seen, in seconds since the epoch. A repeat carries
     /// the time of the first.
     pub received_unix: u64,
+    /// The funding transaction of every channel the payment came through
+    /// whose funding had not the shop's confirmations when it was claimed
+    /// (SL-40), once each, at most [`MAX_FUNDINGS`].
+    pub unconfirmed_fundings: Vec<[u8; 32]>,
+    /// The payment came through more such channels than [`MAX_FUNDINGS`]:
+    /// only the first are listed, and it is never final at once. Only with
+    /// [`MAX_FUNDINGS`] listed.
+    pub more_fundings: bool,
 }
 
-fn hex(hash: &[u8; 32]) -> String {
+pub(crate) fn hex(hash: &[u8; 32]) -> String {
     hash.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn unhex(name: &str) -> Option<[u8; 32]> {
+pub(crate) fn unhex(name: &str) -> Option<[u8; 32]> {
     if name.len() != 64 || !name.is_ascii() {
         return None;
     }
@@ -65,12 +77,12 @@ fn unhex(name: &str) -> Option<[u8; 32]> {
     Some(out)
 }
 
-fn invalid(msg: &str) -> io::Error {
+pub(crate) fn invalid(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg.to_string())
 }
 
 /// What is kept for a hash: the event, and when it was acknowledged if it was.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Kept {
     record: PaidRecord,
     acked_unix: Option<u64>,
@@ -78,7 +90,7 @@ struct Kept {
 
 fn encode(k: &Kept) -> Vec<u8> {
     let r = &k.record;
-    let mut out = Vec::with_capacity(LEN);
+    let mut out = Vec::with_capacity(LEN_2 + 2 + 32 * r.unconfirmed_fundings.len());
     out.push(VERSION);
     out.extend_from_slice(&r.amount_msat.to_be_bytes());
     out.extend_from_slice(&r.received_unix.to_be_bytes());
@@ -87,12 +99,21 @@ fn encode(k: &Kept) -> Vec<u8> {
     out.push(k.acked_unix.is_some() as u8);
     out.extend_from_slice(&k.acked_unix.unwrap_or(0).to_be_bytes());
     out.extend_from_slice(&r.skimmed_msat.to_be_bytes());
+    out.push(r.unconfirmed_fundings.len() as u8);
+    out.push(r.more_fundings as u8);
+    for txid in &r.unconfirmed_fundings {
+        out.extend_from_slice(txid);
+    }
     out
 }
 
 fn decode(hash: [u8; 32], bytes: &[u8]) -> Result<Kept, io::Error> {
+    // Version 3 ends with the count of fundings, a flag and the fundings, so
+    // its length is told by the count.
+    let n = bytes.get(LEN_2).map_or(0, |&n| usize::from(n));
     let ok = match bytes.first() {
-        Some(&VERSION) => bytes.len() == LEN,
+        Some(&VERSION) => bytes.len() == LEN_2 + 2 + 32 * n,
+        Some(&VERSION_2) => bytes.len() == LEN_2,
         Some(&VERSION_1) => bytes.len() == LEN_1,
         _ => false,
     };
@@ -122,6 +143,35 @@ fn decode(hash: [u8; 32], bytes: &[u8]) -> Result<Kept, io::Error> {
         return Err(invalid("paid event: unused bytes"));
     }
     let skimmed = be_u64(bytes, LEN_1).unwrap_or(0);
+    // The fundings: a count of at most [`MAX_FUNDINGS`], a flag that is 1
+    // only for a full list, and the fundings, each once.
+    let (fundings, more) = match bytes
+        .get(LEN_2..)
+        .filter(|_| bytes.first() == Some(&VERSION))
+    {
+        None => (Vec::new(), false),
+        Some(b) => {
+            // The length was checked against the count: no bytes are left over.
+            let (Some(&flag), Some(rest)) = (b.get(1), b.get(2..)) else {
+                return Err(invalid("paid event"));
+            };
+            let list: Vec<[u8; 32]> = rest.as_chunks::<32>().0.to_vec();
+            if list.len() > MAX_FUNDINGS {
+                return Err(invalid("paid event: too many fundings"));
+            }
+            if flag > 1 || (flag == 1 && list.len() != MAX_FUNDINGS) {
+                return Err(invalid("paid event: flag"));
+            }
+            if list
+                .iter()
+                .enumerate()
+                .any(|(i, t)| list.iter().take(i).any(|u| u == t))
+            {
+                return Err(invalid("paid event: a funding twice"));
+            }
+            (list, flag == 1)
+        }
+    };
     Ok(Kept {
         record: PaidRecord {
             payment_hash: hash,
@@ -129,6 +179,8 @@ fn decode(hash: [u8; 32], bytes: &[u8]) -> Result<Kept, io::Error> {
             skimmed_msat: skimmed,
             received_unix: received,
             sender_intended_msat: (sender_flag == 1).then_some(sender),
+            unconfirmed_fundings: fundings,
+            more_fundings: more,
         },
         acked_unix: (acked_flag == 1).then_some(acked),
     })
@@ -145,7 +197,16 @@ fn be_u64(bytes: &[u8], at: usize) -> Option<u64> {
 /// result must be the input.
 #[cfg(feature = "testing")]
 pub fn reencode_for_test(hash: [u8; 32], bytes: &[u8]) -> Option<Vec<u8>> {
-    decode(hash, bytes).ok().map(|k| encode(&k))
+    let k = decode(hash, bytes).ok()?;
+    let mut out = encode(&k);
+    // An older version is the front of the newer one, and what it lacks was
+    // read as nothing.
+    let version = *bytes.first()?;
+    if version != VERSION {
+        out.truncate(bytes.len());
+        *out.first_mut()? = version;
+    }
+    Some(out)
 }
 
 /// The paid events not yet acknowledged.
@@ -175,19 +236,13 @@ impl PaidLog {
         if let Some(kept) = self.read(&r.payment_hash).await? {
             return Ok(kept.acked_unix.is_none().then_some(kept.record));
         }
+        let hash = r.payment_hash;
         let kept = Kept {
             record: r,
             acked_unix: None,
         };
-        KVStore::write(
-            &*self.store,
-            PRIMARY,
-            "",
-            &hex(&r.payment_hash),
-            encode(&kept),
-        )
-        .await?;
-        Ok(Some(r))
+        KVStore::write(&*self.store, PRIMARY, "", &hex(&hash), encode(&kept)).await?;
+        Ok(Some(kept.record))
     }
 
     /// Every paid event not acknowledged, oldest first. The marks of events
@@ -232,44 +287,16 @@ impl PaidLog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bip85::NodeSeed;
-    use crate::device::{DeviceStatus, DirDevice, GatedDevice, SecondDevice};
-    use crate::logger::Logger;
-    use crate::seal::{open, SealKey};
-    use crate::store::{device_name, DualStore};
-    use crate::testutil::temp_dir;
-    use lightning::sign::KeysManager;
-    use lightning::util::logger::Level;
-    use lightning_persister::fs_store::FilesystemStore;
+    use crate::device::SecondDevice;
+    use crate::seal::open;
+    use crate::store::device_name;
+    use crate::testutil::{disks, Disks};
     use std::time::Duration;
-
-    struct Disks {
-        dir: std::path::PathBuf,
-        device: GatedDevice<DirDevice>,
-        key: SealKey,
-    }
-
-    fn disks(name: &str) -> Disks {
-        let dir = temp_dir(name);
-        Disks {
-            device: GatedDevice::new(DirDevice::new(dir.join("device")).unwrap()),
-            key: SealKey::from_seed(&NodeSeed([5; 64])),
-            dir,
-        }
-    }
 
     /// A fresh log over the same disks, with the flusher running: a start.
     fn start(d: &Disks) -> (PaidLog, tokio::task::JoinHandle<()>) {
-        let store = Arc::new(DualStore::new(
-            Arc::new(FilesystemStore::new(d.dir.join("local"))),
-            Arc::new(d.device.clone()),
-            d.key.clone(),
-            Arc::new(KeysManager::new(&[1; 32], 1, 1, true)),
-            Arc::new(DeviceStatus::new()),
-            Arc::new(Logger::open(&d.dir.join("log"), Level::Debug).unwrap()),
-        ));
-        let flusher = store.spawn_lazy_flusher(&tokio::runtime::Handle::current());
-        (PaidLog::new(Arc::new(Background(store))), flusher)
+        let (background, flusher) = crate::testutil::start_background(d);
+        (PaidLog::new(background), flusher)
     }
 
     fn rec(n: u8, at: u64) -> PaidRecord {
@@ -279,6 +306,8 @@ mod tests {
             skimmed_msat: 1_000_000,
             sender_intended_msat: Some(50_000_000),
             received_unix: at,
+            unconfirmed_fundings: Vec::new(),
+            more_fundings: false,
         }
     }
 
@@ -453,5 +482,116 @@ mod tests {
         let again = encode(&decode([1; 32], &old).unwrap());
         assert_eq!(again[1..LEN_1], old[1..]);
         assert_eq!(again[0], VERSION);
+    }
+
+    fn with_fundings(n: u8, fundings: &[u8], more: bool) -> PaidRecord {
+        PaidRecord {
+            unconfirmed_fundings: fundings.iter().map(|t| [*t; 32]).collect(),
+            more_fundings: more,
+            ..rec(n, 5)
+        }
+    }
+
+    /// SL-40: every funding of the channels not yet confirmed is kept with the
+    /// event; the older versions still read, with none; the strict reading
+    /// holds for the new bytes.
+    #[test]
+    fn sl_40_every_funding_is_kept_with_the_event_and_older_versions_read_without_it() {
+        let kept_funded = Kept {
+            record: with_fundings(1, &[7, 8, 9], false),
+            acked_unix: None,
+        };
+        let bytes = encode(&kept_funded);
+        assert_eq!(bytes[0], VERSION);
+        // The count and the flag follow the fields of version 2.
+        assert_eq!(bytes.len(), LEN_2 + 2 + 3 * 32);
+        assert_eq!(&bytes[LEN_2..LEN_2 + 2], &[3, 0]);
+        assert_eq!(&bytes[LEN_2 + 2..LEN_2 + 34], &[7; 32]);
+        assert_eq!(&bytes[LEN_2 + 66..], &[9; 32]);
+        assert_eq!(decode([1; 32], &bytes).unwrap(), kept_funded);
+        // Version 2 is the front of version 3, and has no funding.
+        let mut v2 = bytes[..LEN_2].to_vec();
+        v2[0] = VERSION_2;
+        let read = decode([1; 32], &v2).unwrap();
+        assert!(read.record.unconfirmed_fundings.is_empty());
+        assert!(!read.record.more_fundings);
+        assert_eq!(read.record.skimmed_msat, kept_funded.record.skimmed_msat);
+        // A length that is not the count's is refused.
+        assert!(decode([1; 32], &bytes[..bytes.len() - 1]).is_err());
+        assert!(decode([1; 32], &bytes[..LEN_2]).is_err());
+        assert!(decode([1; 32], &v2[..LEN_2 - 1]).is_err());
+        let mut long = v2.clone();
+        long.push(0);
+        assert!(decode([1; 32], &long).is_err());
+        let mut long = bytes.clone();
+        long.push(0);
+        assert!(decode([1; 32], &long).is_err());
+        // No funding is a count of 0 and nothing behind it.
+        let none = encode(&Kept {
+            record: rec(1, 5),
+            acked_unix: None,
+        });
+        assert_eq!(none.len(), LEN_2 + 2);
+        assert!(decode([1; 32], &none)
+            .unwrap()
+            .record
+            .unconfirmed_fundings
+            .is_empty());
+        // The count is at most 8; the flag is 0 or 1 and 1 only with a full list.
+        let eight = encode(&Kept {
+            record: with_fundings(1, &[1, 2, 3, 4, 5, 6, 7, 8], true),
+            acked_unix: None,
+        });
+        assert!(decode([1; 32], &eight).unwrap().record.more_fundings);
+        let mut nine = eight.clone();
+        nine[LEN_2] = 9;
+        nine.extend_from_slice(&[9; 32]);
+        assert!(decode([1; 32], &nine).is_err());
+        for flag in [2u8, 255] {
+            let mut b = bytes.clone();
+            b[LEN_2 + 1] = flag;
+            assert!(decode([1; 32], &b).is_err());
+        }
+        let mut b = bytes.clone();
+        b[LEN_2 + 1] = 1;
+        assert!(decode([1; 32], &b).is_err());
+        // A funding twice is refused, so that the bytes are the ones `encode` makes.
+        let twice = encode(&Kept {
+            record: with_fundings(1, &[4, 4], false),
+            acked_unix: None,
+        });
+        assert!(decode([1; 32], &twice).is_err());
+    }
+
+    #[cfg(feature = "testing")]
+    #[test]
+    fn sl_40_the_fuzz_hook_writes_back_the_version_it_read() {
+        let kept = Kept {
+            record: with_fundings(1, &[3, 4], false),
+            acked_unix: Some(9),
+        };
+        let v3 = encode(&kept);
+        assert_eq!(reencode_for_test([1; 32], &v3).unwrap(), v3);
+        let mut v2 = v3[..LEN_2].to_vec();
+        v2[0] = VERSION_2;
+        assert_eq!(reencode_for_test([1; 32], &v2).unwrap(), v2);
+        let mut v1 = v3[..LEN_1].to_vec();
+        v1[0] = VERSION_1;
+        assert_eq!(reencode_for_test([1; 32], &v1).unwrap(), v1);
+    }
+
+    #[tokio::test]
+    async fn sl_40_a_funding_survives_a_restart_with_its_event() {
+        let d = disks("paid-funding");
+        let (log, flusher) = start(&d);
+        let r = PaidRecord {
+            unconfirmed_fundings: vec![[4; 32], [5; 32]],
+            ..rec(6, 10)
+        };
+        log.record(r.clone()).await.unwrap();
+        flusher.abort();
+        drop(log);
+        let (log, _f) = start(&d);
+        assert_eq!(log.pending(NOW).await.unwrap(), vec![r]);
     }
 }

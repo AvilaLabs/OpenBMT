@@ -111,6 +111,10 @@ object ShopLightningModel {
     /** Turning off: the field is taken away, and the Lightning counter closes the channels (SL-77). */
     fun turnOff(): ShopLightningEditArgs = ShopLightningEditArgs(ShopLightningAction.Remove)
 
+    /** SL-27: what the page says above the sales of a lost funding, when the report names any. */
+    fun lostFundingNote(report: LightningReport?): String? =
+        ShopLightningWords.lostFundingWhat.takeIf { report != null && report.lostFundingSales.isNotEmpty() }
+
     /** The facts of SL-45 as labelled lines: the settings' cap and provider, and the newest report's numbers (SL-78). */
     fun lines(held: ShopLightningHeld, report: LightningReport?): List<Line> {
         val out = ArrayList<Line>()
@@ -136,6 +140,10 @@ object ShopLightningModel {
         out.add(Line(ShopLightningWords.lastStoredLabel, if (report.lastStoredAt == 0L) ShopLightningWords.neverStored else Format.localTime(report.lastStoredAt)))
         out.add(Line(ShopLightningWords.lastSweepLabel, if (report.lastSweepAt == 0L) ShopLightningWords.noSweep else Format.localTime(report.lastSweepAt)))
         out.add(Line(ShopLightningWords.whyLabel, ShopLightningWords.cause(report.notOffered)))
+        // SL-27: the sales paid through a channel whose funding was lost, as the numbers the counter gave.
+        if (report.lostFundingSales.isNotEmpty()) out.add(Line(ShopLightningWords.lostFundingLabel, report.lostFundingSales.joinToString(", ")))
+        // Past the most the report lists, it also says how many in all.
+        if (report.lostFundingTotal > report.lostFundingSales.size) out.add(Line(ShopLightningWords.lostFundingTotalLabel, report.lostFundingTotal.toString()))
         out.add(Line(ShopLightningWords.cameLabel, Format.localTime(report.takenAt)))
         return out
     }

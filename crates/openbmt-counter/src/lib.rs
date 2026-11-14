@@ -80,7 +80,8 @@ pub use bills::{
 pub use confirm_held::{ConfirmHeld, CONFIRM_HELD_LEN};
 pub use counter::{
     sale_payment_id, Actor, BillView, BlockEffect, BlockTaken, Counter, Facts, OpenFacts, Opened,
-    Overridden, Pairing, SaleExtras, Settled, Sightings, Stored, SwapPaid,
+    Overridden, PaidFunding, Pairing, SaleExtras, Settled, Sightings, Stored, SwapPaid,
+    MAX_FUNDINGS,
 };
 pub use desk::{Desk, OverrideEntry, Role};
 pub use events::Event;

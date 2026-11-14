@@ -3,7 +3,8 @@
 //! ```text
 //! Store:   OBM 0x1e | version | request ID 16 | action u8 | body
 //! Stored:  OBM_ | version | request ID 16 | action u8 | result u8 | data
-//! Report:  OBM 0x1f | version | six fields (LK-84), version 2 with four more
+//! Report:  OBM 0x1f | version | six fields (LK-84), version 2 with four more,
+//!          the sales paid through a funding that was lost, and their total
 //! ```
 //!
 //! Decoding is strict, as in [`openbmt_core::wire`]: bytes decode only if
@@ -29,6 +30,8 @@ pub const MAX_BLOB_LEN: usize = 16 * 1024 * 1024;
 /// The most parts of a blob: enough for [`MAX_BLOB_LEN`] in parts of
 /// [`MAX_PART_LEN`].
 pub const MAX_PARTS: u32 = (MAX_BLOB_LEN.div_ceil(MAX_PART_LEN)) as u32;
+/// The most sales a report names as paid through a funding that was lost.
+pub const MAX_LOST_FUNDING_SALES: usize = 64;
 /// The longest name (LK-83).
 pub const MAX_NAME_LEN: usize = 255;
 /// The longest name the Box stores: its hexadecimal and the `.tmp` of a write
@@ -687,14 +690,15 @@ impl OrderWhy {
     }
 }
 
-/// The version of the report that adds the provider's LSPS1 and the last
-/// order. Version 1, with the six first fields, still reads.
+/// The version of the report that adds the provider's LSPS1, the last order
+/// and the sales paid through a lost funding. Version 1, with the six first
+/// fields, still reads.
 pub const REPORT_VERSION: u8 = 2;
 
 /// The facts the Lightning counter reports with each check-in (LK-84,
 /// SL-78). The cap and the provider are not in it: the owner phone shows
 /// those of its own settings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LightningReport {
     /// The Lightning balance, in satoshis.
     pub balance_sats: u64,
@@ -719,6 +723,12 @@ pub struct LightningReport {
     pub order_why: OrderWhy,
     /// What the last order costs, in satoshis; 0 with no order.
     pub order_fee_sats: u64,
+    /// The numbers of the sales paid through a channel whose funding was
+    /// lost (SL-27), rising, at most [`MAX_LOST_FUNDING_SALES`]; may be empty.
+    pub lost_funding_sales: Vec<u32>,
+    /// How many sales were named lost in all: at least those listed, and
+    /// more when the list kept only the newest [`MAX_LOST_FUNDING_SALES`].
+    pub lost_funding_total: u32,
 }
 
 impl LightningReport {
@@ -740,12 +750,17 @@ impl LightningReport {
         out.extend_from_slice(&self.order_state.to_code().to_le_bytes());
         out.extend_from_slice(&self.order_why.to_code().to_le_bytes());
         out.extend_from_slice(&self.order_fee_sats.to_le_bytes());
+        out.extend_from_slice(&wire::len_u32(self.lost_funding_sales.len()).to_le_bytes());
+        for sale in &self.lost_funding_sales {
+            out.extend_from_slice(&sale.to_le_bytes());
+        }
+        out.extend_from_slice(&self.lost_funding_total.to_le_bytes());
         out
     }
 
-    /// Read the content strictly: version 2, or version 1 with the LSPS1 and
-    /// order facts unknown. An order that failed says why, nothing else does,
-    /// and no order has no fee.
+    /// Read the content strictly: version 2, or version 1 with the LSPS1,
+    /// order and lost-sale facts unknown. An order that failed says why,
+    /// nothing else does, no order has no fee, and the lost sales rise.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
         let (mut r, version) =
             Reader::framed_up_to(bytes, &MAGIC_LIGHTNING_REPORT, REPORT_VERSION)?;
@@ -761,6 +776,8 @@ impl LightningReport {
             order_state: OrderState::None,
             order_why: OrderWhy::None,
             order_fee_sats: 0,
+            lost_funding_sales: Vec::new(),
+            lost_funding_total: 0,
         };
         if version >= 2 {
             report.lsps1 = Lsps1Offer::from_code(r.u16_le()?)
@@ -779,6 +796,20 @@ impl LightningReport {
             }
             if report.order_state == OrderState::None && report.order_fee_sats != 0 {
                 return Err(DecodeError::NonCanonical("no order has no fee"));
+            }
+            let n = r.count(MAX_LOST_FUNDING_SALES, 4)?;
+            for _ in 0..n {
+                let sale = r.u32_le()?;
+                if report.lost_funding_sales.last().is_some_and(|p| *p >= sale) {
+                    return Err(DecodeError::NonCanonical("the sales are not rising"));
+                }
+                report.lost_funding_sales.push(sale);
+            }
+            report.lost_funding_total = r.u32_le()?;
+            if (report.lost_funding_total as usize) < report.lost_funding_sales.len() {
+                return Err(DecodeError::NonCanonical(
+                    "the total of lost sales is less than those listed",
+                ));
             }
         }
         r.finish()?;

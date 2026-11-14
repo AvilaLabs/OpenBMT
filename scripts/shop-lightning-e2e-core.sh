@@ -627,6 +627,26 @@ check "SL-31: the channel is unannounced" $?
 FUNDING_1=$(ctl "$LSP_CTL" channels | grep "cp=$SHOP_ID" | sed -n 's/.*funding_txo=Some(OutPoint { txid: \([0-9a-f]*\), vout: \([0-9]*\) }).*/\1:\2/p')
 note "channel $FUNDING_1, room $(field room_msat "$S") msat"
 
+# SL-27: a payment claimed before its channel's funding confirmed names that
+# funding, and its first confirmation is told to the counter once.
+FUNDING_TXID=${FUNDING_1%%:*}
+PAID_FUNDING=$(sed -n "s/^paid $H1 .* funding=//p" "$PAID_LOG" | head -1)
+[ "$PAID_FUNDING" = confirmed ] || [ "$PAID_FUNDING" = "$FUNDING_TXID" ]
+check "SL-27: the first payment's paid event says its channel funding was confirmed, or names it" $?
+if [ "$PAID_FUNDING" = "$FUNDING_TXID" ]; then
+  mine 1
+  for _ in $(seq 1 30); do
+    ctl "$SHOP_CTL" funding >>"$PAID_LOG"
+    grep -q "funding $FUNDING_TXID confirmed" "$PAID_LOG" && break
+    sleep 1
+  done
+  grep -q "funding $FUNDING_TXID confirmed" "$PAID_LOG"
+  check "SL-27: the funding's first confirmation is told to the counter" $?
+  ctl "$SHOP_CTL" ackfunding "$FUNDING_TXID" >/dev/null
+else
+  note "the funding was confirmed before the payment was claimed"
+fi
+
 # ---- the second payment uses it ------------------------------------------------
 
 say "Second payment"

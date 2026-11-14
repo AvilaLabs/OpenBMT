@@ -1487,13 +1487,17 @@ pub struct ShopLightningView {
     pub why: Option<WordsView>,
     /// The words of the screen that scans the key (SL-76).
     pub scan: WordsView,
+    /// A channel's funding was lost, and sales were paid through it: the
+    /// manager is told, and the sales are named in the detail (SL-27).
+    pub funding_lost: Option<WordsView>,
 }
 
 wire_record!(ShopLightningView {
     needs_seed,
     delete_seed,
     why,
-    scan
+    scan,
+    funding_lost
 });
 
 // ---- Lightning (CR-112 to CR-116) -------------------------------------------------

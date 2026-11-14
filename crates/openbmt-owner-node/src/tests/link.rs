@@ -2874,6 +2874,8 @@ fn report(balance: u64, not_offered: NotOffered) -> LightningReport {
         order_state: OrderState::None,
         order_why: OrderWhy::None,
         order_fee_sats: 0,
+        lost_funding_sales: Vec::new(),
+        lost_funding_total: 0,
     }
 }
 
@@ -2899,14 +2901,14 @@ fn lk_84_the_newest_report_of_the_lightning_counter_is_kept_whole_in_a_file() {
     assert!(w.link.lightning_report().is_none());
     w.send_report(&report(100, NotOffered::Offered).to_bytes());
     w.step(T0);
-    let first = *w.link.lightning_report().expect("kept");
+    let first = w.link.lightning_report().expect("kept").clone();
     assert_eq!(first.from, counter());
     assert_eq!(first.taken_at, T0);
     assert_eq!(first.report, report(100, NotOffered::Offered));
     // The next one replaces it.
     w.send_report(&report(250, NotOffered::SecondDeviceAway).to_bytes());
     w.step(T0 + 30);
-    let second = *w.link.lightning_report().unwrap();
+    let second = w.link.lightning_report().unwrap().clone();
     assert_eq!(second.taken_at, T0 + 30);
     assert_eq!(second.report, report(250, NotOffered::SecondDeviceAway));
     assert!(w.notes().is_empty());
@@ -2941,6 +2943,60 @@ fn lk_84_the_newest_report_of_the_lightning_counter_is_kept_whole_in_a_file() {
 }
 
 #[test]
+fn sl_27_the_sales_paid_through_a_lost_funding_are_kept_with_the_report() {
+    let mut w = world();
+    w.link.set_shop_lightning(parties(counter()));
+    let named = LightningReport {
+        lost_funding_sales: vec![3, 8],
+        lost_funding_total: 70,
+        ..report(100, NotOffered::Offered)
+    };
+    w.send_report(&named.to_bytes());
+    w.step(T0);
+    assert_eq!(
+        w.link.lightning_report().unwrap().report.lost_funding_sales,
+        vec![3, 8]
+    );
+    assert_eq!(
+        w.link.lightning_report().unwrap().report.lost_funding_total,
+        70
+    );
+    // The file is the version 2 report, and a link started again reads it.
+    let bytes = fs::read(w.dir.path().join(crate::LIGHTNING_REPORT_FILE)).unwrap();
+    assert_eq!(bytes[32 + 8 + 4], 2);
+    let kept = w.link.lightning_report().unwrap().clone();
+    let again_dir = Dir::new();
+    let mut again = OwnerLink::new(
+        courier(
+            &w.relay,
+            id(1),
+            Role::Owner,
+            (counter(), Role::Counter),
+            &again_dir,
+            FirstStart::Yes,
+        ),
+        w.dir.path(),
+        devices(),
+        vec![counter()],
+        config(),
+    )
+    .unwrap();
+    again.set_shop_lightning(parties(counter()));
+    assert_eq!(again.lightning_report(), Some(&kept));
+    // The next report that names none replaces it: the owner sees what the
+    // counter says now.
+    w.send_report(&report(5, NotOffered::Offered).to_bytes());
+    w.step(T0 + 10);
+    assert!(w
+        .link
+        .lightning_report()
+        .unwrap()
+        .report
+        .lost_funding_sales
+        .is_empty());
+}
+
+#[test]
 fn lk_80_a_report_is_taken_from_the_lightning_counter_only() {
     let mut w = world();
     // Shop Lightning is off: no sender is the Lightning counter.
@@ -2965,7 +3021,7 @@ fn lk_84_a_report_that_does_not_decode_is_refused_and_the_old_one_stays() {
     w.link.set_shop_lightning(parties(counter()));
     w.send_report(&report(7, NotOffered::ChainBehind).to_bytes());
     w.step(T0);
-    let kept = *w.link.lightning_report().unwrap();
+    let kept = w.link.lightning_report().unwrap().clone();
     let mut cut = report(8, NotOffered::Offered).to_bytes();
     cut.pop();
     w.send_report(&cut);

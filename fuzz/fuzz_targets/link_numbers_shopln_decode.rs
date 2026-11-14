@@ -22,14 +22,27 @@ fn check(data: &[u8]) {
         assert_eq!(v.to_bytes(), data);
     }
     if let Ok(v) = LightningReport::from_bytes(data) {
-        assert_eq!(v.to_bytes(), data);
+        // The encoder writes version 2; a report of version 1 reads, and
+        // writes back as version 2.
+        if data.get(4) == Some(&2) {
+            assert_eq!(v.to_bytes(), data);
+        } else {
+            assert_eq!(LightningReport::from_bytes(&v.to_bytes()).ok(), Some(v));
+        }
     }
 }
 
 fuzz_target!(|data: &[u8]| {
     check(data);
-    // The same bytes behind each frame header (magic and version 1), so that
-    // the input gets past the magic to the parts.
+    // The same bytes behind each frame header (magic and version 1, and 2 for
+    // the report, which names the sales of a lost funding), so that the input
+    // gets past the magic to the parts.
+    for version in [1u8, 2] {
+        let mut framed = MAGIC_LIGHTNING_REPORT.to_vec();
+        framed.push(version);
+        framed.extend_from_slice(data);
+        check(&framed);
+    }
     for magic in [
         MAGIC_INBOX,
         MAGIC_OUTBOX,

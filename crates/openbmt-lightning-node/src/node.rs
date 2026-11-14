@@ -22,6 +22,7 @@ use crate::chain::{ChainFilter, ChainSource, CoreBroadcaster, CoreFees};
 use crate::device::{DeviceSnapshot, DeviceState, DeviceStatus, SecondDevice};
 use crate::expect::{Claim, Expectation, Expectations};
 use crate::filters::{Confirmable, FilterQueue, FilterRun, FilterStart, Follower, Progress};
+use crate::funding::{self, ChannelFunding, FundingEvent, FundingLog};
 use crate::locks::MutexExt;
 use crate::logger::Logger;
 use crate::lsps1::{self, OrderBook, OrderRecord, OrderState, OrderWhy, Orders};
@@ -108,6 +109,8 @@ const MAX_PENDING_UPDATES: u64 = 100;
 const PROVIDER_ANSWER: Duration = Duration::from_secs(15);
 /// How often the chain tip is polled.
 const POLL_EVERY: Duration = Duration::from_secs(1);
+/// How often the fundings watched for the counter are judged (SL-27).
+const FUNDING_CHECK_EVERY: Duration = Duration::from_secs(5);
 /// A chain poll older than this counts as the chain data being behind (SL-41).
 const CHAIN_STALE_SECS: u64 = 60;
 /// How long an invoice lives, in seconds.
@@ -153,6 +156,9 @@ pub struct NodeConfig {
     /// caller has changed it with [`Node::set_sweep_index`] the changed one is
     /// kept and used.
     pub sweep_index: u32,
+    /// The confirmations a funding needs to count as confirmed (SL-40): the
+    /// counter's own, at least 1.
+    pub confirm_depth: u32,
 }
 
 /// Why the node did not start.
@@ -219,6 +225,15 @@ pub struct Paid {
     /// When the claim was seen, in seconds since the epoch. A repeat of the
     /// event carries the time of the first.
     pub received_unix: u64,
+    /// The funding transaction of every channel the payment came through
+    /// whose funding had not the shop's confirmations when it was claimed
+    /// (SL-40), at most [`funding::MAX_FUNDINGS`]. The node then tells of
+    /// the confirmation of each or the loss of any
+    /// ([`Node::try_funding`]).
+    pub unconfirmed_fundings: Vec<[u8; 32]>,
+    /// More such channels than are listed: the payment is never final at
+    /// once.
+    pub more_fundings: bool,
 }
 
 impl From<PaidRecord> for Paid {
@@ -229,6 +244,8 @@ impl From<PaidRecord> for Paid {
             skimmed_msat: r.skimmed_msat,
             sender_intended_msat: r.sender_intended_msat,
             received_unix: r.received_unix,
+            unconfirmed_fundings: r.unconfirmed_fundings,
+            more_fundings: r.more_fundings,
         }
     }
 }
@@ -357,11 +374,14 @@ struct Shared {
     device_status: Arc<DeviceStatus>,
     logger: Arc<Logger>,
     paid: mpsc::UnboundedSender<Paid>,
+    funding: mpsc::UnboundedSender<FundingEvent>,
     waiters: Mutex<HashMap<LSPSRequestId, Waiter>>,
     expectations: Expectations,
     paid_log: PaidLog,
     orders: Orders,
     lsps1: Mutex<Lsps1State>,
+    funding_log: FundingLog,
+    confirm_depth: u32,
     sweeper: Arc<Sweeper>,
     destination: Arc<SweepDestination>,
     tor: Option<SocketAddr>,
@@ -413,6 +433,7 @@ pub struct Node {
     shared: Arc<Shared>,
     paid_rx: tokio::sync::Mutex<mpsc::UnboundedReceiver<Paid>>,
     node_id: PublicKey,
+    funding_rx: tokio::sync::Mutex<mpsc::UnboundedReceiver<FundingEvent>>,
     tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     filters: Mutex<Option<FilterRun>>,
     processor: Mutex<Option<tokio::task::JoinHandle<Result<(), lightning::io::Error>>>>,
@@ -623,6 +644,7 @@ impl Node {
             .map_err(setup)?;
         let orders = Orders::load(Arc::clone(&store)).await.map_err(setup)?;
         let paid_log = PaidLog::new(Arc::clone(&background));
+        let funding_log = FundingLog::new(Arc::clone(&background));
         let destination = Arc::new(
             SweepDestination::load(
                 Arc::clone(&background),
@@ -877,10 +899,33 @@ impl Node {
         ));
 
         let (paid_tx, paid_rx) = mpsc::unbounded_channel();
+        funding_log.load().await.map_err(setup)?;
+        let mut re_emitted: Vec<FundingEvent> = Vec::new();
         // The paid events the caller has not acknowledged come again, with the
         // same payment hash.
         for record in paid_log.pending(now_unix).await.map_err(setup)? {
+            // A payment through a channel not yet confirmed is watched
+            // again, in case the stop came between the two writes (SL-40).
+            for txid in &record.unconfirmed_fundings {
+                if let Some(outcome) = funding_log
+                    .watch(*txid, start_best.height)
+                    .await
+                    .map_err(setup)?
+                {
+                    re_emitted.push(FundingEvent {
+                        txid: *txid,
+                        outcome,
+                    });
+                }
+            }
             let _ = paid_tx.send(Paid::from(record));
+        }
+        let (funding_tx, funding_rx) = mpsc::unbounded_channel();
+        for event in re_emitted {
+            let _ = funding_tx.send(event);
+        }
+        for event in funding_log.pending(now_unix).await.map_err(setup)? {
+            let _ = funding_tx.send(event);
         }
         let shared = Arc::new(Shared {
             network: config.network,
@@ -898,6 +943,7 @@ impl Node {
             device_status: Arc::clone(&status),
             logger: Arc::clone(&logger),
             paid: paid_tx,
+            funding: funding_tx,
             waiters: Mutex::new(HashMap::new()),
             expectations,
             paid_log,
@@ -907,6 +953,8 @@ impl Node {
                 options: None,
                 last_poll: 0,
             }),
+            funding_log,
+            confirm_depth: config.confirm_depth.max(1),
             sweeper: Arc::clone(&sweeper),
             destination: Arc::clone(&destination),
             tor: config.tor,
@@ -1005,6 +1053,13 @@ impl Node {
             _ => return Err(setup("chain source")),
         }
 
+        // The fundings of the channels a payment came through before their
+        // funding had a confirmation (SL-27, SL-40).
+        {
+            let shared = Arc::clone(&shared);
+            tasks.push(tokio::spawn(async move { watch_fundings(shared).await }));
+        }
+
         // The provider: stay connected to it, and only to it (SL-31).
         {
             let shared = Arc::clone(&shared);
@@ -1071,6 +1126,7 @@ impl Node {
             shared,
             node_id,
             paid_rx: tokio::sync::Mutex::new(paid_rx),
+            funding_rx: tokio::sync::Mutex::new(funding_rx),
             tasks: Mutex::new(tasks),
             filters: Mutex::new(filter_run),
             processor: Mutex::new(Some(processor)),
@@ -1093,6 +1149,32 @@ impl Node {
     /// A sale that is paid, if one is waiting.
     pub fn try_paid(&self) -> Option<Paid> {
         self.paid_rx.try_lock().ok()?.try_recv().ok()
+    }
+
+    /// What became of the funding of a channel a paid sale came through
+    /// before the funding had a confirmation (SL-27, SL-40): its first
+    /// confirmation, or its loss. Events are given at least once, as paid
+    /// ones are: each is kept until [`Node::ack_funding`], and a start gives
+    /// again every one not acknowledged.
+    pub fn try_funding(&self) -> Option<FundingEvent> {
+        self.funding_rx.try_lock().ok()?.try_recv().ok()
+    }
+
+    /// What the node holds of a funding named in a paid event (SL-27,
+    /// SL-40): watched, confirmed, lost or not known. It is known after the
+    /// event of its outcome has been acknowledged, so that a sale is never
+    /// left waiting for an event that was given before.
+    pub fn funding_state(&self, txid: &[u8; 32]) -> funding::FundingState {
+        self.shared.funding_log.state(txid)
+    }
+
+    /// The caller has the event of this funding: it is not given again.
+    pub async fn ack_funding(&self, txid: [u8; 32]) -> Result<(), String> {
+        self.shared
+            .funding_log
+            .ack(&txid, now_secs())
+            .await
+            .map_err(|e| e.to_string())
     }
 
     /// The caller has marked the sale with this payment hash paid: its event
@@ -1442,6 +1524,37 @@ impl Node {
 }
 
 impl Shared {
+    /// SL-27: each funding watched for the counter is judged against the
+    /// channels the library lists now. One that got its first confirmation,
+    /// or is lost, is kept as an event and given to the counter.
+    async fn check_fundings(&self) -> Result<(), lightning::io::Error> {
+        let details = self.manager.list_channels();
+        let channels: Vec<ChannelFunding> = details.iter().map(ChannelFunding::of).collect();
+        let height = self.manager.current_best_block().height;
+        for event in self
+            .funding_log
+            .check(&channels, height, self.confirm_depth)
+            .await?
+        {
+            self.logger
+                .line(Level::Info, &format!("funding {:?}", event.outcome));
+            // A funding lost to the timeout leaves its channel open, and the
+            // provider may still send through it: the channel is closed at
+            // once, so that no more payments come through it (SL-27).
+            if event.outcome == funding::Outcome::Lost(funding::LostWhy::TimedOut) {
+                for id in funding::channels_of(&event.txid, &details) {
+                    let _ = self.manager.force_close_broadcasting_latest_txn(
+                        &id.0,
+                        &id.1,
+                        "its funding has no confirmation".to_string(),
+                    );
+                }
+            }
+            let _ = self.funding.send(event);
+        }
+        Ok(())
+    }
+
     fn chain_ok(&self) -> bool {
         now_secs().saturating_sub(self.last_poll_ok.load(Ordering::SeqCst)) < CHAIN_STALE_SECS
     }
@@ -2109,6 +2222,22 @@ async fn rpc_chain(rpc: &RpcClient) -> Result<String, String> {
 const TOR_CONNECT: Duration = Duration::from_secs(10);
 
 /// Whether something listens at the proxy's address (SL-32).
+/// SL-27: the fundings of the payments that came through channels not yet
+/// confirmed, judged every few seconds (the height moves with each block).
+async fn watch_fundings(shared: Arc<Shared>) {
+    loop {
+        tokio::select! {
+            _ = shared.stop.notified() => return,
+            _ = tokio::time::sleep(FUNDING_CHECK_EVERY) => {}
+        }
+        if let Err(e) = shared.check_fundings().await {
+            shared
+                .logger
+                .line(Level::Warn, &format!("fundings not checked: {e}"));
+        }
+    }
+}
+
 async fn tor_reachable(proxy: SocketAddr) -> Result<(), String> {
     match tokio::time::timeout(TOR_CONNECT, tokio::net::TcpStream::connect(proxy)).await {
         Ok(Ok(_)) => Ok(()),
@@ -2336,6 +2465,17 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
             // crash after this gives it again on the next start, and a
             // failure to keep it makes the library give the event again.
             let now = now_secs();
+            // SL-40: a channel the payment came through whose funding has no
+            // confirmation yet.
+            let channels: Vec<ChannelFunding> = shared
+                .manager
+                .list_channels()
+                .iter()
+                .map(ChannelFunding::of)
+                .collect();
+            let htlc_channels: Vec<[u8; 32]> = htlcs.iter().map(|h| h.channel_id.0).collect();
+            let unconfirmed =
+                funding::unconfirmed_fundings(&htlc_channels, &channels, shared.confirm_depth);
             let record = match shared
                 .paid_log
                 .record(PaidRecord {
@@ -2347,6 +2487,8 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
                         .fold(0, u64::saturating_add),
                     sender_intended_msat: sender_intended_total_msat,
                     received_unix: now,
+                    unconfirmed_fundings: unconfirmed.txids,
+                    more_fundings: unconfirmed.more,
                 })
                 .await
             {
@@ -2363,6 +2505,24 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
             // None: the caller has acknowledged this sale already, and this is
             // the library's repeat of its event after a crash.
             if let Some(record) = record {
+                let height = shared.manager.current_best_block().height;
+                for txid in &record.unconfirmed_fundings {
+                    match shared.funding_log.watch(*txid, height).await {
+                        // One settled already: the counter is told again, so
+                        // that it always hears it (SL-27, SL-40).
+                        Ok(Some(outcome)) => {
+                            let _ = shared.funding.send(FundingEvent {
+                                txid: *txid,
+                                outcome,
+                            });
+                        }
+                        Ok(None) => {}
+                        Err(e) => {
+                            log(Level::Warn, format!("funding not watched: {e}"));
+                            return Err(ReplayEvent());
+                        }
+                    }
+                }
                 let _ = shared.paid.send(Paid::from(record));
             }
         }
@@ -2443,6 +2603,9 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
                 Level::Info,
                 format!("channel ready {channel_id} with {counterparty_node_id}"),
             );
+            if shared.check_fundings().await.is_err() {
+                return Err(ReplayEvent());
+            }
         }
         Event::ChannelClosed {
             channel_id, reason, ..
@@ -2451,6 +2614,11 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
                 Level::Warn,
                 format!("channel closed {channel_id}: {reason}"),
             );
+            // A funding that was never in a block is lost with its channel
+            // (SL-27).
+            if shared.check_fundings().await.is_err() {
+                return Err(ReplayEvent());
+            }
         }
         Event::SpendableOutputs {
             outputs,
@@ -2543,6 +2711,7 @@ mod tests {
             start_from: StartFrom::Newer,
             wallet: crate::testutil::wallet_text(),
             sweep_index: 0,
+            confirm_depth: 1,
         }
     }
 

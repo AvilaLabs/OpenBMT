@@ -171,6 +171,27 @@ impl Why {
             )
             .code("CR-14"),
             Self::Instant(label) => label.words(),
+            Self::FundingNotConfirmed => Words::new(
+                Tone::Info,
+                "Waiting for the channel",
+                "The Lightning payment came through a new channel that is not in a block yet, so this sale waits for it.",
+                Who::Cashier,
+                "Ask the customer to wait, usually about ten minutes. A manager may accept the sale sooner.",
+            )
+            .code("SL-40"),
+            Self::FundingLostWait => Words::new(
+                Tone::Info,
+                "Lightning money may not come",
+                "The new channel this payment came through was never confirmed, so the money may never reach the shop.",
+                Who::Cashier,
+                "Take another payment, or ask a manager, who may accept the sale anyway.",
+            )
+            .code("SL-27"),
+            Self::FundingLost => do_not_hand_over(
+                "The new channel this Lightning payment came through was never confirmed, so the money may not reach the shop.",
+                "a Lightning channel was never confirmed",
+                "SL-27",
+            ),
             Self::PaidByLightning => Words::new(
                 Tone::Good,
                 "Paid over Lightning",
@@ -1800,6 +1821,9 @@ pub fn why_name(w: &Why) -> &'static str {
         Why::ConfirmedAt(_) => "ConfirmedAt",
         Why::FinalAt(_) => "FinalAt",
         Why::PaidByLightning => "PaidByLightning",
+        Why::FundingNotConfirmed => "FundingNotConfirmed",
+        Why::FundingLostWait => "FundingLostWait",
+        Why::FundingLost => "FundingLost",
         Why::OverriddenBy { .. } => "OverriddenBy",
         Why::Replaced => "Replaced",
         Why::Reopened => "Reopened",
@@ -1888,6 +1912,22 @@ pub fn sample_screens() -> Vec<(String, Screen)> {
         (
             "Waiting/PauseNotSaved".to_string(),
             screen(State::Waiting, Why::PauseNotSaved, wait),
+        ),
+        (
+            "Waiting/FundingNotConfirmed".to_string(),
+            screen(State::Waiting, Why::FundingNotConfirmed, Next::KeepWatching),
+        ),
+        (
+            "Waiting/FundingLostWait".to_string(),
+            screen(State::Waiting, Why::FundingLostWait, Next::PersonLooks),
+        ),
+        (
+            "DoNotHandOver/FundingLost".to_string(),
+            screen(
+                State::DoNotHandOver,
+                Why::FundingLost,
+                Next::AskOwnerOrOtherPayment,
+            ),
         ),
         (
             "Confirmed".to_string(),

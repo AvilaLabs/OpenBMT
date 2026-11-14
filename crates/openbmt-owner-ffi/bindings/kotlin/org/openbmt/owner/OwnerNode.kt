@@ -1061,7 +1061,10 @@ class ShopLightningHeld(
     val maxOpeningFeeSats: Long,
 )
 
-/** The newest report of the Lightning counter and when it came (SL-78, LK-84). Times are seconds since 1970; 0 is never. */
+/**
+ * The newest report of the Lightning counter and when it came (SL-78, LK-84). Times are seconds since 1970; 0 is never.
+ * [lostFundingSales]: the numbers of the sales paid through a channel whose funding was lost (SL-27), rising.
+ */
 class LightningReport(
     val takenAt: Long,
     val balanceSats: Long,
@@ -1075,6 +1078,9 @@ class LightningReport(
     val orderWhy: OrderWhy,
     /** What the last order costs, in sats; 0 with no order. */
     val orderFeeSats: Long,
+    val lostFundingSales: List<Long>,
+    /** How many sales were named lost in all: more than listed when the list kept only the newest. */
+    val lostFundingTotal: Long,
 )
 
 /**
@@ -2581,7 +2587,7 @@ private fun Reader.shopLightningHeld(): ShopLightningHeld =
     ShopLightningHeld(bytes(), bytes(), bytes(), bytes(), string(), u64(), u64())
 
 private fun Reader.lightningReport(): LightningReport =
-    LightningReport(u64(), u64(), u64(), u64(), u64(), u64(), notOffered(), lsps1Offer(), orderState(), orderWhy(), u64())
+    LightningReport(u64(), u64(), u64(), u64(), u64(), u64(), notOffered(), lsps1Offer(), orderState(), orderWhy(), u64(), list { u32() }, u32())
 
 internal fun Reader.shopLightningState(): ShopLightningState =
     ShopLightningState(

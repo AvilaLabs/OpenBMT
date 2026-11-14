@@ -22,6 +22,7 @@
 //! Commands: `nodeid`, `status`, `quote <sats>`, `invoice <sats>`,
 //! `invoice_capped <sats> <max_fee_msat>`, `paid`, `ack <hash>`,
 //! `sweep <index> <sats>`, `sweep_index <index>`, `address <index>`,
+//! `funding`, `ackfunding <txid>`,
 //! `confirmations` (the funding transaction's, per channel),
 //! `descriptor`, `close <index>`, `tracked`, `stop`.
 //!
@@ -31,9 +32,14 @@
 //! for a Core wallet that must agree on the addresses.
 //!
 //! `paid` lists the paid events waiting; each stays kept, and is given again
-//! after a restart, until `ack` with its hash.
+//! after a restart, until `ack` with its hash. A paid line ends with
+//! `funding=confirmed` or `funding=<txid>` (the channel's funding has no
+//! confirmation yet, SL-27). `funding` lists the funding events waiting
+//! (`funding <txid> confirmed` or `lost`), each kept until `ackfunding
+//! <txid>`.
 
 use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
+use bitcoin::hashes::Hash;
 use bitcoin::secp256k1::{PublicKey, Secp256k1};
 use bitcoin::{Network, NetworkKind};
 use openbmt_core::wallet::descriptor_checksum;
@@ -42,6 +48,7 @@ use openbmt_lightning_node::bip85::node_seed;
 use openbmt_lightning_node::chain::{ChainSource, CoreRpc};
 use openbmt_lightning_node::device_tcp::TcpDevice;
 use openbmt_lightning_node::filters::FilterConfig;
+use openbmt_lightning_node::funding::Outcome;
 use openbmt_lightning_node::node::{Node, NodeConfig, Receive};
 use openbmt_lightning_node::provider::ProviderConfig;
 use openbmt_lightning_node::state::StartFrom;
@@ -116,6 +123,10 @@ async fn main() {
             .get("sweep_index")
             .map(|v| v.parse().unwrap())
             .unwrap_or(0),
+        confirm_depth: args
+            .get("confirm_depth")
+            .map(|v| v.parse().unwrap())
+            .unwrap_or(1),
     };
     let node = match Node::start(config).await {
         Ok(n) => Arc::new(n),
@@ -211,12 +222,42 @@ async fn handle(node: &Node, p: &[&str]) -> String {
                     .iter()
                     .map(|b| format!("{b:02x}"))
                     .collect();
+                let mut funding = paid
+                    .unconfirmed_fundings
+                    .iter()
+                    .map(|t| bitcoin::Txid::from_byte_array(*t).to_string())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                if funding.is_empty() {
+                    funding = "confirmed".to_string();
+                } else if paid.more_fundings {
+                    funding.push_str(",more");
+                }
                 out.push(format!(
-                    "paid {hash} amount_msat={} at={}",
+                    "paid {hash} amount_msat={} at={} funding={funding}",
                     paid.amount_msat, paid.received_unix
                 ));
             }
             out.join("\n")
+        }
+        "funding" => {
+            let mut out = Vec::new();
+            while let Some(event) = node.try_funding() {
+                let txid = bitcoin::Txid::from_byte_array(event.txid);
+                let what = match event.outcome {
+                    Outcome::Confirmed => "confirmed",
+                    _ => "lost",
+                };
+                out.push(format!("funding {txid} {what}"));
+            }
+            out.join("\n")
+        }
+        "ackfunding" => {
+            let txid = p.get(1).and_then(|h| h.parse::<bitcoin::Txid>().ok());
+            match txid {
+                Some(t) => format!("{:?}", node.ack_funding(t.to_byte_array()).await),
+                None => "ERR ackfunding <txid>".into(),
+            }
         }
         "ack" => {
             let hash: Option<[u8; 32]> = p.get(1).and_then(|h| {

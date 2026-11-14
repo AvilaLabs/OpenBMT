@@ -114,6 +114,40 @@ const SALE_VERSION_REQUEST: u8 = 5;
 /// such a payment and for no other; the Lightning flag is always 1, and a
 /// request is never one.
 const SALE_VERSION_SWAP: u8 = 6;
+/// The version byte of a sale paid over the shop's own Lightning node through
+/// channels whose fundings are not all confirmed yet (SL-40), or of a sale
+/// that waits for such fundings: the fields of version 6, then the wait
+/// (`u8`: 0 none, 1 the fundings are not confirmed, 2 one is lost), the flag
+/// of more fundings than listed, the count of fundings (`u8`, at most
+/// [`MAX_FUNDINGS`]) and the fundings, 32 bytes each. Written for a sale
+/// that holds such a payment, whose fundings are listed until each is
+/// confirmed, and for a sale that waits for them, which holds no payment
+/// yet; it is never a swap payment and never a request.
+const SALE_VERSION_FUNDING: u8 = 7;
+/// The most fundings a sale lists (SL-40).
+pub const MAX_FUNDINGS: usize = 8;
+/// What a sale that holds no payment yet waits for (SL-40, SL-27).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FundingWait {
+    /// Nothing.
+    No,
+    /// The payment came through channels whose fundings are not confirmed,
+    /// and more than the shop takes at once on that footing.
+    Unconfirmed,
+    /// One of the fundings is lost.
+    Lost,
+}
+
+impl FundingWait {
+    fn to_byte(self) -> u8 {
+        match self {
+            Self::No => 0,
+            Self::Unconfirmed => 1,
+            Self::Lost => 2,
+        }
+    }
+}
+
 /// Seconds in a day.
 const DAY_SECS: u64 = 86_400;
 
@@ -259,6 +293,17 @@ pub struct Sale {
     /// The Lightning payment came through a swap provider (CR-221): its
     /// claim is on the chain, to this sale's own address.
     pub(crate) via_swap: bool,
+    /// The funding transactions of the channels the Lightning payment came
+    /// through that are not confirmed yet (SL-40): each leaves the list when
+    /// it is confirmed, and the exposure of the sale stays counted until the
+    /// list is empty and [`Sale::funding_more`] is not set. A sale that
+    /// waits for the payment lists them too.
+    pub(crate) funding: Vec<[u8; 32]>,
+    /// The payment came through more unconfirmed fundings than are listed:
+    /// the exposure is never released by a confirmation.
+    pub(crate) funding_more: bool,
+    /// What the sale waits for while it holds no payment (SL-40).
+    pub(crate) funding_wait: FundingWait,
     /// The lifetime of a request to send; none for a sale shown at the till
     /// (CR-204).
     pub(crate) request: Option<RequestDays>,
@@ -312,6 +357,9 @@ impl Sale {
             refunds: Vec::new(),
             lightning: None,
             via_swap: false,
+            funding: Vec::new(),
+            funding_more: false,
+            funding_wait: FundingWait::No,
             request: None,
             note: None,
         }
@@ -415,6 +463,25 @@ impl Sale {
     /// it (CR-224).
     pub fn paid_via_swap(&self) -> bool {
         self.via_swap && self.lightning.is_some()
+    }
+
+    /// The funding transactions of the channels the Lightning payment came
+    /// through that are not confirmed yet (SL-40, SL-27): empty for a payment
+    /// through confirmed channels, and when every funding has confirmed.
+    pub fn lightning_fundings(&self) -> &[[u8; 32]] {
+        &self.funding
+    }
+
+    /// Whether the Lightning payment came through more unconfirmed fundings
+    /// than [`Sale::lightning_fundings`] lists (SL-40).
+    pub fn lightning_fundings_more(&self) -> bool {
+        self.funding_more
+    }
+
+    /// Whether the sale rests on fundings: they are listed, or more came
+    /// than are listed.
+    pub(crate) fn rests_on_fundings(&self) -> bool {
+        !self.funding.is_empty() || self.funding_more
     }
 
     /// The lifetime of the sale if it is a request to send (CR-204).
@@ -726,16 +793,27 @@ impl Sale {
         }
         out.extend_from_slice(&len32(watch.len()).to_le_bytes());
         out.extend_from_slice(&watch);
-        if self.via_swap && self.lightning.is_some() {
+        let funded = !self.via_swap
+            && self.request.is_none()
+            && (self.funding_wait != FundingWait::No
+                || (self.lightning.is_some() && self.rests_on_fundings()));
+        if funded || (self.via_swap && self.lightning.is_some()) {
             if let Some(byte) = out.get_mut(4) {
-                *byte = SALE_VERSION_SWAP;
+                *byte = if funded {
+                    SALE_VERSION_FUNDING
+                } else {
+                    SALE_VERSION_SWAP
+                };
             }
             out.extend_from_slice(&self.tip.0.to_le_bytes());
-            if let Some(paid) = &self.lightning {
-                out.push(1);
-                out.extend_from_slice(&paid.payment_hash);
-                out.extend_from_slice(&paid.amount_msat.to_le_bytes());
-                wire::put_opt_u64(&mut out, paid.settled_at);
+            match &self.lightning {
+                Some(paid) => {
+                    out.push(1);
+                    out.extend_from_slice(&paid.payment_hash);
+                    out.extend_from_slice(&paid.amount_msat.to_le_bytes());
+                    wire::put_opt_u64(&mut out, paid.settled_at);
+                }
+                None => out.push(0),
             }
             out.extend_from_slice(&len32(self.refunds.len()).to_le_bytes());
             for entry in &self.refunds {
@@ -749,6 +827,14 @@ impl Sale {
                     out.extend_from_slice(note.as_bytes());
                 }
                 None => out.push(0),
+            }
+            if funded {
+                out.push(self.funding_wait.to_byte());
+                out.push(u8::from(self.funding_more));
+                out.push(u8::try_from(self.funding.len()).unwrap_or(u8::MAX));
+                for txid in &self.funding {
+                    out.extend_from_slice(txid);
+                }
             }
         } else if self.request.is_some() || self.note.is_some() {
             if let Some(byte) = out.get_mut(4) {
@@ -843,6 +929,7 @@ impl Sale {
             && version != SALE_VERSION_TIP
             && version != SALE_VERSION_REQUEST
             && version != SALE_VERSION_SWAP
+            && version != SALE_VERSION_FUNDING
         {
             return Err(DecodeError::UnsupportedVersion(version));
         }
@@ -974,7 +1061,8 @@ impl Sale {
         let mut refunds: Vec<RefundEntry> = Vec::new();
         let mut lightning = None;
         let mut tip = Amount(0);
-        let swap = version == SALE_VERSION_SWAP;
+        let funded = version == SALE_VERSION_FUNDING;
+        let swap = version == SALE_VERSION_SWAP || funded;
         let extended = version == SALE_VERSION_TIP || version == SALE_VERSION_REQUEST || swap;
         if extended {
             tip = Amount(r.u64_le()?);
@@ -1037,8 +1125,40 @@ impl Sale {
             if !swap && request.is_none() && note.is_none() {
                 return Err(bad("version 5 holds neither a request nor a note"));
             }
-            if swap && (request.is_some() || lightning.is_none()) {
+            if swap && request.is_some() {
                 return Err(bad("version 6 holds a swap payment and is not a request"));
+            }
+            if swap && !funded && lightning.is_none() {
+                return Err(bad("version 6 holds a swap payment"));
+            }
+        }
+        let mut funding = Vec::new();
+        let mut funding_more = false;
+        let mut funding_wait = FundingWait::No;
+        if funded {
+            funding_wait = match r.u8()? {
+                0 => FundingWait::No,
+                1 => FundingWait::Unconfirmed,
+                2 => FundingWait::Lost,
+                _ => return Err(bad("the wait for a funding is not known")),
+            };
+            funding_more = r.flag()?;
+            let n = usize::from(r.u8()?);
+            if n > MAX_FUNDINGS {
+                return Err(bad("a sale lists more fundings than it may"));
+            }
+            for _ in 0..n {
+                let txid = r.array::<32>()?;
+                if funding.contains(&txid) {
+                    return Err(bad("a funding is listed twice"));
+                }
+                funding.push(txid);
+            }
+            // A sale that holds a payment lists fundings and does not wait;
+            // one that holds none waits for them.
+            let rests = n > 0 || funding_more;
+            if !rests || (lightning.is_some() != (funding_wait == FundingWait::No)) {
+                return Err(bad("version 7 is a payment on fundings or a wait for them"));
             }
         }
         r.finish()?;
@@ -1103,7 +1223,10 @@ impl Sale {
             late_unlisted,
             refunds,
             lightning,
-            via_swap: swap,
+            via_swap: swap && !funded,
+            funding,
+            funding_more,
+            funding_wait,
             request,
             note,
         })

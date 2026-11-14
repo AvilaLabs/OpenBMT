@@ -1114,6 +1114,8 @@ class Controller(private val act: MainActivity) {
             // SL-41, SL-76, SL-77: on the Lightning counter only, the reason Lightning is not offered and the call for the key.
             shopLightning(n)?.let { sl ->
                 sl.why?.let { items.add(HomeLine("shop-lightning-why", it.say())) }
+                // SL-27: the funding of a channel was lost, and the sales paid through it are named.
+                sl.fundingLost?.let { items.add(HomeLine("shop-lightning-funding-lost", it.say())) }
                 if (sl.needsSeed) items.add(HomeLine("shop-lightning-key", sl.scan.say()))
                 if (sl.deleteSeed) deleteShopSeed()
             }
@@ -1276,7 +1278,7 @@ class Controller(private val act: MainActivity) {
     /** SL-41, SL-76, SL-77: what the library says of Shop Lightning, or null when it says nothing or cannot be read. */
     private fun shopLightning(n: CounterNode): ShopLightningStatus? =
         try {
-            n.shopLightning().takeIf { it.needsSeed || it.deleteSeed || it.why != null }
+            n.shopLightning().takeIf { it.needsSeed || it.deleteSeed || it.why != null || it.fundingLost != null }
         } catch (e: CounterException) {
             null
         }

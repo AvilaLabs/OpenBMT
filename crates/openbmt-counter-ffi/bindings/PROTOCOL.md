@@ -193,7 +193,7 @@ RefundRow: record: sale: u32, number: option<u64>, asked: u64, value_minor: opti
 HeartbeatOutcome: record: verified: bool, sent_at: option<u64>, words: Words, reports: list<ReportView>
 HealthView: record: healthy: bool, behind: bool, words: Words
 OwnNodeView: record: usable: bool, words: Words
-ShopLightningView: record: needs_seed: bool, delete_seed: bool, why: option<Words>, scan: Words
+ShopLightningView: record: needs_seed: bool, delete_seed: bool, why: option<Words>, scan: Words, funding_lost: option<Words>
 StatusView: record: checked_height: u32, tip_height: u32, health: option<HealthView>, own_node: option<OwnNodeView>, sales: list<u32>, refused_below_minimum: u64, stopped: bool, lightning: option<LightningStatusView>
 RateSourceView: record: id: string, url: string, currency: string, initial: string
 RateParseArgs: record: source: string, response: list<u8>, fetched_at: u64

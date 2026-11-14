@@ -3162,6 +3162,20 @@ impl<P: DriverPort> Node<P> {
         index: u32,
         facts: openbmt_lightning::PaidFacts,
     ) -> bool {
+        self.lightning_paid_through(index, facts, None)
+    }
+
+    /// [`Node::lightning_paid`] for a payment through a channel whose
+    /// funding had no confirmation at the claim, when `funding` says so
+    /// (SL-40): the counter decides it as a swap's (CR-221), and a payment
+    /// that waits is `false`: the node still has it, and it comes again at
+    /// the next turn.
+    pub(crate) fn lightning_paid_through(
+        &mut self,
+        index: u32,
+        facts: openbmt_lightning::PaidFacts,
+        funding: Option<openbmt_counter::PaidFunding>,
+    ) -> bool {
         let now = self.clock.now();
         let heartbeat = self.counter.heartbeat_for_policy(now);
         let judged = Facts {
@@ -3183,17 +3197,35 @@ impl<P: DriverPort> Node<P> {
             .sale(index)
             .and_then(|s| s.lightning())
             .is_some_and(|p| p.payment_hash != hash);
+        // SL-27: the fundings of a payment the node holds as lost, to be
+        // named like the sales of a funding that is lost at this moment.
+        let lost_fundings = match &funding {
+            Some(openbmt_counter::PaidFunding::Lost { txids, .. }) => txids.clone(),
+            _ => Vec::new(),
+        };
         let result = if by_another {
             Err(openbmt_counter::LightningRefused::SaleClosed)
+        } else if let Some(funding) = funding {
+            self.counter
+                .lightning_paid_funded(index, paid, funding, &judged, &mut self.store)
         } else {
             self.counter
                 .lightning_paid(index, paid, &judged, &mut self.store)
+                .map(Some)
         };
         match result {
-            Ok(screen) => {
+            Ok(Some(screen)) => {
                 self.ln_reports.extend(screen.reports);
                 self.ln.paid(index, &hash);
+                self.name_lost_fundings(&lost_fundings);
                 true
+            }
+            // SL-40: above the instant limits or with no room in the ledger,
+            // or through a funding that is lost, the sale waits for the
+            // funding, and a person may accept it.
+            Ok(None) => {
+                self.name_lost_fundings(&lost_fundings);
+                false
             }
             // CR-117: the sale is over, or was paid another way: this is a
             // late payment, recorded and flagged for the owner.
@@ -3296,16 +3328,92 @@ impl<P: DriverPort> Node<P> {
             store: &mut self.store,
         };
         shopln.reconcile(&self.settings, now, &mut src);
+        // SL-27, SL-40: what the node says of the fundings is read before the
+        // payments, so that a payment held for a funding that is confirmed
+        // now is final, and is dealt with after them, so that a sale paid
+        // in this turn is named if its funding is lost.
+        let fundings = shopln.take_funding();
         let paid = shopln.take_paid(now);
         for line in shopln.take_notes() {
             self.note(line);
         }
         for p in paid {
-            if self.lightning_paid(p.sale, p.facts) {
+            if self.lightning_paid_through(p.sale, p.facts, p.funding) {
                 if let Some(shopln) = self.shopln.as_mut() {
                     shopln.recorded(&p.facts.payment_hash);
                 }
             }
+        }
+        for event in fundings {
+            self.funding_event(event);
+        }
+    }
+
+    /// SL-27: the sales that rest on each funding the node holds as lost are
+    /// named for the manager and the owner, and a sale paid at once through
+    /// one is a cancel (CR-14). Asking again changes nothing.
+    fn name_lost_fundings(&mut self, txids: &[[u8; 32]]) {
+        for txid in txids {
+            self.funding_lost_for(txid);
+        }
+    }
+
+    /// The counter's side of the loss of one funding. `false` when a record
+    /// could not be written, so that the event comes again.
+    fn funding_lost_for(&mut self, txid: &[u8; 32]) -> bool {
+        let now = self.clock.now();
+        match self
+            .counter
+            .lightning_funding_lost(txid, now, &mut self.store)
+        {
+            Ok((sales, reports)) => {
+                self.ln_reports.extend(reports);
+                self.shopln
+                    .as_mut()
+                    .is_some_and(|shopln| shopln.funding_lost(&sales))
+            }
+            Err(e) => {
+                self.note(format!(
+                    "SL-27: the loss of a funding was not recorded: {e}"
+                ));
+                false
+            }
+        }
+    }
+
+    /// SL-27, SL-40: the node says what became of the funding of a channel
+    /// that payments came through while it had not the shop's confirmations.
+    pub(crate) fn funding_event(&mut self, event: openbmt_lightning_node::funding::FundingEvent) {
+        use openbmt_lightning_node::funding::Outcome;
+        let handled = match event.outcome {
+            Outcome::Watching => false,
+            // CR-15: the amount leaves the exposure ledger when every funding
+            // of the payment is confirmed.
+            Outcome::Confirmed => {
+                match self
+                    .counter
+                    .lightning_funding_confirmed(&event.txid, &mut self.store)
+                {
+                    Ok(_) => true,
+                    Err(e) => {
+                        self.note(format!("SL-40: the exposure was not released: {e}"));
+                        false
+                    }
+                }
+            }
+            // The sales paid through it are named for the manager and the
+            // owner and cancelled; their exposure stays counted until the
+            // owner releases it.
+            Outcome::Lost(_) => self.funding_lost_for(&event.txid),
+        };
+        let Some(shopln) = self.shopln.as_mut() else {
+            return;
+        };
+        if handled {
+            shopln.funding_handled(&event.txid);
+        }
+        for line in shopln.take_notes() {
+            self.note(line);
         }
     }
 

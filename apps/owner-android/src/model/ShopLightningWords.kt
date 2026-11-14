@@ -96,6 +96,10 @@ object ShopLightningWords {
     const val orderWhyNotPossible = "The provider's terms are ones the counter cannot meet or pay."
     const val orderWhyNoChannel = "It was paid, but no channel opened within two days. Ask the provider for the money back."
     const val orderWhyStopped = "It was paid, but no channel came, so no more room is bought from this provider. Ask it for the money back, or pick another provider."
+    // ---- the sales paid through a channel whose funding was lost (SL-27) ----
+    const val lostFundingLabel = "Sales through a lost channel"
+    const val lostFundingWhat = "A new channel was never confirmed, so the money of these sales may never reach the shop. The counter has closed that channel."
+    const val lostFundingTotalLabel = "All sales through lost channels"
     const val changeLimits = "Change the limits"
     const val changeProvider = "Change the provider"
     const val save = "Save"
@@ -254,6 +258,9 @@ object ShopLightningWords {
         "cameLabel" to cameLabel,
         "noReport" to noReport,
         "whyLabel" to whyLabel,
+        "lostFundingLabel" to lostFundingLabel,
+        "lostFundingWhat" to lostFundingWhat,
+        "lostFundingTotalLabel" to lostFundingTotalLabel,
         "offered" to offered,
         "secondDeviceAway" to secondDeviceAway,
         "chainBehind" to chainBehind,

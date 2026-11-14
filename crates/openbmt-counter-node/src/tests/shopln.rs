@@ -289,13 +289,24 @@ fn sl_77_a_plan_whose_seed_is_gone_is_forgotten() {
 fn sl_41_every_reason_has_written_words_of_its_own() {
     let all = all_shopln_words();
     let mut seen = std::collections::BTreeSet::new();
-    for (name, words) in &all {
-        assert!(!is_placeholder(words), "{name}");
+    // A placeholder stands for words not written yet, one for each state
+    // (SC-12); the rest are sentences.
+    let (placeholders, written): (Vec<_>, Vec<_>) = all
+        .iter()
+        .cloned()
+        .partition(|(_, words)| is_placeholder(words));
+    for (name, words) in &placeholders {
+        assert_eq!(words.heading, words.what, "{name}");
+        assert_eq!(words.heading, words.next, "{name}");
+        assert!(seen.insert(words.heading.clone()), "{name} repeats");
+    }
+    assert!(placeholders.is_empty(), "no words are left unwritten");
+    for (name, words) in &written {
         assert_eq!(openbmt_core::say::check(words), Ok(()), "{name}");
         assert!(seen.insert(words.heading.clone()), "{name} repeats");
         assert!(words.code.is_some_and(|c| c.starts_with("SL-")), "{name}");
     }
-    assert_eq!(openbmt_core::say::check_distinct(&all), Ok(()));
+    assert_eq!(openbmt_core::say::check_distinct(&written), Ok(()));
     // The node's own text is for the small print.
     let w = shopln_words(&Why::Node(
         openbmt_lightning_node::room::OnChainReason::SecondDeviceAway,
@@ -379,4 +390,209 @@ fn sl_21_a_claimed_payment_for_a_sale_the_counter_does_not_know_is_kept_in_the_b
     assert_eq!(book.unmatched[0].payment_hash, [7; 32]);
     assert_eq!(book.unmatched[0].sale, Some(9_999));
     assert_eq!(book.unmatched[0].amount_msat, 7_000_000);
+}
+
+// ---- SL-27, SL-40: a payment through a channel not yet confirmed ----------
+
+const FUNDING: [u8; 32] = [0xf1; 32];
+
+fn unconfirmed() -> Option<openbmt_counter::PaidFunding> {
+    Some(openbmt_counter::PaidFunding::Unconfirmed {
+        txids: vec![FUNDING],
+        more: false,
+    })
+}
+
+fn lost() -> Option<openbmt_counter::PaidFunding> {
+    Some(openbmt_counter::PaidFunding::Lost {
+        txids: vec![FUNDING],
+        more: false,
+    })
+}
+
+/// The owner's heartbeat, so that the instant check is on (CR-50).
+fn heartbeat(rig: &mut Rig) {
+    let hb = openbmt_core::heartbeat::WatcherHeartbeat {
+        counter: id(3).device_id(),
+        seq: 1,
+        time: T0,
+        tip_height: 0,
+        tip_hash: bitcoin::hashes::Hash::to_byte_array(genesis()),
+        healthy: true,
+    };
+    rig.node.heartbeat(&hb.sign(&id(1)).to_bytes()).unwrap();
+}
+
+#[test]
+fn sl_40_a_payment_through_a_channel_not_yet_confirmed_is_decided_as_a_swap_is() {
+    use openbmt_counter::{State, Why};
+    let dir = Scratch::new();
+    let mut rig = rig(&dir, settings_naming(3, 1), None);
+    // No heartbeat: the instant check is off, so the payment waits, with
+    // the reason, and the node keeps it.
+    let waits = sale(&mut rig);
+    assert!(!rig
+        .node
+        .lightning_paid_through(waits, facts(1, 5_000_000), unconfirmed()));
+    let screen = rig.node.judge(waits).unwrap();
+    assert_eq!(screen.state, State::Waiting);
+    assert_eq!(screen.why, Why::FundingNotConfirmed);
+    assert_eq!(rig.node.counter().exposure_outstanding(), 0);
+    // The heartbeat is there: within the limits it is paid at once, and the
+    // amount is in the ledger.
+    heartbeat(&mut rig);
+    assert!(rig
+        .node
+        .lightning_paid_through(waits, facts(1, 5_000_000), unconfirmed()));
+    assert_eq!(rig.node.judge(waits).unwrap().state, State::PaidLightning);
+    assert_eq!(rig.node.counter().exposure_outstanding(), 5_000);
+    // A payment with no unconfirmed funding is final at once, as before.
+    let plain = sale(&mut rig);
+    assert!(rig
+        .node
+        .lightning_paid_through(plain, facts(2, 5_000_000), None));
+    assert_eq!(rig.node.judge(plain).unwrap().state, State::PaidLightning);
+    assert_eq!(rig.node.counter().exposure_outstanding(), 5_000);
+}
+
+#[test]
+fn sl_40_a_funding_confirmed_releases_the_ledger_and_a_waiting_sale_is_paid() {
+    use openbmt_counter::{PaidFunding, State};
+    use openbmt_lightning_node::funding::{FundingEvent, Outcome};
+    let dir = Scratch::new();
+    let mut rig = rig(&dir, settings_naming(3, 1), None);
+    heartbeat(&mut rig);
+    let paid_now = sale(&mut rig);
+    assert!(rig
+        .node
+        .lightning_paid_through(paid_now, facts(1, 5_000_000), unconfirmed()));
+    assert_eq!(rig.node.counter().exposure_outstanding(), 5_000);
+    rig.node.funding_event(FundingEvent {
+        txid: FUNDING,
+        outcome: Outcome::Confirmed,
+    });
+    assert_eq!(rig.node.counter().exposure_outstanding(), 0);
+    // A payment that waited for the funding is final once it is confirmed.
+    rig.time
+        .store(T0 + 100_000, std::sync::atomic::Ordering::SeqCst);
+    let waiting = sale(&mut rig);
+    assert!(!rig
+        .node
+        .lightning_paid_through(waiting, facts(2, 5_000_000), unconfirmed()));
+    // (no heartbeat is fresh any more: the check is off)
+    assert_eq!(rig.node.judge(waiting).unwrap().state, State::Waiting);
+    assert!(rig.node.lightning_paid_through(
+        waiting,
+        facts(2, 5_000_000),
+        Some(PaidFunding::Confirmed)
+    ));
+    assert_eq!(rig.node.judge(waiting).unwrap().state, State::PaidLightning);
+    assert_eq!(rig.node.counter().exposure_outstanding(), 0);
+}
+
+#[test]
+fn sl_27_a_funding_lost_names_the_sales_for_the_manager_and_the_owner() {
+    use openbmt_lightning_node::funding::{FundingEvent, LostWhy, Outcome};
+    let dir = Scratch::new();
+    let mut rig = rig(&dir, settings_naming(3, 1), None);
+    heartbeat(&mut rig);
+    let a = sale(&mut rig);
+    let b = sale(&mut rig);
+    let c = sale(&mut rig);
+    assert!(rig
+        .node
+        .lightning_paid_through(a, facts(1, 5_000_000), unconfirmed()));
+    assert!(rig
+        .node
+        .lightning_paid_through(b, facts(2, 5_000_000), None));
+    assert!(rig
+        .node
+        .lightning_paid_through(c, facts(3, 5_000_000), unconfirmed()));
+    assert!(rig
+        .node
+        .shop_lightning_status()
+        .unwrap()
+        .funding_lost
+        .is_empty());
+    assert!(rig
+        .node
+        .shop_lightning_report()
+        .unwrap()
+        .lost_funding_sales
+        .is_empty());
+    let event = FundingEvent {
+        txid: FUNDING,
+        outcome: Outcome::Lost(LostWhy::TimedOut),
+    };
+    rig.node.funding_event(event);
+    // The manager is told, and the sales are named.
+    let lost = rig.node.shop_lightning_status().unwrap().funding_lost;
+    assert_eq!(lost, vec![a, c]);
+    let words = crate::say::shopln_funding_lost_words(&lost);
+    assert_eq!(words.detail, Some(format!("{a}, {c}")));
+    // The report to the owner carries them.
+    let report = rig.node.shop_lightning_report().unwrap();
+    assert_eq!(report.lost_funding_sales, vec![a, c]);
+    // The same event again changes nothing, and the book keeps them.
+    rig.node.funding_event(event);
+    assert_eq!(
+        rig.node.shop_lightning_report().unwrap().lost_funding_sales,
+        vec![a, c]
+    );
+    let book = crate::shopln::Book::load(&dir.path().join("shop-lightning")).unwrap();
+    assert_eq!(book.lost_funding_sales, vec![a, c]);
+    // The money may never come: the ledger still holds what they counted.
+    assert_eq!(rig.node.counter().exposure_outstanding(), 10_000);
+    // The two sales paid at once through it are cancelled (CR-14): the
+    // alarm, and the sale says the goods are not to be handed over.
+    assert!(rig.node.counter().alarm());
+    let screen = rig.node.judge(a).unwrap();
+    assert_eq!(
+        (screen.state, screen.why),
+        (
+            openbmt_counter::State::DoNotHandOver,
+            openbmt_counter::Why::FundingLost
+        )
+    );
+    assert_eq!(
+        rig.node.judge(b).unwrap().state,
+        openbmt_counter::State::PaidLightning
+    );
+}
+
+#[test]
+fn sl_27_a_payment_through_a_funding_already_lost_waits_and_is_named() {
+    use openbmt_counter::{State, Why};
+    let dir = Scratch::new();
+    let mut rig = rig(&dir, settings_naming(3, 1), None);
+    heartbeat(&mut rig);
+    let s = sale(&mut rig);
+    // Within the limits and with the heartbeat, as one that is paid at once
+    // through an unconfirmed funding, but the funding is lost: it waits.
+    assert!(!rig
+        .node
+        .lightning_paid_through(s, facts(1, 5_000_000), lost()));
+    let screen = rig.node.judge(s).unwrap();
+    assert_eq!(
+        (screen.state, screen.why),
+        (State::Waiting, Why::FundingLostWait)
+    );
+    assert_eq!(rig.node.counter().exposure_outstanding(), 0);
+    // It is named for the manager and the owner, at once.
+    assert_eq!(
+        rig.node.shop_lightning_status().unwrap().funding_lost,
+        vec![s]
+    );
+    assert_eq!(
+        rig.node.shop_lightning_report().unwrap().lost_funding_sales,
+        vec![s]
+    );
+    // Again at the next turn: nothing more is said or counted.
+    assert!(!rig
+        .node
+        .lightning_paid_through(s, facts(1, 5_000_000), lost()));
+    assert_eq!(
+        rig.node.shop_lightning_report().unwrap().lost_funding_total,
+        1
+    );
 }

@@ -55,7 +55,9 @@ use crate::refusal::{
     RangeTakeRefused, RefundRefused, RequoteRefused, SightingError, StaffRefused, TillStartRefused,
     TotalsRefused, WithdrawRefused,
 };
-use crate::sale::{End, LightningPaid, OverrideMark, OwnCheck, PosState, RequestDays, Sale};
+use crate::sale::{
+    End, FundingWait, LightningPaid, OverrideMark, OwnCheck, PosState, RequestDays, Sale,
+};
 use crate::screen::{Next, Report, Screen, State, Why};
 use crate::staff::{StaffChange, StaffEvent};
 use crate::store::{Slot, Store, StoreFault};
@@ -175,6 +177,40 @@ pub struct SwapPaid {
     /// What the claim pays the sale's own address, in satoshis.
     pub received_sats: u64,
 }
+
+/// SL-40: the state of the funding of the channel a Lightning payment came
+/// through, as the node says it at the claim and since.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaidFunding {
+    /// Every funding has the shop's confirmations: the payment is final at
+    /// once.
+    Confirmed,
+    /// Some funding is not confirmed yet, and none is lost.
+    Unconfirmed {
+        /// The funding transactions not confirmed yet, as the node's paid
+        /// event names them: at most [`MAX_FUNDINGS`].
+        txids: Vec<[u8; 32]>,
+        /// More such fundings than listed: the payment is never taken at
+        /// once.
+        more: bool,
+    },
+    /// The node holds a funding of the payment as lost: the payment is never
+    /// taken at once, and a manager may still accept the sale.
+    Lost {
+        /// The funding transactions not confirmed, the lost one among them.
+        txids: Vec<[u8; 32]>,
+        /// More such fundings than listed.
+        more: bool,
+    },
+}
+
+/// What a lost funding did (SL-27): the sales named, rising, and what is
+/// reported for the cancels.
+pub type FundingLoss = (Vec<u32>, Vec<Report>);
+
+/// The most unconfirmed fundings a sale lists (SL-40): a payment through more
+/// is never taken at once.
+pub use crate::sale::MAX_FUNDINGS;
 
 /// The person who overrides (CR-21). The caller has already checked the PIN.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -346,6 +382,10 @@ pub struct Counter {
     /// claim is not yet in a block. Such a sale does not expire. Not stored:
     /// the node says it again after a start.
     swap_pending: BTreeSet<u32>,
+    /// SL-40: sales whose Lightning payment came through a channel whose
+    /// funding has no confirmation and waits for it. Such a sale does not
+    /// expire. Not stored: the node gives the payment again after a start.
+    funding_waiting: BTreeSet<u32>,
     /// CR-253: the bills and the next bill number.
     bills: Bills,
     /// CR-245: the till's reference of each held sale, as the records say.
@@ -400,6 +440,7 @@ impl Counter {
             held_ranges: BTreeMap::new(),
             held_switched: BTreeMap::new(),
             swap_pending: BTreeSet::new(),
+            funding_waiting: BTreeSet::new(),
             bills: Bills::new(),
             references: BTreeMap::new(),
             till_sales: BTreeMap::new(),
@@ -1408,6 +1449,13 @@ impl Counter {
     }
 
     fn install(&mut self, sale: Sale) {
+        // SL-40: a sale that waits for its fundings is known from the sale
+        // itself, so that a start finds it waiting.
+        if sale.funding_wait == FundingWait::No {
+            self.funding_waiting.remove(&sale.index);
+        } else {
+            self.funding_waiting.insert(sale.index);
+        }
         if !sale.is_live() {
             self.archived.insert(sale.script.clone(), sale.index);
         }
@@ -2739,6 +2787,325 @@ impl Counter {
         Ok(reports)
     }
 
+    /// SL-40, CR-221: whether a Lightning payment through a channel whose
+    /// funding has no confirmation may be taken at once, as a payment the
+    /// light client has seen (`CheckMode::Light`, WR-45) may be: the same
+    /// policy as a swap's (the sale's amount, the same slice and heartbeat).
+    /// There is no conflict watch to wait out, because what rests on the
+    /// funding is the channel and not a transaction of the sale. Reads only.
+    fn funding_decide<C: HeaderChain + ?Sized>(
+        &self,
+        index: u32,
+        sats: u64,
+        facts: &Facts<'_, C>,
+    ) -> Option<(openbmt_core::policy::InstantLabel, CheckMode)> {
+        let id = sale_payment_id(index);
+        let outstanding = {
+            let mut ledger = self.exposure.clone();
+            ledger.release_by_owner(&id);
+            ledger.outstanding()
+        };
+        let mut policy = InstantPolicy::for_counter(&self.settings, &self.identity.device_id());
+        policy.underpayment_tolerance_bps = 0;
+        let inputs = Inputs {
+            mode: CheckMode::Light,
+            sale_sats: sats,
+            received_sats: sats,
+            outstanding_sats: outstanding,
+            check_healthy: facts.health.healthy,
+            heartbeat: facts.heartbeat,
+            remote_order: facts.remote_order,
+            customer_wifi: self.settings.customer_wifi,
+            tor_on: self.settings.tor_on,
+            pause: self.pause.status(facts.now),
+            conflict_seen: false,
+            secs_since_first_seen: openbmt_core::policy::CONFLICT_WAIT_SECS,
+        };
+        match evaluate(&policy, &inputs) {
+            Decision::Instant { label, mode } => Some((label, mode)),
+            _ => None,
+        }
+    }
+
+    /// SL-40, CR-109: the shop's own node says the Lightning invoice of a
+    /// sale was paid, and says whether the funding of the channel it came
+    /// through has a confirmation.
+    ///
+    /// With a confirmation the payment is final at once, as
+    /// [`Counter::lightning_paid`] has it. Without, it is decided as a swap's
+    /// is (CR-221): within the shop's instant limits of the `Light` check
+    /// and with room in the exposure ledger, the sale is paid at once, the
+    /// amount is counted in the ledger as for an instant sale (CR-13) and
+    /// stays there until [`Counter::lightning_funding_confirmed`]; otherwise
+    /// the sale waits and shows that the funding is not confirmed yet
+    /// ([`Why::FundingNotConfirmed`]), and `Ok(None)` is returned with
+    /// nothing written. A person may accept a waiting sale (CR-20), and the
+    /// payment, when it comes again, is then the sale's own: the amount the
+    /// person's acceptance counted stays in the ledger as that of the
+    /// payment.
+    ///
+    /// Refused as `lightning_paid` refuses, except that a sale a person has
+    /// accepted takes the payment. The sale keeps the funding while its
+    /// payment rests on it, to be named if the funding is lost
+    /// ([`Counter::lightning_funding_lost`]).
+    pub fn lightning_paid_funded<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        paid: LightningPaid,
+        funding: PaidFunding,
+        facts: &Facts<'_, C>,
+        store: &mut S,
+    ) -> Result<Option<Screen>, LightningRefused<S::Error>> {
+        if self.unreadable.contains(&index) {
+            return Err(LightningRefused::Judge(JudgeError::UnknownSale(index)));
+        }
+        let base = self
+            .sales
+            .get(&index)
+            .cloned()
+            .ok_or(LightningRefused::UnknownSale(index))?;
+        let own = OwnCheck::Mixed(OwnNodeHealth::not_configured());
+        if base.lightning.is_some() {
+            return self
+                .judge_checked(index, facts, &own, store)
+                .map(Some)
+                .map_err(LightningRefused::Judge);
+        }
+        if !base.is_live() {
+            return Err(LightningRefused::SaleClosed);
+        }
+        let now = facts.now;
+        let mut sale = base;
+        let (st, received) = sale.refresh(facts.chain, now, self.depth(), self.final_depth(), &own);
+        if sale.accepted.is_some() || sale.frozen.is_some() || st.needs_a_person {
+            return Err(LightningRefused::PaidAnotherWay);
+        }
+        let sats = paid.sats();
+        let least = sale
+            .quotes
+            .iter()
+            .filter_map(|q| sats_for(sale.amount, q.rate))
+            .min()
+            .unwrap_or(u64::MAX);
+        if sats == 0 || sats < least {
+            return Err(LightningRefused::TooLittle { sats, least });
+        }
+        let by_person = sale.overridden.is_some();
+        match funding {
+            funding @ (PaidFunding::Unconfirmed { .. } | PaidFunding::Lost { .. }) => {
+                let (lost, mut txids, mut more) = match funding {
+                    PaidFunding::Lost { txids, more } => (true, txids, more),
+                    PaidFunding::Unconfirmed { txids, more } => (false, txids, more),
+                    PaidFunding::Confirmed => unreachable!("matched above"),
+                };
+                // The node lists at most the most; a longer list is more.
+                if txids.len() > MAX_FUNDINGS {
+                    txids.truncate(MAX_FUNDINGS);
+                    more = true;
+                }
+                // Taken at once only through fundings that are all listed
+                // and none lost, within the instant limits and with room.
+                let accepted = if by_person || lost || more {
+                    None
+                } else {
+                    self.funding_decide(index, sats, facts)
+                        .and_then(|(label, mode)| {
+                            self.accept_exposure(index, sats, mode, store)
+                                .ok()
+                                .map(|()| (label, mode))
+                        })
+                };
+                match accepted {
+                    Some(accepted) => {
+                        sale.accepted = Some(accepted);
+                        sale.exposure_counted = true;
+                        sale.exposure_released = false;
+                    }
+                    None if !by_person => {
+                        // The sale waits, and keeps what it waits for, so
+                        // that a start finds it waiting.
+                        let wait = if lost {
+                            FundingWait::Lost
+                        } else {
+                            FundingWait::Unconfirmed
+                        };
+                        if sale.funding != txids
+                            || sale.funding_more != more
+                            || sale.funding_wait != wait
+                        {
+                            sale.funding = txids;
+                            sale.funding_more = more;
+                            sale.funding_wait = wait;
+                            self.put_sale(store, sale)
+                                .map_err(LightningRefused::Store)?;
+                        }
+                        return Ok(None);
+                    }
+                    None => {}
+                }
+                sale.funding = txids;
+                sale.funding_more = more;
+                sale.funding_wait = FundingWait::No;
+            }
+            PaidFunding::Confirmed => {
+                if sale.exposure_counted && !sale.exposure_released {
+                    self.release_exposure(index, store)
+                        .map_err(LightningRefused::Store)?;
+                    sale.exposure_released = true;
+                }
+                sale.funding.clear();
+                sale.funding_more = false;
+                sale.funding_wait = FundingWait::No;
+            }
+        }
+        let valued = match sale.rate_of(sale.quote_index_at(now)) {
+            Some(rate) => value_of(sats, rate),
+            None => Amount(0),
+        };
+        sale.lightning = Some(paid);
+        sale.books_final = true;
+        let mut events = vec![Event::PaidByLightning {
+            index,
+            at: now,
+            payment_hash: paid.payment_hash,
+            amount_msat: paid.amount_msat,
+            settled_at: paid.settled_at,
+            valued,
+        }];
+        let mut reports = Vec::new();
+        if received > 0 {
+            sale.surplus_reported = received;
+            events.push(Event::SurplusOwed {
+                index,
+                at: now,
+                sats: received,
+            });
+            reports.push(Report::SurplusOwed {
+                index,
+                sats: received,
+            });
+        }
+        if sale.pos != PosState::Paid {
+            sale.pos = PosState::Paid;
+            events.push(Event::PosPaid { index, at: now });
+            reports.push(Report::PosPaid { index });
+        }
+        reports.push(Report::BooksFinal {
+            index,
+            amount: sale.own_amount(),
+            currency: sale.currency,
+            received_sats: sats,
+        });
+        // The exposure counted above stays on a failure to write: the sale
+        // takes the payment at the next try, which does not count it twice.
+        self.finish(store, sale, &events)
+            .map_err(LightningRefused::Store)?;
+        let mut screen = self
+            .judge_checked(index, facts, &own, store)
+            .map_err(LightningRefused::Judge)?;
+        screen.reports = reports;
+        // CR-249: a part paid over Lightning may settle its bill.
+        if screen.state.is_paid() && self.bills.bill_of_sale(index).is_some() {
+            let _ = self.bills_follow(facts.now, store);
+        }
+        Ok(Some(screen))
+    }
+
+    /// SL-40, CR-15: the funding of a channel is confirmed to the shop's
+    /// depth: it leaves the list of every sale paid through it, and the
+    /// exposure of a sale leaves the ledger when no funding of it is left to
+    /// confirm. Returns the sales released; asking again changes nothing.
+    pub fn lightning_funding_confirmed<S: Store>(
+        &mut self,
+        funding: &[u8; 32],
+        store: &mut S,
+    ) -> Result<Vec<u32>, StoreFault<S::Error>> {
+        let indexes: Vec<u32> = self
+            .sales
+            .values()
+            .filter(|s| {
+                s.lightning.is_some() && !s.exposure_released && s.funding.contains(funding)
+            })
+            .map(|s| s.index)
+            .collect();
+        let mut done = Vec::new();
+        for index in indexes {
+            let Some(base) = self.sales.get(&index) else {
+                continue;
+            };
+            let mut sale = base.clone();
+            sale.funding.retain(|t| t != funding);
+            // CR-15 for a payment through several channels: only when the
+            // last funding is confirmed, and never while more came than are
+            // listed.
+            if sale.rests_on_fundings() {
+                self.put_sale(store, sale)?;
+                continue;
+            }
+            if sale.exposure_counted {
+                self.release_exposure(index, store)?;
+            }
+            sale.exposure_released = true;
+            self.put_sale(store, sale)?;
+            done.push(index);
+        }
+        Ok(done)
+    }
+
+    /// SL-27, SL-40: the funding of a channel is lost, so the money of the
+    /// payments that came through it may never come. Each sale that rests on
+    /// it is named, rising. A sale paid at once through it is a cancel, as a
+    /// conflict on a sale accepted at once is (CR-14): the pause tracker and
+    /// the alarm, the POS told the sale is not paid (CR-30), and the sale
+    /// shows that the goods are not to be handed over; once per sale, and
+    /// its exposure stays counted until the owner releases it. A sale that
+    /// waits for the payment shows that the funding is lost and may still be
+    /// accepted by a manager. Asking again changes nothing.
+    pub fn lightning_funding_lost<S: Store>(
+        &mut self,
+        funding: &[u8; 32],
+        now: u64,
+        store: &mut S,
+    ) -> Result<FundingLoss, StoreFault<S::Error>> {
+        let mut named: Vec<u32> = self
+            .sales
+            .values()
+            .filter(|s| !s.exposure_released && s.funding.contains(funding))
+            .map(|s| s.index)
+            .collect();
+        named.sort_unstable();
+        let mut reports = Vec::new();
+        for &index in &named {
+            let Some(base) = self.sales.get(&index) else {
+                continue;
+            };
+            let mut sale = base.clone();
+            if sale.lightning.is_none() {
+                if sale.funding_wait == FundingWait::Lost {
+                    continue;
+                }
+                sale.funding_wait = FundingWait::Lost;
+                self.put_sale(store, sale)?;
+                continue;
+            }
+            if sale.cancel_recorded || sale.accepted.is_none() {
+                continue;
+            }
+            self.raise_cancel(index, now, store)?;
+            sale.cancel_recorded = true;
+            let mut events = vec![Event::Replaced { index, at: now }];
+            reports.push(Report::Alarm { index });
+            if sale.pos == PosState::Paid {
+                sale.pos = PosState::Unpaid;
+                events.push(Event::PosUnpaid { index, at: now });
+                reports.push(Report::PosUnpaid { index });
+            }
+            self.finish(store, sale, &events)?;
+            self.cancel_applied.remove(&index);
+        }
+        Ok((named, reports))
+    }
+
     /// CR-117: the shop's own node says an invoice of a sale was settled
     /// after the sale ended, or after it was paid another way, or when the sale
     /// was paid over Lightning by another invoice. It is a late payment
@@ -2928,12 +3295,13 @@ impl Counter {
         if let Some(paid) = sale.lightning {
             // CR-221: a swap payment accepted before its lockup was in a
             // block, whose lockup was then replaced, is a cancel (CR-14).
-            if sale.via_swap && sale.cancel_recorded {
-                let mut screen = screen_of(
-                    State::DoNotHandOver,
-                    Why::Replaced,
-                    Next::AskOwnerOrOtherPayment,
-                );
+            if (sale.via_swap || sale.rests_on_fundings()) && sale.cancel_recorded {
+                let why = if sale.via_swap {
+                    Why::Replaced
+                } else {
+                    Why::FundingLost
+                };
+                let mut screen = screen_of(State::DoNotHandOver, why, Next::AskOwnerOrOtherPayment);
                 screen.received_sats = paid.sats();
                 screen.needs_sats = paid.sats();
                 screen.late = sale.is_late();
@@ -2974,6 +3342,7 @@ impl Counter {
             && sale.overridden.is_none()
             && now >= sale.expires_at()
             && !self.swap_pending.contains(&index)
+            && !self.funding_waiting.contains(&index)
         {
             sale.ended = Some((End::Expired, now));
             events.push(Event::Expired { index, at: now });
@@ -3115,6 +3484,14 @@ impl Counter {
                     missing_sats: needs.saturating_sub(received),
                 },
             );
+        } else if sale.funding_wait == FundingWait::Lost {
+            // SL-27: the payment is there, and rests on a channel whose
+            // funding is lost: a manager may still accept the sale.
+            (state, why, next) = (State::Waiting, Why::FundingLostWait, Next::PersonLooks);
+        } else if sale.funding_wait == FundingWait::Unconfirmed {
+            // SL-40: the payment is there, and rests on a channel whose
+            // funding is not in a block yet.
+            (state, why, next) = (State::Waiting, Why::FundingNotConfirmed, Next::KeepWatching);
         } else {
             (state, why, next) = (State::NotPaidYet, Why::NothingArrived, Next::CustomerPays);
         }

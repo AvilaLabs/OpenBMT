@@ -248,6 +248,25 @@ impl SeedNotTaken {
     }
 }
 
+/// SL-27: what a manager is told when the funding of a channel is lost: the
+/// money of the sales paid through it may never come. The sales are named in
+/// the detail, as numbers, rising.
+pub fn shopln_funding_lost_words(sales: &[u32]) -> Words {
+    let words = Words::new(
+        Tone::Stop,
+        "Sales through a lost channel",
+        "A new Lightning channel was never confirmed, so the money of the sales paid through it may never reach the shop.",
+        Who::Manager,
+        "Check the sales named in Details, if any, and ask the provider about the channel. The counter has closed it.",
+    )
+    .code("SL-27");
+    if sales.is_empty() {
+        return words;
+    }
+    let named: Vec<String> = sales.iter().map(u32::to_string).collect();
+    words.detail(named.join(", "))
+}
+
 /// SL-76: the words of the screen that scans the Lightning key and of the
 /// line that says it was kept.
 pub fn shopln_scan_words() -> Words {
@@ -299,6 +318,10 @@ pub fn all_shopln_words() -> Vec<(String, Words)> {
     ] {
         all.push((format!("SeedNotTaken::{name}"), e.words()));
     }
+    all.push((
+        "ShopLightning::fundingLost".to_string(),
+        shopln_funding_lost_words(&[]),
+    ));
     all.push(("ShopLightning::scan".to_string(), shopln_scan_words()));
     all.push(("ShopLightning::kept".to_string(), shopln_seed_kept_words()));
     all

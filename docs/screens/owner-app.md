@@ -886,6 +886,9 @@ library's own:
 | cameLabel | Report from the counter |
 | noReport | No report yet |
 | whyLabel | Lightning now |
+| lostFundingLabel | Sales through a lost channel |
+| lostFundingWhat | A new channel was never confirmed, so the money of these sales may never reach the shop. The counter has closed that channel. |
+| lostFundingTotalLabel | All sales through lost channels |
 | offered | Offered |
 | secondDeviceAway | Not offered: the Box cannot be reached |
 | chainBehind | Not offered: the counter is behind the chain |

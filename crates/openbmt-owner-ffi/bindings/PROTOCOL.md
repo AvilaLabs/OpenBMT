@@ -322,7 +322,7 @@ OrderStateView: enum, one tag byte
 OrderWhyView: enum, one tag byte
     tags None=0 FeeAboveMax=1 CannotPay=2 Refused=3 Expired=4 PaymentFailed=5 Refunded=6 NotPossible=7 NoChannel=8 Stopped=9
 ShopLightningHeldView: record: counter: list<u8>, node_id: list<u8>, second_device: list<u8>, provider_node_id: list<u8>, provider_addr: string, cap_sats: u64, max_opening_fee_sats: u64
-LightningReportView: record: taken_at: u64, balance_sats: u64, receive_room_sats: u64, opening_fees_paid_sats: u64, last_stored_at: u64, last_sweep_at: u64, not_offered: NotOfferedView, lsps1: Lsps1OfferView, order_state: OrderStateView, order_why: OrderWhyView, order_fee_sats: u64
+LightningReportView: record: taken_at: u64, balance_sats: u64, receive_room_sats: u64, opening_fees_paid_sats: u64, last_stored_at: u64, last_sweep_at: u64, not_offered: NotOfferedView, lsps1: Lsps1OfferView, order_state: OrderStateView, order_why: OrderWhyView, order_fee_sats: u64, lost_funding_sales: list<u32>, lost_funding_total: u32
 ShopLightningView: record: on: bool, own_wallet: bool, counters: list<list<u8>>, boxes: list<list<u8>>, held: option<ShopLightningHeldView>, report: option<LightningReportView>
 ShopLightningAction: enum, one tag byte
     tags Set=0 Change=1 Remove=2
