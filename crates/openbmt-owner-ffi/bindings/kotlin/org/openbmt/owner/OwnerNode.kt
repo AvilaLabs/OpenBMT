@@ -1303,8 +1303,8 @@ class Books(
     val requestDays: List<BooksRequestDay> = emptyList(),
 )
 
-/** A rate the app checked: minor units of the shop's currency to a bitcoin, the label of its source (CR-57) and when it was fetched, in Unix seconds. */
-class RequestRate(val perBtc: Long, val source: String, val fetchedAt: Long)
+/** A rate the app checked: minor units of a currency to a bitcoin, the three letters of that currency (the library refuses a rate that is not the shop's, RQ-07), the label of its source (CR-57) and when it was fetched, in Unix seconds. */
+class RequestRate(val perBtc: Long, val currency: String, val source: String, val fetchedAt: Long)
 
 /** What every request call is given: [now] in Unix seconds, the shop's offset from UTC in minutes east, and the newest rate the app has checked, if any. */
 class RequestAsk(val now: Long, val offsetMinutes: Int, val rate: RequestRate? = null)
@@ -1827,7 +1827,7 @@ internal class Reader(private val data: ByteArray) {
 
 internal fun Writer.requestAsk(v: RequestAsk): Writer =
     u64(v.now).u32(v.offsetMinutes.toLong() and 0xffffffffL)
-        .option(v.rate) { r -> u64(r.perBtc).string(r.source).u64(r.fetchedAt) }
+        .option(v.rate) { r -> u64(r.perBtc).string(r.currency).string(r.source).u64(r.fetchedAt) }
 
 internal fun Writer.requestDay(v: RequestDay): Writer = u32(v.year).u32(v.month).u32(v.day)
 

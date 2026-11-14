@@ -328,13 +328,13 @@ object RequestRates {
             val agreed = port.agreeFor(currency.code, replies, clockSecs())
             // The rate is as old as the oldest reply it rests on.
             val at = replies.minOfOrNull { it.fetchedAt } ?: return null
-            RequestRate(agreed.minorPerBtc, agreed.sourceLabel, at)
+            RequestRate(agreed.minorPerBtc, currency.code, agreed.sourceLabel, at)
         } catch (_: OwnerException) {
             null
         }
     }
 
-    /** [cached] when it is young enough to use again, else null. */
-    fun usable(cached: RequestRate?, now: Long): RequestRate? =
-        cached?.takeIf { now >= it.fetchedAt && now - it.fetchedAt <= RequestLimits.RATE_MAX_AGE_SECS }
+    /** [cached] when it is young enough to use again and is a rate of the shop's [currency] now (RQ-07), else null. */
+    fun usable(cached: RequestRate?, now: Long, currency: ShopCurrency): RequestRate? =
+        cached?.takeIf { it.currency == currency.code && now >= it.fetchedAt && now - it.fetchedAt <= RequestLimits.RATE_MAX_AGE_SECS }
 }

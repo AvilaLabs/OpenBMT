@@ -233,7 +233,7 @@ private fun amountLabelOf(priceIn: RequestPriceIn): String =
  */
 private fun Controller.withRate(currency: ShopCurrency, need: Boolean, msg: Slot, then: (RequestRate?) -> Unit) {
     if (!need || currency == ShopCurrency.Sats) return then(null)
-    RequestRates.usable(requestRate, nowSecs())?.let { return then(it) }
+    RequestRates.usable(requestRate, nowSecs(), currency)?.let { return then(it) }
     msg.show(ui.words(RequestWords.rateFetching))
     val gate = TorGate(config?.proxy ?: AppConfig.DEFAULT_PROXY)
     async({ RequestRates.fetch(currency, LibraryPrice, HttpsRateFetcher(gate)) { nowSecs() } }) { r ->

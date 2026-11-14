@@ -33,6 +33,9 @@ use crate::views::WordsView;
 pub struct RequestRateView {
     /// Minor units of the currency per bitcoin; never zero.
     pub per_btc: u64,
+    /// The currency the rate is in, three capital letters: the shop's
+    /// currency in force or the rate is refused (RQ-07).
+    pub currency: String,
     /// The label of the source (CR-57).
     pub source: String,
     /// When the app got the rate, in Unix seconds.
@@ -41,11 +44,13 @@ pub struct RequestRateView {
 
 wire_record!(RequestRateView {
     per_btc,
+    currency,
     source,
     fetched_at
 });
 wire_record_get!(RequestRateView {
     per_btc,
+    currency,
     source,
     fetched_at
 });
@@ -469,13 +474,18 @@ wire_record!(RequestStateView {
     returns
 });
 
-/// RQ-35: the app's rate as the node takes it.
-fn checked_rate(rate: &RequestRateView) -> Result<CheckedRate, AppError> {
-    let bad = |text: &str| {
+/// RQ-35: the app's rate as the node takes it. RQ-07: a request in the
+/// shop's currency is priced at a rate of that currency, the one of the
+/// settings in force (`shop`), so a rate of another is refused.
+fn checked_rate(
+    rate: &RequestRateView,
+    shop: Option<ShopCurrency>,
+) -> Result<CheckedRate, AppError> {
+    let bad_in = |rule: &'static str, text: &str| {
         from_words(
             Kind::Refused,
-            "RQ-12",
-            format!("RQ-12: the rate is refused: {text}"),
+            rule,
+            format!("{rule}: the rate is refused: {text}"),
             openbmt_core::say::Words::new(
                 openbmt_core::say::Tone::Ended,
                 "Price not usable",
@@ -485,6 +495,17 @@ fn checked_rate(rate: &RequestRateView) -> Result<CheckedRate, AppError> {
             ),
         )
     };
+    let bad = |text: &str| bad_in("RQ-12", text);
+    if let Some(shop) = shop.filter(|shop| shop.code() != rate.currency) {
+        return Err(bad_in(
+            "RQ-07",
+            &format!(
+                "it is in {}, and the shop prices in {}",
+                rate.currency,
+                shop.code()
+            ),
+        ));
+    }
     Ok(CheckedRate {
         rate: Rate::new(rate.per_btc).ok_or_else(|| bad("it is zero"))?,
         source: RateSource::new(&rate.source, rate.fetched_at)
@@ -533,7 +554,12 @@ pub(crate) fn prepare<P: OwnerPort>(
     facts: Option<ShopFacts>,
     ask: &RequestAsk,
 ) -> Result<(), AppError> {
-    let rate = ask.rate.as_ref().map(checked_rate).transpose()?;
+    let shop = facts.as_ref().map(|f| f.currency);
+    let rate = ask
+        .rate
+        .as_ref()
+        .map(|r| checked_rate(r, shop))
+        .transpose()?;
     let Some(settings) = facts else {
         return Ok(());
     };

@@ -4716,8 +4716,10 @@ object AppModelTest {
         ok(rate != null && rate.perBtc == 9_100_000L && rate.source == "med.kc" && port.asked == "EUR" && rate.fetchedAt == port.got.minOf { it.fetchedAt }, "the rate is the library's, in minor units, as old as the oldest reply")
         ok(RequestRates.fetch(ShopCurrency.Sats, port, { RateFetch.NotAnswered }) { 1L } == null, "a shop in Bitcoin Standard asks for no rate")
         ok(RequestRates.fetch(ShopCurrency.Eur, FakePrice(listOf("kraken", "coinbase"), refuse = true), { RateFetch.Body("{}".toByteArray()) }) { 1L } == null && RequestRates.fetch(ShopCurrency.Eur, FakePrice(listOf("kraken", "coinbase")), { RateFetch.NotAnswered }) { 1L } == null, "sources that disagree or do not answer give no rate; the library then refuses with the words of a stale rate")
-        val cached = RequestRate(9_100_000L, "med.kc", 1_000L)
-        ok(RequestRates.usable(cached, 1_100L) === cached && RequestRates.usable(cached, 1_121L) == null && RequestRates.usable(cached, 999L) == null && RequestRates.usable(null, 5L) == null, "a rate is used again for two minutes")
+        val cached = RequestRate(9_100_000L, "EUR", "med.kc", 1_000L)
+        ok(RequestRates.usable(cached, 1_100L, ShopCurrency.Eur) === cached && RequestRates.usable(cached, 1_121L, ShopCurrency.Eur) == null && RequestRates.usable(cached, 999L, ShopCurrency.Eur) == null && RequestRates.usable(null, 5L, ShopCurrency.Eur) == null, "a rate is used again for two minutes")
+        ok(rate != null && rate.currency == "EUR", "the rate carries the currency it was fetched for")
+        ok(RequestRates.usable(cached, 1_100L, ShopCurrency.Idr) == null && RequestRates.usable(cached, 1_100L, ShopCurrency.Usd) == null, "a rate of the old currency is not used after the shop's currency changes (RQ-07)")
 
         // RQ-12: the quote is written before anything is shared. The page's share calls the library first; the screen of the link and the sheet follow.
         val share = screens.substringAfter("private fun Controller.shareRequest(").substringBefore("/** The quote that was written")

@@ -363,3 +363,71 @@ fn rq_01_a_shop_with_a_key_app_reads_no_request() {
     let fault = Rd::error(&rig.call(234, handle, &ask(T0).u64(1).0)).expect("refused");
     assert!(fault.rule.starts_with("RQ-"), "{}", fault.rule);
 }
+
+/// What every request op is given, with a rate of `currency`.
+fn ask_with_rate(now: u64, currency: &str, per_btc: u64) -> W {
+    W::new()
+        .u64(now)
+        .u32(0)
+        .u8(1)
+        .u64(per_btc)
+        .string(currency)
+        .string("rates-a")
+        .u64(now - 10)
+}
+
+#[test]
+fn rq_07_a_rate_of_another_currency_than_the_shops_is_refused() {
+    let rig = Rig::new();
+    let file = wallet_file(&rig);
+    settle(&rig, &file);
+    let handle = Rd::ok(&rig.start_own(&file)).u64();
+    let make = |ask: W| {
+        ask.string("Rent")
+            .u64(5_000)
+            .u8(1)
+            .u32(1970)
+            .u32(1)
+            .u32(22)
+            .u8(0)
+            .0
+    };
+    // The shop prices in dollars: a rate of euros, in the numbers of
+    // dollars, is refused whatever the call, and nothing is written.
+    for currency in ["EUR", "SAT", "usd", ""] {
+        let fault =
+            Rd::error(&rig.call(216, handle, &make(ask_with_rate(T0, currency, 10_000_000))))
+                .expect("refused");
+        assert_eq!(fault.rule, "RQ-07", "{currency:?}");
+        assert_eq!(fault.words.heading, "Price not usable");
+    }
+    let response = rig.call(217, handle, &ask(T0).0);
+    let mut r = Rd::ok(&response);
+    let counts: Vec<usize> = (0..5).map(|_| r.list(|r| row(r)).len()).collect();
+    assert_eq!(counts, vec![0; 5], "nothing was made");
+    // A rate of the shop's currency makes it and shares it.
+    let response = rig.call(216, handle, &make(ask_with_rate(T0, "USD", 10_000_000)));
+    let mut r = Rd::ok(&response);
+    assert_eq!(r.u64(), 1);
+    let share = |ask: W| ask.u64(1).string("Corner Cafe").0;
+    let fault = Rd::error(&rig.call(
+        218,
+        handle,
+        &share(ask_with_rate(T0 + 1, "JPY", 1_000_000_000)),
+    ))
+    .expect("refused");
+    assert_eq!(fault.rule, "RQ-07");
+    let response = rig.call(
+        218,
+        handle,
+        &share(ask_with_rate(T0 + 1, "USD", 10_000_000)),
+    );
+    let mut r = Rd::ok(&response);
+    let (n, owed, sats) = (r.u64(), r.u64(), r.u64());
+    assert_eq!((n, owed), (1, 5_000));
+    assert_eq!(sats, 50_000);
+    // A rate of nothing is still the old refusal.
+    let fault = Rd::error(&rig.call(218, handle, &share(ask_with_rate(T0 + 1, "USD", 0))))
+        .expect("refused");
+    assert_eq!(fault.rule, "RQ-12");
+}

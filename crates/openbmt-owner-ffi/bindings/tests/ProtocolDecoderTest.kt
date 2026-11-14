@@ -568,14 +568,14 @@ object ProtocolDecoderTest {
     // ---- the owner's requests ----
 
     private fun requestFrames() {
-        val ask = RequestAsk(1_700_000_000L, -300, RequestRate(6_000_000L, "rates-a", 1_699_999_900L))
+        val ask = RequestAsk(1_700_000_000L, -300, RequestRate(6_000_000L, "USD", "rates-a", 1_699_999_900L))
         val make = requestFrame(216, 1) {
             it.requestAsk(ask).string("Rent").u64(5_000).requestPriceIn(RequestPriceIn.ShopCurrency)
                 .requestDay(RequestDay(2026, 12, 1)).option(RequestEvery.Month) { e -> it.requestEvery(e) }
         }
         check(
             hex(make) == "4f424d6b01d8000100000000000000" + "00f1536500000000" + "d4feffff" +
-                "01" + "808d5b0000000000" + "07000000" + "72617465732d61" + "9cf0536500000000" +
+                "01" + "808d5b0000000000" + "03000000" + "555344" + "07000000" + "72617465732d61" + "9cf0536500000000" +
                 "04000000" + "52656e74" + "8813000000000000" + "01" + "ea070000" + "0c000000" + "01000000" + "01" + "01",
         ) { hex(make) }
         val none = requestFrame(217, 1) { it.requestAsk(RequestAsk(7, 0)) }

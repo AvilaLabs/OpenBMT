@@ -478,7 +478,7 @@ BooksView: record: currency: string, days: list<BooksDayView>, request_days: lis
 ImportKind: enum, one tag byte
     tags Single=1 Multisig=2
 ImportView: record: kind: ImportKind, fingerprint: option<string>, first_address: string
-RequestRateView: record: per_btc: u64, source: string, fetched_at: u64
+RequestRateView: record: per_btc: u64, currency: string, source: string, fetched_at: u64
 RequestAsk: record: now: u64, offset_minutes: i32, rate: option<RequestRateView>
 DayView: record: year: u32, month: u32, day: u32
 RequestPriceIn: enum, one tag byte
