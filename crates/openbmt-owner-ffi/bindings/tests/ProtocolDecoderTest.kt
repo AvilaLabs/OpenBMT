@@ -427,6 +427,7 @@ object ProtocolDecoderTest {
         }
         refusedBy("a third screen too many", "SS-10") { OwnerStarter.page(3, 1) }
         refusedBy("a seal before the check", "SS-10") { OwnerStarter.seal() }
+        refusedBy("a second showing before the check", "SS-10") { OwnerStarter.copyStart() }
         val positions = OwnerStarter.checkStart()
         check(positions.size == 3 && positions == positions.sorted() && positions.all { it in 1..12 })
         val typed = OwnerStarter.key('z'.code)

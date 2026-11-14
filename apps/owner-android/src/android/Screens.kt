@@ -88,7 +88,9 @@ internal fun Controller.showHome(): Unit = withNode { n ->
             val views = ArrayList<View>()
             views.add(hero)
             // SS-36: the starter wallet's line, which cannot be dismissed.
-            starterLine(n)?.let { views.add(starterLineView(it)) }
+            val line = starterLine(n)
+            line?.let { views.add(starterLineView(it)) }
+            line?.let { starterCardView(it) }?.let { views.add(it) }
             // SS-43: a payment that came to the starter wallet after the move.
             starterLateView(n)?.let { views.add(it) }
             // Home has no count of open approvals, of what waits to be delivered or of the refund queue, and it adds no

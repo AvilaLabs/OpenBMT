@@ -173,6 +173,7 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (194, "starter_not_yet"),
         (195, "starter_fee_rate"),
         (196, "starter_open"),
+        (197, "starter_copy_start"),
         (200, "own_offer_starter"),
         (201, "own_switch_send"),
         (202, "own_switch_status"),

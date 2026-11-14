@@ -230,6 +230,7 @@ class Controller(internal val act: MainActivity) {
     fun visible() {
         visible = true
         starter.gate = true
+        starter.cardStart = true
         main.removeCallbacks(relockTimer)
         // The watcher lets go of the node's folder before the node starts (OA-84).
         WatchRunner.reclaim()

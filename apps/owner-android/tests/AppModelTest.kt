@@ -3960,7 +3960,7 @@ object AppModelTest {
             clean(dir)
         }
         val ordered = screens.substringAfter("private fun Controller.sealStarter")
-        ok(ordered.indexOf("keepSealed(sealed, wallet, StarterRecord(") in 0 until ordered.indexOf("starterKeepPinned(wallet)"), "the key, the public wallet and the record are written before the shop's wallet")
+        ok(ordered.indexOf("keepSealed(sealed, wallet, record)") in 0 until ordered.indexOf("starterKeepPinned(wallet)"), "the key, the public wallet and the record are written before the shop's wallet")
         val keepSrc = source("src/android/StarterScreens.kt").substringAfter("private fun Controller.starterKeepPinned").substringBefore("/** The key is on the phone")
         ok(keepSrc.contains("StarterShop.keep(wallet, ownStore, NativeOwnLibrary)") && !keepSrc.contains("loadSealed") && !keepSrc.contains("dataKey") && !keepSrc.contains("OwnerStarter"), "only the public wallet is given to the own store")
         ok(!source("src/model/StarterModel.kt").substringAfter("object StarterShop").substringBefore("/** The wrapped data key").contains("Sealed"), "the shop's keeping never reads the sealed seed")
@@ -4025,7 +4025,7 @@ object AppModelTest {
         val setupSource = source("src/android/StarterScreens.kt")
         val limitPage = setupSource.substringAfter("internal fun Controller.showStarterLimit").substringBefore("// ---- making the key")
         ok(!limitPage.contains("stopLabel") && !limitPage.contains("CheckBox") && limitPage.contains("StarterWords.boxOnly"), "SS-38: setup has no stop option, and says what a Box is for")
-        ok(setupSource.contains("StarterRecord(draft.limitSats, draft.moveBy, false, null)"), "SS-38: a new record starts with the stop off")
+        ok(setupSource.contains("StarterRecord(draft.limitSats, draft.moveBy, false, null, secondCopyMade = draft.copy.made)"), "SS-38: a new record starts with the stop off")
         val useSource = source("src/android/StarterUse.kt")
         ok(useSource.contains("internal fun Controller.hasBoxLink(): Boolean = StarterLineSettings.boxLinked(ownStore)"), "BX-18: the Box link is the one the own-wallet shop keeps")
         val linkDir = tempDir()
@@ -4096,6 +4096,72 @@ object AppModelTest {
         throws("a record with no limit") { StarterRecord.parse("move-by: 2\nstop-above-limit: false\n") }
         throws("a record that does not read") { StarterRecord.parse("garbage\n") }
         ok(rec.withNextChange().changeIndex == 5L && rec.withNotYet(null).notYetUntil == null, "the record moves on")
+
+        // SS-35: a date more than 90 days from today is refused; the field of the limit starts empty.
+        val day = 86_400L
+        ok(!StarterSetup.tooLate(now + 30 * day, now) && !StarterSetup.tooLate(now + 90 * day, now) && StarterSetup.tooLate(now + 91 * day, now) && StarterSetup.tooLate(now + 400 * day, now), "ss_35: 90 days from today is the last day, 91 is refused")
+        ok(!StarterSetup.tooLate(StarterSetup.moveBy(StarterSetup.suggestedDate(now), now)!!, now), "ss_35: the date suggested is allowed")
+        val ninetyOne = java.time.LocalDate.ofEpochDay(now / day + 91).toString()
+        ok(StarterSetup.tooLate(StarterSetup.moveBy(ninetyOne, now)!!, now), "ss_35: a date typed 91 days on is refused")
+        val limitScreen = source("src/android/StarterScreens.kt").substringAfter("internal fun Controller.showStarterLimit").substringBefore("// ---- making the key")
+        ok(!limitScreen.contains("limit.setText") && limitScreen.contains("StarterWords.limitWhy") && limitScreen.contains("StarterWords.limitExample") && limitScreen.contains("StarterWords.dateNote") && limitScreen.contains("StarterWords.dateTooLate"), "ss_35: the limit field starts empty, with its why, example and date note, and the late date is refused")
+        ok(limitScreen.indexOf("limitWhy") < limitScreen.indexOf("labelled(StarterWords.limitLabel") && limitScreen.indexOf("limitExample") < limitScreen.indexOf("labelled(StarterWords.limitLabel"), "ss_35: the why and the example are above the field")
+
+        // SS-36: the card is due at most once a week; daily in the last 7 days or from half the limit; at every start from 80%.
+        val dateFar = now + 60 * day
+        ok(StarterCard.cardDue(now, dateFar, 0.1, null, null, false), "ss_36: a card never shown is due")
+        ok(!StarterCard.cardDue(now, dateFar, 0.1, now - 6 * day, null, false) && StarterCard.cardDue(now, dateFar, 0.1, now - 7 * day, null, false), "ss_36: once a week")
+        ok(!StarterCard.cardDue(now, now + 7 * day, 0.1, now - day + 60, null, false) && StarterCard.cardDue(now, now + 7 * day, 0.1, now - day, null, false), "ss_36: once a day in the last 7 days")
+        ok(!StarterCard.cardDue(now, now + 8 * day, 0.1, now - 2 * day, null, false), "ss_36: eight days before the date it is still weekly")
+        ok(!StarterCard.cardDue(now, dateFar, 0.49, now - day, null, false) && !StarterCard.cardDue(now, dateFar, 0.5, now - day + 60, null, false) && StarterCard.cardDue(now, dateFar, 0.5, now - day, null, false), "ss_36: once a day from half the limit")
+        ok(StarterCard.cardDue(now, dateFar, 0.8, now - 60, null, true) && StarterCard.cardDue(now, dateFar, 1.0, now, now + day, true), "ss_36: at every start of the app from 80%")
+        ok(!StarterCard.cardDue(now, dateFar, 0.79, now - 60, null, true) && !StarterCard.cardDue(now, dateFar, 0.8, now - 60, null, false), "ss_36: not at a start below 80%, and not between starts at 80%")
+        val notNow = StarterCard.notNowUntil(now, dateFar, 0.1)
+        ok(notNow == now + 7 * day && !StarterCard.cardDue(now + 7 * day - 1, dateFar, 0.1, now - 3600, notNow, false) && StarterCard.cardDue(now + 7 * day, dateFar, 0.1, now - 3600, notNow, false), "ss_36: Not now holds a week, until the card is next due")
+        ok(StarterCard.notNowUntil(now, now + 3 * day, 0.1) == now + day && StarterCard.notNowUntil(now, now + 10 * day, 0.1) == now + 3 * day && StarterCard.notNowUntil(now, dateFar, 0.6) == now + day, "ss_36: Not now holds a day in the last 7 days or from half the limit, and not past the start of the last 7 days")
+        ok(StarterCard.cardDue(now + day, now + 4 * day, 0.1, now - 3600, StarterCard.notNowUntil(now, now + 10 * day, 0.1), false), "ss_36: a Not now taken before the last 7 days ends when they begin")
+        ok(StarterCard.cardDue(now + day, dateFar, 0.9, now - 3600, now + 6 * day, false), "ss_36: a Not now does not hold a card past its daily time once it holds half its limit")
+        val cardRec = StarterRecord(1_000, dateFar, false, null).withCardShown(now - 100).withCardNotNow(now + 5)
+        val cardBack = StarterRecord.parse(cardRec.toText())
+        ok(cardBack.cardLastShown == now - 100 && cardBack.cardNotNowUntil == now + 5 && cardBack.withNotYet(now).cardLastShown == now - 100 && cardBack.withStop(true).cardNotNowUntil == now + 5 && cardBack.withNextChange().cardLastShown == now - 100, "ss_36: the times of the card are kept in the record and survive its other changes")
+        ok(StarterRecord.parse(StarterRecord(1, 2, false, null).toText()).cardLastShown == null && StarterRecord.parse("limit-sats: 1\nmove-by: 2\nstop-above-limit: false\n").cardNotNowUntil == null, "ss_36: an older record has no card times")
+        ok(StarterCard.fraction(500, 1_000) == 0.5 && StarterCard.fraction(1, 0) == 1.0, "ss_36: the part of the limit held")
+        ok(StarterHome.daysLeft(now, now + 10 * day) == 10L && StarterHome.daysLeft(now, now + 10 * day - 1) == 10L && StarterHome.daysLeft(now, now + 1) == 1L && StarterHome.daysLeft(now, now) == 0L && StarterHome.daysLeft(now, now - 5) == 0L, "ss_36: the days left to the date, a part of a day counting as one")
+        ok(StarterHome.daysLeftText(12) == StarterWords.lineDaysLeft.replace("{days}", "12") && !StarterHome.daysLeftText(12).contains("{") && StarterHome.daysLeftText(1) == StarterWords.lineLastDay && StarterHome.daysLeftText(0) == StarterWords.lineLastDay, "ss_36: days left, or the last day")
+        val cardWords = StarterHome.cardText(500, 1_000, 9)
+        ok(cardWords.contains("500 sats") && cardWords.contains("1,000 sats") && cardWords.contains("9") && !cardWords.contains("{"), "ss_36: the card says what is held, the limit and the days")
+        val homeLineCore = FakeCore()
+        val dayLine = StarterHome.line(homeLineCore, StarterRecord(1_000, now + 12 * day, false, null), 500, now, StarterCoreWords.line(homeLineCore)) { StarterCoreWords.state(homeLineCore, it) }
+        ok(dayLine.daysLeft == 12L && dayLine.held == 500L && dayLine.limit == 1_000L, "ss_36: the home line holds the days left, what it holds and the limit")
+        val useSrc = source("src/android/StarterUse.kt")
+        val lineSrc = useSrc.substringAfter("internal fun Controller.starterLineView").substringBefore("internal fun Controller.starterCardView")
+        ok(lineSrc.contains("StarterHome.daysLeftText(line.daysLeft)") && lineSrc.contains("StarterWords.homeMove") && lineSrc.contains("showStarterUpgrade(line)"), "ss_36: the home line has the days left and a button to the upgrade screen")
+        val cardSrc = useSrc.substringAfter("internal fun Controller.starterCardView").substringBefore("/**\n * SS-37: once each time")
+        ok(cardSrc.contains("StarterCard.cardDue(") && cardSrc.contains("StarterWords.cardGo") && cardSrc.contains("StarterWords.cardNotNow") && cardSrc.contains("StarterWords.cardTitle") && cardSrc.contains("showStarterUpgrade(line)") && cardSrc.contains("withCardShown") && cardSrc.contains("withCardNotNow") && cardSrc.contains("if (line.opensUpgrade) return null"), "ss_36: the card goes to the upgrade screen, keeps its times, and gives way to the upgrade screen")
+
+        // SS-10: the second copy is offered once, after the check and before the sealing.
+        val copy = SecondCopy()
+        ok(copy.offered() && !copy.made, "ss_10: the second copy is offered after the check")
+        ok(copy.begin() && !copy.offered() && !copy.begin(), "ss_10: it is taken once and is not offered again")
+        copy.finish()
+        ok(copy.made, "ss_10: the copy is made once the owner has written it")
+        copy.seal()
+        ok(!copy.offered() && !copy.begin() && copy.made, "ss_10: nothing more is offered after the sealing")
+        val declined = SecondCopy()
+        declined.seal()
+        ok(!declined.offered() && !declined.begin() && !declined.made, "ss_10: after the sealing there is no offer, and no copy was made")
+        val unfinished = SecondCopy()
+        unfinished.begin()
+        unfinished.seal()
+        ok(!unfinished.made, "ss_10: a copy begun and not finished is not made")
+        val copyRec = StarterRecord(1, 2, false, null, secondCopyMade = true)
+        ok(StarterRecord.parse(copyRec.toText()).secondCopyMade && !StarterRecord.parse(StarterRecord(1, 2, false, null).toText()).secondCopyMade && copyRec.withStop(true).secondCopyMade && copyRec.withCardShown(5).secondCopyMade, "ss_10: whether the copy was made is kept in the record")
+        val copySrc = source("src/android/StarterScreens.kt")
+        ok(copySrc.contains("StarterWords.copyOffer") && copySrc.contains("StarterWords.copyOfferNote") && copySrc.contains("StarterWords.copyLater") && copySrc.contains("t.finished -> showStarterCopyOffer()") && copySrc.contains("OwnerStarter.copyStart()") && copySrc.contains("draft.copy.seal()"), "ss_10: after the check the offer comes before the sealing, and the core allows the one showing")
+        val pageSrc = copySrc.substringAfter("internal fun Controller.showStarterPage").substringBefore("/** Gives up the setup")
+        ok(pageSrc.contains("starterWordsScreen(") && !pageSrc.contains("ui.page("), "ss_10: the second showing is built by the screen that applies the flags of SS-12")
+        ok(copySrc.substringAfter("fun Controller.showStarterPlain").substringBefore("// ---- the checks of the phone").let { it.contains("plainIntro") && it.contains("plainPen") && it.contains("plainNoPhoto") && it.contains("plainNobodyAsks") && it.contains("plainKeep") && it.contains("FirstRunWords.howThisWorks") && it.contains("plainHow") && it.contains("View.GONE") }, "ss_13: the plain screen says its five lines and folds the explanation under howThisWorks")
+        ok(copySrc.contains("StarterWords.sealedSend"), "ss_21: the sealed screen says that sending money out always asks")
 
         // SS-36, SS-37, SS-38: the library's decisions, used as they are.
         val core = FakeCore()
@@ -4254,7 +4320,7 @@ object AppModelTest {
         ok(deleteBody.contains("starterDeleteKey(restart)"), "SS-43: a key that could not be deleted is offered for deletion again")
         ok(Regex("deleteKey\\(\\)").findAll(retire).count() == 1 && Regex("keystore\\.delete\\(\\)").findAll(retire).count() == 1, "SS-43: the key goes in one place only")
         val gateSrc = source("src/android/Screens.kt")
-        ok(gateSrc.contains("starterGate(n)") && gateSrc.contains("starterLine(n)?.let { views.add(starterLineView(it)) }") && gateSrc.contains("starterRows()"), "the home line and the upgrade gate and the entry are wired")
+        ok(gateSrc.contains("starterGate(n)") && gateSrc.contains("line?.let { views.add(starterLineView(it)) }") && gateSrc.contains("line?.let { starterCardView(it) }") && gateSrc.contains("starterRows()"), "the home line and the upgrade gate and the entry are wired")
         ok(source("src/android/AddCounter.kt").contains("starterHolds(") && source("src/android/SettingsEdit.kt").contains("starterHolds("), "adding counters and loosening settings wait (SS-37)")
 
         // SS-22: never backed up. The manifest and both rule files are read.

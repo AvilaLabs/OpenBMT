@@ -131,7 +131,10 @@ object StarterChecks {
     }
 }
 
-/** What the owner sets (SS-35) and the phone keeps: both in satoshis and seconds, the limit and the date, the switch of SS-38 and "Not yet". */
+/**
+ * What the owner sets (SS-35) and the phone keeps: both in satoshis and seconds, the limit and the date, the switch of
+ * SS-38 and "Not yet"; and the times of the nudge card (SS-36) and whether the second copy of the words was made (SS-10).
+ */
 class StarterRecord(
     val limitSats: Long,
     val moveBy: Long,
@@ -139,16 +142,39 @@ class StarterRecord(
     val notYetUntil: Long?,
     /** The next change address the starter wallet's payments use (the app counts them; the library signs for the one it is given). */
     val changeIndex: Long = 0,
+    /** SS-36: when the nudge card was last shown, in seconds; null when it never was. */
+    val cardLastShown: Long? = null,
+    /** SS-36: the end of the "Not now" of the card, in seconds; null when none holds. */
+    val cardNotNowUntil: Long? = null,
+    /** SS-10: whether the words were shown a second time, for a second card, before the key was sealed. */
+    val secondCopyMade: Boolean = false,
 ) {
     fun toText(): String = "limit-sats: $limitSats\nmove-by: $moveBy\nstop-above-limit: $stopAboveLimit\n" +
-        (if (notYetUntil != null) "not-yet-until: $notYetUntil\n" else "") + "change-index: $changeIndex\n"
+        (if (notYetUntil != null) "not-yet-until: $notYetUntil\n" else "") + "change-index: $changeIndex\n" +
+        (if (cardLastShown != null) "card-last-shown: $cardLastShown\n" else "") +
+        (if (cardNotNowUntil != null) "card-not-now-until: $cardNotNowUntil\n" else "") +
+        (if (secondCopyMade) "second-copy-made: true\n" else "")
 
-    fun withNotYet(until: Long?) = StarterRecord(limitSats, moveBy, stopAboveLimit, until, changeIndex)
+    private fun copy(
+        notYet: Long? = notYetUntil,
+        change: Long = changeIndex,
+        stop: Boolean = stopAboveLimit,
+        shown: Long? = cardLastShown,
+        notNow: Long? = cardNotNowUntil,
+    ) = StarterRecord(limitSats, moveBy, stop, notYet, change, shown, notNow, secondCopyMade)
 
-    fun withNextChange() = StarterRecord(limitSats, moveBy, stopAboveLimit, notYetUntil, changeIndex + 1)
+    fun withNotYet(until: Long?) = copy(notYet = until)
+
+    fun withNextChange() = copy(change = changeIndex + 1)
 
     /** SS-38: the record with the stop switched on or off; the rest is kept. */
-    fun withStop(stop: Boolean) = StarterRecord(limitSats, moveBy, stop, notYetUntil, changeIndex)
+    fun withStop(stop: Boolean) = copy(stop = stop)
+
+    /** SS-36: the record with the card shown at [now]. */
+    fun withCardShown(now: Long) = copy(shown = now)
+
+    /** SS-36: the record with the card put off until [until]. */
+    fun withCardNotNow(until: Long?) = copy(notNow = until)
 
     companion object {
         fun parse(text: String): StarterRecord {
@@ -162,7 +188,12 @@ class StarterRecord(
             fun num(key: String): Long = map[key]?.toLongOrNull()?.takeIf { it >= 0 } ?: throw IOException("the starter record has no $key")
             val stop = map["stop-above-limit"]
             if (stop != "true" && stop != "false") throw IOException("the starter record has no stop-above-limit")
-            return StarterRecord(num("limit-sats"), num("move-by"), stop == "true", map["not-yet-until"]?.toLongOrNull(), map["change-index"]?.toLongOrNull()?.takeIf { it >= 0 } ?: 0)
+            return StarterRecord(
+                num("limit-sats"), num("move-by"), stop == "true", map["not-yet-until"]?.toLongOrNull(),
+                map["change-index"]?.toLongOrNull()?.takeIf { it >= 0 } ?: 0,
+                map["card-last-shown"]?.toLongOrNull()?.takeIf { it >= 0 }, map["card-not-now-until"]?.toLongOrNull()?.takeIf { it >= 0 },
+                map["second-copy-made"] == "true",
+            )
         }
     }
 }
@@ -189,6 +220,9 @@ object StarterLineSettings {
 /** What the owner types at setup (SS-35): the limit, the date, and the die rolls that SS-03 allows. */
 object StarterSetup {
     const val SUGGESTED_DAYS = 30L
+
+    /** SS-35: the furthest the date may be from today, in days. */
+    const val MAX_DAYS = 90L
     private const val DAY = 86_400L
 
     /** The date the app suggests, 30 days on from [now] (seconds); the app never suggests an amount. */
@@ -200,6 +234,9 @@ object StarterSetup {
         val secs = date.atStartOfDay().toEpochSecond(ZoneOffset.UTC)
         return if (secs > now) secs else null
     }
+
+    /** SS-35: whether [moveBy] (seconds) falls on a day more than 90 days after the day [now] (seconds) is in. */
+    fun tooLate(moveBy: Long, now: Long): Boolean = moveBy / DAY - now / DAY > MAX_DAYS
 
     /**
      * The limit typed in whole units of the shop's currency, in satoshis at [pricePerBtc] (whole units of the currency
@@ -263,7 +300,16 @@ object LibraryStarter : StarterCore {
 }
 
 /** What the home line and the upgrade screen show (SS-36, SS-37). */
-class HomeLine(val state: StarterLimitKind, val words: SayWords, val facts: List<Pair<String, String>>, val opensUpgrade: Boolean)
+class HomeLine(
+    val state: StarterLimitKind,
+    val words: SayWords,
+    val facts: List<Pair<String, String>>,
+    val opensUpgrade: Boolean,
+    /** SS-36: what the wallet holds and its limit, in satoshis, and the days left to the date (see [StarterHome.daysLeft]). */
+    val held: Long = 0,
+    val limit: Long = 0,
+    val daysLeft: Long = 0,
+)
 
 object StarterHome {
     /** SS-37: the owner phone opens on the upgrade screen when the wallet is at its limit or past its date, and "Not yet" is not in force. */
@@ -271,6 +317,17 @@ object StarterHome {
 
     /** The day a time falls on, as the app writes a date. */
     fun date(secs: Long): String = Instant.ofEpochSecond(secs).atZone(ZoneOffset.UTC).toLocalDate().toString()
+
+    /** SS-36: the days left to [moveBy] from [now], counting a part of a day as a day; 0 once the date is past. */
+    fun daysLeft(now: Long, moveBy: Long): Long = if (moveBy <= now) 0 else (moveBy - now + 86_399) / 86_400
+
+    /** SS-36: "{days} days left", or the last-day words when one day or none is left. */
+    fun daysLeftText(days: Long): String =
+        if (days <= 1) StarterWords.lineLastDay else StarterWords.lineDaysLeft.replace("{days}", days.toString())
+
+    /** SS-36: what the card says, with the numbers as the home line writes them. */
+    fun cardText(held: Long, limit: Long, days: Long): String =
+        StarterWords.cardText.replace("{held}", Format.sats(held)).replace("{limit}", Format.sats(limit)).replace("{days}", days.toString())
 
     /**
      * SS-36: the line that cannot be dismissed: the library's line words, or the words of the state it is in, with
@@ -291,7 +348,81 @@ object StarterHome {
         facts.add(StarterWords.lineLimit to Format.sats(record.limitSats))
         facts.add(StarterWords.lineMoveBy to date(record.moveBy))
         limit.until?.let { facts.add(StarterWords.lineNotYetUntil to date(it)) }
-        return HomeLine(limit.state, stateWords(limit.state) ?: lineWords, facts, opensUpgrade(limit.state))
+        return HomeLine(
+            limit.state, stateWords(limit.state) ?: lineWords, facts, opensUpgrade(limit.state),
+            held, record.limitSats, daysLeft(now, record.moveBy),
+        )
+    }
+}
+
+/** SS-36: when the card that asks for the move is shown. */
+object StarterCard {
+    private const val DAY = 86_400L
+    private const val WEEK = 7 * DAY
+
+    /** The part of the limit held from which the card is shown every day. */
+    const val HALF = 0.5
+
+    /** The part of the limit held from which the card is shown at every start of the app. */
+    const val NEARLY_FULL = 0.8
+
+    /** The gap between two showings: a day in the last 7 days before the date or from half the limit, else a week. */
+    fun interval(nowSecs: Long, dateSecs: Long, heldFraction: Double): Long =
+        if (dateSecs - nowSecs <= WEEK || heldFraction >= HALF) DAY else WEEK
+
+    /**
+     * SS-36: whether the card is shown now. At every start of the app once the wallet holds 80% of its limit. Otherwise at
+     * most once a week; at most once a day in the last 7 days before the date or once the wallet holds half its limit. A
+     * card never shown is due. "Not now" holds the card until [notNowUntilSecs], and no longer than a day once the daily
+     * rule applies.
+     */
+    fun cardDue(nowSecs: Long, dateSecs: Long, heldFraction: Double, lastShownSecs: Long?, notNowUntilSecs: Long?, isAppStart: Boolean): Boolean {
+        if (heldFraction >= NEARLY_FULL && isAppStart) return true
+        if (lastShownSecs == null) return true
+        val gap = interval(nowSecs, dateSecs, heldFraction)
+        val held = if (gap == DAY) lastShownSecs + DAY else maxOf(lastShownSecs + WEEK, notNowUntilSecs ?: 0)
+        return nowSecs >= held
+    }
+
+    /** What the wallet holds as a part of its limit; 1 for a limit of none. */
+    fun fraction(held: Long, limit: Long): Double = if (limit <= 0) 1.0 else held.toDouble() / limit
+
+    /** SS-36: the end of a "Not now" tapped at [nowSecs]: the next time the card is due, not past the start of the last 7 days. */
+    fun notNowUntil(nowSecs: Long, dateSecs: Long, heldFraction: Double): Long {
+        val next = nowSecs + interval(nowSecs, dateSecs, heldFraction)
+        val lastWeek = dateSecs - WEEK
+        return if (lastWeek > nowSecs && lastWeek < next) lastWeek else next
+    }
+}
+
+/**
+ * SS-10: the second showing of the words, for a second card, between the check and the sealing. Offered once; not after
+ * the key is sealed or the showing was used. Whether it was made is kept in the record ([StarterRecord.secondCopyMade]).
+ */
+class SecondCopy {
+    private var used = false
+    private var sealed = false
+
+    /** Whether the offer is shown. */
+    fun offered(): Boolean = !used && !sealed
+
+    /** The owner takes the offer: true once, and not after the sealing. */
+    fun begin(): Boolean {
+        if (!offered()) return false
+        used = true
+        return true
+    }
+
+    /** The owner wrote the second card: the copy was made. */
+    var made = false
+        private set
+
+    fun finish() {
+        if (used && !sealed) made = true
+    }
+
+    fun seal() {
+        sealed = true
     }
 }
 

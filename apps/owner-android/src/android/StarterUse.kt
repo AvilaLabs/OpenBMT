@@ -143,10 +143,54 @@ internal fun Controller.starterLine(n: OwnerNode): HomeLine? {
     }
 }
 
-/** SS-36: the line of the home screen. It has no way to be dismissed. */
+/**
+ * SS-36: the line of the home screen, with what the wallet holds, the limit, the days left and the button that opens the
+ * upgrade screen. It has no way to be dismissed.
+ */
 internal fun Controller.starterLineView(line: HomeLine): View {
     val slot = Slot(act, 12)
-    slot.show(words(line.words), ui.facts(line.facts))
+    slot.show(words(line.words), ui.facts(line.facts), ui.text(StarterHome.daysLeftText(line.daysLeft), 16f), ui.button(StarterWords.homeMove) { showStarterUpgrade(line) })
+    return slot
+}
+
+/**
+ * SS-36: the card that asks for the move, when it is due and the upgrade screen is not already the screen (SS-37). It is
+ * due by [StarterCard.cardDue]; once it is shown its time is kept and it stays until the owner answers it. "Not now" keeps
+ * the end of the wait beside the starter wallet's record.
+ */
+internal fun Controller.starterCardView(line: HomeLine): View? {
+    if (line.opensUpgrade) return null
+    val record = starterRecord() ?: return null
+    val now = nowSecs()
+    val fraction = StarterCard.fraction(line.held, line.limit)
+    if (!starter.cardOpen) {
+        val start = starter.cardStart
+        starter.cardStart = false
+        if (!StarterCard.cardDue(now, record.moveBy, fraction, record.cardLastShown, record.cardNotNowUntil, start)) return null
+        try {
+            starter.store.saveRecord(record.withCardShown(now))
+        } catch (_: IOException) {
+            return null
+        }
+        starter.cardOpen = true
+    }
+    val slot = Slot(act, 12)
+    slot.show(
+        ui.text(StarterWords.cardTitle, 18f, bold = true),
+        ui.text(StarterHome.cardText(line.held, line.limit, line.daysLeft), 16f),
+        ui.primary(StarterWords.cardGo) { starter.cardOpen = false; showStarterUpgrade(line) },
+        ui.button(StarterWords.cardNotNow) {
+            starter.cardOpen = false
+            val current = starterRecord()
+            if (current != null) {
+                try {
+                    starter.store.saveRecord(current.withCardNotNow(StarterCard.notNowUntil(nowSecs(), current.moveBy, fraction)))
+                } catch (_: IOException) {
+                }
+            }
+            slot.visibility = View.GONE
+        },
+    )
     return slot
 }
 

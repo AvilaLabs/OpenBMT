@@ -947,6 +947,9 @@ fn build_ops() -> Vec<Op> {
         op(196, "starter_open", Zero, |_, a: StarterOpenArgs| {
             starter_ops::open(a)
         }),
+        op(197, "starter_copy_start", Zero, |c, _: ()| {
+            starter_ops::copy_start(c.starter())
+        }),
         op(
             200,
             "own_offer_starter",

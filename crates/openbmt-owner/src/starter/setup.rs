@@ -228,8 +228,12 @@ pub(super) enum Stage {
     Checking,
     /// A check was answered wrong; the words must be shown again.
     Failed { reshown: bool },
-    /// The check was passed; the words are not shown again.
+    /// The check was passed; the words are not shown again, except once by
+    /// `begin_copy`.
     Passed,
+    /// The check was passed and the words are shown once more for a second
+    /// card (SS-10). It ends only with the seal; it cannot be begun again.
+    Copy,
 }
 
 /// The making of the starter wallet, from the words made to the seal
@@ -277,6 +281,7 @@ impl Setup {
         match self.stage {
             Stage::Made => {}
             Stage::Failed { .. } => self.stage = Stage::Failed { reshown: true },
+            Stage::Copy => {}
             Stage::Checking | Stage::Passed => return Err(StarterRefusal::Stage),
         }
         if page >= PAGES {
@@ -298,6 +303,19 @@ impl Setup {
         Ok(image)
     }
 
+    /// SS-10: allow the words to be shown once more, for a second card. Only
+    /// after the check is passed and before the seal, and only once: a second
+    /// call is refused, and so is a call after the check is begun again. The
+    /// screens are then drawn by `page` as in the first showing; no check-back
+    /// follows.
+    pub fn begin_copy(&mut self) -> Result<(), StarterRefusal> {
+        if self.stage != Stage::Passed {
+            return Err(StarterRefusal::Stage);
+        }
+        self.stage = Stage::Copy;
+        Ok(())
+    }
+
     /// SS-10: pick three positions from fresh kernel bytes and begin the
     /// check. Returned 1 to 12, ascending: they are not secret. After a
     /// wrong answer the words must have been shown again first.
@@ -308,7 +326,9 @@ impl Setup {
         match self.stage {
             Stage::Made | Stage::Checking => {}
             Stage::Failed { reshown: true } => {}
-            Stage::Failed { reshown: false } | Stage::Passed => return Err(StarterRefusal::Stage),
+            Stage::Failed { reshown: false } | Stage::Passed | Stage::Copy => {
+                return Err(StarterRefusal::Stage)
+            }
         }
         let mut bytes = checked_read(rng)?;
         self.positions = pick_positions(&bytes);
@@ -373,7 +393,7 @@ impl Setup {
     /// check is passed. The setup is kept (the caller drops it once the sealed
     /// seed is stored), so a refusal of the sealing loses nothing.
     pub fn seal(&self, rng: &mut dyn KernelRandom) -> Result<Sealed, StarterRefusal> {
-        if self.stage != Stage::Passed {
+        if !matches!(self.stage, Stage::Passed | Stage::Copy) {
             return Err(StarterRefusal::Stage);
         }
         seal_seed(&self.seed, rng)

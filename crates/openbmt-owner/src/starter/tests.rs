@@ -628,6 +628,52 @@ fn passed_setup(rng_seed: u8) -> Setup {
     setup
 }
 
+#[test]
+fn ss_10_the_words_are_shown_once_more_after_the_check_and_only_once() {
+    let mut setup = passed_setup(1);
+    let first: Vec<Vec<u8>> = (0..PAGES)
+        .map(|p| {
+            let mut s =
+                Setup::begin(&mut Source::fixed(&[counting(1), counting(99)]), &[]).unwrap();
+            s.page(p, 2).unwrap().pixels.clone()
+        })
+        .collect();
+    // Refused before the copy is begun.
+    assert_eq!(setup.page(0, 2).unwrap_err(), StarterRefusal::Stage);
+    setup.begin_copy().unwrap();
+    // The screens are the ones of the first showing, as often as the owner moves between them.
+    for _ in 0..2 {
+        for (p, shown) in first.iter().enumerate() {
+            assert_eq!(&setup.page(p, 2).unwrap().pixels, shown);
+        }
+    }
+    assert_eq!(setup.page(PAGES, 2).unwrap_err(), StarterRefusal::Page);
+    // No second copy, no new check and no keypad in it.
+    assert_eq!(setup.begin_copy(), Err(StarterRefusal::Stage));
+    assert_eq!(
+        setup.start_check(&mut Source::chain()).unwrap_err(),
+        StarterRefusal::Stage
+    );
+    assert_eq!(setup.key(Key::Letter(b'a')), Err(StarterRefusal::Stage));
+    // The seal still goes on from it.
+    assert!(setup.seal(&mut Source::chain()).is_ok());
+}
+
+#[test]
+fn ss_10_no_copy_before_the_check_is_passed() {
+    let mut setup = Setup::begin(&mut Source::chain(), &[]).unwrap();
+    assert_eq!(setup.begin_copy(), Err(StarterRefusal::Stage));
+    let asked = setup.start_check(&mut Source::chain()).unwrap();
+    assert_eq!(setup.begin_copy(), Err(StarterRefusal::Stage));
+    // Nor after a wrong answer.
+    let words = words_of(&setup.seed);
+    let right = words[asked[0] - 1];
+    let wrong = if right == "zoo" { "abandon" } else { "zoo" };
+    type_on(&mut setup, wrong, wrong.len());
+    assert!(setup.key(Key::Enter).unwrap().failed);
+    assert_eq!(setup.begin_copy(), Err(StarterRefusal::Stage));
+}
+
 fn sealed_starter() -> (Sealed, StarterWallet, Seed) {
     let setup = passed_setup(1);
     let wallet = setup.wallet().clone();

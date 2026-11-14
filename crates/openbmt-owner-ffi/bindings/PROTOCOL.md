@@ -196,6 +196,7 @@ ops run on another; it waits for at most 250 ms.
 194 starter_not_yet  handle zero  args (u64, u64) -> u64
 195 starter_fee_rate handle zero  args StarterFeeArgs -> u64
 196 starter_open     handle zero  args StarterOpenArgs -> StarterWalletView
+197 starter_copy_start handle zero  args () -> ()
 200 own_offer_starter handle zero  args (OwnShopArgs, u64) -> OwnOfferView
 201 own_switch_send  handle node  args (list<u8>, u64) -> list<SwitchRowView>
 202 own_switch_status handle node  args list<u8> -> list<SwitchRowView>

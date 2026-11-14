@@ -258,6 +258,18 @@ pub(crate) fn check_start(slot: &StarterSlot) -> Result<StarterCheckView, AppErr
     })
 }
 
+/// Op 197: allow the words to be shown once more, for a second card, after
+/// the check-back is passed and before the seal (SS-10). The screens are then
+/// drawn by op 181 as in the first showing. Refused a second time, before the
+/// check is passed, and after the seal (the setup is gone then).
+pub(crate) fn copy_start(slot: &StarterSlot) -> Result<(), AppError> {
+    let mut session = slot.lock();
+    let Session::Setup(setup) = &mut *session else {
+        return Err(no_setup());
+    };
+    setup.begin_copy().map_err(|e| refusal(&e))
+}
+
 /// What a key of the keypad did (op 183): counts and yes or no, never a
 /// letter (SS-11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

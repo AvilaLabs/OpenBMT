@@ -36,6 +36,7 @@ const OP_CANCEL: u16 = 193;
 const OP_NOT_YET: u16 = 194;
 const OP_FEE: u16 = 195;
 const OP_OPEN: u16 = 196;
+const OP_COPY: u16 = 197;
 const OP_LINE_WORDS: u16 = 204;
 const OP_STATE_WORDS: u16 = 205;
 const OP_HELD_WORDS: u16 = 206;
@@ -338,6 +339,42 @@ fn ss_20_the_seed_is_sealed_after_the_check_and_opens_with_the_data_key_alone() 
     bad[20] ^= 1;
     let fault = Rd::error(&open(&bad, &data_key)).expect("refused");
     assert_eq!(fault.words.heading, "The key will not open");
+}
+
+#[test]
+fn ss_10_a_second_showing_is_allowed_once_after_the_check_and_before_the_seal() {
+    let reg = registry(&[counting(1), counting(77)]);
+    make(&reg, &[]);
+    // Not before the check is passed.
+    assert_eq!(
+        Rd::error(&call(&reg, OP_COPY, &[])).expect("refused").rule,
+        "SS-10"
+    );
+    let positions = positions_of(&call(&reg, OP_CHECK, &[]));
+    for p in positions {
+        type_word(&reg, words()[p as usize - 1], 4);
+        Rd::ok(&key(&reg, 13));
+    }
+    assert_eq!(Rd::error(&page(&reg, 0, 1)).expect("refused").rule, "SS-10");
+    Rd::ok(&call(&reg, OP_COPY, &[]));
+    for n in 0..3 {
+        Rd::ok(&page(&reg, n, 1));
+    }
+    // Only once.
+    assert_eq!(
+        Rd::error(&call(&reg, OP_COPY, &[])).expect("refused").rule,
+        "SS-10"
+    );
+    // The seal goes on, and after it there is no setup to show again.
+    Rd::ok(&call(&reg, OP_SEAL, &[]));
+    assert_eq!(
+        Rd::error(&call(&reg, OP_COPY, &[])).expect("refused").rule,
+        "starter-no-setup"
+    );
+    assert_eq!(
+        Rd::error(&page(&reg, 0, 1)).expect("refused").rule,
+        "starter-no-setup"
+    );
 }
 
 #[test]

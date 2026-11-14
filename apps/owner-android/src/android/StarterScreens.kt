@@ -28,6 +28,9 @@ internal class StarterDraft(val limitSats: Long, val moveBy: Long, val rolls: By
     var wallet: StarterWalletView? = null
     var positions: List<Long> = emptyList()
 
+    /** SS-10: the second showing of the words, once the check is passed. */
+    val copy = SecondCopy()
+
     fun wipe() = rolls.fill(0)
 }
 
@@ -45,6 +48,12 @@ internal class StarterRuntime(base: File) {
 
     /** Set when the app comes into view: the upgrade screen is the first screen once (SS-37). */
     var gate = false
+
+    /** SS-36: set when the app comes into view, for the card that is shown at every start once the wallet holds 80% of its limit. */
+    var cardStart = false
+
+    /** SS-36: the card is on show on the home screen, from its showing until the owner answers it. */
+    var cardOpen = false
 
     /** The first run, while its "Start simple" step is the one on show: the setup leaves to its Money step, not to home. */
     var firstRun: FirstRun? = null
@@ -130,8 +139,11 @@ private fun Controller.starterKeepPinned(wallet: StarterWalletView?): Boolean {
 }
 
 /** The key is on the phone and the wallet is the shop's: the first counter comes next, as after "Wallet checked". */
-private fun Controller.showStarterMade(r: FirstRun) =
-    centre(StarterWords.sealed, listOf(ui.primary(StarterWords.doneButton) { r.next(); showFirstRun() }), title = StarterWords.screenTitle)
+private fun Controller.showStarterMade(r: FirstRun) = showStarterSealed { r.next(); showFirstRun() }
+
+/** SS-20, SS-21: the key is on the phone, and the sealed screen says that sending money out always asks the owner. */
+private fun Controller.showStarterSealed(done: () -> Unit) =
+    centre(StarterWords.sealed, listOf(ui.primary(StarterWords.doneButton) { done() }), extra = listOf(ui.text(StarterWords.sealedSend, 16f)), title = StarterWords.screenTitle)
 
 /**
  * The key was made and locked in an earlier run of this step, and the shop's wallet was not kept (a stop between the two
@@ -175,10 +187,16 @@ private fun Controller.noScreenLock() =
 
 /** SS-13: before the words, one screen says what to do and what never to do with them. */
 internal fun Controller.showStarterPlain() {
+    // The explanation is folded away until the owner asks for it.
+    val how = ui.text(StarterWords.plainHow, 15f).also { it.visibility = View.GONE }
     val views = listOf(
-        ui.text(StarterWords.plainPen, 17f),
+        ui.text(StarterWords.plainIntro, 17f),
+        ui.text(StarterWords.plainPen, 17f, bold = true),
         ui.text(StarterWords.plainNoPhoto, 17f),
         ui.text(StarterWords.plainNobodyAsks, 17f),
+        ui.text(StarterWords.plainKeep, 17f),
+        ui.button(FirstRunWords.howThisWorks) { how.visibility = if (how.visibility == View.VISIBLE) View.GONE else View.VISIBLE },
+        how,
     )
     screen(
         StarterWords.plainTitle, views,
@@ -235,6 +253,9 @@ internal fun Controller.showStarterLimit(message: SayWords? = null) {
     val date = ui.field(StarterWords.dateLabel).also { it.setText(StarterSetup.suggestedDate(nowSecs())) }
     val dice = ui.field(StarterWords.diceLabel)
     val views = ArrayList<View>()
+    // SS-35: why the limit, and an example that is not an amount; the field starts empty.
+    views.add(ui.text(StarterWords.limitWhy, 16f))
+    views.add(ui.text(StarterWords.limitExample, 16f))
     views.add(ui.labelled(StarterWords.limitLabel, limit))
     if (!bitcoinStandard) {
         views.add(note)
@@ -242,6 +263,7 @@ internal fun Controller.showStarterLimit(message: SayWords? = null) {
         fillPriceIn(note, price, currency, StarterWords.said(StarterWords.priceLabel), { StarterWords.said(StarterWords.priceLabel) }, StarterWords.said(StarterWords.priceLabel))
     }
     views.add(ui.labelled(StarterWords.dateLabel, date))
+    views.add(ui.text(StarterWords.dateNote, 14f))
     // SS-32: what a payment from the starter wallet shows on a counter needs a Box; the stop option is on the starter page.
     views.add(ui.text(StarterWords.boxOnly, 14f))
     views.add(ui.labelled(StarterWords.diceLabel, dice))
@@ -253,6 +275,7 @@ internal fun Controller.showStarterLimit(message: SayWords? = null) {
         when {
             sats == null -> msg.show(words(StarterWords.said(StarterWords.limitInvalid, Tones.STOP)))
             by == null -> msg.show(words(StarterWords.said(StarterWords.dateInvalid, Tones.STOP)))
+            StarterSetup.tooLate(by, nowSecs()) -> msg.show(words(StarterWords.said(StarterWords.dateTooLate, Tones.STOP)))
             rolls == null -> msg.show(words(StarterWords.said(StarterWords.diceInvalid, Tones.STOP)))
             else -> {
                 starter.draft?.wipe()
@@ -301,7 +324,7 @@ private fun Controller.starterWordsScreen(title: String, body: List<View>, actio
 }
 
 /** One screen of four numbered words, drawn by the core, shown as a picture and cleared when the owner leaves it. */
-internal fun Controller.showStarterPage(page: Int, message: SayWords? = null) {
+internal fun Controller.showStarterPage(page: Int, message: SayWords? = null, copy: Boolean = false) {
     val image = ImageView(act)
     val holder = StarterWordsImage(act, image)
     try {
@@ -319,9 +342,18 @@ internal fun Controller.showStarterPage(page: Int, message: SayWords? = null) {
     message?.let { views.add(words(it)) }
     views.add(image)
     val next = StarterSetup.pageAfter(page)
-    val forward = if (next != null) ui.primary(StarterWords.pageNext) { clearImage(); showStarterPage(next) }
-    else ui.primary(StarterWords.pageWritten) { clearImage(); showStarterCheck() }
-    val back = if (page > 0) ({ clearImage(); showStarterPage(page - 1) }) else ({ starterCancel() })
+    // The second showing is the first one again, as it was; it ends in the sealing, not in a check-back.
+    val forward = if (next != null) ui.primary(StarterWords.pageNext) { clearImage(); showStarterPage(next, copy = copy) }
+    else ui.primary(StarterWords.pageWritten) {
+        clearImage()
+        if (copy) {
+            starter.draft?.copy?.finish()
+            sealStarter()
+        } else {
+            showStarterCheck()
+        }
+    }
+    val back = if (page > 0) ({ clearImage(); showStarterPage(page - 1, copy = copy) }) else ({ starterCancel() })
     starterWordsScreen(StarterWords.pageTitle, views, listOf(forward, ui.button(StarterWords.backButton) { back() }), back = back, image = holder)
 }
 
@@ -386,7 +418,7 @@ internal fun Controller.showStarterCheck() {
         when {
             // A wrong answer shows the words again, from the first screen.
             t.failed -> showStarterPage(0, StarterWords.said(StarterWords.checkWrong, Tones.STOP))
-            t.finished -> sealStarter()
+            t.finished -> showStarterCopyOffer()
             else -> {
                 asking(t.step)
                 counts.show(countsView(t))
@@ -394,6 +426,33 @@ internal fun Controller.showStarterCheck() {
         }
     }
     starterWordsScreen(StarterWords.checkTitle, listOf(ask, counts, pad), listOf(ui.button(StarterWords.backButton) { starterCancel() }), back = { starterCancel() })
+}
+
+/**
+ * SS-10: the check is passed. Once, before the key is sealed, the owner may have the words shown again for a second card.
+ * The offer is not made again, and not after the sealing.
+ */
+private fun Controller.showStarterCopyOffer() {
+    val draft = starter.draft ?: return showStarter()
+    if (!draft.copy.offered()) return sealStarter()
+    screen(
+        StarterWords.copyOffer, listOf(ui.text(StarterWords.copyOfferNote, 17f)),
+        listOf(ui.primary(StarterWords.copyOffer) { startStarterCopy() }, ui.button(StarterWords.copyLater) { sealStarter() }),
+    )
+}
+
+/** SS-10: the core allows the one more showing; its screens are drawn as in the first showing (SS-11, SS-12). */
+private fun Controller.startStarterCopy() {
+    val draft = starter.draft ?: return showStarter()
+    if (!draft.copy.begin()) return sealStarter()
+    try {
+        OwnerStarter.copyStart()
+    } catch (e: OwnerException) {
+        return centre(e.sayWords(), listOf(ui.button(StarterWords.backButton) { sealStarter() }), title = StarterWords.screenTitle)
+    } catch (e: LinkageError) {
+        return centre(AppWords.libraryMissing(e.message), listOf(ui.button(StarterWords.backButton) { sealStarter() }), title = StarterWords.screenTitle)
+    }
+    showStarterPage(0, copy = true)
 }
 
 // ---- sealing (SS-20, SS-21) -----------------------------------------------------------------------------------------------------
@@ -409,13 +468,15 @@ private fun Controller.sealStarter() {
     } catch (e: LinkageError) {
         return centre(AppWords.libraryMissing(e.message), listOf(ui.button(StarterWords.backButton) { starterCancel() }), title = StarterWords.screenTitle)
     }
-    keepSealed(sealed, wallet, StarterRecord(draft.limitSats, draft.moveBy, false, null)) { ok ->
+    draft.copy.seal()
+    val record = StarterRecord(draft.limitSats, draft.moveBy, false, null, secondCopyMade = draft.copy.made)
+    keepSealed(sealed, wallet, record) { ok ->
         if (ok) {
             starterLeave()
             // The key and the public wallet are kept; the shop's wallet is written last, and the first counter follows.
             val first = starterFirstRun()
             if (first == null) {
-                centre(StarterWords.sealed, listOf(ui.primary(StarterWords.doneButton) { showHome() }), title = StarterWords.screenTitle)
+                showStarterSealed { showHome() }
             } else if (starterKeepPinned(wallet)) {
                 showStarterMade(first)
             } else {

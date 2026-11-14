@@ -195,6 +195,7 @@ private const val OP_STARTER_CANCEL = 193
 private const val OP_STARTER_NOT_YET = 194
 private const val OP_STARTER_FEE_RATE = 195
 private const val OP_STARTER_OPEN = 196
+private const val OP_STARTER_COPY_START = 197
 private const val OP_OWN_OFFER_STARTER = 200
 private const val OP_OWN_SWITCH_SEND = 201
 private const val OP_OWN_SWITCH_STATUS = 202
@@ -4025,6 +4026,12 @@ object OwnerStarter {
         val r = call(OP_STARTER_CHECK_START, 0)
         return r.list { r.u32() }.also { r.end() }
     }
+
+    /**
+     * SS-10: allow the words to be shown once more, for a second card, after the check-back is passed and before the
+     * seal. The screens are then asked of [page] as in the first showing. Refused a second time and after the seal.
+     */
+    fun copyStart() = callUnit(OP_STARTER_COPY_START, 0)
 
     /**
      * SS-11: one key of the keypad: a letter (`a` to `z`, either case), 8 for backspace, 10 or 13 for enter. It

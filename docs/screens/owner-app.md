@@ -235,6 +235,12 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | welcomeTry | Try it first |
 | welcomeSetup | Set up my shop |
 | welcomeTryNote | A practice shop on this phone. No money, no wallet, nothing to buy. |
+| welcomeLine | Your keys. Your bitcoin. Your shop. |
+| welcomeNew | OpenBMT is new. No outside security firm has checked it yet. Start with small amounts. |
+| beforeTitle | Before you start |
+| beforeText | About 10 minutes. You'll need this phone, a pen, and the phone or tablet for your till, if you use one. |
+| beforeResume | You can stop at any step and carry on later. |
+| beforeGo | Start |
 | practiceBanner | PRACTICE. No real money. |
 | practiceIntroTitle | Here is a sale, start to finish |
 | practiceIntroText | You ring it up, the customer scans the code with their bitcoin wallet, and the sale shows Paid. In your shop this runs on the counter, the phone or tablet at the till. |
@@ -252,7 +258,7 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | practiceRefundText | A refund is given in cash from the till straight away, or in bitcoin, which you approve later from your own wallet. |
 | practiceRefundDone | Refunded in cash |
 | practiceDoneTitle | That is the whole sale |
-| practiceDoneText | Setting up your shop takes about ten minutes. Making a wallet, if you need one, takes about an hour and can wait. |
+| practiceDoneText | Setting up your shop takes about ten minutes, and you can take a first sale today. |
 | practiceSetup | Set up my shop |
 | practiceAgain | Try again |
 | practiceDelete | Delete the practice shop |
@@ -270,6 +276,7 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | shopNext | Next |
 | tillTitle | How do you take payments now? |
 | tillText | Bitcoin is added to your till as one more way to pay. Nothing else about your till changes. |
+| tillReads | OpenBMT only reads your till's orders, to match each bitcoin payment to its sale. It never changes them, and your till never sees a bitcoin address. |
 | tillSearch | Search tills |
 | tillNone | No till. I write sales down or use a cash box. |
 | tillOther | Another till |
@@ -319,23 +326,29 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | tillNoneText | The counter keeps every sale with its time, amount and who took it. Your books come from there. |
 | tillOtherText | Most tills let you add your own payment type. In your till's settings, look for "payment types" or "payment methods", add one called Bitcoin, and turn it on for your registers. |
 | tillOtherAsk | If your till has no such setting, the counter still keeps every sale for your books. |
-| moneyTitle | Where should the money go? |
-| moneyText | Bitcoin from your sales goes straight to a wallet you hold. OpenBMT never holds it and never makes your keys. |
-| moneyOwn | Use my own wallet |
-| moneyOwnNote | You already have a wallet and want sales to go there. |
-| moneyMake | Help me make a cold wallet |
-| moneyMakeNote | With a coin or a die and your laptop, offline. About an hour. |
+| moneyTitle | Your wallet |
+| moneyText | Bitcoin from your sales goes straight to a wallet you hold. Choose how to start. |
+| moneyPlan | Sell today, then move to a hardware wallet |
+| moneyPlanToday | Today: a starter wallet on this phone, with a limit you choose. |
+| moneyPlanLater | When your hardware wallet arrives: everything moves to it in one step. |
+| moneyOwn | I already have a wallet |
+| moneyOwnNote | A hardware wallet, a multisig, or any wallet that can show its public description. |
+| moneyOther | Other ways to make one |
+| moneyMake | Make a savings wallet on a spare laptop |
+| moneyMakeNote | Offline, from your own coin flips. About an hour, guided step by step. |
+| moneyDiy | A signer you build yourself |
+| moneyDiyNote | Made from parts and free software. It connects like any wallet you already have. |
 | moneyLater | Set up the rest now, add the wallet later |
 | moneyLaterNote | The counter says "Not taking bitcoin yet" until you do. |
 | moneyNotYet | This part is still being built. For now, setup continues with the test setup. |
-| ownAdviceTitle | We recommend a cold wallet |
-| ownAdviceText | A cold wallet keeps its keys on a device that never connects to the internet, such as a hardware signer or an offline computer. Its 12 words are best made from your own coin flips or die rolls. |
-| ownAdviceHot | A hot wallet, on a phone or an online computer, is fine for small amounts. Its keys sit on a device that can be hacked, so keep savings elsewhere. |
-| ownAdviceMake | Make a cold wallet with a coin or a die |
+| ownAdviceTitle | A wallet for the shop's money |
+| ownAdviceText | Best is a cold wallet: its keys stay on a device that never goes online, such as a hardware wallet or an offline computer, and it is used only for the shop. |
+| ownAdviceHot | A wallet on a phone or an online computer suits small amounts only. Its keys sit on a device that can be hacked, so keep savings elsewhere. |
+| ownAdviceMake | Make a savings wallet on a spare laptop |
 | ownAdviceGo | Continue with my wallet |
-| whyTitle | Why we do it this way |
-| whyText1 | Any app can be hacked, ours included. So your keys never touch one. |
-| whyText2 | You make them yourself, offline, with a coin or a die. After that, nobody can move your bitcoin without your words. Not even us. |
+| whyTitle | Why the keys are made offline |
+| whyText1 | Any app can be hacked, this one too. So the keys to your savings never touch one. |
+| whyText2 | You make them yourself, offline, from a coin or a die. From then on, your bitcoin moves only when your words say so. |
 | whyText3 | The inconvenience happens once. |
 | whyRealCases | Real cases |
 | realTitle | When someone else holds the money |
@@ -368,10 +381,54 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | realBitcoinHead | Your own bitcoin is different |
 | realBitcoinText | Bitcoin in your own wallet is not held by a bank or a payment company. Nobody can put a hold on it, close the account or cap your withdrawals, because there is no account. It moves only when your keys sign. |
 | realKeysTitle | Why the keys need so much care |
-| realKeysText | With nobody in the middle, nobody can undo a mistake either. Whoever has your 12 words can spend the money, and if every copy is lost, nobody can give it back. So the words are made where no one can see them, written by hand, and put on steel. |
+| realKeysText | With nobody in the middle, nobody can undo a mistake either. Whoever has your 12 words can spend the money, and if every copy is lost, nobody can give it back. So the words are made where no one can see them, written by hand, and later kept on steel plates, which survive fire and water. |
 | realCoinTitle | Why a coin or a die |
 | realCoinText | Phones and computers make random numbers with chips and software, and those have had faults before. A coin or a die has no chip and no software, so nothing can reach into it from outside. The key maker only turns your flips into words, offline, and shows its work so you can check it by hand. |
 | realMore | More cases, with their sources and how each ended, are in the handbook under "When someone else holds the money". |
+| hwTitle | Getting a hardware wallet |
+| hwText | A small device that keeps your keys away from the internet. Four rules keep a fake or tampered one out of your shop. |
+| hwRule1 | Buy it only from the maker's own website. Never a marketplace, a reseller or second-hand. |
+| hwRule2 | It makes new words in front of you. If it arrives with words, or a card already filled in, someone else has them: send it back. |
+| hwRule3 | Its software is open for anyone to check. |
+| hwRule4 | The box arrives sealed. |
+| hwNoBrand | OpenBMT names no brand. Makers change; these rules do not. |
+| hwHelper | A page for your helper |
+| hwHelperNote | The same rules, and the steps for when it arrives, to print or to show someone you trust. |
+| hwArrives | When it arrives, tap Move to my hardware wallet on the home screen. The phone guides each step. |
+| hwNext | Make my starter wallet |
+| helperTitle | Helping set up a hardware wallet |
+| helperIntro | This shop takes bitcoin with OpenBMT. Its money sits in a small starter wallet on the owner's phone until it moves to a hardware wallet. |
+| helperBuy | Buying it |
+| helperArrives | When it arrives |
+| helperStep1 | Check the box is sealed, then set the device up as new. It shows 12 or 24 words: write them by hand, never a photo. |
+| helperStep2 | In the owner app, tap Move to my hardware wallet and show the app the device's public description, by its QR code or a file. |
+| helperStep3 | Compare the first receive address on the phone with the one on the device's own screen. They must match exactly. |
+| helperStep4 | Each counter shows the same address once; the manager checks it against the device and confirms. |
+| helperStep5 | The phone moves everything to the hardware wallet in one payment, then deletes the starter key. |
+| instantTitle | Instant payments |
+| instantText | Small payments count at once. Bigger ones wait about ten minutes, until the payment is in a block. |
+| instantLabel | Count at once up to |
+| instantTypical | A typical sale in your shop |
+| instantZero | Type 0 to make every payment wait. |
+| instantHow1 | In the first minutes, a dishonest customer could try to send the same bitcoin somewhere else, like a bad note. The counter and this phone both watch for it and raise the alarm if they see it. |
+| instantHow2 | Up to your amount, the goods are handed over at once and you carry that small risk. Above it, the sale waits for a block, after which a payment is very hard to undo. |
+| instantDetails | The exact rules, and the limits with your own node or a Box, are in the handbook under Getting paid. |
+| instantNext | Next |
+| firstSaleTitle | A first real sale |
+| firstSaleText | Ring up a small sale on the counter and pay it from any bitcoin wallet. |
+| firstSaleSkip | Skip, I'll try it later |
+| firstSaleWaiting | Waiting for the payment. |
+| firstSalePaid | Paid to you, person to person. No bank, no processor. |
+| firstSaleSee | See it yourself |
+| firstSaleSeeText | This is the payment's ID. Look it up in any bitcoin wallet or on your own node. |
+| firstSaleDone | Done |
+| checklistTitle | Still to do |
+| checklistSale | Make a first sale |
+| checklistNotTested | Not tested yet |
+| checklistCopy | Write a second copy of your words |
+| checklistCueCard | Print the cue card for staff |
+| howThisWorks | How this works |
+| details | Details |
 | kgTitle | Make your cold wallet |
 | kgStepBadge | Step {n} of {total} |
 | kgNext | Next |
@@ -429,7 +486,7 @@ Connect your wallet, after the advice on an own wallet, in `ConnectWords`:
 | introStep1 | Open your wallet on the computer or phone where it lives. |
 | introStep2 | Find Export or Settings, then Output descriptor. |
 | introStep3 | Show it as a code, then scan it with this phone. |
-| introNote | Sparrow and Coldcard can show one. A wallet that shows only an xpub or zpub cannot be used yet. |
+| introNote | Most wallet apps and hardware wallets can show one, often under Export or Descriptor. A wallet that shows only an xpub or zpub cannot be used yet. |
 | introScan | Scan the code |
 | introPaste | Paste the text |
 | pasteHint | Paste the output descriptor here. |
@@ -554,16 +611,19 @@ core's own words, which the binding does not carry yet:
 
 | Key | Text |
 |---|---|
-| SS00_ROW_TITLE | Start simple |
-| SS00_ROW_SUB | A small wallet on this phone, for a shop's first sales |
-| SS00_SCREEN_TITLE | Start simple |
+| SS00_ROW_TITLE | Starter wallet |
+| SS00_ROW_SUB | A small wallet on this phone, until your hardware wallet arrives |
+| SS00_SCREEN_TITLE | Starter wallet |
 | SS00_START_BUTTON | Start |
 | SS00_BACK_BUTTON | Back |
 | SS00_DONE_BUTTON | Done |
 | SS24_NO_LOCK_HEADING | Set a screen lock first |
 | SS24_NO_LOCK_WHAT | The starter wallet's key is locked by the phone's screen lock, and this phone has none. |
 | SS24_NO_LOCK_NEXT | Set a PIN, pattern or password in the phone's settings, then come back. |
-| SS13_TITLE | Before the words |
+| SS13_TITLE | Your 12 words |
+| SS13_INTRO | These 12 words are your bitcoin. Whoever has them can spend it, so they stay with you, on paper. If this phone is lost, stolen or broken, they bring your money back on a new phone. |
+| SS13_KEEP | Keep the card somewhere dry and safe, not in the shop. |
+| SS13_HOW | A photo or a note on a phone can be read by any app that gets into the phone; paper cannot. The words are on this screen only while they are shown, and an infected phone could read them then. That is why the starter wallet has a limit. |
 | SS13_PEN | Write the 12 words on the card, in pen. |
 | SS13_NO_PHOTO | Never take a photo or a screenshot of them. Apps that steal bitcoin read people's photos for exactly this. |
 | SS13_NOBODY_ASKS | No app and no person will ever ask you for these words. Anyone who does is a thief. |
@@ -588,9 +648,13 @@ core's own words, which the binding does not carry yet:
 | SS33_CONFIRM_BUTTON | Go on anyway |
 | SS33_CONFIRM_AGAIN | Each thing below was found on this phone. Go on only if you understand it. |
 | SS35_TITLE | Your limit and your date |
+| SS35_WHY | If this phone is stolen or infected, someone could take what the starter wallet holds, and never more than your limit. Choose the most you would be OK losing. |
+| SS35_EXAMPLE | For example, a day's takings or less. |
+| SS35_DATE_NOTE | 30 days from today unless you change it, and at most 90. |
+| SS35_DATE_TOO_LATE | Choose a date at most 90 days from today. |
 | SS35_LIMIT_LABEL | Most it may hold |
 | SS35_PRICE_LABEL | Price of one bitcoin |
-| SS35_DATE_LABEL | Move to a key made offline by |
+| SS35_DATE_LABEL | Move to a wallet kept offline by |
 | SS32_BOX_ONLY | Payments from the starter wallet show on the counters only once the shop has a Box. Until then, this phone alone shows them. |
 | SS38_STOP_LABEL | Stop bitcoin sales above my limit |
 | SS35_LIMIT_INVALID | Type the most the starter wallet may hold, as a whole number. |
@@ -610,6 +674,9 @@ core's own words, which the binding does not carry yet:
 | SS11_KEY_ENTER | Enter |
 | SS10_CHECK_WRONG | That is not the word on the card at that number. The words are shown again. |
 | SS10_MADE_HEADING | Starter wallet made |
+| SS10_COPY_OFFER | Make a second copy |
+| SS10_COPY_OFFER_NOTE | Write the words again on a second card, and keep it in another place. They can be shown again only now, before you finish. |
+| SS10_COPY_LATER | Not now |
 | SS21_AUTH_TITLE | Unlock the starter wallet |
 | SS21_AUTH_SUBTITLE | Your fingerprint, face or phone PIN opens the key for this one step. |
 | SS21_AUTH_SEAL | Lock the key on this phone |
@@ -619,6 +686,7 @@ core's own words, which the binding does not carry yet:
 | SS20_SEALED_HEADING | The key is on this phone |
 | SS20_SEALED_WHAT | The starter wallet's key is locked by this phone's key hardware and opens only with your fingerprint, face or PIN. |
 | SS20_SEALED_NEXT | Keep the card with the 12 words somewhere safe, away from the phone. |
+| SS21_SEND_LINE | Taking payments never needs this. Sending money out always does. |
 | SS20_NOT_SAVED_HEADING | The key was not kept |
 | SS20_NOT_SAVED_WHAT | The phone could not lock the key, so nothing was kept and no wallet was made. |
 | SS20_NOT_SAVED_NEXT | Try again. If it happens again, make the key on the stick instead. |
@@ -636,10 +704,17 @@ core's own words, which the binding does not carry yet:
 | SS36_LIMIT | Limit |
 | SS36_MOVE_BY | Move by |
 | SS37_NOT_YET_UNTIL | Not yet, until |
-| SS37_TITLE | Upgrade your wallet |
-| SS37_UPGRADE_NOW | Upgrade now |
+| SS36_DAYS_LEFT | {days} days left |
+| SS36_LAST_DAY | Last day |
+| SS36_CARD_TITLE | Time to move your bitcoin offline |
+| SS36_CARD_TEXT | Your starter wallet holds {held} of your {limit} limit, and {days} days are left. A hardware wallet keeps your bitcoin away from the internet. |
+| SS36_CARD_GO | Set up my hardware wallet |
+| SS36_CARD_NOT_NOW | Not now |
+| SS36_HOME_MOVE | Move to my hardware wallet |
+| SS37_TITLE | Move to your hardware wallet |
+| SS37_UPGRADE_NOW | Move now |
 | SS37_NOT_YET | Not yet |
-| SS37_NOT_YET_SENTENCE | My shop's money stays on a wallet made on my everyday phone. |
+| SS37_NOT_YET_SENTENCE | My shop's bitcoin stays on my everyday phone for now. |
 | SS37_NOT_YET_ASK | To wait up to 7 more days, type this: |
 | SS37_NOT_YET_CONFIRM | Wait |
 | SS37_NOT_YET_DIFFERS | That is not the sentence exactly. Check each word. |
