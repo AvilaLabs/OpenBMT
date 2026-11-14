@@ -230,7 +230,7 @@ private const val OP_WEB_STEP = 231
 private const val OP_WEB_REPLY = 232
 private const val OP_WEB_CODE_READ = 233
 private const val OP_REQUEST_READ = 234
-private const val OP_STARTER_LINE_SET = 227
+private const val OP_STARTER_LINE_SET = 235
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 

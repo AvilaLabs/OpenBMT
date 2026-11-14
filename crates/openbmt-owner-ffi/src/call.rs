@@ -81,7 +81,7 @@
 //!   step of a visit (which the app sends to the store) and the store's
 //!   answer to it. 233 reads a pairing code to show what is compared; it
 //!   works on no node.
-//! - 227: the limit and the stop the owner phone's own record holds, given to
+//! - 235: the limit and the stop the owner phone's own record holds, given to
 //!   the node for the starter line it sends to the counters (LK-79, SS-32,
 //!   SS-38).
 //! - 100 to 103: the lock on the setup text the app stores
@@ -1066,7 +1066,7 @@ fn build_ops() -> Vec<Op> {
             web_orders::read_code(text)
         op(234, "request_read", Node, |c, a: RequestNumberArgs| {
             c.entry()?.request_read(a)
-        op(227, "starter_line_set", Node, |c, a: StarterLineSetArgs| {
+        op(235, "starter_line_set", Node, |c, a: StarterLineSetArgs| {
             c.entry()?.starter_line_set(a)
         }),
     ]
