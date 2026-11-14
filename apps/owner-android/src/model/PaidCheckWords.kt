@@ -47,6 +47,13 @@ object PaidCheckWords {
     val notKeptHeading = say("OC64_NOT_KEPT_HEADING", "Checks not kept")
     val notKeptWhat = say("OC64_NOT_KEPT_WHAT", "This phone could not read back its record of the counter checks.")
     val notKeptNext = say("OC64_NOT_KEPT_NEXT", "Clear the checks to start them again.")
+    val fullWhat = say("OC64_FULL_WHAT", "This phone's record of the counter checks is full, so new checks are shown but not kept.")
+    val fullNext = say("OC64_FULL_NEXT", "Clear the checks you have dealt with.")
+
+    // ---- a counter whose records cannot be checked (OC-61) ----
+    val unreadableHeading = say("OC61_UNREADABLE_HEADING", "Counter cannot be checked")
+    val unreadableWhat = say("OC61_UNREADABLE_WHAT", "The records of {counter} do not read as sales, so this phone cannot check the payments of its sales.")
+    val unreadableNext = say("OC61_UNREADABLE_NEXT", "Check the counter: it may have been tampered with.")
 
     private fun said(heading: String, what: String, next: String, tone: Int): SayWords =
         SayWords(tone, Who.OWNER, heading, what, next, null, null, null, null)

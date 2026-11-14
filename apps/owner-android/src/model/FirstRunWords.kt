@@ -257,6 +257,7 @@ object FirstRunWords {
     const val instantLabel = "Count at once up to"
     const val instantTypical = "A typical sale in your shop"
     const val instantZero = "Type 0 to make every payment wait."
+    const val instantHigher = "To count more at once, raise it later in Settings."
     const val instantHow1 = "In the first minutes, a dishonest customer could try to send the same bitcoin somewhere else, like a bad note. " +
         "The counter and this phone both watch for it and raise the alarm if they see it."
     const val instantHow2 = "Up to your amount, the goods are handed over at once and you carry that small risk. " +
@@ -353,7 +354,7 @@ object FirstRunWords {
         add("helperTitle", helperTitle); add("helperIntro", helperIntro); add("helperBuy", helperBuy); add("helperArrives", helperArrives)
         helperSteps.forEachIndexed { i, t -> add("helperStep${i + 1}", t) }
         add("instantTitle", instantTitle); add("instantText", instantText); add("instantLabel", instantLabel)
-        add("instantTypical", instantTypical); add("instantZero", instantZero); add("instantHow1", instantHow1)
+        add("instantTypical", instantTypical); add("instantZero", instantZero); add("instantHigher", instantHigher); add("instantHow1", instantHow1)
         add("instantHow2", instantHow2); add("instantDetails", instantDetails); add("instantNext", instantNext)
         add("firstSaleTitle", firstSaleTitle); add("firstSaleText", firstSaleText); add("firstSaleSkip", firstSaleSkip)
         add("firstSaleWaiting", firstSaleWaiting); add("firstSalePaid", firstSalePaid); add("firstSaleSee", firstSaleSee)
