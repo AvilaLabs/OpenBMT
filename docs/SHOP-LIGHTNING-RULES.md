@@ -164,19 +164,27 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   channel's funding leaves the chain, the library closes that channel by
   force, and the shop's money comes back as from any close (SL-33, SL-36); a
   later payment opens a new channel (SL-29). A channel the provider opened for
-  a payment is used before its funding confirms (SL-40). If that funding is
-  beaten by another transaction, or has no confirmation within 144 blocks
-  **[to tune]**, it is lost and the money in the channel may never come. The
-  node then closes that channel by force at once, so nothing more comes
-  through it. Each sale paid at once through it, or accepted by a person
-  (CR-20) before any of its fundings was lost, is a cancel, as CR-14 says: the
-  alarm, the pause, "Do not hand over" on its screen, and the POS told it is
-  unpaid (CR-30). A sale still waiting for that funding is told so, and a
-  manager can still accept it. A later payment through a funding already lost
-  is never paid at once. The counter tells the manager, and the owner phone
-  lists the sales paid through it: the first 64 by number, and the count of
-  all. If a write fails partway through, what was recorded before it is still
-  reported, and the rest is tried again.
+  a payment is used before its funding confirms (SL-40). If that funding has
+  no confirmation within 144 blocks **[to tune]** of the payment, it is lost
+  and the money in the channel may never come; a funding beaten by another
+  transaction is found that way, since its channel never closes by itself. A
+  channel that closes before its funding is in a block loses it too. A funding
+  that was in a block is not lost when its channel closes: it counts as
+  confirmed once the shop's depth of blocks has passed since the block the
+  node first saw it in. A payment that came through a channel already gone
+  when the payment is taken is a payment through a lost funding, unless the
+  node last saw that channel's funding at the shop's depth. The node closes
+  the channel of a lost funding by force at once, and again at each check
+  while it is still open, so nothing more comes through it. Each sale paid at
+  once through it, or accepted by a person (CR-20) before any of its fundings
+  was lost, is a cancel, as CR-14 says: the alarm, the pause, "Do not hand
+  over" on its screen, and the POS told it is unpaid (CR-30). A sale still
+  waiting for that funding is told so, and a manager can still accept it. A
+  later payment through a funding already lost is never paid at once. The
+  counter tells the manager, and the owner phone lists the sales paid through
+  it: the first 64 by number, and the count of all. If a write fails partway
+  through, what was recorded before it is still reported, and the rest is
+  tried again.
 
 ## 5. The provider
 
