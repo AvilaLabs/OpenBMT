@@ -207,7 +207,9 @@ funds.**
   not `m/84'/0'/0'/0/i` or `m/84'/0'/0'/1/i` under the master fingerprint of
   these words, or the key at that path is not the input's key; an input asks
   for a signature other than SIGHASH_ALL; the payment is not for real
-  bitcoin; the outputs pay more than the inputs hold.
+  bitcoin; the outputs pay more than the inputs hold; the file is over
+  8 MiB or has bytes after its last map, as the signer refuses
+  (`docs/SIGNER-RULES.md`).
 - **SK-55. What is shown before signing.** Every output, with its address
   and amount in bitcoin. An output is marked as the wallet's own only when
   the program derives its address itself from these words; a claim in the

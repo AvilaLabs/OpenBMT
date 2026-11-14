@@ -76,9 +76,16 @@ and gives bytes and text. The app draws the codes and words the progress.
   differs in any of them is refused, and so is a whole UR among multi-part
   ones. When a message is complete, a part of another type is refused.
 - **UR-11.** The decoder holds at most twice the sequence length of mixed
-  parts that it cannot yet reduce. A mixed part with the same fragments as
-  one held is not held again. A part that would be held beyond the bound is
-  refused.
+  parts that it cannot yet reduce, and at most 100 index entries for each
+  fragment of the sequence across all of them (1,000,000 at 10,000
+  fragments, about 12 MB). A mixed part with the same fragments as one held
+  is not held again. A new mixed part that would pass either bound pushes
+  out the held part with the most fragments still unknown, or is not held
+  when it has at least as many itself. A mixed part that still mixes more
+  than half the fragments of the sequence (and more than 64), once what is
+  known is taken out, is not held. None of these is an error: the decoder
+  keeps reading, and a stream read from any point, even past every single
+  fragment, completes.
 - **UR-12.** When every fragment is known the message is cut to its
   length. The bytes cut off must all be zeros and the CRC-32 of the message
   must equal the checksum in the parts. If not, the part is refused and the
@@ -94,7 +101,10 @@ and gives bytes and text. The app draws the codes and words the progress.
 - **UR-17.** A decoder never panics, whatever the text: every length is
   checked before it is used, no index is taken that could be out of range,
   and the work and memory for one text are bounded by the rules above. The
-  decoder is fuzzed (`fuzz/fuzz_targets/ur_decode.rs`).
+  bounds hold over the whole stream too: learning a fragment looks at each
+  held index entry once, and choosing the fragments of a part costs about
+  its degree times the logarithm of the sequence length. The decoder is
+  fuzzed (`fuzz/fuzz_targets/ur_decode.rs`).
 
 ## 4. The fountain code
 
