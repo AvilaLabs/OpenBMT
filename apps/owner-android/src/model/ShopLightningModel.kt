@@ -71,7 +71,7 @@ object ShopLightningModel {
 
     /** The turn-on edit from the steps' draft (SL-76). */
     fun turnOn(d: Draft): Form<ShopLightningEditArgs> {
-        val counter = d.counter ?: return Form.Refused(ShopLightningWords.said(ShopLightningWords.noCounters))
+        val counter = d.counter ?: return Form.Refused(ShopLightningWords.noCountersWords)
         if (!NODE_ID.matches(d.nodeId)) return Form.Refused(ShopLightningWords.nodeNotIdWords)
         if (d.providerKey.isBlank() || d.providerAddr.isBlank()) return Form.Refused(ShopLightningWords.providerMissingWords)
         val cap = sats(d.cap) ?: return Form.Refused(ShopLightningWords.numberInvalidWords)

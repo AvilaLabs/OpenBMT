@@ -1359,9 +1359,8 @@ object AppWords {
         for ((key, text) in WebOrderWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         out.append(
             "\nShop Lightning (`docs/SHOP-LIGHTNING-RULES.md`, SL-04 to SL-78), in\n" +
-                "`ShopLightningWords`. A text named `WORDS_NEEDED_SL<rule>_<NAME>` is not\n" +
-                "written yet and shows its own name. What the library says of a refusal\n" +
-                "is `WORDS_NEEDED_SL<rule>_<NAME>_HEADING`, `_WHAT` and `_NEXT`:\n\n" +
+                "`ShopLightningWords`. What the library says of a refusal is the\n" +
+                "library's own:\n\n" +
                 "| Key | Text |\n" +
                 "|---|---|\n",
         )

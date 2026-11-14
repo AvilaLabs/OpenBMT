@@ -4734,13 +4734,13 @@ object AppModelTest {
     ) = ShopLightningState(on, ownWallet, listOf(ByteArray(32) { 1 }), List(boxes) { ByteArray(32) { 3 } }, if (on) shopLightningHeld() else null, report)
 
     private fun shopLightningTests() {
-        // The words: every text is the placeholder of a rule of docs/SHOP-LIGHTNING-RULES.md, and none is used twice.
+        // The words: every text is written and listed once; the app's own messages pass the checks and read apart.
         val all = ShopLightningWords.all()
-        ok(all.map { it.first }.toSet().size == all.size && all.map { it.second }.toSet().size == all.size, "each Shop Lightning text is written once")
-        ok(all.all { (_, text) -> Regex("WORDS_NEEDED_SL\\d{2}_[A-Z_]+").matches(text) && ShopLightningWords.isPlaceholder(text) }, "each Shop Lightning text is a placeholder that names its rule")
-        val rules = Regex("SL-(\\d{2})").findAll(File(appDir, "../../docs/SHOP-LIGHTNING-RULES.md").readText()).map { it.groupValues[1] }.toSet()
-        ok(all.all { (_, text) -> text.removePrefix("WORDS_NEEDED_SL").take(2) in rules }, "the rule of each placeholder is a rule of the Shop Lightning rules")
-        ok(NotOffered.values().all { ShopLightningWords.isPlaceholder(ShopLightningWords.cause(it)) } && NotOffered.values().map { ShopLightningWords.cause(it) }.toSet().size == NotOffered.values().size, "each cause the report gives has its own text")
+        ok(all.map { it.first }.toSet().size == all.size, "each Shop Lightning text is listed once")
+        ok(all.all { (_, text) -> text.isNotBlank() && text.trim() == text && !text.contains("WORDS_NEEDED") }, "each Shop Lightning text is written")
+        for ((k, w) in ShopLightningWords.messages()) ok(SayCheck.problem(w) == null && w.code?.startsWith("SL-") == true, "words of $k: ${SayCheck.problem(w)}")
+        ok(SayCheck.distinctProblem(ShopLightningWords.messages()) == null, "no two Shop Lightning messages read the same")
+        ok(NotOffered.values().map { ShopLightningWords.cause(it) }.toSet().size == NotOffered.values().size, "each cause the report gives has words of its own")
         val screens = source("src/android/ShopLightning.kt")
         val literals = Regex("\"([^\"\\\\]*)\"").findAll(screens.lines().filter { !it.trimStart().startsWith("//") && !it.trimStart().startsWith("import") && !it.trimStart().startsWith("*") && !it.trimStart().startsWith("/**") }.joinToString("\n")).map { it.groupValues[1] }.toList()
         ok(literals.all { it.isEmpty() || it.startsWith("\$") }, "the Shop Lightning screens write no text of their own: $literals")
@@ -4802,7 +4802,7 @@ object AppModelTest {
         ok(shown[ShopLightningWords.whyLabel] == ShopLightningWords.secondDeviceAway && shown[ShopLightningWords.cameLabel] == Format.localTime(1_000), "why it is not offered and when the report came")
         ok(shown[ShopLightningWords.providerLabel]!!.endsWith(" 203.0.113.7:9735") && shown[ShopLightningWords.nodeLabel]!!.contains("\u2026"), "the provider's ID and address, and the node's ID cut at both ends")
         ok(ShopLightningModel.lines(held, LightningReport(1, 1, 1, 9, 0, 0, NotOffered.Offered)).any { it.label == ShopLightningWords.lastSweepLabel && it.value == ShopLightningWords.noSweep }, "a sweep that never was")
-        ok(ShopLightningModel.Step.values().map { ShopLightningModel.stepLine(it) }.toSet().size == 1, "the step's place is one text until its words are written")
+        ok(ShopLightningModel.Step.values().map { ShopLightningModel.stepLine(it) } == (1..5).map { "Step $it of 5" }, "SL-76: each step says where it stands among the five")
     }
 
     private fun floatTests() {

@@ -59,30 +59,18 @@ fn sl_71_the_provider_key_reads_capitals_and_the_address_needs_a_port() {
     }
 }
 
-/// SC-12: every text of a refusal is the placeholder of its rule, named by
-/// the refusal, and each is its own.
+/// SC-12: every refusal has written words that pass the checks, carry the
+/// rule they are from, and read apart from one another.
 #[test]
-fn sc_12_the_words_are_placeholders_of_their_rule_and_each_is_its_own() {
+fn sc_12_the_words_pass_the_checks_carry_their_rule_and_differ() {
     let all = all_refusals();
     assert_eq!(all.len(), ShopLightningRefusal::ALL.len());
-    let mut headings = std::collections::BTreeSet::new();
     for (name, w) in &all {
-        let rule = name.len(); // the name is only for the failure message
-        let _ = rule;
-        assert!(w.heading.starts_with("WORDS_NEEDED_SL7"), "{name}");
-        assert!(w.heading.ends_with("_HEADING"), "{name}");
-        let stem = w.heading.trim_end_matches("_HEADING");
-        assert_eq!(w.what, format!("{stem}_WHAT"), "{name}");
-        assert_eq!(w.next, format!("{stem}_NEXT"), "{name}");
-        assert!(headings.insert(w.heading.clone()), "{name}");
+        assert_eq!(openbmt_core::say::check(w), Ok(()), "{name}");
+        assert!(!w.heading.contains("WORDS_NEEDED"), "{name}");
     }
+    assert_eq!(openbmt_core::say::check_distinct(&all), Ok(()));
     for r in ShopLightningRefusal::ALL {
-        let number = r.rule().trim_start_matches("SL-");
-        assert!(
-            r.words()
-                .heading
-                .starts_with(&format!("WORDS_NEEDED_SL{number}_")),
-            "{r:?}"
-        );
+        assert_eq!(r.words().code, Some(r.rule()), "{r:?}");
     }
 }

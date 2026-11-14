@@ -8,11 +8,8 @@
 //! that loosens to the Key app, and signs one that tightens with the owner's
 //! key alone. [`openbmt_core::approval::classify`] gives its class.
 //!
-//! No sentence is written yet. Every text is the placeholder that names its
-//! rule, `WORDS_NEEDED_SL<rule>_<NAME>_HEADING`, `_WHAT` and `_NEXT`, so that
-//! the missing words show wherever the words will stand. As the web order
-//! words do, they are not in the table of the library's other words, whose
-//! checks would refuse a placeholder.
+//! Each refusal has words of its own that pass the checks of
+//! `openbmt_core::say` and carry the rule they are from (SC-12).
 
 use std::fmt;
 use std::net::SocketAddr;
@@ -152,20 +149,61 @@ impl ShopLightningRefusal {
         Self::NotOn,
     ];
 
-    /// What the owner is told: the placeholders of the refusal's rule.
+    /// What the owner is told about the refusal. Nothing changed.
     pub fn words(self) -> Words {
-        let stem = format!(
-            "WORDS_NEEDED_SL{}_{}",
-            self.rule().trim_start_matches("SL-"),
-            self.name()
-        );
-        Words::new(
-            Tone::Stop,
-            format!("{stem}_HEADING"),
-            format!("{stem}_WHAT"),
-            Who::Owner,
-            format!("{stem}_NEXT"),
-        )
+        let (heading, what, next) = match self {
+            Self::OwnWallet => (
+                "Not for this shop yet",
+                "This shop is paid to its own wallet, and turning Shop Lightning on there is not built yet. Nothing changed.",
+                "Sales go on as before, on-chain.",
+            ),
+            Self::NoBox => (
+                "A Box is needed first",
+                "Shop Lightning keeps a second copy of the node's state on the shop's Box, and this shop has none.",
+                "Add a Box to the shop, then turn Shop Lightning on.",
+            ),
+            Self::BoxNotInShop => (
+                "Not a Box of this shop",
+                "The device chosen to keep the second copy is not a Box in the shop's settings, so nothing changed.",
+                "Pick the shop's own Box, then try again.",
+            ),
+            Self::CounterNotInShop => (
+                "Not a counter of this shop",
+                "The counter chosen for Lightning is not in the shop's settings, so nothing changed.",
+                "Pick one of the shop's counters, then try again.",
+            ),
+            Self::NodeId => (
+                "Node's ID not read",
+                "The node's ID is not one a Lightning node can have, so nothing changed.",
+                "Scan the ID again from the code the stick shows.",
+            ),
+            Self::ProviderKey => (
+                "Provider's ID not read",
+                "The provider's node ID is not one a Lightning node can have, so nothing changed.",
+                "Copy the node ID again from the provider's own page.",
+            ),
+            Self::ProviderAddress => (
+                "Provider's address not read",
+                "The provider's address is not an IP address with a port, such as 203.0.113.5:9735, so nothing changed.",
+                "Copy the address again from the provider's own page. An onion address is not taken yet.",
+            ),
+            Self::CapZero => (
+                "Cap is zero",
+                "The cap is the most the node holds, and a cap of zero would take no payment. Nothing changed.",
+                "Set a cap above zero, such as one day of Lightning sales.",
+            ),
+            Self::OtherLightning => (
+                "Another Lightning is set",
+                "The shop already takes Lightning through its own node or a swap, and Shop Lightning is never set beside either.",
+                "Turn the other one off first, then turn Shop Lightning on.",
+            ),
+            Self::NotOn => (
+                "Shop Lightning is off",
+                "There is no Shop Lightning to change, since it is off. Nothing changed.",
+                "Turn it on first.",
+            ),
+        };
+        Words::new(Tone::Stop, heading, what, Who::Owner, next).code(self.rule())
     }
 }
 

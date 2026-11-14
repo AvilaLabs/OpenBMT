@@ -233,9 +233,8 @@ fn sl_73_a_shop_without_a_box_is_refused_with_the_placeholder_of_its_rule() {
     let (rig, handle) = held(false);
     let f = preview(&rig, handle, &Edit::set()).unwrap_err();
     assert!(f.rule.starts_with("SL-73"), "{f:?}");
-    assert_eq!(f.words.heading, "WORDS_NEEDED_SL73_NO_BOX_HEADING");
-    assert_eq!(f.words.what, "WORDS_NEEDED_SL73_NO_BOX_WHAT");
-    assert_eq!(f.words.next, "WORDS_NEEDED_SL73_NO_BOX_NEXT");
+    assert_eq!(f.words.heading, "A Box is needed first");
+    assert!(f.words.what.contains("second copy"));
 }
 
 #[test]
@@ -353,7 +352,7 @@ fn sl_71_an_edit_that_is_missing_what_its_step_needs_is_refused() {
     )
     .unwrap_err();
     assert!(f.rule.starts_with("SL-76"), "{f:?}");
-    assert_eq!(f.words.heading, "WORDS_NEEDED_SL76_NODE_ID_HEADING");
+    assert_eq!(f.words.heading, "Node's ID not read");
 }
 
 #[test]
