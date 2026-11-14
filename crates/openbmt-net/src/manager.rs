@@ -895,12 +895,14 @@ impl Manager {
         let limit = u64::from(self.store.tip_height()).saturating_add(u64::from(BEHIND_BLOCKS));
         let mut empty_claims = Vec::new();
         for (id, peer) in self.peers.iter_mut().filter(|(_, p)| p.ready) {
+            // NR-100: the own node is not dropped for a claim, as when it is
+            // held apart from `peers`.
             let ahead = u64::from(peer.shown_height) > limit;
             match (ahead, peer.ahead_since) {
                 (true, None) => peer.ahead_since = Some(now),
                 (false, Some(_)) => peer.ahead_since = None,
                 (true, Some(since)) => {
-                    if !peer.blocked && now.saturating_sub(since) >= CLAIM_SECS {
+                    if !peer.own && !peer.blocked && now.saturating_sub(since) >= CLAIM_SECS {
                         empty_claims.push(*id);
                     }
                 }
@@ -988,6 +990,10 @@ impl Manager {
         let Some(peer) = self.peers.get_mut(&id) else {
             return;
         };
+        // NR-100: a request of the own node that runs out does not end it.
+        if peer.own {
+            return;
+        }
         peer.unanswered = peer.unanswered.saturating_add(1);
         if peer.unanswered >= MAX_UNANSWERED {
             self.drop_peer(

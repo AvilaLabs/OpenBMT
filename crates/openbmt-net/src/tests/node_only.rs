@@ -173,14 +173,52 @@ fn nr_106_the_checks_of_the_peer_protocol_still_apply_to_what_it_sends() {
 }
 
 #[test]
-fn nr_106_a_node_that_claims_a_height_and_sends_no_headers_is_dropped_as_any_peer() {
+fn nr_100_a_node_that_claims_a_height_and_sends_no_headers_is_not_dropped() {
     let mut n = net();
-    let (id, _, _) = join_node(&mut n, 1, filters(), 50);
+    let (_, _, _) = join_node(&mut n, 1, filters(), 50);
+    let out = n.tick(crate::manager::CLAIM_SECS - 1);
+    assert!(disconnects(&out).is_empty(), "{out:?}");
+    let out = n.tick(1);
+    assert!(disconnects(&out).is_empty(), "{out:?}");
+    let out = n.tick(1);
+    assert!(disconnects(&out).is_empty(), "{out:?}");
+}
+
+#[test]
+fn nr_33_an_ordinary_peer_in_the_mode_that_claims_a_height_is_dropped() {
+    let mut n = net();
+    let id = n.join(2, filters(), 50).id;
     let out = n.tick(crate::manager::CLAIM_SECS - 1);
     assert!(disconnects(&out).is_empty(), "{out:?}");
     let out = n.tick(1);
     assert_eq!(disconnects(&out), vec![(id, true)]);
     assert!(reason(&out).starts_with("NR-33: "));
+}
+
+#[test]
+fn nr_100_a_request_of_the_node_that_runs_out_does_not_end_it() {
+    let mut n = net();
+    let (id, _, _) = join_node(&mut n, 1, filters(), 0);
+    n.sent(id);
+    let txids = [fake_txid(1), fake_txid(2), fake_txid(3)];
+    n.inv_txs(id, &txids);
+    assert_eq!(tx_requests(&n.sent(id)).len(), 3);
+    let out = n.tick(30);
+    assert!(disconnects(&out).is_empty(), "{out:?}");
+    let out = n.tick(30);
+    assert!(disconnects(&out).is_empty(), "{out:?}");
+}
+
+#[test]
+fn nr_42_an_ordinary_peer_in_the_mode_whose_requests_run_out_is_dropped() {
+    let mut n = net();
+    let id = n.up(2);
+    n.sent(id);
+    n.inv_txs(id, &[fake_txid(1), fake_txid(2), fake_txid(3)]);
+    assert_eq!(tx_requests(&n.sent(id)).len(), 3);
+    let out = n.tick(30);
+    assert_eq!(disconnects(&out), vec![(id, false)]);
+    assert!(reason(&out).starts_with("NR-42: "));
 }
 
 #[test]
