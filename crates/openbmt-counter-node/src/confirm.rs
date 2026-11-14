@@ -16,6 +16,7 @@
 //! notices that follow a change that was dropped or refused.
 
 use openbmt_core::approval::{confirm_words, drops_last_counter, field_class, ChangeClass};
+use openbmt_core::identity::DeviceId;
 use openbmt_core::settings::{changed_fields, Change, Limit, Settings, SignedSettings};
 use openbmt_core::words::WORD_COUNT;
 
@@ -54,10 +55,6 @@ pub struct ChangedField {
     pub after: FieldValue,
 }
 
-fn count(n: usize) -> FieldValue {
-    FieldValue::Count(u32::try_from(n).unwrap_or(u32::MAX))
-}
-
 /// The value of a limit (CR-240): the satoshis when they differ, since a
 /// counter enforces satoshis and the shown units can move the other way; the
 /// units only when the satoshis are the same.
@@ -80,23 +77,77 @@ fn own_node_text(s: &Settings) -> String {
     )
 }
 
-/// The first four bytes of `bytes` as hex.
-fn hex_prefix(bytes: &[u8]) -> String {
-    bytes.iter().take(4).map(|b| format!("{b:02x}")).collect()
+/// `bytes` as lower-case hex.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// A device id in full: 64 hex digits in groups of four, as the approver
+/// writes it (the same text, so the manager can compare the two screens).
+pub(crate) fn full_id(d: &DeviceId) -> String {
+    let digits = hex(&d.to_bytes());
+    let groups: Vec<&str> = digits
+        .as_bytes()
+        .chunks(4)
+        .filter_map(|c| std::str::from_utf8(c).ok())
+        .collect();
+    groups.join(" ")
+}
+
+/// A share in basis points as a percent with up to two decimals.
+pub(crate) fn share_percent(bp: u16) -> String {
+    let (whole, frac) = (bp / 100, bp % 100);
+    match frac {
+        0 => format!("{whole}%"),
+        f if f % 10 == 0 => format!("{whole}.{}%", f / 10),
+        f => format!("{whole}.{f:02}%"),
+    }
+}
+
+/// `entries` joined by ", ", or "None" when there are none.
+fn list_text(entries: Vec<String>) -> String {
+    if entries.is_empty() {
+        "None".to_string()
+    } else {
+        entries.join(", ")
+    }
+}
+
+/// The counters of `of` that `other` does not have identically (the same key
+/// with the same share), each in full with its share (CR-240).
+fn counters_not_in(of: &Settings, other: &Settings) -> String {
+    list_text(
+        of.counters
+            .iter()
+            .filter(|(d, share)| other.counters.get(*d) != Some(*share))
+            .map(|(d, share)| format!("{} {}", full_id(d), share_percent(*share)))
+            .collect(),
+    )
+}
+
+/// The devices of `of` that `other` does not have, each in full (CR-240).
+pub(crate) fn devices_not_in(of: &Settings, other: &Settings) -> String {
+    list_text(
+        of.devices
+            .iter()
+            .filter(|d| !other.devices.contains(*d))
+            .map(full_id)
+            .collect(),
+    )
 }
 
 /// Shop Lightning of `s` as text, or "Not set" (AP-13): the provider's key
-/// prefix and address, the second device's id prefix, and the cap and the most
-/// for one opening in satoshis.
+/// and address, the second device's id in full, and the cap and the most for
+/// one opening in satoshis.
 fn shop_lightning_text(s: &Settings) -> String {
     s.shop_lightning.as_ref().map_or_else(
         || "Not set".to_string(),
         |sl| {
             format!(
                 "provider {} at {}, second copy on {}, holds up to {} sats, opening costs up to {} sats",
-                hex_prefix(&sl.provider_node_id),
+                hex(&sl.provider_node_id),
                 sl.provider_addr,
-                hex_prefix(&sl.second_device.to_bytes()),
+                full_id(&sl.second_device),
                 sl.cap_sats,
                 sl.max_opening_fee_sats
             )
@@ -107,7 +158,11 @@ fn shop_lightning_text(s: &Settings) -> String {
 /// The values of `field` in `old` and `new`, or `None` for a field that is not
 /// shown (the Lightning node, the watch key and the Boxes, which no
 /// loosening of a counter's concern names).
-fn values(field: &str, old: &Settings, new: &Settings) -> Option<(FieldValue, FieldValue)> {
+pub(crate) fn values(
+    field: &str,
+    old: &Settings,
+    new: &Settings,
+) -> Option<(FieldValue, FieldValue)> {
     use FieldValue::{Code, Count, Flag, Sats, Seconds};
     Some(match field {
         "light_per_sale" => limit(&old.light_per_sale, &new.light_per_sale),
@@ -144,8 +199,14 @@ fn values(field: &str, old: &Settings, new: &Settings) -> Option<(FieldValue, Fi
         "tor_on" => (Flag(old.tor_on), Flag(new.tor_on)),
         "customer_wifi" => (Flag(old.customer_wifi), Flag(new.customer_wifi)),
         "min_sale_sats" => (Sats(old.min_sale_sats), Sats(new.min_sale_sats)),
-        "devices" => (count(old.devices.len()), count(new.devices.len())),
-        "counters" => (count(old.counters.len()), count(new.counters.len())),
+        "devices" => (
+            Code(devices_not_in(old, new)),
+            Code(devices_not_in(new, old)),
+        ),
+        "counters" => (
+            Code(counters_not_in(old, new)),
+            Code(counters_not_in(new, old)),
+        ),
         // AP-11: the node every device trusts for its payments, as
         // `<name>:<port>`, or "Not set".
         "own_node" => (Code(own_node_text(old)), Code(own_node_text(new))),

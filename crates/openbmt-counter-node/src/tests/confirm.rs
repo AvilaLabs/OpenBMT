@@ -751,6 +751,129 @@ fn ap_12_the_last_counters_removal_is_listed_for_the_manager() {
     new.counters.clear();
     let fields = loosened_fields(&old, &new);
     let f = fields.iter().find(|f| f.field == "counters").unwrap();
-    assert_eq!(f.now, FieldValue::Count(old.counters.len() as u32));
-    assert_eq!(f.after, FieldValue::Count(0));
+    let FieldValue::Code(now) = &f.now else {
+        panic!("not text");
+    };
+    for d in old.counters.keys() {
+        assert!(now.contains(&crate::confirm::full_id(d)));
+    }
+    assert_eq!(f.after, FieldValue::Code("None".to_string()));
 }
+
+/// The `now` and `after` text of `field` as the manager is shown them.
+fn code_of(old: &Settings, new: &Settings, field: &str) -> (String, String) {
+    let (now, after) = crate::confirm::values(field, old, new).unwrap();
+    let (FieldValue::Code(now), FieldValue::Code(after)) = (&now, &after) else {
+        panic!("not text");
+    };
+    (now.clone(), after.clone())
+}
+
+#[test]
+fn cr_240_the_id_text_is_the_approvers() {
+    // `openbmt_approver::describe::full` of this id.
+    let d = id(1).device_id();
+    let text = crate::confirm::full_id(&d);
+    assert_eq!(text.len(), 64 + 15);
+    assert!(text.split(' ').all(|g| g.len() == 4));
+    assert_eq!(text.replace(' ', ""), {
+        let b = d.to_bytes();
+        b.iter().map(|x| format!("{x:02x}")).collect::<String>()
+    });
+    assert_eq!(text, PINNED_ID_TEXT);
+}
+
+#[test]
+fn cr_240_the_share_is_a_percent() {
+    use crate::confirm::share_percent;
+    assert_eq!(share_percent(10_000), "100%");
+    assert_eq!(share_percent(5_000), "50%");
+    assert_eq!(share_percent(2_550), "25.5%");
+    assert_eq!(share_percent(2_505), "25.05%");
+    assert_eq!(share_percent(1), "0.01%");
+}
+
+#[test]
+fn cr_240_swapping_one_counter_for_another_shows_both_keys() {
+    let mut old = settings();
+    old.counters.clear();
+    old.devices.insert(id(60).device_id());
+    old.counters.insert(id(60).device_id(), 5_000);
+    let mut new = old.clone();
+    new.version += 1;
+    new.devices.insert(id(62).device_id());
+    new.counters.remove(&id(60).device_id());
+    new.counters.insert(id(62).device_id(), 5_000);
+    let (now, after) = code_of(&old, &new, "counters");
+    assert_eq!(
+        now,
+        format!("{} 50%", crate::confirm::full_id(&id(60).device_id()))
+    );
+    assert_eq!(
+        after,
+        format!("{} 50%", crate::confirm::full_id(&id(62).device_id()))
+    );
+}
+
+#[test]
+fn cr_240_raising_a_counters_share_shows_the_share() {
+    let mut old = settings();
+    old.counters.clear();
+    old.devices.insert(id(60).device_id());
+    old.counters.insert(id(60).device_id(), 2_000);
+    let mut new = old.clone();
+    new.version += 1;
+    new.counters.insert(id(60).device_id(), 2_550);
+    let (now, after) = code_of(&old, &new, "counters");
+    let key = crate::confirm::full_id(&id(60).device_id());
+    assert_eq!(now, format!("{key} 20%"));
+    assert_eq!(after, format!("{key} 25.5%"));
+}
+
+#[test]
+fn cr_240_swapping_a_device_shows_both_keys() {
+    let mut old = settings();
+    old.devices.insert(id(60).device_id());
+    let mut new = old.clone();
+    new.version += 1;
+    new.devices.remove(&id(60).device_id());
+    new.devices.insert(id(62).device_id());
+    let (now, after) = code_of(&old, &new, "devices");
+    assert_eq!(now, crate::confirm::full_id(&id(60).device_id()));
+    assert_eq!(after, crate::confirm::full_id(&id(62).device_id()));
+    assert_eq!(code_of(&old, &old, "devices").0, "None");
+}
+
+#[test]
+fn cr_240_a_provider_that_keeps_four_bytes_shows_different_text() {
+    let mut old = settings();
+    let boxed = id(61).device_id();
+    old.devices.insert(id(60).device_id());
+    old.counters.insert(id(60).device_id(), 500);
+    old.devices.insert(boxed);
+    old.boxes.insert(boxed);
+    old.shop_lightning = Some(openbmt_core::settings::ShopLightning {
+        counter: id(60).device_id(),
+        node_id: [7u8; 33],
+        second_device: boxed,
+        provider_node_id: [8u8; 33],
+        provider_addr: "203.0.113.5:9735".parse().unwrap(),
+        cap_sats: 5_000_000,
+        max_opening_fee_sats: 20_000,
+    });
+    let mut new = old.clone();
+    new.version += 1;
+    let sl = new.shop_lightning.as_mut().unwrap();
+    sl.provider_node_id[10] = 9;
+    sl.provider_addr = "198.51.100.1:9735".parse().unwrap();
+    let (now, after) = code_of(&old, &new, "shop_lightning");
+    assert_ne!(now, after);
+    assert!(now.contains(&"08".repeat(33)));
+    assert!(after.contains(&format!("{}09{}", "08".repeat(10), "08".repeat(22))));
+    assert!(now.contains(&crate::confirm::full_id(&boxed)));
+}
+
+/// `openbmt_approver::describe::full` of `id(1)`, written out (this crate does
+/// not depend on the approver).
+const PINNED_ID_TEXT: &str =
+    "1b84 c556 7b12 6440 995d 3ed5 aaba 0565 d71e 1834 6048 19ff 9c17 f5e9 d5dd 078f";
