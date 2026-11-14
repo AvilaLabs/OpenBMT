@@ -697,7 +697,7 @@ object ProtocolDecoderTest {
     // ---- Shop Lightning on the owner phone ----
 
     /** The `shop_lightning_preview` request of [shopLightningEdit], as the Rust test of the same name writes it. */
-    private const val SHOP_LIGHTNING_FRAME_HEX =
+    private val SHOP_LIGHTNING_FRAME_HEX =
         "4f424d6b01ed00010000000000000000" + "01" + "20000000" + "07".repeat(32) + "01" + "02000000" + "6162" + "00" +
             "01" + "02000000" + "6364" + "01" + "09000000" + "312e322e332e343a35" + "01" + "0500000000000000" +
             "01" + "0600000000000000"

@@ -161,6 +161,7 @@ internal fun Controller.showSettingsAndPhone() {
             RowItem(AppWords.watchSetting.heading) { showWatch() },
             RowItem(AppWords.torBuiltIn.heading) { showTor() },
             webRow(),
+            shopLightningRow(),
             tillStepsRow { showSettingsAndPhone() },
         ),
     )

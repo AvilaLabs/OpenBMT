@@ -121,6 +121,11 @@ import org.openbmt.owner.StarterPaid
 import org.openbmt.owner.StarterTyped
 import org.openbmt.owner.StarterWalletView
 import org.openbmt.owner.Words
+import org.openbmt.owner.LightningReport
+import org.openbmt.owner.NotOffered
+import org.openbmt.owner.ShopLightningAction
+import org.openbmt.owner.ShopLightningHeld
+import org.openbmt.owner.ShopLightningState
 
 /**
  * The tests of the pure parts of the owner app: its words, the setup text,
@@ -212,7 +217,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + OwnPairWords.all().size + 1 + AppWords.keyMapAll().size + 1 + StarterWords.all().size + 1 + RequestWords.all().size + 1 + WebOrderWords.all().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's, of the key map's, of the starter wallet's and of the payment requests'")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + OwnPairWords.all().size + 1 + AppWords.keyMapAll().size + 1 + StarterWords.all().size + 1 + RequestWords.all().size + 1 + WebOrderWords.all().size + 1 + ShopLightningWords.all().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's, of the key map's, of the starter wallet's and of the payment requests'")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -4267,6 +4272,7 @@ object AppModelTest {
         floatWiringTests()
         requestTests()
         webOrderTests()
+        shopLightningTests()
         ruleTests(rulesMd)
         println("AppModelTest (owner): $count checks passed")
     }
@@ -4715,6 +4721,88 @@ object AppModelTest {
             override fun step(ask: RequestAsk, force: Boolean) = WebStep(WebStepKind.Call, webCall(WebCallKind.Orders))
         }
         ok(WebVisit.run(endless, fetcher, { RequestAsk(1, 0) }, false) == WebVisit.MAX_CALLS, "a visit is at most ${WebVisit.MAX_CALLS} calls")
+    }
+
+    private fun shopLightningHeld(cap: Long = 5_000_000, fee: Long = 20_000) =
+        ShopLightningHeld(ByteArray(32) { 1 }, ByteArray(33) { 2 }, ByteArray(32) { 3 }, ByteArray(33) { 4 }, "203.0.113.7:9735", cap, fee)
+
+    private fun shopLightningState(
+        on: Boolean = true,
+        ownWallet: Boolean = false,
+        boxes: Int = 1,
+        report: LightningReport? = null,
+    ) = ShopLightningState(on, ownWallet, listOf(ByteArray(32) { 1 }), List(boxes) { ByteArray(32) { 3 } }, if (on) shopLightningHeld() else null, report)
+
+    private fun shopLightningTests() {
+        // The words: every text is the placeholder of a rule of docs/SHOP-LIGHTNING-RULES.md, and none is used twice.
+        val all = ShopLightningWords.all()
+        ok(all.map { it.first }.toSet().size == all.size && all.map { it.second }.toSet().size == all.size, "each Shop Lightning text is written once")
+        ok(all.all { (_, text) -> Regex("WORDS_NEEDED_SL\\d{2}_[A-Z_]+").matches(text) && ShopLightningWords.isPlaceholder(text) }, "each Shop Lightning text is a placeholder that names its rule")
+        val rules = Regex("SL-(\\d{2})").findAll(File(appDir, "../../docs/SHOP-LIGHTNING-RULES.md").readText()).map { it.groupValues[1] }.toSet()
+        ok(all.all { (_, text) -> text.removePrefix("WORDS_NEEDED_SL").take(2) in rules }, "the rule of each placeholder is a rule of the Shop Lightning rules")
+        ok(NotOffered.values().all { ShopLightningWords.isPlaceholder(ShopLightningWords.cause(it)) } && NotOffered.values().map { ShopLightningWords.cause(it) }.toSet().size == NotOffered.values().size, "each cause the report gives has its own text")
+        val screens = source("src/android/ShopLightning.kt")
+        val literals = Regex("\"([^\"\\\\]*)\"").findAll(screens.lines().filter { !it.trimStart().startsWith("//") && !it.trimStart().startsWith("import") && !it.trimStart().startsWith("*") && !it.trimStart().startsWith("/**") }.joinToString("\n")).map { it.groupValues[1] }.toList()
+        ok(literals.all { it.isEmpty() || it.startsWith("\$") }, "the Shop Lightning screens write no text of their own: $literals")
+        ok(source("src/android/Screens.kt").contains("shopLightningRow()"), "Shop Lightning is a row under Settings and this phone")
+
+        // The page, and what turning on needs (SL-73, SL-76).
+        ok(ShopLightningModel.page(shopLightningState(on = false)) == ShopLightningModel.Page.Off, "off")
+        ok(ShopLightningModel.page(shopLightningState()) == ShopLightningModel.Page.On, "on")
+        ok(ShopLightningModel.page(shopLightningState(on = false, ownWallet = true)) == ShopLightningModel.Page.OwnWallet, "a shop with its own wallet has no way to change it")
+        ok(ShopLightningModel.canTurnOn(shopLightningState(on = false)) && !ShopLightningModel.canTurnOn(shopLightningState(on = false, boxes = 0)) && !ShopLightningModel.canTurnOn(shopLightningState(on = false, ownWallet = true)), "turning on needs a Box and a Key app")
+        ok(ShopLightningModel.rowSub(null) == ShopLightningWords.rowSubOff && ShopLightningModel.rowSub(shopLightningState()) == ShopLightningWords.rowSubOn, "the row says whether it is on")
+
+        // The node's ID: 66 lower-case hexadecimal digits, as the stick's code gives them (SK-35).
+        val id = "02" + "ab".repeat(32)
+        ok((ShopLightningModel.nodeId(" $id\n".toByteArray()) as? Form.Ok)?.value == id, "a scanned ID is taken as it is")
+        for (bad in listOf("", id.dropLast(2), id + "00", id.uppercase(), "zz" + id.drop(2), "$id@host:9735")) {
+            ok(ShopLightningModel.nodeId(bad.toByteArray()) is Form.Refused, "an ID that is not 66 lower-case digits is refused: $bad")
+        }
+
+        // The turn-on edit from the steps.
+        val d = ShopLightningModel.Draft()
+        d.counter = ByteArray(32) { 1 }
+        d.nodeId = id
+        d.providerKey = " " + "03" + "cd".repeat(32) + " "
+        d.providerAddr = " 203.0.113.7:9735 "
+        d.cap = "5,000,000"
+        d.fee = "20000"
+        ok(ShopLightningModel.turnOn(d) is Form.Ok, "a cap typed with commas is read as the number")
+        d.cap = "5000000"
+        val on = (ShopLightningModel.turnOn(d) as Form.Ok).value
+        ok(on.action == ShopLightningAction.Set && on.capSats == 5_000_000L && on.maxOpeningFeeSats == 20_000L && on.nodeId == id, "the turn-on edit names every field")
+        ok(on.providerNodeId == "03" + "cd".repeat(32) && on.providerAddr == "203.0.113.7:9735" && on.secondDevice == null, "the provider's fields are trimmed and the Box is the shop's")
+        for (breakIt in listOf<(ShopLightningModel.Draft) -> Unit>({ it.counter = null }, { it.nodeId = "" }, { it.providerKey = " " }, { it.providerAddr = "" }, { it.cap = "0" }, { it.cap = "" }, { it.fee = "x" })) {
+            val bad = ShopLightningModel.Draft().also { c -> c.counter = d.counter; c.nodeId = d.nodeId; c.providerKey = d.providerKey; c.providerAddr = d.providerAddr; c.cap = d.cap; c.fee = d.fee }
+            breakIt(bad)
+            ok(ShopLightningModel.turnOn(bad) is Form.Refused, "a step that is missing what it needs is refused")
+        }
+        ok((ShopLightningModel.turnOn(d.also { it.fee = "0" }) as Form.Ok).value.maxOpeningFeeSats == 0L, "a provider that opens for nothing is allowed")
+
+        // A change sends only what differs; the provider's two fields go together; turning off names no field.
+        val held = shopLightningHeld()
+        val lower = (ShopLightningModel.limits("4000000", "20000", held) as Form.Ok).value
+        ok(lower.action == ShopLightningAction.Change && lower.capSats == 4_000_000L && lower.maxOpeningFeeSats == null && lower.providerNodeId == null, "only the cap that changed is sent")
+        ok(ShopLightningModel.limits("0", "20000", held) is Form.Refused && ShopLightningModel.limits("1", "-1", held) is Form.Refused, "a cap of zero and a fee that is not a number are refused")
+        ok(ShopLightningModel.provider("03aa", "") is Form.Refused && ShopLightningModel.provider("", "1.2.3.4:5") is Form.Refused, "the provider's fields go together")
+        val moved = (ShopLightningModel.provider(" 03aa ", " 1.2.3.4:5 ") as Form.Ok).value
+        ok(moved.providerNodeId == "03aa" && moved.providerAddr == "1.2.3.4:5" && moved.capSats == null, "a change of provider sends the provider alone")
+        val off = ShopLightningModel.turnOff()
+        ok(off.action == ShopLightningAction.Remove && off.counter == null && off.capSats == null && off.providerAddr == null, "turning off names no field")
+
+        // The facts of SL-45 and the report's time and cause (SL-78).
+        val none = ShopLightningModel.lines(held, null)
+        ok(none.last().label == ShopLightningWords.cameLabel && none.last().value == ShopLightningWords.noReport, "with no report the page says none came")
+        val report = LightningReport(1_000, 11, 22, 33, 0, 55, NotOffered.SecondDeviceAway)
+        val shown = ShopLightningModel.lines(held, report).associate { it.label to it.value }
+        ok(shown[ShopLightningWords.capLabel] == Format.sats(5_000_000) && shown[ShopLightningWords.balanceLabel] == Format.sats(11), "the cap is the settings' and the balance the report's")
+        ok(shown[ShopLightningWords.roomLabel] == Format.sats(22) && shown[ShopLightningWords.feesPaidLabel] == Format.sats(33), "the room to receive and the fees paid")
+        ok(shown[ShopLightningWords.lastStoredLabel] == ShopLightningWords.neverStored && shown[ShopLightningWords.lastSweepLabel] == Format.localTime(55), "a store that never came and a sweep that did")
+        ok(shown[ShopLightningWords.whyLabel] == ShopLightningWords.secondDeviceAway && shown[ShopLightningWords.cameLabel] == Format.localTime(1_000), "why it is not offered and when the report came")
+        ok(shown[ShopLightningWords.providerLabel]!!.endsWith(" 203.0.113.7:9735") && shown[ShopLightningWords.nodeLabel]!!.contains("\u2026"), "the provider's ID and address, and the node's ID cut at both ends")
+        ok(ShopLightningModel.lines(held, LightningReport(1, 1, 1, 9, 0, 0, NotOffered.Offered)).any { it.label == ShopLightningWords.lastSweepLabel && it.value == ShopLightningWords.noSweep }, "a sweep that never was")
+        ok(ShopLightningModel.Step.values().map { ShopLightningModel.stepLine(it) }.toSet().size == 1, "the step's place is one text until its words are written")
     }
 
     private fun floatTests() {

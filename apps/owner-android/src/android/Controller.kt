@@ -75,6 +75,9 @@ class Controller(internal val act: MainActivity) {
     // What the owner has typed in the settings editor, in memory only (OA-34).
     internal var settingsDraft = SettingsDraft()
 
+    /** What the Shop Lightning turn-on steps have gathered (SL-76); forgotten when the change is queued. */
+    internal var shopLightningDraft = ShopLightningModel.Draft()
+
     // The key ceremony in progress: held in memory for the screens, and sealed on disk between steps (OA-26).
     internal var ceremony: CeremonyDraft? = null
 
