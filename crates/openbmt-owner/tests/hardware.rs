@@ -304,6 +304,22 @@ fn as_92_the_summary_is_what_the_signer_shows() {
 }
 
 #[test]
+fn as_93_a_returned_psbt_with_bytes_after_its_end_is_refused() {
+    let mut f = fixture();
+    let file = export(&mut f);
+    let signed = signer_signs(&file.psbt);
+    assert!(matches!(read_returned(&signed), Ok(Returned::Psbt(_))));
+    let mut longer = signed.clone();
+    longer.push(0);
+    assert_eq!(
+        read_returned(&longer),
+        Err(HardwareRefusal::Unreadable(
+            "the PSBT has bytes after its end"
+        ))
+    );
+}
+
+#[test]
 fn as_93_every_form_a_signer_returns_is_read() {
     let mut f = fixture();
     let file = export(&mut f);

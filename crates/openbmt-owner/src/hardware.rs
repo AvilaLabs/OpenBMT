@@ -390,6 +390,13 @@ pub fn read_returned(bytes: &[u8]) -> Result<Returned, HardwareRefusal> {
     if raw.starts_with(b"psbt\xff") {
         let psbt = Psbt::deserialize(&raw)
             .map_err(|_| HardwareRefusal::Unreadable("the PSBT is malformed"))?;
+        // The parser stops after the last map and ignores what follows.
+        let maps = 1 + psbt.inputs.len() + psbt.outputs.len();
+        if openbmt_core::psbt::psbt_len(&raw, maps) != Some(raw.len()) {
+            return Err(HardwareRefusal::Unreadable(
+                "the PSBT has bytes after its end",
+            ));
+        }
         return Ok(match transaction_of_final_file(&psbt) {
             Some(tx) => Returned::Transaction(tx),
             None => Returned::Psbt(psbt),

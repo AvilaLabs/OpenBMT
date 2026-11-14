@@ -27,6 +27,7 @@ pub mod pairing;
 pub mod pairing_own;
 pub mod pinned_wallet;
 pub mod policy;
+pub mod psbt;
 pub mod records;
 pub mod relay;
 pub mod say;
