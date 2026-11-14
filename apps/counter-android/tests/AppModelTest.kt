@@ -112,7 +112,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1 + WordsOfTill.all().size + 1 + WordsOfStarter.all().size + 1 + ShopLightningWords.all().size + 1, "one row for each words and the header, and for each text of the switch, of the till, of the starter line and of the Lightning key and their headers")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1 + WordsOfTill.all().size + 1 + WordsOfStarter.all().size + 1 + ShopLightningWords.all().size + 1 + 1 + 1, "one row for each words and the header, and for each text of the switch, of the till, of the starter line and of the Lightning key and their headers")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -646,6 +646,9 @@ object AppModelTest {
         val all = SetupStatus(pairing = true, pin = true, config = true)
         val bad = AppWords.fault(CounterException("r", "t", 4))
         ok(ScreenModel.pick(bad, all, AppWords.orbotNotRunning, true) is Screen.Fault, "a fault comes first")
+        ok(ScreenModel.counterLine(Showing.Home, all) == AppWords.COUNTER_LINE, "DESIGN 2.1: the idle paired counter carries the line")
+        ok(ScreenModel.counterLine(Showing.Sale(1), all) == null && ScreenModel.counterLine(Showing.Sales, all) == null, "DESIGN 2.1: a sale does not")
+        ok(ScreenModel.counterLine(Showing.Home, none) == null, "DESIGN 2.1: an unpaired counter does not")
         ok(ScreenModel.pick(null, none, null, false) is Screen.FirstStart, "nothing saved: first start")
         ok(ScreenModel.pick(null, SetupStatus(true, true, false), null, false) is Screen.FirstStart, "a setup that was not finished: first start")
         ok(ScreenModel.pick(null, SetupStatus(true, false, true), null, false) is Screen.FirstStart, "no PIN: first start")

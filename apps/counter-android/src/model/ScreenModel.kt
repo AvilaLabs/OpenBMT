@@ -42,4 +42,8 @@ object ScreenModel {
         locked -> Screen.WhoAtTill
         else -> Screen.Home
     }
+
+    /** DESIGN 2.1: the counter's line is on the ready-to-sell screen of a paired counter, and on no sale screen. */
+    fun counterLine(showing: Showing, setup: SetupStatus): String? =
+        if (showing == Showing.Home && setup.complete) AppWords.COUNTER_LINE else null
 }

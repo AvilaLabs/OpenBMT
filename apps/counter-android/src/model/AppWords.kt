@@ -739,6 +739,14 @@ object AppWords {
                 "|---|---|\n",
         )
         for ((key, text) in ShopLightningWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
+        out.append(
+            "\n## The counter's line (DESIGN 2.1)\n\n" +
+                "Shown large on the ready-to-sell screen of a paired counter,\n" +
+                "and on no sale screen.\n\n" +
+                "| Key | Text |\n" +
+                "|---|---|\n" +
+                "| COUNTER_LINE | ${cell(COUNTER_LINE)} |\n",
+        )
         return out.toString()
     }
 

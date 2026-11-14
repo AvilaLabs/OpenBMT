@@ -41,6 +41,7 @@ import org.openbmt.app.SealedFile
 import org.openbmt.app.TorLease
 import org.openbmt.app.TorRunner
 import org.openbmt.app.TorStartException
+import org.openbmt.app.Type
 import org.openbmt.app.Ui
 import org.openbmt.app.UrScan
 import org.openbmt.app.UrWords
@@ -1062,6 +1063,11 @@ class Controller(private val act: MainActivity) {
 
     // ---- home ----------------------------------------------------------------------------------------------------------
 
+    /** DESIGN 2.1: the counter's line under the home screen, in the app's largest body text. */
+    private fun counterLine(): View = ui.text(ScreenModel.counterLine(Showing.Home, SetupStatus(true, true, true)) ?: "", Type.BODY).apply {
+        setPadding(0, ui.px(16), 0, 0)
+    }
+
     private fun showHome() {
         if (lockedOut()) return
         val n = node ?: return render()
@@ -1095,7 +1101,7 @@ class Controller(private val act: MainActivity) {
         tiles.addView(pair, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.topMargin = ui.px(12) })
         // CR-246: bills and tabs, one tile under the others.
         tiles.addView(ui.tile(WordsOfBills.BILLS, Glyph.List, false) { showBills() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.px(104)).also { it.topMargin = ui.px(12) })
-        show(bar, listOf(health, tillSlot, starterSlot, lines, noteSlot, tiles, requestsSlot), emptyList(), Showing.Home)
+        show(bar, listOf(health, tillSlot, starterSlot, lines, noteSlot, tiles, requestsSlot, counterLine()), emptyList(), Showing.Home)
         var healthSig: String? = null
         var linesSig: String? = null
         var requestsSig: String? = null

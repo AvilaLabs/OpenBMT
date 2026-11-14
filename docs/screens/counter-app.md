@@ -15,7 +15,7 @@ These are the words of what the app decides itself.
 | changeWaits | Change to confirm | A change to the shop's settings waits for a manager to confirm it. | Check it with the owner, then open Change to confirm in Settings. | a manager |  |
 | changeConfirmed | Change confirmed | The owner phone sends the change to every counter. It applies once it arrives. | Nothing to do. | nobody |  |
 | notSetUp | Not set up yet | This counter has not been paired with the shop yet, so it cannot take a sale. | Type a name for the counter, the manager's name and a PIN. Then tap Pair with the shop and scan the code on the owner phone or the Key app. | a manager |  |
-| pairingSaved | Counter set up | The counter is paired with the shop, and the pairing and the PIN are saved on this phone. | Keep the app open at the counter. It starts looking for the network now. | the cashier |  |
+| pairingSaved | Counter set up | The counter is paired with the shop. This device takes payments for you. Only your keys can send. | Keep the app open at the counter. It starts looking for the network now. | the cashier |  |
 | pairingScanOffer | Scan the shop's code | The owner phone or the Key app shows a code for a new counter. This counter reads the shop's wallet and network from it. | Open Add a counter on the owner phone, or Pair a counter on the Key app. Then tap Scan and hold this phone's camera to its code. | a manager |  |
 | pairingCompare | Compare the four words | The Key app shows four words for this pairing, and the same four are below. If they are not the same, someone changed the code on the way. | Check all four words on the Key app, then tap They match, or tap They differ if any word is not the same. | a manager |  |
 | pairingScanBundle | Scan the owner's phone | The four words matched. The owner's phone now shows the code that finishes the pairing. | On the owner's phone open the counter's code, then tap Scan and hold this phone's camera to it. | a manager |  |
@@ -155,3 +155,12 @@ The texts of the page that reads the stick's code.
 | back | Back |
 | kept | Lightning key kept |
 | keptButton | Done |
+
+## The counter's line (DESIGN 2.1)
+
+Shown large on the ready-to-sell screen of a paired counter,
+and on no sale screen.
+
+| Key | Text |
+|---|---|
+| COUNTER_LINE | This device takes payments for you. Only your keys can send. |
