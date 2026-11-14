@@ -2657,9 +2657,10 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
             // the library's repeat of its event after a crash.
             if let Some(record) = record {
                 for txid in &record.unconfirmed_fundings {
-                    // A funding whose channel is gone but was last seen in a
-                    // block is watched with that block (SL-27).
-                    let seen = funding::last_seen_height(txid, &htlc_channels, &channels, |id| {
+                    // A funding seen in a block, through a channel open now
+                    // or one gone since, is watched with that block, so that
+                    // a close before the next check is not a loss (SL-27).
+                    let seen = funding::last_seen_height(txid, &htlc_channels, |id| {
                         shared.last_fundings.lock_recover().get(id).copied()
                     });
                     match shared.funding_log.watch_seen(*txid, height, seen).await {

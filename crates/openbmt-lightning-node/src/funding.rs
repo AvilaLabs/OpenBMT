@@ -141,20 +141,19 @@ fn seen_height(
         .min()
 }
 
-/// The height of the block a funding was first seen in, for one named by
-/// [`unconfirmed_fundings`] whose channel (one of `htlc_channels`) is no
-/// longer in `channels`: from the confirmations `last_known` holds and the tip
-/// height they were read at. `None` when it was last seen with none, or not
-/// known (SL-27).
+/// The height of the block a funding named by [`unconfirmed_fundings`] was
+/// last seen in, through the channels of the payment (`htlc_channels`): from
+/// the confirmations `last_known` holds and the tip height they were read at.
+/// The caller notes the channels listed at the claim first, so a channel
+/// still open gives the block of now, and one gone the block it was last seen
+/// in. `None` when it was last seen with none, or not known (SL-27).
 pub fn last_seen_height(
     txid: &[u8; 32],
     htlc_channels: &[[u8; 32]],
-    channels: &[ChannelFunding],
     last_known: impl Fn(&[u8; 32]) -> Option<([u8; 32], u32, u32)>,
 ) -> Option<u32> {
     htlc_channels
         .iter()
-        .filter(|id| !channels.iter().any(|c| &c.channel_id == *id))
         .filter_map(last_known)
         .filter(|(t, _, _)| t == txid)
         .filter_map(|(_, confirmations, read)| block_height(read, confirmations))
@@ -433,8 +432,8 @@ impl FundingLog {
     }
 
     /// [`FundingLog::watch`] for a funding already known to have been in a
-    /// block: `seen` is the height of that block, kept as its first-seen
-    /// height when the funding is not kept yet (SL-27).
+    /// block: `seen` is the height of that block, kept as its seen height
+    /// when the funding is not kept yet, or is watched with none (SL-27).
     pub async fn watch_seen(
         &self,
         txid: [u8; 32],
@@ -443,6 +442,16 @@ impl FundingLog {
     ) -> Result<Option<Outcome>, io::Error> {
         let _one = self.gate.lock().await;
         if let Some(kept) = self.read(&txid).await? {
+            if kept.outcome == Outcome::Watching && kept.seen_height.is_none() && seen.is_some() {
+                self.write(
+                    &txid,
+                    &Kept {
+                        seen_height: seen,
+                        ..kept
+                    },
+                )
+                .await?;
+            }
             return Ok((kept.outcome != Outcome::Watching).then_some(kept.outcome));
         }
         self.write(
@@ -1084,6 +1093,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sl_27_a_funding_in_a_block_at_the_claim_is_not_lost_by_a_close_before_the_check() {
+        let d = disks("funding-seen-before-check");
+        let (log, _bg) = start(&d);
+        // At the claim the channel is open with one confirmation at the tip
+        // 110: the funding is kept with that block before any check.
+        log.watch_seen([1; 32], 110, Some(110)).await.unwrap();
+        // A funding kept with no block takes one given later.
+        log.watch([2; 32], 110).await.unwrap();
+        log.watch_seen([2; 32], 110, Some(110)).await.unwrap();
+        // Both channels close normally before the first check; depth 3.
+        let got = log.check(&[], 112, 3).await.unwrap();
+        assert_eq!(
+            got,
+            vec![
+                FundingEvent {
+                    txid: [1; 32],
+                    outcome: Outcome::Confirmed
+                },
+                FundingEvent {
+                    txid: [2; 32],
+                    outcome: Outcome::Confirmed
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
     async fn sl_27_a_channel_gone_at_the_claim_is_watched_by_where_it_was_last_seen() {
         let d = disks("funding-seen-at-claim");
         let (log, _bg) = start(&d);
@@ -1094,13 +1130,12 @@ mod tests {
             2 => Some(([2; 32], 0, 110)),
             _ => None,
         };
-        let seen1 = last_seen_height(&[1; 32], &[[1; 32]], &[], last);
-        let seen2 = last_seen_height(&[2; 32], &[[2; 32]], &[], last);
+        let seen1 = last_seen_height(&[1; 32], &[[1; 32]], last);
+        let seen2 = last_seen_height(&[2; 32], &[[2; 32]], last);
         assert_eq!(seen1, Some(110));
         assert_eq!(seen2, None);
-        // A channel still listed gives no height here: the check does.
-        let listed = [chan(1, Some(1), 1)];
-        assert_eq!(last_seen_height(&[1; 32], &[[1; 32]], &listed, last), None);
+        // Another funding of the same channel gives no height.
+        assert_eq!(last_seen_height(&[3; 32], &[[1; 32]], last), None);
         log.watch_seen([1; 32], 115, seen1).await.unwrap();
         log.watch_seen([2; 32], 115, seen2).await.unwrap();
         // Depth 3: the funding seen at 110 is confirmed at 112; the other
