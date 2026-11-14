@@ -190,39 +190,47 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   changed at any time. OpenBMT runs none and takes nothing. When the provider
   also offers LSPS1 (bLIP-51), the node buys room ahead: once the room to
   receive (SL-40) is under half the cap, it orders a channel that brings the
-  room up to the cap, asks that the channel be used only after its funding has
-  a confirmation (`required_channel_confirmations` 1, or the provider's least
-  when that is more), and pays the provider's invoice from the Lightning
-  balance, only when the fee is at most what the owner allows for one opening
-  (SL-29). The shop puts nothing into that channel, and the channel is not
-  announced. The order the provider approves must give at least the room, the
-  lease and the confirmations asked, must not be announced, and must ask no
-  coins of the shop; otherwise it is not paid. Only a BOLT 11 invoice of the
-  provider's own, not expired, is paid, only over a channel to the provider,
-  and only when it asks a final CLTV of at most 144 blocks. The amount set out
-  is written to the book before it is sent, and an order with an amount set
-  out is never paid again: a payment on its way is waited for, and one that
-  did not leave lets the order expire. The fee counted is what the payment
-  delivered as the library reports it, rounded up to a satoshi, or else the
-  amount set out. A refund the provider claims does not lower the count, since
-  the node cannot check it. An order is made at most once an hour, and not
-  within an hour of the last one ending. One not paid within an hour is given
-  up, whether or not the provider answers. An order is done only when the
-  node's own channel list holds a channel with the provider that is ready,
-  whose funding has a confirmation, that the node did not hold when the order
-  was made, that is funded by the output the provider names, and whose
-  provider side is at least nine tenths of the room ordered. Without it, the
-  order is given up two days after the payment. No order is made while the
-  provider already has more than 16 channels with the node. An order already
-  made is followed whenever the provider is connected, even when it no longer
-  offers LSPS1. A paid order given up without its channel stops further orders
-  from that provider; a provider the shop picks after it can be ordered from.
-  The provider's word that an order is paid or open changes nothing until a
-  payment of the shop's own has left for it. A change to the orders takes
-  effect only once it is stored. Nothing is ordered without a usable channel
-  to the provider to pay from, so the first channel still comes through LSPS2.
-  A provider without LSPS1 is taken all the same; room then comes only with a
-  payment too big for it.
+  room up to the cap (none when the provider's smallest channel is more than
+  that, or its least wait for the funding is more than 144 blocks), asks that
+  the channel be used only after its funding has a confirmation
+  (`required_channel_confirmations` 1, or the provider's least when that is
+  more), and pays the provider's invoice from the Lightning balance, only when
+  the fee is at most what the owner allows for one opening (SL-29). The shop
+  puts nothing into that channel, and the channel is not announced. The order
+  the provider approves must give at least the room, the lease and the
+  confirmations asked, must promise the funding within 144 blocks, must not be
+  announced, and must ask no coins of the shop; otherwise it is not paid. Only
+  a BOLT 11 invoice of the provider's own, not expired, is paid, only over a
+  channel to the provider, and only when it asks a final CLTV of at most 144
+  blocks. The amount set out is written to the book before it is sent, and an
+  order with an amount set out is never paid again: a payment on its way is
+  waited for, and one that did not leave lets the order expire; one the
+  library says it did not send ends the order as not paid. The fee counted is
+  what the payment delivered as the library reports it, rounded up to a
+  satoshi, or else the amount set out. A refund the provider claims does not
+  lower the count, since the node cannot check it. An order is made at most
+  once an hour, and not within an hour of the last one ending. One not paid
+  within an hour is given up, whether or not the provider answers. An order is
+  done only when the node's own channel list holds a channel with the provider
+  that is ready, whose funding has a confirmation, that the node did not hold
+  when the order was made, that is funded by the output the provider names,
+  and whose provider side is at least nine tenths of the room ordered. Without
+  it, the order is given up two days after the payment. No order is made while
+  the provider already has more than 16 channels with the node. An order
+  already made is followed whenever the provider is connected, even when it no
+  longer offers LSPS1. An order stays with the provider it was made with: when
+  the shop picks another, one with no payment set out is given up at once, and
+  one with a payment set out is followed with its own provider while the node
+  is connected to it, and given up two days after its last change otherwise;
+  it is never paid, or done, through another provider. An order with a payment
+  set out that ends without its channel stops further orders from its provider
+  for good; up to 16 stopped providers are kept, the oldest dropped past that.
+  A payment that failed stops none. The provider's word that an order is paid
+  or open changes nothing until a payment of the shop's own has left for it. A
+  change to the orders takes effect only once it is stored. Nothing is ordered
+  without a usable channel to the provider to pay from, so the first channel
+  still comes through LSPS2. A provider without LSPS1 is taken all the same;
+  room then comes only with a payment too big for it.
 - **SL-29. The fee before the payment.** A payment that opens a channel shows
   the provider's fee to the customer's amount before the invoice is made, and
   the owner sets the most the shop will pay for one opening. Above it, the
