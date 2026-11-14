@@ -249,6 +249,9 @@ pub enum Output {
         tx: Vec<u8>,
         /// Where the peers that announced it were reached.
         from: Vec<PeerAddr>,
+        /// The own node is among those that announced it (WR-66). It is not
+        /// in `from`.
+        own: bool,
     },
     /// NR-53: a peer announced a transaction that was fetched already. The
     /// app maps the ID to the transaction if it kept it.
@@ -2104,7 +2107,11 @@ impl Manager {
             None => Vec::new(),
         };
         self.return_to_order(&txid);
-        out.push(Output::Sighting { tx: bytes, from });
+        out.push(Output::Sighting {
+            tx: bytes,
+            from,
+            own: by_own_node,
+        });
         if by_own_node {
             // The sale knows the transaction now: the own node's report is
             // sent again, so that the app can record it (WR-61).

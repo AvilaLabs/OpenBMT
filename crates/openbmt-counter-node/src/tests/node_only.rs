@@ -105,6 +105,7 @@ fn sighted_by(tx: &Transaction, peers: &[u8]) -> AppEvent {
     AppEvent::Sighting {
         tx: bytes(tx),
         from: peers.iter().map(|n| peer(*n)).collect(),
+        own: false,
     }
 }
 
@@ -346,6 +347,65 @@ fn wr_66_a_payment_the_node_holds_is_checked_by_the_node_alone() {
     assert_eq!(screen.state, State::PaidInstant, "{:?}", screen.why);
     assert_eq!(screen.why, Why::Instant(InstantLabel::YourNode));
     assert_eq!(rig.node.node_only_line(), Some(NodeOnlyLine::Usable));
+}
+
+fn own_sighted(tx: &Transaction) -> AppEvent {
+    AppEvent::Sighting {
+        tx: bytes(tx),
+        from: vec![],
+        own: true,
+    }
+}
+
+#[test]
+fn wr_66_a_payment_only_the_own_node_announced_reaches_the_sale() {
+    let dir = Scratch::new();
+    let mut rig = rig_with_sale(dir.path(), false);
+    let tx = payment();
+    // No random peer: the driver names the own node alone.
+    rig.feed_own(vec![up()]);
+    rig.feed(vec![own_sighted(&tx)]);
+    let screen = rig.node.judge(0).unwrap();
+    assert_eq!(screen.received_sats, 20_000);
+    assert_eq!(screen.check_mode, Some(CheckMode::OwnNodeOnly));
+    assert!(screen.own_node_saw && screen.own_node_counted);
+    assert_eq!(rig.node.node_only_line(), Some(NodeOnlyLine::Usable));
+    // The conflict watch counts from the node's announcement.
+    rig.time.store(T0 + 30, Ordering::SeqCst);
+    let screen = rig.node.judge(0).unwrap();
+    assert_eq!(screen.state, State::PaidInstant, "{:?}", screen.why);
+}
+
+#[test]
+fn wr_66_a_replacement_the_own_node_announces_is_seen_by_the_conflict_watch() {
+    let dir = Scratch::new();
+    let mut rig = rig_with_sale(dir.path(), false);
+    rig.feed_own(vec![up()]);
+    rig.feed(vec![own_sighted(&payment())]);
+    // The same coin paid elsewhere.
+    let other = spend(1, &[(&bitcoin::ScriptBuf::new(), 20_000)]);
+    rig.feed(vec![own_sighted(&other)]);
+    rig.time.store(T0 + 30, Ordering::SeqCst);
+    let screen = rig.node.judge(0).unwrap();
+    assert!(screen.conflict_seen);
+    assert_ne!(screen.state, State::PaidInstant, "{:?}", screen.why);
+}
+
+#[test]
+fn wr_61_without_node_only_the_own_node_alone_is_no_sighting() {
+    let dir = Scratch::new();
+    let mut rig = rig_with(dir.path(), node_settings(1, false, false));
+    rig.feed(vec![Rig::peers()]);
+    rig.node
+        .open(TWENTY, usd(), rate(), &source_at(&rig.time))
+        .unwrap();
+    rig.time.store(T0 + 10, Ordering::SeqCst);
+    rig.node.heartbeat(&hb(1, T0 + 10)).unwrap();
+    rig.feed(vec![own_sighted(&payment())]);
+    let screen = rig.node.judge(0).unwrap();
+    assert_eq!(screen.received_sats, 0);
+    assert_eq!(screen.check_mode, None);
+    assert!(!screen.own_node_saw);
 }
 
 #[test]

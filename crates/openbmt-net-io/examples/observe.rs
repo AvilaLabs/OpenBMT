@@ -295,7 +295,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 blocks.push((t, h, hash, bytes.len()));
                 println!("{t:.1} block {hash} {} bytes", bytes.len());
             }
-            AppEvent::Sighting { tx, from } => {
+            AppEvent::Sighting { tx, from, .. } => {
                 *kinds.entry("sighting").or_default() += 1;
                 sightings += 1;
                 // Only the id: the transaction itself is not printed.

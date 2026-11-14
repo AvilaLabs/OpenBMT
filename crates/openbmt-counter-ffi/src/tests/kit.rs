@@ -235,6 +235,7 @@ pub fn sighting(tx: &Transaction, from: Vec<PeerAddr>) -> AppEvent {
     AppEvent::Sighting {
         tx: serialize(tx),
         from,
+        own: false,
     }
 }
 

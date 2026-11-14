@@ -198,7 +198,7 @@ fn nr_106_a_transaction_the_node_announces_is_held_fetched_and_never_a_light_sou
     assert_eq!(sightings(&out), 1);
     assert!(out
         .iter()
-        .any(|o| matches!(o, Output::Sighting { from, .. } if from.is_empty())));
+        .any(|o| matches!(o, Output::Sighting { from, own: true, .. } if from.is_empty())));
     assert_eq!(has(&out), vec![txid]);
     // Asked about later, it is held: the answer is at once.
     assert_eq!(has(&n.m.ask_own_node(txid)), vec![txid]);

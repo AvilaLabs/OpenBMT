@@ -248,7 +248,10 @@ fn nr_106_a_transaction_the_node_announces_is_a_report_and_no_light_sighting() {
             _ => {}
         }
         while let Ok(e) = handle.events().try_recv() {
-            if let AppEvent::Sighting { tx: bytes, from } = e {
+            if let AppEvent::Sighting {
+                tx: bytes, from, ..
+            } = e
+            {
                 sighted = Some((bytes, from));
             }
         }

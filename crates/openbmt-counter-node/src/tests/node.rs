@@ -19,6 +19,7 @@ fn sighting(tx: &Transaction, from: Vec<openbmt_watch::PeerAddr>) -> AppEvent {
     AppEvent::Sighting {
         tx: bytes(tx),
         from,
+        own: false,
     }
 }
 

@@ -41,6 +41,7 @@ fn seen_by_three(tx: &Transaction) -> AppEvent {
     AppEvent::Sighting {
         tx: bytes(tx),
         from: vec![peer(20), peer(21), peer(22)],
+        own: false,
     }
 }
 
@@ -165,6 +166,7 @@ fn cr_104_the_own_node_alone_is_not_a_check() {
     rig.feed(vec![AppEvent::Sighting {
         tx: bytes(&tx),
         from: vec![peer(20)],
+        own: false,
     }]);
     rig.time.store(T0 + 10, Ordering::SeqCst);
     rig.node.heartbeat(&hb(1, T0 + 10)).unwrap();

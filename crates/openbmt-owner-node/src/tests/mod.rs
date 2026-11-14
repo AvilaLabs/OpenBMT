@@ -380,6 +380,7 @@ fn notes_and_stop_events_are_taken_and_other_events_are_ignored() {
         AppEvent::Sighting {
             tx: vec![1, 2, 3],
             from: vec![],
+            own: false,
         },
     ]);
     assert_eq!(rig.watcher.take_notes(), vec!["a peer was dropped"]);

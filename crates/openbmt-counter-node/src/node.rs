@@ -14,7 +14,8 @@
 //!   events, from the checked height and the clock.
 //! - `Chain`: updates the [`ChainView`].
 //! - `Sighting`: offers the transaction to the counter once for every peer
-//!   address it came from. If any sale took it, the bytes are kept in a small
+//!   address it came from, and once from the own node when it announced it
+//!   and `node_only` is on (WR-66). If any sale took it, the bytes are kept in a small
 //!   cache (the last 256 transactions) so that a later announcement can be
 //!   offered as one more sighting.
 //! - `AlsoAnnounced`: one more sighting, if the cache holds the transaction.
@@ -2045,9 +2046,13 @@ impl<P: DriverPort> Node<P> {
                 }
                 touched.extend(self.sales_with_payments());
             }
-            AppEvent::Sighting { tx, from } => {
+            AppEvent::Sighting { tx, from, own } => {
                 let swap_took = self.swap_sighting(&tx, &from);
-                if self.offer(&tx, &from, touched, reports) || swap_took {
+                // WR-66: with `node_only` on the own node is the source of
+                // the sale. Otherwise its report is a marker on what the
+                // light client sighted (CR-103) and is no sighting.
+                let own = own && self.node_only;
+                if self.offer(&tx, &from, own, touched, reports) || swap_took {
                     self.remember(&tx);
                     self.ask_own_node_about(&tx);
                 }
@@ -2059,7 +2064,7 @@ impl<P: DriverPort> Node<P> {
                     .find(|(id, _)| *id == txid)
                     .map(|(_, bytes)| bytes.clone());
                 if let Some(tx) = kept {
-                    self.offer(&tx, &[from], touched, reports);
+                    self.offer(&tx, &[from], false, touched, reports);
                 }
             }
             AppEvent::Block { hash, bytes } => self.take_block(hash, &bytes, touched, reports),
@@ -2258,22 +2263,25 @@ impl<P: DriverPort> Node<P> {
         }
     }
 
-    /// Offer a transaction to the counter once for each address. True if any
-    /// sale did not ignore it.
+    /// Offer a transaction to the counter once for each address, and once
+    /// more from the own node when `own` is set (WR-66). True if any sale did
+    /// not ignore it.
     fn offer(
         &mut self,
         tx: &[u8],
         from: &[PeerAddr],
+        own: bool,
         touched: &mut BTreeSet<u32>,
         reports: &mut Vec<Report>,
     ) -> bool {
         let now = self.clock.now();
         let mut taken = false;
-        for addr in from {
-            match self
-                .counter
-                .sighting(tx, Source::Peer(*addr), now, &mut self.store)
-            {
+        let sources = from
+            .iter()
+            .map(|addr| Source::Peer(*addr))
+            .chain(own.then_some(Source::OwnNode));
+        for source in sources {
+            match self.counter.sighting(tx, source, now, &mut self.store) {
                 Ok(done) => {
                     for (index, result) in done.results {
                         taken = true;

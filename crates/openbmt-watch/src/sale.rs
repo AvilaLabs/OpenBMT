@@ -31,6 +31,10 @@ pub enum Source {
     Peer(PeerAddr),
     /// The shop's Box. It is never counted as a peer (WR-41).
     Box,
+    /// The shop's own node, with `node_only` on (WR-66). It is never a peer:
+    /// it counts in no network group and starts no clock in the light mode
+    /// (WR-60).
+    OwnNode,
 }
 
 /// What a sighting did to the sale (WR-40, WR-42).
@@ -1045,6 +1049,11 @@ fn record_source(entry: &mut Entry, source: Source, at: u64) {
             }
         }
         Source::Box => entry.by_box = true,
+        // WR-66: marked as `own_node_saw_at` marks it.
+        Source::OwnNode => {
+            entry.by_own_node = true;
+            entry.own_reported.get_or_insert(at);
+        }
     }
     if entry.first_seen.is_none() && (entry.by_box || entry.groups.len() >= SEEN_GROUPS) {
         entry.first_seen = Some(at);

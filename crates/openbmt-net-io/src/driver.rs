@@ -251,6 +251,8 @@ pub enum AppEvent {
         tx: Vec<u8>,
         /// The peers.
         from: Vec<PeerAddr>,
+        /// The own node announced it too (WR-66). It is not in `from`.
+        own: bool,
     },
     /// NR-53: a peer announced a transaction that was fetched already.
     AlsoAnnounced {
@@ -1329,7 +1331,9 @@ where
                     }
                     self.emit(AppEvent::FeeBlock { hash, bytes });
                 }
-                Output::Sighting { tx, from } => self.emit(AppEvent::Sighting { tx, from }),
+                Output::Sighting { tx, from, own } => {
+                    self.emit(AppEvent::Sighting { tx, from, own })
+                }
                 Output::AlsoAnnounced { txid, from } => {
                     self.emit(AppEvent::AlsoAnnounced { txid, from })
                 }

@@ -43,6 +43,7 @@ fn rig_with_a_seen_sale(dir: &Scratch) -> Rig {
     rig.feed(vec![AppEvent::Sighting {
         tx: bytes(&pay),
         from: vec![peer(20), peer(21), peer(22)],
+        own: false,
     }]);
     rig.time.store(T0 + 10, Ordering::SeqCst);
     rig
@@ -84,6 +85,7 @@ fn a_heartbeat_that_is_too_old_waits_again() {
     rig.feed(vec![AppEvent::Sighting {
         tx: bytes(&pay),
         from: vec![peer(20), peer(21), peer(22)],
+        own: false,
     }]);
     rig.time.fetch_add(10, Ordering::SeqCst);
     let screen = rig.node.judge(1).unwrap();
@@ -250,6 +252,7 @@ fn wr_54_behind_on_blocks_a_sale_still_opens_and_is_not_accepted_at_once() {
     rig.feed(vec![AppEvent::Sighting {
         tx: bytes(&pay),
         from: vec![peer(20), peer(21), peer(22)],
+        own: false,
     }]);
     rig.time.store(T0 + 30, Ordering::SeqCst);
     let mut h = hb(1, T0 + 30);

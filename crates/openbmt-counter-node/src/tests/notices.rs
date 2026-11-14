@@ -46,6 +46,7 @@ fn sighting(tx: &Transaction) -> AppEvent {
     AppEvent::Sighting {
         tx: bytes(tx),
         from: vec![peer(20)],
+        own: false,
     }
 }
 

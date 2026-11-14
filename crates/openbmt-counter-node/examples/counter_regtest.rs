@@ -386,8 +386,9 @@ struct OwnControl {
 
 fn three_groups(event: AppEvent) -> AppEvent {
     match event {
-        AppEvent::Sighting { tx, .. } => AppEvent::Sighting {
+        AppEvent::Sighting { tx, own, .. } => AppEvent::Sighting {
             tx,
+            own,
             from: (20..23)
                 .map(|n| PeerAddr::Ip(format!("{n}.{n}.1.1").parse().expect("an address")))
                 .collect(),

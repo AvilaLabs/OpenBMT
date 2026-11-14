@@ -114,6 +114,7 @@ impl World {
         self.rig.feed(vec![AppEvent::Sighting {
             tx: bytes(&lockup),
             from: vec![peer(20), peer(21), peer(22)],
+            own: false,
         }]);
         lockup
     }
@@ -503,6 +504,7 @@ fn cr_223_a_provider_that_never_locks_leaves_the_sale_unpaid_with_the_words() {
     w.rig.feed(vec![AppEvent::Sighting {
         tx: bytes(&pay),
         from: vec![peer(20)],
+        own: false,
     }]);
     assert_eq!(w.rig.node.judge(index).unwrap().state, State::Waiting);
 }
@@ -737,6 +739,7 @@ mod live {
             self.rig.feed(vec![AppEvent::Sighting {
                 tx: bytes(&lockup),
                 from: vec![peer(20), peer(21), peer(22)],
+                own: false,
             }]);
             lockup
         }

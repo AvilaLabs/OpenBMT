@@ -93,7 +93,7 @@ fn describe(event: &AppEvent, script: &ScriptBuf) -> Option<String> {
             line
         }
         AppEvent::FeeBlock { hash, bytes } => format!("feeblock {hash} {}", bytes.len()),
-        AppEvent::Sighting { tx, from } => match deserialize::<Transaction>(tx) {
+        AppEvent::Sighting { tx, from, .. } => match deserialize::<Transaction>(tx) {
             Ok(t) => format!(
                 "sighting {} from={} pays {}",
                 t.compute_txid(),

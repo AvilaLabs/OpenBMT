@@ -615,6 +615,7 @@ fn oc_02_an_unconfirmed_payment_a_peer_shows_is_not_a_coin() {
         AppEvent::Sighting {
             tx: serialize(&pay),
             from: vec![],
+            own: false,
         },
         AppEvent::AlsoAnnounced {
             txid: pay.compute_txid(),

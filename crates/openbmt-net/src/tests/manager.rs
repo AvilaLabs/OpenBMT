@@ -1511,6 +1511,7 @@ fn nr_53_a_fetched_transaction_is_a_sighting_from_every_announcer() {
         vec![Output::Sighting {
             tx: bitcoin::consensus::encode::serialize(&tx),
             from: vec![addr(1), addr(2)],
+            own: false,
         }]
     );
     // A later announcement by another peer is a further sighting.

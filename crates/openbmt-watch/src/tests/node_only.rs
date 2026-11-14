@@ -9,7 +9,7 @@ use openbmt_core::say::Tone;
 use super::kit::*;
 use crate::{
     NodeOnlyFault, NodeOnlyHealth, NodeOnlyInput, NodeOnlyLine, NodeOnlyProblem, NodeOnlyTracker,
-    OwnNodeInput, OwnNodeLink, OwnNodeProblem, PeerAddr, SaleStatus, SaleWatch, Source,
+    OwnNodeInput, OwnNodeLink, OwnNodeProblem, PeerAddr, SaleStatus, SaleWatch, Sighted, Source,
 };
 
 const NOW: u64 = 1_000_000;
@@ -131,6 +131,47 @@ fn wr_66_a_payment_the_node_does_not_hold_has_no_mode_and_waits() {
     let s = status(&mut w, &usable());
     assert_eq!(s.mode, None);
     assert!(!s.own_node_saw && !s.own_node_counted);
+}
+
+#[test]
+fn wr_66_a_sighting_from_the_own_node_admits_the_transaction_and_counts_no_group() {
+    let tx = pays();
+    let mut w = watch();
+    assert_eq!(
+        w.sighting(&bytes(&tx), Source::OwnNode, NOW),
+        Ok(Sighted::New)
+    );
+    let chain = TestChain::new(1);
+    let s = w.status_node_only(&chain, NOW + 30, &usable());
+    assert_eq!(s.received_sats, 10_000);
+    assert_eq!(s.mode, Some(CheckMode::OwnNodeOnly));
+    assert_eq!(s.peer_groups, 0);
+    assert_eq!(s.secs_since_first_seen, 30);
+    // In the mixed mode it is no sighting of the light client: no mode and
+    // no clock (WR-60).
+    let mut mixed = watch();
+    mixed.sighting(&bytes(&tx), Source::OwnNode, NOW).unwrap();
+    let own = crate::check_own_node(Some(&connected().node), TIP, NOW, None);
+    let s = mixed.status_with_own_node(&chain, NOW + 30, &own);
+    assert_eq!(s.mode, None);
+    assert_eq!(s.secs_since_first_seen, 0);
+}
+
+#[test]
+fn wr_66_a_conflict_the_own_node_announces_sets_the_conflict_flag() {
+    let tx = pays();
+    let mut w = watch();
+    w.sighting(&bytes(&tx), Source::OwnNode, NOW).unwrap();
+    let elsewhere = spend(1, &[(&script(9), 10_000)]);
+    assert_eq!(
+        w.sighting(&bytes(&elsewhere), Source::OwnNode, NOW + 1),
+        Ok(Sighted::Conflicting)
+    );
+    let chain = TestChain::new(1);
+    assert!(
+        w.status_node_only(&chain, NOW + 30, &usable())
+            .conflict_seen
+    );
 }
 
 #[test]
