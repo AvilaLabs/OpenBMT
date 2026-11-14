@@ -168,13 +168,15 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   beaten by another transaction, or has no confirmation within 144 blocks
   **[to tune]**, it is lost and the money in the channel may never come. The
   node then closes that channel by force at once, so nothing more comes
-  through it. Each sale paid at once through it is a cancel, as CR-14 says:
-  the alarm, the pause, "Do not hand over" on its screen, and the POS told it
-  is unpaid (CR-30). A sale still waiting for that funding is told so, and a
-  manager can still accept it. A later payment through a funding already lost
-  is never paid at once. The counter tells the manager, and the owner phone
-  lists the sales paid through it: the first 64 by number, and the count of
-  all.
+  through it. Each sale paid at once through it, or accepted by a person
+  (CR-20), is a cancel, as CR-14 says: the alarm, the pause, "Do not hand
+  over" on its screen, and the POS told it is unpaid (CR-30). A sale still
+  waiting for that funding is told so, and a manager can still accept it. A
+  later payment through a funding already lost is never paid at once. The
+  counter tells the manager, and the owner phone lists the sales paid through
+  it: the first 64 by number, and the count of all. If a write fails partway
+  through, what was recorded before it is still reported, and the rest is
+  tried again.
 
 ## 5. The provider
 
@@ -301,7 +303,10 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   channels is never Paid at once. When the counter hears of a payment with no
   news of its fundings, it asks the node, and a funding the node does not know
   counts as not confirmed. A sale waiting for its fundings is still waiting
-  after a restart. SL-27 says what happens if a funding never confirms.
+  after a restart. It is not cancelled and takes no new quote (CR-08). A
+  payment that pays it another way, through a confirmed channel or a swap,
+  ends the wait. A swap payment rests on no channel funding. SL-27 says what
+  happens if a funding never confirms.
 - **SL-41. When Lightning is not offered.** With the second device away, the
   chain data behind, no usable channel and no provider answering, the
   counter shows the on-chain code alone and the manager sees why.

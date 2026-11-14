@@ -65,10 +65,11 @@ draws what it is told.
   what has arrived shrinks, the newest valuations are dropped first. A sale
   records at most 128 valuations; satoshis that arrive after that stay
   unvalued and are counted at the quote in force each time.
-- **CR-08.** What the sale needs, in satoshis, is the satoshis already
-  valued plus the rest of the amount at the current quote, rounded up to
-  a whole satoshi. A new quote moves only the part that has not been
-  paid. Once enough has arrived the sale takes no new quote.
+- **CR-08.** What the sale needs, in satoshis, is the satoshis already valued
+  plus the rest of the amount at the current quote, rounded up to a whole
+  satoshi. A new quote moves only the part that has not been paid. Once enough
+  has arrived the sale takes no new quote, nor does a sale that holds a
+  Lightning payment or waits for the funding of one (SL-40).
 - **CR-09.** No sale opens while a rescan is pending after a restore or a
   reset (§5.5).
 - **CR-75.** The shop's signed settings name the smallest bitcoin sale, in
@@ -185,7 +186,12 @@ carries two texts: why it is in this state, and what happens next (§2.6).
   `DoNotHandOver`. The amount at risk goes into the exposure ledger as an
   override, stored before the screen changes. It is refused when the ledger
   has no room, and when the desk already keeps 1,000 overrides inside the
-  window of CR-21, until older ones leave it.
+  window of CR-21, until older ones leave it. On a sale paid over Lightning or
+  through a swap, the override is an acceptance as one made at once: the sale
+  shows paid, and a loss after it (a funding lost, a lockup spent, a claim
+  that left the chain) is a cancel (CR-14). What took the sale back before the
+  override is not held against it, so a sale accepted after its lockup was
+  spent is not cancelled again for that same spend.
 - **CR-21.** A cashier's override is refused above the per-sale instant
   limit, and when it would take that cashier's overrides of the last 24
   hours past the cashier's daily cap. A manager's is refused when it
@@ -392,8 +398,11 @@ has been made).
   deeper: the amount is checked against what of the sale is that deep, and a
   cash refund of a sale paid only by an unconfirmed payment is refused, for a
   manager too, until it confirms. Satoshis paid over Lightning count as
-  confirmed. A bitcoin refund is not changed by this: it already waits for the
-  final depth (CR-66).
+  confirmed only when no channel funding the payment rests on (SL-40) is
+  unconfirmed or lost and no cancel is recorded on the sale. A swap payment
+  (CR-221) counts as its claim, once that is at the shop's depth, as any
+  payment on the chain does. A bitcoin refund is not changed by this: it
+  already waits for the final depth (CR-66).
 - **CR-72.** For each sale the counter gives a `RefundView` for each entry:
   the sale, what was asked in satoshis, the state (`Requested`,
   `WaitingForDepth`, `Withdrawn` or `PaidInCash`), who asked and when. The
@@ -1715,12 +1724,17 @@ own, as the driver of section 12 has none.
   transaction that replaced the lockup, in a block of the best chain takes the
   sale back at once in the same way, with the alarm and the pause for a sale
   paid at once, overridden or reported paid (CR-14); the claim is not built
-  again. If that block leaves the chain and the claim is in a block, the sale
-  is paid again, and the alarm stays for the owner. The swap is lost only when
-  that spend is at the shop's refund depth: `Counter::swap_cancelled` then
-  makes the cancel final and tells the POS unpaid (CR-30). A sale paid at once
-  whose swap fails before the claim is a cancel in the same way. One not yet
-  reported paid is taken back with no alarm.
+  again. The sale is stored as taken back, with the reason, so it is still
+  taken back after a restart, and the alarm and the record are made once for
+  that spend. If that block leaves the chain and the claim is in a block, the
+  sale is paid again, and the alarm stays for the owner. A claim that leaves
+  the chain after a person accepted the sale is a cancel in the same way, and
+  the sale is paid again when the claim is back in a block. The swap is lost
+  only when that spend is at the shop's refund depth:
+  `Counter::swap_cancelled` then makes the cancel final, with no second alarm
+  or record, and tells the POS unpaid (CR-30). A sale paid at once whose swap
+  fails before the claim is a cancel in the same way. One not yet reported
+  paid is taken back with no alarm.
 - **CR-222.** The claim pays the sale's address at a fee rate that starts at 2
   sat/vB or at the recent rate of the blocks the counter has checked (FE-13,
   from the fee samples it makes of them and keeps in memory only), whichever
