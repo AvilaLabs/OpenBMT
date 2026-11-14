@@ -819,13 +819,7 @@ class Controller(internal val act: MainActivity) {
             override fun begin(onText: (String) -> Unit, onFailed: (SayWords) -> Unit) {
                 val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
                 openPicker(intent, { showPasteSetup(null) }) { uri ->
-                    try {
-                        onText(String(readBytes(uri, OwnerSetup.MAX_TEXT * 4 + 1), Charsets.UTF_8))
-                    } catch (e: IOException) {
-                        onFailed(AppWords.fileNotRead(e.message))
-                    } catch (e: SecurityException) {
-                        onFailed(AppWords.fileNotRead(e.message))
-                    }
+                    readPicked(uri, OwnerSetup.MAX_TEXT * 4 + 1, { onText(String(it, Charsets.UTF_8)) }) { onFailed(AppWords.fileNotRead(it)) }
                 }
             }
         },
@@ -842,18 +836,13 @@ class Controller(internal val act: MainActivity) {
             override fun begin(onBytes: (ByteArray) -> Unit, onFailed: (SayWords) -> Unit) {
                 val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
                 openPicker(intent, cancelled) { uri ->
-                    try {
-                        val bytes = readBytes(uri, ApprovalText.MAX_BYTES + 1)
+                    readPicked(uri, ApprovalText.MAX_BYTES + 1, { bytes ->
                         if (bytes.size > ApprovalText.MAX_BYTES) {
                             onFailed(AppWords.responseNotReadable("the file is longer than a response can be"))
                         } else {
                             onBytes(bytes)
                         }
-                    } catch (e: IOException) {
-                        onFailed(AppWords.fileNotRead(e.message))
-                    } catch (e: SecurityException) {
-                        onFailed(AppWords.fileNotRead(e.message))
-                    }
+                    }) { onFailed(AppWords.fileNotRead(it)) }
                 }
             }
         },
@@ -929,13 +918,7 @@ class Controller(internal val act: MainActivity) {
     internal fun pickBytes(limit: Int, cancelled: () -> Unit, onBytes: (ByteArray) -> Unit, failed: (SayWords) -> Unit) {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
         openPicker(intent, cancelled) { uri ->
-            try {
-                onBytes(readBytes(uri, limit))
-            } catch (e: IOException) {
-                failed(AppWords.fileNotRead(e.message))
-            } catch (e: SecurityException) {
-                failed(AppWords.fileNotRead(e.message))
-            }
+            readPicked(uri, limit, onBytes) { failed(AppWords.fileNotRead(it)) }
         }
     }
 
@@ -998,6 +981,36 @@ class Controller(internal val act: MainActivity) {
         if (done != null) done(result == android.app.Activity.RESULT_OK) else begin()
     }
 
+    /**
+     * [readBytes] on a worker thread with a deadline of [FILE_READ_MS], so that a document provider that is slow
+     * or stuck cannot hang the app. The result is handed back on the main thread; a read that is not done by the
+     * deadline is an unreadable file ([onFailed] gets the reason), and what it gives later is dropped.
+     */
+    private fun readPicked(uri: Uri, limit: Int, onBytes: (ByteArray) -> Unit, onFailed: (String?) -> Unit) {
+        var settled = false
+        val timeout = Runnable {
+            if (!settled) {
+                settled = true
+                onFailed("WORDS_NEEDED_F1_READ_TOO_SLOW")
+            }
+        }
+        val reader = Thread {
+            val r = runCatching { readBytes(uri, limit) }
+            main.post {
+                if (!settled) {
+                    settled = true
+                    main.removeCallbacks(timeout)
+                    r.fold(onBytes) { e ->
+                        if (e is IOException || e is SecurityException) onFailed(e.message) else throw e
+                    }
+                }
+            }
+        }
+        reader.isDaemon = true
+        reader.start()
+        main.postDelayed(timeout, FILE_READ_MS)
+    }
+
     /** At most [limit] bytes of the file at [uri]; a longer file gives [limit] bytes, so that the caller can refuse it. */
     private fun readBytes(uri: Uri, limit: Int): ByteArray {
         val input = act.contentResolver.openInputStream(uri) ?: throw IOException("the file could not be opened")
@@ -1024,6 +1037,9 @@ class Controller(internal val act: MainActivity) {
 
         /** How long a copied secret stays on the clipboard. */
         const val SENSITIVE_CLIP_MS = 60_000L
+
+        /** How long a picked file may take to read before it counts as unreadable. */
+        const val FILE_READ_MS = 20_000L
 
         /** How long the app waits for the built-in Tor to have a circuit: a little over the minute the words promise (OA-100). */
         const val TOR_WAIT_MS = 90_000L

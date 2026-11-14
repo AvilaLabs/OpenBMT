@@ -4321,6 +4321,12 @@ object AppModelTest {
         ok(picked.contains("PickedUri.accept(uri, act)") && picked.indexOf("PickedUri.accept(uri, act)") in 0 until picked.indexOf("done(uri)"), "a picker's address is checked before the caller reads or writes it")
         ok(picked.contains("AppWords.fileNotRead(null)"), "a refused address says the file was not read")
         ok(controller.split("openInputStream(").size == 2 && controller.split("openOutputStream(").size == 2, "one read and one write of a picked address, both after the check")
+        // A picked file is read off the main thread under a deadline, and a late read is an unreadable file.
+        val reader = controller.substringAfter("private fun readPicked(").substringBefore("private fun readBytes(")
+        ok(controller.split("readBytes(").size == 3 && reader.contains("readBytes(uri, limit)") && reader.contains("Thread {") && reader.contains("reader.start()"), "the only read of a picked file runs on a worker thread")
+        ok(reader.contains("main.postDelayed(timeout, FILE_READ_MS)") && reader.contains("main.removeCallbacks(timeout)") && controller.contains("const val FILE_READ_MS = 20_000L"), "the read has a deadline of 20 seconds")
+        ok(reader.contains("onFailed(\"WORDS_NEEDED_F1_READ_TOO_SLOW\")") && reader.indexOf("if (!settled)") in 0 until reader.indexOf("onFailed("), "a read past the deadline is an unreadable file, once")
+        ok(occurs(controller, "readPicked(uri, ") == 3, "the setup file, the response file and the other picked files all take the worker")
         ok(occurs(controller, "Intent.ACTION_OPEN_DOCUMENT") + occurs(controller, "Intent.ACTION_CREATE_DOCUMENT") == occurs(controller, "openPicker(intent, "), "every picker intent goes through the one function that checks the result")
         ok(!controller.contains("ACTION_GET_CONTENT") && occurs(controller, "startActivityForResult(") == 2, "the pickers and the phone's PIN screen are the only calls for a result")
         val others = File(appDir, "src/android").listFiles { f -> f.name.endsWith(".kt") && f.name != "Controller.kt" }!!
