@@ -95,7 +95,7 @@ object ShopLightningWords {
     const val orderWhyRefunded = "The provider gave the payment back."
     const val orderWhyNotPossible = "The provider's terms are ones the counter cannot meet or pay."
     const val orderWhyNoChannel = "It was paid, but no channel opened within two days. Ask the provider for the money back."
-    const val orderWhyStopped = "WORDS_NEEDED_SL28_ORDER_WHY_STOPPED"
+    const val orderWhyStopped = "It was paid, but no channel came, so no more room is bought from this provider. Ask it for the money back, or pick another provider."
     const val changeLimits = "Change the limits"
     const val changeProvider = "Change the provider"
     const val save = "Save"

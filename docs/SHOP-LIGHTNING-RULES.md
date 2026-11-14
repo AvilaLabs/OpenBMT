@@ -188,20 +188,31 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   balance, only when the fee is at most what the owner allows for one opening
   (SL-29). The shop puts nothing into that channel, and the channel is not
   announced. Only a BOLT 11 invoice of the provider's own, not expired, is
-  paid, and only over a channel to the provider. The fee counted is the
-  largest of the invoice, the fee and the total the provider names, and a
-  refund takes it off the count again. An order is made at most once an hour,
-  and not within an hour of the last one ending. One not paid within an hour,
-  or paid with no channel two days later, is given up. Nothing is ordered
-  without a usable channel to the provider to pay from, so the first channel
-  still comes through LSPS2. A provider without LSPS1 is taken all the same;
-  room then comes only with a payment too big for it.
-- **SL-29. The fee before the payment.** A payment that opens a channel
-  shows the provider's fee to the customer's amount before the invoice is
-  made, and the owner sets the most the shop will pay for one opening. Above
-  it, the sale is on-chain. A sale is credited with what arrived plus the
-  fee the provider took from it, and the opening fees paid so far count
-  what was taken, not what was quoted.
+  paid, only over a channel to the provider, and only when it asks a final
+  CLTV of at most 144 blocks. A payment on its way is waited for, never paid
+  or failed again. The fee counted is what the payment delivered, rounded up
+  to a satoshi; when that amount is not known, it is the largest of the
+  invoice, the fee and the total the provider names. A refund the provider
+  claims does not lower the count, since the node cannot check it. An order is
+  made at most once an hour, and not within an hour of the last one ending.
+  One not paid within an hour is given up. An order is done only when the
+  node's own channel list holds a channel with the provider, funded by the
+  output the provider names, whose provider side is at least nine tenths of
+  the room ordered; without it, the order is given up two days after the
+  payment. A paid order given up without its channel stops further orders from
+  that provider; a provider the shop picks after it can be ordered from. The
+  provider's word that an order is paid or open changes nothing until a
+  payment of the shop's own has left for it. Nothing is ordered without a
+  usable channel to the provider to pay from, so the first channel still comes
+  through LSPS2. A provider without LSPS1 is taken all the same; room then
+  comes only with a payment too big for it.
+- **SL-29. The fee before the payment.** A payment that opens a channel shows
+  the provider's fee to the customer's amount before the invoice is made, and
+  the owner sets the most the shop will pay for one opening. Above it, the
+  sale is on-chain. A sale is credited with what arrived plus the fee the
+  provider took from it, and the opening fees paid so far count what was
+  taken, not what was quoted. For room bought ahead (SL-28), they count what
+  the payment delivered.
 - **SL-30. The window to be back online.** The node asks for
   `our_to_self_delay` of 2016 blocks (about two weeks), or the provider's
   `max_client_to_self_delay` if lower. A provider offering under 1008 blocks
@@ -373,8 +384,9 @@ section widens it.
   opening fees paid so far, when the Box last stored the state, the time of
   the last sweep, why Lightning is not offered when it is not (SL-41), and the
   facts of buying room ahead (SL-28): whether the provider offers it, and the
-  last order's state, cause and fee. The owner phone shows the newest report
-  and when it came. The cap and the provider it shows are those of the
+  last order's state, cause and fee. While buying from the provider is stopped
+  (SL-28), the cause says that instead. The owner phone shows the newest
+  report and when it came. The cap and the provider it shows are those of the
   settings. While the counter still holds the seed it goes on sending reports
   after the settings stop naming it, so the owner can follow the closing until
   the money is back.
