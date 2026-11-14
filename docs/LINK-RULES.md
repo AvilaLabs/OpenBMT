@@ -564,5 +564,7 @@ how the two talk.
   own before it counts anything.
 - **LK-84. The Lightning report.** It is sent with each check-in (LK-57)
   and carries what `docs/SHOP-LIGHTNING-RULES.md` SL-78 lists, each as a
-  number of satoshis, a time or a cause code. It is not a record: a lost
+  number of satoshis, a time or a cause code. It is version 2, which adds
+  the facts of buying room ahead; a version 1 report still reads, with
+  those unknown, and a later version is refused. It is not a record: a lost
   report is replaced by the next one, and the owner keeps only the newest.

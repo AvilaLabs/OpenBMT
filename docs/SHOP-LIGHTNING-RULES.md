@@ -175,19 +175,27 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
 - **SL-28. Any provider, the shop's choice.** The first channel and every
   later one come from a liquidity provider the shop picks, through LSPS2
   (`lightning-liquidity` 0.2.8: `request_opening_params`,
-  `select_opening_params`). `client_trusts_lsp` is the provider's own
-  setting: with it false the provider sends the funding before the payment,
-  and with it true it may hold the funding back until the shop has taken
-  the payment; SL-27 and SL-40 cover a funding that does not come. The
-  provider can be changed at any time. OpenBMT runs none and takes nothing. When the
-  provider also offers LSPS1 (bLIP-51), the node buys room ahead: once the
-  room to receive (SL-40) is under half the cap, it orders a channel that
-  brings the room up to the cap, asks that the channel be used only after
-  its funding has a confirmation (`required_channel_confirmations` 1), and
-  pays the provider's invoice from the Lightning balance, only when the fee
-  is at most what the owner allows for one opening (SL-29). A provider
-  without LSPS1 is taken all the same; room then comes only with a payment
-  too big for it.
+  `select_opening_params`). `client_trusts_lsp` is the provider's own setting:
+  with it false the provider sends the funding before the payment, and with it
+  true it may hold the funding back until the shop has taken the payment;
+  SL-27 and SL-40 cover a funding that does not come. The provider can be
+  changed at any time. OpenBMT runs none and takes nothing. When the provider
+  also offers LSPS1 (bLIP-51), the node buys room ahead: once the room to
+  receive (SL-40) is under half the cap, it orders a channel that brings the
+  room up to the cap, asks that the channel be used only after its funding has
+  a confirmation (`required_channel_confirmations` 1, or the provider's least
+  when that is more), and pays the provider's invoice from the Lightning
+  balance, only when the fee is at most what the owner allows for one opening
+  (SL-29). The shop puts nothing into that channel, and the channel is not
+  announced. Only a BOLT 11 invoice of the provider's own, not expired, is
+  paid, and only over a channel to the provider. The fee counted is the
+  largest of the invoice, the fee and the total the provider names, and a
+  refund takes it off the count again. An order is made at most once an hour,
+  and not within an hour of the last one ending. One not paid within an hour,
+  or paid with no channel two days later, is given up. Nothing is ordered
+  without a usable channel to the provider to pay from, so the first channel
+  still comes through LSPS2. A provider without LSPS1 is taken all the same;
+  room then comes only with a payment too big for it.
 - **SL-29. The fee before the payment.** A payment that opens a channel
   shows the provider's fee to the customer's amount before the invoice is
   made, and the owner sets the most the shop will pay for one opening. Above
@@ -269,9 +277,11 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
 
 ## 8. What the owner sees
 
-- **SL-45.** The owner phone shows the Lightning balance and the cap, the
-  room to receive, the provider and its fees paid so far, the second device
-  and when it last stored the state, and the date of the last sweep.
+- **SL-45.** The owner phone shows the Lightning balance and the cap, the room
+  to receive, the provider and its fees paid so far, the second device and
+  when it last stored the state, and the date of the last sweep. When the
+  provider offers LSPS1 (SL-28) it shows that too, with the last order's state
+  and fee and, for one that failed, why.
 
 ## 9. Tests
 
@@ -302,16 +312,17 @@ section widens it.
   payments only, as in a shop without Shop Lightning. Asking the Lightning
   counter for invoices over the link (SL-03), and running the node on a Box,
   come later.
-- **SL-71. In the signed settings.** The settings field `shop_lightning`
-  names the Lightning counter, which is a counter of the settings; the
-  node's ID, 33 bytes (SL-72); the second device, which is a Box of the
-  settings (SL-73); the provider, by its node ID and its IP address and port
-  (SL-28, SL-32); the cap, in satoshis (SL-34); and the most the shop pays
-  for one opening, in satoshis (SL-29). With the field unset, Shop Lightning
-  is off (SL-04). It is never set together with `lightning_node` or `swap`.
-  Settings that break any of this are refused when they are read, as any
-  other settings that do not check are. Settings without the field encode
-  and hash exactly as they did before it existed.
+- **SL-71. In the signed settings.** The settings field `shop_lightning` names
+  the Lightning counter, which is a counter of the settings; the node's ID, 33
+  bytes (SL-72); the second device, which is a Box of the settings (SL-73);
+  the provider, by its node ID and its IP address and port (SL-28, SL-32); the
+  cap, in satoshis (SL-34); and the most the shop pays for one opening, in
+  satoshis (SL-29). The node reads the cap when it starts, so a change of the
+  cap takes effect at its next start. With the field unset, Shop Lightning is
+  off (SL-04). It is never set together with `lightning_node` or `swap`.
+  Settings that break any of this are refused when they are read, as any other
+  settings that do not check are. Settings without the field encode and hash
+  exactly as they did before it existed.
 - **SL-72. The node's ID, pinned.** The node's ID is the public key the
   library makes from the seed of SL-10. The seed's BIP-32 master key gives
   the 32 bytes handed to `KeysManager::new`, and the node key is the
@@ -360,11 +371,13 @@ section widens it.
   sends the owner a message of kind Lightning report (`docs/LINK-RULES.md`
   LK-84) with the facts of SL-45: the balance, the room to receive, the
   opening fees paid so far, when the Box last stored the state, the time of
-  the last sweep, and why Lightning is not offered when it is not (SL-41).
-  The owner phone shows the newest report and when it came. The cap and the
-  provider it shows are those of the settings. While the counter still
-  holds the seed it goes on sending reports after the settings stop naming
-  it, so the owner can follow the closing until the money is back.
+  the last sweep, why Lightning is not offered when it is not (SL-41), and the
+  facts of buying room ahead (SL-28): whether the provider offers it, and the
+  last order's state, cause and fee. The owner phone shows the newest report
+  and when it came. The cap and the provider it shows are those of the
+  settings. While the counter still holds the seed it goes on sending reports
+  after the settings stop naming it, so the owner can follow the closing until
+  the money is back.
 - **SL-79. Tested.** The core's ID equals the library's (SL-72); settings
   with `shop_lightning` round-trip, and each broken case of SL-71 is refused;
   a counter given a seed of another ID stores nothing; a write the Box did

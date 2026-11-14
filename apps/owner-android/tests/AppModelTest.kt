@@ -4858,8 +4858,7 @@ object AppModelTest {
         // The words: every text is written and listed once; the app's own messages pass the checks and read apart.
         val all = ShopLightningWords.all()
         ok(all.map { it.first }.toSet().size == all.size, "each Shop Lightning text is listed once")
-        ok(all.all { (_, text) -> text.isNotBlank() && text.trim() == text && (!text.contains("WORDS_NEEDED") || text.startsWith("WORDS_NEEDED_SL28_")) }, "each Shop Lightning text is written, or is a placeholder of the room bought ahead (SL-28)")
-        ok(all.filter { it.second.startsWith("WORDS_NEEDED_") }.all { (k, text) -> text == "WORDS_NEEDED_SL28_" + k.replace(Regex("([A-Z])"), "_$1").uppercase() }, "each placeholder is named for its key")
+        ok(all.all { (_, text) -> text.isNotBlank() && text.trim() == text && !text.contains("WORDS_NEEDED") }, "each Shop Lightning text is written")
         for ((k, w) in ShopLightningWords.messages()) ok(SayCheck.problem(w) == null && w.code?.startsWith("SL-") == true, "words of $k: ${SayCheck.problem(w)}")
         ok(SayCheck.distinctProblem(ShopLightningWords.messages()) == null, "no two Shop Lightning messages read the same")
         ok(NotOffered.values().map { ShopLightningWords.cause(it) }.toSet().size == NotOffered.values().size, "each cause the report gives has words of its own")

@@ -891,25 +891,25 @@ library's own:
 | chainBehind | Not offered: the counter is behind the chain |
 | noUsableChannel | Not offered: no channel can take a payment |
 | providerSilent | Not offered: the provider does not answer |
-| roomAheadLabel | WORDS_NEEDED_SL28_ROOM_AHEAD_LABEL |
-| roomAheadUnknown | WORDS_NEEDED_SL28_ROOM_AHEAD_UNKNOWN |
-| roomAheadOffered | WORDS_NEEDED_SL28_ROOM_AHEAD_OFFERED |
-| roomAheadNotOffered | WORDS_NEEDED_SL28_ROOM_AHEAD_NOT_OFFERED |
-| orderLabel | WORDS_NEEDED_SL28_ORDER_LABEL |
-| orderOpen | WORDS_NEEDED_SL28_ORDER_OPEN |
-| orderPaid | WORDS_NEEDED_SL28_ORDER_PAID |
-| orderDone | WORDS_NEEDED_SL28_ORDER_DONE |
-| orderFailed | WORDS_NEEDED_SL28_ORDER_FAILED |
-| orderWhyLabel | WORDS_NEEDED_SL28_ORDER_WHY_LABEL |
-| orderFeeLabel | WORDS_NEEDED_SL28_ORDER_FEE_LABEL |
-| orderWhyFeeAboveMax | WORDS_NEEDED_SL28_ORDER_WHY_FEE_ABOVE_MAX |
-| orderWhyCannotPay | WORDS_NEEDED_SL28_ORDER_WHY_CANNOT_PAY |
-| orderWhyRefused | WORDS_NEEDED_SL28_ORDER_WHY_REFUSED |
-| orderWhyExpired | WORDS_NEEDED_SL28_ORDER_WHY_EXPIRED |
-| orderWhyPaymentFailed | WORDS_NEEDED_SL28_ORDER_WHY_PAYMENT_FAILED |
-| orderWhyRefunded | WORDS_NEEDED_SL28_ORDER_WHY_REFUNDED |
-| orderWhyNotPossible | WORDS_NEEDED_SL28_ORDER_WHY_NOT_POSSIBLE |
-| orderWhyNoChannel | WORDS_NEEDED_SL28_ORDER_WHY_NO_CHANNEL |
+| roomAheadLabel | Room bought ahead |
+| roomAheadUnknown | Not known yet: the provider has not been asked. |
+| roomAheadOffered | Yes: the provider sells room ahead, so the counter buys it before it runs low. |
+| roomAheadNotOffered | No: this provider does not sell room ahead. Room comes only with a payment too big for the counter. |
+| orderLabel | Last purchase of room |
+| orderOpen | Asked for, not paid yet |
+| orderPaid | Paid, waiting for the channel |
+| orderDone | Done: the channel is open |
+| orderFailed | Failed |
+| orderWhyLabel | Why it failed |
+| orderFeeLabel | Its fee |
+| orderWhyFeeAboveMax | The provider's fee was above the most the shop pays for one opening. |
+| orderWhyCannotPay | The counter's channels could not pay it. |
+| orderWhyRefused | The provider refused it, or answered in a way the counter cannot use. |
+| orderWhyExpired | The provider's invoice ran out before it was paid. |
+| orderWhyPaymentFailed | The payment did not go through. |
+| orderWhyRefunded | The provider gave the payment back. |
+| orderWhyNotPossible | The provider's terms are ones the counter cannot meet or pay. |
+| orderWhyNoChannel | It was paid, but no channel opened within two days. Ask the provider for the money back. |
 | changeLimits | Change the limits |
 | changeProvider | Change the provider |
 | save | Save |
