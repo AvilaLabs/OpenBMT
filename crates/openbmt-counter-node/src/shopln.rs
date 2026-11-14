@@ -31,9 +31,9 @@ use openbmt_lightning_node::room::OnChainReason;
 use openbmt_link::shopln::NotOffered;
 
 /// The magic of the seed record, which the app seals (version 1).
-pub const MAGIC_SEED_RECORD: [u8; 4] = *b"OBM\x1d";
+pub const MAGIC_SEED_RECORD: [u8; 4] = *b"OBM\x19";
 /// The magic of the book (version 1).
-pub const MAGIC_BOOK: [u8; 4] = *b"OBM\x1b";
+pub const MAGIC_BOOK: [u8; 4] = *b"OBM\x1a";
 /// The file of the book, in the node's own folder.
 pub const BOOK_FILE: &str = "book";
 /// The most invoices the book keeps: past it no new invoice is made.
