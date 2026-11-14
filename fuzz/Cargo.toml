@@ -36,6 +36,8 @@ openbmt-qr = { path = "../crates/openbmt-qr" }
 openbmt-rates = { path = "../crates/openbmt-rates" }
 openbmt-requests = { path = "../crates/openbmt-requests" }
 openbmt-ur = { path = "../crates/openbmt-ur" }
+openbmt-stick = { path = "../crates/openbmt-stick" }
+openbmt-lightning-node = { path = "../crates/openbmt-lightning-node", features = ["testing"] }
 openbmt-bbqr = { path = "../crates/openbmt-bbqr" }
 openbmt-qr-jni = { path = "../crates/openbmt-qr-jni" }
 openbmt-json = { path = "../crates/openbmt-json" }
@@ -857,6 +859,55 @@ bench = false
 [[bin]]
 name = "tap_answer"
 path = "fuzz_targets/tap_answer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "stick_prepare"
+path = "fuzz_targets/stick_prepare.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "owner_hardware_return"
+path = "fuzz_targets/owner_hardware_return.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "owner_web_order_reply"
+path = "fuzz_targets/owner_web_order_reply.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lightning_expect_paid_decode"
+path = "fuzz_targets/lightning_expect_paid_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "owner_ffi_call"
+path = "fuzz_targets/owner_ffi_call.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "link_numbers_shopln_decode"
+path = "fuzz_targets/link_numbers_shopln_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ur_long_stream"
+path = "fuzz_targets/ur_long_stream.rs"
 test = false
 doc = false
 bench = false
