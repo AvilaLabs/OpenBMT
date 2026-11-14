@@ -14,6 +14,9 @@
 //! - [`chain`]: chain data from the shop's own Bitcoin Core (SL-26);
 //!   [`filters`]: the same from the compact-filter watcher on the counter's
 //!   peer layer (SL-26, SL-27).
+//! - [`lsps1`]: room bought ahead from a provider that offers LSPS1 (SL-28,
+//!   SL-35): when to order, what to ask for, whether to pay, and the open
+//!   order kept in the store.
 //! - [`provider`]: the choice among a provider's offers (SL-29, SL-30);
 //!   [`room`]: the room to receive and the decision for an amount (SL-40,
 //!   SL-41).
@@ -105,6 +108,7 @@ pub mod expect;
 pub mod feehistory;
 pub mod filters;
 pub mod logger;
+pub mod lsps1;
 pub mod node;
 pub mod paid;
 pub mod provider;
