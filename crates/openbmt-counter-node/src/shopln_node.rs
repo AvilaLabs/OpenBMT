@@ -29,21 +29,36 @@
 //!
 //! - The sweep of SL-33 is begun here: once the node's balance is over the
 //!   cap, everything over half the cap goes to the wallet, at most one try
-//!   every [`SWEEP_EVERY_SECS`] seconds. The address is the last index of the
-//!   pairing's first range of the shop's own wallet, which the owner's
-//!   wallet already watches; a counter paired with the Key app holds no
-//!   description of the wallet, so Shop Lightning does not start on it
-//!   ([`Why::NoWallet`]).
+//!   every [`SWEEP_EVERY_SECS`] seconds. The address is an index of the
+//!   shop's own wallet that the counter's ranges give to Shop Lightning the
+//!   way they give one to a sale ([`SweepSource::take_index`]): written
+//!   before it is used, never given to a sale and never used by two
+//!   transactions. The book keeps the current one for the node's output
+//!   sweeper and the next sweep or close, and a new one is taken after a
+//!   transaction has paid it. The wallet is read from the counter at every
+//!   pump; when it changes, the node is stopped and started again with the
+//!   new one. A counter paired with the Key app holds no description of the
+//!   wallet, so Shop Lightning does not start on it ([`Why::NoWallet`]); with
+//!   no free index in any range it does not sweep ([`Why::NoSweepAddress`]).
 //! - A channel the provider opens may be used before its funding transaction
 //!   is confirmed (`zero_conf`): the provider funds it, and the shop holds
 //!   nothing in it until a payment comes.
 //! - The invoices are kept in the book, in plain, until their payment is
-//!   acknowledged, so that a paid event after a restart finds its sale. A
-//!   paid event of an invoice that is not in the book is noted and
-//!   acknowledged: the counter has no sale to give it to.
-//! - What a sale is credited is what arrived plus the provider's opening fee
-//!   (SL-29): the customer paid the whole invoice, and the shop bears the
-//!   fee.
+//!   acknowledged, so that a paid event after a restart finds its sale; when
+//!   the sale is over, cancelled or quoted again they are taken out and the
+//!   node is told to fail a payment to them back. A paid event of an invoice
+//!   that is not in the book is kept in the book as a payment no sale took,
+//!   and only then acknowledged.
+//! - What a sale is credited is what arrived plus the fee the provider
+//!   skimmed off that payment (SL-29): the customer paid the whole invoice,
+//!   and the shop bears the fee. A payment that opened no channel has no
+//!   skim.
+//! - A book that is there and does not read is an error, not an empty book:
+//!   the node is not started and the seed is kept. The seed is deleted only
+//!   when the node, running, reports that nothing is left (no channel, no
+//!   claimable balance, no tracked output, no write waiting).
+//! - The node's folder is held by a lock file from before the node is built
+//!   until it has stopped, so that two nodes never run on one seed.
 
 use std::collections::HashMap;
 use std::fs;
@@ -54,6 +69,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
+use bitcoin::hashes::{sha256, Hash};
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::Network;
 use openbmt_core::identity::{DeviceId, Identity};
@@ -83,7 +99,8 @@ use tokio::runtime::{Builder, Runtime};
 use crate::lightning::SaleLightning;
 use crate::relaylink::link_route;
 use crate::shopln::{
-    role, take_seed, Book, InvoiceEntry, Role, SeedNotTaken, SeedRecord, Why, MAX_INVOICES,
+    role, take_seed, Book, InvoiceEntry, Role, SeedNotTaken, SeedRecord, SweepAddress, Unmatched,
+    Why, MAX_INVOICES,
 };
 
 /// How often a node that did not start is started again, in seconds.
@@ -102,6 +119,8 @@ pub const DESCRIPTION: &str = crate::swap::DESCRIPTION;
 const NODE_DIR: &str = "node";
 /// The folder of the node's chain watcher.
 const CHAIN_DIR: &str = "chain";
+/// The file whose lock holds the node's folder.
+const FOLDER_LOCK_FILE: &str = "node.lock";
 
 /// What the app gives the counter at its start for Shop Lightning.
 pub struct ShopLnConfig {
@@ -130,11 +149,106 @@ pub struct ShopLnArgs {
     pub driver: DriverConfig,
     /// Whether Tor is on in the settings (SL-32).
     pub tor_on: bool,
-    /// The shop's pinned wallet and the index the sweep and the close pay to
-    /// (SL-33), when the counter holds a description of the wallet.
-    pub wallet: Option<(String, u32)>,
     /// From the app.
     pub config: ShopLnConfig,
+}
+
+/// Where Shop Lightning gets the shop's wallet and the addresses of its own
+/// transactions (SL-33). The counter implements it over its pinned wallet and
+/// its ranges; it is read at every use, so a switch of wallet is seen.
+pub trait SweepSource {
+    /// The description of the wallet the counter pays into now, if it holds
+    /// one.
+    fn wallet(&self) -> Option<String>;
+    /// The next index of the ranges, taken as a sale takes its address: it is
+    /// written before it is handed back and is never given again. `Ok(None)`
+    /// when no range has a free index.
+    fn take_index(&mut self) -> Result<Option<u32>, String>;
+}
+
+/// What the sweep and the close need of a running node.
+trait NodeOps {
+    fn balance_sat(&self) -> u64;
+    fn sweep(&self, index: u32, amount_sat: u64) -> Result<(), String>;
+    fn close_all(&self, index: u32) -> Result<usize, String>;
+    fn sweeper_spends(&self) -> Vec<[u8; 32]>;
+    fn sweeper_index(&self) -> u32;
+    fn set_sweeper_index(&self, index: u32, rt: &Runtime);
+}
+
+impl NodeOps for Arc<LnNode> {
+    fn balance_sat(&self) -> u64 {
+        LnNode::balance_sat(self)
+    }
+    fn sweep(&self, index: u32, amount_sat: u64) -> Result<(), String> {
+        LnNode::sweep(self, index, amount_sat)
+    }
+    fn close_all(&self, index: u32) -> Result<usize, String> {
+        LnNode::close_all(self, index)
+    }
+    fn sweeper_spends(&self) -> Vec<[u8; 32]> {
+        LnNode::sweeper_spends(self)
+    }
+    fn sweeper_index(&self) -> u32 {
+        LnNode::sweep_index(self)
+    }
+    fn set_sweeper_index(&self, index: u32, rt: &Runtime) {
+        let node = Arc::clone(self);
+        rt.spawn(async move {
+            let _ = node.set_sweep_index(index).await;
+        });
+    }
+}
+
+fn wallet_hash(wallet: &str) -> [u8; 32] {
+    sha256::Hash::hash(wallet.as_bytes()).to_byte_array()
+}
+
+/// The lock on the node's folder: held from before the node is built until
+/// it is fully stopped, so that no second node runs on the same seed.
+struct FolderLock {
+    _file: fs::File,
+    #[cfg(test)]
+    probe: Option<Arc<tests::Probe>>,
+}
+
+#[cfg(test)]
+impl Drop for FolderLock {
+    fn drop(&mut self) {
+        if let Some(p) = &self.probe {
+            p.leave();
+        }
+    }
+}
+
+/// Takes the exclusive lock on `path`, waiting for whoever holds it until
+/// `give_up` is set. `None` when given up.
+fn take_folder_lock(path: &Path, give_up: &AtomicBool) -> Result<Option<FolderLock>, String> {
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(path)
+        .map_err(|e| format!("the node's folder lock: {e}"))?;
+    loop {
+        match file.try_lock() {
+            Ok(()) => {
+                return Ok(Some(FolderLock {
+                    _file: file,
+                    #[cfg(test)]
+                    probe: None,
+                }))
+            }
+            Err(fs::TryLockError::WouldBlock) => {
+                if give_up.load(Ordering::SeqCst) {
+                    return Ok(None);
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(fs::TryLockError::Error(e)) => return Err(format!("the node's folder lock: {e}")),
+        }
+    }
 }
 
 /// What a sale's invoice is.
@@ -171,6 +285,33 @@ struct InstShared {
     node: Mutex<Option<Arc<LnNode>>>,
     failed: Mutex<Option<Why>>,
     stopped: AtomicBool,
+    /// A start is in progress: waiting for the folder or building the node.
+    starting: AtomicBool,
+    /// A stop wants the start to end without waiting for the folder any
+    /// longer.
+    give_up: AtomicBool,
+    /// The lock on the node's folder, held until the node has stopped.
+    folder: Mutex<Option<FolderLock>>,
+}
+
+impl InstShared {
+    fn new() -> Self {
+        Self {
+            node: Mutex::new(None),
+            failed: Mutex::new(None),
+            stopped: AtomicBool::new(false),
+            starting: AtomicBool::new(false),
+            give_up: AtomicBool::new(false),
+            folder: Mutex::new(None),
+        }
+    }
+
+    /// The node is fully stopped, or never was: the folder is let go, and
+    /// only then is the instance said to be stopped.
+    fn finish_stop(&self) {
+        lock(&self.folder).take();
+        self.stopped.store(true, Ordering::SeqCst);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,6 +331,13 @@ struct Instance {
     close_begun_at: Option<u64>,
     /// The last time a sweep was tried.
     sweep_tried_at: Option<u64>,
+    /// The hash of the wallet description the node was started with.
+    wallet: [u8; 32],
+    /// The transactions of the node's output sweeper seen when the sweep
+    /// address was taken; a new one has paid the address.
+    spends_seen: Option<Vec<[u8; 32]>>,
+    /// The index the node's output sweeper was last told to pay to.
+    pointed: Option<u32>,
     /// The node has been told to stop for good, to delete the seed.
     finishing: bool,
 }
@@ -221,9 +369,13 @@ pub struct ShopLn {
     network: Network,
     driver: DriverConfig,
     tor_on: bool,
-    wallet: Option<(String, u32)>,
     config: ShopLnConfig,
     shared: Arc<Shared>,
+    /// The book is there and did not read: nothing is started or written
+    /// until it does, and the seed is kept.
+    book_error: Option<String>,
+    /// Why the node does not sweep, when it does not.
+    sweep_blocked: Option<Why>,
     seed: Option<SeedRecord>,
     seed_wiped: bool,
     inst: Option<Instance>,
@@ -240,19 +392,27 @@ pub struct ShopLn {
     /// not tried at every pump.
     last_try: Option<u64>,
     dir: PathBuf,
+    #[cfg(test)]
+    probe: Option<Arc<tests::Probe>>,
+    #[cfg(test)]
+    start_delay: Duration,
 }
 
 impl ShopLn {
     /// Reads the book and the seed record the app handed over. A seed record
-    /// that does not read, or a book that does not, is noted and left out:
-    /// nothing is started from it.
+    /// that does not read is noted and left out. A book that is there and
+    /// does not read is an error state: no node is started and the seed is
+    /// kept.
     pub fn new(mut args: ShopLnArgs) -> Self {
         let dir = args.dir.join("shop-lightning");
         let mut notes = Vec::new();
-        let book = Book::load(&dir).unwrap_or_else(|e| {
-            notes.push(format!("SL-77: {e}"));
-            Book::default()
-        });
+        let (book, book_error) = match Book::load(&dir) {
+            Ok(book) => (book, None),
+            Err(e) => {
+                notes.push(format!("SL-77: {e}"));
+                (Book::default(), Some(e))
+            }
+        };
         let seed = args.config.seed_record.take().and_then(|bytes| {
             SeedRecord::from_bytes(&bytes)
                 .map_err(|e| notes.push(format!("SL-76: the stored Lightning key: {e}")))
@@ -263,12 +423,13 @@ impl ShopLn {
             network: args.network,
             driver: args.driver,
             tor_on: args.tor_on,
-            wallet: args.wallet,
             config: args.config,
             shared: Arc::new(Shared {
                 dir: dir.clone(),
                 book: Mutex::new(book),
             }),
+            book_error,
+            sweep_blocked: None,
             seed,
             seed_wiped: false,
             inst: None,
@@ -280,6 +441,10 @@ impl ShopLn {
             blocked: None,
             last_try: None,
             dir,
+            #[cfg(test)]
+            probe: None,
+            #[cfg(test)]
+            start_delay: Duration::ZERO,
         }
     }
 
@@ -317,48 +482,66 @@ impl ShopLn {
         text: &str,
         settings: &Settings,
         now: u64,
+        src: &mut dyn SweepSource,
     ) -> Result<Vec<u8>, SeedNotTaken> {
         let record = take_seed(text, settings, &self.me, self.seed.is_some())?;
         let bytes = record.to_bytes();
         self.seed = Some(record);
         self.seed_wiped = false;
         self.last_try = None;
-        self.reconcile(settings, now);
+        self.reconcile(settings, now, src);
         Ok(bytes)
     }
 
     /// SL-70, SL-72, SL-77: bring the instance to what the settings in force
     /// say. Called at every pump; it does no waiting.
-    pub fn reconcile(&mut self, settings: &Settings, now: u64) {
+    pub fn reconcile(&mut self, settings: &Settings, now: u64, src: &mut dyn SweepSource) {
         let want = match role(settings, &self.me) {
             Role::Here(sl) => Some(*sl),
             _ => None,
         };
         self.named = want.is_some();
+        // SL-33: the wallet is read from the counter at every pump. A node
+        // that runs with another wallet is stopped and started again.
+        let wallet = src.wallet().map(|w| wallet_hash(&w));
+        let wallet_changed = |inst: &Instance| wallet.is_some_and(|w| w != inst.wallet);
         enum Do {
             Nothing,
             Restart,
             Close,
         }
         let act = match (&self.inst, want) {
-            (Some(inst), Some(w)) if inst.phase == Phase::Serving && w == inst.sl => Do::Nothing,
+            (Some(inst), Some(w))
+                if inst.phase == Phase::Serving && w == inst.sl && !wallet_changed(inst) =>
+            {
+                Do::Nothing
+            }
             (Some(inst), Some(w))
                 if inst.phase == Phase::Serving
                     && w.counter == inst.sl.counter
                     && w.node_id == inst.sl.node_id =>
             {
-                // The same node with other terms: stop it, start it again.
+                // The same node with other terms or another wallet: stop it,
+                // start it again.
                 Do::Restart
             }
             // SL-77: off, or another counter, or another node.
             (Some(inst), _) if inst.phase == Phase::Serving => Do::Close,
+            (Some(inst), _) if inst.phase == Phase::Closing && wallet_changed(inst) => Do::Restart,
             _ => Do::Nothing,
         };
         match act {
             Do::Nothing => {}
             Do::Restart => {
+                let closing = self
+                    .inst
+                    .as_ref()
+                    .is_some_and(|i| i.phase == Phase::Closing);
                 if let Some(inst) = &mut self.inst {
                     inst.phase = Phase::Stopping;
+                }
+                if closing {
+                    self.slots.clear();
                 }
                 self.stop_instance_task();
             }
@@ -369,14 +552,14 @@ impl ShopLn {
                 self.slots.clear();
             }
         }
-        self.advance(now);
+        self.advance(now, src);
         if self.inst.is_none() {
-            self.start_from_settings(want, now);
+            self.start_from_settings(want, now, src);
         }
     }
 
     /// The part of a reconcile that moves a running instance on.
-    fn advance(&mut self, now: u64) {
+    fn advance(&mut self, now: u64, src: &mut dyn SweepSource) {
         let Some(inst) = &self.inst else {
             return;
         };
@@ -389,10 +572,13 @@ impl ShopLn {
             }
             Phase::Serving | Phase::Closing => {
                 self.note_failed(now);
-                self.retry_start(now);
+                self.retry_start(now, src);
+                let Some(node) = self.node() else {
+                    return;
+                };
                 match self.inst.as_ref().map(|i| i.phase) {
-                    Some(Phase::Serving) => self.sweep(now),
-                    Some(Phase::Closing) => self.close(now),
+                    Some(Phase::Serving) => self.sweep(&node, now, src),
+                    Some(Phase::Closing) => self.close(&node, now, src),
                     _ => {}
                 }
             }
@@ -400,7 +586,7 @@ impl ShopLn {
     }
 
     /// Starts again a node that did not start, after [`RESTART_SECS`].
-    fn retry_start(&mut self, now: u64) {
+    fn retry_start(&mut self, now: u64, src: &mut dyn SweepSource) {
         let Some(inst) = &mut self.inst else {
             return;
         };
@@ -414,8 +600,13 @@ impl ShopLn {
         let shared = Arc::clone(&inst.shared);
         inst.failed_at = None;
         *lock(&shared.failed) = None;
-        match self.prepare(&sl) {
-            Ok(config) => self.spawn_start(config, shared),
+        match self.prepare(&sl, src) {
+            Ok((config, wallet)) => {
+                if let Some(inst) = &mut self.inst {
+                    inst.wallet = wallet;
+                }
+                self.spawn_start(config, shared);
+            }
             Err(why) => {
                 *lock(&shared.failed) = Some(why);
             }
@@ -423,7 +614,35 @@ impl ShopLn {
     }
 
     /// With no instance: make one, or clean up what a finished one left.
-    fn start_from_settings(&mut self, want: Option<ShopLightning>, now: u64) {
+    fn start_from_settings(
+        &mut self,
+        want: Option<ShopLightning>,
+        now: u64,
+        src: &mut dyn SweepSource,
+    ) {
+        // A book that did not read is read again from time to time; until it
+        // does, nothing is started and the seed is kept.
+        if self.book_error.is_some() {
+            if self
+                .last_try
+                .is_some_and(|t| now < t.saturating_add(RESTART_SECS))
+            {
+                return;
+            }
+            self.last_try = Some(now);
+            match Book::load(&self.dir) {
+                Ok(book) => {
+                    *lock(&self.shared.book) = book;
+                    self.book_error = None;
+                    self.last_try = None;
+                }
+                Err(e) => {
+                    self.blocked = Some(Why::NotStarted(e.clone()));
+                    self.book_error = Some(e);
+                    return;
+                }
+            }
+        }
         let plan = lock(&self.shared.book).plan;
         let target = match (want, plan) {
             // The settings name this node: start it, when the seed is there
@@ -435,15 +654,10 @@ impl ShopLn {
                 }
                 Some(seed) if seed.node_id() == sl.node_id => Some((sl, Phase::Serving)),
                 // A seed of another node is still held: the old node is
-                // closed first (SL-13, SL-77).
-                Some(_) => match plan {
-                    Some(old) => Some((old, Phase::Closing)),
-                    None => {
-                        self.wipe_seed();
-                        self.blocked = Some(Why::NoSeed);
-                        return;
-                    }
-                },
+                // closed first (SL-13, SL-77). Its seed is deleted only when
+                // the running node has nothing left, never because no plan
+                // is kept.
+                Some(seed) => Some((plan.unwrap_or_else(|| self.plan_of(seed)), Phase::Closing)),
             },
             // The settings do not name it, and a node was run: close it from
             // the plan the book kept (SL-77).
@@ -454,12 +668,13 @@ impl ShopLn {
                 self.forget_plan();
                 None
             }
-            // A seed that never ran a node is deleted at once.
-            (None, None) if self.seed.is_some() => {
-                self.wipe_seed();
-                None
-            }
-            (None, None) => None,
+            // A seed with no plan: the book may have been lost with channels
+            // open, so a node is started to find out what is left, and the
+            // seed is deleted only when that node reports nothing.
+            (None, None) => self
+                .seed
+                .as_ref()
+                .map(|seed| (self.plan_of(seed), Phase::Closing)),
         };
         let Some((sl, phase)) = target else {
             self.blocked = None;
@@ -472,14 +687,36 @@ impl ShopLn {
             return;
         }
         self.last_try = Some(now);
-        self.begin(sl, phase);
+        self.begin(sl, phase, src);
+    }
+
+    /// The terms to start a node of `seed` from when the book holds none:
+    /// enough to run it and close its channels. The provider is not
+    /// reachable on purpose (the discard port of this machine); nothing is
+    /// opened or received on such a node.
+    fn plan_of(&self, seed: &SeedRecord) -> ShopLightning {
+        let second_device = self
+            .config
+            .relay
+            .as_ref()
+            .and_then(|h| h.device())
+            .unwrap_or(self.me);
+        ShopLightning {
+            counter: self.me,
+            node_id: seed.node_id(),
+            second_device,
+            provider_node_id: seed.node_id(),
+            provider_addr: SocketAddr::from(([127, 0, 0, 1], 9)),
+            cap_sats: 0,
+            max_opening_fee_sats: 0,
+        }
     }
 
     /// Makes an instance of `sl` and starts its node. A start that cannot be
     /// made leaves the reason in `blocked` and no instance.
-    fn begin(&mut self, sl: ShopLightning, phase: Phase) {
-        let config = match self.prepare(&sl) {
-            Ok(config) => config,
+    fn begin(&mut self, sl: ShopLightning, phase: Phase, src: &mut dyn SweepSource) {
+        let (config, wallet) = match self.prepare(&sl, src) {
+            Ok(prepared) => prepared,
             Err(why) => {
                 self.blocked = Some(why);
                 return;
@@ -500,11 +737,7 @@ impl ShopLn {
             }
         }
         self.blocked = None;
-        let shared = Arc::new(InstShared {
-            node: Mutex::new(None),
-            failed: Mutex::new(None),
-            stopped: AtomicBool::new(false),
-        });
+        let shared = Arc::new(InstShared::new());
         self.spawn_start(config, Arc::clone(&shared));
         self.inst = Some(Instance {
             sl,
@@ -513,13 +746,116 @@ impl ShopLn {
             failed_at: None,
             close_begun_at: None,
             sweep_tried_at: None,
+            wallet,
+            spends_seen: None,
+            pointed: None,
             finishing: false,
         });
     }
 
-    /// The checks of SL-60, SL-73 and SL-33, and the node's configuration.
-    /// `Err` is the reason the node is not started.
-    fn prepare(&self, sl: &ShopLightning) -> Result<LnConfig, Why> {
+    /// The address index the sweeps, the closes and the node's output sweeper
+    /// pay to now (SL-33): the one the book keeps for this wallet, or a new
+    /// one from the counter's ranges, written to the book before it is used.
+    fn sweep_address(&mut self, src: &mut dyn SweepSource) -> Result<(String, u32), Why> {
+        let wallet = src.wallet().ok_or(Why::NoWallet)?;
+        let hash = wallet_hash(&wallet);
+        let mut book = lock(&self.shared.book);
+        if let Some(a) = book.sweep.filter(|a| a.wallet == hash) {
+            return Ok((wallet, a.index));
+        }
+        let index = match src.take_index() {
+            Ok(Some(index)) => index,
+            Ok(None) => return Err(Why::NoSweepAddress),
+            Err(e) => return Err(Why::NotStarted(e)),
+        };
+        book.sweep = Some(SweepAddress {
+            wallet: hash,
+            index,
+        });
+        if let Err(e) = self.shared.save(&book) {
+            // Not written: the index is not used, and a new one is taken at
+            // the next try.
+            book.sweep = None;
+            self.notes
+                .push(format!("SL-77: the book was not written: {e}"));
+            return Err(Why::NotStarted(e.to_string()));
+        }
+        Ok((wallet, index))
+    }
+
+    /// A transaction has paid the sweep address: the book moves on to a new
+    /// one, and the node's output sweeper is told of it.
+    fn address_paid(&mut self, ops: &dyn NodeOps, src: &mut dyn SweepSource) {
+        {
+            let mut book = lock(&self.shared.book);
+            book.sweep = None;
+            if let Err(e) = self.shared.save(&book) {
+                self.notes
+                    .push(format!("SL-77: the book was not written: {e}"));
+            }
+        }
+        if let Some(inst) = &mut self.inst {
+            inst.spends_seen = Some(ops.sweeper_spends());
+        }
+        self.point_sweeper(ops, src);
+    }
+
+    /// The node's output sweeper pays to the book's sweep address. A
+    /// transaction of the sweeper that was not there when the address was
+    /// taken has paid it, and the book moves on.
+    fn point_sweeper(&mut self, ops: &dyn NodeOps, src: &mut dyn SweepSource) {
+        let spends = ops.sweeper_spends();
+        let paid = match self.inst.as_mut() {
+            Some(inst) => match &inst.spends_seen {
+                Some(seen) => spends.iter().any(|t| !seen.contains(t)),
+                None => {
+                    inst.spends_seen = Some(spends.clone());
+                    false
+                }
+            },
+            None => return,
+        };
+        if paid {
+            // Taken first, so that the paid address is not reused.
+            let mut book = lock(&self.shared.book);
+            book.sweep = None;
+            if let Err(e) = self.shared.save(&book) {
+                self.notes
+                    .push(format!("SL-77: the book was not written: {e}"));
+            }
+            drop(book);
+            if let Some(inst) = &mut self.inst {
+                inst.spends_seen = Some(spends);
+            }
+        }
+        match self.sweep_address(src) {
+            Ok((_, index)) => {
+                self.sweep_blocked = None;
+                let Some(rt) = self.rt.as_ref() else {
+                    return;
+                };
+                let Some(inst) = &mut self.inst else {
+                    return;
+                };
+                if ops.sweeper_index() == index {
+                    inst.pointed = Some(index);
+                } else if inst.pointed != Some(index) {
+                    inst.pointed = Some(index);
+                    ops.set_sweeper_index(index, rt);
+                }
+            }
+            Err(why) => self.sweep_blocked = Some(why),
+        }
+    }
+
+    /// The checks of SL-60, SL-73 and SL-33, and the node's configuration:
+    /// with the hash of the wallet it was made for. `Err` is the reason the
+    /// node is not started.
+    fn prepare(
+        &mut self,
+        sl: &ShopLightning,
+        src: &mut dyn SweepSource,
+    ) -> Result<(LnConfig, [u8; 32]), Why> {
         if self.network == Network::Bitcoin && !MAINNET_ALLOWED {
             return Err(Why::Mainnet);
         }
@@ -527,7 +863,9 @@ impl ShopLn {
         if seed.node_id() != sl.node_id {
             return Err(Why::NoSeed);
         }
-        let (wallet, sweep_index) = self.wallet.clone().ok_or(Why::NoWallet)?;
+        if src.wallet().is_none() {
+            return Err(Why::NoWallet);
+        }
         let hint = self.config.relay.clone().ok_or(Why::NotTheBox)?;
         let relay = hint.device().ok_or(Why::NotTheBox)?;
         if relay != sl.second_device {
@@ -549,47 +887,96 @@ impl ShopLn {
         }
         let device = RelayDevice::open(&self.dir, identity, relay, route)
             .map_err(|e| Why::NotStarted(format!("the numbers of the Store messages: {e}")))?;
-        Ok(LnConfig {
-            network: self.network,
-            seed: NodeSeed(*seed.seed()),
-            data_dir: self.dir.join(NODE_DIR),
-            chain: ChainSource::Filters(FilterConfig {
-                dir: self.dir.join(CHAIN_DIR),
-                driver: driver.clone(),
-            }),
-            tor: driver.proxy,
-            device: Arc::new(device),
-            provider: ProviderConfig {
-                node_id: provider,
-                addr: sl.provider_addr,
-                token: None,
-                zero_conf: true,
+        // Last, so that an index is not taken for a node that is not
+        // started.
+        let (wallet, sweep_index) = self.sweep_address(src)?;
+        self.sweep_blocked = None;
+        let seed = self.seed.as_ref().ok_or(Why::NoSeed)?;
+        let hash = wallet_hash(&wallet);
+        Ok((
+            LnConfig {
+                network: self.network,
+                seed: NodeSeed(*seed.seed()),
+                data_dir: self.dir.join(NODE_DIR),
+                chain: ChainSource::Filters(FilterConfig {
+                    dir: self.dir.join(CHAIN_DIR),
+                    driver: driver.clone(),
+                }),
+                tor: driver.proxy,
+                device: Arc::new(device),
+                provider: ProviderConfig {
+                    node_id: provider,
+                    addr: sl.provider_addr,
+                    token: None,
+                    zero_conf: true,
+                },
+                max_opening_fee_msat: sl.max_opening_fee_sats.saturating_mul(1000),
+                start_from: StartFrom::Newer,
+                wallet,
+                sweep_index,
             },
-            max_opening_fee_msat: sl.max_opening_fee_sats.saturating_mul(1000),
-            start_from: StartFrom::Newer,
-            wallet,
-            sweep_index,
-        })
+            hash,
+        ))
     }
 
-    /// Starts the node as a task.
+    /// Starts the node as a task. The node's folder is locked first, and the
+    /// lock is kept until the node has stopped.
     fn spawn_start(&mut self, config: LnConfig, shared: Arc<InstShared>) {
         let Some(handle) = self.rt().map(|rt| rt.handle().clone()) else {
             *lock(&shared.failed) = Some(Why::NotStarted("no runtime".to_string()));
             return;
         };
+        let lock_path = self.dir.join(FOLDER_LOCK_FILE);
+        #[cfg(test)]
+        let (probe, delay) = (self.probe.clone(), self.start_delay);
+        shared.starting.store(true, Ordering::SeqCst);
         // The library's start is a future that cannot move between threads,
         // so a thread of its own drives it on the runtime.
         let spawned = std::thread::Builder::new()
             .name("shop-lightning-start".to_string())
             .spawn({
                 let shared = Arc::clone(&shared);
-                move || match handle.block_on(LnNode::start(config)) {
-                    Ok(node) => *lock(&shared.node) = Some(Arc::new(node)),
-                    Err(e) => *lock(&shared.failed) = Some(why_not_started(e)),
+                move || {
+                    match take_folder_lock(&lock_path, &shared.give_up) {
+                        Ok(Some(mut held)) => {
+                            #[cfg(test)]
+                            {
+                                if let Some(p) = &probe {
+                                    p.enter();
+                                    held.probe = Some(Arc::clone(p));
+                                }
+                                std::thread::sleep(delay);
+                            }
+                            #[cfg(not(test))]
+                            let _ = &mut held;
+                            *lock(&shared.folder) = Some(held);
+                        }
+                        Ok(None) => {
+                            *lock(&shared.failed) =
+                                Some(Why::NotStarted("the node's folder is in use".to_string()));
+                            shared.starting.store(false, Ordering::SeqCst);
+                            return;
+                        }
+                        Err(e) => {
+                            *lock(&shared.failed) = Some(Why::NotStarted(e));
+                            shared.starting.store(false, Ordering::SeqCst);
+                            return;
+                        }
+                    }
+                    match handle.block_on(LnNode::start(config)) {
+                        Ok(node) => *lock(&shared.node) = Some(Arc::new(node)),
+                        Err(e) => {
+                            // Nothing runs: the folder is let go for the next
+                            // start.
+                            lock(&shared.folder).take();
+                            *lock(&shared.failed) = Some(why_not_started(e));
+                        }
+                    }
+                    shared.starting.store(false, Ordering::SeqCst);
                 }
             });
         if let Err(e) = spawned {
+            shared.starting.store(false, Ordering::SeqCst);
             *lock(&shared.failed) = Some(Why::NotStarted(e.to_string()));
         }
     }
@@ -617,10 +1004,8 @@ impl ShopLn {
     }
 
     /// SL-33: the sweep, when the balance is over the cap.
-    fn sweep(&mut self, now: u64) {
-        let Some(node) = self.node() else {
-            return;
-        };
+    fn sweep(&mut self, ops: &dyn NodeOps, now: u64, src: &mut dyn SweepSource) {
+        self.point_sweeper(ops, src);
         let Some(inst) = &mut self.inst else {
             return;
         };
@@ -630,19 +1015,30 @@ impl ShopLn {
         {
             return;
         }
-        let Some(amount) = sweep_amount_sat(node.balance_sat(), inst.sl.cap_sats) else {
+        let Some(amount) = sweep_amount_sat(ops.balance_sat(), inst.sl.cap_sats) else {
             return;
         };
         inst.sweep_tried_at = Some(now);
-        let index = self.wallet.as_ref().map_or(0, |(_, i)| *i);
-        match node.sweep(index, amount) {
+        // Each sweep pays an address of its own, and none is a sale's.
+        let index = match self.sweep_address(src) {
+            Ok((_, index)) => index,
+            Err(why) => {
+                self.notes.push(format!("SL-33: no sweep: {why:?}"));
+                self.sweep_blocked = Some(why);
+                return;
+            }
+        };
+        match ops.sweep(index, amount) {
             Ok(()) => {
-                let mut book = lock(&self.shared.book);
-                book.last_sweep_at = now;
-                if let Err(e) = self.shared.save(&book) {
-                    self.notes
-                        .push(format!("SL-77: the book was not written: {e}"));
+                {
+                    let mut book = lock(&self.shared.book);
+                    book.last_sweep_at = now;
+                    if let Err(e) = self.shared.save(&book) {
+                        self.notes
+                            .push(format!("SL-77: the book was not written: {e}"));
+                    }
                 }
+                self.address_paid(ops, src);
             }
             Err(e) => self.notes.push(format!("SL-33: no sweep: {e}")),
         }
@@ -650,12 +1046,9 @@ impl ShopLn {
 
     /// SL-36, SL-77: close every channel, and when none is left, nothing
     /// waits to be swept and every write has reached the Box, delete the
-    /// seed.
-    fn close(&mut self, now: u64) {
-        let Some(node) = self.node() else {
-            return;
-        };
-        let index = self.wallet.as_ref().map_or(0, |(_, i)| *i);
+    /// seed. The node must be running and report this itself.
+    fn close(&mut self, node: &Arc<LnNode>, now: u64, src: &mut dyn SweepSource) {
+        self.point_sweeper(node, src);
         let Some(inst) = &mut self.inst else {
             return;
         };
@@ -674,10 +1067,22 @@ impl ShopLn {
             .is_none_or(|at| status.channels > 0 && now >= at.saturating_add(RESTART_SECS * 6));
         if begin && status.channels > 0 {
             inst.close_begun_at = Some(now);
+            let index = match self.sweep_address(src) {
+                Ok((_, index)) => index,
+                Err(why) => {
+                    self.notes.push(format!("SL-36: no close: {why:?}"));
+                    self.sweep_blocked = Some(why);
+                    return;
+                }
+            };
             match node.close_all(index) {
-                Ok(n) => self
-                    .notes
-                    .push(format!("SL-36: closing {n} Lightning channels")),
+                Ok(n) => {
+                    self.notes
+                        .push(format!("SL-36: closing {n} Lightning channels"));
+                    if n > 0 {
+                        self.address_paid(node, src);
+                    }
+                }
                 Err(e) => self.notes.push(format!("SL-36: the close: {e}")),
             }
             return;
@@ -692,31 +1097,42 @@ impl ShopLn {
         if done {
             inst.finishing = true;
             let shared = Arc::clone(&inst.shared);
+            let node = Arc::clone(node);
             if let Some(rt) = self.rt.as_ref() {
                 rt.spawn(async move {
                     node.stop().await;
-                    shared.stopped.store(true, Ordering::SeqCst);
+                    shared.finish_stop();
                 });
             }
         }
     }
 
-    /// Stops the node of the instance in the background.
+    /// Stops the node of the instance in the background. A stop while the
+    /// node is still starting waits for the start to end and then stops the
+    /// node it made; the instance is stopped only when that is done and the
+    /// folder is let go.
     fn stop_instance_task(&mut self) {
         let Some(inst) = &self.inst else {
             return;
         };
         let shared = Arc::clone(&inst.shared);
-        let node = lock(&shared.node).clone();
-        match (node, self.rt.as_ref()) {
-            (Some(node), Some(rt)) => {
-                rt.spawn(async move {
-                    node.stop().await;
-                    shared.stopped.store(true, Ordering::SeqCst);
-                });
-            }
-            _ => shared.stopped.store(true, Ordering::SeqCst),
+        let Some(rt) = self.rt.as_ref() else {
+            shared.finish_stop();
+            return;
+        };
+        if shared.starting.load(Ordering::SeqCst) {
+            shared.give_up.store(true, Ordering::SeqCst);
         }
+        rt.spawn(async move {
+            while shared.starting.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            let node = lock(&shared.node).clone();
+            if let Some(node) = node {
+                node.stop().await;
+            }
+            shared.finish_stop();
+        });
     }
 
     /// SL-12, SL-77: the seed is deleted from the counter. The app deletes
@@ -769,6 +1185,11 @@ impl ShopLn {
                     && now >= slot.asked_at.saturating_add(RETRY_OFFER_SECS)
             }
             _ => {
+                // A sale quoted again asks for a new invoice; the old one is
+                // of no use.
+                if self.slots.contains_key(&index) {
+                    self.drop_invoices(index);
+                }
                 self.slots.insert(
                     index,
                     SaleSlot {
@@ -825,17 +1246,51 @@ impl ShopLn {
         });
     }
 
-    /// A sale is over: its invoice is no longer asked for or shown.
+    /// A sale is over or cancelled: its invoice is no longer asked for or
+    /// shown, it leaves the book and the node fails a payment to it back.
     pub fn sale_closed(&mut self, index: u32) {
         self.slots.remove(&index);
+        self.drop_invoices(index);
     }
 
-    /// SL-21: the sales the node says are paid, after both copies of the
-    /// state are stored. Each comes again at every call until
-    /// [`ShopLn::recorded`] says the counter has it.
-    pub fn take_paid(&mut self, now: u64) -> Vec<PaidSale> {
+    /// A sale is quoted again: its invoice is of no use, and the sale asks
+    /// for a new one.
+    pub fn sale_requoted(&mut self, index: u32) {
+        self.slots.remove(&index);
+        self.drop_invoices(index);
+    }
+
+    /// Takes the invoices of a sale out of the book, and tells the node to
+    /// fail a payment to them back. An invoice whose payment is claimed and
+    /// waits to be recorded stays.
+    fn drop_invoices(&mut self, index: u32) {
+        self.drain_paid();
+        let keep: Vec<[u8; 32]> = self.pending.iter().map(|p| p.payment_hash).collect();
+        let gone = {
+            let mut book = lock(&self.shared.book);
+            let gone = book.drop_sale(index, &keep);
+            if !gone.is_empty() {
+                if let Err(e) = self.shared.save(&book) {
+                    self.notes
+                        .push(format!("SL-77: the book was not written: {e}"));
+                }
+            }
+            gone
+        };
+        if let (false, Some(node), Some(rt)) = (gone.is_empty(), self.node(), self.rt.as_ref()) {
+            rt.spawn(async move {
+                for hash in gone {
+                    let _ = node.cancel_invoice(hash).await;
+                }
+            });
+        }
+    }
+
+    /// Takes what the node has reported paid into the list of those waiting
+    /// to be recorded.
+    fn drain_paid(&mut self) {
         let Some(node) = self.node() else {
-            return Vec::new();
+            return;
         };
         while let Some(p) = node.try_paid() {
             if !self
@@ -846,6 +1301,24 @@ impl ShopLn {
                 self.pending.push(p);
             }
         }
+    }
+
+    /// SL-21: the sales the node says are paid, after both copies of the
+    /// state are stored. Each comes again at every call until
+    /// [`ShopLn::recorded`] says the counter has it.
+    pub fn take_paid(&mut self, now: u64) -> Vec<PaidSale> {
+        if self.node().is_none() {
+            return Vec::new();
+        }
+        self.drain_paid();
+        self.settle_pending(now)
+    }
+
+    /// The paid events waiting, as sales to record. What a sale is credited
+    /// is what arrived plus what the provider skimmed off that payment (SL-29).
+    /// A payment of an invoice the book does not hold is kept in the book as
+    /// one no sale took, and only then acknowledged.
+    fn settle_pending(&mut self, now: u64) -> Vec<PaidSale> {
         {
             let mut book = lock(&self.shared.book);
             book.prune(now);
@@ -860,37 +1333,94 @@ impl ShopLn {
                         sale: e.sale,
                         facts: PaidFacts {
                             payment_hash: p.payment_hash,
-                            amount_received_msat: p.amount_msat.saturating_add(e.opening_fee_msat),
+                            amount_received_msat: p.amount_msat.saturating_add(p.skimmed_msat),
                             settled_at: Some(p.received_unix),
                         },
                     }),
-                    None => unknown.push(p.payment_hash),
+                    None => {
+                        unknown.push((p.payment_hash, p.amount_msat.saturating_add(p.skimmed_msat)))
+                    }
                 }
             }
         }
-        for hash in unknown {
-            self.notes.push(
-                "SL-21: a Lightning payment was claimed for an invoice the counter has no sale \
-                 for"
-                .to_string(),
-            );
-            self.recorded(&hash);
+        for (hash, amount_msat) in unknown {
+            if self.keep_unmatched(None, hash, amount_msat, now) {
+                self.recorded(&hash);
+            }
         }
         out
+    }
+
+    /// SL-21: a claimed payment no sale took is kept in the book, with its
+    /// amount and hash, before the node is told to forget it. `false` when
+    /// it could not be kept: the node still has it.
+    pub fn keep_unmatched(
+        &mut self,
+        sale: Option<u32>,
+        hash: [u8; 32],
+        amount_msat: u64,
+        now: u64,
+    ) -> bool {
+        let mut book = lock(&self.shared.book);
+        let before = book.unmatched.len();
+        if !book.keep_unmatched(Unmatched {
+            payment_hash: hash,
+            sale,
+            amount_msat,
+            at: now,
+        }) {
+            drop(book);
+            self.notes.push(
+                "SL-21: a claimed Lightning payment no sale took could not be kept: the list is \
+                 full"
+                    .to_string(),
+            );
+            return false;
+        }
+        let added = book.unmatched.len() != before;
+        if added {
+            if let Err(e) = self.shared.save(&book) {
+                book.unmatched.pop();
+                drop(book);
+                self.notes
+                    .push(format!("SL-77: the book was not written: {e}"));
+                return false;
+            }
+        }
+        drop(book);
+        if added {
+            self.notes.push(format!(
+                "SL-21: a claimed Lightning payment of {amount_msat} msat was kept: no sale took it"
+            ));
+        }
+        true
     }
 
     /// The counter has recorded the sale of this payment: the node is told,
     /// so that the event is not given again, and the fee is counted (SL-21,
     /// SL-78).
     pub fn recorded(&mut self, hash: &[u8; 32]) {
+        let skimmed_msat = self
+            .pending
+            .iter()
+            .find(|p| &p.payment_hash == hash)
+            .map(|p| p.skimmed_msat);
         self.pending.retain(|p| &p.payment_hash != hash);
         {
             let mut book = lock(&self.shared.book);
-            if let Some(i) = book.invoices.iter().position(|e| &e.payment_hash == hash) {
-                let e = book.invoices.remove(i);
-                book.opening_fees_paid_sats = book
-                    .opening_fees_paid_sats
-                    .saturating_add(e.opening_fee_msat / 1000);
+            let removed = book
+                .invoices
+                .iter()
+                .position(|e| &e.payment_hash == hash)
+                .map(|i| book.invoices.remove(i))
+                .is_some();
+            // The fee counted is what the provider took from this payment,
+            // not what was quoted, and only once.
+            if let Some(skim) = skimmed_msat {
+                book.opening_fees_paid_sats =
+                    book.opening_fees_paid_sats.saturating_add(skim / 1000);
+            }
+            if removed || skimmed_msat.is_some() {
                 if let Err(e) = self.shared.save(&book) {
                     self.notes
                         .push(format!("SL-77: the book was not written: {e}"));
@@ -906,9 +1436,12 @@ impl ShopLn {
     }
 
     /// SL-78: the facts of the report that goes with a check-in. `None` when
-    /// the settings do not name this counter.
+    /// the settings do not name this counter and no seed or node is left.
     pub fn report(&self) -> Option<LightningReport> {
-        if !self.named {
+        // SL-77: while a seed is held the report goes on after the settings
+        // stopped naming the node, with the reason (closing, or what
+        // stopped it), so that a wind-down that stalls is seen.
+        if !self.named && self.seed.is_none() && self.inst.is_none() {
             return None;
         }
         let book = lock(&self.shared.book);
@@ -927,7 +1460,15 @@ impl ShopLn {
             report.balance_sats = node.balance_sat();
             report.receive_room_sats = status.room_msat / 1000;
             report.last_stored_at = status.device.last_stored_unix;
-            report.not_offered = if status.device.state == DeviceState::Away {
+            report.not_offered = if self
+                .inst
+                .as_ref()
+                .is_some_and(|i| i.phase != Phase::Serving)
+                || !self.named
+            {
+                // A node that is closing offers nothing, whatever its state.
+                Why::Closing.not_offered()
+            } else if status.device.state == DeviceState::Away {
                 NotOffered::SecondDeviceAway
             } else if !status.chain_ok {
                 NotOffered::ChainBehind
@@ -942,8 +1483,8 @@ impl ShopLn {
 
     /// What the app reads (SL-41, SL-76, SL-77).
     pub fn status(&self) -> ShopLnStatus {
-        let why = if self.named || self.inst.is_some() {
-            self.offer_blocked()
+        let why = if self.named || self.inst.is_some() || self.seed.is_some() {
+            self.offer_blocked().or_else(|| self.sweep_blocked.clone())
         } else {
             None
         };
@@ -957,10 +1498,23 @@ impl ShopLn {
     /// Stops the node, as the counter stops. Waits for the library's last
     /// writes, a few seconds at most.
     pub fn stop(&mut self) {
-        if let (Some(node), Some(rt)) = (self.node(), self.rt.as_ref()) {
+        if let (Some(inst), Some(rt)) = (self.inst.as_ref(), self.rt.as_ref()) {
+            let shared = Arc::clone(&inst.shared);
+            shared.give_up.store(true, Ordering::SeqCst);
+            // A node that is still starting is waited for, then stopped.
             rt.block_on(async {
-                let _ = tokio::time::timeout(Duration::from_secs(20), node.stop()).await;
+                let _ = tokio::time::timeout(Duration::from_secs(20), async {
+                    while shared.starting.load(Ordering::SeqCst) {
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                    }
+                    let node = lock(&shared.node).clone();
+                    if let Some(node) = node {
+                        node.stop().await;
+                    }
+                })
+                .await;
             });
+            shared.finish_stop();
         }
         if let Some(rt) = self.rt.take() {
             rt.shutdown_background();
@@ -1212,12 +1766,113 @@ mod tests {
         .unwrap()
     }
 
-    fn ln(
-        network: Network,
-        relay: Option<RelayHint>,
-        wallet: Option<(String, u32)>,
-        seed_n: Option<u8>,
-    ) -> ShopLn {
+    /// What the counter gives Shop Lightning in a test: a wallet and the
+    /// next free index of a range.
+    struct Fake {
+        wallet: Option<String>,
+        next: u32,
+        end: u32,
+        taken: Vec<u32>,
+        fail: bool,
+    }
+
+    impl Fake {
+        fn new(wallet: Option<(String, u32)>) -> Self {
+            let (wallet, next) = match wallet {
+                Some((w, i)) => (Some(w), i),
+                None => (None, 0),
+            };
+            Self {
+                wallet,
+                next,
+                end: u32::MAX,
+                taken: Vec::new(),
+                fail: false,
+            }
+        }
+    }
+
+    impl SweepSource for Fake {
+        fn wallet(&self) -> Option<String> {
+            self.wallet.clone()
+        }
+        fn take_index(&mut self) -> Result<Option<u32>, String> {
+            if self.fail {
+                return Err("disk full".to_string());
+            }
+            if self.next >= self.end {
+                return Ok(None);
+            }
+            self.next += 1;
+            self.taken.push(self.next - 1);
+            Ok(Some(self.next - 1))
+        }
+    }
+
+    /// A node that does what the sweep and the close ask, and remembers it.
+    struct FakeNode {
+        balance: u64,
+        swept: Mutex<Vec<u32>>,
+        closed: Mutex<Vec<u32>>,
+        spends: Mutex<Vec<[u8; 32]>>,
+        index: Mutex<u32>,
+    }
+
+    impl FakeNode {
+        fn new(balance: u64) -> Self {
+            Self {
+                balance,
+                swept: Mutex::new(Vec::new()),
+                closed: Mutex::new(Vec::new()),
+                spends: Mutex::new(Vec::new()),
+                index: Mutex::new(0),
+            }
+        }
+    }
+
+    impl NodeOps for FakeNode {
+        fn balance_sat(&self) -> u64 {
+            self.balance
+        }
+        fn sweep(&self, index: u32, _amount_sat: u64) -> Result<(), String> {
+            lock(&self.swept).push(index);
+            Ok(())
+        }
+        fn close_all(&self, index: u32) -> Result<usize, String> {
+            lock(&self.closed).push(index);
+            Ok(1)
+        }
+        fn sweeper_spends(&self) -> Vec<[u8; 32]> {
+            lock(&self.spends).clone()
+        }
+        fn sweeper_index(&self) -> u32 {
+            *lock(&self.index)
+        }
+        fn set_sweeper_index(&self, index: u32, _rt: &Runtime) {
+            *lock(&self.index) = index;
+        }
+    }
+
+    /// Counts the nodes whose folder is held at once.
+    #[derive(Default)]
+    pub(super) struct Probe {
+        live: std::sync::atomic::AtomicUsize,
+        most: std::sync::atomic::AtomicUsize,
+        entered: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Probe {
+        pub(super) fn enter(&self) {
+            let now = self.live.fetch_add(1, Ordering::SeqCst) + 1;
+            self.most.fetch_max(now, Ordering::SeqCst);
+            self.entered.fetch_add(1, Ordering::SeqCst);
+        }
+        pub(super) fn leave(&self) {
+            self.live.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    fn ln(network: Network, relay: Option<RelayHint>, seed_n: Option<u8>) -> ShopLn {
         let dir = std::env::temp_dir().join(format!(
             "shopln-node-{}-{:?}",
             std::process::id(),
@@ -1231,7 +1886,6 @@ mod tests {
             network,
             driver: DriverConfig::new(network, 0),
             tor_on: false,
-            wallet,
             config: ShopLnConfig {
                 seed_record: seed_n.map(|n| SeedRecord::new(seed(n)).to_bytes()),
                 identity: Box::new(|| Some(id(3))),
@@ -1245,38 +1899,63 @@ mod tests {
         let _ = fs::remove_dir_all(l.dir.parent().unwrap_or(&l.dir));
     }
 
+    /// An instance with a node that is not a real one, for the sweep.
+    fn serving(l: &mut ShopLn, wallet: &str) {
+        l.inst = Some(Instance {
+            sl: sl(),
+            phase: Phase::Serving,
+            shared: Arc::new(InstShared::new()),
+            failed_at: None,
+            close_begun_at: None,
+            sweep_tried_at: None,
+            wallet: wallet_hash(wallet),
+            spends_seen: None,
+            pointed: None,
+            finishing: false,
+        });
+        let _ = l.rt();
+    }
+
     #[test]
     fn sl_60_the_counter_does_not_start_the_node_on_the_real_network() {
-        let l = ln(Network::Bitcoin, Some(hint(8)), Some(wallet()), Some(1));
-        assert_eq!(l.prepare(&sl()).err(), Some(Why::Mainnet));
+        let mut l = ln(Network::Bitcoin, Some(hint(8)), Some(1));
+        let mut src = Fake::new(Some(wallet()));
+        assert_eq!(l.prepare(&sl(), &mut src).err(), Some(Why::Mainnet));
         cleanup(&l);
     }
 
     #[test]
     fn sl_72_a_node_whose_seed_does_not_give_the_pinned_id_does_not_start() {
-        let l = ln(Network::Regtest, Some(hint(8)), Some(wallet()), Some(2));
-        assert_eq!(l.prepare(&sl()).err(), Some(Why::NoSeed));
-        let none = ln(Network::Regtest, Some(hint(8)), Some(wallet()), None);
-        assert_eq!(none.prepare(&sl()).err(), Some(Why::NoSeed));
+        let mut src = Fake::new(Some(wallet()));
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(2));
+        assert_eq!(l.prepare(&sl(), &mut src).err(), Some(Why::NoSeed));
+        let mut none = ln(Network::Regtest, Some(hint(8)), None);
+        assert_eq!(none.prepare(&sl(), &mut src).err(), Some(Why::NoSeed));
         cleanup(&l);
         cleanup(&none);
     }
 
     #[test]
     fn sl_73_the_relay_must_be_the_box_named_as_the_second_device() {
+        let mut src = Fake::new(Some(wallet()));
         // The relay is device 9, the second device is 8.
-        let l = ln(Network::Regtest, Some(hint(9)), Some(wallet()), Some(1));
-        assert_eq!(l.prepare(&sl()).err(), Some(Why::NotTheBox));
-        let none = ln(Network::Regtest, None, Some(wallet()), Some(1));
-        assert_eq!(none.prepare(&sl()).err(), Some(Why::NotTheBox));
+        let mut l = ln(Network::Regtest, Some(hint(9)), Some(1));
+        assert_eq!(l.prepare(&sl(), &mut src).err(), Some(Why::NotTheBox));
+        let mut none = ln(Network::Regtest, None, Some(1));
+        assert_eq!(none.prepare(&sl(), &mut src).err(), Some(Why::NotTheBox));
+        assert!(
+            src.taken.is_empty(),
+            "no index is taken for a node that does not start"
+        );
         cleanup(&l);
         cleanup(&none);
     }
 
     #[test]
     fn sl_33_a_counter_with_no_description_of_the_wallet_does_not_start() {
-        let l = ln(Network::Regtest, Some(hint(8)), None, Some(1));
-        assert_eq!(l.prepare(&sl()).err(), Some(Why::NoWallet));
+        let mut src = Fake::new(None);
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        assert_eq!(l.prepare(&sl(), &mut src).err(), Some(Why::NoWallet));
         cleanup(&l);
     }
 
@@ -1290,18 +1969,29 @@ mod tests {
             id(8).device_id().to_bytes(),
         );
         if let Ok(onion) = onion {
-            let l = ln(Network::Regtest, Some(onion), Some(wallet()), Some(1));
-            assert_eq!(l.prepare(&sl()).err(), Some(Why::NoRoute));
+            let mut src = Fake::new(Some(wallet()));
+            let mut l = ln(Network::Regtest, Some(onion), Some(1));
+            assert_eq!(l.prepare(&sl(), &mut src).err(), Some(Why::NoRoute));
             cleanup(&l);
         }
     }
 
     #[test]
     fn sl_77_a_start_that_can_be_made_is_made_with_the_settings_terms_in_millisatoshis() {
-        let l = ln(Network::Regtest, Some(hint(8)), Some(wallet()), Some(1));
-        let c = l.prepare(&sl()).unwrap();
+        let mut src = Fake::new(Some(wallet()));
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        let (c, hash) = l.prepare(&sl(), &mut src).unwrap();
         assert_eq!(c.max_opening_fee_msat, 3_000_000);
+        // The index is the counter's next free one, and the book keeps it.
         assert_eq!(c.sweep_index, 19);
+        assert_eq!(src.taken, vec![19]);
+        assert_eq!(
+            lock(&l.shared.book).sweep,
+            Some(SweepAddress {
+                wallet: hash,
+                index: 19
+            })
+        );
         assert_eq!(c.provider.addr, sl().provider_addr);
         assert_eq!(c.provider.node_id.serialize(), sl().provider_node_id);
         assert_eq!(c.network, Network::Regtest);
@@ -1309,6 +1999,10 @@ mod tests {
         assert_eq!(c.seed.0, seed(1));
         assert!(matches!(c.chain, ChainSource::Filters(_)));
         let _ = LIGHTNING_NODE_BYTES;
+        // A start again does not take another index.
+        let (again, _) = l.prepare(&sl(), &mut src).unwrap();
+        assert_eq!(again.sweep_index, 19);
+        assert_eq!(src.taken, vec![19]);
         cleanup(&l);
     }
 
@@ -1323,5 +2017,363 @@ mod tests {
             "a write has not reached the Box"
         );
         assert!(!close_done(0, 0, 0, 0, false), "the Box is away");
+    }
+
+    #[test]
+    fn sl_33_two_sweeps_use_two_addresses_and_none_is_reused() {
+        let (w, first) = wallet();
+        let mut src = Fake::new(Some((w.clone(), first)));
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        serving(&mut l, &w);
+        let node = FakeNode::new(300_000);
+        l.sweep(&node, 1_000, &mut src);
+        l.sweep(&node, 1_000 + SWEEP_EVERY_SECS, &mut src);
+        let swept = lock(&node.swept).clone();
+        assert_eq!(swept.len(), 2);
+        assert_ne!(swept[0], swept[1]);
+        // Each came from the counter's ranges, and the output sweeper was
+        // moved on to a third.
+        assert_eq!(src.taken, vec![first, first + 1, first + 2]);
+        assert_eq!(swept, vec![first, first + 1]);
+        assert_eq!(*lock(&node.index), first + 2);
+        assert_eq!(lock(&l.shared.book).sweep.unwrap().index, first + 2);
+        assert_eq!(lock(&l.shared.book).last_sweep_at, 1_000 + SWEEP_EVERY_SECS);
+        cleanup(&l);
+    }
+
+    #[test]
+    fn sl_33_a_close_pays_an_address_of_its_own_and_the_sweeper_moves_on_after_a_spend() {
+        let (w, first) = wallet();
+        let mut src = Fake::new(Some((w.clone(), first)));
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        serving(&mut l, &w);
+        let node = FakeNode::new(0);
+        l.point_sweeper(&node, &mut src);
+        assert_eq!(*lock(&node.index), first);
+        // The sweeper spent an output to that address: the next is new.
+        lock(&node.spends).push([5; 32]);
+        l.point_sweeper(&node, &mut src);
+        assert_eq!(*lock(&node.index), first + 1);
+        // The same spend is not counted again.
+        l.point_sweeper(&node, &mut src);
+        assert_eq!(*lock(&node.index), first + 1);
+        assert_eq!(src.taken, vec![first, first + 1]);
+        cleanup(&l);
+    }
+
+    #[test]
+    fn sl_33_a_switch_of_wallet_stops_the_node_and_the_next_index_is_of_the_new_wallet() {
+        let (w, first) = wallet();
+        let mut src = Fake::new(Some((w.clone(), first)));
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        serving(&mut l, &w);
+        let node = FakeNode::new(300_000);
+        l.sweep(&node, 1_000, &mut src);
+        assert_eq!(lock(&node.swept).len(), 1);
+        // The counter now pays into another wallet.
+        let other = format!("{w}x");
+        src.wallet = Some(other.clone());
+        src.next = 500;
+        let mut settings = Settings::defaults(1_000);
+        settings.shop_lightning = Some(sl());
+        // The node is stopped and started again with the new wallet, and the
+        // address it pays to is an index of that wallet.
+        let mut now = 2_000;
+        let began = std::time::Instant::now();
+        while l
+            .inst
+            .as_ref()
+            .is_none_or(|i| i.wallet != wallet_hash(&other))
+        {
+            assert!(began.elapsed() < Duration::from_secs(30), "no restart");
+            l.reconcile(&settings, now, &mut src);
+            now += 1;
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let book = lock(&l.shared.book).sweep.unwrap();
+        assert_eq!(book.wallet, wallet_hash(&other));
+        assert_eq!(book.index, 500);
+        let (config, hash) = l.prepare(&sl(), &mut src).unwrap();
+        assert_eq!(config.wallet, other);
+        assert_eq!(hash, wallet_hash(&other));
+        assert_eq!(config.sweep_index, 500);
+        l.stop();
+        cleanup(&l);
+    }
+
+    #[test]
+    fn sl_33_with_no_free_index_nothing_is_swept_and_the_reason_is_given() {
+        let (w, first) = wallet();
+        let mut src = Fake::new(Some((w.clone(), first)));
+        src.end = first;
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        serving(&mut l, &w);
+        let node = FakeNode::new(300_000);
+        l.sweep(&node, 1_000, &mut src);
+        assert!(lock(&node.swept).is_empty());
+        assert_eq!(l.sweep_blocked, Some(Why::NoSweepAddress));
+        assert_eq!(l.prepare(&sl(), &mut src).err(), Some(Why::NoSweepAddress));
+        // An index appears: the sweep goes on.
+        src.end = u32::MAX;
+        l.sweep(&node, 1_000 + SWEEP_EVERY_SECS, &mut src);
+        assert_eq!(lock(&node.swept).len(), 1);
+        cleanup(&l);
+    }
+
+    #[test]
+    fn sl_77_a_book_that_does_not_read_is_not_an_empty_book_and_the_seed_is_kept() {
+        let (w, first) = wallet();
+        let mut src = Fake::new(Some((w, first)));
+        let dir = std::env::temp_dir().join(format!(
+            "shopln-badbook-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("shop-lightning")).unwrap();
+        fs::write(
+            dir.join("shop-lightning").join(crate::shopln::BOOK_FILE),
+            b"junk",
+        )
+        .unwrap();
+        let mut l = ShopLn::new(ShopLnArgs {
+            me: id(3).device_id(),
+            dir: dir.clone(),
+            network: Network::Regtest,
+            driver: DriverConfig::new(Network::Regtest, 0),
+            tor_on: false,
+            config: ShopLnConfig {
+                seed_record: Some(SeedRecord::new(seed(1)).to_bytes()),
+                identity: Box::new(|| Some(id(3))),
+                relay: Some(hint(8)),
+                link_proxy: None,
+            },
+        });
+        // Settings on, and settings off: no node, the seed stays.
+        for settings in [
+            {
+                let mut s = Settings::defaults(1_000);
+                s.shop_lightning = Some(sl());
+                s
+            },
+            Settings::defaults(1_000),
+        ] {
+            for t in 0..5 {
+                l.reconcile(&settings, 1_000 + t * 100, &mut src);
+                assert!(l.inst.is_none());
+                assert!(l.has_seed());
+                assert!(!l.status().delete_seed);
+                assert!(matches!(l.status().why, Some(Why::NotStarted(_))));
+            }
+        }
+        assert!(src.taken.is_empty());
+        // The book is not written over.
+        assert_eq!(
+            fs::read(dir.join("shop-lightning").join(crate::shopln::BOOK_FILE)).unwrap(),
+            b"junk"
+        );
+        // It reads again once the file does.
+        Book::default().save(&dir.join("shop-lightning")).unwrap();
+        l.reconcile(&Settings::defaults(1_000), 9_000, &mut src);
+        assert!(l.book_error.is_none());
+        l.stop();
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sl_77_the_seed_is_not_deleted_for_want_of_a_plan_but_when_a_started_node_reports_nothing() {
+        let (w, first) = wallet();
+        let mut src = Fake::new(Some((w.clone(), first)));
+        // Settings off, a seed held, no plan in the book.
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        let off = Settings::defaults(1_000);
+        l.reconcile(&off, 1_000, &mut src);
+        assert!(l.has_seed(), "a seed is not deleted from the book alone");
+        assert!(!l.status().delete_seed);
+        // A node was made to look: a closing instance, from the seed's own
+        // terms.
+        let inst = l.inst.as_ref().expect("a node is started to look");
+        assert_eq!(inst.phase, Phase::Closing);
+        assert_eq!(inst.sl.node_id, node_id(&seed(1)));
+        // The node has reported nothing (it is not up): still held, at every
+        // pump.
+        for t in 1..5 {
+            l.reconcile(&off, 1_000 + t, &mut src);
+            assert!(l.has_seed());
+            assert!(!l.status().delete_seed);
+        }
+        l.stop();
+        cleanup(&l);
+    }
+
+    fn pending(hash: u8, amount_msat: u64, skimmed_msat: u64) -> Paid {
+        Paid {
+            payment_hash: [hash; 32],
+            amount_msat,
+            skimmed_msat,
+            sender_intended_msat: None,
+            received_unix: 50,
+        }
+    }
+
+    fn invoice(hash: u8, sale: u32, fee_msat: u64) -> InvoiceEntry {
+        InvoiceEntry {
+            payment_hash: [hash; 32],
+            sale,
+            amount_msat: 50_000_000,
+            opening_fee_msat: fee_msat,
+            made_at: 10,
+        }
+    }
+
+    #[test]
+    fn sl_29_a_sale_is_credited_what_arrived_plus_what_was_skimmed_not_the_quoted_fee() {
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        // The invoice quoted a 2,000 msat fee.
+        lock(&l.shared.book).invoices = vec![invoice(1, 4, 2_000_000), invoice(2, 5, 2_000_000)];
+        // The first payment opened a channel and was skimmed 1,500 msat; the
+        // second found a channel already open and was skimmed nothing.
+        l.pending = vec![pending(1, 48_500_000, 1_500_000), pending(2, 50_000_000, 0)];
+        let paid = l.settle_pending(100);
+        assert_eq!(paid.len(), 2);
+        assert_eq!(paid[0].sale, 4);
+        assert_eq!(paid[0].facts.amount_received_msat, 50_000_000);
+        assert_eq!(paid[1].sale, 5);
+        assert_eq!(paid[1].facts.amount_received_msat, 50_000_000);
+        l.recorded(&[1; 32]);
+        l.recorded(&[2; 32]);
+        // The fee counted is the skim, 1,500 sats, not 4,000 sats of quotes.
+        assert_eq!(lock(&l.shared.book).opening_fees_paid_sats, 1_500);
+        assert!(lock(&l.shared.book).invoices.is_empty());
+        // Recording twice counts once.
+        l.recorded(&[1; 32]);
+        assert_eq!(lock(&l.shared.book).opening_fees_paid_sats, 1_500);
+        cleanup(&l);
+    }
+
+    #[test]
+    fn sl_21_a_payment_with_no_invoice_in_the_book_is_kept_not_dropped() {
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        l.pending = vec![pending(9, 4_000_000, 1_000_000)];
+        assert!(l.settle_pending(100).is_empty());
+        let book = lock(&l.shared.book);
+        assert_eq!(
+            book.unmatched,
+            vec![Unmatched {
+                payment_hash: [9; 32],
+                sale: None,
+                amount_msat: 5_000_000,
+                at: 100
+            }]
+        );
+        drop(book);
+        assert!(l.pending.is_empty());
+        // It is on disk.
+        assert_eq!(Book::load(&l.dir).unwrap().unmatched.len(), 1);
+        cleanup(&l);
+    }
+
+    #[test]
+    fn sl_21_a_payment_that_cannot_be_kept_stays_with_the_node() {
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        for n in 0..crate::shopln::MAX_UNMATCHED {
+            let mut hash = [0u8; 32];
+            hash[..8].copy_from_slice(&(n as u64).to_le_bytes());
+            assert!(l.keep_unmatched(None, hash, 1_000, 1));
+        }
+        l.pending = vec![pending(9, 4_000_000, 0)];
+        assert!(l.settle_pending(100).is_empty());
+        assert_eq!(l.pending.len(), 1, "not acknowledged: the node keeps it");
+        cleanup(&l);
+    }
+
+    #[test]
+    fn sl_21_six_hundred_sales_opened_and_closed_never_reach_the_cap() {
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        for sale in 0..600u32 {
+            {
+                let mut book = lock(&l.shared.book);
+                assert!(book.invoices.len() < MAX_INVOICES);
+                book.invoices.push(invoice(1, sale, 0));
+            }
+            // Closed, cancelled or quoted again: either way it leaves.
+            if sale % 2 == 0 {
+                l.sale_closed(sale);
+            } else {
+                l.sale_requoted(sale);
+            }
+            assert!(lock(&l.shared.book).invoices.is_empty(), "sale {sale}");
+        }
+        // An invoice whose payment is claimed and waits stays.
+        lock(&l.shared.book).invoices = vec![invoice(7, 3, 0)];
+        l.pending = vec![pending(7, 50_000_000, 0)];
+        l.sale_closed(3);
+        assert_eq!(lock(&l.shared.book).invoices.len(), 1);
+        cleanup(&l);
+    }
+
+    #[test]
+    fn sl_78_the_report_goes_on_while_a_seed_is_held_after_the_settings_stop() {
+        let l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        let r = l.report().expect("a seed is held");
+        assert_ne!(r.not_offered, NotOffered::Offered);
+        cleanup(&l);
+        let none = ln(Network::Regtest, Some(hint(8)), None);
+        assert!(none.report().is_none());
+        cleanup(&none);
+    }
+
+    #[test]
+    fn sl_23_a_stop_while_the_node_starts_waits_and_only_one_node_holds_the_folder() {
+        let (w, first) = wallet();
+        let mut src = Fake::new(Some((w, first)));
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        let probe = Arc::new(Probe::default());
+        l.probe = Some(Arc::clone(&probe));
+        l.start_delay = Duration::from_millis(600);
+        let mut settings = Settings::defaults(1_000);
+        settings.shop_lightning = Some(sl());
+        l.reconcile(&settings, 1_000, &mut src);
+        assert_eq!(l.inst.as_ref().unwrap().phase, Phase::Serving);
+        // The cap is lowered while the node is still starting.
+        let mut lower = settings.clone();
+        lower.shop_lightning = Some(ShopLightning {
+            cap_sats: 50_000,
+            ..sl()
+        });
+        let began = std::time::Instant::now();
+        let mut now = 1_001;
+        let mut restarted = false;
+        while began.elapsed() < Duration::from_secs(60) {
+            l.reconcile(&lower, now, &mut src);
+            now += 1;
+            if probe.entered.load(Ordering::SeqCst) >= 2 && l.inst.is_some() {
+                restarted = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(restarted, "the second node started");
+        assert_eq!(l.inst.as_ref().unwrap().sl.cap_sats, 50_000);
+        // Never two at once, though the first start was slow.
+        assert_eq!(probe.most.load(Ordering::SeqCst), 1);
+        l.stop();
+        assert_eq!(probe.live.load(Ordering::SeqCst), 0);
+        cleanup(&l);
+    }
+
+    #[test]
+    fn sl_23_a_second_holder_of_the_folder_waits_for_the_first() {
+        let dir = std::env::temp_dir().join(format!("shopln-lock-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(FOLDER_LOCK_FILE);
+        let never = AtomicBool::new(false);
+        let first = take_folder_lock(&path, &never).unwrap().unwrap();
+        let give_up = AtomicBool::new(true);
+        assert!(take_folder_lock(&path, &give_up).unwrap().is_none());
+        drop(first);
+        assert!(take_folder_lock(&path, &give_up).unwrap().is_some());
+        let _ = fs::remove_dir_all(&dir);
     }
 }

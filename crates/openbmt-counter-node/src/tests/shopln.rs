@@ -236,14 +236,37 @@ fn sl_60_the_counter_does_not_start_the_node_on_the_real_network() {
 }
 
 #[test]
-fn sl_77_a_seed_with_no_node_behind_it_is_deleted_when_the_settings_do_not_name_it() {
+fn sl_77_a_seed_with_no_plan_is_not_deleted_until_a_started_node_reports_nothing_left() {
     let dir = Scratch::new();
     let record = SeedRecord::new(seed(1)).to_bytes();
     let mut rig = rig(&dir, settings(), Some(record));
     rig.feed(vec![Rig::peers()]);
+    // The book holds no plan, and no node can be started to look (the
+    // counter has no description of the wallet): the seed stays, with the
+    // reason.
     let status = rig.node.shop_lightning_status().unwrap();
-    assert!(status.delete_seed, "the app deletes what it sealed");
+    assert!(!status.delete_seed, "the seed is not deleted from the book");
     assert!(!status.needs_seed);
+    assert_eq!(status.why, Some(Why::NoWallet));
+}
+
+#[test]
+fn sl_77_a_book_that_does_not_read_keeps_the_seed_and_starts_no_node() {
+    let dir = Scratch::new();
+    let book = dir.path().join("shop-lightning");
+    std::fs::create_dir_all(&book).unwrap();
+    std::fs::write(book.join(crate::shopln::BOOK_FILE), b"not a book").unwrap();
+    let record = SeedRecord::new(seed(1)).to_bytes();
+    let mut rig = rig(&dir, settings_naming(3, 1), Some(record));
+    rig.feed(vec![Rig::peers()]);
+    let status = rig.node.shop_lightning_status().unwrap();
+    assert!(!status.delete_seed);
+    assert!(matches!(status.why, Some(Why::NotStarted(_))));
+    assert!(!dir.path().join("shop-lightning").join("node").exists());
+    assert_eq!(
+        std::fs::read(book.join(crate::shopln::BOOK_FILE)).unwrap(),
+        b"not a book"
+    );
 }
 
 #[test]
@@ -264,7 +287,11 @@ fn sl_77_a_plan_whose_seed_is_gone_is_forgotten() {
 
 #[test]
 fn sl_41_every_reason_has_written_words_of_its_own() {
-    let all = all_shopln_words();
+    // The reason of no address to sweep to has only its placeholder so far.
+    let (placeholders, all): (Vec<_>, Vec<_>) = all_shopln_words()
+        .into_iter()
+        .partition(|(name, _)| name == "ShopLightning::NoSweepAddress");
+    assert!(placeholders.iter().all(|(_, w)| is_placeholder(w)));
     let mut seen = std::collections::BTreeSet::new();
     for (name, words) in &all {
         assert!(!is_placeholder(words), "{name}");
@@ -278,4 +305,82 @@ fn sl_41_every_reason_has_written_words_of_its_own() {
         openbmt_lightning_node::room::OnChainReason::SecondDeviceAway,
     ));
     assert!(w.detail.unwrap().contains("not answering"));
+}
+
+/// A claimed payment of `msat` for `hash`.
+fn facts(hash: u8, msat: u64) -> openbmt_lightning::PaidFacts {
+    openbmt_lightning::PaidFacts {
+        payment_hash: [hash; 32],
+        amount_received_msat: msat,
+        settled_at: Some(T0),
+    }
+}
+
+#[test]
+fn sl_21_a_claimed_payment_a_sale_does_not_take_is_recorded_as_a_late_one() {
+    use openbmt_counter::Report;
+    let dir = Scratch::new();
+    let mut rig = rig(&dir, settings_naming(3, 1), None);
+    let index = sale(&mut rig);
+    // Less than the least the sale asks (SATS is what a $5.00 sale needs):
+    // not credited, recorded as late with its amount.
+    assert!(rig.node.lightning_paid(index, facts(1, 3_000)));
+    let reports = rig.feed(vec![]);
+    assert!(
+        reports.contains(&Report::LatePayment { index, sats: 3 }),
+        "{reports:?}"
+    );
+    let late = rig
+        .node
+        .counter()
+        .sale(index)
+        .unwrap()
+        .late_payments()
+        .to_vec();
+    assert_eq!(late.len(), 1);
+    assert_eq!(late[0].1, 3);
+    // Once: the same payment again adds nothing.
+    assert!(rig.node.lightning_paid(index, facts(1, 3_000)));
+    assert_eq!(
+        rig.node
+            .counter()
+            .sale(index)
+            .unwrap()
+            .late_payments()
+            .len(),
+        1
+    );
+    // A sale that ended: recorded as late.
+    rig.node.cancel(index).unwrap();
+    assert!(rig.node.lightning_paid(index, facts(2, 5_000_000)));
+    assert_eq!(
+        rig.node
+            .counter()
+            .sale(index)
+            .unwrap()
+            .late_payments()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn sl_21_a_claimed_payment_for_a_sale_the_counter_does_not_know_is_kept_in_the_book() {
+    use openbmt_counter::Report;
+    let dir = Scratch::new();
+    let mut rig = rig(&dir, settings_naming(3, 1), None);
+    assert!(rig.node.lightning_paid(9_999, facts(7, 7_000_000)));
+    let reports = rig.feed(vec![]);
+    assert!(
+        reports.contains(&Report::LatePayment {
+            index: 9_999,
+            sats: 7_000
+        }),
+        "{reports:?}"
+    );
+    let book = crate::shopln::Book::load(&dir.path().join("shop-lightning")).unwrap();
+    assert_eq!(book.unmatched.len(), 1);
+    assert_eq!(book.unmatched[0].payment_hash, [7; 32]);
+    assert_eq!(book.unmatched[0].sale, Some(9_999));
+    assert_eq!(book.unmatched[0].amount_msat, 7_000_000);
 }

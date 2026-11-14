@@ -153,7 +153,7 @@ use crate::notices::NodeRecords;
 use crate::paired_own::OwnPairingRecord;
 use crate::settings::{check_not_rolled, decode_file, SettingsFault, SettingsRefused};
 use crate::shopln::SeedNotTaken;
-use crate::shopln_node::{ShopLn, ShopLnArgs, ShopLnConfig, ShopLnStatus};
+use crate::shopln_node::{ShopLn, ShopLnArgs, ShopLnConfig, ShopLnStatus, SweepSource};
 use crate::starter::{stop_decision, Cards, StarterCard, StarterRefused, StopDecision};
 use crate::swap::{Effect, SaleSwap, SwapDriver, SwapRequest, Update};
 use crate::switch::{
@@ -554,6 +554,29 @@ impl StartedWith {
 /// node the settings name replaces the one of the counter app's own
 /// configuration, which is then not used (a note says so); the mode is
 /// `NodeOnly` when `node_only` is on, else `Mixed`.
+/// SL-33: the counter as the source of Shop Lightning's wallet and of the
+/// addresses of its own transactions. The wallet is the one the counter pays
+/// into now, so a switch is seen, and an index is taken from the ranges the
+/// way a sale's address is.
+struct CounterSweep<'a> {
+    counter: &'a mut Counter,
+    store: &'a mut DirStore,
+}
+
+impl SweepSource for CounterSweep<'_> {
+    fn wallet(&self) -> Option<String> {
+        self.counter
+            .own_wallet()
+            .map(|w| w.canonical_string().to_string())
+    }
+
+    fn take_index(&mut self) -> Result<Option<u32>, String> {
+        self.counter
+            .take_own_index(self.store)
+            .map_err(|e| format!("the ranges were not written: {e}"))
+    }
+}
+
 fn apply_settings_to_driver(
     settings: &Settings,
     driver: &mut DriverConfig,
@@ -970,8 +993,9 @@ impl<P: DriverPort> Node<P> {
         let launch_swap_scripts = swap.watched_scripts();
         scripts.extend(launch_swap_scripts.iter().cloned());
         // SL-70, SL-33: Shop Lightning gets the driver's settings as the
-        // counter's other chain users have them, and the description of the
-        // shop's own wallet when the counter holds one.
+        // counter's other chain users have them. The shop's own wallet and
+        // the addresses of its transactions are read from the counter when
+        // they are used.
         let shopln = shop_lightning.map(|config| {
             ShopLn::new(ShopLnArgs {
                 me: counter_device,
@@ -979,12 +1003,6 @@ impl<P: DriverPort> Node<P> {
                 network: driver.network,
                 driver: driver.clone(),
                 tor_on: settings.tor_on,
-                wallet: own.as_ref().map(|o| {
-                    (
-                        o.wallet.canonical_string().to_string(),
-                        o.first_range.range.end.saturating_sub(1),
-                    )
-                }),
                 config,
             })
         });
@@ -3134,7 +3152,11 @@ impl<P: DriverPort> Node<P> {
     /// the sale holds it, or it was recorded as late, or the counter will
     /// not take it at all. `false` when a record could not be written, so
     /// the node still has it.
-    fn lightning_paid(&mut self, index: u32, facts: openbmt_lightning::PaidFacts) -> bool {
+    pub(crate) fn lightning_paid(
+        &mut self,
+        index: u32,
+        facts: openbmt_lightning::PaidFacts,
+    ) -> bool {
         let now = self.clock.now();
         let heartbeat = self.counter.heartbeat_for_policy(now);
         let judged = Facts {
@@ -3197,16 +3219,60 @@ impl<P: DriverPort> Node<P> {
                 self.note(format!(
                     "sale {index}: a Lightning payment was not taken: {e}"
                 ));
-                // A payment the counter will not take now is not asked
-                // about again; a failure to write is, because the node
-                // still has it.
-                let dealt = !matches!(e, openbmt_counter::LightningRefused::Store(_));
-                if dealt {
-                    self.ln.settled(index, &hash);
+                // A failure to write is asked about again, because the node
+                // still has the payment.
+                if matches!(e, openbmt_counter::LightningRefused::Store(_)) {
+                    return false;
                 }
-                dealt
+                // Any other payment the sale does not take is recorded the
+                // way a late one is, with its amount and hash, before the
+                // node is told to forget it.
+                match self
+                    .counter
+                    .lightning_late(index, paid, now, &mut self.store)
+                {
+                    Ok(reports) => {
+                        self.ln_reports.extend(reports);
+                        self.ln.settled(index, &hash);
+                        true
+                    }
+                    Err(openbmt_counter::LightningRefused::Store(e)) => {
+                        self.note(format!(
+                            "sale {index}: a Lightning payment was not recorded: {e}"
+                        ));
+                        false
+                    }
+                    // The counter has no sale to hang it on, or cannot read
+                    // it: the payment is kept with the node's own books, and
+                    // the owner is told of it as of a late payment.
+                    Err(_) => self.keep_unmatched_payment(index, &paid, now),
+                }
             }
         }
+    }
+
+    /// A Lightning payment no sale can hold is kept in Shop Lightning's book
+    /// and flagged for the owner. `false` when it could not be kept, so the
+    /// node still has it.
+    fn keep_unmatched_payment(&mut self, index: u32, paid: &LightningPaid, now: u64) -> bool {
+        let Some(shopln) = self.shopln.as_mut() else {
+            // No Shop Lightning book: the payment is of another Lightning
+            // path, which has its own record.
+            self.ln.settled(index, &paid.payment_hash);
+            return true;
+        };
+        if !shopln.keep_unmatched(Some(index), paid.payment_hash, paid.amount_msat, now) {
+            return false;
+        }
+        self.ln_reports.push(Report::LatePayment {
+            index,
+            sats: (paid.amount_msat / 1_000).max(1),
+        });
+        for line in shopln.take_notes() {
+            self.note(line);
+        }
+        self.ln.settled(index, &paid.payment_hash);
+        true
     }
 
     // SL-70 to SL-78: Shop Lightning.
@@ -3220,7 +3286,11 @@ impl<P: DriverPort> Node<P> {
         let Some(shopln) = self.shopln.as_mut() else {
             return;
         };
-        shopln.reconcile(&self.settings, now);
+        let mut src = CounterSweep {
+            counter: &mut self.counter,
+            store: &mut self.store,
+        };
+        shopln.reconcile(&self.settings, now, &mut src);
         let paid = shopln.take_paid(now);
         for line in shopln.take_notes() {
             self.note(line);
@@ -3243,7 +3313,11 @@ impl<P: DriverPort> Node<P> {
         let Some(shopln) = self.shopln.as_mut() else {
             return Err(SeedNotTaken::NotHere);
         };
-        let bytes = shopln.take_seed(text, &self.settings, now)?;
+        let mut src = CounterSweep {
+            counter: &mut self.counter,
+            store: &mut self.store,
+        };
+        let bytes = shopln.take_seed(text, &self.settings, now, &mut src)?;
         for line in shopln.take_notes() {
             self.note(line);
         }
@@ -3278,6 +3352,9 @@ impl<P: DriverPort> Node<P> {
         let sats = self.counter.sale(index).map_or(0, |s| s.needs_sats());
         self.ln.sale_requoted(index, sats, now);
         self.swap.sale_requoted(index, sats, now);
+        if let Some(shopln) = self.shopln.as_mut() {
+            shopln.sale_requoted(index);
+        }
         Ok(quote)
     }
 

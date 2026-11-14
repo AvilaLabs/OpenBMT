@@ -10,8 +10,9 @@
 //! - [`Book`]: what the counter keeps about the node in plain, and nothing
 //!   secret: the settings block the node was started from (a node that is
 //!   being closed needs it after the settings stopped naming it, SL-77), the
-//!   invoices it made for sales, the opening fees paid and the time of the
-//!   last sweep.
+//!   invoices it made for sales, the opening fees paid, the time of the
+//!   last sweep, the address index the sweeps and closes pay to and the
+//!   payments that found no sale.
 //! - [`Why`]: why a sale shows the on-chain code alone (SL-41).
 //!
 //! The node itself, its runtime and its link to the Box are in
@@ -37,6 +38,9 @@ pub const MAGIC_BOOK: [u8; 4] = *b"OBM\x1b";
 pub const BOOK_FILE: &str = "book";
 /// The most invoices the book keeps: past it no new invoice is made.
 pub const MAX_INVOICES: usize = 512;
+/// The most payments with no sale the book keeps. A payment past it is not
+/// acknowledged to the node, which keeps it.
+pub const MAX_UNMATCHED: usize = 512;
 /// How long an invoice stays in the book unpaid, in seconds: a day past the
 /// hour the node lets it live.
 pub const INVOICE_KEPT_SECS: u64 = 25 * 3600;
@@ -212,6 +216,31 @@ pub struct InvoiceEntry {
     pub made_at: u64,
 }
 
+/// A payment the node claimed that no sale could take: kept, never dropped,
+/// so that the money the node holds for it stays accounted for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Unmatched {
+    /// The payment hash.
+    pub payment_hash: [u8; 32],
+    /// The sale the invoice was made for, when the counter knew one.
+    pub sale: Option<u32>,
+    /// What the shop was paid, in millisatoshis, the skimmed fee included.
+    pub amount_msat: u64,
+    /// When the counter kept it, in seconds since 1970.
+    pub at: u64,
+}
+
+/// The address index of the shop's wallet that the sweeps, the closes and the
+/// node's output sweeper pay to now (SL-33). It is taken from the counter's
+/// ranges, as a sale's address is, and is the address of one wallet only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SweepAddress {
+    /// The SHA-256 of the wallet description the index belongs to.
+    pub wallet: [u8; 32],
+    /// The index.
+    pub index: u32,
+}
+
 /// What the counter keeps about the node, in plain.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Book {
@@ -224,6 +253,11 @@ pub struct Book {
     pub last_sweep_at: u64,
     /// The invoices not yet acknowledged.
     pub invoices: Vec<InvoiceEntry>,
+    /// The address the next sweep or close pays to, and the node's output
+    /// sweeper, until a transaction has paid it.
+    pub sweep: Option<SweepAddress>,
+    /// The claimed payments no sale took.
+    pub unmatched: Vec<Unmatched>,
 }
 
 fn put_plan(out: &mut Vec<u8>, sl: &ShopLightning) {
@@ -293,6 +327,30 @@ impl Book {
             out.extend_from_slice(&e.opening_fee_msat.to_le_bytes());
             out.extend_from_slice(&e.made_at.to_le_bytes());
         }
+        match &self.sweep {
+            Some(a) => {
+                out.push(1);
+                out.extend_from_slice(&a.wallet);
+                out.extend_from_slice(&a.index.to_le_bytes());
+            }
+            None => out.push(0),
+        }
+        out.extend_from_slice(&wire::len_u32(self.unmatched.len()).to_le_bytes());
+        for u in &self.unmatched {
+            out.extend_from_slice(&u.payment_hash);
+            match u.sale {
+                Some(sale) => {
+                    out.push(1);
+                    out.extend_from_slice(&sale.to_le_bytes());
+                }
+                None => {
+                    out.push(0);
+                    out.extend_from_slice(&0u32.to_le_bytes());
+                }
+            }
+            out.extend_from_slice(&u.amount_msat.to_le_bytes());
+            out.extend_from_slice(&u.at.to_le_bytes());
+        }
         out
     }
 
@@ -317,16 +375,46 @@ impl Book {
                 made_at: r.u64_le()?,
             });
         }
+        let sweep = if r.flag()? {
+            Some(SweepAddress {
+                wallet: r.array()?,
+                index: r.u32_le()?,
+            })
+        } else {
+            None
+        };
+        let n = r.count(MAX_UNMATCHED, 53)?;
+        let mut unmatched = Vec::with_capacity(n);
+        for _ in 0..n {
+            let payment_hash = r.array()?;
+            let has_sale = r.flag()?;
+            let sale = r.u32_le()?;
+            if !has_sale && sale != 0 {
+                return Err(DecodeError::NonCanonical(
+                    "a payment with no sale names a sale",
+                ));
+            }
+            unmatched.push(Unmatched {
+                payment_hash,
+                sale: has_sale.then_some(sale),
+                amount_msat: r.u64_le()?,
+                at: r.u64_le()?,
+            });
+        }
         r.finish()?;
         Ok(Self {
             plan,
             opening_fees_paid_sats,
             last_sweep_at,
             invoices,
+            sweep,
+            unmatched,
         })
     }
 
-    /// The book in `dir`, or an empty one when there is none.
+    /// The book in `dir`, or an empty one when there is no file. A file that
+    /// is there and does not read is an error, never an empty book: the node
+    /// is not started from it and the seed is kept.
     pub fn load(dir: &Path) -> Result<Self, String> {
         match fs::read(dir.join(BOOK_FILE)) {
             Ok(bytes) => Self::from_bytes(&bytes).map_err(|e| format!("the book: {e}")),
@@ -358,6 +446,40 @@ impl Book {
     pub fn invoice(&self, hash: &[u8; 32]) -> Option<&InvoiceEntry> {
         self.invoices.iter().find(|e| &e.payment_hash == hash)
     }
+
+    /// Takes the invoices of a sale out of the book, except those whose
+    /// hash is in `keep` (a payment of theirs is claimed and waits to be
+    /// recorded). Returns the hashes taken out. A sale that is over, cancelled
+    /// or quoted again has no use for them, and they would otherwise wait for
+    /// [`INVOICE_KEPT_SECS`] against the cap of [`MAX_INVOICES`].
+    pub fn drop_sale(&mut self, sale: u32, keep: &[[u8; 32]]) -> Vec<[u8; 32]> {
+        let mut gone = Vec::new();
+        self.invoices.retain(|e| {
+            let drop = e.sale == sale && !keep.contains(&e.payment_hash);
+            if drop {
+                gone.push(e.payment_hash);
+            }
+            !drop
+        });
+        gone
+    }
+
+    /// Keeps a claimed payment no sale took. `false` when the book is full
+    /// of them; one that is kept already is kept once.
+    pub fn keep_unmatched(&mut self, u: Unmatched) -> bool {
+        if self
+            .unmatched
+            .iter()
+            .any(|k| k.payment_hash == u.payment_hash)
+        {
+            return true;
+        }
+        if self.unmatched.len() >= MAX_UNMATCHED {
+            return false;
+        }
+        self.unmatched.push(u);
+        true
+    }
 }
 
 /// Why a sale shows the on-chain code alone, or why Lightning is not on at
@@ -379,6 +501,9 @@ pub enum Why {
     NotTheBox,
     /// The relay cannot be reached the way the settings need (Tor).
     NoRoute,
+    /// There is no address of the shop's wallet to sweep to: no range of the
+    /// pairing has a free index (SL-33).
+    NoSweepAddress,
     /// The node did not start; the text is the node's own.
     NotStarted(String),
     /// The node is closing its channels (SL-77).
@@ -523,6 +648,24 @@ mod tests {
                 opening_fee_msat: 2_000,
                 made_at: 1_700_000_001,
             }],
+            sweep: Some(SweepAddress {
+                wallet: [3; 32],
+                index: 77,
+            }),
+            unmatched: vec![
+                Unmatched {
+                    payment_hash: [8; 32],
+                    sale: Some(9),
+                    amount_msat: 6_000,
+                    at: 5,
+                },
+                Unmatched {
+                    payment_hash: [9; 32],
+                    sale: None,
+                    amount_msat: 7_000,
+                    at: 6,
+                },
+            ],
         };
         assert_eq!(Book::from_bytes(&book.to_bytes()).unwrap(), book);
         let mut v6 = book.clone();
@@ -552,6 +695,48 @@ mod tests {
     }
 
     #[test]
+    fn sl_21_the_invoices_of_a_closed_sale_leave_the_book_but_not_one_that_is_claimed() {
+        let entry = |hash: u8, sale: u32| InvoiceEntry {
+            payment_hash: [hash; 32],
+            sale,
+            amount_msat: 1,
+            opening_fee_msat: 0,
+            made_at: 10,
+        };
+        let mut book = Book {
+            invoices: vec![entry(1, 4), entry(2, 4), entry(3, 5)],
+            ..Book::default()
+        };
+        assert_eq!(book.drop_sale(4, &[[2; 32]]), vec![[1; 32]]);
+        assert_eq!(book.invoices, vec![entry(2, 4), entry(3, 5)]);
+        assert!(book.drop_sale(9, &[]).is_empty());
+        assert_eq!(book.drop_sale(4, &[]), vec![[2; 32]]);
+    }
+
+    #[test]
+    fn sl_21_a_payment_no_sale_took_is_kept_once_and_the_book_has_a_limit() {
+        let mut book = Book::default();
+        let u = |n: u8| Unmatched {
+            payment_hash: [n; 32],
+            sale: None,
+            amount_msat: 1_000,
+            at: 1,
+        };
+        assert!(book.keep_unmatched(u(1)));
+        assert!(book.keep_unmatched(u(1)));
+        assert_eq!(book.unmatched.len(), 1);
+        for n in 1..MAX_UNMATCHED {
+            let mut v = u(0);
+            v.payment_hash[..8].copy_from_slice(&(n as u64).to_le_bytes());
+            assert!(book.keep_unmatched(v));
+        }
+        assert_eq!(book.unmatched.len(), MAX_UNMATCHED);
+        let mut over = u(7);
+        over.payment_hash[2] = 9;
+        assert!(!book.keep_unmatched(over));
+    }
+
+    #[test]
     fn sl_78_each_reason_has_a_cause_the_report_can_name() {
         assert_eq!(
             Why::Node(OnChainReason::SecondDeviceAway).not_offered(),
@@ -566,6 +751,10 @@ mod tests {
             NotOffered::ProviderSilent
         );
         assert_eq!(Why::NoSeed.not_offered(), NotOffered::NoUsableChannel);
+        assert_eq!(
+            Why::NoSweepAddress.not_offered(),
+            NotOffered::NoUsableChannel
+        );
         assert_eq!(Why::NotStored.not_offered(), NotOffered::SecondDeviceAway);
     }
 }
