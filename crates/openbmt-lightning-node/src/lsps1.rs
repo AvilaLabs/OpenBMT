@@ -11,6 +11,7 @@
 //! its own channels, to the chosen provider, and never more than the owner
 //! allows for one opening (SL-29).
 
+use crate::funding::LOST_AFTER_BLOCKS;
 use crate::locks::MutexExt;
 use crate::store::DualStore;
 use bitcoin::hashes::Hash;
@@ -54,6 +55,8 @@ pub const MAX_ID_LEN: usize = 64;
 /// The most channels with the provider that an order notes as earlier ones;
 /// with more, no order is made.
 pub const MAX_PRIOR_CHANNELS: usize = 16;
+/// The most providers kept as stopped; past that the oldest is dropped.
+pub const MAX_STOPPED: usize = 16;
 /// The largest final CLTV delta the node takes from the provider's invoice: the
 /// provider chooses it, and the shop's payment is locked that long.
 pub const MAX_FINAL_CLTV: u64 = 144;
@@ -167,6 +170,9 @@ impl OrderWhy {
 pub struct OrderRecord {
     /// The provider's id for it.
     pub id: String,
+    /// The node id of the provider the order was made with: it alone is asked
+    /// about the order, and it alone is paid for it.
+    pub provider: [u8; 33],
     /// Where it is.
     pub state: OrderState,
     /// Why it failed; [`OrderWhy::None`] unless it did.
@@ -193,21 +199,39 @@ pub struct OrderRecord {
 }
 
 /// What is kept: the last order, the fees paid for orders so far, the time
-/// before which no new order is made, and the provider no more is bought from.
+/// before which no new order is made, and the providers no more is bought from.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct OrderBook {
     /// What orders paid so far, in satoshis (SL-29, SL-45).
     pub fees_paid_sat: u64,
     /// No new order before this, in seconds since the epoch.
     pub next_try_unix: u64,
-    /// The provider (its node id) from which a paid order brought no channel:
-    /// no new order is made from it (SL-28).
-    pub stopped_for: Option<[u8; 33]>,
+    /// The providers (their node ids, oldest first, at most [`MAX_STOPPED`])
+    /// from which an order whose payment was sent brought no channel: no new
+    /// order is made from them (SL-28).
+    pub stopped: Vec<[u8; 33]>,
     /// The last order.
     pub order: Option<OrderRecord>,
 }
 
 impl OrderBook {
+    /// Whether buying from `provider` is stopped.
+    pub fn is_stopped(&self, provider: &[u8; 33]) -> bool {
+        self.stopped.contains(provider)
+    }
+
+    /// Stops the buying from `provider`; past [`MAX_STOPPED`] the oldest stop
+    /// is dropped. A provider already stopped stays where it is.
+    fn stop(&mut self, provider: &[u8; 33]) {
+        if self.is_stopped(provider) {
+            return;
+        }
+        self.stopped.push(*provider);
+        while self.stopped.len() > MAX_STOPPED {
+            self.stopped.remove(0);
+        }
+    }
+
     /// Whether an order is open: one the node waits on.
     pub fn has_open_order(&self) -> bool {
         self.order.as_ref().is_some_and(|o| o.state.is_open())
@@ -285,22 +309,46 @@ impl OrderBook {
             .as_ref()
             .is_some_and(|o| o.payment_hash == *payment_hash && o.state == OrderState::Open);
         if ours {
-            // Never paid, so nothing to stop for.
-            self.fail(OrderWhy::PaymentFailed, now, &[0; 33]);
+            // The payment failed: nothing left the node, so nothing to stop
+            // for, whatever was set out.
+            self.end(OrderWhy::PaymentFailed, now, false);
         }
         ours
     }
 
+    /// The payment set out for the open order was not sent (the library says
+    /// so): what was set out is taken back and the order fails as not paid,
+    /// with no stop and nothing counted. `false` if the order is not open.
+    pub fn not_sent(&mut self, now: u64) -> bool {
+        let open = self.order.as_ref().is_some_and(|o| o.state.is_open());
+        if open {
+            if let Some(o) = self.order.as_mut() {
+                o.sent_msat = 0;
+            }
+            self.end(OrderWhy::PaymentFailed, now, false);
+        }
+        open
+    }
+
     /// The order failed, or was not paid; a new one is made no sooner than an
-    /// hour from now. An order that was paid and ends without its channel
-    /// stops the buying from `provider`, for any reason: the fees paid stay
-    /// as they were, since a refund the provider claims cannot be checked.
-    pub fn fail(&mut self, why: OrderWhy, now: u64, provider: &[u8; 33]) {
+    /// hour from now. An order whose payment was sent (it is Paid, or it has
+    /// `sent_msat` set) and that ends without its channel stops the buying
+    /// from its provider, for any reason: the fees paid stay as they were,
+    /// since a refund the provider claims cannot be checked.
+    pub fn fail(&mut self, why: OrderWhy, now: u64) {
+        self.end(why, now, true);
+    }
+
+    fn end(&mut self, why: OrderWhy, now: u64, stop_if_sent: bool) {
         if let Some(o) = self.order.as_mut() {
             if o.state != OrderState::Done {
-                if o.state == OrderState::Paid {
-                    self.stopped_for = Some(*provider);
+                if stop_if_sent && (o.state == OrderState::Paid || o.sent_msat != 0) {
+                    let provider = o.provider;
+                    self.stop(&provider);
                 }
+                let Some(o) = self.order.as_mut() else {
+                    return;
+                };
                 o.state = OrderState::Failed;
                 o.why = why;
                 o.updated_unix = now;
@@ -318,12 +366,9 @@ fn encode(book: &OrderBook) -> Vec<u8> {
     let mut out = vec![VERSION];
     out.extend_from_slice(&book.fees_paid_sat.to_be_bytes());
     out.extend_from_slice(&book.next_try_unix.to_be_bytes());
-    match &book.stopped_for {
-        None => out.push(0),
-        Some(id) => {
-            out.push(1);
-            out.extend_from_slice(id);
-        }
+    out.push(book.stopped.len() as u8);
+    for id in &book.stopped {
+        out.extend_from_slice(id);
     }
     match &book.order {
         None => out.push(0),
@@ -331,6 +376,7 @@ fn encode(book: &OrderBook) -> Vec<u8> {
             out.push(1);
             out.push(o.id.len() as u8);
             out.extend_from_slice(o.id.as_bytes());
+            out.extend_from_slice(&o.provider);
             out.push(o.state.code());
             out.push(o.why.code());
             out.extend_from_slice(&o.fee_sat.to_be_bytes());
@@ -385,11 +431,19 @@ fn decode(bytes: &[u8]) -> Result<OrderBook, io::Error> {
     }
     let fees_paid_sat = r.u64()?;
     let next_try_unix = r.u64()?;
-    let stopped_for = match r.u8()? {
-        0 => None,
-        1 => Some(r.array()?),
-        _ => return Err(invalid("orders: stopped flag")),
-    };
+    let n = r.u8()? as usize;
+    if n > MAX_STOPPED {
+        return Err(invalid("orders: stopped"));
+    }
+    let mut stopped: Vec<[u8; 33]> = Vec::with_capacity(n);
+    for _ in 0..n {
+        let id: [u8; 33] = r.array()?;
+        // Written once each: a repeat is not what the node writes.
+        if stopped.contains(&id) {
+            return Err(invalid("orders: stopped twice"));
+        }
+        stopped.push(id);
+    }
     let order = match r.u8()? {
         0 => None,
         1 => {
@@ -403,6 +457,7 @@ fn decode(bytes: &[u8]) -> Result<OrderBook, io::Error> {
             if !id.chars().all(|c| c.is_ascii_graphic()) {
                 return Err(invalid("orders: id characters"));
             }
+            let provider: [u8; 33] = r.array()?;
             let state = OrderState::from_code(r.u8()?).ok_or_else(|| invalid("orders: state"))?;
             let why = OrderWhy::from_code(r.u8()?).ok_or_else(|| invalid("orders: why"))?;
             // A failure says why, and nothing else has a reason.
@@ -427,6 +482,7 @@ fn decode(bytes: &[u8]) -> Result<OrderBook, io::Error> {
             }
             Some(OrderRecord {
                 id,
+                provider,
                 state,
                 why,
                 fee_sat,
@@ -446,7 +502,7 @@ fn decode(bytes: &[u8]) -> Result<OrderBook, io::Error> {
     Ok(OrderBook {
         fees_paid_sat,
         next_try_unix,
-        stopped_for,
+        stopped,
         order,
     })
 }
@@ -496,6 +552,24 @@ impl Orders {
         self.change_checked(f).await.map(|_| ())
     }
 
+    /// As [`Orders::change`]; when the write fails, the time of the next try
+    /// is still set in memory (an hour from `now`), so that the node does not
+    /// ask for a new order every few seconds while the disks are down. The
+    /// error is given.
+    pub async fn change_held(
+        &self,
+        f: impl FnOnce(&mut OrderBook),
+        now: u64,
+    ) -> Result<(), io::Error> {
+        let r = self.change(f).await;
+        if r.is_err() {
+            let until = now.saturating_add(RETRY_AFTER_SECS);
+            let mut book = self.book.lock_recover();
+            book.next_try_unix = book.next_try_unix.max(until);
+        }
+        r
+    }
+
     /// As [`Orders::change`], and says whether the book changed.
     pub async fn change_checked(&self, f: impl FnOnce(&mut OrderBook)) -> Result<bool, io::Error> {
         let _one_at_a_time = self.gate.lock().await;
@@ -522,7 +596,7 @@ pub fn order_wanted(
     provider: &[u8; 33],
 ) -> bool {
     cap_sat > 0
-        && book.stopped_for.as_ref() != Some(provider)
+        && !book.is_stopped(provider)
         && !book.has_open_order()
         && now >= book.next_try_unix
         && (room_msat as u128) * 2 < (cap_sat as u128) * 1000
@@ -533,14 +607,18 @@ pub fn order_wanted(
 pub enum NoOrder {
     /// The provider needs the client to put in coins; the shop puts in none.
     ClientBalanceRequired,
-    /// No size is within the provider's limits and the cap.
+    /// No size is within the provider's limits and the cap: the provider's
+    /// smallest channel is above what brings the room to the cap, or its
+    /// limits leave no size, or it waits longer for the funding than the node
+    /// allows.
     OutsideLimits,
     /// The provider allows no lease of the channel.
     NoExpiry,
 }
 
 /// The order that brings the room up to the cap (SL-28): the provider puts in
-/// what the room lacks, at least its smallest and at most its largest, the
+/// what the room lacks, at most its largest (no order when its smallest is
+/// more than what the room lacks), the
 /// shop puts in nothing, the channel is used after one confirmation, kept
 /// private, and leased for the most the provider allows. `room_msat` is the
 /// room to receive now.
@@ -563,11 +641,16 @@ pub fn order_params(
     let hi = options
         .max_initial_lsp_balance_sat
         .min(options.max_channel_balance_sat);
-    if lo > hi || hi == 0 {
+    // The provider's smallest above what the room lacks would put the room
+    // over the cap: no order.
+    if lo > hi || hi == 0 || lo > lacking {
+        return Err(NoOrder::OutsideLimits);
+    }
+    if u32::from(options.min_funding_confirms_within_blocks) > LOST_AFTER_BLOCKS {
         return Err(NoOrder::OutsideLimits);
     }
     Ok(LSPS1OrderParams {
-        lsp_balance_sat: lacking.clamp(lo, hi),
+        lsp_balance_sat: lacking.min(hi),
         client_balance_sat: 0,
         required_channel_confirmations: options.min_required_channel_confirmations.max(1),
         funding_confirms_within_blocks: options
@@ -863,15 +946,56 @@ pub fn unanswered_step(record: &OrderRecord, sent: Sent, now: u64) -> Option<Ord
     }
 }
 
+/// What to do about an open order given which provider is chosen now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FollowPlan {
+    /// Ask the order's own provider about it and act on the answer.
+    Ask,
+    /// Nothing yet.
+    Wait,
+    /// The order is over, for this cause; the book's rules say whether its
+    /// provider is stopped (only if a payment was sent).
+    Fail(OrderWhy),
+}
+
+/// How an open order is followed when the provider chosen now is `current`
+/// (SL-28, SL-35): an order is only ever asked about, paid and judged done
+/// with the provider it was made with. Another provider chosen now gives up
+/// an order not paid at once; one whose payment was sent is followed with its
+/// own provider while `reachable` (the node is connected to it), and given up
+/// two days after its last change when it is not.
+pub fn follow_plan(
+    record: &OrderRecord,
+    current: &[u8; 33],
+    reachable: bool,
+    now: u64,
+) -> FollowPlan {
+    if record.provider == *current {
+        return FollowPlan::Ask;
+    }
+    if record.state == OrderState::Open && record.sent_msat == 0 {
+        return FollowPlan::Fail(OrderWhy::NotPossible);
+    }
+    if reachable {
+        FollowPlan::Ask
+    } else if now.saturating_sub(record.updated_unix) > GIVE_UP_AFTER_SECS {
+        FollowPlan::Fail(OrderWhy::NoChannel)
+    } else {
+        FollowPlan::Wait
+    }
+}
+
 /// Whether the order the provider approved is the one asked for (SL-28): no
 /// less room, no less lease, no fewer confirmations, not announced, and no
-/// coins asked of the shop.
+/// coins asked of the shop, and the funding not waited for longer than
+/// [`LOST_AFTER_BLOCKS`].
 pub fn terms_ok(asked: &LSPS1OrderParams, got: &LSPS1OrderParams) -> bool {
     got.lsp_balance_sat >= asked.lsp_balance_sat
         && !got.announce_channel
         && got.required_channel_confirmations >= asked.required_channel_confirmations
         && got.channel_expiry_blocks >= asked.channel_expiry_blocks
         && got.client_balance_sat == 0
+        && u32::from(got.funding_confirms_within_blocks) <= LOST_AFTER_BLOCKS
 }
 
 #[cfg(test)]
@@ -961,6 +1085,7 @@ mod tests {
     fn record(state: OrderState) -> OrderRecord {
         OrderRecord {
             id: "order-1".into(),
+            provider: PROV,
             state,
             why: if state == OrderState::Failed {
                 OrderWhy::Refused
@@ -1016,7 +1141,7 @@ mod tests {
             order: Some(record(OrderState::Open)),
             ..Default::default()
         };
-        book.fail(OrderWhy::FeeAboveMax, NOW, &PROV);
+        book.fail(OrderWhy::FeeAboveMax, NOW);
         assert!(!book.has_open_order());
         assert!(!order_wanted(0, 1_000_000, &book, NOW + 3599, &PROV));
         assert!(order_wanted(0, 1_000_000, &book, NOW + 3600, &PROV));
@@ -1038,8 +1163,14 @@ mod tests {
 
     #[test]
     fn sl_28_the_size_is_held_within_the_providers_limits() {
-        // Little lacking: raised to the provider's smallest.
-        let p = order_params(&options(), 950_000_000, 1_000_000, None).unwrap();
+        // Little lacking, under the provider's smallest: no order, since the
+        // smallest would put the room over the cap.
+        assert_eq!(
+            order_params(&options(), 950_000_000, 1_000_000, None),
+            Err(NoOrder::OutsideLimits)
+        );
+        // Lacking exactly the smallest: that.
+        let p = order_params(&options(), 900_000_000, 1_000_000, None).unwrap();
         assert_eq!(p.lsp_balance_sat, 100_000);
         // A lot lacking: cut to the provider's largest.
         let p = order_params(&options(), 0, 50_000_000, None).unwrap();
@@ -1453,12 +1584,13 @@ mod tests {
         better.channel_expiry_blocks += 1;
         better.required_channel_confirmations += 1;
         assert!(terms_ok(&asked, &better));
-        let mutate: [fn(&mut LSPS1OrderParams); 5] = [
+        let mutate: [fn(&mut LSPS1OrderParams); 6] = [
             |p| p.lsp_balance_sat -= 1,
             |p| p.announce_channel = true,
             |p| p.required_channel_confirmations = 0,
             |p| p.channel_expiry_blocks -= 1,
             |p| p.client_balance_sat = 1,
+            |p| p.funding_confirms_within_blocks = 145,
         ];
         for (n, f) in mutate.iter().enumerate() {
             let mut p = asked.clone();
@@ -1547,7 +1679,7 @@ mod tests {
         book.begin(record(OrderState::Open));
         book.paid(&[5; 32], Some(2_000_000), NOW);
         assert_eq!(book.fees_paid_sat, 2_000);
-        book.fail(OrderWhy::Refunded, NOW + 5, &PROV);
+        book.fail(OrderWhy::Refunded, NOW + 5);
         assert_eq!(book.fees_paid_sat, 2_000);
         assert_eq!(book.order.as_ref().unwrap().why, OrderWhy::Refunded);
     }
@@ -1561,7 +1693,7 @@ mod tests {
         assert!(book.payment_failed(&[5; 32], NOW + 1));
         assert_eq!(book.order.as_ref().unwrap().why, OrderWhy::PaymentFailed);
         assert_eq!(book.fees_paid_sat, 0);
-        assert_eq!(book.stopped_for, None);
+        assert!(book.stopped.is_empty());
         assert!(!order_wanted(0, 1_000_000, &book, NOW + 100, &PROV));
         // An order already paid is not failed by a late failure event.
         let mut book = OrderBook::default();
@@ -1579,16 +1711,16 @@ mod tests {
         // The payment is told meanwhile: the book moved on from the snapshot.
         book.paid(&[5; 32], Some(2_000_000), NOW + 1);
         let before = book.clone();
-        assert!(!book.if_current(&stale, |b| b.fail(OrderWhy::CannotPay, NOW + 2, &PROV)));
+        assert!(!book.if_current(&stale, |b| b.fail(OrderWhy::CannotPay, NOW + 2)));
         assert_eq!(book, before);
         // Another order with another id is not the snapshot's either.
         let mut other = record(OrderState::Paid);
         other.id = "order-2".into();
-        assert!(!book.if_current(&other, |b| b.fail(OrderWhy::Expired, NOW + 2, &PROV)));
+        assert!(!book.if_current(&other, |b| b.fail(OrderWhy::Expired, NOW + 2)));
         assert_eq!(book, before);
         // The same id in the same state is.
         let now_paid = record(OrderState::Paid);
-        assert!(book.if_current(&now_paid, |b| b.fail(OrderWhy::NoChannel, NOW + 3, &PROV)));
+        assert!(book.if_current(&now_paid, |b| b.fail(OrderWhy::NoChannel, NOW + 3)));
         assert_eq!(book.order.as_ref().unwrap().why, OrderWhy::NoChannel);
         // No order at all: nothing to act on.
         let mut empty = OrderBook::default();
@@ -1607,8 +1739,8 @@ mod tests {
             let mut book = OrderBook::default();
             book.begin(record(OrderState::Open));
             book.paid(&[5; 32], Some(2_000_000), NOW);
-            book.fail(why, NOW + 10, &PROV);
-            assert_eq!(book.stopped_for, Some(PROV), "{why:?}");
+            book.fail(why, NOW + 10);
+            assert_eq!(book.stopped, vec![PROV], "{why:?}");
             // Not an hour later, not ever, from this provider.
             for t in [NOW + 10 + 3600, NOW + 100 * 24 * 3600] {
                 assert!(!order_wanted(0, 1_000_000, &book, t, &PROV), "{why:?}");
@@ -1622,16 +1754,16 @@ mod tests {
     fn sl_28_an_order_that_never_left_or_that_brought_its_channel_does_not_stop_anything() {
         let mut book = OrderBook::default();
         book.begin(record(OrderState::Open));
-        book.fail(OrderWhy::Expired, NOW + 1, &PROV);
-        assert_eq!(book.stopped_for, None);
+        book.fail(OrderWhy::Expired, NOW + 1);
+        assert!(book.stopped.is_empty());
         assert!(order_wanted(0, 1_000_000, &book, NOW + 3601, &PROV));
         let mut book = OrderBook::default();
         book.begin(record(OrderState::Open));
         book.paid(&[5; 32], Some(2_000_000), NOW);
         assert!(book.done(NOW + 1, None));
         // A late failure does not undo a done order.
-        book.fail(OrderWhy::NoChannel, NOW + 2, &PROV);
-        assert_eq!(book.stopped_for, None);
+        book.fail(OrderWhy::NoChannel, NOW + 2);
+        assert!(book.stopped.is_empty());
         assert_eq!(book.order.as_ref().unwrap().state, OrderState::Done);
     }
 
@@ -1664,7 +1796,7 @@ mod tests {
         let mut book = OrderBook {
             fees_paid_sat: 77,
             next_try_unix: NOW + 5,
-            stopped_for: Some([2; 33]),
+            stopped: vec![[2; 33]],
             order: Some(record(OrderState::Paid)),
         };
         assert_eq!(decode(&encode(&book)).unwrap(), book);
@@ -1709,8 +1841,9 @@ mod tests {
         let mut bad = good.clone();
         bad[0] = 2;
         assert!(decode(&bad).is_err());
-        // Version, fees, next try, no stop, order flag, id length, id.
-        let id_end = 1 + 8 + 8 + 1 + 1 + 1 + "order-1".len();
+        // Version, fees, next try, no stop, order flag, id length, id, the
+        // provider's 33 bytes.
+        let id_end = 1 + 8 + 8 + 1 + 1 + 1 + "order-1".len() + 33;
         let mut bad = good.clone();
         bad[id_end] = 9;
         assert!(decode(&bad).is_err());
@@ -1721,16 +1854,236 @@ mod tests {
         bad[1 + 8 + 8 + 1 + 2] = b' ';
         assert!(decode(&bad).is_err());
         assert!(decode(&[]).is_err());
-        // The stop flag is 0 or 1, and 1 carries the 33 bytes of a node id.
+        // The stops are a count of at most sixteen, then 33 bytes of a node id
+        // each, none twice.
         let stopped = encode(&OrderBook {
-            stopped_for: Some([2; 33]),
+            stopped: vec![[2; 33], [3; 33]],
             ..Default::default()
         });
-        assert_eq!(decode(&stopped).unwrap().stopped_for, Some([2; 33]));
+        assert_eq!(decode(&stopped).unwrap().stopped, vec![[2; 33], [3; 33]]);
+        assert_eq!(encode(&decode(&stopped).unwrap()), stopped);
         let mut bad = stopped.clone();
-        bad[1 + 8 + 8] = 2;
+        bad[1 + 8 + 8] = 17;
         assert!(decode(&bad).is_err());
+        let mut bad = stopped.clone();
+        bad[1 + 8 + 8] = 3;
+        assert!(decode(&bad).is_err());
+        let mut twice = stopped.clone();
+        twice[1 + 8 + 8 + 1 + 33..1 + 8 + 8 + 1 + 66].copy_from_slice(&[2; 33]);
+        assert!(decode(&twice).is_err());
         assert!(decode(&stopped[..stopped.len() - 2]).is_err());
+        let sixteen = OrderBook {
+            stopped: (0..16).map(|n| [n + 2; 33]).collect(),
+            ..Default::default()
+        };
+        assert_eq!(decode(&encode(&sixteen)).unwrap(), sixteen);
+    }
+
+    #[test]
+    fn sl_28_the_funding_wait_is_at_most_a_day_of_blocks() {
+        let asked = order_params(&options(), 0, 1_000_000, None).unwrap();
+        let mut p = asked.clone();
+        p.funding_confirms_within_blocks = LOST_AFTER_BLOCKS as u16;
+        assert!(terms_ok(&asked, &p));
+        p.funding_confirms_within_blocks = LOST_AFTER_BLOCKS as u16 + 1;
+        assert!(!terms_ok(&asked, &p));
+        // A provider that wants longer is not ordered from at all.
+        let mut o = options();
+        o.min_funding_confirms_within_blocks = LOST_AFTER_BLOCKS as u16 + 1;
+        assert_eq!(
+            order_params(&o, 0, 1_000_000, None),
+            Err(NoOrder::OutsideLimits)
+        );
+    }
+
+    #[test]
+    fn sl_28_a_smallest_channel_above_what_brings_the_room_to_the_cap_makes_no_order() {
+        let mut o = options();
+        // 300,000 sat of room, a cap of 1,000,000: 700,000 brings it there.
+        o.min_initial_lsp_balance_sat = 700_001;
+        o.min_channel_balance_sat = 700_001;
+        assert_eq!(
+            order_params(&o, 300_000_000, 1_000_000, None),
+            Err(NoOrder::OutsideLimits)
+        );
+        o.min_initial_lsp_balance_sat = 700_000;
+        o.min_channel_balance_sat = 700_000;
+        assert_eq!(
+            order_params(&o, 300_000_000, 1_000_000, None)
+                .unwrap()
+                .lsp_balance_sat,
+            700_000
+        );
+    }
+
+    // ---- stopped providers ----
+
+    fn sent_open(provider: [u8; 33]) -> OrderRecord {
+        let mut r = record(OrderState::Open);
+        r.provider = provider;
+        r.sent_msat = 2_000_000;
+        r
+    }
+
+    #[test]
+    fn sl_28_a_stop_is_kept_for_every_provider_not_only_the_last() {
+        let a = [10; 33];
+        let b = [11; 33];
+        let mut book = OrderBook::default();
+        for p in [a, b] {
+            let mut r = record(OrderState::Open);
+            r.provider = p;
+            book.begin(r);
+            book.paid(&[5; 32], Some(2_000_000), NOW);
+            book.fail(OrderWhy::NoChannel, NOW + 1);
+        }
+        // A stopped, B stopped, back to A: A is still stopped.
+        assert!(book.is_stopped(&a) && book.is_stopped(&b));
+        assert!(!order_wanted(0, 1_000_000, &book, NOW + 100_000, &a));
+        assert!(!order_wanted(0, 1_000_000, &book, NOW + 100_000, &b));
+        assert!(order_wanted(0, 1_000_000, &book, NOW + 100_000, &[12; 33]));
+        // A stopped again changes nothing.
+        let before = book.clone();
+        book.begin(sent_open(a));
+        book.fail(OrderWhy::Expired, NOW + 2);
+        assert_eq!(book.stopped, before.stopped);
+    }
+
+    #[test]
+    fn sl_28_at_most_sixteen_stops_are_kept_and_the_oldest_is_dropped() {
+        let mut book = OrderBook::default();
+        for n in 0..17u8 {
+            book.begin(sent_open([n + 20; 33]));
+            book.fail(OrderWhy::NoChannel, NOW + n as u64);
+        }
+        assert_eq!(book.stopped.len(), MAX_STOPPED);
+        assert!(!book.is_stopped(&[20; 33]));
+        assert!(book.is_stopped(&[21; 33]) && book.is_stopped(&[36; 33]));
+        assert_eq!(decode(&encode(&book)).unwrap(), book);
+    }
+
+    #[test]
+    fn sl_28_a_sent_order_recorded_open_that_expires_stops_its_provider() {
+        let mut book = OrderBook::default();
+        book.begin(sent_open(PROV));
+        // The decision the node makes: nothing on its way, the hour is over.
+        let later = NOW + OPEN_UNPAID_SECS + 1;
+        let step = next_step(
+            book.order.as_ref().unwrap(),
+            Seen::Expecting,
+            Sent::NotSent,
+            false,
+            later,
+        );
+        assert_eq!(step, Next::Fail(OrderWhy::Expired));
+        book.fail(OrderWhy::Expired, later);
+        assert!(book.is_stopped(&PROV));
+        assert!(!order_wanted(0, 1_000_000, &book, later + 100_000, &PROV));
+        // An order never sent stops nothing.
+        let mut book = OrderBook::default();
+        book.begin(record(OrderState::Open));
+        book.fail(OrderWhy::Expired, later);
+        assert!(book.stopped.is_empty());
+    }
+
+    #[test]
+    fn sl_28_a_failed_payment_event_stops_nothing_even_with_a_payment_set_out() {
+        let mut book = OrderBook::default();
+        book.begin(sent_open(PROV));
+        assert!(book.payment_failed(&[5; 32], NOW + 1));
+        assert!(book.stopped.is_empty());
+        assert_eq!(book.fees_paid_sat, 0);
+    }
+
+    // ---- an order stays with its provider ----
+
+    #[test]
+    fn sl_28_an_unpaid_order_of_another_provider_is_given_up_at_once() {
+        let mut r = record(OrderState::Open);
+        r.provider = OTHER;
+        for reachable in [true, false] {
+            assert_eq!(
+                follow_plan(&r, &PROV, reachable, NOW + 5),
+                FollowPlan::Fail(OrderWhy::NotPossible)
+            );
+        }
+        let mut book = OrderBook::default();
+        book.begin(r);
+        book.fail(OrderWhy::NotPossible, NOW + 5);
+        // Given up with no stop of either provider.
+        assert!(book.stopped.is_empty());
+        // The order of the provider chosen is asked about as before.
+        assert_eq!(
+            follow_plan(&record(OrderState::Open), &PROV, false, NOW),
+            FollowPlan::Ask
+        );
+    }
+
+    #[test]
+    fn sl_28_an_order_with_a_sent_payment_is_followed_with_its_own_provider_or_given_up_after_two_days(
+    ) {
+        let r = sent_open(OTHER);
+        assert_eq!(follow_plan(&r, &PROV, true, NOW + 5), FollowPlan::Ask);
+        assert_eq!(follow_plan(&r, &PROV, false, NOW + 5), FollowPlan::Wait);
+        assert_eq!(
+            follow_plan(&r, &PROV, false, NOW + GIVE_UP_AFTER_SECS),
+            FollowPlan::Wait
+        );
+        assert_eq!(
+            follow_plan(&r, &PROV, false, NOW + GIVE_UP_AFTER_SECS + 1),
+            FollowPlan::Fail(OrderWhy::NoChannel)
+        );
+        // Given up, it stops its own provider, not the one chosen now.
+        let mut book = OrderBook::default();
+        book.begin(r);
+        book.fail(OrderWhy::NoChannel, NOW + GIVE_UP_AFTER_SECS + 1);
+        assert_eq!(book.stopped, vec![OTHER]);
+        assert!(order_wanted(
+            0,
+            1_000_000,
+            &book,
+            NOW + 3 * GIVE_UP_AFTER_SECS,
+            &PROV
+        ));
+        // A paid order of another provider is not given up as unpaid either.
+        let mut paid = record(OrderState::Paid);
+        paid.provider = OTHER;
+        assert_eq!(follow_plan(&paid, &PROV, true, NOW), FollowPlan::Ask);
+    }
+
+    #[test]
+    fn sl_28_the_record_keeps_its_provider() {
+        let mut r = record(OrderState::Open);
+        r.provider = OTHER;
+        let book = OrderBook {
+            order: Some(r),
+            ..Default::default()
+        };
+        assert_eq!(
+            decode(&encode(&book)).unwrap().order.unwrap().provider,
+            OTHER
+        );
+    }
+
+    // ---- a payment that was not sent ----
+
+    #[test]
+    fn sl_28_a_payment_the_library_did_not_send_fails_the_order_as_not_paid() {
+        let mut book = OrderBook::default();
+        book.begin(sent_open(PROV));
+        assert!(book.not_sent(NOW + 1));
+        let o = book.order.as_ref().unwrap();
+        assert_eq!(o.state, OrderState::Failed);
+        assert_eq!(o.why, OrderWhy::PaymentFailed);
+        assert_eq!(o.sent_msat, 0);
+        assert!(book.stopped.is_empty());
+        assert_eq!(book.fees_paid_sat, 0);
+        assert!(!book.has_open_order());
+        assert_eq!(book.next_try_unix, NOW + 1 + RETRY_AFTER_SECS);
+        // Not open: nothing to take back.
+        let before = book.clone();
+        assert!(!book.not_sent(NOW + 2));
+        assert_eq!(book, before);
     }
 
     // ---- the store: a restart keeps the order ----
@@ -1832,6 +2185,40 @@ mod tests {
         assert_eq!(orders.snapshot().order.unwrap().state, OrderState::Paid);
         let again = Orders::load(start(&d)).await.unwrap();
         assert_eq!(again.snapshot().fees_paid_sat, 2_000);
+    }
+
+    #[tokio::test]
+    async fn sl_28_a_failed_write_of_a_refused_order_still_holds_the_next_try_in_memory() {
+        let d = disks("lsps1-held");
+        let orders = Orders::load(start(&d)).await.unwrap();
+        orders.change(|b| b.next_try_unix = 1).await.unwrap();
+        std::fs::remove_dir_all(d.dir.join("local")).unwrap();
+        std::fs::write(d.dir.join("local"), b"not a directory").unwrap();
+        let end = |b: &mut OrderBook| {
+            let mut r = record(OrderState::Failed);
+            r.id = "-".into();
+            b.begin(r);
+            b.fail(OrderWhy::Refused, NOW);
+        };
+        assert!(orders.change_held(end, NOW).await.is_err());
+        let book = orders.snapshot();
+        // The order is not in the book, but no new one is asked for an hour.
+        assert!(book.order.is_none());
+        assert!(!order_wanted(0, 1_000_000, &book, NOW + 2, &PROV));
+        assert!(!order_wanted(
+            0,
+            1_000_000,
+            &book,
+            NOW + RETRY_AFTER_SECS - 1,
+            &PROV
+        ));
+        assert!(order_wanted(
+            0,
+            1_000_000,
+            &book,
+            NOW + RETRY_AFTER_SECS,
+            &PROV
+        ));
     }
 
     #[tokio::test]

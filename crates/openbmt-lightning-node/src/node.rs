@@ -1280,6 +1280,7 @@ impl Node {
         let channels = s.manager.list_channels();
         let usable = s.manager.list_usable_channels();
         let book: OrderBook = s.orders.snapshot();
+        let stopped = book.is_stopped(&s.provider.node_id.serialize());
         NodeStatus {
             device: s.device_status.snapshot(),
             chain_ok: s.chain_ok(),
@@ -1291,7 +1292,7 @@ impl Node {
             lsps1: s.lsps1.lock_recover().offer,
             last_order: book.order,
             lsps1_fees_paid_sat: book.fees_paid_sat,
-            lsps1_stopped: book.stopped_for == Some(s.provider.node_id.serialize()),
+            lsps1_stopped: stopped,
         }
     }
 
@@ -1731,6 +1732,7 @@ impl Shared {
         let failed = |why: OrderWhy| {
             let record = OrderRecord {
                 id: "-".to_string(),
+                provider: me,
                 state: OrderState::Failed,
                 why,
                 fee_sat: 0,
@@ -1743,7 +1745,7 @@ impl Shared {
             };
             move |b: &mut OrderBook| {
                 b.begin(record);
-                b.fail(why, now, &me);
+                b.fail(why, now);
             }
         };
         let params = match lsps1::order_params(
@@ -1756,7 +1758,7 @@ impl Shared {
             Err(e) => {
                 self.logger
                     .line(Level::Info, &format!("no order can be made: {e:?}"));
-                let _ = self.orders.change(failed(OrderWhy::NotPossible)).await;
+                self.write_failed(failed(OrderWhy::NotPossible), now).await;
                 return;
             }
         };
@@ -1769,14 +1771,14 @@ impl Shared {
         let Some(answer) = answer else {
             self.logger
                 .line(Level::Info, "the provider did not take the order");
-            let _ = self.orders.change(failed(OrderWhy::Refused)).await;
+            self.write_failed(failed(OrderWhy::Refused), now).await;
             return;
         };
         let id_ok = !answer.id.is_empty()
             && answer.id.len() <= lsps1::MAX_ID_LEN
             && answer.id.chars().all(|c| c.is_ascii_graphic());
         if !id_ok {
-            let _ = self.orders.change(failed(OrderWhy::Refused)).await;
+            self.write_failed(failed(OrderWhy::Refused), now).await;
             return;
         }
         // The order the provider approved is the one asked for, or it is not
@@ -1786,11 +1788,12 @@ impl Shared {
                 Level::Info,
                 "the provider's order differs from the one asked",
             );
-            let _ = self.orders.change(failed(OrderWhy::NotPossible)).await;
+            self.write_failed(failed(OrderWhy::NotPossible), now).await;
             return;
         }
         let record = OrderRecord {
             id: answer.id.clone(),
+            provider: me,
             state: OrderState::Open,
             why: OrderWhy::None,
             fee_sat: lsps1::order_fee_sat(&answer.payment),
@@ -1813,29 +1816,64 @@ impl Shared {
             Level::Info,
             &format!("order {} made, fee {} sat", record.id, record.fee_sat),
         );
-        self.progress_order(&record, &answer, now).await;
+        self.progress_order(&record, &provider, &answer, now).await;
     }
 
-    /// Asks the provider about the open order and acts on the answer.
+    /// Writes the end of an order that was never made; when the write fails
+    /// the next try is still held back in memory, and the failure is logged.
+    async fn write_failed(&self, f: impl FnOnce(&mut OrderBook), now: u64) {
+        if let Err(e) = self.orders.change_held(f, now).await {
+            self.logger.line(
+                Level::Warn,
+                &format!("order failure not stored, next try held back in memory: {e}"),
+            );
+        }
+    }
+
+    /// Asks the order's own provider about the open order and acts on the
+    /// answer (SL-28): never another provider than the one it was made with.
     async fn follow_order(&self, record: &OrderRecord, now: u64) {
-        let provider = self.provider.node_id;
+        let reachable = PublicKey::from_slice(&record.provider)
+            .is_ok_and(|p| self.peers.peer_by_node_id(&p).is_some());
+        let plan = lsps1::follow_plan(record, &self.provider.node_id.serialize(), reachable, now);
+        let why = match plan {
+            lsps1::FollowPlan::Ask => None,
+            lsps1::FollowPlan::Wait => return,
+            lsps1::FollowPlan::Fail(why) => Some(why),
+        };
+        // A provider id that is no key is not asked either.
+        let provider = match (why, PublicKey::from_slice(&record.provider)) {
+            (None, Ok(p)) => p,
+            (why, _) => {
+                let why = why.unwrap_or(OrderWhy::NotPossible);
+                self.logger
+                    .line(Level::Info, &format!("order {} over: {why:?}", record.id));
+                self.write_failed(
+                    |b| {
+                        b.if_current(record, |b| b.fail(why, now));
+                    },
+                    now,
+                )
+                .await;
+                return;
+            }
+        };
         let id = LSPS1OrderId(record.id.clone());
         let answer = self
             .order_request(|h| h.check_order_status(&provider, id))
             .await;
         match answer {
-            Some(a) if a.id == record.id => self.progress_order(record, &a, now).await,
+            Some(a) if a.id == record.id => self.progress_order(record, &provider, &a, now).await,
             _ => {
                 // No answer: asked again later. A paid order that stays
                 // unanswered is given up after two days, one not paid an
                 // hour after it was made. The book changes only if the order
                 // is still the one the decision was made from.
                 if let Some(why) = lsps1::unanswered_step(record, self.sent_of(record), now) {
-                    let me = provider.serialize();
                     let _ = self
                         .orders
                         .change(|b| {
-                            b.if_current(record, |b| b.fail(why, now, &me));
+                            b.if_current(record, |b| b.fail(why, now));
                         })
                         .await;
                 }
@@ -1887,9 +1925,16 @@ impl Shared {
     /// What to do about an order after the provider's answer. Every change of
     /// the book applies only if the order is still the one `record` was taken
     /// from.
-    async fn progress_order(&self, record: &OrderRecord, answer: &OrderAnswer, now: u64) {
+    /// `provider` is the order's own provider: the channel is judged against
+    /// it, and the order is paid only if it is the provider chosen now.
+    async fn progress_order(
+        &self,
+        record: &OrderRecord,
+        provider: &PublicKey,
+        answer: &OrderAnswer,
+        now: u64,
+    ) {
         let seen = lsps1::read_status(&answer.payment, &answer.channel);
-        let me = self.provider.node_id.serialize();
         let write = |r: Result<(), lightning::io::Error>| {
             if let Err(e) = r {
                 self.logger
@@ -1900,7 +1945,7 @@ impl Shared {
         let channel_ok = answer.channel.as_ref().is_some_and(|c| {
             lsps1::channel_verified(
                 &self.own_channels(),
-                &self.provider.node_id,
+                provider,
                 &c.funding_outpoint,
                 record.lsp_balance_sat,
                 &record.prior_channels,
@@ -1936,15 +1981,19 @@ impl Shared {
                 write(
                     self.orders
                         .change(|b| {
-                            b.if_current(record, |b| b.fail(why, now, &me));
+                            b.if_current(record, |b| b.fail(why, now));
                         })
                         .await,
                 );
             }
             lsps1::Next::Pay => {
+                // Never paid to a provider other than the order's own.
+                if *provider != self.provider.node_id {
+                    return;
+                }
                 let plan = lsps1::judge_payment(
                     &answer.payment,
-                    &self.provider.node_id,
+                    provider,
                     self.max_opening_fee_msat,
                     self.best_outbound_msat(),
                     now,
@@ -1956,9 +2005,7 @@ impl Shared {
                         write(
                             self.orders
                                 .change(|b| {
-                                    b.if_current(record, |b| {
-                                        b.fail(OrderWhy::NotPossible, now, &me)
-                                    });
+                                    b.if_current(record, |b| b.fail(OrderWhy::NotPossible, now));
                                 })
                                 .await,
                         );
@@ -1970,7 +2017,7 @@ impl Shared {
                         write(
                             self.orders
                                 .change(|b| {
-                                    b.if_current(record, |b| b.fail(r.why(), now, &me));
+                                    b.if_current(record, |b| b.fail(r.why(), now));
                                 })
                                 .await,
                         );
@@ -1996,7 +2043,22 @@ impl Shared {
                     })
                     .await;
                 match set_out {
-                    Ok(true) => self.send_order_payment(route, &plan),
+                    Ok(true) => {
+                        // Nothing went out: what was set out is taken back
+                        // and the order fails as not paid, so that it does
+                        // not stay open with a payment that does not exist.
+                        if !self.send_order_payment(route, &plan) {
+                            write(
+                                self.orders
+                                    .change(|b| {
+                                        b.if_current(record, |b| {
+                                            b.not_sent(now);
+                                        });
+                                    })
+                                    .await,
+                            );
+                        }
+                    }
                     Ok(false) => {}
                     Err(e) => self
                         .logger
@@ -2038,24 +2100,31 @@ impl Shared {
         })
     }
 
-    /// Sends the order's payment over the route.
-    fn send_order_payment(&self, route: Route, plan: &lsps1::PayPlan) {
+    /// Sends the order's payment over the route. `false` if the library says
+    /// it was not sent (a duplicate is on its way already, so it is not that).
+    fn send_order_payment(&self, route: Route, plan: &lsps1::PayPlan) -> bool {
         match self.manager.send_payment_with_route(
             route,
             PaymentHash(plan.payment_hash),
             RecipientOnionFields::secret_only(PaymentSecret(plan.payment_secret)),
             PaymentId(plan.payment_hash),
         ) {
-            Ok(()) => self.logger.line(
-                Level::Info,
-                &format!("paying the provider {} msat for room", plan.amount_msat),
-            ),
+            Ok(()) => {
+                self.logger.line(
+                    Level::Info,
+                    &format!("paying the provider {} msat for room", plan.amount_msat),
+                );
+                true
+            }
             // Already on its way: nothing to do.
-            Err(RetryableSendFailure::DuplicatePayment) => {}
-            Err(e) => self.logger.line(
-                Level::Warn,
-                &format!("the order's payment was not sent: {e:?}"),
-            ),
+            Err(RetryableSendFailure::DuplicatePayment) => true,
+            Err(e) => {
+                self.logger.line(
+                    Level::Warn,
+                    &format!("the order's payment was not sent: {e:?}"),
+                );
+                false
+            }
         }
     }
 

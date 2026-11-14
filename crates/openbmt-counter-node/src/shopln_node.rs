@@ -2885,6 +2885,7 @@ mod tests {
         use openbmt_lightning_node::lsps1 as ln;
         let record = |state, why| ln::OrderRecord {
             id: "o".to_string(),
+            provider: [2; 33],
             state,
             why,
             fee_sat: 2_000,
