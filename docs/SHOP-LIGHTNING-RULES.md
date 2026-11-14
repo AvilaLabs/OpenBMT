@@ -187,25 +187,34 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   when that is more), and pays the provider's invoice from the Lightning
   balance, only when the fee is at most what the owner allows for one opening
   (SL-29). The shop puts nothing into that channel, and the channel is not
-  announced. Only a BOLT 11 invoice of the provider's own, not expired, is
-  paid, only over a channel to the provider, and only when it asks a final
-  CLTV of at most 144 blocks. A payment on its way is waited for, never paid
-  or failed again. The fee counted is what the payment delivered, rounded up
-  to a satoshi; when that amount is not known, it is the largest of the
-  invoice, the fee and the total the provider names. A refund the provider
-  claims does not lower the count, since the node cannot check it. An order is
-  made at most once an hour, and not within an hour of the last one ending.
-  One not paid within an hour is given up. An order is done only when the
-  node's own channel list holds a channel with the provider, funded by the
-  output the provider names, whose provider side is at least nine tenths of
-  the room ordered; without it, the order is given up two days after the
-  payment. A paid order given up without its channel stops further orders from
-  that provider; a provider the shop picks after it can be ordered from. The
-  provider's word that an order is paid or open changes nothing until a
-  payment of the shop's own has left for it. Nothing is ordered without a
-  usable channel to the provider to pay from, so the first channel still comes
-  through LSPS2. A provider without LSPS1 is taken all the same; room then
-  comes only with a payment too big for it.
+  announced. The order the provider approves must give at least the room, the
+  lease and the confirmations asked, must not be announced, and must ask no
+  coins of the shop; otherwise it is not paid. Only a BOLT 11 invoice of the
+  provider's own, not expired, is paid, only over a channel to the provider,
+  and only when it asks a final CLTV of at most 144 blocks. The amount set out
+  is written to the book before it is sent, and an order with an amount set
+  out is never paid again: a payment on its way is waited for, and one that
+  did not leave lets the order expire. The fee counted is what the payment
+  delivered as the library reports it, rounded up to a satoshi, or else the
+  amount set out. A refund the provider claims does not lower the count, since
+  the node cannot check it. An order is made at most once an hour, and not
+  within an hour of the last one ending. One not paid within an hour is given
+  up, whether or not the provider answers. An order is done only when the
+  node's own channel list holds a channel with the provider that is ready,
+  whose funding has a confirmation, that the node did not hold when the order
+  was made, that is funded by the output the provider names, and whose
+  provider side is at least nine tenths of the room ordered. Without it, the
+  order is given up two days after the payment. No order is made while the
+  provider already has more than 16 channels with the node. An order already
+  made is followed whenever the provider is connected, even when it no longer
+  offers LSPS1. A paid order given up without its channel stops further orders
+  from that provider; a provider the shop picks after it can be ordered from.
+  The provider's word that an order is paid or open changes nothing until a
+  payment of the shop's own has left for it. A change to the orders takes
+  effect only once it is stored. Nothing is ordered without a usable channel
+  to the provider to pay from, so the first channel still comes through LSPS2.
+  A provider without LSPS1 is taken all the same; room then comes only with a
+  payment too big for it.
 - **SL-29. The fee before the payment.** A payment that opens a channel shows
   the provider's fee to the customer's amount before the invoice is made, and
   the owner sets the most the shop will pay for one opening. Above it, the

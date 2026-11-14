@@ -910,7 +910,7 @@ library's own:
 | orderWhyRefunded | The provider gave the payment back. |
 | orderWhyNotPossible | The provider's terms are ones the counter cannot meet or pay. |
 | orderWhyNoChannel | It was paid, but no channel opened within two days. Ask the provider for the money back. |
-| orderWhyStopped | WORDS_NEEDED_SL28_ORDER_WHY_STOPPED |
+| orderWhyStopped | It was paid, but no channel came, so no more room is bought from this provider. Ask it for the money back, or pick another provider. |
 | changeLimits | Change the limits |
 | changeProvider | Change the provider |
 | save | Save |
