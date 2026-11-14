@@ -2,8 +2,10 @@
 //! ([rules](../../../docs/SHOP-LIGHTNING-RULES.md)).
 //!
 //! - [`bip85`]: the node's seed, the 64-byte child of the shop's words (SL-10).
-//! - [`device`], [`device_tcp`], [`seal`]: the second device and what is
-//!   sealed for it (SL-20).
+//! - [`device`], [`device_link`], [`seal`]: the second device and what is
+//!   sealed for it (SL-20); the second device is the Box, over the shop's own
+//!   link (SL-74). `device_tcp`, a plain TCP device, is built for tests and
+//!   with the `tcp-device` feature, which only the node's own tools turn on.
 //! - [`store`]: the store that writes both copies, the second device first
 //!   (SL-21, SL-23, SL-24); [`state`]: which copy is newer (SL-25).
 //! - [`expect`]: what is expected of each invoice, across a restart; [`paid`]:
@@ -96,6 +98,8 @@ pub mod cap;
 pub mod chain;
 pub mod close;
 pub mod device;
+pub mod device_link;
+#[cfg(any(test, feature = "tcp-device"))]
 pub mod device_tcp;
 pub mod expect;
 pub mod feehistory;

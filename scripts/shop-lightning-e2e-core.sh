@@ -218,7 +218,7 @@ guarded() {
 if [ -z "${SHOP_BIN:-}" ] || [ -z "${DEVICE_BIN:-}" ]; then
   say "Build the node's example and the second device"
   guarded CARGO_TARGET_DIR="$TARGET" cargo build --quiet --locked --manifest-path "$ROOT/Cargo.toml" \
-    -p openbmt-lightning-node --bins --example shop_regtest || die "the build of the node failed"
+    -p openbmt-lightning-node --features tcp-device --bins --example shop_regtest || die "the build of the node failed"
   SHOP_BIN=${SHOP_BIN:-$TARGET/debug/examples/shop_regtest}
   DEVICE_BIN=${DEVICE_BIN:-$TARGET/debug/shop-lightning-device}
 fi
