@@ -137,7 +137,8 @@ refuses a lockfile that does not match `package.json`.
    arrives through another package's update.
 2. **Exact versions.** Every dependency is pinned with `=` and the lock
    files are committed. Builds use `--locked`.
-3. **crates.io only.** No git dependencies and no other registries.
+3. **crates.io only.** No git dependencies and no other registries. A
+   path dependency or a `[patch]` entry points inside this repository.
 4. **Default features off** unless a default is needed, and the reason is
    a comment beside the dependency.
 5. **Build-time code counts.** A build script or a procedural macro runs
