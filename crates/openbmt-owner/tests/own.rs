@@ -1344,7 +1344,7 @@ fn oa_121_a_change_is_dropped_after_seven_days_and_the_file_is_read_strictly() {
     // A restart reads it back; a restart that finds it in force drops it.
     let mut restored =
         OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), &disk.get()).unwrap();
-    assert_eq!(restored.restore_waiting(&bytes), Ok(true));
+    assert_eq!(restored.restore_waiting(&bytes, |b| disk.put(b)), Ok(true));
     assert_eq!(restored.waiting_change(), Some(&held));
     let confirmed = restored
         .join_confirmation(CounterConfirmation::sign(&id(3), &held.hash()))
@@ -1352,7 +1352,7 @@ fn oa_121_a_change_is_dropped_after_seven_days_and_the_file_is_read_strictly() {
     restored.put_in_force(&confirmed, |b| disk.put(b)).unwrap();
     let mut again =
         OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), &disk.get()).unwrap();
-    assert_eq!(again.restore_waiting(&bytes), Ok(false));
+    assert_eq!(again.restore_waiting(&bytes, |b| disk.put(b)), Ok(false));
     assert!(again.waiting_change().is_none());
 }
 
@@ -1385,4 +1385,113 @@ fn oa_123_a_box_is_not_added_while_a_change_waits_and_is_after_it_is_in_force_or
     pair_second(&mut s, &disk, &waiting, 4, T0 + 100);
     s.drop_waiting();
     assert!(s.add_box(id(10).device_id(), USD, |b| disk.put(b)).is_ok());
+}
+
+/// Whether the counter `n` is paired as far as the owner phone knows: its
+/// range is in the book and its bundle waits.
+fn knows(s: &OwnShop, n: u8) -> bool {
+    s.book().has_device(&id(n).device_id())
+        && s.counters_waiting()
+            .iter()
+            .any(|w| w.counter == id(n).device_id())
+}
+
+fn reopen(state: &[u8]) -> OwnShop {
+    OwnShop::restore(id(1), PinnedWallet::from_text(SINGLE).unwrap(), state).unwrap()
+}
+
+#[test]
+fn oa_119_a_stop_after_any_write_leaves_no_pairing_or_a_counter_the_owner_phone_knows() {
+    // The three writes of a counter added to a waiting change, in order:
+    // the waiting file, the state, and then what is sent (nothing is sent
+    // before both are written).
+    for stop in 0..3 {
+        let (disk, waiting) = (Disk::new(), Disk::new());
+        let mut s = shop_with_counter_and_box(&disk);
+        let on_disk = disk.get();
+        let made = s.make_offer(T0 + 100).unwrap();
+        let (_, r) = counter_request(&made, 4, "Back");
+        let result = s.confirm_with(
+            &made,
+            T0 + 130,
+            &r.to_bytes(),
+            USD,
+            Vec::new(),
+            None,
+            |b| {
+                if stop == 1 {
+                    Err("stopped before the state".to_string())
+                } else {
+                    disk.put(b)
+                }
+            },
+            |b| {
+                if stop == 0 {
+                    Err("stopped before the file".to_string())
+                } else {
+                    waiting.put(b)
+                }
+            },
+        );
+        if stop == 2 {
+            assert!(result.is_ok());
+        } else {
+            assert!(matches!(result, Err(OwnError::Store(_))), "stop {stop}");
+        }
+        // The next start: the state file and the waiting file as they are.
+        let mut back = reopen(&disk.get());
+        let file = waiting.get();
+        if !file.is_empty() {
+            assert_eq!(back.restore_waiting(&file, |b| disk.put(b)), Ok(true));
+        }
+        match stop {
+            // (a) Nothing was written: no counter has anything that pairs it.
+            0 => {
+                assert!(file.is_empty() && disk.get() == on_disk);
+                assert!(!back.book().has_device(&id(4).device_id()));
+                assert!(back
+                    .counters_waiting()
+                    .iter()
+                    .all(|w| w.counter != id(4).device_id()));
+                assert!(back.waiting_change().is_none());
+            }
+            // (b) The file is there and the state is not: the start completes
+            // the state from the file, and stores it.
+            1 => {
+                assert_ne!(disk.get(), on_disk);
+                assert!(knows(&back, 4), "completed from the file");
+                assert!(back.waiting_change().is_some());
+                assert_eq!(reopen(&disk.get()).to_bytes(), back.to_bytes());
+            }
+            // Both written: the state is whole already and the file is read.
+            _ => {
+                assert!(knows(&back, 4));
+                assert_eq!(back.to_bytes(), s.to_bytes());
+                assert_eq!(back.waiting_change(), s.waiting_change());
+            }
+        }
+    }
+}
+
+#[test]
+fn oa_119_a_waiting_file_for_a_counter_the_state_lacks_and_carries_no_state_is_refused() {
+    let (disk, waiting) = (Disk::new(), Disk::new());
+    let mut s = shop_with_counter_and_box(&disk);
+    let on_disk = disk.get();
+    pair_second(&mut s, &disk, &waiting, 4, T0 + 100);
+    let mut held = WaitingChange::from_bytes(&waiting.get()).unwrap();
+    held.state = Vec::new();
+    let mut back = reopen(&on_disk);
+    assert!(matches!(
+        back.restore_waiting(&held.to_bytes(), |b| disk.put(b)),
+        Err(openbmt_owner::own_shop::WaitingRestoreError::Unreadable(_))
+    ));
+    // A state of another shop's settings is refused too.
+    let mut held = WaitingChange::from_bytes(&waiting.get()).unwrap();
+    held.state = shop(SINGLE).to_bytes();
+    let mut back = reopen(&on_disk);
+    assert!(back
+        .restore_waiting(&held.to_bytes(), |b| disk.put(b))
+        .is_err());
+    assert_eq!(reopen(&on_disk).to_bytes(), on_disk);
 }

@@ -214,6 +214,17 @@ impl<E: fmt::Display> fmt::Display for OwnError<E> {
 
 impl<E: fmt::Debug + fmt::Display> std::error::Error for OwnError<E> {}
 
+/// Why the waiting change's file did not come back (OA-119 to OA-121).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WaitingRestoreError<E> {
+    /// The file does not read, or does not fit the settings in force.
+    Unreadable(DecodeError),
+    /// The state the file carries does not read or is not this shop's.
+    State(OwnRestoreError),
+    /// The state could not be stored.
+    Store(E),
+}
+
 /// Why the shop's state did not come back.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OwnRestoreError {
@@ -476,10 +487,29 @@ impl OwnShop {
         wallet: PinnedWallet,
         bytes: &[u8],
     ) -> Result<Self, OwnRestoreError> {
+        let (state, wallet, recovered) = decode_state(&identity.device_id(), wallet, bytes)?;
+        Ok(Self {
+            identity,
+            wallet,
+            state,
+            recovered,
+            held: None,
+        })
+    }
+}
+
+/// Read the state's bytes for the owner `owner` and `wallet` (OA-105), with
+/// the wallet the state is for and whether CR-261's recovery was needed.
+fn decode_state(
+    expect: &DeviceId,
+    wallet: PinnedWallet,
+    bytes: &[u8],
+) -> Result<(OwnState, PinnedWallet, bool), OwnRestoreError> {
+    {
         let mut r = Reader::framed(bytes, &MAGIC_OWN_STATE).map_err(corrupt)?;
         let owner = r.device_id().map_err(corrupt)?;
         let wallet_hash = r.array::<32>().map_err(corrupt)?;
-        if owner != identity.device_id() {
+        if owner != *expect {
             return Err(OwnRestoreError::NotThisShop);
         }
         let known = if r.flag().map_err(corrupt)? {
@@ -575,15 +605,11 @@ impl OwnShop {
                 _ => return Err(OwnRestoreError::NotThisShop),
             }
         };
-        Ok(Self {
-            identity,
-            wallet,
-            state,
-            recovered,
-            held: None,
-        })
+        Ok((state, wallet, recovered))
     }
+}
 
+impl OwnShop {
     /// The bytes of the shop's state.
     pub fn to_bytes(&self) -> Vec<u8> {
         self.state
@@ -890,10 +916,13 @@ impl OwnShop {
             approver_sig: None,
             settings: settings.clone(),
         };
-        // The range is written to the book before it is signed (OA-106).
+        let hold = self.holds(&settings);
         let mut next = self.state.clone();
         let range = next.book.allocate(read.counter, now)?;
-        self.commit(next, &persist)?;
+        if !hold {
+            // The range is written to the book before it is signed (OA-106).
+            self.commit(next.clone(), &persist)?;
+        }
         let first_range = SignedRange::sign(&self.identity, range)
             .map_err(|e| OwnRefusal::Pairing(OwnPairError::Range(e)))?;
         debug_assert!(range.end - range.start >= FIRST_RANGE_MIN_COUNT);
@@ -907,25 +936,29 @@ impl OwnShop {
             relay,
         )
         .map_err(OwnRefusal::Pairing)?;
-        let hold = self.holds(&settings);
-        let held = WaitingChange {
-            signed: signed_settings.clone(),
-            signed_at: now,
-        };
-        if hold {
-            // Written before anything is sent (OA-119).
-            persist_waiting(&held.to_bytes()).map_err(OwnError::Store)?;
-        }
-        let mut next = self.state.clone();
         if !hold {
-            next.known = Some(signed_settings);
+            next.known = Some(signed_settings.clone());
         }
         next.waiting.push(bundle.clone());
         next.waiting
             .sort_by_key(|b| b.pairing.entry.counter.to_bytes());
+        let mut held = None;
+        if hold {
+            // OA-119: the file is written first and carries the state that
+            // pairs the counter (its range and its bundle), so that a stop
+            // before the state is stored leaves either nothing that pairs
+            // it or a start that completes the state from the file.
+            let change = WaitingChange {
+                signed: signed_settings.clone(),
+                signed_at: now,
+                state: next.encode(&self.identity.device_id(), &self.wallet.checksum32()),
+            };
+            persist_waiting(&change.to_bytes()).map_err(OwnError::Store)?;
+            held = Some(change);
+        }
         self.commit(next, &persist)?;
         if hold {
-            self.held = Some(held);
+            self.held = held;
         }
         Ok(Paired {
             bundle,
@@ -999,8 +1032,16 @@ impl OwnShop {
     /// already the settings in force is dropped, and the answer is `false`:
     /// the caller deletes the file (OA-120). A change of a version that is
     /// not above the one in force is refused as a file that does not read.
-    pub fn restore_waiting(&mut self, bytes: &[u8]) -> Result<bool, DecodeError> {
-        let change = WaitingChange::from_bytes(bytes)?;
+    ///
+    /// A file that adds a counter the state lacks is the stop between the
+    /// file and the state (OA-119): the state the file carries is stored
+    /// through `persist` and taken, before anything else runs.
+    pub fn restore_waiting<E>(
+        &mut self,
+        bytes: &[u8],
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<bool, WaitingRestoreError<E>> {
+        let change = WaitingChange::from_bytes(bytes).map_err(WaitingRestoreError::Unreadable)?;
         if change.is_in_force(self.state.known.as_ref()) {
             self.held = None;
             return Ok(false);
@@ -1011,9 +1052,43 @@ impl OwnShop {
             .as_ref()
             .is_none_or(|k| change.signed.settings.version > k.settings.version);
         if !above {
-            return Err(DecodeError::NonCanonical(
+            return Err(WaitingRestoreError::Unreadable(DecodeError::NonCanonical(
                 "the waiting settings are not above the ones in force",
-            ));
+            )));
+        }
+        let added: Vec<DeviceId> = change
+            .signed
+            .settings
+            .counters
+            .keys()
+            .filter(|c| {
+                !self
+                    .state
+                    .known
+                    .as_ref()
+                    .is_some_and(|k| k.settings.counters.contains_key(c))
+            })
+            .copied()
+            .collect();
+        if added.iter().any(|c| !self.state.book.has_device(c)) {
+            if change.state.is_empty() {
+                return Err(WaitingRestoreError::Unreadable(DecodeError::NonCanonical(
+                    "the waiting settings add a counter the shop does not know",
+                )));
+            }
+            let (state, _, _) = decode_state(
+                &self.identity.device_id(),
+                self.wallet.clone(),
+                &change.state,
+            )
+            .map_err(WaitingRestoreError::State)?;
+            if state.known != self.state.known || added.iter().any(|c| !state.book.has_device(c)) {
+                return Err(WaitingRestoreError::State(OwnRestoreError::Corrupt(
+                    "the waiting change's state is not this shop's",
+                )));
+            }
+            persist(&change.state).map_err(WaitingRestoreError::Store)?;
+            self.state = state;
         }
         self.held = Some(change);
         Ok(true)
@@ -1089,6 +1164,7 @@ impl OwnShop {
         let held = WaitingChange {
             signed: signed.clone(),
             signed_at: now,
+            state: Vec::new(),
         };
         persist_waiting(&held.to_bytes()).map_err(OwnError::Store)?;
         self.held = Some(held);
@@ -1193,6 +1269,11 @@ impl OwnShop {
                 return Err(OwnRefusal::Settings(Refusal::BoxKnown).into());
             }
         }
+        // One change waits at a time, and a Box added now would be built on
+        // the settings in force, not on the ones that wait (OA-121).
+        if self.held.is_some() {
+            return Err(OwnRefusal::BoxWaits.into());
+        }
         let settings = self
             .settings_with_box(box_key, usd_per_btc)
             .map_err(OwnRefusal::Settings)?;
@@ -1269,11 +1350,6 @@ impl OwnShop {
         ))
     }
 
-        // One change waits at a time, and a Box added now would be built on
-        // the settings in force, not on the ones that wait (OA-121).
-        if self.held.is_some() {
-            return Err(OwnRefusal::BoxWaits.into());
-        }
     /// SS-41, SS-42: the receive index of `new_wallet` that the move of the
     /// starter wallet pays: the first index of a new range of the owner's
     /// own, taken from the book after every range given so far (the

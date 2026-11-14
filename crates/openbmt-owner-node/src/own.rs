@@ -28,7 +28,9 @@ use openbmt_core::pinned_wallet::PinnedWallet;
 use openbmt_core::settings::Authority;
 use openbmt_courier::Post;
 use openbmt_owner::own_book::{gap_limit, needs_range, unused_indexes, AllocationBook};
-use openbmt_owner::own_shop::{OwnError, OwnRefusal, OwnRestoreError, OwnShop};
+use openbmt_owner::own_shop::{
+    OwnError, OwnRefusal, OwnRestoreError, OwnShop, WaitingRestoreError,
+};
 use openbmt_owner::own_switch::{
     move_ready, switch_status, HeldSwitch, MoveNotReady, Repin, RepinHold, SwitchStatus,
 };
@@ -180,16 +182,22 @@ impl OwnNode {
         };
         // OA-120, OA-121: the waiting change is read strictly; a start that
         // finds the settings in force equal to it deletes the file.
+        // A file that adds a counter the state lacks is a stop between the
+        // file and the state: the state it carries is stored first (OA-119).
         match fs::read(dir.join(OWN_WAITING_FILE)) {
-            Ok(bytes) => match shop.restore_waiting(&bytes) {
-                Ok(true) => {}
-                Ok(false) => remove_file(dir, OWN_WAITING_FILE)?,
-                Err(_) => {
-                    return Err(OwnNodeError::State(OwnRestoreError::Corrupt(
-                        "the waiting change does not read back",
-                    )))
+            Ok(bytes) => {
+                match shop.restore_waiting(&bytes, |state| write_file(dir, OWN_STATE_FILE, state)) {
+                    Ok(true) => {}
+                    Ok(false) => remove_file(dir, OWN_WAITING_FILE)?,
+                    Err(WaitingRestoreError::Store(e)) => return Err(OwnNodeError::Io(e)),
+                    Err(WaitingRestoreError::State(e)) => return Err(OwnNodeError::State(e)),
+                    Err(WaitingRestoreError::Unreadable(_)) => {
+                        return Err(OwnNodeError::State(OwnRestoreError::Corrupt(
+                            "the waiting change does not read back",
+                        )))
+                    }
                 }
-            },
+            }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(OwnNodeError::Io(format!("read: {e}"))),
         }

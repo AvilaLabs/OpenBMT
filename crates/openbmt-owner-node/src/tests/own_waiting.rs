@@ -113,3 +113,58 @@ fn oa_120_a_start_that_finds_the_settings_in_force_deletes_the_file() {
     assert!(again.waiting_view().is_none());
     assert!(!dir.0.join(OWN_WAITING_FILE).exists());
 }
+
+#[test]
+fn oa_119_a_stop_between_the_file_and_the_state_is_completed_from_the_file_at_the_start() {
+    let dir = Dir::new();
+    // The state as it was before the second counter, and then the pairing.
+    let mut node = open(&dir).unwrap();
+    let writer = node.waiting_writer();
+    {
+        let (shop, store) = node.shop_and_store();
+        let made = shop.make_offer(T0).unwrap();
+        shop.confirm_with(&made, T0 + 30, &request(&made, 3), USD, vec![], None, &store, &writer)
+            .unwrap();
+        shop.add_box(id(9).device_id(), 0, &store).unwrap();
+    }
+    let state_path = dir.0.join(crate::own::OWN_STATE_FILE);
+    let before = std::fs::read(&state_path).unwrap();
+    {
+        let (shop, store) = node.shop_and_store();
+        let made = shop.make_offer(T0 + 100).unwrap();
+        shop.confirm_with(&made, T0 + 130, &request(&made, 4), USD, vec![], None, &store, &writer)
+            .unwrap();
+    }
+    let after = std::fs::read(&state_path).unwrap();
+    drop(node);
+    let counter = id(4).device_id();
+    // (a) Stopped before the file: the old state and no file pair nobody.
+    std::fs::write(&state_path, &before).unwrap();
+    std::fs::remove_file(dir.0.join(OWN_WAITING_FILE)).unwrap();
+    let node = open(&dir).unwrap();
+    assert!(node.waiting_view().is_none());
+    assert!(!node.shop().book().has_device(&counter));
+    drop(node);
+    // (b) Stopped after the file and before the state: the file is back,
+    // the state is the old one, and the start completes it.
+    let file = {
+        let dir2 = Dir::new();
+        drop(node_with_a_waiting_change(&dir2));
+        std::fs::read(dir2.0.join(OWN_WAITING_FILE)).unwrap()
+    };
+    std::fs::write(dir.0.join(OWN_WAITING_FILE), &file).unwrap();
+    let node = open(&dir).unwrap();
+    assert!(node.shop().book().has_device(&counter));
+    assert!(node
+        .shop()
+        .counters_waiting()
+        .iter()
+        .any(|w| w.counter == counter));
+    assert!(node.waiting_view().is_some());
+    assert_eq!(std::fs::read(&state_path).unwrap(), after);
+    drop(node);
+    // A second start finds the state whole and changes nothing.
+    let node = open(&dir).unwrap();
+    assert!(node.waiting_view().is_some());
+    assert_eq!(std::fs::read(&state_path).unwrap(), after);
+}
