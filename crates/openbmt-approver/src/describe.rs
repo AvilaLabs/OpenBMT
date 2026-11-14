@@ -119,7 +119,7 @@ fn own_node(node: &Option<OwnNode>) -> String {
 fn shop_lightning(sl: &Option<ShopLightning>) -> String {
     match sl {
         Some(s) => format!(
-            "node {}, Lightning counter {}, provider {} at {}, second device {}, \
+            "node {}, Lightning counter {}, provider {} at {}, second copy on {}, \
              holds up to {} sats, opening costs up to {} sats",
             hex(&s.node_id),
             full(&s.counter),

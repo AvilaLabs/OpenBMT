@@ -1835,8 +1835,14 @@ not in this section; it stays refused as CR-236 says.
   arrived. A Redirect change is refused as before.
 - **CR-240.** While a change waits, the manager's menu has "Change to
   confirm". It shows each field the change loosens, with its value now and
-  its value after, from `settings::changed_fields` (AP-01), in the shop's
-  currency where it is an amount; the settings version; and the four words
+  its value after, from `settings::changed_fields` (AP-01), and the
+  removal of the last counter in force (AP-12). A limit is shown in
+  satoshis, the number the counter enforces, whenever its satoshis change;
+  in the shop's currency only when the satoshis stay the same, so a change
+  cannot show a lower amount while it raises the limit. A change of Shop
+  Lightning (AP-13) shows the provider's key in short and its address, the
+  device that keeps the second copy in short, the cap and the most for one
+  opening. Then come the settings version and the four words
   of AP-03 for the settings' hash, large. It has two buttons, "Confirm with
   manager PIN" and "Not now". Home shows a line that a change waits, for the
   manager.

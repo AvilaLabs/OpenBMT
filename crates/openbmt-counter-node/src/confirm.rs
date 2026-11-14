@@ -93,7 +93,7 @@ fn shop_lightning_text(s: &Settings) -> String {
         || "Not set".to_string(),
         |sl| {
             format!(
-                "provider {} at {}, second device {}, cap {} sats, opening {} sats",
+                "provider {} at {}, second copy on {}, holds up to {} sats, opening costs up to {} sats",
                 hex_prefix(&sl.provider_node_id),
                 sl.provider_addr,
                 hex_prefix(&sl.second_device.to_bytes()),

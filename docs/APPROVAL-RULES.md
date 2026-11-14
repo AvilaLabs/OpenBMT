@@ -37,6 +37,11 @@ signature for every loosening change, unchanged.
   protect. Any other loosening in the same change keeps its class. Once one
   counter is in force, every counter added is Loosen (AP-01), so that a
   counter added by the owner phone alone can never confirm the next change.
+  For the same reason, a change that leaves no counter while the settings in
+  force name at least one is Loosen: the last counter confirms its own
+  removal, and the owner phone alone cannot empty the list and then fill it
+  with counters of its own choosing. Removing some counters while one stays
+  is Free, as any tightening is.
 
 - **AP-13. Shop Lightning.** Setting `shop_lightning`
   (`docs/SHOP-LIGHTNING-RULES.md` SL-71), or changing its node's ID or its

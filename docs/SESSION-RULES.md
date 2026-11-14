@@ -163,6 +163,10 @@ last settings it co-signed, and the last 256 session IDs it finished.
   signature verifies, the values pass `Settings::validate`, and the version
   is above the version of the last settings the Key app co-signed. With no
   earlier settings every field is new and the change counts as loosening.
+  Every field `changed_fields` can name has its value shown in full, Shop
+  Lightning's node ID, counter, provider and second copy among them, so
+  that the node ID can be compared with the stick's code (SL-76); a test
+  fails when a field is added without its value.
   A change that tightens everything can still be approved. The Key app has
   then already allowed everything the new settings allow.
 - **AS-28.** The line of a `Pairing` item shows the counter's name, its key
