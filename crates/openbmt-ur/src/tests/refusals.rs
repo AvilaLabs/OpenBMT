@@ -333,11 +333,10 @@ fn ur_11_mixed_parts_held_are_at_most_twice_the_sequence_length() {
     let checksum = 0x1234_5678;
     let data = [5u8; 10];
     let mut d = Decoder::new();
-    let mut held = 0;
-    let mut refused = false;
     // Parts of degree two to half the sequence (no more is held), so that
     // nothing is ever learned.
     let mut seen = Vec::new();
+    let mut most = 0;
     for n in (seq_len as u32 + 1)..400_000 {
         let idx = choose_fragments(n, seq_len, checksum);
         if idx.len() < 2 || idx.len() > seq_len / 2 || seen.contains(&idx) {
@@ -345,17 +344,12 @@ fn ur_11_mixed_parts_held_are_at_most_twice_the_sequence_length() {
         }
         seen.push(idx);
         let text = part_text("bytes", n, seq_len, 111, checksum, &data);
-        match d.receive(&text) {
-            Ok(_) => held += 1,
-            Err(e) => {
-                assert_eq!(e.rule(), "UR-11", "{e}");
-                refused = true;
-                break;
-            }
-        }
+        // A part beyond the bound is not held (or pushes a worse one out).
+        d.receive(&text).expect("never an error for the bound");
+        most = most.max(d.held_mixed());
+        assert!(d.held_mixed() <= 2 * seq_len);
     }
-    assert!(refused, "the bound was never reached");
-    assert_eq!(held, 2 * seq_len);
+    assert_eq!(most, 2 * seq_len);
     assert_eq!(d.held_mixed(), 2 * seq_len);
 }
 
@@ -492,19 +486,12 @@ fn ur_11_hostile_high_degree_parts_hold_bounded_entries_and_work() {
     assert_eq!(d.held_mixed(), 0);
     assert_eq!(d.held_entries_and_work(), (0, 0));
     // Degrees just under the cap fill the entry budget, and no more.
-    let mut refused = false;
     for n in parts_of_degree(seq_len, checksum, seq_len / 4..=seq_len / 2, 2 * seq_len) {
         let text = part_text("bytes", n, seq_len, message_len, checksum, &data);
-        match d.receive(&text) {
-            Ok(_) => {}
-            Err(e) => {
-                assert_eq!(e.rule(), "UR-11");
-                refused = true;
-            }
-        }
+        d.receive(&text)
+            .expect("pushed out or not held, not refused");
         assert!(d.held_entries_and_work().0 <= budget);
     }
-    assert!(refused, "the entry budget was never reached");
     // The pure fragments then reduce every held part, each entry once.
     let (entries, _) = d.held_entries_and_work();
     assert!(entries > budget / 2, "{entries}");
@@ -533,8 +520,7 @@ fn ur_11_an_honest_stream_of_the_largest_length_decodes_within_the_budget() {
         if i % 10 < 3 {
             continue;
         }
-        // A part refused for the bound is dropped; the decoder keeps waiting.
-        let _ = d.receive(&p);
+        d.receive(&p).expect("no refusal for the bound");
         max_entries = max_entries.max(d.held_entries_and_work().0);
         if d.is_complete() {
             break;
@@ -543,4 +529,70 @@ fn ur_11_an_honest_stream_of_the_largest_length_decodes_within_the_budget() {
     assert!(d.is_complete(), "not complete");
     assert!(max_entries <= 100 * 10_000);
     assert_eq!(d.result().map(|r| r.1), Some(payload));
+}
+
+/// A scanner that starts late on an honest animated sequence sees only mixed
+/// parts (sequence numbers above the sequence length). Returns the parts
+/// taken, the most index entries held, and whether a part was refused for
+/// the bound.
+fn read_from_the_first_mix(seq_len: usize, lost_in_ten: usize) -> (usize, usize, bool) {
+    let message = make_message(seq_len * 100 - 20, "late");
+    let payload = crate::cbor::encode_bytes(&message);
+    let mut e = Encoder::new("bytes", &payload, 100, 10).expect("ok");
+    assert_eq!(e.seq_len(), seq_len);
+    for _ in 0..seq_len {
+        e.next_part();
+    }
+    let mut d = Decoder::new();
+    let (mut taken, mut max_entries, mut full) = (0, 0, false);
+    for i in 0..60 * seq_len {
+        let p = e.next_part();
+        if i % 10 < lost_in_ten {
+            continue;
+        }
+        taken += 1;
+        match d.receive(&p) {
+            Ok(_) => {}
+            Err(err) => {
+                assert_eq!(err.rule(), "UR-11", "{err}");
+                full = true;
+            }
+        }
+        max_entries = max_entries.max(d.held_entries_and_work().0);
+        if d.is_complete() {
+            assert_eq!(d.result().map(|r| r.1), Some(payload));
+            return (taken, max_entries, full);
+        }
+    }
+    panic!("{seq_len} parts, {lost_in_ten}0% lost: not complete after {taken} parts");
+}
+
+fn late_start(seq_len: usize) {
+    for lost in [0, 3] {
+        let (_taken, max_entries, full) = read_from_the_first_mix(seq_len, lost);
+        assert!(max_entries <= 100 * seq_len);
+        assert!(!full, "an honest stream hit the bound");
+    }
+}
+
+#[test]
+fn ur_11_a_late_start_on_an_honest_stream_completes_at_50() {
+    late_start(50);
+}
+
+#[test]
+fn ur_11_a_late_start_on_an_honest_stream_completes_at_100() {
+    late_start(100);
+}
+
+#[test]
+fn ur_11_a_late_start_on_an_honest_stream_completes_at_1000() {
+    late_start(1000);
+}
+
+// About 40 s with the dev profile; run with `--run-ignored all`.
+#[test]
+#[ignore]
+fn ur_11_a_late_start_on_an_honest_stream_completes_at_10000() {
+    late_start(10_000);
 }

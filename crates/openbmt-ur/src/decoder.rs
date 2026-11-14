@@ -63,6 +63,9 @@ struct State {
     /// For each fragment, the slots of the held parts that carry it.
     watch: Vec<Vec<u32>>,
     held: usize,
+    /// `(fragments still unknown, slot)` of every held part, to find the
+    /// one that is furthest from known.
+    by_left: BTreeSet<(usize, u32)>,
     /// The index entries of the held parts.
     held_entries: usize,
     /// Parts looked at by `learn`, for the tests.
@@ -283,6 +286,7 @@ impl Decoder {
                     free: Vec::new(),
                     watch: vec![Vec::new(); seq_len],
                     held: 0,
+                    by_left: BTreeSet::new(),
                     held_entries: 0,
                     #[cfg(test)]
                     work: 0,
@@ -373,13 +377,7 @@ impl State {
                     })
                 })
             });
-        let hold = mixed && !dup;
-        if hold
-            && (self.held >= 2 * self.seq_len
-                || self.held_entries + indexes.len() > HELD_ENTRIES_PER_FRAGMENT * self.seq_len)
-        {
-            return Err(UrError::MixedFull);
-        }
+        let hold = mixed && !dup && self.make_room(indexes.len());
         if self.seen.len() < 4 * self.seq_len {
             self.seen.insert(seq_num);
         }
@@ -396,6 +394,37 @@ impl State {
         }
     }
 
+    /// Makes room for a mixed part of `len` fragments under the two bounds
+    /// of UR-11. A part that does not fit pushes out the held part with the
+    /// most fragments still unknown, as long as that has more than the new
+    /// one; a new part that is itself the furthest from known is not held.
+    /// A sequence of any length read from any part on thus keeps making
+    /// progress inside the bounds.
+    fn make_room(&mut self, len: usize) -> bool {
+        let budget = HELD_ENTRIES_PER_FRAGMENT * self.seq_len;
+        while self.held >= 2 * self.seq_len || self.held_entries + len > budget {
+            let Some(&(left, id)) = self.by_left.last() else {
+                return false;
+            };
+            if left <= len {
+                return false;
+            }
+            self.by_left.remove(&(left, id));
+            let Some(gone) = self.mixed.get_mut(id as usize).and_then(Option::take) else {
+                continue;
+            };
+            self.free.push(id as usize);
+            self.held -= 1;
+            self.held_entries = self.held_entries.saturating_sub(gone.indexes.len());
+            for &k in &gone.indexes {
+                if let Some(w) = self.watch.get_mut(k) {
+                    w.retain(|&w| w != id);
+                }
+            }
+        }
+        true
+    }
+
     fn hold(&mut self, indexes: Vec<usize>, data: Vec<u8>) {
         let id = self.free.pop().unwrap_or(self.mixed.len());
         for &i in &indexes {
@@ -405,6 +434,7 @@ impl State {
         }
         self.held += 1;
         self.held_entries += indexes.len();
+        self.by_left.insert((indexes.len(), id as u32));
         let part = Some(Mixed {
             left: indexes.len(),
             indexes,
@@ -443,8 +473,10 @@ impl State {
                     continue;
                 };
                 xor_into(&mut m.data, &d);
+                self.by_left.remove(&(m.left, id));
                 m.left = m.left.saturating_sub(1);
                 if m.left > 1 {
+                    self.by_left.insert((m.left, id));
                     continue;
                 }
                 let Some(done) = self.mixed.get_mut(id as usize).and_then(Option::take) else {
