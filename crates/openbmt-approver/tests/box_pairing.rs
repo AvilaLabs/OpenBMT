@@ -4,7 +4,7 @@ mod common;
 
 use common::*;
 use openbmt_approver::{Choice, Detail, RestoreError, StepStatus};
-use openbmt_core::boxpair::{Claim, Invitation, Welcome, INVITATION_SECS};
+use openbmt_core::boxpair::{BoxRoots, Claim, Invitation, Welcome, INVITATION_SECS};
 use openbmt_core::identity::DeviceId;
 use openbmt_session::{DeclineCode, Item, Payload, Response, Verdict};
 
@@ -296,7 +296,7 @@ fn as_82_approving_makes_the_welcome_the_box_accepts_and_spends_the_invitation()
     };
     // It is the welcome the Box checks with its invitation and nonce.
     let pinned = welcome.verify(&inv, &box_key(), &claim.nonce).unwrap();
-    assert_eq!(pinned, roots());
+    assert_eq!(pinned, BoxRoots::KeyApp(roots()));
     // The settings were co-signed and the invitation is spent.
     assert!(matches!(
         verdict(&r, 0),

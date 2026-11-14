@@ -77,6 +77,7 @@ struct Owner {
     /// The owner node the app runs (OA-107): the live watch over the book.
     runner: Option<OwnerNode<IdlePort>>,
     carried: u32,
+    waiting_given: Option<[u8; 32]>,
     _events: Arc<std::sync::Mutex<Vec<std::sync::mpsc::Sender<AppEvent>>>>,
 }
 
@@ -95,6 +96,7 @@ impl Owner {
             link: None,
             runner: None,
             carried: 0,
+            waiting_given: None,
             _events: Arc::default(),
         }
     }
@@ -203,7 +205,15 @@ impl Owner {
         let link = self.link.as_mut().unwrap();
         link.step(runner.watcher_mut(), now);
         let mut shop = OwnNode::open(self.dir.path(), id(1), self.wallet.clone()).unwrap();
-        let tick = shop.tick(runner, link, &mut self.carried, now).unwrap();
+        let tick = shop
+            .tick(
+                runner,
+                link,
+                &mut self.carried,
+                &mut self.waiting_given,
+                now,
+            )
+            .unwrap();
         // LK-79: the owner node's turn on the starter line.
         runner.starter_line_step(link, now);
         tick

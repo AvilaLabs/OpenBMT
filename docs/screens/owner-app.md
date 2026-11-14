@@ -774,6 +774,7 @@ link) are shown as they arrive:
 | RQ_28_CHECK_TITLE | Check it with the customer |
 | RQ_28_CHECK_TEXT | Compare these groups with the customer by another way than the message the address came in, such as a call or in person. |
 | RQ_28_CHECK_NEXT | Someone who can change your messages can change an address in them. The return waits in the queue until you pay the returns. |
+
 The web store (`docs/WEB-ORDER-RULES.md`, WO-01 to WO-32), in
 `WebOrderWords`. What the library says of a refusal or a failed visit
 is in `crates/openbmt-owner/src/web_order/say.rs`:
