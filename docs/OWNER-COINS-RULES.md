@@ -274,7 +274,8 @@ the rest by a check once a month. The code is in
   issued range, OC-10, and read back strictly), and the view holds no
   unspent coin at it and no held transaction pays it. A script with an
   unspent coin always stays, because the spend of the coin must be seen. A
-  change script never leaves. A receive index that no issued range holds is
+  change script never leaves, and neither does the address of a request
+  (`docs/REQUEST-RULES.md` RQ-04). A receive index that no issued range holds is
   never set aside. If too few scripts are quiet, the live watch stays over
   the bound; the limit that stops the node is the driver's (OC-07). The node
   looks for scripts to set aside when the marks grow, and at least every 10
@@ -511,7 +512,8 @@ the shop's currency, so the node keeps a log of its own.
   finished on a hardware signer and settled from a block (OC-52): a cash-out
   of everything is never logged as zero, and a refund whose fee the
   customer paid is logged at what the customer received, not at what was
-  asked.
+  asked. A cash-out of everything whose transaction pays nothing to its
+  address is not logged, and the owner's log says so.
 - **OC-50.** The log is `paid-log.bin`: `OBM&`, version 1, and then entries of
   118 bytes, each ending in the first 8 bytes of the SHA-256 of the 110 bytes
   before it. The file is only added to: a new file is built from the old

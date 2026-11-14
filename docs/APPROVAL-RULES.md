@@ -4,9 +4,12 @@ What a shop that uses its own wallet needs, besides the owner phone, to
 change its settings. Without a Key app, the second signature is replaced by
 one of two approvals, chosen by what the change can do. The code is
 `crates/openbmt-core/src/approval.rs`. Tests are named after the rule
-(`ap_01_...`). This is the first slice: the types and the checks. No screen,
-counter or owner phone uses them yet. Shops that keep the Key app keep its
-signature for every loosening change, unchanged.
+(`ap_01_...`). The classes and the counter's confirmation are in use: the
+owner phone holds a Loosen change until a counter confirms it, and the
+counters check it (`docs/COUNTER-RULES.md` CR-242). The wallet's signature
+of AP-06 to AP-10 is checked by the code but nothing asks for it yet, so a
+Redirect change is refused by the counters for now. Shops that keep the Key
+app keep its signature for every loosening change, unchanged.
 
 ## 1. Classes of change
 

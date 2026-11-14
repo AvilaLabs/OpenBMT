@@ -83,7 +83,8 @@ out silently.
   a bare script or an unknown witness version is refused. Amounts are at
   most 21,000,000 BTC in total.
 - **SP-23.** A change amount below the dust limit of its script (330
-  satoshis) is not made. It is added to the fee, and the plan says so: the
+  satoshis for the shop's 2-of-3 wallet, 294 for a wallet of one key) is
+  not made. It is added to the fee, and the plan says so: the
   plan holds the amount that was dropped.
 - **SP-24.** A payment to one of the wallet's own scripts is refused, with
   one exception. SR-23 would let the signer sign an output to the wallet's
@@ -161,14 +162,14 @@ out silently.
   0xFFFFFFFD, is below 0xFFFFFFFF, so the lock time takes effect; the
   replaceability signal is as before.
 - **SP-38.** The size of a consolidation (SP-24) of `n` coins can be had
-  without signing and without coins: `consolidation_size(n)` is the weight
-  and the virtual size of `n` inputs and the one 34-byte output of the
-  wallet's change script, by the shape of SP-30, and
-  `consolidation_cost_sats(n, rate)` is the fee of SP-30 for that size. They
-  equal the weight, size and fee that `plan` gives a `send_all` of `n` coins
-  to the change script. They serve the owner's line about what spending
-  every receipt would cost (`docs/OWNER-COINS-RULES.md`, OC-17). There is
-  no answer for no coin or on overflow.
+  without signing and without coins: `consolidation_size(n)` is the weight and
+  the virtual size of `n` inputs and the one output of the wallet's change
+  script (34 bytes for the 2-of-3 wallet, 22 for a wallet of one key), by the
+  shape of SP-30, and `consolidation_cost_sats(n, rate)` is the fee of SP-30
+  for that size. They equal the weight, size and fee that `plan` gives a
+  `send_all` of `n` coins to the change script. They serve the owner's line
+  about what spending every receipt would cost (`docs/OWNER-COINS-RULES.md`,
+  OC-17). There is no answer for no coin or on overflow.
 - **SP-39.** One consolidation takes at most `MAX_CONSOLIDATION_INPUTS`
   (400) coins **[to tune]**. That many inputs weigh about 167,000 units,
   inside the limit of SP-33, and leave most of the signer's 8 MiB file for
