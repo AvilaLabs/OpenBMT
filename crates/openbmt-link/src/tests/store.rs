@@ -84,6 +84,26 @@ fn lk_41_a_torn_tail_loses_at_most_the_message_being_written() {
 }
 
 #[test]
+fn lk_41_a_failed_append_leaves_no_fragment_for_the_next_one_to_land_behind() {
+    let dir = TempDir::new("failed-append");
+    let reader = counter().device_id();
+    let mut store = DirStore::new(&dir.0).unwrap();
+    store.set_members(&[reader], &[]).unwrap();
+    store.create(&reader).unwrap();
+    store.put(&reader, 1, &msg(1)).unwrap();
+    let whole = fs::metadata(log_path(&dir)).unwrap().len();
+    store.tear_next = Some(7);
+    assert!(store.put(&reader, 2, &msg(2)).is_err());
+    assert_eq!(fs::metadata(log_path(&dir)).unwrap().len(), whole);
+    store.put(&reader, 3, &msg(3)).unwrap();
+    store.ack(&reader, 1).unwrap();
+    drop(store);
+    let mut store = DirStore::new(&dir.0).unwrap();
+    let events = store.load().unwrap().mailboxes.remove(0).1;
+    assert_eq!(events.len(), 3, "put 1, put 3 and the floor all survive");
+}
+
+#[test]
 fn lk_41_the_log_is_rewritten_when_acknowledged_messages_pass_half_of_it() {
     let dir = TempDir::new("compact");
     let mut rig = dir_rig(&dir);

@@ -219,6 +219,9 @@ pub struct DirStore {
     dir: PathBuf,
     /// Bytes in each log, as last written or loaded.
     sizes: HashMap<DeviceId, u64>,
+    /// Test only: the next append writes this many bytes and then fails.
+    #[cfg(test)]
+    pub(crate) tear_next: Option<usize>,
 }
 
 fn record(kind: u8, body: &[u8]) -> Vec<u8> {
@@ -413,6 +416,8 @@ impl DirStore {
         Ok(Self {
             dir,
             sizes: HashMap::new(),
+            #[cfg(test)]
+            tear_next: None,
         })
     }
 
@@ -428,8 +433,24 @@ impl DirStore {
 
     fn append(&mut self, reader: &DeviceId, bytes: &[u8]) -> io::Result<()> {
         let mut file = OpenOptions::new().append(true).open(self.path(reader))?;
-        file.write_all(bytes)?;
-        file.sync_data()?;
+        let before = file.metadata()?.len();
+        #[cfg(test)]
+        let torn = self.tear_next.take();
+        let written = (|| {
+            #[cfg(test)]
+            if let Some(n) = torn {
+                file.write_all(bytes.get(..n).unwrap_or(bytes))?;
+                return Err(io::Error::other("injected write failure"));
+            }
+            file.write_all(bytes)?;
+            file.sync_data()
+        })();
+        if let Err(e) = written {
+            // Cut a part-written record off, so a later append does not
+            // land behind a fragment that the next start would stop at.
+            let _ = file.set_len(before).and_then(|()| file.sync_data());
+            return Err(e);
+        }
         let size = self.sizes.entry(*reader).or_insert(0);
         *size = size.saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
         Ok(())
