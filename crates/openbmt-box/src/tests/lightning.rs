@@ -793,7 +793,7 @@ fn bx_92_a_blob_past_16_mib_is_refused_part_by_part() {
 }
 
 #[test]
-fn bx_92_the_status_page_shows_the_full_store_in_placeholders_and_otherwise_nothing() {
+fn bx_92_the_status_page_shows_the_full_store_and_otherwise_nothing() {
     let view = |store_full| PageView {
         status: crate::state::BoxStatus::Paired,
         version: "1.0.0",
@@ -804,13 +804,12 @@ fn bx_92_the_status_page_shows_the_full_store_in_placeholders_and_otherwise_noth
         store_full,
     };
     let words = store_full_words();
-    for text in [&words.heading, &words.what, &words.next] {
-        assert!(text.starts_with("WORDS_NEEDED_BX92_"), "{text}");
-    }
+    assert_eq!(openbmt_core::say::check(&words), Ok(()));
     let full = render_home(&view(true), "box.local:8987", None);
-    assert!(full.contains(&words.heading) && full.contains(&words.what));
+    let shown = |t: &str| t.replace('\'', "&#39;");
+    assert!(full.contains(&shown(&words.heading)) && full.contains(&shown(&words.what)));
     let plain = render_home(&view(false), "box.local:8987", None);
-    assert!(!plain.contains("WORDS_NEEDED_BX92_"));
+    assert!(!plain.contains(&shown(&words.heading)));
 }
 
 // ---- BX-93 ---------------------------------------------------------------

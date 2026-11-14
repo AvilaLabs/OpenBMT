@@ -362,19 +362,20 @@ fn sk_35_turning_off_clears_the_screen_and_its_code() {
 }
 
 #[test]
-fn sk_35_the_placeholders_are_the_ones_listed() {
-    // Every new word is a placeholder until the owner of the rules writes
-    // it; this list is that to-do.
-    let want = [
-        "WORDS_NEEDED_SK35_MENU_NODE_ID",
-        "WORDS_NEEDED_SK35_PUBLIC",
-        "WORDS_NEEDED_SK35_SCAN",
-        "WORDS_NEEDED_SK35_FIRST",
-        "WORDS_NEEDED_SK35_LAST",
-    ];
-    assert_eq!(words::placeholders(), want);
-    assert!(words::is_placeholder(want[0]));
-    assert!(!words::is_placeholder(words::SK_33_LIGHTNING_WHAT));
+fn sk_35_the_node_id_screen_says_what_the_id_is() {
+    for text in [
+        words::SK_35_MENU_NODE_ID,
+        words::SK_35_PUBLIC,
+        words::SK_35_SCAN,
+        words::SK_35_FIRST,
+        words::SK_35_LAST,
+    ] {
+        assert!(
+            !text.is_empty() && !text.starts_with(concat!("WORDS", "_NEEDED")),
+            "{text}"
+        );
+    }
+    assert!(words::SK_35_PUBLIC.contains("public"));
 }
 
 /// The app standing at the public result of the test words.

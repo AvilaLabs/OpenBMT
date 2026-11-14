@@ -402,16 +402,16 @@ pub struct PageView {
     pub store_full: bool,
 }
 
-/// The words of a full store (BX-92). Placeholders: the words are written by
-/// the rules' owner.
+/// The words of a full store (BX-92).
 pub fn store_full_words() -> Words {
     Words::new(
         Tone::Stop,
-        "WORDS_NEEDED_BX92_STORE_FULL_HEADING",
-        "WORDS_NEEDED_BX92_STORE_FULL_WHAT",
+        "Lightning store is full",
+        "The Box holds as much of Shop Lightning's state as it may, so the Lightning counter offers no Lightning payments now.",
         openbmt_core::say::Who::BoxKeeper,
-        "WORDS_NEEDED_BX92_STORE_FULL_NEXT",
+        "Tell the shop's owner. Turning Shop Lightning off on the owner phone closes its channels and sends the money to the shop's wallet.",
     )
+    .code("BX-92")
 }
 
 /// What came of a posted invitation (BX-57).

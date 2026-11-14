@@ -737,16 +737,11 @@ fn sk_15_every_word_is_distinct_and_some_screen_shows_each() {
     // rules, not by the code.
     let src = std::fs::read_to_string(root().join("src/words.rs")).unwrap();
     let tag = ["WORDS", "_NEEDED"].concat();
-    // The words of the node ID screen (SK-35) are written by the owner of
-    // the rules; until they are, exactly those placeholders may remain, and
-    // `sk_35_the_placeholders_are_the_ones_listed` names them.
-    let sk35 = [tag.clone(), "_SK35_".to_string()].concat();
-    for line in src.lines().filter(|l| l.contains(&tag)) {
-        assert!(
-            line.contains(&sk35),
-            "a placeholder remains in words.rs: {line}"
-        );
-    }
+    let left: Vec<&str> = src.lines().filter(|l| l.contains(&tag)).collect();
+    assert!(
+        left.is_empty(),
+        "a placeholder remains in words.rs: {left:?}"
+    );
     // Every constant is named for its rule.
     for line in src
         .lines()

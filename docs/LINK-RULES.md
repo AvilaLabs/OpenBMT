@@ -520,7 +520,8 @@ how the two talk.
   replay.
 - **LK-83. What they carry.** A Store carries a request ID of 16 random
   bytes, an action (write, read, list or remove) and a name (the node's
-  names: 1 to 255 of the characters `A-Z a-z 0-9 _ - ~`). A write carries
+  names: 1 to 125 of the characters `A-Z a-z 0-9 _ - ~`, so that the name
+  in hexadecimal is a file name the Box can keep, BX-93). A write carries
   one part of the blob, at most 60,000 bytes, with the part's number, the
   number of parts and the SHA-256 of the whole blob; a blob is at most
   16 MiB. A read names the part it asks for. A list names the name to list
