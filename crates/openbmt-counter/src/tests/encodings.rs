@@ -54,12 +54,14 @@ fn a_desk() -> Desk {
         name: "ann".to_string(),
         at: T0 + 6,
         sats: 5_000,
+        height: None,
     });
     d.push_override(OverrideEntry {
         role: Role::Manager,
         name: "max".to_string(),
         at: T0 + 9,
         sats: 70_000,
+        height: None,
     });
     d.set_alarm(true);
     d.set_last_command_seq(7);

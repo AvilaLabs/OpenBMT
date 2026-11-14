@@ -1,7 +1,7 @@
 //! Section 3: overrides (CR-20 to CR-22).
 
 use super::kit::*;
-use crate::{Event, OverrideRefused, Report, Role, State, Why, OVERRIDE_WINDOW_SECS};
+use crate::{Event, OverrideRefused, Report, Role, Slot, State, Why, OVERRIDE_WINDOW_SECS};
 
 /// A sale of `cents` with `sats` seen by one group (so it waits), judged once
 /// so that a later call writes nothing.
@@ -144,7 +144,7 @@ fn cr_20_a_sale_already_counted_adds_nothing_but_the_limits_still_count() {
     w.override_sale(o.index, Role::Cashier, "ann").unwrap();
     assert_eq!(w.c.exposure_outstanding(), 5_000, "not counted twice");
     assert_eq!(
-        w.c.desk().override_total(Role::Cashier, "ann", w.now),
+        w.c.desk().override_total(Role::Cashier, "ann", w.now, None),
         5_000
     );
 }
@@ -186,8 +186,89 @@ fn cr_21_a_cashier_is_held_to_the_daily_cap_over_24_hours() {
         }
     );
     assert_eq!(err.rule(), "CR-21");
-    // Another cashier has a cap of her own.
+    // CR-146: with no cashier listed another name is the same cap.
+    assert!(w.override_sale(ids[2], Role::Cashier, "bob").is_err());
+}
+
+fn list_cashiers(w: &mut World, names: &[&str]) {
+    for name in names {
+        let event = crate::StaffEvent {
+            at: w.now,
+            change: crate::StaffChange::Added,
+            name: (*name).to_string(),
+            by: "max".to_string(),
+        };
+        w.c.record_staff(&event, &mut w.m).unwrap();
+    }
+}
+
+#[test]
+fn cr_146_a_new_name_does_not_bring_a_new_override_cap_while_no_cashier_is_listed() {
+    let mut w = World::new();
+    let ids: Vec<u32> = (0..3).map(|_| waiting_sale(&mut w, 700, 7_000)).collect();
+    w.override_sale(ids[0], Role::Cashier, "ann").unwrap();
+    w.override_sale(ids[1], Role::Cashier, "bob").unwrap();
+    let err = w.override_sale(ids[2], Role::Cashier, "cy").unwrap_err();
+    assert_eq!(
+        err,
+        OverrideRefused::OverDailyCap {
+            sats: 7_000,
+            already: 14_000,
+            cap: 20_000
+        }
+    );
+    // A manager is counted by name as before.
+    w.override_sale(ids[2], Role::Manager, "max").unwrap();
+}
+
+#[test]
+fn cr_146_with_cashiers_listed_each_has_a_cap_of_their_own() {
+    let mut w = World::new();
+    list_cashiers(&mut w, &["ann", "bob"]);
+    let ids: Vec<u32> = (0..4).map(|_| waiting_sale(&mut w, 700, 7_000)).collect();
+    w.override_sale(ids[0], Role::Cashier, "ann").unwrap();
+    w.override_sale(ids[1], Role::Cashier, "ann").unwrap();
+    assert!(w.override_sale(ids[2], Role::Cashier, "ann").is_err());
     w.override_sale(ids[2], Role::Cashier, "bob").unwrap();
+    // The list is kept across a restart.
+    w.restart();
+    assert_eq!(w.c.desk().cashiers_listed(), 2);
+    w.override_sale(ids[3], Role::Cashier, "bob").unwrap();
+    // With the last one removed the cap is shared again.
+    for name in ["ann", "bob"] {
+        let event = crate::StaffEvent {
+            at: w.now,
+            change: crate::StaffChange::Removed,
+            name: name.to_string(),
+            by: "max".to_string(),
+        };
+        w.c.record_staff(&event, &mut w.m).unwrap();
+    }
+    assert_eq!(w.c.desk().cashiers_listed(), 0);
+    let extra = waiting_sale(&mut w, 100, 1_000);
+    assert!(w.override_sale(extra, Role::Cashier, "cy").is_err());
+}
+
+#[test]
+fn cr_21_the_window_is_a_day_of_blocks_as_well_as_a_day_of_the_clock() {
+    let mut w = World::new();
+    let ids: Vec<u32> = (0..3)
+        .map(|_| waiting_sale(&mut w, 1_000, 10_000))
+        .collect();
+    w.override_sale(ids[0], Role::Cashier, "ann").unwrap();
+    w.override_sale(ids[1], Role::Cashier, "ann").unwrap();
+    // The date was set forward by 25 hours; the chain moved 143 blocks.
+    w.tick(OVERRIDE_WINDOW_SECS + 3_600);
+    w.chain.tip += 143;
+    assert!(w.override_sale(ids[2], Role::Cashier, "ann").is_err());
+    assert!(w.override_sale(ids[2], Role::Cashier, "bob").is_err());
+    // A day of blocks has passed too.
+    w.chain.tip += 1;
+    w.override_sale(ids[2], Role::Cashier, "ann").unwrap();
+    assert_eq!(w.c.desk().overrides().len(), 1);
+    // The heights are kept across a restart.
+    let stored = crate::Desk::from_bytes(&w.m.slots[&Slot::Desk]).unwrap();
+    assert_eq!(stored.overrides()[0].height, Some(w.chain.tip));
 }
 
 #[test]
@@ -223,13 +304,14 @@ fn cr_21_the_window_forgets_after_24_hours() {
     w.override_sale(ids[1], Role::Cashier, "ann").unwrap();
     assert!(w.override_sale(ids[2], Role::Cashier, "ann").is_err());
     w.tick(OVERRIDE_WINDOW_SECS - 1);
+    w.chain.tip += 144;
     assert!(w.override_sale(ids[2], Role::Cashier, "ann").is_err());
     w.tick(1);
     w.override_sale(ids[2], Role::Cashier, "ann").unwrap();
     // The two old entries were pruned when the desk was written.
     assert_eq!(w.c.desk().overrides().len(), 1);
     assert_eq!(
-        w.c.desk().override_total(Role::Cashier, "ann", w.now),
+        w.c.desk().override_total(Role::Cashier, "ann", w.now, None),
         10_000
     );
 }

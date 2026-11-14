@@ -800,19 +800,15 @@ fn cr_69_a_cashier_over_the_daily_cap_needs_a_manager() {
         }
     );
     assert_eq!(err.rule(), "CR-69");
-    // Another cashier has a cap of their own.
-    let bob = Actor {
-        role: Role::Cashier,
-        name: "bob".to_string(),
-    };
-    assert_eq!(ask(&mut w, i, 40_000, bob), Ok(4));
+    // CR-146: with no cashier listed another name is the same cap.
+    assert!(ask(&mut w, i, 40_000, bob()).is_err());
     // A manager goes on.
-    assert_eq!(ask(&mut w, i, 40_000, max()), Ok(5));
+    assert_eq!(ask(&mut w, i, 40_000, max()), Ok(4));
     // The window moves on: a day and a day of blocks later the cap is free
     // again (CR-120).
     w.tick(86_401);
     w.chain.tip += 144;
-    assert_eq!(ask(&mut w, i, 40_000, ann()), Ok(6));
+    assert_eq!(ask(&mut w, i, 40_000, ann()), Ok(5));
 }
 
 #[test]
@@ -1507,4 +1503,139 @@ fn cr_120_entries_and_records_carry_the_height_and_read_back() {
     let mut long = a;
     long.extend_from_slice(&7u32.to_le_bytes());
     assert!(Event::decode(&long).is_err());
+}
+
+// CR-71, CR-146.
+
+fn bob() -> Actor {
+    Actor {
+        role: Role::Cashier,
+        name: "bob".to_string(),
+    }
+}
+
+fn list_cashiers(w: &mut World, names: &[&str]) {
+    for name in names {
+        let event = crate::StaffEvent {
+            at: w.now,
+            change: crate::StaffChange::Added,
+            name: (*name).to_string(),
+            by: "max".to_string(),
+        };
+        w.c.record_staff(&event, &mut w.m).unwrap();
+    }
+}
+
+#[test]
+fn cr_146_with_no_cashier_listed_two_names_refund_against_one_daily_cap() {
+    let mut w = World::new();
+    let i = big_sale(&mut w);
+    // The cap is 300,000 sats a day.
+    for n in 1..=2 {
+        assert_eq!(ask(&mut w, i, 90_000, ann()), Ok(n));
+    }
+    assert_eq!(ask(&mut w, i, 90_000, bob()), Ok(3));
+    assert!(matches!(
+        ask(&mut w, i, 40_000, bob()),
+        Err(RefundRefused::NeedsManagerDaily {
+            already: 270_000,
+            ..
+        })
+    ));
+    assert!(matches!(
+        ask(
+            &mut w,
+            i,
+            40_000,
+            Actor {
+                role: Role::Cashier,
+                name: "cy".to_string()
+            }
+        ),
+        Err(RefundRefused::NeedsManagerDaily { .. })
+    ));
+    // A manager is not held to it.
+    assert!(ask(&mut w, i, 40_000, max()).is_ok());
+}
+
+#[test]
+fn cr_146_with_cashiers_listed_each_has_a_refund_cap_of_their_own() {
+    let mut w = World::new();
+    list_cashiers(&mut w, &["ann", "bob"]);
+    let i = big_sale(&mut w);
+    for n in 1..=3 {
+        assert_eq!(ask(&mut w, i, 90_000, ann()), Ok(n));
+    }
+    assert!(over_the_cap(&mut w, i));
+    assert_eq!(ask(&mut w, i, 90_000, bob()), Ok(4));
+    assert!(matches!(
+        ask(&mut w, i, 40_000, ann()),
+        Err(RefundRefused::NeedsManagerDaily { .. })
+    ));
+}
+
+#[test]
+fn cr_71_a_cash_refund_waits_for_the_shops_depth() {
+    let mut w = World::new();
+    let mut s = settings();
+    s.min_confirmations = 3;
+    w.c.set_settings(s);
+    // Paid and seen, not in a block.
+    let o = w.open(500);
+    let t = w.pay(&o, 5_000);
+    w.see(&t, 3);
+    w.judge(o.index);
+    let err = ask_cash(&mut w, o.index, 100, ann()).unwrap_err();
+    assert!(matches!(
+        err,
+        RefundRefused::NotSettled {
+            received: 5_000,
+            settled: 0,
+            ..
+        }
+    ));
+    assert_eq!(err.rule(), "CR-71");
+    assert!(refund_events(&w).is_empty());
+    // A manager is refused as well.
+    assert!(matches!(
+        ask_cash(&mut w, o.index, 100, max()),
+        Err(RefundRefused::NotSettled { .. })
+    ));
+    // One confirmation is not the shop's three.
+    w.confirm(&[t], 100);
+    w.judge(o.index);
+    assert!(matches!(
+        ask_cash(&mut w, o.index, 100, ann()),
+        Err(RefundRefused::NotSettled { settled: 0, .. })
+    ));
+    // A bitcoin request is not held by this: it waits for its own depth.
+    assert!(ask(&mut w, o.index, 1_000, ann()).is_ok());
+    w.chain.tip += 1;
+    assert!(ask_cash(&mut w, o.index, 100, ann()).is_err());
+    w.chain.tip += 1;
+    w.judge(o.index);
+    assert_eq!(ask_cash(&mut w, o.index, 100, ann()), Ok(()));
+}
+
+#[test]
+fn cr_71_a_cash_refund_counts_only_what_is_at_depth() {
+    let mut w = World::new();
+    // 5,000 sats confirmed deep, 3,000 more only seen.
+    let o = w.open(500);
+    let deep = w.pay(&o, 5_000);
+    w.confirm(std::slice::from_ref(&deep), 95);
+    let shallow = w.pay(&o, 3_000);
+    w.see(&shallow, 3);
+    w.judge(o.index);
+    // 4,000 sats of cash is within the 5,000 that are deep.
+    assert_eq!(ask_cash(&mut w, o.index, 300, ann()), Ok(()));
+    let err = ask_cash(&mut w, o.index, 400, ann()).unwrap_err();
+    assert!(matches!(
+        err,
+        RefundRefused::NotSettled {
+            received: 8_000,
+            settled: 5_000,
+            ..
+        }
+    ));
 }

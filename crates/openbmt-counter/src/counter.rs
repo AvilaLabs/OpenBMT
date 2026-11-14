@@ -57,7 +57,7 @@ use crate::refusal::{
 };
 use crate::sale::{End, LightningPaid, OverrideMark, OwnCheck, PosState, RequestDays, Sale};
 use crate::screen::{Next, Report, Screen, State, Why};
-use crate::staff::StaffEvent;
+use crate::staff::{StaffChange, StaffEvent};
 use crate::store::{Slot, Store, StoreFault};
 use crate::switched_held::SwitchedHeld;
 use crate::till::{TillCancelled, TillDropped, TillRequest, TillWaiting};
@@ -1082,8 +1082,20 @@ impl Counter {
         if !refund_text_ok(&event.by) {
             return Err(StaffRefused::BadName("manager's name"));
         }
-        self.append_record(store, event.kind(), event.encode())
-            .map_err(StaffRefused::Store)
+        let record = self
+            .append_record(store, event.kind(), event.encode())
+            .map_err(StaffRefused::Store)?;
+        // CR-146: the desk keeps whether any cashier is listed, which is what
+        // decides whether a cashier's daily caps are by name or shared.
+        let listed = self.desk.cashiers_listed();
+        let listed = match event.change {
+            StaffChange::Added => listed.saturating_add(1),
+            StaffChange::Removed => listed.saturating_sub(1),
+        };
+        let mut desk = self.desk.clone();
+        desk.set_cashiers_listed(listed);
+        self.put_desk(store, desk).map_err(StaffRefused::Store)?;
+        Ok(record)
     }
 
     /// CR-152 to CR-155: the totals of the day `[from, to)` (seconds since
@@ -1670,7 +1682,7 @@ impl Counter {
                 now,
             });
         }
-        let mut desk = self.desk.pruned(now);
+        let mut desk = self.desk.pruned_addresses(now);
         if !desk.has_room_for_address() {
             return Err(OpenRefused::RateLimited);
         }
@@ -3440,7 +3452,10 @@ impl Counter {
         let amount = amount_at_risk(screen.needs_sats, screen.received_sats);
         let mode = screen.check_mode.unwrap_or(CheckMode::Light);
         let me = self.identity.device_id();
-        let already = self.desk.override_total(actor.role, &actor.name, now);
+        let height = chain_height(facts.chain);
+        let already = self
+            .desk
+            .override_total(actor.role, &actor.name, now, height);
         let over =
             |total: u64, limit: u64| u128::from(total) + u128::from(amount) > u128::from(limit);
         match actor.role {
@@ -3474,7 +3489,7 @@ impl Counter {
                 }
             }
         }
-        let mut desk = self.desk.pruned(now);
+        let mut desk = self.desk.pruned_overrides(now, height);
         if !desk.has_room_for_override() {
             return Err(OverrideRefused::TooManyOverrides);
         }
@@ -3503,6 +3518,7 @@ impl Counter {
             name: actor.name.clone(),
             at: now,
             sats: amount,
+            height,
         });
         self.put_desk(store, desk).map_err(OverrideRefused::Store)?;
         let event = Event::Override {
@@ -3765,6 +3781,26 @@ impl Counter {
         let (received, _) = self.refund_facts(&base, now, headers);
         let height = chain_height(headers);
         self.refund_limits(&base, &actor, true, sats, received, now, height)?;
+        // CR-71: cash leaves the till at once, so only what is at the shop's
+        // depth counts as received; an unconfirmed or shallow payment may
+        // still be replaced.
+        let settled = self.settled_sats(&base, received, headers);
+        if settled < received {
+            match self.refund_limits(&base, &actor, true, sats, settled, now, height) {
+                Err(
+                    RefundRefused::MoreThanReceived { .. }
+                    | RefundRefused::WithdrawnMayBePaid { .. }
+                    | RefundRefused::NothingReceived,
+                ) => {
+                    return Err(RefundRefused::NotSettled {
+                        received,
+                        settled,
+                        sats,
+                    })
+                }
+                other => other?,
+            }
+        }
         let event = Event::RefundPaidInCash {
             index,
             at: now,
@@ -3940,6 +3976,21 @@ impl Counter {
         (received, status.min_confirmations)
     }
 
+    /// CR-71: how much of `received` is at the shop's confirmation depth or
+    /// deeper: all of it for what arrived over Lightning (CR-111), and for
+    /// the rest what the standing transactions at that depth pay.
+    fn settled_sats<C: HeaderChain + ?Sized>(
+        &self,
+        sale: &Sale,
+        received: u64,
+        headers: &C,
+    ) -> u64 {
+        let paid = sale.lightning.as_ref().map_or(0, |p| p.sats());
+        let onchain = received.saturating_sub(paid);
+        let deep = sale.watch().sats_at_depth(headers, self.depth());
+        deep.min(onchain).saturating_add(paid)
+    }
+
     /// CR-65, CR-67, CR-69, CR-119: the checks that a request and a cash
     /// refund share, for `sats` more asked on a sale that has `received`.
     /// `cash` says the call is a cash refund; `height` is the chain height
@@ -4004,12 +4055,19 @@ impl Counter {
     /// CR-69, CR-120: what a person has asked for in refunds inside the
     /// window before `now`, over every sale: requests (withdrawn ones too)
     /// and cash refunds. The window is a day by the clock, and also a day of
-    /// blocks when the heights are known. The sum saturates.
+    /// blocks when the heights are known. While no cashier is listed
+    /// (CR-146) a cashier is every cashier entry, whatever the name. The sum
+    /// saturates.
     fn refund_total(&self, actor: &Actor, now: u64, height: Option<u32>) -> u64 {
         self.sales
             .values()
             .flat_map(|s| s.refunds.iter())
-            .filter(|e| e.role == actor.role && e.name == actor.name)
+            .filter(|e| {
+                e.role == actor.role
+                    && (e.name == actor.name
+                        // CR-146: with no cashier listed a new name brings no new cap.
+                        || (actor.role == Role::Cashier && self.desk.cashiers_listed() == 0))
+            })
             .filter(|e| e.counts_for_cap(now, height))
             .fold(0u64, |sum, e| sum.saturating_add(e.sats))
     }

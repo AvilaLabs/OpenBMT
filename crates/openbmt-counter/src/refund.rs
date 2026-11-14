@@ -14,7 +14,7 @@ use bitcoin::{Address, Network, Script, ScriptBuf};
 use openbmt_core::wire::{DecodeError, Reader};
 
 use crate::counter::Actor;
-use crate::desk::{in_override_window, Role};
+use crate::desk::{counts_in_window, Role};
 use crate::money::{Amount, Rate, RateSource, MAX_SATS, SATS_PER_BTC};
 use crate::refusal::DestinationRefused;
 
@@ -228,12 +228,7 @@ impl RefundEntry {
     /// blocks ago when both heights are known, or its time is later than the
     /// clock.
     pub fn counts_for_cap(&self, now: u64, now_height: Option<u32>) -> bool {
-        in_override_window(self.at, now)
-            || self.at > now
-            || matches!(
-                (self.height, now_height),
-                (Some(then), Some(now_h)) if now_h.saturating_sub(then) < CAP_WINDOW_BLOCKS
-            )
+        counts_in_window(self.at, self.height, now, now_height)
     }
 
     pub fn write(&self, out: &mut Vec<u8>) {

@@ -16,6 +16,13 @@
 //!
 //! OBMG | 3 | last_command_seq u64 | alarm flag | last_heartbeat_seq u64
 //!   | last_refund_no u64 | the rest as in version 1
+//!
+//! OBMG | 4 | last_command_seq u64 | alarm flag | last_heartbeat_seq u64
+//!   | last_refund_no u64 | cashiers_listed u32
+//!   | n_times u32 | n_times * u64            (non-decreasing)
+//!   | n_overrides u32
+//!   | n_overrides * (role u8 | name_len u8 | name | at u64 | sats u64 | height u32)
+//!                                            (at non-decreasing; height 0 is unknown)
 //! ```
 //!
 //! Version 2 is written only when a heartbeat has been taken, and its
@@ -26,15 +33,25 @@
 //! zero, and `last_heartbeat_seq` may be zero. Each desk has one spelling, so
 //! a version 2 form with a zero number and a version 3 form with a zero
 //! request number do not read back.
+//!
+//! Version 4 is written only when the number of cashiers listed (CR-146) is
+//! above zero or an override holds the chain height the counter knew when it
+//! was made (CR-21): the heartbeat and request numbers may then be zero. An
+//! earlier form reads with no cashier listed and every height unknown. A build
+//! from before this one refuses a version 4.
 
 use openbmt_core::wire::{self, DecodeError, Reader};
 
+use crate::refund::CAP_WINDOW_BLOCKS;
 use crate::{MAX_ADDRESSES_PER_HOUR, MAX_NAME_BYTES, MAX_OVERRIDE_ENTRIES, OVERRIDE_WINDOW_SECS};
 
 /// The version byte of a desk that holds a heartbeat number (CR-54).
 const DESK_VERSION_WITH_HEARTBEAT: u8 = 2;
 /// The version byte of a desk that holds a refund request number (CR-73).
 const DESK_VERSION_WITH_REFUNDS: u8 = 3;
+/// The version byte of a desk that holds the number of cashiers listed and the
+/// chain height of each override (CR-21, CR-146).
+const DESK_VERSION_WITH_STAFF: u8 = 4;
 
 /// Seconds in the window over which new addresses are counted (CR-04).
 pub const ADDRESS_WINDOW_SECS: u64 = 3_600;
@@ -85,6 +102,9 @@ pub struct OverrideEntry {
     pub at: u64,
     /// How much was put at risk, in satoshis.
     pub sats: u64,
+    /// The chain height the counter knew when the override was made, when it
+    /// knew one (CR-21).
+    pub height: Option<u32>,
 }
 
 /// The counter's own state.
@@ -95,6 +115,7 @@ pub struct Desk {
     last_command_seq: u64,
     last_heartbeat_seq: u64,
     last_refund_no: u64,
+    cashiers_listed: u32,
     overrides: Vec<OverrideEntry>,
 }
 
@@ -124,6 +145,12 @@ impl Desk {
         self.last_refund_no
     }
 
+    /// CR-146: how many cashiers are listed on the counter (0 if none). With
+    /// none, a cashier's daily caps are shared by every name.
+    pub fn cashiers_listed(&self) -> u32 {
+        self.cashiers_listed
+    }
+
     /// The overrides kept, oldest first.
     pub fn overrides(&self) -> &[OverrideEntry] {
         &self.overrides
@@ -137,12 +164,18 @@ impl Desk {
             .count()
     }
 
-    /// Sats a person has put at risk by override inside the window before
-    /// `now` (CR-21). The sum saturates.
-    pub fn override_total(&self, role: Role, name: &str, now: u64) -> u64 {
+    /// Sats put at risk by override inside the window before `now` (CR-21).
+    /// The window is a day by the clock, and also a day of blocks when the
+    /// heights are known (as CR-120 has it for refunds). A manager is counted
+    /// by name. A cashier is counted by name while cashiers are listed, and
+    /// as one bucket of every cashier entry when none is (CR-146), so that a
+    /// new name does not bring a new cap. The sum saturates.
+    pub fn override_total(&self, role: Role, name: &str, now: u64, now_height: Option<u32>) -> u64 {
+        let by_role = role == Role::Cashier && self.cashiers_listed == 0;
         self.overrides
             .iter()
-            .filter(|e| e.role == role && e.name == name && in_override_window(e.at, now))
+            .filter(|e| e.role == role && (by_role || e.name == name))
+            .filter(|e| counts_in_window(e.at, e.height, now, now_height))
             .fold(0u64, |sum, e| sum.saturating_add(e.sats))
     }
 
@@ -162,13 +195,25 @@ impl Desk {
         self.last_refund_no = no;
     }
 
-    /// A copy with the address times and overrides older than their windows
-    /// dropped.
-    pub(crate) fn pruned(&self, now: u64) -> Self {
+    pub(crate) fn set_cashiers_listed(&mut self, n: u32) {
+        self.cashiers_listed = n;
+    }
+
+    /// A copy with the address times older than their window dropped. The
+    /// overrides are left as they are.
+    pub(crate) fn pruned_addresses(&self, now: u64) -> Self {
         let mut next = self.clone();
         next.address_times
             .retain(|t| now.saturating_sub(*t) < ADDRESS_WINDOW_SECS);
-        next.overrides.retain(|e| in_override_window(e.at, now));
+        next
+    }
+
+    /// A copy with the overrides older than their window dropped, the chain
+    /// being at `now_height` (see [`Desk::override_total`]).
+    pub(crate) fn pruned_overrides(&self, now: u64, now_height: Option<u32>) -> Self {
+        let mut next = self.clone();
+        next.overrides
+            .retain(|e| counts_in_window(e.at, e.height, now, now_height));
         next
     }
 
@@ -200,12 +245,16 @@ impl Desk {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = wire::start(
             &wire::MAGIC_COUNTER_DESK,
-            33 + self.address_times.len() * 8 + self.overrides.len() * 40,
+            41 + self.address_times.len() * 8 + self.overrides.len() * 44,
         );
         out.extend_from_slice(&self.last_command_seq.to_le_bytes());
         out.push(u8::from(self.alarm));
-        if self.last_heartbeat_seq != 0 || self.last_refund_no != 0 {
-            let version = if self.last_refund_no != 0 {
+        let staff_form =
+            self.cashiers_listed != 0 || self.overrides.iter().any(|e| e.height.is_some());
+        if staff_form || self.last_heartbeat_seq != 0 || self.last_refund_no != 0 {
+            let version = if staff_form {
+                DESK_VERSION_WITH_STAFF
+            } else if self.last_refund_no != 0 {
                 DESK_VERSION_WITH_REFUNDS
             } else {
                 DESK_VERSION_WITH_HEARTBEAT
@@ -214,8 +263,11 @@ impl Desk {
                 *byte = version;
             }
             out.extend_from_slice(&self.last_heartbeat_seq.to_le_bytes());
-            if self.last_refund_no != 0 {
+            if staff_form || self.last_refund_no != 0 {
                 out.extend_from_slice(&self.last_refund_no.to_le_bytes());
+            }
+            if staff_form {
+                out.extend_from_slice(&self.cashiers_listed.to_le_bytes());
             }
         }
         out.extend_from_slice(&len32(self.address_times.len()).to_le_bytes());
@@ -229,6 +281,9 @@ impl Desk {
             out.extend_from_slice(e.name.as_bytes());
             out.extend_from_slice(&e.at.to_le_bytes());
             out.extend_from_slice(&e.sats.to_le_bytes());
+            if staff_form {
+                out.extend_from_slice(&e.height.unwrap_or(0).to_le_bytes());
+            }
         }
         out
     }
@@ -247,7 +302,10 @@ impl Desk {
         let version = r.u8()?;
         if !matches!(
             version,
-            wire::VERSION | DESK_VERSION_WITH_HEARTBEAT | DESK_VERSION_WITH_REFUNDS
+            wire::VERSION
+                | DESK_VERSION_WITH_HEARTBEAT
+                | DESK_VERSION_WITH_REFUNDS
+                | DESK_VERSION_WITH_STAFF
         ) {
             return Err(DecodeError::UnsupportedVersion(version));
         }
@@ -262,18 +320,23 @@ impl Desk {
                 }
                 n => n,
             },
-            DESK_VERSION_WITH_REFUNDS => r.u64_le()?,
+            DESK_VERSION_WITH_REFUNDS | DESK_VERSION_WITH_STAFF => r.u64_le()?,
             _ => 0,
         };
-        let last_refund_no = if version == DESK_VERSION_WITH_REFUNDS {
-            match r.u64_le()? {
+        let last_refund_no = match version {
+            DESK_VERSION_WITH_REFUNDS => match r.u64_le()? {
                 0 => {
                     return Err(DecodeError::NonCanonical(
                         "version 3 holds a request number of zero",
                     ))
                 }
                 n => n,
-            }
+            },
+            DESK_VERSION_WITH_STAFF => r.u64_le()?,
+            _ => 0,
+        };
+        let cashiers_listed = if version == DESK_VERSION_WITH_STAFF {
+            r.u32_le()?
         } else {
             0
         };
@@ -287,6 +350,7 @@ impl Desk {
             address_times.push(t);
         }
         let n = r.count(MAX_OVERRIDE_ENTRIES, 19)?;
+        let mut any_height = false;
         let mut overrides: Vec<OverrideEntry> = Vec::with_capacity(n);
         for _ in 0..n {
             let role = Role::from_u8(r.u8()?)
@@ -302,6 +366,15 @@ impl Desk {
                 .to_string();
             let at = r.u64_le()?;
             let sats = r.u64_le()?;
+            let height = if version == DESK_VERSION_WITH_STAFF {
+                match r.u32_le()? {
+                    0 => None,
+                    h => Some(h),
+                }
+            } else {
+                None
+            };
+            any_height |= height.is_some();
             if overrides.last().is_some_and(|prev| prev.at > at) {
                 return Err(DecodeError::NonCanonical("overrides are not in order"));
             }
@@ -310,15 +383,22 @@ impl Desk {
                 name,
                 at,
                 sats,
+                height,
             });
         }
         r.finish()?;
+        if version == DESK_VERSION_WITH_STAFF && cashiers_listed == 0 && !any_height {
+            return Err(DecodeError::NonCanonical(
+                "version 4 holds no cashier and no height",
+            ));
+        }
         Ok(Self {
             address_times,
             alarm,
             last_command_seq,
             last_heartbeat_seq,
             last_refund_no,
+            cashiers_listed,
             overrides,
         })
     }
@@ -328,6 +408,20 @@ impl Desk {
 /// in the future (the clock went back) counts.
 pub fn in_override_window(at: u64, now: u64) -> bool {
     now.saturating_sub(at) < OVERRIDE_WINDOW_SECS
+}
+
+/// Whether an entry made at `at`, with the chain at `height` then, still
+/// counts at `now` with the chain at `now_height` (CR-21, CR-120): it is from
+/// the last 24 hours by the clock, or its time is later than the clock, or it
+/// was made fewer than [`CAP_WINDOW_BLOCKS`] blocks ago when both heights are
+/// known.
+pub fn counts_in_window(at: u64, height: Option<u32>, now: u64, now_height: Option<u32>) -> bool {
+    in_override_window(at, now)
+        || at > now
+        || matches!(
+            (height, now_height),
+            (Some(then), Some(now_h)) if now_h.saturating_sub(then) < CAP_WINDOW_BLOCKS
+        )
 }
 
 /// A length as the `u32` the stored forms carry. Every list is far below the

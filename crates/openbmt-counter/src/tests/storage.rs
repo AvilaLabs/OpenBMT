@@ -310,7 +310,7 @@ fn cr_41_an_override_stopped_at_each_of_its_four_writes_is_safe() {
             if n == 1 { 0 } else { 5_000 },
             "write {n}"
         );
-        let counted = w.c.desk().override_total(Role::Cashier, "ann", w.now);
+        let counted = w.c.desk().override_total(Role::Cashier, "ann", w.now, None);
         assert_eq!(counted, if n <= 2 { 0 } else { 5_000 }, "write {n}");
         // Asking again works and does not count the ledger twice.
         w.override_sale(0, Role::Cashier, "ann").unwrap();

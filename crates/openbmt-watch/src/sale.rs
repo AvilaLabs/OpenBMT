@@ -417,14 +417,17 @@ impl SaleWatch {
         self.status_inner(chain, now, &health.own, Some(health.light_fallback))
     }
 
-    /// `node_only` is `Some(light_fallback)` in the mode of WR-66.
-    fn status_inner<C: HeaderChain + ?Sized>(
-        &mut self,
-        chain: &C,
-        now: u64,
-        own: &OwnNodeHealth,
-        node_only: Option<bool>,
-    ) -> SaleStatus {
+    /// What the standing transactions at `depth` confirmations or more pay
+    /// the sale, from the chain now. A depth below 1 is taken as 1.
+    pub fn sats_at_depth<C: HeaderChain + ?Sized>(&self, chain: &C, depth: u32) -> u64 {
+        let depth = depth.max(1);
+        let (confs, standing) = self.depths_and_standing(chain);
+        self.sum(|i| standing[i] && confs[i] >= depth)
+    }
+
+    /// What each transaction's depth is now (0 if not confirmed) and whether
+    /// it still stands (WR-43), from the chain.
+    fn depths_and_standing<C: HeaderChain + ?Sized>(&self, chain: &C) -> (Vec<u32>, Vec<bool>) {
         let confs: Vec<u32> = self
             .entries
             .iter()
@@ -457,6 +460,18 @@ impl SaleWatch {
                 !(by_known || by_other)
             })
             .collect();
+        (confs, standing)
+    }
+
+    /// `node_only` is `Some(light_fallback)` in the mode of WR-66.
+    fn status_inner<C: HeaderChain + ?Sized>(
+        &mut self,
+        chain: &C,
+        now: u64,
+        own: &OwnNodeHealth,
+        node_only: Option<bool>,
+    ) -> SaleStatus {
+        let (confs, standing) = self.depths_and_standing(chain);
 
         // WR-31: standing transactions that conflict with each other count
         // once, at the smallest amount any of them pays.

@@ -34,7 +34,8 @@ fn cr_143_a_change_is_written_as_a_pairing_record_and_reads_back() {
     let record = w.c.record_staff(&added(), &mut w.m).unwrap();
     assert_eq!(record.kind, RecordKind::Pairing);
     assert_eq!(w.c.records_len(), before + 1);
-    assert_eq!(w.m.log, vec!["record".to_string()], "one write, the record");
+    // The record, then the desk with the number of cashiers listed (CR-146).
+    assert_eq!(w.m.log, ["record", "Desk"], "the record, then the desk");
     assert_eq!(StaffEvent::decode(&record.body).unwrap(), added());
     // The stored copy is the record.
     let stored = Record::from_bytes(w.m.records.last().unwrap()).unwrap();

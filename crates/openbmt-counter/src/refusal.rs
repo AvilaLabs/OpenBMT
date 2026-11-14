@@ -1000,6 +1000,16 @@ pub enum RefundRefused<E> {
         /// What this one asks, in satoshis.
         sats: u64,
     },
+    /// CR-71: a cash refund would pass what is at the shop's confirmation
+    /// depth; the rest may still be replaced.
+    NotSettled {
+        /// What was received for the sale, in satoshis.
+        received: u64,
+        /// What of it is at the shop's depth, in satoshis.
+        settled: u64,
+        /// What this one asks, in satoshis.
+        sats: u64,
+    },
     /// CR-69: a cashier asks for more than the largest single refund; a
     /// manager is needed.
     NeedsManagerSingle {
@@ -1038,6 +1048,7 @@ impl<E> RefundRefused<E> {
             Self::OwnScript => "CR-68",
             Self::WithdrawnMayBePaid { .. } => "CR-119",
             Self::LightningCashOnly { .. } => "CR-217",
+            Self::NotSettled { .. } => "CR-71",
             Self::NothingReceived => "CR-65",
             Self::NeedsManagerSingle { .. } | Self::NeedsManagerDaily { .. } => "CR-69",
             Self::Store(_) => "CR-40",
@@ -1098,6 +1109,15 @@ impl<E: fmt::Display> fmt::Display for RefundRefused<E> {
                 f,
                 "{sats} sats is more than the {room} sats of this Lightning-paid sale that \
                  arrived on-chain and can be refunded on-chain; give the refund in cash"
+            ),
+            Self::NotSettled {
+                received,
+                settled,
+                sats,
+            } => write!(
+                f,
+                "{sats} sats in cash is more than the {settled} of the {received} sats received \
+                 that is at the shop's confirmation depth; wait for more confirmations"
             ),
             Self::NeedsManagerSingle { sats, limit } => write!(
                 f,

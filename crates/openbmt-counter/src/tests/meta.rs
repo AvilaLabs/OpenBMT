@@ -40,7 +40,7 @@ const TEST_SOURCES: [&str; 28] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 107] = [
+const NOT_HERE: [(&str, &str); 106] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -397,11 +397,6 @@ const NOT_HERE: [(&str, &str); 107] = [
         "CR-145",
         "it states that adding cashiers loosens nothing: the limits it names are CR-20 and \
          CR-21, tested above; there is nothing more to enforce or to test",
-    ),
-    (
-        "CR-146",
-        "the till lock turning on and off with the list is the Android app's; its tests are the \
-         app's JVM tests",
     ),
     (
         "CR-147",
