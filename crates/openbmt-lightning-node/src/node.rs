@@ -1466,14 +1466,40 @@ impl Node {
 
     /// Closes every channel cooperatively to the pinned wallet's receive
     /// address at `index`, which the node derives itself (SL-36). It is
-    /// refused while a splice is not locked yet.
-    pub fn close_all(&self, index: u32) -> Result<usize, String> {
+    /// refused while a splice is not locked yet; a channel already closing
+    /// is left, and one that refuses does not stop the others.
+    pub fn close_all(&self, index: u32) -> Result<crate::close::Closing, String> {
         let to = self.wallet_address(index)?;
         crate::close::close_all(
             &self.shared.manager,
             &self.shared.monitor,
             &self.shared.logger,
             &to,
+        )
+    }
+
+    /// The ids of the channels the node lists, open or closing.
+    pub fn channel_ids(&self) -> Vec<[u8; 32]> {
+        self.shared
+            .manager
+            .list_channels()
+            .iter()
+            .map(|c| c.channel_id.0)
+            .collect()
+    }
+
+    /// Closes by force the listed channels among `ids` (SL-36): the latest
+    /// commitment is broadcast. Refused while a splice is not locked yet.
+    pub fn force_close(&self, ids: &[[u8; 32]]) -> Result<crate::close::Forced, String> {
+        let ids: Vec<_> = ids
+            .iter()
+            .map(|b| lightning::ln::types::ChannelId::from_bytes(*b))
+            .collect();
+        crate::close::force_close(
+            &self.shared.manager,
+            &self.shared.monitor,
+            &self.shared.logger,
+            &ids,
         )
     }
 

@@ -816,6 +816,7 @@ dependencies = [
  "bip324",
  "bitcoin",
  "openbmt-core",
+ "openbmt-kernel-random",
  "openbmt-net",
  "openbmt-watch",
 ]

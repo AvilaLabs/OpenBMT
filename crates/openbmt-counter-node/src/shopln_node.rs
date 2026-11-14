@@ -107,6 +107,9 @@ use crate::shopln::{
 
 /// How often a node that did not start is started again, in seconds.
 pub const RESTART_SECS: u64 = 10;
+/// Seconds after a close was first asked of a channel that is still listed
+/// before the wind-down closes it by force (SL-36). To tune.
+pub const FORCE_CLOSE_AFTER_SECS: u64 = 3600;
 /// The fewest seconds between two tries to sweep (SL-33).
 pub const SWEEP_EVERY_SECS: u64 = 600;
 /// Seconds an invoice may wait on a write to the Box before the sale says
@@ -168,11 +171,49 @@ pub trait SweepSource {
     fn take_index(&mut self) -> Result<Option<u32>, String>;
 }
 
+/// What a close of channels did, as the wind-down reads it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct CloseReport {
+    begun: usize,
+    /// Channels already shutting down, left as they are.
+    already: usize,
+    /// The channels refused, and why.
+    failed: Vec<([u8; 32], String)>,
+}
+
+/// The channels to close by force now: those still `listed` whose close was
+/// first asked at least [`FORCE_CLOSE_AFTER_SECS`] ago. A listed channel not
+/// yet in `first_asked` is entered at `now`; one no longer listed is dropped.
+fn channels_to_force(
+    first_asked: &mut HashMap<[u8; 32], u64>,
+    listed: &[[u8; 32]],
+    now: u64,
+) -> Vec<[u8; 32]> {
+    first_asked.retain(|id, _| listed.contains(id));
+    let mut due = Vec::new();
+    for id in listed {
+        let at = *first_asked.entry(*id).or_insert(now);
+        if now >= at.saturating_add(FORCE_CLOSE_AFTER_SECS) && !due.contains(id) {
+            due.push(*id);
+        }
+    }
+    due
+}
+
+/// A channel id as text, for the notes.
+fn id_text(id: &[u8; 32]) -> String {
+    id.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// What the sweep and the close need of a running node.
 trait NodeOps {
     fn balance_sat(&self) -> u64;
     fn sweep(&self, index: u32, amount_sat: u64) -> Result<(), String>;
-    fn close_all(&self, index: u32) -> Result<usize, String>;
+    fn close_all(&self, index: u32) -> Result<CloseReport, String>;
+    /// The ids of the channels the node lists.
+    fn channel_ids(&self) -> Vec<[u8; 32]>;
+    /// Closes by force the listed channels among `ids`.
+    fn force_close(&self, ids: &[[u8; 32]]) -> Result<CloseReport, String>;
     fn sweeper_spends(&self) -> Vec<[u8; 32]>;
     fn sweeper_index(&self) -> u32;
     fn set_sweeper_index(&self, index: u32, rt: &Runtime);
@@ -185,8 +226,24 @@ impl NodeOps for Arc<LnNode> {
     fn sweep(&self, index: u32, amount_sat: u64) -> Result<(), String> {
         LnNode::sweep(self, index, amount_sat)
     }
-    fn close_all(&self, index: u32) -> Result<usize, String> {
-        LnNode::close_all(self, index)
+    fn close_all(&self, index: u32) -> Result<CloseReport, String> {
+        let c = LnNode::close_all(self, index)?;
+        Ok(CloseReport {
+            begun: c.begun,
+            already: c.already,
+            failed: c.failed.into_iter().map(|(id, e)| (id.0, e)).collect(),
+        })
+    }
+    fn channel_ids(&self) -> Vec<[u8; 32]> {
+        LnNode::channel_ids(self)
+    }
+    fn force_close(&self, ids: &[[u8; 32]]) -> Result<CloseReport, String> {
+        let f = LnNode::force_close(self, ids)?;
+        Ok(CloseReport {
+            begun: f.begun,
+            already: 0,
+            failed: f.failed.into_iter().map(|(id, e)| (id.0, e)).collect(),
+        })
     }
     fn sweeper_spends(&self) -> Vec<[u8; 32]> {
         LnNode::sweeper_spends(self)
@@ -331,6 +388,9 @@ struct Instance {
     failed_at: Option<u64>,
     /// Whether the closes were begun, and when.
     close_begun_at: Option<u64>,
+    /// When a close was first asked of each channel, in this instance only:
+    /// after a restart the clock starts again.
+    close_first_asked: HashMap<[u8; 32], u64>,
     /// The last time a sweep was tried.
     sweep_tried_at: Option<u64>,
     /// The hash of the wallet description the node was started with.
@@ -814,6 +874,7 @@ impl ShopLn {
             shared,
             failed_at: None,
             close_begun_at: None,
+            close_first_asked: HashMap::new(),
             sweep_tried_at: None,
             wallet,
             spends_seen: None,
@@ -1138,24 +1199,7 @@ impl ShopLn {
             .is_none_or(|at| status.channels > 0 && now >= at.saturating_add(RESTART_SECS * 6));
         if begin && status.channels > 0 {
             inst.close_begun_at = Some(now);
-            let index = match self.sweep_address(src) {
-                Ok((_, index)) => index,
-                Err(why) => {
-                    self.notes.push(format!("SL-36: no close: {why:?}"));
-                    self.sweep_blocked = Some(why);
-                    return;
-                }
-            };
-            match node.close_all(index) {
-                Ok(n) => {
-                    self.notes
-                        .push(format!("SL-36: closing {n} Lightning channels"));
-                    if n > 0 {
-                        self.address_paid(node, src);
-                    }
-                }
-                Err(e) => self.notes.push(format!("SL-36: the close: {e}")),
-            }
+            self.close_retry(node, now, src);
             return;
         }
         let done = close_done(
@@ -1175,6 +1219,63 @@ impl ShopLn {
                     shared.finish_stop();
                 });
             }
+        }
+    }
+
+    /// One try of the wind-down: closes cooperatively every channel not
+    /// already closing, then closes by force those whose close was first
+    /// asked [`FORCE_CLOSE_AFTER_SECS`] ago and that are still listed.
+    fn close_retry(&mut self, ops: &dyn NodeOps, now: u64, src: &mut dyn SweepSource) {
+        let index = match self.sweep_address(src) {
+            Ok((_, index)) => index,
+            Err(why) => {
+                self.notes.push(format!("SL-36: no close: {why:?}"));
+                self.sweep_blocked = Some(why);
+                return;
+            }
+        };
+        match ops.close_all(index) {
+            Ok(c) => {
+                self.notes.push(format!(
+                    "SL-36: closing {} Lightning channels, {} already closing",
+                    c.begun, c.already
+                ));
+                for (id, e) in &c.failed {
+                    self.notes.push(format!(
+                        "SL-36: the close of channel {} failed: {e}",
+                        id_text(id)
+                    ));
+                }
+                if c.begun > 0 {
+                    self.address_paid(ops, src);
+                }
+            }
+            Err(e) => {
+                self.notes.push(format!("SL-36: the close: {e}"));
+                return;
+            }
+        }
+        let Some(inst) = &mut self.inst else {
+            return;
+        };
+        let due = channels_to_force(&mut inst.close_first_asked, &ops.channel_ids(), now);
+        if due.is_empty() {
+            return;
+        }
+        match ops.force_close(&due) {
+            Ok(f) => {
+                self.notes.push(format!(
+                    "SL-36: closing {} Lightning channels by force",
+                    f.begun
+                ));
+                for (id, e) in &f.failed {
+                    self.notes.push(format!(
+                        "SL-36: the force close of channel {} failed: {e}",
+                        id_text(id)
+                    ));
+                }
+            }
+            Err(e) => self.notes.push(format!("SL-36: the force close: {e}")),
         }
     }
 
@@ -2045,6 +2146,9 @@ mod tests {
         balance: u64,
         swept: Mutex<Vec<u32>>,
         closed: Mutex<Vec<u32>>,
+        /// The channels the node lists; they never leave by themselves.
+        channels: Mutex<Vec<[u8; 32]>>,
+        forced: Mutex<Vec<Vec<[u8; 32]>>>,
         spends: Mutex<Vec<[u8; 32]>>,
         index: Mutex<u32>,
     }
@@ -2055,6 +2159,8 @@ mod tests {
                 balance,
                 swept: Mutex::new(Vec::new()),
                 closed: Mutex::new(Vec::new()),
+                channels: Mutex::new(Vec::new()),
+                forced: Mutex::new(Vec::new()),
                 spends: Mutex::new(Vec::new()),
                 index: Mutex::new(0),
             }
@@ -2069,9 +2175,22 @@ mod tests {
             lock(&self.swept).push(index);
             Ok(())
         }
-        fn close_all(&self, index: u32) -> Result<usize, String> {
+        fn close_all(&self, index: u32) -> Result<CloseReport, String> {
             lock(&self.closed).push(index);
-            Ok(1)
+            Ok(CloseReport {
+                begun: 1,
+                ..CloseReport::default()
+            })
+        }
+        fn channel_ids(&self) -> Vec<[u8; 32]> {
+            lock(&self.channels).clone()
+        }
+        fn force_close(&self, ids: &[[u8; 32]]) -> Result<CloseReport, String> {
+            lock(&self.forced).push(ids.to_vec());
+            Ok(CloseReport {
+                begun: ids.len(),
+                ..CloseReport::default()
+            })
         }
         fn sweeper_spends(&self) -> Vec<[u8; 32]> {
             lock(&self.spends).clone()
@@ -2138,6 +2257,7 @@ mod tests {
             shared: Arc::new(InstShared::new()),
             failed_at: None,
             close_begun_at: None,
+            close_first_asked: HashMap::new(),
             sweep_tried_at: None,
             wallet: wallet_hash(wallet),
             spends_seen: None,
@@ -2248,6 +2368,45 @@ mod tests {
             "a write has not reached the Box"
         );
         assert!(!close_done(0, 0, 0, 0, false), "the Box is away");
+    }
+
+    #[test]
+    fn sl_36_a_channel_is_forced_only_from_an_hour_after_its_first_ask() {
+        let (a, b) = ([1u8; 32], [2u8; 32]);
+        let mut asked = HashMap::new();
+        assert!(channels_to_force(&mut asked, &[a], 1_000).is_empty());
+        assert!(channels_to_force(&mut asked, &[a], 1_000 + FORCE_CLOSE_AFTER_SECS - 1).is_empty());
+        // A second channel that shows later has its own clock.
+        let t = 1_000 + FORCE_CLOSE_AFTER_SECS;
+        assert_eq!(channels_to_force(&mut asked, &[a, b], t), vec![a]);
+        assert_eq!(asked.get(&b), Some(&t));
+        // One that is no longer listed is dropped, and starts again if it
+        // comes back.
+        assert!(channels_to_force(&mut asked, &[b], t + 1).is_empty());
+        assert!(!asked.contains_key(&a));
+        assert!(channels_to_force(&mut asked, &[a, b], t + 2).is_empty());
+        assert_eq!(asked.get(&a), Some(&(t + 2)));
+    }
+
+    #[test]
+    fn sl_36_a_channel_that_never_leaves_is_closed_by_force_after_an_hour() {
+        let (w, first) = wallet();
+        let mut src = Fake::new(Some((w.clone(), first)));
+        let mut l = ln(Network::Regtest, Some(hint(8)), Some(1));
+        serving(&mut l, &w);
+        let node = FakeNode::new(0);
+        *lock(&node.channels) = vec![[7; 32], [8; 32]];
+        l.close_retry(&node, 1_000, &mut src);
+        l.close_retry(&node, 1_000 + FORCE_CLOSE_AFTER_SECS - 1, &mut src);
+        assert!(lock(&node.forced).is_empty());
+        // One channel leaves; the other is forced, and the cooperative close
+        // is still asked at every try.
+        *lock(&node.channels) = vec![[7; 32]];
+        l.close_retry(&node, 1_000 + FORCE_CLOSE_AFTER_SECS, &mut src);
+        assert_eq!(*lock(&node.forced), vec![vec![[7; 32]]]);
+        assert_eq!(lock(&node.closed).len(), 3);
+        assert!(l.notes.iter().any(|n| n.starts_with("SL-36: closing 1")));
+        cleanup(&l);
     }
 
     #[test]

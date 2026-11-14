@@ -97,24 +97,13 @@ fn nr_23_the_system_clock_and_urandom_give_changing_values() {
 }
 
 #[test]
-fn nr_23_a_source_that_gives_no_bytes_gives_an_error_never_a_number() {
-    // `/dev/null` reads as the end of the file at once.
-    let mut rng = OsRandomness::with_file(fs::File::open("/dev/null").unwrap());
-    for _ in 0..3 {
-        assert_eq!(rng.next_u64(), Err(crate::RandomError));
-    }
-    // A write-only file cannot be read at all.
-    let dir = TempDir::new("random-unreadable");
-    fs::create_dir_all(&dir.0).unwrap();
-    let path = dir.0.join("w");
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&path)
-        .unwrap();
-    let mut rng = OsRandomness::with_file(file);
-    assert_eq!(rng.next_u64(), Err(crate::RandomError));
+fn ss_02_two_reads_of_the_kernel_source_differ_and_neither_is_zero() {
+    let mut rng = OsRandomness::new().unwrap();
+    let a = rng.next_u64().unwrap();
+    let b = rng.next_u64().unwrap();
+    assert_ne!(a, b);
+    assert_ne!(a, 0);
+    assert_ne!(b, 0);
 }
 
 #[test]

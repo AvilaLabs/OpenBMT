@@ -17,6 +17,9 @@ openbmt-net = { path = "../openbmt-net" }
 openbmt-watch = { path = "../openbmt-watch" }
 openbmt-core = { path = "../openbmt-core" }
 
+# The random source reads the kernel through the checked read (SS-02).
+openbmt-kernel-random = { path = "../openbmt-kernel-random" }
+
 # The tests' fake peer speaks the encrypted transport with the same crate
 # that the net crate uses.
 [dev-dependencies]

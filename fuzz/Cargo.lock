@@ -882,6 +882,7 @@ version = "0.1.0"
 dependencies = [
  "bitcoin",
  "openbmt-core",
+ "openbmt-kernel-random",
  "openbmt-net",
  "openbmt-watch",
 ]

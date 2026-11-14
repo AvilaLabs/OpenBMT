@@ -6,7 +6,7 @@
 
 use std::fmt::{self, Display};
 use std::fs::{self, File, TryLockError};
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -80,46 +80,29 @@ impl Clock for SystemClock {
     }
 }
 
-/// Randomness read from `/dev/urandom`. For Linux and other Unix systems.
-/// An Android app passes its own [`Randomness`] (for example one over
-/// `SecureRandom`) instead.
+/// Randomness from the kernel: its bytes, read and checked as SS-02 says
+/// (`openbmt_kernel_random`). For Linux and other Unix systems. An Android
+/// app passes its own [`Randomness`] (for example one over `SecureRandom`)
+/// instead.
 ///
-/// If a read from the file fails, the call returns [`RandomError`]. No other
-/// numbers take the place of the ones that were not read.
+/// If the kernel's read is refused, the call returns [`RandomError`]. Nothing
+/// stands in for the bytes that were not read.
 #[derive(Debug)]
-pub struct OsRandomness {
-    file: File,
-}
+pub struct OsRandomness;
 
 impl OsRandomness {
-    /// Open `/dev/urandom`.
+    /// The kernel source; it holds no file, so this does not fail.
     pub fn new() -> io::Result<Self> {
-        Ok(Self {
-            file: File::open("/dev/urandom")?,
-        })
-    }
-}
-
-#[cfg(test)]
-impl OsRandomness {
-    /// A source over any file, for the tests.
-    pub(crate) fn with_file(file: File) -> Self {
-        Self { file }
+        Ok(Self)
     }
 }
 
 impl Randomness for OsRandomness {
     fn next_u64(&mut self) -> Result<u64, RandomError> {
-        read_word(&mut self.file)
+        openbmt_kernel_random::system_bytes::<8>()
+            .map(u64::from_le_bytes)
+            .map_err(|_| RandomError)
     }
-}
-
-/// One number from a reader, or [`RandomError`] when it gives fewer than 8
-/// bytes.
-fn read_word(source: &mut impl Read) -> Result<u64, RandomError> {
-    let mut bytes = [0u8; 8];
-    source.read_exact(&mut bytes).map_err(|_| RandomError)?;
-    Ok(u64::from_le_bytes(bytes))
 }
 
 /// Values kept as files in one directory.
