@@ -169,13 +169,14 @@ order of the rules, so that the refusal names the first that fails.
   checked against the vectors of the BIP. Nothing in a claim depends on the
   service's help; the cost is a larger transaction that shows the swap's
   script on chain.
-- **SW-46.** A claim that is not yet in a block can be built again at
-  another fee rate, from the same lockup, to the same address, with the
-  same rules as SW-40 to SW-44. A swap that was not claimed is refused. The
-  new claim's transaction id replaces the one the state holds, so the state
-  names the claim that was sent last. The caller sends it to take the place
-  of the earlier one (it signals replacement) and keeps the lockup, which
-  the machine does not hold after the claim.
+- **SW-46.** A claim that is not yet in a block can be built again at another
+  fee rate, from the same lockup, to the same address, with the same rules as
+  SW-40 to SW-43. The timing of SW-44 is for the first claim only: a claim
+  already sent is built again at and past the timeout. A swap that was not
+  claimed is refused. The new claim's transaction id replaces the one the
+  state holds, so the state names the claim that was sent last. The caller
+  sends it to take the place of the earlier one (it signals replacement) and
+  keeps the lockup, which the machine does not hold after the claim.
 
 ## 6. The state file
 
@@ -231,14 +232,14 @@ order of the rules, so that the refusal names the first that fails.
   `transaction.mempool`, `transaction.confirmed`, `invoice.settled`,
   `invoice.expired`, `transaction.failed`, `swap.expired` and
   `transaction.refunded`; any other is reported as unknown, not guessed.
-- **SW-71.** One swap is held from the request to the claim by a machine
-  that takes the status, the lockup the caller found, the time and the
-  height of the chain, and says what to do next: wait and ask again after a
-  number of seconds, check the lockup, build the claim, watch the claim, or
-  that the swap is paid or has failed, with the reason. Every change makes
-  a new value. A failed swap shows no preimage: after a status that says the
-  swap failed, or at the timeout, no claim is built. After the claim is
-  sent a status changes nothing.
+- **SW-71.** One swap is held from the request to the claim by a machine that
+  takes the status, the lockup the caller found, the time and the height of
+  the chain, and says what to do next: wait and ask again after a number of
+  seconds, check the lockup, build the claim, watch the claim, or that the
+  swap is paid or has failed, with the reason. Every change makes a new value.
+  A failed swap shows no preimage: after a status that says the swap failed,
+  or at the timeout, no first claim is built. After the claim is sent a status
+  changes nothing.
 - **SW-72.** The machine does not believe the service about money. A lockup is
   believed only after SW-30 has checked the bytes of the transaction, and
   bytes in a status are always taken as not yet in a block. Once the shop's
@@ -311,7 +312,10 @@ order of the rules, so that the refusal names the first that fails.
 | `MAX_LEAF_BYTES` | 128 | SW-13 |
 | `MIN_INVOICE_LIFE_SECS` | 300 | SW-23 |
 | `MIN_CLAIM_BLOCKS` | 36 | SW-27 |
+| `CLAIM_MARGIN_BLOCKS` | 18 | SW-27, SW-44 |
 | `MIN_ONCHAIN_SATS` | 1,000 | SW-28 |
+| `MIN_ONCHAIN_PPM` | 900,000 | SW-28 |
+| `MAX_LOCKUP_FEE_SATS` | 25,000 | SW-60 |
 | `PAIRS_FRESH_SECS` | 600 | SW-63 |
 | `MAX_HTTP_BYTES` | 64 KiB | SW-60, SW-81 |
 | `POLL_WAITING_SECS` | 10 | SW-71 |
@@ -320,4 +324,5 @@ order of the rules, so that the refusal names the first that fails.
 **[to tune]**: the service's own minimum and maximum are read live (SW-60);
 the numbers above are the shop's floors and caps, not the service's. The
 service's timeout in blocks was not read from a swap, so `MIN_CLAIM_BLOCKS`
-stays to tune, and so do the age of the terms and the two polling intervals.
+stays to tune, and so do `CLAIM_MARGIN_BLOCKS`, `MIN_ONCHAIN_PPM`,
+`MAX_LOCKUP_FEE_SATS`, the age of the terms and the two polling intervals.
