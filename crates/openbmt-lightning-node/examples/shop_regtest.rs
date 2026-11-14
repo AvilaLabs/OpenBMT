@@ -102,6 +102,7 @@ async fn main() {
             token: None,
             zero_conf: true,
         },
+        cap_sat: args.get("cap_sat").map(|v| v.parse().unwrap()).unwrap_or(0),
         max_opening_fee_msat: args
             .get("max_fee_msat")
             .map(|v| v.parse().unwrap())
@@ -172,6 +173,17 @@ async fn handle(node: &Node, p: &[&str]) -> String {
                 s.channels,
                 s.usable_channels,
                 s.room_msat
+            )
+        }
+        // The provider's LSPS1 and the last order (SL-28, SL-45), for the drill.
+        "lsps1" => {
+            let s = node.status();
+            let order = s.last_order.as_ref().map_or("none".to_string(), |o| {
+                format!("{:?}/{:?}/fee_sat={}", o.state, o.why, o.fee_sat)
+            });
+            format!(
+                "offer={:?} order={} fees_paid_sat={} room_msat={}",
+                s.lsps1, order, s.lsps1_fees_paid_sat, s.room_msat
             )
         }
         "confirmations" => format!("{:?}", node.funding_confirmations()),

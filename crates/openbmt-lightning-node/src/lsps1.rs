@@ -38,6 +38,8 @@ pub const POLL_EVERY_SECS: u64 = 10;
 /// After a refusal to pay, a failed order or a finished one, no new order is
 /// made sooner than this: an hour.
 pub const RETRY_AFTER_SECS: u64 = 3600;
+/// An order not paid by this time is given up as expired: an hour.
+pub const OPEN_UNPAID_SECS: u64 = 3600;
 /// An order paid and not opened by this time is given up as failed: two days.
 pub const GIVE_UP_AFTER_SECS: u64 = 2 * 24 * 3600;
 /// The channel is asked to last at least this many blocks if the provider
@@ -212,10 +214,15 @@ impl OrderBook {
         true
     }
 
-    /// The provider has opened the channel.
+    /// The provider has opened the channel. An order whose payment the node
+    /// has not been told of yet is counted as paid now: the provider does not
+    /// open a channel before it is.
     pub fn done(&mut self, now: u64) {
         if let Some(o) = self.order.as_mut() {
             if o.state.is_open() {
+                if o.state == OrderState::Open {
+                    self.fees_paid_sat = self.fees_paid_sat.saturating_add(o.fee_sat);
+                }
                 o.state = OrderState::Done;
                 o.updated_unix = now;
                 // The room comes when the channel is ready; the same wait as
@@ -226,11 +233,28 @@ impl OrderBook {
         }
     }
 
+    /// The payment of the open order failed. `false` if the payment is not the
+    /// open order's, or the order is not waiting for its payment.
+    pub fn payment_failed(&mut self, payment_hash: &[u8; 32], now: u64) -> bool {
+        let ours = self
+            .order
+            .as_ref()
+            .is_some_and(|o| o.payment_hash == *payment_hash && o.state == OrderState::Open);
+        if ours {
+            self.fail(OrderWhy::PaymentFailed, now);
+        }
+        ours
+    }
+
     /// The order failed, or was not paid; a new one is made no sooner than an
-    /// hour from now.
+    /// hour from now. A fee counted for a payment the provider gave back is
+    /// taken off again, since the fees paid count what was taken (SL-29).
     pub fn fail(&mut self, why: OrderWhy, now: u64) {
         if let Some(o) = self.order.as_mut() {
             if o.state != OrderState::Done {
+                if o.state == OrderState::Paid && why == OrderWhy::Refunded {
+                    self.fees_paid_sat = self.fees_paid_sat.saturating_sub(o.fee_sat);
+                }
                 o.state = OrderState::Failed;
                 o.why = why;
                 o.updated_unix = now;
@@ -498,6 +522,28 @@ pub struct PayPlan {
     pub min_final_cltv: u32,
 }
 
+/// What the order costs, in satoshis, as the provider's Lightning option
+/// says it: the most of its fee, its total and the invoice's amount (the shop
+/// puts in no coins, so the whole order is the fee); 0 with no such option.
+pub fn order_fee_sat(payment: &LSPS1PaymentInfo) -> u64 {
+    let Some(b) = payment.bolt11.as_ref() else {
+        return 0;
+    };
+    let invoice_msat = b.invoice.amount_milli_satoshis().unwrap_or(0);
+    invoice_msat
+        .max(b.fee_total_sat.saturating_mul(1000))
+        .max(b.order_total_sat.saturating_mul(1000))
+        .div_ceil(1000)
+}
+
+/// The payment hash of the order's Lightning invoice; zeros with none.
+pub fn payment_hash_of(payment: &LSPS1PaymentInfo) -> [u8; 32] {
+    payment
+        .bolt11
+        .as_ref()
+        .map_or([0; 32], |b| b.invoice.payment_hash().to_byte_array())
+}
+
 /// Whether to pay the order's Lightning payment option, and what (SL-28,
 /// SL-29). `can_pay_msat` is the most one channel to the provider can send
 /// now; `now_unix` is the time.
@@ -524,10 +570,8 @@ pub fn judge_payment(
         .ok_or(PayRefusal::NoAmount)?;
     // The shop puts in no coins, so the whole order is the fee. Whichever of
     // the numbers the provider gives is the largest counts.
-    let fee_msat = amount_msat
-        .max(bolt11.fee_total_sat.saturating_mul(1000))
-        .max(bolt11.order_total_sat.saturating_mul(1000));
-    let fee_sat = fee_msat.div_ceil(1000);
+    let fee_sat = order_fee_sat(payment);
+    let fee_msat = fee_sat.saturating_mul(1000);
     if fee_msat > max_fee_msat {
         return Err(PayRefusal::FeeAboveMax { fee_sat });
     }
@@ -590,10 +634,12 @@ pub enum Next {
 
 /// The step for an open order, from what the provider says (SL-28).
 pub fn next_step(record: &OrderRecord, seen: Seen, now: u64) -> Next {
+    let unpaid_too_long = now.saturating_sub(record.created_unix) > OPEN_UNPAID_SECS;
     match (seen, record.state) {
         (Seen::Opened, _) => Next::Done,
         (Seen::Refunded, _) => Next::Fail(OrderWhy::Refunded),
         (Seen::NoBolt11, _) => Next::Fail(OrderWhy::NotPossible),
+        (Seen::Expecting, OrderState::Open) if unpaid_too_long => Next::Fail(OrderWhy::Expired),
         (Seen::Expecting, OrderState::Open) => Next::Pay,
         // Paid, and the provider has not got it yet: the payment is on its way.
         (Seen::Expecting, _) => Next::Wait,
@@ -960,6 +1006,52 @@ mod tests {
         book.begin(next);
         assert!(book.paid(&[6; 32], NOW + 20));
         assert_eq!(book.fees_paid_sat, 2_500);
+    }
+
+    #[test]
+    fn sl_45_a_refund_takes_the_fee_off_again_and_an_order_opened_unseen_counts_once() {
+        let mut book = OrderBook::default();
+        book.begin(record(OrderState::Open));
+        book.paid(&[5; 32], NOW);
+        assert_eq!(book.fees_paid_sat, 2_000);
+        book.fail(OrderWhy::Refunded, NOW + 5);
+        assert_eq!(book.fees_paid_sat, 0);
+        assert_eq!(book.order.as_ref().unwrap().why, OrderWhy::Refunded);
+        // The provider opened the channel before the node saw its payment sent.
+        let mut book = OrderBook::default();
+        book.begin(record(OrderState::Open));
+        book.done(NOW + 5);
+        assert_eq!(book.fees_paid_sat, 2_000);
+        assert!(book.paid(&[5; 32], NOW + 6));
+        assert_eq!(book.fees_paid_sat, 2_000);
+    }
+
+    #[test]
+    fn sl_28_a_failed_payment_fails_the_open_order_only() {
+        let mut book = OrderBook::default();
+        book.begin(record(OrderState::Open));
+        assert!(!book.payment_failed(&[6; 32], NOW));
+        assert!(book.has_open_order());
+        assert!(book.payment_failed(&[5; 32], NOW + 1));
+        assert_eq!(book.order.as_ref().unwrap().why, OrderWhy::PaymentFailed);
+        assert_eq!(book.fees_paid_sat, 0);
+        assert!(!order_wanted(0, 1_000_000, &book, NOW + 100));
+        // An order already paid is not failed by a late failure event.
+        let mut book = OrderBook::default();
+        book.begin(record(OrderState::Open));
+        book.paid(&[5; 32], NOW);
+        assert!(!book.payment_failed(&[5; 32], NOW + 1));
+        assert_eq!(book.order.as_ref().unwrap().state, OrderState::Paid);
+    }
+
+    #[test]
+    fn sl_28_an_order_not_paid_within_the_hour_is_given_up() {
+        let open = record(OrderState::Open);
+        assert_eq!(next_step(&open, Seen::Expecting, NOW + 3600), Next::Pay);
+        assert_eq!(
+            next_step(&open, Seen::Expecting, NOW + 3601),
+            Next::Fail(OrderWhy::Expired)
+        );
     }
 
     #[test]

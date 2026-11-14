@@ -911,6 +911,7 @@ impl ShopLn {
                     zero_conf: true,
                 },
                 max_opening_fee_msat: sl.max_opening_fee_sats.saturating_mul(1000),
+                cap_sat: sl.cap_sats,
                 start_from: StartFrom::Newer,
                 wallet,
                 sweep_index,

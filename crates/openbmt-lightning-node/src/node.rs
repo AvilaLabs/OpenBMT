@@ -23,6 +23,7 @@ use crate::device::{DeviceSnapshot, DeviceState, DeviceStatus, SecondDevice};
 use crate::expect::{Claim, Expectation, Expectations};
 use crate::filters::{Confirmable, FilterQueue, FilterRun, FilterStart, Follower, Progress};
 use crate::logger::Logger;
+use crate::lsps1::{self, OrderBook, OrderRecord, OrderState, OrderWhy, Orders};
 use crate::paid::{PaidLog, PaidRecord};
 use crate::provider::{choose_offer, Offer, ProviderConfig, Refusal};
 use crate::room::{decide, room_to_receive_msat, OnChainReason, ReceiveDecision, Situation};
@@ -40,12 +41,15 @@ use lightning::chain::channelmonitor::ChannelMonitor;
 use lightning::chain::{BestBlock, Listen, Watch};
 use lightning::events::{Event, PaymentPurpose, ReplayEvent};
 use lightning::ln::channelmanager::{
-    Bolt11InvoiceParameters, ChainParameters, ChannelManagerReadArgs,
+    Bolt11InvoiceParameters, ChainParameters, ChannelManagerReadArgs, PaymentId,
+    RecipientOnionFields, RetryableSendFailure,
 };
 use lightning::ln::peer_handler::{IgnoringMessageHandler, MessageHandler};
 use lightning::onion_message::messenger::NullMessageRouter;
-use lightning::routing::router::{RouteHint, RouteHintHop};
+use lightning::routing::router::{Path, Route, RouteHint, RouteHintHop, RouteHop};
 use lightning::sign::{InMemorySigner, KeysManager, NodeSigner};
+use lightning::types::features::{ChannelFeatures, NodeFeatures};
+use lightning::types::payment::{PaymentHash, PaymentSecret};
 use lightning::util::config::{
     ChannelConfigOverrides, ChannelConfigUpdate, ChannelHandshakeConfigUpdate, UserConfig,
 };
@@ -64,6 +68,11 @@ use lightning_invoice::{
 };
 use lightning_liquidity::events::LiquidityEvent;
 use lightning_liquidity::lsps0::ser::LSPSRequestId;
+use lightning_liquidity::lsps1::client::LSPS1ClientConfig;
+use lightning_liquidity::lsps1::event::LSPS1ClientEvent;
+use lightning_liquidity::lsps1::msgs::{
+    LSPS1ChannelInfo, LSPS1Options, LSPS1OrderId, LSPS1PaymentInfo,
+};
 use lightning_liquidity::lsps2::client::LSPS2ClientConfig;
 use lightning_liquidity::lsps2::event::LSPS2ClientEvent;
 use lightning_liquidity::lsps2::msgs::LSPS2OpeningFeeParams;
@@ -129,6 +138,9 @@ pub struct NodeConfig {
     pub provider: ProviderConfig,
     /// The most the shop pays for one opening, in millisatoshis (SL-29).
     pub max_opening_fee_msat: u64,
+    /// The cap, in satoshis (SL-34): room is bought ahead (SL-28) when the room
+    /// to receive is under half of it. 0 buys none.
+    pub cap_sat: u64,
     /// Which copy of the state to start from (SL-25).
     pub start_from: StartFrom,
     /// The shop's pinned wallet description, as the counter pins it (WL-20,
@@ -277,17 +289,41 @@ pub struct NodeStatus {
     pub usable_channels: usize,
     /// The room to receive (SL-40), in millisatoshis.
     pub room_msat: u64,
+    /// Whether the provider offers LSPS1 (SL-28).
+    pub lsps1: lsps1::Offer,
+    /// The last order for room bought ahead (SL-45).
+    pub last_order: Option<OrderRecord>,
+    /// What orders paid so far, in satoshis (SL-29, SL-45).
+    pub lsps1_fees_paid_sat: u64,
+}
+
+/// What the provider says of an order (SL-28).
+struct OrderAnswer {
+    id: String,
+    payment: LSPS1PaymentInfo,
+    channel: Option<LSPS1ChannelInfo>,
 }
 
 enum Waiter {
     Params(oneshot::Sender<Vec<LSPS2OpeningFeeParams>>),
     Buy(oneshot::Sender<(u64, u32)>),
+    Options(oneshot::Sender<LSPS1Options>),
+    Order(oneshot::Sender<OrderAnswer>),
+}
+
+/// What the node knows of the provider's LSPS1 (SL-28).
+struct Lsps1State {
+    offer: lsps1::Offer,
+    options: Option<LSPS1Options>,
+    /// When an open order was last asked about, in seconds since the epoch.
+    last_poll: u64,
 }
 
 struct Shared {
     network: Network,
     provider: ProviderConfig,
     max_opening_fee_msat: u64,
+    cap_sat: u64,
     manager: Arc<Manager>,
     monitor: Arc<Monitor>,
     peers: Arc<Peers>,
@@ -302,6 +338,8 @@ struct Shared {
     waiters: Mutex<HashMap<LSPSRequestId, Waiter>>,
     expectations: Expectations,
     paid_log: PaidLog,
+    orders: Orders,
+    lsps1: Mutex<Lsps1State>,
     sweeper: Arc<Sweeper>,
     destination: Arc<SweepDestination>,
     tor: Option<SocketAddr>,
@@ -557,6 +595,7 @@ impl Node {
         let expectations = Expectations::load(Arc::clone(&store), now_unix)
             .await
             .map_err(setup)?;
+        let orders = Orders::load(Arc::clone(&store)).await.map_err(setup)?;
         let paid_log = PaidLog::new(Arc::clone(&background));
         let destination = Arc::new(
             SweepDestination::load(
@@ -785,7 +824,9 @@ impl Node {
                 Arc::clone(&broadcaster),
                 None,
                 Some(LiquidityClientConfig {
-                    lsps1_client_config: None,
+                    lsps1_client_config: Some(LSPS1ClientConfig {
+                        max_channel_fees_msat: Some(config.max_opening_fee_msat),
+                    }),
                     lsps2_client_config: Some(LSPS2ClientConfig {}),
                     lsps5_client_config: None,
                 }),
@@ -819,6 +860,7 @@ impl Node {
             network: config.network,
             provider: config.provider.clone(),
             max_opening_fee_msat: config.max_opening_fee_msat,
+            cap_sat: config.cap_sat,
             manager: Arc::clone(&manager),
             monitor: Arc::clone(&monitor),
             peers: Arc::clone(&peers),
@@ -833,6 +875,12 @@ impl Node {
             waiters: Mutex::new(HashMap::new()),
             expectations,
             paid_log,
+            orders,
+            lsps1: Mutex::new(Lsps1State {
+                offer: lsps1::Offer::Unknown,
+                options: None,
+                last_poll: 0,
+            }),
             sweeper: Arc::clone(&sweeper),
             destination: Arc::clone(&destination),
             tor: config.tor,
@@ -938,10 +986,15 @@ impl Node {
                 keep_provider_connected(shared).await
             }));
         }
-        // The LSPS2 answers.
+        // The LSPS1 and LSPS2 answers.
         {
             let shared = Arc::clone(&shared);
             tasks.push(tokio::spawn(async move { lsps2_events(shared).await }));
+        }
+        // Room bought ahead from a provider that offers LSPS1 (SL-28).
+        {
+            let shared = Arc::clone(&shared);
+            tasks.push(tokio::spawn(async move { lsps1_task(shared).await }));
         }
 
         // The library's own loop: events, timers, persistence.
@@ -1128,6 +1181,7 @@ impl Node {
         let s = &self.shared;
         let channels = s.manager.list_channels();
         let usable = s.manager.list_usable_channels();
+        let book: OrderBook = s.orders.snapshot();
         NodeStatus {
             device: s.device_status.snapshot(),
             chain_ok: s.chain_ok(),
@@ -1136,6 +1190,9 @@ impl Node {
             channels: channels.len(),
             usable_channels: usable.len(),
             room_msat: room_to_receive_msat(usable.iter().map(|c| c.inbound_capacity_msat)),
+            lsps1: s.lsps1.lock().unwrap().offer,
+            last_order: book.order,
+            lsps1_fees_paid_sat: book.fees_paid_sat,
         }
     }
 
@@ -1388,6 +1445,320 @@ impl Shared {
             .map_err(|_| ())
     }
 
+    /// Asks the provider for its LSPS1 options. No answer in 30 seconds or an
+    /// error means it has no LSPS1; that is kept and asked again at the next
+    /// connection (SL-28).
+    async fn ask_lsps1_options(&self) {
+        let answer = async {
+            let handler = self.liquidity.lsps1_client_handler()?;
+            let (tx, rx) = oneshot::channel();
+            {
+                let mut waiters = self.waiters.lock().unwrap();
+                let id = handler.request_supported_options(self.provider.node_id);
+                waiters.insert(id, Waiter::Options(tx));
+            }
+            tokio::time::timeout(lsps1::OPTIONS_ANSWER, rx)
+                .await
+                .ok()?
+                .ok()
+        }
+        .await;
+        let mut st = self.lsps1.lock().unwrap();
+        match answer {
+            Some(options) => {
+                st.offer = lsps1::Offer::Offered;
+                st.options = Some(options);
+                self.logger.line(Level::Info, "the provider offers LSPS1");
+            }
+            None => {
+                st.offer = lsps1::Offer::NotOffered;
+                st.options = None;
+                self.logger.line(
+                    Level::Info,
+                    "the provider has no LSPS1: room comes with a payment too big for it",
+                );
+            }
+        }
+    }
+
+    /// Sends one order request and waits for the provider's answer.
+    async fn order_request(
+        &self,
+        send: impl FnOnce(
+            &lightning_liquidity::lsps1::client::LSPS1ClientHandler<
+                Arc<KeysManager>,
+                Arc<Background>,
+            >,
+        ) -> LSPSRequestId,
+    ) -> Option<OrderAnswer> {
+        let handler = self.liquidity.lsps1_client_handler()?;
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut waiters = self.waiters.lock().unwrap();
+            let id = send(handler);
+            waiters.insert(id, Waiter::Order(tx));
+        }
+        tokio::time::timeout(lsps1::ORDER_ANSWER, rx)
+            .await
+            .ok()?
+            .ok()
+    }
+
+    /// The most one usable channel to the provider can send now, in
+    /// millisatoshis.
+    fn best_outbound_msat(&self) -> u64 {
+        self.manager
+            .list_usable_channels()
+            .iter()
+            .filter(|c| c.counterparty.node_id == self.provider.node_id)
+            .map(|c| c.next_outbound_htlc_limit_msat)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// One step of room bought ahead (SL-28): follow the open order, or make
+    /// one if the room is under half the cap.
+    async fn lsps1_step(&self, options: &LSPS1Options) {
+        let now = now_secs();
+        // Nothing is ordered or paid while the copies cannot both be written
+        // or the chain data is behind: the order would not be kept.
+        if !self.chain_ok() || self.device_status.snapshot().state != DeviceState::Reachable {
+            return;
+        }
+        let book = self.orders.snapshot();
+        match book.order.as_ref().filter(|o| o.state.is_open()) {
+            Some(record) => {
+                if now.saturating_sub(self.lsps1.lock().unwrap().last_poll) < lsps1::POLL_EVERY_SECS
+                {
+                    return;
+                }
+                self.lsps1.lock().unwrap().last_poll = now;
+                self.follow_order(record, now).await;
+            }
+            None => self.make_order(options, &book, now).await,
+        }
+    }
+
+    /// Makes an order if the room is under half the cap and the node has
+    /// something to pay with.
+    async fn make_order(&self, options: &LSPS1Options, book: &OrderBook, now: u64) {
+        let room_msat = room_to_receive_msat(
+            self.manager
+                .list_usable_channels()
+                .iter()
+                .map(|c| c.inbound_capacity_msat),
+        );
+        if !lsps1::order_wanted(room_msat, self.cap_sat, book, now) {
+            return;
+        }
+        // Without a channel to pay from, nothing is asked: the provider is
+        // not given orders that cannot be paid.
+        if self.best_outbound_msat() < 1000 {
+            return;
+        }
+        let failed = |why: OrderWhy| {
+            let record = OrderRecord {
+                id: "-".to_string(),
+                state: OrderState::Failed,
+                why,
+                fee_sat: 0,
+                payment_hash: [0; 32],
+                created_unix: now,
+                updated_unix: now,
+            };
+            move |b: &mut OrderBook| {
+                b.begin(record);
+                b.fail(why, now);
+            }
+        };
+        let params = match lsps1::order_params(
+            options,
+            room_msat,
+            self.cap_sat,
+            self.provider.token.as_deref(),
+        ) {
+            Ok(p) => p,
+            Err(e) => {
+                self.logger
+                    .line(Level::Info, &format!("no order can be made: {e:?}"));
+                let _ = self.orders.change(failed(OrderWhy::NotPossible)).await;
+                return;
+            }
+        };
+        let provider = self.provider.node_id;
+        let answer = self
+            .order_request(|h| h.create_order(&provider, params, None))
+            .await;
+        let Some(answer) = answer else {
+            self.logger
+                .line(Level::Info, "the provider did not take the order");
+            let _ = self.orders.change(failed(OrderWhy::Refused)).await;
+            return;
+        };
+        let id_ok = !answer.id.is_empty()
+            && answer.id.len() <= lsps1::MAX_ID_LEN
+            && answer.id.chars().all(|c| c.is_ascii_graphic());
+        if !id_ok {
+            let _ = self.orders.change(failed(OrderWhy::Refused)).await;
+            return;
+        }
+        let record = OrderRecord {
+            id: answer.id.clone(),
+            state: OrderState::Open,
+            why: OrderWhy::None,
+            fee_sat: lsps1::order_fee_sat(&answer.payment),
+            payment_hash: lsps1::payment_hash_of(&answer.payment),
+            created_unix: now,
+            updated_unix: now,
+        };
+        // Kept on both devices before anything is paid: a restart finds the
+        // order and makes no second.
+        let kept = record.clone();
+        if let Err(e) = self.orders.change(|b| b.begin(kept)).await {
+            self.logger
+                .line(Level::Warn, &format!("order not stored: {e}"));
+            return;
+        }
+        self.logger.line(
+            Level::Info,
+            &format!("order {} made, fee {} sat", record.id, record.fee_sat),
+        );
+        self.progress_order(&record, &answer, now).await;
+    }
+
+    /// Asks the provider about the open order and acts on the answer.
+    async fn follow_order(&self, record: &OrderRecord, now: u64) {
+        let provider = self.provider.node_id;
+        let id = LSPS1OrderId(record.id.clone());
+        let answer = self
+            .order_request(|h| h.check_order_status(&provider, id))
+            .await;
+        match answer {
+            Some(a) if a.id == record.id => self.progress_order(record, &a, now).await,
+            _ => {
+                // No answer: asked again later. A paid order that stays
+                // unanswered is given up after two days.
+                if record.state == OrderState::Paid
+                    && now.saturating_sub(record.updated_unix) > lsps1::GIVE_UP_AFTER_SECS
+                {
+                    let _ = self
+                        .orders
+                        .change(|b| b.fail(OrderWhy::NoChannel, now))
+                        .await;
+                }
+            }
+        }
+    }
+
+    /// What to do about an order after the provider's answer.
+    async fn progress_order(&self, record: &OrderRecord, answer: &OrderAnswer, now: u64) {
+        let seen = lsps1::read_status(&answer.payment, &answer.channel);
+        let write = |r: Result<(), lightning::io::Error>| {
+            if let Err(e) = r {
+                self.logger
+                    .line(Level::Warn, &format!("order change not stored: {e}"));
+            }
+        };
+        match lsps1::next_step(record, seen, now) {
+            lsps1::Next::Wait => {}
+            lsps1::Next::MarkPaid => write(
+                self.orders
+                    .change(|b| {
+                        b.paid(&record.payment_hash, now);
+                    })
+                    .await,
+            ),
+            lsps1::Next::Done => {
+                self.logger
+                    .line(Level::Info, &format!("order {} done", record.id));
+                write(self.orders.change(|b| b.done(now)).await);
+            }
+            lsps1::Next::Fail(why) => {
+                self.logger
+                    .line(Level::Info, &format!("order {} over: {why:?}", record.id));
+                write(self.orders.change(|b| b.fail(why, now)).await);
+            }
+            lsps1::Next::Pay => {
+                let plan = lsps1::judge_payment(
+                    &answer.payment,
+                    &self.provider.node_id,
+                    self.max_opening_fee_msat,
+                    self.best_outbound_msat(),
+                    now,
+                );
+                let plan = match plan {
+                    Ok(p) if p.payment_hash == record.payment_hash => p,
+                    // The provider changed the invoice after the order was made.
+                    Ok(_) => {
+                        write(
+                            self.orders
+                                .change(|b| b.fail(OrderWhy::NotPossible, now))
+                                .await,
+                        );
+                        return;
+                    }
+                    Err(r) => {
+                        self.logger
+                            .line(Level::Info, &format!("order {} not paid: {r:?}", record.id));
+                        write(self.orders.change(|b| b.fail(r.why(), now)).await);
+                        return;
+                    }
+                };
+                self.pay_order(&plan);
+            }
+        }
+    }
+
+    /// Pays the provider's invoice over a channel to the provider itself, the
+    /// one way this node pays (SL-28). The payment id is the payment hash, so
+    /// the library refuses a second payment of the same invoice.
+    fn pay_order(&self, plan: &lsps1::PayPlan) {
+        let channel = self
+            .manager
+            .list_usable_channels()
+            .into_iter()
+            .filter(|c| {
+                c.counterparty.node_id == self.provider.node_id
+                    && c.next_outbound_htlc_limit_msat >= plan.amount_msat
+            })
+            .max_by_key(|c| c.next_outbound_htlc_limit_msat);
+        let Some(scid) = channel.and_then(|c| c.get_outbound_payment_scid()) else {
+            return;
+        };
+        let route = Route {
+            paths: vec![Path {
+                hops: vec![RouteHop {
+                    pubkey: self.provider.node_id,
+                    node_features: NodeFeatures::empty(),
+                    short_channel_id: scid,
+                    channel_features: ChannelFeatures::empty(),
+                    fee_msat: plan.amount_msat,
+                    cltv_expiry_delta: plan.min_final_cltv,
+                    maybe_announced_channel: false,
+                }],
+                blinded_tail: None,
+            }],
+            route_params: None,
+        };
+        match self.manager.send_payment_with_route(
+            route,
+            PaymentHash(plan.payment_hash),
+            RecipientOnionFields::secret_only(PaymentSecret(plan.payment_secret)),
+            PaymentId(plan.payment_hash),
+        ) {
+            Ok(()) => self.logger.line(
+                Level::Info,
+                &format!("paying the provider {} msat for room", plan.amount_msat),
+            ),
+            // Already on its way: nothing to do.
+            Err(RetryableSendFailure::DuplicatePayment) => {}
+            Err(e) => self.logger.line(
+                Level::Warn,
+                &format!("the order's payment was not sent: {e:?}"),
+            ),
+        }
+    }
+
     /// Buys the offer for this amount: the provider's answer is the short
     /// channel id and the CLTV delta for the invoice's route hint.
     async fn buy(&self, amount_msat: u64, offer: &Offer) -> Result<(u64, u32), InvoiceError> {
@@ -1479,6 +1850,85 @@ impl Shared {
                     .line(Level::Warn, &format!("invoice not stored: {e}"));
                 InvoiceError::NotStored
             })
+    }
+}
+
+/// Hands each LSPS1 answer to the call that waits for it (SL-28).
+fn lsps1_event(shared: &Shared, event: LSPS1ClientEvent) {
+    let provider = shared.provider.node_id;
+    let mut waiters = shared.waiters.lock().unwrap();
+    match event {
+        LSPS1ClientEvent::SupportedOptionsReady {
+            request_id,
+            counterparty_node_id,
+            supported_options,
+        } if counterparty_node_id == provider => {
+            if let Some(Waiter::Options(tx)) = waiters.remove(&request_id) {
+                let _ = tx.send(supported_options);
+            }
+        }
+        LSPS1ClientEvent::OrderCreated {
+            request_id,
+            counterparty_node_id,
+            order_id,
+            payment,
+            channel,
+            ..
+        }
+        | LSPS1ClientEvent::OrderStatus {
+            request_id,
+            counterparty_node_id,
+            order_id,
+            payment,
+            channel,
+            ..
+        } if counterparty_node_id == provider => {
+            if let Some(Waiter::Order(tx)) = waiters.remove(&request_id) {
+                let _ = tx.send(OrderAnswer {
+                    id: order_id.0,
+                    payment,
+                    channel,
+                });
+            }
+        }
+        LSPS1ClientEvent::SupportedOptionsRequestFailed { request_id, .. }
+        | LSPS1ClientEvent::OrderRequestFailed { request_id, .. } => {
+            // The sender is dropped: the waiting call sees a refusal.
+            waiters.remove(&request_id);
+        }
+        _ => {}
+    }
+}
+
+/// Room bought ahead (SL-28, SL-35): when the provider connects, ask it for
+/// its LSPS1 options; with them, order a channel whenever the room to receive
+/// is under half the cap, and follow the order until the channel is opened.
+async fn lsps1_task(shared: Arc<Shared>) {
+    let id = shared.provider.node_id;
+    let mut was_connected = false;
+    loop {
+        tokio::select! {
+            _ = shared.stop.notified() => return,
+            _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+        }
+        if shared.peers.peer_by_node_id(&id).is_none() {
+            was_connected = false;
+            continue;
+        }
+        if !was_connected {
+            was_connected = true;
+            shared.ask_lsps1_options().await;
+        }
+        let options = {
+            let st = shared.lsps1.lock().unwrap();
+            match (st.offer, &st.options) {
+                (lsps1::Offer::Offered, Some(o)) => Some(o.clone()),
+                _ => None,
+            }
+        };
+        if let Some(options) = options {
+            shared.lsps1_step(&options).await;
+        }
     }
 }
 
@@ -1579,8 +2029,13 @@ async fn lsps2_events(shared: Arc<Shared>) {
             _ = shared.stop.notified() => return,
             e = shared.liquidity.next_event_async() => e,
         };
-        let LiquidityEvent::LSPS2Client(event) = event else {
-            continue;
+        let event = match event {
+            LiquidityEvent::LSPS2Client(event) => event,
+            LiquidityEvent::LSPS1Client(event) => {
+                lsps1_event(&shared, event);
+                continue;
+            }
+            _ => continue,
         };
         let mut waiters = shared.waiters.lock().unwrap();
         match event {
@@ -1749,6 +2204,37 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
                 let _ = shared.paid.send(Paid::from(record));
             }
         }
+        Event::PaymentSent { payment_hash, .. } => {
+            // The provider's invoice for room bought ahead is paid (SL-28);
+            // its fee counts with the opening fees paid (SL-29, SL-45). A
+            // failure to keep it gives the event again.
+            let now = now_secs();
+            if let Err(e) = shared
+                .orders
+                .change(|b| {
+                    b.paid(&payment_hash.0, now);
+                })
+                .await
+            {
+                log(Level::Warn, format!("order payment not kept: {e}"));
+                return Err(ReplayEvent());
+            }
+        }
+        Event::PaymentFailed { payment_hash, .. } => {
+            let (now, hash) = (now_secs(), payment_hash.map(|h| h.0));
+            if let Some(hash) = hash {
+                if let Err(e) = shared
+                    .orders
+                    .change(|b| {
+                        b.payment_failed(&hash, now);
+                    })
+                    .await
+                {
+                    log(Level::Warn, format!("order payment failure not kept: {e}"));
+                    return Err(ReplayEvent());
+                }
+            }
+        }
         Event::ChannelPending {
             channel_id,
             counterparty_node_id,
@@ -1887,6 +2373,7 @@ mod tests {
                 zero_conf: false,
             },
             max_opening_fee_msat: 1_000_000,
+            cap_sat: 1_000_000,
             start_from: StartFrom::Newer,
             wallet: crate::testutil::wallet_text(),
             sweep_index: 0,
