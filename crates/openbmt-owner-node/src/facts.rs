@@ -18,8 +18,9 @@ pub enum FactsRefused {
     /// This is not a refusal of the request: it waits and is tried again.
     ViewNotReady,
     /// The view's receipt log is full (OC-13), so it cannot say what a sale
-    /// received. The request waits like one for a view that is not ready,
-    /// until the view is reset and rescanned.
+    /// received. The request waits like one for a view that is not ready; a
+    /// reset and rescan does not end the state, which finds the same
+    /// payments again.
     ReceiptLogFull,
     /// The sale's receive index lost a receipt to pruning (OC-28, OC-29), so
     /// the wallet cannot check what was paid. The request is refused: the

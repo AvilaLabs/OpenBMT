@@ -32,8 +32,7 @@ pub const DUE_SOON_DAYS: u32 = 3;
 pub const MAX_LEAD_DAYS: u32 = 31;
 /// RQ-25: most requests a repeat makes at one time.
 pub const MAX_REPEATS_AT_A_TIME: usize = 12;
-/// RQ-15: most payments one request keeps. (A limit of this library, for the
-/// size of the book: the rules name none.)
+/// RQ-15: most payments one request keeps.
 pub const MAX_CREDITS: usize = 1_000;
 
 /// How a request is priced (RQ-07). Never changes after the request is made.

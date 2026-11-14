@@ -168,15 +168,17 @@ an end, payments in parts, repeats and returns.
 
 ## 5. Due, overdue and asking again
 
-- **RQ-21.** The list of requests has three parts, in this order: "Overdue"
-  (past the due day and not paid), "Due soon" (due within 3 days), then
-  "Waiting", each newest due date last. A request shows its note, its
-  number, what is still owed and its due date.
-- **RQ-22.** The owner app sets no alarm and starts no job (OA-89), so it
-  does not remind anyone by itself. When it is opened, Home shows how many
-  requests are overdue, and each request has "Send again", which makes a
-  fresh quote (RQ-14) and opens the share sheet with the overdue line of
-  the words above the link.
+- **RQ-21.** The list of requests has these parts, in this order: "Ready
+  to send" (RQ-25), "Overdue" (past the due day and not paid), "Due soon"
+  (due within 3 days) and "Waiting", each newest due date last, then
+  "Finished", the requests that have ended, newest first. A repeat not yet
+  shared stays under "Ready to send" even past its due day. A request shows
+  its note, its number, what is still owed and its due date.
+- **RQ-22.** The owner app sets no alarm and starts no job (OA-89), so it does
+  not remind anyone by itself. When it is opened, Home shows how many requests
+  are under "Overdue", so a repeat not yet shared is not counted, and each
+  request has "Send again", which makes a fresh quote (RQ-14) and opens the
+  share sheet with the overdue line of the words above the link.
 - **RQ-23.** The background watcher (OA-80 to OA-89) holds no request and
   learns no payment to one: it signs heartbeats only. A request's payment is
   counted when the owner app next follows the chain.

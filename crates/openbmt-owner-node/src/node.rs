@@ -3220,8 +3220,8 @@ impl<P: OwnerPort> OwnerNode<P> {
     }
 
     /// OC-55: the entries that are held, with the blocks left until the block
-    /// that beat their payment is more than [`UNDO_BLOCKS`] deep: 0 at the
-    /// tip where they are released.
+    /// that beat their payment is more than [`UNDO_BLOCKS`] deep: 0 once it
+    /// is [`UNDO_BLOCKS`] + 1 deep, where they are released.
     pub fn held(&self) -> Vec<(openbmt_owner::HeldEntry, u32)> {
         self.owner
             .held_entries()
