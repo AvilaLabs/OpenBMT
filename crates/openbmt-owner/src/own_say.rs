@@ -213,13 +213,13 @@ impl OwnRefusal {
                 "Finish pairing a waiting counter, then add this one.",
             )
             .code("OA-111"),
-            Self::BoxWaits => Words::new(
-                Tone::Stop,
-                "WORDS_NEEDED_OA_OA123_BOX_WAITS_HEADING",
-                "WORDS_NEEDED_OA_OA123_BOX_WAITS_WHAT",
+            Self::BoxWaits => stop(
+                "A change waits for a counter",
+                "A change of the shop's settings is waiting for a counter to confirm it, so the Box was not added.",
                 Who::Owner,
-                "WORDS_NEEDED_OA_OA123_BOX_WAITS_NEXT",
-            ),
+                "Confirm the change on a counter, or wait until it is dropped, then connect the Box again.",
+            )
+            .code("OA-119"),
             Self::SwitchSameWallet => stop(
                 "Already the counters' wallet",
                 "The wallet given is the one the counters already pay into, so no switch was made.",

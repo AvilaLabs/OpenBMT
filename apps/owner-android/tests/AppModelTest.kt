@@ -3164,7 +3164,7 @@ object AppModelTest {
                     val t = OwnBoxPairing(real, lib4)
                     t.start(1_000); t.toAddress(); t.found("host.example:80", claim); t.match()
                     val first = t.send(1, "")
-                    ok(first != null && first.heading == OwnPairWords.boxLinkNotSaved && t.step == OwnBoxStep.Rest && lib4.calls.count { it.startsWith("welcome") } == 1, "BX-18: a link that was not saved says so, after one welcome")
+                    ok(first != null && first.heading == OwnPairWords.boxLinkNotSaved.heading && t.step == OwnBoxStep.Rest && lib4.calls.count { it.startsWith("welcome") } == 1, "BX-18: a link that was not saved says so, after one welcome")
                     linkFile.deleteRecursively()
                     ok(t.send(1, "") == null && t.step == OwnBoxStep.Sent && real.hasLink() && lib4.calls.count { it.startsWith("welcome") } == 1, "BX-18: Send again keeps the link and does not send the welcome again")
                 } finally {

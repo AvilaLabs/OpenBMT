@@ -1368,7 +1368,7 @@ fn oa_123_a_box_is_not_added_while_a_change_waits_and_is_after_it_is_in_force_or
     let refusal = refused(s.add_box(id(10).device_id(), USD, |b| disk.put(b)));
     assert_eq!(refusal, OwnRefusal::BoxWaits);
     assert_eq!(refusal.rule(), "OA-119");
-    assert!(refusal.words().heading.starts_with("WORDS_NEEDED_OA_OA123_BOX_WAITS_"));
+    assert_eq!(refusal.words().heading, "A change waits for a counter");
     assert_eq!(s.to_bytes(), state);
     assert_eq!(disk.get(), stored);
     assert_eq!(s.waiting_change(), Some(&held));
