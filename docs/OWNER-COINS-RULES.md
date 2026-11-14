@@ -424,6 +424,56 @@ the reply (OA-16 to OA-19).
   `docs/SCREEN-RULES.md`: what happened, why, and what to do next, with no
   rule numbers.
 
+## 8b. A counter's Paid, checked against the wallet
+
+A counter that is taken over can show Paid for a sale nobody paid, and sign
+a record that says so (R3-3). The owner phone does not take its word: it
+checks every Paid on chain against its own view of the wallet (OC-14), and
+says so when one is missing.
+
+- **OC-60.** What is checked. Every sale a counter's records show paid by a
+  payment to the sale's own address: accepted at once (CR-13), confirmed, or
+  paid by a swap claim to that address (CR-221). A sale paid over the shop's
+  own Lightning node has no payment to its address and is not checked here
+  (`docs/SHOP-LIGHTNING-RULES.md`). The amount the counter recorded as
+  received is compared with the amount the owner's view verified at the sale's
+  index (OC-14), with the sale's own underpayment tolerance (WR-32). More
+  received than recorded is not a mismatch: late payments and surplus explain
+  it (OC-15).
+- **OC-61.** When. A sale whose Paid record is less than
+  `PAID_CHECK_WAIT_SECS` (24 hours) **[to tune]** old, by the owner phone's
+  clock, and whose payment is not yet in a block, is listed as "waiting for a
+  block" and is not a mismatch: a payment with a low fee can wait that long
+  (DESIGN §2.6). After that, a verified amount below the recorded one is a
+  mismatch. Nothing is judged while the view is not ready or has not checked
+  the chain to its tip (OC-14); a sale too old for facts (OC-14) is listed as
+  not checkable, never as a mismatch or as checked.
+- **OC-62.** The mismatch. The owner phone raises an alarm with the counter's
+  name, the sale's number, the cashier, the amount the counter recorded, the
+  amount seen and the time of the Paid, in words that say the counter showed
+  Paid and this phone sees no payment, or less, and that the counter may have
+  been tampered with. Only the owner clears it, on the owner phone; the
+  acknowledgement is kept in the phone's own ledger as OC-36 says, and a sale
+  whose payment later arrives in full clears itself, with a line that says so.
+  A mismatch is raised once per sale.
+- **OC-63.** The day. The owner phone's day summary shows, for each counter,
+  the number and total of its sales paid on chain, and how many of them this
+  phone has seen in a block, is waiting for, could not check and found
+  missing. A counter whose total differs from what was seen is named.
+- **OC-64.** Storage. The marks of OC-61 and OC-62 (sale, state, time raised,
+  time cleared) are kept in the owner node's durable writes, in a strict frame
+  of their own: read back with no byte left over, every bound checked, and
+  refused if writing them again would give other bytes. At most 65,536 marks
+  are kept; the oldest cleared marks go first, and a mark not cleared is never
+  dropped. A file that does not read back does not stop the node: the check
+  says it cannot keep its marks, in words, until the owner clears them.
+- **OC-65.** Tests. A counter record of a Paid with no receipt raises the
+  alarm after the wait and not before; a payment arriving later clears it; a
+  partial payment within the tolerance is not a mismatch and one outside it
+  is; a Lightning sale is not checked; a view not ready judges nothing; a sale
+  too old for facts is not checkable; the day summary's counts; the marks read
+  back strictly.
+
 ## 9. Setting up the owner's phone
 
 The owner's phone makes key 1, reads the Key app's public answer, and builds

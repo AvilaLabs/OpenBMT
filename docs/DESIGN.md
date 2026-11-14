@@ -220,7 +220,8 @@ Nobody has to open either.
     shows the shop's past payments to whoever opens it; a tampered counter
     could show a false Paid, so the owner phone checks every Paid against
     the payments it sees itself and raises the alarm when one is missing
-    (§2.7) **[to build]**. Then the steps for the chosen till, with a cue
+    (§2.7, `docs/OWNER-COINS-RULES.md` OC-60 to OC-63). Then the steps for
+    the chosen till, with a cue
     card for staff to print.
 12. **Instant payments.** Two sentences and one choice: "Small payments
     count at once. Bigger ones wait about ten minutes, until the payment is
@@ -1871,7 +1872,7 @@ review (A, W, U, P), the round-3 check (R3-1 to R3-10) or the round-4 check
 | Lost recovery kit and one key | — | Two keys needed to spend: one key alone can never spend, but nothing can be spent if two are lost | Kit reminders; yearly key 3 inspection; health check; prompt to move to a new wallet when any key is lost | §5.4 |
 | Key 2 and key 3 born in the same app on the same phone; a bystander sees both sets of words | R3-1 | One component or person holds two keys | Key 3 made with another publisher's wallet app on the counter tablet before it becomes the counter, in airplane mode, or on a hardware wallet; tablet factory reset; only its xpub reaches the Key app; separate sittings; "do this step alone". Launch condition 1 | §0, §2.1, §5.4 |
 | One publisher holds both release keys; Android cannot block a bad update of an installed app | R3-2 | Malicious pair of releases defeats the two-app separation | Key app release key held by a second, independent person (launch condition 2, second holder not yet named); until then the doc and chooser say one publisher signs both and recommend a hardware wallet or another publisher's signer for key 2; vendored crates reviewed by someone else; independent rebuilder; no automatic updates | §0, §5.4, §16 |
-| Counter or main-app build shows its own address and says Paid; owner-phone matching runs the same app | R3-3 | Sales proceeds lost until noticed | Monthly outside check in Sparrow or Bitcoin Core against the POS bitcoin-tender total; claim restated as protection up to the caps and until reconciliation | §0, §10 |
+| Counter or main-app build shows its own address and says Paid; owner-phone matching runs the same app | R3-3 | Sales proceeds lost until noticed | The owner phone checks every Paid against its own view of the wallet and raises an alarm for one missing (`docs/OWNER-COINS-RULES.md` OC-60 to OC-63); monthly outside check in Sparrow or Bitcoin Core against the POS bitcoin-tender total; claim restated as protection up to the caps and until reconciliation | §0, §10 |
 | Allowlist poisoning; no ceiling on allowlisted destinations | R3-4 | Funds to attacker | Enrolled only by scanning the deposit QR with the Key app's camera, label typed there, active after 24 hours on the Key app's clock; satoshi ceilings also on allowlisted destinations | §5.4, §11 |
 | Dollar ceilings on an offline Key app; restore mode; fee measured on value sent | R3-5 | Ceilings meaningless or bypassed | All ceilings in satoshis set on the Key app, per transaction, per day and per week; dollars labeled "from the owner phone"; restore-and-sign enforces ceilings; fee ceiling on total input with a hard bound | §5.4 |
 | Key 2 is a hardware wallet: batches, settings and pairings need only key 1 | R3-6 | Owner phone alone loosens limits | Key app as an approver on a spare device (identity key only); without it, the screen says these rest on the owner phone plus spot checks | §5.4, §2.10 |
