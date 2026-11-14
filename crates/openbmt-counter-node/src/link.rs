@@ -155,6 +155,9 @@ pub struct Outgoing {
     /// The relay was reached by the poll.
     reached: bool,
     check_in: Option<Vec<u8>>,
+    /// LK-84: the Lightning report that goes with the check-in, when this
+    /// counter is the Lightning counter.
+    lightning_report: Option<Vec<u8>>,
     /// Where the records to send start, and each message with the number of
     /// records in it.
     records_from: u64,
@@ -378,6 +381,11 @@ impl<R: Post> CounterLink<R> {
         };
         if polled.reached {
             out.check_in = self.prepare_check_in(node, now);
+            // SL-78, LK-84: a report goes with each check-in that is sent,
+            // made from what the node knows at this moment.
+            if out.check_in.is_some() {
+                out.lightning_report = node.shop_lightning_report().map(|r| r.to_bytes());
+            }
             self.prepare_records(node, now, &mut out);
         }
         (reports, out)
@@ -392,6 +400,7 @@ impl<R: Post> CounterLink<R> {
         }
         let reached = out.reached
             && self.send_check_in(out.check_in)
+            && self.send_lightning_report(out.lightning_report)
             && self.send_records(out.records_from, out.records, now)
             && self.send_notices();
         self.courier.end();
@@ -599,6 +608,22 @@ impl<R: Post> CounterLink<R> {
                 }
                 self.send_failed(&e, "the check-in")
             }
+        }
+    }
+
+    /// LK-84: the Lightning report. A report is not a record: one that did
+    /// not go is not sent again, the next check-in brings a newer one.
+    /// `false` if the relay could not be reached.
+    fn send_lightning_report(&mut self, bytes: Option<Vec<u8>>) -> bool {
+        let Some(bytes) = bytes else {
+            return true;
+        };
+        match self
+            .courier
+            .send(&self.owner, Kind::LightningReport, &bytes)
+        {
+            Ok(()) => true,
+            Err(e) => self.send_failed(&e, "the Lightning report"),
         }
     }
 

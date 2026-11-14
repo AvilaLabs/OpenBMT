@@ -1058,3 +1058,60 @@ fn lk_79_a_starter_line_is_given_to_a_starter_counter_and_refused_by_the_others(
     k.step(T0);
     assert_eq!(k.link.state().node_refusals, 1);
 }
+
+/// A world whose node is the Lightning counter of the settings, which holds
+/// no key yet.
+fn lightning_world(named: bool) -> World {
+    use openbmt_core::settings::ShopLightning;
+    use openbmt_core::shop_lightning::node_id;
+    world_on(config(), true, move |dir| {
+        let time = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(T0));
+        let mut c = super::kit::config(dir, &time);
+        let boxed = id(61).device_id();
+        c.settings.devices.insert(boxed);
+        c.settings.boxes.insert(boxed);
+        c.settings.shop_lightning = named.then(|| ShopLightning {
+            counter: counter(),
+            node_id: node_id(&[1; 64]),
+            second_device: boxed,
+            provider_node_id: node_id(&[2; 64]),
+            provider_addr: "127.0.0.1:9".parse().unwrap(),
+            cap_sats: 100_000,
+            max_opening_fee_sats: 3_000,
+        });
+        c.shop_lightning = Some(crate::ShopLnConfig {
+            seed_record: None,
+            identity: Box::new(|| Some(id(3))),
+            relay: None,
+            link_proxy: None,
+        });
+        start_with(c, time)
+    })
+}
+
+#[test]
+fn sl_78_a_check_in_of_the_lightning_counter_brings_a_report_that_says_why_it_offers_none() {
+    use openbmt_link::shopln::{LightningReport, NotOffered};
+    let mut w = lightning_world(true);
+    w.step(T0);
+    let got = w.owner_gets();
+    assert_eq!(of_kind(&got, Kind::CheckIn).len(), 1);
+    let reports = of_kind(&got, Kind::LightningReport);
+    assert_eq!(reports.len(), 1);
+    let report = LightningReport::from_bytes(&reports[0].content).unwrap();
+    assert_eq!(report.not_offered, NotOffered::NoUsableChannel);
+    assert_eq!(report.balance_sats, 0);
+    assert_eq!(report.opening_fees_paid_sats, 0);
+    assert_eq!(report.last_sweep_at, 0);
+    // A report is not a record: it is not among the counter's records.
+    assert!(carried(&got).iter().all(|r| r.kind == RecordKind::CheckIn));
+}
+
+#[test]
+fn sl_78_a_counter_that_is_not_the_lightning_counter_sends_no_report() {
+    let mut w = lightning_world(false);
+    w.step(T0);
+    let got = w.owner_gets();
+    assert_eq!(of_kind(&got, Kind::CheckIn).len(), 1);
+    assert!(of_kind(&got, Kind::LightningReport).is_empty());
+}

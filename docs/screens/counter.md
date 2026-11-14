@@ -246,6 +246,29 @@ by hand. To write it again, run the test
 | SwapFailed | Lightning payment unfinished | The swap provider did not lock the bitcoin in time, so the customer's payment was cancelled and goes back to them. | Ask the customer to pay again, or take another payment. | the cashier | CR-223 |
 | SwapUnavailable | Lightning off for now | The swap provider could not be reached, or refused this amount. | The same code still takes bitcoin on-chain. | the cashier | CR-219 |
 | SwapClaimStuck | Lightning claim waiting | A Lightning sale's claim has not confirmed and the provider's deadline is near. | Nothing to do. The counter keeps raising the fee. If the deadline passes, the sale is shown unpaid. | the owner | CR-222 |
+| ShopLightning::NoSeed | WORDS_NEEDED_SL76_NO_SEED | WORDS_NEEDED_SL76_NO_SEED | WORDS_NEEDED_SL76_NO_SEED | a manager | SL-76 |
+| ShopLightning::Starting | WORDS_NEEDED_SL41_STARTING | WORDS_NEEDED_SL41_STARTING | WORDS_NEEDED_SL41_STARTING | a manager | SL-41 |
+| ShopLightning::Mainnet | WORDS_NEEDED_SL60_MAINNET | WORDS_NEEDED_SL60_MAINNET | WORDS_NEEDED_SL60_MAINNET | a manager | SL-60 |
+| ShopLightning::NoWallet | WORDS_NEEDED_SL33_NO_WALLET | WORDS_NEEDED_SL33_NO_WALLET | WORDS_NEEDED_SL33_NO_WALLET | a manager | SL-33 |
+| ShopLightning::NotTheBox | WORDS_NEEDED_SL73_NOT_THE_BOX | WORDS_NEEDED_SL73_NOT_THE_BOX | WORDS_NEEDED_SL73_NOT_THE_BOX | a manager | SL-73 |
+| ShopLightning::NoRoute | WORDS_NEEDED_SL32_NO_ROUTE | WORDS_NEEDED_SL32_NO_ROUTE | WORDS_NEEDED_SL32_NO_ROUTE | a manager | SL-32 |
+| ShopLightning::NotStarted | WORDS_NEEDED_SL41_NOT_STARTED | WORDS_NEEDED_SL41_NOT_STARTED | WORDS_NEEDED_SL41_NOT_STARTED | a manager | SL-41 |
+| ShopLightning::Closing | WORDS_NEEDED_SL77_CLOSING | WORDS_NEEDED_SL77_CLOSING | WORDS_NEEDED_SL77_CLOSING | a manager | SL-77 |
+| ShopLightning::SecondDeviceAway | WORDS_NEEDED_SL41_SECOND_DEVICE_AWAY | WORDS_NEEDED_SL41_SECOND_DEVICE_AWAY | WORDS_NEEDED_SL41_SECOND_DEVICE_AWAY | a manager | SL-41 |
+| ShopLightning::ChainBehind | WORDS_NEEDED_SL41_CHAIN_BEHIND | WORDS_NEEDED_SL41_CHAIN_BEHIND | WORDS_NEEDED_SL41_CHAIN_BEHIND | a manager | SL-41 |
+| ShopLightning::NoRoom | WORDS_NEEDED_SL40_NO_ROOM | WORDS_NEEDED_SL40_NO_ROOM | WORDS_NEEDED_SL40_NO_ROOM | a manager | SL-40 |
+| ShopLightning::NoAmount | WORDS_NEEDED_SL41_NO_AMOUNT | WORDS_NEEDED_SL41_NO_AMOUNT | WORDS_NEEDED_SL41_NO_AMOUNT | a manager | SL-41 |
+| ShopLightning::ProviderAway | WORDS_NEEDED_SL41_PROVIDER_AWAY | WORDS_NEEDED_SL41_PROVIDER_AWAY | WORDS_NEEDED_SL41_PROVIDER_AWAY | a manager | SL-41 |
+| ShopLightning::FeeAboveMax | WORDS_NEEDED_SL29_FEE_ABOVE_MAX | WORDS_NEEDED_SL29_FEE_ABOVE_MAX | WORDS_NEEDED_SL29_FEE_ABOVE_MAX | a manager | SL-29 |
+| ShopLightning::WindowTooShort | WORDS_NEEDED_SL30_WINDOW_TOO_SHORT | WORDS_NEEDED_SL30_WINDOW_TOO_SHORT | WORDS_NEEDED_SL30_WINDOW_TOO_SHORT | a manager | SL-30 |
+| ShopLightning::NotStored | WORDS_NEEDED_SL20_NOT_STORED | WORDS_NEEDED_SL20_NOT_STORED | WORDS_NEEDED_SL20_NOT_STORED | a manager | SL-20 |
+| ShopLightning::Library | WORDS_NEEDED_SL41_LIBRARY | WORDS_NEEDED_SL41_LIBRARY | WORDS_NEEDED_SL41_LIBRARY | a manager | SL-41 |
+| SeedNotTaken::NotHere | WORDS_NEEDED_SL76_NOT_HERE | WORDS_NEEDED_SL76_NOT_HERE | WORDS_NEEDED_SL76_NOT_HERE | a manager | SL-76 |
+| SeedNotTaken::NotASeed | WORDS_NEEDED_SL76_NOT_A_KEY | WORDS_NEEDED_SL76_NOT_A_KEY | WORDS_NEEDED_SL76_NOT_A_KEY | a manager | SL-76 |
+| SeedNotTaken::WrongNode | WORDS_NEEDED_SL72_WRONG_NODE | WORDS_NEEDED_SL72_WRONG_NODE | WORDS_NEEDED_SL72_WRONG_NODE | a manager | SL-72 |
+| SeedNotTaken::AlreadyStored | WORDS_NEEDED_SL76_ALREADY_STORED | WORDS_NEEDED_SL76_ALREADY_STORED | WORDS_NEEDED_SL76_ALREADY_STORED | a manager | SL-76 |
+| ShopLightning::scan | WORDS_NEEDED_SL76_SCAN_THE_KEY | WORDS_NEEDED_SL76_SCAN_THE_KEY | WORDS_NEEDED_SL76_SCAN_THE_KEY | a manager | SL-76 |
+| ShopLightning::kept | WORDS_NEEDED_SL76_KEY_KEPT | WORDS_NEEDED_SL76_KEY_KEPT | WORDS_NEEDED_SL76_KEY_KEPT | a manager | SL-76 |
 | ConfirmRefused::NothingWaits | Nothing to confirm | No change waits at this counter, or a newer one has taken its place, so nothing was confirmed. | Open Change to confirm again to see what waits now. | a manager | CR-241 |
 | ConfirmRefused::NotWritten | Confirmation not saved | The counter could not save its confirmation, so nothing was confirmed and nothing changed. | Try again. If it fails again, tell the owner. | a manager | CR-40 |
 | OwnNodeSettingRefused::NotTor | Not a Tor address | A home-network address cannot prove which machine answers, so it cannot be your own node. | Use your node's Tor address, which ends in .onion. Your node's own app shows it, often under its connection details. | a manager | CR-101 |

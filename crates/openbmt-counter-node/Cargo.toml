@@ -22,6 +22,11 @@ openbmt-pos = { path = "../openbmt-pos" }
 openbmt-lightning = { path = "../openbmt-lightning" }
 # Lightning through a swap provider (CR-218 to CR-226).
 openbmt-swap = { path = "../openbmt-swap" }
+# Shop Lightning's node (SL-70 to SL-78): the counter that the settings name
+# runs it, and talks to the Box with Store and Stored messages. tokio is the
+# runtime the node needs, at the version the node pins.
+openbmt-lightning-node = { path = "../openbmt-lightning-node" }
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "time", "sync"] }
 
 [dev-dependencies]
 # The recorded replies and the invoice writer of the tests.

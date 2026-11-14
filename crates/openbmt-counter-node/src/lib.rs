@@ -24,6 +24,9 @@
 //! 9. [`settings`]: the settings the owner sends after pairing, the file the
 //!    counter keeps them in and what a start does with it (CR-160 to
 //!    CR-166).
+//! 10. [`shopln`] and [`shopln_node`]: Shop Lightning at the counter that
+//!     the settings name, its seed, its node, its second copy on the Box and
+//!     its invoices for the sales (SL-70 to SL-78).
 //!
 //! The rules the node follows are `docs/COUNTER-RULES.md` and, for what the
 //! driver does, `docs/NETWORK-RULES.md` (NR-44, NR-53, NR-75 above all). The
@@ -59,6 +62,8 @@ pub mod relaylink;
 pub mod say;
 pub mod settings;
 pub mod starter;
+pub mod shopln;
+pub mod shopln_node;
 pub mod swap;
 pub mod switch;
 
@@ -103,6 +108,8 @@ pub use settings::{
 pub use starter::{
     stop_decision, Cards, StarterCard, StarterRefused, StopDecision, MAGIC_STARTER_CARDS, MAX_CARDS,
 };
+pub use shopln::{role, Book, Role, SeedNotTaken, SeedRecord, Why};
+pub use shopln_node::{PaidSale, ShopLn, ShopLnArgs, ShopLnConfig, ShopLnStatus};
 pub use swap::{
     SaleSwap, SwapDriver, SwapRecord, SwapRequest, MAGIC_SWAP_RECORD, NOT_FOR_THIS_SALE,
 };

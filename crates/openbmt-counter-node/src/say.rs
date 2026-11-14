@@ -22,7 +22,9 @@ use crate::paired_own::OwnPairRefused;
 use crate::relaylink::LinkLine;
 use crate::settings::{SettingsFault, SettingsLine, SettingsRefused};
 use crate::starter::StarterRefused;
+use crate::shopln::{SeedNotTaken, Why};
 use crate::switch::{SwitchNotice, SwitchRefused, SwitchStepRefused};
+use openbmt_lightning_node::room::OnChainReason;
 
 impl DirStoreError {
     /// What the owner is told about a file of the counter's data folder.
@@ -134,6 +136,143 @@ fn said(tone: Tone, key: &'static str, who: Who) -> Words {
 /// would (CR-276). Its value is its own name, which names the rule.
 fn needed(tone: Tone, placeholder: &'static str, who: Who) -> Words {
     Words::new(tone, placeholder, placeholder, who, placeholder)
+}
+
+/// Shop Lightning's words (SL-41, SL-60, SL-72 to SL-77) are placeholders
+/// until they are written: the name of the rule and of the state stands in
+/// the heading and both sentences, once each.
+fn shopln_said(tone: Tone, key: &'static str, who: Who) -> Words {
+    Words::new(tone, key, key, who, key)
+}
+
+/// SL-41, SL-60, SL-73, SL-76, SL-77: what a manager is told while Lightning
+/// is not offered on this counter, or not offered for a sale. The node's own
+/// text is in the detail.
+pub fn shopln_words(why: &Why) -> Words {
+    use openbmt_lightning_node::words as node_words;
+    let (key, rule, detail) = match why {
+        Why::NoSeed => ("WORDS_NEEDED_SL76_NO_SEED", "SL-76", None),
+        Why::Starting => ("WORDS_NEEDED_SL41_STARTING", "SL-41", None),
+        Why::Mainnet => (
+            "WORDS_NEEDED_SL60_MAINNET",
+            "SL-60",
+            Some(node_words::SL_60.to_string()),
+        ),
+        Why::NoWallet => ("WORDS_NEEDED_SL33_NO_WALLET", "SL-33", None),
+        Why::NotTheBox => ("WORDS_NEEDED_SL73_NOT_THE_BOX", "SL-73", None),
+        Why::NoRoute => ("WORDS_NEEDED_SL32_NO_ROUTE", "SL-32", None),
+        Why::NotStarted(e) => ("WORDS_NEEDED_SL41_NOT_STARTED", "SL-41", Some(e.clone())),
+        Why::Closing => ("WORDS_NEEDED_SL77_CLOSING", "SL-77", None),
+        Why::Node(OnChainReason::SecondDeviceAway) => (
+            "WORDS_NEEDED_SL41_SECOND_DEVICE_AWAY",
+            "SL-41",
+            Some(node_words::SL_23.to_string()),
+        ),
+        Why::Node(OnChainReason::ChainBehind) => ("WORDS_NEEDED_SL41_CHAIN_BEHIND", "SL-41", None),
+        Why::Node(OnChainReason::NoRoom) => (
+            "WORDS_NEEDED_SL40_NO_ROOM",
+            "SL-40",
+            Some(node_words::SL_40.to_string()),
+        ),
+        Why::Node(OnChainReason::NoAmount) => ("WORDS_NEEDED_SL41_NO_AMOUNT", "SL-41", None),
+        Why::Node(OnChainReason::ProviderAway) => (
+            "WORDS_NEEDED_SL41_PROVIDER_AWAY",
+            "SL-41",
+            Some(node_words::SL_41.to_string()),
+        ),
+        Why::Node(OnChainReason::FeeAboveMax) => (
+            "WORDS_NEEDED_SL29_FEE_ABOVE_MAX",
+            "SL-29",
+            Some(node_words::SL_29.to_string()),
+        ),
+        Why::Node(OnChainReason::WindowTooShort) => (
+            "WORDS_NEEDED_SL30_WINDOW_TOO_SHORT",
+            "SL-30",
+            Some(node_words::SL_30.to_string()),
+        ),
+        Why::NotStored => (
+            "WORDS_NEEDED_SL20_NOT_STORED",
+            "SL-20",
+            Some(node_words::SL_20_INVOICE_NOT_STORED.to_string()),
+        ),
+        Why::Library(e) => ("WORDS_NEEDED_SL41_LIBRARY", "SL-41", Some(e.clone())),
+    };
+    let words = shopln_said(Tone::Info, key, Who::Manager).code(rule);
+    match detail {
+        Some(d) => words.detail(d),
+        None => words,
+    }
+}
+
+impl SeedNotTaken {
+    /// SL-72, SL-76: what a manager is told when a scanned Lightning key was
+    /// not taken. Nothing was stored.
+    pub fn words(&self) -> Words {
+        let key = match self {
+            Self::NotHere => "WORDS_NEEDED_SL76_NOT_HERE",
+            Self::NotASeed => "WORDS_NEEDED_SL76_NOT_A_KEY",
+            Self::WrongNode(_) => "WORDS_NEEDED_SL72_WRONG_NODE",
+            Self::AlreadyStored => "WORDS_NEEDED_SL76_ALREADY_STORED",
+        };
+        shopln_said(Tone::Stop, key, Who::Manager)
+            .code(self.rule())
+            .detail(self.to_string())
+    }
+}
+
+/// SL-76: the words of the screen that scans the Lightning key and of the
+/// line that says it was kept.
+pub fn shopln_scan_words() -> Words {
+    shopln_said(Tone::Info, "WORDS_NEEDED_SL76_SCAN_THE_KEY", Who::Manager).code("SL-76")
+}
+
+/// SL-76: the key was taken.
+pub fn shopln_seed_kept_words() -> Words {
+    shopln_said(Tone::Good, "WORDS_NEEDED_SL76_KEY_KEPT", Who::Manager).code("SL-76")
+}
+
+/// Every word of Shop Lightning with its name, for the list of every word.
+pub fn all_shopln_words() -> Vec<(String, Words)> {
+    let mut all = Vec::new();
+    for (name, why) in [
+        ("NoSeed", Why::NoSeed),
+        ("Starting", Why::Starting),
+        ("Mainnet", Why::Mainnet),
+        ("NoWallet", Why::NoWallet),
+        ("NotTheBox", Why::NotTheBox),
+        ("NoRoute", Why::NoRoute),
+        ("NotStarted", Why::NotStarted(String::new())),
+        ("Closing", Why::Closing),
+        (
+            "SecondDeviceAway",
+            Why::Node(OnChainReason::SecondDeviceAway),
+        ),
+        ("ChainBehind", Why::Node(OnChainReason::ChainBehind)),
+        ("NoRoom", Why::Node(OnChainReason::NoRoom)),
+        ("NoAmount", Why::Node(OnChainReason::NoAmount)),
+        ("ProviderAway", Why::Node(OnChainReason::ProviderAway)),
+        ("FeeAboveMax", Why::Node(OnChainReason::FeeAboveMax)),
+        ("WindowTooShort", Why::Node(OnChainReason::WindowTooShort)),
+        ("NotStored", Why::NotStored),
+        ("Library", Why::Library(String::new())),
+    ] {
+        all.push((format!("ShopLightning::{name}"), shopln_words(&why)));
+    }
+    let wrong = openbmt_core::shop_lightning::SeedRefused::WrongNode {
+        pinned: [0; 33],
+        scanned: [1; 33],
+    };
+    for (name, e) in [
+        ("NotHere", SeedNotTaken::NotHere),
+        ("NotASeed", SeedNotTaken::NotASeed),
+        ("WrongNode", SeedNotTaken::WrongNode(wrong)),
+        ("AlreadyStored", SeedNotTaken::AlreadyStored),
+    ] {
+        all.push((format!("SeedNotTaken::{name}"), e.words()));
+    }
+    all.push(("ShopLightning::scan".to_string(), shopln_scan_words()));
+    all.push(("ShopLightning::kept".to_string(), shopln_seed_kept_words()));
+    all
 }
 
 /// Whether these words are a placeholder (CR-264).
@@ -934,6 +1073,8 @@ pub fn all_words() -> Vec<(String, Words)> {
     // CR-112 to CR-116: the words of the Lightning driver.
     all.extend(crate::lightning::all_words());
     all.extend(crate::swap::all_words());
+    // SL-41, SL-72, SL-76, SL-77: the words of Shop Lightning.
+    all.extend(all_shopln_words());
     for (name, e) in [
         ("NothingWaits", crate::confirm::ConfirmRefused::NothingWaits),
         (

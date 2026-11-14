@@ -153,6 +153,8 @@ use crate::notices::NodeRecords;
 use crate::paired_own::OwnPairingRecord;
 use crate::settings::{check_not_rolled, decode_file, SettingsFault, SettingsRefused};
 use crate::starter::{stop_decision, Cards, StarterCard, StarterRefused, StopDecision};
+use crate::shopln::SeedNotTaken;
+use crate::shopln_node::{ShopLn, ShopLnArgs, ShopLnConfig, ShopLnStatus};
 use crate::swap::{Effect, SaleSwap, SwapDriver, SwapRequest, Update};
 use crate::switch::{
     check_switch, PendingSwitch, SwitchNotice, SwitchRefused, SwitchStepRefused, Waiting,
@@ -453,6 +455,10 @@ pub struct NodeConfig {
     /// from it, and writes it again for the app to keep when the counter
     /// switches. Without it the counter takes no switch.
     pub own_record: Option<OwnPairingRecord>,
+    /// SL-70 to SL-78: what Shop Lightning needs from the app: the stored
+    /// seed record and the relay of the pairing, which is the Box that keeps
+    /// the second copy. Without it the counter takes on-chain payments only.
+    pub shop_lightning: Option<ShopLnConfig>,
 }
 
 impl NodeConfig {
@@ -477,6 +483,7 @@ impl NodeConfig {
             lightning: None,
             announce_settings: false,
             own_record: None,
+            shop_lightning: None,
         }
     }
 
@@ -654,6 +661,8 @@ pub struct Node<P: DriverPort = Handle> {
     ln: Lightning,
     /// What a Lightning payment reported, for the next pump.
     ln_reports: Vec<Report>,
+    /// SL-70 to SL-78: Shop Lightning, when the app gave it what it needs.
+    shopln: Option<ShopLn>,
     /// CR-218 to CR-226: the driver of Lightning through a swap provider.
     swap: SwapDriver,
     /// The operating system's randomness for a swap's secrets (CR-219).
@@ -816,6 +825,7 @@ impl<P: DriverPort> Node<P> {
             lightning,
             announce_settings,
             own_record,
+            shop_lightning,
         } = config;
         let mut own = own;
         let mut own_record = own_record;
@@ -934,6 +944,7 @@ impl<P: DriverPort> Node<P> {
         let node_light_fallback = settings.light_fallback;
         let started_at = clock.now();
         let pending = load_pending(&mut store, &authority, &settings, started_at, &mut notes);
+        let counter_device = counter.device_id();
         let counter_id: [u8; 4] = counter
             .device_id()
             .to_bytes()
@@ -958,6 +969,25 @@ impl<P: DriverPort> Node<P> {
         let mut scripts = counter.watched_scripts();
         let launch_swap_scripts = swap.watched_scripts();
         scripts.extend(launch_swap_scripts.iter().cloned());
+        // SL-70, SL-33: Shop Lightning gets the driver's settings as the
+        // counter's other chain users have them, and the description of the
+        // shop's own wallet when the counter holds one.
+        let shopln = shop_lightning.map(|config| {
+            ShopLn::new(ShopLnArgs {
+                me: counter_device,
+                dir: dir.clone(),
+                network: driver.network,
+                driver: driver.clone(),
+                tor_on: settings.tor_on,
+                wallet: own.as_ref().map(|o| {
+                    (
+                        o.wallet.canonical_string().to_string(),
+                        o.first_range.range.end.saturating_sub(1),
+                    )
+                }),
+                config,
+            })
+        });
         let network = driver.network;
         let port = spawn(Launch {
             driver,
@@ -1021,6 +1051,7 @@ impl<P: DriverPort> Node<P> {
             settle_wanted: false,
             ln,
             ln_reports: Vec::new(),
+            shopln,
             swap,
             swap_random: Box::new(os_random),
             swap_watching: launch_swap_scripts,
@@ -1062,6 +1093,9 @@ impl<P: DriverPort> Node<P> {
         // their unconfirmed payments.
         node.own_health_now();
         node.ask_own_node_about_sales();
+        // SL-70: whether this is the Lightning counter is known from the
+        // first call, and a node that is wanted starts now.
+        node.shopln_step();
         Ok(node)
     }
 
@@ -1871,6 +1905,7 @@ impl<P: DriverPort> Node<P> {
         }
         self.take_own_events(&mut touched);
         self.swap_step(&mut reports);
+        self.shopln_step();
         // WR-54 reads the checked height and the clock, which move without
         // a `Peers` event.
         self.refresh_health(&mut touched);
@@ -2972,7 +3007,20 @@ impl<P: DriverPort> Node<P> {
         let now = self.clock.now();
         let live = self.counter.sale(index).is_some_and(|s| s.is_live());
         if !live {
+            if let Some(shopln) = self.shopln.as_mut() {
+                shopln.sale_closed(index);
+            }
             return SaleLightning::Off;
+        }
+        // SL-70: Shop Lightning is one of the Lightning paths, and the
+        // settings never set it with another (SL-71).
+        let sats = self.counter.sale(index).map_or(0, |s| s.needs_sats());
+        let request = self.counter.sale(index).is_some_and(|s| s.is_request());
+        if let Some(shopln) = self.shopln.as_mut().filter(|_| !request) {
+            let view = shopln.sale_view(index, sats, now);
+            if !matches!(view, SaleLightning::Off) {
+                return view;
+            }
         }
         let view = self.ln.sale_view(index, now);
         self.take_ln_notes();
@@ -3081,7 +3129,12 @@ impl<P: DriverPort> Node<P> {
         self.take_ln_notes();
     }
 
-    fn lightning_paid(&mut self, index: u32, facts: openbmt_lightning::PaidFacts) {
+    /// Records a Lightning payment against its sale. `true` when the payment
+    /// is dealt with, which is when the node that reported it may forget it:
+    /// the sale holds it, or it was recorded as late, or the counter will
+    /// not take it at all. `false` when a record could not be written, so
+    /// the node still has it.
+    fn lightning_paid(&mut self, index: u32, facts: openbmt_lightning::PaidFacts) -> bool {
         let now = self.clock.now();
         let heartbeat = self.counter.heartbeat_for_policy(now);
         let judged = Facts {
@@ -3113,6 +3166,7 @@ impl<P: DriverPort> Node<P> {
             Ok(screen) => {
                 self.ln_reports.extend(screen.reports);
                 self.ln.paid(index, &hash);
+                true
             }
             // CR-117: the sale is over, or was paid another way: this is a
             // late payment, recorded and flagged for the owner.
@@ -3129,11 +3183,15 @@ impl<P: DriverPort> Node<P> {
                     ));
                     self.ln_reports.extend(reports);
                     self.ln.settled(index, &hash);
+                    true
                 }
                 // The node still has it: asked again.
-                Err(e) => self.note(format!(
-                    "sale {index}: a late Lightning payment was not recorded: {e}"
-                )),
+                Err(e) => {
+                    self.note(format!(
+                        "sale {index}: a late Lightning payment was not recorded: {e}"
+                    ));
+                    false
+                }
             },
             Err(e) => {
                 self.note(format!(
@@ -3142,11 +3200,67 @@ impl<P: DriverPort> Node<P> {
                 // A payment the counter will not take now is not asked
                 // about again; a failure to write is, because the node
                 // still has it.
-                if !matches!(e, openbmt_counter::LightningRefused::Store(_)) {
+                let dealt = !matches!(e, openbmt_counter::LightningRefused::Store(_));
+                if dealt {
                     self.ln.settled(index, &hash);
+                }
+                dealt
+            }
+        }
+    }
+
+    // SL-70 to SL-78: Shop Lightning.
+
+    /// One turn of Shop Lightning at a pump: the settings in force are
+    /// reconciled with the node that runs, and each sale the node says is
+    /// paid is recorded and then acknowledged, so that it is not given
+    /// twice (SL-21).
+    fn shopln_step(&mut self) {
+        let now = self.clock.now();
+        let Some(shopln) = self.shopln.as_mut() else {
+            return;
+        };
+        shopln.reconcile(&self.settings, now);
+        let paid = shopln.take_paid(now);
+        for line in shopln.take_notes() {
+            self.note(line);
+        }
+        for p in paid {
+            if self.lightning_paid(p.sale, p.facts) {
+                if let Some(shopln) = self.shopln.as_mut() {
+                    shopln.recorded(&p.facts.payment_hash);
                 }
             }
         }
+    }
+
+    /// SL-72, SL-76: the seed code a manager scanned from the stick. It is
+    /// checked against the node ID the settings pin before anything is
+    /// stored; on a mismatch nothing is kept. On success the bytes are for
+    /// the app to seal and keep, and hand back at each start.
+    pub fn shop_lightning_take_seed(&mut self, text: &str) -> Result<Vec<u8>, SeedNotTaken> {
+        let now = self.clock.now();
+        let Some(shopln) = self.shopln.as_mut() else {
+            return Err(SeedNotTaken::NotHere);
+        };
+        let bytes = shopln.take_seed(text, &self.settings, now)?;
+        for line in shopln.take_notes() {
+            self.note(line);
+        }
+        Ok(bytes)
+    }
+
+    /// SL-41, SL-76, SL-77: what the app reads of Shop Lightning: whether the
+    /// seed is to be scanned, whether the sealed seed is to be deleted, and
+    /// why Lightning is not offered.
+    pub fn shop_lightning_status(&self) -> Option<ShopLnStatus> {
+        self.shopln.as_ref().map(|s| s.status())
+    }
+
+    /// SL-78, LK-84: the facts of the Lightning report that goes with a
+    /// check-in, when this is the Lightning counter.
+    pub fn shop_lightning_report(&self) -> Option<openbmt_link::shopln::LightningReport> {
+        self.shopln.as_ref().and_then(|s| s.report())
     }
 
     /// Give a sale a new quote (CR-05).
@@ -3181,6 +3295,9 @@ impl<P: DriverPort> Node<P> {
     ) -> Result<(), CancelRefused<DirStoreError>> {
         let now = self.clock.now();
         self.counter.cancel_by(index, now, by, &mut self.store)?;
+        if let Some(shopln) = self.shopln.as_mut() {
+            shopln.sale_closed(index);
+        }
         self.ln.sale_closed(index);
         self.swap.sale_closed(index);
         Ok(())
@@ -3358,6 +3475,9 @@ impl<P: DriverPort> Node<P> {
     /// those events reported.
     pub fn shutdown(&mut self) -> Vec<Report> {
         self.port.shutdown();
+        if let Some(shopln) = self.shopln.as_mut() {
+            shopln.stop();
+        }
         self.pump(Duration::ZERO)
     }
 }
