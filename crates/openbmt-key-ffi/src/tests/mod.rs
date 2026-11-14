@@ -5,6 +5,7 @@ mod allowlist;
 mod boxpair;
 mod call;
 mod ceremony;
+mod clock;
 mod deposit;
 mod history;
 mod kit;

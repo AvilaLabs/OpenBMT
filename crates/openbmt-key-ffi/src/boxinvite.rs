@@ -48,7 +48,7 @@ impl KeyApp {
     pub fn make_invitation(&self) -> Result<InvitationView, KeyError> {
         self.run(|inner| {
             inner.no_session()?;
-            let now = inner.store.now();
+            let now = inner.clock()?;
             let store = Arc::clone(&inner.store);
             let mut bytes = random_bytes(&store, INVITATION_RANDOM_LEN)?;
             let mut random = [0u8; INVITATION_RANDOM_LEN];

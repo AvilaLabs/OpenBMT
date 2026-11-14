@@ -32,7 +32,7 @@ use crate::{
 };
 
 pub const NET: Network = Network::Regtest;
-pub const NOW: u64 = 10_000_000;
+pub const NOW: u64 = 1_800_000_000;
 pub const OWNER_SECRET: [u8; 32] = [0x11; 32];
 pub const SMALL_BATCH: u32 = 3;
 /// The PIN of every Key app the tests make (SR-72).

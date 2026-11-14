@@ -383,6 +383,14 @@ fn state_words(rule: &str, text: &str) -> Option<Words> {
             "Finish or cancel the open request first.",
         )
         .detail(text),
+        "clock" => Words::new(
+            Tone::Info,
+            "WORDS_NEEDED: clock",
+            "WORDS_NEEDED: the clock cannot be read, nothing was done.",
+            Who::KeyHolder,
+            "WORDS_NEEDED: check the date and time and try again.",
+        )
+        .detail(text),
         "session-closed" => Words::new(
             Tone::Ended,
             "Request is closed",
@@ -1220,6 +1228,7 @@ pub(crate) fn samples() -> Vec<(Kind, &'static str, &'static str)> {
         (Refused, "handle-unexpected", ""),
         (Refused, "busy", ""),
         (State, "session-open", ""),
+        (State, "clock", ""),
         (State, "session-closed", ""),
         (State, "not-ready", ""),
         (State, "wallet-set", ""),

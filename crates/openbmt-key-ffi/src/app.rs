@@ -282,6 +282,11 @@ pub(crate) enum Gate {
     Legacy(Wiped),
 }
 
+/// The earliest time the clock may read for anything that needs the time to
+/// be done: 2026-11-01T00:00:00Z, in seconds since 1970. A clock that fails
+/// reads 0, and a clock before this date is not a clock that was set.
+pub const CLOCK_FLOOR_SECS: u64 = 1_793_491_200;
+
 /// Everything behind the lock.
 pub(crate) struct Inner {
     /// What the Key app reads and writes through: every write is sealed
@@ -322,6 +327,20 @@ impl Inner {
             old.into_iter().for_each(wipe_string);
         }
         self.words = words;
+    }
+
+    /// The clock's seconds, for a call that needs the time. A clock that
+    /// fails (it then reads 0) or reads before [`CLOCK_FLOOR_SECS`] is
+    /// refused: nothing that needs the time is done.
+    pub(crate) fn clock(&self) -> Result<u64, KeyError> {
+        let now = self.store.now();
+        if now < CLOCK_FLOOR_SECS {
+            return Err(wrong_state(
+                "clock",
+                "WORDS_NEEDED: the clock cannot be read, so nothing that needs the time is done",
+            ));
+        }
+        Ok(now)
     }
 
     /// Own-screen and setup calls are refused while a session is open: the

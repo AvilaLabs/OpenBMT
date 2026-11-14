@@ -275,7 +275,7 @@ impl KeyApp {
     /// counts as allowlisted after the wait.
     pub fn enroll_destination(&self, text: String, label: String) -> Result<(), KeyError> {
         self.run(|inner| {
-            let now = inner.store.now();
+            let now = inner.clock()?;
             let address = address_of(&text, inner)?;
             let script = script_of(&address, inner)?;
             change_signer(inner, |s| {
@@ -354,7 +354,7 @@ impl KeyApp {
     /// SR-31: confirm a clock correction, using the clock the app gave.
     pub fn correct_clock(&self) -> Result<(), KeyError> {
         self.run(|inner| {
-            let now = inner.store.now();
+            let now = inner.clock()?;
             change_signer(inner, |s| {
                 no_store(s.correct_clock(now, |_| Ok::<(), Infallible>(())))
             })

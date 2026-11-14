@@ -67,7 +67,7 @@ impl KeyApp {
                     "a session is open already: finish or cancel it first",
                 ));
             }
-            let now = inner.store.now();
+            let now = inner.clock()?;
             let id = inner.next_session;
             let ready = inner.ready()?;
             // The checks of AS-20 run here; the session itself is dropped.
