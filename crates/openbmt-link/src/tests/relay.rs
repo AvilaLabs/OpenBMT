@@ -567,6 +567,25 @@ fn lk_22_the_byte_limit_also_takes_from_the_sender_holding_the_most() {
 }
 
 #[test]
+fn lk_22_the_message_limit_takes_from_the_sender_holding_the_most_messages() {
+    let mut rig = rig_with_box_mailbox(RelayConfig::default());
+    for n in 1..=30u64 {
+        let big = to_box(&owner(), Role::Owner, n, Kind::Settings, &[5u8; 4096]);
+        assert!(matches!(rig.put(big), Response::Stored { .. }));
+    }
+    // A flooder of the smallest messages: the owner's bytes are the most
+    // held, but the message limit is the one that binds.
+    for n in 1..=400u64 {
+        let beat = to_box(&counter(), Role::Counter, n, Kind::PaidNotice, b"");
+        assert!(matches!(rig.put(beat), Response::Stored { .. }));
+    }
+    let mb = rig.relay.mailbox(&the_box().device_id()).unwrap();
+    assert_eq!(mb.len(), 256);
+    let held = box_ids(&mut rig);
+    assert_eq!(&held[..30], (1..=30u64).collect::<Vec<_>>().as_slice());
+}
+
+#[test]
 fn lk_22_equal_shares_lose_the_oldest_message_overall() {
     let cfg = RelayConfig {
         max_messages: 1,

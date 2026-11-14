@@ -157,17 +157,19 @@ impl Mailbox {
         self.messages.push_back((id, sender, sealed));
         self.next_id = self.next_id.max(id.saturating_add(1));
         while self.messages.len() > cfg.max_messages || self.bytes > cfg.max_bytes {
-            if !self.evict() {
+            if !self.evict(self.messages.len() > cfg.max_messages) {
                 break;
             }
         }
     }
 
-    /// Drop the oldest message of the sender that holds the most bytes here
-    /// (LK-22). Ties go to the sender with more messages, then to the sender
-    /// of the oldest message. Messages whose sender cannot be read (not
-    /// possible for what a put stored) count as one sender. Returns false when nothing is held.
-    fn evict(&mut self) -> bool {
+    /// Drop the oldest message of the sender that holds the most here
+    /// (LK-22): the most messages when the message limit is the one passed
+    /// (`by_count`), else the most bytes. Ties go to the sender with more of
+    /// the other, then to the sender of the oldest message. Messages whose
+    /// sender cannot be read (not possible for what a put stored) count as
+    /// one sender. Returns false when nothing is held.
+    fn evict(&mut self, by_count: bool) -> bool {
         // Per sender: bytes, messages, and the position of its oldest message.
         let mut shares: BTreeMap<Option<DeviceId>, (usize, usize, usize)> = BTreeMap::new();
         for (at, (_, sender, m)) in self.messages.iter().enumerate() {
@@ -177,7 +179,14 @@ impl Mailbox {
         }
         let Some(at) = shares
             .values()
-            .max_by_key(|(bytes, count, oldest)| (*bytes, *count, std::cmp::Reverse(*oldest)))
+            .max_by_key(|(bytes, count, oldest)| {
+                let (first, second) = if by_count {
+                    (*count, *bytes)
+                } else {
+                    (*bytes, *count)
+                };
+                (first, second, std::cmp::Reverse(*oldest))
+            })
             .map(|(_, _, oldest)| *oldest)
         else {
             return false;
