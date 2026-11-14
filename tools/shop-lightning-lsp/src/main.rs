@@ -2,12 +2,22 @@
 //! 127.0.0.1, for `scripts/shop-lightning-e2e-core.sh`.
 //!
 //! `shop-lightning-lsp dir=<datadir> ctl=<port> rpc=<port> user=<u> pass=<p>
-//!  p2p=<port> [min_fee_msat=<n>]`
+//!  p2p=<port> [min_fee_msat=<n>] [lsps1=on|off] [lsps1_fee_sat=<n>]`
 //!
 //! The provider runs with `client_trusts_lsp` false (SL-28), takes 1% with a
 //! minimum, funds the channel at six times the first payment, and allows a
 //! client `to_self_delay` of up to 2016 blocks (SL-30). One command per
 //! connection; the reply ends when the connection closes.
+//!
+//! `lsps1=on` is for the check of room bought ahead (SL-28). ldk-node 0.7.1
+//! has no LSPS1 service: the library's own is behind `cfg(lsps1_service)`,
+//! which is not to be enabled, and the node gives no hook for the LSPS0
+//! messages of the lsps1 methods (its liquidity manager answers them
+//! itself, with nothing, as a peer without the service). A service of our
+//! own needs the provider to be made on the library, not on ldk-node, which
+//! is a change of this tool's dependencies. So the flag is refused here
+//! rather than taken and ignored: a run that asked for LSPS1 does not go on
+//! against a provider that has none.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -27,6 +37,10 @@ fn main() {
         .skip(1)
         .filter_map(|a| a.split_once('=').map(|(k, v)| (k.to_string(), v.to_string())))
         .collect();
+    if args.get("lsps1").map(String::as_str) == Some("on") {
+        eprintln!("[lsp] lsps1=on: this provider has no LSPS1 service (ldk-node 0.7.1 has none and gives no hook for one)");
+        std::process::exit(4);
+    }
     let dir = PathBuf::from(&args["dir"]);
     std::fs::create_dir_all(&dir).unwrap();
 

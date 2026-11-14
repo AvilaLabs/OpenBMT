@@ -49,6 +49,12 @@
 #          and its room too small, is paid with the provider's skim at or
 #          under the recorded maximum; one whose skim is above the recorded
 #          maximum is failed back (SL-21, SL-29)
+#        - with LSPS1=1 and a provider that serves LSPS1: after a sweep leaves
+#          the room under half the cap, the node orders a channel, pays the
+#          provider's invoice from its own channel within the owner's most,
+#          the funding confirms, the room comes back to about the cap, a
+#          payment then goes through a channel with a confirmed funding, and
+#          the fee counts in the fees paid (SL-28, SL-29, SL-35, SL-40, SL-45)
 #   The script ends `ALL PASS` only if every check printed PASS.
 #
 #   With SHOP_CHAIN=filters the run is another one, on the same network: the
@@ -84,6 +90,10 @@
 #   SHOP_BIN       the `shop_regtest` example binary
 #   DEVICE_BIN     the `shop-lightning-device` binary
 #   LSP_BIN        the `shop-lightning-lsp` binary
+#   LSPS1          `1` turns LSPS1 on at the provider (`lsps1=on`) and runs the
+#                  check of room bought ahead after the sweep (default off: the
+#                  provider serves LSPS2 alone, and the node must find that out
+#                  and order nothing)
 #
 # Everything here is regtest on 127.0.0.1 with fresh keys, except the shop's,
 # which are made from the BIP-85 text's published master key. No real keys or
@@ -115,6 +125,7 @@ TOR_FREE=$((P0 + 11))
 TOR_FAKE=$((P0 + 12))
 TOR_DEV=$((P0 + 13))
 SHOP_CHAIN=${SHOP_CHAIN:-core}
+LSPS1=${LSPS1:-0}
 RPC_USER=shopln
 RPC_PASS=shopln_pw
 # The node id the BIP-85 child at index 0 of the text's master key gives
@@ -266,8 +277,10 @@ lnd_synced() { [ "$(lnc getinfo 2>/dev/null | jq -r .synced_to_chain)" = true ];
 for _ in $(seq 1 90); do lnd_synced && break; sleep 1; done
 lnd_synced || die "lnd did not start"
 
+LSP_ARGS=()
+[ "$LSPS1" = 1 ] && LSP_ARGS+=(lsps1=on lsps1_fee_sat=1500)
 "$LSP_BIN" dir="$LSP_DIR" ctl="$LSP_CTL" rpc="$BTC_RPC" user="$RPC_USER" pass="$RPC_PASS" p2p="$LSP_P2P" \
-  >"$LSP_DIR/out.log" 2>&1 &
+  ${LSP_ARGS[@]+"${LSP_ARGS[@]}"} >"$LSP_DIR/out.log" 2>&1 &
 PIDS[lsp]=$!
 wait_port "$LSP_CTL" 120 || die "the provider did not start"
 LSP_ID=$(ctl "$LSP_CTL" nodeid)
@@ -1013,6 +1026,119 @@ check "SL-21: and it is not reported paid" $?
 grep -q "SkimAboveMax" "$SHOP_DIR/node.log"
 check "SL-29: the node's log says the refusal was for the skim" $?
 stop_shop
+
+# ---- room bought ahead (LSPS1) -------------------------------------------------
+
+if [ "$LSPS1" = 1 ]; then
+  say "Room bought ahead from a provider that offers LSPS1"
+  # The node had no cap until now, so nothing was ordered before this point.
+  start_shop max_fee_msat=20000000 || die "the node did not start: $(cat "$BASE/shop.out" "$BASE/shop.err" | tail -3)"
+  await_status "provider=true channels=2 usable=2" 90 || die "the node does not hold its two channels"
+  CH0=$(lsp_channels_with_shop)
+  # A sweep, as the cap asks for (SL-33); it does not give the room back (SL-35).
+  BEFORE=$(bw pinned getbalance)
+  R=$(ctl "$SHOP_CTL" sweep 12 5000)
+  note "sweep: $R"
+  [ "$R" = "Ok(())" ]
+  check "SL-33: a sweep of 5,000 sat was begun" $?
+  for _ in $(seq 1 40); do
+    mine 1
+    sleep 1
+    [ "$(bw pinned getbalance)" != "$BEFORE" ] && break
+  done
+  mine 6
+  await_status "provider=true channels=2 usable=2" 90 || die "the channels are not usable after the splice"
+  S=$(shop_status)
+  S0_ROOM_SAT=$(( $(field room_msat "$S") / 1000 ))
+  note "room after the sweep: $S0_ROOM_SAT sat"
+  # With the room above half the cap nothing is ordered, and the node finds
+  # out that the provider offers LSPS1.
+  stop_shop
+  start_shop max_fee_msat=20000000 cap_sat=$((S0_ROOM_SAT * 2 - 1000)) || die "the node did not start"
+  await_status "provider=true channels=2 usable=2" 90 || die "no channels after the restart"
+  sleep 15
+  L=$(ctl "$SHOP_CTL" lsps1)
+  note "room above half the cap: $L"
+  [ "$(field offer "$L")" = Offered ] && [ "$(field order "$L")" = none ]
+  check "SL-28: the provider answered its LSPS1 options, and with the room above half the cap nothing is ordered" $?
+  # The room is under half the cap now.
+  CAP_SAT=$((S0_ROOM_SAT * 2 + 100000))
+  stop_shop
+  start_shop max_fee_msat=20000000 cap_sat="$CAP_SAT" || die "the node did not start"
+  ORDERED=1
+  for _ in $(seq 1 90); do
+    L=$(ctl "$SHOP_CTL" lsps1)
+    case "$(field order "$L")" in Paid*|Done*) ORDERED=0; break ;; esac
+    sleep 1
+  done
+  note "after the order: $L"
+  [ "$ORDERED" = 0 ] && [ "$(field fees_paid_sat "$L")" = 1500 ]
+  check "SL-28, SL-29: with the room under half the cap ($S0_ROOM_SAT sat of $CAP_SAT) the node ordered a channel and paid the provider's 1,500 sat from its own channel" $?
+  # The provider opens it once the invoice is paid.
+  for _ in $(seq 1 60); do
+    [ "$(lsp_channels_with_shop)" = $((CH0 + 1)) ] && break
+    sleep 1
+  done
+  [ "$(lsp_channels_with_shop)" = $((CH0 + 1))  ]
+  check "SL-28: the provider opened the ordered channel" $?
+  ! ctl "$LSP_CTL" channels | grep "cp=$SHOP_ID" | grep -q 'announced=true'
+  check "SL-31: no channel is announced, the ordered one included" $?
+  # The ordered channel is used after one confirmation (SL-28).
+  mine 6
+  ROOM_BACK=1
+  for _ in $(seq 1 120); do
+    S=$(shop_status)
+    ROOM_SAT=$(( $(field room_msat "$S") / 1000 ))
+    [ "$ROOM_SAT" -ge $((CAP_SAT * 9 / 10)) ] && [ "$ROOM_SAT" -le $((CAP_SAT * 105 / 100)) ] && { ROOM_BACK=0; break; }
+    sleep 1
+  done
+  note "room $ROOM_SAT sat for a cap of $CAP_SAT sat: $S"
+  [ "$ROOM_BACK" = 0 ]
+  check "SL-35: the room to receive is back to about the cap ($ROOM_SAT sat of $CAP_SAT sat)" $?
+  CONF=$(ctl "$SHOP_CTL" confirmations)
+  ! grep -q None <<<"$CONF"
+  check "SL-26: every channel's funding has a confirmation: $CONF" $?
+  # An amount the room before the order could not take.
+  AMT=$((S0_ROOM_SAT + 50000))
+  Q=$(ctl "$SHOP_CTL" quote "$AMT")
+  [ "$Q" = "invoice" ]
+  check "SL-40: an amount above the room before the order is an invoice now: $Q" $?
+  shop_invoice "$AMT"
+  H20=$(hash_of "$INVOICE")
+  [ "$(field fee_msat "$REPLY")" = 0 ]
+  check "that payment needs no opening, so it has no opening fee" $?
+  pay "$INVOICE" 60s && await_paid "$H20" 30
+  check "SL-28, SL-40: a payment above the room before the order is paid through channels with a confirmed funding" $?
+  [ "$(lsp_channels_with_shop)" = $((CH0 + 1))  ]
+  check "no further channel was opened for it" $?
+  for _ in $(seq 1 60); do
+    L=$(ctl "$SHOP_CTL" lsps1)
+    case "$(field order "$L")" in Done*) break ;; esac
+    sleep 1
+  done
+  [ "$(field fees_paid_sat "$L")" = 1500 ] && case "$(field order "$L")" in Done*) true ;; *) false ;; esac
+  check "SL-45: the order is done, and its fee counts once in the fees paid: $L" $?
+  # The restart keeps the order: nothing is ordered a second time.
+  stop_shop
+  start_shop max_fee_msat=20000000 cap_sat="$((CAP_SAT * 4))" || die "the node did not start"
+  await_status "provider=true" 60 || die "the node did not connect"
+  sleep 15
+  L=$(ctl "$SHOP_CTL" lsps1)
+  [ "$(field fees_paid_sat "$L")" = 1500 ] && [ "$(lsp_channels_with_shop)" = $((CH0 + 1)) ]
+  check "SL-28: after a restart the order is still there, even with the room under half a larger cap within the hour, and no second one was made: $L" $?
+  stop_shop
+else
+  # No LSPS1 at the provider: the node finds that out and orders nothing.
+  say "A provider without LSPS1"
+  start_shop max_fee_msat=20000000 cap_sat=100000000 || die "the node did not start: $(cat "$BASE/shop.out" "$BASE/shop.err" | tail -3)"
+  await_status "provider=true" 60 || die "the node did not connect to the provider"
+  CH0=$(lsp_channels_with_shop)
+  sleep 45
+  L=$(ctl "$SHOP_CTL" lsps1)
+  [ "$(field offer "$L")" = NotOffered ] && [ "$(field order "$L")" = none ] && [ "$(lsp_channels_with_shop)" = "$CH0" ]
+  check "SL-28: a provider without LSPS1 is found out, nothing is ordered, and room comes only with a payment too big for it: $L" $?
+  stop_shop
+fi
 
 echo
 if [ "$FAILED" = 0 ]; then echo "ALL PASS"; else echo "FAILED"; exit 1; fi
