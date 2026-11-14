@@ -79,6 +79,7 @@ pub mod range_outbox;
 pub mod receipts;
 pub mod refunds;
 pub mod requests;
+mod requests_undo;
 pub mod say;
 pub mod settings_roster;
 pub mod settle_owed;

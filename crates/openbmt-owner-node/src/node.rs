@@ -98,7 +98,7 @@ use crate::deep::{DeepRun, DeepSpawn};
 use crate::live::{plan_release, WatchLimits, REBALANCE_SECS};
 use crate::paid_log::{value_at, PaidEntry, PaidLog, PaidValue, PaidWhat, PAID_LOG_FILE};
 use crate::receipts::read_fee_history;
-use crate::requests::Requests;
+use crate::requests::{Requests, RequestsOff};
 use crate::settle_owed::{Owed, OwedKind, SettleOwed, SETTLE_OWED_FILE};
 use crate::take_journal::{TakeJournal, MAX_JOURNAL_BYTES};
 use crate::watcher::{write_file, OwnerConfig, OwnerStartError, OwnerWatcher};
@@ -884,6 +884,9 @@ impl<P: OwnerPort> OwnerNode<P> {
         // reorganization it saw is; the rest follows once the node exists.
         let mut stopped_reorg = None;
         if let Some((left, fork)) = view.left_while_stopped(|h| chain.hash_at(h)) {
+            // RQ-37: the request book undoes the same blocks; the marker is
+            // stored before the view's rollback is.
+            crate::requests_undo::mark(&dir, fork).map_err(NodeError::Files)?;
             let effect = view
                 .reorganize(&left, fork, |b| write_file(&dir, COINS_FILE, b))
                 .map_err(|e| NodeError::Files(format!("{COINS_FILE}: {e}")))?;
@@ -1088,6 +1091,10 @@ impl<P: OwnerPort> OwnerNode<P> {
             node.note(line);
         }
         node.prune_fee_samples();
+        // RQ-37, OC-53: the requests undo the blocks a marker names, those
+        // that left while the node was stopped and those a reorg left
+        // behind when its book could not be stored.
+        node.requests_undo_recover()?;
         if let Some((left, fork, effect)) = stopped_reorg {
             node.note(format!(
                 "the chain changed while the node was stopped: {} block(s) left",
@@ -1095,8 +1102,6 @@ impl<P: OwnerPort> OwnerNode<P> {
             ));
             node.forget_owed_blocks(&left);
             node.forget_fee_samples_from(fork.saturating_add(1), &left);
-            // RQ-37, OC-53: the requests undo the same blocks.
-            node.requests_reorg(fork);
             node.after_reorg(effect);
         }
         if node.take_journal.is_none() {
@@ -3446,6 +3451,20 @@ impl<P: OwnerPort> OwnerNode<P> {
         for line in notes {
             self.note(line);
         }
+        // RQ-37: the marker is stored before the coin view's rollback is, so
+        // a book that fails to store is taken back at the next start.
+        let marked = if self.requests_keep_book() {
+            match crate::requests_undo::mark(&dir, fork) {
+                Ok(marked) => Some(marked),
+                Err(e) => {
+                    return self.stop(format!(
+                        "the requests' undo marker could not be stored: {e}"
+                    ));
+                }
+            }
+        } else {
+            None
+        };
         match self
             .view
             .reorganize(left, fork, |b| write_file(&dir, COINS_FILE, b))
@@ -3455,11 +3474,40 @@ impl<P: OwnerPort> OwnerNode<P> {
                 self.starter_note_reorg(fork);
                 // RQ-37: the requests undo the same blocks, before the facts
                 // of the queued refunds are worked out again.
-                self.requests_reorg(fork);
+                if let Some(marked) = marked {
+                    self.requests_undone(marked);
+                }
                 self.after_reorg(effect);
             }
             Err(e) => self.stop(format!("the coin view could not be stored: {e}")),
         }
+    }
+
+    /// RQ-37: whether the node has a request book a reorg must be marked
+    /// for: a shop with a key app has none.
+    fn requests_keep_book(&self) -> bool {
+        !matches!(&self.requests.state, Err(RequestsOff::KeyApp))
+    }
+
+    /// RQ-37: the book is taken back to `fork`; the marker goes once the
+    /// book is stored for it, and stays when it could not be.
+    fn requests_undone(&mut self, fork: u32) {
+        if self.requests_reorg(fork) {
+            if let Err(e) = crate::requests_undo::clear(&self.dir) {
+                self.note(format!("the requests' undo marker was not deleted: {e}"));
+            }
+        } else {
+            self.note("the requests were not taken back; they are at the next start".to_string());
+        }
+    }
+
+    /// RQ-37, OC-53: at start, a marker that is still there is run again.
+    fn requests_undo_recover(&mut self) -> Result<(), NodeError> {
+        let Some(fork) = crate::requests_undo::read(&self.dir).map_err(NodeError::Files)? else {
+            return Ok(());
+        };
+        self.requests_undone(fork);
+        Ok(())
     }
 
     /// What follows the coin view's reorganization: the facts of the queued

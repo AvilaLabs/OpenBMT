@@ -854,6 +854,92 @@ fn rq_30_the_arrivals_file_reads_strictly_and_encodes_to_the_same_bytes() {
     }
 }
 
+/// The chain forks below `block` and the new chain has none of it.
+fn fork_out(rig: &mut Rig, block: &Block) {
+    let height = u32::try_from(rig.chain.len()).unwrap() - 1;
+    let other = mine(block.header.prev_blockhash, height, 9, &[]);
+    let after = mine(other.block_hash(), height + 1, 9, &[]);
+    let left = vec![
+        rig.node.watcher().chain().hash_at(height + 1).unwrap(),
+        block.block_hash(),
+    ];
+    rig.chain.truncate(rig.chain.len() - 2);
+    rig.chain.push(other.clone());
+    rig.chain.push(after.clone());
+    rig.feed(vec![
+        AppEvent::Chain {
+            joined: vec![
+                (height, other.block_hash()),
+                (height + 1, after.block_hash()),
+            ],
+            left,
+        },
+        AppEvent::Block {
+            hash: other.block_hash(),
+            bytes: serialize(&other),
+        },
+        AppEvent::Block {
+            hash: after.block_hash(),
+            bytes: serialize(&after),
+        },
+        AppEvent::Checked(height + 1),
+    ]);
+}
+
+#[test]
+fn rq_37_a_book_that_could_not_be_stored_in_a_reorg_is_taken_back_at_the_next_start() {
+    let dir = Dir::new();
+    let (mut rig, book, setup) = desk_rig(&dir, 2);
+    rig.node.make_request(&deposit(100_000), 0, START).unwrap();
+    let block = rig.mine(&[payment(0, 7, 100_000)]);
+    rig.mine_empty(1);
+    assert_eq!(status(&rig, 1), Status::Paid);
+    // The book cannot be stored: its temporary file's place is taken.
+    let blocked = dir.path().join(format!("{REQUEST_BOOK_FILE}.tmp"));
+    std::fs::create_dir(&blocked).unwrap();
+    fork_out(&mut rig, &block);
+    assert!(rig.node.requests().is_err());
+    assert!(dir
+        .path()
+        .join(crate::requests_undo::REQUESTS_UNDO_FILE)
+        .exists());
+    let chain = rig.chain.clone();
+    rig.node.shutdown();
+    drop(rig);
+    std::fs::remove_dir(&blocked).unwrap();
+    // The coin view is already on the new chain; the book is not.
+    let on_disk = openbmt_requests::RequestBook::open(dir.path()).unwrap();
+    assert_eq!(on_disk.request(1).unwrap().credits.len(), 1);
+    let mut setup = setup;
+    setup.own = Some(book);
+    let mut rig = start_at(&dir, &setup, chain).unwrap();
+    rig.node.set_request_context(context(2), None);
+    assert_eq!(status(&rig, 1), Status::Waiting);
+    assert_eq!(received(&rig, 1), 0);
+    let on_disk = openbmt_requests::RequestBook::open(dir.path()).unwrap();
+    assert!(on_disk.request(1).unwrap().credits.is_empty());
+    assert!(!dir
+        .path()
+        .join(crate::requests_undo::REQUESTS_UNDO_FILE)
+        .exists());
+}
+
+#[test]
+fn rq_37_a_marker_that_does_not_read_back_stops_the_start() {
+    let dir = Dir::new();
+    let (rig, book, setup) = desk_rig(&dir, 1);
+    let chain = rig.chain.clone();
+    drop(rig);
+    std::fs::write(
+        dir.path().join(crate::requests_undo::REQUESTS_UNDO_FILE),
+        b"not a marker",
+    )
+    .unwrap();
+    let mut setup = setup;
+    setup.own = Some(book);
+    assert!(start_at(&dir, &setup, chain).is_err());
+}
+
 #[test]
 fn rq_15_a_request_takes_the_most_payments_it_holds_and_the_rest_wait() {
     let dir = Dir::new();

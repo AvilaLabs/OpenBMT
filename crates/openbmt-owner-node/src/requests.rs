@@ -882,21 +882,28 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// queued returns that no longer fit are taken off the queue, and the
     /// book is stored again. Called from the place the coin view undoes the
     /// same blocks, while the node runs and at its start.
-    pub(crate) fn requests_reorg(&mut self, fork: u32) {
-        let Ok(loaded) = &self.requests.state else {
-            return;
+    ///
+    /// True when the book is stored for the reorg or had nothing to take
+    /// back, so the marker of it may go; false when requests are off or the
+    /// book could not be stored.
+    pub(crate) fn requests_reorg(&mut self, fork: u32) -> bool {
+        let loaded = match &self.requests.state {
+            Ok(loaded) => loaded,
+            // A shop with a key app has no book to take anything back from.
+            Err(off) => return matches!(off, RequestsOff::KeyApp),
         };
         let mut next = loaded.clone();
         next.pending.retain(|a| a.height <= fork);
         let taken = next.book.take_back_above(fork);
         if next.book == loaded.book && next.pending == loaded.pending {
-            return;
+            return true;
         }
         let arrivals_changed = next.pending != loaded.pending;
         if let Err(e) = self.store_requests(&next, arrivals_changed) {
             // Memory and file would differ: the file is what a start reads,
             // and it is read again at a start (OC-53), so requests go off.
-            return self.requests_off(e);
+            self.requests_off(e);
+            return false;
         }
         self.requests.state = Ok(next);
         self.note(format!(
@@ -911,6 +918,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 "request No. {number} shows {over} sats returned more than it now received"
             ));
         }
+        true
     }
 
     /// RQ-37: a queued return was taken off the queue: its refund goes too,
