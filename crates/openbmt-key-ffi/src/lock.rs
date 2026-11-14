@@ -74,11 +74,11 @@ fn failed(text: &str) -> StoreError {
     }
 }
 
-/// A nonce from the platform's random source.
+/// A nonce from the kernel's checked random bytes.
 pub(crate) fn draw_nonce(raw: &dyn KeyStore) -> Result<[u8; NONCE_LEN], StoreError> {
-    let bytes = raw.random(NONCE_LEN as u32)?;
-    <[u8; NONCE_LEN]>::try_from(bytes.as_slice())
-        .map_err(|_| failed("the random source gave a different number of bytes than asked for"))
+    let mut nonce = [0u8; NONCE_LEN];
+    crate::keys::draw(raw, &mut nonce).map_err(|e| failed(&e.to_string()))?;
+    Ok(nonce)
 }
 
 impl KeyStore for Sealing {
@@ -125,8 +125,9 @@ impl KeyStore for Sealing {
         result
     }
 
-    fn random(&self, n: u32) -> Result<Vec<u8>, StoreError> {
-        self.raw.random(n)
+    #[cfg(any(test, feature = "test-random"))]
+    fn test_block(&self) -> Option<[u8; 32]> {
+        self.raw.test_block()
     }
 
     fn now(&self) -> u64 {

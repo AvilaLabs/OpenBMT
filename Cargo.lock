@@ -738,6 +738,7 @@ dependencies = [
  "jni-sys",
  "openbmt-approver",
  "openbmt-core",
+ "openbmt-kernel-random",
  "openbmt-lock",
  "openbmt-owner",
  "openbmt-session",

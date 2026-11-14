@@ -3,7 +3,8 @@
 The OpenBMT Key app's core as a library an Android app calls. One object,
 `KeyApp`, holds the one `Approver` of `openbmt-approver` (with the signer of
 `openbmt-signer`) behind a lock. The app implements one interface,
-`KeyStore`, for storage, randomness and the clock. The library has one entry
+`KeyStore`, for storage and the clock. The library reads the kernel's random
+bytes itself and takes none from the app. The library has one entry
 point, `dispatch`, which takes a framed request and returns a framed
 response; on Android the one exported symbol is a JNI function that calls it.
 
@@ -151,10 +152,13 @@ calls).
 ## Behaviour
 
 Setup follows `docs/DESIGN.md` section 2.1. Entropy sources follow section
-5.4: `Platform` (32 bytes from `KeyStore.random`, 24 words), `DiceHashed`,
+5.4: `Platform` (32 bytes from the kernel, 24 words), `DiceHashed`,
 `CoinFlips`, `DiceSkewCorrected` and `TypedWords`. With the dice and coin
 sources nothing else is mixed in, so the same throws give the same words in
-another tool. The identity secret always comes from `KeyStore.random`. Key 2
+another tool. The identity secret, the PIN lock's salt and every nonce always come from the
+kernel. Each read is made twice by `openbmt-kernel-random`: the two must differ
+and neither may be all one byte, or nothing is made (`docs/START-SIMPLE-RULES.md`,
+SS-01, SS-02). Key 2
 is the BIP39 seed (empty passphrase) at `m/48'/coin'/0'/2'`.
 
 `TypedWords` takes 12 or 24 BIP39 English words, each trimmed and
@@ -274,7 +278,7 @@ scripts/key-ffi-build.sh
   source passes to `refused_by`, `wrong_state` and `internal` has words of
   its own.
 - The JNI glue against a fake `JNIEnv`: the happy path, a Java exception in
-  each store method, null returns, a wrong array length from `random`, missing
+  each store method, null returns, missing
   methods, no array for the response, use after the call and from another
   thread.
 - The fuzz target `key_dispatch` (arbitrary request bytes against a Key app

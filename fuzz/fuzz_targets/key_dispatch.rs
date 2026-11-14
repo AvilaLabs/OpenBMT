@@ -21,11 +21,9 @@ const OWNER_SECRET: [u8; 32] = [0x11; 32];
 /// changed (a full allowlist, a closed app) does not hide the next.
 const REMAKE_EVERY: u32 = 256;
 
-/// An in-memory store: it keeps the last bytes saved and draws bytes from a
-/// counter.
+/// An in-memory store: it keeps the last bytes saved.
 struct Mem {
     saved: Mutex<Option<Vec<u8>>>,
-    drawn: Mutex<u64>,
 }
 
 impl KeyStore for Mem {
@@ -36,23 +34,6 @@ impl KeyStore for Mem {
     fn save(&self, bytes: Vec<u8>) -> Result<(), StoreError> {
         *self.saved.lock().unwrap() = Some(bytes);
         Ok(())
-    }
-
-    fn random(&self, n: u32) -> Result<Vec<u8>, StoreError> {
-        let mut drawn = self.drawn.lock().unwrap();
-        let mut out = Vec::new();
-        while out.len() < n as usize {
-            *drawn += 1;
-            let mut x = drawn.wrapping_mul(0x9e37_79b9_7f4a_7c15) ^ 0x1234_5678_9abc_def1;
-            for _ in 0..4 {
-                x ^= x << 13;
-                x ^= x >> 7;
-                x ^= x << 17;
-                out.extend_from_slice(&x.to_le_bytes());
-            }
-        }
-        out.truncate(n as usize);
-        Ok(out)
     }
 
     fn now(&self) -> u64 {
@@ -132,7 +113,6 @@ struct World {
 fn world() -> World {
     let store = Arc::new(Mem {
         saved: Mutex::new(None),
-        drawn: Mutex::new(0),
     });
     let reg = Registry::new();
     let app = u64::from_le_bytes(ok(&reg, &store, 1, 0, &[])[..8].try_into().unwrap());
@@ -243,8 +223,7 @@ fuzz_target!(|data: &[u8]| {
         if saved != w.checked {
             let again = Arc::new(Mem {
                 saved: Mutex::new(saved.clone()),
-                drawn: Mutex::new(0),
-            });
+                    });
             KeyApp::open(again).expect("the stored bytes restore");
             w.checked = saved;
         }

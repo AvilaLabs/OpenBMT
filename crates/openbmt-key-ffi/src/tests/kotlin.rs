@@ -149,7 +149,6 @@ fn the_kotlin_native_declaration_matches_the_exported_symbol() {
     for method in [
         "fun load(): ByteArray?",
         "fun save(bytes: ByteArray)",
-        "fun random(n: Int): ByteArray",
         "fun now(): Long",
     ] {
         assert!(text.contains(method), "{method}");

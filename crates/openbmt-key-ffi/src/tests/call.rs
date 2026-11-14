@@ -809,11 +809,11 @@ impl KeyStore for Panicky {
         Ok(())
     }
 
-    fn random(&self, _n: u32) -> Result<Vec<u8>, StoreError> {
+    fn test_block(&self) -> Option<[u8; 32]> {
         if self.on_random {
             panic!("a panic in random");
         }
-        Ok(vec![7; 32])
+        Some(std::array::from_fn(|i| u8::try_from(i).expect("fits") + 1))
     }
 
     fn now(&self) -> u64 {
@@ -883,8 +883,8 @@ impl KeyStore for Reenter {
         Ok(())
     }
 
-    fn random(&self, _n: u32) -> Result<Vec<u8>, StoreError> {
-        Ok(vec![7; 32])
+    fn test_block(&self) -> Option<[u8; 32]> {
+        Some(std::array::from_fn(|i| u8::try_from(i).expect("fits") + 1))
     }
 
     fn now(&self) -> u64 {

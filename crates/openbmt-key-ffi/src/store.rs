@@ -1,9 +1,10 @@
-//! The app's side of the Key app: storage, randomness and the clock.
+//! The app's side of the Key app: storage and the clock. Randomness is not
+//! the app's: the Rust side reads the kernel itself (`openbmt-kernel-random`).
 
 use crate::error::StoreError;
 
 /// The store of a Key app between two calls of the call protocol: nothing
-/// is kept, nothing is drawn, and the clock reads 0.
+/// is kept, and the clock reads 0.
 pub(crate) struct Detached;
 
 impl KeyStore for Detached {
@@ -12,10 +13,6 @@ impl KeyStore for Detached {
     }
 
     fn save(&self, _bytes: Vec<u8>) -> Result<(), StoreError> {
-        Err(detached())
-    }
-
-    fn random(&self, _n: u32) -> Result<Vec<u8>, StoreError> {
         Err(detached())
     }
 
@@ -31,7 +28,8 @@ fn detached() -> StoreError {
 }
 
 /// What the Android app implements. The Rust side never touches the file
-/// system, the clock or a random source itself.
+/// system or the clock itself. It reads the kernel's random bytes itself and
+/// takes none from the app.
 ///
 /// The bytes handed to `save` are the `OBM7` envelope: they hold the
 /// identity secret and, when this device holds key 2, key 2's account
@@ -48,9 +46,12 @@ pub trait KeyStore: Send + Sync {
     /// the app's old bytes must still be what `load` returns.
     fn save(&self, bytes: Vec<u8>) -> Result<(), StoreError>;
 
-    /// `n` bytes from the platform's cryptographically strong random
-    /// source. Fewer or more bytes than asked for are refused.
-    fn random(&self, n: u32) -> Result<Vec<u8>, StoreError>;
+    /// A test's fixed 32 bytes in place of one read of the kernel; `None`
+    /// reads the kernel. Compiled in tests, and with the `test-random` feature.
+    #[cfg(any(test, feature = "test-random"))]
+    fn test_block(&self) -> Option<[u8; 32]> {
+        None
+    }
 
     /// The time now, in seconds since 1970-01-01 UTC.
     fn now(&self) -> u64;

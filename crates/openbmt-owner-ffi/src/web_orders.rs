@@ -9,7 +9,6 @@
 //! Every text is a placeholder that names its rule until the words are
 //! written (`openbmt_owner::web_order::say`).
 
-use openbmt_owner::starter::{KernelRandom, KERNEL_BYTES};
 use openbmt_owner::web_order::{PairingCode, RangeResult};
 use openbmt_owner_node::{
     trouble_words, OwnerNode, OwnerPort, PairState, WebCall, WebCallKind, WebError, WebFailure,
@@ -21,14 +20,7 @@ use crate::error::{from_words, rule_in, AppError, Kind};
 use crate::requests::RequestAsk;
 use crate::views::WordsView;
 
-/// The kernel's bytes, from the `getrandom` system call (WO-43).
-pub(crate) struct Kernel;
-
-impl KernelRandom for Kernel {
-    fn read32(&mut self) -> Option<[u8; KERNEL_BYTES]> {
-        openbmt_kernel_random::read32().ok()
-    }
-}
+pub(crate) use openbmt_kernel_random::Kernel;
 
 /// The arguments of `web_pair_start` (WO-05, WO-06).
 #[derive(Debug, Clone, PartialEq, Eq)]

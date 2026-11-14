@@ -185,8 +185,9 @@ fn sr_71_every_write_is_a_locked_frame_with_a_new_nonce() {
     }
 }
 
-/// A store whose random source never changes.
-struct SameRandom(Arc<MemStore>);
+/// A store whose random blocks differ, but only after the 12 bytes of a
+/// nonce, so that a nonce repeats.
+struct SameRandom(Arc<MemStore>, std::sync::atomic::AtomicU8);
 
 impl KeyStore for SameRandom {
     fn load(&self) -> Result<Option<Vec<u8>>, StoreError> {
@@ -197,8 +198,11 @@ impl KeyStore for SameRandom {
         self.0.save(bytes)
     }
 
-    fn random(&self, n: u32) -> Result<Vec<u8>, StoreError> {
-        Ok(vec![7; usize::try_from(n).expect("fits")])
+    fn test_block(&self) -> Option<[u8; 32]> {
+        let k = self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let mut block = [7u8; 32];
+        block[12..].fill(k.wrapping_add(9));
+        Some(block)
     }
 
     fn now(&self) -> u64 {
@@ -209,7 +213,7 @@ impl KeyStore for SameRandom {
 #[test]
 fn sr_71_a_nonce_is_never_reused_even_when_the_random_source_repeats() {
     let inner = MemStore::new();
-    let app = KeyApp::open(Arc::new(SameRandom(inner.clone()))).expect("opens");
+    let app = KeyApp::open(Arc::new(SameRandom(inner.clone(), 0.into()))).expect("opens");
     app.set_pin(PIN.to_string()).expect("a PIN");
     app.create_approver_only().expect("the first write");
     let first = inner.saved().expect("stored");

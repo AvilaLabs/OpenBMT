@@ -265,12 +265,10 @@ object AppModelTest {
 
         // The store around it.
         var now = 1_700_000_000L
-        val store = PersistentStore(file, java.security.SecureRandom()) { now }
+        val store = PersistentStore(file) { now }
         ok(store.load()!!.contentEquals(one), "the store loads")
         store.save(byteArrayOf(1, 2))
         ok(store.load()!!.contentEquals(byteArrayOf(1, 2)), "the store saves")
-        ok(store.random(32).size == 32 && store.random(0).isEmpty(), "random has the length asked for")
-        ok(!store.random(32).contentEquals(store.random(32)), "random differs between calls")
         ok(store.now() == 1_700_000_000L, "now is in seconds")
         now += 5
         ok(store.now() == 1_700_000_005L, "now follows the clock")

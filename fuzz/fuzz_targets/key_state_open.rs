@@ -20,10 +20,6 @@ impl KeyStore for Mem {
         Ok(())
     }
 
-    fn random(&self, n: u32) -> Result<Vec<u8>, StoreError> {
-        Ok(vec![7; n as usize])
-    }
-
     fn now(&self) -> u64 {
         10_000_000
     }

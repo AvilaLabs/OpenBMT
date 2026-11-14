@@ -12,6 +12,7 @@ use openbmt_core::entropy::{
 };
 use openbmt_core::identity::Identity;
 use openbmt_core::wallet::coin_type;
+use openbmt_kernel_random::KernelRandom;
 
 use crate::codec::{bad_tag, wire_record, wire_unit_enum, Define, Get, Reader, Shaped, TypeDef};
 use crate::envelope::{wipe_string, Key2, Material, Secret32};
@@ -235,23 +236,41 @@ fn progress(have: usize, words: KeyWordCount) -> BitProgress {
     }
 }
 
-/// `n` bytes from the app's random source, refused if the count is wrong.
-pub(crate) fn random_bytes(store: &Arc<dyn KeyStore>, n: usize) -> Result<Vec<u8>, KeyError> {
-    let want = u32::try_from(n).map_err(|_| internal("random: count"))?;
-    let bytes = store
-        .random(want)
-        .map_err(|e| crate::error::store_failed(&e))?;
-    if bytes.len() != n {
-        return Err(KeyError::Store {
-            rule: "random".to_string(),
-            text: format!("the platform gave {} random bytes, not {n}", bytes.len()),
-        });
+/// Where the checked reads come from: the kernel, and in a test the store's
+/// fixed blocks.
+struct Blocks<'a>(
+    #[cfg_attr(not(any(test, feature = "test-random")), allow(dead_code))] &'a dyn KeyStore,
+);
+
+impl KernelRandom for Blocks<'_> {
+    fn read32(&mut self) -> Option<[u8; 32]> {
+        #[cfg(any(test, feature = "test-random"))]
+        if let Some(block) = self.0.test_block() {
+            return Some(block);
+        }
+        openbmt_kernel_random::Kernel.read32()
     }
+}
+
+/// `out` filled with the kernel's random bytes, each 32 by two separate
+/// reads that must differ and not be all one byte (SS-02). A refusal is an
+/// error and `out` is wiped: there is no other source to fall back to.
+pub(crate) fn draw(store: &dyn KeyStore, out: &mut [u8]) -> Result<(), KeyError> {
+    openbmt_kernel_random::checked_fill(&mut Blocks(store), out).map_err(|e| KeyError::Store {
+        rule: "random".to_string(),
+        text: e.to_string(),
+    })
+}
+
+/// `n` checked random bytes of the kernel (SS-01, SS-02).
+pub(crate) fn random_bytes(store: &Arc<dyn KeyStore>, n: usize) -> Result<Vec<u8>, KeyError> {
+    let mut bytes = vec![0u8; n];
+    draw(store.as_ref(), &mut bytes)?;
     Ok(bytes)
 }
 
-/// A fresh identity secret from the platform's random source (device
-/// identity keys always use it, `docs/DESIGN.md` §5.4).
+/// A fresh identity secret from the kernel's checked random bytes (device
+/// identity keys always use them, `docs/DESIGN.md` §5.4).
 pub(crate) fn new_identity_secret(store: &Arc<dyn KeyStore>) -> Result<Secret32, KeyError> {
     for _ in 0..8 {
         let mut bytes = random_bytes(store, 32)?;
@@ -265,7 +284,7 @@ pub(crate) fn new_identity_secret(store: &Arc<dyn KeyStore>) -> Result<Secret32,
     }
     Err(KeyError::Store {
         rule: "random".to_string(),
-        text: "the platform's random source gave no valid identity key in 8 tries".to_string(),
+        text: "the kernel's random source gave no valid identity key in 8 tries".to_string(),
     })
 }
 
@@ -275,7 +294,7 @@ pub(crate) fn make_key2(
     source: &EntropySource,
     network: Network,
 ) -> Result<(Key2, Vec<String>), KeyError> {
-    let mnemonic = match source {
+    let mut mnemonic = match source {
         EntropySource::Platform => {
             let mut bytes = random_bytes(store, 32)?;
             let m = bip39::Mnemonic::from_entropy(&bytes).map_err(internal);
@@ -309,6 +328,7 @@ pub(crate) fn make_key2(
         mnemonic.words().map(str::to_string).collect()
     };
     let mut seed = mnemonic.to_seed_normalized("");
+    openbmt_core::entropy::wipe_mnemonic(&mut mnemonic);
     let key = key2_from_seed(&seed, network);
     seed.fill(0);
     std::hint::black_box(&mut seed);

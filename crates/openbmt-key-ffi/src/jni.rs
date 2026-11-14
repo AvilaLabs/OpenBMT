@@ -8,8 +8,7 @@
 //!
 //! It copies the request out of the Java array, wraps `store` in a
 //! [`JniStore`] that implements [`KeyStore`] by calling the Java object's
-//! `load(): ByteArray?`, `save(ByteArray)`, `random(Int): ByteArray` and
-//! `now(): Long` through the JNI function table, runs
+//! `load(): ByteArray?`, `save(ByteArray)` and `now(): Long` through the JNI function table, runs
 //! [`dispatch`](crate::dispatch) and returns the response as a new Java
 //! array.
 //!
@@ -30,8 +29,8 @@ use std::sync::{Arc, OnceLock};
 use std::thread::ThreadId;
 
 use jni_sys::{
-    jbyte, jbyteArray, jclass, jint, jmethodID, jobject, jsize, jvalue, JNIEnv,
-    JNINativeInterface_, JNI_TRUE,
+    jbyte, jbyteArray, jclass, jmethodID, jobject, jsize, jvalue, JNIEnv, JNINativeInterface_,
+    JNI_TRUE,
 };
 
 use crate::call::{dispatch, error_response, Registry};
@@ -202,7 +201,6 @@ struct JniStore {
     class: jclass,
     load: jmethodID,
     save: jmethodID,
-    random: jmethodID,
     now: jmethodID,
     thread: ThreadId,
     closed: AtomicBool,
@@ -238,22 +236,20 @@ impl JniStore {
         let ids = (
             find(c"load", c"()[B", "load(): ByteArray?"),
             find(c"save", c"([B)V", "save(ByteArray)"),
-            find(c"random", c"(I)[B", "random(Int): ByteArray"),
             find(c"now", c"()J", "now(): Long"),
         );
         match ids {
-            (Ok(load), Ok(save), Ok(random), Ok(now)) => Ok(Self {
+            (Ok(load), Ok(save), Ok(now)) => Ok(Self {
                 env,
                 obj,
                 class,
                 load,
                 save,
-                random,
                 now,
                 thread: std::thread::current().id(),
                 closed: AtomicBool::new(false),
             }),
-            (Err(e), _, _, _) | (_, Err(e), _, _) | (_, _, Err(e), _) | (_, _, _, Err(e)) => {
+            (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
                 env.delete_local(class);
                 Err(e)
             }
@@ -330,23 +326,6 @@ impl KeyStore for JniStore {
             None => Err(failed("the JNI environment cannot call save")),
             Some(()) if threw => Err(self.threw("save")),
             Some(()) => Ok(()),
-        }
-    }
-
-    fn random(&self, n: u32) -> Result<Vec<u8>, StoreError> {
-        self.usable()?;
-        let count = jint::try_from(n).map_err(|_| failed("too many random bytes asked for"))?;
-        let result = self
-            .env
-            .call_object(self.obj, self.random, &[jvalue { i: count }]);
-        if self.env.threw() {
-            self.env.delete_local(result.unwrap_or(null_mut()));
-            return Err(self.threw("random"));
-        }
-        match result {
-            None => Err(failed("the JNI environment cannot call random")),
-            Some(array) if array.is_null() => Err(failed("random returned null")),
-            Some(array) => self.take_array(array, "random"),
         }
     }
 
@@ -438,7 +417,6 @@ mod tests {
 
     const LOAD: usize = 1;
     const SAVE: usize = 2;
-    const RANDOM: usize = 3;
     const NOW: usize = 4;
 
     #[derive(Clone, Copy, PartialEq, Eq)]
@@ -446,8 +424,6 @@ mod tests {
         Normal,
         Throw,
         Null,
-        Short,
-        Long,
     }
 
     struct Fake {
@@ -457,10 +433,8 @@ mod tests {
         live: i32,
         clears: usize,
         stored: Option<Vec<u8>>,
-        drawn: u8,
         load: Mode,
         save: Mode,
-        random: Mode,
         now: Mode,
         now_value: i64,
         new_array_fails: bool,
@@ -478,10 +452,8 @@ mod tests {
                 live: 0,
                 clears: 0,
                 stored: None,
-                drawn: 0,
                 load: Mode::Normal,
                 save: Mode::Normal,
-                random: Mode::Normal,
                 now: Mode::Normal,
                 now_value: 1_700_000_000,
                 new_array_fails: false,
@@ -543,7 +515,6 @@ mod tests {
             let id = match (name, sig) {
                 ("load", "()[B") => LOAD,
                 ("save", "([B)V") => SAVE,
-                ("random", "(I)[B") => RANDOM,
                 ("now", "()J") => NOW,
                 _ => 0,
             };
@@ -559,38 +530,23 @@ mod tests {
         _: *mut JNIEnv,
         obj: jobject,
         id: jmethodID,
-        args: *const jvalue,
+        _args: *const jvalue,
     ) -> jobject {
         assert_eq!(obj as usize, STORE_OBJ);
         let id = id as usize;
-        let count = if id == RANDOM { (*args).i } else { 0 };
         fake(|f| {
-            f.calls.push(if id == LOAD { "load" } else { "random" });
-            let mode = if id == LOAD { f.load } else { f.random };
-            let bytes: Vec<u8> = match mode {
+            assert_eq!(id, LOAD, "the store has no random method");
+            f.calls.push("load");
+            let bytes: Vec<u8> = match f.load {
                 Mode::Throw => {
                     f.pending = true;
                     return null_mut();
                 }
                 Mode::Null => return null_mut(),
-                _ if id == LOAD => match &f.stored {
+                Mode::Normal => match &f.stored {
                     None => return null_mut(),
                     Some(b) => b.clone(),
                 },
-                Mode::Normal | Mode::Short | Mode::Long => {
-                    let n = usize::try_from(count).unwrap_or(0);
-                    let n = match mode {
-                        Mode::Short => n - 1,
-                        Mode::Long => n + 1,
-                        _ => n,
-                    };
-                    (0..n)
-                        .map(|_| {
-                            f.drawn = f.drawn.wrapping_add(1);
-                            f.drawn
-                        })
-                        .collect()
-                }
             };
             f.arrays.push(bytes);
             f.live += 1;
@@ -816,19 +772,16 @@ mod tests {
         assert_eq!(response.get(6..), Some(1u64.to_le_bytes().as_slice()));
         assert_eq!(fake(|f| f.calls.clone()), vec!["load"]);
 
-        // The salt of the PIN's key, nothing stored.
+        // The salt of the PIN's key comes from the kernel, nothing stored.
         let response = h.call(&reg, &set_pin(1)).expect("a response");
         assert_eq!(reply(&response).0, 0);
-        assert_eq!(fake(|f| f.calls.clone()), vec!["load", "random"]);
+        assert_eq!(fake(|f| f.calls.clone()), vec!["load"]);
 
         let response = h.call(&reg, &create(1)).expect("a response");
         assert_eq!(reply(&response).0, 0);
-        // 32 bytes for the identity and 32 for the words, the nonce, the
-        // read of the stored generation (SR-92), then the save.
-        assert_eq!(
-            fake(|f| f.calls.clone()),
-            vec!["load", "random", "random", "random", "random", "load", "save"]
-        );
+        // The identity, the words and the nonce are the kernel's: the store
+        // sees the read of the stored generation (SR-92), then the save.
+        assert_eq!(fake(|f| f.calls.clone()), vec!["load", "load", "save"]);
         let stored = fake(|f| f.stored.clone()).expect("stored");
         crate::lock::decode(&stored).expect("the locked frame decodes");
         assert!(envelope::decode(&stored).is_err());
@@ -887,19 +840,6 @@ mod tests {
         assert!(!fake(|f| f.pending));
         assert!(fake(|f| f.clears) >= 1);
 
-        // random
-        let mut h = Harness::new();
-        let reg = Registry::new();
-        h.call(&reg, &open()).expect("a response");
-        h.call(&reg, &set_pin(1)).expect("a response");
-        fake(|f| f.random = Mode::Throw);
-        let response = h.call(&reg, &create(1)).expect("a response");
-        let (status, rule, text) = reply(&response);
-        assert_eq!((status, rule.as_str()), (2, "AS-34"));
-        assert!(text.contains("exception in random"));
-        assert!(!fake(|f| f.pending));
-        assert!(fake(|f| f.stored.is_none()));
-
         // save: nothing is stored and the app stays empty.
         let mut h = Harness::new();
         let reg = Registry::new();
@@ -940,23 +880,6 @@ mod tests {
             Some([0u8].as_slice())
         );
 
-        // random returns null, too few and too many bytes.
-        for mode in [Mode::Null, Mode::Short, Mode::Long] {
-            let mut h = Harness::new();
-            let reg = Registry::new();
-            h.call(&reg, &open()).expect("a response");
-            h.call(&reg, &set_pin(1)).expect("a response");
-            fake(|f| f.random = mode);
-            let (status, rule, _) = reply(&h.call(&reg, &create(1)).expect("a response"));
-            assert_eq!(status, 2);
-            if mode == Mode::Null {
-                assert_eq!(rule, "AS-34");
-            } else {
-                assert_eq!(rule, "random");
-            }
-            assert!(fake(|f| f.stored.is_none()));
-        }
-
         // A null for the request, and a request that is too long.
         let mut h = Harness::new();
         let reg = Registry::new();
@@ -987,7 +910,7 @@ mod tests {
 
         // Each method missing: the pending exception is cleared and the
         // class reference released.
-        for name in ["load", "save", "random", "now"] {
+        for name in ["load", "save", "now"] {
             let mut h = Harness::new();
             fake(|f| f.missing_method = Some(name));
             let response = h.call(&Registry::new(), &open()).expect("a response");
@@ -1038,7 +961,6 @@ mod tests {
         assert!(result);
         store.close();
         assert!(store.load().is_err());
-        assert!(store.random(4).is_err());
         assert_eq!(store.now(), 0);
         // Closing twice releases the class once.
         store.close();

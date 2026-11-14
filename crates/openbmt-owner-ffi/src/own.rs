@@ -610,20 +610,21 @@ fn with_shop<T>(
     f(&mut node)
 }
 
-/// 32 bytes read straight from the system's random source, with no
+/// 32 bytes from the kernel by the two checked reads of SS-02, with no
 /// fallback.
-fn random32() -> Result<[u8; 32], AppError> {
-    use std::io::Read;
-    let mut out = [0u8; 32];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut out))
-        .map_err(|e| internal(format!("no random bytes: {e}")))?;
-    Ok(out)
+fn random32(rng: &mut dyn openbmt_kernel_random::KernelRandom) -> Result<[u8; 32], AppError> {
+    openbmt_kernel_random::checked_read(rng).map_err(|e| internal(format!("no random bytes: {e}")))
 }
 
 /// Op 147: make the owner root of a shop with its own wallet.
 pub(crate) fn owner_make() -> Result<OwnOwnerMade, AppError> {
-    let mut secret = random32()?;
+    owner_make_from(&mut openbmt_kernel_random::Kernel)
+}
+
+fn owner_make_from(
+    rng: &mut dyn openbmt_kernel_random::KernelRandom,
+) -> Result<OwnOwnerMade, AppError> {
+    let mut secret = random32(rng)?;
     let identity = Identity::from_secret_bytes(&secret)
         .map_err(|e| internal(format!("the owner key: {e}")))?;
     let made = OwnOwnerMade {
@@ -968,4 +969,20 @@ pub(crate) fn relay_sign(a: OwnRelayArgs) -> Result<Vec<u8>, AppError> {
     let hint = RelayHint::new(route, key)
         .map_err(|e| crate::error::refused_by("box-address", e.to_string()))?;
     Ok(SignedRelayHint::sign(hint, &identity).to_bytes())
+}
+
+#[cfg(test)]
+mod random_tests {
+    use super::*;
+    use crate::tests::fakes::Blocks;
+
+    #[test]
+    fn a_dry_weak_or_repeating_random_source_makes_no_owner_root() {
+        for mut rng in [Blocks::dry(), Blocks::zeros(), Blocks::repeat()] {
+            assert!(owner_make_from(&mut rng).is_err());
+        }
+        let made = owner_make_from(&mut Blocks::good()).expect("good bytes");
+        assert_eq!(made.secret.len(), 32);
+        assert!(owner_make().is_ok());
+    }
 }

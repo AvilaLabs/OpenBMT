@@ -26,6 +26,7 @@ hex-conservative v0.2.3
 hex_lit v0.1.1
 inout v0.1.4
 jni-sys v0.3.0
+libc v0.2.191
 miniscript v12.3.5
 opaque-debug v0.3.1
 password-hash v0.5.0

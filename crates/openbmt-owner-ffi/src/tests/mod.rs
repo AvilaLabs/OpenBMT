@@ -7,6 +7,7 @@ mod call;
 mod ceremony;
 mod counter;
 mod e2e;
+pub(crate) mod fakes;
 mod float;
 mod import;
 pub(crate) mod kit;

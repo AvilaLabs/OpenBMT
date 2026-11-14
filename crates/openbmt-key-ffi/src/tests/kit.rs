@@ -64,7 +64,7 @@ struct MemState {
 }
 
 /// What the Android app implements, in memory. It can be made to fail and it
-/// counts its saves. Its random bytes are a hash stream: test only.
+/// counts its saves. Its test blocks are a hash stream in place of the kernel: test only.
 pub struct MemStore(Mutex<MemState>);
 
 impl MemStore {
@@ -128,17 +128,12 @@ impl KeyStore for MemStore {
         Ok(())
     }
 
-    fn random(&self, n: u32) -> Result<Vec<u8>, StoreError> {
+    fn test_block(&self) -> Option<[u8; 32]> {
         let mut s = self.state();
-        let mut out = Vec::new();
-        while out.len() < usize::try_from(n).expect("n fits") {
-            s.drawn += 1;
-            let block =
-                sha256::Hash::hash(&[b"key-ffi-test".as_slice(), &s.drawn.to_le_bytes()].concat());
-            out.extend_from_slice(block.as_byte_array());
-        }
-        out.truncate(usize::try_from(n).expect("n fits"));
-        Ok(out)
+        s.drawn += 1;
+        let block =
+            sha256::Hash::hash(&[b"key-ffi-test".as_slice(), &s.drawn.to_le_bytes()].concat());
+        Some(*block.as_byte_array())
     }
 
     fn now(&self) -> u64 {

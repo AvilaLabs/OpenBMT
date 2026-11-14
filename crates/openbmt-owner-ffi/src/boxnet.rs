@@ -311,10 +311,14 @@ pub(crate) fn already_paired() -> AppError {
 // ---- BX-17: the owner phone alone ------------------------------------------
 
 fn random17() -> Result<[u8; INVITATION_RANDOM_LEN], AppError> {
-    use std::io::Read;
+    random17_from(&mut openbmt_kernel_random::Kernel)
+}
+
+fn random17_from(
+    rng: &mut dyn openbmt_kernel_random::KernelRandom,
+) -> Result<[u8; INVITATION_RANDOM_LEN], AppError> {
     let mut out = [0u8; INVITATION_RANDOM_LEN];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut out))
+    openbmt_kernel_random::checked_fill(rng, &mut out)
         .map_err(|e| store_by("box-random", format!("the random source: {e}")))?;
     Ok(out)
 }
@@ -364,4 +368,18 @@ pub(crate) fn own_check(a: BoxOwnCheckArgs) -> Result<BoxOwnCheckView, AppError>
             .map(|w| (*w).to_string())
             .collect(),
     })
+}
+
+#[cfg(test)]
+mod random_tests {
+    use super::*;
+    use crate::tests::fakes::Blocks;
+
+    #[test]
+    fn a_dry_weak_or_repeating_random_source_makes_no_invitation() {
+        for mut rng in [Blocks::dry(), Blocks::zeros(), Blocks::repeat()] {
+            assert!(random17_from(&mut rng).is_err());
+        }
+        assert!(random17_from(&mut Blocks::good()).is_ok());
+    }
 }

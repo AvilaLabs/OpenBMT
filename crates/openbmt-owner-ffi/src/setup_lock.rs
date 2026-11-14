@@ -43,23 +43,22 @@ fn wipe(pin: String) {
     std::hint::black_box(&mut bytes);
 }
 
-/// `N` bytes read from the system's random source. A read that fails or comes
-/// up short is refused.
+/// `N` bytes from the kernel by the checked reads of SS-02. A read that fails,
+/// is weak or repeats is refused.
 fn random<const N: usize>() -> Result<[u8; N], AppError> {
-    random_from("/dev/urandom")
+    random_from(&mut openbmt_kernel_random::Kernel)
 }
 
-fn random_from<const N: usize>(path: &str) -> Result<[u8; N], AppError> {
-    use std::io::Read;
+fn random_from<const N: usize>(
+    rng: &mut dyn openbmt_kernel_random::KernelRandom,
+) -> Result<[u8; N], AppError> {
     let mut out = [0u8; N];
-    std::fs::File::open(path)
-        .and_then(|mut f| f.read_exact(&mut out))
-        .map_err(|_| {
-            refused_by(
-                "pin-random",
-                "the system's random source did not give the bytes for a lock",
-            )
-        })?;
+    openbmt_kernel_random::checked_fill(rng, &mut out).map_err(|_| {
+        refused_by(
+            "pin-random",
+            "the system's random source did not give the bytes for a lock",
+        )
+    })?;
     Ok(out)
 }
 
@@ -156,11 +155,12 @@ mod random_tests {
     use super::*;
 
     #[test]
-    fn oa_60_a_failing_random_source_is_refused() {
-        let nothing = random_from::<16>("/nonexistent/random").expect_err("no source");
-        assert_eq!(nothing.rule(), "pin-random");
-        let short = random_from::<16>("/dev/null").expect_err("short");
-        assert_eq!(short.rule(), "pin-random");
-        assert_ne!(random::<16>().expect("urandom"), [0u8; 16]);
+    fn oa_60_a_failing_weak_or_repeating_random_source_is_refused() {
+        use crate::tests::fakes::Blocks;
+        for mut rng in [Blocks::dry(), Blocks::zeros(), Blocks::repeat()] {
+            let refused = random_from::<16>(&mut rng).expect_err("no bytes");
+            assert_eq!(refused.rule(), "pin-random");
+        }
+        assert_ne!(random::<16>().expect("kernel"), [0u8; 16]);
     }
 }

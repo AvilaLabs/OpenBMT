@@ -12,6 +12,7 @@ mod kit_scan;
 mod kotlin;
 mod lock;
 mod protocol;
+mod random;
 mod screen;
 mod session;
 mod setup;

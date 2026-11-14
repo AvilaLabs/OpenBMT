@@ -453,17 +453,15 @@ fn words4(w: [&'static str; 4]) -> Vec<String> {
     w.iter().map(|s| (*s).to_string()).collect()
 }
 
-/// 64 bytes read straight from the system's random source. There is no
-/// fallback: a read that fails or comes up short is refused (OC-40).
+/// 64 bytes from the kernel, each 32 by the two checked reads of SS-02. There
+/// is no fallback: a read that fails, is weak or repeats is refused (OC-40).
 fn random64() -> Result<[u8; 64], AppError> {
-    random64_from("/dev/urandom")
+    random64_from(&mut openbmt_kernel_random::Kernel)
 }
 
-fn random64_from(path: &str) -> Result<[u8; 64], AppError> {
-    use std::io::Read;
+fn random64_from(rng: &mut dyn openbmt_kernel_random::KernelRandom) -> Result<[u8; 64], AppError> {
     let mut out = [0u8; 64];
-    std::fs::File::open(path)
-        .and_then(|mut f| f.read_exact(&mut out))
+    openbmt_kernel_random::checked_fill(rng, &mut out)
         .map_err(|_| refused(CeremonyError::Random))?;
     Ok(out)
 }
@@ -582,13 +580,14 @@ mod random_tests {
     use super::*;
 
     #[test]
-    fn oc_40_a_failing_random_source_is_refused() {
-        let nothing = random64_from("/nonexistent/random").expect_err("no source");
-        assert!(nothing.to_string().contains("OC-40"), "{nothing}");
-        // A source that ends early gives too few bytes.
-        let short = random64_from("/dev/null").expect_err("short");
-        assert!(short.to_string().contains("OC-40"), "{short}");
-        assert_ne!(random64().expect("urandom"), [0u8; 64]);
+    fn oc_40_a_failing_weak_or_repeating_random_source_is_refused() {
+        use crate::tests::fakes::Blocks;
+        for rng in [Blocks::dry(), Blocks::zeros(), Blocks::repeat()] {
+            let mut rng = rng;
+            let refused = random64_from(&mut rng).expect_err("no key");
+            assert!(refused.to_string().contains("OC-40"), "{refused}");
+        }
+        assert_ne!(random64().expect("kernel"), [0u8; 64]);
     }
 }
 

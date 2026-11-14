@@ -1,9 +1,10 @@
 package org.openbmt.key
 
 /**
- * What the app implements: storage, randomness and the clock. The library
- * calls these during one call of [Native.call] and on the calling thread,
- * and keeps no reference to the object afterwards.
+ * What the app implements: storage and the clock. The app gives no random
+ * bytes; the library reads the kernel's itself. The library calls these
+ * during one call of [Native.call] and on the calling thread, and keeps no
+ * reference to the object afterwards.
  *
  * `save` must not return before the bytes are durable (flushed and synced).
  * The bytes hold the identity secret and, when this device holds key 2, key
@@ -18,9 +19,6 @@ interface KeyStore {
 
     /** Store [bytes]; durable before this returns. Throw on any failure. */
     fun save(bytes: ByteArray)
-
-    /** [n] bytes from the platform's cryptographically strong random source. */
-    fun random(n: Int): ByteArray
 
     /** The time now, in seconds since 1970-01-01 UTC. */
     fun now(): Long

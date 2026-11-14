@@ -21,10 +21,6 @@ impl KeyStore for Null {
         Ok(())
     }
 
-    fn random(&self, n: u32) -> Result<Vec<u8>, StoreError> {
-        Ok(vec![0x42; n as usize])
-    }
-
     fn now(&self) -> u64 {
         1_000_000
     }

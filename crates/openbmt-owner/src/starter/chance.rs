@@ -21,45 +21,18 @@ pub const STARTER_TAG: &[u8] = b"OpenBMT/starter/v1";
 /// SS-04: the number of words.
 pub const STARTER_WORDS: usize = 12;
 
-/// SS-01: where the 32 bytes come from. The owner app's is the kernel's
-/// `getrandom` system call (`openbmt-kernel-random`); a test gives fixed
-/// bytes.
-pub trait KernelRandom {
-    /// The next 32 bytes, or `None` when there are none to give.
-    fn read32(&mut self) -> Option<[u8; KERNEL_BYTES]>;
-}
-
-/// A read that is all one byte: all zero, or one byte repeated.
-fn is_weak(bytes: &[u8; KERNEL_BYTES]) -> bool {
-    match bytes.first() {
-        Some(first) => bytes.iter().all(|b| b == first),
-        None => true,
-    }
-}
+/// SS-01: where the 32 bytes come from. The trait and the checks live in
+/// `openbmt-kernel-random`, which every key of the Rust side shares.
+pub use openbmt_kernel_random::KernelRandom;
 
 /// SS-02: two separate reads of the source, neither all one byte, and the
 /// two different. The first is returned; the second is wiped.
 pub fn checked_read(rng: &mut dyn KernelRandom) -> Result<[u8; KERNEL_BYTES], StarterRefusal> {
-    let mut a = rng.read32().ok_or(StarterRefusal::Random)?;
-    let Some(mut b) = rng.read32() else {
-        wipe(&mut a);
-        return Err(StarterRefusal::Random);
-    };
-    let verdict = if is_weak(&a) || is_weak(&b) {
-        Err(StarterRefusal::RandomWeak)
-    } else if a == b {
-        Err(StarterRefusal::RandomRepeat)
-    } else {
-        Ok(())
-    };
-    wipe(&mut b);
-    match verdict {
-        Ok(()) => Ok(a),
-        Err(e) => {
-            wipe(&mut a);
-            Err(e)
-        }
-    }
+    openbmt_kernel_random::checked_read(rng).map_err(|e| match e {
+        openbmt_kernel_random::Refusal::Unavailable => StarterRefusal::Random,
+        openbmt_kernel_random::Refusal::Weak => StarterRefusal::RandomWeak,
+        openbmt_kernel_random::Refusal::Repeat => StarterRefusal::RandomRepeat,
+    })
 }
 
 /// The entropy of the 12 words, in memory only while a call uses it. The
@@ -100,7 +73,9 @@ impl Seed {
     /// The account key and the wallet, only inside one call.
     pub(crate) fn open(&self) -> Result<Opened, StarterRefusal> {
         let secp = Secp256k1::new();
-        let mut seed = self.mnemonic()?.to_seed("");
+        let mut words = self.mnemonic()?;
+        let mut seed = words.to_seed("");
+        openbmt_core::entropy::wipe_mnemonic(&mut words);
         let master = Xpriv::new_master(Network::Bitcoin, &seed);
         wipe(&mut seed);
         let mut master = master.map_err(|_| StarterRefusal::Wallet)?;

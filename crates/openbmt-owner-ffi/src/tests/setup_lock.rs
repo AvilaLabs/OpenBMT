@@ -91,9 +91,10 @@ fn oa_60_the_library_stores_nothing_of_the_lock() {
     .join("src");
     let text = std::fs::read_to_string(dir.join("setup_lock.rs")).expect("readable");
     let code = text.split("\n#[cfg(test)]").next().expect("the code");
-    // The only file it touches is the random source, and only to read.
-    assert_eq!(code.matches("std::fs::").count(), 1);
-    assert!(code.contains("std::fs::File::open(path)"));
+    // It touches no file at all: its random bytes are the kernel's, through
+    // `openbmt-kernel-random`.
+    assert_eq!(code.matches("std::fs::").count(), 0);
+    assert!(!code.contains("File::open"));
     for needle in ["write(", "create(", "OpenOptions", "remove_file", "rename("] {
         assert!(!code.contains(needle), "{needle}");
     }

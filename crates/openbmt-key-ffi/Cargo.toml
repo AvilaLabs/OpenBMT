@@ -18,6 +18,10 @@ crate-type = ["lib", "cdylib", "staticlib"]
 # it; on Android it is always compiled.
 default = ["jni"]
 jni = []
+# A test's fixed random blocks in place of the kernel's, through
+# `KeyStore::test_block`. For other crates' tests only; a shipped build leaves
+# it off.
+test-random = []
 
 # The same exact versions as the other crates, so the types unify.
 [dependencies]
@@ -33,6 +37,9 @@ jni-sys = "=0.3.0"
 # The PIN lock (SR-71) is the shared crate, which holds Argon2 and
 # ChaCha20-Poly1305: no package of its own is added here.
 openbmt-lock = { path = "../openbmt-lock" }
+# The kernel's random bytes with the checks of SS-02: every key, identity,
+# salt and nonce is made from them, never from bytes the app passes in.
+openbmt-kernel-random = { path = "../openbmt-kernel-random" }
 
 [dev-dependencies]
 openbmt-owner = { path = "../openbmt-owner" }

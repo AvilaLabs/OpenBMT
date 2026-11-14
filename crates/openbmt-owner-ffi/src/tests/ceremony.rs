@@ -19,7 +19,8 @@ use crate::ceremony::{
 };
 use crate::{dispatch, AppError, OwnerNetwork};
 
-/// What the Key app's platform gives it, in memory.
+/// What the Key app's platform gives it, in memory. Its test blocks stand in
+/// for the kernel's reads, so that the fixtures of the Kotlin harness hold.
 struct Store(Mutex<(Option<Vec<u8>>, u64)>);
 
 impl Store {
@@ -36,17 +37,11 @@ impl KeyStore for Store {
         self.0.lock().expect("lock").0 = Some(bytes);
         Ok(())
     }
-    fn random(&self, n: u32) -> Result<Vec<u8>, StoreError> {
+    fn test_block(&self) -> Option<[u8; 32]> {
         let mut s = self.0.lock().expect("lock");
-        let mut out = Vec::new();
-        while out.len() < n as usize {
-            s.1 += 1;
-            let block =
-                sha256::Hash::hash(&[b"ceremony-e2e".as_slice(), &s.1.to_le_bytes()].concat());
-            out.extend_from_slice(block.as_byte_array());
-        }
-        out.truncate(n as usize);
-        Ok(out)
+        s.1 += 1;
+        let block = sha256::Hash::hash(&[b"ceremony-e2e".as_slice(), &s.1.to_le_bytes()].concat());
+        Some(*block.as_byte_array())
     }
     fn now(&self) -> u64 {
         T0

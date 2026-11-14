@@ -50,6 +50,6 @@ jni-sys = "=0.3.0"
 # The Key app, in process, for the end-to-end test of an approval.
 openbmt-approver = { path = "../openbmt-approver" }
 # The Key app, for the end-to-end test of the key ceremony.
-openbmt-key-ffi = { path = "../openbmt-key-ffi" }
+openbmt-key-ffi = { path = "../openbmt-key-ffi", features = ["test-random"] }
 # A real Box on the loopback, for the end-to-end test of connecting one.
 openbmt-box = { path = "../openbmt-box" }

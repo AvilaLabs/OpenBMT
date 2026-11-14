@@ -23,7 +23,7 @@ use bitcoin::{Address, ScriptBuf};
 use openbmt_core::wallet_single::ImportedWallet;
 use openbmt_owner::starter::{
     self, Coin, DataKey, KernelRandom, Key, Restore, Sealed, Setup, StarterRefusal, StarterWallet,
-    Typed, KERNEL_BYTES,
+    Typed,
 };
 
 use crate::codec::{wire_record, wire_record_get, wire_unit_enum};
@@ -58,14 +58,7 @@ pub(crate) fn not_ready(e: &openbmt_owner::own_switch::MoveNotReady) -> AppError
     )
 }
 
-/// The kernel's bytes, from the `getrandom` system call (SS-01).
-struct Kernel;
-
-impl KernelRandom for Kernel {
-    fn read32(&mut self) -> Option<[u8; KERNEL_BYTES]> {
-        openbmt_kernel_random::read32().ok()
-    }
-}
+use openbmt_kernel_random::Kernel;
 
 /// What the process holds of a starter wallet in the making.
 enum Session {
