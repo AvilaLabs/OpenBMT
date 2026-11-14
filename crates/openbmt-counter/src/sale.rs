@@ -13,12 +13,17 @@
 //!   | n_segments u32 | n_segments * (sats u64 | quote u32)
 //!   | frozen (flag, u64) | accepted (flag, label u8, mode u8)
 //!   | overridden (flag, role u8, name_len u8, name, at u64, conflict flag, reopened flag)
-//!   | reopened | cancel_recorded | exposure_counted | exposure_released (flags)
+//!   | reopened (see below) | cancel_recorded | exposure_counted | exposure_released (flags)
 //!   | ended (0 none, 1 expired, 2 cancelled; then at u64 unless none)
 //!   | dust_logged flag | pos u8 | confirmed_logged flag | books_final flag
 //!   | surplus_reported u64
 //!   | late_unlisted flag | n_late u32 | n_late * (txid (32) | sats u64)
 //!   | watch_len u32 | the sale watch (OBMV)
+//!
+//! The reopened byte is 0 or 1 in every earlier file, and the refund latch
+//! (CR-66) then equals it. A build that holds the two apart writes 2 (the
+//! refund latch only: the payment is back at the shop's depth but not yet at
+//! the refund depth) or 3 (reopened only); no other value reads back.
 //!
 //! OBML | 2 | the fields of version 1
 //!   | n_refunds u32 | n_refunds * refund entry   (see `refund::RefundEntry`)
@@ -234,6 +239,10 @@ pub struct Sale {
     pub(crate) accepted: Option<(InstantLabel, CheckMode)>,
     pub(crate) overridden: Option<OverrideMark>,
     pub(crate) reopened: bool,
+    /// CR-66: the payment was unconfirmed again by a reorg and has not been
+    /// back at the refund depth since. Set with `reopened`, cleared only at
+    /// the refund depth, so a refund request keeps waiting for depth.
+    pub(crate) refund_reopened: bool,
     pub(crate) cancel_recorded: bool,
     pub(crate) exposure_counted: bool,
     pub(crate) exposure_released: bool,
@@ -288,6 +297,7 @@ impl Sale {
             accepted: None,
             overridden: None,
             reopened: false,
+            refund_reopened: false,
             cancel_recorded: false,
             exposure_counted: false,
             exposure_released: false,
@@ -452,10 +462,11 @@ impl Sale {
     }
 
     /// CR-61 to CR-72: whether the sale was at the refund depth the last
-    /// time it was judged and has not been reopened since. A refund request
-    /// is "waiting for depth" until then (CR-66).
+    /// time it was judged and a reorg has not unconfirmed its payment since
+    /// without it being back at the refund depth. A refund request is
+    /// "waiting for depth" until then (CR-66).
     pub fn at_refund_depth(&self) -> bool {
-        self.books_final && !self.reopened
+        self.books_final && !self.refund_reopened
     }
 
     /// CR-19: a payment arrived after the sale ended or was final.
@@ -585,7 +596,8 @@ impl Sale {
     /// CR-11: ask the watcher for its status, keep the "reopened" latch,
     /// value what has arrived, and ask again if the need moved (the
     /// confirmation depth is judged against the need). `depth` is the
-    /// shop's confirmation depth.
+    /// shop's confirmation depth and `final_depth` the refund depth (CR-66),
+    /// at which the refund latch is let go.
     ///
     /// Returns the status and what has arrived, with dust counted as nothing.
     pub(crate) fn refresh<C: HeaderChain + ?Sized>(
@@ -593,6 +605,7 @@ impl Sale {
         headers: &C,
         now: u64,
         depth: u32,
+        final_depth: u32,
         own: &OwnCheck,
     ) -> (SaleStatus, u64) {
         let first = own.status(&mut self.watch, headers, now);
@@ -610,6 +623,10 @@ impl Sale {
         };
         if first.unconfirmed_again {
             self.reopened = true;
+            self.refund_reopened = true;
+        }
+        if status.min_confirmations >= final_depth {
+            self.refund_reopened = false;
         }
         if status.min_confirmations >= depth {
             self.reopened = false;
@@ -664,7 +681,12 @@ impl Sale {
             }
             None => out.push(0),
         }
-        out.push(u8::from(self.reopened));
+        out.push(match (self.reopened, self.refund_reopened) {
+            (false, false) => 0,
+            (true, true) => 1,
+            (false, true) => 2,
+            (true, false) => 3,
+        });
         out.push(u8::from(self.cancel_recorded));
         out.push(u8::from(self.exposure_counted));
         out.push(u8::from(self.exposure_released));
@@ -899,7 +921,13 @@ impl Sale {
         } else {
             None
         };
-        let reopened = r.flag()?;
+        let (reopened, refund_reopened) = match r.u8()? {
+            0 => (false, false),
+            1 => (true, true),
+            2 => (false, true),
+            3 => (true, false),
+            _ => return Err(bad("the reopened byte is not known")),
+        };
         let cancel_recorded = r.flag()?;
         let exposure_counted = r.flag()?;
         let exposure_released = r.flag()?;
@@ -1053,6 +1081,7 @@ impl Sale {
             accepted,
             overridden,
             reopened,
+            refund_reopened,
             cancel_recorded,
             exposure_counted,
             exposure_released,

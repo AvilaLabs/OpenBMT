@@ -592,6 +592,77 @@ fn cr_66_a_request_after_a_reorg_took_a_final_sale_below_the_depth_is_waiting() 
     );
 }
 
+#[test]
+fn cr_66_after_a_reorg_the_flag_stays_until_the_refund_depth_not_the_shops_depth() {
+    let mut w = World::new();
+    let o = w.open_five();
+    let t = w.pay(&o, 5_000);
+    let block = w.confirm(std::slice::from_ref(&t), 95);
+    assert_eq!(w.judge(o.index).state, crate::State::Final);
+    assert!(w.c.sale(o.index).unwrap().at_refund_depth());
+    w.orphan(&block);
+    w.judge(o.index);
+    assert!(!w.c.sale(o.index).unwrap().at_refund_depth());
+    // The chain comes back to that block but is shorter than before: two
+    // confirmations, the shop's depth (1) and below the refund depth (6).
+    // The request still waits for depth.
+    w.chain.add(block.block_hash(), 95);
+    w.chain.tip = 96;
+    assert_eq!(w.judge(o.index).state, crate::State::Confirmed);
+    assert!(!w.c.sale(o.index).unwrap().at_refund_depth());
+    ask(&mut w, o.index, 1_000, ann()).unwrap();
+    match refund_events(&w).last().unwrap() {
+        Event::RefundRequested {
+            waiting_for_depth, ..
+        } => assert!(*waiting_for_depth),
+        e => panic!("{e:?}"),
+    }
+    assert_eq!(
+        w.c.refund_views(o.index)[0].state,
+        RefundState::WaitingForDepth
+    );
+    // At the refund depth it no longer waits, and the answer survives a
+    // restart.
+    w.chain.tip = 100;
+    assert_eq!(w.judge(o.index).state, crate::State::Final);
+    assert_eq!(w.c.refund_views(o.index)[0].state, RefundState::Requested);
+    w.restart();
+    assert_eq!(w.c.refund_views(o.index)[0].state, RefundState::Requested);
+}
+
+#[test]
+fn cr_66_the_refund_latch_is_stored_and_an_earlier_sale_reads_with_it_equal_to_reopened() {
+    use crate::sale::Sale;
+    let mut w = World::new();
+    let o = w.open_five();
+    let base = w.c.sale(o.index).unwrap().clone();
+    let form = |reopened: bool, latch: bool| {
+        let mut s = base.clone();
+        s.reopened = reopened;
+        s.refund_reopened = latch;
+        s.to_bytes()
+    };
+    // Every earlier build wrote 0 or 1 in that byte; the same bytes read
+    // with the latch equal to `reopened`.
+    let (off, on) = (form(false, false), form(true, true));
+    let at = off.iter().zip(&on).position(|(a, b)| a != b).unwrap();
+    assert_eq!((off[at], on[at]), (0, 1));
+    let read = Sale::from_bytes(&off).unwrap();
+    assert!(!read.reopened && !read.refund_reopened);
+    let read = Sale::from_bytes(&on).unwrap();
+    assert!(read.reopened && read.refund_reopened);
+    // The two apart round-trip; no other value reads.
+    for (reopened, latch) in [(false, true), (true, false)] {
+        let bytes = form(reopened, latch);
+        let read = Sale::from_bytes(&bytes).unwrap();
+        assert_eq!((read.reopened, read.refund_reopened), (reopened, latch));
+        assert_eq!(read.to_bytes(), bytes);
+    }
+    let mut bad = off.clone();
+    bad[at] = 4;
+    assert!(Sale::from_bytes(&bad).is_err());
+}
+
 // CR-67.
 
 #[test]

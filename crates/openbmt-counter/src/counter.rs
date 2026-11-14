@@ -2024,10 +2024,12 @@ impl Counter {
             return Err(RequoteRefused::AmountTooLarge);
         };
         let depth = self.depth();
+        let final_depth = self.final_depth();
         sale.refresh(
             headers,
             now,
             depth,
+            final_depth,
             &OwnCheck::Mixed(OwnNodeHealth::not_configured()),
         );
         if sale.frozen.is_some() {
@@ -2058,6 +2060,7 @@ impl Counter {
             headers,
             now,
             depth,
+            final_depth,
             &OwnCheck::Mixed(OwnNodeHealth::not_configured()),
         );
         let event = Event::Requoted {
@@ -2424,7 +2427,7 @@ impl Counter {
         }
         let now = facts.now;
         let mut sale = base;
-        let (st, received) = sale.refresh(facts.chain, now, self.depth(), &own);
+        let (st, received) = sale.refresh(facts.chain, now, self.depth(), self.final_depth(), &own);
         if sale.accepted.is_some()
             || sale.overridden.is_some()
             || sale.frozen.is_some()
@@ -2590,7 +2593,7 @@ impl Counter {
         }
         let now = facts.now;
         let mut sale = base;
-        let (st, received) = sale.refresh(facts.chain, now, self.depth(), &own);
+        let (st, received) = sale.refresh(facts.chain, now, self.depth(), self.final_depth(), &own);
         if sale.accepted.is_some()
             || sale.overridden.is_some()
             || sale.frozen.is_some()
@@ -2909,7 +2912,7 @@ impl Counter {
         let now = facts.now;
         let depth = self.depth();
         let final_depth = u32::from(self.settings.final_confirmations).max(depth);
-        let (st, received) = sale.refresh(facts.chain, now, depth, own);
+        let (st, received) = sale.refresh(facts.chain, now, depth, final_depth, own);
         let needs = sale.watch.sale_sats();
 
         // CR-109, CR-110: a sale the shop's node says was paid over
@@ -3991,6 +3994,7 @@ impl Counter {
             headers,
             now,
             self.depth(),
+            self.final_depth(),
             &OwnCheck::Mixed(OwnNodeHealth::not_configured()),
         );
         // CR-111: what arrived over Lightning is received and final at once.
