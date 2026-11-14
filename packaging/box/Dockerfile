@@ -8,7 +8,11 @@ FROM rust:1.89-slim-trixie@sha256:8cffb8fe4e8a95cf0d6a2060375e5a28aff4c752155aa9
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-RUN cargo build --locked --release -p openbmt-box
+COPY scripts/box-build.sh ./scripts/box-build.sh
+# The same build as outside the container, with the build directories mapped
+# to fixed names (scripts/box-build.sh), so that the binary does not depend
+# on where it was built.
+RUN scripts/box-build.sh
 
 # Debian trixie, slim. Tag debian:trixie-slim read 2026-11-11 (UTC) from the
 # Docker Hub registry.

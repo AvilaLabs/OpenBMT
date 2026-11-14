@@ -252,7 +252,14 @@ apply: pinned, from the publisher's registry, checked against a digest.
 - **It does not vendor.** The design asks for the Key app's crates to be
   copied into the tree and reviewed by someone other than the author of
   the app; that is not done yet.
-- **It does not make builds reproducible.** That is separate work, and a
-  launch condition for the Key app.
+- **Builds repeat on one machine, not yet across machines.** Two builds of
+  one commit from different directories give byte-identical Key, Owner and
+  Counter APKs and an identical Box binary; `scripts/repro-check.sh` builds
+  twice and compares. Zip entries carry the commit's time, and the build
+  directories are mapped out of the binaries. A signed APK repeats only
+  with an RSA key, because an ECDSA signature differs at every signing, so
+  a release key must be RSA for its APKs to repeat. The Tor library is the
+  pinned prebuilt above, not rebuilt. A rebuild by a second party on another machine, which the
+  design makes a launch condition for the Key app, is not done.
 - **It trusts crates.io and the Rust toolchain** to deliver what was
   published.
