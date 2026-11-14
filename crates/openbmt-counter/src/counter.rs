@@ -1671,7 +1671,8 @@ impl Counter {
             return Err(OpenRefused::RescanPending);
         }
         // WR-54 turns instant acceptance off and does not stop a sale from
-        // opening: it waits for a confirmation.
+        // opening: what arrives is not handed over until it is confirmed
+        // (CR-12 rule 7).
         if !facts.health.healthy && facts.health.problem != Some(Problem::BlocksBehind) {
             return Err(OpenRefused::Unhealthy(facts.health.problem));
         }

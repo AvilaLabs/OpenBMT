@@ -24,10 +24,11 @@ draws what it is told.
 
 - **CR-01.** Bitcoin is offered only when the check is healthy (WR-50 to
   WR-54) at that moment, except that being behind on blocks (WR-54) alone does
-  not refuse opening: the sale opens and waits for a confirmation. Otherwise
-  opening is refused and the cashier is told to use another payment type. A
-  clock mismatch (WR-53) refuses opening too: the price lock and the expiry
-  cannot be trusted.
+  not refuse opening: the sale opens, and until the counter has caught up what
+  arrives is judged by CR-12 rule 7 and is paid only once confirmed at the
+  shop's depth. Otherwise opening is refused and the cashier is told to use
+  another payment type. A clock mismatch (WR-53) refuses opening too: the
+  price lock and the expiry cannot be trusted.
 - **CR-02.** A sale gets the next unused address of the counter's current
   batch, and only that. An empty batch refuses the sale: "do not offer
   Bitcoin". An address is never used for two sales.
@@ -124,11 +125,12 @@ carries two texts: why it is in this state, and what happens next (§2.6).
   6. the sale was accepted at once earlier (CR-13): `PaidInstant`;
   7. enough has arrived, unconfirmed: ask the instant decision.
      `Instant` gives `PaidInstant`; anything else gives `Waiting` with its
-     reason, or `DoNotHandOver` (cannot check) if the check is not healthy.
-     The check is not healthy while the counter is behind on blocks
-     (WR-54): a header is known above the height checked in full, so a
-     conflicting payment in that block cannot have been seen. No sale is
-     accepted at once then, and it waits for a confirmation;
+     reason. While the check is not healthy the state is `DoNotHandOver`
+     (cannot check) instead, and no sale is accepted at once. The check is
+     not healthy while the counter is behind on blocks (WR-54): a header is
+     known above the height checked in full, so a conflicting payment in
+     that block cannot have been seen. The sale is then decided by rule 5
+     once the payment has the shop's depth;
   8. something has arrived, not enough: `PartPaid`;
   9. nothing: `NotPaidYet`, or `Expired` under CR-07.
 - **CR-13.** Accepting at once is a step with a record. The counter adds
