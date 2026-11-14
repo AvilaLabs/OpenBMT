@@ -234,7 +234,11 @@ screen and not a shared computer.
 
 - **BX-50.** Everything a Box stores is written whole to a temporary file,
   flushed and renamed, or appended to a log whose torn tail is cut at the
-  next start. A value is stored before it takes effect.
+  next start. A value is stored before it takes effect. Every file the Box
+  writes, the relay's mailboxes and lists and the chain data among them, is
+  made with mode 0600, and every folder it makes with mode 0700; a
+  temporary file left with a wider mode is emptied and set to 0600 before
+  it is written, so the file it becomes is never wider.
 - **BX-51.** A Box that cannot read its key, its roots or its settings
   does not start as paired and does not make new ones over them: it stops
   and says which file is damaged.
@@ -642,8 +646,11 @@ code and checks the payment.
   its bearer token and its reply key (BX-80), never the key itself. A new
   key replaces the old one, which stops working at the next request. Every
   request carries `Authorization: Bearer <token>`, the token of BX-80. The
-  Box compares the hash of what it was given with the stored hash in
-  constant time. No key file, no header, a header that is not a bearer
+  Box compares the hash of what it was given with a copy of the stored hash
+  it holds in memory, in constant time. The copy is replaced when the Box
+  makes a key, and read again when another process has replaced the file,
+  so a new key works at the next request. A request with a wrong token
+  never waits for the Box's state: only an accepted request takes it. No key file, no header, a header that is not a bearer
   token or a wrong token is a 401 with the words `tillKeyWrong`. The Box
   never prints or logs the key or the token.
 - **BX-72.** `POST /till/v1/sales` takes `Content-Type: application/json`
