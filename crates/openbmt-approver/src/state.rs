@@ -141,19 +141,25 @@ impl Approver {
     pub fn attach_signer(
         &mut self,
         state: SignerState,
-        account_key: Xpriv,
+        mut account_key: Xpriv,
     ) -> Result<(), SetupError> {
+        // A refusal does not keep the key: the copy passed in is overwritten.
+        let refuse = |key: &mut Xpriv, e: SetupError| {
+            key.private_key.non_secure_erase();
+            std::hint::black_box(&mut *key);
+            Err(e)
+        };
         if self.kept.signer.is_some() {
-            return Err(SetupError::SignerAttached);
+            return refuse(&mut account_key, SetupError::SignerAttached);
         }
         if state.wallet().checksum32() != self.wallet_id {
-            return Err(SetupError::SignerWallet);
+            return refuse(&mut account_key, SetupError::SignerWallet);
         }
         let slot = usize::from(state.own_slot()).checked_sub(1);
         let own = slot.and_then(|s| state.wallet().slots().get(s));
         match own {
             Some(slot) if slot.xpub == Xpub::from_priv(secp(), &account_key) => {}
-            _ => return Err(SetupError::SignerKey),
+            _ => return refuse(&mut account_key, SetupError::SignerKey),
         }
         self.kept.signer = Some(state);
         self.key2 = Some(account_key);

@@ -116,6 +116,30 @@ impl fmt::Debug for SeedWords {
     }
 }
 
+/// Overwrite the words of a mnemonic in place with the words of all-zero
+/// entropy of the same length. The `bip39` crate is built without its
+/// `zeroize` feature (it would add a crate that is not in the lock file), so
+/// the words are replaced by a value of the same type and the write is kept
+/// from being dropped as a dead store.
+pub fn wipe_mnemonic(m: &mut bip39::Mnemonic) {
+    let zeros = [0u8; 32];
+    let bytes = m.word_count() / 3 * 4;
+    if let Some(blank) = zeros
+        .get(..bytes)
+        .and_then(|e| bip39::Mnemonic::from_entropy(e).ok())
+    {
+        *m = blank;
+    }
+    std::hint::black_box(&mut *m);
+}
+
+/// Overwrite the bytes of a text that held words or a seed, and empty it.
+pub fn wipe_string(s: &mut String) {
+    let mut bytes = std::mem::take(s).into_bytes();
+    bytes.fill(0);
+    std::hint::black_box(&mut bytes);
+}
+
 /// One coin flip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Flip {
@@ -249,6 +273,19 @@ pub fn bits_still_needed(bits: usize, count: WordCount) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_wiped_mnemonic_holds_the_words_of_zero_entropy_and_a_wiped_text_is_empty() {
+        for bytes in [16usize, 32] {
+            let mut m = bip39::Mnemonic::from_entropy(&vec![0x5a; bytes]).unwrap();
+            wipe_mnemonic(&mut m);
+            assert_eq!(m.to_entropy(), vec![0u8; bytes]);
+            assert_eq!(m.word_count(), bytes / 4 * 3);
+        }
+        let mut text = "abandon ability".to_string();
+        wipe_string(&mut text);
+        assert!(text.is_empty());
+    }
 
     fn words_of(w: &SeedWords) -> String {
         w.words().collect::<Vec<_>>().join(" ")

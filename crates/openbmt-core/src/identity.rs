@@ -174,7 +174,18 @@ impl fmt::Debug for Identity {
     }
 }
 
+impl Drop for Identity {
+    fn drop(&mut self) {
+        self.erase();
+    }
+}
+
 impl Identity {
+    /// Overwrite the secret key held here.
+    fn erase(&mut self) {
+        self.keypair.non_secure_erase();
+    }
+
     /// Build from 32 secret bytes supplied by a cryptographic random source.
     pub fn from_secret_bytes(secret: &[u8; 32]) -> Result<Self, IdentityError> {
         Keypair::from_seckey_slice(secp(), secret)
@@ -226,6 +237,15 @@ mod tests {
     use super::*;
     use crate::testutil::identity;
     use bitcoin::hashes::{sha256, Hash};
+
+    #[test]
+    fn the_secret_is_overwritten_when_the_identity_goes() {
+        // Drop calls `erase`; the overwrite is seen through the same call.
+        let mut id = Identity::from_secret_bytes(&[0x42; 32]).unwrap();
+        assert_eq!(id.keypair.secret_bytes(), [0x42; 32]);
+        id.erase();
+        assert_ne!(id.keypair.secret_bytes(), [0x42; 32]);
+    }
 
     #[test]
     fn tagged_hash_matches_bip340_definition() {

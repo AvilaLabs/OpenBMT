@@ -393,8 +393,9 @@ impl FloatWords {
         if held.0.split(' ').count() != FLOAT_WORDS {
             return Err(FloatRefusal::Words);
         }
-        Mnemonic::parse_in_normalized(Language::English, &held.0)
+        let mut parsed = Mnemonic::parse_in_normalized(Language::English, &held.0)
             .map_err(|_| FloatRefusal::Words)?;
+        openbmt_core::entropy::wipe_mnemonic(&mut parsed);
         Ok(held)
     }
 
@@ -404,10 +405,13 @@ impl FloatWords {
         if entropy.len() != 16 {
             return Err(FloatRefusal::Words);
         }
-        let m = Mnemonic::from_entropy_in(Language::English, entropy)
+        let mut m = Mnemonic::from_entropy_in(Language::English, entropy)
             .map_err(|_| FloatRefusal::Words)?;
-        let words = m.words().collect::<Vec<_>>().join(" ");
-        Self::new(&words)
+        let mut words = m.words().collect::<Vec<_>>().join(" ");
+        openbmt_core::entropy::wipe_mnemonic(&mut m);
+        let held = Self::new(&words);
+        wipe_string(&mut words);
+        held
     }
 
     /// The words, space-separated, for the caller to show or seal once.
@@ -512,9 +516,7 @@ fn seal_scan(
 /// are sealed under different labels.
 pub fn wallet_of_sealed(sealed: &[u8], key: &DataKey) -> Result<FloatWallet, FloatSealError> {
     let seed = open_seed_with(sealed, key, FLOAT_SEAL_AAD).map_err(FloatSealError::Seal)?;
-    let mnemonic = seed.mnemonic().map_err(FloatSealError::Seal)?;
-    let words = FloatWords::new(&mnemonic.words().collect::<Vec<_>>().join(" "))
-        .map_err(FloatSealError::Float)?;
+    let words = words_of_seed(&seed)?;
     FloatWallet::from_words(&words).map_err(FloatSealError::Float)
 }
 
@@ -532,9 +534,10 @@ impl Drop for Opened {
 
 fn open(words: &FloatWords) -> Result<Opened, FloatRefusal> {
     let secp = Secp256k1::new();
-    let mnemonic = Mnemonic::parse_in_normalized(Language::English, &words.0)
+    let mut mnemonic = Mnemonic::parse_in_normalized(Language::English, &words.0)
         .map_err(|_| FloatRefusal::Words)?;
     let mut seed = mnemonic.to_seed("");
+    openbmt_core::entropy::wipe_mnemonic(&mut mnemonic);
     let master = Xpriv::new_master(Network::Bitcoin, &seed);
     wipe(&mut seed);
     let mut master = master.map_err(|_| FloatRefusal::Wallet)?;
@@ -806,8 +809,18 @@ pub fn sweep_sealed(
 
 fn words_of_sealed(sealed: &[u8], key: &DataKey) -> Result<FloatWords, FloatSealError> {
     let seed = open_seed_with(sealed, key, FLOAT_SEAL_AAD).map_err(FloatSealError::Seal)?;
-    let mnemonic = seed.mnemonic().map_err(FloatSealError::Seal)?;
-    FloatWords::new(&mnemonic.words().collect::<Vec<_>>().join(" ")).map_err(FloatSealError::Float)
+    words_of_seed(&seed)
+}
+
+/// The words of a seed, with the library's copy and the joined text
+/// overwritten once the held words are made.
+fn words_of_seed(seed: &Seed) -> Result<FloatWords, FloatSealError> {
+    let mut mnemonic = seed.mnemonic().map_err(FloatSealError::Seal)?;
+    let mut joined = mnemonic.words().collect::<Vec<_>>().join(" ");
+    openbmt_core::entropy::wipe_mnemonic(&mut mnemonic);
+    let words = FloatWords::new(&joined).map_err(FloatSealError::Float);
+    wipe_string(&mut joined);
+    words
 }
 
 impl Owner {

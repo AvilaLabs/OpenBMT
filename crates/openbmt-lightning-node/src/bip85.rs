@@ -25,6 +25,13 @@ pub const NODE_SEED_INDEX: u32 = 0;
 #[derive(Clone, PartialEq, Eq)]
 pub struct NodeSeed(pub [u8; SEED_LEN]);
 
+impl Drop for NodeSeed {
+    fn drop(&mut self) {
+        self.0.fill(0);
+        std::hint::black_box(&mut self.0);
+    }
+}
+
 impl fmt::Debug for NodeSeed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("NodeSeed(..)")
@@ -39,12 +46,13 @@ pub fn entropy_at(master: &Xpriv, path: &[u32]) -> Result<[u8; 64], bitcoin::bip
     for step in path {
         steps.push(ChildNumber::from_hardened_idx(*step)?);
     }
-    let key = master
-        .derive_priv(&secp, &DerivationPath::from(steps))?
-        .private_key
-        .secret_bytes();
+    let mut child = master.derive_priv(&secp, &DerivationPath::from(steps))?;
+    let mut key = child.private_key.secret_bytes();
+    child.private_key.non_secure_erase();
     let mut engine = HmacEngine::<sha512::Hash>::new(HMAC_KEY);
     engine.input(&key);
+    key.fill(0);
+    std::hint::black_box(&mut key);
     Ok(Hmac::from_engine(engine).to_byte_array())
 }
 

@@ -282,15 +282,20 @@ impl Setup {
         if page >= PAGES {
             return Err(StarterRefusal::Page);
         }
-        let mnemonic = self.seed.mnemonic()?;
-        let lines: Vec<String> = mnemonic
+        let mut mnemonic = self.seed.mnemonic()?;
+        let mut lines: Vec<String> = mnemonic
             .words()
             .enumerate()
             .skip(page * WORDS_PER_PAGE)
             .take(WORDS_PER_PAGE)
             .map(|(i, w)| format!("{:>2} {w}", i + 1))
             .collect();
-        Ok(draw(&lines, scale))
+        let image = draw(&lines, scale);
+        lines
+            .iter_mut()
+            .for_each(openbmt_core::entropy::wipe_string);
+        openbmt_core::entropy::wipe_mnemonic(&mut mnemonic);
+        Ok(image)
     }
 
     /// SS-10: pick three positions from fresh kernel bytes and begin the
@@ -350,11 +355,12 @@ impl Setup {
         let Some(position) = self.positions.get(self.answered) else {
             return Ok(false);
         };
-        let mnemonic = self.seed.mnemonic()?;
+        let mut mnemonic = self.seed.mnemonic()?;
         let answered = mnemonic
             .words()
             .nth(*position)
             .is_some_and(|w| self.pad.answers(w));
+        openbmt_core::entropy::wipe_mnemonic(&mut mnemonic);
         Ok(answered)
     }
 
