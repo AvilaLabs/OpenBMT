@@ -1,4 +1,4 @@
-package org.openbmt.counter.app
+package org.openbmt.app
 
 /**
  * The phone's two counters that a hold of wrong PIN tries is measured by: the milliseconds since the phone started

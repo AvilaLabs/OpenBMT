@@ -9,6 +9,9 @@ import java.security.SecureRandom
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 import org.openbmt.app.DurableFile
+import org.openbmt.app.HoldCheck
+import org.openbmt.app.PinHold
+import org.openbmt.app.PinNow
 
 /** What turns a PIN and a salt into the bytes that are stored. The platform's PBKDF2 on Android and on the JVM. */
 fun interface PinHasher {

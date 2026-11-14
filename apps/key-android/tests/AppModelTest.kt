@@ -17,6 +17,7 @@ import org.openbmt.app.StoreFormatException
 import org.openbmt.app.Tones
 import org.openbmt.app.UrWords
 import org.openbmt.app.Tries
+import org.openbmt.app.PinNow
 import org.openbmt.app.TriesFile
 import org.openbmt.app.TriesRecord
 import org.openbmt.app.Who
@@ -493,6 +494,8 @@ object AppModelTest {
         val controller = File(appDir, "src/android/Controller.kt").readText()
         ok(!Regex("[^a-zA-Z]filesDir").containsMatchIn(controller), "the plain files folder is not used")
         ok(controller.contains("TriesFile(act.noBackupFilesDir)"), "the tries file is in the no-backup folder")
+        // SR-75: the wait is told by the time since start and the boot count, never by the date.
+        ok(controller.contains("PinNow(SystemClock.elapsedRealtime(), bootCount() and 0xffffffffL)") && !controller.contains("tries.read(clock())") && !controller.contains("Tries.check(rec, clock())"), "the key's PIN wait is told by the time since start and the boot count")
     }
 
     private fun sr_75_waits_and_tries_left() {
@@ -500,38 +503,48 @@ object AppModelTest {
         for ((n, w) in waits.withIndex()) ok(Tries.waitSeconds(n) == w, "$n wrong tries wait $w s")
         val t0 = 1_000_000L
         for (n in 1..9) {
-            val rec = TriesRecord(n, t0)
-            val c = Tries.check(rec, t0)
+            val rec = TriesRecord(n, t0, 7)
+            val c = Tries.check(rec, PinNow(t0, 7))
             ok(c.waitLeft == waits[n] && !c.wipe, "right after $n wrong: wait ${waits[n]}")
-            ok(Tries.check(rec, t0 + waits[n]).waitLeft == 0L, "after the wait the try goes on ($n)")
-            ok(Tries.check(rec, t0 + 10).waitLeft == (waits[n] - 10).coerceAtLeast(0), "the wait counts down ($n)")
+            ok(Tries.check(rec, PinNow(t0 + waits[n] * 1000, 7)).waitLeft == 0L, "after the wait the try goes on ($n)")
+            ok(Tries.check(rec, PinNow(t0 + 10_000, 7)).waitLeft == (waits[n] - 10).coerceAtLeast(0), "the wait counts down ($n)")
         }
         ok(!Tries.showsTriesLeft(4) && Tries.showsTriesLeft(5), "tries left are said from the 5th wrong try")
         ok(Tries.triesLeftText(5) == "5 tries left before this key is wiped.", "5 left")
         ok(Tries.triesLeftText(9) == "1 try left before this key is wiped.", "1 left")
-        ok(Tries.before(TriesRecord(3, 5), 99) == TriesRecord(4, 99), "one more is counted before the try")
-        ok(Tries.afterRight() == TriesRecord(0, 0), "a right PIN clears the count")
+        ok(Tries.before(TriesRecord(3, 5, 7), PinNow(99, 7)) == TriesRecord(4, 99, 7), "one more is counted before the try")
+        ok(Tries.afterRight() == TriesRecord(0, 0, 0), "a right PIN clears the count")
         ok(Tries.waitText(30) == "30 s" && Tries.waitText(260) == "4 min 20 s" && Tries.waitText(3600) == "1 h 0 min", "wait text")
-        // A clock set back restarts the wait.
-        val back = Tries.check(TriesRecord(6, t0), t0 - 500)
-        ok(back.waitLeft == 60L && back.record == TriesRecord(6, t0 - 500), "a clock behind restarts the wait and stores it")
-        ok(Tries.check(TriesRecord(10, t0), t0).wipe, "10 wrong tries wipe")
+        // A time since start set back restarts the wait; a new start of the phone does too.
+        val back = Tries.check(TriesRecord(6, t0, 7), PinNow(t0 - 500, 7))
+        ok(back.waitLeft == 60L && back.record == TriesRecord(6, t0 - 500, 7), "a time behind restarts the wait and stores it")
+        val rebooted = Tries.check(TriesRecord(6, t0, 7), PinNow(t0 + 900_000, 8))
+        ok(rebooted.waitLeft == 60L && rebooted.record == TriesRecord(6, t0 + 900_000, 8), "a new boot restarts the wait")
+        ok(Tries.check(TriesRecord(10, t0, 7), PinNow(t0, 7)).wipe, "10 wrong tries wipe")
         // The file.
         val dir = tempDir()
         try {
             val f = TriesFile(dir)
-            ok(f.read(5) == TriesRecord(0, 0), "no file: no wrong tries")
-            f.write(TriesRecord(7, 1234))
-            ok(f.read(5) == TriesRecord(7, 1234), "the record is read back")
+            val now = PinNow(5_000, 7)
+            val nine = TriesRecord(9, 5_000, 7)
+            ok(f.read(now) == TriesRecord(0, 0, 0), "no file: no wrong tries")
+            f.write(TriesRecord(7, 1234, 9))
+            ok(f.read(now) == TriesRecord(7, 1234, 9), "the record is read back")
             val file = File(dir, TriesFile.NAME)
             val good = file.readBytes()
-            ok(good.size == 17, "17 bytes")
-            for (bad in listOf(good.copyOf(16), good + byteArrayOf(0), good.copyOf().also { it[4] = 2 }, good.copyOf().also { it[0] = 0 })) {
+            ok(good.size == 25, "25 bytes")
+            for (bad in listOf(good.copyOf(16), good + byteArrayOf(0), good.copyOf().also { it[4] = 3 }, good.copyOf().also { it[0] = 0 })) {
                 file.writeBytes(bad)
-                ok(f.read(77) == TriesRecord(9, 77), "a file that is not exact counts as 9 wrong tries just now")
+                ok(f.read(now) == nine, "a file that is not exact counts as 9 wrong tries just now")
             }
             file.writeBytes(good.copyOf().also { it[8] = 0x80.toByte() })
-            ok(f.read(77) == TriesRecord(9, 77), "a negative count is not read")
+            ok(f.read(now) == nine, "a negative count is not read")
+            // A file of the first version (a date) keeps its count, and its wait begins in full from now.
+            val v1 = java.nio.ByteBuffer.allocate(17).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                .put("OBKT".toByteArray()).put(1).putInt(6).putLong(1_700_000_000L).array()
+            file.writeBytes(v1)
+            val old = Tries.check(f.read(now), now)
+            ok(old.record == TriesRecord(6, 5_000, 7) && old.waitLeft == 60L, "an old file keeps its count and waits in full")
             f.delete()
             ok(!f.exists(), "deleted")
         } finally {
@@ -546,7 +559,7 @@ object AppModelTest {
             val tries = TriesFile(dir)
             fun setUp() {
                 state.writeBytes(byteArrayOf(1, 2, 3))
-                tries.write(TriesRecord(10, 5))
+                tries.write(TriesRecord(10, 5, 7))
             }
             setUp()
             val seen = ArrayList<String>()
@@ -558,8 +571,8 @@ object AppModelTest {
             // A failing key deletion leaves the tries file, so the next start wipes again.
             setUp()
             throwsIo("a key that stays throws") { Wipe.run(dir, tries) { throw IOException("still there") } }
-            ok(!state.exists() && tries.exists() && tries.read(0).wrong == 10, "a wipe that stops leaves the count at 10")
-            ok(Tries.check(tries.read(0), 0).wipe, "and the next start wipes")
+            ok(!state.exists() && tries.exists() && tries.read(PinNow(0, 0)).wrong == 10, "a wipe that stops leaves the count at 10")
+            ok(Tries.check(tries.read(PinNow(0, 0)), PinNow(0, 0)).wipe, "and the next start wipes")
             ok(AppWords.wiped.what.contains("the other two keys still exist") && AppWords.wiped.what.contains("not lost"), "the wiped words")
             ok(AppWords.wiped.next.contains("24 words"), "the wiped words say what is next")
         } finally {

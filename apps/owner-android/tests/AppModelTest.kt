@@ -25,6 +25,7 @@ import org.openbmt.app.Space
 import org.openbmt.app.Tones
 import org.openbmt.app.TorControl
 import org.openbmt.app.Tries
+import org.openbmt.app.PinNow
 import org.openbmt.app.TriesFile
 import org.openbmt.app.TriesRecord
 import org.openbmt.app.UrWords
@@ -1790,7 +1791,9 @@ object AppModelTest {
     private fun oa_63_wrong_tries_are_counted_in_the_shared_file_before_each_try() {
         val waits = listOf(0L, 0, 0, 0, 0, 30, 60, 300, 900, 3600)
         for ((n, w) in waits.withIndex()) ok(Tries.waitSeconds(n) == w, "$n wrong tries wait $w s")
-        ok(Tries.check(TriesRecord(10, 5), 5).wipe && !Tries.check(TriesRecord(9, 5), 5).wipe, "the 10th wipes")
+        ok(Tries.check(TriesRecord(10, 5, 7), PinNow(5, 7)).wipe && !Tries.check(TriesRecord(9, 5, 7), PinNow(5, 7)).wipe, "the 10th wipes")
+        ok(Tries.check(TriesRecord(6, 1_000, 7), PinNow(1_500, 7)).waitLeft == 60L && Tries.check(TriesRecord(6, 1_000, 7), PinNow(61_000, 7)).waitLeft == 0L, "the wait runs on the time since start")
+        ok(Tries.check(TriesRecord(6, 1_000, 7), PinNow(900_000, 8)).waitLeft == 60L, "a new boot restarts the wait")
         ok(Tries.showsTriesLeft(5) && !Tries.showsTriesLeft(4), "tries left are said from the 5th")
         val lock = lockSource()
         val tried = lock.substringAfter("private fun Controller.triedPin(").substringBefore("// ---- the wipe")
@@ -1798,15 +1801,22 @@ object AppModelTest {
         ok(tried.contains("Tries.afterRight()") && tried.contains("giveBack()"), "a right PIN clears the count and another refusal gives the step back")
         ok(tried.contains("before.wrong >= Tries.WIPE_AT"), "the 10th wrong try wipes")
         ok(source("src/android/Controller.kt").contains("TriesFile(dir)"), "the file is the shared TriesFile, in the app's folder")
+        ok(source("src/android/Controller.kt").contains("PinNow(SystemClock.elapsedRealtime(), bootCount() and 0xffffffffL)") && !lock.contains("tries.read(nowSecs())") && !lock.contains("Tries.check(rec, nowSecs())"), "the PIN wait is told by the time since start and the boot count, not the date")
         ok(!File(appDir, "src/model").listFiles()!!.any { it.readText().contains("object Tries") || it.readText().contains("class TriesFile") }, "the owner app has no copy of the tries code")
         val dir = tempDir()
         try {
             val f = TriesFile(dir)
-            ok(f.read(5) == TriesRecord(0, 0), "no file: no wrong tries")
-            f.write(TriesRecord(7, 1234))
-            ok(f.read(5) == TriesRecord(7, 1234) && File(dir, TriesFile.NAME).length() == 17L, "the record is read back, in 17 bytes")
+            val now = PinNow(5_000, 7)
+            ok(f.read(now) == TriesRecord(0, 0, 0), "no file: no wrong tries")
+            f.write(TriesRecord(7, 1234, 9))
+            ok(f.read(now) == TriesRecord(7, 1234, 9) && File(dir, TriesFile.NAME).length() == 25L, "the record is read back, in 25 bytes")
             File(dir, TriesFile.NAME).writeBytes(ByteArray(16))
-            ok(f.read(77) == TriesRecord(9, 77), "a file that is not exact counts as 9 wrong tries just now")
+            ok(f.read(now) == TriesRecord(9, 5_000, 7), "a file that is not exact counts as 9 wrong tries just now")
+            val v1 = java.nio.ByteBuffer.allocate(17).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                .put("OBKT".toByteArray()).put(1).putInt(8).putLong(1_700_000_000L).array()
+            File(dir, TriesFile.NAME).writeBytes(v1)
+            val old = Tries.check(f.read(now), now)
+            ok(old.record == TriesRecord(8, 5_000, 7) && old.waitLeft == 900L, "an old file keeps its count and waits in full")
         } finally {
             dir.deleteRecursively()
         }
@@ -1826,7 +1836,7 @@ object AppModelTest {
                 setup.writeBytes(byteArrayOf(1, 2, 3))
                 ceremony.writeBytes(byteArrayOf(4, 5, 6))
                 File(dir, AppFiles.SETUP_FILE + ".tmp").writeBytes(byteArrayOf(7))
-                tries.write(TriesRecord(10, 5))
+                tries.write(TriesRecord(10, 5, 7))
             }
             setUp()
             val seen = ArrayList<String>()
@@ -1836,7 +1846,7 @@ object AppModelTest {
             }
             ok(seen == listOf("key") && !tries.exists() && !File(dir, AppFiles.SETUP_FILE + ".tmp").exists(), "all of it is gone")
             // A ceremony file that is not there is no trouble.
-            tries.write(TriesRecord(10, 5))
+            tries.write(TriesRecord(10, 5, 7))
             setup.writeBytes(byteArrayOf(1))
             WipeOrder.run(dir, SetupLock.WIPE_FILES, tries) { }
             ok(!setup.exists() && !tries.exists(), "a wipe without a ceremony file")
@@ -1847,14 +1857,14 @@ object AppModelTest {
                 ok(false, "a key that stays throws")
             } catch (_: IOException) {
             }
-            ok(!setup.exists() && !ceremony.exists() && tries.read(0).wrong == 10 && Tries.check(tries.read(0), 0).wipe, "a wipe that stops leaves the count at 10")
+            ok(!setup.exists() && !ceremony.exists() && tries.read(PinNow(0, 0)).wrong == 10 && Tries.check(tries.read(PinNow(0, 0)), PinNow(0, 0)).wipe, "a wipe that stops leaves the count at 10")
         } finally {
             dir.deleteRecursively()
         }
         val lock = lockSource()
         ok(lock.contains("WipeOrder.run(appDir, SetupLock.WIPE_FILES, tries) { OwnerWipe.deleteKey() }"), "the screens wipe through the shared order")
         ok(source("src/android/OwnerWipe.kt").contains("deleteEntry(AppFiles.KEY_ALIAS)"), "the Keystore key of the setup is deleted")
-        ok(source("src/android/Controller.kt").contains("if (tries.read(nowSecs()).wrong >= Tries.WIPE_AT) return wipe()"), "a wipe that stopped is finished at the next start")
+        ok(source("src/android/Controller.kt").contains("if (tries.read(pinNow()).wrong >= Tries.WIPE_AT) return wipe()"), "a wipe that stopped is finished at the next start")
         val w = AppWords.wiped
         ok(w.heading == "Key 1 wiped from this phone" && w.what.contains("copy of key 1 was wiped after 10 wrong tries"), "the wiped words say what happened")
         ok(w.what.contains("not lost") && w.what.contains("two of the three keys still exist"), "and that the money is not lost")

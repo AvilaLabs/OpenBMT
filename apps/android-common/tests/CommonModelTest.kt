@@ -497,30 +497,54 @@ object CommonModelTest {
         ok(Tries.WIPE_AT == 10 && Tries.WARN_FROM == 5, "the wipe and the warning counts")
         val t0 = 1_000_000L
         for (n in 1..9) {
-            val c = Tries.check(TriesRecord(n, t0), t0)
+            val c = Tries.check(TriesRecord(n, t0, 7), PinNow(t0, 7))
             ok(c.waitLeft == waits[n] && !c.wipe, "right after $n wrong: wait ${waits[n]}")
+            ok(Tries.check(TriesRecord(n, t0, 7), PinNow(t0 + waits[n] * 1000, 7)).waitLeft == 0L, "after the wait the try goes on ($n)")
         }
-        ok(Tries.check(TriesRecord(10, t0), t0).wipe, "10 wrong tries wipe")
-        ok(Tries.check(TriesRecord(6, t0), t0 - 500).record == TriesRecord(6, t0 - 500), "a clock behind restarts the wait from now")
-        ok(Tries.before(TriesRecord(3, 5), 99) == TriesRecord(4, 99) && Tries.afterRight() == TriesRecord(0, 0), "one more before, none after")
+        ok(Tries.check(TriesRecord(10, t0, 7), PinNow(t0, 7)).wipe, "10 wrong tries wipe")
+        val back = Tries.check(TriesRecord(6, t0, 7), PinNow(t0 - 500, 7))
+        ok(back.waitLeft == 60L && back.record == TriesRecord(6, t0 - 500, 7), "a time since start behind restarts the wait from now")
+        // Only the time since the phone started counts: the wait runs down on it and on nothing else (SR-75, OA-63).
+        val partway = Tries.check(TriesRecord(6, t0, 7), PinNow(t0 + 1_500, 7))
+        ok(partway.waitLeft == 59L && partway.record == TriesRecord(6, t0, 7), "the wait counts down on the time since start")
+        // A new start of the phone begins the wait again in full, as PinHold does, and stores that start.
+        val rebooted = Tries.check(TriesRecord(6, t0, 7), PinNow(t0 + 900_000, 8))
+        ok(rebooted.waitLeft == 60L && rebooted.record == TriesRecord(6, t0 + 900_000, 8), "a new boot restarts the wait")
+        ok(Tries.check(TriesRecord(3, t0, 7), PinNow(t0, 8)).waitLeft == 0L, "no wait before the 5th wrong try")
+        ok(Tries.before(TriesRecord(3, 5, 7), PinNow(99, 7)) == TriesRecord(4, 99, 7) && Tries.afterRight() == TriesRecord(0, 0, 0), "one more before, none after")
         ok(Relock.needed(null, 5) && !Relock.needed(1000, 61_000) && Relock.needed(1000, 61_001) && Relock.needed(1000, 500), "the 60-second rule")
         externalWaits()
         val dir = Files.createTempDirectory("lock-model").toFile()
         try {
             val tries = TriesFile(dir)
-            ok(tries.read(5) == TriesRecord(0, 0) && !tries.exists(), "no file: no wrong tries")
-            tries.write(TriesRecord(7, 1234))
-            ok(tries.read(5) == TriesRecord(7, 1234) && File(dir, TriesFile.NAME).length() == 17L, "the record is read back in 17 bytes")
-            for (bad in listOf(ByteArray(16), ByteArray(18), ByteArray(17))) {
+            val now = PinNow(5_000, 7)
+            ok(tries.read(now) == TriesRecord(0, 0, 0) && !tries.exists(), "no file: no wrong tries")
+            tries.write(TriesRecord(7, 1234, 9))
+            ok(tries.read(now) == TriesRecord(7, 1234, 9) && File(dir, TriesFile.NAME).length() == 25L, "the record is read back in 25 bytes")
+            val nine = TriesRecord(9, 5_000, 7)
+            for (bad in listOf(ByteArray(16), ByteArray(18), ByteArray(25), ByteArray(17))) {
                 File(dir, TriesFile.NAME).writeBytes(bad)
-                ok(tries.read(77) == TriesRecord(9, 77), "a file that is not exact counts as 9 wrong tries just now")
+                ok(tries.read(now) == nine, "a file that is not exact counts as 9 wrong tries just now")
             }
+            // The first version (a date, no boot count) still reads: its count is kept and its wait begins in full from now.
+            val v1 = java.nio.ByteBuffer.allocate(17).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                .put("OBKT".toByteArray()).put(1).putInt(7).putLong(1_700_000_000L).array()
+            File(dir, TriesFile.NAME).writeBytes(v1)
+            val legacy = tries.read(now)
+            ok(legacy.wrong == 7 && legacy.startMs == PinHold.NONE, "an old file keeps its count")
+            val restarted = Tries.check(legacy, now)
+            ok(restarted.waitLeft == 300L && restarted.record == TriesRecord(7, 5_000, 7) && !restarted.wipe, "and its wait begins again in full from now")
+            File(dir, TriesFile.NAME).writeBytes(v1.copyOf().also { it[5 + 3] = 0x80.toByte() })
+            ok(tries.read(now) == nine, "a negative count of the old file is not read")
+            File(dir, TriesFile.NAME).writeBytes(v1.copyOf().also { it[4] = 3 })
+            ok(tries.read(now) == nine, "another version is not read")
+            tries.delete()
             // The wipe order over two files: the files first, in the order given, then the key, then the tries.
             fun setUp() {
                 File(dir, "one.obks").writeBytes(byteArrayOf(1))
                 File(dir, "two.obks").writeBytes(byteArrayOf(2))
                 File(dir, "one.obks.tmp").writeBytes(byteArrayOf(3))
-                tries.write(TriesRecord(10, 5))
+                tries.write(TriesRecord(10, 5, 7))
             }
             setUp()
             val seen = ArrayList<String>()
@@ -538,7 +562,7 @@ object CommonModelTest {
             } catch (_: IOException) {
                 threw = true
             }
-            ok(threw && tries.read(0).wrong == 10, "a key that stays throws and the count stays at 10")
+            ok(threw && tries.read(now).wrong == 10, "a key that stays throws and the count stays at 10")
         } finally {
             dir.deleteRecursively()
         }

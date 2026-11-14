@@ -5,6 +5,8 @@ import java.io.IOException
 import java.security.SecureRandom
 import java.util.Locale
 import org.openbmt.app.DurableFile
+import org.openbmt.app.PinHold
+import org.openbmt.app.PinNow
 import org.openbmt.app.SayWords
 
 /** The file of cashiers did not have the form [StaffStore] writes (CR-140). */

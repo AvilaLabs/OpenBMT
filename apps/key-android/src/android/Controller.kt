@@ -27,6 +27,7 @@ import org.openbmt.app.KeyLevel
 import org.openbmt.app.KeystoreSealer
 import org.openbmt.app.LineStyle
 import org.openbmt.app.PickedUri
+import org.openbmt.app.PinNow
 import org.openbmt.app.accept
 import org.openbmt.app.ReceiptLine
 import org.openbmt.app.Relock
@@ -113,6 +114,15 @@ class Controller(private val act: MainActivity) {
 
     private fun clock(): Long = System.currentTimeMillis() / 1000
 
+    /** The two counters a PIN wait is told by, which moving the date does not change (SR-75). */
+    private fun pinNow() = PinNow(SystemClock.elapsedRealtime(), bootCount() and 0xffffffffL)
+
+    private fun bootCount(): Long = try {
+        Settings.Global.getInt(act.contentResolver, Settings.Global.BOOT_COUNT).toLong()
+    } catch (_: Settings.SettingNotFoundException) {
+        -1L
+    }
+
     // ---- start, resume, pause ---------------------------------------------------
 
     fun start() {
@@ -120,7 +130,7 @@ class Controller(private val act: MainActivity) {
         if (refusals.isNotEmpty()) return render(ScreenModel.pick(refusals, null, null))
         close()
         // A wipe that was begun and not finished is finished first (SR-76).
-        if (tries.read(clock()).wrong >= Tries.WIPE_AT) return wipe()
+        if (tries.read(pinNow()).wrong >= Tries.WIPE_AT) return wipe()
         var fault: Words? = null
         try {
             val sealer = KeystoreSealer()
@@ -454,7 +464,7 @@ class Controller(private val act: MainActivity) {
     private fun showUnlock(message: Words?) {
         stopTicker()
         val a = app ?: return
-        val now = clock()
+        val now = pinNow()
         val rec = tries.read(now)
         val check = Tries.check(rec, now)
         if (check.wipe) return wipe()
@@ -475,7 +485,7 @@ class Controller(private val act: MainActivity) {
             }
         }
         fun update() {
-            val left = Tries.check(check.record, clock()).waitLeft
+            val left = Tries.check(check.record, pinNow()).waitLeft
             countdown.text = if (left > 0) "Wait ${Tries.waitText(left)}" else ""
             countdown.visibility = if (left > 0) View.VISIBLE else View.GONE
             unlock.isEnabled = left <= 0
@@ -496,7 +506,7 @@ class Controller(private val act: MainActivity) {
             val tick = object : Runnable {
                 override fun run() {
                     update()
-                    if (Tries.check(check.record, clock()).waitLeft > 0) main.postDelayed(this, 1000) else ticker = null
+                    if (Tries.check(check.record, pinNow()).waitLeft > 0) main.postDelayed(this, 1000) else ticker = null
                 }
             }
             ticker = tick
@@ -517,7 +527,7 @@ class Controller(private val act: MainActivity) {
     }
 
     private fun triedPin(back: (Words?) -> Unit, op: () -> Unit, done: () -> Unit) {
-        val now = clock()
+        val now = pinNow()
         val rec = tries.read(now)
         val check = Tries.check(rec, now)
         if (check.wipe) return wipe()
@@ -574,7 +584,7 @@ class Controller(private val act: MainActivity) {
     /** Changing the PIN asks for the current one, and a wrong one counts like a wrong try at the unlock screen. */
     private fun showChangePin(message: Words?) {
         val a = app ?: return
-        val now = clock()
+        val now = pinNow()
         val check = Tries.check(tries.read(now), now)
         if (check.wipe) return wipe()
         val current = secret("", false)

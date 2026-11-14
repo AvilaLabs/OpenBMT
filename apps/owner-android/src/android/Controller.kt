@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.View
 import android.widget.TextView
 import java.io.ByteArrayOutputStream
@@ -18,6 +19,7 @@ import java.util.concurrent.TimeUnit
 import org.openbmt.app.ExternalWait
 import org.openbmt.app.KeystoreSealer
 import org.openbmt.app.PickedUri
+import org.openbmt.app.PinNow
 import org.openbmt.app.Relock
 import org.openbmt.app.SayWords
 import org.openbmt.app.ScanFlow
@@ -185,6 +187,15 @@ class Controller(internal val act: MainActivity) {
 
     internal fun nowSecs(): Long = System.currentTimeMillis() / 1000
 
+    /** The two counters a PIN wait is told by, which moving the date does not change (OA-63). */
+    internal fun pinNow() = PinNow(SystemClock.elapsedRealtime(), bootCount() and 0xffffffffL)
+
+    private fun bootCount(): Long = try {
+        Settings.Global.getInt(act.contentResolver, Settings.Global.BOOT_COUNT).toLong()
+    } catch (_: Settings.SettingNotFoundException) {
+        -1L
+    }
+
     // ---- visible, hidden -------------------------------------------------------------------------
 
     fun visible() {
@@ -287,7 +298,7 @@ class Controller(internal val act: MainActivity) {
         ceremony = null
         stopNode()
         // A wipe that was begun and not finished is finished first (OA-64).
-        if (tries.read(nowSecs()).wrong >= Tries.WIPE_AT) return wipe()
+        if (tries.read(pinNow()).wrong >= Tries.WIPE_AT) return wipe()
         val setupStatus = try {
             config = configFile.load()
             if (config == null && ownStore.hasWallet()) {

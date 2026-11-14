@@ -8,6 +8,7 @@ import java.nio.file.Files
 import java.security.SecureRandom
 import org.openbmt.app.Colour
 import org.openbmt.app.ControlReader
+import org.openbmt.app.PinHold
 import org.openbmt.app.SayCheck
 import org.openbmt.app.SayWords
 import org.openbmt.app.Tones
@@ -983,7 +984,8 @@ object AppModelTest {
         ok(controller.contains("PinStore(dir, { SystemClock.elapsedRealtime() }, boot = { bootCount() })") && controller.contains("StaffStore(dir, { SystemClock.elapsedRealtime() }, { config?.manager ?: \"\" }, boot = { bootCount() })"), "the manager's and the cashiers' PINs are held by the time since start and the boot count")
         ok(controller.contains("Settings.Global.BOOT_COUNT"), "the boot count is the phone's")
         ok(!controller.contains("PinStore(dir, { nowSecs() }") && !controller.contains("StaffStore(dir, { nowSecs() }"), "no PIN hold is told by the date")
-        val model = File(appDir, "src/model").listFiles { f -> f.name == "PinStore.kt" || f.name == "StaffStore.kt" || f.name == "PinHold.kt" }!!
+        val model = File(appDir, "src/model").listFiles { f -> f.name == "PinStore.kt" || f.name == "StaffStore.kt" }!! +
+            File(appDir, "../android-common/src/model/PinHold.kt")
         ok(model.none { it.readText().replace(Regex("//.*"), "").contains("currentTimeMillis") }, "the PIN files read no date")
     }
 

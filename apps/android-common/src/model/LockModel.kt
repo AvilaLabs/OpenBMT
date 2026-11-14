@@ -5,8 +5,12 @@ import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-/** The count of wrong PINs and the time of the last one, in seconds since 1970 (SR-75, OA-63). */
-data class TriesRecord(val wrong: Int, val lastWrongAt: Long)
+/**
+ * The count of wrong PINs and when the last one was, as the time since the phone started ([startMs]) and which
+ * start of the phone it was ([boot], see [PinHold]; SR-75, OA-63). [startMs] is [PinHold.NONE] for no wrong try,
+ * and for a record of the first file version, which had the date and not these.
+ */
+data class TriesRecord(val wrong: Int, val startMs: Long, val boot: Long)
 
 /**
  * The pure parts of the PIN lock around the library, shared by the Key app and the owner app
@@ -39,20 +43,24 @@ object Tries {
     )
 
     /**
-     * SR-75, SR-76: [rec] as it is at [now]. A record at the wipe count wipes. A clock behind the time of the
-     * last wrong try restarts the wait from [now], and the record with that time is the one to store.
+     * SR-75, SR-76: [rec] as it is at [now]. A record at the wipe count wipes. The wait is told as [PinHold] tells
+     * a hold: by the time since the phone started, which moving the date does not change. After the phone has
+     * started again, and for a record of the first file version (which held a date), the wait begins again in
+     * full from [now], and the record with that start is the one to store.
      */
-    fun check(rec: TriesRecord, now: Long): Check {
+    fun check(rec: TriesRecord, now: PinNow): Check {
         if (rec.wrong >= WIPE_AT) return Check(rec, 0, true)
-        val r = if (rec.wrong > 0 && now < rec.lastWrongAt) TriesRecord(rec.wrong, now) else rec
-        val waited = if (r.wrong > 0) now - r.lastWrongAt else 0
-        return Check(r, (waitSeconds(r.wrong) - waited).coerceAtLeast(0), false)
+        val length = waitSeconds(rec.wrong)
+        if (rec.wrong == 0 || length <= 0) return Check(rec, 0, false)
+        val hold = if (rec.startMs == PinHold.NONE) null else PinHold.check(rec.startMs, rec.boot, now, length)
+        if (hold == null || hold.restart) return Check(TriesRecord(rec.wrong, now.elapsedMs, now.boot), length, false)
+        return Check(rec, hold.remainingSecs, false)
     }
 
     /** SR-75: what is written before a try: one more wrong try, now. A right PIN then writes [afterRight]. */
-    fun before(rec: TriesRecord, now: Long) = TriesRecord(rec.wrong + 1, now)
+    fun before(rec: TriesRecord, now: PinNow) = TriesRecord(rec.wrong + 1, now.elapsedMs, now.boot)
 
-    fun afterRight() = TriesRecord(0, 0)
+    fun afterRight() = TriesRecord(0, PinHold.NONE, 0)
 
     /** "30 s", "4 min 20 s", "1 h 0 min": the wait left, for the person to read. */
     fun waitText(seconds: Long): String {
@@ -98,8 +106,10 @@ object ExternalWait {
 }
 
 /**
- * The file of the count of wrong tries (SR-75): `"OBKT" | 1 | wrong u32 LE | last wrong time u64 LE`, in the
- * app's no-backup folder, written through [DurableFile]. Strict: any other length or version is refused.
+ * The file of the count of wrong tries (SR-75): `"OBKT" | 2 | wrong u32 LE | start ms u64 LE | boot u64 LE`, in the
+ * app's no-backup folder, written through [DurableFile]. Version 1 (`"OBKT" | 1 | wrong u32 LE | date u64 LE`) is
+ * still read: its count is kept and its wait begins again in full ([Tries.check]). Strict: any other length or
+ * version is refused.
  */
 class TriesFile(private val dir: File, val name: String = NAME) {
     private val file = File(dir, name)
@@ -108,12 +118,12 @@ class TriesFile(private val dir: File, val name: String = NAME) {
      * The record. No file is a record of no wrong tries. A file that cannot be read counts as 9 wrong tries
      * just now, so that the one wait that is longest applies and one try is left (it fails closed).
      */
-    fun read(now: Long): TriesRecord {
-        if (!file.exists()) return TriesRecord(0, 0)
+    fun read(now: PinNow): TriesRecord {
+        if (!file.exists()) return TriesRecord(0, PinHold.NONE, 0)
         return try {
             decode(file.readBytes())
         } catch (_: IOException) {
-            TriesRecord(Tries.WIPE_AT - 1, now)
+            TriesRecord(Tries.WIPE_AT - 1, now.elapsedMs, now.boot)
         }
     }
 
@@ -130,26 +140,36 @@ class TriesFile(private val dir: File, val name: String = NAME) {
 
     companion object {
         const val NAME = "tries.obkt"
-        private const val SIZE = 4 + 1 + 4 + 8
+        private const val SIZE_V1 = 4 + 1 + 4 + 8
+        private const val SIZE = 4 + 1 + 4 + 8 + 8
         private val MAGIC = byteArrayOf('O'.code.toByte(), 'B'.code.toByte(), 'K'.code.toByte(), 'T'.code.toByte())
 
         fun encode(rec: TriesRecord): ByteArray {
-            if (rec.wrong < 0 || rec.lastWrongAt < 0) throw IOException("a record with a negative number")
+            if (rec.wrong < 0 || rec.startMs < 0) throw IOException("a record with a negative number")
             val out = ByteBuffer.allocate(SIZE).order(ByteOrder.LITTLE_ENDIAN)
-            out.put(MAGIC).put(1).putInt(rec.wrong).putLong(rec.lastWrongAt)
+            out.put(MAGIC).put(2).putInt(rec.wrong).putLong(rec.startMs).putLong(rec.boot)
             return out.array()
         }
 
         fun decode(bytes: ByteArray): TriesRecord {
-            if (bytes.size != SIZE) throw IOException("the tries file has a bad length")
-            if (!bytes.copyOfRange(0, 4).contentEquals(MAGIC) || bytes[4].toInt() != 1) {
+            if (bytes.size < 5 || !bytes.copyOfRange(0, 4).contentEquals(MAGIC)) {
                 throw IOException("the tries file is not of this version")
             }
-            val b = ByteBuffer.wrap(bytes, 5, 12).order(ByteOrder.LITTLE_ENDIAN)
+            val version = bytes[4].toInt()
+            if (version == 1 && bytes.size == SIZE_V1) {
+                val b = ByteBuffer.wrap(bytes, 5, 12).order(ByteOrder.LITTLE_ENDIAN)
+                val wrong = b.int
+                if (wrong < 0 || b.long < 0) throw IOException("the tries file holds a negative number")
+                return TriesRecord(wrong, PinHold.NONE, 0)
+            }
+            if (version != 2) throw IOException("the tries file is not of this version")
+            if (bytes.size != SIZE) throw IOException("the tries file has a bad length")
+            val b = ByteBuffer.wrap(bytes, 5, 20).order(ByteOrder.LITTLE_ENDIAN)
             val wrong = b.int
-            val at = b.long
-            if (wrong < 0 || at < 0) throw IOException("the tries file holds a negative number")
-            return TriesRecord(wrong, at)
+            val start = b.long
+            val boot = b.long
+            if (wrong < 0 || start < 0) throw IOException("the tries file holds a negative number")
+            return TriesRecord(wrong, start, boot)
         }
     }
 }

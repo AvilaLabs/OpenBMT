@@ -76,7 +76,7 @@ internal fun Controller.openStored() {
         fault = AppWords.storageUnavailable(e.message)
         return render()
     }
-    val wrong = tries.read(nowSecs()).wrong
+    val wrong = tries.read(pinNow()).wrong
     val locked = try {
         OwnerLock.isLocked(stored)
     } catch (e: OwnerException) {
@@ -197,7 +197,7 @@ private fun Controller.triesLines(check: Tries.Check): List<View> {
 /** The unlock screen, with the wait counted down and the tries left said from the 5th wrong one. */
 internal fun Controller.showUnlock(stored: ByteArray, message: SayWords?) {
     stopTicker()
-    val now = nowSecs()
+    val now = pinNow()
     val rec = tries.read(now)
     val check = Tries.check(rec, now)
     if (check.wipe) return wipe()
@@ -220,7 +220,7 @@ internal fun Controller.showUnlock(stored: ByteArray, message: SayWords?) {
         }
     }
     fun update() {
-        val left = Tries.check(check.record, nowSecs()).waitLeft
+        val left = Tries.check(check.record, pinNow()).waitLeft
         countdown.text = if (left > 0) "Wait ${Tries.waitText(left)}" else ""
         countdown.visibility = if (left > 0) View.VISIBLE else View.GONE
         unlock.isEnabled = left <= 0
@@ -236,7 +236,7 @@ internal fun Controller.showUnlock(stored: ByteArray, message: SayWords?) {
         val tick = object : Runnable {
             override fun run() {
                 update()
-                if (Tries.check(check.record, nowSecs()).waitLeft > 0) main.postDelayed(this, 1000) else ticker = null
+                if (Tries.check(check.record, pinNow()).waitLeft > 0) main.postDelayed(this, 1000) else ticker = null
             }
         }
         ticker = tick
@@ -253,7 +253,7 @@ private class SetupNotRead : Exception()
  * the screen the try came from, with the words to show on it. [done] runs when [op] worked.
  */
 internal fun Controller.triedPin(back: (SayWords?) -> Unit, op: () -> Unit, done: () -> Unit) {
-    val now = nowSecs()
+    val now = pinNow()
     val rec = tries.read(now)
     val check = Tries.check(rec, now)
     if (check.wipe) return wipe()
@@ -337,7 +337,7 @@ internal fun Controller.wipe() {
 
 /** Changing the PIN asks for the current one, and a wrong one counts like a wrong try at the unlock screen. */
 internal fun Controller.showChangePin(message: SayWords?) {
-    val now = nowSecs()
+    val now = pinNow()
     val check = Tries.check(tries.read(now), now)
     if (check.wipe) return wipe()
     val current = secret("", false)
