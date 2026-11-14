@@ -404,12 +404,9 @@ fn checked_fork(checked: u32, stored: &[[u8; 32]], view: &ChainView) -> Option<u
     Some(checked.saturating_sub(n))
 }
 
+/// 32 bytes from the kernel, read and checked as SS-02 says; None when the read fails or is refused.
 fn os_random() -> Option<[u8; 32]> {
-    use std::io::Read;
-    let mut file = std::fs::File::open("/dev/urandom").ok()?;
-    let mut bytes = [0u8; 32];
-    file.read_exact(&mut bytes).ok()?;
-    Some(bytes)
+    openbmt_kernel_random::system_bytes::<32>().ok()
 }
 
 /// The function that answers the health question (WR-50 to WR-53; the node

@@ -13,5 +13,6 @@ publish.workspace = true
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
 chacha20poly1305 = { version = "=0.10.1", default-features = false, features = ["alloc"] }
 openbmt-core = { path = "../openbmt-core" }
+openbmt-kernel-random = { path = "../openbmt-kernel-random" }
 # Only for its SOCKS5 client and its clock trait.
 openbmt-net-io = { path = "../openbmt-net-io" }

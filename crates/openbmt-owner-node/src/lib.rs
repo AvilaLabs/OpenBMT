@@ -75,6 +75,7 @@ pub mod own;
 pub mod paid_log;
 pub mod pos;
 pub mod price;
+pub mod random;
 pub mod range_outbox;
 pub mod receipts;
 pub mod refunds;

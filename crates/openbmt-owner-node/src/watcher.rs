@@ -41,10 +41,11 @@ use openbmt_core::heartbeat::WatcherHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_counter_node::{ChainView, DriverPort, HealthFn, MAX_EVENTS_PER_PUMP};
 use openbmt_net_io::{
-    AppEvent, Clock, DirLock, Driver, DriverConfig, FileStorage, Handle, Key, OsRandomness,
-    Storage, SystemClock,
+    AppEvent, Clock, DirLock, Driver, DriverConfig, FileStorage, Handle, Key, Storage, SystemClock,
 };
 use openbmt_watch::{check_health, HeaderChain, HeaderStore, Health, HealthInput};
+
+use crate::random::KernelRandomness;
 
 /// The file that holds the number of the last heartbeat made.
 pub const HEARTBEAT_FILE: &str = "heartbeat-seq.bin";
@@ -190,7 +191,7 @@ impl OwnerWatcher<Handle> {
     pub fn start(config: OwnerConfig) -> Result<Self, OwnerStartError> {
         Self::start_with(config, |driver, dir| {
             let storage = FileStorage::new(&dir).map_err(|e| e.to_string())?;
-            let random = OsRandomness::new().map_err(|e| e.to_string())?;
+            let random = KernelRandomness;
             Driver::spawn(driver, storage, SystemClock, random, Vec::new())
                 .map_err(|e| e.to_string())
         })

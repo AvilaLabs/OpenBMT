@@ -269,7 +269,8 @@ pub struct WatchNode<P: DriverPort = Handle, R: Post = RelayPost> {
 impl WatchNode<Handle, RelayPost> {
     /// Start on a real driver and a real relay.
     pub fn start(config: WatchConfig) -> Result<Self, WatchStartError> {
-        use openbmt_net_io::{Driver, FileStorage, OsRandomness, SystemClock};
+        use crate::random::KernelRandomness;
+        use openbmt_net_io::{Driver, FileStorage, SystemClock};
         let WatchConfig {
             dir,
             secret,
@@ -296,7 +297,7 @@ impl WatchNode<Handle, RelayPost> {
         }
         let watcher = OwnerWatcher::start_with(owner, |driver, dir| {
             let storage = FileStorage::new(&dir).map_err(|e| e.to_string())?;
-            let random = OsRandomness::new().map_err(|e| e.to_string())?;
+            let random = KernelRandomness;
             Driver::spawn(driver, storage, SystemClock, random, Vec::new())
                 .map_err(|e| e.to_string())
         })

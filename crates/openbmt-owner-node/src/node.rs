@@ -78,8 +78,8 @@ use openbmt_core::wallet::Keychain;
 use openbmt_core::wallet_single::ImportedWallet;
 use openbmt_counter_node::{ChainView, DriverPort, MAX_EVENTS_PER_PUMP};
 use openbmt_net_io::{
-    AppEvent, DirLock, Driver, DriverConfig, FileStorage, Handle, OsRandomness, Randomness,
-    RelayState, SystemClock, MAX_WATCHED_SCRIPTS,
+    AppEvent, DirLock, Driver, DriverConfig, FileStorage, Handle, Randomness, RelayState,
+    SystemClock, MAX_WATCHED_SCRIPTS,
 };
 use openbmt_owner::own_book::AllocationBook;
 use openbmt_owner::own_spend::{OwnBuilt, OwnFile, OwnTaken};
@@ -97,6 +97,7 @@ use crate::coins::{
 use crate::deep::{DeepRun, DeepSpawn};
 use crate::live::{plan_release, WatchLimits, REBALANCE_SECS};
 use crate::paid_log::{value_at, PaidEntry, PaidLog, PaidValue, PaidWhat, PAID_LOG_FILE};
+use crate::random::KernelRandomness;
 use crate::receipts::read_fee_history;
 use crate::requests::{Requests, RequestsOff};
 use crate::settle_owed::{Owed, OwedKind, SettleOwed, SETTLE_OWED_FILE};
@@ -569,7 +570,7 @@ impl OwnerParts {
         approver: DeviceId,
         policy: BatchPolicy,
     ) -> Result<Self, NodeError> {
-        let random = OsRandomness::new().map_err(|e| NodeError::Config(e.to_string()))?;
+        let random = KernelRandomness;
         Ok(Self {
             owner_secret,
             wallet: wallet.into(),
@@ -817,7 +818,7 @@ impl OwnerNode<Handle> {
     pub fn start(config: OwnerConfig, parts: OwnerParts) -> Result<Self, NodeError> {
         Self::start_with(config, parts, |driver, dir, scripts| {
             let storage = FileStorage::new(&dir).map_err(|e| e.to_string())?;
-            let random = OsRandomness::new().map_err(|e| e.to_string())?;
+            let random = KernelRandomness;
             Driver::spawn(driver, storage, SystemClock, random, scripts).map_err(|e| e.to_string())
         })
     }

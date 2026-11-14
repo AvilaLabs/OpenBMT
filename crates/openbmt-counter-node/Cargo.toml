@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
 openbmt-core = { path = "../openbmt-core" }
+openbmt-kernel-random = { path = "../openbmt-kernel-random" }
 openbmt-watch = { path = "../openbmt-watch" }
 openbmt-net-io = { path = "../openbmt-net-io" }
 openbmt-counter = { path = "../openbmt-counter" }

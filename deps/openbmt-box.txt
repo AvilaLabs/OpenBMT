@@ -23,6 +23,7 @@ generic-array v0.14.7
 hex-conservative v0.2.3
 hex_lit v0.1.1
 inout v0.1.4
+libc v0.2.191
 miniscript v12.3.5
 opaque-debug v0.3.1
 poly1305 v0.8.0
