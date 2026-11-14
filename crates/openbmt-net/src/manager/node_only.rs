@@ -3,7 +3,8 @@
 //! With `node_only` on, the own node is not the second check of
 //! `manager/own.rs` but the one peer: it is in `peers`, so it serves
 //! headers, filters, blocks and transactions through the same checks as any
-//! peer (NR-106). What differs is kept here:
+//! peer (NR-106), except that it is never dropped for a claim without
+//! headers or a request that runs out (NR-100). What differs is kept here:
 //!
 //! - one filter is the whole check, because there is nobody to compare with
 //!   (NR-40 to NR-42 with a quorum of 1); with the random peers of NR-110

@@ -658,11 +658,11 @@ the node these rules are written and tested against.
   else: no anchors, no fixed peers, no address book, no seeds and no onion
   peers. The own node is then the only peer, and it serves the headers,
   filters, blocks and transactions that sections 4 to 6 ask of peers. The
-  checks of those sections still apply to what it sends: a header chain is
-  checked for its proof of work and difficulty as from any peer, a block
-  must match its header, a filter must be the one its header commits to
-  where the counter can check it. A node can withhold; it cannot make work
-  it did not do.
+  checks of those sections still apply to what it sends, except the drops of
+  NR-33 and NR-42, which NR-100 spares it: a header chain is checked for its
+  proof of work and difficulty as from any peer, a block must match its
+  header, a filter must be the one its header commits to where the counter can
+  check it. A node can withhold; it cannot make work it did not do.
 - **NR-107.** A node that does not advertise compact filters
   (`NODE_COMPACT_FILTERS`, BIP 157) and blocks (`NODE_NETWORK` or
   `NODE_NETWORK_LIMITED`) in its `version` cannot serve a device in this
