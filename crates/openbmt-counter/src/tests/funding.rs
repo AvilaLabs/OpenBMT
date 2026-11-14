@@ -4,8 +4,12 @@
 //! funding is told to the sales that rest on it.
 
 use super::kit::*;
+use crate::refund::CashRefund;
 use crate::sale::Sale;
-use crate::{LightningPaid, LightningRefused, Opened, PaidFunding, Role, Screen, State, Why};
+use crate::{
+    Actor, Amount, LightningPaid, LightningRefused, Opened, PaidFunding, RefundRefused, Report,
+    Role, Screen, State, Why,
+};
 use openbmt_core::policy::PauseStatus;
 
 const FUNDING: [u8; 32] = [0xf1; 32];
@@ -25,6 +29,20 @@ impl World {
         self.c
             .lightning_funding_lost(txid, self.now, &mut self.m)
             .unwrap()
+    }
+
+    /// The shop's node says the sale was paid over a channel that is
+    /// confirmed, as the plain call does.
+    fn plain(&mut self, o: &Opened, hash: u8) -> Result<Screen, LightningRefused<&'static str>> {
+        let facts = crate::Facts {
+            chain: &self.chain,
+            health: self.health,
+            heartbeat: heartbeat(),
+            remote_order: self.remote_order,
+            now: self.now,
+        };
+        self.c
+            .lightning_paid(o.index, paid(hash, o.needs_sats), &facts, &mut self.m)
     }
 
     fn funded(
@@ -159,7 +177,7 @@ fn cr_20_a_manager_can_accept_a_sale_that_waits_for_a_funding_and_its_payment_is
     // The payment comes again: it is the sale's own, and its amount is the
     // one the acceptance counted.
     let screen = w.funded(&big, 1, unconfirmed(FUNDING)).unwrap().unwrap();
-    assert_eq!(screen.state, State::PaidLightning);
+    assert_eq!(screen.state, State::Overridden);
     assert_eq!(w.c.exposure_outstanding(), 20_000);
     assert_eq!(
         w.c.sale(big.index).unwrap().lightning_fundings(),
@@ -285,6 +303,7 @@ fn sl_40_the_stored_sale_is_version_7_and_older_versions_still_read() {
     long.push(0);
     assert!(Sale::from_bytes(&long).is_err());
     let mut v6 = bytes[..bytes.len() - 35].to_vec();
+    v6.push(0);
     v6[4] = 6;
     let old = Sale::from_bytes(&v6).unwrap();
     assert!(old.lightning_fundings().is_empty());
@@ -520,7 +539,7 @@ fn sl_27_a_payment_through_a_funding_already_lost_waits_and_a_manager_can_accept
     // named as a sale of a lost funding.
     w.override_sale(o.index, Role::Manager, "max").unwrap();
     let screen = w.funded(&o, 1, lost(FUNDING)).unwrap().unwrap();
-    assert_eq!(screen.state, State::PaidLightning);
+    assert_eq!(screen.state, State::Overridden);
     assert_eq!(w.c.sale(o.index).unwrap().lightning_fundings(), &[FUNDING]);
     assert_eq!(w.lose(&FUNDING).0, vec![o.index]);
 }
@@ -632,4 +651,218 @@ fn sl_40_a_sale_waiting_for_its_funding_is_restored_waiting_after_a_start() {
     assert!(w.c.sale(big.index).unwrap().lightning_fundings().is_empty());
     assert_eq!(w.c.sale(big.index).unwrap().to_bytes()[4], 3);
     assert_eq!(w.c.exposure_outstanding(), 0);
+}
+
+fn cashier_cash(minor: u64) -> CashRefund {
+    CashRefund {
+        actor: Actor {
+            role: Role::Cashier,
+            name: "ann".to_string(),
+        },
+        minor: Amount(minor),
+        currency: usd(),
+        reason: "till refund".to_string(),
+    }
+}
+
+fn manager() -> Actor {
+    Actor {
+        role: Role::Manager,
+        name: "max".to_string(),
+    }
+}
+
+#[test]
+fn cr_71_a_cash_refund_waits_for_the_fundings_of_a_lightning_payment_to_confirm() {
+    let mut w = World::new();
+    let o = w.open_five();
+    w.funded(&o, 1, unconfirmed(FUNDING)).unwrap().unwrap();
+    // The payment rests on a funding that may never confirm: not settled, as
+    // an unconfirmed payment on chain is not (SL-40).
+    let err =
+        w.c.refund_in_cash(o.index, cashier_cash(100), w.now, &w.chain, &mut w.m)
+            .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            RefundRefused::NotSettled {
+                received: 5_000,
+                settled: 0,
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+    // It is allowed once the funding confirms.
+    w.c.lightning_funding_confirmed(&FUNDING, &mut w.m).unwrap();
+    w.c.refund_in_cash(o.index, cashier_cash(100), w.now, &w.chain, &mut w.m)
+        .unwrap();
+}
+
+#[test]
+fn cr_71_a_cash_refund_is_refused_on_a_payment_whose_funding_is_lost() {
+    let mut w = World::new();
+    let o = w.open_five();
+    w.funded(&o, 1, unconfirmed(FUNDING)).unwrap().unwrap();
+    w.lose(&FUNDING);
+    let err =
+        w.c.refund_in_cash(o.index, cashier_cash(100), w.now, &w.chain, &mut w.m)
+            .unwrap_err();
+    assert!(
+        matches!(err, RefundRefused::NotSettled { settled: 0, .. }),
+        "{err:?}"
+    );
+    // A manager is refused as well.
+    let mut cash = cashier_cash(100);
+    cash.actor = manager();
+    assert!(matches!(
+        w.c.refund_in_cash(o.index, cash, w.now, &w.chain, &mut w.m),
+        Err(RefundRefused::NotSettled { .. })
+    ));
+}
+
+#[test]
+fn cr_20_an_override_of_a_sale_that_lost_its_funding_shows_it_paid_and_a_later_loss_is_a_cancel() {
+    let mut w = World::new();
+    let o = w.open_five();
+    w.funded(&o, 1, several(&[FUNDING, OTHER]))
+        .unwrap()
+        .unwrap();
+    let (_, reports) = w.lose(&FUNDING);
+    assert!(
+        reports.contains(&Report::Alarm { index: o.index }),
+        "{reports:?}"
+    );
+    assert_eq!(w.judge(o.index).state, State::DoNotHandOver);
+    // A manager accepts it: shown paid, the POS told paid, and it does not
+    // flap on the next judgements.
+    w.override_sale(o.index, Role::Manager, "max").unwrap();
+    assert!(w
+        .override_reports
+        .contains(&Report::PosPaid { index: o.index }));
+    for _ in 0..2 {
+        let screen = w.judge(o.index);
+        assert_eq!(screen.state, State::Overridden, "{screen:?}");
+        assert!(screen.reports.is_empty(), "{:?}", screen.reports);
+    }
+    // Another funding is lost: one cancel, and the screen is red.
+    let (_, reports) = w.lose(&OTHER);
+    assert_eq!(
+        reports
+            .iter()
+            .filter(|r| matches!(r, Report::Alarm { .. }))
+            .count(),
+        1,
+        "{reports:?}"
+    );
+    assert!(
+        reports.contains(&Report::PosUnpaid { index: o.index }),
+        "{reports:?}"
+    );
+    assert_eq!(w.judge(o.index).state, State::DoNotHandOver);
+    // And it stays red when asked again, and after a restart.
+    assert!(w.lose(&OTHER).1.is_empty());
+    w.restart();
+    assert_eq!(w.judge(o.index).state, State::DoNotHandOver);
+}
+
+#[test]
+fn cr_20_a_sale_a_manager_accepted_is_cancelled_when_its_funding_is_lost() {
+    let mut w = World::new();
+    let big = w.open(2_000);
+    assert!(w.funded(&big, 1, unconfirmed(FUNDING)).unwrap().is_none());
+    w.override_sale(big.index, Role::Manager, "max").unwrap();
+    let screen = w.funded(&big, 1, unconfirmed(FUNDING)).unwrap().unwrap();
+    assert_eq!(screen.state, State::Overridden);
+    // The funding is lost: the alarm, the POS told, the screen red, once.
+    let (named, reports) = w.lose(&FUNDING);
+    assert_eq!(named, vec![big.index]);
+    assert!(
+        reports.contains(&Report::Alarm { index: big.index }),
+        "{reports:?}"
+    );
+    assert!(
+        reports.contains(&Report::PosUnpaid { index: big.index }),
+        "{reports:?}"
+    );
+    assert!(w.c.alarm());
+    assert_eq!(w.judge(big.index).state, State::DoNotHandOver);
+    assert!(w.lose(&FUNDING).1.is_empty());
+}
+
+#[test]
+fn sl_40_a_payment_that_replaces_a_wait_clears_it_and_the_stored_sale_reads_back() {
+    let mut w = World::new();
+    let big = w.open(2_000);
+    assert!(w.funded(&big, 1, unconfirmed(FUNDING)).unwrap().is_none());
+    assert_eq!(w.c.sale(big.index).unwrap().to_bytes()[4], 7);
+    // Another invoice is paid through a confirmed channel.
+    let screen = w.plain(&big, 2).unwrap();
+    assert_eq!(screen.state, State::PaidLightning);
+    assert!(w.c.sale(big.index).unwrap().lightning_fundings().is_empty());
+    let bytes = w.c.sale(big.index).unwrap().to_bytes();
+    assert!(Sale::from_bytes(&bytes).is_ok());
+    w.restart();
+    assert_eq!(w.judge(big.index).state, State::PaidLightning);
+    // The funding it waited for is not its own any more.
+    assert!(w.lose(&FUNDING).0.is_empty());
+}
+
+#[test]
+fn sl_27_the_reports_of_the_sales_stored_before_a_failed_write_are_given_back() {
+    let mut w = World::new();
+    let a = w.open_five();
+    let b = w.open_five();
+    w.funded(&a, 1, unconfirmed(FUNDING)).unwrap().unwrap();
+    w.funded(&b, 2, unconfirmed(FUNDING)).unwrap().unwrap();
+    // The second sale is not written.
+    w.m.reset();
+    w.m.fail_on = Some(7);
+    let err =
+        w.c.lightning_funding_lost(&FUNDING, w.now, &mut w.m)
+            .unwrap_err();
+    assert_eq!(err.named, vec![a.index, b.index]);
+    assert!(
+        err.reports.contains(&Report::Alarm { index: a.index }),
+        "{:?}",
+        err.reports
+    );
+    assert!(err.reports.contains(&Report::PosUnpaid { index: a.index }));
+    assert!(!err.reports.contains(&Report::Alarm { index: b.index }));
+    // The retry names both and cancels the second; the first is not again.
+    w.m.reset();
+    let (named, reports) = w.lose(&FUNDING);
+    assert_eq!(named, vec![a.index, b.index]);
+    assert!(reports.contains(&Report::Alarm { index: b.index }));
+    assert!(!reports.contains(&Report::Alarm { index: a.index }));
+}
+
+#[test]
+fn sl_40_a_retry_after_a_failed_write_leaves_no_exposure_behind() {
+    let mut w = World::new();
+    let o = w.open_five();
+    // The sale is not stored: the exposure counted for it stays for the retry.
+    w.m.reset();
+    w.m.fail_on = Some(3);
+    let err = w.funded(&o, 1, unconfirmed(FUNDING)).unwrap_err();
+    assert!(matches!(err, LightningRefused::Store(_)), "{err:?}");
+    assert_eq!(w.c.exposure_outstanding(), 5_000);
+    // The retry finds the funding lost: the sale waits, and holds nothing.
+    w.m.reset();
+    assert!(w.funded(&o, 1, lost(FUNDING)).unwrap().is_none());
+    assert_eq!(w.c.exposure_outstanding(), 0);
+}
+
+#[test]
+fn cr_07_a_sale_that_waits_for_a_funding_is_not_cancelled_or_requoted() {
+    let mut w = World::new();
+    let big = w.open(2_000);
+    assert!(w.funded(&big, 1, unconfirmed(FUNDING)).unwrap().is_none());
+    let err = w.c.cancel(big.index, w.now, &mut w.m).unwrap_err();
+    assert!(matches!(err, crate::CancelRefused::MoneyArrived), "{err:?}");
+    let err = w.requote(big.index, 60_000_000).unwrap_err();
+    assert!(
+        matches!(err, crate::RequoteRefused::AlreadyEnough),
+        "{err:?}"
+    );
 }

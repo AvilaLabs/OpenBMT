@@ -3463,8 +3463,11 @@ impl<P: DriverPort> Node<P> {
                     .is_some_and(|shopln| shopln.funding_lost(&sales))
             }
             Err(e) => {
+                // What was stored before the failure is told all the same.
+                self.ln_reports.extend(e.reports);
                 self.note(format!(
-                    "SL-27: the loss of a funding was not recorded: {e}"
+                    "SL-27: the loss of a funding was not recorded: {}",
+                    e.fault
                 ));
                 false
             }

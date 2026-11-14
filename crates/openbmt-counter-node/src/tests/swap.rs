@@ -1693,12 +1693,15 @@ fn cr_220_a_cancel_that_was_not_stored_is_put_again_until_it_is() {
     w.block(&[]);
     assert_eq!(stage_of(&dir, index), Stage::Failed(Failure::Lost));
     assert!(!record_of(&dir, index).failure_told);
-    assert!(!w.rig.node.counter().sale(index).unwrap().cancel_recorded());
+    // The sale was taken back at one block, and that stands only once the
+    // loss is stored.
+    assert_eq!(w.rig.node.counter().sale(index).unwrap().taken_back(), 1);
     // The next pump puts it again, and it is stored.
     std::fs::remove_dir(&sale_file).unwrap();
     std::fs::write(&sale_file, saved).unwrap();
     w.block(&[]);
     assert!(w.rig.node.counter().sale(index).unwrap().cancel_recorded());
+    assert_eq!(w.rig.node.counter().sale(index).unwrap().taken_back(), 0);
     assert!(record_of(&dir, index).failure_told);
 }
 

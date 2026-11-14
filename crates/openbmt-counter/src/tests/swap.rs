@@ -790,3 +790,339 @@ fn cr_221_a_retry_that_is_not_accepted_at_once_leaves_no_exposure_behind() {
     assert!(!screen.state.is_paid(), "{screen:?}");
     assert_eq!(w.c.exposure_outstanding(), 0);
 }
+
+fn cash(minor: u64) -> crate::refund::CashRefund {
+    crate::refund::CashRefund {
+        actor: Actor {
+            role: Role::Cashier,
+            name: "ann".to_string(),
+        },
+        minor: crate::Amount(minor),
+        currency: usd(),
+        reason: "till refund".to_string(),
+    }
+}
+
+#[test]
+fn cr_71_a_cash_refund_on_a_swap_sale_waits_for_the_claim_at_the_shops_depth() {
+    let mut w = World::new();
+    let mut s = settings();
+    s.min_confirmations = 3;
+    w.c.set_settings(s);
+    let o = w.open_five();
+    let st = w.lockup_status(3, 9);
+    w.swap_paid(&o, Some(&st)).unwrap().unwrap();
+    w.mine_claim(&o, 4_300);
+    w.claim_depth(&o, 1);
+    // One confirmation of three: cash is refused, as against any payment on
+    // chain that is not at the shop's depth.
+    let err =
+        w.c.refund_in_cash(o.index, cash(100), w.now, &w.chain, &mut w.m)
+            .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            crate::RefundRefused::NotSettled {
+                received: 4_300,
+                settled: 0,
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+    // At three it is allowed.
+    w.chain.tip += 2;
+    w.claim_depth(&o, 3);
+    w.c.refund_in_cash(o.index, cash(100), w.now, &w.chain, &mut w.m)
+        .unwrap();
+}
+
+#[test]
+fn cr_20_an_override_of_a_taken_back_swap_sale_shows_it_paid_and_a_later_loss_is_a_cancel() {
+    let mut w = World::new();
+    let o = w.open_five();
+    let st = w.lockup_status(3, 9);
+    w.swap_paid(&o, Some(&st)).unwrap().unwrap();
+    // The refund is in a block: taken back, with the alarm.
+    w.spent(&o, true);
+    assert_eq!(w.judge(o.index).state, State::DoNotHandOver);
+    // A manager accepts it as it is: shown paid, the POS told paid, and it
+    // does not flap.
+    w.override_sale(o.index, Role::Manager, "max").unwrap();
+    assert!(w
+        .override_reports
+        .contains(&Report::PosPaid { index: o.index }));
+    for _ in 0..2 {
+        let screen = w.judge(o.index);
+        assert_eq!(screen.state, State::Overridden, "{screen:?}");
+        assert!(screen.reports.is_empty(), "{:?}", screen.reports);
+    }
+    // The spend leaves the chain and comes back: a loss after the override
+    // is one cancel.
+    w.spent(&o, false);
+    let reports = w.spent(&o, true);
+    assert_eq!(
+        reports
+            .iter()
+            .filter(|r| matches!(r, Report::Alarm { .. }))
+            .count(),
+        1,
+        "{reports:?}"
+    );
+    assert!(
+        reports.contains(&Report::PosUnpaid { index: o.index }),
+        "{reports:?}"
+    );
+    assert_eq!(w.judge(o.index).state, State::DoNotHandOver);
+    // Not again at the refund depth.
+    assert!(w
+        .c
+        .swap_cancelled(o.index, w.now, &mut w.m)
+        .unwrap()
+        .is_empty());
+    assert_eq!(w.judge(o.index).state, State::DoNotHandOver);
+}
+
+fn alarms(reports: &[Report]) -> usize {
+    reports
+        .iter()
+        .filter(|r| matches!(r, Report::Alarm { .. }))
+        .count()
+}
+
+fn replaced(w: &World) -> usize {
+    w.m.events()
+        .iter()
+        .filter(|e| matches!(e, Event::Replaced { .. }))
+        .count()
+}
+
+#[test]
+fn cr_20_a_person_who_accepted_a_sale_after_its_lockup_was_spent_is_not_cancelled_for_that_spend() {
+    let mut w = World::new();
+    let o = w.open_five();
+    let st = w.lockup_status(3, 9);
+    w.swap_paid(&o, Some(&st)).unwrap().unwrap();
+    assert_eq!(alarms(&w.spent(&o, true)), 1);
+    assert_eq!(replaced(&w), 1);
+    w.override_sale(o.index, Role::Manager, "max").unwrap();
+    assert_eq!(w.c.sale(o.index).unwrap().taken_back(), 3);
+    // A restart: the driver tells the spend again. No second alarm, no
+    // second record, still accepted.
+    for _ in 0..2 {
+        w.restart();
+        let reports = w.spent(&o, true);
+        assert!(reports.is_empty(), "{reports:?}");
+        let screen = w.judge(o.index);
+        assert_eq!(screen.state, State::Overridden, "{screen:?}");
+        assert!(screen.reports.is_empty(), "{:?}", screen.reports);
+        assert_eq!(replaced(&w), 1);
+    }
+    // The refund depth: still accepted, still one alarm and one record.
+    let reports = w.c.swap_cancelled(o.index, w.now, &mut w.m).unwrap();
+    assert!(reports.is_empty(), "{reports:?}");
+    w.restart();
+    assert_eq!(w.judge(o.index).state, State::Overridden);
+    assert_eq!(replaced(&w), 1);
+    assert_eq!(w.c.sale(o.index).unwrap().taken_back(), 3);
+}
+
+#[test]
+fn cr_20_when_the_spend_a_person_accepted_leaves_the_chain_a_new_spend_is_one_cancel() {
+    let mut w = World::new();
+    let o = w.open_five();
+    let st = w.lockup_status(3, 9);
+    w.swap_paid(&o, Some(&st)).unwrap().unwrap();
+    w.spent(&o, true);
+    w.override_sale(o.index, Role::Manager, "max").unwrap();
+    assert!(w.spent(&o, false).is_empty());
+    assert_eq!(w.c.sale(o.index).unwrap().taken_back(), 0);
+    assert_eq!(w.judge(o.index).state, State::Overridden);
+    w.restart();
+    assert_eq!(w.c.sale(o.index).unwrap().taken_back(), 0);
+    assert_eq!(w.judge(o.index).state, State::Overridden);
+    let reports = w.spent(&o, true);
+    assert_eq!(alarms(&reports), 1, "{reports:?}");
+    assert_eq!(w.judge(o.index).state, State::DoNotHandOver);
+}
+
+#[test]
+fn cr_20_a_sale_accepted_before_any_spend_is_still_cancelled_by_one() {
+    let mut w = World::new();
+    let o = w.open(2_000);
+    w.swap_paid(&o, None).unwrap().unwrap();
+    w.override_sale(o.index, Role::Manager, "max").unwrap();
+    assert_eq!(w.c.sale(o.index).unwrap().taken_back(), 0);
+    let reports = w.spent(&o, true);
+    assert_eq!(alarms(&reports), 1, "{reports:?}");
+}
+
+#[test]
+fn cr_20_the_decoder_holds_the_meaning_of_taken_back_three() {
+    let mut w = World::new();
+    let o = w.open_five();
+    let st = w.lockup_status(3, 9);
+    w.swap_paid(&o, Some(&st)).unwrap().unwrap();
+    w.spent(&o, true);
+    let slot = crate::Slot::Sale(o.index);
+    let cancelled = w.m.slots.get(&slot).unwrap().clone();
+    w.override_sale(o.index, Role::Manager, "max").unwrap();
+    let accepted = w.m.slots.get(&slot).unwrap().clone();
+    let with = |bytes: &[u8], last: u8| {
+        let mut b = bytes.to_vec();
+        *b.last_mut().unwrap() = last;
+        crate::Sale::from_bytes(&b)
+    };
+    // As stored, both read back and re-encode alike.
+    assert_eq!(*accepted.last().unwrap(), 3);
+    assert!(with(&accepted, 3).is_ok());
+    assert!(with(&cancelled, 1).is_ok());
+    // 3 with a cancel recorded, 3 without an override, and 4 are refused.
+    assert!(with(&cancelled, 3).is_err());
+    assert!(with(&accepted, 4).is_err());
+    assert!(with(&accepted, 1).is_err());
+    assert!(with(&accepted, 0).is_ok());
+}
+
+#[test]
+fn cr_20_a_claim_that_left_the_chain_of_a_sale_a_manager_accepted_is_a_cancel() {
+    let mut w = World::new();
+    let big = w.open(2_000);
+    w.swap_paid(&big, None).unwrap().unwrap();
+    w.override_sale(big.index, Role::Manager, "max").unwrap();
+    assert_eq!(w.judge(big.index).state, State::Overridden);
+    w.claim_depth(&big, 1);
+    // The exposure was released at the first confirmation; the claim leaves
+    // the chain: a cancel.
+    let reports = w.claim_depth(&big, 0);
+    assert_eq!(
+        reports
+            .iter()
+            .filter(|r| matches!(r, Report::Alarm { .. }))
+            .count(),
+        1,
+        "{reports:?}"
+    );
+    assert_eq!(w.judge(big.index).state, State::DoNotHandOver);
+    // The claim back in a block undoes it.
+    w.claim_depth(&big, 1);
+    assert_eq!(w.judge(big.index).state, State::Confirmed);
+}
+
+#[test]
+fn cr_221_one_alarm_and_one_record_from_the_refund_at_one_block_to_the_loss_at_depth() {
+    let mut w = World::new();
+    let o = w.open_five();
+    let st = w.lockup_status(3, 9);
+    w.swap_paid(&o, Some(&st)).unwrap().unwrap();
+    let reports = w.spent(&o, true);
+    assert_eq!(
+        reports
+            .iter()
+            .filter(|r| matches!(r, Report::Alarm { .. }))
+            .count(),
+        1
+    );
+    // The stored sale holds why it was taken back; a restart shows it taken
+    // back until the driver says the spend has left the chain.
+    assert_eq!(w.c.sale(o.index).unwrap().taken_back(), 1);
+    w.restart();
+    assert_eq!(w.judge(o.index).state, State::DoNotHandOver);
+    assert_eq!(w.c.sale(o.index).unwrap().taken_back(), 1);
+    // At the refund depth: no second alarm and no second record.
+    let before =
+        w.m.events()
+            .iter()
+            .filter(|e| matches!(e, Event::Replaced { .. }))
+            .count();
+    assert_eq!(before, 1);
+    let reports = w.c.swap_cancelled(o.index, w.now, &mut w.m).unwrap();
+    assert!(reports.is_empty(), "{reports:?}");
+    let after =
+        w.m.events()
+            .iter()
+            .filter(|e| matches!(e, Event::Replaced { .. }))
+            .count();
+    assert_eq!(after, 1);
+    assert_eq!(w.c.sale(o.index).unwrap().taken_back(), 0);
+    assert!(w.c.sale(o.index).unwrap().cancel_recorded());
+    // It stands: the spend leaving the chain after that undoes nothing.
+    w.spent(&o, false);
+    assert_eq!(w.judge(o.index).state, State::DoNotHandOver);
+    // Taken back for a spend and then undone, across a restart.
+    let mut w = World::new();
+    let o = w.open_five();
+    let st = w.lockup_status(3, 9);
+    w.swap_paid(&o, Some(&st)).unwrap().unwrap();
+    w.spent(&o, true);
+    w.restart();
+    let reports = w.spent(&o, false);
+    assert!(
+        reports.contains(&Report::PosPaid { index: o.index }),
+        "{reports:?}"
+    );
+    assert_eq!(w.judge(o.index).state, State::PaidInstant);
+    assert!(!w.c.sale(o.index).unwrap().cancel_recorded());
+    assert!(w.c.alarm(), "the alarm stays for the owner");
+}
+
+#[test]
+fn cr_07_a_swap_sale_that_is_held_is_not_requoted() {
+    let mut w = World::new();
+    let big = w.open(2_000);
+    w.swap_paid(&big, None).unwrap().unwrap();
+    let err = w.requote(big.index, 60_000_000).unwrap_err();
+    assert!(
+        matches!(err, crate::RequoteRefused::AlreadyEnough),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn sl_40_a_swap_payment_that_replaces_a_wait_clears_it_and_a_funding_loss_leaves_the_sale_alone() {
+    let mut w = World::new();
+    let big = w.open(2_000);
+    let funding = [0xf1u8; 32];
+    {
+        let facts = crate::Facts {
+            chain: &w.chain,
+            health: w.health,
+            heartbeat: heartbeat(),
+            remote_order: w.remote_order,
+            now: w.now,
+        };
+        let paid = crate::LightningPaid {
+            payment_hash: [5; 32],
+            amount_msat: big.needs_sats * 1_000,
+            settled_at: Some(1),
+        };
+        let got =
+            w.c.lightning_paid_funded(
+                big.index,
+                paid,
+                crate::PaidFunding::Unconfirmed {
+                    txids: vec![funding],
+                    more: false,
+                },
+                &facts,
+                &mut w.m,
+            )
+            .unwrap();
+        assert!(got.is_none(), "the sale waits");
+    }
+    assert_eq!(w.c.sale(big.index).unwrap().to_bytes()[4], 7);
+    w.swap_paid(&big, None).unwrap().unwrap();
+    let sale = w.c.sale(big.index).unwrap();
+    assert!(sale.paid_via_swap() && sale.lightning_fundings().is_empty());
+    // A funding loss names nothing and changes nothing.
+    let (named, reports) =
+        w.c.lightning_funding_lost(&funding, w.now, &mut w.m)
+            .unwrap();
+    assert!(named.is_empty() && reports.is_empty());
+    // The stored sale reads back as the swap payment it is.
+    let bytes = w.c.sale(big.index).unwrap().to_bytes();
+    assert_eq!(bytes[4], 6);
+    assert!(crate::Sale::from_bytes(&bytes).is_ok());
+    w.restart();
+    assert!(w.c.sale(big.index).unwrap().paid_via_swap());
+}

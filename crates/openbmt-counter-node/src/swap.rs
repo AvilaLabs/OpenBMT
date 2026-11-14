@@ -1656,7 +1656,7 @@ impl Follow {
         };
         if matches!(stage, Stage::Locked(_) | Stage::ClaimSent) {
             let spent = spent_height.is_some();
-            if self.spent_told != Some(spent) && (spent || self.spent_told.is_some()) {
+            if self.spent_told != Some(spent) {
                 updates.push(Update::LockupSpent { index, spent });
             }
             self.spent_told = Some(spent);

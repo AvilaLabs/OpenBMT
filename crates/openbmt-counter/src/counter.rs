@@ -208,6 +208,24 @@ pub enum PaidFunding {
 /// reported for the cancels.
 pub type FundingLoss = (Vec<u32>, Vec<Report>);
 
+/// A write failed while the loss of a funding was recorded: what was
+/// recorded before it, and the reports of that, which must still be given.
+#[derive(Debug)]
+pub struct FundingLossFault<E> {
+    /// The failed write.
+    pub fault: StoreFault<E>,
+    /// The sales named before it.
+    pub named: Vec<u32>,
+    /// The reports of the sales stored before it.
+    pub reports: Vec<Report>,
+}
+
+impl<E: std::fmt::Display> std::fmt::Display for FundingLossFault<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.fault)
+    }
+}
+
 /// The most unconfirmed fundings a sale lists (SL-40): a payment through more
 /// is never taken at once.
 pub use crate::sale::MAX_FUNDINGS;
@@ -341,9 +359,6 @@ pub struct Counter {
     /// told them (CR-221). Memory only: the node tells them again after a
     /// start, and until then a sale that was reported paid or final stays so.
     swap_claims: BTreeMap<u32, u32>,
-    /// CR-221: the swaps whose lockup is spent now by a transaction that is
-    /// not the shop's claim, in a block of the chain, as the node last told.
-    swap_spent: BTreeSet<u32>,
     /// CR-221: the ids of the claims the node built for a sale, as the node
     /// last told: the sale's own payments, which are not late ones.
     swap_claim_ids: BTreeMap<u32, Vec<Txid>>,
@@ -434,7 +449,6 @@ impl Counter {
             pause_unsaved: false,
             cancel_applied: BTreeSet::new(),
             swap_claims: BTreeMap::new(),
-            swap_spent: BTreeSet::new(),
             swap_claim_ids: BTreeMap::new(),
             refund_unsaved: BTreeSet::new(),
             records: RecordLog::new(),
@@ -1375,7 +1389,6 @@ impl Counter {
             self.refund_book.remove(&index);
             self.cancel_applied.remove(&index);
             self.swap_claims.remove(&index);
-            self.swap_spent.remove(&index);
             self.swap_claim_ids.remove(&index);
             self.refund_unsaved.remove(&index);
             count += 1;
@@ -2111,7 +2124,10 @@ impl Counter {
             final_depth,
             &OwnCheck::Mixed(OwnNodeHealth::not_configured()),
         );
-        if sale.frozen.is_some() {
+        // A Lightning payment the sale holds, or waits for, is enough: a new
+        // quote would ask for a second invoice.
+        if sale.frozen.is_some() || sale.lightning.is_some() || sale.funding_wait != FundingWait::No
+        {
             return Err(RequoteRefused::AlreadyEnough);
         }
         // CR-75: a sale with nothing received is not requoted below the
@@ -2195,6 +2211,7 @@ impl Counter {
             || sale.accepted.is_some()
             || sale.overridden.is_some()
             || sale.lightning.is_some()
+            || sale.funding_wait != FundingWait::No
             || !sale.is_live()
         {
             return Err(CancelRefused::MoneyArrived);
@@ -2537,6 +2554,10 @@ impl Counter {
         };
         sale.lightning = Some(paid);
         sale.books_final = true;
+        // This payment replaces what the sale waited for.
+        sale.funding.clear();
+        sale.funding_more = false;
+        sale.funding_wait = FundingWait::No;
         let mut events = vec![Event::PaidByLightning {
             index,
             at: now,
@@ -2734,6 +2755,10 @@ impl Counter {
         };
         sale.lightning = Some(lightning);
         sale.via_swap = true;
+        // This payment replaces what the sale waited for.
+        sale.funding.clear();
+        sale.funding_more = false;
+        sale.funding_wait = FundingWait::No;
         let mut events = vec![Event::PaidByLightning {
             index,
             at: now,
@@ -2887,17 +2912,81 @@ impl Counter {
         facts: &Facts<'_, C>,
         store: &mut S,
     ) -> Result<Vec<Report>, JudgeError<S::Error>> {
-        let changed = if spent {
-            self.swap_spent.insert(index)
-        } else {
-            self.swap_spent.remove(&index)
+        let Some(base) = self.sales.get(&index) else {
+            return Ok(Vec::new());
         };
-        let judged = self.sales.get(&index).is_some_and(|s| s.paid_via_swap());
-        if !changed || !judged || self.unreadable.contains(&index) {
+        if !base.paid_via_swap() || self.unreadable.contains(&index) {
             return Ok(Vec::new());
         }
+        let mut sale = base.clone();
+        if spent {
+            if sale.cancel_recorded || sale.taken_back == 3 {
+                return Ok(Vec::new());
+            }
+            let mut events = Vec::new();
+            let mut reports = Vec::new();
+            let was_paid = self
+                .take_back_swap(&mut sale, 1, facts.now, store, &mut events, &mut reports)
+                .map_err(JudgeError::Store)?;
+            self.finish(store, sale, &events)
+                .map_err(JudgeError::Store)?;
+            if was_paid {
+                self.cancel_applied.remove(&index);
+            }
+            return Ok(reports);
+        }
+        if sale.taken_back == 3 {
+            // The spend a person accepted left the chain: the sale stays
+            // accepted, and a spend after this is a new loss.
+            sale.taken_back = 0;
+            self.finish(store, sale, &[]).map_err(JudgeError::Store)?;
+            return Ok(Vec::new());
+        }
+        if sale.taken_back != 1 {
+            return Ok(Vec::new());
+        }
+        // The spend left the chain: the sale is judged by its claim again.
+        sale.cancel_recorded = false;
+        sale.taken_back = 0;
+        self.finish(store, sale, &[]).map_err(JudgeError::Store)?;
         let own = OwnCheck::Mixed(OwnNodeHealth::not_configured());
         Ok(self.judge_checked(index, facts, &own, store)?.reports)
+    }
+
+    /// The sale of a swap is taken back: the cancel is recorded on it (with
+    /// `cause` 0 for one that stands, else 1 or 2, which can be undone), and
+    /// for a sale paid at once, accepted by a person or reported paid the
+    /// pause and the alarm go up and the POS is told it is unpaid. The caller
+    /// writes the sale and the events. True when the cancel was raised.
+    fn take_back_swap<S: Store>(
+        &mut self,
+        sale: &mut Sale,
+        cause: u8,
+        now: u64,
+        store: &mut S,
+        events: &mut Vec<Event>,
+        reports: &mut Vec<Report>,
+    ) -> Result<bool, StoreFault<S::Error>> {
+        let index = sale.index;
+        // Paid at once, accepted by a person, or reported paid at the shop's
+        // depth, even if the claim has left the chain since.
+        let was_paid = sale.accepted.is_some()
+            || sale.overridden.is_some()
+            || sale.pos == PosState::Paid
+            || sale.confirmed_logged;
+        events.push(Event::Replaced { index, at: now });
+        if was_paid {
+            self.raise_cancel(index, now, store)?;
+            reports.push(Report::Alarm { index });
+        }
+        sale.cancel_recorded = true;
+        sale.taken_back = cause;
+        if sale.pos == PosState::Paid {
+            sale.pos = PosState::Unpaid;
+            events.push(Event::PosUnpaid { index, at: now });
+            reports.push(Report::PosUnpaid { index });
+        }
+        Ok(was_paid)
     }
 
     /// CR-221: the shop's confirmation depth and refund depth, which the
@@ -2926,26 +3015,22 @@ impl Counter {
         let Some(base) = self.sales.get(&index) else {
             return Ok(Vec::new());
         };
-        if !base.via_swap || base.cancel_recorded || base.lightning.is_none() {
+        if !base.via_swap || base.lightning.is_none() || base.taken_back == 3 {
+            // A person accepted the sale with that loss held against it.
             return Ok(Vec::new());
         }
-        // Paid at once, or reported paid at the shop's depth, even if the
-        // claim has left the chain since and the POS was told so.
-        let was_paid =
-            base.accepted.is_some() || base.pos == PosState::Paid || base.confirmed_logged;
         let mut sale = base.clone();
-        let mut events = vec![Event::Replaced { index, at: now }];
+        if sale.cancel_recorded {
+            // Taken back already, once, with its alarm: it stands now.
+            if sale.taken_back != 0 {
+                sale.taken_back = 0;
+                self.finish(store, sale, &[])?;
+            }
+            return Ok(Vec::new());
+        }
+        let mut events = Vec::new();
         let mut reports = Vec::new();
-        if was_paid {
-            self.raise_cancel(index, now, store)?;
-            reports.push(Report::Alarm { index });
-        }
-        sale.cancel_recorded = true;
-        if sale.pos == PosState::Paid {
-            sale.pos = PosState::Unpaid;
-            events.push(Event::PosUnpaid { index, at: now });
-            reports.push(Report::PosUnpaid { index });
-        }
+        let was_paid = self.take_back_swap(&mut sale, 0, now, store, &mut events, &mut reports)?;
         self.finish(store, sale, &events)?;
         if was_paid {
             self.cancel_applied.remove(&index);
@@ -3055,6 +3140,12 @@ impl Counter {
             .unwrap_or(u64::MAX);
         if sats == 0 || sats < least {
             return Err(LightningRefused::TooLittle { sats, least });
+        }
+        // An earlier try counted the exposure and then did not store the sale:
+        // this one decides again, so no entry is left that nothing releases.
+        if !sale.exposure_counted {
+            self.release_exposure(index, store)
+                .map_err(LightningRefused::Store)?;
         }
         let by_person = sale.overridden.is_some();
         match funding {
@@ -3232,11 +3323,11 @@ impl Counter {
         funding: &[u8; 32],
         now: u64,
         store: &mut S,
-    ) -> Result<FundingLoss, StoreFault<S::Error>> {
+    ) -> Result<FundingLoss, FundingLossFault<S::Error>> {
         let mut named: Vec<u32> = self
             .sales
             .values()
-            .filter(|s| !s.exposure_released && s.funding.contains(funding))
+            .filter(|s| !s.via_swap && !s.exposure_released && s.funding.contains(funding))
             .map(|s| s.index)
             .collect();
         named.sort_unstable();
@@ -3251,22 +3342,42 @@ impl Counter {
                     continue;
                 }
                 sale.funding_wait = FundingWait::Lost;
-                self.put_sale(store, sale)?;
+                if let Err(fault) = self.put_sale(store, sale) {
+                    return Err(FundingLossFault {
+                        fault,
+                        named,
+                        reports,
+                    });
+                }
                 continue;
             }
-            if sale.cancel_recorded || sale.accepted.is_none() {
+            // A sale a person accepted is a cancel as one accepted at once.
+            if sale.cancel_recorded || (sale.accepted.is_none() && sale.overridden.is_none()) {
                 continue;
             }
-            self.raise_cancel(index, now, store)?;
+            if let Err(fault) = self.raise_cancel(index, now, store) {
+                return Err(FundingLossFault {
+                    fault,
+                    named,
+                    reports,
+                });
+            }
             sale.cancel_recorded = true;
             let mut events = vec![Event::Replaced { index, at: now }];
-            reports.push(Report::Alarm { index });
+            let mut these = vec![Report::Alarm { index }];
             if sale.pos == PosState::Paid {
                 sale.pos = PosState::Unpaid;
                 events.push(Event::PosUnpaid { index, at: now });
-                reports.push(Report::PosUnpaid { index });
+                these.push(Report::PosUnpaid { index });
             }
-            self.finish(store, sale, &events)?;
+            if let Err(fault) = self.finish(store, sale, &events) {
+                return Err(FundingLossFault {
+                    fault,
+                    named,
+                    reports,
+                });
+            }
+            reports.extend(these);
             self.cancel_applied.remove(&index);
         }
         Ok((named, reports))
@@ -3471,6 +3582,19 @@ impl Counter {
                     State::DoNotHandOver,
                     Why::FundingLost,
                     Next::AskOwnerOrOtherPayment,
+                );
+                screen.received_sats = paid.sats();
+                screen.needs_sats = paid.sats();
+                screen.late = sale.is_late();
+                return Ok(screen);
+            }
+            // A person's override is an acceptance: shown paid, the POS told
+            // when it was made (CR-20).
+            if let Some(mark) = &sale.overridden {
+                let mut screen = screen_of(
+                    State::Overridden,
+                    Why::OverriddenBy { role: mark.role },
+                    Next::Nothing,
                 );
                 screen.received_sats = paid.sats();
                 screen.needs_sats = paid.sats();
@@ -3904,23 +4028,29 @@ impl Counter {
         // be an earlier, larger one than the newest.
         let mined = sale.watch.sats_at_depth(facts.chain, 1);
         let booked = if conf >= 1 && mined > 0 { mined } else { sats };
-        let spent = self.swap_spent.contains(&index);
         let mut events: Vec<Event> = Vec::new();
         let mut reports: Vec<Report> = Vec::new();
-        if spent && !sale.cancel_recorded {
-            // The provider's refund, in a block: the sale is taken back at
-            // once; the swap is lost at the refund depth.
-            let was_paid = sale.accepted.is_some()
-                || sale.overridden.is_some()
-                || sale.pos == PosState::Paid
-                || sale.confirmed_logged;
-            if was_paid && !self.cancel_applied.contains(&index) {
-                self.raise_cancel(index, now, store)
-                    .map_err(JudgeError::Store)?;
-                reports.push(Report::Alarm { index });
-            }
+        // The claim back in a block undoes the taking back of a sale a
+        // person accepted whose claim had left the chain.
+        if sale.taken_back == 2 && conf >= 1 {
+            sale.cancel_recorded = false;
+            sale.taken_back = 0;
         }
-        let (state, why, next) = if sale.cancel_recorded || spent {
+        let left_the_chain = (conf == 0 && sale.exposure_released)
+            || (sale.confirmed_logged && (conf == 0 || sale.accepted.is_none()));
+        let mut raised = false;
+        if !sale.cancel_recorded
+            && sale.overridden.is_some()
+            && left_the_chain
+            && !(sale.books_final || conf >= depth)
+        {
+            // A claim that left the chain after a person accepted the sale is
+            // a loss, as for a sale accepted at once: a cancel.
+            raised = self
+                .take_back_swap(&mut sale, 2, now, store, &mut events, &mut reports)
+                .map_err(JudgeError::Store)?;
+        }
+        let (state, why, next) = if sale.cancel_recorded {
             (
                 State::DoNotHandOver,
                 Why::Replaced,
@@ -3934,9 +4064,7 @@ impl Counter {
                 Why::ConfirmedAt(conf),
                 Next::FinalAt { depth: final_depth },
             )
-        } else if (conf == 0 && sale.exposure_released)
-            || (sale.confirmed_logged && (conf == 0 || sale.accepted.is_none()))
-        {
+        } else if left_the_chain && sale.overridden.is_none() {
             // The claim was in a block, which released the exposure or
             // reported the sale confirmed, and it left the chain: the sale is
             // taken back until it is back, accepted at once or not (CR-30).
@@ -4009,7 +4137,7 @@ impl Counter {
             sale.pos = PosState::Unpaid;
             events.push(Event::PosUnpaid { index, at: now });
             reports.push(Report::PosUnpaid { index });
-            events.push(if sale.cancel_recorded || spent {
+            events.push(if sale.cancel_recorded {
                 Event::Replaced { index, at: now }
             } else {
                 Event::Reopened { index, at: now }
@@ -4023,6 +4151,9 @@ impl Counter {
         screen.reports = reports;
         self.finish(store, sale, &events)
             .map_err(JudgeError::Store)?;
+        if raised {
+            self.cancel_applied.remove(&index);
+        }
         Ok(screen)
     }
 
@@ -4284,6 +4415,19 @@ impl Counter {
         });
         sale.exposure_counted = true;
         sale.exposure_released = false;
+        if sale.lightning.is_some() {
+            // The override accepts the sale as it is: what had taken it back
+            // is not held against it. A later loss is a cancel of its own.
+            sale.cancel_recorded = false;
+            // A spend that was held against the sale when the person
+            // accepted it is not held again.
+            sale.taken_back = if sale.via_swap && sale.taken_back == 1 {
+                3
+            } else {
+                0
+            };
+            sale.confirmed_logged = false;
+        }
         let tell_pos = sale.pos != PosState::Paid;
         sale.pos = PosState::Paid;
         let mut events = vec![event];
@@ -4759,8 +4903,20 @@ impl Counter {
         received: u64,
         headers: &C,
     ) -> u64 {
-        let paid = sale.lightning.as_ref().map_or(0, |p| p.sats());
-        let onchain = received.saturating_sub(paid);
+        // CR-224: a swap payment is the claim on the chain, settled at the
+        // shop's depth like any payment on it.
+        if sale.via_swap {
+            return sale.watch().sats_at_depth(headers, self.depth());
+        }
+        // CR-71, SL-40: what arrived over Lightning is settled when it is
+        // the shop's own node's and no funding it rests on is unconfirmed or
+        // lost.
+        let paid = sale
+            .lightning
+            .as_ref()
+            .filter(|_| !sale.rests_on_fundings() && !sale.cancel_recorded)
+            .map_or(0, |p| p.sats());
+        let onchain = received.saturating_sub(sale.lightning.as_ref().map_or(0, |p| p.sats()));
         let deep = sale.watch().sats_at_depth(headers, self.depth());
         deep.min(onchain).saturating_add(paid)
     }

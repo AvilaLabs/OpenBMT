@@ -51,6 +51,12 @@
 //!   | n_refunds u32 | n_refunds * refund entry
 //!   | request u8 (0 none, else 1, 3 or 7 days) | note (flag, len u8, text)
 //!
+//! OBML | 6 | the fields of version 5, then taken_back u8 (0 to 3)
+//!
+//! Version 6 is written for a sale paid through a swap provider (CR-221).
+//! `taken_back` 1 or 2 needs a cancel recorded that can be undone; 3 needs
+//! none recorded and a person's override.
+//!
 //! Version 5 is written only for a request to send (CR-204) or a sale with a
 //! note (CR-206), and holds at least one of the two. A request has one quote,
 //! and the quote lasts the request's days instead of [`QUOTE_SECS`]. A
@@ -304,6 +310,13 @@ pub struct Sale {
     pub(crate) funding_more: bool,
     /// What the sale waits for while it holds no payment (SL-40).
     pub(crate) funding_wait: FundingWait,
+    /// Why a swap sale was taken back, if it can be undone (CR-221): 1 the
+    /// lockup is spent in a block by another than the shop's claim, 2 the
+    /// claim of a sale a person accepted left the chain, 3 a person accepted
+    /// the sale after its lockup was spent, and that spend is not held
+    /// against it. 0 for none, and for a cancel that stands. Only a swap
+    /// payment holds it (version 6).
+    pub(crate) taken_back: u8,
     /// The lifetime of a request to send; none for a sale shown at the till
     /// (CR-204).
     pub(crate) request: Option<RequestDays>,
@@ -344,6 +357,7 @@ impl Sale {
             reopened: false,
             refund_reopened: false,
             cancel_recorded: false,
+            taken_back: 0,
             exposure_counted: false,
             exposure_released: false,
             ended: None,
@@ -520,6 +534,12 @@ impl Sale {
     /// The cancel of this sale was recorded (CR-14).
     pub fn cancel_recorded(&self) -> bool {
         self.cancel_recorded
+    }
+
+    /// CR-221: why a swap sale was taken back when that can be undone: 1 the
+    /// lockup is spent, 2 the claim of an accepted sale left the chain.
+    pub fn taken_back(&self) -> u8 {
+        self.taken_back
     }
 
     /// Payments that arrived after the sale ended, with what each paid
@@ -835,6 +855,8 @@ impl Sale {
                 for txid in &self.funding {
                     out.extend_from_slice(txid);
                 }
+            } else {
+                out.push(self.taken_back);
             }
         } else if self.request.is_some() || self.note.is_some() {
             if let Some(byte) = out.get_mut(4) {
@@ -1135,6 +1157,21 @@ impl Sale {
                 return Err(bad("version 6 holds a swap payment"));
             }
         }
+        let mut taken_back = 0;
+        if swap_payment {
+            taken_back = r.u8()?;
+            let held = match taken_back {
+                0 => true,
+                1 | 2 => cancel_recorded,
+                3 => !cancel_recorded && overridden.is_some(),
+                _ => false,
+            };
+            if !held {
+                return Err(bad(
+                    "a swap sale is taken back for a reason that is not known",
+                ));
+            }
+        }
         let mut funding = Vec::new();
         let mut funding_more = false;
         let mut funding_wait = FundingWait::No;
@@ -1231,6 +1268,7 @@ impl Sale {
             refunds,
             lightning,
             via_swap: swap && !funded,
+            taken_back,
             funding,
             funding_more,
             funding_wait,
