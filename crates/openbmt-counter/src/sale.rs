@@ -1063,6 +1063,9 @@ impl Sale {
         let mut tip = Amount(0);
         let funded = version == SALE_VERSION_FUNDING;
         let swap = version == SALE_VERSION_SWAP || funded;
+        // Only a swap payment (version 6) may be held or taken back; a payment
+        // on fundings (version 7) keeps the rules of its own.
+        let swap_payment = version == SALE_VERSION_SWAP;
         let extended = version == SALE_VERSION_TIP || version == SALE_VERSION_REQUEST || swap;
         if extended {
             tip = Amount(r.u64_le()?);
@@ -1183,7 +1186,9 @@ impl Sale {
         if watch.tolerance_bps() != tolerance_bps {
             return Err(bad("the watch has another tolerance"));
         }
-        if cancel_recorded && accepted.is_none() && overridden.is_none() {
+        // A swap payment may be reported paid at the claim's depth and then
+        // taken back (CR-221), with no acceptance at once.
+        if cancel_recorded && accepted.is_none() && overridden.is_none() && !swap_payment {
             return Err(bad(
                 "a cancel is recorded on a sale that was never accepted",
             ));
@@ -1191,7 +1196,9 @@ impl Sale {
         if ended.is_some() && (accepted.is_some() || overridden.is_some()) {
             return Err(bad("an accepted sale has ended"));
         }
-        if lightning.is_some() && (ended.is_some() || !books_final) {
+        // A swap payment is final at the claim's refund depth, not before
+        // (CR-221): until then the sale holds it and is not final.
+        if lightning.is_some() && (ended.is_some() || (!books_final && !swap_payment)) {
             return Err(bad("a sale paid over Lightning has ended or is not final"));
         }
         Ok(Self {

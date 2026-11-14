@@ -37,6 +37,32 @@ fn ppm(text: &str) -> Result<u32, Refused> {
 }
 
 #[test]
+fn sw_60_terms_with_a_lockup_fee_above_the_cap_are_refused() {
+    use crate::MAX_LOCKUP_FEE_SATS;
+    assert_eq!(MAX_LOCKUP_FEE_SATS, 25_000);
+    let with_lockup = |lockup: u64| {
+        format!(
+            "{{\"BTC\":{{\"BTC\":{{\"limits\":{{\"maximal\":5000000,\"minimal\":10000}},\
+             \"fees\":{{\"percentage\":0.5,\"minerFees\":{{\"claim\":234,\
+             \"lockup\":{lockup}}}}}}}}}}}"
+        )
+        .into_bytes()
+    };
+    assert!(Pairs::parse(&with_lockup(25_000), NOW).is_ok());
+    let err = Pairs::parse(&with_lockup(25_001), NOW).unwrap_err();
+    assert_eq!(
+        err,
+        Refused::LockupFeeTooHigh {
+            fee: 25_001,
+            most: 25_000
+        }
+    );
+    assert_eq!(err.rule(), "SW-60");
+    assert!(Pairs::parse(&with_lockup(24_000_000), NOW).is_err());
+    // The claim's fee is the shop's own and is not capped here.
+}
+
+#[test]
 fn sw_60_the_live_btc_pair_is_read_and_other_pairs_are_ignored() {
     let pairs = Pairs::parse(&reverse(), NOW).unwrap();
     let t = pairs.terms();

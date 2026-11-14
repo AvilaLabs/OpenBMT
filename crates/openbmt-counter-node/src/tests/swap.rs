@@ -14,10 +14,11 @@ use openbmt_swap::testing::{Mode, Pretend};
 
 use super::kit::*;
 use crate::swap::{
-    all_words, claim_stuck_words, confirming_words, failed_words, unavailable_words, SwapRecord,
-    MAGIC_SWAP_RECORD, NOT_FOR_THIS_SALE, SWAP_WINDOW_SECS,
+    all_words, claim_stuck_words, confirming_words, failed_words, lost_words, unavailable_words,
+    SwapRecord, MAGIC_SWAP_RECORD, NOT_FOR_THIS_SALE, SWAP_WINDOW_SECS,
 };
 use crate::{DirStore, NodeConfig, SaleLightning};
+use openbmt_swap::{Failure, Stage};
 
 /// $10.00, which is the least a swap is made for at the test rate (SW-02).
 fn ten_dollars() -> openbmt_counter::Amount {
@@ -124,8 +125,11 @@ impl World {
         let block = self.blocks.extend(txs).clone();
         let height = self.blocks.height();
         self.tip = (height, block.block_hash());
-        self.rig
-            .feed(vec![joined(height, &block), block_event(&block)])
+        self.rig.feed(vec![
+            joined(height, &block),
+            block_event(&block),
+            AppEvent::Checked(height),
+        ])
     }
 
     /// One block with a transaction that pays `sat_per_vb` to the miner.
@@ -138,8 +142,11 @@ impl World {
             .clone();
         let height = self.blocks.height();
         self.tip = (height, block.block_hash());
-        self.rig
-            .feed(vec![joined(height, &block), block_event(&block)]);
+        self.rig.feed(vec![
+            joined(height, &block),
+            block_event(&block),
+            AppEvent::Checked(height),
+        ]);
     }
 
     /// The owner's heartbeat, with the next number and the chain the node
@@ -316,7 +323,11 @@ fn cr_220_a_restart_between_the_lockup_and_the_claim_loses_nothing() {
     w.serve();
     w.block(std::slice::from_ref(&lockup));
     assert_eq!(w.sent().len(), 1);
-    assert_eq!(w.rig.node.judge(index).unwrap().state, State::PaidLightning);
+    // The sale is paid when the claim is in a block, not before.
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Waiting);
+    let claim = w.sent()[0].clone();
+    w.block(std::slice::from_ref(&claim));
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Confirmed);
 }
 
 #[test]
@@ -332,10 +343,41 @@ fn cr_221_a_lockup_in_the_mempool_within_the_instant_limits_pays_the_sale_at_onc
     w.serve();
     w.rig.feed(vec![]);
     let screen = w.rig.node.judge(index).unwrap();
-    assert_eq!(screen.state, State::PaidLightning, "{screen:?}");
-    assert!(w.rig.node.counter().exposure_outstanding() > 0);
+    assert_eq!(screen.state, State::PaidInstant, "{screen:?}");
     // The claim went to the peers, once.
     assert_eq!(w.sent().len(), 1);
+    // What is at risk is what the claim pays the shop.
+    let claim = w.sent()[0].clone();
+    let received = claim.output[0].value.to_sat();
+    assert_eq!(w.rig.node.counter().exposure_outstanding(), received);
+    assert!(received < 10_000);
+}
+
+#[test]
+fn cr_221_the_exposure_of_a_swap_sale_stays_until_the_claim_is_in_a_block() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    w.heartbeat();
+    let index = w.open();
+    w.serve();
+    let lockup = w.lockup_in_mempool();
+    w.at(10);
+    w.heartbeat();
+    w.serve();
+    w.rig.feed(vec![]);
+    let claim = w.sent()[0].clone();
+    let received = claim.output[0].value.to_sat();
+    assert_eq!(w.rig.node.counter().exposure_outstanding(), received);
+    // The lockup in a block: the claim can still lose to the refund, so the
+    // exposure stays.
+    w.heartbeat();
+    w.block(std::slice::from_ref(&lockup));
+    assert_eq!(w.rig.node.counter().exposure_outstanding(), received);
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::PaidInstant);
+    // The claim in a block: released, and the sale is confirmed.
+    w.block(std::slice::from_ref(&claim));
+    assert_eq!(w.rig.node.counter().exposure_outstanding(), 0);
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Confirmed);
 }
 
 #[test]
@@ -355,44 +397,71 @@ fn cr_221_a_sale_above_the_instant_limit_waits_for_one_block() {
         SaleLightning::Confirming(words) => assert_eq!(words, confirming_words()),
         other => panic!("{other:?}"),
     }
-    // One block with the lockup: claimed and paid.
+    // One block with the lockup: claimed, and not yet paid.
     let reports = w.block(std::slice::from_ref(&lockup));
-    assert!(reports.contains(&Report::PosPaid { index }), "{reports:?}");
+    assert!(!reports.contains(&Report::PosPaid { index }), "{reports:?}");
     assert_eq!(w.sent().len(), 1);
-    assert_eq!(w.rig.node.judge(index).unwrap().state, State::PaidLightning);
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Waiting);
+    // The claim in a block at the shop's depth: paid.
+    let claim = w.sent()[0].clone();
+    let reports = w.block(std::slice::from_ref(&claim));
+    assert!(reports.contains(&Report::PosPaid { index }), "{reports:?}");
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Confirmed);
     assert_eq!(w.rig.node.counter().exposure_outstanding(), 0);
 }
 
 #[test]
-fn cr_221_a_sale_paid_on_one_block_of_the_lockup_stays_paid_when_that_block_leaves() {
+fn cr_221_a_claim_that_leaves_the_chain_is_sent_again_and_the_sale_is_paid_again() {
     let dir = Scratch::new();
     let mut w = world(&dir);
-    // No heartbeat: the sale waits for the first block of the lockup.
+    // No heartbeat: the sale waits for the claim to be in a block.
     let index = w.open();
     w.serve();
     let lockup = w.lockup_in_mempool();
     w.at(10);
     w.serve();
-    let reports = w.block(std::slice::from_ref(&lockup));
+    w.block(std::slice::from_ref(&lockup));
+    let claim = w.sent()[0].clone();
+    let reports = w.block(std::slice::from_ref(&claim));
     assert!(reports.contains(&Report::PosPaid { index }), "{reports:?}");
-    assert_eq!(w.rig.node.judge(index).unwrap().state, State::PaidLightning);
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Confirmed);
+    assert_eq!(w.sent().len(), 1);
+    let claim_block = w.blocks.at(2).block_hash();
     let first = w.blocks.at(1).block_hash();
 
-    // Two blocks of another branch take the chain: the block with the
-    // lockup is gone. CR-221 takes one block of the lockup as final for a
-    // sale paid through the swap, so the sale is not taken back, unlike one
-    // paid on-chain (WR-33).
-    let alt1 = mine(genesis(), 1, 7, &[]);
-    let alt2 = mine(alt1.block_hash(), 2, 7, &[]);
-    let reports = w.rig.feed(vec![AppEvent::Chain {
-        joined: vec![(1, alt1.block_hash()), (2, alt2.block_hash())],
-        left: vec![first],
-    }]);
+    // Two blocks of another branch, which keep the block of the lockup and
+    // not the one of the claim: the claim is out of the chain.
+    let alt2 = mine(first, 2, 7, &[]);
+    let alt3 = mine(alt2.block_hash(), 3, 7, &[]);
+    let reports = w.rig.feed(vec![
+        AppEvent::Chain {
+            joined: vec![(2, alt2.block_hash()), (3, alt3.block_hash())],
+            left: vec![claim_block],
+        },
+        block_event(&alt2),
+        block_event(&alt3),
+        AppEvent::Checked(3),
+    ]);
+    // The sale is taken back while the claim is out, as a payment on-chain
+    // that is undone is (CR-30), and the claim is sent again, the same one.
     assert!(
-        !reports.contains(&Report::PosUnpaid { index }),
+        reports.contains(&Report::PosUnpaid { index }),
         "{reports:?}"
     );
-    assert_eq!(w.rig.node.judge(index).unwrap().state, State::PaidLightning);
+    let screen = w.rig.node.judge(index).unwrap();
+    assert_eq!(screen.state, State::DoNotHandOver, "{screen:?}");
+    assert_eq!(w.sent().len(), 2);
+    assert_eq!(w.sent()[1].compute_txid(), claim.compute_txid());
+    // It is mined again: paid again, and the POS is told again.
+    let again = mine(alt3.block_hash(), 4, 7, std::slice::from_ref(&claim));
+    let reports = w.rig.feed(vec![
+        joined(4, &again),
+        block_event(&again),
+        AppEvent::Checked(4),
+    ]);
+    assert!(reports.contains(&Report::PosPaid { index }), "{reports:?}");
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Confirmed);
+    assert_eq!(w.sent().len(), 2, "nothing more is sent");
 }
 
 #[test]
@@ -421,6 +490,426 @@ fn cr_222_a_claim_that_stays_out_of_a_block_is_built_again_at_a_higher_fee() {
     assert_eq!(w.sent().len(), 3);
     assert!(w.rig.node.swap_status().is_none());
     let _ = index;
+}
+
+/// A transaction that spends `lockup`'s first output to some script: the
+/// provider's refund, or any spend that is not the shop's claim.
+fn spending_lockup(lockup: &Transaction) -> Transaction {
+    let mut tx = spend(0xee, &[(&script_of(0), 5_000)]);
+    tx.input[0].previous_output = bitcoin::OutPoint::new(lockup.compute_txid(), 0);
+    tx
+}
+
+fn stage_of(dir: &Scratch, index: u32) -> Stage {
+    record_of(dir, index).machine.stage()
+}
+
+fn record_of(dir: &Scratch, index: u32) -> SwapRecord {
+    let bytes = std::fs::read(dir.path().join(format!("swap-{index}-0.bin"))).unwrap();
+    SwapRecord::from_bytes(&bytes).unwrap()
+}
+
+/// A sale accepted at once: the lockup in the mempool seen by three groups
+/// for long enough, with the heartbeat the instant policy needs, so that the
+/// claim is out and the sale is paid at once. Returns the sale, the lockup
+/// and the claim.
+fn instant_sale(w: &mut World) -> (u32, Transaction, Transaction) {
+    w.heartbeat();
+    let index = w.open();
+    w.serve();
+    let lockup = w.lockup_in_mempool();
+    w.at(10);
+    w.heartbeat();
+    w.serve();
+    w.rig.feed(vec![]);
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::PaidInstant);
+    let claim = w.sent()[0].clone();
+    (index, lockup, claim)
+}
+
+#[test]
+fn cr_221_a_lockup_spent_by_the_provider_takes_the_sale_back() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, lockup, claim) = instant_sale(&mut w);
+    assert_eq!(
+        w.rig.node.counter().exposure_outstanding(),
+        claim.output[0].value.to_sat()
+    );
+    // A block spends the lockup with a transaction that is not the claim.
+    let reports = w.block(&[spending_lockup(&lockup)]);
+    assert!(reports.contains(&Report::Alarm { index }), "{reports:?}");
+    assert!(
+        reports.contains(&Report::PosUnpaid { index }),
+        "{reports:?}"
+    );
+    assert!(w.rig.node.counter().alarm());
+    let screen = w.rig.node.judge(index).unwrap();
+    assert_eq!(screen.state, State::DoNotHandOver, "{screen:?}");
+    // One block deep, the swap is not lost yet; the lockup is spent, so no
+    // claim is built for it.
+    for _ in 0..4 {
+        w.block(&[]);
+    }
+    assert_eq!(stage_of(&dir, index), Stage::ClaimSent);
+    // At the refund depth it is lost.
+    w.block(&[]);
+    w.block(&[]);
+    assert_eq!(w.sent().len(), 1);
+    // Its record is written as lost, with the claim that was sent, and reads
+    // back.
+    let bytes = std::fs::read(dir.path().join(format!("swap-{index}-0.bin"))).unwrap();
+    let record = SwapRecord::from_bytes(&bytes).unwrap();
+    assert_eq!(
+        record.machine.stage(),
+        openbmt_swap::Stage::Failed(openbmt_swap::Failure::Lost)
+    );
+    assert_eq!(record.claims.len(), 1);
+    assert_eq!(record.to_bytes(), bytes);
+    // A block that holds the shop's own claim is not a spend by another.
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, _, claim) = instant_sale(&mut w);
+    let reports = w.block(std::slice::from_ref(&claim));
+    assert!(!reports.contains(&Report::Alarm { index }), "{reports:?}");
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Confirmed);
+}
+
+#[test]
+fn cr_221_a_claim_not_in_a_block_at_the_timeout_does_not_take_the_sale_back() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    w.pretend.timeout_blocks = 40;
+    let (index, _, _) = instant_sale(&mut w);
+    for _ in 0..39 {
+        w.block(&[]);
+    }
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::PaidInstant);
+    // The tip reaches the timeout and goes past it: the claim is not in a
+    // block, and the preimage is out, so it is kept and raced against the
+    // refund. The sale is not taken back, and the exposure stays.
+    for _ in 0..3 {
+        let reports = w.block(&[]);
+        assert!(!reports.contains(&Report::Alarm { index }), "{reports:?}");
+        assert!(
+            !reports.contains(&Report::PosUnpaid { index }),
+            "{reports:?}"
+        );
+    }
+    assert!(w.tip.0 > 40);
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::PaidInstant);
+    assert!(!w.rig.node.counter().alarm());
+    assert!(w.rig.node.counter().exposure_outstanding() > 0);
+}
+
+#[test]
+fn cr_221_a_claim_that_leaves_the_chain_past_the_timeout_is_sent_again() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    w.pretend.timeout_blocks = 40;
+    let (index, _, claim) = instant_sale(&mut w);
+    w.block(std::slice::from_ref(&claim));
+    let claim_block = w.blocks.at(1).block_hash();
+    let base = w.blocks.at(1).header.prev_blockhash;
+    assert_eq!(w.sent().len(), 1);
+    // A branch from the block before the claim's, longer than the timeout, that
+    // does not hold the claim: the claim is out of the chain, past the
+    // timeout.
+    let mut joined_blocks = Vec::new();
+    let mut events = Vec::new();
+    let mut prev = base;
+    for height in 1..=45u32 {
+        let b = mine(prev, height, 7, &[]);
+        prev = b.block_hash();
+        joined_blocks.push((height, prev));
+        events.push(block_event(&b));
+    }
+    let mut feed = vec![AppEvent::Chain {
+        joined: joined_blocks,
+        left: vec![claim_block],
+    }];
+    feed.extend(events);
+    feed.push(AppEvent::Checked(45));
+    let reports = w.rig.feed(feed);
+    assert!(!reports.contains(&Report::Alarm { index }), "{reports:?}");
+    // The same claim goes out again, past the timeout.
+    assert_eq!(w.sent().len(), 2, "{reports:?}");
+    assert_eq!(w.sent()[1].compute_txid(), claim.compute_txid());
+}
+
+#[test]
+fn cr_221_a_claim_that_confirms_past_the_timeout_makes_the_sale_paid() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    w.pretend.timeout_blocks = 40;
+    let (index, _, _) = instant_sale(&mut w);
+    for _ in 0..42 {
+        w.block(&[]);
+    }
+    assert!(w.tip.0 > 40);
+    let latest = w.sent().last().unwrap().clone();
+    let reports = w.block(std::slice::from_ref(&latest));
+    assert!(!reports.contains(&Report::Alarm { index }), "{reports:?}");
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Confirmed);
+    assert_eq!(w.rig.node.counter().exposure_outstanding(), 0);
+}
+
+#[test]
+fn cr_221_the_providers_refund_in_a_block_past_the_timeout_makes_the_swap_lost() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    w.pretend.timeout_blocks = 40;
+    let (index, lockup, _) = instant_sale(&mut w);
+    for _ in 0..42 {
+        w.block(&[]);
+    }
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::PaidInstant);
+    let reports = w.block(&[spending_lockup(&lockup)]);
+    assert!(reports.contains(&Report::Alarm { index }), "{reports:?}");
+    assert!(
+        reports.contains(&Report::PosUnpaid { index }),
+        "{reports:?}"
+    );
+    let screen = w.rig.node.judge(index).unwrap();
+    assert_eq!(screen.state, State::DoNotHandOver, "{screen:?}");
+    assert!(w.rig.node.counter().alarm());
+    // The refund is lost at the refund depth, not before.
+    for _ in 0..5 {
+        w.block(&[]);
+    }
+    assert_eq!(stage_of(&dir, index), Stage::Failed(Failure::Lost));
+    assert!(w.rig.node.swap_status().is_none());
+}
+
+#[test]
+fn cr_221_a_sale_not_yet_reported_paid_is_taken_back_without_an_alarm_when_the_swap_is_lost() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    w.pretend.timeout_blocks = 40;
+    // No heartbeat: the sale waits for the claim, which never gets in.
+    let index = w.open();
+    w.serve();
+    let lockup = w.lockup_in_mempool();
+    w.at(10);
+    w.serve();
+    w.block(std::slice::from_ref(&lockup));
+    assert_eq!(w.sent().len(), 1);
+    for _ in 0..42 {
+        w.block(&[]);
+    }
+    // Past the timeout the claim is still bumped; the sale waits.
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Waiting);
+    assert!(w.sent().len() > 1);
+    let reports = w.block(&[spending_lockup(&lockup)]);
+    // The POS was never told the sale is paid, so there is nothing to tell
+    // it, and no alarm: the sale only shows that the payment is gone.
+    assert!(!reports.contains(&Report::Alarm { index }), "{reports:?}");
+    assert!(
+        !reports.contains(&Report::PosUnpaid { index }),
+        "{reports:?}"
+    );
+    assert!(!w.rig.node.counter().alarm());
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::DoNotHandOver);
+    // At the refund depth the swap is lost. The claim was sent, so the
+    // preimage was shown: the words of CR-223 for a lost swap, not those of
+    // a swap that never showed it.
+    for _ in 0..5 {
+        w.block(&[]);
+    }
+    match w.view(index) {
+        SaleLightning::Failed(words) => assert_eq!(words, lost_words()),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// A swap with 40 blocks to the timeout and `blocks` empty blocks on the
+/// chain before the lockup is in a block.
+fn lockup_after(w: &mut World, blocks: u32) -> u32 {
+    w.pretend.timeout_blocks = 40;
+    let index = w.open();
+    w.serve();
+    let lockup = w.lockup_in_mempool();
+    w.at(10);
+    for _ in 0..blocks {
+        w.block(&[]);
+    }
+    w.block(std::slice::from_ref(&lockup));
+    index
+}
+
+#[test]
+fn cr_221_the_claim_is_built_only_with_the_margin_left_before_the_timeout() {
+    // 18 blocks left at the tip: the least that is taken.
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    lockup_after(&mut w, 21);
+    assert_eq!(w.tip.0, 22);
+    assert_eq!(w.sent().len(), 1);
+    // 17 blocks left: no claim, the swap ends, and the preimage is not shown.
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let index = lockup_after(&mut w, 22);
+    assert_eq!(w.tip.0, 23);
+    assert!(w.sent().is_empty());
+    w.block(&[]);
+    assert!(w.sent().is_empty());
+    match w.view(index) {
+        SaleLightning::Failed(words) => assert_eq!(words, failed_words()),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::NotPaidYet);
+    assert!(!w.rig.node.counter().alarm());
+}
+
+#[test]
+fn cr_221_no_claim_is_built_while_the_counter_is_behind_on_blocks() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let index = w.open();
+    w.serve();
+    let lockup = w.lockup_in_mempool();
+    w.at(10);
+    // The block with the lockup is taken, and the app has not yet said that
+    // the height is checked in full (WR-54).
+    let block = w.blocks.extend(std::slice::from_ref(&lockup)).clone();
+    w.tip = (1, block.block_hash());
+    w.rig.feed(vec![joined(1, &block), block_event(&block)]);
+    assert!(w.sent().is_empty(), "no claim while behind");
+    w.rig.feed(vec![]);
+    assert!(w.sent().is_empty());
+    // Once the height is checked, the claim goes.
+    w.rig.feed(vec![AppEvent::Checked(1)]);
+    assert_eq!(w.sent().len(), 1);
+    let _ = index;
+}
+
+#[test]
+fn cr_221_a_status_of_the_provider_does_not_end_a_swap_whose_lockup_the_watch_holds() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let index = w.open();
+    w.serve();
+    let lockup = w.lockup_in_mempool();
+    // The provider says the swap ran out, or sends bytes that are not the
+    // lockup, while the shop's own watch has the lockup.
+    w.at(10);
+    w.pretend.report("swap.expired", None);
+    w.serve();
+    let mut bad = lockup.clone();
+    bad.output[0].value = bitcoin::Amount::from_sat(1);
+    w.pretend.report("transaction.mempool", Some(bad));
+    w.at(50);
+    w.serve();
+    w.pretend.report("transaction.failed", None);
+    w.at(90);
+    w.serve();
+    // The chain decides: the lockup is in a block and the claim goes.
+    w.block(std::slice::from_ref(&lockup));
+    assert_eq!(w.sent().len(), 1);
+    let claim = w.sent()[0].clone();
+    w.block(std::slice::from_ref(&claim));
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Confirmed);
+}
+
+#[test]
+fn cr_221_the_lockup_is_the_one_that_pays_what_was_promised_and_is_in_a_block() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let index = w.open();
+    w.serve();
+    let offer = w.pretend.offer.clone().unwrap();
+    let script = offer.address.script_pubkey();
+    // Two transactions pay the lockup address. The first the watch holds
+    // pays too little; the second pays what was promised, from another
+    // coin, and is in no block; the third is the real one and is mined.
+    let decoy = spend(0x70, &[(&script, offer.lockup_sats - 1)]);
+    let twin = spend(0x71, &[(&script, offer.lockup_sats)]);
+    let real = w.pretend.pretend_lockup();
+    for tx in [&decoy, &twin, &real] {
+        w.rig.feed(vec![AppEvent::Sighting {
+            tx: bytes(tx),
+            from: vec![peer(20), peer(21), peer(22)],
+            own: false,
+        }]);
+    }
+    w.at(10);
+    w.block(std::slice::from_ref(&real));
+    assert_eq!(w.sent().len(), 1);
+    let claim = w.sent()[0].clone();
+    assert_eq!(
+        claim.input[0].previous_output,
+        bitcoin::OutPoint::new(real.compute_txid(), 0)
+    );
+    let _ = index;
+}
+
+#[test]
+fn cr_221_the_claim_is_final_at_the_shops_refund_depth_and_paid_at_its_depth() {
+    let dir = Scratch::new();
+    let time = Arc::new(AtomicU64::new(T0));
+    let mut config = config(dir.path(), &time);
+    config.settings.swap = Some(provider(1_000_000));
+    config.settings.min_confirmations = 2;
+    let mut w = world_from(config, time, T0);
+    let index = w.open();
+    w.serve();
+    let lockup = w.lockup_in_mempool();
+    w.at(10);
+    w.block(std::slice::from_ref(&lockup));
+    let claim = w.sent()[0].clone();
+    // One block of the claim is not the shop's depth.
+    let reports = w.block(std::slice::from_ref(&claim));
+    assert!(!reports.contains(&Report::PosPaid { index }), "{reports:?}");
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Waiting);
+    let reports = w.block(&[]);
+    assert!(reports.contains(&Report::PosPaid { index }), "{reports:?}");
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Confirmed);
+    // At the refund depth (6) the books are told.
+    for _ in 0..3 {
+        let reports = w.block(&[]);
+        assert!(!reports
+            .iter()
+            .any(|r| matches!(r, Report::BooksFinal { .. })));
+    }
+    let reports = w.block(&[]);
+    assert!(
+        reports
+            .iter()
+            .any(|r| matches!(r, Report::BooksFinal { received_sats, .. } if *received_sats == claim.output[0].value.to_sat())),
+        "{reports:?}"
+    );
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Final);
+    assert_eq!(w.sent().len(), 1);
+}
+
+#[test]
+fn sw_60_a_provider_whose_lockup_fee_is_too_high_gets_no_swap() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    w.pretend.terms.lockup_fee_sats = 30_000;
+    let index = w.open();
+    w.serve();
+    assert!(w.pretend.offer.is_none(), "no swap was asked for");
+    assert!(matches!(w.view(index), SaleLightning::Unavailable(_)));
+}
+
+#[test]
+fn sw_28_a_reply_that_leaves_less_than_nine_tenths_is_refused() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    // 5 percent and 5,000 for the lockup: 4,500 of 10,000 reaches the shop.
+    w.pretend.terms.fee_ppm = 50_000;
+    w.pretend.terms.lockup_fee_sats = 5_000;
+    let index = w.open();
+    w.serve();
+    assert!(w.pretend.offer.is_some());
+    assert!(matches!(w.view(index), SaleLightning::Unavailable(_)));
+    // An honest 0.6 percent and 324 is taken.
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let index = w.open();
+    w.serve();
+    assert!(matches!(w.view(index), SaleLightning::Invoice(_)));
 }
 
 /// The rate of the first claim, in satoshis per 1000 virtual bytes.
@@ -725,6 +1214,7 @@ mod live {
                 let block: Block = deserialize(&Vec::<u8>::from_hex(&hex).unwrap()).unwrap();
                 events.push(joined(height, &block));
                 events.push(block_event(&block));
+                events.push(AppEvent::Checked(height));
                 self.tip = (height, block.block_hash());
             }
             self.rig.feed(events)
@@ -795,7 +1285,7 @@ mod live {
         w.heartbeat();
         w.serve();
         let screen = w.rig.node.judge(index).unwrap();
-        assert_eq!(screen.state, State::PaidLightning, "{screen:?}");
+        assert_eq!(screen.state, State::PaidInstant, "{screen:?}");
         assert!(w.rig.node.counter().exposure_outstanding() > 0);
         assert_eq!(core.confirmed_height(&lockup.compute_txid()).unwrap(), None);
         let claims = w.relay(&core, 0);
@@ -882,11 +1372,12 @@ mod live {
         assert!(w.sent().is_empty());
         core.mine(1).unwrap();
         let reports = w.sync(&core);
-        assert!(reports.contains(&Report::PosPaid { index }), "{reports:?}");
+        assert!(!reports.contains(&Report::PosPaid { index }), "{reports:?}");
         let claims = w.relay(&core, 0);
         assert_eq!(claims.len(), 1);
         core.mine(1).unwrap();
-        w.sync(&core);
+        let reports = w.sync(&core);
+        assert!(reports.contains(&Report::PosPaid { index }), "{reports:?}");
         assert!(core.confirmed_height(&claims[0]).unwrap().is_some());
         assert!(core
             .confirmed_height(&lockup.compute_txid())
@@ -944,7 +1435,7 @@ mod live {
         core.mine(1).unwrap();
         w.sync(&core);
         assert!(core.confirmed_height(&claims[0]).unwrap().is_some());
-        assert_eq!(w.rig.node.judge(index).unwrap().state, State::PaidLightning);
+        assert_eq!(w.rig.node.judge(index).unwrap().state, State::Confirmed);
         drop(w);
 
         // Each path has a private chain of its own, so that the sales of one
@@ -983,4 +1474,282 @@ mod live {
         w.sync(&core);
         assert_eq!(w.sent().len(), 2);
     }
+}
+
+/// What the sale holds as the swap's payment, in satoshis.
+fn held_sats(w: &World, index: u32) -> u64 {
+    w.rig
+        .node
+        .counter()
+        .sale(index)
+        .unwrap()
+        .lightning()
+        .unwrap()
+        .sats()
+}
+
+/// `count` blocks on top of the chain of `prev` at `height`, as the node is
+/// told of them, after a reorg.
+fn branch_on(
+    w: &mut World,
+    prev: BlockHash,
+    first_height: u32,
+    first: &[Transaction],
+    count: u32,
+    left: Vec<BlockHash>,
+) -> (Vec<Report>, BlockHash) {
+    let mut prev = prev;
+    let mut joined_blocks = Vec::new();
+    let mut events = Vec::new();
+    for i in 0..count {
+        let height = first_height + i;
+        let txs = if i == 0 { first } else { &[] };
+        let b = mine(prev, height, 7, txs);
+        prev = b.block_hash();
+        joined_blocks.push((height, prev));
+        events.push(block_event(&b));
+    }
+    let mut feed = vec![AppEvent::Chain {
+        joined: joined_blocks,
+        left,
+    }];
+    feed.extend(events);
+    feed.push(AppEvent::Checked(first_height + count - 1));
+    (w.rig.feed(feed), prev)
+}
+
+#[test]
+fn cr_221_a_refund_one_block_deep_takes_the_sale_back_and_the_claim_in_its_place_gives_it_again() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, lockup, claim) = instant_sale(&mut w);
+    // The provider's refund is in a block: the sale is taken back at once.
+    let reports = w.block(&[spending_lockup(&lockup)]);
+    assert!(reports.contains(&Report::Alarm { index }), "{reports:?}");
+    assert!(
+        reports.contains(&Report::PosUnpaid { index }),
+        "{reports:?}"
+    );
+    assert_eq!(stage_of(&dir, index), Stage::ClaimSent);
+    // A branch with the claim in the place of the refund wins: the swap goes
+    // on, and the sale is paid again.
+    let spend_block = w.blocks.at(1).block_hash();
+    let base = w.blocks.at(1).header.prev_blockhash;
+    let (reports, tip) = branch_on(
+        &mut w,
+        base,
+        1,
+        std::slice::from_ref(&claim),
+        2,
+        vec![spend_block],
+    );
+    assert!(reports.contains(&Report::PosPaid { index }), "{reports:?}");
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Confirmed);
+    assert_eq!(stage_of(&dir, index), Stage::ClaimSent);
+    // At the refund depth of the claim the swap is paid.
+    branch_on(&mut w, tip, 3, &[], 4, vec![]);
+    assert!(matches!(stage_of(&dir, index), Stage::Paid { .. }));
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Final);
+}
+
+#[test]
+fn cr_221_a_lockup_replaced_in_a_block_takes_the_sale_back_and_the_claim_is_not_bumped() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, lockup, _) = instant_sale(&mut w);
+    // A transaction that spends the same coins as the lockup, paying
+    // another script, is in a block: the lockup the claim spends is gone.
+    let mut replacement = lockup.clone();
+    replacement.output = vec![bitcoin::TxOut {
+        value: bitcoin::Amount::from_sat(1_000),
+        script_pubkey: script_of(0),
+    }];
+    let before = w.sent().len();
+    let reports = w.block(&[replacement]);
+    assert!(reports.contains(&Report::Alarm { index }), "{reports:?}");
+    assert!(
+        reports.contains(&Report::PosUnpaid { index }),
+        "{reports:?}"
+    );
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::DoNotHandOver);
+    for _ in 0..4 {
+        w.block(&[]);
+    }
+    assert_eq!(w.sent().len(), before, "the claim is not built again");
+    assert_eq!(stage_of(&dir, index), Stage::ClaimSent);
+    // At the refund depth it is lost.
+    w.block(&[]);
+    assert_eq!(stage_of(&dir, index), Stage::Failed(Failure::Lost));
+    assert_eq!(w.sent().len(), before);
+}
+
+#[test]
+fn cr_221_a_claim_refused_at_a_higher_fee_is_sent_again_at_every_block() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, _, _) = instant_sale(&mut w);
+    for _ in 0..14 {
+        w.block(&[]);
+    }
+    // One claim at the start and one at each block: built again at a higher
+    // fee until the fee is too much of the lockup, and the same bytes after.
+    let sent = w.sent();
+    assert_eq!(sent.len(), 15);
+    let ids: Vec<_> = sent.iter().map(Transaction::compute_txid).collect();
+    let last = ids[14];
+    assert_eq!(ids[13], last);
+    assert_eq!(ids[12], last);
+    assert_eq!(record_of(&dir, index).claims.last(), Some(&last));
+    // The sale holds what the newest claim pays.
+    assert_eq!(held_sats(&w, index), sent[14].output[0].value.to_sat());
+    assert!(sent[14].output[0].value < sent[0].output[0].value);
+}
+
+#[test]
+fn cr_222_no_claim_id_is_dropped_at_the_limit_and_the_last_claim_is_sent_again() {
+    crate::swap::set_claim_limit(3);
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, _, first) = instant_sale(&mut w);
+    for _ in 0..6 {
+        w.block(&[]);
+    }
+    let record = record_of(&dir, index);
+    assert_eq!(record.claims.len(), 3);
+    assert_eq!(record.claims[0], first.compute_txid());
+    let sent = w.sent();
+    assert_eq!(sent.len(), 7);
+    assert_eq!(
+        sent[6].compute_txid(),
+        *record.claims.last().unwrap(),
+        "the last claim again"
+    );
+    // The first claim, if it is the one mined, is still one of the claims.
+    let reports = w.block(std::slice::from_ref(&first));
+    assert!(!reports.contains(&Report::Alarm { index }), "{reports:?}");
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Confirmed);
+}
+
+#[test]
+fn cr_220_a_restart_after_the_claim_was_mined_while_off_finds_the_swap_paid() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, _, claim) = instant_sale(&mut w);
+    let record = record_of(&dir, index);
+    assert!(record.told, "the sale took the payment: kept");
+    let World { rig, pretend, .. } = w;
+    drop(rig);
+    let mut w = world(&dir);
+    w.pretend = pretend;
+    // The claim is in the first block the counter sees after the start, and
+    // five more follow.
+    w.block(std::slice::from_ref(&claim));
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Confirmed);
+    for _ in 0..5 {
+        w.block(&[]);
+    }
+    assert!(matches!(stage_of(&dir, index), Stage::Paid { .. }));
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::Final);
+}
+
+#[test]
+fn cr_220_a_restart_after_the_refund_was_mined_while_off_takes_the_sale_back_and_loses_at_depth() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, lockup, _) = instant_sale(&mut w);
+    let World { rig, pretend, .. } = w;
+    drop(rig);
+    let mut w = world(&dir);
+    w.pretend = pretend;
+    let reports = w.block(&[spending_lockup(&lockup)]);
+    assert!(reports.contains(&Report::Alarm { index }), "{reports:?}");
+    assert!(
+        reports.contains(&Report::PosUnpaid { index }),
+        "{reports:?}"
+    );
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::DoNotHandOver);
+    assert_eq!(record_of(&dir, index).spent_in, Some(w.tip.1));
+    for _ in 0..5 {
+        w.block(&[]);
+    }
+    assert_eq!(stage_of(&dir, index), Stage::Failed(Failure::Lost));
+}
+
+#[test]
+fn cr_220_a_cancel_that_was_not_stored_is_put_again_until_it_is() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, lockup, _) = instant_sale(&mut w);
+    w.block(&[spending_lockup(&lockup)]);
+    for _ in 0..4 {
+        w.block(&[]);
+    }
+    // The sale cannot be written: a directory is where its file is.
+    let sale_file = dir.path().join(format!("sale-{index}.bin"));
+    let saved = std::fs::read(&sale_file).unwrap();
+    std::fs::remove_file(&sale_file).unwrap();
+    std::fs::create_dir(&sale_file).unwrap();
+    // The refund depth: the swap is lost, and the cancel is not stored.
+    w.block(&[]);
+    assert_eq!(stage_of(&dir, index), Stage::Failed(Failure::Lost));
+    assert!(!record_of(&dir, index).failure_told);
+    assert!(!w.rig.node.counter().sale(index).unwrap().cancel_recorded());
+    // The next pump puts it again, and it is stored.
+    std::fs::remove_dir(&sale_file).unwrap();
+    std::fs::write(&sale_file, saved).unwrap();
+    w.block(&[]);
+    assert!(w.rig.node.counter().sale(index).unwrap().cancel_recorded());
+    assert!(record_of(&dir, index).failure_told);
+}
+
+#[test]
+fn cr_220_the_record_keeps_what_the_swap_was_told_and_reads_it_strictly() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, lockup, _) = instant_sale(&mut w);
+    w.block(&[spending_lockup(&lockup)]);
+    let bytes = std::fs::read(dir.path().join(format!("swap-{index}-0.bin"))).unwrap();
+    let record = SwapRecord::from_bytes(&bytes).unwrap();
+    assert!(record.told && !record.failure_told);
+    assert_eq!(record.spent_in, Some(w.tip.1));
+    assert_eq!(record.to_bytes(), bytes);
+    // Every cut is refused, a byte more is refused, and so is a flag that is
+    // not known.
+    for cut in 0..bytes.len() {
+        assert!(SwapRecord::from_bytes(&bytes[..cut]).is_err(), "{cut}");
+    }
+    let mut long = bytes.clone();
+    long.push(0);
+    assert!(SwapRecord::from_bytes(&long).is_err());
+    let flags = bytes.len() - 32 - 1;
+    let mut odd = bytes.clone();
+    odd[flags] |= 0x10;
+    assert!(SwapRecord::from_bytes(&odd).is_err());
+}
+
+#[test]
+fn cr_221_once_one_swap_of_a_sale_has_sent_its_claim_no_other_is_claimed() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let index = w.open();
+    w.serve();
+    let first = w.lockup_in_mempool();
+    w.rig
+        .node
+        .requote(index, usd(), rate(), &fresh(T0 + 30))
+        .unwrap();
+    w.at(10);
+    w.serve();
+    let second = w.lockup_in_mempool();
+    w.at(20);
+    w.serve();
+    w.block(&[first, second]);
+    // The first swap's claim is out; the second is not claimed, and its
+    // preimage is never shown.
+    assert_eq!(w.sent().len(), 1, "{:?}", w.sent());
+    let bytes = std::fs::read(dir.path().join(format!("swap-{index}-1.bin"))).unwrap();
+    let other = SwapRecord::from_bytes(&bytes).unwrap();
+    assert!(other.claims.is_empty());
+    assert!(matches!(other.machine.stage(), Stage::Locked(_)));
+    assert_eq!(record_of(&dir, index).claims.len(), 1);
 }

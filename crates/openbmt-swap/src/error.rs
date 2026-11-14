@@ -58,6 +58,14 @@ pub enum Refused {
         /// What the service promised.
         got: u64,
     },
+    /// SW-28: the amount on chain is below the least share of the invoice
+    /// (`MIN_ONCHAIN_PPM`).
+    OnchainBelowShare {
+        /// The least the share allows.
+        least: u64,
+        /// What the service promised.
+        got: u64,
+    },
     /// SW-30: no output of the transaction pays the lockup address.
     NoLockupOutput,
     /// SW-30: more than one output pays the lockup address.
@@ -84,6 +92,14 @@ pub enum Refused {
     BadPairs(&'static str),
     /// SW-61: a percentage is not a decimal the shop reads exactly.
     BadPercentage,
+    /// SW-60: the service counts more for its lockup's miner fee than
+    /// `MAX_LOCKUP_FEE_SATS`.
+    LockupFeeTooHigh {
+        /// The fee the terms name, in satoshis.
+        fee: u64,
+        /// The most that is accepted.
+        most: u64,
+    },
     /// SW-62: the amount is outside the service's own live limits.
     ServiceLimit {
         /// The least invoice amount the service takes now.
@@ -130,9 +146,10 @@ impl Refused {
             Self::LeafMismatch(_) => "SW-25",
             Self::WrongLockupAddress => "SW-26",
             Self::TimeoutTooSoon => "SW-27",
-            Self::OnchainTooSmall | Self::OnchainAboveInvoice | Self::OnchainBelowQuote { .. } => {
-                "SW-28"
-            }
+            Self::OnchainTooSmall
+            | Self::OnchainAboveInvoice
+            | Self::OnchainBelowQuote { .. }
+            | Self::OnchainBelowShare { .. } => "SW-28",
             Self::NoLockupOutput | Self::TwoLockupOutputs | Self::LockupTooSmall => "SW-30",
             Self::DestinationNetwork | Self::ClaimUnbuildable(_) => "SW-40",
             Self::FeeTooHigh => "SW-41",
@@ -141,6 +158,7 @@ impl Refused {
             Self::AlreadyClaimed => "SW-53",
             Self::BadState(_) => "SW-52",
             Self::BadPairs(_) => "SW-60",
+            Self::LockupFeeTooHigh { .. } => "SW-60",
             Self::BadPercentage => "SW-61",
             Self::ServiceLimit { .. } => "SW-62",
             Self::PairsStale => "SW-63",
@@ -182,6 +200,10 @@ impl fmt::Display for Refused {
             Self::OnchainBelowQuote { least, got } => {
                 write!(f, "the amount on chain is {got}, the quote leaves {least}")
             }
+            Self::OnchainBelowShare { least, got } => write!(
+                f,
+                "the amount on chain is {got}, the least share of the invoice is {least}"
+            ),
             Self::NoLockupOutput => f.write_str("no output pays the lockup address"),
             Self::TwoLockupOutputs => f.write_str("two outputs pay the lockup address"),
             Self::LockupTooSmall => f.write_str("the lockup pays less than promised"),
@@ -193,6 +215,12 @@ impl fmt::Display for Refused {
             Self::AlreadyClaimed => f.write_str("the swap is already claimed"),
             Self::BadState(w) => write!(f, "the state file is refused: {w}"),
             Self::BadPairs(w) => write!(f, "the service's terms are refused: {w}"),
+            Self::LockupFeeTooHigh { fee, most } => {
+                write!(
+                    f,
+                    "the service counts {fee} for its lockup, the most is {most}"
+                )
+            }
             Self::BadPercentage => f.write_str("the percentage is not read exactly"),
             Self::ServiceLimit { min, max } => {
                 write!(f, "the service's own limit is {min} to {max} satoshis")

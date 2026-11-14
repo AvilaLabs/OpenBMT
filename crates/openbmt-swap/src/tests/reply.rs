@@ -493,6 +493,66 @@ fn sw_28_the_amount_on_chain_is_above_the_floor_and_the_quote() {
 }
 
 #[test]
+fn sw_28_the_service_never_takes_more_than_a_tenth_of_the_invoice() {
+    use crate::MIN_ONCHAIN_PPM;
+    assert_eq!(MIN_ONCHAIN_PPM, 900_000);
+    // A greedy quote: the service's percentage and its lockup fee together
+    // are 40 percent. Promising 60,000 of 100,000 passes the quote, and not
+    // the share.
+    let s = secrets();
+    let mut e = expect(&s);
+    e.quote = Quote {
+        fee_ppm: 100_000,
+        lockup_fee_sats: 25_000,
+    };
+    let mut fx = Fx::good();
+    fx.onchain = "65000".into();
+    assert_eq!(
+        check(&fx.parse().unwrap(), &e).unwrap_err(),
+        Refused::OnchainBelowShare {
+            least: 90_000,
+            got: 65_000
+        }
+    );
+    // Exactly 90 percent is taken, a satoshi less is not.
+    fx.onchain = "90000".into();
+    assert!(check(&fx.parse().unwrap(), &e).is_ok());
+    fx.onchain = "89999".into();
+    assert_eq!(check(&fx.parse().unwrap(), &e).unwrap_err().rule(), "SW-28");
+    // Rounded up: 90 percent of 100,001 is 90,000.9, so 90,001.
+    let mut e = expect(&s);
+    e.invoice_sats = 100_001;
+    e.quote = Quote {
+        fee_ppm: 100_000,
+        lockup_fee_sats: 25_000,
+    };
+    let mut fx = Fx::good();
+    fx.invoice = format!(
+        "\"{}\"",
+        invoice(s.preimage_hash(), 100_001, "tbs", NOW - 10, 3600)
+    );
+    fx.onchain = "90000".into();
+    assert_eq!(
+        check(&fx.parse().unwrap(), &e).unwrap_err(),
+        Refused::OnchainBelowShare {
+            least: 90_001,
+            got: 90_000
+        }
+    );
+    fx.onchain = "90001".into();
+    assert!(check(&fx.parse().unwrap(), &e).is_ok());
+    // The quote's own floor still comes first when both fail.
+    let mut e = expect(&s);
+    e.quote = QUOTE;
+    let mut fx = Fx::good();
+    fx.onchain = "50000".into();
+    assert!(matches!(
+        check(&fx.parse().unwrap(), &e).unwrap_err(),
+        Refused::OnchainBelowQuote { .. }
+    ));
+}
+
+#[test]
 fn sw_28_the_quote_rounds_the_percentage_up() {
     let quote = Quote {
         fee_ppm: 2_500,

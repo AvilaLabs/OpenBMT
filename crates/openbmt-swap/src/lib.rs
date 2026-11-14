@@ -83,6 +83,17 @@ pub const MIN_INVOICE_LIFE_SECS: u64 = 300;
 pub const MIN_CLAIM_BLOCKS: u64 = 36;
 /// SW-28: the least amount on chain, in satoshis.
 pub const MIN_ONCHAIN_SATS: u64 = 1_000;
+/// SW-28: the least share of the invoice amount the service may promise on
+/// chain, in parts per million, rounded up: 90 percent. The service's
+/// percentage and its lockup fee together never take more than the rest.
+/// **[to tune]**
+pub const MIN_ONCHAIN_PPM: u64 = 900_000;
+/// SW-60: the most the service may count for its lockup's miner fee, in
+/// satoshis. Terms above it are refused. **[to tune]**
+pub const MAX_LOCKUP_FEE_SATS: u64 = 25_000;
+/// SW-44: the least blocks between the chain tip and the timeout for the
+/// claim, which shows the preimage, to be built and sent. **[to tune]**
+pub const CLAIM_MARGIN_BLOCKS: u64 = 18;
 
 /// SW-63: the most seconds the service's terms are used after they were
 /// read. **[to tune]**

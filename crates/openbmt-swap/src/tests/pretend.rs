@@ -80,6 +80,8 @@ fn sw_90_the_pretend_service_plays_a_whole_swap_without_a_node() {
             now_secs: NOW,
             tip_height: TIP,
             accept_unconfirmed: false,
+            behind: false,
+            lockup_on_chain: false,
         };
         let m = ReverseSwap::new(state);
         // Nothing yet.
@@ -175,6 +177,8 @@ fn sw_91_the_refusals_hold_against_the_pretend_service() {
         now_secs: NOW,
         tip_height: TIP,
         accept_unconfirmed: true,
+        behind: false,
+        lockup_on_chain: false,
     };
     let m = ReverseSwap::new(state);
     let lockup = p.pretend_lockup();
@@ -222,6 +226,8 @@ fn sw_90_regtest_swap_from_pairs_to_paid() {
         now_secs: NOW,
         tip_height: tip,
         accept_unconfirmed: false,
+        behind: false,
+        lockup_on_chain: false,
     };
     let m = ReverseSwap::new(state);
     // The service makes a real lockup to the address it promised, and says

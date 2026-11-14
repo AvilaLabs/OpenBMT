@@ -15,6 +15,7 @@
 //! locked, the lockup's transaction id (32), output index (4), value (8) and
 //! flags (1: bit 0 confirmed, bit 1 signals replacement); for paid, the
 //! height of the block (4); for failed, the failure (1); none otherwise.
+//! The failure "lost" (7) agrees with a state that holds a claim or not.
 
 use bitcoin::hashes::Hash;
 use bitcoin::{OutPoint, Transaction, Txid};
@@ -24,7 +25,7 @@ use crate::error::Refused;
 use crate::lockup::{check_lockup, LockupSeen, Seen};
 use crate::state::{Phase, SwapState};
 use crate::status::{Status, StatusKind};
-use crate::{POLL_LOCKED_SECS, POLL_WAITING_SECS};
+use crate::{CLAIM_MARGIN_BLOCKS, POLL_LOCKED_SECS, POLL_WAITING_SECS};
 
 /// SW-73: the first four bytes of a saved machine.
 pub const MAGIC_FOLLOW: [u8; 4] = *b"OBM'";
@@ -42,10 +43,15 @@ pub enum Failure {
     SwapExpired,
     /// The service said it took its lockup back.
     Refunded,
-    /// The chain reached the timeout before the claim was sent.
+    /// The chain reached the timeout, or came within `CLAIM_MARGIN_BLOCKS`
+    /// of it, before the claim was sent.
     TimedOut,
     /// The lockup the service pointed to is not what was promised (SW-30).
     LockupRefused,
+    /// The lockup was spent by a transaction that is not the shop's claim
+    /// (the service's refund), or the timeout came with the claim not in a
+    /// block. The claim, if one was sent, is lost.
+    Lost,
 }
 
 impl Failure {
@@ -57,6 +63,7 @@ impl Failure {
             Self::Refunded => 4,
             Self::TimedOut => 5,
             Self::LockupRefused => 6,
+            Self::Lost => 7,
         }
     }
 
@@ -68,6 +75,7 @@ impl Failure {
             4 => Self::Refunded,
             5 => Self::TimedOut,
             6 => Self::LockupRefused,
+            7 => Self::Lost,
             _ => return None,
         })
     }
@@ -84,7 +92,8 @@ pub enum Stage {
     Locked(LockupSeen),
     /// The claim was built and handed over, and is not yet seen confirmed.
     ClaimSent,
-    /// The claim was seen confirmed, in a block of this height. Paid.
+    /// The claim was seen at the shop's refund depth, the first block of it
+    /// at this height. Paid.
     Paid {
         /// The height of the block.
         height: u32,
@@ -103,6 +112,22 @@ pub struct Ctx {
     /// Whether the shop sends the claim for a lockup that is not yet in a
     /// block (the service can still replace it; SW-31). The shop's rule.
     pub accept_unconfirmed: bool,
+    /// The chain is behind: a header is known above the height checked in
+    /// full (WR-54), so the tip is not to be trusted for the claim's
+    /// margin. The claim waits.
+    pub behind: bool,
+    /// The shop's own watch holds a lockup of the swap, in a block or seen.
+    /// A status of the service cannot end such a swap (SW-72): only the
+    /// chain or the timeout does.
+    pub lockup_on_chain: bool,
+}
+
+impl Ctx {
+    /// Whether the claim, which shows the preimage, still has
+    /// `CLAIM_MARGIN_BLOCKS` before `timeout`.
+    fn margin_left(&self, timeout: u32) -> bool {
+        u64::from(self.tip_height).saturating_add(CLAIM_MARGIN_BLOCKS) <= u64::from(timeout)
+    }
 }
 
 /// What to do next.
@@ -191,6 +216,15 @@ impl ReverseSwap {
             Stage::Announced if late => fail(Failure::TimedOut),
             Stage::Announced => (self.clone(), Next::CheckLockup),
             Stage::Locked(_) if late => fail(Failure::TimedOut),
+            // SW-44: too few blocks are left to claim and show the preimage.
+            Stage::Locked(_) if !ctx.margin_left(self.state.timeout()) => fail(Failure::TimedOut),
+            // A chain that is behind has no tip to measure the margin by.
+            Stage::Locked(_) if ctx.behind => (
+                self.clone(),
+                Next::Wait {
+                    poll_after_secs: POLL_LOCKED_SECS,
+                },
+            ),
             Stage::Locked(lockup) if lockup.confirmed || ctx.accept_unconfirmed => {
                 (self.clone(), Next::BuildClaim { lockup })
             }
@@ -218,7 +252,10 @@ impl ReverseSwap {
     /// if the caller had found them, and always as not yet in a block,
     /// whatever the service says. A status that says the swap has failed
     /// ends it, so that the preimage is not shown for a swap the service has
-    /// given up. After the claim is sent, a status changes nothing.
+    /// given up, unless the shop's own watch holds the lockup
+    /// (`ctx.lockup_on_chain`): then neither such a status nor bytes that
+    /// are refused change the swap, and only the chain or the timeout ends
+    /// it. After the claim is sent, a status changes nothing.
     pub fn on_status(&self, status: &Status, ctx: &Ctx) -> (Self, Next) {
         if !matches!(
             self.stage,
@@ -226,14 +263,21 @@ impl ReverseSwap {
         ) {
             return self.settle(ctx);
         }
+        let failed = |failure: Failure| {
+            if ctx.lockup_on_chain {
+                self.stage
+            } else {
+                Stage::Failed(failure)
+            }
+        };
         let next_stage = match status.kind() {
             StatusKind::SwapCreated | StatusKind::InvoiceSettled | StatusKind::Unknown(_) => {
                 self.stage
             }
-            StatusKind::InvoiceExpired => Stage::Failed(Failure::InvoiceExpired),
-            StatusKind::TransactionFailed => Stage::Failed(Failure::LockupFailed),
-            StatusKind::SwapExpired => Stage::Failed(Failure::SwapExpired),
-            StatusKind::TransactionRefunded => Stage::Failed(Failure::Refunded),
+            StatusKind::InvoiceExpired => failed(Failure::InvoiceExpired),
+            StatusKind::TransactionFailed => failed(Failure::LockupFailed),
+            StatusKind::SwapExpired => failed(Failure::SwapExpired),
+            StatusKind::TransactionRefunded => failed(Failure::Refunded),
             StatusKind::TransactionMempool | StatusKind::TransactionConfirmed => {
                 match status.transaction() {
                     None => match self.stage {
@@ -246,7 +290,7 @@ impl ReverseSwap {
                             Stage::Locked(old) if old.outpoint == l.outpoint => self.stage,
                             _ => Stage::Locked(l),
                         },
-                        Err(_) => Stage::Failed(Failure::LockupRefused),
+                        Err(_) => failed(Failure::LockupRefused),
                     },
                 }
             }
@@ -281,11 +325,19 @@ impl ReverseSwap {
     /// SW-40 to SW-44: build the claim of the lockup that was checked, at
     /// `fee_rate_per_kvb`. Returns the machine at "claim sent" and the
     /// transaction. The caller keeps the new machine before it hands the
-    /// transaction to the network.
+    /// transaction to the network. The claim shows the preimage, so it is
+    /// refused (SW-44) with fewer than `CLAIM_MARGIN_BLOCKS` before the
+    /// timeout, and while the chain is behind.
     pub fn claim(&self, fee_rate_per_kvb: u64, ctx: &Ctx) -> Result<(Self, Transaction), Refused> {
         let Stage::Locked(lockup) = self.stage else {
             return Err(Refused::NotReady("no lockup has been checked"));
         };
+        if !ctx.margin_left(self.state.timeout()) {
+            return Err(Refused::TooLate);
+        }
+        if ctx.behind {
+            return Err(Refused::NotReady("the chain is behind"));
+        }
         let tx = build_claim(&self.state, &lockup, fee_rate_per_kvb, ctx.tip_height)?;
         let state = self.state.claimed(tx.compute_txid())?;
         Ok((
@@ -315,6 +367,18 @@ impl ReverseSwap {
         let tx = rebuild_claim(&self.state, lockup, fee_rate_per_kvb, ctx.tip_height)?;
         let state = self.state.reclaimed(tx.compute_txid())?;
         Ok((self.with_state(state, Stage::ClaimSent), tx))
+    }
+
+    /// SW-44: the lockup was spent by a transaction that is not the shop's
+    /// claim, or the timeout came with no claim in a block: the swap ends,
+    /// lost. Allowed while a lockup is held or the claim is sent.
+    pub fn lost(&self) -> Result<Self, Refused> {
+        match self.stage {
+            Stage::Locked(_) | Stage::ClaimSent => {
+                Ok(self.with_state(self.state.clone(), Stage::Failed(Failure::Lost)))
+            }
+            _ => Err(Refused::NotReady("no lockup is held")),
+        }
     }
 
     /// SW-72: the caller saw the claim in a block of this height. Only the
@@ -428,6 +492,8 @@ impl ReverseSwap {
         let agrees = match stage {
             Stage::ClaimSent | Stage::Paid { .. } => claimed,
             Stage::Locked(l) => !claimed && l.value_sats >= state.onchain_sats(),
+            // A lost swap may or may not have had its claim sent.
+            Stage::Failed(Failure::Lost) => true,
             _ => !claimed,
         };
         if !agrees {

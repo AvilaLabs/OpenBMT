@@ -337,6 +337,16 @@ pub struct Counter {
     /// Sales whose cancel is already in the pause tracker in memory but not
     /// yet marked on the sale, so that a retry does not count it twice.
     cancel_applied: BTreeSet<u32>,
+    /// The confirmations of the claim of each swap payment, as the node last
+    /// told them (CR-221). Memory only: the node tells them again after a
+    /// start, and until then a sale that was reported paid or final stays so.
+    swap_claims: BTreeMap<u32, u32>,
+    /// CR-221: the swaps whose lockup is spent now by a transaction that is
+    /// not the shop's claim, in a block of the chain, as the node last told.
+    swap_spent: BTreeSet<u32>,
+    /// CR-221: the ids of the claims the node built for a sale, as the node
+    /// last told: the sale's own payments, which are not late ones.
+    swap_claim_ids: BTreeMap<u32, Vec<Txid>>,
     /// Sales whose refund entries were taken from the counter's records and
     /// differ from what is stored, so that the stored sale is written again
     /// before the next refund call acts (CR-73).
@@ -423,6 +433,9 @@ impl Counter {
             pause: PauseTracker::new(),
             pause_unsaved: false,
             cancel_applied: BTreeSet::new(),
+            swap_claims: BTreeMap::new(),
+            swap_spent: BTreeSet::new(),
+            swap_claim_ids: BTreeMap::new(),
             refund_unsaved: BTreeSet::new(),
             records: RecordLog::new(),
             refund_book: BTreeMap::new(),
@@ -1361,6 +1374,9 @@ impl Counter {
             self.till_cancelled.remove(&index);
             self.refund_book.remove(&index);
             self.cancel_applied.remove(&index);
+            self.swap_claims.remove(&index);
+            self.swap_spent.remove(&index);
+            self.swap_claim_ids.remove(&index);
             self.refund_unsaved.remove(&index);
             count += 1;
         }
@@ -2178,6 +2194,7 @@ impl Counter {
         if sale.watch.transactions().next().is_some()
             || sale.accepted.is_some()
             || sale.overridden.is_some()
+            || sale.lightning.is_some()
             || !sale.is_live()
         {
             return Err(CancelRefused::MoneyArrived);
@@ -2307,7 +2324,13 @@ impl Counter {
         };
         // CR-221: what a swap's claim pays the sale's address is the sale's
         // own payment, not a late one.
-        if base.via_swap {
+        // A payment that is not one of the claims the node told is late.
+        if base.via_swap
+            && self
+                .swap_claim_ids
+                .get(&index)
+                .is_none_or(|ids| ids.contains(&txid))
+        {
             return Ok(());
         }
         if base.late.iter().any(|(t, _)| *t == txid)
@@ -2613,21 +2636,24 @@ impl Counter {
     }
 
     /// CR-221, CR-109: the swap provider's bitcoin for a sale is locked and
-    /// the claim to the sale's own address is built, so the sale is paid
-    /// over Lightning. `instant` is the decision of [`Counter::swap_decide`]
-    /// when the lockup is not yet in a block: the amount at risk is counted
-    /// in the exposure ledger as for any instant sale (CR-13) until the
-    /// lockup confirms ([`Counter::swap_lockup_confirmed`]). With `None` the
-    /// lockup is in a block and nothing is counted.
+    /// the claim to the sale's own address is built, so the sale holds the
+    /// swap's payment. `instant` is the decision of [`Counter::swap_decide`]
+    /// when the lockup is not yet in a block: the sale is then paid at once
+    /// and the amount at risk, what the claim pays the sale's address, is
+    /// counted in the exposure ledger as for any instant sale (CR-13) until
+    /// the claim's first confirmation ([`Counter::swap_claim_depth`]). With
+    /// `None` the sale is paid when the claim is in a block at the shop's
+    /// depth, and until then it waits.
     ///
     /// The sale keeps the payment hash and `received_sats`, what the claim
     /// pays the sale's address, in place of the node's millisatoshis. The
     /// customer paid `invoice_sats`, which must cover a quote of the sale.
-    /// Refused as [`Counter::lightning_paid`] refuses. `Ok(None)` when the
-    /// exposure could not be counted (the slice is full or the ledger could
-    /// not be written): nothing was changed and the payment waits for the
-    /// lockup's confirmation. The writes are those of `lightning_paid`,
-    /// after the ledger.
+    /// Refused as [`Counter::lightning_paid`] refuses. The sale is then
+    /// judged by the claim's confirmations (CR-221, CR-30): `PaidInstant` if
+    /// it was accepted at once, `Confirmed` and `Final` at the shop's depth
+    /// and refund depth. `Ok(None)` when the exposure could not be counted
+    /// (the slice is full or the ledger could not be written): nothing was
+    /// changed. The writes are those of `lightning_paid`, after the ledger.
     pub fn swap_paid<C: HeaderChain + ?Sized, S: Store>(
         &mut self,
         index: u32,
@@ -2664,6 +2690,15 @@ impl Counter {
         {
             return Err(LightningRefused::PaidAnotherWay);
         }
+        // What the swap's own claims pay the address is the sale's payment,
+        // not a surplus.
+        let received = received.saturating_sub(self.claims_paid(&sale));
+        if instant.is_none() && !sale.exposure_counted {
+            // An earlier try counted the exposure and then did not store the
+            // sale: this one holds the payment without it, so none is left.
+            self.release_exposure(index, store)
+                .map_err(LightningRefused::Store)?;
+        }
         let least = sale
             .quotes
             .iter()
@@ -2677,8 +2712,9 @@ impl Counter {
             });
         }
         if let Some((label, mode)) = instant {
+            // CR-221: what is at risk is what the claim pays the shop.
             if self
-                .accept_exposure(index, paid.invoice_sats, mode, store)
+                .accept_exposure(index, paid.received_sats, mode, store)
                 .is_err()
             {
                 return Ok(None);
@@ -2698,7 +2734,6 @@ impl Counter {
         };
         sale.lightning = Some(lightning);
         sale.via_swap = true;
-        sale.books_final = true;
         let mut events = vec![Event::PaidByLightning {
             index,
             at: now,
@@ -2720,55 +2755,168 @@ impl Counter {
                 sats: received,
             });
         }
-        if sale.pos != PosState::Paid {
-            sale.pos = PosState::Paid;
-            events.push(Event::PosPaid { index, at: now });
-            reports.push(Report::PosPaid { index });
-        }
-        reports.push(Report::BooksFinal {
-            index,
-            amount: sale.own_amount(),
-            currency: sale.currency,
-            received_sats: paid.received_sats,
-        });
         self.swap_pending.remove(&index);
         if let Err(e) = self.finish(store, sale, &events) {
             // The exposure counted above stays: the sale is accepted by the
             // next try, which does not count it twice.
             return Err(LightningRefused::Store(e));
         }
+        // The sale is now judged by its claim: paid at once, or confirmed.
         let mut screen = self
             .judge_checked(index, facts, &own, store)
             .map_err(LightningRefused::Judge)?;
+        reports.append(&mut screen.reports);
         screen.reports = reports;
         Ok(Some(screen))
     }
 
-    /// CR-221, CR-15: the lockup of a sale paid before its bitcoin was in a
-    /// block is now in one: the exposure leaves the ledger. Asking again
-    /// changes nothing.
-    pub fn swap_lockup_confirmed<S: Store>(
+    /// CR-221, CR-15, CR-30: the claim of a swap's payment has this many
+    /// confirmations now, from the node: 0 when it is not in a block,
+    /// including a claim that was in one and left it. The depth is kept
+    /// whether or not the sale was paid yet. A sale paid through the swap is
+    /// judged again: the exposure counted for it leaves the ledger at the
+    /// first confirmation, and it is `Confirmed` and `Final` at the shop's
+    /// depth and refund depth as an on-chain payment is. The returned reports
+    /// hold what the POS and the books are told. Asking again changes
+    /// nothing.
+    pub fn swap_claim_depth<C: HeaderChain + ?Sized, S: Store>(
         &mut self,
         index: u32,
+        confirmations: u32,
+        facts: &Facts<'_, C>,
+        store: &mut S,
+    ) -> Result<Vec<Report>, JudgeError<S::Error>> {
+        self.swap_claims.insert(index, confirmations);
+        let judged = self.sales.get(&index).is_some_and(|s| s.paid_via_swap());
+        if !judged || self.unreadable.contains(&index) {
+            return Ok(Vec::new());
+        }
+        let own = OwnCheck::Mixed(OwnNodeHealth::not_configured());
+        Ok(self.judge_checked(index, facts, &own, store)?.reports)
+    }
+
+    /// CR-221: the greatest depth now of any of `claims`, the transactions
+    /// the node built to claim a swap's lockup, as the sale's own watch of
+    /// its address holds them. It lets the node know a claim that was mined
+    /// while the counter was off. 0 when the sale holds none in a block.
+    pub fn swap_claim_seen<C: HeaderChain + ?Sized>(
+        &self,
+        index: u32,
+        claims: &[Txid],
+        chain: &C,
+    ) -> u32 {
+        let Some(sale) = self.sales.get(&index) else {
+            return 0;
+        };
+        claims
+            .iter()
+            .filter_map(|txid| sale.watch.depth_of(chain, txid))
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// What the claims the node told pay the sale's address, as its watch
+    /// holds them.
+    fn claims_paid(&self, sale: &Sale) -> u64 {
+        let Some(ids) = self.swap_claim_ids.get(&sale.index) else {
+            return 0;
+        };
+        sale.watch
+            .transactions()
+            .filter(|tx| ids.contains(&tx.compute_txid()))
+            .flat_map(|tx| tx.output.iter())
+            .filter(|o| o.script_pubkey == sale.script)
+            .fold(0u64, |sum, o| sum.saturating_add(o.value.to_sat()))
+    }
+
+    /// CR-221, CR-19: the ids of the claims the node built for a sale. They
+    /// are the sale's own payments; any other payment to its address is a
+    /// late one.
+    pub fn set_swap_claims(&mut self, index: u32, claims: &[Txid]) {
+        if claims.is_empty() {
+            self.swap_claim_ids.remove(&index);
+        } else {
+            self.swap_claim_ids.insert(index, claims.to_vec());
+        }
+    }
+
+    /// The ids of the claims the node told for a sale.
+    #[cfg(test)]
+    pub(crate) fn swap_claim_ids_of(&self, index: u32) -> Vec<Txid> {
+        self.swap_claim_ids.get(&index).cloned().unwrap_or_default()
+    }
+
+    /// CR-221, CR-224: the newest claim of a swap pays the sale's address
+    /// this many satoshis. The payment the sale holds is changed to it; the
+    /// exposure counted at the first claim stays. Asking again changes
+    /// nothing.
+    pub fn swap_claim_amount<S: Store>(
+        &mut self,
+        index: u32,
+        received_sats: u64,
         store: &mut S,
     ) -> Result<(), StoreFault<S::Error>> {
         let Some(base) = self.sales.get(&index) else {
             return Ok(());
         };
-        if !base.via_swap || base.exposure_released || !base.exposure_counted {
+        let Some(paid) = base.lightning.as_ref().filter(|_| base.via_swap) else {
+            return Ok(());
+        };
+        let msat = received_sats.saturating_mul(1_000);
+        if received_sats == 0 || paid.amount_msat == msat {
             return Ok(());
         }
         let mut sale = base.clone();
-        self.release_exposure(index, store)?;
-        sale.exposure_released = true;
-        self.put_sale(store, sale)
+        if let Some(p) = sale.lightning.as_mut() {
+            p.amount_msat = msat;
+        }
+        self.finish(store, sale, &[])
     }
 
-    /// CR-221, CR-14: a sale paid by a swap before its lockup was in a
-    /// block, whose lockup was replaced or never came to the claim, is a
-    /// cancel: the pause tracker and the alarm, the POS told the sale is not
-    /// paid, and the sale shows that the goods are not to be handed over.
-    /// Once per sale; the exposure stays counted until the owner releases it.
+    /// CR-221, CR-14: the lockup of a swap is spent now, in a block of the
+    /// chain, by a transaction that is not the shop's claim (or was
+    /// replaced), or it is not any more. A sale the swap paid is taken back
+    /// while it is, as a conflict on a sale accepted at once is (CR-14), and
+    /// is judged by its claim again when the spend leaves the chain. The
+    /// returned reports hold what the POS is told. Asking again changes
+    /// nothing.
+    pub fn swap_lockup_spent<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        index: u32,
+        spent: bool,
+        facts: &Facts<'_, C>,
+        store: &mut S,
+    ) -> Result<Vec<Report>, JudgeError<S::Error>> {
+        let changed = if spent {
+            self.swap_spent.insert(index)
+        } else {
+            self.swap_spent.remove(&index)
+        };
+        let judged = self.sales.get(&index).is_some_and(|s| s.paid_via_swap());
+        if !changed || !judged || self.unreadable.contains(&index) {
+            return Ok(Vec::new());
+        }
+        let own = OwnCheck::Mixed(OwnNodeHealth::not_configured());
+        Ok(self.judge_checked(index, facts, &own, store)?.reports)
+    }
+
+    /// CR-221: the shop's confirmation depth and refund depth, which the
+    /// claim of a swap payment is measured against (CR-12, CR-66).
+    pub fn swap_depths(&self) -> (u32, u32) {
+        (self.depth(), self.final_depth())
+    }
+
+    /// CR-221, CR-14: a swap whose payment the sale holds was lost: the
+    /// lockup was spent by a transaction that is not the shop's claim (the
+    /// provider's refund), or the timeout came with the claim not in a
+    /// block, or the lockup a sale was paid at once on was replaced. The
+    /// payment is taken back, as a conflict on a sale accepted at once is
+    /// (CR-14): the sale shows that the goods are not to be handed over. A
+    /// sale that was paid at once, or reported paid (confirmed), also raises
+    /// the cancel: the pause tracker and the alarm, and the POS is told the
+    /// sale is not paid. A sale that was not yet reported paid is only taken
+    /// back. A sale the swap never paid changes nothing. Once per sale; the
+    /// exposure stays counted until the owner releases it.
     pub fn swap_cancelled<S: Store>(
         &mut self,
         index: u32,
@@ -2778,21 +2926,30 @@ impl Counter {
         let Some(base) = self.sales.get(&index) else {
             return Ok(Vec::new());
         };
-        if !base.via_swap || base.cancel_recorded || base.accepted.is_none() {
+        if !base.via_swap || base.cancel_recorded || base.lightning.is_none() {
             return Ok(Vec::new());
         }
+        // Paid at once, or reported paid at the shop's depth, even if the
+        // claim has left the chain since and the POS was told so.
+        let was_paid =
+            base.accepted.is_some() || base.pos == PosState::Paid || base.confirmed_logged;
         let mut sale = base.clone();
-        self.raise_cancel(index, now, store)?;
-        sale.cancel_recorded = true;
         let mut events = vec![Event::Replaced { index, at: now }];
-        let mut reports = vec![Report::Alarm { index }];
+        let mut reports = Vec::new();
+        if was_paid {
+            self.raise_cancel(index, now, store)?;
+            reports.push(Report::Alarm { index });
+        }
+        sale.cancel_recorded = true;
         if sale.pos == PosState::Paid {
             sale.pos = PosState::Unpaid;
             events.push(Event::PosUnpaid { index, at: now });
             reports.push(Report::PosUnpaid { index });
         }
         self.finish(store, sale, &events)?;
-        self.cancel_applied.remove(&index);
+        if was_paid {
+            self.cancel_applied.remove(&index);
+        }
         Ok(reports)
     }
 
@@ -3302,15 +3459,19 @@ impl Counter {
         // that arrive there are a late payment (CR-19) and nothing else is
         // judged.
         if let Some(paid) = sale.lightning {
-            // CR-221: a swap payment accepted before its lockup was in a
-            // block, whose lockup was then replaced, is a cancel (CR-14).
-            if (sale.via_swap || sale.rests_on_fundings()) && sale.cancel_recorded {
-                let why = if sale.via_swap {
-                    Why::Replaced
-                } else {
-                    Why::FundingLost
-                };
-                let mut screen = screen_of(State::DoNotHandOver, why, Next::AskOwnerOrOtherPayment);
+            // CR-221: a swap payment is the claim to the sale's own address,
+            // judged by the claim's confirmations as an on-chain payment is.
+            if sale.via_swap {
+                return self.judge_swap(sale, paid, facts, store);
+            }
+            // A payment that rests on channel fundings, whose funding was
+            // lost, is a cancel (CR-14).
+            if sale.rests_on_fundings() && sale.cancel_recorded {
+                let mut screen = screen_of(
+                    State::DoNotHandOver,
+                    Why::FundingLost,
+                    Next::AskOwnerOrOtherPayment,
+                );
                 screen.received_sats = paid.sats();
                 screen.needs_sats = paid.sats();
                 screen.late = sale.is_late();
@@ -3696,6 +3857,173 @@ impl Counter {
             }),
             Err(e) => Err(JudgeError::Store(e)),
         }
+    }
+
+    /// CR-221: the confirmations of the claim of a swap payment, as the node
+    /// last told them. Before the node has told (a restart), a sale that was
+    /// final stays at the refund depth and one reported confirmed at the
+    /// shop's depth.
+    fn swap_claim_confirmations(&self, sale: &Sale) -> u32 {
+        self.swap_claims
+            .get(&sale.index)
+            .copied()
+            .unwrap_or_else(|| {
+                if sale.books_final {
+                    self.final_depth()
+                } else if sale.confirmed_logged && sale.pos == PosState::Paid {
+                    self.depth()
+                } else if sale.exposure_released {
+                    1
+                } else {
+                    0
+                }
+            })
+    }
+
+    /// CR-221: judge a sale paid through a swap provider. Its payment is the
+    /// claim to the sale's own address, so it is judged as an on-chain
+    /// payment is: `PaidInstant` when accepted at once and the claim is not
+    /// yet in a block, `Confirmed` at the shop's depth, `Final` at the refund
+    /// depth (CR-12, CR-30). A claim that was in a block and left it takes
+    /// the sale back (`Reopened`, as CR-14 for a reorg) until it is back, and
+    /// a swap that was lost is a cancel ([`Counter::swap_cancelled`]). The
+    /// exposure counted for an instant sale leaves the ledger at the claim's
+    /// first confirmation (CR-15).
+    fn judge_swap<C: HeaderChain + ?Sized, S: Store>(
+        &mut self,
+        mut sale: Sale,
+        paid: LightningPaid,
+        facts: &Facts<'_, C>,
+        store: &mut S,
+    ) -> Result<Screen, JudgeError<S::Error>> {
+        let (index, now, sats) = (sale.index, facts.now, paid.sats());
+        let depth = self.depth();
+        let final_depth = self.final_depth();
+        let conf = self.swap_claim_confirmations(&sale);
+        // CR-224: the books carry what the claim in a block paid, which may
+        // be an earlier, larger one than the newest.
+        let mined = sale.watch.sats_at_depth(facts.chain, 1);
+        let booked = if conf >= 1 && mined > 0 { mined } else { sats };
+        let spent = self.swap_spent.contains(&index);
+        let mut events: Vec<Event> = Vec::new();
+        let mut reports: Vec<Report> = Vec::new();
+        if spent && !sale.cancel_recorded {
+            // The provider's refund, in a block: the sale is taken back at
+            // once; the swap is lost at the refund depth.
+            let was_paid = sale.accepted.is_some()
+                || sale.overridden.is_some()
+                || sale.pos == PosState::Paid
+                || sale.confirmed_logged;
+            if was_paid && !self.cancel_applied.contains(&index) {
+                self.raise_cancel(index, now, store)
+                    .map_err(JudgeError::Store)?;
+                reports.push(Report::Alarm { index });
+            }
+        }
+        let (state, why, next) = if sale.cancel_recorded || spent {
+            (
+                State::DoNotHandOver,
+                Why::Replaced,
+                Next::AskOwnerOrOtherPayment,
+            )
+        } else if sale.books_final || conf >= final_depth {
+            (State::Final, Why::FinalAt(conf), Next::Nothing)
+        } else if conf >= depth {
+            (
+                State::Confirmed,
+                Why::ConfirmedAt(conf),
+                Next::FinalAt { depth: final_depth },
+            )
+        } else if (conf == 0 && sale.exposure_released)
+            || (sale.confirmed_logged && (conf == 0 || sale.accepted.is_none()))
+        {
+            // The claim was in a block, which released the exposure or
+            // reported the sale confirmed, and it left the chain: the sale is
+            // taken back until it is back, accepted at once or not (CR-30).
+            (
+                State::DoNotHandOver,
+                Why::Reopened,
+                Next::AskOwnerOrOtherPayment,
+            )
+        } else if let Some(mark) = &sale.overridden {
+            (
+                State::Overridden,
+                Why::OverriddenBy { role: mark.role },
+                Next::WaitForConfirmation { depth },
+            )
+        } else if let Some((label, _)) = sale.accepted {
+            (
+                State::PaidInstant,
+                Why::Instant(label),
+                Next::WaitForConfirmation { depth },
+            )
+        } else {
+            (State::Waiting, Why::NotSeenEnough, Next::KeepWatching)
+        };
+
+        // CR-15: the exposure leaves the ledger at the claim's first
+        // confirmation.
+        if conf >= 1 && sale.exposure_counted && !sale.exposure_released {
+            self.release_exposure(sale.index, store)
+                .map_err(JudgeError::Store)?;
+            sale.exposure_released = true;
+        }
+
+        // CR-30 to CR-32: what the POS and the books are told.
+        if state.is_paid() {
+            if matches!(state, State::Confirmed | State::Final)
+                && (!sale.confirmed_logged || sale.pos != PosState::Paid)
+            {
+                sale.confirmed_logged = true;
+                events.push(Event::Confirmed {
+                    index,
+                    at: now,
+                    received_sats: booked,
+                    depth: conf,
+                });
+            }
+            if sale.pos != PosState::Paid {
+                if let (State::PaidInstant, Some((label, mode))) = (state, sale.accepted) {
+                    events.push(Event::PaidAtOnce {
+                        index,
+                        at: now,
+                        at_risk_sats: sats,
+                        label,
+                        mode,
+                    });
+                }
+                sale.pos = PosState::Paid;
+                events.push(Event::PosPaid { index, at: now });
+                reports.push(Report::PosPaid { index });
+            }
+            if state == State::Final && !sale.books_final {
+                sale.books_final = true;
+                reports.push(Report::BooksFinal {
+                    index,
+                    amount: sale.own_amount(),
+                    currency: sale.currency,
+                    received_sats: booked,
+                });
+            }
+        } else if state == State::DoNotHandOver && sale.pos == PosState::Paid {
+            sale.pos = PosState::Unpaid;
+            events.push(Event::PosUnpaid { index, at: now });
+            reports.push(Report::PosUnpaid { index });
+            events.push(if sale.cancel_recorded || spent {
+                Event::Replaced { index, at: now }
+            } else {
+                Event::Reopened { index, at: now }
+            });
+        }
+
+        let mut screen = screen_of(state, why, next);
+        screen.received_sats = sats;
+        screen.needs_sats = sats;
+        screen.late = sale.is_late();
+        screen.reports = reports;
+        self.finish(store, sale, &events)
+            .map_err(JudgeError::Store)?;
+        Ok(screen)
     }
 
     /// CR-13: count the amount at risk in the exposure ledger, under the
@@ -4407,6 +4735,16 @@ impl Counter {
         );
         // CR-111: what arrived over Lightning is received and final at once.
         if let Some(paid) = &sale.lightning {
+            // CR-224: a swap payment is the claim on the chain, to the
+            // sale's own address: counted once, at the claim's depth.
+            if sale.via_swap {
+                // What the claim in a block pays, not what a claim that is
+                // not in one would.
+                return (
+                    copy.watch().sats_at_depth(headers, 1),
+                    self.swap_claim_confirmations(sale),
+                );
+            }
             return (received.saturating_add(paid.sats()), u32::MAX);
         }
         (received, status.min_confirmations)

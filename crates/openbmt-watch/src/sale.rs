@@ -623,6 +623,41 @@ impl SaleWatch {
             .collect()
     }
 
+    /// The depth now, from the chain, of the transaction `txid` that this
+    /// watch holds and that is not displaced (WR-43): 0 if it is not in a
+    /// block, `None` if the watch does not hold it or it is displaced. For a
+    /// caller that follows one known transaction, such as the shop's own
+    /// claim to a sale's address.
+    pub fn depth_of<C: HeaderChain + ?Sized>(&self, chain: &C, txid: &Txid) -> Option<u32> {
+        let (confs, standing) = self.depths_and_standing(chain);
+        let i = self.entries.iter().position(|e| e.txid == *txid)?;
+        standing
+            .get(i)
+            .copied()
+            .unwrap_or(false)
+            .then(|| confs.get(i).copied().unwrap_or(0))
+    }
+
+    /// The standing payments of [`SaleWatch::standing`], each with its depth
+    /// now from the chain (0 if it is not in a block), in the same order.
+    /// For a caller that must tell which of several payments is the one in
+    /// a block.
+    pub fn standing_depths<C: HeaderChain + ?Sized>(&self, chain: &C) -> Vec<(Txid, u32)> {
+        let (confs, _) = self.depths_and_standing(chain);
+        self.last_standing
+            .iter()
+            .map(|p| {
+                let depth = self
+                    .entries
+                    .iter()
+                    .position(|e| e.txid == p.txid)
+                    .and_then(|i| confs.get(i).copied())
+                    .unwrap_or(0);
+                (p.txid, depth)
+            })
+            .collect()
+    }
+
     /// WR-31: the earliest time any payment of [`SaleWatch::standing`] was
     /// first seen; for a payment that was never seen before a block held
     /// it, the time the caller gave to [`SaleWatch::confirmed_at`]. `None`

@@ -140,7 +140,7 @@ use openbmt_pos::TillMessage;
 use openbmt_watch::{
     check_blocks_checked, check_health, BlockProgress, HeaderChain, HeaderStore, Health,
     HealthInput, NodeOnlyHealth, NodeOnlyInput, NodeOnlyLine, NodeOnlyTracker, OwnNodeHealth,
-    OwnNodeInput, OwnNodeLink, OwnNodeTracker, PeerAddr, Source, WellFormedBlock,
+    OwnNodeInput, OwnNodeLink, OwnNodeTracker, PeerAddr, SaleStatus, Source, WellFormedBlock,
 };
 
 use crate::chainview::ChainView;
@@ -156,7 +156,7 @@ use crate::settings::{check_not_rolled, decode_file, SettingsFault, SettingsRefu
 use crate::shopln::SeedNotTaken;
 use crate::shopln_node::{ShopLn, ShopLnArgs, ShopLnConfig, ShopLnStatus, SweepSource};
 use crate::starter::{stop_decision, Cards, StarterCard, StarterRefused, StopDecision};
-use crate::swap::{Effect, SaleSwap, SwapDriver, SwapRequest, Update};
+use crate::swap::{Effect, SaleSwap, StepEnv, SwapDriver, SwapRequest, Update};
 use crate::switch::{
     check_switch, PendingSwitch, SwitchNotice, SwitchRefused, SwitchStepRefused, Waiting,
     SWITCH_PENDING_SECS,
@@ -2451,7 +2451,15 @@ impl<P: DriverPort> Node<P> {
             .iter()
             .filter_map(|i| self.counter.sale(*i))
             .filter(|s| !s.is_request())
-            .map(|s| (s.index(), s.script().clone(), s.needs_sats(), s.is_live()))
+            // A sale that holds a payment, a swap's included, asks for no more.
+            .map(|s| {
+                (
+                    s.index(),
+                    s.script().clone(),
+                    s.needs_sats(),
+                    s.is_live() && s.lightning().is_none(),
+                )
+            })
             .collect();
         for (index, script, sats, open) in sales {
             if let Ok(address) = Address::from_script(&script, self.network) {
@@ -2525,12 +2533,28 @@ impl<P: DriverPort> Node<P> {
             now,
         };
         let counter = &self.counter;
-        let updates = self.swap.step(now, &self.view, &mut |index, sats, status| {
+        let final_depth = counter.swap_depths().1;
+        let view = &self.view;
+        let claim_seen = |index: u32, claims: &[Txid]| counter.swap_claim_seen(index, claims, view);
+        let mut decide = |index: u32, sats: u64, status: &SaleStatus| {
             counter.swap_decide(index, sats, status, &facts).is_some()
-        });
+        };
+        // CR-221: no claim is built while a header is known above the
+        // height checked in full (WR-54).
+        let mut env = StepEnv {
+            behind: self.view.tip_height() > self.checked,
+            final_depth,
+            decide: &mut decide,
+            claim_seen: &claim_seen,
+        };
+        let updates = self.swap.step(now, &self.view, &mut env);
         // The records first: a claim is sent only after its record is
         // written (CR-220).
         self.swap_flush();
+        // The claims' ids first: the sale's own payments are known before
+        // any is judged.
+        let mut updates = updates;
+        updates.sort_by_key(|u| !matches!(u, Update::Claims { .. }));
         for update in updates {
             match update {
                 Update::Claimed {
@@ -2540,6 +2564,7 @@ impl<P: DriverPort> Node<P> {
                     invoice_sats,
                     received_sats,
                     lockup_confirmed,
+                    claim_confirmations,
                     status,
                 } => {
                     let facts = Facts {
@@ -2549,26 +2574,32 @@ impl<P: DriverPort> Node<P> {
                         remote_order: false,
                         now,
                     };
-                    let instant = if lockup_confirmed {
+                    // CR-221: the sale is paid at once when the policy says so,
+                    // and otherwise it holds the swap's payment and waits for
+                    // the claim to be in a block at the shop's depth.
+                    let claim_in_block = claim_confirmations >= self.counter.swap_depths().0;
+                    let instant = if claim_in_block {
                         None
                     } else {
                         self.counter
                             .swap_decide(index, invoice_sats, &status, &facts)
                     };
-                    if !lockup_confirmed && instant.is_none() {
-                        // The claim is sent; the sale is paid when the
-                        // lockup is in a block.
-                        continue;
-                    }
                     let paid = SwapPaid {
                         payment_hash,
                         invoice_sats,
                         received_sats,
                     };
-                    match self
-                        .counter
-                        .swap_paid(index, paid, instant, &facts, &mut self.store)
-                    {
+                    let mut taken =
+                        self.counter
+                            .swap_paid(index, paid, instant, &facts, &mut self.store);
+                    // The slice is full or the ledger would not take it: the
+                    // sale holds the payment and waits for the claim.
+                    if instant.is_some() && matches!(taken, Ok(None)) {
+                        taken = self
+                            .counter
+                            .swap_paid(index, paid, None, &facts, &mut self.store);
+                    }
+                    match taken {
                         Ok(Some(screen)) => {
                             reports.extend(screen.reports);
                             self.swap.told(index, n, lockup_confirmed);
@@ -2588,19 +2619,73 @@ impl<P: DriverPort> Node<P> {
                         }
                     }
                 }
-                Update::LockupConfirmed { index } => {
-                    if let Err(e) = self.counter.swap_lockup_confirmed(index, &mut self.store) {
-                        self.note(format!("sale {index}: the exposure was not released: {e}"));
+                Update::ClaimDepth {
+                    index,
+                    confirmations,
+                } => {
+                    let facts = Facts {
+                        chain: &self.view,
+                        health: self.health.unwrap_or(NO_ANSWER_YET),
+                        heartbeat: self.counter.heartbeat_for_policy(now),
+                        remote_order: false,
+                        now,
+                    };
+                    match self.counter.swap_claim_depth(
+                        index,
+                        confirmations,
+                        &facts,
+                        &mut self.store,
+                    ) {
+                        Ok(r) => reports.extend(r),
+                        Err(e) => self.note(format!(
+                            "sale {index}: the claim's depth was not recorded: {e:?}"
+                        )),
                     }
                 }
-                Update::Cancel { index } => {
+                Update::Cancel { index, n } => {
                     match self.counter.swap_cancelled(index, now, &mut self.store) {
-                        Ok(r) => reports.extend(r),
+                        Ok(r) => {
+                            reports.extend(r);
+                            // Only a cancel that was stored is not put again.
+                            self.swap.failure_done(index, n);
+                        }
                         Err(e) => {
                             self.note(format!("sale {index}: the cancel was not stored: {e}"))
                         }
                     }
                 }
+                Update::ClaimAmount {
+                    index,
+                    received_sats,
+                } => {
+                    if let Err(e) =
+                        self.counter
+                            .swap_claim_amount(index, received_sats, &mut self.store)
+                    {
+                        self.note(format!(
+                            "sale {index}: the claim's amount was not stored: {e}"
+                        ));
+                    }
+                }
+                Update::LockupSpent { index, spent } => {
+                    let facts = Facts {
+                        chain: &self.view,
+                        health: self.health.unwrap_or(NO_ANSWER_YET),
+                        heartbeat: self.counter.heartbeat_for_policy(now),
+                        remote_order: false,
+                        now,
+                    };
+                    match self
+                        .counter
+                        .swap_lockup_spent(index, spent, &facts, &mut self.store)
+                    {
+                        Ok(r) => reports.extend(r),
+                        Err(e) => self.note(format!(
+                            "sale {index}: the spent lockup was not recorded: {e:?}"
+                        )),
+                    }
+                }
+                Update::Claims { index, ids } => self.counter.set_swap_claims(index, &ids),
                 Update::Pending { index, pending } => {
                     self.counter.set_swap_pending(index, pending);
                 }
@@ -3052,7 +3137,12 @@ impl<P: DriverPort> Node<P> {
         }
         // CR-219: one Lightning path at a time, so only one of the two has
         // anything to show.
-        match self.swap.sale_view(index, now) {
+        // A sale reported paid is shown by the counter, not by these words.
+        let reported_paid = self
+            .counter
+            .sale(index)
+            .is_some_and(|s| s.accepted().is_some() || s.pos() == openbmt_counter::PosState::Paid);
+        match self.swap.sale_view(index, now, reported_paid) {
             SaleSwap::Off => SaleLightning::Off,
             SaleSwap::Waiting => SaleLightning::Waiting,
             SaleSwap::Invoice(checked) => SaleLightning::Invoice(checked),

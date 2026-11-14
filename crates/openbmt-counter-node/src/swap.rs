@@ -23,7 +23,9 @@
 //!   seconds after the quote, the sale has no Lightning code and says so. A
 //!   reply that comes later is dropped: nobody saw its invoice.
 //! - Each swap is asked for its status as the machine of SW-71 says, until
-//!   the claim is sent.
+//!   the claim is sent. A status never overrides the chain (SW-72): once
+//!   the shop's own watch holds the lockup, only the chain or the timeout
+//!   ends the swap.
 //!
 //! ## What it keeps
 //!
@@ -41,6 +43,20 @@
 //! on-chain payment is (WR-31 to WR-46), and a second watcher of the sale's
 //! own address finds the claim in a block. What the provider says of the
 //! lockup is used only to know when to look (SW-72).
+//!
+//! ## The claim, and what ends a swap (CR-221, CR-222)
+//!
+//! The claim, which shows the preimage, is built only while the timeout is
+//! at least `CLAIM_MARGIN_BLOCKS` above the tip and the counter is not
+//! behind on blocks (WR-54); with fewer blocks the swap ends and nothing is
+//! shown. The sale is paid at once only when the lockup is in the mempool
+//! and CR-13's policy says so. Otherwise it holds the payment of the claim
+//! and is paid when the claim is in a block at the shop's confirmation
+//! depth; the swap is done at the refund depth. A
+//! claim that was in a block and left it is sent again. A swap whose lockup
+//! is spent in a block by a transaction that is not the claim is lost: the
+//! node tells the counter, which takes the sale back (`Update::Cancel`). A
+//! claim not in a block at the timeout is still bumped and sent.
 
 use std::collections::BTreeMap;
 
@@ -53,8 +69,8 @@ use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_lightning::bolt11::{self, Checked};
 use openbmt_swap::follow::{Ctx, Failure, Next, ReverseSwap, Stage};
 use openbmt_swap::{
-    check, parse_response, Expect, LockupSeen, Pairs, Provider, Quote, Refused, Reply, Request,
-    Secrets, Seen, Status, SwapState, MIN_CLAIM_BLOCKS,
+    check, check_lockup, parse_response, Expect, LockupSeen, Pairs, Provider, Quote, Refused,
+    Reply, Request, Secrets, Seen, Status, SwapState, MIN_CLAIM_BLOCKS,
 };
 use openbmt_watch::{
     block_fee_sample, FeeHistory, HeaderChain, SaleStatus, SaleWatch, Source, WellFormedBlock,
@@ -88,6 +104,29 @@ pub const RETRY_AFTER_SECS: u64 = 30;
 pub const DESCRIPTION: &str = "Lightning payment";
 /// The most claims a swap record keeps the ids of.
 const MAX_CLAIMS: usize = 32;
+
+#[cfg(test)]
+thread_local! {
+    static CLAIM_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(MAX_CLAIMS) };
+}
+
+/// The most claims built for one swap. A test may set it lower.
+fn claim_limit() -> usize {
+    #[cfg(test)]
+    {
+        CLAIM_LIMIT.with(std::cell::Cell::get)
+    }
+    #[cfg(not(test))]
+    {
+        MAX_CLAIMS
+    }
+}
+
+/// A test sets the most claims built for one swap, on its own thread.
+#[cfg(test)]
+pub(crate) fn set_claim_limit(limit: usize) {
+    CLAIM_LIMIT.with(|c| c.set(limit));
+}
 /// The most bytes of a record.
 const MAX_RECORD_BYTES: usize = 4096;
 /// CR-219: the small line under the code of a sale that has no Lightning.
@@ -175,20 +214,53 @@ pub enum Update {
         received_sats: u64,
         /// The lockup is in a block.
         lockup_confirmed: bool,
+        /// The confirmations of the claim, which count against the shop's
+        /// depth for a sale that was not accepted at once.
+        claim_confirmations: u32,
         /// The lockup's watch, now.
         status: SaleStatus,
     },
-    /// The lockup of a swap whose sale was paid before it was in a block is
-    /// now in one (CR-15).
-    LockupConfirmed {
+    /// The confirmations of the claim of this swap changed, 0 for a claim
+    /// that is not in a block, including one that left it (CR-221).
+    ClaimDepth {
         /// The sale.
         index: u32,
+        /// The confirmations now.
+        confirmations: u32,
     },
-    /// A sale that was paid before its lockup was in a block lost its
-    /// lockup or its swap (CR-221).
+    /// A sale that was paid lost its swap (CR-221): the lockup was spent by
+    /// a transaction that is not the claim, or the lockup it was paid on was
+    /// replaced, and that is as deep as the refund depth. Given again until
+    /// [`SwapDriver::failure_done`].
     Cancel {
         /// The sale.
         index: u32,
+        /// The swap.
+        n: u32,
+    },
+    /// The newest claim of this sale's swap pays this many satoshis to the
+    /// sale's address (a claim built again at another fee).
+    ClaimAmount {
+        /// The sale.
+        index: u32,
+        /// What the claim pays.
+        received_sats: u64,
+    },
+    /// The lockup of a swap of this sale is spent in a block of the chain by
+    /// a transaction that is not the shop's claim (`true`), or no longer is
+    /// (`false`).
+    LockupSpent {
+        /// The sale.
+        index: u32,
+        /// Whether it is spent.
+        spent: bool,
+    },
+    /// The ids of the claims the sale's swaps built, when they change.
+    Claims {
+        /// The sale.
+        index: u32,
+        /// The ids.
+        ids: Vec<Txid>,
     },
     /// The lockup of a swap of this sale is on the way or the claim is not
     /// yet in a block (`true`), or neither (`false`): the sale does not
@@ -229,12 +301,24 @@ pub struct SwapRecord {
     pub fee_per_kvb: u64,
     /// The height of the chain when the last claim was built, 0 for none.
     pub claim_tip: u32,
+    /// The sale took the payment: it holds it, or was paid at once on it.
+    pub told: bool,
+    /// The failure of the swap was told to the counter, which took the sale
+    /// back if it was paid.
+    pub failure_told: bool,
+    /// The claim was in a block once: if it left, it is sent again.
+    pub claim_in_block: bool,
+    /// The block of the best chain that held a spend of the lockup by a
+    /// transaction that is not one of the claims, or a replacement of the
+    /// lockup's own transaction.
+    pub spent_in: Option<BlockHash>,
 }
 
 impl SwapRecord {
     /// The bytes the node writes: the magic, version 1, the machine (SW-73)
     /// with its length, the lockup (flag, id, index, value, flags), the
-    /// claims, the fee rate and the height.
+    /// claims, the fee rate and the height, a byte of flags (told, failure
+    /// told, claim was in a block, spent) and the block of the spend.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = wire::start(&MAGIC_SWAP_RECORD, 1024);
         let machine = self.machine.encode();
@@ -260,6 +344,15 @@ impl SwapRecord {
         }
         out.extend_from_slice(&self.fee_per_kvb.to_le_bytes());
         out.extend_from_slice(&self.claim_tip.to_le_bytes());
+        out.push(
+            u8::from(self.told)
+                | (u8::from(self.failure_told) << 1)
+                | (u8::from(self.claim_in_block) << 2)
+                | (u8::from(self.spent_in.is_some()) << 3),
+        );
+        if let Some(hash) = &self.spent_in {
+            out.extend_from_slice(hash.as_ref());
+        }
         out
     }
 
@@ -303,8 +396,19 @@ impl SwapRecord {
         }
         let fee_per_kvb = r.u64_le()?;
         let claim_tip = r.u32_le()?;
+        let flags = r.u8()?;
+        if flags > 15 {
+            return Err(bad("the record flags are not known"));
+        }
+        let spent_in = if flags & 8 != 0 {
+            Some(BlockHash::from_byte_array(r.array()?))
+        } else {
+            None
+        };
         r.finish()?;
-        let claimed = matches!(machine.stage(), Stage::ClaimSent | Stage::Paid { .. });
+        // A swap that was lost may have had its claim sent or not: the claim
+        // is in the state's phase either way.
+        let claimed = matches!(machine.state().phase(), openbmt_swap::Phase::Claimed(_));
         let current = match machine.state().phase() {
             openbmt_swap::Phase::Claimed(txid) => Some(txid),
             openbmt_swap::Phase::Waiting => None,
@@ -319,6 +423,10 @@ impl SwapRecord {
             claims,
             fee_per_kvb,
             claim_tip,
+            told: flags & 1 != 0,
+            failure_told: flags & 2 != 0,
+            claim_in_block: flags & 4 != 0,
+            spent_in,
         };
         if record.to_bytes() != bytes {
             return Err(bad("the record is not canonical"));
@@ -374,14 +482,21 @@ struct Follow {
     dirty: bool,
     /// A claim to send once the record is written.
     pending_claim: Option<Vec<u8>>,
-    /// The sale was told that it is paid.
-    told: bool,
     /// The sale was told that the lockup is in a block.
     lockup_told: bool,
     stuck_told: bool,
-    failure_told: bool,
+    /// The failure was put to the node, in this run.
+    failure_pushed: bool,
     /// What the last claim pays the sale's address.
     claim_sats: u64,
+    /// What the sale holds as the claim's amount, as last told.
+    claim_amount_told: u64,
+    /// The claim's confirmations as last told to the sale, if told.
+    depth_told: Option<u32>,
+    /// Whether the counter was last told that the lockup is spent.
+    spent_told: Option<bool>,
+    /// The lockup watch holds a lockup of the swap now.
+    lockup_seen: bool,
     last_status: Option<u64>,
     poll_after: u32,
     /// The lockup, as the light client sees it.
@@ -398,6 +513,8 @@ struct SaleSwaps {
     open: bool,
     /// The node was told whether a swap of the sale is on the way.
     pending_told: bool,
+    /// The ids of the claims of all its swaps, as last told to the counter.
+    claims_told: Vec<Txid>,
     address: Address,
     swaps: Vec<Swap>,
 }
@@ -433,7 +550,26 @@ fn claim_ctx(now: u64, tip: u32, accept_unconfirmed: bool) -> Ctx {
         now_secs: now,
         tip_height: tip,
         accept_unconfirmed,
+        behind: false,
+        lockup_on_chain: false,
     }
+}
+
+/// What the node tells the driver about the chain, and asks of the counter,
+/// at each step.
+pub struct StepEnv<'a> {
+    /// The counter is behind on blocks: a header is known above the height
+    /// checked in full (WR-54). No claim is built while it is.
+    pub behind: bool,
+    /// The shop's refund depth (CR-66): a claim at this depth ends the swap.
+    pub final_depth: u32,
+    /// Whether the counter takes the payment at once (CR-221), for a sale,
+    /// the quote's satoshis and the lockup's status.
+    pub decide: &'a mut dyn FnMut(u32, u64, &SaleStatus) -> bool,
+    /// The greatest depth of any of these claims, as the sale's own watch of
+    /// its address holds them (`Counter::swap_claim_seen`): a claim mined
+    /// while the counter was off.
+    pub claim_seen: &'a dyn Fn(u32, &[Txid]) -> u32,
 }
 
 /// CR-222: the first claim, at `start_rate`; at the floor instead when the
@@ -542,11 +678,14 @@ impl SwapDriver {
                 saved: true,
                 dirty: false,
                 pending_claim: None,
-                told: false,
                 lockup_told: false,
                 stuck_told: false,
-                failure_told: false,
+                failure_pushed: false,
                 claim_sats: 0,
+                claim_amount_told: 0,
+                depth_told: None,
+                spent_told: None,
+                lockup_seen: false,
                 last_status: None,
                 poll_after: 0,
             };
@@ -558,6 +697,7 @@ impl SwapDriver {
             let sale = me.sales.entry(*index).or_insert_with(|| SaleSwaps {
                 open: false,
                 pending_told: false,
+                claims_told: Vec::new(),
                 address,
                 swaps: Vec::new(),
             });
@@ -610,6 +750,7 @@ impl SwapDriver {
         let sale = self.sales.entry(index).or_insert_with(|| SaleSwaps {
             open: true,
             pending_told: false,
+            claims_told: Vec::new(),
             address,
             swaps: Vec::new(),
         });
@@ -626,6 +767,7 @@ impl SwapDriver {
         let sale = self.sales.entry(index).or_insert_with(|| SaleSwaps {
             open,
             pending_told: false,
+            claims_told: Vec::new(),
             address,
             swaps: Vec::new(),
         });
@@ -681,7 +823,10 @@ impl SwapDriver {
     }
 
     /// What the screen of a sale shows of the swap (CR-219).
-    pub fn sale_view(&self, index: u32, now: u64) -> SaleSwap {
+    ///
+    /// `reported_paid`: the sale was accepted at once or told to the POS as
+    /// paid, so a swap lost after its claim was sent shows no words here.
+    pub fn sale_view(&self, index: u32, now: u64, reported_paid: bool) -> SaleSwap {
         let Some(sale) = self.sales.get(&index) else {
             return SaleSwap::Off;
         };
@@ -698,8 +843,16 @@ impl SwapDriver {
         };
         for swap in &sale.swaps {
             if let Phase::Have(f) = &swap.phase {
-                if f.failed_unpaid() && !current_alive(sale) {
-                    return SaleSwap::Failed(failed_words());
+                let lost = f.lost_after_claim() && !reported_paid;
+                if (f.failed_unpaid() || lost) && !current_alive(sale) {
+                    // A swap lost after its claim was sent showed the
+                    // preimage: the customer's payment does not go back.
+                    let words = if f.lost_after_claim() {
+                        lost_words()
+                    } else {
+                        failed_words()
+                    };
+                    return SaleSwap::Failed(words);
                 }
             }
         }
@@ -980,15 +1133,22 @@ impl SwapDriver {
                     claims: Vec::new(),
                     fee_per_kvb: CLAIM_FEE_PER_KVB,
                     claim_tip: 0,
+                    told: false,
+                    failure_told: false,
+                    claim_in_block: false,
+                    spent_in: None,
                 },
                 saved: false,
                 dirty: true,
                 pending_claim: None,
-                told: false,
                 lockup_told: false,
                 stuck_told: false,
-                failure_told: false,
+                failure_pushed: false,
                 claim_sats: 0,
+                claim_amount_told: 0,
+                depth_told: None,
+                spent_told: None,
+                lockup_seen: false,
                 last_status: Some(now),
                 poll_after: openbmt_swap::POLL_WAITING_SECS,
             })
@@ -1012,7 +1172,10 @@ impl SwapDriver {
         };
         match Status::parse(body) {
             Ok(status) => {
-                let ctx = claim_ctx(now, tip, false);
+                let ctx = Ctx {
+                    lockup_on_chain: f.lockup_seen,
+                    ..claim_ctx(now, tip, false)
+                };
                 let (machine, next) = f.record.machine.on_status(&status, &ctx);
                 f.adopt(machine, &next);
             }
@@ -1063,6 +1226,27 @@ impl SwapDriver {
                 if let Ok(list) = block.payments(headers, &f.lockup_script) {
                     for proven in list {
                         let _ = f.watch.confirmed_at(proven, now);
+                    }
+                }
+                // A block that spends the lockup with a transaction that is
+                // not one of the claims: the provider's refund, or another.
+                if let Some(lockup) = f.record.lockup.filter(|_| !f.ended()) {
+                    if let Ok(list) = block.spends(headers, &[lockup.outpoint]) {
+                        for (_, txid, hash) in list {
+                            if !f.record.claims.contains(&txid) && f.record.spent_in != Some(hash) {
+                                f.record.spent_in = Some(hash);
+                                f.dirty = true;
+                            }
+                        }
+                    }
+                }
+                // A block that holds a transaction that replaces the lockup's
+                // own: the lockup the claim spends does not exist.
+                if !f.ended() {
+                    if let Ok(list) = block.spends(headers, &f.watch.watched_outpoints()) {
+                        for (outpoint, by, hash) in list {
+                            f.watch.spent_elsewhere(outpoint, by, hash);
+                        }
                     }
                 }
                 if f.record.claims.is_empty() {
@@ -1146,8 +1330,21 @@ impl SwapDriver {
     /// block or not: if not, [`Update::LockupConfirmed`] follows.
     pub fn told(&mut self, index: u32, n: u32, lockup_confirmed: bool) {
         if let Some(f) = self.follow_mut(index, n) {
-            f.told = true;
+            f.record.told = true;
+            f.dirty = true;
             f.lockup_told = lockup_confirmed;
+            f.claim_amount_told = f.claim_sats;
+        }
+    }
+
+    /// The failure of a swap was put to the counter, which took the sale
+    /// back if it was paid: it is not put again.
+    pub fn failure_done(&mut self, index: u32, n: u32) {
+        if let Some(f) = self.follow_mut(index, n) {
+            if !f.record.failure_told {
+                f.record.failure_told = true;
+                f.dirty = true;
+            }
         }
     }
 
@@ -1156,13 +1353,13 @@ impl SwapDriver {
     /// time has come, built again when it did not confirm, and what the node
     /// must tell the counter is returned.
     ///
-    /// `decide` says, for a sale and the quote's satoshis and the lockup's
-    /// status, whether the counter takes the payment at once (CR-221).
+    /// `env` says whether the counter is behind, the shop's depths, and what
+    /// the counter decides at once (CR-221) and has seen of the claims.
     pub fn step<C: HeaderChain + ?Sized>(
         &mut self,
         now: u64,
         chain: &C,
-        decide: &mut dyn FnMut(u32, u64, &SaleStatus) -> bool,
+        env: &mut StepEnv<'_>,
     ) -> Vec<Update> {
         let tip = chain.tip_height();
         let mut updates = Vec::new();
@@ -1171,7 +1368,16 @@ impl SwapDriver {
         for (index, sale) in &mut self.sales {
             let index = *index;
             let mut pending = false;
-            for swap in &mut sale.swaps {
+            for i in 0..sale.swaps.len() {
+                // CR-221: once a swap of a sale has sent its claim, no other
+                // is claimed: its preimage is never shown, so the customer's
+                // other payment is not settled and goes back to them.
+                let other_claimed = sale.swaps.iter().enumerate().any(|(j, w)| {
+                    j != i && matches!(&w.phase, Phase::Have(f) if !f.record.claims.is_empty())
+                });
+                let Some(swap) = sale.swaps.get_mut(i) else {
+                    continue;
+                };
                 let n = swap.n;
                 let sats = swap.sats;
                 let Phase::Have(f) = &mut swap.phase else {
@@ -1184,12 +1390,26 @@ impl SwapDriver {
                     now,
                     tip,
                     start_rate,
+                    other_claimed,
                     chain,
-                    decide,
+                    env,
                     &mut updates,
                     &mut notes,
                 );
                 pending |= f.on_the_way();
+            }
+            let ids: Vec<Txid> = sale
+                .swaps
+                .iter()
+                .filter_map(|w| match &w.phase {
+                    Phase::Have(f) => Some(f.record.claims.clone()),
+                    _ => None,
+                })
+                .flatten()
+                .collect();
+            if ids != sale.claims_told {
+                sale.claims_told = ids.clone();
+                updates.push(Update::Claims { index, ids });
             }
             // CR-221: told when it changes.
             if sale.pending_told != pending {
@@ -1223,16 +1443,26 @@ impl Follow {
     /// The claim is not built yet and the lockup is in the mempool: the sale
     /// is waiting for a block.
     fn waiting_for_block(&self) -> bool {
-        matches!(self.record.machine.stage(), Stage::Locked(l) if !l.confirmed)
-            && !self.told
-            && self.record.claims.is_empty()
+        let lockup_waits = matches!(self.record.machine.stage(), Stage::Locked(l) if !l.confirmed)
+            && !self.record.told
+            && self.record.claims.is_empty();
+        // The claim is out and the sale, not accepted at once, waits for it
+        // to be in a block at the shop's depth.
+        let claim_waits = self.record.machine.stage() == Stage::ClaimSent && !self.record.told;
+        lockup_waits || claim_waits
     }
 
     fn failed_unpaid(&self) -> bool {
         matches!(
             self.record.machine.stage(),
             Stage::Failed(f) if f != Failure::InvoiceExpired
-        ) && !self.told
+        ) && !self.record.told
+    }
+
+    /// The swap was lost with its claim sent.
+    fn lost_after_claim(&self) -> bool {
+        self.record.machine.stage() == Stage::Failed(Failure::Lost)
+            && !self.record.claims.is_empty()
     }
 
     fn on_the_way(&self) -> bool {
@@ -1293,6 +1523,60 @@ impl Follow {
         }
     }
 
+    /// The height of the block of the best chain that spends the lockup by a
+    /// transaction that is not a claim, or replaces the lockup's own: from
+    /// what the record holds of it, and what the watch learned. The record
+    /// keeps it while it stands, and lets it go when it leaves the chain.
+    fn spent_height<C: HeaderChain + ?Sized>(&mut self, chain: &C) -> Option<u32> {
+        let held = self.record.spent_in;
+        let mut found = None;
+        let others = self.watch.spent_elsewhere_in().iter().map(|(_, _, h)| *h);
+        for hash in held.into_iter().chain(others) {
+            if let Some(height) = chain.height_of(&hash) {
+                found = Some((hash, height));
+                break;
+            }
+        }
+        let now = found.map(|(hash, _)| hash);
+        if now != held {
+            self.record.spent_in = now;
+            self.dirty = true;
+        }
+        found.map(|(_, height)| height)
+    }
+
+    /// The lockup the claim is built from: a transaction the watch holds
+    /// that is not displaced, pays the lockup script the promised amount in
+    /// exactly one output (SW-30), and is in a block, or else is seen. Not
+    /// the first transaction the watch happens to hold.
+    fn lockup_candidate<C: HeaderChain + ?Sized>(
+        &self,
+        chain: &C,
+    ) -> Option<(bitcoin::Transaction, Seen)> {
+        let standing = self.watch.standing_depths(chain);
+        let promised = self.record.machine.state().onchain_sats();
+        let mut seen_only = None;
+        for tx in self.watch.transactions() {
+            let txid = tx.compute_txid();
+            let Some((_, depth)) = standing.iter().find(|(t, _)| *t == txid) else {
+                continue;
+            };
+            let seen = if *depth >= 1 {
+                Seen::Block
+            } else {
+                Seen::Mempool
+            };
+            if check_lockup(tx, &self.lockup_script, promised, seen).is_err() {
+                continue;
+            }
+            if seen == Seen::Block {
+                return Some((tx.clone(), seen));
+            }
+            seen_only.get_or_insert_with(|| (tx.clone(), seen));
+        }
+        seen_only
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn step<C: HeaderChain + ?Sized>(
         &mut self,
@@ -1302,33 +1586,35 @@ impl Follow {
         now: u64,
         tip: u32,
         start_rate: u64,
+        other_claimed: bool,
         chain: &C,
-        decide: &mut dyn FnMut(u32, u64, &SaleStatus) -> bool,
+        env: &mut StepEnv<'_>,
         updates: &mut Vec<Update>,
         notes: &mut Vec<String>,
     ) {
         let stage = self.record.machine.stage();
         let status = self.watch.status(chain, now);
-        let confirmed = status.min_confirmations >= 1;
+        self.lockup_seen = !self.watch.standing().is_empty();
+        let (behind, on_chain) = (env.behind, self.lockup_seen);
+        let ctx_of = |accept: bool| Ctx {
+            behind,
+            lockup_on_chain: on_chain,
+            ..claim_ctx(now, tip, accept)
+        };
         // 1. The lockup the light client holds is checked by SW-30.
         if matches!(stage, Stage::Created | Stage::Announced | Stage::Locked(_)) {
-            let held = self.watch.transactions().next().cloned();
-            if let Some(tx) = held {
+            if let Some((tx, seen)) = self.lockup_candidate(chain) {
+                let held = self.watch.standing_depths(chain);
                 let better = match stage {
-                    Stage::Locked(l) => confirmed && !l.confirmed,
+                    // In a block now, or the one held is displaced.
+                    Stage::Locked(l) => {
+                        (seen == Seen::Block && !l.confirmed)
+                            || !held.iter().any(|(t, _)| *t == l.outpoint.txid)
+                    }
                     _ => true,
                 };
                 if better {
-                    let seen = if confirmed {
-                        Seen::Block
-                    } else {
-                        Seen::Mempool
-                    };
-                    match self
-                        .record
-                        .machine
-                        .on_lockup(&tx, seen, &claim_ctx(now, tip, false))
-                    {
+                    match self.record.machine.on_lockup(&tx, seen, &ctx_of(false)) {
                         Ok((machine, _)) => {
                             if let Stage::Locked(l) = machine.stage() {
                                 self.record.lockup = Some(l);
@@ -1345,16 +1631,41 @@ impl Follow {
             self.record.machine.stage(),
             Stage::Created | Stage::Announced
         ) {
-            let (machine, next) = self.record.machine.settle(&claim_ctx(now, tip, false));
+            let (machine, next) = self.record.machine.settle(&ctx_of(false));
             if matches!(next, Next::Failed(_)) {
                 self.adopt(machine, &next);
             }
         }
         let stage = self.record.machine.stage();
+        // The lockup the swap holds, in a block now.
+        let lockup_confirmed = self.record.lockup.is_some_and(|l| {
+            l.confirmed
+                || self
+                    .watch
+                    .depth_of(chain, &l.outpoint.txid)
+                    .is_some_and(|d| d >= 1)
+        });
+        // The lockup spent by a transaction that is not a claim, or replaced,
+        // in a block of the chain: the provider's refund. The sale is taken
+        // back at once, the swap is lost at the refund depth, and the claim
+        // is not built or bumped, since the lockup it spends is gone.
+        let spent_height = if matches!(stage, Stage::Locked(_) | Stage::ClaimSent) {
+            self.spent_height(chain)
+        } else {
+            None
+        };
+        if matches!(stage, Stage::Locked(_) | Stage::ClaimSent) {
+            let spent = spent_height.is_some();
+            if self.spent_told != Some(spent) && (spent || self.spent_told.is_some()) {
+                updates.push(Update::LockupSpent { index, spent });
+            }
+            self.spent_told = Some(spent);
+        }
+        let spent = spent_height.is_some();
         // 2. The claim, when its time has come.
-        if let Stage::Locked(l) = stage {
-            let accept = l.confirmed || decide(index, sats, &status);
-            let ctx = claim_ctx(now, tip, accept);
+        if let (Stage::Locked(l), false, false) = (stage, spent, other_claimed) {
+            let accept = l.confirmed || (env.decide)(index, sats, &status);
+            let ctx = ctx_of(accept);
             let (machine, next) = self.record.machine.settle(&ctx);
             match next {
                 Next::BuildClaim { lockup } => match claim_first(&machine, start_rate, &ctx) {
@@ -1374,81 +1685,170 @@ impl Follow {
                 _ => {}
             }
         }
+        // The refund is as deep as the shop's refund depth: the swap is lost,
+        // claim sent or not.
+        if let Some(height) = spent_height {
+            let depth = tip.saturating_sub(height).saturating_add(1);
+            if depth >= env.final_depth.max(1)
+                && matches!(
+                    self.record.machine.stage(),
+                    Stage::Locked(_) | Stage::ClaimSent
+                )
+            {
+                if let Ok(lost) = self.record.machine.lost() {
+                    self.record.machine = lost;
+                    self.dirty = true;
+                }
+            }
+        }
         let stage = self.record.machine.stage();
         // 3. The claim, sent: told to the sale, built again, or confirmed.
         if matches!(stage, Stage::ClaimSent) {
             if let Some(lockup) = self.record.lockup {
-                if !self.told {
+                let cst = self.claim_watch.status(chain, now);
+                // What the sale's own watch holds of the claims counts too:
+                // a claim mined while the counter was off.
+                let conf = cst
+                    .min_confirmations
+                    .max((env.claim_seen)(index, &self.record.claims));
+                if self.depth_told != Some(conf) {
+                    self.depth_told = Some(conf);
+                    updates.push(Update::ClaimDepth {
+                        index,
+                        confirmations: conf,
+                    });
+                }
+                let timeout = self.record.machine.state().timeout();
+                if conf >= 1 && !self.record.claim_in_block {
+                    self.record.claim_in_block = true;
+                    self.dirty = true;
+                }
+                if conf >= env.final_depth.max(1) {
+                    // The refund depth: the swap is done.
+                    self.finish_claim(conf, tip);
+                } else if conf == 0 {
+                    // At and past the timeout the claim is still bumped: the
+                    // preimage is out, so it races the refund. The swap is
+                    // lost only when the lockup is spent by another.
+                    if env.behind || spent {
+                        // Wait for the blocks: the claim may be in one. Or
+                        // the lockup is spent, and the claim spends nothing.
+                    } else if self.record.claim_in_block {
+                        // The claim was in a block and left it: sent again,
+                        // the same transaction.
+                        self.record.claim_in_block = false;
+                        self.dirty = true;
+                        self.resend_now(lockup, tip, now, notes);
+                    } else if tip > self.record.claim_tip {
+                        // CR-222: a block came and the claim is not in it.
+                        self.bump(lockup, tip, now, notes);
+                    }
+                }
+                if !self.stuck_told
+                    && conf == 0
+                    && u64::from(tip) + MIN_CLAIM_BLOCKS / 2 >= u64::from(timeout)
+                {
+                    self.stuck_told = true;
+                    updates.push(Update::Stuck { index });
+                }
+                // The sale holds the newest claim's amount.
+                if self.record.told
+                    && self.claim_sats != self.claim_amount_told
+                    && self.claim_sats > 0
+                {
+                    self.claim_amount_told = self.claim_sats;
+                    updates.push(Update::ClaimAmount {
+                        index,
+                        received_sats: self.claim_sats,
+                    });
+                }
+                // The sale is told of the claim only while the swap stands.
+                if !self.record.told && self.record.machine.stage() == Stage::ClaimSent {
                     updates.push(Update::Claimed {
                         index,
                         n,
                         payment_hash: self.invoice.payment_hash,
                         invoice_sats: self.invoice.amount_msat / 1_000,
                         received_sats: self.claim_sats,
-                        lockup_confirmed: lockup.confirmed || confirmed,
+                        lockup_confirmed,
+                        claim_confirmations: conf,
                         status,
                     });
-                }
-                let cst = self.claim_watch.status(chain, now);
-                if cst.min_confirmations >= 1 {
-                    let height = tip.saturating_sub(cst.min_confirmations).saturating_add(1);
-                    let seen = self
-                        .claim_watch
-                        .standing()
-                        .first()
-                        .map(|(txid, _)| *txid)
-                        .or(self.record.claims.last().copied());
-                    if let Some(txid) = seen {
-                        let earlier = self.record.claims.clone();
-                        if let Ok(done) = self
-                            .record
-                            .machine
-                            .claim_confirmed_among(txid, &earlier, height)
-                        {
-                            // The claim that was mined is the last one.
-                            self.record.claims.retain(|c| *c != txid);
-                            self.record.claims.push(txid);
-                            self.record.machine = done;
-                            self.dirty = true;
-                        }
-                    }
-                } else if tip > self.record.claim_tip {
-                    // CR-222: a block came and the claim is not in it.
-                    self.bump(lockup, tip, now, notes);
-                }
-                let timeout = u64::from(self.record.machine.state().timeout());
-                if !self.stuck_told
-                    && cst.min_confirmations == 0
-                    && u64::from(tip) + MIN_CLAIM_BLOCKS / 2 >= timeout
-                {
-                    self.stuck_told = true;
-                    updates.push(Update::Stuck { index });
                 }
             }
         }
         let stage = self.record.machine.stage();
         // 4. The lockup, now in a block, for the sale paid before.
-        if self.told && !self.lockup_told && confirmed {
+        if self.record.told && !self.lockup_told && lockup_confirmed {
             self.lockup_told = true;
             if let Some(l) = &mut self.record.lockup {
                 l.confirmed = true;
                 self.dirty = true;
             }
-            updates.push(Update::LockupConfirmed { index });
         }
-        // 5. A swap that failed.
+        // 5. A swap that failed. A sale that was paid is taken back.
         if let Stage::Failed(failure) = stage {
-            if !self.failure_told {
-                self.failure_told = true;
-                updates.push(Update::Failed { index, n, failure });
-                if self.told && !self.lockup_told {
-                    updates.push(Update::Cancel { index });
+            if !self.record.failure_told {
+                if !self.failure_pushed {
+                    self.failure_pushed = true;
+                    updates.push(Update::Failed { index, n, failure });
+                }
+                if self.record.told {
+                    // Put again at every step until the counter has stored
+                    // it ([`SwapDriver::failure_done`]).
+                    updates.push(Update::Cancel { index, n });
+                } else {
+                    self.record.failure_told = true;
+                    self.dirty = true;
                 }
             }
-        } else if self.told && !self.lockup_told && status.conflict_seen {
-            // The lockup the sale was paid on was replaced.
-            self.lockup_told = true;
-            updates.push(Update::Cancel { index });
+        }
+    }
+
+    /// The claim is at the refund depth: the swap is paid.
+    fn finish_claim(&mut self, conf: u32, tip: u32) {
+        let height = tip.saturating_sub(conf).saturating_add(1);
+        let seen = self
+            .claim_watch
+            .standing()
+            .first()
+            .map(|(txid, _)| *txid)
+            .or(self.record.claims.last().copied());
+        let Some(txid) = seen else {
+            return;
+        };
+        let earlier = self.record.claims.clone();
+        if let Ok(done) = self
+            .record
+            .machine
+            .claim_confirmed_among(txid, &earlier, height)
+        {
+            // The claim that was mined is the last one.
+            self.record.claims.retain(|c| *c != txid);
+            self.record.claims.push(txid);
+            self.record.machine = done;
+            self.dirty = true;
+        }
+    }
+
+    /// The claim again, at the same fee: after it left the block that held
+    /// it, or when it cannot be built again at a higher fee. The preimage is
+    /// out, so the timeout does not refuse it (SW-46).
+    fn resend_now(&mut self, lockup: LockupSeen, tip: u32, now: u64, notes: &mut Vec<String>) {
+        let ctx = claim_ctx(now, tip, true);
+        match self
+            .record
+            .machine
+            .reclaim(&lockup, self.record.fee_per_kvb, &ctx)
+        {
+            Ok((machine, tx)) => {
+                self.record.machine = machine;
+                self.record.claim_tip = tip;
+                self.claim_sats = tx.output.first().map_or(0, |o| o.value.to_sat());
+                self.pending_claim = Some(serialize(&tx));
+                self.dirty = true;
+            }
+            Err(e) => notes.push(format!("{}: the claim was not sent again: {e}", e.rule())),
         }
     }
 
@@ -1456,23 +1856,27 @@ impl Follow {
         let old = self.record.fee_per_kvb;
         let fee = old.saturating_add((old / 2).max(BUMP_MIN_PER_KVB));
         let ctx = claim_ctx(now, tip, true);
+        // No claim id is dropped: at the limit the last claim is sent again.
+        if self.record.claims.len() >= claim_limit() {
+            notes.push("CR-222: the claim was not built again: the limit of claims".to_string());
+            self.resend_now(lockup, tip, now, notes);
+            return;
+        }
         match self.record.machine.reclaim(&lockup, fee, &ctx) {
             Ok((machine, tx)) => {
                 self.record.machine = machine;
                 self.record.fee_per_kvb = fee;
                 self.record.claim_tip = tip;
                 self.record.claims.push(tx.compute_txid());
-                if self.record.claims.len() > MAX_CLAIMS {
-                    self.record.claims.remove(0);
-                }
                 self.claim_sats = tx.output.first().map_or(0, |o| o.value.to_sat());
                 self.pending_claim = Some(serialize(&tx));
                 self.dirty = true;
             }
             Err(e) => {
-                // Too late, or too dear: the claim as it is stays out.
-                self.record.claim_tip = tip;
+                // Too dear: the claim as it is is sent again, the same bytes,
+                // at each block while it is not in one.
                 notes.push(format!("{}: the claim was not built again: {e}", e.rule()));
+                self.resend_now(lockup, tip, now, notes);
             }
         }
     }
@@ -1504,6 +1908,18 @@ pub fn failed_words() -> Words {
     .code("CR-223")
 }
 
+/// CR-223: the provider took its bitcoin back after the claim was sent.
+pub fn lost_words() -> Words {
+    Words::new(
+        Tone::Stop,
+        "Lightning payment lost",
+        "The swap provider took its bitcoin back before the shop's claim was in a block, so this sale is not paid.",
+        Who::Cashier,
+        "Do not hand over the goods yet. Tell the owner, who can take it up with the provider.",
+    )
+    .code("CR-223")
+}
+
 /// CR-219: the provider could not be reached, or refused the amount.
 pub fn unavailable_words() -> Words {
     Words::new(
@@ -1523,7 +1939,7 @@ pub fn claim_stuck_words() -> Words {
         "Lightning claim waiting",
         "A Lightning sale's claim has not confirmed and the provider's deadline is near.",
         Who::Owner,
-        "Nothing to do. The counter keeps raising the fee. If the deadline passes, the sale is shown unpaid.",
+        "Nothing to do. The counter keeps raising the fee. If the provider takes its bitcoin back first, the sale is shown unpaid.",
     )
     .code("CR-222")
 }
@@ -1533,6 +1949,7 @@ pub fn all_words() -> Vec<(String, Words)> {
     vec![
         ("SwapConfirming".to_string(), confirming_words()),
         ("SwapFailed".to_string(), failed_words()),
+        ("SwapLost".to_string(), lost_words()),
         ("SwapUnavailable".to_string(), unavailable_words()),
         ("SwapClaimStuck".to_string(), claim_stuck_words()),
     ]

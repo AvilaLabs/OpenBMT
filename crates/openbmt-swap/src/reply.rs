@@ -13,7 +13,7 @@ use crate::pairs::Pairs;
 use crate::tree::{claim_script, refund_script, KeyOrder, SwapTree};
 use crate::{
     MAX_INVOICE_SATS, MAX_LEAF_BYTES, MAX_REPLY_BYTES, MAX_REPLY_DEPTH, MIN_CLAIM_BLOCKS,
-    MIN_INVOICE_LIFE_SECS, MIN_ONCHAIN_SATS,
+    MIN_INVOICE_LIFE_SECS, MIN_ONCHAIN_PPM, MIN_ONCHAIN_SATS,
 };
 
 /// The version of a tapscript leaf (BIP 342).
@@ -249,6 +249,18 @@ pub fn check(reply: &Reply, expect: &Expect<'_>) -> Result<Swap, Refused> {
     if reply.onchain_amount < least {
         return Err(Refused::OnchainBelowQuote {
             least,
+            got: reply.onchain_amount,
+        });
+    }
+    // The service's percentage and its lockup fee together never take more
+    // than the rest of the invoice amount.
+    let share = u64::try_from(
+        (u128::from(expect.invoice_sats) * u128::from(MIN_ONCHAIN_PPM)).div_ceil(1_000_000),
+    )
+    .unwrap_or(u64::MAX);
+    if reply.onchain_amount < share {
+        return Err(Refused::OnchainBelowShare {
+            least: share,
             got: reply.onchain_amount,
         });
     }

@@ -1,6 +1,6 @@
 //! Sections 4 and 5: what a sale holds, who saw it and conflicts.
 
-use bitcoin::{Amount, Block, ScriptBuf, Transaction, TxOut, Witness};
+use bitcoin::{Amount, Block, ScriptBuf, Transaction, TxOut, Txid, Witness};
 use openbmt_core::policy::CheckMode;
 
 use super::kit::*;
@@ -1030,6 +1030,39 @@ fn wr_31_standing_lists_what_each_payment_pays_ascending_by_id() {
     ];
     expect.sort_by_key(|(t, _)| bitcoin::hashes::Hash::to_byte_array(*t));
     assert_eq!(w.standing(), expect);
+}
+
+#[test]
+fn wr_31_standing_depths_tell_which_payment_is_in_a_block() {
+    let mut w = watch(20_000, 0);
+    let chain0 = TestChain::new(1);
+    assert!(w.standing_depths(&chain0).is_empty());
+    let (a, b) = (pays(1, 10_000), pays(2, 10_000));
+    for tx in [&a, &b] {
+        sight(&mut w, tx, peer(20), NOW);
+    }
+    let mut chain = TestChain::new(5);
+    confirm_in(&mut w, &mut chain, std::slice::from_ref(&b), 5);
+    // The chain is two blocks higher than the block of the second payment.
+    chain.tip = 6;
+    status_at(&mut w, &chain, NOW);
+    let depths = w.standing_depths(&chain);
+    let of = |tx: &Transaction| {
+        depths
+            .iter()
+            .find(|(t, _)| *t == tx.compute_txid())
+            .map(|(_, d)| *d)
+    };
+    assert_eq!(depths.len(), 2);
+    assert_eq!(of(&a), Some(0));
+    assert_eq!(of(&b), Some(2));
+    // One payment asked for by its id.
+    assert_eq!(w.depth_of(&chain, &a.compute_txid()), Some(0));
+    assert_eq!(w.depth_of(&chain, &b.compute_txid()), Some(2));
+    assert_eq!(w.depth_of(&chain, &pays(9, 1).compute_txid()), None);
+    // The order is that of `standing`.
+    let ids: Vec<Txid> = w.standing().iter().map(|(t, _)| *t).collect();
+    assert_eq!(depths.iter().map(|(t, _)| *t).collect::<Vec<_>>(), ids);
 }
 
 #[test]

@@ -349,11 +349,10 @@ fn sw_46_a_claim_is_built_again_at_another_rate_with_the_same_rules() {
     );
     assert!(second.output[0].value < first.output[0].value);
     assert!(second.is_explicitly_rbf());
-    // The same limits: at the timeout, or a fee above half, it is refused.
-    assert_eq!(
-        rebuild_claim(&sent, &lockup, 4_000, TIMEOUT).unwrap_err(),
-        Refused::TooLate
-    );
+    // At and past the timeout it is built: the preimage is out and the
+    // claim races the refund. A fee above half is refused.
+    assert!(rebuild_claim(&sent, &lockup, 4_000, TIMEOUT).is_ok());
+    assert!(rebuild_claim(&sent, &lockup, 4_000, u32::MAX).is_ok());
     assert_eq!(
         rebuild_claim(&sent, &lockup, 4_000_000, TIP).unwrap_err(),
         Refused::FeeTooHigh

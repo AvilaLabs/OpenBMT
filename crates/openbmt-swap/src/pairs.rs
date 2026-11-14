@@ -4,7 +4,9 @@
 use openbmt_json::{Limits, Value};
 
 use crate::error::Refused;
-use crate::{MAX_HTTP_BYTES, MAX_INVOICE_SATS, MIN_INVOICE_SATS, PAIRS_FRESH_SECS};
+use crate::{
+    MAX_HTTP_BYTES, MAX_INVOICE_SATS, MAX_LOCKUP_FEE_SATS, MIN_INVOICE_SATS, PAIRS_FRESH_SECS,
+};
 
 /// The deepest nesting of a pairs reply that is read: the BTC to BTC pair
 /// sits at depth 5, and the other pairs have room to grow.
@@ -111,6 +113,12 @@ impl Pairs {
         };
         if terms.min_sats == 0 || terms.min_sats > terms.max_sats {
             return Err(Refused::BadPairs("limits"));
+        }
+        if terms.lockup_fee_sats > MAX_LOCKUP_FEE_SATS {
+            return Err(Refused::LockupFeeTooHigh {
+                fee: terms.lockup_fee_sats,
+                most: MAX_LOCKUP_FEE_SATS,
+            });
         }
         Ok(Self { terms, read_at })
     }

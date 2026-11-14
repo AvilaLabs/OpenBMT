@@ -10,7 +10,8 @@ use bitcoin::{Amount, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, T
 use super::fixtures::*;
 use crate::follow::{Ctx, Failure, Next, ReverseSwap, Stage};
 use crate::{
-    Refused, Seen, Status, StatusKind, SwapState, MAGIC_FOLLOW, POLL_LOCKED_SECS, POLL_WAITING_SECS,
+    Refused, Seen, Status, StatusKind, SwapState, CLAIM_MARGIN_BLOCKS, MAGIC_FOLLOW,
+    POLL_LOCKED_SECS, POLL_WAITING_SECS,
 };
 
 fn ctx() -> Ctx {
@@ -18,6 +19,8 @@ fn ctx() -> Ctx {
         now_secs: NOW,
         tip_height: TIP,
         accept_unconfirmed: false,
+        behind: false,
+        lockup_on_chain: false,
     }
 }
 
@@ -327,7 +330,20 @@ fn every_stage() -> Vec<ReverseSwap> {
     let (sent, claim) = block.claim(1_500, &ctx()).unwrap();
     let paid = sent.claim_confirmed(claim.compute_txid(), 250_010).unwrap();
     let (failed, _) = m.on_status(&status("swap.expired", None), &ctx());
-    vec![m, announced, mempool, block, sent, paid, failed]
+    // Lost, with the claim sent and with only a lockup held.
+    let lost_sent = sent.lost().unwrap();
+    let lost_locked = block.lost().unwrap();
+    vec![
+        m,
+        announced,
+        mempool,
+        block,
+        sent,
+        paid,
+        failed,
+        lost_sent,
+        lost_locked,
+    ]
 }
 
 #[test]
@@ -487,4 +503,163 @@ fn sw_75_the_claim_seen_in_a_block_may_be_an_earlier_one_the_caller_built() {
     );
     // The last claim needs no list.
     assert!(m2.claim_confirmed(second.compute_txid(), TIP + 1).is_ok());
+}
+
+// SW-44: the margin and the chain that is behind
+
+fn locked_in_block() -> ReverseSwap {
+    machine()
+        .on_lockup(&lockup_tx(99_350), Seen::Block, &ctx())
+        .unwrap()
+        .0
+}
+
+fn at_tip(tip_height: u32) -> Ctx {
+    Ctx {
+        tip_height,
+        ..ctx()
+    }
+}
+
+#[test]
+fn sw_44_the_claim_is_built_only_with_the_margin_left_before_the_timeout() {
+    let m = locked_in_block();
+    let last_good = TIMEOUT - u32::try_from(CLAIM_MARGIN_BLOCKS).unwrap();
+    // With exactly the margin left: claimed.
+    assert!(matches!(
+        m.settle(&at_tip(last_good)).1,
+        Next::BuildClaim { .. }
+    ));
+    assert!(m.claim(2_000, &at_tip(last_good)).is_ok());
+    // One block less: no claim, and the swap ends so that the preimage is
+    // never shown.
+    for tip in [last_good + 1, TIMEOUT - 1, TIMEOUT] {
+        let (f, next) = m.settle(&at_tip(tip));
+        assert_eq!(next, Next::Failed(Failure::TimedOut), "{tip}");
+        assert_eq!(f.stage(), Stage::Failed(Failure::TimedOut));
+        assert_eq!(
+            m.claim(2_000, &at_tip(tip)).unwrap_err(),
+            Refused::TooLate,
+            "{tip}"
+        );
+    }
+    // A lockup in the mempool, which the shop's rule would claim, ends the
+    // same way.
+    let (mempool, _) = machine()
+        .on_lockup(&lockup_tx(99_350), Seen::Mempool, &ctx())
+        .unwrap();
+    let loose = Ctx {
+        accept_unconfirmed: true,
+        tip_height: last_good + 1,
+        ..ctx()
+    };
+    assert_eq!(mempool.settle(&loose).1, Next::Failed(Failure::TimedOut));
+    assert!(mempool.claim(2_000, &loose).is_err());
+    // A claim that was sent is built again at a higher fee, at and past the
+    // timeout too: the preimage is out already (SW-46).
+    let (sent, _, lockup) = claimed_machine();
+    assert!(sent.reclaim(&lockup, 4_000, &at_tip(TIMEOUT - 1)).is_ok());
+    assert!(sent.reclaim(&lockup, 4_000, &at_tip(TIMEOUT)).is_ok());
+}
+
+#[test]
+fn sw_44_a_chain_that_is_behind_waits_and_does_not_claim() {
+    let m = locked_in_block();
+    let behind = Ctx {
+        behind: true,
+        ..ctx()
+    };
+    assert_eq!(
+        m.settle(&behind).1,
+        Next::Wait {
+            poll_after_secs: POLL_LOCKED_SECS
+        }
+    );
+    assert!(matches!(m.claim(2_000, &behind), Err(Refused::NotReady(_))));
+    // Caught up, the same machine claims.
+    assert!(matches!(m.settle(&ctx()).1, Next::BuildClaim { .. }));
+    assert!(m.claim(2_000, &ctx()).is_ok());
+    // Behind and short of margin: the swap ends all the same, since the
+    // real tip is no lower than the one known.
+    let both = Ctx {
+        behind: true,
+        tip_height: TIMEOUT - 3,
+        ..ctx()
+    };
+    assert_eq!(m.settle(&both).1, Next::Failed(Failure::TimedOut));
+}
+
+// SW-72: a status never overrides the chain
+
+#[test]
+fn sw_72_a_status_does_not_end_a_swap_whose_lockup_the_watch_holds() {
+    let m = locked_in_block();
+    let seen = Ctx {
+        lockup_on_chain: true,
+        ..ctx()
+    };
+    for name in [
+        "invoice.expired",
+        "transaction.failed",
+        "swap.expired",
+        "transaction.refunded",
+    ] {
+        let (same, next) = m.on_status(&status(name, None), &seen);
+        assert_eq!(same, m, "{name}");
+        assert!(matches!(next, Next::BuildClaim { .. }), "{name}");
+    }
+    // Bytes in a status that fail SW-30 do not end it either.
+    let small = lockup_tx(99_349);
+    let (same, next) = m.on_status(&status("transaction.mempool", Some(&small)), &seen);
+    assert_eq!(same, m);
+    assert!(matches!(next, Next::BuildClaim { .. }));
+    // The shop still claims.
+    assert!(m.claim(2_000, &seen).is_ok());
+    // A swap whose lockup the watch has not seen is ended by the status, as
+    // before.
+    let (f, _) = m.on_status(&status("swap.expired", None), &ctx());
+    assert_eq!(f.stage(), Stage::Failed(Failure::SwapExpired));
+    // The timeout still ends it.
+    let late = Ctx {
+        tip_height: TIMEOUT,
+        ..seen
+    };
+    let (f, next) = m.on_status(&status("swap.expired", None), &late);
+    assert_eq!(
+        (f.stage(), next),
+        (
+            Stage::Failed(Failure::TimedOut),
+            Next::Failed(Failure::TimedOut)
+        )
+    );
+}
+
+// SW-44: lost
+
+#[test]
+fn sw_44_a_swap_whose_lockup_was_spent_elsewhere_or_whose_time_ran_out_is_lost() {
+    let (sent, _, _) = claimed_machine();
+    let lost = sent.lost().unwrap();
+    assert_eq!(lost.stage(), Stage::Failed(Failure::Lost));
+    // The claim stays in the state, and the machine reports the failure.
+    assert!(matches!(lost.state().phase(), crate::Phase::Claimed(_)));
+    assert_eq!(lost.settle(&ctx()).1, Next::Failed(Failure::Lost));
+    assert_eq!(ReverseSwap::decode(&lost.encode()).unwrap(), lost);
+    // A lockup held and not yet claimed can be lost too.
+    let held = locked_in_block().lost().unwrap();
+    assert_eq!(held.stage(), Stage::Failed(Failure::Lost));
+    assert_eq!(ReverseSwap::decode(&held.encode()).unwrap(), held);
+    // A swap with nothing to lose, or already paid, is not lost.
+    assert!(machine().lost().is_err());
+    let (m, claim, _) = claimed_machine();
+    let paid = m.claim_confirmed(claim.compute_txid(), TIP + 1).unwrap();
+    assert!(paid.lost().is_err());
+    // Every other failure still needs a state that holds no claim.
+    let mut bytes = sent.encode();
+    bytes[5] = 5;
+    bytes.insert(6, 3);
+    assert_eq!(
+        ReverseSwap::decode(&bytes),
+        Err(Refused::BadFollow("stage and phase"))
+    );
 }
