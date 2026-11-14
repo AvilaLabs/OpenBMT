@@ -130,6 +130,7 @@ fn refusal_name(r: &Refusal) -> String {
         Refusal::QueueNotSaved(_) => "QueueNotSaved".to_string(),
         Refusal::NoKeyApp => "NoKeyApp".to_string(),
         Refusal::OwnSpend(_) => "OwnSpend".to_string(),
+        Refusal::ShopLightning(_) => "ShopLightning".to_string(),
         Refusal::Hardware(h) => {
             let kind = std::mem::discriminant(h);
             let name = crate::hardware::all_refusals()

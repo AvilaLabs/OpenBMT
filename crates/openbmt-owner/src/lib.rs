@@ -58,6 +58,7 @@ pub mod own_spend;
 pub mod own_switch;
 pub mod own_waiting;
 pub mod say;
+pub mod shop_lightning;
 mod single_key;
 pub mod starter;
 mod state;
@@ -74,6 +75,9 @@ pub use edit::{
     SettingsPreview, SwapEdit, WatchEdit, MAX_EDIT_CONFIRMATIONS, MAX_USD_PER_BTC, MIN_USD_PER_BTC,
 };
 pub use error::{BoxGap, BundleGap, NodeKeyFault, OwnerError, Refusal, RestoreError, SetupError};
+pub use shop_lightning::{
+    ShopLightningChange, ShopLightningEdit, ShopLightningRefusal, ShopLightningSet,
+};
 pub use state::Owner;
 pub use types::{
     Built, CashAmount, CashOut, Deliverable, Delivery, FeePayer, Held, HeldEntry, IssuedRange,

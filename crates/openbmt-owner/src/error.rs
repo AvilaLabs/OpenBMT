@@ -211,6 +211,8 @@ pub enum Refusal {
     /// AS-101 to AS-106: a step of a spend from the shop's own wallet was
     /// refused.
     OwnSpend(crate::own_spend::OwnSpendRefusal),
+    /// SL-71, SL-73, SL-76: an edit of Shop Lightning was refused.
+    ShopLightning(crate::shop_lightning::ShopLightningRefusal),
 }
 
 impl fmt::Display for Refusal {
@@ -330,6 +332,7 @@ impl fmt::Display for Refusal {
                 "no-key-app: this shop uses its own wallet and has no Key app; the item needs one"
             ),
             Self::OwnSpend(r) => write!(f, "{r}"),
+            Self::ShopLightning(r) => write!(f, "{r}"),
         }
     }
 }

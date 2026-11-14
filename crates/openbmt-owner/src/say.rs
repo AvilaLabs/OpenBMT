@@ -830,6 +830,7 @@ impl Refusal {
             Self::Hardware(h) => h.words(),
             Self::NoKeyApp => crate::own_spend::no_key_app_words(),
             Self::OwnSpend(r) => r.words(),
+            Self::ShopLightning(r) => r.words(),
         }
     }
 }

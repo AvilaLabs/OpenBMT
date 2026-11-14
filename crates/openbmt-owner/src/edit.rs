@@ -12,6 +12,7 @@ use openbmt_core::settings::{
 };
 
 use crate::error::{NodeKeyFault, Refusal};
+use crate::shop_lightning::{self, ShopLightningEdit, ShopLightningRefusal};
 use crate::state::Owner;
 
 /// Most confirmations an edit may ask for (AS-74).
@@ -109,6 +110,8 @@ pub struct SettingsEdit {
     pub swap: Option<SwapEdit>,
     /// The watch key: `None` keeps it.
     pub watch_key: Option<WatchEdit>,
+    /// Shop Lightning: `None` keeps it (SL-71, AP-13).
+    pub shop_lightning: Option<ShopLightningEdit>,
 }
 
 /// What an edit would do, before anything is stored (AS-77).
@@ -321,6 +324,12 @@ impl Owner {
     /// exactly as [`Owner::queue_settings`] sorts them. Nothing is stored
     /// and the owner is not changed.
     pub fn settings_preview(&self, edit: &SettingsEdit) -> Result<SettingsPreview, Refusal> {
+        // SL-76: a shop with its own wallet has no way to carry a change of
+        // Shop Lightning: neither a counter's confirmation (CR-239) nor a
+        // wallet's signature (CR-236) is joined to the settings it signs.
+        if edit.shop_lightning.is_some() && self.is_own_wallet() {
+            return Err(ShopLightningRefusal::OwnWallet.into());
+        }
         let base = self
             .state
             .latest_settings()
@@ -491,6 +500,9 @@ impl Owner {
             None => {}
             Some(WatchEdit::Remove) => s.watch_key = None,
             Some(WatchEdit::Set(key)) => s.watch_key = Some(*key),
+        }
+        if let Some(edit) = &edit.shop_lightning {
+            shop_lightning::apply(&mut s, edit)?;
         }
         s.validate()
             .map_err(|e| Refusal::SettingsInvalid(e.to_string()))?;
