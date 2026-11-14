@@ -52,7 +52,8 @@ pub enum Every {
     Week,
     /// On the same day of each month, or the last day of a shorter one.
     Month,
-    /// On the same date of each year, or 28 February for 29 February.
+    /// On the same date of each year, or 28 February in a year with no 29
+    /// February.
     Year,
 }
 

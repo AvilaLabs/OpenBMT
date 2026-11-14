@@ -457,10 +457,10 @@ to 85 of `openbmt-owner-ffi`. OC-38 and OC-39 are not used.
   record whose parts do not belong together (a key not at its path, a
   description that does not hold the keys, a stage that does not fit the
   fields) is refused.
-- **OC-45.** The setup finishes only from a built wallet, with a refund
-  depth of at most 100 confirmations and a birthday. The finished record
-  gives the values the node starts from: the descriptor, the network, the
-  roots, the batch minimum, the refund depth and the birthday.
+- **OC-45.** The setup finishes only from a built wallet, with a refund depth
+  of 1 to 100 confirmations and a birthday. The finished record gives the
+  values the node starts from: the descriptor, the network, the roots, the
+  batch minimum, the refund depth and the birthday.
 - **OC-46.** Every stage and every refusal has words that pass the checks
   of `docs/SCREEN-RULES.md`, with no rule numbers.
 - **OC-47.** The facts of a queued refund follow the chain, whoever queued it.
@@ -514,27 +514,30 @@ the shop's currency, so the node keeps a log of its own.
   customer paid is logged at what the customer received, not at what was
   asked. A cash-out of everything whose transaction pays nothing to its
   address is not logged, and the owner's log says so.
-- **OC-50.** The log is `paid-log.bin`: `OBM&`, version 1, and then entries of
-  118 bytes, each ending in the first 8 bytes of the SHA-256 of the 110 bytes
-  before it. The file is only added to: a new file is built from the old
-  entries and the new ones, stored through the watcher's atomic write, and
-  swapped in only when the store succeeds. `archive_paid` does not touch it.
-  It holds at most 100,000 entries; past that nothing more is appended and
-  the node notes it. An entry whose payment did not happen is never
-  removed: it is undone by a later entry of the kind "undone" that names the
-  same kind, number and transaction. That entry is appended when the
-  transaction is replaced, or beaten by a block that spends one of its
-  inputs, never only because its block left or because it cannot be found:
-  the same bytes are sent again (OC-05) and usually confirm, and an undoing
-  written in error would drop a real payment from the books. The books leave an entry and its undoing both out, so a
-  refund paid again by a new transaction is one disposal, not two. It is
-  read strictly: a length that is not a whole number
-  of entries, a check that does not match, a flag that is not 0 or 1, a field
-  that a kind does not use and is not zero, an entry that repeats an earlier
-  one, a currency that is not three capital letters and a kind that is not
-  known refuse the whole file. A node whose log does not read back does not
-  start: the fault is the one of any other file of the node that does not read
-  back (`NodeError::Files`).
+- **OC-50.** The log is `paid-log.bin`: `OBM&`, version 1, or version 2 when
+  it holds an entry that undoes another, and then entries of 118 bytes, each
+  ending in the first 8 bytes of the SHA-256 of the 110 bytes before it. The
+  file is only added to: a new file is built from the old entries and the new
+  ones, stored through the watcher's atomic write, and swapped in only when
+  the store succeeds. `archive_paid` does not touch it. It holds at most
+  100,000 entries; past that nothing more is appended and the node notes it.
+  An entry whose payment did not happen is never removed: it is undone by a
+  later entry of the kind "undone" that names the same kind, number and
+  transaction. That entry is appended when the transaction is replaced, or
+  beaten by a block that spends one of its inputs, never only because its
+  block left or because it cannot be found: the same bytes are sent again
+  (OC-05) and usually confirm, and an undoing written in error would drop a
+  real payment from the books. The books leave an entry and its undoing both
+  out, so a refund paid again by a new transaction is one disposal, not two.
+  It is read strictly: a length that is not a whole number of entries, a check
+  that does not match, a flag that is not 0 or 1, a field that a kind does not
+  use and is not zero, an entry that repeats an earlier one that still stands
+  (a payment may be written again after its undoing, OC-55), a version that is
+  not the one the entries need, an undoing that names no earlier entry, a
+  currency that is not three capital letters and a kind that is not known
+  refuse the whole file. A node whose log does not read back does not start:
+  the fault is the one of any other file of the node that does not read back
+  (`NodeError::Files`).
 - **OC-51.** The queue keeps what the log needs until the entry is logged: a
   cash-out keeps the price the owner confirmed for it (a currency code and
   minor units per bitcoin, never zero), and a refund that came from a

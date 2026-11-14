@@ -74,10 +74,10 @@ an end, payments in parts, repeats and returns.
     settings (CR-193) and is what is owed. The satoshis asked for are worked
     out each time the request is shared (RQ-12).
 - **RQ-08.** The amount in satoshis, or worked out from the currency, is at
-  least the shop's smallest bitcoin sale (CR-75) and above the dust line
-  (CR-17). A smaller one is refused with nothing written. The currency
-  amount is at most 1,000,000 units of the currency, and the satoshi amount
-  at most 21,000,000 bitcoin; a larger one is refused.
+  least the shop's smallest bitcoin sale (CR-75) and at least the dust line
+  (CR-17). A smaller one is refused with nothing written. The currency amount
+  is at most 1,000,000 units of the currency, and the satoshi amount at most
+  21,000,000 bitcoin; a larger one is refused.
 - **RQ-09.** The due date is a day in the shop's time zone, from the day the
   request is made to 366 days later. It is a date to show, not an end: the
   request stays open after it (RQ-17).
@@ -87,7 +87,9 @@ an end, payments in parts, repeats and returns.
   ledger have no part in it (as CR-208). The owner phone learns of payments
   from checked blocks only (OC-01, OC-02).
 - **RQ-11.** At most 1,000 requests are open at once. Making one more is
-  refused, with the words of RQ-36, until one is paid or cancelled.
+  refused, with the words of RQ-36, until one is paid or cancelled. A repeat
+  (RQ-25) that would make one more is refused the same way, with its own
+  words.
 
 ## 3. Sharing a request
 
@@ -185,8 +187,10 @@ an end, payments in parts, repeats and returns.
 
 ## 6. Repeats
 
-- **RQ-24.** A request may repeat every week, every month or every year,
-  from its due date. A month that has no such day uses its last day.
+- **RQ-24.** A request may repeat every week, every month or every year, each
+  due date worked out from the first one. A month that has no such day uses
+  its last day, so a yearly repeat from 29 February falls on 28 February in a
+  year that has no 29 February.
 - **RQ-25.** When the owner app is opened on or after a repeat's next due
   date less the same lead as the first request had (its due date less the
   day it was made, at most 31 days), it makes the next request: a new
@@ -198,11 +202,13 @@ an end, payments in parts, repeats and returns.
 
 ## 7. Returning money
 
-- **RQ-26.** Money can be returned from any request that received
-  something: an overpayment, a payment after a cancel or a close, or part
-  or all of a payment the owner chooses to give back. The amount returned
-  from a request is at most what it received less what was already returned
-  from it, and is chosen in satoshis or in the currency at the rate of now.
+- **RQ-26.** Money can be returned from any request that received something:
+  an overpayment, a payment after a cancel or a close, or part or all of a
+  payment the owner chooses to give back. The amount returned from a request
+  is at most what it received less what was already returned from it, and is
+  chosen in satoshis or in the currency at the rate of now. It is at least the
+  dust limit of the customer's address (294 satoshis for P2WPKH, 330 for P2WSH
+  or P2TR, 540 for P2SH, 546 for P2PKH); a smaller one is refused.
 - **RQ-27.** The customer's address is asked for and not guessed: the
   address a payment came from is never used, because it can belong to an
   exchange or another person. "Ask for an address" opens the share sheet
