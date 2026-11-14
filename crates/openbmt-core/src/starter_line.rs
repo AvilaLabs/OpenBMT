@@ -7,7 +7,7 @@
 //! the owner root:
 //!
 //! ```text
-//! line: "OBM_" | 1 | number u64 LE | time u64 LE | held sats u64 LE
+//! line: "OBM" 0x1b | 1 | number u64 LE | time u64 LE | held sats u64 LE
 //!         | limit sats u64 LE | stop flag u8 (0 or 1) | payment count u8 (0..=16)
 //!         | per payment: txid (32) | sats u64 LE | time u64 LE | made by the owner phone u8 (0 or 1)
 //!         | owner sig (64)

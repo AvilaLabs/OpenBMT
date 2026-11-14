@@ -20,7 +20,7 @@ use openbmt_core::wire::{self, DecodeError, Reader};
 /// (u64 LE), the time (u64 LE), the flag of the owner phone's own payment
 /// and the flag of a payment seen at the counter, in the order of the
 /// transaction IDs, none twice.
-pub const MAGIC_STARTER_CARDS: [u8; 4] = *b"OBM\"";
+pub const MAGIC_STARTER_CARDS: [u8; 4] = *b"OBM\x1c";
 
 /// Most payments the counter keeps (CR-274). One more drops the oldest that
 /// was seen, or else the oldest.

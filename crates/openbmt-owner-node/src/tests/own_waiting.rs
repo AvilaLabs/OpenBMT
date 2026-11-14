@@ -123,8 +123,17 @@ fn oa_119_a_stop_between_the_file_and_the_state_is_completed_from_the_file_at_th
     {
         let (shop, store) = node.shop_and_store();
         let made = shop.make_offer(T0).unwrap();
-        shop.confirm_with(&made, T0 + 30, &request(&made, 3), USD, vec![], None, &store, &writer)
-            .unwrap();
+        shop.confirm_with(
+            &made,
+            T0 + 30,
+            &request(&made, 3),
+            USD,
+            vec![],
+            None,
+            &store,
+            &writer,
+        )
+        .unwrap();
         shop.add_box(id(9).device_id(), 0, &store).unwrap();
     }
     let state_path = dir.0.join(crate::own::OWN_STATE_FILE);
@@ -132,8 +141,17 @@ fn oa_119_a_stop_between_the_file_and_the_state_is_completed_from_the_file_at_th
     {
         let (shop, store) = node.shop_and_store();
         let made = shop.make_offer(T0 + 100).unwrap();
-        shop.confirm_with(&made, T0 + 130, &request(&made, 4), USD, vec![], None, &store, &writer)
-            .unwrap();
+        shop.confirm_with(
+            &made,
+            T0 + 130,
+            &request(&made, 4),
+            USD,
+            vec![],
+            None,
+            &store,
+            &writer,
+        )
+        .unwrap();
     }
     let after = std::fs::read(&state_path).unwrap();
     drop(node);

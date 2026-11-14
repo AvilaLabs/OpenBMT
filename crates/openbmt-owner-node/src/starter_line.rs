@@ -18,7 +18,7 @@
 //!   queue's outbox took it.
 //! - The time of a payment is the owner's clock at the first step that found
 //!   it. The last 16 are kept, with the line's number, in the file
-//!   [`STARTER_LINE_FILE`] (the `OBM_` frame of the last line made, nothing
+//!   [`STARTER_LINE_FILE`] (the frame, magic `OBM` 0x1b, of the last line made, nothing
 //!   else), so a start goes on from where the last one stopped. The number of
 //!   a line is the greater of the last one plus one and the time now, so it
 //!   rises even if the file is lost.

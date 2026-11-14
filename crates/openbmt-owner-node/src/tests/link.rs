@@ -2831,6 +2831,8 @@ fn oa_120_a_confirmation_in_a_counters_records_is_read_from_its_copy() {
     b.w.step(T0);
     b.w.link.scan_index_use();
     assert_eq!(b.w.link.confirmations(), vec![(counter(), held)]);
+}
+
 #[test]
 fn lk_79_a_starter_line_goes_to_a_counter_that_has_not_switched_and_is_not_kept_for_sending_again()
 {

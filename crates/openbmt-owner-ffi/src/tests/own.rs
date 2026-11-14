@@ -810,6 +810,8 @@ fn ss_41_a_repin_that_waits_comes_back_with_its_words_and_code_and_writes_nothin
     // "They differ" gives the offer up: the unsettled queue waits again.
     Rd::ok(&call(153, &[]));
     waits(&repin(handle), "Upgrade waits for a payment");
+}
+
 #[test]
 fn oa_119_no_change_waits_in_a_shop_that_has_none() {
     let dir = Scratch::new();

@@ -54,7 +54,7 @@ pub const MAX_NAMES: usize = 10_000;
 /// its second device: 30 days (BX-94).
 pub const GRACE_SECS: u64 = 30 * 24 * 60 * 60;
 
-const MAGIC_TENANTS: [u8; 4] = *b"OBM\"";
+const MAGIC_TENANTS: [u8; 4] = *b"OBM\x1d";
 /// The most counters the tenants file holds: the counters a settings value
 /// may name over 30 days are few; this only bounds a damaged file.
 const MAX_TENANTS: usize = 64;

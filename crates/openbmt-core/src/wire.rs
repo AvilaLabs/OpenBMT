@@ -103,7 +103,7 @@ pub const MAGIC_CONFIRMED_SETTINGS: [u8; 4] = *b"OBM<";
 pub const MAGIC_SWITCH_OWN: [u8; 4] = *b"OBM]";
 /// Magic of a [`StarterLine`](crate::starter_line::StarterLine), the owner
 /// phone's line to the counters of a starter wallet (LK-79).
-pub const MAGIC_STARTER_LINE: [u8; 4] = *b"OBM_";
+pub const MAGIC_STARTER_LINE: [u8; 4] = *b"OBM\x1b";
 /// Magic of a [`SignedRelayHint`](crate::relay::SignedRelayHint), the relay
 /// for counters (CR-132).
 pub const MAGIC_RELAY_FOR_COUNTERS: [u8; 4] = *b"OBMz";

@@ -27,7 +27,7 @@ fn line(count: u8) -> StarterLine {
 fn lk_79_line_is_strict() {
     for count in [0u8, 1, 16] {
         let bytes = line(count).to_bytes();
-        assert_eq!(&bytes[..4], b"OBM_");
+        assert_eq!(&bytes[..4], b"OBM\x1b");
         assert_eq!(bytes.len(), 5 + 34 + 49 * usize::from(count) + 64);
         assert_strict_decoding(&bytes, StarterLine::from_bytes, StarterLine::to_bytes);
     }

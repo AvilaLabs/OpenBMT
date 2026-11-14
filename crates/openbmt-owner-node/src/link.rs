@@ -745,7 +745,7 @@ impl<R: Post> OwnerLink<R> {
             .collect()
     }
 
-    /// LK-79: send a starter line (the `OBM_` frame) to a counter as a
+    /// LK-79: send a starter line (the frame with magic `OBM` 0x1b) to a counter as a
     /// message of kind Starter. It is not kept: the next line replaces it.
     pub fn send_starter(&mut self, counter: &DeviceId, line: &[u8]) -> Result<(), SendError> {
         self.send_now(counter, Kind::Starter, line)

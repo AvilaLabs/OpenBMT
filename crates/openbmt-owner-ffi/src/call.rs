@@ -1064,8 +1064,10 @@ fn build_ops() -> Vec<Op> {
         }),
         op(233, "web_code_read", Zero, |_, text: String| {
             web_orders::read_code(text)
+        }),
         op(234, "request_read", Node, |c, a: RequestNumberArgs| {
             c.entry()?.request_read(a)
+        }),
         op(235, "starter_line_set", Node, |c, a: StarterLineSetArgs| {
             c.entry()?.starter_line_set(a)
         }),

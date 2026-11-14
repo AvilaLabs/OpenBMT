@@ -4432,6 +4432,8 @@ object AppModelTest {
         ok(source("src/android/Controller.kt").contains("OwnerNode.start(floatWatching(start))"), "the node is started with the float's watch")
         ok(screens.contains("sealed.wipe()") && screens.contains("FloatWords.rowTitle)"), "the data key is overwritten when the seal cannot be kept, and the unlock prompt is the float's own")
 
+    }
+
     // ---- the owner's payment requests (docs/REQUEST-RULES.md, RQ-35, RQ-36) ------------------------------------------
 
     private fun day(y: Int, m: Int, d: Int) = RequestDay(y.toLong(), m.toLong(), d.toLong())
@@ -4637,6 +4639,8 @@ object AppModelTest {
         ok(activity.contains("FLAG_SECURE"), "OA-04: the window that shows the code takes no screenshot or recording")
         // RQ-13: no picture goes to other apps, so the manifest keeps no provider (OA-03, OA-89).
         ok(!source("AndroidManifest.xml").contains("<provider") && !screens.contains("ACTION_SEND\").setType(\"image"), "the manifest is as OA-03 and OA-89 say, and no picture is shared")
+    }
+
     private fun webState(
         pairing: WebPairing = WebPairing.Paired,
         off: Words? = null,

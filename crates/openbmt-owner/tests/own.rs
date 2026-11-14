@@ -1043,6 +1043,8 @@ fn fl_35_the_float_off_index_is_taken_once_above_every_range_and_a_retry_gets_th
         .float_off_index(T0 + 1, |_: &[u8]| Err("disk full".to_string()));
     assert!(matches!(failed, Err(OwnError::Store(_))));
     let _ = &mut back;
+}
+
 // ---- BX-18: a Box for a shop with its own wallet ----
 
 #[test]

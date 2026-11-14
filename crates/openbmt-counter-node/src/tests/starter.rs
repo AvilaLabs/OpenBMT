@@ -432,7 +432,7 @@ fn cr_274_the_file_of_the_payments_is_read_strictly_and_holds_at_most_256() {
     small.add(&[payment(1, 5), payment(2, 6)]);
     small.mark_seen(&[2; 32]);
     let bytes = small.to_bytes();
-    assert_eq!(&bytes[..4], b"OBM\"");
+    assert_eq!(&bytes[..4], b"OBM\x1c");
     assert_eq!(Cards::from_bytes(&bytes).unwrap(), small);
     assert_eq!(Cards::from_bytes(&bytes).unwrap().to_bytes(), bytes);
     for n in 0..bytes.len() {
@@ -457,7 +457,7 @@ fn cr_274_the_file_of_the_payments_is_read_strictly_and_holds_at_most_256() {
 fn cr_274_a_file_of_payments_that_does_not_read_is_removed_with_a_note() {
     let dir = Scratch::new();
     drop(fresh_rig(dir.path()));
-    std::fs::write(path(dir.path(), STARTER_CARDS_FILE), b"OBM\"\x01\x05").unwrap();
+    std::fs::write(path(dir.path(), STARTER_CARDS_FILE), b"OBM\x1c\x01\x05").unwrap();
     let mut rig = fresh_rig(dir.path());
     assert!(rig.node.starter_payments().is_empty());
     assert!(rig.node.take_notes().iter().any(|n| n.contains("CR-274")));

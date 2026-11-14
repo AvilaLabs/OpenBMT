@@ -658,6 +658,9 @@ object ProtocolDecoderTest {
             val at = Writer().u64(3).string("Rent").u64(1_850).u32(2026).u32(12).u32(1).string("line").string("state").u32(0).bool(false).toByteArray().size
             bad[at] = 9
             decodeResponse(header(0, bad)).requestDetail()
+        }
+    }
+
     // ---- the store's web orders ----
 
     private fun webFrames() {

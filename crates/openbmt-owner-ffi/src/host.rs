@@ -2934,11 +2934,17 @@ impl Entry {
         self.run(Some(a.ask.now), move |st| {
             request_prepare(st, &a.ask)?;
             web::reply(&mut st.node, &a)
+        })
+    }
+
     /// RQ-35: one request as the book keeps it, for its page.
     pub(crate) fn request_read(&self, a: RequestNumberArgs) -> Result<RequestDetailView, AppError> {
         self.run(Some(a.ask.now), move |st| {
             request_prepare(st, &a.ask)?;
             requests::read(&st.node, &a)
+        })
+    }
+
     /// LK-79: the limit and the stop the app's own record holds, for the
     /// starter line the node builds. The app gives them at start, before
     /// the node takes blocks, and when they change.
