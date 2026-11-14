@@ -87,7 +87,7 @@ by hand. To write it again, run the test
 | JudgeError::UnknownSale | Sale not found | The counter has no such sale to check. | Look the sale up again. If it is missing, tell the owner: the counter lost a sale. | the cashier | CR-78 |
 | JudgeError::Store | Sale not checked | The counter could not save it, so the check of this sale was not recorded. | Do not hand over the goods yet. Ask for the check again. If it fails again, tell the owner: the counter cannot save. See Details. | the cashier | CR-40 |
 | RequoteRefused::UnknownSale | Sale not found | The counter has no such sale to give a new price. | Look the sale up again. If it is missing, tell the owner: the counter lost a sale. | the cashier | CR-78 |
-| RequoteRefused::WrongCurrency | WORDS_NEEDED_CR196_REQUOTE_CURRENCY | WORDS_NEEDED_CR196_REQUOTE_CURRENCY | WORDS_NEEDED_CR196_REQUOTE_CURRENCY | the cashier | CR-196 |
+| RequoteRefused::WrongCurrency | Sale in another currency | This sale was opened in another currency than the new price, so it takes no new price. | End this sale and start it again in the shop's currency. | the cashier | CR-196 |
 | RequoteRefused::SaleEnded | Sale already ended | The sale has ended, so it takes no new price. | Start a new sale. | the cashier | CR-05 |
 | RequoteRefused::AlreadyEnough | Already paid enough | Enough has arrived for this sale, so it takes no new price. | Nothing to do. The sale screen says when to hand over the goods. | nobody | CR-08 |
 | RequoteRefused::TooManyQuotes | Too many new prices | This sale has had as many new prices as it can keep. | Start a new sale. If the customer already paid on this one, tell the owner. | the cashier | CR-05 |
@@ -171,7 +171,7 @@ by hand. To write it again, run the test
 | RefundRefused::BadText | Name or reason not usable | The name must be plain text of 1 to 64 characters. | Type it again. | the cashier | CR-61 |
 | RefundRefused::DestinationKind | Refund address not usable | The refund request holds an address of a kind this counter cannot pay. | Ask the customer for another address from their own wallet. | the cashier | CR-63 |
 | RefundRefused::UnknownSale | Sale not found | The counter has no such sale to refund. | Look the sale up again. If it is missing, tell the owner: the counter lost a sale. | the cashier | CR-64 |
-| RefundRefused::WrongCurrency | WORDS_NEEDED_CR196_REFUND_CURRENCY | WORDS_NEEDED_CR196_REFUND_CURRENCY | WORDS_NEEDED_CR196_REFUND_CURRENCY | the cashier | CR-196 |
+| RefundRefused::WrongCurrency | Refund in another currency | This sale was paid in another currency than the refund names, so no refund was made. | Give the refund in the sale's own currency, or in satoshis. | the cashier | CR-196 |
 | RefundRefused::StaleRate | Price too old for refund | The exchange price is too old to work out the refund. | Wait for a new price, or check the internet connection. If it stays old, tell the owner. | the cashier | CR-58 |
 | RefundRefused::ZeroAmount | Refund needs an amount | A refund of nothing cannot be asked for. | Enter the amount to refund. | the cashier | CR-67 |
 | RefundRefused::AmountTooLarge | Refund amount too large | That is more than any real payment could be, so no refund was asked for. | Check the amount and enter it again. | the cashier | CR-67 |
