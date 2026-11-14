@@ -1749,15 +1749,26 @@ own, as the driver of section 12 has none.
   sat/vB or at the recent rate of the blocks the counter has checked (FE-13,
   from the fee samples it makes of them and keeps in memory only), whichever
   is higher, and at 2 sat/vB when the higher rate would be refused by SW-41 or
-  no sample has been made. It signals replacement (SW-40) and is built again
-  at a higher fee (SW-46) every block it stays out of a block: 50% more, and
-  at least 2 sat/vB more, never above the limit of SW-41. The first claim is
-  never built at or after the provider's timeout, with fewer than 18 blocks
-  before it, or while the chain is behind (SW-44). A claim already sent is
-  built again, and sent again when it left the chain, past the timeout too,
-  until it or the provider's refund is in a block. A claim that cannot be
-  built again, at the fee limit or at the limit of 32 claims, is sent again as
-  it is at every block; no claim is forgotten. The node tells the sale the
+  no sample has been made. It signals replacement (SW-40). While more than 9
+  blocks **[to tune]** are left before the provider's timeout, a claim that
+  stays out of a block is built again (SW-46) only at the starting rate of
+  now, and only when that is at least 2 sat/vB above its own; otherwise it is
+  sent again as it is at each block. With 9 blocks or fewer left, and at and
+  past the timeout, it is built again every block it stays out of a block at
+  the starting rate of now or 50% more, at least 2 sat/vB more, whichever is
+  higher. A fee is never above the limit of SW-41. The first claim is never
+  built at or after the provider's timeout, with fewer than 18 blocks before
+  it, or while the chain is behind (SW-44). A claim already sent is built
+  again, and sent again when it left the chain, past the timeout too, until it
+  or the provider's refund is in a block. A claim that cannot be built again,
+  at the fee limit or at the limit of claims, is sent again as it is at every
+  block; no claim is forgotten. A swap keeps the ids of 32 claims; the last 4
+  are kept for the claim of a lockup that replaced the first (SW-44), so
+  higher fees stop at 28. When a lockup is replaced in a block by a
+  transaction that pays its script too little, the sale is still taken back
+  (CR-221), and the shop claims that output all the same, at the starting
+  rate, past the timeout too, if the claim passes SW-41; the sale is not paid
+  by it, and its money reaches the sale's address. The node tells the sale the
   newest claim's amount. A claim still unconfirmed `MIN_CLAIM_BLOCKS / 2`
   blocks before the timeout is told to the owner (words "Lightning claim
   waiting"). The swap is done when the shop's own claim, or an earlier one it

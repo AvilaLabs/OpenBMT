@@ -323,6 +323,7 @@ order of the rules, so that the refusal names the first that fails.
 | `MIN_INVOICE_LIFE_SECS` | 300 | SW-23 |
 | `MIN_CLAIM_BLOCKS` | 36 | SW-27 |
 | `CLAIM_MARGIN_BLOCKS` | 18 | SW-27, SW-44 |
+| `FEE_ESCALATE_BLOCKS` | 9 | CR-222 |
 | `MIN_ONCHAIN_SATS` | 1,000 | SW-28 |
 | `MIN_ONCHAIN_PPM` | 900,000 | SW-28 |
 | `MAX_LOCKUP_FEE_SATS` | 25,000 | SW-60 |
