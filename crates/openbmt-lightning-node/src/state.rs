@@ -13,7 +13,7 @@
 
 use crate::chain::{CoreBroadcaster, CoreFees};
 use crate::logger::Logger;
-use crate::store::{device_name, split_device_name, DeviceView};
+use crate::store::{device_name, split_device_name, Background, DeviceView};
 use lightning::io;
 use lightning::ln::types::ChannelId;
 use lightning::sign::KeysManager;
@@ -221,28 +221,72 @@ pub async fn push<K: KVStore>(
     Ok(keys.len())
 }
 
-/// Makes the counter's copy hold exactly what the second device holds.
+/// Whether a key is written through `Background`, the counter's copy first
+/// and the second device's later: what the node holds only locally for a
+/// while. Everything but the channel manager, which a pull replaces as it
+/// does the monitors (the library reads a manager older than its monitors).
+pub fn is_lazy(primary: &str, secondary: &str, key: &str) -> bool {
+    use lightning::util::persist::{
+        NETWORK_GRAPH_PERSISTENCE_KEY, OUTPUT_SWEEPER_PERSISTENCE_KEY, SCORER_PERSISTENCE_KEY,
+    };
+    match (primary, secondary) {
+        (p, _) if p == crate::paid::PRIMARY => true,
+        (p, _) if p == crate::sweep::DESTINATION_PRIMARY => true,
+        ("lightning_liquidity_state", _) => true,
+        ("", "") => [
+            OUTPUT_SWEEPER_PERSISTENCE_KEY,
+            SCORER_PERSISTENCE_KEY,
+            NETWORK_GRAPH_PERSISTENCE_KEY,
+        ]
+        .contains(&key),
+        _ => false,
+    }
+}
+
+/// Brings the counter's copy to the second device's, except for the keys of
+/// the background writes (see [`is_lazy`]): the counter's own version of one
+/// is kept, as the device may be behind it, the device's is taken only where
+/// the counter has none (a wiped counter), and none is ever removed. Those
+/// keys are for [`owe_lazy`] to give back to the device.
 pub async fn pull<K: KVStore>(
     local_dir: &Path,
     local: &K,
     device: &DeviceView,
 ) -> Result<usize, io::Error> {
     let names = device.names().await?;
+    let held: BTreeSet<(String, String, String)> = local_keys(local_dir)?.into_iter().collect();
     let mut wanted = BTreeSet::new();
     for name in &names {
         let Some((p, s, k)) = split_device_name(name) else {
             continue;
         };
+        if is_lazy(p, s, k) && held.contains(&(p.to_string(), s.to_string(), k.to_string())) {
+            continue;
+        }
         let blob = device.read(p, s, k).await?;
         local.write(p, s, k, blob).await?;
         wanted.insert(name.clone());
     }
-    for (p, s, k) in local_keys(local_dir)? {
-        if !wanted.contains(&device_name(&p, &s, &k)) {
+    for (p, s, k) in held {
+        if !is_lazy(&p, &s, &k) && !wanted.contains(&device_name(&p, &s, &k)) {
             local.remove(&p, &s, &k, false).await?;
         }
     }
     Ok(names.len())
+}
+
+/// Queues every key of the background writes in the counter's copy for the
+/// second device, after a pull, so that the two copies meet again.
+pub async fn owe_lazy(local_dir: &Path, background: &Background) -> Result<usize, io::Error> {
+    let mut n = 0;
+    for (p, s, k) in local_keys(local_dir)? {
+        if is_lazy(&p, &s, &k) {
+            let blob = KVStore::read(background, &p, &s, &k).await?;
+            KVStore::write(background, &p, &s, &k, blob).await?;
+            n += 1;
+        }
+    }
+    Ok(n)
 }
 
 #[cfg(test)]

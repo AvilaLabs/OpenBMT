@@ -520,6 +520,7 @@ impl Node {
             .map_err(setup)?;
         let found = state::order(&local_numbers, &device_numbers);
         logger.line(Level::Info, &format!("copies: {found:?}"));
+        let mut pulled = false;
         match state::action(found, config.start_from).map_err(StartError::State)? {
             state::Action::Go => {}
             state::Action::PushToDevice => {
@@ -531,6 +532,7 @@ impl Node {
                 state::pull(&state_dir, &*local, &view)
                     .await
                     .map_err(setup)?;
+                pulled = true;
             }
         }
 
@@ -544,6 +546,13 @@ impl Node {
         ));
         let background = Arc::new(Background(Arc::clone(&store)));
         let flusher = store.spawn_lazy_flusher(&handle);
+        if pulled {
+            // What the counter kept of the background writes goes back to
+            // the device, which may be behind it.
+            state::owe_lazy(&state_dir, &background)
+                .await
+                .map_err(setup)?;
+        }
         let now_unix = now_secs();
         let expectations = Expectations::load(Arc::clone(&store), now_unix)
             .await

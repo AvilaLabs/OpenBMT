@@ -692,4 +692,127 @@ mod tests {
         crate::state::push(&wiped, &fresh, &view).await.unwrap();
         assert_eq!(view.read("monitors", "", "b_1").await.unwrap(), b"newer");
     }
+
+    fn view_of(r: &Rig) -> DeviceView {
+        let keys = Arc::new(KeysManager::new(&[1; 32], 1, 1, true));
+        DeviceView::new(Arc::new(r.device.clone()), r.key.clone(), keys)
+    }
+
+    #[tokio::test]
+    async fn sl_25_a_pull_keeps_what_the_background_wrote_only_locally() {
+        let r = rig("store-pull-lazy");
+        let view = view_of(&r);
+        // The device holds an older sweep index, a paid event the counter
+        // lacks, and monitors ahead of the counter's.
+        r.store
+            .write(
+                "sweep_destination",
+                "",
+                "index",
+                3u32.to_be_bytes().to_vec(),
+            )
+            .await
+            .unwrap();
+        r.store
+            .write("paid_events", "", "dev", b"on-device".to_vec())
+            .await
+            .unwrap();
+        r.store
+            .write("monitors", "", "a_0", b"new-monitor".to_vec())
+            .await
+            .unwrap();
+        // The counter's own copy: a newer index, a paid event the device
+        // never got, an older monitor, and a key only it holds elsewhere.
+        r.local
+            .write(
+                "sweep_destination",
+                "",
+                "index",
+                9u32.to_be_bytes().to_vec(),
+            )
+            .await
+            .unwrap();
+        r.local
+            .write("paid_events", "", "mine", b"local-only".to_vec())
+            .await
+            .unwrap();
+        r.local
+            .write("monitors", "", "a_0", b"old-monitor".to_vec())
+            .await
+            .unwrap();
+        r.local
+            .write("monitors", "", "gone", b"x".to_vec())
+            .await
+            .unwrap();
+        crate::state::pull(&r.local_dir, &*r.local, &view)
+            .await
+            .unwrap();
+        let read = |p: &'static str, k: &'static str| {
+            let local = Arc::clone(&r.local);
+            async move { KVStore::read(&*local, p, "", k).await }
+        };
+        assert_eq!(
+            read("sweep_destination", "index").await.unwrap(),
+            9u32.to_be_bytes()
+        );
+        assert_eq!(read("paid_events", "mine").await.unwrap(), b"local-only");
+        // Taken from the device where the counter lacks it.
+        assert_eq!(read("paid_events", "dev").await.unwrap(), b"on-device");
+        // Monitors are the device's, and what it lacks is removed.
+        assert_eq!(read("monitors", "a_0").await.unwrap(), b"new-monitor");
+        assert!(read("monitors", "gone").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn sl_25_after_a_pull_what_the_counter_kept_is_owed_to_the_device() {
+        let r = rig("store-pull-owe");
+        let view = view_of(&r);
+        let _flusher = r
+            .store
+            .spawn_lazy_flusher(&tokio::runtime::Handle::current());
+        r.store
+            .write(
+                "sweep_destination",
+                "",
+                "index",
+                3u32.to_be_bytes().to_vec(),
+            )
+            .await
+            .unwrap();
+        r.local
+            .write(
+                "sweep_destination",
+                "",
+                "index",
+                9u32.to_be_bytes().to_vec(),
+            )
+            .await
+            .unwrap();
+        r.local
+            .write("paid_events", "", "mine", b"local-only".to_vec())
+            .await
+            .unwrap();
+        crate::state::pull(&r.local_dir, &*r.local, &view)
+            .await
+            .unwrap();
+        let bg = Background(Arc::new(r.store.clone()));
+        assert_eq!(crate::state::owe_lazy(&r.local_dir, &bg).await.unwrap(), 2);
+        let name = "sweep_destination~~index";
+        for _ in 0..50 {
+            settle(100).await;
+            let paid = r.device.read("paid_events~~mine").await.unwrap();
+            let index = r.device.read(name).await.unwrap();
+            let current =
+                index.is_some_and(|b| open(&r.key, name, &b).unwrap() == 9u32.to_be_bytes());
+            if paid.is_some() && current {
+                break;
+            }
+        }
+        let sealed = r.device.read(name).await.unwrap();
+        assert_eq!(
+            open(&r.key, name, &sealed.unwrap()).unwrap(),
+            9u32.to_be_bytes()
+        );
+        assert!(r.device.read("paid_events~~mine").await.unwrap().is_some());
+    }
 }
