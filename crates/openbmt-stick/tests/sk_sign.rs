@@ -671,6 +671,19 @@ fn sk_54_a_version_one_file_and_a_file_without_outputs_are_refused() {
 }
 
 #[test]
+fn sk_54_a_file_over_the_size_cap_or_with_trailing_bytes_is_refused() {
+    let master = common::master();
+    let good = common::payment().serialize();
+    assert!(prepare(&good, &master).is_ok());
+    let mut trailing = good.clone();
+    trailing.push(0);
+    assert_eq!(prepare(&trailing, &master).unwrap_err(), Refusal::NotAPsbt);
+    let mut huge = good;
+    huge.resize(openbmt_stick::sign::MAX_PSBT_BYTES + 1, 0);
+    assert_eq!(prepare(&huge, &master).unwrap_err(), Refusal::NotAPsbt);
+}
+
+#[test]
 fn sk_54_a_key_of_the_test_coin_type_is_not_real_bitcoin() {
     let master = common::master();
     let mut p = common::payment();

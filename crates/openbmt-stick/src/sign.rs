@@ -22,6 +22,11 @@ pub const OWN_INDEX_BOUND: u32 = 1000;
 /// (a file of the owner phone holds a handful).
 pub const MAX_PARTS: usize = 500;
 
+/// The most bytes of a payment file the stick parses. The same bound as
+/// `MAX_PSBT_BYTES` of the signer (`openbmt-signer`), whose `analyze` also
+/// takes the trailing-bytes check below.
+pub const MAX_PSBT_BYTES: usize = 8 * 1024 * 1024;
+
 /// The bytes of a signed P2WPKH input's witness at most: the item count, a
 /// 72-byte signature with its hash type and a 33-byte key, each with its
 /// length (1 + 1 + 72 + 1 + 33 = 108).
@@ -151,11 +156,57 @@ fn prevout(psbt: &Psbt, i: usize) -> Result<TxOut, Refusal> {
     }
 }
 
+/// A BIP174 compact size at `*at`, which moves past it. As in the signer's
+/// `analysis.rs`.
+fn compact_size(bytes: &[u8], at: &mut usize) -> Option<usize> {
+    let first = *bytes.get(*at)?;
+    *at += 1;
+    let width = match first {
+        0xfd => 2,
+        0xfe => 4,
+        0xff => 8,
+        small => return Some(usize::from(small)),
+    };
+    let raw = bytes.get(*at..at.checked_add(width)?)?;
+    *at += width;
+    let value = raw.iter().rev().fold(0u64, |v, b| (v << 8) | u64::from(*b));
+    usize::try_from(value).ok()
+}
+
+/// Where a PSBT of `maps` key-value maps ends in `bytes`; `None` if the
+/// bytes end first. As `psbt_len` in the signer's `analysis.rs`: the parser
+/// stops after the last map, so the file must end there too.
+fn psbt_len(bytes: &[u8], maps: usize) -> Option<usize> {
+    let mut at = 5usize;
+    for _ in 0..maps {
+        loop {
+            let key_len = compact_size(bytes, &mut at)?;
+            if key_len == 0 {
+                break;
+            }
+            at = at.checked_add(key_len)?;
+            let value_len = compact_size(bytes, &mut at)?;
+            at = at.checked_add(value_len)?;
+            if at > bytes.len() {
+                return None;
+            }
+        }
+    }
+    Some(at)
+}
+
 /// SK-53, SK-54, SK-55: judges the payment `bytes` for the wallet of
 /// `master`. Nothing is shown before every check has passed.
 pub fn prepare(bytes: &[u8], master: &Xpriv) -> Result<Prepared, Refusal> {
     let secp = Secp256k1::new();
+    if bytes.len() > MAX_PSBT_BYTES {
+        return Err(Refusal::NotAPsbt);
+    }
     let psbt = Psbt::deserialize(bytes).map_err(|_| Refusal::NotAPsbt)?;
+    let maps = 1 + psbt.inputs.len() + psbt.outputs.len();
+    if psbt_len(bytes, maps) != Some(bytes.len()) {
+        return Err(Refusal::NotAPsbt);
+    }
     let n_in = psbt.unsigned_tx.input.len();
     let n_out = psbt.unsigned_tx.output.len();
     if psbt.version != 0
