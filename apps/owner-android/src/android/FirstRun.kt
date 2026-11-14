@@ -498,9 +498,6 @@ private const val CHECKLIST_EVERY_MS = 15_000L
 /** The owner has a starter wallet and did not write the second copy of its words: read from the starter record. */
 private fun Controller.secondCopySkipped(): Boolean = starterRecord()?.let { !it.secondCopyMade } ?: false
 
-// Stub for `StarterRecord.secondCopyMade`, which the starter wallet's branch adds as a member. Delete this line when
-// the branches join: the member then wins and the compiler flags the extension as shadowed.
-private val StarterRecord.secondCopyMade: Boolean get() = true
 
 /** The advice on an own wallet: a cold wallet is recommended; the owner may make one, or go on with the wallet they have. */
 private fun Controller.showOwnAdvice(r: FirstRun) {
