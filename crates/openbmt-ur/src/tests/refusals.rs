@@ -506,6 +506,33 @@ fn ur_11_hostile_high_degree_parts_hold_bounded_entries_and_work() {
 }
 
 #[test]
+fn ur_11_a_part_cut_down_by_known_fragments_holds_only_what_is_left() {
+    // Nearly every fragment known first, then parts of high degree that
+    // reduce to a few unknown ones: the memory held must be what is counted,
+    // not the degree each part was sent at.
+    let seq_len = 1000;
+    let fragment_len = 105;
+    let message_len = seq_len * fragment_len - 3;
+    let checksum = 0x0bad_f00d;
+    let data = vec![9u8; fragment_len];
+    let mut d = Decoder::new();
+    // 50 fragments left unknown, and fewer parts than that, so the message
+    // never completes (a completed one fails its checksum and starts over).
+    for n in 1..=(seq_len - 50) as u32 {
+        let text = part_text("bytes", n, seq_len, message_len, checksum, &data);
+        d.receive(&text).expect("a pure part");
+    }
+    for n in parts_of_degree(seq_len, checksum, seq_len / 4..=seq_len / 2, 20) {
+        let text = part_text("bytes", n, seq_len, message_len, checksum, &data);
+        d.receive(&text).expect("held or dropped, not refused");
+    }
+    let (entries, _) = d.held_entries_and_work();
+    assert!(d.held_mixed() > 0);
+    assert!(entries < 20 * 50, "{entries}");
+    assert_eq!(d.held_capacity(), entries);
+}
+
+#[test]
 fn ur_11_an_honest_stream_of_the_largest_length_decodes_within_the_budget() {
     // 10,000 fragments of 104 bytes: the longest sequence UR-03 allows.
     let message = make_message(10_000 * 104 - 20, "largest");

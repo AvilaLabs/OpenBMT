@@ -183,6 +183,14 @@ impl Decoder {
         self.state.as_ref().map_or(0, |s| s.held)
     }
 
+    /// Index entries the held parts have room for, used or not.
+    #[cfg(test)]
+    pub(crate) fn held_capacity(&self) -> usize {
+        self.state.as_ref().map_or(0, |s| {
+            s.mixed.iter().flatten().map(|m| m.indexes.capacity()).sum()
+        })
+    }
+
     /// Index entries held now, and the parts `learn` has looked at.
     #[cfg(test)]
     pub(crate) fn held_entries_and_work(&self) -> (usize, usize) {
@@ -425,7 +433,11 @@ impl State {
         true
     }
 
-    fn hold(&mut self, indexes: Vec<usize>, data: Vec<u8>) {
+    fn hold(&mut self, mut indexes: Vec<usize>, data: Vec<u8>) {
+        // The list was made at the part's whole degree and cut down by what
+        // is known; it keeps only what it holds, so the memory held is what
+        // the budget counts (UR-11).
+        indexes.shrink_to_fit();
         let id = self.free.pop().unwrap_or(self.mixed.len());
         for &i in &indexes {
             if let Some(w) = self.watch.get_mut(i) {
