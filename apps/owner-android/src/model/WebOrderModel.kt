@@ -30,11 +30,7 @@ fun interface WebFetcher {
     fun send(call: WebCall): WebFetch
 }
 
-/**
- * The sender of the store's calls is not built: the node says what to send and nothing is sent, so a visit ends as one
- * the store was not reached for, and the page says so. The choice of the client that carries the calls, over Tor or
- * not, is the owner's to make.
- */
+/** A sender that reaches nothing, for tests: a visit ends as one the store was not reached for. The real one is `HttpsWebFetcher`. */
 object NoWebFetcher : WebFetcher {
     override fun send(call: WebCall): WebFetch = WebFetch.NotReached
 }

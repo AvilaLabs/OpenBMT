@@ -545,7 +545,7 @@ class Controller(internal val act: MainActivity) {
             var first = true
             while (runId == id) {
                 try {
-                    WebVisit.run(LibraryWeb(n), webFetcher, { webAsk() }, first)
+                    WebVisit.run(LibraryWeb(n), webFetcher ?: HttpsWebFetcher(TorGate(proxyNow())), { webAsk() }, first)
                     first = false
                     main.post { if (id == runId) tick?.invoke() }
                 } catch (_: OwnerException) {

@@ -16,8 +16,8 @@ import org.openbmt.owner.WebState
 // thread of `Controller.kt`, which sends what the node says to send through [webFetcher]. Every text is a placeholder
 // of `WebOrderWords` until the words are written.
 
-/** What sends the calls of a visit. None is built yet: see [NoWebFetcher]. */
-internal var webFetcher: WebFetcher = NoWebFetcher
+/** What sends the calls of a visit; null in the real app, which then sends through [HttpsWebFetcher]. A test puts its own here. */
+internal var webFetcher: WebFetcher? = null
 
 /** What every web order call is given: the time, the phone's offset from UTC in minutes east, and no rate. */
 internal fun Controller.webAsk(): RequestAsk {
@@ -71,7 +71,6 @@ private fun Controller.showWebPaired(n: OwnerNode, state: WebState, views: Array
     views.add(ui.labelled(WebOrderWords.lastVisitLabel, ui.text(shown(state.lastVisit) ?: WebOrderWords.neverVisited)))
     shown(state.retryAt)?.let { views.add(ui.labelled(WebOrderWords.nextVisitLabel, ui.text(it))) }
     state.failure?.let { views.add(ui.words(it.say())) }
-    if (webFetcher === NoWebFetcher) views.add(ui.text(WebOrderWords.noSender))
     state.trouble?.let { views.add(ui.words(it.say())) }
     views.add(ui.labelled(WebOrderWords.sentLabel, ui.text(state.addressesSent.toString())))
     state.left?.let { views.add(ui.labelled(WebOrderWords.leftLabel, ui.text(it.toString()))) }
