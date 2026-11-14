@@ -11,7 +11,10 @@
 //! box_pair send     <dir> <addr> <from> <to> <text>
 //! box_pair recv     <dir> <addr> <name>
 //! box_pair fetch    <dir> <addr> <name>         read a mailbox without making it or acknowledging (LK-28)
-//! box_pair settings <dir> <addr> <version> <drop-c2 | drop-box>
+//! box_pair settings <dir> <addr> <version> <drop-c2 | drop-box | shop-ln-on | shop-ln-off>
+//! box_pair shop-ln  <dir> <node id> <provider id> <provider addr> <cap sats> <max fee sats>
+//!                                               keep the Shop Lightning block that a `welcome ... with-rc`
+//!                                               and `shop-ln-on` settings carry (SL-71)
 //! box_pair key      <dir> <name>                print a device's key in hex
 //! box_pair notice   <dir> <addr> <counter> <index> <opened|paid|unpaid|final> <cents>
 //!                                               a counter's paid notice to the Box (BX-40)
@@ -59,7 +62,7 @@ use openbmt_box::{BoxError, BoxRunner, PosSetup};
 use openbmt_core::batch::PinnedRoots;
 use openbmt_core::boxpair::{Claim, Invitation, Welcome};
 use openbmt_core::identity::{tagged_hash, DeviceId, Identity};
-use openbmt_core::settings::{Settings, SignedSettings};
+use openbmt_core::settings::{Settings, ShopLightning, SignedSettings};
 use openbmt_counter::{Amount, Currency};
 use openbmt_link::{
     open, os_random, seal, Client, ClientConfig, ClientError, Kind, Role, Route, ServerConfig,
@@ -145,6 +148,33 @@ fn first_settings_with(
     }
     s.boxes = [*box_key].into_iter().collect();
     Ok(s)
+}
+
+/// The Shop Lightning block kept by `shop-ln`: the regtest counter `rc` is the
+/// Lightning counter and the Box is its second device (SL-71, SL-73).
+fn shop_ln_block(dir: &Path, box_key: &DeviceId) -> Result<ShopLightning, String> {
+    let text = fs::read_to_string(dir.join("shop-ln.txt"))
+        .map_err(|_| "no Shop Lightning block was kept (shop-ln)".to_string())?;
+    let w: Vec<&str> = text.split_whitespace().collect();
+    let [node, provider, addr, cap, fee] = w.as_slice() else {
+        return Err("shop-ln.txt is not five words".to_string());
+    };
+    let key = |t: &str| -> Result<[u8; 33], String> {
+        (0..t.len() / 2)
+            .map(|i| u8::from_str_radix(&t[2 * i..2 * i + 2], 16).map_err(|e| e.to_string()))
+            .collect::<Result<Vec<u8>, String>>()?
+            .try_into()
+            .map_err(|_| "a node ID is not 33 bytes".to_string())
+    };
+    Ok(ShopLightning {
+        counter: identity("rc")?.device_id(),
+        node_id: key(node)?,
+        second_device: *box_key,
+        provider_node_id: key(provider)?,
+        provider_addr: addr.parse().map_err(|_| "the provider address")?,
+        cap_sats: cap.parse().map_err(|_| "the cap")?,
+        max_opening_fee_sats: fee.parse().map_err(|_| "the fee")?,
+    })
 }
 
 fn signed(s: Settings, both: bool) -> Result<SignedSettings, String> {
@@ -432,7 +462,11 @@ fn run(args: &[String]) -> Result<(), String> {
             let _ = fs::remove_file(dir.join("invitation.txt"));
             let welcome = Welcome::make(&inv, &claim, roots()?);
             let with_rc = arg(3).is_ok_and(|w| w == "with-rc");
-            let settings = signed(first_settings_with(&claim.box_key, 1, with_rc)?, true)?;
+            let mut first = first_settings_with(&claim.box_key, 1, with_rc)?;
+            if with_rc && dir.join("shop-ln.txt").exists() {
+                first.shop_lightning = Some(shop_ln_block(&dir, &claim.box_key)?);
+            }
+            let settings = signed(first, true)?;
             let mut c = connect(arg(2)?, Some(&claim.box_key))?;
             c.welcome(&welcome.to_bytes(), &settings.to_bytes())
                 .map_err(|e| refused(&e))?;
@@ -444,6 +478,11 @@ fn run(args: &[String]) -> Result<(), String> {
                 Ok(()) => return Err("ACCEPTED a stranger's welcome".into()),
                 Err(e) => println!("{}", refused(&e)),
             }
+        }
+        "shop-ln" => {
+            let text = (2..7).map(arg).collect::<Result<Vec<_>, _>>()?.join(" ");
+            fs::write(dir.join("shop-ln.txt"), text).map_err(|e| e.to_string())?;
+            println!("shop-ln kept");
         }
         "key" => {
             println!("{}", hex(&identity(arg(2)?)?.device_id().to_bytes()));
@@ -562,7 +601,17 @@ fn run(args: &[String]) -> Result<(), String> {
             let claim = read_claim(&dir)?;
             let mut s = first_settings(&claim.box_key, version)?;
             let c2 = identity("c2")?.device_id();
+            let mut both = false;
             match arg(4)? {
+                "shop-ln-on" | "shop-ln-off" => {
+                    // The regtest counter's settings (`with-rc`), with or
+                    // without the block: the owner and the approver sign.
+                    s = first_settings_with(&claim.box_key, version, true)?;
+                    if arg(4)? == "shop-ln-on" {
+                        s.shop_lightning = Some(shop_ln_block(&dir, &claim.box_key)?);
+                    }
+                    both = true;
+                }
                 "drop-c2" => {
                     s.devices.remove(&c2);
                     s.counters.remove(&c2);
@@ -576,7 +625,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 other => return Err(format!("unknown change {other}")),
             }
             // Both are tightenings: the owner's signature is enough.
-            let settings = signed(s, false)?;
+            let settings = signed(s, both)?;
             let n = next_number(&dir, "owner", "box")?;
             let sealed = seal(
                 &identity("owner")?,

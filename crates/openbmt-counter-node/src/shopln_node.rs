@@ -90,6 +90,9 @@ use crate::shopln::{
 pub const RESTART_SECS: u64 = 10;
 /// The fewest seconds between two tries to sweep (SL-33).
 pub const SWEEP_EVERY_SECS: u64 = 600;
+/// Seconds an invoice may wait on a write to the Box before the sale says
+/// Lightning is not offered for now (SL-41).
+const WRITE_WAIT_SECS: u64 = 8;
 /// How long an invoice that could not be offered is not asked for again, in
 /// seconds.
 pub const RETRY_OFFER_SECS: u64 = 5;
@@ -780,8 +783,19 @@ impl ShopLn {
         if ask {
             self.ask_invoice(index, now);
         }
+        // SL-41: an invoice that waits on a write the Box has not answered is
+        // on-chain only for now, and shows when the Box answers.
+        let stuck = self.slots.get(&index).is_some_and(|s| {
+            now >= s.asked_at.saturating_add(WRITE_WAIT_SECS)
+                && self
+                    .node()
+                    .is_some_and(|n| n.status().device.pending_writes > 0)
+        });
         match self.slots.get(&index).map(|s| lock(&s.state)) {
             Some(g) => match &*g {
+                Slot::Pending if stuck => SaleLightning::Unavailable(crate::say::shopln_words(
+                    &Why::Node(OnChainReason::SecondDeviceAway),
+                )),
                 Slot::Pending => SaleLightning::Waiting,
                 Slot::Ready(c) => SaleLightning::Invoice(c.clone()),
                 Slot::Off(why) => SaleLightning::Unavailable(crate::say::shopln_words(why)),

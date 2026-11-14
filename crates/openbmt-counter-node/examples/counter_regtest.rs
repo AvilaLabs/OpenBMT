@@ -7,6 +7,9 @@
 //!     [--heartbeat-max-age <seconds>] [--customers-off-wifi]
 //!     [--regtest-own-node] [--own-wallet <description>]
 //!     [--relay <address> --relay-key <hex>] [--box-key <hex>] [--box-owner-fixed]
+//!     [--shop-ln <node id> <provider id> <provider address> <cap sats> <max fee sats>]
+//!     [--shop-ln-other]
+//! counter_regtest --shop-ln-id <128 hex>
 //! ```
 //!
 //! `scripts/counter-e2e-core.sh` uses this to check the whole receive path
@@ -52,6 +55,19 @@
 //! on the first run and kept in `own-record.bin` in the data directory. The
 //! commands `switch-take`, `switch-state`, `switch-same`, `switch-kept` and
 //! `switch-different` below drive the switch.
+//!
+//! `--shop-ln ...` puts a `shop_lightning` block in the settings the
+//! own-wallet record is made with (SL-70, SL-71): this counter is the
+//! Lightning counter (with `--shop-ln-other`, a counter that is not this one), the Box
+//! of `--box-key` is the second device, and the node ID and the provider are
+//! the ones given. The counter's seed record is the file `shop-seed.bin` in
+//! the data directory, which the app would keep sealed. The wallet of
+//! `--own-wallet test` is a fixed single-key wallet. `--shop-ln-id` prints
+//! the node ID of a seed and stops. Commands: `shop-seed <128 hex>` (SL-72,
+//! SL-76), `shop-status` (SL-41, SL-76, SL-77; it deletes the file when the
+//! library says the seed is gone), `lightning <index>` (SL-40, SL-42),
+//! `shop-report` (SL-78) and `shop-settings <on|off> <version>`
+//! (SL-77).
 //!
 //! **Test only, never use.** The three identities and the three wallet keys
 //! are made from fixed bytes that anyone can read here. The money they would
@@ -210,13 +226,84 @@ const USAGE: &str = "usage: counter_regtest <data dir> <node address> [--regtest
                      [--heartbeat-max-age <seconds>] [--customers-off-wifi] \
                      [--regtest-own-node] [--own-wallet <description>] \
                      [--relay <address> --relay-key <hex>] [--box-key <hex>] \
-                     [--box-owner-fixed]";
+                     [--box-owner-fixed] \
+                     [--shop-ln <node id> <provider id> <provider address> <cap sats> \
+                     <max fee sats>] [--shop-ln-other]\n       counter_regtest --shop-ln-id <128 hex>";
 const ADDRESSES: u32 = 20;
 
 /// The Box that is the relay, from `--box-key`.
 static BOX_KEY: OnceLock<DeviceId> = OnceLock::new();
 /// Set by `--box-owner-fixed`: the owner of the link is `owner_regtest`'s even with a Box.
 static BOX_OWNER_FIXED: OnceLock<()> = OnceLock::new();
+
+/// What `--shop-ln` asks for (SL-71), and where the seed record is kept.
+struct ShopLnPlan {
+    node_id: [u8; 33],
+    provider_id: [u8; 33],
+    provider_addr: SocketAddr,
+    cap_sats: u64,
+    max_fee_sats: u64,
+    /// The settings name another counter as the Lightning counter.
+    other: std::sync::atomic::AtomicBool,
+    dir: OnceLock<String>,
+}
+
+static SHOP_LN: OnceLock<ShopLnPlan> = OnceLock::new();
+
+/// The file the app would keep the sealed seed record in.
+const SHOP_SEED_FILE: &str = "shop-seed.bin";
+
+/// TEST ONLY: a second counter, which the settings name when `--shop-ln ...
+/// other` says this one is not the Lightning counter.
+const OTHER_COUNTER_SECRET: [u8; 32] = [0x14; 32];
+
+/// TEST ONLY: the shop's wallet of `--own-wallet test`, a single-key wallet
+/// at 84h/0h/0h under a master key of fixed bytes.
+fn test_wallet_text() -> Result<String, String> {
+    let secp = Secp256k1::new();
+    let master = Xpriv::new_master(Network::Bitcoin, &KEY_SEEDS[0]).map_err(|e| e.to_string())?;
+    let path = DerivationPath::from_str("m/84h/0h/0h").map_err(|e| e.to_string())?;
+    let account = master
+        .derive_priv(&secp, &path)
+        .map_err(|e| e.to_string())?;
+    let wallet = openbmt_core::wallet_single::SingleKeyWallet::new(
+        master.fingerprint(&secp),
+        0,
+        Xpub::from_priv(&secp, &account),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(wallet.canonical_string().to_string())
+}
+
+/// SL-71: the Box as a device and a Box of the settings, and the
+/// `shop_lightning` block, when `--shop-ln` was given.
+fn shop_ln_settings(settings: &mut Settings, counter: &Identity) -> Result<(), String> {
+    let (Some(plan), Some(box_key)) = (SHOP_LN.get(), BOX_KEY.get()) else {
+        return Ok(());
+    };
+    settings.devices.insert(*box_key);
+    settings.boxes.insert(*box_key);
+    settings.customer_wifi = false;
+    let named = if plan.other.load(Ordering::SeqCst) {
+        let other = identity(&OTHER_COUNTER_SECRET)?.device_id();
+        settings.devices.insert(other);
+        settings.counters.insert(counter.device_id(), 9_000);
+        settings.counters.insert(other, 1_000);
+        other
+    } else {
+        counter.device_id()
+    };
+    settings.shop_lightning = Some(openbmt_core::settings::ShopLightning {
+        counter: named,
+        node_id: plan.node_id,
+        second_device: *box_key,
+        provider_node_id: plan.provider_id,
+        provider_addr: plan.provider_addr,
+        cap_sats: plan.cap_sats,
+        max_opening_fee_sats: plan.max_fee_sats,
+    });
+    Ok(())
+}
 
 /// TEST ONLY: the name the node is told its own node has (a valid v3 onion
 /// name; nothing is ever dialled at it).
@@ -538,6 +625,7 @@ fn own_record(dir: &str, wallet: &PinnedWallet) -> Result<OwnPairingRecord, Stri
     settings.version = 1;
     settings.devices.insert(counter.device_id());
     settings.counters.insert(counter.device_id(), 10_000);
+    shop_ln_settings(&mut settings, &counter)?;
     let signed = SignedSettings {
         owner_sig: settings.sign(&owner),
         approver_sig: None,
@@ -829,6 +917,100 @@ fn command<P: DriverPort>(
                 Err(e) => say(format!("settings refused {e}")),
             }
         }
+        Some("shop-seed") => {
+            let text = words.next().ok_or("the seed is missing")?;
+            match node.shop_lightning_take_seed(text) {
+                Ok(bytes) => {
+                    let dir = SHOP_LN
+                        .get()
+                        .and_then(|p| p.dir.get())
+                        .ok_or("no data dir")?;
+                    std::fs::write(Path::new(dir).join(SHOP_SEED_FILE), &bytes)
+                        .map_err(|e| format!("write the seed record: {e}"))?;
+                    say(format!("shop-seed kept bytes={}", bytes.len()));
+                }
+                Err(e) => say(format!("shop-seed refused {} {e}", e.rule())),
+            }
+        }
+        Some("shop-status") => match node.shop_lightning_status() {
+            None => say("shop none"),
+            Some(s) => {
+                say(format!(
+                    "shop needs_seed={} delete_seed={} why={}",
+                    s.needs_seed,
+                    s.delete_seed,
+                    s.why
+                        .as_ref()
+                        .map_or("none".to_string(), |w| format!("{w:?}"))
+                ));
+                if s.delete_seed {
+                    let dir = SHOP_LN
+                        .get()
+                        .and_then(|p| p.dir.get())
+                        .ok_or("no data dir")?;
+                    let _ = std::fs::remove_file(Path::new(dir).join(SHOP_SEED_FILE));
+                    say("shop-seed deleted");
+                }
+            }
+        },
+        Some("shop-report") => match node.shop_lightning_report() {
+            None => say("shop-report none"),
+            Some(r) => say(format!(
+                "shop-report balance={} room={} fees={} stored_at={} swept_at={} not_offered={:?}",
+                r.balance_sats,
+                r.receive_room_sats,
+                r.opening_fees_paid_sats,
+                r.last_stored_at,
+                r.last_sweep_at,
+                r.not_offered
+            )),
+        },
+        Some("lightning") => {
+            let index: u32 = number(words.next(), "the index")?;
+            match node.lightning_sale(index) {
+                openbmt_counter_node::SaleLightning::Off => say("lightning off"),
+                openbmt_counter_node::SaleLightning::Waiting => say("lightning waiting"),
+                openbmt_counter_node::SaleLightning::Invoice(c) => say(format!(
+                    "lightning invoice hash={} msat={} bolt11={}",
+                    hex(&c.payment_hash),
+                    c.amount_msat,
+                    c.bolt11
+                )),
+                openbmt_counter_node::SaleLightning::Unavailable(w) => {
+                    say(format!("lightning unavailable {}", w.heading))
+                }
+                other => say(format!("lightning other {other:?}")),
+            }
+        }
+        Some("shop-settings") => {
+            let on = match words.next() {
+                Some("on") => true,
+                Some("off") => false,
+                _ => return Err("on or off".to_string()),
+            };
+            let version: u32 = number(words.next(), "the version")?;
+            let counter = identity(&COUNTER_SECRET)?;
+            let mut next = node.settings().clone();
+            next.version = version;
+            if on {
+                shop_ln_settings(&mut next, &counter)?;
+            } else {
+                next.shop_lightning = None;
+            }
+            let signed = SignedSettings {
+                owner_sig: next.sign(&identity(&OWNER_SECRET)?),
+                approver_sig: None,
+                settings: next,
+            };
+            match node.take_settings(&signed) {
+                Ok(Some(change)) => say(format!(
+                    "settings taken version={} change={change:?}",
+                    node.settings().version
+                )),
+                Ok(None) => say("settings dropped: not newer than the ones in force"),
+                Err(e) => say(format!("settings refused {e}")),
+            }
+        }
         Some("till-waiting") => {
             let now = now_secs();
             let waiting = node.till_waiting();
@@ -1115,6 +1297,7 @@ fn run(args: &[String]) -> Result<(), String> {
     let mut customers_off_wifi = false;
     let mut own_node = false;
     let mut own_wallet: Option<String> = None;
+    let mut shop_ln_other = false;
     let mut relay: Option<SocketAddr> = None;
     let mut relay_key: Option<DeviceId> = None;
     let mut rest = Vec::new();
@@ -1145,7 +1328,44 @@ fn run(args: &[String]) -> Result<(), String> {
         } else if arg == "--regtest-own-node" {
             own_node = true;
         } else if arg == "--own-wallet" {
-            own_wallet = Some(args.next().ok_or(USAGE)?.clone());
+            let text = args.next().ok_or(USAGE)?;
+            own_wallet = Some(if text == "test" {
+                test_wallet_text()?
+            } else {
+                text.clone()
+            });
+        } else if arg == "--shop-ln-id" {
+            let text = args.next().ok_or(USAGE)?;
+            let seed: [u8; 64] = unhex(Some(text))?
+                .try_into()
+                .map_err(|_| "the seed is not 64 bytes".to_string())?;
+            say(hex(&openbmt_core::shop_lightning::node_id(&seed)));
+            return Ok(());
+        } else if arg == "--shop-ln" {
+            let mut next = || args.next().ok_or(USAGE.to_string());
+            let key = |t: &str| -> Result<[u8; 33], String> {
+                unhex(Some(t))?
+                    .try_into()
+                    .map_err(|_| "a node ID is not 33 bytes".to_string())
+            };
+            let node_id = key(next()?)?;
+            let provider_id = key(next()?)?;
+            let provider_addr: SocketAddr = next()?
+                .parse()
+                .map_err(|_| "the provider address".to_string())?;
+            let cap_sats: u64 = next()?.parse().map_err(|_| "the cap".to_string())?;
+            let max_fee_sats: u64 = next()?.parse().map_err(|_| "the fee".to_string())?;
+            let _ = SHOP_LN.set(ShopLnPlan {
+                node_id,
+                provider_id,
+                provider_addr,
+                cap_sats,
+                max_fee_sats,
+                other: std::sync::atomic::AtomicBool::new(false),
+                dir: OnceLock::new(),
+            });
+        } else if arg == "--shop-ln-other" {
+            shop_ln_other = true;
         } else if arg == "--heartbeat-max-age" {
             let secs = args.next().ok_or(USAGE)?;
             heartbeat_max_age = Some(secs.parse().map_err(|_| format!("seconds: {secs}"))?);
@@ -1160,10 +1380,14 @@ fn run(args: &[String]) -> Result<(), String> {
         return Err("--relay and --relay-key go together".to_string());
     }
     let peer: SocketAddr = peer.parse().map_err(|_| format!("node address: {peer}"))?;
+    if let Some(plan) = SHOP_LN.get() {
+        plan.other.store(shop_ln_other, Ordering::SeqCst);
+        let _ = plan.dir.set(dir.to_string());
+    }
     let seen = Arc::new(Mutex::new(Seen::default()));
     let Setup {
         wallet,
-        config,
+        mut config,
         settings,
     } = match own_wallet.as_deref() {
         Some(text) => setup_own(dir, peer, single_peer, text, &seen)?,
@@ -1177,6 +1401,26 @@ fn run(args: &[String]) -> Result<(), String> {
             &seen,
         )?,
     };
+
+    if SHOP_LN.get().is_some() {
+        // SL-70: the counter's seed record is the file the app would keep.
+        let hint = match (relay, relay_key) {
+            (Some(addr), Some(key)) => Some(
+                openbmt_core::relay::RelayHint::new(
+                    openbmt_core::relay::RelayRoute::Direct(addr),
+                    key.to_bytes(),
+                )
+                .map_err(|e| format!("the relay hint: {e}"))?,
+            ),
+            _ => None,
+        };
+        config.shop_lightning = Some(openbmt_counter_node::ShopLnConfig {
+            seed_record: std::fs::read(Path::new(dir).join(SHOP_SEED_FILE)).ok(),
+            identity: Box::new(|| identity(&COUNTER_SECRET).ok()),
+            relay: hint,
+            link_proxy: None,
+        });
+    }
 
     say(format!("descriptor {wallet}"));
     if single_peer {
