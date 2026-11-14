@@ -1,11 +1,14 @@
 package org.openbmt.owner.app
 
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PersistableBundle
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.View
@@ -184,6 +187,32 @@ class Controller(internal val act: MainActivity) {
     private val pickerOpen: Boolean get() = pickerSince != null
     private var pickerDone: ((Uri) -> Unit)? = null
     private var pickerCancel: (() -> Unit)? = null
+
+    // The text on the clipboard that holds a secret, and the timer that takes it off again.
+    private var sensitiveClip: String? = null
+    private val clearSensitiveClip = Runnable {
+        val held = sensitiveClip ?: return@Runnable
+        sensitiveClip = null
+        val board = act.getSystemService(ClipboardManager::class.java) ?: return@Runnable
+        // Only the clip this app put there goes: what the person copied since stays.
+        if (board.primaryClip?.getItemAt(0)?.text?.toString() == held) board.clearPrimaryClip()
+    }
+
+    /**
+     * Copy [text], which holds a secret, marked sensitive so the system keeps it out of previews, and take it off
+     * the clipboard after [SENSITIVE_CLIP_MS] if it is still the clip there.
+     */
+    internal fun copySensitive(text: String) {
+        val board = act.getSystemService(ClipboardManager::class.java) ?: return
+        val clip = ClipData.newPlainText("", text)
+        clip.description.extras = PersistableBundle().also {
+            it.putBoolean(if (Build.VERSION.SDK_INT >= 33) ClipDescription.EXTRA_IS_SENSITIVE else "android.content.extra.IS_SENSITIVE", true)
+        }
+        board.setPrimaryClip(clip)
+        main.removeCallbacks(clearSensitiveClip)
+        sensitiveClip = text
+        main.postDelayed(clearSensitiveClip, SENSITIVE_CLIP_MS)
+    }
 
     internal fun nowSecs(): Long = System.currentTimeMillis() / 1000
 
@@ -770,6 +799,8 @@ class Controller(internal val act: MainActivity) {
                         ceremony = null
                         setup = try { OwnerSetup.parse(text) } catch (_: SetupFormatException) { null }
                         act.getSystemService(ClipboardManager::class.java)?.clearPrimaryClip()
+                        main.removeCallbacks(clearSensitiveClip)
+                        sensitiveClip = null
                         showMessage(AppWords.setupSaved, "Start") { begin() }
                     }
                     is IOException -> onRefused(AppWords.fileNotSaved(e.message))
@@ -990,6 +1021,9 @@ class Controller(internal val act: MainActivity) {
         /** The request code of the notification permission's dialog (OA-83). */
         const val REQUEST_NOTIFY = 8001
         const val LINK_EVERY_MS = 5_000L
+
+        /** How long a copied secret stays on the clipboard. */
+        const val SENSITIVE_CLIP_MS = 60_000L
 
         /** How long the app waits for the built-in Tor to have a circuit: a little over the minute the words promise (OA-100). */
         const val TOR_WAIT_MS = 90_000L

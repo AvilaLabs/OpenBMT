@@ -4761,6 +4761,11 @@ object AppModelTest {
         val literals = Regex("\"([^\"\\\\]*)\"").findAll(screens.lines().filter { !it.trimStart().startsWith("//") && !it.trimStart().startsWith("import") }.joinToString("\n")).map { it.groupValues[1] }.toList()
         ok(literals.all { it.isEmpty() || it.startsWith("\$") }, "the web store screens write no text of their own: $literals")
         ok(source("src/android/Screens.kt").contains("webRow()"), "the web store is a row under Settings and this phone")
+        // The pairing code holds a secret: it is marked sensitive and leaves the clipboard after 60 seconds.
+        val controllerSrc = source("src/android/Controller.kt")
+        ok(screens.contains("copySensitive(code)") && !screens.contains("setPrimaryClip"), "the pairing code is copied as a sensitive clip")
+        ok(controllerSrc.contains("ClipDescription.EXTRA_IS_SENSITIVE") && controllerSrc.contains("\"android.content.extra.IS_SENSITIVE\"") && controllerSrc.contains("SDK_INT >= 33"), "the clip is marked sensitive, by the key of the platform on 33 and above and by its name below")
+        ok(controllerSrc.contains("const val SENSITIVE_CLIP_MS = 60_000L") && controllerSrc.contains("main.postDelayed(clearSensitiveClip, SENSITIVE_CLIP_MS)") && controllerSrc.contains("board.primaryClip?.getItemAt(0)?.text?.toString() == held"), "it is taken off after 60 seconds when it is still the clip there")
 
         // The page.
         ok(WebModel.page(webState(WebPairing.None)) == WebModel.Page.NoStore, "no store")

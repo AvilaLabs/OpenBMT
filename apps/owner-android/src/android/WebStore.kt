@@ -1,7 +1,5 @@
 package org.openbmt.owner.app
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.view.View
 import java.text.DateFormat
 import java.util.Date
@@ -125,7 +123,7 @@ private fun Controller.showWebCode(state: WebState) {
     views.add(ui.labelled(WebOrderWords.codeTitle, ui.text(code).also { it.setTextIsSelectable(true) }))
     views.add(
         ui.button(WebOrderWords.codeCopy) {
-            act.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("", code))
+            copySensitive(code)
             msg.show(ui.text(WebOrderWords.codeCopied))
         },
     )
