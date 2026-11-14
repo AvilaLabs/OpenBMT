@@ -361,11 +361,72 @@ impl PageBackend for PageHandles {
     }
 }
 
+/// The till key file as the listener compares against it (BX-71): its bytes
+/// are held here, under a lock of their own, so that a caller who has not
+/// shown the key never takes the core's lock and never waits on the disk. The
+/// copy is loaded when the Box starts and again when the key is made. A file
+/// that was replaced by another process (`openbmt-box till-key` on a running
+/// Box) is noticed by its identity, size and time, which one metadata call
+/// gives, and read again.
+struct TillKey {
+    path: PathBuf,
+    held: Mutex<HeldKey>,
+}
+
+struct HeldKey {
+    seen: Option<(u64, i128, u64)>,
+    bytes: Option<Vec<u8>>,
+}
+
+impl TillKey {
+    fn load(dir: &Path) -> Self {
+        let key = Self {
+            path: dir.join(TILL_KEY_FILE),
+            held: Mutex::new(HeldKey {
+                seen: None,
+                bytes: None,
+            }),
+        };
+        key.reload();
+        key
+    }
+
+    /// What identifies the file now: its number on the disk, when it was
+    /// changed and its size; `None` if there is no file.
+    fn seen(&self) -> Option<(u64, i128, u64)> {
+        use std::os::unix::fs::MetadataExt;
+        let meta = std::fs::metadata(&self.path).ok()?;
+        Some((
+            meta.ino(),
+            i128::from(meta.mtime()) * 1_000_000_000 + i128::from(meta.mtime_nsec()),
+            meta.len(),
+        ))
+    }
+
+    /// Read the file again into the copy.
+    fn reload(&self) {
+        let mut held = lock(&self.held);
+        held.seen = self.seen();
+        held.bytes = std::fs::read(&self.path).ok();
+    }
+
+    fn check(&self, presented: Option<&str>) -> KeyCheck {
+        let mut held = lock(&self.held);
+        let seen = self.seen();
+        if seen != held.seen {
+            held.seen = seen;
+            held.bytes = std::fs::read(&self.path).ok();
+        }
+        check_till_key(held.bytes.as_deref(), presented)
+    }
+}
+
 /// The Box as the till listener sees it (BX-70 to BX-75). It holds the
 /// state's locks only for the moment of one call, and never the core's and
 /// the table's together.
 struct TillHandles {
     core: Core,
+    key: Arc<TillKey>,
     clock: Arc<dyn Clock + Send + Sync>,
     table: Till,
 }
@@ -388,11 +449,7 @@ impl TillHandles {
 
 impl TillBackend for TillHandles {
     fn check_key(&self, presented: Option<&str>) -> KeyCheck {
-        let stored = lock(&self.core).files().read(TILL_KEY_FILE);
-        match stored {
-            Ok(Some(stored)) => check_till_key(Some(&stored), presented),
-            _ => KeyCheck::Wrong(None),
-        }
+        self.key.check(presented)
     }
 
     fn create(&self, body: CreateBody) -> Result<([u8; 16], SaleInfo), TillRefusal> {
@@ -738,6 +795,7 @@ pub struct BoxRunner {
     notes: Notes,
     view: View,
     till: Till,
+    till_key: Arc<TillKey>,
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
     server: Option<Server>,
@@ -919,6 +977,7 @@ impl BoxRunner {
             notes,
             view,
             till,
+            till_key: Arc::new(TillKey::load(&dir)),
             stop,
             worker: Some(handle),
             server: Some(server),
@@ -994,6 +1053,7 @@ impl BoxRunner {
         let listener = TcpListener::bind(bind).map_err(StartFailure::Listen)?;
         let backend = Arc::new(TillHandles {
             core: Arc::clone(&self.core),
+            key: Arc::clone(&self.till_key),
             clock: Arc::clone(&self.clock),
             table: Arc::clone(&self.till),
         });
@@ -1005,10 +1065,12 @@ impl BoxRunner {
 
     /// BX-71: make a new till key and keep only its hash. The key is
     /// returned as 64 lowercase hex and is not kept anywhere. The listener
-    /// reads the hash at each request, so the new key works at once and the
-    /// old one stops.
+    /// compares against a copy of the hash held in memory, which is replaced
+    /// here, so the new key works at once and the old one stops.
     pub fn make_till_key(&self) -> Result<String, BoxError> {
-        make_till_key(lock(&self.core).files_mut())
+        let key = make_till_key(lock(&self.core).files_mut());
+        self.till_key.reload();
+        key
     }
 
     /// Store the POS token the merchant typed (BX-41). Only a paired Box that

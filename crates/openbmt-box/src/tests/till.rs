@@ -1736,6 +1736,62 @@ fn bx_71_a_box_with_no_till_key_made_refuses_every_request() {
 }
 
 #[test]
+fn bx_71_a_caller_with_the_wrong_token_never_waits_for_the_core() {
+    let dir = TempDir::new("tillnolock");
+    let (mut r, _) = start(&dir);
+    let key = r.make_till_key().unwrap();
+    let addr = r
+        .serve_till("127.0.0.1:0".parse().unwrap(), TillConfig::default())
+        .unwrap();
+    let path = format!("/till/v1/sales/{SALE}");
+    // Another part of the Box holds the core for the whole of this block.
+    let core = r.core().lock().unwrap();
+    let started = Instant::now();
+    for bearer in ["0".repeat(64), "x".to_string(), String::new()] {
+        let raw = format!(
+            "GET {path} HTTP/1.1\r\nHost: b\r\n{NONCE_HEADER}Authorization: Bearer {bearer}\r\n\r\n"
+        );
+        let (status, body, mac) = http_mac(addr, &raw);
+        assert_eq!(status, 401, "{bearer}");
+        assert_eq!(field(&body, "error"), "tillKeyWrong");
+        assert!(mac.is_some());
+    }
+    let (status, body, _) = http_mac(
+        addr,
+        &format!("GET {path} HTTP/1.1\r\nHost: b\r\n{NONCE_HEADER}\r\n"),
+    );
+    assert_eq!(
+        (status, field(&body, "error").as_str()),
+        (401, "tillKeyWrong")
+    );
+    assert!(started.elapsed() < Duration::from_secs(5));
+    drop(core);
+    // With the core free the right key goes on to the state.
+    let (status, _) = call(addr, "GET", &path, Some(&key), None);
+    assert_eq!(status, 503);
+}
+
+#[test]
+fn bx_71_a_key_made_by_another_process_is_honoured_at_the_next_request() {
+    let dir = TempDir::new("tillrotate");
+    let (mut r, _) = start(&dir);
+    let old = r.make_till_key().unwrap();
+    let addr = r
+        .serve_till("127.0.0.1:0".parse().unwrap(), TillConfig::default())
+        .unwrap();
+    let path = format!("/till/v1/sales/{SALE}");
+    assert_eq!(call(addr, "GET", &path, Some(&old), None).0, 503);
+    // `openbmt-box till-key` on the data folder of a Box that is running.
+    let new = make_till_key(&mut DirFiles::new(dir.path())).unwrap();
+    assert_eq!(call(addr, "GET", &path, Some(&old), None).0, 401);
+    assert_eq!(call(addr, "GET", &path, Some(&new), None).0, 503);
+    // The key the running Box makes is honoured at once, and the old one stops.
+    let newer = r.make_till_key().unwrap();
+    assert_eq!(call(addr, "GET", &path, Some(&new), None).0, 401);
+    assert_eq!(call(addr, "GET", &path, Some(&newer), None).0, 503);
+}
+
+#[test]
 fn bx_72_a_box_that_has_not_joined_the_shop_says_so() {
     let dir = TempDir::new("tillunpaired");
     let (mut r, _) = start(&dir);
