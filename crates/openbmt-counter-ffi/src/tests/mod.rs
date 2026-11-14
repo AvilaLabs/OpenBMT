@@ -20,6 +20,7 @@ mod protocol;
 mod rates;
 mod requests;
 mod screen;
+mod shopln;
 mod staff;
 mod starter;
 mod strict;

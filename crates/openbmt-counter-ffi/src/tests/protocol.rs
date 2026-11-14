@@ -106,6 +106,8 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (87, "till_not_now"),
         (88, "till_of_sale"),
         (89, "tap_answer"),
+        (90, "shop_lightning_seed"),
+        (91, "shop_lightning"),
         (200, "pending_switch"),
         (201, "switch_same"),
         (202, "switch_record_kept"),

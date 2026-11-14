@@ -317,6 +317,7 @@ fn the_real_owner_pairs_the_real_counter_which_sells_from_the_wallet_and_takes_a
             own_node: None,
             lightning: None,
             link_proxy: None,
+            shop_seed: None,
         });
         rig.send(vec![peers_event()]);
         let response = rig.call(OP_PUMP, handle, &W::new().u64(T0 + 100).u32(50).0);
@@ -438,6 +439,7 @@ fn ss_41_the_real_owner_switches_the_real_counter_from_the_starter_wallet_and_ss
         own_node: None,
         lightning: None,
         link_proxy: None,
+        shop_seed: None,
     });
     rig.send(vec![peers_event()]);
     Rd::ok(&rig.call(OP_PUMP, handle, &W::new().u64(T0 + 100).u32(50).0));

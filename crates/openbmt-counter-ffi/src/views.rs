@@ -113,6 +113,11 @@ pub struct StartConfig {
     /// relay is an onion service and the settings have Tor off (with Tor on
     /// the link uses `proxy`). The app gives it only when the proxy answers.
     pub link_proxy: Option<String>,
+    /// SL-76: the stored Lightning key as `shop_lightning_seed` returned it
+    /// and as the app kept it sealed, or none. It is not part of the pairing
+    /// record, and it is not used on a counter that is not the Lightning
+    /// counter of the settings.
+    pub shop_seed: Option<Vec<u8>>,
 }
 
 wire_record!(StartConfig {
@@ -122,7 +127,8 @@ wire_record!(StartConfig {
     proxy,
     own_node,
     lightning,
-    link_proxy
+    link_proxy,
+    shop_seed
 });
 wire_record_get!(StartConfig {
     dir,
@@ -131,7 +137,8 @@ wire_record_get!(StartConfig {
     proxy,
     own_node,
     lightning,
-    link_proxy
+    link_proxy,
+    shop_seed
 });
 
 /// The arguments of `own_node_check`: what a manager typed, the network of
@@ -1453,6 +1460,31 @@ wire_record!(StatusView {
     refused_below_minimum,
     stopped,
     lightning
+});
+
+// ---- Shop Lightning (SL-70 to SL-78) ------------------------------------------------
+
+/// What the app reads of Shop Lightning on this counter (SL-41, SL-76,
+/// SL-77).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShopLightningView {
+    /// This is the Lightning counter and holds no key: the app shows the
+    /// screen that scans it (SL-76).
+    pub needs_seed: bool,
+    /// The key is gone from the counter: the app deletes what it sealed
+    /// (SL-77).
+    pub delete_seed: bool,
+    /// Why Lightning is not offered, for the manager (SL-41), if it is not.
+    pub why: Option<WordsView>,
+    /// The words of the screen that scans the key (SL-76).
+    pub scan: WordsView,
+}
+
+wire_record!(ShopLightningView {
+    needs_seed,
+    delete_seed,
+    why,
+    scan
 });
 
 // ---- Lightning (CR-112 to CR-116) -------------------------------------------------

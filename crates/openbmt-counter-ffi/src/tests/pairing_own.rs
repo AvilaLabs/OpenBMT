@@ -308,6 +308,7 @@ fn cr_233_the_record_reads_by_its_magic_and_starts_a_counter_that_sells_from_the
             own_node: None,
             lightning: None,
             link_proxy: None,
+            shop_seed: None,
         });
         rig.send(vec![peers_event()]);
         let response = rig.call(10, handle, &W::new().u64(T0 + 100).u32(50).0);
@@ -351,6 +352,7 @@ fn cr_235_a_batch_sent_to_an_own_wallet_counter_is_refused_with_words() {
         own_node: None,
         lightning: None,
         link_proxy: None,
+        shop_seed: None,
     });
     rig.send(vec![peers_event()]);
     // Bytes that are not a batch are refused as such; the refusal that

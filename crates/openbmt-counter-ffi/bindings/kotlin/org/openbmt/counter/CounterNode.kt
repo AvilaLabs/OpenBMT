@@ -128,6 +128,8 @@ private const val OP_TILL_START = 86
 private const val OP_TILL_NOT_NOW = 87
 private const val OP_TILL_OF_SALE = 88
 private const val OP_TAP_ANSWER = 89
+private const val OP_SHOP_LIGHTNING_SEED = 90
+private const val OP_SHOP_LIGHTNING = 91
 private const val OP_PENDING_SWITCH = 200
 private const val OP_SWITCH_SAME = 201
 private const val OP_SWITCH_RECORD_KEPT = 202
@@ -233,7 +235,8 @@ class Actor(val role: ActorRole, val name: String)
  * [CounterNode.lnReply] returned it when the test passed, kept sealed by the
  * app (CR-115), or null. [linkProxy] is Orbot's address for the link to the
  * owner when the relay is an onion service and the settings have Tor off (CR-134);
- * give it only when the proxy answers.
+ * give it only when the proxy answers. [shopSeed] is the Lightning key as
+ * [CounterNode.shopLightningSeed] returned it, kept sealed by the app (SL-76), or null.
  */
 class StartConfig(
     val dir: String,
@@ -243,6 +246,7 @@ class StartConfig(
     val ownNode: String? = null,
     val lightning: ByteArray? = null,
     val linkProxy: String? = null,
+    val shopSeed: ByteArray? = null,
 )
 
 /** What [Pairing.begin] returns: the request to show as a code, and the four words. */
@@ -535,6 +539,14 @@ class LightningSale(
 
 /** CR-116: the Lightning line of the status. */
 class LightningStatus(val ready: Boolean, val words: Words)
+
+/**
+ * SL-41, SL-76, SL-77: what Shop Lightning shows on this counter. [needsSeed]: this is the Lightning counter and
+ * holds no key, so the screen that scans it is offered. [deleteSeed]: the key is gone from the counter, so what
+ * the app sealed is deleted. [why]: the reason Lightning is not offered, for a manager, or null. [scan]: the
+ * words of the scan screen.
+ */
+class ShopLightningStatus(val needsSeed: Boolean, val deleteSeed: Boolean, val why: Words?, val scan: Words)
 
 /** The kind of node a connection is for (LN-01). */
 enum class LnKind { Lnd, Cln }
@@ -855,6 +867,7 @@ private fun Writer.refundAsk(v: RefundAsk): Writer {
 private fun Writer.start(c: StartConfig): Writer =
     string(c.dir).u64(c.now).bytes(c.record).option(c.proxy) { string(it) }
         .option(c.ownNode) { string(it) }.option(c.lightning) { bytes(it) }.option(c.linkProxy) { string(it) }
+        .option(c.shopSeed) { bytes(it) }
 
 
 internal fun Reader.ownWalletKind(): OwnWalletKind =
@@ -1497,6 +1510,22 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
     fun starterSeen(now: Long, txid: ByteArray) {
         val r = call(OP_STARTER_SEEN, handle) { it.u64(now).bytes(txid) }
         r.end()
+    }
+
+    /**
+     * SL-72, SL-76: the seed code scanned from the stick, as text. The library checks it against the node ID the
+     * settings pin before anything is kept, and throws the words of why not. The bytes returned are the record
+     * to seal with the Keystore and keep, and to hand to [StartConfig.shopSeed] at each start.
+     */
+    fun shopLightningSeed(text: String): ByteArray {
+        val r = call(OP_SHOP_LIGHTNING_SEED, handle) { it.string(text) }
+        return r.bytes().also { r.end() }
+    }
+
+    /** SL-41, SL-76, SL-77: what Shop Lightning shows; call it where the status is read. */
+    fun shopLightning(): ShopLightningStatus {
+        val r = call(OP_SHOP_LIGHTNING, handle)
+        return ShopLightningStatus(r.bool(), r.bool(), r.option { r.words() }, r.words()).also { r.end() }
     }
 
     /** The open requests, newest first (CR-215). */

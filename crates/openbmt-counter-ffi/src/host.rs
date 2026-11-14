@@ -38,7 +38,7 @@ use openbmt_counter_node::say::{change_confirmed_words, switch_dropped_words, sw
 use openbmt_counter_node::{effective_settings_of, own_node_setting};
 use openbmt_counter_node::{
     DirStore, DriverPort, HeartbeatNotTaken, Launch, Node, NodeConfig, PairedRecord, RecordRefused,
-    SaleLightning, SettingsFault, SetupStep, StartError, NOTE_LOG,
+    SaleLightning, SettingsFault, SetupStep, ShopLnConfig, StartError, NOTE_LOG,
 };
 use openbmt_lightning::{
     CertPin, ClnCredential, Credential, Endpoint, LndCredential, Reply as LnReply,
@@ -60,8 +60,9 @@ use crate::views::{
     LnFailArgs, LnKind, LnReplyArgs, LnRequestView, LnSetupArgs, LnStepView, OpenArgs,
     OpenRequestArgs, OpenTipArgs, OpenedView, OverrideArgs, OwnNodeView, PendingChangeView,
     PendingSwitchView, PumpView, RefundArgs, RefundAskView, RefundRow, ReportView, RequestRow,
-    RequoteArgs, SaleInfoView, ScreenView, StaffArgs, StartConfig, StatusView, SwapReplyArgs,
-    SwapRequestView, SwitchSameView, SwitchStateView, TipChoiceView, WithdrawArgs, WordsView,
+    RequoteArgs, SaleInfoView, ScreenView, ShopLightningView, StaffArgs, StartConfig, StatusView,
+    SwapReplyArgs, SwapRequestView, SwitchSameView, SwitchStateView, TipChoiceView, WithdrawArgs,
+    WordsView,
 };
 
 /// The longest a `pump` waits, whatever the app asks for, so that a call
@@ -243,6 +244,7 @@ fn check_start(
         return Err(refused_by("start-dir", "the data folder is empty"));
     }
     let record = PairedRecord::from_bytes(&req.record).map_err(record_refused)?;
+    let record_bytes = req.record.clone();
     // CR-94 to CR-96 and CR-230 to CR-232 again, on what was kept: the
     // settings' signatures, the lists, the version and the first batch or
     // range.
@@ -353,6 +355,25 @@ fn check_start(
     config.clock = Box::new(AppClock(Arc::clone(clock)));
     // CR-115: the saved Lightning connection, if the app has one.
     config.lightning = req.lightning;
+    // SL-70 to SL-78: Shop Lightning, which runs only if the settings name
+    // this counter. The relay of the pairing is the Box that keeps the second
+    // copy, and the counter's identity seals what is sent to it.
+    config.shop_lightning = Some(ShopLnConfig {
+        seed_record: req.shop_seed,
+        identity: Box::new(move || {
+            PairedRecord::from_bytes(&record_bytes)
+                .ok()?
+                .identity()
+                .ok()
+        }),
+        relay: record.relay().cloned(),
+        link_proxy: req
+            .link_proxy
+            .as_deref()
+            .map(str::parse)
+            .transpose()
+            .map_err(|e| refused_by("start-proxy", format!("the link's proxy address: {e}")))?,
+    });
     Ok(Checked {
         config,
         network,
@@ -1251,6 +1272,35 @@ impl Entry {
     pub(crate) fn ln_next(&self, now: u64) -> Result<Option<LnRequestView>, CounterError> {
         self.run(Some(now), |node, _, _| {
             Ok(node.lightning_next().map(LnRequestView::from))
+        })
+    }
+
+    // Shop Lightning (SL-70 to SL-78).
+
+    /// SL-72, SL-76: the seed code a manager scanned. The seed is checked
+    /// against the node ID the settings pin before anything is stored. The
+    /// bytes returned are the record for the app to seal and keep.
+    pub(crate) fn shop_lightning_seed(&self, text: String) -> Result<Vec<u8>, CounterError> {
+        self.run(None, |node, _, _| {
+            node.shop_lightning_take_seed(&text).map_err(|e| {
+                let (rule, words) = (e.rule(), e.words());
+                from_rule(rule, e, words)
+            })
+        })
+    }
+
+    /// SL-41, SL-76, SL-77: what the app reads of Shop Lightning.
+    pub(crate) fn shop_lightning(&self) -> Result<ShopLightningView, CounterError> {
+        self.run(None, |node, _, _| {
+            let status = node.shop_lightning_status();
+            Ok(ShopLightningView {
+                needs_seed: status.as_ref().is_some_and(|s| s.needs_seed),
+                delete_seed: status.as_ref().is_some_and(|s| s.delete_seed),
+                why: status
+                    .and_then(|s| s.why)
+                    .map(|w| WordsView(openbmt_counter_node::say::shopln_words(&w))),
+                scan: WordsView(openbmt_counter_node::say::shopln_scan_words()),
+            })
         })
     }
 

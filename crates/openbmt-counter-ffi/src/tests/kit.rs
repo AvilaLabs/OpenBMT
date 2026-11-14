@@ -114,6 +114,7 @@ pub fn start_config(dir: &str) -> StartConfig {
         own_node: None,
         lightning: None,
         link_proxy: None,
+        shop_seed: None,
     }
 }
 

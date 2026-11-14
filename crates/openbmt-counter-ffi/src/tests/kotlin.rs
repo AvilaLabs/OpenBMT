@@ -193,7 +193,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "HealthView: record: healthy: bool, behind: bool, words: Words",
         "OwnNodeView: record: usable: bool, words: Words",
         "OwnNodeCheckArgs: record: text: string, network: CounterNetwork, tor: bool",
-        "StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>, own_node: option<string>, lightning: option<list<u8>>, link_proxy: option<string>",
+        "StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>, own_node: option<string>, lightning: option<list<u8>>, link_proxy: option<string>, shop_seed: option<list<u8>>",
         "PairingView: record: network: CounterNetwork, settings: SettingsView, relay: RelayKind",
         "LinkView: record: words: Words, connected: bool, since: option<u64>, refused: bool, heartbeats_taken: u64, owner_records: u64, last_check_in_at: option<u64>, settings_version: u32, restart_needed: bool, settings_line: option<Words>",
         "LinkStepView: record: link: LinkView, notes: list<string>",
@@ -281,7 +281,7 @@ fn the_kotlin_wrapper_takes_no_lock_so_that_pump_and_the_screen_can_run_together
 }
 
 const START_FRAME_HEX: &str =
-    "4f424d6d010100000000000000000001000000640100000000000000010000000201010000007001010000006f01010000000300";
+    "4f424d6d010100000000000000000001000000640100000000000000010000000201010000007001010000006f0101000000030000";
 
 #[test]
 fn the_start_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
@@ -293,6 +293,7 @@ fn the_start_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
         own_node: Some("o".to_string()),
         lightning: Some(vec![3]),
         link_proxy: None,
+        shop_seed: None,
     };
     let bytes = frame(1, 0, &W::new().start(&sample).0);
     let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();

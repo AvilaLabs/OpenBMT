@@ -37,6 +37,7 @@ fn config(rig: &Rig, max_sale_sats: u64) -> StartConfig {
         own_node: None,
         lightning: None,
         link_proxy: None,
+        shop_seed: None,
     }
 }
 

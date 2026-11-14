@@ -62,6 +62,7 @@ impl W {
             .opt_string(c.own_node.as_deref())
             .opt_bytes(c.lightning.as_deref())
             .opt_string(c.link_proxy.as_deref())
+            .opt_bytes(c.shop_seed.as_deref())
     }
 
     /// The fields of `open`.

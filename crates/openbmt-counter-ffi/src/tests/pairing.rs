@@ -297,6 +297,7 @@ fn cr_92_the_ceremony_runs_from_the_offer_to_a_node_that_opens_a_sale() {
         own_node: None,
         lightning: None,
         link_proxy: None,
+        shop_seed: None,
     });
     rig.send(vec![peers_event()]);
     let response = rig.call(10, handle, &W::new().u64(T0 + 100).u32(50).0);

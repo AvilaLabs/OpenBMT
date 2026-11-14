@@ -6,7 +6,7 @@ import java.io.ByteArrayOutputStream
 object ProtocolDecoderTest {
     /** The `start` request of [sampleConfig], as the Rust test of the same name writes it. */
     private const val START_FRAME_HEX =
-        "4f424d6d010100000000000000000001000000640100000000000000010000000201010000007001010000006f01010000000300"
+        "4f424d6d010100000000000000000001000000640100000000000000010000000201010000007001010000006f0101000000030000"
 
     /** The `ln_reply` request for handle 1, as the Rust test of the same name writes it. */
     private const val LN_REPLY_FRAME_HEX =

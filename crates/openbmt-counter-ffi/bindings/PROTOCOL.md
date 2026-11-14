@@ -128,6 +128,8 @@ ops run on another; it waits for at most 250 ms.
  87 till_not_now     handle node  args (u64, list<u8>) -> ()
  88 till_of_sale     handle node  args u32 -> TillSaleView
  89 tap_answer       handle zero  args TapArgs -> TapView
+ 90 shop_lightning_seed handle node  args string -> list<u8>
+ 91 shop_lightning   handle node  args () -> ShopLightningView
 200 pending_switch   handle node  args u64 -> SwitchStateView
 201 switch_same      handle node  args u64 -> SwitchSameView
 202 switch_record_kept handle node  args u64 -> Words
@@ -144,7 +146,7 @@ CounterNetwork: enum, one tag byte
 ActorRole: enum, one tag byte
     tags Cashier=0 Manager=1
 ActorView: record: role: ActorRole, name: string
-StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>, own_node: option<string>, lightning: option<list<u8>>, link_proxy: option<string>
+StartConfig: record: dir: string, now: u64, record: list<u8>, proxy: option<string>, own_node: option<string>, lightning: option<list<u8>>, link_proxy: option<string>, shop_seed: option<list<u8>>
 OwnNodeCheckArgs: record: text: string, network: CounterNetwork, tor: bool
 PairBeginArgs: record: offer: list<u8>, name: string, now: u64
 PairStartedView: record: request: list<u8>, words: list<string>, address: string, wallet: OwnWalletKind
@@ -191,6 +193,7 @@ RefundRow: record: sale: u32, number: option<u64>, asked: u64, value_minor: opti
 HeartbeatOutcome: record: verified: bool, sent_at: option<u64>, words: Words, reports: list<ReportView>
 HealthView: record: healthy: bool, behind: bool, words: Words
 OwnNodeView: record: usable: bool, words: Words
+ShopLightningView: record: needs_seed: bool, delete_seed: bool, why: option<Words>, scan: Words
 StatusView: record: checked_height: u32, tip_height: u32, health: option<HealthView>, own_node: option<OwnNodeView>, sales: list<u32>, refused_below_minimum: u64, stopped: bool, lightning: option<LightningStatusView>
 RateSourceView: record: id: string, url: string, currency: string, initial: string
 RateParseArgs: record: source: string, response: list<u8>, fetched_at: u64

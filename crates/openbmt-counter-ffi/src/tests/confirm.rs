@@ -133,6 +133,7 @@ pub(super) fn config(rig: &Rig, record: &[u8]) -> StartConfig {
         own_node: None,
         lightning: None,
         link_proxy: None,
+        shop_seed: None,
     }
 }
 

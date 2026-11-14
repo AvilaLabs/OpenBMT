@@ -93,6 +93,13 @@
 //! - 89 `tap_answer` answers one command of an NFC reader from the tag's
 //!   bytes and the session the app keeps (TP-10 to TP-15); it works on no
 //!   node and keeps nothing.
+//! - 90 `shop_lightning_seed` and 91 `shop_lightning` are Shop Lightning
+//!   (SL-70 to SL-78): the first takes the seed code a manager scanned from
+//!   the stick, checks it against the node ID the settings pin (SL-72) and
+//!   returns the record for the app to seal and keep, and the second says
+//!   whether the key is to be scanned, whether the sealed key is to be
+//!   deleted, and why Lightning is not offered. The seed of a start is
+//!   `StartConfig.shop_seed`.
 //! - 200 to 203 the switch from the starter wallet (CR-256 to CR-263):
 //!   `pending_switch` reads the switch that waits (the new wallet's first
 //!   address, the kind of wallet) and the pairing record the app still has to
@@ -149,9 +156,9 @@ use crate::views::{
     OwnNodeCheckArgs, OwnNodeView, OwnWalletKind, PairBeginArgs, PairStartedView, PairingView,
     PendingChangeView, PendingSwitchView, PersonLineView, PumpView, RefundArgs, RefundAskView,
     RefundRow, RefundStateView, RelayKind, ReportView, RequestRow, RequoteArgs, SaleInfoView,
-    ScreenView, StaffArgs, StartConfig, StateView, StatusView, SwapReplyArgs, SwapRequestView,
-    SwitchSameView, SwitchStateView, TallyView, TipChoiceView, TipTallyView, WithdrawArgs,
-    WordsView,
+    ScreenView, ShopLightningView, StaffArgs, StartConfig, StateView, StatusView, SwapReplyArgs,
+    SwapRequestView, SwitchSameView, SwitchStateView, TallyView, TipChoiceView, TipTallyView,
+    WithdrawArgs, WordsView,
 };
 
 /// The first four bytes of a request.
@@ -603,6 +610,12 @@ fn build_ops() -> Vec<Op> {
             c.entry()?.till_of_sale(index)
         }),
         op(89, "tap_answer", Zero, |_, a: TapArgs| Ok(tap_op(a))),
+        op(90, "shop_lightning_seed", Node, |c, text: String| {
+            c.entry()?.shop_lightning_seed(text)
+        }),
+        op(91, "shop_lightning", Node, |c, ()| {
+            c.entry()?.shop_lightning()
+        }),
         op(200, "pending_switch", Node, |c, now: u64| {
             c.entry()?.pending_switch(now)
         }),
@@ -791,6 +804,7 @@ fn definitions() -> Vec<TypeDef> {
         HeartbeatOutcome::define(),
         HealthView::define(),
         OwnNodeView::define(),
+        ShopLightningView::define(),
         StatusView::define(),
         RateSourceView::define(),
         RateParseArgs::define(),

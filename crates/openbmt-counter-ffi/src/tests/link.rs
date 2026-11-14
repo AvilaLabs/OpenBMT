@@ -132,6 +132,7 @@ fn config_for(rig: &Rig, relay: Option<RelayHint>, link_proxy: Option<&str>) -> 
         own_node: None,
         lightning: None,
         link_proxy: link_proxy.map(str::to_string),
+        shop_seed: None,
     }
 }
 
@@ -154,6 +155,7 @@ fn config_for_box(rig: &Rig, relay: RelayHint) -> StartConfig {
         own_node: None,
         lightning: None,
         link_proxy: None,
+        shop_seed: None,
     }
 }
 
