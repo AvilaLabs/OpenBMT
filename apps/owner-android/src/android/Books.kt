@@ -31,6 +31,7 @@ internal fun Controller.showBooks(save: BooksModel.SaveFile? = null) {
             views.add(ui.rows(page.rows.map { RowItem(it.date, it.totals) }))
             views.add(line(OwnerLook.BOOKS_NOTE, muted = true))
         }
+        views.addAll(paidDayViews(n, msg))
         views.add(msg)
         page.accounting?.let { file -> footer.add(ui.primary(OwnerLook.BOOKS_SAVE_ACCOUNTING) { saveBooks(file, msg) }) }
         page.ledger?.let { name -> footer.add(ui.button(OwnerLook.BOOKS_SAVE_LEDGER) { showLedgerWarning(n, name) }) }

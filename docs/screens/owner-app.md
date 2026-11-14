@@ -999,3 +999,27 @@ library's own:
 | turnOffWhat | Turning Shop Lightning off closes every channel of the node. Their money goes to the shop's wallet once the closes confirm, and the counter then deletes the Lightning key. Sales go on, paid on-chain. |
 | turnOffConfirm | Turn off and close the channels |
 | turnOffKeep | Keep it on |
+
+The counter checks (`docs/OWNER-COINS-RULES.md`, OC-60 to OC-64), in
+`PaidCheckWords`. `{counter}` is the counter's name, `{number}` the
+sale's number, `{amount}`, `{seen}` and `{total}` amounts, `{time}` the
+time of the Paid and `{cashier}` the name the counter recorded; the
+other names in braces are counts:
+
+| Key | Text |
+|---|---|
+| OC62_MISMATCH_HEADING | Paid on the counter, not seen here |
+| OC62_MISMATCH_WHAT | {counter} showed sale {number} as paid, {amount}, at {time}, taken by {cashier}. This phone sees {seen} paid to that sale's address. |
+| OC62_MISMATCH_NEXT | Check the counter: it may have been tampered with. Clear this once you know what happened. |
+| OC62_CLEAR_BUTTON | Clear |
+| OC62_ARRIVED_LINE | The payment for sale {number} has now arrived in full. |
+| OC61_WAITING_HEADING | Waiting for a block |
+| OC61_WAITING_WHAT | The counter showed this sale as paid, and its payment is not in a block yet. One with a low fee can take up to a day. |
+| OC61_WAITING_NEXT | Nothing to do yet. |
+| OC61_NOT_CHECKABLE_HEADING | Too old to check |
+| OC61_NOT_CHECKABLE_WHAT | This sale is too old for the wallet to check what was paid. |
+| OC61_NOT_CHECKABLE_NEXT | Check it by hand if it matters. |
+| OC63_DAY_LINE | {counter}: {n} sales paid on chain, {total}. Seen {seen}, waiting {waiting}, too old to check {old}, missing {missing}. |
+| OC64_NOT_KEPT_HEADING | Checks not kept |
+| OC64_NOT_KEPT_WHAT | This phone could not read back its record of the counter checks. |
+| OC64_NOT_KEPT_NEXT | Clear the checks to start them again. |

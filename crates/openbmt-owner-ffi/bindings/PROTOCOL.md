@@ -236,6 +236,10 @@ ops run on another; it waits for at most 250 ms.
 236 shop_lightning_report handle node  args () -> ShopLightningView
 237 shop_lightning_preview handle node  args ShopLightningEditArgs -> ShopLightningPreviewView
 238 shop_lightning_cap_suggestion handle node  args (u64, i32) -> option<u64>
+239 paid_check       handle node  args u64 -> PaidCheckView
+240 paid_day         handle node  args PaidDayArgs -> list<PaidDayView>
+241 paid_clear       handle node  args PaidClearArgs -> ()
+242 paid_check_reset handle node  args () -> ()
 ```
 
 ## Types
@@ -332,6 +336,13 @@ ShopLightningEditArgs: record: action: ShopLightningAction, counter: option<list
 ShopLightningClass: enum, one tag byte
     tags Free=0 Loosen=1 Redirect=2
 ShopLightningPreviewView: record: version: u32, class: ShopLightningClass, needs_key_app: bool, nothing_changed: bool, after: option<ShopLightningHeldView>, settings: list<u8>
+PaidAlarmView: record: counter: list<u8>, sale: u32, cashier: string, recorded_sats: u64, seen_sats: u64, paid_at: u64, raised_at: u64
+PaidArrivedView: record: counter: list<u8>, sale: u32, cleared_at: u64
+PaidSaleLineView: record: counter: list<u8>, sale: u32, recorded_sats: u64, paid_at: u64
+PaidCheckView: record: kept: bool, alarms: list<PaidAlarmView>, arrived: list<PaidArrivedView>, waiting: list<PaidSaleLineView>, not_checkable: list<PaidSaleLineView>, not_checkable_more: u32
+PaidDayArgs: record: now: u64, offset_secs: i32
+PaidDayView: record: counter: list<u8>, sales: u32, total_sats: u64, seen: u32, waiting: u32, too_old: u32, missing: u32, seen_sats: u64, differs: bool
+PaidClearArgs: record: now: u64, counter: list<u8>, sale: u32
 DeliverView: record: sent: u32, waiting: u32, notes: list<string>
 AlertView: record: kind: AlertKind, counter: list<u8>, value: u64, words: Words
 CounterView: record: counter: list<u8>, records: u64, head: list<u8>, check_in_seq: option<u64>, check_in_held: option<bool>, last_check_in_at: option<u64>, words: Words

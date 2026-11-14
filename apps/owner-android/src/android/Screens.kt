@@ -634,6 +634,7 @@ internal fun Controller.showAlerts(message: SayWords? = null): Unit = withNode {
                     ),
                 )
             }
+            views.addAll(paidCheckViews(n, msg) { showAlerts() })
             views.add(msg)
         }
     }

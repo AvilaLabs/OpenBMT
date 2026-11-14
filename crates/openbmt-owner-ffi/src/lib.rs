@@ -61,6 +61,7 @@ mod import_view;
 mod jni;
 mod own;
 mod own_spend_views;
+mod paid_check_views;
 mod pos_views;
 mod price;
 mod requests;
@@ -104,6 +105,10 @@ pub use own::{
     OwnBoxDeliveredView, OwnBoxWelcomeArgs, OwnBundleView, OwnConfirmArgs, OwnCounterArgs,
     OwnGapArgs, OwnGapView, OwnMade, OwnOfferView, OwnOwnerMade, OwnRelayArgs, OwnRequestArgs,
     OwnRequestView, OwnShopArgs, OwnWaitingView, OwnWalletView, SwitchRowView, SwitchStateKind,
+};
+pub use paid_check_views::{
+    PaidAlarmView, PaidArrivedView, PaidCheckView, PaidClearArgs, PaidDayArgs, PaidDayView,
+    PaidSaleLineView,
 };
 pub use pos_views::{
     PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,

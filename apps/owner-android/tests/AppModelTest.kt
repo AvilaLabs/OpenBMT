@@ -37,6 +37,10 @@ import org.openbmt.owner.Alert
 import org.openbmt.owner.AlertKind
 import org.openbmt.owner.BatchWaiting
 import org.openbmt.owner.Books
+import org.openbmt.owner.PaidAlarm
+import org.openbmt.owner.PaidArrived
+import org.openbmt.owner.PaidDay
+import org.openbmt.owner.PaidSaleLine
 import org.openbmt.owner.BooksDay
 import org.openbmt.owner.BooksFile
 import org.openbmt.owner.CashAmount
@@ -222,7 +226,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + OwnPairWords.all().size + 1 + AppWords.keyMapAll().size + 1 + StarterWords.all().size + 1 + RequestWords.all().size + 1 + WebOrderWords.all().size + 1 + ShopLightningWords.all().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's, of the key map's, of the starter wallet's and of the payment requests'")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + OwnPairWords.all().size + 1 + AppWords.keyMapAll().size + 1 + StarterWords.all().size + 1 + RequestWords.all().size + 1 + WebOrderWords.all().size + 1 + ShopLightningWords.all().size + 1 + PaidCheckWords.all().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's, of the key map's, of the starter wallet's and of the payment requests'")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -4506,6 +4510,7 @@ object AppModelTest {
         requestTests()
         webOrderTests()
         shopLightningTests()
+        paidCheckTests()
         ruleTests(rulesMd)
         println("AppModelTest (owner): $count checks passed")
     }
@@ -5056,6 +5061,53 @@ object AppModelTest {
         boxes: Int = 1,
         report: LightningReport? = null,
     ) = ShopLightningState(on, ownWallet, listOf(ByteArray(32) { 1 }), List(boxes) { ByteArray(32) { 3 } }, if (on) shopLightningHeld() else null, report)
+
+    /** The counter checks (OC-60 to OC-64): the words as given, the alarm's words filled and shown, the screens' wiring. */
+    private fun paidCheckTests() {
+        val keys = PaidCheckWords.all()
+        ok(keys.map { it.first }.toSet().size == keys.size && keys.all { it.second.isNotBlank() }, "each counter check text is listed once and written")
+        val said = keys.toMap()
+        ok(said["OC62_MISMATCH_HEADING"] == "Paid on the counter, not seen here", "the alarm's heading, as written down")
+        ok(said["OC62_MISMATCH_WHAT"] == "{counter} showed sale {number} as paid, {amount}, at {time}, taken by {cashier}. This phone sees {seen} paid to that sale's address.", "what the alarm says")
+        ok(said["OC62_MISMATCH_NEXT"] == "Check the counter: it may have been tampered with. Clear this once you know what happened.", "what to do about the alarm")
+        ok(said["OC62_ARRIVED_LINE"] == "The payment for sale {number} has now arrived in full.", "the line of a payment that arrived")
+        ok(said["OC61_WAITING_HEADING"] == "Waiting for a block" && said["OC61_WAITING_NEXT"] == "Nothing to do yet.", "the waiting words")
+        ok(said["OC61_WAITING_WHAT"] == "The counter showed this sale as paid, and its payment is not in a block yet. One with a low fee can take up to a day.", "what waiting says")
+        ok(said["OC61_NOT_CHECKABLE_HEADING"] == "Too old to check" && said["OC61_NOT_CHECKABLE_WHAT"] == "This sale is too old for the wallet to check what was paid." && said["OC61_NOT_CHECKABLE_NEXT"] == "Check it by hand if it matters.", "the too-old words")
+        ok(said["OC63_DAY_LINE"] == "{counter}: {n} sales paid on chain, {total}. Seen {seen}, waiting {waiting}, too old to check {old}, missing {missing}.", "the day's line")
+        ok(said["OC64_NOT_KEPT_HEADING"] == "Checks not kept" && said["OC64_NOT_KEPT_WHAT"] == "This phone could not read back its record of the counter checks." && said["OC64_NOT_KEPT_NEXT"] == "Clear the checks to start them again.", "the checks-not-kept words")
+        ok(said["OC62_CLEAR_BUTTON"] == "Clear", "the button")
+        // The alarm's words, filled from a sale; the cashier's name is the counter's text and is cleaned.
+        val alarm = PaidAlarm(ByteArray(32) { 0x1a }, 7, "An\u0007a\u202E", 5_000, 0, 1_700_000_000, 1_700_090_000)
+        val w = PaidCheckWords.mismatch(alarm)
+        ok(w.heading == PaidCheckWords.mismatchHeading && w.next == PaidCheckWords.mismatchNext && w.tone == Tones.STOP && w.who == Who.OWNER, "the alarm is a stop for the owner")
+        ok(w.what == "Counter 1a1a1a1a showed sale 7 as paid, 5,000 sats, at ${Format.localTime(1_700_000_000)}, taken by An a. This phone sees 0 sats paid to that sale's address.", "the alarm names the counter, the sale, both amounts, the time and the cashier: ${w.what}")
+        ok(!w.what.contains("{") && !w.what.contains("}"), "every name in braces was filled")
+        ok(PaidCheckWords.arrived(PaidArrived(ByteArray(32), 8, 3)) == "The payment for sale 8 has now arrived in full.", "the arrived line")
+        val day = PaidDay(ByteArray(32) { 0x1a }, 4, 9_000, 2, 1, 0, 1, 7_000, true)
+        ok(PaidCheckWords.day(day) == "Counter 1a1a1a1a: 4 sales paid on chain, 9,000 sats. Seen 2, waiting 1, too old to check 0, missing 1.", "the day's line is filled: ${PaidCheckWords.day(day)}")
+        val row = PaidSaleLine(ByteArray(32) { 0x1a }, 9, 900, 1_700_000_000)
+        ok(PaidCheckWords.saleTitle(row) == "Counter 1a1a1a1a #9" && PaidCheckWords.saleSub(row) == "900 sats, ${Format.localTime(1_700_000_000)}", "a waiting sale's row")
+        // The words checks: every sentence passes. The alarm's heading is 34 characters and the check allows 28, so it
+        // is refused; the text is kept as it was given, and only the heading is refused.
+        for ((k, m) in PaidCheckWords.messages(alarm)) {
+            val problem = SayCheck.problem(m)
+            if (k == "mismatch") {
+                ok(problem == "heading length", "the alarm's heading is the one refusal: $problem")
+                ok(SayCheck.problem(m.copy(heading = "Paid, not seen")) == null, "its sentences pass: ${SayCheck.problem(m.copy(heading = "Paid, not seen"))}")
+            } else {
+                ok(problem == null, "words of $k: $problem")
+            }
+        }
+        // The screens show these words and no sentence of their own; the alarm has a Clear button that clears it in the phone's own marks.
+        val screen = source("src/android/PaidCheckScreen.kt")
+        ok(screen.contains("ui.words(PaidCheckWords.mismatch(a))") && screen.contains("ui.button(PaidCheckWords.clearButton)") && screen.contains("n.paidClear(nowSecs(), a.counter, a.sale)"), "each alarm is shown with its words and a Clear button")
+        ok(screen.contains("ui.words(PaidCheckWords.notKept)") && screen.contains("n.paidCheckReset()") && screen.indexOf("check.kept") < screen.indexOf("check.alarms"), "checks that are not kept are said and cleared before anything else")
+        ok(screen.contains("PaidCheckWords.arrived(a)") && screen.contains("ui.words(PaidCheckWords.waiting)") && screen.contains("ui.words(PaidCheckWords.notCheckable)") && screen.contains("PaidCheckWords.day(it)"), "the arrived line, the two lists and the day's line are shown")
+        ok(!Regex("\"[A-Z][a-z]+ [a-z]+").containsMatchIn(screen.lines().filter { !it.trim().startsWith("*") && !it.trim().startsWith("/") }.joinToString("\n")), "no sentence is written in the screen file")
+        ok(source("src/android/Screens.kt").contains("paidCheckViews(n, msg) { showAlerts() }") && source("src/android/Books.kt").contains("paidDayViews(n, msg)"), "the alarms are on the Alerts page and the day on the Books page")
+        ok(source("src/model/PaidCheckWords.kt").contains("Format.cleanForeign(a.cashier)"), "the cashier's name is cleaned before it is shown")
+    }
 
     private fun shopLightningTests() {
         // The words: every text is written and listed once; the app's own messages pass the checks and read apart.

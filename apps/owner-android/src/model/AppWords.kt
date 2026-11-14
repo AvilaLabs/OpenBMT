@@ -1365,6 +1365,16 @@ object AppWords {
                 "|---|---|\n",
         )
         for ((key, text) in ShopLightningWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
+        out.append(
+            "\nThe counter checks (`docs/OWNER-COINS-RULES.md`, OC-60 to OC-64), in\n" +
+                "`PaidCheckWords`. `{counter}` is the counter's name, `{number}` the\n" +
+                "sale's number, `{amount}`, `{seen}` and `{total}` amounts, `{time}` the\n" +
+                "time of the Paid and `{cashier}` the name the counter recorded; the\n" +
+                "other names in braces are counts:\n\n" +
+                "| Key | Text |\n" +
+                "|---|---|\n",
+        )
+        for ((key, text) in PaidCheckWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         return out.toString()
     }
 

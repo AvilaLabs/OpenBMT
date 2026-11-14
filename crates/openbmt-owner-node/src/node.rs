@@ -1151,6 +1151,30 @@ impl<P: OwnerPort> OwnerNode<P> {
         self.refund_depth
     }
 
+    /// OC-60, OC-14: the facts of a counter's sale from the owner's own
+    /// views at `tip`: the current view first, then those of the wallets the
+    /// shop moved off, newest first. The float's indexes are its own, not a
+    /// sale's.
+    pub fn paid_facts(
+        &self,
+        sale: openbmt_owner::SaleKey,
+        tip: u32,
+    ) -> Result<openbmt_owner::SaleFacts, crate::facts::FactsRefused> {
+        crate::facts::verified_facts_across(
+            std::iter::once(&self.view).chain(
+                self.former
+                    .iter()
+                    .rev()
+                    .filter(|f| !f.is_float())
+                    .map(|f| &f.view),
+            ),
+            &self.owner,
+            sale,
+            tip,
+            self.refund_depth,
+        )
+    }
+
     /// OC-14, OC-15: apply the refund requests that arrived on the link to
     /// the owner's queue, with the sales' facts taken from this node's own
     /// coin view at its own tip, never from the counters' records. A request

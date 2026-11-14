@@ -36,6 +36,10 @@
 //! cash-out at a time, with its value in the shop's currency, for the books
 //! (`docs/OWNER-COINS-RULES.md`, OC-48 to OC-51).
 //!
+//! The [`paid_check`] module checks every sale a counter shows as paid on
+//! chain against the owner's own view of the wallet, and keeps the alarms it
+//! raises (`docs/OWNER-COINS-RULES.md`, OC-60 to OC-65).
+//!
 //! The [`price`] module is the owner phone's own ask of the price sources
 //! (`docs/OWNER-APP-RULES.md` OA-101, on `docs/RATE-RULES.md`): the app
 //! fetches the replies, the library reads them and agrees on one price.
@@ -73,6 +77,7 @@ pub mod link;
 pub mod live;
 pub mod node;
 pub mod own;
+pub mod paid_check;
 pub mod paid_log;
 pub mod pos;
 pub mod price;
@@ -116,6 +121,12 @@ pub use node::{
 pub use own::{
     former_coins_file, own_approver, NotWatching, OwnNode, OwnNodeError, OwnTick, ToppedUp,
     WaitingStep, WaitingView, Watching, COINS_OF_FILE, OWN_STATE_FILE, OWN_WAITING_FILE,
+};
+pub use paid_check::{
+    check_paid, day_bounds, day_summary, paid_sales, paid_sales_from_chain, CheckResult,
+    DaySummary, MarkState, PaidCheckRefused, PaidChecks, PaidHow, PaidMark, PaidMarks, PaidSale,
+    PaidState, SaleCheck, MAGIC_PAID_CHECK, MAX_PAID_MARKS, PAID_ARRIVED_SHOWN_SECS,
+    PAID_CHECK_FILE, PAID_CHECK_WAIT_SECS,
 };
 pub use paid_log::{
     standing, value_at, PaidEntry, PaidLog, PaidValue, PaidWhat, Undone, MAGIC_PAID_LOG,

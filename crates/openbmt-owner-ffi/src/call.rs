@@ -132,6 +132,11 @@
 //!   turning it off, which stores nothing and gives the bytes `queue_settings`
 //!   takes, and the suggestion for the cap (SL-34): one day's Lightning sales
 //!   of the last seven, at most the limit of instant payments.
+//! - 239 to 242: the owner phone's check of every sale a counter shows paid
+//!   on chain against the wallet's view (`docs/OWNER-COINS-RULES.md` OC-60 to
+//!   OC-64): run the check and list the alarms and the sales waiting or not
+//!   checkable, the day's summary of each counter, clear an alarm, and clear
+//!   the checks when their file does not read back.
 //! - 146: the full ledger (`docs/BOOKS-RULES.md` BK-19), made only when the
 //!   request says the person accepted the warning; `false` refuses. The
 //!   books call (144) never holds it.
@@ -179,6 +184,10 @@ use crate::own::{
 use crate::own_spend_views::{
     OwnSpendBuildArgs, OwnSpendBuiltView, OwnSpendFileView, OwnSpendItemView, OwnSpendSessionView,
     OwnSpendTakeArgs, OwnSpendTakenView,
+};
+use crate::paid_check_views::{
+    PaidAlarmView, PaidArrivedView, PaidCheckView, PaidClearArgs, PaidDayArgs, PaidDayView,
+    PaidSaleLineView,
 };
 use crate::pos_views::{
     PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
@@ -1102,6 +1111,18 @@ fn build_ops() -> Vec<Op> {
                 c.entry()?.shop_lightning_cap_suggestion(now, offset_secs)
             },
         ),
+        op(239, "paid_check", Node, |c, now: u64| {
+            c.entry()?.paid_check(now)
+        }),
+        op(240, "paid_day", Node, |c, a: PaidDayArgs| {
+            c.entry()?.paid_day(a)
+        }),
+        op(241, "paid_clear", Node, |c, a: PaidClearArgs| {
+            c.entry()?.paid_clear(a)
+        }),
+        op(242, "paid_check_reset", Node, |c, _: ()| {
+            c.entry()?.paid_check_reset()
+        }),
     ]
 }
 
@@ -1299,6 +1320,13 @@ fn definitions() -> Vec<TypeDef> {
         ShopLightningEditArgs::define(),
         ShopLightningClass::define(),
         ShopLightningPreviewView::define(),
+        PaidAlarmView::define(),
+        PaidArrivedView::define(),
+        PaidSaleLineView::define(),
+        PaidCheckView::define(),
+        PaidDayArgs::define(),
+        PaidDayView::define(),
+        PaidClearArgs::define(),
         DeliverView::define(),
         AlertView::define(),
         CounterView::define(),

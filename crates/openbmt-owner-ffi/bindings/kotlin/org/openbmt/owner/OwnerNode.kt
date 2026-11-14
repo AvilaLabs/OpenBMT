@@ -235,6 +235,10 @@ private const val OP_STARTER_LINE_SET = 235
 private const val OP_SHOP_LIGHTNING_REPORT = 236
 private const val OP_SHOP_LIGHTNING_PREVIEW = 237
 private const val OP_SHOP_LIGHTNING_CAP_SUGGESTION = 238
+private const val OP_PAID_CHECK = 239
+private const val OP_PAID_DAY = 240
+private const val OP_PAID_CLEAR = 241
+private const val OP_PAID_CHECK_RESET = 242
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -1555,6 +1559,51 @@ class PosAlertKey(val kind: PosAlertKind, val subject: PosSubject)
 
 class PosAlert(val key: PosAlertKey, val raisedAt: Long, val words: Words)
 
+// ---- the counter checks (ops 239 to 242, `docs/OWNER-COINS-RULES.md` OC-60 to OC-64) ----
+
+/** A counter showed a sale paid and this phone does not see the payment (OC-62). Amounts are in satoshis. */
+class PaidAlarm(
+    val counter: ByteArray,
+    val sale: Long,
+    val cashier: String,
+    val recordedSats: Long,
+    val seenSats: Long,
+    val paidAt: Long,
+    val raisedAt: Long,
+)
+
+/** A sale whose payment arrived in full after its alarm was raised (OC-62). */
+class PaidArrived(val counter: ByteArray, val sale: Long, val clearedAt: Long)
+
+/** A sale that is waiting for a block, or too old to check (OC-61). */
+class PaidSaleLine(val counter: ByteArray, val sale: Long, val recordedSats: Long, val paidAt: Long)
+
+/**
+ * What a check shows. When [kept] is false the file of marks does not read back and nothing was checked: every list is
+ * empty until [OwnerNode.paidCheckReset] (OC-64). [notCheckableMore] counts the sales too old to check that are not listed.
+ */
+class PaidCheck(
+    val kept: Boolean,
+    val alarms: List<PaidAlarm>,
+    val arrived: List<PaidArrived>,
+    val waiting: List<PaidSaleLine>,
+    val notCheckable: List<PaidSaleLine>,
+    val notCheckableMore: Long,
+)
+
+/** One counter's day of sales paid on chain (OC-63); [differs] names a counter whose total is not what was seen. */
+class PaidDay(
+    val counter: ByteArray,
+    val sales: Long,
+    val totalSats: Long,
+    val seen: Long,
+    val waiting: Long,
+    val tooOld: Long,
+    val missing: Long,
+    val seenSats: Long,
+    val differs: Boolean,
+)
+
 class PosReply(
     val again: Boolean,
     val moreLeft: Boolean,
@@ -2228,6 +2277,23 @@ private fun Reader.posSubject(): PosSubject =
     }
 
 private fun Reader.posSetup(): PosSetup = PosSetup(posVendor(), string(), strings(), strings())
+
+private fun Reader.paidAlarm(): PaidAlarm = PaidAlarm(bytes(), u32(), string(), u64(), u64(), u64(), u64())
+
+private fun Reader.paidArrived(): PaidArrived = PaidArrived(bytes(), u32(), u64())
+
+private fun Reader.paidSaleLine(): PaidSaleLine = PaidSaleLine(bytes(), u32(), u64(), u64())
+
+internal fun Reader.paidCheck(): PaidCheck = PaidCheck(
+    bool(),
+    list { paidAlarm() },
+    list { paidArrived() },
+    list { paidSaleLine() },
+    list { paidSaleLine() },
+    u32(),
+)
+
+internal fun Reader.paidDay(): PaidDay = PaidDay(bytes(), u32(), u64(), u32(), u32(), u32(), u32(), u64(), bool())
 
 private fun Reader.posAlert(): PosAlert =
     PosAlert(PosAlertKey(posAlertKind(), posSubject()), u64(), words())
@@ -3269,6 +3335,28 @@ class OwnerNode private constructor(private val handle: Long) : AutoCloseable {
         val r = call(OP_SHOP_LIGHTNING_CAP_SUGGESTION, handle) { it.u64(now).u32(offsetSecs.toLong()) }
         return r.option { r.u64() }.also { r.end() }
     }
+
+    /**
+     * OC-60 to OC-62: check every sale a counter shows paid on chain against the wallet, and list the alarms, the
+     * payments that arrived since, the sales waiting for a block and those too old to check. [now] is in seconds.
+     */
+    fun paidCheck(now: Long): PaidCheck {
+        val r = call(OP_PAID_CHECK, handle) { it.u64(now) }
+        return r.paidCheck().also { r.end() }
+    }
+
+    /** OC-63: each counter's sales paid on chain in the day of [now], in the zone [offsetSecs] seconds from UTC. */
+    fun paidDay(now: Long, offsetSecs: Int): List<PaidDay> {
+        val r = call(OP_PAID_DAY, handle) { it.u64(now).u32(offsetSecs.toLong()) }
+        return r.list { r.paidDay() }.also { r.end() }
+    }
+
+    /** OC-62: clear an alarm, in this phone's own marks only. */
+    fun paidClear(now: Long, counter: ByteArray, sale: Long) =
+        callUnit(OP_PAID_CLEAR, handle) { it.u64(now).bytes(counter).u32(sale) }
+
+    /** OC-64: clear the checks when their file does not read back, so that they start again. */
+    fun paidCheckReset() = callUnit(OP_PAID_CHECK_RESET, handle)
 
     /** The watch key the settings in force name (32 bytes), or null when they name none (CR-185). */
     fun watchNamed(): ByteArray? {

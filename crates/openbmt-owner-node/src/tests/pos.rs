@@ -39,7 +39,7 @@ const CLOVER: &[u8] =
 /// Long after the last tender of the fixtures.
 const NOW: u64 = 1_794_324_000;
 
-fn usd() -> Currency {
+pub(super) fn usd() -> Currency {
     Currency::new(*b"USD").unwrap()
 }
 
@@ -153,7 +153,7 @@ fn replace(bytes: &[u8], from: &str, to: &str) -> Vec<u8> {
 
 // ---- the counters' sales ---------------------------------------------------------
 
-fn opened(index: u32, at: u64, cents: u64) -> Event {
+pub(super) fn opened(index: u32, at: u64, cents: u64) -> Event {
     Event::Opened {
         index,
         at,
@@ -167,7 +167,7 @@ fn opened(index: u32, at: u64, cents: u64) -> Event {
     }
 }
 
-fn at_once(index: u32, at: u64) -> Event {
+pub(super) fn at_once(index: u32, at: u64) -> Event {
     Event::PaidAtOnce {
         index,
         at,
@@ -196,7 +196,7 @@ fn courier_for(dir: &Dir) -> Courier<MemoryPost> {
 
 /// A link whose copy of the counter's chain holds `events`, written to the
 /// copy's file as the link writes it and read back (verified) by the link.
-fn link_with(events: &[Event]) -> (OwnerLink<MemoryPost>, Dir, Dir) {
+pub(super) fn link_with(events: &[Event]) -> (OwnerLink<MemoryPost>, Dir, Dir) {
     let (root, courier_dir) = (Dir::new(), Dir::new());
     let mut chain = Chain::new();
     for e in events {

@@ -63,6 +63,10 @@ use openbmt_owner::{
 use openbmt_owner_node::coins::ViewState;
 use openbmt_owner_node::lightning_day;
 use openbmt_owner_node::live::DeepLine;
+use openbmt_owner_node::paid_check::{
+    day_bounds, day_summary, paid_sales, MarkState, PaidCheckRefused, PaidChecks, PaidState,
+    PAID_ARRIVED_SHOWN_SECS,
+};
 use openbmt_owner_node::pos::{
     AlertKind as PosKind, PosAlertRef, PosId, PosSaleKey, PosSubject, TenderKey,
 };
@@ -97,6 +101,10 @@ use crate::own_spend_views::{
     built_view as own_built_view, file_view as own_file_view, item_view as own_item_view,
     taken_view as own_taken_view, OwnSpendBuildArgs, OwnSpendBuiltView, OwnSpendFileView,
     OwnSpendSessionView, OwnSpendTakeArgs, OwnSpendTakenView,
+};
+use crate::paid_check_views::{
+    PaidAlarmView, PaidArrivedView, PaidCheckView, PaidClearArgs, PaidDayArgs, PaidDayView,
+    PaidSaleLineView,
 };
 use crate::pos_views::{
     PosAckArgs, PosAlertKey, PosAlertKind, PosAlertView, PosMethodView, PosReplyArgs, PosReplyView,
@@ -237,6 +245,8 @@ struct State {
     relay: Option<SignedRelayHint>,
     intake: RefundIntake,
     pos: OwnerPos,
+    /// The marks of the counter checks (OC-64).
+    paid: PaidChecks,
     /// Key 1's state, or none for a shop with its own wallet.
     key1: Option<SignerState>,
     key1_account: Option<Xpriv>,
@@ -411,6 +421,22 @@ fn pos_setup_view(s: &PosSetup) -> PosSetupView {
     }
 }
 
+/// What a refusal of the counter checks is, as the error the app gets
+/// (OC-64).
+fn paid_error(e: &PaidCheckRefused) -> AppError {
+    let text = e.to_string();
+    match e {
+        PaidCheckRefused::Facts { .. } => refused_by("paid-facts", text),
+        PaidCheckRefused::NotKept { .. } => wrong_state("paid-not-kept", &text),
+        PaidCheckRefused::MarksFull => wrong_state("paid-full", &text),
+        PaidCheckRefused::NoSuchAlarm => refused_by("paid-alarm-unknown", text),
+        PaidCheckRefused::Store(_) => store_by("paid-store", text),
+    }
+}
+
+/// The most sales too old to check that `paid_check` lists.
+const PAID_OLD_LISTED: usize = 200;
+
 fn pos_key_view(key: &PosAlertRef) -> PosAlertKey {
     PosAlertKey {
         kind: match key.kind {
@@ -477,6 +503,42 @@ fn share_views(s: &openbmt_core::settings::Settings) -> Vec<CounterShareView> {
 
 fn count32(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
+}
+
+/// OC-60: fold the paid sales of the link's counters and run the check at
+/// `now`. None when the marks cannot be kept (OC-64) or the node has no link:
+/// nothing is checked then.
+fn paid_run(
+    st: &mut State,
+    now: u64,
+) -> Result<
+    Option<(
+        Vec<openbmt_owner_node::PaidSale>,
+        openbmt_owner_node::CheckResult,
+    )>,
+    AppError,
+> {
+    let State {
+        node, link, paid, ..
+    } = st;
+    let Some(link) = link.as_ref() else {
+        return Ok(None);
+    };
+    if paid.not_kept().is_some() {
+        return Ok(None);
+    }
+    let bps = node
+        .owner()
+        .known_settings()
+        .map_or(Settings::defaults(0).underpayment_tolerance_bps, |s| {
+            s.underpayment_tolerance_bps
+        });
+    let sales = paid_sales(link, bps).map_err(|e| paid_error(&e))?;
+    let tip = node.watcher().chain().tip_height();
+    let result = paid
+        .check(&sales, now, |k| node.paid_facts(k, tip))
+        .map_err(|e| paid_error(&e))?;
+    Ok(Some((sales, result)))
 }
 
 fn queue_error(e: &OwnerError<String>) -> AppError {
@@ -1080,6 +1142,7 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
             relay,
             intake,
             pos: OwnerPos::open(&dir),
+            paid: PaidChecks::open(&dir),
             key1,
             key1_account: key1_keys.map(|(account, _, _)| account),
             own: own_wallet.map(|wallet| OwnShop {
@@ -2451,6 +2514,125 @@ impl Entry {
         self.run(Some(a.now), move |st| {
             st.pos.acknowledge(&key, a.now).map_err(|e| pos_error(&e))
         })
+    }
+
+    /// OC-60 to OC-62: check every sale a counter shows paid on chain against
+    /// the wallet's view, keep the marks, and give the lists the screen shows.
+    /// A shop with no link has no counters to check.
+    pub(crate) fn paid_check(&self, now: u64) -> Result<PaidCheckView, AppError> {
+        self.run(Some(now), move |st| {
+            let Some((sales, result)) = paid_run(st, now)? else {
+                return Ok(PaidCheckView {
+                    kept: st.paid.not_kept().is_none(),
+                    alarms: Vec::new(),
+                    arrived: Vec::new(),
+                    waiting: Vec::new(),
+                    not_checkable: Vec::new(),
+                    not_checkable_more: 0,
+                });
+            };
+            let state_of =
+                |sale: &openbmt_owner::SaleKey| result.checks.iter().find(|c| &c.sale == sale);
+            let mut alarms = Vec::new();
+            let mut arrived = Vec::new();
+            for m in st.paid.marks().iter() {
+                match m.state {
+                    MarkState::Raised => {
+                        let Some(s) = sales.iter().find(|s| s.key() == m.sale) else {
+                            continue;
+                        };
+                        alarms.push(PaidAlarmView {
+                            counter: s.counter.to_bytes().to_vec(),
+                            sale: s.index,
+                            cashier: s.cashier.clone(),
+                            recorded_sats: s.recorded_sats,
+                            seen_sats: state_of(&m.sale).and_then(|c| c.seen_sats).unwrap_or(0),
+                            paid_at: s.paid_at,
+                            raised_at: m.raised_at,
+                        });
+                    }
+                    MarkState::ClearedByArrival => {
+                        let at = m.cleared_at.unwrap_or(0);
+                        if at.saturating_add(PAID_ARRIVED_SHOWN_SECS) > now {
+                            arrived.push(PaidArrivedView {
+                                counter: m.sale.counter.to_bytes().to_vec(),
+                                sale: m.sale.index,
+                                cleared_at: at,
+                            });
+                        }
+                    }
+                    MarkState::ClearedByOwner => {}
+                }
+            }
+            alarms.sort_by_key(|a| (a.raised_at, a.counter.clone(), a.sale));
+            let line = |s: &openbmt_owner_node::PaidSale| PaidSaleLineView {
+                counter: s.counter.to_bytes().to_vec(),
+                sale: s.index,
+                recorded_sats: s.recorded_sats,
+                paid_at: s.paid_at,
+            };
+            let lines = |want: PaidState| {
+                let mut out: Vec<&openbmt_owner_node::PaidSale> = sales
+                    .iter()
+                    .filter(|s| state_of(&s.key()).is_some_and(|c| c.state == want))
+                    .collect();
+                out.sort_by_key(|s| std::cmp::Reverse((s.paid_at, s.index)));
+                out
+            };
+            let waiting = lines(PaidState::Waiting).into_iter().map(line).collect();
+            let old = lines(PaidState::NotCheckable);
+            let not_checkable_more = count32(old.len().saturating_sub(PAID_OLD_LISTED));
+            Ok(PaidCheckView {
+                kept: true,
+                alarms,
+                arrived,
+                waiting,
+                not_checkable: old.into_iter().take(PAID_OLD_LISTED).map(line).collect(),
+                not_checkable_more,
+            })
+        })
+    }
+
+    /// OC-63: each counter's day.
+    pub(crate) fn paid_day(&self, a: PaidDayArgs) -> Result<Vec<PaidDayView>, AppError> {
+        self.run(Some(a.now), move |st| {
+            let Some((sales, result)) = paid_run(st, a.now)? else {
+                return Ok(Vec::new());
+            };
+            let (from, to) = day_bounds(a.now, a.offset_secs);
+            Ok(day_summary(&sales, &result.checks, from, to)
+                .into_iter()
+                .map(|d| PaidDayView {
+                    counter: d.counter.to_bytes().to_vec(),
+                    sales: d.sales,
+                    total_sats: d.total_sats,
+                    seen: d.seen,
+                    waiting: d.waiting,
+                    too_old: d.too_old,
+                    missing: d.missing,
+                    seen_sats: d.seen_sats,
+                    differs: d.differs,
+                })
+                .collect())
+        })
+    }
+
+    /// OC-62: the owner clears an alarm. It is a change of the phone's own
+    /// marks and sends nothing.
+    pub(crate) fn paid_clear(&self, a: PaidClearArgs) -> Result<(), AppError> {
+        let counter = device("the counter's root", "id-length", &a.counter)?;
+        self.run(Some(a.now), move |st| {
+            let sale = SaleKey {
+                counter,
+                index: a.sale,
+            };
+            st.paid.clear(&sale, a.now).map_err(|e| paid_error(&e))
+        })
+    }
+
+    /// OC-64: drop the marks, and the file that did not read back.
+    pub(crate) fn paid_check_reset(&self) -> Result<(), AppError> {
+        self.run(None, |st| st.paid.reset().map_err(|e| paid_error(&e)))
     }
 
     pub(crate) fn refund_notes(&self) -> Result<Vec<RefundNoteView>, AppError> {

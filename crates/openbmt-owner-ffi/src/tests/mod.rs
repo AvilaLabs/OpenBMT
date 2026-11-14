@@ -15,6 +15,7 @@ mod kotlin;
 mod lock;
 mod own;
 mod own_box;
+mod paid_check;
 mod pos;
 mod price;
 mod protocol;
