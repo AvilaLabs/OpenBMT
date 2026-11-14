@@ -363,6 +363,38 @@ fn cr_221_a_sale_above_the_instant_limit_waits_for_one_block() {
 }
 
 #[test]
+fn cr_221_a_sale_paid_on_one_block_of_the_lockup_stays_paid_when_that_block_leaves() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    // No heartbeat: the sale waits for the first block of the lockup.
+    let index = w.open();
+    w.serve();
+    let lockup = w.lockup_in_mempool();
+    w.at(10);
+    w.serve();
+    let reports = w.block(std::slice::from_ref(&lockup));
+    assert!(reports.contains(&Report::PosPaid { index }), "{reports:?}");
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::PaidLightning);
+    let first = w.blocks.at(1).block_hash();
+
+    // Two blocks of another branch take the chain: the block with the
+    // lockup is gone. CR-221 takes one block of the lockup as final for a
+    // sale paid through the swap, so the sale is not taken back, unlike one
+    // paid on-chain (WR-33).
+    let alt1 = mine(genesis(), 1, 7, &[]);
+    let alt2 = mine(alt1.block_hash(), 2, 7, &[]);
+    let reports = w.rig.feed(vec![AppEvent::Chain {
+        joined: vec![(1, alt1.block_hash()), (2, alt2.block_hash())],
+        left: vec![first],
+    }]);
+    assert!(
+        !reports.contains(&Report::PosUnpaid { index }),
+        "{reports:?}"
+    );
+    assert_eq!(w.rig.node.judge(index).unwrap().state, State::PaidLightning);
+}
+
+#[test]
 fn cr_222_a_claim_that_stays_out_of_a_block_is_built_again_at_a_higher_fee() {
     let dir = Scratch::new();
     let mut w = world(&dir);

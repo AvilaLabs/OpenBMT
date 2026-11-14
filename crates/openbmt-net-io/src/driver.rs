@@ -1300,7 +1300,17 @@ where
                     }
                 }
                 Output::Addresses { from, list } => self.learn(from, &list, now),
-                Output::Chain { joined, left } => self.emit(AppEvent::Chain { joined, left }),
+                Output::Chain { joined, left } => {
+                    // The blocks that take the place of the ones that left
+                    // are checked again: the checked height is reported
+                    // again as it rises from the fork, even where it does not
+                    // pass what was reported before.
+                    if !left.is_empty() {
+                        let now_checked = self.manager.checked_height();
+                        self.last_checked = self.last_checked.map(|c| c.min(now_checked));
+                    }
+                    self.emit(AppEvent::Chain { joined, left });
+                }
                 Output::Block { hash, bytes } => {
                     // NR-73: the headers reach the disk before the app can
                     // store anything that names this block. An app whose

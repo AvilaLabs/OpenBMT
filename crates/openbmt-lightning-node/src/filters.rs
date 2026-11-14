@@ -269,8 +269,11 @@ impl Follower {
     /// (lowest first) are in.
     pub fn on_chain(&mut self, joined: &[(u32, BlockHash)], left: &[BlockHash]) -> Vec<Effect> {
         let mut lowest_left: Option<u32> = None;
+        let mut unknown_left = false;
         for hash in left {
-            if let Some(height) = self.heights.remove(hash) {
+            let known = self.heights.remove(hash);
+            unknown_left |= known.is_none();
+            if let Some(height) = known {
                 if self.chain.get(&height) == Some(hash) {
                     self.chain.remove(&height);
                 }
@@ -281,10 +284,21 @@ impl Follower {
         for (height, hash) in joined {
             self.set_at(*height, *hash);
         }
-        self.drain_registrations();
-        if !left.is_empty() {
-            self.reconcile(lowest_left);
+        // The blocks that take the place of the ones that left are not
+        // checked yet, and the driver reports its checked height again as it
+        // rises from the fork. The best block waits for that, so that the
+        // library has the transactions of the new branch before it is told
+        // the chain is longer. A block that left at a height not known here
+        // may be anywhere below the tip: the floor is then the only height
+        // that is safe.
+        if let Some(lowest) = lowest_left {
+            self.checked = self.checked.min(lowest.saturating_sub(1));
         }
+        if unknown_left {
+            self.checked = self.checked.min(self.floor);
+        }
+        self.drain_registrations();
+        self.reconcile(lowest_left);
         self.retry_waiting();
         self.try_tip();
         self.take_effects()
@@ -356,15 +370,20 @@ impl Follower {
     }
 
     /// Gives a transaction that the library holds as confirmed in a block that
-    /// is no longer on the best chain to `transaction_unconfirmed`. A block
-    /// below the heights the follower knows is taken to be too deep to have
-    /// left.
+    /// is no longer on the best chain to `transaction_unconfirmed`. This runs
+    /// at the start and at every change of the chain, so that a chain that
+    /// moved while the node was down is read the same way as one that moved
+    /// while it ran. A block below the heights the follower knows is taken to
+    /// be too deep to have left.
     fn reconcile(&mut self, lowest_left: Option<u32>) {
         let gone = |height: u32| lowest_left.is_some_and(|l| height >= l);
+        let known_tip = self.chain.keys().next_back().copied();
         for confirmable in &self.confirmables {
             for (txid, height, hash) in confirmable.get_relevant_txids() {
                 let stale = match (hash, self.chain.get(&height)) {
                     (Some(h), Some(on)) => *on != h,
+                    // The chain is known and ends below the block.
+                    (Some(_), None) if known_tip.is_some_and(|tip| height > tip) => true,
                     _ => gone(height),
                 };
                 if stale {
@@ -1165,7 +1184,8 @@ mod tests {
             vec![format!("unconfirmed {}", &fid.to_string()[..8])]
         );
         // The header of the new tip comes, then the block with the funding
-        // transaction, now at height 2.
+        // transaction, now at height 2. The driver has not checked the new
+        // branch: the library is not told the chain is longer.
         r.follower.on_headers(
             new.iter()
                 .enumerate()
@@ -1173,22 +1193,118 @@ mod tests {
                 .collect(),
         );
         r.follower.on_block(new[1].block_hash(), bytes(&new[1]));
+        assert!(!r.rec.calls().iter().any(|c| c.starts_with("best")));
+        // The driver reports the new branch checked, at the same height as
+        // before the reorganization.
+        r.follower.on_checked(3);
         let calls = r.rec.calls();
         assert_eq!(calls[0], format!("unconfirmed {}", &fid.to_string()[..8]));
         assert_eq!(
             calls[1],
-            format!("best 3 {}", short(new[2].block_hash())),
-            "{calls:?}"
-        );
-        assert_eq!(
-            calls[2],
             format!(
                 "confirmed [1:{}] at 2 in {}",
                 &fid.to_string()[..8],
                 short(new[1].block_hash())
             )
         );
+        assert_eq!(
+            calls[2],
+            format!("best 3 {}", short(new[2].block_hash())),
+            "{calls:?}"
+        );
         assert_eq!(calls.len(), 3);
+    }
+
+    #[test]
+    fn sl_26_a_shorter_branch_is_given_after_its_blocks_and_then_extended() {
+        let mut r = rig(0);
+        let funding = fresh(5, &script(7), 100_000);
+        let fid = funding.compute_txid();
+        r.queue.register_tx(&fid, &script(7));
+        r.follower.begin();
+        let old = chain(3, vec![funding.clone()], 90);
+        join(&mut r.follower, &old, 1);
+        r.follower.on_checked(3);
+        r.follower.on_block(old[0].block_hash(), bytes(&old[0]));
+        r.rec
+            .relevant
+            .lock()
+            .unwrap()
+            .push((fid, 1, Some(old[0].block_hash())));
+        r.rec.calls.lock().unwrap().clear();
+
+        // Two blocks of another branch from the same base, the funding
+        // transaction in the first.
+        let first = mined(BlockHash::all_zeros(), 900, vec![funding]);
+        let second = mined(first.block_hash(), 901, vec![]);
+        let left: Vec<BlockHash> = old.iter().rev().map(Block::block_hash).collect();
+        r.follower
+            .on_chain(&[(1, first.block_hash()), (2, second.block_hash())], &left);
+        r.follower
+            .on_headers(vec![(1, first.header), (2, second.header)]);
+        r.follower.on_block(first.block_hash(), bytes(&first));
+        assert!(!r.rec.calls().iter().any(|c| c.starts_with("best")));
+        r.follower.on_checked(2);
+        let calls = r.rec.calls();
+        assert_eq!(calls.len(), 3, "{calls:?}");
+        assert!(calls[0].starts_with("unconfirmed"));
+        assert!(calls[1].starts_with("confirmed"));
+        assert_eq!(calls[2], format!("best 2 {}", short(second.block_hash())));
+
+        // The branch grows by two blocks; they are given in order.
+        let third = mined(second.block_hash(), 902, vec![]);
+        let fourth = mined(third.block_hash(), 903, vec![]);
+        r.follower
+            .on_chain(&[(3, third.block_hash()), (4, fourth.block_hash())], &[]);
+        r.follower
+            .on_headers(vec![(3, third.header), (4, fourth.header)]);
+        r.follower.on_checked(4);
+        let calls = r.rec.calls();
+        assert_eq!(
+            calls.last().unwrap(),
+            &format!("best 4 {}", short(fourth.block_hash()))
+        );
+        assert_eq!(calls.len(), 4, "{calls:?}");
+    }
+
+    #[test]
+    fn p_2_a_transaction_confirmed_in_a_block_the_stored_chain_does_not_have_is_unconfirmed() {
+        let mut r = rig(0);
+        let old = chain(3, vec![], 95);
+        let other = chain(3, vec![], 96);
+        let txid = Txid::from_byte_array([9; 32]);
+        r.rec
+            .relevant
+            .lock()
+            .unwrap()
+            .push((txid, 2, Some(old[1].block_hash())));
+        r.follower.seed(
+            other
+                .iter()
+                .enumerate()
+                .map(|(i, b)| (1 + i as u32, b.header))
+                .collect(),
+        );
+        r.follower.begin();
+        // The library tells nothing to the test through the effects at the
+        // start: its own record is read.
+        assert!(r.rec.calls().iter().any(|c| c.starts_with("unconfirmed")));
+    }
+
+    #[test]
+    fn p_2_a_transaction_above_the_end_of_the_known_chain_is_unconfirmed() {
+        let mut r = rig(0);
+        let blocks = chain(3, vec![], 97);
+        let txid = Txid::from_byte_array([8; 32]);
+        r.follower.begin();
+        join(&mut r.follower, &blocks, 1);
+        r.rec
+            .relevant
+            .lock()
+            .unwrap()
+            .push((txid, 5, Some(BlockHash::from_byte_array([3; 32]))));
+        r.follower.on_chain(&[], &[]);
+        assert!(r.rec.calls().iter().any(|c| c.starts_with("unconfirmed")));
     }
 
     #[test]
