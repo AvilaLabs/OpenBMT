@@ -3664,19 +3664,33 @@ object AppModelTest {
         val i = toMoney().first
         i.choose(MoneyChoice.Plan); i.next(); i.next(); i.next()
         ok(i.step == FirstRunStep.Instant, "at the instant step")
-        ok(!i.saveInstant("abc") { written.add(it) } && !i.saveInstant("") { written.add(it) } && !i.saveInstant("2.5") { written.add(it) } && !i.saveInstant("-1") { written.add(it) } && written.isEmpty() && i.step == FirstRunStep.Instant, "a number that is not whole writes nothing and stays")
-        throws("a write that fails keeps the step") { i.saveInstant("5") { throw java.io.IOException("not written") } }
-        ok(i.step == FirstRunStep.Instant && i.instantTyped == null, "a refused write leaves the step")
-        ok(i.saveInstant("25") { written.add(it) } && written == listOf(25L) && i.step == FirstRunStep.FirstSale && i.instantTyped == "25", "the value typed is written, and the first sale follows")
+        val NN = InstantResult.NotNumber
+        ok(listOf("abc", "", "2.5", "-1").all { i.saveInstant(it, 30) { v -> written.add(v) } == NN } && written.isEmpty() && i.step == FirstRunStep.Instant, "a number that is not whole writes nothing and stays")
+        ok(i.saveInstant("31", 30) { written.add(it) } == InstantResult.Higher && written.isEmpty() && i.step == FirstRunStep.Instant, "F2: more than the shop's limit is refused, nothing written")
+        throws("a write that fails keeps the step") { i.saveInstant("5", 30) { throw java.io.IOException("not written") } }
+        ok(i.step == FirstRunStep.Instant && i.instantTyped == null && i.queuedLimit == null, "a refused write leaves the step")
+        ok(i.saveInstant("25", 30) { written.add(it) } == InstantResult.Saved && written == listOf(25L) && i.step == FirstRunStep.FirstSale && i.instantTyped == "25", "a lower value is written, and the first sale follows")
         i.back(); ok(i.step == FirstRunStep.Instant && i.instantTyped == "25", "back keeps what was typed")
-        ok(i.saveInstant("0") { written.add(it) } && written == listOf(25L, 0L), "0 is accepted: every payment waits")
-        i.back(); i.typicalTyped = "12"; ok(!i.saveInstant("x") { written.add(it) } && i.typicalTyped == "12" && written.size == 2, "the typical sale is only for comparison and is never written")
-        ok(!plan.saveInstant("3") { written.add(it) } && written.size == 2, "the limit is written only at its step")
+        ok(i.saveInstant("25", 30) { written.add(it) } == InstantResult.Saved && written == listOf(25L), "F2: the same value is not queued twice")
+        i.back(); ok(i.saveInstant("0", 30) { written.add(it) } == InstantResult.Saved && written == listOf(25L, 0L), "0 is accepted: every payment waits")
+        i.back(); i.typicalTyped = "12"; ok(i.saveInstant("x", 30) { written.add(it) } == NN && i.typicalTyped == "12" && written.size == 2, "the typical sale is only for comparison and is never written")
+        ok(i.saveInstant("30", 30) { written.add(it) } == InstantResult.Saved && written.size == 2, "F2: keeping the held limit writes nothing")
+        ok(plan.saveInstant("3", 30) { written.add(it) } == InstantResult.NotHere && written.size == 2, "the limit is written only at its step")
+        toMoney().first.let { f -> f.choose(MoneyChoice.Plan); f.next(); f.next(); f.next(); f.skipInstant(); ok(f.step == FirstRunStep.FirstSale, "F2: while the starter wallet holds the shop, the step goes on with nothing written") }
         ok(InstantStep.parse(" \$1,000 ") == 1000L && InstantStep.parse("4294967295") == 4294967295L && InstantStep.parse("4294967296") == null, "whole currency units, at most what the library holds")
 
         // The first sale: waiting, then paid when the books show one; skipped otherwise.
         val sale = i.firstSale
-        ok(!sale.paid && !sale.observe(0) && !sale.paid, "no paid sale: still waiting")
+        ok(!sale.paid && !sale.observe(0) && !sale.paid && sale.baseline == 0L, "no paid sale: still waiting, and the count at entry is kept")
+        val old = FirstSale()
+        ok(!old.observe(3) && !old.observe(3) && !old.paid && old.observe(4) && old.paid, "F5: a shop with sales already waits for one more than it had")
+        ok(Checklist.copyDue(true, true, StarterRecord(1, 2, false, null)) && !Checklist.copyDue(true, true, StarterRecord(1, 2, false, null, secondCopyMade = true)) && !Checklist.copyDue(false, true, StarterRecord(1, 2, false, null)) && !Checklist.copyDue(true, false, StarterRecord(1, 2, false, null)) && !Checklist.copyDue(true, true, null), "F1: the second copy is listed only for a sealed, pinned starter wallet whose copy was not made")
+        run {
+            val now = 1_000_000_000L; val day = 86_400L; val far = now + 90 * day
+            ok(StarterCard.cardDue(now, far, 0.1, now + day, null, false), "F3: a card last shown in the future is due")
+            ok(StarterCard.cardDue(now, far, 0.1, now - 8 * day, now + 30 * day, false), "F3: a Not now more than 8 days ahead is past")
+            ok(!StarterCard.cardDue(now, far, 0.1, now - 8 * day, now + 2 * day, false), "F3: a Not now within 8 days still holds")
+        }
         sale.see("x"); ok(!sale.seeing && sale.txid == null, "there is nothing to see before a sale is paid")
         ok(sale.observe(1) && sale.paid && !sale.observe(2), "the first paid sale ends the wait, once")
         val txid = "ab".repeat(32)
@@ -3686,7 +3700,7 @@ object AppModelTest {
         ok(FirstSale.firstTxid((head + "\n" + row.joinToString(",") + "\n").toByteArray()) == txid, "the ledger's Txid column gives the first payment's ID")
         ok(FirstSale.firstTxid(head.toByteArray()) == null && FirstSale.firstTxid(ByteArray(0)) == null && FirstSale.firstTxid("a,b\n1,2\n".toByteArray()) == null, "no sale, no column or no ledger: no ID")
         sale.see(txid); ok(sale.seeing && sale.txid == txid, "See it yourself holds the ID")
-        i.saveInstant("5") { }; ok(i.firstSale !== sale && !i.firstSale.paid, "each visit to the step starts waiting again")
+        i.back(); i.saveInstant("30", 30) { }; ok(i.firstSale !== sale && !i.firstSale.paid, "each visit to the step starts waiting again")
         i.next(); ok(i.step == FirstRunStep.NotYet, "skip, or Done: what the flow did before")
         val booksDay = org.openbmt.owner.BooksDay("2026-11-14", 2, 1, "10.00")
         ok(FirstSale.paidSales(org.openbmt.owner.Books("USD", listOf(booksDay, booksDay), emptyList(), null)) == 4L, "paid sales are the books' count of sales that received funds")

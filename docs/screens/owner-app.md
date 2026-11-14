@@ -410,6 +410,7 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | instantLabel | Count at once up to |
 | instantTypical | A typical sale in your shop |
 | instantZero | Type 0 to make every payment wait. |
+| instantHigher | To count more at once, raise it later in Settings. |
 | instantHow1 | In the first minutes, a dishonest customer could try to send the same bitcoin somewhere else, like a bad note. The counter and this phone both watch for it and raise the alarm if they see it. |
 | instantHow2 | Up to your amount, the goods are handed over at once and you carry that small risk. Above it, the sale waits for a block, after which a payment is very hard to undo. |
 | instantDetails | The exact rules, and the limits with your own node or a Box, are in the handbook under Getting paid. |
@@ -1023,3 +1024,8 @@ other names in braces are counts:
 | OC64_NOT_KEPT_HEADING | Checks not kept |
 | OC64_NOT_KEPT_WHAT | This phone could not read back its record of the counter checks. |
 | OC64_NOT_KEPT_NEXT | Clear the checks to start them again. |
+| OC64_FULL_WHAT | This phone's record of the counter checks is full, so new checks are shown but not kept. |
+| OC64_FULL_NEXT | Clear the checks you have dealt with. |
+| OC61_UNREADABLE_HEADING | Counter cannot be checked |
+| OC61_UNREADABLE_WHAT | The records of {counter} do not read as sales, so this phone cannot check the payments of its sales. |
+| OC61_UNREADABLE_NEXT | Check the counter: it may have been tampered with. |

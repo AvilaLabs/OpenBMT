@@ -378,7 +378,9 @@ object StarterCard {
      */
     fun cardDue(nowSecs: Long, dateSecs: Long, heldFraction: Double, lastShownSecs: Long?, notNowUntilSecs: Long?, isAppStart: Boolean): Boolean {
         if (heldFraction >= NEARLY_FULL && isAppStart) return true
-        if (lastShownSecs == null) return true
+        if (lastShownSecs == null || lastShownSecs > nowSecs) return true
+        // A "Not now" further ahead than the longest gap and a day was not made by this rule, or the clock moved: it is past.
+        val notNowUntilSecs = notNowUntilSecs?.takeIf { it <= nowSecs + 8 * DAY }
         val gap = interval(nowSecs, dateSecs, heldFraction)
         val held = if (gap == DAY) lastShownSecs + DAY else maxOf(lastShownSecs + WEEK, notNowUntilSecs ?: 0)
         return nowSecs >= held

@@ -383,14 +383,20 @@ private fun Controller.showInstant(r: FirstRun) {
 /**
  * Writes the limit the way the settings screen does (SettingsEdit.kt): the node judges the one-field edit, and what it
  * would change is queued with the bytes it gave. The first run holds no settings of its own, so there is no other place
- * to write it. Nothing is queued when the settings already hold the number. A tightening takes effect when delivered; a
- * raise waits for the Key app like any loosening. With no node or no settings yet the step stays, with the library's words.
+ * to write it. The limit is only lowered or kept (more than the shop's is refused with the words under the field), which is
+ * a tightening that takes effect when delivered. Nothing is queued when the settings already hold the number or this step
+ * queued it. While the starter wallet holds the shop at its limit or date (SS-37) nothing is written and the step goes on.
+ * With no node or no settings yet the step stays, with the library's words.
  */
 private fun Controller.writeInstant(r: FirstRun, msg: Slot) {
     val typed = r.instantTyped ?: ""
     if (InstantStep.parse(typed) == null) {
         msg.show(ui.words(AppWords.editValueNotRead(FieldKind.Dollars, FirstRunWords.instantLabel, shopFile.load().currency ?: ShopCurrency.Usd)))
         return
+    }
+    if (starterHolds(org.openbmt.owner.StarterChangeKind.Other)) {
+        r.skipInstant()
+        return showFirstRun()
     }
     val n = node
     val held = try {
@@ -401,8 +407,8 @@ private fun Controller.writeInstant(r: FirstRun, msg: Slot) {
         return msg.show(ui.words(AppWords.libraryMissing(e.message)))
     }
     if (n == null || held == null) return msg.show(ui.words(AppWords.noSettingsYet))
-    val ok = try {
-        r.saveInstant(typed) { v ->
+    val result = try {
+        r.saveInstant(typed, held.lightPerSale.displayUsd) { v ->
             val p = n.previewSettings(InstantStep.edit(v))
             if (!p.nothingChanged) n.queueSettings(p.settings)
         }
@@ -411,7 +417,11 @@ private fun Controller.writeInstant(r: FirstRun, msg: Slot) {
     } catch (e: LinkageError) {
         return msg.show(ui.words(AppWords.libraryMissing(e.message)))
     }
-    if (ok) showFirstRun()
+    when (result) {
+        InstantResult.Saved -> showFirstRun()
+        InstantResult.Higher -> msg.show(line(FirstRunWords.instantHigher, bold = true))
+        else -> {}
+    }
 }
 
 // ---- a first real sale ---------------------------------------------------------------------------------------------------------
@@ -439,18 +449,18 @@ private fun Controller.showFirstSale(r: FirstRun) {
     stepScreen(FirstRunWords.shopTitle, body, actions, back)
     if (!sale.paid) {
         // The link's turns call this every few seconds: the first paid sale of the books ends the waiting.
-        tick = { if (node?.let { n -> sale.observe(paidSalesOf(n)) } == true) showFirstRun() }
+        tick = { if (node?.let { n -> paidSalesOf(n)?.let { c -> sale.observe(c) } } == true) showFirstRun() }
         tick?.invoke()
     }
 }
 
-/** The shop's paid sales as the books count them; 0 when the node cannot say. */
-internal fun Controller.paidSalesOf(n: OwnerNode): Long = try {
+/** The shop's paid sales as the books count them; null when the node cannot say. */
+internal fun Controller.paidSalesOf(n: OwnerNode): Long? = try {
     FirstSale.paidSales(n.books(java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60_000))
 } catch (_: OwnerException) {
-    0L
+    null
 } catch (_: LinkageError) {
-    0L
+    null
 }
 
 /**
@@ -482,7 +492,7 @@ internal fun Controller.homeChecklist(n: OwnerNode): View? {
     val now = System.currentTimeMillis()
     if (!checklistSaleSeen && now - checklistAt >= CHECKLIST_EVERY_MS) {
         checklistAt = now
-        checklistSaleSeen = paidSalesOf(n) >= 1
+        checklistSaleSeen = (paidSalesOf(n) ?: 0L) >= 1
     }
     val items = Checklist.items(checklistSaleSeen, secondCopySkipped())
     if (items.isEmpty()) return null
@@ -496,7 +506,7 @@ internal fun Controller.homeChecklist(n: OwnerNode): View? {
 private const val CHECKLIST_EVERY_MS = 15_000L
 
 /** The owner has a starter wallet and did not write the second copy of its words: read from the starter record. */
-private fun Controller.secondCopySkipped(): Boolean = starterRecord()?.let { !it.secondCopyMade } ?: false
+private fun Controller.secondCopySkipped(): Boolean = Checklist.copyDue(starter.store.hasSealed(), starterPinned(), starterRecord())
 
 
 /** The advice on an own wallet: a cold wallet is recommended; the owner may make one, or go on with the wallet they have. */

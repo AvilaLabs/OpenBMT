@@ -338,18 +338,32 @@ class FirstRun(start: ShopPrefs, locale: String) {
     var firstSale = FirstSale()
         private set
 
+    /** What this step queued, so that the same value is not queued twice; null until it queued one. */
+    var queuedLimit: Long? = null
+        private set
+
     /**
-     * Instant, Next: the limit typed is written with [write] as whole units of the shop's money, 0 allowed, and the
-     * step goes on. False, with nothing written and the step kept, when the text is not a whole number. [write]
-     * may throw; then the step stays too.
+     * Instant, Next: the limit typed may be 0 up to [held], the limit the shop has (it is lowered or kept here, never
+     * raised). It is written with [write] as whole units of the shop's money unless it is what the shop holds or what
+     * this step already queued; then the step goes on. With nothing written and the step kept: [InstantResult.NotNumber]
+     * for text that is not a whole number, [InstantResult.Higher] for more than [held]. [write] may throw; then the step stays too.
      */
-    fun saveInstant(text: String, write: (Long) -> Unit): Boolean {
-        if (step != FirstRunStep.Instant) return false
-        val v = InstantStep.parse(text) ?: return false
-        write(v)
+    fun saveInstant(text: String, held: Long, write: (Long) -> Unit): InstantResult {
+        if (step != FirstRunStep.Instant) return InstantResult.NotHere
+        val v = InstantStep.parse(text) ?: return InstantResult.NotNumber
+        if (v > held) return InstantResult.Higher
+        if (v != held && v != queuedLimit) {
+            write(v)
+            queuedLimit = v
+        }
         instantTyped = text
         next()
-        return true
+        return InstantResult.Saved
+    }
+
+    /** Instant, Next while the starter wallet holds the shop at its limit or date (SS-37): nothing is written and the step goes on. */
+    fun skipInstant() {
+        if (step == FirstRunStep.Instant) next()
     }
 
     fun choose(choice: MoneyChoice) {
@@ -405,6 +419,9 @@ class FirstRun(start: ShopPrefs, locale: String) {
     }
 }
 
+/** What [FirstRun.saveInstant] did. */
+enum class InstantResult { Saved, NotNumber, Higher, NotHere }
+
 /** The page for the owner's helper (DESIGN 2.1 step 7): the four rules for buying and the numbered steps for when it arrives. */
 object HelperPage {
     val rules = listOf(FirstRunWords.hwRule1, FirstRunWords.hwRule2, FirstRunWords.hwRule3, FirstRunWords.hwRule4)
@@ -443,6 +460,10 @@ object InstantStep {
  * count is the books' own (sales that received funds, from the counter's records); nothing here asks the network.
  */
 class FirstSale {
+    /** The count when the step was entered: only a count above it is a sale of this step. */
+    var baseline: Long? = null
+        private set
+
     var paid = false
         private set
 
@@ -454,9 +475,14 @@ class FirstSale {
     var seeing = false
         private set
 
-    /** The books' count of paid sales: true, once, when it shows the first. */
+    /** The books' count of paid sales: the first count is the baseline; true, once, when a later one is above it. */
     fun observe(paidSales: Long): Boolean {
-        if (paid || paidSales < 1) return false
+        val base = baseline
+        if (base == null) {
+            baseline = paidSales
+            return false
+        }
+        if (paid || paidSales <= base) return false
         paid = true
         return true
     }
@@ -514,6 +540,9 @@ class ChecklistItem(val text: String, val note: String? = null)
 
 /** The home checklist (DESIGN 2.1): what is still to do, and gone when nothing is. */
 object Checklist {
+    /** The second copy is still to do only for a sealed, pinned starter wallet whose record says it was not made. */
+    fun copyDue(sealed: Boolean, pinned: Boolean, record: StarterRecord?): Boolean = sealed && pinned && record != null && !record.secondCopyMade
+
     /**
      * The items for a shop: a first sale until one is paid, and a second copy of the starter words only when the
      * owner skipped it. Empty when both are done.
