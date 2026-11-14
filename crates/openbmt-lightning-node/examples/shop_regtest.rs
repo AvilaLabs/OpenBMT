@@ -279,7 +279,7 @@ async fn handle(node: &Node, p: &[&str]) -> String {
         },
         "sweep" => format!("{:?}", node.sweep(sats(1) as u32, sats(2))),
         "tracked" => node.tracked_outputs().to_string(),
-        "close" => format!("{:?}", node.close_all(sats(1) as u32)),
+        "close" => format!("{:?}", node.close_all(sats(1) as u32).map(|c| c.begun)),
         "descriptor" => test_prefix_descriptor(&wallet_text(&Xpriv::from_str(XPRV).unwrap())),
         _ => "ERR unknown command".into(),
     }
