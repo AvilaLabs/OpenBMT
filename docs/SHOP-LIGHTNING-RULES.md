@@ -324,7 +324,9 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   the counter's own address; a payment too big is never offered; the second
   device away holds a payment without a panic and finishes it on return; a
   restore from the newer copy works and from the older is refused; 1,000
-  blocks offline then back is safe.
+  blocks offline then back is safe; a payment through a channel whose funding
+  Core is told never to mine is claimed, and 144 blocks later the funding is
+  reported lost and the channel is closed by force (SL-27).
 - **SL-51. The key.** BIP-85 vectors (SL-10), and a stick or signer child
   equals the core's.
 

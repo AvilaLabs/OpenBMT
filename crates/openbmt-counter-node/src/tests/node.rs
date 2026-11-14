@@ -828,3 +828,11 @@ fn nr_46_a_checked_block_still_on_the_chain_leaves_the_height_and_a_height_alone
     fs::write(dir.path().join("checked.bin"), [3, 0, 0, 0, 2, 9]).unwrap();
     assert!(DirStore::open(dir.path()).unwrap().load().is_err());
 }
+
+#[test]
+fn ss_02_the_nodes_own_random_bytes_come_from_the_checked_read_and_differ() {
+    let a = crate::node::os_random().expect("the kernel gave bytes");
+    let b = crate::node::os_random().expect("the kernel gave bytes");
+    assert_ne!(a, [0u8; 32]);
+    assert_ne!(a, b);
+}

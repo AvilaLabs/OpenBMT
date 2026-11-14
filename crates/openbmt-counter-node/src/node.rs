@@ -405,7 +405,7 @@ fn checked_fork(checked: u32, stored: &[[u8; 32]], view: &ChainView) -> Option<u
 }
 
 /// 32 bytes from the kernel, read and checked as SS-02 says; None when the read fails or is refused.
-fn os_random() -> Option<[u8; 32]> {
+pub(crate) fn os_random() -> Option<[u8; 32]> {
     openbmt_kernel_random::system_bytes::<32>().ok()
 }
 

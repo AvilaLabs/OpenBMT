@@ -786,3 +786,12 @@ fn kind_13_lk_79_a_starter_line_is_sent_by_the_owner_to_a_counter_and_is_kind_13
     assert!(!Kind::Starter.allowed(Role::Watch, Role::Counter));
     assert!(!Kind::Starter.allowed(Role::Owner, Role::Box));
 }
+
+#[test]
+fn lk_03_the_system_random_gives_bytes_checked_as_ss_02_and_two_calls_differ() {
+    let (mut a, mut b) = ([0u8; 32], [0u8; 32]);
+    crate::random::os_random(&mut a).expect("the kernel gave bytes");
+    crate::random::os_random(&mut b).expect("the kernel gave bytes");
+    assert_ne!(a, [0u8; 32]);
+    assert_ne!(a, b);
+}

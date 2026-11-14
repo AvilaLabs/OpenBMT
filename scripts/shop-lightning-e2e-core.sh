@@ -55,6 +55,11 @@
 #          the funding confirms, the room comes back to about the cap, a
 #          payment then goes through a channel with a confirmed funding, and
 #          the fee counts in the fees paid (SL-28, SL-29, SL-35, SL-40, SL-45)
+#        - a payment claimed through a channel whose funding Core is told never
+#          to mine (`prioritisetransaction` with a large negative fee delta,
+#          so the funding stays in the mempool and out of every block): after
+#          144 blocks mined in one call the node reports the funding lost, it
+#          force-closes that channel, and no payment can use it (SL-27, SL-40)
 #   The script ends `ALL PASS` only if every check printed PASS.
 #
 #   With SHOP_CHAIN=filters the run is another one, on the same network: the
@@ -1159,6 +1164,74 @@ else
   check "SL-28: a provider without LSPS1 is found out, nothing is ordered, and room comes only with a payment too big for it: $L" $?
   stop_shop
 fi
+
+# ---- a funding that never confirms ---------------------------------------------
+
+say "A payment through a channel whose funding is kept out of every block"
+# SL-27: the provider's zero-conf channel carries a payment, its funding stays
+# in Core's mempool (Core is told by `prioritisetransaction` not to mine it),
+# and 144 blocks later the node judges it lost and force-closes the channel.
+# Nothing here waits on the earlier steps: it starts from the provider closing
+# every channel the shop has, and the 144 blocks are mined in one call.
+FUNDING_LOG="$BASE/funding.log"
+: >"$FUNDING_LOG"
+start_shop max_fee_msat=20000000 || die "the node did not start: $(cat "$BASE/shop.out" "$BASE/shop.err" | tail -3)"
+await_status "provider=true" 60 || die "the node did not connect to the provider"
+ctl "$LSP_CTL" forceclose "$SHOP_ID" >/dev/null
+for _ in $(seq 1 60); do
+  mine 1
+  sleep 1
+  [ "$(lsp_channels_with_shop)" = 0 ] && await_status "channels=0" 1 && break
+done
+await_status "provider=true channels=0" 60 || die "the shop still holds a channel"
+note "the shop holds no channel"
+shop_invoice 50000
+HL=$(hash_of "$INVOICE")
+[ -n "$INVOICE" ] && grep -q "fee_msat=[1-9]" <<<"$REPLY"
+check "with no channel the invoice is one that opens one" $?
+pay "$INVOICE" 90s && await_paid_keep "$HL" 30
+check "SL-21: the payment through the new channel is claimed and reported paid" $?
+FUNDING_L=$(ctl "$LSP_CTL" channels | grep "cp=$SHOP_ID" | sed -n 's/.*funding_txo=Some(OutPoint { txid: \([0-9a-f]*\), vout: \([0-9]*\) }).*/\1/p')
+[ -n "$FUNDING_L" ] && [ "$(lsp_channels_with_shop)" = 1 ]
+check "the payment opened one channel, funded by $FUNDING_L" $?
+for _ in $(seq 1 30); do bcli getmempoolentry "$FUNDING_L" >/dev/null 2>&1 && break; sleep 1; done
+bcli getmempoolentry "$FUNDING_L" >/dev/null 2>&1
+check "the funding transaction is in Core's mempool, in no block" $?
+PAID_FUNDING_L=$(sed -n "s/^paid $HL .* funding=//p" "$PAID_LOG" | head -1)
+[ "$PAID_FUNDING_L" = "$FUNDING_L" ]
+check "SL-27, SL-40: the paid event names the funding that has no confirmation: $PAID_FUNDING_L" $?
+# Core is told not to mine the funding: with a fee delta that large its
+# modified fee is under the block minimum, so no block template takes it.
+bcli prioritisetransaction "$FUNDING_L" 0 -100000000 >/dev/null
+check "Core was told not to mine the funding transaction (test-only: a fee delta of -1 BTC)" $?
+mine 144
+TIP=$(bcli getblockcount)
+[ "$(bcli getrawtransaction "$FUNDING_L" true 2>/dev/null | jq -r '.blockhash // "none"')" = none ] &&
+  bcli getmempoolentry "$FUNDING_L" >/dev/null 2>&1
+check "after 144 blocks mined in one call (height $TIP) the funding transaction is still in no block" $?
+await_status "chain_ok=true height=$TIP " 150
+check "SL-26: the node follows to the tip, $TIP" $?
+LOST=1
+for _ in $(seq 1 90); do
+  ctl "$SHOP_CTL" funding >>"$FUNDING_LOG"
+  grep -q "funding $FUNDING_L lost" "$FUNDING_LOG" && { LOST=0; break; }
+  sleep 1
+done
+check "SL-27: the node reports the funding lost, 144 blocks after the claim, with none confirming" $LOST
+grep -q "funding Lost(TimedOut)" "$SHOP_DIR/node.log"
+check "SL-27: the node's log gives the reason as the timeout" $?
+await_status "provider=true channels=0 usable=0" 60
+check "SL-27: the node force-closed the channel: it is no longer in the shop's channel list" $?
+case "$(ctl "$SHOP_CTL" quote 5000)" in invoice*) false ;; *) true ;; esac
+check "SL-27, SL-40: no payment is possible through that channel: the node no longer quotes an invoice on an open channel ($(ctl "$SHOP_CTL" quote 5000))" $?
+ctl "$LSP_CTL" channels | grep "cp=$SHOP_ID" | grep "$FUNDING_L" | grep -q 'usable=true'
+[ $? != 0 ]
+check "the provider does not hold that channel usable either" $?
+# Put things back as they were: the funding may be mined now.
+bcli prioritisetransaction "$FUNDING_L" 0 100000000 >/dev/null
+mine 3
+ctl "$SHOP_CTL" ackfunding "$FUNDING_L" >/dev/null
+stop_shop
 
 echo
 if [ "$FAILED" = 0 ]; then echo "ALL PASS"; else echo "FAILED"; exit 1; fi
