@@ -738,11 +738,16 @@ object ProtocolDecoderTest {
             val got = decodeResponse(header(0, one)).let { it.shopLightningState().also { _ -> it.end() } }
             check(got.report!!.notOffered == cause)
         }
+        run {
+            val stopped = Writer().bool(false).bool(false).u32(0).u32(0).u8(0).u8(1).u64(1).u64(2).u64(3).u64(4).u64(5).u64(6).u8(0).u8(1).u8(4).u8(9).u64(7).toByteArray()
+            val got = decodeResponse(header(0, stopped)).let { it.shopLightningState().also { _ -> it.end() } }
+            check(got.report!!.orderState == OrderState.Failed && got.report!!.orderWhy == OrderWhy.Stopped && got.report!!.orderFeeSats == 7L)
+        }
         rejects("a cause that is not defined") {
             val bad = Writer().bool(false).bool(false).u32(0).u32(0).u8(0).u8(1).u64(1).u64(2).u64(3).u64(4).u64(5).u64(6).u8(5).u8(0).u8(0).u8(0).u64(0).toByteArray()
             decodeResponse(header(0, bad)).shopLightningState()
         }
-        for ((what, tags) in listOf("an offer" to listOf(3, 0, 0), "an order state" to listOf(0, 5, 0), "an order cause" to listOf(0, 0, 9))) {
+        for ((what, tags) in listOf("an offer" to listOf(3, 0, 0), "an order state" to listOf(0, 5, 0), "an order cause" to listOf(0, 0, 10))) {
             rejects("$what that is not defined") {
                 val bad = Writer().bool(false).bool(false).u32(0).u32(0).u8(0).u8(1).u64(1).u64(2).u64(3).u64(4).u64(5).u64(6).u8(0)
                     .u8(tags[0]).u8(tags[1]).u8(tags[2]).u64(0).toByteArray()

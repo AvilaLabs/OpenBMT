@@ -352,10 +352,12 @@ pub struct PaidSale {
 }
 
 /// The provider's LSPS1 and the last order, as the report says them (SL-28,
-/// SL-45, LK-84).
+/// SL-45, LK-84). With the buying stopped (a paid order brought no channel),
+/// the order is said failed for that cause.
 fn order_facts(
     offered: openbmt_lightning_node::lsps1::Offer,
     order: Option<&openbmt_lightning_node::lsps1::OrderRecord>,
+    stopped: bool,
 ) -> (Lsps1Offer, OrderState, OrderWhy, u64) {
     use openbmt_lightning_node::lsps1 as ln;
     let offer = match offered {
@@ -364,8 +366,15 @@ fn order_facts(
         ln::Offer::NotOffered => Lsps1Offer::NotOffered,
     };
     let Some(o) = order else {
-        return (offer, OrderState::None, OrderWhy::None, 0);
+        return if stopped {
+            (offer, OrderState::Failed, OrderWhy::Stopped, 0)
+        } else {
+            (offer, OrderState::None, OrderWhy::None, 0)
+        };
     };
+    if stopped {
+        return (offer, OrderState::Failed, OrderWhy::Stopped, o.fee_sat);
+    }
     let state = match o.state {
         ln::OrderState::Open => OrderState::Open,
         ln::OrderState::Paid => OrderState::Paid,
@@ -1509,7 +1518,11 @@ impl ShopLn {
                 report.order_state,
                 report.order_why,
                 report.order_fee_sats,
-            ) = order_facts(status.lsps1, status.last_order.as_ref());
+            ) = order_facts(
+                status.lsps1,
+                status.last_order.as_ref(),
+                status.lsps1_stopped,
+            );
             report.not_offered = if self
                 .inst
                 .as_ref()
@@ -2370,26 +2383,27 @@ mod tests {
             state,
             why,
             fee_sat: 2_000,
+            lsp_balance_sat: 1_000_000,
             payment_hash: [1; 32],
             created_unix: 1,
             updated_unix: 2,
         };
         assert_eq!(
-            order_facts(ln::Offer::Unknown, None),
+            order_facts(ln::Offer::Unknown, None, false),
             (Lsps1Offer::Unknown, OrderState::None, OrderWhy::None, 0)
         );
         assert_eq!(
-            order_facts(ln::Offer::NotOffered, None),
+            order_facts(ln::Offer::NotOffered, None, false),
             (Lsps1Offer::NotOffered, OrderState::None, OrderWhy::None, 0)
         );
         let paid = record(ln::OrderState::Paid, ln::OrderWhy::None);
         assert_eq!(
-            order_facts(ln::Offer::Offered, Some(&paid)),
+            order_facts(ln::Offer::Offered, Some(&paid), false),
             (Lsps1Offer::Offered, OrderState::Paid, OrderWhy::None, 2_000)
         );
         let refused = record(ln::OrderState::Failed, ln::OrderWhy::FeeAboveMax);
         assert_eq!(
-            order_facts(ln::Offer::Offered, Some(&refused)),
+            order_facts(ln::Offer::Offered, Some(&refused), false),
             (
                 Lsps1Offer::Offered,
                 OrderState::Failed,
@@ -2403,7 +2417,7 @@ mod tests {
             (ln::OrderState::Done, OrderState::Done),
         ] {
             let r = record(state, ln::OrderWhy::None);
-            assert_eq!(order_facts(ln::Offer::Offered, Some(&r)).1, expect);
+            assert_eq!(order_facts(ln::Offer::Offered, Some(&r), false).1, expect);
         }
         for (why, expect) in [
             (ln::OrderWhy::CannotPay, OrderWhy::CannotPay),
@@ -2415,8 +2429,23 @@ mod tests {
             (ln::OrderWhy::NoChannel, OrderWhy::NoChannel),
         ] {
             let r = record(ln::OrderState::Failed, why);
-            assert_eq!(order_facts(ln::Offer::Offered, Some(&r)).2, expect);
+            assert_eq!(order_facts(ln::Offer::Offered, Some(&r), false).2, expect);
         }
+        // A buying stopped says so, whatever the last order's own cause.
+        let r = record(ln::OrderState::Failed, ln::OrderWhy::NoChannel);
+        assert_eq!(
+            order_facts(ln::Offer::Offered, Some(&r), true),
+            (
+                Lsps1Offer::Offered,
+                OrderState::Failed,
+                OrderWhy::Stopped,
+                2_000
+            )
+        );
+        assert_eq!(
+            order_facts(ln::Offer::Offered, None, true).2,
+            OrderWhy::Stopped
+        );
     }
 
     #[test]

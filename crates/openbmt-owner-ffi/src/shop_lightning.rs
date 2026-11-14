@@ -136,6 +136,9 @@ pub enum OrderWhyView {
     NotPossible,
     /// Paid, and no channel came in two days.
     NoChannel,
+    /// A paid order brought no channel, so no more room is bought from this
+    /// provider.
+    Stopped,
 }
 
 wire_unit_enum!(OrderWhyView {
@@ -147,7 +150,8 @@ wire_unit_enum!(OrderWhyView {
     PaymentFailed = 5,
     Refunded = 6,
     NotPossible = 7,
-    NoChannel = 8
+    NoChannel = 8,
+    Stopped = 9
 });
 
 impl OrderWhyView {
@@ -162,6 +166,7 @@ impl OrderWhyView {
             OrderWhy::Refunded => Self::Refunded,
             OrderWhy::NotPossible => Self::NotPossible,
             OrderWhy::NoChannel => Self::NoChannel,
+            OrderWhy::Stopped => Self::Stopped,
         }
     }
 }

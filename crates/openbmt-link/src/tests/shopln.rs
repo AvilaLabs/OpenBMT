@@ -845,6 +845,12 @@ fn lk_84_the_lsps1_and_order_facts_round_trip_and_decode_strictly() {
             OrderWhy::NoChannel,
             0,
         ),
+        (
+            Lsps1Offer::Offered,
+            OrderState::Failed,
+            OrderWhy::Stopped,
+            2_000,
+        ),
     ] {
         let r = LightningReport {
             lsps1,
@@ -861,10 +867,10 @@ fn lk_84_the_lsps1_and_order_facts_round_trip_and_decode_strictly() {
             LightningReport::to_bytes,
         );
     }
-    for code in 0..9 {
+    for code in 0..10 {
         assert_eq!(OrderWhy::from_code(code).map(OrderWhy::to_code), Some(code));
     }
-    assert_eq!(OrderWhy::from_code(9), None);
+    assert_eq!(OrderWhy::from_code(10), None);
     assert_eq!(OrderState::from_code(5), None);
     assert_eq!(Lsps1Offer::from_code(3), None);
 }
@@ -890,7 +896,7 @@ fn lk_84_a_cause_without_a_failure_a_failure_without_a_cause_and_a_fee_without_a
         ..report()
     }));
     // A code that is not a choice, in each of the three places.
-    for (at, code) in [(47usize, 3u16), (49, 5), (51, 9)] {
+    for (at, code) in [(47usize, 3u16), (49, 5), (51, 10)] {
         let mut b = report().to_bytes();
         b[at..at + 2].copy_from_slice(&code.to_le_bytes());
         assert!(LightningReport::from_bytes(&b).is_err(), "{at}");

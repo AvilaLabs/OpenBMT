@@ -646,6 +646,9 @@ pub enum OrderWhy {
     NotPossible,
     /// Paid, and no channel came in two days.
     NoChannel,
+    /// A paid order brought no channel, so no more room is bought from this
+    /// provider.
+    Stopped,
 }
 
 impl OrderWhy {
@@ -661,6 +664,7 @@ impl OrderWhy {
             Self::Refunded => 6,
             Self::NotPossible => 7,
             Self::NoChannel => 8,
+            Self::Stopped => 9,
         }
     }
 
@@ -676,6 +680,7 @@ impl OrderWhy {
             Self::Refunded,
             Self::NotPossible,
             Self::NoChannel,
+            Self::Stopped,
         ]
         .into_iter()
         .find(|c| c.to_code() == code)

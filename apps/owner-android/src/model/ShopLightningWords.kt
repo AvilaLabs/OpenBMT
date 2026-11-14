@@ -95,6 +95,7 @@ object ShopLightningWords {
     const val orderWhyRefunded = "The provider gave the payment back."
     const val orderWhyNotPossible = "The provider's terms are ones the counter cannot meet or pay."
     const val orderWhyNoChannel = "It was paid, but no channel opened within two days. Ask the provider for the money back."
+    const val orderWhyStopped = "WORDS_NEEDED_SL28_ORDER_WHY_STOPPED"
     const val changeLimits = "Change the limits"
     const val changeProvider = "Change the provider"
     const val save = "Save"
@@ -192,6 +193,7 @@ object ShopLightningWords {
         org.openbmt.owner.OrderWhy.Refunded -> orderWhyRefunded
         org.openbmt.owner.OrderWhy.NotPossible -> orderWhyNotPossible
         org.openbmt.owner.OrderWhy.NoChannel -> orderWhyNoChannel
+        org.openbmt.owner.OrderWhy.Stopped -> orderWhyStopped
     }
 
     /** Every text with the name it is listed under, in screen order, for the screens table and the checks. */
@@ -276,6 +278,7 @@ object ShopLightningWords {
         "orderWhyRefunded" to orderWhyRefunded,
         "orderWhyNotPossible" to orderWhyNotPossible,
         "orderWhyNoChannel" to orderWhyNoChannel,
+        "orderWhyStopped" to orderWhyStopped,
         "changeLimits" to changeLimits,
         "changeProvider" to changeProvider,
         "save" to save,

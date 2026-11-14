@@ -294,6 +294,7 @@ private const val TAG_ORDER_WHY_VIEW_PAYMENT_FAILED = 5
 private const val TAG_ORDER_WHY_VIEW_REFUNDED = 6
 private const val TAG_ORDER_WHY_VIEW_NOT_POSSIBLE = 7
 private const val TAG_ORDER_WHY_VIEW_NO_CHANNEL = 8
+private const val TAG_ORDER_WHY_VIEW_STOPPED = 9
 private const val TAG_SHOP_LIGHTNING_ACTION_SET = 0
 private const val TAG_SHOP_LIGHTNING_ACTION_CHANGE = 1
 private const val TAG_SHOP_LIGHTNING_ACTION_REMOVE = 2
@@ -1041,7 +1042,7 @@ enum class OrderState { None, Open, Paid, Done, Failed }
 
 /** Why the last order failed or was not paid; None unless it failed (SL-45, LK-84). */
 enum class OrderWhy {
-    None, FeeAboveMax, CannotPay, Refused, Expired, PaymentFailed, Refunded, NotPossible, NoChannel,
+    None, FeeAboveMax, CannotPay, Refused, Expired, PaymentFailed, Refunded, NotPossible, NoChannel, Stopped,
 }
 
 /** The Shop Lightning the settings in force name (SL-71): the cap and the provider the page shows are these (SL-78). */
@@ -2572,6 +2573,7 @@ private fun Reader.orderWhy(): OrderWhy =
         TAG_ORDER_WHY_VIEW_REFUNDED -> OrderWhy.Refunded
         TAG_ORDER_WHY_VIEW_NOT_POSSIBLE -> OrderWhy.NotPossible
         TAG_ORDER_WHY_VIEW_NO_CHANNEL -> OrderWhy.NoChannel
+        TAG_ORDER_WHY_VIEW_STOPPED -> OrderWhy.Stopped
         else -> tag("OrderWhyView")
     }
 

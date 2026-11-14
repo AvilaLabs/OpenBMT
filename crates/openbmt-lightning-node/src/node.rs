@@ -43,7 +43,7 @@ use lightning::chain::{BestBlock, Listen, Watch};
 use lightning::events::{Event, PaymentPurpose, ReplayEvent};
 use lightning::ln::channelmanager::{
     Bolt11InvoiceParameters, ChainParameters, ChannelManagerReadArgs, PaymentId,
-    RecipientOnionFields, RetryableSendFailure,
+    RecentPaymentDetails, RecipientOnionFields, RetryableSendFailure,
 };
 use lightning::ln::peer_handler::{IgnoringMessageHandler, MessageHandler};
 use lightning::onion_message::messenger::NullMessageRouter;
@@ -296,6 +296,9 @@ pub struct NodeStatus {
     pub last_order: Option<OrderRecord>,
     /// What orders paid so far, in satoshis (SL-29, SL-45).
     pub lsps1_fees_paid_sat: u64,
+    /// A paid order brought no channel, so no more room is bought from this
+    /// provider (SL-28).
+    pub lsps1_stopped: bool,
 }
 
 /// What the provider says of an order (SL-28).
@@ -303,6 +306,22 @@ struct OrderAnswer {
     id: String,
     payment: LSPS1PaymentInfo,
     channel: Option<LSPS1ChannelInfo>,
+}
+
+/// Waits for the answer to the request `id`; if none comes in time, the
+/// waiter's entry is taken out of the map, so an answer that never comes
+/// leaves nothing behind.
+async fn answer_within<T>(
+    waiters: &Mutex<HashMap<LSPSRequestId, Waiter>>,
+    id: &LSPSRequestId,
+    rx: oneshot::Receiver<T>,
+    wait: Duration,
+) -> Option<T> {
+    let answer = tokio::time::timeout(wait, rx).await;
+    if answer.is_err() {
+        waiters.lock_recover().remove(id);
+    }
+    answer.ok()?.ok()
 }
 
 enum Waiter {
@@ -1185,9 +1204,10 @@ impl Node {
             channels: channels.len(),
             usable_channels: usable.len(),
             room_msat: room_to_receive_msat(usable.iter().map(|c| c.inbound_capacity_msat)),
-            lsps1: s.lsps1.lock().unwrap().offer,
+            lsps1: s.lsps1.lock_recover().offer,
             last_order: book.order,
             lsps1_fees_paid_sat: book.fees_paid_sat,
+            lsps1_stopped: book.stopped_for == Some(s.provider.node_id.serialize()),
         }
     }
 
@@ -1428,16 +1448,16 @@ impl Shared {
     async fn opening_params(&self) -> Result<Vec<LSPS2OpeningFeeParams>, ()> {
         let handler = self.liquidity.lsps2_client_handler().ok_or(())?;
         let (tx, rx) = oneshot::channel();
-        {
+        let id = {
             let mut waiters = self.waiters.lock_recover();
             let id =
                 handler.request_opening_params(self.provider.node_id, self.provider.token.clone());
-            waiters.insert(id, Waiter::Params(tx));
-        }
-        tokio::time::timeout(PROVIDER_ANSWER, rx)
+            waiters.insert(id.clone(), Waiter::Params(tx));
+            id
+        };
+        answer_within(&self.waiters, &id, rx, PROVIDER_ANSWER)
             .await
-            .map_err(|_| ())?
-            .map_err(|_| ())
+            .ok_or(())
     }
 
     /// Asks the provider for its LSPS1 options. No answer in 30 seconds or an
@@ -1447,18 +1467,16 @@ impl Shared {
         let answer = async {
             let handler = self.liquidity.lsps1_client_handler()?;
             let (tx, rx) = oneshot::channel();
-            {
-                let mut waiters = self.waiters.lock().unwrap();
+            let id = {
+                let mut waiters = self.waiters.lock_recover();
                 let id = handler.request_supported_options(self.provider.node_id);
-                waiters.insert(id, Waiter::Options(tx));
-            }
-            tokio::time::timeout(lsps1::OPTIONS_ANSWER, rx)
-                .await
-                .ok()?
-                .ok()
+                waiters.insert(id.clone(), Waiter::Options(tx));
+                id
+            };
+            answer_within(&self.waiters, &id, rx, lsps1::OPTIONS_ANSWER).await
         }
         .await;
-        let mut st = self.lsps1.lock().unwrap();
+        let mut st = self.lsps1.lock_recover();
         match answer {
             Some(options) => {
                 st.offer = lsps1::Offer::Offered;
@@ -1488,15 +1506,13 @@ impl Shared {
     ) -> Option<OrderAnswer> {
         let handler = self.liquidity.lsps1_client_handler()?;
         let (tx, rx) = oneshot::channel();
-        {
-            let mut waiters = self.waiters.lock().unwrap();
+        let id = {
+            let mut waiters = self.waiters.lock_recover();
             let id = send(handler);
-            waiters.insert(id, Waiter::Order(tx));
-        }
-        tokio::time::timeout(lsps1::ORDER_ANSWER, rx)
-            .await
-            .ok()?
-            .ok()
+            waiters.insert(id.clone(), Waiter::Order(tx));
+            id
+        };
+        answer_within(&self.waiters, &id, rx, lsps1::ORDER_ANSWER).await
     }
 
     /// The most one usable channel to the provider can send now, in
@@ -1523,11 +1539,11 @@ impl Shared {
         let book = self.orders.snapshot();
         match book.order.as_ref().filter(|o| o.state.is_open()) {
             Some(record) => {
-                if now.saturating_sub(self.lsps1.lock().unwrap().last_poll) < lsps1::POLL_EVERY_SECS
+                if now.saturating_sub(self.lsps1.lock_recover().last_poll) < lsps1::POLL_EVERY_SECS
                 {
                     return;
                 }
-                self.lsps1.lock().unwrap().last_poll = now;
+                self.lsps1.lock_recover().last_poll = now;
                 self.follow_order(record, now).await;
             }
             None => self.make_order(options, &book, now).await,
@@ -1543,7 +1559,8 @@ impl Shared {
                 .iter()
                 .map(|c| c.inbound_capacity_msat),
         );
-        if !lsps1::order_wanted(room_msat, self.cap_sat, book, now) {
+        let me = self.provider.node_id.serialize();
+        if !lsps1::order_wanted(room_msat, self.cap_sat, book, now, &me) {
             return;
         }
         // Without a channel to pay from, nothing is asked: the provider is
@@ -1557,13 +1574,14 @@ impl Shared {
                 state: OrderState::Failed,
                 why,
                 fee_sat: 0,
+                lsp_balance_sat: 0,
                 payment_hash: [0; 32],
                 created_unix: now,
                 updated_unix: now,
             };
             move |b: &mut OrderBook| {
                 b.begin(record);
-                b.fail(why, now);
+                b.fail(why, now, &me);
             }
         };
         let params = match lsps1::order_params(
@@ -1581,6 +1599,7 @@ impl Shared {
             }
         };
         let provider = self.provider.node_id;
+        let lsp_balance_sat = params.lsp_balance_sat;
         let answer = self
             .order_request(|h| h.create_order(&provider, params, None))
             .await;
@@ -1602,6 +1621,7 @@ impl Shared {
             state: OrderState::Open,
             why: OrderWhy::None,
             fee_sat: lsps1::order_fee_sat(&answer.payment),
+            lsp_balance_sat,
             payment_hash: lsps1::payment_hash_of(&answer.payment),
             created_unix: now,
             updated_unix: now,
@@ -1632,46 +1652,123 @@ impl Shared {
             Some(a) if a.id == record.id => self.progress_order(record, &a, now).await,
             _ => {
                 // No answer: asked again later. A paid order that stays
-                // unanswered is given up after two days.
+                // unanswered is given up after two days. The book changes
+                // only if the order is still the one the decision was made
+                // from.
                 if record.state == OrderState::Paid
                     && now.saturating_sub(record.updated_unix) > lsps1::GIVE_UP_AFTER_SECS
                 {
+                    let me = provider.serialize();
                     let _ = self
                         .orders
-                        .change(|b| b.fail(OrderWhy::NoChannel, now))
+                        .change(|b| {
+                            b.if_current(record, |b| b.fail(OrderWhy::NoChannel, now, &me));
+                        })
                         .await;
                 }
             }
         }
     }
 
-    /// What to do about an order after the provider's answer.
+    /// What the payment manager says of the payment for the order's invoice.
+    /// A payment claimed whose amount is not known is waited for: the
+    /// library's event brings the amount that left.
+    fn sent_of(&self, record: &OrderRecord, answer: &OrderAnswer) -> lsps1::Sent {
+        let id = PaymentId(record.payment_hash);
+        for p in self.manager.list_recent_payments() {
+            match p {
+                RecentPaymentDetails::Pending { payment_id, .. }
+                | RecentPaymentDetails::AwaitingInvoice { payment_id }
+                    if payment_id == id =>
+                {
+                    return lsps1::Sent::OnItsWay;
+                }
+                RecentPaymentDetails::Fulfilled { payment_id, .. } if payment_id == id => {
+                    let msat = answer
+                        .payment
+                        .bolt11
+                        .as_ref()
+                        .filter(|_| lsps1::payment_hash_of(&answer.payment) == record.payment_hash)
+                        .and_then(|b| b.invoice.amount_milli_satoshis());
+                    return match msat {
+                        Some(m) => lsps1::Sent::Left(Some(m)),
+                        None => lsps1::Sent::OnItsWay,
+                    };
+                }
+                _ => {}
+            }
+        }
+        lsps1::Sent::NotSent
+    }
+
+    /// The channels the node holds, as far as an order's channel is checked.
+    fn own_channels(&self) -> Vec<lsps1::OwnChannel> {
+        self.manager
+            .list_channels()
+            .iter()
+            .map(|c| lsps1::OwnChannel {
+                counterparty: c.counterparty.node_id,
+                funding: c.funding_txo.map(|o| o.into_bitcoin_outpoint()),
+                inbound_msat: c.inbound_capacity_msat,
+            })
+            .collect()
+    }
+
+    /// What to do about an order after the provider's answer. Every change of
+    /// the book applies only if the order is still the one `record` was taken
+    /// from.
     async fn progress_order(&self, record: &OrderRecord, answer: &OrderAnswer, now: u64) {
         let seen = lsps1::read_status(&answer.payment, &answer.channel);
+        let me = self.provider.node_id.serialize();
         let write = |r: Result<(), lightning::io::Error>| {
             if let Err(e) = r {
                 self.logger
                     .line(Level::Warn, &format!("order change not stored: {e}"));
             }
         };
-        match lsps1::next_step(record, seen, now) {
+        let sent = self.sent_of(record, answer);
+        let channel_ok = answer.channel.as_ref().is_some_and(|c| {
+            lsps1::channel_verified(
+                &self.own_channels(),
+                &self.provider.node_id,
+                &c.funding_outpoint,
+                record.lsp_balance_sat,
+            )
+        });
+        match lsps1::next_step(record, seen, sent, channel_ok, now) {
             lsps1::Next::Wait => {}
-            lsps1::Next::MarkPaid => write(
+            lsps1::Next::MarkPaid(left_msat) => write(
                 self.orders
                     .change(|b| {
-                        b.paid(&record.payment_hash, now);
+                        b.if_current(record, |b| {
+                            b.paid(&record.payment_hash, left_msat, now);
+                        });
                     })
                     .await,
             ),
             lsps1::Next::Done => {
                 self.logger
                     .line(Level::Info, &format!("order {} done", record.id));
-                write(self.orders.change(|b| b.done(now)).await);
+                write(
+                    self.orders
+                        .change(|b| {
+                            b.if_current(record, |b| {
+                                b.done(now, None);
+                            });
+                        })
+                        .await,
+                );
             }
             lsps1::Next::Fail(why) => {
                 self.logger
                     .line(Level::Info, &format!("order {} over: {why:?}", record.id));
-                write(self.orders.change(|b| b.fail(why, now)).await);
+                write(
+                    self.orders
+                        .change(|b| {
+                            b.if_current(record, |b| b.fail(why, now, &me));
+                        })
+                        .await,
+                );
             }
             lsps1::Next::Pay => {
                 let plan = lsps1::judge_payment(
@@ -1687,7 +1784,11 @@ impl Shared {
                     Ok(_) => {
                         write(
                             self.orders
-                                .change(|b| b.fail(OrderWhy::NotPossible, now))
+                                .change(|b| {
+                                    b.if_current(record, |b| {
+                                        b.fail(OrderWhy::NotPossible, now, &me)
+                                    });
+                                })
                                 .await,
                         );
                         return;
@@ -1695,7 +1796,13 @@ impl Shared {
                     Err(r) => {
                         self.logger
                             .line(Level::Info, &format!("order {} not paid: {r:?}", record.id));
-                        write(self.orders.change(|b| b.fail(r.why(), now)).await);
+                        write(
+                            self.orders
+                                .change(|b| {
+                                    b.if_current(record, |b| b.fail(r.why(), now, &me));
+                                })
+                                .await,
+                        );
                         return;
                     }
                 };
@@ -1762,7 +1869,7 @@ impl Shared {
             .lsps2_client_handler()
             .ok_or_else(|| InvoiceError::Provider("no handler".into()))?;
         let (tx, rx) = oneshot::channel();
-        {
+        let id = {
             let mut waiters = self.waiters.lock_recover();
             let id = handler
                 .select_opening_params(
@@ -1771,12 +1878,12 @@ impl Shared {
                     offer.params.clone(),
                 )
                 .map_err(|e| InvoiceError::Provider(format!("{e:?}")))?;
-            waiters.insert(id, Waiter::Buy(tx));
-        }
-        tokio::time::timeout(PROVIDER_ANSWER, rx)
+            waiters.insert(id.clone(), Waiter::Buy(tx));
+            id
+        };
+        answer_within(&self.waiters, &id, rx, PROVIDER_ANSWER)
             .await
-            .map_err(|_| InvoiceError::Provider("no answer".into()))?
-            .map_err(|_| InvoiceError::Provider("refused".into()))
+            .ok_or_else(|| InvoiceError::Provider("no answer or refused".into()))
     }
 
     /// The invoice for an amount that opens a channel: the provider's
@@ -1851,7 +1958,7 @@ impl Shared {
 /// Hands each LSPS1 answer to the call that waits for it (SL-28).
 fn lsps1_event(shared: &Shared, event: LSPS1ClientEvent) {
     let provider = shared.provider.node_id;
-    let mut waiters = shared.waiters.lock().unwrap();
+    let mut waiters = shared.waiters.lock_recover();
     match event {
         LSPS1ClientEvent::SupportedOptionsReady {
             request_id,
@@ -1915,7 +2022,7 @@ async fn lsps1_task(shared: Arc<Shared>) {
             shared.ask_lsps1_options().await;
         }
         let options = {
-            let st = shared.lsps1.lock().unwrap();
+            let st = shared.lsps1.lock_recover();
             match (st.offer, &st.options) {
                 (lsps1::Offer::Offered, Some(o)) => Some(o.clone()),
                 _ => None,
@@ -2199,15 +2306,19 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
                 let _ = shared.paid.send(Paid::from(record));
             }
         }
-        Event::PaymentSent { payment_hash, .. } => {
+        Event::PaymentSent {
+            payment_hash,
+            amount_msat,
+            ..
+        } => {
             // The provider's invoice for room bought ahead is paid (SL-28);
-            // its fee counts with the opening fees paid (SL-29, SL-45). A
+            // what left counts with the opening fees paid (SL-29, SL-45). A
             // failure to keep it gives the event again.
             let now = now_secs();
             if let Err(e) = shared
                 .orders
                 .change(|b| {
-                    b.paid(&payment_hash.0, now);
+                    b.paid(&payment_hash.0, amount_msat, now);
                 })
                 .await
             {
@@ -2637,5 +2748,26 @@ mod tests {
             "039fe56192d9a44a06a725f975e5d7ccf307e023e2eab9a6bb5114ee8f69b6a9e9"
         );
         assert!(ids[0] != ids[1] && ids[1] != ids[2] && ids[0] != ids[2]);
+    }
+
+    #[tokio::test]
+    async fn sl_28_a_waiter_whose_answer_does_not_come_is_taken_out_of_the_map() {
+        let waiters = Mutex::new(HashMap::new());
+        let id = LSPSRequestId("r1".to_string());
+        let (tx, rx) = oneshot::channel();
+        waiters.lock().unwrap().insert(id.clone(), Waiter::Buy(tx));
+        let got = answer_within(&waiters, &id, rx, Duration::from_millis(20)).await;
+        assert_eq!(got, None);
+        assert!(waiters.lock().unwrap().is_empty());
+        // One that is answered gives the answer; the event takes its entry.
+        let id = LSPSRequestId("r2".to_string());
+        let (tx, rx) = oneshot::channel();
+        waiters.lock().unwrap().insert(id.clone(), Waiter::Buy(tx));
+        if let Some(Waiter::Buy(tx)) = waiters.lock().unwrap().remove(&id) {
+            tx.send((7, 8)).unwrap();
+        }
+        let got = answer_within(&waiters, &id, rx, Duration::from_secs(5)).await;
+        assert_eq!(got, Some((7, 8)));
+        assert!(waiters.lock().unwrap().is_empty());
     }
 }
