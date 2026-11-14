@@ -4506,8 +4506,6 @@ object AppModelTest {
         ok(screens.contains("sealed.wipe()") && screens.contains("FloatWords.rowTitle)"), "the data key is overwritten when the seal cannot be kept, and the unlock prompt is the float's own")
     }
 
-    }
-
     // ---- the owner's payment requests (docs/REQUEST-RULES.md, RQ-35, RQ-36) ------------------------------------------
 
     private fun day(y: Int, m: Int, d: Int) = RequestDay(y.toLong(), m.toLong(), d.toLong())

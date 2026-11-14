@@ -133,13 +133,25 @@ The labels of the card on Home and of the line on a started sale.
 ## The starter line's payments (CR-273, CR-274)
 
 The labels of the cards on Home and of the day's payments on
-Today. The words are not written yet.
+Today.
 
 | Key | Text |
 |---|---|
-| seen | WORDS_NEEDED_CR274_SEEN |
-| amount | WORDS_NEEDED_CR274_AMOUNT |
-| time | WORDS_NEEDED_CR274_TIME |
-| byOwner | WORDS_NEEDED_CR274_BY_OWNER |
-| notByOwner | WORDS_NEEDED_CR274_NOT_BY_OWNER |
-| today | WORDS_NEEDED_CR274_TODAY |
+| seen | Seen |
+| amount | Amount |
+| time | Time |
+| byOwner | Made on the owner phone |
+| notByOwner | Not made on the owner phone |
+| today | Payments from the starter wallet |
+
+## The Lightning key of Shop Lightning (SL-72, SL-76)
+
+The texts of the page that reads the stick's code.
+
+| Key | Text |
+|---|---|
+| bar | Lightning key |
+| scan | Scan the stick's code |
+| back | Back |
+| kept | Lightning key kept |
+| keptButton | Done |

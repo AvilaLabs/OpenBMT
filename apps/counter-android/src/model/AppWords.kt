@@ -724,15 +724,14 @@ object AppWords {
         out.append(
             "\n## The starter line's payments (CR-273, CR-274)\n\n" +
                 "The labels of the cards on Home and of the day's payments on\n" +
-                "Today. The words are not written yet.\n\n" +
+                "Today.\n\n" +
                 "| Key | Text |\n" +
                 "|---|---|\n",
         )
         for ((key, text) in WordsOfStarter.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         out.append(
             "\n## The Lightning key of Shop Lightning (SL-72, SL-76)\n\n" +
-                "The texts of the page that reads the stick's code. Every one is a\n" +
-                "placeholder until it is written.\n\n" +
+                "The texts of the page that reads the stick's code.\n\n" +
                 "| Key | Text |\n" +
                 "|---|---|\n",
         )

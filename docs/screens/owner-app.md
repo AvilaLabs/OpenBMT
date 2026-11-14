@@ -591,7 +591,7 @@ core's own words, which the binding does not carry yet:
 | SS35_LIMIT_LABEL | Most it may hold |
 | SS35_PRICE_LABEL | Price of one bitcoin |
 | SS35_DATE_LABEL | Move to a key made offline by |
-| SS32_BOX_ONLY | WORDS_NEEDED_OA_SS32_BOX_ONLY |
+| SS32_BOX_ONLY | Payments from the starter wallet show on the counters only once the shop has a Box. Until then, this phone alone shows them. |
 | SS38_STOP_LABEL | Stop bitcoin sales above my limit |
 | SS35_LIMIT_INVALID | Type the most the starter wallet may hold, as a whole number. |
 | SS35_DATE_INVALID | Type a date after today. |
@@ -823,3 +823,78 @@ is in `crates/openbmt-owner/src/web_order/say.rs`:
 | unpairWhat | This phone stops taking the store's orders. Unpair it in the store's settings too, so that it stops offering bitcoin at checkout. |
 | unpairConfirm | Unpair |
 | unpairKeep | Addresses already given to the store stay watched, so a late payment is still seen. |
+
+Shop Lightning (`docs/SHOP-LIGHTNING-RULES.md`, SL-04 to SL-78), in
+`ShopLightningWords`. What the library says of a refusal is the
+library's own:
+
+| Key | Text |
+|---|---|
+| rowTitle | Shop Lightning |
+| rowSubOff | Off: Lightning payments on one of the shop's counters |
+| rowSubOn | On: one counter takes Lightning payments |
+| pageTitle | Lightning on a counter |
+| back | Back |
+| whatItIs | One of the shop's counters takes Lightning payments with a node of its own. The shop's Box keeps a second copy of the node's state, a provider the shop picks opens its channels, and money above a cap moves to the shop's wallet. |
+| noBox | Shop Lightning needs the shop's Box, which keeps the second copy of the node's state. Add a Box first. |
+| ownWallet | For a shop paid to its own wallet, Shop Lightning cannot be turned on from this phone yet. |
+| turnOn | Turn on |
+| stepOf | Step {n} of {of} |
+| counterTitle | Pick the Lightning counter |
+| counterWhat | Lightning is taken on this counter only, and it holds the node's key. Pick one that stays at the shop. |
+| noCounters | The shop has no counter yet. Add a counter first. |
+| nodeTitle | Scan the node's ID |
+| nodeWhat | On the stick that holds the Lightning key, choose to show the ID of Shop Lightning's node, then scan the code it shows. |
+| scanNode | Scan the ID |
+| nodeScanned | Check that its start and its end are the ones the stick shows. |
+| nodeNotId | Not a node's ID |
+| nodeScanCancelled | ID scan cancelled |
+| providerTitle | Pick a provider |
+| providerWhat | A liquidity provider opens the channels that payments arrive in, for a fee. The shop picks any provider that offers LSPS2 and can change it at any time. Copy its node ID and its address from its own page. |
+| providerKeyLabel | Provider's node ID |
+| providerAddrLabel | Provider's address, IP and port |
+| providerMissing | Provider not complete |
+| limitsTitle | Set the limits |
+| capLabel | Cap, in sats |
+| capWhat | The most the node holds. Above it, everything over half the cap moves to the shop's wallet. One day of Lightning sales is a good start. |
+| feeLabel | Most for one opening, in sats |
+| feeWhat | A payment that needs a new channel costs the provider's fee, shown before the invoice is made. A sale whose opening costs more than this is paid on-chain instead. |
+| numberInvalid | Not a whole number |
+| next | Next |
+| approveTitle | Check the change |
+| approveFree | This change only tightens the settings, so it needs no approval from the Key app. |
+| approveLoosen | This change loosens the settings, so the Key app must approve it. |
+| approveRedirect | This change sends payments somewhere new, so the Key app must approve it. |
+| nothingChanged | These are the settings already in force, so there is nothing to change. |
+| queue | Queue the change |
+| queuedKeyApp | The change is queued. It takes effect once the Key app approves it. |
+| queuedDone | The change is queued and goes to the counters at their next check-in. |
+| buildRequest | Make the request for the Key app |
+| later | Later |
+| onTitle | Shop Lightning is on |
+| counterLabel | Lightning counter |
+| nodeLabel | Node's ID |
+| balanceLabel | Balance and cap |
+| roomLabel | Room to receive |
+| providerLabel | Provider |
+| feesPaidLabel | Opening fees paid |
+| boxLabel | Second copy on |
+| lastStoredLabel | Last stored |
+| neverStored | Not yet |
+| lastSweepLabel | Last move to the wallet |
+| noSweep | None yet |
+| cameLabel | Report from the counter |
+| noReport | No report yet |
+| whyLabel | Lightning now |
+| offered | Offered |
+| secondDeviceAway | Not offered: the Box cannot be reached |
+| chainBehind | Not offered: the counter is behind the chain |
+| noUsableChannel | Not offered: no channel can take a payment |
+| providerSilent | Not offered: the provider does not answer |
+| changeLimits | Change the limits |
+| changeProvider | Change the provider |
+| save | Save |
+| turnOff | Turn off |
+| turnOffWhat | Turning Shop Lightning off closes every channel of the node. Their money goes to the shop's wallet once the closes confirm, and the counter then deletes the Lightning key. Sales go on, paid on-chain. |
+| turnOffConfirm | Turn off and close the channels |
+| turnOffKeep | Keep it on |
