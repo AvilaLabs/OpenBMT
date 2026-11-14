@@ -235,6 +235,12 @@ pub fn refused_payments() -> Vec<(&'static str, Vec<u8>)> {
                 p.unsigned_tx.output[0].value = Amount::from_sat(900_000);
             }),
         ),
+        (
+            "NoPreviousTransaction",
+            change(&|p| {
+                p.inputs[1].non_witness_utxo = None;
+            }),
+        ),
     ]
 }
 

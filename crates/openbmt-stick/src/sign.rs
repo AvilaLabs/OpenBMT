@@ -42,6 +42,9 @@ pub enum Refusal {
     NotMainnet,
     /// An input lacks its previous output.
     NoPrevout(usize),
+    /// An input carries only its previous output alone, not the full
+    /// previous transaction: its amount could be a lie (SK-54).
+    NoPreviousTransaction(usize),
     /// An input's two previous outputs (full transaction and output alone)
     /// disagree, or the full transaction is not the one the input spends.
     PrevoutMismatch(usize),
@@ -133,26 +136,30 @@ fn script_of(key: &secp256k1::PublicKey) -> ScriptBuf {
     ScriptBuf::new_p2wpkh(&CompressedPublicKey(*key).wpubkey_hash())
 }
 
-/// The previous output of input `i`, from the file, checked against itself.
+/// The previous output of input `i`: its amount comes only from the full
+/// previous transaction, which must hash to the outpoint's txid; the output
+/// alone, when it is there too, must be the same (SK-54).
 fn prevout(psbt: &Psbt, i: usize) -> Result<TxOut, Refusal> {
     let txin = psbt.unsigned_tx.input.get(i).ok_or(Refusal::NotAPsbt)?;
     let input = psbt.inputs.get(i).ok_or(Refusal::NotAPsbt)?;
-    let full = match &input.non_witness_utxo {
-        Some(tx) => {
-            if tx.compute_txid() != txin.previous_output.txid {
-                return Err(Refusal::PrevoutMismatch(i));
-            }
-            let vout =
-                usize::try_from(txin.previous_output.vout).map_err(|_| Refusal::NoPrevout(i))?;
-            Some(tx.output.get(vout).ok_or(Refusal::NoPrevout(i))?.clone())
-        }
-        None => None,
+    let Some(tx) = &input.non_witness_utxo else {
+        // An amount from the output alone is not enough: a segwit v0
+        // signature commits only to its own input's amount, so two files
+        // with different amounts could be combined (SK-54).
+        return Err(if input.witness_utxo.is_some() {
+            Refusal::NoPreviousTransaction(i)
+        } else {
+            Refusal::NoPrevout(i)
+        });
     };
-    match (full, &input.witness_utxo) {
-        (Some(a), Some(b)) if a != *b => Err(Refusal::PrevoutMismatch(i)),
-        (Some(a), _) => Ok(a),
-        (None, Some(b)) => Ok(b.clone()),
-        (None, None) => Err(Refusal::NoPrevout(i)),
+    if tx.compute_txid() != txin.previous_output.txid {
+        return Err(Refusal::PrevoutMismatch(i));
+    }
+    let vout = usize::try_from(txin.previous_output.vout).map_err(|_| Refusal::NoPrevout(i))?;
+    let out = tx.output.get(vout).ok_or(Refusal::NoPrevout(i))?;
+    match &input.witness_utxo {
+        Some(b) if b != out => Err(Refusal::PrevoutMismatch(i)),
+        _ => Ok(out.clone()),
     }
 }
 

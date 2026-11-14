@@ -632,6 +632,7 @@ fn expected_refusal(name: &str) -> Refusal {
         "KeyMismatch" => Refusal::KeyMismatch(0),
         "SighashNotAll" => Refusal::SighashNotAll(1),
         "OutputsExceedInputs" => Refusal::OutputsExceedInputs,
+        "NoPreviousTransaction" => Refusal::NoPreviousTransaction(1),
         other => panic!("{other}"),
     }
 }
@@ -645,7 +646,7 @@ fn sk_54_the_good_payment_passes() {
 fn sk_54_each_refusal_names_why_one_by_one() {
     let master = common::master();
     let cases = common::refused_payments();
-    assert_eq!(cases.len(), 10);
+    assert_eq!(cases.len(), 11);
     for (name, bytes) in cases {
         let got = prepare(&bytes, &master).map(|_| ()).unwrap_err();
         assert_eq!(got, expected_refusal(name), "{name}");
@@ -729,6 +730,7 @@ fn sk_54_the_screen_names_each_refusal_and_its_input() {
         words::SK_54_KEY_MISMATCH,
         words::SK_54_NOT_SIGHASH_ALL,
         words::SK_54_OUTPUTS_EXCEED,
+        words::SK_54_NO_PREVIOUS_TX,
     ];
     for ((name, bytes), reason) in common::refused_payments().into_iter().zip(want) {
         let mut a = scanned(&bytes, Form::Ur);
@@ -883,6 +885,34 @@ fn sk_55_more_than_three_outputs_take_pages() {
     assert!(second.contains(words::SK_55_SENT));
     a.key(Key::Up);
     assert_eq!(text(&a), first);
+}
+
+#[test]
+fn sk_54_an_amount_from_the_output_alone_is_refused_and_the_whole_transaction_signs() {
+    let master = common::master();
+    // Only witness_utxo on an input: refused, whichever input it is.
+    for i in 0..2 {
+        let mut p = common::payment();
+        assert!(p.inputs[i].witness_utxo.is_some());
+        p.inputs[i].non_witness_utxo = None;
+        assert_eq!(
+            prepare(&p.serialize(), &master).map(|_| ()).unwrap_err(),
+            Refusal::NoPreviousTransaction(i)
+        );
+    }
+    // The same payment with the whole previous transactions signs.
+    let p = common::payment();
+    assert!(p.inputs.iter().all(|i| i.non_witness_utxo.is_some()));
+    prepare(&p.serialize(), &master)
+        .unwrap()
+        .sign(&master)
+        .unwrap();
+    // The whole transaction alone (no witness_utxo) also signs.
+    let mut q = common::payment();
+    for i in &mut q.inputs {
+        i.witness_utxo = None;
+    }
+    prepare(&q.serialize(), &master).unwrap();
 }
 
 #[test]

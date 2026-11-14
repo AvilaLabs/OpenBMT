@@ -343,6 +343,7 @@ impl<C: Chance> App<C> {
                     Refusal::NotAPsbt => (SK_52_BAD_FILE, None),
                     Refusal::NotMainnet => (SK_54_NOT_MAINNET, None),
                     Refusal::NoPrevout(i) => (SK_54_NO_PREVOUT, Some(*i)),
+                    Refusal::NoPreviousTransaction(i) => (SK_54_NO_PREVIOUS_TX, Some(*i)),
                     Refusal::PrevoutMismatch(i) => (SK_54_PREVOUT_MISMATCH, Some(*i)),
                     Refusal::NoPath(i) => (SK_54_NO_PATH, Some(*i)),
                     Refusal::OtherWallet(i) => (SK_54_OTHER_WALLET, Some(*i)),

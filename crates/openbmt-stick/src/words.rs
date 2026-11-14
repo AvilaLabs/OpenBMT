@@ -169,6 +169,9 @@ pub const SK_54_INPUT: &str = "Coin number";
 pub const SK_54_NOT_MAINNET: &str = "It is for a test network, not real bitcoin.";
 /// Refused: an input lacks its previous output (SK-54).
 pub const SK_54_NO_PREVOUT: &str = "It does not say what one of its coins holds.";
+/// Refused: an input carries its previous output alone, without the whole previous transaction (SK-54).
+pub const SK_54_NO_PREVIOUS_TX: &str =
+    "WORDS_NEEDED: the payment gives only the amount of one of its coins, not the whole earlier transaction that made it, so the amount cannot be trusted";
 /// Refused: an input's previous outputs disagree (SK-54).
 pub const SK_54_PREVOUT_MISMATCH: &str = "It says two different things about one of its coins.";
 /// Refused: an input lacks its key path (SK-54).
@@ -283,6 +286,7 @@ pub const ALL: &[&str] = &[
     SK_54_INPUT,
     SK_54_NOT_MAINNET,
     SK_54_NO_PREVOUT,
+    SK_54_NO_PREVIOUS_TX,
     SK_54_PREVOUT_MISMATCH,
     SK_54_NO_PATH,
     SK_54_OTHER_WALLET,
