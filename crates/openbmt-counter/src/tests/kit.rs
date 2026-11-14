@@ -415,10 +415,11 @@ impl World {
     /// Open a sale of `cents` dollars-cents at the test rate.
     pub fn open(&mut self, cents: u64) -> Opened {
         let facts = self.open_facts();
+        let currency = self.c.settings().currency;
         self.c
             .open(
                 Amount(cents),
-                usd(),
+                Currency::of_shop(currency),
                 rate(),
                 &fresh(facts.now),
                 facts,

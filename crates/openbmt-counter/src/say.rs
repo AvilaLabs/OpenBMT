@@ -17,6 +17,7 @@
 use std::fmt::Display;
 
 use openbmt_core::command::CommandError;
+use openbmt_core::currency::ShopCurrency;
 use openbmt_core::heartbeat::HeartbeatError;
 use openbmt_core::policy::{CheckMode, InstantLabel, OffReason, WaitReason};
 use openbmt_core::say::{sats, Quoted, Tone, Who, Words};
@@ -26,6 +27,7 @@ use openbmt_watch::Problem;
 use crate::bill_say::all_bill_words;
 use crate::desk::Role;
 use crate::heartbeat::{HeartbeatView, NotVerified};
+use crate::money::Currency;
 use crate::refund::{RefundState, RefundView};
 use crate::refusal::{
     BatchTakeRefused, BlockError, CancelRefused, CommandRefused, DestinationRefused,
@@ -47,6 +49,10 @@ const CHECK_AMOUNT_NEXT: &str = "Check the amount and enter it again.";
 /// The goods stay, another kind of payment is taken, and the owner is told.
 const OTHER_PAYMENT_NEXT: &str =
     "Take another kind of payment. Tell the owner: the counter cannot check payments.";
+
+/// CR-196: the words of a sale named in another currency than the shop's
+/// are not written yet (CR-271).
+const WRONG_CURRENCY_WORDS: &str = "WORDS_NEEDED_CR196_WRONG_CURRENCY";
 
 /// Words for a refusal: nothing happened, so the tone is neutral.
 pub(crate) fn refused(
@@ -581,6 +587,13 @@ impl<E: Display> OpenRefused<E> {
                 Who::Cashier,
                 "Take another kind of payment and tell the owner: a payment code was used twice.",
                 "CR-02",
+            ),
+            Self::WrongCurrency { .. } => refused(
+                WRONG_CURRENCY_WORDS,
+                WRONG_CURRENCY_WORDS,
+                Who::Cashier,
+                WRONG_CURRENCY_WORDS,
+                "CR-196",
             ),
             Self::BadName => refused(
                 "Sale not opened",
@@ -2047,6 +2060,13 @@ pub fn all_words() -> Vec<(String, Words)> {
     let w = write_fault;
     let open: Vec<(&str, OpenRefused<String>)> = vec![
         ("Removed", OpenRefused::Removed),
+        (
+            "WrongCurrency",
+            OpenRefused::WrongCurrency {
+                shop: Currency::of_shop(ShopCurrency::Eur),
+                named: Currency::of_shop(ShopCurrency::Usd),
+            },
+        ),
         ("RescanPending", OpenRefused::RescanPending),
         ("Unhealthy", OpenRefused::Unhealthy(Some(Problem::TipIsOld))),
         ("ZeroAmount", OpenRefused::ZeroAmount),

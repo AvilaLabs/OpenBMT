@@ -38,6 +38,10 @@ fn world_in(currency: ShopCurrency) -> World {
     w
 }
 
+fn sat() -> Currency {
+    Currency::of_shop(ShopCurrency::Sats)
+}
+
 fn opened_event(w: &World) -> Event {
     w.m.events()
         .into_iter()
@@ -46,13 +50,13 @@ fn opened_event(w: &World) -> Event {
 }
 
 #[test]
-fn cr_196_a_sale_is_in_the_currency_of_the_settings_whatever_the_caller_says() {
+fn cr_196_a_sale_is_in_the_currency_of_the_settings() {
     for currency in ShopCurrency::ALL {
         if currency.is_sats() {
             continue;
         }
         let mut w = world_in(currency);
-        // The caller says dollars: the sale is in the shop's currency.
+        // The caller names the shop's currency: the sale is in it.
         let o = w.open_five();
         let want = Currency::of_shop(currency);
         assert_eq!(w.c.sale(o.index).unwrap().currency(), want);
@@ -95,7 +99,7 @@ fn cr_197_bitcoin_standard_prices_the_amount_as_its_own_satoshis() {
     let facts = w.open_facts();
     let stale = RateSource::new("test-fixed", 1).unwrap();
     let o =
-        w.c.open(Amount(5_000), usd(), rate(), &stale, facts, &mut w.m)
+        w.c.open(Amount(5_000), sat(), rate(), &stale, facts, &mut w.m)
             .expect("a sale opens with no price");
     assert_eq!(o.needs_sats, 5_000);
     assert_eq!(o.quote.rate, Rate::sats());
@@ -143,7 +147,7 @@ fn cr_197_the_dust_line_and_the_floor_still_apply_in_satoshis() {
     let err =
         w.c.open(
             Amount(400),
-            usd(),
+            sat(),
             rate(),
             &fresh(facts.now),
             facts,
@@ -158,7 +162,7 @@ fn cr_197_the_dust_line_and_the_floor_still_apply_in_satoshis() {
     let err =
         w.c.open(
             Amount(1_999),
-            usd(),
+            sat(),
             rate(),
             &fresh(facts.now),
             facts,
@@ -197,4 +201,58 @@ fn cr_197_a_new_quote_in_bitcoin_standard_is_the_amount_again() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+#[test]
+fn cr_196_a_sale_named_in_another_currency_than_the_settings_is_refused() {
+    // The settings are in dollars; the caller names euros.
+    let mut w = World::new();
+    let eur = Currency::new(*b"EUR").unwrap();
+    let facts = w.open_facts();
+    let err =
+        w.c.open(
+            Amount(5_000),
+            eur,
+            rate(),
+            &fresh(facts.now),
+            facts,
+            &mut w.m,
+        )
+        .unwrap_err();
+    assert_eq!(
+        err,
+        OpenRefused::WrongCurrency {
+            shop: usd(),
+            named: eur
+        }
+    );
+    assert_eq!(err.rule(), "CR-196");
+    // Nothing was written and no address was handed out.
+    assert!(w
+        .m
+        .events()
+        .iter()
+        .all(|e| !matches!(e, Event::Opened { .. })));
+    assert!(w.c.sale(0).is_none());
+    // A shop in Bitcoin Standard refuses a fiat name, and takes its own.
+    let mut w = world_in(ShopCurrency::Sats);
+    let facts = w.open_facts();
+    let err =
+        w.c.open(
+            Amount(5_000),
+            usd(),
+            rate(),
+            &fresh(facts.now),
+            facts,
+            &mut w.m,
+        )
+        .unwrap_err();
+    assert_eq!(
+        err,
+        OpenRefused::WrongCurrency {
+            shop: sat(),
+            named: usd()
+        }
+    );
+    w.open(5_000);
 }

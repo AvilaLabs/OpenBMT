@@ -61,6 +61,7 @@ by hand. To write it again, run the test
 | TillDropped::Known | Till request already here | The till asked again for a sale this counter already has. | Nothing to do: the sale on this counter goes on. | the cashier | CR-266 |
 | TillStartRefused::NotWaiting | Till request no longer here | The till cancelled this request, or its time ran out, before Start. | Ask the till to send it again, or type the sale on this counter. | the cashier | CR-266 |
 | OpenRefused::Removed | This counter was removed | The owner removed this counter from the shop, so it cannot start a sale. | Take another kind of payment. Ask the owner: this counter is no longer on the shop's list. | the cashier | CR-165 |
+| OpenRefused::WrongCurrency | WORDS_NEEDED_CR196_WRONG_CURRENCY | WORDS_NEEDED_CR196_WRONG_CURRENCY | WORDS_NEEDED_CR196_WRONG_CURRENCY | the cashier | CR-196 |
 | OpenRefused::RescanPending | Bitcoin not ready yet | The counter is still looking back over the network for payments, so it cannot start a bitcoin sale. | Take another kind of payment. Tell the owner: the counter is still catching up. | the cashier | CR-09 |
 | OpenRefused::Unhealthy | Cannot take bitcoin now | This counter cannot check payments right now. | Take another kind of payment. Tell the owner: the counter cannot check payments. | the cashier | CR-01 |
 | OpenRefused::ZeroAmount | Sale needs an amount | The sale has no amount, so no payment code was made. | Enter the amount and start the sale again. | the cashier | CR-05 |

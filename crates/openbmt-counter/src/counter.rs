@@ -1515,8 +1515,8 @@ impl Counter {
     /// [`crate::MAX_RATE_AHEAD_SECS`] after it, is refused (CR-58), with nothing
     /// written.
     ///
-    /// CR-196: the sale is in the currency of the settings in force, whatever
-    /// `currency` says. With Bitcoin Standard (CR-197) the amount is in
+    /// CR-196: the sale is in the currency of the settings in force; a
+    /// `currency` that is another is refused. With Bitcoin Standard (CR-197) the amount is in
     /// satoshis, `rate` and `source` are not read, and the sale is quoted at
     /// the amount and records the source `sats`.
     pub fn open<S: Store>(
@@ -1618,7 +1618,7 @@ impl Counter {
         &mut self,
         amount: Amount,
         tip: Amount,
-        _currency: Currency,
+        currency: Currency,
         rate: Rate,
         source: &RateSource,
         facts: OpenFacts,
@@ -1627,7 +1627,7 @@ impl Counter {
         store: &mut S,
     ) -> Result<Opened, OpenRefused<S::Error>> {
         self.open_sale(
-            amount, tip, _currency, rate, source, facts, by, extras, None, store,
+            amount, tip, currency, rate, source, facts, by, extras, None, store,
         )
     }
 
@@ -1640,7 +1640,7 @@ impl Counter {
         &mut self,
         amount: Amount,
         tip: Amount,
-        _currency: Currency,
+        named: Currency,
         rate: Rate,
         source: &RateSource,
         facts: OpenFacts,
@@ -1662,6 +1662,12 @@ impl Counter {
         // CR-196, CR-197: the currency is the settings'; Bitcoin Standard
         // has no price, so the rate and its source are the satoshi's own.
         let currency = Currency::of_shop(self.settings.currency);
+        if named != currency {
+            return Err(OpenRefused::WrongCurrency {
+                shop: currency,
+                named,
+            });
+        }
         let (rate, source) = self.priced_at(rate, source, now);
         let source = &source;
         if !self.is_listed() {

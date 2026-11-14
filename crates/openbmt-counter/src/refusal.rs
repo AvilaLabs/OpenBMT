@@ -16,6 +16,7 @@ use openbmt_core::records::ChainError;
 use openbmt_core::wire::DecodeError;
 use openbmt_watch::{Problem, Refusal};
 
+use crate::money::Currency;
 use crate::screen::{problem_text, State};
 use crate::store::StoreFault;
 
@@ -25,6 +26,13 @@ pub enum OpenRefused<E> {
     /// CR-165: the settings in force do not list this counter: the owner
     /// removed it from the shop.
     Removed,
+    /// CR-196: the currency named is not the one of the settings in force.
+    WrongCurrency {
+        /// The currency of the settings in force.
+        shop: Currency,
+        /// The currency the caller named.
+        named: Currency,
+    },
     /// CR-09: a rescan is pending after a restore or a reset.
     RescanPending,
     /// CR-01: the check is not healthy; the problem is named when known.
@@ -113,6 +121,7 @@ impl<E> OpenRefused<E> {
     pub fn rule(&self) -> &'static str {
         match self {
             Self::Removed => "CR-165",
+            Self::WrongCurrency { .. } => "CR-196",
             Self::RescanPending => "CR-09",
             Self::Unhealthy(_) => "CR-01",
             Self::ZeroAmount | Self::AmountTooLarge => "CR-05",
@@ -138,6 +147,10 @@ impl<E: fmt::Display> fmt::Display for OpenRefused<E> {
             Self::Removed => write!(
                 f,
                 "this counter was removed from the shop by the owner; ask the owner"
+            ),
+            Self::WrongCurrency { shop, named } => write!(
+                f,
+                "the shop's settings price in {shop}, not {named}; a sale is in the shop's currency"
             ),
             Self::RescanPending => write!(
                 f,
