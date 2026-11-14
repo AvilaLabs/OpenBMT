@@ -1771,11 +1771,15 @@ own, as the driver of section 12 has none.
   transaction that pays its script too little, the sale is still taken back
   (CR-221), and the shop claims that output all the same, at the starting
   rate, past the timeout too, if the claim passes SW-41; the sale is not paid
-  by it, and its money reaches the sale's address. The node tells the sale the
-  newest claim's amount. A claim still unconfirmed `MIN_CLAIM_BLOCKS / 2`
-  blocks before the timeout is told to the owner (words "Lightning claim
-  waiting"). The swap is done when the shop's own claim, or an earlier one it
-  built, is at the shop's refund depth (SW-72, SW-75).
+  by it, and its money reaches the sale's address. The loss stands while that
+  transaction is in a block, through a reorg of the block it was first in too,
+  and that claim is sent again and built again as any claim, after the swap is
+  lost too, until it or another spend of that output is in a block. After a
+  restart, such a transaction the counter holds in a block is claimed as well.
+  The node tells the sale the newest claim's amount. A claim still unconfirmed
+  `MIN_CLAIM_BLOCKS / 2` blocks before the timeout is told to the owner (words
+  "Lightning claim waiting"). The swap is done when the shop's own claim, or
+  an earlier one it built, is at the shop's refund depth (SW-72, SW-75).
 - **CR-223.** A swap that fails before the claim (the invoice ran out, the
   provider could not lock, the lockup is refused by SW-30, the provider took
   it back, the timeout) leaves the sale unpaid and shows "Lightning payment
