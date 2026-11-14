@@ -1424,7 +1424,12 @@ impl<P: OwnerPort> OwnerNode<P> {
                 self.view.checked()
             )));
         }
-        let retained = self.view.retained_confirmations();
+        // A paid refund of a former wallet can be reopened by that wallet's
+        // view too, so what any view still retains is kept.
+        let mut retained = self.view.retained_confirmations();
+        for f in &self.former {
+            retained.extend(f.view.retained_confirmations());
+        }
         let dir = self.dir.clone();
         self.owner
             .archive_paid(&retained, |b| write_file(&dir, QUEUE_FILE, b))
@@ -2628,7 +2633,12 @@ impl<P: OwnerPort> OwnerNode<P> {
         // A transaction that was paid and then reorged is present in the
         // view's pending set even if the UI already archived its rows and its
         // outbox record. The view's undo record is the durable signed source.
-        let pending: Vec<Transaction> = self.view.pending().map(|p| p.tx.clone()).collect();
+        let pending: Vec<Transaction> = self
+            .view
+            .pending()
+            .chain(self.former.iter().flat_map(|f| f.view.pending()))
+            .map(|p| p.tx.clone())
+            .collect();
         for tx in pending {
             let txid = tx.compute_txid();
             if self.states.contains_key(&txid) {
@@ -3421,12 +3431,16 @@ impl<P: OwnerPort> OwnerNode<P> {
         self.forget_fee_samples_from(fork.saturating_add(1), left);
         let dir = self.dir.clone();
         let mut notes = Vec::new();
+        let mut former_reopened = Vec::new();
         for f in &mut self.former {
-            if let Err(e) = f
+            match f
                 .view
                 .reorganize(left, fork, |b| write_file(&dir, &f.file, b))
             {
-                notes.push(format!("a former wallet's view could not be stored: {e}"));
+                // OC-47: what a former wallet's block confirmed is reopened
+                // the same way as the current wallet's.
+                Ok(effect) => former_reopened.extend(effect.reopened),
+                Err(e) => notes.push(format!("a former wallet's view could not be stored: {e}")),
             }
         }
         for line in notes {
@@ -3436,7 +3450,8 @@ impl<P: OwnerPort> OwnerNode<P> {
             .view
             .reorganize(left, fork, |b| write_file(&dir, COINS_FILE, b))
         {
-            Ok(effect) => {
+            Ok(mut effect) => {
+                effect.reopened.extend(former_reopened);
                 self.starter_note_reorg(fork);
                 // RQ-37: the requests undo the same blocks, before the facts
                 // of the queued refunds are worked out again.
@@ -3466,9 +3481,12 @@ impl<P: OwnerPort> OwnerNode<P> {
             Err(e) => self.note(format!("the refunds' facts wait to be refreshed: {e}")),
         }
         for txid in effect.reopened {
+            // The transaction is in the view of the wallet that confirmed it:
+            // the current one or a former one.
             let tx = self
                 .view
                 .pending()
+                .chain(self.former.iter().flat_map(|f| f.view.pending()))
                 .find(|p| p.tx.compute_txid() == txid)
                 .map(|p| p.tx.clone());
             let Some(tx) = tx else {

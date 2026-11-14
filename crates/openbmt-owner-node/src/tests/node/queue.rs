@@ -38,12 +38,13 @@ struct Retiring {
 
 fn retiring(dir: &Dir) -> Retiring {
     let mut rig = start(dir, &old_setup()).unwrap();
+    let sale = sale(1);
     let write = rig.node.queue_writer();
     rig.node
         .owner_mut()
         .unwrap()
         .set_sale_facts(
-            sale(1),
+            sale,
             SaleFacts {
                 received_sats: 50_000,
                 reached_refund_depth: true,
@@ -51,8 +52,8 @@ fn retiring(dir: &Dir) -> Retiring {
             &write,
         )
         .unwrap();
-    let queued = queue_refund_to(&mut rig, 9);
-    let paid = queue_refund_to(&mut rig, 10);
+    let queued = queue_refund_to(&mut rig, sale, 9);
+    let paid = queue_refund_to(&mut rig, sale, 10);
     // The wallet's coin, and the sale's payment in the same transaction.
     let fund = tx_from(
         OutPoint::new(Txid::from_byte_array([7; 32]), 0),
@@ -80,12 +81,12 @@ fn retiring(dir: &Dir) -> Retiring {
     Retiring { rig, queued }
 }
 
-fn queue_refund_to(rig: &mut Rig, to: u8) -> u32 {
+fn queue_refund_to(rig: &mut Rig, sale: SaleKey, to: u8) -> u32 {
     let write = rig.node.queue_writer();
     rig.node
         .owner_mut()
         .unwrap()
-        .queue_refund(sale(1), "Mia", external(to), 10_000, None, &write)
+        .queue_refund(sale, "Mia", external(to), 10_000, None, &write)
         .unwrap()
 }
 
@@ -187,7 +188,7 @@ fn ss_41_n13f_03_the_repin_waits_while_another_starter_transaction_is_unconfirme
     let dir = Dir::new();
     let mut retired = retiring(&dir);
     // A refund's transaction is handed to the outbox and no block holds it.
-    let third = queue_refund_to(&mut retired.rig, 11);
+    let third = queue_refund_to(&mut retired.rig, sale(1), 11);
     let coin = tx_from(
         OutPoint::new(Txid::from_byte_array([9; 32]), 0),
         &[(&old_script(2), 100_000)],
@@ -240,4 +241,139 @@ fn ss_41_n13f_03_a_queue_of_another_wallet_is_still_refused_at_start() {
     std::fs::write(dir.path().join(QUEUE_FILE), foreign.snapshot().unwrap()).unwrap();
     let error = start_at(&dir, &former_setup(), chain).err().unwrap();
     assert!(error.to_string().contains("another wallet"), "{error}");
+}
+
+/// The shop after its re-pin, started again with the queue it held before:
+/// the node follows the wallet replaced as a former wallet.
+fn repinned(dir: &Dir) -> (Rig, u32) {
+    let mut retired = retiring(dir);
+    retired.rig.node.rebind_queue(single()).unwrap();
+    retired.rig.node.mark_repinned(single());
+    let chain = retired.rig.chain.clone();
+    let queued = retired.queued;
+    drop(retired.rig);
+    rotate_view(dir);
+    (start_at(dir, &former_setup(), chain).unwrap(), queued)
+}
+
+/// The chain above `kept` blocks is replaced by `more` others, the driver
+/// telling the node of each.
+fn replace_above(rig: &mut Rig, kept: usize, more: u32) {
+    let left: Vec<BlockHash> = rig.chain[kept..]
+        .iter()
+        .rev()
+        .map(Block::block_hash)
+        .collect();
+    let first = u32::try_from(kept).unwrap() + 1;
+    let mut branch = Vec::new();
+    let mut prev = rig.chain[kept - 1].block_hash();
+    for height in first..first + more {
+        let block = mine(prev, height, height + 100, &[]);
+        prev = block.block_hash();
+        branch.push(block);
+    }
+    let joined = branch
+        .iter()
+        .enumerate()
+        .map(|(i, block)| (first + u32::try_from(i).unwrap(), block.block_hash()))
+        .collect();
+    rig.chain.truncate(kept);
+    rig.chain.extend(branch.iter().cloned());
+    rig.feed(vec![AppEvent::Chain { joined, left }]);
+    for (i, block) in branch.iter().enumerate() {
+        rig.deliver(vec![
+            AppEvent::Block {
+                hash: block.block_hash(),
+                bytes: serialize(block),
+            },
+            AppEvent::Checked(first + u32::try_from(i).unwrap()),
+        ]);
+    }
+}
+
+#[test]
+fn oc_47_a_reorg_in_a_former_wallets_view_reopens_the_refund_it_paid() {
+    let dir = Dir::new();
+    let (mut rig, _queued) = repinned(&dir);
+    let paid = rig
+        .node
+        .owner()
+        .refunds()
+        .iter()
+        .find_map(|r| match r.stage {
+            Stage::Paid { txid } => Some((r.id, txid)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(rig.node.owner().outbox().len(), 1);
+    // The block that holds the payment leaves the chain.
+    let at = rig
+        .chain
+        .iter()
+        .position(|b| b.txdata.iter().any(|t| t.compute_txid() == paid.1))
+        .unwrap();
+    let len = u32::try_from(rig.chain.len()).unwrap();
+    replace_above(&mut rig, at, len - u32::try_from(at).unwrap() + 1);
+    let stage = |rig: &Rig| {
+        rig.node
+            .owner()
+            .refunds()
+            .iter()
+            .find(|r| r.id == paid.0)
+            .map(|r| r.stage.clone())
+    };
+    assert_eq!(stage(&rig), Some(Stage::Sent { txid: paid.1 }));
+    assert!(rig.txids().contains(&paid.1));
+    assert!(rig.node.send_state(&paid.1).is_some());
+}
+
+#[test]
+fn oc_47_what_left_a_former_wallets_view_while_the_node_was_stopped_reopens_the_refund_at_start() {
+    let dir = Dir::new();
+    let (rig, _queued) = repinned(&dir);
+    let paid = rig
+        .node
+        .owner()
+        .refunds()
+        .iter()
+        .find_map(|r| match r.stage {
+            Stage::Paid { txid } => Some((r.id, txid)),
+            _ => None,
+        })
+        .unwrap();
+    let old = rig.chain.clone();
+    drop(rig);
+    // The chain the driver saved has none of the blocks from the payment on.
+    let at = old
+        .iter()
+        .position(|b| b.txdata.iter().any(|t| t.compute_txid() == paid.1))
+        .unwrap();
+    let mut new: Vec<Block> = old[..at].to_vec();
+    for height in at..=old.len() + 1 {
+        let prev = new.last().unwrap().block_hash();
+        new.push(mine(prev, u32::try_from(height).unwrap() + 1, 77, &[]));
+    }
+    let rig = start_at(&dir, &former_setup(), new).unwrap();
+    let stage = rig
+        .node
+        .owner()
+        .refunds()
+        .iter()
+        .find(|r| r.id == paid.0)
+        .map(|r| r.stage.clone());
+    assert_eq!(stage, Some(Stage::Sent { txid: paid.1 }));
+    assert!(rig.txids().contains(&paid.1));
+}
+
+#[test]
+fn oc_47_a_paid_refund_a_former_wallets_view_can_still_undo_is_not_archived() {
+    let dir = Dir::new();
+    let (mut rig, _queued) = repinned(&dir);
+    assert_eq!(rig.node.archive_paid().unwrap(), 0);
+    assert!(rig
+        .node
+        .owner()
+        .refunds()
+        .iter()
+        .any(|r| matches!(r.stage, Stage::Paid { .. })));
 }
