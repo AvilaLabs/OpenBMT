@@ -11,7 +11,6 @@ import org.openbmt.app.AnimatedQrView
 import org.openbmt.app.Format
 import org.openbmt.app.RowItem
 import org.openbmt.app.SayWords
-import org.openbmt.app.Tones
 import org.openbmt.app.Who
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
@@ -215,7 +214,7 @@ internal fun Controller.showRequestForm(draft: RequestDraft = RequestDraft(), me
             is Form.Ok -> {
                 val v = f.value
                 attempt(msg) { n.requestMake(requestAsk(), v.note, v.amount, v.priceIn, v.due, v.repeat) }
-                    ?.let { showRequestPage(it.number, RequestWords.said(RequestWords.made, Tones.GOOD)) }
+                    ?.let { showRequestPage(it.number, RequestWords.made) }
             }
         }
     }
@@ -235,7 +234,7 @@ private fun amountLabelOf(priceIn: RequestPriceIn): String =
 private fun Controller.withRate(currency: ShopCurrency, need: Boolean, msg: Slot, then: (RequestRate?) -> Unit) {
     if (!need || currency == ShopCurrency.Sats) return then(null)
     RequestRates.usable(requestRate, nowSecs())?.let { return then(it) }
-    msg.show(ui.words(RequestWords.said(RequestWords.rateFetching)))
+    msg.show(ui.words(RequestWords.rateFetching))
     val gate = TorGate(config?.proxy ?: AppConfig.DEFAULT_PROXY)
     async({ RequestRates.fetch(currency, LibraryPrice, HttpsRateFetcher(gate)) { nowSecs() } }) { r ->
         requestRate = r.getOrNull()
@@ -286,7 +285,7 @@ private fun Controller.showCode(number: Long, shared: RequestShared, currency: S
     below.add(ui.text(RequestShare.owed(shared, currency), 20f, bold = true))
     below.addAll(codeFallback(made))
     codeScreen(
-        RequestWords.codeTitle, RequestWords.said(RequestWords.codeTitle), made.view, below,
+        RequestWords.codeTitle, RequestWords.codeWords, made.view, below,
         listOf(ui.button(RequestWords.back) { showShare(number, shared, currency) }),
         back = { showShare(number, shared, currency) },
     )

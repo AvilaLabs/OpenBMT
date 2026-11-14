@@ -1341,8 +1341,9 @@ object AppWords {
         for ((key, text) in StarterWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         out.append(
             "\nThe owner's payment requests (`docs/REQUEST-RULES.md`, RQ-35), in\n" +
-                "`RequestWords`. No text is written yet: each is a `WORDS_NEEDED_RQ_...`\n" +
-                "name for its rule and shows its own name. The library's own words (a\n" +
+                "`RequestWords`. Each text is listed under the rule of its screen; a\n" +
+                "message of the app's own is its heading and two sentences, under keys\n" +
+                "that end in `_HEADING`, `_WHAT` and `_NEXT`. The library's own words (a\n" +
                 "refusal, a row of the list, the state of a request, the line above a\n" +
                 "link) are shown as they arrive:\n\n" +
                 "| Key | Text |\n" +

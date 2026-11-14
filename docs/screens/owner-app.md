@@ -632,87 +632,107 @@ core's own words, which the binding does not carry yet:
 | SS43_CONFIRMATIONS_UNKNOWN | The phone does not know yet whether the move is confirmed. |
 
 The owner's payment requests (`docs/REQUEST-RULES.md`, RQ-35), in
-`RequestWords`. No text is written yet: each is a `WORDS_NEEDED_RQ_...`
-name for its rule and shows its own name. The library's own words (a
+`RequestWords`. Each text is listed under the rule of its screen; a
+message of the app's own is its heading and two sentences, under keys
+that end in `_HEADING`, `_WHAT` and `_NEXT`. The library's own words (a
 refusal, a row of the list, the state of a request, the line above a
 link) are shown as they arrive:
 
 | Key | Text |
 |---|---|
-| RQ_35_HOME_BUTTON | WORDS_NEEDED_RQ_35_HOME_BUTTON |
-| RQ_35_HOME_ROW_TITLE | WORDS_NEEDED_RQ_35_HOME_ROW_TITLE |
-| RQ_35_HOME_ROW_SUB | WORDS_NEEDED_RQ_35_HOME_ROW_SUB |
-| RQ_35_LIST_TITLE | WORDS_NEEDED_RQ_35_LIST_TITLE |
-| RQ_25_PART_READY_TO_SEND | WORDS_NEEDED_RQ_25_PART_READY_TO_SEND |
-| RQ_21_PART_OVERDUE | WORDS_NEEDED_RQ_21_PART_OVERDUE |
-| RQ_21_PART_DUE_SOON | WORDS_NEEDED_RQ_21_PART_DUE_SOON |
-| RQ_21_PART_WAITING | WORDS_NEEDED_RQ_21_PART_WAITING |
-| RQ_35_PART_FINISHED | WORDS_NEEDED_RQ_35_PART_FINISHED |
-| RQ_35_BACK | WORDS_NEEDED_RQ_35_BACK |
-| RQ_29_PAY_RETURNS | WORDS_NEEDED_RQ_29_PAY_RETURNS |
-| RQ_24_REPEATS_LINE | WORDS_NEEDED_RQ_24_REPEATS_LINE |
-| RQ_14_SHARE_AGAIN | WORDS_NEEDED_RQ_14_SHARE_AGAIN |
-| RQ_22_SEND_AGAIN | WORDS_NEEDED_RQ_22_SEND_AGAIN |
-| RQ_19_CANCEL | WORDS_NEEDED_RQ_19_CANCEL |
-| RQ_20_CLOSE | WORDS_NEEDED_RQ_20_CLOSE |
-| RQ_16_COUNT_PAID | WORDS_NEEDED_RQ_16_COUNT_PAID |
-| RQ_25_STOP_REPEATING | WORDS_NEEDED_RQ_25_STOP_REPEATING |
-| RQ_26_RETURN | WORDS_NEEDED_RQ_26_RETURN |
-| RQ_15_OWED_LABEL | WORDS_NEEDED_RQ_15_OWED_LABEL |
-| RQ_15_PAID_LABEL | WORDS_NEEDED_RQ_15_PAID_LABEL |
-| RQ_15_ADDRESS_LABEL | WORDS_NEEDED_RQ_15_ADDRESS_LABEL |
-| RQ_12_QUOTES_LABEL | WORDS_NEEDED_RQ_12_QUOTES_LABEL |
-| RQ_15_PAYMENTS_LABEL | WORDS_NEEDED_RQ_15_PAYMENTS_LABEL |
-| RQ_15_PAYMENT_BLOCK | WORDS_NEEDED_RQ_15_PAYMENT_BLOCK |
-| RQ_15_PAYMENT_WAITING | WORDS_NEEDED_RQ_15_PAYMENT_WAITING |
-| RQ_15_PAYMENT_NOT_CREDITED | WORDS_NEEDED_RQ_15_PAYMENT_NOT_CREDITED |
-| RQ_29_RETURNS_LABEL | WORDS_NEEDED_RQ_29_RETURNS_LABEL |
-| RQ_29_RETURN_QUEUED | WORDS_NEEDED_RQ_29_RETURN_QUEUED |
-| RQ_29_RETURN_SENT | WORDS_NEEDED_RQ_29_RETURN_SENT |
-| RQ_29_RETURN_DONE | WORDS_NEEDED_RQ_29_RETURN_DONE |
-| RQ_29_RETURN_CANCELLED | WORDS_NEEDED_RQ_29_RETURN_CANCELLED |
-| RQ_05_FORM_TITLE | WORDS_NEEDED_RQ_05_FORM_TITLE |
-| RQ_06_NOTE_LABEL | WORDS_NEEDED_RQ_06_NOTE_LABEL |
-| RQ_06_NOTE_HINT | WORDS_NEEDED_RQ_06_NOTE_HINT |
-| RQ_07_PRICED_LABEL | WORDS_NEEDED_RQ_07_PRICED_LABEL |
-| RQ_07_PRICED_BITCOIN | WORDS_NEEDED_RQ_07_PRICED_BITCOIN |
-| RQ_07_PRICED_CURRENCY | WORDS_NEEDED_RQ_07_PRICED_CURRENCY |
-| RQ_08_AMOUNT_BITCOIN_LABEL | WORDS_NEEDED_RQ_08_AMOUNT_BITCOIN_LABEL |
-| RQ_08_AMOUNT_CURRENCY_LABEL | WORDS_NEEDED_RQ_08_AMOUNT_CURRENCY_LABEL |
-| RQ_09_DUE_LABEL | WORDS_NEEDED_RQ_09_DUE_LABEL |
-| RQ_09_DUE_HINT | WORDS_NEEDED_RQ_09_DUE_HINT |
-| RQ_24_REPEAT_LABEL | WORDS_NEEDED_RQ_24_REPEAT_LABEL |
-| RQ_24_REPEAT_NONE | WORDS_NEEDED_RQ_24_REPEAT_NONE |
-| RQ_24_REPEAT_WEEK | WORDS_NEEDED_RQ_24_REPEAT_WEEK |
-| RQ_24_REPEAT_MONTH | WORDS_NEEDED_RQ_24_REPEAT_MONTH |
-| RQ_24_REPEAT_YEAR | WORDS_NEEDED_RQ_24_REPEAT_YEAR |
-| RQ_03_MAKE_BUTTON | WORDS_NEEDED_RQ_03_MAKE_BUTTON |
-| RQ_06_NOTE_REFUSED | WORDS_NEEDED_RQ_06_NOTE_REFUSED |
-| RQ_08_AMOUNT_REFUSED | WORDS_NEEDED_RQ_08_AMOUNT_REFUSED |
-| RQ_09_DUE_REFUSED | WORDS_NEEDED_RQ_09_DUE_REFUSED |
-| RQ_09_DUE_RANGE | WORDS_NEEDED_RQ_09_DUE_RANGE |
-| RQ_03_MADE | WORDS_NEEDED_RQ_03_MADE |
-| RQ_12_SHARE_TITLE | WORDS_NEEDED_RQ_12_SHARE_TITLE |
-| RQ_12_RATE_FETCHING | WORDS_NEEDED_RQ_12_RATE_FETCHING |
-| RQ_12_QUOTE_LABEL | WORDS_NEEDED_RQ_12_QUOTE_LABEL |
-| RQ_12_QUOTE_SATS_LABEL | WORDS_NEEDED_RQ_12_QUOTE_SATS_LABEL |
-| RQ_12_QUOTE_UNTIL_LABEL | WORDS_NEEDED_RQ_12_QUOTE_UNTIL_LABEL |
-| RQ_13_SHARE_LINK | WORDS_NEEDED_RQ_13_SHARE_LINK |
-| RQ_13_SENDS_NOTHING | WORDS_NEEDED_RQ_13_SENDS_NOTHING |
-| RQ_13_SHOW_CODE | WORDS_NEEDED_RQ_13_SHOW_CODE |
-| RQ_13_CODE_TITLE | WORDS_NEEDED_RQ_13_CODE_TITLE |
-| RQ_26_RETURN_TITLE | WORDS_NEEDED_RQ_26_RETURN_TITLE |
-| RQ_26_RETURN_IN_LABEL | WORDS_NEEDED_RQ_26_RETURN_IN_LABEL |
-| RQ_26_RETURN_IN_SATS | WORDS_NEEDED_RQ_26_RETURN_IN_SATS |
-| RQ_26_RETURN_IN_CURRENCY | WORDS_NEEDED_RQ_26_RETURN_IN_CURRENCY |
-| RQ_26_RETURN_AMOUNT_SATS_LABEL | WORDS_NEEDED_RQ_26_RETURN_AMOUNT_SATS_LABEL |
-| RQ_26_RETURN_AMOUNT_CURRENCY_LABEL | WORDS_NEEDED_RQ_26_RETURN_AMOUNT_CURRENCY_LABEL |
-| RQ_26_RETURN_AMOUNT_REFUSED | WORDS_NEEDED_RQ_26_RETURN_AMOUNT_REFUSED |
-| RQ_27_ASK_ADDRESS | WORDS_NEEDED_RQ_27_ASK_ADDRESS |
-| RQ_28_ADDRESS_LABEL | WORDS_NEEDED_RQ_28_ADDRESS_LABEL |
-| RQ_28_ADDRESS_NEEDED | WORDS_NEEDED_RQ_28_ADDRESS_NEEDED |
-| RQ_28_SCAN_ADDRESS | WORDS_NEEDED_RQ_28_SCAN_ADDRESS |
-| RQ_29_ADD_RETURN | WORDS_NEEDED_RQ_29_ADD_RETURN |
-| RQ_28_CHECK_TITLE | WORDS_NEEDED_RQ_28_CHECK_TITLE |
-| RQ_28_CHECK_TEXT | WORDS_NEEDED_RQ_28_CHECK_TEXT |
-| RQ_28_CHECK_NEXT | WORDS_NEEDED_RQ_28_CHECK_NEXT |
+| RQ_35_HOME_BUTTON | Request a payment |
+| RQ_35_HOME_ROW_TITLE | Payment requests |
+| RQ_35_HOME_ROW_SUB | Ask a customer to pay from anywhere |
+| RQ_35_LIST_TITLE | Payment requests |
+| RQ_25_PART_READY_TO_SEND | Ready to send |
+| RQ_21_PART_OVERDUE | Overdue |
+| RQ_21_PART_DUE_SOON | Due soon |
+| RQ_21_PART_WAITING | Waiting |
+| RQ_35_PART_FINISHED | Finished |
+| RQ_35_BACK | Back |
+| RQ_29_PAY_RETURNS | Pay the returns |
+| RQ_24_REPEATS_LINE | This request repeats |
+| RQ_14_SHARE_AGAIN | Share |
+| RQ_22_SEND_AGAIN | Send again |
+| RQ_19_CANCEL | Cancel the request |
+| RQ_20_CLOSE | Close as it is |
+| RQ_16_COUNT_PAID | Count as paid |
+| RQ_25_STOP_REPEATING | Stop repeating |
+| RQ_26_RETURN | Return money |
+| RQ_15_OWED_LABEL | Still owed |
+| RQ_15_PAID_LABEL | Paid so far |
+| RQ_15_ADDRESS_LABEL | Address |
+| RQ_12_QUOTES_LABEL | Amounts asked |
+| RQ_15_PAYMENTS_LABEL | Payments |
+| RQ_15_PAYMENT_BLOCK | In block |
+| RQ_15_PAYMENT_WAITING | Not in a block yet |
+| RQ_15_PAYMENT_NOT_CREDITED | Not counted toward it |
+| RQ_29_RETURNS_LABEL | Returns |
+| RQ_29_RETURN_QUEUED | Waiting to be paid |
+| RQ_29_RETURN_SENT | Sent, not confirmed yet |
+| RQ_29_RETURN_DONE | Returned |
+| RQ_29_RETURN_CANCELLED | Cancelled |
+| RQ_05_FORM_TITLE | New request |
+| RQ_06_NOTE_LABEL | What it is for |
+| RQ_06_NOTE_HINT | Deposit for a booking |
+| RQ_07_PRICED_LABEL | Priced in |
+| RQ_07_PRICED_BITCOIN | Bitcoin |
+| RQ_07_PRICED_CURRENCY | The shop's currency |
+| RQ_08_AMOUNT_BITCOIN_LABEL | Amount in sats |
+| RQ_08_AMOUNT_CURRENCY_LABEL | Amount in the shop's currency |
+| RQ_09_DUE_LABEL | Due on |
+| RQ_09_DUE_HINT | Year-month-day |
+| RQ_24_REPEAT_LABEL | Repeats |
+| RQ_24_REPEAT_NONE | Never |
+| RQ_24_REPEAT_WEEK | Every week |
+| RQ_24_REPEAT_MONTH | Every month |
+| RQ_24_REPEAT_YEAR | Every year |
+| RQ_03_MAKE_BUTTON | Make the request |
+| RQ_06_NOTE_REFUSED_HEADING | Say what it is for |
+| RQ_06_NOTE_REFUSED_WHAT | A request needs a short note of what it is for, so it can be told apart from the others later. |
+| RQ_06_NOTE_REFUSED_NEXT | Write a note of up to 64 characters on one line, then make the request again. |
+| RQ_08_AMOUNT_REFUSED_HEADING | Amount not read |
+| RQ_08_AMOUNT_REFUSED_WHAT | The amount could not be read as an amount above zero that a request can ask for in this way. |
+| RQ_08_AMOUNT_REFUSED_NEXT | Type the amount in digits and check what it is priced in, then make the request again. |
+| RQ_09_DUE_REFUSED_HEADING | Due date not read |
+| RQ_09_DUE_REFUSED_WHAT | The due date could not be read as a day written as the year, the month and the day. |
+| RQ_09_DUE_REFUSED_NEXT | Write it as year-month-day, such as 2026-12-31, then make the request again. |
+| RQ_09_DUE_RANGE_HEADING | Due date too early or late |
+| RQ_09_DUE_RANGE_WHAT | A request is due on a day from today to a year from now, and this day is outside that. |
+| RQ_09_DUE_RANGE_NEXT | Pick a day from today to a year from now, then make the request again. |
+| RQ_03_MADE_HEADING | Request made |
+| RQ_03_MADE_WHAT | It has an address of its own, and nothing is sent to anyone until you share it. |
+| RQ_03_MADE_NEXT | Share it with the customer as a link, or show its code to a customer who is here. |
+| RQ_12_SHARE_TITLE | Share the request |
+| RQ_12_RATE_FETCHING_HEADING | Getting the rate |
+| RQ_12_RATE_FETCHING_WHAT | The shop's price sources are being asked for the rate of now, through Tor. |
+| RQ_12_RATE_FETCHING_NEXT | Wait a moment. Nothing is shared until the rate has come in. |
+| RQ_12_QUOTE_LABEL | Asked for |
+| RQ_12_QUOTE_SATS_LABEL | In sats |
+| RQ_12_QUOTE_UNTIL_LABEL | Holds until |
+| RQ_13_SHARE_LINK | Share the link |
+| RQ_13_SENDS_NOTHING | This phone sends nothing itself. Share the link through whatever you already use, and the customer pays it from any wallet. |
+| RQ_13_SHOW_CODE | Show the code |
+| RQ_13_CODE_TITLE | Code to pay |
+| RQ_13_CODE_HEADING | Scan to pay |
+| RQ_13_CODE_WHAT | This code holds the same link, for a customer who is here to scan it with any wallet. |
+| RQ_13_CODE_NEXT | Let the customer scan it, then go back. |
+| RQ_26_RETURN_TITLE | Return money |
+| RQ_26_RETURN_IN_LABEL | Return in |
+| RQ_26_RETURN_IN_SATS | Sats |
+| RQ_26_RETURN_IN_CURRENCY | The shop's currency |
+| RQ_26_RETURN_AMOUNT_SATS_LABEL | Amount in sats |
+| RQ_26_RETURN_AMOUNT_CURRENCY_LABEL | Amount in the shop's currency |
+| RQ_26_RETURN_AMOUNT_REFUSED_HEADING | Return amount not read |
+| RQ_26_RETURN_AMOUNT_REFUSED_WHAT | The amount to return could not be read as an amount above zero. |
+| RQ_26_RETURN_AMOUNT_REFUSED_NEXT | Type the amount in digits, then try again. |
+| RQ_27_ASK_ADDRESS | Ask for an address |
+| RQ_28_ADDRESS_LABEL | The customer's address |
+| RQ_28_ADDRESS_NEEDED_HEADING | No address yet |
+| RQ_28_ADDRESS_NEEDED_WHAT | A return goes to a bitcoin address of the customer's own, and none is filled in. |
+| RQ_28_ADDRESS_NEEDED_NEXT | Ask the customer for one, then paste or scan what they send. |
+| RQ_28_SCAN_ADDRESS | Scan an address |
+| RQ_29_ADD_RETURN | Add the return |
+| RQ_28_CHECK_TITLE | Check it with the customer |
+| RQ_28_CHECK_TEXT | Compare these groups with the customer by another way than the message the address came in, such as a call or in person. |
+| RQ_28_CHECK_NEXT | Someone who can change your messages can change an address in them. The return waits in the queue until you pay the returns. |

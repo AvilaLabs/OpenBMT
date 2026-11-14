@@ -4178,16 +4178,24 @@ object AppModelTest {
         RequestRow(number, note, 5_000, due, "No. $number", "Waiting for payment", emptyList(), repeats)
 
     private fun requestTests() {
-        // Words (RQ-36): every text is a placeholder named for its rule, listed under its own key, and shows its name.
+        // Words (RQ-36): every text is written, named for its rule and listed once; the app's own messages pass the checks
+        // and read apart from one another.
         val words = RequestWords.all()
         ok(words.isNotEmpty() && words.map { it.first }.toSet().size == words.size, "each request text is listed once")
         for ((k, n) in words) {
-            ok(Regex("RQ_\\d{2}_[A-Z_]+").matches(k) && n == "WORDS_NEEDED_$k", "$n is named for its rule and is its own key")
-            val w = RequestWords.said(n)
-            ok(RequestWords.isPlaceholder(w) && w.heading == n && w.what == n && w.next == n, "$n shows its name")
-            ok(RequestWords.refusal(n).tone == Tones.STOP, "$n as a refusal is a stop")
+            ok(Regex("RQ_\\d{2}_[A-Z_]+").matches(k), "$k is named for its rule")
+            ok(n.isNotBlank() && n.trim() == n && !n.contains("WORDS_NEEDED"), "$k is written")
         }
-        ok(words.none { (_, n) -> !n.startsWith("WORDS_NEEDED_RQ_") }, "no request text is written yet, and none is written by the app")
+        val wordsSource = source("src/model/RequestWords.kt")
+        ok(!wordsSource.contains("need(") && Regex("say\\(\\s*\"").findAll(wordsSource).count() + 3 * RequestWords.messages().size == words.size, "every text of the source is in the list")
+        for ((k, w) in RequestWords.messages()) {
+            ok(SayCheck.problem(w) == null, "words of $k: ${SayCheck.problem(w)}")
+            ok(w.who == Who.OWNER && w.code == "RQ-" + k.substring(3, 5), "$k carries the rule of its screen")
+            ok(listOf("HEADING", "WHAT", "NEXT").all { e -> words.any { it.first == k + "_" + e } }, "$k has its three words in the list")
+        }
+        ok(SayCheck.distinctProblem(RequestWords.messages()) == null, "no two request messages read the same: ${SayCheck.distinctProblem(RequestWords.messages())}")
+        val refusals = listOf(RequestWords.noteRefused, RequestWords.amountRefused, RequestWords.dueRefused, RequestWords.dueRange, RequestWords.returnAmountRefused, RequestWords.addressNeeded)
+        ok(refusals.all { it.tone == Tones.STOP } && RequestWords.made.tone == Tones.GOOD && RequestWords.rateFetching.tone == Tones.INFO, "a refusal is a stop, a request made is good news, the rate on its way is a note")
         val md = AppWords.screensMarkdown()
         ok(words.all { (k, _) -> md.contains("| ${k} |") }, "the screens list has every request text")
         // The app writes no sentence of its own on these screens: every string a person reads is a RequestWords name or the library's words.
@@ -4288,7 +4296,7 @@ object AppModelTest {
         fun draft(note: String = "Deposit", amount: String = "50000", priceIn: RequestPriceIn = RequestPriceIn.Bitcoin, due: String = "2026-12-01", repeat: RequestEvery? = null) = RequestDraft(note, amount, priceIn, due, repeat)
         val made = RequestForm.check(draft(repeat = RequestEvery.Month), ShopCurrency.Usd, today) as Form.Ok
         ok(made.value.note == "Deposit" && made.value.amount == 50_000L && made.value.priceIn == RequestPriceIn.Bitcoin && RequestForm.dayText(made.value.due) == "2026-12-01" && made.value.repeat == RequestEvery.Month, "RQ-24: a form that is right becomes the arguments, with its repeat")
-        fun refused(f: Form<RequestMake>): String? = (f as? Form.Refused)?.words?.heading
+        fun refused(f: Form<RequestMake>): SayWords? = (f as? Form.Refused)?.words
         ok(refused(RequestForm.check(draft(note = ""), ShopCurrency.Usd, today)) == RequestWords.noteRefused, "RQ-06: no note is refused with the note's words")
         ok(refused(RequestForm.check(draft(amount = "x"), ShopCurrency.Usd, today)) == RequestWords.amountRefused, "RQ-08: an amount that is not one is refused with the amount's words")
         ok(refused(RequestForm.check(draft(priceIn = RequestPriceIn.ShopCurrency), ShopCurrency.Sats, today)) == RequestWords.amountRefused, "RQ-07: a shop in Bitcoin Standard cannot price in its currency")
@@ -4305,8 +4313,8 @@ object AppModelTest {
         val cur = ReturnForm.check(ReturnDraft(true, "10.50", "bc1q"), ShopCurrency.Usd) as Form.Ok
         ok(cur.value.inCurrency && cur.value.amount == 1_050L, "a return in the currency, in minor units")
         ok(!(ReturnForm.check(ReturnDraft(true, "100", "bc1q"), ShopCurrency.Sats) as Form.Ok).value.inCurrency, "Bitcoin Standard returns in satoshis")
-        ok((ReturnForm.check(ReturnDraft(false, "0", "bc1q"), ShopCurrency.Usd) as Form.Refused).words.heading == RequestWords.returnAmountRefused, "no amount, no return")
-        ok((ReturnForm.check(ReturnDraft(false, "5", "  "), ShopCurrency.Usd) as Form.Refused).words.heading == RequestWords.addressNeeded, "RQ-27: the address is asked for, never guessed")
+        ok((ReturnForm.check(ReturnDraft(false, "0", "bc1q"), ShopCurrency.Usd) as Form.Refused).words == RequestWords.returnAmountRefused, "no amount, no return")
+        ok((ReturnForm.check(ReturnDraft(false, "5", "  "), ShopCurrency.Usd) as Form.Refused).words == RequestWords.addressNeeded, "RQ-27: the address is asked for, never guessed")
         ok(ReturnForm.amount(ReturnDraft(false, "5", ""), ShopCurrency.Usd) is Form.Ok, "the line that asks for an address needs the amount only")
 
         // Sharing (RQ-13): the line, then the link, and nothing else.

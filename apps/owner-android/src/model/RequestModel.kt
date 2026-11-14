@@ -260,11 +260,11 @@ object RequestForm {
 
     /** The arguments of the call, or the words that say what is wrong with the form. */
     fun check(draft: RequestDraft, currency: ShopCurrency, today: LocalDate): Form<RequestMake> {
-        val note = note(draft.note) ?: return Form.Refused(RequestWords.refusal(RequestWords.noteRefused))
-        if (draft.priceIn !in pricings(currency)) return Form.Refused(RequestWords.refusal(RequestWords.amountRefused))
-        val amount = amount(draft.amount, draft.priceIn, currency) ?: return Form.Refused(RequestWords.refusal(RequestWords.amountRefused))
-        val due = day(draft.due) ?: return Form.Refused(RequestWords.refusal(RequestWords.dueRefused))
-        if (!inRange(due, today)) return Form.Refused(RequestWords.refusal(RequestWords.dueRange))
+        val note = note(draft.note) ?: return Form.Refused(RequestWords.noteRefused)
+        if (draft.priceIn !in pricings(currency)) return Form.Refused(RequestWords.amountRefused)
+        val amount = amount(draft.amount, draft.priceIn, currency) ?: return Form.Refused(RequestWords.amountRefused)
+        val due = day(draft.due) ?: return Form.Refused(RequestWords.dueRefused)
+        if (!inRange(due, today)) return Form.Refused(RequestWords.dueRange)
         return Form.Ok(RequestMake(note, amount, draft.priceIn, asDay(due), draft.repeat))
     }
 }
@@ -284,7 +284,7 @@ object ReturnForm {
     fun amount(draft: ReturnDraft, currency: ShopCurrency): Form<ReturnMake> {
         val inCurrency = draft.inCurrency && currency != ShopCurrency.Sats
         val amount = if (inCurrency) RequestModel.parseMinor(draft.amount, RequestModel.exponent(currency)) else Format.toAmount(draft.amount)
-        if (amount == null || amount <= 0) return Form.Refused(RequestWords.refusal(RequestWords.returnAmountRefused))
+        if (amount == null || amount <= 0) return Form.Refused(RequestWords.returnAmountRefused)
         return Form.Ok(ReturnMake(inCurrency, amount, ""))
     }
 
@@ -295,7 +295,7 @@ object ReturnForm {
             is Form.Refused -> return f
         }
         val address = draft.address.trim()
-        if (address.isEmpty()) return Form.Refused(RequestWords.refusal(RequestWords.addressNeeded))
+        if (address.isEmpty()) return Form.Refused(RequestWords.addressNeeded)
         return Form.Ok(ReturnMake(made.inCurrency, made.amount, address))
     }
 }
