@@ -198,7 +198,7 @@ impl RequestError {
             Self::Repeat(e) => say::repeat_refused(e),
             Self::Return(e) => say::return_refused(e),
             Self::Address(e) => say::address_refused(e),
-            Self::NoAddress => openbmt_core::say::Words::new(openbmt_core::say::Tone::Stop, "WORDS_NEEDED_RQ12_NO_ADDRESS", "WORDS_NEEDED_RQ12_NO_ADDRESS", openbmt_core::say::Who::Owner, "WORDS_NEEDED_RQ12_NO_ADDRESS"),
+            Self::NoAddress => openbmt_core::say::Words::new(openbmt_core::say::Tone::Stop, "No address for this request", "This phone cannot work out the address of the wallet this request was made for, so no link was made.", openbmt_core::say::Who::Owner, "Check that this phone still has that wallet, then share again."),
             Self::Queue(_) => openbmt_core::say::Words::new(openbmt_core::say::Tone::Stop, "Return not taken", "The return could not be stored in the queue of payments, so nothing will be paid.", openbmt_core::say::Who::Owner, "Try again. If it keeps failing, check the phone's free space."),
         }
     }

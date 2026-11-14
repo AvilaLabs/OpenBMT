@@ -584,6 +584,8 @@ and the 60-second rule are the shared `LockModel.kt` of
   permission dialog: a result that comes back (a file picked, the picker
   cancelled, the permission answered), or a resume, after more than 60
   seconds drops the result unread and locks the setup the same way. A
+  picked file is read off the main thread, with 20 seconds to arrive; one
+  that takes longer is a file that could not be read. A
   "Working" page is drawn before the library is asked, because the key from
   the PIN takes about a second (OA-12). A wrong PIN is refused with the
   rule `pin-wrong` and changes nothing; a file that is cut or damaged is
@@ -598,9 +600,10 @@ and the 60-second rule are the shared `LockModel.kt` of
   written before each try and 0 after a right PIN; a refusal that is not
   `pin-wrong` gives the step back; from 5 wrong tries the waits are 30
   seconds, 1 minute, 5 minutes, 15 minutes and 1 hour; from the 5th the
-  screen says how many tries are left; a clock behind the last wrong try
-  restarts the wait; a file that is not exact counts as 9 wrong tries. The
-  code is the same file as the Key app's, not a copy.
+  screen says how many tries are left; the wait is told by the time since
+  the phone started and its boot count, so moving the date ends nothing; a
+  file that is not exact counts as 9 wrong tries. The code is the same file
+  as the Key app's, not a copy.
 - **OA-64.** The 10th wrong try wipes key 1 from this phone, in this order:
   the setup file, the ceremony's file if there is one, the note that key 2
   is a hardware signer and the record of the first address check (OA-72),

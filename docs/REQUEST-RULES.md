@@ -98,7 +98,9 @@ an end, payments in parts, repeats and returns.
   stale rate makes no quote, and the share is refused with the words of a
   stale rate. A quote in the currency holds for 24 hours. The quote is
   written to the request (at most 64 per request; the oldest goes first)
-  before anything is shared.
+  before anything is shared. When the request's address cannot be worked
+  out, because its wallet is not on the phone any more, the share is
+  refused and nothing is written.
 - **RQ-13.** What is shared is a BIP 321 link with the request's address,
   the quote's amount in bitcoin and the shop's name as the label, written
   as CR-83 writes a sale's, and nothing else: no note, no number, no

@@ -991,7 +991,7 @@ class Controller(internal val act: MainActivity) {
         val timeout = Runnable {
             if (!settled) {
                 settled = true
-                onFailed("WORDS_NEEDED_F1_READ_TOO_SLOW")
+                onFailed("the file took more than 20 seconds to read")
             }
         }
         val reader = Thread {

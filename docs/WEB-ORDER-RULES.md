@@ -43,6 +43,8 @@ funds.**
   scans with the store's admin page open on a computer, a pairing code shown
   by the owner phone. It holds the owner phone's public key for web orders,
   a secret of 32 random bytes for the requests of WO-20 and the shop's name.
+  Copied, the code is marked as sensitive, so that the phone does not show
+  it in clipboard previews, and it leaves the clipboard after 60 seconds.
   The plugin keeps them and shows the key's short fingerprint, which the
   owner checks against the owner phone. Only a site administrator (the
   `manage_options` capability) pairs or unpairs; a shop manager cannot. A

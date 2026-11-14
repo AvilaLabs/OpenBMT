@@ -497,14 +497,17 @@ SR-81 and the screens of SR-82 by the Android app.
   folder, and the manifest excludes every domain from cloud backup and from
   device transfer.
 - **SR-75. Wrong tries and waits.** The app counts wrong PINs in a small file
-  of its own: the count, and the time of the last wrong one. It writes the
+  of its own: the count, and when the last wrong one was, as the time since
+  the phone started and which start of the phone it was (its boot count).
+  A wait is told by that time, so moving the phone's date ends nothing, and
+  a new start of the phone restarts the wait in full. A file of the first
+  version, which held the date, keeps its count and waits in full. It writes the
   count plus one before each attempt, and 0 after a right PIN. A refusal that
   is not `pin-wrong` gives the step back. After 1 to 4 wrong tries the next
   attempt waits for nothing; after 5, 30 seconds; after 6, 1 minute; after 7,
   5 minutes; after 8, 15 minutes; after 9, 1 hour. From the 5th wrong try
   the screen says how many tries are left before the key is wiped, and the
-  time left to wait counts down. A clock behind the time of the last wrong
-  try restarts the wait from now, and that time is stored.
+  time left to wait counts down.
 - **SR-76. The wipe.** The 10th wrong try deletes the sealed state file and
   the Keystore key, then the tries file, and shows that the phone's copy of
   the key was wiped. It says that the money is not lost, because the wallet
