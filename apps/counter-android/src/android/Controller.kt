@@ -1347,7 +1347,7 @@ class Controller(private val act: MainActivity) {
 
     // ---- settings -------------------------------------------------------------------------------------------------------
 
-    /** Staff, the own node, the network, Lightning, About, and the sounds; with no cashier listed, the cashier's name first. No PIN is asked here: the screens behind it ask as they do. */
+    /** Staff, the own node, the network, Lightning, About, and the sounds; with no cashier listed, the cashier's name first. No PIN is asked here: the screens behind it ask as they do (the name's page asks for the manager's). */
     private fun showSettings() {
         if (lockedOut()) return
         val items = ArrayList<RowItem>()
@@ -1458,35 +1458,40 @@ class Controller(private val act: MainActivity) {
         show(ui.bar(SwitchWords.BAR, back = { showSettings() }), views, listOf(same, different))
     }
 
-    /** CR-146: the cashier's one name, kept in the config file. */
+    /** CR-146: the cashier's one name, kept in the config file, changed only behind the manager's PIN: a name that anyone could change would start the daily caps again. */
     private fun showYourName() {
         val cfg = config ?: return render()
         val saved = Slot(act)
         val name = ui.field("").also { it.setText(cfg.cashier) }
+        val pinInput = pinField(act, "")
         titled(
             "Your name",
             null,
-            listOf(ui.labelled("Your name", name), saved),
+            listOf(ui.labelled("Your name", name), ui.labelled("Manager's PIN", pinInput), saved),
             listOf(
                 ui.primary("Save my name") {
                     val v = name.text.toString().trim()
                     if (!AppConfig.validName(v)) {
                         saved.show(note(AppWords.nameNotAccepted))
                     } else {
-                        try {
-                            val updated = cfg.withCashier(v)
-                            configFile.save(updated)
-                            config = updated
-                            showSettings()
-                        } catch (e: IOException) {
-                            saved.show(note(AppWords.fileNotSaved(e.message)))
-                        }
+                        checkPin(pinInput.text.toString(), pinInput, { keepYourName(cfg, v, saved) }, { saved.show(note(it)) })
                     }
                 },
                 ui.button("Back") { showSettings() },
             ),
             back = { showSettings() },
         )
+    }
+
+    private fun keepYourName(cfg: AppConfig, name: String, saved: Slot) {
+        try {
+            val updated = cfg.withCashier(name)
+            configFile.save(updated)
+            config = updated
+            showSettings()
+        } catch (e: IOException) {
+            saved.show(note(AppWords.fileNotSaved(e.message)))
+        }
     }
 
     /** The sounds on or off, kept in the config file next to the cashier's name. The phone's own ringer setting still wins. */

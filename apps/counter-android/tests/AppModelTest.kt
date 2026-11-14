@@ -1220,6 +1220,10 @@ object AppModelTest {
         ok(choose.indexOf("configFile.save(cfg.with(choice))") in 1 until choose.indexOf("begin()"), "CR-203: the choice is saved before the app starts again with it")
         ok(controller.contains("next.with(TorChoice.Orbot)") && controller.contains("checkPin(pinInput.text.toString(), pinInput, { keepNetwork(cfg, text, choosing, msg) }"), "CR-203: Use Orbot is saved behind the manager's PIN with the address")
         ok(controller.contains("configFile.save(AppConfig(AppConfig.DEFAULT_PROXY, managerName, \"\"))"), "CR-203: a new counter's config takes the default, the built-in Tor")
+        val yourName = controller.substringAfter("private fun showYourName()").substringBefore("/** The sounds on or off")
+        ok(yourName.contains("checkPin(pinInput.text.toString(), pinInput, { keepYourName(cfg, v, saved) }") && yourName.contains("ui.labelled(\"Manager's PIN\", pinInput)"), "CR-146: changing the cashier's name asks for the manager's PIN")
+        ok(yourName.substringAfter("private fun keepYourName(").contains("cfg.withCashier(name)") && !yourName.substringBefore("private fun keepYourName(").contains("withCashier"), "CR-146: the name is written only after the PIN was right")
+        ok(controller.split("withCashier(").size == 2, "CR-146: no other place changes the cashier's name")
         val rules = File(appDir, "../../docs/COUNTER-RULES.md").readText()
         ok(rules.contains("- **CR-203.**"), "CR-203 is in the rules")
     }
