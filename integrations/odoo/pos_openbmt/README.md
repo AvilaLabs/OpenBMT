@@ -53,6 +53,14 @@ Anyone with the till key can ask a counter to start a sale. The cashier still
 has to tap Start on the counter, and the key cannot move money or change any
 setting. A new key from `openbmt-box till-key` replaces the old one at once.
 
+## When the Box is slow
+
+Each call to the Box gives up after 15 seconds in all, so a Box that answers
+a little at a time cannot hold an Odoo worker. The till then shows that the
+Box could not be reached, and the cashier can try again. The limit is checked
+while the answer's body is read; while the Box is still sending the first
+lines of its answer, only the wait for each read applies.
+
 ## Status
 
 The module installs in Odoo 18.0 Community and passes its tests there

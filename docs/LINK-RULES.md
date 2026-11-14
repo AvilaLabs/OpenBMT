@@ -204,6 +204,8 @@ one. A merchant with no Box can use any relay: it sees ciphertext.
   paired again; it never starts over from zero by itself.
 - **LK-41.** A relay stores mailboxes as files written whole or as an
   append-only log; a torn write loses at most the message being written.
+  Its files are mode 0600 and its folders 0700, as every file of the Box
+  (BX-50).
 - **LK-42.** A relay stores the leaving list beside the member list, in a
   file `leaving.set` of its own: for each leaving device its key (32 bytes)
   and the time it became leaving (u64 LE), then the first four bytes of the
