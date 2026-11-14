@@ -5015,6 +5015,6 @@ object AppModelTest {
         val words = FloatWords.all()
         ok(words.size == 57 && words.toSet().size == words.size, "each float text is written once")
         ok(words.none { it.isBlank() }, "no float text is empty")
-        ok(FloatWords.placeholders().toSet() == setOf("WORDS_NEEDED_FL35_LEFT_MOVABLE", "WORDS_NEEDED_FL35_LEFT_WAITING", "WORDS_NEEDED_FL35_VIEW_UNKNOWN", "WORDS_NEEDED_FL35_MOVE_REST", "WORDS_NEEDED_FL04_INDEX_LABEL", "WORDS_NEEDED_FL04_INDEX_INVALID", "WORDS_NEEDED_FL04_INDEX_REMEMBERED", "WORDS_NEEDED_FL04_INDEX_NEXT"), "the float texts not written yet are the eight placeholders named after their rules")
+        ok(FloatWords.placeholders().isEmpty(), "every float text is written")
     }
 }

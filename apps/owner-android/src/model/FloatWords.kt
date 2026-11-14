@@ -10,7 +10,7 @@ object FloatWords {
     val childOnly = "The float has 12 words of its own, made from the shop's words on the stick. Only the float's words come to this phone, never the shop's."
     val scanChild = "Scan the float's words"
     val storageUnavailable = "This phone could not open its record of the float. Restart the app. If it keeps failing, check the phone's free space."
-    val childIndex = "The first time, make the float's words on the stick with number 0."
+    val childIndex = "Make the float's words on the stick with the number below: 0 the first time."
     val nextIndex = "After a lost or replaced phone, make the next number on the stick. The new phone first moves what is left in the old float."
     val scanUnavailable = "The float is not set up yet. Scan its words from the stick to finish."
     val capSaved = "Cap saved. No money was moved."
@@ -57,23 +57,22 @@ object FloatWords {
     val restoreDone = "The float's key is back on this phone. Refunds can be paid from the float again."
     val restoreNeedsFloat = "This phone has no record of the float to bring its key into. Set the float up again from its page."
 
-    // FL-35, FL-04: not written yet. Each is a placeholder that shows its own name where the words will be.
     /** FL-35: the move had its confirmation, but the float still holds a coin a move can take; the key stays on the phone. */
-    val sweepLeftMovable = "WORDS_NEEDED_FL35_LEFT_MOVABLE"
+    val sweepLeftMovable = "The move to savings is in a block, but the float still holds coins. Move the rest too. Until then the float's key stays on this phone."
     /** FL-35: the float still holds only coins that have no confirmation yet; the key stays, and the next move waits for one. */
-    val sweepLeftWaiting = "WORDS_NEEDED_FL35_LEFT_WAITING"
+    val sweepLeftWaiting = "The float still holds coins that are not in a block yet. The key stays on this phone. Move them once a block holds them."
     /** FL-35: the move had its confirmation, but what the float holds is not known (no coin view), so the key is not deleted. */
-    val sweepViewUnknown = "WORDS_NEEDED_FL35_VIEW_UNKNOWN"
+    val sweepViewUnknown = "The move to savings is in a block, but what else the float holds is not known yet. The key stays on this phone until it is."
     /** FL-35: the button that signs another move for what was left. */
-    val sweepMoveRest = "WORDS_NEEDED_FL35_MOVE_REST"
+    val sweepMoveRest = "Move the rest to savings"
     /** FL-04: label of the field for the number of the float's words on the stick. */
-    val indexLabel = "WORDS_NEEDED_FL04_INDEX_LABEL"
+    val indexLabel = "Number of the float's words"
     /** FL-04: the number typed is not a whole number in range. */
-    val indexInvalid = "WORDS_NEEDED_FL04_INDEX_INVALID"
+    val indexInvalid = "Type the number the stick used, a whole number from 0 up."
     /** FL-04: label of the number the phone remembers for the float it had (same words again). */
-    val indexRemembered = "WORDS_NEEDED_FL04_INDEX_REMEMBERED"
+    val indexRemembered = "Number used last time"
     /** FL-04: label of the number to make on the stick for a new float (the remembered one plus one). */
-    val indexNext = "WORDS_NEEDED_FL04_INDEX_NEXT"
+    val indexNext = "Number for a new float"
 
     /** Every text, in screen order. */
     fun all(): List<String> = listOf(

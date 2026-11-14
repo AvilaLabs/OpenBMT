@@ -42,22 +42,27 @@ funds.**
   screen lock is removed, nothing can be paid from the float and the screen
   says so. The money stays in the float, and the stick makes its words
   again from the shop's words; FL-06 brings them back.
-- **FL-04. A new float after a loss.** The index starts at 0. After a lost
-  or replaced phone, the owner makes the next index on the stick, and the
-  new phone first moves what is left in the old float to the new one
-  (FL-30). The owner phone remembers the index so that it can say which one
-  to make.
+- **FL-04. A new float after a loss.** The index starts at 0. After a lost or
+  replaced phone, the owner makes the next index on the stick, and the new
+  phone first moves what is left in the old float to the new one (FL-30). The
+  owner phone remembers the index so that it can say which one to make: the
+  setup screen takes the index, starts from the one the phone remembers, and
+  shows it beside the next one. Turning the float off keeps the record's next
+  receive and change indexes. A setup again with the same index, or the same
+  words, goes on from them and never lower, so no address is used twice; a new
+  index starts at 0.
 
 - **FL-05. Watched by the owner node.** The owner node watches the float's
-  wallet as a wallet of its own, beside the pinned wallet and its former
-  ones: its own coin view, kept in its own file, from the day the float was
-  set up, over both chains up to 20 past the highest index used or handed
-  out. When the phone uses or hands out an index past what is watched, the
-  node moves the watch to 20 past it at once, without a restart, and reads
-  the blocks since the float was set up for the new addresses. Its coins are
+  wallet as a wallet of its own, beside the pinned wallet and its former ones:
+  its own coin view, kept in its own file, from the day the float was set up,
+  over both chains up to 20 past the highest index used or handed out. When
+  the phone uses or hands out an index past what is watched, the node moves
+  the watch to 20 past it at once, without a restart, and reads the blocks
+  since the float was set up for the new addresses. A float that is off is
+  still watched while its record says something is left (FL-35). Its coins are
   in no total of the shop's wallet, never pay anything but a float payment,
-  and are given to the float's calls as the checked view that FL-10, FL-11
-  and FL-20 need. No sale's facts come from it.
+  and are given to the float's calls as the checked view that FL-10, FL-11 and
+  FL-20 need. No sale's facts come from it.
 - **FL-06. The key brought back.** When the phone has dropped the float's
   key, the float's page offers to scan the float's words again, made on
   the stick at the index the phone recorded (FL-04). The core reads them as
@@ -117,14 +122,18 @@ funds.**
 
 ## 5. Turning it off
 
-- **FL-35. Off.** Turning the float off moves all of it to a fresh address
-  of the shop's wallet, derived by the owner phone from the shop's pinned
-  wallet description: the first of a range of the owner phone's own, taken
-  once above every range given out, as `docs/START-SIMPLE-RULES.md` SS-42
-  takes the move's address, so signing the move again pays the same
-  address. The move goes through the outbox as FL-20 says, with no refund.
-  The sealed seed and its keystore key are deleted once that payment has
-  one confirmation, and the node stops watching the float a day after.
+- **FL-35. Off.** Turning the float off moves all of it to a fresh address of
+  the shop's wallet, derived by the owner phone from the shop's pinned wallet
+  description: the first of a range of the owner phone's own, taken once above
+  every range given out, as `docs/START-SIMPLE-RULES.md` SS-42 takes the
+  move's address, so signing the move again pays the same address. The move
+  goes through the outbox as FL-20 says, with no refund. The sealed seed and
+  its keystore key are deleted once that payment has one confirmation and the
+  float's checked coin view holds nothing at any depth. When coins are left,
+  or the view is not known, the key stays: the record says something is left,
+  the node keeps watching the float while it does, and the owner moves the
+  rest with another move once those coins are in a block. Otherwise the node
+  stops watching the float a day after the key is deleted.
 
 ## 6. Tests
 
