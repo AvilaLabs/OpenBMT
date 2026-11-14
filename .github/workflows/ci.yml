@@ -126,7 +126,9 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
       - name: Fetch the locked packages
-        run: cargo fetch --locked
+        run: |
+          cargo fetch --locked
+          cargo fetch --locked --manifest-path fuzz/Cargo.toml
       - name: Lists, sources and licences
         run: scripts/deps-check.sh
       - name: Every framed encoding has a magic of its own
