@@ -116,7 +116,9 @@ an end, payments in parts, repeats and returns.
 
 - **RQ-15.** Every output paid to a request's address in a checked block is
   a payment to that request, in the order of the blocks. An output of zero
-  satoshis is not a payment and is not recorded. Each payment is
+  satoshis is not a payment and is not recorded. A request holds at most
+  1,000 payments: past that, later payments wait, in their order, and the
+  owner's log says how many wait. Each payment is
   credited as follows, and what is still owed is the amount less every
   credit, never below zero.
   - **In bitcoin:** its satoshis.
@@ -154,9 +156,13 @@ an end, payments in parts, repeats and returns.
   returns of a request then come to more than it received, its queued
   returns are taken off the queue, newest first, until they no longer do,
   and so is a return that goes back to the queue later because its spend
-  was replaced (RQ-29); a return already in a spend or done stays, and the request shows that
-  more was returned than it now received, for the owner to decide. Nothing
-  is paid or cancelled without the owner.
+  was replaced (RQ-29); a return already in a spend or done stays, and the
+  request shows that more was returned than it now received, for the owner
+  to decide. Nothing is paid or cancelled without the owner. The book is
+  taken back even after a stop: before the shop's coins are stored at the
+  new chain, a small file records the height the chain was taken back to,
+  and it is deleted only once the book is stored again. A start that finds
+  it takes the book back to that height; a start that cannot read it stops.
 
 ## 5. Due, overdue and asking again
 

@@ -39,6 +39,10 @@ not ask a server what the wallet holds.
   signs a replacement automatically. Paid rows whose transaction remains in
   this undo horizon cannot be archived. Once the confirmation leaves the
   horizon, archiving folds refund amounts into the sale's archived total.
+  After the shop moves to a new wallet, the views of its former wallets
+  follow the same rule: a refund paid from a former wallet returns to sent
+  when its block leaves that view, at start too, and its paid rows wait for
+  that view's horizon as well.
 - **OC-06.** A reorganization of more than 100 blocks, or of a block that
   holds coins and has no record kept, cannot be undone. The view takes the
   named state "deep reorg: rescan", offers no coins, and stays so until it
@@ -463,7 +467,9 @@ to 85 of `openbmt-owner-ffi`. OC-38 and OC-39 are not used.
   view, the facts of every sale with a refund in the queue, manual or from
   intake, are worked out again from the view as it is (OC-14, at the height
   the view has checked), built, stored, and swapped in only when the store
-  succeeds. A sale the view cannot give facts for keeps its amount and is
+  succeeds. The view asked is the current wallet's, then each former
+  wallet's, newest first, but never the float's; the first one that holds
+  the sale's receipt gives its facts. A sale the view cannot give facts for keeps its amount and is
   no longer at the refund depth. A refund whose facts no longer fit (AS-52,
   AS-53) stays queued and waits for depth, as it already does, and is in no
   session until they fit again. The same refresh runs again when a session
