@@ -317,6 +317,22 @@ fn lc_06_a_change_of_pin_is_one_step_and_needs_the_current_pin() {
     let mut wrong = LockKey::new(cost!(), "000000", [3; SALT_LEN]).expect("a key");
     assert!(reseal(&bytes, &wrong, &mut other, [5; NONCE_LEN]).is_err());
     assert!(wrong.seal_next([1; NONCE_LEN], b"x").is_some());
+    // A frame with a generation is not changed here: that would drop it.
+    let mut keyed = LockKey::new(cost!(), PIN, [9; SALT_LEN]).expect("a key");
+    let generation = keyed
+        .seal_generation([10; NONCE_LEN], 3, b"the setup text")
+        .expect("sealed");
+    assert!(matches!(
+        change(
+            &generation,
+            PIN,
+            cost!(),
+            "654321",
+            [1; SALT_LEN],
+            [2; NONCE_LEN]
+        ),
+        Err(LockError::Fault(_))
+    ));
 }
 
 #[test]

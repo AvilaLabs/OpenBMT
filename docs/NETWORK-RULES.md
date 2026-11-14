@@ -65,7 +65,8 @@ thin driver that owns the sockets.
 - **NR-14.** A handshake that is not finished in 30 seconds ends the
   connection. After the handshake the counter sends a `ping` every 2
   minutes; a peer that has not answered the last ping when the next is
-  due is disconnected. A peer's `ping` is answered.
+  due is disconnected. A peer's `ping` is answered. A timeout here drops the
+  connection and bans nobody: a slow path can cause it (NR-25).
 
 ## 3. Which peers
 
@@ -161,11 +162,11 @@ thin driver that owns the sockets.
 - **NR-43.** A downloaded block is handed to the watcher (WR-20 to
   WR-22). If the block pays a watched script and a peer's filter for it
   did not match, that peer sent a false filter (NR-25).
-- **NR-44.** While any sale has a payment that is seen and not yet
-  confirmed, the counter downloads every new block in full, whatever the
-  filters say. A transaction that spends the payment's coins and pays the
-  shop nothing is in no filter the counter can match, because the counter
-  does not know the scripts of the customer's coins. Reading the whole
+- **NR-44.** While any live sale has received something that is not yet at the
+  shop's confirmation depth, the counter downloads every new block in full,
+  whatever the filters say. A transaction that spends the payment's coins and
+  pays the shop nothing is in no filter the counter can match, because the
+  counter does not know the scripts of the customer's coins. Reading the whole
   block is the only way to see it (WR-42).
 - **NR-45.** A block is asked of one peer at a time, with 60 seconds to
   answer **[to tune]**, then of another. A peer that has shown the block
@@ -212,10 +213,11 @@ thin driver that owns the sockets.
   when the shop makes a sale. At most 5,000 requests are out at once, and
   at most 1,000 of them with one peer, so that a peer which announces
   much and answers nothing cannot hold up the others.
-- **NR-52.** A shop can choose "less data": transactions are then fetched
-  only from the opening of a sale until its payment confirms or the sale
-  ends, and for 10 minutes after. The settings screen says what this
-  tells peers.
+- **NR-52.** "Less data" is not offered yet. The peer layer can stop
+  fetching transactions (`set_fetch_transactions`), and no app turns that
+  on. When it is offered, transactions are fetched only from the opening of
+  a sale until its payment confirms or the sale ends, and for 10 minutes
+  after, and the settings screen says what this tells peers.
 - **NR-53.** A fetched transaction is handed to the watcher as a sighting
   from every peer that announced it (WR-40), at most 8. A later
   announcement of the same transaction by another peer is a further

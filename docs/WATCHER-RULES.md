@@ -199,9 +199,12 @@ that.
 - **WR-41.** Peers are counted by network group, not by address. Two peers
   in one group count once. The groups: an IPv4 address by its first 16
   bits; an IPv6 address by its first 32 bits; an IPv4 address carried
-  inside IPv6 (mapped, 6to4, Teredo) by the IPv4 rule. Every peer reached
-  by a name that anyone can make without cost (Tor, I2P, CJDNS) is in one
-  single group together, because an attacker can be all of them. Local
+  inside IPv6 (mapped, 6to4, Teredo) by the IPv4 rule. An onion peer is
+  in one of 16 groups by the first 4 bits of its key, as Bitcoin Core does
+  (NR-93); an attacker can make onion names in every one of them, so those
+  groups are weaker than the IP groups. Every other peer reached by a name
+  that anyone can make without cost (I2P, CJDNS) is in one single group
+  together. Local
   and private addresses are one single group as well. The Box is not a
   peer and is never counted as one.
 - **WR-42.** Two different transactions conflict when they spend at least

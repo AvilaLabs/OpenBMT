@@ -51,19 +51,21 @@ funds.**
   write whose nonce would repeat the last one under the same key is
   refused. The nonce is remembered before the frame is returned, so that a
   write that fails after it still never repeats it.
-- **LC-05. A wrong PIN.** A wrong PIN and a frame whose ciphertext, salt,
-  nonce or parameters were changed give the same answer: the tag does not
-  verify, and nothing is returned. The key made from a PIN is overwritten
-  when it is dropped, and so are the bytes opened inside a call that does
-  not hand them on.
+- **LC-05. A wrong PIN.** A wrong PIN and a frame whose ciphertext, salt or
+  nonce were changed give the same answer: the tag does not verify, and
+  nothing is returned. Parameters outside the limits or a changed length make
+  the frame unreadable, which is told apart. The key made from a PIN is
+  overwritten when it is dropped, and so are the bytes opened inside a call
+  that does not hand them on.
 - **LC-06. Changing the PIN.** The current PIN is needed. The new PIN is
   checked against LC-03, a new salt and a new nonce are used, and the same
-  bytes are locked again in one step: nothing is returned unless the
-  current PIN opened the frame and the new PIN was taken. A salt or a nonce
-  that is the old frame's own is refused. A frame of version 1 stays version
-  1; a frame of version 2 keeps its contents, with the generation raised by
-  one, and the Key app stores it only when the stored generation is still
-  the one it opened (SR-92).
+  bytes are locked again in one step: nothing is returned unless the current
+  PIN opened the frame and the new PIN was taken. A frame of version 1 is
+  changed by `change`, which refuses a salt or a nonce that is the old frame's
+  own, and refuses a frame of version 2. A frame of version 2 is changed by
+  `reseal` under a key with a new salt: it keeps its contents, with the
+  generation raised by one, and the Key app stores it only when the stored
+  generation is still the one it opened (SR-92).
 
 ## 3. The cost under test
 

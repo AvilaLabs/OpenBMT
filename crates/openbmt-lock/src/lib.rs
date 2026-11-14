@@ -562,6 +562,14 @@ pub fn change(
     nonce: [u8; NONCE_LEN],
 ) -> Result<Vec<u8>, LockError> {
     let frame = decode(stored).map_err(LockError::Unreadable)?;
+    // A frame with a generation (SR-92) is changed through its keys, with
+    // `reseal`, which raises the generation; locking its bytes again here
+    // would drop it.
+    if frame.header.version == VERSION_GENERATION {
+        return Err(LockError::Fault(
+            "a frame with a generation is changed with reseal",
+        ));
+    }
     if frame.header.salt == salt || frame.header.nonce == nonce {
         return Err(LockError::Fault(
             "the salt or the nonce repeats the frame's",
