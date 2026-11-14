@@ -246,29 +246,29 @@ by hand. To write it again, run the test
 | SwapFailed | Lightning payment unfinished | The swap provider did not lock the bitcoin in time, so the customer's payment was cancelled and goes back to them. | Ask the customer to pay again, or take another payment. | the cashier | CR-223 |
 | SwapUnavailable | Lightning off for now | The swap provider could not be reached, or refused this amount. | The same code still takes bitcoin on-chain. | the cashier | CR-219 |
 | SwapClaimStuck | Lightning claim waiting | A Lightning sale's claim has not confirmed and the provider's deadline is near. | Nothing to do. The counter keeps raising the fee. If the deadline passes, the sale is shown unpaid. | the owner | CR-222 |
-| ShopLightning::NoSeed | WORDS_NEEDED_SL76_NO_SEED | WORDS_NEEDED_SL76_NO_SEED | WORDS_NEEDED_SL76_NO_SEED | a manager | SL-76 |
-| ShopLightning::Starting | WORDS_NEEDED_SL41_STARTING | WORDS_NEEDED_SL41_STARTING | WORDS_NEEDED_SL41_STARTING | a manager | SL-41 |
-| ShopLightning::Mainnet | WORDS_NEEDED_SL60_MAINNET | WORDS_NEEDED_SL60_MAINNET | WORDS_NEEDED_SL60_MAINNET | a manager | SL-60 |
-| ShopLightning::NoWallet | WORDS_NEEDED_SL33_NO_WALLET | WORDS_NEEDED_SL33_NO_WALLET | WORDS_NEEDED_SL33_NO_WALLET | a manager | SL-33 |
-| ShopLightning::NotTheBox | WORDS_NEEDED_SL73_NOT_THE_BOX | WORDS_NEEDED_SL73_NOT_THE_BOX | WORDS_NEEDED_SL73_NOT_THE_BOX | a manager | SL-73 |
-| ShopLightning::NoRoute | WORDS_NEEDED_SL32_NO_ROUTE | WORDS_NEEDED_SL32_NO_ROUTE | WORDS_NEEDED_SL32_NO_ROUTE | a manager | SL-32 |
-| ShopLightning::NotStarted | WORDS_NEEDED_SL41_NOT_STARTED | WORDS_NEEDED_SL41_NOT_STARTED | WORDS_NEEDED_SL41_NOT_STARTED | a manager | SL-41 |
-| ShopLightning::Closing | WORDS_NEEDED_SL77_CLOSING | WORDS_NEEDED_SL77_CLOSING | WORDS_NEEDED_SL77_CLOSING | a manager | SL-77 |
-| ShopLightning::SecondDeviceAway | WORDS_NEEDED_SL41_SECOND_DEVICE_AWAY | WORDS_NEEDED_SL41_SECOND_DEVICE_AWAY | WORDS_NEEDED_SL41_SECOND_DEVICE_AWAY | a manager | SL-41 |
-| ShopLightning::ChainBehind | WORDS_NEEDED_SL41_CHAIN_BEHIND | WORDS_NEEDED_SL41_CHAIN_BEHIND | WORDS_NEEDED_SL41_CHAIN_BEHIND | a manager | SL-41 |
-| ShopLightning::NoRoom | WORDS_NEEDED_SL40_NO_ROOM | WORDS_NEEDED_SL40_NO_ROOM | WORDS_NEEDED_SL40_NO_ROOM | a manager | SL-40 |
-| ShopLightning::NoAmount | WORDS_NEEDED_SL41_NO_AMOUNT | WORDS_NEEDED_SL41_NO_AMOUNT | WORDS_NEEDED_SL41_NO_AMOUNT | a manager | SL-41 |
-| ShopLightning::ProviderAway | WORDS_NEEDED_SL41_PROVIDER_AWAY | WORDS_NEEDED_SL41_PROVIDER_AWAY | WORDS_NEEDED_SL41_PROVIDER_AWAY | a manager | SL-41 |
-| ShopLightning::FeeAboveMax | WORDS_NEEDED_SL29_FEE_ABOVE_MAX | WORDS_NEEDED_SL29_FEE_ABOVE_MAX | WORDS_NEEDED_SL29_FEE_ABOVE_MAX | a manager | SL-29 |
-| ShopLightning::WindowTooShort | WORDS_NEEDED_SL30_WINDOW_TOO_SHORT | WORDS_NEEDED_SL30_WINDOW_TOO_SHORT | WORDS_NEEDED_SL30_WINDOW_TOO_SHORT | a manager | SL-30 |
-| ShopLightning::NotStored | WORDS_NEEDED_SL20_NOT_STORED | WORDS_NEEDED_SL20_NOT_STORED | WORDS_NEEDED_SL20_NOT_STORED | a manager | SL-20 |
-| ShopLightning::Library | WORDS_NEEDED_SL41_LIBRARY | WORDS_NEEDED_SL41_LIBRARY | WORDS_NEEDED_SL41_LIBRARY | a manager | SL-41 |
-| SeedNotTaken::NotHere | WORDS_NEEDED_SL76_NOT_HERE | WORDS_NEEDED_SL76_NOT_HERE | WORDS_NEEDED_SL76_NOT_HERE | a manager | SL-76 |
-| SeedNotTaken::NotASeed | WORDS_NEEDED_SL76_NOT_A_KEY | WORDS_NEEDED_SL76_NOT_A_KEY | WORDS_NEEDED_SL76_NOT_A_KEY | a manager | SL-76 |
-| SeedNotTaken::WrongNode | WORDS_NEEDED_SL72_WRONG_NODE | WORDS_NEEDED_SL72_WRONG_NODE | WORDS_NEEDED_SL72_WRONG_NODE | a manager | SL-72 |
-| SeedNotTaken::AlreadyStored | WORDS_NEEDED_SL76_ALREADY_STORED | WORDS_NEEDED_SL76_ALREADY_STORED | WORDS_NEEDED_SL76_ALREADY_STORED | a manager | SL-76 |
-| ShopLightning::scan | WORDS_NEEDED_SL76_SCAN_THE_KEY | WORDS_NEEDED_SL76_SCAN_THE_KEY | WORDS_NEEDED_SL76_SCAN_THE_KEY | a manager | SL-76 |
-| ShopLightning::kept | WORDS_NEEDED_SL76_KEY_KEPT | WORDS_NEEDED_SL76_KEY_KEPT | WORDS_NEEDED_SL76_KEY_KEPT | a manager | SL-76 |
+| ShopLightning::NoSeed | Lightning key not scanned | Shop Lightning runs on this counter, but its Lightning key has not been scanned here yet. Sales take on-chain payments only. | Scan the stick's Lightning key in the manager's menu, under Lightning key. | a manager | SL-76 |
+| ShopLightning::Starting | Lightning is starting | The counter is starting Shop Lightning. Until it is ready, sales take on-chain payments only. | Wait a moment. Lightning is offered once it has started. | a manager | SL-41 |
+| ShopLightning::Mainnet | No Lightning on real bitcoin | Shop Lightning is not ready for real bitcoin in this release, so this counter takes on-chain payments only. | Nothing needs doing. Sales go on with on-chain payments. | a manager | SL-60 |
+| ShopLightning::NoWallet | No wallet to move money to | Shop Lightning moves its money to the shop's own wallet, and this counter was paired without one. | Turn Shop Lightning off on the owner phone, or pair this counter again with the shop's own wallet. | a manager | SL-33 |
+| ShopLightning::NotTheBox | Not connected to the Box | Shop Lightning keeps a second copy on the shop's Box, and this counter was paired to reach the shop another way. | Pair this counter again through the shop's Box. Until then, sales take on-chain payments only. | a manager | SL-73 |
+| ShopLightning::NoRoute | Tor not reached | The shop's settings send Lightning through Tor, and this counter cannot reach Tor, so Lightning has not started. | Check the counter's network, then restart the counter. | a manager | SL-32 |
+| ShopLightning::NotStarted | Lightning did not start | Shop Lightning could not start on this counter, so sales take on-chain payments only. | Restart the counter. If Lightning still does not start, see Details. | a manager | SL-41 |
+| ShopLightning::Closing | Lightning is closing | Shop Lightning was turned off or moved, so this counter is closing its channels and offers no Lightning. | Keep the counter on and online until the money is back in the shop's wallet. | a manager | SL-77 |
+| ShopLightning::SecondDeviceAway | Box not answering | The Box keeps Shop Lightning's second copy and is not answering, so this counter offers no Lightning for now. | Check that the Box is on and connected. Lightning comes back by itself when it answers. | a manager | SL-41 |
+| ShopLightning::ChainBehind | Lightning catching up | The counter has not caught up with the newest blocks yet, so it offers no Lightning for now. | Keep the counter online for a few minutes. Lightning comes back by itself. | a manager | SL-41 |
+| ShopLightning::NoRoom | Too much for Lightning now | This amount is more than Lightning can take in right now, so the sale shows the on-chain code only. | Take this payment on-chain. Smaller sales can still be paid by Lightning. | a manager | SL-40 |
+| ShopLightning::NoAmount | No amount for Lightning | A Lightning payment needs an amount above zero, and this sale has none yet. | Enter the amount of the sale. | a manager | SL-41 |
+| ShopLightning::ProviderAway | Lightning provider away | No channel can take this payment and the shop's Lightning provider is not answering, so the sale shows the on-chain code only. | Take this payment on-chain. Lightning comes back by itself when the provider answers. | a manager | SL-41 |
+| ShopLightning::FeeAboveMax | Opening fee above the limit | Paying by Lightning would open a new channel, and the provider asks more for that than the shop's most for one opening. | Take this payment on-chain, or raise the most for one opening on the owner phone. | a manager | SL-29 |
+| ShopLightning::WindowTooShort | Provider not used | The provider gives the shop less than a week to come back online after a problem with a channel, so Lightning is not used. | Pick another provider on the owner phone. Until then, sales take on-chain payments only. | a manager | SL-30 |
+| ShopLightning::NotStored | Invoice not kept twice | The Lightning invoice could not be kept on both this counter and the Box, so it is not shown. | Take this payment on-chain. | a manager | SL-20 |
+| ShopLightning::Library | Invoice not made | Shop Lightning could not make an invoice for this sale, so it shows the on-chain code only. | Take this payment on-chain. If it happens again, see Details. | a manager | SL-41 |
+| SeedNotTaken::NotHere | Not the Lightning counter | The shop's settings do not run Shop Lightning on this counter, so it takes no Lightning key. Nothing was kept. | Scan the key on the counter the owner phone picked for Lightning. | a manager | SL-76 |
+| SeedNotTaken::NotASeed | Not a Lightning key | The code scanned is not the stick's Lightning key, so nothing was kept. | Scan the code the stick shows for the Lightning key. | a manager | SL-76 |
+| SeedNotTaken::WrongNode | Wrong Lightning key | This key does not match the one the owner phone set when it turned Shop Lightning on, so nothing was kept. | Scan the Lightning key from the stick the owner phone read when Lightning was turned on. | a manager | SL-72 |
+| SeedNotTaken::AlreadyStored | Lightning key already kept | This counter already keeps a Lightning key, so nothing changed. | Nothing more to do. | a manager | SL-76 |
+| ShopLightning::scan | Scan the Lightning key | The stick shows the Lightning key as a code. This counter checks it against the shop's settings before keeping it. | Hold the stick's code in front of the camera. | a manager | SL-76 |
+| ShopLightning::kept | Lightning key kept | The key matches the shop's settings and is kept on this counter only. Lightning starts now. | Put the stick back in its safe place. | a manager | SL-76 |
 | ConfirmRefused::NothingWaits | Nothing to confirm | No change waits at this counter, or a newer one has taken its place, so nothing was confirmed. | Open Change to confirm again to see what waits now. | a manager | CR-241 |
 | ConfirmRefused::NotWritten | Confirmation not saved | The counter could not save its confirmation, so nothing was confirmed and nothing changed. | Try again. If it fails again, tell the owner. | a manager | CR-40 |
 | OwnNodeSettingRefused::NotTor | Not a Tor address | A home-network address cannot prove which machine answers, so it cannot be your own node. | Use your node's Tor address, which ends in .onion. Your node's own app shows it, often under its connection details. | a manager | CR-101 |

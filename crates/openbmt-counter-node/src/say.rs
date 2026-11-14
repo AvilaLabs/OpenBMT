@@ -138,11 +138,35 @@ fn needed(tone: Tone, placeholder: &'static str, who: Who) -> Words {
     Words::new(tone, placeholder, placeholder, who, placeholder)
 }
 
-/// Shop Lightning's words (SL-41, SL-60, SL-72 to SL-77) are placeholders
-/// until they are written: the name of the rule and of the state stands in
-/// the heading and both sentences, once each.
+/// Shop Lightning's words (SL-20 to SL-77), by the name of their state.
 fn shopln_said(tone: Tone, key: &'static str, who: Who) -> Words {
-    Words::new(tone, key, key, who, key)
+    let (heading, what, next) = match key {
+        "WORDS_NEEDED_SL76_NO_SEED" => ("Lightning key not scanned", "Shop Lightning runs on this counter, but its Lightning key has not been scanned here yet. Sales take on-chain payments only.", "Scan the stick's Lightning key in the manager's menu, under Lightning key."),
+        "WORDS_NEEDED_SL41_STARTING" => ("Lightning is starting", "The counter is starting Shop Lightning. Until it is ready, sales take on-chain payments only.", "Wait a moment. Lightning is offered once it has started."),
+        "WORDS_NEEDED_SL60_MAINNET" => ("No Lightning on real bitcoin", "Shop Lightning is not ready for real bitcoin in this release, so this counter takes on-chain payments only.", "Nothing needs doing. Sales go on with on-chain payments."),
+        "WORDS_NEEDED_SL33_NO_WALLET" => ("No wallet to move money to", "Shop Lightning moves its money to the shop's own wallet, and this counter was paired without one.", "Turn Shop Lightning off on the owner phone, or pair this counter again with the shop's own wallet."),
+        "WORDS_NEEDED_SL73_NOT_THE_BOX" => ("Not connected to the Box", "Shop Lightning keeps a second copy on the shop's Box, and this counter was paired to reach the shop another way.", "Pair this counter again through the shop's Box. Until then, sales take on-chain payments only."),
+        "WORDS_NEEDED_SL32_NO_ROUTE" => ("Tor not reached", "The shop's settings send Lightning through Tor, and this counter cannot reach Tor, so Lightning has not started.", "Check the counter's network, then restart the counter."),
+        "WORDS_NEEDED_SL41_NOT_STARTED" => ("Lightning did not start", "Shop Lightning could not start on this counter, so sales take on-chain payments only.", "Restart the counter. If Lightning still does not start, see Details."),
+        "WORDS_NEEDED_SL77_CLOSING" => ("Lightning is closing", "Shop Lightning was turned off or moved, so this counter is closing its channels and offers no Lightning.", "Keep the counter on and online until the money is back in the shop's wallet."),
+        "WORDS_NEEDED_SL41_SECOND_DEVICE_AWAY" => ("Box not answering", "The Box keeps Shop Lightning's second copy and is not answering, so this counter offers no Lightning for now.", "Check that the Box is on and connected. Lightning comes back by itself when it answers."),
+        "WORDS_NEEDED_SL41_CHAIN_BEHIND" => ("Lightning catching up", "The counter has not caught up with the newest blocks yet, so it offers no Lightning for now.", "Keep the counter online for a few minutes. Lightning comes back by itself."),
+        "WORDS_NEEDED_SL40_NO_ROOM" => ("Too much for Lightning now", "This amount is more than Lightning can take in right now, so the sale shows the on-chain code only.", "Take this payment on-chain. Smaller sales can still be paid by Lightning."),
+        "WORDS_NEEDED_SL41_NO_AMOUNT" => ("No amount for Lightning", "A Lightning payment needs an amount above zero, and this sale has none yet.", "Enter the amount of the sale."),
+        "WORDS_NEEDED_SL41_PROVIDER_AWAY" => ("Lightning provider away", "No channel can take this payment and the shop's Lightning provider is not answering, so the sale shows the on-chain code only.", "Take this payment on-chain. Lightning comes back by itself when the provider answers."),
+        "WORDS_NEEDED_SL29_FEE_ABOVE_MAX" => ("Opening fee above the limit", "Paying by Lightning would open a new channel, and the provider asks more for that than the shop's most for one opening.", "Take this payment on-chain, or raise the most for one opening on the owner phone."),
+        "WORDS_NEEDED_SL30_WINDOW_TOO_SHORT" => ("Provider not used", "The provider gives the shop less than a week to come back online after a problem with a channel, so Lightning is not used.", "Pick another provider on the owner phone. Until then, sales take on-chain payments only."),
+        "WORDS_NEEDED_SL20_NOT_STORED" => ("Invoice not kept twice", "The Lightning invoice could not be kept on both this counter and the Box, so it is not shown.", "Take this payment on-chain."),
+        "WORDS_NEEDED_SL41_LIBRARY" => ("Invoice not made", "Shop Lightning could not make an invoice for this sale, so it shows the on-chain code only.", "Take this payment on-chain. If it happens again, see Details."),
+        "WORDS_NEEDED_SL76_NOT_HERE" => ("Not the Lightning counter", "The shop's settings do not run Shop Lightning on this counter, so it takes no Lightning key. Nothing was kept.", "Scan the key on the counter the owner phone picked for Lightning."),
+        "WORDS_NEEDED_SL76_NOT_A_KEY" => ("Not a Lightning key", "The code scanned is not the stick's Lightning key, so nothing was kept.", "Scan the code the stick shows for the Lightning key."),
+        "WORDS_NEEDED_SL72_WRONG_NODE" => ("Wrong Lightning key", "This key does not match the one the owner phone set when it turned Shop Lightning on, so nothing was kept.", "Scan the Lightning key from the stick the owner phone read when Lightning was turned on."),
+        "WORDS_NEEDED_SL76_ALREADY_STORED" => ("Lightning key already kept", "This counter already keeps a Lightning key, so nothing changed.", "Nothing more to do."),
+        "WORDS_NEEDED_SL76_SCAN_THE_KEY" => ("Scan the Lightning key", "The stick shows the Lightning key as a code. This counter checks it against the shop's settings before keeping it.", "Hold the stick's code in front of the camera."),
+        "WORDS_NEEDED_SL76_KEY_KEPT" => ("Lightning key kept", "The key matches the shop's settings and is kept on this counter only. Lightning starts now.", "Put the stick back in its safe place."),
+        _ => (key, key, key),
+    };
+    Words::new(tone, heading, what, who, next)
 }
 
 /// SL-41, SL-60, SL-73, SL-76, SL-77: what a manager is told while Lightning

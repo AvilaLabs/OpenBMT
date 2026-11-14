@@ -1370,9 +1370,9 @@ object AppModelTest {
     // ---- the switch from the starter wallet (CR-259 to CR-264) -----------------------------
 
     private fun cr260ConfirmSwitchTests(appDir: File?) {
-        ok(ShopLightningWords.placeholders.all { it.startsWith("WORDS_NEEDED_SL76_") } && ShopLightningWords.placeholders.toSet().size == ShopLightningWords.placeholders.size, "SL-76: the texts of the Lightning key page are placeholders that name their rule, once each")
-        ok(ShopLightningWords.placeholders.all { ShopLightningWords.isPlaceholder(ShopLightningWords.said(it)) && ShopLightningWords.said(it).heading == ShopLightningWords.said(it).what }, "SL-76: each unwritten text shows its own name")
-        ok(ShopLightningWords.all().map { it.second }.toSet() == ShopLightningWords.placeholders.toSet(), "SL-76: the list of the page is the list of placeholders")
+        ok(ShopLightningWords.all().none { it.second.startsWith("WORDS_NEEDED_") } && ShopLightningWords.all().map { it.second }.toSet().size == 5, "SL-76: every text of the Lightning key page is written, once each")
+        ok(SayCheck.problem(ShopLightningWords.kept) == null && !ShopLightningWords.isPlaceholder(ShopLightningWords.kept), "SL-76: the line that says the key was kept passes the checks of the words: ${SayCheck.problem(ShopLightningWords.kept)}")
+        ok(ShopLightningWords.kept.tone == Tones.GOOD && ShopLightningWords.kept.who == Who.MANAGER, "SL-76: the key kept is good news for the manager")
         ok(ShopLightningWords.FILE != LightningSetup.FILE && ShopLightningWords.KEY_ALIAS != LightningSetup.KEY_ALIAS, "SL-76: the seed has its own file and its own Keystore key")
         ok(SwitchWords.BAR == "New wallet to check" && SwitchWords.SAME == "Same address" && SwitchWords.DIFFERENT == "Different", "CR-260: the menu row and the two buttons are as the rules name them")
         ok(ConfirmSwitch.address("bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq") == "bc1q ar0s rrr7 xfkv y5l6 43ly dnw9 re59 gtzz wf5m dq", "CR-260: the address is shown in groups of four")

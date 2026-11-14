@@ -138,8 +138,8 @@ fn sl_76_the_lightning_counter_without_a_seed_asks_for_it_and_offers_no_invoice(
     let SaleLightning::Unavailable(words) = rig.node.lightning_sale(index) else {
         panic!("the sale shows the reason");
     };
-    assert_eq!(words.heading, "WORDS_NEEDED_SL76_NO_SEED");
-    assert!(is_placeholder(&words));
+    assert_eq!(words.heading, "Lightning key not scanned");
+    assert_eq!(words.code, Some("SL-76"));
     let status = rig.node.shop_lightning_status().unwrap();
     assert!(status.needs_seed);
     assert_eq!(status.why, Some(Why::NoSeed));
@@ -155,7 +155,7 @@ fn sl_72_a_seed_of_another_id_is_refused_with_words_and_nothing_is_stored() {
         .unwrap_err();
     assert!(matches!(e, SeedNotTaken::WrongNode(_)));
     let words = e.words();
-    assert_eq!(words.heading, "WORDS_NEEDED_SL72_WRONG_NODE");
+    assert_eq!(words.heading, "Wrong Lightning key");
     assert_eq!(words.code, Some("SL-72"));
     // Nothing was kept: still asking for the key, and no file made.
     let status = rig.node.shop_lightning_status().unwrap();
@@ -207,7 +207,7 @@ fn sl_33_a_counter_with_the_key_and_no_wallet_description_starts_nothing_and_say
     let SaleLightning::Unavailable(words) = rig.node.lightning_sale(index) else {
         panic!("the sale shows the reason");
     };
-    assert_eq!(words.heading, "WORDS_NEEDED_SL33_NO_WALLET");
+    assert_eq!(words.heading, "No wallet to move money to");
     assert_eq!(
         rig.node.shop_lightning_status().unwrap().why,
         Some(Why::NoWallet)
@@ -263,16 +263,16 @@ fn sl_77_a_plan_whose_seed_is_gone_is_forgotten() {
 }
 
 #[test]
-fn sl_41_every_reason_has_words_that_are_placeholders_with_their_own_name() {
+fn sl_41_every_reason_has_written_words_of_its_own() {
     let all = all_shopln_words();
     let mut seen = std::collections::BTreeSet::new();
     for (name, words) in &all {
-        assert!(is_placeholder(words), "{name}");
-        assert_eq!(words.heading, words.what, "{name}");
-        assert_eq!(words.heading, words.next, "{name}");
+        assert!(!is_placeholder(words), "{name}");
+        assert_eq!(openbmt_core::say::check(words), Ok(()), "{name}");
         assert!(seen.insert(words.heading.clone()), "{name} repeats");
-        assert!(words.heading.starts_with("WORDS_NEEDED_SL"), "{name}");
+        assert!(words.code.is_some_and(|c| c.starts_with("SL-")), "{name}");
     }
+    assert_eq!(openbmt_core::say::check_distinct(&all), Ok(()));
     // The node's own text is for the small print.
     let w = shopln_words(&Why::Node(
         openbmt_lightning_node::room::OnChainReason::SecondDeviceAway,
