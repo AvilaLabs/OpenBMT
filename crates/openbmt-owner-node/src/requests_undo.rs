@@ -15,8 +15,8 @@ use crate::watcher::write_file;
 /// The marker's file in the node's folder.
 pub(crate) const REQUESTS_UNDO_FILE: &str = "requests-undo";
 
-/// Magic of the marker: the free frame magic `OBM` and byte 0x1a.
-const MAGIC: [u8; 4] = *b"OBM\x1a";
+/// Magic of the marker: the free frame magic `OBM` and byte 0x18.
+const MAGIC: [u8; 4] = *b"OBM\x18";
 
 fn to_bytes(fork: u32) -> Vec<u8> {
     let mut out = wire::start(&MAGIC, 4);
