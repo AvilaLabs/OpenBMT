@@ -650,8 +650,9 @@ code and checks the payment.
   it holds in memory, in constant time. The copy is replaced when the Box
   makes a key, and read again when another process has replaced the file,
   so a new key works at the next request. A request with a wrong token
-  never waits for the Box's state: only an accepted request takes it. No key file, no header, a header that is not a bearer
-  token or a wrong token is a 401 with the words `tillKeyWrong`. The Box
+  never waits for the Box's state: only an accepted request takes it. No
+  key file, no header, a header that is not a bearer token or a wrong token
+  is a 401 with the words `tillKeyWrong`. The Box
   never prints or logs the key or the token.
 - **BX-72.** `POST /till/v1/sales` takes `Content-Type: application/json`
   and an object of strings: `counter`, `amount`, `currency`, `request` and

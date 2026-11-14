@@ -369,15 +369,15 @@ by hand. To write it again, run the test
 | SwitchStepRefused::NotWritten | Switch not finished yet | The counter could not write every part of the switch. It finishes the switch at its next start. | Restart the counter. | a manager | CR-40 |
 | SwitchNotice::Dropped | Wallet check expired | The new wallet waited seven days without a check, so it was dropped. Sales still go to the starter wallet. | Send the switch again from the owner phone when a manager can check it. | a manager | CR-259 |
 | SwitchHomeLine | A new wallet waits | The owner phone sent a new wallet for this counter's sales. | Open New wallet to check in the manager's menu. | a manager | CR-260 |
-| StarterRefused::Frame | WORDS_NEEDED_CR272_NOT_A_LINE | WORDS_NEEDED_CR272_NOT_A_LINE | WORDS_NEEDED_CR272_NOT_A_LINE | the owner | CR-272 |
-| StarterRefused::NotStarter | WORDS_NEEDED_CR272_NOT_STARTER | WORDS_NEEDED_CR272_NOT_STARTER | WORDS_NEEDED_CR272_NOT_STARTER | the owner | CR-272 |
-| StarterRefused::NotFromOwner | WORDS_NEEDED_CR272_NOT_FROM_OWNER | WORDS_NEEDED_CR272_NOT_FROM_OWNER | WORDS_NEEDED_CR272_NOT_FROM_OWNER | the owner | CR-272 |
-| StarterRefused::Old | WORDS_NEEDED_CR272_OLD | WORDS_NEEDED_CR272_OLD | WORDS_NEEDED_CR272_OLD | the owner | CR-272 |
-| StarterRefused::NotWritten | WORDS_NEEDED_CR272_NOT_SAVED | WORDS_NEEDED_CR272_NOT_SAVED | WORDS_NEEDED_CR272_NOT_SAVED | the owner | CR-272 |
-| StarterRefused::NoSuchPayment | WORDS_NEEDED_CR274_NO_SUCH_PAYMENT | WORDS_NEEDED_CR274_NO_SUCH_PAYMENT | WORDS_NEEDED_CR274_NO_SUCH_PAYMENT | the cashier | CR-274 |
-| StarterStopped | WORDS_NEEDED_CR273_STOPPED | WORDS_NEEDED_CR273_STOPPED | WORDS_NEEDED_CR273_STOPPED | the cashier | CR-273 |
-| StarterUnchecked | WORDS_NEEDED_CR273_UNCHECKED | WORDS_NEEDED_CR273_UNCHECKED | WORDS_NEEDED_CR273_UNCHECKED | a manager | CR-273 |
-| StarterCards | WORDS_NEEDED_CR274_CARDS | WORDS_NEEDED_CR274_CARDS | WORDS_NEEDED_CR274_CARDS | a manager | CR-274 |
+| StarterRefused::Frame | Starter line not read | A message from the owner phone is not a starter line this counter can read, so nothing changed. | Nothing to do. The owner phone sends a new line soon. | the owner | CR-272 |
+| StarterRefused::NotStarter | No starter wallet here | This counter is not paired with the starter wallet, so it takes no starter line. Nothing changed. | Nothing to do on this counter. | the owner | CR-272 |
+| StarterRefused::NotFromOwner | Line not from the owner | The starter line is not signed by the owner phone this counter was paired with, so it was not taken. | Check that only the shop's own owner phone is linked to this counter. | the owner | CR-272 |
+| StarterRefused::Old | Older starter line | This counter already has a newer starter line than this one, so it was not taken. | Nothing to do. | the owner | CR-272 |
+| StarterRefused::NotWritten | Starter line not saved | The counter could not save the starter line, so it keeps the last one it had. | Check that the counter has room. The owner phone sends a new line soon. | the owner | CR-272 |
+| StarterRefused::NoSuchPayment | Payment not on this counter | That payment is not among the starter wallet's payments this counter shows, so nothing was marked. | Go back to Home and tap Seen on a card that is there. | the cashier | CR-274 |
+| StarterStopped | No bitcoin sales now | The starter wallet holds as much as the owner's limit, and the owner asked to stop bitcoin sales above it. | Take another way to pay. Bitcoin sales come back when the owner moves the money or raises the limit. | the cashier | CR-273 |
+| StarterUnchecked | Limit cannot be checked | The owner phone's last word on the starter wallet is too old to say whether it holds more than the limit. | Bitcoin sales go on. Open the owner app so the counter hears from it again. | a manager | CR-273 |
+| StarterCards | Starter wallet payments | Money left the starter wallet. Each card shows a payment until someone here taps Seen. | Check each one with the owner. A payment the owner phone did not make needs a look now. | a manager | CR-274 |
 | Switched | Switched to the new wallet | From now on this counter's sales go to the new wallet. | Nothing more to do on this counter. | nobody | CR-261 |
 | SwitchDifferent | New wallet not taken | The manager said the address on the counter differs from the new wallet's own screen, so this counter keeps paying into the starter wallet. | Check that the right wallet was connected on the owner phone. If it was, the owner phone may not be safe to use. | the owner | CR-260 |
 | NodeOnlyLine::Usable | Your node is checking | Your node is connected and up to date, and it alone checks this counter's payments. | Nothing to do. | nobody | WR-67 |
