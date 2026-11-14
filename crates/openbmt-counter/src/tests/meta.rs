@@ -40,7 +40,7 @@ const TEST_SOURCES: [&str; 28] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 102] = [
+const NOT_HERE: [(&str, &str); 107] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -528,6 +528,26 @@ const NOT_HERE: [(&str, &str); 102] = [
         "the words are listed in `openbmt-counter-node`, `openbmt-counter-ffi` and the app (SC-12)",
     ),
     (
+        "CR-272",
+        "taking a line is the counter node's (`starter`); its tests are there and in `openbmt-counter-ffi`",
+    ),
+    (
+        "CR-273",
+        "the stop decision is a pure function in the counter node's `starter`; its tests are there, and the app shows it (the app's JVM tests)",
+    ),
+    (
+        "CR-274",
+        "the cards and what was seen are the counter node's (`starter`) and the app's; their tests are there and in the app's JVM tests",
+    ),
+    (
+        "CR-275",
+        "the drop after the switch is the counter node's (`starter`, `switch`); its tests are there and in `openbmt-counter-ffi`",
+    ),
+    (
+        "CR-276",
+        "the words are listed in `openbmt-counter-node`, `openbmt-counter-ffi` and the app (SC-12)",
+    ),
+    (
         "CR-254",
         "the Paid screen is the Android app's; its tests are the app's JVM tests \
          (`apps/counter-android`), and the library gives it the reference (`openbmt-counter-ffi`)",
@@ -550,9 +570,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_two_hundred_and_twenty_one_rules() {
+fn the_rules_file_defines_two_hundred_and_twenty_six_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 221);
+    assert_eq!(ids.len(), 226);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -597,6 +617,7 @@ fn the_rules_file_defines_two_hundred_and_twenty_one_rules() {
             && ids.contains("CR-264")
             && ids.contains("CR-266")
             && ids.contains("CR-271")
+            && ids.contains("CR-276")
     );
 }
 

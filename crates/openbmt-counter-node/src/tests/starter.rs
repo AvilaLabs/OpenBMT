@@ -18,7 +18,7 @@ fn payment(n: u8, time: u64) -> LinePayment {
         txid: [n; 32],
         sats: 1_000 * u64::from(n),
         time,
-        by_owner: n % 2 == 0,
+        by_owner: n.is_multiple_of(2),
     }
 }
 

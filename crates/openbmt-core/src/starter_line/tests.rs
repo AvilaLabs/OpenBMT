@@ -6,13 +6,21 @@ fn payment(n: u8) -> LinePayment {
         txid: [n; 32],
         sats: 1000 * u64::from(n),
         time: 1_700_000_000 + u64::from(n),
-        by_owner: n % 2 == 0,
+        by_owner: n.is_multiple_of(2),
     }
 }
 
 fn line(count: u8) -> StarterLine {
     let payments: Vec<LinePayment> = (1..=count).map(payment).collect();
-    StarterLine::sign(&identity(1), 7, 1_700_000_100, 250_000, 300_000, true, &payments)
+    StarterLine::sign(
+        &identity(1),
+        7,
+        1_700_000_100,
+        250_000,
+        300_000,
+        true,
+        &payments,
+    )
 }
 
 #[test]
