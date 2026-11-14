@@ -2195,7 +2195,7 @@ object AppModelTest {
 
     private fun oa_116_the_file_reaches_the_wallet_by_the_persons_pick_and_comes_back_the_same_ways() {
         ok(OwnSpendModel.transports.map { it.transport } == listOf(Transport.Ur, Transport.Bbqr, Transport.File), "the three ways of OA-70, in order")
-        ok(OwnSpendModel.transports.all { it.examples.startsWith("For example ") }, "each with wallets as examples")
+        ok(OwnSpendModel.transports.all { it.examples.startsWith("The wallet ") }, "each with how the wallet shows it, no brand named")
         val c = source("src/android/OwnSpend.kt")
         ok(c.contains("showTransportChoice("), "the person picks, and no choice is made for them")
         ok(c.contains("HardwareModel.UR_PSBT") && c.contains("HardwareModel.BBQR_PSBT") && c.contains("file.fileName"), "a UR of crypto-psbt, a BBQr of type P or a <name>.psbt file")
@@ -3615,7 +3615,7 @@ object AppModelTest {
         r.back(); r.realNext(); ok(r.step == FirstRunStep.Why && r.realPage == 0, "the pages move only inside the real cases")
         val shown = FirstRunWords.all().toMap()
         ok(shown["whyRealCases"] == "Real cases" && shown["realTitle"] == "When someone else holds the money" &&
-            shown["realCase1Place"] == "Lebanon, since 2019" && shown["realBar"] == "Real cases" && shown["realCase4Head"] == "\$64.9 million in savings. \$11.8 million offered back." && shown["whyText2"]!!.contains("with a coin or a die."), "the real cases words are the ones of the words file")
+            shown["realCase1Place"] == "Lebanon, since 2019" && shown["realBar"] == "Real cases" && shown["realCase4Head"] == "\$64.9 million in savings. \$11.8 million offered back." && shown["whyText2"]!!.contains("from a coin or a die."), "the real cases words are the ones of the words file")
         ok(listOf(1, 2, 3, 4).map { shown["realCase${it}Place"]!!.substringBefore(",") } == listOf("Lebanon", "Laiki Bank", "TMON and WeMakePrice", "Synapse"), "the four cases come worst first, in the order of the words file")
         ok(listOf(shown["realCase1Head"], shown["realCase2Head"], shown["realCase3Head"]) == listOf("Six years on, most of their savings are still locked in the banks.", "Of €400,000 taken from one business, about €24,000 came back.", "48,000 sellers have still not been paid for their own sales.") &&
             shown["realCount"] == "{n} of {total}" && FirstRunWords.count(2, 4) == "2 of 4" && shown["realNext"] == "Next case" && shown["realToBitcoin"] == "Your own bitcoin" &&
