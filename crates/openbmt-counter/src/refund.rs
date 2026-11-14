@@ -15,7 +15,7 @@ use openbmt_core::wire::{DecodeError, Reader};
 
 use crate::counter::Actor;
 use crate::desk::{counts_in_window, Role};
-use crate::money::{Amount, Rate, RateSource, MAX_SATS, SATS_PER_BTC};
+use crate::money::{Amount, Currency, Rate, RateSource, MAX_SATS, SATS_PER_BTC};
 use crate::refusal::DestinationRefused;
 
 /// CR-61: the longest destination script, in bytes (a P2WSH or P2TR script).
@@ -119,6 +119,8 @@ pub enum RefundAsk {
     Value {
         /// The amount in minor units.
         minor: u64,
+        /// The currency of the amount: the sale's (CR-196).
+        currency: Currency,
         /// The rate, in minor units per bitcoin.
         rate: Rate,
         /// Where the rate came from (CR-57).
@@ -160,8 +162,10 @@ pub struct RefundRequest {
 pub struct CashRefund {
     /// Who gives the cash. The caller has already checked the PIN.
     pub actor: Actor,
-    /// The amount in the shop's currency, in minor units.
+    /// The amount in the sale's currency, in minor units.
     pub minor: Amount,
+    /// The currency of the amount: the sale's (CR-196).
+    pub currency: Currency,
     /// Why.
     pub reason: String,
 }

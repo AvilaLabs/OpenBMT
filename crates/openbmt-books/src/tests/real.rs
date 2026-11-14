@@ -222,6 +222,7 @@ impl Run {
         self.c
             .requote(
                 o.index,
+                self.c.sale(o.index).expect("a sale").currency(),
                 Rate::new(minor_per_btc).expect("a rate"),
                 &source,
                 self.now,

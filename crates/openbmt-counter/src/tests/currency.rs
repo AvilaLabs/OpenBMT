@@ -6,7 +6,7 @@ use openbmt_core::settings::Limit;
 
 use super::kit::*;
 use crate::money::{value_of, SATS_LABEL};
-use crate::{Amount, Currency, Event, OpenRefused, Rate, RateSource};
+use crate::{Amount, Currency, Event, OpenRefused, Rate, RateSource, RequoteRefused};
 
 /// A world whose settings are in `currency`. For Bitcoin Standard every
 /// limit is its own satoshis (CR-194).
@@ -255,4 +255,36 @@ fn cr_196_a_sale_named_in_another_currency_than_the_settings_is_refused() {
         }
     );
     w.open(5_000);
+}
+
+#[test]
+fn cr_196_a_requote_named_in_another_currency_than_the_sales_is_refused() {
+    let mut w = World::new();
+    let o = w.open(5_000);
+    w.tick(60);
+    let written = w.m.events().len();
+    let eur = Currency::of_shop(ShopCurrency::Eur);
+    let err =
+        w.c.requote(
+            o.index,
+            eur,
+            Rate::new(20_000_000).unwrap(),
+            &fresh(w.now),
+            w.now,
+            &w.chain,
+            &mut w.m,
+        )
+        .unwrap_err();
+    assert_eq!(
+        err,
+        RequoteRefused::WrongCurrency {
+            sale: usd(),
+            named: eur
+        }
+    );
+    assert_eq!(err.rule(), "CR-196");
+    // Nothing was written; the sale's currency requotes.
+    assert_eq!(w.m.events().len(), written);
+    assert_eq!(w.c.sale(o.index).unwrap().quotes().len(), 1);
+    assert!(w.requote(o.index, 20_000_000).is_ok());
 }

@@ -122,6 +122,7 @@ fn scripted_day() -> World {
     let cash = CashRefund {
         actor: max(),
         minor: Amount(100),
+        currency: usd(),
         reason: "till refund".to_string(),
     };
     w.c.refund_in_cash(g, cash, w.now, &w.chain, &mut w.m)

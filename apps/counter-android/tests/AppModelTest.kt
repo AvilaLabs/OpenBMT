@@ -1676,16 +1676,24 @@ object AppModelTest {
         ok(entry.minor == 3345L, "CR-250: more digits follow the share")
         entry.set(0)
         ok(entry.minor == 0L, "CR-250: no share leaves the keypad empty")
+        // CR-196: a sale in EUR with the settings in USD is refunded in EUR: its digits, its code, its currency.
+        val shopUsd = Money.of("USD")!!
+        val saleEur = SaleMoney.of("EUR", shopUsd)
+        ok(saleEur.code == "EUR" && saleEur.show(1_234) == "12.34 EUR" && saleEur.parse("12.34") == 1_234L, "CR-196: a refund of a sale in EUR is in EUR with the settings in USD")
+        ok(SaleMoney.of("JPY", shopUsd).parse("1500") == 1_500L && SaleMoney.of("JPY", shopUsd).parse("12.5") == null, "CR-196: a sale in yen takes whole yen")
+        ok(SaleMoney.of("???", shopUsd).code == "USD", "CR-196: an unknown code falls back to the shop's money")
+        ok(!SaleMoney.byValue(saleEur, shopUsd) && SaleMoney.byValue(shopUsd, shopUsd) && !SaleMoney.byValue(Money.of("SAT")!!, Money.of("SAT")!!), "CR-196: only a sale in the shop's currency is refunded at a price")
         // CR-248: a sale that is in a bill is not offered again.
         val inBill = bill(parts = listOf(BillPart(3, 500, null, true), BillPart(null, 100, PartWay.Cash, true)))
         ok(BillModel.joinable(listOf(5, 3, 1), listOf(inBill)) == listOf(5L, 1L), "CR-248: a sale joins one bill only")
         // CR-254: the Paid screen shows the number and the reference, and the bill when the sale is a part.
-        val plain = SaleInfo(null, 0, 0, false, null, null)
+        val plain = SaleInfo(null, 0, 0, false, null, null, "USD")
         ok(BillModel.paidLines(6, plain).map { it.label to it.value } == listOf(WordsOfBills.SALE_NUMBER to "7"), "CR-254: a sale with no reference shows its number only")
-        val referenced = SaleInfo(null, 0, 0, false, "T-14/1", 3)
+        val referenced = SaleInfo(null, 0, 0, false, "T-14/1", 3, "USD")
         ok(BillModel.paidLines(6, referenced).map { it.label to it.value } == listOf(WordsOfBills.SALE_NUMBER to "7", WordsOfBills.SALE_REFERENCE to "T-14/1", WordsOfBills.SALE_BILL to "3"), "CR-254: the number, the reference and the bill")
         if (appDir != null) {
             val controller = File(appDir, "src/android/Controller.kt").readText()
+            ok(controller.substringAfter("private fun showRefundRequest(").substringBefore("private fun showCashRefund(").contains("saleMoney(n, index, shop)") && controller.substringAfter("private fun showCashRefund(").substringBefore("private fun showWithdraw(").let { it.contains("saleMoney(n, index,") && it.contains("minor, m.code, why") }, "CR-196: the refund screens use the sale's own money and pass its currency")
             for (name in listOf("showBills", "showBill", "showNewBill", "showBillPart", "showOtherPart", "showJoinSale", "showSplit", "showChangeTab", "showCloseShort", "showSaleReference")) {
                 ok(controller.contains("private fun $name("), "CR-246: the screen $name is there")
             }

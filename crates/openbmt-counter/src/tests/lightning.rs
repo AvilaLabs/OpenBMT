@@ -340,6 +340,7 @@ fn cash(minor: u64) -> CashRefund {
     CashRefund {
         actor: ann(),
         minor: Amount(minor),
+        currency: usd(),
         reason: "till refund".to_string(),
     }
 }

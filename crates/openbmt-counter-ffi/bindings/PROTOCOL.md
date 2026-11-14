@@ -161,7 +161,7 @@ OpenArgs: record: now: u64, amount_minor: u64, currency: string, rate: u64, sour
 OpenTipArgs: record: now: u64, amount_minor: u64, tip_minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64, actor: option<ActorView>
 OpenRequestArgs: record: now: u64, amount_minor: u64, currency: string, rate: u64, source_label: string, source_fetched_at: u64, actor: option<ActorView>, note: option<string>, days: u8
 AddNoteArgs: record: now: u64, index: u32, note: string
-SaleInfoView: record: note: option<string>, request_days: u8, expires_at: u64, cash_refund_only: bool, reference: option<string>, bill_number: option<u32>
+SaleInfoView: record: note: option<string>, request_days: u8, expires_at: u64, cash_refund_only: bool, reference: option<string>, bill_number: option<u32>, currency: string
 RequestRow: record: index: u32, note: option<string>, amount_minor: u64, opened_at: u64, expires_at: u64, needs_sats: u64
 TipChoiceView: record: percent: u8, tip_minor: u64
 TipTallyView: record: count: u32, minor: u64
@@ -177,7 +177,7 @@ RefundAskView: enum, a tag byte, then: Sats(sats: u64) | Value(minor: u64, curre
     tags Sats=0 Value=1
 RefundArgs: record: now: u64, index: u32, ask: RefundAskView, destination: string, actor: ActorView, reason: string
 WithdrawArgs: record: now: u64, index: u32, number: u64, actor: ActorView
-CashArgs: record: now: u64, index: u32, actor: ActorView, minor: u64, reason: string
+CashArgs: record: now: u64, index: u32, actor: ActorView, minor: u64, currency: string, reason: string
 Words: record: tone: u8, who: u8, heading: str16, what: str16, next: str16, code: option<str16>, at: option<u64>, quoted: option<(str16, str16)>, detail: option<str16>; a str16 is a u16 length and UTF-8
 StateView: enum, one tag byte
     tags NotPaidYet=0 PartPaid=1 Waiting=2 PaidInstant=3 Confirmed=4 Final=5 Overridden=6 DoNotHandOver=7 Expired=8 Cancelled=9 NeedsAPerson=10 PaidLightning=11

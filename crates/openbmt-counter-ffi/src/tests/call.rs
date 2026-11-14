@@ -396,6 +396,7 @@ fn refunds_are_asked_listed_withdrawn_and_paid_in_cash() {
                 .u32(0)
                 .actor(true, "mia")
                 .u64(100)
+                .string("USD")
                 .string("till")
                 .0,
         ),

@@ -39,6 +39,7 @@ fn cr_57_the_source_of_each_quote_is_written_down() {
     let second = RateSource::new("second.one", w.now - 5).unwrap();
     w.c.requote(
         o.index,
+        usd(),
         crate::Rate::new(20_000_000).unwrap(),
         &second,
         w.now,
@@ -105,6 +106,7 @@ fn cr_58_a_rate_fetched_too_long_ago_or_in_the_future_is_refused_at_requote() {
         w.m.reset();
         let result = w.c.requote(
             o.index,
+            usd(),
             crate::Rate::new(20_000_000).unwrap(),
             &source,
             w.now,
@@ -137,7 +139,7 @@ fn cr_58_the_existing_refusals_keep_their_place() {
     let o = w.open_five();
     w.c.cancel(o.index, w.now, &mut w.m).unwrap();
     let ended =
-        w.c.requote(o.index, rate(), &stale, w.now, &w.chain, &mut w.m)
+        w.c.requote(o.index, usd(), rate(), &stale, w.now, &w.chain, &mut w.m)
             .unwrap_err();
     assert_eq!(ended, RequoteRefused::SaleEnded);
 }

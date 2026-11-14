@@ -50,6 +50,11 @@ const CHECK_AMOUNT_NEXT: &str = "Check the amount and enter it again.";
 const OTHER_PAYMENT_NEXT: &str =
     "Take another kind of payment. Tell the owner: the counter cannot check payments.";
 
+/// CR-196: the words of a new price or a refund named in another currency
+/// than the sale's are not written yet (CR-271).
+const REQUOTE_CURRENCY_WORDS: &str = "WORDS_NEEDED_CR196_REQUOTE_CURRENCY";
+const REFUND_CURRENCY_WORDS: &str = "WORDS_NEEDED_CR196_REFUND_CURRENCY";
+
 /// Words for a refusal: nothing happened, so the tone is neutral.
 pub(crate) fn refused(
     heading: &str,
@@ -736,6 +741,13 @@ impl<E: Display> RequoteRefused<E> {
                 "CR-78",
             )
             .detail(format!("Sale number {i}.")),
+            Self::WrongCurrency { .. } => refused(
+                REQUOTE_CURRENCY_WORDS,
+                REQUOTE_CURRENCY_WORDS,
+                Who::Cashier,
+                REQUOTE_CURRENCY_WORDS,
+                "CR-196",
+            ),
             Self::SaleEnded => refused(
                 "Sale already ended",
                 "The sale has ended, so it takes no new price.",
@@ -1450,6 +1462,13 @@ impl<E: Display> RefundRefused<E> {
                 "Ask the customer for another address from their own wallet.",
                 "CR-63",
             ),
+            Self::WrongCurrency { .. } => refused(
+                REFUND_CURRENCY_WORDS,
+                REFUND_CURRENCY_WORDS,
+                Who::Cashier,
+                REFUND_CURRENCY_WORDS,
+                "CR-196",
+            ),
             Self::UnknownSale(i) => refused(
                 "Sale not found",
                 "The counter has no such sale to refund.",
@@ -2156,6 +2175,13 @@ pub fn all_words() -> Vec<(String, Words)> {
     }
     let requote: Vec<(&str, RequoteRefused<String>)> = vec![
         ("UnknownSale", RequoteRefused::UnknownSale(3)),
+        (
+            "WrongCurrency",
+            RequoteRefused::WrongCurrency {
+                sale: Currency::of_shop(ShopCurrency::Eur),
+                named: Currency::of_shop(ShopCurrency::Usd),
+            },
+        ),
         ("SaleEnded", RequoteRefused::SaleEnded),
         ("AlreadyEnough", RequoteRefused::AlreadyEnough),
         ("TooManyQuotes", RequoteRefused::TooManyQuotes),
@@ -2384,6 +2410,13 @@ pub fn all_words() -> Vec<(String, Words)> {
         ("BadText", RefundRefused::BadText("name")),
         ("DestinationKind", RefundRefused::DestinationKind),
         ("UnknownSale", RefundRefused::UnknownSale(3)),
+        (
+            "WrongCurrency",
+            RefundRefused::WrongCurrency {
+                sale: Currency::of_shop(ShopCurrency::Eur),
+                named: Currency::of_shop(ShopCurrency::Usd),
+            },
+        ),
         (
             "StaleRate",
             RefundRefused::StaleRate {

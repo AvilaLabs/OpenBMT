@@ -50,6 +50,8 @@ fn sale_info(rig: &Rig, handle: u64, index: u32) -> (Option<String>, u8, u64) {
     assert!(!r.bool());
     // CR-245, CR-254: no reference and no bill in these tests.
     assert!(r.opt(Rd::string).is_none() && r.opt(Rd::u32).is_none());
+    // CR-196: the sale's currency; these tests' shop is in dollars.
+    assert_eq!(r.string(), "USD");
     r.done();
     info
 }

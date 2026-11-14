@@ -686,6 +686,7 @@ fn a_refund_request_is_a_record_on_the_nodes_chain_and_survives_a_restart() {
             openbmt_counter::CashRefund {
                 actor: ann.clone(),
                 minor: Amount(100),
+                currency: usd(),
                 reason: "till".to_string(),
             },
         )

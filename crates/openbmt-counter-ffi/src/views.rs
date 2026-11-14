@@ -413,6 +413,9 @@ pub struct SaleInfoView {
     pub reference: Option<String>,
     /// CR-254: the number of the bill the sale is a part of, when it is one.
     pub bill_number: Option<u32>,
+    /// CR-196: the currency the sale was opened in, three capital letters
+    /// (`SAT` for Bitcoin Standard): the one its refunds are in.
+    pub currency: String,
 }
 
 wire_record!(SaleInfoView {
@@ -421,7 +424,8 @@ wire_record!(SaleInfoView {
     expires_at,
     cash_refund_only,
     reference,
-    bill_number
+    bill_number,
+    currency
 });
 
 /// How a value of a field of a change to the settings is to be written
@@ -915,8 +919,10 @@ pub struct CashArgs {
     pub index: u32,
     /// Who gives the cash.
     pub actor: ActorView,
-    /// The amount in minor units of the shop's currency.
+    /// The amount in minor units of the sale's currency.
     pub minor: u64,
+    /// The currency of the amount, three capital letters: the sale's.
+    pub currency: String,
     /// Why.
     pub reason: String,
 }
@@ -926,6 +932,7 @@ wire_record!(CashArgs {
     index,
     actor,
     minor,
+    currency,
     reason
 });
 wire_record_get!(CashArgs {
@@ -933,6 +940,7 @@ wire_record_get!(CashArgs {
     index,
     actor,
     minor,
+    currency,
     reason
 });
 

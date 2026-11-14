@@ -43,6 +43,7 @@ fn cash(minor: u64, actor: Actor) -> CashRefund {
     CashRefund {
         actor,
         minor: Amount(minor),
+        currency: usd(),
         reason: "till refund".to_string(),
     }
 }
@@ -213,6 +214,7 @@ fn cr_61_an_amount_in_the_shops_currency_is_turned_into_sats_at_its_rate_rounded
     let req = RefundRequest {
         ask: RefundAsk::Value {
             minor: 1_111,
+            currency: usd(),
             rate: crate::Rate::new(30_000_000).unwrap(),
             source: fresh(w.now),
         },
@@ -248,6 +250,7 @@ fn cr_61_a_stale_rate_is_refused() {
     let req = RefundRequest {
         ask: RefundAsk::Value {
             minor: 100,
+            currency: usd(),
             rate: rate(),
             source: fresh(w.now - 601),
         },
@@ -741,6 +744,7 @@ fn cr_67_a_zero_amount_and_one_below_the_destinations_dust_limit_are_refused() {
     let req = RefundRequest {
         ask: RefundAsk::Value {
             minor: 0,
+            currency: usd(),
             rate: rate(),
             source: fresh(w.now),
         },
@@ -756,6 +760,7 @@ fn cr_67_a_zero_amount_and_one_below_the_destinations_dust_limit_are_refused() {
     let req = RefundRequest {
         ask: RefundAsk::Value {
             minor: u64::MAX,
+            currency: usd(),
             rate: crate::Rate::new(1).unwrap(),
             source: fresh(w.now),
         },
@@ -1737,4 +1742,46 @@ fn cr_71_a_cash_refund_counts_only_what_is_at_depth() {
             ..
         }
     ));
+}
+
+fn eur() -> crate::Currency {
+    crate::Currency::new(*b"EUR").unwrap()
+}
+
+#[test]
+fn cr_196_a_refund_by_value_or_in_cash_named_in_another_currency_is_refused() {
+    let mut w = World::new();
+    let i = final_sale(&mut w);
+    let written = w.m.events().len();
+    let wrong = RefundRefused::WrongCurrency {
+        sale: usd(),
+        named: eur(),
+    };
+    let by_value = RefundRequest {
+        ask: RefundAsk::Value {
+            minor: 100,
+            currency: eur(),
+            rate: rate(),
+            source: fresh(w.now),
+        },
+        destination: dest(),
+        actor: ann(),
+        reason: "wrong size".to_string(),
+    };
+    let err =
+        w.c.request_refund(i, by_value, w.now, &w.chain, &mut w.m)
+            .unwrap_err();
+    assert_eq!(err, wrong);
+    assert_eq!(err.rule(), "CR-196");
+    let mut in_cash = cash(100, ann());
+    in_cash.currency = eur();
+    let err =
+        w.c.refund_in_cash(i, in_cash, w.now, &w.chain, &mut w.m)
+            .unwrap_err();
+    assert_eq!(err, wrong);
+    // Nothing was written and the sale has no refund.
+    assert_eq!(w.m.events().len(), written);
+    assert!(w.c.refund_views(i).is_empty());
+    // In the sale's currency both go on.
+    assert!(ask_cash(&mut w, i, 100, ann()).is_ok());
 }

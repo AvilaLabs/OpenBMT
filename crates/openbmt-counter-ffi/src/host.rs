@@ -197,29 +197,13 @@ fn named_currency(text: &str) -> Result<Currency, CounterError> {
         .ok_or_else(|| refused_by("sale-currency", "a currency is three capital letters"))
 }
 
-/// CR-196, CR-197: the rate to price sale `index` at again, for `requote`
-/// and for a refund by value. The currency named is the rate's, and must be
-/// the one the sale was opened in; a sale that is not in the currency of the
-/// settings in force any more (Bitcoin Standard on one side only) is not
-/// priced here, since the amount and the rate would not be of one currency.
-/// Bitcoin Standard has no price: the rate and the source of the call are
-/// not read, as for `open`.
-fn rate_for_sale(
-    node: &Node<Port>,
-    index: u32,
-    named: &str,
-    now: u64,
-    (rate, label, fetched_at): (u64, &str, u64),
-) -> Result<(Rate, RateSource), CounterError> {
-    let named = named_currency(named)?;
+/// CR-196: a sale that is not in the kind of currency of the settings in
+/// force any more (Bitcoin Standard on one side only) is not priced here,
+/// since its amount and the shop's price would not be of one currency. That
+/// the currency named is the sale's is the library's check.
+fn same_kind(node: &Node<Port>, index: u32) -> Result<(), CounterError> {
     let shop = node.settings().currency;
     if let Some(sale) = node.counter().sale(index) {
-        if named != sale.currency() {
-            return Err(refused_by(
-                "sale-currency",
-                format!("the sale is in {}, not {named}", sale.currency()),
-            ));
-        }
         if shop.is_sats() != (Currency::new(*b"SAT") == Some(sale.currency())) {
             return Err(refused_by(
                 "sale-currency",
@@ -231,11 +215,27 @@ fn rate_for_sale(
             ));
         }
     }
-    if shop.is_sats() {
-        Ok((Rate::sats(), RateSource::sats(now)))
+    Ok(())
+}
+
+/// CR-196, CR-197: the currency named and the rate to price sale `index` at
+/// again, for `requote` and for a refund by value. Bitcoin Standard has no
+/// price: the rate and the source of the call are not read, as for `open`.
+fn rate_for_sale(
+    node: &Node<Port>,
+    index: u32,
+    named: &str,
+    now: u64,
+    (rate, label, fetched_at): (u64, &str, u64),
+) -> Result<(Currency, Rate, RateSource), CounterError> {
+    let named = named_currency(named)?;
+    same_kind(node, index)?;
+    let (rate, source) = if node.settings().currency.is_sats() {
+        (Rate::sats(), RateSource::sats(now))
     } else {
-        rate_and_source(rate, label, fetched_at)
-    }
+        rate_and_source(rate, label, fetched_at)?
+    };
+    Ok((named, rate, source))
 }
 
 fn start_error(e: &StartError) -> CounterError {
@@ -626,6 +626,7 @@ impl Entry {
                 cash_refund_only: node.refund_onchain_room(index) == Some(0),
                 reference: node.counter().sale_reference(index).map(str::to_string),
                 bill_number: node.bill_of_sale(index),
+                currency: sale.currency().to_string(),
             })
         })
     }
@@ -934,7 +935,7 @@ impl Entry {
 
     pub(crate) fn requote(&self, a: RequoteArgs) -> Result<OpenedView, CounterError> {
         self.run(Some(a.now), |node, _, _| {
-            let (rate, source) = rate_for_sale(
+            let (currency, rate, source) = rate_for_sale(
                 node,
                 a.index,
                 &a.currency,
@@ -942,7 +943,7 @@ impl Entry {
                 (a.rate, &a.source_label, a.source_fetched_at),
             )?;
             let quote = node
-                .requote(a.index, rate, &source)
+                .requote(a.index, currency, rate, &source)
                 .map_err(|e| from_rule(e.rule(), &e, e.words()))?;
             let needs = node.counter().sale(a.index).map_or(0, |s| s.needs_sats());
             Ok(OpenedView {
@@ -1018,7 +1019,7 @@ impl Entry {
                     source_label,
                     source_fetched_at,
                 } => {
-                    let (rate, source) = rate_for_sale(
+                    let (currency, rate, source) = rate_for_sale(
                         node,
                         a.index,
                         &currency,
@@ -1027,6 +1028,7 @@ impl Entry {
                     )?;
                     RefundAsk::Value {
                         minor,
+                        currency,
                         rate,
                         source,
                     }
@@ -1054,9 +1056,12 @@ impl Entry {
 
     pub(crate) fn refund_in_cash(&self, a: CashArgs) -> Result<(), CounterError> {
         self.run(Some(a.now), |node, _, _| {
+            let currency = named_currency(&a.currency)?;
+            same_kind(node, a.index)?;
             let cash = CashRefund {
                 actor: actor(a.actor),
                 minor: Amount(a.minor),
+                currency,
                 reason: a.reason,
             };
             node.refund_in_cash(a.index, cash)

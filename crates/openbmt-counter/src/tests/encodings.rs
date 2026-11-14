@@ -752,6 +752,7 @@ fn a_sale_with_refunds() -> Sale {
                 name: "ann".to_string(),
             },
             minor: Amount(50),
+            currency: usd(),
             reason: "wrong size".to_string(),
         },
         w.now,

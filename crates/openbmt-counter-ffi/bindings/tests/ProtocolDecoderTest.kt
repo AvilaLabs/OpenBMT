@@ -194,17 +194,17 @@ object ProtocolDecoderTest {
         check(hex(requestFrame(62, 1) { it.u64(9).u32(2).string("hi") }).endsWith("0900000000000000" + "02000000" + "02000000" + "6869"))
         check(hex(requestFrame(65, 1) { it.u32(2).string("l") }).endsWith("02000000" + "01000000" + "6c"))
         // sale_info (63): a note and the days, and none.
-        decodeResponse(header(0, Writer().u8(1).string("Tour").u8(7).u64(1_700_604_800).u8(1).u8(1).string("T-7").u8(1).u32(4).toByteArray())).let { r ->
+        decodeResponse(header(0, Writer().u8(1).string("Tour").u8(7).u64(1_700_604_800).u8(1).u8(1).string("T-7").u8(1).u32(4).string("EUR").toByteArray())).let { r ->
             val info = r.saleInfo()
             r.end()
             check(info.note == "Tour" && info.requestDays == 7 && info.expiresAt == 1_700_604_800L && info.cashRefundOnly)
-            check(info.reference == "T-7" && info.billNumber == 4L)
+            check(info.reference == "T-7" && info.billNumber == 4L && info.currency == "EUR")
         }
-        decodeResponse(header(0, Writer().u8(0).u8(0).u64(900).u8(0).u8(0).u8(0).toByteArray())).let { r ->
+        decodeResponse(header(0, Writer().u8(0).u8(0).u64(900).u8(0).u8(0).u8(0).string("USD").toByteArray())).let { r ->
             val info = r.saleInfo()
             r.end()
             check(info.note == null && info.requestDays == 0 && info.expiresAt == 900L && !info.cashRefundOnly)
-            check(info.reference == null && info.billNumber == null)
+            check(info.reference == null && info.billNumber == null && info.currency == "USD")
         }
         rejects("a flag that is not 0 or 1 in a sale's info") {
             decodeResponse(header(0, Writer().u8(2).u8(0).u64(900).u8(0).toByteArray())).saleInfo()

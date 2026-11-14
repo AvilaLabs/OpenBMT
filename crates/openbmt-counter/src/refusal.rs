@@ -249,6 +249,13 @@ impl<E: fmt::Debug + fmt::Display> std::error::Error for JudgeError<E> {}
 pub enum RequoteRefused<E> {
     /// CR-78: the counter has no sale with this index.
     UnknownSale(u32),
+    /// CR-196: the rate is named in another currency than the sale's.
+    WrongCurrency {
+        /// The currency the sale is in.
+        sale: Currency,
+        /// The currency the caller named.
+        named: Currency,
+    },
     /// CR-05: the sale has ended.
     SaleEnded,
     /// CR-08: enough has arrived; the sale takes no new quote.
@@ -284,6 +291,7 @@ impl<E> RequoteRefused<E> {
     pub fn rule(&self) -> &'static str {
         match self {
             Self::UnknownSale(_) => "CR-78",
+            Self::WrongCurrency { .. } => "CR-196",
             Self::SaleEnded | Self::TooManyQuotes | Self::AmountTooLarge => "CR-05",
             Self::AlreadyEnough => "CR-08",
             Self::IsRequest => "CR-207",
@@ -299,6 +307,10 @@ impl<E: fmt::Display> fmt::Display for RequoteRefused<E> {
         write!(f, "{}: ", self.rule())?;
         match self {
             Self::UnknownSale(i) => write!(f, "there is no sale with index {i}"),
+            Self::WrongCurrency { sale, named } => write!(
+                f,
+                "the sale is in {sale}, not {named}; its rate is in the sale's currency"
+            ),
             Self::SaleEnded => write!(f, "the sale has ended and takes no new quote"),
             Self::AlreadyEnough => write!(f, "enough has arrived; the sale takes no new quote"),
             Self::TooManyQuotes => write!(f, "the sale has the most quotes it can keep"),
@@ -958,6 +970,13 @@ pub enum RefundRefused<E> {
     DestinationKind,
     /// CR-64: the counter has no sale with this index.
     UnknownSale(u32),
+    /// CR-196: the amount is named in another currency than the sale's.
+    WrongCurrency {
+        /// The currency the sale is in.
+        sale: Currency,
+        /// The currency the caller named.
+        named: Currency,
+    },
     /// CR-58: the rate that turns an amount into satoshis is stale.
     StaleRate {
         /// When the caller got the rate.
@@ -1052,6 +1071,7 @@ impl<E> RefundRefused<E> {
             Self::BadText(_) => "CR-61",
             Self::DestinationKind => "CR-63",
             Self::UnknownSale(_) => "CR-64",
+            Self::WrongCurrency { .. } => "CR-196",
             Self::StaleRate { .. } => "CR-58",
             Self::ZeroAmount
             | Self::AmountTooLarge
@@ -1082,6 +1102,10 @@ impl<E: fmt::Display> fmt::Display for RefundRefused<E> {
                 "the destination is not a P2WPKH, P2WSH, P2TR, P2PKH or P2SH script"
             ),
             Self::UnknownSale(i) => write!(f, "there is no sale with index {i}"),
+            Self::WrongCurrency { sale, named } => write!(
+                f,
+                "the sale is in {sale}, not {named}; a refund is in the sale's currency"
+            ),
             Self::StaleRate { fetched_at, now } => write!(
                 f,
                 "the rate was fetched at {fetched_at} and the time is {now}; fetch a rate again"

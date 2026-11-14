@@ -2049,9 +2049,11 @@ impl Counter {
     /// the sale. If the process stops between them the sale does not hold
     /// the new quote and `Err` is returned; the record names a quote the
     /// sale never took, and asking again writes a second record.
+    #[allow(clippy::too_many_arguments)]
     pub fn requote<C: HeaderChain + ?Sized, S: Store>(
         &mut self,
         index: u32,
+        currency: Currency,
         rate: Rate,
         source: &RateSource,
         now: u64,
@@ -2065,6 +2067,13 @@ impl Counter {
             .get(&index)
             .cloned()
             .ok_or(RequoteRefused::UnknownSale(index))?;
+        // CR-196: the rate is in the currency the sale was opened in.
+        if currency != sale.currency() {
+            return Err(RequoteRefused::WrongCurrency {
+                sale: sale.currency(),
+                named: currency,
+            });
+        }
         if !sale.is_live() {
             return Err(RequoteRefused::SaleEnded);
         }
@@ -4015,9 +4024,17 @@ impl Counter {
             RefundAsk::Sats(sats) => (sats, Ask::Sats),
             RefundAsk::Value {
                 minor,
+                currency,
                 rate,
                 source,
             } => {
+                // CR-196: the amount is in the currency the sale was opened in.
+                if currency != base.currency() {
+                    return Err(RefundRefused::WrongCurrency {
+                        sale: base.currency(),
+                        named: currency,
+                    });
+                }
                 let (rate, source) = self.priced_at(rate, &source, now);
                 if !source.is_fresh_at(now) {
                     return Err(RefundRefused::StaleRate {
@@ -4165,6 +4182,7 @@ impl Counter {
         let CashRefund {
             actor,
             minor,
+            currency,
             reason,
         } = cash;
         self.settle_refunds(store).map_err(RefundRefused::Store)?;
@@ -4179,6 +4197,13 @@ impl Counter {
             .get(&index)
             .cloned()
             .ok_or(RefundRefused::UnknownSale(index))?;
+        // CR-196: the amount is in the currency the sale was opened in.
+        if currency != base.currency() {
+            return Err(RefundRefused::WrongCurrency {
+                sale: base.currency(),
+                named: currency,
+            });
+        }
         if minor.0 == 0 {
             return Err(RefundRefused::ZeroAmount);
         }

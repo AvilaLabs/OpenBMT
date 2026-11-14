@@ -394,6 +394,8 @@ class SaleInfo(
     val reference: String?,
     /** The number of the bill the sale is a part of (CR-248), for the Paid screen (CR-254). */
     val billNumber: Long?,
+    /** The currency the sale was opened in (CR-196), the one its refunds are in; `SAT` for Bitcoin Standard. */
+    val currency: String,
 )
 
 /** A bill or a tab (CR-246). */
@@ -1012,7 +1014,7 @@ private fun Reader.pendingChange(): PendingChange =
 internal fun Reader.changeState(): ChangeState = ChangeState(option { pendingChange() }, option { words() })
 
 internal fun Reader.saleInfo(): SaleInfo =
-    SaleInfo(option { string() }, u8(), u64(), bool(), option { string() }, option { u32() })
+    SaleInfo(option { string() }, u8(), u64(), bool(), option { string() }, option { u32() }, string())
 
 private fun Reader.billKind(): BillKind =
     when (u8()) {
@@ -1733,10 +1735,10 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
     fun withdrawRefund(now: Long, index: Long, number: Long, actor: Actor) =
         callUnit(OP_WITHDRAW_REFUND, handle) { it.u64(now).u32(index).u64(number).actor(actor) }
 
-    /** A refund paid in cash from the till, [minor] in the shop's currency. */
-    fun refundInCash(now: Long, index: Long, actor: Actor, minor: Long, reason: String) =
+    /** A refund paid in cash from the till, [minor] in [currency], the sale's (CR-196). */
+    fun refundInCash(now: Long, index: Long, actor: Actor, minor: Long, currency: String, reason: String) =
         callUnit(OP_REFUND_IN_CASH, handle) {
-            it.u64(now).u32(index).actor(actor).u64(minor).string(reason)
+            it.u64(now).u32(index).actor(actor).u64(minor).string(currency).string(reason)
         }
 
     /** The refunds of a sale, with the words for each. */

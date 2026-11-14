@@ -154,7 +154,14 @@ fn cr_196_a_requote_in_another_currency_than_the_sales_is_refused() {
             &requote_args(T0 + 1, named, RATE * 2, "test-fixed"),
         ))
         .expect("a refusal");
-        assert_eq!(f.rule, "sale-currency", "{named}");
+        // The library refuses another currency; letters that are not one
+        // never reach it.
+        let rule = if named.len() == 3 && named.chars().all(char::is_uppercase) {
+            "CR-196"
+        } else {
+            "sale-currency"
+        };
+        assert_eq!(f.rule, rule, "{named}");
     }
     // The sale still needs what it did; the sale's own currency requotes.
     let response = rig.call(
@@ -196,12 +203,12 @@ fn cr_196_a_refund_by_value_in_another_currency_than_the_sales_is_refused() {
     };
     for named in ["USD", "SAT"] {
         let f = Rd::error(&rig.call(16, handle, &ask(named))).expect("a refusal");
-        assert_eq!(f.rule, "sale-currency", "{named}");
+        assert_eq!(f.rule, "CR-196", "{named}");
     }
     // In the sale's currency the ask goes on to the refund rules, which
     // refuse it for a sale that has not been paid, not for its currency.
     let f = Rd::error(&rig.call(16, handle, &ask("EUR"))).expect("a refusal");
-    assert_ne!(f.rule, "sale-currency");
+    assert_ne!(f.rule, "CR-196");
 }
 
 #[test]
@@ -227,7 +234,7 @@ fn cr_197_a_requote_in_bitcoin_standard_takes_no_price_and_no_source() {
     // The currency is still the sale's.
     let f =
         Rd::error(&rig.call(13, handle, &requote_args(T0 + 3, "USD", 0, ""))).expect("a refusal");
-    assert_eq!(f.rule, "sale-currency");
+    assert_eq!(f.rule, "CR-196");
 }
 
 #[test]
@@ -244,4 +251,39 @@ fn cr_05_a_requote_of_a_rate_of_zero_in_a_shop_with_a_price_is_still_refused() {
     let f = Rd::error(&rig.call(13, handle, &requote_args(T0 + 1, "EUR", RATE, "")))
         .expect("a refusal");
     assert_eq!(f.rule, "sale-source");
+}
+
+#[test]
+fn cr_196_a_cash_refund_in_another_currency_than_the_sales_is_refused() {
+    let (rig, handle) = ready_in(ShopCurrency::Eur);
+    rig.call(
+        11,
+        handle,
+        &W::new().open(T0, 500, "EUR", RATE, "test-fixed").0,
+    );
+    let cash = |currency: &str| {
+        W::new()
+            .u64(T0)
+            .u32(0)
+            .actor(true, "mia")
+            .u64(100)
+            .string(currency)
+            .string("till")
+            .0
+    };
+    for named in ["USD", "SAT"] {
+        let f = Rd::error(&rig.call(18, handle, &cash(named))).expect("a refusal");
+        assert_eq!(f.rule, "CR-196", "{named}");
+    }
+    // Letters that are not a currency never reach the library.
+    let f = Rd::error(&rig.call(18, handle, &cash("eu"))).expect("a refusal");
+    assert_eq!(f.rule, "sale-currency");
+    // Nothing was written: the sale has no refund.
+    let response = rig.call(19, handle, &W::new().u32(0).0);
+    let mut r = Rd::ok(&response);
+    assert_eq!(r.list(|r| r.u8()).len(), 0);
+    // In the sale's currency it goes on to the refund rules, and an unpaid
+    // sale has nothing to give back, which is not its currency.
+    let f = Rd::error(&rig.call(18, handle, &cash("EUR"))).expect("a refusal");
+    assert_ne!(f.rule, "CR-196");
 }

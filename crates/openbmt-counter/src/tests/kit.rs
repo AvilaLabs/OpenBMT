@@ -578,8 +578,10 @@ impl World {
         index: u32,
         minor_per_btc: u64,
     ) -> Result<crate::Quote, crate::RequoteRefused<&'static str>> {
+        let currency = self.c.sale(index).map_or_else(usd, |s| s.currency());
         self.c.requote(
             index,
+            currency,
             Rate::new(minor_per_btc).unwrap(),
             &fresh(self.now),
             self.now,

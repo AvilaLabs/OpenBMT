@@ -256,7 +256,9 @@ fn cr_112_a_new_quote_asks_for_a_new_invoice() {
     // The price moves: 2,500 satoshis now.
     tick(&rig, 30);
     let rate = Rate::new(20_000_000).unwrap();
-    rig.node.requote(index, rate, &fresh(T0 + 30)).unwrap();
+    rig.node
+        .requote(index, usd(), rate, &fresh(T0 + 30))
+        .unwrap();
     assert_eq!(rig.node.lightning_sale(index), SaleLightning::Waiting);
     // The earlier invoice is asked about first (it is kept, CR-112); then the
     // new one is asked for.
@@ -734,7 +736,9 @@ fn with_first_invoice(rig: &mut Rig) -> u32 {
 fn requote_with_invoice(rig: &mut Rig, index: u32, seed: u8, sats: u64, held: &[(u8, u64)]) {
     tick(rig, 1);
     let source = source_at(&rig.time);
-    rig.node.requote(index, rate_for(sats), &source).unwrap();
+    rig.node
+        .requote(index, usd(), rate_for(sats), &source)
+        .unwrap();
     let credential = lnd();
     loop {
         let req = rig.node.lightning_next().expect("a request");
@@ -877,7 +881,9 @@ fn cr_112_an_answer_for_an_invoice_the_driver_no_longer_holds_is_ignored() {
         SaleLightning::Unavailable(_)
     ));
     let source = source_at(&rig.time);
-    rig.node.requote(index, rate_for(2_500), &source).unwrap();
+    rig.node
+        .requote(index, usd(), rate_for(2_500), &source)
+        .unwrap();
     // The invoice of the old quote comes at last: nothing holds it.
     rig.node
         .lightning_reply(lost.id, &created_seed(1, index, SATS));
@@ -905,7 +911,9 @@ fn cr_118_the_ninth_quote_of_a_sale_gets_no_invoice() {
     // Eight invoices are held; the ninth quote gets none.
     tick(&rig, 1);
     let source = source_at(&rig.time);
-    rig.node.requote(index, rate_for(31_250), &source).unwrap();
+    rig.node
+        .requote(index, usd(), rate_for(31_250), &source)
+        .unwrap();
     let SaleLightning::Unavailable(words) = rig.node.lightning_sale(index) else {
         panic!("unavailable");
     };
@@ -936,7 +944,10 @@ fn cr_112_after_a_restart_the_invoices_of_earlier_quotes_are_found_by_label() {
         index = with_first_invoice_of(&mut first, &c);
         tick(&first, 1);
         let source = source_at(&first.time);
-        first.node.requote(index, rate_for(2_500), &source).unwrap();
+        first
+            .node
+            .requote(index, usd(), rate_for(2_500), &source)
+            .unwrap();
         first.node.shutdown();
     }
     let mut rig = rig(&dir, c.clone());

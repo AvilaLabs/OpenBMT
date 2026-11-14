@@ -86,6 +86,7 @@ fn corpus(handle: u64) -> Vec<Vec<u8>> {
                 .u32(0)
                 .actor(true, "mia")
                 .u64(5)
+                .string("USD")
                 .string("r")
                 .0,
         ),

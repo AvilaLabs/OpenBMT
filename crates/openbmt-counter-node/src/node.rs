@@ -3454,13 +3454,20 @@ impl<P: DriverPort> Node<P> {
     pub fn requote(
         &mut self,
         index: u32,
+        currency: Currency,
         rate: Rate,
         source: &RateSource,
     ) -> Result<Quote, RequoteRefused<DirStoreError>> {
         let now = self.clock.now();
-        let quote = self
-            .counter
-            .requote(index, rate, source, now, &self.view, &mut self.store)?;
+        let quote = self.counter.requote(
+            index,
+            currency,
+            rate,
+            source,
+            now,
+            &self.view,
+            &mut self.store,
+        )?;
         // CR-112: a new quote asks for a new invoice.
         let sats = self.counter.sale(index).map_or(0, |s| s.needs_sats());
         self.ln.sale_requoted(index, sats, now);

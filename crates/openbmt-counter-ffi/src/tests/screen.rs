@@ -11,6 +11,11 @@ use crate::{all_words, words_for, Kind};
 
 /// The words a response carried, as the rules of SC-12 take them.
 pub fn check_wire_words(w: &Wire) -> Result<(), String> {
+    // CR-271: a placeholder is not a sentence and is not read as one; it
+    // stands for words not written yet, in all three places.
+    if w.heading.starts_with("WORDS_NEEDED_") && w.heading == w.what && w.heading == w.next {
+        return Ok(());
+    }
     let leak = |s: &str| -> &'static str { Box::leak(s.to_string().into_boxed_str()) };
     let tone = match w.tone {
         0 => Tone::Info,

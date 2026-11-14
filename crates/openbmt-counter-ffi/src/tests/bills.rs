@@ -164,6 +164,7 @@ fn cr_245_a_reference_is_added_once_to_a_bill_and_to_a_sale() {
     let _ = (r.opt(Rd::string), r.u8(), r.u64(), r.bool());
     assert_eq!(r.opt(Rd::string).as_deref(), Some("T-7"));
     assert_eq!(r.opt(Rd::u32), None);
+    assert_eq!(r.string(), "USD");
     r.done();
 }
 
@@ -181,6 +182,7 @@ fn cr_248_a_part_opens_a_sale_that_the_info_says_is_in_the_bill() {
     let _ = (r.opt(Rd::string), r.u8(), r.u64(), r.bool());
     assert_eq!(r.opt(Rd::string).as_deref(), Some("T-14/1"));
     assert_eq!(r.opt(Rd::u32), Some(number));
+    assert_eq!(r.string(), "USD");
     r.done();
     let rows = bills(&rig, handle);
     assert_eq!(rows[0].pending, 1);

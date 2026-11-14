@@ -2554,15 +2554,22 @@ class Controller(private val act: MainActivity) {
         show(ui.bar(WordsOfRequests.ADD_NOTE, back = { showSaleDetails(index) }), views, listOf(save, ui.button("Back") { showSaleDetails(index) }), Showing.Sale(index))
     }
 
+    /** CR-196: the money of the sale, the currency it was opened in, which is not the settings' after a change of currency. */
+    private fun saleMoney(n: CounterNode, index: Long, shop: Money): Money =
+        try { SaleMoney.of(n.saleInfo(index).currency, shop) } catch (_: CounterException) { shop }
+
     private fun showRefundRequest(index: Long) {
         val n = node ?: return render()
-        val m = money ?: return render()
+        val shop = money ?: return render()
+        // The refund is in the sale's currency (CR-196); a price is only at hand in the shop's.
+        val m = saleMoney(n, index, shop)
+        val byValue = SaleMoney.byValue(m, shop)
         locks.saleScreen(index)
         val views = ArrayList<View>()
         val msg = Slot(act)
         views.add(msg)
         views.add(label("Amount to refund"))
-        val kind = ui.chips(if (m.isSats) listOf("In sats") else listOf("In ${m.code}", "In sats"))
+        val kind = ui.chips(if (byValue) listOf("In ${m.code}", "In sats") else listOf("In sats"))
         views.add(kind)
         val amount = amountField(act, "Amount")
         views.add(amount)
@@ -2577,7 +2584,7 @@ class Controller(private val act: MainActivity) {
             val text = amount.text.toString()
             val dest = destination.text.toString().trim()
             val why = reason.text.toString().trim()
-            val inSats = m.isSats || ui.chosen(kind) == 1
+            val inSats = !byValue || ui.chosen(kind) == 1
             val sats = Format.toAmount(text)
             val minor = m.parse(text)
             when {
@@ -2613,7 +2620,7 @@ class Controller(private val act: MainActivity) {
 
     private fun showCashRefund(index: Long) {
         val n = node ?: return render()
-        val m = money ?: return render()
+        val m = saleMoney(n, index, money ?: return render())
         locks.saleScreen(index)
         val views = ArrayList<View>()
         val msg = Slot(act)
@@ -2633,7 +2640,7 @@ class Controller(private val act: MainActivity) {
                 why.isEmpty() -> msg.show(note(AppWords.reasonNeeded))
                 else -> resolveActor(actor, { who ->
                     try {
-                        n.refundInCash(nowSecs(), index, who, minor, why)
+                        n.refundInCash(nowSecs(), index, who, minor, m.code, why)
                         showSaleDetails(index, AppWords.cashRefunded)
                     } catch (e: CounterException) {
                         msg.show(note(e.sayWords()))

@@ -58,6 +58,18 @@ class Money(val code: String, val exponent: Int) {
 }
 
 /**
+ * CR-196: a refund is in the currency the sale was opened in, which is not the settings' after a change of
+ * currency. The keypad's digits, the code shown and the currency passed are the sale's.
+ */
+object SaleMoney {
+    /** The money of a sale opened in [saleCode]; the shop's [shop] when that is not a code the app knows. */
+    fun of(saleCode: String, shop: Money): Money = Money.of(saleCode) ?: shop
+
+    /** Whether a refund of the sale can be asked at a price: the price the app has is of the shop's currency, so only for a sale in it. */
+    fun byValue(sale: Money, shop: Money): Boolean = !shop.isSats && sale.code == shop.code
+}
+
+/**
  * The cashier's keypad: digits push into the minor units, so 1, 2, 3, 4 is
  * 12.34. At most [MAX_DIGITS] digits.
  */
