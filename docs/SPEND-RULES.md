@@ -1,6 +1,6 @@
 # Spend rules: building, joining and finishing a transaction
 
-Status: specification for `crates/openbmt-spend`, written before the code.
+Status: specification for `crates/openbmt-spend`.
 Each rule has an ID so that a test can name the rule it proves. The rules
 serve `docs/DESIGN.md` §2.4 (refunds), §2.10 (approval session) and §11
 (cash-out), and they are written to meet `docs/SIGNER-RULES.md`: where the

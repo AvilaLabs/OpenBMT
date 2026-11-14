@@ -1,6 +1,6 @@
 # Start simple rules: a capped starter wallet on the owner phone
 
-Status: specification, written before the code, for the `starter` module of
+Status: specification for the `starter` module of
 `crates/openbmt-owner`, its calls in `crates/openbmt-owner-ffi`, and the owner
 app. Each rule has an ID so that a test can name the rule it proves
 (`ss_NN_...`).

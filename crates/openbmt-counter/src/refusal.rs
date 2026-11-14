@@ -196,7 +196,7 @@ impl<E: fmt::Debug + fmt::Display> std::error::Error for OpenRefused<E> {}
 /// Why a sale could not be judged.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JudgeError<E> {
-    /// CR-11: the counter has no sale with this index.
+    /// CR-78: the counter has no sale with this index.
     UnknownSale(u32),
     /// CR-40: a write failed. The caller must treat the sale as not safe
     /// and ask again; nothing was reported.
@@ -207,7 +207,7 @@ impl<E> JudgeError<E> {
     /// The rule the refusal belongs to.
     pub fn rule(&self) -> &'static str {
         match self {
-            Self::UnknownSale(_) => "CR-11",
+            Self::UnknownSale(_) => "CR-78",
             Self::Store(_) => "CR-40",
         }
     }
@@ -234,7 +234,7 @@ impl<E: fmt::Debug + fmt::Display> std::error::Error for JudgeError<E> {}
 /// Why a new quote was refused (CR-05, CR-08).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequoteRefused<E> {
-    /// CR-11: the counter has no sale with this index.
+    /// CR-78: the counter has no sale with this index.
     UnknownSale(u32),
     /// CR-05: the sale has ended.
     SaleEnded,
@@ -270,7 +270,7 @@ impl<E> RequoteRefused<E> {
     /// The rule the refusal belongs to.
     pub fn rule(&self) -> &'static str {
         match self {
-            Self::UnknownSale(_) => "CR-11",
+            Self::UnknownSale(_) => "CR-78",
             Self::SaleEnded | Self::TooManyQuotes | Self::AmountTooLarge => "CR-05",
             Self::AlreadyEnough => "CR-08",
             Self::IsRequest => "CR-207",
@@ -310,7 +310,7 @@ impl<E: fmt::Debug + fmt::Display> std::error::Error for RequoteRefused<E> {}
 /// Why a note was not added to a sale (CR-206).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NoteRefused<E> {
-    /// CR-11: the counter has no sale with this index.
+    /// CR-78: the counter has no sale with this index.
     UnknownSale(u32),
     /// CR-206: the note is not plain text of 1 to 64 characters.
     BadNote,
@@ -324,7 +324,7 @@ impl<E> NoteRefused<E> {
     /// The rule the refusal belongs to.
     pub fn rule(&self) -> &'static str {
         match self {
-            Self::UnknownSale(_) => "CR-11",
+            Self::UnknownSale(_) => "CR-78",
             Self::BadNote | Self::AlreadyNoted => "CR-206",
             Self::Store(_) => "CR-40",
         }
@@ -351,7 +351,7 @@ impl<E: fmt::Debug + fmt::Display> std::error::Error for NoteRefused<E> {}
 /// Why a bill, a tab or a reference was refused (CR-245 to CR-253).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BillRefused<E> {
-    /// CR-11: the counter has no sale with this index.
+    /// CR-78: the counter has no sale with this index.
     UnknownSale(u32),
     /// CR-246: the counter has no bill with this number.
     UnknownBill(u32),
@@ -404,7 +404,7 @@ impl<E> BillRefused<E> {
     /// The rule the refusal belongs to.
     pub fn rule(&self) -> &'static str {
         match self {
-            Self::UnknownSale(_) => "CR-11",
+            Self::UnknownSale(_) => "CR-78",
             Self::UnknownBill(_) | Self::BadAmount | Self::NotOpen => "CR-246",
             Self::BadReference | Self::AlreadyReferenced => "CR-245",
             Self::TooManyOpen | Self::TooManyParts => "CR-253",
@@ -499,7 +499,7 @@ impl<E: fmt::Debug + fmt::Display> std::error::Error for PartRefused<E> {}
 /// Why a sale was not cancelled (CR-07).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CancelRefused<E> {
-    /// CR-11: the counter has no sale with this index.
+    /// CR-78: the counter has no sale with this index.
     UnknownSale(u32),
     /// CR-07: the sale has already ended.
     AlreadyEnded,
@@ -516,7 +516,7 @@ impl<E> CancelRefused<E> {
     /// The rule the refusal belongs to.
     pub fn rule(&self) -> &'static str {
         match self {
-            Self::UnknownSale(_) => "CR-11",
+            Self::UnknownSale(_) => "CR-78",
             Self::AlreadyEnded | Self::MoneyArrived => "CR-07",
             Self::BadName => "CR-61",
             Self::Store(_) => "CR-40",
@@ -549,7 +549,7 @@ impl<E: fmt::Debug + fmt::Display> std::error::Error for CancelRefused<E> {}
 /// Why a Lightning payment was not taken for a sale (CR-109).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LightningRefused<E> {
-    /// CR-11: the counter has no sale with this index.
+    /// CR-78: the counter has no sale with this index.
     UnknownSale(u32),
     /// CR-109: the sale had already ended (expired or cancelled) or was
     /// final, so nothing is changed. The payment is in the shop's node.
@@ -575,7 +575,7 @@ impl<E> LightningRefused<E> {
     /// The rule the refusal belongs to.
     pub fn rule(&self) -> &'static str {
         match self {
-            Self::UnknownSale(_) => "CR-11",
+            Self::UnknownSale(_) => "CR-78",
             Self::SaleClosed | Self::PaidAnotherWay | Self::TooLittle { .. } => "CR-109",
             Self::Judge(e) => e.rule(),
             Self::Store(_) => "CR-40",
@@ -608,7 +608,7 @@ impl<E: fmt::Debug + fmt::Display> std::error::Error for LightningRefused<E> {}
 /// Why an override was refused (CR-20 to CR-22).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OverrideRefused<E> {
-    /// CR-11: the counter has no sale with this index.
+    /// CR-78: the counter has no sale with this index.
     UnknownSale(u32),
     /// CR-22: the person's name is empty or too long.
     BadName,

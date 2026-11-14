@@ -1,4 +1,4 @@
-//! The starter line at the counter (`docs/COUNTER-RULES.md` section 26,
+//! The starter line at the counter (`docs/COUNTER-RULES.md` section 28,
 //! CR-272 to CR-276).
 //!
 //! A counter paired with the starter wallet and not switched takes the

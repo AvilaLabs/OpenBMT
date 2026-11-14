@@ -151,7 +151,7 @@ fn cr_206_a_note_is_set_when_the_request_opens_and_added_once_to_a_sale() {
     );
     // No such sale.
     let f = Rd::error(&add(77, "x")).expect("refused");
-    assert_eq!(f.rule, "CR-11");
+    assert_eq!(f.rule, "CR-78");
 }
 
 #[test]

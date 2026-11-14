@@ -1,6 +1,6 @@
 # Shop Lightning rules: the shop's own Lightning node, built in
 
-Status: specification, written before the code, for `crates/openbmt-lightning-node`.
+Status: specification for `crates/openbmt-lightning-node`.
 Each rule has an ID so that a test can name the rule it proves (`sl_NN_...`).
 It implements the choice of 2026-11-12: a Lightning node inside OpenBMT, on
 the LDK library (`lightning` 0.2.8), used as a library and never forked.

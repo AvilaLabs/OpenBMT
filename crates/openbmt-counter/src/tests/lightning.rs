@@ -155,7 +155,7 @@ fn cr_109_a_payment_is_not_added_to_a_sale_that_is_closed_or_paid_another_way() 
     // Each refusal names its rule.
     assert_eq!(LightningRefused::<&str>::SaleClosed.rule(), "CR-109");
     assert_eq!(LightningRefused::<&str>::PaidAnotherWay.rule(), "CR-109");
-    assert_eq!(LightningRefused::<&str>::UnknownSale(1).rule(), "CR-11");
+    assert_eq!(LightningRefused::<&str>::UnknownSale(1).rule(), "CR-78");
 }
 
 #[test]

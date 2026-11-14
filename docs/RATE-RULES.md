@@ -1,6 +1,6 @@
 # Rate rules: where the price comes from
 
-Status: specification for `crates/openbmt-rates`, written before the code.
+Status: specification for `crates/openbmt-rates`.
 Each rule has an ID so that a test can name the rule it proves. The rules
 implement `docs/DESIGN.md` §2.3 (the price is locked per sale and its source
 recorded) and the "Rate source manipulated" row of its threat table: two or

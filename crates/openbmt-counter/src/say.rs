@@ -627,7 +627,7 @@ impl<E: Display> JudgeError<E> {
                 "The counter has no such sale to check.",
                 Who::Cashier,
                 NOT_FOUND_NEXT,
-                "CR-11",
+                "CR-78",
             )
             .detail(format!("Sale number {i}.")),
             Self::Store(fault) => store_failed(
@@ -652,7 +652,7 @@ impl<E: Display> LightningRefused<E> {
                 "A Lightning payment was reported for a sale this counter does not hold.",
                 Who::Cashier,
                 NOT_FOUND_NEXT,
-                "CR-11",
+                "CR-78",
             ),
             Self::SaleClosed => refused(
                 "Lightning payment not added",
@@ -703,7 +703,7 @@ impl<E: Display> RequoteRefused<E> {
                 "The counter has no such sale to give a new price.",
                 Who::Cashier,
                 NOT_FOUND_NEXT,
-                "CR-11",
+                "CR-78",
             )
             .detail(format!("Sale number {i}.")),
             Self::SaleEnded => refused(
@@ -791,7 +791,7 @@ impl<E: Display> NoteRefused<E> {
                 "The counter has no such sale to add a note to.",
                 Who::Cashier,
                 NOT_FOUND_NEXT,
-                "CR-11",
+                "CR-78",
             )
             .detail(format!("Sale number {i}.")),
             Self::BadNote => note_not_read(),
@@ -823,7 +823,7 @@ impl<E: Display> CancelRefused<E> {
                 "The counter has no such sale to cancel.",
                 Who::Cashier,
                 NOT_FOUND_NEXT,
-                "CR-11",
+                "CR-78",
             )
             .detail(format!("Sale number {i}.")),
             Self::AlreadyEnded => refused(
@@ -993,7 +993,7 @@ impl<E: Display> OverrideRefused<E> {
                 "The counter has no such sale to check before accepting it by hand.",
                 Who::Cashier,
                 NOT_FOUND_NEXT,
-                "CR-11",
+                "CR-78",
             )
             .detail(format!("Sale number {i}.")),
             Self::Judge(JudgeError::Store(fault)) => store_failed(

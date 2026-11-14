@@ -1,6 +1,6 @@
 # Books rules: from verified records to the merchant's books and exports
 
-Status: specification for `crates/openbmt-books`, written before the code.
+Status: specification for `crates/openbmt-books`.
 Each rule has an ID so that a test can name the rule it proves. The rules
 serve `docs/DESIGN.md` §2.4 (refunds), §2.5 (end of day), §2.7 (the books
 never count unfinished money), §10 (books and tax) and §11 (cash-out).

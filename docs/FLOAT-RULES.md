@@ -1,6 +1,6 @@
 # Float rules: the refund float on the owner phone
 
-Status: specification, written before the code, for the `float` module of
+Status: specification for the `float` module of
 `crates/openbmt-owner` and its calls in `crates/openbmt-owner-ffi`. Each
 rule has an ID so that a test can name the rule it proves (`fl_NN_...`).
 

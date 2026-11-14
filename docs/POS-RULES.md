@@ -1,6 +1,6 @@
 # POS rules: matching the POS orders to the counter's sales
 
-Status: specification for `crates/openbmt-pos`, written before the code.
+Status: specification for `crates/openbmt-pos`.
 Each rule has an ID so that a test can name the rule it proves. The rules
 implement `docs/DESIGN.md` §2.2, §2.7, §5.3 (the Box, and "The owner phone
 polls the POS itself"), §5.6 and §10 for any POS, without naming one.
@@ -52,23 +52,26 @@ effect, and draws what it is told. Times are whole seconds since 1970 UTC.
   no time test at all). This clock slack is a setting. It is separate from the
   2 minutes of PS-41, which are about the payment and not about the clocks.
 - **PS-05.** A sale as the matcher sees it (a "sale fact") is: the counter,
-  the sale index, the amount and currency, when it opened, when it was
-  first reported paid (if ever), whether it was reported unpaid after that
-  and not paid again, whether it is final, and its reference. Facts are
-  built only from the counter's signed records. The chain is verified whole
-  first, and a chain that does not verify gives no facts. The Box has no
-  records: it builds the same facts from the counter's signed paid notices
-  (BX-40), which carry exactly these fields and nothing else; the
-  reference is worked out from the counter's key and the sale index
-  (PS-20). The counter folds its own records as PS-06 and PS-09 say to know
-  which notices to send, so the two ways give equal facts.
+  the sale index, the amount and currency, when it opened, when it was first
+  reported paid (if ever), whether it was reported unpaid after that and not
+  paid again, whether it is final, its reference, and the till's own reference
+  for it when the till gave one (CR-245). Facts are built only from the
+  counter's signed records. The chain is verified whole first, and a chain
+  that does not verify gives no facts. The Box has no records: it builds the
+  same facts from the counter's signed paid notices (BX-40), which carry these
+  fields and nothing else, except the till's reference, which a notice never
+  carries, and the id of the till sale when a till asked for the sale through
+  the Box (BX-77). The reference is worked out from the counter's key and the
+  sale index (PS-20). The counter folds its own records as PS-06 and PS-09 say
+  to know which notices to send, so the two ways give equal facts.
 - **PS-06.** Without PS-09, the facts are read from the counter's events in
   order. The sale is reported paid at the first of `PaidAtOnce`, `Confirmed`,
-  `Override` or `Final`. It is reported unpaid after that by `Reopened`, and
-  by `Replaced` unless the sale is confirmed at that moment, and is paid again
-  by any of the four paid events. It is final at `Final`, until a `Reopened`.
-  An event for a sale that was never opened, a second `Opened` for one sale,
-  and a record body that does not decode are refused.
+  `Override`, `Final` or `PaidByLightning`. It is reported unpaid after that
+  by `Reopened`, and by `Replaced` unless the sale is confirmed at that
+  moment, and is paid again by any of the five paid events. It is final at
+  `Final` or `PaidByLightning`, until a `Reopened`. An event for a sale that
+  was never opened, a second `Opened` for one sale, and a record body that
+  does not decode are refused.
 - **PS-07.** What the counter's events do not carry stays empty. The times are
   the counter's time of the judgment that wrote the record. A late payment on
   an ended sale (CR-19), a surplus and a refund are not part of a fact.
@@ -104,11 +107,12 @@ effect, and draws what it is told. Times are whole seconds since 1970 UTC.
   counters that serve it (at most 32 locations, 16 counters each). A
   counter is in at most one location. A counter may instead be marked "no
   POS", for a counter that is used without one.
-- **PS-15.** Which tenders are Bitcoin tenders is decided when an order is
-  first taken into the ledger, with the settings of that moment, and only
-  those tenders are kept. A name added to the settings later does not reach
-  back into orders already held. A tender that was kept and is gone from a
-  later version of its order is treated as removed (PS-45).
+- **PS-15.** Which tenders are Bitcoin tenders is decided each time a version
+  of an order is taken into the ledger, with the settings of that moment, and
+  only those tenders are kept. A name added to the settings later reaches an
+  order already held only when a newer version of that order arrives; an order
+  that does not change is not read again. A tender that was kept and is gone
+  from a later version of its order is treated as removed (PS-45).
 
 ## 3. The sale reference
 
@@ -595,4 +599,4 @@ the API reference as it was rendered on 2026-11-12.
 - **They do not settle two orders for one payment by themselves.** The
   alerts say which are involved; the owner decides.
 - **They do not re-read orders already held** when the settings change
-  (PS-15).
+  (PS-15): an order is read again only when a newer version of it arrives.

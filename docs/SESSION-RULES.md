@@ -1,7 +1,7 @@
 # Session rules: the approval session between the owner phone and the Key app
 
 Status: specification for `crates/openbmt-session`, `crates/openbmt-approver`
-and `crates/openbmt-owner`, written before the code. Each rule has an ID so
+and `crates/openbmt-owner`. Each rule has an ID so
 that a test can name the rule it proves. The rules implement
 `docs/DESIGN.md` §2.4 (refunds), §2.9 (roles, loosening and tightening,
 pairing), §2.10 (the approval session), §5.1 (batches, the order of the Key

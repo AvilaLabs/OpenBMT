@@ -1,6 +1,6 @@
 # Network rules: how the counter talks to Bitcoin peers
 
-Status: specification for `crates/openbmt-net`, written before the code.
+Status: specification for `crates/openbmt-net`.
 Each rule has an ID so that a test can name the rule it proves. The rules
 implement the network side of `docs/DESIGN.md` §5.1 and feed the checks of
 `docs/WATCHER-RULES.md`.

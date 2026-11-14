@@ -1,6 +1,6 @@
 # Stick rules: the shop's key made on an ordinary computer, offline
 
-Status: specification, written before the code. Each rule has an ID so that
+Status: specification. Each rule has an ID so that
 a test can name the rule it proves (`sk_NN_...`).
 
 The stick is a folder the owner copies onto any USB stick. An ordinary PC

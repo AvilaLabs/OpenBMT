@@ -37,10 +37,11 @@ draws what it is told.
   between the two wastes an index and never reuses one.
 - **CR-04.** At most 120 new addresses are handed out per hour **[to
   tune]**. Past that, opening is refused until the hour has moved on.
-- **CR-05.** A sale has an amount in the shop's currency and a quote: a
-  rate the caller supplies, good for 5 minutes. When a quote runs out the
-  caller supplies a new rate and the sale gets a new quote. The address
-  does not change. All quotes of a sale are kept.
+- **CR-05.** A sale has an amount in the shop's currency and a quote: a rate
+  the caller supplies, good for 5 minutes. When a quote runs out the caller
+  supplies a new rate and the sale gets a new quote. The address does not
+  change. All quotes of a sale are kept, up to 64: past that the last quote
+  stays in force and a new one is refused.
 - **CR-57.** A rate comes with its source: a label of 1 to 32 bytes from
   `a-z`, `0-9`, `-`, `+` and `.`, and the time, in Unix seconds, at which
   the caller got the rate. A label with any other byte, or none, is
@@ -58,11 +59,12 @@ draws what it is told.
   the quote. If the process stops between the two writes, the record names
   a quote that the sale does not hold; the caller was told the requote
   failed, and asking again writes a second record.
-- **CR-06.** Satoshis are valued once, at the quote that was current when
-  the counter first learned of them, and that value never changes. If
-  none was current, the last quote is used: it is the one the customer
-  was shown. If what has arrived shrinks, the newest valuations are
-  dropped first.
+- **CR-06.** Satoshis are valued once, at the quote that was current when the
+  counter first learned of them, and that value never changes. If none was
+  current, the last quote is used: it is the one the customer was shown. If
+  what has arrived shrinks, the newest valuations are dropped first. A sale
+  records at most 128 valuations; satoshis that arrive after that stay
+  unvalued and are counted at the quote in force each time.
 - **CR-08.** What the sale needs, in satoshis, is the satoshis already
   valued plus the rest of the amount at the current quote, rounded up to
   a whole satoshi. A new quote moves only the part that has not been
@@ -107,6 +109,9 @@ carries two texts: why it is in this state, and what happens next (§2.6).
     that was done and "could still be cancelled".
   - `Confirmed` (green): confirmed at the shop's depth, with the depth.
   - `Final` (green): confirmed at the shop's refund depth.
+  - `Overridden` (green): a person accepted it (CR-20), with their role;
+    it waits for a confirmation.
+  - `PaidLightning` (green): paid over Lightning, final at once (CR-109).
   - `DoNotHandOver` (red): the money is not safe, with a cause.
   - `Expired`, `Cancelled` (neutral): ended with nothing received.
   - `NeedsAPerson` (red): the sale holds more than the watcher can judge
@@ -122,7 +127,8 @@ carries two texts: why it is in this state, and what happens next (§2.6).
      depth: `DoNotHandOver` (replaced);
   4. confirmed at the refund depth: `Final`;
   5. confirmed at the shop's depth: `Confirmed`;
-  6. the sale was accepted at once earlier (CR-13): `PaidInstant`;
+  6. a person accepted the sale (CR-20): `Overridden`; or else it was
+     accepted at once earlier (CR-13): `PaidInstant`;
   7. enough has arrived, unconfirmed: ask the instant decision.
      `Instant` gives `PaidInstant`; anything else gives `Waiting` with its
      reason. While the check is not healthy the state is `DoNotHandOver`
@@ -133,6 +139,9 @@ carries two texts: why it is in this state, and what happens next (§2.6).
      once the payment has the shop's depth;
   8. something has arrived, not enough: `PartPaid`;
   9. nothing: `NotPaidYet`, or `Expired` under CR-07.
+
+  A sale paid over Lightning is `PaidLightning` and is judged by CR-109,
+  not by this order.
 - **CR-13.** Accepting at once is a step with a record. The counter adds
   the amount at risk to its exposure ledger, under the sale and not under
   a transaction (a fee bump changes the transaction), against the slice of
@@ -141,13 +150,14 @@ carries two texts: why it is in this state, and what happens next (§2.6).
   ledger has no room, the state is `Waiting`. From then on the sale is
   "accepted at once" for good: a later worse answer from the instant
   decision does not take the green screen back, only rules 1 to 3 do.
-- **CR-14.** A conflict on a sale that was accepted at once is a cancel.
-  The counter records it in the pause tracker (instant pauses, §6),
-  raises the cancel alarm, and the sale shows `DoNotHandOver`. The alarm
-  stays raised until the owner clears it with a signed command
-  (`openbmt_core::command`); nothing at the counter clears it. The same
-  holds for resetting a pause and for releasing exposure by hand. A
-  command is taken once: its number must be above the last one taken.
+- **CR-14.** A conflict, or a reorg that undoes the payment, on a sale that
+  was accepted at once or accepted by a person (CR-20) is a cancel. The
+  counter records it in the pause tracker (instant pauses, §6), raises the
+  cancel alarm, and the sale shows `DoNotHandOver`. The alarm stays raised
+  until the owner clears it with a signed command (`openbmt_core::command`);
+  nothing at the counter clears it. The same holds for resetting a pause and
+  for releasing exposure by hand. A command is taken once: its number must be
+  above the last one taken.
 - **CR-15.** Exposure leaves the ledger when what the sale needs is first
   confirmed, or by the owner's signed command. Never on a timeout, and
   not when the sale turns red.
@@ -160,18 +170,20 @@ carries two texts: why it is in this state, and what happens next (§2.6).
 - **CR-18.** A payment that is seen and not confirmed for 2 hours **[to
   tune]** adds "stuck: not confirming" to the state's texts. The state
   does not change and the sale does not close.
-- **CR-19.** A payment that arrives for a sale that expired or was
-  cancelled is recorded on that sale, flagged for the owner, and shown
-  as "late payment". It never changes another sale. This holds until the
-  sale is settled (CR-76); after that the counter no longer watches the
-  address, and a payment to it is seen by the owner's wallet (CR-80).
+- **CR-19.** A payment that arrives for a sale that expired or was cancelled
+  is recorded on that sale, flagged for the owner, and shown as "late
+  payment". At most 20 late payments are listed; later ones still mark the
+  sale late. It never changes another sale. This holds until the sale is
+  settled (CR-76); after that the counter no longer watches the address, and a
+  payment to it is seen by the owner's wallet (CR-80).
 
 ## 3. Overrides
 
 - **CR-20.** A person can accept a sale that is `Waiting`, `PartPaid` or
-  `DoNotHandOver`. The amount at risk goes into the exposure ledger as
-  an override, stored before the screen changes. It is refused when the
-  ledger has no room.
+  `DoNotHandOver`. The amount at risk goes into the exposure ledger as an
+  override, stored before the screen changes. It is refused when the ledger
+  has no room, and when the desk already keeps 1,000 overrides inside the
+  window of CR-21, until older ones leave it.
 - **CR-21.** A cashier's override is refused above the per-sale instant
   limit, and when it would take that cashier's overrides of the last 24
   hours past the cashier's daily cap. A manager's is refused when it
@@ -187,10 +199,10 @@ carries two texts: why it is in this state, and what happens next (§2.6).
 
 ## 4. What leaves the counter
 
-- **CR-30.** The sale closes in the POS as paid on `PaidInstant`,
-  `Confirmed`, `Final` or an override, and on nothing else. A sale that
-  turned `DoNotHandOver` after it was closed is reported to the POS as
-  unpaid again.
+- **CR-30.** The sale closes in the POS as paid on `PaidInstant`, `Confirmed`,
+  `Final`, `Overridden` or `PaidLightning`, and on nothing else. A sale that
+  turned `DoNotHandOver` after it was closed is reported to the POS as unpaid
+  again.
 - **CR-31.** The books count a sale as money only at `Final`. Before
   that it is pending.
 - **CR-32.** Every change of state that CR-30 or CR-31 reports is also
@@ -330,12 +342,17 @@ has been made).
   has the refund depth again, not only the shop's depth. Until then a sale
   that was final takes blocks and sightings again, wherever the payment is
   mined the second time, and it is not settled (CR-76).
-- **CR-67.** A request is refused when its amount is zero, or when it
-  would take what is asked for the sale past what was received for it.
-  What is asked is the sum of the earlier requests that are not withdrawn
-  and the cash refunds (CR-71), valued in satoshis at the sale's last
-  quote. This holds across parts: two requests that together pass what was
-  received make the second one refused.
+- **CR-67.** A request is refused when its amount is zero, when it is
+  below the dust limit of its destination's kind (294 satoshis for P2WPKH,
+  330 for P2WSH or P2TR, 540 for P2SH, 546 for P2PKH), or when it would take
+  what is asked for the sale past what was received for it. What is asked is
+  the sum of the earlier requests that are not withdrawn and the cash
+  refunds (CR-71), each in the satoshis it was given when it was made: a
+  request in the shop's currency at its own fresh rate, a cash refund at the
+  sale's last quote at that moment. This holds across parts: two requests
+  that together pass what was received make the second one refused. A sale
+  keeps at most 32 entries, requests and cash refunds together, and a
+  request or cash refund past that is refused.
 - **CR-68.** A request whose destination is a script of the wallet's own, as
   far as the counter can tell (any script in its address batches, shown or
   not), is refused. The counter cannot check further: the owner and the Key
@@ -400,11 +417,11 @@ has been made).
 - **CR-119.** A cashier's cash refund (CR-71) is refused when it would take
   what is asked for the sale past what was received only if the sale's
   withdrawn requests are counted as well. The owner may already have the
-  request in an open approval session (CR-70), and would pay it on top of
-  the cash. The refusal says the owner is to be asked whether the request
-  was dropped, and that a manager can then give the cash refund. A manager's
-  cash refund, and a new request (the owner sees both), count the withdrawn
-  requests as CR-67 says. A cash refund that is over what arrived without
+  request in an open approval session (CR-70), and would pay it on top of the
+  cash. The refusal says the owner is to be asked whether the request was
+  dropped, and that a manager can then give the cash refund. A manager's cash
+  refund, and a new request (the owner sees both), leave the withdrawn
+  requests out, as CR-67 says. A cash refund that is over what arrived without
   the withdrawn requests is refused under CR-67 as before.
 - **CR-120.** Each refund entry keeps the chain height the counter's headers
   were at when the entry was made, when that height is above zero; a record
@@ -454,7 +471,8 @@ and sales not yet settled wait for the owner's copy to catch up.
   6. its exposure is not still counted in the ledger (CR-15): a sale
      accepted at once whose exposure has not been released is not settled.
   A sale that is live, or that the counter has no owner's mark for, is
-  never settled.
+  never settled. Neither is a sale that is part of an open bill (CR-249):
+  the bill still counts it.
 - **CR-77.** `Counter::settle(store, now)` settles at most
   `MAX_SETTLE_PER_CALL` (256) sales in one call, the one whose last change
   is oldest first (the lower index first among equal times), and says how
@@ -469,20 +487,22 @@ and sales not yet settled wait for the owner's copy to catch up.
   desk's numbers and the batches' issued ranges are not touched, so the
   index of a settled sale is never handed out again.
 - **CR-78.** After a settled sale is gone, the counter does not judge it, does
-  not report it and does not take sightings for its address (CR-80). A
-  call that names its index is refused as for any sale the counter does not
-  hold. The refund numbers in the records still count (CR-73).
+  not report it and does not take sightings for its address (CR-80). A call
+  that names an index the counter does not hold, a settled sale's or any
+  other, is refused under this rule; a refund request for one is refused under
+  CR-64. The refund numbers in the records still count (CR-73).
 - **CR-79.** The batches keep the time at which each script was shown or
-  retired, in their stored form (`OBMC`, same version). A script that no
-  sale of the counter holds, that was shown or retired at least
-  `SETTLE_SECS` ago, leaves the counter's watch list: it is not in
-  `Counter::watched_scripts()` after the next call to `settle`. This covers
-  an address that was handed out and never used for a sale (CR-41), an
-  address of a retired batch, and the address of a sale that was settled.
-  The index stays issued: the range is kept and the index is never handed out
-  again. Nothing is released while any sale is unreadable (CR-42), because
-  the counter cannot tell which address it held. The counter does not
-  learn what an address it does not hold received: that is the owner's.
+  retired, in their stored form (`OBMC`, same version). A script that no sale
+  of the counter holds, that was shown or retired at least `SETTLE_SECS` ago,
+  leaves the counter's watch list: it is not in `Counter::watched_scripts()`
+  after the next call to `settle`. This covers an address that was handed out
+  and never used for a sale (CR-41), an address of a retired batch, and the
+  address of a sale that was settled. The index stays issued: the range is
+  kept and the index is never handed out again. Nothing is released while any
+  sale is unreadable (CR-42), because the counter cannot tell which address it
+  held. A counter paired with the shop's own wallet (CR-234) releases nothing:
+  its ranges hold indexes, not times. The counter does not learn what an
+  address it does not hold received: that is the owner's.
 - **CR-80.** What the counter does not watch any more, the owner's wallet
   does (OC-07, OC-10 to OC-12): every issued address is watched, all the
   time while the wallet's addresses fit the live watch, and by a check once a
@@ -562,10 +582,12 @@ and sales not yet settled wait for the owner's copy to catch up.
   laptop (debug build, signatures checked) and held 16,384 records.
 - **CR-82.** `openbmt-counter-node` calls `settle` from the node's pump once
   at start, as soon as the owner's mark is known, and then once an hour, and
-  never more often than once a minute. The list of scripts the driver is
-  started with (`watched_scripts()`) is then the shorter one. The node keeps
-  a line in its log when it settles: the count only, no index and no
-  address. A store fault in a settle is a note and changes nothing else.
+  never more often than once a minute. While a settle leaves sales still to
+  settle, the next one comes after the minute, not the hour. The list of
+  scripts the driver is started with (`watched_scripts()`) is then the shorter
+  one. The node keeps a line in its log when it settles: the count only, no
+  index and no address. A store fault in a settle is a note and changes
+  nothing else.
 - **CR-83.** The payment request the customer scans is the sale's
   address and what it needs now (CR-08) as a BIP 21 URI. The text of the
   QR code is `BITCOIN:` and a bech32 address, both in upper case, so that
@@ -952,24 +974,6 @@ counter holds is not, and never leaves the counter.
   of CR-113 that Lightning is not available for this sale, with the reason
   under the details: "this sale has had too many quotes for Lightning". The
   earlier invoices stay watched (CR-112).
-
-## 13. What these rules do not do
-
-- **They do not check payments.** Proof of work, proofs, peers and
-  conflicts are the watcher's. A wrong fact handed in gives a wrong
-  screen.
-- **They do not see a payment drop out of the network.** A light client
-  cannot. A payment that never confirms is "stuck" (CR-18); the limits
-  of `docs/DESIGN.md` §6 are what protect the shop.
-- **They do not refund.** Surplus and cancelled sales with money on them
-  are recorded for the owner's refund session (§2.4). A sale paid over
-  Lightning is refunded in cash, or on-chain up to what arrived on-chain
-  (CR-217), never over Lightning (CR-111).
-- **They do not talk to the POS.** CR-30 says what to report; the
-  connector reports it.
-- **They do not know who a person is.** The list of managers and their
-  PINs is not in the signed settings yet. The caller names the person
-  and the role.
 
 ## 13. Talking to the owner through the Box
 
@@ -1808,15 +1812,15 @@ a counter paired with the shop's own wallet.
   as strictly as CR-169 says. A counter paired with the Key app drops a Range message with a
   note, and a counter paired with the shop's own wallet drops a Batch
   message with a note: "This counter makes its own addresses."
-- **CR-236.** Settings after pairing are checked as section 15 says, with
-  the owner root alone in place of the two roots. The class of the change is
+- **CR-236.** Settings after pairing are checked as section 15 says, with the
+  owner root alone in place of the two roots. The class of the change is
   computed from the settings in force and the new ones
   (`openbmt_core::approval::classify`, AP-01, AP-02). A Free change is taken
-  with the owner's signature alone. A Loosen or Redirect change is refused:
-  it needs a counter confirmation or a wallet signature
-  (`docs/APPROVAL-RULES.md`), and neither is joined to the settings yet. The
-  note says the change must be confirmed at a counter. The `Setting` record
-  of CR-162 is written as there.
+  with the owner's signature alone. A Loosen change needs a counter's
+  confirmation (`docs/APPROVAL-RULES.md`): it waits to be confirmed as CR-239
+  to CR-242 say. A Redirect change is refused, since the wallet signature it
+  needs is not asked for yet. The `Setting` record of CR-162 is written as
+  there.
 - **CR-237.** The app's screens are the camera's, as CR-98 says: scan the
   owner phone's offer, the first-address screen, the request as a code with
   its four words and "They match" and "They differ", then the bundle. The
@@ -1898,7 +1902,7 @@ sections above, and a part paid another way is written down by the cashier.
 A tab is a bill whose amount grows while it is open. The till's reference
 (its check or receipt number) can ride on a sale or a bill, so that what the
 till closed as bitcoin can be matched against what arrived
-(`docs/BOOKS-RULES.md` §13). Status: specification, written before the code.
+(`docs/BOOKS-RULES.md` §13).
 
 - **CR-245.** A sale or a bill may carry the till's reference: 1 to 32
   characters of `A-Z`, `a-z`, `0-9`, `-`, `_`, `/`, `#` and `.`. It is set
@@ -2066,7 +2070,6 @@ A till that works with the Box (the Odoo module, `docs/BOX-RULES.md` §5c)
 asks one counter to take a payment of a set amount. The cashier starts it
 on that counter, and from then it is an ordinary sale with every rule of the
 sections above. These rules are the counter's side of BX-76 to BX-78.
-Status: specification, written before the code.
 
 - **CR-266. What is taken.** A POS notice from the Box (BX-76) that is a
   sale request is taken only from the Box of the settings in force, sealed
@@ -2104,7 +2107,7 @@ Status: specification, written before the code.
 - **CR-271.** Every state and refusal of this section has words under
   `docs/SCREEN-RULES.md`, and the tests name these rules.
 
-## 26. The starter line
+## 28. The starter line
 
 A counter paired with the starter wallet is told by the owner phone what
 that wallet holds, its limit, whether the owner asked to stop bitcoin sales
@@ -2118,13 +2121,13 @@ SS-38, `docs/LINK-RULES.md` LK-79). The line needs the shop's Box.
   folder in a file of its own, written as CR-161 and read strictly at
   start. A line that fails any check is dropped with a note and changes
   nothing.
-- **CR-273. The stop.** When the last line taken says stop, holds at least
-  the limit, and is not older than the heartbeat age limit of the settings
-  in force, "New sale" offers no bitcoin and says why (SS-38). With no line,
-  or a line older than that, the counter offers bitcoin as before, and,
-  when the last line said stop, Home says that the limit cannot be checked.
-  The counter takes no other meaning from the line: a sale already open is
-  not changed.
+- **CR-273. The stop.** When the last line taken says stop, holds at least the
+  limit, and is not further from the counter's clock than the heartbeat age
+  limit of the settings in force, either way, "New sale" offers no bitcoin and
+  says why (SS-38). With no line, or a line further than that, the counter
+  offers bitcoin as before, and, when the last line said stop, Home says that
+  the limit cannot be checked. The counter takes no other meaning from the
+  line: a sale already open is not changed.
 - **CR-274. The payments.** Each payment in a line that the counter has not
   shown before goes on Home as a card with its amount and time, and says
   whether the owner phone made it, until someone at the counter taps that
@@ -2135,3 +2138,20 @@ SS-38, `docs/LINK-RULES.md` LK-79). The line needs the shop's Box.
 - **CR-276.** Every state and refusal of this section has words under
   `docs/SCREEN-RULES.md`.
 
+## 29. What these rules do not do
+
+- **They do not check payments.** Proof of work, proofs, peers and
+  conflicts are the watcher's. A wrong fact handed in gives a wrong
+  screen.
+- **They do not see a payment drop out of the network.** A light client
+  cannot. A payment that never confirms is "stuck" (CR-18); the limits
+  of `docs/DESIGN.md` §6 are what protect the shop.
+- **They do not refund.** Surplus and cancelled sales with money on them
+  are recorded for the owner's refund session (§2.4). A sale paid over
+  Lightning is refunded in cash, or on-chain up to what arrived on-chain
+  (CR-217), never over Lightning (CR-111).
+- **They do not talk to the POS.** CR-30 says what to report; the
+  connector reports it.
+- **They do not know who a person is.** The list of managers and their
+  PINs is not in the signed settings yet. The caller names the person
+  and the role.

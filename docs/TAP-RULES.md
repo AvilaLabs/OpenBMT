@@ -1,6 +1,6 @@
 # Tap rules: the payment request over NFC
 
-Status: specification, written before the code, for the tag module of
+Status: specification for the tag module of
 `crates/openbmt-counter-ffi` and the tag service of the counter app. Each
 rule has an ID so that a test can name the rule it proves (`tp_NN_...`).
 The rules implement `docs/DESIGN.md` §7.
