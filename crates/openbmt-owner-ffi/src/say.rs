@@ -681,6 +681,14 @@ pub(crate) fn link_alert_words(alert: &openbmt_owner_node::Alert) -> Words {
         .code("LK-59")
         .detail(format!("record {seq}")),
         Alert::BatchUndelivered { since, .. } => openbmt_owner_node::say::batch_undelivered_words(*since),
+        Alert::PaidNotSeen { .. } => Words::new(
+            Tone::Stop,
+            "Paid on counter, not seen",
+            "A counter showed a sale as paid and this phone does not see the payment.",
+            Who::Owner,
+            "Open the alerts to see the sale, and check the counter.",
+        )
+        .code("OC-62"),
     }
 }
 
@@ -778,6 +786,10 @@ pub fn all_words() -> Vec<(String, Words)> {
                 counter,
                 since: 1_700_000_000,
             }),
+        ));
+        out.push((
+            "alert-paid-not-seen".to_string(),
+            link_alert_words(&Alert::PaidNotSeen { counter, sale: 7 }),
         ));
     }
     out.push(("counter-none".to_string(), counter_words(None, None, None)));

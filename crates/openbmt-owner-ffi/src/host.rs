@@ -247,6 +247,9 @@ struct State {
     pos: OwnerPos,
     /// The marks of the counter checks (OC-64).
     paid: PaidChecks,
+    /// The view's tip and readiness when the counter checks last ran in the
+    /// background; none before the first run (OC-62).
+    paid_key: Option<(u32, bool)>,
     /// Key 1's state, or none for a shop with its own wallet.
     key1: Option<SignerState>,
     key1_account: Option<Xpriv>,
@@ -521,7 +524,7 @@ fn paid_run(
     let State {
         node, link, paid, ..
     } = st;
-    let Some(link) = link.as_ref() else {
+    let Some(link) = link.as_mut() else {
         return Ok(None);
     };
     if paid.not_kept().is_some() {
@@ -538,7 +541,53 @@ fn paid_run(
     let result = paid
         .check(&sales, now, |k| node.paid_facts(k, tip))
         .map_err(|e| paid_error(&e))?;
+    paid_alerts(link, paid);
     Ok(Some((sales, result)))
+}
+
+/// OC-62: the alarms of the link are the alarms not cleared in the marks, so
+/// a mismatch is among the owner's other alarms (the Alerts line on the home
+/// page counts it) without the owner opening a page.
+fn paid_alerts(link: &mut OwnerLink, paid: &PaidChecks) {
+    let raised: Vec<SaleKey> = paid
+        .marks()
+        .iter()
+        .filter(|m| m.state == MarkState::Raised)
+        .map(|m| m.sale)
+        .collect();
+    let stale: Vec<Alert> = link
+        .alerts()
+        .iter()
+        .filter(|a| match a {
+            Alert::PaidNotSeen { counter, sale } => !raised.contains(&SaleKey {
+                counter: *counter,
+                index: *sale,
+            }),
+            _ => false,
+        })
+        .cloned()
+        .collect();
+    for a in &stale {
+        link.clear(a);
+    }
+    for s in raised {
+        link.raise_alert(Alert::PaidNotSeen {
+            counter: s.counter,
+            sale: s.index,
+        });
+    }
+}
+
+/// OC-62: run the counter checks when the view has a new tip or readiness,
+/// and once after the start. A failure is not the pump's: the next tip runs
+/// them again, and a page that asks shows the refusal.
+fn paid_background(st: &mut State, now: u64) {
+    let key = (st.node.view().checked(), st.node.view().ready());
+    if st.paid_key == Some(key) {
+        return;
+    }
+    st.paid_key = Some(key);
+    let _ = paid_run(st, now);
 }
 
 fn queue_error(e: &OwnerError<String>) -> AppError {
@@ -1143,6 +1192,7 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
             intake,
             pos: OwnerPos::open(&dir),
             paid: PaidChecks::open(&dir),
+            paid_key: None,
             key1,
             key1_account: key1_keys.map(|(account, _, _)| account),
             own: own_wallet.map(|wallet| OwnShop {
@@ -1314,6 +1364,7 @@ impl Entry {
                 .min(Duration::from_millis(u64::from(SLICE_MS)));
             let (notes, stopped) = self.run(Some(now), move |st| {
                 st.node.pump(slice);
+                paid_background(st, now);
                 Ok((
                     st.node.watcher_mut().take_notes(),
                     st.node.watcher().stopped(),
@@ -2331,6 +2382,9 @@ impl Entry {
                         Alert::BatchUndelivered { counter, since } => {
                             (AlertKind::BatchUndelivered, counter, *since)
                         }
+                        Alert::PaidNotSeen { counter, sale } => {
+                            (AlertKind::PaidNotSeen, counter, u64::from(*sale))
+                        }
                     };
                     let alert_words = if own {
                         own_alert_words(a)
@@ -2406,9 +2460,25 @@ impl Entry {
                     counter,
                     since: a.value,
                 },
+                AlertKind::PaidNotSeen => Alert::PaidNotSeen {
+                    counter,
+                    sale: u32::try_from(a.value)
+                        .map_err(|_| refused_by("alert-unknown", "the alert is not raised"))?,
+                },
             };
             if !link.alerts().contains(&alert) {
                 return Err(refused_by("alert-unknown", "the alert is not raised"));
+            }
+            // The alarm of a counter check is cleared in the marks too (OC-62).
+            if let Alert::PaidNotSeen { counter, sale } = &alert {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(1, |d| d.as_secs());
+                let key = SaleKey {
+                    counter: *counter,
+                    index: *sale,
+                };
+                st.paid.clear(&key, now).map_err(|e| paid_error(&e))?;
             }
             link.clear(&alert);
             Ok(())
@@ -2626,13 +2696,23 @@ impl Entry {
                 counter,
                 index: a.sale,
             };
-            st.paid.clear(&sale, a.now).map_err(|e| paid_error(&e))
+            st.paid.clear(&sale, a.now).map_err(|e| paid_error(&e))?;
+            if let Some(link) = st.link.as_mut() {
+                paid_alerts(link, &st.paid);
+            }
+            Ok(())
         })
     }
 
     /// OC-64: drop the marks, and the file that did not read back.
     pub(crate) fn paid_check_reset(&self) -> Result<(), AppError> {
-        self.run(None, |st| st.paid.reset().map_err(|e| paid_error(&e)))
+        self.run(None, |st| {
+            st.paid.reset().map_err(|e| paid_error(&e))?;
+            if let Some(link) = st.link.as_mut() {
+                paid_alerts(link, &st.paid);
+            }
+            Ok(())
+        })
     }
 
     pub(crate) fn refund_notes(&self) -> Result<Vec<RefundNoteView>, AppError> {

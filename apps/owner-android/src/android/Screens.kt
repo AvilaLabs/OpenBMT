@@ -617,11 +617,13 @@ internal fun Controller.showAlerts(message: SayWords? = null): Unit = withNode {
             views.add(msg)
         } else {
             views.add(ui.text(OwnerModel.alertsLine(l.alerts.size), 16f, bold = l.alerts.isNotEmpty()))
-            for (a in l.alerts) {
+            // A mismatch of a counter check is shown with its sale and its Clear button below (OC-62).
+            for (a in l.alerts.filter { it.kind != AlertKind.PaidNotSeen }) {
                 val kind = when (a.kind) {
                     AlertKind.MissedCheckIn -> "Missed check-in"
                     AlertKind.Diverged -> "Records do not match"
                     AlertKind.BatchUndelivered -> "New addresses not taken"
+                    AlertKind.PaidNotSeen -> ""
                 }
                 views.add(
                     stack(

@@ -656,3 +656,33 @@ fn oc_63_the_day_runs_from_local_midnight() {
         (midnight - 86_400 + 5 * 3_600, midnight + 5 * 3_600)
     );
 }
+
+#[test]
+fn oc_61_an_index_the_owner_never_issued_to_the_counter_is_a_mismatch_at_once() {
+    let owner = new_owner();
+    let view = view_with(&[]);
+    // Index 20 is past the range of 20 addresses the owner issued.
+    let sales = [
+        sale(20, 5_000, PaidHow::AtOnce),
+        sale(0, 5_000, PaidHow::AtOnce),
+    ];
+    // Paid a second ago: the wait does not apply to the unissued one.
+    let result = check_paid(&sales, &PaidMarks::new(), PAID_AT + 1, |k| {
+        verified_facts(&view, &owner, k, TIP, DEPTH)
+    });
+    assert_eq!(state_of(&result, 20), PaidState::Mismatch);
+    assert_eq!(result.checks[0].seen_sats, Some(0));
+    assert_eq!(
+        state_of(&result, 0),
+        PaidState::Waiting,
+        "an issued one waits"
+    );
+    assert_eq!(result.raised, vec![key(20)]);
+    // It is raised once: a mark stands.
+    let marks = PaidMarks::new().after(&result, PAID_AT + 1).unwrap();
+    let again = check_paid(&sales, &marks, PAID_AT + 2, |k| {
+        verified_facts(&view, &owner, k, TIP, DEPTH)
+    });
+    assert_eq!(state_of(&again, 20), PaidState::Mismatch);
+    assert!(again.raised.is_empty());
+}

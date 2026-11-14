@@ -1008,7 +1008,7 @@ other names in braces are counts:
 
 | Key | Text |
 |---|---|
-| OC62_MISMATCH_HEADING | Paid on the counter, not seen here |
+| OC62_MISMATCH_HEADING | Paid on counter, not seen |
 | OC62_MISMATCH_WHAT | {counter} showed sale {number} as paid, {amount}, at {time}, taken by {cashier}. This phone sees {seen} paid to that sale's address. |
 | OC62_MISMATCH_NEXT | Check the counter: it may have been tampered with. Clear this once you know what happened. |
 | OC62_CLEAR_BUTTON | Clear |

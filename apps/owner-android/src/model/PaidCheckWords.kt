@@ -26,7 +26,7 @@ object PaidCheckWords {
     }
 
     // ---- the alarm (OC-62) ----
-    val mismatchHeading = say("OC62_MISMATCH_HEADING", "Paid on the counter, not seen here")
+    val mismatchHeading = say("OC62_MISMATCH_HEADING", "Paid on counter, not seen")
     val mismatchWhat = say("OC62_MISMATCH_WHAT", "{counter} showed sale {number} as paid, {amount}, at {time}, taken by {cashier}. This phone sees {seen} paid to that sale's address.")
     val mismatchNext = say("OC62_MISMATCH_NEXT", "Check the counter: it may have been tampered with. Clear this once you know what happened.")
     val clearButton = say("OC62_CLEAR_BUTTON", "Clear")

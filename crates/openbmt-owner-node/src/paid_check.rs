@@ -505,10 +505,10 @@ pub enum PaidState {
     /// Paid less than [`PAID_CHECK_WAIT_SECS`] ago and the payment is not in
     /// a block yet.
     Waiting,
-    /// The sale is too old for the wallet to say what was paid, or its index
-    /// is not one the owner issued to the counter.
+    /// The sale is too old for the wallet to say what was paid.
     NotCheckable,
-    /// The wallet shows less than the counter recorded, after the wait.
+    /// The wallet shows less than the counter recorded, after the wait, or
+    /// the sale's index was never issued to the counter (no wait).
     Mismatch,
     /// A mismatch that was raised, whose payment has since arrived in full.
     ClearedByArrival,
@@ -564,8 +564,15 @@ pub fn check_paid(
             Err(FactsRefused::ViewNotReady | FactsRefused::ReceiptLogFull) => {
                 (PaidState::NotYet, None)
             }
-            Err(FactsRefused::TooOldForFacts | FactsRefused::NotThisCountersAddress) => {
-                (PaidState::NotCheckable, None)
+            Err(FactsRefused::TooOldForFacts) => (PaidState::NotCheckable, None),
+            // The owner never issued this index to this counter, so no
+            // payment there can be the shop's: a mismatch at once, with
+            // nothing seen and no wait.
+            Err(FactsRefused::NotThisCountersAddress) => {
+                if mark.is_none() {
+                    out.raised.push(key);
+                }
+                (PaidState::Mismatch, Some(0))
             }
             Ok(f) => {
                 let enough = u128::from(f.received_sats)

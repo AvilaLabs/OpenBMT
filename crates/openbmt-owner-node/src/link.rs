@@ -216,6 +216,15 @@ pub enum Alert {
         /// When the oldest batch that waits was first sent.
         since: u64,
     },
+    /// A counter showed a sale paid on chain and the wallet's view does not
+    /// show the payment (OC-62). The marks of `paid_check` hold the rest; this
+    /// puts the mismatch where the owner's other alarms are.
+    PaidNotSeen {
+        /// The counter.
+        counter: DeviceId,
+        /// The sale's number.
+        sale: u32,
+    },
 }
 
 /// The batches of addresses that wait for one counter to hold them (LK-70).
@@ -601,6 +610,12 @@ impl<R: Post> OwnerLink<R> {
     /// is raised again by the next message that shows it.
     pub fn clear(&mut self, alert: &Alert) {
         self.alerts.retain(|a| a != alert);
+    }
+
+    /// Raise an alert that does not come from the link's own messages (the
+    /// counter checks of OC-62). An alert already raised is not added twice.
+    pub fn raise_alert(&mut self, alert: Alert) {
+        self.raise(alert);
     }
 
     /// What the Box reported, oldest first (BX-42). These are the Box's
@@ -1128,7 +1143,8 @@ impl<R: Post> OwnerLink<R> {
             self.alerts.retain(|a| match a {
                 Alert::MissedCheckIn { counter: c, .. }
                 | Alert::Diverged { counter: c, .. }
-                | Alert::BatchUndelivered { counter: c, .. } => *c != counter,
+                | Alert::BatchUndelivered { counter: c, .. }
+                | Alert::PaidNotSeen { counter: c, .. } => *c != counter,
             });
             // Batches for a counter that is no longer on the link are not
             // sent again (LK-67, LK-70).

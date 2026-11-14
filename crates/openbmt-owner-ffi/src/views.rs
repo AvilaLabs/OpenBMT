@@ -421,12 +421,16 @@ pub enum AlertKind {
     /// A batch of addresses has waited a day for the counter to hold it
     /// (LK-73).
     BatchUndelivered,
+    /// A counter showed a sale paid and the wallet does not show the payment
+    /// (OC-62); the value is the sale's number.
+    PaidNotSeen,
 }
 
 wire_unit_enum!(AlertKind {
     MissedCheckIn = 0,
     Diverged = 1,
-    BatchUndelivered = 2
+    BatchUndelivered = 2,
+    PaidNotSeen = 3
 });
 
 /// The arguments of `clear_alert`: the alert as `link_state` showed it.

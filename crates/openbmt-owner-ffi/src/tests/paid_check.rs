@@ -134,21 +134,15 @@ fn check(rig: &Rig, handle: u64, now: u64) -> Check {
 }
 
 #[test]
-fn oc_60_the_check_lists_a_sale_the_wallet_cannot_speak_for_and_the_day_counts_it() {
+fn oc_61_a_sale_at_an_index_never_issued_is_an_alarm_and_the_day_counts_it_missing() {
     let (rig, handle) = ready(false);
-    // The test shop issued no address of the counter's, so the wallet cannot
-    // say what was paid to the sale's address: the sale is listed, not
-    // judged, and no alarm is raised however late it is.
-    let c = check(&rig, handle, PAID_AT + 10 * 86_400);
+    // The test shop issued no address of the counter's, so no payment at the
+    // sale's index can be the shop's: an alarm at once, however recent.
+    let c = check(&rig, handle, PAID_AT + 10);
     assert!(c.kept);
-    assert_eq!((c.alarms, c.arrived, c.not_checkable_more), (0, 0, 0));
-    assert!(c.waiting.is_empty());
-    assert_eq!(
-        c.not_checkable,
-        vec![(counter_bytes(), 7, 5_000, PAID_AT)],
-        "the counter, the sale's number, what it recorded and when"
-    );
-    // The day of the Paid: one sale, none seen, one too old to check.
+    assert_eq!((c.alarms, c.arrived, c.not_checkable_more), (1, 0, 0));
+    assert!(c.waiting.is_empty() && c.not_checkable.is_empty());
+    // The day of the Paid: one sale, none seen, one missing.
     let response = rig.call(OP_DAY, handle, &W::new().u64(PAID_AT + 100).u32(0).0);
     let mut r = Rd::ok(&response);
     let days = r.list(|r| {
@@ -164,7 +158,7 @@ fn oc_60_the_check_lists_a_sale_the_wallet_cannot_speak_for_and_the_day_counts_i
     r.done();
     assert_eq!(
         days,
-        vec![(counter_bytes(), 1, 5_000, (0, 0, 1, 0), 0, true)],
+        vec![(counter_bytes(), 1, 5_000, (0, 0, 0, 1), 0, true)],
         "sales, total, seen, waiting, too old, missing, seen total, named"
     );
     // Another day has no line.
@@ -175,11 +169,17 @@ fn oc_60_the_check_lists_a_sale_the_wallet_cannot_speak_for_and_the_day_counts_i
 }
 
 #[test]
-fn oc_62_an_alarm_that_is_not_raised_is_not_cleared() {
+fn oc_62_only_a_raised_alarm_is_cleared() {
     let (rig, handle) = ready(false);
-    let fields = W::new().u64(PAID_AT).bytes(&counter_bytes()).u32(7).0;
+    let fields = W::new().u64(PAID_AT).bytes(&counter_bytes()).u32(8).0;
     let f = fault(&rig.call(OP_CLEAR, handle, &fields));
     assert_eq!((f.status, f.rule.as_str()), (1, "paid-alarm-unknown"));
+    // The raised one is cleared, once, and its alert goes with it.
+    let fields = W::new().u64(PAID_AT).bytes(&counter_bytes()).u32(7).0;
+    Rd::ok(&rig.call(OP_CLEAR, handle, &fields)).done();
+    assert!(paid_alerts(&rig, handle).is_empty());
+    let f = fault(&rig.call(OP_CLEAR, handle, &fields));
+    assert_eq!(f.rule.as_str(), "paid-alarm-unknown");
     // A counter that is not 32 bytes is refused before any mark is looked at.
     let f = fault(&rig.call(
         OP_CLEAR,
@@ -196,6 +196,8 @@ fn oc_64_checks_that_do_not_read_back_are_named_and_cleared_by_the_owner() {
     let c = check(&rig, handle, PAID_AT + 10 * 86_400);
     assert!(!c.kept);
     assert!(c.alarms == 0 && c.waiting.is_empty() && c.not_checkable.is_empty());
+    // Nor is an alert raised in the background while the marks are not kept.
+    assert!(paid_alerts(&rig, handle).is_empty());
     let response = rig.call(OP_DAY, handle, &W::new().u64(PAID_AT + 100).u32(0).0);
     let mut r = Rd::ok(&response);
     assert!(r.list(|r| r.bytes()).is_empty());
@@ -208,7 +210,7 @@ fn oc_64_checks_that_do_not_read_back_are_named_and_cleared_by_the_owner() {
     Rd::ok(&rig.call(OP_RESET, handle, &[])).done();
     let c = check(&rig, handle, PAID_AT + 10 * 86_400);
     assert!(c.kept);
-    assert_eq!(c.not_checkable.len(), 1);
+    assert_eq!(c.alarms, 1);
 }
 
 #[test]
@@ -240,4 +242,43 @@ fn oc_62_every_request_is_decoded_strictly() {
     }
     let f = fault(&rig.call(OP_RESET, handle, &[0]));
     assert_eq!(f.status, 1, "{f:?}");
+}
+
+/// The sales of the alerts of kind 3 that `link_state` lists.
+fn paid_alerts(rig: &Rig, handle: u64) -> Vec<u64> {
+    let response = rig.call(50, handle, &[]);
+    let mut r = Rd::ok(&response);
+    r.link()
+        .alerts
+        .iter()
+        .filter(|a| a.0 == 3)
+        .map(|a| a.2)
+        .collect()
+}
+
+#[test]
+fn oc_62_a_mismatch_reaches_the_alerts_without_a_page_and_a_new_tip_raises_it() {
+    let (rig, handle) = ready(false);
+    // No call asked for the check: the pump of the start ran it, and the
+    // mismatch is among the owner's alerts.
+    assert_eq!(paid_alerts(&rig, handle), vec![7]);
+    // Clearing the checks drops the alert; nothing runs them until the view
+    // has a new tip.
+    Rd::ok(&rig.call(242, handle, &[])).done();
+    assert!(paid_alerts(&rig, handle).is_empty());
+    rig.pump(handle);
+    assert!(paid_alerts(&rig, handle).is_empty(), "no new tip, no run");
+    rig.mine(handle, &[]);
+    assert_eq!(
+        paid_alerts(&rig, handle),
+        vec![7],
+        "a new tip runs the checks"
+    );
+    // Clearing the alert on the link clears the mark: the next tip does not
+    // raise it again.
+    let clear = W::new().u8(3).bytes(&counter_bytes()).u64(7).0;
+    Rd::ok(&rig.call(51, handle, &clear)).done();
+    assert!(paid_alerts(&rig, handle).is_empty());
+    rig.mine(handle, &[]);
+    assert!(paid_alerts(&rig, handle).is_empty(), "raised once per sale");
 }

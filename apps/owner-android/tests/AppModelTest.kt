@@ -5067,7 +5067,7 @@ object AppModelTest {
         val keys = PaidCheckWords.all()
         ok(keys.map { it.first }.toSet().size == keys.size && keys.all { it.second.isNotBlank() }, "each counter check text is listed once and written")
         val said = keys.toMap()
-        ok(said["OC62_MISMATCH_HEADING"] == "Paid on the counter, not seen here", "the alarm's heading, as written down")
+        ok(said["OC62_MISMATCH_HEADING"] == "Paid on counter, not seen", "the alarm's heading, as written down")
         ok(said["OC62_MISMATCH_WHAT"] == "{counter} showed sale {number} as paid, {amount}, at {time}, taken by {cashier}. This phone sees {seen} paid to that sale's address.", "what the alarm says")
         ok(said["OC62_MISMATCH_NEXT"] == "Check the counter: it may have been tampered with. Clear this once you know what happened.", "what to do about the alarm")
         ok(said["OC62_ARRIVED_LINE"] == "The payment for sale {number} has now arrived in full.", "the line of a payment that arrived")
@@ -5088,16 +5088,9 @@ object AppModelTest {
         ok(PaidCheckWords.day(day) == "Counter 1a1a1a1a: 4 sales paid on chain, 9,000 sats. Seen 2, waiting 1, too old to check 0, missing 1.", "the day's line is filled: ${PaidCheckWords.day(day)}")
         val row = PaidSaleLine(ByteArray(32) { 0x1a }, 9, 900, 1_700_000_000)
         ok(PaidCheckWords.saleTitle(row) == "Counter 1a1a1a1a #9" && PaidCheckWords.saleSub(row) == "900 sats, ${Format.localTime(1_700_000_000)}", "a waiting sale's row")
-        // The words checks: every sentence passes. The alarm's heading is 34 characters and the check allows 28, so it
-        // is refused; the text is kept as it was given, and only the heading is refused.
+        // The words checks: every heading and sentence passes.
         for ((k, m) in PaidCheckWords.messages(alarm)) {
-            val problem = SayCheck.problem(m)
-            if (k == "mismatch") {
-                ok(problem == "heading length", "the alarm's heading is the one refusal: $problem")
-                ok(SayCheck.problem(m.copy(heading = "Paid, not seen")) == null, "its sentences pass: ${SayCheck.problem(m.copy(heading = "Paid, not seen"))}")
-            } else {
-                ok(problem == null, "words of $k: $problem")
-            }
+            ok(SayCheck.problem(m) == null, "words of $k: ${SayCheck.problem(m)}")
         }
         // The screens show these words and no sentence of their own; the alarm has a Clear button that clears it in the phone's own marks.
         val screen = source("src/android/PaidCheckScreen.kt")
@@ -5106,6 +5099,7 @@ object AppModelTest {
         ok(screen.contains("PaidCheckWords.arrived(a)") && screen.contains("ui.words(PaidCheckWords.waiting)") && screen.contains("ui.words(PaidCheckWords.notCheckable)") && screen.contains("PaidCheckWords.day(it)"), "the arrived line, the two lists and the day's line are shown")
         ok(!Regex("\"[A-Z][a-z]+ [a-z]+").containsMatchIn(screen.lines().filter { !it.trim().startsWith("*") && !it.trim().startsWith("/") }.joinToString("\n")), "no sentence is written in the screen file")
         ok(source("src/android/Screens.kt").contains("paidCheckViews(n, msg) { showAlerts() }") && source("src/android/Books.kt").contains("paidDayViews(n, msg)"), "the alarms are on the Alerts page and the day on the Books page")
+        ok(source("src/android/Screens.kt").contains("it.kind != AlertKind.PaidNotSeen"), "a counter check's alert on the link is shown by its own views, not twice")
         ok(source("src/model/PaidCheckWords.kt").contains("Format.cleanForeign(a.cashier)"), "the cashier's name is cleaned before it is shown")
     }
 

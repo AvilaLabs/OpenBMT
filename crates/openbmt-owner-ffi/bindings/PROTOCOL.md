@@ -261,7 +261,7 @@ CashPriceView: record: currency: string, whole_per_btc: u64
 CashOutArgs: record: address: string, amount: CashAmountView, label: string, price: option<CashPriceView>
 BatchArgs: record: counter: list<u8>, start: u32, count: u32
 AlertKind: enum, one tag byte
-    tags MissedCheckIn=0 Diverged=1 BatchUndelivered=2
+    tags MissedCheckIn=0 Diverged=1 BatchUndelivered=2 PaidNotSeen=3
 ClearArgs: record: kind: AlertKind, counter: list<u8>, value: u64
 Words: record: tone: u8, who: u8, heading: str16, what: str16, next: str16, code: option<str16>, at: option<u64>, quoted: option<(str16, str16)>, detail: option<str16>; a str16 is a u16 length and UTF-8
 Key1Args: record: network: OwnerNetwork, show_words: bool

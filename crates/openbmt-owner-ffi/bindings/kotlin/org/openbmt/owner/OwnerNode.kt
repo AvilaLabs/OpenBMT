@@ -368,6 +368,7 @@ private const val TAG_CURRENCY_ACTION_ZAR = 16
 private const val TAG_ALERT_KIND_MISSED_CHECK_IN = 0
 private const val TAG_ALERT_KIND_DIVERGED = 1
 private const val TAG_ALERT_KIND_BATCH_UNDELIVERED = 2
+private const val TAG_ALERT_KIND_PAID_NOT_SEEN = 3
 private const val TAG_VIEW_KIND_READY = 0
 private const val TAG_VIEW_KIND_RESCANNING = 1
 private const val TAG_VIEW_KIND_DEEP_REORG = 2
@@ -526,7 +527,7 @@ class CashOutArgs(val address: String, val amount: CashAmount, val label: String
 
 class BatchArgs(val counter: ByteArray, val start: Long, val count: Long)
 
-enum class AlertKind { MissedCheckIn, Diverged, BatchUndelivered }
+enum class AlertKind { MissedCheckIn, Diverged, BatchUndelivered, PaidNotSeen }
 
 /** An alert as [OwnerNode.linkState] showed it. */
 class ClearArgs(val kind: AlertKind, val counter: ByteArray, val value: Long)
@@ -2103,6 +2104,7 @@ private fun Writer.alertKind(v: AlertKind): Writer =
             AlertKind.MissedCheckIn -> TAG_ALERT_KIND_MISSED_CHECK_IN
             AlertKind.Diverged -> TAG_ALERT_KIND_DIVERGED
             AlertKind.BatchUndelivered -> TAG_ALERT_KIND_BATCH_UNDELIVERED
+            AlertKind.PaidNotSeen -> TAG_ALERT_KIND_PAID_NOT_SEEN
         },
     )
 
@@ -2111,6 +2113,7 @@ private fun Reader.alertKind(): AlertKind =
         TAG_ALERT_KIND_MISSED_CHECK_IN -> AlertKind.MissedCheckIn
         TAG_ALERT_KIND_DIVERGED -> AlertKind.Diverged
         TAG_ALERT_KIND_BATCH_UNDELIVERED -> AlertKind.BatchUndelivered
+        TAG_ALERT_KIND_PAID_NOT_SEEN -> AlertKind.PaidNotSeen
         else -> tag("AlertKind")
     }
 
