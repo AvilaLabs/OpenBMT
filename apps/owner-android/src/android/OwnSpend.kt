@@ -87,7 +87,7 @@ internal fun Controller.showOwnSpend(picked: List<Long> = emptyList(), message: 
     }
     views.add(msg)
     actions.add(ui.button("Back") { showHome() })
-    screen("Send from your wallet", views, actions, back = { showHome() }, words = OwnSpendWords.list)
+    screen("Send from your wallet", views, actions, back = { showHome() }, words = OwnSpendWords.list, guard = true)
 }
 
 private fun Controller.ownFeeRate(n: OwnerNode): Long = try {
@@ -121,7 +121,7 @@ private fun Controller.showOwnCompare(run: OwnRun, items: List<OwnSpendItem>) {
         views.add(ui.text(OwnSpendModel.compareLines(item).joinToString("\n\n"), 14f, mono = true))
     }
     val actions = listOf(ui.primary("Next: choose how to send it") { pickOwnTransport(run) }, ui.button("Later") { run.back() })
-    screen("Send from your wallet", views, actions, back = run.back)
+    screen("Send from your wallet", views, actions, back = run.back, guard = true)
 }
 
 // ---- the file for the wallet (OA-115, OA-116) ----------------------------------------------------------------------------
@@ -140,7 +140,7 @@ private fun Controller.showOwnFile(run: OwnRun, chosen: Boolean = false, message
     val msg = Slot(act)
     val back = { pickOwnTransport(run) }
     val file = attempt(msg) { n.ownSpendFile(run.session, run.number) }
-        ?: return screen("Send from your wallet", listOf(msg), listOf(ui.button("Back") { run.back() }), back = run.back)
+        ?: return screen("Send from your wallet", listOf(msg), listOf(ui.button("Back") { run.back() }), back = run.back, guard = true)
     val views = ArrayList<View>()
     views.add(ui.text(OwnSpendModel.compareLines(asItem(file, run)).joinToString("\n\n"), 14f, mono = true))
     val height = codeHeight()
@@ -179,6 +179,7 @@ private fun Controller.showOwnFile(run: OwnRun, chosen: Boolean = false, message
     screen(
         "Send from your wallet", views, actions, back = back,
         words = OwnSpendWords.transport,
+        guard = true,
     )
 }
 
@@ -204,6 +205,7 @@ private fun Controller.showOwnReturn(run: OwnRun, message: SayWords?) {
         "Send from your wallet", views,
         listOf(ui.primary("Scan the wallet's code") { scanOwn(n, run) }, ui.button("Back") { showOwnFile(run, chosen = true) }),
         back = { showOwnFile(run, chosen = true) }, words = OwnSpendWords.returnNeeded,
+        guard = true,
     )
 }
 
@@ -234,5 +236,5 @@ private fun Controller.takeOwn(n: OwnerNode, run: OwnRun, bytes: ByteArray) {
     for (s in taken.sends) {
         views.add(stack(ui.words(s.words.say()), line("Transaction ${s.txid}", muted = true, mono = true)))
     }
-    screen("Send from your wallet", views, listOf(ui.primary("Done") { showOwnSpend() }))
+    screen("Send from your wallet", views, listOf(ui.primary("Done") { showOwnSpend() }), guard = true)
 }

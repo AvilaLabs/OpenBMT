@@ -251,7 +251,7 @@ private fun Controller.showSignerExport(run: SignerRun, message: List<View> = em
     views.add(msg)
     actions.add(ui.button("Next: bring it back") { showSignerReturn(run, null) })
     actions.add(ui.button("Back") { showTransportChoice({ t -> run.transport = t; showSignerExport(run) }, run.back) })
-    screen("The signer", views, actions, back = { showTransportChoice({ t -> run.transport = t; showSignerExport(run) }, run.back) }, words = HardwareWords.signerReview)
+    screen("The signer", views, actions, back = { showTransportChoice({ t -> run.transport = t; showSignerExport(run) }, run.back) }, words = HardwareWords.signerReview, guard = true)
 }
 
 /** OA-73: each payment, the change and the fee, one to a line, as the signer's screen shows them. */
@@ -282,6 +282,7 @@ internal fun Controller.showSignerReturn(run: SignerRun, message: SayWords?) {
         "The signer", views,
         listOf(ui.primary("Scan the signer's code") { scanReturned(n, run) }, ui.button("Back") { showSignerExport(run) }),
         back = { showSignerExport(run) }, words = HardwareWords.returnedNeeded,
+        guard = true,
     )
 }
 
@@ -330,5 +331,5 @@ private fun Controller.showSignerTaken(n: OwnerNode, run: SignerRun, taken: Sign
         if (more) showSignerExport(SignerRun(run.session, run.number + 1, run.built, run.back).also { it.transport = run.transport })
         else run.built?.let { showBuilt(it, run.back) } ?: run.back()
     }
-    screen("The signer", views, listOf(done))
+    screen("The signer", views, listOf(done), guard = true)
 }

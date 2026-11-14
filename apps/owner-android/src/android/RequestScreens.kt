@@ -345,7 +345,7 @@ internal fun Controller.showReturn(number: Long, draft: ReturnDraft = ReturnDraf
             }
         }
     }
-    screen(RequestWords.returnTitle, views, listOf(add, ui.button(RequestWords.back) { back() }), back = { back() })
+    screen(RequestWords.returnTitle, views, listOf(add, ui.button(RequestWords.back) { back() }), back = { back() }, guard = true)
 }
 
 /** RQ-28: the camera reads the customer's address into the field; the library judges it when the return is added. */
@@ -372,5 +372,6 @@ private fun Controller.showReturnAdded(number: Long, added: RequestReturnAdded) 
         RequestWords.returnTitle, views,
         listOf(ui.primary(RequestWords.payReturns) { showSpend() }, ui.button(RequestWords.back) { showRequestPage(number) }),
         back = { showRequestPage(number) },
+        guard = true,
     )
 }

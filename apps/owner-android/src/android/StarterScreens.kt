@@ -9,6 +9,7 @@ import java.io.IOException
 import org.openbmt.app.RowItem
 import org.openbmt.app.SayWords
 import org.openbmt.app.Tones
+import org.openbmt.app.WindowGuard
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerStarter
 import org.openbmt.owner.ShopCurrency
@@ -296,7 +297,7 @@ private fun Controller.starterWordsScreen(title: String, body: List<View>, actio
     tick = null
     val page = ui.page(ui.bar(title, null, back), body, actions)
     act.show(page)
-    StarterWindow.protect(act, page)
+    WindowGuard.protect(act, page)
 }
 
 /** One screen of four numbered words, drawn by the core, shown as a picture and cleared when the owner leaves it. */
@@ -345,7 +346,7 @@ private fun Controller.starterKeypad(onKey: (Int) -> Unit): View {
     }
     for (letters in StarterKeypad.rows) row(letters.map { c -> key(c.toString(), StarterKeypad.letterKey(c)) })
     row(listOf(key(StarterWords.keyBackspace, StarterKeypad.BACKSPACE), key(StarterWords.keyEnter, StarterKeypad.ENTER)))
-    StarterWindow.sensitive(column)
+    WindowGuard.sensitive(column)
     return column
 }
 

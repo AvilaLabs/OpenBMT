@@ -28,6 +28,7 @@ import android.widget.TextView
 import org.openbmt.app.Colour
 import org.openbmt.app.Fills
 import org.openbmt.app.Feedback
+import org.openbmt.app.WindowGuard
 import org.openbmt.app.Icon
 import org.openbmt.app.IconDrawable
 import org.openbmt.app.Palette
@@ -164,6 +165,7 @@ internal fun Controller.screen(
     logo: Boolean = false,
     lead: View? = null,
     after: View? = null,
+    guard: Boolean = false,
 ) {
     val model = words?.let { WordsModel.of(it) }
     val all = ArrayList<View>()
@@ -176,7 +178,16 @@ internal fun Controller.screen(
     }
     if (after != null) all.add(after)
     tick = null
-    act.show(ui.page(ui.bar(title, sub, back, logo = logo), all, actions, tone))
+    present(ui.page(ui.bar(title, sub, back, logo = logo), all, actions, tone), guard)
+}
+
+/**
+ * Puts [page] on the screen. A [guard]ed page (one that shows an address to pay or asks for the confirm of a payment) is
+ * also kept out of screenshots and out of reach of other apps' overlays, as the screens of words are (SS-33).
+ */
+internal fun Controller.present(page: View, guard: Boolean) {
+    act.show(page)
+    if (guard) WindowGuard.protect(act, page)
 }
 
 /** A screen that is one message (a result, a refusal, a state): the panel of the words, [extra] under it, the [actions] in the footer. */
@@ -187,9 +198,10 @@ internal fun Controller.centre(
     title: String = "Owner",
     back: (() -> Unit)? = null,
     logo: Boolean = back == null && title == "Owner",
+    guard: Boolean = false,
 ) {
     tick = null
-    act.show(ui.page(ui.bar(title, back = back, logo = logo), listOf(ui.resultPanel(WordsModel.of(words))) + extra, actions))
+    present(ui.page(ui.bar(title, back = back, logo = logo), listOf(ui.resultPanel(WordsModel.of(words))) + extra, actions), guard)
 }
 
 /** A screen that only waits: the ring, and the words. */
@@ -208,6 +220,7 @@ internal fun Controller.codeScreen(
     back: (() -> Unit)? = null,
     lead: View? = null,
     after: View? = null,
+    guard: Boolean = false,
 ) {
     val model = WordsModel.of(words)
     val all = ArrayList<View>()
@@ -219,7 +232,7 @@ internal fun Controller.codeScreen(
     all.addAll(ui.foldViews(model))
     if (after != null) all.add(after)
     tick = null
-    act.show(ui.page(ui.bar(title, back = back), all, actions))
+    present(ui.page(ui.bar(title, back = back), all, actions), guard)
 }
 
 /** A labelled field: the view to put on the page, and the field to read. */

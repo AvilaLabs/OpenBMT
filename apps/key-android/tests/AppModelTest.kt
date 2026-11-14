@@ -6,6 +6,7 @@ import java.nio.file.Files
 import java.security.MessageDigest
 import org.openbmt.app.Format
 import org.openbmt.app.KeyTextOutcome
+import org.openbmt.app.PickedUri
 import org.openbmt.app.Relock
 import org.openbmt.app.SealedFile
 import org.openbmt.app.Sealer
@@ -584,6 +585,52 @@ object AppModelTest {
         ok(triedPin.indexOf("op()") > triedPin.indexOf("slow(skipped"), "the PIN is tried only inside the guarded block")
     }
 
+    /** A picked file is read or written only when it came from a documents provider, never from the app's own folder (the picker's result). */
+    private fun picked_files_come_from_a_documents_provider(appDir: File?) {
+        val own = "org.openbmt.key"
+        ok(PickedUri.accept("content", "com.android.providers.downloads.documents", own), "a documents provider's file is taken")
+        ok(PickedUri.accept("content", "com.android.externalstorage.documents", own), "the storage documents provider's file is taken")
+        ok(PickedUri.accept("content", "10@com.android.externalstorage.documents", own), "a file of another user's provider is taken")
+        ok(PickedUri.accept("CONTENT", "media", own), "the scheme is read ignoring case")
+        ok(!PickedUri.accept("file", null, own), "a file address is refused")
+        ok(!PickedUri.accept("file", "", own), "a file address with an empty authority is refused")
+        ok(!PickedUri.accept(null, "com.android.providers.downloads.documents", own), "no scheme is refused")
+        ok(!PickedUri.accept("", "media", own), "an empty scheme is refused")
+        ok(!PickedUri.accept("https", "example.org", own), "another scheme is refused")
+        ok(!PickedUri.accept("content", null, own) && !PickedUri.accept("content", "", own) && !PickedUri.accept("content", "10@", own), "no authority is refused")
+        ok(!PickedUri.accept("content", own, own), "the app's own authority is refused")
+        ok(!PickedUri.accept("content", "$own.fileprovider", own), "an authority that starts with the app's own is refused")
+        ok(!PickedUri.accept("content", "10@$own", own) && !PickedUri.accept("content", "ORG.OPENBMT.KEY.x", own), "the app's own authority is refused with a user or capitals")
+        ok(!PickedUri.accept("content", "org.openbmt.key.dev", own) && !PickedUri.accept("content", "org.openbmt.key.dev.x", "org.openbmt.key.dev"), "the development copy's own authority is refused too")
+        if (appDir == null) return
+        val controller = File(appDir, "src/android/Controller.kt").readText()
+        val picked = controller.substringAfter("fun picked(").substringBefore("private fun openRequest(")
+        ok(picked.contains("PickedUri.accept(uri, act)") && picked.indexOf("PickedUri.accept(uri, act)") in 0 until picked.indexOf("when (code)"), "a picker's address is checked before it is read or written")
+        ok(picked.contains("AppWords.fileNotSaved(null)") && picked.contains("AppWords.fileNotRead(null)"), "a refused address says the file was not read or saved")
+        ok(controller.split("openInputStream(").size == 2 && controller.split("openOutputStream(").size == 2, "one read and one write of a picked address, both after the check")
+        ok(controller.split("startActivityForResult(").size == 2 && !controller.contains("ACTION_GET_CONTENT"), "the one picker call is the one that is checked")
+        val others = File(appDir, "src/android").listFiles { f -> f.name.endsWith(".kt") && f.name != "Controller.kt" }!!
+        ok(others.none { f -> f.readText().let { it.contains("openInputStream(") || it.contains("openOutputStream(") || it.contains("ACTION_OPEN_DOCUMENT") || it.contains("ACTION_CREATE_DOCUMENT") } }, "no other file of the app reads or writes a picked address")
+    }
+
+    /** The app refuses to run under screen overlays (docs/SIGNER-RULES.md); every screen hides them, and the hold ignores a touch through one. */
+    private fun every_screen_is_kept_from_overlays(appDir: File?) {
+        if (appDir == null) return
+        val activity = File(appDir, "src/android/MainActivity.kt").readText()
+        val show = activity.substringAfter("fun show(page: View)").substringBefore("/** The development copy's band")
+        ok(show.contains("setContentView(content)") && show.indexOf("WindowGuard.protect(this, content)") > show.indexOf("setContentView(content)"), "every screen is protected once it is on show")
+        ok(activity.split("setContentView(").size == 2, "the one place a screen is put on show is the one that protects it")
+        ok(File(appDir, "src/android").listFiles { f -> f.name.endsWith(".kt") && f.name != "MainActivity.kt" }!!.none { it.readText().contains("setContentView(") }, "no other file puts a screen on show")
+        ok(activity.contains("FLAG_SECURE"), "the window still carries FLAG_SECURE")
+        val manifest = File(appDir, "AndroidManifest.xml").readText()
+        ok(manifest.contains("<uses-permission android:name=\"android.permission.HIDE_OVERLAY_WINDOWS\" />"), "the manifest has HIDE_OVERLAY_WINDOWS")
+        val guard = File(appDir, "../android-common/src/android/WindowGuard.kt").readText()
+        ok(guard.contains("setHideOverlayWindows(true)") && guard.contains("filterTouchesWhenObscured = true") && guard.contains("FLAG_SECURE"), "the shared helper hides overlays, filters obscured touches and sets FLAG_SECURE")
+        val hold = File(appDir, "../android-common/src/android/Feedback.kt").readText().substringAfter("class HoldButton(").substringBefore("private fun inCircle(")
+        ok(hold.contains("onFilterTouchEventForSecurity(") && hold.contains("MotionEvent.FLAG_WINDOW_IS_OBSCURED") && hold.contains("MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED"), "the hold ignores a touch through an overlay, over all of the window or over a part")
+        ok(hold.contains("clock.release(now())") && hold.contains("return false"), "a hold that has begun lets go when an overlay appears")
+    }
+
     private fun sr_77_relock_after_a_minute() {
         ok(Relock.needed(null, 5), "never paused: locked")
         ok(!Relock.needed(1000, 1000 + 60_000), "60 s exactly is not more than 60 s")
@@ -706,6 +753,8 @@ object AppModelTest {
         sr_76_wipe_order_and_failure()
         sr_77_relock_after_a_minute()
         sr_77_picker_and_permission_waits_count(appDir)
+        picked_files_come_from_a_documents_provider(appDir)
+        every_screen_is_kept_from_overlays(appDir)
         sr_83_a_redraw_is_drawn_from_state_and_never_skips_the_pin()
         sr_91_the_release_build_keeps_the_usb_check()
         sr_78_deposit_code_from_the_camera()

@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The one permission is CAMERA, asked for at run time only when the person
+<!-- Two permissions. CAMERA is asked for at run time only when the person
      taps Scan: signing data comes in by QR code. The camera is no network path,
-     and the app asks for no network and no other permission. The camera is not
-     required, so the app installs on a phone without one and the person pastes
-     text or chooses a file instead. tests/check-manifest.sh fails the build if
+     and the app asks for no network. HIDE_OVERLAY_WINDOWS (Android 12 and
+     later, a normal permission that is granted at install) lets every screen
+     hide other apps' overlay windows. The app asks for nothing else. The camera
+     is not required, so the app installs on a phone without one and the person
+     pastes text or chooses a file instead. tests/check-manifest.sh fails the build if
      the list differs, or if anything but the launcher activity is exported. The
      activity is a single instance (singleTask), so that two screens never hold
      the signer at once (SR-92). -->
@@ -11,6 +13,7 @@
     package="org.openbmt.key">
 
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 

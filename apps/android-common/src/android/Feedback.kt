@@ -216,6 +216,23 @@ class HoldButton(context: Context, private val label: String, private val onAppr
 
     private fun now(): Long = SystemClock.uptimeMillis()
 
+    /**
+     * A touch that reached the hold through a window drawn over it, over all of it or over only a part, is not the
+     * person's. `filterTouchesWhenObscured` does not catch an overlay that cannot be touched and covers only part of the
+     * screen, so both flags are looked at here. A hold that has begun lets go at once.
+     */
+    override fun onFilterTouchEventForSecurity(event: MotionEvent): Boolean {
+        val covered = MotionEvent.FLAG_WINDOW_IS_OBSCURED or MotionEvent.FLAG_WINDOW_IS_PARTIALLY_OBSCURED
+        if (event.flags and covered != 0) {
+            if (clock.holding) {
+                clock.release(now())
+                startFrames()
+            }
+            return false
+        }
+        return super.onFilterTouchEventForSecurity(event)
+    }
+
     private fun inCircle(e: MotionEvent): Boolean {
         val cx = disc.left + disc.width / 2f
         val cy = disc.top + disc.height / 2f

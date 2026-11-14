@@ -12,10 +12,9 @@ import android.graphics.Color
 import android.os.Build
 import android.provider.Settings
 import android.view.View
-import android.view.ViewGroup
-import android.view.WindowManager
 import android.view.accessibility.AccessibilityManager
 import android.widget.ImageView
+import org.openbmt.app.WindowGuard
 import java.io.File
 import java.time.LocalDate
 import org.openbmt.owner.StarterImage
@@ -23,35 +22,6 @@ import org.openbmt.owner.StarterImage
 // What the starter's screens need of the window and of the phone: the flags of every screen that shows or takes
 // words (SS-12), the picture of four words (SS-11) and what the phone says of itself (SS-33, SS-34). The decisions
 // about what is found are in `StarterModel.kt`.
-
-/** SS-12: the one helper every screen that shows or takes words goes through. */
-internal object StarterWindow {
-    /**
-     * `FLAG_SECURE` (no screenshot, no recording, blank in recent apps), other apps' overlay windows hidden (Android 12 and
-     * later), and touches made through an overlay dropped on every view of [root].
-     */
-    fun protect(act: Activity, root: View) {
-        act.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        if (Build.VERSION.SDK_INT >= 31) act.window.setHideOverlayWindows(true)
-        filterTouches(root)
-    }
-
-    /** Every other screen lets overlays be drawn again. */
-    fun release(act: Activity) {
-        if (Build.VERSION.SDK_INT >= 31) act.window.setHideOverlayWindows(false)
-    }
-
-    private fun filterTouches(view: View) {
-        view.filterTouchesWhenObscured = true
-        if (view is ViewGroup) for (i in 0 until view.childCount) filterTouches(view.getChildAt(i))
-    }
-
-    /** Marks the words image and the keypad as sensitive for accessibility services (Android 14 and later). */
-    fun sensitive(view: View) {
-        if (Build.VERSION.SDK_INT >= 34) view.setAccessibilityDataSensitive(View.ACCESSIBILITY_DATA_SENSITIVE_YES)
-        if (view is ViewGroup) for (i in 0 until view.childCount) sensitive(view.getChildAt(i))
-    }
-}
 
 /**
  * SS-11: a screen of four words as the core drew it, shown as a bitmap and then cleared. The pixels the core gave
@@ -64,7 +34,7 @@ internal class StarterWordsImage(act: Activity, private val view: ImageView) {
         view.scaleType = ImageView.ScaleType.FIT_CENTER
         view.adjustViewBounds = true
         view.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        StarterWindow.sensitive(view)
+        WindowGuard.sensitive(view)
     }
 
     /** Draws [image] (one byte for each pixel, 0 black to 255 white) and overwrites it. */

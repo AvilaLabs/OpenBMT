@@ -251,7 +251,7 @@ internal fun Controller.showSpend(): Unit = withNode { n ->
             }
         }
     }
-    screen("Spend", views, listOf(build, backButton { showHome() }), back = { showHome() })
+    screen("Spend", views, listOf(build, backButton { showHome() }), back = { showHome() }, guard = true)
 }
 
 // ---- open approvals ---------------------------------------------------------------------------------------
@@ -373,7 +373,7 @@ internal fun Controller.showQueue(prefillCounter: ByteArray? = null, prefillSale
     val q = attempt(msg) { n.queue() }
     if (q == null) {
         views.add(msg)
-        return@withNode screen("Refund queue", views, listOf(backButton { showHome() }), back = { showHome() })
+        return@withNode screen("Refund queue", views, listOf(backButton { showHome() }), back = { showHome() }, guard = true)
     }
     if (q.refunds.isEmpty()) views.add(ui.text("No refund is queued.", 16f))
     for (r in q.refunds) {
@@ -453,7 +453,7 @@ internal fun Controller.showQueue(prefillCounter: ByteArray? = null, prefillSale
             }
         }
     }
-    screen("Refund queue", views, listOf(queue, backButton { showHome() }), back = { showHome() })
+    screen("Refund queue", views, listOf(queue, backButton { showHome() }), back = { showHome() }, guard = true)
 }
 
 private fun Controller.showQueueAfterRefund(receivedSats: Long, atDepth: Boolean) {
@@ -512,7 +512,7 @@ internal fun Controller.showCashOut(): Unit = withNode { n ->
             }
         }
     }
-    screen("Cash out", views, listOf(queue, backButton { showHome() }), back = { showHome() })
+    screen("Cash out", views, listOf(queue, backButton { showHome() }), back = { showHome() }, guard = true)
 }
 
 /**
@@ -537,7 +537,7 @@ private fun Controller.showCashOutPrice(n: OwnerNode, args: CashOutArgs, currenc
             }
         }
     }
-    screen("Cash out", listOf(note, input.view, msg), listOf(queue, backButton { showCashOut() }), back = { showCashOut() })
+    screen("Cash out", listOf(note, input.view, msg), listOf(queue, backButton { showCashOut() }), back = { showCashOut() }, guard = true)
 }
 
 // ---- old addresses ------------------------------------------------------------------------------------------------

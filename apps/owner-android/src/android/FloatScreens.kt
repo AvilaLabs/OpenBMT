@@ -7,6 +7,7 @@ import java.io.IOException
 import org.openbmt.app.Format
 import org.openbmt.app.RowItem
 import org.openbmt.app.Tones
+import org.openbmt.app.WindowGuard
 import org.openbmt.owner.FloatPaid
 import org.openbmt.owner.FloatWalletView
 import org.openbmt.owner.OwnerException
@@ -80,7 +81,7 @@ private fun Controller.floatWordsScreen(title: String, body: List<View>, actions
     tick = null
     val page = ui.page(ui.bar(title, null, back), body, actions)
     act.show(page)
-    StarterWindow.protect(act, page)
+    WindowGuard.protect(act, page)
 }
 
 private fun floatKeystore() = StarterKeystore(FloatStore.KEY_ALIAS)
@@ -128,7 +129,7 @@ private fun Controller.floatRestoreScan(store: FloatStore, wallet: FloatWalletVi
     scan.begin(
         show = { v ->
             showScan(v)
-            StarterWindow.protect(act, act.window.decorView)
+            WindowGuard.protect(act, act.window.decorView)
         },
         onBytes = { bytes -> floatRestoreSeal(store, wallet, bytes) },
         onFailed = { floatKeyGone(ui.text(FloatWords.scanFailed)) },
@@ -236,7 +237,7 @@ private fun Controller.floatScan(store: FloatStore, draft: FloatRecord) {
     scan.begin(
         show = { v ->
             showScan(v)
-            StarterWindow.protect(act, act.window.decorView)
+            WindowGuard.protect(act, act.window.decorView)
         },
         onBytes = { bytes -> floatSeal(store, draft, bytes) },
         onFailed = { showFloatSetup(ui.text(FloatWords.scanFailed)) },
@@ -354,7 +355,7 @@ private fun Controller.showFloatRefill() {
         }
     }
     go.isEnabled = wallet != null && FloatModel.canRefill(home)
-    screen(FloatWords.refillAction, body, listOf(go, ui.button(FloatWords.back) { showFloat() }), back = { showFloat() })
+    screen(FloatWords.refillAction, body, listOf(go, ui.button(FloatWords.back) { showFloat() }), back = { showFloat() }, guard = true)
 }
 
 /**
@@ -379,7 +380,7 @@ private fun Controller.showFloatRefund() {
         if (payable.size < ready.size) body.add(ui.text(FloatWords.refundTooBig))
     }
     body.add(msg)
-    screen(FloatWords.refundPay, body, listOf(ui.button(FloatWords.back) { showFloat() }), back = { showFloat() })
+    screen(FloatWords.refundPay, body, listOf(ui.button(FloatWords.back) { showFloat() }), back = { showFloat() }, guard = true)
 }
 
 /** FL-22: the address in full, the amount and the fee rate before the owner proves they are there; nothing is signed yet. */
@@ -398,7 +399,7 @@ private fun Controller.floatPayConfirm(n: OwnerNode, store: FloatStore, r: Refun
             floatPaySigned(n, store, paid, r)
         }
     }
-    screen(FloatWords.refundPay, views, listOf(go, ui.button(FloatWords.back) { showFloatRefund() }), back = { showFloatRefund() })
+    screen(FloatWords.refundPay, views, listOf(go, ui.button(FloatWords.back) { showFloatRefund() }), back = { showFloatRefund() }, guard = true)
 }
 
 /** What was signed, shown in full before it goes out; the node's outbox takes it only for the float's own coins and this ready refund. */
@@ -422,7 +423,7 @@ private fun Controller.floatPaySigned(n: OwnerNode, store: FloatStore, paid: Flo
         }
     }
     screen(FloatWords.refundPay, listOf(ui.facts(FloatModel.afterLines(paid)), ui.words(StarterWords.signed), msg),
-        listOf(send, ui.button(FloatWords.back) { showFloatRefund() }), back = { showFloatRefund() })
+        listOf(send, ui.button(FloatWords.back) { showFloatRefund() }), back = { showFloatRefund() }, guard = true)
 }
 
 private fun record(store: FloatStore): FloatRecord? = try { store.load() } catch (_: IOException) { null }
@@ -445,7 +446,7 @@ private fun Controller.showFloatSweep() {
     body.add(msg)
     val sweep = ui.primary(FloatWords.sweepConfirm) { if (record != null) floatSweepConfirm(n, store, record) }
     sweep.isEnabled = actions.sweep
-    screen(FloatWords.sweepTitle, body, listOf(sweep, ui.button(FloatWords.back) { showFloat() }), back = { showFloat() })
+    screen(FloatWords.sweepTitle, body, listOf(sweep, ui.button(FloatWords.back) { showFloat() }), back = { showFloat() }, guard = true)
 }
 
 private fun Controller.floatSweepConfirm(n: OwnerNode, store: FloatStore, record: FloatRecord) {
@@ -463,7 +464,7 @@ private fun Controller.floatSweepConfirm(n: OwnerNode, store: FloatStore, record
             floatSweepSigned(n, store, record, paid)
         }
     }
-    screen(FloatWords.sweepTitle, views, listOf(go, ui.button(FloatWords.back) { showFloatSweep() }), back = { showFloatSweep() })
+    screen(FloatWords.sweepTitle, views, listOf(go, ui.button(FloatWords.back) { showFloatSweep() }), back = { showFloatSweep() }, guard = true)
 }
 
 private fun Controller.floatSweepSigned(n: OwnerNode, store: FloatStore, record: FloatRecord, paid: FloatPaid) {
@@ -482,7 +483,7 @@ private fun Controller.floatSweepSigned(n: OwnerNode, store: FloatStore, record:
         }
     }
     screen(FloatWords.sweepTitle, listOf(ui.facts(FloatModel.afterLines(paid)), ui.words(StarterWords.signed), msg),
-        listOf(send, ui.button(FloatWords.back) { showFloatSweep() }), back = { showFloatSweep() })
+        listOf(send, ui.button(FloatWords.back) { showFloatSweep() }), back = { showFloatSweep() }, guard = true)
 }
 
 /** FL-35: after one confirmation of the move the key is deleted and the float is off; an unknown depth never deletes it. */
@@ -530,5 +531,5 @@ private fun Controller.showFloatSweepDelete() {
         })
     }
     actions.add(ui.button(FloatWords.back) { showFloat() })
-    screen(FloatWords.sweepTitle, views, actions, back = { showFloat() })
+    screen(FloatWords.sweepTitle, views, actions, back = { showFloat() }, guard = true)
 }

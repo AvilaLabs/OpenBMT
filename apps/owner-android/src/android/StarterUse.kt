@@ -292,7 +292,7 @@ internal fun Controller.showStarterPay() {
     if (refunds.isEmpty()) views.add(ui.text(StarterWords.payEmpty, 16f))
     else views.add(ui.rows(refunds.map { r -> RowItem(Format.sats(r.sats), r.address) { starterChecked(CheckStage.Paying, back = { showStarterPay() }) { starterPayConfirm(n, r) } } }))
     views.add(msg)
-    screen(StarterWords.payTitle, views, listOf(ui.button(StarterWords.backButton) { showStarter() }), back = { showStarter() })
+    screen(StarterWords.payTitle, views, listOf(ui.button(StarterWords.backButton) { showStarter() }), back = { showStarter() }, guard = true)
 }
 
 /** SS-31: every address in full and every amount before the owner proves they are there. */
@@ -311,7 +311,7 @@ private fun Controller.starterPayConfirm(n: OwnerNode, r: RefundRow) {
             n.starterPay(sealed, key, r.id, rate, MIN_CONFIRMATIONS)
         }
     }
-    screen(StarterWords.payTitle, views, listOf(go, ui.button(StarterWords.backButton) { showStarterPay() }), back = { showStarterPay() })
+    screen(StarterWords.payTitle, views, listOf(go, ui.button(StarterWords.backButton) { showStarterPay() }), back = { showStarterPay() }, guard = true)
 }
 
 /**
@@ -380,7 +380,7 @@ private fun Controller.showStarterSigned(
             msg.show(words(AppWords.fileNotSaved(e.message)))
         }
     }
-    screen(StarterWords.payTitle, listOf(ui.facts(StarterPayModel.afterLines(paid)), words(StarterWords.signed), msg), listOf(send, ui.button(StarterWords.backButton) { back() }), back = back)
+    screen(StarterWords.payTitle, listOf(ui.facts(StarterPayModel.afterLines(paid)), words(StarterWords.signed), msg), listOf(send, ui.button(StarterWords.backButton) { back() }), back = back, guard = true)
 }
 
 // ---- the move (SS-42) and the end of the key (SS-43) ----------------------------------------------------------------------------------------
@@ -397,7 +397,7 @@ internal fun Controller.showStarterMove() {
             if (description.isEmpty()) return@primary msg.show(words(StarterWords.said(StarterWords.moveInvalid, Tones.STOP)))
             starterMoveConfirm(n, description)
         }
-        screen(StarterWords.moveTitle, views, listOf(go, ui.button(StarterWords.backButton) { showStarter() }), back = { showStarter() })
+        screen(StarterWords.moveTitle, views, listOf(go, ui.button(StarterWords.backButton) { showStarter() }), back = { showStarter() }, guard = true)
     }
 }
 
@@ -418,7 +418,7 @@ private fun Controller.starterMoveConfirm(n: OwnerNode, newWallet: String) {
             n.starterMoveSwitched(sealed, key, newWallet, nowSecs(), rate, MIN_CONFIRMATIONS)
         }
     }
-    screen(StarterWords.moveTitle, views, listOf(go, ui.button(StarterWords.backButton) { showStarterMove() }), back = { showStarterMove() })
+    screen(StarterWords.moveTitle, views, listOf(go, ui.button(StarterWords.backButton) { showStarterMove() }), back = { showStarterMove() }, guard = true)
 }
 
 /** SS-43: once the move has one confirmation the sealed seed, the wrapped key and the Keystore key are deleted. */

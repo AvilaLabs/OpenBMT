@@ -8,6 +8,7 @@ import android.view.View
 import android.view.WindowManager
 import org.openbmt.app.applyNight
 import org.openbmt.app.isNight
+import org.openbmt.app.WindowGuard
 
 /**
  * The one activity of the owner app, and the only exported component. The
@@ -77,7 +78,7 @@ class MainActivity : Activity() {
     /** Shows [page] as the whole content. */
     fun show(page: View) {
         controller.firstRunBack = null
-        StarterWindow.release(this)
+        WindowGuard.release(this)
         setContentView(page)
     }
 }

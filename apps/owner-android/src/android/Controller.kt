@@ -17,6 +17,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import org.openbmt.app.ExternalWait
 import org.openbmt.app.KeystoreSealer
+import org.openbmt.app.PickedUri
 import org.openbmt.app.Relock
 import org.openbmt.app.SayWords
 import org.openbmt.app.ScanFlow
@@ -29,6 +30,7 @@ import org.openbmt.app.TriesFile
 import org.openbmt.app.Ui
 import org.openbmt.app.UrScan
 import org.openbmt.app.WaitOutcome
+import org.openbmt.app.accept
 import org.openbmt.owner.OwnerCeremony
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
@@ -929,6 +931,10 @@ class Controller(internal val act: MainActivity) {
         if (result != android.app.Activity.RESULT_OK || uri == null || done == null) {
             if (cancelled != null) cancelled() else begin()
             return
+        }
+        if (!PickedUri.accept(uri, act)) {
+            // Only a document from a documents provider is read or written: nothing is, and the file is said not to be read.
+            return showMessage(AppWords.fileNotRead(null)) { if (cancelled != null) cancelled() else begin() }
         }
         done(uri)
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks what the built APK's manifest says, with the SDK's own aapt2: no
-# permission but CAMERA (with the camera feature not required), no network permission or setting, backup and device
+# permission but CAMERA (with the camera feature not required) and HIDE_OVERLAY_WINDOWS, no network permission or setting, backup and device
 # transfer off, nothing exported but the launcher activity, which is a single
 # instance (SR-92), and no service,
 # receiver or provider. The manifest in the APK is the merged one: no library
@@ -27,17 +27,18 @@ tree="$("$aapt2" dump xmltree --file AndroidManifest.xml "$apk" 2>&1)" || { echo
 
 count() { printf '%s\n' "$tree" | grep -c -E "$1"; }
 
-# 1. The one permission is CAMERA, and the camera is not required. No network permission.
+# 1. The permissions are CAMERA (the camera is not required) and HIDE_OVERLAY_WINDOWS. No network permission.
 declared="$(printf '%s\n' "$tree" | grep -E 'E: uses-permission' | wc -l)"
-if [ "$declared" -eq 1 ]; then pass "exactly one uses-permission element"; else fail "$declared uses-permission elements"; fi
-if printf '%s\n' "$tree" | grep -q 'android.permission.CAMERA'; then pass "the permission is CAMERA"; else fail "CAMERA is not declared"; fi
+if [ "$declared" -eq 2 ]; then pass "exactly two uses-permission elements"; else fail "$declared uses-permission elements"; fi
+if printf '%s\n' "$tree" | grep -q 'android.permission.CAMERA'; then pass "one permission is CAMERA"; else fail "CAMERA is not declared"; fi
+if printf '%s\n' "$tree" | grep -q 'android.permission.HIDE_OVERLAY_WINDOWS'; then pass "one permission is HIDE_OVERLAY_WINDOWS"; else fail "HIDE_OVERLAY_WINDOWS is not declared"; fi
 if printf '%s\n' "$tree" | grep -q -i -E 'INTERNET|NETWORK_STATE|WIFI_STATE|CHANGE_NETWORK|NEARBY|BLUETOOTH|NFC'; then
     fail "a network-related name is in the manifest"
 else
     pass "no network-related name in the manifest"
 fi
 perms="$("$aapt2" dump permissions "$apk" 2>&1 | grep -v -E '^package:' | sed -e 's/^ *//' | sort | tr '\n' ' ')"
-if [ "$perms" = "uses-permission: name='android.permission.CAMERA' " ]; then pass "aapt2 dump permissions lists exactly CAMERA"; else fail "aapt2 dump permissions lists: $perms"; fi
+if [ "$perms" = "uses-permission: name='android.permission.CAMERA' uses-permission: name='android.permission.HIDE_OVERLAY_WINDOWS' " ]; then pass "aapt2 dump permissions lists exactly CAMERA and HIDE_OVERLAY_WINDOWS"; else fail "aapt2 dump permissions lists: $perms"; fi
 # Two uses-feature elements, both not required: camera.any, and camera,
 # which the CAMERA permission would otherwise imply as required (a store
 # would then hide the app from a phone without a back camera).

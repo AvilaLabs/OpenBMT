@@ -26,6 +26,8 @@ import org.openbmt.app.Format
 import org.openbmt.app.KeyLevel
 import org.openbmt.app.KeystoreSealer
 import org.openbmt.app.LineStyle
+import org.openbmt.app.PickedUri
+import org.openbmt.app.accept
 import org.openbmt.app.ReceiptLine
 import org.openbmt.app.Relock
 import org.openbmt.app.RowItem
@@ -1502,6 +1504,15 @@ class Controller(private val act: MainActivity) {
         }
         val uri = data?.data
         if (result != android.app.Activity.RESULT_OK || uri == null) return refresh()
+        if (!PickedUri.accept(uri, act)) {
+            // Only a document from a documents provider is read or written: nothing is, and the file is said not to be read or saved.
+            val bytes = pendingAnswer
+            return if (code == REQUEST_SAVE && bytes != null) {
+                showMessage(AppWords.fileNotSaved(null)) { saveAnswer(bytes) }
+            } else {
+                showMessage(AppWords.fileNotRead(null)) { refresh() }
+            }
+        }
         when (code) {
             REQUEST_OPEN -> allowed { openRequest(uri) }
             REQUEST_SAVE -> writeAnswer(uri)

@@ -12,6 +12,7 @@ import javax.crypto.spec.SecretKeySpec
 import org.openbmt.app.ControlMessage
 import org.openbmt.app.ControlReader
 import org.openbmt.app.Format
+import org.openbmt.app.PickedUri
 import org.openbmt.app.KeyTextOutcome
 import org.openbmt.app.Palette
 import org.openbmt.app.SayCheck
@@ -4180,17 +4181,18 @@ object AppModelTest {
 
         // SS-12: every screen that shows or takes words goes through the one helper.
         val helper = source("src/android/StarterWindow.kt")
-        ok(helper.contains("FLAG_SECURE") && helper.contains("setHideOverlayWindows(true)") && helper.contains("SDK_INT >= 31") && helper.contains("filterTouchesWhenObscured = true") && helper.contains("setAccessibilityDataSensitive(View.ACCESSIBILITY_DATA_SENSITIVE_YES)") && helper.contains("SDK_INT >= 34"), "the helper sets every flag")
+        val guard = source("../android-common/src/android/WindowGuard.kt")
+        ok(guard.contains("FLAG_SECURE") && guard.contains("setHideOverlayWindows(true)") && guard.contains("SDK_INT >= 31") && guard.contains("filterTouchesWhenObscured = true") && guard.contains("setAccessibilityDataSensitive(View.ACCESSIBILITY_DATA_SENSITIVE_YES)") && guard.contains("SDK_INT >= 34"), "the helper sets every flag")
         val screens = source("src/android/StarterScreens.kt")
         val builder = screens.substringAfter("private fun Controller.starterWordsScreen(").substringBefore("/** One screen of four numbered words")
-        ok(builder.contains("StarterWindow.protect(act, page)") && builder.indexOf("act.show(page)") in 0 until builder.indexOf("StarterWindow.protect(act, page)"), "the builder applies the helper once the page is on show")
-        ok(occurs(screens, "StarterWindow.protect(") == 1 && occurs(screens, "act.show(") == 1, "nothing else of the setup shows a page or applies flags on its own")
+        ok(builder.contains("WindowGuard.protect(act, page)") && builder.indexOf("act.show(page)") in 0 until builder.indexOf("WindowGuard.protect(act, page)"), "the builder applies the helper once the page is on show")
+        ok(occurs(screens, "WindowGuard.protect(") == 1 && occurs(screens, "act.show(") == 1, "nothing else of the setup shows a page or applies flags on its own")
         for (name in listOf("showStarterPage", "showStarterCheck", "showStarterRestore")) {
             val body = screens.substringAfter("internal fun Controller.$name(").substringBefore("\n}\n")
             ok(body.contains("starterWordsScreen("), "$name builds its screen with the helper")
         }
-        ok(helper.contains("StarterWindow.sensitive(view)") && screens.contains("StarterWindow.sensitive(column)"), "the words image and the keypad are marked sensitive")
-        ok(source("src/android/MainActivity.kt").contains("StarterWindow.release(this)"), "every other screen lets overlays be drawn again")
+        ok(helper.contains("WindowGuard.sensitive(view)") && screens.contains("WindowGuard.sensitive(column)"), "the words image and the keypad are marked sensitive")
+        ok(source("src/android/MainActivity.kt").contains("WindowGuard.release(this)"), "every other screen lets overlays be drawn again")
         // Nothing of a words screen is typed into a field, copied or logged.
         for (f in listOf("StarterScreens", "StarterWindow")) {
             val src = source("src/android/$f.kt")
@@ -4285,11 +4287,61 @@ object AppModelTest {
         bx_18_ownBoxTests()
         floatTests()
         floatWiringTests()
+        pickedFileTests()
+        paymentScreensAreGuardedTests()
         requestTests()
         webOrderTests()
         shopLightningTests()
         ruleTests(rulesMd)
         println("AppModelTest (owner): $count checks passed")
+    }
+
+    /** A picked file is read or written only when it came from a documents provider, never from the app's own folder (the picker's result). */
+    private fun pickedFileTests() {
+        val own = "org.openbmt.owner.app"
+        ok(PickedUri.accept("content", "com.android.providers.downloads.documents", own), "a documents provider's file is taken")
+        ok(PickedUri.accept("content", "com.android.externalstorage.documents", own), "the storage documents provider's file is taken")
+        ok(PickedUri.accept("content", "10@com.android.externalstorage.documents", own), "a file of another user's provider is taken")
+        ok(!PickedUri.accept("file", null, own) && !PickedUri.accept("file", "", own), "a file address is refused")
+        ok(!PickedUri.accept(null, "com.android.providers.downloads.documents", own) && !PickedUri.accept("", "media", own), "no scheme is refused")
+        ok(!PickedUri.accept("content", null, own) && !PickedUri.accept("content", "", own), "no authority is refused")
+        ok(!PickedUri.accept("content", own, own) && !PickedUri.accept("content", "$own.fileprovider", own) && !PickedUri.accept("content", "10@$own", own), "the app's own authority is refused")
+        val controller = source("src/android/Controller.kt")
+        val picked = controller.substringAfter("fun picked(").substringBefore("// The phone's own PIN screen")
+        ok(picked.contains("PickedUri.accept(uri, act)") && picked.indexOf("PickedUri.accept(uri, act)") in 0 until picked.indexOf("done(uri)"), "a picker's address is checked before the caller reads or writes it")
+        ok(picked.contains("AppWords.fileNotRead(null)"), "a refused address says the file was not read")
+        ok(controller.split("openInputStream(").size == 2 && controller.split("openOutputStream(").size == 2, "one read and one write of a picked address, both after the check")
+        ok(occurs(controller, "Intent.ACTION_OPEN_DOCUMENT") + occurs(controller, "Intent.ACTION_CREATE_DOCUMENT") == occurs(controller, "openPicker(intent, "), "every picker intent goes through the one function that checks the result")
+        ok(!controller.contains("ACTION_GET_CONTENT") && occurs(controller, "startActivityForResult(") == 2, "the pickers and the phone's PIN screen are the only calls for a result")
+        val others = File(appDir, "src/android").listFiles { f -> f.name.endsWith(".kt") && f.name != "Controller.kt" }!!
+        ok(others.none { f -> f.readText().let { it.contains("openInputStream(") || it.contains("openOutputStream(") || it.contains("ACTION_OPEN_DOCUMENT") || it.contains("ACTION_CREATE_DOCUMENT") || it.contains("ACTION_GET_CONTENT") } }, "no other file of the app reads or writes a picked address")
+    }
+
+    /** The screens that show an address to pay or ask for the confirm of a payment hide other apps' overlays (SS-33). */
+    private fun paymentScreensAreGuardedTests() {
+        fun body(file: String, name: String): String {
+            val text = source("src/android/$file")
+            val start = text.indexOf("fun Controller.$name(")
+            ok(start >= 0, "$file has $name")
+            val next = Regex("\n(private |internal )?fun ").find(text, start + 10)
+            return text.substring(start, next?.range?.first ?: text.length)
+        }
+        val screens = mapOf(
+            "OwnSpend.kt" to listOf("showOwnSpend", "showOwnCompare", "showOwnFile", "showOwnReturn", "takeOwn"),
+            "RequestScreens.kt" to listOf("showReturn", "showReturnAdded"),
+            "Screens.kt" to listOf("showSpend", "showQueue", "showCashOut", "showCashOutPrice"),
+            "Hardware.kt" to listOf("showSignerExport", "showSignerReturn", "showSignerTaken"),
+            "StarterUse.kt" to listOf("showStarterPay", "starterPayConfirm", "showStarterSigned", "showStarterMove", "starterMoveConfirm"),
+            "FloatScreens.kt" to listOf("showFloatRefill", "showFloatRefund", "floatPayConfirm", "floatPaySigned", "showFloatSweep", "floatSweepConfirm", "floatSweepSigned", "showFloatSweepDelete"),
+        )
+        for ((file, names) in screens) for (name in names) {
+            ok(body(file, name).contains("guard = true"), "$file $name puts its screen on show guarded")
+        }
+        val ui = source("src/android/OwnerUi.kt")
+        ok(ui.contains("fun Controller.present(page: View, guard: Boolean)") && ui.substringAfter("fun Controller.present(").substringBefore("\n}").let { it.contains("act.show(page)") && it.indexOf("WindowGuard.protect(act, page)") > it.indexOf("act.show(page)") }, "a guarded page is protected once it is on show")
+        ok(ui.contains("present(ui.page(ui.bar(title, sub, back, logo = logo), all, actions, tone), guard)") && ui.contains("guard: Boolean = false"), "the screen builders hand the choice on")
+        ok(source("AndroidManifest.xml").contains("android.permission.HIDE_OVERLAY_WINDOWS"), "the manifest has HIDE_OVERLAY_WINDOWS")
+        ok(source("../android-common/src/android/Feedback.kt").substringAfter("class HoldButton(").contains("FLAG_WINDOW_IS_PARTIALLY_OBSCURED"), "the shared hold control ignores a touch through an overlay")
     }
 
     private fun floatWiringTests() {
@@ -4430,7 +4482,7 @@ object AppModelTest {
 
         // SS-12 and FL-03: the screen sets the window flags, and the words never become text.
         val screens = source("src/android/FloatScreens.kt")
-        ok(screens.contains("StarterWindow.protect(act, page)") && screens.contains("StarterWindow.protect(act, act.window.decorView)"), "the float's setup page and its scan page set the window flags of SS-12")
+        ok(screens.contains("WindowGuard.protect(act, page)") && screens.contains("WindowGuard.protect(act, act.window.decorView)"), "the float's setup page and its scan page set the window flags of SS-12")
         ok(screens.contains("floatWordsScreen(FloatWords.setupTitle"), "the setup screen is built through the protected helper")
         ok(screens.contains("LibraryFloat.seal(scanned)") && !screens.contains("LibraryFloat.open(") && !screens.contains("OwnerFloat.open(") && !screens.contains("String(bytes"), "the scan goes to the library as bytes and no words are made as text")
         ok(screens.indexOf("store.saveSealed(") < screens.indexOf("starterWrapKey(") && screens.indexOf("starterWrapKey(") < screens.indexOf("store.finishSetup("), "the screen keeps the seal, wraps the key, and records last")
@@ -4443,7 +4495,7 @@ object AppModelTest {
         ok(screens.contains("FloatModel.canRestore(record, wallet)") && screens.contains("floatRestoreScan(store, wallet)"), "the page that says the key is gone offers to scan the float's words again when the phone has the float's record and wallet (FL-06)")
         ok(screens.contains("LibraryFloat.restore(scanned, wallet.description)") && !screens.contains("OwnerFloat.restore(") && screens.indexOf("private fun Controller.floatRestoreScan") < screens.indexOf("private fun Controller.floatRestoreSeal"), "the scan goes to the library as bytes with the recorded description and no words are made as text (FL-06)")
         val restoreScan = screens.substring(screens.indexOf("private fun Controller.floatRestoreScan"), screens.indexOf("private fun Controller.floatRestoreSeal"))
-        ok(restoreScan.contains("StarterWindow.protect(act, act.window.decorView)") && screens.indexOf("private fun Controller.floatKeyGone") < screens.indexOf("floatWordsScreen(FloatWords.rowTitle, body, actions"), "the scan page and the page that offers it set the window flags of SS-12 (FL-06)")
+        ok(restoreScan.contains("WindowGuard.protect(act, act.window.decorView)") && screens.indexOf("private fun Controller.floatKeyGone") < screens.indexOf("floatWordsScreen(FloatWords.rowTitle, body, actions"), "the scan page and the page that offers it set the window flags of SS-12 (FL-06)")
         val restoreSeal = screens.substring(screens.indexOf("private fun Controller.floatRestoreSeal"), screens.indexOf("private fun Controller.floatWatchRaise"))
         ok(restoreSeal.indexOf("LibraryFloat.restore(") < restoreSeal.indexOf("keystore.delete()") && restoreSeal.indexOf("keystore.delete()") < restoreSeal.indexOf("store.saveSealed(") && restoreSeal.indexOf("store.saveSealed(") < restoreSeal.indexOf("starterWrapKey(") && restoreSeal.indexOf("starterWrapKey(") < restoreSeal.indexOf("showFloat(FloatWords.restoreDone)"), "the library takes the words first, then the old Keystore key goes, the sealed seed is kept, the new data key is wrapped, and only then the float is shown ready (FL-06)")
         ok(restoreSeal.contains("floatKeystore()") && restoreSeal.contains("{ store.saveWrapped(it) }") && restoreSeal.indexOf("fun undo()") < restoreSeal.indexOf("store.deleteKey()") && !restoreSeal.contains("store.save(") && !restoreSeal.contains("finishSetup"), "the new data key is wrapped by the float's own Keystore key, a failure undoes both and the record is left as it was (FL-06)")

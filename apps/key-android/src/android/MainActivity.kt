@@ -13,12 +13,15 @@ import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import org.openbmt.app.Feedback
 import org.openbmt.app.Palette
+import org.openbmt.app.WindowGuard
 
 /**
  * The one activity of the Key app, and the only exported component. Every
  * window of the app carries FLAG_SECURE: no screenshot, no screen recording
- * and a blank preview in the recent-apps list. There is no dialog, because a
- * dialog is another window that would need the flag too.
+ * and a blank preview in the recent-apps list. Every screen also hides other
+ * apps' overlay windows and drops touches made through one ([WindowGuard]).
+ * There is no dialog, because a dialog is another window that would need the
+ * flags too.
  */
 class MainActivity : Activity() {
     private lateinit var controller: Controller
@@ -79,7 +82,10 @@ class MainActivity : Activity() {
     /** Shows [page] as the whole content. */
     fun show(page: View) {
         current = page
-        setContentView(if (DevCopy.ON) withBand(page) else page)
+        val content = if (DevCopy.ON) withBand(page) else page
+        setContentView(content)
+        // Every screen of the signer: no other app's overlay drawn over it or touching through it.
+        WindowGuard.protect(this, content)
     }
 
     /** The development copy's band above every screen (SR-91), in the stop tone. */
