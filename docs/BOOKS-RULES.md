@@ -215,8 +215,9 @@ Nothing here says what a merchant owes. It writes down what the records say.
   opaque IDs are the ones the keys give, the order, the references from
   refunds and returns, and the high-water marks against the sales.
 - **BK-29.** The one file helper writes the bytes to a temporary name in the
-  same folder, flushes it and renames it over the target, so that the target
-  is either the old file or the whole new one.
+  same folder, flushes it, renames it over the target and flushes the
+  folder, so that the target is either the old file or the whole new one,
+  also after a loss of power.
 
 ## 7. Hostile input
 

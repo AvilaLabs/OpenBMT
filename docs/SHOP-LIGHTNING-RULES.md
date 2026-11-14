@@ -101,7 +101,10 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   missing. Payments already in flight finish when it returns. One node runs
   on a node's folder at a time: the folder is locked before the node is
   built and released only once it has stopped, so a change of settings
-  during a start never gives two nodes the same seed.
+  during a start never gives two nodes the same seed. The node's log,
+  `node.log`, is moved to `node.log.1` at 16 MiB, so there are two files
+  at most; a log that cannot be written never stops the node or a write of
+  the state.
 - **SL-24. Order of writes.** Each channel's monitor goes to the second
   device first, then to the counter's own copy, so the second device never
   holds an older monitor. The channel manager, the provider's state and the
@@ -114,7 +117,13 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   as a monitor is, second device first, before the counter shows the
   invoice; an invoice whose expectation could not be stored is not shown.
   The paid events (SL-21) and the sweep address (SL-33) go to the counter's
-  copy first, as the manager does.
+  copy first, as the manager does. A start that takes the second device's
+  copy because it is newer (SL-25) takes its monitors and its manager
+  whole. What else goes to the counter's copy first (the paid events, the
+  sweep address, the spendable outputs and the provider's state) is kept
+  where the counter has it and taken from the device only where the counter
+  lacks it, and nothing of it is removed; it is then sent to the device
+  again, so the two copies agree.
 - **SL-25. No old copy, ever.** On a start, the node reads the update
   numbers of both copies and starts only from the newer one. A copy behind
   the other is never used. When each copy is ahead of the other on some
