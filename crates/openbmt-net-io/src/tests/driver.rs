@@ -223,6 +223,37 @@ fn nr_25_a_book_peer_that_misbehaves_is_marked_in_the_book() {
 }
 
 #[test]
+fn nr_25_a_fault_on_the_old_transport_after_the_encrypted_one_failed_is_no_ban() {
+    // The fake peer sends its `version` first, as a path that answers the
+    // encrypted handshake in the old way does (NR-81): the old transport is
+    // used only because of that, and a path can corrupt it.
+    let peer = FakePeer::start(Behavior::Garbage);
+    let storage = MemStorage::with(Key::Book, book_bytes(&[(8, 8, 8, 8, 8333)], &[]));
+    let (net, _, _) = net_to(peer.addr, Vec::new());
+    let mut config = bare();
+    config.v2 = true;
+    let mut handle = start(config, &storage, net);
+    let seen = wait_for(
+        &handle,
+        10,
+        |e| matches!(e, AppEvent::Note(n) if n.contains("NR-01")),
+    )
+    .expect("no drop for the garbage");
+    assert!(
+        seen.iter()
+            .all(|e| !matches!(e, AppEvent::Note(n) if n.contains("24 h"))),
+        "{seen:?}"
+    );
+    handle.shutdown();
+    let book = stored_book(&storage);
+    let entry = book.get(&v4(8, 8, 8, 8), 8333).unwrap();
+    assert!(entry.banned_until.is_none());
+    // The failed dials are counted, but the peer is not dropped from the
+    // book.
+    assert!(entry.failures >= 1);
+}
+
+#[test]
 fn nr_23_the_next_address_is_drawn_from_the_book_with_the_callers_randomness() {
     let peer = FakePeer::start(Behavior::Serve(Vec::new()));
     let storage = MemStorage::with(Key::Book, book_bytes(&[(8, 8, 8, 8, 8333)], &[]));

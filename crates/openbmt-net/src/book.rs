@@ -641,6 +641,13 @@ impl AddressBook {
         }
     }
 
+    /// NR-81: whether the peer did not speak the encrypted transport lately,
+    /// so that the old one is used with it for now.
+    pub fn v2_failed_lately(&self, addr: &AddrV2, port: u16, now: u64) -> bool {
+        self.get(addr, port)
+            .is_some_and(|e| matches!(e.v2_failed_until, Some(until) if now < until))
+    }
+
     /// NR-80: whether to try the encrypted transport first with this peer.
     /// Yes, unless NR-81 says it did not speak it lately, or the peer itself
     /// (not a seed, not another peer) stated services without

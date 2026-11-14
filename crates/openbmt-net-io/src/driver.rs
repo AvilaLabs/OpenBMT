@@ -958,6 +958,10 @@ struct Conn {
     ready_at: Option<u64>,
     /// NR-98: the own node's connection.
     own: bool,
+    /// NR-81: the old transport is used because the peer did not speak the
+    /// encrypted one, which the counter tried. A path can cause that, so a
+    /// fault on such a connection does not ban the peer (NR-25).
+    v2_fallback: bool,
 }
 
 /// A connection being opened.
@@ -1275,12 +1279,13 @@ where
                     // The manager has forgotten the peer already.
                     let who = self.who(id);
                     let own = self.conns.get(&id).is_some_and(|c| c.own);
+                    let path = self.conns.get(&id).is_some_and(|c| c.v2_fallback && !c.own);
                     self.remove_conn(id, now, misbehaved);
                     if let Some(who) = who {
-                        let mark = match (misbehaved, own) {
-                            (true, true) => " (not dialed until asked)",
-                            (true, false) => " (not dialed for 24 h)",
-                            (false, _) => "",
+                        let mark = match (misbehaved, own, path) {
+                            (true, true, _) => " (not dialed until asked)",
+                            (true, false, false) => " (not dialed for 24 h)",
+                            _ => "",
                         };
                         self.emit(AppEvent::Note(format!("{who} dropped{mark}: {reason}")));
                     }
@@ -1392,7 +1397,14 @@ where
         } else {
             self.pause_target(&conn.target, now);
         }
-        if misbehaved {
+        if misbehaved && conn.v2_fallback {
+            // NR-25, NR-81: a path that made the encrypted transport fail
+            // can corrupt the old one as well, so the peer is not banned and
+            // keeps its place as an anchor. It is a failed dial.
+            if let Some((addr, port)) = book_key(&conn.target) {
+                self.book.failed(&addr, port, now);
+            }
+        } else if misbehaved {
             // NR-25.
             self.banned
                 .insert(conn.target.clone(), now.saturating_add(BAN_SECS));
@@ -1475,22 +1487,38 @@ where
     /// predictable (a key from it would be no protection), or when NR-81 or
     /// the address book says so.
     /// `None` when the randomness gave no numbers for the key.
-    fn transport_for(&mut self, target: &Target, now: u64) -> Option<TransportChoice> {
+    ///
+    /// The flag says that the old one is used only because the encrypted one
+    /// failed (NR-81): the counter would try the encrypted one otherwise.
+    fn transport_for(&mut self, target: &Target, now: u64) -> Option<(TransportChoice, bool)> {
         let remembered = self.v2.v1_until.get(target).is_some_and(|t| *t > now);
         let own = self.own.target.as_ref() == Some(target);
-        let book_says_v1 =
-            !own && book_key(target).is_some_and(|(a, p)| !self.book.v2_first(&a, p, now));
-        if !self.config.v2 || remembered || book_says_v1 || !self.rng.unpredictable() {
-            return Some(TransportChoice::V1);
+        let book_key = book_key(target);
+        let book_says_v1 = !own
+            && book_key
+                .as_ref()
+                .is_some_and(|(a, p)| !self.book.v2_first(a, *p, now));
+        let failed_lately = remembered
+            || (!own
+                && book_key
+                    .as_ref()
+                    .is_some_and(|(a, p)| self.book.v2_failed_lately(a, *p, now)));
+        let unpredictable = self.rng.unpredictable();
+        if !self.config.v2 || remembered || book_says_v1 || !unpredictable {
+            let fallback = self.config.v2 && unpredictable && failed_lately;
+            return Some((TransportChoice::V1, fallback));
         }
         let mut words = [0u64; 8];
         for word in &mut words {
             *word = self.draw()?;
         }
         let mut next = words.into_iter();
-        Some(TransportChoice::V2(V2Entropy::from_words(|| {
-            next.next().unwrap_or_default()
-        })))
+        Some((
+            TransportChoice::V2(V2Entropy::from_words(|| {
+                next.next().unwrap_or_default()
+            })),
+            false,
+        ))
     }
 
     /// The next random number. If the source gave none, the driver says so
@@ -1544,7 +1572,7 @@ where
 
     /// A socket is open: give it to the manager, or close it at once.
     fn adopt(&mut self, id: PeerId, target: Target, stream: TcpStream, own: bool, now: u64) {
-        let (Some(nonce), Some(transport)) = (self.draw(), self.transport_for(&target, now)) else {
+        let (Some(nonce), Some((transport, v2_fallback))) = (self.draw(), self.transport_for(&target, now)) else {
             // No random numbers: the socket is closed and the dial counts as
             // failed.
             let _ = stream.shutdown(Shutdown::Both);
@@ -1610,6 +1638,7 @@ where
                         target,
                         ready_at: None,
                         own,
+                        v2_fallback,
                     },
                 );
             }
