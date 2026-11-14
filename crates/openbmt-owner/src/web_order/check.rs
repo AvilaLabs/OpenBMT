@@ -8,7 +8,7 @@ use super::range::Range;
 use super::WebOrderRefusal;
 
 /// The most bytes of the store's list of orders that are read.
-const MAX_ORDERS_BYTES: usize = 256 * 1024;
+pub(super) const MAX_ORDERS_BYTES: usize = 256 * 1024;
 
 /// One order as the store reports it (WO-20).
 #[derive(Debug, Clone, PartialEq, Eq)]

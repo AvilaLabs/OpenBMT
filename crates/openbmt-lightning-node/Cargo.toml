@@ -51,6 +51,8 @@ openbmt-box = { path = "../openbmt-box" }
 # an app (SL-74). Only the two tools below turn it on.
 [features]
 tcp-device = []
+# Re-encoding hooks for the fuzz targets, which cannot reach the private decoders.
+testing = []
 
 [[bin]]
 name = "shop-lightning-device"

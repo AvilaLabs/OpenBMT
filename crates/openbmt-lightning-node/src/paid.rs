@@ -99,6 +99,14 @@ fn decode(hash: [u8; 32], bytes: &[u8]) -> Result<Kept, io::Error> {
     if !ok {
         return Err(invalid("paid event"));
     }
+    // A flag is 0 or 1, and with 0 its eight bytes are zero, so that the
+    // bytes are the ones `encode` makes.
+    if bytes[17] > 1 || bytes[26] > 1 {
+        return Err(invalid("paid event: flag"));
+    }
+    if (bytes[17] == 0 && bytes[18..26] != [0; 8]) || (bytes[26] == 0 && bytes[27..35] != [0; 8]) {
+        return Err(invalid("paid event: unused bytes"));
+    }
     let skimmed = bytes
         .get(LEN_1..LEN)
         .map_or(0, |b| u64::from_be_bytes(b.try_into().unwrap()));
@@ -114,6 +122,13 @@ fn decode(hash: [u8; 32], bytes: &[u8]) -> Result<Kept, io::Error> {
         },
         acked_unix: (bytes[26] == 1).then_some(acked),
     })
+}
+
+/// The event read from `bytes` and written again, for the fuzz target: the
+/// result must be the input.
+#[cfg(feature = "testing")]
+pub fn reencode_for_test(hash: [u8; 32], bytes: &[u8]) -> Option<Vec<u8>> {
+    decode(hash, bytes).ok().map(|k| encode(&k))
 }
 
 /// The paid events not yet acknowledged.
@@ -359,5 +374,39 @@ mod tests {
         assert_eq!(read.record.skimmed_msat, 0);
         assert_eq!(read.record.amount_msat, none.record.amount_msat);
         assert!(decode([1; 32], &old[..LEN_1 - 1]).is_err());
+    }
+
+    /// A flag other than 0 or 1, and bytes that are not zero behind a flag of
+    /// 0, are refused, so that what is read writes back to the same bytes.
+    #[test]
+    fn sl_21_a_flag_that_is_not_0_or_1_and_unused_bytes_are_refused() {
+        let kept = Kept {
+            record: rec(1, 5),
+            acked_unix: Some(9),
+        };
+        let good = encode(&kept);
+        assert_eq!(decode([1; 32], &good).unwrap(), kept);
+        for at in [17, 26] {
+            for flag in [2u8, 255] {
+                let mut b = good.clone();
+                b[at] = flag;
+                assert!(decode([1; 32], &b).is_err());
+            }
+        }
+        let mut sender = encode(&Kept {
+            record: PaidRecord {
+                sender_intended_msat: None,
+                ..rec(1, 5)
+            },
+            acked_unix: Some(9),
+        });
+        sender[20] = 1;
+        assert!(decode([1; 32], &sender).is_err());
+        let mut acked = encode(&Kept {
+            record: rec(1, 5),
+            acked_unix: None,
+        });
+        acked[30] = 1;
+        assert!(decode([1; 32], &acked).is_err());
     }
 }

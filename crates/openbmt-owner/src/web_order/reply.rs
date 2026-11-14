@@ -4,7 +4,7 @@
 
 use openbmt_json::{Limits, Value};
 
-use super::check::StoreOrder;
+use super::check::{StoreOrder, MAX_ORDERS_BYTES};
 use super::WebOrderRefusal;
 
 /// The most bytes of a store's answer to a range or a notice that are read.
@@ -26,7 +26,7 @@ impl OrdersReply {
         let bad = WebOrderRefusal::Orders;
         let orders = StoreOrder::parse_list(text)?;
         let limits = Limits {
-            max_bytes: text.len().max(1),
+            max_bytes: MAX_ORDERS_BYTES,
             max_depth: 4,
             max_values: 4096,
         };
@@ -177,6 +177,17 @@ mod tests {
         ] {
             assert_eq!(OrdersReply::parse(bad), Err(WebOrderRefusal::Orders));
         }
+    }
+
+    /// WO-20: a reply over the cap is refused, however well formed.
+    #[test]
+    fn wo_20_an_orders_reply_over_the_cap_is_refused() {
+        let body = br#"{"orders":[],"left":1}"#;
+        let mut text = body.to_vec();
+        text.resize(MAX_ORDERS_BYTES, b' ');
+        assert!(OrdersReply::parse(&text).is_ok());
+        text.push(b' ');
+        assert_eq!(OrdersReply::parse(&text), Err(WebOrderRefusal::Orders));
     }
 
     /// WO-10: each answer the plugin gives to a range reads, and a word it

@@ -85,10 +85,17 @@ fn decode(bytes: &[u8]) -> Result<HashMap<[u8; 32], Expectation>, io::Error> {
         return Err(invalid("expectations: length"));
     }
     let mut book = HashMap::with_capacity(count);
+    let mut last: Option<[u8; 32]> = None;
     for i in 0..count {
         let chunk = &body[i * ENTRY_LEN..(i + 1) * ENTRY_LEN];
         let mut hash = [0u8; 32];
         hash.copy_from_slice(&chunk[..32]);
+        // The blob is written in ascending order of hash, so a hash that is
+        // not above the one before is a repeat or a blob not made here.
+        if last.is_some_and(|l| hash <= l) {
+            return Err(invalid("expectations: order"));
+        }
+        last = Some(hash);
         book.insert(
             hash,
             Expectation {
@@ -98,6 +105,13 @@ fn decode(bytes: &[u8]) -> Result<HashMap<[u8; 32], Expectation>, io::Error> {
         );
     }
     Ok(book)
+}
+
+/// The book read from `bytes` and written again, for the fuzz target: the
+/// result must be the input.
+#[cfg(feature = "testing")]
+pub fn reencode_for_test(bytes: &[u8]) -> Option<Vec<u8>> {
+    decode(bytes).ok().map(|book| encode(&book))
 }
 
 fn drop_expired(book: &mut HashMap<[u8; 32], Expectation>, now: u64) -> bool {
@@ -339,5 +353,31 @@ mod tests {
         let mut book = HashMap::new();
         book.insert([1; 32], exp(5, 9));
         assert_eq!(decode(&encode(&book)).unwrap(), book);
+    }
+
+    /// A blob with a repeated hash or hashes out of order is refused, so that
+    /// what is read always writes back to the same bytes.
+    #[test]
+    fn sl_20_a_blob_out_of_order_or_with_a_repeat_is_refused() {
+        let entry = |h: u8| {
+            let mut e = vec![h; 32];
+            e.extend_from_slice(&[0; 16]);
+            e
+        };
+        let blob = |hashes: &[u8]| {
+            let mut out = vec![VERSION];
+            out.extend_from_slice(&(hashes.len() as u32).to_be_bytes());
+            for h in hashes {
+                out.extend_from_slice(&entry(*h));
+            }
+            out
+        };
+        assert_eq!(
+            encode(&decode(&blob(&[1, 2, 3])).unwrap()),
+            blob(&[1, 2, 3])
+        );
+        assert!(decode(&blob(&[1, 1])).is_err());
+        assert!(decode(&blob(&[2, 1])).is_err());
+        assert!(decode(&blob(&[1, 3, 2])).is_err());
     }
 }
