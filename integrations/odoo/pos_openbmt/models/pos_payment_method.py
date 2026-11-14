@@ -11,6 +11,7 @@ import json
 import logging
 import re
 import secrets
+import time
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 
@@ -21,7 +22,15 @@ from odoo.exceptions import ValidationError
 
 _logger = logging.getLogger(__name__)
 
+
+class DeadlinePassed(Exception):
+    """The answer was not whole by the deadline of the call."""
+
 TIMEOUT = 10
+# The whole exchange with the Box, connecting and reading the answer, may take
+# this many seconds. TIMEOUT alone is per socket read, which an endpoint that
+# sends a byte every few seconds never trips.
+DEADLINE = 15
 MAX_ANSWER = 16 * 1024
 MAX_REFERENCE = 40
 SALE_RE = re.compile(r'^[0-9a-f]{32}$')
@@ -220,13 +229,14 @@ class PosPaymentMethod(models.Model):
                    'Accept': 'application/json'}
         if body is not None:
             headers['Content-Type'] = 'application/json'
+        due = time.monotonic() + DEADLINE
         try:
             response = requests.request(
                 verb, base + path, data=sent if body is not None else None,
-                timeout=TIMEOUT, allow_redirects=False, stream=True,
-                headers=headers)
-            raw = self._openbmt_read(response)
-        except requests.RequestException as exc:
+                timeout=min(TIMEOUT, DEADLINE), allow_redirects=False,
+                stream=True, headers=headers)
+            raw = self._openbmt_read(response, due)
+        except (requests.RequestException, DeadlinePassed) as exc:
             # The class name only: the text of an exception may carry
             # request details.
             _logger.warning('OpenBMT box call failed: %s', type(exc).__name__)
@@ -269,14 +279,20 @@ class PosPaymentMethod(models.Model):
         return address.rstrip('/')
 
     @staticmethod
-    def _openbmt_read(response):
+    def _openbmt_read(response, due):
         chunks = []
         size = 0
-        for chunk in response.iter_content(4096):
+        # One byte a read, so that the deadline is looked at between bytes
+        # and a read that returns only when its buffer is full cannot hold
+        # the call past it.
+        for chunk in response.iter_content(1):
             size += len(chunk)
             if size > MAX_ANSWER:
                 response.close()
                 return None
+            if time.monotonic() > due:
+                response.close()
+                raise DeadlinePassed()
             chunks.append(chunk)
         return b''.join(chunks)
 

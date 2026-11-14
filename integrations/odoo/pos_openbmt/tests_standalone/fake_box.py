@@ -95,6 +95,8 @@ class FakeBox:
         self.nonces = []
         self.mode = 'normal'  # normal, redirect, garbage, slow, shape
         self.delay = 0.0
+        # In drip mode: seconds between the bytes of the answer.
+        self.gap = 1.0
         self.shape = None
         self.status_code = 200
         self.currency = 'EUR'
@@ -166,6 +168,22 @@ class FakeBox:
         h.end_headers()
         h.wfile.write(raw)
 
+    def drip(self, h):
+        """Headers at once, then the body a byte at a time."""
+        h.send_response(200)
+        h.send_header('Content-Type', 'application/json')
+        h.send_header('Content-Length', '4000')
+        h.end_headers()
+        h.wfile.flush()
+        try:
+            for _ in range(4000):
+                h.wfile.write(b' ')
+                h.wfile.flush()
+                time.sleep(self.gap)
+        except OSError:
+            pass
+        h.close_connection = True
+
     def view(self, sale, state):
         """A sale as the Box tells it, with what `echo` changes."""
         body = {'sale': sale, 'state': state}
@@ -196,6 +214,9 @@ class FakeBox:
             return
         if self.mode == 'slow':
             time.sleep(self.delay)
+        if self.mode == 'drip':
+            self.drip(h)
+            return
         if self.mode == 'garbage':
             self.send(h, 200, b'<html>not json</html>')
             return

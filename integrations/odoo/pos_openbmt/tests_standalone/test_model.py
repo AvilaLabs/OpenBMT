@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import sys
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -213,6 +214,22 @@ class Transport(Base):
         self.box.delay = 1.5
         r = self.start()
         self.assertEqual(r, {'error': mod.ERR_TRANSPORT, 'words': mod.LOCAL_WORDS[mod.ERR_TRANSPORT]})
+        self.assert_clean(r)
+
+    def test_a_box_that_drips_bytes_is_cut_off_at_the_deadline(self):
+        # One byte a second: every read is well inside TIMEOUT, so only the
+        # deadline of the whole call stops it.
+        old = mod.DEADLINE
+        mod.DEADLINE = 2
+        self.addCleanup(setattr, mod, 'DEADLINE', old)
+        self.box.mode = 'drip'
+        self.box.gap = 1.0
+        began = time.monotonic()
+        r = self.start()
+        took = time.monotonic() - began
+        self.assertEqual(r, {'error': mod.ERR_TRANSPORT, 'words': mod.LOCAL_WORDS[mod.ERR_TRANSPORT]})
+        self.assertGreaterEqual(took, 1.5)
+        self.assertLess(took, 5)
         self.assert_clean(r)
 
     def test_redirect_refused(self):
