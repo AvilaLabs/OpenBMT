@@ -315,15 +315,39 @@ pub struct SwapRecord {
     /// transaction that is not one of the claims, or a replacement of the
     /// lockup's own transaction.
     pub spent_in: Option<BlockHash>,
+    /// The block of the best chain that held a spend of the underpaying
+    /// lockup the swap holds by a transaction that is not one of the claims:
+    /// the claim of that lockup is not sent after it. Version 2.
+    pub held_spent_in: Option<BlockHash>,
+    /// The coins the lockup of the swap spends, when they are at most
+    /// `MAX_LOCKUP_INPUTS`, else none: a lockup that replaces it spends one
+    /// of them. Version 2.
+    pub lockup_inputs: Vec<OutPoint>,
 }
+
+/// The most inputs of a lockup that the record keeps.
+const MAX_LOCKUP_INPUTS: usize = 16;
+/// The version of the record that is written.
+const RECORD_VERSION: u8 = 2;
 
 impl SwapRecord {
     /// The bytes the node writes: the magic, version 1, the machine (SW-73)
     /// with its length, the lockup (flag, id, index, value, flags), the
     /// claims, the fee rate and the height, a byte of flags (told, failure
     /// told, claim was in a block, spent) and the block of the spend.
+    ///
+    /// Version 2 adds, after the block of the spend, the block of a spend of
+    /// the underpaying lockup (flag, id) and the lockup's inputs (count, then
+    /// id and index each). Version 1 is still read, with neither.
     pub fn to_bytes(&self) -> Vec<u8> {
+        self.encode(RECORD_VERSION)
+    }
+
+    fn encode(&self, version: u8) -> Vec<u8> {
         let mut out = wire::start(&MAGIC_SWAP_RECORD, 1024);
+        if let Some(v) = out.get_mut(4) {
+            *v = version;
+        }
         let machine = self.machine.encode();
         out.extend_from_slice(
             &u16::try_from(machine.len())
@@ -356,6 +380,20 @@ impl SwapRecord {
         if let Some(hash) = &self.spent_in {
             out.extend_from_slice(hash.as_ref());
         }
+        if version >= 2 {
+            match &self.held_spent_in {
+                Some(hash) => {
+                    out.push(1);
+                    out.extend_from_slice(hash.as_ref());
+                }
+                None => out.push(0),
+            }
+            out.push(u8::try_from(self.lockup_inputs.len()).unwrap_or(u8::MAX));
+            for o in &self.lockup_inputs {
+                out.extend_from_slice(o.txid.as_ref());
+                out.extend_from_slice(&o.vout.to_le_bytes());
+            }
+        }
         out
     }
 
@@ -368,7 +406,7 @@ impl SwapRecord {
         if bytes.len() > MAX_RECORD_BYTES {
             return Err(DecodeError::TooLarge);
         }
-        let mut r = Reader::framed(bytes, &MAGIC_SWAP_RECORD)?;
+        let (mut r, version) = Reader::framed_up_to(bytes, &MAGIC_SWAP_RECORD, RECORD_VERSION)?;
         let n = usize::from(r.u16_le()?);
         let machine =
             ReverseSwap::decode(r.take(n)?).map_err(|_| bad("the swap does not read back"))?;
@@ -408,6 +446,21 @@ impl SwapRecord {
         } else {
             None
         };
+        let mut held_spent_in = None;
+        let mut lockup_inputs = Vec::new();
+        if version >= 2 {
+            if r.flag()? {
+                held_spent_in = Some(BlockHash::from_byte_array(r.array()?));
+            }
+            let count = usize::from(r.u8()?);
+            if count > MAX_LOCKUP_INPUTS {
+                return Err(DecodeError::TooLarge);
+            }
+            for _ in 0..count {
+                let txid = Txid::from_byte_array(r.array()?);
+                lockup_inputs.push(OutPoint::new(txid, r.u32_le()?));
+            }
+        }
         r.finish()?;
         // A swap that was lost may have had its claim sent or not: the claim
         // is in the state's phase either way.
@@ -430,8 +483,10 @@ impl SwapRecord {
             failure_told: flags & 2 != 0,
             claim_in_block: flags & 4 != 0,
             spent_in,
+            held_spent_in,
+            lockup_inputs,
         };
-        if record.to_bytes() != bytes {
+        if record.encode(version) != bytes {
             return Err(bad("the record is not canonical"));
         }
         Ok(record)
@@ -503,10 +558,6 @@ struct Follow {
     /// Blocks seen in this run that spend the coins of the watched lockups
     /// by a transaction the watch holds: who, and in which block.
     displaced_in: Vec<(Txid, BlockHash)>,
-    /// The block that spent the held lockup by a transaction that is not one
-    /// of the claims, seen in this run: for a lost swap that still sends the
-    /// claim of an underpaying lockup.
-    held_spent_in: Option<BlockHash>,
     last_status: Option<u64>,
     poll_after: u32,
     /// The lockup, as the light client sees it.
@@ -697,7 +748,6 @@ impl SwapDriver {
                 spent_told: None,
                 lockup_seen: false,
                 displaced_in: Vec::new(),
-                held_spent_in: None,
                 last_status: None,
                 poll_after: 0,
             };
@@ -1150,6 +1200,8 @@ impl SwapDriver {
                     failure_told: false,
                     claim_in_block: false,
                     spent_in: None,
+                    held_spent_in: None,
+                    lockup_inputs: Vec::new(),
                 },
                 saved: false,
                 dirty: true,
@@ -1163,7 +1215,6 @@ impl SwapDriver {
                 spent_told: None,
                 lockup_seen: false,
                 displaced_in: Vec::new(),
-                held_spent_in: None,
                 last_status: Some(now),
                 poll_after: openbmt_swap::POLL_WAITING_SECS,
             })
@@ -1251,7 +1302,10 @@ impl SwapDriver {
                             if f.record.claims.contains(&txid) {
                                 continue;
                             }
-                            f.held_spent_in = Some(hash);
+                            if f.holds_underpaid() && f.record.held_spent_in != Some(hash) {
+                                f.record.held_spent_in = Some(hash);
+                                f.dirty = true;
+                            }
                             if !f.ended() && f.record.spent_in != Some(hash) {
                                 f.record.spent_in = Some(hash);
                                 f.dirty = true;
@@ -1733,6 +1787,7 @@ impl Follow {
         let stage = self.record.machine.stage();
         let status = self.watch.status(chain, now);
         self.lockup_seen = !self.watch.standing().is_empty();
+        self.keep_lockup_inputs();
         let (behind, on_chain) = (env.behind, self.lockup_seen);
         let ctx_of = |accept: bool| Ctx {
             behind,
@@ -1866,7 +1921,8 @@ impl Follow {
                 let conf = cst
                     .min_confirmations
                     .max((env.claim_seen)(index, &self.record.claims));
-                if self.depth_told != Some(conf) {
+                // The sale is not judged by the claim of an underpaying lockup.
+                if self.depth_told != Some(conf) && !self.holds_underpaid() {
                     self.depth_told = Some(conf);
                     updates.push(Update::ClaimDepth {
                         index,
@@ -2092,6 +2148,29 @@ impl Follow {
         }
     }
 
+    /// The coins the lockup spends are kept in the record once the watch
+    /// holds that lockup, and not changed after: a replacement spends the
+    /// same coins.
+    fn keep_lockup_inputs(&mut self) {
+        let Some(l) = self.record.lockup else {
+            return;
+        };
+        if !self.record.lockup_inputs.is_empty() {
+            return;
+        }
+        let Some(tx) = self
+            .watch
+            .transactions()
+            .find(|t| t.compute_txid() == l.outpoint.txid)
+        else {
+            return;
+        };
+        if tx.input.len() <= MAX_LOCKUP_INPUTS {
+            self.record.lockup_inputs = tx.input.iter().map(|i| i.previous_output).collect();
+            self.dirty = true;
+        }
+    }
+
     /// The swap was lost with its claim sent, and the lockup it holds is an
     /// underpaying one: that claim is still sent (CR-222) until it, or
     /// another spend of that lockup, is in a block.
@@ -2133,11 +2212,14 @@ impl Follow {
             }
             return;
         }
-        if self
-            .held_spent_in
-            .is_some_and(|h| chain.height_of(&h).is_some())
-        {
-            return;
+        match self.record.held_spent_in {
+            Some(h) if chain.height_of(&h).is_some() => return,
+            // The block left the chain: the sending goes on.
+            Some(_) => {
+                self.record.held_spent_in = None;
+                self.dirty = true;
+            }
+            None => {}
         }
         self.send_again(lockup, env.behind, tip, now, start_rate, notes);
     }
@@ -2198,36 +2280,44 @@ impl Follow {
         // The transactions of the watch that are in a block of the chain: the
         // ones seen to displace the lockup in this run, and every standing one
         // the watch holds, which a restart leaves in the watch only.
-        let mut ids: Vec<Txid> = self
+        let mut ids: Vec<(Txid, bool)> = self
             .displaced_in
             .iter()
             .filter(|(_, hash)| chain.height_of(hash).is_some())
-            .map(|(by, _)| *by)
+            .map(|(by, _)| (*by, true))
             .collect();
         let standing = self.watch.standing_depths(chain);
-        ids.extend(standing.iter().filter(|(_, d)| *d >= 1).map(|(t, _)| *t));
-        // The inputs of the held lockup, if the watch holds it: what a
-        // replacement spends.
-        let inputs: Option<Vec<OutPoint>> = self
+        ids.extend(
+            standing
+                .iter()
+                .filter(|(_, d)| *d >= 1)
+                .map(|(t, _)| (*t, false)),
+        );
+        // The coins the held lockup spends, from the watch or the record: a
+        // replacement the watch holds spends one of them. With none known the
+        // watch alone adopts nothing, since it may hold any payment to the
+        // script.
+        let inputs: Vec<OutPoint> = self
             .watch
             .transactions()
             .find(|t| t.compute_txid() == held.outpoint.txid)
-            .map(|t| t.input.iter().map(|i| i.previous_output).collect());
-        let held_in_block = standing
-            .iter()
-            .any(|(t, d)| *t == held.outpoint.txid && *d >= 1);
+            .map(|t| t.input.iter().map(|i| i.previous_output).collect())
+            .unwrap_or_else(|| self.record.lockup_inputs.clone());
         let mut found = None;
-        for by in ids {
+        for (by, seen_to_displace) in ids {
             if by == held.outpoint.txid {
                 continue;
             }
             let Some(tx) = self.watch.transactions().find(|t| t.compute_txid() == by) else {
                 continue;
             };
-            let replaces = match &inputs {
-                Some(own) => tx.input.iter().any(|i| own.contains(&i.previous_output)),
-                // The held lockup is not in the watch: it is not in a block.
-                None => !held_in_block,
+            // With the coins known the replacement must spend one of them: a
+            // block fed after a start finds any payment to the script "seen
+            // to displace" itself.
+            let replaces = if inputs.is_empty() {
+                seen_to_displace
+            } else {
+                tx.input.iter().any(|i| inputs.contains(&i.previous_output))
             };
             if !replaces {
                 continue;
@@ -2258,6 +2348,7 @@ impl Follow {
             Ok((machine, claim)) => {
                 self.record.machine = machine;
                 self.record.lockup = Some(next);
+                self.record.held_spent_in = None;
                 self.record.fee_per_kvb = rate;
                 self.record.claim_tip = tip;
                 self.record.claim_in_block = false;

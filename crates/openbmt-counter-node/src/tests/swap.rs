@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use bitcoin::consensus::encode::deserialize;
+use bitcoin::hashes::Hash;
 use bitcoin::{BlockHash, Network, Transaction};
 use openbmt_core::settings::SwapProvider;
 use openbmt_counter::{Report, State};
@@ -1768,7 +1769,10 @@ fn cr_220_the_record_keeps_what_the_swap_was_told_and_reads_it_strictly() {
     let mut long = bytes.clone();
     long.push(0);
     assert!(SwapRecord::from_bytes(&long).is_err());
-    let flags = bytes.len() - 32 - 1;
+    // The flags come before the block of the spend, the version 2 flag, the
+    // count and the inputs.
+    assert!(record.held_spent_in.is_none());
+    let flags = bytes.len() - (2 + 36 * record.lockup_inputs.len()) - 32 - 1;
     let mut odd = bytes.clone();
     odd[flags] |= 0x10;
     assert!(SwapRecord::from_bytes(&odd).is_err());
@@ -2393,4 +2397,109 @@ fn cr_221_after_a_restart_an_underpaying_lockup_in_a_block_is_claimed() {
     let new = w.sent().last().unwrap().clone();
     assert!(spends_outpoint(&new, displacing.compute_txid()));
     assert_eq!(record_of(&dir, index).claims.len(), 2);
+}
+
+#[test]
+fn cr_222_a_restart_after_a_spend_of_the_underpaying_lockup_in_a_block_keeps_the_sending_stopped() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, lockup, _) = instant_sale(&mut w);
+    let displacing = underpaying_by(&lockup, 1_000);
+    w.block(std::slice::from_ref(&displacing));
+    until_lost(&mut w, &dir, index, 12);
+    let refund = spending_lockup(&displacing);
+    // The provider takes the coins of the underpaying lockup.
+    w.block(std::slice::from_ref(&refund));
+    assert!(record_of(&dir, index).held_spent_in.is_some());
+    let height = w.tip.0;
+    let sent = w.sent().len();
+    for _ in 0..3 {
+        w.block(&[]);
+    }
+    assert_eq!(w.sent().len(), sent, "no more sending");
+    // The chain is fed again after a start, the same blocks.
+    let World { rig, pretend, .. } = w;
+    drop(rig);
+    let mut w = world(&dir);
+    w.pretend = pretend;
+    for h in 1..=height {
+        let txs = if h == 1 {
+            vec![displacing.clone()]
+        } else if h == height {
+            vec![refund.clone()]
+        } else {
+            Vec::new()
+        };
+        w.block(&txs);
+    }
+    assert!(record_of(&dir, index).held_spent_in.is_some());
+    let sent = w.sent().len();
+    for _ in 0..4 {
+        w.block(&[]);
+    }
+    assert_eq!(w.sent().len(), sent, "the sending stays stopped");
+}
+
+#[test]
+fn cr_221_a_payment_to_the_script_by_a_third_party_after_a_restart_is_not_adopted() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, lockup, _) = instant_sale(&mut w);
+    w.block(&[]);
+    assert!(!record_of(&dir, index).lockup_inputs.is_empty());
+    let World { rig, pretend, .. } = w;
+    drop(rig);
+    let mut w = world(&dir);
+    w.pretend = pretend;
+    // Other coins pay the lockup's script less than was promised.
+    let mut other = underpaying_by(&lockup, 1_000);
+    other.input[0].previous_output = bitcoin::OutPoint::new(lockup.compute_txid(), 5);
+    let sent = w.sent().len();
+    w.block(&[other]);
+    assert_eq!(w.sent().len(), sent);
+    assert_eq!(record_of(&dir, index).claims.len(), 1);
+}
+
+#[test]
+fn cr_221_the_depth_of_the_claim_of_an_underpaying_lockup_does_not_judge_a_sale_accepted_by_a_person(
+) {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, lockup, _) = instant_sale(&mut w);
+    let displacing = underpaying_by(&lockup, 1_000);
+    w.block(std::slice::from_ref(&displacing));
+    let ann = openbmt_counter::Actor {
+        role: openbmt_counter::Role::Cashier,
+        name: "ann".to_string(),
+    };
+    let _ = w.rig.node.override_sale(index, ann);
+    let claim = w.sent().last().unwrap().clone();
+    w.block(std::slice::from_ref(&claim));
+    for _ in 0..8 {
+        w.block(&[]);
+        assert_ne!(w.rig.node.judge(index).unwrap().state, State::Confirmed);
+    }
+}
+
+#[test]
+fn cr_220_a_record_of_the_first_version_is_still_read() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    let (index, _, _) = instant_sale(&mut w);
+    w.block(&[]);
+    let mut record = record_of(&dir, index);
+    record.held_spent_in = None;
+    record.lockup_inputs = Vec::new();
+    let mut old = record.to_bytes();
+    // Version 1 is the same bytes without the two fields of version 2.
+    old.truncate(old.len() - 2);
+    old[4] = 1;
+    assert_eq!(SwapRecord::from_bytes(&old).unwrap(), record);
+    let mut kept = record.clone();
+    kept.lockup_inputs = vec![bitcoin::OutPoint::new(
+        bitcoin::Txid::from_byte_array([4; 32]),
+        1,
+    )];
+    assert_eq!(SwapRecord::from_bytes(&kept.to_bytes()).unwrap(), kept);
+    assert_eq!(kept.to_bytes().get(4), Some(&2));
 }
