@@ -97,8 +97,9 @@ out silently.
   that are known here are the scripts of the coins handed in and the change
   script at `change_index`; a payment to any other script of the wallet
   cannot be told from a payment to someone else.
-- **SP-25.** At least one payment is required. There are at most 100
-  outputs in total (SR-02), change included, and at most 1,000 inputs.
+- **SP-25.** At least one payment is required. There are at most 100 outputs
+  in total (SR-02), change included, and at most 1,000 inputs. A 2-of-3 wallet
+  reaches the weight limit of SP-33 first, at about 950 inputs.
 - **SP-26.** The request says where the change goes: last, or at a place
   taken from a seed. With a seed, the place is the first 8 bytes, read as
   a u64 `x` in little-endian order, of

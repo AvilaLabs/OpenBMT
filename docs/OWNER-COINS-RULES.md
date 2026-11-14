@@ -222,20 +222,22 @@ code is in `crates/openbmt-owner-node/src/receipts.rs`.
   blockchain that these payments belong to one wallet (`docs/DESIGN.md` §11).
   The offer is a suggestion and is never taken by itself.
 - **OC-20.** Approving the offer queues one cash-out of every coin the merge
-  takes in (the amount "all") to the wallet's next change address, and
-  builds a session for the Key app from it at the rate that the offer
-  stated, through the same path any spend takes (`OwnerNode::build_request`
-  with the queue's cash-out of AS-57). It is then an ordinary two-key
-  session: the Key app shows it as a move inside the wallet, and key 1 signs
-  it when the owner takes the response (`OwnerNode::take`). Nothing is
-  signed or sent by the approval itself, and no new signing path exists. The
-  merge is refused, and the queue is as it was but for the number the entry
-  used, when the offer does not hold at that moment, when a refund or a
-  cash-out is queued or in a session (the merge would take the same coins
-  and the change address would no longer be the one in the entry), or when
-  the session cannot take it (the session that came out without it is given
-  up and the entry is cancelled). A merge entry is queued and built in one
-  call, so it does not wait in the queue for a change address that has moved.
+  takes in (the amount "all") to the wallet's next change address, and builds
+  a session for the Key app from it at the rate that the offer stated, through
+  the same path any spend takes (`OwnerNode::build_request` with the queue's
+  cash-out of AS-57). It is then an ordinary two-key session: the Key app
+  shows it as a move inside the wallet, and key 1 signs it when the owner
+  takes the response (`OwnerNode::take`). Nothing is signed or sent by the
+  approval itself, and no new signing path exists. The merge is refused, and
+  the queue is as it was but for the number the entry used, when the offer
+  does not hold at that moment, when a refund or a cash-out is queued or in a
+  session (the merge would take the same coins and the change address would no
+  longer be the one in the entry), or when the session cannot take it (the
+  session that came out without it is given up and the entry is cancelled). A
+  merge entry is queued and built in one call, so it does not wait in the
+  queue for a change address that has moved. A shop with its own wallet merges
+  the same way, with the same refusals, except that the session is one for the
+  shop's own wallet (AS-101, AS-106), which shows it as a move inside itself.
 - **OC-21.** One merge takes in at most `MAX_CONSOLIDATION_INPUTS` (SP-39)
   coins, and at most 4 MiB of the previous transactions that every input
   carries (half of the signer's 8 MiB file, `docs/SIGNER-RULES.md`), oldest

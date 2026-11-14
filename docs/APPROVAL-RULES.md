@@ -14,12 +14,12 @@ app keep its signature for every loosening change, unchanged.
 ## 1. Classes of change
 
 - **AP-01. Fields and classes.** The class of a change is computed from the
-  old and the new settings, never declared. Redirect: `lightning_node` is
-  set, or changed to another node. Loosen: every other field that loosens
-  (limits, budgets, tolerance, confirmations lowered, heartbeat age raised,
-  Tor turned off, customer Wi-Fi, minimum sale lowered, a device or counter
-  added, a counter's share raised, the currency). Free: a Box added (with
-  its place on the device list), the watch key set or changed, and any
+  old and the new settings, never declared. Redirect: `lightning_node` is set,
+  or changed to another node. Loosen: every other field that loosens (limits,
+  budgets, tolerance, confirmations lowered, heartbeat age raised, Tor turned
+  off, customer Wi-Fi, minimum sale lowered, a device or counter added except
+  as AP-12 says, a counter's share raised, the currency). Free: a Box added
+  (with its place on the device list), the watch key set or changed, and any
   change that tightens, including taking the Lightning node away. The
   per-field direction is the one `settings::changed_fields` gives.
   `shop_lightning` takes the classes of AP-13.
@@ -35,16 +35,17 @@ app keep its signature for every loosening change, unchanged.
   changing `own_node` while `node_only` is off is Free: the node is then a
   second check only (NR-98 to NR-103, WR-60 to WR-65).
 - **AP-12. No counter yet.** When the settings in force name no counter, a
-  change whose only loosening is counters added, with their shares, is
-  Free: no counter can confirm it, and a confirmation has nothing yet to
-  protect. Any other loosening in the same change keeps its class. Once one
-  counter is in force, every counter added is Loosen (AP-01), so that a
+  change whose only loosening is counters added, with their shares, is Free:
+  no counter can confirm it, and a confirmation has nothing yet to protect.
+  Their entries on the device list, and those of a Box added with them, are
+  Free with them. Any other loosening in the same change keeps its class. Once
+  one counter is in force, every counter added is Loosen (AP-01), so that a
   counter added by the owner phone alone can never confirm the next change.
   For the same reason, a change that leaves no counter while the settings in
   force name at least one is Loosen: the last counter confirms its own
   removal, and the owner phone alone cannot empty the list and then fill it
-  with counters of its own choosing. Removing some counters while one stays
-  is Free, as any tightening is.
+  with counters of its own choosing. Removing some counters while one stays is
+  Free, as any tightening is.
 
 - **AP-13. Shop Lightning.** Setting `shop_lightning`
   (`docs/SHOP-LIGHTNING-RULES.md` SL-71), or changing its node's ID or its
