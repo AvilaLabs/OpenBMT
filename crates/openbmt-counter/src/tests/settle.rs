@@ -171,6 +171,28 @@ fn cr_76_a_sale_with_a_refund_waiting_for_depth_is_not_settled() {
 }
 
 #[test]
+fn cr_76_a_final_sale_whose_payment_a_reorg_undid_is_not_settled_until_back_at_the_refund_depth() {
+    let mut w = World::new();
+    let o = w.open_five();
+    let t = w.pay(&o, 5_000);
+    let block = w.confirm(std::slice::from_ref(&t), 95);
+    assert_eq!(w.judge(o.index).state, crate::State::Final);
+    w.orphan(&block);
+    w.judge(o.index);
+    assert!(w.c.sale(o.index).unwrap().is_watched());
+    owner_holds_all(&mut w);
+    w.tick(SETTLE_SECS + DAY);
+    assert_eq!(settle(&mut w), 0);
+    // Back at the refund depth in another block: watched no more.
+    w.confirm(std::slice::from_ref(&t), 95);
+    w.judge(o.index);
+    assert!(!w.c.sale(o.index).unwrap().is_watched());
+    owner_holds_all(&mut w);
+    w.tick(SETTLE_SECS + DAY);
+    assert_eq!(settle(&mut w), 1);
+}
+
+#[test]
 fn cr_76_a_record_above_the_owner_s_mark_blocks_the_sale() {
     let mut w = World::new();
     let i = ended_sale(&mut w);

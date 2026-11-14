@@ -481,6 +481,14 @@ impl Sale {
         self.ended.is_none() && !self.books_final
     }
 
+    /// Whether the sale still takes evidence for its watch: it is live, or it
+    /// is final and a reorg undid its payment and it is not yet back at the
+    /// refund depth (CR-66). Blocks, sightings and the owner's reports go to
+    /// such a sale; everything else that needs a live sale stays refused.
+    pub fn is_watched(&self) -> bool {
+        self.is_live() || (self.books_final && self.refund_reopened)
+    }
+
     fn segment_sum(&self) -> u64 {
         self.segments
             .iter()

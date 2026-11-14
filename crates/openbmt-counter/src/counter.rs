@@ -1243,7 +1243,7 @@ impl Counter {
     /// CR-76: the time a sale last changed if it is settled at `now` given
     /// the owner's mark, else `None`.
     fn settled_since(&self, sale: &Sale, mark: u64, now: u64) -> Option<u64> {
-        if sale.is_live() || self.unreadable.contains(&sale.index) {
+        if sale.is_watched() || self.unreadable.contains(&sale.index) {
             return None;
         }
         if sale.exposure_counted && !sale.exposure_released {
@@ -2159,7 +2159,7 @@ impl Counter {
         let live: Vec<u32> = self
             .sales
             .iter()
-            .filter(|(_, s)| s.is_live())
+            .filter(|(_, s)| s.is_watched())
             .map(|(i, _)| *i)
             .collect();
         for index in live {
@@ -2191,7 +2191,7 @@ impl Counter {
     pub fn own_node_saw(&mut self, txid: Txid) -> Vec<u32> {
         let mut known = Vec::new();
         for (index, sale) in self.sales.iter_mut() {
-            if sale.is_live() && sale.watch.own_node_saw(txid) {
+            if sale.is_watched() && sale.watch.own_node_saw(txid) {
                 known.push(*index);
             }
         }
@@ -2203,7 +2203,7 @@ impl Counter {
     pub fn own_node_saw_at(&mut self, txid: Txid, at: u64) -> Vec<u32> {
         let mut known = Vec::new();
         for (index, sale) in self.sales.iter_mut() {
-            if sale.is_live() && sale.watch.own_node_saw_at(txid, at) {
+            if sale.is_watched() && sale.watch.own_node_saw_at(txid, at) {
                 known.push(*index);
             }
         }
@@ -2294,7 +2294,7 @@ impl Counter {
         let live: Vec<u32> = self
             .sales
             .iter()
-            .filter(|(_, s)| s.is_live())
+            .filter(|(_, s)| s.is_watched())
             .map(|(i, _)| *i)
             .collect();
         for index in live {

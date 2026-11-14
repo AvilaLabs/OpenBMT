@@ -631,6 +631,34 @@ fn cr_66_after_a_reorg_the_flag_stays_until_the_refund_depth_not_the_shops_depth
 }
 
 #[test]
+fn cr_66_a_final_sale_whose_payment_is_mined_again_in_another_block_takes_that_block() {
+    let mut w = World::new();
+    let o = w.open_five();
+    let t = w.pay(&o, 5_000);
+    let block = w.confirm(std::slice::from_ref(&t), 95);
+    assert_eq!(w.judge(o.index).state, crate::State::Final);
+    w.orphan(&block);
+    w.judge(o.index);
+    ask(&mut w, o.index, 1_000, ann()).unwrap();
+    // A different block holds the payment now, at the shop's depth only.
+    let again = w.mine_at(std::slice::from_ref(&t), 100);
+    let taken = w.offer(&again);
+    assert_eq!(taken.results.len(), 1);
+    assert_eq!(w.judge(o.index).state, crate::State::Confirmed);
+    assert_eq!(
+        w.c.refund_views(o.index)[0].state,
+        RefundState::WaitingForDepth
+    );
+    // At the refund depth the request no longer waits, and stays so.
+    w.chain.tip = 105;
+    assert_eq!(w.judge(o.index).state, crate::State::Final);
+    assert_eq!(w.c.refund_views(o.index)[0].state, RefundState::Requested);
+    assert!(!w.c.sale(o.index).unwrap().is_watched());
+    w.restart();
+    assert_eq!(w.c.refund_views(o.index)[0].state, RefundState::Requested);
+}
+
+#[test]
 fn cr_66_the_refund_latch_is_stored_and_an_earlier_sale_reads_with_it_equal_to_reopened() {
     use crate::sale::Sale;
     let mut w = World::new();
