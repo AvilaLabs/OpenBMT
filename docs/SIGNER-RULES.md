@@ -270,7 +270,11 @@ bytes each, with the hash-type byte).
   only if that step succeeds.
 - **SR-56.** The signer erases its copies of secret key material when it is
   done with them. This is best effort: the compiler and the operating system
-  can leave other copies in memory.
+  can leave other copies in memory. The same holds on every side of the apps
+  for a device's identity key, the Lightning node's seed and the keys made on
+  the way to it, a key handed to the signer and refused, and recovery words:
+  a word list is overwritten in place with the words of zero entropy, and the
+  text it was shown or read from is emptied.
 
 ## 9. Setup: registering the wallet
 
@@ -455,7 +459,8 @@ SR-81 and the screens of SR-82 by the Android app.
   whole header as associated data. The parameters are 64 MiB, 3 passes and 1
   lane. A file that asks for more than 256 MiB, 10 passes or 4 lanes, or for
   no passes or no lanes, is refused before Argon2 runs. The salt and the
-  nonce come from the platform's random source. Every write has a new nonce,
+  nonce come from the kernel, read and checked as SS-01 and SS-02 say
+  (`docs/START-SIMPLE-RULES.md`). Every write has a new nonce,
   and a write whose nonce would repeat the last one under the same key is
   refused. Decoding is strict: version 1, the exact length, and only bytes
   that writing the frame again would give. Every write of the state goes
@@ -524,7 +529,7 @@ SR-81 and the screens of SR-82 by the Android app.
   from the current time of SR-31. "Remove" asks for a confirmation and takes
   effect at once (SR-30).
 - **SR-80. The invitation.** `make_invitation` makes an invitation (BX-10)
-  from 17 bytes of the platform's random source, stores the state with it and
+  from 17 bytes read from the kernel as SS-01 and SS-02 say, stores the state with it and
   an end 30 minutes after this phone's clock (BX-11), and only then returns it:
   its 30 characters in six groups of five separated by hyphens, the end in
   seconds since 1970 and the seconds left. A failed store gives no invitation

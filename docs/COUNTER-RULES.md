@@ -654,8 +654,8 @@ it.
 - **CR-91.** The ceremony begins from the offer's bytes and from nothing
   else the app supplies but a name and the time. The counter makes its own
   identity key and a fresh 32-byte number from the system's random source,
-  in the library and never from the app; if that source cannot be
-  trusted to be unpredictable, the call is refused. The ceremony is in
+  in the library and never from the app; if that source gives nothing or
+  cannot be trusted to be unpredictable, the call is refused. The ceremony is in
   memory only: a restart forgets it, and a new `pair_begin`, a refusal, a
   finish, `pair_differ` and `pair_cancel` each forget it with its key and
   number. A call with no ceremony is refused with words that say to begin

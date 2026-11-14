@@ -30,9 +30,14 @@ funds.**
   the Linux kernel for 32 bytes with the `getrandom` system call, which
   waits until the kernel's generator is ready. Nothing else makes or
   changes randomness: no Java generator, no pool kept by OpenBMT. The owner app
-  needs Android 10 or later, and `getrandom` is there from Android 9.
+  needs Android 10 or later, and `getrandom` is there from Android 9. Every
+  secret the Rust side of the apps makes is read this way, through one reader
+  (`crates/openbmt-kernel-random`): the starter wallet, key 1 and the owner's
+  root, key 2 and the Key app's identity, the salt and nonce of each PIN lock,
+  and the Box invitations.
 - **SS-02. Checked before use.** Two separate reads must differ, and a read
-  that is all zero bytes, or one byte repeated, is refused. A refusal makes
+  that is all zero bytes, or one byte repeated, is refused; a longer read is
+  checked 32 bytes at a time and wiped when it is refused. A refusal makes
   no key and says so.
 - **SS-03. Dice, if the owner wants.** The owner may add die rolls. They are
   mixed as the stick mixes them (`docs/STICK-RULES.md` SK-20): the first 16

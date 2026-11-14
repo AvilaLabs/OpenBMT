@@ -84,7 +84,11 @@ thin driver that owns the sockets.
   book with addresses it made up. Only publicly routable addresses are
   kept.
 - **NR-23.** The next address to dial is drawn at random, with randomness
-  the caller supplies, from groups that have no connection now.
+  the caller supplies, from groups that have no connection now. The driver
+  reads that randomness, and the nonces and keys of NR-11 and NR-80, from the
+  kernel. When the kernel gives nothing, the step that needed it is not
+  taken: no dial, no connection, no lookup. The driver says so in a note,
+  and never makes up a number from the clock.
 - **NR-24.** The two peers that have been connected longest without
   fault are stored and dialed first after a restart, so a restart is not
   a chance to surround the counter with new peers.

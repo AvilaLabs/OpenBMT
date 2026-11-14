@@ -427,7 +427,8 @@ fingerprints. The Key app's side is SR-64 to SR-69 in
 `docs/SIGNER-RULES.md`; the code is `openbmt-owner` (`ceremony`) and ops 80
 to 85 of `openbmt-owner-ffi`. OC-38 and OC-39 are not used.
 
-- **OC-40.** Key 1 is made from 64 random bytes the caller passes, on the
+- **OC-40.** Key 1 is made from 64 random bytes read from the kernel as
+  SS-01 and SS-02 say (`docs/START-SIMPLE-RULES.md`), on the
   BIP 48 path `m/48'/coin'/0'/2'` (coin 0 on mainnet, 1 otherwise). The
   owner's root is a separate secret from the same bytes. The twelve
   recovery words are shown only when the owner asks for them. The setup
