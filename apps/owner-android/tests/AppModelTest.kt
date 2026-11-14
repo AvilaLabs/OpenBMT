@@ -4013,7 +4013,22 @@ object AppModelTest {
         ok(!limitPage.contains("stopLabel") && !limitPage.contains("CheckBox") && limitPage.contains("StarterWords.boxOnly"), "SS-38: setup has no stop option, and says what a Box is for")
         ok(setupSource.contains("StarterRecord(draft.limitSats, draft.moveBy, false, null)"), "SS-38: a new record starts with the stop off")
         val useSource = source("src/android/StarterUse.kt")
-        ok(useSource.contains("internal fun Controller.hasBoxLink(): Boolean = false"), "BX-18: the Box link is not wired in yet: the function says no")
+        ok(useSource.contains("internal fun Controller.hasBoxLink(): Boolean = StarterLineSettings.boxLinked(ownStore)"), "BX-18: the Box link is the one the own-wallet shop keeps")
+        val linkDir = tempDir()
+        try {
+            val linkStore = OwnShopStore(linkDir, testSealer())
+            ok(!StarterLineSettings.boxLinked(linkStore) && !StarterLineSettings.stopOptionShown(StarterLineSettings.boxLinked(linkStore)) && !StarterLineSettings.stopForNode(record, StarterLineSettings.boxLinked(linkStore)), "BX-18: without a Box link the stop option is not shown and the node is given no stop")
+            linkStore.saveLink(OwnLink("192.168.1.20:8080", ByteArray(32) { 9 }, emptyList()))
+            ok(StarterLineSettings.boxLinked(linkStore) && StarterLineSettings.stopOptionShown(true) && StarterLineSettings.stopForNode(record, StarterLineSettings.boxLinked(linkStore)), "BX-18: with a Box link the option is shown and the stop reaches the node")
+            File(linkDir, AppFiles.OWN_LINK_FILE).delete()
+            ok(!StarterLineSettings.boxLinked(linkStore) && !StarterLineSettings.stopForNode(record, StarterLineSettings.boxLinked(linkStore)), "BX-18: when the link goes the node is given stop=false at the next hand-over")
+            linkStore.saveLink(OwnLink("192.168.1.20:8080", ByteArray(32) { 9 }, emptyList()))
+            val raw = File(linkDir, AppFiles.OWN_LINK_FILE).readBytes()
+            File(linkDir, AppFiles.OWN_LINK_FILE).writeBytes(raw.copyOf(raw.size - 1))
+            ok(!StarterLineSettings.boxLinked(linkStore), "BX-18: a link file that does not read is no Box link")
+        } finally {
+            linkDir.deleteRecursively()
+        }
         val manage = useSource.substringAfter("internal fun Controller.showStarterManage").substringBefore("/** SS-43: after the key is deleted")
         ok(manage.contains("StarterLineSettings.stopOptionShown(hasBoxLink())") && manage.contains("StarterWords.stopLabel") && manage.contains("record.withStop(on)") && manage.contains("starterLineGive(n)"), "SS-38: the starter page has the stop, saves it and gives it to the node")
         ok(useSource.contains("n.starterLineSet(record.limitSats, StarterLineSettings.stopForNode(record, hasBoxLink()))") && source("src/android/Controller.kt").substringAfter("private fun adopt").substringBefore("val pump = Thread").contains("starterLineGive(n)"), "LK-79: the node is given the limit and the stop when it starts, before it takes blocks")
@@ -4437,6 +4452,7 @@ object AppModelTest {
         ok(screens.contains("NodeFloat(node).raiseWatch(it)"), "the raise goes through the node's float call (FL-05)")
         ok(source("src/android/Controller.kt").contains("OwnerNode.start(floatWatching(start))"), "the node is started with the float's watch")
         ok(screens.contains("sealed.wipe()") && screens.contains("FloatWords.rowTitle)"), "the data key is overwritten when the seal cannot be kept, and the unlock prompt is the float's own")
+    }
 
     }
 

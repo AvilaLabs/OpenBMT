@@ -36,10 +36,11 @@ internal fun Controller.starterRecord(): StarterRecord? = try {
 }
 
 /**
- * Whether the shop has a link to a Box (LK-79, SS-38). The own-wallet Box link (BX-18) is built on another branch, so this
- * says no until that is wired in; the stop option and the stop sent to the node follow it.
+ * Whether the shop has a link to a Box (LK-79, SS-38): its own wallet has a Box added and linked (BX-18). The stop option
+ * and the stop sent to the node follow it. A link that is added or dropped starts the node again (`restartIfLinkChanged`),
+ * which gives the stop again.
  */
-internal fun Controller.hasBoxLink(): Boolean = false
+internal fun Controller.hasBoxLink(): Boolean = StarterLineSettings.boxLinked(ownStore)
 
 /**
  * LK-79: the limit and the stop of the phone's own record, given to the node for the starter line it sends to the counters.

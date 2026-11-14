@@ -172,6 +172,13 @@ class StarterRecord(
  * the Box, so the option is shown, and the stop is passed to the node, only for a shop with a Box link.
  */
 object StarterLineSettings {
+    /** BX-18: whether the shop has a Box added and linked: the link of its own wallet is kept. A file that does not read says no. */
+    fun boxLinked(store: OwnShopStore): Boolean = try {
+        store.loadLink() != null
+    } catch (_: IOException) {
+        false
+    }
+
     /** SS-38: whether the starter page offers the stop option. */
     fun stopOptionShown(hasBoxLink: Boolean): Boolean = hasBoxLink
 
