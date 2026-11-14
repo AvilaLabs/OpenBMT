@@ -162,13 +162,19 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
 - **SL-27. What it watches.** The funding output of each channel and every
   output the library registers with `chain::Filter`. When a block that holds a
   channel's funding leaves the chain, the library closes that channel by
-  force, and the shop's money comes back as from any close (SL-33, SL-36);
-  a later payment opens a new channel (SL-29). A channel the provider opened
-  for a payment is used before its funding confirms (SL-40). If that
-  funding is beaten by another transaction, or has no confirmation within
-  144 blocks **[to tune]**, the money in the channel may never come: the
-  counter tells the manager, and the owner phone lists the sales paid
-  through it.
+  force, and the shop's money comes back as from any close (SL-33, SL-36); a
+  later payment opens a new channel (SL-29). A channel the provider opened for
+  a payment is used before its funding confirms (SL-40). If that funding is
+  beaten by another transaction, or has no confirmation within 144 blocks
+  **[to tune]**, it is lost and the money in the channel may never come. The
+  node then closes that channel by force at once, so nothing more comes
+  through it. Each sale paid at once through it is a cancel, as CR-14 says:
+  the alarm, the pause, "Do not hand over" on its screen, and the POS told it
+  is unpaid (CR-30). A sale still waiting for that funding is told so, and a
+  manager can still accept it. A later payment through a funding already lost
+  is never paid at once. The counter tells the manager, and the owner phone
+  lists the sales paid through it: the first 64 by number, and the count of
+  all.
 
 ## 5. The provider
 
@@ -277,17 +283,25 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   above that sum less a margin is on-chain only, or opens a new channel
   (SL-29). A payment bigger than the room is held by the payer for about two
   minutes and then fails (prototype E7, `MPP_TIMEOUT_TICKS` = 3), which a
-  customer at a counter must never see. A payment over channels whose
-  funding has a confirmation is final at once. A payment that came through
-  a channel the provider opened for it, before that channel's funding has a
+  customer at a counter must never see. A payment over channels whose funding
+  has a confirmation is final at once. A payment that came through a channel
+  the provider opened for it, before that channel's funding has a
   confirmation, rests on a transaction not yet in a block, as an on-chain
-  payment seen and not yet confirmed does, and is decided the same way, as
-  a swap is (CR-221): within the shop's instant limits for a payment the
-  light client has seen (`Light`, WR-45) and with room in the exposure
-  ledger, the sale is Paid at once, and the amount stays in the ledger until
-  the funding confirms. Above them the sale waits for that confirmation,
-  and the manager can accept it as any waiting sale (CR-20). SL-27 says
-  what happens if the funding never confirms.
+  payment seen and not yet confirmed does, and is decided the same way, as a
+  swap is (CR-221): within the shop's instant limits for a payment the light
+  client has seen (`Light`, WR-45) and with room in the exposure ledger, the
+  sale is Paid at once, and the amount stays in the ledger until the funding
+  confirms. Above them the sale waits for that confirmation, and the manager
+  can accept it as any waiting sale (CR-20). A funding counts as confirmed
+  only at the shop's confirmation depth (`min_confirmations`); one that falls
+  back out of a block is watched again. A payment's fundings are all those of
+  its channels not yet at that depth, up to 8: the amount leaves the ledger,
+  or a waiting sale is paid, only when every one is confirmed, and any one
+  lost makes the payment's funding lost. A payment through more than 8 such
+  channels is never Paid at once. When the counter hears of a payment with no
+  news of its fundings, it asks the node, and a funding the node does not know
+  counts as not confirmed. A sale waiting for its fundings is still waiting
+  after a restart. SL-27 says what happens if a funding never confirms.
 - **SL-41. When Lightning is not offered.** With the second device away, the
   chain data behind, no usable channel and no provider answering, the
   counter shows the on-chain code alone and the manager sees why.
@@ -394,11 +408,12 @@ section widens it.
   the last sweep, why Lightning is not offered when it is not (SL-41), and the
   facts of buying room ahead (SL-28): whether the provider offers it, and the
   last order's state, cause and fee. While buying from the provider is stopped
-  (SL-28), the cause says that instead. The owner phone shows the newest
-  report and when it came. The cap and the provider it shows are those of the
-  settings. While the counter still holds the seed it goes on sending reports
-  after the settings stop naming it, so the owner can follow the closing until
-  the money is back.
+  (SL-28), the cause says that instead. It also names the sales paid through a
+  lost channel (SL-27): the first 64 by number, and the count of all. The
+  owner phone shows the newest report and when it came. The cap and the
+  provider it shows are those of the settings. While the counter still holds
+  the seed it goes on sending reports after the settings stop naming it, so
+  the owner can follow the closing until the money is back.
 - **SL-79. Tested.** The core's ID equals the library's (SL-72); settings
   with `shop_lightning` round-trip, and each broken case of SL-71 is refused;
   a counter given a seed of another ID stores nothing; a write the Box did
