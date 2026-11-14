@@ -214,8 +214,11 @@ class OwnBoxPairing(
         val text = invitation?.text ?: return OwnPairWords.codeNotShown
         val bytes = claim ?: return OwnPairWords.codeNotShown
         if (step != OwnBoxStep.Rest) return null
-        val made = call { delivered = library.welcome(args, ConnectBoxModel.linkFor(address, proxy), text, bytes, usdPerBtc) }
-        if (made != null) return made
+        // A Box that already took its welcome is not sent it again: only the link is kept again.
+        if (delivered == null) {
+            val made = call { delivered = library.welcome(args, ConnectBoxModel.linkFor(address, proxy), text, bytes, usdPerBtc) }
+            if (made != null) return made
+        }
         val d = delivered ?: return OwnPairWords.codeNotShown
         return try {
             store.saveLink(OwnLink(address, d.boxKey, d.counters))

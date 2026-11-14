@@ -3152,6 +3152,24 @@ object AppModelTest {
                 ok(q.send(1, "")!!.heading == waits && q.step == OwnBoxStep.Rest && !store3.hasLink(), "OA-123: a Box is not added while a change waits, and the words say so")
                 lib3.refuse = null
                 ok(q.send(1, "") == null && store3.hasLink(), "BX-18: the welcome again keeps it")
+                // The link that could not be saved is saved again with the welcome the Box already took.
+                val dir4 = tempDir()
+                try {
+                    val real = OwnShopStore(dir4, testSealer())
+                    real.saveWallet(byteArrayOf(1)); real.saveOwner(ByteArray(32) { 1 })
+                    // The first save cannot be written: a folder is where the file goes.
+                    val linkFile = File(dir4, AppFiles.OWN_LINK_FILE)
+                    linkFile.mkdirs(); File(linkFile, "x").writeBytes(byteArrayOf(1))
+                    val lib4 = FakeBox()
+                    val t = OwnBoxPairing(real, lib4)
+                    t.start(1_000); t.toAddress(); t.found("host.example:80", claim); t.match()
+                    val first = t.send(1, "")
+                    ok(first != null && first.heading == OwnPairWords.boxLinkNotSaved && t.step == OwnBoxStep.Rest && lib4.calls.count { it.startsWith("welcome") } == 1, "BX-18: a link that was not saved says so, after one welcome")
+                    linkFile.deleteRecursively()
+                    ok(t.send(1, "") == null && t.step == OwnBoxStep.Sent && real.hasLink() && lib4.calls.count { it.startsWith("welcome") } == 1, "BX-18: Send again keeps the link and does not send the welcome again")
+                } finally {
+                    dir4.deleteRecursively()
+                }
                 // They differ: nothing is kept.
                 val r = OwnBoxPairing(store3, lib3)
                 r.start(2_000); r.toAddress(); r.found("host.example:80", claim)
