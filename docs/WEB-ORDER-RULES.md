@@ -69,7 +69,11 @@ funds.**
   only under the store's lock, which is taken by one atomic insert into the
   options table. A lock never released is taken over after 30 seconds, by an
   update that succeeds only on the value that was read, and a request
-  releases only the lock it wrote.
+  releases only the lock it wrote. An order takes its address with the lock
+  held: the order is read again from the database, an order that already has
+  an address takes none, and the address, the quote and the order are
+  written before the lock is released, so an order sent twice at once takes
+  one address.
 - **WO-12. Watched forever.** Every address in a range the plugin accepted is
   watched by the owner phone from the moment it is sent, used or not
   (RQ-04).
