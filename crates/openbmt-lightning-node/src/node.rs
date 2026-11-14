@@ -72,7 +72,7 @@ use lightning_liquidity::lsps0::ser::LSPSRequestId;
 use lightning_liquidity::lsps1::client::LSPS1ClientConfig;
 use lightning_liquidity::lsps1::event::LSPS1ClientEvent;
 use lightning_liquidity::lsps1::msgs::{
-    LSPS1ChannelInfo, LSPS1Options, LSPS1OrderId, LSPS1PaymentInfo,
+    LSPS1ChannelInfo, LSPS1Options, LSPS1OrderId, LSPS1OrderParams, LSPS1PaymentInfo,
 };
 use lightning_liquidity::lsps2::client::LSPS2ClientConfig;
 use lightning_liquidity::lsps2::event::LSPS2ClientEvent;
@@ -304,6 +304,8 @@ pub struct NodeStatus {
 /// What the provider says of an order (SL-28).
 struct OrderAnswer {
     id: String,
+    /// The order as the provider approved it.
+    params: LSPS1OrderParams,
     payment: LSPS1PaymentInfo,
     channel: Option<LSPS1ChannelInfo>,
 }
@@ -1527,9 +1529,10 @@ impl Shared {
             .unwrap_or(0)
     }
 
-    /// One step of room bought ahead (SL-28): follow the open order, or make
-    /// one if the room is under half the cap.
-    async fn lsps1_step(&self, options: &LSPS1Options) {
+    /// One step of room bought ahead (SL-28): follow the open order whatever
+    /// the provider's offer is, or make one if the room is under half the cap
+    /// and the provider's options are known (`options`).
+    async fn lsps1_step(&self, options: Option<&LSPS1Options>) {
         let now = now_secs();
         // Nothing is ordered or paid while the copies cannot both be written
         // or the chain data is behind: the order would not be kept.
@@ -1546,7 +1549,11 @@ impl Shared {
                 self.lsps1.lock_recover().last_poll = now;
                 self.follow_order(record, now).await;
             }
-            None => self.make_order(options, &book, now).await,
+            None => {
+                if let Some(options) = options {
+                    self.make_order(options, &book, now).await;
+                }
+            }
         }
     }
 
@@ -1568,6 +1575,20 @@ impl Shared {
         if self.best_outbound_msat() < 1000 {
             return;
         }
+        // The channels the provider has with the node now are not the order's.
+        let mut prior_channels = Vec::new();
+        let mut with_provider = 0;
+        for c in self.manager.list_channels() {
+            if c.counterparty.node_id == self.provider.node_id {
+                with_provider += 1;
+                if let Some(o) = c.funding_txo {
+                    prior_channels.push(o.into_bitcoin_outpoint());
+                }
+            }
+        }
+        if with_provider > lsps1::MAX_PRIOR_CHANNELS {
+            return;
+        }
         let failed = |why: OrderWhy| {
             let record = OrderRecord {
                 id: "-".to_string(),
@@ -1575,9 +1596,11 @@ impl Shared {
                 why,
                 fee_sat: 0,
                 lsp_balance_sat: 0,
+                sent_msat: 0,
                 payment_hash: [0; 32],
                 created_unix: now,
                 updated_unix: now,
+                prior_channels: Vec::new(),
             };
             move |b: &mut OrderBook| {
                 b.begin(record);
@@ -1600,6 +1623,7 @@ impl Shared {
         };
         let provider = self.provider.node_id;
         let lsp_balance_sat = params.lsp_balance_sat;
+        let asked = params.clone();
         let answer = self
             .order_request(|h| h.create_order(&provider, params, None))
             .await;
@@ -1616,15 +1640,27 @@ impl Shared {
             let _ = self.orders.change(failed(OrderWhy::Refused)).await;
             return;
         }
+        // The order the provider approved is the one asked for, or it is not
+        // paid.
+        if !lsps1::terms_ok(&asked, &answer.params) {
+            self.logger.line(
+                Level::Info,
+                "the provider's order differs from the one asked",
+            );
+            let _ = self.orders.change(failed(OrderWhy::NotPossible)).await;
+            return;
+        }
         let record = OrderRecord {
             id: answer.id.clone(),
             state: OrderState::Open,
             why: OrderWhy::None,
             fee_sat: lsps1::order_fee_sat(&answer.payment),
             lsp_balance_sat,
+            sent_msat: 0,
             payment_hash: lsps1::payment_hash_of(&answer.payment),
             created_unix: now,
             updated_unix: now,
+            prior_channels,
         };
         // Kept on both devices before anything is paid: a restart finds the
         // order and makes no second.
@@ -1652,17 +1688,15 @@ impl Shared {
             Some(a) if a.id == record.id => self.progress_order(record, &a, now).await,
             _ => {
                 // No answer: asked again later. A paid order that stays
-                // unanswered is given up after two days. The book changes
-                // only if the order is still the one the decision was made
-                // from.
-                if record.state == OrderState::Paid
-                    && now.saturating_sub(record.updated_unix) > lsps1::GIVE_UP_AFTER_SECS
-                {
+                // unanswered is given up after two days, one not paid an
+                // hour after it was made. The book changes only if the order
+                // is still the one the decision was made from.
+                if let Some(why) = lsps1::unanswered_step(record, self.sent_of(record), now) {
                     let me = provider.serialize();
                     let _ = self
                         .orders
                         .change(|b| {
-                            b.if_current(record, |b| b.fail(OrderWhy::NoChannel, now, &me));
+                            b.if_current(record, |b| b.fail(why, now, &me));
                         })
                         .await;
                 }
@@ -1671,9 +1705,10 @@ impl Shared {
     }
 
     /// What the payment manager says of the payment for the order's invoice.
-    /// A payment claimed whose amount is not known is waited for: the
-    /// library's event brings the amount that left.
-    fn sent_of(&self, record: &OrderRecord, answer: &OrderAnswer) -> lsps1::Sent {
+    /// What left is what the node set out to pay (the record's `sent_msat`);
+    /// a payment claimed with none set out is waited for: the library's event
+    /// brings the amount that left.
+    fn sent_of(&self, record: &OrderRecord) -> lsps1::Sent {
         let id = PaymentId(record.payment_hash);
         for p in self.manager.list_recent_payments() {
             match p {
@@ -1684,15 +1719,9 @@ impl Shared {
                     return lsps1::Sent::OnItsWay;
                 }
                 RecentPaymentDetails::Fulfilled { payment_id, .. } if payment_id == id => {
-                    let msat = answer
-                        .payment
-                        .bolt11
-                        .as_ref()
-                        .filter(|_| lsps1::payment_hash_of(&answer.payment) == record.payment_hash)
-                        .and_then(|b| b.invoice.amount_milli_satoshis());
-                    return match msat {
-                        Some(m) => lsps1::Sent::Left(Some(m)),
-                        None => lsps1::Sent::OnItsWay,
+                    return match record.sent_msat {
+                        0 => lsps1::Sent::OnItsWay,
+                        m => lsps1::Sent::Left(Some(m)),
                     };
                 }
                 _ => {}
@@ -1710,6 +1739,8 @@ impl Shared {
                 counterparty: c.counterparty.node_id,
                 funding: c.funding_txo.map(|o| o.into_bitcoin_outpoint()),
                 inbound_msat: c.inbound_capacity_msat,
+                ready: c.is_channel_ready,
+                confirmations: c.confirmations.unwrap_or(0),
             })
             .collect()
     }
@@ -1726,13 +1757,14 @@ impl Shared {
                     .line(Level::Warn, &format!("order change not stored: {e}"));
             }
         };
-        let sent = self.sent_of(record, answer);
+        let sent = self.sent_of(record);
         let channel_ok = answer.channel.as_ref().is_some_and(|c| {
             lsps1::channel_verified(
                 &self.own_channels(),
                 &self.provider.node_id,
                 &c.funding_outpoint,
                 record.lsp_balance_sat,
+                &record.prior_channels,
             )
         });
         match lsps1::next_step(record, seen, sent, channel_ok, now) {
@@ -1806,15 +1838,40 @@ impl Shared {
                         return;
                     }
                 };
-                self.pay_order(&plan);
+                // The route first, so that nothing is set out with no way to
+                // send it; then the book, which keeps what is set out before
+                // the money goes. It is sent only if that write changed the
+                // book: an order already set out, or no longer the one the
+                // decision was made from, sends nothing.
+                let Some(route) = self.pay_route(&plan) else {
+                    return;
+                };
+                let set_out = self
+                    .orders
+                    .change_checked(|b| {
+                        b.if_current(record, |b| {
+                            if let Some(o) = b.order.as_mut().filter(|o| o.sent_msat == 0) {
+                                o.sent_msat = plan.amount_msat;
+                            }
+                        });
+                    })
+                    .await;
+                match set_out {
+                    Ok(true) => self.send_order_payment(route, &plan),
+                    Ok(false) => {}
+                    Err(e) => self
+                        .logger
+                        .line(Level::Warn, &format!("order change not stored: {e}")),
+                }
             }
         }
     }
 
-    /// Pays the provider's invoice over a channel to the provider itself, the
-    /// one way this node pays (SL-28). The payment id is the payment hash, so
-    /// the library refuses a second payment of the same invoice.
-    fn pay_order(&self, plan: &lsps1::PayPlan) {
+    /// The route to pay the provider's invoice: one hop over a usable channel
+    /// to the provider itself, the one way this node pays (SL-28). The payment
+    /// id is the payment hash, so the library refuses a second payment of the
+    /// same invoice. `None` with no such channel.
+    fn pay_route(&self, plan: &lsps1::PayPlan) -> Option<Route> {
         let channel = self
             .manager
             .list_usable_channels()
@@ -1824,10 +1881,8 @@ impl Shared {
                     && c.next_outbound_htlc_limit_msat >= plan.amount_msat
             })
             .max_by_key(|c| c.next_outbound_htlc_limit_msat);
-        let Some(scid) = channel.and_then(|c| c.get_outbound_payment_scid()) else {
-            return;
-        };
-        let route = Route {
+        let scid = channel.and_then(|c| c.get_outbound_payment_scid())?;
+        Some(Route {
             paths: vec![Path {
                 hops: vec![RouteHop {
                     pubkey: self.provider.node_id,
@@ -1841,7 +1896,11 @@ impl Shared {
                 blinded_tail: None,
             }],
             route_params: None,
-        };
+        })
+    }
+
+    /// Sends the order's payment over the route.
+    fn send_order_payment(&self, route: Route, plan: &lsps1::PayPlan) {
         match self.manager.send_payment_with_route(
             route,
             PaymentHash(plan.payment_hash),
@@ -1973,21 +2032,22 @@ fn lsps1_event(shared: &Shared, event: LSPS1ClientEvent) {
             request_id,
             counterparty_node_id,
             order_id,
+            order,
             payment,
             channel,
-            ..
         }
         | LSPS1ClientEvent::OrderStatus {
             request_id,
             counterparty_node_id,
             order_id,
+            order,
             payment,
             channel,
-            ..
         } if counterparty_node_id == provider => {
             if let Some(Waiter::Order(tx)) = waiters.remove(&request_id) {
                 let _ = tx.send(OrderAnswer {
                     id: order_id.0,
+                    params: order,
                     payment,
                     channel,
                 });
@@ -2028,9 +2088,9 @@ async fn lsps1_task(shared: Arc<Shared>) {
                 _ => None,
             }
         };
-        if let Some(options) = options {
-            shared.lsps1_step(&options).await;
-        }
+        // An order already made is followed whatever the offer; a new one
+        // needs the options.
+        shared.lsps1_step(options.as_ref()).await;
     }
 }
 

@@ -51,6 +51,9 @@ pub const WANTED_EXPIRY_BLOCKS: u32 = 2016;
 pub const WANTED_FUNDING_WITHIN_BLOCKS: u16 = 6;
 /// The longest order id kept.
 pub const MAX_ID_LEN: usize = 64;
+/// The most channels with the provider that an order notes as earlier ones;
+/// with more, no order is made.
+pub const MAX_PRIOR_CHANNELS: usize = 16;
 /// The largest final CLTV delta the node takes from the provider's invoice: the
 /// provider chooses it, and the shop's payment is locked that long.
 pub const MAX_FINAL_CLTV: u64 = 144;
@@ -173,12 +176,20 @@ pub struct OrderRecord {
     /// What the node asked the provider to put into the channel, in
     /// satoshis: the channel that comes is checked against it.
     pub lsp_balance_sat: u64,
+    /// What the node set out to pay, in millisatoshis, written to the book
+    /// before the payment is sent; 0 while nothing was sent. An order with
+    /// this set is never paid again.
+    pub sent_msat: u64,
     /// The payment hash of the provider's invoice; zeros until it is known.
     pub payment_hash: [u8; 32],
     /// When it was made, in seconds since the epoch.
     pub created_unix: u64,
     /// When its state last changed.
     pub updated_unix: u64,
+    /// The funding outputs of the node's channels with the provider when the
+    /// order was made, at most [`MAX_PRIOR_CHANNELS`]: none of them is the
+    /// channel of this order.
+    pub prior_channels: Vec<bitcoin::OutPoint>,
 }
 
 /// What is kept: the last order, the fees paid for orders so far, the time
@@ -324,9 +335,15 @@ fn encode(book: &OrderBook) -> Vec<u8> {
             out.push(o.why.code());
             out.extend_from_slice(&o.fee_sat.to_be_bytes());
             out.extend_from_slice(&o.lsp_balance_sat.to_be_bytes());
+            out.extend_from_slice(&o.sent_msat.to_be_bytes());
             out.extend_from_slice(&o.payment_hash);
             out.extend_from_slice(&o.created_unix.to_be_bytes());
             out.extend_from_slice(&o.updated_unix.to_be_bytes());
+            out.push(o.prior_channels.len() as u8);
+            for p in &o.prior_channels {
+                out.extend_from_slice(&p.txid.to_byte_array());
+                out.extend_from_slice(&p.vout.to_be_bytes());
+            }
         }
     }
     out
@@ -346,11 +363,18 @@ impl<'a> Cursor<'a> {
     }
 
     fn u8(&mut self) -> Result<u8, io::Error> {
-        Ok(self.take(1)?[0])
+        let [b] = self.array::<1>()?;
+        Ok(b)
+    }
+
+    fn array<const N: usize>(&mut self) -> Result<[u8; N], io::Error> {
+        self.take(N)?
+            .try_into()
+            .map_err(|_| invalid("orders: short"))
     }
 
     fn u64(&mut self) -> Result<u64, io::Error> {
-        Ok(u64::from_be_bytes(self.take(8)?.try_into().unwrap()))
+        Ok(u64::from_be_bytes(self.array()?))
     }
 }
 
@@ -363,7 +387,7 @@ fn decode(bytes: &[u8]) -> Result<OrderBook, io::Error> {
     let next_try_unix = r.u64()?;
     let stopped_for = match r.u8()? {
         0 => None,
-        1 => Some(r.take(33)?.try_into().unwrap()),
+        1 => Some(r.array()?),
         _ => return Err(invalid("orders: stopped flag")),
     };
     let order = match r.u8()? {
@@ -387,18 +411,31 @@ fn decode(bytes: &[u8]) -> Result<OrderBook, io::Error> {
             }
             let fee_sat = r.u64()?;
             let lsp_balance_sat = r.u64()?;
-            let payment_hash: [u8; 32] = r.take(32)?.try_into().unwrap();
+            let sent_msat = r.u64()?;
+            let payment_hash: [u8; 32] = r.array()?;
             let created_unix = r.u64()?;
             let updated_unix = r.u64()?;
+            let n = r.u8()? as usize;
+            if n > MAX_PRIOR_CHANNELS {
+                return Err(invalid("orders: prior channels"));
+            }
+            let mut prior_channels = Vec::with_capacity(n);
+            for _ in 0..n {
+                let txid = bitcoin::Txid::from_byte_array(r.array()?);
+                let vout = u32::from_be_bytes(r.array()?);
+                prior_channels.push(bitcoin::OutPoint { txid, vout });
+            }
             Some(OrderRecord {
                 id,
                 state,
                 why,
                 fee_sat,
                 lsp_balance_sat,
+                sent_msat,
                 payment_hash,
                 created_unix,
                 updated_unix,
+                prior_channels,
             })
         }
         _ => return Err(invalid("orders: flag")),
@@ -425,6 +462,8 @@ pub fn reencode_for_test(bytes: &[u8]) -> Option<Vec<u8>> {
 pub struct Orders {
     store: Arc<DualStore>,
     book: Mutex<OrderBook>,
+    /// One change at a time, from the book read to the book written.
+    gate: tokio::sync::Mutex<()>,
 }
 
 impl Orders {
@@ -439,6 +478,7 @@ impl Orders {
         Ok(Orders {
             store,
             book: Mutex::new(book),
+            gate: tokio::sync::Mutex::new(()),
         })
     }
 
@@ -448,20 +488,26 @@ impl Orders {
     }
 
     /// Changes the book and returns when both copies hold the change. The
-    /// numbering of the store's writes is taken while the book is locked, so
-    /// the blobs land in the order the book changed. A change that leaves the
-    /// book as it was is not written.
+    /// change is made on a copy, written, and only then does the book in
+    /// memory become it: a write that fails leaves the book as it was and
+    /// gives the error, so a repeat of the change is written again. One change
+    /// at a time. A change that leaves the book as it was is not written.
     pub async fn change(&self, f: impl FnOnce(&mut OrderBook)) -> Result<(), io::Error> {
-        let write = {
-            let mut book = self.book.lock_recover();
-            let before = book.clone();
-            f(&mut book);
-            if *book == before {
-                return Ok(());
-            }
-            KVStore::write(&*self.store, PRIMARY, "", KEY, encode(&book))
-        };
-        write.await
+        self.change_checked(f).await.map(|_| ())
+    }
+
+    /// As [`Orders::change`], and says whether the book changed.
+    pub async fn change_checked(&self, f: impl FnOnce(&mut OrderBook)) -> Result<bool, io::Error> {
+        let _one_at_a_time = self.gate.lock().await;
+        let before = self.snapshot();
+        let mut next = before.clone();
+        f(&mut next);
+        if next == before {
+            return Ok(false);
+        }
+        KVStore::write(&*self.store, PRIMARY, "", KEY, encode(&next)).await?;
+        *self.book.lock_recover() = next;
+        Ok(true)
     }
 }
 
@@ -704,6 +750,10 @@ pub struct OwnChannel {
     /// What the node can receive over it, in millisatoshis: the provider's
     /// side.
     pub inbound_msat: u64,
+    /// Whether both sides have said the channel is ready.
+    pub ready: bool,
+    /// The confirmations of the funding; 0 when not known.
+    pub confirmations: u32,
 }
 
 /// The least share of what was ordered, in percent, that the provider's side
@@ -713,18 +763,25 @@ pub const MIN_ROOM_PERCENT: u128 = 90;
 /// Whether the node's own channels hold the channel the provider says it
 /// opened (SL-28): one with the provider, funded by `funding`, whose provider
 /// side is at least [`MIN_ROOM_PERCENT`] of what was ordered
-/// (`lsp_balance_sat`). The provider's word alone is not enough.
+/// (`lsp_balance_sat`), that is ready with its funding confirmed, and that is
+/// not one the node held when the order was made (`prior`). The provider's
+/// word alone is not enough.
 pub fn channel_verified(
     channels: &[OwnChannel],
     provider: &PublicKey,
     funding: &bitcoin::OutPoint,
     lsp_balance_sat: u64,
+    prior: &[bitcoin::OutPoint],
 ) -> bool {
-    channels.iter().any(|c| {
-        c.counterparty == *provider
-            && c.funding.as_ref() == Some(funding)
-            && (c.inbound_msat as u128) * 100 >= (lsp_balance_sat as u128) * 1000 * MIN_ROOM_PERCENT
-    })
+    !prior.contains(funding)
+        && channels.iter().any(|c| {
+            c.ready
+                && c.confirmations >= 1
+                && c.counterparty == *provider
+                && c.funding.as_ref() == Some(funding)
+                && (c.inbound_msat as u128) * 100
+                    >= (lsp_balance_sat as u128) * 1000 * MIN_ROOM_PERCENT
+        })
 }
 
 /// What to do about an open order after the provider's answer: the change of
@@ -773,7 +830,10 @@ pub fn next_step(record: &OrderRecord, seen: Seen, sent: Sent, channel_ok: bool,
         (Seen::NoBolt11, _) => Next::Fail(OrderWhy::NotPossible),
         // Not paid by the node: whatever the provider says of it, nothing
         // changes until the hour is over.
-        (Seen::Expecting, OrderState::Open) if !unpaid_too_long => Next::Pay,
+        // An order with a payment set out is never paid again.
+        (Seen::Expecting, OrderState::Open) if !unpaid_too_long && record.sent_msat == 0 => {
+            Next::Pay
+        }
         (_, OrderState::Open) if unpaid_too_long => Next::Fail(OrderWhy::Expired),
         (_, OrderState::Open) => Next::Wait,
         (Seen::Opened, _) if channel_ok => Next::Done,
@@ -781,6 +841,37 @@ pub fn next_step(record: &OrderRecord, seen: Seen, sent: Sent, channel_ok: bool,
         // provider has not got the payment yet: two days, from the payment.
         (_, _) => no_channel(),
     }
+}
+
+/// What to do about an open order the provider does not answer about (SL-28):
+/// a paid one is given up two days after the payment; one not paid is given
+/// up as expired an hour after it was made, but only when the payment manager
+/// knows no payment for it and none was set out.
+pub fn unanswered_step(record: &OrderRecord, sent: Sent, now: u64) -> Option<OrderWhy> {
+    match record.state {
+        OrderState::Paid if now.saturating_sub(record.updated_unix) > GIVE_UP_AFTER_SECS => {
+            Some(OrderWhy::NoChannel)
+        }
+        OrderState::Open
+            if now.saturating_sub(record.created_unix) > OPEN_UNPAID_SECS
+                && sent == Sent::NotSent
+                && record.sent_msat == 0 =>
+        {
+            Some(OrderWhy::Expired)
+        }
+        _ => None,
+    }
+}
+
+/// Whether the order the provider approved is the one asked for (SL-28): no
+/// less room, no less lease, no fewer confirmations, not announced, and no
+/// coins asked of the shop.
+pub fn terms_ok(asked: &LSPS1OrderParams, got: &LSPS1OrderParams) -> bool {
+    got.lsp_balance_sat >= asked.lsp_balance_sat
+        && !got.announce_channel
+        && got.required_channel_confirmations >= asked.required_channel_confirmations
+        && got.channel_expiry_blocks >= asked.channel_expiry_blocks
+        && got.client_balance_sat == 0
 }
 
 #[cfg(test)]
@@ -878,9 +969,11 @@ mod tests {
             },
             fee_sat: 2_000,
             lsp_balance_sat: 1_000_000,
+            sent_msat: 0,
             payment_hash: [5; 32],
             created_unix: NOW,
             updated_unix: NOW,
+            prior_channels: Vec::new(),
         }
     }
 
@@ -1217,6 +1310,8 @@ mod tests {
             counterparty,
             funding,
             inbound_msat,
+            ready: true,
+            confirmations: 3,
         }
     }
 
@@ -1225,20 +1320,12 @@ mod tests {
         let want = outpoint(1, 0);
         let ordered = 1_000_000; // sat
         let nine_tenths = 900_000_000; // msat
-        assert!(channel_verified(
-            &[own(provider(), Some(want), nine_tenths)],
-            &provider(),
-            &want,
-            ordered
-        ));
-        assert!(!channel_verified(&[], &provider(), &want, ordered));
+        let ok =
+            |channels: &[OwnChannel]| channel_verified(channels, &provider(), &want, ordered, &[]);
+        assert!(ok(&[own(provider(), Some(want), nine_tenths)]));
+        assert!(!ok(&[]));
         // One msat short of nine tenths.
-        assert!(!channel_verified(
-            &[own(provider(), Some(want), nine_tenths - 1)],
-            &provider(),
-            &want,
-            ordered
-        ));
+        assert!(!ok(&[own(provider(), Some(want), nine_tenths - 1)]));
         // Another funding output, another vout, no funding yet, another peer.
         for bad in [
             own(provider(), Some(outpoint(2, 0)), 2 * nine_tenths),
@@ -1250,18 +1337,134 @@ mod tests {
                 2 * nine_tenths,
             ),
         ] {
-            assert!(!channel_verified(&[bad], &provider(), &want, ordered));
+            assert!(!ok(&[bad]));
         }
         // Among several, the right one counts.
-        assert!(channel_verified(
-            &[
-                own(provider(), Some(outpoint(2, 0)), 0),
-                own(provider(), Some(want), nine_tenths),
-            ],
-            &provider(),
-            &want,
-            ordered
+        assert!(ok(&[
+            own(provider(), Some(outpoint(2, 0)), 0),
+            own(provider(), Some(want), nine_tenths),
+        ]));
+    }
+
+    #[test]
+    fn sl_28_a_channel_not_ready_or_not_confirmed_or_held_before_the_order_is_not_its_channel() {
+        let want = outpoint(1, 0);
+        let good = own(provider(), Some(want), 900_000_000);
+        let check = |c: OwnChannel, prior: &[bitcoin::OutPoint]| {
+            channel_verified(&[c], &provider(), &want, 1_000_000, prior)
+        };
+        assert!(check(good, &[]));
+        // Funded as named but not ready.
+        assert!(!check(
+            OwnChannel {
+                ready: false,
+                ..good
+            },
+            &[]
         ));
+        // Ready (as far as it says) with no confirmation of the funding.
+        assert!(!check(
+            OwnChannel {
+                confirmations: 0,
+                ..good
+            },
+            &[]
+        ));
+        // The outpoint of a channel that was there when the order was made.
+        assert!(!check(good, &[outpoint(9, 9), want]));
+        // Other earlier channels do not matter.
+        assert!(check(good, &[outpoint(9, 9)]));
+    }
+
+    #[test]
+    fn sl_28_an_order_with_a_payment_set_out_is_never_paid_again_and_what_left_is_what_was_set_out()
+    {
+        let mut open = record(OrderState::Open);
+        open.sent_msat = 2_000_000;
+        // Nothing of ours in the payment manager: wait, and give up after the hour.
+        assert_eq!(
+            next_step(&open, Seen::Expecting, Sent::NotSent, false, NOW),
+            Next::Wait
+        );
+        assert_eq!(
+            next_step(
+                &open,
+                Seen::Expecting,
+                Sent::NotSent,
+                false,
+                NOW + OPEN_UNPAID_SECS + 1
+            ),
+            Next::Fail(OrderWhy::Expired)
+        );
+        assert_eq!(
+            next_step(&open, Seen::Expecting, Sent::OnItsWay, false, NOW),
+            Next::Wait
+        );
+        // The count of a payment that left is the one recorded.
+        let mut book = OrderBook::default();
+        book.begin(open);
+        assert!(book.paid(&[5; 32], Some(2_000_000), NOW));
+        assert_eq!(book.fees_paid_sat, 2_000);
+    }
+
+    #[test]
+    fn sl_28_an_open_order_the_provider_does_not_answer_is_given_up_after_the_hour_if_nothing_left()
+    {
+        let open = record(OrderState::Open);
+        assert_eq!(
+            unanswered_step(&open, Sent::NotSent, NOW + OPEN_UNPAID_SECS),
+            None
+        );
+        assert_eq!(
+            unanswered_step(&open, Sent::NotSent, NOW + OPEN_UNPAID_SECS + 1),
+            Some(OrderWhy::Expired)
+        );
+        // A payment on its way, claimed, or set out: wait.
+        for sent in [Sent::OnItsWay, Sent::Left(Some(1))] {
+            assert_eq!(
+                unanswered_step(&open, sent, NOW + OPEN_UNPAID_SECS + 1),
+                None
+            );
+        }
+        let mut set_out = record(OrderState::Open);
+        set_out.sent_msat = 1;
+        assert_eq!(
+            unanswered_step(&set_out, Sent::NotSent, NOW + OPEN_UNPAID_SECS + 1),
+            None
+        );
+        // A paid order: two days from the payment.
+        let paid = record(OrderState::Paid);
+        assert_eq!(
+            unanswered_step(&paid, Sent::NotSent, NOW + GIVE_UP_AFTER_SECS),
+            None
+        );
+        assert_eq!(
+            unanswered_step(&paid, Sent::NotSent, NOW + GIVE_UP_AFTER_SECS + 1),
+            Some(OrderWhy::NoChannel)
+        );
+    }
+
+    #[test]
+    fn sl_28_the_order_the_provider_approved_must_be_the_one_asked_for() {
+        let asked = order_params(&options(), 0, 1_000_000, None).unwrap();
+        assert!(terms_ok(&asked, &asked));
+        let mut better = asked.clone();
+        better.lsp_balance_sat += 1;
+        better.channel_expiry_blocks += 1;
+        better.required_channel_confirmations += 1;
+        assert!(terms_ok(&asked, &better));
+        let mutate: [fn(&mut LSPS1OrderParams); 5] = [
+            |p| p.lsp_balance_sat -= 1,
+            |p| p.announce_channel = true,
+            |p| p.required_channel_confirmations = 0,
+            |p| p.channel_expiry_blocks -= 1,
+            |p| p.client_balance_sat = 1,
+        ];
+        for (n, f) in mutate.iter().enumerate() {
+            let mut p = asked.clone();
+            f(&mut p);
+            assert!(!terms_ok(&asked, &p), "{n}");
+        }
     }
 
     #[test]
@@ -1475,6 +1678,23 @@ mod tests {
             OrderBook::default()
         );
 
+        // The payment set out and the earlier channels are kept, and at most
+        // sixteen of them are read.
+        let mut rec = record(OrderState::Open);
+        rec.sent_msat = 2_000_000;
+        rec.prior_channels = (0..16).map(|n| outpoint(n, n as u32)).collect();
+        let full = OrderBook {
+            order: Some(rec.clone()),
+            ..Default::default()
+        };
+        assert_eq!(decode(&encode(&full)).unwrap(), full);
+        assert_eq!(encode(&decode(&encode(&full)).unwrap()), encode(&full));
+        let mut seventeen = encode(&full);
+        let count_at = seventeen.len() - 16 * 36 - 1;
+        seventeen[count_at] = 17;
+        seventeen.extend_from_slice(&[0; 36]);
+        assert!(decode(&seventeen).is_err());
+
         // Strict: a trailing byte, a short blob, a wrong version, a state
         // that is not one, a reason on an order that did not fail, and an
         // id that is not printable are all refused.
@@ -1587,6 +1807,31 @@ mod tests {
         assert!(d.dir.join("local").join(PRIMARY).join(KEY).exists());
         let name = crate::store::device_name(PRIMARY, "", KEY);
         assert!(d.device.read(&name).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn sl_28_a_change_that_is_not_written_is_not_in_the_book_and_is_written_when_repeated() {
+        let d = disks("lsps1-failing-write");
+        let orders = Orders::load(start(&d)).await.unwrap();
+        orders
+            .change(|b| b.begin(record(OrderState::Open)))
+            .await
+            .unwrap();
+        let before = orders.snapshot();
+        // The counter's own disk fails: its directory is a file now.
+        std::fs::remove_dir_all(d.dir.join("local")).unwrap();
+        std::fs::write(d.dir.join("local"), b"not a directory").unwrap();
+        let tell = |b: &mut OrderBook| {
+            b.paid(&[5; 32], Some(2_000_000), NOW + 1);
+        };
+        assert!(orders.change(tell).await.is_err());
+        assert_eq!(orders.snapshot(), before, "memory is as it was");
+        // The disk is back: the same change is written, not taken for done.
+        std::fs::remove_file(d.dir.join("local")).unwrap();
+        orders.change(tell).await.unwrap();
+        assert_eq!(orders.snapshot().order.unwrap().state, OrderState::Paid);
+        let again = Orders::load(start(&d)).await.unwrap();
+        assert_eq!(again.snapshot().fees_paid_sat, 2_000);
     }
 
     #[tokio::test]

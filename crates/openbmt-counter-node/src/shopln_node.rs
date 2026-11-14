@@ -2384,9 +2384,11 @@ mod tests {
             why,
             fee_sat: 2_000,
             lsp_balance_sat: 1_000_000,
+            sent_msat: 0,
             payment_hash: [1; 32],
             created_unix: 1,
             updated_unix: 2,
+            prior_channels: Vec::new(),
         };
         assert_eq!(
             order_facts(ln::Offer::Unknown, None, false),
