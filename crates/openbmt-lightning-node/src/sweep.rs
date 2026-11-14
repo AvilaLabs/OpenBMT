@@ -15,6 +15,7 @@
 //! the same derivation ([`SweepDestination::address_at`]).
 
 use crate::chain::{ChainFilter, CoreBroadcaster, CoreFees};
+use crate::locks::MutexExt;
 use crate::logger::Logger;
 use crate::store::Background;
 use crate::types::Graph;
@@ -116,13 +117,13 @@ impl SweepDestination {
     pub async fn set(&self, index: u32) -> Result<(), io::Error> {
         self.script_at(index)?;
         self.keep(index).await?;
-        *self.index.lock().unwrap() = index;
+        *self.index.lock_recover() = index;
         Ok(())
     }
 
     /// The index of the destination now.
     pub fn index(&self) -> u32 {
-        *self.index.lock().unwrap()
+        *self.index.lock_recover()
     }
 
     /// The destination script now.

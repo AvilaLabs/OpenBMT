@@ -95,6 +95,15 @@
 //! and signet (SL-60).
 
 #![forbid(unsafe_code)]
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing
+    )
+)]
 
 pub mod bip85;
 pub mod cap;
@@ -107,6 +116,7 @@ pub mod device_tcp;
 pub mod expect;
 pub mod feehistory;
 pub mod filters;
+mod locks;
 pub mod logger;
 pub mod lsps1;
 pub mod node;

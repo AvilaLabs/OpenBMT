@@ -26,6 +26,7 @@
 //! device first (SL-24).
 
 use crate::device::{DeviceStatus, SecondDevice};
+use crate::locks::MutexExt;
 use crate::logger::Logger;
 use crate::seal::{open, seal, SealKey, NONCE_LEN};
 use lightning::io;
@@ -154,7 +155,7 @@ impl Inner {
     async fn flush_lazy_round(&self) -> bool {
         loop {
             let next = {
-                let lazy = self.lazy.lock().unwrap();
+                let lazy = self.lazy.lock_recover();
                 lazy.iter().next().map(|(n, op)| (n.clone(), op.clone()))
             };
             let Some((name, op)) = next else { return true };
@@ -169,7 +170,7 @@ impl Inner {
             match result {
                 Ok(()) => {
                     self.status.stored(now_unix());
-                    let mut lazy = self.lazy.lock().unwrap();
+                    let mut lazy = self.lazy.lock_recover();
                     // A newer change of the same name stays owed.
                     let unchanged = match (lazy.get(&name), &op) {
                         (Some(LazyOp::Write(a)), LazyOp::Write(b)) => a == b,
@@ -340,8 +341,7 @@ impl KVStore for Background {
             KVStore::write(&*inner.local, &p, &s, &k, buf.clone()).await?;
             inner
                 .lazy
-                .lock()
-                .unwrap()
+                .lock_recover()
                 .insert(device_name(&p, &s, &k), LazyOp::Write(buf));
             inner.lazy_wake.notify_one();
             Ok(())
@@ -355,8 +355,7 @@ impl KVStore for Background {
             KVStore::remove(&*inner.local, &p, &s, &k, lazy).await?;
             inner
                 .lazy
-                .lock()
-                .unwrap()
+                .lock_recover()
                 .insert(device_name(&p, &s, &k), LazyOp::Remove);
             inner.lazy_wake.notify_one();
             Ok(())

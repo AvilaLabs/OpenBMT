@@ -50,6 +50,10 @@ pub enum SealError {
 /// Seals `content` under the name `name`, with the given nonce.
 pub fn seal(key: &SealKey, nonce: [u8; NONCE_LEN], name: &str, content: &[u8]) -> Vec<u8> {
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&key.0));
+    // The cipher's one error is a blob past 256 GiB, which a blob held in
+    // memory for the node never is; a rewrite would make every store write
+    // fallible for it.
+    #[allow(clippy::expect_used)]
     let body = cipher
         .encrypt(
             Nonce::from_slice(&nonce),

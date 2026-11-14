@@ -12,6 +12,7 @@
 //! invoice the counter shows is always known after a restart. Expired entries
 //! are dropped when the book is loaded and on every write.
 
+use crate::locks::MutexExt;
 use crate::store::DualStore;
 use lightning::io;
 use lightning::util::persist::KVStore;
@@ -72,11 +73,13 @@ fn encode(book: &HashMap<[u8; 32], Expectation>) -> Vec<u8> {
 }
 
 fn decode(bytes: &[u8]) -> Result<HashMap<[u8; 32], Expectation>, io::Error> {
-    if bytes.len() < 5 || bytes[0] != VERSION {
+    let Some((&VERSION, rest)) = bytes.split_first() else {
         return Err(invalid("expectations: version"));
-    }
-    let count = u32::from_be_bytes(bytes[1..5].try_into().unwrap()) as usize;
-    let body = &bytes[5..];
+    };
+    let Some((count, body)) = rest.split_first_chunk::<4>() else {
+        return Err(invalid("expectations: version"));
+    };
+    let count = u32::from_be_bytes(*count) as usize;
     if body.len()
         != count
             .checked_mul(ENTRY_LEN)
@@ -86,10 +89,19 @@ fn decode(bytes: &[u8]) -> Result<HashMap<[u8; 32], Expectation>, io::Error> {
     }
     let mut book = HashMap::with_capacity(count);
     let mut last: Option<[u8; 32]> = None;
-    for i in 0..count {
-        let chunk = &body[i * ENTRY_LEN..(i + 1) * ENTRY_LEN];
-        let mut hash = [0u8; 32];
-        hash.copy_from_slice(&chunk[..32]);
+    for chunk in body.as_chunks::<ENTRY_LEN>().0 {
+        let entry = chunk.split_first_chunk::<32>().and_then(|(hash, rest)| {
+            let (fee, rest) = rest.split_first_chunk::<8>()?;
+            let expires = rest.first_chunk::<8>()?;
+            Some((
+                *hash,
+                u64::from_be_bytes(*fee),
+                u64::from_be_bytes(*expires),
+            ))
+        });
+        let Some((hash, max_fee_msat, expires_unix)) = entry else {
+            return Err(invalid("expectations: length"));
+        };
         // The blob is written in ascending order of hash, so a hash that is
         // not above the one before is a repeat or a blob not made here.
         if last.is_some_and(|l| hash <= l) {
@@ -99,8 +111,8 @@ fn decode(bytes: &[u8]) -> Result<HashMap<[u8; 32], Expectation>, io::Error> {
         book.insert(
             hash,
             Expectation {
-                max_fee_msat: u64::from_be_bytes(chunk[32..40].try_into().unwrap()),
-                expires_unix: u64::from_be_bytes(chunk[40..48].try_into().unwrap()),
+                max_fee_msat,
+                expires_unix,
             },
         );
     }
@@ -152,7 +164,7 @@ impl Expectations {
         now: u64,
     ) -> Result<(), io::Error> {
         let write = {
-            let mut book = self.book.lock().unwrap();
+            let mut book = self.book.lock_recover();
             drop_expired(&mut book, now);
             book.insert(payment_hash, expectation);
             KVStore::write(&*self.store, PRIMARY, "", KEY, encode(&book))
@@ -163,7 +175,7 @@ impl Expectations {
     /// Takes an invoice out (it is paid), the same way.
     pub async fn forget(&self, payment_hash: &[u8; 32], now: u64) -> Result<(), io::Error> {
         let write = {
-            let mut book = self.book.lock().unwrap();
+            let mut book = self.book.lock_recover();
             let removed = book.remove(payment_hash).is_some();
             let dropped = drop_expired(&mut book, now);
             if !removed && !dropped {
@@ -176,7 +188,7 @@ impl Expectations {
 
     /// Whether a payment of this hash, with this much skimmed, is claimed.
     pub fn judge(&self, payment_hash: &[u8; 32], skimmed_msat: u64, now: u64) -> Claim {
-        match self.book.lock().unwrap().get(payment_hash) {
+        match self.book.lock_recover().get(payment_hash) {
             None => Claim::Unknown,
             Some(e) if e.expires_unix <= now => Claim::Expired,
             Some(e) if skimmed_msat > e.max_fee_msat => Claim::SkimAboveMax,
@@ -186,7 +198,7 @@ impl Expectations {
 
     /// How many invoices are in the book.
     pub fn len(&self) -> usize {
-        self.book.lock().unwrap().len()
+        self.book.lock_recover().len()
     }
 
     /// Whether the book is empty.
@@ -379,5 +391,19 @@ mod tests {
         assert!(decode(&blob(&[1, 1])).is_err());
         assert!(decode(&blob(&[2, 1])).is_err());
         assert!(decode(&blob(&[1, 3, 2])).is_err());
+    }
+
+    /// What reads writes back to the same bytes: the blob of a book of any
+    /// size, and the empty one.
+    #[test]
+    fn sl_20_a_blob_that_reads_writes_back_to_the_same_bytes() {
+        for n in [0u8, 1, 2, 5] {
+            let mut book = HashMap::new();
+            for h in 0..n {
+                book.insert([h.wrapping_mul(37); 32], exp(u64::from(h) + 1, 9));
+            }
+            let bytes = encode(&book);
+            assert_eq!(encode(&decode(&bytes).unwrap()), bytes);
+        }
     }
 }

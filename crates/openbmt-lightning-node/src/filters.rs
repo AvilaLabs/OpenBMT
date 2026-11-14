@@ -37,6 +37,7 @@
 
 use crate::chain::{CoreFees, FilterWatcher};
 use crate::feehistory::FeeKeeper;
+use crate::locks::MutexExt;
 use bitcoin::block::Header;
 use bitcoin::consensus::deserialize;
 use bitcoin::{Block, BlockHash, Network, OutPoint, Script, ScriptBuf, Transaction, Txid};
@@ -96,20 +97,19 @@ pub struct FilterQueue {
 
 impl FilterQueue {
     fn take(&self) -> Vec<Registration> {
-        std::mem::take(&mut *self.queue.lock().unwrap())
+        std::mem::take(&mut *self.queue.lock_recover())
     }
 }
 
 impl FilterWatcher for FilterQueue {
     fn register_tx(&self, txid: &Txid, script_pubkey: &Script) {
         self.queue
-            .lock()
-            .unwrap()
+            .lock_recover()
             .push(Registration::Tx(*txid, script_pubkey.to_owned()));
     }
 
     fn register_output(&self, output: WatchedOutput) {
-        self.queue.lock().unwrap().push(Registration::Output {
+        self.queue.lock_recover().push(Registration::Output {
             block_hash: output.block_hash,
             outpoint: output.outpoint.into_bitcoin_outpoint(),
             script: output.script_pubkey,
@@ -430,27 +430,31 @@ impl Follower {
         for _ in 0..MAX_PASSES {
             // What the last delivery registered may be in this block too.
             self.drain_registrations();
-            let matched: Vec<(usize, &Transaction)> = block
+            let found: Vec<(usize, &Transaction, Txid)> = block
                 .txdata
                 .iter()
+                .zip(&ids)
                 .enumerate()
-                .filter(|(i, tx)| {
-                    !self.given.contains(&(hash, ids[*i]))
-                        && (self.txs.contains_key(&ids[*i])
+                .filter(|(_, (tx, id))| {
+                    !self.given.contains(&(hash, **id))
+                        && (self.txs.contains_key(*id)
                             || tx
                                 .input
                                 .iter()
                                 .any(|i| self.outputs.contains_key(&i.previous_output)))
                 })
+                .map(|(i, (tx, id))| (i, tx, *id))
                 .collect();
-            if matched.is_empty() {
+            if found.is_empty() {
                 break;
             }
-            for (i, _) in &matched {
-                self.given.insert((hash, ids[*i]));
+            for (_, _, id) in &found {
+                self.given.insert((hash, *id));
                 self.effects
-                    .push(Effect::Note(format!("given {} at {height}", ids[*i])));
+                    .push(Effect::Note(format!("given {id} at {height}")));
             }
+            let matched: Vec<(usize, &Transaction)> =
+                found.iter().map(|(i, tx, _)| (*i, *tx)).collect();
             for confirmable in &self.confirmables {
                 confirmable.transactions_confirmed(&block.header, &matched, height);
             }
@@ -512,11 +516,11 @@ pub struct HeaderTap {
 
 impl HeaderTap {
     fn put(&self, bytes: &[u8]) {
-        *self.latest.lock().unwrap() = Some(bytes.to_vec());
+        *self.latest.lock_recover() = Some(bytes.to_vec());
     }
 
     fn take(&self) -> Option<Vec<u8>> {
-        self.latest.lock().unwrap().take()
+        self.latest.lock_recover().take()
     }
 }
 

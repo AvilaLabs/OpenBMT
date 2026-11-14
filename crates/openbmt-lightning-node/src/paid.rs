@@ -99,29 +99,46 @@ fn decode(hash: [u8; 32], bytes: &[u8]) -> Result<Kept, io::Error> {
     if !ok {
         return Err(invalid("paid event"));
     }
+    // The lengths are checked above, so every field is there.
+    let fields = (|| {
+        Some((
+            be_u64(bytes, 1)?,
+            be_u64(bytes, 9)?,
+            *bytes.get(17)?,
+            be_u64(bytes, 18)?,
+            *bytes.get(26)?,
+            be_u64(bytes, 27)?,
+        ))
+    })();
+    let Some((amount, received, sender_flag, sender, acked_flag, acked)) = fields else {
+        return Err(invalid("paid event"));
+    };
     // A flag is 0 or 1, and with 0 its eight bytes are zero, so that the
     // bytes are the ones `encode` makes.
-    if bytes[17] > 1 || bytes[26] > 1 {
+    if sender_flag > 1 || acked_flag > 1 {
         return Err(invalid("paid event: flag"));
     }
-    if (bytes[17] == 0 && bytes[18..26] != [0; 8]) || (bytes[26] == 0 && bytes[27..35] != [0; 8]) {
+    if (sender_flag == 0 && sender != 0) || (acked_flag == 0 && acked != 0) {
         return Err(invalid("paid event: unused bytes"));
     }
-    let skimmed = bytes
-        .get(LEN_1..LEN)
-        .map_or(0, |b| u64::from_be_bytes(b.try_into().unwrap()));
-    let sender = u64::from_be_bytes(bytes[18..26].try_into().unwrap());
-    let acked = u64::from_be_bytes(bytes[27..35].try_into().unwrap());
+    let skimmed = be_u64(bytes, LEN_1).unwrap_or(0);
     Ok(Kept {
         record: PaidRecord {
             payment_hash: hash,
-            amount_msat: u64::from_be_bytes(bytes[1..9].try_into().unwrap()),
+            amount_msat: amount,
             skimmed_msat: skimmed,
-            received_unix: u64::from_be_bytes(bytes[9..17].try_into().unwrap()),
-            sender_intended_msat: (bytes[17] == 1).then_some(sender),
+            received_unix: received,
+            sender_intended_msat: (sender_flag == 1).then_some(sender),
         },
-        acked_unix: (bytes[26] == 1).then_some(acked),
+        acked_unix: (acked_flag == 1).then_some(acked),
     })
+}
+
+/// The eight bytes at `at` as a number, if they are there.
+fn be_u64(bytes: &[u8], at: usize) -> Option<u64> {
+    let end = at.checked_add(8)?;
+    let eight: [u8; 8] = bytes.get(at..end)?.try_into().ok()?;
+    Some(u64::from_be_bytes(eight))
 }
 
 /// The event read from `bytes` and written again, for the fuzz target: the
@@ -408,5 +425,33 @@ mod tests {
         });
         acked[30] = 1;
         assert!(decode([1; 32], &acked).is_err());
+    }
+
+    /// What reads writes back to the same bytes, in each of the four ways the
+    /// flags can be, and a version 1 blob is read and written as version 2.
+    #[test]
+    fn sl_21_an_event_that_reads_writes_back_to_the_same_bytes() {
+        for sender in [None, Some(7u64)] {
+            for acked_unix in [None, Some(9u64)] {
+                let kept = Kept {
+                    record: PaidRecord {
+                        sender_intended_msat: sender,
+                        ..rec(1, 5)
+                    },
+                    acked_unix,
+                };
+                let bytes = encode(&kept);
+                assert_eq!(encode(&decode([1; 32], &bytes).unwrap()), bytes);
+            }
+        }
+        let mut old = encode(&Kept {
+            record: rec(1, 5),
+            acked_unix: None,
+        });
+        old.truncate(LEN_1);
+        old[0] = VERSION_1;
+        let again = encode(&decode([1; 32], &old).unwrap());
+        assert_eq!(again[1..LEN_1], old[1..]);
+        assert_eq!(again[0], VERSION);
     }
 }

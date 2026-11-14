@@ -9,6 +9,7 @@
 //! of the two a node is given.
 
 use crate::filters::FilterConfig;
+use crate::locks::{MutexExt, RwLockExt};
 use crate::logger::Logger;
 use bitcoin::consensus::encode::serialize_hex;
 use bitcoin::{Script, Transaction, Txid};
@@ -62,14 +63,15 @@ fn base64(input: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
     for chunk in input.chunks(3) {
-        let n = (chunk[0] as u32) << 16
-            | (*chunk.get(1).unwrap_or(&0) as u32) << 8
-            | *chunk.get(2).unwrap_or(&0) as u32;
+        let at = |i: usize| *chunk.get(i).unwrap_or(&0) as u32;
+        let n = at(0) << 16 | at(1) << 8 | at(2);
         for i in 0..4 {
-            if i <= chunk.len() {
-                out.push(ALPHABET[(n >> (18 - 6 * i) & 63) as usize] as char);
-            } else {
-                out.push('=');
+            // The index is masked to 6 bits, so a letter is always found; the
+            // padding is also what a position past the chunk gets.
+            let letter = ALPHABET.get((n >> (18 - 6 * i) & 63) as usize);
+            match letter {
+                Some(&l) if i <= chunk.len() => out.push(l as char),
+                _ => out.push('='),
             }
         }
     }
@@ -97,19 +99,19 @@ pub struct ChainFilter {
 impl ChainFilter {
     /// Plugs in a compact-filter watcher.
     pub fn set_watcher(&self, watcher: Arc<dyn FilterWatcher>) {
-        *self.watcher.write().unwrap() = Some(watcher);
+        *self.watcher.write_recover() = Some(watcher);
     }
 }
 
 impl Filter for ChainFilter {
     fn register_tx(&self, txid: &Txid, script_pubkey: &Script) {
-        if let Some(w) = self.watcher.read().unwrap().as_ref() {
+        if let Some(w) = self.watcher.read_recover().as_ref() {
             w.register_tx(txid, script_pubkey);
         }
     }
 
     fn register_output(&self, output: WatchedOutput) {
-        if let Some(w) = self.watcher.read().unwrap().as_ref() {
+        if let Some(w) = self.watcher.read_recover().as_ref() {
             w.register_output(output);
         }
     }
@@ -175,7 +177,7 @@ impl BroadcasterInterface for CoreBroadcaster {
                 }
             }
             Via::Peers(sender) => {
-                let sender = sender.lock().unwrap();
+                let sender = sender.lock_recover();
                 for tx in txs {
                     let txid = tx.compute_txid();
                     match sender.send(bitcoin::consensus::encode::serialize(*tx)) {
@@ -236,7 +238,7 @@ impl CoreFees {
     /// Reads the rates from the samples of blocks, at this tip (SL-26a). A
     /// target the history cannot answer keeps the fixed rate.
     pub fn use_history(&self, history: FeeHistory, tip: u32) {
-        *self.history.write().unwrap() = Some((history, tip));
+        *self.history.write_recover() = Some((history, tip));
     }
 
     /// What the history says for a target, if it says anything: the recent
@@ -245,7 +247,7 @@ impl CoreFees {
     /// most a provider may set (FE-17). The lowest a provider may set is not
     /// read from it.
     fn rate_from_history(&self, target: ConfirmationTarget) -> Option<u32> {
-        let guard = self.history.read().unwrap();
+        let guard = self.history.read_recover();
         let (history, tip) = guard.as_ref()?;
         let recent = history.recent_rate(*tip);
         match target {

@@ -22,6 +22,7 @@ use crate::chain::{ChainFilter, ChainSource, CoreBroadcaster, CoreFees};
 use crate::device::{DeviceSnapshot, DeviceState, DeviceStatus, SecondDevice};
 use crate::expect::{Claim, Expectation, Expectations};
 use crate::filters::{Confirmable, FilterQueue, FilterRun, FilterStart, Follower, Progress};
+use crate::locks::MutexExt;
 use crate::logger::Logger;
 use crate::lsps1::{self, OrderBook, OrderRecord, OrderState, OrderWhy, Orders};
 use crate::paid::{PaidLog, PaidRecord};
@@ -390,6 +391,7 @@ fn now_secs() -> u64 {
 pub struct Node {
     shared: Arc<Shared>,
     paid_rx: tokio::sync::Mutex<mpsc::UnboundedReceiver<Paid>>,
+    node_id: PublicKey,
     tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     filters: Mutex<Option<FilterRun>>,
     processor: Mutex<Option<tokio::task::JoinHandle<Result<(), lightning::io::Error>>>>,
@@ -501,6 +503,9 @@ impl Node {
             now.subsec_nanos(),
             true,
         ));
+        let node_id = keys
+            .get_node_id(lightning::sign::Recipient::Node)
+            .map_err(|()| StartError::Setup("the node's own key".to_string()))?;
         let seal_key = SealKey::from_seed(&config.seed);
 
         // Chain data (SL-26).
@@ -1040,17 +1045,10 @@ impl Node {
             })
         };
 
-        logger.line(
-            Level::Info,
-            &format!(
-                "started, node id {}",
-                keys.get_node_id(lightning::sign::Recipient::Node)
-                    .map(|k| k.to_string())
-                    .unwrap_or_default()
-            ),
-        );
+        logger.line(Level::Info, &format!("started, node id {node_id}"));
         Ok(Node {
             shared,
+            node_id,
             paid_rx: tokio::sync::Mutex::new(paid_rx),
             tasks: Mutex::new(tasks),
             filters: Mutex::new(filter_run),
@@ -1060,10 +1058,7 @@ impl Node {
 
     /// The node's public key.
     pub fn node_id(&self) -> PublicKey {
-        self.shared
-            .keys
-            .get_node_id(lightning::sign::Recipient::Node)
-            .expect("the node's own key")
+        self.node_id
     }
 
     /// The next sale that is paid (SL-21). Events are given at least once: each
@@ -1395,8 +1390,8 @@ impl Node {
         self.shared.stop.notify_waiters();
         // `notify_waiters` wakes only those waiting now; keep telling until
         // the loops are done.
-        let tasks: Vec<_> = std::mem::take(&mut *self.tasks.lock().unwrap());
-        let processor = self.processor.lock().unwrap().take();
+        let tasks: Vec<_> = std::mem::take(&mut *self.tasks.lock_recover());
+        let processor = self.processor.lock_recover().take();
         for t in tasks {
             let _ = tokio::time::timeout(Duration::from_secs(5), t).await;
         }
@@ -1413,7 +1408,7 @@ impl Node {
             }
         }
         // The watcher's thread, and the driver with it, which saves its headers.
-        let filters = self.filters.lock().unwrap().take();
+        let filters = self.filters.lock_recover().take();
         if let Some(mut run) = filters {
             let _ = tokio::task::spawn_blocking(move || run.stop()).await;
         }
@@ -1434,7 +1429,7 @@ impl Shared {
         let handler = self.liquidity.lsps2_client_handler().ok_or(())?;
         let (tx, rx) = oneshot::channel();
         {
-            let mut waiters = self.waiters.lock().unwrap();
+            let mut waiters = self.waiters.lock_recover();
             let id =
                 handler.request_opening_params(self.provider.node_id, self.provider.token.clone());
             waiters.insert(id, Waiter::Params(tx));
@@ -1768,7 +1763,7 @@ impl Shared {
             .ok_or_else(|| InvoiceError::Provider("no handler".into()))?;
         let (tx, rx) = oneshot::channel();
         {
-            let mut waiters = self.waiters.lock().unwrap();
+            let mut waiters = self.waiters.lock_recover();
             let id = handler
                 .select_opening_params(
                     self.provider.node_id,
@@ -2037,7 +2032,7 @@ async fn lsps2_events(shared: Arc<Shared>) {
             }
             _ => continue,
         };
-        let mut waiters = shared.waiters.lock().unwrap();
+        let mut waiters = shared.waiters.lock_recover();
         match event {
             LSPS2ClientEvent::OpeningParametersReady {
                 request_id,
