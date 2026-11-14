@@ -159,9 +159,9 @@ order of the rules, so that the refusal names the first that fails.
   shown. A claim already sent has shown the preimage, and its spend has no
   timelock: it is built again at a higher fee (SW-46), or sent again after it
   left the chain, at and past the timeout too, until it or another spend of
-  the lockup is in a block. A swap is lost when its lockup is spent, in a
-  block of the best chain, by a transaction that is not one of the shop's
-  claims.
+  the lockup is in a block. A swap is lost when its lockup is spent, or
+  replaced, by a transaction that is not one of the shop's claims and that is
+  at the shop's refund depth in the best chain (CR-221).
 - **SW-45.** The claim is by the script path only. The cooperative key-path
   signature of MuSig2 is not built here: the packages the project allows
   have no MuSig2 signing code, and the one part of BIP 327 that is needed to
