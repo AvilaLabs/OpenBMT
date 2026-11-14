@@ -116,6 +116,8 @@ class FloatRecord(
     val watchFrom: Long = 0,
     /** FL-35: when the float was turned off, in seconds; the node keeps watching it for a day after. */
     val offAt: Long? = null,
+    /** FL-35: the move to savings had its confirmation but the float still held something; the key stays and the node keeps watching. */
+    val leftOver: Boolean = false,
 ) {
     init {
         require(watchFrom in 0..FloatLimits.MAX_INDEX) { "float watch height is outside the supported range" }
@@ -129,7 +131,7 @@ class FloatRecord(
     }
 
     fun text(): String = "cap-sats: $capSats\nreceive-index: $nextReceiveIndex\nchange-index: $nextChangeIndex\n" +
-        "state: ${state.name}\nchild-index: $childIndex\nwatch-from: $watchFrom\n" + (offAt?.let { "off-at: $it\n" } ?: "") + (pendingPayId?.let { "pending-pay-id: $it\n" } ?: "") +
+        "state: ${state.name}\nchild-index: $childIndex\nwatch-from: $watchFrom\n" + (offAt?.let { "off-at: $it\n" } ?: "") + (if (leftOver) "left-over: true\n" else "") + (pendingPayId?.let { "pending-pay-id: $it\n" } ?: "") +
         (pendingSweepId?.let { "pending-sweep-id: $it\n" } ?: "")
 
     companion object {
@@ -144,7 +146,7 @@ class FloatRecord(
                 val key = line.substring(0, split)
                 if (fields.put(key, line.substring(split + 2)) != null) throw IOException("the float record repeats a field")
             }
-            val allowed = setOf("cap-sats", "receive-index", "change-index", "state", "child-index", "watch-from", "off-at", "pending-pay-id", "pending-sweep-id")
+            val allowed = setOf("cap-sats", "receive-index", "change-index", "state", "child-index", "watch-from", "off-at", "left-over", "pending-pay-id", "pending-sweep-id")
             if (fields.keys.any { it !in allowed }) throw IOException("the float record has an unknown field")
             fun number(name: String, max: Long): Long = fields[name]?.toLongOrNull()
                 ?.takeIf { it in 0..max } ?: throw IOException("the float record has no valid $name")
@@ -161,6 +163,11 @@ class FloatRecord(
                     if (fields.containsKey("child-index")) number("child-index", FloatLimits.MAX_INDEX) else 0,
                     if (fields.containsKey("watch-from")) number("watch-from", FloatLimits.MAX_INDEX) else 0,
                     if (fields.containsKey("off-at")) number("off-at", Long.MAX_VALUE) else null,
+                    when (fields["left-over"]) {
+                        null -> false
+                        "true" -> true
+                        else -> throw IOException("the float record has no valid left-over")
+                    },
                 )
             } catch (e: IllegalArgumentException) {
                 throw IOException("the float record does not read", e)
@@ -196,14 +203,19 @@ class FloatStore(base: File) {
 
     /**
      * FL-03, FL-04: the last step of the setup. Only once the sealed seed and the wrapped key are both kept does the
-     * public wallet go down, and then the record, last, as Ready at child index [childIndex] with receive index 0:
-     * a Ready record never exists without its key.
+     * public wallet go down, and then the record, last, as Ready at child index [childIndex]: a Ready record never
+     * exists without its key. The indexes start at 0, except when the float is set up again after it was turned off with
+     * the same child index (or the same wallet): the former record's receive and change indexes are kept, never lowered,
+     * so no address is handed out twice (FL-04).
      */
     fun finishSetup(draft: FloatRecord, wallet: FloatWalletView, childIndex: Long = 0, watchFrom: Long = 0): FloatRecord {
         if (!hasSealed() || !hasWrapped()) throw IllegalStateException("the float's key is not kept yet")
         if (!dir.isDirectory && !dir.mkdirs()) throw IOException("the float folder could not be made")
+        val former = load()
+        val formerWallet = loadWallet()
+        val (receive, change) = FloatModel.setupIndexes(draft, former, formerWallet, wallet, childIndex)
         DurableFile.write(dir, File(dir, WALLET), "${wallet.description}\n${wallet.firstAddress}\n".toByteArray(Charsets.UTF_8))
-        val ready = FloatRecord(draft.capSats, 0, 0, null, null, FloatState.Ready, childIndex, watchFrom)
+        val ready = FloatRecord(draft.capSats, receive, change, null, null, FloatState.Ready, childIndex, watchFrom)
         save(ready)
         return ready
     }
@@ -220,7 +232,7 @@ class FloatStore(base: File) {
         require(capSats in 1..FloatLimits.MAX_SATS)
         val latest = current(record)
         val updated = FloatRecord(capSats, latest.nextReceiveIndex, latest.nextChangeIndex,
-            latest.pendingPayId, latest.pendingSweepId, latest.state, latest.childIndex, latest.watchFrom, latest.offAt)
+            latest.pendingPayId, latest.pendingSweepId, latest.state, latest.childIndex, latest.watchFrom, latest.offAt, latest.leftOver)
         save(updated)
         return updated
     }
@@ -246,13 +258,16 @@ class FloatStore(base: File) {
     }
 
     /**
-     * Mark disabled only after a known confirmation; an unknown depth never deletes the key. [now] is when the float went
-     * off: the node watches it for a day after that (FL-35).
+     * Mark disabled only after a known confirmation and a coin view that holds nothing at any depth; an unknown depth or an
+     * unavailable view never deletes the key. [now] is when the float went off: the node watches it for a day after that (FL-35).
      */
-    fun completeSweep(record: FloatRecord, confirmations: Long?, now: Long) {
-        if (!FloatModel.sweepMayDeleteWords(confirmations)) throw IllegalStateException("the float move is not confirmed")
-        save(copy(current(record), sweep = null, state = FloatState.Disabled, offAt = now))
+    fun completeSweep(record: FloatRecord, confirmations: Long?, view: FloatCoinView, now: Long) {
+        if (!FloatModel.sweepMayDeleteWords(confirmations, view)) throw IllegalStateException("the float move is not confirmed or the float is not empty")
+        save(copy(current(record), sweep = null, state = FloatState.Disabled, offAt = now, leftOver = false))
     }
+
+    /** FL-35: the move had its confirmation and the float still holds something: the move is done, the key stays, the watch goes on. */
+    fun markLeft(record: FloatRecord) = save(copy(current(record), sweep = null, leftOver = true))
 
     private fun current(fallback: FloatRecord): FloatRecord = load() ?: fallback
 
@@ -273,7 +288,8 @@ class FloatStore(base: File) {
             sweep: String? = record.pendingSweepId,
             state: FloatState = record.state,
             offAt: Long? = record.offAt,
-        ) = FloatRecord(record.capSats, receive, change, pay, sweep, state, record.childIndex, record.watchFrom, offAt)
+            leftOver: Boolean = record.leftOver,
+        ) = FloatRecord(record.capSats, receive, change, pay, sweep, state, record.childIndex, record.watchFrom, offAt, leftOver)
     }
 }
 
@@ -312,8 +328,36 @@ object FloatModel {
 
     fun feeRate(core: FloatCore, recent: Long?, typed: Long?): Long = core.feeRate(recent, typed)
 
-    /** Unknown and zero confirmations both fail closed. */
-    fun sweepMayDeleteWords(confirmations: Long?): Boolean = confirmations != null && confirmations >= 1
+    /** FL-35: what the float's coin view says is left once the move is made, at any depth. */
+    enum class Left { Nothing, Movable, Waiting, Unknown }
+
+    /** FL-35: nothing left, something a move can take now (a coin with a confirmation), only unconfirmed coins, or no view. */
+    fun left(view: FloatCoinView): Left {
+        if (view !is FloatCoinView.Checked) return Left.Unknown
+        if (view.coins.isEmpty() && view.confirmedSats == 0L && view.unconfirmedIncomingSats == 0L) return Left.Nothing
+        return if (view.confirmedSats > 0 || view.coins.any { it.confirmations >= 1 }) Left.Movable else Left.Waiting
+    }
+
+    /**
+     * FL-35: the key may be deleted only when the move has one confirmation and the coin view holds nothing else at any
+     * depth, unconfirmed included. Unknown and zero confirmations, and an unavailable view, all fail closed.
+     */
+    fun sweepMayDeleteWords(confirmations: Long?, view: FloatCoinView): Boolean =
+        confirmations != null && confirmations >= 1 && left(view) == Left.Nothing
+
+    /** FL-04: the indexes a setup starts at: the former record's when it was turned off with the same child index or wallet, else 0; never lower than the former's (a new float starts at 0 even from a draft that is the old record). */
+    fun setupIndexes(draft: FloatRecord, former: FloatRecord?, formerWallet: FloatWalletView?, wallet: FloatWalletView, childIndex: Long): Pair<Long, Long> {
+        if (former == null || former.state != FloatState.Disabled) return Pair(0L, 0L)
+        val same = former.childIndex == childIndex || formerWallet?.description == wallet.description
+        if (!same) return Pair(0L, 0L)
+        return Pair(maxOf(draft.nextReceiveIndex, former.nextReceiveIndex), maxOf(draft.nextChangeIndex, former.nextChangeIndex))
+    }
+
+    /** FL-04: the child index typed on the setup screen, a whole number within the unhardened range. */
+    fun childIndex(text: String): Long? = text.trim().takeIf { Regex("[0-9]{1,10}").matches(it) }?.toLongOrNull()?.takeIf { it in 0..FloatLimits.MAX_INDEX }
+
+    /** FL-04: the child index the setup screen starts from: the former float's, as turning off keeps it, else 0. */
+    fun suggestedChildIndex(record: FloatRecord?): Long = if (record != null && record.state == FloatState.Disabled) record.childIndex else 0
 
     /**
      * FL-20, SS-30: the queued refunds that are ready, as the starter wallet's list reads them: queued and not waiting
@@ -340,7 +384,7 @@ object FloatModel {
 
     /** Which buttons the float page enables, from what the phone knows. */
     fun actions(record: FloatRecord?, home: FloatHome, hasKey: Boolean, refunds: List<RefundRow>): FloatActions = FloatActions(
-        setup = record != null && record.state == FloatState.NeedsSetup,
+        setup = record != null && (record.state == FloatState.NeedsSetup || record.state == FloatState.Disabled),
         refill = canRefill(home),
         pay = refunds.any { canPay(home, hasKey, it) },
         sweep = canSweep(home, hasKey),
@@ -353,7 +397,7 @@ object FloatModel {
     /** The next free receive index after a refill was queued to [record]'s current one (FL-30): no address is used twice. */
     fun afterRefill(record: FloatRecord): FloatRecord =
         FloatRecord(record.capSats, record.nextReceiveIndex + 1, record.nextChangeIndex, record.pendingPayId,
-            record.pendingSweepId, record.state, record.childIndex, record.watchFrom, record.offAt)
+            record.pendingSweepId, record.state, record.childIndex, record.watchFrom, record.offAt, record.leftOver)
 
     /** FL-05: where each chain's watch ends, one past the last index used or handed out; the node adds 20 (FL-05). */
     fun watchEnds(record: FloatRecord): Pair<Long, Long> = Pair(record.nextReceiveIndex + 1, record.nextChangeIndex + 1)
@@ -365,7 +409,7 @@ object FloatModel {
     fun canRestore(record: FloatRecord?, wallet: FloatWalletView?): Boolean =
         record != null && record.state == FloatState.Ready && wallet != null
 
-    /** FL-35: how long the node keeps watching a float that was turned off, in seconds. */
+    /** FL-35: how long the node keeps watching a float that was turned off, in seconds; while the record says something is left it keeps watching. */
     const val WATCH_AFTER_OFF_SECS = 86_400L
 
     /**
@@ -377,7 +421,7 @@ object FloatModel {
         if (record == null || wallet == null) return null
         val live = when (record.state) {
             FloatState.Ready -> true
-            FloatState.Disabled -> record.offAt != null && now < record.offAt + WATCH_AFTER_OFF_SECS
+            FloatState.Disabled -> record.leftOver || (record.offAt != null && now < record.offAt + WATCH_AFTER_OFF_SECS)
             FloatState.NeedsSetup -> false
         }
         if (!live) return null

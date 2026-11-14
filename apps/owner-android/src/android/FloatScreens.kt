@@ -227,19 +227,34 @@ private fun Controller.showFloatSetup(notice: View? = null) {
     body.add(ui.text(FloatWords.childIndex))
     body.add(ui.text(FloatWords.nextIndex))
     if (record == null) body.add(ui.text(FloatWords.needCapFirst))
-    val scanButton = ui.primary(FloatWords.scanChild) { if (record != null) floatScan(store, record) }
+    // FL-04: the phone remembers the index of the float it had, so it can say which number the stick makes next.
+    if (record != null && record.state != FloatState.NeedsSetup) {
+        body.add(ui.labelled(FloatWords.indexRemembered, ui.text(record.childIndex.toString())))
+        body.add(ui.labelled(FloatWords.indexNext, ui.text((record.childIndex + 1).toString())))
+    }
+    val index = ui.field(FloatWords.indexLabel).also {
+        it.inputType = InputType.TYPE_CLASS_NUMBER
+        it.setText(FloatModel.suggestedChildIndex(record).toString())
+    }
+    body.add(ui.labelled(FloatWords.indexLabel, index))
+    val note = Slot(act)
+    body.add(note)
+    val scanButton = ui.primary(FloatWords.scanChild) {
+        val typed = FloatModel.childIndex(index.text.toString())
+        if (typed == null) note.show(ui.text(FloatWords.indexInvalid)) else if (record != null) floatScan(store, record, typed)
+    }
     scanButton.isEnabled = actions.setup
     floatWordsScreen(FloatWords.setupTitle, body, listOf(scanButton, ui.button(FloatWords.back) { showFloat() }), back = { showFloat() })
 }
 
 /** FL-01: the camera reads one plain code; its bytes go to the library and are not kept here. */
-private fun Controller.floatScan(store: FloatStore, draft: FloatRecord) {
+private fun Controller.floatScan(store: FloatStore, draft: FloatRecord, childIndex: Long) {
     scan.begin(
         show = { v ->
             showScan(v)
             WindowGuard.protect(act, act.window.decorView)
         },
-        onBytes = { bytes -> floatSeal(store, draft, bytes) },
+        onBytes = { bytes -> floatSeal(store, draft, childIndex, bytes) },
         onFailed = { showFloatSetup(ui.text(FloatWords.scanFailed)) },
         onCancel = { showFloatSetup() },
     )
@@ -248,9 +263,9 @@ private fun Controller.floatScan(store: FloatStore, draft: FloatRecord) {
 /**
  * FL-03, FL-04: the library turns the scan into the seed and seals it. The order is fixed: the sealed seed is kept, the data
  * key is wrapped by the Keystore key (after the owner proves they are there) and kept, and only then the public wallet and the
- * record, as Ready at index 0. Whatever fails before that leaves no key and no Ready record behind.
+ * record, as Ready at the typed child index. Whatever fails before that leaves no key and no Ready record behind.
  */
-private fun Controller.floatSeal(store: FloatStore, draft: FloatRecord, scanned: ByteArray) {
+private fun Controller.floatSeal(store: FloatStore, draft: FloatRecord, childIndex: Long, scanned: ByteArray) {
     val sealed = try {
         LibraryFloat.seal(scanned)
     } catch (e: OwnerException) {
@@ -276,7 +291,7 @@ private fun Controller.floatSeal(store: FloatStore, draft: FloatRecord, scanned:
             return@starterWrapKey showFloatSetup(ui.text(FloatWords.sealFailed))
         }
         try {
-            store.finishSetup(draft, sealed.wallet, 0, watchFrom())
+            store.finishSetup(draft, sealed.wallet, childIndex, watchFrom())
             // The node watches the float from its next start (FL-05).
             stopNode()
             startNode()
@@ -437,15 +452,19 @@ private fun Controller.showFloatSweep() {
     val record = try { store.load() } catch (_: IOException) { return floatReadFailed() }
     if (record?.pendingSweepId != null) return showFloatSweepDelete()
     val n = node ?: return begin()
-    val home = FloatModel.home(floatCore(), record)
+    val view = floatCore().coinView()
+    val home = FloatModel.home(floatCore(), record, view)
     val actions = FloatModel.actions(record, home, store.hasSealed(), emptyList())
+    val left = FloatModel.left(view)
     val msg = Slot(act)
     val body = ArrayList<View>()
     body.add(ui.text(if (home.heldSats == null) FloatWords.sweepConfirmationsUnknown else FloatWords.sweepBefore))
     if (home.state == FloatState.Ready && home.heldSats == 0L) body.add(ui.text(FloatWords.sweepNothing))
+    // FL-35: something was left after the first move; a coin without a confirmation waits for one before a move can take it.
+    if (record?.leftOver == true) body.add(ui.text(if (left == FloatModel.Left.Waiting) FloatWords.sweepLeftWaiting else FloatWords.sweepLeftMovable))
     body.add(msg)
-    val sweep = ui.primary(FloatWords.sweepConfirm) { if (record != null) floatSweepConfirm(n, store, record) }
-    sweep.isEnabled = actions.sweep
+    val sweep = ui.primary(if (record?.leftOver == true) FloatWords.sweepMoveRest else FloatWords.sweepConfirm) { if (record != null) floatSweepConfirm(n, store, record) }
+    sweep.isEnabled = actions.sweep && left != FloatModel.Left.Waiting
     screen(FloatWords.sweepTitle, body, listOf(sweep, ui.button(FloatWords.back) { showFloat() }), back = { showFloat() }, guard = true)
 }
 
@@ -497,18 +516,41 @@ private fun Controller.showFloatSweepDelete() {
     } catch (_: OwnerException) {
         null
     }
-    val ready = FloatModel.sweepMayDeleteWords(confirmations)
+    // FL-35: the key goes only when the move has its confirmation and the float's coin view holds nothing else at any depth.
+    val view = floatCore().coinView()
+    val left = FloatModel.left(view)
+    val ready = FloatModel.sweepMayDeleteWords(confirmations, view)
+    val moved = confirmations != null && confirmations >= 1
     val views = ArrayList<View>()
     views.add(ui.text(txid, 14f, mono = true))
-    views.add(ui.text(if (confirmations == null) FloatWords.sweepDepthUnknown else FloatWords.sweepWaiting, 16f))
+    views.add(ui.text(when {
+        confirmations == null -> FloatWords.sweepDepthUnknown
+        !moved -> FloatWords.sweepWaiting
+        left == FloatModel.Left.Unknown -> FloatWords.sweepViewUnknown
+        left == FloatModel.Left.Waiting -> FloatWords.sweepLeftWaiting
+        left == FloatModel.Left.Movable -> FloatWords.sweepLeftMovable
+        else -> FloatWords.sweepWaiting
+    }, 16f))
     val actions = ArrayList<android.widget.Button>()
+    if (moved && (left == FloatModel.Left.Movable || left == FloatModel.Left.Waiting)) {
+        // The first move is done; what is left is moved by another one, the same path, once it has its confirmation.
+        actions.add(ui.primary(FloatWords.sweepMoveRest) {
+            try {
+                store.markLeft(record)
+                floatWatchRaise(store)
+                showFloatSweep()
+            } catch (_: IOException) {
+                showFloat(FloatWords.storageUnavailable)
+            }
+        })
+    }
     if (ready) {
         actions.add(
             ui.danger(StarterWords.deleteButton) {
                 try {
                     store.deleteKey()
                     floatKeystore().delete()
-                    store.completeSweep(record, confirmations, nowSecs())
+                    store.completeSweep(record, confirmations, view, nowSecs())
                     centre(
                         StarterWords.said(FloatWords.sweepDeletedHeading, FloatWords.sweepDeletedWhat, FloatWords.sweepDeletedNext, Tones.GOOD),
                         listOf(ui.primary(StarterWords.doneButton) { showFloat() }), title = FloatWords.rowTitle,

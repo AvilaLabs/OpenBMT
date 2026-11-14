@@ -57,6 +57,24 @@ object FloatWords {
     val restoreDone = "The float's key is back on this phone. Refunds can be paid from the float again."
     val restoreNeedsFloat = "This phone has no record of the float to bring its key into. Set the float up again from its page."
 
+    // FL-35, FL-04: not written yet. Each is a placeholder that shows its own name where the words will be.
+    /** FL-35: the move had its confirmation, but the float still holds a coin a move can take; the key stays on the phone. */
+    val sweepLeftMovable = "WORDS_NEEDED_FL35_LEFT_MOVABLE"
+    /** FL-35: the float still holds only coins that have no confirmation yet; the key stays, and the next move waits for one. */
+    val sweepLeftWaiting = "WORDS_NEEDED_FL35_LEFT_WAITING"
+    /** FL-35: the move had its confirmation, but what the float holds is not known (no coin view), so the key is not deleted. */
+    val sweepViewUnknown = "WORDS_NEEDED_FL35_VIEW_UNKNOWN"
+    /** FL-35: the button that signs another move for what was left. */
+    val sweepMoveRest = "WORDS_NEEDED_FL35_MOVE_REST"
+    /** FL-04: label of the field for the number of the float's words on the stick. */
+    val indexLabel = "WORDS_NEEDED_FL04_INDEX_LABEL"
+    /** FL-04: the number typed is not a whole number in range. */
+    val indexInvalid = "WORDS_NEEDED_FL04_INDEX_INVALID"
+    /** FL-04: label of the number the phone remembers for the float it had (same words again). */
+    val indexRemembered = "WORDS_NEEDED_FL04_INDEX_REMEMBERED"
+    /** FL-04: label of the number to make on the stick for a new float (the remembered one plus one). */
+    val indexNext = "WORDS_NEEDED_FL04_INDEX_NEXT"
+
     /** Every text, in screen order. */
     fun all(): List<String> = listOf(
         rowTitle,
@@ -108,8 +126,16 @@ object FloatWords {
         restoreWhat,
         restoreDone,
         restoreNeedsFloat,
+        sweepLeftMovable,
+        sweepLeftWaiting,
+        sweepViewUnknown,
+        sweepMoveRest,
+        indexLabel,
+        indexInvalid,
+        indexRemembered,
+        indexNext,
     )
 
-    /** FL-06: the texts not written yet, each named after its rule. */
+    /** The texts not written yet, each named after its rule. */
     fun placeholders(): List<String> = all().filter { it.startsWith("WORDS_NEEDED_") }
 }

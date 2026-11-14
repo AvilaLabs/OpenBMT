@@ -4419,6 +4419,35 @@ object AppModelTest {
         val offActions = FloatModel.actions(off, home(off, 10_000), true, queue)
         ok(!offActions.pay && !offActions.sweep && !offActions.refill, "a float that is off enables nothing")
 
+        // FL-35: the watch goes on while the record says something is left.
+        val wv = FloatWalletView("d", "a")
+        ok(FloatModel.watch(FloatRecord(100_000, state = FloatState.Disabled, offAt = 1, leftOver = true), wv, 0, 1 + FloatModel.WATCH_AFTER_OFF_SECS * 30) != null && FloatModel.watch(FloatRecord(100_000, state = FloatState.Disabled, offAt = 1), wv, 0, 1 + FloatModel.WATCH_AFTER_OFF_SECS * 30) == null, "FL-35: a float with something left is watched after the day, one with nothing left is not")
+        ok(FloatRecord.parse("cap-sats: 5\nreceive-index: 2\nchange-index: 1\nstate: Disabled\nchild-index: 3\noff-at: 9\n").let { !it.leftOver && it.nextReceiveIndex == 2L && it.childIndex == 3L }, "FL-04: an older record text without the new field still reads")
+
+        // FL-04: setting up again after turning off.
+        run {
+            val d2 = tempDir()
+            try {
+                val st = FloatStore(d2)
+                st.saveSealed(byteArrayOf(1)); st.saveWrapped(byteArrayOf(2))
+                val w = FloatWalletView("desc-A", "addr")
+                st.finishSetup(draft, w, 4)
+                st.save(FloatRecord(100_000, 6, 3, null, null, FloatState.Ready, 4, 0))
+                st.completeSweep(st.load()!!, 1, FloatCoinView.Checked(emptyList(), 0, 0), 5)
+                val again = st.finishSetup(st.load()!!, w, 4)
+                ok(again.state == FloatState.Ready && again.nextReceiveIndex == 6L && again.nextChangeIndex == 3L && again.childIndex == 4L && st.load()!!.nextReceiveIndex == 6L, "FL-04: setting up again with the same index keeps the next receive and change indexes")
+                st.completeSweep(again, 1, FloatCoinView.Checked(emptyList(), 0, 0), 6)
+                val fresh = st.finishSetup(st.load()!!, FloatWalletView("desc-B", "addr2"), 5)
+                ok(fresh.nextReceiveIndex == 0L && fresh.nextChangeIndex == 0L && fresh.childIndex == 5L, "FL-04: a new index (a new float) starts at 0")
+                ok(FloatModel.setupIndexes(FloatRecord(1, 2, 2), FloatRecord(1, 6, 3, state = FloatState.Disabled, childIndex = 4), null, w, 4) == Pair(6L, 3L) && FloatModel.setupIndexes(FloatRecord(1, 9, 9), FloatRecord(1, 6, 3, state = FloatState.Disabled, childIndex = 4), null, w, 4) == Pair(9L, 9L), "FL-04: the indexes are never lowered")
+                ok(FloatModel.childIndex("4") == 4L && FloatModel.childIndex(" 0 ") == 0L && listOf("", "-1", "x", "2147483648", "1.5").all { FloatModel.childIndex(it) == null }, "FL-04: the child index typed is a whole number in range")
+                ok(FloatModel.suggestedChildIndex(FloatRecord(1, childIndex = 4, state = FloatState.Disabled)) == 4L && FloatModel.suggestedChildIndex(null) == 0L, "FL-04: the setup starts from the former float's index")
+                ok(FloatModel.actions(FloatRecord(1, state = FloatState.Disabled), FloatHome(FloatState.Disabled, null, null, null, ""), false, emptyList()).setup, "FL-04: a float that is off can be set up again")
+            } finally {
+                d2.deleteRecursively()
+            }
+        }
+
         // FL-03, FL-04: the write order of the setup.
         val dir = tempDir()
         try {
@@ -4436,7 +4465,7 @@ object AppModelTest {
             ok(store.loadWallet()!!.description == "descriptor-text" && store.loadWallet()!!.firstAddress == "bc1qfirst", "the public wallet is kept with the record")
             ok(FloatStore.DIR != StarterStore.DIR && FloatStore.KEY_ALIAS != StarterStore.KEY_ALIAS && store.dir.name == FloatStore.DIR, "the float keeps its seal and its Keystore key apart from the starter wallet's")
             ok(store.loadSealed()!!.contentEquals(byteArrayOf(1, 2, 3)) && File(store.dir, StarterStore.SEALED).isFile && File(store.dir, StarterStore.WRAPPED).isFile, "the sealed seed and the wrapped key are kept as the starter wallet keeps them")
-            ok(File(store.dir, FloatStore.RECORD).readText().lines().all { it.substringBefore(": ") in setOf("cap-sats", "receive-index", "change-index", "state", "child-index", "watch-from", "off-at", "") }, "the record holds no key material")
+            ok(File(store.dir, FloatStore.RECORD).readText().lines().all { it.substringBefore(": ") in setOf("cap-sats", "receive-index", "change-index", "state", "child-index", "watch-from", "off-at", "left-over", "") }, "the record holds no key material")
             store.deleteKey()
             ok(!store.hasSealed() && !store.hasWrapped() && store.load() != null, "deleting the key leaves the public record")
             // An older record without a child index reads as index 0.
@@ -4506,7 +4535,9 @@ object AppModelTest {
         ok(screens.contains("n.floatPay(sealed, key,") && screens.contains("n.floatSweep(sealed, key,") && screens.contains("n.floatSend(paid.tx, listOf(r.id), false)") && screens.contains("n.floatSend(paid.tx, emptyList(), true)"), "paying and turning off sign from the sealed seed and go through the node's outbox")
         ok(screens.contains("keystore = floatKeystore()") && screens.contains("loadWrapped = { store.loadWrapped() }"), "the unlock uses the float's own Keystore key and wrapped key")
         ok(screens.indexOf("store.pendingSweep(record, paid.txid)") < screens.indexOf("n.floatSend(paid.tx, emptyList(), true)"), "the move is recorded before the outbox takes it")
-        ok(screens.indexOf("store.deleteKey()") < screens.indexOf("store.completeSweep(") && screens.contains("FloatModel.sweepMayDeleteWords(confirmations)") && screens.contains("n.starterConfirmations(txid)"), "the key is deleted only after the move has a known confirmation")
+        ok(screens.indexOf("store.deleteKey()") < screens.indexOf("store.completeSweep(") && screens.contains("FloatModel.sweepMayDeleteWords(confirmations, view)") && screens.contains("store.completeSweep(record, confirmations, view, nowSecs())") && screens.contains("n.starterConfirmations(txid)"), "the key is deleted only after the move has a known confirmation and the float's coin view holds nothing (FL-35)")
+        ok(screens.contains("FloatWords.sweepLeftMovable") && screens.contains("FloatWords.sweepLeftWaiting") && screens.contains("FloatWords.sweepViewUnknown") && screens.contains("store.markLeft(record)") && screens.contains("FloatWords.sweepMoveRest") && screens.indexOf("val view = floatCore().coinView()", screens.indexOf("private fun Controller.showFloatSweepDelete")) > 0, "the delete screen says what is left or that the view is unknown and offers another move (FL-35)")
+        ok(screens.contains("FloatModel.childIndex(index.text.toString())") && screens.contains("store.finishSetup(draft, sealed.wallet, childIndex, watchFrom())") && !screens.contains("finishSetup(draft, sealed.wallet, 0"), "the setup records the child index typed, not always 0, and says which one the phone remembers (FL-04)")
         // FL-06: the float's words scanned again bring the key back.
         ok(screens.contains("FloatModel.canRestore(record, wallet)") && screens.contains("floatRestoreScan(store, wallet)"), "the page that says the key is gone offers to scan the float's words again when the phone has the float's record and wallet (FL-06)")
         ok(screens.contains("LibraryFloat.restore(scanned, wallet.description)") && !screens.contains("OwnerFloat.restore(") && screens.indexOf("private fun Controller.floatRestoreScan") < screens.indexOf("private fun Controller.floatRestoreSeal"), "the scan goes to the library as bytes with the recorded description and no words are made as text (FL-06)")
@@ -4948,12 +4979,30 @@ object AppModelTest {
 
             val waiting = FloatRecord(120_000, 7, 9, payId, sweepId, FloatState.Ready)
             for (depth in listOf(null, 0L)) {
-                val refused = runCatching { store.completeSweep(waiting, depth, 1_000) }.exceptionOrNull()
+                val refused = runCatching { store.completeSweep(waiting, depth, FloatCoinView.Checked(emptyList(), 0, 0), 1_000) }.exceptionOrNull()
                 val persisted = store.load()!!
                 ok(refused is IllegalStateException && persisted.state == FloatState.Ready && persisted.pendingSweepId == sweepId, "an unknown or zero-confirmation sweep does not disable the float")
             }
-            store.completeSweep(waiting, 1, 1_000)
-            ok(store.load()!!.state == FloatState.Disabled && store.load()!!.pendingSweepId == null && store.load()!!.offAt == 1_000L, "a confirmed sweep can mark the float disabled and records when (FL-35)")
+            // FL-35: the key may go only with the move confirmed AND nothing else in the float's view at any depth.
+            val coin = { conf: Long -> FloatCoin(ByteArray(32), 0, ByteArray(0), false, 0, conf) }
+            val left = FloatCoinView.Checked(listOf(coin(3)), 5_000, 0)
+            val leftWaiting = FloatCoinView.Checked(listOf(coin(0)), 0, 5_000)
+            val leftOnlyNumber = FloatCoinView.Checked(emptyList(), 0, 700)
+            for ((name, v) in listOf("a confirmed coin" to left, "an unconfirmed coin" to leftWaiting, "unconfirmed sats alone" to leftOnlyNumber, "no coin view" to FloatCoinView.Unavailable)) {
+                val refused = runCatching { store.completeSweep(waiting, 1, v, 1_000) }.exceptionOrNull()
+                val persisted = store.load()!!
+                ok(refused is IllegalStateException && persisted.state == FloatState.Ready && persisted.pendingSweepId == sweepId, "FL-35: the key is not deleted while $name is in the float's view")
+                ok(!FloatModel.sweepMayDeleteWords(1, v) && !FloatModel.sweepMayDeleteWords(null, v) && !FloatModel.sweepMayDeleteWords(0, v), "FL-35: $name never allows the deletion")
+            }
+            ok(FloatModel.left(left) == FloatModel.Left.Movable && FloatModel.left(leftWaiting) == FloatModel.Left.Waiting && FloatModel.left(FloatCoinView.Unavailable) == FloatModel.Left.Unknown && FloatModel.left(FloatCoinView.Checked(emptyList(), 0, 0)) == FloatModel.Left.Nothing, "FL-35: what is left is told as movable now, waiting for a confirmation, unknown or nothing")
+            ok(FloatModel.sweepMayDeleteWords(1, FloatCoinView.Checked(emptyList(), 0, 0)) && !FloatModel.sweepMayDeleteWords(0, FloatCoinView.Checked(emptyList(), 0, 0)), "FL-35: an empty view and one confirmation allow the deletion")
+            store.markLeft(waiting)
+            val marked = store.load()!!
+            ok(marked.leftOver && marked.state == FloatState.Ready && marked.pendingSweepId == null && FloatRecord.parse(marked.text()).leftOver, "FL-35: a move with something left is marked done, the float stays on and the mark is kept in the record")
+            store.save(waiting)
+            store.completeSweep(waiting, 1, FloatCoinView.Checked(emptyList(), 0, 0), 1_000)
+            ok(store.load()!!.state == FloatState.Disabled && store.load()!!.pendingSweepId == null && store.load()!!.offAt == 1_000L && !store.load()!!.leftOver, "a confirmed sweep of an empty float can mark the float disabled and records when (FL-35)")
+            ok(store.load()!!.nextReceiveIndex == 7L && store.load()!!.nextChangeIndex == 9L && store.load()!!.childIndex == 0L, "turning off keeps the indexes in the record (FL-04)")
 
             File(store.dir, FloatStore.RECORD).writeText("cap-sats: nope\nstate: Ready\n")
             throws("a malformed float store record") { store.load() }
@@ -4964,8 +5013,8 @@ object AppModelTest {
         }
 
         val words = FloatWords.all()
-        ok(words.size == 49 && words.toSet().size == words.size, "each float text is written once")
+        ok(words.size == 57 && words.toSet().size == words.size, "each float text is written once")
         ok(words.none { it.isBlank() }, "no float text is empty")
-        ok(FloatWords.placeholders().isEmpty(), "every float text is written")
+        ok(FloatWords.placeholders().toSet() == setOf("WORDS_NEEDED_FL35_LEFT_MOVABLE", "WORDS_NEEDED_FL35_LEFT_WAITING", "WORDS_NEEDED_FL35_VIEW_UNKNOWN", "WORDS_NEEDED_FL35_MOVE_REST", "WORDS_NEEDED_FL04_INDEX_LABEL", "WORDS_NEEDED_FL04_INDEX_INVALID", "WORDS_NEEDED_FL04_INDEX_REMEMBERED", "WORDS_NEEDED_FL04_INDEX_NEXT"), "the float texts not written yet are the eight placeholders named after their rules")
     }
 }
