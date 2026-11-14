@@ -169,14 +169,14 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   **[to tune]**, it is lost and the money in the channel may never come. The
   node then closes that channel by force at once, so nothing more comes
   through it. Each sale paid at once through it, or accepted by a person
-  (CR-20), is a cancel, as CR-14 says: the alarm, the pause, "Do not hand
-  over" on its screen, and the POS told it is unpaid (CR-30). A sale still
-  waiting for that funding is told so, and a manager can still accept it. A
-  later payment through a funding already lost is never paid at once. The
-  counter tells the manager, and the owner phone lists the sales paid through
-  it: the first 64 by number, and the count of all. If a write fails partway
-  through, what was recorded before it is still reported, and the rest is
-  tried again.
+  (CR-20) before any of its fundings was lost, is a cancel, as CR-14 says: the
+  alarm, the pause, "Do not hand over" on its screen, and the POS told it is
+  unpaid (CR-30). A sale still waiting for that funding is told so, and a
+  manager can still accept it. A later payment through a funding already lost
+  is never paid at once. The counter tells the manager, and the owner phone
+  lists the sales paid through it: the first 64 by number, and the count of
+  all. If a write fails partway through, what was recorded before it is still
+  reported, and the rest is tried again.
 
 ## 5. The provider
 

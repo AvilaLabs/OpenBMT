@@ -191,7 +191,12 @@ carries two texts: why it is in this state, and what happens next (§2.6).
   shows paid, and a loss after it (a funding lost, a lockup spent, a claim
   that left the chain) is a cancel (CR-14). What took the sale back before the
   override is not held against it, so a sale accepted after its lockup was
-  spent is not cancelled again for that same spend.
+  spent is not cancelled again for that same spend. A person who accepts a
+  Lightning sale with a funding of its payment lost has accepted that payment
+  as it is: no loss of its fundings is a cancel after that, and cash still
+  waits for them (CR-71). For a swap sale a person accepted, only a claim out
+  of the chain is a loss; a claim that falls back to fewer blocks but stays in
+  one is not.
 - **CR-21.** A cashier's override is refused above the per-sale instant
   limit, and when it would take that cashier's overrides of the last 24
   hours past the cashier's daily cap. A manager's is refused when it
@@ -1729,8 +1734,12 @@ own, as the driver of section 12 has none.
   that spend. If that block leaves the chain and the claim is in a block, the
   sale is paid again, and the alarm stays for the owner. A claim that leaves
   the chain after a person accepted the sale is a cancel in the same way, and
-  the sale is paid again when the claim is back in a block. The swap is lost
-  only when that spend is at the shop's refund depth:
+  the sale is paid again when the claim is back in a block. After a restart
+  such a sale stays taken back until the node tells where the claim is. A
+  spend the node tells before the payment is recorded takes the sale back as
+  soon as it is: no alarm, since it was never shown paid, and nothing counted
+  in the exposure ledger. A spend the counter could not store is told again.
+  The swap is lost only when that spend is at the shop's refund depth:
   `Counter::swap_cancelled` then makes the cancel final, with no second alarm
   or record, and tells the POS unpaid (CR-30). A sale paid at once whose swap
   fails before the claim is a cancel in the same way. One not yet reported
