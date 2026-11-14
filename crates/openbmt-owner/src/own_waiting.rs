@@ -16,7 +16,9 @@
 //! state without them completes it from the file (OA-119). It is read
 //! strictly: what decodes encodes to the same bytes.
 
-use openbmt_core::approval::{classify, confirm_words, ChangeClass, CounterConfirmation};
+use openbmt_core::approval::{
+    classify, confirm_words, drops_last_counter, ChangeClass, CounterConfirmation,
+};
 use openbmt_core::confirmed::ConfirmedSettings;
 use openbmt_core::identity::DeviceId;
 use openbmt_core::settings::{changed_fields, Change, Settings, SignedSettings};
@@ -113,7 +115,10 @@ impl WaitingChange {
     pub fn loosened_fields(&self, current: &Settings) -> Vec<&'static str> {
         changed_fields(current, &self.signed.settings)
             .into_iter()
-            .filter(|c| c.direction == Change::Loosening)
+            .filter(|c| {
+                c.direction == Change::Loosening
+                    || (c.field == "counters" && drops_last_counter(current, &self.signed.settings))
+            })
             .map(|c| c.field)
             .collect()
     }

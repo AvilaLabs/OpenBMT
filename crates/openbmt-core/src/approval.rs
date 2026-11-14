@@ -49,12 +49,24 @@ pub enum ChangeClass {
 pub fn classify(old: &Settings, new: &Settings) -> ChangeClass {
     let mut class = ChangeClass::Free;
     for c in changed_fields(old, new) {
-        if c.direction != Change::Loosening {
+        // The last counter's removal tightens by direction but is
+        // classified as a loosening (AP-12).
+        if c.direction != Change::Loosening
+            && !(c.field == "counters" && drops_last_counter(old, new))
+        {
             continue;
         }
         class = class.max(field_class(old, new, c.field));
     }
     class
+}
+
+/// AP-12: the change leaves the settings with no counter while the settings
+/// in force name at least one. Without this, a counter in force could be
+/// removed for free and the next counter added for free, so a key held by
+/// the owner phone alone would become the one that confirms.
+pub fn drops_last_counter(old: &Settings, new: &Settings) -> bool {
+    !old.counters.is_empty() && new.counters.is_empty()
 }
 
 /// The class of one field that loosens (AP-01): what [`classify`] takes it
@@ -78,6 +90,8 @@ pub fn field_class(old: &Settings, new: &Settings, field: &str) -> ChangeClass {
         // AP-12: while the settings in force name no counter, counters added
         // with their shares are Free: no counter can confirm the change.
         "counters" if old.counters.is_empty() => ChangeClass::Free,
+        // AP-12: the last counter in force confirms its own removal.
+        "counters" if drops_last_counter(old, new) => ChangeClass::Loosen,
         "devices"
             if old.counters.is_empty()
                 && new.devices.difference(&old.devices).all(|d| {
@@ -704,6 +718,74 @@ mod tests {
         new.devices.insert(c);
         new.counters.insert(c, 10_000);
         assert_eq!(classify(&old, &new), ChangeClass::Free);
+    }
+
+    #[test]
+    fn ap_12_removing_the_last_counter_is_loosen_and_the_three_step_attack_stops_at_step_one() {
+        let c = identity(41).device_id();
+        let mut old = base();
+        old.devices.insert(c);
+        old.counters.insert(c, 10_000);
+        // Step 1: every counter removed.
+        let mut step1 = next(&old);
+        step1.counters.clear();
+        assert_eq!(classify_change(&old, &step1), Change::Tightening);
+        assert_eq!(classify(&old, &step1), ChangeClass::Loosen);
+        // Removing the counter's device with it is the same.
+        step1.devices.remove(&c);
+        assert_eq!(classify(&old, &step1), ChangeClass::Loosen);
+        // Step 2, taken from the no-counter settings, would be Free by the
+        // first counter rule; it is only reachable through a confirmation.
+        let mut step2 = next(&step1);
+        let x = identity(66).device_id();
+        step2.devices.insert(x);
+        step2.counters.insert(x, 10_000);
+        assert_eq!(classify(&step1, &step2), ChangeClass::Free);
+    }
+
+    #[test]
+    fn ap_12_removing_one_of_two_counters_is_free() {
+        let (c1, c2) = (identity(41).device_id(), identity(42).device_id());
+        let mut old = base();
+        old.devices.extend([c1, c2]);
+        old.counters.insert(c1, 5_000);
+        old.counters.insert(c2, 5_000);
+        let mut new = next(&old);
+        new.counters.remove(&c2);
+        assert_eq!(classify(&old, &new), ChangeClass::Free);
+        new.devices.remove(&c2);
+        assert_eq!(classify(&old, &new), ChangeClass::Free);
+    }
+
+    #[test]
+    fn ap_12_a_first_counter_for_settings_that_never_had_one_is_free() {
+        let c = identity(41).device_id();
+        let old = base();
+        assert!(old.counters.is_empty());
+        let mut new = next(&old);
+        new.devices.insert(c);
+        new.counters.insert(c, 10_000);
+        assert_eq!(classify(&old, &new), ChangeClass::Free);
+    }
+
+    #[test]
+    fn ap_12_the_last_counter_confirms_its_own_removal() {
+        let c = identity(41);
+        let mut old = base();
+        old.devices.insert(c.device_id());
+        old.counters.insert(c.device_id(), 10_000);
+        let mut new = next(&old);
+        new.counters.clear();
+        new.devices.remove(&c.device_id());
+        assert_eq!(classify(&old, &new), ChangeClass::Loosen);
+        let h = new.hash();
+        let conf = CounterConfirmation::sign(&c, &h);
+        // Checked against the counters in force, not the new ones.
+        assert_eq!(conf.verify(&h, &old.counters), Ok(()));
+        assert_eq!(
+            conf.verify(&h, &new.counters),
+            Err(ConfirmError::NotACounter)
+        );
     }
 
     #[test]

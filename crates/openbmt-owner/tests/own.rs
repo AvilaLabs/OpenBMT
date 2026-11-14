@@ -1267,6 +1267,37 @@ fn oa_119_a_waiting_file_that_cannot_be_written_changes_nothing_that_is_sent() {
 }
 
 #[test]
+fn ap_12_removing_the_last_counter_waits_for_that_counters_confirmation() {
+    let (disk, waiting) = (Disk::new(), Disk::new());
+    let mut s = shop_with_counter_and_box(&disk);
+    let before = s.known_settings().unwrap().clone();
+    let mut new = before.settings.clone();
+    new.version += 1;
+    new.counters.clear();
+    new.devices.remove(&id(3).device_id());
+    let (signed, held) = s
+        .change_settings_with(new, T0 + 200, |b| disk.put(b), |b| waiting.put(b))
+        .unwrap();
+    assert!(held, "the removal of the last counter is held");
+    assert_eq!(s.known_settings(), Some(&before));
+    let change = s.waiting_change().unwrap();
+    assert_eq!(change.signed, signed);
+    assert!(change
+        .loosened_fields(&before.settings)
+        .contains(&"counters"));
+    // Only the counter in force confirms it.
+    let hash = change.hash();
+    assert!(s
+        .join_confirmation(CounterConfirmation::sign(&id(8), &hash))
+        .is_none());
+    let confirmed = s
+        .join_confirmation(CounterConfirmation::sign(&id(3), &hash))
+        .unwrap();
+    s.put_in_force(&confirmed, |b| disk.put(b)).unwrap();
+    assert!(s.known_settings().unwrap().settings.counters.is_empty());
+}
+
+#[test]
 fn oa_120_the_first_confirmation_for_the_hash_from_a_counter_in_force_is_joined() {
     let (disk, waiting) = (Disk::new(), Disk::new());
     let mut s = shop_with_counter_and_box(&disk);
