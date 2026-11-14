@@ -472,7 +472,8 @@ and sales not yet settled wait for the owner's copy to catch up.
      accepted at once whose exposure has not been released is not settled.
   A sale that is live, or that the counter has no owner's mark for, is
   never settled. Neither is a sale that is part of an open bill (CR-249):
-  the bill still counts it.
+  the bill still counts it. Nor is a final sale whose payment a reorg undid,
+  until it is back at the refund depth (CR-66).
 - **CR-77.** `Counter::settle(store, now)` settles at most
   `MAX_SETTLE_PER_CALL` (256) sales in one call, the one whose last change
   is oldest first (the lower index first among equal times), and says how
