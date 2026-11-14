@@ -832,7 +832,16 @@ mine 3
 AFTER=$(bw pinned getbalance)
 note "pinned wallet: $BEFORE -> $AFTER"
 awk -v a="$AFTER" -v b="$BEFORE" 'BEGIN { exit !(a > b) }'
-check "SL-36: the pinned wallet was paid by the close" $?
+CLOSE_OK=$?
+check "SL-36: the pinned wallet was paid by the close" $CLOSE_OK
+if [ "$CLOSE_OK" != 0 ]; then
+  # Enough of what each side saw to tell where the close stopped.
+  note "shop node, close lines:"
+  grep -Ei "close|shutdown|broadcast|sweep|spend" "$SHOP_DIR/node.log" | tail -40 | sed 's/^/        /'
+  note "provider, last lines:"
+  tail -40 "$LSP_DIR/out.log" | sed 's/^/        /'
+  note "mempool: $(bcli getrawmempool | jq -c .)"
+fi
 GOT=$(bw pinned getreceivedbyaddress "$SHOP_ADDR" 1)
 awk -v g="$GOT" 'BEGIN { exit !(g > 0) }' && is_pinned "$SHOP_ADDR"
 check "SL-36: the close paid the address of index 11 that the node derives ($GOT BTC)" $?
