@@ -1726,19 +1726,20 @@ own, as the driver of section 12 has none.
   and leaves the chain takes the sale back, whether it was paid at once or
   not: "Do not hand over", the POS told unpaid, until the claim is back, and
   the claim is sent again. A spend of the lockup that is not a claim, or a
-  transaction that replaced the lockup, in a block of the best chain takes the
-  sale back at once in the same way, with the alarm and the pause for a sale
-  paid at once, overridden or reported paid (CR-14); the claim is not built
-  again. The sale is stored as taken back, with the reason, so it is still
-  taken back after a restart, and the alarm and the record are made once for
-  that spend. If that block leaves the chain and the claim is in a block, the
-  sale is paid again, and the alarm stays for the owner. A claim that leaves
-  the chain after a person accepted the sale is a cancel in the same way, and
-  the sale is paid again when the claim is back in a block. After a restart
-  such a sale stays taken back until the node tells where the claim is. A
-  spend the node tells before the payment is recorded takes the sale back as
-  soon as it is: no alarm, since it was never shown paid, and nothing counted
-  in the exposure ledger. A spend the counter could not store is told again.
+  transaction that replaced the lockup with none that passes SW-30 (SW-44), in
+  a block of the best chain takes the sale back at once in the same way, with
+  the alarm and the pause for a sale paid at once, overridden or reported paid
+  (CR-14); the claim is not built again. The sale is stored as taken back,
+  with the reason, so it is still taken back after a restart, and the alarm
+  and the record are made once for that spend. If that block leaves the chain
+  and the claim is in a block, the sale is paid again, and the alarm stays for
+  the owner. A claim that leaves the chain after a person accepted the sale is
+  a cancel in the same way, and the sale is paid again when the claim is back
+  in a block. After a restart such a sale stays taken back until the node
+  tells where the claim is. A spend the node tells before the payment is
+  recorded takes the sale back as soon as it is: no alarm, since it was never
+  shown paid, and nothing counted in the exposure ledger. A spend, a claim's
+  depth or a claim's amount that the counter could not store is told again.
   The swap is lost only when that spend is at the shop's refund depth:
   `Counter::swap_cancelled` then makes the cancel final, with no second alarm
   or record, and tells the POS unpaid (CR-30). A sale paid at once whose swap

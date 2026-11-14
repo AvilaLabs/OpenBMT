@@ -112,7 +112,10 @@ order of the rules, so that the refusal names the first that fails.
   that the claim has time to confirm. This floor is for the claim only: it is
   not the time a customer is made to wait. The first claim, which shows the
   preimage, is built only while at least `CLAIM_MARGIN_BLOCKS` (18) blocks are
-  left before the timeout (SW-44).
+  left before the timeout (SW-44). The invoice is not shown, and the swap ends
+  as an expired invoice, once a lockup in the next block would leave fewer
+  than `CLAIM_MARGIN_BLOCKS` blocks: a customer is never shown an invoice
+  whose payment the shop would not claim.
 - **SW-28.** The amount on chain is at least `MIN_ONCHAIN_SATS` and at most
   the invoice amount. With the quote the caller gives (the service's
   percentage in parts per million of the invoice amount, rounded up, and its
@@ -159,9 +162,15 @@ order of the rules, so that the refusal names the first that fails.
   shown. A claim already sent has shown the preimage, and its spend has no
   timelock: it is built again at a higher fee (SW-46), or sent again after it
   left the chain, at and past the timeout too, until it or another spend of
-  the lockup is in a block. A swap is lost when its lockup is spent, or
-  replaced, by a transaction that is not one of the shop's claims and that is
-  at the shop's refund depth in the best chain (CR-221).
+  the lockup is in a block. While the chain is behind it is not built again,
+  but it is sent again at each block. A swap is lost when its lockup is spent,
+  or replaced, by a transaction that is not one of the shop's claims and that
+  is at the shop's refund depth in the best chain (CR-221). A replacement that
+  itself passes SW-30 is no loss: it is taken as the lockup, and a claim of it
+  is built and sent at once, even past the timeout or while the chain is
+  behind, since the preimage is already shown; the earlier claims stay listed.
+  A replacement in a block that leaves no transaction passing SW-30, one that
+  pays the lockup script too little among them, is a loss as a spend is.
 - **SW-45.** The claim is by the script path only. The cooperative key-path
   signature of MuSig2 is not built here: the packages the project allows
   have no MuSig2 signing code, and the one part of BIP 327 that is needed to
@@ -170,13 +179,14 @@ order of the rules, so that the refusal names the first that fails.
   service's help; the cost is a larger transaction that shows the swap's
   script on chain.
 - **SW-46.** A claim that is not yet in a block can be built again at another
-  fee rate, from the same lockup, to the same address, with the same rules as
-  SW-40 to SW-43. The timing of SW-44 is for the first claim only: a claim
-  already sent is built again at and past the timeout. A swap that was not
-  claimed is refused. The new claim's transaction id replaces the one the
-  state holds, so the state names the claim that was sent last. The caller
-  sends it to take the place of the earlier one (it signals replacement) and
-  keeps the lockup, which the machine does not hold after the claim.
+  fee rate, from the same lockup (or the one that replaced it, SW-44), to the
+  same address, with the same rules as SW-40 to SW-43. The timing of SW-44 is
+  for the first claim only: a claim already sent is built again at and past
+  the timeout. A swap that was not claimed is refused. The new claim's
+  transaction id replaces the one the state holds, so the state names the
+  claim that was sent last. The caller sends it to take the place of the
+  earlier one (it signals replacement) and keeps the lockup, which the machine
+  does not hold after the claim.
 
 ## 6. The state file
 
