@@ -2,8 +2,8 @@
 
 Status: specification for `crates/openbmt-box`. All sections are
 implemented, section 4 (the POS on the Box, and its way to a vendor over
-curl), section 5b (the status page) and section 5c (the till listener)
-included. Section 5d (Shop Lightning's store) is specified and not built yet.
+curl), section 5b (the status page), section 5c (the till listener) and
+section 5d (Shop Lightning's store) included.
 Each rule has an ID so that a test can name the rule it proves. The rules
 implement `docs/DESIGN.md` §5.3 and close the open item of §16: how a Box,
 which has no screen, is paired.
@@ -218,8 +218,8 @@ screen and not a shared computer.
 - **BX-48.** The status of a reply decides what it is. 200 to 299 is read.
   401 and 403 are "the token was refused": the words say to make a new
   read-only token at the vendor and give it with `pos-token`. 429 is "wait":
-  the reading is not made again for at least a minute, or the time the
-  vendor named if that is longer. A redirect is refused, and any other
+  the reading is not made again for a minute. A time the vendor names in
+  its answer is not read. A redirect is refused, and any other
   status is refused with it named.
 - **BX-49.** The Box reads the POS of the vendor its own `pos-config` names
   (Square or Clover) with the reader of `openbmt-pos-readers` for it:
@@ -395,7 +395,7 @@ These details too leave every rule of section 4 as it is.
   outnumber the sales. If none can be dropped the new notice is refused
   with a note: nothing else is ever dropped for room.
 - **The timer.** The time is the clock the Box is given. The POS is read
-  every 30 seconds, and at once at the next turn of the worker after a
+  every 60 seconds (BX-49), and at once at the next turn of the worker after a
   paid notice was taken; a notice that is refused does not bring a reading.
   Each reading is a sync of PS-74 on all the sales the Box holds. A reading
   that fails (the POS is down, times out, answers with something that does

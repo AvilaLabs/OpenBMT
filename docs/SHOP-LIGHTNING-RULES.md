@@ -117,7 +117,9 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   copy first, as the manager does.
 - **SL-25. No old copy, ever.** On a start, the node reads the update
   numbers of both copies and starts only from the newer one. A copy behind
-  the other is never used. Prototype E5b: an old copy makes the library stop
+  the other is never used. When each copy is ahead of the other on some
+  channel, neither is used: the node does not start, Lightning stays off,
+  and the counter says so. Prototype E5b: an old copy makes the library stop
   with "you are running with an old backup"; the provider did not close the
   channel, but a broadcast of that old state would lose the channel's money.
 

@@ -61,8 +61,9 @@ what arrives as if it came from an enemy.
   that one message cannot move a sender's numbers out of reach; a sender
   that adds 1 each time never comes near it.
 - **LK-07.** The content is padded before it is encrypted, up to the next
-  of these sizes: 256, 1,024, 4,096, 16,384, 65,536 bytes. Larger content
-  is refused; the sender splits it. A relay sees only which size step a
+  of these sizes: 256, 1,024, 4,096, 16,384, 65,536 bytes. The content and
+  its 4-byte length fill the step, so content of more than 65,532 bytes is
+  refused; the sender splits it. A relay sees only which size step a
   message is in.
 - **LK-08.** The kind is one byte, signed but not encrypted, so that a
   reader can refuse a kind it does not expect from that sender before it
@@ -82,6 +83,7 @@ what arrives as if it came from an enemy.
   | POS notice | Box | counter, owner |
   | Range | owner | counter |
   | Switch | owner | counter |
+  | Starter | owner | counter |
   | Store | Lightning counter | Box |
   | Stored | Box | Lightning counter |
   | Lightning report | Lightning counter | owner |
@@ -543,9 +545,10 @@ how the two talk.
   challenge (LK-23): the seal proves the sender, and the number stops a
   replay.
 - **LK-83. What they carry.** A Store carries a request ID of 16 random
-  bytes, an action (write, read, list or remove) and a name (the node's
-  names: 1 to 125 of the characters `A-Z a-z 0-9 _ - ~`, so that the name
-  in hexadecimal is a file name the Box can keep, BX-93). A write carries
+  bytes, an action (write, read, list or remove) and a name (1 to 255 of
+  the characters `A-Z a-z 0-9 _ - ~`). The node uses names of at most 125,
+  and the Box refuses a longer one by name, so that the name in hexadecimal
+  is a file name the Box can keep (BX-93). A write carries
   one part of the blob, at most 60,000 bytes, with the part's number, the
   number of parts and the SHA-256 of the whole blob; a blob is at most
   16 MiB. A read names the part it asks for. A list names the name to list
