@@ -6,10 +6,12 @@
 # Artifacts compared: for each of the Key, Owner and Counter apps the signed
 # APK, the unsigned aligned APK (the stage before signing), classes.dex, and
 # every stripped native library in the APK; and the Box binary
-# (cargo build --release -p openbmt-box, the command packaging/box/Dockerfile
-# runs). The APKs are signed with the same local test key (the build scripts
-# keep it under ~/.cache/openbmt/tmp/<app>apk/), so a signed-APK mismatch with
-# a matching aligned stage would point at the signer.
+# (scripts/box-build.sh: cargo build --release -p openbmt-box, as
+# packaging/box/Dockerfile does). The APKs are signed with one local RSA test
+# key per app, made by the first build and kept in $REPRO_DIR/keys (not the
+# usual test keys: an RSA PKCS#1 v1.5 signature is deterministic, an ECDSA one
+# is not, so an EC key can never give a matching signed APK). A signed-APK
+# mismatch with a matching aligned stage would point at the signer.
 #
 # Usage: scripts/repro-check.sh [commit]      (default: HEAD of this checkout)
 #   REPRO_DIR    work directory (default: ~/.cache/openbmt/repro); the two
@@ -71,14 +73,14 @@ build_side() { # a|b
         up="$(printf '%s' "$app" | tr a-z A-Z)"
         echo "-- $app apk ($s)"
         "$guard" env TMPDIR="$tmp" \
-            "${up}APK_OUT=$out/$app" "${up}APK_CARGO_TARGET=$t" \
+            "${up}APK_OUT=$out/$app" "${up}APK_CARGO_TARGET=$t" "${up}APK_KEYDIR=$base/keys/$app" \
             "$src/apps/$app-android/build.sh" >"$out/$app.log" 2>&1 \
             || { tail -n 20 "$out/$app.log" >&2; die "the $app build failed in copy $s (log $out/$app.log)"; }
     done
     case " $only " in *" box "*)
         echo "-- box ($s)"
-        (cd "$src" && "$guard" env CARGO_TARGET_DIR="$t" TMPDIR="$tmp" CARGO_BUILD_JOBS=2 \
-            cargo build --locked --release -p openbmt-box) >"$out/box.log" 2>&1 \
+        "$guard" env CARGO_TARGET_DIR="$t" TMPDIR="$tmp" CARGO_BUILD_JOBS=2 \
+            "$src/scripts/box-build.sh" >"$out/box.log" 2>&1 \
             || { tail -n 20 "$out/box.log" >&2; die "the box build failed in copy $s"; } ;;
     esac
 }
