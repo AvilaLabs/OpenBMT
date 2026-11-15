@@ -595,6 +595,51 @@ fn cr_235_a_range_overlapping_what_is_handed_out_or_in_use_is_refused() {
 }
 
 #[test]
+fn cr_231_first_settings_that_name_a_lightning_node_or_shop_lightning_are_refused() {
+    let authority = Authority::OwnWallet {
+        owner: owner().device_id(),
+    };
+    let base = settings().settings;
+    assert!(settings().verify_with(&authority, None).is_ok());
+
+    let mut node = base.clone();
+    node.lightning_node = Some([2u8; LIGHTNING_NODE_BYTES]);
+    let e = resign(node.clone())
+        .verify_with(&authority, None)
+        .unwrap_err();
+    assert_eq!(e, SettingsError::RedirectAtPairing);
+    assert!(e.to_string().starts_with("CR-231"));
+
+    let mut shop = base.clone();
+    let seed: [u8; 64] = std::array::from_fn(|i| i as u8);
+    let counter_id = counter().device_id();
+    let box_id = identity(61).device_id();
+    shop.devices.insert(box_id);
+    shop.boxes.insert(box_id);
+    shop.shop_lightning = Some(crate::settings::ShopLightning {
+        counter: counter_id,
+        node_id: crate::shop_lightning::node_id(&seed),
+        second_device: box_id,
+        provider_node_id: crate::shop_lightning::node_id(&[99; 64]),
+        provider_addr: "127.0.0.1:9".parse().unwrap(),
+        cap_sats: 100_000,
+        max_opening_fee_sats: 3_000,
+    });
+    assert_eq!(
+        resign(shop.clone()).verify_with(&authority, None).err(),
+        Some(SettingsError::RedirectAtPairing)
+    );
+
+    // A later change from settings in force is still CR-236.
+    let mut store = SettingsStore::with_authority(authority, 4);
+    store.apply(settings()).unwrap();
+    assert_eq!(
+        store.apply(resign(node)).err(),
+        Some(SettingsError::ConfirmationRequired(ChangeClass::Redirect))
+    );
+}
+
+#[test]
 fn cr_236_only_a_free_change_is_taken_without_a_confirmation() {
     let authority = Authority::OwnWallet {
         owner: owner().device_id(),

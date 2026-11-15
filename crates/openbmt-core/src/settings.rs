@@ -1369,6 +1369,10 @@ pub enum SettingsError {
     /// (`docs/APPROVAL-RULES.md`), which are not joined to the settings yet.
     /// The class says which.
     ConfirmationRequired(ChangeClass),
+    /// CR-231: the first settings of a counter paired with the shop's own
+    /// wallet name a Lightning node or Shop Lightning, which the person at
+    /// the counter did not see when comparing the address and the words.
+    RedirectAtPairing,
 }
 
 impl fmt::Display for SettingsError {
@@ -1381,6 +1385,10 @@ impl fmt::Display for SettingsError {
             Self::ConfirmationRequired(class) => write!(
                 f,
                 "CR-236: this change ({class:?}) must be confirmed at a counter"
+            ),
+            Self::RedirectAtPairing => write!(
+                f,
+                "CR-231: first settings of a shop with no Key app name no Lightning node and no Shop Lightning"
             ),
             Self::StaleVersion { current, got } => {
                 write!(
@@ -1450,8 +1458,9 @@ impl SignedSettings {
     /// `Authority::OwnWallet` the owner root's signature, the values, the
     /// version and the carried limits are checked as for the Key app; a Key
     /// app signature is refused; first settings (`current` is `None`) are
-    /// taken with no classification (CR-231); and a change from settings in
-    /// force is classified ([`crate::approval::classify`]): a Free one is
+    /// taken with no classification (CR-231), unless they name a Lightning
+    /// node or Shop Lightning ([`SettingsError::RedirectAtPairing`]); and a
+    /// change from settings in force is classified ([`crate::approval::classify`]): a Free one is
     /// taken, a Loosen or Redirect one is
     /// [`SettingsError::ConfirmationRequired`] (CR-236).
     pub fn verify_with(
@@ -1493,6 +1502,11 @@ impl SignedSettings {
                     ));
                 }
                 match current.map(|cur| crate::approval::classify(cur, &self.settings)) {
+                    None if self.settings.lightning_node.is_some()
+                        || self.settings.shop_lightning.is_some() =>
+                    {
+                        Err(SettingsError::RedirectAtPairing)
+                    }
                     None | Some(ChangeClass::Free) => Ok(change),
                     Some(class) => Err(SettingsError::ConfirmationRequired(class)),
                 }

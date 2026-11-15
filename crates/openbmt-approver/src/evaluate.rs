@@ -402,7 +402,11 @@ fn eval_settings(
         Err(SettingsError::OwnerSignatureInvalid) => (Some(0), None),
         // The Key app checks under the two roots, which never ask for a
         // counter's confirmation; one that came would break a rule.
-        Err(SettingsError::Invalid(_) | SettingsError::ConfirmationRequired(_)) => (Some(1), None),
+        Err(
+            SettingsError::Invalid(_)
+            | SettingsError::ConfirmationRequired(_)
+            | SettingsError::RedirectAtPairing,
+        ) => (Some(1), None),
         Err(SettingsError::StaleVersion { .. }) => (Some(2), None),
         Err(SettingsError::ApproverSignatureInvalid) => (Some(0), None),
         Err(SettingsError::ApproverRequired) => (None, Some(Change::Loosening)),

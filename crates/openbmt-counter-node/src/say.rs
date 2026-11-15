@@ -927,6 +927,7 @@ impl OwnPairRefused {
             Self::NoRandomness => stopped("No key made", "The phone gave no random numbers the counter can trust, so it made no key and the pairing with the shop's wallet did not start.", Who::Manager, "Try again. If it fails again, restart the phone and start again from the owner phone."),
             Self::Pair(e) => own_pair_error_words(e),
             Self::Bundle(e) => PairRefused::Bundle(e.clone()).words(),
+            Self::Settings(SettingsError::RedirectAtPairing) => stopped("Code not taken", "The owner phone's code names a Lightning node, which a new counter does not take.", Who::Manager, "Pair again from the owner phone."),
             Self::Settings(_) => stopped("Settings not signed", "The first settings in the owner phone's code are not signed by that owner phone, or are not valid. Nothing was saved.", Who::Manager, "Start the pairing again from the owner phone."),
             Self::SettingsOld { .. } => stopped("Settings out of date", "The first settings in the owner phone's code are older than the ones it offered. Nothing was saved.", Who::Manager, "Update the owner phone, then start the pairing again."),
             Self::NotOnDevices => stopped("Counter not in the settings", "The first settings from the owner phone do not list this counter, so it could not take them. Nothing was saved.", Who::Manager, "Start the pairing again from the owner phone."),

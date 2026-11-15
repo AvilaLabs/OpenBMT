@@ -444,9 +444,9 @@ fn settings_words(e: &SettingsError) -> Words {
         // confirmation, and if one came it breaks a rule. A Box of a shop
         // with its own wallet (BX-18) gets these words until its own are
         // written.
-        SettingsError::Invalid(_) | SettingsError::ConfirmationRequired(_) => {
-            settings_break_a_rule()
-        }
+        SettingsError::Invalid(_)
+        | SettingsError::ConfirmationRequired(_)
+        | SettingsError::RedirectAtPairing => settings_break_a_rule(),
     }
     .code("BX-21")
     .detail(detail)

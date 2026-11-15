@@ -132,6 +132,7 @@ fn settings_name(e: &SettingsError) -> &'static str {
         SettingsError::StaleVersion { .. } => "SettingsError::StaleVersion",
         SettingsError::Invalid(_) => "SettingsError::Invalid",
         SettingsError::ConfirmationRequired(_) => "SettingsError::ConfirmationRequired",
+        SettingsError::RedirectAtPairing => "SettingsError::RedirectAtPairing",
     }
 }
 

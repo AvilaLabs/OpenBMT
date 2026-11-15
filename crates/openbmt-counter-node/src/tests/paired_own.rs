@@ -211,6 +211,34 @@ fn cr_231_the_first_settings_are_owner_signed_newer_and_list_this_counter() {
 }
 
 #[test]
+fn cr_231_first_settings_that_name_a_lightning_node_are_refused_at_pairing_and_at_start() {
+    let naming = |c: &DeviceId| {
+        let mut s = settings_for(c, FLOOR + 1).settings;
+        s.lightning_node = Some([2u8; 33]);
+        SignedSettings {
+            owner_sig: s.sign(&id(1)),
+            approver_sig: None,
+            settings: s,
+        }
+    };
+    let (mut c, bytes) = ready(naming, 1_000);
+    assert_eq!(
+        c.finish(&bytes, &POLICY, T0 + 20).unwrap_err(),
+        OwnPairRefused::Settings(SettingsError::RedirectAtPairing)
+    );
+    assert!(!c.is_open());
+    // The same settings in a saved record are refused at start.
+    let mut saved = record();
+    saved.settings = naming(&saved.identity().unwrap().device_id());
+    assert_eq!(
+        saved.check(&POLICY).unwrap_err(),
+        OwnPairRefused::Settings(SettingsError::RedirectAtPairing)
+    );
+    let words = OwnPairRefused::Settings(SettingsError::RedirectAtPairing).words();
+    assert_eq!(words.heading, "Code not taken");
+}
+
+#[test]
 fn cr_232_the_first_range_holds_at_least_the_minimum() {
     let (mut c, bytes) = ready(|c| settings_for(c, FLOOR + 1), 999);
     let refused = c.finish(&bytes, &POLICY, T0 + 20).unwrap_err();
