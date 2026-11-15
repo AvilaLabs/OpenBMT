@@ -2017,3 +2017,209 @@ fn oc_60_the_day_summary_counts_an_unknown_lightning_sale_as_not_checked() {
     assert_eq!(d.sales, 1);
     assert_eq!((d.seen, d.waiting, d.too_old, d.missing), (0, 0, 1, 0));
 }
+
+#[test]
+fn oc_62_a_sale_cleared_by_arrival_is_listed_for_a_week() {
+    assert_eq!(crate::paid_check::PAID_ARRIVED_SHOWN_SECS, 604_800);
+}
+
+#[test]
+fn oc_64_a_version_1_file_one_byte_short_of_its_count_is_refused_as_truncated() {
+    // The count of a version 1 file is checked against 53 bytes a mark, so a
+    // file one byte short of its marks is refused before any is read: the
+    // mark held is bad (state 9), and is not the reason given.
+    let short = v1_file(1, &[(3, 9, 1_000, 0)]);
+    assert_eq!(
+        PaidMarks::from_bytes(&short[..short.len() - 1]),
+        Err(DecodeError::Truncated)
+    );
+    // With its last byte the mark is read, and refused for its state.
+    assert_eq!(
+        PaidMarks::from_bytes(&short),
+        Err(DecodeError::UnknownKind(9))
+    );
+    // A whole mark is read.
+    let one = v1_file(1, &[(3, 1, 1_000, 0)]);
+    assert_eq!(PaidMarks::from_bytes(&one).unwrap().len(), 1);
+}
+
+/// A file of one mark in the form the current version writes, with its
+/// fields set by hand: (state, first read, raised, cleared).
+fn v2_file(state: u8, first_read: u64, raised: u64, cleared: u64) -> Vec<u8> {
+    let mut out = openbmt_core::wire::start(&MAGIC_PAID_CHECK, 0);
+    out[4] = 2;
+    out.extend_from_slice(&1u32.to_le_bytes());
+    out.extend_from_slice(&counter().to_bytes());
+    out.extend_from_slice(&7u32.to_le_bytes());
+    out.push(state);
+    out.extend_from_slice(&first_read.to_le_bytes());
+    out.extend_from_slice(&raised.to_le_bytes());
+    out.extend_from_slice(&cleared.to_le_bytes());
+    out
+}
+
+#[test]
+fn oc_64_a_version_1_file_has_no_state_for_a_reading() {
+    // State 4 with no times is a good mark of version 2 and no mark of
+    // version 1.
+    assert_eq!(
+        PaidMarks::from_bytes(&v2_file(4, 9, 0, 0))
+            .unwrap()
+            .get(&key(7))
+            .unwrap()
+            .state,
+        MarkState::Reading
+    );
+    let old = v1_file(1, &[(7, 4, 0, 0)]);
+    assert_eq!(
+        PaidMarks::from_bytes(&old),
+        Err(DecodeError::UnknownKind(4))
+    );
+}
+
+#[test]
+fn oc_64_a_mark_only_read_has_no_time_raised_or_cleared() {
+    for (raised, cleared) in [(5, 0), (0, 6), (5, 6)] {
+        assert_eq!(
+            PaidMarks::from_bytes(&v2_file(4, 9, raised, cleared)),
+            Err(DecodeError::NonCanonical("a mark only read has a time"))
+        );
+    }
+}
+
+#[test]
+fn oc_64_a_raised_mark_has_a_time_raised_and_no_time_cleared() {
+    let not_in_form = Err(DecodeError::NonCanonical(
+        "a raised mark is not in its form",
+    ));
+    assert_eq!(PaidMarks::from_bytes(&v2_file(1, 9, 0, 0)), not_in_form);
+    assert_eq!(PaidMarks::from_bytes(&v2_file(1, 9, 0, 6)), not_in_form);
+    assert_eq!(PaidMarks::from_bytes(&v2_file(1, 9, 5, 6)), not_in_form);
+    assert!(PaidMarks::from_bytes(&v2_file(1, 9, 5, 0)).is_ok());
+    // The same holds for a version 1 file.
+    assert_eq!(
+        PaidMarks::from_bytes(&v1_file(1, &[(7, 1, 0, 0)])),
+        not_in_form
+    );
+}
+
+#[test]
+fn oc_64_a_cleared_mark_has_both_times() {
+    let not_in_form = Err(DecodeError::NonCanonical(
+        "a cleared mark is not in its form",
+    ));
+    assert_eq!(PaidMarks::from_bytes(&v2_file(2, 9, 0, 0)), not_in_form);
+    assert_eq!(PaidMarks::from_bytes(&v2_file(3, 9, 5, 0)), not_in_form);
+    assert_eq!(PaidMarks::from_bytes(&v2_file(3, 9, 0, 6)), not_in_form);
+    assert!(PaidMarks::from_bytes(&v2_file(3, 9, 5, 6)).is_ok());
+}
+
+#[test]
+fn oc_64_marks_say_whether_there_are_none() {
+    let none = PaidMarks::new();
+    assert!(none.is_empty());
+    assert_eq!(none.len(), 0);
+    let some = raised_marks(0, 1, 100);
+    assert!(!some.is_empty());
+    assert_eq!(some.len(), 1);
+}
+
+#[test]
+fn oc_64_a_set_over_by_several_readings_is_fitted_by_all_of_them() {
+    // No mark is cleared, so the readings alone go: all that are over.
+    let over = 3;
+    let marks = PaidMarks::new().after(
+        &CheckResult {
+            read: (0..MAX_PAID_MARKS as u32 + over).map(key).collect(),
+            ..CheckResult::default()
+        },
+        100,
+    );
+    assert_eq!(marks.len(), MAX_PAID_MARKS + over as usize);
+    let fitted = marks.fitted();
+    assert_eq!(fitted.len(), MAX_PAID_MARKS);
+    assert!(!fitted.is_over());
+}
+
+/// Sixteen bytes of identity for each number, so that a set may be larger than
+/// one byte can number.
+fn counters_numbered(n: usize) -> Vec<DeviceId> {
+    (0..n)
+        .map(|i| {
+            let mut secret = [1u8; 32];
+            secret[..2].copy_from_slice(&(i as u16).to_le_bytes());
+            Identity::from_secret_bytes(&secret).unwrap().device_id()
+        })
+        .collect()
+}
+
+#[test]
+fn oc_60_a_full_set_of_lightning_counters_is_kept_and_reads_back_and_takes_no_more() {
+    let max = openbmt_core::settings::MAX_DEVICES;
+    let ids = counters_numbered(max + 1);
+    let dir = Dir::new();
+    let mut set = LightningCounters::open(dir.path());
+    for id in &ids {
+        set.note(id);
+    }
+    // The set holds the first MAX_DEVICES it was told of, and not one more.
+    assert!(ids[..max].iter().all(|id| set.contains(id)));
+    assert!(!set.contains(&ids[max]));
+    let bytes = std::fs::read(dir.path().join(LIGHTNING_COUNTERS_FILE)).unwrap();
+    assert_eq!(bytes.len(), 5 + 4 + max * 32);
+    assert_eq!(LightningCounters::from_bytes(&bytes).unwrap().len(), max);
+    // A full file is read back whole, not refused as too large.
+    let again = LightningCounters::open(dir.path());
+    assert!(ids[..max].iter().all(|id| again.contains(id)));
+    assert!(!again.contains(&ids[max]));
+    assert_eq!(
+        lightning_link_sales(&again)[0].how,
+        PaidHow::LightningUnnamed
+    );
+}
+
+#[test]
+fn oc_64_a_file_of_marks_too_large_is_refused_as_such_and_not_read() {
+    let big = Dir::new();
+    std::fs::write(
+        big.path().join(PAID_CHECK_FILE),
+        vec![0u8; 5 + 4 + MAX_PAID_MARKS * MARK + 1],
+    )
+    .unwrap();
+    assert_eq!(
+        PaidChecks::open(big.path()).trouble(),
+        Some(PaidTrouble::NotKept("the file is too large".to_string()))
+    );
+}
+
+#[test]
+fn oc_64_a_file_that_cannot_be_looked_at_is_a_trouble_and_a_missing_one_is_not() {
+    // No file: nothing is wrong.
+    let dir = Dir::new();
+    assert_eq!(PaidChecks::open(dir.path()).trouble(), None);
+    // The folder is a file: the marks' file cannot be looked at.
+    let plain = Dir::new();
+    let not_a_folder = plain.path().join("not-a-folder");
+    std::fs::write(&not_a_folder, b"x").unwrap();
+    assert!(matches!(
+        PaidChecks::open(&not_a_folder).trouble(),
+        Some(PaidTrouble::NotKept(why)) if why.starts_with(PAID_CHECK_FILE)
+    ));
+    // The same for the Lightning counters: the set is unread, not empty.
+    let set = LightningCounters::open(&not_a_folder);
+    assert_eq!(lightning_link_sales(&set)[0].how, PaidHow::LightningUnknown);
+}
+
+#[test]
+fn oc_64_clearing_the_checks_with_no_file_works_and_a_file_that_cannot_be_removed_is_refused() {
+    let dir = Dir::new();
+    let mut checks = PaidChecks::open(dir.path());
+    // No file to remove is no trouble.
+    assert_eq!(checks.reset(), Ok(()));
+    // A folder in the file's place cannot be removed as a file.
+    std::fs::create_dir(dir.path().join(PAID_CHECK_FILE)).unwrap();
+    assert!(matches!(
+        checks.reset(),
+        Err(PaidCheckRefused::Store(why)) if why.starts_with(PAID_CHECK_FILE)
+    ));
+}
