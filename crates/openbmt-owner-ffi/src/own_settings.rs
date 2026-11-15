@@ -13,6 +13,7 @@ use crate::error::{refused_by, AppError};
 use crate::host::queue_error;
 use crate::own::{device, own_error, with_shop, OwnShopArgs};
 use crate::settings_edit::{preview_view, to_edit, SettingsEditArgs, SettingsPreviewView};
+use crate::shop_lightning::{ShopLightningEditArgs, ShopLightningPreviewView};
 
 /// The arguments of `own_settings_preview`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,5 +114,72 @@ pub(crate) fn attach(a: OwnSettingsAttachArgs) -> Result<u32, AppError> {
         shop.change_settings_with_wallet_sig(signed.settings, &a.signature, &store)
             .map(|s| s.settings.version)
             .map_err(own_error)
+    })
+}
+
+/// The arguments of `own_shop_lightning_preview`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnShopLightningPreviewArgs {
+    /// The shop.
+    pub shop: OwnShopArgs,
+    /// The Shop Lightning edit, as for `shop_lightning_preview`.
+    pub edit: ShopLightningEditArgs,
+    /// The shop is on its starter wallet (AP-15): the app knows.
+    pub starter: bool,
+}
+
+wire_record!(OwnShopLightningPreviewArgs {
+    shop,
+    edit,
+    starter
+});
+wire_record_get!(OwnShopLightningPreviewArgs {
+    shop,
+    edit,
+    starter
+});
+
+/// What `own_shop_lightning_preview` found: nothing was stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnShopLightningPreviewView {
+    /// The preview as `shop_lightning_preview` gives it.
+    pub preview: ShopLightningPreviewView,
+    /// The change needs the wallet's signature (AP-14).
+    pub needs_wallet_sig: bool,
+    /// The message to sign (AP-06); empty when no signature is needed.
+    pub message: String,
+    /// The address that has to sign (AP-09); empty when none is needed.
+    pub address: String,
+}
+
+wire_record!(OwnShopLightningPreviewView {
+    preview,
+    needs_wallet_sig,
+    message,
+    address
+});
+
+/// Op 245: what a Shop Lightning edit does to the settings of a shop with
+/// its own wallet, with what the wallet has to sign (AP-14, AP-15).
+pub(crate) fn shop_lightning_preview(
+    a: OwnShopLightningPreviewArgs,
+) -> Result<OwnShopLightningPreviewView, AppError> {
+    let mut edit = crate::shop_lightning::to_edit(a.edit)?;
+    edit.starter_wallet = a.starter;
+    with_shop(a.shop, |node| {
+        let preview = node
+            .shop()
+            .settings_preview(&edit)
+            .map_err(|r| queue_error(&OwnerError::Refused(r)))?;
+        let (needs_wallet_sig, message, address) = match &preview.wallet_sig {
+            Some(ask) => (true, ask.message.clone(), ask.address.clone()),
+            None => (false, String::new(), String::new()),
+        };
+        Ok(OwnShopLightningPreviewView {
+            preview: crate::shop_lightning::preview_view(&preview),
+            needs_wallet_sig,
+            message,
+            address,
+        })
     })
 }

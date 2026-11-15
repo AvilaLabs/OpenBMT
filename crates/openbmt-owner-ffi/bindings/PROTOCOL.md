@@ -242,6 +242,7 @@ ops run on another; it waits for at most 250 ms.
 242 paid_check_reset handle node  args () -> ()
 243 own_settings_preview handle zero  args OwnSettingsPreviewArgs -> OwnSettingsPreviewView
 244 own_settings_attach handle zero  args OwnSettingsAttachArgs -> u32
+245 own_shop_lightning_preview handle zero  args OwnShopLightningPreviewArgs -> OwnShopLightningPreviewView
 ```
 
 ## Types
@@ -323,6 +324,8 @@ SettingChangeView: record: field: string, label: string, counter: option<list<u8
 SettingsPreviewView: record: version: u32, changes: list<SettingChangeView>, needs_key_app: bool, nothing_changed: bool, shares_total_bps: u32, usd_per_btc: option<u64>, sats_per_usd: option<u64>, settings: list<u8>, currency: ShopCurrencyView
 OwnSettingsPreviewArgs: record: shop: OwnShopArgs, edit: SettingsEditArgs, starter: bool
 OwnSettingsPreviewView: record: preview: SettingsPreviewView, needs_wallet_sig: bool, message: string, address: string
+OwnShopLightningPreviewArgs: record: shop: OwnShopArgs, edit: ShopLightningEditArgs, starter: bool
+OwnShopLightningPreviewView: record: preview: ShopLightningPreviewView, needs_wallet_sig: bool, message: string, address: string
 OwnSettingsAttachArgs: record: shop: OwnShopArgs, settings: list<u8>, signature: string
 NotOfferedView: enum, one tag byte
     tags Offered=0 SecondDeviceAway=1 ChainBehind=2 NoUsableChannel=3 ProviderSilent=4

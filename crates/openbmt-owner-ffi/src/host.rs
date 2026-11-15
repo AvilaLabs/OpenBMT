@@ -1959,11 +1959,23 @@ impl Entry {
         self.run(None, |st| {
             let owner = st.node.owner();
             let report = st.link.as_ref().and_then(|l| l.lightning_report());
-            Ok(shop_lightning::view(
-                owner.is_own_wallet(),
-                owner.known_settings(),
-                report,
-            ))
+            // A shop with its own wallet keeps its settings in its own state,
+            // which is read from the folder (AP-14).
+            let own_settings = match &st.own {
+                Some(own) => {
+                    let identity = st.node.owner_identity().map_err(|e| node_error(&e))?;
+                    own::turn_on_shop(&st.dir, identity, own.wallet.clone(), |shop| {
+                        Ok(shop.shop().known_settings().map(|k| k.settings.clone()))
+                    })
+                    .map_err(own::node_error)?
+                }
+                None => None,
+            };
+            let known = match &st.own {
+                Some(_) => own_settings.as_ref(),
+                None => owner.known_settings(),
+            };
+            Ok(shop_lightning::view(owner.is_own_wallet(), known, report))
         })
     }
 

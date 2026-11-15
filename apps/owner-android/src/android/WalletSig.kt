@@ -6,7 +6,6 @@ import android.widget.Button
 import org.openbmt.app.AnimatedQrView
 import org.openbmt.app.UrWords
 import org.openbmt.app.Who
-import org.openbmt.owner.OwnSettingsPreview
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerOwn
 
@@ -16,9 +15,17 @@ import org.openbmt.owner.OwnerOwn
 // anything is queued; the app holds no key and checks nothing itself.
 
 /** The message and the address as the screen shows them, then the signature field, "Scan signature" and "Send change". */
-internal fun Controller.showWalletSig(ask: OwnSettingsPreview, typed: String = "", message: org.openbmt.app.SayWords? = null, back: () -> Unit) {
+internal fun Controller.showWalletSig(
+    settings: ByteArray,
+    message: String,
+    address: String,
+    typed: String = "",
+    words: org.openbmt.app.SayWords? = null,
+    done: () -> Unit = { showHome() },
+    back: () -> Unit,
+) {
     val msg = Slot(act)
-    message?.let { msg.show(ui.words(it)) }
+    words?.let { msg.show(ui.words(it)) }
     val sig = ui.field(WalletSigWords.fieldLabel, lines = 4, mono = true).also { it.setText(typed) }
     val paste = ui.button(WalletSigWords.paste) {
         val clip = act.getSystemService(ClipboardManager::class.java)?.primaryClip?.getItemAt(0)?.text?.toString()
@@ -28,12 +35,12 @@ internal fun Controller.showWalletSig(ask: OwnSettingsPreview, typed: String = "
     views.add(ui.text(WalletSigWords.what))
     views.add(ui.text(WalletSigWords.next))
     views.add(label(WalletSigWords.addressLabel))
-    views.add(ui.text(ask.address, 15f, mono = true))
-    views.add(ui.button(WalletSigWords.copy) { copy(ask.address) })
+    views.add(ui.text(address, 15f, mono = true))
+    views.add(ui.button(WalletSigWords.copy) { copy(address) })
     views.add(label(WalletSigWords.messageLabel))
-    views.add(ui.text(ask.message, 15f, mono = true))
-    views.add(ui.button(WalletSigWords.copy) { copy(ask.message) })
-    val made = AnimatedQrView.makePlain(act, Who.OWNER, ask.message, ExchangeModel.codeHeight(act.resources.displayMetrics.heightPixels))
+    views.add(ui.text(message, 15f, mono = true))
+    views.add(ui.button(WalletSigWords.copy) { copy(message) })
+    val made = AnimatedQrView.makePlain(act, Who.OWNER, message, ExchangeModel.codeHeight(act.resources.displayMetrics.heightPixels))
     views.add(made.view?.let { ui.codeCard(it) } ?: ui.words(made.words ?: UrWords.cannotShow(Who.OWNER)))
     views.add(ui.labelled(WalletSigWords.fieldLabel, sig))
     views.add(paste)
@@ -41,25 +48,25 @@ internal fun Controller.showWalletSig(ask: OwnSettingsPreview, typed: String = "
     val send = ui.primary(WalletSigWords.send) {
         val shop = ownStore.args() ?: return@primary
         try {
-            OwnerOwn.settingsAttach(shop, ask.preview.settings, sig.text.toString())
+            OwnerOwn.settingsAttach(shop, settings, sig.text.toString())
             settingsDraft = SettingsDraft()
-            showHome()
+            done()
         } catch (e: OwnerException) {
             // The screen stays, with the signature as typed, and nothing was queued.
-            showWalletSig(ask, sig.text.toString(), if (e.rule == "AP-10") WalletSigWords.wrong(ask.address) else e.sayWords(), back)
+            showWalletSig(settings, message, address, sig.text.toString(), if (e.rule == "AP-10") WalletSigWords.wrong(address) else e.sayWords(), done, back)
         } catch (e: LinkageError) {
             msg.show(ui.words(AppWords.libraryMissing(e.message)))
         }
     }
-    val scanButton = ui.button(WalletSigWords.scan) { scanSignature(ask, back) }
+    val scanButton = ui.button(WalletSigWords.scan) { scanSignature(settings, message, address, done, back) }
     screen(WalletSigWords.heading, views, listOf<Button>(send, scanButton, ui.button("Back") { back() }), back = { back() })
 }
 
 /** The wallet's code, read by the camera, which is asked for only when the button is pressed. */
-private fun Controller.scanSignature(ask: OwnSettingsPreview, back: () -> Unit) {
+private fun Controller.scanSignature(settings: ByteArray, message: String, address: String, done: () -> Unit, back: () -> Unit) {
     fun give(r: SourceResult) = when (r) {
-        is SourceResult.Bytes -> showWalletSig(ask, String(r.bytes, Charsets.UTF_8).trim(), null, back)
-        is SourceResult.Failed -> showWalletSig(ask, "", r.words, back)
+        is SourceResult.Bytes -> showWalletSig(settings, message, address, String(r.bytes, Charsets.UTF_8).trim(), null, done, back)
+        is SourceResult.Failed -> showWalletSig(settings, message, address, "", r.words, done, back)
     }
     scan.begin(
         show = { v -> showScan(v) },

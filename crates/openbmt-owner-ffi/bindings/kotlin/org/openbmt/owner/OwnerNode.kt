@@ -241,6 +241,7 @@ private const val OP_PAID_CLEAR = 241
 private const val OP_PAID_CHECK_RESET = 242
 private const val OP_OWN_SETTINGS_PREVIEW = 243
 private const val OP_OWN_SETTINGS_ATTACH = 244
+private const val OP_OWN_SHOP_LIGHTNING_PREVIEW = 245
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -1055,6 +1056,17 @@ class OwnSettingsPreview(
     val message: String,
     val address: String,
 )
+
+/** What [OwnerOwn.shopLightningPreview] found, as [OwnSettingsPreview] does for the settings editor. */
+class OwnShopLightningPreview(
+    val preview: ShopLightningPreview,
+    val needsWalletSig: Boolean,
+    val message: String,
+    val address: String,
+)
+
+internal fun Reader.ownShopLightningPreview(): OwnShopLightningPreview =
+    OwnShopLightningPreview(shopLightningPreview(), bool(), string(), string())
 
 internal fun Reader.ownSettingsPreview(): OwnSettingsPreview = OwnSettingsPreview(settingsPreview(), bool(), string(), string())
 
@@ -4042,6 +4054,12 @@ object OwnerOwn {
     fun settingsPreview(shop: OwnShopArgs, edit: SettingsEditArgs, starter: Boolean): OwnSettingsPreview {
         val r = call(OP_OWN_SETTINGS_PREVIEW, 0) { it.ownShop(shop).settingsEdit(edit).bool(starter) }
         return r.ownSettingsPreview().also { r.end() }
+    }
+
+    /** AP-14, AP-15: [OwnerOwn.settingsPreview] for a Shop Lightning edit. */
+    fun shopLightningPreview(shop: OwnShopArgs, edit: ShopLightningEditArgs, starter: Boolean): OwnShopLightningPreview {
+        val r = call(OP_OWN_SHOP_LIGHTNING_PREVIEW, 0) { it.ownShop(shop).shopLightningEdit(edit).bool(starter) }
+        return r.ownShopLightningPreview().also { r.end() }
     }
 
     /**

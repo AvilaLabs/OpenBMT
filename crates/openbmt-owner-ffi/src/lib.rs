@@ -107,7 +107,10 @@ pub use own::{
     OwnGapArgs, OwnGapView, OwnMade, OwnOfferView, OwnOwnerMade, OwnRelayArgs, OwnRequestArgs,
     OwnRequestView, OwnShopArgs, OwnWaitingView, OwnWalletView, SwitchRowView, SwitchStateKind,
 };
-pub use own_settings::{OwnSettingsAttachArgs, OwnSettingsPreviewArgs, OwnSettingsPreviewView};
+pub use own_settings::{
+    OwnSettingsAttachArgs, OwnSettingsPreviewArgs, OwnSettingsPreviewView,
+    OwnShopLightningPreviewArgs, OwnShopLightningPreviewView,
+};
 pub use paid_check_views::{
     PaidAlarmView, PaidArrivedView, PaidCheckView, PaidClearArgs, PaidDayArgs, PaidDayView,
     PaidSaleLineView,

@@ -4692,7 +4692,7 @@ object AppModelTest {
         ok(SayCheck.problem(wrong) == null && SayCheck.problem(WalletSigWords.starter()) == null, "OA-127: the refusal words keep the limits of the words")
         ok(WalletSigWords.starter().heading == "Move to your own wallet" && WalletSigWords.starter().code == "AP-15", "OA-127: a shop on its starter wallet is not offered the change")
         val screen = source("src/android/WalletSig.kt")
-        ok(screen.contains("OwnerOwn.settingsAttach") && screen.contains("showWalletSig(ask, sig.text.toString()") && screen.contains("scan.begin") && screen.contains("AnimatedQrView.makePlain(act, Who.OWNER, ask.message"), "OA-127: the screen sends through the library, keeps itself on a refusal, scans and shows the code")
+        ok(screen.contains("OwnerOwn.settingsAttach") && screen.contains("showWalletSig(settings, message, address, sig.text.toString()") && screen.contains("scan.begin") && screen.contains("AnimatedQrView.makePlain(act, Who.OWNER, message"), "OA-127: the screen sends through the library, keeps itself on a refusal, scans and shows the code")
         ok(source("src/android/SettingsEdit.kt").contains("ask.needsWalletSig"), "OA-127: the review leads to the screen for a Redirect change")
     }
 
@@ -5398,8 +5398,16 @@ object AppModelTest {
         // The page, and what turning on needs (SL-73, SL-76).
         ok(ShopLightningModel.page(shopLightningState(on = false)) == ShopLightningModel.Page.Off, "off")
         ok(ShopLightningModel.page(shopLightningState()) == ShopLightningModel.Page.On, "on")
-        ok(ShopLightningModel.page(shopLightningState(on = false, ownWallet = true)) == ShopLightningModel.Page.OwnWallet, "a shop with its own wallet has no way to change it")
-        ok(ShopLightningModel.canTurnOn(shopLightningState(on = false)) && !ShopLightningModel.canTurnOn(shopLightningState(on = false, boxes = 0)) && !ShopLightningModel.canTurnOn(shopLightningState(on = false, ownWallet = true)), "turning on needs a Box and a Key app")
+        ok(ShopLightningModel.canTurnOn(shopLightningState(on = false)) && !ShopLightningModel.canTurnOn(shopLightningState(on = false, boxes = 0)), "turning on needs a counter and a Box")
+        // A shop with its own wallet turns it on through the wallet-signing screen (AP-14); on its starter wallet it is not offered (AP-15).
+        val own = shopLightningState(on = false, ownWallet = true)
+        ok(ShopLightningModel.page(own) == ShopLightningModel.Page.Off && ShopLightningModel.canTurnOn(own), "a shop with its own wallet is offered turning on")
+        ok(ShopLightningModel.page(own, starter = true) == ShopLightningModel.Page.Starter && ShopLightningModel.page(shopLightningState(ownWallet = true), starter = true) == ShopLightningModel.Page.On, "a shop on its starter wallet is shown the starter words, unless it is already on")
+        ok(WalletSigWords.starter().heading == "Move to your own wallet" && WalletSigWords.starter().code == "AP-15", "the starter words are the AP-15 ones")
+        ok(ShopLightningWords.all().none { it.first == "ownWallet" }, "the words that said it cannot be turned on are gone")
+        val page = source("src/android/ShopLightning.kt")
+        ok(page.contains("ShopLightningModel.Page.Starter") && page.contains("WalletSigWords.starter()"), "the page shows the starter words for a starter wallet")
+        ok(page.contains("OwnerOwn.shopLightningPreview(shop, edit, starterPinned())") && page.contains("ask.needsWalletSig") && page.contains("showWalletSig(p.settings, ask.message, ask.address"), "turning on goes preview, wallet-signing screen, attach")
         ok(ShopLightningModel.rowSub(null) == ShopLightningWords.rowSubOff && ShopLightningModel.rowSub(shopLightningState()) == ShopLightningWords.rowSubOn, "the row says whether it is on")
 
         // The node's ID: 66 lower-case hexadecimal digits, as the stick's code gives them (SK-35).

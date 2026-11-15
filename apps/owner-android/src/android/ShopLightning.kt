@@ -50,10 +50,10 @@ private fun Controller.withState(back: () -> Unit, block: (OwnerNode, ShopLightn
 }
 
 internal fun Controller.showShopLightning(): Unit = withState({ showSettingsAndPhone() }) { _, state ->
-    when (ShopLightningModel.page(state)) {
-        ShopLightningModel.Page.OwnWallet -> screen(
+    when (ShopLightningModel.page(state, ownStore.hasWallet() && starterPinned())) {
+        ShopLightningModel.Page.Starter -> screen(
             ShopLightningWords.pageTitle,
-            listOf(ui.text(ShopLightningWords.whatItIs), ui.text(ShopLightningWords.ownWallet)),
+            listOf(ui.text(ShopLightningWords.whatItIs), ui.words(WalletSigWords.starter())),
             listOf(ui.button(ShopLightningWords.back) { showSettingsAndPhone() }),
             back = { showSettingsAndPhone() },
         )
@@ -269,8 +269,16 @@ private fun Controller.showSlReview(edit: ShopLightningEditArgs, back: () -> Uni
         begin()
         return
     }
+    // A shop with its own wallet is previewed by the library for it: turning on is a Redirect change, which the
+    // wallet signs (OA-127), and a shop on its starter wallet is refused (AP-15).
+    var ownAsk: org.openbmt.owner.OwnShopLightningPreview? = null
     val p = try {
-        n.shopLightningPreview(edit)
+        val shop = if (ownStore.hasWallet()) ownStore.args() else null
+        if (shop != null) {
+            org.openbmt.owner.OwnerOwn.shopLightningPreview(shop, edit, starterPinned()).also { ownAsk = it }.preview
+        } else {
+            n.shopLightningPreview(edit)
+        }
     } catch (e: OwnerException) {
         screen(ShopLightningWords.approveTitle, listOf(ui.words(e.sayWords())), listOf(ui.button(ShopLightningWords.back) { back() }), back = { back() })
         return
@@ -292,7 +300,14 @@ private fun Controller.showSlReview(edit: ShopLightningEditArgs, back: () -> Uni
         body.add(ui.text(ShopLightningWords.nothingChanged))
     } else {
         body.add(ui.text(needs))
-        actions.add(
+        val ask = ownAsk
+        if (ask != null && ask.needsWalletSig) {
+            actions.add(
+                ui.primary(WalletSigWords.heading) {
+                    showWalletSig(p.settings, ask.message, ask.address, done = { shopLightningDraft = ShopLightningModel.Draft(); showShopLightning() }, back = { showSlReview(edit, back) })
+                },
+            )
+        } else actions.add(
             ui.primary(ShopLightningWords.queue) {
                 // SS-37: a change that loosens or redirects waits while the starter wallet is at its limit or past its date.
                 if (p.changeClass != ShopLightningClass.Free && starterHolds(org.openbmt.owner.StarterChangeKind.Other)) return@primary showStarterHeld { back() }

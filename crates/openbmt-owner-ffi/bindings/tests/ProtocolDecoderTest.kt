@@ -146,6 +146,11 @@ object ProtocolDecoderTest {
         check(ask.preview.version == 4L && ask.needsWalletSig && ask.message == "Message to sign" && ask.address == "bc1qaddress")
         val none = decodeResponse(ownPreviewFrame(needs = false)).ownSettingsPreview()
         check(!none.needsWalletSig && none.message.isEmpty() && none.address.isEmpty() && none.preview.changes.size == 2)
+        // Op 245: the same for a Shop Lightning edit, the preview of which has no changes list.
+        val lightning = decodeResponse(ownShopLightningFrame()).ownShopLightningPreview()
+        check(lightning.preview.version == 5L && lightning.preview.changeClass == ShopLightningClass.Redirect && lightning.preview.after == null)
+        check(lightning.preview.settings.contentEquals(byteArrayOf(7, 7)) && lightning.needsWalletSig && lightning.message == "Message to sign" && lightning.address == "bc1qaddress")
+        rejects("a short Shop Lightning own preview") { decodeResponse(ownShopLightningFrame().let { it.copyOf(it.size - 2) }).ownShopLightningPreview() }
         rejects("an own preview flag") { decodeResponse(ownPreviewFrame(flag = 2)).ownSettingsPreview() }
         rejects("a short own preview") { decodeResponse(ownPreviewFrame().let { it.copyOf(it.size - 3) }).ownSettingsPreview() }
         rejects("a trailing byte after an own preview") { decodeResponse(ownPreviewFrame() + byteArrayOf(0)).let { r -> r.ownSettingsPreview().also { r.end() } } }
@@ -1039,6 +1044,13 @@ object ProtocolDecoderTest {
         w.u8(1).bool(false).u32(8_333).u8(1).u64(98_500).u8(1).u64(1_015).bytes(byteArrayOf(9, 9)).u8(2)
         w.u8(flag)
         if (needs) w.string("Message to sign").string("bc1qaddress") else w.string("").string("")
+        return header(0, w.toByteArray())
+    }
+
+    /** The answer of op 245: a Shop Lightning preview of class Redirect that turns it off, then what the wallet signs. */
+    private fun ownShopLightningFrame(): ByteArray {
+        val w = Writer().u32(5).u8(2).bool(false).bool(false).u8(0).bytes(byteArrayOf(7, 7))
+        w.bool(true).string("Message to sign").string("bc1qaddress")
         return header(0, w.toByteArray())
     }
 

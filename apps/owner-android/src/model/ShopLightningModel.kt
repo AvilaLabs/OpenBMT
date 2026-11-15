@@ -16,7 +16,7 @@ import org.openbmt.owner.ShopLightningState
  */
 object ShopLightningModel {
     /** The pages of the row. */
-    enum class Page { OwnWallet, Off, On }
+    enum class Page { Starter, Off, On }
 
     /** The steps of a turn-on, in order (SL-76). */
     enum class Step { Counter, Node, Provider, Limits, Approve }
@@ -38,14 +38,18 @@ object ShopLightningModel {
         var fee: String = ""
     }
 
-    fun page(state: ShopLightningState): Page = when {
-        state.ownWallet -> Page.OwnWallet
+    /** A shop on its starter wallet is not offered turning on: the wallet's key is on this phone (AP-15). */
+    fun page(state: ShopLightningState, starter: Boolean = false): Page = when {
         state.on -> Page.On
+        state.ownWallet && starter -> Page.Starter
         else -> Page.Off
     }
 
-    /** Turning on needs a shop with a Key app, a counter to pick and a Box to keep the second copy (SL-73, SL-76). */
-    fun canTurnOn(state: ShopLightningState): Boolean = !state.ownWallet && state.counters.isNotEmpty() && state.boxes.isNotEmpty()
+    /**
+     * Turning on needs a counter to pick and a Box to keep the second copy (SL-73, SL-76). A shop with its own wallet
+     * signs the change with the wallet (AP-14).
+     */
+    fun canTurnOn(state: ShopLightningState): Boolean = state.counters.isNotEmpty() && state.boxes.isNotEmpty()
 
     /** The row's second line: whether Shop Lightning is on. */
     fun rowSub(state: ShopLightningState?): String = if (state != null && state.on) ShopLightningWords.rowSubOn else ShopLightningWords.rowSubOff

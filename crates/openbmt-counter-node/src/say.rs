@@ -533,9 +533,9 @@ fn needs_wallet() -> Words {
     Words::new(
         Tone::Ended,
         "Change needs the wallet",
-        "This change sends payments somewhere else, which only the shop's wallet can approve. That is not built yet, so nothing changed.",
+        "This change sends payments somewhere else, and it came without the signature of the shop's wallet, so nothing changed.",
         Who::Owner,
-        "Keep this setting as it is for now.",
+        "Make the change again on the owner phone and sign it with the wallet.",
     )
     .code("CR-239")
 }

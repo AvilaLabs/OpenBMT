@@ -7,7 +7,7 @@ import org.openbmt.app.Who
 /**
  * The owner app's own words on the Shop Lightning screens (`docs/SHOP-LIGHTNING-RULES.md`, SL-04, SL-45, SL-70 to
  * SL-78), listed in screen order. The words the library gives for a refusal (no Box, a node's ID that is not one, a
- * provider's address that is not one, a shop with its own wallet) are the library's own. The list is
+ * provider's address that is not one, a shop on its starter wallet) are the library's own. The list is
  * written to docs/screens/owner-app.md by [AppWords.screensMarkdown]. No Android class is used.
  */
 object ShopLightningWords {
@@ -19,7 +19,6 @@ object ShopLightningWords {
     const val back = "Back"
     const val whatItIs = "One of the shop's counters takes Lightning payments with a node of its own. The shop's Box keeps a second copy of the node's state, a provider the shop picks opens its channels, and money above a cap moves to the shop's wallet."
     const val noBox = "Shop Lightning needs the shop's Box, which keeps the second copy of the node's state. Add a Box first."
-    const val ownWallet = "For a shop paid to its own wallet, Shop Lightning cannot be turned on from this phone yet."
     const val turnOn = "Turn on"
     // ---- the turn-on steps, and the approval of a change (SL-03, SL-28, SL-29, SL-32, SL-34, SL-71, SL-72, SL-76) ----
     const val stepOf = "Step {n} of {of}"
@@ -216,7 +215,6 @@ object ShopLightningWords {
         "back" to back,
         "whatItIs" to whatItIs,
         "noBox" to noBox,
-        "ownWallet" to ownWallet,
         "turnOn" to turnOn,
         "stepOf" to stepOf,
         "counterTitle" to counterTitle,

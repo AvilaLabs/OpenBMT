@@ -952,7 +952,6 @@ library's own:
 | back | Back |
 | whatItIs | One of the shop's counters takes Lightning payments with a node of its own. The shop's Box keeps a second copy of the node's state, a provider the shop picks opens its channels, and money above a cap moves to the shop's wallet. |
 | noBox | Shop Lightning needs the shop's Box, which keeps the second copy of the node's state. Add a Box first. |
-| ownWallet | For a shop paid to its own wallet, Shop Lightning cannot be turned on from this phone yet. |
 | turnOn | Turn on |
 | stepOf | Step {n} of {of} |
 | counterTitle | Pick the Lightning counter |

@@ -9,6 +9,7 @@ use openbmt_core::approval::wallet_message_for;
 use openbmt_core::identity::Identity;
 use openbmt_core::pairing_own::OwnCounterPairing;
 use openbmt_core::settings::SignedSettings;
+use openbmt_owner_node::OwnNodeError;
 
 use super::kit::Scratch;
 use super::settings::Edit;
@@ -165,4 +166,81 @@ fn ap_14_a_good_signature_is_attached_and_a_bad_one_stores_nothing_through_dispa
     // Now the node is set and the same edit changes nothing, so no Redirect.
     let after = ask(&dir, &file, false).unwrap();
     assert!(!after.1);
+}
+
+const LN_NODE: &str = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+const LN_PROVIDER: &str = "02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5";
+
+/// The request of op 245 for turning Shop Lightning on at the paired counter,
+/// with the Box given.
+fn shop_lightning_request(dir: &Scratch, file: &[u8], starter: bool) -> Vec<u8> {
+    // The shop has a Box in force, as Shop Lightning needs (SL-73).
+    let wallet = openbmt_core::pinned_wallet::PinnedWallet::from_bytes(file).unwrap();
+    crate::own::turn_on_shop(dir.path(), id(1), wallet, |node| {
+        let (shop, store) = node.shop_and_store();
+        shop.add_box(id(9).device_id(), 0, |b| store(b))
+            .map(|_| ())
+            .map_err(|e| OwnNodeError::Io(format!("{e:?}")))
+    })
+    .unwrap_or_else(|e| panic!("a Box was not added: {e}"));
+    let mut w = W::new()
+        .string(dir.path().to_str().unwrap())
+        .bytes(&[1u8; 32])
+        .bytes(file)
+        // Set, the counter, the node, the Box, the provider and its address.
+        .u8(0)
+        .opt_bytes(Some(&id(2).device_id().to_bytes()))
+        .opt_string(Some(LN_NODE))
+        .opt_bytes(None)
+        .opt_string(Some(LN_PROVIDER))
+        .opt_string(Some("203.0.113.7:9735"));
+    // The cap and the most for one opening.
+    w = w.u8(1).u64(5_000_000).u8(1).u64(20_000);
+    w.u8(u8::from(starter)).0
+}
+
+#[test]
+fn ap_14_shop_lightning_is_previewed_and_put_in_force_through_dispatch() {
+    let (dir, file, key) = paired(64);
+    let response = call(245, &shop_lightning_request(&dir, &file, false));
+    if let Some(f) = Rd::error(&response) {
+        panic!("refused: {f:?}");
+    }
+    let mut r = Rd::ok(&response);
+    let _version = r.u32();
+    let (class, _, nothing) = (r.u8(), r.bool(), r.bool());
+    assert_eq!(class, 2, "a Redirect");
+    assert!(!nothing);
+    let after = r.opt(|r| {
+        let counter = r.bytes();
+        let _ = (
+            r.bytes(),
+            r.bytes(),
+            r.bytes(),
+            r.string(),
+            r.u64(),
+            r.u64(),
+        );
+        counter
+    });
+    assert_eq!(after.unwrap(), id(2).device_id().to_bytes());
+    let settings = r.bytes();
+    let (needs, message, address) = (r.bool(), r.string(), r.string());
+    r.done();
+    assert!(needs);
+    let parsed = SignedSettings::from_bytes(&settings).unwrap();
+    assert_eq!(message, wallet_message_for(&parsed.settings));
+    let wallet = openbmt_core::pinned_wallet::PinnedWallet::from_bytes(&file).unwrap();
+    assert_eq!(address, wallet.receive_address(0).unwrap().to_string());
+    // A wrong signature stores nothing; the right one puts it in force.
+    let wrong = sign_compact_text(&key, "another message");
+    assert_eq!(attach(&dir, &file, &settings, &wrong).unwrap_err(), "AP-10");
+    attach(&dir, &file, &settings, &sign_compact_text(&key, &message)).unwrap();
+}
+
+#[test]
+fn ap_15_shop_lightning_on_a_starter_wallet_is_refused_through_dispatch() {
+    let (dir, file, _) = paired(65);
+    let response = call(245, &shop_lightning_request(&dir, &file, true));
+    assert_eq!(Rd::error(&response).expect("refused").rule, "AP-15");
 }
