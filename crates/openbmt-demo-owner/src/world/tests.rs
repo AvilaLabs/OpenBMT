@@ -49,6 +49,7 @@ fn start_fields() -> Vec<u8> {
     f.push(0); // no link
     f.push(0); // not an own wallet
     f.push(0); // no float
+    f.push(0); // a shop (GV-03)
     f
 }
 
