@@ -34,6 +34,7 @@ fn shop(dir: &Scratch, wallet: &[u8]) -> W {
         .string(dir.path().to_str().unwrap())
         .bytes(&[1u8; 32])
         .bytes(wallet)
+        .u8(0)
 }
 
 /// A shop with its own wallet and one counter in force: its folder and the
@@ -106,6 +107,7 @@ fn ask_with_cosigners(
             .string(dir.path().to_str().unwrap())
             .bytes(&[1u8; 32])
             .bytes(file)
+            .u8(0)
             .0
             .into_iter()
             .chain(node_edit())
@@ -233,6 +235,7 @@ fn shop_lightning_request(dir: &Scratch, file: &[u8], starter: bool) -> Vec<u8> 
         .string(dir.path().to_str().unwrap())
         .bytes(&[1u8; 32])
         .bytes(file)
+        .u8(0)
         // Set, the counter, the node, the Box, the provider and its address.
         .u8(0)
         .opt_bytes(Some(&id(2).device_id().to_bytes()))
@@ -310,6 +313,7 @@ fn preview_of(dir: &Scratch, file: &[u8], edit: Vec<u8>) -> Vec<u8> {
             .string(dir.path().to_str().unwrap())
             .bytes(&[1u8; 32])
             .bytes(file)
+            .u8(0)
             .0
             .into_iter()
             .chain(edit)
@@ -407,6 +411,7 @@ fn sl_77_shop_lightning_is_turned_off_for_a_shop_with_its_own_wallet_through_op_
         .string(dir.path().to_str().unwrap())
         .bytes(&[1u8; 32])
         .bytes(&file)
+        .u8(0)
         .u8(2)
         .opt_bytes(None)
         .opt_string(None)

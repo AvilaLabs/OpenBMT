@@ -1139,7 +1139,7 @@ class Controller(private val act: MainActivity) {
         // CR-246: bills and tabs, one tile under the others.
         tiles.addView(ui.tile(WordsOfBills.BILLS, Glyph.List, false) { showBills() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.px(104)).also { it.topMargin = ui.px(12) })
         // GV-14: the manager leaves the settings and the lists, and the amount screen is home again.
-        val leave = if (Giving.isGiving(place)) listOf(ui.button(GivingWords.TODO_WORDS_GIVING_LEAVE) { desk.leave(); showHome() }) else emptyList()
+        val leave = if (Giving.isGiving(place)) listOf(ui.button(GivingWords.LEAVE) { desk.leave(); showHome() }) else emptyList()
         show(bar, listOf(health, tillSlot, starterSlot, lines, noteSlot, tiles, requestsSlot, counterLine()), leave, Showing.Home)
         var healthSig: String? = null
         var linesSig: String? = null
@@ -1942,7 +1942,7 @@ class Controller(private val act: MainActivity) {
         }
         val msg = Slot(act)
         val centre = Centered(act)
-        centre.addView(ui.text(if (giving) GivingWords.TODO_WORDS_GIVING_AMOUNT_HEADING else "Amount of the sale", 14f, colour = ui.pal.secondary, medium = true).also { it.gravity = android.view.Gravity.CENTER }, ui.margins())
+        centre.addView(ui.text(if (giving) GivingWords.AMOUNT_HEADING else "Amount of the sale", 14f, colour = ui.pal.secondary, medium = true).also { it.gravity = android.view.Gravity.CENTER }, ui.margins())
         centre.addView(display, ui.margins(top = 6))
         priceWords()?.let { centre.addView(ui.text(it.what, 14f, colour = ui.pal.secondary).also { t -> t.gravity = android.view.Gravity.CENTER }, ui.margins(top = 6)) }
         centre.addView(msg, ui.margins(top = 12))
@@ -1955,12 +1955,12 @@ class Controller(private val act: MainActivity) {
             display.text = entry.show()
             msg.show()
         }
-        val open = ui.primary(if (giving) GivingWords.TODO_WORDS_GIVING_GIVE else "Open the sale") {
+        val open = ui.primary(if (giving) GivingWords.GIVE else "Open the sale") {
             if (entry.minor <= 0) msg.show(note(AppWords.amountNeeded)) else chooseTip(entry.minor) { msg.show(note(it)) }
         }
         if (giving) {
             // GV-11, GV-14: the amount screen of a giving point is home; its one way out is the gear, behind the manager's PIN.
-            return show(ui.bar(GivingWords.TODO_WORDS_GIVING_BAR, logo = true, gear = { showSettings() }), listOf(centre, pad), listOf(open), Showing.Home)
+            return show(ui.bar(GivingWords.BAR, logo = true, gear = { showSettings() }), listOf(centre, pad), listOf(open), Showing.Home)
         }
         val request = ui.secondary(WordsOfRequests.REQUEST) {
             if (entry.minor <= 0) msg.show(note(AppWords.amountNeeded)) else showRequestForm(entry.minor)
@@ -1978,10 +1978,10 @@ class Controller(private val act: MainActivity) {
         val views = ArrayList<View>()
         views.add(ui.labelled("Manager's PIN", pinInput))
         views.add(msg)
-        val go = ui.primary(GivingWords.TODO_WORDS_GIVING_PIN_GO) {
+        val go = ui.primary(GivingWords.PIN_GO) {
             checkPin(pinInput.text.toString(), pinInput, { desk.managerUnlocked(); then() }, { w -> msg.show(note(w)) })
         }
-        show(ui.bar(GivingWords.TODO_WORDS_GIVING_PIN_BAR, back = { showHome() }), views, listOf(go))
+        show(ui.bar(GivingWords.PIN_BAR, back = { showHome() }), views, listOf(go))
     }
 
     /** CR-213: the optional note and the lifetime of a request to send, for the amount typed on New sale. */
@@ -2305,8 +2305,8 @@ class Controller(private val act: MainActivity) {
                         centre.addView(OutcomeMark(act, says.colour, band.band), LinearLayout.LayoutParams(ui.px(112), ui.px(112)))
                         centre.addView(
                             ui.text(
-                                if (gift) GivingWords.TODO_WORDS_GIVING_OUTCOME_HEADING else says.heading,
-                                SaleModel.outcomeHeadingSp(if (gift) GivingWords.TODO_WORDS_GIVING_OUTCOME_HEADING else says.heading),
+                                if (gift) GivingWords.OUTCOME_HEADING else says.heading,
+                                SaleModel.outcomeHeadingSp(if (gift) GivingWords.OUTCOME_HEADING else says.heading),
                                 bold = true,
                                 colour = Palette.WHITE,
                             ).also { it.gravity = android.view.Gravity.CENTER },
@@ -2334,7 +2334,7 @@ class Controller(private val act: MainActivity) {
                             }
                         }
                         if (gift) {
-                            centre.addView(ui.text(GivingWords.TODO_WORDS_GIVING_OUTCOME_THANKS, 17f, colour = Palette.WHITE).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 28))
+                            centre.addView(ui.text(GivingWords.OUTCOME_THANKS, 17f, colour = Palette.WHITE).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 28))
                         } else {
                             centre.addView(ui.text(says.what, 17f, colour = Palette.WHITE).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 28))
                             centre.addView(ui.text(says.next, 17f, bold = true, colour = Palette.WHITE).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 10))
@@ -2352,7 +2352,7 @@ class Controller(private val act: MainActivity) {
                             centre.addView(card, ui.margins(top = 16))
                         }
                         val actions = ArrayList<Button>()
-                        actions.add(ui.onBand(if (gift) GivingWords.TODO_WORDS_GIVING_OUTCOME_DONE else "Done", SaleModel.isPaid(s.state) && says.colour == Colour.Green, band.band) { showHome() })
+                        actions.add(ui.onBand(if (gift) GivingWords.OUTCOME_DONE else "Done", SaleModel.isPaid(s.state) && says.colour == Colour.Green, band.band) { showHome() })
                         // GV-14: the gift's details and the hand-by-hand accept are the manager's, behind the PIN.
                         if (Giving.pageOffersManagerSteps(place, desk.managerIn)) {
                             if (b.override) actions.add(ui.onBand(if (cashiers.isEmpty()) "Accept by hand (manager)" else "Accept by hand", false, band.band) { showOverride(index) })

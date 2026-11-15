@@ -223,18 +223,28 @@ pub fn clean_foreign(text: &str) -> String {
 }
 
 /// The label of the setting that says what kind of place this is (GV-01),
-/// as the change screens show it. Placeholder until the words are given.
-pub const TODO_WORDS_PLACE_LABEL: &str = "TODO_WORDS_PLACE_LABEL";
-/// The value of that setting for a shop. Placeholder.
-pub const TODO_WORDS_PLACE_SHOP: &str = "TODO_WORDS_PLACE_SHOP";
-/// The value of that setting for a place of giving. Placeholder.
-pub const TODO_WORDS_PLACE_GIVING: &str = "TODO_WORDS_PLACE_GIVING";
+/// as the change screens show it.
+pub const PLACE_LABEL: &str = "Kind of place";
+/// The value of that setting for a shop.
+pub const PLACE_SHOP: &str = "Shop";
+/// The value of that setting for a place of giving.
+pub const PLACE_GIVING: &str = "Place that takes gifts";
+
+/// The words of the kind of place under their names, for the list of
+/// `docs/screens/core.md` and for the checks of SC-12.
+pub fn place_words() -> [(&'static str, &'static str); 3] {
+    [
+        ("PLACE_LABEL", PLACE_LABEL),
+        ("PLACE_SHOP", PLACE_SHOP),
+        ("PLACE_GIVING", PLACE_GIVING),
+    ]
+}
 
 /// The value of the place setting as a change screen shows it.
 pub fn place_value(place: Place) -> &'static str {
     match place {
-        Place::Shop => TODO_WORDS_PLACE_SHOP,
-        Place::Giving => TODO_WORDS_PLACE_GIVING,
+        Place::Shop => PLACE_SHOP,
+        Place::Giving => PLACE_GIVING,
     }
 }
 
@@ -337,6 +347,12 @@ fn check_sentence(name: &'static str, text: &str) -> Result<(), String> {
     if text.chars().next().is_some_and(char::is_lowercase) {
         return fail("starts with a small letter");
     }
+    check_plain(name, text)
+}
+
+/// SC-12: whether a label is plain: no control character, rule number, id,
+/// program notation or jargon.
+pub fn check_plain_text(name: &'static str, text: &str) -> Result<(), String> {
     check_plain(name, text)
 }
 

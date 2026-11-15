@@ -1054,7 +1054,7 @@ object AppWords {
     )
 
     fun editField(id: String, c: ShopCurrency = ShopCurrency.Usd, giving: Boolean = false): SayWords {
-        // GV-03: the switch of the kind of place has placeholder words, which are not in the list the words test checks.
+        // GV-03: the switch of the kind of place has words of its own, listed in [all].
         if (id == "place") return GivingWords.editFieldPlace
         val shop = editFieldsIn(c).firstOrNull { it.first == id }?.second ?: throw IllegalArgumentException("no field $id")
         // GV-10: a place of giving speaks the words of giving of this field where it has them.
@@ -1397,6 +1397,15 @@ object AppWords {
                 "|---|---|\n",
         )
         for ((key, text) in PaidCheckWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
+        out.append(
+            "\n## A place that takes gifts (GV-03)\n\n" +
+                "The question of the first run and its two answers. The words of the\n" +
+                "settings editor's group and switch for the kind of place are in the\n" +
+                "list above.\n\n" +
+                "| Key | Text |\n" +
+                "|---|---|\n",
+        )
+        for ((key, text) in GivingWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         return out.toString()
     }
 
@@ -1500,6 +1509,8 @@ object AppWords {
         "editGroupSafety" to editGroupSafety,
         "editGroupShares" to editGroupShares,
         "editGroupLightning" to editGroupLightning,
+        "editGroupPlace" to GivingWords.editGroupPlace,
+        "editField_place" to GivingWords.editFieldPlace,
         "editLightningNote" to editLightningNote,
         "editNothingChanged" to editNothingChanged,
         "editNeedsKeyApp" to editNeedsKeyApp,

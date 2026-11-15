@@ -599,7 +599,7 @@ fn field_words(
         ),
         "tips_on" => ("Ask for a tip", (on_off(old.tips_on), on_off(new.tips_on))),
         "place" => (
-            openbmt_core::say::TODO_WORDS_PLACE_LABEL,
+            openbmt_core::say::PLACE_LABEL,
             (
                 openbmt_core::say::place_value(old.place).to_string(),
                 openbmt_core::say::place_value(new.place).to_string(),

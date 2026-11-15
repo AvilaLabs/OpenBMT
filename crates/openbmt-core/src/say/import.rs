@@ -96,6 +96,15 @@ pub fn screens_markdown() -> String {
             words.code.unwrap_or("")
         ));
     }
+    out.push_str(
+        "\n## The kind of place (GV-01)\n\n\
+         The label and the two values the change screens show for it.\n\n\
+         | Key | Text |\n\
+         |---|---|\n",
+    );
+    for (key, text) in crate::say::place_words() {
+        out.push_str(&format!("| {} | {} |\n", cell(key), cell(text)));
+    }
     out
 }
 
@@ -103,6 +112,7 @@ pub fn screens_markdown() -> String {
 mod tests {
     use super::*;
     use crate::say::check_distinct;
+    use crate::settings::Place;
 
     #[test]
     fn sc_12_every_word_passes_the_check_and_none_repeats() {
@@ -128,6 +138,27 @@ mod tests {
             assert!(listed(&r));
         }
         assert_eq!(all_words().len(), ALL_REFUSED.len());
+    }
+
+    #[test]
+    fn gv_01_the_words_of_the_place_are_written_and_plain() {
+        let words = crate::say::place_words();
+        for (name, text) in words {
+            assert!(!text.contains("TODO_WORDS"), "{name}");
+            assert!(
+                (1..=crate::say::MAX_HEADING).contains(&text.chars().count()),
+                "{name}"
+            );
+            assert!(!text.ends_with('.'), "{name}");
+            assert!(crate::say::check_plain_text(name, text).is_ok(), "{name}");
+        }
+        assert_eq!(crate::say::place_value(Place::Shop), "Shop");
+        assert_eq!(
+            crate::say::place_value(Place::Giving),
+            "Place that takes gifts"
+        );
+        let texts: std::collections::HashSet<_> = words.iter().map(|w| w.1).collect();
+        assert_eq!(texts.len(), 3);
     }
 
     #[test]

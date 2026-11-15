@@ -113,7 +113,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1 + WordsOfTill.all().size + 1 + WordsOfStarter.all().size + 1 + ShopLightningWords.all().size + 1 + PairHereWords.all().size + 1 + 1 + 1 + 1, "one row for each words and the header, and for each text of the switch, of the till, of the starter line and of the Lightning key and their headers")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1 + WordsOfTill.all().size + 1 + WordsOfStarter.all().size + 1 + ShopLightningWords.all().size + 1 + PairHereWords.all().size + 1 + GivingWords.all().size + 1 + 1 + 1 + 1, "one row for each words and the header, and for each text of the switch, of the till, of the starter line and of the Lightning key and their headers")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -1851,13 +1851,10 @@ object AppModelTest {
         ok(desk.returnsToAmount(false) && !desk.managerIn, "GV-14: after two minutes the screen returns to the amount and the manager is out")
         ok(!desk.idle() && !desk.returnsToAmount(false), "the count starts again after the return")
         ok(Giving.leavesWhenIdle(false) && !Giving.leavesWhenIdle(true), "only the gift in progress is not left")
-        // The placeholder words are named for what they must say and are not in the list of screens.
-        val ids = listOf(
-            GivingWords.TODO_WORDS_GIVING_BAR, GivingWords.TODO_WORDS_GIVING_AMOUNT_HEADING, GivingWords.TODO_WORDS_GIVING_GIVE,
-            GivingWords.TODO_WORDS_GIVING_PIN_BAR, GivingWords.TODO_WORDS_GIVING_PIN_GO, GivingWords.TODO_WORDS_GIVING_LEAVE,
-            GivingWords.TODO_WORDS_GIVING_OUTCOME_HEADING, GivingWords.TODO_WORDS_GIVING_OUTCOME_THANKS, GivingWords.TODO_WORDS_GIVING_OUTCOME_DONE,
-        )
-        ok(ids.all { it.startsWith("TODO_WORDS_GIVING_") } && ids.toSet().size == ids.size, "each placeholder is its own")
+        // The words are written, listed with the screens, and each is its own.
+        val texts = GivingWords.all().map { it.second }
+        ok(texts.size == 9 && texts.toSet().size == 9 && texts.none { it.contains("TODO_WORDS") }, "each giving word is written and its own")
+        ok(GivingWords.BAR == "Give" && GivingWords.OUTCOME_THANKS == "Thank you for your gift.", "the words are as written down")
         // The controller reads the place, gates the three screens, counts touches and uses the one constant.
         val controller = appDir?.let { File(it, "src/android/Controller.kt").readText() }
         if (controller != null) {

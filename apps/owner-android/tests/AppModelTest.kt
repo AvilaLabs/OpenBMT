@@ -230,7 +230,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + OwnPairWords.all().size + 1 + AppWords.keyMapAll().size + 1 + StarterWords.all().size + 1 + RequestWords.all().size + 1 + WebOrderWords.all().size + 1 + ShopLightningWords.all().size + 1 + WalletSigWords.all().size + 1 + PaidCheckWords.all().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's, of the key map's, of the starter wallet's and of the payment requests'")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + OwnPairWords.all().size + 1 + AppWords.keyMapAll().size + 1 + StarterWords.all().size + 1 + RequestWords.all().size + 1 + WebOrderWords.all().size + 1 + ShopLightningWords.all().size + 1 + WalletSigWords.all().size + 1 + PaidCheckWords.all().size + 1 + GivingWords.all().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's, of the key map's, of the starter wallet's and of the payment requests'")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -3653,8 +3653,12 @@ object AppModelTest {
         ok((SettingsEditModel.args(td, sampleSettings()) as Form.Ok).value.place == Place.Giving, "a switch to giving is sent")
         td.typed["place"] = "0"
         ok((SettingsEditModel.args(td, sampleSettings(place = Place.Giving)) as Form.Ok).value.place == Place.Shop, "a switch back to a shop is sent")
-        // GV-10: the placeholders are not registered words, and no giving word is written.
-        ok(GivingWords.editGroupPlace.heading.startsWith("TODO_WORDS") && GivingWords.TODO_WORDS_PLACE_QUESTION.startsWith("TODO_WORDS"), "GV-10: the new screens' words are markers")
+        // GV-10: the words of the new screens are written and registered, and none is a marker.
+        val names = AppWords.all().map { it.first }
+        ok("editGroupPlace" in names && "editField_place" in names, "GV-10: the group and the switch are listed with the app's words")
+        ok(GivingWords.all().size == 4 && GivingWords.all().none { it.second.contains("TODO_WORDS") }, "GV-10: the first run's words are listed and written")
+        ok(GivingWords.PLACE_QUESTION == "What kind of place is this?" && GivingWords.PLACE_BAR == "Kind of place", "GV-03: the question as written down")
+        ok(listOf(GivingWords.editGroupPlace, GivingWords.editFieldPlace).all { SayCheck.problem(it) == null }, "the words of the place pass the checks")
         ok(AppWords.editField("tips_on", ShopCurrency.Usd, true).what == AppWords.editField("tips_on", ShopCurrency.Usd, false).what, "GV-10: a giving lookup with no giving word is the shop's word")
     }
 

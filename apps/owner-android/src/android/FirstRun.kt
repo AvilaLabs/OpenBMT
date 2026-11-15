@@ -170,11 +170,11 @@ private fun Controller.showPlace(r: FirstRun) {
         }
     }
     stepScreen(
-        GivingWords.TODO_WORDS_PLACE_BAR,
-        listOf(heading(GivingWords.TODO_WORDS_PLACE_QUESTION), msg),
+        GivingWords.PLACE_BAR,
+        listOf(heading(GivingWords.PLACE_QUESTION), msg),
         listOf(
-            ui.primary(GivingWords.TODO_WORDS_PLACE_CHOICE_SHOP) { choose(Place.Shop) },
-            ui.primary(GivingWords.TODO_WORDS_PLACE_CHOICE_GIVING) { choose(Place.Giving) },
+            ui.primary(GivingWords.PLACE_CHOICE_SHOP) { choose(Place.Shop) },
+            ui.primary(GivingWords.PLACE_CHOICE_GIVING) { choose(Place.Giving) },
         ),
         { r.back(); showFirstRun() },
     )

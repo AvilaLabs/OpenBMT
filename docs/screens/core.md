@@ -10,3 +10,13 @@ environment variable `OPENBMT_WRITE_SCREENS=1` to write it again.
 | ImportRefused::Damaged | This description is damaged | Its checksum does not match, so part of it was misread or changed. | Scan or export it again from your wallet. | the owner | WL-10 |
 | ImportRefused::TestNetwork | Test-network wallet | It is for testnet or signet, not real bitcoin. | Export the description of your real bitcoin account and scan that. | the owner | WL-11 |
 | ImportRefused::Unsupported | Wallet type not supported | OpenBMT can check native SegWit single-key wallets and its own 2-of-3 multisig. This is a different kind. | In your wallet, export the public description of a native SegWit account (it starts with wpkh) and scan that. | the owner | WL-12 |
+
+## The kind of place (GV-01)
+
+The label and the two values the change screens show for it.
+
+| Key | Text |
+|---|---|
+| PLACE_LABEL | Kind of place |
+| PLACE_SHOP | Shop |
+| PLACE_GIVING | Place that takes gifts |

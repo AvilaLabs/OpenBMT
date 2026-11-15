@@ -52,7 +52,7 @@ pub(crate) fn shown_name(field: &'static str) -> &'static str {
         "watch_key" => "Watch key",
         "tips_on" => "Ask for a tip",
         "tip_percents" => "Tips",
-        "place" => openbmt_core::say::TODO_WORDS_PLACE_LABEL,
+        "place" => openbmt_core::say::PLACE_LABEL,
         other => other,
     }
 }

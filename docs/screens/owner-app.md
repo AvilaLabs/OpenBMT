@@ -107,6 +107,8 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | editGroupSafety | Safety | How recent this phone's report must be, and what the shop says about its network. | Change what you need, then press Done. | the owner |  |
 | editGroupShares | Counters' shares | Each counter's share of every instant limit. The shares may add up to 100% at most. | Type each share as a percent with up to two decimals. | the owner |  |
 | editGroupLightning | Lightning node | The shop's own Lightning node: every Lightning payment must be made out to this node's key. | Paste or scan the node's key or address, or remove the node. | the owner |  |
+| editGroupPlace | Kind of place | A shop sells things. A place that takes gifts, such as a church or a charity, lets each giver choose the amount. | Choose the one this is. A place that takes gifts hides the shop's steps; they stay in the settings. | the owner |  |
+| editField_place | A place that takes gifts | On, the counter asks each giver for the amount, thanks them, and nothing is handed over. | Turning it on needs the Key app's approval. Turning it off does not. | the owner |  |
 | editLightningNote | Naming a node | Naming a node needs the Key app, which shows the key in full. | Afterwards, set up Lightning on each counter, which holds its own limited key. | the owner |  |
 | editNothingChanged | Nothing changed | Every value is what the settings hold now, so there is nothing to queue. | Go back and change a value, or leave the editor. | the owner |  |
 | editNeedsKeyApp | The Key app must approve | Something here loosens a limit or a check, so the whole change needs the Key app's approval. | Queue the change, then build the request for the Key app. | the owner |  |
@@ -1101,3 +1103,16 @@ other names in braces are counts:
 | OC61_HELD_HEADING | Counter not checked |
 | OC61_HELD_WHAT | {counter} has 256 payment alarms not cleared, so this phone checks none of its sales until some are cleared. |
 | OC61_HELD_NEXT | Check the counter: it may have been tampered with. Clear each alarm once it is dealt with. |
+
+## A place that takes gifts (GV-03)
+
+The question of the first run and its two answers. The words of the
+settings editor's group and switch for the kind of place are in the
+list above.
+
+| Key | Text |
+|---|---|
+| GV03_PLACE_QUESTION | What kind of place is this? |
+| GV03_PLACE_CHOICE_SHOP | A shop |
+| GV03_PLACE_CHOICE_GIVING | A place that takes gifts |
+| GV03_PLACE_BAR | Kind of place |

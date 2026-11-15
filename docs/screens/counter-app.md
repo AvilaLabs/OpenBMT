@@ -173,6 +173,23 @@ The texts of the pairing screen the owner app opens.
 | pairHereDone | Done |
 | pairHereNotTaken | The owner app sent a code this pairing does not take. Nothing was changed. |
 
+## A place that takes gifts (GV-11, GV-12, GV-14)
+
+The texts of the amount screen, the manager's PIN page and the screen
+that ends a gift.
+
+| Key | Text |
+|---|---|
+| GV_BAR | Give |
+| GV_AMOUNT_HEADING | Amount of your gift |
+| GV_GIVE | Give this amount |
+| GV_PIN_BAR | For the manager |
+| GV_PIN_GO | Unlock |
+| GV_LEAVE | Back to giving |
+| GV_OUTCOME_HEADING | Received |
+| GV_OUTCOME_THANKS | Thank you for your gift. |
+| GV_OUTCOME_DONE | Done |
+
 ## The counter's line (DESIGN 2.1)
 
 Shown large on the ready-to-sell screen of a paired counter,

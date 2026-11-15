@@ -750,6 +750,14 @@ object AppWords {
         )
         for ((key, text) in PairHereWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         out.append(
+            "\n## A place that takes gifts (GV-11, GV-12, GV-14)\n\n" +
+                "The texts of the amount screen, the manager's PIN page and the screen\n" +
+                "that ends a gift.\n\n" +
+                "| Key | Text |\n" +
+                "|---|---|\n",
+        )
+        for ((key, text) in GivingWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
+        out.append(
             "\n## The counter's line (DESIGN 2.1)\n\n" +
                 "Shown large on the ready-to-sell screen of a paired counter,\n" +
                 "and on no sale screen. The second is for a counter paired on the owner's phone\n" +
