@@ -14,7 +14,7 @@ default-theme = "rust"
 preferred-dark-theme = "navy"
 git-repository-url = "https://github.com/AvilaLabs/OpenBMT"
 edit-url-template = "https://github.com/AvilaLabs/OpenBMT/edit/main/{path}"
-site-url = "/"
+site-url = "/handbook/"
 
 [output.html.playground]
 runnable = false

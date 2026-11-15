@@ -1,0 +1,27 @@
+[package]
+name = "openbmt-demo"
+description = "The OpenBMT web demo: the counter and the books run in the page against a chain simulated in memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The same exact pins as the crates it drives. No package is added: the glue
+# between the page and the code is the three calls of `abi`.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+openbmt-core = { path = "../openbmt-core" }
+openbmt-counter = { path = "../openbmt-counter" }
+openbmt-watch = { path = "../openbmt-watch" }
+openbmt-books = { path = "../openbmt-books" }
+openbmt-qr = { path = "../openbmt-qr" }
+openbmt-json = { path = "../openbmt-json" }
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
+
+# The wallet key of the demo is made once and only its public part is kept
+# (see `wallet.rs`); this test reads the kernel's random bytes to make it.
+[dev-dependencies]
+openbmt-counter-ffi = { path = "../openbmt-counter-ffi" }

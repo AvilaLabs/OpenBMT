@@ -117,6 +117,14 @@ object AppModelTest {
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
             ok(screensMd.isFile && screensMd.readText() == text, "docs/screens/counter-app.md is what screensMarkdown makes (run with OPENBMT_WRITE_SCREENS=1)")
+            val json = AppWords.screensJson()
+            val jsonFile = File(screensMd.parentFile.parentFile.parentFile, "demo/words/counter-app.json")
+            if (System.getenv("OPENBMT_WRITE_SCREENS") != null) {
+                jsonFile.parentFile.mkdirs()
+                jsonFile.writeText(json)
+            }
+            ok(jsonFile.isFile && jsonFile.readText() == json, "demo/words/counter-app.json is what screensJson makes (run with OPENBMT_WRITE_SCREENS=1)")
+            ok(all.all { (name, _) -> text.contains("| $name |") && json.contains("\"$name\": {") }, "every state of the table is in the JSON")
         }
         // The library's words go through the same checks.
         val lib = Words(2, 3, "Heading", "What happened.", "Do this.", "CR-12", 1_700_000_000L, Quoted("The POS", "a\u0007b"), "d")

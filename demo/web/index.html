@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenBMT demo</title>
+<meta name="description" content="Try OpenBMT in your browser: ring up a bitcoin sale on the counter and watch it reach the owner's phone. Real OpenBMT code, pretend blockchain.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preload" href="fonts/ubuntu-latin-300-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="page.css">
+<link rel="stylesheet" href="screens.css">
+<script type="module" src="page.js"></script>
+<script type="module" src="demo.js"></script>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="https://avilalabs.org"><img src="avila-mark.png" alt="" width="40" height="21"><span>Avila Labs</span></a>
+  <nav><a href="/handbook/">Handbook</a><a href="https://github.com/AvilaLabs/OpenBMT">Source</a></nav>
+</header>
+
+<main>
+  <section class="intro">
+    <p class="kicker">OpenBMT · live demo</p>
+    <h1>Take a bitcoin payment, start to finish.</h1>
+    <p class="lede">Pick the kind of place, then ring up a sale on the counter and watch it reach the owner's phone. It runs the real OpenBMT code against a pretend blockchain inside this page, so no real bitcoin moves and nothing leaves your browser.</p>
+  </section>
+
+  <div class="place" id="place" role="radiogroup" aria-label="Kind of place">
+    <button type="button" role="radio" aria-checked="true" value="shop">Shop</button>
+    <button type="button" role="radio" aria-checked="false" value="giving" disabled>Church or nonprofit<small>soon</small></button>
+    <button type="button" role="radio" aria-checked="false" value="online" disabled>Online store<small>soon</small></button>
+    <button type="button" role="radio" aria-checked="false" value="box" disabled>Box and till<small>soon</small></button>
+  </div>
+
+  <section class="stage" aria-label="The two apps">
+    <figure class="device pos">
+      <figcaption><b>Counter app</b> on the shop's tablet</figcaption>
+      <div class="bezel"><div class="glass" id="pos-screen" aria-live="polite"></div></div>
+    </figure>
+
+    <aside class="you">
+      <p class="you-head">You play the customer and the network.</p>
+      <p class="step" id="step" aria-live="polite">Starting the apps…</p>
+      <div id="demo-controls" class="controls"></div>
+      <button type="button" class="restart" id="restart">Start over</button>
+    </aside>
+
+    <figure class="device phone">
+      <figcaption><b>Owner app</b> on the owner's phone</figcaption>
+      <div class="bezel"><div class="glass" id="phone-screen" aria-live="polite"></div></div>
+    </figure>
+  </section>
+
+  <section class="chain" aria-label="Pretend blockchain">
+    <p class="chain-label">Pretend blockchain</p>
+    <ol class="blocks" id="chain"></ol>
+  </section>
+
+  <noscript><p class="notice">The demo needs JavaScript to run the OpenBMT code in this page.</p></noscript>
+  <p class="notice" id="failed" hidden>The demo could not start in this browser. It needs WebAssembly, which current versions of every major browser have.</p>
+
+  <section class="real">
+    <h2>What is real here</h2>
+    <div class="real-cols">
+      <p>The screens, the checks and the words are the apps' own, from the same code that runs on the tablet and the phone.</p>
+      <p>The blockchain, the customer's wallet and the price of bitcoin are pretend. The addresses are for a test network, so no wallet can send real bitcoin to them.</p>
+      <p>OpenBMT is open source and not released yet. No independent security audit has been done. <a href="/handbook/">Read the handbook</a> for how it works and what it will never do.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <span>OpenBMT, from <a href="https://avilalabs.org">Avila Labs</a></span>
+  <a href="/handbook/">Handbook</a>
+</footer>
+</body>
+</html>

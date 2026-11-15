@@ -16,3 +16,6 @@ apps/key-android/build/
 dist/
 .wrangler/
 __pycache__/
+
+# The web demo build
+dist/

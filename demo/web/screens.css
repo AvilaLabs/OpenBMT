@@ -1,0 +1,25 @@
+/* The inside of the two rectangles, roughly the Android layout. The shell
+   page (outside the rectangles) styles itself. No font or file from the web. */
+.obd-screen { box-sizing: border-box; min-height: 0; overflow: hidden; display: flex; flex-direction: column; height: 100%; background: #fff; color: #1b1b1b; font-family: system-ui, sans-serif; }
+.obd-band { height: 0.75rem; flex: none; background: #bbb; }
+.obd-band.tone-info { background: #2f6fd0; }
+.obd-band.tone-good { background: #2e9b4f; }
+.obd-band.tone-stop { background: #c9302c; }
+.obd-band.tone-ended { background: #8a8a8a; }
+.obd-body { padding: 1rem; overflow-y: auto; flex: 1; min-height: 0; }
+.obd-heading { font-size: 1.6rem; font-weight: 700; margin: 0 0 0.5rem; }
+.obd-what { font-size: 1.05rem; margin: 0 0 0.5rem; }
+.obd-next { font-size: 1.05rem; font-weight: 600; margin: 0 0 1rem; }
+.obd-amount { font-size: 1.4rem; margin: 0 0 0.75rem; }
+.obd-qr { display: block; width: 14rem; max-width: 70%; height: auto; image-rendering: pixelated; background: #fff; margin: 0 auto 0.5rem; }
+.obd-address { font-family: ui-monospace, monospace; font-size: 0.7rem; word-break: break-all; color: #555; }
+.obd-record { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 0.75rem; margin: 0; }
+.obd-record dt { color: #555; }
+.obd-record dd { margin: 0; font-weight: 600; word-break: break-word; }
+
+.obd-controls { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; justify-content: center; }
+.obd-controls button { padding: 0.6rem 1rem; font: inherit; border-radius: 0.5rem; border: 1px solid #333; background: #fff; }
+.obd-controls button:disabled { color: #999; border-color: #ccc; }
+.obd-controls input { width: 7rem; padding: 0.4rem; font: inherit; }
+.obd-status { flex-basis: 100%; text-align: center; color: #555; font-size: 0.9rem; margin: 0; }
+.obd-problem { flex-basis: 100%; text-align: center; color: #8a1c1c; margin: 0; }

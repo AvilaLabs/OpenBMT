@@ -762,6 +762,9 @@ object AppWords {
         return out.toString()
     }
 
+    /** The words of the table above as JSON for the web demo (`demo/words/counter-app.json`). */
+    fun screensJson(): String = org.openbmt.app.WordsJson.of(all())
+
     /** Every fixed words of the app, for the test that checks them all and writes the list. */
     fun all(): List<Pair<String, SayWords>> = listOf(
         "changeWaits" to changeWaits,
