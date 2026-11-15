@@ -23,7 +23,7 @@
 //! A panic in a job is caught, becomes an internal error and poisons the
 //! entry: every later call returns the same error until the node is stopped.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
@@ -64,8 +64,8 @@ use openbmt_owner_node::coins::ViewState;
 use openbmt_owner_node::lightning_day;
 use openbmt_owner_node::live::DeepLine;
 use openbmt_owner_node::paid_check::{
-    day_bounds, day_summary, paid_sales, MarkState, PaidCheckRefused, PaidChecks, PaidState,
-    PaidTrouble, PAID_ARRIVED_SHOWN_SECS,
+    day_bounds, day_summary, gate_open_alarms, paid_sales, MarkState, PaidCheckRefused, PaidChecks,
+    PaidState, PaidTrouble, PAID_ARRIVED_SHOWN_SECS,
 };
 use openbmt_owner_node::pos::{
     AlertKind as PosKind, PosAlertRef, PosId, PosSaleKey, PosSubject, TenderKey,
@@ -530,7 +530,7 @@ fn paid_run(
         ..
     } = st;
     let link = link.as_mut()?;
-    let found = paid_sales(link);
+    let found = gate_open_alarms(paid_sales(link), paid.marks());
     let tip = node.watcher().chain().tip_height();
     let result = paid.check(&found.sales, now, |k| node.paid_facts(k, tip));
     *paid_unreadable = found.unreadable;
@@ -563,25 +563,15 @@ fn paid_alerts(link: &mut OwnerLink, paid: &PaidChecks, unreadable: &[DeviceId])
         Some(PaidTrouble::Full) => want.push(Alert::PaidNotKept { full: true }),
         None => {}
     }
-    let stale: Vec<Alert> = link
-        .alerts()
-        .iter()
-        .filter(|a| {
-            matches!(
-                a,
-                Alert::PaidNotSeen { .. }
-                    | Alert::PaidUnreadable { .. }
-                    | Alert::PaidNotKept { .. }
-            ) && !want.contains(a)
-        })
-        .cloned()
-        .collect();
-    for a in &stale {
-        link.clear(a);
-    }
-    for a in want {
-        link.raise_alert(a);
-    }
+    let order = want.clone();
+    let want: HashSet<Alert> = want.iter().cloned().collect();
+    link.clear_where(|a| {
+        matches!(
+            a,
+            Alert::PaidNotSeen { .. } | Alert::PaidUnreadable { .. } | Alert::PaidNotKept { .. }
+        ) && !want.contains(a)
+    });
+    link.raise_alerts(order);
 }
 
 /// How long after a run whose marks could not be written the next is tried.

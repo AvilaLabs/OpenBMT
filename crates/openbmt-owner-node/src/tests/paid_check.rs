@@ -12,9 +12,10 @@ use super::*;
 use crate::coins::CoinView;
 use crate::facts::{verified_facts, FactsRefused};
 use crate::paid_check::{
-    check_paid, day_summary, default_tolerance_bps, gather, paid_sales, paid_sales_from_chain,
-    CheckResult, MarkState, PaidCheckRefused, PaidChecks, PaidHow, PaidMarks, PaidSale, PaidState,
-    PaidTrouble, MAGIC_PAID_CHECK, MAX_PAID_MARKS, PAID_CHECK_FILE, PAID_CHECK_WAIT_SECS,
+    check_paid, day_summary, default_tolerance_bps, gate_open_alarms, gather, paid_sales,
+    paid_sales_from_chain, CheckResult, MarkState, PaidCheckRefused, PaidChecks, PaidHow,
+    PaidMarks, PaidSale, PaidSales, PaidState, PaidTrouble, MAGIC_PAID_CHECK,
+    MAX_OPEN_ALARMS_PER_COUNTER, MAX_PAID_MARKS, PAID_CHECK_FILE, PAID_CHECK_WAIT_SECS,
 };
 
 const PAID_AT: u64 = 1_800_000_000;
@@ -444,7 +445,11 @@ fn at_once_for(index: u32, at: u64, sats: u64) -> Event {
 
 /// The paid sales of the test counter, as `(index, how, recorded, quoted)`.
 fn folded(events: &[Event]) -> Vec<(u32, PaidHow, u64, u64)> {
-    let (link, _a, _b) = link_with(events);
+    let (mut link, _a, _b) = link_with(events);
+    link.set_shop_lightning(Some(openbmt_link::StoreParties {
+        counter: counter(),
+        second_device: id(9).device_id(),
+    }));
     let found = paid_sales(&link);
     assert!(found.unreadable.is_empty());
     found
@@ -456,7 +461,7 @@ fn folded(events: &[Event]) -> Vec<(u32, PaidHow, u64, u64)> {
 
 #[test]
 fn oc_60_the_records_tell_an_on_chain_payment_from_lightning() {
-    let (link, _a, _b) = link_with(&[
+    let (mut link, _a, _b) = link_with(&[
         named(0, PAID_AT - 50, "Ana"),
         at_once_for(0, PAID_AT, 5_000),
         opened(1, PAID_AT - 50, 100),
@@ -470,6 +475,10 @@ fn oc_60_the_records_tell_an_on_chain_payment_from_lightning() {
         // Never paid.
         opened(4, PAID_AT - 50, 100),
     ]);
+    link.set_shop_lightning(Some(openbmt_link::StoreParties {
+        counter: counter(),
+        second_device: id(9).device_id(),
+    }));
     let found = paid_sales(&link);
     assert!(found.unreadable.is_empty());
     let sales = found.sales;
@@ -877,8 +886,9 @@ fn oc_64_the_oldest_cleared_marks_go_first_and_a_raised_one_is_never_dropped_fro
     let over = full.after(&one_more, 200);
     assert_eq!(over.len(), MAX_PAID_MARKS + 1);
     assert!(over.is_over());
-    assert_eq!(over.fitted().len(), MAX_PAID_MARKS);
-    assert!(PaidMarks::from_bytes(&over.fitted().to_bytes()).is_ok());
+    // Nothing but alarms: none is dropped, so the fitted set is still over.
+    assert_eq!(over.fitted().len(), MAX_PAID_MARKS + 1);
+    assert!(over.fitted().is_over());
     // Clear three, the later one first: the two oldest go, then the third.
     let marks = full
         .cleared_by_owner(&key(10), 3_000)
@@ -1001,7 +1011,22 @@ fn oc_64_a_file_that_does_not_read_back_does_not_stop_the_node_or_the_check() {
 fn oc_64_marks_full_still_show_the_mismatch() {
     let dir = Dir::new();
     // A file of the most marks, every one an alarm raised for another sale.
-    let full = raised_marks(1, MAX_PAID_MARKS as u32 + 1, 100);
+    // (Under the cap of OC-61 for one counter this takes many counters; the
+    // file is read as it is, whatever the bounds that make it.)
+    let full = PaidMarks::new().after(
+        &CheckResult {
+            raised: (0..256u32)
+                .flat_map(|c| {
+                    let mut secret = [7u8; 32];
+                    secret[0] = c as u8;
+                    let device = Identity::from_secret_bytes(&secret).unwrap().device_id();
+                    (0..MAX_OPEN_ALARMS_PER_COUNTER as u32).map(move |i| key_of(device, i))
+                })
+                .collect(),
+            ..CheckResult::default()
+        },
+        100,
+    );
     assert_eq!(full.len(), MAX_PAID_MARKS);
     std::fs::write(dir.path().join(PAID_CHECK_FILE), full.to_bytes()).unwrap();
     let mut checks = PaidChecks::open(dir.path());
@@ -1094,4 +1119,211 @@ fn oc_61_an_index_the_owner_never_issued_to_the_counter_is_a_mismatch_at_once() 
     });
     assert_eq!(state_of(&again, 20), PaidState::Mismatch);
     assert!(again.raised.is_empty());
+}
+
+fn other_counter() -> DeviceId {
+    id(4).device_id()
+}
+
+fn key_of(counter: DeviceId, index: u32) -> SaleKey {
+    SaleKey { counter, index }
+}
+
+#[test]
+fn oc_60_a_lightning_paid_is_exempt_only_from_the_named_lightning_counter() {
+    let events = [opened(1, PAID_AT - 50, 100), lightning(1, PAID_AT + 1, 700)];
+    let (mut link, _a, _b) = link_with(&events);
+    let now = PAID_AT + 10;
+    let parties = |c: DeviceId| {
+        Some(openbmt_link::StoreParties {
+            counter: c,
+            second_device: id(9).device_id(),
+        })
+    };
+    // The recording counter is the named one: exempt, no state.
+    link.set_shop_lightning(parties(counter()));
+    let named = paid_sales(&link);
+    assert_eq!(named.sales[0].how, PaidHow::Lightning);
+    let result = check_paid(&named.sales, &PaidMarks::new(), now, |_| {
+        panic!("a named counter's Lightning sale is not looked up")
+    });
+    assert!(result.checks.is_empty() && result.raised.is_empty());
+    // Another counter is named, or none: a mismatch at once, nothing seen,
+    // and the fold goes on (the counter is not unreadable).
+    for other in [parties(other_counter()), None] {
+        link.set_shop_lightning(other);
+        let found = paid_sales(&link);
+        assert!(found.unreadable.is_empty());
+        assert_eq!(found.sales[0].how, PaidHow::LightningUnnamed);
+        let result = check_paid(&found.sales, &PaidMarks::new(), now, |_| {
+            panic!("no address to look at")
+        });
+        assert_eq!(state_of(&result, 1), PaidState::Mismatch);
+        assert_eq!(result.checks[0].seen_sats, Some(0));
+        assert_eq!(result.raised, vec![key(1)]);
+        // Raised once.
+        let marks = PaidMarks::new().after(&result, now);
+        let again = check_paid(&found.sales, &marks, now + 1, |_| {
+            panic!("no address to look at")
+        });
+        assert!(again.raised.is_empty());
+    }
+}
+
+/// `n` sales of `counter`, paid at once, whose payments are nowhere.
+fn missing_sales(counter: DeviceId, n: u32) -> Vec<PaidSale> {
+    (0..n)
+        .map(|i| PaidSale {
+            counter,
+            ..sale(i, 5_000, PaidHow::AtOnce)
+        })
+        .collect()
+}
+
+#[test]
+fn oc_61_a_counter_over_the_alarm_cap_is_checked_no_further_until_the_owner_clears() {
+    let cap = MAX_OPEN_ALARMS_PER_COUNTER as u32;
+    let now = PAID_AT + PAID_CHECK_WAIT_SECS;
+    let none = |_: SaleKey| {
+        Ok(SaleFacts {
+            received_sats: 0,
+            reached_refund_depth: false,
+        })
+    };
+    let sales = missing_sales(counter(), cap + 40);
+    let other = missing_sales(other_counter(), 2);
+    let all: Vec<PaidSale> = sales.iter().chain(&other).cloned().collect();
+    let marks = read_at(&all, PAID_AT);
+    // One run raises up to one above the cap; the other counter is checked.
+    let result = check_paid(&all, &marks, now, none);
+    assert_eq!(
+        result
+            .raised
+            .iter()
+            .filter(|k| k.counter == counter())
+            .count(),
+        cap as usize + 1
+    );
+    assert_eq!(
+        result
+            .raised
+            .iter()
+            .filter(|k| k.counter == other_counter())
+            .count(),
+        2
+    );
+    let marks = marks.after(&result, now);
+    assert_eq!(marks.open_alarms()[&counter()], cap as usize + 1);
+    // The next run: the counter shows as unreadable, none of its sales are
+    // checked, and its alarms stay.
+    let found = gate_open_alarms(
+        PaidSales {
+            sales: all.clone(),
+            unreadable: vec![],
+        },
+        &marks,
+    );
+    assert_eq!(found.unreadable, vec![counter()]);
+    assert!(found.sales.iter().all(|s| s.counter == other_counter()));
+    let again = check_paid(&found.sales, &marks, now + 60, none);
+    assert!(again.raised.is_empty());
+    assert_eq!(
+        marks.after(&again, now + 60).open_alarms()[&counter()],
+        cap as usize + 1
+    );
+    // Clearing down to the cap resumes the checks of the counter.
+    let cleared = marks.cleared_by_owner(&key(0), now + 100).unwrap();
+    assert_eq!(cleared.open_alarms()[&counter()], cap as usize);
+    let found = gate_open_alarms(
+        PaidSales {
+            sales: all,
+            unreadable: vec![],
+        },
+        &cleared,
+    );
+    assert!(found.unreadable.is_empty());
+    assert!(found.sales.iter().any(|s| s.counter == counter()));
+    // With the sales checked again, the counter raises one more at most.
+    let resumed = check_paid(&found.sales, &cleared, now + 200, none);
+    assert_eq!(
+        resumed
+            .raised
+            .iter()
+            .filter(|k| k.counter == counter())
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn oc_64_the_alarms_of_every_counter_at_the_cap_fit_the_marks() {
+    const {
+        assert!(openbmt_core::settings::MAX_DEVICES * MAX_OPEN_ALARMS_PER_COUNTER <= MAX_PAID_MARKS)
+    };
+}
+
+#[test]
+fn oc_64_eviction_drops_cleared_then_readings_and_never_an_alarm() {
+    // Readings, cleared marks and alarms of another counter, over the limit.
+    let other = other_counter();
+    let mut raised = raised_marks(0, MAX_PAID_MARKS as u32 - 10, 100);
+    // Ten cleared (oldest first) and ten readings beyond the limit.
+    let extra = CheckResult {
+        raised: (0..10).map(|i| key_of(other, i)).collect(),
+        read: (10..20).map(|i| key_of(other, i)).collect(),
+        ..CheckResult::default()
+    };
+    raised = raised.after(&extra, 500);
+    for i in 0..10 {
+        raised = raised
+            .cleared_by_owner(&key_of(other, i), 1_000 + u64::from(i))
+            .unwrap();
+    }
+    assert_eq!(raised.len(), MAX_PAID_MARKS + 10);
+    let fitted = raised.fitted();
+    assert_eq!(fitted.len(), MAX_PAID_MARKS);
+    // The ten cleared went first; the readings stayed.
+    assert!((0..10).all(|i| fitted.get(&key_of(other, i)).is_none()));
+    assert!((10..20).all(|i| fitted.get(&key_of(other, i)).is_some()));
+    // With no cleared marks, the newest readings go, and the alarms stay.
+    let mut more = raised_marks(0, MAX_PAID_MARKS as u32 - 2, 100);
+    more = more.after(
+        &CheckResult {
+            read: vec![key_of(other, 1), key_of(other, 2), key_of(other, 3)],
+            ..CheckResult::default()
+        },
+        10,
+    );
+    let more = more.after(&CheckResult::default(), 11);
+    assert_eq!(more.len(), MAX_PAID_MARKS + 1);
+    // The marks were first read at 10 each; the newest sorts by key then.
+    let fitted = more.fitted();
+    assert_eq!(fitted.len(), MAX_PAID_MARKS);
+    assert_eq!(
+        fitted
+            .iter()
+            .filter(|m| m.state == MarkState::Raised)
+            .count(),
+        MAX_PAID_MARKS - 2
+    );
+}
+
+#[test]
+fn oc_64_marks_that_stay_over_keep_the_file_and_report_full() {
+    let dir = Dir::new();
+    let full = raised_marks(1, MAX_PAID_MARKS as u32 + 1, 100);
+    std::fs::write(dir.path().join(PAID_CHECK_FILE), full.to_bytes()).unwrap();
+    let before = std::fs::read(dir.path().join(PAID_CHECK_FILE)).unwrap();
+    let mut checks = PaidChecks::open(dir.path());
+    let sales = [sale(0, 5_000, PaidHow::AtOnce)];
+    let view = view_with(&[]);
+    checks.check(&sales, PAID_AT, from_view(&view));
+    checks.check(&sales, PAID_AT + PAID_CHECK_WAIT_SECS, from_view(&view));
+    // Nothing but alarms: no alarm is dropped, the file is as it was.
+    assert_eq!(checks.trouble(), Some(PaidTrouble::Full));
+    assert_eq!(checks.marks().len(), MAX_PAID_MARKS + 1);
+    assert_eq!(
+        std::fs::read(dir.path().join(PAID_CHECK_FILE)).unwrap(),
+        before
+    );
 }

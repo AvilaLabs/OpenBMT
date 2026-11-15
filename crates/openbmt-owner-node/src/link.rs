@@ -190,7 +190,7 @@ impl Default for OwnerLinkConfig {
 }
 
 /// Something the owner must be told (LK-62).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Alert {
     /// No check-in has come from the counter for the grace period.
     MissedCheckIn {
@@ -603,6 +603,12 @@ impl<R: Post> OwnerLink<R> {
         self.shop_lightning = parties;
     }
 
+    /// OC-60: the Lightning counter the settings in force name, when they
+    /// name Shop Lightning.
+    pub fn shop_lightning_counter(&self) -> Option<DeviceId> {
+        self.shop_lightning.as_ref().map(|p| p.counter)
+    }
+
     /// SL-78, LK-84: the newest report of the Lightning counter of the
     /// settings in force, and when it came. A report of a counter the
     /// settings no longer name is not given.
@@ -629,6 +635,23 @@ impl<R: Post> OwnerLink<R> {
     /// counter checks of OC-62). An alert already raised is not added twice.
     pub fn raise_alert(&mut self, alert: Alert) {
         self.raise(alert);
+    }
+
+    /// Raise many alerts that do not come from the link's own messages, with
+    /// the work linear in the alerts held and given: each is added once and in
+    /// the order given, as [`Self::raise_alert`] would add them one by one.
+    pub fn raise_alerts(&mut self, alerts: impl IntoIterator<Item = Alert>) {
+        let mut held: std::collections::HashSet<Alert> = self.alerts.iter().cloned().collect();
+        for alert in alerts {
+            if held.insert(alert.clone()) {
+                self.alerts.push(alert);
+            }
+        }
+    }
+
+    /// Clear every alert for which `stale` says so, in one pass.
+    pub fn clear_where(&mut self, stale: impl Fn(&Alert) -> bool) {
+        self.alerts.retain(|a| !stale(a));
     }
 
     /// What the Box reported, oldest first (BX-42). These are the Box's

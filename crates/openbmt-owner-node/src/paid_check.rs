@@ -30,7 +30,7 @@
 //! and the time cleared (u64 LE, 0 for a mark not cleared). Marks are in the
 //! order of counter, then index, with none twice.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -59,6 +59,18 @@ pub const MAGIC_PAID_CHECK: [u8; 4] = *b"OBM\x17";
 /// cleared is never dropped from the phone's memory, and the file holds
 /// the ones that fit.
 pub const MAX_PAID_MARKS: usize = 65_536;
+
+/// Most alarms not cleared one counter may hold (OC-61, OC-64). A counter with
+/// more keeps its alarms, raises no more and is checked no further until the
+/// owner clears enough of them, so that one counter cannot fill the marks for
+/// the others. A run raises at most one alarm above this number for a counter,
+/// and that one is what stops the checks of it.
+pub const MAX_OPEN_ALARMS_PER_COUNTER: usize = 256;
+
+// A counter is a device of the settings (at most MAX_DEVICES), so the alarms
+// of every counter at the cap always fit the marks a file keeps (OC-64).
+const _: () =
+    assert!(openbmt_core::settings::MAX_DEVICES * MAX_OPEN_ALARMS_PER_COUNTER <= MAX_PAID_MARKS);
 
 /// How long after the owner phone first read a Paid in a counter's records a
 /// sale whose payment is not in a block yet is only waiting, and not a
@@ -91,8 +103,14 @@ pub enum PaidHow {
     AtOnce,
     /// Confirmed or final: the payment is in a block the counter saw.
     Confirmed,
-    /// Paid over the shop's own Lightning node (CR-109). Not checked.
+    /// Paid over the shop's own Lightning node (CR-109), recorded by the
+    /// counter the signed settings name as the shop's Lightning counter
+    /// (OC-60). Not checked.
     Lightning,
+    /// A Lightning payment recorded by a counter that is not the shop's
+    /// Lightning counter (OC-60): no payment of the shop's, a mismatch at
+    /// once with nothing seen.
+    LightningUnnamed,
 }
 
 /// A sale a counter's records have shown paid.
@@ -129,6 +147,16 @@ impl PaidSale {
     /// Whether the check of OC-60 applies: a payment to the sale's address.
     pub fn on_chain(&self) -> bool {
         self.how != PaidHow::Lightning
+    }
+
+    /// OC-60: a Lightning payment is exempt only from the counter the signed
+    /// settings name as the shop's Lightning counter; from any other it is
+    /// held as [`PaidHow::LightningUnnamed`].
+    fn named_by(mut self, lightning_counter: Option<&DeviceId>) -> Self {
+        if self.how == PaidHow::Lightning && lightning_counter != Some(&self.counter) {
+            self.how = PaidHow::LightningUnnamed;
+        }
+        self
     }
 
     /// OC-60: what the check expects at the sale's address: the higher of the
@@ -295,7 +323,12 @@ pub fn gather(folds: Vec<(DeviceId, Result<Vec<PaidSale>, FactsError>)>) -> Paid
 
 /// OC-30, OC-61: the paid sales of every counter of the link, from the
 /// owner's verified copy of its records, each counter apart.
+///
+/// OC-60: a Lightning payment is exempt only when recorded by the counter the
+/// settings in force name as the shop's Lightning counter; the owner node
+/// keeps only the settings in force, not those before them.
 pub fn paid_sales<R: Post>(link: &OwnerLink<R>) -> PaidSales {
+    let named = link.shop_lightning_counter();
     let mut folds = Vec::new();
     for counter in link.counters() {
         let Some(copy) = link.copy(counter) else {
@@ -307,7 +340,39 @@ pub fn paid_sales<R: Post>(link: &OwnerLink<R>) -> PaidSales {
             paid_sales_from_chain(&chain, link.devices(), counter),
         ));
     }
-    gather(folds)
+    let mut found = gather(folds);
+    for sale in &mut found.sales {
+        *sale = sale.clone().named_by(named.as_ref());
+    }
+    found
+}
+
+/// OC-61: take out the counters that hold more than
+/// [`MAX_OPEN_ALARMS_PER_COUNTER`] alarms not cleared: they are checked no
+/// further and are listed as unreadable, until the owner clears enough.
+pub fn gate_open_alarms(found: PaidSales, marks: &PaidMarks) -> PaidSales {
+    let open = marks.open_alarms();
+    let over = |c: &DeviceId| {
+        open.get(c)
+            .is_some_and(|n| *n > MAX_OPEN_ALARMS_PER_COUNTER)
+    };
+    let mut listed: BTreeSet<DeviceId> = found.unreadable.iter().copied().collect();
+    let mut out = PaidSales {
+        sales: Vec::new(),
+        unreadable: found.unreadable,
+    };
+    for sale in found.sales {
+        if !over(&sale.counter) {
+            out.sales.push(sale);
+        }
+    }
+    // A counter over the cap shows whether or not its fold has a paid sale.
+    for counter in open.keys().filter(|c| over(c)) {
+        if listed.insert(*counter) {
+            out.unreadable.push(*counter);
+        }
+    }
+    out
 }
 
 /// What a mark says of a sale (OC-61, OC-62, OC-64).
@@ -366,6 +431,15 @@ impl PaidMarks {
     /// The mark of a sale.
     pub fn get(&self, sale: &SaleKey) -> Option<&PaidMark> {
         self.marks.get(sale)
+    }
+
+    /// OC-61: how many alarms not cleared each counter holds.
+    pub fn open_alarms(&self) -> HashMap<DeviceId, usize> {
+        let mut open: HashMap<DeviceId, usize> = HashMap::new();
+        for m in self.marks.values().filter(|m| m.state == MarkState::Raised) {
+            *open.entry(m.sale.counter).or_default() += 1;
+        }
+        open
     }
 
     /// Every mark, in the order of the file.
@@ -559,8 +633,10 @@ impl PaidMarks {
     }
 
     /// OC-64: the marks a file can keep: all of them, or when there are too
-    /// many, the alarms and then the oldest readings, so that an alarm is never
-    /// the one left out while a reading is kept.
+    /// many, without the oldest cleared marks first and then the newest
+    /// readings. An alarm not cleared is never left out; if the marks are
+    /// still too many (not possible with the bounds on counters and alarms),
+    /// the result is still over and [`Self::is_over`] says so.
     pub fn fitted(&self) -> Self {
         if !self.is_over() {
             return self.clone();
@@ -584,17 +660,8 @@ impl PaidMarks {
                 next.marks.remove(&sale);
                 excess -= 1;
             }
-            if excess > 0 {
-                let mut raised: Vec<(u64, SaleKey)> = next
-                    .marks
-                    .values()
-                    .map(|m| (m.raised_at.unwrap_or(m.first_read), m.sale))
-                    .collect();
-                raised.sort_unstable_by(|a, b| b.cmp(a));
-                for (_, sale) in raised.into_iter().take(excess) {
-                    next.marks.remove(&sale);
-                }
-            }
+            // An alarm not cleared is never dropped. A set still over here
+            // is left to the caller, which keeps the file as it is.
         }
         next
     }
@@ -668,6 +735,7 @@ pub fn check_paid(
     facts: impl Fn(SaleKey) -> Result<SaleFacts, FactsRefused>,
 ) -> CheckResult {
     let mut out = CheckResult::default();
+    let mut open = marks.open_alarms();
     for sale in sales.iter().filter(|s| s.on_chain()) {
         let key = sale.key();
         let mark = marks.get(&key);
@@ -677,7 +745,23 @@ pub fn check_paid(
         }
         let alarmed = mark.is_some_and(|m| m.state != MarkState::Reading);
         let expected = sale.expected_sats();
-        let (state, seen) = match facts(key) {
+        // OC-60: a Lightning payment of a counter the settings do not name
+        // has no address to look at: a mismatch at once.
+        let answer = if sale.how == PaidHow::LightningUnnamed {
+            Err(FactsRefused::NotThisCountersAddress)
+        } else {
+            facts(key)
+        };
+        // OC-61: a counter holds at most one alarm above the cap; that one
+        // stops its checks (see `gate_open_alarms`).
+        let mut raise = |out: &mut CheckResult| {
+            let n = open.entry(sale.counter).or_default();
+            if *n <= MAX_OPEN_ALARMS_PER_COUNTER {
+                *n += 1;
+                out.raised.push(key);
+            }
+        };
+        let (state, seen) = match answer {
             Err(FactsRefused::ViewNotReady | FactsRefused::ReceiptLogFull) => {
                 (PaidState::NotYet, None)
             }
@@ -690,7 +774,7 @@ pub fn check_paid(
             // nothing seen and no wait.
             Err(FactsRefused::NotThisCountersAddress) => {
                 if !alarmed {
-                    out.raised.push(key);
+                    raise(&mut out);
                 }
                 (PaidState::Mismatch, Some(0))
             }
@@ -714,7 +798,7 @@ pub fn check_paid(
                     PaidState::Waiting
                 } else {
                     if !alarmed {
-                        out.raised.push(key);
+                        raise(&mut out);
                     }
                     PaidState::Mismatch
                 };
@@ -877,8 +961,12 @@ impl PaidChecks {
 
     fn store(&mut self, next: PaidMarks) {
         if self.broken.is_none() && (next != self.marks || self.store_failed.is_some()) {
-            let written = write_file(&self.dir, PAID_CHECK_FILE, &next.fitted().to_bytes());
-            self.store_failed = written.err();
+            let fitted = next.fitted();
+            // Still over: the file is kept as it is, and the trouble is Full.
+            if !fitted.is_over() {
+                let written = write_file(&self.dir, PAID_CHECK_FILE, &fitted.to_bytes());
+                self.store_failed = written.err();
+            }
         }
         self.marks = next;
     }
