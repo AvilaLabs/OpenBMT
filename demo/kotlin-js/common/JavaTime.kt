@@ -11,3 +11,12 @@ class Locale private constructor() {
         val ROOT = Locale()
     }
 }
+
+object Arrays {
+    fun fill(a: ByteArray, value: Byte) = a.fill(value)
+}
+
+object Collections {
+    /** The list itself: nothing else runs in the page while it is used. */
+    fun <T> synchronizedList(list: MutableList<T>): MutableList<T> = list
+}

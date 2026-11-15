@@ -30,6 +30,8 @@ fun String(bytes: ByteArray, charset: Charset): String = when (charset.name) {
 fun String(bytes: ByteArray, offset: Int, length: Int, charset: Charset): String =
     String(bytes.copyOfRange(offset, offset + length), charset)
 
+fun ByteArray.toString(charset: Charset): String = String(this, charset)
+
 fun String.lowercase(locale: java.util.Locale): String = lowercase()
 
 fun String.codePointCount(begin: Int, end: Int): Int {

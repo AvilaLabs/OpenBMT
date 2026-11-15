@@ -22,16 +22,57 @@ class File(val parent: String?, val name: String) {
     fun delete(): Boolean = table.remove(path) != null
     fun length(): Long = table[path]?.size?.toLong() ?: 0L
     val isFile: Boolean get() = exists()
+    val absolutePath: String get() = path
+    val isDirectory: Boolean get() = folders.contains(path)
+
+    /** Makes the folder; there is nothing to fail on in a table, so it always answers true. */
+    fun mkdirs(): Boolean {
+        folders.add(path)
+        return true
+    }
+
+    /** Makes an empty file and answers true, or answers false when there is one. */
+    fun createNewFile(): Boolean {
+        if (exists()) return false
+        table[path] = ByteArray(0)
+        return true
+    }
 
     companion object {
         /** The files of the demo's one folder. */
         val table = HashMap<String, ByteArray>()
+
+        /** The folders that were made. */
+        val folders = HashSet<String>()
     }
 }
 
-class ByteArrayOutputStream {
-    private var buf = ByteArray(32)
-    private var count = 0
+/** The reading side of a stream of bytes; the model reads what the page hands it. */
+abstract class InputStream {
+    /** The next byte (0 to 255), or -1 at the end. */
+    abstract fun read(): Int
+
+    /** Up to [len] bytes into [b] at [off]; the count, or -1 at the end. */
+    open fun read(b: ByteArray, off: Int, len: Int): Int {
+        if (len == 0) return 0
+        var n = 0
+        while (n < len) {
+            val c = read()
+            if (c < 0) break
+            b[off + n] = c.toByte()
+            n++
+        }
+        return if (n == 0) -1 else n
+    }
+}
+
+open class ByteArrayOutputStream {
+    protected var buf = ByteArray(32)
+    protected var count = 0
+
+    fun reset() {
+        count = 0
+    }
 
     fun size(): Int = count
     fun write(b: Int) {

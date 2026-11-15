@@ -47,3 +47,27 @@ object System {
 
 /** `synchronized`: nothing else runs in the page while a block does. */
 inline fun <R> synchronized(lock: Any, block: () -> R): R = block()
+
+/** A library that is not there; the page's twin of the native library is always there, so it is never thrown. */
+open class LinkageError(message: String? = null) : Error(message)
+
+class InterruptedException(message: String? = null) : Exception(message)
+
+/** A thread that runs its body when it starts, to the end: nothing else runs in the page meanwhile. */
+class Thread(private val target: Runnable?) {
+    var isDaemon: Boolean = false
+
+    fun start() {
+        target?.run()
+    }
+    fun join() {}
+    fun interrupt() {}
+
+    companion object {
+        fun currentThread(): Thread = Thread(null)
+    }
+}
+
+fun interface Runnable {
+    fun run()
+}
