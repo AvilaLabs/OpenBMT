@@ -1832,7 +1832,7 @@ object AppModelTest {
     }
 
     private fun oa_64_the_tenth_wrong_try_wipes_key_1_in_order() {
-        ok(SetupLock.WIPE_FILES == listOf(AppFiles.SETUP_FILE, AppFiles.CEREMONY_FILE, AppFiles.KEY2_SIGNER_FILE, AppFiles.FIRST_ADDRESS_FILE), "the setup, the ceremony's file, then the signer note and the first address record")
+        ok(SetupLock.WIPE_FILES == listOf(AppFiles.SETUP_FILE, AppFiles.CEREMONY_FILE, AppFiles.KEY2_SIGNER_FILE, AppFiles.FIRST_ADDRESS_FILE, OnePhoneFile.NAME), "the setup, the ceremony's file, then the signer note, the first address record and the same-phone note")
         ok(SetupLock.WIPE_FILES.containsAll(listOf("key2-signer.txt", "first-address.obm0")), "the wipe list names both files of a hardware signer")
         ok(SetupLock.gate(10, true) == Gate.Wipe && SetupLock.gate(10, false) == Gate.Wipe && SetupLock.gate(9, true) == Gate.Unlock, "10 wrong tries wipe, whatever the file")
         val dir = tempDir()
@@ -3272,7 +3272,7 @@ object AppModelTest {
         ok(paired.contains("resume.arm()") && paired.contains("if (node == null) return begin()") && paired.contains("showFirstRun()") && src.substringAfter("private fun Controller.showOwnPaired").substringBefore("val wallet").contains("r.done()") &&
             !src.substringAfter("private fun Controller.showOwnPaired").substringBefore("val wallet").contains("restartIfLinkChanged"), "B: the first counter starts the node and arms the hand-off; the pairing's Done only calls the exit")
         val ctl = source("src/android/Controller.kt")
-        ok(ctl.contains("if (resume.take(firstRun)) showFirstRun() else showHome()") && ctl.contains("if (firstRun?.needsNode == true) resume.arm()") && source("src/android/Lock.kt").substringAfter("internal fun Controller.wipe()").substringBefore("try {").contains("resume.clear()"), "B: the node's start resumes the first run once, and a wipe clears the hand-off")
+        ok(ctl.contains("if (resume.take(firstRun)) showFirstRun() else homeOrHeld()") && ctl.contains("if (firstRun?.needsNode == true) resume.arm()") && source("src/android/Lock.kt").substringAfter("internal fun Controller.wipe()").substringBefore("try {").contains("resume.clear()"), "B: the node's start resumes the first run once, and a wipe clears the hand-off")
         ok(source("src/android/AddCounter.kt").contains("AddCounterChoice.of(") && source("src/android/AddCounter.kt").contains("showOwnAddCounter()"), "Add a counter chooses by the shop's kind")
         // SS-37: the hold comes before the choice.
         val add = source("src/android/AddCounter.kt").substringAfter("internal fun Controller.showAddCounter")
@@ -3663,6 +3663,28 @@ object AppModelTest {
         resume.arm(); ok(!resume.take(toMoney().first) && !resume.armed, "B: a first run still before the counter is not resumed")
         resume.arm(); resume.clear(); ok(!resume.take(atInstant), "B: a wipe clears it")
         ok(atInstant.step == FirstRunStep.Instant, "B: the first run's state survives")
+
+        // The step after the wallet is pinned is kept in the shop file, and a first run is rebuilt from it.
+        run {
+            fun bad(text: String) = try { ShopPrefs.decode(text.toByteArray()); false } catch (_: ConfigFormatException) { true }
+            val base = "name: Cafe\ncurrency: EUR\ntill: \nsteps-shown: no\ncard-printed: no\n"
+            ok(String(ShopPrefs("Cafe", step = FirstRunStep.Instant).encode()).endsWith("card-printed: no\nstep: Instant\n") && !String(ShopPrefs("Cafe").encode()).contains("step:"), "step line: written only with a step")
+            for (st in FirstRunStep.PERSISTED) ok(ShopPrefs.decode(ShopPrefs("Cafe", step = st).encode()).step == st, "step line: ${st.name} reads back")
+            ok(ShopPrefs.decode(base.toByteArray()).step == null && ShopPrefs.decode("name: Cafe\ncurrency: \ntill: \nsteps-shown: no\n".toByteArray()).step == null, "step line: an old file reads as none")
+            ok(bad(base + "step: Money\n") && bad(base + "step: Nonsense\n") && bad(base + "step: \n") && bad(base + "step: Instant\nmore: x\n") && bad(base + "other: Instant\n"), "step line: an unknown name or line is refused")
+            val held = ShopPrefs("Cafe", cardPrinted = true, step = FirstRunStep.Ready)
+            ok(held.with(name = "Bar").step == FirstRunStep.Ready && held.withStep(null).step == null && held.withStep(null).cardPrinted, "step line: other saves keep it, withStep clears it")
+            val at = ShopPrefs("Cafe", step = FirstRunStep.FirstSale)
+            ok(FirstRunRestore.step(at, true, false) == FirstRunStep.FirstSale, "restore: a step, a pinned wallet and no first run in memory rebuilds")
+            ok(FirstRunRestore.step(at, false, false) == null && FirstRunRestore.step(at, true, true) == null && FirstRunRestore.step(ShopPrefs("Cafe"), true, false) == null, "restore: no wallet, a first run in memory or no step does not")
+            val rebuilt = FirstRunRestore.rebuild(at, "DE", FirstRunStep.FirstSale)
+            ok(rebuilt.step == FirstRunStep.FirstSale && rebuilt.name == "Cafe" && rebuilt.needsNode, "restore: the rebuilt first run is at the step with the shop's fields")
+            val hand = FirstRunResume(); hand.arm()
+            ok(hand.take(rebuilt), "restore: the hand-off shows it when the node is up")
+            ok(FirstRunRestore.rebuild(at, "DE", FirstRunStep.Money).step == FirstRunStep.Welcome, "restore: a step the file does not keep is not taken")
+            val cfile = source("src/android/FirstRun.kt")
+            ok(cfile.contains("private fun Controller.keepStep") && cfile.substringAfter("private fun Controller.endFirstRun").substringBefore("afterFirstCounter()").contains("forgetStep()") && source("src/android/Lock.kt").substringAfter("internal fun Controller.wipe()").contains("forgetStep()") && source("src/android/Controller.kt").contains("if (firstRun == null) restoreFirstRun()"), "restore: the step is kept on entry, and cleared at the end and on a wipe")
+        }
 
         // Back on every new step.
         val b = toMoney().first
@@ -4232,7 +4254,7 @@ object AppModelTest {
         val setupSource = source("src/android/StarterScreens.kt")
         val limitPage = setupSource.substringAfter("internal fun Controller.showStarterLimit").substringBefore("// ---- making the key")
         ok(!limitPage.contains("stopLabel") && !limitPage.contains("CheckBox") && limitPage.contains("StarterWords.boxOnly"), "SS-38: setup has no stop option, and says what a Box is for")
-        ok(setupSource.contains("StarterRecord(draft.limitSats, draft.moveBy, false, null, secondCopyMade = draft.copy.made, made = nowSecs())"), "SS-38: a new record starts with the stop off")
+        ok(setupSource.contains("StarterRecord(draft.limitSats, draft.moveBy, false, null, secondCopyMade = draft.copy.made, made = draft.made)"), "SS-38: a new record starts with the stop off")
         val useSource = source("src/android/StarterUse.kt")
         ok(useSource.contains("internal fun Controller.hasBoxLink(): Boolean = StarterLineSettings.boxLinked(ownStore)"), "BX-18: the Box link is the one the own-wallet shop keeps")
         val linkDir = tempDir()
@@ -4368,8 +4390,10 @@ object AppModelTest {
         fun refused(text: String) = try { StarterRecord.parse(text); false } catch (_: java.io.IOException) { true }
         val madeAt = 1_700_000_000L
         ok(refused("limit-sats: 0\nmove-by: 2\nstop-above-limit: false\n") && refused("limit-sats: -5\nmove-by: 2\nstop-above-limit: false\n"), "I: a limit of 0 or below does not read")
-        ok(refused("limit-sats: 5\nmove-by: ${madeAt + 91 * day}\nstop-above-limit: false\nmade: $madeAt\n") && !refused("limit-sats: 5\nmove-by: ${madeAt + 90 * day}\nstop-above-limit: false\nmade: $madeAt\n") &&
-            !refused("limit-sats: 5\nmove-by: ${madeAt + 400 * day}\nstop-above-limit: false\n"), "I: a date more than 90 days after the record was made does not read; a record from before the time was kept has no such check")
+        ok(refused("limit-sats: 5\nmove-by: ${madeAt + 92 * day}\nstop-above-limit: false\nmade: $madeAt\n") && !refused("limit-sats: 5\nmove-by: ${madeAt + 90 * day}\nstop-above-limit: false\nmade: $madeAt\n") && !refused("limit-sats: 5\nmove-by: ${madeAt + 91 * day}\nstop-above-limit: false\nmade: $madeAt\n") &&
+            !refused("limit-sats: 5\nmove-by: ${madeAt + 400 * day}\nstop-above-limit: false\n"), "I: a date more than 90 days and a day after the record was made does not read; a record from before the time was kept has no such check")
+        val screensSrc = source("src/android/StarterScreens.kt")
+        ok(screensSrc.contains("StarterDraft(sats, by, rolls, now)") && screensSrc.contains("made = draft.made)") && !screensSrc.contains("made = nowSecs()"), "I: the record's made time is taken when the date is set")
         ok(StarterRecord(5, madeAt + day, false, null, made = madeAt).toText().contains("made: $madeAt") && StarterRecord.parse(StarterRecord(5, madeAt + day, false, null, made = madeAt).toText()).made == madeAt, "I: the time the record was made is kept")
 
         // J: a clock set back does not move the date or the card.
@@ -4385,9 +4409,11 @@ object AppModelTest {
         ok(useSrc2.contains("val now = record.judged(nowSecs())") && useSrc2.contains("record?.judged(nowSecs())"), "J: the card and Not yet are judged at the higher time")
 
         // H: a stopped setup's files are dropped, and only then.
-        ok(!StarterOrphan.found(false, false, false, false, false) { error("not asked") } && StarterOrphan.found(true, false, false, false, false) { false } && StarterOrphan.found(false, true, true, false, false) { false } &&
-            StarterOrphan.found(true, true, false, true, false) { false } && !StarterOrphan.found(true, true, true, true, false) { error("not asked") }, "H: sealed or wrapped with no wallet or no record is a stopped setup; a whole one is not")
-        ok(!StarterOrphan.found(true, true, false, false, true) { false } && !StarterOrphan.found(true, true, true, false, false) { true }, "H: not while a setup is writing, and not when the wallet is the shop's pinned one")
+        ok(!StarterOrphan.found(false, false, false, false, false) { error("not asked") } && StarterOrphan.found(true, false, false, false, false) { true } && StarterOrphan.found(false, true, true, false, false) { true } &&
+            StarterOrphan.found(true, true, false, true, false) { true } && !StarterOrphan.found(true, true, true, true, false) { error("not asked") }, "H: sealed or wrapped with no wallet or no record, and no pinned wallet, is a stopped setup; a whole one is not")
+        ok(!StarterOrphan.found(true, true, false, false, true) { true }, "H: not while a setup is writing")
+        ok(!StarterOrphan.found(true, false, true, false, false) { false } && !StarterOrphan.found(true, true, false, true, false) { false }, "H: a missing record or a missing wallet file with a pinned wallet is kept")
+        ok(!StarterOrphan.found(true, false, true, false, false) { null } && !StarterOrphan.found(true, false, false, false, false) { null }, "H: doubt about the pinned wallet keeps the files")
         run {
             val dir = tempDir()
             val st = StarterStore(dir)
@@ -4397,8 +4423,7 @@ object AppModelTest {
             ok(st.dropOrphan(), "H: nothing left is no trouble")
             dir.deleteRecursively()
         }
-        val screensSrc = source("src/android/StarterScreens.kt")
-        ok(screensSrc.contains("starterDropOrphan()") && source("src/android/Controller.kt").contains("starterDropOrphan()") && screensSrc.contains("starter.keeping = true") && screensSrc.contains("made = nowSecs()"), "H: the step and the start of the app drop a stopped setup, never one that is writing")
+        ok(screensSrc.contains("starterDropOrphan()") && source("src/android/Controller.kt").contains("starterDropOrphan()") && screensSrc.contains("starter.keeping = true"), "H: the step and the start of the app drop a stopped setup, never one that is writing")
 
         // D: the two loosening paths that skipped the hold.
         ok(source("src/android/ShopLightning.kt").contains("p.changeClass != ShopLightningClass.Free && starterHolds(org.openbmt.owner.StarterChangeKind.Other)") &&

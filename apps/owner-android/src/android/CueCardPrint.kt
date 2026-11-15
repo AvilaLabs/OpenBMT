@@ -44,16 +44,25 @@ internal class CueCardAdapter(
     ) {
         if (signal?.isCanceled == true) return callback.onLayoutCancelled()
         attributes = next
-        val info = PrintDocumentInfo.Builder("cue-card.pdf")
-            .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
-            .setPageCount(1)
-            .build()
-        callback.onLayoutFinished(info, old != next)
+        try {
+            val info = PrintDocumentInfo.Builder("cue-card.pdf")
+                .setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+                .setPageCount(1)
+                .build()
+            callback.onLayoutFinished(info, old != next)
+        } catch (_: RuntimeException) {
+            callback.onLayoutFailed(FirstRunWords.cardPrintFailed)
+        }
     }
 
     override fun onWrite(pages: Array<out PageRange>?, destination: ParcelFileDescriptor, signal: CancellationSignal?, callback: WriteResultCallback) {
+        written = false
         val attrs = attributes ?: return callback.onWriteFailed(FirstRunWords.cardPrintFailed)
-        val doc = PrintedPdfDocument(context, attrs)
+        val doc = try {
+            PrintedPdfDocument(context, attrs)
+        } catch (_: RuntimeException) {
+            return callback.onWriteFailed(FirstRunWords.cardPrintFailed)
+        }
         try {
             if (signal?.isCanceled == true) return callback.onWriteCancelled()
             val p = doc.startPage(0)
@@ -65,6 +74,9 @@ internal class CueCardAdapter(
         } catch (_: IOException) {
             callback.onWriteFailed(FirstRunWords.cardPrintFailed)
             onFailed()
+        } catch (_: RuntimeException) {
+            callback.onWriteFailed(FirstRunWords.cardPrintFailed)
+            onFailed()
         } finally {
             doc.close()
         }
@@ -72,7 +84,7 @@ internal class CueCardAdapter(
 
     override fun onFinish() {
         val j = job
-        if (written && j != null && !j.isCancelled && !j.isFailed) onPrinted()
+        if (written && j != null && (j.isCompleted || j.isQueued || j.isStarted) && !j.isCancelled && !j.isFailed) onPrinted()
     }
 
     companion object {

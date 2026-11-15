@@ -115,6 +115,12 @@ private fun Controller.oneConfirm(r: OwnPairExit, p: OwnPairing) {
 /** The bundle goes back to the counter app by the same activity; its answer says whether it is paired (OA-125). */
 private fun Controller.oneBundle(r: OwnPairExit, p: OwnPairing) {
     val bundle = p.bundle ?: return showOwnCounter(r)
+    // The counter app is checked again just before the bundle goes to it, as at the start.
+    when (OnePhoneCheck.peer(act, OnePhone.COUNTER_PACKAGE)) {
+        OnePhone.Peer.Missing -> return oneNoApp(r, p)
+        OnePhone.Peer.OtherSigner -> return oneOtherSigner(r, p)
+        OnePhone.Peer.Same -> Unit
+    }
     startOnePhone(
         Controller.REQUEST_ONE_BUNDLE, oneIntent(OnePhone.ACTION_BUNDLE, OnePhone.EXTRA_BUNDLE, bundle.code),
         failed = { oneEnded(r) },
