@@ -343,6 +343,7 @@ fn ss_10_positions_follow_the_byte_rule() {
 #[test]
 fn ss_10_the_positions_come_from_fresh_kernel_bytes() {
     let mut setup = Setup::begin(&mut Source::chain(), &[]).unwrap();
+    show_all(&mut setup);
     // 32 fresh bytes: 7, 19 (7 again), 3, then the rest.
     let mut bytes = [255u8; 32];
     bytes[0] = 7;
@@ -354,10 +355,11 @@ fn ss_10_the_positions_come_from_fresh_kernel_bytes() {
         .unwrap();
     // Positions 3, 7 and 11, shown 1 to 12.
     assert_eq!(asked, [4, 8, 12]);
-    // Two checks pick differently for different bytes, and a source that is
-    // weak is refused.
+    // A source that is weak is refused.
+    let mut weak = Setup::begin(&mut Source::chain(), &[]).unwrap();
+    show_all(&mut weak);
     assert_eq!(
-        setup.start_check(&mut Source::fixed(&[[0u8; 32], counting(4)])),
+        weak.start_check(&mut Source::fixed(&[[0u8; 32], counting(4)])),
         Err(StarterRefusal::RandomWeak)
     );
 }
@@ -372,8 +374,16 @@ fn type_on(setup: &mut Setup, word: &str, letters: usize) -> Typed {
     last.unwrap()
 }
 
+/// Shows all three screens, as the app does before the check.
+fn show_all(setup: &mut Setup) {
+    for p in 0..PAGES {
+        setup.page(p, 1).unwrap();
+    }
+}
+
 fn setup_checking() -> (Setup, [usize; 3]) {
     let mut setup = Setup::begin(&mut Source::fixed(&[kernel_a(), counting(77)]), &[]).unwrap();
+    show_all(&mut setup);
     let asked = setup.start_check(&mut Source::chain()).unwrap();
     (setup, asked)
 }
@@ -440,7 +450,7 @@ fn ss_10_a_wrong_answer_shows_the_words_again_and_asks_again() {
         Err(StarterRefusal::Stage)
     );
     // Shown again, the check starts again with new positions.
-    setup.page(0, 2).unwrap();
+    show_all(&mut setup);
     let asked = setup.start_check(&mut Source::chain()).unwrap();
     assert_eq!(asked.len(), 3);
     let t = setup.key(Key::Backspace).unwrap();
@@ -613,11 +623,128 @@ fn ss_11_only_letters_backspace_and_enter_are_keys() {
     }
 }
 
+#[test]
+fn ss_10_the_check_is_begun_only_once_all_three_screens_are_shown() {
+    for shown in [
+        &[][..],
+        &[0],
+        &[1],
+        &[2],
+        &[0, 1],
+        &[0, 2],
+        &[1, 2],
+        &[0, 0, 1],
+    ] {
+        let mut setup = Setup::begin(&mut Source::chain(), &[]).unwrap();
+        for p in shown {
+            setup.page(*p, 1).unwrap();
+        }
+        let mut rng = Source::chain();
+        assert_eq!(setup.start_check(&mut rng), Err(StarterRefusal::Stage));
+        assert_eq!(rng.reads, 0, "{shown:?}");
+    }
+    // A screen that does not exist is not counted.
+    let mut setup = Setup::begin(&mut Source::chain(), &[]).unwrap();
+    setup.page(0, 1).unwrap();
+    setup.page(1, 1).unwrap();
+    assert_eq!(setup.page(PAGES, 1).unwrap_err(), StarterRefusal::Page);
+    assert_eq!(
+        setup.start_check(&mut Source::chain()),
+        Err(StarterRefusal::Stage)
+    );
+    setup.page(2, 1).unwrap();
+    assert!(setup.start_check(&mut Source::chain()).is_ok());
+}
+
+#[test]
+fn ss_10_the_check_asks_the_same_positions_until_a_wrong_answer() {
+    let mut setup = Setup::begin(&mut Source::chain(), &[]).unwrap();
+    show_all(&mut setup);
+    let first = setup.start_check(&mut Source::chain()).unwrap();
+    let mut rng = Source::chain();
+    assert_eq!(setup.start_check(&mut rng).unwrap(), first);
+    assert_eq!(setup.start_check(&mut rng).unwrap(), first);
+    assert_eq!(rng.reads, 0);
+    // The answer in progress is not disturbed by the repeated call.
+    let words = words_of(&setup.seed);
+    let t = type_on(&mut setup, words[first[0] - 1], 4);
+    assert!(t.accepted);
+    assert_eq!(setup.start_check(&mut rng).unwrap(), first);
+    assert_eq!(setup.key(Key::Enter).unwrap().step, 1);
+}
+
+/// A setup whose check was answered wrong, and the positions that were asked.
+fn setup_failed() -> (Setup, [usize; 3]) {
+    let mut setup = Setup::begin(&mut Source::chain(), &[]).unwrap();
+    show_all(&mut setup);
+    let first = setup.start_check(&mut Source::chain()).unwrap();
+    fail_check(&mut setup, first);
+    (setup, first)
+}
+
+fn fail_check(setup: &mut Setup, asked: [usize; 3]) {
+    let words = words_of(&setup.seed);
+    let right = words[asked[0] - 1];
+    let wrong = if right == "zoo" { "abandon" } else { "zoo" };
+    type_on(setup, wrong, wrong.len());
+    assert!(setup.key(Key::Enter).unwrap().failed);
+}
+
+#[test]
+fn ss_10_after_a_wrong_answer_all_three_screens_are_shown_again_before_new_positions() {
+    for shown in [&[][..], &[0], &[1], &[0, 2], &[2, 2, 1]] {
+        let (mut setup, _) = setup_failed();
+        for p in shown {
+            setup.page(*p, 1).unwrap();
+        }
+        let mut rng = Source::chain();
+        assert_eq!(setup.start_check(&mut rng), Err(StarterRefusal::Stage));
+        assert_eq!(rng.reads, 0, "{shown:?}");
+    }
+    let (mut setup, first) = setup_failed();
+    show_all(&mut setup);
+    let mut rng = Source::fixed(&[kernel_c(), counting(9)]);
+    let second = setup.start_check(&mut rng).unwrap();
+    assert_eq!(rng.reads, 2);
+    assert_ne!(second, first);
+    // A second wrong answer empties the shown screens again.
+    fail_check(&mut setup, second);
+    assert_eq!(
+        setup.start_check(&mut Source::chain()),
+        Err(StarterRefusal::Stage)
+    );
+}
+
+#[test]
+fn ss_10_no_new_check_after_it_is_passed_or_in_the_second_showing() {
+    let mut setup = passed_setup(1);
+    show_all_refused(&mut setup);
+    setup.begin_copy().unwrap();
+    for p in 0..PAGES {
+        setup.page(p, 1).unwrap();
+    }
+    assert_eq!(
+        setup.start_check(&mut Source::chain()),
+        Err(StarterRefusal::Stage)
+    );
+}
+
+fn show_all_refused(setup: &mut Setup) {
+    for p in 0..PAGES {
+        assert_eq!(setup.page(p, 1).unwrap_err(), StarterRefusal::Stage);
+    }
+    assert_eq!(
+        setup.start_check(&mut Source::chain()),
+        Err(StarterRefusal::Stage)
+    );
+}
+
 // ---- SS-20 -----------------------------------------------------------------------
 
 fn passed_setup(rng_seed: u8) -> Setup {
     let mut setup =
         Setup::begin(&mut Source::fixed(&[counting(rng_seed), counting(99)]), &[]).unwrap();
+    show_all(&mut setup);
     let asked = setup.start_check(&mut Source::chain()).unwrap();
     let words = words_of(&setup.seed);
     for pos in asked {
@@ -663,6 +790,7 @@ fn ss_10_the_words_are_shown_once_more_after_the_check_and_only_once() {
 fn ss_10_no_copy_before_the_check_is_passed() {
     let mut setup = Setup::begin(&mut Source::chain(), &[]).unwrap();
     assert_eq!(setup.begin_copy(), Err(StarterRefusal::Stage));
+    show_all(&mut setup);
     let asked = setup.start_check(&mut Source::chain()).unwrap();
     assert_eq!(setup.begin_copy(), Err(StarterRefusal::Stage));
     // Nor after a wrong answer.

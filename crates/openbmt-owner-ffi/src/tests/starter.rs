@@ -143,6 +143,7 @@ fn no_words_in(response: &[u8]) {
 /// data key and the wallet's description.
 pub(super) fn sealed_wallet(reg: &Registry) -> (Vec<u8>, Vec<u8>, String) {
     let (description, _, _) = wallet_view(&make(reg, &[]));
+    show_all(reg);
     let positions = positions_of(&call(reg, OP_CHECK, &[]));
     assert_eq!(positions.len(), 3);
     for p in positions {
@@ -208,6 +209,30 @@ fn page(reg: &Registry, n: u32, scale: u32) -> Vec<u8> {
     call(reg, OP_PAGE, &W::new().u32(n).u32(scale).0)
 }
 
+/// Shows all three screens of words, as the app does before the check.
+pub(super) fn show_all(reg: &Registry) {
+    for n in 0..3 {
+        Rd::ok(&page(reg, n, 1));
+    }
+}
+
+#[test]
+fn ss_10_the_check_is_refused_until_all_three_screens_are_shown_and_then_repeats() {
+    let reg = registry(&[counting(1), counting(77)]);
+    make(&reg, &[]);
+    for n in 0..2 {
+        Rd::ok(&page(&reg, n, 1));
+        assert_eq!(
+            Rd::error(&call(&reg, OP_CHECK, &[])).expect("refused").rule,
+            "SS-10"
+        );
+    }
+    Rd::ok(&page(&reg, 2, 1));
+    let first = positions_of(&call(&reg, OP_CHECK, &[]));
+    // A screen rebuilt while the check is open asks the same three.
+    assert_eq!(positions_of(&call(&reg, OP_CHECK, &[])), first);
+}
+
 #[test]
 fn ss_11_a_screen_of_words_is_an_image_and_never_text() {
     let reg = registry(&[counting(1), counting(77)]);
@@ -245,6 +270,7 @@ fn ss_10_the_keypad_answers_with_counts_and_a_yes_and_the_check_runs_through_the
         let mut guard = reg.starter.rng.lock().unwrap();
         *guard = Some(Box::new(Fixed::new(&[fresh, counting(4)])));
     }
+    show_all(&reg);
     let positions = positions_of(&call(&reg, OP_CHECK, &[]));
     assert_eq!(positions, vec![4, 8, 12]);
     let asked: Vec<&str> = positions.iter().map(|p| words()[*p as usize - 1]).collect();
@@ -277,6 +303,7 @@ fn ss_10_the_keypad_answers_with_counts_and_a_yes_and_the_check_runs_through_the
 fn ss_10_a_wrong_answer_shows_the_words_again_before_a_new_check() {
     let reg = registry(&[counting(1), counting(77)]);
     make(&reg, &[]);
+    show_all(&reg);
     Rd::ok(&call(&reg, OP_CHECK, &[]));
     type_word(&reg, "zoo", 3);
     let t = typed(&key(&reg, 13));
@@ -290,7 +317,7 @@ fn ss_10_a_wrong_answer_shows_the_words_again_before_a_new_check() {
         Rd::error(&call(&reg, OP_CHECK, &[])).expect("refused").rule,
         "SS-10"
     );
-    Rd::ok(&page(&reg, 0, 1));
+    show_all(&reg);
     Rd::ok(&call(&reg, OP_CHECK, &[]));
 }
 
@@ -350,6 +377,7 @@ fn ss_10_a_second_showing_is_allowed_once_after_the_check_and_before_the_seal() 
         Rd::error(&call(&reg, OP_COPY, &[])).expect("refused").rule,
         "SS-10"
     );
+    show_all(&reg);
     let positions = positions_of(&call(&reg, OP_CHECK, &[]));
     for p in positions {
         type_word(&reg, words()[p as usize - 1], 4);

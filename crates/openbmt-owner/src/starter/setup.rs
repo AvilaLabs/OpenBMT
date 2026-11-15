@@ -220,6 +220,9 @@ pub fn pick_positions(bytes: &[u8]) -> [usize; ASKED] {
     ]
 }
 
+/// The bits of `Setup::shown` when every screen of words has been shown.
+const ALL_SHOWN: u8 = (1 << PAGES) - 1;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Stage {
     /// Made; the words may be shown.
@@ -227,7 +230,7 @@ pub(super) enum Stage {
     /// A check is being answered.
     Checking,
     /// A check was answered wrong; the words must be shown again.
-    Failed { reshown: bool },
+    Failed,
     /// The check was passed; the words are not shown again, except once by
     /// `begin_copy`.
     Passed,
@@ -246,6 +249,9 @@ pub struct Setup {
     positions: [usize; ASKED],
     answered: usize,
     pad: Pad,
+    /// Which of the screens have been shown since the words were made, and
+    /// again since the last wrong answer: one bit per screen.
+    shown: u8,
 }
 
 impl fmt::Debug for Setup {
@@ -266,6 +272,7 @@ impl Setup {
             positions: [0, 1, 2],
             answered: 0,
             pad: Pad::default(),
+            shown: 0,
         })
     }
 
@@ -277,15 +284,19 @@ impl Setup {
     /// SS-10, SS-11: screen `page` (0 to 2) of four numbered words, drawn
     /// at `scale`. Only before the check is passed, and not while it is
     /// being answered; after a wrong answer, the screens are shown again.
+    /// Each screen drawn is noted, since the words were made and again since
+    /// the last wrong answer: `start_check` needs all three. The second
+    /// showing (after the check is passed) is not noted.
     pub fn page(&mut self, page: usize, scale: u32) -> Result<Image, StarterRefusal> {
         match self.stage {
-            Stage::Made => {}
-            Stage::Failed { .. } => self.stage = Stage::Failed { reshown: true },
-            Stage::Copy => {}
+            Stage::Made | Stage::Failed | Stage::Copy => {}
             Stage::Checking | Stage::Passed => return Err(StarterRefusal::Stage),
         }
         if page >= PAGES {
             return Err(StarterRefusal::Page);
+        }
+        if matches!(self.stage, Stage::Made | Stage::Failed) {
+            self.shown |= 1 << page;
         }
         let mut mnemonic = self.seed.mnemonic()?;
         let mut lines: Vec<String> = mnemonic
@@ -317,16 +328,20 @@ impl Setup {
     }
 
     /// SS-10: pick three positions from fresh kernel bytes and begin the
-    /// check. Returned 1 to 12, ascending: they are not secret. After a
-    /// wrong answer the words must have been shown again first.
+    /// check. Returned 1 to 12, ascending: they are not secret. Refused
+    /// until all three screens of words have been shown, since the words were
+    /// made and again since the last wrong answer. While a check is being
+    /// answered, the positions already drawn are returned: no bytes are read
+    /// and nothing changes, so positions are drawn anew only after a wrong
+    /// answer and a showing of all three screens.
     pub fn start_check(
         &mut self,
         rng: &mut dyn KernelRandom,
     ) -> Result<[usize; ASKED], StarterRefusal> {
         match self.stage {
-            Stage::Made | Stage::Checking => {}
-            Stage::Failed { reshown: true } => {}
-            Stage::Failed { reshown: false } | Stage::Passed | Stage::Copy => {
+            Stage::Checking => return Ok(self.positions.map(|p| p + 1)),
+            Stage::Made | Stage::Failed if self.shown == ALL_SHOWN => {}
+            Stage::Made | Stage::Failed | Stage::Passed | Stage::Copy => {
                 return Err(StarterRefusal::Stage)
             }
         }
@@ -358,7 +373,8 @@ impl Setup {
                     }
                 } else {
                     self.pad.clear();
-                    self.stage = Stage::Failed { reshown: false };
+                    self.stage = Stage::Failed;
+                    self.shown = 0;
                 }
             }
         }
@@ -367,7 +383,7 @@ impl Setup {
             accepted: self.stage == Stage::Checking && self.accepted()?,
             step: self.answered,
             finished: self.stage == Stage::Passed,
-            failed: matches!(self.stage, Stage::Failed { .. }),
+            failed: self.stage == Stage::Failed,
         })
     }
 

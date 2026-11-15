@@ -40,7 +40,7 @@ use openbmt_core::wallet::Keychain;
 use openbmt_core::wallet_single::{ImportedWallet, SingleKeyWallet};
 use openbmt_owner::starter::{
     move_all, pay_refund, seed_may_go, Coin, DataKey, KernelRandom, Key, Setup, StarterPaid,
-    StarterRefusal, StarterWallet, KERNEL_BYTES,
+    StarterRefusal, StarterWallet, KERNEL_BYTES, PAGES,
 };
 
 const NETWORK: Network = Network::Regtest;
@@ -220,6 +220,12 @@ fn cmd_make(args: &[String]) -> Result<ExitCode, String> {
     // The check-back, typed on the library's own keypad from the words the
     // script worked out: it passes only if they are the library's words.
     let words: Vec<&str> = a.one("words")?.split(' ').collect();
+    // The check is begun only once every screen of words has been shown.
+    for page in 0..PAGES {
+        if let Err(e) = setup.page(page, 1) {
+            return refused(&e);
+        }
+    }
     let asked = match setup.start_check(&mut rng) {
         Ok(p) => p,
         Err(e) => return refused(&e),

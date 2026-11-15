@@ -56,10 +56,13 @@ funds.**
 - **SS-10. Once, by hand.** The words are shown once, four at a time, for the
   owner to write on the card in pen. Then three positions, picked from fresh
   kernel bytes by KM-16's byte rule, are asked back. A wrong answer shows the
-  words again. Once they are checked, and before the key is sealed, the owner
-  may have them shown once more, the same way, to write a second card kept in
-  another place. After setup the app never shows them again, and never asks
-  for them except in the restore of SS-23, which only the owner starts.
+  words again. The positions are asked only once all three screens of words
+  have been shown, and are drawn anew only after a wrong answer, once all
+  three screens have been shown again; until then the same three are asked.
+  Once they are checked, and before the key is sealed, the owner may have
+  them shown once more, the same way, to write a second card kept in another
+  place. After setup the app never shows them again, and never asks for them
+  except in the restore of SS-23, which only the owner starts.
 - **SS-11. Never through Kotlin as text.** The words are made, kept and used
   in the Rust core. They cross to the app only to be drawn: as one image per
   screen of four words, drawn by the Rust core, which the app shows and
