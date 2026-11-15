@@ -99,9 +99,9 @@
     return ui.page(ui.bar(title, sub, back, logo), all, actions, tone);
   }
 
-  // ---- OwnerUi.kt:336 OwnerIcon ---------------------------------------------------------------------------------
+  // ---- OwnerUi.kt:337 OwnerIcon ---------------------------------------------------------------------------------
 
-  /** OwnerUi.kt:336 OwnerIcon(kind, colour, strokeWidth): the icons of the home groups and of a fold, as paths on a 24 by 24 grid. */
+  /** OwnerUi.kt:337 OwnerIcon(kind, colour, strokeWidth): the icons of the home groups and of a fold, as paths on a 24 by 24 grid. */
   function OwnerIconView(kind, colour, strokeWidth = 2) {
     const c = css(colour);
     const stroke = `fill="none" stroke="${c}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round"`;
