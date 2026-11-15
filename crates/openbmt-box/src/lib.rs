@@ -77,7 +77,8 @@ pub use pos::{
 };
 pub use pos_config::{PosConfig, PosConfigError, Vendor, POS_CONFIG_FILE};
 pub use runner::{
-    invitation_text, read_invitation_file, BoxRunner, LocalPost, PosView, StartFailure, RELAY_DIR,
+    invitation_text, read_invitation_file, BoxRunner, LocalPost, PosView, SetupStore, StartFailure,
+    RELAY_DIR,
 };
 pub use state::{
     BoxCore, BoxError, BoxStatus, SettingsTaken, INVITATION_FILE, INVITE_SECS, KEY_FILE,

@@ -842,9 +842,28 @@ impl BoxRunner {
         clock: Arc<dyn Clock + Send + Sync>,
         cfg: ServerConfig,
     ) -> Result<Self, StartFailure> {
-        let dir: PathBuf = dir.into();
-        let pos = vendor_setup(&dir);
-        Self::start_inner(dir, bind, clock, cfg, pos)
+        Self::start_inner(dir.into(), bind, clock, cfg, PosFrom::Config, &mut |_| {})
+    }
+
+    /// [`BoxRunner::start`] that, once the data directory is open and before
+    /// the POS side is read from `pos-config`, calls `take` with the Box's
+    /// setup store (BX-64). A `pos-config` that `take` writes is read at this
+    /// start. The runner comes back with what `take` returned.
+    pub fn start_taking<T: Default>(
+        dir: impl Into<PathBuf>,
+        bind: SocketAddr,
+        clock: Arc<dyn Clock + Send + Sync>,
+        cfg: ServerConfig,
+        take: impl FnOnce(&dyn SetupStore) -> T,
+    ) -> Result<(Self, T), StartFailure> {
+        let mut take = Some(take);
+        let mut taken = None;
+        let runner = Self::start_inner(dir.into(), bind, clock, cfg, PosFrom::Config, &mut |s| {
+            if let Some(take) = take.take() {
+                taken = Some(take(s));
+            }
+        })?;
+        Ok((runner, taken.unwrap_or_default()))
     }
 
     /// [`BoxRunner::start`] with a POS connector (BX-40 to BX-43). With
@@ -857,7 +876,14 @@ impl BoxRunner {
         cfg: ServerConfig,
         pos: Option<PosSetup>,
     ) -> Result<Self, StartFailure> {
-        Self::start_inner(dir.into(), bind, clock, cfg, Ok(pos))
+        Self::start_inner(
+            dir.into(),
+            bind,
+            clock,
+            cfg,
+            PosFrom::Given(pos),
+            &mut |_| {},
+        )
     }
 
     fn start_inner(
@@ -865,7 +891,8 @@ impl BoxRunner {
         bind: SocketAddr,
         clock: Arc<dyn Clock + Send + Sync>,
         cfg: ServerConfig,
-        pos: Result<Option<PosSetup>, PosOpenError>,
+        pos: PosFrom,
+        before_pos: &mut dyn FnMut(&dyn SetupStore),
     ) -> Result<Self, StartFailure> {
         let dir_lock = DirLock::acquire(&dir).map_err(StartFailure::Lock)?;
         let core =
@@ -949,6 +976,13 @@ impl BoxRunner {
         }
         sync_relay(&core, &relay, &*clock, &notes);
 
+        // BX-64: the setup files are taken before the POS side is read and
+        // before any listener is built, so they work at this start.
+        before_pos(&CoreSetup(Arc::clone(&core)));
+        let pos = match pos {
+            PosFrom::Config => vendor_setup(&dir),
+            PosFrom::Given(pos) => Ok(pos),
+        };
         let (pos_side, view) = match pos {
             Err(e) => {
                 note(&notes, format!("the POS side is off: {e}"));
@@ -1139,18 +1173,14 @@ impl BoxRunner {
     /// Store the POS token the merchant typed (BX-41). Only a paired Box that
     /// the settings list takes one.
     pub fn store_pos_token(&self, token: &str) -> Result<(), BoxError> {
-        lock(&self.core).store_pos_token(token)
+        store_pos_token(&self.core, token)
     }
 
     /// BX-49: take the line `pos-setup` was given, keep it as the Box's POS
-    /// vendor and say when it takes effect: at the next start.
+    /// vendor. It takes effect at the next start, or at this one when a setup
+    /// file is taken as the Box starts (BX-64).
     pub fn store_pos_config(&self, line: &str) -> Result<PosConfig, PosConfigError> {
-        let config = PosConfig::parse(line)?;
-        lock(&self.core)
-            .files_mut()
-            .write(POS_CONFIG_FILE, &config.to_bytes())
-            .map_err(|e| PosConfigError::Io(e.kind()))?;
-        Ok(config)
+        store_pos_config(&self.core, line)
     }
 
     /// The POS side as the worker last saw it, without the token (BX-41).
@@ -1205,6 +1235,57 @@ impl Drop for BoxRunner {
     fn drop(&mut self) {
         self.shutdown();
     }
+}
+
+fn store_pos_token(core: &Core, token: &str) -> Result<(), BoxError> {
+    lock(core).store_pos_token(token)
+}
+
+fn store_pos_config(core: &Core, line: &str) -> Result<PosConfig, PosConfigError> {
+    let config = PosConfig::parse(line)?;
+    lock(core)
+        .files_mut()
+        .write(POS_CONFIG_FILE, &config.to_bytes())
+        .map_err(|e| PosConfigError::Io(e.kind()))?;
+    Ok(config)
+}
+
+/// Where the setup files' contents are stored (BX-64): the same two calls the
+/// console's `pos-token` and `pos-setup` make.
+pub trait SetupStore {
+    /// As [`BoxRunner::store_pos_token`].
+    fn store_pos_token(&self, token: &str) -> Result<(), BoxError>;
+    /// As [`BoxRunner::store_pos_config`].
+    fn store_pos_config(&self, line: &str) -> Result<PosConfig, PosConfigError>;
+}
+
+impl SetupStore for BoxRunner {
+    fn store_pos_token(&self, token: &str) -> Result<(), BoxError> {
+        BoxRunner::store_pos_token(self, token)
+    }
+    fn store_pos_config(&self, line: &str) -> Result<PosConfig, PosConfigError> {
+        BoxRunner::store_pos_config(self, line)
+    }
+}
+
+/// The setup store of a Box that is still starting.
+struct CoreSetup(Core);
+
+impl SetupStore for CoreSetup {
+    fn store_pos_token(&self, token: &str) -> Result<(), BoxError> {
+        store_pos_token(&self.0, token)
+    }
+    fn store_pos_config(&self, line: &str) -> Result<PosConfig, PosConfigError> {
+        store_pos_config(&self.0, line)
+    }
+}
+
+/// Where the POS side of a start comes from.
+enum PosFrom {
+    /// The data directory's `pos-config`, read once the setup files are taken.
+    Config,
+    /// A connector the caller gives.
+    Given(Option<PosSetup>),
 }
 
 /// BX-49: the POS side the data directory's `pos-config` asks for: none when

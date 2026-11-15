@@ -175,11 +175,14 @@ fn main() -> ExitCode {
         None => None,
     };
     let data_dir = PathBuf::from(&dir);
-    let mut runner = match BoxRunner::start(
+    // BX-64: the setup files are taken as the Box starts, before its POS side
+    // and the till listener are built, so each works at this start.
+    let (mut runner, setup_lines) = match BoxRunner::start_taking(
         dir,
         bind_addr,
         Arc::new(SystemClock),
         ServerConfig::default(),
+        |store| take_setup_files(store, &data_dir),
     ) {
         Ok(r) => r,
         Err(e) => {
@@ -193,8 +196,8 @@ fn main() -> ExitCode {
     ));
     say(&format!("key: {}", hex(&runner.device_id().to_bytes())));
     say(&format!("listening: {}", runner.local_addr()));
-    // BX-64: the files a host without a console sets the Box up with.
-    say_all(take_setup_files(&runner, &data_dir));
+    say_all(setup_lines);
+    // A `--till-listen` flag wins over the address in `till.txt`.
     let till_addr = match till_addr {
         Some(addr) => Some(addr),
         None => match till_file_listen(&data_dir) {
