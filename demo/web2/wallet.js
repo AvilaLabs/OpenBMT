@@ -1,6 +1,6 @@
 // The customer's wallet: a plain bitcoin wallet on the customer's phone, no brand, drawn only for the demo.
 // It is not an OpenBMT app; any wallet that scans a payment code works the same way at the counter.
-// Four screens: home, scanning, the check before sending, and sent.
+// Five screens: home, scanning, tapping, the check before sending, and sent.
 "use strict";
 (function (root) {
   const C = root.OpenBmtChrome;
@@ -43,12 +43,16 @@
 
   const sats = (n) => n.toLocaleString("en-US") + " sats";
 
-  /** Home: the balance, Scan to pay. */
+  /** Home: the balance, and Scan and Tap side by side to pay. */
   function home(balance) {
+    const row = el("div", "display:flex;gap:12px;");
+    const scan = button("Scan", true), tap = button("Tap", false);
+    scan.style.flex = tap.style.flex = "1";
+    row.append(scan, tap);
     return frame([
       card([el("div", `font-size:15px;color:${MUTED}`, "Balance"), el("div", "font-size:36px;font-weight:500", sats(balance))]),
       el("div", `font-size:15px;color:${MUTED};padding:4px 2px`, "To pay a shop, scan the code on its screen."),
-    ], [button("Scan", true), button("Receive", false)]);
+    ], [row]);
   }
 
   /** Scanning: the camera pointed at the counter's code. */
@@ -60,19 +64,50 @@
     return frame([view], [button("Cancel", false)]);
   }
 
-  /** The check before sending: who it goes to and how much, from the code. */
-  function confirm(amountSats, address) {
-    return frame([
+  /** Tapping: the phone held to the counter, which gives the payment over NFC. */
+  function tapping() {
+    const view = el("div", "flex:1;border-radius:24px;background:#1b1d22;position:relative;overflow:hidden;display:grid;place-items:center;");
+    const rings = el("div", "position:relative;width:200px;height:200px;");
+    for (const r of [200, 140, 80]) {
+      rings.append(el("div", `position:absolute;left:50%;top:50%;width:${r}px;height:${r}px;transform:translate(-50%,-50%);border:3px solid rgba(255,255,255,${r === 80 ? 0.95 : r === 140 ? 0.6 : 0.3});border-radius:50%;`));
+    }
+    const tip = el("div", "position:absolute;left:0;right:0;bottom:28px;text-align:center;color:#fff;font-size:16px;", "Hold near the counter");
+    view.append(rings, tip);
+    return frame([view], [button("Cancel", false)]);
+  }
+
+  /**
+   * The check before sending: who it goes to and how much, from the code. When the request carries a Lightning
+   * invoice, [pay] is {method, onPick(method)}: a row "Pay with" offers Lightning and On-chain, and the line below
+   * says "Lightning invoice" for Lightning and the address for On-chain.
+   */
+  function confirm(amountSats, address, pay) {
+    const lightning = !!pay && pay.method === "Lightning";
+    const rows = [
       el("div", "font-size:22px;font-weight:500;padding:4px 2px", "Send this payment?"),
       card([
         el("div", `font-size:15px;color:${MUTED}`, "Amount"),
         el("div", "font-size:34px;font-weight:500", sats(amountSats)),
       ]),
-      card([
-        el("div", `font-size:15px;color:${MUTED}`, "To"),
-        el("div", `font:500 17px "Roboto Mono",monospace;word-break:break-all;line-height:1.5`, address),
-      ]),
-    ], [button("Send", true), button("Cancel", false)]);
+    ];
+    if (pay) {
+      const row = el("div", "display:flex;align-items:center;gap:10px;padding:0 2px;");
+      row.append(el("div", `font-size:15px;color:${MUTED};margin-right:auto`, "Pay with"));
+      for (const method of ["Lightning", "On-chain"]) {
+        const on = pay.method === method;
+        const b = el("button", `height:40px;padding:0 16px;border-radius:20px;font:500 15px ${FONT};border:${on ? "0" : "1px solid " + LINE};background:${on ? INK : BG};color:${on ? "#fff" : INK};`, method);
+        b.addEventListener("click", () => pay.onPick(method));
+        row.append(b);
+      }
+      rows.push(row);
+    }
+    rows.push(card([
+      el("div", `font-size:15px;color:${MUTED}`, "To"),
+      lightning
+        ? el("div", "font-size:17px;font-weight:500;line-height:1.5", "Lightning invoice")
+        : el("div", `font:500 17px "Roboto Mono",monospace;word-break:break-all;line-height:1.5`, address),
+    ]));
+    return frame(rows, [button("Send", true), button("Cancel", false)]);
   }
 
   /** Sent. */
@@ -85,5 +120,5 @@
     ], [button("Done", true)]);
   }
 
-  root.OpenBmtWallet = { home, scanning, confirm, sent };
+  root.OpenBmtWallet = { home, scanning, tapping, confirm, sent };
 })(globalThis);

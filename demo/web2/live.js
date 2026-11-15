@@ -6,20 +6,51 @@
 // The owner's phone runs on the owner app's own code the same way (owner-controller.js, the owner's model and the
 // owner's library as WebAssembly), on the same pretend chain: every chain action goes through one object
 // (one-chain.js) that moves both modules together. The customer's wallet is only drawn for the demo; it reads the
-// sale's own payment code.
+// sale's own payment code, or the same request from the counter's tag when the customer taps. The sounds and the
+// logo's snap are the apps' own (demo/ui/feedback.js, sound.js).
 "use strict";
 (async function () {
   const U = OpenBmtUi, C = OpenBmtChrome;
   const Wl = OpenBmtWallet, QS = OpenBmtQuestions, PC = OpenBmtPaymentCode, CC = OpenBmtCounterController;
   const OC = OpenBmtOwnerController, { OneChain } = OpenBmtOneChain;
+  const F = OpenBmtFeedback, Cu = OpenBmtCustomer;
   // Where the files are: the page may say (OpenBmtAssets); the repository's layout otherwise.
   const assets = Object.assign({
     logo: "../ui/logo.png", palette: "../ui/palette.json",
     model: "../../dist/kotlin-js/counter/counter-model.mjs", wasm: "../../dist/demo-counter/counter.wasm", host: "./counter-host.mjs",
     ownerModel: "../../dist/kotlin-js/owner/owner-model.mjs", ownerWasm: "../../dist/demo-owner/owner.wasm", ownerHost: "./owner-host.mjs",
+    sounds: "./sounds/", logoPieces: "../ui/logo-pieces/",
   }, globalThis.OpenBmtAssets);
   const palette = new U.PaletteOf(await (await fetch(assets.palette)).json());
   const shell = new OpenBmtShell(document.getElementById("app"));
+
+  // ---- The sounds and the logo's snap ----
+  // Audio starts only after the visitor's first tap; the switch in the bar is remembered.
+  const box = OpenBmtSound.forPage(F, assets.sounds);
+  for (const kind of ["pointerup", "click", "keydown"]) addEventListener(kind, () => box.unlock(), { capture: true });
+  shell.setSound(box.state.soundOn);
+  shell.onSound = () => {
+    box.state.soundOn = !box.state.soundOn;
+    shell.setSound(box.state.soundOn);
+  };
+  // With reduced motion the logo is still and silent, as the app's is with the animator scale at 0 (Feedback.kt:74 motionOn).
+  const motionOn = () => !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const snap = F.LogoSnapView(await F.loadPieces(assets.logoPieces), innerWidth < 900 ? 96 : 128, box, motionOn);
+
+  /** SaleModel.kt:87 OutcomePlays: a sale plays the sound of good once and the sound of stop once, in this run. */
+  function OutcomePlays() {
+    const played = new Set();
+    return {
+      /** True the first time [sale] shows [colour] and the colour plays a sound. */
+      first(sale, colour) {
+        if (colour !== "Green" && colour !== "Red") return false;
+        const key = `${sale}:${colour}`;
+        if (played.has(key)) return false;
+        played.add(key);
+        return true;
+      },
+    };
+  }
   const wasm = await (await fetch(assets.wasm)).arrayBuffer();
   const { loadCounter } = await import(assets.host);
   const flow = (await import(assets.model)).CounterFlowDemo.getInstance();
@@ -69,9 +100,10 @@
 
   async function startRun(onEvent, withOwner) {
     stopRun();
-    const r = { dead: false, beat: 0, aim: null, onEvent };
+    const r = { dead: false, beat: 0, aim: null, onEvent, plays: OutcomePlays(), quiet: false, host: null };
     // Two modules, one chain: both read the page's clock, and every chain action is made on both (one-chain.js).
     const counterChain = await loadCounter(wasm, { now: () => clock.now() });
+    r.host = counterChain;
     const ownerChain = await loadOwner(ownerWasm, { now: () => clock.now() });
     r.chain = OneChain(counterChain, ownerChain);
     r.controller = CC.Controller({
@@ -81,7 +113,13 @@
         shell.show("counter", page(viewOf));
         if (r.aim) shell.target("counter", r.aim, null);
       },
-      event(kind, data) { if (!r.dead) r.onEvent(kind, data); },
+      event(kind, data) {
+        if (r.dead) return;
+        // Controller.kt:2369 first: the first time this sale's screen is green or red, its sound plays, once.
+        // A visitor's skipped taps (r.quiet) are made without it.
+        if (kind === "sale" && r.plays.first(data.number, data.says.colour) && !r.quiet) box.outcome(data.says.colour);
+        r.onEvent(kind, data);
+      },
     });
     r.owner = OC.Controller({
       flow: ownerFlow, chain: ownerChain, clock,
@@ -200,52 +238,18 @@
   }
 
   // ---- As a customer: the shop's counter (the demo plays the cashier) and your phone with a wallet. ----
+  // The moments are customer.js's; this gives them the page's side.
   function customerMoments(go, S) {
-    let read = null;
-    /** The wallet's last screens, once the counter has turned paid. */
-    const paidNow = () => {
-      shell.say("Your phone sent the payment. The counter saw it in a few seconds.",
-        ["The green screen tells the cashier to hand over your order."], { label: "Next", onSkip: go });
-      shell.questions(QS.customer.paid);
-    };
-    return [
-      { step: 0, enter() {
-        shell.show("wallet", () => Wl.home(250000));
-        shell.light("wallet", { counter: "The cashier's screen. It waits for your payment." });
-        shell.say("The cashier rang up your order: 8.00 USD. The counter shows a code.",
-          ["You are the customer. On your phone, tap ", { b: "Scan" }, "."]);
-        shell.questions(QS.customer.scan);
-        shell.target("wallet", "Scan", go);
-      } },
-      { step: 0, enter() {
-        shell.show("wallet", () => Wl.scanning());
-        shell.say("", ["Your phone reads the code on the counter."]);
-        const at = S.index;
-        setTimeout(() => { if (S.index === at) go(); }, 1400);
-      } },
-      { step: 1, enter() {
-        read = readCode();
-        shell.show("wallet", () => Wl.confirm(read.sats, read.address));
-        shell.say("Your phone read the code: the amount and the shop's address.",
-          ["Check the amount, then tap ", { b: "Send" }, "."]);
-        shell.questions(QS.customer.send);
-        shell.target("wallet", "Send", () => { payCode(read); go(); });
-      }, auto() { read = readCode(); payCode(read); waitForPaid(); } },
-      { step: 2, enter() {
-        shell.show("wallet", () => Wl.sent(read.sats));
-        shell.light("counter", { wallet: "Your payment is sent." });
-        shell.say("Your phone sent the payment.", ["Watch the shop's counter: it checks the payment itself."]);
-        shell.questions([]);
-        const data = run.controller.saleData();
-        if (data && data.isPaid) paidNow();
-        else S.on = { sale: (d) => { if (d.isPaid) { S.on = null; paidNow(); } } };
-      } },
-      { step: 3, enter() {
-        shell.light("counter", {});
-        shell.say("You paid from your own wallet, straight to the shop's own wallet, with no company in between.",
-          ["That is all a customer does. Tap ", { b: "Start over" }, " to try it as the merchant."]);
-      } },
-    ];
+    return Cu.moments({
+      shell, Wl, QS, PC,
+      saleData: () => run.controller.saleData(),
+      payCode,
+      // The counter's host pays an invoice when it has the call (a pretend Lightning node); false says it has none, and
+      // the wallet pays on-chain.
+      payLightning: (invoice) => (typeof run.host.payLightning === "function" ? run.host.payLightning(invoice) : false),
+      waitForPaid,
+      pump: () => pump(run),
+    }, go, S);
   }
 
   // ---- The runner: a moment ends when the model says so; a step tab replays the taps on a fresh model. ----
@@ -282,7 +286,9 @@
     }, path.devices.some((d) => d.id === "owner"));
     path.setup();
     // The visitor's taps before the moment they chose, made on the real model.
+    run.quiet = true;
     for (let j = 0; j < from; j++) if (moments[j].auto) moments[j].auto();
+    run.quiet = false;
     enter(from);
     shell.onStep = (s) => {
       const target = moments.findIndex((m) => m.step >= s);
@@ -295,7 +301,7 @@
     shell.start([
       { name: "As a customer", what: "Pay a shop in bitcoin, the way it works at the counter.", go: "Start", onPick: () => play(customer) },
       { name: "As a merchant", what: "Take a payment at the counter and see it reach the owner's phone.", go: "Start", onPick: () => play(merchant) },
-    ]);
+    ], snap);
   };
   shell.onRestart = pick;
   const want = new URLSearchParams(location.search).get("path");

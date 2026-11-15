@@ -30,6 +30,18 @@ const SOURCES = {
   },
   // The page's controller for the shop sale (../web2): Controller.kt is the counter's.
   "../web2/counter-controller.js": { "Controller.kt": "apps/counter-android/src/android/Controller.kt" },
+  // The sounds and the logo's snap: FeedbackModel.kt's math, Feedback.kt's player and drawing.
+  "feedback.js": {
+    "FeedbackModel.kt": "apps/android-common/src/model/FeedbackModel.kt", "Feedback.kt": "apps/android-common/src/android/Feedback.kt",
+    "Palette.kt": "apps/android-common/src/model/Palette.kt",
+  },
+  // The page's sound (../web2): the app's Feedback object.
+  "../web2/sound.js": { "Feedback.kt": "apps/android-common/src/android/Feedback.kt" },
+  // The page's run of the counter (../web2): where the counter app plays its outcome sound.
+  "../web2/live.js": {
+    "Controller.kt": "apps/counter-android/src/android/Controller.kt", "SaleModel.kt": "apps/counter-android/src/model/SaleModel.kt",
+    "Feedback.kt": "apps/android-common/src/android/Feedback.kt",
+  },
   // The page's controller for the owner's home (../web2): Controller.kt and Screens.kt are the owner's.
   "../web2/owner-controller.js": { "Controller.kt": "apps/owner-android/src/android/Controller.kt", "Screens.kt": "apps/owner-android/src/android/Screens.kt" },
 };

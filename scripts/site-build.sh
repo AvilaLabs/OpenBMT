@@ -16,9 +16,9 @@ scripts/demo-kotlin-js.sh owner
 mdbook build
 
 rm -rf dist/site
-mkdir -p dist/site/ui dist/site/fonts
+mkdir -p dist/site/ui dist/site/fonts dist/site/sounds
 # The page, its scripts and style, with the repository's paths written as the site's.
-for f in shell.js shell.css wallet.js payment-code.js questions.js one-chain.js counter-controller.js owner-controller.js live.js counter-host.mjs owner-host.mjs; do
+for f in shell.js shell.css wallet.js payment-code.js questions.js sound.js customer.js one-chain.js counter-controller.js owner-controller.js live.js counter-host.mjs owner-host.mjs; do
     cp "demo/web2/$f" dist/site/
 done
 sed -e 's#\.\./\.\./dist/kotlin-js/counter/#./#g' -e 's#\.\./\.\./dist/demo-counter/#./#g' \
@@ -28,9 +28,12 @@ sed -e 's#\.\./\.\./dist/kotlin-js/counter/#./#g' -e 's#\.\./\.\./dist/demo-coun
     -e 's#\.\./\.\./dist/kotlin-js/owner/#./#g' -e 's#\.\./\.\./dist/demo-owner/#./#g' \
     -e 's#\.\./ui/#ui/#g' demo/web2/assets.js >dist/site/assets.js
 sed -i 's#\.\./web/fonts/#fonts/#g' dist/site/shell.css
-cp demo/ui/ui.js demo/ui/chrome.js demo/ui/counter-views.js demo/ui/owner-views.js demo/ui/gallery-data.js \
+cp demo/ui/ui.js demo/ui/chrome.js demo/ui/counter-views.js demo/ui/owner-views.js demo/ui/gallery-data.js demo/ui/feedback.js \
     demo/ui/ui.css demo/ui/palette.json demo/ui/logo.png dist/site/ui/
 cp -R demo/ui/fonts dist/site/ui/fonts
+cp -R demo/ui/logo-pieces dist/site/ui/logo-pieces
+# The apps' five sounds (CC0), with the README beside them.
+cp demo/web2/sounds/* dist/site/sounds/
 cp demo/web/favicon.svg dist/site/
 cp demo/web/fonts/ubuntu-latin-*.woff2 demo/web/fonts/UBUNTU-FONT-LICENCE.txt dist/site/fonts/
 cp dist/kotlin-js/counter/counter-model.mjs dist/site/

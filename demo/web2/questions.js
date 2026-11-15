@@ -68,20 +68,71 @@
       a: "Only from the shop. A paid sale stays paid; no bank or card company can pull it back. The shop can refund you from its own wallet.",
       page: "why-bitcoin.html", anchor: "disputes-and-refunds",
     },
+    tap: {
+      q: "What is Tap?",
+      a: "A phone that can tap reads the same payment from the counter over NFC, without the camera. Everything after that is the same.",
+      page: "getting-paid.html", anchor: "enter-the-sale-and-show-the-code",
+    },
+    lightningOrChain: {
+      q: "Lightning or on-chain: which should you pick?",
+      a: "Either pays the shop. Lightning is final at once and costs little to send, so it suits small amounts. On-chain suits any amount, and the counter checks it itself in a few seconds. Many wallets pick for you.",
+      page: "getting-paid.html", anchor: "small-sales-and-lightning",
+    },
+    feeCustomer: {
+      q: "Who pays the network fee?",
+      a: "Your wallet pays the fee of the payment it sends, as with any bitcoin payment.",
+      page: "cost-reference.html", anchor: "processing-and-network-fees",
+    },
+    staff: {
+      q: "Can staff take the money?",
+      a: "A counter takes payments into the shop's wallet and holds no key that can send. Spending needs the owner's phone and a second key. Cashiers have their own PINs and limits.",
+      page: "safety.html", anchor: "what-staff-can-do",
+    },
+    offline: {
+      q: "What if the internet drops?",
+      a: "The counter needs the internet to check a payment. Without it, it says so and opens no bitcoin sale, so nothing is handed over unpaid.",
+      page: "getting-paid.html", anchor: "when-a-sale-does-not-go-as-expected",
+    },
+    note: {
+      q: "Can a sale carry a note?",
+      a: "Yes. The cashier can add a short note to a sale, such as a table number, up to 64 characters. It stays in the shop's records and is never written into the payment.",
+      page: "getting-paid.html", anchor: "enter-the-sale-and-show-the-code",
+    },
+    confirmed: {
+      q: "How long until a payment is confirmed?",
+      a: "A sale under the instant limit turns green after the counter's own check, in a few seconds. A block confirms a payment in about ten minutes on average, sometimes longer, and a sale that waits for one turns green then. A Lightning payment is final at once.",
+      page: "getting-paid.html", anchor: "decide-when-to-hand-over-the-goods",
+    },
+    feeShop: {
+      q: "Who pays the network fee?",
+      a: "The customer's wallet pays the fee of the payment it sends. The shop pays a fee later, when it spends what it took in.",
+      page: "cost-reference.html", anchor: "processing-and-network-fees",
+    },
+    priceDrops: {
+      q: "What if the price of bitcoin drops?",
+      a: "From the moment a sale is paid, the shop holds bitcoin, and its value moves with the price, up and down. OpenBMT does not convert it. The owner chooses how much to keep and sends the rest to an exchange, with the second key's approval.",
+      page: "cost-reference.html", anchor: "supply-and-price",
+    },
+    books: {
+      q: "How does it go in my books?",
+      a: "Every sale is in the owner's books with its price in your currency at the time. Books writes the files for your bookkeeper.",
+      page: "cost-reference.html", anchor: "united-states-tax-records",
+    },
   };
 
   root.OpenBmtQuestions = {
     merchant: {
-      ringUp: [Q.counter, Q.price],
-      code: [Q.code, Q.short],
-      paid: [Q.instant, Q.who],
-      owner: [Q.where, Q.pileUp],
-      books: [Q.pileUp, Q.settled],
+      ringUp: [Q.counter, Q.price, Q.staff, Q.offline, Q.note],
+      code: [Q.code, Q.short, Q.feeShop],
+      paid: [Q.confirmed, Q.instant, Q.who],
+      owner: [Q.where, Q.pileUp, Q.priceDrops],
+      books: [Q.pileUp, Q.settled, Q.books],
     },
     customer: {
-      scan: [Q.anyWallet, Q.code],
-      send: [Q.newAddress, Q.fast],
+      scan: [Q.anyWallet, Q.code, Q.tap],
+      send: [Q.newAddress, Q.fast, Q.lightningOrChain, Q.feeCustomer],
       paid: [Q.fast, Q.refund],
     },
   };
+  if (typeof module !== "undefined" && module.exports) module.exports = root.OpenBmtQuestions;
 })(globalThis);

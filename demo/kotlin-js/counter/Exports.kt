@@ -91,6 +91,8 @@ class SaleScreenData(
     val qrBits: ByteArray?,
     val uri: String?,
     val copyUri: String?,
+    /** The NDEF file the counter's tag holds for the sale (TP-01): what a phone that taps reads; null when no code shows. */
+    val tag: ByteArray?,
     val address: String?,
     val needsSats: Double,
     val receivedSats: Double,
@@ -294,6 +296,7 @@ object CounterFlowDemo {
             qrBits = if (code) payment?.qrBits else null,
             uri = if (code) payment?.uri else null,
             copyUri = if (code) payment?.copyUri else null,
+            tag = if (code) payment?.tag else null,
             address = payment?.address,
             needsSats = s.needsSats.toDouble(),
             receivedSats = s.receivedSats.toDouble(),

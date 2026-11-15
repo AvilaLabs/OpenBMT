@@ -24,6 +24,7 @@
       this.slots = new Map();
       this.onStep = null;
       this.onRestart = null;
+      this.onSound = null;
       this.build();
       addEventListener("resize", () => this.fit());
     }
@@ -36,11 +37,14 @@
       mark.innerHTML = '<img src="' + LOGO + '" alt=""><span>OpenBMT demo</span>';
       this.stepList = el("ol", "steps");
       const right = el("div", "right");
+      // The sound switch shows the state it is in (see [setSound]); the page decides what a tap does.
+      this.soundEl = el("button", "sound");
+      this.soundEl.addEventListener("click", () => this.onSound && this.onSound());
       const again = el("button", null, "Start over");
       again.addEventListener("click", () => this.onRestart && this.onRestart());
       const book = el("a", null, "Handbook");
       book.href = HANDBOOK;
-      right.append(again, book);
+      right.append(this.soundEl, again, book);
       bar.append(mark, this.stepList, right);
 
       this.sayEl = el("section", "say");
@@ -71,8 +75,16 @@
       this.root.append(demo);
     }
 
-    /** The start screen. [roles]: [{name, what, go, onPick}]. */
-    start(roles) {
+    /** The sound switch reads "Sound on" or "Sound off": the state, not the action. */
+    setSound(on) {
+      this.soundEl.textContent = on ? "Sound on" : "Sound off";
+    }
+
+    /**
+     * The start screen. [roles]: [{name, what, go, onPick}]. [snap]: {canvas, play()}, the logo that snaps together
+     * once, above the choices, each time the screen is shown.
+     */
+    start(roles, snap) {
       let s = this.root.querySelector(".start");
       if (!s) {
         s = el("div", "start");
@@ -85,6 +97,11 @@
         const mid = el("div", "mid");
         mid.append(el("h1", null, "Try OpenBMT"),
           el("p", "lede", "Take a bitcoin payment the way a shop does, on the real apps, in this page."));
+        if (snap) {
+          const holder = el("div", "snap");
+          holder.append(snap.canvas);
+          mid.append(holder);
+        }
         const list = el("div", "roles");
         for (const r of roles) {
           const b = el("button", "role");
@@ -99,6 +116,7 @@
       }
       s.hidden = false;
       this.demo.hidden = true;
+      if (snap) snap.play();
     }
 
     /**
@@ -184,7 +202,7 @@
     redraw(s) {
       if (!s.build) return;
       s.phone.replaceChildren(s.build(s.size));
-      if (s.aim) this.aim(s, s.aim.label, s.aim.onTap);
+      if (s.aim) this.aim(s, s.aim);
       this.fit();
     }
 
@@ -270,28 +288,42 @@
      * control is shown.
      */
     target(id, label, onTap) {
-      return this.aim(this.slots.get(id), label, onTap);
+      return this.aim(this.slots.get(id), [{ label, onTap }]);
     }
 
-    aim(s, label, onTap) {
-      s.aim = { label, onTap };
+    /** The same for several controls at once: [list] is [{label, onTap}]; a tap on any one of them ends the marking. */
+    targets(id, list) {
+      return this.aim(this.slots.get(id), list);
+    }
+
+    aim(s, list) {
+      s.aim = list;
       for (const t of this.root.querySelectorAll(".target")) t.classList.remove("target");
       const all = [...s.phone.querySelectorAll("button, [role=button]")];
-      const hit = all.find((b) => b.textContent.trim() === label)
-        || all.find((b) => b.textContent.trim().startsWith(label));
-      if (!hit) return false;
-      hit.classList.add("target");
-      if (onTap) {
+      const hits = [];
+      for (const { label, onTap } of list) {
+        const hit = all.find((b) => b.textContent.trim() === label)
+          || all.find((b) => b.textContent.trim().startsWith(label));
+        if (!hit) continue;
+        hit.classList.add("target");
+        hits.push([hit, onTap]);
+      }
+      const handlers = [];
+      const release = () => {
+        for (const [h, f] of handlers) { h.removeEventListener("click", f, true); h.classList.remove("target"); }
+        s.aim = null;
+      };
+      for (const [hit, onTap] of hits) {
+        if (!onTap) continue;
         const once = (ev) => {
           ev.stopPropagation();
-          hit.removeEventListener("click", once, true);
-          hit.classList.remove("target");
-          s.aim = null;
+          release();
           onTap();
         };
+        handlers.push([hit, once]);
         hit.addEventListener("click", once, true);
       }
-      return true;
+      return hits.length === list.length;
     }
 
     /** The customer the demo plays: [who], one [line] and one button. Null puts it away. */
