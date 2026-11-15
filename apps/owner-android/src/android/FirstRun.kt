@@ -60,6 +60,7 @@ internal fun Controller.showFirstRun() {
         FirstRunStep.OwnCounter -> showOwnCounter(r)
         FirstRunStep.Instant -> showInstant(r)
         FirstRunStep.FirstSale -> showFirstSale(r)
+        FirstRunStep.Ready -> showReady(r)
         FirstRunStep.Why -> showWhy(r)
         FirstRunStep.RealCases -> showRealCases(r)
         FirstRunStep.Guide -> showKeyGuide(r)
@@ -284,11 +285,10 @@ private fun Controller.showMoney(r: FirstRun) {
             RowItem(FirstRunWords.moneyDiy, FirstRunWords.moneyDiyNote, onClick = pick(MoneyChoice.Diy)),
         ),
     )
-    val later = listOf(RowItem(FirstRunWords.moneyLater, FirstRunWords.moneyLaterNote, onClick = pick(MoneyChoice.Later)))
     stepScreen(
         FirstRunWords.shopTitle,
         listOf(ui.moneyPicture(), heading(FirstRunWords.moneyTitle), para(FirstRunWords.moneyText), ui.rows(main)) +
-            fold(FirstRunWords.moneyOther, other) + ui.rows(later),
+            fold(FirstRunWords.moneyOther, other),
         back = { r.back(); showFirstRun() },
     )
 }
@@ -314,6 +314,7 @@ private fun Controller.showHardware(r: FirstRun) {
     views.add(ui.hardwarePicture())
     views.add(heading(FirstRunWords.hwTitle))
     views.add(para(FirstRunWords.hwText))
+    views.add(para(FirstRunWords.hwCost))
     for (rule in HelperPage.rules) views.add(ui.text("\u2022 $rule", 15f))
     views.add(line(FirstRunWords.hwNoBrand, muted = true))
     views.add(stack(ui.button(FirstRunWords.hwHelper) { r.openHelper(); showFirstRun() }, line(FirstRunWords.hwHelperNote, muted = true), gap = 6))
@@ -388,7 +389,7 @@ private fun Controller.showInstant(r: FirstRun) {
  * would change is queued with the bytes it gave. The first run holds no settings of its own, so there is no other place
  * to write it. The limit is only lowered or kept (more than the shop's is refused with the words under the field), which is
  * a tightening that takes effect when delivered. Nothing is queued when the settings already hold the number or this step
- * queued it. While the starter wallet holds the shop at its limit or date (SS-37) nothing is written and the step goes on.
+ * queued it. The step only lowers or keeps, which the starter wallet's hold (SS-37) never holds, so it is not asked.
  * With no node or no settings yet the step stays, with the library's words.
  */
 private fun Controller.writeInstant(r: FirstRun, msg: Slot) {
@@ -396,10 +397,6 @@ private fun Controller.writeInstant(r: FirstRun, msg: Slot) {
     if (InstantStep.parse(typed) == null) {
         msg.show(ui.words(AppWords.editValueNotRead(FieldKind.Dollars, FirstRunWords.instantLabel, shopFile.load().currency ?: ShopCurrency.Usd)))
         return
-    }
-    if (starterHolds(org.openbmt.owner.StarterChangeKind.Other)) {
-        r.skipInstant()
-        return showFirstRun()
     }
     val n = node
     val held = try {
@@ -456,6 +453,28 @@ private fun Controller.showFirstSale(r: FirstRun) {
         tick = { if (node?.let { n -> paidSalesOf(n)?.let { c -> sale.observe(c) } } == true) showFirstRun() }
         tick?.invoke()
     }
+}
+
+// ---- the end of the first run ---------------------------------------------------------------------------------------------------
+
+/**
+ * The first run ends here (DESIGN 2.1): the counter takes bitcoin, and what is still to do is the home checklist's, listed as
+ * plain lines. The button ends the first run and goes on to the till steps once, then home.
+ */
+private fun Controller.showReady(r: FirstRun) {
+    val views = ArrayList<View>()
+    views.add(heading(FirstRunWords.readyTitle))
+    views.add(para(FirstRunWords.readyText))
+    for (i in Checklist.items(checklistSaleSeen || r.firstSale.paid, secondCopySkipped(), Checklist.cardDue(shopFile.load()))) views.add(ui.text(i.text, 16f))
+    stepScreen(FirstRunWords.shopTitle, views, listOf(ui.primary(FirstRunWords.readyGo) { endFirstRun() }), { r.back(); showFirstRun() })
+}
+
+/** The first run is over: its state is let go, and the till steps (once) and home follow. */
+private fun Controller.endFirstRun() {
+    firstRun = null
+    starter.firstRun = null
+    resume.clear()
+    afterFirstCounter()
 }
 
 /** The shop's paid sales as the books count them; null when the node cannot say. */

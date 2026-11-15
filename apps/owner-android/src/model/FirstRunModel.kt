@@ -258,7 +258,7 @@ class MoneyTabs(start: ShopCurrency, private val guess: ShopCurrency) {
 
 /** The screens of the first run, in the order they come. Back from each is [FirstRun.back]. */
 enum class FirstRunStep {
-    Welcome, Before, Shop, Till, Money, Hardware, Helper, OwnAdvice, Connect, Starter, OwnCounter, Instant, FirstSale, Why, RealCases, Guide, NotYet,
+    Welcome, Before, Shop, Till, Money, Hardware, Helper, OwnAdvice, Connect, Starter, OwnCounter, Instant, FirstSale, Ready, Why, RealCases, Guide, NotYet,
 }
 
 /**
@@ -299,7 +299,7 @@ class FirstRun(start: ShopPrefs, locale: String) {
      * The step after [step]; the Money step goes on to Hardware for the plan, to Connect for a wallet the owner holds,
      * to Why for the key maker, to OwnAdvice for a signer built by the owner and to NotYet for the others. The plan's
      * Hardware goes on to Starter. Starter and Connect (once checked) go on to adding the first counter, then to Instant,
-     * then to FirstSale, then NotYet. OwnAdvice goes on to Connect, or to Why once the choice is changed to the key maker.
+     * then to FirstSale, then Ready, where the first run ends. OwnAdvice goes on to Connect, or to Why once the choice is changed to the key maker.
      */
     fun next() {
         step = when (step) {
@@ -332,7 +332,8 @@ class FirstRun(start: ShopPrefs, locale: String) {
                 firstSale = FirstSale()
                 FirstRunStep.FirstSale
             }
-            FirstRunStep.FirstSale -> FirstRunStep.NotYet
+            FirstRunStep.FirstSale -> FirstRunStep.Ready
+            FirstRunStep.Ready -> FirstRunStep.Ready
             FirstRunStep.Why -> {
                 guide = KeyGuide()
                 FirstRunStep.Guide
@@ -376,6 +377,9 @@ class FirstRun(start: ShopPrefs, locale: String) {
     /** What the owner typed for a typical sale: shown beside the limit for comparison, and never written. */
     var typicalTyped = ""
 
+    /** Whether the step in memory reads the running node: Instant, FirstSale and Ready. */
+    val needsNode: Boolean get() = step == FirstRunStep.Instant || step == FirstRunStep.FirstSale || step == FirstRunStep.Ready
+
     /** The first sale watch of the FirstSale step, made new each time the step is entered. */
     var firstSale = FirstSale()
         private set
@@ -401,11 +405,6 @@ class FirstRun(start: ShopPrefs, locale: String) {
         instantTyped = text
         next()
         return InstantResult.Saved
-    }
-
-    /** Instant, Next while the starter wallet holds the shop at its limit or date (SS-37): nothing is written and the step goes on. */
-    fun skipInstant() {
-        if (step == FirstRunStep.Instant) next()
     }
 
     fun choose(choice: MoneyChoice) {
@@ -434,6 +433,7 @@ class FirstRun(start: ShopPrefs, locale: String) {
             FirstRunStep.OwnCounter -> if (money == MoneyChoice.Plan) FirstRunStep.Starter else FirstRunStep.Connect
             FirstRunStep.Instant -> FirstRunStep.OwnCounter
             FirstRunStep.FirstSale -> FirstRunStep.Instant
+            FirstRunStep.Ready -> FirstRunStep.FirstSale
             FirstRunStep.Why -> FirstRunStep.Money
             FirstRunStep.RealCases -> if (realPage > 0) {
                 realPage--
@@ -458,6 +458,35 @@ class FirstRun(start: ShopPrefs, locale: String) {
     companion object {
         /** The four cases and the page on the owner's own bitcoin. */
         const val REAL_PAGES = 5
+    }
+}
+
+/**
+ * The hand-off that carries the first run across the start of the node. The first counter is paired before any node runs;
+ * the node is then started, and when it is up the first run goes on at the Instant step instead of home. It is armed once,
+ * by the pairing, and used once: [take] clears it whether or not it applies, and a wipe clears it ([clear]).
+ */
+class FirstRunResume {
+    var armed = false
+        private set
+
+    /** The first counter is paired and the node is to start: the first run resumes when it is up. */
+    fun arm() {
+        armed = true
+    }
+
+    /**
+     * The node is up: true once when the hand-off was armed and the first run is in memory at a step that needs the node.
+     * Otherwise false, and the home screen is drawn as always. Either way the hand-off is spent.
+     */
+    fun take(run: FirstRun?): Boolean {
+        val was = armed
+        armed = false
+        return was && run != null && run.needsNode
+    }
+
+    fun clear() {
+        armed = false
     }
 }
 

@@ -317,6 +317,10 @@ internal fun Controller.triedPin(back: (SayWords?) -> Unit, op: () -> Unit, done
 /** The delete order of OA-64: the setup file, the ceremony's file, the Keystore key, then the tries file; and say so. */
 internal fun Controller.wipe() {
     stopTicker()
+    // The first run in memory and its hand-off belong to what is deleted.
+    resume.clear()
+    firstRun = null
+    starter.firstRun = null
     lockNow()
     // The watch key and what the watcher follows go with the setup (OA-86).
     WatchService.stop(act)

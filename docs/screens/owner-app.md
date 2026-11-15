@@ -340,7 +340,7 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | moneyDiyNote | Made from parts and free software. It connects like any wallet you already have. |
 | moneyLater | Set up the rest now, add the wallet later |
 | moneyLaterNote | The counter says "Not taking bitcoin yet" until you do. |
-| moneyNotYet | This part is still being built. For now, setup continues with the test setup. |
+| moneyNotYet | Next, the shop's wallet is made with the Key app on a second phone. |
 | ownAdviceTitle | A wallet for the shop's money |
 | ownAdviceText | Best is a cold wallet: its keys stay on a device that never goes online, such as a hardware wallet or an offline computer, and it is used only for the shop. |
 | ownAdviceHot | A wallet on a phone or an online computer suits small amounts only. Its keys sit on a device that can be hacked, so keep savings elsewhere. |
@@ -387,7 +387,8 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | realMore | More cases, with their sources and how each ended, are in the handbook under "When someone else holds the money". |
 | hwTitle | Getting a hardware wallet |
 | hwText | A small device that keeps your keys away from the internet. Four rules keep a fake or tampered one out of your shop. |
-| hwRule1 | Buy it only from the maker's own website. Never a marketplace, a reseller or second-hand. |
+| hwCost | Most cost between 60 and 150 US dollars. |
+| hwRule1 | Buy it only from the maker's own website: type the address yourself, never through an ad or a link. Never a marketplace, a reseller or second-hand. |
 | hwRule2 | It makes new words in front of you. If it arrives with words, or a card already filled in, someone else has them: send it back. |
 | hwRule3 | Its software is open for anyone to check. |
 | hwRule4 | The box arrives sealed. |
@@ -406,7 +407,7 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | helperStep4 | Each counter shows the same address once; the manager checks it against the device and confirms. |
 | helperStep5 | The phone moves everything to the hardware wallet in one payment, then deletes the starter key. |
 | instantTitle | Instant payments |
-| instantText | Small payments count at once. Bigger ones wait about ten minutes, until the payment is in a block. |
+| instantText | Small payments count at once. Bigger ones wait about ten minutes, until the bitcoin network has recorded the payment. |
 | instantLabel | Count at once up to |
 | instantTypical | A typical sale in your shop |
 | instantZero | Type 0 to make every payment wait. |
@@ -423,6 +424,9 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | firstSaleSee | See it yourself |
 | firstSaleSeeText | This is the payment's ID. Look it up in any bitcoin wallet or on your own node. |
 | firstSaleDone | Done |
+| readyTitle | Your shop is ready |
+| readyText | The counter takes bitcoin now. Anything still to do is on the home screen. |
+| readyGo | Go to the home screen |
 | checklistTitle | Still to do |
 | checklistSale | Make a first sale |
 | checklistNotTested | Not tested yet |
@@ -456,7 +460,7 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | kgNeedList2 | Two USB sticks: one of 8 GB or more for Tails, and any small one for the key maker page. |
 | kgNeedList3 | A coin or one six-sided die, a pen, and the blank card from this app. |
 | kgNeedList4 | About an hour, somewhere nobody can see your screen. |
-| kgNeedCard | No card? Any paper will do for now. Write "TEMPORARY. PUT THIS ON STEEL." at the top. |
+| kgNeedCard | No card? Any paper will do for now. Write "TEMPORARY" at the top. |
 | kgTailsTitle | Put Tails on the big stick |
 | kgTailsText | Tails is a free system that starts the computer from the USB stick, never touches its own disk, and forgets everything when you shut down. On any computer, go to tails.net and follow its install guide for a USB stick. Check the download the way the guide says. |
 | kgTailsNote | This step needs the internet. The rest does not. |
@@ -491,7 +495,7 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | kgCameraOffWhat | The guide reads the page's code with the camera. |
 | kgCameraOffNext | Allow the camera for OpenBMT in the phone's settings, then press Scan the page's code again. |
 | kgDoneTitle | Shut down Tails |
-| kgDoneText | On the page, press Clear and close, then shut down Tails and take out both sticks. Keep the card somewhere safe and private, and put the words on steel as soon as you can. |
+| kgDoneText | On the page, press Clear and close, then shut down Tails and take out both sticks. Keep the card somewhere safe and private, and copy the words onto a metal backup plate when you can. |
 | kgDoneButton | Done |
 
 Connect your wallet, after the advice on an own wallet, in `ConnectWords`:
@@ -612,12 +616,12 @@ the state words in lower case:
 | keyMapKey2 | Key 2 |
 | keyMapKey2Where | Key app |
 | keyMapKey3 | Key 3 |
-| keyMapKey3Where | On steel |
+| keyMapKey3Where | On paper or metal |
 | keyMapMade | Made |
 | keyMapNext | Next |
 | keyMapNotYet | Not yet |
 | keyMapRule | Any 2 of the 3 keys can spend. One alone cannot. |
-| keyMapSpoken | Key 1, on this phone: {k1}. Key 2, on the Key app: {k2}. Key 3, on steel: {k3}. Any 2 of the 3 keys can spend. |
+| keyMapSpoken | Key 1, on this phone: {k1}. Key 2, on the Key app: {k2}. Key 3, on paper or metal: {k3}. Any 2 of the 3 keys can spend. |
 | keyMadeTitle | Your keys |
 | keyMadeHeading | Now make key 2 |
 | keyMadeText | Open the Key app on the second phone and choose Set up keys. It shows a code. Scan that code with this phone. |

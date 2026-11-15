@@ -62,7 +62,7 @@ object AppWords {
     const val keyMapKey2 = "Key 2"
     const val keyMapKey2Where = "Key app"
     const val keyMapKey3 = "Key 3"
-    const val keyMapKey3Where = "On steel"
+    const val keyMapKey3Where = "On paper or metal"
     const val keyMapMade = "Made"
     const val keyMapNext = "Next"
     const val keyMapNotYet = "Not yet"
@@ -72,7 +72,7 @@ object AppWords {
     const val keyMapRule = "Any 2 of the 3 keys can spend. One alone cannot."
 
     /** The key map's spoken description; `{k1}`, `{k2}` and `{k3}` are the state words in lower case. */
-    const val keyMapSpoken = "Key 1, on this phone: {k1}. Key 2, on the Key app: {k2}. Key 3, on steel: {k3}. Any 2 of the 3 keys can spend."
+    const val keyMapSpoken = "Key 1, on this phone: {k1}. Key 2, on the Key app: {k2}. Key 3, on paper or metal: {k3}. Any 2 of the 3 keys can spend."
 
     /** Every key and its text, in the order of the words file, for docs/screens/owner-app.md. */
     fun keyMapAll(): List<Pair<String, String>> = listOf(

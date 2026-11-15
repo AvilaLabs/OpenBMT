@@ -21,14 +21,29 @@ internal class OwnPairExit(val leave: () -> Unit, val done: () -> Unit)
 
 private fun Controller.firstRunExit(r: FirstRun) = OwnPairExit(
     leave = { r.back(); showFirstRun() },
-    done = { r.next(); showFirstRun() },
+    done = { r.next(); firstCounterPaired() },
 )
+
+/**
+ * The first counter is paired in the first run, and no node has run yet: the node starts as for any shop with its own wallet
+ * (`begin`), and the first run goes on at its next step when the node is up (`resume`), so that the limit and the first sale
+ * read it. With a node already up, only a link kept by the pairing starts it again, and the step is shown at once.
+ */
+private fun Controller.firstCounterPaired() {
+    resume.arm()
+    if (node == null) return begin()
+    if (!restartIfLinkChanged()) {
+        resume.clear()
+        showFirstRun()
+    }
+}
 
 /** "Add a counter" on the Devices page for a shop with its own wallet: the same screens as the first run's, ending at Devices. */
 internal fun Controller.showOwnAddCounter() {
     ownPairing?.back()
     ownPairing = null
-    showOwnCounter(OwnPairExit(leave = { showDevices() }, done = { showDevices() }))
+    // A counter paired later is followed from the settings; the node starts again only if the kept link is not the one it has.
+    showOwnCounter(OwnPairExit(leave = { showDevices() }, done = { if (!restartIfLinkChanged()) showDevices() }))
 }
 
 internal fun Controller.showOwnCounter(r: OwnPairExit, message: SayWords? = null) {
@@ -190,8 +205,7 @@ private fun Controller.showOwnPaired(r: OwnPairExit, p: OwnPairing) {
     views.add(ui.text(OwnPairWords.pairedNext, 15f, bold = true))
     val done = ui.primary(FirstRunWords.tillStepsDone) {
         ownPairing = null
-        // A counter paired later is followed from the settings; the node starts again only if the kept link is not the one it has.
-        if (!restartIfLinkChanged()) r.done()
+        r.done()
     }
     val wallet = ui.button(OwnPairWords.walletButton) { showOwnWallet(r) }
     stepScreen(OwnPairWords.title, views, listOf(done, wallet), { }, tone = ui.pal.good)

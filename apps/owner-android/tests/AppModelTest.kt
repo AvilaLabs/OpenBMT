@@ -1336,10 +1336,10 @@ object AppModelTest {
     private fun keyMapTests() {
         // The words are the words file's, exactly.
         ok(AppWords.keyMapKey1 == "Key 1" && AppWords.keyMapKey1Where == "This phone" && AppWords.keyMapKey2 == "Key 2" &&
-            AppWords.keyMapKey2Where == "Key app" && AppWords.keyMapKey3 == "Key 3" && AppWords.keyMapKey3Where == "On steel", "the key map's names and places")
+            AppWords.keyMapKey2Where == "Key app" && AppWords.keyMapKey3 == "Key 3" && AppWords.keyMapKey3Where == "On paper or metal", "the key map's names and places")
         ok(AppWords.keyMapMade == "Made" && AppWords.keyMapNext == "Next" && AppWords.keyMapNotYet == "Not yet", "the key map's states")
         ok(AppWords.keyMapRule == "Any 2 of the 3 keys can spend. One alone cannot.", "the key map's rule")
-        ok(AppWords.keyMapSpoken == "Key 1, on this phone: {k1}. Key 2, on the Key app: {k2}. Key 3, on steel: {k3}. Any 2 of the 3 keys can spend.", "the spoken description, as written")
+        ok(AppWords.keyMapSpoken == "Key 1, on this phone: {k1}. Key 2, on the Key app: {k2}. Key 3, on paper or metal: {k3}. Any 2 of the 3 keys can spend.", "the spoken description, as written")
         val keys = AppWords.keyMapAll().map { it.first }
         ok(keys.size == 14 && keys.toSet().size == 14 && keys.all { k -> AppWords.all().none { it.first == k } }, "the key map's keys are used once")
         val screensMdText = File(appDir, "../../docs/screens/owner-app.md").readText()
@@ -1368,8 +1368,8 @@ object AppModelTest {
             src.contains("CeremonyDraft(record, at.stage)"), "the states come from the draft, and a resume sets its stage")
         ok(Regex("lead = keyMap\\(").findAll(src).count() == 7 && src.contains("rootChecked = true"), "the key made, resume, root check, key 2, wallet check, setup code and save screens carry the key map")
         // The spoken description fills in the three states in lower case.
-        ok(KeyMapModel.spoken(listOf(made, next, not)) == "Key 1, on this phone: made. Key 2, on the Key app: next. Key 3, on steel: not yet. Any 2 of the 3 keys can spend.", "spoken, key 1 made")
-        ok(KeyMapModel.spoken(KeyMapModel.allMade) == "Key 1, on this phone: made. Key 2, on the Key app: made. Key 3, on steel: made. Any 2 of the 3 keys can spend.", "spoken, all made")
+        ok(KeyMapModel.spoken(listOf(made, next, not)) == "Key 1, on this phone: made. Key 2, on the Key app: next. Key 3, on paper or metal: not yet. Any 2 of the 3 keys can spend.", "spoken, key 1 made")
+        ok(KeyMapModel.spoken(KeyMapModel.allMade) == "Key 1, on this phone: made. Key 2, on the Key app: made. Key 3, on paper or metal: made. Any 2 of the 3 keys can spend.", "spoken, all made")
         ok(!KeyMapModel.spoken(listOf(made, next, not)).contains("{"), "no placeholder is left")
         ok(source("src/android/KeyMap.kt").contains("KeyMapModel.spoken(states)") && source("src/android/KeyMap.kt").contains("contentDescription"), "the view is described by the spoken text")
         // Colours: one blue for the three keys, a grey for a key not reached; the same in each state of every key.
@@ -3265,8 +3265,13 @@ object AppModelTest {
         ok(lib.inner.calls.count { it == "offer" } == 2 && lib.inner.calls.count { it.startsWith("confirm:") } == 2, "each pairing asks the library for its own offer and range")
         // The screens: shared by the first run and Devices, ending at Devices.
         val src = source("src/android/OwnCounter.kt")
-        ok(src.contains("showOwnCounter(OwnPairExit(leave = { showDevices() }, done = { showDevices() }))"), "Done and Back from Devices' pairing return to Devices")
-        ok(src.contains("done = { r.next(); showFirstRun() }") && !src.contains("r: FirstRun, p:"), "the first run ends in its next step through the same screens")
+        ok(src.contains("showOwnCounter(OwnPairExit(leave = { showDevices() }, done = { if (!restartIfLinkChanged()) showDevices() }))"), "Done and Back from Devices' pairing return to Devices")
+        ok(src.contains("done = { r.next(); firstCounterPaired() }") && !src.contains("r: FirstRun, p:"), "the first run ends in its next step through the same screens")
+        val paired = src.substringAfter("private fun Controller.firstCounterPaired()").substringBefore("/** \"Add a counter\"")
+        ok(paired.contains("resume.arm()") && paired.contains("if (node == null) return begin()") && paired.contains("showFirstRun()") && src.substringAfter("private fun Controller.showOwnPaired").substringBefore("val wallet").contains("r.done()") &&
+            !src.substringAfter("private fun Controller.showOwnPaired").substringBefore("val wallet").contains("restartIfLinkChanged"), "B: the first counter starts the node and arms the hand-off; the pairing's Done only calls the exit")
+        val ctl = source("src/android/Controller.kt")
+        ok(ctl.contains("if (resume.take(firstRun)) showFirstRun() else showHome()") && ctl.contains("if (firstRun?.needsNode == true) resume.arm()") && source("src/android/Lock.kt").substringAfter("internal fun Controller.wipe()").substringBefore("try {").contains("resume.clear()"), "B: the node's start resumes the first run once, and a wipe clears the hand-off")
         ok(source("src/android/AddCounter.kt").contains("AddCounterChoice.of(") && source("src/android/AddCounter.kt").contains("showOwnAddCounter()"), "Add a counter chooses by the shop's kind")
         // SS-37: the hold comes before the choice.
         val add = source("src/android/AddCounter.kt").substringAfter("internal fun Controller.showAddCounter")
@@ -3561,7 +3566,7 @@ object AppModelTest {
         r.connect.read(bytes(WL06_ONE), reader); r.connect.same(); ok(r.connect.step == ConnectStep.Checked, "Same address: checked")
         r.next(); ok(r.step == FirstRunStep.OwnCounter, "Next from Wallet checked goes to adding the first counter (OA-108)")
         r.back(); ok(r.step == FirstRunStep.Connect && r.connect.step == ConnectStep.Checked, "Back from adding a counter: Wallet checked")
-        r.next(); r.next(); r.next(); r.next(); ok(r.step == FirstRunStep.NotYet, "Next from adding a counter goes to the instant limit, the first sale, then the notice")
+        r.next(); r.next(); r.next(); r.next(); ok(r.step == FirstRunStep.Ready, "Next from adding a counter goes to the instant limit, the first sale, then the end of the first run")
         r.back(); r.back(); r.back(); ok(r.step == FirstRunStep.OwnCounter, "Back from the notice: the first sale, the instant limit, the counter")
         r.back(); ok(r.step == FirstRunStep.Connect && r.connect.step == ConnectStep.Checked, "Back from the counter: Wallet checked")
         r.back(); ok(r.step == FirstRunStep.Connect && r.connect.step == ConnectStep.Address, "Back from Wallet checked: the address check")
@@ -3615,16 +3620,16 @@ object AppModelTest {
         ok(
             order == listOf(
                 FirstRunStep.Welcome, FirstRunStep.Before, FirstRunStep.Shop, FirstRunStep.Till, FirstRunStep.Money, FirstRunStep.Hardware,
-                FirstRunStep.Starter, FirstRunStep.OwnCounter, FirstRunStep.Instant, FirstRunStep.FirstSale, FirstRunStep.NotYet,
+                FirstRunStep.Starter, FirstRunStep.OwnCounter, FirstRunStep.Instant, FirstRunStep.FirstSale, FirstRunStep.Ready,
             ),
-            "the plan path: before, shop, till, money, the buying guide, the starter wallet, the counter, the limit, the first sale",
+            "the plan path: before, shop, till, money, the buying guide, the starter wallet, the counter, the limit, the first sale, ready",
         )
         val own = toMoney().first
         own.choose(MoneyChoice.Own); ok(own.step == FirstRunStep.Connect, "I already have a wallet goes straight to connecting it")
         connectChecked(own); own.next(); ok(own.step == FirstRunStep.OwnCounter, "own path: the counter")
         own.next(); ok(own.step == FirstRunStep.Instant, "own path: the instant limit after the counter")
         own.next(); ok(own.step == FirstRunStep.FirstSale, "own path: the first sale")
-        own.next(); ok(own.step == FirstRunStep.NotYet, "own path: then what the flow did before")
+        own.next(); ok(own.step == FirstRunStep.Ready, "own path: then the end of the first run")
         val make = toMoney().first
         make.choose(MoneyChoice.Make); ok(make.step == FirstRunStep.Why, "make path: the why")
         make.next(); make.next(); ok(make.step == FirstRunStep.NotYet && make.money == MoneyChoice.Make, "make path: Why, Guide, the notice, with no limit or first sale")
@@ -3635,6 +3640,28 @@ object AppModelTest {
         val later = toMoney().first
         later.choose(MoneyChoice.Later); ok(later.step == FirstRunStep.NotYet, "later path: the notice")
         later.back(); ok(later.step == FirstRunStep.Money, "later path: back to the money")
+
+        // A: the first run ends at Ready; Back from it is the first sale; Next from it stays.
+        val ready = toMoney().first
+        ready.choose(MoneyChoice.Own); connectChecked(ready); ready.next(); ready.next(); ready.next()
+        ok(ready.step == FirstRunStep.FirstSale, "ready: the first sale comes before it")
+        ready.next(); ok(ready.step == FirstRunStep.Ready && ready.needsNode, "A: the first sale goes on to Ready")
+        ready.next(); ok(ready.step == FirstRunStep.Ready, "A: Ready is the last step")
+        ready.back(); ok(ready.step == FirstRunStep.FirstSale, "A: back from Ready is the first sale")
+        ok(FirstRunWords.readyTitle == "Your shop is ready" && FirstRunWords.readyText == "The counter takes bitcoin now. Anything still to do is on the home screen." && FirstRunWords.readyGo == "Go to the home screen", "A: the Ready words, exactly")
+        ok(FirstRunWords.all().any { it.first == "readyGo" }, "A: the Ready words are registered")
+
+        // B: the hand-off that carries the first run across the start of the node.
+        val resume = FirstRunResume()
+        val atInstant = toMoney().first.also { it.choose(MoneyChoice.Own); connectChecked(it); it.next(); it.next() }
+        ok(atInstant.step == FirstRunStep.Instant && !resume.armed && !resume.take(atInstant), "B: nothing is resumed unless the pairing armed it")
+        resume.arm(); ok(resume.armed, "B: the pairing arms it")
+        ok(resume.take(atInstant) && !resume.armed, "B: the node being up resumes the first run once")
+        ok(!resume.take(atInstant), "B: a second start of the node draws home")
+        resume.arm(); ok(!resume.take(null) && !resume.armed, "B: with no first run in memory the hand-off is spent and home is drawn")
+        resume.arm(); ok(!resume.take(toMoney().first) && !resume.armed, "B: a first run still before the counter is not resumed")
+        resume.arm(); resume.clear(); ok(!resume.take(atInstant), "B: a wipe clears it")
+        ok(atInstant.step == FirstRunStep.Instant, "B: the first run's state survives")
 
         // Back on every new step.
         val b = toMoney().first
@@ -3676,7 +3703,7 @@ object AppModelTest {
         i.back(); i.typicalTyped = "12"; ok(i.saveInstant("x", 30) { written.add(it) } == NN && i.typicalTyped == "12" && written.size == 2, "the typical sale is only for comparison and is never written")
         ok(i.saveInstant("30", 30) { written.add(it) } == InstantResult.Saved && written.size == 2, "F2: keeping the held limit writes nothing")
         ok(plan.saveInstant("3", 30) { written.add(it) } == InstantResult.NotHere && written.size == 2, "the limit is written only at its step")
-        toMoney().first.let { f -> f.choose(MoneyChoice.Plan); f.next(); f.next(); f.next(); f.skipInstant(); ok(f.step == FirstRunStep.FirstSale, "F2: while the starter wallet holds the shop, the step goes on with nothing written") }
+        toMoney().first.let { f -> f.choose(MoneyChoice.Plan); f.next(); f.next(); f.next(); ok(f.step == FirstRunStep.Instant && f.saveInstant("5", 30) { } == InstantResult.Saved && f.step == FirstRunStep.FirstSale, "C: a lowering is written whatever the starter wallet holds (it is a tightening)") }
         ok(InstantStep.parse(" \$1,000 ") == 1000L && InstantStep.parse("4294967295") == 4294967295L && InstantStep.parse("4294967296") == null, "whole currency units, at most what the library holds")
 
         // The first sale: waiting, then paid when the books show one; skipped otherwise.
@@ -3701,7 +3728,7 @@ object AppModelTest {
         ok(FirstSale.firstTxid(head.toByteArray()) == null && FirstSale.firstTxid(ByteArray(0)) == null && FirstSale.firstTxid("a,b\n1,2\n".toByteArray()) == null, "no sale, no column or no ledger: no ID")
         sale.see(txid); ok(sale.seeing && sale.txid == txid, "See it yourself holds the ID")
         i.back(); i.saveInstant("30", 30) { }; ok(i.firstSale !== sale && !i.firstSale.paid, "each visit to the step starts waiting again")
-        i.next(); ok(i.step == FirstRunStep.NotYet, "skip, or Done: what the flow did before")
+        i.next(); ok(i.step == FirstRunStep.Ready, "skip, or Done: the end of the first run")
         val booksDay = org.openbmt.owner.BooksDay("2026-11-14", 2, 1, "10.00")
         ok(FirstSale.paidSales(org.openbmt.owner.Books("USD", listOf(booksDay, booksDay), emptyList(), null)) == 4L, "paid sales are the books' count of sales that received funds")
 
@@ -3865,7 +3892,7 @@ object AppModelTest {
         ok(KeyGuideWords.badge(3, 6) == "Step 3 of 6", "the badge")
         ok(KeyGuideWords.kgNeedList.size == 4 && KeyGuideWords.kgScanButton == "Scan the page's code", "the guide's words")
         ok(KeyGuideWords.kgDifferentText == "Stop. Do not use this wallet. On the page, press Clear and close, shut down Tails, and start again.", "the stop text, exactly")
-        ok(KeyGuideWords.kgNeedCard == "No card? Any paper will do for now. Write \"TEMPORARY. PUT THIS ON STEEL.\" at the top.", "the card note, exactly")
+        ok(KeyGuideWords.kgNeedCard == "No card? Any paper will do for now. Write \"TEMPORARY\" at the top.", "the card note, exactly")
 
         // The locale guess: the fifteen of the app, the euro countries, and the dollar for the rest.
         val guesses = mapOf("US" to ShopCurrency.Usd, "GB" to ShopCurrency.Gbp, "FR" to ShopCurrency.Eur, "JP" to ShopCurrency.Jpy, "AU" to ShopCurrency.Aud,
@@ -4017,7 +4044,7 @@ object AppModelTest {
         ok(keys.size == keys.toSet().size, "every first-run key is used once")
         ok(shown["ownAdviceTitle"] == FirstRunWords.ownAdviceTitle && shown["ownAdviceText"] == FirstRunWords.ownAdviceText && shown["ownAdviceHot"] == FirstRunWords.ownAdviceHot &&
             shown["ownAdviceMake"] == FirstRunWords.ownAdviceMake && shown["ownAdviceGo"] == "Continue with my wallet" && shown["moneyMakeNote"] == FirstRunWords.moneyMakeNote, "the advice words are the ones of the words file")
-        ok(FirstRunWords.moneyNotYet == "This part is still being built. For now, setup continues with the test setup.", "the notice, exactly")
+        ok(FirstRunWords.moneyNotYet == "Next, the shop's wallet is made with the Key app on a second phone.", "the notice, exactly")
         ok(FirstRunWords.with(FirstRunWords.tillStepsTitle, "Odoo") == "Add Bitcoin to Odoo", "{till} is the till's name")
     }
 
@@ -4089,12 +4116,12 @@ object AppModelTest {
         r.back(); ok(r.step == FirstRunStep.Hardware && r.money == MoneyChoice.Plan, "back from the setup: the buying guide")
         r.next(); r.next(); ok(r.step == FirstRunStep.OwnCounter, "the wallet made, the first counter follows")
         r.back(); ok(r.step == FirstRunStep.Starter, "back from the first counter is the made wallet, not a second setup")
-        r.next(); r.next(); r.next(); r.next(); ok(r.step == FirstRunStep.NotYet, "after the counter: the instant limit, the first sale, then the notice")
-        r.back(); r.back(); r.back(); r.back(); ok(r.step == FirstRunStep.Starter, "back from the notice, through the first sale, the limit and the counter: the starter step")
+        r.next(); r.next(); r.next(); r.next(); ok(r.step == FirstRunStep.Ready, "after the counter: the instant limit, the first sale, then the end of the first run")
+        r.back(); r.back(); r.back(); r.back(); ok(r.step == FirstRunStep.Starter, "back from the end, through the first sale, the limit and the counter: the starter step")
         r.back(); r.back(); r.choose(MoneyChoice.Diy); r.next(); r.next(); r.back(); ok(r.step == FirstRunStep.OwnAdvice, "the signer the owner builds is as the own wallet was")
         val run = source("src/android/FirstRun.kt").replace(Regex("//.*"), "")
         val money = run.substringAfter("private fun Controller.showMoney(").substringBefore("stepScreen(")
-        ok(Regex("moneyPlan[\\s\\S]*moneyOwn[\\s\\S]*moneyMake[\\s\\S]*moneyDiy[\\s\\S]*moneyLater[\\s\\S]*fold\\(FirstRunWords.moneyOther").containsMatchIn(run.substringAfter("private fun Controller.showMoney(").substringBefore("/** A title that opens")), "the money page: the plan and the own wallet, then the other ways folded, then later")
+        ok(Regex("moneyPlan[\\s\\S]*moneyOwn[\\s\\S]*moneyMake[\\s\\S]*moneyDiy[\\s\\S]*fold\\(FirstRunWords.moneyOther").containsMatchIn(run.substringAfter("private fun Controller.showMoney(").substringBefore("/** A title that opens")) && !run.substringAfter("private fun Controller.showMoney(").substringBefore("/** A title that opens").contains("moneyLater"), "A: the money page: the plan and the own wallet, then the other ways folded, and no later row")
         ok(run.contains("FirstRunStep.Starter -> showStarterStep(r)"), "the step shows the starter setup")
         val screens = source("src/android/StarterScreens.kt")
         ok(screens.contains("starterChecked(CheckStage.Making) { showStarterLimit() }") && !screens.substringAfter("private fun Controller.sealStarter").substringBefore("private fun Controller.keepSealed").contains("OwnerOwn"), "every check of the setup still applies, in the same order")

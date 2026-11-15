@@ -94,6 +94,9 @@ class Controller(internal val act: MainActivity) {
     // The first run (`FirstRun.kt`): its step and entries, the practice shop (in memory only, never saved) and the notice the
     // welcome shows once after the practice shop is deleted.
     internal var firstRun: FirstRun? = null
+
+    /** The hand-off that goes on with the first run once the node it needs is up (`OwnCounter.kt`, [adopt]); spent when used and on a wipe. */
+    internal val resume = FirstRunResume()
     internal var practice: Practice? = null
     internal var welcomeNotice: String? = null
     internal val shopFile by lazy { ShopFile(dir) }
@@ -327,6 +330,8 @@ class Controller(internal val act: MainActivity) {
 
     internal fun begin() {
         starter.pinned = null
+        // A first run that stands at a step which reads the node goes on there once the node is up again (a return to the app, a retry after a fault).
+        if (firstRun?.needsNode == true) resume.arm()
         fault = null
         torBlocked = null
         ceremony = null
@@ -632,7 +637,8 @@ class Controller(internal val act: MainActivity) {
             showHardwareRegister { showHome() }
         } else {
             registerNext = false
-            showHome()
+            // The first run, left at the first counter to start the node, goes on at its next step; else home.
+            if (resume.take(firstRun)) showFirstRun() else showHome()
         }
     }
 

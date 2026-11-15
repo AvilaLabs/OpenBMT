@@ -23,7 +23,7 @@ object KeyGuideWords {
         "A coin or one six-sided die, a pen, and the blank card from this app.",
         "About an hour, somewhere nobody can see your screen.",
     )
-    const val kgNeedCard = "No card? Any paper will do for now. Write \"TEMPORARY. PUT THIS ON STEEL.\" at the top."
+    const val kgNeedCard = "No card? Any paper will do for now. Write \"TEMPORARY\" at the top."
 
     const val kgTailsTitle = "Put Tails on the big stick"
     const val kgTailsText = "Tails is a free system that starts the computer from the USB stick, never touches its own disk, " +
@@ -64,7 +64,7 @@ object KeyGuideWords {
 
     const val kgDoneTitle = "Shut down Tails"
     const val kgDoneText = "On the page, press Clear and close, then shut down Tails and take out both sticks. Keep the card " +
-        "somewhere safe and private, and put the words on steel as soon as you can."
+        "somewhere safe and private, and copy the words onto a metal backup plate when you can."
     const val kgDoneButton = "Done"
 
     const val kgStopTitle = "Stop"

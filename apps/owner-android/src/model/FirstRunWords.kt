@@ -178,7 +178,7 @@ object FirstRunWords {
     const val ownAdviceGo = "Continue with my wallet"
 
     /** The screen before the existing setup: this build does not have the three paths yet. */
-    const val moneyNotYet = "This part is still being built. For now, setup continues with the test setup."
+    const val moneyNotYet = "Next, the shop's wallet is made with the Key app on a second phone."
 
     // ---- the why ----------------------------------------------------------------------------------
 
@@ -229,7 +229,8 @@ object FirstRunWords {
 
     const val hwTitle = "Getting a hardware wallet"
     const val hwText = "A small device that keeps your keys away from the internet. Four rules keep a fake or tampered one out of your shop."
-    const val hwRule1 = "Buy it only from the maker's own website. Never a marketplace, a reseller or second-hand."
+    const val hwCost = "Most cost between 60 and 150 US dollars."
+    const val hwRule1 = "Buy it only from the maker's own website: type the address yourself, never through an ad or a link. Never a marketplace, a reseller or second-hand."
     const val hwRule2 = "It makes new words in front of you. If it arrives with words, or a card already filled in, someone else has them: send it back."
     const val hwRule3 = "Its software is open for anyone to check."
     const val hwRule4 = "The box arrives sealed."
@@ -253,7 +254,7 @@ object FirstRunWords {
     // ---- instant payments (DESIGN 2.1 step 12) -----------------------------------------------------------
 
     const val instantTitle = "Instant payments"
-    const val instantText = "Small payments count at once. Bigger ones wait about ten minutes, until the payment is in a block."
+    const val instantText = "Small payments count at once. Bigger ones wait about ten minutes, until the bitcoin network has recorded the payment."
     const val instantLabel = "Count at once up to"
     const val instantTypical = "A typical sale in your shop"
     const val instantZero = "Type 0 to make every payment wait."
@@ -277,6 +278,12 @@ object FirstRunWords {
     const val firstSaleDone = "Done"
 
     // ---- the home checklist (DESIGN 2.1) -------------------------------------------------------------------
+
+    // ---- the end of the first run -----------------------------------------------------------------------------
+
+    const val readyTitle = "Your shop is ready"
+    const val readyText = "The counter takes bitcoin now. Anything still to do is on the home screen."
+    const val readyGo = "Go to the home screen"
 
     const val checklistTitle = "Still to do"
     const val checklistSale = "Make a first sale"
@@ -368,7 +375,7 @@ object FirstRunWords {
         add("realCase3Place", realCase3Place); add("realCase3Text", realCase3Text); add("realCase3Quote", realCase3Quote); add("realCase3Who", realCase3Who)
         add("realCase4Place", realCase4Place); add("realCase4Text", realCase4Text); add("realCase4Quote", realCase4Quote); add("realCase4Who", realCase4Who)
         add("realBitcoinHead", realBitcoinHead); add("realBitcoinText", realBitcoinText); add("realKeysTitle", realKeysTitle); add("realKeysText", realKeysText); add("realCoinTitle", realCoinTitle); add("realCoinText", realCoinText); add("realMore", realMore)
-        add("hwTitle", hwTitle); add("hwText", hwText); add("hwRule1", hwRule1); add("hwRule2", hwRule2)
+        add("hwTitle", hwTitle); add("hwText", hwText); add("hwCost", hwCost); add("hwRule1", hwRule1); add("hwRule2", hwRule2)
         add("hwRule3", hwRule3); add("hwRule4", hwRule4); add("hwNoBrand", hwNoBrand); add("hwHelper", hwHelper)
         add("hwHelperNote", hwHelperNote); add("hwArrives", hwArrives); add("hwNext", hwNext)
         add("helperTitle", helperTitle); add("helperIntro", helperIntro); add("helperBuy", helperBuy); add("helperArrives", helperArrives)
@@ -379,6 +386,7 @@ object FirstRunWords {
         add("firstSaleTitle", firstSaleTitle); add("firstSaleText", firstSaleText); add("firstSaleSkip", firstSaleSkip)
         add("firstSaleWaiting", firstSaleWaiting); add("firstSalePaid", firstSalePaid); add("firstSaleSee", firstSaleSee)
         add("firstSaleSeeText", firstSaleSeeText); add("firstSaleDone", firstSaleDone)
+        add("readyTitle", readyTitle); add("readyText", readyText); add("readyGo", readyGo)
         add("checklistTitle", checklistTitle); add("checklistSale", checklistSale); add("checklistNotTested", checklistNotTested)
         add("checklistCopy", checklistCopy); add("checklistCueCard", checklistCueCard)
         add("cardScreenTitle", cardScreenTitle); add("cardOpen", cardOpen); add("cardScreenText", cardScreenText)
