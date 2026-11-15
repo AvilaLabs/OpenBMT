@@ -447,9 +447,12 @@ says so when one is missing.
   checks it; its limits are those of Shop Lightning
   (`docs/SHOP-LIGHTNING-RULES.md`). That holds only for a counter that
   settings the owner phone signed have named as the shop's Lightning counter
-  (SL-70): a Lightning payment recorded by any other counter is a mismatch at
-  once, with nothing seen. Nor does this check a manager's override, which is
-  recorded and alarmed as CR-20 says.
+  (SL-70), which the owner phone keeps in a file of its own: every counter
+  that the settings in force have named, added when they name it and never
+  taken out, so that turning Shop Lightning off or moving it does not make
+  earlier sales mismatches. A Lightning payment recorded by any other counter
+  is a mismatch at once, with nothing seen. Nor does this check a manager's
+  override, which is recorded and alarmed as CR-20 says.
 - **OC-61.** When. The wait runs on the owner phone's clock, from the first
   time the owner phone read the Paid in the counter's records; the time the
   counter wrote in it is not used, nor for the day of OC-63. A sale whose Paid
