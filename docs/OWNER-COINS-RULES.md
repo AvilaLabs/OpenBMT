@@ -451,8 +451,11 @@ says so when one is missing.
   that the settings in force have named, added when they name it and never
   taken out, so that turning Shop Lightning off or moving it does not make
   earlier sales mismatches. A Lightning payment recorded by any other counter
-  is a mismatch at once, with nothing seen. Nor does this check a manager's
-  override, which is recorded and alarmed as CR-20 says.
+  is a mismatch at once, with nothing seen. When that file does not read back,
+  the owner phone cannot tell which counters earlier settings named, so such a
+  payment is listed as not checkable, not as a mismatch, and the file is left
+  as it is. Nor does this check a manager's override, which is recorded and
+  alarmed as CR-20 says.
 - **OC-61.** When. The wait runs on the owner phone's clock, from the first
   time the owner phone read the Paid in the counter's records; the time the
   counter wrote in it is not used, nor for the day of OC-63. A first reading
@@ -489,8 +492,11 @@ says so when one is missing.
   OC-36 says, and a sale whose payment later arrives in full clears itself,
   with a line that says so. An alarm of a sale that is no longer checked
   (OC-61) shows what the marks keep: the counter, the sale's number and the
-  time of the Paid. A mismatch is raised once per sale. The alarms are
-  raised again from the kept marks at every start, before the first check.
+  time of the Paid. A mismatch is raised once per sale, with one exception: an
+  alarm that cleared itself because the payment arrived is raised again if
+  that payment later leaves the view, as when its block is replaced. An alarm
+  the owner cleared stays cleared. The alarms are raised again from the kept
+  marks at every start, before the first check.
 - **OC-63.** The day. The owner phone's day summary shows, for each counter,
   the number and total of its sales paid on chain, and how many of them this
   phone has seen in a block, is waiting for, could not check and found
@@ -508,13 +514,16 @@ says so when one is missing.
   that it cannot keep its marks, until the owner clears them; the node still
   starts.
 - **OC-65.** Tests. A counter record of a Paid with no receipt raises the
-  alarm after the wait and not before; a payment arriving later clears it; a
-  partial payment within the tolerance is not a mismatch and one outside it
-  is; a Lightning sale is not checked; a view not ready judges nothing; a sale
-  too old for facts is not checkable; a record that does not read as a sale is
-  passed over and the counter's other sales are still checked; a full
-  receipt log lists sales as not checkable; the day summary's counts; the
-  marks read back strictly.
+  alarm after the wait and not before; a payment arriving later clears it; an
+  alarm cleared that way is raised again when the payment leaves the view, and
+  one the owner cleared is not; a partial payment within the tolerance is not
+  a mismatch and one outside it is; a Lightning sale is not checked; a
+  Lightning sale of a counter not named is a mismatch, and is not checkable
+  when the file of Lightning counters does not read back; a view not ready
+  judges nothing; a sale too old for facts is not checkable; a record that
+  does not read as a sale is passed over and the counter's other sales are
+  still checked; a full receipt log lists sales as not checkable; the day
+  summary's counts; the marks read back strictly.
 
 ## 9. Setting up the owner's phone
 

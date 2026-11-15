@@ -191,10 +191,113 @@ fn oc_62_a_payment_arriving_later_clears_the_alarm_itself() {
     let next = check_paid(&sales, &marks, now + 1_200, from_view(&paid));
     assert_eq!(state_of(&next, 0), PaidState::ClearedByArrival);
     assert!(next.cleared.is_empty() && next.raised.is_empty());
-    // A payment that goes missing again does not raise it a second time.
+    // A payment that goes missing again is raised again (see the tests below).
     let gone = check_paid(&sales, &marks, now + 1_800, from_view(&view_with(&[])));
     assert_eq!(state_of(&gone, 0), PaidState::Mismatch);
+    assert_eq!(gone.raised, vec![key(0)]);
+}
+
+/// A sale raised, then cleared by its payment arriving: the marks and the time.
+fn cleared_by_arrival(sales: &[PaidSale]) -> (PaidMarks, u64) {
+    let marks = read_at(sales, PAID_AT);
+    let now = PAID_AT + PAID_CHECK_WAIT_SECS;
+    let missing = check_paid(sales, &marks, now, from_view(&view_with(&[])));
+    let marks = marks.after(&missing, now);
+    let paid = view_with(&[(0, 5_000, 2)]);
+    let arrived = check_paid(sales, &marks, now + 600, from_view(&paid));
+    (marks.after(&arrived, now + 600), now + 600)
+}
+
+#[test]
+fn oc_62_an_alarm_cleared_by_arrival_is_raised_again_when_the_payment_leaves_the_view() {
+    let sales = [sale(0, 5_000, PaidHow::AtOnce)];
+    let (marks, at) = cleared_by_arrival(&sales);
+    assert_eq!(
+        marks.get(&key(0)).unwrap().state,
+        MarkState::ClearedByArrival
+    );
+    let first_read = marks.get(&key(0)).unwrap().first_read;
+    assert_eq!(first_read, PAID_AT);
+    // Its block is replaced: the verified amount drops below what is expected.
+    let later = at + 1_200;
+    let gone = check_paid(&sales, &marks, later, from_view(&view_with(&[])));
+    assert_eq!(state_of(&gone, 0), PaidState::Mismatch);
+    assert_eq!(gone.raised, vec![key(0)]);
+    assert!(gone.cleared.is_empty());
+    let marks = marks.after(&gone, later);
+    let mark = marks.get(&key(0)).unwrap();
+    assert_eq!(mark.state, MarkState::Raised);
+    assert_eq!(mark.raised_at, Some(later));
+    assert_eq!(mark.cleared_at, None);
+    assert_eq!(mark.first_read, first_read);
+    // Raised once more, not on every check.
+    let again = check_paid(&sales, &marks, later + 60, from_view(&view_with(&[])));
+    assert_eq!(state_of(&again, 0), PaidState::Mismatch);
+    assert!(again.raised.is_empty());
+}
+
+#[test]
+fn oc_62_an_alarm_the_owner_cleared_stays_cleared_when_the_payment_leaves() {
+    let sales = [sale(0, 5_000, PaidHow::AtOnce)];
+    let marks = read_at(&sales, PAID_AT);
+    let now = PAID_AT + PAID_CHECK_WAIT_SECS;
+    let missing = check_paid(&sales, &marks, now, from_view(&view_with(&[])));
+    let marks = marks.after(&missing, now);
+    let marks = marks.cleared_by_owner(&key(0), now + 10).unwrap();
+    let gone = check_paid(&sales, &marks, now + 600, from_view(&view_with(&[])));
+    assert_eq!(state_of(&gone, 0), PaidState::Mismatch);
     assert!(gone.raised.is_empty());
+    let marks = marks.after(&gone, now + 600);
+    assert_eq!(marks.get(&key(0)).unwrap().state, MarkState::ClearedByOwner);
+}
+
+#[test]
+fn oc_62_a_counter_at_the_alarm_cap_does_not_raise_a_payment_that_leaves() {
+    // Through `check_paid` directly: `gate_open_alarms` holds a counter at the
+    // cap back before the check, so this is the check's own guard.
+    let cap = MAX_OPEN_ALARMS_PER_COUNTER as u32;
+    let sales: Vec<PaidSale> = (0..=cap).map(|i| sale(i, 5_000, PaidHow::AtOnce)).collect();
+    let (marks, at) = cleared_by_arrival(&sales[..1]);
+    // The cap's worth of other sales are raised.
+    let rest = &sales[1..];
+    let marks = {
+        let read = check_paid(rest, &marks, at, |_| Err(FactsRefused::ViewNotReady));
+        marks.after(&read, at)
+    };
+    let later = at + PAID_CHECK_WAIT_SECS + 1;
+    let raised = check_paid(rest, &marks, later, from_view(&view_with(&[])));
+    let marks = marks.after(&raised, later);
+    assert_eq!(marks.open_alarms()[&counter()], cap as usize);
+    assert_eq!(
+        marks.get(&key(0)).unwrap().state,
+        MarkState::ClearedByArrival
+    );
+    // Sale 0's payment leaves: the counter is at the cap, so nothing is raised.
+    let gone = check_paid(&sales, &marks, later + 60, from_view(&view_with(&[])));
+    assert_eq!(state_of(&gone, 0), PaidState::Mismatch);
+    assert!(gone.raised.is_empty());
+    let marks = marks.after(&gone, later + 60);
+    assert_eq!(
+        marks.get(&key(0)).unwrap().state,
+        MarkState::ClearedByArrival
+    );
+}
+
+#[test]
+fn oc_62_after_a_second_alarm_the_payment_arriving_again_clears_it_again() {
+    let sales = [sale(0, 5_000, PaidHow::AtOnce)];
+    let (marks, at) = cleared_by_arrival(&sales);
+    let gone = check_paid(&sales, &marks, at + 100, from_view(&view_with(&[])));
+    let marks = marks.after(&gone, at + 100);
+    assert_eq!(marks.get(&key(0)).unwrap().state, MarkState::Raised);
+    let paid = view_with(&[(0, 5_000, 2)]);
+    let back = check_paid(&sales, &marks, at + 200, from_view(&paid));
+    assert_eq!(state_of(&back, 0), PaidState::ClearedByArrival);
+    assert_eq!(back.cleared, vec![key(0)]);
+    let marks = marks.after(&back, at + 200);
+    let mark = marks.get(&key(0)).unwrap();
+    assert_eq!(mark.state, MarkState::ClearedByArrival);
+    assert_eq!(mark.cleared_at, Some(at + 200));
 }
 
 #[test]
@@ -1654,4 +1757,88 @@ fn oc_60_settings_in_force_add_their_lightning_counter_and_later_settings_take_n
     set.note_settings(&settings_naming(None));
     let reopened = LightningCounters::open(dir.path());
     assert!(reopened.contains(&counter()) && reopened.contains(&other_counter()));
+}
+
+/// A folder holding a file of Lightning counters that does not read, and the
+/// bytes it holds.
+fn unreadable_counters() -> (Dir, Vec<u8>) {
+    let dir = Dir::new();
+    let bad = vec![1u8, 2, 3];
+    std::fs::write(dir.path().join(LIGHTNING_COUNTERS_FILE), &bad).unwrap();
+    (dir, bad)
+}
+
+fn lightning_link_sales(set: &LightningCounters) -> Vec<PaidSale> {
+    let events = [opened(1, PAID_AT - 50, 100), lightning(1, PAID_AT + 1, 700)];
+    let (link, _a, _b) = link_with(&events);
+    paid_sales(&link, set).sales
+}
+
+#[test]
+fn oc_60_an_unreadable_file_of_lightning_counters_gives_no_false_alarm() {
+    let (dir, bad) = unreadable_counters();
+    let mut set = LightningCounters::open(dir.path());
+    let sales = lightning_link_sales(&set);
+    assert_eq!(sales[0].how, PaidHow::LightningUnknown);
+    let now = PAID_AT + PAID_CHECK_WAIT_SECS;
+    let result = check_paid(&sales, &PaidMarks::new(), now, |_| {
+        panic!("an unknown Lightning sale is not looked up")
+    });
+    assert_eq!(state_of(&result, 1), PaidState::NotCheckable);
+    assert_eq!(result.checks[0].seen_sats, None);
+    assert!(result.raised.is_empty());
+    assert_eq!(result.settled, vec![key(1)]);
+    // The file is left as it is when a new counter is noted.
+    set.note(&other_counter());
+    assert_eq!(
+        std::fs::read(dir.path().join(LIGHTNING_COUNTERS_FILE)).unwrap(),
+        bad
+    );
+}
+
+#[test]
+fn oc_60_a_good_file_that_does_not_name_the_counter_is_a_mismatch() {
+    let set = named_counters(&[other_counter()]);
+    let sales = lightning_link_sales(&set);
+    assert_eq!(sales[0].how, PaidHow::LightningUnnamed);
+    let now = PAID_AT + 10;
+    let result = check_paid(&sales, &PaidMarks::new(), now, |_| {
+        panic!("no address to look at")
+    });
+    assert_eq!(state_of(&result, 1), PaidState::Mismatch);
+    assert_eq!(result.raised, vec![key(1)]);
+}
+
+#[test]
+fn oc_60_a_good_file_naming_the_counter_leaves_the_sale_out_of_the_checks() {
+    let set = named_counters(&[counter()]);
+    let sales = lightning_link_sales(&set);
+    assert_eq!(sales[0].how, PaidHow::Lightning);
+    let result = check_paid(&sales, &PaidMarks::new(), PAID_AT + 10, |_| {
+        panic!("a named counter's Lightning sale is not looked up")
+    });
+    assert!(result.checks.is_empty() && result.raised.is_empty());
+}
+
+#[test]
+fn oc_60_with_an_unreadable_file_a_counter_named_in_this_run_is_still_exempt() {
+    let (dir, _bad) = unreadable_counters();
+    let mut set = LightningCounters::open(dir.path());
+    set.note_settings(&settings_naming(Some(counter())));
+    let sales = lightning_link_sales(&set);
+    assert_eq!(sales[0].how, PaidHow::Lightning);
+}
+
+#[test]
+fn oc_60_the_day_summary_counts_an_unknown_lightning_sale_as_not_checked() {
+    let (dir, _bad) = unreadable_counters();
+    let set = LightningCounters::open(dir.path());
+    let sales = lightning_link_sales(&set);
+    let now = PAID_AT + PAID_CHECK_WAIT_SECS;
+    let result = check_paid(&sales, &PaidMarks::new(), now, |_| panic!("not looked up"));
+    let days = day_summary(&sales, &result.checks, now - 1, now + 1);
+    assert_eq!(days.len(), 1);
+    let d = &days[0];
+    assert_eq!(d.sales, 1);
+    assert_eq!((d.seen, d.waiting, d.too_old, d.missing), (0, 0, 1, 0));
 }

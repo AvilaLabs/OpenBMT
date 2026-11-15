@@ -117,6 +117,11 @@ pub enum PaidHow {
     /// Lightning counter (OC-60): no payment of the shop's, a mismatch at
     /// once with nothing seen.
     LightningUnnamed,
+    /// A Lightning payment recorded by a counter not in the set of Lightning
+    /// counters, when that set's file did not read back (OC-60): whether
+    /// earlier settings named the counter cannot be told, so it is not
+    /// checkable.
+    LightningUnknown,
 }
 
 /// A sale a counter's records have shown paid.
@@ -157,10 +162,15 @@ impl PaidSale {
 
     /// OC-60: a Lightning payment is exempt only from a counter the signed
     /// settings have named as the shop's Lightning counter; from any other it is
-    /// held as [`PaidHow::LightningUnnamed`].
+    /// held as [`PaidHow::LightningUnnamed`], or as [`PaidHow::LightningUnknown`]
+    /// when the file of the set did not read back.
     fn named_by(mut self, named: &LightningCounters) -> Self {
         if self.how == PaidHow::Lightning && !named.contains(&self.counter) {
-            self.how = PaidHow::LightningUnnamed;
+            self.how = if named.unread {
+                PaidHow::LightningUnknown
+            } else {
+                PaidHow::LightningUnnamed
+            };
         }
         self
     }
@@ -381,14 +391,18 @@ pub fn paid_sales<R: Post>(link: &OwnerLink<R>, named: &LightningCounters) -> Pa
 /// frame: `OBM\x16`, version, the count (u32 LE, at most
 /// [`MAX_DEVICES`]), then the counters in ascending order with none twice.
 /// A file that does not read back does not stop the node and raises nothing
-/// new: the set then starts empty in memory, so only the counters named from
-/// now on are exempt, and the file is not written over.
+/// new: the set then starts empty in memory and the file is not written over;
+/// a Lightning payment of a counter not in the set is then not checkable, not
+/// a mismatch.
 #[derive(Debug)]
 pub struct LightningCounters {
     dir: PathBuf,
     named: BTreeSet<DeviceId>,
     /// The file did not read back: it is left as it is.
     broken: bool,
+    /// The file was there and did not read back: which counters earlier
+    /// settings named cannot be told.
+    unread: bool,
     /// The last write failed, so the file is behind the memory.
     unsaved: bool,
 }
@@ -400,15 +414,16 @@ impl LightningCounters {
             dir: dir.to_path_buf(),
             named: BTreeSet::new(),
             broken: false,
+            unread: false,
             unsaved: false,
         };
         match read_file(dir, LIGHTNING_COUNTERS_FILE, 5 + 4 + MAX_DEVICES * 32) {
             Ok(None) => {}
             Ok(Some(bytes)) => match Self::decode(&bytes) {
                 Ok(named) => out.named = named,
-                Err(_) => out.broken = true,
+                Err(_) => (out.broken, out.unread) = (true, true),
             },
-            Err(_) => out.broken = true,
+            Err(_) => (out.broken, out.unread) = (true, true),
         }
         out
     }
@@ -419,6 +434,7 @@ impl LightningCounters {
             dir: PathBuf::new(),
             named: BTreeSet::new(),
             broken: true,
+            unread: false,
             unsaved: false,
         }
     }
@@ -869,9 +885,12 @@ pub struct CheckResult {
 /// view verified plus the sale's tolerance on the expected amount reaches the
 /// expected amount ([`PaidSale::expected_sats`]). Short of that it is `Waiting`
 /// while the owner phone first read its Paid less than [`PAID_CHECK_WAIT_SECS`]
-/// before `now`, and a `Mismatch` after. A mismatch is raised once per sale: a
-/// sale with an alarm mark, whatever its state, is not raised again. A raised
-/// alarm whose payment has arrived is cleared.
+/// before `now`, and a `Mismatch` after. A mismatch is raised once per sale,
+/// with one exception: an alarm that cleared itself because the payment arrived
+/// is raised again if that payment later leaves the view. An alarm the owner
+/// cleared stays cleared. A raised alarm whose payment has arrived is cleared.
+/// A Lightning payment of a counter that earlier settings may have named
+/// ([`PaidHow::LightningUnknown`]) is not looked up: it is not checkable.
 pub fn check_paid(
     sales: &[PaidSale],
     marks: &PaidMarks,
@@ -893,10 +912,12 @@ pub fn check_paid(
         let expected = sale.expected_sats();
         // OC-60: a Lightning payment of a counter the settings do not name
         // has no address to look at: a mismatch at once.
-        let answer = if sale.how == PaidHow::LightningUnnamed {
-            Err(FactsRefused::NotThisCountersAddress)
-        } else {
-            facts(key)
+        let answer = match sale.how {
+            PaidHow::LightningUnnamed => Err(FactsRefused::NotThisCountersAddress),
+            // OC-60: the set's file did not read back, so the sale cannot be
+            // told from a named one: not checkable, and no lookup.
+            PaidHow::LightningUnknown => Err(FactsRefused::TooOldForFacts),
+            _ => facts(key),
         };
         // OC-61: a counter holds at most the cap of alarms not cleared (see
         // `gate_open_alarms`).
@@ -942,7 +963,9 @@ pub fn check_paid(
                 } else if !alarmed && now.saturating_sub(first_read) < PAID_CHECK_WAIT_SECS {
                     PaidState::Waiting
                 } else {
-                    if !alarmed {
+                    // An alarm that cleared itself is raised again when the
+                    // payment leaves the view; one the owner cleared is not.
+                    if !alarmed || mark.map(|m| m.state) == Some(MarkState::ClearedByArrival) {
                         raise(&mut out);
                     }
                     PaidState::Mismatch
