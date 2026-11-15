@@ -1582,14 +1582,15 @@ class PaidAlarm(
 /** A sale whose payment arrived in full after its alarm was raised (OC-62). */
 class PaidArrived(val counter: ByteArray, val sale: Long, val clearedAt: Long)
 
-/** A sale that is waiting for a block, or too old to check (OC-61). */
+/** A sale that is waiting for a block, too old to check, or not checkable because the receipt log is full (OC-61). */
 class PaidSaleLine(val counter: ByteArray, val sale: Long, val recordedSats: Long, val firstRead: Long)
 
 /**
  * What a check shows. When [kept] is false the file of marks does not read back or could not be written: the check
  * still ran, on marks held in memory, until [OwnerNode.paidCheckReset] (OC-64). [full] is true when there are more marks
  * than a file keeps. [unreadable] holds the counters whose records do not read as sales (OC-61). [notCheckableMore]
- * counts the sales too old to check that are not listed.
+ * counts the sales too old to check that are not listed. [logFull] holds the sales that cannot be checked because the
+ * receipt log is full, and [logFullMore] counts those not listed.
  */
 class PaidCheck(
     val kept: Boolean,
@@ -1600,6 +1601,8 @@ class PaidCheck(
     val waiting: List<PaidSaleLine>,
     val notCheckable: List<PaidSaleLine>,
     val notCheckableMore: Long,
+    val logFull: List<PaidSaleLine>,
+    val logFullMore: Long,
 )
 
 /** One counter's day of sales paid on chain (OC-63); [differs] names a counter whose total is not what was seen. */
@@ -2308,6 +2311,8 @@ internal fun Reader.paidCheck(): PaidCheck = PaidCheck(
     list { paidAlarm() },
     list { paidArrived() },
     list { paidSaleLine() },
+    list { paidSaleLine() },
+    u32(),
     list { paidSaleLine() },
     u32(),
 )

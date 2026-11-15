@@ -5315,7 +5315,7 @@ object AppModelTest {
         ok(said["OC61_WAITING_HEADING"] == "Waiting for a block" && said["OC61_WAITING_NEXT"] == "Nothing to do yet.", "the waiting words")
         ok(said["OC61_WAITING_WHAT"] == "The counter showed this sale as paid, and its payment is not in a block yet. One with a low fee can take up to a day.", "what waiting says")
         ok(said["OC61_NOT_CHECKABLE_HEADING"] == "Too old to check" && said["OC61_NOT_CHECKABLE_WHAT"] == "This sale is too old for the wallet to check what was paid." && said["OC61_NOT_CHECKABLE_NEXT"] == "Check it by hand if it matters.", "the too-old words")
-        ok(said["OC63_DAY_LINE"] == "{counter}: {n} sales paid on chain, {total}. Seen {seen}, waiting {waiting}, too old to check {old}, missing {missing}.", "the day's line")
+        ok(said["OC63_DAY_LINE"] == "{counter}: {n} sales paid on chain, {total}. Seen {seen}, waiting {waiting}, not checked {old}, missing {missing}.", "the day's line")
         ok(said["OC64_NOT_KEPT_HEADING"] == "Checks not kept" && said["OC64_NOT_KEPT_WHAT"] == "This phone could not read back its record of the counter checks." && said["OC64_NOT_KEPT_NEXT"] == "Clear the checks to start them again.", "the checks-not-kept words")
         ok(said["OC64_FULL_WHAT"] == "This phone's record of the counter checks is full, so new checks are shown but not kept." && said["OC64_FULL_NEXT"] == "Clear the checks you have dealt with.", "the checks-full words")
         ok(said["OC61_UNREADABLE_HEADING"] == "Counter cannot be checked" && said["OC61_UNREADABLE_NEXT"] == "Check the counter: it may have been tampered with.", "the unreadable-counter words")
@@ -5328,9 +5328,11 @@ object AppModelTest {
         ok(!w.what.contains("{") && !w.what.contains("}"), "every name in braces was filled")
         ok(PaidCheckWords.arrived(PaidArrived(ByteArray(32), 8, 3)) == "The payment for sale 8 has now arrived in full.", "the arrived line")
         val day = PaidDay(ByteArray(32) { 0x1a }, 4, 9_000, 2, 1, 0, 1, 7_000, true)
-        ok(PaidCheckWords.day(day) == "Counter 1a1a1a1a: 4 sales paid on chain, 9,000 sats. Seen 2, waiting 1, too old to check 0, missing 1.", "the day's line is filled: ${PaidCheckWords.day(day)}")
+        ok(PaidCheckWords.day(day) == "Counter 1a1a1a1a: 4 sales paid on chain, 9,000 sats. Seen 2, waiting 1, not checked 0, missing 1.", "the day's line is filled: ${PaidCheckWords.day(day)}")
         val row = PaidSaleLine(ByteArray(32) { 0x1a }, 9, 900, 1_700_000_000)
         ok(PaidCheckWords.saleTitle(row) == "Counter 1a1a1a1a #9" && PaidCheckWords.saleSub(row) == "900 sats, ${Format.localTime(1_700_000_000)}", "a waiting sale's row")
+        val full = PaidCheckWords.logFull
+        ok(full.heading == "Cannot be checked" && full.what == "This phone's record of payments is full, so it cannot check what was paid for this sale." && full.next == "Check it by hand if it matters.", "the log-full words")
         // The words checks: every heading and sentence passes.
         for ((k, m) in PaidCheckWords.messages(alarm)) {
             ok(SayCheck.problem(m) == null, "words of $k: ${SayCheck.problem(m)}")
@@ -5342,7 +5344,7 @@ object AppModelTest {
         ok(screen.contains("PaidCheckWords.unreadable(c)") && screen.contains("check.unreadable"), "a counter whose records cannot be read is named")
         val unreadable = PaidCheckWords.unreadable(ByteArray(32) { 0x1a })
         ok(unreadable.what == "Some records of Counter 1a1a1a1a do not read as sales, so this phone cannot check the payments in them. Its other sales are still checked." && unreadable.tone == Tones.STOP, "the unreadable words name the counter: ${unreadable.what}")
-        ok(screen.contains("PaidCheckWords.arrived(a)") && screen.contains("ui.words(PaidCheckWords.waiting)") && screen.contains("ui.words(PaidCheckWords.notCheckable)") && screen.contains("PaidCheckWords.day(it)"), "the arrived line, the two lists and the day's line are shown")
+        ok(screen.contains("PaidCheckWords.arrived(a)") && screen.contains("ui.words(PaidCheckWords.waiting)") && screen.contains("ui.words(PaidCheckWords.notCheckable)") && screen.contains("ui.words(PaidCheckWords.logFull)") && screen.contains("PaidCheckWords.day(it)"), "the arrived line, the two lists and the day's line are shown")
         ok(!Regex("\"[A-Z][a-z]+ [a-z]+").containsMatchIn(screen.lines().filter { !it.trim().startsWith("*") && !it.trim().startsWith("/") }.joinToString("\n")), "no sentence is written in the screen file")
         ok(source("src/android/Screens.kt").contains("paidCheckViews(n, msg) { showAlerts() }") && source("src/android/Books.kt").contains("paidDayViews(n, msg)"), "the alarms are on the Alerts page and the day on the Books page")
         ok(source("src/android/Screens.kt").contains("it.kind != AlertKind.PaidNotSeen"), "a counter check's alert on the link is shown by its own views, not twice")

@@ -147,6 +147,9 @@ fn check(rig: &Rig, handle: u64, now: u64) -> Check {
     let waiting = r.list(line);
     let not_checkable = r.list(line);
     let not_checkable_more = r.u32();
+    let log_full = r.list(line);
+    let log_full_more = r.u32();
+    assert_eq!((log_full.len(), log_full_more), (0, 0));
     r.done();
     Check {
         kept,

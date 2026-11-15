@@ -462,7 +462,9 @@ says so when one is missing.
   long (DESIGN §2.6). After that, a verified amount below the expected one is
   a mismatch. Nothing is judged while the view is not ready or has not checked
   the chain to its tip (OC-14); a sale too old for facts (OC-14) is listed as
-  not checkable, never as a mismatch or as checked. A Paid at an address the
+  not checkable, never as a mismatch or as checked. While the receipt log is
+  full (OC-13) no sale's payment can be checked: its sales are listed as not
+  checkable, not as waiting. A Paid at an address the
   owner never issued to that counter (OC-14, "not this counter's address") is
   a mismatch at once, with nothing seen: no payment there is the shop's. A
   record of a counter that does not read as part of a sale, such as a second
@@ -507,8 +509,8 @@ says so when one is missing.
   partial payment within the tolerance is not a mismatch and one outside it
   is; a Lightning sale is not checked; a view not ready judges nothing; a sale
   too old for facts is not checkable; a record that does not read as a sale is
-  passed over and the counter's other sales are still checked; the day
-  summary's counts; the marks read back strictly.
+  passed over and the counter's other sales are still checked; a full
+  receipt log lists sales as not checkable; the day summary's counts; the marks read back strictly.
 
 ## 9. Setting up the owner's phone
 

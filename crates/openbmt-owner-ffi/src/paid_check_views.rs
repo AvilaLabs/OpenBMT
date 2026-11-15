@@ -102,6 +102,11 @@ pub struct PaidCheckView {
     pub not_checkable: Vec<PaidSaleLineView>,
     /// How many more there are than `not_checkable` lists.
     pub not_checkable_more: u32,
+    /// The newest sales that cannot be checked because the receipt log is
+    /// full, at most 200.
+    pub log_full: Vec<PaidSaleLineView>,
+    /// How many more there are than `log_full` lists.
+    pub log_full_more: u32,
 }
 
 wire_record!(PaidCheckView {
@@ -112,7 +117,9 @@ wire_record!(PaidCheckView {
     arrived,
     waiting,
     not_checkable,
-    not_checkable_more
+    not_checkable_more,
+    log_full,
+    log_full_more
 });
 
 /// The arguments of `paid_day`.
@@ -141,7 +148,7 @@ pub struct PaidDayView {
     pub seen: u32,
     /// Waiting for a block.
     pub waiting: u32,
-    /// Too old to check.
+    /// Not checkable: too old, or the receipt log is full.
     pub too_old: u32,
     /// Missing.
     pub missing: u32,

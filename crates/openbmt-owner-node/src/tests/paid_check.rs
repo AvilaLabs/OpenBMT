@@ -267,7 +267,7 @@ fn oc_61_a_view_that_is_not_ready_judges_nothing() {
         now,
     );
     let result = check_paid(&sales, &raised, now + 1, |_| {
-        Err(FactsRefused::ReceiptLogFull)
+        Err(FactsRefused::ViewNotReady)
     });
     assert_eq!(state_of(&result, 0), PaidState::NotYet);
     assert!(result.cleared.is_empty());
@@ -283,6 +283,39 @@ fn oc_61_a_sale_too_old_for_facts_is_not_checkable() {
     assert_eq!(state_of(&result, 0), PaidState::NotCheckable);
     assert!(result.raised.is_empty());
     assert_eq!(result.checks[0].seen_sats, None);
+}
+
+#[test]
+fn oc_61_a_full_receipt_log_lists_sales_as_not_checkable_and_not_as_waiting() {
+    let sales = [
+        sale(0, 5_000, PaidHow::AtOnce),
+        sale(1, 6_000, PaidHow::Confirmed),
+    ];
+    let marks = read_at(&sales, PAID_AT);
+    // Well past the wait: with a log that cannot say what was paid, nothing is
+    // a mismatch.
+    let now = PAID_AT + 10 * PAID_CHECK_WAIT_SECS;
+    let result = check_paid(&sales, &marks, now, |_| Err(FactsRefused::ReceiptLogFull));
+    assert_eq!(state_of(&result, 0), PaidState::LogFull);
+    assert_eq!(state_of(&result, 1), PaidState::LogFull);
+    assert!(result.raised.is_empty() && result.cleared.is_empty());
+    assert!(result.checks.iter().all(|c| c.seen_sats.is_none()));
+    // The day counts them as not checked, never as waiting.
+    let day = day_summary(&sales, &result.checks, PAID_AT - 10, PAID_AT + 10);
+    assert_eq!(
+        (
+            day[0].sales,
+            day[0].seen,
+            day[0].waiting,
+            day[0].too_old,
+            day[0].missing
+        ),
+        (2, 0, 0, 2, 0)
+    );
+    // A view that is not ready is still a wait.
+    let result = check_paid(&sales, &marks, now, |_| Err(FactsRefused::ViewNotReady));
+    let day = day_summary(&sales, &result.checks, PAID_AT - 10, PAID_AT + 10);
+    assert_eq!((day[0].waiting, day[0].too_old), (2, 0));
 }
 
 #[test]

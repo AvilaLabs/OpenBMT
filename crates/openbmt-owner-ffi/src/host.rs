@@ -2690,6 +2690,8 @@ impl Entry {
                     waiting: Vec::new(),
                     not_checkable: Vec::new(),
                     not_checkable_more: 0,
+                    log_full: Vec::new(),
+                    log_full_more: 0,
                 });
             };
             let state_of =
@@ -2747,6 +2749,8 @@ impl Entry {
             let waiting = lines(PaidState::Waiting).into_iter().map(line).collect();
             let old = lines(PaidState::NotCheckable);
             let not_checkable_more = count32(old.len().saturating_sub(PAID_OLD_LISTED));
+            let full = lines(PaidState::LogFull);
+            let log_full_more = count32(full.len().saturating_sub(PAID_OLD_LISTED));
             let trouble = st.paid.trouble();
             Ok(PaidCheckView {
                 kept: !matches!(trouble, Some(PaidTrouble::NotKept(_))),
@@ -2761,6 +2765,8 @@ impl Entry {
                 waiting,
                 not_checkable: old.into_iter().take(PAID_OLD_LISTED).map(line).collect(),
                 not_checkable_more,
+                log_full: full.into_iter().take(PAID_OLD_LISTED).map(line).collect(),
+                log_full_more,
             })
         })
     }

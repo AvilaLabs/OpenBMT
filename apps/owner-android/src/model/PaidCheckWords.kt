@@ -12,7 +12,7 @@ import org.openbmt.owner.PaidSaleLine
 /**
  * Every text of the counter checks that the app writes itself (`docs/OWNER-COINS-RULES.md`, OC-60 to OC-64), listed
  * under the rule of its screen: the alarm of a sale a counter showed paid that this phone does not see, the line of a
- * payment that arrived since, the sales waiting for a block or too old to check, a counter's day, and the checks that
+ * payment that arrived since, the sales waiting for a block, too old to check or not checkable because the receipt log is full, a counter's day, and the checks that
  * could not be kept. A `{name}` in a text is filled by the app. The list is written to docs/screens/owner-app.md by
  * [AppWords.screensMarkdown]. No Android class is used.
  */
@@ -42,8 +42,12 @@ object PaidCheckWords {
     val notCheckableWhat = say("OC61_NOT_CHECKABLE_WHAT", "This sale is too old for the wallet to check what was paid.")
     val notCheckableNext = say("OC61_NOT_CHECKABLE_NEXT", "Check it by hand if it matters.")
 
+    val logFullHeading = say("OC61_LOG_FULL_HEADING", "Cannot be checked")
+    val logFullWhat = say("OC61_LOG_FULL_WHAT", "This phone's record of payments is full, so it cannot check what was paid for this sale.")
+    val logFullNext = say("OC61_LOG_FULL_NEXT", "Check it by hand if it matters.")
+
     // ---- the day of a counter (OC-63) ----
-    val dayLine = say("OC63_DAY_LINE", "{counter}: {n} sales paid on chain, {total}. Seen {seen}, waiting {waiting}, too old to check {old}, missing {missing}.")
+    val dayLine = say("OC63_DAY_LINE", "{counter}: {n} sales paid on chain, {total}. Seen {seen}, waiting {waiting}, not checked {old}, missing {missing}.")
 
     // ---- the checks that could not be kept (OC-64) ----
     val notKeptHeading = say("OC64_NOT_KEPT_HEADING", "Checks not kept")
@@ -94,6 +98,9 @@ object PaidCheckWords {
     /** OC-61: the words of a sale too old for the wallet to check. */
     val notCheckable: SayWords get() = said(notCheckableHeading, notCheckableWhat, notCheckableNext, Tones.INFO)
 
+    /** OC-61: the words of a sale that cannot be checked because the receipt log is full. */
+    val logFull: SayWords get() = said(logFullHeading, logFullWhat, logFullNext, Tones.INFO)
+
     /** OC-64: the words of checks that cannot be kept. */
     val notKept: SayWords get() = said(notKeptHeading, notKeptWhat, notKeptNext, Tones.STOP)
 
@@ -129,6 +136,7 @@ object PaidCheckWords {
         "mismatch" to mismatch(sample),
         "waiting" to waiting,
         "notCheckable" to notCheckable,
+        "logFull" to logFull,
         "notKept" to notKept,
         "full" to full,
         "unreadable" to unreadable(sample.counter),

@@ -1059,7 +1059,10 @@ other names in braces are counts:
 | OC61_NOT_CHECKABLE_HEADING | Too old to check |
 | OC61_NOT_CHECKABLE_WHAT | This sale is too old for the wallet to check what was paid. |
 | OC61_NOT_CHECKABLE_NEXT | Check it by hand if it matters. |
-| OC63_DAY_LINE | {counter}: {n} sales paid on chain, {total}. Seen {seen}, waiting {waiting}, too old to check {old}, missing {missing}. |
+| OC61_LOG_FULL_HEADING | Cannot be checked |
+| OC61_LOG_FULL_WHAT | This phone's record of payments is full, so it cannot check what was paid for this sale. |
+| OC61_LOG_FULL_NEXT | Check it by hand if it matters. |
+| OC63_DAY_LINE | {counter}: {n} sales paid on chain, {total}. Seen {seen}, waiting {waiting}, not checked {old}, missing {missing}. |
 | OC64_NOT_KEPT_HEADING | Checks not kept |
 | OC64_NOT_KEPT_WHAT | This phone could not read back its record of the counter checks. |
 | OC64_NOT_KEPT_NEXT | Clear the checks to start them again. |

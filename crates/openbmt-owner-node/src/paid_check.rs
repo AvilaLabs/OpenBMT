@@ -813,6 +813,9 @@ pub enum PaidState {
     Waiting,
     /// The sale is too old for the wallet to say what was paid.
     NotCheckable,
+    /// The wallet's receipt log is full (OC-13), so it cannot say what was
+    /// paid to any sale: not checkable, and not a wait.
+    LogFull,
     /// The wallet shows less than the check expects, after the wait, or the
     /// sale's index was never issued to the counter (no wait).
     Mismatch,
@@ -898,9 +901,8 @@ pub fn check_paid(
             }
         };
         let (state, seen) = match answer {
-            Err(FactsRefused::ViewNotReady | FactsRefused::ReceiptLogFull) => {
-                (PaidState::NotYet, None)
-            }
+            Err(FactsRefused::ViewNotReady) => (PaidState::NotYet, None),
+            Err(FactsRefused::ReceiptLogFull) => (PaidState::LogFull, None),
             Err(FactsRefused::TooOldForFacts) => {
                 out.settled.push(key);
                 (PaidState::NotCheckable, None)
@@ -965,7 +967,7 @@ pub struct DaySummary {
     /// How many it is waiting for; a sale the view cannot judge yet counts
     /// here too.
     pub waiting: u32,
-    /// How many it could not check.
+    /// How many it could not check: too old, or the receipt log is full.
     pub too_old: u32,
     /// How many it found missing.
     pub missing: u32,
@@ -1022,7 +1024,7 @@ pub fn day_summary(
         let count = match check.state {
             PaidState::Checked | PaidState::ClearedByArrival => &mut day.seen,
             PaidState::Waiting | PaidState::NotYet => &mut day.waiting,
-            PaidState::NotCheckable => &mut day.too_old,
+            PaidState::NotCheckable | PaidState::LogFull => &mut day.too_old,
             PaidState::Mismatch => &mut day.missing,
         };
         *count = count.saturating_add(1);

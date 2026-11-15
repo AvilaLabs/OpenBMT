@@ -13,7 +13,7 @@ import org.openbmt.owner.OwnerNode
 
 /**
  * The alarms of the Alerts page: each sale a counter showed paid that this phone does not see, with a button that
- * clears it (OC-62), the lines of payments that arrived since, and the sales waiting for a block or too old to check
+ * clears it (OC-62), the lines of payments that arrived since, and the sales waiting for a block, too old to check or not checkable while the receipt log is full
  * (OC-61), and the counters whose records cannot be read. When the checks cannot be kept or are full, the page says so and offers to clear them, and still shows what it found (OC-64). [again] shows the page
  * again, with the words of what was just done.
  */
@@ -49,6 +49,11 @@ internal fun Controller.paidCheckViews(n: OwnerNode, msg: Slot, again: () -> Uni
         out.add(ui.words(PaidCheckWords.notCheckable))
         out.add(ui.rows(check.notCheckable.map { RowItem(PaidCheckWords.saleTitle(it), PaidCheckWords.saleSub(it)) }))
         if (check.notCheckableMore > 0) out.add(line("+ ${check.notCheckableMore}", muted = true))
+    }
+    if (check.logFull.isNotEmpty()) {
+        out.add(ui.words(PaidCheckWords.logFull))
+        out.add(ui.rows(check.logFull.map { RowItem(PaidCheckWords.saleTitle(it), PaidCheckWords.saleSub(it)) }))
+        if (check.logFullMore > 0) out.add(line("+ ${check.logFullMore}", muted = true))
     }
     return out
 }

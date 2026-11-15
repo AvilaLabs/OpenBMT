@@ -339,7 +339,7 @@ ShopLightningPreviewView: record: version: u32, class: ShopLightningClass, needs
 PaidAlarmView: record: counter: list<u8>, sale: u32, cashier: string, recorded_sats: u64, seen_sats: u64, first_read: u64, raised_at: u64, known: bool
 PaidArrivedView: record: counter: list<u8>, sale: u32, cleared_at: u64
 PaidSaleLineView: record: counter: list<u8>, sale: u32, recorded_sats: u64, first_read: u64
-PaidCheckView: record: kept: bool, full: bool, unreadable: list<list<u8>>, alarms: list<PaidAlarmView>, arrived: list<PaidArrivedView>, waiting: list<PaidSaleLineView>, not_checkable: list<PaidSaleLineView>, not_checkable_more: u32
+PaidCheckView: record: kept: bool, full: bool, unreadable: list<list<u8>>, alarms: list<PaidAlarmView>, arrived: list<PaidArrivedView>, waiting: list<PaidSaleLineView>, not_checkable: list<PaidSaleLineView>, not_checkable_more: u32, log_full: list<PaidSaleLineView>, log_full_more: u32
 PaidDayArgs: record: now: u64, offset_secs: i32
 PaidDayView: record: counter: list<u8>, sales: u32, total_sats: u64, seen: u32, waiting: u32, too_old: u32, missing: u32, seen_sats: u64, differs: bool
 PaidClearArgs: record: now: u64, counter: list<u8>, sale: u32
