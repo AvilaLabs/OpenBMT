@@ -13,9 +13,10 @@ use crate::coins::CoinView;
 use crate::facts::{verified_facts, FactsRefused};
 use crate::paid_check::{
     check_paid, day_summary, default_tolerance_bps, gate_open_alarms, gather, paid_sales,
-    paid_sales_from_chain, CheckResult, MarkState, PaidCheckRefused, PaidChecks, PaidHow,
-    PaidMarks, PaidSale, PaidSales, PaidState, PaidTrouble, MAGIC_PAID_CHECK,
-    MAX_OPEN_ALARMS_PER_COUNTER, MAX_PAID_MARKS, PAID_CHECK_FILE, PAID_CHECK_WAIT_SECS,
+    paid_sales_from_chain, CheckResult, LightningCounters, MarkState, PaidCheckRefused, PaidChecks,
+    PaidHow, PaidMarks, PaidSale, PaidSales, PaidState, PaidTrouble, LIGHTNING_COUNTERS_FILE,
+    MAGIC_LIGHTNING_COUNTERS, MAGIC_PAID_CHECK, MAX_OPEN_ALARMS_PER_COUNTER, MAX_PAID_MARKS,
+    PAID_CHECK_FILE, PAID_CHECK_WAIT_SECS,
 };
 
 const PAID_AT: u64 = 1_800_000_000;
@@ -445,12 +446,8 @@ fn at_once_for(index: u32, at: u64, sats: u64) -> Event {
 
 /// The paid sales of the test counter, as `(index, how, recorded, quoted)`.
 fn folded(events: &[Event]) -> Vec<(u32, PaidHow, u64, u64)> {
-    let (mut link, _a, _b) = link_with(events);
-    link.set_shop_lightning(Some(openbmt_link::StoreParties {
-        counter: counter(),
-        second_device: id(9).device_id(),
-    }));
-    let found = paid_sales(&link);
+    let (link, _a, _b) = link_with(events);
+    let found = paid_sales(&link, &named_counters(&[counter()]));
     assert!(found.unreadable.is_empty());
     found
         .sales
@@ -461,7 +458,7 @@ fn folded(events: &[Event]) -> Vec<(u32, PaidHow, u64, u64)> {
 
 #[test]
 fn oc_60_the_records_tell_an_on_chain_payment_from_lightning() {
-    let (mut link, _a, _b) = link_with(&[
+    let (link, _a, _b) = link_with(&[
         named(0, PAID_AT - 50, "Ana"),
         at_once_for(0, PAID_AT, 5_000),
         opened(1, PAID_AT - 50, 100),
@@ -475,11 +472,7 @@ fn oc_60_the_records_tell_an_on_chain_payment_from_lightning() {
         // Never paid.
         opened(4, PAID_AT - 50, 100),
     ]);
-    link.set_shop_lightning(Some(openbmt_link::StoreParties {
-        counter: counter(),
-        second_device: id(9).device_id(),
-    }));
-    let found = paid_sales(&link);
+    let found = paid_sales(&link, &named_counters(&[counter()]));
     assert!(found.unreadable.is_empty());
     let sales = found.sales;
     let by: Vec<(u32, PaidHow, u64)> = sales
@@ -565,7 +558,7 @@ fn oc_60_a_reopened_after_a_paid_keeps_the_sale_checked() {
             at: PAID_AT + 1,
         },
     ]);
-    let sales = paid_sales(&link).sales;
+    let sales = paid_sales(&link, &LightningCounters::empty()).sales;
     assert_eq!(sales.len(), 1, "the reopening does not remove the sale");
     let dir = Dir::new();
     let mut checks = PaidChecks::open(dir.path());
@@ -594,7 +587,7 @@ fn oc_60_a_later_confirmed_with_a_lower_amount_does_not_clear_the_alarm() {
             more: false,
         },
     ]);
-    let sales = paid_sales(&link).sales;
+    let sales = paid_sales(&link, &LightningCounters::empty()).sales;
     assert_eq!(
         sales[0].recorded_sats, 5_000,
         "the most ever recorded stands"
@@ -659,7 +652,7 @@ fn oc_60_the_quoted_amount_is_read_from_the_opening_and_the_latest_requote() {
         at_once_for(0, PAID_AT, 5_000),
         confirmed(0, PAID_AT + 5, 100),
     ]);
-    let found = paid_sales(&link).sales;
+    let found = paid_sales(&link, &LightningCounters::empty()).sales;
     assert_eq!(found[0].expected_sats(), 8_000);
 }
 
@@ -667,7 +660,7 @@ fn oc_60_the_quoted_amount_is_read_from_the_opening_and_the_latest_requote() {
 fn oc_61_the_counters_time_in_the_future_does_not_delay_the_alarm() {
     let far = PAID_AT + 20 * 365 * 86_400;
     let (link, _a, _b) = link_with(&[opened(0, PAID_AT - 50, 100), at_once_for(0, far, 5_000)]);
-    let sales = paid_sales(&link).sales;
+    let sales = paid_sales(&link, &LightningCounters::empty()).sales;
     let dir = Dir::new();
     let mut checks = PaidChecks::open(dir.path());
     let view = view_with(&[]);
@@ -692,7 +685,7 @@ fn oc_60_a_raised_tolerance_in_settings_does_not_hide_a_mismatch() {
     settings.underpayment_tolerance_bps = 10_000;
     assert_ne!(default_tolerance_bps(), settings.underpayment_tolerance_bps);
     let (link, _a, _b) = link_with(&[opened(0, PAID_AT - 50, 100), confirmed(0, PAID_AT, 10_000)]);
-    let sales = paid_sales(&link).sales;
+    let sales = paid_sales(&link, &LightningCounters::empty()).sales;
     assert_eq!(sales[0].tolerance_bps, 50);
     // Half of it is a mismatch, though settings that allowed all would pass it.
     let view = view_with(&[(0, 5_000, DEPTH)]);
@@ -735,7 +728,7 @@ fn oc_61_one_counter_with_a_bad_record_alarms_while_another_is_still_checked() {
     }
     // From the records: a copy that does not fold is listed, with no sale.
     let (link, _a, _b) = link_with(&[opened(0, PAID_AT - 50, 100), at_once_for(9, PAID_AT, 1)]);
-    let found = paid_sales(&link);
+    let found = paid_sales(&link, &LightningCounters::empty());
     assert_eq!(found.unreadable, vec![counter()]);
     assert!(found.sales.is_empty());
 }
@@ -1130,29 +1123,21 @@ fn key_of(counter: DeviceId, index: u32) -> SaleKey {
 }
 
 #[test]
-fn oc_60_a_lightning_paid_is_exempt_only_from_the_named_lightning_counter() {
+fn oc_60_a_lightning_paid_is_exempt_only_from_a_counter_the_settings_have_named() {
     let events = [opened(1, PAID_AT - 50, 100), lightning(1, PAID_AT + 1, 700)];
-    let (mut link, _a, _b) = link_with(&events);
+    let (link, _a, _b) = link_with(&events);
     let now = PAID_AT + 10;
-    let parties = |c: DeviceId| {
-        Some(openbmt_link::StoreParties {
-            counter: c,
-            second_device: id(9).device_id(),
-        })
-    };
-    // The recording counter is the named one: exempt, no state.
-    link.set_shop_lightning(parties(counter()));
-    let named = paid_sales(&link);
-    assert_eq!(named.sales[0].how, PaidHow::Lightning);
-    let result = check_paid(&named.sales, &PaidMarks::new(), now, |_| {
+    // The recording counter is named: exempt, no state.
+    let found = paid_sales(&link, &named_counters(&[counter()]));
+    assert_eq!(found.sales[0].how, PaidHow::Lightning);
+    let result = check_paid(&found.sales, &PaidMarks::new(), now, |_| {
         panic!("a named counter's Lightning sale is not looked up")
     });
     assert!(result.checks.is_empty() && result.raised.is_empty());
-    // Another counter is named, or none: a mismatch at once, nothing seen,
-    // and the fold goes on (the counter is not unreadable).
-    for other in [parties(other_counter()), None] {
-        link.set_shop_lightning(other);
-        let found = paid_sales(&link);
+    // Only another counter is named, or none: a mismatch at once, nothing
+    // seen, and the fold goes on (the counter is not unreadable).
+    for set in [named_counters(&[other_counter()]), named_counters(&[])] {
+        let found = paid_sales(&link, &set);
         assert!(found.unreadable.is_empty());
         assert_eq!(found.sales[0].how, PaidHow::LightningUnnamed);
         let result = check_paid(&found.sales, &PaidMarks::new(), now, |_| {
@@ -1167,6 +1152,98 @@ fn oc_60_a_lightning_paid_is_exempt_only_from_the_named_lightning_counter() {
             panic!("no address to look at")
         });
         assert!(again.raised.is_empty());
+    }
+}
+
+/// A set of Lightning counters, kept in a folder of its own.
+fn named_counters(ids: &[DeviceId]) -> LightningCounters {
+    let dir = Dir::new();
+    let mut set = LightningCounters::open(dir.path());
+    for id in ids {
+        set.note(id);
+    }
+    // The folder lives as long as the process: the set is kept in memory.
+    std::mem::forget(dir);
+    set
+}
+
+#[test]
+fn oc_60_a_counter_once_named_stays_exempt_when_shop_lightning_is_removed_or_moved() {
+    let dir = Dir::new();
+    let mut set = LightningCounters::open(dir.path());
+    // Named, then the settings drop Shop Lightning: nothing is taken out.
+    set.note(&counter());
+    // Moved to another counter: both are exempt.
+    set.note(&other_counter());
+    set.note(&other_counter());
+    let reopened = LightningCounters::open(dir.path());
+    assert!(reopened.contains(&counter()) && reopened.contains(&other_counter()));
+    let events = [opened(1, PAID_AT - 50, 100), lightning(1, PAID_AT + 1, 700)];
+    let (link, _a, _b) = link_with(&events);
+    assert_eq!(
+        paid_sales(&link, &reopened).sales[0].how,
+        PaidHow::Lightning
+    );
+    // A counter never named is still a mismatch.
+    let never = LightningCounters::open(Dir::new().path());
+    assert!(!never.contains(&counter()));
+    let only_other = {
+        let d = Dir::new();
+        let mut s = LightningCounters::open(d.path());
+        s.note(&other_counter());
+        s
+    };
+    assert_eq!(
+        paid_sales(&link, &only_other).sales[0].how,
+        PaidHow::LightningUnnamed
+    );
+}
+
+#[test]
+fn oc_60_the_file_of_lightning_counters_reads_back_strictly() {
+    let (a, b) = {
+        let mut two = [counter(), other_counter()];
+        two.sort();
+        (two[0], two[1])
+    };
+    let dir = Dir::new();
+    let mut set = LightningCounters::open(dir.path());
+    set.note(&b);
+    set.note(&a);
+    let bytes = std::fs::read(dir.path().join(LIGHTNING_COUNTERS_FILE)).unwrap();
+    assert_eq!(&bytes[..4], &MAGIC_LIGHTNING_COUNTERS);
+    assert_eq!(LightningCounters::from_bytes(&bytes).unwrap(), vec![a, b]);
+    assert_eq!(set.to_bytes(), bytes, "written as it reads");
+    // Truncated, trailing byte, out of order, twice, too many: refused.
+    assert!(LightningCounters::from_bytes(&bytes[..bytes.len() - 1]).is_err());
+    let mut trailing = bytes.clone();
+    trailing.push(0);
+    assert!(LightningCounters::from_bytes(&trailing).is_err());
+    let mut unsorted = bytes[..9].to_vec();
+    unsorted.extend_from_slice(&b.to_bytes());
+    unsorted.extend_from_slice(&a.to_bytes());
+    assert!(LightningCounters::from_bytes(&unsorted).is_err());
+    let mut twice = bytes[..9].to_vec();
+    twice.extend_from_slice(&a.to_bytes());
+    twice.extend_from_slice(&a.to_bytes());
+    assert!(LightningCounters::from_bytes(&twice).is_err());
+    let mut many = bytes[..5].to_vec();
+    many.extend_from_slice(&(openbmt_core::settings::MAX_DEVICES as u32 + 1).to_le_bytes());
+    assert!(LightningCounters::from_bytes(&many).is_err());
+    assert!(LightningCounters::from_bytes(&[]).is_err());
+    // A file that does not read: the node starts, the set is empty, the file
+    // is left as it is, and a counter named now is held in memory.
+    for bad in [&trailing, &unsorted] {
+        let broken = Dir::new();
+        std::fs::write(broken.path().join(LIGHTNING_COUNTERS_FILE), bad).unwrap();
+        let mut set = LightningCounters::open(broken.path());
+        assert!(!set.contains(&a) && !set.contains(&b));
+        set.note(&a);
+        assert!(set.contains(&a));
+        assert_eq!(
+            &std::fs::read(broken.path().join(LIGHTNING_COUNTERS_FILE)).unwrap(),
+            bad
+        );
     }
 }
 

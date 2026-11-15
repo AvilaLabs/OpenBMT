@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 
 use openbmt_core::identity::DeviceId;
 use openbmt_core::records::{Chain, DeviceList, RecordKind};
-use openbmt_core::settings::Settings;
+use openbmt_core::settings::{Settings, MAX_DEVICES};
 use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_counter::money::tolerance;
 use openbmt_counter::Event;
@@ -48,6 +48,13 @@ use openbmt_pos::{FactsError, MAX_SALES};
 use crate::facts::FactsRefused;
 use crate::link::OwnerLink;
 use crate::watcher::write_file;
+
+/// The file of the Lightning counters ever named (OC-60), under the node's
+/// directory.
+pub const LIGHTNING_COUNTERS_FILE: &str = "lightning-counters.bin";
+
+/// The magic of the file of the Lightning counters.
+pub const MAGIC_LIGHTNING_COUNTERS: [u8; 4] = *b"OBM\x16";
 
 /// The file under the node's directory.
 pub const PAID_CHECK_FILE: &str = "paid-check.bin";
@@ -149,11 +156,11 @@ impl PaidSale {
         self.how != PaidHow::Lightning
     }
 
-    /// OC-60: a Lightning payment is exempt only from the counter the signed
-    /// settings name as the shop's Lightning counter; from any other it is
+    /// OC-60: a Lightning payment is exempt only from a counter the signed
+    /// settings have named as the shop's Lightning counter; from any other it is
     /// held as [`PaidHow::LightningUnnamed`].
-    fn named_by(mut self, lightning_counter: Option<&DeviceId>) -> Self {
-        if self.how == PaidHow::Lightning && lightning_counter != Some(&self.counter) {
+    fn named_by(mut self, named: &LightningCounters) -> Self {
+        if self.how == PaidHow::Lightning && !named.contains(&self.counter) {
             self.how = PaidHow::LightningUnnamed;
         }
         self
@@ -324,11 +331,10 @@ pub fn gather(folds: Vec<(DeviceId, Result<Vec<PaidSale>, FactsError>)>) -> Paid
 /// OC-30, OC-61: the paid sales of every counter of the link, from the
 /// owner's verified copy of its records, each counter apart.
 ///
-/// OC-60: a Lightning payment is exempt only when recorded by the counter the
-/// settings in force name as the shop's Lightning counter; the owner node
-/// keeps only the settings in force, not those before them.
-pub fn paid_sales<R: Post>(link: &OwnerLink<R>) -> PaidSales {
-    let named = link.shop_lightning_counter();
+/// OC-60: a Lightning payment is exempt only when recorded by a counter in
+/// `named`, the counters the settings in force have ever named as the shop's
+/// Lightning counter.
+pub fn paid_sales<R: Post>(link: &OwnerLink<R>, named: &LightningCounters) -> PaidSales {
     let mut folds = Vec::new();
     for counter in link.counters() {
         let Some(copy) = link.copy(counter) else {
@@ -342,9 +348,110 @@ pub fn paid_sales<R: Post>(link: &OwnerLink<R>) -> PaidSales {
     }
     let mut found = gather(folds);
     for sale in &mut found.sales {
-        *sale = sale.clone().named_by(named.as_ref());
+        *sale = sale.clone().named_by(named);
     }
     found
+}
+
+/// OC-60: the counters the settings in force have named as the shop's
+/// Lightning counter, each added when named and never taken out, so that
+/// turning Shop Lightning off or moving it makes no earlier sale a mismatch.
+/// They are kept in a file of their own in the node's directory, in a strict
+/// frame: `OBM\x16`, version, the count (u32 LE, at most
+/// [`MAX_DEVICES`]), then the counters in ascending order with none twice.
+/// A file that does not read back does not stop the node and raises nothing
+/// new: the set then starts empty in memory, so only the counters named from
+/// now on are exempt, and the file is not written over.
+#[derive(Debug)]
+pub struct LightningCounters {
+    dir: PathBuf,
+    named: BTreeSet<DeviceId>,
+    /// The file did not read back: it is left as it is.
+    broken: bool,
+    /// The last write failed, so the file is behind the memory.
+    unsaved: bool,
+}
+
+impl LightningCounters {
+    /// The set in `dir`, read back strictly.
+    pub fn open(dir: &Path) -> Self {
+        let mut out = Self {
+            dir: dir.to_path_buf(),
+            named: BTreeSet::new(),
+            broken: false,
+            unsaved: false,
+        };
+        match read_file(dir, LIGHTNING_COUNTERS_FILE, 5 + 4 + MAX_DEVICES * 32) {
+            Ok(None) => {}
+            Ok(Some(bytes)) => match Self::decode(&bytes) {
+                Ok(named) => out.named = named,
+                Err(_) => out.broken = true,
+            },
+            Err(_) => out.broken = true,
+        }
+        out
+    }
+
+    /// An empty set that is kept nowhere, for a read of records alone.
+    pub fn empty() -> Self {
+        Self {
+            dir: PathBuf::new(),
+            named: BTreeSet::new(),
+            broken: true,
+            unsaved: false,
+        }
+    }
+
+    fn decode(bytes: &[u8]) -> Result<BTreeSet<DeviceId>, DecodeError> {
+        let mut r = Reader::framed(bytes, &MAGIC_LIGHTNING_COUNTERS)?;
+        let count = r.count(MAX_DEVICES, 32)?;
+        let mut named = BTreeSet::new();
+        let mut last: Option<DeviceId> = None;
+        for _ in 0..count {
+            let id = r.device_id()?;
+            if last.is_some_and(|l| l >= id) {
+                return Err(DecodeError::NonCanonical(
+                    "the Lightning counters are not in order",
+                ));
+            }
+            last = Some(id);
+            named.insert(id);
+        }
+        r.finish()?;
+        Ok(named)
+    }
+
+    /// The set as the file holds it.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = wire::start(&MAGIC_LIGHTNING_COUNTERS, 4 + self.named.len() * 32);
+        out.extend_from_slice(&wire::len_u32(self.named.len()).to_le_bytes());
+        for id in &self.named {
+            out.extend_from_slice(&id.to_bytes());
+        }
+        out
+    }
+
+    /// Read a file's bytes back as a set, strictly (for a test or a check).
+    pub fn from_bytes(bytes: &[u8]) -> Result<Vec<DeviceId>, DecodeError> {
+        Self::decode(bytes).map(|s| s.into_iter().collect())
+    }
+
+    /// Whether the settings have named this counter as the Lightning counter.
+    pub fn contains(&self, counter: &DeviceId) -> bool {
+        self.named.contains(counter)
+    }
+
+    /// Add a counter the settings in force name as the Lightning counter.
+    /// Nothing is ever taken out. The file is written when the set grew and
+    /// can be written; a failed write is tried again at the next call, and the
+    /// set holds in memory meanwhile.
+    pub fn note(&mut self, counter: &DeviceId) {
+        let added = self.named.len() < MAX_DEVICES && self.named.insert(*counter);
+        if (added || self.unsaved) && !self.broken {
+            self.unsaved =
+                write_file(&self.dir, LIGHTNING_COUNTERS_FILE, &self.to_bytes()).is_err();
+        }
+    }
 }
 
 /// OC-61: take out the counters that hold more than
@@ -1017,13 +1124,17 @@ impl PaidChecks {
 }
 
 fn read_bounded(dir: &Path) -> Result<Option<Vec<u8>>, String> {
-    let path = dir.join(PAID_CHECK_FILE);
+    read_file(dir, PAID_CHECK_FILE, MAX_FILE_BYTES)
+}
+
+fn read_file(dir: &Path, name: &str, max: usize) -> Result<Option<Vec<u8>>, String> {
+    let path = dir.join(name);
     match fs::metadata(&path) {
-        Ok(m) if m.len() > MAX_FILE_BYTES as u64 => Err("the file is too large".to_string()),
+        Ok(m) if m.len() > max as u64 => Err("the file is too large".to_string()),
         Ok(_) => fs::read(&path)
             .map(Some)
-            .map_err(|e| format!("{PAID_CHECK_FILE}: {e}")),
+            .map_err(|e| format!("{name}: {e}")),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(format!("{PAID_CHECK_FILE}: {e}")),
+        Err(e) => Err(format!("{name}: {e}")),
     }
 }

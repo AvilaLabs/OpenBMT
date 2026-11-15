@@ -64,8 +64,8 @@ use openbmt_owner_node::coins::ViewState;
 use openbmt_owner_node::lightning_day;
 use openbmt_owner_node::live::DeepLine;
 use openbmt_owner_node::paid_check::{
-    day_bounds, day_summary, gate_open_alarms, paid_sales, MarkState, PaidCheckRefused, PaidChecks,
-    PaidState, PaidTrouble, PAID_ARRIVED_SHOWN_SECS,
+    day_bounds, day_summary, gate_open_alarms, paid_sales, LightningCounters, MarkState,
+    PaidCheckRefused, PaidChecks, PaidState, PaidTrouble, PAID_ARRIVED_SHOWN_SECS,
 };
 use openbmt_owner_node::pos::{
     AlertKind as PosKind, PosAlertRef, PosId, PosSaleKey, PosSubject, TenderKey,
@@ -247,6 +247,8 @@ struct State {
     pos: OwnerPos,
     /// The marks of the counter checks (OC-64).
     paid: PaidChecks,
+    /// The counters the settings have named as the Lightning counter (OC-60).
+    lightning_named: LightningCounters,
     /// The view's tip and readiness when the counter checks last ran in the
     /// background; none before the first run (OC-62).
     paid_key: Option<(u32, bool)>,
@@ -527,10 +529,21 @@ fn paid_run(
         link,
         paid,
         paid_unreadable,
+        lightning_named,
         ..
     } = st;
     let link = link.as_mut()?;
-    let found = gate_open_alarms(paid_sales(link), paid.marks());
+    // OC-60: the Lightning counter of the settings in force, now, is kept.
+    if let Some(counter) = node
+        .owner()
+        .known_settings()
+        .and_then(StoreParties::from_settings)
+        .map(|p| p.counter)
+        .or_else(|| link.shop_lightning_counter())
+    {
+        lightning_named.note(&counter);
+    }
+    let found = gate_open_alarms(paid_sales(link, lightning_named), paid.marks());
     let tip = node.watcher().chain().tip_height();
     let result = paid.check(&found.sales, now, |k| node.paid_facts(k, tip));
     *paid_unreadable = found.unreadable;
@@ -1211,6 +1224,7 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
             intake,
             pos: OwnerPos::open(&dir),
             paid: PaidChecks::open(&dir),
+            lightning_named: LightningCounters::open(&dir),
             paid_key: None,
             paid_started: false,
             paid_unreadable: Vec::new(),

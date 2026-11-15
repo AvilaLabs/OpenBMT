@@ -124,10 +124,11 @@ pub use own::{
 };
 pub use paid_check::{
     check_paid, day_bounds, day_summary, default_tolerance_bps, gate_open_alarms, gather,
-    paid_sales, paid_sales_from_chain, CheckResult, DaySummary, MarkState, PaidCheckRefused,
-    PaidChecks, PaidHow, PaidMark, PaidMarks, PaidSale, PaidSales, PaidState, PaidTrouble,
-    SaleCheck, MAGIC_PAID_CHECK, MAX_OPEN_ALARMS_PER_COUNTER, MAX_PAID_MARKS,
-    PAID_ARRIVED_SHOWN_SECS, PAID_CHECK_FILE, PAID_CHECK_WAIT_SECS,
+    paid_sales, paid_sales_from_chain, CheckResult, DaySummary, LightningCounters, MarkState,
+    PaidCheckRefused, PaidChecks, PaidHow, PaidMark, PaidMarks, PaidSale, PaidSales, PaidState,
+    PaidTrouble, SaleCheck, LIGHTNING_COUNTERS_FILE, MAGIC_LIGHTNING_COUNTERS, MAGIC_PAID_CHECK,
+    MAX_OPEN_ALARMS_PER_COUNTER, MAX_PAID_MARKS, PAID_ARRIVED_SHOWN_SECS, PAID_CHECK_FILE,
+    PAID_CHECK_WAIT_SECS,
 };
 pub use paid_log::{
     standing, value_at, PaidEntry, PaidLog, PaidValue, PaidWhat, Undone, MAGIC_PAID_LOG,
