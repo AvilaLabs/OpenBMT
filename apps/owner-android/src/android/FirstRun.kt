@@ -46,6 +46,7 @@ internal fun Controller.showFirstRun() {
     val p = practice
     if (p != null) return showPractice(p)
     val r = run()
+    keepStep(r)
     when (r.step) {
         FirstRunStep.Welcome -> showWelcome()
         FirstRunStep.Before -> showBefore(r)
@@ -65,6 +66,39 @@ internal fun Controller.showFirstRun() {
         FirstRunStep.RealCases -> showRealCases(r)
         FirstRunStep.Guide -> showKeyGuide(r)
         FirstRunStep.NotYet -> showNotYet(r)
+    }
+}
+
+/** The steps after the wallet is pinned are noted in the shop file, so that a start after the app was stopped goes on there. */
+private fun Controller.keepStep(r: FirstRun) {
+    if (!r.persisted) return
+    try {
+        val held = shopFile.load()
+        if (held.step != r.step) shopFile.save(held.withStep(r.step))
+    } catch (_: IOException) {
+        // The note is a help: without it a restart goes home, as before.
+    }
+}
+
+/** The first run is rebuilt from the shop file when the app starts with none in memory and the file names a step (see [FirstRunRestore]). */
+internal fun Controller.restoreFirstRun() {
+    try {
+        val held = shopFile.load()
+        val kept = FirstRunRestore.step(held, ownStore.hasWallet(), firstRun != null) ?: return
+        firstRun = FirstRunRestore.rebuild(held, Locale.getDefault().country, kept)
+        resume.arm()
+    } catch (_: IOException) {
+        // The shop's files cannot be read: the start goes on as for any shop.
+    }
+}
+
+/** The step is let go of in the shop file: the first run is over, or the shop is wiped. */
+internal fun Controller.forgetStep() {
+    try {
+        val held = shopFile.load()
+        if (held.step != null) shopFile.save(held.withStep(null))
+    } catch (_: IOException) {
+        // The note then stays until the next start reads the shop's wallet.
     }
 }
 
@@ -469,7 +503,7 @@ private fun Controller.showReady(r: FirstRun) {
     val actions = ArrayList<Button>()
     // OA-126: a counter paired on this phone in the first run, with the watch off: the offer waits for this step, where the
     // node is up.
-    val samePhone = OnePhoneFile.read(act.noBackupFilesDir) != null
+    val samePhone = node?.let { oneCounterInForce(it) } == true
     if (samePhone && !watchStore.enabled()) {
         views.add(heading(OwnPairWords.oneWatchTitle))
         views.add(para(OwnPairWords.oneWatchText))
@@ -486,6 +520,7 @@ private fun Controller.endFirstRun() {
     firstRun = null
     starter.firstRun = null
     resume.clear()
+    forgetStep()
     afterFirstCounter()
 }
 

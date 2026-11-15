@@ -339,6 +339,8 @@ class Controller(internal val act: MainActivity) {
 
     internal fun begin() {
         starter.pinned = null
+        // A first run stopped after the wallet was pinned is rebuilt from the shop file and goes on once the node is up.
+        if (firstRun == null) restoreFirstRun()
         // A first run that stands at a step which reads the node goes on there once the node is up again (a return to the app, a retry after a fault).
         if (firstRun?.needsNode == true) resume.arm()
         fault = null
@@ -645,11 +647,11 @@ class Controller(internal val act: MainActivity) {
         web.start()
         if (registerNext && key2Signer) {
             registerNext = false
-            showHardwareRegister { showHome() }
+            showHardwareRegister { homeOrHeld() }
         } else {
             registerNext = false
             // The first run, left at the first counter to start the node, goes on at its next step; else home.
-            if (resume.take(firstRun)) showFirstRun() else showHome()
+            if (resume.take(firstRun)) showFirstRun() else homeOrHeld()
         }
     }
 
@@ -997,6 +999,11 @@ class Controller(internal val act: MainActivity) {
                 }
             }
         }
+    }
+
+    /** Where the node start ends: the answer that was kept goes on first (OA-62), else home. */
+    private fun homeOrHeld() {
+        if (!resumeHeld()) showHome()
     }
 
     /** Goes on with the answer that was kept, once; false when none was. */

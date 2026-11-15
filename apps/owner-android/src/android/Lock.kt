@@ -323,6 +323,7 @@ internal fun Controller.wipe() {
     firstRun = null
     starter.firstRun = null
     oneHold.drop()
+    forgetStep()
     lockNow()
     // The watch key and what the watcher follows go with the setup (OA-86).
     WatchService.stop(act)

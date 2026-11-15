@@ -115,13 +115,18 @@ object CueCard {
     }
 }
 
-/** What the shop's first screens keep: the name, the money, the till, whether the till steps were shown and whether the cue card was printed. */
+/**
+ * What the shop's first screens keep: the name, the money, the till, whether the till steps were shown, whether the cue card
+ * was printed and, for the steps after the wallet is pinned only, the step the first run is at (a start after the app was
+ * stopped goes on there).
+ */
 class ShopPrefs(
     val name: String = "",
     val currency: ShopCurrency? = null,
     val till: Till? = null,
     val stepsShown: Boolean = false,
     val cardPrinted: Boolean = false,
+    val step: FirstRunStep? = null,
 ) {
     fun encode(): ByteArray {
         val sb = StringBuilder()
@@ -130,6 +135,7 @@ class ShopPrefs(
         sb.append("till: ").append(till?.key ?: "").append('\n')
         sb.append("steps-shown: ").append(if (stepsShown) "yes" else "no").append('\n')
         sb.append("card-printed: ").append(if (cardPrinted) "yes" else "no").append('\n')
+        if (step != null) sb.append("step: ").append(step.name).append('\n')
         return sb.toString().toByteArray(Charsets.UTF_8)
     }
 
@@ -139,7 +145,10 @@ class ShopPrefs(
         till: Till? = this.till,
         stepsShown: Boolean = this.stepsShown,
         cardPrinted: Boolean = this.cardPrinted,
-    ): ShopPrefs = ShopPrefs(clean(name), currency, till, stepsShown, cardPrinted)
+    ): ShopPrefs = ShopPrefs(clean(name), currency, till, stepsShown, cardPrinted, step)
+
+    /** The same file with the first run's step set, or with none when [to] is null. */
+    fun withStep(to: FirstRunStep?): ShopPrefs = ShopPrefs(name, currency, till, stepsShown, cardPrinted, to)
 
     companion object {
         const val MAX_NAME = 60
@@ -156,8 +165,8 @@ class ShopPrefs(
             }
             if (!text.endsWith("\n")) throw ConfigFormatException("the shop file does not end with a line end")
             val lines = text.dropLast(1).split('\n')
-            // A file from before the card flag has 4 lines and reads as a card not printed.
-            if (lines.size != 4 && lines.size != 5) throw ConfigFormatException("the shop file does not have 4 or 5 lines")
+            // A file from before the card flag has 4 lines and reads as a card not printed; the step line is the 6th and optional.
+            if (lines.size !in 4..6) throw ConfigFormatException("the shop file does not have 4 to 6 lines")
             fun value(i: Int, key: String): String {
                 val prefix = "$key: "
                 if (!lines[i].startsWith(prefix)) throw ConfigFormatException("line ${i + 1} is not \"$key: ...\"")
@@ -180,7 +189,11 @@ class ShopPrefs(
                 "no" -> false
                 else -> throw ConfigFormatException("card-printed is not yes or no")
             }
-            return ShopPrefs(name, currency, till, shown, printed)
+            val step = if (lines.size < 6) null else {
+                val named = value(5, "step")
+                FirstRunStep.PERSISTED.firstOrNull { it.name == named } ?: throw ConfigFormatException("the step is not one the first run keeps")
+            }
+            return ShopPrefs(name, currency, till, shown, printed, step)
         }
 
         /**
@@ -258,7 +271,12 @@ class MoneyTabs(start: ShopCurrency, private val guess: ShopCurrency) {
 
 /** The screens of the first run, in the order they come. Back from each is [FirstRun.back]. */
 enum class FirstRunStep {
-    Welcome, Before, Shop, Till, Money, Hardware, Helper, OwnAdvice, Connect, Starter, OwnCounter, Instant, FirstSale, Ready, Why, RealCases, Guide, NotYet,
+    Welcome, Before, Shop, Till, Money, Hardware, Helper, OwnAdvice, Connect, Starter, OwnCounter, Instant, FirstSale, Ready, Why, RealCases, Guide, NotYet;
+
+    companion object {
+        /** The steps that come after the wallet is pinned: the only ones the shop file keeps. */
+        val PERSISTED: List<FirstRunStep> = listOf(OwnCounter, Instant, FirstSale, Ready)
+    }
 }
 
 /**
@@ -293,7 +311,8 @@ class FirstRun(start: ShopPrefs, locale: String) {
     var connect = Connect()
         private set
 
-    fun prefs(stepsShown: Boolean, cardPrinted: Boolean = false): ShopPrefs = ShopPrefs(ShopPrefs.clean(name), currency, till, stepsShown, cardPrinted)
+    fun prefs(stepsShown: Boolean, cardPrinted: Boolean = false): ShopPrefs =
+        ShopPrefs(ShopPrefs.clean(name), currency, till, stepsShown, cardPrinted, step.takeIf { it in FirstRunStep.PERSISTED })
 
     /**
      * The step after [step]; the Money step goes on to Hardware for the plan, to Connect for a wallet the owner holds,
@@ -417,6 +436,14 @@ class FirstRun(start: ShopPrefs, locale: String) {
         if (step == FirstRunStep.OwnAdvice) choose(MoneyChoice.Make)
     }
 
+    /** Whether the step in memory is one the shop file keeps (after the wallet is pinned). */
+    val persisted: Boolean get() = step in FirstRunStep.PERSISTED
+
+    /** A first run rebuilt from the shop file goes on at [kept]; only a step the file keeps is taken. */
+    fun resumeAt(kept: FirstRunStep) {
+        if (kept in FirstRunStep.PERSISTED) step = kept
+    }
+
     /** The step before: what was entered stays. Welcome has none. */
     fun back() {
         step = when (step) {
@@ -476,18 +503,28 @@ class FirstRunResume {
     }
 
     /**
-     * The node is up: true once when the hand-off was armed and the first run is in memory at a step that needs the node.
+     * The node is up: true once when the hand-off was armed and the first run is in memory at a step that needs the node (or at the first counter, when rebuilt from the shop file).
      * Otherwise false, and the home screen is drawn as always. Either way the hand-off is spent.
      */
     fun take(run: FirstRun?): Boolean {
         val was = armed
         armed = false
-        return was && run != null && run.needsNode
+        return was && run != null && (run.needsNode || run.step == FirstRunStep.OwnCounter)
     }
 
     fun clear() {
         armed = false
     }
+}
+
+/** Whether a first run is rebuilt from the shop file at the start of the app. */
+object FirstRunRestore {
+    /** The step to go on at: the file names one, the shop has a pinned wallet and no first run is in memory; else null. */
+    fun step(prefs: ShopPrefs, hasPinnedWallet: Boolean, inMemory: Boolean): FirstRunStep? =
+        if (inMemory || !hasPinnedWallet) null else prefs.step
+
+    /** The first run at the kept step, with the rest of its fields from [prefs]. */
+    fun rebuild(prefs: ShopPrefs, locale: String, kept: FirstRunStep): FirstRun = FirstRun(prefs, locale).also { it.resumeAt(kept) }
 }
 
 /** What [FirstRun.saveInstant] did. */
