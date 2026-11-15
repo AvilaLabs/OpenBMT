@@ -324,11 +324,11 @@ SettingsEditArgs: record: usd_per_btc: option<u64>, light_per_sale: option<u32>,
 SettingChangeView: record: field: string, label: string, counter: option<list<u8>>, old: string, new: string, loosening: bool
 SettingsPreviewView: record: version: u32, changes: list<SettingChangeView>, needs_key_app: bool, nothing_changed: bool, shares_total_bps: u32, usd_per_btc: option<u64>, sats_per_usd: option<u64>, settings: list<u8>, currency: ShopCurrencyView
 OwnSettingsPreviewArgs: record: shop: OwnShopArgs, edit: SettingsEditArgs, starter: bool
-OwnSettingsPreviewView: record: preview: SettingsPreviewView, needs_wallet_sig: bool, message: string, address: string
+OwnSettingsPreviewView: record: preview: SettingsPreviewView, needs_wallet_sig: bool, message: string, address: string, path: option<string>
 OwnSettingsSendArgs: record: shop: OwnShopArgs, settings: list<u8>, now: u64
 OwnSettingsSentView: record: version: u32, waits: bool
 OwnShopLightningPreviewArgs: record: shop: OwnShopArgs, edit: ShopLightningEditArgs, starter: bool
-OwnShopLightningPreviewView: record: preview: ShopLightningPreviewView, needs_wallet_sig: bool, message: string, address: string
+OwnShopLightningPreviewView: record: preview: ShopLightningPreviewView, needs_wallet_sig: bool, message: string, address: string, path: option<string>
 OwnSettingsAttachArgs: record: shop: OwnShopArgs, settings: list<u8>, signature: string
 NotOfferedView: enum, one tag byte
     tags Offered=0 SecondDeviceAway=1 ChainBehind=2 NoUsableChannel=3 ProviderSilent=4

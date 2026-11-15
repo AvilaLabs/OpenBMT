@@ -169,6 +169,7 @@ internal fun Controller.screen(
 ) {
     val model = words?.let { WordsModel.of(it) }
     val all = ArrayList<View>()
+    savedNote?.let { all.add(line(it, bold = true)); savedNote = null }
     if (lead != null) all.add(lead)
     if (model != null) all.add(ui.titleBlock(model, title))
     all.addAll(body)

@@ -73,7 +73,7 @@ private fun Controller.watchTurnOnGranted() {
         val queued = r.getOrNull()
         WatchService.start(act)
         when {
-            queued == null -> watchDone()
+            queued == null -> if (!takeOwnSent()) watchDone()
             queued.tightening -> centre(AppWords.editQueuedTightening, listOf(ui.primary("Done") { watchDone() }))
             else -> centre(AppWords.editQueuedLoosening, listOf(ui.primary("Build the request for the Key app") { showSpend() }, ui.button("Later") { watchDone() }))
         }
@@ -98,7 +98,8 @@ private fun Controller.makeWatchReady(n: OwnerNode): SettingsQueued? {
         val named = n.watchNamed()
         if (named == null || !named.contentEquals(key)) {
             val p = n.watchSettingsPreview(true, key)
-            if (!p.nothingChanged) queued = n.queueSettings(p.settings)
+            // A shop with its own wallet has no Key app: the library puts the change in force (OA-127).
+            if (!p.nothingChanged) { if (ownStore.hasWallet()) sendOwnQuietly(p.settings) else queued = n.queueSettings(p.settings) }
         }
         watchStore.saveContents(n.watchExport(secret))
         watchStore.setEnabled(true)
@@ -117,7 +118,7 @@ private fun Controller.watchTurnOff() {
         watchStore.remove()
         if (n.watchNamed() != null) {
             val p = n.watchSettingsPreview(false, ByteArray(0))
-            if (!p.nothingChanged) n.queueSettings(p.settings) else null
+            if (p.nothingChanged) null else if (ownStore.hasWallet()) { sendOwnQuietly(p.settings); null } else n.queueSettings(p.settings)
         } else {
             null
         }
@@ -126,7 +127,7 @@ private fun Controller.watchTurnOff() {
         if (e != null) return@async showWatch(watchRefusal(e))
         if (r.getOrNull() != null) {
             centre(AppWords.editQueuedTightening, listOf(ui.primary("Done") { showWatch(null) }, ui.button("Waiting to be delivered") { showOutbox() }))
-        } else {
+        } else if (!takeOwnSent()) {
             showWatch(null)
         }
     }

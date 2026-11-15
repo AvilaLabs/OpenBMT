@@ -82,6 +82,12 @@ class Controller(internal val act: MainActivity) {
     // What the owner has typed in the settings editor, in memory only (OA-34).
     internal var settingsDraft = SettingsDraft()
 
+    /** A short line that the next page shows once above its body: a change of an own-wallet shop was put in force (OA-127). */
+    internal var savedNote: String? = null
+
+    /** What the last own-wallet change sent from a background step came to, until the step's screen takes it (OA-127). */
+    internal var ownSentLast: org.openbmt.owner.OwnSettingsSent? = null
+
     /** What the Shop Lightning turn-on steps have gathered (SL-76); forgotten when the change is queued. */
     internal var shopLightningDraft = ShopLightningModel.Draft()
 

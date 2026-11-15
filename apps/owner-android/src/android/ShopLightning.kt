@@ -304,7 +304,7 @@ private fun Controller.showSlReview(edit: ShopLightningEditArgs, back: () -> Uni
         if (ask != null && ask.needsWalletSig) {
             actions.add(
                 ui.primary(WalletSigWords.heading) {
-                    showWalletSig(p.settings, ask.message, ask.address, done = { shopLightningDraft = ShopLightningModel.Draft(); showShopLightning() }, back = { showSlReview(edit, back) })
+                    showWalletSig(p.settings, ask.message, ask.address, ask.path, done = { shopLightningDraft = ShopLightningModel.Draft(); showShopLightning() }, back = { showSlReview(edit, back) })
                 },
             )
         } else actions.add(

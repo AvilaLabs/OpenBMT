@@ -102,6 +102,7 @@ fn ap_14_the_preview_of_a_redirect_gives_the_message_and_the_address() {
             .wallet_sig
             .expect("a Redirect asks for the signature");
         assert_eq!(ask.message, wallet_message_for(&preview.settings));
+        assert_eq!(ask.path.as_deref(), Some("m/84h/0h/0h/0/0"));
         assert_eq!(
             ask.address,
             s.wallet().receive_address(0).unwrap().to_string()

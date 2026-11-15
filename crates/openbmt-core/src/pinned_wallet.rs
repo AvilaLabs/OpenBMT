@@ -162,6 +162,17 @@ impl PinnedWallet {
         }
     }
 
+    /// The derivation of the receive address at index 0 from the master key,
+    /// written with `h` for hardened (`m/84h/0h/0h/0/0`), when the wallet's
+    /// description gives a key origin for it: a single-key wallet does; a
+    /// multi-key wallet has no one path, so it gives none (OA-127).
+    pub fn first_address_path(&self) -> Option<String> {
+        match &self.wallet {
+            ImportedWallet::Single(w) => Some(format!("m/84h/0h/{}h/0/0", w.account())),
+            ImportedWallet::Multisig(_) => None,
+        }
+    }
+
     /// Wire form: `OBM)`, version 1, the text length, the text, its hash.
     pub fn to_bytes(&self) -> Vec<u8> {
         let text = self.canonical_string().as_bytes();
@@ -514,6 +525,15 @@ mod tests {
 
     fn signed(start: u32, end: u32) -> SignedRange {
         SignedRange::sign(&identity(1), range(3, start, end)).unwrap()
+    }
+
+    #[test]
+    fn oa_127_the_first_address_path_is_given_for_a_wallet_with_a_key_origin_only() {
+        assert_eq!(
+            pinned_single().first_address_path().as_deref(),
+            Some("m/84h/0h/0h/0/0")
+        );
+        assert_eq!(pinned_multi().first_address_path(), None);
     }
 
     #[test]

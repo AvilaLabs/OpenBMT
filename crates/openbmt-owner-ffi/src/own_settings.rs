@@ -50,13 +50,18 @@ pub struct OwnSettingsPreviewView {
     /// The address that has to sign (AP-09); empty when no signature is
     /// needed.
     pub address: String,
+    /// The derivation of that address from the wallet's key origin, with `h`
+    /// for hardened (`m/84h/0h/0h/0/0`); `None` when the description gives no
+    /// origin or no signature is needed (OA-127).
+    pub path: Option<String>,
 }
 
 wire_record!(OwnSettingsPreviewView {
     preview,
     needs_wallet_sig,
     message,
-    address
+    address,
+    path
 });
 
 /// The arguments of `own_settings_attach`.
@@ -90,15 +95,21 @@ pub(crate) fn preview(a: OwnSettingsPreviewArgs) -> Result<OwnSettingsPreviewVie
             .shop()
             .settings_preview(&edit)
             .map_err(|r| queue_error(&OwnerError::Refused(r)))?;
-        let (needs_wallet_sig, message, address) = match &preview.wallet_sig {
-            Some(ask) => (true, ask.message.clone(), ask.address.clone()),
-            None => (false, String::new(), String::new()),
+        let (needs_wallet_sig, message, address, path) = match &preview.wallet_sig {
+            Some(ask) => (
+                true,
+                ask.message.clone(),
+                ask.address.clone(),
+                ask.path.clone(),
+            ),
+            None => (false, String::new(), String::new(), None),
         };
         Ok(OwnSettingsPreviewView {
             preview: preview_view(&preview),
             needs_wallet_sig,
             message,
             address,
+            path,
         })
     })
 }
@@ -151,13 +162,18 @@ pub struct OwnShopLightningPreviewView {
     pub message: String,
     /// The address that has to sign (AP-09); empty when none is needed.
     pub address: String,
+    /// The derivation of that address from the wallet's key origin, with `h`
+    /// for hardened (`m/84h/0h/0h/0/0`); `None` when the description gives no
+    /// origin or no signature is needed (OA-127).
+    pub path: Option<String>,
 }
 
 wire_record!(OwnShopLightningPreviewView {
     preview,
     needs_wallet_sig,
     message,
-    address
+    address,
+    path
 });
 
 /// Op 245: what a Shop Lightning edit does to the settings of a shop with
@@ -172,15 +188,21 @@ pub(crate) fn shop_lightning_preview(
             .shop()
             .settings_preview(&edit)
             .map_err(|r| queue_error(&OwnerError::Refused(r)))?;
-        let (needs_wallet_sig, message, address) = match &preview.wallet_sig {
-            Some(ask) => (true, ask.message.clone(), ask.address.clone()),
-            None => (false, String::new(), String::new()),
+        let (needs_wallet_sig, message, address, path) = match &preview.wallet_sig {
+            Some(ask) => (
+                true,
+                ask.message.clone(),
+                ask.address.clone(),
+                ask.path.clone(),
+            ),
+            None => (false, String::new(), String::new(), None),
         };
         Ok(OwnShopLightningPreviewView {
             preview: crate::shop_lightning::preview_view(&preview),
             needs_wallet_sig,
             message,
             address,
+            path,
         })
     })
 }

@@ -155,6 +155,10 @@ pub struct WalletSigAsk {
     /// The address that has to sign: the first receive address of the
     /// pinned wallet.
     pub address: String,
+    /// The derivation of that address from the wallet's key origin, with
+    /// `h` for hardened (`m/84h/0h/0h/0/0`), when the description gives one
+    /// (OA-127).
+    pub path: Option<String>,
 }
 
 /// What the preview of a shop with its own wallet knows of the wallet.
@@ -162,6 +166,8 @@ pub struct WalletSigAsk {
 pub(crate) struct OwnFacts {
     /// The first receive address of the pinned wallet, as text.
     pub(crate) address: String,
+    /// The derivation path of that address, when the wallet has a key origin.
+    pub(crate) path: Option<String>,
     /// The app says the shop is on its starter wallet (AP-15).
     pub(crate) starter: bool,
 }
@@ -173,6 +179,7 @@ impl OwnFacts {
                 .receive_address(0)
                 .map(|a| a.to_string())
                 .unwrap_or_default(),
+            path: wallet.first_address_path(),
             starter,
         }
     }
@@ -596,6 +603,7 @@ pub(crate) fn preview_over(
             Some(WalletSigAsk {
                 message: wallet_message_for(&s),
                 address: own.address.clone(),
+                path: own.path.clone(),
             })
         }
         _ => None,

@@ -33,11 +33,18 @@ object WalletSigWords {
     val starterHeading = say("OA_WALLETSIG_STARTER_HEADING", "Move to your own wallet")
     val starterWhat = say("OA_WALLETSIG_STARTER_WHAT", "This change decides where Lightning payments go. A starter wallet's key is on this phone, so it cannot approve it.")
     val starterNext = say("OA_WALLETSIG_STARTER_NEXT", "Move the shop to your own wallet first, then make this change.")
+    val saved = say("OA_WALLETSIG_SAVED", "Saved. The counters take the change when they next reach this phone.")
 
     // The names of the two buttons that copy and paste: the words of the decided design name the buttons "Copy" and
     // "Paste" and give no other text for them.
     const val copy = "Copy"
     const val paste = "Paste"
+
+    /**
+     * What the code holds (OA-127): `signmessage {path} ascii:{message}`, the form in which signers that read codes take
+     * a message to sign, with the derivation [path] of the address that signs; the message alone when there is no path.
+     */
+    fun qrText(message: String, path: String?): String = if (path == null) message else "signmessage $path ascii:$message"
 
     /** The words of a signature that was not accepted, with the address that had to sign. */
     fun wrong(address: String): SayWords = SayWords(

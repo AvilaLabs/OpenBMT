@@ -1059,6 +1059,7 @@ sign:
 | OA_WALLETSIG_STARTER_HEADING | Move to your own wallet |
 | OA_WALLETSIG_STARTER_WHAT | This change decides where Lightning payments go. A starter wallet's key is on this phone, so it cannot approve it. |
 | OA_WALLETSIG_STARTER_NEXT | Move the shop to your own wallet first, then make this change. |
+| OA_WALLETSIG_SAVED | Saved. The counters take the change when they next reach this phone. |
 
 The counter checks (`docs/OWNER-COINS-RULES.md`, OC-60 to OC-64), in
 `PaidCheckWords`. `{counter}` is the counter's name, `{number}` the

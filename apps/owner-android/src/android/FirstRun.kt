@@ -444,7 +444,8 @@ private fun Controller.writeInstant(r: FirstRun, msg: Slot) {
     val result = try {
         r.saveInstant(typed, held.lightPerSale.displayUsd) { v ->
             val p = n.previewSettings(InstantStep.edit(v))
-            if (!p.nothingChanged) n.queueSettings(p.settings)
+            // A shop with its own wallet has no Key app: the library puts the change in force (OA-127).
+            if (!p.nothingChanged) { if (ownStore.hasWallet()) sendOwnQuietly(p.settings) else n.queueSettings(p.settings) }
         }
     } catch (e: OwnerException) {
         return msg.show(ui.words(e.sayWords()))
@@ -452,7 +453,7 @@ private fun Controller.writeInstant(r: FirstRun, msg: Slot) {
         return msg.show(ui.words(AppWords.libraryMissing(e.message)))
     }
     when (result) {
-        InstantResult.Saved -> showFirstRun()
+        InstantResult.Saved -> if (!takeOwnSent()) showFirstRun()
         InstantResult.Higher -> msg.show(line(FirstRunWords.instantHigher, bold = true))
         else -> {}
     }

@@ -143,13 +143,14 @@ object ProtocolDecoderTest {
 
         // Ops 243 and 244: the preview of a shop with its own wallet, with what the wallet has to sign.
         val ask = decodeResponse(ownPreviewFrame()).ownSettingsPreview()
-        check(ask.preview.version == 4L && ask.needsWalletSig && ask.message == "Message to sign" && ask.address == "bc1qaddress")
+        check(ask.preview.version == 4L && ask.needsWalletSig && ask.message == "Message to sign" && ask.address == "bc1qaddress" && ask.path == "m/84h/0h/0h/0/0")
+        check(decodeResponse(ownPreviewFrame(path = null)).ownSettingsPreview().path == null)
         val none = decodeResponse(ownPreviewFrame(needs = false)).ownSettingsPreview()
         check(!none.needsWalletSig && none.message.isEmpty() && none.address.isEmpty() && none.preview.changes.size == 2)
         // Op 245: the same for a Shop Lightning edit, the preview of which has no changes list.
         val lightning = decodeResponse(ownShopLightningFrame()).ownShopLightningPreview()
         check(lightning.preview.version == 5L && lightning.preview.changeClass == ShopLightningClass.Redirect && lightning.preview.after == null)
-        check(lightning.preview.settings.contentEquals(byteArrayOf(7, 7)) && lightning.needsWalletSig && lightning.message == "Message to sign" && lightning.address == "bc1qaddress")
+        check(lightning.preview.settings.contentEquals(byteArrayOf(7, 7)) && lightning.needsWalletSig && lightning.message == "Message to sign" && lightning.address == "bc1qaddress" && lightning.path == null)
         rejects("a short Shop Lightning own preview") { decodeResponse(ownShopLightningFrame().let { it.copyOf(it.size - 2) }).ownShopLightningPreview() }
         // Op 246: the version of the change and whether it waits for a counter.
         val sent = decodeResponse(header(0, Writer().u32(7).bool(true).toByteArray())).ownSettingsSent()
@@ -1041,7 +1042,7 @@ object ProtocolDecoderTest {
     }
 
     /** The answer of op 243: the preview, then whether the wallet signs, the message and the address. */
-    private fun ownPreviewFrame(needs: Boolean = true, flag: Int = if (needs) 1 else 0): ByteArray {
+    private fun ownPreviewFrame(needs: Boolean = true, flag: Int = if (needs) 1 else 0, path: String? = "m/84h/0h/0h/0/0"): ByteArray {
         val w = Writer().u32(4).u32(2)
         w.string("refund_cap").string("Largest single refund").u8(0).string("$100").string("$150").bool(true)
         w.string("counters").string("Counter's share").u8(1).bytes(ByteArray(32) { 5 })
@@ -1049,13 +1050,14 @@ object ProtocolDecoderTest {
         w.u8(1).bool(false).u32(8_333).u8(1).u64(98_500).u8(1).u64(1_015).bytes(byteArrayOf(9, 9)).u8(2)
         w.u8(flag)
         if (needs) w.string("Message to sign").string("bc1qaddress") else w.string("").string("")
+        w.option(if (needs) path else null) { w.string(it) }
         return header(0, w.toByteArray())
     }
 
     /** The answer of op 245: a Shop Lightning preview of class Redirect that turns it off, then what the wallet signs. */
     private fun ownShopLightningFrame(): ByteArray {
         val w = Writer().u32(5).u8(2).bool(false).bool(false).u8(0).bytes(byteArrayOf(7, 7))
-        w.bool(true).string("Message to sign").string("bc1qaddress")
+        w.bool(true).string("Message to sign").string("bc1qaddress").option(null as String?) { w.string(it) }
         return header(0, w.toByteArray())
     }
 

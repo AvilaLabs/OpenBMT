@@ -4685,16 +4685,33 @@ object AppModelTest {
     private fun oa_127_signing_with_the_wallet() {
         val all = WalletSigWords.all().toMap()
         ok(all["OA_WALLETSIG_HEADING"] == "Sign with your wallet" && all["OA_WALLETSIG_SEND"] == "Send change" && all["OA_WALLETSIG_SCAN"] == "Scan signature", "OA-127: the heading and the two buttons")
-        ok(all.size == 14 && all.values.none { it.isBlank() || it.contains("TODO_WORDS") }, "OA-127: every text of the screen is written and listed")
+        ok(all.size == 15 && all.values.none { it.isBlank() || it.contains("TODO_WORDS") }, "OA-127: every text of the screen is written and listed")
         val address = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
         val wrong = WalletSigWords.wrong(address)
         ok(wrong.heading == "Signature not accepted" && wrong.what.contains(address) && !wrong.what.contains("{address}") && wrong.code == "AP-10", "OA-127: the words of a wrong signature name the address that had to sign")
         ok(SayCheck.problem(wrong) == null && SayCheck.problem(WalletSigWords.starter()) == null, "OA-127: the refusal words keep the limits of the words")
         ok(WalletSigWords.starter().heading == "Move to your own wallet" && WalletSigWords.starter().code == "AP-15", "OA-127: a shop on its starter wallet is not offered the change")
         val screen = source("src/android/WalletSig.kt")
-        ok(screen.contains("OwnerOwn.settingsAttach") && screen.contains("showWalletSig(settings, message, address, sig.text.toString()") && screen.contains("scan.begin") && screen.contains("AnimatedQrView.makePlain(act, Who.OWNER, message"), "OA-127: the screen sends through the library, keeps itself on a refusal, scans and shows the code")
+        ok(screen.contains("OwnerOwn.settingsAttach") && screen.contains("showWalletSig(settings, message, address, path, sig.text.toString()") && screen.contains("scan.begin") && screen.contains("AnimatedQrView.makePlain(act, Who.OWNER, WalletSigWords.qrText(message, path)"), "OA-127: the screen sends through the library, keeps itself on a refusal, scans and shows the code")
+        ok(WalletSigWords.saved == "Saved. The counters take the change when they next reach this phone.", "OA-127: the line shown when an own-wallet change is in force")
+        val spec = "OpenBMT settings change, shop settings version 7, Lightning node none, settings " + "ab".repeat(32)
+        ok(WalletSigWords.qrText(spec, "m/84h/0h/0h/0/0") == "signmessage m/84h/0h/0h/0/0 ascii:$spec", "OA-127: with a key origin the code holds signmessage, the path and the message")
+        ok(WalletSigWords.qrText(spec, null) == spec, "OA-127: with no key origin the code holds the message alone")
+        ok(screen.contains("WalletSigWords.qrText(message, path)") && screen.contains("ui.text(message, 15f, mono = true)") && screen.contains("copy(message)"), "OA-127: the code holds the signmessage text, the text block and Copy stay the plain message")
         ok(source("src/android/SettingsEdit.kt").contains("ask.needsWalletSig"), "OA-127: the review leads to the screen for a Redirect change")
         // A change of a shop with its own wallet that needs no signature never goes down the Key-app queue.
+        // Every call of queueSettings in the app is one of these, and each has its own-wallet route in front of it.
+        val callers = File(appDir, "src/android").listFiles { f -> f.name.endsWith(".kt") }!!.sortedBy { it.name }
+            .flatMap { f -> f.readLines().filter { it.contains("queueSettings(") && !it.trimStart().startsWith("//") && !it.trimStart().startsWith("*") }.map { f.name } }
+        ok(callers == listOf("FirstRun.kt", "SettingsEdit.kt", "ShopLightning.kt", "WatchScreen.kt", "WatchScreen.kt"), "OA-127: queueSettings is called in these places only: $callers")
+        for (name in listOf("FirstRun.kt", "WatchScreen.kt")) {
+            val text = source("src/android/$name")
+            ok(occurs(text, "queueSettings(") == occurs(text, "ownStore.hasWallet()) sendOwnQuietly(") + occurs(text, "ownStore.hasWallet()) { sendOwnQuietly("), "OA-127: $name sends an own-wallet change through the library before it could queue it")
+            ok(text.contains("takeOwnSent()"), "OA-127: $name shows what the library did with the change")
+        }
+        val quiet = source("src/android/WalletSig.kt").substringAfter("internal fun Controller.sendOwnQuietly")
+        ok(quiet.contains("OwnerOwn.settingsSend(") && !quiet.substringBefore("takeOwnSent").contains("queueSettings"), "OA-127: the quiet send uses the library's own path")
+        ok(source("src/android/OwnerUi.kt").contains("savedNote?.let"), "OA-127: the saved line is shown once above the next page")
         val editor = source("src/android/SettingsEdit.kt").substringAfter("internal fun Controller.showEditReview")
         ok(editor.indexOf("sendOwnChange(p.settings, msg)") in 0 until editor.indexOf("n.queueSettings(p.settings)"), "OA-127: the editor's Queue the change sends an own-wallet change before it could reach the Key-app queue")
         val lightning = source("src/android/ShopLightning.kt").substringAfter("private fun Controller.showSlReview")
@@ -5415,7 +5432,7 @@ object AppModelTest {
         ok(ShopLightningWords.all().none { it.first == "ownWallet" }, "the words that said it cannot be turned on are gone")
         val page = source("src/android/ShopLightning.kt")
         ok(page.contains("ShopLightningModel.Page.Starter") && page.contains("WalletSigWords.starter()"), "the page shows the starter words for a starter wallet")
-        ok(page.contains("OwnerOwn.shopLightningPreview(shop, edit, starterPinned())") && page.contains("ask.needsWalletSig") && page.contains("showWalletSig(p.settings, ask.message, ask.address"), "turning on goes preview, wallet-signing screen, attach")
+        ok(page.contains("OwnerOwn.shopLightningPreview(shop, edit, starterPinned())") && page.contains("ask.needsWalletSig") && page.contains("showWalletSig(p.settings, ask.message, ask.address, ask.path"), "turning on goes preview, wallet-signing screen, attach")
         ok(ShopLightningModel.rowSub(null) == ShopLightningWords.rowSubOff && ShopLightningModel.rowSub(shopLightningState()) == ShopLightningWords.rowSubOn, "the row says whether it is on")
 
         // The node's ID: 66 lower-case hexadecimal digits, as the stick's code gives them (SK-35).

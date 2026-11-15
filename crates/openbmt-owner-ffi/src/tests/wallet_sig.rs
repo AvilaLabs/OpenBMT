@@ -64,13 +64,12 @@ fn node_edit() -> Vec<u8> {
     Edit::node(KEY).bytes()
 }
 
-/// The answer of op 243: the settings of the preview, whether a signature is
-/// asked for, the message and the address.
-fn ask(
-    dir: &Scratch,
-    file: &[u8],
-    starter: bool,
-) -> Result<(Vec<u8>, bool, String, String), String> {
+/// What op 243 answers: the settings of the preview, whether a signature is
+/// asked for, the message, the address and the path of the address.
+type Asked = (Vec<u8>, bool, String, String, Option<String>);
+
+/// The answer of op 243.
+fn ask(dir: &Scratch, file: &[u8], starter: bool) -> Result<Asked, String> {
     let response = call(
         243,
         &W::new()
@@ -102,9 +101,9 @@ fn ask(
     let (_, _) = (r.opt(Rd::u64), r.opt(Rd::u64));
     let settings = r.bytes();
     let _currency = r.u8();
-    let (needs, message, address) = (r.bool(), r.string(), r.string());
+    let (needs, message, address, path) = (r.bool(), r.string(), r.string(), r.opt(Rd::string));
     r.done();
-    Ok((settings, needs, message, address))
+    Ok((settings, needs, message, address, path))
 }
 
 fn attach(dir: &Scratch, file: &[u8], settings: &[u8], signature: &str) -> Result<u32, String> {
@@ -121,8 +120,10 @@ fn attach(dir: &Scratch, file: &[u8], settings: &[u8], signature: &str) -> Resul
 #[test]
 fn ap_14_the_preview_gives_the_message_and_the_address_through_dispatch() {
     let (dir, file, _) = paired(61);
-    let (settings, needs, message, address) = ask(&dir, &file, false).unwrap();
+    let (settings, needs, message, address, path) = ask(&dir, &file, false).unwrap();
     assert!(needs);
+    // OA-127: the wallet's key origin gives the path of that address.
+    assert_eq!(path.as_deref(), Some("m/84h/0h/0h/0/0"));
     let parsed = SignedSettings::from_bytes(&settings).unwrap();
     assert_eq!(message, wallet_message_for(&parsed.settings));
     let wallet = openbmt_core::pinned_wallet::PinnedWallet::from_bytes(&file).unwrap();
@@ -138,7 +139,7 @@ fn ap_15_a_shop_on_its_starter_wallet_is_refused_through_dispatch() {
 #[test]
 fn ap_14_a_good_signature_is_attached_and_a_bad_one_stores_nothing_through_dispatch() {
     let (dir, file, key) = paired(63);
-    let (settings, _, message, _) = ask(&dir, &file, false).unwrap();
+    let (settings, _, message, _, _) = ask(&dir, &file, false).unwrap();
     // A signature of another message is refused, with the rule, and the next
     // preview still finds the same settings to change.
     let wrong = sign_compact_text(&key, "some other message");
@@ -230,9 +231,10 @@ fn ap_14_shop_lightning_is_previewed_and_put_in_force_through_dispatch() {
     });
     assert_eq!(after.unwrap(), id(2).device_id().to_bytes());
     let settings = r.bytes();
-    let (needs, message, address) = (r.bool(), r.string(), r.string());
+    let (needs, message, address, path) = (r.bool(), r.string(), r.string(), r.opt(Rd::string));
     r.done();
     assert!(needs);
+    assert_eq!(path.as_deref(), Some("m/84h/0h/0h/0/0"));
     let parsed = SignedSettings::from_bytes(&settings).unwrap();
     assert_eq!(message, wallet_message_for(&parsed.settings));
     let wallet = openbmt_core::pinned_wallet::PinnedWallet::from_bytes(&file).unwrap();
@@ -388,7 +390,7 @@ fn sl_77_shop_lightning_is_turned_off_for_a_shop_with_its_own_wallet_through_op_
 #[test]
 fn ap_14_a_redirect_without_the_signature_is_refused_by_op_246_and_stores_nothing() {
     let (dir, file, _) = paired(69);
-    let (settings, needs, _, _) = ask(&dir, &file, false).unwrap();
+    let (settings, needs, _, _, _) = ask(&dir, &file, false).unwrap();
     assert!(needs);
     assert_eq!(
         send(&dir, &file, &settings, T0 + 100).unwrap_err(),

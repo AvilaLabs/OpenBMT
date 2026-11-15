@@ -87,15 +87,16 @@ signature for every loosening change, unchanged.
 
 ## 3. Wallet message signature
 
-- **AP-06. The message.** The wallet signs this text, with `\n` at the end
-  of every line but the last, ASCII only:
+- **AP-06. The message.** The wallet signs this text, ASCII only, on one
+  line, with single spaces and no colon:
 
   ```
-  OpenBMT settings change
-  Shop settings version {version}
-  Lightning node {66 hex, or "none"}
-  Settings {64 hex settings_hash}
+  OpenBMT settings change, shop settings version {version}, Lightning node {66 hex, or "none"}, settings {64 hex settings_hash}
   ```
+
+  It is at most 215 characters. Some signers take a message of one line of
+  at most 240 characters, and some read a colon as part of the form a
+  message comes to them in, so the message is made to suit all of them.
 
 - **AP-07. Compact signatures.** A 65-byte signature, in base64, with a
   header from 27 to 34 (Electrum and legacy) or from 39 to 42 (BIP-137

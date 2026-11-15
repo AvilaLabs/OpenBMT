@@ -202,8 +202,8 @@ fn hex(bytes: &[u8]) -> String {
     s
 }
 
-/// The message the owner's wallet signs for a redirect (AP-06). Lines end
-/// with `\n`, the last one without; ASCII only.
+/// The message the owner's wallet signs for a redirect (AP-06): one line,
+/// single spaces, no colon, ASCII only, at most 215 characters.
 pub fn wallet_message(
     version: u32,
     lightning_node: Option<&[u8; LIGHTNING_NODE_BYTES]>,
@@ -211,7 +211,7 @@ pub fn wallet_message(
 ) -> String {
     let node = lightning_node.map_or_else(|| "none".to_string(), |n| hex(n));
     format!(
-        "OpenBMT settings change\nShop settings version {version}\nLightning node {node}\nSettings {}",
+        "OpenBMT settings change, shop settings version {version}, Lightning node {node}, settings {}",
         hex(settings_hash)
     )
 }
@@ -1069,7 +1069,7 @@ mod tests {
         assert_eq!(
             m,
             format!(
-                "OpenBMT settings change\nShop settings version {}\nLightning node {}\nSettings {}",
+                "OpenBMT settings change, shop settings version {}, Lightning node {}, settings {}",
                 s.version,
                 hex(&sl.node_id),
                 hex(&s.hash())
@@ -1077,10 +1077,10 @@ mod tests {
         );
         // Without the field the line is as before.
         let mut plain = base();
-        assert!(wallet_message_for(&plain).contains("Lightning node none\n"));
+        assert!(wallet_message_for(&plain).contains(", Lightning node none, "));
         plain.lightning_node = Some([2u8; LIGHTNING_NODE_BYTES]);
         assert!(
-            wallet_message_for(&plain).contains(&format!("Lightning node {}\n", "02".repeat(33)))
+            wallet_message_for(&plain).contains(&format!(", Lightning node {}, ", "02".repeat(33)))
         );
     }
 
@@ -1148,22 +1148,34 @@ mod tests {
         let node = [0x02u8; LIGHTNING_NODE_BYTES];
         let m = wallet_message(7, Some(&node), &h);
         let want = format!(
-            "OpenBMT settings change\nShop settings version 7\nLightning node {}\nSettings {}",
+            "OpenBMT settings change, shop settings version 7, Lightning node {}, settings {}",
             "02".repeat(33),
             "ab".repeat(32)
         );
         assert_eq!(m, want);
         assert!(m.is_ascii());
         assert!(!m.ends_with('\n'));
-        assert_eq!(m.lines().count(), 4);
+        assert_eq!(m.lines().count(), 1);
         let none = wallet_message(1, None, &[0u8; 32]);
         assert_eq!(
             none,
             format!(
-                "OpenBMT settings change\nShop settings version 1\nLightning node none\nSettings {}",
+                "OpenBMT settings change, shop settings version 1, Lightning node none, settings {}",
                 "0".repeat(64)
             )
         );
+    }
+
+    #[test]
+    fn ap_06_the_longest_wallet_message_is_215_characters_on_one_line_without_a_colon() {
+        let node = [0x03u8; LIGHTNING_NODE_BYTES];
+        let m = wallet_message(u32::MAX, Some(&node), &[0xffu8; 32]);
+        assert_eq!(m.len(), 215);
+        assert!(m.is_ascii());
+        assert!(!m.contains(':'));
+        assert!(!m.contains('\n'));
+        assert!(!m.contains("  "));
+        assert!(wallet_message(1, None, &[0u8; 32]).len() < 215);
     }
 
     #[test]

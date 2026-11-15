@@ -1056,6 +1056,8 @@ class OwnSettingsPreview(
     val needsWalletSig: Boolean,
     val message: String,
     val address: String,
+    /** The derivation of [address] from the wallet's key origin (`m/84h/0h/0h/0/0`), or null when the description gives none (OA-127). */
+    val path: String?,
 )
 
 /** What [OwnerOwn.settingsSend] did: the [version] of the change, and whether it [waits] for a counter's confirmation. */
@@ -1069,12 +1071,14 @@ class OwnShopLightningPreview(
     val needsWalletSig: Boolean,
     val message: String,
     val address: String,
+    /** The derivation of [address] from the wallet's key origin (`m/84h/0h/0h/0/0`), or null when the description gives none (OA-127). */
+    val path: String?,
 )
 
 internal fun Reader.ownShopLightningPreview(): OwnShopLightningPreview =
-    OwnShopLightningPreview(shopLightningPreview(), bool(), string(), string())
+    OwnShopLightningPreview(shopLightningPreview(), bool(), string(), string(), option { string() })
 
-internal fun Reader.ownSettingsPreview(): OwnSettingsPreview = OwnSettingsPreview(settingsPreview(), bool(), string(), string())
+internal fun Reader.ownSettingsPreview(): OwnSettingsPreview = OwnSettingsPreview(settingsPreview(), bool(), string(), string(), option { string() })
 
 /** Why Lightning is not offered, as the Lightning counter's report says it (LK-84, SL-41). */
 enum class NotOffered { Offered, SecondDeviceAway, ChainBehind, NoUsableChannel, ProviderSilent }
