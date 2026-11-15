@@ -433,7 +433,7 @@ pub enum AlertKind {
     /// The marks of the counter checks are not kept (OC-64); the value is 1
     /// when they are full and 0 when the file is unreadable. No counter.
     PaidNotKept,
-    /// A counter sent more than 20,000 records in a day (LK-80).
+    /// A counter sent more than 20,000 records in a day (LK-85).
     RecordsFlood,
 }
 

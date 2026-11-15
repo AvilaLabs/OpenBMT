@@ -511,7 +511,7 @@ fn oc_61_the_alert_of_a_held_counter_says_none_of_its_sales_are_checked() {
 }
 
 #[test]
-fn lk_80_the_alert_of_a_flood_of_records_says_what_it_is_and_the_owner_clears_it() {
+fn lk_85_the_alert_of_a_flood_of_records_says_what_it_is_and_the_owner_clears_it() {
     let w = crate::say::link_alert_words(&openbmt_owner_node::Alert::RecordsFlood {
         counter: counter(),
     });
@@ -524,7 +524,7 @@ fn lk_80_the_alert_of_a_flood_of_records_says_what_it_is_and_the_owner_clears_it
         w.next,
         "Check the counter. This phone still keeps its records, and the alert goes once it sends fewer."
     );
-    assert_eq!(w.code, Some("LK-80"));
+    assert_eq!(w.code, Some("LK-85"));
     // It reaches the view with its counter and words, and the owner clears it.
     let (rig, handle) = ready(false);
     let entry = rig.registry().entry_for_test(handle).expect("an entry");

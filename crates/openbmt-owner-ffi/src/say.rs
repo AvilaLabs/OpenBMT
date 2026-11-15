@@ -688,7 +688,7 @@ pub(crate) fn link_alert_words(alert: &openbmt_owner_node::Alert) -> Words {
             Who::Owner,
             "Check the counter. This phone still keeps its records, and the alert goes once it sends fewer.",
         )
-        .code("LK-80"),
+        .code("LK-85"),
         Alert::PaidNotKept { full: false } => Words::new(
             Tone::Stop,
             "Checks not kept",
