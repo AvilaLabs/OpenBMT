@@ -285,9 +285,10 @@ These are details the rules above leave open. None of them changes a rule.
   `invitation` (the invitation, its box nonce and the time it was entered),
   `roots`, `settings` (the signed settings in force), `link-inbox` and
   `link-outbox` (the message numbers of LK-40), `pos.token` (BX-41),
-  `pos-notices` and `pos-ledger` (the POS side, below), and the directory
-  `relay/` (the relay's member list and mailboxes). Every file is written
-  with mode 0600.
+  `pos-notices` and `pos-ledger` (the POS side, below), `till-key` (BX-71),
+  `till-seen` (the latest time of a till request taken, BX-80), and the
+  directory `relay/` (the relay's member list and mailboxes). Every file is
+  written with mode 0600.
 - **Welcome request.** The welcome and the first settings reach an unpaired
   Box over its relay connection as one request (`docs/LINK-RULES.md`,
   LK-27): the length of the welcome as 4 bytes little endian, the welcome,
@@ -672,18 +673,20 @@ code and checks the payment.
 - **BX-71.** The till key is 32 bytes from the system's randomness.
   `openbmt-box till-key <data dir>` (or `till-key` on the console of a Box
   that runs) makes one, prints it once as 64 lowercase hex with the words
-  `tillKeyMade`, and stores in `till-key` in the data directory, written
-  whole with mode 0600 (BX-50), the request key and the reply key made from
-  it (BX-80), never the key itself. A new key replaces the old one, which
-  stops working at the next request. Every request is signed as BX-80
-  says. The Box checks each request's mac under the request key in a copy
-  of the file it holds in memory, comparing in constant time. The copy is
-  replaced when the Box makes a key, and read again when another process has
-  replaced the file, so a new key works at the next request. A request with
-  a wrong mac never waits for the Box's state: only an accepted request
-  takes it. No key file, or a wrong mac, is a 401 with the words
-  `tillKeyWrong`. The Box never prints or logs the key or the keys made
-  from it.
+  `tillKeyMade`, and stores in `till-key` in the data directory, written whole
+  with mode 0600 (BX-50), the request key and the reply key made from it
+  (BX-80), never the key itself. The two are as good as the key for signing
+  requests and answers, so the file is left out of the Box's backups where the
+  host system allows it (BX-63), and a Box whose data directory may have been
+  copied needs a new key. A new key replaces the old one, which stops working
+  at the next request. Every request is signed as BX-80 says. The Box checks
+  each request's mac under the request key in a copy of the file it holds in
+  memory, comparing in constant time. The copy is replaced when the Box makes
+  a key, and read again when another process has replaced the file, so a new
+  key works at the next request. A request with a wrong mac never waits for
+  the Box's state: only an accepted request takes it. No key file, or a wrong
+  mac, is a 401 with the words `tillKeyWrong`. The Box never prints or logs
+  the key or the keys made from it.
 - **BX-72.** `POST /till/v1/sales` takes `Content-Type: application/json`
   and an object of strings: `counter`, `amount`, `currency`, `request` and
   `reference` (the last may be left out). `counter` is the first 4 bytes of a
@@ -783,23 +786,32 @@ Box reads the file at each request, so a key made while the Box runs works at
 once. The file holds a version byte, the request key and the reply key, each
 made as BIP340 tagged hashes are. A file in an earlier form, which holds only
 a hash of the key or a hash of a bearer token, gets `tillKeyOld` until a new
-key is made. The Box keeps the nonces of the last ten minutes in memory only,
-at most 8,192 of them; when they are full a request is refused 429 `tillFlood`
-until older ones have expired. A restart forgets them, so a request whose time
-is before the listener started is refused as `tillClock`: one recorded before
-a restart cannot be sent again after it. If the Box's clock goes back past
-that time, the earliest time taken goes back with it.
-The shop's currency is named by its three letters, `SAT` for Bitcoin Standard
-(CR-196). A sale counts as waiting from BX-72 until
-the counter's "opened" notice; at most 32 do, and at most 4,096 sales of any
-state are kept, so that a till that makes and cancels sales cannot grow the
-table without limit. An opened sale that nothing comes of for an hour counts as
-`unpaid`. A "paid" or "final" notice moves a sale that is `unpaid`, `expired`
-or `cancelled` to `paid` while the Box still keeps it, because the counter's
-word that it was paid is what the till needs most; a till that cancelled a
-sale and then reads `paid` has been paid. The numbers of the counters' notices
-are checked for the till against the last till notice taken from the counter,
-in memory, because the till works on a Box that reads no POS.
+key is made. The Box keeps the nonces of the last ten minutes and one second
+in memory only, at most 8,192 of them; when they are full a request is refused
+429 `tillFlood` until older ones have expired. A request's time may be up to
+five minutes either side of the Box's, so the same request can be taken at
+most ten minutes apart; its nonce is kept one second longer, so it is refused
+for its time before its nonce is forgotten. A restart forgets the nonces, so
+the Box also writes to `till-seen` the latest time of a request it took,
+before it answers; after a start it refuses as `tillClock` a request whose
+time is not later than the one in `till-seen`, so a request recorded before a
+restart cannot be sent again after it, whatever either clock said. A Box whose
+clock went back a long way refuses the till until the clocks agree again. A
+`till-seen` that does not read refuses every till request, with a note in the
+Box's notes. Making a new till key clears `till-seen`, after the new key is
+written, because no request signed with the old key is taken again, so a new
+key is also how a till refused for a `till-seen` that does not read works
+again. The shop's currency is named by its three letters, `SAT` for Bitcoin
+Standard (CR-196). A sale counts as waiting from BX-72 until the counter's
+"opened" notice; at most 32 do, and at most 4,096 sales of any state are kept,
+so that a till that makes and cancels sales cannot grow the table without
+limit. An opened sale that nothing comes of for an hour counts as `unpaid`. A
+"paid" or "final" notice moves a sale that is `unpaid`, `expired` or
+`cancelled` to `paid` while the Box still keeps it, because the counter's word
+that it was paid is what the till needs most; a till that cancelled a sale and
+then reads `paid` has been paid. The numbers of the counters' notices are
+checked for the till against the last till notice taken from the counter, in
+memory, because the till works on a Box that reads no POS.
 
 ## 5d. Shop Lightning's store
 

@@ -11,7 +11,7 @@
 //! that names the sale (BX-78), and the till closes its own order when it
 //! reads `paid` (BX-79).
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 
 use openbmt_core::hkdf::{hmac_sha256, sha256_of};
 use openbmt_core::identity::{tagged_hash, DeviceId};
@@ -46,8 +46,12 @@ pub const KEY_FILE_LEN: usize = 65;
 pub const KEY_FILE_LEN_V1: usize = 32;
 /// Seconds a request's time may differ from the Box's own (BX-80).
 pub const CLOCK_SECS: u64 = 300;
-/// Seconds the Box remembers a request's nonce (BX-80).
-pub const NONCE_SECS: u64 = 600;
+/// The file that holds the latest time of a request taken (BX-80).
+pub const TILL_SEEN_FILE: &str = "till-seen";
+/// Seconds the Box remembers a request's nonce (BX-80): a request's time may
+/// be [`CLOCK_SECS`] either side of the Box's, so the same request can be
+/// taken twice that apart, and its nonce outlives that by a second.
+pub const NONCE_SECS: u64 = 2 * CLOCK_SECS + 1;
 /// Most nonces the Box remembers at once (BX-80).
 pub const MAX_NONCES: usize = 8_192;
 /// Seconds a request waits for the cashier to press Start (BX-76).
@@ -220,8 +224,6 @@ pub enum NonceCheck {
 #[derive(Debug, Default)]
 pub struct NonceCache {
     seen: BTreeMap<[u8; 16], u64>,
-    /// The same nonces in the order they were taken, oldest first.
-    order: VecDeque<[u8; 16]>,
 }
 
 impl NonceCache {
@@ -253,9 +255,23 @@ impl NonceCache {
             return NonceCheck::Busy;
         }
         self.seen.insert(*nonce, now);
-        self.order.push_back(*nonce);
         NonceCheck::Fresh
     }
+}
+
+/// What `till-seen` holds, as the Box writes it (BX-80): the time as decimal
+/// ASCII.
+pub fn till_seen_file(time: u64) -> Vec<u8> {
+    time.to_string().into_bytes()
+}
+
+/// The time in the contents of `till-seen`, or `None` if they are not a
+/// decimal number of ASCII digits and nothing else (BX-80).
+pub fn read_till_seen(bytes: &[u8]) -> Option<u64> {
+    if bytes.is_empty() || bytes.len() > 20 || !bytes.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    std::str::from_utf8(bytes).ok()?.parse().ok()
 }
 
 /// The mac of an answer (BX-80): HMAC-SHA256 under the reply key of the
@@ -358,7 +374,8 @@ pub fn check_till_key(stored: Option<&[u8]>) -> KeyCheck {
 }
 
 /// BX-71, BX-80: make a till key from the system's randomness and store its
-/// request key and its reply key in `files`, replacing any earlier one.
+/// request key and its reply key in `files`, replacing any earlier one, and
+/// clear `till-seen`.
 /// Returns the key as 64 lowercase hex, the only place the key itself ever
 /// exists.
 pub fn make_till_key(files: &mut impl BoxFiles) -> Result<String, BoxError> {
@@ -371,6 +388,13 @@ pub fn make_till_key(files: &mut impl BoxFiles) -> Result<String, BoxError> {
             op: "write",
             kind: e.kind(),
         })?;
+    // No request signed with the old key is taken again, so the record of the
+    // latest time taken goes, after the new key is written (BX-80).
+    files.remove(TILL_SEEN_FILE).map_err(|e| BoxError::Io {
+        file: TILL_SEEN_FILE,
+        op: "remove",
+        kind: e.kind(),
+    })?;
     Ok(hex(&key))
 }
 

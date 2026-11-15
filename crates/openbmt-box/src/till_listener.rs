@@ -463,12 +463,17 @@ pub trait TillBackend: Send + Sync + 'static {
     fn now(&self) -> u64;
     /// Look at a request's nonce and, when it is fresh, remember it (BX-80).
     fn take_nonce(&self, nonce: &[u8; 16], now: u64) -> NonceCheck;
-    /// The earliest request time taken (BX-80): the Box's time when the
-    /// listener started, as the nonces taken before then are forgotten, or
-    /// `now` if the Box's clock has since gone back before it.
-    fn time_floor(&self, now: u64) -> u64 {
-        let _ = now;
-        0
+    /// The latest request time taken before the listener started (BX-80),
+    /// as the nonces taken before then are forgotten; `None` if the record
+    /// of it cannot be read. It does not change while the listener runs.
+    fn time_floor(&self) -> Option<u64> {
+        Some(0)
+    }
+    /// Keep `time`, the time of a request just taken, as the latest, before
+    /// the answer is sent (BX-80). An error refuses the request.
+    fn record_time(&self, time: u64) -> Result<(), TillRefusal> {
+        let _ = time;
+        Ok(())
     }
     /// BX-72: ask a counter for a sale.
     fn create(&self, body: CreateBody) -> Result<([u8; 16], SaleInfo), TillRefusal>;
@@ -618,7 +623,7 @@ fn create_body(fields: &BTreeMap<String, String>) -> Option<CreateBody> {
 
 /// What a request that passed the reader comes to against the till key, the
 /// clock and the nonces already taken, in the order of BX-80: the mac, then
-/// the time, then the nonce. The nonce is remembered only for a request whose
+/// the time window, then the floor, then the nonce. The nonce is remembered only for a request whose
 /// mac and time are right. The reply key signs the refusal when there is one.
 fn checked(backend: &dyn TillBackend, request: &Request) -> Result<[u8; 32], Vec<u8>> {
     let (request_key, reply_key) = match backend.keys() {
@@ -651,18 +656,23 @@ fn checked(backend: &dyn TillBackend, request: &Request) -> Result<[u8; 32], Vec
     if !time_is_near(&request.time, now) {
         return refuse(TillRefusal::Clock);
     }
-    // The nonces are kept in memory only, so a request made before the
-    // listener started could be one already taken: it is refused.
-    let floor = backend.time_floor(now);
-    if request.time.parse::<u64>().map_or(true, |t| t < floor) {
-        return refuse(TillRefusal::Clock);
+    // The nonces are kept in memory only, so a request not later than the
+    // latest one taken before the listener started could be one already
+    // taken: it is refused. A record that cannot be read refuses all.
+    let time = request.time.parse::<u64>().unwrap_or(0);
+    match backend.time_floor() {
+        Some(floor) if time > floor => {}
+        _ => return refuse(TillRefusal::Clock),
     }
     // The reader took the nonce as 32 lowercase hex.
     let Some(nonce) = unhex::<16>(&request.nonce) else {
         return refuse(TillRefusal::BadRequest);
     };
     match backend.take_nonce(&nonce, now) {
-        NonceCheck::Fresh => Ok(reply_key),
+        NonceCheck::Fresh => match backend.record_time(time) {
+            Ok(()) => Ok(reply_key),
+            Err(refusal) => refuse(refusal),
+        },
         NonceCheck::Replay => refuse(TillRefusal::Replay),
         NonceCheck::Busy => refuse(TillRefusal::Flood),
     }

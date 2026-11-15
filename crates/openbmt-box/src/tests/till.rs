@@ -26,10 +26,11 @@ use crate::say::{
 };
 use crate::till::{
     check_till_key, clean_reference, counter_code, find_counter, format_amount, hex, key_file,
-    make_till_key, parse_amount, reply_mac, request_id_ok, request_mac, request_mac_is_good,
-    till_reply_key, till_request_key, time_is_near, KeyCheck, NewSale, NonceCache, NonceCheck,
-    SaleInfo, SaleState, TillRefusal, TillTable, KEEP_SECS, KEY_FILE_LEN, KEY_FILE_VERSION,
-    MAX_NONCES, MAX_WAITING, OPEN_SECS, REQUEST_SECS, TILL_KEY_FILE,
+    make_till_key, parse_amount, read_till_seen, reply_mac, request_id_ok, request_mac,
+    request_mac_is_good, till_reply_key, till_request_key, till_seen_file, time_is_near, KeyCheck,
+    NewSale, NonceCache, NonceCheck, SaleInfo, SaleState, TillRefusal, TillTable, CLOCK_SECS,
+    KEEP_SECS, KEY_FILE_LEN, KEY_FILE_VERSION, MAX_NONCES, MAX_WAITING, NONCE_SECS, OPEN_SECS,
+    REQUEST_SECS, TILL_KEY_FILE,
 };
 use crate::till_listener::{
     parse_object, parse_request, refusal_response, reject_response, sale_body, CreateBody, Reject,
@@ -520,6 +521,28 @@ fn bx_80_a_time_is_near_when_it_is_within_five_minutes_either_way() {
 }
 
 #[test]
+fn bx_80_till_seen_is_decimal_ascii_and_nothing_else_reads() {
+    assert_eq!(
+        read_till_seen(&till_seen_file(1_700_000_000)),
+        Some(1_700_000_000)
+    );
+    assert_eq!(read_till_seen(b"0"), Some(0));
+    for bad in [
+        &b""[..],
+        b"abc",
+        b" 12",
+        b"12\n",
+        b"-1",
+        b"+1",
+        b"1.5",
+        b"99999999999999999999",
+        &[0u8, 0, 0, 0, 0, 0, 0, 0],
+    ] {
+        assert_eq!(read_till_seen(bad), None, "{bad:?}");
+    }
+}
+
+#[test]
 fn bx_80_the_nonce_cache_remembers_ten_minutes_and_holds_at_most_8192() {
     let mut cache = NonceCache::new();
     let n = |i: u32| {
@@ -530,8 +553,10 @@ fn bx_80_the_nonce_cache_remembers_ten_minutes_and_holds_at_most_8192() {
     assert_eq!(cache.take(&n(1), 100), NonceCheck::Fresh);
     assert_eq!(cache.take(&n(1), 100), NonceCheck::Replay);
     assert_eq!(cache.take(&n(1), 699), NonceCheck::Replay);
-    // Ten minutes after it was taken it is forgotten and may be taken again.
-    assert_eq!(cache.take(&n(1), 700), NonceCheck::Fresh);
+    // Ten minutes and a second after it was taken it is forgotten and may be
+    // taken again.
+    assert_eq!(cache.take(&n(1), 700), NonceCheck::Replay);
+    assert_eq!(cache.take(&n(1), 100 + NONCE_SECS), NonceCheck::Fresh);
     assert_eq!(cache.len(), 1);
     // The cache is bounded: when it is full, a fresh nonce is refused and
     // nothing is forgotten early.
@@ -545,8 +570,42 @@ fn bx_80_the_nonce_cache_remembers_ten_minutes_and_holds_at_most_8192() {
     // One that is in the cache is still a replay, not busy.
     assert_eq!(cache.take(&n(5), 1_001), NonceCheck::Replay);
     // When the older ones have expired there is room again.
-    assert_eq!(cache.take(&n(u32::MAX), 1_600), NonceCheck::Fresh);
+    assert_eq!(cache.take(&n(5), 1_600), NonceCheck::Replay);
+    assert_eq!(
+        cache.take(&n(u32::MAX), 1_000 + NONCE_SECS),
+        NonceCheck::Fresh
+    );
     assert_eq!(cache.len(), 1);
+}
+
+#[test]
+fn bx_80_a_nonce_outlives_the_time_window_and_the_cache_stays_bounded() {
+    // A request's time may be five minutes either side of the Box's, so one
+    // taken at the edge can be sent again ten minutes later and still be in
+    // the window: its nonce must be kept at least that long.
+    assert_eq!(NONCE_SECS, 2 * CLOCK_SECS + 1);
+    let n = |i: u32| {
+        let mut b = [0u8; 16];
+        b[..4].copy_from_slice(&i.to_be_bytes());
+        b
+    };
+    let mut cache = NonceCache::new();
+    assert_eq!(cache.take(&n(1), 0), NonceCheck::Fresh);
+    assert_eq!(cache.take(&n(1), 2 * CLOCK_SECS), NonceCheck::Replay);
+    // Many rounds of nonces that expire: the cache never holds more than
+    // the most.
+    let mut at = 0;
+    let mut next = 10;
+    for _ in 0..20 {
+        for _ in 0..512 {
+            assert_eq!(cache.take(&n(next), at), NonceCheck::Fresh);
+            next += 1;
+            assert!(cache.len() <= MAX_NONCES);
+        }
+        at += NONCE_SECS;
+        assert!(cache.len() <= MAX_NONCES);
+    }
+    assert!(cache.len() <= MAX_NONCES);
 }
 
 #[test]
@@ -2261,6 +2320,8 @@ fn bx_76_a_restart_forgets_the_sales_and_the_till_is_told_so() {
     );
     let sale = field(&body, "sale");
     r.stop();
+    // The first request's time is kept in till-seen, so the next is later.
+    clock.advance(1);
     // The same data directory, the Box started again: the key still works,
     // the sale is gone.
     let mut r = start_in(&dir, &clock).unwrap();
@@ -3138,9 +3199,6 @@ fn bx_80_a_request_changed_in_its_body_path_nonce_or_time_is_refused() {
 fn bx_80_a_time_more_than_five_minutes_from_the_box_is_refused() {
     let t = till_box("tillclock");
     let path = format!("/till/v1/sales/{SALE}");
-    // The listener has run five minutes, so that a time five minutes back is
-    // not before it started.
-    t.clock.advance(300);
     let now = test_now();
     let at = |time: u64| {
         let nonce = fresh_nonce();
@@ -3171,45 +3229,202 @@ fn bx_80_a_time_more_than_five_minutes_from_the_box_is_refused() {
     assert_eq!((answer.0, error_of(&answer.1).as_str()), (401, "tillClock"));
 }
 
-#[test]
-fn bx_80_a_request_made_before_the_listener_started_is_refused() {
-    let mut t = till_box("tillstart");
-    let path = format!("/till/v1/sales/{SALE}");
-    // One second before the listener started, though within five minutes.
-    let early = request_text_at(
-        "GET",
-        &path,
-        Some(&t.key),
-        Some(&fresh_nonce()),
-        None,
-        test_now() - 1,
-    );
-    let answer = http_mac(t.addr, &early);
-    assert_eq!((answer.0, error_of(&answer.1).as_str()), (401, "tillClock"));
-    // A request recorded and taken, then sent again after the listener
-    // started again with no nonces, is refused.
-    let recorded = request_text("GET", &path, Some(&t.key), Some(&fresh_nonce()), None);
-    assert_eq!(http_mac(t.addr, &recorded).0, 404);
-    t.clock.advance(60);
+/// The Box's listener started again on the same data directory, which reads
+/// `till-seen` afresh and has no nonces.
+fn restart_listener(t: &mut Till) {
     t.addr =
         t.r.serve_till("127.0.0.1:0".parse().unwrap(), TillConfig::default())
             .unwrap();
-    let again = http_mac(t.addr, &recorded);
-    assert_eq!((again.0, error_of(&again.1).as_str()), (401, "tillClock"));
-    // A request made now is taken.
-    let fresh = request_text("GET", &path, Some(&t.key), Some(&fresh_nonce()), None);
-    assert_eq!(http_mac(t.addr, &fresh).0, 404);
+}
+
+fn get_at(t: &Till, time: u64) -> (String, (u16, String, Option<String>)) {
+    let path = format!("/till/v1/sales/{SALE}");
+    let raw = request_text_at("GET", &path, Some(&t.key), Some(&fresh_nonce()), None, time);
+    (raw.clone(), http_mac(t.addr, &raw))
+}
+
+fn clock_refused(answer: &(u16, String, Option<String>)) -> bool {
+    (answer.0, error_of(&answer.1).as_str()) == (401, "tillClock")
 }
 
 #[test]
-fn bx_80_the_floor_goes_down_with_a_clock_that_went_back() {
-    let t = till_box("tillback");
+fn bx_80_a_request_taken_is_refused_after_a_restart_at_a_later_or_earlier_clock() {
+    for (name, later) in [("tillseenlater", true), ("tillseenearlier", false)] {
+        let mut t = till_box(name);
+        let start = test_now();
+        let (recorded, answer) = get_at(&t, start);
+        assert_eq!(answer.0, 404);
+        if later {
+            t.clock.advance(100);
+        } else {
+            t.clock.back(100);
+        }
+        restart_listener(&mut t);
+        let again = http_mac(t.addr, &recorded);
+        assert!(clock_refused(&again), "{name}: {again:?}");
+        // Nor is a time that is no later than the recorded one taken.
+        let (_, older) = get_at(&t, start - 1);
+        assert!(clock_refused(&older), "{name}");
+        // A new request after it is taken.
+        t.clock.advance(if later { 0 } else { 101 });
+        let (_, newer) = get_at(&t, test_now());
+        assert_eq!(newer.0, 404, "{name}");
+    }
+}
+
+#[test]
+fn bx_80_a_till_clock_ahead_and_a_restart_within_that_time_let_nothing_recorded_through() {
+    let mut t = till_box("tillseenahead");
+    // The till's clock is 299 seconds ahead of the Box's.
+    let ahead = test_now() + 299;
+    let (recorded, answer) = get_at(&t, ahead);
+    assert_eq!(answer.0, 404);
+    t.clock.advance(60);
+    restart_listener(&mut t);
+    let again = http_mac(t.addr, &recorded);
+    assert!(clock_refused(&again), "{again:?}");
+    // A request later than the recorded one is taken.
+    let (_, newer) = get_at(&t, ahead + 1);
+    assert_eq!(newer.0, 404);
+}
+
+#[test]
+fn bx_80_till_seen_holds_the_latest_time_taken_in_a_file_of_mode_0600() {
+    let t = till_box("tillseenmax");
+    let file = t._dir.path().join("till-seen");
+    assert!(!file.exists());
+    let now = test_now();
+    // Taken out of order: the later time is kept.
+    assert_eq!(get_at(&t, now + 5).1 .0, 404);
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        (now + 5).to_string().into_bytes()
+    );
+    assert_eq!(get_at(&t, now + 2).1 .0, 404);
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        (now + 5).to_string().into_bytes()
+    );
+    assert_eq!(get_at(&t, now + 7).1 .0, 404);
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        (now + 7).to_string().into_bytes()
+    );
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(
+        std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    // A refused request records nothing.
+    assert!(clock_refused(&get_at(&t, now + 10_000).1));
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        (now + 7).to_string().into_bytes()
+    );
+}
+
+#[test]
+fn bx_80_a_till_seen_that_does_not_read_refuses_every_request_with_the_clock_words() {
+    let mut t = till_box("tillseenbad");
+    for bytes in [&b"abc"[..], b"", b"12 ", &[1u8, 0, 0, 0, 0, 0, 0, 0]] {
+        std::fs::write(t._dir.path().join("till-seen"), bytes).unwrap();
+        restart_listener(&mut t);
+        let (_, answer) = get_at(&t, test_now());
+        assert!(clock_refused(&answer), "{bytes:?}: {answer:?}");
+        assert!(answer.2.is_some(), "the refusal is signed");
+    }
+    // Put right, it is read again at the next start.
+    std::fs::write(t._dir.path().join("till-seen"), b"5").unwrap();
+    restart_listener(&mut t);
+    assert_eq!(get_at(&t, test_now()).1 .0, 404);
+}
+
+/// A request signed with `key`, as `get_at` sends one.
+fn get_with(t: &Till, key: &str, time: u64) -> (u16, String, Option<String>) {
     let path = format!("/till/v1/sales/{SALE}");
-    // The Box's clock is put back an hour after the listener started: a
-    // request at the new time is still taken.
-    t.clock.back(3_600);
-    let raw = request_text("GET", &path, Some(&t.key), Some(&fresh_nonce()), None);
-    assert_eq!(http_mac(t.addr, &raw).0, 404);
+    let raw = request_text_at("GET", &path, Some(key), Some(&fresh_nonce()), None, time);
+    http_mac(t.addr, &raw)
+}
+
+#[test]
+fn bx_80_a_new_key_made_in_the_box_clears_a_till_seen_that_does_not_read() {
+    let mut t = till_box("tillseenkey1");
+    let file = t._dir.path().join("till-seen");
+    std::fs::write(&file, b"abc").unwrap();
+    restart_listener(&mut t);
+    let old = t.key.clone();
+    assert!(clock_refused(&get_with(&t, &old, test_now())));
+    // A new key made in the running Box: the Box works with it, no restart.
+    t.key = t.r.make_till_key().unwrap();
+    assert!(!file.exists(), "till-seen is gone with the old key");
+    assert_eq!(get_with(&t, &t.key, test_now()).0, 404);
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        test_now().to_string().into_bytes()
+    );
+    // The old key is refused for its mac, not let through by the reset.
+    let wrong = get_with(&t, &old, test_now() + 1);
+    assert_eq!(
+        (wrong.0, error_of(&wrong.1).as_str()),
+        (401, "tillKeyWrong")
+    );
+}
+
+#[test]
+fn bx_80_a_key_made_by_another_process_clears_a_till_seen_that_does_not_read() {
+    let mut t = till_box("tillseenkey2");
+    let file = t._dir.path().join("till-seen");
+    std::fs::write(&file, b"abc").unwrap();
+    restart_listener(&mut t);
+    let old = t.key.clone();
+    assert!(clock_refused(&get_with(&t, &old, test_now())));
+    t.key = make_till_key(&mut DirFiles::new(t._dir.path())).unwrap();
+    assert!(!file.exists());
+    assert_eq!(get_with(&t, &t.key, test_now()).0, 404);
+    let wrong = get_with(&t, &old, test_now() + 1);
+    assert_eq!(
+        (wrong.0, error_of(&wrong.1).as_str()),
+        (401, "tillKeyWrong")
+    );
+    // The request taken under the new key is recorded again.
+    assert!(file.exists());
+}
+
+#[test]
+fn bx_80_a_restart_after_a_new_key_takes_a_fresh_request_and_till_seen_returns() {
+    let mut t = till_box("tillseenkey3");
+    let file = t._dir.path().join("till-seen");
+    let start = test_now();
+    assert_eq!(get_with(&t, &t.key, start + 50).0, 404);
+    assert!(file.exists());
+    t.key = t.r.make_till_key().unwrap();
+    assert!(!file.exists());
+    // A time earlier than the one the old key's record held is taken.
+    assert_eq!(get_with(&t, &t.key, start).0, 404);
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        start.to_string().into_bytes()
+    );
+    // Another new key, then a restart: a fresh request is taken.
+    t.key = t.r.make_till_key().unwrap();
+    assert!(!file.exists());
+    restart_listener(&mut t);
+    assert_eq!(get_with(&t, &t.key, start + 1).0, 404);
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        (start + 1).to_string().into_bytes()
+    );
+}
+
+#[test]
+fn bx_80_a_till_seen_that_cannot_be_written_refuses_the_request_with_a_fault() {
+    let t = till_box("tillseenwrite");
+    // A directory where the temporary file would go stops the write.
+    std::fs::create_dir(t._dir.path().join("till-seen.tmp")).unwrap();
+    let (_, answer) = get_at(&t, test_now());
+    assert_eq!(answer.0, 500, "{answer:?}");
+    assert_eq!(error_of(&answer.1), "tillFault");
+    assert!(!t._dir.path().join("till-seen").exists());
 }
 
 #[test]
@@ -3235,8 +3450,8 @@ fn bx_80_a_nonce_is_used_up_only_by_a_request_whose_mac_and_time_are_right() {
     assert_eq!(http_mac(t.addr, &good).0, 404);
     let again = http_mac(t.addr, &good);
     assert_eq!((again.0, error_of(&again.1).as_str()), (401, "tillReplay"));
-    // A nonce is free again ten minutes after it was taken.
-    t.clock.advance(599);
+    // A nonce is free again ten minutes and a second after it was taken.
+    t.clock.advance(600);
     let fresh = request_text("GET", &path, Some(&t.key), Some(&nonce), None);
     assert_eq!(error_of(&http_mac(t.addr, &fresh).1), "tillReplay");
     t.clock.advance(1);
@@ -3326,7 +3541,7 @@ fn bx_80_a_full_nonce_cache_is_a_429_until_older_nonces_have_expired() {
     assert_eq!(error_of(&one(&held).1), "tillReplay");
     // The refused nonce was not taken; when the held ones have expired the
     // same request goes through.
-    t.clock.advance(600);
+    t.clock.advance(NONCE_SECS);
     assert_eq!(one(&nonce).0, 401, "its time is now ten minutes old");
     let nonce = fresh_nonce();
     let raw = request_text("GET", &path, Some(&t.key), Some(&nonce), None);

@@ -31,7 +31,7 @@ use std::fs;
 use std::io;
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -57,8 +57,9 @@ use crate::say::note_words;
 use crate::state::{BoxCore, BoxError, BoxStatus};
 use crate::status_page::{Entered, PageBackend, PageConfig, PageView, SetupCode, StatusPage};
 use crate::till::{
-    check_till_key, clean_reference, find_counter, make_till_key, parse_amount, KeyCheck, NewSale,
-    NonceCache, NonceCheck, SaleInfo, TillRefusal, TillTable, TILL_KEY_FILE,
+    check_till_key, clean_reference, find_counter, make_till_key, parse_amount, read_till_seen,
+    till_seen_file, KeyCheck, NewSale, NonceCache, NonceCheck, SaleInfo, TillRefusal, TillTable,
+    TILL_KEY_FILE, TILL_SEEN_FILE,
 };
 use crate::till_listener::{CreateBody, TillBackend, TillConfig, TillListener};
 use crate::vendor::{VendorConnector, VENDOR_POLL_SECS};
@@ -378,6 +379,24 @@ impl PageBackend for PageHandles {
 struct TillKey {
     path: PathBuf,
     held: Mutex<HeldKey>,
+    /// The record of the latest time taken, which a new key clears.
+    taken: Mutex<TakenTimes>,
+}
+
+/// What the listener holds of `till-seen` (BX-80).
+struct TakenTimes {
+    /// The latest request time taken before the listener started, or `None`
+    /// if `till-seen` could not be read.
+    floor: Option<u64>,
+    /// The time `till-seen` holds; the lock keeps writes in step.
+    recorded: u64,
+}
+
+impl TakenTimes {
+    const CLEAR: Self = Self {
+        floor: Some(0),
+        recorded: 0,
+    };
 }
 
 struct HeldKey {
@@ -393,6 +412,7 @@ impl TillKey {
                 seen: None,
                 bytes: None,
             }),
+            taken: Mutex::new(TakenTimes::CLEAR),
         };
         key.reload();
         key
@@ -415,6 +435,7 @@ impl TillKey {
         let mut held = lock(&self.held);
         held.seen = self.seen();
         held.bytes = std::fs::read(&self.path).ok();
+        *lock(&self.taken) = TakenTimes::CLEAR;
     }
 
     fn check(&self) -> KeyCheck {
@@ -423,6 +444,8 @@ impl TillKey {
         if seen != held.seen {
             held.seen = seen;
             held.bytes = std::fs::read(&self.path).ok();
+            // A new key was made: what `till-seen` held is cleared with it.
+            *lock(&self.taken) = TakenTimes::CLEAR;
         }
         check_till_key(held.bytes.as_deref())
     }
@@ -437,8 +460,8 @@ struct TillHandles {
     clock: Arc<dyn Clock + Send + Sync>,
     table: Till,
     nonces: Mutex<NonceCache>,
-    /// The Box's time when the listener started (BX-80).
-    started: AtomicU64,
+    /// The data directory, where `till-seen` is kept (BX-80).
+    dir: PathBuf,
 }
 
 impl TillHandles {
@@ -470,8 +493,20 @@ impl TillBackend for TillHandles {
         lock(&self.nonces).take(nonce, now)
     }
 
-    fn time_floor(&self, now: u64) -> u64 {
-        self.started.fetch_min(now, Ordering::SeqCst).min(now)
+    fn time_floor(&self) -> Option<u64> {
+        lock(&self.key.taken).floor
+    }
+
+    fn record_time(&self, time: u64) -> Result<(), TillRefusal> {
+        let mut taken = lock(&self.key.taken);
+        if time <= taken.recorded {
+            return Ok(());
+        }
+        DirFiles::new(&self.dir)
+            .write(TILL_SEEN_FILE, &till_seen_file(time))
+            .map_err(|_| TillRefusal::Fault)?;
+        taken.recorded = time;
+        Ok(())
     }
 
     fn create(&self, body: CreateBody) -> Result<([u8; 16], SaleInfo), TillRefusal> {
@@ -820,6 +855,7 @@ pub struct BoxRunner {
     view: View,
     till: Till,
     till_key: Arc<TillKey>,
+    dir: PathBuf,
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
     server: Option<Server>,
@@ -1051,6 +1087,7 @@ impl BoxRunner {
             view,
             till,
             till_key: Arc::new(TillKey::load(&dir)),
+            dir: dir.clone(),
             stop,
             worker: Some(handle),
             server: Some(server),
@@ -1146,14 +1183,38 @@ impl BoxRunner {
         cfg: TillConfig,
     ) -> Result<SocketAddr, StartFailure> {
         let listener = TcpListener::bind(bind).map_err(StartFailure::Listen)?;
+        let floor = match std::fs::read(self.dir.join(TILL_SEEN_FILE)) {
+            Ok(bytes) => {
+                let floor = read_till_seen(&bytes);
+                if floor.is_none() {
+                    note(
+                        &self.notes,
+                        "BX-80: till-seen does not read, so every till request is refused".into(),
+                    );
+                }
+                floor
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(0),
+            Err(e) => {
+                note(
+                    &self.notes,
+                    format!("BX-80: till-seen could not be read ({e}), so every till request is refused"),
+                );
+                None
+            }
+        };
         let backend = Arc::new(TillHandles {
             core: Arc::clone(&self.core),
             key: Arc::clone(&self.till_key),
             clock: Arc::clone(&self.clock),
             table: Arc::clone(&self.till),
             nonces: Mutex::new(NonceCache::new()),
-            started: AtomicU64::new(self.clock.now()),
+            dir: self.dir.clone(),
         });
+        *lock(&self.till_key.taken) = TakenTimes {
+            floor,
+            recorded: floor.unwrap_or(0),
+        };
         let till = TillListener::start(listener, backend, cfg).map_err(StartFailure::Listen)?;
         let addr = till.local_addr();
         self.till_listener = Some(till);
