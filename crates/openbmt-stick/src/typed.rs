@@ -49,3 +49,20 @@ pub fn check_words(words: &[&str]) -> Result<[u8; ENTROPY_BYTES], TypedError> {
     out.copy_from_slice(&m.to_entropy());
     Ok(out)
 }
+
+/// SK-62: the most words a key has.
+pub const MAX_PHRASE_WORDS: usize = 24;
+
+/// SK-62: whether `words` are 12 or 24 words of the list whose BIP39
+/// checksum matches.
+pub fn check_phrase(words: &[&str]) -> Result<(), TypedError> {
+    if words.len() != WORD_COUNT && words.len() != MAX_PHRASE_WORDS {
+        return Err(TypedError::Count);
+    }
+    bip39::Mnemonic::parse_normalized(&words.join(" "))
+        .map(|_| ())
+        .map_err(|e| match e {
+            bip39::Error::InvalidChecksum => TypedError::BadChecksum,
+            _ => TypedError::BadWord,
+        })
+}

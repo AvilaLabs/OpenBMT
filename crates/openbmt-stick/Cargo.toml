@@ -23,7 +23,7 @@ openbmt-core = { path = "../openbmt-core" }
 openbmt-qr = { path = "../openbmt-qr" }
 openbmt-ur = { path = "../openbmt-ur" }
 openbmt-bbqr = { path = "../openbmt-bbqr" }
-bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std", "secp-recovery"] }
 bip39 = { version = "=2.2.2", default-features = false, features = ["alloc"] }
 libc = "=0.2.191"
 

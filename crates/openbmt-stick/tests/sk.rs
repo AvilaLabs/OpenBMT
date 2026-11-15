@@ -10,7 +10,9 @@ use openbmt_qr::{decode_luma, Ecc};
 use openbmt_stick::app::{App, Chance, Facts, Outcome};
 use openbmt_stick::check::{answer_matches, pick_positions};
 use openbmt_stick::draw::{pack, render, text_scale, wrap, write_row, Channel, PixelFormat};
-use openbmt_stick::keys::{key_from_code, key_from_event, Key, EVENT_SIZE};
+use openbmt_stick::keys::{
+    key_from_code, key_from_code_shift, key_from_event, Decoder, Key, EVENT_SIZE, SHIFT_CODES,
+};
 use openbmt_stick::mix::{dice_alone, dice_values, mix, MixError};
 use openbmt_stick::modlist::{check_camera_list, check_list, CAMERA_ALLOWED, FORBIDDEN};
 use openbmt_stick::mounts::{MOUNTS, NEVER};
@@ -747,6 +749,7 @@ fn sk_15_every_word_is_distinct_and_some_screen_shows_each() {
         .lines()
         .filter(|l| l.starts_with("pub const ") && !l.starts_with("pub const ALL"))
     {
+        // A line the rules owner still has to write is a placeholder.
         assert!(line.starts_with("pub const SK_"), "{line}");
     }
 }
@@ -878,7 +881,9 @@ fn sk_14_the_keys_come_from_input_events() {
     assert_eq!(key_from_code(31), Some(Key::Char('s')));
     assert_eq!(key_from_code(50), Some(Key::Char('m')));
     assert_eq!(key_from_code(79), Some(Key::Char('1')));
-    assert_eq!(key_from_code(57), None);
+    assert_eq!(key_from_code(57), Some(Key::Char(' ')));
+    assert_eq!(key_from_code(13), Some(Key::Char('=')));
+    assert_eq!(key_from_code(78), Some(Key::Char('+')));
     // All 26 letters are reachable.
     let letters: std::collections::BTreeSet<char> = (0..256u16)
         .filter_map(key_from_code)
@@ -898,6 +903,77 @@ fn sk_14_the_keys_come_from_input_events() {
     assert_eq!(key_from_event(&ev(1, 28, 0)), None);
     assert_eq!(key_from_event(&ev(1, 28, 2)), None);
     assert_eq!(key_from_event(&ev(4, 28, 1)), None);
+}
+
+/// One raw input event.
+fn raw_event(kind: u16, code: u16, value: i32) -> [u8; EVENT_SIZE] {
+    let mut raw = [0u8; EVENT_SIZE];
+    raw[16..18].copy_from_slice(&kind.to_ne_bytes());
+    raw[18..20].copy_from_slice(&code.to_ne_bytes());
+    raw[20..24].copy_from_slice(&value.to_ne_bytes());
+    raw
+}
+
+#[test]
+fn sk_62_every_printable_ascii_character_is_reachable_with_or_without_shift() {
+    let mut reach = std::collections::BTreeMap::new();
+    for code in 0..256u16 {
+        for shift in [false, true] {
+            if let Some(Key::Char(c)) = key_from_code_shift(code, shift) {
+                reach.entry(c).or_insert((code, shift));
+            }
+        }
+    }
+    for c in ' '..='~' {
+        assert!(reach.contains_key(&c), "{c:?} cannot be typed");
+    }
+    // The pairs of a US keyboard.
+    let pairs = [
+        (2, '1', '!'),
+        (3, '2', '@'),
+        (4, '3', '#'),
+        (5, '4', '$'),
+        (6, '5', '%'),
+        (7, '6', '^'),
+        (8, '7', '&'),
+        (9, '8', '*'),
+        (10, '9', '('),
+        (11, '0', ')'),
+        (12, '-', '_'),
+        (13, '=', '+'),
+        (26, '[', '{'),
+        (27, ']', '}'),
+        (39, ';', ':'),
+        (40, '\'', '"'),
+        (41, '`', '~'),
+        (43, '\\', '|'),
+        (51, ',', '<'),
+        (52, '.', '>'),
+        (53, '/', '?'),
+        (57, ' ', ' '),
+        (16, 'q', 'Q'),
+        (30, 'a', 'A'),
+        (50, 'm', 'M'),
+    ];
+    for (code, plain, upper) in pairs {
+        assert_eq!(key_from_code_shift(code, false), Some(Key::Char(plain)));
+        assert_eq!(key_from_code_shift(code, true), Some(Key::Char(upper)));
+    }
+    // Shift's own codes are no key; a held Shift changes the next keys only.
+    let mut d = Decoder::new();
+    assert_eq!(d.event(&raw_event(1, SHIFT_CODES[0], 1)), None);
+    assert_eq!(d.event(&raw_event(1, 20, 1)), Some(Key::Char('T')));
+    assert_eq!(d.event(&raw_event(1, 20, 0)), None);
+    assert_eq!(d.event(&raw_event(1, SHIFT_CODES[0], 0)), None);
+    assert_eq!(d.event(&raw_event(1, 20, 1)), Some(Key::Char('t')));
+    // The right Shift too; a repeat gives nothing.
+    assert_eq!(d.event(&raw_event(1, SHIFT_CODES[1], 1)), None);
+    assert_eq!(d.event(&raw_event(1, 2, 1)), Some(Key::Char('!')));
+    assert_eq!(d.event(&raw_event(1, 2, 2)), None);
+    assert_eq!(d.event(&raw_event(1, SHIFT_CODES[1], 0)), None);
+    assert_eq!(d.event(&raw_event(1, 2, 1)), Some(Key::Char('1')));
+    // Word entry's keys are unchanged: lower-case letters and digits.
+    assert_eq!(key_from_event(&raw_event(1, 20, 1)), Some(Key::Char('t')));
 }
 
 #[test]

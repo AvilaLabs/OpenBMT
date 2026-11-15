@@ -12,6 +12,13 @@
 //!       under the own-spend finishing (`openbmt_spend::take_wallet_signature`
 //!       and `finalize`, which `openbmt-owner`'s `take_own` calls), and the
 //!       file otherwise unchanged
+//!   payment message-make <dir>
+//!       writes `message.code` (a settings change as the owner phone shows
+//!       it, for the account 3 key of the test words with a passphrase) and
+//!       prints what the stick must show, worked out here from the core
+//!   payment message-verify <dir> <signature> <matrix>
+//!       checks the signature with the core's check of AP-07 and that the
+//!       stick's code holds the same text
 
 #[path = "../tests/common/mod.rs"]
 mod common;
@@ -51,6 +58,28 @@ fn luma_of(rows: &[&str]) -> (usize, usize, Vec<u8>) {
         }
     }
     (side, side, out)
+}
+
+const MESSAGE_PATH: &str = "m/84h/0h/3h/0/0";
+const MESSAGE_VERSION: u32 = 12;
+const PASSPHRASE: &str = "TREZOR 1!";
+
+/// The address the stick must sign for and the message, worked out with the
+/// core: the test words and the passphrase, the key at `MESSAGE_PATH`.
+fn settings_change() -> (String, String) {
+    use std::str::FromStr;
+    let m = bip39::Mnemonic::parse_normalized(&common::WORDS.join(" ")).expect("words");
+    let seed = m.to_seed_normalized(PASSPHRASE);
+    let master =
+        bitcoin::bip32::Xpriv::new_master(bitcoin::NetworkKind::Main, &seed).expect("master");
+    let secp = bitcoin::secp256k1::Secp256k1::new();
+    let path = bitcoin::bip32::DerivationPath::from_str(MESSAGE_PATH).expect("path");
+    let key = master.derive_priv(&secp, &path).expect("key");
+    let pk = bitcoin::CompressedPublicKey(key.private_key.public_key(&secp));
+    let address = bitcoin::Address::p2wpkh(&pk, bitcoin::Network::Bitcoin);
+    let message =
+        openbmt_core::approval::wallet_message(MESSAGE_VERSION, Some(&[3u8; 33]), &[0xcd; 32]);
+    (address.to_string(), message)
 }
 
 fn main() -> ExitCode {
@@ -151,6 +180,44 @@ fn main() -> ExitCode {
                 println!("FAIL the file changed in more than its signatures");
                 return ExitCode::FAILURE;
             }
+            println!("OK");
+            ExitCode::SUCCESS
+        }
+        Some("message-make") => {
+            let dir = &args[1];
+            let (address, message) = settings_change();
+            let code = format!("signmessage {MESSAGE_PATH} ascii:{message}");
+            fs::write(format!("{dir}/message.code"), code + "\n").expect("write");
+            println!("passphrase {PASSPHRASE}");
+            println!("address {address}");
+            println!("version {MESSAGE_VERSION}");
+            println!("node {}", "03".repeat(33));
+            println!("hash {}", ["cdcd"; 16].join(" "));
+            ExitCode::SUCCESS
+        }
+        Some("message-verify") => {
+            let sig = &args[2];
+            let (address, message) = settings_change();
+            let address: bitcoin::Address = address
+                .parse::<bitcoin::Address<bitcoin::address::NetworkUnchecked>>()
+                .expect("address")
+                .assume_checked();
+            if let Err(e) = openbmt_core::approval::verify_wallet_message(&address, &message, sig) {
+                println!("FAIL the signature: {e}");
+                return ExitCode::FAILURE;
+            }
+            let text = fs::read_to_string(&args[3]).expect("matrix");
+            let rows: Vec<&str> = text.lines().map(str::trim).collect();
+            let (w, h, luma) = luma_of(&rows);
+            let Ok(d) = decode_luma(w, h, &luma) else {
+                println!("FAIL the signature's code does not decode");
+                return ExitCode::FAILURE;
+            };
+            if d.bytes != sig.as_bytes() {
+                println!("FAIL the code holds another text than the signature");
+                return ExitCode::FAILURE;
+            }
+            println!("signature of {address} verifies with the core (AP-07); the code holds the same text");
             println!("OK");
             ExitCode::SUCCESS
         }

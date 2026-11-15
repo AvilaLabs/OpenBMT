@@ -87,7 +87,9 @@ funds.**
   no file outside memory. When the owner is done it turns the computer off,
   and the words are gone with the memory.
 - **SK-14. The screen and the keys.** It draws on the frame buffer the
-  firmware or the kernel's display driver gives, in large text, and reads
+  firmware or the kernel's display driver gives, in large text (smaller only
+  on a screen whose lines would not all fit, so no line is ever left off a
+  small display), and reads
   the keyboard through the kernel's input events. No mouse is needed.
 - **SK-15. The words of every screen** are the constants of
   `crates/openbmt-stick/src/words.rs`, each distinct and each shown by some
@@ -239,6 +241,40 @@ funds.**
   `serial-echo`, no release contains. The signed PSBT is checked against
   `crates/openbmt-owner`'s own-spend finishing. A real camera on a real PC
   is tested by hand.
+
+## 9. Sign a settings change
+
+- **SK-60. A message, in the same mode.** In the mode of SK-50 the code
+  read may also be a settings change to sign: the text
+  `signmessage {path} ascii:{message}` that the owner phone shows
+  (`docs/APPROVAL-RULES.md` AP-18, `docs/OWNER-APP-RULES.md` OA-127). It is
+  for a key kept on a signer that cannot sign that message itself (AP-19).
+- **SK-61. Only a settings change.** The message must be exactly the text of
+  AP-06, with its numbers in their forms; any other message is refused, so
+  the stick signs nothing but a change of the shop's settings. The path
+  must be `m/84h/0h/{N}h/0/0` (a single-key wallet) or
+  `m/48h/0h/{N}h/2h/0/0` (a cosigner of the 2-of-3 wallet), with N from 0 to
+  2^31-1; any other path is refused.
+- **SK-62. The words.** The owner types the words of that key, 12 or 24,
+  with their BIP39 checksum checked, then its passphrase if it has one. A
+  passphrase may hold any printable ASCII character, space included, typed
+  as on a US keyboard with Shift for capitals and the upper signs; the
+  screen shows a star for each character.
+- **SK-63. What is shown before signing.** The settings version, the
+  Lightning node, or that there is none, and the settings hash in groups of
+  four characters, then the address the signature is for, derived by the
+  program from these words at that path, for the owner to compare with the
+  owner phone's card of that key. Enter signs, Esc refuses and nothing is
+  signed.
+- **SK-64. What comes out.** The signature of AP-07, with a header from 39
+  to 42, in base64, as a QR code and as text, for the owner phone to scan or
+  take as typed. "Turn off" then clears the words, the passphrase and the
+  message, as SK-29.
+- **SK-65. Tested.** Unit tests: each refusal of SK-61; the address for
+  known words at both paths, equal to the core's address for the same key
+  (AP-16); the signature verifies with the core's check of AP-07 for that
+  address and message. In QEMU: a whole run signs a message fed through
+  `serial-frames`, checked by the core.
 
 ## 7. Tests
 

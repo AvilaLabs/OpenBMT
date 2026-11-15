@@ -219,6 +219,51 @@ pub const SK_56_SHOW: &str = "Signed. Scan this with the owner phone to send it.
 /// The label before the part shown out of the parts (SK-56).
 pub const SK_56_PART: &str = "Part";
 
+// SK-60 to SK-65: signing a settings change.
+
+/// On the refusal screen: the code is not a change of the shop's settings,
+/// so it is not signed (SK-61).
+pub const SK_61_REFUSED: &str =
+    "This code is not a change of the shop's settings, so it is not signed.";
+/// The title of the words screen for a settings change: type the 12 or 24
+/// words of the key that signs it (SK-62).
+pub const SK_62_WORDS: &str =
+    "To sign the change, type the words of the key the owner phone named.";
+/// On that screen: the keys, and that Enter on an empty line goes on after
+/// the 12th or the 24th word (SK-62).
+pub const SK_62_KEYS: &str =
+    "Type each word or its first four letters, then press Enter. After the last word, press Enter on the empty line. Backspace erases.";
+/// On that screen: the words do not pass the BIP39 checksum (SK-62).
+pub const SK_62_BAD_CHECKSUM: &str =
+    "These words do not make a key. One of them is wrong or out of order.";
+/// The title of the passphrase screen: type the key's passphrase, or
+/// nothing if it has none (SK-62).
+pub const SK_62_PASSPHRASE: &str = "Type the passphrase of this key, if it has one.";
+/// On that screen: the keys, and that Enter goes on (SK-62).
+pub const SK_62_PASSPHRASE_KEYS: &str =
+    "Press Enter when it is typed, or Enter alone if the key has none. Backspace erases.";
+/// The title of the screen shown before signing a settings change (SK-63).
+pub const SK_63_TITLE: &str = "Check the change before you sign.";
+/// The label before the settings version (SK-63).
+pub const SK_63_VERSION: &str = "Shop settings version:";
+/// The label before the Lightning node's ID (SK-63).
+pub const SK_63_NODE: &str = "Lightning node:";
+/// After that label when the message names no Lightning node (SK-63).
+pub const SK_63_NO_NODE: &str = "none";
+/// The label before the settings hash in groups of four (SK-63).
+pub const SK_63_HASH: &str = "Settings:";
+/// The label before the address the signature is for (SK-63).
+pub const SK_63_ADDRESS: &str = "Signed for the address:";
+/// Under the address: compare it with the owner phone's card of this key (SK-63).
+pub const SK_63_COMPARE: &str =
+    "Sign only if it matches the address on this key's card in the owner phone.";
+/// The title of the signature's QR screen: scan it with the owner phone or
+/// type the text below it (SK-64).
+pub const SK_64_SHOW: &str =
+    "Signed. Scan this with the owner phone, or type the text below into it.";
+/// The label before the signature as text (SK-64).
+pub const SK_64_TEXT: &str = "Signature:";
+
 /// Every constant above, for the test that each is distinct and shown.
 pub const ALL: &[&str] = &[
     SK_10_TITLE,
@@ -316,6 +361,21 @@ pub const ALL: &[&str] = &[
     SK_55_REFUSE,
     SK_56_SHOW,
     SK_56_PART,
+    SK_61_REFUSED,
+    SK_62_WORDS,
+    SK_62_KEYS,
+    SK_62_BAD_CHECKSUM,
+    SK_62_PASSPHRASE,
+    SK_62_PASSPHRASE_KEYS,
+    SK_63_TITLE,
+    SK_63_VERSION,
+    SK_63_NODE,
+    SK_63_NO_NODE,
+    SK_63_HASH,
+    SK_63_ADDRESS,
+    SK_63_COMPARE,
+    SK_64_SHOW,
+    SK_64_TEXT,
 ];
 
 /// What the first screen shows after [`SK_06_SECURE_BOOT`] for the

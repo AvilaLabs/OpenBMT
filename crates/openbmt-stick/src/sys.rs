@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use bitcoin::hashes::{sha256, Hash};
 use openbmt_stick::app::{Chance, Facts};
-use openbmt_stick::keys::{key_from_event, Key, EVENT_SIZE};
+use openbmt_stick::keys::{Decoder, Key, EVENT_SIZE};
 use openbmt_stick::mix::KERNEL_BYTES;
 use openbmt_stick::mounts::MOUNTS;
 
@@ -214,11 +214,19 @@ impl Chance for KernelChance {
 /// by looking again every half second.
 pub struct Keyboards {
     open: Vec<(PathBuf, File)>,
+    /// Whether Shift is held (SK-62).
+    decoder: Decoder,
+    /// Keys read but not yet given: one read can hold several events.
+    queued: std::collections::VecDeque<Key>,
 }
 
 impl Keyboards {
     pub fn new() -> Self {
-        Self { open: Vec::new() }
+        Self {
+            open: Vec::new(),
+            decoder: Decoder::new(),
+            queued: std::collections::VecDeque::new(),
+        }
     }
 
     fn rescan(&mut self) {
@@ -257,6 +265,9 @@ impl Keyboards {
 
     /// Waits at most `timeout_ms` for a key the program uses.
     pub fn poll_key(&mut self, timeout_ms: i32) -> Option<Key> {
+        if let Some(k) = self.queued.pop_front() {
+            return Some(k);
+        }
         self.rescan();
         let mut fds: Vec<libc::pollfd> = self
             .open
@@ -281,12 +292,13 @@ impl Keyboards {
                 continue;
             };
             for ev in raw[..got].as_chunks::<EVENT_SIZE>().0 {
-                if let Some(k) = key_from_event(ev) {
-                    return Some(k);
+                // Every event is read, so that Shift's release is seen.
+                if let Some(k) = self.decoder.event(ev) {
+                    self.queued.push_back(k);
                 }
             }
         }
-        None
+        self.queued.pop_front()
     }
 }
 

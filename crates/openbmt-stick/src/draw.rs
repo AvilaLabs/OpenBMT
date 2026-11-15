@@ -85,6 +85,56 @@ fn draw_char(c: &mut Canvas, x: usize, y: usize, scale: usize, ch: char) {
     }
 }
 
+/// How a screen's text is laid out on a display: the text scale, the
+/// characters per line, and the rows the text needs and the rows there are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fit {
+    pub scale: usize,
+    pub cols: usize,
+    pub rows_needed: usize,
+    pub rows_free: usize,
+}
+
+/// The layout of `screen` on a `w` x `h` display. The text is as large as
+/// SK-14 asks ([`text_scale`], one step smaller beside a code); a screen whose
+/// lines do not all fit at that size is drawn smaller, so no line is left off
+/// a small display.
+pub fn fit(screen: &Screen, w: usize, h: usize) -> Fit {
+    let margin = (w / 40).max(8);
+    let text_x = match &screen.qr {
+        Some(qr) => {
+            let modules = qr.size() + 2 * QUIET;
+            let side = (h.saturating_sub(2 * margin)).min(w * 3 / 5);
+            2 * margin + modules * (side / modules).max(1)
+        }
+        None => margin,
+    };
+    let wanted = if screen.qr.is_some() {
+        (text_scale(w) / 2).max(1)
+    } else {
+        text_scale(w)
+    };
+    let at = |scale: usize| {
+        let cols = w.saturating_sub(text_x + margin) / (GLYPH_W * scale);
+        let rows_needed = screen.lines.iter().map(|l| wrap(l, cols).len()).sum();
+        let line_h = (GLYPH_H + 4) * scale;
+        let rows_free = (0..)
+            .take_while(|r| margin + r * line_h + GLYPH_H * scale <= h)
+            .count();
+        Fit {
+            scale,
+            cols,
+            rows_needed,
+            rows_free,
+        }
+    };
+    (1..=wanted)
+        .rev()
+        .map(at)
+        .find(|f| f.rows_needed <= f.rows_free)
+        .unwrap_or_else(|| at(1))
+}
+
 /// Draws the screen into `w * h` pixels.
 pub fn render(screen: &Screen, w: usize, h: usize) -> Vec<u32> {
     let mut c = Canvas {
@@ -114,13 +164,8 @@ pub fn render(screen: &Screen, w: usize, h: usize) -> Vec<u32> {
         }
         text_x = 2 * margin + modules * px;
     }
-    // With a code beside it the text is one step smaller.
-    let scale = if screen.qr.is_some() {
-        (text_scale(w) / 2).max(1)
-    } else {
-        text_scale(w)
-    };
-    let cols = w.saturating_sub(text_x + margin) / (GLYPH_W * scale);
+    let fit = fit(screen, w, h);
+    let (scale, cols) = (fit.scale, fit.cols);
     let line_h = (GLYPH_H + 4) * scale;
     let mut y = margin;
     for line in &screen.lines {

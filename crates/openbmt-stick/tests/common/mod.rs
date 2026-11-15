@@ -377,5 +377,83 @@ pub fn walk_new_screens() -> String {
         }
         note(&f);
     }
+    // SK-60 to SK-64: a settings change.
+    seen.push_str(&walk_message_screens());
+    seen
+}
+
+/// The wallet message of AP-06 for a node (`None` for none), a version and a
+/// hash made of one repeated byte.
+pub fn settings_message(version: u32, node: Option<u8>, hash_byte: u8) -> String {
+    let node = node.map(|n| [n; 33]);
+    openbmt_core::approval::wallet_message(version, node.as_ref(), &[hash_byte; 32])
+}
+
+/// The code the owner phone shows (SK-60).
+pub fn signmessage(path: &str, message: &str) -> String {
+    format!("signmessage {path} ascii:{message}")
+}
+
+/// 24 words of 32 zero bytes of entropy: `abandon` 23 times and `art`.
+pub fn words24() -> Vec<&'static str> {
+    let mut w = vec!["abandon"; 23];
+    w.push("art");
+    w
+}
+
+/// The app after "Sign a payment" and a settings change read, standing at
+/// the words screen.
+pub fn message_scanned(code: &str) -> App<Zero> {
+    let mut a = app();
+    assert_eq!(a.key(Key::Char('4')), Outcome::LoadCamera);
+    a.camera_found();
+    assert!(a.frame_text(code));
+    a
+}
+
+/// Types words with Enter after each, then an empty Enter.
+pub fn type_phrase(a: &mut App<Zero>, words: &[&str]) {
+    type_words(a, words);
+    a.key(Key::Enter);
+}
+
+/// The screens of signing a settings change, for the test that every word
+/// of `words.rs` is shown.
+pub fn walk_message_screens() -> String {
+    let mut seen = String::new();
+    let mut note = |a: &App<Zero>| {
+        seen.push_str(&text(a));
+        seen.push('\n');
+    };
+    let code = signmessage("m/84h/0h/0h/0/0", &settings_message(3, Some(2), 0xab));
+    let mut a = message_scanned(&code);
+    note(&a);
+    // A word that is not on the list, and 12 words that fail the checksum.
+    press(&mut a, "zzz");
+    a.key(Key::Enter);
+    note(&a);
+    for _ in 0..3 {
+        a.key(Key::Backspace);
+    }
+    let mut c = message_scanned(&code);
+    type_phrase(&mut c, &["abandon"; 12]);
+    note(&c);
+    type_phrase(&mut a, &WORDS);
+    note(&a);
+    a.key(Key::Enter);
+    note(&a);
+    a.key(Key::Enter);
+    note(&a);
+    // No Lightning node.
+    let none = signmessage("m/84h/0h/0h/0/0", &settings_message(1, None, 0x01));
+    let mut b = message_scanned(&none);
+    type_phrase(&mut b, &WORDS);
+    b.key(Key::Enter);
+    note(&b);
+    // A refused code.
+    note(&message_scanned(&signmessage(
+        "m/84h/0h/0h/0/0",
+        "something else",
+    )));
     seen
 }

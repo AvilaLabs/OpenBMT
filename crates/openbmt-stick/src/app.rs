@@ -8,6 +8,7 @@ use crate::bip85::{float_entropy, lightning_hex, lightning_node_id_hex, FLOAT_IN
 use crate::check::{answer_matches, pick_positions, ASKED};
 use crate::frames::{codes_of, Collector, Feed, Form};
 use crate::keys::Key;
+use crate::message::{self, SettingsMessage};
 use crate::mix::{
     dice_alone, dice_values, mix, DICE_VALUES, ENOUGH_ROLLS, ENTROPY_BYTES, KERNEL_BYTES,
 };
@@ -15,7 +16,9 @@ use crate::outputs::{master_of, public_of, words_of, Public};
 use crate::screen::Screen;
 use crate::seedqr::compact_seedqr;
 use crate::sign::{btc, hundredths, prepare, Prepared, Refusal};
-use crate::typed::{check_words, complete_word, TypedError, WORD_COUNT};
+use crate::typed::{
+    check_phrase, check_words, complete_word, TypedError, MAX_PHRASE_WORDS, WORD_COUNT,
+};
 use crate::words::*;
 
 /// What the program tells the owner on the first screen (SK-06, SK-12,
@@ -63,6 +66,8 @@ const PER_PAGE: usize = 4;
 pub const CAMERA_WAIT_MS: u64 = 15_000;
 /// SK-56: how long each part of the signed payment's animated code shows.
 pub const FRAME_MS: u64 = 300;
+/// SK-62: the longest passphrase typed.
+const MAX_PASSPHRASE: usize = 100;
 /// SK-55: outputs shown on one page of the review.
 const OUTPUTS_PER_PAGE: usize = 3;
 
@@ -85,6 +90,25 @@ struct Job {
     form: Form,
     psbt: Vec<u8>,
     prepared: Option<Prepared>,
+}
+
+/// A settings change read through the camera, with the words typed for it
+/// (SK-60 to SK-64).
+struct MessageJob {
+    msg: SettingsMessage,
+    words: Vec<&'static str>,
+    passphrase: String,
+    /// The address the signature is for, worked out when the review shows.
+    address: Option<String>,
+}
+
+impl MessageJob {
+    fn wipe(&mut self) {
+        self.words.clear();
+        let mut p = std::mem::take(&mut self.passphrase).into_bytes();
+        wipe(&mut p);
+        self.address = None;
+    }
 }
 
 #[derive(Debug)]
@@ -140,6 +164,19 @@ enum State {
         frame: usize,
         ms: u64,
     },
+    /// SK-61: the code is not a settings change.
+    MessageRefused,
+    /// SK-62: the words of the key that signs the settings change.
+    MessageWords {
+        buf: String,
+        error: Option<&'static str>,
+    },
+    /// SK-62: the passphrase, empty if the key has none.
+    MessagePassphrase,
+    /// SK-63: the settings change is shown, waiting for Enter or Esc.
+    MessageReview,
+    /// SK-64: the signature, as a code and as text.
+    MessageOut,
 }
 
 /// The whole program.
@@ -159,6 +196,10 @@ pub struct App<C: Chance> {
     node_id: Option<(String, QrCode)>,
     job: Option<Job>,
     out_codes: Vec<QrCode>,
+    /// SK-60 to SK-64: the settings change to sign.
+    message: Option<MessageJob>,
+    /// SK-64: the signature, as text and as a code.
+    signature: Option<(String, QrCode)>,
 }
 
 /// Overwrites bytes with zeros, in a way the compiler may not drop.
@@ -187,6 +228,8 @@ impl<C: Chance> App<C> {
             node_id: None,
             job: None,
             out_codes: Vec::new(),
+            message: None,
+            signature: None,
         }
     }
 
@@ -222,6 +265,15 @@ impl<C: Chance> App<C> {
         }
         self.job = None;
         self.out_codes.clear();
+        // SK-64: the words, the passphrase and the message go too.
+        if let Some(m) = self.message.as_mut() {
+            m.wipe();
+        }
+        self.message = None;
+        self.signature = None;
+        if let State::MessageWords { buf, .. } = &mut self.state {
+            buf.clear();
+        }
         self.state = State::Start { selected: 0 };
     }
 
@@ -375,6 +427,62 @@ impl<C: Chance> App<C> {
                 }
             }
             State::Review { page, seen } => self.review_screen(*page, *seen),
+            State::MessageRefused => Screen {
+                id: "message-refused",
+                lines: vec![
+                    SK_61_REFUSED.to_string(),
+                    String::new(),
+                    format!("Esc {SK_29_TURN_OFF}"),
+                ],
+                qr: None,
+            },
+            State::MessageWords { buf, error } => {
+                let count = self.message.as_ref().map_or(0, |m| m.words.len());
+                let mut lines = vec![
+                    SK_62_WORDS.to_string(),
+                    format!("{SK_28_TYPE} {}", count + 1),
+                ];
+                if let Some(e) = error {
+                    lines.push((*e).to_string());
+                }
+                lines.push(format!("> {buf}"));
+                lines.push(String::new());
+                lines.push(SK_62_KEYS.to_string());
+                Screen {
+                    id: "message-words",
+                    lines,
+                    qr: None,
+                }
+            }
+            State::MessagePassphrase => {
+                let typed = self.message.as_ref().map_or(0, |m| m.passphrase.len());
+                Screen {
+                    id: "message-passphrase",
+                    lines: vec![
+                        SK_62_PASSPHRASE.to_string(),
+                        format!("> {}", "*".repeat(typed)),
+                        String::new(),
+                        SK_62_PASSPHRASE_KEYS.to_string(),
+                    ],
+                    qr: None,
+                }
+            }
+            State::MessageReview => self.message_review_screen(),
+            State::MessageOut => {
+                let (text, qr) = match &self.signature {
+                    Some((t, q)) => (t.as_str(), Some(q.clone())),
+                    None => ("", None),
+                };
+                Screen {
+                    id: "message-out",
+                    lines: vec![
+                        SK_64_SHOW.to_string(),
+                        format!("{SK_64_TEXT} {text}"),
+                        format!("Esc {SK_29_TURN_OFF}"),
+                    ],
+                    qr,
+                }
+            }
             State::Out { frame, .. } => {
                 let n = self.out_codes.len();
                 Screen {
@@ -387,6 +495,34 @@ impl<C: Chance> App<C> {
                     qr: self.out_codes.get(*frame).cloned(),
                 }
             }
+        }
+    }
+
+    /// SK-63: the version, the node, the hash in groups of four and the
+    /// address the signature is for.
+    fn message_review_screen(&self) -> Screen {
+        let mut lines = vec![SK_63_TITLE.to_string()];
+        if let Some(m) = &self.message {
+            let node = m
+                .msg
+                .node
+                .as_ref()
+                .map_or_else(|| SK_63_NO_NODE.to_string(), message::node_hex);
+            lines.push(format!("{SK_63_VERSION} {}", m.msg.version));
+            lines.push(format!("{SK_63_NODE} {node}"));
+            lines.push(format!("{SK_63_HASH} {}", message::grouped(&m.msg.hash)));
+            lines.push(format!(
+                "{SK_63_ADDRESS} {}",
+                m.address.as_deref().unwrap_or("")
+            ));
+            lines.push(SK_63_COMPARE.to_string());
+        }
+        lines.push(format!("Enter {SK_55_SIGN}"));
+        lines.push(format!("Esc {SK_55_REFUSE}"));
+        Screen {
+            id: "message-review",
+            lines,
+            qr: None,
         }
     }
 
@@ -714,8 +850,8 @@ impl<C: Chance> App<C> {
                     view: View::Lightning,
                 },
                 Key::Char('n') if view == View::Lightning => State::Result { view: View::NodeId },
-                Key::Char(c @ ('+' | '-')) if view == View::Float => {
-                    self.float_index = if c == '+' {
+                Key::Char(c @ ('+' | '=' | '-')) if view == View::Float => {
+                    self.float_index = if c != '-' {
                         (self.float_index + 1).min(FLOAT_INDEX_MAX)
                     } else {
                         self.float_index.saturating_sub(1)
@@ -794,6 +930,31 @@ impl<C: Chance> App<C> {
                 }
                 _ => State::Out { frame, ms },
             },
+            State::MessageRefused => match key {
+                Key::Escape => {
+                    self.clear();
+                    return Outcome::TurnOff;
+                }
+                _ => State::MessageRefused,
+            },
+            State::MessageWords { buf, error } => self.message_words_key(key, buf, error),
+            State::MessagePassphrase => self.message_passphrase_key(key),
+            State::MessageReview => match key {
+                // SK-63: nothing is signed.
+                Key::Escape => {
+                    self.clear();
+                    State::Start { selected: 3 }
+                }
+                Key::Enter => self.sign_message_now(),
+                _ => State::MessageReview,
+            },
+            State::MessageOut => match key {
+                Key::Escape => {
+                    self.clear();
+                    return Outcome::TurnOff;
+                }
+                _ => State::MessageOut,
+            },
         };
         outcome
     }
@@ -819,6 +980,8 @@ impl<C: Chance> App<C> {
             || self.node_id.is_some()
             || self.job.is_some()
             || !self.out_codes.is_empty()
+            || self.message.is_some()
+            || self.signature.is_some()
     }
 
     /// Whether the loop should offer camera frames now (SK-52).
@@ -884,6 +1047,28 @@ impl<C: Chance> App<C> {
     /// The text of one QR code read from a frame (SK-52), or, in the test
     /// build, from the serial port. Returns true when the screen changed.
     pub fn frame_text(&mut self, text: &str) -> bool {
+        if !matches!(self.state, State::Scan { .. }) {
+            return false;
+        }
+        // SK-60: a settings change is one plain code, not a part of a file.
+        if text.starts_with(message::PREFIX.trim_end()) {
+            self.state = match message::parse(text) {
+                Ok(msg) => {
+                    self.message = Some(MessageJob {
+                        msg,
+                        words: Vec::new(),
+                        passphrase: String::new(),
+                        address: None,
+                    });
+                    State::MessageWords {
+                        buf: String::new(),
+                        error: None,
+                    }
+                }
+                Err(_) => State::MessageRefused,
+            };
+            return true;
+        }
         let State::Scan { gathering, .. } = &mut self.state else {
             return false;
         };
@@ -936,6 +1121,116 @@ impl<C: Chance> App<C> {
                 State::Out { frame: 0, ms: 0 }
             }
             None => State::Review { page, seen },
+        }
+    }
+
+    /// SK-62: the words of the key, 12 or 24. Enter on an empty line after
+    /// the 12th or the 24th word goes on.
+    fn message_words_key(
+        &mut self,
+        key: Key,
+        mut buf: String,
+        mut error: Option<&'static str>,
+    ) -> State {
+        let Some(job) = self.message.as_mut() else {
+            self.clear();
+            return State::Start { selected: 0 };
+        };
+        match key {
+            Key::Escape => {
+                self.clear();
+                return State::Start { selected: 3 };
+            }
+            Key::Char(c) if c.is_ascii_lowercase() && buf.len() < MAX_TYPED => {
+                buf.push(c);
+                error = None;
+            }
+            Key::Backspace => {
+                error = None;
+                if buf.pop().is_none() {
+                    if let Some(w) = job.words.pop() {
+                        buf.push_str(w);
+                    }
+                }
+            }
+            Key::Enter if buf.is_empty() => {
+                let n = job.words.len();
+                if n == WORD_COUNT || n == MAX_PHRASE_WORDS {
+                    match check_phrase(&job.words) {
+                        Ok(()) => return State::MessagePassphrase,
+                        Err(_) => error = Some(SK_62_BAD_CHECKSUM),
+                    }
+                }
+            }
+            Key::Enter => match complete_word(&buf) {
+                None => error = Some(SK_28_BAD_WORD),
+                Some(w) => {
+                    if job.words.len() < MAX_PHRASE_WORDS {
+                        job.words.push(w);
+                        buf.clear();
+                        error = None;
+                    }
+                }
+            },
+            _ => {}
+        }
+        State::MessageWords { buf, error }
+    }
+
+    /// SK-62: the passphrase, then SK-63: the review with the address.
+    fn message_passphrase_key(&mut self, key: Key) -> State {
+        let Some(job) = self.message.as_mut() else {
+            self.clear();
+            return State::Start { selected: 0 };
+        };
+        match key {
+            Key::Escape => {
+                self.clear();
+                State::Start { selected: 3 }
+            }
+            Key::Char(c) if (' '..='~').contains(&c) && job.passphrase.len() < MAX_PASSPHRASE => {
+                job.passphrase.push(c);
+                State::MessagePassphrase
+            }
+            Key::Backspace => {
+                job.passphrase.pop();
+                State::MessagePassphrase
+            }
+            Key::Enter => match message::address_of(&job.words, &job.passphrase, &job.msg) {
+                Ok(a) => {
+                    job.address = Some(a.to_string());
+                    State::MessageReview
+                }
+                Err(_) => {
+                    self.clear();
+                    State::Start { selected: 0 }
+                }
+            },
+            _ => State::MessagePassphrase,
+        }
+    }
+
+    /// SK-64: Enter on the review signs, shows the signature as a code and
+    /// as text, and drops the words and the passphrase.
+    fn sign_message_now(&mut self) -> State {
+        let signed = self.message.as_ref().and_then(|m| {
+            message::sign(&m.words, &m.passphrase, &m.msg)
+                .ok()
+                .and_then(|text| {
+                    let qr = openbmt_qr::encode_text(&text, Ecc::M).ok()?;
+                    Some((text, qr))
+                })
+        });
+        match signed {
+            Some(done) => {
+                if let Some(m) = self.message.as_mut() {
+                    m.wipe();
+                }
+                self.message = None;
+                self.signature = Some(done);
+                State::MessageOut
+            }
+            None => State::MessageReview,
         }
     }
 

@@ -6,7 +6,8 @@ the screens from the serial log (stick/test-qemu.sh, SK-40).
 
 Scenarios: dice (dice alone, SK-22), mix (the computer's bytes and rolls,
 SK-20/21, with a wrong answer first), type (check my words, SK-28), and with
-the last three arguments: sign-ur and sign-bbqr (a whole payment signed from
+the last three arguments: sign-message (a settings change signed from one
+plain code fed through the serial port, SK-60 to SK-64), sign-ur and sign-bbqr (a whole payment signed from
 frames fed through the serial port, SK-50 to SK-58), sign-refuse (a payment
 of another wallet), camera (the camera modules load only after the choice;
 no camera, SK-51, SK-52).
@@ -34,8 +35,13 @@ pay_bin, pay_dir, ser_path = (sys.argv[6:9] + [None, None, None])[:3]
 # are read under their full name.
 _words_rs = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "crates", "openbmt-stick", "src", "words.rs")
 W = {}
-for m in re.finditer(r'pub const ((?:WORDS_NEEDED_)?SK_\w+): &str =\s*"((?:[^"\\]|\\.)*)";', open(_words_rs).read()):
+for m in re.finditer(r'pub const ((?:WORDS_NEEDED_|TODO_WORDS_)?SK_\w+): &str =\s*"((?:[^"\\]|\\.)*)";', open(_words_rs).read()):
     W[m.group(1)] = m.group(2).replace('\\"', '"')
+
+
+def WK(name):
+    """The words of a constant that may still be a placeholder."""
+    return W.get("TODO_WORDS_" + name, W.get(name))
 
 
 def fail(msg):
@@ -325,6 +331,97 @@ elif scenario == "type":
     if exp["fingerprint"] != "818bc9b6":
         fail("the core's fingerprint for the test seed")
     check_result(s, TEST_SEED, exp)
+elif scenario == "sign-message":
+    # SK-60 to SK-64: a settings change is one plain code; the words and the
+    # passphrase are typed; the signature is checked by the core.
+    import threading
+    press("4")
+    deadline = time.time() + 60
+    while "OBM-ECHO MODULES camera" not in open(log_path, "rb").read().decode("latin-1"):
+        if time.time() > deadline:
+            fail("the camera modules did not load")
+        time.sleep(0.2)
+    info = {}
+    for line in subprocess.run([pay_bin, "message-make", pay_dir], check=True, capture_output=True, text=True).stdout.splitlines():
+        k, _, v = line.partition(" ")
+        info[k] = v
+    code = open(os.path.join(pay_dir, "message.code")).read().strip()
+    ser = socket.socket(socket.AF_UNIX)
+    end = time.time() + 30
+    while True:
+        try:
+            ser.connect(ser_path)
+            break
+        except OSError:
+            if time.time() > end:
+                fail("no serial socket")
+            time.sleep(0.2)
+
+    def drain():
+        try:
+            while ser.recv(65536):
+                pass
+        except OSError:
+            pass
+
+    threading.Thread(target=drain, daemon=True).start()
+    n = len(screens())
+    ser.sendall(("OBM-FRAME " + code + "\n").encode())
+    s = wait_screens(n)[-1]
+    if s["id"] != "message-words":
+        fail("the settings change was not taken: %r" % s["lines"])
+    ok("SK-60 one plain code, the text signmessage {path} ascii:{message}, was taken in the sign mode")
+    for w in TEST_SEED:
+        type_text(w)
+        s = press("ret")
+    s = press("ret")
+    if s["id"] != "message-passphrase":
+        fail("12 words and an empty Enter did not ask for the passphrase: %r" % s["lines"])
+    ok("SK-62 the 12 words passed the checksum; the passphrase is asked for")
+    # SK-62: capitals, a space and a sign, typed with Shift held through
+    # QEMU's key input.
+    s = None
+    for ch in info["passphrase"]:
+        if ch == " ":
+            s = press("spc")
+        elif ch.isupper():
+            s = press("shift-" + ch.lower())
+        elif ch == "!":
+            s = press("shift-1")
+        else:
+            s = press(ch)
+    if sum(1 for l in s["lines"] if l.startswith("> ")) != 1 or ("> " + "*" * len(info["passphrase"])) not in s["lines"]:
+        fail("the passphrase screen does not show a star for each character: %r" % s["lines"])
+    if any(info["passphrase"] in l for l in s["lines"]):
+        fail("the passphrase is shown as typed")
+    s = press("ret")
+    if s["id"] != "message-review":
+        fail("expected the review, got %s %r" % (s["id"], s["lines"]))
+    lines = s["lines"]
+    if (WK("SK_63_ADDRESS") + " " + info["address"]) not in lines:
+        fail("the review does not show the core's address %s: %r" % (info["address"], lines))
+    if (WK("SK_63_VERSION") + " " + info["version"]) not in lines:
+        fail("the review's version: %r" % lines)
+    if (WK("SK_63_HASH") + " " + info["hash"]) not in lines:
+        fail("the review's hash in groups of four: %r" % lines)
+    if not any(l.startswith(WK("SK_63_NODE") + " ") and info["node"] in l for l in lines):
+        fail("the review's node: %r" % lines)
+    ok("SK-63 the review shows version %s, the node, the hash in groups of four and the core's address %s" % (info["version"], info["address"]))
+    shot("message-review", 500)
+    n = len(screens())
+    sendkey("ret")
+    s = wait_screens(n)[-1]
+    if s["id"] != "message-out":
+        fail("expected the signature, got %s %r" % (s["id"], s["lines"]))
+    sig = field(s, WK("SK_64_TEXT"))
+    mpath = log_path + ".matrices"
+    open(mpath, "w").write("\n".join(s["qr"]) + "\n")
+    shot("message-signed", 1500)
+    out = subprocess.run([pay_bin, "message-verify", pay_dir, sig, mpath], capture_output=True, text=True)
+    if out.returncode != 0 or "OK" not in out.stdout:
+        fail("the signature does not check: %s %s" % (out.stdout, out.stderr))
+    for line in out.stdout.splitlines():
+        ok("SK-64 " + line)
 elif scenario in ("sign-ur", "sign-bbqr", "sign-refuse", "camera"):
     CAMERA_MODULES = ["mc", "videodev", "videobuf2_common", "videobuf2_memops", "videobuf2_v4l2",
                       "videobuf2_vmalloc", "uvc", "uvcvideo"]

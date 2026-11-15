@@ -163,6 +163,9 @@ if want camera; then drive camera; fi
 if want sign-ur; then drive sign-ur; fi
 if want sign-bbqr; then drive sign-bbqr; fi
 if want sign-refuse; then drive sign-refuse; fi
+# SK-60 to SK-64: a settings change signed from one plain code, the signature
+# checked by the core.
+if want sign-message; then drive sign-message; fi
 
 # ---- SK-41: refused when unsigned ------------------------------------------
 echo "== run: unsigned"
