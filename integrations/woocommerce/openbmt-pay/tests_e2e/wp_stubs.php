@@ -284,6 +284,7 @@ function wc_get_order( $id ) {
  * @return array<int,Obm_E2e_Order>
  */
 function wc_get_orders( array $args ): array {
+	$GLOBALS['obm_e2e_last_query'] = $args;
 	$out = array();
 	$ids = array_map( 'intval', array_keys( $GLOBALS['obm_e2e_orders'] ) );
 	sort( $ids );

@@ -127,8 +127,12 @@ final class OpenBmt_Pay_Admin {
 			echo '<div class="notice notice-warning"><p>' . esc_html( OpenBmt_Pay_Words::t( 'WO_11_LOW' ) ) . '</p></div>';
 		}
 		$unpaid = OpenBmt_Pay_Store::unpaid_count( time() );
-		if ( OpenBmtPay\Unpaid::at_cap( $unpaid, OpenBmt_Pay_Store::max_unpaid() ) ) {
-			echo '<div class="notice notice-warning"><p>' . esc_html( sprintf( OpenBmt_Pay_Words::t( 'WO_11_UNPAID_AT_CAP' ), (string) $unpaid ) ) . '</p></div>';
+		$max    = OpenBmt_Pay_Store::max_unpaid();
+		if ( $unpaid['open'] >= $max ) {
+			echo '<div class="notice notice-warning"><p>' . esc_html( sprintf( OpenBmt_Pay_Words::t( 'WO_11_UNPAID_AT_CAP' ), (string) $unpaid['open'] ) ) . '</p></div>';
+		}
+		if ( $unpaid['day'] >= $max * OpenBmtPay\Unpaid::DAY_FACTOR ) {
+			echo '<div class="notice notice-warning"><p>' . esc_html( sprintf( OpenBmt_Pay_Words::t( 'WO_11_UNPAID_DAY_CAP' ), (string) $unpaid['day'] ) ) . '</p></div>';
 		}
 		$visit = OpenBmt_Pay_Store::visit();
 		if ( null === $visit ) {

@@ -66,14 +66,19 @@ funds.**
   signature and uses each address once, in order.
 - **WO-11. Running low.** With fewer than 20 left the plugin says so in its
   admin page, and the owner phone sends the next range at its next visit
-  (WO-20). With none left, Bitcoin is hidden at checkout. At most 20 orders
-  made in the last 24 hours may be unpaid at once, a number the owner can set
-  in the admin page from 1 to 100; when that many are, Bitcoin is hidden at
-  checkout and the admin page says why. Each unpaid order holds an address and
-  a wallet looks only a few unused addresses ahead, so a script that opens
-  orders it never pays can use up neither the addresses nor the room the
-  wallet looks in. The plugin keeps no address of a customer's computer for
-  this. An address is never used twice. The pool, the numbers used once and an
+  (WO-20). With none left, Bitcoin is hidden at checkout. Bitcoin is also
+  hidden at checkout while 20 unpaid orders still have their quote open
+  (WO-15), a number the owner can set in the admin page from 1 to 100, and
+  while ten times that number of orders made in the last 24 hours are
+  unpaid; the admin page says which of the two it is. Each unpaid order
+  holds an address that is never given again, so a script that places
+  orders it never pays could otherwise use up the addresses the owner phone
+  can send. The first limit clears as quotes run out, so a script has to
+  keep placing orders to keep Bitcoin hidden; the second bounds the
+  addresses it can use in a day. Against such a script the store's own
+  protection of its checkout applies, as it does for fake card orders. The
+  plugin keeps no address of a customer's computer for this. An address is
+  never used twice. The pool, the numbers used once and an
   order are changed only under the store's lock, which is taken by one atomic
   insert into the options table. A lock never released is taken over after 30
   seconds, by an update that succeeds only on the value that was read, and a

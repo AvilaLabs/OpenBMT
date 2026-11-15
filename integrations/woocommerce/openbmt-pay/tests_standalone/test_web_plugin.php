@@ -304,14 +304,18 @@ t_eq( 2, $wpdb->inserts, 'wo_20 a replay takes the lock, for the ledger' );
 t_ok( ! array_key_exists( $lock, $opts ), 'wo_20 the lock is free after' );
 t_eq( Health::READY, OpenBmt_Pay_Store::health()['state'], 'wo_20 the store is still sound' );
 
-// WO-11: at most as many unpaid orders of the last day as the owner allows; at the cap no address is taken and the pool is not touched.
-$unpaid_order = static function ( int $number, int $created, string $status = 'on-hold', bool $paid = false, string $address = 'x' ): void {
+// WO-11: at most as many unpaid orders with an open quote as the owner allows, and ten times as many in a day; at the cap no address is taken and the pool is not touched.
+$unpaid_order = static function ( int $number, int $created, string $status = 'on-hold', bool $paid = false, string $address = 'x', ?int $expires = null ): void {
+	$meta = '' === $address ? array() : array( '_openbmt_address' => $address . $number );
+	if ( '' !== $address ) {
+		$meta['_openbmt_expires_at'] = (string) ( $expires ?? time() + 1800 );
+	}
 	$GLOBALS['obm_e2e_orders'][ (string) $number ] = array(
 		'payment_method' => 'openbmt',
 		'status'         => $status,
 		'paid'           => $paid,
 		'created'        => $created,
-		'meta'           => '' === $address ? array() : array( '_openbmt_address' => $address . $number ),
+		'meta'           => $meta,
 	);
 };
 $set_max = static function ( $value ) {
@@ -333,7 +337,7 @@ $set_max( '2' );
 $now = time();
 $unpaid_order( 21, $now - 60 );
 $fresh_order();
-t_eq( 1, OpenBmt_Pay_Store::unpaid_count( $now ), 'wo_11 one unpaid order counts' );
+t_eq( 1, OpenBmt_Pay_Store::unpaid_count( $now )['open'], 'wo_11 one unpaid order counts' );
 $GLOBALS['t_notices'] = array();
 $answer = $gateway->process_payment( 8 );
 t_eq( array( 'result' => 'success', 'redirect' => 'return:8' ), $answer, 'wo_11 under the cap the order takes its address' );
@@ -375,7 +379,7 @@ $unpaid_order( 23, $now - 100000 );
 $unpaid_order( 24, $now - 60, 'on-hold', false, '' );
 $unpaid_order( 25, $now - 60, 'completed', true );
 $unpaid_order( 26, $now - 60 );
-t_eq( 1, OpenBmt_Pay_Store::unpaid_count( $now ), 'wo_11 paid orders, old ones and ones with no address do not count' );
+t_eq( 1, OpenBmt_Pay_Store::unpaid_count( $now )['day'], 'wo_11 paid orders, old ones and ones with no address do not count' );
 t_ok( ! OpenBmt_Pay_Store::unpaid_at_cap( $now ), 'wo_11 so the cap of 2 is not reached' );
 $unpaid_order( 27, $now - 60 );
 t_ok( OpenBmt_Pay_Store::unpaid_at_cap( $now ), 'wo_11 a second recent unpaid order reaches it' );
@@ -385,11 +389,101 @@ t_ok( ! OpenBmt_Pay_Store::unpaid_at_cap( $now ), 'wo_11 an order a signed notic
 // Another gateway's orders do not count.
 $unpaid_order( 28, $now - 60 );
 $GLOBALS['obm_e2e_orders']['28']['payment_method'] = 'cod';
-t_eq( 1, OpenBmt_Pay_Store::unpaid_count( $now ), 'wo_11 orders paid another way do not count' );
+t_eq( 1, OpenBmt_Pay_Store::unpaid_count( $now )['day'], 'wo_11 orders paid another way do not count' );
 // An unpaid order that was cancelled or failed still holds its address, so it counts.
 $unpaid_order( 29, $now - 60, 'cancelled' );
 $unpaid_order( 30, $now - 60, 'failed' );
-t_eq( 3, OpenBmt_Pay_Store::unpaid_count( $now ), 'wo_11 cancelled and failed unpaid orders count' );
+t_eq( 3, OpenBmt_Pay_Store::unpaid_count( $now )['day'], 'wo_11 cancelled and failed unpaid orders count' );
+
+// Quotes that have run out do not hold Bitcoin hidden: 20 such orders of the last day leave it offered.
+t_reset();
+t_pair_store( $id, $secret );
+for ( $n = 100; $n < 120; $n++ ) {
+	$unpaid_order( $n, $now - 600, 'on-hold', false, 'x', $now - 10 );
+}
+t_eq( array( 'open' => 0, 'day' => 20 ), OpenBmt_Pay_Store::unpaid_count( $now ), 'wo_11 20 orders with run-out quotes are 0 open and 20 in the day' );
+t_ok( ! OpenBmt_Pay_Store::unpaid_at_cap( $now ), 'wo_11 so 20 run-out quotes do not hide Bitcoin at the default of 20' );
+// The same 20 with open quotes do.
+for ( $n = 100; $n < 120; $n++ ) {
+	$GLOBALS['obm_e2e_orders'][ (string) $n ]['meta']['_openbmt_expires_at'] = (string) ( $now + 5 );
+}
+t_ok( OpenBmt_Pay_Store::unpaid_at_cap( $now ), 'wo_11 20 orders with open quotes hide Bitcoin at the default of 20' );
+// The day limit: ten times the setting, with no quote open.
+$set_max( '2' );
+for ( $n = 100; $n < 120; $n++ ) {
+	$GLOBALS['obm_e2e_orders'][ (string) $n ]['meta']['_openbmt_expires_at'] = (string) ( $now - 1 );
+}
+t_ok( OpenBmt_Pay_Store::unpaid_at_cap( $now ), 'wo_11 ten times the setting unpaid in a day hides Bitcoin with no quote open' );
+$GLOBALS['obm_e2e_orders']['119']['status'] = 'processing';
+$GLOBALS['obm_e2e_orders']['119']['paid']   = true;
+t_ok( ! OpenBmt_Pay_Store::unpaid_at_cap( $now ), 'wo_11 one fewer than ten times the setting does not' );
+// The query asks for one more order than the largest day limit.
+$set_max( '100' );
+OpenBmt_Pay_Store::unpaid_count( $now );
+t_eq( 1001, $GLOBALS['obm_e2e_last_query']['limit'], 'wo_11 the store query limit is 1001' );
+
+// The admin page names the limit that hides Bitcoin, with its count.
+if ( ! function_exists( 'esc_html' ) ) {
+	function esc_html( $a = '' ) {
+		return $a;
+	}
+}
+if ( ! function_exists( 'esc_url' ) ) {
+	function esc_url( $a = '' ) {
+		return $a;
+	}
+}
+if ( ! function_exists( 'sanitize_key' ) ) {
+	function sanitize_key( $a = '' ) {
+		return $a;
+	}
+}
+if ( ! function_exists( 'get_woocommerce_currency' ) ) {
+	function get_woocommerce_currency() {
+		return '';
+	}
+}
+if ( ! function_exists( 'wp_nonce_field' ) ) {
+	function wp_nonce_field( $a = '', $b = '' ) {
+		return '';
+	}
+}
+if ( ! function_exists( 'wp_date' ) ) {
+	function wp_date( $a = '', $b = '' ) {
+		return (string) $a;
+	}
+}
+$GLOBALS['t_can'] = 'manage_options';
+$page = static function (): string {
+	ob_start();
+	OpenBmt_Pay_Admin::page();
+	return (string) ob_get_clean();
+};
+$at_cap_text  = sprintf( OpenBmt_Pay_Words::t( 'WO_11_UNPAID_AT_CAP' ), '2' );
+$day_cap_text = sprintf( OpenBmt_Pay_Words::t( 'WO_11_UNPAID_DAY_CAP' ), '20' );
+t_reset();
+t_pair_store( $id, $secret );
+$set_max( '2' );
+$unpaid_order( 21, $now - 60 );
+$html = $page();
+t_ok( false === strpos( $html, 'Bitcoin is hidden at checkout' ), 'wo_11 the admin page shows no cap notice under the limits' );
+$unpaid_order( 22, $now - 60 );
+$html = $page();
+t_ok( false !== strpos( $html, $at_cap_text ), 'wo_11 the admin page shows the open-quote notice with the open count' );
+t_ok( false === strpos( $html, 'orders from the last 24 hours were not paid' ), 'wo_11 and not the day notice' );
+t_reset();
+t_pair_store( $id, $secret );
+$set_max( '2' );
+for ( $n = 100; $n < 120; $n++ ) {
+	$unpaid_order( $n, $now - 600, 'on-hold', false, 'x', $now - 10 );
+}
+$html = $page();
+t_ok( false !== strpos( $html, $day_cap_text ), 'wo_11 the admin page shows the day notice with the day count' );
+t_ok( false === strpos( $html, $at_cap_text ), 'wo_11 and not the open-quote notice' );
+$unpaid_order( 121, $now - 60 );
+$unpaid_order( 122, $now - 60 );
+$html = $page();
+t_ok( false !== strpos( $html, sprintf( OpenBmt_Pay_Words::t( 'WO_11_UNPAID_AT_CAP' ), '2' ) ) && false !== strpos( $html, sprintf( OpenBmt_Pay_Words::t( 'WO_11_UNPAID_DAY_CAP' ), '22' ) ), 'wo_11 the admin page shows both notices when both limits are reached' );
 
 // The gateway hides Bitcoin at the cap, and the setting is kept within its bounds.
 t_eq( '1', $gateway->validate_max_unpaid_field( 'max_unpaid', '0' ), 'wo_11 the saved setting is at least 1' );
