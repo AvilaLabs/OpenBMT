@@ -758,7 +758,8 @@ it.
 - **CR-98.** The app's pairing screens are the camera's: scan the offer,
   show the request as a code with its four words and "They match" and "They
   differ", then scan the bundle. The words are the most prominent thing on
-  the screen. There is no pairing text, no paste and no file. The record
+  the screen. There is no pairing text, no paste and no file; the one other
+  path is the owner app on the same phone (CR-277 to CR-282). The record
   that `pair_finish` returns is sealed with the Android Keystore in the
   app's `noBackupFilesDir` and handed to `start` at every start; the
   ceremony under way is never kept, and a restart says so in words and
@@ -1923,6 +1924,50 @@ a counter paired with the shop's own wallet.
   follows.
 - **CR-238.** Every state and refusal of this section has words under
   `docs/SCREEN-RULES.md`.
+
+### 23a. Pairing on the owner's own phone
+
+Someone who sells alone may run the counter app on the owner phone. The two
+apps then pass the offer, the request and the bundle to each other on the
+phone, in place of the camera. The checks the person makes by eye (the first
+address, the four words) guard against a code swapped on its way between two
+devices; on one phone the bytes go from one app to the other, and the
+counter checks who sent them. Everything else in this section is unchanged:
+the same frames, the same ceremony and its 10 minutes, the same checks of
+the bundle and the same record.
+
+- **CR-277.** The counter app has one activity for this, exported and
+  guarded by the permission `org.openbmt.permission.PAIR_ON_THIS_PHONE`,
+  of protection level `signature`, which both apps declare. It acts only on
+  an intent started for a result, whose calling package is
+  `org.openbmt.owner.app` and whose signing certificate is the counter
+  app's own (`PackageManager.hasSigningCertificate`, SHA-256). Any other
+  start, or a check that does not pass, ends the activity with words and
+  changes nothing. The manifest declares the permission and this one
+  activity, and the app's manifest check covers both.
+- **CR-278.** The intent carries the owner phone's offer (CR-227) and
+  nothing else. The counter reads it as CR-227 says and refuses a Key app
+  offer. A counter already paired refuses, and nothing changes. Before
+  anything is made, the counter asks the person, on its own screen, to pair
+  with the owner app on this phone; "Cancel" ends the ceremony and nothing
+  is kept.
+- **CR-279.** "Pair" stands for "Same address" (CR-228) and "They match"
+  (CR-229): the counter makes its key and number as CR-229 says and returns
+  the request as the activity's result, to the caller only. The ceremony
+  stays in memory as CR-91 says; when the app is stopped before the bundle,
+  it is gone, and the owner app says so and starts again.
+- **CR-280.** The bundle comes back by a second intent to the same activity,
+  checked as CR-277 says, and is taken as CR-230 to CR-232 say. The result
+  of that intent tells the owner app whether the counter is paired, and
+  nothing else.
+- **CR-281.** The record of CR-233 is the same. Beside it, in its own file,
+  the app keeps that it was paired on this phone, and reads it only to
+  choose its line between sales: on a counter paired on this phone with the
+  starter wallet, "Sales are taken here. Sending needs your fingerprint or
+  PIN in the owner app."; on any other counter, the line of DESIGN §2.1.
+- **CR-282.** Nothing else crosses between the two apps: no file, no
+  setting and no key. After pairing, the counter reaches the owner phone
+  through the link only, as any counter does.
 
 ## 24. Confirming a change at a counter
 
