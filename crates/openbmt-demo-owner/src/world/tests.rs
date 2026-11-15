@@ -6,7 +6,13 @@ use super::*;
 use crate::{call, set_now, shop};
 
 const T0: u64 = 1_700_000_000;
-const DIR: &str = "/demo/owner-world-test";
+/// Under the system's temporary folder: a real folder when the workspace is
+/// built with the network side, and only a name in the build whose files are in
+/// memory.
+fn dir() -> String {
+    let dir = std::env::temp_dir().join(format!("openbmt-demo-owner-world-{}", std::process::id()));
+    dir.to_str().expect("UTF-8").to_string()
+}
 
 fn frame(op: u16, handle: u64, fields: &[u8]) -> Vec<u8> {
     let mut out = b"OBMk".to_vec();
@@ -25,7 +31,7 @@ fn put_bytes(out: &mut Vec<u8>, v: &[u8]) {
 /// The fields of `start` for a shop with its own wallet on regtest.
 fn start_fields(wallet: &[u8]) -> Vec<u8> {
     let mut f = Vec::new();
-    put_bytes(&mut f, DIR.as_bytes());
+    put_bytes(&mut f, dir().as_bytes());
     f.push(3); // regtest
     f.extend_from_slice(&T0.to_le_bytes());
     put_bytes(&mut f, &shop::OWNER_SECRET);
@@ -55,8 +61,13 @@ fn ok(response: &[u8]) -> &[u8] {
 
 #[test]
 fn a_payment_to_the_demo_wallet_is_seen_and_mined_and_the_counters_range_is_watched() {
+    // Built together with the Android library, the owner's code has its
+    // network side and takes no regtest wallet: the demo runs only without it.
+    if !openbmt_owner_ffi::DEMO_CHAIN {
+        return;
+    }
     set_now(T0);
-    shop::seed(DIR, T0).expect("seeded");
+    shop::seed(&dir(), T0).expect("seeded");
     let wallet = shop::wallet_file().expect("a wallet");
     let started = call(&frame(1, 0, &start_fields(&wallet)));
     let handle = u64::from_le_bytes(ok(&started).get(..8).expect("a handle").try_into().unwrap());

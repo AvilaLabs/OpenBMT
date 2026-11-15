@@ -18,7 +18,8 @@ fn the_wallet_file_is_the_demo_wallet_the_counter_takes_payments_into() {
 
 #[test]
 fn the_seeded_state_gives_the_demo_counter_its_first_range_and_is_kept_when_seeded_again() {
-    let dir = "/demo/owner-seed-test";
+    let dir = std::env::temp_dir().join(format!("openbmt-demo-owner-seed-{}", std::process::id()));
+    let dir = dir.to_str().expect("UTF-8");
     seed(dir, T0).expect("seeded");
     let bytes = fs::read(format!("{dir}/{OWN_STATE_FILE}")).expect("the state is there");
     let shop = OwnShop::restore(

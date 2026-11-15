@@ -1176,8 +1176,13 @@ pub(crate) fn counter_label(counter: &DeviceId) -> String {
 /// side takes it: where the real drivers are, a wallet of this kind is on
 /// mainnet.
 fn demo_regtest(network: Network) -> bool {
-    cfg!(not(feature = "network")) && network == Network::Regtest
+    DEMO_CHAIN && network == Network::Regtest
 }
+
+/// Whether this build is the one without the network side, which runs the web
+/// demo on a pretend chain. A workspace build that also builds the Android
+/// library has the network side, whatever a demo crate asked for.
+pub const DEMO_CHAIN: bool = cfg!(not(feature = "network"));
 
 /// Everything `start` makes, on the node's thread.
 fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State, AppError> {

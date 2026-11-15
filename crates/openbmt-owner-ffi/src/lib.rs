@@ -107,7 +107,7 @@ pub use float::{
     FloatPaidView, FloatPayArgs, FloatRefillArgs, FloatRefillView, FloatSealedView, FloatSendArgs,
     FloatStatusArgs, FloatStatusView, FloatSweepArgs, FloatWalletView,
 };
-pub use host::{Entry, HostSpawn, KEY1_FILE, MAX_WAIT_MS, SLICE_MS};
+pub use host::{Entry, HostSpawn, DEMO_CHAIN, KEY1_FILE, MAX_WAIT_MS, SLICE_MS};
 pub use import_view::{ImportKind, ImportView};
 pub use own::{
     OwnBoxDeliveredView, OwnBoxWelcomeArgs, OwnBundleView, OwnConfirmArgs, OwnCounterArgs,
