@@ -86,6 +86,7 @@ use openbmt_owner_node::{
     SendState, SettingsWaiting,
 };
 use openbmt_signer::SignerState;
+use openbmt_watch::say::Device;
 use openbmt_watch::HeaderChain;
 
 use crate::books::{self, BooksArgs, BooksView};
@@ -1714,7 +1715,7 @@ impl Entry {
                     known: true,
                     healthy: h.healthy,
                     behind: h.behind,
-                    words: words(h.words()),
+                    words: words(h.words_on(Device::OwnerPhone)),
                 },
             };
             let recovery_pending = node.take_recovery_pending();

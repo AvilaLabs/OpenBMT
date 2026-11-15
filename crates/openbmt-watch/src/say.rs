@@ -15,41 +15,116 @@ use crate::node_only::{NodeOnlyLine, NodeOnlyProblem};
 use crate::own_node::{OwnNodeHealth, OwnNodeProblem};
 use crate::refusal::Refusal;
 
+/// Which device shows the health words: the counter, or the owner's phone.
+/// The codes, the tone and who is told are the same on both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Device {
+    /// The counter.
+    Counter,
+    /// The owner's phone.
+    OwnerPhone,
+}
+
 impl Problem {
-    /// What the owner is told about one problem with the check. The cashier
-    /// is only told that the counter cannot check payments.
+    /// What the owner is told about one problem with the check, on the
+    /// counter. The cashier is only told that the counter cannot check
+    /// payments.
     pub fn words(&self) -> Words {
+        self.words_on(Device::Counter)
+    }
+
+    /// The same words as they read on `device`.
+    pub fn words_on(&self, device: Device) -> Words {
+        let phone = device == Device::OwnerPhone;
         let (heading, what, next) = match self {
             Self::TooFewPeerGroups => (
                 "Too few network links",
-                "This counter is connected to too few separate parts of the network to trust what it sees.",
-                "Check the counter's internet connection and wait a few minutes.",
+                if phone {
+                    "This phone is connected to too few separate parts of the network to trust what it sees."
+                } else {
+                    "This counter is connected to too few separate parts of the network to trust what it sees."
+                },
+                if phone {
+                    "Check the phone's internet connection and wait a few minutes."
+                } else {
+                    "Check the counter's internet connection and wait a few minutes."
+                },
             ),
             Self::TooFewFilterPeers => (
                 "Too few sources for checks",
-                "Too few of this counter's connections can answer its payment checks.",
-                "Check the counter's internet connection and wait a few minutes.",
+                if phone {
+                    "Too few of this phone's connections can answer its payment checks."
+                } else {
+                    "Too few of this counter's connections can answer its payment checks."
+                },
+                if phone {
+                    "Check the phone's internet connection and wait a few minutes."
+                } else {
+                    "Check the counter's internet connection and wait a few minutes."
+                },
             ),
             Self::TipIsOld => (
                 "Newest block is too old",
-                "The newest block this counter knows is more than two hours old.",
-                "Check the counter's internet connection; it catches up by itself.",
+                if phone {
+                    "The newest block this phone knows is more than two hours old."
+                } else {
+                    "The newest block this counter knows is more than two hours old."
+                },
+                if phone {
+                    "Check the phone's internet connection; it catches up by itself."
+                } else {
+                    "Check the counter's internet connection; it catches up by itself."
+                },
             ),
             Self::HeadersBehind => (
-                "Counter is behind",
-                "This counter has stayed behind the rest of the network for more than ten minutes.",
-                "Check the counter's internet connection; it catches up by itself.",
+                if phone {
+                    "Phone is behind"
+                } else {
+                    "Counter is behind"
+                },
+                if phone {
+                    "This phone has stayed behind the rest of the network for more than ten minutes."
+                } else {
+                    "This counter has stayed behind the rest of the network for more than ten minutes."
+                },
+                if phone {
+                    "Check the phone's internet connection; it catches up by itself."
+                } else {
+                    "Check the counter's internet connection; it catches up by itself."
+                },
             ),
             Self::ClockMismatch => (
-                "Counter's clock is wrong",
-                "This counter's clock is more than two hours behind the network's.",
-                "Set the counter's clock to the right time.",
+                if phone {
+                    "Phone's clock is wrong"
+                } else {
+                    "Counter's clock is wrong"
+                },
+                if phone {
+                    "This phone's clock is more than two hours behind the network's."
+                } else {
+                    "This counter's clock is more than two hours behind the network's."
+                },
+                if phone {
+                    "Set the phone's clock to the right time."
+                } else {
+                    "Set the counter's clock to the right time."
+                },
             ),
-            Self::BlocksBehind => (
-                "Instant sales paused",
-                "The counter heard of a new block but has not received it yet, so it cannot check it for a conflicting payment.",
-                "Nothing to do. Instant sales come back when the block arrives; until then sales wait for a confirmation.",
-            ),
+            Self::BlocksBehind => {
+                if phone {
+                    (
+                        "Waiting for a block",
+                        "The phone heard of a new block but has not received it yet, so it cannot check it for a conflicting payment.",
+                        "Nothing to do. It checks the block when it arrives.",
+                    )
+                } else {
+                    (
+                        "Instant sales paused",
+                        "The counter heard of a new block but has not received it yet, so it cannot check it for a conflicting payment.",
+                        "Nothing to do. Instant sales come back when the block arrives; until then sales wait for a confirmation.",
+                    )
+                }
+            }
         };
         let (tone, who) = match self {
             Self::BlocksBehind => (Tone::Info, Who::Nobody),
@@ -66,35 +141,62 @@ impl Problem {
 }
 
 impl Health {
-    /// What the owner is told about the answer of the health check.
+    /// What the owner is told about the answer of the health check, on the
+    /// counter.
     pub fn words(&self) -> Words {
+        self.words_on(Device::Counter)
+    }
+
+    /// The same words as they read on `device`.
+    pub fn words_on(&self, device: Device) -> Words {
+        let phone = device == Device::OwnerPhone;
         if let Some(problem) = self.problem {
-            return problem.words();
+            return problem.words_on(device);
         }
         if !self.healthy {
             return Words::new(
                 Tone::Info,
                 "No answer from the network",
-                "The counter has not yet heard from enough of the network to say whether it can check payments.",
+                if phone {
+                    "The phone has not yet heard from enough of the network to say whether it can check payments."
+                } else {
+                    "The counter has not yet heard from enough of the network to say whether it can check payments."
+                },
                 Who::Nobody,
-                "Nothing to do. It starts by itself once the counter is connected.",
+                if phone {
+                    "Nothing to do. It starts by itself once the phone is connected."
+                } else {
+                    "Nothing to do. It starts by itself once the counter is connected."
+                },
             )
             .code("WR-50");
         }
         if self.behind {
             return Words::new(
                 Tone::Info,
-                "Counter may be catching up",
-                "Some of the network is a few blocks ahead of this counter, which can still check payments.",
+                if phone { "Phone may be catching up" } else { "Counter may be catching up" },
+                if phone {
+                    "Some of the network is a few blocks ahead of this phone, which can still check payments."
+                } else {
+                    "Some of the network is a few blocks ahead of this counter, which can still check payments."
+                },
                 Who::Nobody,
-                "Nothing to do. If it lasts more than ten minutes the counter stops checking payments.",
+                if phone {
+                    "Nothing to do. If it lasts more than ten minutes the phone stops checking payments."
+                } else {
+                    "Nothing to do. If it lasts more than ten minutes the counter stops checking payments."
+                },
             )
             .code("WR-52");
         }
         Words::new(
             Tone::Info,
             "Checking works",
-            "This counter can check payments.",
+            if phone {
+                "This phone can check payments."
+            } else {
+                "This counter can check payments."
+            },
             Who::Nobody,
             "Nothing to do.",
         )

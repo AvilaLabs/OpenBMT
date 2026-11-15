@@ -166,6 +166,7 @@ fn status_and_notes_answer_before_and_after_the_network() {
     let after = status(&rig);
     assert!(after.health.0, "an answer");
     check_wire_words(&after.health.3).expect("words");
+    assert_eq!(after.health.3.what, "This phone can check payments.");
 
     let response = rig.call(60, handle, &[]);
     let mut r = Rd::ok(&response);

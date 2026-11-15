@@ -182,3 +182,68 @@ fn sc_01_every_own_node_state_has_words() {
     }
     assert!(all.iter().any(|(n, _)| n == "OwnNode::Healthy"));
 }
+
+/// Every problem the check can name.
+const EVERY_PROBLEM: [Problem; 6] = [
+    Problem::TooFewPeerGroups,
+    Problem::TooFewFilterPeers,
+    Problem::TipIsOld,
+    Problem::HeadersBehind,
+    Problem::ClockMismatch,
+    Problem::BlocksBehind,
+];
+
+#[test]
+fn sc_01_the_phone_health_words_name_the_phone_and_the_counter_words_are_unchanged() {
+    use crate::say::Device;
+    let mut healths = vec![
+        Health {
+            healthy: true,
+            problem: None,
+            behind: false,
+        },
+        Health {
+            healthy: true,
+            problem: None,
+            behind: true,
+        },
+        Health {
+            healthy: false,
+            problem: None,
+            behind: false,
+        },
+    ];
+    for problem in EVERY_PROBLEM {
+        healths.push(Health {
+            healthy: false,
+            problem: Some(problem),
+            behind: false,
+        });
+    }
+    for h in healths {
+        let counter = h.words_on(Device::Counter);
+        let phone = h.words_on(Device::OwnerPhone);
+        assert_eq!(counter, h.words(), "{h:?}");
+        assert_eq!(check(&phone), Ok(()), "{h:?}");
+        assert_eq!(
+            (phone.code, phone.tone, phone.who),
+            (counter.code, counter.tone, counter.who)
+        );
+        let text = format!("{} {} {}", phone.heading, phone.what, phone.next);
+        assert!(!text.to_lowercase().contains("counter"), "{text}");
+    }
+    for p in EVERY_PROBLEM {
+        assert_eq!(p.words_on(Device::Counter), p.words());
+        assert_ne!(p.words_on(Device::OwnerPhone).what, p.words().what);
+    }
+    let healthy = Health {
+        healthy: true,
+        problem: None,
+        behind: false,
+    };
+    assert_eq!(healthy.words().what, "This counter can check payments.");
+    assert_eq!(
+        healthy.words_on(Device::OwnerPhone).what,
+        "This phone can check payments."
+    );
+}
