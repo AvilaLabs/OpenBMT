@@ -4,8 +4,10 @@
 //! is started on a fake driver.
 
 use bitcoin::secp256k1::SecretKey;
-use openbmt_core::approval::test_signing::{sign_bip322_text, sign_compact_text, signing_wallet};
-use openbmt_core::approval::wallet_message_for;
+use openbmt_core::approval::test_signing::{
+    cosigning_wallet, sign_bip322_text, sign_compact_text, signing_wallet,
+};
+use openbmt_core::approval::{join_cosigner_sigs, wallet_message_for, WalletSigError};
 use openbmt_core::settings::{
     Change, Settings, SettingsError, ShopLightning, SignedSettings, LIGHTNING_NODE_BYTES,
 };
@@ -244,5 +246,69 @@ fn cr_239_a_redirect_without_a_signature_is_not_kept_and_a_signed_frame_in_confi
     .unwrap();
     let mut rig = rig_for(dir.path(), &record);
     assert!(rig.node.pending_change().is_none());
+    assert!(!confirm_exists(dir.path()));
+}
+
+/// A record paired with the 2-of-3 wallet and the key each cosigner signs
+/// with (AP-16).
+fn paired_multi(seed: u8) -> (crate::OwnPairingRecord, [SecretKey; 3]) {
+    let (wallet, keys) = cosigning_wallet(seed);
+    let mut r = record();
+    r.wallet = wallet;
+    (r, keys)
+}
+
+#[test]
+fn ap_17_a_redirect_with_two_cosigners_signatures_comes_into_force() {
+    let dir = Scratch::new();
+    let (record, keys) = paired_multi(33);
+    let mut rig = rig_for(dir.path(), &record);
+    let s = redirect(2);
+    let message = wallet_message_for(&s);
+    let text = join_cosigner_sigs(&[
+        (1, sign_compact_text(&keys[0], &message)),
+        (3, sign_bip322_text(&keys[2], &message)),
+    ]);
+    let change = signed(&s, Some(text));
+    assert_eq!(rig.node.take_settings(&change), Ok(Some(Change::Loosening)));
+    assert_eq!(rig.node.settings().version, 2);
+    assert!(!confirm_exists(dir.path()));
+    // The frame that was kept reads back to the same bytes.
+    let kept = DirStore::open(dir.path())
+        .unwrap()
+        .settings_file()
+        .unwrap()
+        .unwrap();
+    assert_eq!(kept, change.to_bytes());
+    assert_eq!(SignedSettings::from_bytes(&kept).unwrap(), change);
+}
+
+#[test]
+fn ap_17_a_redirect_with_one_cosigner_or_a_bad_one_is_refused_and_changes_nothing() {
+    let dir = Scratch::new();
+    let (record, keys) = paired_multi(34);
+    let mut rig = rig_for(dir.path(), &record);
+    let s = redirect(2);
+    let message = wallet_message_for(&s);
+    let one = join_cosigner_sigs(&[(2, sign_compact_text(&keys[1], &message))]);
+    let e = rig.node.take_settings(&signed(&s, Some(one))).unwrap_err();
+    assert!(matches!(
+        e,
+        SettingsRefused::Verify(SettingsError::WalletSig(WalletSigError::NotEnough))
+    ));
+    // Two signatures, the second not by the cosigner of its place.
+    let bad = join_cosigner_sigs(&[
+        (1, sign_compact_text(&keys[0], &message)),
+        (2, sign_compact_text(&keys[0], &message)),
+    ]);
+    let e = rig.node.take_settings(&signed(&s, Some(bad))).unwrap_err();
+    let named = record.wallet.cosigners().unwrap()[1].address.to_string();
+    match e {
+        SettingsRefused::Verify(SettingsError::WalletSig(WalletSigError::WrongSigner {
+            address,
+        })) => assert_eq!(address, named),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(rig.node.settings().version, settings().version);
     assert!(!confirm_exists(dir.path()));
 }

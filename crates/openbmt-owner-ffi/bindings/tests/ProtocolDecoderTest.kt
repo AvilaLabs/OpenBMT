@@ -147,6 +147,20 @@ object ProtocolDecoderTest {
         check(decodeResponse(ownPreviewFrame(path = null)).ownSettingsPreview().path == null)
         val none = decodeResponse(ownPreviewFrame(needs = false)).ownSettingsPreview()
         check(!none.needsWalletSig && none.message.isEmpty() && none.address.isEmpty() && none.preview.changes.size == 2)
+        check(ask.cosigners.isEmpty() && none.cosigners.isEmpty())
+        // The 2-of-3 wallet lists its three cosigners (AP-16, AP-18).
+        val multi = decodeResponse(ownPreviewFrame(cosigners = true)).ownSettingsPreview()
+        check(multi.cosigners.map { it.place } == listOf(1, 2, 3) && multi.cosigners.none { it.signed })
+        check(multi.cosigners[1].fingerprint == "fp2" && multi.cosigners[1].address == "bc1qcosigner2" && multi.cosigners[1].path == "m/48h/0h/0h/2h/0/0")
+        check(multi.cosigners[2].qr == "signmessage m/48h/0h/0h/2h/0/0 ascii:Message to sign")
+        rejects("a short cosigner list") { decodeResponse(ownPreviewFrame(cosigners = true).let { it.copyOf(it.size - 1) }).ownSettingsPreview() }
+        rejects("a cosigner flag") { decodeResponse(ownPreviewFrame(cosigners = true).also { it[it.size - 1] = 2 }).ownSettingsPreview() }
+        // Op 247: the signatures held, the places that signed and whether two have.
+        val hw = Writer().string("1:AAAA,3:BBBB")
+        hw.list(listOf(1, 3)) { hw.u8(it) }
+        val cosigned = decodeResponse(header(0, hw.bool(true).toByteArray())).ownCosigned()
+        check(cosigned.held == "1:AAAA,3:BBBB" && cosigned.signed == listOf(1, 3) && cosigned.ready)
+        rejects("a short cosigned answer") { decodeResponse(header(0, Writer().string("1:AAAA").toByteArray())).ownCosigned() }
         // Op 245: the same for a Shop Lightning edit, the preview of which has no changes list.
         val lightning = decodeResponse(ownShopLightningFrame()).ownShopLightningPreview()
         check(lightning.preview.version == 5L && lightning.preview.changeClass == ShopLightningClass.Redirect && lightning.preview.after == null)
@@ -1042,7 +1056,7 @@ object ProtocolDecoderTest {
     }
 
     /** The answer of op 243: the preview, then whether the wallet signs, the message and the address. */
-    private fun ownPreviewFrame(needs: Boolean = true, flag: Int = if (needs) 1 else 0, path: String? = "m/84h/0h/0h/0/0"): ByteArray {
+    private fun ownPreviewFrame(needs: Boolean = true, flag: Int = if (needs) 1 else 0, path: String? = "m/84h/0h/0h/0/0", cosigners: Boolean = false): ByteArray {
         val w = Writer().u32(4).u32(2)
         w.string("refund_cap").string("Largest single refund").u8(0).string("$100").string("$150").bool(true)
         w.string("counters").string("Counter's share").u8(1).bytes(ByteArray(32) { 5 })
@@ -1051,13 +1065,21 @@ object ProtocolDecoderTest {
         w.u8(flag)
         if (needs) w.string("Message to sign").string("bc1qaddress") else w.string("").string("")
         w.option(if (needs) path else null) { w.string(it) }
+        w.list(if (cosigners) (1..3).toList() else emptyList()) { putCosigner(w, it) }
         return header(0, w.toByteArray())
+    }
+
+    /** One cosigner of the 2-of-3 wallet as the library writes it (AP-16). */
+    private fun putCosigner(w: Writer, place: Int, signed: Boolean = false) {
+        w.u8(place).string("fp$place").string("bc1qcosigner$place").string("m/48h/0h/0h/2h/0/0")
+            .string("signmessage m/48h/0h/0h/2h/0/0 ascii:Message to sign").bool(signed)
     }
 
     /** The answer of op 245: a Shop Lightning preview of class Redirect that turns it off, then what the wallet signs. */
     private fun ownShopLightningFrame(): ByteArray {
         val w = Writer().u32(5).u8(2).bool(false).bool(false).u8(0).bytes(byteArrayOf(7, 7))
         w.bool(true).string("Message to sign").string("bc1qaddress").option(null as String?) { w.string(it) }
+        w.list(emptyList<Int>()) { putCosigner(w, it) }
         return header(0, w.toByteArray())
     }
 

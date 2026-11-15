@@ -2,7 +2,9 @@
 //! and 244, `docs/APPROVAL-RULES.md` AP-14, AP-15, `docs/OWNER-APP-RULES.md`
 //! OA-127): the preview of an edit, which says whether the wallet has to sign
 //! it, with the message and the address, and the call that attaches the
-//! signature, checks it and puts the settings in force. Like the other ops of
+//! signature, checks it and puts the settings in force. For the 2-of-3 wallet
+//! (AP-16 to AP-18) the preview lists the three cosigners and op 247 takes one
+//! cosigner's signature at a time. Like the other ops of
 //! a shop with its own wallet they work on no node: each is given the shop's
 //! folder, the owner root secret and the wallet's file.
 
@@ -15,6 +17,52 @@ use crate::host::queue_error;
 use crate::own::{device, own_error, with_shop, OwnShopArgs};
 use crate::settings_edit::{preview_view, to_edit, SettingsEditArgs, SettingsPreviewView};
 use crate::shop_lightning::{ShopLightningEditArgs, ShopLightningPreviewView};
+
+/// One cosigner of the 2-of-3 wallet as the owner phone shows it (AP-16,
+/// AP-18).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnCosignerView {
+    /// 1, 2 or 3: the place in the wallet's description.
+    pub place: u8,
+    /// The master fingerprint of the cosigner's key, in hexadecimal.
+    pub fingerprint: String,
+    /// The P2WPKH address of the key that signs.
+    pub address: String,
+    /// The derivation of that key from the master key (`m/48h/0h/0h/2h/0/0`).
+    pub path: String,
+    /// What the code for that cosigner holds:
+    /// `signmessage {path} ascii:{message}`.
+    pub qr: String,
+    /// The cosigner's signature is held. False in a preview.
+    pub signed: bool,
+}
+
+wire_record!(OwnCosignerView {
+    place,
+    fingerprint,
+    address,
+    path,
+    qr,
+    signed
+});
+
+/// The cosigners of a preview's ask, empty for a single-key wallet.
+fn cosigner_views(ask: Option<&openbmt_owner::WalletSigAsk>) -> Vec<OwnCosignerView> {
+    ask.map(|a| {
+        a.cosigners
+            .iter()
+            .map(|c| OwnCosignerView {
+                place: c.place,
+                fingerprint: c.fingerprint.clone(),
+                address: c.address.clone(),
+                path: c.path.clone(),
+                qr: format!("signmessage {} ascii:{}", c.path, a.message),
+                signed: false,
+            })
+            .collect()
+    })
+    .unwrap_or_default()
+}
 
 /// The arguments of `own_settings_preview`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +102,9 @@ pub struct OwnSettingsPreviewView {
     /// for hardened (`m/84h/0h/0h/0/0`); `None` when the description gives no
     /// origin or no signature is needed (OA-127).
     pub path: Option<String>,
+    /// For the 2-of-3 wallet, its three cosigners and what each signs
+    /// (AP-16); `address` is empty then. Empty for a single-key wallet.
+    pub cosigners: Vec<OwnCosignerView>,
 }
 
 wire_record!(OwnSettingsPreviewView {
@@ -61,7 +112,8 @@ wire_record!(OwnSettingsPreviewView {
     needs_wallet_sig,
     message,
     address,
-    path
+    path,
+    cosigners
 });
 
 /// The arguments of `own_settings_attach`.
@@ -110,6 +162,81 @@ pub(crate) fn preview(a: OwnSettingsPreviewArgs) -> Result<OwnSettingsPreviewVie
             message,
             address,
             path,
+            cosigners: cosigner_views(preview.wallet_sig.as_ref()),
+        })
+    })
+}
+
+/// The arguments of `own_cosigner_sig_add`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnCosignerAddArgs {
+    /// The shop.
+    pub shop: OwnShopArgs,
+    /// The settings of the preview, as its bytes.
+    pub settings: Vec<u8>,
+    /// The signatures held so far, as an earlier call gave them; empty for
+    /// none.
+    pub held: String,
+    /// The cosigner's place, 1 to 3.
+    pub place: u8,
+    /// The cosigner's signature as the person pasted or scanned it.
+    pub signature: String,
+}
+
+wire_record!(OwnCosignerAddArgs {
+    shop,
+    settings,
+    held,
+    place,
+    signature
+});
+wire_record_get!(OwnCosignerAddArgs {
+    shop,
+    settings,
+    held,
+    place,
+    signature
+});
+
+/// What `own_cosigner_sig_add` holds after taking a signature.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnCosignedView {
+    /// The signatures held, in one text: given back with the next signature
+    /// and, once two cosigners have signed, as the `signature` of op 244.
+    pub held: String,
+    /// The places that have signed.
+    pub signed: Vec<u8>,
+    /// Two different cosigners have signed, so the change can be sent.
+    pub ready: bool,
+}
+
+wire_record!(OwnCosignedView {
+    held,
+    signed,
+    ready
+});
+
+/// Op 247: take one cosigner's signature of the 2-of-3 wallet for the settings
+/// of a preview (AP-17, AP-18). It is checked at once against that cosigner's
+/// address and refused with that address when it does not verify; nothing is
+/// stored. The answer gives the signatures held and the places that signed.
+pub(crate) fn cosigner_sig_add(a: OwnCosignerAddArgs) -> Result<OwnCosignedView, AppError> {
+    let signed = openbmt_core::settings::SignedSettings::from_bytes(&a.settings)
+        .map_err(|e| refused_by("settings-bytes", format!("not settings: {e}")))?;
+    with_shop(a.shop, |node| {
+        let held = node
+            .shop()
+            .add_cosigner_sig::<String>(&signed.settings, &a.held, a.place, &a.signature)
+            .map_err(own_error)?;
+        let places = openbmt_core::approval::split_cosigner_sigs(&held)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect::<Vec<u8>>();
+        Ok(OwnCosignedView {
+            ready: places.len() >= openbmt_core::approval::COSIGNERS_NEEDED,
+            signed: places,
+            held,
         })
     })
 }
@@ -166,6 +293,9 @@ pub struct OwnShopLightningPreviewView {
     /// for hardened (`m/84h/0h/0h/0/0`); `None` when the description gives no
     /// origin or no signature is needed (OA-127).
     pub path: Option<String>,
+    /// For the 2-of-3 wallet, its three cosigners and what each signs
+    /// (AP-16); `address` is empty then. Empty for a single-key wallet.
+    pub cosigners: Vec<OwnCosignerView>,
 }
 
 wire_record!(OwnShopLightningPreviewView {
@@ -173,7 +303,8 @@ wire_record!(OwnShopLightningPreviewView {
     needs_wallet_sig,
     message,
     address,
-    path
+    path,
+    cosigners
 });
 
 /// Op 245: what a Shop Lightning edit does to the settings of a shop with
@@ -203,6 +334,7 @@ pub(crate) fn shop_lightning_preview(
             message,
             address,
             path,
+            cosigners: cosigner_views(preview.wallet_sig.as_ref()),
         })
     })
 }

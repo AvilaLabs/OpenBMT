@@ -147,18 +147,36 @@ pub struct SettingsPreview {
 
 /// What the owner is asked to sign in the wallet for a Redirect change (AP-06,
 /// AP-09): the message, and the first receive address of the wallet that has
-/// to sign it.
+/// to sign it. For the 2-of-3 wallet it is each cosigner that signs
+/// (AP-16): the address is empty and [`WalletSigAsk::cosigners`] lists them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WalletSigAsk {
     /// The message of AP-06 for the settings of the preview.
     pub message: String,
     /// The address that has to sign: the first receive address of the
-    /// pinned wallet.
+    /// pinned wallet. Empty for the 2-of-3 wallet.
     pub address: String,
     /// The derivation of that address from the wallet's key origin, with
     /// `h` for hardened (`m/84h/0h/0h/0/0`), when the description gives one
     /// (OA-127).
     pub path: Option<String>,
+    /// The three cosigners of the 2-of-3 wallet, in the order of the
+    /// description; empty for a single-key wallet (AP-16).
+    pub cosigners: Vec<CosignerAsk>,
+}
+
+/// One cosigner of the 2-of-3 wallet as the owner is asked for its signature
+/// (AP-16, AP-18).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CosignerAsk {
+    /// 1, 2 or 3: the place in the wallet's description.
+    pub place: u8,
+    /// The master fingerprint of the cosigner's key, in hexadecimal.
+    pub fingerprint: String,
+    /// The P2WPKH address of the key that signs.
+    pub address: String,
+    /// The derivation of that key from the master key (`m/48h/0h/0h/2h/0/0`).
+    pub path: String,
 }
 
 /// What the preview of a shop with its own wallet knows of the wallet.
@@ -168,18 +186,36 @@ pub(crate) struct OwnFacts {
     pub(crate) address: String,
     /// The derivation path of that address, when the wallet has a key origin.
     pub(crate) path: Option<String>,
+    /// The cosigners of the 2-of-3 wallet; empty for a single-key wallet.
+    pub(crate) cosigners: Vec<CosignerAsk>,
     /// The app says the shop is on its starter wallet (AP-15).
     pub(crate) starter: bool,
 }
 
 impl OwnFacts {
     pub(crate) fn of(wallet: &PinnedWallet, starter: bool) -> Self {
+        let cosigners: Vec<CosignerAsk> = wallet
+            .cosigners()
+            .into_iter()
+            .flatten()
+            .map(|c| CosignerAsk {
+                place: c.place,
+                fingerprint: c.fingerprint.to_string(),
+                address: c.address.to_string(),
+                path: c.path,
+            })
+            .collect();
         Self {
-            address: wallet
-                .receive_address(0)
-                .map(|a| a.to_string())
-                .unwrap_or_default(),
+            address: if cosigners.is_empty() {
+                wallet
+                    .receive_address(0)
+                    .map(|a| a.to_string())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            },
             path: wallet.first_address_path(),
+            cosigners,
             starter,
         }
     }
@@ -604,6 +640,7 @@ pub(crate) fn preview_over(
                 message: wallet_message_for(&s),
                 address: own.address.clone(),
                 path: own.path.clone(),
+                cosigners: own.cosigners.clone(),
             })
         }
         _ => None,

@@ -71,7 +71,7 @@ pub use counter::{
     equal_shares, BundleParts, CounterBundleMade, CounterQueued, CounterRequest, WaitingCounter,
 };
 pub use edit::{
-    parse_lightning_node, price_band, sats_per_usd_at, LightningEdit, SettingsEdit,
+    parse_lightning_node, price_band, sats_per_usd_at, CosignerAsk, LightningEdit, SettingsEdit,
     SettingsPreview, SwapEdit, WalletSigAsk, WatchEdit, MAX_EDIT_CONFIRMATIONS, MAX_USD_PER_BTC,
     MIN_USD_PER_BTC,
 };

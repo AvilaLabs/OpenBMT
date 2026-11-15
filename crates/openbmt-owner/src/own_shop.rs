@@ -42,6 +42,7 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
+use openbmt_core::approval::{WalletSigError, WalletSigners};
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::pairing::PAIRING_WINDOW_SECS;
 use openbmt_core::pairing_own::{
@@ -139,8 +140,9 @@ pub enum OwnRefusal {
     /// OA-119, OA-123: a Box cannot be added while a change waits for a
     /// counter's confirmation.
     BoxWaits,
-    /// AP-10, OA-127: the signature does not verify for the wallet's first
-    /// receive address, which is the address that had to sign.
+    /// AP-10, OA-127: the signature does not verify for the address that had
+    /// to sign: the wallet's first receive address, or the key address of the
+    /// cosigner whose signature it was (AP-16).
     WalletSig {
         /// The address that had to sign.
         address: String,
@@ -181,6 +183,24 @@ impl fmt::Display for OwnRefusal {
                 "AP-10: not a signature that is accepted; the address {address} has to sign"
             ),
         }
+    }
+}
+
+/// The refusal for a wallet signature that did not verify. A signature that
+/// is not accepted, or not from the key that had to sign, is refused with the
+/// address that had to sign (AP-10): for a single-key wallet its first
+/// address, for the 2-of-3 wallet the address of the cosigner whose signature
+/// it was. Too few cosigners, or a form the wallet does not take, is a
+/// refusal of the settings with the rule's own words (AP-17).
+fn wallet_sig_refusal(signers: &WalletSigners, e: WalletSigError) -> OwnRefusal {
+    match (signers, e) {
+        (WalletSigners::Single(address), _) => OwnRefusal::WalletSig {
+            address: address.to_string(),
+        },
+        (_, WalletSigError::Malformed { address } | WalletSigError::WrongSigner { address }) => {
+            OwnRefusal::WalletSig { address }
+        }
+        (_, e) => OwnRefusal::Settings(Refusal::SettingsInvalid(e.to_string())),
     }
 }
 
@@ -1296,19 +1316,13 @@ impl OwnShop {
             .into());
         }
         let signature = signature.trim();
-        let address = self.wallet.receive_address(0).map_err(|_| {
-            OwnRefusal::Settings(Refusal::SettingsInvalid(
-                "AP-09: the pinned wallet has no first receive address".to_string(),
-            ))
-        })?;
-        openbmt_core::approval::verify_wallet_message(
-            &address,
-            &openbmt_core::approval::wallet_message_for(&settings),
-            signature,
-        )
-        .map_err(|_| OwnRefusal::WalletSig {
-            address: address.to_string(),
-        })?;
+        let signers = self.signers()?;
+        signers
+            .verify(
+                &openbmt_core::approval::wallet_message_for(&settings),
+                signature,
+            )
+            .map_err(|e| wallet_sig_refusal(&signers, e))?;
         let signed = SignedSettings {
             owner_sig: settings.sign(&self.identity),
             approver_sig: None,
@@ -1319,6 +1333,61 @@ impl OwnShop {
         next.known = Some(signed.clone());
         self.commit(next, persist)?;
         Ok(signed)
+    }
+
+    /// The addresses that have to sign a Redirect change of the pinned wallet
+    /// (AP-09, AP-16).
+    fn signers<E>(&self) -> Result<WalletSigners, OwnError<E>> {
+        WalletSigners::of(&self.wallet).ok_or_else(|| {
+            OwnRefusal::Settings(Refusal::SettingsInvalid(
+                "AP-09: the pinned wallet has no first receive address".to_string(),
+            ))
+            .into()
+        })
+    }
+
+    /// AP-17, AP-18: take one cosigner's signature of the 2-of-3 wallet for
+    /// the Redirect change `settings`. It is checked at once against that
+    /// cosigner's address (AP-10), and the answer is the signatures so far
+    /// (`so_far`, the text an earlier call gave, empty for none) with it
+    /// added in its place, to be given again with the next and, once two
+    /// cosigners have signed, to [`OwnShop::change_settings_with_wallet_sig`].
+    /// A signature already held for that place is replaced. A single-key
+    /// wallet, a place that is not 1 to 3 and a `so_far` that is not this
+    /// form are refused.
+    pub fn add_cosigner_sig<E>(
+        &self,
+        settings: &Settings,
+        so_far: &str,
+        place: u8,
+        signature: &str,
+    ) -> Result<String, OwnError<E>> {
+        use openbmt_core::approval::{join_cosigner_sigs, split_cosigner_sigs};
+        let signers = self.signers()?;
+        let WalletSigners::TwoOfThree(addresses) = &signers else {
+            return Err(wallet_sig_refusal(&signers, WalletSigError::Shape).into());
+        };
+        let signature = signature.trim();
+        let mut held = if so_far.is_empty() {
+            Vec::new()
+        } else {
+            split_cosigner_sigs(so_far)
+                .ok_or_else(|| wallet_sig_refusal(&signers, WalletSigError::Shape))?
+        };
+        let address = usize::from(place)
+            .checked_sub(1)
+            .and_then(|i| addresses.get(i))
+            .ok_or_else(|| wallet_sig_refusal(&signers, WalletSigError::Shape))?;
+        openbmt_core::approval::verify_wallet_message(
+            address,
+            &openbmt_core::approval::wallet_message_for(settings),
+            signature,
+        )
+        .map_err(|e| wallet_sig_refusal(&signers, e))?;
+        held.retain(|(p, _)| *p != place);
+        held.push((place, signature.to_string()));
+        held.sort_by_key(|(p, _)| *p);
+        Ok(join_cosigner_sigs(&held))
     }
 
     /// BX-18, AS-84: whether the settings this phone signed list `key` as a

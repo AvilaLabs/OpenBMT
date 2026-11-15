@@ -304,7 +304,9 @@ private fun Controller.showSlReview(edit: ShopLightningEditArgs, back: () -> Uni
         if (ask != null && ask.needsWalletSig) {
             actions.add(
                 ui.primary(WalletSigWords.heading) {
-                    showWalletSig(p.settings, ask.message, ask.address, ask.path, done = { shopLightningDraft = ShopLightningModel.Draft(); showShopLightning() }, back = { showSlReview(edit, back) })
+                    val finished = { shopLightningDraft = ShopLightningModel.Draft(); showShopLightning() }
+                    if (ask.cosigners.isEmpty()) showWalletSig(p.settings, ask.message, ask.address, ask.path, done = finished, back = { showSlReview(edit, back) })
+                    else showCosignerSigs(p.settings, ask.message, ask.cosigners, done = finished, back = { showSlReview(edit, back) })
                 },
             )
         } else actions.add(

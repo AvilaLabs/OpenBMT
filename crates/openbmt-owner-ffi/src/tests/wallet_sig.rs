@@ -4,7 +4,9 @@
 //! address, a signature that does not check is refused with the rule and
 //! stores nothing, and a good one puts the settings in force.
 
-use openbmt_core::approval::test_signing::{sign_bip322_text, sign_compact_text, signing_wallet};
+use openbmt_core::approval::test_signing::{
+    cosigning_wallet, sign_bip322_text, sign_compact_text, signing_wallet,
+};
 use openbmt_core::approval::wallet_message_for;
 use openbmt_core::identity::Identity;
 use openbmt_core::pairing_own::OwnCounterPairing;
@@ -37,8 +39,21 @@ fn shop(dir: &Scratch, wallet: &[u8]) -> W {
 /// A shop with its own wallet and one counter in force: its folder and the
 /// wallet's file, and the key that signs for the wallet.
 fn paired(seed: u8) -> (Scratch, Vec<u8>, bitcoin::secp256k1::SecretKey) {
-    let dir = Scratch::new();
     let (wallet, key) = signing_wallet(seed);
+    let (dir, file) = paired_with(&wallet);
+    (dir, file, key)
+}
+
+/// A shop with the 2-of-3 wallet and one counter in force: its folder and the
+/// wallet's file, and the key each cosigner signs with.
+fn paired_multi(seed: u8) -> (Scratch, Vec<u8>, [bitcoin::secp256k1::SecretKey; 3]) {
+    let (wallet, keys) = cosigning_wallet(seed);
+    let (dir, file) = paired_with(&wallet);
+    (dir, file, keys)
+}
+
+fn paired_with(wallet: &openbmt_core::pinned_wallet::PinnedWallet) -> (Scratch, Vec<u8>) {
+    let dir = Scratch::new();
     let file = wallet.to_bytes();
     let response = call(150, &shop(&dir, &file).u64(T0).0);
     let mut r = Rd::ok(&response);
@@ -57,7 +72,7 @@ fn paired(seed: u8) -> (Scratch, Vec<u8>, bitcoin::secp256k1::SecretKey) {
             .0,
     );
     Rd::ok(&response);
-    (dir, file, key)
+    (dir, file)
 }
 
 fn node_edit() -> Vec<u8> {
@@ -68,8 +83,23 @@ fn node_edit() -> Vec<u8> {
 /// asked for, the message, the address and the path of the address.
 type Asked = (Vec<u8>, bool, String, String, Option<String>);
 
+/// A cosigner as op 243 lists it: place, fingerprint, address, path, code
+/// text, signed.
+type Cosigner = (u8, String, String, String, String, bool);
+
 /// The answer of op 243.
 fn ask(dir: &Scratch, file: &[u8], starter: bool) -> Result<Asked, String> {
+    let (asked, cosigners) = ask_with_cosigners(dir, file, starter)?;
+    assert!(cosigners.is_empty());
+    Ok(asked)
+}
+
+/// The answer of op 243 with the cosigners of the 2-of-3 wallet.
+fn ask_with_cosigners(
+    dir: &Scratch,
+    file: &[u8],
+    starter: bool,
+) -> Result<(Asked, Vec<Cosigner>), String> {
     let response = call(
         243,
         &W::new()
@@ -102,8 +132,18 @@ fn ask(dir: &Scratch, file: &[u8], starter: bool) -> Result<Asked, String> {
     let settings = r.bytes();
     let _currency = r.u8();
     let (needs, message, address, path) = (r.bool(), r.string(), r.string(), r.opt(Rd::string));
+    let cosigners = r.list(|r| {
+        (
+            r.u8(),
+            r.string(),
+            r.string(),
+            r.string(),
+            r.string(),
+            r.bool(),
+        )
+    });
     r.done();
-    Ok((settings, needs, message, address, path))
+    Ok(((settings, needs, message, address, path), cosigners))
 }
 
 fn attach(dir: &Scratch, file: &[u8], settings: &[u8], signature: &str) -> Result<u32, String> {
@@ -232,6 +272,16 @@ fn ap_14_shop_lightning_is_previewed_and_put_in_force_through_dispatch() {
     assert_eq!(after.unwrap(), id(2).device_id().to_bytes());
     let settings = r.bytes();
     let (needs, message, address, path) = (r.bool(), r.string(), r.string(), r.opt(Rd::string));
+    assert!(r
+        .list(|r| (
+            r.u8(),
+            r.string(),
+            r.string(),
+            r.string(),
+            r.string(),
+            r.bool()
+        ))
+        .is_empty());
     r.done();
     assert!(needs);
     assert_eq!(path.as_deref(), Some("m/84h/0h/0h/0/0"));
@@ -398,4 +448,81 @@ fn ap_14_a_redirect_without_the_signature_is_refused_by_op_246_and_stores_nothin
     );
     // Nothing is in force: the same Redirect is still a Redirect.
     assert!(ask(&dir, &file, false).unwrap().1);
+}
+
+/// The answer of op 247: the signatures held, the places that signed and
+/// whether two have.
+fn add_cosigner(
+    dir: &Scratch,
+    file: &[u8],
+    settings: &[u8],
+    held: &str,
+    place: u8,
+    signature: &str,
+) -> Result<(String, Vec<u8>, bool), Box<super::wire::Fault>> {
+    let response = call(
+        247,
+        &shop(dir, file)
+            .bytes(settings)
+            .string(held)
+            .u8(place)
+            .string(signature)
+            .0,
+    );
+    if let Some(f) = Rd::error(&response) {
+        return Err(Box::new(f));
+    }
+    let mut r = Rd::ok(&response);
+    let out = (r.string(), r.list(Rd::u8), r.bool());
+    r.done();
+    Ok(out)
+}
+
+#[test]
+fn ap_18_the_preview_lists_the_cosigners_of_the_2_of_3_wallet_through_dispatch() {
+    let (dir, file, keys) = paired_multi(63);
+    let ((settings, needs, message, address, path), cosigners) =
+        ask_with_cosigners(&dir, &file, false).unwrap();
+    assert!(needs && address.is_empty() && path.is_none());
+    let parsed = SignedSettings::from_bytes(&settings).unwrap();
+    assert_eq!(message, wallet_message_for(&parsed.settings));
+    assert_eq!(cosigners.len(), 3);
+    let wallet = openbmt_core::pinned_wallet::PinnedWallet::from_bytes(&file).unwrap();
+    for (i, (place, fingerprint, addr, cpath, qr, signed)) in cosigners.iter().enumerate() {
+        let c = &wallet.cosigners().unwrap()[i];
+        assert_eq!(usize::from(*place), i + 1);
+        assert_eq!(fingerprint, &c.fingerprint.to_string());
+        assert_eq!(addr, &c.address.to_string());
+        assert_eq!(cpath, "m/48h/0h/0h/2h/0/0");
+        assert_eq!(qr, &format!("signmessage {cpath} ascii:{message}"));
+        assert!(!signed);
+    }
+    let _ = keys;
+}
+
+#[test]
+fn ap_17_two_cosigners_are_taken_one_at_a_time_and_the_change_goes_in_force_through_dispatch() {
+    let (dir, file, keys) = paired_multi(64);
+    let ((settings, _, message, _, _), cosigners) = ask_with_cosigners(&dir, &file, false).unwrap();
+    let sig = |i: usize| sign_compact_text(&keys[i], &message);
+    let (held, signed, ready) = add_cosigner(&dir, &file, &settings, "", 2, &sig(1)).unwrap();
+    assert_eq!((signed.as_slice(), ready), (&[2u8][..], false));
+    // A wrong signature names that cosigner's address and holds nothing.
+    let e = add_cosigner(&dir, &file, &settings, &held, 3, &sig(0)).unwrap_err();
+    assert_eq!(e.rule, "AP-10");
+    assert!(e.words.what.contains(&cosigners[2].2));
+    // One signature is refused by the attach and nothing is stored.
+    assert!(attach(&dir, &file, &settings, &held).is_err());
+    let (held, signed, ready) = add_cosigner(&dir, &file, &settings, &held, 1, &sig(0)).unwrap();
+    assert_eq!((signed.as_slice(), ready), (&[1u8, 2][..], true));
+    assert_eq!(attach(&dir, &file, &settings, &held), Ok(2));
+}
+
+#[test]
+fn ap_17_a_single_key_shop_refuses_the_cosigner_op_through_dispatch() {
+    let (dir, file, key) = paired(65);
+    let (settings, _, message, _, _) = ask(&dir, &file, false).unwrap();
+    let sig = sign_compact_text(&key, &message);
+    let e = add_cosigner(&dir, &file, &settings, "", 1, &sig).unwrap_err();
+    assert_eq!(e.rule, "AP-10");
 }

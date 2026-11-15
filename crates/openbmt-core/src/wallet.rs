@@ -455,6 +455,40 @@ impl WalletDescription {
             .into_script())
     }
 
+    /// The path of the key a cosigner signs a message with (AP-16): its
+    /// account key's origin and then `/0/0`, written with `h` for hardened
+    /// (`m/48h/0h/0h/2h/0/0`). `place` is 1, 2 or 3.
+    pub fn cosigner_path(&self, place: u8) -> Option<String> {
+        match place {
+            1..=3 => Some(format!("m/48h/{}h/0h/2h/0/0", coin_type(self.network))),
+            _ => None,
+        }
+    }
+
+    /// The compressed key a cosigner signs a message with (AP-16): its
+    /// account xpub at receive index 0, unhardened. `place` is 1, 2 or 3.
+    pub fn cosigner_key(&self, place: u8) -> Result<bitcoin::CompressedPublicKey, WalletError> {
+        let slot = match place {
+            1..=3 => &self.slots[usize::from(place) - 1],
+            _ => return Err(WalletError::Derive("no such cosigner".into())),
+        };
+        let path = [
+            ChildNumber::Normal { index: 0 },
+            ChildNumber::Normal { index: 0 },
+        ];
+        let child = slot
+            .xpub
+            .derive_pub(secp(), &path)
+            .map_err(|e| WalletError::Derive(e.to_string()))?;
+        Ok(bitcoin::CompressedPublicKey(child.public_key))
+    }
+
+    /// The P2WPKH address of the key a cosigner signs a message with
+    /// (AP-16). `place` is 1, 2 or 3.
+    pub fn cosigner_address(&self, place: u8) -> Result<Address, WalletError> {
+        Ok(Address::p2wpkh(&self.cosigner_key(place)?, self.network))
+    }
+
     /// Receive script at `index`.
     pub fn receive_script(&self, index: u32) -> Result<ScriptBuf, WalletError> {
         self.script(Keychain::Receive, index)
@@ -477,6 +511,46 @@ mod tests {
     use super::*;
     use crate::testutil::{slot_from_mnemonic, wallet, MNEMONICS};
     use bitcoin::bip32::Xpriv;
+
+    /// The key each cosigner signs a message with (AP-16), from the BIP-39
+    /// test mnemonics: the account key's public derivation at `0/0` agrees
+    /// with deriving the whole path from the master private key. The fixed
+    /// addresses were made with a separate BIP-32 and bech32 script from the
+    /// mnemonics (no published vector covers a `48h/0h/0h/2h` key).
+    #[test]
+    fn ap_16_the_cosigners_keys_are_the_account_key_at_zero_zero() {
+        const FIXED: [&str; 3] = [
+            "bc1qtncy45g8qy8laah6jvxn6ppvj0s9rluxj5uxf6",
+            "bc1qgq7933ydtlwfgcq48zapuu2kfn8cwpcds2gr63",
+            "bc1qetqq0xwdqa2an5kks327hrucffjpsnn8dfl62k",
+        ];
+        let w = wallet(Network::Bitcoin);
+        for (i, mnemonic) in MNEMONICS[..3].iter().enumerate() {
+            let place = i as u8 + 1;
+            let seed = bip39::Mnemonic::parse(*mnemonic).unwrap().to_seed("");
+            let master = Xpriv::new_master(Network::Bitcoin, &seed).unwrap();
+            let path = w.cosigner_path(place).unwrap();
+            let sk = master
+                .derive_priv(secp(), &DerivationPath::from_str(&path).unwrap())
+                .unwrap()
+                .private_key;
+            let pk = bitcoin::CompressedPublicKey(sk.public_key(secp()));
+            assert_eq!(w.cosigner_key(place).unwrap(), pk);
+            let address = Address::p2wpkh(&pk, Network::Bitcoin);
+            assert_eq!(w.cosigner_address(place).unwrap(), address);
+            assert_eq!(address.to_string(), FIXED[i], "place {place}");
+        }
+        assert_eq!(w.cosigner_path(1).as_deref(), Some("m/48h/0h/0h/2h/0/0"));
+        assert_eq!(w.cosigner_path(0), None);
+        assert_eq!(w.cosigner_path(4), None);
+        assert!(w.cosigner_key(0).is_err());
+        assert!(w.cosigner_address(4).is_err());
+        // A cosigner's address is not the wallet's own.
+        assert_ne!(
+            w.cosigner_address(1).unwrap().script_pubkey(),
+            w.receive_script(0).unwrap()
+        );
+    }
 
     #[test]
     fn bip380_checksum_test_vector() {

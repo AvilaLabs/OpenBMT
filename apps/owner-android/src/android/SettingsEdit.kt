@@ -362,7 +362,10 @@ internal fun Controller.showEditReview() {
             SettingsEditModel.reviewShares(p)?.let { views.add(ui.text(it, 15f)) }
             val ask = ownAsk
             if (ask != null && ask.needsWalletSig) {
-                actions.add(ui.primary(WalletSigWords.heading) { showWalletSig(p.settings, ask.message, ask.address, ask.path) { showEditReview() } })
+                actions.add(ui.primary(WalletSigWords.heading) {
+                    if (ask.cosigners.isEmpty()) showWalletSig(p.settings, ask.message, ask.address, ask.path) { showEditReview() }
+                    else showCosignerSigs(p.settings, ask.message, ask.cosigners, done = { showHome() }, back = { showEditReview() })
+                })
             } else actions.add(
                 ui.button("Queue the change", ButtonKind.Primary) {
                     // SS-37: a change that loosens waits while the starter wallet is at its limit or past its date.

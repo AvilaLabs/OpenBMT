@@ -17,7 +17,8 @@ use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 
 use crate::approval::{
-    verify_wallet_message, wallet_message_for, ChangeClass, WalletSigError, MAX_SIG_TEXT,
+    is_cosigner_text, join_cosigner_sigs, sig_text_ok, split_cosigner_sigs, wallet_message_for,
+    ChangeClass, WalletSigError, WalletSigners, COSIGNERS, MAX_SIG_TEXT,
 };
 use crate::batch::PinnedRoots;
 use crate::currency::ShopCurrency;
@@ -25,7 +26,6 @@ use crate::identity::{tagged_hash, DeviceId, Identity, Sig, TAG_SETTINGS};
 use crate::onion::{parse_onion_name, SUFFIX};
 use crate::policy::{self, CheckMode};
 use crate::wire::{self, DecodeError, Reader};
-use bitcoin::Address;
 
 /// Largest underpayment tolerance `validate` accepts, in basis points (5%).
 pub const MAX_TOLERANCE_BPS: u32 = 500;
@@ -86,6 +86,12 @@ const SHOP_LIGHTNING_VERSION: u8 = 5;
 /// (AP-14). The byte after it is the version of the settings layout (1 to
 /// 5), and the wallet signature follows the owner's.
 const WALLET_SIG_VERSION: u8 = 6;
+
+/// The frame version of signed settings that carry the signatures of the
+/// 2-of-3 wallet's cosigners (AP-17). It is laid out as version 6, except
+/// that the wallet signature is a count (1 to 3) of entries, each a place
+/// (1 to 3), a length (2 bytes little endian) and a text.
+const WALLET_SIGS_VERSION: u8 = 7;
 
 /// Characters of the base32 part of a Tor v3 host name (NR-92).
 const ONION_BASE_CHARS: usize = 56;
@@ -1444,12 +1450,13 @@ pub enum Authority {
     OwnWallet {
         /// The owner root.
         owner: DeviceId,
-        /// The first receive address of the wallet the device pinned
-        /// (AP-09), which has to sign a Redirect change. `None` for a
-        /// device that pins no wallet (a Box): it takes a Redirect change
-        /// that carries a wallet signature of the right shape and leaves the
-        /// check of that signature to the counters, which pinned the wallet.
-        first_address: Option<Address>,
+        /// The addresses of the wallet the device pinned that have to sign
+        /// a Redirect change (AP-09, AP-16): the first receive address, or
+        /// each cosigner's. `None` for a device that pins no wallet (a Box):
+        /// it takes a Redirect change that carries a wallet signature of the
+        /// right shape and leaves the check of that signature to the
+        /// counters, which pinned the wallet.
+        signers: Option<WalletSigners>,
         /// Whether the counter was paired with a starter wallet (CR-256).
         starter: bool,
     },
@@ -1474,11 +1481,11 @@ impl Authority {
         wallet: &crate::pinned_wallet::PinnedWallet,
         starter: bool,
     ) -> Self {
-        let first_address = wallet.receive_address(0).ok();
+        let signers = WalletSigners::of(wallet);
         Self::OwnWallet {
             owner,
-            starter: starter || first_address.is_none(),
-            first_address,
+            starter: starter || signers.is_none(),
+            signers,
         }
     }
 
@@ -1487,7 +1494,7 @@ impl Authority {
     pub fn own_wallet(owner: DeviceId) -> Self {
         Self::OwnWallet {
             owner,
-            first_address: None,
+            signers: None,
             starter: false,
         }
     }
@@ -1504,14 +1511,21 @@ pub struct SignedSettings {
     pub approver_sig: Option<Sig>,
     /// The wallet's signature of the message of AP-06 for these settings, in
     /// base64 (AP-14): at most 1,000 ASCII characters. Only a Redirect
-    /// change of a shop with its own wallet carries one.
+    /// change of a shop with its own wallet carries one. For the 2-of-3
+    /// wallet it is the text of [`join_cosigner_sigs`]: each cosigner's
+    /// place and signature (AP-17).
     pub wallet_sig: Option<String>,
 }
 
 /// Whether `text` is a wallet signature the frame can carry: 1 to
-/// [`MAX_SIG_TEXT`] printable ASCII characters.
+/// [`MAX_SIG_TEXT`] printable ASCII characters, or the places and signatures
+/// of the 2-of-3 wallet (AP-17).
 fn wallet_sig_text_ok(text: &str) -> bool {
-    !text.is_empty() && text.len() <= MAX_SIG_TEXT && text.bytes().all(|b| b.is_ascii_graphic())
+    if is_cosigner_text(text) {
+        split_cosigner_sigs(text).is_some()
+    } else {
+        sig_text_ok(text)
+    }
 }
 
 impl SignedSettings {
@@ -1571,9 +1585,7 @@ impl SignedSettings {
                 _ => Ok(change),
             },
             Authority::OwnWallet {
-                first_address,
-                starter,
-                ..
+                signers, starter, ..
             } => {
                 if self.approver_sig.is_some() {
                     return Err(SettingsError::Invalid(
@@ -1596,13 +1608,10 @@ impl SignedSettings {
                         let Some(sig) = &self.wallet_sig else {
                             return Err(SettingsError::ConfirmationRequired(ChangeClass::Redirect));
                         };
-                        if let Some(address) = first_address {
-                            verify_wallet_message(
-                                address,
-                                &wallet_message_for(&self.settings),
-                                sig,
-                            )
-                            .map_err(SettingsError::WalletSig)?;
+                        if let Some(signers) = signers {
+                            signers
+                                .verify(&wallet_message_for(&self.settings), sig)
+                                .map_err(SettingsError::WalletSig)?;
                         }
                         Ok(change)
                     }
@@ -1657,11 +1666,12 @@ impl SignedSettings {
             (Authority::KeyApp(_), Some(_)) => return Err(SettingsError::WalletSigNotWanted),
             (
                 Authority::OwnWallet {
-                    first_address: Some(address),
+                    signers: Some(signers),
                     ..
                 },
                 Some(sig),
-            ) => verify_wallet_message(address, &wallet_message_for(&self.settings), sig)
+            ) => signers
+                .verify(&wallet_message_for(&self.settings), sig)
                 .map_err(SettingsError::WalletSig)?,
             _ => {}
         }
@@ -1680,14 +1690,21 @@ impl SignedSettings {
     /// bytes that are hashed and signed), the owner signature, a flag byte
     /// (1 if a Key app signature follows, else 0) and, only when the flag is
     /// 1, the Key app signature. In version 6 the wallet signature follows:
-    /// its length (2 bytes little endian) and its text. Call it on settings that passed `validate`;
+    /// its length (2 bytes little endian) and its text. In version 7, which
+    /// carries the 2-of-3 wallet's cosigner signatures (AP-17), a count of 1
+    /// to 3 follows and then that many entries of the cosigner's place (1 to
+    /// 3), the length of its signature and its text. Call it on settings that passed `validate`;
     /// `encode` panics when a list holds more than `u32::MAX` entries.
     pub fn to_bytes(&self) -> Vec<u8> {
         let body = self.settings.encode();
         let mut out = wire::start(&wire::MAGIC_SIGNED_SETTINGS, body.len() + 129);
         if let Some(byte) = out.get_mut(4) {
-            *byte = if self.wallet_sig.is_some() {
-                WALLET_SIG_VERSION
+            *byte = if let Some(text) = &self.wallet_sig {
+                if is_cosigner_text(text) {
+                    WALLET_SIGS_VERSION
+                } else {
+                    WALLET_SIG_VERSION
+                }
             } else {
                 self.settings.frame_version()
             };
@@ -1705,9 +1722,21 @@ impl SignedSettings {
             None => out.push(0),
         }
         if let Some(text) = &self.wallet_sig {
-            // The text is at most MAX_SIG_TEXT bytes, which fits a u16.
-            out.extend_from_slice(&(text.len() as u16).to_le_bytes());
-            out.extend_from_slice(text.as_bytes());
+            if is_cosigner_text(text) {
+                // Call it on settings that passed `verify`: a text that does
+                // not split is written as no entries, which no reader takes.
+                let sigs = split_cosigner_sigs(text).unwrap_or_default();
+                out.push(sigs.len() as u8);
+                for (place, sig) in &sigs {
+                    out.push(*place);
+                    out.extend_from_slice(&(sig.len() as u16).to_le_bytes());
+                    out.extend_from_slice(sig.as_bytes());
+                }
+            } else {
+                // The text is at most MAX_SIG_TEXT bytes, which fits a u16.
+                out.extend_from_slice(&(text.len() as u16).to_le_bytes());
+                out.extend_from_slice(text.as_bytes());
+            }
         }
         out
     }
@@ -1718,8 +1747,9 @@ impl SignedSettings {
     /// [`SignedSettings::verify`].
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
         let (mut r, version) =
-            Reader::framed_up_to(bytes, &wire::MAGIC_SIGNED_SETTINGS, WALLET_SIG_VERSION)?;
-        let layout = if version == WALLET_SIG_VERSION {
+            Reader::framed_up_to(bytes, &wire::MAGIC_SIGNED_SETTINGS, WALLET_SIGS_VERSION)?;
+        let with_sig = version >= WALLET_SIG_VERSION;
+        let layout = if with_sig {
             match r.u8()? {
                 v @ 1..=SHOP_LIGHTNING_VERSION => v,
                 v => return Err(DecodeError::UnsupportedVersion(v)),
@@ -1730,10 +1760,41 @@ impl SignedSettings {
         let settings = Settings::read(&mut r, layout)?;
         let owner_sig = r.sig()?;
         let approver_sig = if r.flag()? { Some(r.sig()?) } else { None };
-        let wallet_sig = if version == WALLET_SIG_VERSION {
+        let wallet_sig = if version == WALLET_SIGS_VERSION {
+            let count = usize::from(r.u8()?);
+            if !(1..=COSIGNERS).contains(&count) {
+                return Err(DecodeError::NonCanonical(
+                    "the wallet signatures are one to three",
+                ));
+            }
+            let mut sigs: Vec<(u8, String)> = Vec::with_capacity(count);
+            for _ in 0..count {
+                let place = r.u8()?;
+                let len = usize::from(r.u16_le()?);
+                let text = r.take(len)?;
+                if !(1..=3).contains(&place) || sigs.iter().any(|(p, _)| *p == place) {
+                    return Err(DecodeError::NonCanonical(
+                        "a cosigner's place is 1 to 3 and given once",
+                    ));
+                }
+                if !(1..=MAX_SIG_TEXT).contains(&len)
+                    || !text
+                        .iter()
+                        .all(|b| b.is_ascii_graphic() && *b != b':' && *b != b',')
+                {
+                    return Err(DecodeError::NonCanonical(
+                        "a cosigner's signature is 1 to 1,000 printable ASCII characters",
+                    ));
+                }
+                sigs.push((place, String::from_utf8_lossy(text).into_owned()));
+            }
+            Some(join_cosigner_sigs(&sigs))
+        } else if version == WALLET_SIG_VERSION {
             let len = usize::from(r.u16_le()?);
             let text = r.take(len)?;
-            if !(1..=MAX_SIG_TEXT).contains(&len) || !text.iter().all(|b| b.is_ascii_graphic()) {
+            if !(1..=MAX_SIG_TEXT).contains(&len)
+                || !text.iter().all(|b| b.is_ascii_graphic() && *b != b':')
+            {
                 return Err(DecodeError::NonCanonical(
                     "the wallet signature is 1 to 1,000 printable ASCII characters",
                 ));
@@ -1751,7 +1812,7 @@ impl SignedSettings {
         };
         // A frame is read back to the bytes it was written as: a layout
         // byte that is not the one the settings give is not canonical.
-        if version == WALLET_SIG_VERSION && layout != signed.settings.frame_version() {
+        if with_sig && layout != signed.settings.frame_version() {
             return Err(DecodeError::NonCanonical(
                 "the settings layout byte is not the one the settings need",
             ));
@@ -2845,7 +2906,7 @@ mod tests {
         };
         assert_eq!(edit(3, b'X'), DecodeError::BadMagic);
         assert_eq!(edit(4, 0), DecodeError::UnsupportedVersion(0));
-        assert_eq!(edit(4, 7), DecodeError::UnsupportedVersion(7));
+        assert_eq!(edit(4, 8), DecodeError::UnsupportedVersion(8));
         assert!(matches!(edit(TOR_AT, 2), DecodeError::NonCanonical(_)));
         assert!(matches!(edit(TOR_AT + 1, 2), DecodeError::NonCanonical(_)));
         // The Key app signature flag is the last byte but 64.
@@ -4243,10 +4304,10 @@ mod tests {
             ShopCurrency::Usd
         );
         let mut v4 = wire.clone();
-        v4[4] = 7;
+        v4[4] = 8;
         assert_eq!(
             SignedSettings::from_bytes(&v4),
-            Err(DecodeError::UnsupportedVersion(7))
+            Err(DecodeError::UnsupportedVersion(8))
         );
         let mut v0 = wire;
         v0[4] = 0;
@@ -4388,10 +4449,10 @@ mod tests {
         v1[4] = 1;
         assert!(SignedSettings::from_bytes(&v1).is_err());
         let mut v4 = wire;
-        v4[4] = 7;
+        v4[4] = 8;
         assert_eq!(
             SignedSettings::from_bytes(&v4),
-            Err(DecodeError::UnsupportedVersion(7))
+            Err(DecodeError::UnsupportedVersion(8))
         );
     }
 

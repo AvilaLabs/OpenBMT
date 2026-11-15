@@ -243,6 +243,7 @@ private const val OP_OWN_SETTINGS_PREVIEW = 243
 private const val OP_OWN_SETTINGS_ATTACH = 244
 private const val OP_OWN_SHOP_LIGHTNING_PREVIEW = 245
 private const val OP_OWN_SETTINGS_SEND = 246
+private const val OP_OWN_COSIGNER_SIG_ADD = 247
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -1058,7 +1059,27 @@ class OwnSettingsPreview(
     val address: String,
     /** The derivation of [address] from the wallet's key origin (`m/84h/0h/0h/0/0`), or null when the description gives none (OA-127). */
     val path: String?,
+    /** For the 2-of-3 wallet, its three cosigners and what each signs (AP-16); [address] is empty then. Empty for a single-key wallet. */
+    val cosigners: List<OwnCosigner>,
 )
+
+/**
+ * One cosigner of the 2-of-3 wallet as the screen shows it (AP-16, AP-18): its [place] (1 to 3) in the wallet's
+ * description, [fingerprint], the [address] of the key that signs, that key's derivation [path], and [qr], what its code
+ * holds (`signmessage {path} ascii:{message}`). [signed] is false in a preview.
+ */
+class OwnCosigner(val place: Int, val fingerprint: String, val address: String, val path: String, val qr: String, val signed: Boolean)
+
+internal fun Reader.ownCosigner(): OwnCosigner = OwnCosigner(u8(), string(), string(), string(), string(), bool())
+
+/**
+ * What [OwnerOwn.cosignerSigAdd] holds after taking a signature (AP-17): [held] is the signatures in one text, given
+ * back with the next and, once [ready], as the signature of [OwnerOwn.settingsAttach]; [signed] are the places that
+ * have signed; [ready] is true once two different cosigners have.
+ */
+class OwnCosigned(val held: String, val signed: List<Int>, val ready: Boolean)
+
+internal fun Reader.ownCosigned(): OwnCosigned = OwnCosigned(string(), list { u8() }, bool())
 
 /** What [OwnerOwn.settingsSend] did: the [version] of the change, and whether it [waits] for a counter's confirmation. */
 class OwnSettingsSent(val version: Long, val waits: Boolean)
@@ -1073,12 +1094,14 @@ class OwnShopLightningPreview(
     val address: String,
     /** The derivation of [address] from the wallet's key origin (`m/84h/0h/0h/0/0`), or null when the description gives none (OA-127). */
     val path: String?,
+    /** For the 2-of-3 wallet, its three cosigners (AP-16); empty for a single-key wallet. */
+    val cosigners: List<OwnCosigner>,
 )
 
 internal fun Reader.ownShopLightningPreview(): OwnShopLightningPreview =
-    OwnShopLightningPreview(shopLightningPreview(), bool(), string(), string(), option { string() })
+    OwnShopLightningPreview(shopLightningPreview(), bool(), string(), string(), option { string() }, list { ownCosigner() })
 
-internal fun Reader.ownSettingsPreview(): OwnSettingsPreview = OwnSettingsPreview(settingsPreview(), bool(), string(), string(), option { string() })
+internal fun Reader.ownSettingsPreview(): OwnSettingsPreview = OwnSettingsPreview(settingsPreview(), bool(), string(), string(), option { string() }, list { ownCosigner() })
 
 /** Why Lightning is not offered, as the Lightning counter's report says it (LK-84, SL-41). */
 enum class NotOffered { Offered, SecondDeviceAway, ChainBehind, NoUsableChannel, ProviderSilent }
@@ -4089,6 +4112,16 @@ object OwnerOwn {
     fun settingsAttach(shop: OwnShopArgs, settings: ByteArray, signature: String): Long {
         val r = call(OP_OWN_SETTINGS_ATTACH, 0) { it.ownShop(shop).bytes(settings).string(signature) }
         return r.u32().also { r.end() }
+    }
+
+    /**
+     * AP-17, AP-18: take one cosigner's [signature] of the 2-of-3 wallet for the [settings] of a preview. It is checked at
+     * once against that cosigner's address and refused with that address when it does not verify; nothing is stored.
+     * [held] is the text an earlier call gave (empty for none). Answers the signatures held.
+     */
+    fun cosignerSigAdd(shop: OwnShopArgs, settings: ByteArray, held: String, place: Int, signature: String): OwnCosigned {
+        val r = call(OP_OWN_COSIGNER_SIG_ADD, 0) { it.ownShop(shop).bytes(settings).string(held).u8(place).string(signature) }
+        return r.ownCosigned().also { r.end() }
     }
 
     /** The counter shows Paired (OA-111). */

@@ -108,8 +108,9 @@ pub use own::{
     OwnRequestView, OwnShopArgs, OwnWaitingView, OwnWalletView, SwitchRowView, SwitchStateKind,
 };
 pub use own_settings::{
-    OwnSettingsAttachArgs, OwnSettingsPreviewArgs, OwnSettingsPreviewView, OwnSettingsSendArgs,
-    OwnSettingsSentView, OwnShopLightningPreviewArgs, OwnShopLightningPreviewView,
+    OwnCosignedView, OwnCosignerAddArgs, OwnCosignerView, OwnSettingsAttachArgs,
+    OwnSettingsPreviewArgs, OwnSettingsPreviewView, OwnSettingsSendArgs, OwnSettingsSentView,
+    OwnShopLightningPreviewArgs, OwnShopLightningPreviewView,
 };
 pub use paid_check_views::{
     PaidAlarmView, PaidArrivedView, PaidCheckView, PaidClearArgs, PaidDayArgs, PaidDayView,

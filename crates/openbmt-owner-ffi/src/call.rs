@@ -187,9 +187,9 @@ use crate::own::{
     OwnRequestView, OwnShopArgs, OwnWaitingView, OwnWalletView, SwitchRowView, SwitchStateKind,
 };
 use crate::own_settings::{
-    self, OwnSettingsAttachArgs, OwnSettingsPreviewArgs, OwnSettingsPreviewView,
-    OwnSettingsSendArgs, OwnSettingsSentView, OwnShopLightningPreviewArgs,
-    OwnShopLightningPreviewView,
+    self, OwnCosignedView, OwnCosignerAddArgs, OwnCosignerView, OwnSettingsAttachArgs,
+    OwnSettingsPreviewArgs, OwnSettingsPreviewView, OwnSettingsSendArgs, OwnSettingsSentView,
+    OwnShopLightningPreviewArgs, OwnShopLightningPreviewView,
 };
 use crate::own_spend_views::{
     OwnSpendBuildArgs, OwnSpendBuiltView, OwnSpendFileView, OwnSpendItemView, OwnSpendSessionView,
@@ -1157,6 +1157,12 @@ fn build_ops() -> Vec<Op> {
             Zero,
             |_, a: OwnSettingsSendArgs| own_settings::send(a),
         ),
+        op(
+            247,
+            "own_cosigner_sig_add",
+            Zero,
+            |_, a: OwnCosignerAddArgs| own_settings::cosigner_sig_add(a),
+        ),
     ]
 }
 
@@ -1350,6 +1356,9 @@ fn definitions() -> Vec<TypeDef> {
         OwnShopLightningPreviewArgs::define(),
         OwnShopLightningPreviewView::define(),
         OwnSettingsAttachArgs::define(),
+        OwnCosignerView::define(),
+        OwnCosignerAddArgs::define(),
+        OwnCosignedView::define(),
         NotOfferedView::define(),
         Lsps1OfferView::define(),
         OrderStateView::define(),

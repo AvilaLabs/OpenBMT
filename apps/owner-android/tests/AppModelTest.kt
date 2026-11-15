@@ -37,6 +37,8 @@ import org.openbmt.owner.Alert
 import org.openbmt.owner.AlertKind
 import org.openbmt.owner.BatchWaiting
 import org.openbmt.owner.Books
+import org.openbmt.owner.OwnCosigned
+import org.openbmt.owner.OwnCosigner
 import org.openbmt.owner.PaidAlarm
 import org.openbmt.owner.PaidArrived
 import org.openbmt.owner.PaidDay
@@ -4694,7 +4696,12 @@ object AppModelTest {
     private fun oa_127_signing_with_the_wallet() {
         val all = WalletSigWords.all().toMap()
         ok(all["OA_WALLETSIG_HEADING"] == "Sign with your wallet" && all["OA_WALLETSIG_SEND"] == "Send change" && all["OA_WALLETSIG_SCAN"] == "Scan signature", "OA-127: the heading and the two buttons")
-        ok(all.size == 15 && all.values.none { it.isBlank() || it.contains("TODO_WORDS") }, "OA-127: every text of the screen is written and listed")
+        val cosignerKeys = all.keys.filter { it.startsWith("OA_WALLETSIG_COSIGNER_") }.toSet()
+        ok(all.size == 20 && all.values.none { it.isBlank() }, "OA-127: every text of the screen is listed")
+        ok(all.filterKeys { it !in cosignerKeys }.size == 15 && all.filterKeys { it !in cosignerKeys }.values.none { it.contains("TODO_WORDS") }, "OA-127: every text of the single-key screen is written")
+        ok(cosignerKeys.size == 5 && all.filterKeys { it in cosignerKeys }.values.none { it.contains("TODO_WORDS") }, "AP-18: every text of the 2-of-3 screen is written")
+        ok(WalletSigWords.cosignerNeedTwo == "Two keys must sign before the change can be sent." && WalletSigWords.cosignerAdd == "Check signature", "AP-18: Send waits for two keys, and each card checks its signature")
+        ap_18_cosigners_sign()
         val address = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
         val wrong = WalletSigWords.wrong(address)
         ok(wrong.heading == "Signature not accepted" && wrong.what.contains(address) && !wrong.what.contains("{address}") && wrong.code == "AP-10", "OA-127: the words of a wrong signature name the address that had to sign")
@@ -4728,6 +4735,27 @@ object AppModelTest {
         ok(source("src/android/ShopLightning.kt").contains("showSlReview(ShopLightningModel.turnOff()"), "OA-127: Turn off goes through that review")
         val send = source("src/android/WalletSig.kt").substringAfter("internal fun Controller.sendOwnChange")
         ok(send.contains("OwnerOwn.settingsSend(") && !send.contains("queueSettings") && send.contains("showOwnWaitingChange()"), "OA-127: the own-wallet send uses the library's own path and shows the waiting change with the app's words")
+    }
+
+    /** AP-16 to AP-18: two of the 2-of-3 wallet's cosigners sign a Redirect change. */
+    private fun ap_18_cosigners_sign() {
+        fun cosigner(place: Int, signed: Boolean = false) =
+            OwnCosigner(place, "fp$place", "bc1qcosigner$place", "m/48h/0h/0h/2h/0/0", "signmessage m/48h/0h/0h/2h/0/0 ascii:m", signed)
+        val three = listOf(cosigner(3), cosigner(1), cosigner(2))
+        ok(!CosignerSigModel.ready(emptyList()) && !CosignerSigModel.ready(listOf(2)) && !CosignerSigModel.ready(listOf(2, 2)), "AP-18: Send waits while fewer than two different cosigners have signed")
+        ok(CosignerSigModel.ready(listOf(1, 3)) && CosignerSigModel.ready(listOf(1, 2, 3)) && CosignerSigModel.NEEDED == 2, "AP-18: Send is enabled once two have signed")
+        ok(CosignerSigModel.sendHint(listOf(1)) == WalletSigWords.cosignerNeedTwo && CosignerSigModel.sendHint(listOf(1, 2)) == null, "AP-18: the line beside Send is shown only while it waits")
+        val cards = CosignerSigModel.cards(three, listOf(2))
+        ok(cards.map { it.place } == listOf(1, 2, 3) && cards.map { it.signed } == listOf(false, true, false), "AP-18: one card for each cosigner in the wallet's order, marked when it signed")
+        ok(cards.all { it.qr.startsWith("signmessage m/48h/0h/0h/2h/0/0 ascii:") }, "AP-18: each card's code holds signmessage with that cosigner's path")
+        val state = CosignerSigModel.State().took(OwnCosigned("1:AAAA,3:BBBB", listOf(1, 3), true))
+        ok(state.held == "1:AAAA,3:BBBB" && state.signed == listOf(1, 3), "AP-18: the screen keeps what the library held")
+        val screen = source("src/android/WalletSig.kt").substringAfter("internal fun Controller.showCosignerSigs").substringBefore("The wallet's code, read by the camera")
+        ok(screen.contains("OwnerOwn.cosignerSigAdd(shop, settings, state.held, c.place") && screen.contains("OwnerOwn.settingsAttach(shop, settings, state.held)") && screen.contains("send.isEnabled = CosignerSigModel.ready(state.signed)"), "AP-18: each signature is checked by the library when added, and Send goes through it once two have signed")
+        ok(screen.contains("for (c in CosignerSigModel.cards(cosigners, state.signed))") && screen.contains("AnimatedQrView.makePlain(act, Who.OWNER, c.qr") && screen.contains("ui.text(c.fingerprint") && screen.contains("ui.text(c.address") && screen.contains("scan.begin") && screen.contains("WalletSigWords.paste"), "AP-18: a card shows the fingerprint, the address and the code, and takes the signature pasted or scanned")
+        ok(screen.contains("copy(message)") && occurs(screen, "ui.text(message, 15f, mono = true)") == 1, "AP-18: the message is shown once, with Copy")
+        ok(screen.contains("WalletSigWords.wrong(c.address)"), "AP-18: a signature that does not verify is refused with the words naming that cosigner's address")
+        ok(source("src/android/SettingsEdit.kt").contains("showCosignerSigs(p.settings, ask.message, ask.cosigners") && source("src/android/ShopLightning.kt").contains("showCosignerSigs(p.settings, ask.message, ask.cosigners"), "AP-18: both Redirect reviews lead to the cosigners' screen for the 2-of-3 wallet")
     }
 
     /** OA-124 to OA-126: this phone as the counter too. */

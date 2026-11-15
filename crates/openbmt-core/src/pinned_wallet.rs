@@ -94,6 +94,20 @@ pub enum WalletKind {
     TwoOfThree,
 }
 
+/// One cosigner of the 2-of-3 wallet and the key it signs a message with
+/// (AP-16).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cosigner {
+    /// 1, 2 or 3: the place in the description.
+    pub place: u8,
+    /// The master fingerprint of the cosigner's key.
+    pub fingerprint: bitcoin::bip32::Fingerprint,
+    /// The P2WPKH address of the key that signs.
+    pub address: Address,
+    /// The derivation of that key from the master key (`m/48h/0h/0h/2h/0/0`).
+    pub path: String,
+}
+
 /// The wallet a counter derives its addresses from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PinnedWallet {
@@ -171,6 +185,24 @@ impl PinnedWallet {
             ImportedWallet::Single(w) => Some(format!("m/84h/0h/{}h/0/0", w.account())),
             ImportedWallet::Multisig(_) => None,
         }
+    }
+
+    /// The three cosigners of the 2-of-3 wallet with the key each signs a
+    /// message with (AP-16); `None` for a single-key wallet or when a key
+    /// cannot be derived.
+    pub fn cosigners(&self) -> Option<[Cosigner; 3]> {
+        let ImportedWallet::Multisig(w) = &self.wallet else {
+            return None;
+        };
+        let one = |place: u8| -> Option<Cosigner> {
+            Some(Cosigner {
+                place,
+                fingerprint: w.fingerprints().get(usize::from(place) - 1).copied()?,
+                address: w.cosigner_address(place).ok()?,
+                path: w.cosigner_path(place)?,
+            })
+        };
+        Some([one(1)?, one(2)?, one(3)?])
     }
 
     /// Wire form: `OBM)`, version 1, the text length, the text, its hash.
@@ -525,6 +557,19 @@ mod tests {
 
     fn signed(start: u32, end: u32) -> SignedRange {
         SignedRange::sign(&identity(1), range(3, start, end)).unwrap()
+    }
+
+    #[test]
+    fn ap_16_the_2_of_3_wallet_gives_its_three_cosigners_and_a_single_key_none() {
+        let cosigners = pinned_multi().cosigners().unwrap();
+        let w = wallet(Network::Bitcoin);
+        for (i, c) in cosigners.iter().enumerate() {
+            assert_eq!(usize::from(c.place), i + 1);
+            assert_eq!(c.fingerprint, w.fingerprints()[i]);
+            assert_eq!(c.address, w.cosigner_address(c.place).unwrap());
+            assert_eq!(c.path, "m/48h/0h/0h/2h/0/0");
+        }
+        assert_eq!(pinned_single().cosigners(), None);
     }
 
     #[test]

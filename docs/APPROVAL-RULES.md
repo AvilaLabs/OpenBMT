@@ -70,6 +70,31 @@ signature for every loosening change, unchanged.
   phone that holds the owner root. The owner phone does not offer a Redirect
   change while the shop is on its starter wallet, and a counter paired with a
   starter wallet (CR-256) refuses one.
+- **AP-16. The 2-of-3 wallet.** Wallets do not yet sign a message for a
+  2-of-3 address, so for the 2-of-3 wallet each cosigner signs for a key of
+  its own: the key of its account key in the wallet's description at receive
+  index 0 (`{origin}/0/0`, for most `m/48h/0h/0h/2h/0/0`), as the P2WPKH
+  address of that key. Two different cosigners must sign the message of
+  AP-06, each with AP-07 or AP-08. They are the cosigners who could sign a
+  payment from the wallet, so no fewer than could move its money can
+  approve where it is paid.
+- **AP-17. Carrying two signatures.** For the 2-of-3 wallet the frame of
+  AP-14 carries two or three signatures, each with the cosigner's place in
+  the description (1, 2 or 3, in the order the description lists the keys)
+  and its text in base64, at most 1,000 characters. The counter and the
+  owner phone check each against that cosigner's address. Settings are
+  refused when fewer than two different cosigners sign, when a place is
+  given twice, or when any signature given does not verify, and the refusal
+  names the address of the cosigner whose signature did not (AP-10).
+- **AP-18. Asking each cosigner.** The owner phone shows the message once,
+  and for each cosigner its fingerprint, its address of AP-16 and a code
+  that holds `signmessage {origin}/0/0 ascii:{message}`, so the person can
+  tell which device to use for which. It takes the signatures one at a time,
+  says which cosigners have signed, and sends the change once two have.
+- **AP-19. A signer that cannot.** Some signers sign a message only for the
+  addresses of a single-key wallet. For a cosigner kept on one of them, the
+  OpenBMT boot stick signs the message from that cosigner's words
+  (`docs/STICK-RULES.md`), and the words never reach a phone.
 
 ## 2. Counter confirmation
 
@@ -109,8 +134,9 @@ signature for every loosening change, unchanged.
   and the address. Trailing bytes, another count of items or another
   sighash type are refused.
 - **AP-09. Only one address type.** The signing address must be a mainnet
-  P2WPKH address (the first receive address of the single-key wallet).
-  Every other address type and network is refused.
+  P2WPKH address: for a single-key wallet its first receive address, and for
+  the 2-of-3 wallet the address of each cosigner's key of AP-16. Every other
+  address type and network is refused.
 - **AP-10. A wrong one names the address.** A signature that is not
   accepted, or was not made by the key of the address, is refused with the
   address that had to sign in the refusal.

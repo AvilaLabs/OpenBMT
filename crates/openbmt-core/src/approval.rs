@@ -244,6 +244,12 @@ pub enum WalletSigError {
         /// The address that had to sign.
         address: String,
     },
+    /// AP-17: fewer than two different cosigners of the 2-of-3 wallet signed.
+    NotEnough,
+    /// AP-17: the signatures are not in the form the wallet takes (one
+    /// signature for a single-key wallet; places and signatures for the
+    /// 2-of-3 wallet).
+    Shape,
 }
 
 impl fmt::Display for WalletSigError {
@@ -260,6 +266,14 @@ impl fmt::Display for WalletSigError {
             Self::WrongSigner { address } => write!(
                 f,
                 "AP-10: the signature is not from the address {address}, which has to sign"
+            ),
+            Self::NotEnough => write!(
+                f,
+                "AP-17: two different cosigners of the wallet have to sign"
+            ),
+            Self::Shape => write!(
+                f,
+                "AP-17: the signatures are not in the form this wallet takes"
             ),
         }
     }
@@ -354,6 +368,112 @@ pub fn verify_wallet_message(
         Some(true) => Ok(()),
         Some(false) => Err(wrong()),
         None => Err(malformed()),
+    }
+}
+
+/// The most cosigners of the 2-of-3 wallet (AP-17).
+pub const COSIGNERS: usize = 3;
+/// The fewest different cosigners whose signatures are taken (AP-17).
+pub const COSIGNERS_NEEDED: usize = 2;
+
+/// The signatures of the 2-of-3 wallet's cosigners as the settings carry them
+/// (AP-17): each with its place (1 to 3) in the description. In memory they
+/// are one text, `place:base64` entries joined by commas (base64 holds
+/// neither character), which is told from a single-key wallet's one signature
+/// by the colon.
+pub fn join_cosigner_sigs(sigs: &[(u8, String)]) -> String {
+    sigs.iter()
+        .map(|(place, text)| format!("{place}:{text}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// Whether the carried signature text is the 2-of-3 form.
+pub fn is_cosigner_text(text: &str) -> bool {
+    text.contains(':')
+}
+
+/// A signature text that can be carried: 1 to [`MAX_SIG_TEXT`] printable
+/// ASCII characters.
+pub fn sig_text_ok(text: &str) -> bool {
+    !text.is_empty() && text.len() <= MAX_SIG_TEXT && text.bytes().all(|b| b.is_ascii_graphic())
+}
+
+/// Read the 2-of-3 form of [`join_cosigner_sigs`]: one to three entries, each
+/// a place of 1 to 3 that no other entry has and a signature text that can be
+/// carried.
+pub fn split_cosigner_sigs(text: &str) -> Option<Vec<(u8, String)>> {
+    let mut out: Vec<(u8, String)> = Vec::new();
+    for entry in text.split(',') {
+        let (place, sig) = entry.split_once(':')?;
+        let place = match place.as_bytes() {
+            [d @ b'1'..=b'3'] => d - b'0',
+            _ => return None,
+        };
+        if !sig_text_ok(sig) || sig.contains([':', ',']) || out.iter().any(|(p, _)| *p == place) {
+            return None;
+        }
+        out.push((place, sig.to_string()));
+        if out.len() > COSIGNERS {
+            return None;
+        }
+    }
+    Some(out)
+}
+
+/// The addresses that have to sign a Redirect change (AP-09, AP-16).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WalletSigners {
+    /// The first receive address of a single-key wallet.
+    Single(Address),
+    /// The address of each cosigner's key of the 2-of-3 wallet, in the order
+    /// of the description.
+    TwoOfThree([Address; COSIGNERS]),
+}
+
+impl WalletSigners {
+    /// The signers of a pinned wallet, `None` when an address cannot be
+    /// derived.
+    pub fn of(wallet: &crate::pinned_wallet::PinnedWallet) -> Option<Self> {
+        match wallet.cosigners() {
+            Some(list) => {
+                let [a, b, c] = list;
+                Some(Self::TwoOfThree([a.address, b.address, c.address]))
+            }
+            None => wallet.receive_address(0).ok().map(Self::Single),
+        }
+    }
+
+    /// Check the carried signature text against `message`: for a single-key
+    /// wallet one signature (AP-07, AP-08); for the 2-of-3 wallet the
+    /// signatures of at least two different cosigners, each checked against
+    /// that cosigner's address (AP-16, AP-17), and the first that does not
+    /// verify is refused naming its cosigner's address (AP-10).
+    pub fn verify(&self, message: &str, text: &str) -> Result<(), WalletSigError> {
+        match self {
+            Self::Single(address) => {
+                if is_cosigner_text(text) {
+                    return Err(WalletSigError::Shape);
+                }
+                verify_wallet_message(address, message, text)
+            }
+            Self::TwoOfThree(addresses) => {
+                if !is_cosigner_text(text) {
+                    return Err(WalletSigError::NotEnough);
+                }
+                let sigs = split_cosigner_sigs(text).ok_or(WalletSigError::Shape)?;
+                if sigs.len() < COSIGNERS_NEEDED {
+                    return Err(WalletSigError::NotEnough);
+                }
+                for (place, sig) in &sigs {
+                    let address = addresses
+                        .get(usize::from(*place) - 1)
+                        .ok_or(WalletSigError::Shape)?;
+                    verify_wallet_message(address, message, sig)?;
+                }
+                Ok(())
+            }
+        }
     }
 }
 
@@ -488,6 +608,35 @@ pub mod test_signing {
                 wallet,
             )),
             sk,
+        )
+    }
+
+    /// The 2-of-3 wallet of three known keys (the accounts made from seeds
+    /// `seed`, `seed + 1` and `seed + 2`), and the secret key each cosigner
+    /// signs a message with (its account key at `0/0`, AP-16).
+    pub fn cosigning_wallet(seed: u8) -> (crate::pinned_wallet::PinnedWallet, [SecretKey; 3]) {
+        let account: DerivationPath = "m/48h/0h/0h/2h".parse().unwrap();
+        let first: DerivationPath = "m/0/0".parse().unwrap();
+        let mut slots = Vec::new();
+        let mut keys = Vec::new();
+        for i in 0..3u8 {
+            let master = Xpriv::new_master(Network::Bitcoin, &[seed + i; 32]).unwrap();
+            let account_key = master.derive_priv(secp(), &account).unwrap();
+            slots.push(crate::wallet::KeySlot {
+                index: i + 1,
+                origin_fingerprint: master.fingerprint(secp()),
+                origin_path: account.clone(),
+                xpub: Xpub::from_priv(secp(), &account_key),
+            });
+            keys.push(account_key.derive_priv(secp(), &first).unwrap().private_key);
+        }
+        let slots: [crate::wallet::KeySlot; 3] = slots.try_into().unwrap();
+        let description = crate::wallet::WalletDescription::new(Network::Bitcoin, slots).unwrap();
+        (
+            crate::pinned_wallet::PinnedWallet::new(
+                crate::wallet_single::ImportedWallet::Multisig(description),
+            ),
+            keys.try_into().unwrap(),
         )
     }
 
@@ -1341,7 +1490,7 @@ mod tests {
     fn authority(shop: &Shop, starter: bool) -> crate::settings::Authority {
         crate::settings::Authority::OwnWallet {
             owner: shop.owner.device_id(),
-            first_address: Some(shop.address.clone()),
+            signers: Some(WalletSigners::Single(shop.address.clone())),
             starter,
         }
     }
@@ -1536,6 +1685,289 @@ mod tests {
         );
     }
 
+    // ---- the 2-of-3 wallet (AP-16, AP-17) -----------------------------------
+
+    /// A shop with the 2-of-3 wallet: the owner, the cosigners' keys, the
+    /// settings in force and a Redirect change of them.
+    struct Msig {
+        shop: Shop,
+        pinned: crate::pinned_wallet::PinnedWallet,
+        keys: [bitcoin::secp256k1::SecretKey; 3],
+        message: String,
+    }
+
+    fn msig() -> Msig {
+        let (pinned, keys) = cosigning_wallet(31);
+        let shop = shop();
+        let message = wallet_message_for(&shop.new);
+        Msig {
+            shop,
+            pinned,
+            keys,
+            message,
+        }
+    }
+
+    impl Msig {
+        fn authority(&self) -> crate::settings::Authority {
+            crate::settings::Authority::pinned_own_wallet(
+                self.shop.owner.device_id(),
+                &self.pinned,
+                false,
+            )
+        }
+
+        /// The compact signature of cosigner `place` (1 to 3).
+        fn sig(&self, place: u8) -> String {
+            sign_compact_text(&self.keys[usize::from(place) - 1], &self.message)
+        }
+
+        fn take(&self, text: String) -> Result<Change, SettingsError> {
+            owned(&self.shop, &self.shop.new, Some(text))
+                .verify_with(&self.authority(), Some(&self.shop.old))
+        }
+    }
+
+    #[test]
+    fn ap_16_each_cosigner_signs_with_its_account_key_at_receive_index_zero() {
+        let m = msig();
+        let cosigners = m.pinned.cosigners().unwrap();
+        for (i, c) in cosigners.iter().enumerate() {
+            assert_eq!(usize::from(c.place), i + 1);
+            assert_eq!(c.path, "m/48h/0h/0h/2h/0/0");
+            let pk = CompressedPublicKey(m.keys[i].public_key(secp()));
+            assert_eq!(c.address, address(&pk));
+            assert!(c.address.script_pubkey().is_p2wpkh());
+        }
+        // A single-key wallet has no cosigners.
+        assert!(signing_wallet(21).0.cosigners().is_none());
+    }
+
+    #[test]
+    fn ap_16_a_cosigners_signature_by_another_cosigners_key_is_not_its_own() {
+        let m = msig();
+        let signers = WalletSigners::of(&m.pinned).unwrap();
+        // Cosigner 2's text under place 1.
+        let text = join_cosigner_sigs(&[(1, m.sig(2)), (3, m.sig(3))]);
+        let e = signers.verify(&m.message, &text).unwrap_err();
+        let first = m.pinned.cosigners().unwrap()[0].address.to_string();
+        assert_eq!(e, WalletSigError::WrongSigner { address: first });
+    }
+
+    #[test]
+    fn ap_17_two_good_signatures_and_three_good_ones_are_taken() {
+        let m = msig();
+        for places in [[1u8, 2].as_slice(), &[1, 3], &[2, 3], &[3, 1], &[1, 2, 3]] {
+            let sigs: Vec<_> = places.iter().map(|p| (*p, m.sig(*p))).collect();
+            assert_eq!(
+                m.take(join_cosigner_sigs(&sigs)),
+                Ok(Change::Loosening),
+                "{places:?}"
+            );
+        }
+        // BIP-322 is taken for a cosigner as for a single key (AP-08).
+        let b = sign_bip322_text(&m.keys[1], &m.message);
+        assert_eq!(
+            m.take(join_cosigner_sigs(&[(1, m.sig(1)), (2, b)])),
+            Ok(Change::Loosening)
+        );
+    }
+
+    #[test]
+    fn ap_17_one_signature_or_the_same_cosigner_twice_is_refused() {
+        let m = msig();
+        assert_eq!(
+            m.take(join_cosigner_sigs(&[(2, m.sig(2))])),
+            Err(SettingsError::WalletSig(WalletSigError::NotEnough))
+        );
+        // A signature of the single-key form, with no place.
+        assert_eq!(
+            m.take(m.sig(1)),
+            Err(SettingsError::WalletSig(WalletSigError::NotEnough))
+        );
+        // The same cosigner twice: a text the frame cannot carry.
+        let twice = join_cosigner_sigs(&[(1, m.sig(1)), (1, m.sig(1))]);
+        assert!(matches!(m.take(twice), Err(SettingsError::Invalid(_))));
+        // Two places for one key is no second cosigner.
+        let signers = WalletSigners::of(&m.pinned).unwrap();
+        let both = join_cosigner_sigs(&[(1, m.sig(1)), (2, m.sig(1))]);
+        assert!(matches!(
+            signers.verify(&m.message, &both),
+            Err(WalletSigError::WrongSigner { .. })
+        ));
+    }
+
+    #[test]
+    fn ap_17_two_good_and_one_bad_is_refused_naming_the_bad_cosigners_address() {
+        let m = msig();
+        let other = signing_wallet(77).1;
+        let bad = sign_compact_text(&other, &m.message);
+        let third = m.pinned.cosigners().unwrap()[2].address.to_string();
+        let text = join_cosigner_sigs(&[(1, m.sig(1)), (2, m.sig(2)), (3, bad)]);
+        assert_eq!(
+            m.take(text),
+            Err(SettingsError::WalletSig(WalletSigError::WrongSigner {
+                address: third.clone()
+            }))
+        );
+        let junk = join_cosigner_sigs(&[(1, m.sig(1)), (3, "AAAA".into())]);
+        assert_eq!(
+            m.take(junk),
+            Err(SettingsError::WalletSig(WalletSigError::Malformed {
+                address: third
+            }))
+        );
+        // A signature of another message.
+        let wrong = sign_compact_text(&m.keys[1], "another message");
+        let text = join_cosigner_sigs(&[(1, m.sig(1)), (2, wrong)]);
+        assert!(matches!(
+            m.take(text),
+            Err(SettingsError::WalletSig(WalletSigError::WrongSigner { .. }))
+        ));
+    }
+
+    #[test]
+    fn ap_17_a_single_key_wallet_refuses_the_cosigner_form_and_the_other_way_round() {
+        let (wallet, key) = signing_wallet(21);
+        let signers = WalletSigners::of(&wallet).unwrap();
+        let message = "m";
+        let sig = sign_compact_text(&key, message);
+        assert_eq!(signers.verify(message, &sig), Ok(()));
+        let text = join_cosigner_sigs(&[(1, sig.clone()), (2, sig)]);
+        assert_eq!(signers.verify(message, &text), Err(WalletSigError::Shape));
+    }
+
+    #[test]
+    fn ap_17_the_cosigner_text_is_read_strictly() {
+        let good = "1:AAAA,2:BBBB";
+        assert_eq!(
+            split_cosigner_sigs(good),
+            Some(vec![(1, "AAAA".to_string()), (2, "BBBB".to_string())])
+        );
+        for bad in [
+            "",
+            "0:AAAA,1:BBBB",
+            "4:AAAA,1:BBBB",
+            "1:AAAA,1:BBBB",
+            "1:AAAA,2:BBBB,3:CCCC,1:DDDD",
+            "1:,2:BBBB",
+            "1:AAAA,",
+            ",1:AAAA",
+            "12:AAAA",
+            "1:AA:AA",
+            "1:AA AA",
+            "AAAA",
+        ] {
+            assert_eq!(split_cosigner_sigs(bad), None, "{bad:?}");
+        }
+        let long = format!("1:{}", "A".repeat(1_001));
+        assert_eq!(split_cosigner_sigs(&long), None);
+        let longest = format!("1:{}", "A".repeat(1_000));
+        assert!(split_cosigner_sigs(&longest).is_some());
+    }
+
+    #[test]
+    fn ap_17_the_frame_carries_places_and_signatures_and_reads_back_to_its_bytes() {
+        let m = msig();
+        // Single-key frames are the bytes they were (AP-14).
+        let single = owned(&m.shop, &m.shop.new, Some("A".repeat(88)));
+        assert_eq!(single.to_bytes()[4], 6);
+        for places in [[1u8, 2].as_slice(), &[3, 1], &[1, 2, 3]] {
+            let sigs: Vec<_> = places.iter().map(|p| (*p, m.sig(*p))).collect();
+            let signed = owned(&m.shop, &m.shop.new, Some(join_cosigner_sigs(&sigs)));
+            let bytes = signed.to_bytes();
+            assert_eq!(&bytes[..4], b"OBMS");
+            assert_eq!(bytes[4], 7);
+            assert_eq!(bytes[5], owned(&m.shop, &m.shop.new, None).to_bytes()[4]);
+            let back = SignedSettings::from_bytes(&bytes).unwrap();
+            assert_eq!(back, signed);
+            assert_eq!(back.to_bytes(), bytes);
+            assert_eq!(
+                back.verify_with(&m.authority(), Some(&m.shop.old)),
+                Ok(Change::Loosening)
+            );
+            // The tail is the count and the entries.
+            let tail_len = 1 + sigs.iter().map(|(_, t)| 3 + t.len()).sum::<usize>();
+            assert_eq!(bytes[bytes.len() - tail_len], places.len() as u8);
+            crate::testutil::assert_strict_decoding(
+                &bytes,
+                SignedSettings::from_bytes,
+                SignedSettings::to_bytes,
+            );
+        }
+    }
+
+    #[test]
+    fn ap_17_the_frame_refuses_a_bad_place_a_repeat_a_count_or_a_text() {
+        let m = msig();
+        let sigs = [(1u8, m.sig(1)), (2, m.sig(2))];
+        let good = owned(&m.shop, &m.shop.new, Some(join_cosigner_sigs(&sigs))).to_bytes();
+        assert!(SignedSettings::from_bytes(&good).is_ok());
+        let len = |n: usize| 1 + n * (3 + sigs[0].1.len());
+        let at = good.len() - len(2);
+        // Count 0 and count above 3.
+        for count in [0u8, 4, 255] {
+            let mut bad = good.clone();
+            bad[at] = count;
+            assert!(SignedSettings::from_bytes(&bad).is_err(), "count {count}");
+        }
+        // Place 0, above 3, and a place given twice.
+        let first = at + 1;
+        let second = first + 3 + sigs[0].1.len();
+        for (index, place) in [(first, 0u8), (first, 4), (second, 0), (second, 1)] {
+            let mut bad = good.clone();
+            bad[index] = place;
+            assert!(
+                SignedSettings::from_bytes(&bad).is_err(),
+                "place {place} at {index}"
+            );
+        }
+        // Text over 1,000 characters, empty text, and a character that is
+        // not printable ASCII.
+        let mut long = good[..at + 1].to_vec();
+        long.push(1);
+        long.extend_from_slice(&1_001u16.to_le_bytes());
+        long.extend_from_slice(&[b'A'; 1_001]);
+        assert!(SignedSettings::from_bytes(&long).is_err());
+        let mut empty = good[..at + 1].to_vec();
+        empty.extend_from_slice(&[1, 0, 0]);
+        assert!(SignedSettings::from_bytes(&empty).is_err());
+        let mut odd = good.clone();
+        odd[first + 3] = b' ';
+        assert!(SignedSettings::from_bytes(&odd).is_err());
+        for c in *b":," {
+            let mut bad = good.clone();
+            bad[first + 3] = c;
+            assert!(SignedSettings::from_bytes(&bad).is_err());
+        }
+        // Trailing bytes, and a cut frame.
+        let mut trail = good.clone();
+        trail.push(0);
+        assert!(SignedSettings::from_bytes(&trail).is_err());
+        assert!(SignedSettings::from_bytes(&good[..good.len() - 1]).is_err());
+        // A version above the newest.
+        let mut next = good.clone();
+        next[4] = 8;
+        assert!(SignedSettings::from_bytes(&next).is_err());
+    }
+
+    #[test]
+    fn ap_17_the_counters_store_check_is_the_same_as_the_phones() {
+        let m = msig();
+        let text = join_cosigner_sigs(&[(1, m.sig(1)), (3, m.sig(3))]);
+        let signed = owned(&m.shop, &m.shop.new, Some(text));
+        assert_eq!(signed.verify_signatures_with(&m.authority()), Ok(()));
+        let one = owned(
+            &m.shop,
+            &m.shop.new,
+            Some(join_cosigner_sigs(&[(1, m.sig(1))])),
+        );
+        assert_eq!(
+            one.verify_signatures_with(&m.authority()),
+            Err(SettingsError::WalletSig(WalletSigError::NotEnough))
+        );
+    }
+
     #[test]
     fn base64_is_strict() {
         for n in 0..8usize {
@@ -1567,15 +1999,18 @@ mod tests {
         // the file is not the order of the numbers.
         let mut ids = rule_ids();
         ids.sort();
-        assert_eq!(ids.len(), 15);
+        assert_eq!(ids.len(), 19);
         assert_eq!(ids.first().map(String::as_str), Some("AP-01"));
-        assert_eq!(ids.last().map(String::as_str), Some("AP-15"));
+        assert_eq!(ids.last().map(String::as_str), Some("AP-19"));
     }
 
     #[test]
     fn every_rule_has_at_least_one_test_named_for_it() {
         let missing: Vec<_> = rule_ids()
             .into_iter()
+            // AP-18 is the owner phone's screen and AP-19 the boot stick's
+            // signing; their tests are in those crates.
+            .filter(|id| !matches!(id.as_str(), "AP-18" | "AP-19"))
             .filter(|id| !SOURCE.contains(&format!("fn ap_{}_", &id[3..])))
             .collect();
         assert!(missing.is_empty(), "rules without a test: {missing:?}");
@@ -1596,6 +2031,8 @@ mod tests {
                 address: "a".into(),
             }
             .to_string(),
+            WalletSigError::NotEnough.to_string(),
+            WalletSigError::Shape.to_string(),
             crate::settings::SettingsError::WalletSigNotWanted.to_string(),
             crate::settings::SettingsError::RedirectStarter.to_string(),
         ];

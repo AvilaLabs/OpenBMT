@@ -731,6 +731,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "approval_cosigner_signatures"
+path = "fuzz_targets/approval_cosigner_signatures.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "pinned_wallet_decode"
 path = "fuzz_targets/pinned_wallet_decode.rs"
 test = false

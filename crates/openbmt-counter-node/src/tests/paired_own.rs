@@ -351,7 +351,7 @@ fn cr_236_the_authority_of_an_own_wallet_record_is_the_owner_root_alone() {
     assert_eq!(record.authority(), expected);
     assert!(matches!(
         record.authority(),
-        Authority::OwnWallet { owner, first_address: Some(_), .. } if owner == id(1).device_id()
+        Authority::OwnWallet { owner, signers: Some(_), .. } if owner == id(1).device_id()
     ));
     assert!(record.roots().is_none() && record.key_app_pairing().is_none());
     assert_eq!(record.owner(), id(1).device_id());

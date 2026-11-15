@@ -6,6 +6,7 @@ import android.widget.Button
 import org.openbmt.app.AnimatedQrView
 import org.openbmt.app.UrWords
 import org.openbmt.app.Who
+import org.openbmt.owner.OwnCosigner
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerOwn
 
@@ -61,6 +62,87 @@ internal fun Controller.showWalletSig(
     }
     val scanButton = ui.button(WalletSigWords.scan) { scanSignature(settings, message, address, path, done, back) }
     screen(WalletSigWords.heading, views, listOf<Button>(send, scanButton, ui.button("Back") { back() }), back = { back() })
+}
+
+/**
+ * The 2-of-3 wallet (AP-16 to AP-18): the message once, with Copy, then one card for each cosigner with its fingerprint,
+ * its address, its code, a box for its signature and a mark when it has signed. Each signature is checked by the library
+ * when it is added; Send is enabled once two different cosigners have signed. [typed] is what each box holds, by place.
+ */
+internal fun Controller.showCosignerSigs(
+    settings: ByteArray,
+    message: String,
+    cosigners: List<OwnCosigner>,
+    state: CosignerSigModel.State = CosignerSigModel.State(),
+    typed: Map<Int, String> = emptyMap(),
+    words: org.openbmt.app.SayWords? = null,
+    done: () -> Unit,
+    back: () -> Unit,
+) {
+    val msg = Slot(act)
+    words?.let { msg.show(ui.words(it)) }
+    val views = ArrayList<View>()
+    views.add(ui.text(WalletSigWords.what))
+    views.add(ui.text(WalletSigWords.cosignerNext))
+    views.add(label(WalletSigWords.messageLabel))
+    views.add(ui.text(message, 15f, mono = true))
+    views.add(ui.button(WalletSigWords.copy) { copy(message) })
+    val boxes = HashMap<Int, android.widget.EditText>()
+    fun typedNow() = boxes.mapValues { it.value.text.toString() }
+    for (c in CosignerSigModel.cards(cosigners, state.signed)) {
+        val box = ui.field(WalletSigWords.fieldLabel, lines = 4, mono = true).also { it.setText(typed[c.place] ?: "") }
+        boxes[c.place] = box
+        views.add(label(WalletSigWords.cosignerLabel))
+        views.add(ui.text(c.fingerprint, 15f, mono = true))
+        views.add(label(WalletSigWords.addressLabel))
+        views.add(ui.text(c.address, 15f, mono = true))
+        val made = AnimatedQrView.makePlain(act, Who.OWNER, c.qr, ExchangeModel.codeHeight(act.resources.displayMetrics.heightPixels))
+        views.add(made.view?.let { ui.codeCard(it) } ?: ui.words(made.words ?: UrWords.cannotShow(Who.OWNER)))
+        if (c.signed) views.add(ui.text(WalletSigWords.cosignerSigned))
+        views.add(ui.labelled(WalletSigWords.fieldLabel, box))
+        views.add(ui.button(WalletSigWords.paste) {
+            val clip = act.getSystemService(ClipboardManager::class.java)?.primaryClip?.getItemAt(0)?.text?.toString()
+            if (clip != null) box.setText(clip.trim())
+        })
+        views.add(ui.button(WalletSigWords.scan) {
+            val kept = typedNow()
+            scan.begin(
+                show = { v -> showScan(v) },
+                onBytes = { showCosignerSigs(settings, message, cosigners, state, kept + (c.place to String(it, Charsets.UTF_8).trim()), null, done, back) },
+                onFailed = { f -> showCosignerSigs(settings, message, cosigners, state, kept, (ScanResult.failed(f.off, f.problem, f.words) as SourceResult.Failed).words, done, back) },
+                onCancel = { showCosignerSigs(settings, message, cosigners, state, kept, AppWords.counterScanCancelled, done, back) },
+            )
+        })
+        views.add(ui.button(WalletSigWords.cosignerAdd) {
+            val shop = ownStore.args() ?: return@button
+            try {
+                val took = state.took(OwnerOwn.cosignerSigAdd(shop, settings, state.held, c.place, box.text.toString()))
+                showCosignerSigs(settings, message, cosigners, took, typedNow() - c.place, null, done, back)
+            } catch (e: OwnerException) {
+                // The card keeps what was typed, and nothing was held.
+                val w = if (e.rule == "AP-10") WalletSigWords.wrong(c.address) else e.sayWords()
+                showCosignerSigs(settings, message, cosigners, state, typedNow(), w, done, back)
+            } catch (e: LinkageError) {
+                msg.show(ui.words(AppWords.libraryMissing(e.message)))
+            }
+        })
+    }
+    views.add(msg)
+    val send = ui.primary(WalletSigWords.send) {
+        val shop = ownStore.args() ?: return@primary
+        try {
+            OwnerOwn.settingsAttach(shop, settings, state.held)
+            settingsDraft = SettingsDraft()
+            done()
+        } catch (e: OwnerException) {
+            showCosignerSigs(settings, message, cosigners, state, typedNow(), e.sayWords(), done, back)
+        } catch (e: LinkageError) {
+            msg.show(ui.words(AppWords.libraryMissing(e.message)))
+        }
+    }
+    send.isEnabled = CosignerSigModel.ready(state.signed)
+    CosignerSigModel.sendHint(state.signed)?.let { views.add(ui.text(it)) }
+    screen(WalletSigWords.heading, views, listOf<Button>(send, ui.button("Back") { back() }), back = { back() })
 }
 
 /** The wallet's code, read by the camera, which is asked for only when the button is pressed. */
