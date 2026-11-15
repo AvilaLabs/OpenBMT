@@ -1064,7 +1064,7 @@ class Controller(private val act: MainActivity) {
     // ---- home ----------------------------------------------------------------------------------------------------------
 
     /** DESIGN 2.1: the counter's line under the home screen, in the app's largest body text. */
-    private fun counterLine(): View = ui.text(ScreenModel.counterLine(Showing.Home, SetupStatus(true, true, true)) ?: "", Type.BODY).apply {
+    private fun counterLine(): View = ui.text(ScreenModel.counterLine(Showing.Home, SetupStatus(true, true, true), SamePhone.read(dir)) ?: "", Type.BODY).apply {
         setPadding(0, ui.px(16), 0, 0)
     }
 
@@ -1352,6 +1352,8 @@ class Controller(private val act: MainActivity) {
     private fun keptRecord(bytes: ByteArray) {
         SealedFile(dir, KeystoreSealer(KEY_ALIAS), PAIRING_FILE).save(bytes)
         record = bytes
+        // The record of a switch has no starter mark: the same-phone line (CR-281) is for the starter wallet only.
+        SamePhone.clearStarter(dir)
     }
 
     /** CR-107: the own node's health line, or the library's words for why there is none. */

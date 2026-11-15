@@ -59,10 +59,10 @@ object TapManifestTest {
         ok(meta.size == 1, "one meta-data")
         ok(meta[0].attr("name") == "android.nfc.cardemulation.host_apdu_service" && meta[0].attr("resource") == "@xml/tap_aid", "the service file")
         ok(doc.all("receiver").isEmpty(), "no receiver")
-        // Only the launcher activity and the tag service are exported.
+        // Only the launcher activity, the pairing activity (CR-277) and the tag service are exported.
         val exported = (doc.all("activity") + doc.all("service") + doc.all("provider") + doc.all("receiver"))
             .filter { it.attr("exported") == "true" }.map { it.attr("name") }.sorted()
-        ok(exported == listOf("org.openbmt.counter.app.MainActivity", "org.openbmt.counter.app.TapService"), "exported: $exported")
+        ok(exported == listOf("org.openbmt.counter.app.MainActivity", "org.openbmt.counter.app.PairHereActivity", "org.openbmt.counter.app.TapService"), "exported: $exported")
         // TP-23: no discovery of tags, tag technologies or NDEF messages, anywhere, and no NFC intent at all.
         for (word in listOf("NDEF_DISCOVERED", "TECH_DISCOVERED", "TAG_DISCOVERED", "nfc.action", "tech-list", "nfc_tech_filter")) {
             ok(!text.contains(word), "the manifest has no $word")

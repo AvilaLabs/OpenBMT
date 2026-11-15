@@ -156,11 +156,30 @@ The texts of the page that reads the stick's code.
 | kept | Lightning key kept |
 | keptButton | Done |
 
+## Pairing with the owner app on the same phone (CR-277 to CR-282)
+
+The texts of the pairing screen the owner app opens.
+
+| Key | Text |
+|---|---|
+| pairHereTitle | Pair with the owner app |
+| pairHereText | The owner app on this phone asks to make this app its counter. Payments will go to the shop's wallet. |
+| pairHerePair | Pair |
+| pairHereCancel | Cancel |
+| pairHereAlready | This counter is already paired. Nothing was changed. |
+| pairHereNotOwner | Only the OpenBMT Owner app on this phone can pair this counter here. |
+| pairHerePairedTitle | Paired |
+| pairHerePairedText | This phone now takes payments for the shop. Open OpenBMT Counter when you sell. |
+| pairHereDone | Done |
+| pairHereNotTaken | The owner app sent a code this pairing does not take. Nothing was changed. |
+
 ## The counter's line (DESIGN 2.1)
 
 Shown large on the ready-to-sell screen of a paired counter,
-and on no sale screen.
+and on no sale screen. The second is for a counter paired on the owner's phone
+with the starter wallet (CR-281).
 
 | Key | Text |
 |---|---|
 | COUNTER_LINE | This device takes payments for you. Only your keys can send. |
+| COUNTER_LINE_SAME_PHONE | Sales are taken here. Sending needs your fingerprint or PIN in the owner app. |

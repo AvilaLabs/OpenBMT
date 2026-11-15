@@ -112,7 +112,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1 + WordsOfTill.all().size + 1 + WordsOfStarter.all().size + 1 + ShopLightningWords.all().size + 1 + 1 + 1, "one row for each words and the header, and for each text of the switch, of the till, of the starter line and of the Lightning key and their headers")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1 + WordsOfTill.all().size + 1 + WordsOfStarter.all().size + 1 + ShopLightningWords.all().size + 1 + PairHereWords.all().size + 1 + 1 + 1 + 1, "one row for each words and the header, and for each text of the switch, of the till, of the starter line and of the Lightning key and their headers")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -1463,6 +1463,63 @@ object AppModelTest {
         1_000L, 500L, 1_700_000_000L, payments,
     )
 
+    private fun cr277OnePhoneTests(appDir: File?) {
+        val all = SetupStatus(pairing = true, pin = true, config = true)
+        val none = SetupStatus(pairing = false, pin = false, config = false)
+        // CR-281: the four combinations of the note and the starter mark, and a counter not set up.
+        ok(ScreenModel.counterLine(Showing.Home, all, null) == AppWords.COUNTER_LINE, "CR-281: no note, the line of DESIGN 2.1")
+        ok(ScreenModel.counterLine(Showing.Home, all, SamePhoneMark(false)) == AppWords.COUNTER_LINE, "CR-281: paired on this phone with its own wallet, the line of DESIGN 2.1")
+        ok(ScreenModel.counterLine(Showing.Home, all, SamePhoneMark(true)) == AppWords.COUNTER_LINE_SAME_PHONE, "CR-281: paired on this phone with the starter wallet, the same-phone line")
+        ok(SamePhone.line(null) == AppWords.COUNTER_LINE && SamePhone.line(SamePhoneMark(true)) != SamePhone.line(SamePhoneMark(false)), "CR-281: the two lines differ")
+        ok(ScreenModel.counterLine(Showing.Sale(1), all, SamePhoneMark(true)) == null && ScreenModel.counterLine(Showing.Home, none, SamePhoneMark(true)) == null, "CR-281: no line on a sale or on a counter not set up")
+        ok(AppWords.COUNTER_LINE_SAME_PHONE == "Sales are taken here. Sending needs your fingerprint or PIN in the owner app.", "CR-281: the words are as written down")
+        // The note: strict reading.
+        ok(SamePhone.decode(SamePhone.encode(true))?.starter == true && SamePhone.decode(SamePhone.encode(false))?.starter == false, "CR-281: a note reads back")
+        val good = SamePhone.encode(true)
+        ok(SamePhone.decode(good + byteArrayOf(0)) == null && SamePhone.decode(good.copyOf(5)) == null && SamePhone.decode(ByteArray(0)) == null, "CR-281: a note of another length is no note")
+        ok(SamePhone.decode(good.copyOf().also { it[0] = 'X'.code.toByte() }) == null, "CR-281: another magic is no note")
+        ok(SamePhone.decode(good.copyOf().also { it[4] = 2 }) == null, "CR-281: another version is no note")
+        ok(SamePhone.decode(good.copyOf().also { it[5] = 2 }) == null && SamePhone.decode(good.copyOf().also { it[5] = -1 }) == null, "CR-281: a flag that is not 0 or 1 is no note")
+        val dir = Files.createTempDirectory("samephone").toFile()
+        try {
+            ok(SamePhone.read(dir) == null, "CR-281: no file, no note")
+            SamePhone.write(dir, true)
+            ok(SamePhone.read(dir)?.starter == true, "CR-281: the note is kept")
+            SamePhone.clearStarter(dir)
+            ok(SamePhone.read(dir)?.starter == false, "CR-261: a switch clears the starter mark and keeps the note")
+            File(dir, SamePhone.FILE).writeBytes(byteArrayOf(1, 2, 3))
+            ok(SamePhone.read(dir) == null, "CR-281: a file that does not read strictly is no note")
+            SamePhone.write(dir, true)
+            SamePhone.delete(dir)
+            ok(SamePhone.read(dir) == null && !File(dir, SamePhone.FILE).exists() && !File(dir, SamePhone.FILE + ".tmp").exists(), "CR-281: deleting the note leaves no file")
+        } finally {
+            dir.deleteRecursively()
+        }
+        // The offer's starter mark is its version byte (CR-256).
+        val v1 = byteArrayOf('O'.code.toByte(), 'B'.code.toByte(), 'M'.code.toByte(), '-'.code.toByte(), 1) + ByteArray(60)
+        val v2 = v1.copyOf().also { it[4] = 2 }
+        ok(!SamePhone.offerIsStarter(v1) && SamePhone.offerIsStarter(v2) && !SamePhone.offerIsStarter(ByteArray(3)), "CR-256: version 2 of an offer is the starter's")
+        ok(!SamePhone.offerIsStarter(v2.copyOf(5)) && !SamePhone.offerIsStarter(v2.copyOf(41)) && !SamePhone.offerIsStarter(v2.copyOf().also { it[3] = 'X'.code.toByte() }), "CR-256: a short offer or another frame is not starter")
+        // The ceremony's hold between the two intents is taken once.
+        PairHereHold.clear()
+        ok(PairHereHold.take() == null, "CR-279: nothing taken, nothing held")
+        PairHereHold.taken(true)
+        ok(PairHereHold.take() == true && PairHereHold.take() == null, "CR-280: the mark is given once")
+        // The words.
+        ok(PairHereWords.all().size == 10 && PairHereWords.all().map { it.second }.toSet().size == 10, "CR-277: ten texts, each its own")
+        ok(PairHereWords.TITLE == "Pair with the owner app" && PairHereWords.PAIR == "Pair" && PairHereWords.NOT_OWNER == "Only the OpenBMT Owner app on this phone can pair this counter here.", "CR-277: the words are as written down")
+        if (appDir != null) {
+            val manifest = File(appDir, "AndroidManifest.xml").readText()
+            val activity = manifest.substringAfter("<activity\n            android:name=\"org.openbmt.counter.app.PairHereActivity\"").substringBefore("/>")
+            ok(activity.contains("android:exported=\"true\"") && activity.contains("android:permission=\"org.openbmt.permission.PAIR_ON_THIS_PHONE\""), "CR-277: the activity is exported and guarded by the permission")
+            ok(Regex("<permission android:name=\"org.openbmt.permission.PAIR_ON_THIS_PHONE\"\\s+android:protectionLevel=\"signature\"").containsMatchIn(manifest), "CR-277: the permission is of protection level signature")
+            ok(Regex("<activity\\b").findAll(manifest).count() == 2 && !manifest.substring(manifest.indexOf("PairHereActivity")).substringBefore("<provider").contains("<intent-filter"), "CR-277: two activities, and the pairing one has no filter")
+            val code = File(appDir, "src/android/PairHereActivity.kt").readText()
+            ok(code.contains("callingActivity") && code.contains("OnePhone.callerAllowed") && code.contains("OnePhoneCheck.sameSigner"), "CR-277: the caller and its certificate are checked")
+            ok(code.contains("Pairing.begin") && code.contains("Pairing.addressSame") && code.contains("Pairing.finish"), "CR-279: the same library calls as the camera's")
+        }
+    }
+
     private fun cr273StarterTests(appDir: File?) {
         val a = StarterPayment(ByteArray(32) { 1 }, 4_000, 1_700_000_100L, true, false)
         val b = StarterPayment(ByteArray(32) { 2 }, 9_000, 1_700_000_200L, false, true)
@@ -1784,6 +1841,7 @@ object AppModelTest {
         cr260ConfirmSwitchTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr245BillsTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr266TillTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        cr277OnePhoneTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr273StarterTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr85HoldClockTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr115LightningCaptureTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })

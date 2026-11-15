@@ -9,15 +9,22 @@
      request's code. One service, the NFC tag of the payment request (TP-10):
      exported, as Android's NFC service must reach it, and bound only by the
      system (BIND_NFC_SERVICE). No filter for tags, tag technologies or NDEF
-     messages: the counter reads no tags (TP-23). tests/check-manifest.sh
+     messages: the counter reads no tags (TP-23). One permission of its own,
+     of protection level signature, and one more activity, exported and
+     guarded by it, for pairing with the owner app on the same phone (CR-277):
+     no intent filter, so it is reached by its explicit name only. tests/check-manifest.sh
      fails the build if the list differs, or if anything but the launcher
-     activity and the tag service is exported. -->
+     activity, the pairing activity and the tag service is exported. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.openbmt.counter.app">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.NFC" />
+    <!-- CR-277: held by the owner app of the same publisher, and asked of any caller of the pairing activity. -->
+    <permission android:name="org.openbmt.permission.PAIR_ON_THIS_PHONE"
+        android:protectionLevel="signature" />
+
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.nfc.hce" android:required="false" />
@@ -42,6 +49,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- CR-277: pairing with the owner app on this phone. Acts only on an intent
+             started for a result by the owner app's package, signed as this app is. -->
+        <activity
+            android:name="org.openbmt.counter.app.PairHereActivity"
+            android:exported="true"
+            android:permission="org.openbmt.permission.PAIR_ON_THIS_PHONE"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|screenLayout|smallestScreenSize|uiMode"
+            android:windowSoftInputMode="adjustResize" />
 
         <!-- Hands the share sheet the image of a request's code (CR-214): not
              exported, one address, read only, access given by the counter

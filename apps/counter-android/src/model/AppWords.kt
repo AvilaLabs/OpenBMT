@@ -61,6 +61,9 @@ object AppWords {
     /** The counter's own line (DESIGN 2.1): shown large once it is paired, and under the first sale. */
     const val COUNTER_LINE = "This device takes payments for you. Only your keys can send."
 
+    /** CR-281: the line of a counter paired on the owner's own phone with the starter wallet. */
+    const val COUNTER_LINE_SAME_PHONE = "Sales are taken here. Sending needs your fingerprint or PIN in the owner app."
+
     val pairingSaved = w(
         Tones.GOOD, "Counter set up",
         "The counter is paired with the shop. This device takes payments for you. Only your keys can send.",
@@ -740,12 +743,21 @@ object AppWords {
         )
         for ((key, text) in ShopLightningWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         out.append(
+            "\n## Pairing with the owner app on the same phone (CR-277 to CR-282)\n\n" +
+                "The texts of the pairing screen the owner app opens.\n\n" +
+                "| Key | Text |\n" +
+                "|---|---|\n",
+        )
+        for ((key, text) in PairHereWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
+        out.append(
             "\n## The counter's line (DESIGN 2.1)\n\n" +
                 "Shown large on the ready-to-sell screen of a paired counter,\n" +
-                "and on no sale screen.\n\n" +
+                "and on no sale screen. The second is for a counter paired on the owner's phone\n" +
+                "with the starter wallet (CR-281).\n\n" +
                 "| Key | Text |\n" +
                 "|---|---|\n" +
-                "| COUNTER_LINE | ${cell(COUNTER_LINE)} |\n",
+                "| COUNTER_LINE | ${cell(COUNTER_LINE)} |\n" +
+                "| COUNTER_LINE_SAME_PHONE | ${cell(COUNTER_LINE_SAME_PHONE)} |\n",
         )
         return out.toString()
     }

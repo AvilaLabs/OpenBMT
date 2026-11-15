@@ -568,8 +568,26 @@ object CommonModelTest {
         }
     }
 
+    private fun onePhoneTests() {
+        val cert = byteArrayOf(1, 2, 3, 4)
+        val digest = OnePhone.ownDigest(listOf(cert))
+        ok(digest != null && digest.size == 32, "one certificate gives its SHA-256")
+        ok(digest!!.contentEquals(java.security.MessageDigest.getInstance("SHA-256").digest(cert)), "it is the digest of those bytes")
+        ok(!digest.contentEquals(OnePhone.ownDigest(listOf(byteArrayOf(1, 2, 3, 5)))!!), "another certificate, another digest")
+        ok(OnePhone.ownDigest(emptyList()) == null, "no certificate gives none")
+        ok(OnePhone.ownDigest(listOf(ByteArray(0))) == null, "an empty certificate gives none")
+        ok(OnePhone.ownDigest(listOf(cert, cert)) == null, "several signers give none")
+        ok(OnePhone.callerAllowed("org.openbmt.owner.app"), "the owner app's package is allowed")
+        ok(!OnePhone.callerAllowed(null) && !OnePhone.callerAllowed("org.openbmt.owner.app.evil") && !OnePhone.callerAllowed("org.openbmt.counter.app") && !OnePhone.callerAllowed(""), "no other caller is")
+        ok(OnePhone.peer(false, false) == OnePhone.Peer.Missing && OnePhone.peer(false, true) == OnePhone.Peer.Missing, "not installed is missing")
+        ok(OnePhone.peer(true, false) == OnePhone.Peer.OtherSigner, "installed and signed otherwise")
+        ok(OnePhone.peer(true, true) == OnePhone.Peer.Same, "installed and signed the same")
+        ok(OnePhone.PAIR_ACTIVITY.startsWith(OnePhone.COUNTER_PACKAGE + ".") && OnePhone.COUNTER_MAIN.startsWith(OnePhone.COUNTER_PACKAGE + "."), "the counter's activities are in its package")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
+        onePhoneTests()
         lockModelTests()
         checkerTests()
         wordsModelTests()

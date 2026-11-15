@@ -44,6 +44,6 @@ object ScreenModel {
     }
 
     /** DESIGN 2.1: the counter's line is on the ready-to-sell screen of a paired counter, and on no sale screen. */
-    fun counterLine(showing: Showing, setup: SetupStatus): String? =
-        if (showing == Showing.Home && setup.complete) AppWords.COUNTER_LINE else null
+    fun counterLine(showing: Showing, setup: SetupStatus, samePhone: SamePhoneMark? = null): String? =
+        if (showing == Showing.Home && setup.complete) SamePhone.line(samePhone) else null
 }

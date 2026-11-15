@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Checks what the built APK's manifest says, with the SDK's own aapt2: the
 # permissions are INTERNET, CAMERA and NFC and nothing else (no notifications,
-# foreground service, network state or Bluetooth), the camera and card emulation are not required, backup and device transfer off, nothing exported but the
-# launcher activity and the NFC tag service (TP-10), no receiver, one service (the tag, bound only by
+# foreground service, network state or Bluetooth), one permission of its own of protection level signature and one
+# more activity, exported and guarded by it, with no intent filter (CR-277), the camera and card emulation are not required,
+# backup and device transfer off, nothing exported but the launcher activity, that pairing activity and the NFC tag
+# service (TP-10), no receiver, one service (the tag, bound only by
 # BIND_NFC_SERVICE, one application ID, category other, device unlock required, no NFC discovery filter, TP-23)
 # and one provider (the image of a request's code, CR-214), not exported. The manifest in the APK is the merged one: no library
 # adds to it.
@@ -34,8 +36,8 @@ else
     pass "no other permission name in the manifest"
 fi
 perms="$("$aapt2" dump permissions "$apk" 2>&1 | grep -v -E '^package:' | sed -e 's/^ *//' | sort | tr '\n' ' ')"
-if [ "$perms" = "uses-permission: name='android.permission.CAMERA' uses-permission: name='android.permission.INTERNET' uses-permission: name='android.permission.NFC' " ]; then
-    pass "aapt2 dump permissions lists exactly CAMERA, INTERNET and NFC"
+if [ "$perms" = "permission: org.openbmt.permission.PAIR_ON_THIS_PHONE uses-permission: name='android.permission.CAMERA' uses-permission: name='android.permission.INTERNET' uses-permission: name='android.permission.NFC' " ]; then
+    pass "aapt2 dump permissions lists exactly its own PAIR_ON_THIS_PHONE, then CAMERA, INTERNET and NFC"
 else
     fail "aapt2 dump permissions lists: $perms"
 fi
@@ -79,8 +81,23 @@ else
     fail "res/xml/data_extraction_rules.xml is not in the APK"
 fi
 
-# 3. Components: one activity, exported, the launcher; one service, the NFC tag; nothing else.
-if [ "$(count 'E: activity( |$)')" -eq 1 ]; then pass "one activity"; else fail "not exactly one activity"; fi
+# 3. Components: two activities, the launcher and the pairing one (CR-277); one service, the NFC tag; nothing else.
+if [ "$(count 'E: activity( |$)')" -eq 2 ]; then pass "two activities"; else fail "not exactly two activities"; fi
+if [ "$(count 'E: permission( |$)')" -eq 1 ] \
+    && printf '%s\n' "$tree" | grep -A3 'E: permission' | grep -q 'org.openbmt.permission.PAIR_ON_THIS_PHONE' \
+    && printf '%s\n' "$tree" | grep -A3 'E: permission' | grep -q -E 'protectionLevel.*=0x0*2( |$)'; then
+    pass "one permission of its own, PAIR_ON_THIS_PHONE, of protection level signature"
+else
+    fail "the permission of its own is not exactly PAIR_ON_THIS_PHONE of protection level signature"
+fi
+pair="$(printf '%s\n' "$tree" | awk '/E: activity/ { keep = 0 } /org.openbmt.counter.app.PairHereActivity/ { keep = 1 } /E: provider|E: service/ { keep = 0 } keep')"
+if printf '%s\n' "$pair" | grep -q -E 'exported.*=true' \
+    && printf '%s\n' "$pair" | grep -q 'permission.*org.openbmt.permission.PAIR_ON_THIS_PHONE' \
+    && ! printf '%s\n' "$pair" | grep -q 'E: intent-filter'; then
+    pass "the pairing activity is exported, guarded by the permission, and has no intent filter"
+else
+    fail "the pairing activity is not exported and guarded by the permission with no intent filter"
+fi
 for kind in receiver activity-alias; do
     if [ "$(count "E: $kind( |\$)")" -eq 0 ]; then pass "no $kind"; else fail "a $kind is declared"; fi
 done
@@ -120,7 +137,7 @@ else
 fi
 exported="$(printf '%s\n' "$tree" | grep -c -E 'exported.*=true')"
 unexported="$(printf '%s\n' "$tree" | grep -c -E 'exported.*=false')"
-if [ "$exported" -eq 2 ] && [ "$unexported" -eq 1 ]; then pass "exactly two exported components (the launcher and the tag service), and the provider not exported"; else fail "exported components: $exported true, $unexported false"; fi
+if [ "$exported" -eq 3 ] && [ "$unexported" -eq 1 ]; then pass "exactly three exported components (the launcher, the pairing activity and the tag service), and the provider not exported"; else fail "exported components: $exported true, $unexported false"; fi
 if printf '%s\n' "$tree" | grep -q 'android.intent.category.LAUNCHER'; then pass "the exported one is the launcher"; else fail "no launcher category"; fi
 if [ "$(count 'E: intent-filter')" -eq 2 ] && [ "$(count 'E: action')" -eq 2 ]; then pass "two intent filters with one action each (the launcher's and the tag service's)"; else fail "more intent filters or actions than the launcher's and the tag service's"; fi
 
