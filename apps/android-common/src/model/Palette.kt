@@ -158,6 +158,52 @@ object Palette {
         return (argb and 0xFF000000.toInt()) or channel(16) or channel(8) or channel(0)
     }
 
+    /** A colour as the web writes it: #rrggbb when opaque, else #aarrggbb. */
+    fun hex(argb: Int): String =
+        if ((argb ushr 24) == 0xFF) String.format("#%06x", argb and 0xFFFFFF) else String.format("#%08x", argb)
+
+    /**
+     * Every colour of the palette as JSON, for the demo's drawing layer (demo/ui/palette.json): the brand, the text
+     * on it, white, the four outcome bands and the two schemes with their tones. The web types no colour by hand.
+     */
+    fun json(): String {
+        val sb = StringBuilder()
+        fun tone(name: String, t: Tone, last: Boolean) {
+            sb.append("    \"$name\": {\"band\": \"${hex(t.band)}\", \"ink\": \"${hex(t.ink)}\", \"tint\": \"${hex(t.tint)}\"}")
+            sb.append(if (last) "\n" else ",\n")
+        }
+        fun scheme(name: String, s: Scheme, last: Boolean) {
+            sb.append("  \"$name\": {\n")
+            sb.append("    \"background\": \"${hex(s.background)}\",\n")
+            sb.append("    \"paper\": \"${hex(s.paper)}\",\n")
+            sb.append("    \"surface\": \"${hex(s.surface)}\",\n")
+            sb.append("    \"text\": \"${hex(s.text)}\",\n")
+            sb.append("    \"secondary\": \"${hex(s.secondary)}\",\n")
+            sb.append("    \"hint\": \"${hex(s.hint)}\",\n")
+            sb.append("    \"divider\": \"${hex(s.divider)}\",\n")
+            sb.append("    \"fieldLine\": \"${hex(s.fieldLine)}\",\n")
+            sb.append("    \"chip\": \"${hex(s.chip)}\",\n")
+            val tones = tones(s)
+            for ((i, p) in tones.withIndex()) tone(p.first, p.second, i == tones.size - 1)
+            sb.append(if (last) "  }\n" else "  },\n")
+        }
+        sb.append("{\n")
+        sb.append("  \"white\": \"${hex(WHITE)}\",\n")
+        sb.append("  \"brand\": \"${hex(BRAND)}\",\n")
+        sb.append("  \"onBrand\": \"${hex(ON_BRAND)}\",\n")
+        sb.append("  \"outcomes\": {\n")
+        val outs = outcomes()
+        for ((i, p) in outs.withIndex()) {
+            sb.append("    \"${p.first}\": {\"band\": \"${hex(p.second.band)}\", \"sub\": \"${hex(p.second.sub)}\"}")
+            sb.append(if (i == outs.size - 1) "\n" else ",\n")
+        }
+        sb.append("  },\n")
+        scheme("light", light, false)
+        scheme("dark", dark, true)
+        sb.append("}\n")
+        return sb.toString()
+    }
+
     /** The text of res/values/colors.xml (light) or res/values-night/colors.xml (dark): the resources the themes use. */
     fun colorsXml(night: Boolean): String {
         val s = of(night)

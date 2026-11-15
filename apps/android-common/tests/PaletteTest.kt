@@ -89,6 +89,23 @@ object PaletteTest {
         }
     }
 
+    /**
+     * demo/ui/palette.json is what the palette makes. OPENBMT_WRITE_SCREENS=1 writes it first. It is checked only
+     * where the demo folder exists next to apps (a checkout of the repository).
+     */
+    private fun demoPaletteTests(common: File) {
+        val folder = File(common.parentFile.parentFile, "demo/ui")
+        if (!folder.isDirectory && System.getenv("OPENBMT_WRITE_SCREENS") != "1") return
+        val file = File(folder, "palette.json")
+        if (System.getenv("OPENBMT_WRITE_SCREENS") == "1") {
+            folder.mkdirs()
+            file.writeText(Palette.json())
+        }
+        ok(file.isFile && file.readText() == Palette.json(), "demo/ui/palette.json is what the palette makes (run with OPENBMT_WRITE_SCREENS=1)")
+        ok(Palette.hex(Palette.BRAND) == "#f7931a" && Palette.hex(0x80112233.toInt()) == "#80112233", "colours are written as the web reads them")
+        ok(Palette.json().contains("\"fieldLine\": \"#d5d9e0\"") && Palette.json().contains("\"sub\": \"#ddf3ea\""), "the json has the field line and the outcome seconds")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         contrastTests()
@@ -96,6 +113,7 @@ object PaletteTest {
         toneTests()
         newColourTests()
         resourceTests(File(args[0]))
+        demoPaletteTests(File(args[0]))
         println("PaletteTest: $count checks passed")
     }
 }

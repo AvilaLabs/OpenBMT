@@ -1,0 +1,43 @@
+{
+  "white": "#ffffff",
+  "brand": "#f7931a",
+  "onBrand": "#111317",
+  "outcomes": {
+    "paid": {"band": "#0e7350", "sub": "#ddf3ea"},
+    "waiting": {"band": "#1d4aa8", "sub": "#dce7fd"},
+    "stop": {"band": "#a9221b", "sub": "#fde2e0"},
+    "ended": {"band": "#3d434c", "sub": "#d3d7de"}
+  },
+  "light": {
+    "background": "#f4f5f7",
+    "paper": "#fbfaf7",
+    "surface": "#ffffff",
+    "text": "#111317",
+    "secondary": "#4a505a",
+    "hint": "#6b7280",
+    "divider": "#e2e5ea",
+    "fieldLine": "#d5d9e0",
+    "chip": "#e7e9ee",
+    "good": {"band": "#12805c", "ink": "#117e5b", "tint": "#e7f6ef"},
+    "info": {"band": "#1f4fb8", "ink": "#1f4fb8", "tint": "#eaf1fe"},
+    "wait": {"band": "#5b616b", "ink": "#5b616b", "tint": "#eceef1"},
+    "warn": {"band": "#8a5300", "ink": "#6d4200", "tint": "#fff8ee"},
+    "stop": {"band": "#b3261e", "ink": "#b3261e", "tint": "#fdecec"}
+  },
+  "dark": {
+    "background": "#0e1013",
+    "paper": "#15140f",
+    "surface": "#171a1f",
+    "text": "#f2f4f7",
+    "secondary": "#a8b0bc",
+    "hint": "#8a93a0",
+    "divider": "#262a31",
+    "fieldLine": "#343a44",
+    "chip": "#22262d",
+    "good": {"band": "#1f7a55", "ink": "#34c38f", "tint": "#10291f"},
+    "info": {"band": "#1b5db0", "ink": "#7fa8ff", "tint": "#16233f"},
+    "wait": {"band": "#4d545e", "ink": "#a8b0bc", "tint": "#22262d"},
+    "warn": {"band": "#8a5300", "ink": "#ffb74d", "tint": "#2a2010"},
+    "stop": {"band": "#b71c1c", "ink": "#ff8a80", "tint": "#3a1513"}
+  }
+}

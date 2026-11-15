@@ -1,0 +1,83 @@
+/* The drawing layer of the Android apps, for the browser: the base of every view ui.js makes.
+   1 dp is 1 CSS px at the device's width (412 px for the 1080 px emulator at density 2.625); 1 sp is 1 px.
+   Colours are never written here: ui.js sets them from palette.json. */
+
+@font-face { font-family: "Roboto"; font-weight: 400; font-style: normal; src: url("fonts/roboto-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Roboto"; font-weight: 500; font-style: normal; src: url("fonts/roboto-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Roboto"; font-weight: 700; font-style: normal; src: url("fonts/roboto-latin-700-normal.woff2") format("woff2"); }
+@font-face { font-family: "Roboto Mono"; font-weight: 400; font-style: normal; src: url("fonts/roboto-mono-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Roboto Mono"; font-weight: 500; font-style: normal; src: url("fonts/roboto-mono-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Roboto Mono"; font-weight: 700; font-style: normal; src: url("fonts/roboto-mono-latin-700-normal.woff2") format("woff2"); }
+@font-face { font-family: "Noto Serif"; font-weight: 400; font-style: normal; src: url("fonts/noto-serif-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "Noto Serif"; font-weight: 500; font-style: normal; src: url("fonts/noto-serif-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "Noto Serif"; font-weight: 700; font-style: normal; src: url("fonts/noto-serif-latin-700-normal.woff2") format("woff2"); }
+
+/* Every view: no margin, sized by border box, no browser text adjustments. */
+.v, .v * { box-sizing: border-box; margin: 0; }
+.v { -webkit-text-size-adjust: none; text-size-adjust: none; -webkit-tap-highlight-color: transparent; }
+.gone { display: none !important; }
+
+/* LinearLayout: a flex column or row; children are sized by ui.js from their LayoutParams. */
+.ll { display: flex; }
+.ll[data-layout="v"] { flex-direction: column; align-items: flex-start; }
+.ll[data-layout="h"] { flex-direction: row; align-items: flex-start; }
+
+/* FrameLayout: children stacked in one cell; each is placed by its gravity. */
+.fl { display: grid; grid-template-columns: minmax(0, auto); justify-items: start; align-items: start; }
+.fl > * { grid-area: 1 / 1; }
+
+/* ScrollView: scrolls on its own and never shows a bar. */
+.sv { overflow-x: hidden; overflow-y: auto; scrollbar-width: none; overscroll-behavior: contain; }
+.sv::-webkit-scrollbar { display: none; }
+
+/* TextView and the views made of text. */
+.tv { font-family: "Roboto", sans-serif; font-weight: 400; white-space: pre-line; overflow-wrap: break-word; line-height: normal; }
+.tv.single { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tv.select { user-select: text; }
+
+/* Tapping: a view that has a ripple shows it while it is pressed. */
+.clickable { cursor: pointer; }
+.ripple:active { background-image: linear-gradient(var(--ripple), var(--ripple)); }
+.ripple-over { position: relative; }
+.ripple-over:active::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--ripple); pointer-events: none; }
+
+/* A button that is off is faded. */
+.ui-button { display: flex; align-items: center; justify-content: center; text-align: center; user-select: none; }
+.ui-button.off { opacity: 0.4; pointer-events: none; }
+
+/* A field of typed text. */
+.edit { display: flex; width: 100%; font-family: "Roboto", sans-serif; outline: none; border-radius: 0; appearance: none; }
+.edit::placeholder { color: var(--hint); opacity: 1; }
+textarea.edit { resize: none; }
+
+/* RadioButton of ui.choice: the system's round control and its text. */
+.radio { display: flex; align-items: center; width: 100%; }
+.radio .ring { flex: none; width: 20px; height: 20px; border-radius: 50%; border: 2px solid; position: relative; margin: 14px 12px 14px 14px; }
+.radio .ring.on::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: currentColor; }
+
+/* The ring of ui.working turns once a second, and stays still for a reader who has asked for less motion. */
+@keyframes ui-turn { to { transform: rotate(360deg); } }
+.spinner svg { animation: ui-turn 1s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .spinner svg { animation: none; } }
+
+/* The scanner's glow. */
+.scanline { position: absolute; }
+
+/* The device: a phone's screen of 412 by 915 dp with the system bars drawn over it. */
+.device { position: relative; width: 412px; height: 915px; overflow: hidden; flex: none; font-family: "Roboto", sans-serif; }
+.device > .window { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.device > .window > .v { flex: 1 1 0; min-height: 0; width: 100%; }
+.statusbar { position: absolute; left: 0; right: 0; top: 0; pointer-events: none; }
+.navbar { position: absolute; left: 0; right: 0; bottom: 0; pointer-events: none; }
+.statusbar .time { position: absolute; left: 31px; top: 0; font-size: 14px; font-weight: 400; display: flex; align-items: center; letter-spacing: 0.01em; }
+.statusbar .right { position: absolute; right: 24px; top: 0; display: flex; align-items: center; gap: 6px; }
+.statusbar .left-icon { position: absolute; left: 76px; top: 0; display: flex; align-items: center; }
+.navbar svg { position: absolute; }
+
+/* The gallery. */
+body.gallery { margin: 0; padding: 24px; font-family: "Roboto", sans-serif; background: #d8dadf; color: #111317; }
+body.gallery h1 { font-size: 20px; font-weight: 500; margin: 0 0 4px; }
+body.gallery p.note { margin: 0 0 20px; font-size: 14px; color: #4a505a; }
+body.gallery .set { display: flex; flex-wrap: wrap; gap: 32px; margin-bottom: 40px; }
+body.gallery .slot { display: flex; flex-direction: column; gap: 6px; }
+body.gallery .slot > .title { font-size: 13px; font-weight: 500; color: #4a505a; }
