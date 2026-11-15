@@ -187,3 +187,11 @@ fn lk_40_stored_tables_decode_strictly() {
         Inbox::default()
     );
 }
+
+#[test]
+fn cr_54_a_heartbeat_number_has_the_same_bound_as_a_message_number() {
+    assert_eq!(
+        openbmt_core::heartbeat::MAX_NUMBER_JUMP,
+        crate::seal::MAX_NUMBER_JUMP
+    );
+}

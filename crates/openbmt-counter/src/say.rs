@@ -1097,6 +1097,16 @@ const HEARTBEAT: Signed = Signed {
     ),
 };
 
+// TODO_WORDS_HEARTBEAT_TOO_FAR: heading, what happened and what to do, for a
+// check-in whose number is more than 2^32 above the last one taken (CR-54).
+// The text here only stands in so that the screen checker passes; the owner
+// of the words replaces it.
+const TODO_WORDS_HEARTBEAT_TOO_FAR: (&str, &str, &str) = (
+    "Check-in number too high",
+    "The check-in's number is far above the last one this counter took, so it was not taken.",
+    "Nothing to do. The phone sends a new check-in by itself.",
+);
+
 /// The words for the owner's signed message, by the three causes the
 /// shared enums name.
 fn signed_words(set: &Signed, code: &'static str, cause: SignedCause, detail: String) -> Words {
@@ -1129,6 +1139,9 @@ fn heartbeat_cause(e: &HeartbeatError) -> SignedCause {
         HeartbeatError::WrongCounter => SignedCause::WrongCounter,
         HeartbeatError::Stale { .. } => SignedCause::Stale,
         HeartbeatError::OwnerSignatureInvalid => SignedCause::BadSignature,
+        // Told apart in `HeartbeatRefused::words`; never reaches the words of
+        // the three causes.
+        HeartbeatError::TooFarAhead { .. } => SignedCause::Stale,
     }
 }
 
@@ -1153,6 +1166,14 @@ impl<E: Display> HeartbeatRefused<E> {
     /// What the owner is told when the counter did not take a check-in.
     pub fn words(&self) -> Words {
         match self {
+            Self::Refused(e @ HeartbeatError::TooFarAhead { .. }) => refused(
+                TODO_WORDS_HEARTBEAT_TOO_FAR.0,
+                TODO_WORDS_HEARTBEAT_TOO_FAR.1,
+                Who::Owner,
+                TODO_WORDS_HEARTBEAT_TOO_FAR.2,
+                "CR-54",
+            )
+            .detail(e.to_string()),
             Self::Refused(e) => signed_words(&HEARTBEAT, "CR-50", heartbeat_cause(e), e.to_string()),
             Self::FromTheFuture { ahead_secs } => refused(
                 "Check-in is from the future",
@@ -2304,6 +2325,13 @@ pub fn all_words() -> Vec<(String, Words)> {
     for (name, e) in [
         ("WrongCounter", HeartbeatError::WrongCounter),
         ("Stale", HeartbeatError::Stale { last: 5, got: 3 }),
+        (
+            "TooFarAhead",
+            HeartbeatError::TooFarAhead {
+                last: 5,
+                got: u64::MAX,
+            },
+        ),
         (
             "OwnerSignatureInvalid",
             HeartbeatError::OwnerSignatureInvalid,

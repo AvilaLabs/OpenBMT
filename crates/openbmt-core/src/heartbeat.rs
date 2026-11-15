@@ -58,6 +58,10 @@ pub enum HeartbeatError {
     /// The number is not above the last one taken: an old heartbeat played
     /// again, or one that was already taken.
     Stale { last: u64, got: u64 },
+    /// The number is more than [`MAX_NUMBER_JUMP`] above the last one taken
+    /// (CR-54): one signature could otherwise make every later heartbeat
+    /// stale.
+    TooFarAhead { last: u64, got: u64 },
     /// The signature is neither the owner root's nor the watch key's named
     /// in the settings in force, over this heartbeat.
     OwnerSignatureInvalid,
@@ -71,6 +75,12 @@ impl fmt::Display for HeartbeatError {
                 write!(
                     f,
                     "heartbeat number {got} is not above the last one, {last}"
+                )
+            }
+            Self::TooFarAhead { last, got } => {
+                write!(
+                    f,
+                    "heartbeat number {got} is too far above the last one, {last}"
                 )
             }
             Self::OwnerSignatureInvalid => write!(f, "heartbeat is not signed by the owner"),
@@ -123,6 +133,12 @@ impl WatcherHeartbeat {
     }
 }
 
+/// The most a heartbeat's number may be above the last one taken (CR-54): 2^32.
+/// The same bound as a link message's number (`MAX_NUMBER_JUMP` of
+/// `openbmt-link`, LK-06), which this crate cannot name; a test in that crate
+/// holds the two equal.
+pub const MAX_NUMBER_JUMP: u64 = 1 << 32;
+
 /// A heartbeat and the owner's signature on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SignedHeartbeat {
@@ -134,8 +150,8 @@ pub struct SignedHeartbeat {
 }
 
 impl SignedHeartbeat {
-    /// Check the heartbeat is for `counter`, is numbered above `last_seq`,
-    /// and is signed by the owner root or by `watch`, the watch key the
+    /// Check the heartbeat is for `counter`, is numbered above `last_seq` and
+    /// at most [`MAX_NUMBER_JUMP`] above it, and is signed by the owner root or by `watch`, the watch key the
     /// settings in force name, if any. Checked in that order. On success
     /// the heartbeat is handed back.
     pub fn verify(
@@ -163,6 +179,12 @@ impl SignedHeartbeat {
         }
         if self.heartbeat.seq <= last_seq {
             return Err(HeartbeatError::Stale {
+                last: last_seq,
+                got: self.heartbeat.seq,
+            });
+        }
+        if self.heartbeat.seq > last_seq.saturating_add(MAX_NUMBER_JUMP) {
+            return Err(HeartbeatError::TooFarAhead {
                 last: last_seq,
                 got: self.heartbeat.seq,
             });
@@ -284,6 +306,28 @@ mod tests {
             signed(0).verify(&roots(), None, &counter(), 0),
             Err(HeartbeatError::Stale { last: 0, got: 0 })
         );
+    }
+
+    #[test]
+    fn cr_54_the_number_may_not_jump_more_than_two_to_the_32() {
+        let last = 10;
+        let top = last + MAX_NUMBER_JUMP;
+        assert!(signed(top).verify(&roots(), None, &counter(), last).is_ok());
+        assert_eq!(
+            signed(top + 1).verify(&roots(), None, &counter(), last),
+            Err(HeartbeatError::TooFarAhead { last, got: top + 1 })
+        );
+        assert_eq!(
+            signed(u64::MAX).verify(&roots(), None, &counter(), 0),
+            Err(HeartbeatError::TooFarAhead {
+                last: 0,
+                got: u64::MAX
+            })
+        );
+        // The sum of the last number and the jump does not wrap.
+        assert!(signed(u64::MAX)
+            .verify(&roots(), None, &counter(), u64::MAX - 1)
+            .is_ok());
     }
 
     #[test]

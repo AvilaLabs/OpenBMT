@@ -146,6 +146,25 @@ fn cr_50_the_number_must_be_above_the_last_one_taken() {
 }
 
 #[test]
+fn cr_54_a_number_too_far_above_the_last_is_refused_and_not_used_up() {
+    use openbmt_core::heartbeat::MAX_NUMBER_JUMP;
+    let mut w = world();
+    assert!(w.take(&from_owner(hb(5, w.now))).is_ok());
+    for got in [5 + MAX_NUMBER_JUMP + 1, u64::MAX] {
+        let err = w.take(&from_owner(hb(got, w.now))).unwrap_err();
+        assert_eq!(
+            err,
+            HeartbeatRefused::Refused(HeartbeatError::TooFarAhead { last: 5, got })
+        );
+        assert_eq!(w.c.desk().last_heartbeat_seq(), 5);
+    }
+    // The next number still counts, and the largest allowed one does.
+    assert!(w.take(&from_owner(hb(6, w.now))).is_ok());
+    assert!(w.take(&from_owner(hb(6 + MAX_NUMBER_JUMP, w.now))).is_ok());
+    assert_eq!(w.c.desk().last_heartbeat_seq(), 6 + MAX_NUMBER_JUMP);
+}
+
+#[test]
 fn cr_50_the_refusal_reads_plainly() {
     let mut w = world();
     let err = w.take(&hb(1, w.now).sign(&id(2))).unwrap_err();
