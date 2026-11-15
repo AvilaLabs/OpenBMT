@@ -32,6 +32,9 @@ internal class CueCardAdapter(
     private var attributes: PrintAttributes? = null
     private var written = false
 
+    /** The job the print service made for this card; a job the owner cancelled in the print screen is not a print. */
+    var job: android.print.PrintJob? = null
+
     override fun onLayout(
         old: PrintAttributes?,
         next: PrintAttributes,
@@ -68,7 +71,8 @@ internal class CueCardAdapter(
     }
 
     override fun onFinish() {
-        if (written) onPrinted()
+        val j = job
+        if (written && j != null && !j.isCancelled && !j.isFailed) onPrinted()
     }
 
     companion object {
@@ -109,7 +113,8 @@ internal class CueCardAdapter(
 internal fun Controller.printCueCard(page: CueCardPage, onPrinted: () -> Unit, onFailed: () -> Unit): Boolean {
     val manager = act.getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return false
     return try {
-        manager.print(FirstRunWords.cardScreenTitle, CueCardAdapter(act, page, onPrinted, onFailed), null)
+        val adapter = CueCardAdapter(act, page, onPrinted, onFailed)
+        adapter.job = manager.print(FirstRunWords.cardScreenTitle, adapter, null)
         true
     } catch (_: RuntimeException) {
         false
