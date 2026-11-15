@@ -62,6 +62,14 @@
     )
 )]
 
+// The build without the network side keeps its files in memory and runs on a
+// clock and a driver the host gives: it is for the web demo only. The Android
+// app's library is always the full one.
+#[cfg(all(target_os = "android", not(feature = "network")))]
+compile_error!(
+    "the Android library is built with the network side: build it with the default features"
+);
+
 mod bills;
 mod call;
 mod codec;

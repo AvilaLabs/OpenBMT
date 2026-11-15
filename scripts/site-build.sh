@@ -14,4 +14,5 @@ cp -R dist/demo/. dist/site/
 cp -R dist/handbook dist/site/handbook
 # A page that is not found is the handbook's own.
 cp dist/handbook/404.html dist/site/404.html
+cp deploy/handbook/_headers dist/site/_headers
 echo "dist/site ready"
