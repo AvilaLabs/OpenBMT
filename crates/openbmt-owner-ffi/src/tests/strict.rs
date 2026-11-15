@@ -184,7 +184,7 @@ fn unknown_ops_bad_handles_and_bad_frames_are_refused() {
     // The network byte follows the folder's empty text.
     fields[4] = 9;
     assert_eq!(rule(&frame(1, 0, &fields)), "request-malformed");
-    let flag = frame(51, handle, &W::new().u8(7).bytes(&counter_bytes()).u64(1).0);
+    let flag = frame(51, handle, &W::new().u8(8).bytes(&counter_bytes()).u64(1).0);
     assert_eq!(rule(&flag), "request-malformed");
     // Text that is not UTF-8.
     let utf = frame(

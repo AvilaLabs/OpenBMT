@@ -721,6 +721,145 @@ fn lk_62_a_missed_check_in_is_one_alert_until_a_check_in_clears_it() {
     );
 }
 
+fn floods(alerts: &[Alert]) -> usize {
+    alerts
+        .iter()
+        .filter(|a| matches!(a, Alert::RecordsFlood { counter: c } if *c == counter()))
+        .count()
+}
+
+#[test]
+fn lk_80_twenty_thousand_records_in_a_day_raise_nothing_and_one_more_raises_the_alert() {
+    use crate::RECORDS_DAY_ALARM;
+    assert_eq!(RECORDS_DAY_ALARM, 20_000);
+    let mut w = world();
+    w.step(T0);
+    w.link.count_records(counter(), T0, 20_000);
+    w.step(T0 + 1);
+    assert_eq!(floods(w.link.alerts()), 0);
+    w.link.count_records(counter(), T0 + 2, 1);
+    w.step(T0 + 3);
+    assert_eq!(floods(w.link.alerts()), 1);
+    // One alert, not one for each step.
+    w.step(T0 + 4);
+    assert_eq!(floods(w.link.alerts()), 1);
+}
+
+#[test]
+fn lk_80_records_taken_over_the_message_path_are_counted_and_still_taken() {
+    let mut w = world();
+    let mut c = chain(3, 21);
+    c.append_check_in(&id(3));
+    w.step(T0);
+    w.send_records(&c.records()[..3]);
+    w.step(T0 + 1);
+    assert_eq!(w.copy().len(), 3);
+    assert_eq!(floods(w.link.alerts()), 0);
+    // A flood is only counted as taken records: the copy still grows.
+    w.link.count_records(counter(), T0 + 2, 25_000);
+    w.step(T0 + 3);
+    assert_eq!(floods(w.link.alerts()), 1);
+    w.send_records(&c.records()[3..]);
+    w.step(T0 + 4);
+    assert_eq!(w.copy().len(), 4);
+}
+
+#[test]
+fn lk_80_records_spread_over_25_hours_leave_the_last_24_hours_at_the_limit() {
+    let mut w = world();
+    w.step(T0);
+    let hour = 3600;
+    let start = (T0 / hour + 1) * hour;
+    // 5,000 in the first hour, then 20,000 over the next 24 hours.
+    w.link.count_records(counter(), start, 5_000);
+    for h in 1..=24 {
+        w.link
+            .count_records(counter(), start + h * hour, 20_000 / 24);
+    }
+    w.link
+        .count_records(counter(), start + 24 * hour, 20_000 % 24);
+    // At the last hour the window holds hours 1 to 24: 20,000 exactly.
+    w.step(start + 24 * hour + 10);
+    assert_eq!(floods(w.link.alerts()), 0);
+    // With the first hour's 5,000 inside the window it would be 25,000.
+    let mut early = world();
+    early.step(T0);
+    early.link.count_records(counter(), start, 5_000);
+    early
+        .link
+        .count_records(counter(), start + 23 * hour, 20_000);
+    early.step(start + 23 * hour + 10);
+    assert_eq!(floods(early.link.alerts()), 1);
+    // And when the first hour falls out, it is 20,000 again.
+    early.step(start + 24 * hour + 10);
+    assert_eq!(floods(early.link.alerts()), 0);
+}
+
+#[test]
+fn lk_80_the_alert_goes_by_itself_when_the_count_falls_back_and_the_owner_can_clear_it() {
+    let mut w = world();
+    let hour = 3600;
+    let start = (T0 / hour + 1) * hour;
+    w.step(start);
+    w.link.count_records(counter(), start, 20_001);
+    w.step(start + 1);
+    let alert = Alert::RecordsFlood { counter: counter() };
+    assert_eq!(w.link.alerts(), std::slice::from_ref(&alert));
+    // The owner clears it; the flood goes on, so it comes back.
+    w.link.clear(&alert);
+    assert!(w.link.alerts().is_empty());
+    w.step(start + 2);
+    assert_eq!(w.link.alerts(), std::slice::from_ref(&alert));
+    // More records after a clear keep it raised.
+    w.link.clear(&alert);
+    w.link.count_records(counter(), start + 3, 5);
+    w.step(start + 4);
+    assert_eq!(floods(w.link.alerts()), 1);
+    // The bucket falls out of the window: the alert goes by itself, while
+    // check-ins are missed meanwhile.
+    w.step(start + 24 * hour);
+    assert_eq!(floods(w.link.alerts()), 0);
+    // The owner has nothing to clear, and no further flood raises none.
+    w.step(start + 24 * hour + 1);
+    assert_eq!(floods(w.link.alerts()), 0);
+}
+
+#[test]
+fn lk_80_the_alert_of_a_counter_that_is_removed_goes_with_it() {
+    let mut b = with_box();
+    let second = id(7).device_id();
+    b.w.link.follow(&[counter(), second], &[box_key()]).unwrap();
+    b.w.step(T0);
+    b.w.link.count_records(second, T0, 20_001);
+    b.w.step(T0 + 1);
+    let alert = Alert::RecordsFlood { counter: second };
+    assert!(b.w.link.alerts().contains(&alert));
+    b.w.link.follow(&[counter()], &[box_key()]).unwrap();
+    assert!(!b.w.link.alerts().contains(&alert));
+    // Added again, its count starts from nothing.
+    b.w.link.follow(&[counter(), second], &[box_key()]).unwrap();
+    b.w.step(T0 + 2);
+    assert!(!b.w.link.alerts().contains(&alert));
+}
+
+#[test]
+fn lk_80_the_count_of_a_counter_has_a_fixed_size() {
+    let mut day = crate::RecordsDay::default();
+    let before = std::mem::size_of_val(&day);
+    for h in 0..1_000u64 {
+        day.add(T0 + h * 3600, 3);
+    }
+    assert_eq!(day.len(), 24);
+    assert_eq!(std::mem::size_of_val(&day), before);
+    // Only the last 24 hours are counted.
+    assert_eq!(day.total(T0 + 999 * 3600), 3 * 24);
+    // A bucket is replaced by the hour that comes 24 hours later, not added.
+    let mut day = crate::RecordsDay::default();
+    day.add(T0, 10);
+    day.add(T0 + 24 * 3600, 4);
+    assert_eq!(day.total(T0 + 24 * 3600), 4);
+}
+
 #[test]
 fn lk_62_the_alert_comes_though_the_relay_is_down() {
     let mut w = world();

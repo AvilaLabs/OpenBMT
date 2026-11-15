@@ -2521,6 +2521,9 @@ impl Entry {
                             (AlertKind::PaidUnreadable, Some(counter), 0)
                         }
                         Alert::PaidHeld { counter } => (AlertKind::PaidHeld, Some(counter), 0),
+                        Alert::RecordsFlood { counter } => {
+                            (AlertKind::RecordsFlood, Some(counter), 0)
+                        }
                         Alert::PaidNotKept { full } => {
                             (AlertKind::PaidNotKept, None, u64::from(*full))
                         }
@@ -2599,7 +2602,8 @@ impl Entry {
                 AlertKind::MissedCheckIn
                 | AlertKind::Diverged
                 | AlertKind::BatchUndelivered
-                | AlertKind::PaidNotSeen,
+                | AlertKind::PaidNotSeen
+                | AlertKind::RecordsFlood,
             ) = (counter, a.kind)
             else {
                 return Err(refused_by("alert-unknown", "the alert is not raised"));
@@ -2617,6 +2621,7 @@ impl Entry {
                     counter,
                     since: a.value,
                 },
+                AlertKind::RecordsFlood => Alert::RecordsFlood { counter },
                 AlertKind::PaidNotSeen => Alert::PaidNotSeen {
                     counter,
                     sale: u32::try_from(a.value)
@@ -3771,6 +3776,19 @@ impl Entry {
     pub(crate) fn run_for_test(&self, f: impl FnOnce() + Send + 'static) -> Result<(), AppError> {
         self.run(None, move |_| {
             f();
+            Ok(())
+        })
+    }
+
+    /// Raise an alert on the node's link, as the link's own steps would.
+    #[cfg(test)]
+    pub(crate) fn raise_alert_for_test(&self, alert: Alert) -> Result<(), AppError> {
+        self.run(None, move |st| {
+            let link = st
+                .link
+                .as_mut()
+                .ok_or_else(|| wrong_state("link-none", "the node was started without a link"))?;
+            link.raise_alert(alert);
             Ok(())
         })
     }

@@ -99,7 +99,8 @@ object ProtocolDecoderTest {
 
         val link = decodeResponse(linkFrame()).linkState()
         check(link.reachable && link.refused == 2L)
-        check(link.alerts.size == 1 && link.alerts[0].kind == AlertKind.Diverged && link.alerts[0].value == 9L)
+        check(link.alerts.size == 2 && link.alerts[0].kind == AlertKind.Diverged && link.alerts[0].value == 9L)
+        check(link.alerts[1].kind == AlertKind.RecordsFlood && link.alerts[1].counter.size == 32)
         check(link.counters.size == 1 && link.counters[0].records == 5L)
         check(link.counters[0].checkInSeq == 3L && link.counters[0].checkInHeld == true)
         check(link.counters[0].lastCheckInAt == null)
@@ -947,7 +948,9 @@ object ProtocolDecoderTest {
 
     private fun linkFrame(): ByteArray {
         val out = ByteArrayOutputStream()
-        out.write(Writer().u8(1).u64(2).u32(1).u8(1).bytes(ByteArray(32) { 2 }).u64(9).toByteArray())
+        out.write(Writer().u8(1).u64(2).u32(2).u8(1).bytes(ByteArray(32) { 2 }).u64(9).toByteArray())
+        words(out)
+        out.write(Writer().u8(7).bytes(ByteArray(32) { 2 }).u64(0).toByteArray())
         words(out)
         out.write(Writer().u32(1).bytes(ByteArray(32) { 2 }).u64(5).bytes(ByteArray(32) { 3 }).toByteArray())
         out.write(Writer().u8(1).u64(3).u8(1).u8(1).u8(0).toByteArray())

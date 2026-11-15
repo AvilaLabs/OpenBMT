@@ -511,6 +511,40 @@ fn oc_61_the_alert_of_a_held_counter_says_none_of_its_sales_are_checked() {
 }
 
 #[test]
+fn lk_80_the_alert_of_a_flood_of_records_says_what_it_is_and_the_owner_clears_it() {
+    let w = crate::say::link_alert_words(&openbmt_owner_node::Alert::RecordsFlood {
+        counter: counter(),
+    });
+    assert_eq!(w.heading, "Counter sends too much");
+    assert_eq!(
+        w.what,
+        "A counter sent more than 20,000 records in a day, far more than its sales need. It may have been tampered with."
+    );
+    assert_eq!(
+        w.next,
+        "Check the counter. This phone still keeps its records, and the alert goes once it sends fewer."
+    );
+    assert_eq!(w.code, Some("LK-80"));
+    // It reaches the view with its counter and words, and the owner clears it.
+    let (rig, handle) = ready(false);
+    let entry = rig.registry().entry_for_test(handle).expect("an entry");
+    entry
+        .raise_alert_for_test(openbmt_owner_node::Alert::RecordsFlood { counter: counter() })
+        .expect("raised");
+    let response = rig.call(50, handle, &[]);
+    let mut r = Rd::ok(&response);
+    let link = r.link();
+    let flood: Vec<_> = link.alerts.iter().filter(|a| a.0 == 7).collect();
+    assert_eq!(flood.len(), 1);
+    assert_eq!(flood[0].1, counter_bytes());
+    assert_eq!(flood[0].3.heading, "Counter sends too much");
+    check_wire_words(&flood[0].3).expect("words");
+    let clear = W::new().u8(7).bytes(&counter_bytes()).u64(0).0;
+    Rd::ok(&rig.call(51, handle, &clear)).done();
+    assert!(alerts_of(&rig, handle, 7).is_empty());
+}
+
+#[test]
 fn oc_61_the_counter_checks_view_looks_up_by_key_and_keeps_its_order() {
     use crate::host::{checks_by_key, sales_by_key, sales_in_state};
     use openbmt_owner_node::{PaidHow, PaidSale, PaidState, SaleCheck};

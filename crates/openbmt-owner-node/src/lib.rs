@@ -106,9 +106,9 @@ pub use copy::{CheckInTaken, CopyError, CounterCopy, Stop, Taken};
 pub use facts::{verified_facts, FactsRefused};
 pub use link::{
     Alert, BatchesWaiting, BoxReport, CounterState, IndexUse, OwnerLink, OwnerLinkConfig,
-    OwnerLinkError, RangesWaiting, SettingsNotCarried, SettingsWaiting, TakenReport,
+    OwnerLinkError, RangesWaiting, RecordsDay, SettingsNotCarried, SettingsWaiting, TakenReport,
     BATCH_ALERT_SECS, BATCH_RESEND_SECS, LIGHTNING_REPORT_FILE, MAX_BOX_REPORTS,
-    MAX_CARRIED_SETTINGS,
+    MAX_CARRIED_SETTINGS, RECORDS_DAY_ALARM,
 };
 pub use live::{
     DeepLine, Spans, WatchLimits, DEEP_CHECK_SECS, DEEP_RETRY_SECS, DEEP_STALL_SECS,

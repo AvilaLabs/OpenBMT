@@ -74,6 +74,7 @@ use openbmt_core::pairing_own::SwitchOwn;
 use openbmt_core::pinned_wallet::SignedRange;
 use openbmt_core::records::{DeviceList, Record, RecordKind};
 use openbmt_core::settings::{Authority, Settings, SettingsError, SignedSettings};
+use openbmt_counter::totals::TOTALS_MAX_RECORDS;
 use openbmt_counter::{BatchHeld, ConfirmHeld, Event, RangeHeld, SwitchedHeld};
 use openbmt_counter_node::DriverPort;
 use openbmt_courier::{
@@ -105,6 +106,13 @@ pub const BATCH_RESEND_SECS: u64 = 120;
 
 /// Seconds a batch may wait before the owner is told (LK-73): 24 hours.
 pub const BATCH_ALERT_SECS: u64 = 24 * 60 * 60;
+
+/// Records a counter may send in 24 hours before the owner is told (LK-80):
+/// the most a day's totals read, so far more than any shop's sales need.
+pub const RECORDS_DAY_ALARM: u64 = TOTALS_MAX_RECORDS;
+
+/// Hourly buckets of the count of records taken (LK-80): 24 hours.
+const RECORDS_DAY_BUCKETS: usize = 24;
 
 /// The file the newest Lightning report is kept in, under the link's
 /// directory (SL-78).
@@ -253,6 +261,55 @@ pub enum Alert {
         /// Whether the marks are full, rather than unreadable.
         full: bool,
     },
+    /// A counter sent more than [`RECORDS_DAY_ALARM`] records in 24 hours
+    /// (LK-80). It goes by itself when the count falls to that or below; the
+    /// records are taken all the same.
+    RecordsFlood {
+        /// The counter.
+        counter: DeviceId,
+    },
+}
+
+/// The records taken from one counter over the last 24 hours, in hourly
+/// buckets so that the memory for a counter is fixed (LK-80).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecordsDay {
+    /// The bucket of an hour is at that hour modulo 24: the hour (owner
+    /// clock, in hours) it counts, and the records taken in it.
+    buckets: [(u64, u64); RECORDS_DAY_BUCKETS],
+}
+
+impl RecordsDay {
+    /// Count `n` records taken at `now` (seconds).
+    pub fn add(&mut self, now: u64, n: u64) {
+        let hour = now / 3600;
+        let at = (hour % RECORDS_DAY_BUCKETS as u64) as usize;
+        if let Some(slot) = self.buckets.get_mut(at) {
+            if slot.0 != hour {
+                *slot = (hour, 0);
+            }
+            slot.1 = slot.1.saturating_add(n);
+        }
+    }
+
+    /// The records taken in the hour of `now` and the 23 before it.
+    pub fn total(&self, now: u64) -> u64 {
+        let hour = now / 3600;
+        self.buckets
+            .iter()
+            .filter(|(h, n)| *n > 0 && h.saturating_add(RECORDS_DAY_BUCKETS as u64) > hour)
+            .fold(0, |sum, (_, n)| sum.saturating_add(*n))
+    }
+
+    /// The number of buckets, which does not change.
+    pub fn len(&self) -> usize {
+        self.buckets.len()
+    }
+
+    /// Whether there are no buckets, which is never so.
+    pub fn is_empty(&self) -> bool {
+        self.buckets.is_empty()
+    }
 }
 
 /// The batches of addresses that wait for one counter to hold them (LK-70).
@@ -458,6 +515,8 @@ pub struct OwnerLink<R: Post = RelayPost> {
     cfg: OwnerLinkConfig,
     alerts: Vec<Alert>,
     last_check_in_at: BTreeMap<DeviceId, u64>,
+    /// LK-80: the records taken from each counter over the last 24 hours.
+    records_day: BTreeMap<DeviceId, RecordsDay>,
     started_at: Option<u64>,
     last_heartbeat_at: Option<u64>,
     next_relay_at: u64,
@@ -554,6 +613,7 @@ impl<R: Post> OwnerLink<R> {
             cfg,
             alerts: Vec::new(),
             last_check_in_at: BTreeMap::new(),
+            records_day: BTreeMap::new(),
             started_at: None,
             last_heartbeat_at: None,
             next_relay_at: 0,
@@ -1214,6 +1274,7 @@ impl<R: Post> OwnerLink<R> {
             self.counters.retain(|c| *c != counter);
             self.copies.remove(&counter);
             self.last_check_in_at.remove(&counter);
+            self.records_day.remove(&counter);
             self.alerts.retain(|a| match a {
                 Alert::MissedCheckIn { counter: c, .. }
                 | Alert::Diverged { counter: c, .. }
@@ -1222,6 +1283,7 @@ impl<R: Post> OwnerLink<R> {
                 | Alert::PaidUnreadable { counter: c }
                 | Alert::PaidHeld { counter: c } => *c != counter,
                 Alert::PaidNotKept { .. } => true,
+                Alert::RecordsFlood { counter: c } => *c != counter,
             });
             // Batches for a counter that is no longer on the link are not
             // sent again (LK-67, LK-70).
@@ -1388,6 +1450,7 @@ impl<R: Post> OwnerLink<R> {
     pub fn step<P: DriverPort>(&mut self, watcher: &mut OwnerWatcher<P>, now: u64) {
         let started = *self.started_at.get_or_insert(now);
         self.check_missed(now, started);
+        self.check_records_flood(now);
         self.scan_index_use();
         self.settle_ranges();
         self.settle_switches();
@@ -1410,6 +1473,7 @@ impl<R: Post> OwnerLink<R> {
         // Taking a check-in may have cleared an alert; taking records may
         // have raised one.
         self.check_missed(now, started);
+        self.check_records_flood(now);
         if reached {
             reached = self.reply(&reply_due);
         }
@@ -1455,6 +1519,36 @@ impl<R: Post> OwnerLink<R> {
                 .any(|a| matches!(a, Alert::MissedCheckIn { counter: c, .. } if *c == counter));
             if silent && !raised {
                 self.raise(Alert::MissedCheckIn { counter, last_at });
+            }
+        }
+    }
+
+    /// LK-80: count the records taken from a counter at `now`.
+    pub(crate) fn count_records(&mut self, counter: DeviceId, now: u64, appended: u64) {
+        if appended > 0 {
+            self.records_day
+                .entry(counter)
+                .or_default()
+                .add(now, appended);
+        }
+    }
+
+    /// LK-80: raise the alert for a counter that sent more than
+    /// [`RECORDS_DAY_ALARM`] records over the last 24 hours, and drop it when
+    /// the count falls back. An alert the owner cleared is raised again while
+    /// the count stays above.
+    fn check_records_flood(&mut self, now: u64) {
+        let counters = self.counters.clone();
+        for counter in counters {
+            let over = self
+                .records_day
+                .get(&counter)
+                .is_some_and(|day| day.total(now) > RECORDS_DAY_ALARM);
+            let alert = Alert::RecordsFlood { counter };
+            if over {
+                self.raise(alert);
+            } else {
+                self.alerts.retain(|a| *a != alert);
             }
         }
     }
@@ -1692,7 +1786,7 @@ impl<R: Post> OwnerLink<R> {
 
     fn route(&mut self, message: Received, now: u64, reply_due: &mut BTreeSet<DeviceId>) {
         match message.kind {
-            Kind::Records => self.take_records(message.from, &message.content, reply_due),
+            Kind::Records => self.take_records(message.from, &message.content, now, reply_due),
             Kind::CheckIn => self.take_check_in(message.from, &message.content, now),
             Kind::PosNotice => self.take_pos_notice(&message, now),
             Kind::LightningReport => self.take_lightning_report(&message, now),
@@ -1705,7 +1799,13 @@ impl<R: Post> OwnerLink<R> {
     }
 
     /// LK-58, LK-59.
-    fn take_records(&mut self, from: DeviceId, content: &[u8], reply_due: &mut BTreeSet<DeviceId>) {
+    fn take_records(
+        &mut self,
+        from: DeviceId,
+        content: &[u8],
+        now: u64,
+        reply_due: &mut BTreeSet<DeviceId>,
+    ) {
         let records = match decode_records(content) {
             Ok(records) => records,
             Err(e) => {
@@ -1721,6 +1821,7 @@ impl<R: Post> OwnerLink<R> {
         };
         let taken = copy.take(records, &self.devices);
         let diverged_at = copy.diverged_at();
+        self.count_records(from, now, taken.appended);
         // Even a message that was refused is answered: the counter learns
         // what the copy holds and sends from there.
         reply_due.insert(from);

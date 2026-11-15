@@ -625,6 +625,7 @@ internal fun Controller.showAlerts(message: SayWords? = null): Unit = withNode {
                     AlertKind.MissedCheckIn -> "Missed check-in"
                     AlertKind.Diverged -> "Records do not match"
                     AlertKind.BatchUndelivered -> "New addresses not taken"
+                    AlertKind.RecordsFlood -> "Too many records"
                     AlertKind.PaidNotSeen, AlertKind.PaidUnreadable, AlertKind.PaidHeld, AlertKind.PaidNotKept -> ""
                 }
                 views.add(

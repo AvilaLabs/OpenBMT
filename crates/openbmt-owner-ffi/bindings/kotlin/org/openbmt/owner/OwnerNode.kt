@@ -372,6 +372,7 @@ private const val TAG_ALERT_KIND_PAID_NOT_SEEN = 3
 private const val TAG_ALERT_KIND_PAID_UNREADABLE = 4
 private const val TAG_ALERT_KIND_PAID_NOT_KEPT = 5
 private const val TAG_ALERT_KIND_PAID_HELD = 6
+private const val TAG_ALERT_KIND_RECORDS_FLOOD = 7
 private const val TAG_VIEW_KIND_READY = 0
 private const val TAG_VIEW_KIND_RESCANNING = 1
 private const val TAG_VIEW_KIND_DEEP_REORG = 2
@@ -530,7 +531,7 @@ class CashOutArgs(val address: String, val amount: CashAmount, val label: String
 
 class BatchArgs(val counter: ByteArray, val start: Long, val count: Long)
 
-enum class AlertKind { MissedCheckIn, Diverged, BatchUndelivered, PaidNotSeen, PaidUnreadable, PaidNotKept, PaidHeld }
+enum class AlertKind { MissedCheckIn, Diverged, BatchUndelivered, PaidNotSeen, PaidUnreadable, PaidNotKept, PaidHeld, RecordsFlood }
 
 /** An alert as [OwnerNode.linkState] showed it. */
 class ClearArgs(val kind: AlertKind, val counter: ByteArray, val value: Long)
@@ -2128,6 +2129,7 @@ private fun Writer.alertKind(v: AlertKind): Writer =
             AlertKind.PaidUnreadable -> TAG_ALERT_KIND_PAID_UNREADABLE
             AlertKind.PaidNotKept -> TAG_ALERT_KIND_PAID_NOT_KEPT
             AlertKind.PaidHeld -> TAG_ALERT_KIND_PAID_HELD
+            AlertKind.RecordsFlood -> TAG_ALERT_KIND_RECORDS_FLOOD
         },
     )
 
@@ -2140,6 +2142,7 @@ private fun Reader.alertKind(): AlertKind =
         TAG_ALERT_KIND_PAID_UNREADABLE -> AlertKind.PaidUnreadable
         TAG_ALERT_KIND_PAID_NOT_KEPT -> AlertKind.PaidNotKept
         TAG_ALERT_KIND_PAID_HELD -> AlertKind.PaidHeld
+        TAG_ALERT_KIND_RECORDS_FLOOD -> AlertKind.RecordsFlood
         else -> tag("AlertKind")
     }
 
