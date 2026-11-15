@@ -16,6 +16,10 @@
 # (crates/openbmt-demo-counter) into dist/demo-counter/: counter.wasm and
 # counter-host.mjs, the page's side of the counter's one native call.
 #
+# The owner's own library, without its network side, is built the same way
+# (crates/openbmt-demo-owner) into dist/demo-owner/: owner.wasm and
+# owner-host.mjs, the page's side of the owner's one native call.
+#
 # The cargo calls run under the memory guard.
 #
 # Usage: scripts/demo-build.sh
@@ -33,6 +37,7 @@ ndk="${ANDROID_NDK_HOME:-$HOME/Android/Sdk/ndk/26.3.11579264}"
 bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
 out="$root/dist/demo"
 counter_out="$root/dist/demo-counter"
+owner_out="$root/dist/demo-owner"
 cd "$root"
 
 if ! rustup target list --installed | grep -qx wasm32-unknown-unknown; then
@@ -64,6 +69,7 @@ build() {
 }
 build -p openbmt-demo
 build -p openbmt-demo-counter
+build -p openbmt-demo-owner
 
 rm -rf "$out"
 mkdir -p "$out/words"
@@ -80,5 +86,10 @@ rm -rf "$counter_out"
 mkdir -p "$counter_out"
 cp "$target_dir/wasm32-unknown-unknown/release/openbmt_demo_counter.wasm" "$counter_out/counter.wasm"
 cp demo/web2/counter-host.mjs "$counter_out/"
+rm -rf "$owner_out"
+mkdir -p "$owner_out"
+cp "$target_dir/wasm32-unknown-unknown/release/openbmt_demo_owner.wasm" "$owner_out/owner.wasm"
+cp demo/web2/owner-host.mjs "$owner_out/"
+echo "PASS  dist/demo-owner ($(wc -c <"$owner_out/owner.wasm") bytes of wasm)"
 echo "PASS  dist/demo-counter ($(wc -c <"$counter_out/counter.wasm") bytes of wasm)"
 echo "PASS  dist/demo ($(wc -c <"$out/demo.wasm") bytes of wasm)"

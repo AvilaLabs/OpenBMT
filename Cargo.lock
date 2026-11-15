@@ -748,6 +748,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbmt-demo-owner"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "openbmt-core",
+ "openbmt-counter-node",
+ "openbmt-demo",
+ "openbmt-kernel-random",
+ "openbmt-net-io",
+ "openbmt-owner",
+ "openbmt-owner-ffi",
+ "openbmt-owner-node",
+ "openbmt-watch",
+]
+
+[[package]]
 name = "openbmt-json"
 version = "0.1.0"
 

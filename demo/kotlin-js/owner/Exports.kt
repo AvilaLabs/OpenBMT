@@ -3,6 +3,9 @@ package org.openbmt.owner.demo
 import org.openbmt.owner.BooksDay
 import org.openbmt.owner.Books
 import org.openbmt.owner.Native
+import org.openbmt.owner.OwnerNetwork
+import org.openbmt.owner.OwnerNode
+import org.openbmt.owner.StartConfig
 import org.openbmt.owner.app.BooksModel
 import org.openbmt.owner.app.RequestForm
 import org.openbmt.owner.app.RequestModel
@@ -50,4 +53,76 @@ object OwnerModelDemo {
 
     /** The request bytes through [Native.call] and the answer's length, or -1 when the page has no answer. */
     fun nativeAnswerLength(request: ByteArray): Int = Native.call(request)?.size ?: -1
+}
+
+/**
+ * The owner app's own entry points, driven from the page's script: the node is started with [OwnerNode.start] on
+ * the demo wallet held as the shop's own, and what it holds is read with [OwnerNode.status],
+ * [OwnerNode.receiptsLine] and [OwnerNode.books], all through [Native.call], which the page answers with the
+ * WebAssembly build of the owner's library.
+ */
+@JsExport
+object OwnerFlowDemo {
+    private var node: OwnerNode? = null
+
+    private fun running(): OwnerNode = node ?: error("the node is not started")
+
+    /**
+     * Start the node on the folder [dir], which the page has seeded, for the shop with its own wallet [wallet]
+     * (the file the module gives), and take its first events (the app pumps in a loop).
+     */
+    fun start(dir: String, now: Double, wallet: ByteArray) {
+        val config = StartConfig(
+            dir = dir,
+            network = OwnerNetwork.Regtest,
+            now = now.toLong(),
+            ownerSecret = ByteArray(32) { 1 },
+            approverRoot = ByteArray(32),
+            wallet = "",
+            key1Account = ByteArray(0),
+            key3Xpub = null,
+            batchMinCount = 1000,
+            refundDepth = 6,
+            birthday = 0,
+            proxy = null,
+            fixedPeers = emptyList(),
+            broadcastProxy = null,
+            withoutTor = true,
+            link = null,
+            ownWallet = wallet,
+        )
+        val started = OwnerNode.start(config)
+        node = started
+        started.pump(now.toLong(), 0)
+    }
+
+    /** Take the network's events; how many lines they logged. */
+    fun pump(now: Double): Int = running().pump(now.toLong(), 0).notes.size
+
+    /** What the wallet holds, in satoshis, as the node's coin view counts it. */
+    fun balanceSats(): Double = running().status().balanceSats.toDouble()
+
+    /** The height of the chain the node has checked. */
+    fun checkedHeight(): Double = running().status().checkedHeight.toDouble()
+
+    /** Whether the node says the chain it watches is healthy. */
+    fun healthy(): Boolean = running().status().health.healthy
+
+    /** The kind of the line about the payments received: NotReady, NoCoins, FeeUnknown or Known. */
+    fun receiptsKind(): String = running().receiptsLine().kind.name
+
+    /** The number of payments the receipts line counts. */
+    fun receiptsPayments(): Double = running().receiptsLine().payments.toDouble()
+
+    /** The currency of the books page and the days it has, as "currency|days". */
+    fun booksSummary(): String {
+        val books = running().books(0)
+        return "${books.currency}|${books.days.size}"
+    }
+
+    /** Stop the node. */
+    fun stop() {
+        node?.stop()
+        node = null
+    }
 }

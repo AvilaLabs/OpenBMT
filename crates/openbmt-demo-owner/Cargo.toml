@@ -1,0 +1,26 @@
+[package]
+name = "openbmt-demo-owner"
+description = "The OpenBMT web demo's owner phone: the owner app's own library (the owner node and its framed calls) compiled to WebAssembly, on the same chain simulated in memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# The library is the one the Android app calls, without its network side
+# (the `network` feature of the owner and counter crates): the page gives the
+# drivers, the time and the random bytes.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+openbmt-core = { path = "../openbmt-core" }
+openbmt-counter-node = { path = "../openbmt-counter-node", default-features = false }
+openbmt-demo = { path = "../openbmt-demo", default-features = false }
+openbmt-kernel-random = { path = "../openbmt-kernel-random" }
+openbmt-net-io = { path = "../openbmt-net-io" }
+openbmt-owner = { path = "../openbmt-owner" }
+openbmt-owner-ffi = { path = "../openbmt-owner-ffi", default-features = false }
+openbmt-owner-node = { path = "../openbmt-owner-node", default-features = false }
+openbmt-watch = { path = "../openbmt-watch" }
+bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
