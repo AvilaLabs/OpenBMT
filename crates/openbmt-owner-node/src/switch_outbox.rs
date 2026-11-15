@@ -15,8 +15,8 @@
 //! the order of the counter's bytes, with no two for the same counter and
 //! new wallet.
 
+use openbmt_counter_node::vfs::fs;
 use std::fmt;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 

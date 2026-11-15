@@ -27,8 +27,8 @@
 //! merchant id), the exact names of the Bitcoin tender and the currencies. All
 //! the counters of the link serve that one location.
 
+use openbmt_counter_node::vfs::{fs, File};
 use std::fmt;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -691,7 +691,7 @@ impl OwnerPos {
                 Err(e) => return Err(PosRefused::Store(format!("{name}: {e}"))),
             }
         }
-        fs::File::open(&self.dir)
+        File::open(&self.dir)
             .and_then(|d| d.sync_all())
             .map_err(|e| PosRefused::Store(e.to_string()))?;
         self.setup = None;

@@ -110,7 +110,8 @@ impl<P: OwnerPort> OwnerNode<P> {
 
     /// Read the last line made, if the file is there and is the owner's.
     fn starter_restore(&mut self) {
-        let Ok(bytes) = std::fs::read(self.dir.join(STARTER_LINE_FILE)) else {
+        let Ok(bytes) = openbmt_counter_node::vfs::fs::read(self.dir.join(STARTER_LINE_FILE))
+        else {
             return;
         };
         let owner = match self.owner_identity() {

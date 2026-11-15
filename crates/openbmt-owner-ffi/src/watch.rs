@@ -10,15 +10,21 @@
 //! [`decode_file`]: exact length, every list and string within its limit, and
 //! the bytes encode again to the same bytes.
 
+#[cfg(feature = "network")]
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::mpsc::{channel, Receiver, Sender};
+#[cfg(feature = "network")]
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{channel, Sender};
 use std::sync::Mutex;
 use std::thread::JoinHandle;
+#[cfg(feature = "network")]
 use std::time::Duration;
 
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_net_io::DriverConfig;
-use openbmt_owner_node::{WatchConfig, WatchLinkConfig, WatchNode};
+#[cfg(feature = "network")]
+use openbmt_owner_node::WatchNode;
+use openbmt_owner_node::{WatchConfig, WatchLinkConfig};
 
 use crate::codec::{wire_record, wire_record_get, Get, Put, Reader};
 use crate::error::{internal, refused_by, wrong_state, AppError};
@@ -208,6 +214,7 @@ pub fn public_key(secret: &[u8]) -> Result<Vec<u8>, AppError> {
 }
 
 /// What the watcher's thread is asked.
+#[cfg_attr(not(feature = "network"), allow(dead_code))]
 enum Order {
     Step(u64, u32, Sender<WatchStepView>),
     Stop(Sender<()>),
@@ -221,6 +228,7 @@ pub struct WatchEntry {
     thread: Mutex<Option<JoinHandle<()>>>,
 }
 
+#[cfg(feature = "network")]
 fn work(node: &mut WatchNode, now: u64, wait_ms: u32) -> WatchStepView {
     node.pump(Duration::from_millis(u64::from(
         wait_ms.min(crate::host::MAX_WAIT_MS),
@@ -235,6 +243,7 @@ fn work(node: &mut WatchNode, now: u64, wait_ms: u32) -> WatchStepView {
     }
 }
 
+#[cfg(feature = "network")]
 fn run_thread(config: WatchConfig, ready: Sender<Result<(), AppError>>, orders: Receiver<Order>) {
     let mut node = match WatchNode::start(config) {
         Ok(node) => {
@@ -314,23 +323,31 @@ impl WatchEntry {
             link,
             health: None,
         };
-        let (orders_tx, orders_rx) = channel();
-        let (ready_tx, ready_rx) = channel();
-        let thread = std::thread::Builder::new()
-            .name("openbmt-owner-watch".to_string())
-            .spawn(move || run_thread(config, ready_tx, orders_rx))
-            .map_err(|e| internal(format!("the watcher's thread did not start: {e}")))?;
-        let ready = ready_rx
-            .recv()
-            .unwrap_or_else(|_| Err(internal("the watcher's thread ended before it started")));
-        if let Err(e) = ready {
-            let _ = thread.join();
-            return Err(e);
+        #[cfg(not(feature = "network"))]
+        {
+            let _ = config;
+            Err(internal("this build has no background watcher"))
         }
-        Ok(Self {
-            orders: Mutex::new(Some(orders_tx)),
-            thread: Mutex::new(Some(thread)),
-        })
+        #[cfg(feature = "network")]
+        {
+            let (orders_tx, orders_rx) = channel();
+            let (ready_tx, ready_rx) = channel();
+            let thread = std::thread::Builder::new()
+                .name("openbmt-owner-watch".to_string())
+                .spawn(move || run_thread(config, ready_tx, orders_rx))
+                .map_err(|e| internal(format!("the watcher's thread did not start: {e}")))?;
+            let ready = ready_rx
+                .recv()
+                .unwrap_or_else(|_| Err(internal("the watcher's thread ended before it started")));
+            if let Err(e) = ready {
+                let _ = thread.join();
+                return Err(e);
+            }
+            Ok(Self {
+                orders: Mutex::new(Some(orders_tx)),
+                thread: Mutex::new(Some(thread)),
+            })
+        }
     }
 
     /// One turn at `now`: take the driver's events for at most `wait_ms`,

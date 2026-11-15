@@ -22,9 +22,9 @@
 //! in the order of the outbox number, with none twice; devices in the order
 //! of their keys, with none twice.
 
+use openbmt_counter_node::vfs::fs;
 use std::collections::BTreeMap;
 use std::fmt;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 

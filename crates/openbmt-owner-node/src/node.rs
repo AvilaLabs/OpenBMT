@@ -58,13 +58,14 @@
 //! where it was and no session is built until the node is restarted. It is
 //! never silent: a note says what failed.
 
+use openbmt_counter_node::mono::Instant;
+use openbmt_counter_node::vfs::{fs, File};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use bitcoin::bip32::Xpriv;
 use bitcoin::bip32::Xpub;
@@ -76,11 +77,13 @@ use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::pinned_wallet::PinnedWallet;
 use openbmt_core::wallet::Keychain;
 use openbmt_core::wallet_single::ImportedWallet;
+use openbmt_counter_node::vfs::DirLock;
+#[cfg(feature = "network")]
+use openbmt_counter_node::vfs::FileStorage;
 use openbmt_counter_node::{ChainView, DriverPort, MAX_EVENTS_PER_PUMP};
-use openbmt_net_io::{
-    AppEvent, DirLock, Driver, DriverConfig, FileStorage, Handle, Randomness, RelayState,
-    SystemClock, MAX_WATCHED_SCRIPTS,
-};
+use openbmt_net_io::{AppEvent, DriverConfig, Handle, Randomness, RelayState, MAX_WATCHED_SCRIPTS};
+#[cfg(feature = "network")]
+use openbmt_net_io::{Driver, SystemClock};
 use openbmt_owner::own_book::AllocationBook;
 use openbmt_owner::own_spend::{OwnBuilt, OwnFile, OwnTaken};
 use openbmt_owner::starter::{held_sats, IncomingCoin, RebindError};
@@ -292,7 +295,7 @@ impl fmt::Display for NodeError {
 
 fn remove_take_journal(dir: &std::path::Path) -> Result<(), String> {
     match fs::remove_file(dir.join(TAKE_JOURNAL_FILE)) {
-        Ok(()) => fs::File::open(dir)
+        Ok(()) => File::open(dir)
             .and_then(|directory| directory.sync_all())
             .map_err(|error| format!("{TAKE_JOURNAL_FILE}: {error}")),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -315,7 +318,7 @@ pub(crate) fn write_queue_file(dir: &std::path::Path, bytes: &[u8]) -> Result<()
 
 pub(crate) fn read_take_journal(dir: &std::path::Path) -> Result<Option<TakeJournal>, String> {
     let path = dir.join(TAKE_JOURNAL_FILE);
-    let file = match fs::File::open(&path) {
+    let file = match File::open(&path) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(format!("{TAKE_JOURNAL_FILE}: {error}")),
@@ -813,6 +816,7 @@ pub struct OwnerNode<P: OwnerPort = Handle> {
     next_rebalance: u64,
 }
 
+#[cfg(feature = "network")]
 impl OwnerNode<Handle> {
     /// Start the node on real drivers.
     pub fn start(config: OwnerConfig, parts: OwnerParts) -> Result<Self, NodeError> {
@@ -2353,7 +2357,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                 };
                 let bytes = journal.to_bytes()?;
                 if let Err(error) = write_file(&dir, TAKE_JOURNAL_FILE, &bytes) {
-                    if dir.join(TAKE_JOURNAL_FILE).exists() {
+                    if fs::metadata(dir.join(TAKE_JOURNAL_FILE)).is_ok() {
                         committed = Some(journal);
                     }
                     return Err(error);
@@ -2411,7 +2415,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                     };
                     let bytes = journal.to_bytes()?;
                     if let Err(error) = write_file(&dir, TAKE_JOURNAL_FILE, &bytes) {
-                        if dir.join(TAKE_JOURNAL_FILE).exists() {
+                        if fs::metadata(dir.join(TAKE_JOURNAL_FILE)).is_ok() {
                             committed = Some(journal);
                         }
                         return Err(error);

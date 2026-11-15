@@ -47,6 +47,13 @@
     )
 )]
 
+// The build without the network side is the web demo's; it is never the
+// library of the Android app.
+#[cfg(all(target_os = "android", not(feature = "network")))]
+compile_error!(
+    "the Android library is built with the network side; build it with the default features"
+);
+
 mod books;
 mod boxnet;
 mod call;
@@ -100,7 +107,7 @@ pub use float::{
     FloatPaidView, FloatPayArgs, FloatRefillArgs, FloatRefillView, FloatSealedView, FloatSendArgs,
     FloatStatusArgs, FloatStatusView, FloatSweepArgs, FloatWalletView,
 };
-pub use host::{Entry, KEY1_FILE, MAX_WAIT_MS, SLICE_MS};
+pub use host::{Entry, HostSpawn, KEY1_FILE, MAX_WAIT_MS, SLICE_MS};
 pub use import_view::{ImportKind, ImportView};
 pub use own::{
     OwnBoxDeliveredView, OwnBoxWelcomeArgs, OwnBundleView, OwnConfirmArgs, OwnCounterArgs,

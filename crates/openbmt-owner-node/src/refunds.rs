@@ -59,9 +59,9 @@
 //!   cash-return bookkeeping of its own: the books read the record (BK-13).
 //!   [`RefundIntake::cash_refunds`] lists them for a screen.
 
+use openbmt_counter_node::vfs::{fs, File};
 use std::collections::BTreeMap;
 use std::fmt;
-use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 

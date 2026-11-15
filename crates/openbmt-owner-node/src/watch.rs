@@ -43,7 +43,9 @@ use openbmt_courier::{Courier, CourierConfig, FirstStart, Post, RelayPost};
 use openbmt_link::{ClientConfig, ClientError, Kind, Role, Route};
 use openbmt_net_io::{DriverConfig, Handle};
 
-use crate::watcher::{OwnerConfig, OwnerStartError, OwnerWatcher};
+#[cfg(feature = "network")]
+use crate::watcher::OwnerConfig;
+use crate::watcher::{OwnerStartError, OwnerWatcher};
 
 /// The folder, in the node's folder, of the watcher's number files.
 pub const WATCH_LINK_DIR: &str = "watch-link";
@@ -266,6 +268,7 @@ pub struct WatchNode<P: DriverPort = Handle, R: Post = RelayPost> {
     link: WatchLink<R>,
 }
 
+#[cfg(feature = "network")]
 impl WatchNode<Handle, RelayPost> {
     /// Start on a real driver and a real relay.
     pub fn start(config: WatchConfig) -> Result<Self, WatchStartError> {
@@ -311,6 +314,7 @@ impl WatchNode<Handle, RelayPost> {
 
 /// The courier of the watcher's link: role Watch, the counters as peers, the
 /// number files in their own folder (LK-53).
+#[cfg_attr(not(feature = "network"), allow(dead_code))]
 fn start_courier(
     dir: &Path,
     identity: Identity,
@@ -319,11 +323,11 @@ fn start_courier(
     relay: DeviceId,
 ) -> Result<Courier<RelayPost>, WatchStartError> {
     let files = dir.join(WATCH_LINK_DIR);
-    std::fs::create_dir_all(&files)
+    openbmt_counter_node::vfs::fs::create_dir_all(&files)
         .map_err(|e| WatchStartError::Link(WatchLinkError::Files(e.to_string())))?;
     let first = if ["link-inbox", "link-outbox"]
         .iter()
-        .any(|f| files.join(f).exists())
+        .any(|f| openbmt_counter_node::vfs::fs::metadata(files.join(f)).is_ok())
     {
         FirstStart::No
     } else {

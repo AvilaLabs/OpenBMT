@@ -66,12 +66,19 @@ mod mem {
 
     /// The lock on a data folder. There is one process and nothing to lock
     /// against, so it is always taken.
-    pub struct DirLock;
+    pub struct DirLock {
+        dir: PathBuf,
+    }
 
     impl DirLock {
         /// Takes the lock.
-        pub fn acquire(_dir: impl Into<PathBuf>) -> Result<Self, std::convert::Infallible> {
-            Ok(Self)
+        pub fn acquire(dir: impl Into<PathBuf>) -> Result<Self, std::convert::Infallible> {
+            Ok(Self { dir: dir.into() })
+        }
+
+        /// The directory that is locked.
+        pub fn dir(&self) -> &Path {
+            &self.dir
         }
     }
 
@@ -205,6 +212,11 @@ mod mem {
                 }),
                 None => Err(not_found()),
             }
+        }
+
+        /// The same as [`metadata`]: files in memory are never links.
+        pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<Metadata> {
+            metadata(path)
         }
 
         /// The names directly inside a directory.

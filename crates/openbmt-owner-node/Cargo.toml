@@ -7,6 +7,13 @@ license.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+# The counter node's network side (Shop Lightning's node and tokio), which the
+# owner's node does not use itself. On by default; the build for a browser
+# turns it off.
+default = ["network"]
+network = ["openbmt-counter-node/network"]
+
 # The same exact bitcoin version as the other crates, so the types unify.
 [dependencies]
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
@@ -15,7 +22,7 @@ openbmt-kernel-random = { path = "../openbmt-kernel-random" }
 openbmt-watch = { path = "../openbmt-watch" }
 openbmt-net-io = { path = "../openbmt-net-io" }
 # For `ChainView` and `DriverPort`, which the two nodes share.
-openbmt-counter-node = { path = "../openbmt-counter-node" }
+openbmt-counter-node = { path = "../openbmt-counter-node", default-features = false }
 openbmt-courier = { path = "../openbmt-courier" }
 openbmt-link = { path = "../openbmt-link" }
 # For the Box's POS notices (BX-42).

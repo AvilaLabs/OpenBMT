@@ -179,7 +179,7 @@ use crate::float::{
     FloatRestoreArgs, FloatSealedView, FloatSendArgs, FloatStatusArgs, FloatStatusView,
     FloatSweepArgs, FloatWalletView, FloatWatchArgs,
 };
-use crate::host::{real_spawn, Entry, Spawn};
+use crate::host::{real_spawn, Entry, HostSpawn, Port, Spawn};
 use crate::import_view::{self, ImportKind, ImportView};
 use crate::own::{
     self, OwnBoxDeliveredView, OwnBoxWelcomeArgs, OwnBundleView, OwnConfirmArgs, OwnCounterArgs,
@@ -304,6 +304,9 @@ pub struct Registry {
     state: Mutex<RegState>,
     /// The starter wallet being made or restored, if one (SS-10, SS-23).
     pub(crate) starter: StarterSlot,
+    /// The drivers a host gives, where the real ones (sockets and threads)
+    /// are not there. `None` is the real drivers.
+    host: Option<HostSpawn>,
     /// The way the next node starts its driver, in tests.
     #[cfg(test)]
     pub(crate) spawner: Mutex<Option<Spawn>>,
@@ -325,8 +328,20 @@ impl Registry {
                 watches: BTreeMap::new(),
             }),
             starter: StarterSlot::new(),
+            host: None,
             #[cfg(test)]
             spawner: Mutex::new(None),
+        }
+    }
+
+    /// A registry whose nodes take their drivers from `host`, instead of
+    /// starting the real ones. The build for a browser has no sockets or
+    /// threads; the page gives ports over its own chain, and the time comes
+    /// with each call.
+    pub fn with_host(host: HostSpawn) -> Self {
+        Self {
+            host: Some(host),
+            ..Self::new()
         }
     }
 
@@ -356,7 +371,13 @@ impl Registry {
                 return spawn;
             }
         }
-        real_spawn()
+        match &self.host {
+            Some(host) => {
+                let host = Arc::clone(host);
+                Box::new(move |driver, dir, scripts| host(driver, dir, scripts).map(Port))
+            }
+            None => real_spawn(),
+        }
     }
 
     fn start(&self, config: StartConfig) -> Result<u64, AppError> {

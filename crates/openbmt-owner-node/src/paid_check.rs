@@ -30,8 +30,8 @@
 //! and the time cleared (u64 LE, 0 for a mark not cleared). Marks are in the
 //! order of counter, then index, with none twice.
 
+use openbmt_counter_node::vfs::{fs, File};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -1181,7 +1181,7 @@ impl PaidChecks {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
             Err(e) => return Err(PaidCheckRefused::Store(format!("{PAID_CHECK_FILE}: {e}"))),
         }
-        fs::File::open(&self.dir)
+        File::open(&self.dir)
             .and_then(|d| d.sync_all())
             .map_err(|e| PaidCheckRefused::Store(e.to_string()))?;
         self.marks = PaidMarks::new();

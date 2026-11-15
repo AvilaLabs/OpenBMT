@@ -8,7 +8,7 @@
 //! from the blocks this device has checked and downloaded in full, never
 //! from a service. The words of every state are in [`crate::say`].
 
-use std::fs;
+use openbmt_counter_node::vfs::fs;
 use std::io;
 use std::path::Path;
 

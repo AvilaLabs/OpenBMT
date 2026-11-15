@@ -17,8 +17,8 @@
 //! then of the first index of the range, with no two of the same counter and
 //! first index.
 
+use openbmt_counter_node::vfs::fs;
 use std::fmt;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 

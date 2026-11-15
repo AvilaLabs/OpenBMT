@@ -13,8 +13,8 @@
 //! (LK-59). When the whole copy is read back at the start it is checked again
 //! from the first record, so a file that was edited is found.
 
+use openbmt_counter_node::vfs::{fs, File, OpenOptions};
 use std::fmt;
-use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -375,7 +375,7 @@ impl CounterCopy {
             });
         }
         let path = self.dir.join(RECORDS_FILE);
-        let existed = path.exists();
+        let existed = fs::metadata(&path).is_ok();
         let mut file = OpenOptions::new()
             .append(true)
             .create(true)

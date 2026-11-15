@@ -27,24 +27,27 @@
 //! not read back is logged and taken as zero: a number that is too low is
 //! refused by the counter and does no harm.
 
+use openbmt_counter_node::mono::Instant;
+use openbmt_counter_node::vfs::{fs, File};
 use std::collections::VecDeque;
 use std::fmt;
-use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::RecvTimeoutError;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use bitcoin::hashes::Hash;
 use bitcoin::Network;
 use openbmt_core::heartbeat::WatcherHeartbeat;
 use openbmt_core::identity::{DeviceId, Identity};
+use openbmt_counter_node::vfs::{DirLock, FileStorage};
 use openbmt_counter_node::{ChainView, DriverPort, HealthFn, MAX_EVENTS_PER_PUMP};
-use openbmt_net_io::{
-    AppEvent, Clock, DirLock, Driver, DriverConfig, FileStorage, Handle, Key, Storage, SystemClock,
-};
+#[cfg(feature = "network")]
+use openbmt_net_io::Driver;
+use openbmt_net_io::{AppEvent, Clock, DriverConfig, Handle, Key, Storage, SystemClock};
 use openbmt_watch::{check_health, HeaderChain, HeaderStore, Health, HealthInput};
 
+#[cfg(feature = "network")]
 use crate::random::KernelRandomness;
 
 /// The file that holds the number of the last heartbeat made.
@@ -185,6 +188,7 @@ pub(crate) fn load_chain(
     Ok((ChainView::from_store(&headers), notes))
 }
 
+#[cfg(feature = "network")]
 impl OwnerWatcher<Handle> {
     /// Start the watcher on a real driver that keeps its headers and its
     /// address book in the watcher's directory.

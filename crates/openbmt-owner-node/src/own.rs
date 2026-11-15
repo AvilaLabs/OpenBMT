@@ -17,8 +17,8 @@
 //! next range, kept in the range outbox and sent as a message of kind Range
 //! (LK-77).
 
+use openbmt_counter_node::vfs::fs;
 use std::fmt;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -590,7 +590,7 @@ impl OwnNode {
             Ok(of) => {
                 if let Ok(of) = <[u8; 32]>::try_from(of.as_slice()) {
                     let from = self.dir.join(COINS_FILE);
-                    if from.exists() {
+                    if fs::metadata(&from).is_ok() {
                         fs::rename(&from, self.dir.join(former_coins_file(&of)))
                             .map_err(|e| io("the coin view", e))?;
                     }

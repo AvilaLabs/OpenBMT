@@ -3,7 +3,7 @@
 //! the view's rollback is stored and deleted once the book has been stored
 //! for it. A start that finds it runs the book's rollback again.
 
-use std::fs;
+use openbmt_counter_node::vfs::{fs, File};
 use std::io;
 use std::path::Path;
 
@@ -65,7 +65,7 @@ pub(crate) fn mark(dir: &Path, fork: u32) -> Result<u32, String> {
 /// Delete the marker; none there is done.
 pub(crate) fn clear(dir: &Path) -> Result<(), String> {
     match fs::remove_file(dir.join(REQUESTS_UNDO_FILE)) {
-        Ok(()) => fs::File::open(dir)
+        Ok(()) => File::open(dir)
             .and_then(|d| d.sync_all())
             .map_err(|e| format!("{REQUESTS_UNDO_FILE}: {e}")),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),

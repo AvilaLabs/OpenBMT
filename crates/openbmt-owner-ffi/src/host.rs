@@ -29,10 +29,15 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{channel, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::channel;
+#[cfg(feature = "network")]
+use std::sync::mpsc::Sender;
+use std::sync::Arc;
+#[cfg(feature = "network")]
+use std::sync::Mutex;
+#[cfg(feature = "network")]
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use bitcoin::bip32::{Xpriv, Xpub};
 use bitcoin::hashes::Hash;
@@ -49,6 +54,7 @@ use openbmt_core::relay::{RelayHint, RelayRoute, SignedRelayHint};
 use openbmt_core::settings::{Limit, Settings, SignedSettings};
 use openbmt_core::wallet::WalletDescription;
 use openbmt_core::wallet_single::ImportedWallet;
+use openbmt_counter_node::mono::Instant;
 use openbmt_counter_node::{DriverPort, BATCH_MIN_COUNT};
 use openbmt_courier::{Courier, CourierConfig, FirstStart};
 use openbmt_link::{ClientConfig, Role, Route, StoreParties};
@@ -203,6 +209,14 @@ impl OwnerPort for Port {
 pub(crate) type Spawn =
     Box<dyn FnMut(DriverConfig, PathBuf, Vec<ScriptBuf>) -> Result<Port, String> + Send>;
 
+/// The drivers a host gives in place of the real ones: the page's pretend
+/// chain, in the build for a browser.
+pub type HostSpawn = Arc<
+    dyn Fn(DriverConfig, PathBuf, Vec<ScriptBuf>) -> Result<Box<dyn OwnerPort + Send>, String>
+        + Send
+        + Sync,
+>;
+
 /// The real drivers, on the files of the data folder.
 pub(crate) fn real_spawn() -> Spawn {
     Box::new(
@@ -291,10 +305,54 @@ type Job = Box<dyn FnOnce(&mut Option<State>) + Send>;
 
 /// One running node.
 pub struct Entry {
+    /// The node's thread, which takes the jobs.
+    #[cfg(feature = "network")]
     jobs: Mutex<Option<Sender<Job>>>,
+    #[cfg(feature = "network")]
     thread: Mutex<Option<JoinHandle<()>>>,
+    /// Where the node is kept, on the one thread there is, in the build
+    /// without the network side.
+    #[cfg(not(feature = "network"))]
+    slot: u64,
     poisoned: AtomicBool,
     clock: Arc<AtomicU64>,
+}
+
+// Without the network side there is no thread to give the node (the build
+// for a browser has one), so the nodes are kept here and a job runs on the
+// thread that calls.
+#[cfg(not(feature = "network"))]
+thread_local! {
+    static SLOTS: std::cell::RefCell<BTreeMap<u64, Option<State>>> =
+        const { std::cell::RefCell::new(BTreeMap::new()) };
+}
+
+#[cfg(not(feature = "network"))]
+static NEXT_SLOT: AtomicU64 = AtomicU64::new(1);
+
+#[cfg(not(feature = "network"))]
+impl Drop for Entry {
+    fn drop(&mut self) {
+        // The entry was let go without a stop: the node goes with it.
+        let left = SLOTS.with(|slots| slots.borrow_mut().remove(&self.slot));
+        if let Some(Some(mut state)) = left {
+            state.node.shutdown();
+        }
+    }
+}
+
+/// The wall clock's seconds since 1970. The build without the network side
+/// has none, and uses the app's clock.
+#[cfg(feature = "network")]
+fn wall_secs(_clock: &AtomicU64) -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(1, |d| d.as_secs())
+}
+
+#[cfg(not(feature = "network"))]
+fn wall_secs(clock: &AtomicU64) -> u64 {
+    clock.load(Ordering::SeqCst).max(1)
 }
 
 /// Key 1's state and account key, for a call that needs the Key app. A
@@ -1113,6 +1171,14 @@ pub(crate) fn counter_label(counter: &DeviceId) -> String {
     format!("Counter {hex}")
 }
 
+/// Whether `network` is the regtest of the web demo, whose owner holds its
+/// own wallet on a chain that is simulated. Only the build without the network
+/// side takes it: where the real drivers are, a wallet of this kind is on
+/// mainnet.
+fn demo_regtest(network: Network) -> bool {
+    cfg!(not(feature = "network")) && network == Network::Regtest
+}
+
 /// Everything `start` makes, on the node's thread.
 fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State, AppError> {
     if req.dir.is_empty() {
@@ -1128,7 +1194,7 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
         .own_wallet
         .as_deref()
         .map(|file| {
-            if network != Network::Bitcoin {
+            if network != Network::Bitcoin && !demo_regtest(network) {
                 return Err(refused_by(
                     "start-wallet",
                     "the wallet of a shop with its own wallet is on mainnet",
@@ -1337,6 +1403,7 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
     }
 }
 
+#[cfg(feature = "network")]
 fn run_thread(
     req: StartConfig,
     spawn: Spawn,
@@ -1366,7 +1433,24 @@ fn run_thread(
 }
 
 impl Entry {
+    /// Start a node from the app's request, on the calling thread: there is
+    /// no other.
+    #[cfg(not(feature = "network"))]
+    pub(crate) fn start(req: StartConfig, spawn: Spawn) -> Result<Self, AppError> {
+        let clock = Arc::new(AtomicU64::new(0));
+        let built = catch_unwind(AssertUnwindSafe(|| build(req, spawn, &clock)))
+            .unwrap_or_else(|_| Err(internal("caught a panic: [redacted]")))?;
+        let slot = NEXT_SLOT.fetch_add(1, Ordering::SeqCst);
+        SLOTS.with(|slots| slots.borrow_mut().insert(slot, Some(built)));
+        Ok(Self {
+            slot,
+            poisoned: AtomicBool::new(false),
+            clock,
+        })
+    }
+
     /// Start a node from the app's request.
+    #[cfg(feature = "network")]
     pub(crate) fn start(req: StartConfig, spawn: Spawn) -> Result<Self, AppError> {
         let clock = Arc::new(AtomicU64::new(0));
         let (jobs_tx, jobs_rx) = channel::<Job>();
@@ -1398,6 +1482,57 @@ impl Entry {
         })
     }
 
+    /// Hand a job to the node's thread.
+    #[cfg(feature = "network")]
+    fn submit(&self, job: Job) -> Result<(), AppError> {
+        let sender = self
+            .jobs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .ok_or_else(unknown_handle)?;
+        sender.send(job).map_err(|_| unknown_handle())
+    }
+
+    /// Hand a job to the node's thread, the last: the thread ends after it
+    /// and is joined.
+    #[cfg(feature = "network")]
+    fn submit_last(&self, job: Job) -> Result<(), AppError> {
+        let sender = self
+            .jobs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+            .ok_or_else(unknown_handle)?;
+        sender.send(job).map_err(|_| unknown_handle())?;
+        drop(sender);
+        // The job's answer is read by the caller; the thread is joined once
+        // the job is over, which is when the sender's side is gone.
+        if let Some(thread) = self.thread.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = thread.join();
+        }
+        Ok(())
+    }
+
+    /// Run a job on the node, here.
+    #[cfg(not(feature = "network"))]
+    fn submit(&self, job: Job) -> Result<(), AppError> {
+        SLOTS.with(|slots| {
+            let mut slots = slots.borrow_mut();
+            let slot = slots.get_mut(&self.slot).ok_or_else(unknown_handle)?;
+            job(slot);
+            Ok(())
+        })
+    }
+
+    /// Run the last job on the node, here, and let the node go.
+    #[cfg(not(feature = "network"))]
+    fn submit_last(&self, job: Job) -> Result<(), AppError> {
+        self.submit(job)?;
+        SLOTS.with(|slots| slots.borrow_mut().remove(&self.slot));
+        Ok(())
+    }
+
     /// Run `f` on the node's thread and wait for its result. The time, when
     /// the call has one, raises the clock first.
     fn run<R: Send + 'static>(
@@ -1419,13 +1554,7 @@ impl Entry {
             };
             let _ = tx.send(out);
         });
-        let sender = self
-            .jobs
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-            .ok_or_else(unknown_handle)?;
-        sender.send(job).map_err(|_| unknown_handle())?;
+        self.submit(job)?;
         match rx.recv() {
             Ok(Ok(result)) => result,
             Ok(Err(_)) => {
@@ -1454,18 +1583,8 @@ impl Entry {
             drop(slot.take());
             let _ = tx.send(out);
         });
-        let sender = self
-            .jobs
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take()
-            .ok_or_else(unknown_handle)?;
-        sender.send(job).map_err(|_| unknown_handle())?;
-        drop(sender);
+        self.submit_last(job)?;
         let result = rx.recv();
-        if let Some(thread) = self.thread.lock().unwrap_or_else(|e| e.into_inner()).take() {
-            let _ = thread.join();
-        }
         match result {
             Ok(Some(Ok(view))) => Ok(view),
             Ok(Some(Err(_))) => Err(internal("caught a panic: [redacted]")),
@@ -1501,6 +1620,7 @@ impl Entry {
                 break;
             }
             // Let a call that waits take its turn.
+            #[cfg(feature = "network")]
             std::thread::sleep(Duration::from_millis(1));
         }
         out.notes.truncate(openbmt_owner_node::NOTE_LOG);
@@ -2601,6 +2721,7 @@ impl Entry {
         } else {
             Some(device("the counter's root", "id-length", &a.counter)?)
         };
+        let clock = Arc::clone(&self.clock);
         self.run(None, move |st| {
             let link = st
                 .link
@@ -2648,9 +2769,7 @@ impl Entry {
             }
             // The alarm of a counter check is cleared in the marks too (OC-62).
             if let Alert::PaidNotSeen { counter, sale } = &alert {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_or(1, |d| d.as_secs());
+                let now = wall_secs(&clock);
                 let key = SaleKey {
                     counter: *counter,
                     index: *sale,

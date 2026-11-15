@@ -600,9 +600,10 @@ impl<R: Post> OwnerLink<R> {
         let switches = SwitchOutbox::open(&root).map_err(OwnerLinkError::Switches)?;
         let roster = SettingsRoster::open(&root).map_err(OwnerLinkError::Roster)?;
         // A report that does not read is dropped: the next one replaces it.
-        let lightning_report = std::fs::read(root.join(LIGHTNING_REPORT_FILE))
-            .ok()
-            .and_then(|bytes| TakenReport::from_bytes(&bytes));
+        let lightning_report =
+            openbmt_counter_node::vfs::fs::read(root.join(LIGHTNING_REPORT_FILE))
+                .ok()
+                .and_then(|bytes| TakenReport::from_bytes(&bytes));
         Ok(Self {
             courier,
             root,

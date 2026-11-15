@@ -16,8 +16,11 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
 [features]
 # The JNI entry point, compiled for every target so that the host can test
 # it; on Android it is always compiled.
-default = ["jni"]
+default = ["jni", "network"]
 jni = []
+# The node's network side, through the owner node and the counter node. Off
+# for the build for a browser, which gives its own driver, time and random bytes.
+network = ["openbmt-owner-node/network", "openbmt-counter-node/network"]
 
 # The same exact versions as the other crates, so the types unify. Every
 # openbmt crate is a path dependency inside this workspace.
@@ -26,7 +29,7 @@ jni = []
 openbmt-books = { path = "../openbmt-books" }
 openbmt-core = { path = "../openbmt-core" }
 openbmt-counter = { path = "../openbmt-counter" }
-openbmt-counter-node = { path = "../openbmt-counter-node" }
+openbmt-counter-node = { path = "../openbmt-counter-node", default-features = false }
 openbmt-courier = { path = "../openbmt-courier" }
 openbmt-link = { path = "../openbmt-link" }
 openbmt-lock = { path = "../openbmt-lock" }
@@ -34,7 +37,7 @@ openbmt-lock = { path = "../openbmt-lock" }
 openbmt-kernel-random = { path = "../openbmt-kernel-random" }
 openbmt-net-io = { path = "../openbmt-net-io" }
 openbmt-owner = { path = "../openbmt-owner" }
-openbmt-owner-node = { path = "../openbmt-owner-node" }
+openbmt-owner-node = { path = "../openbmt-owner-node", default-features = false }
 # The table of price sources the app fetches, the same as the counter's.
 openbmt-rates = { path = "../openbmt-rates" }
 # The request book's own types, for the ops that carry its words (RQ-36).
