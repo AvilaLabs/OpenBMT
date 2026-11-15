@@ -133,7 +133,9 @@ private fun Controller.onePaired(r: OwnPairExit, p: OwnPairing, counter: ByteArr
     } catch (_: java.io.IOException) {
         // Without the note only the shortcut "Open the counter" is missing; the counter is paired.
     }
-    if (watchStore.enabled()) return showOwnCounter(r)
+    // In the first run the node is not up yet, and turning on the watch needs it: the offer is made on the last step
+    // of the first run instead (showReady).
+    if (watchStore.enabled() || node == null) return showOwnCounter(r)
     val next = { showOwnCounter(r) }
     val on = ui.primary(OwnPairWords.oneWatchOn) { watchTurnOnThen(next) }
     val later = ui.button(OwnPairWords.oneWatchLater) { next() }

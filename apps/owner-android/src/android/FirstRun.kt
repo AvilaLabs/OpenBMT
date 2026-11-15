@@ -466,7 +466,19 @@ private fun Controller.showReady(r: FirstRun) {
     views.add(heading(FirstRunWords.readyTitle))
     views.add(para(FirstRunWords.readyText))
     for (i in Checklist.items(checklistSaleSeen || r.firstSale.paid, secondCopySkipped(), Checklist.cardDue(shopFile.load()))) views.add(ui.text(i.text, 16f))
-    stepScreen(FirstRunWords.shopTitle, views, listOf(ui.primary(FirstRunWords.readyGo) { endFirstRun() }), { r.back(); showFirstRun() })
+    val actions = ArrayList<Button>()
+    // OA-126: a counter paired on this phone in the first run, with the watch off: the offer waits for this step, where the
+    // node is up.
+    val samePhone = OnePhoneFile.read(act.noBackupFilesDir) != null
+    if (samePhone && !watchStore.enabled()) {
+        views.add(heading(OwnPairWords.oneWatchTitle))
+        views.add(para(OwnPairWords.oneWatchText))
+        actions.add(ui.primary(OwnPairWords.oneWatchOn) { watchTurnOnThen { showFirstRun() } })
+        actions.add(ui.button(FirstRunWords.readyGo) { endFirstRun() })
+    } else {
+        actions.add(ui.primary(FirstRunWords.readyGo) { endFirstRun() })
+    }
+    stepScreen(FirstRunWords.shopTitle, views, actions, { r.back(); showFirstRun() })
 }
 
 /** The first run is over: its state is let go, and the till steps (once) and home follow. */
