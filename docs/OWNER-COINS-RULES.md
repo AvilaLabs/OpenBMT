@@ -473,8 +473,7 @@ says so when one is missing.
   of its payments cannot be checked; its other sales, and every other counter,
   are still checked. A second opening leaves the first as it was, and sales
   past the 16,384 a counter may hold are passed over the same way. A counter
-  with more than 256 alarms not cleared is checked no further either: its
-  alarms stay, no more are raised for it, and it is checked no further until
+  with more than 256 alarms not cleared is held back: its alarms stay, no more are raised for it, and it is checked no further until
   the owner clears them, so that one counter cannot fill the marks of OC-64
   for the others. The check runs each time the owner's view checks a new tip,
   and when the app starts, and a run that failed is tried again at the next.
@@ -486,7 +485,9 @@ says so when one is missing.
   and that the counter may have been tampered with. Only the owner clears it,
   on the owner phone; the acknowledgement is kept in the phone's own ledger as
   OC-36 says, and a sale whose payment later arrives in full clears itself,
-  with a line that says so. A mismatch is raised once per sale. The alarms are
+  with a line that says so. An alarm of a sale that is no longer checked
+  (OC-61) shows what the marks keep: the counter, the sale's number and the
+  time of the Paid. A mismatch is raised once per sale. The alarms are
   raised again from the kept marks at every start, before the first check.
 - **OC-63.** The day. The owner phone's day summary shows, for each counter,
   the number and total of its sales paid on chain, and how many of them this
@@ -510,7 +511,8 @@ says so when one is missing.
   is; a Lightning sale is not checked; a view not ready judges nothing; a sale
   too old for facts is not checkable; a record that does not read as a sale is
   passed over and the counter's other sales are still checked; a full
-  receipt log lists sales as not checkable; the day summary's counts; the marks read back strictly.
+  receipt log lists sales as not checkable; the day summary's counts; the
+  marks read back strictly.
 
 ## 9. Setting up the owner's phone
 

@@ -29,7 +29,7 @@ object PaidCheckWords {
     val mismatchHeading = say("OC62_MISMATCH_HEADING", "Paid on counter, not seen")
     val mismatchWhat = say("OC62_MISMATCH_WHAT", "{counter} showed sale {number} as paid, {amount}, at {time}, taken by {cashier}. This phone sees {seen} paid to that sale's address.")
     /** The alarm of a sale this phone no longer reads from the counter's records: the amounts and the cashier are not known. */
-    val TODO_WORDS_MISMATCH_UNLISTED_WHAT = "TODO_WORDS_MISMATCH_UNLISTED_WHAT"
+    val mismatchUnlistedWhat = say("OC62_MISMATCH_UNLISTED_WHAT", "{counter} showed sale {number} as paid at {time}, and this phone saw no payment for it, or less. Its amount and cashier are no longer read.")
     val mismatchNext = say("OC62_MISMATCH_NEXT", "Check the counter: it may have been tampered with. Clear this once you know what happened.")
     val clearButton = say("OC62_CLEAR_BUTTON", "Clear")
     val arrivedLine = say("OC62_ARRIVED_LINE", "The payment for sale {number} has now arrived in full.")
@@ -70,7 +70,7 @@ object PaidCheckWords {
     /** OC-62: the alarm of a sale, the facts filled in; the cashier's name is text of the counter's and is cleaned. */
     fun mismatch(a: PaidAlarm): SayWords = if (!a.known) said(
         mismatchHeading,
-        TODO_WORDS_MISMATCH_UNLISTED_WHAT
+        mismatchUnlistedWhat
             .replace("{counter}", counterName(a.counter))
             .replace("{number}", a.sale.toString())
             .replace("{time}", Format.localTime(a.firstRead)),

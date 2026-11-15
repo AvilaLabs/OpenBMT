@@ -1050,6 +1050,7 @@ other names in braces are counts:
 |---|---|
 | OC62_MISMATCH_HEADING | Paid on counter, not seen |
 | OC62_MISMATCH_WHAT | {counter} showed sale {number} as paid, {amount}, at {time}, taken by {cashier}. This phone sees {seen} paid to that sale's address. |
+| OC62_MISMATCH_UNLISTED_WHAT | {counter} showed sale {number} as paid at {time}, and this phone saw no payment for it, or less. Its amount and cashier are no longer read. |
 | OC62_MISMATCH_NEXT | Check the counter: it may have been tampered with. Clear this once you know what happened. |
 | OC62_CLEAR_BUTTON | Clear |
 | OC62_ARRIVED_LINE | The payment for sale {number} has now arrived in full. |
