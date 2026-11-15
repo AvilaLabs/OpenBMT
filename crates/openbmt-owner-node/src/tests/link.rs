@@ -1114,6 +1114,7 @@ fn signed_by_owner(s: Settings) -> SignedSettings {
         owner_sig: s.sign(&id(1)),
         approver_sig: None,
         settings: s,
+        wallet_sig: None,
     }
 }
 
@@ -1122,6 +1123,7 @@ fn signed_by_both(s: Settings) -> SignedSettings {
         owner_sig: s.sign(&id(1)),
         approver_sig: Some(s.sign(&id(2))),
         settings: s,
+        wallet_sig: None,
     }
 }
 
@@ -3011,7 +3013,7 @@ fn ss_41_each_counter_is_switched_waiting_or_refused_and_ss_42_the_move_waits_fo
 fn oa_119_a_change_that_waits_goes_to_the_counters_only_and_once() {
     let mut b = with_box();
     let waiting = signed_by_owner(listed(2, |s| s.light_per_sale.sats += 50));
-    let authority = openbmt_core::settings::Authority::OwnWallet { owner: owner() };
+    let authority = openbmt_core::settings::Authority::own_wallet(owner());
     b.w.link
         .carry_held_settings(2, &waiting, &authority, T0)
         .unwrap();
@@ -3037,7 +3039,7 @@ fn oa_120_the_confirmed_settings_go_to_the_counter_and_the_box_in_place_of_the_w
     let mut b = with_box();
     let current = listed(1, |_| {});
     let waiting = signed_by_owner(listed(2, |s| s.light_per_sale.sats += 50));
-    let authority = openbmt_core::settings::Authority::OwnWallet { owner: owner() };
+    let authority = openbmt_core::settings::Authority::own_wallet(owner());
     b.w.link
         .carry_held_settings(2, &waiting, &authority, T0)
         .unwrap();

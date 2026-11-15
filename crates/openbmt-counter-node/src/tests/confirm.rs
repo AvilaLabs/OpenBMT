@@ -49,6 +49,7 @@ fn signed(version: u32, f: impl FnOnce(&mut Settings)) -> SignedSettings {
         owner_sig: s.sign(&id(1)),
         approver_sig: None,
         settings: s,
+        wallet_sig: None,
     }
 }
 
@@ -360,6 +361,7 @@ fn cr_239_a_counter_paired_with_the_key_app_behaves_as_before() {
         owner_sig: s.sign(&id(1)),
         approver_sig: None,
         settings: s,
+        wallet_sig: None,
     };
     let mut s = settings();
     s.version = 2;
@@ -658,6 +660,7 @@ fn cr_163_a_confirmed_frame_with_a_bad_signature_or_for_a_key_app_counter_is_a_f
             owner_sig: settings().sign(&id(1)),
             approver_sig: Some(settings().sign(&id(2))),
             settings: settings(),
+            wallet_sig: None,
         },
         first_batch: None,
         peers: Vec::new(),

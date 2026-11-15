@@ -122,6 +122,13 @@ impl SettingsRefused {
         match self {
             // A change that sends payments elsewhere is refused by CR-239.
             Self::Verify(SettingsError::ConfirmationRequired(_)) => "CR-239",
+            // A Redirect change is taken with the wallet's signature or
+            // refused by CR-236.
+            Self::Verify(
+                SettingsError::RedirectStarter
+                | SettingsError::WalletSig(_)
+                | SettingsError::WalletSigNotWanted,
+            ) => "CR-236",
             Self::Bytes(_) | Self::Verify(_) => "CR-160",
             Self::Store(_) => "CR-161",
             Self::Confirmation(_) | Self::NoConfirmationHere => "CR-242",

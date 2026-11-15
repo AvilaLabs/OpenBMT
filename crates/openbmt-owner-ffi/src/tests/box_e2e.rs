@@ -121,6 +121,7 @@ impl Phones {
             owner_sig: s.sign(&self.owner),
             approver_sig: None,
             settings: s,
+            wallet_sig: None,
         };
         Rd::ok(
             &self

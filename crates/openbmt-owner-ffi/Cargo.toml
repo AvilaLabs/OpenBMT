@@ -47,6 +47,8 @@ bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
 jni-sys = "=0.3.0"
 
 [dev-dependencies]
+# The test keys and signatures of a wallet, for the end-to-end test of AP-14.
+openbmt-core = { path = "../openbmt-core", features = ["test-support"] }
 # The Key app, in process, for the end-to-end test of an approval.
 openbmt-approver = { path = "../openbmt-approver" }
 # The Key app, for the end-to-end test of the key ceremony.

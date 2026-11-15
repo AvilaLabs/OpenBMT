@@ -1040,6 +1040,27 @@ library's own:
 | turnOffConfirm | Turn off and close the channels |
 | turnOffKeep | Keep it on |
 
+Signing a Redirect change with the wallet (`docs/OWNER-APP-RULES.md`,
+OA-127), in `WalletSigWords`. `{address}` is the address that has to
+sign:
+
+| Key | Text |
+|---|---|
+| OA_WALLETSIG_HEADING | Sign with your wallet |
+| OA_WALLETSIG_WHAT | This change decides where Lightning payments go, so your own wallet must approve it. |
+| OA_WALLETSIG_NEXT | In your wallet, sign the message below with the address shown, then paste or scan the signature. |
+| OA_WALLETSIG_ADDRESS_LABEL | Address that signs |
+| OA_WALLETSIG_MESSAGE_LABEL | Message to sign |
+| OA_WALLETSIG_FIELD_LABEL | Signature |
+| OA_WALLETSIG_SEND | Send change |
+| OA_WALLETSIG_SCAN | Scan signature |
+| OA_WALLETSIG_WRONG_HEADING | Signature not accepted |
+| OA_WALLETSIG_WRONG_WHAT | This signature was not made by {address}, or is not of a kind this phone reads. |
+| OA_WALLETSIG_WRONG_NEXT | Sign the message again with that address and paste the whole signature. |
+| OA_WALLETSIG_STARTER_HEADING | Move to your own wallet |
+| OA_WALLETSIG_STARTER_WHAT | This change decides where Lightning payments go. A starter wallet's key is on this phone, so it cannot approve it. |
+| OA_WALLETSIG_STARTER_NEXT | Move the shop to your own wallet first, then make this change. |
+
 The counter checks (`docs/OWNER-COINS-RULES.md`, OC-60 to OC-64), in
 `PaidCheckWords`. `{counter}` is the counter's name, `{number}` the
 sale's number, `{amount}`, `{seen}` and `{total}` amounts, `{time}` the

@@ -139,6 +139,12 @@ pub enum OwnRefusal {
     /// OA-119, OA-123: a Box cannot be added while a change waits for a
     /// counter's confirmation.
     BoxWaits,
+    /// AP-10, OA-127: the signature does not verify for the wallet's first
+    /// receive address, which is the address that had to sign.
+    WalletSig {
+        /// The address that had to sign.
+        address: String,
+    },
 }
 
 impl fmt::Display for OwnRefusal {
@@ -169,6 +175,10 @@ impl fmt::Display for OwnRefusal {
             Self::BoxWaits => write!(
                 f,
                 "OA-119: a change waits for a counter's confirmation, so no Box is added"
+            ),
+            Self::WalletSig { address } => write!(
+                f,
+                "AP-10: not a signature that is accepted; the address {address} has to sign"
             ),
         }
     }
@@ -915,6 +925,7 @@ impl OwnShop {
             owner_sig: settings.sign(&self.identity),
             approver_sig: None,
             settings: settings.clone(),
+            wallet_sig: None,
         };
         let hold = self.holds(&settings);
         let mut next = self.state.clone();
@@ -1160,6 +1171,7 @@ impl OwnShop {
             owner_sig: settings.sign(&self.identity),
             approver_sig: None,
             settings,
+            wallet_sig: None,
         };
         let held = WaitingChange {
             signed: signed.clone(),
@@ -1198,6 +1210,110 @@ impl OwnShop {
             owner_sig: settings.sign(&self.identity),
             approver_sig: None,
             settings,
+            wallet_sig: None,
+        };
+        let mut next = self.state.clone();
+        next.known = Some(signed.clone());
+        self.commit(next, persist)?;
+        Ok(signed)
+    }
+
+    /// AS-74 to AS-77, AP-14, AP-15: what `edit` would do to the settings of
+    /// this shop, as [`Owner::settings_preview`](crate::Owner) says it for a
+    /// shop with a Key app: the edit is applied to the change that waits, or
+    /// else to the settings in force. A Redirect change says that it needs
+    /// the wallet's signature, with the message and the address that signs;
+    /// it is refused while `edit.starter_wallet` says the shop is on its
+    /// starter wallet. Nothing is stored.
+    pub fn settings_preview(
+        &self,
+        edit: &crate::SettingsEdit,
+    ) -> Result<crate::SettingsPreview, Refusal> {
+        let known = self.state.known.as_ref().map(|k| &k.settings);
+        let held = self.held.as_ref().map(|h| &h.signed.settings);
+        let latest = match (held, known) {
+            (Some(h), Some(k)) if h.version > k.version => Some(h),
+            (Some(h), None) => Some(h),
+            (_, k) => k,
+        };
+        let highest = held.into_iter().chain(known).map(|s| s.version).max();
+        crate::edit::preview_over(
+            &crate::edit::PreviewBasis {
+                latest,
+                known,
+                highest: highest.unwrap_or(0),
+            },
+            Some(&crate::edit::OwnFacts::of(
+                &self.wallet,
+                edit.starter_wallet,
+            )),
+            edit,
+        )
+    }
+
+    /// AP-14: the owner changes the settings by a Redirect change, which
+    /// carries the wallet's signature of the message of AP-06 for them.
+    /// `signature` is the base64 text as the wallet gave it; surrounding
+    /// white space is cut off and nothing else is changed. It is checked
+    /// against the first receive address of the pinned wallet before
+    /// anything is stored (AP-14, AP-10): a signature that does not verify
+    /// gives [`OwnRefusal::WalletSig`] and changes nothing. The change must
+    /// be a Redirect from the settings in force (AP-01), and the shop may not
+    /// be held for a counter's confirmation at the same version. The settings
+    /// are signed by the owner root, joined to the signature and stored as
+    /// the settings in force; the link carries them as it carries any
+    /// (CR-236).
+    pub fn change_settings_with_wallet_sig<E>(
+        &mut self,
+        settings: Settings,
+        signature: &str,
+        persist: impl FnOnce(&[u8]) -> Result<(), E>,
+    ) -> Result<SignedSettings, OwnError<E>> {
+        settings
+            .validate()
+            .map_err(|e| OwnRefusal::Settings(Refusal::SettingsInvalid(e.to_string())))?;
+        let above = self
+            .held
+            .as_ref()
+            .map(|h| &h.signed)
+            .or(self.state.known.as_ref())
+            .map_or(0, |k| k.settings.version);
+        if settings.version <= above {
+            return Err(OwnRefusal::Settings(Refusal::SettingsVersion {
+                known: above,
+                got: settings.version,
+            })
+            .into());
+        }
+        let redirect = self.state.known.as_ref().is_some_and(|k| {
+            openbmt_core::approval::classify(&k.settings, &settings)
+                == openbmt_core::approval::ChangeClass::Redirect
+        });
+        if !redirect {
+            return Err(OwnRefusal::Settings(Refusal::SettingsInvalid(
+                "AP-14: only a Redirect change carries the wallet's signature".to_string(),
+            ))
+            .into());
+        }
+        let signature = signature.trim();
+        let address = self.wallet.receive_address(0).map_err(|_| {
+            OwnRefusal::Settings(Refusal::SettingsInvalid(
+                "AP-09: the pinned wallet has no first receive address".to_string(),
+            ))
+        })?;
+        openbmt_core::approval::verify_wallet_message(
+            &address,
+            &openbmt_core::approval::wallet_message_for(&settings),
+            signature,
+        )
+        .map_err(|_| OwnRefusal::WalletSig {
+            address: address.to_string(),
+        })?;
+        let signed = SignedSettings {
+            owner_sig: settings.sign(&self.identity),
+            approver_sig: None,
+            settings,
+            wallet_sig: Some(signature.to_string()),
         };
         let mut next = self.state.clone();
         next.known = Some(signed.clone());

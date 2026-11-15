@@ -113,6 +113,7 @@ fn pair(relay: RelayHint, peer: &str) -> Result<(PairingRecord, Vec<u8>), String
         owner_sig: settings.sign(&owner),
         approver_sig: Some(settings.sign(&approver)),
         settings,
+        wallet_sig: None,
     };
     let bundle = CounterBundle::new(pairing, signed, None, vec![peer.to_string()])
         .map_err(|e| e.to_string())?
@@ -402,6 +403,7 @@ fn signed_alone(settings: Settings, owner: &Identity) -> SignedSettings {
         owner_sig: settings.sign(owner),
         approver_sig: None,
         settings,
+        wallet_sig: None,
     }
 }
 
@@ -410,6 +412,7 @@ fn signed_by_both(settings: Settings, owner: &Identity, approver: &Identity) -> 
         owner_sig: settings.sign(owner),
         approver_sig: Some(settings.sign(approver)),
         settings,
+        wallet_sig: None,
     }
 }
 

@@ -374,6 +374,7 @@ fn settings_the_owner_signs_are_queued_and_a_repeat_is_refused() {
         owner_sig: settings.sign(&id(0x11)),
         approver_sig: None,
         settings,
+        wallet_sig: None,
     };
     let response = rig.call(46, handle, &W::new().bytes(&signed.to_bytes()).0);
     let mut r = Rd::ok(&response);
@@ -468,6 +469,7 @@ fn the_settings_the_node_holds_and_the_outbox_follow_an_approval() {
         owner_sig: settings.sign(&id(0x11)),
         approver_sig: None,
         settings: settings.clone(),
+        wallet_sig: None,
     };
     unit_ok_settings(&rig, handle, &signed);
     let mut app = key_app();
@@ -749,6 +751,7 @@ fn lk_66_settings_wait_in_the_outbox_and_the_row_says_which_devices_lack_them() 
         owner_sig: settings.sign(&id(0x11)),
         approver_sig: None,
         settings: settings.clone(),
+        wallet_sig: None,
     };
     unit_ok_settings(&rig, handle, &first);
     let mut app = key_app();
@@ -760,6 +763,7 @@ fn lk_66_settings_wait_in_the_outbox_and_the_row_says_which_devices_lack_them() 
         owner_sig: settings.sign(&id(0x11)),
         approver_sig: None,
         settings,
+        wallet_sig: None,
     };
     unit_ok_settings(&rig, handle, &second);
 

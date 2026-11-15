@@ -1093,9 +1093,9 @@ fn bx_18_adding_a_box_signs_with_the_owner_root_alone_and_stores_before_it_takes
     let signed = s.add_box(the_box, USD, |b| disk.put(b)).unwrap();
     assert!(signed.approver_sig.is_none());
     signed
-        .verify_signatures_with(&openbmt_core::settings::Authority::OwnWallet {
-            owner: id(1).device_id(),
-        })
+        .verify_signatures_with(&openbmt_core::settings::Authority::own_wallet(
+            id(1).device_id(),
+        ))
         .unwrap();
     assert!(s.knows_box(&the_box));
     assert_eq!(s.known_settings(), Some(&signed));

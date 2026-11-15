@@ -290,6 +290,7 @@ mod tests {
             owner_sig: identity(1).sign_digest(&h),
             approver_sig: Some(identity(2).sign_digest(&h)),
             settings: s,
+            wallet_sig: None,
         }
     }
 

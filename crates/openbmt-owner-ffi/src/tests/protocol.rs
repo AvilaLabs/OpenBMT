@@ -217,6 +217,8 @@ fn the_op_numbers_are_the_ones_the_readme_lists() {
         (240, "paid_day"),
         (241, "paid_clear"),
         (242, "paid_check_reset"),
+        (243, "own_settings_preview"),
+        (244, "own_settings_attach"),
     ];
     let table: Vec<(u16, &str)> = ops().iter().map(|o| (o.num, o.name)).collect();
     assert_eq!(table, pinned);

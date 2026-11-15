@@ -132,6 +132,11 @@
 //!   turning it off, which stores nothing and gives the bytes `queue_settings`
 //!   takes, and the suggestion for the cap (SL-34): one day's Lightning sales
 //!   of the last seven, at most the limit of instant payments.
+//! - 243, 244: a Redirect change of a shop with its own wallet
+//!   (`docs/APPROVAL-RULES.md` AP-14, AP-15, `docs/OWNER-APP-RULES.md`
+//!   OA-127): the preview, which says whether the wallet has to sign and gives
+//!   the message and the address, and the call that attaches the signature,
+//!   checks it and puts the settings in force. They work on no node.
 //! - 239 to 242: the owner phone's check of every sale a counter shows paid
 //!   on chain against the wallet's view (`docs/OWNER-COINS-RULES.md` OC-60 to
 //!   OC-64): run the check and list the alarms and the sales waiting or not
@@ -180,6 +185,9 @@ use crate::own::{
     self, OwnBoxDeliveredView, OwnBoxWelcomeArgs, OwnBundleView, OwnConfirmArgs, OwnCounterArgs,
     OwnGapArgs, OwnGapView, OwnMade, OwnOfferView, OwnOwnerMade, OwnRelayArgs, OwnRequestArgs,
     OwnRequestView, OwnShopArgs, OwnWaitingView, OwnWalletView, SwitchRowView, SwitchStateKind,
+};
+use crate::own_settings::{
+    self, OwnSettingsAttachArgs, OwnSettingsPreviewArgs, OwnSettingsPreviewView,
 };
 use crate::own_spend_views::{
     OwnSpendBuildArgs, OwnSpendBuiltView, OwnSpendFileView, OwnSpendItemView, OwnSpendSessionView,
@@ -1123,6 +1131,18 @@ fn build_ops() -> Vec<Op> {
         op(242, "paid_check_reset", Node, |c, _: ()| {
             c.entry()?.paid_check_reset()
         }),
+        op(
+            243,
+            "own_settings_preview",
+            Zero,
+            |_, a: OwnSettingsPreviewArgs| own_settings::preview(a),
+        ),
+        op(
+            244,
+            "own_settings_attach",
+            Zero,
+            |_, a: OwnSettingsAttachArgs| own_settings::attach(a),
+        ),
     ]
 }
 
@@ -1309,6 +1329,9 @@ fn definitions() -> Vec<TypeDef> {
         SettingsEditArgs::define(),
         SettingChangeView::define(),
         SettingsPreviewView::define(),
+        OwnSettingsPreviewArgs::define(),
+        OwnSettingsPreviewView::define(),
+        OwnSettingsAttachArgs::define(),
         NotOfferedView::define(),
         Lsps1OfferView::define(),
         OrderStateView::define(),

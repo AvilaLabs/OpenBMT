@@ -6,10 +6,10 @@ one of two approvals, chosen by what the change can do. The code is
 `crates/openbmt-core/src/approval.rs`. Tests are named after the rule
 (`ap_01_...`). The classes and the counter's confirmation are in use: the
 owner phone holds a Loosen change until a counter confirms it, and the
-counters check it (`docs/COUNTER-RULES.md` CR-242). The wallet's signature
-of AP-06 to AP-10 is checked by the code but nothing asks for it yet, so a
-Redirect change is refused by the counters for now. Shops that keep the Key
-app keep its signature for every loosening change, unchanged.
+counters check it (`docs/COUNTER-RULES.md` CR-242). The wallet's signature of
+AP-06 to AP-10 is asked for by the owner phone for a Redirect change and
+checked by the counters (AP-14). Shops that keep the Key app keep its
+signature for every loosening change, unchanged.
 
 ## 1. Classes of change
 
@@ -55,6 +55,21 @@ app keep its signature for every loosening change, unchanged.
   either, and taking `shop_lightning` away, are Free. When `shop_lightning`
   is set, the "Lightning node" line of the wallet's message (AP-06) gives
   its node's ID.
+
+- **AP-14. Carrying the signature.** A Redirect change is sent with the
+  wallet's signature of the message of AP-06 for those settings, in the
+  settings frame after the owner's signature: the signature's text in base64,
+  at most 1,000 characters. The counter checks it against the first receive
+  address of the wallet it pinned at pairing (AP-09) and refuses the settings
+  when it does not verify (AP-10). The owner phone checks it the same way
+  before it sends anything. A signature on a change of another class is
+  refused, so that a frame has one meaning, and a shop that keeps the Key app
+  does not use it.
+- **AP-15. Not from the same phone.** A starter wallet's key is on the owner
+  phone (`docs/START-SIMPLE-RULES.md`), so its signature would come from the
+  phone that holds the owner root. The owner phone does not offer a Redirect
+  change while the shop is on its starter wallet, and a counter paired with a
+  starter wallet (CR-256) refuses one.
 
 ## 2. Counter confirmation
 

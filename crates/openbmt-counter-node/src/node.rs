@@ -719,6 +719,7 @@ fn load_pending(
     };
     let signed = decode_file(&bytes).ok().filter(|signed| {
         matches!(authority, Authority::OwnWallet { .. })
+            && signed.wallet_sig.is_none()
             && signed.verify_signatures_with(authority).is_ok()
             && signed.settings.version > in_force.version
     });
@@ -887,7 +888,11 @@ impl<P: DriverPort> Node<P> {
         let view = ChainView::from_store(&headers);
 
         let authority = match &own {
-            Some(own) => Authority::OwnWallet { owner: own.owner },
+            Some(own) => Authority::pinned_own_wallet(
+                own.owner,
+                &own.wallet,
+                own_record.as_ref().is_some_and(|r| r.starter),
+            ),
             None => Authority::KeyApp(pairing.roots),
         };
         // CR-261: a book that is ahead of the record is finished before the
@@ -1287,7 +1292,9 @@ impl<P: DriverPort> Node<P> {
     /// are not refused: they are kept as the one change to confirm and are
     /// not in force, and the answer is `Ok(None)`, as for a version that does
     /// not go past the one in force; [`Node::pending_change`] says what waits.
-    /// A Redirect change is refused.
+    /// A Redirect change is taken only with the wallet's signature, which
+    /// is checked against the wallet pinned now (CR-236, AP-14), and is never
+    /// kept to be confirmed.
     pub fn take_settings(
         &mut self,
         signed: &SignedSettings,
@@ -1295,7 +1302,7 @@ impl<P: DriverPort> Node<P> {
         if signed.settings.version <= self.settings.version {
             return Ok(None);
         }
-        match signed.verify_with(&self.authority, Some(&self.settings)) {
+        match signed.verify_with(&self.settings_authority(), Some(&self.settings)) {
             Ok(change) => self.commit_settings(signed, &signed.to_bytes(), change),
             Err(SettingsError::ConfirmationRequired(ChangeClass::Loosen)) => {
                 self.keep_pending(signed)?;
@@ -1316,7 +1323,7 @@ impl<P: DriverPort> Node<P> {
         &mut self,
         confirmed: &ConfirmedSettings,
     ) -> Result<Option<Change>, SettingsRefused> {
-        let Authority::OwnWallet { owner } = self.authority else {
+        let Authority::OwnWallet { owner, .. } = self.authority else {
             return Err(SettingsRefused::NoConfirmationHere);
         };
         if confirmed.signed.settings.version <= self.settings.version {
@@ -1333,6 +1340,19 @@ impl<P: DriverPort> Node<P> {
             Err(ConfirmedError::Settings(e)) => {
                 Err(self.refused(e, confirmed.signed.settings.version))
             }
+        }
+    }
+
+    /// Who may sign settings now: for a counter paired with the shop's own
+    /// wallet, the owner root, the wallet the counter pins now and whether it
+    /// is a starter wallet (a switch changes both, CR-261), so that a
+    /// Redirect change is checked against the wallet in force (AP-14).
+    fn settings_authority(&self) -> Authority {
+        match (&self.authority, self.counter.own_wallet()) {
+            (Authority::OwnWallet { owner, .. }, Some(wallet)) => {
+                Authority::pinned_own_wallet(*owner, wallet, self.starter)
+            }
+            (authority, _) => authority.clone(),
         }
     }
 
@@ -1458,7 +1478,7 @@ impl<P: DriverPort> Node<P> {
     }
 
     fn check(&self, sw: &SwitchOwn) -> Result<(), SwitchRefused> {
-        let Authority::OwnWallet { owner } = self.authority else {
+        let Authority::OwnWallet { owner, .. } = self.authority else {
             return Err(SwitchRefused::NotStarter);
         };
         let me = self.counter.device_id();
@@ -1690,7 +1710,7 @@ impl<P: DriverPort> Node<P> {
     }
 
     fn starter_signed(&self, line: &StarterLine) -> bool {
-        matches!(self.authority, Authority::OwnWallet { owner } if line.verify(&owner))
+        matches!(self.authority, Authority::OwnWallet { owner, .. } if line.verify(&owner))
     }
 
     /// CR-275: drop the starter line and the starter payments, in memory and

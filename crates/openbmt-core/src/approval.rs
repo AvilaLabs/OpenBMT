@@ -314,7 +314,7 @@ fn base64_decode(text: &str) -> Option<Vec<u8>> {
 
 /// Longest base64 text that is looked at (a BIP-322 simple signature is
 /// about 150 characters).
-const MAX_SIG_TEXT: usize = 1_000;
+pub const MAX_SIG_TEXT: usize = 1_000;
 
 /// Check that `sig_base64` is a signature of `message` by the key of the
 /// mainnet P2WPKH `address` (AP-07, AP-08, AP-09, AP-10).
@@ -464,11 +464,43 @@ fn verify_bip322(script: &ScriptBuf, message: &str, raw: &[u8]) -> Option<bool> 
     )
 }
 
-#[cfg(test)]
-pub(crate) mod test_signing {
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_signing {
     //! Signing helpers for the tests and for the later slices' tests.
     use super::*;
+    use bitcoin::bip32::{DerivationPath, Xpriv, Xpub};
     use bitcoin::secp256k1::SecretKey;
+
+    /// A single-key wallet of a known key: the pinned wallet of the account
+    /// made from `seed`, and the secret key of its first receive address.
+    pub fn signing_wallet(seed: u8) -> (crate::pinned_wallet::PinnedWallet, SecretKey) {
+        let master = Xpriv::new_master(Network::Bitcoin, &[seed; 32]).unwrap();
+        let account: DerivationPath = "m/84h/0h/0h".parse().unwrap();
+        let account_key = master.derive_priv(secp(), &account).unwrap();
+        let xpub = Xpub::from_priv(secp(), &account_key);
+        let wallet =
+            crate::wallet_single::SingleKeyWallet::new(master.fingerprint(secp()), 0, xpub)
+                .unwrap();
+        let first: DerivationPath = "m/0/0".parse().unwrap();
+        let sk = account_key.derive_priv(secp(), &first).unwrap().private_key;
+        (
+            crate::pinned_wallet::PinnedWallet::new(crate::wallet_single::ImportedWallet::Single(
+                wallet,
+            )),
+            sk,
+        )
+    }
+
+    /// The base64 of a compact signature of `message` by `sk`.
+    pub fn sign_compact_text(sk: &SecretKey, message: &str) -> String {
+        b64(&compact(sk, message, 31))
+    }
+
+    /// The base64 of a BIP-322 simple signature of `message` by `sk`.
+    pub fn sign_bip322_text(sk: &SecretKey, message: &str) -> String {
+        let pk = CompressedPublicKey(sk.public_key(secp()));
+        b64(&bip322(sk, &pk, message))
+    }
 
     pub fn key(n: u8) -> (SecretKey, CompressedPublicKey) {
         let sk = SecretKey::from_slice(&[n; 32]).unwrap();
@@ -526,7 +558,7 @@ pub(crate) mod test_signing {
 mod tests {
     use super::test_signing::*;
     use super::*;
-    use crate::settings::{classify_change, OwnNode};
+    use crate::settings::{classify_change, OwnNode, SettingsError, SignedSettings};
     use crate::testutil::{identity, node_key, with_shop_lightning};
     use std::str::FromStr;
 
@@ -1261,6 +1293,237 @@ mod tests {
         }
     }
 
+    // ---- carrying the signature (AP-14, AP-15) ------------------------------
+
+    /// A shop that uses its own wallet: the owner, the pinned wallet's first
+    /// address and key, the settings in force and a Redirect change of them.
+    struct Shop {
+        owner: Identity,
+        address: Address,
+        key: bitcoin::secp256k1::SecretKey,
+        old: Settings,
+        new: Settings,
+    }
+
+    fn shop() -> Shop {
+        let (wallet, key) = signing_wallet(21);
+        let (old, new) = mutated(|s| s.lightning_node = Some(node_key(5)));
+        Shop {
+            owner: identity(1),
+            address: wallet.receive_address(0).unwrap(),
+            key,
+            old,
+            new,
+        }
+    }
+
+    fn owned(shop: &Shop, settings: &Settings, wallet_sig: Option<String>) -> SignedSettings {
+        SignedSettings {
+            owner_sig: settings.sign(&shop.owner),
+            approver_sig: None,
+            settings: settings.clone(),
+            wallet_sig,
+        }
+    }
+
+    fn authority(shop: &Shop, starter: bool) -> crate::settings::Authority {
+        crate::settings::Authority::OwnWallet {
+            owner: shop.owner.device_id(),
+            first_address: Some(shop.address.clone()),
+            starter,
+        }
+    }
+
+    #[test]
+    fn ap_14_a_redirect_with_the_wallets_signature_is_taken() {
+        let shop = shop();
+        let message = wallet_message_for(&shop.new);
+        for text in [
+            sign_compact_text(&shop.key, &message),
+            sign_bip322_text(&shop.key, &message),
+        ] {
+            let signed = owned(&shop, &shop.new, Some(text));
+            assert_eq!(
+                signed.verify_with(&authority(&shop, false), Some(&shop.old)),
+                Ok(Change::Loosening)
+            );
+        }
+    }
+
+    #[test]
+    fn ap_14_a_wrong_signature_is_refused_and_names_the_address() {
+        let shop = shop();
+        let message = wallet_message_for(&shop.new);
+        let other = signing_wallet(22).1;
+        for text in [
+            sign_compact_text(&other, &message),
+            sign_bip322_text(&other, &message),
+            // A good signature of another message.
+            sign_compact_text(&shop.key, "another message"),
+            "!!!!".to_string(),
+        ] {
+            let signed = owned(&shop, &shop.new, Some(text));
+            let e = signed
+                .verify_with(&authority(&shop, false), Some(&shop.old))
+                .unwrap_err();
+            assert!(matches!(e, SettingsError::WalletSig(_)), "{e}");
+            assert!(e.to_string().starts_with("AP-14"));
+            assert!(e.to_string().contains(&shop.address.to_string()), "{e}");
+        }
+        // A signature that covers other settings is not the signature of
+        // these (AP-02).
+        let mut other_settings = shop.new.clone();
+        other_settings.tor_on = !other_settings.tor_on;
+        let text = sign_compact_text(&shop.key, &wallet_message_for(&other_settings));
+        let signed = owned(&shop, &shop.new, Some(text));
+        assert!(matches!(
+            signed.verify_with(&authority(&shop, false), Some(&shop.old)),
+            Err(SettingsError::WalletSig(_))
+        ));
+    }
+
+    #[test]
+    fn ap_14_a_redirect_without_the_signature_still_needs_one() {
+        let shop = shop();
+        let signed = owned(&shop, &shop.new, None);
+        assert_eq!(
+            signed.verify_with(&authority(&shop, false), Some(&shop.old)),
+            Err(SettingsError::ConfirmationRequired(ChangeClass::Redirect))
+        );
+    }
+
+    #[test]
+    fn ap_14_a_redirect_in_the_first_settings_is_refused_with_or_without_a_signature() {
+        let shop = shop();
+        let text = sign_compact_text(&shop.key, &wallet_message_for(&shop.new));
+        for sig in [None, Some(text)] {
+            let signed = owned(&shop, &shop.new, sig);
+            assert_eq!(
+                signed.verify_with(&authority(&shop, false), None),
+                Err(SettingsError::RedirectAtPairing)
+            );
+        }
+    }
+
+    #[test]
+    fn ap_14_a_signature_on_a_change_of_another_class_is_refused() {
+        let shop = shop();
+        let (old, free) = mutated(|s| s.light_per_sale.sats -= 1);
+        let (_, loosen) = mutated(|s| s.light_per_sale.sats += 1);
+        let (_, first) = mutated(|_| {});
+        for (current, new) in [(Some(&old), &free), (Some(&old), &loosen), (None, &first)] {
+            let text = sign_compact_text(&shop.key, &wallet_message_for(new));
+            let signed = owned(&shop, new, Some(text));
+            assert_eq!(
+                signed.verify_with(&authority(&shop, false), current),
+                Err(SettingsError::WalletSigNotWanted)
+            );
+            // Without it, a Free change is taken as before.
+            let plain = owned(&shop, new, None);
+            let expect = match current.map(|c| classify(c, new)) {
+                Some(ChangeClass::Loosen) => {
+                    Err(SettingsError::ConfirmationRequired(ChangeClass::Loosen))
+                }
+                _ => Ok(()),
+            };
+            assert_eq!(
+                plain
+                    .verify_with(&authority(&shop, false), current)
+                    .map(|_| ()),
+                expect
+            );
+        }
+    }
+
+    #[test]
+    fn ap_14_a_shop_with_the_key_app_does_not_use_it() {
+        let shop = shop();
+        let approver = identity(2);
+        let roots =
+            crate::batch::PinnedRoots::new(shop.owner.device_id(), approver.device_id()).unwrap();
+        let text = sign_compact_text(&shop.key, &wallet_message_for(&shop.new));
+        let h = shop.new.hash();
+        let signed = SignedSettings {
+            approver_sig: Some(approver.sign_digest(&h)),
+            ..owned(&shop, &shop.new, Some(text))
+        };
+        assert_eq!(
+            signed.verify(&roots, Some(&shop.old)),
+            Err(SettingsError::WalletSigNotWanted)
+        );
+        assert_eq!(
+            signed.verify_signatures(&roots),
+            Err(SettingsError::WalletSigNotWanted)
+        );
+    }
+
+    #[test]
+    fn ap_14_the_signature_is_at_most_1000_ascii_characters_in_the_frame() {
+        let shop = shop();
+        let text = sign_bip322_text(&shop.key, &wallet_message_for(&shop.new));
+        let signed = owned(&shop, &shop.new, Some(text));
+        let bytes = signed.to_bytes();
+        // The frame has a version of its own and reads back to the same
+        // bytes, with the same signature.
+        assert_eq!(bytes[4], 6);
+        let back = SignedSettings::from_bytes(&bytes).unwrap();
+        assert_eq!(back, signed);
+        assert_eq!(back.to_bytes(), bytes);
+        for bad in ["", &"A".repeat(1_001), "a b", "caf\u{e9}"] {
+            let signed = owned(&shop, &shop.new, Some(bad.to_string()));
+            assert!(matches!(
+                signed.verify_with(&authority(&shop, false), Some(&shop.old)),
+                Err(SettingsError::Invalid(_))
+            ));
+        }
+        let long = owned(&shop, &shop.new, Some("A".repeat(1_000)));
+        assert_eq!(
+            SignedSettings::from_bytes(&long.to_bytes())
+                .unwrap()
+                .wallet_sig,
+            long.wallet_sig
+        );
+    }
+
+    #[test]
+    fn ap_15_a_counter_paired_with_a_starter_wallet_refuses_a_redirect() {
+        let shop = shop();
+        let text = sign_compact_text(&shop.key, &wallet_message_for(&shop.new));
+        for sig in [None, Some(text)] {
+            let signed = owned(&shop, &shop.new, sig);
+            assert_eq!(
+                signed.verify_with(&authority(&shop, true), Some(&shop.old)),
+                Err(SettingsError::RedirectStarter)
+            );
+        }
+        // A starter counter still takes a Free change.
+        let (old, free) = mutated(|s| s.light_per_sale.sats -= 1);
+        let signed = owned(&shop, &free, None);
+        assert!(signed
+            .verify_with(&authority(&shop, true), Some(&old))
+            .is_ok());
+        assert!(SettingsError::RedirectStarter
+            .to_string()
+            .starts_with("AP-15"));
+    }
+
+    #[test]
+    fn ap_14_a_device_that_pins_no_wallet_takes_a_redirect_with_a_signature_of_the_right_shape() {
+        let shop = shop();
+        let box_side = crate::settings::Authority::own_wallet(shop.owner.device_id());
+        let text = sign_compact_text(&shop.key, &wallet_message_for(&shop.new));
+        let signed = owned(&shop, &shop.new, Some(text));
+        assert_eq!(
+            signed.verify_with(&box_side, Some(&shop.old)),
+            Ok(Change::Loosening)
+        );
+        let none = owned(&shop, &shop.new, None);
+        assert_eq!(
+            none.verify_with(&box_side, Some(&shop.old)),
+            Err(SettingsError::ConfirmationRequired(ChangeClass::Redirect))
+        );
+    }
+
     #[test]
     fn base64_is_strict() {
         for n in 0..8usize {
@@ -1292,9 +1555,9 @@ mod tests {
         // the file is not the order of the numbers.
         let mut ids = rule_ids();
         ids.sort();
-        assert_eq!(ids.len(), 13);
+        assert_eq!(ids.len(), 15);
         assert_eq!(ids.first().map(String::as_str), Some("AP-01"));
-        assert_eq!(ids.last().map(String::as_str), Some("AP-13"));
+        assert_eq!(ids.last().map(String::as_str), Some("AP-15"));
     }
 
     #[test]
@@ -1321,6 +1584,8 @@ mod tests {
                 address: "a".into(),
             }
             .to_string(),
+            crate::settings::SettingsError::WalletSigNotWanted.to_string(),
+            crate::settings::SettingsError::RedirectStarter.to_string(),
         ];
         for s in shown {
             assert!(ids.iter().any(|i| s.starts_with(i.as_str())), "{s}");

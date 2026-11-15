@@ -69,12 +69,14 @@ fn fixture() -> &'static Fixture {
             owner_sig: s.sign(&id(1)),
             approver_sig: None,
             settings: s.clone(),
+            wallet_sig: None,
         }
         .to_bytes();
         let settings = SignedSettings {
             owner_sig: s.sign(&id(1)),
             approver_sig: Some(s.sign(&id(2))),
             settings: s,
+            wallet_sig: None,
         }
         .to_bytes();
         Fixture {

@@ -405,7 +405,10 @@ fn eval_settings(
         Err(
             SettingsError::Invalid(_)
             | SettingsError::ConfirmationRequired(_)
-            | SettingsError::RedirectAtPairing,
+            | SettingsError::RedirectAtPairing
+            | SettingsError::WalletSigNotWanted
+            | SettingsError::RedirectStarter
+            | SettingsError::WalletSig(_),
         ) => (Some(1), None),
         Err(SettingsError::StaleVersion { .. }) => (Some(2), None),
         Err(SettingsError::ApproverSignatureInvalid) => (Some(0), None),

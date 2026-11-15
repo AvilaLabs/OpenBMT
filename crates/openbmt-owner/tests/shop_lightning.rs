@@ -322,7 +322,10 @@ fn sl_76_a_preview_stores_nothing() {
 }
 
 #[test]
-fn sl_76_a_shop_with_its_own_wallet_has_no_way_to_carry_it_and_is_refused() {
+fn sl_76_a_shop_with_its_own_wallet_keeps_its_settings_in_its_own_state() {
+    // The queue of a shop with its own wallet is a placeholder that holds no
+    // settings, so an edit finds nothing to change; the preview of such a
+    // shop is `OwnShop::settings_preview` (AP-14, AP-15).
     use bitcoin::bip32::{Xpriv, Xpub};
     use openbmt_core::wallet_single::{ImportedWallet, SingleKeyWallet};
     use openbmt_owner::own_shop::own_approver;
@@ -350,7 +353,7 @@ fn sl_76_a_shop_with_its_own_wallet_has_no_way_to_carry_it_and_is_refused() {
     ] {
         assert_eq!(
             owner.settings_preview(&edit(e)).unwrap_err(),
-            Refusal::ShopLightning(ShopLightningRefusal::OwnWallet)
+            Refusal::NoSettingsToChange
         );
     }
 }

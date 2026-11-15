@@ -753,6 +753,7 @@ fn signed_settings(version: u32, f: impl FnOnce(&mut Settings)) -> SignedSetting
         owner_sig: s.sign(&id(1)),
         approver_sig: None,
         settings: s,
+        wallet_sig: None,
     }
 }
 
@@ -832,6 +833,7 @@ fn naming(version: u32, key: Option<DeviceId>) -> SignedSettings {
         owner_sig: s.sign(&id(1)),
         approver_sig: Some(s.sign(&id(2))),
         settings: s,
+        wallet_sig: None,
     }
 }
 

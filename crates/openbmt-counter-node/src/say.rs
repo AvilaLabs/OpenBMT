@@ -448,6 +448,20 @@ impl SettingsRefused {
             Self::Verify(SettingsError::ConfirmationRequired(ChangeClass::Redirect)) => {
                 needs_wallet()
             }
+            Self::Verify(SettingsError::RedirectStarter) => Words::new(
+                Tone::Ended,
+                "Change not taken",
+                "This counter was paired with a starter wallet, so it does not take a change of where Lightning payments go.",
+                Who::Owner,
+                "The owner moves the shop to its own wallet first.",
+            ),
+            Self::Verify(SettingsError::WalletSig(_)) => Words::new(
+                Tone::Ended,
+                "Change not taken",
+                "The wallet's signature on this change does not check out.",
+                Who::Owner,
+                "The owner signs the change again with the wallet.",
+            ),
             Self::Confirmation(_) | Self::NoConfirmationHere => bad_confirmation(),
             Self::Verify(e) => Words::new(
                 Tone::Ended,
@@ -1381,6 +1395,16 @@ pub fn every_settings_refused() -> Vec<(&'static str, SettingsRefused)> {
         (
             "ConfirmationRequired",
             SettingsRefused::Verify(SettingsError::ConfirmationRequired(ChangeClass::Redirect)),
+        ),
+        (
+            "RedirectStarter",
+            SettingsRefused::Verify(SettingsError::RedirectStarter),
+        ),
+        (
+            "WalletSig",
+            SettingsRefused::Verify(SettingsError::WalletSig(
+                openbmt_core::approval::WalletSigError::UnsupportedAddress,
+            )),
         ),
         (
             "Confirmation",

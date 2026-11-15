@@ -141,6 +141,15 @@ object ProtocolDecoderTest {
         rejects("a preview flag") { decodeResponse(previewFrame(needsKeyApp = 2)).settingsPreview() }
         rejects("a short preview") { decodeResponse(previewFrame().copyOf(30)).settingsPreview() }
 
+        // Ops 243 and 244: the preview of a shop with its own wallet, with what the wallet has to sign.
+        val ask = decodeResponse(ownPreviewFrame()).ownSettingsPreview()
+        check(ask.preview.version == 4L && ask.needsWalletSig && ask.message == "Message to sign" && ask.address == "bc1qaddress")
+        val none = decodeResponse(ownPreviewFrame(needs = false)).ownSettingsPreview()
+        check(!none.needsWalletSig && none.message.isEmpty() && none.address.isEmpty() && none.preview.changes.size == 2)
+        rejects("an own preview flag") { decodeResponse(ownPreviewFrame(flag = 2)).ownSettingsPreview() }
+        rejects("a short own preview") { decodeResponse(ownPreviewFrame().let { it.copyOf(it.size - 3) }).ownSettingsPreview() }
+        rejects("a trailing byte after an own preview") { decodeResponse(ownPreviewFrame() + byteArrayOf(0)).let { r -> r.ownSettingsPreview().also { r.end() } } }
+
         val scan = decodeResponse(counterScanFrame()).counterScan()
         check(scan.pairing == 4L && scan.counter.size == 32 && scan.name == "Front counter")
         check(scan.sessionWords == listOf("one", "two", "three", "four") && scan.needsRate)
@@ -1018,6 +1027,18 @@ object ProtocolDecoderTest {
         w.string("counters").string("Counter's share").u8(1).bytes(ByteArray(32) { 5 })
             .string("50%").string("33.33%").bool(false)
         w.u8(needsKeyApp).bool(false).u32(8_333).u8(1).u64(98_500).u8(1).u64(1_015).bytes(byteArrayOf(9, 9)).u8(2)
+        return header(0, w.toByteArray())
+    }
+
+    /** The answer of op 243: the preview, then whether the wallet signs, the message and the address. */
+    private fun ownPreviewFrame(needs: Boolean = true, flag: Int = if (needs) 1 else 0): ByteArray {
+        val w = Writer().u32(4).u32(2)
+        w.string("refund_cap").string("Largest single refund").u8(0).string("$100").string("$150").bool(true)
+        w.string("counters").string("Counter's share").u8(1).bytes(ByteArray(32) { 5 })
+            .string("50%").string("33.33%").bool(false)
+        w.u8(1).bool(false).u32(8_333).u8(1).u64(98_500).u8(1).u64(1_015).bytes(byteArrayOf(9, 9)).u8(2)
+        w.u8(flag)
+        if (needs) w.string("Message to sign").string("bc1qaddress") else w.string("").string("")
         return header(0, w.toByteArray())
     }
 

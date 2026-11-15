@@ -320,9 +320,9 @@ fn bx_18_the_settings_a_box_takes_read_back_as_signed_by_the_owner_alone() {
     let signed = SignedSettings::from_bytes(&stored).unwrap();
     assert!(signed.approver_sig.is_none());
     signed
-        .verify_signatures_with(&openbmt_core::settings::Authority::OwnWallet {
-            owner: owner().device_id(),
-        })
+        .verify_signatures_with(&openbmt_core::settings::Authority::own_wallet(
+            owner().device_id(),
+        ))
         .expect("signed by the owner root alone");
     runner.stop();
     let _ = std::fs::remove_dir_all(&dir);

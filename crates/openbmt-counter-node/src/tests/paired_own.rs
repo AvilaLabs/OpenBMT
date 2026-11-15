@@ -44,6 +44,7 @@ fn settings_for(counter: &DeviceId, version: u32) -> SignedSettings {
         owner_sig: s.sign(&id(1)),
         approver_sig: None,
         settings: s,
+        wallet_sig: None,
     }
 }
 
@@ -213,6 +214,7 @@ fn cr_231_the_first_settings_are_owner_signed_newer_and_list_this_counter() {
                 owner_sig: s.sign(&id(1)),
                 approver_sig: None,
                 settings: s,
+                wallet_sig: None,
             }
         },
         1_000,
@@ -232,6 +234,7 @@ fn cr_231_first_settings_that_name_a_lightning_node_are_refused_at_pairing_and_a
             owner_sig: s.sign(&id(1)),
             approver_sig: None,
             settings: s,
+            wallet_sig: None,
         }
     };
     let (mut c, bytes) = ready(naming, 1_000);
@@ -342,13 +345,14 @@ fn cr_233_the_secret_is_not_in_what_a_ceremony_or_a_record_prints() {
 
 #[test]
 fn cr_236_the_authority_of_an_own_wallet_record_is_the_owner_root_alone() {
-    let record = PairedRecord::OwnWallet(Box::new(record()));
-    assert_eq!(
+    let own = record();
+    let expected = Authority::pinned_own_wallet(id(1).device_id(), &own.wallet, own.starter);
+    let record = PairedRecord::OwnWallet(Box::new(own));
+    assert_eq!(record.authority(), expected);
+    assert!(matches!(
         record.authority(),
-        Authority::OwnWallet {
-            owner: id(1).device_id()
-        }
-    );
+        Authority::OwnWallet { owner, first_address: Some(_), .. } if owner == id(1).device_id()
+    ));
     assert!(record.roots().is_none() && record.key_app_pairing().is_none());
     assert_eq!(record.owner(), id(1).device_id());
     assert_eq!(record.network(), Network::Bitcoin);
@@ -605,6 +609,7 @@ fn cr_233_every_length_of_a_record_is_checked_at_its_limit() {
         owner_sig: s.sign(&id(1)),
         approver_sig: None,
         settings: s,
+        wallet_sig: None,
     };
     assert!(big.settings.to_bytes().len() > 2_000);
     assert_eq!(OwnPairingRecord::from_bytes(&big.to_bytes()).unwrap(), big);

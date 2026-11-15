@@ -39,6 +39,7 @@ fn settings_naming(counter: u8) -> SignedSettings {
         owner_sig: s.sign(&id(1)),
         approver_sig: Some(s.sign(&id(2))),
         settings: s,
+        wallet_sig: None,
     }
 }
 

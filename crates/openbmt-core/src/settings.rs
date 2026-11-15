@@ -16,13 +16,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
 
-use crate::approval::ChangeClass;
+use crate::approval::{
+    verify_wallet_message, wallet_message_for, ChangeClass, WalletSigError, MAX_SIG_TEXT,
+};
 use crate::batch::PinnedRoots;
 use crate::currency::ShopCurrency;
 use crate::identity::{tagged_hash, DeviceId, Identity, Sig, TAG_SETTINGS};
 use crate::onion::{parse_onion_name, SUFFIX};
 use crate::policy::{self, CheckMode};
 use crate::wire::{self, DecodeError, Reader};
+use bitcoin::Address;
 
 /// Largest underpayment tolerance `validate` accepts, in basis points (5%).
 pub const MAX_TOLERANCE_BPS: u32 = 500;
@@ -78,6 +81,11 @@ const OWN_NODE_VERSION: u8 = 4;
 /// the own node, then the Shop Lightning block. It is the version of exactly
 /// the settings that name Shop Lightning.
 const SHOP_LIGHTNING_VERSION: u8 = 5;
+
+/// The frame version of signed settings that carry a wallet signature
+/// (AP-14). The byte after it is the version of the settings layout (1 to
+/// 5), and the wallet signature follows the owner's.
+const WALLET_SIG_VERSION: u8 = 6;
 
 /// Characters of the base32 part of a Tor v3 host name (NR-92).
 const ONION_BASE_CHARS: usize = 56;
@@ -1373,6 +1381,14 @@ pub enum SettingsError {
     /// wallet name a Lightning node or Shop Lightning, which the person at
     /// the counter did not see when comparing the address and the words.
     RedirectAtPairing,
+    /// AP-14: a wallet signature came with a change that is not a Redirect,
+    /// or with settings of a shop that keeps the Key app.
+    WalletSigNotWanted,
+    /// AP-15: a counter paired with a starter wallet does not take a
+    /// Redirect change.
+    RedirectStarter,
+    /// AP-14: the wallet's signature on a Redirect change does not verify.
+    WalletSig(WalletSigError),
 }
 
 impl fmt::Display for SettingsError {
@@ -1390,6 +1406,15 @@ impl fmt::Display for SettingsError {
                 f,
                 "CR-231: first settings of a shop with no Key app name no Lightning node and no Shop Lightning"
             ),
+            Self::WalletSigNotWanted => write!(
+                f,
+                "AP-14: a wallet signature comes only with a Redirect change of a shop with its own wallet"
+            ),
+            Self::RedirectStarter => write!(
+                f,
+                "AP-15: a counter paired with a starter wallet does not take a Redirect change"
+            ),
+            Self::WalletSig(e) => write!(f, "AP-14: {e}"),
             Self::StaleVersion { current, got } => {
                 write!(
                     f,
@@ -1405,7 +1430,7 @@ impl std::error::Error for SettingsError {}
 /// Who may sign settings for a counter: the two pinned roots of a shop with
 /// a Key app, or the owner root alone of a shop that uses its own wallet
 /// (`docs/COUNTER-RULES.md` CR-236).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Authority {
     /// The owner and Key app roots. A change that loosens needs both
     /// signatures.
@@ -1413,11 +1438,20 @@ pub enum Authority {
     /// The owner root alone. The class of a change is computed from the
     /// settings ([`classify`]): a Free change is taken with the owner's
     /// signature, a Loosen or Redirect change is refused until a counter's
-    /// confirmation or a wallet signature is joined to the settings. No Key
+    /// confirmation or a wallet signature is joined to the settings. A
+    /// Redirect change is taken with the wallet's signature (AP-14). No Key
     /// app signature is taken.
     OwnWallet {
         /// The owner root.
         owner: DeviceId,
+        /// The first receive address of the wallet the device pinned
+        /// (AP-09), which has to sign a Redirect change. `None` for a
+        /// device that pins no wallet (a Box): it takes a Redirect change
+        /// that carries a wallet signature of the right shape and leaves the
+        /// check of that signature to the counters, which pinned the wallet.
+        first_address: Option<Address>,
+        /// Whether the counter was paired with a starter wallet (CR-256).
+        starter: bool,
     },
 }
 
@@ -1426,7 +1460,35 @@ impl Authority {
     pub fn owner(&self) -> &DeviceId {
         match self {
             Self::KeyApp(roots) => &roots.owner,
-            Self::OwnWallet { owner } => owner,
+            Self::OwnWallet { owner, .. } => owner,
+        }
+    }
+
+    /// The authority of a shop with its own wallet for a counter that pinned
+    /// `wallet`: a Redirect change is checked against the wallet's first
+    /// receive address (AP-14). A wallet whose first address cannot be
+    /// derived is treated as a starter wallet, so that no Redirect change is
+    /// taken.
+    pub fn pinned_own_wallet(
+        owner: DeviceId,
+        wallet: &crate::pinned_wallet::PinnedWallet,
+        starter: bool,
+    ) -> Self {
+        let first_address = wallet.receive_address(0).ok();
+        Self::OwnWallet {
+            owner,
+            starter: starter || first_address.is_none(),
+            first_address,
+        }
+    }
+
+    /// The authority of a shop with its own wallet for a device that pins no
+    /// wallet and does not know a starter wallet (a Box).
+    pub fn own_wallet(owner: DeviceId) -> Self {
+        Self::OwnWallet {
+            owner,
+            first_address: None,
+            starter: false,
         }
     }
 }
@@ -1440,6 +1502,16 @@ pub struct SignedSettings {
     pub owner_sig: Sig,
     /// Key app root signature, needed for loosening.
     pub approver_sig: Option<Sig>,
+    /// The wallet's signature of the message of AP-06 for these settings, in
+    /// base64 (AP-14): at most 1,000 ASCII characters. Only a Redirect
+    /// change of a shop with its own wallet carries one.
+    pub wallet_sig: Option<String>,
+}
+
+/// Whether `text` is a wallet signature the frame can carry: 1 to
+/// [`MAX_SIG_TEXT`] printable ASCII characters.
+fn wallet_sig_text_ok(text: &str) -> bool {
+    !text.is_empty() && text.len() <= MAX_SIG_TEXT && text.bytes().all(|b| b.is_ascii_graphic())
 }
 
 impl SignedSettings {
@@ -1488,6 +1560,9 @@ impl SignedSettings {
             classify_change(cur, &self.settings)
         });
         match authority {
+            Authority::KeyApp(_) if self.wallet_sig.is_some() => {
+                Err(SettingsError::WalletSigNotWanted)
+            }
             Authority::KeyApp(roots) => match (&self.approver_sig, change) {
                 (Some(sig), _) if !roots.approver.verify_digest(&h, sig) => {
                     Err(SettingsError::ApproverSignatureInvalid)
@@ -1495,22 +1570,57 @@ impl SignedSettings {
                 (None, Change::Loosening) => Err(SettingsError::ApproverRequired),
                 _ => Ok(change),
             },
-            Authority::OwnWallet { .. } => {
+            Authority::OwnWallet {
+                first_address,
+                starter,
+                ..
+            } => {
                 if self.approver_sig.is_some() {
                     return Err(SettingsError::Invalid(
                         "CR-236: settings of a shop with no Key app carry no Key app signature",
                     ));
                 }
+                self.check_wallet_sig_text()?;
                 match current.map(|cur| crate::approval::classify(cur, &self.settings)) {
                     None if self.settings.lightning_node.is_some()
                         || self.settings.shop_lightning.is_some() =>
                     {
                         Err(SettingsError::RedirectAtPairing)
                     }
-                    None | Some(ChangeClass::Free) => Ok(change),
+                    None if self.wallet_sig.is_some() => Err(SettingsError::WalletSigNotWanted),
+                    None => Ok(change),
+                    Some(ChangeClass::Redirect) => {
+                        if *starter {
+                            return Err(SettingsError::RedirectStarter);
+                        }
+                        let Some(sig) = &self.wallet_sig else {
+                            return Err(SettingsError::ConfirmationRequired(ChangeClass::Redirect));
+                        };
+                        if let Some(address) = first_address {
+                            verify_wallet_message(
+                                address,
+                                &wallet_message_for(&self.settings),
+                                sig,
+                            )
+                            .map_err(SettingsError::WalletSig)?;
+                        }
+                        Ok(change)
+                    }
+                    Some(_) if self.wallet_sig.is_some() => Err(SettingsError::WalletSigNotWanted),
+                    Some(ChangeClass::Free) => Ok(change),
                     Some(class) => Err(SettingsError::ConfirmationRequired(class)),
                 }
             }
+        }
+    }
+
+    /// A wallet signature that is there must fit the frame (AP-14).
+    fn check_wallet_sig_text(&self) -> Result<(), SettingsError> {
+        match &self.wallet_sig {
+            Some(text) if !wallet_sig_text_ok(text) => Err(SettingsError::Invalid(
+                "AP-14: the wallet signature is 1 to 1,000 ASCII characters",
+            )),
+            _ => Ok(()),
         }
     }
 }
@@ -1542,6 +1652,19 @@ impl SignedSettings {
             }
             _ => {}
         }
+        self.check_wallet_sig_text()?;
+        match (authority, &self.wallet_sig) {
+            (Authority::KeyApp(_), Some(_)) => return Err(SettingsError::WalletSigNotWanted),
+            (
+                Authority::OwnWallet {
+                    first_address: Some(address),
+                    ..
+                },
+                Some(sig),
+            ) => verify_wallet_message(address, &wallet_message_for(&self.settings), sig)
+                .map_err(SettingsError::WalletSig)?,
+            _ => {}
+        }
         self.settings.validate()
     }
 }
@@ -1550,17 +1673,27 @@ impl SignedSettings {
     /// Wire form: `OBMS`, version 1 (2 when the settings carry the extension
     /// block, the currency and the tips, CR-187 and CR-193, 3 when they
     /// also name a swap provider, CR-218, 4 when they name an own node,
-    /// NR-105, and 5 when they name Shop Lightning, SL-71), the bytes of
+    /// NR-105, and 5 when they name Shop Lightning, SL-71; 6 when a wallet
+    /// signature follows the others, AP-14, with one more byte after the
+    /// version that gives the number of 1 to 5 the settings would have), the bytes of
     /// [`Settings::encode`] (the
     /// bytes that are hashed and signed), the owner signature, a flag byte
     /// (1 if a Key app signature follows, else 0) and, only when the flag is
-    /// 1, the Key app signature. Call it on settings that passed `validate`;
+    /// 1, the Key app signature. In version 6 the wallet signature follows:
+    /// its length (2 bytes little endian) and its text. Call it on settings that passed `validate`;
     /// `encode` panics when a list holds more than `u32::MAX` entries.
     pub fn to_bytes(&self) -> Vec<u8> {
         let body = self.settings.encode();
         let mut out = wire::start(&wire::MAGIC_SIGNED_SETTINGS, body.len() + 129);
         if let Some(byte) = out.get_mut(4) {
-            *byte = self.settings.frame_version();
+            *byte = if self.wallet_sig.is_some() {
+                WALLET_SIG_VERSION
+            } else {
+                self.settings.frame_version()
+            };
+        }
+        if self.wallet_sig.is_some() {
+            out.push(self.settings.frame_version());
         }
         out.extend_from_slice(&body);
         out.extend_from_slice(&self.owner_sig.0);
@@ -1571,6 +1704,11 @@ impl SignedSettings {
             }
             None => out.push(0),
         }
+        if let Some(text) = &self.wallet_sig {
+            // The text is at most MAX_SIG_TEXT bytes, which fits a u16.
+            out.extend_from_slice(&(text.len() as u16).to_le_bytes());
+            out.extend_from_slice(text.as_bytes());
+        }
         out
     }
 
@@ -1580,16 +1718,45 @@ impl SignedSettings {
     /// [`SignedSettings::verify`].
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
         let (mut r, version) =
-            Reader::framed_up_to(bytes, &wire::MAGIC_SIGNED_SETTINGS, SHOP_LIGHTNING_VERSION)?;
-        let settings = Settings::read(&mut r, version)?;
+            Reader::framed_up_to(bytes, &wire::MAGIC_SIGNED_SETTINGS, WALLET_SIG_VERSION)?;
+        let layout = if version == WALLET_SIG_VERSION {
+            match r.u8()? {
+                v @ 1..=SHOP_LIGHTNING_VERSION => v,
+                v => return Err(DecodeError::UnsupportedVersion(v)),
+            }
+        } else {
+            version
+        };
+        let settings = Settings::read(&mut r, layout)?;
         let owner_sig = r.sig()?;
         let approver_sig = if r.flag()? { Some(r.sig()?) } else { None };
+        let wallet_sig = if version == WALLET_SIG_VERSION {
+            let len = usize::from(r.u16_le()?);
+            let text = r.take(len)?;
+            if !(1..=MAX_SIG_TEXT).contains(&len) || !text.iter().all(|b| b.is_ascii_graphic()) {
+                return Err(DecodeError::NonCanonical(
+                    "the wallet signature is 1 to 1,000 printable ASCII characters",
+                ));
+            }
+            Some(String::from_utf8_lossy(text).into_owned())
+        } else {
+            None
+        };
         r.finish()?;
-        Ok(Self {
+        let signed = Self {
             settings,
             owner_sig,
             approver_sig,
-        })
+            wallet_sig,
+        };
+        // A frame is read back to the bytes it was written as: a layout
+        // byte that is not the one the settings give is not canonical.
+        if version == WALLET_SIG_VERSION && layout != signed.settings.frame_version() {
+            return Err(DecodeError::NonCanonical(
+                "the settings layout byte is not the one the settings need",
+            ));
+        }
+        Ok(signed)
     }
 }
 
@@ -1885,6 +2052,7 @@ mod tests {
             owner_sig: off.sign(&o),
             approver_sig: None,
             settings: off.clone(),
+            wallet_sig: None,
         };
         assert_eq!(
             only_owner.verify(&roots, Some(&old)),
@@ -1901,6 +2069,7 @@ mod tests {
             owner_sig: up.sign(&o),
             approver_sig: None,
             settings: up,
+            wallet_sig: None,
         };
         assert_eq!(tight.verify(&roots, Some(&old)), Ok(Change::Tightening));
     }
@@ -1935,6 +2104,7 @@ mod tests {
             owner_sig: new.sign(&o),
             approver_sig: None,
             settings: new,
+            wallet_sig: None,
         };
         assert_eq!(signed.verify(&roots, Some(&cur)), Ok(Change::Tightening));
     }
@@ -1949,6 +2119,7 @@ mod tests {
             owner_sig: new.sign(&o),
             approver_sig: None,
             settings: new.clone(),
+            wallet_sig: None,
         };
         assert_eq!(
             owner_only.verify(&roots, Some(&cur)),
@@ -1964,6 +2135,7 @@ mod tests {
             owner_sig: new.sign(&a),
             approver_sig: Some(new.sign(&a)),
             settings: new.clone(),
+            wallet_sig: None,
         };
         assert_eq!(
             approver_only.verify(&roots, Some(&cur)),
@@ -1990,6 +2162,7 @@ mod tests {
             owner_sig: new.sign(&o),
             approver_sig: Some(Sig([7; 64])),
             settings: new,
+            wallet_sig: None,
         };
         assert_eq!(
             signed.verify(&roots, Some(&cur)),
@@ -2011,6 +2184,7 @@ mod tests {
             owner_sig: sig,
             approver_sig: Some(loose.sign(&a)),
             settings: loose,
+            wallet_sig: None,
         };
         assert_eq!(
             forged.verify(&roots, Some(&cur)),
@@ -2031,6 +2205,7 @@ mod tests {
                 owner_sig: new.sign(&o),
                 approver_sig: Some(new.sign(&a)),
                 settings: new,
+                wallet_sig: None,
             };
             assert_eq!(
                 s.verify(&roots, Some(&cur)),
@@ -2050,6 +2225,7 @@ mod tests {
             owner_sig: s.sign(&o),
             approver_sig: None,
             settings: s.clone(),
+            wallet_sig: None,
         };
         assert_eq!(
             one.verify(&roots, None),
@@ -2073,6 +2249,7 @@ mod tests {
                 owner_sig: s1.sign(&o),
                 approver_sig: Some(s1.sign(&a)),
                 settings: s1.clone(),
+                wallet_sig: None,
             })
             .unwrap();
         assert_eq!(store.current(), Some(&s1));
@@ -2083,6 +2260,7 @@ mod tests {
             owner_sig: s2.sign(&o),
             approver_sig: None,
             settings: s2.clone(),
+            wallet_sig: None,
         };
         assert_eq!(store.apply(signed2.clone()), Ok(Change::Tightening));
         // replay of version 2 is stale
@@ -2097,6 +2275,7 @@ mod tests {
             owner_sig: s3.sign(&o),
             approver_sig: None,
             settings: s3,
+            wallet_sig: None,
         };
         assert_eq!(store.apply(bad), Err(SettingsError::ApproverRequired));
         assert_eq!(store.current(), Some(&s2));
@@ -2239,6 +2418,7 @@ mod tests {
             owner_sig: up.sign(&o),
             approver_sig: None,
             settings: up.clone(),
+            wallet_sig: None,
         };
         assert_eq!(
             owner_only.verify(&roots, Some(&cur)),
@@ -2256,6 +2436,7 @@ mod tests {
             owner_sig: gone.sign(&o),
             approver_sig: None,
             settings: gone,
+            wallet_sig: None,
         };
         assert_eq!(signed.verify(&roots, Some(&cur)), Ok(Change::Tightening));
     }
@@ -2322,6 +2503,7 @@ mod tests {
             owner_sig: bad.sign(&o),
             approver_sig: Some(bad.sign(&a)),
             settings: bad.clone(),
+            wallet_sig: None,
         };
         assert!(matches!(
             signed.verify(&roots, None),
@@ -2371,6 +2553,7 @@ mod tests {
                 owner_sig: s.sign(&o),
                 approver_sig: Some(s.sign(&a)),
                 settings: s,
+                wallet_sig: None,
             };
             assert_eq!(
                 store.apply(signed),
@@ -2384,6 +2567,7 @@ mod tests {
             owner_sig: s.sign(&o),
             approver_sig: Some(s.sign(&a)),
             settings: s,
+            wallet_sig: None,
         };
         assert_eq!(store.apply(signed), Ok(Change::Loosening));
     }
@@ -2398,6 +2582,7 @@ mod tests {
             owner_sig: s.sign(&o),
             approver_sig: Some(s.sign(&a)),
             settings: s,
+            wallet_sig: None,
         };
         assert_eq!(
             store.apply(signed),
@@ -2419,6 +2604,7 @@ mod tests {
             owner_sig: s.sign(&o),
             approver_sig: Some(s.sign(&a)),
             settings: s,
+            wallet_sig: None,
         };
         assert_eq!(
             signed.verify(&roots, None),
@@ -2499,6 +2685,7 @@ mod tests {
             owner_sig: s.sign(&o),
             approver_sig: Some(s.sign(&a)),
             settings: s,
+            wallet_sig: None,
         }
     }
 
@@ -2543,6 +2730,98 @@ mod tests {
         }
     }
 
+    /// Every layout the settings can have, as the frame versions 1 to 5.
+    fn every_layout() -> Vec<Settings> {
+        let plain = base();
+        let mut v2 = base();
+        v2.currency = ShopCurrency::Sats;
+        let mut v3 = base();
+        v3.swap = Some(swap_provider());
+        let v4 = with_own_node(base(), false, false);
+        let v5 = with_shop_lightning(base());
+        vec![plain, v2, v3, v4, v5]
+    }
+
+    #[test]
+    fn ap_14_the_frame_with_a_wallet_signature_has_its_own_version_and_reads_every_layout() {
+        let sig = "A".repeat(150);
+        let mut seen = BTreeSet::new();
+        for settings in every_layout() {
+            let layout = settings.frame_version();
+            seen.insert(layout);
+            let plain = signed_both(settings.clone());
+            let with = SignedSettings {
+                wallet_sig: Some(sig.clone()),
+                ..plain.clone()
+            };
+            let bytes = with.to_bytes();
+            // The frame without the signature is the one it always was, and
+            // still reads, with none.
+            let old = plain.to_bytes();
+            assert_eq!(old[4], layout);
+            assert_eq!(SignedSettings::from_bytes(&old).unwrap().wallet_sig, None);
+            // With it, the version is 6 and the layout byte follows.
+            assert_eq!(&bytes[..4], b"OBMS");
+            assert_eq!(bytes[4], 6);
+            assert_eq!(bytes[5], layout);
+            assert_eq!(
+                &bytes[6..6 + settings.encode().len()],
+                &settings.encode()[..]
+            );
+            assert_eq!(SignedSettings::from_bytes(&bytes).unwrap(), with);
+            crate::testutil::assert_strict_decoding(
+                &bytes,
+                SignedSettings::from_bytes,
+                SignedSettings::to_bytes,
+            );
+            // An empty signature is the old frame, not a version 6 one.
+            let mut empty = bytes.clone();
+            empty.truncate(bytes.len() - sig.len() - 2);
+            empty.extend_from_slice(&[0, 0]);
+            assert!(SignedSettings::from_bytes(&empty).is_err());
+            // A layout byte that is not the one the settings need.
+            for other in 1..=5u8 {
+                let mut bad = bytes.clone();
+                bad[5] = other;
+                assert_eq!(
+                    SignedSettings::from_bytes(&bad).is_ok(),
+                    other == layout,
+                    "layout {other} of {layout}"
+                );
+            }
+            let mut bad = bytes.clone();
+            bad[5] = 6;
+            assert!(SignedSettings::from_bytes(&bad).is_err());
+        }
+        assert_eq!(seen.len(), 5);
+    }
+
+    #[test]
+    fn ap_14_a_signature_text_of_the_wrong_kind_does_not_read() {
+        let signed = SignedSettings {
+            wallet_sig: Some("A".repeat(10)),
+            ..signed_both(base())
+        };
+        let bytes = signed.to_bytes();
+        let at = bytes.len() - 12;
+        // A control character, a space, a byte that is not ASCII.
+        for bad in [0u8, b' ', 0x7f, 0xc3] {
+            let mut m = bytes.clone();
+            m[at + 2] = bad;
+            assert!(SignedSettings::from_bytes(&m).is_err(), "{bad}");
+        }
+        // A length over 1,000.
+        let mut long = bytes[..at].to_vec();
+        long.extend_from_slice(&1_001u16.to_le_bytes());
+        long.extend(std::iter::repeat_n(b'A', 1_001));
+        assert!(SignedSettings::from_bytes(&long).is_err());
+        // Exactly 1,000 reads.
+        let mut ok = bytes[..at].to_vec();
+        ok.extend_from_slice(&1_000u16.to_le_bytes());
+        ok.extend(std::iter::repeat_n(b'A', 1_000));
+        assert!(SignedSettings::from_bytes(&ok).is_ok());
+    }
+
     #[test]
     fn many_devices_round_trip_in_ascending_key_order() {
         // BTreeSet order must be the byte order the decoder requires.
@@ -2566,7 +2845,7 @@ mod tests {
         };
         assert_eq!(edit(3, b'X'), DecodeError::BadMagic);
         assert_eq!(edit(4, 0), DecodeError::UnsupportedVersion(0));
-        assert_eq!(edit(4, 6), DecodeError::UnsupportedVersion(6));
+        assert_eq!(edit(4, 7), DecodeError::UnsupportedVersion(7));
         assert!(matches!(edit(TOR_AT, 2), DecodeError::NonCanonical(_)));
         assert!(matches!(edit(TOR_AT + 1, 2), DecodeError::NonCanonical(_)));
         // The Key app signature flag is the last byte but 64.
@@ -2822,6 +3101,7 @@ mod tests {
             owner_sig: up.sign(&o),
             approver_sig: None,
             settings: up.clone(),
+            wallet_sig: None,
         };
         assert_eq!(
             owner_only.verify(&roots, Some(&cur)),
@@ -2838,6 +3118,7 @@ mod tests {
             owner_sig: gone.sign(&o),
             approver_sig: None,
             settings: gone,
+            wallet_sig: None,
         };
         assert_eq!(signed.verify(&roots, Some(&cur)), Ok(Change::Tightening));
     }
@@ -2897,6 +3178,7 @@ mod tests {
             owner_sig: named.sign(&o),
             approver_sig: None,
             settings: named.clone(),
+            wallet_sig: None,
         };
         assert_eq!(
             only_owner.verify(&roots, Some(&old)),
@@ -2913,6 +3195,7 @@ mod tests {
             owner_sig: gone.sign(&o),
             approver_sig: None,
             settings: gone,
+            wallet_sig: None,
         };
         assert_eq!(removed.verify(&roots, Some(&named)), Ok(Change::Tightening));
     }
@@ -2928,6 +3211,7 @@ mod tests {
             owner_sig: t.sign(&o),
             approver_sig: None,
             settings: t.clone(),
+            wallet_sig: None,
         };
         let bytes = signed.to_bytes();
         let back = SignedSettings::from_bytes(&bytes).expect("reads back");
@@ -2959,6 +3243,7 @@ mod tests {
             owner_sig: t.sign(&o),
             approver_sig: None,
             settings: t,
+            wallet_sig: None,
         };
         let bytes = signed.to_bytes();
         // The flag byte sits before the key, the owner signature and the
@@ -3006,6 +3291,7 @@ mod tests {
             owner_sig: named.sign(&o),
             approver_sig: None,
             settings: named.clone(),
+            wallet_sig: None,
         };
         assert_eq!(
             only_owner.verify(&roots, Some(&old)),
@@ -3023,6 +3309,7 @@ mod tests {
             owner_sig: gone.sign(&o),
             approver_sig: None,
             settings: gone,
+            wallet_sig: None,
         };
         assert_eq!(removed.verify(&roots, Some(&named)), Ok(Change::Tightening));
     }
@@ -3038,6 +3325,7 @@ mod tests {
             owner_sig: t.sign(&o),
             approver_sig: None,
             settings: t,
+            wallet_sig: None,
         };
         let bytes = signed.to_bytes();
         let back = SignedSettings::from_bytes(&bytes).expect("reads back");
@@ -3060,6 +3348,7 @@ mod tests {
             owner_sig: t.sign(&o),
             approver_sig: None,
             settings: t,
+            wallet_sig: None,
         };
         let bytes = signed.to_bytes();
         // The flag byte sits before its 33 bytes, the watch key flag, the
@@ -3135,6 +3424,7 @@ mod tests {
             owner_sig: both.sign(&o),
             approver_sig: None,
             settings: both,
+            wallet_sig: None,
         };
         assert_eq!(signed.verify(&roots, Some(&old)), Ok(Change::Tightening));
         // Mixed with a loosening field, the whole change loosens.
@@ -3441,9 +3731,7 @@ mod tests {
         };
         assert_eq!(no_approver.verify_signatures(&r), Ok(()));
         // Under an own wallet any Key app signature is refused.
-        let own = Authority::OwnWallet {
-            owner: o.device_id(),
-        };
+        let own = Authority::own_wallet(o.device_id());
         assert!(matches!(
             good.verify_signatures_with(&own),
             Err(SettingsError::Invalid(m)) if m.contains("CR-236")
@@ -3472,6 +3760,7 @@ mod tests {
             owner_sig: named.sign(&o),
             approver_sig: None,
             settings: named.clone(),
+            wallet_sig: None,
         };
         assert_eq!(signed.verify(&roots, Some(&old)), Ok(Change::Tightening));
         let mut other = named.clone();
@@ -3860,6 +4149,7 @@ mod tests {
             owner_sig: s.sign(o),
             approver_sig: Some(s.sign(a)),
             settings: s.clone(),
+            wallet_sig: None,
         }
     }
 
@@ -3953,10 +4243,10 @@ mod tests {
             ShopCurrency::Usd
         );
         let mut v4 = wire.clone();
-        v4[4] = 6;
+        v4[4] = 7;
         assert_eq!(
             SignedSettings::from_bytes(&v4),
-            Err(DecodeError::UnsupportedVersion(6))
+            Err(DecodeError::UnsupportedVersion(7))
         );
         let mut v0 = wire;
         v0[4] = 0;
@@ -4098,10 +4388,10 @@ mod tests {
         v1[4] = 1;
         assert!(SignedSettings::from_bytes(&v1).is_err());
         let mut v4 = wire;
-        v4[4] = 6;
+        v4[4] = 7;
         assert_eq!(
             SignedSettings::from_bytes(&v4),
-            Err(DecodeError::UnsupportedVersion(6))
+            Err(DecodeError::UnsupportedVersion(7))
         );
     }
 
@@ -4163,6 +4453,7 @@ mod tests {
             owner_sig: n.sign(&o),
             approver_sig: None,
             settings: n.clone(),
+            wallet_sig: None,
         };
         assert_eq!(
             owner_only.verify(&roots, Some(&s)),

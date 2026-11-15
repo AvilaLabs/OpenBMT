@@ -351,7 +351,7 @@ impl BoxRoots {
     pub fn authority(&self) -> crate::settings::Authority {
         match self {
             Self::KeyApp(roots) => crate::settings::Authority::KeyApp(*roots),
-            Self::OwnWallet { owner } => crate::settings::Authority::OwnWallet { owner: *owner },
+            Self::OwnWallet { owner } => crate::settings::Authority::own_wallet(*owner),
         }
     }
 

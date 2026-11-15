@@ -240,6 +240,8 @@ ops run on another; it waits for at most 250 ms.
 240 paid_day         handle node  args PaidDayArgs -> list<PaidDayView>
 241 paid_clear       handle node  args PaidClearArgs -> ()
 242 paid_check_reset handle node  args () -> ()
+243 own_settings_preview handle zero  args OwnSettingsPreviewArgs -> OwnSettingsPreviewView
+244 own_settings_attach handle zero  args OwnSettingsAttachArgs -> u32
 ```
 
 ## Types
@@ -319,6 +321,9 @@ ShopCurrencyView: enum, one tag byte
 SettingsEditArgs: record: usd_per_btc: option<u64>, light_per_sale: option<u32>, light_budget: option<u32>, node_per_sale: option<u32>, node_budget: option<u32>, box_per_sale: option<u32>, box_budget: option<u32>, underpayment_tolerance_bps: option<u32>, refund_cap: option<u32>, refund_daily_cap: option<u32>, cashier_override_daily_cap: option<u32>, manager_override_ceiling: option<u32>, min_confirmations: option<u8>, final_confirmations: option<u8>, heartbeat_max_age_secs: option<u32>, tor_on: option<bool>, customer_wifi: option<bool>, min_sale_sats: option<u64>, tips_on: option<bool>, tip_percents: option<list<u8>>, shares: list<CounterShareView>, lightning: LightningAction, lightning_text: string, currency: CurrencyAction, swap: SwapAction, swap_name: string, swap_onion: string, swap_prefix: string, swap_max_sats: u64
 SettingChangeView: record: field: string, label: string, counter: option<list<u8>>, old: string, new: string, loosening: bool
 SettingsPreviewView: record: version: u32, changes: list<SettingChangeView>, needs_key_app: bool, nothing_changed: bool, shares_total_bps: u32, usd_per_btc: option<u64>, sats_per_usd: option<u64>, settings: list<u8>, currency: ShopCurrencyView
+OwnSettingsPreviewArgs: record: shop: OwnShopArgs, edit: SettingsEditArgs, starter: bool
+OwnSettingsPreviewView: record: preview: SettingsPreviewView, needs_wallet_sig: bool, message: string, address: string
+OwnSettingsAttachArgs: record: shop: OwnShopArgs, settings: list<u8>, signature: string
 NotOfferedView: enum, one tag byte
     tags Offered=0 SecondDeviceAway=1 ChainBehind=2 NoUsableChannel=3 ProviderSilent=4
 Lsps1OfferView: enum, one tag byte

@@ -231,6 +231,7 @@ impl Owner {
                         settings: signed.settings.clone(),
                         owner_sig: signed.owner_sig,
                         approver_sig: Some(*sig),
+                        wallet_sig: None,
                     };
                     let known = next.known.as_ref().map(|k| &k.settings);
                     match both.verify(&self.roots, known) {

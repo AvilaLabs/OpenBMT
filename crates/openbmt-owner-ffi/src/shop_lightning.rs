@@ -498,6 +498,7 @@ pub(crate) fn preview_view(p: &SettingsPreview) -> ShopLightningPreviewView {
         settings: p.settings.clone(),
         owner_sig: openbmt_core::identity::Sig([0; 64]),
         approver_sig: None,
+        wallet_sig: None,
     };
     ShopLightningPreviewView {
         version: p.settings.version,

@@ -509,7 +509,7 @@ pub(crate) fn node_error(e: OwnNodeError) -> AppError {
     }
 }
 
-fn own_error(e: OwnError<String>) -> AppError {
+pub(crate) fn own_error(e: OwnError<String>) -> AppError {
     match e {
         OwnError::Refused(r) => refusal(&r),
         OwnError::Store(text) => from_words(Kind::Store, "OA-105", text, shop_file_failed()),
@@ -532,7 +532,7 @@ pub(crate) fn wallet_of(file: &[u8]) -> Result<PinnedWallet, AppError> {
     Ok(wallet)
 }
 
-fn device(name: &str, bytes: &[u8]) -> Result<DeviceId, AppError> {
+pub(crate) fn device(name: &str, bytes: &[u8]) -> Result<DeviceId, AppError> {
     let array: [u8; 32] = bytes
         .try_into()
         .map_err(|_| crate::error::refused_by("id-length", format!("{name} must be 32 bytes")))?;
@@ -576,7 +576,7 @@ pub(crate) fn turn_on_shop<T>(
 }
 
 /// Open the shop for one call, run `f`, and wipe the secret.
-fn with_shop<T>(
+pub(crate) fn with_shop<T>(
     a: OwnShopArgs,
     f: impl FnOnce(&mut OwnNode) -> Result<T, AppError>,
 ) -> Result<T, AppError> {

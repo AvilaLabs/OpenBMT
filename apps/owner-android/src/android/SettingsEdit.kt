@@ -330,8 +330,16 @@ internal fun Controller.showEditReview() {
             }
             is Form.Ok -> a.value
         }
+        // A shop with its own wallet is previewed by the library for it: a Redirect change then asks for the wallet's
+        // signature (OA-127) and a shop on its starter wallet is refused (AP-15).
+        var ownAsk: org.openbmt.owner.OwnSettingsPreview? = null
         val p = try {
-            n.previewSettings(args)
+            val shop = if (ownStore.hasWallet()) ownStore.args() else null
+            if (shop != null) {
+                org.openbmt.owner.OwnerOwn.settingsPreview(shop, args, starterPinned()).also { ownAsk = it }.preview
+            } else {
+                n.previewSettings(args)
+            }
         } catch (e: OwnerException) {
             if (e.rule == "AS-75") showEditPrice(e.sayWords(), held.currency) else showChangeSettings(e.sayWords())
             return@withHeld
@@ -352,7 +360,10 @@ internal fun Controller.showEditReview() {
                 views.add(stack(label("Takes effect when delivered"), *delivered.map { ui.text(it, 15f) }.toTypedArray(), gap = 6))
             }
             SettingsEditModel.reviewShares(p)?.let { views.add(ui.text(it, 15f)) }
-            actions.add(
+            val ask = ownAsk
+            if (ask != null && ask.needsWalletSig) {
+                actions.add(ui.primary(WalletSigWords.heading) { showWalletSig(ask) { showEditReview() } })
+            } else actions.add(
                 ui.button("Queue the change", ButtonKind.Primary) {
                     // SS-37: a change that loosens waits while the starter wallet is at its limit or past its date.
                     if (p.changes.any { it.loosening } && starterHolds(org.openbmt.owner.StarterChangeKind.Other)) return@button showStarterHeld { showChangeSettings() }

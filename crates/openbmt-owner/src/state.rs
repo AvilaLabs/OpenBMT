@@ -897,6 +897,7 @@ impl Owner {
             settings,
             owner_sig,
             approver_sig: None,
+            wallet_sig: None,
         };
         let change = match &next.known {
             Some(k) => classify_change(&k.settings, &signed.settings),

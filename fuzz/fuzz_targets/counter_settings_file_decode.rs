@@ -29,6 +29,7 @@ fuzz_target!(|data: &[u8]| {
         settings: Settings::defaults(1_000),
         owner_sig: Sig([0u8; 64]),
         approver_sig: None,
+        wallet_sig: None,
     };
     let whole = signed.to_bytes();
     let cut = data.first().map_or(0, |b| usize::from(*b)) % (whole.len() + 1);

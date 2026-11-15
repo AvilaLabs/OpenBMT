@@ -458,7 +458,10 @@ fn settings_words(e: &SettingsError) -> Words {
         // written.
         SettingsError::Invalid(_)
         | SettingsError::ConfirmationRequired(_)
-        | SettingsError::RedirectAtPairing => settings_break_a_rule(),
+        | SettingsError::RedirectAtPairing
+        | SettingsError::WalletSigNotWanted
+        | SettingsError::RedirectStarter
+        | SettingsError::WalletSig(_) => settings_break_a_rule(),
     }
     .code("BX-21")
     .detail(detail)

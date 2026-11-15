@@ -168,6 +168,7 @@ fn nr_105_a_change_of_the_node_or_the_mode_needs_a_restart() {
         owner_sig: node_settings(2, false, false).sign(&id(1)),
         approver_sig: None,
         settings: node_settings(2, false, false),
+        wallet_sig: None,
     };
     // The Key app's counter takes a tightening on the owner's signature.
     assert_eq!(rig.node.take_settings(&named), Ok(Some(Change::Tightening)));
@@ -203,6 +204,7 @@ fn nr_105_a_change_of_the_mode_back_needs_a_restart_too() {
             owner_sig: s.sign(&id(1)),
             approver_sig: None,
             settings: s,
+            wallet_sig: None,
         };
         // The Key app's counter needs no co-signature for a tightening.
         assert_eq!(
@@ -217,6 +219,7 @@ fn nr_105_a_change_of_the_mode_back_needs_a_restart_too() {
         owner_sig: s.sign(&id(1)),
         approver_sig: Some(s.sign(&id(2))),
         settings: s,
+        wallet_sig: None,
     };
     assert_eq!(rig.node.take_settings(&signed), Ok(Some(Change::Loosening)));
     assert!(!rig.node.restart_needed());
@@ -243,6 +246,7 @@ fn signed_by_owner(s: Settings) -> SignedSettings {
         owner_sig: s.sign(&id(1)),
         approver_sig: None,
         settings: s,
+        wallet_sig: None,
     }
 }
 

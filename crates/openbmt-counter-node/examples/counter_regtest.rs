@@ -631,6 +631,7 @@ fn own_record(dir: &str, wallet: &PinnedWallet) -> Result<OwnPairingRecord, Stri
         owner_sig: settings.sign(&owner),
         approver_sig: None,
         settings,
+        wallet_sig: None,
     };
     let first = SignedRange::sign(
         &owner,
@@ -998,10 +999,24 @@ fn command<P: DriverPort>(
             } else {
                 next.shop_lightning = None;
             }
+            // Turning it on is a Redirect change, which a shop with its own
+            // wallet signs with the wallet (AP-14): the fixed test wallet of
+            // `--own-wallet test` signs here, as the owner phone attaches it.
+            let wallet_sig = if on && OWN_FIXTURE.get().is_some() {
+                let message = openbmt_core::approval::wallet_message_for(&next);
+                let (_, key) =
+                    openbmt_core::approval::test_signing::signing_wallet(KEY_SEEDS[0][0]);
+                Some(openbmt_core::approval::test_signing::sign_compact_text(
+                    &key, &message,
+                ))
+            } else {
+                None
+            };
             let signed = SignedSettings {
                 owner_sig: next.sign(&identity(&OWNER_SECRET)?),
                 approver_sig: None,
                 settings: next,
+                wallet_sig,
             };
             match node.take_settings(&signed) {
                 Ok(Some(change)) => say(format!(

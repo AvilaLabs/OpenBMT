@@ -106,6 +106,7 @@ impl OwnRefusal {
             Self::Book(_) => "OA-106",
             Self::NoBundle | Self::TooManyWaiting => "OA-111",
             Self::BoxWaits => "OA-119",
+            Self::WalletSig { .. } => "AP-10",
             Self::UnknownCounter => "OA-112",
         }
     }
@@ -220,6 +221,13 @@ impl OwnRefusal {
                 "Confirm the change on a counter, or wait until it is dropped, then connect the Box again.",
             )
             .code("OA-119"),
+            Self::WalletSig { address } => stop(
+                "Signature not accepted",
+                format!("This signature was not made by {address}, or is not of a kind this phone reads."),
+                Who::Owner,
+                "Sign the message again with that address and paste the whole signature.",
+            )
+            .code("AP-10"),
             Self::SwitchSameWallet => stop(
                 "Already the counters' wallet",
                 "The wallet given is the one the counters already pay into, so no switch was made.",
@@ -294,6 +302,12 @@ pub fn all_own_words() -> Vec<(String, Words)> {
         ("OwnRefusal::TooManyWaiting", OwnRefusal::TooManyWaiting),
         ("OwnRefusal::BoxWaits", OwnRefusal::BoxWaits),
         (
+            "OwnRefusal::WalletSig",
+            OwnRefusal::WalletSig {
+                address: "bc1qyjassxtmzl02s8de8jw9365qmuvwg74udtp3vj".to_string(),
+            },
+        ),
+        (
             "OwnRefusal::Pairing",
             OwnRefusal::Pairing(OwnPairError::NotTheOwner),
         ),
@@ -364,6 +378,7 @@ mod tests {
                 OwnRefusal::UnknownCounter => "OwnRefusal::UnknownCounter",
                 OwnRefusal::TooManyWaiting => "OwnRefusal::TooManyWaiting",
                 OwnRefusal::BoxWaits => "OwnRefusal::BoxWaits",
+                OwnRefusal::WalletSig { .. } => "OwnRefusal::WalletSig",
                 OwnRefusal::Pairing(_) => "OwnRefusal::Pairing",
             }
         };

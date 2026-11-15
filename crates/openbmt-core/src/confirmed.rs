@@ -117,12 +117,16 @@ impl ConfirmedSettings {
     /// CR-242: check these settings as a change from `current`, the settings
     /// now in force, under the owner root `owner`. Every check of the
     /// `OBMS` frame applies (the owner's signature, valid values, a version
-    /// above the one in force); a Redirect change is refused; and a change
+    /// above the one in force); a Redirect change is refused, and so is a
+    /// wallet signature (AP-14), which only a Redirect change carries; and a change
     /// that is not Free needs this confirmation: from a counter of `current`
     /// (AP-05), signed for these settings' hash (AP-04). A confirmation that
     /// is carried must be right whether or not the change needed it.
     pub fn verify(&self, owner: &DeviceId, current: &Settings) -> Result<Change, ConfirmedError> {
-        let authority = Authority::OwnWallet { owner: *owner };
+        if self.signed.wallet_sig.is_some() {
+            return Err(ConfirmedError::Settings(SettingsError::WalletSigNotWanted));
+        }
+        let authority = Authority::own_wallet(*owner);
         let change = match self.signed.verify_with(&authority, Some(current)) {
             Ok(change) => change,
             Err(SettingsError::ConfirmationRequired(ChangeClass::Loosen)) => Change::Loosening,
@@ -181,6 +185,7 @@ mod tests {
             settings: s,
             owner_sig,
             approver_sig: None,
+            wallet_sig: None,
         }
     }
 

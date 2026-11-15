@@ -81,6 +81,7 @@ fn settings() -> Item {
             settings: s,
             owner_sig,
             approver_sig: None,
+            wallet_sig: None,
         },
     }
 }

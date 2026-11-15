@@ -61,6 +61,7 @@ fn settings() -> SignedSettings {
         owner_sig: s.sign(&owner()),
         approver_sig: None,
         settings: s,
+        wallet_sig: None,
     }
 }
 
@@ -70,6 +71,7 @@ fn resign(mut s: Settings) -> SignedSettings {
         owner_sig: s.sign(&owner()),
         approver_sig: None,
         settings: s,
+        wallet_sig: None,
     }
 }
 
@@ -432,9 +434,7 @@ fn cr_230_the_owner_phone_signs_only_as_the_offers_owner_root() {
 #[test]
 fn cr_231_the_first_settings_need_the_owner_signature_only() {
     let first = settings();
-    let authority = Authority::OwnWallet {
-        owner: owner().device_id(),
-    };
+    let authority = Authority::own_wallet(owner().device_id());
     assert!(first.verify_with(&authority, None).is_ok());
     // Not the owner root's signature.
     let mut wrong = first.clone();
@@ -458,10 +458,11 @@ fn cr_231_the_first_settings_need_the_owner_signature_only() {
         owner_sig: bad.sign(&owner()),
         approver_sig: None,
         settings: bad,
+        wallet_sig: None,
     };
     assert!(bad.verify_with(&authority, None).is_err());
     // The floor is the store's: a version at or below it is stale.
-    let mut store = SettingsStore::with_authority(authority, 5);
+    let mut store = SettingsStore::with_authority(authority.clone(), 5);
     assert_eq!(
         store.apply(first.clone()).err(),
         Some(SettingsError::StaleVersion { current: 5, got: 5 })
@@ -596,9 +597,7 @@ fn cr_235_a_range_overlapping_what_is_handed_out_or_in_use_is_refused() {
 
 #[test]
 fn cr_231_first_settings_that_name_a_lightning_node_or_shop_lightning_are_refused() {
-    let authority = Authority::OwnWallet {
-        owner: owner().device_id(),
-    };
+    let authority = Authority::own_wallet(owner().device_id());
     let base = settings().settings;
     assert!(settings().verify_with(&authority, None).is_ok());
 
@@ -641,9 +640,7 @@ fn cr_231_first_settings_that_name_a_lightning_node_or_shop_lightning_are_refuse
 
 #[test]
 fn cr_236_only_a_free_change_is_taken_without_a_confirmation() {
-    let authority = Authority::OwnWallet {
-        owner: owner().device_id(),
-    };
+    let authority = Authority::own_wallet(owner().device_id());
     let first = settings();
     let mut store = SettingsStore::with_authority(authority, 4);
     store.apply(first.clone()).unwrap();

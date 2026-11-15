@@ -133,6 +133,9 @@ fn settings_name(e: &SettingsError) -> &'static str {
         SettingsError::Invalid(_) => "SettingsError::Invalid",
         SettingsError::ConfirmationRequired(_) => "SettingsError::ConfirmationRequired",
         SettingsError::RedirectAtPairing => "SettingsError::RedirectAtPairing",
+        SettingsError::WalletSigNotWanted => "SettingsError::WalletSigNotWanted",
+        SettingsError::RedirectStarter => "SettingsError::RedirectStarter",
+        SettingsError::WalletSig(_) => "SettingsError::WalletSig",
     }
 }
 

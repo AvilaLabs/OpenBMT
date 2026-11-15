@@ -4,8 +4,10 @@
 //! that come out go to [`Owner::queue_settings`] when the owner agrees.
 
 use bitcoin::secp256k1::PublicKey;
+use openbmt_core::approval::{classify, wallet_message_for, ChangeClass};
 use openbmt_core::currency::ShopCurrency;
 use openbmt_core::identity::DeviceId;
+use openbmt_core::pinned_wallet::PinnedWallet;
 use openbmt_core::settings::{
     carried_limit_fields, changed_fields, classify_change, Change, FieldChange, Limit, Settings,
     SwapProvider, LIGHTNING_NODE_BYTES,
@@ -112,6 +114,9 @@ pub struct SettingsEdit {
     pub watch_key: Option<WatchEdit>,
     /// Shop Lightning: `None` keeps it (SL-71, AP-13).
     pub shop_lightning: Option<ShopLightningEdit>,
+    /// The shop is on its starter wallet, which the app knows: a Redirect
+    /// change is then refused (AP-15).
+    pub starter_wallet: bool,
 }
 
 /// What an edit would do, before anything is stored (AS-77).
@@ -134,6 +139,55 @@ pub struct SettingsPreview {
     /// unit of it (rounded, for the screen) that the changed limits were
     /// made at, when any was (AS-75).
     pub price: Option<(u64, u64)>,
+    /// For a shop with its own wallet, a Redirect change needs the wallet's
+    /// signature (AP-14): what to sign and who signs it. `None` for every
+    /// other change and for a shop with a Key app.
+    pub wallet_sig: Option<WalletSigAsk>,
+}
+
+/// What the owner is asked to sign in the wallet for a Redirect change (AP-06,
+/// AP-09): the message, and the first receive address of the wallet that has
+/// to sign it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WalletSigAsk {
+    /// The message of AP-06 for the settings of the preview.
+    pub message: String,
+    /// The address that has to sign: the first receive address of the
+    /// pinned wallet.
+    pub address: String,
+}
+
+/// What the preview of a shop with its own wallet knows of the wallet.
+#[derive(Debug, Clone)]
+pub(crate) struct OwnFacts {
+    /// The first receive address of the pinned wallet, as text.
+    pub(crate) address: String,
+    /// The app says the shop is on its starter wallet (AP-15).
+    pub(crate) starter: bool,
+}
+
+impl OwnFacts {
+    pub(crate) fn of(wallet: &PinnedWallet, starter: bool) -> Self {
+        Self {
+            address: wallet
+                .receive_address(0)
+                .map(|a| a.to_string())
+                .unwrap_or_default(),
+            starter,
+        }
+    }
+}
+
+/// The settings an edit is applied to and compared with, and the version the
+/// result takes, from the state of the Key app's queue or of a shop with its
+/// own wallet.
+pub(crate) struct PreviewBasis<'a> {
+    /// The latest settings, held or queued.
+    pub(crate) latest: Option<&'a Settings>,
+    /// The settings in force.
+    pub(crate) known: Option<&'a Settings>,
+    /// The highest version signed so far.
+    pub(crate) highest: u32,
 }
 
 /// Lowest price of a bitcoin in dollars that is taken (AS-75).
@@ -322,214 +376,240 @@ impl Owner {
     /// applied to the latest settings, held or queued, at the version one
     /// above every version signed so far; they are validated and sorted
     /// exactly as [`Owner::queue_settings`] sorts them. Nothing is stored
-    /// and the owner is not changed.
+    /// and the owner is not changed. For a shop with its own wallet a
+    /// Redirect change says that it needs the wallet's signature (AP-14), or
+    /// is refused while the shop is on its starter wallet (AP-15).
     pub fn settings_preview(&self, edit: &SettingsEdit) -> Result<SettingsPreview, Refusal> {
-        // SL-76: a shop with its own wallet has no way to carry a change of
-        // Shop Lightning: neither a counter's confirmation (CR-239) nor a
-        // wallet's signature (CR-236) is joined to the settings it signs.
-        if edit.shop_lightning.is_some() && self.is_own_wallet() {
-            return Err(ShopLightningRefusal::OwnWallet.into());
-        }
-        let base = self
-            .state
-            .latest_settings()
-            .ok_or(Refusal::NoSettingsToChange)?;
-        let currency = edit.currency.unwrap_or(base.currency);
-        let changing = currency != base.currency;
-        // AS-75: the price is in the currency the limits will be in. Bitcoin
-        // Standard has none; a price given for it is not read.
-        let (pricing, rate) = match (currency, edit.usd_per_btc) {
-            (ShopCurrency::Sats, _) => (Some(Pricing::Sats), Some(1)),
-            (_, None) => (None, None),
-            (ShopCurrency::Usd, Some(price)) => {
-                let rate = sats_per_usd_at(price)?;
-                (Some(Pricing::PerUnit(rate)), Some(rate))
-            }
-            (c, Some(price)) => (
-                Some(Pricing::Price(price)),
-                Some(sats_per_unit_at(c, price)?),
-            ),
-        };
-        let mut used = false;
-        let mut s = base.clone();
-        s.currency = currency;
-        s.version = self
-            .state
-            .highest_signed_version()
-            .checked_add(1)
-            .ok_or_else(|| Refusal::SettingsInvalid("no version is left".to_string()))?;
-        let u = &mut used;
-        s.light_per_sale = edited_limit(
-            &base.light_per_sale,
-            edit.light_per_sale,
-            pricing,
-            currency,
-            changing,
-            u,
-        )?;
-        s.light_budget = edited_limit(
-            &base.light_budget,
-            edit.light_budget,
-            pricing,
-            currency,
-            changing,
-            u,
-        )?;
-        s.node_per_sale = edited_limit(
-            &base.node_per_sale,
-            edit.node_per_sale,
-            pricing,
-            currency,
-            changing,
-            u,
-        )?;
-        s.node_budget = edited_limit(
-            &base.node_budget,
-            edit.node_budget,
-            pricing,
-            currency,
-            changing,
-            u,
-        )?;
-        s.box_per_sale = edited_limit(
-            &base.box_per_sale,
-            edit.box_per_sale,
-            pricing,
-            currency,
-            changing,
-            u,
-        )?;
-        s.box_budget = edited_limit(
-            &base.box_budget,
-            edit.box_budget,
-            pricing,
-            currency,
-            changing,
-            u,
-        )?;
-        s.refund_cap = edited_limit(
-            &base.refund_cap,
-            edit.refund_cap,
-            pricing,
-            currency,
-            changing,
-            u,
-        )?;
-        s.refund_daily_cap = edited_limit(
-            &base.refund_daily_cap,
-            edit.refund_daily_cap,
-            pricing,
-            currency,
-            changing,
-            u,
-        )?;
-        s.cashier_override_daily_cap = edited_limit(
-            &base.cashier_override_daily_cap,
-            edit.cashier_override_daily_cap,
-            pricing,
-            currency,
-            changing,
-            u,
-        )?;
-        s.manager_override_ceiling = edited_limit(
-            &base.manager_override_ceiling,
-            edit.manager_override_ceiling,
-            pricing,
-            currency,
-            changing,
-            u,
-        )?;
-        if let Some(v) = edit.underpayment_tolerance_bps {
-            s.underpayment_tolerance_bps = v;
-        }
-        for depth in [edit.min_confirmations, edit.final_confirmations]
-            .into_iter()
-            .flatten()
-        {
-            if !(1..=MAX_EDIT_CONFIRMATIONS).contains(&depth) {
-                return Err(Refusal::SettingsInvalid(
-                    "a number of confirmations is outside 1 to 100".to_string(),
-                ));
-            }
-        }
-        if let Some(v) = edit.min_confirmations {
-            s.min_confirmations = v;
-        }
-        if let Some(v) = edit.final_confirmations {
-            s.final_confirmations = v;
-        }
-        if let Some(v) = edit.heartbeat_max_age_secs {
-            s.heartbeat_max_age_secs = v;
-        }
-        if let Some(v) = edit.tor_on {
-            s.tor_on = v;
-        }
-        if let Some(v) = edit.customer_wifi {
-            s.customer_wifi = v;
-        }
-        if let Some(v) = edit.min_sale_sats {
-            s.min_sale_sats = v;
-        }
-        if let Some(v) = edit.tips_on {
-            s.tips_on = v;
-        }
-        if let Some(v) = &edit.tip_percents {
-            s.tip_percents.clone_from(v);
-        }
-        for (counter, bps) in &edit.shares {
-            match s.counters.get_mut(counter) {
-                Some(share) => *share = *bps,
-                None => {
-                    return Err(Refusal::SettingsInvalid(
-                        "a share is for a key that is not a counter".to_string(),
-                    ))
-                }
-            }
-        }
-        match &edit.lightning_node {
-            None => {}
-            Some(LightningEdit::Remove) => s.lightning_node = None,
-            Some(LightningEdit::Set(text)) => s.lightning_node = Some(parse_lightning_node(text)?),
-        }
-        match &edit.swap {
-            None => {}
-            Some(SwapEdit::Remove) => s.swap = None,
-            Some(SwapEdit::Set(provider)) => s.swap = Some(provider.clone()),
-        }
-        match &edit.watch_key {
-            None => {}
-            Some(WatchEdit::Remove) => s.watch_key = None,
-            Some(WatchEdit::Set(key)) => s.watch_key = Some(*key),
-        }
-        if let Some(edit) = &edit.shop_lightning {
-            shop_lightning::apply(&mut s, edit)?;
-        }
-        s.validate()
-            .map_err(|e| Refusal::SettingsInvalid(e.to_string()))?;
-        let carried = carried_limit_fields(base, &s);
-        if !carried.is_empty() {
-            return Err(Refusal::SettingsInvalid(format!(
-                "CR-195: a change of currency gives every limit again, and these keep the old \
-                 currency's value: {}",
-                carried.join(", ")
-            )));
-        }
-        let known = self.known_settings();
-        let reference = known.unwrap_or(base).clone();
-        let change = match known {
-            Some(k) => classify_change(k, &s),
-            None => Change::Loosening,
-        };
-        let fields = once(changed_fields(&reference, &s));
-        Ok(SettingsPreview {
-            settings: s,
-            reference,
-            fields,
-            change,
-            price: match (used, edit.usd_per_btc, rate) {
-                (true, Some(price), Some(rate)) => Some((price, rate)),
-                _ => None,
+        let own = self
+            .is_own_wallet()
+            .then(|| OwnFacts::of(&PinnedWallet::new(self.wallet.clone()), edit.starter_wallet));
+        preview_over(
+            &PreviewBasis {
+                latest: self.state.latest_settings(),
+                known: self.known_settings(),
+                highest: self.state.highest_signed_version(),
             },
-        })
+            own.as_ref(),
+            edit,
+        )
     }
+}
+
+/// [`Owner::settings_preview`] over the settings of either kind of shop.
+pub(crate) fn preview_over(
+    basis: &PreviewBasis<'_>,
+    own: Option<&OwnFacts>,
+    edit: &SettingsEdit,
+) -> Result<SettingsPreview, Refusal> {
+    let base = basis.latest.ok_or(Refusal::NoSettingsToChange)?;
+    let currency = edit.currency.unwrap_or(base.currency);
+    let changing = currency != base.currency;
+    // AS-75: the price is in the currency the limits will be in. Bitcoin
+    // Standard has none; a price given for it is not read.
+    let (pricing, rate) = match (currency, edit.usd_per_btc) {
+        (ShopCurrency::Sats, _) => (Some(Pricing::Sats), Some(1)),
+        (_, None) => (None, None),
+        (ShopCurrency::Usd, Some(price)) => {
+            let rate = sats_per_usd_at(price)?;
+            (Some(Pricing::PerUnit(rate)), Some(rate))
+        }
+        (c, Some(price)) => (
+            Some(Pricing::Price(price)),
+            Some(sats_per_unit_at(c, price)?),
+        ),
+    };
+    let mut used = false;
+    let mut s = base.clone();
+    s.currency = currency;
+    s.version = basis
+        .highest
+        .checked_add(1)
+        .ok_or_else(|| Refusal::SettingsInvalid("no version is left".to_string()))?;
+    let u = &mut used;
+    s.light_per_sale = edited_limit(
+        &base.light_per_sale,
+        edit.light_per_sale,
+        pricing,
+        currency,
+        changing,
+        u,
+    )?;
+    s.light_budget = edited_limit(
+        &base.light_budget,
+        edit.light_budget,
+        pricing,
+        currency,
+        changing,
+        u,
+    )?;
+    s.node_per_sale = edited_limit(
+        &base.node_per_sale,
+        edit.node_per_sale,
+        pricing,
+        currency,
+        changing,
+        u,
+    )?;
+    s.node_budget = edited_limit(
+        &base.node_budget,
+        edit.node_budget,
+        pricing,
+        currency,
+        changing,
+        u,
+    )?;
+    s.box_per_sale = edited_limit(
+        &base.box_per_sale,
+        edit.box_per_sale,
+        pricing,
+        currency,
+        changing,
+        u,
+    )?;
+    s.box_budget = edited_limit(
+        &base.box_budget,
+        edit.box_budget,
+        pricing,
+        currency,
+        changing,
+        u,
+    )?;
+    s.refund_cap = edited_limit(
+        &base.refund_cap,
+        edit.refund_cap,
+        pricing,
+        currency,
+        changing,
+        u,
+    )?;
+    s.refund_daily_cap = edited_limit(
+        &base.refund_daily_cap,
+        edit.refund_daily_cap,
+        pricing,
+        currency,
+        changing,
+        u,
+    )?;
+    s.cashier_override_daily_cap = edited_limit(
+        &base.cashier_override_daily_cap,
+        edit.cashier_override_daily_cap,
+        pricing,
+        currency,
+        changing,
+        u,
+    )?;
+    s.manager_override_ceiling = edited_limit(
+        &base.manager_override_ceiling,
+        edit.manager_override_ceiling,
+        pricing,
+        currency,
+        changing,
+        u,
+    )?;
+    if let Some(v) = edit.underpayment_tolerance_bps {
+        s.underpayment_tolerance_bps = v;
+    }
+    for depth in [edit.min_confirmations, edit.final_confirmations]
+        .into_iter()
+        .flatten()
+    {
+        if !(1..=MAX_EDIT_CONFIRMATIONS).contains(&depth) {
+            return Err(Refusal::SettingsInvalid(
+                "a number of confirmations is outside 1 to 100".to_string(),
+            ));
+        }
+    }
+    if let Some(v) = edit.min_confirmations {
+        s.min_confirmations = v;
+    }
+    if let Some(v) = edit.final_confirmations {
+        s.final_confirmations = v;
+    }
+    if let Some(v) = edit.heartbeat_max_age_secs {
+        s.heartbeat_max_age_secs = v;
+    }
+    if let Some(v) = edit.tor_on {
+        s.tor_on = v;
+    }
+    if let Some(v) = edit.customer_wifi {
+        s.customer_wifi = v;
+    }
+    if let Some(v) = edit.min_sale_sats {
+        s.min_sale_sats = v;
+    }
+    if let Some(v) = edit.tips_on {
+        s.tips_on = v;
+    }
+    if let Some(v) = &edit.tip_percents {
+        s.tip_percents.clone_from(v);
+    }
+    for (counter, bps) in &edit.shares {
+        match s.counters.get_mut(counter) {
+            Some(share) => *share = *bps,
+            None => {
+                return Err(Refusal::SettingsInvalid(
+                    "a share is for a key that is not a counter".to_string(),
+                ))
+            }
+        }
+    }
+    match &edit.lightning_node {
+        None => {}
+        Some(LightningEdit::Remove) => s.lightning_node = None,
+        Some(LightningEdit::Set(text)) => s.lightning_node = Some(parse_lightning_node(text)?),
+    }
+    match &edit.swap {
+        None => {}
+        Some(SwapEdit::Remove) => s.swap = None,
+        Some(SwapEdit::Set(provider)) => s.swap = Some(provider.clone()),
+    }
+    match &edit.watch_key {
+        None => {}
+        Some(WatchEdit::Remove) => s.watch_key = None,
+        Some(WatchEdit::Set(key)) => s.watch_key = Some(*key),
+    }
+    if let Some(edit) = &edit.shop_lightning {
+        shop_lightning::apply(&mut s, edit)?;
+    }
+    s.validate()
+        .map_err(|e| Refusal::SettingsInvalid(e.to_string()))?;
+    let carried = carried_limit_fields(base, &s);
+    if !carried.is_empty() {
+        return Err(Refusal::SettingsInvalid(format!(
+            "CR-195: a change of currency gives every limit again, and these keep the old \
+             currency's value: {}",
+            carried.join(", ")
+        )));
+    }
+    let known = basis.known;
+    let reference = known.unwrap_or(base).clone();
+    let change = match known {
+        Some(k) => classify_change(k, &s),
+        None => Change::Loosening,
+    };
+    let redirect = known.is_some_and(|k| classify(k, &s) == ChangeClass::Redirect);
+    let wallet_sig = match own {
+        Some(own) if redirect => {
+            if own.starter {
+                return Err(ShopLightningRefusal::Starter.into());
+            }
+            Some(WalletSigAsk {
+                message: wallet_message_for(&s),
+                address: own.address.clone(),
+            })
+        }
+        _ => None,
+    };
+    let fields = once(changed_fields(&reference, &s));
+    Ok(SettingsPreview {
+        settings: s,
+        reference,
+        fields,
+        change,
+        price: match (used, edit.usd_per_btc, rate) {
+            (true, Some(price), Some(rate)) => Some((price, rate)),
+            _ => None,
+        },
+        wallet_sig,
+    })
 }

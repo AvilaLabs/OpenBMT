@@ -420,10 +420,13 @@ section widens it.
   sees the names the state is stored under, their sizes and when they
   change. It holds no key that opens the state.
 - **SL-76. Turning it on.** The owner phone turns Shop Lightning on by a
-  change of the settings (`docs/APPROVAL-RULES.md` AP-13). It takes the
-  node's ID from the stick's code (`docs/STICK-RULES.md` SK-35), never from
-  a counter. The Lightning counter then scans the stick's seed code (SK-32)
-  and checks it against the pinned ID (SL-72).
+  change of the settings (`docs/APPROVAL-RULES.md` AP-13). For a shop with its
+  own wallet the change is a Redirect and carries the wallet's signature
+  (`docs/APPROVAL-RULES.md` AP-14); a shop on its starter wallet turns it on
+  once it has moved to its own wallet (AP-15). It takes the node's ID from the
+  stick's code (`docs/STICK-RULES.md` SK-35), never from a counter. The
+  Lightning counter then scans the stick's seed code (SK-32) and checks it
+  against the pinned ID (SL-72).
 - **SL-77. Turning it off or moving it.** Settings without
   `shop_lightning`, or naming another Lightning counter or another node's
   ID, make the counter close every channel of the node it runs (SL-36). It

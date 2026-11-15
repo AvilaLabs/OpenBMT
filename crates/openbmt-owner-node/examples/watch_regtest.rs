@@ -137,6 +137,7 @@ fn signed_settings(
                 owner_sig: s.sign(&identity(&OWNER_SECRET)?),
                 approver_sig: Some(s.sign(&identity(&APPROVER_SECRET)?)),
                 settings: s,
+                wallet_sig: None,
             })
         }
         "remove" => {
@@ -146,6 +147,7 @@ fn signed_settings(
                 owner_sig: s.sign(&identity(&OWNER_SECRET)?),
                 approver_sig: None,
                 settings: s,
+                wallet_sig: None,
             })
         }
         _ => Err("settings <version> name|remove".to_string()),

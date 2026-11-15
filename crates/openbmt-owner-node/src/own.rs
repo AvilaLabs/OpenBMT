@@ -271,7 +271,7 @@ impl OwnNode {
             return Ok(WaitingStep::Expired);
         }
         let owner = self.shop.owner_id();
-        let authority = Authority::OwnWallet { owner };
+        let authority = Authority::own_wallet(owner);
         let hash = held.hash();
         if *given != Some(hash) {
             let version = held.signed.settings.version;
@@ -662,9 +662,7 @@ impl OwnNode {
         if version <= *carried {
             return Ok(false);
         }
-        let authority = Authority::OwnWallet {
-            owner: self.shop.owner_id(),
-        };
+        let authority = Authority::own_wallet(self.shop.owner_id());
         link.carry_settings_with(version, signed, &authority, None, now)?;
         if link.settings_missing(version).is_empty() {
             link.settings_done(version);

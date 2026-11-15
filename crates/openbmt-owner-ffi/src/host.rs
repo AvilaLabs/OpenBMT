@@ -692,7 +692,7 @@ fn paid_background(st: &mut State, now: u64) {
     }
 }
 
-fn queue_error(e: &OwnerError<String>) -> AppError {
+pub(crate) fn queue_error(e: &OwnerError<String>) -> AppError {
     node_error(&NodeError::from(e.clone()))
 }
 
@@ -3595,7 +3595,23 @@ impl Entry {
                 sats: l.sats,
                 display_usd: l.display_usd,
             };
-            Ok(st.node.owner().known_settings().map(|s| SettingsHeldView {
+            // A shop with its own wallet keeps its settings in its own state,
+            // which is read from the folder (AP-14).
+            let own_settings = match &st.own {
+                Some(own) => {
+                    let identity = st.node.owner_identity().map_err(|e| node_error(&e))?;
+                    own::turn_on_shop(&st.dir, identity, own.wallet.clone(), |shop| {
+                        Ok(shop.shop().known_settings().map(|k| k.settings.clone()))
+                    })
+                    .map_err(own::node_error)?
+                }
+                None => None,
+            };
+            let known = match &st.own {
+                Some(_) => own_settings.as_ref(),
+                None => st.node.owner().known_settings(),
+            };
+            Ok(known.map(|s| SettingsHeldView {
                 version: s.version,
                 light_per_sale: limit(&s.light_per_sale),
                 light_budget: limit(&s.light_budget),

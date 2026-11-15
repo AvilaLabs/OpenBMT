@@ -58,6 +58,7 @@ pub(super) fn signed(s: Settings) -> SignedSettings {
         owner_sig: s.sign(&owner()),
         approver_sig: None,
         settings: s,
+        wallet_sig: None,
     }
 }
 

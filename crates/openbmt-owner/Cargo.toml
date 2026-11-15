@@ -32,5 +32,7 @@ ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["zer
 openbmt-kernel-random = { path = "../openbmt-kernel-random" }
 
 [dev-dependencies]
+# The signing wallet and the signatures of a wallet message (AP-14).
+openbmt-core = { path = "../openbmt-core", features = ["test-support"] }
 openbmt-approver = { path = "../openbmt-approver" }
 openbmt-bbqr = { path = "../openbmt-bbqr" }

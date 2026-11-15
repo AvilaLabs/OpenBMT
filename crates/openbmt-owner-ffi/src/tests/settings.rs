@@ -22,7 +22,7 @@ const SET: u8 = 2;
 
 /// An edit as the app writes it: every field absent unless set.
 #[derive(Default)]
-struct Edit {
+pub(super) struct Edit {
     price: Option<u64>,
     limits: [Option<u32>; 10],
     tolerance: Option<u32>,
@@ -56,7 +56,16 @@ fn opt32(w: W, v: Option<u32>) -> W {
 }
 
 impl Edit {
-    fn bytes(&self) -> Vec<u8> {
+    /// An edit that sets the Lightning node and nothing else.
+    pub(super) fn node(text: &str) -> Edit {
+        Edit {
+            lightning: SET,
+            text: text.to_string(),
+            ..Edit::default()
+        }
+    }
+
+    pub(super) fn bytes(&self) -> Vec<u8> {
         let mut w = match self.price {
             None => W::new().u8(0),
             Some(r) => W::new().u8(1).u64(r),
@@ -179,6 +188,7 @@ pub(super) fn held() -> (Rig, u64) {
         owner_sig: settings.sign(&id(0x11)),
         approver_sig: None,
         settings,
+        wallet_sig: None,
     };
     Rd::ok(&rig.call(46, handle, &W::new().bytes(&signed.to_bytes()).0));
     let response = rig.call(30, handle, &W::new().u64(T0).u64(1_000).0);

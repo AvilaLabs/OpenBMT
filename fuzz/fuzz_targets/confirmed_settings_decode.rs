@@ -30,6 +30,7 @@ fuzz_target!(|data: &[u8]| {
         settings: Settings::defaults(1_000),
         owner_sig: Sig([0u8; 64]),
         approver_sig: None,
+        wallet_sig: None,
     };
     let mut whole = b"OBM<\x01".to_vec();
     whole.extend_from_slice(&signed.to_bytes());

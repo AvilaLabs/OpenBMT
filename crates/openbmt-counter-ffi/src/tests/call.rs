@@ -133,6 +133,7 @@ fn start_refuses_what_the_pairing_record_does_not_hold() {
         owner_sig: s.sign(&id(1)),
         approver_sig: Some(s.sign(&id(2))),
         settings: s,
+        wallet_sig: None,
     };
     cases.push(("CR-95", with(record_with(other))));
     // A first batch for another counter.

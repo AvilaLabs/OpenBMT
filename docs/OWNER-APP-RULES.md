@@ -1155,3 +1155,11 @@ These rules go with `docs/COUNTER-RULES.md` §23a and section 17.
   phone sells, and says why. "Not now" goes on. The home screen of a shop
   with a counter on this phone has "Open the counter", which starts the
   counter app by its explicit name.
+- **OA-127.** Signing with the wallet. A Redirect change of a shop with its
+  own wallet shows the message of `docs/APPROVAL-RULES.md` AP-06 as text and
+  as a code, and the address that must sign it, each with a copy button. The
+  owner signs the message in the wallet and pastes or scans the signature.
+  The phone checks it before anything is sent; a signature that does not
+  check is refused with the address it had to come from, and nothing is
+  sent. While the shop is on its starter wallet the change is not offered
+  (AP-15).

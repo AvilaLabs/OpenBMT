@@ -440,6 +440,7 @@ fn bx_15_settings_signed_by_other_roots_pair_nothing() {
         owner_sig: s.sign(&stranger()),
         approver_sig: Some(s.sign(&approver())),
         settings: s,
+        wallet_sig: None,
     };
     let err = core.take_welcome(&w, &forged.to_bytes(), NOW).unwrap_err();
     assert!(matches!(err, BoxError::Settings(_)), "{err}");
@@ -699,6 +700,7 @@ fn bx_21_settings_signed_by_other_roots_are_refused() {
             owner_sig: s.sign(&o),
             approver_sig: Some(s.sign(&a)),
             settings: s.clone(),
+            wallet_sig: None,
         };
         assert!(matches!(
             core.take_settings(&forged.to_bytes()),
@@ -971,6 +973,7 @@ fn bx_51_settings_that_the_pinned_roots_did_not_sign_are_damage() {
         owner_sig: s.sign(&stranger()),
         approver_sig: Some(s.sign(&approver())),
         settings: s,
+        wallet_sig: None,
     };
     files.put(SETTINGS_FILE, &forged.to_bytes());
     let err = BoxCore::open(files, &mut fixed_random).unwrap_err();
@@ -1152,6 +1155,7 @@ mod own_wallet {
                 owner_sig: s.sign(&stranger()),
                 approver_sig: None,
                 settings: s,
+                wallet_sig: None,
             }
         };
         for make in [&both as &dyn Fn(&DeviceId) -> SignedSettings, &by_stranger] {
@@ -1242,6 +1246,38 @@ mod own_wallet {
             Err(BoxError::Confirmed(_))
         ));
         assert_eq!(snapshot(&core), before);
+    }
+
+    #[test]
+    fn bx_21_a_redirect_with_a_wallet_signature_is_taken_by_its_shape() {
+        // The Box pins no wallet, so it cannot check the signature; the
+        // counters do (AP-14). It keeps the settings only when they carry one
+        // of the right shape, and reads them back from disk the same way.
+        let mut core = own_core();
+        let me = core.device_id();
+        let mut redirect = settings_with(2, &me);
+        redirect.lightning_node = Some([2u8; 33]);
+        let mut signed = sign_owner(redirect);
+        let before = snapshot(&core);
+        for bad in ["", "has a space", "caf\u{e9}"] {
+            signed.wallet_sig = Some(bad.to_string());
+            assert!(core.take_settings(&signed.to_bytes()).is_err());
+            assert_eq!(snapshot(&core), before);
+        }
+        signed.wallet_sig = Some("H".repeat(88));
+        core.take_settings(&signed.to_bytes()).unwrap();
+        assert_eq!(core.settings().unwrap().lightning_node, Some([2u8; 33]));
+        let again = reopen(core).unwrap();
+        assert_eq!(again.settings().unwrap().version, 2);
+        // A signature on a change of another class is refused.
+        let mut core = own_core();
+        let mut free = sign_owner({
+            let mut t = settings_with(2, &core.device_id());
+            t.tor_on = true;
+            t
+        });
+        free.wallet_sig = Some("H".repeat(88));
+        assert!(core.take_settings(&free.to_bytes()).is_err());
     }
 
     #[test]

@@ -48,6 +48,7 @@ fn held(with_box: bool) -> (Rig, u64) {
         owner_sig: settings.sign(&id(0x11)),
         approver_sig: None,
         settings,
+        wallet_sig: None,
     };
     Rd::ok(&rig.call(46, handle, &W::new().bytes(&signed.to_bytes()).0));
     approve(&rig, handle, 1);
@@ -510,6 +511,7 @@ fn held_with_link() -> (Rig, u64) {
         owner_sig: settings.sign(&id(0x11)),
         approver_sig: None,
         settings,
+        wallet_sig: None,
     };
     Rd::ok(&rig.call(46, handle, &W::new().bytes(&signed.to_bytes()).0));
     approve(&rig, handle, 1);

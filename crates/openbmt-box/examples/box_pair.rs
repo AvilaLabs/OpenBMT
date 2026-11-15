@@ -186,6 +186,7 @@ fn signed(s: Settings, both: bool) -> Result<SignedSettings, String> {
             None
         },
         settings: s,
+        wallet_sig: None,
     })
 }
 

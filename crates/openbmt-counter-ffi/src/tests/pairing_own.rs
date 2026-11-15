@@ -117,6 +117,7 @@ fn settings(counter: Option<&openbmt_core::identity::DeviceId>, version: u32) ->
         owner_sig: s.sign(&owner()),
         approver_sig: None,
         settings: s,
+        wallet_sig: None,
     }
 }
 

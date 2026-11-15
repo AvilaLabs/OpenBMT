@@ -60,6 +60,7 @@ mod import_view;
 #[cfg(any(target_os = "android", feature = "jni"))]
 mod jni;
 mod own;
+mod own_settings;
 mod own_spend_views;
 mod paid_check_views;
 mod pos_views;
@@ -106,6 +107,7 @@ pub use own::{
     OwnGapArgs, OwnGapView, OwnMade, OwnOfferView, OwnOwnerMade, OwnRelayArgs, OwnRequestArgs,
     OwnRequestView, OwnShopArgs, OwnWaitingView, OwnWalletView, SwitchRowView, SwitchStateKind,
 };
+pub use own_settings::{OwnSettingsAttachArgs, OwnSettingsPreviewArgs, OwnSettingsPreviewView};
 pub use paid_check_views::{
     PaidAlarmView, PaidArrivedView, PaidCheckView, PaidClearArgs, PaidDayArgs, PaidDayView,
     PaidSaleLineView,

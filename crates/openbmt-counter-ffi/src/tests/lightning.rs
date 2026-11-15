@@ -53,6 +53,7 @@ fn settings_with(node: Option<[u8; 33]>) -> openbmt_core::settings::SignedSettin
         owner_sig: s.sign(&id(1)),
         approver_sig: Some(s.sign(&id(2))),
         settings: s,
+        wallet_sig: None,
     }
 }
 

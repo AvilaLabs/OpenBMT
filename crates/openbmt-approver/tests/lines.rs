@@ -615,6 +615,7 @@ fn as_27_the_checks_name_a_bad_signature_a_bad_value_and_a_stale_version() {
             settings: s,
             owner_sig: sig,
             approver_sig: None,
+            wallet_sig: None,
         },
     };
     let lines = lines_of(&mut a, vec![item]);

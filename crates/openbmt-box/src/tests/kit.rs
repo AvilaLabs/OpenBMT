@@ -102,6 +102,7 @@ pub fn sign_both(s: Settings) -> SignedSettings {
         owner_sig: s.sign(&owner()),
         approver_sig: Some(s.sign(&approver())),
         settings: s,
+        wallet_sig: None,
     }
 }
 
@@ -110,6 +111,7 @@ pub fn sign_owner(s: Settings) -> SignedSettings {
         owner_sig: s.sign(&owner()),
         approver_sig: None,
         settings: s,
+        wallet_sig: None,
     }
 }
 

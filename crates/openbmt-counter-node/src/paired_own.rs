@@ -452,7 +452,7 @@ impl OwnPairingRecord {
         // `None` for the settings in force: the first settings are not a
         // change, so nothing is classified (CR-231).
         self.settings
-            .verify_with(&Authority::OwnWallet { owner: self.owner }, None)
+            .verify_with(&Authority::own_wallet(self.owner), None)
             .map_err(OwnPairRefused::Settings)?;
         let s = &self.settings.settings;
         if s.version <= self.settings_floor {
@@ -720,7 +720,7 @@ impl PairedRecord {
     pub fn authority(&self) -> Authority {
         match self {
             Self::KeyApp(r) => Authority::KeyApp(r.roots),
-            Self::OwnWallet(r) => Authority::OwnWallet { owner: r.owner },
+            Self::OwnWallet(r) => Authority::pinned_own_wallet(r.owner, &r.wallet, r.starter),
         }
     }
 

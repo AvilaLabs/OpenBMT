@@ -26,6 +26,7 @@ mod setup_lock;
 mod shop_lightning;
 mod starter;
 mod strict;
+mod wallet_sig;
 mod watch;
 mod web_orders;
 pub(crate) mod wire;

@@ -144,6 +144,7 @@ fn config_for_box(rig: &Rig, relay: RelayHint) -> StartConfig {
         owner_sig: settings.sign(&id(1)),
         approver_sig: Some(settings.sign(&id(2))),
         settings,
+        wallet_sig: None,
     };
     let mut record = record_with(signed);
     record.relay = Some(relay);
@@ -685,6 +686,7 @@ fn owner_alone(mut s: openbmt_core::settings::Settings, version: u32) -> Vec<u8>
         owner_sig: s.sign(&id(1)),
         approver_sig: None,
         settings: s,
+        wallet_sig: None,
     }
     .to_bytes()
 }
@@ -695,6 +697,7 @@ fn both_roots(mut s: openbmt_core::settings::Settings, version: u32) -> Vec<u8> 
         owner_sig: s.sign(&id(1)),
         approver_sig: Some(s.sign(&id(2))),
         settings: s,
+        wallet_sig: None,
     }
     .to_bytes()
 }

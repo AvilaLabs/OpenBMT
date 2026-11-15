@@ -1881,8 +1881,8 @@ a counter paired with the shop's own wallet.
   compared the address and the words. That comparison shows where on-chain
   payments go and nothing else, so the first settings may name no Lightning
   node and no Shop Lightning: either would send payments somewhere the person
-  did not see (AP-13), and a shop with its own wallet has no signature yet
-  that approves a redirect (CR-236). A bundle whose settings name either is
+  did not see (AP-13), and the person has seen no wallet signature that
+  approves a redirect (CR-236). A bundle whose settings name either is
   refused, and the ceremony ends.
 - **CR-232.** The first range must be signed by the owner root, name this
   counter and have a valid shape (WL-23, WL-24, WL-28), and hold at least
@@ -1926,9 +1926,10 @@ a counter paired with the shop's own wallet.
   (`openbmt_core::approval::classify`, AP-01, AP-02). A Free change is taken
   with the owner's signature alone. A Loosen change needs a counter's
   confirmation (`docs/APPROVAL-RULES.md`): it waits to be confirmed as CR-239
-  to CR-242 say. A Redirect change is refused, since the wallet signature it
-  needs is not asked for yet. The `Setting` record of CR-162 is written as
-  there.
+  to CR-242 say. A Redirect change needs the wallet's signature of
+  `docs/APPROVAL-RULES.md` AP-14, checked against the wallet this counter
+  pinned; without it, or on a counter paired with a starter wallet (AP-15), it
+  is refused. The `Setting` record of CR-162 is written as there.
 - **CR-237.** The app's screens are the camera's, as CR-98 says: scan the
   owner phone's offer, the first-address screen, the request as a code with
   its four words and "They match" and "They differ", then the bundle. The
@@ -1987,20 +1988,21 @@ the bundle and the same record.
 
 A shop that uses its own wallet has no Key app to sign a loosening of its
 settings. Instead, a person at one of the shop's counters confirms it
-(`docs/APPROVAL-RULES.md` §2): the counter shows what the change loosens
-and four words, the owner phone shows the same four words, and a manager's
-PIN signs it. A phone taken from the owner cannot loosen the shop's limits
-on its own. This section is the counter's part. A change that sends payments
-somewhere else (Redirect, AP-01) needs the wallet's own signature and is
-not in this section; it stays refused as CR-236 says.
+(`docs/APPROVAL-RULES.md` §2): the counter shows what the change loosens and
+four words, the owner phone shows the same four words, and a manager's PIN
+signs it. A phone taken from the owner cannot loosen the shop's limits on its
+own. This section is the counter's part. A change that sends payments
+somewhere else (Redirect, AP-01) needs the wallet's own signature and is not
+in this section: it is taken or refused as CR-236 says.
 
-- **CR-239.** Settings that pass every check of CR-236 except the
-  confirmation of a Loosen change are not refused: they are kept as the
-  counter's one change to confirm, in the node's folder (`confirm.bin`, the
-  `OBMS` frame and nothing else, written as CR-161), and are not in force.
-  Newer such settings replace older ones. They are dropped when settings of
-  the same or a higher version come into force, and seven days after they
-  arrived. A Redirect change is refused as before.
+- **CR-239.** Settings that pass every check of CR-236 except the confirmation
+  of a Loosen change are not refused: they are kept as the counter's one
+  change to confirm, in the node's folder (`confirm.bin`, the `OBMS` frame and
+  nothing else, written as CR-161), and are not in force. Newer such settings
+  replace older ones. They are dropped when settings of the same or a higher
+  version come into force, and seven days after they arrived. A Redirect
+  change is never kept to be confirmed: it is taken with the wallet's
+  signature or refused (CR-236).
 - **CR-240.** While a change waits, the manager's menu has "Change to
   confirm". It shows each field the change loosens, with its value now and
   its value after, from `settings::changed_fields` (AP-01), and the

@@ -227,7 +227,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + OwnPairWords.all().size + 1 + AppWords.keyMapAll().size + 1 + StarterWords.all().size + 1 + RequestWords.all().size + 1 + WebOrderWords.all().size + 1 + ShopLightningWords.all().size + 1 + PaidCheckWords.all().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's, of the key map's, of the starter wallet's and of the payment requests'")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + FirstRunWords.all().size + 1 + ConnectWords.all().size + 1 + OwnPairWords.all().size + 1 + AppWords.keyMapAll().size + 1 + StarterWords.all().size + 1 + RequestWords.all().size + 1 + WebOrderWords.all().size + 1 + ShopLightningWords.all().size + 1 + WalletSigWords.all().size + 1 + PaidCheckWords.all().size + 1, "one row for each words and the header, and for each of the first run's, of Connect your wallet's, of the key map's, of the starter wallet's and of the payment requests'")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -3482,7 +3482,7 @@ object AppModelTest {
         val rules = Regex("^- \\*\\*OA-(\\d{2,3})\\.\\*\\*", RegexOption.MULTILINE).findAll(rulesMd.readText()).map { it.groupValues[1] }.toList()
         ok(rules.first() == "01" && rules.map { it.toInt() } == rules.map { it.toInt() }.sorted() && rules.toSet().size == rules.size, "the rules are numbered upward from 01, each once: $rules")
         // OA-36 to OA-39 are kept for other work, OA-49 to OA-59 for the next, and OA-66 to OA-69 and OA-75 to OA-79 for more.
-        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..126)
+        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..127)
         ok(rules.map { it.toInt() }.all { it in numbered } && rules.map { it.toInt() } == numbered.filter { it.toString().padStart(2, '0') in rules }, "the rules are numbered from 01 without a gap but the kept numbers: $rules")
         for (id in rules) {
             ok(id in ids || "OA-$id" in notHere, "OA-$id has a test named oa_${id}_... or a reason")
@@ -4679,6 +4679,21 @@ object AppModelTest {
         paidCheckTests()
         ruleTests(rulesMd)
         println("AppModelTest (owner): $count checks passed")
+    }
+
+    /** OA-127: signing a Redirect change with the wallet. */
+    private fun oa_127_signing_with_the_wallet() {
+        val all = WalletSigWords.all().toMap()
+        ok(all["OA_WALLETSIG_HEADING"] == "Sign with your wallet" && all["OA_WALLETSIG_SEND"] == "Send change" && all["OA_WALLETSIG_SCAN"] == "Scan signature", "OA-127: the heading and the two buttons")
+        ok(all.size == 14 && all.values.none { it.isBlank() || it.contains("TODO_WORDS") }, "OA-127: every text of the screen is written and listed")
+        val address = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4"
+        val wrong = WalletSigWords.wrong(address)
+        ok(wrong.heading == "Signature not accepted" && wrong.what.contains(address) && !wrong.what.contains("{address}") && wrong.code == "AP-10", "OA-127: the words of a wrong signature name the address that had to sign")
+        ok(SayCheck.problem(wrong) == null && SayCheck.problem(WalletSigWords.starter()) == null, "OA-127: the refusal words keep the limits of the words")
+        ok(WalletSigWords.starter().heading == "Move to your own wallet" && WalletSigWords.starter().code == "AP-15", "OA-127: a shop on its starter wallet is not offered the change")
+        val screen = source("src/android/WalletSig.kt")
+        ok(screen.contains("OwnerOwn.settingsAttach") && screen.contains("showWalletSig(ask, sig.text.toString()") && screen.contains("scan.begin") && screen.contains("AnimatedQrView.makePlain(act, Who.OWNER, ask.message"), "OA-127: the screen sends through the library, keeps itself on a refusal, scans and shows the code")
+        ok(source("src/android/SettingsEdit.kt").contains("ask.needsWalletSig"), "OA-127: the review leads to the screen for a Redirect change")
     }
 
     /** OA-124 to OA-126: this phone as the counter too. */

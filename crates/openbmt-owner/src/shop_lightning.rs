@@ -76,10 +76,9 @@ pub enum ShopLightningEdit {
 /// from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShopLightningRefusal {
-    /// SL-76, AP-13: the shop uses its own wallet, and its owner phone has no
-    /// way to carry a change of the settings that sends payments somewhere
-    /// else or loosens a limit.
-    OwnWallet,
+    /// AP-15: the shop is on its starter wallet, whose key is on this phone,
+    /// so it cannot approve a change that sends payments somewhere else.
+    Starter,
     /// SL-73: the shop has no Box to keep the second copy.
     NoBox,
     /// SL-73: the Box named is not one of the shop's.
@@ -108,7 +107,8 @@ impl ShopLightningRefusal {
     /// The rule this refusal is from, with its prefix.
     pub fn rule(self) -> &'static str {
         match self {
-            Self::OwnWallet | Self::NodeId => "SL-76",
+            Self::NodeId => "SL-76",
+            Self::Starter => "AP-15",
             Self::NoBox | Self::BoxNotInShop => "SL-73",
             Self::CounterNotInShop
             | Self::ProviderKey
@@ -122,7 +122,7 @@ impl ShopLightningRefusal {
     /// The name part of the placeholders of this refusal.
     fn name(self) -> &'static str {
         match self {
-            Self::OwnWallet => "OWN_WALLET",
+            Self::Starter => "STARTER",
             Self::NoBox => "NO_BOX",
             Self::BoxNotInShop => "BOX_NOT_IN_SHOP",
             Self::CounterNotInShop => "COUNTER_NOT_IN_SHOP",
@@ -137,7 +137,7 @@ impl ShopLightningRefusal {
 
     /// Every refusal, for the checks.
     pub const ALL: [Self; 10] = [
-        Self::OwnWallet,
+        Self::Starter,
         Self::NoBox,
         Self::BoxNotInShop,
         Self::CounterNotInShop,
@@ -152,10 +152,10 @@ impl ShopLightningRefusal {
     /// What the owner is told about the refusal. Nothing changed.
     pub fn words(self) -> Words {
         let (heading, what, next) = match self {
-            Self::OwnWallet => (
-                "Not for this shop yet",
-                "This shop is paid to its own wallet, and turning Shop Lightning on there is not built yet. Nothing changed.",
-                "Sales go on as before, on-chain.",
+            Self::Starter => (
+                "Move to your own wallet",
+                "This change decides where Lightning payments go. A starter wallet's key is on this phone, so it cannot approve it.",
+                "Move the shop to your own wallet first, then make this change.",
             ),
             Self::NoBox => (
                 "A Box is needed first",
@@ -210,8 +210,8 @@ impl ShopLightningRefusal {
 impl fmt::Display for ShopLightningRefusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let why = match self {
-            Self::OwnWallet => {
-                "this shop uses its own wallet, so no change of Shop Lightning is carried"
+            Self::Starter => {
+                "this shop is on its starter wallet, so it makes no change that sends payments elsewhere"
             }
             Self::NoBox => "the shop has no Box to keep the second copy",
             Self::BoxNotInShop => "the second device is not a Box of the shop",

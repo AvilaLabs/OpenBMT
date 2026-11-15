@@ -341,6 +341,7 @@ pub fn settings_item(s: Settings) -> Item {
             settings: s,
             owner_sig,
             approver_sig: None,
+            wallet_sig: None,
         },
     }
 }

@@ -1374,6 +1374,14 @@ object AppWords {
         )
         for ((key, text) in ShopLightningWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         out.append(
+            "\nSigning a Redirect change with the wallet (`docs/OWNER-APP-RULES.md`,\n" +
+                "OA-127), in `WalletSigWords`. `{address}` is the address that has to\n" +
+                "sign:\n\n" +
+                "| Key | Text |\n" +
+                "|---|---|\n",
+        )
+        for ((key, text) in WalletSigWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
+        out.append(
             "\nThe counter checks (`docs/OWNER-COINS-RULES.md`, OC-60 to OC-64), in\n" +
                 "`PaidCheckWords`. `{counter}` is the counter's name, `{number}` the\n" +
                 "sale's number, `{amount}`, `{seen}` and `{total}` amounts, `{time}` the\n" +

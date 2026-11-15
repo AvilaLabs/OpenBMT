@@ -110,6 +110,7 @@ fn as_33_batches_settings_and_pairings_are_signed_through_the_core_crate() {
         settings: settings.clone(),
         owner_sig: settings.sign(&owner()),
         approver_sig: Some(sig),
+        wallet_sig: None,
     };
     assert_eq!(
         signed_settings.verify(&roots(), None),

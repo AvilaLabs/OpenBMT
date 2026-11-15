@@ -42,6 +42,7 @@ fn settings_with(version: u32, boxes: &[DeviceId], devices: &[DeviceId]) -> Vec<
         owner_sig: s.sign(&id(1)),
         approver_sig: Some(s.sign(&id(2))),
         settings: s,
+        wallet_sig: None,
     }
     .to_bytes()
 }

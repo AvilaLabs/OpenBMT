@@ -659,6 +659,7 @@ fn bx_21_replayed_and_forged_settings_messages_change_nothing() {
         owner_sig: s.sign(&stranger()),
         approver_sig: Some(s.sign(&approver())),
         settings: s,
+        wallet_sig: None,
     };
     send_settings(&r, 3, &forged);
     eventually("both refusals are noted", || {

@@ -239,6 +239,8 @@ private const val OP_PAID_CHECK = 239
 private const val OP_PAID_DAY = 240
 private const val OP_PAID_CLEAR = 241
 private const val OP_PAID_CHECK_RESET = 242
+private const val OP_OWN_SETTINGS_PREVIEW = 243
+private const val OP_OWN_SETTINGS_ATTACH = 244
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -1041,6 +1043,20 @@ class SettingsPreview(
     /** The shop's currency after the change. */
     val currency: ShopCurrency = ShopCurrency.Usd,
 )
+
+/**
+ * What [OwnerOwn.settingsPreview] found for a shop with its own wallet: [preview] is the preview as
+ * [OwnerNode.previewSettings] gives it, and a Redirect change needs the wallet's signature (AP-14): [message] is
+ * what it signs (AP-06) and [address] who signs it (AP-09). Both are empty when [needsWalletSig] is false.
+ */
+class OwnSettingsPreview(
+    val preview: SettingsPreview,
+    val needsWalletSig: Boolean,
+    val message: String,
+    val address: String,
+)
+
+internal fun Reader.ownSettingsPreview(): OwnSettingsPreview = OwnSettingsPreview(settingsPreview(), bool(), string(), string())
 
 /** Why Lightning is not offered, as the Lightning counter's report says it (LK-84, SL-41). */
 enum class NotOffered { Offered, SecondDeviceAway, ChainBehind, NoUsableChannel, ProviderSilent }
@@ -4017,6 +4033,25 @@ object OwnerOwn {
     fun waitingChange(shop: OwnShopArgs): OwnWaitingView {
         val r = call(OP_OWN_WAITING_CHANGE, 0) { it.ownShop(shop) }
         return r.ownWaitingView().also { r.end() }
+    }
+
+    /**
+     * AP-14, AP-15: what an edit does to the settings of a shop with its own wallet. [starter] says the shop is on
+     * its starter wallet, which refuses a Redirect change. Nothing is stored.
+     */
+    fun settingsPreview(shop: OwnShopArgs, edit: SettingsEditArgs, starter: Boolean): OwnSettingsPreview {
+        val r = call(OP_OWN_SETTINGS_PREVIEW, 0) { it.ownShop(shop).settingsEdit(edit).bool(starter) }
+        return r.ownSettingsPreview().also { r.end() }
+    }
+
+    /**
+     * AP-14: attach the wallet's [signature] to the [settings] of a preview, check it, and put the settings in
+     * force. A signature that does not verify is refused with the address that had to sign, and nothing is
+     * stored. Answers the version in force.
+     */
+    fun settingsAttach(shop: OwnShopArgs, settings: ByteArray, signature: String): Long {
+        val r = call(OP_OWN_SETTINGS_ATTACH, 0) { it.ownShop(shop).bytes(settings).string(signature) }
+        return r.u32().also { r.end() }
     }
 
     /** The counter shows Paired (OA-111). */

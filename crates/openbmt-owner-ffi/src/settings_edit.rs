@@ -389,6 +389,7 @@ pub(crate) fn to_edit(
         swap,
         watch_key: None,
         shop_lightning: None,
+        starter_wallet: false,
     })
 }
 
@@ -670,6 +671,7 @@ pub(crate) fn preview_view(p: &SettingsPreview) -> SettingsPreviewView {
         settings: p.settings.clone(),
         owner_sig: openbmt_core::identity::Sig([0; 64]),
         approver_sig: None,
+        wallet_sig: None,
     };
     SettingsPreviewView {
         version: p.settings.version,
