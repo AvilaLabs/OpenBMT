@@ -473,13 +473,13 @@ says so when one is missing.
   that counter (OC-14, "not this counter's address") is a mismatch at once,
   with nothing seen: no payment there is the shop's. A record of a counter
   that does not read as part of a sale, such as a second opening of a sale, a
-  payment for a sale never opened, or a record of a kind not known, is passed
-  over, and the counter raises its own alarm, that some of its payments cannot
-  be checked; its other sales, and every other counter, are still checked. A
-  second opening leaves the first as it was. A counter with 256 alarms not
-  cleared is held back: its alarms stay, no more are raised for it, and it is
-  checked no further until the owner clears them, so that one counter cannot
-  fill the marks of OC-64 for the others. The check runs each time the owner's
+  payment for a sale never opened, or a sale record whose contents do not
+  read, is passed over, and the counter raises its own alarm, that some of
+  its payments cannot be checked; its other sales, and every other counter,
+  are still checked. A second opening leaves the first as it was. A counter
+  with 256 alarms not cleared is held back: its alarms stay, no more are
+  raised for it, and it is checked no further until the owner clears them, so
+  that one counter cannot fill the marks of OC-64 for the others. The check runs each time the owner's
   view checks a new tip, and when the app starts, and a run that failed is
   tried again at the next.
 - **OC-62.** The mismatch. The owner phone raises an alarm, as it raises a

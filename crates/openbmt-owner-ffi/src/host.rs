@@ -2701,9 +2701,10 @@ impl Entry {
             for m in st.paid.marks().iter() {
                 match m.state {
                     MarkState::Raised => {
-                        // A counter held back for too many open alarms, or whose
-                        // copy no longer verifies, has no sales in `sales`: its
-                        // alarm is still shown, with what the mark holds.
+                        // A counter held back for too many open alarms, or no
+                        // longer among the shop's counters, has no sales in
+                        // `sales`: its alarm is still shown, with what the mark
+                        // holds.
                         let found = sales.iter().find(|s| s.key() == m.sale);
                         alarms.push(PaidAlarmView {
                             counter: m.sale.counter.to_bytes().to_vec(),

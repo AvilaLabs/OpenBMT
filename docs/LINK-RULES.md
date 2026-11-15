@@ -334,7 +334,8 @@ over is still checked by the rules of the thing it carries.
   copy's head. The first record that fails stops the message; the records
   before it were taken. A record is written to the copy's file, which only
   grows, before it counts; a last record cut short by a crash is cut off at
-  the next start, as the counter does with its own file.
+  the next start, as the counter does with its own file. When the copy is
+  opened, its records are checked again in the same way from the first.
 - **LK-59.** A record the copy already holds (same number, same hash) is
   skipped without a word. A record with the number of one the copy holds and
   another hash, or that follows another record than the one the copy holds,

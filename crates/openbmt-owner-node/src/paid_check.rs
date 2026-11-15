@@ -341,12 +341,12 @@ pub struct PaidSales {
     /// The paid sales of the counters that fold.
     pub sales: Vec<PaidSale>,
     /// The counters with a record that does not read as part of a sale, or a
-    /// copy that does not verify: some of their payments cannot be checked.
+    /// chain that does not verify: some of their payments cannot be checked.
     pub unreadable: Vec<DeviceId>,
 }
 
 /// OC-61: put the folds of each counter together. A counter that passed over a
-/// record, or whose copy does not verify, is listed apart; the sales that do
+/// record, or whose chain does not verify, is listed apart; the sales that do
 /// read, and every other counter, are still checked.
 pub fn gather(folds: Vec<(DeviceId, Result<Fold, FactsError>)>) -> PaidSales {
     let mut out = PaidSales::default();
@@ -710,6 +710,9 @@ impl PaidMarks {
     /// to `now`. The oldest cleared marks go first when there
     /// are more than [`MAX_PAID_MARKS`]; one not cleared is never dropped here.
     pub fn after(&self, result: &CheckResult, now: u64) -> Self {
+        // A time of zero is not a mark's time (OC-64): a clock at zero is
+        // taken as one, so that the file still reads back.
+        let now = now.max(1);
         let mut next = self.clone();
         for sale in &result.read {
             next.marks.entry(*sale).or_insert(PaidMark {
