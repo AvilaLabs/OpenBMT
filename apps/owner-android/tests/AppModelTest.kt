@@ -1216,7 +1216,7 @@ object AppModelTest {
         ok(queued.contains("showSpend()"), "the approval goes on from the spend screen's request")
         ok(AppWords.sharesNote(2).next.contains("Change settings"), "the shares are equal and the words say where custom ones are set")
         ok(AppWords.counterCompare.what.contains("Key app shows them too"), "the words are compared on the Key app too")
-        ok(AppWords.counterPriceNeeded.next.contains("price of one bitcoin in whole dollars") && !check.contains("Satoshis to a dollar"), "the price's words say what to type, and no satoshis are asked for")
+        ok(AppWords.counterPriceNeeded.next.contains("price of one bitcoin in whole US dollars") && !check.contains("Satoshis to a dollar"), "the price's words say what to type, and no satoshis are asked for")
         ok(!source("src/android/Screens.kt").contains("changing the shop's settings"), "the About screen no longer lists the settings editor as not built")
         ok(!source("src/android/Screens.kt").substringAfter("\"Not built yet\" to").contains("adding a counter"), "and does not say it is not built")
     }
@@ -2783,7 +2783,7 @@ object AppModelTest {
         ok(fetched is PriceOutcome.Fetched && fetched.usd == 98_500L, "the sources agree: the library's price")
         ok(port.got.map { it.source }.sorted() == listOf("coinbase", "kraken") && port.got.all { it.fetchedAt == 1_700_000_000L } && port.at == 1_700_000_000L, "every reply is handed over, stamped by the phone's clock")
         ok(PriceModel.fieldText(fetched) == "98500" && (CounterModel.price(PriceModel.fieldText(fetched)) as? Form.Ok)?.value == 98_500L, "the price is in the field as whole dollars, and the field's own check takes it")
-        ok(AppWords.counterPriceFetched(98_500).what.contains("98,500 dollars for one bitcoin"), "the words say the price with its separator")
+        ok(AppWords.counterPriceFetched(98_500).what.contains("98,500 US dollars for one bitcoin"), "the words say the price with its separator")
         ok(PriceModel.dollars(98_500) == "98,500" && PriceModel.dollars(999) == "999" && PriceModel.dollars(1_234_567) == "1,234,567" && PriceModel.dollars(1_000) == "1,000", "thousands separators")
         // Refused: the sources do not agree, or no source answered, or the proxy did not answer. The price is typed.
         val disagree = PriceModel.fetch(FakePrice(listOf("kraken", "coinbase"), refuse = true), { RateFetch.Body("{}".toByteArray()) }) { 1L }
@@ -2876,10 +2876,13 @@ object AppModelTest {
         ok(refused.refusal != null && refused.refusal.heading == "Heading" && refused.accounting == null && refused.ledger == null && refused.empty == null, "a refusal shows the library's words and offers no file")
         ok(OwnerLook.BOOKS_NOTE == "The files follow US rules only and are not tax advice." && OwnerLook.BOOKS_SAVE_ACCOUNTING == "Save the accounting file" && OwnerLook.BOOKS_SAVE_LEDGER == "Save the full ledger", "the footnote and the buttons, as written down")
         val booksSaved = AppWords.booksSaved
-        ok(booksSaved.heading == "File saved" && booksSaved.what == "The file is saved where you chose. It holds sale numbers, times and amounts, and no addresses." && booksSaved.next == "Give it to your bookkeeper." && booksSaved.who == Who.OWNER, "the saved words, as written down")
+        ok(booksSaved.heading == "File saved" && booksSaved.what == "The accounting file is saved where you chose. Each line has a date, a sale number and an amount, and no addresses or payment IDs." && booksSaved.next == "Give it to your bookkeeper. The full ledger also has the payment IDs." && booksSaved.who == Who.OWNER, "the saved words, as written down")
         val src = source("src/android/Books.kt")
         ok(src.contains("ui.primary(OwnerLook.BOOKS_SAVE_ACCOUNTING)") && src.contains("ui.button(OwnerLook.BOOKS_SAVE_LEDGER) { showLedgerWarning(n, name) }") && src.contains("line(OwnerLook.BOOKS_NOTE, muted = true)"), "a primary and a secondary button, and the footnote in 13 sp secondary")
         ok(src.contains("file.name, file.bytes, \"text/csv\"") && src.contains("AppWords.booksSaved"), "the save writes the bytes it was given, through the picker, and says it did")
+        val ledgerSaved = AppWords.ledgerSaved
+        ok(ledgerSaved.heading == "Full ledger saved" && ledgerSaved.what == "The full ledger is saved where you chose. It has each sale's payment IDs and value, so it shows the shop's payments on the blockchain." && ledgerSaved.next == "Share it only with people you trust with that, such as your bookkeeper." && ledgerSaved.who == Who.OWNER, "the ledger's saved words, as written down")
+        ok(src.contains("if (file.ledger) AppWords.ledgerSaved else AppWords.booksSaved"), "the full ledger is not said to hold no payment IDs once saved")
         fullLedgerWarning()
     }
 
@@ -2897,6 +2900,7 @@ object AppModelTest {
         val file = ask.accept()
         ok(calls == listOf(true) && !ask.open, "accepting makes the call once, with true")
         ok(file != null && file.name == "openbmt-ledger-2026-11.csv" && file.bytes.contentEquals(full), "the file is the library's bytes under the offered name")
+        ok(file != null && file.ledger && !BooksModel.SaveFile("a.csv", full).ledger, "the full ledger is marked as such; another file is not")
         ok(ask.accept() == null && calls.size == 1, "the answer is not kept: a second accept makes no call")
         ask.ask()
         ask.accept()

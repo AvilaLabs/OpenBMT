@@ -305,9 +305,9 @@ object AppWords {
     /** A phone with no settings needs today's price of a bitcoin to start them. */
     val counterPriceNeeded = w(
         Tones.INFO, "Price needed",
-        "This phone holds no settings yet, and the starting limits are in dollars, so it needs today's price of a bitcoin.",
+        "The starting limits are set in US dollars whatever money the shop takes, so this phone needs today's price of a bitcoin in US dollars.",
         Who.OWNER,
-        "Type today's price of one bitcoin in whole dollars, then say the words match.",
+        "Type today's price of one bitcoin in whole US dollars, then say the words match.",
     )
 
     /** The phone is asking the price sources for the price, while a phone with no settings waits for it (OA-101). */
@@ -321,7 +321,7 @@ object AppWords {
     /** The sources agreed, and the price is in the field (OA-101). */
     fun counterPriceFetched(price: Long) = w(
         Tones.INFO, "Today's price",
-        "The price sources give ${PriceModel.dollars(price)} dollars for one bitcoin. The starting limits are worked out from it.",
+        "The price sources give ${PriceModel.dollars(price)} US dollars for one bitcoin. The starting limits are worked out from it.",
         Who.OWNER,
         "If it looks right, say the words match. To use another price, type it below.",
     )
@@ -660,12 +660,20 @@ object AppWords {
         "Nothing to do. Sales appear here as the counters report them.",
     )
 
-    /** A file of the books was written where the owner chose (OA-103). */
+    /** The accounting file was written where the owner chose (OA-103, BK-17, BK-18). */
     val booksSaved = w(
         Tones.GOOD, "File saved",
-        "The file is saved where you chose. It holds sale numbers, times and amounts, and no addresses.",
+        "The accounting file is saved where you chose. Each line has a date, a sale number and an amount, and no addresses or payment IDs.",
         Who.OWNER,
-        "Give it to your bookkeeper.",
+        "Give it to your bookkeeper. The full ledger also has the payment IDs.",
+    )
+
+    /** The full ledger was written where the owner chose (OA-103, BK-19). */
+    val ledgerSaved = w(
+        Tones.GOOD, "Full ledger saved",
+        "The full ledger is saved where you chose. It has each sale's payment IDs and value, so it shows the shop's payments on the blockchain.",
+        Who.OWNER,
+        "Share it only with people you trust with that, such as your bookkeeper.",
     )
 
     val entryCancelled = w(
@@ -1455,6 +1463,7 @@ object AppWords {
         "cashOutPriceNeeded" to cashOutPriceNeeded,
         "booksEmpty" to booksEmpty,
         "booksSaved" to booksSaved,
+        "ledgerSaved" to ledgerSaved,
         "entryCancelled" to entryCancelled,
         "entryRequeued" to entryRequeued,
         "sessionAbandoned" to sessionAbandoned,

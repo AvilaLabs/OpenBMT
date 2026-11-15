@@ -35,9 +35,9 @@ object BoxWords {
     /** A phone with no settings needs today's price of a bitcoin to start them. */
     val priceNeeded = w(
         Tones.INFO, "Price for the Box",
-        "This phone holds no settings yet, and the starting limits are in dollars, so it needs today's price of a bitcoin.",
+        "The starting limits are set in US dollars whatever money the shop takes, so this phone needs today's price of a bitcoin in US dollars.",
         Who.OWNER,
-        "Type today's price of one bitcoin in whole dollars, then queue the Box.",
+        "Type today's price of one bitcoin in whole US dollars, then queue the Box.",
     )
 
     /** The same words as for a counter: the phone is asking the price sources (OA-101). */

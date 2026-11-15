@@ -660,9 +660,11 @@ own; the library judges sales and prices and knows nothing of them.
   app has the proxy: the built-in Tor's port once Tor has a circuit, or, with
   Orbot, the answer to a SOCKS5 greeting. If it has none, nothing is sent
   around it: the node is not started, no price is fetched, and the app says
-  so (CR-204 for the built-in Tor; for Orbot "Tor is on for this shop, but
-  Orbot is not running." and "Open Orbot and turn it on. If it listens at
-  another address, the manager can change it under Network."). The Network
+  so (CR-204 for the built-in Tor; for Orbot "Orbot is off", "Tor is on for
+  this shop, and this counter uses the Orbot app for it, but Orbot is not
+  running." and "Open the Orbot app, turn it on, then come back here. If
+  Orbot listens at another address, the manager can change it under
+  Network."). The Network
   screen, reached from home and from that screen, holds the proxy's address
   of Orbot; it is saved behind the manager's PIN. The manager is the one who
   acts. This is NR-26 applied: the proxy is the caller's. The node enforces
@@ -1553,9 +1555,10 @@ RT-03, RT-24).
   Orbot", "This app sends everything through Orbot, which must be installed
   and running." and "Keep Orbot running. To stop needing it, choose Built-in
   Tor."
-- **CR-204.** With the built-in Tor the screen says "Starting Tor", "This app
-  is connecting to the Tor network, which can take up to a minute." and "Wait
-  on this screen." while the app waits, for up to 90 seconds, for Tor's first
+- **CR-204.** With the built-in Tor the screen says "Starting Tor", "This
+  counter is connecting to the Tor network. It can take up to a minute, so
+  open the app a few minutes before the first sale." and "Wait on this
+  screen." while the app waits, for up to 90 seconds, for Tor's first
   circuit. If Tor stops, does not load, does not connect in time, or does not
   answer, nothing is sent: the node is not started, no price is fetched, and
   the screen says "Tor did not start", "This app could not connect to the Tor

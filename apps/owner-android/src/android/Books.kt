@@ -59,7 +59,7 @@ private fun Controller.saveBooks(file: BooksModel.SaveFile, msg: Slot) {
     saveBytes(
         file.name, file.bytes, "text/csv",
         cancelled = { msg.show() },
-        saved = { msg.show(ui.words(AppWords.booksSaved)) },
+        saved = { msg.show(ui.words(if (file.ledger) AppWords.ledgerSaved else AppWords.booksSaved)) },
         failed = { msg.show(ui.words(it)) },
     )
 }

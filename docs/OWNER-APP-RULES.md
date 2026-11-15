@@ -972,8 +972,13 @@ signs batches, settings and pairings, are never in the service.
   only when the library made that file. Each opens the system's save picker with
   a name like `openbmt-accounting-2026-11.csv` or `openbmt-ledger-2026-11.csv`,
   for the newest month of the books, and writes exactly the bytes the library
-  gave, then says "File saved", "The file is saved where you chose. It holds
-  sale numbers, times and amounts, and no addresses." and "Give it to your
+  gave. The accounting file then says "File saved", "The accounting file is
+  saved where you chose. Each line has a date, a sale number and an amount,
+  and no addresses or payment IDs." and "Give it to your bookkeeper. The full
+  ledger also has the payment IDs."; the full ledger says "Full ledger
+  saved", "The full ledger is saved where you chose. It has each sale's
+  payment IDs and value, so it shows the shop's payments on the blockchain."
+  and "Share it only with people you trust with that, such as your
   bookkeeper." A refusal of the library is shown in its own words, and then
   no file is offered for what was refused and nothing is written.
 

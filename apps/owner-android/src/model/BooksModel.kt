@@ -12,8 +12,11 @@ object BooksModel {
     /** One row of the page: the day as the title and its totals as the sub. */
     class Row(val date: String, val totals: String)
 
-    /** A file the owner can save: the name the picker starts with, and exactly the bytes the library made. */
-    class SaveFile(val name: String, val bytes: ByteArray)
+    /**
+     * A file the owner can save: the name the picker starts with, exactly the bytes the library made, and whether it is
+     * the full ledger (BK-19), which is told apart once saved because it holds what the accounting file leaves out.
+     */
+    class SaveFile(val name: String, val bytes: ByteArray, val ledger: Boolean = false)
 
     class Page(
         val rows: List<Row>,
@@ -51,7 +54,7 @@ object BooksModel {
         fun accept(): SaveFile? {
             if (!open) return null
             open = false
-            return SaveFile(name, make(true))
+            return SaveFile(name, make(true), ledger = true)
         }
     }
 

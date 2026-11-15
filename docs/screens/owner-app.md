@@ -41,9 +41,9 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | sharesNote | Equal shares | Each counter's share of the instant limit becomes 1/2. | Custom shares are set under Settings, in Change settings. | the owner |  |
 | sharesNoteOne | Equal shares | This is the only counter, so its share of the instant limit is all of it. | Custom shares are set under Settings, in Change settings. | the owner |  |
 | counterCompare | Compare the four words | Check that the counter shows these same four words, and that the Key app shows them too. | If they match, say so below. If they differ, say so and nothing is paired. | the owner |  |
-| counterPriceNeeded | Price needed | This phone holds no settings yet, and the starting limits are in dollars, so it needs today's price of a bitcoin. | Type today's price of one bitcoin in whole dollars, then say the words match. | the owner |  |
+| counterPriceNeeded | Price needed | The starting limits are set in US dollars whatever money the shop takes, so this phone needs today's price of a bitcoin in US dollars. | Type today's price of one bitcoin in whole US dollars, then say the words match. | the owner |  |
 | counterPriceFetching | Getting today's price | This phone is asking the price sources for the price of one bitcoin, through Tor. | Wait a moment. If they do not answer, you can type the price. | nobody |  |
-| counterPriceFetched | Today's price | The price sources give 98,500 dollars for one bitcoin. The starting limits are worked out from it. | If it looks right, say the words match. To use another price, type it below. | the owner |  |
+| counterPriceFetched | Today's price | The price sources give 98,500 US dollars for one bitcoin. The starting limits are worked out from it. | If it looks right, say the words match. To use another price, type it below. | the owner |  |
 | priceNotRead | Price not read | The price of a bitcoin is a whole number of dollars above 0, so nothing was queued. | Type today's price of one bitcoin in whole dollars, like 98500. | the owner |  |
 | counterCancelled | Counter not added | The four words did not match, so the counter's request was taken out of the queue. | Start again on the counter, and scan the new code it shows. | the owner |  |
 | counterNotPaired | Counter not paired | The Key app did not approve this counter, so no code for it was made. | Read the words above, then scan the counter's code again to start over. | the owner |  |
@@ -86,7 +86,8 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | cashOutPrice | Today's price | The price sources give 98,500 dollars for one bitcoin. The books record this cash-out at that price. | If it looks right, go on. To use another price, type it below. | the owner |  |
 | cashOutPriceNeeded | Price needed | The price sources did not answer, and the books need what this cash-out is worth. | Type the price of one bitcoin, then go on. | the owner |  |
 | booksEmpty | No sales yet | No counter has sent a sale to this phone yet. | Nothing to do. Sales appear here as the counters report them. | nobody |  |
-| booksSaved | File saved | The file is saved where you chose. It holds sale numbers, times and amounts, and no addresses. | Give it to your bookkeeper. | the owner |  |
+| booksSaved | File saved | The accounting file is saved where you chose. Each line has a date, a sale number and an amount, and no addresses or payment IDs. | Give it to your bookkeeper. The full ledger also has the payment IDs. | the owner |  |
+| ledgerSaved | Full ledger saved | The full ledger is saved where you chose. It has each sale's payment IDs and value, so it shows the shop's payments on the blockchain. | Share it only with people you trust with that, such as your bookkeeper. | the owner |  |
 | entryCancelled | Entry cancelled | The entry is taken out of the queue. | Nothing to do. | nobody |  |
 | entryRequeued | Entry queued again | The entry that was sent back is in the queue again. | Start an approval when the Key app is at hand. | the owner |  |
 | sessionAbandoned | Approval abandoned | The open approval is closed, and its entries are back in the queue. | Nothing to do. Start a new approval when the Key app is at hand. | nobody |  |
@@ -175,9 +176,9 @@ the library (`docs/screens/owner.md`, `docs/screens/owner-node.md`,
 | editField_customer_wifi | Customers can join the Wi-Fi | Whether customers can join the Wi-Fi a counter is on, or you are not sure. No removes a Tor requirement. | Choose Yes or unsure, or No. | the owner |  |
 | boxAddressNotRead | Address not read | The Box's address is host:port on your network, or a v3 .onion name and a port, so nothing was tried. | Type it again, for example 192.168.1.20:8080. | the owner |  |
 | boxLooking | Looking for the Box | The phone is asking the Box for its claim, which can take up to a minute. | Wait on this screen. | the owner |  |
-| boxPriceNeeded | Price for the Box | This phone holds no settings yet, and the starting limits are in dollars, so it needs today's price of a bitcoin. | Type today's price of one bitcoin in whole dollars, then queue the Box. | the owner |  |
+| boxPriceNeeded | Price for the Box | The starting limits are set in US dollars whatever money the shop takes, so this phone needs today's price of a bitcoin in US dollars. | Type today's price of one bitcoin in whole US dollars, then queue the Box. | the owner |  |
 | boxPriceFetching | Getting today's price | This phone is asking the price sources for the price of one bitcoin, through Tor. | Wait a moment. If they do not answer, you can type the price. | nobody |  |
-| boxPriceFetched | Today's price | The price sources give 98,500 dollars for one bitcoin. The starting limits are worked out from it. | If it looks right, say the words match. To use another price, type it below. | the owner |  |
+| boxPriceFetched | Today's price | The price sources give 98,500 US dollars for one bitcoin. The starting limits are worked out from it. | If it looks right, say the words match. To use another price, type it below. | the owner |  |
 | boxCompare | Compare the four words | The Box shows four words on its own screen. They must be the same as these, and the Key app will show them too. | If they differ, go back. Nothing is paired until the Key app approves. | the owner |  |
 | boxQueued | Box queued | The Box's claim and the settings that add it wait for the Key app. | Build the request for the Key app, approve there, and bring its response back. | the owner |  |
 | boxHanding | Handing over the welcome | The Box is being given its welcome and the settings, which can take up to a minute. | Wait on this screen. | the owner |  |
@@ -684,7 +685,7 @@ core's own words, which the binding does not carry yet:
 | SS34_PATCH_UNKNOWN_WHY | This phone does not say when it was last updated, so it may lack fixes for known attacks. |
 | SS33_OVERLAY_NOTE | Android does not show every app that can draw over others, so one may be on this phone and not be listed here. |
 | SS33_CONFIRM_BUTTON | Go on anyway |
-| SS33_CONFIRM_AGAIN | Each thing below was found on this phone. Go on only if you understand it. |
+| SS33_CONFIRM_AGAIN | Each thing below was found on this phone. Go on only if you understand it. If someone else set up this phone for you, ask them about each one first. |
 | SS35_TITLE | Your limit and your date |
 | SS35_WHY | If this phone is stolen or infected, someone could take what the starter wallet holds, and never more than your limit. Choose the most you would be OK losing. |
 | SS35_EXAMPLE | For example, a day's takings or less. |
@@ -693,7 +694,7 @@ core's own words, which the binding does not carry yet:
 | SS35_LIMIT_LABEL | Most it may hold |
 | SS35_PRICE_LABEL | Price of one bitcoin |
 | SS35_DATE_LABEL | Move to a wallet kept offline by |
-| SS32_BOX_ONLY | Payments from the starter wallet show on the counters only once the shop has a Box. Until then, this phone alone shows them. |
+| SS32_BOX_ONLY | Payments from the starter wallet show on the counters only once the shop has a Box, a small computer that stays on at home or in the shop. Until then, this phone alone shows them. |
 | SS38_STOP_LABEL | Stop bitcoin sales above my limit |
 | SS35_LIMIT_INVALID | Type the most the starter wallet may hold, as a whole number. |
 | SS35_DATE_INVALID | Type a date after today. |

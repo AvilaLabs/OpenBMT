@@ -297,7 +297,7 @@ object AppWords {
 
     val torStarting = w(
         Tones.INFO, "Starting Tor",
-        "This app is connecting to the Tor network, which can take up to a minute.",
+        "This counter is connecting to the Tor network. It can take up to a minute, so open the app a few minutes before the first sale.",
         Who.NOBODY,
         "Wait on this screen.",
     )
@@ -310,10 +310,10 @@ object AppWords {
     )
 
     val orbotNotRunning = w(
-        Tones.STOP, "Tor is not running",
-        "Tor is on for this shop, but Orbot is not running.",
+        Tones.STOP, "Orbot is off",
+        "Tor is on for this shop, and this counter uses the Orbot app for it, but Orbot is not running.",
         Who.MANAGER,
-        "Open Orbot and turn it on. If it listens at another address, the manager can change it under Network.",
+        "Open the Orbot app, turn it on, then come back here. If Orbot listens at another address, the manager can change it under Network.",
     )
 
     // ---- the PIN -------------------------------------------------------------------------

@@ -95,8 +95,8 @@ object AppModelTest {
         val all = AppWords.all()
         for ((name, w) in all) ok(SayCheck.problem(w) == null, "words of $name: ${SayCheck.problem(w)}")
         ok(SayCheck.distinctProblem(all) == null, "no two words read the same: ${SayCheck.distinctProblem(all)}")
-        ok(AppWords.orbotNotRunning.what == "Tor is on for this shop, but Orbot is not running.", "the Orbot words, as written down")
-        ok(AppWords.orbotNotRunning.next == "Open Orbot and turn it on. If it listens at another address, the manager can change it under Network.", "the Orbot next step")
+        ok(AppWords.orbotNotRunning.what == "Tor is on for this shop, and this counter uses the Orbot app for it, but Orbot is not running.", "the Orbot words, as written down")
+        ok(AppWords.orbotNotRunning.next == "Open the Orbot app, turn it on, then come back here. If Orbot listens at another address, the manager can change it under Network.", "the Orbot next step")
         ok(AppWords.orbotNotRunning.who == Who.MANAGER, "the manager does it")
         ok(AppWords.lightningRefundCash.who == Who.CASHIER && AppWords.lightningRefundCash.next == "Give the refund in cash from the till.", "a Lightning-paid sale is refunded in cash by the cashier")
         ok(AppWords.pinWrong(4).tone == Tones.STOP && AppWords.pinWrong(4).next.contains("4 seconds"), "a wrong PIN says how long")
@@ -1353,7 +1353,7 @@ object AppModelTest {
     }
 
     private fun cr204TorFailsTests(appDir: File?) {
-        ok(AppWords.torStarting.heading == "Starting Tor" && AppWords.torStarting.what == "This app is connecting to the Tor network, which can take up to a minute." && AppWords.torStarting.next == "Wait on this screen." && AppWords.torStarting.who == Who.NOBODY, "CR-204: the words while it connects, as written down")
+        ok(AppWords.torStarting.heading == "Starting Tor" && AppWords.torStarting.what == "This counter is connecting to the Tor network. It can take up to a minute, so open the app a few minutes before the first sale." && AppWords.torStarting.next == "Wait on this screen." && AppWords.torStarting.who == Who.NOBODY, "CR-204: the words while it connects, as written down")
         ok(AppWords.torFailed.heading == "Tor did not start" && AppWords.torFailed.what == "This app could not connect to the Tor network." && AppWords.torFailed.next == "Check that the phone is online, then try again. If it keeps failing, choose Use Orbot." && AppWords.torFailed.who == Who.OWNER && AppWords.torFailed.tone == Tones.STOP, "CR-204: the words when it did not, as written down")
         ok(ScreenModel.pick(null, SetupStatus(true, true, true), AppWords.torFailed, false).let { it is Screen.TorBlocked && it.words === AppWords.torFailed }, "CR-204: a failed Tor is a screen of its own, before the node's")
         ok(AppWords.all().map { it.first }.containsAll(listOf("torBuiltIn", "torUsesOrbot", "torStarting", "torFailed")), "the four words are in the list")
