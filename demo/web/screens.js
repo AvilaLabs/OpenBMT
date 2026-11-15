@@ -4,15 +4,16 @@
 // Android apps roughly. Loaded by the page before demo.js, and by Node.
 "use strict";
 
-// Words of the owner phone's lines. Still to be written: TODO_WORDS_ placeholders.
+// Words of the owner phone's lines.
 const OWNER_WORDS = {
-  nothing: "TODO_WORDS_owner_nothing_yet",
-  heading: "TODO_WORDS_owner_heading",
-  id: "TODO_WORDS_owner_sale_id",
-  amount: "TODO_WORDS_owner_amount",
-  state: "TODO_WORDS_owner_state",
-  counting: "TODO_WORDS_owner_counting",
-  sats: "TODO_WORDS_owner_sats",
+  nothing: "No sales yet. A sale shows here as soon as the counter sends it.",
+  heading: "Latest sale",
+  id: "Sale",
+  amount: "Amount",
+  state: "State",
+  counting: "In the books as",
+  sats: "Received",
+  notYet: "nothing counted yet",
 };
 
 // The words of a counter reply: a sale's come with the reply (the library's
@@ -98,7 +99,7 @@ function renderPhone(doc, root, reply) {
   } else {
     body.append(el(doc, "p", "obd-heading", OWNER_WORDS.heading));
     const dl = el(doc, "dl", "obd-record");
-    const sats = o.sats_received === null ? o.sats_received_why : satsText(o.sats_received);
+    const sats = o.sats_received === null ? OWNER_WORDS.notYet : satsText(o.sats_received) + " sats";
     const rows = [
       [OWNER_WORDS.id, o.id],
       [OWNER_WORDS.amount, o.amount + " " + o.currency],

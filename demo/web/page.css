@@ -53,7 +53,7 @@ a:focus-visible, button:focus-visible { outline: 3px solid var(--cyan); outline-
   color: var(--blue);
 }
 h1 {
-  margin: 0; max-width: 15ch;
+  margin: 0; max-width: 17ch;
   font: 300 clamp(40px, 6vw, 86px)/1.02 var(--sans);
   letter-spacing: -.035em; color: var(--blue);
 }
@@ -87,7 +87,7 @@ h1 {
   color: #fff;
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(220px, .8fr) minmax(0, 1fr);
-  align-items: center;
+  align-items: start;
   gap: clamp(20px, 3vw, 48px);
   padding: clamp(36px, 5vw, 72px) clamp(16px, 5.5vw, 80px);
 }
@@ -115,7 +115,7 @@ h1 {
 .phone .glass { aspect-ratio: 9 / 19.5; border-radius: 26px; }
 
 /* You: the customer and the network */
-.you { display: flex; flex-direction: column; gap: 18px; }
+.you { display: flex; flex-direction: column; gap: 18px; align-self: center; }
 .you-head {
   margin: 0;
   font: 300 clamp(21px, 1.9vw, 28px)/1.18 var(--sans); letter-spacing: -.01em;
@@ -136,6 +136,17 @@ h1 {
 .controls button:not(:disabled):hover { background: #fff; color: var(--blue); }
 .controls button:disabled { opacity: .38; cursor: default; }
 .controls button::after { content: "→"; }
+.controls label {
+  display: flex; flex-direction: column; gap: 6px;
+  font: 400 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: rgba(255,255,255,.7);
+}
+.controls input {
+  font: 300 26px var(--sans); color: #fff; background: transparent;
+  border: 0; border-bottom: 1px solid rgba(255,255,255,.55); padding: 4px 0 6px; width: 100%;
+}
+.controls input:focus-visible { outline: none; border-bottom-color: var(--cyan); }
+.controls .obd-status:empty { display: none; }
+.controls .obd-problem { margin: 0; font-size: 13px; color: var(--cyan); }
 .restart {
   border: 0; padding: 4px 0; justify-content: flex-start;
   font: 400 13px var(--mono); letter-spacing: .08em; text-transform: uppercase;

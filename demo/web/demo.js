@@ -4,16 +4,14 @@
 // loaded by demo.test.js, which drives the shop flow without a page.
 "use strict";
 
-// The words of the controls are still to be written (TODO_WORDS_
-// placeholders), but for the two the brief names.
+// The words of the controls.
 const CONTROL_WORDS = {
-  amount: "TODO_WORDS_amount_label",
-  newSale: "TODO_WORDS_new_sale",
+  amount: "Sale amount, US dollars",
+  newSale: "Ring up the sale",
   customerPays: "Customer pays",
-  letTimePass: "TODO_WORDS_let_time_pass",
+  letTimePass: "Let 10 seconds pass",
   mine: "Mine a block",
-  amountNotAccepted: "TODO_WORDS_amount_not_accepted",
-  chainLine: "TODO_WORDS_chain_line",
+  amountNotAccepted: "Type an amount from 0.01 to 1000000 dollars, then ring up the sale.",
 };
 
 // The seconds "let time pass" moves the clock: more than the counter's
@@ -46,13 +44,17 @@ function stepOf(reply) {
   if (c.kind !== "sale") return "saleReady";
   switch (c.state) {
     case "NotPaidYet":
-    case "PartPaid":
       return "showingCode";
+    case "PartPaid":
+      return "partPaid";
     case "Waiting":
+      return "waiting";
     case "PaidInstant":
-      return "seenUnconfirmed";
+      return "paidInstant";
+    case "Final":
+      return "final";
     default:
-      return "paid";
+      return "confirmed";
   }
 }
 
@@ -142,7 +144,6 @@ function startPage(doc, demo, appWords) {
   function draw(reply) {
     Screens.renderPos(doc, doc.getElementById("pos-screen"), reply, appWords.counter);
     Screens.renderPhone(doc, doc.getElementById("phone-screen"), reply);
-    status.textContent = CONTROL_WORDS.chainLine + " " + reply.height + " / " + reply.mempool + " / " + reply.clock;
     const sale = reply.counter.sale;
     pays.disabled = !sale || sale.customer_paid;
     pass.disabled = !sale;

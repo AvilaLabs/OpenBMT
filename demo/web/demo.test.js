@@ -86,8 +86,8 @@ test("the shop flow: set up, a sale, the customer pays, a block, final", () => {
   assert.equal(r.height, 106);
 
   assert.deepEqual(steps, [
-    "saleReady", "showingCode", "seenUnconfirmed", "seenUnconfirmed", "paid",
-    "paid", "paid", "paid", "paid", "paid",
+    "saleReady", "showingCode", "waiting", "paidInstant", "confirmed",
+    "confirmed", "confirmed", "confirmed", "confirmed", "final",
   ]);
   assert.equal(r.chain.blocks.length, 6);
   assert.deepEqual(r.chain.blocks.map((b) => b.ours), [true, false, false, false, false, false]);

@@ -17,9 +17,3 @@
 .obd-record dt { color: #555; }
 .obd-record dd { margin: 0; font-weight: 600; word-break: break-word; }
 
-.obd-controls { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; justify-content: center; }
-.obd-controls button { padding: 0.6rem 1rem; font: inherit; border-radius: 0.5rem; border: 1px solid #333; background: #fff; }
-.obd-controls button:disabled { color: #999; border-color: #ccc; }
-.obd-controls input { width: 7rem; padding: 0.4rem; font: inherit; }
-.obd-status { flex-basis: 100%; text-align: center; color: #555; font-size: 0.9rem; margin: 0; }
-.obd-problem { flex-basis: 100%; text-align: center; color: #8a1c1c; margin: 0; }

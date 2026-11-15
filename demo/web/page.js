@@ -9,10 +9,13 @@
 // What the visitor is told at each step, by the state names demo.js sends.
 const STEPS = {
   starting: "Starting the apps…",
-  saleReady: "Type an amount on the counter and show the customer the code.",
-  showingCode: "The counter shows a code for this sale. As the customer, pay it.",
-  seenUnconfirmed: "The payment is on its way, waiting to be mined. The counter applies the shop's rule for payments not yet in a block.",
-  paid: "The payment is in a block. The counter says paid, and the owner's phone has the sale in its books.",
+  saleReady: "Type an amount and ring up the sale. The counter makes a code for it.",
+  showingCode: "The counter shows the sale's code. You are the customer now: pay it.",
+  partPaid: "Less than the amount has arrived. The counter asks for the rest.",
+  waiting: "The payment has arrived but is not in a block yet. A small sale is accepted after a short watch for a second payment of the same coins: let 10 seconds pass. A larger one waits for a block: mine one.",
+  paidInstant: "Accepted without waiting for a block, as the shop's rule allows for small sales. The owner's phone has it as paid at once. Mine a block to confirm it.",
+  confirmed: "The payment is in a block. Each block mined on top makes it harder to undo; at six the owner's books count it as final.",
+  final: "Six blocks deep: the sale is final in the owner's books. Ring up another, or start over.",
 };
 
 const shown = { blocks: new Set() };
