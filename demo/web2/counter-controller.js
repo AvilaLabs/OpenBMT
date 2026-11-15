@@ -44,7 +44,7 @@
   }
 
   /**
-   * Controller.kt:94 Controller(act): the controller of the counter. [host] is the page's side:
+   * Controller.kt:95 Controller(act): the controller of the counter. [host] is the page's side:
    *   flow    CounterFlowDemo of the model module;
    *   chain   the pretend chain's controls (counter-host.mjs);
    *   clock   {now()}: the page's clock, in seconds;
@@ -57,28 +57,28 @@
     let showing = "home";
     let sale = null;
 
-    /** Controller.kt:212 nowSecs(): the page's clock, in seconds since 1970. */
+    /** Controller.kt:234 nowSecs(): the page's clock, in seconds since 1970. */
     function nowSecs() {
       return host.clock.now();
     }
 
-    /** Controller.kt:349 startNode(): the node is started on the pairing record and takes its first events. */
+    /** Controller.kt:375 startNode(): the node is started on the pairing record and takes its first events. */
     function startNode() {
       flow.start("/demo/counter", nowSecs(), host.chain.record());
     }
 
-    /** Controller.kt:643 onPump(reported): the open screen is made again from the library's state when it changed. */
+    /** Controller.kt:676 onPump(reported): the open screen is made again from the library's state when it changed. */
     function onPump(reported) {
       if (reported && tick) tick();
     }
 
-    /** Controller.kt:652 stopNode(): the node lets go of its folder. */
+    /** Controller.kt:685 stopNode(): the node lets go of its folder. */
     function stopNode() {
       tick = null;
       try { flow.stop(); } catch (e) { /* already stopped */ }
     }
 
-    /** Controller.kt:684 put(view, shown): [viewOf] is on the screen, with the open screen's tick cleared. */
+    /** Controller.kt:717 put(view, shown): [viewOf] is on the screen, with the open screen's tick cleared. */
     function put(viewOf, shown) {
       tick = null;
       showing = shown;
@@ -90,19 +90,19 @@
       showHome();
     }
 
-    /** Controller.kt:550 redraw(): the open screen is drawn again from the state. */
+    /** Controller.kt:580 redraw(): the open screen is drawn again from the state. */
     function redraw() {
       if (showing === "sale" && sale) showSale(sale.index, null, null);
       else showHome();
     }
 
-    /** Controller.kt:1067 counterLine(): the counter's line under the home screen; the model has its text. */
+    /** Controller.kt:1101 counterLine(): the counter's line under the home screen; the model has its text. */
     function counterLine(home) {
       return home.counterLine;
     }
 
     /**
-     * Controller.kt:1071 showHome(): the counter's home. The health card, the lines (the price here), the open
+     * Controller.kt:1105 showHome(): the counter's home. The health card, the lines (the price here), the open
      * requests and the counter's line are the model's; the tiles are the app's. New sale opens the keypad. The
      * screen is made again when what it says changes.
      */
@@ -133,13 +133,13 @@
       host.event("home", {});
     }
 
-    /** Controller.kt:1859 priceWords(): the price line of the keypad: the model's words for the pretend price. */
+    /** Controller.kt:1900 priceWords(): the price line of the keypad: the model's words for the pretend price. */
     function priceWords() {
       return flow.priceWords();
     }
 
     /**
-     * Controller.kt:1893 showNewSale(): the amount of the sale, the keys, and Open the sale. The entry is the model's
+     * Controller.kt:1934 showNewSale(): the amount of the sale, the keys, and Open the sale. The entry is the model's
      * (AmountEntry): a key calls it and the display shows what it says.
      */
     function showNewSale() {
@@ -165,7 +165,7 @@
     }
 
     /**
-     * Controller.kt:2012 chooseTip(amountMinor, refused): the sale opens at once when the counter offers no tip, which
+     * Controller.kt:2073 chooseTip(amountMinor, refused): the sale opens at once when the counter offers no tip, which
      * is how the demo shop's settings have it; the screen of tips (showTip) is not ported.
      */
     function chooseTip(amountMinor, refused) {
@@ -174,7 +174,7 @@
       return choices;
     }
 
-    /** Controller.kt:2094 openSale(amountMinor, tipMinor, refused): the model opens the sale, and its screen shows. */
+    /** Controller.kt:2155 openSale(amountMinor, tipMinor, refused): the model opens the sale, and its screen shows. */
     function openSale(amountMinor, tipMinor, refused) {
       let index;
       try {
@@ -186,7 +186,7 @@
     }
 
     /**
-     * Controller.kt:2121 showSale(index, first, notice): one screen that changes with the state. Not paid yet and part
+     * Controller.kt:2182 showSale(index, first, notice): one screen that changes with the state. Not paid yet and part
      * paid show the amount, the code and the next step on the page; every other state is the whole screen in the colour
      * of its outcome. The model works out the screen from the library's judgment; it is drawn again when what it says
      * changes (its signature).
