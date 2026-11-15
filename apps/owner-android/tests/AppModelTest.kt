@@ -793,8 +793,9 @@ object AppModelTest {
             }
         }
         val gate = source("src/model/TorGate.kt")
-        ok(Regex("Socket\\(").findAll(gate).count() == 1 && gate.contains("write(byteArrayOf(5, 1, 0))"), "the one socket is the greeting to the proxy")
-        ok(!gate.contains("URL"), "no URL in the gate")
+        val probe = source("src/model/Socks5Probe.kt")
+        ok(Regex("Socket\\(").findAll(probe).count() == 1 && probe.contains("write(byteArrayOf(5, 1, 0))"), "the one socket is the greeting to the proxy")
+        ok(!gate.contains("Socket(") && !gate.contains("URL") && !probe.contains("URL"), "no other socket and no URL in the gate")
         // The till's fetcher is the one other place, and it opens one connection through the proxy of OA-05.
         val fetcher = source("src/android/HttpsPosFetcher.kt")
         ok(Regex("openConnection\\(").findAll(fetcher).count() == 1 && fetcher.contains("Proxy.Type.SOCKS"), "the fetcher opens one connection, through the proxy")
