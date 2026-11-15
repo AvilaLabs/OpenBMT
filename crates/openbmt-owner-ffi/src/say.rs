@@ -389,36 +389,12 @@ const RULES: &[Entry] = &[
         "Nothing to do. Read the alarms again.",
     ),
     (
-        "paid-not-kept",
-        Kind::State,
-        "Checks not kept",
-        "This phone could not read back its record of the counter checks.",
-        Who::Owner,
-        "Clear the checks to start them again.",
-    ),
-    (
-        "paid-full",
-        Kind::State,
-        "Too many alarms",
-        "Every check this phone keeps is an alarm that was not cleared, so it cannot keep another.",
-        Who::Owner,
-        "Clear the alarms you have dealt with, then try again.",
-    ),
-    (
         "paid-store",
         Kind::Store,
         "Checks not saved",
         "This phone could not write its record of the counter checks, so nothing was changed.",
         Who::Owner,
         "Try again. If it happens again, free some space on the phone.",
-    ),
-    (
-        "paid-facts",
-        Kind::Refused,
-        "Counter's records not read",
-        "The records of a counter do not read as a counter's, so none of the counters' sales were checked.",
-        Who::Owner,
-        "Check the counter that shows a problem. See Details.",
     ),
     (
         "note-unknown",
@@ -689,6 +665,30 @@ pub(crate) fn link_alert_words(alert: &openbmt_owner_node::Alert) -> Words {
             "Open the alerts to see the sale, and check the counter.",
         )
         .code("OC-62"),
+        Alert::PaidUnreadable { .. } => Words::new(
+            Tone::Stop,
+            "Counter cannot be checked",
+            "The records of a counter do not read as sales, so this phone cannot check the payments of its sales.",
+            Who::Owner,
+            "Check the counter: it may have been tampered with.",
+        )
+        .code("OC-61"),
+        Alert::PaidNotKept { full: false } => Words::new(
+            Tone::Stop,
+            "Checks not kept",
+            "This phone could not read back its record of the counter checks.",
+            Who::Owner,
+            "Clear the checks to start them again.",
+        )
+        .code("OC-64"),
+        Alert::PaidNotKept { full: true } => Words::new(
+            Tone::Stop,
+            "Checks not kept",
+            "This phone's record of the counter checks is full, so new checks are shown but not kept.",
+            Who::Owner,
+            "Clear the checks you have dealt with.",
+        )
+        .code("OC-64"),
     }
 }
 
@@ -790,6 +790,16 @@ pub fn all_words() -> Vec<(String, Words)> {
         out.push((
             "alert-paid-not-seen".to_string(),
             link_alert_words(&Alert::PaidNotSeen { counter, sale: 7 }),
+        ));
+        out.push((
+            "alert-paid-unreadable".to_string(),
+            link_alert_words(&Alert::PaidUnreadable { counter }),
+        ));
+    }
+    for full in [false, true] {
+        out.push((
+            format!("alert-paid-not-kept-{full}"),
+            link_alert_words(&Alert::PaidNotKept { full }),
         ));
     }
     out.push(("counter-none".to_string(), counter_words(None, None, None)));

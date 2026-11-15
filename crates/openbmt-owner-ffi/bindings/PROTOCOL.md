@@ -261,7 +261,7 @@ CashPriceView: record: currency: string, whole_per_btc: u64
 CashOutArgs: record: address: string, amount: CashAmountView, label: string, price: option<CashPriceView>
 BatchArgs: record: counter: list<u8>, start: u32, count: u32
 AlertKind: enum, one tag byte
-    tags MissedCheckIn=0 Diverged=1 BatchUndelivered=2 PaidNotSeen=3
+    tags MissedCheckIn=0 Diverged=1 BatchUndelivered=2 PaidNotSeen=3 PaidUnreadable=4 PaidNotKept=5
 ClearArgs: record: kind: AlertKind, counter: list<u8>, value: u64
 Words: record: tone: u8, who: u8, heading: str16, what: str16, next: str16, code: option<str16>, at: option<u64>, quoted: option<(str16, str16)>, detail: option<str16>; a str16 is a u16 length and UTF-8
 Key1Args: record: network: OwnerNetwork, show_words: bool
@@ -336,10 +336,10 @@ ShopLightningEditArgs: record: action: ShopLightningAction, counter: option<list
 ShopLightningClass: enum, one tag byte
     tags Free=0 Loosen=1 Redirect=2
 ShopLightningPreviewView: record: version: u32, class: ShopLightningClass, needs_key_app: bool, nothing_changed: bool, after: option<ShopLightningHeldView>, settings: list<u8>
-PaidAlarmView: record: counter: list<u8>, sale: u32, cashier: string, recorded_sats: u64, seen_sats: u64, paid_at: u64, raised_at: u64
+PaidAlarmView: record: counter: list<u8>, sale: u32, cashier: string, recorded_sats: u64, seen_sats: u64, first_read: u64, raised_at: u64
 PaidArrivedView: record: counter: list<u8>, sale: u32, cleared_at: u64
-PaidSaleLineView: record: counter: list<u8>, sale: u32, recorded_sats: u64, paid_at: u64
-PaidCheckView: record: kept: bool, alarms: list<PaidAlarmView>, arrived: list<PaidArrivedView>, waiting: list<PaidSaleLineView>, not_checkable: list<PaidSaleLineView>, not_checkable_more: u32
+PaidSaleLineView: record: counter: list<u8>, sale: u32, recorded_sats: u64, first_read: u64
+PaidCheckView: record: kept: bool, full: bool, unreadable: list<list<u8>>, alarms: list<PaidAlarmView>, arrived: list<PaidArrivedView>, waiting: list<PaidSaleLineView>, not_checkable: list<PaidSaleLineView>, not_checkable_more: u32
 PaidDayArgs: record: now: u64, offset_secs: i32
 PaidDayView: record: counter: list<u8>, sales: u32, total_sats: u64, seen: u32, waiting: u32, too_old: u32, missing: u32, seen_sats: u64, differs: bool
 PaidClearArgs: record: now: u64, counter: list<u8>, sale: u32

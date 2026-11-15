@@ -14,21 +14,23 @@ import org.openbmt.owner.OwnerNode
 /**
  * The alarms of the Alerts page: each sale a counter showed paid that this phone does not see, with a button that
  * clears it (OC-62), the lines of payments that arrived since, and the sales waiting for a block or too old to check
- * (OC-61). When the checks cannot be kept, the page says so and offers to clear them (OC-64). [again] shows the page
+ * (OC-61), and the counters whose records cannot be read. When the checks cannot be kept or are full, the page says so and offers to clear them, and still shows what it found (OC-64). [again] shows the page
  * again, with the words of what was just done.
  */
 internal fun Controller.paidCheckViews(n: OwnerNode, msg: Slot, again: () -> Unit): List<View> {
     val check = attempt(msg) { n.paidCheck(nowSecs()) } ?: return emptyList()
-    if (!check.kept) {
-        return listOf(
+    val out = ArrayList<View>()
+    // Marks that are not kept or full do not stop the check: the alarms still show below (OC-64).
+    if (!check.kept || check.full) {
+        out.add(
             stack(
-                ui.words(PaidCheckWords.notKept),
+                ui.words(if (check.kept) PaidCheckWords.full else PaidCheckWords.notKept),
                 ui.button(PaidCheckWords.clearButton) { if (attempt(msg) { n.paidCheckReset() } != null) again() },
                 gap = 10,
             ),
         )
     }
-    val out = ArrayList<View>()
+    for (c in check.unreadable) out.add(ui.words(PaidCheckWords.unreadable(c)))
     for (a in check.alarms) {
         out.add(
             stack(
@@ -54,7 +56,7 @@ internal fun Controller.paidCheckViews(n: OwnerNode, msg: Slot, again: () -> Uni
 /**
  * The day summary of the Books page (OC-63): a line for each counter that has a sale paid on chain today, in the
  * phone's time zone. A counter whose total is not what was seen is named in strong type. Nothing when there is
- * no such sale, or when the checks cannot be kept (the Alerts page says so).
+ * no such sale, (a check that cannot be kept still gives its days; the Alerts page says so).
  */
 internal fun Controller.paidDayViews(n: OwnerNode, msg: Slot): List<View> {
     val offsetSecs = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 1000

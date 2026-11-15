@@ -15,12 +15,13 @@ pub struct PaidAlarmView {
     /// Who took the sale, as the counter recorded; empty when it names
     /// nobody.
     pub cashier: String,
-    /// What the counter recorded as received, in satoshis.
+    /// What the check expects, in satoshis: the most recorded or the amount
+    /// last quoted.
     pub recorded_sats: u64,
     /// What this phone sees paid to the sale's address, in satoshis.
     pub seen_sats: u64,
-    /// The time of the Paid, by the counter's clock.
-    pub paid_at: u64,
+    /// When this phone first read the Paid, by its clock.
+    pub first_read: u64,
     /// When the alarm was raised, by this phone's clock.
     pub raised_at: u64,
 }
@@ -31,7 +32,7 @@ wire_record!(PaidAlarmView {
     cashier,
     recorded_sats,
     seen_sats,
-    paid_at,
+    first_read,
     raised_at
 });
 
@@ -59,26 +60,31 @@ pub struct PaidSaleLineView {
     pub counter: Vec<u8>,
     /// The sale's number.
     pub sale: u32,
-    /// What the counter recorded as received, in satoshis.
+    /// What the check expects, in satoshis: the most recorded or the amount
+    /// last quoted.
     pub recorded_sats: u64,
-    /// The time of the Paid, by the counter's clock.
-    pub paid_at: u64,
+    /// When this phone first read the Paid, by its clock.
+    pub first_read: u64,
 }
 
 wire_record!(PaidSaleLineView {
     counter,
     sale,
     recorded_sats,
-    paid_at
+    first_read
 });
 
 /// What `paid_check` returns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaidCheckView {
     /// The checks keep their marks. False when the file of marks does not
-    /// read back: nothing is checked and every list is empty until
-    /// `paid_check_reset`.
+    /// read back or could not be written: the check still runs, on marks held
+    /// in memory, until `paid_check_reset`.
     pub kept: bool,
+    /// There are more marks than a file keeps.
+    pub full: bool,
+    /// The counters whose records do not read as sales, 32 bytes each.
+    pub unreadable: Vec<Vec<u8>>,
     /// The alarms not cleared, oldest first.
     pub alarms: Vec<PaidAlarmView>,
     /// Alarms that cleared themselves lately.
@@ -93,6 +99,8 @@ pub struct PaidCheckView {
 
 wire_record!(PaidCheckView {
     kept,
+    full,
+    unreadable,
     alarms,
     arrived,
     waiting,

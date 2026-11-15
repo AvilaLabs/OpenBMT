@@ -68,7 +68,7 @@ object PaidCheckWords {
             .replace("{counter}", counterName(a.counter))
             .replace("{number}", a.sale.toString())
             .replace("{amount}", Format.sats(a.recordedSats))
-            .replace("{time}", Format.localTime(a.paidAt))
+            .replace("{time}", Format.localTime(a.firstRead))
             .replace("{cashier}", Format.cleanForeign(a.cashier))
             .replace("{seen}", Format.sats(a.seenSats)),
         mismatchNext,
@@ -87,6 +87,17 @@ object PaidCheckWords {
     /** OC-64: the words of checks that cannot be kept. */
     val notKept: SayWords get() = said(notKeptHeading, notKeptWhat, notKeptNext, Tones.STOP)
 
+    /** OC-64: the words of marks that are full: new checks are shown but not kept. */
+    val full: SayWords get() = said(notKeptHeading, fullWhat, fullNext, Tones.STOP)
+
+    /** OC-61: the words of a counter whose records do not read as sales. */
+    fun unreadable(counter: ByteArray): SayWords = said(
+        unreadableHeading,
+        unreadableWhat.replace("{counter}", counterName(counter)),
+        unreadableNext,
+        Tones.STOP,
+    )
+
     /** OC-63: a counter's day. */
     fun day(d: PaidDay): String = dayLine
         .replace("{counter}", counterName(d.counter))
@@ -101,7 +112,7 @@ object PaidCheckWords {
     fun saleTitle(s: PaidSaleLine): String = counterName(s.counter) + " #" + s.sale
 
     /** What the counter recorded for it and when, as a row's second line. */
-    fun saleSub(s: PaidSaleLine): String = Format.sats(s.recordedSats) + ", " + Format.localTime(s.paidAt)
+    fun saleSub(s: PaidSaleLine): String = Format.sats(s.recordedSats) + ", " + Format.localTime(s.firstRead)
 
     /** The words the app says with, for the test that checks them (the alarm for a sample). */
     fun messages(sample: PaidAlarm): List<Pair<String, SayWords>> = listOf(
@@ -109,6 +120,8 @@ object PaidCheckWords {
         "waiting" to waiting,
         "notCheckable" to notCheckable,
         "notKept" to notKept,
+        "full" to full,
+        "unreadable" to unreadable(sample.counter),
     )
 
     /** Every key and its text, in order, for docs/screens/owner-app.md. */

@@ -123,10 +123,11 @@ pub use own::{
     WaitingStep, WaitingView, Watching, COINS_OF_FILE, OWN_STATE_FILE, OWN_WAITING_FILE,
 };
 pub use paid_check::{
-    check_paid, day_bounds, day_summary, paid_sales, paid_sales_from_chain, CheckResult,
-    DaySummary, MarkState, PaidCheckRefused, PaidChecks, PaidHow, PaidMark, PaidMarks, PaidSale,
-    PaidState, SaleCheck, MAGIC_PAID_CHECK, MAX_PAID_MARKS, PAID_ARRIVED_SHOWN_SECS,
-    PAID_CHECK_FILE, PAID_CHECK_WAIT_SECS,
+    check_paid, day_bounds, day_summary, default_tolerance_bps, gather, paid_sales,
+    paid_sales_from_chain, CheckResult, DaySummary, MarkState, PaidCheckRefused, PaidChecks,
+    PaidHow, PaidMark, PaidMarks, PaidSale, PaidSales, PaidState, PaidTrouble, SaleCheck,
+    MAGIC_PAID_CHECK, MAX_PAID_MARKS, PAID_ARRIVED_SHOWN_SECS, PAID_CHECK_FILE,
+    PAID_CHECK_WAIT_SECS,
 };
 pub use paid_log::{
     standing, value_at, PaidEntry, PaidLog, PaidValue, PaidWhat, Undone, MAGIC_PAID_LOG,

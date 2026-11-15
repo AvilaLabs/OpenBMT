@@ -4,6 +4,7 @@
 use openbmt_core::wire::DecodeError;
 use openbmt_counter::{Amount, Event, Role};
 use openbmt_owner::{SaleFacts, SaleKey};
+use openbmt_pos::FactsError;
 
 use super::pos::{at_once, link_with, opened};
 use super::refunds::{new_owner, view_with, DEPTH, TIP};
@@ -11,12 +12,14 @@ use super::*;
 use crate::coins::CoinView;
 use crate::facts::{verified_facts, FactsRefused};
 use crate::paid_check::{
-    check_paid, day_summary, paid_sales, paid_sales_from_chain, CheckResult, MarkState,
-    PaidCheckRefused, PaidChecks, PaidHow, PaidMarks, PaidSale, PaidState, MAGIC_PAID_CHECK,
-    MAX_PAID_MARKS, PAID_CHECK_FILE, PAID_CHECK_WAIT_SECS,
+    check_paid, day_summary, default_tolerance_bps, gather, paid_sales, paid_sales_from_chain,
+    CheckResult, MarkState, PaidCheckRefused, PaidChecks, PaidHow, PaidMarks, PaidSale, PaidState,
+    PaidTrouble, MAGIC_PAID_CHECK, MAX_PAID_MARKS, PAID_CHECK_FILE, PAID_CHECK_WAIT_SECS,
 };
 
 const PAID_AT: u64 = 1_800_000_000;
+/// The length of a mark in the file.
+const MARK: usize = 61;
 
 fn key(index: u32) -> SaleKey {
     SaleKey {
@@ -31,7 +34,7 @@ fn sale(index: u32, recorded: u64, how: PaidHow) -> PaidSale {
         index,
         cashier: "Ana".to_string(),
         recorded_sats: recorded,
-        paid_at: PAID_AT,
+        quoted_sats: 0,
         how,
         tolerance_bps: 50,
     }
@@ -53,16 +56,26 @@ fn state_of(result: &CheckResult, index: u32) -> PaidState {
         .unwrap()
 }
 
+/// The marks after the owner phone first read these sales at `at`, with the
+/// view not ready: nothing is judged, the readings are marked.
+fn read_at(sales: &[PaidSale], at: u64) -> PaidMarks {
+    let result = check_paid(sales, &PaidMarks::new(), at, |_| {
+        Err(FactsRefused::ViewNotReady)
+    });
+    PaidMarks::new().after(&result, at)
+}
+
 #[test]
-fn oc_60_a_paid_with_no_receipt_raises_the_alarm_after_the_wait_and_not_before() {
+fn oc_61_a_paid_with_no_receipt_raises_the_alarm_after_the_wait_and_not_before() {
     let view = view_with(&[]);
     let sales = [sale(0, 5_000, PaidHow::AtOnce)];
-    let marks = PaidMarks::new();
+    let read = PAID_AT;
+    let marks = read_at(&sales, read);
     // One second short of the wait: listed as waiting, nothing raised.
     let early = check_paid(
         &sales,
         &marks,
-        PAID_AT + PAID_CHECK_WAIT_SECS - 1,
+        read + PAID_CHECK_WAIT_SECS - 1,
         from_view(&view),
     );
     assert_eq!(state_of(&early, 0), PaidState::Waiting);
@@ -71,12 +84,44 @@ fn oc_60_a_paid_with_no_receipt_raises_the_alarm_after_the_wait_and_not_before()
     let late = check_paid(
         &sales,
         &marks,
-        PAID_AT + PAID_CHECK_WAIT_SECS,
+        read + PAID_CHECK_WAIT_SECS,
         from_view(&view),
     );
     assert_eq!(state_of(&late, 0), PaidState::Mismatch);
     assert_eq!(late.raised, vec![key(0)]);
     assert_eq!(late.checks[0].seen_sats, Some(0));
+    assert_eq!(late.checks[0].first_read, read);
+}
+
+#[test]
+fn oc_61_the_wait_starts_at_the_first_read_by_the_owners_clock() {
+    let view = view_with(&[]);
+    let sales = [sale(0, 5_000, PaidHow::AtOnce)];
+    // The first check reads the Paid: the clock starts there, and it is kept.
+    let dir = Dir::new();
+    let mut checks = PaidChecks::open(dir.path());
+    let first = PAID_AT + 5 * PAID_CHECK_WAIT_SECS;
+    let result = checks.check(&sales, first, from_view(&view));
+    assert_eq!(state_of(&result, 0), PaidState::Waiting);
+    assert_eq!(result.read, vec![key(0)]);
+    assert!(
+        result.raised.is_empty(),
+        "a Paid old by the counter's clock still waits"
+    );
+    let mark = *checks.marks().get(&key(0)).unwrap();
+    assert_eq!((mark.state, mark.first_read), (MarkState::Reading, first));
+    // A new start reads it back, and the wait is still counted from the first read.
+    let mut again = PaidChecks::open(dir.path());
+    let result = again.check(&sales, first + PAID_CHECK_WAIT_SECS - 1, from_view(&view));
+    assert_eq!(state_of(&result, 0), PaidState::Waiting);
+    assert!(result.read.is_empty(), "not read again");
+    let result = again.check(&sales, first + PAID_CHECK_WAIT_SECS, from_view(&view));
+    assert_eq!(state_of(&result, 0), PaidState::Mismatch);
+    assert_eq!(result.raised, vec![key(0)]);
+    // The raised mark keeps the time of the first read.
+    let mark = *again.marks().get(&key(0)).unwrap();
+    assert_eq!(mark.first_read, first);
+    assert_eq!(mark.raised_at, Some(first + PAID_CHECK_WAIT_SECS));
 }
 
 #[test]
@@ -88,9 +133,10 @@ fn oc_61_the_wait_is_a_day_and_is_marked_to_tune() {
 fn oc_62_a_mismatch_is_raised_once_per_sale() {
     let view = view_with(&[]);
     let sales = [sale(0, 5_000, PaidHow::Confirmed)];
+    let marks = read_at(&sales, PAID_AT);
     let now = PAID_AT + PAID_CHECK_WAIT_SECS;
-    let first = check_paid(&sales, &PaidMarks::new(), now, from_view(&view));
-    let marks = PaidMarks::new().after(&first, now).unwrap();
+    let first = check_paid(&sales, &marks, now, from_view(&view));
+    let marks = marks.after(&first, now);
     let again = check_paid(&sales, &marks, now + 60, from_view(&view));
     assert_eq!(state_of(&again, 0), PaidState::Mismatch);
     assert!(again.raised.is_empty(), "the second check raises nothing");
@@ -100,15 +146,16 @@ fn oc_62_a_mismatch_is_raised_once_per_sale() {
 #[test]
 fn oc_62_a_payment_arriving_later_clears_the_alarm_itself() {
     let sales = [sale(0, 5_000, PaidHow::AtOnce)];
+    let marks = read_at(&sales, PAID_AT);
     let now = PAID_AT + PAID_CHECK_WAIT_SECS;
-    let missing = check_paid(&sales, &PaidMarks::new(), now, from_view(&view_with(&[])));
-    let marks = PaidMarks::new().after(&missing, now).unwrap();
+    let missing = check_paid(&sales, &marks, now, from_view(&view_with(&[])));
+    let marks = marks.after(&missing, now);
     // The payment arrives in full, in a block.
     let paid = view_with(&[(0, 5_000, 2)]);
     let arrived = check_paid(&sales, &marks, now + 600, from_view(&paid));
     assert_eq!(state_of(&arrived, 0), PaidState::ClearedByArrival);
     assert_eq!(arrived.cleared, vec![key(0)]);
-    let marks = marks.after(&arrived, now + 600).unwrap();
+    let marks = marks.after(&arrived, now + 600);
     let mark = marks.get(&key(0)).unwrap();
     assert_eq!(mark.state, MarkState::ClearedByArrival);
     assert_eq!(mark.cleared_at, Some(now + 600));
@@ -131,14 +178,15 @@ fn oc_60_a_partial_payment_within_the_tolerance_is_not_a_mismatch_and_one_outsid
         sale(0, 10_000, PaidHow::Confirmed),
         sale(1, 10_000, PaidHow::Confirmed),
     ];
-    let result = check_paid(&sales, &PaidMarks::new(), now, from_view(&view));
+    let marks = read_at(&sales, PAID_AT);
+    let result = check_paid(&sales, &marks, now, from_view(&view));
     assert_eq!(state_of(&result, 0), PaidState::Checked);
     assert_eq!(state_of(&result, 1), PaidState::Mismatch);
     assert_eq!(result.raised, vec![key(1)]);
     // The sale's own tolerance counts, not a fixed one.
     let mut strict = sale(0, 10_000, PaidHow::Confirmed);
     strict.tolerance_bps = 0;
-    let result = check_paid(&[strict], &PaidMarks::new(), now, from_view(&view));
+    let result = check_paid(&[strict], &marks, now, from_view(&view));
     assert_eq!(state_of(&result, 0), PaidState::Mismatch);
 }
 
@@ -146,14 +194,30 @@ fn oc_60_a_partial_payment_within_the_tolerance_is_not_a_mismatch_and_one_outsid
 fn oc_60_more_received_than_recorded_is_not_a_mismatch() {
     let now = PAID_AT + PAID_CHECK_WAIT_SECS + 1;
     let view = view_with(&[(0, 7_000, DEPTH)]);
-    let result = check_paid(
-        &[sale(0, 5_000, PaidHow::Confirmed)],
-        &PaidMarks::new(),
-        now,
-        from_view(&view),
-    );
+    let sales = [sale(0, 5_000, PaidHow::Confirmed)];
+    let result = check_paid(&sales, &read_at(&sales, PAID_AT), now, from_view(&view));
     assert_eq!(state_of(&result, 0), PaidState::Checked);
     assert!(result.raised.is_empty());
+}
+
+#[test]
+fn oc_60_the_expected_amount_is_the_higher_of_the_recorded_and_the_quoted() {
+    let mut quoted = sale(0, 5_000, PaidHow::AtOnce);
+    quoted.quoted_sats = 8_000;
+    assert_eq!(quoted.expected_sats(), 8_000);
+    quoted.quoted_sats = 100;
+    assert_eq!(quoted.expected_sats(), 5_000);
+    // The wallet shows the recorded amount only: short of the quote.
+    let mut sales = [sale(0, 5_000, PaidHow::AtOnce)];
+    sales[0].quoted_sats = 8_000;
+    let view = view_with(&[(0, 5_000, DEPTH)]);
+    let result = check_paid(
+        &sales,
+        &read_at(&sales, PAID_AT),
+        PAID_AT + PAID_CHECK_WAIT_SECS,
+        from_view(&view),
+    );
+    assert_eq!(state_of(&result, 0), PaidState::Mismatch);
 }
 
 #[test]
@@ -163,7 +227,8 @@ fn oc_60_a_lightning_sale_is_not_checked() {
         sale(0, 5_000, PaidHow::Lightning),
         sale(1, 5_000, PaidHow::AtOnce),
     ];
-    let result = check_paid(&sales, &PaidMarks::new(), now, from_view(&view_with(&[])));
+    let marks = read_at(&sales, PAID_AT);
+    let result = check_paid(&sales, &marks, now, from_view(&view_with(&[])));
     assert_eq!(result.checks.len(), 1, "only the on-chain sale has a state");
     assert_eq!(result.checks[0].sale, key(1));
     assert_eq!(result.raised, vec![key(1)]);
@@ -191,15 +256,13 @@ fn oc_61_a_view_that_is_not_ready_judges_nothing() {
     });
     assert_eq!(state_of(&result, 0), PaidState::NotYet);
     // And a raised alarm is neither cleared nor changed by it.
-    let raised = PaidMarks::new()
-        .after(
-            &CheckResult {
-                raised: vec![key(0)],
-                ..CheckResult::default()
-            },
-            now,
-        )
-        .unwrap();
+    let raised = PaidMarks::new().after(
+        &CheckResult {
+            raised: vec![key(0)],
+            ..CheckResult::default()
+        },
+        now,
+    );
     let result = check_paid(&sales, &raised, now + 1, |_| {
         Err(FactsRefused::ReceiptLogFull)
     });
@@ -220,22 +283,35 @@ fn oc_61_a_sale_too_old_for_facts_is_not_checkable() {
 }
 
 #[test]
-fn oc_63_the_day_summary_counts_each_counters_sales() {
-    let now = PAID_AT + PAID_CHECK_WAIT_SECS + 100;
+fn oc_63_the_day_summary_counts_each_counters_sales_by_the_first_read() {
+    let day_start = PAID_AT;
+    let now = day_start + PAID_CHECK_WAIT_SECS + 100;
     let view = view_with(&[(0, 4_000, DEPTH), (1, 6_000, DEPTH), (2, 1_000, DEPTH)]);
-    let mut young = sale(3, 2_000, PaidHow::AtOnce);
-    young.paid_at = now - 10;
-    let mut yesterday = sale(5, 9_000, PaidHow::Confirmed);
-    yesterday.paid_at = PAID_AT - 86_400;
     let sales = [
         sale(0, 4_000, PaidHow::Confirmed),
         sale(1, 6_000, PaidHow::Confirmed),
         sale(2, 3_000, PaidHow::AtOnce),
-        young,
+        sale(3, 2_000, PaidHow::AtOnce),
         sale(4, 800, PaidHow::Confirmed),
-        yesterday,
+        sale(5, 9_000, PaidHow::Confirmed),
         sale(6, 700, PaidHow::Lightning),
     ];
+    // Sales 0, 1, 2 and 4 were first read at the start of the day, 5 the day
+    // before, and 3 only now.
+    let mut marks = PaidMarks::new();
+    for (i, at) in [
+        (5, day_start - 86_400),
+        (0, day_start),
+        (1, day_start),
+        (2, day_start),
+        (4, day_start),
+        (3, now),
+    ] {
+        let result = check_paid(&[sales[i].clone()], &marks, at, |_| {
+            Err(FactsRefused::ViewNotReady)
+        });
+        marks = marks.after(&result, at);
+    }
     let facts = |k: SaleKey| {
         if k.index == 4 {
             Err(FactsRefused::TooOldForFacts)
@@ -243,9 +319,8 @@ fn oc_63_the_day_summary_counts_each_counters_sales() {
             from_view(&view)(k)
         }
     };
-    let result = check_paid(&sales, &PaidMarks::new(), now, facts);
-    let days = day_summary(&sales, &result.checks, PAID_AT - 1, PAID_AT + 1 + 100);
-    // The sale of 2 seconds short of now falls outside this window.
+    let result = check_paid(&sales, &marks, now, facts);
+    let days = day_summary(&sales, &result.checks, day_start - 1, day_start + 1 + 100);
     assert_eq!(days.len(), 1);
     let d = &days[0];
     assert_eq!(d.counter, counter());
@@ -262,8 +337,8 @@ fn oc_63_the_day_summary_counts_each_counters_sales() {
     assert_eq!((days[0].sales, days[0].waiting), (1, 1));
     // A counter whose total is what was seen is not named.
     let exact = [sale(0, 4_000, PaidHow::Confirmed)];
-    let result = check_paid(&exact, &PaidMarks::new(), now, from_view(&view));
-    let days = day_summary(&exact, &result.checks, PAID_AT - 1, PAID_AT + 1);
+    let result = check_paid(&exact, &marks, now, from_view(&view));
+    let days = day_summary(&exact, &result.checks, day_start - 1, day_start + 1);
     assert!(!days[0].differs);
     // No sale in the window, no line.
     assert!(day_summary(&exact, &result.checks, 0, 10).is_empty());
@@ -295,6 +370,42 @@ fn named(index: u32, at: u64, name: &str) -> Event {
         minor_per_btc,
         source,
         by: Some((Role::Cashier, name.to_string())),
+    }
+}
+
+/// A sale opened at a quote of `needs` satoshis.
+fn quoted(index: u32, at: u64, needs: u64) -> Event {
+    match opened(index, at, 100) {
+        Event::Opened {
+            amount,
+            tip,
+            currency,
+            minor_per_btc,
+            source,
+            by,
+            ..
+        } => Event::Opened {
+            index,
+            at,
+            amount,
+            tip,
+            currency,
+            needs_sats: needs,
+            minor_per_btc,
+            source,
+            by,
+        },
+        _ => unreachable!(),
+    }
+}
+
+fn requoted(index: u32, at: u64, needs: u64) -> Event {
+    Event::Requoted {
+        index,
+        at,
+        needs_sats: needs,
+        minor_per_btc: 1,
+        source: openbmt_counter::RateSource::new("test-fixed", at).unwrap(),
     }
 }
 
@@ -331,6 +442,18 @@ fn at_once_for(index: u32, at: u64, sats: u64) -> Event {
     }
 }
 
+/// The paid sales of the test counter, as `(index, how, recorded, quoted)`.
+fn folded(events: &[Event]) -> Vec<(u32, PaidHow, u64, u64)> {
+    let (link, _a, _b) = link_with(events);
+    let found = paid_sales(&link);
+    assert!(found.unreadable.is_empty());
+    found
+        .sales
+        .iter()
+        .map(|s| (s.index, s.how, s.recorded_sats, s.quoted_sats))
+        .collect()
+}
+
 #[test]
 fn oc_60_the_records_tell_an_on_chain_payment_from_lightning() {
     let (link, _a, _b) = link_with(&[
@@ -340,26 +463,27 @@ fn oc_60_the_records_tell_an_on_chain_payment_from_lightning() {
         lightning(1, PAID_AT + 1, 700),
         opened(2, PAID_AT - 50, 100),
         confirmed(2, PAID_AT + 2, 9_000),
-        // Accepted at once, then confirmed: the time of the first Paid
-        // stands, and the amount is the confirmed one.
+        // Accepted at once, then confirmed: the amount is the confirmed one.
         opened(3, PAID_AT - 50, 100),
         at_once_for(3, PAID_AT + 3, 100),
         confirmed(3, PAID_AT + 400, 1_200),
         // Never paid.
         opened(4, PAID_AT - 50, 100),
     ]);
-    let sales = paid_sales(&link, 50).unwrap();
-    let by: Vec<(u32, PaidHow, u64, u64)> = sales
+    let found = paid_sales(&link);
+    assert!(found.unreadable.is_empty());
+    let sales = found.sales;
+    let by: Vec<(u32, PaidHow, u64)> = sales
         .iter()
-        .map(|s| (s.index, s.how, s.recorded_sats, s.paid_at))
+        .map(|s| (s.index, s.how, s.recorded_sats))
         .collect();
     assert_eq!(
         by,
         vec![
-            (0, PaidHow::AtOnce, 5_000, PAID_AT),
-            (1, PaidHow::Lightning, 700, PAID_AT + 1),
-            (2, PaidHow::Confirmed, 9_000, PAID_AT + 2),
-            (3, PaidHow::Confirmed, 1_200, PAID_AT + 3),
+            (0, PaidHow::AtOnce, 5_000),
+            (1, PaidHow::Lightning, 700),
+            (2, PaidHow::Confirmed, 9_000),
+            (3, PaidHow::Confirmed, 1_200),
         ]
     );
     assert_eq!(sales[0].cashier, "Ana");
@@ -371,8 +495,8 @@ fn oc_60_the_records_tell_an_on_chain_payment_from_lightning() {
 }
 
 #[test]
-fn oc_60_a_sale_that_was_reopened_or_replaced_is_not_paid_and_a_swap_is_on_chain() {
-    let (link, _a, _b) = link_with(&[
+fn oc_60_a_reopened_or_replaced_sale_stays_checked_and_a_manager_acceptance_is_not_a_payment() {
+    let sales = folded(&[
         opened(0, PAID_AT - 50, 100),
         at_once_for(0, PAID_AT, 5_000),
         Event::Replaced {
@@ -385,8 +509,8 @@ fn oc_60_a_sale_that_was_reopened_or_replaced_is_not_paid_and_a_swap_is_on_chain
             index: 1,
             at: PAID_AT + 1,
         },
-        // Paid again after the reopening: a new Paid.
-        at_once_for(1, PAID_AT + 100, 5_000),
+        // Paid again after the reopening: the first Paid still stands.
+        at_once_for(1, PAID_AT + 100, 4_000),
         // A manager's acceptance is not a payment to the address.
         opened(2, PAID_AT - 50, 100),
         Event::Override {
@@ -396,62 +520,254 @@ fn oc_60_a_sale_that_was_reopened_or_replaced_is_not_paid_and_a_swap_is_on_chain
             name: "Bo".to_string(),
             sats: 5_000,
         },
-        // A payment confirmed, then a conflict seen: still paid.
+        // A payment confirmed, then a replacement: still paid.
         opened(3, PAID_AT - 50, 100),
         confirmed(3, PAID_AT, 4_000),
         Event::Replaced {
             index: 3,
             at: PAID_AT + 1,
         },
+        // Reopened and never paid again: still checked for what was shown.
+        opened(4, PAID_AT - 50, 100),
+        at_once_for(4, PAID_AT, 2_000),
+        Event::Reopened {
+            index: 4,
+            at: PAID_AT + 1,
+        },
     ]);
-    let sales = paid_sales(&link, 0).unwrap();
-    let by: Vec<(u32, PaidHow, u64)> = sales.iter().map(|s| (s.index, s.how, s.paid_at)).collect();
     assert_eq!(
-        by,
+        sales,
         vec![
-            (1, PaidHow::AtOnce, PAID_AT + 100),
-            (3, PaidHow::Confirmed, PAID_AT)
+            (0, PaidHow::AtOnce, 5_000, 1),
+            (1, PaidHow::Confirmed, 5_000, 1),
+            (3, PaidHow::Confirmed, 4_000, 1),
+            (4, PaidHow::AtOnce, 2_000, 1),
         ]
     );
 }
 
 #[test]
-fn oc_30_a_copy_that_does_not_fold_gives_no_paid_sales() {
+fn oc_60_a_reopened_after_a_paid_keeps_the_sale_checked() {
+    let (link, _a, _b) = link_with(&[
+        opened(0, PAID_AT - 50, 100),
+        at_once_for(0, PAID_AT, 5_000),
+        Event::Reopened {
+            index: 0,
+            at: PAID_AT + 1,
+        },
+    ]);
+    let sales = paid_sales(&link).sales;
+    assert_eq!(sales.len(), 1, "the reopening does not remove the sale");
+    let dir = Dir::new();
+    let mut checks = PaidChecks::open(dir.path());
+    let view = view_with(&[]);
+    checks.check(&sales, PAID_AT, from_view(&view));
+    let result = checks.check(&sales, PAID_AT + PAID_CHECK_WAIT_SECS, from_view(&view));
+    assert_eq!(state_of(&result, 0), PaidState::Mismatch);
+    assert_eq!(result.raised, vec![key(0)]);
+}
+
+#[test]
+fn oc_60_a_later_confirmed_with_a_lower_amount_does_not_clear_the_alarm() {
+    let (link, _a, _b) = link_with(&[
+        opened(0, PAID_AT - 50, 100),
+        at_once_for(0, PAID_AT, 5_000),
+        // The counter, taken over, writes a smaller amount afterwards.
+        confirmed(0, PAID_AT + 10, 100),
+        Event::Final {
+            index: 0,
+            at: PAID_AT + 20,
+            received_sats: 50,
+            depth: 6,
+            first_seen_at: PAID_AT,
+            valued: Amount(0),
+            payments: Vec::new(),
+            more: false,
+        },
+    ]);
+    let sales = paid_sales(&link).sales;
+    assert_eq!(
+        sales[0].recorded_sats, 5_000,
+        "the most ever recorded stands"
+    );
+    assert_eq!(sales[0].expected_sats(), 5_000);
+    let dir = Dir::new();
+    let mut checks = PaidChecks::open(dir.path());
+    // The wallet shows 100: that is not what the counter showed first.
+    let view = view_with(&[(0, 100, DEPTH)]);
+    checks.check(&sales, PAID_AT, from_view(&view));
+    let result = checks.check(&sales, PAID_AT + PAID_CHECK_WAIT_SECS, from_view(&view));
+    assert_eq!(state_of(&result, 0), PaidState::Mismatch);
+    assert_eq!(result.raised, vec![key(0)]);
+}
+
+#[test]
+fn oc_60_a_sale_paid_on_chain_stays_on_chain_when_lightning_follows_and_the_reverse_is_not_checked()
+{
+    let sales = folded(&[
+        opened(0, PAID_AT - 50, 100),
+        at_once_for(0, PAID_AT, 5_000),
+        lightning(0, PAID_AT + 1, 9_999),
+        opened(1, PAID_AT - 50, 100),
+        lightning(1, PAID_AT, 700),
+        at_once_for(1, PAID_AT + 1, 5_000),
+        confirmed(1, PAID_AT + 2, 5_000),
+    ]);
+    assert_eq!(
+        sales,
+        vec![
+            (0, PaidHow::AtOnce, 5_000, 1),
+            (1, PaidHow::Lightning, 700, 1),
+        ]
+    );
+}
+
+#[test]
+fn oc_60_the_quoted_amount_is_read_from_the_opening_and_the_latest_requote() {
+    let sales = folded(&[
+        quoted(0, PAID_AT - 50, 8_000),
+        at_once_for(0, PAID_AT, 5_000),
+        quoted(1, PAID_AT - 50, 8_000),
+        requoted(1, PAID_AT - 40, 9_000),
+        at_once_for(1, PAID_AT, 5_000),
+        quoted(2, PAID_AT - 50, 8_000),
+        requoted(2, PAID_AT - 40, 9_000),
+        requoted(2, PAID_AT - 30, 6_000),
+        at_once_for(2, PAID_AT, 5_000),
+    ]);
+    assert_eq!(
+        sales,
+        vec![
+            (0, PaidHow::AtOnce, 5_000, 8_000),
+            (1, PaidHow::AtOnce, 5_000, 9_000),
+            (2, PaidHow::AtOnce, 5_000, 6_000),
+        ]
+    );
+    // The check expects the higher of the two, and a later lower record
+    // never lowers it.
+    let (link, _a, _b) = link_with(&[
+        quoted(0, PAID_AT - 50, 8_000),
+        at_once_for(0, PAID_AT, 5_000),
+        confirmed(0, PAID_AT + 5, 100),
+    ]);
+    let found = paid_sales(&link).sales;
+    assert_eq!(found[0].expected_sats(), 8_000);
+}
+
+#[test]
+fn oc_61_the_counters_time_in_the_future_does_not_delay_the_alarm() {
+    let far = PAID_AT + 20 * 365 * 86_400;
+    let (link, _a, _b) = link_with(&[opened(0, PAID_AT - 50, 100), at_once_for(0, far, 5_000)]);
+    let sales = paid_sales(&link).sales;
+    let dir = Dir::new();
+    let mut checks = PaidChecks::open(dir.path());
+    let view = view_with(&[]);
+    let first = PAID_AT + 100;
+    let result = checks.check(&sales, first, from_view(&view));
+    assert_eq!(state_of(&result, 0), PaidState::Waiting);
+    // A day on the owner's clock: the alarm, whatever the counter wrote.
+    let result = checks.check(&sales, first + PAID_CHECK_WAIT_SECS, from_view(&view));
+    assert_eq!(state_of(&result, 0), PaidState::Mismatch);
+    assert_eq!(result.raised, vec![key(0)]);
+    // And the counter's time does not place the sale in a day either.
+    let days = day_summary(&sales, &result.checks, first - 10, first + 10);
+    assert_eq!(days.len(), 1, "the day of the first read");
+}
+
+#[test]
+fn oc_60_a_raised_tolerance_in_settings_does_not_hide_a_mismatch() {
+    // The tolerance is the policy default, however the settings are set.
+    let mut settings = openbmt_core::settings::Settings::defaults(0);
+    assert_eq!(default_tolerance_bps(), settings.underpayment_tolerance_bps);
+    assert_eq!(default_tolerance_bps(), 50);
+    settings.underpayment_tolerance_bps = 10_000;
+    assert_ne!(default_tolerance_bps(), settings.underpayment_tolerance_bps);
+    let (link, _a, _b) = link_with(&[opened(0, PAID_AT - 50, 100), confirmed(0, PAID_AT, 10_000)]);
+    let sales = paid_sales(&link).sales;
+    assert_eq!(sales[0].tolerance_bps, 50);
+    // Half of it is a mismatch, though settings that allowed all would pass it.
+    let view = view_with(&[(0, 5_000, DEPTH)]);
+    let result = check_paid(
+        &sales,
+        &read_at(&sales, PAID_AT),
+        PAID_AT + PAID_CHECK_WAIT_SECS,
+        from_view(&view),
+    );
+    assert_eq!(state_of(&result, 0), PaidState::Mismatch);
+}
+
+#[test]
+fn oc_61_one_counter_with_a_bad_record_alarms_while_another_is_still_checked() {
+    let other = id(60).device_id();
+    let bad = counter();
+    let mut other_sale = sale(3, 5_000, PaidHow::AtOnce);
+    other_sale.counter = other;
+    let found = gather(vec![
+        (bad, Err(FactsError::UnknownSale { index: 9 })),
+        (other, Ok(vec![other_sale.clone()])),
+    ]);
+    assert_eq!(found.unreadable, vec![bad]);
+    assert_eq!(found.sales, vec![other_sale.clone()]);
+    // The other counter is still checked, and its sale raised.
+    let dir = Dir::new();
+    let mut checks = PaidChecks::open(dir.path());
+    let view = view_with(&[]);
+    let result = checks.check(&found.sales, PAID_AT, from_view(&view));
+    assert_eq!(result.checks.len(), 1);
+    // (The test view issued no address of the other counter's: at once.)
+    assert_eq!(result.raised.len(), 1);
+    // Every kind of unreadable copy is one counter's, not the whole.
+    for e in [
+        FactsError::OpenedTwice { index: 1 },
+        FactsError::TooManySales,
+    ] {
+        let found = gather(vec![(bad, Err(e)), (other, Ok(vec![]))]);
+        assert_eq!(found.unreadable, vec![bad]);
+    }
+    // From the records: a copy that does not fold is listed, with no sale.
     let (link, _a, _b) = link_with(&[opened(0, PAID_AT - 50, 100), at_once_for(9, PAID_AT, 1)]);
-    assert!(matches!(
-        paid_sales(&link, 0),
-        Err(PaidCheckRefused::Facts { .. })
-    ));
-    // And a chain that does not verify gives none.
+    let found = paid_sales(&link);
+    assert_eq!(found.unreadable, vec![counter()]);
+    assert!(found.sales.is_empty());
+}
+
+#[test]
+fn oc_30_a_chain_that_does_not_verify_gives_no_paid_sales() {
     let chain = openbmt_core::records::Chain::new();
     let devices = openbmt_core::records::DeviceList::new([]);
-    assert!(paid_sales_from_chain(&chain, &devices, &counter(), 0)
+    assert!(paid_sales_from_chain(&chain, &devices, &counter())
         .unwrap()
         .is_empty());
 }
 
 // ---- the marks -----------------------------------------------------------------------
 
-fn raised_marks(count: u32, now: u64) -> PaidMarks {
-    PaidMarks::new()
-        .after(
-            &CheckResult {
-                raised: (0..count).map(key).collect(),
-                ..CheckResult::default()
-            },
-            now,
-        )
-        .unwrap()
+fn raised_marks(from: u32, to: u32, now: u64) -> PaidMarks {
+    PaidMarks::new().after(
+        &CheckResult {
+            raised: (from..to).map(key).collect(),
+            ..CheckResult::default()
+        },
+        now,
+    )
 }
 
 #[test]
 fn oc_64_the_marks_read_back_strictly() {
-    let marks = raised_marks(3, 1_000);
+    let marks = raised_marks(0, 3, 1_000);
     let marks = marks.cleared_by_owner(&key(1), 2_000).unwrap();
+    // A sale only read has its own state.
+    let marks = marks.after(
+        &CheckResult {
+            read: vec![key(5)],
+            ..CheckResult::default()
+        },
+        3_000,
+    );
     let bytes = marks.to_bytes();
     assert_eq!(&bytes[..4], &MAGIC_PAID_CHECK);
     assert_eq!(&MAGIC_PAID_CHECK, b"OBM\x17");
-    assert_eq!(bytes[4], 1, "version 1");
+    assert_eq!(bytes[4], 2, "version 2");
     assert_eq!(PaidMarks::from_bytes(&bytes).unwrap(), marks);
     // An empty set is a frame and a count.
     assert_eq!(
@@ -474,19 +790,19 @@ fn oc_64_the_marks_read_back_strictly() {
         Err(DecodeError::BadMagic)
     ));
     let mut bad = bytes.clone();
-    bad[4] = 2;
+    bad[4] = 3;
     assert!(matches!(
         PaidMarks::from_bytes(&bad),
-        Err(DecodeError::UnsupportedVersion(2))
+        Err(DecodeError::UnsupportedVersion(3))
     ));
     // A count that is more than the bytes hold, or more than the cap.
     let mut bad = bytes.clone();
-    bad[5..9].copy_from_slice(&4u32.to_le_bytes());
+    bad[5..9].copy_from_slice(&5u32.to_le_bytes());
     assert!(PaidMarks::from_bytes(&bad).is_err());
     let mut bad = bytes.clone();
     bad[5..9].copy_from_slice(&(MAX_PAID_MARKS as u32 + 1).to_le_bytes());
     assert!(PaidMarks::from_bytes(&bad).is_err());
-    // A state that is none of the three.
+    // A state that is none of the four.
     let state_at = 9 + 32 + 4;
     let mut bad = bytes.clone();
     bad[state_at] = 9;
@@ -496,40 +812,73 @@ fn oc_64_the_marks_read_back_strictly() {
     ));
     // A raised mark with a time cleared, and a cleared one with none.
     let mut bad = bytes.clone();
-    bad[state_at + 9..state_at + 17].copy_from_slice(&5u64.to_le_bytes());
+    bad[state_at + 17..state_at + 25].copy_from_slice(&5u64.to_le_bytes());
     assert!(PaidMarks::from_bytes(&bad).is_err());
     let mut bad = bytes.clone();
     bad[state_at] = 2;
     assert!(PaidMarks::from_bytes(&bad).is_err());
+    // A mark with no time of first read.
+    let mut bad = bytes.clone();
+    bad[state_at + 1..state_at + 9].copy_from_slice(&0u64.to_le_bytes());
+    assert!(PaidMarks::from_bytes(&bad).is_err());
     // Marks out of order, and the same mark twice.
-    let entry = |i: usize| bytes[9 + i * 53..9 + (i + 1) * 53].to_vec();
+    let entry = |i: usize| bytes[9 + i * MARK..9 + (i + 1) * MARK].to_vec();
     let mut swapped = bytes[..9].to_vec();
-    for i in [1, 0, 2] {
+    for i in [1, 0, 2, 3] {
         swapped.extend(entry(i));
     }
     assert!(PaidMarks::from_bytes(&swapped).is_err());
     let mut twice = bytes[..9].to_vec();
-    for i in [0, 0, 2] {
+    for i in [0, 0, 2, 3] {
         twice.extend(entry(i));
     }
     assert!(PaidMarks::from_bytes(&twice).is_err());
     // A file larger than the cap's whole frame.
     assert!(matches!(
-        PaidMarks::from_bytes(&vec![0; 5 + 4 + MAX_PAID_MARKS * 53 + 1]),
+        PaidMarks::from_bytes(&vec![0; 5 + 4 + MAX_PAID_MARKS * MARK + 1]),
         Err(DecodeError::TooLarge)
     ));
 }
 
 #[test]
-fn oc_64_the_oldest_cleared_marks_go_first_and_a_raised_one_is_never_dropped() {
-    let full = raised_marks(MAX_PAID_MARKS as u32, 100);
+fn oc_64_a_version_1_file_still_reads_with_the_time_raised_as_the_first_read() {
+    // One raised mark, as version 1 wrote it: no time of first read.
+    let mut old = openbmt_core::wire::start(&MAGIC_PAID_CHECK, 0);
+    old.extend_from_slice(&1u32.to_le_bytes());
+    old.extend_from_slice(&counter().to_bytes());
+    old.extend_from_slice(&7u32.to_le_bytes());
+    old.push(1);
+    old.extend_from_slice(&1_234u64.to_le_bytes());
+    old.extend_from_slice(&0u64.to_le_bytes());
+    let marks = PaidMarks::from_bytes(&old).unwrap();
+    let m = marks.get(&key(7)).unwrap();
+    assert_eq!(
+        (m.state, m.first_read, m.raised_at, m.cleared_at),
+        (MarkState::Raised, 1_234, Some(1_234), None)
+    );
+    // Written again, it is version 2.
+    assert_eq!(marks.to_bytes()[4], 2);
+    // A version 1 file has no state 4.
+    let mut bad = old.clone();
+    bad[9 + 32 + 4] = 4;
+    assert!(PaidMarks::from_bytes(&bad).is_err());
+}
+
+#[test]
+fn oc_64_the_oldest_cleared_marks_go_first_and_a_raised_one_is_never_dropped_from_memory() {
+    let full = raised_marks(0, MAX_PAID_MARKS as u32, 100);
     assert_eq!(full.len(), MAX_PAID_MARKS);
-    // Every mark is a raised alarm: nothing can go, so another is refused.
+    assert!(!full.is_over());
+    // Every mark is a raised alarm: another is held in memory, but over what a file keeps.
     let one_more = CheckResult {
         raised: vec![key(MAX_PAID_MARKS as u32)],
         ..CheckResult::default()
     };
-    assert_eq!(full.after(&one_more, 200), Err(PaidCheckRefused::MarksFull));
+    let over = full.after(&one_more, 200);
+    assert_eq!(over.len(), MAX_PAID_MARKS + 1);
+    assert!(over.is_over());
+    assert_eq!(over.fitted().len(), MAX_PAID_MARKS);
+    assert!(PaidMarks::from_bytes(&over.fitted().to_bytes()).is_ok());
     // Clear three, the later one first: the two oldest go, then the third.
     let marks = full
         .cleared_by_owner(&key(10), 3_000)
@@ -542,7 +891,7 @@ fn oc_64_the_oldest_cleared_marks_go_first_and_a_raised_one_is_never_dropped() {
         raised: vec![key(70_000), key(70_001)],
         ..CheckResult::default()
     };
-    let next = marks.after(&two_more, 5_000).unwrap();
+    let next = marks.after(&two_more, 5_000);
     assert_eq!(next.len(), MAX_PAID_MARKS);
     assert!(next.get(&key(20)).is_none() && next.get(&key(30)).is_none());
     assert!(next.get(&key(10)).is_some(), "the newest cleared stays");
@@ -563,7 +912,8 @@ fn oc_62_only_a_raised_alarm_is_cleared_and_by_the_owner() {
     let sales = [sale(0, 5_000, PaidHow::AtOnce)];
     let now = PAID_AT + PAID_CHECK_WAIT_SECS;
     let view = view_with(&[]);
-    let result = checks.check(&sales, now, from_view(&view)).unwrap();
+    checks.check(&sales, PAID_AT, from_view(&view));
+    let result = checks.check(&sales, now, from_view(&view));
     assert_eq!(result.raised, vec![key(0)]);
     assert_eq!(
         checks.clear(&key(9), now),
@@ -573,71 +923,130 @@ fn oc_62_only_a_raised_alarm_is_cleared_and_by_the_owner() {
     checks.clear(&key(0), now + 5).unwrap();
     let mark = *checks.marks().get(&key(0)).unwrap();
     assert_eq!(mark.state, MarkState::ClearedByOwner);
-    assert_eq!((mark.raised_at, mark.cleared_at), (now, Some(now + 5)));
+    assert_eq!(
+        (mark.raised_at, mark.cleared_at),
+        (Some(now), Some(now + 5))
+    );
     assert_eq!(
         checks.clear(&key(0), now + 6),
         Err(PaidCheckRefused::NoSuchAlarm)
     );
     // A cleared alarm is not raised again, and the sale is still missing.
-    let result = checks.check(&sales, now + 60, from_view(&view)).unwrap();
+    let result = checks.check(&sales, now + 60, from_view(&view));
     assert_eq!(state_of(&result, 0), PaidState::Mismatch);
     assert!(result.raised.is_empty());
     // The marks are in the file, and a new start reads them back.
     let again = PaidChecks::open(dir.path());
     assert_eq!(again.marks(), checks.marks());
-    assert!(again.not_kept().is_none());
+    assert!(again.trouble().is_none());
 }
 
 #[test]
-fn oc_64_a_file_that_does_not_read_back_does_not_stop_the_node() {
+fn oc_64_a_sale_seen_in_full_loses_its_reading() {
+    let dir = Dir::new();
+    let mut checks = PaidChecks::open(dir.path());
+    let sales = [sale(0, 5_000, PaidHow::AtOnce)];
+    let result = checks.check(&sales, PAID_AT, from_view(&view_with(&[])));
+    assert_eq!(state_of(&result, 0), PaidState::Waiting);
+    assert_eq!(checks.marks().len(), 1);
+    let paid = view_with(&[(0, 5_000, DEPTH)]);
+    let result = checks.check(&sales, PAID_AT + 60, from_view(&paid));
+    assert_eq!(state_of(&result, 0), PaidState::Checked);
+    assert!(
+        checks.marks().is_empty(),
+        "nothing is kept for a sale that is settled"
+    );
+}
+
+#[test]
+fn oc_64_a_file_that_does_not_read_back_does_not_stop_the_node_or_the_check() {
     let dir = Dir::new();
     std::fs::write(dir.path().join(PAID_CHECK_FILE), b"OBM\x17\x01garbage").unwrap();
     let mut checks = PaidChecks::open(dir.path());
-    assert!(checks.not_kept().is_some(), "the state is named");
+    assert!(matches!(checks.trouble(), Some(PaidTrouble::NotKept(_))));
     assert!(checks.marks().is_empty());
     let sales = [sale(0, 5_000, PaidHow::AtOnce)];
     let view = view_with(&[]);
-    let refused = checks.check(&sales, PAID_AT, from_view(&view)).unwrap_err();
-    assert!(matches!(refused, PaidCheckRefused::NotKept { .. }));
-    assert!(refused.to_string().starts_with("OC-64:"));
-    assert!(matches!(
-        checks.clear(&key(0), PAID_AT),
-        Err(PaidCheckRefused::NotKept { .. })
-    ));
+    // The check runs on marks held in memory, and shows its mismatch.
+    checks.check(&sales, PAID_AT, from_view(&view));
+    let result = checks.check(&sales, PAID_AT + PAID_CHECK_WAIT_SECS, from_view(&view));
+    assert_eq!(state_of(&result, 0), PaidState::Mismatch);
+    assert_eq!(result.raised, vec![key(0)]);
+    // The owner can clear it, in memory.
+    checks
+        .clear(&key(0), PAID_AT + PAID_CHECK_WAIT_SECS + 1)
+        .unwrap();
     // Nothing was written over the file.
     assert_eq!(
         std::fs::read(dir.path().join(PAID_CHECK_FILE)).unwrap(),
         b"OBM\x17\x01garbage"
     );
-    // The owner clears the checks, and they start again.
+    // The owner clears the checks, and they are kept again.
     checks.reset().unwrap();
-    assert!(checks.not_kept().is_none());
+    assert!(checks.trouble().is_none());
     assert!(!dir.path().join(PAID_CHECK_FILE).exists());
-    let now = PAID_AT + PAID_CHECK_WAIT_SECS;
-    let result = checks.check(&sales, now, from_view(&view)).unwrap();
-    assert_eq!(result.raised, vec![key(0)]);
+    checks.check(&sales, PAID_AT, from_view(&view));
     assert!(dir.path().join(PAID_CHECK_FILE).exists());
-    // A file too large for its bound is refused too, not read.
+    // A file too large for its bound is not read either.
     let big = Dir::new();
     std::fs::write(
         big.path().join(PAID_CHECK_FILE),
-        vec![0u8; 5 + 4 + MAX_PAID_MARKS * 53 + 1],
+        vec![0u8; 5 + 4 + MAX_PAID_MARKS * MARK + 1],
     )
     .unwrap();
-    assert!(PaidChecks::open(big.path()).not_kept().is_some());
+    assert!(PaidChecks::open(big.path()).trouble().is_some());
 }
 
 #[test]
-fn oc_64_marks_that_cannot_be_stored_take_no_effect() {
+fn oc_64_marks_full_still_show_the_mismatch() {
     let dir = Dir::new();
-    let mut checks = PaidChecks::open(&dir.path().join("missing"));
+    // A file of the most marks, every one an alarm raised for another sale.
+    let full = raised_marks(1, MAX_PAID_MARKS as u32 + 1, 100);
+    assert_eq!(full.len(), MAX_PAID_MARKS);
+    std::fs::write(dir.path().join(PAID_CHECK_FILE), full.to_bytes()).unwrap();
+    let mut checks = PaidChecks::open(dir.path());
+    assert!(checks.trouble().is_none(), "full is not over");
     let sales = [sale(0, 5_000, PaidHow::AtOnce)];
-    let now = PAID_AT + PAID_CHECK_WAIT_SECS;
-    let err = checks
-        .check(&sales, now, from_view(&view_with(&[])))
-        .unwrap_err();
-    assert!(matches!(err, PaidCheckRefused::Store(_)));
-    assert!(checks.marks().is_empty(), "nothing was raised");
+    let view = view_with(&[]);
+    checks.check(&sales, PAID_AT, from_view(&view));
+    let result = checks.check(&sales, PAID_AT + PAID_CHECK_WAIT_SECS, from_view(&view));
+    assert_eq!(state_of(&result, 0), PaidState::Mismatch);
+    assert_eq!(
+        result.raised,
+        vec![key(0)],
+        "the mismatch is shown and raised"
+    );
+    assert_eq!(checks.trouble(), Some(PaidTrouble::Full));
+    // The file still holds what fits, and reads back.
+    let bytes = std::fs::read(dir.path().join(PAID_CHECK_FILE)).unwrap();
+    assert_eq!(PaidMarks::from_bytes(&bytes).unwrap().len(), MAX_PAID_MARKS);
+}
+
+#[test]
+fn oc_64_marks_that_cannot_be_stored_are_held_and_the_write_is_tried_again() {
+    let dir = Dir::new();
+    let folder = dir.path().join("later");
+    let mut checks = PaidChecks::open(&folder);
+    let sales = [sale(0, 5_000, PaidHow::AtOnce)];
+    let view = view_with(&[]);
+    checks.check(&sales, PAID_AT, from_view(&view));
+    let result = checks.check(&sales, PAID_AT + PAID_CHECK_WAIT_SECS, from_view(&view));
+    assert_eq!(result.raised, vec![key(0)], "the check ran");
+    assert!(checks.store_failed());
+    assert!(matches!(checks.trouble(), Some(PaidTrouble::NotKept(_))));
+    assert_eq!(checks.marks().len(), 1, "held in memory");
+    // The folder is there now: the next run writes what it held.
+    std::fs::create_dir_all(&folder).unwrap();
+    let result = checks.check(
+        &sales,
+        PAID_AT + PAID_CHECK_WAIT_SECS + 60,
+        from_view(&view),
+    );
+    assert!(result.raised.is_empty());
+    assert!(!checks.store_failed() && checks.trouble().is_none());
+    let again = PaidChecks::open(&folder);
+    assert_eq!(again.marks(), checks.marks());
+    assert_eq!(again.marks().get(&key(0)).unwrap().state, MarkState::Raised);
 }
 
 #[test]
@@ -679,7 +1088,7 @@ fn oc_61_an_index_the_owner_never_issued_to_the_counter_is_a_mismatch_at_once() 
     );
     assert_eq!(result.raised, vec![key(20)]);
     // It is raised once: a mark stands.
-    let marks = PaidMarks::new().after(&result, PAID_AT + 1).unwrap();
+    let marks = PaidMarks::new().after(&result, PAID_AT + 1);
     let again = check_paid(&sales, &marks, PAID_AT + 2, |k| {
         verified_facts(&view, &owner, k, TIP, DEPTH)
     });

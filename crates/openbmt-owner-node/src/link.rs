@@ -225,6 +225,19 @@ pub enum Alert {
         /// The sale's number.
         sale: u32,
     },
+    /// A counter's records do not read as sales, so its Paids cannot be
+    /// checked (OC-61). It clears itself when they read again.
+    PaidUnreadable {
+        /// The counter.
+        counter: DeviceId,
+    },
+    /// The marks of the paid check are not kept: the file does not read back,
+    /// could not be written, or is full (OC-64). `full` is true for a file
+    /// that is full.
+    PaidNotKept {
+        /// Whether the marks are full, rather than unreadable.
+        full: bool,
+    },
 }
 
 /// The batches of addresses that wait for one counter to hold them (LK-70).
@@ -1144,7 +1157,9 @@ impl<R: Post> OwnerLink<R> {
                 Alert::MissedCheckIn { counter: c, .. }
                 | Alert::Diverged { counter: c, .. }
                 | Alert::BatchUndelivered { counter: c, .. }
-                | Alert::PaidNotSeen { counter: c, .. } => *c != counter,
+                | Alert::PaidNotSeen { counter: c, .. }
+                | Alert::PaidUnreadable { counter: c } => *c != counter,
+                Alert::PaidNotKept { .. } => true,
             });
             // Batches for a counter that is no longer on the link are not
             // sent again (LK-67, LK-70).

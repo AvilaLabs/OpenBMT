@@ -369,6 +369,8 @@ private const val TAG_ALERT_KIND_MISSED_CHECK_IN = 0
 private const val TAG_ALERT_KIND_DIVERGED = 1
 private const val TAG_ALERT_KIND_BATCH_UNDELIVERED = 2
 private const val TAG_ALERT_KIND_PAID_NOT_SEEN = 3
+private const val TAG_ALERT_KIND_PAID_UNREADABLE = 4
+private const val TAG_ALERT_KIND_PAID_NOT_KEPT = 5
 private const val TAG_VIEW_KIND_READY = 0
 private const val TAG_VIEW_KIND_RESCANNING = 1
 private const val TAG_VIEW_KIND_DEEP_REORG = 2
@@ -527,7 +529,7 @@ class CashOutArgs(val address: String, val amount: CashAmount, val label: String
 
 class BatchArgs(val counter: ByteArray, val start: Long, val count: Long)
 
-enum class AlertKind { MissedCheckIn, Diverged, BatchUndelivered, PaidNotSeen }
+enum class AlertKind { MissedCheckIn, Diverged, BatchUndelivered, PaidNotSeen, PaidUnreadable, PaidNotKept }
 
 /** An alert as [OwnerNode.linkState] showed it. */
 class ClearArgs(val kind: AlertKind, val counter: ByteArray, val value: Long)
@@ -1569,7 +1571,7 @@ class PaidAlarm(
     val cashier: String,
     val recordedSats: Long,
     val seenSats: Long,
-    val paidAt: Long,
+    val firstRead: Long,
     val raisedAt: Long,
 )
 
@@ -1577,14 +1579,18 @@ class PaidAlarm(
 class PaidArrived(val counter: ByteArray, val sale: Long, val clearedAt: Long)
 
 /** A sale that is waiting for a block, or too old to check (OC-61). */
-class PaidSaleLine(val counter: ByteArray, val sale: Long, val recordedSats: Long, val paidAt: Long)
+class PaidSaleLine(val counter: ByteArray, val sale: Long, val recordedSats: Long, val firstRead: Long)
 
 /**
- * What a check shows. When [kept] is false the file of marks does not read back and nothing was checked: every list is
- * empty until [OwnerNode.paidCheckReset] (OC-64). [notCheckableMore] counts the sales too old to check that are not listed.
+ * What a check shows. When [kept] is false the file of marks does not read back or could not be written: the check
+ * still ran, on marks held in memory, until [OwnerNode.paidCheckReset] (OC-64). [full] is true when there are more marks
+ * than a file keeps. [unreadable] holds the counters whose records do not read as sales (OC-61). [notCheckableMore]
+ * counts the sales too old to check that are not listed.
  */
 class PaidCheck(
     val kept: Boolean,
+    val full: Boolean,
+    val unreadable: List<ByteArray>,
     val alarms: List<PaidAlarm>,
     val arrived: List<PaidArrived>,
     val waiting: List<PaidSaleLine>,
@@ -2105,6 +2111,8 @@ private fun Writer.alertKind(v: AlertKind): Writer =
             AlertKind.Diverged -> TAG_ALERT_KIND_DIVERGED
             AlertKind.BatchUndelivered -> TAG_ALERT_KIND_BATCH_UNDELIVERED
             AlertKind.PaidNotSeen -> TAG_ALERT_KIND_PAID_NOT_SEEN
+            AlertKind.PaidUnreadable -> TAG_ALERT_KIND_PAID_UNREADABLE
+            AlertKind.PaidNotKept -> TAG_ALERT_KIND_PAID_NOT_KEPT
         },
     )
 
@@ -2114,6 +2122,8 @@ private fun Reader.alertKind(): AlertKind =
         TAG_ALERT_KIND_DIVERGED -> AlertKind.Diverged
         TAG_ALERT_KIND_BATCH_UNDELIVERED -> AlertKind.BatchUndelivered
         TAG_ALERT_KIND_PAID_NOT_SEEN -> AlertKind.PaidNotSeen
+        TAG_ALERT_KIND_PAID_UNREADABLE -> AlertKind.PaidUnreadable
+        TAG_ALERT_KIND_PAID_NOT_KEPT -> AlertKind.PaidNotKept
         else -> tag("AlertKind")
     }
 
@@ -2289,6 +2299,8 @@ private fun Reader.paidSaleLine(): PaidSaleLine = PaidSaleLine(bytes(), u32(), u
 
 internal fun Reader.paidCheck(): PaidCheck = PaidCheck(
     bool(),
+    bool(),
+    list { bytes() },
     list { paidAlarm() },
     list { paidArrived() },
     list { paidSaleLine() },

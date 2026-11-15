@@ -7,31 +7,37 @@
 //! ([`paid_sales`]), asks the wallet's view what was received at each sale's
 //! address (OC-14), and says so when a payment is missing ([`check_paid`]).
 //! The checker is pure: the view is a function the caller hands in, and the
-//! marks (which alarm was raised, cleared by whom) come in and go out as
-//! values. [`PaidChecks`] keeps the marks in the node's directory, in a
-//! strict frame of their own, and a file that does not read back does not
-//! stop the node (OC-64).
+//! marks (when the owner phone first read a Paid, which alarm was raised,
+//! cleared by whom) come in and go out as values. [`PaidChecks`] keeps the
+//! marks in the node's directory, in a strict frame of their own, and a file
+//! that does not read back, or marks that do not fit, do not stop the node or
+//! the check (OC-64).
 //!
-//! A sale is told as paid on chain or over Lightning by the record that made
-//! it Paid: `PaidAtOnce` (CR-13), `Confirmed` and `Final` are payments to the
-//! sale's own address (a swap claim is written as these, CR-221), and
+//! A sale is told as paid on chain or over Lightning by the first record that
+//! made it Paid: `PaidAtOnce` (CR-13), `Confirmed` and `Final` are payments to
+//! the sale's own address (a swap claim is written as these, CR-221), and
 //! `PaidByLightning` is a payment to the shop's own node, which has no payment
-//! to the address and is not checked (OC-60).
+//! to the address and is not checked (OC-60). A later record of another kind,
+//! a reopening or a replacement does not change that: the counter's own word
+//! cannot undo a Paid it showed.
 //!
-//! The file is `OBM\x17`, version 1: the number of marks (u32 LE), then for
+//! The file is `OBM\x17`, version 2 (a version 1 file, which had no time of
+//! first read, still reads: its marks take the time raised for it): the number of marks (u32 LE), then for
 //! each mark the counter (32 bytes), the sale's receive index (u32 LE), the
-//! state (1 raised, 2 cleared by the owner, 3 cleared by arrival), the time
-//! raised (u64 LE) and the time cleared (u64 LE, 0 for a mark not cleared).
-//! Marks are in the order of counter, then index, with none twice.
+//! state (1 raised, 2 cleared by the owner, 3 cleared by arrival, 4 first
+//! read and not yet checked), the time the owner phone first read the Paid
+//! (u64 LE, never 0), the time raised (u64 LE, 0 unless raised or cleared)
+//! and the time cleared (u64 LE, 0 for a mark not cleared). Marks are in the
+//! order of counter, then index, with none twice.
 
 use std::collections::BTreeMap;
-use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use openbmt_core::identity::DeviceId;
 use openbmt_core::records::{Chain, DeviceList, RecordKind};
+use openbmt_core::settings::Settings;
 use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_counter::money::tolerance;
 use openbmt_counter::Event;
@@ -50,20 +56,33 @@ pub const PAID_CHECK_FILE: &str = "paid-check.bin";
 pub const MAGIC_PAID_CHECK: [u8; 4] = *b"OBM\x17";
 
 /// Most marks kept (OC-64). The oldest cleared marks go first; a mark not
-/// cleared is never dropped.
+/// cleared is never dropped from the phone's memory, and the file holds
+/// the ones that fit.
 pub const MAX_PAID_MARKS: usize = 65_536;
 
-/// How long after its Paid record a sale whose payment is not in a block yet
-/// is only waiting, and not a mismatch (OC-61): a payment with a low fee can
-/// wait that long. **[to tune]**
+/// How long after the owner phone first read a Paid in a counter's records a
+/// sale whose payment is not in a block yet is only waiting, and not a
+/// mismatch (OC-61): a payment with a low fee can wait that long. **[to
+/// tune]**
 pub const PAID_CHECK_WAIT_SECS: u64 = 86_400;
 
 /// How long a sale that cleared itself by its payment arriving is listed with
 /// its line (OC-62). **[to tune]**
 pub const PAID_ARRIVED_SHOWN_SECS: u64 = 7 * 86_400;
 
-const MARK_LEN: usize = 32 + 4 + 1 + 8 + 8;
+/// The version of the file written.
+const FILE_VERSION: u8 = 2;
+const MARK_LEN: usize = 32 + 4 + 1 + 8 + 8 + 8;
+/// A mark of a version 1 file: no time of first read.
+const MARK_LEN_V1: usize = 32 + 4 + 1 + 8 + 8;
 const MAX_FILE_BYTES: usize = 5 + 4 + MAX_PAID_MARKS * MARK_LEN;
+
+/// OC-60: the underpayment tolerance the check uses, in basis points: the
+/// policy default, whatever the settings say, since a raised tolerance must
+/// not hide a missing payment.
+pub fn default_tolerance_bps() -> u32 {
+    Settings::defaults(0).underpayment_tolerance_bps
+}
 
 /// How a sale was made Paid by the counter's records (OC-60).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,7 +95,7 @@ pub enum PaidHow {
     Lightning,
 }
 
-/// A sale a counter's records show paid.
+/// A sale a counter's records have shown paid.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaidSale {
     /// The counter.
@@ -86,11 +105,13 @@ pub struct PaidSale {
     /// Who opened the sale, as the counter recorded; empty when it names
     /// nobody.
     pub cashier: String,
-    /// The amount the counter recorded as received, in satoshis.
+    /// The most the counter ever recorded as received or at risk, in
+    /// satoshis. A later record of less does not lower it.
     pub recorded_sats: u64,
-    /// The time of the Paid record, by the counter's clock.
-    pub paid_at: u64,
-    /// How it was paid.
+    /// The satoshis the sale was last quoted at: its opening or its latest
+    /// requote.
+    pub quoted_sats: u64,
+    /// How it was first paid.
     pub how: PaidHow,
     /// The sale's underpayment tolerance, in basis points (WR-32).
     pub tolerance_bps: u32,
@@ -109,47 +130,26 @@ impl PaidSale {
     pub fn on_chain(&self) -> bool {
         self.how != PaidHow::Lightning
     }
+
+    /// OC-60: what the check expects at the sale's address: the higher of the
+    /// most recorded and the amount the sale was last quoted at.
+    pub fn expected_sats(&self) -> u64 {
+        self.recorded_sats.max(self.quoted_sats)
+    }
 }
 
-/// Why the paid sales could not be folded (OC-30).
+/// Why the marks could not be changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PaidCheckRefused {
-    /// A counter's copy does not fold; nothing is checked on part of the
-    /// counters.
-    Facts {
-        /// The counter.
-        counter: DeviceId,
-        /// Why.
-        error: FactsError,
-    },
-    /// The marks do not read back (OC-64): the check cannot keep them until
-    /// the owner clears them.
-    NotKept {
-        /// Why the file was refused.
-        why: String,
-    },
-    /// Every mark kept is an alarm not cleared, so nothing can be dropped.
-    MarksFull,
     /// No alarm of this sale is raised.
     NoSuchAlarm,
     /// The marks could not be stored.
     Store(String),
 }
 
-impl fmt::Display for PaidCheckRefused {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for PaidCheckRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Facts { error, .. } => {
-                write!(f, "OC-30: a counter's records do not fold: {error}")
-            }
-            Self::NotKept { why } => write!(
-                f,
-                "OC-64: the record of the counter checks does not read back: {why}"
-            ),
-            Self::MarksFull => write!(
-                f,
-                "OC-64: every mark kept is an alarm not cleared, so no more can be kept"
-            ),
             Self::NoSuchAlarm => write!(f, "OC-62: no alarm of this sale is raised"),
             Self::Store(e) => write!(f, "OC-64: the marks could not be stored: {e}"),
         }
@@ -160,23 +160,24 @@ impl std::error::Error for PaidCheckRefused {}
 
 struct Acc {
     cashier: String,
-    /// The first Paid that stands: its time, how, and the amount recorded.
-    paid: Option<(u64, PaidHow, u64)>,
-    confirmed_now: bool,
+    /// How the first Paid that was shown was made.
+    how: Option<PaidHow>,
+    recorded: u64,
+    quoted: u64,
 }
 
 /// OC-60: the paid sales of one counter, folded from a copy of its records
-/// that verifies, ordered by sale index. A sale that was reopened or whose
-/// payment was replaced before it was confirmed is not paid. A manager's
-/// acceptance is not a payment to the address and is not listed unless a
-/// payment record follows.
+/// that verifies, ordered by sale index. A sale stays in the list once it has
+/// had a Paid: a reopening or a replacement, a later record of less, or a
+/// later Lightning record changes nothing. A manager's acceptance is not a
+/// payment to the address and is not listed unless a payment record follows.
 pub fn paid_sales_from_chain(
     chain: &Chain,
     devices: &DeviceList,
     counter: &DeviceId,
-    tolerance_bps: u32,
 ) -> Result<Vec<PaidSale>, FactsError> {
     chain.verify(devices).map_err(FactsError::Chain)?;
+    let tolerance_bps = default_tolerance_bps();
     let mut sales: BTreeMap<u32, Acc> = BTreeMap::new();
     for record in chain.records() {
         let holds_events = matches!(
@@ -194,7 +195,13 @@ pub fn paid_sales_from_chain(
         if event.bill_number().is_some() {
             continue;
         }
-        if let Event::Opened { index, by, .. } = &event {
+        if let Event::Opened {
+            index,
+            by,
+            needs_sats,
+            ..
+        } = &event
+        {
             if sales.len() >= MAX_SALES && !sales.contains_key(index) {
                 return Err(FactsError::TooManySales);
             }
@@ -205,8 +212,9 @@ pub fn paid_sales_from_chain(
                 *index,
                 Acc {
                     cashier: by.as_ref().map(|(_, n)| n.clone()).unwrap_or_default(),
-                    paid: None,
-                    confirmed_now: false,
+                    how: None,
+                    recorded: 0,
+                    quoted: *needs_sats,
                 },
             );
             continue;
@@ -219,84 +227,90 @@ pub fn paid_sales_from_chain(
                 index: event.index(),
             });
         };
+        let on_chain = acc.how != Some(PaidHow::Lightning);
         match event {
-            Event::PaidAtOnce {
-                at, at_risk_sats, ..
-            } => {
-                if acc.paid.is_none() {
-                    acc.paid = Some((at, PaidHow::AtOnce, at_risk_sats));
+            Event::Requoted { needs_sats, .. } => acc.quoted = needs_sats,
+            Event::PaidAtOnce { at_risk_sats, .. } => {
+                if acc.how.is_none() {
+                    acc.how = Some(PaidHow::AtOnce);
+                }
+                if on_chain {
+                    acc.recorded = acc.recorded.max(at_risk_sats);
                 }
             }
-            Event::Confirmed {
-                at, received_sats, ..
-            }
-            | Event::Final {
-                at, received_sats, ..
-            } => {
-                let first = acc.paid.map_or(at, |(t, _, _)| t);
-                if !matches!(acc.paid, Some((_, PaidHow::Lightning, _))) {
-                    acc.paid = Some((first, PaidHow::Confirmed, received_sats));
+            Event::Confirmed { received_sats, .. } | Event::Final { received_sats, .. } => {
+                if acc.how.is_none() || acc.how == Some(PaidHow::AtOnce) {
+                    acc.how = Some(PaidHow::Confirmed);
                 }
-                acc.confirmed_now = true;
-            }
-            Event::PaidByLightning {
-                at, amount_msat, ..
-            } => {
-                if acc.paid.is_none() {
-                    acc.paid = Some((at, PaidHow::Lightning, amount_msat / 1_000));
+                if on_chain {
+                    acc.recorded = acc.recorded.max(received_sats);
                 }
-                acc.confirmed_now = true;
             }
-            Event::Reopened { .. } => {
-                acc.paid = None;
-                acc.confirmed_now = false;
+            Event::PaidByLightning { amount_msat, .. } if acc.how.is_none() => {
+                acc.how = Some(PaidHow::Lightning);
+                acc.recorded = amount_msat / 1_000;
             }
-            Event::Replaced { .. } if !acc.confirmed_now => acc.paid = None,
             _ => {}
         }
     }
     Ok(sales
         .into_iter()
         .filter_map(|(index, acc)| {
-            let (paid_at, how, recorded_sats) = acc.paid?;
             Some(PaidSale {
                 counter: *counter,
                 index,
                 cashier: acc.cashier,
-                recorded_sats,
-                paid_at,
-                how,
+                recorded_sats: acc.recorded,
+                quoted_sats: acc.quoted,
+                how: acc.how?,
                 tolerance_bps,
             })
         })
         .collect())
 }
 
-/// OC-30: the paid sales of every counter of the link, from the owner's
-/// verified copy of its records. A copy that does not fold gives no sales at
-/// all, so that a partial list never raises an alarm.
-pub fn paid_sales<R: Post>(
-    link: &OwnerLink<R>,
-    tolerance_bps: u32,
-) -> Result<Vec<PaidSale>, PaidCheckRefused> {
-    let mut all = Vec::new();
+/// The paid sales of every counter, and the counters whose records could not
+/// be folded (OC-61).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PaidSales {
+    /// The paid sales of the counters that fold.
+    pub sales: Vec<PaidSale>,
+    /// The counters whose records do not read as sales, for whatever reason:
+    /// their payments cannot be checked.
+    pub unreadable: Vec<DeviceId>,
+}
+
+/// OC-61: put the folds of each counter together. A counter that does not
+/// fold is listed apart, and the others are still checked.
+pub fn gather(folds: Vec<(DeviceId, Result<Vec<PaidSale>, FactsError>)>) -> PaidSales {
+    let mut out = PaidSales::default();
+    for (counter, fold) in folds {
+        match fold {
+            Ok(sales) => out.sales.extend(sales),
+            Err(_) => out.unreadable.push(counter),
+        }
+    }
+    out
+}
+
+/// OC-30, OC-61: the paid sales of every counter of the link, from the
+/// owner's verified copy of its records, each counter apart.
+pub fn paid_sales<R: Post>(link: &OwnerLink<R>) -> PaidSales {
+    let mut folds = Vec::new();
     for counter in link.counters() {
         let Some(copy) = link.copy(counter) else {
             continue;
         };
         let chain = Chain::from_records(copy.records().to_vec());
-        let sales = paid_sales_from_chain(&chain, link.devices(), counter, tolerance_bps).map_err(
-            |error| PaidCheckRefused::Facts {
-                counter: *counter,
-                error,
-            },
-        )?;
-        all.extend(sales);
+        folds.push((
+            *counter,
+            paid_sales_from_chain(&chain, link.devices(), counter),
+        ));
     }
-    Ok(all)
+    gather(folds)
 }
 
-/// What a mark says of an alarm (OC-62, OC-64).
+/// What a mark says of a sale (OC-61, OC-62, OC-64).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarkState {
     /// The mismatch was raised and stands.
@@ -305,6 +319,9 @@ pub enum MarkState {
     ClearedByOwner,
     /// The payment arrived in full and cleared it.
     ClearedByArrival,
+    /// The owner phone first read the Paid at this time, and the sale is not
+    /// checked yet.
+    Reading,
 }
 
 impl MarkState {
@@ -313,20 +330,24 @@ impl MarkState {
             Self::Raised => 1,
             Self::ClearedByOwner => 2,
             Self::ClearedByArrival => 3,
+            Self::Reading => 4,
         }
     }
 }
 
-/// One mark: a sale's alarm, with the times (OC-64).
+/// One mark: a sale's reading and alarm, with the times (OC-64).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PaidMark {
     /// The sale.
     pub sale: SaleKey,
-    /// Where the alarm stands.
+    /// Where the sale stands.
     pub state: MarkState,
-    /// When it was raised, by the owner phone's clock.
-    pub raised_at: u64,
-    /// When it was cleared; none while raised.
+    /// When the owner phone first read the Paid, by its clock.
+    pub first_read: u64,
+    /// When the alarm was raised, by this phone's clock; none for a sale
+    /// only read.
+    pub raised_at: Option<u64>,
+    /// When it was cleared; none while raised or read.
     pub cleared_at: Option<u64>,
 }
 
@@ -367,8 +388,9 @@ impl PaidMarks {
         if bytes.len() > MAX_FILE_BYTES {
             return Err(DecodeError::TooLarge);
         }
-        let mut r = Reader::framed(bytes, &MAGIC_PAID_CHECK)?;
-        let count = r.count(MAX_PAID_MARKS, MARK_LEN)?;
+        let (mut r, version) = Reader::framed_up_to(bytes, &MAGIC_PAID_CHECK, FILE_VERSION)?;
+        let old = version == 1;
+        let count = r.count(MAX_PAID_MARKS, if old { MARK_LEN_V1 } else { MARK_LEN })?;
         let mut marks = BTreeMap::new();
         let mut last: Option<SaleKey> = None;
         for _ in 0..count {
@@ -378,21 +400,34 @@ impl PaidMarks {
                 1 => MarkState::Raised,
                 2 => MarkState::ClearedByOwner,
                 3 => MarkState::ClearedByArrival,
+                4 if !old => MarkState::Reading,
                 k => return Err(DecodeError::UnknownKind(k)),
             };
-            let raised_at = r.u64_le()?;
+            let first_read = if old { None } else { Some(r.u64_le()?) };
+            let raised = r.u64_le()?;
             let cleared = r.u64_le()?;
-            let cleared_at = match (state, cleared) {
-                (MarkState::Raised, 0) => None,
-                (MarkState::Raised, _) => {
+            if first_read == Some(0) {
+                return Err(DecodeError::NonCanonical(
+                    "a mark has no time of first read",
+                ));
+            }
+            let (raised_at, cleared_at) = match (state, raised, cleared) {
+                (MarkState::Reading, 0, 0) => (None, None),
+                (MarkState::Reading, _, _) => {
+                    return Err(DecodeError::NonCanonical("a mark only read has a time"))
+                }
+                (MarkState::Raised, t, 0) if t != 0 => (Some(t), None),
+                (MarkState::Raised, _, _) => {
                     return Err(DecodeError::NonCanonical(
-                        "a raised mark has a time cleared",
+                        "a raised mark is not in its form",
                     ))
                 }
-                (_, 0) => {
-                    return Err(DecodeError::NonCanonical("a cleared mark has no time"));
+                (_, t, c) if t != 0 && c != 0 => (Some(t), Some(c)),
+                _ => {
+                    return Err(DecodeError::NonCanonical(
+                        "a cleared mark is not in its form",
+                    ))
                 }
-                (_, t) => Some(t),
             };
             let sale = SaleKey { counter, index };
             if last.is_some_and(|l| l >= sale) {
@@ -404,6 +439,7 @@ impl PaidMarks {
                 PaidMark {
                     sale,
                     state,
+                    first_read: first_read.or(raised_at).unwrap_or(1),
                     raised_at,
                     cleared_at,
                 },
@@ -412,7 +448,7 @@ impl PaidMarks {
         r.finish()?;
         let read = Self { marks };
         // Canonical form: writing it again gives the same bytes.
-        if read.to_bytes() != bytes {
+        if !old && read.to_bytes() != bytes {
             return Err(DecodeError::NonCanonical(
                 "the marks are not in their one form",
             ));
@@ -420,33 +456,49 @@ impl PaidMarks {
         Ok(read)
     }
 
-    /// The marks as the file holds them.
+    /// The marks as the file holds them. A set longer than
+    /// [`MAX_PAID_MARKS`] is not a file; see [`Self::fitted`].
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = wire::start(&MAGIC_PAID_CHECK, 5 + 4 + self.marks.len() * MARK_LEN);
+        let mut out = Vec::with_capacity(5 + 4 + self.marks.len() * MARK_LEN);
+        out.extend_from_slice(&MAGIC_PAID_CHECK);
+        out.push(FILE_VERSION);
         out.extend_from_slice(&wire::len_u32(self.marks.len()).to_le_bytes());
         for m in self.marks.values() {
             out.extend_from_slice(&m.sale.counter.to_bytes());
             out.extend_from_slice(&m.sale.index.to_le_bytes());
             out.push(m.state.byte());
-            out.extend_from_slice(&m.raised_at.to_le_bytes());
+            out.extend_from_slice(&m.first_read.to_le_bytes());
+            out.extend_from_slice(&m.raised_at.unwrap_or(0).to_le_bytes());
             out.extend_from_slice(&m.cleared_at.unwrap_or(0).to_le_bytes());
         }
         out
     }
 
-    /// OC-62, OC-64: the marks after a check at `now`. The oldest cleared
-    /// marks go first when there are more than [`MAX_PAID_MARKS`]; a mark not
-    /// cleared is never dropped, and when that cannot be kept the marks are
-    /// refused whole.
-    pub fn after(&self, result: &CheckResult, now: u64) -> Result<Self, PaidCheckRefused> {
+    /// OC-61, OC-62: the marks after a check at `now`. A sale read for the
+    /// first time is marked as read; a sale found missing is raised, once; a
+    /// payment that arrived clears its alarm; a sale that no longer waits for
+    /// a check loses its reading. The oldest cleared marks go first when there
+    /// are more than [`MAX_PAID_MARKS`]; one not cleared is never dropped here.
+    pub fn after(&self, result: &CheckResult, now: u64) -> Self {
         let mut next = self.clone();
+        for sale in &result.read {
+            next.marks.entry(*sale).or_insert(PaidMark {
+                sale: *sale,
+                state: MarkState::Reading,
+                first_read: now,
+                raised_at: None,
+                cleared_at: None,
+            });
+        }
         for sale in &result.raised {
+            let first_read = next.marks.get(sale).map_or(now, |m| m.first_read);
             next.marks.insert(
                 *sale,
                 PaidMark {
                     sale: *sale,
                     state: MarkState::Raised,
-                    raised_at: now,
+                    first_read,
+                    raised_at: Some(now),
                     cleared_at: None,
                 },
             );
@@ -457,8 +509,17 @@ impl PaidMarks {
                 m.cleared_at = Some(now.max(1));
             }
         }
-        next.evict()?;
-        Ok(next)
+        for sale in &result.settled {
+            if next
+                .marks
+                .get(sale)
+                .is_some_and(|m| m.state == MarkState::Reading)
+            {
+                next.marks.remove(sale);
+            }
+        }
+        next.evict_cleared();
+        next
     }
 
     /// OC-62: the owner clears the alarm of a sale.
@@ -476,9 +537,9 @@ impl PaidMarks {
         }
     }
 
-    fn evict(&mut self) -> Result<(), PaidCheckRefused> {
+    fn evict_cleared(&mut self) {
         if self.marks.len() <= MAX_PAID_MARKS {
-            return Ok(());
+            return;
         }
         let mut cleared: Vec<(u64, SaleKey)> = self
             .marks
@@ -487,28 +548,70 @@ impl PaidMarks {
             .collect();
         cleared.sort_unstable();
         let excess = self.marks.len() - MAX_PAID_MARKS;
-        if cleared.len() < excess {
-            return Err(PaidCheckRefused::MarksFull);
-        }
         for (_, sale) in cleared.into_iter().take(excess) {
             self.marks.remove(&sale);
         }
-        Ok(())
+    }
+
+    /// Whether more marks are held than a file can keep.
+    pub fn is_over(&self) -> bool {
+        self.marks.len() > MAX_PAID_MARKS
+    }
+
+    /// OC-64: the marks a file can keep: all of them, or when there are too
+    /// many, the alarms and then the oldest readings, so that an alarm is never
+    /// the one left out while a reading is kept.
+    pub fn fitted(&self) -> Self {
+        if !self.is_over() {
+            return self.clone();
+        }
+        let mut next = self.clone();
+        next.evict_cleared();
+        if next.marks.len() > MAX_PAID_MARKS {
+            let mut readings: Vec<(u64, SaleKey)> = next
+                .marks
+                .values()
+                .filter(|m| m.state == MarkState::Reading)
+                .map(|m| (m.first_read, m.sale))
+                .collect();
+            // The newest readings go first.
+            readings.sort_unstable_by(|a, b| b.cmp(a));
+            let mut excess = next.marks.len() - MAX_PAID_MARKS;
+            for (_, sale) in readings {
+                if excess == 0 {
+                    break;
+                }
+                next.marks.remove(&sale);
+                excess -= 1;
+            }
+            if excess > 0 {
+                let mut raised: Vec<(u64, SaleKey)> = next
+                    .marks
+                    .values()
+                    .map(|m| (m.raised_at.unwrap_or(m.first_read), m.sale))
+                    .collect();
+                raised.sort_unstable_by(|a, b| b.cmp(a));
+                for (_, sale) in raised.into_iter().take(excess) {
+                    next.marks.remove(&sale);
+                }
+            }
+        }
+        next
     }
 }
 
 /// Where a paid sale stands against the wallet (OC-60, OC-61).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaidState {
-    /// The wallet shows what the counter recorded, within the tolerance.
+    /// The wallet shows what the check expects, within the tolerance.
     Checked,
-    /// Paid less than [`PAID_CHECK_WAIT_SECS`] ago and the payment is not in
-    /// a block yet.
+    /// First read by the owner phone less than [`PAID_CHECK_WAIT_SECS`] ago
+    /// and the payment is not in a block yet.
     Waiting,
     /// The sale is too old for the wallet to say what was paid.
     NotCheckable,
-    /// The wallet shows less than the counter recorded, after the wait, or
-    /// the sale's index was never issued to the counter (no wait).
+    /// The wallet shows less than the check expects, after the wait, or the
+    /// sale's index was never issued to the counter (no wait).
     Mismatch,
     /// A mismatch that was raised, whose payment has since arrived in full.
     ClearedByArrival,
@@ -527,29 +630,37 @@ pub struct SaleCheck {
     /// What the wallet's view verified at the sale's address, when it could
     /// say.
     pub seen_sats: Option<u64>,
+    /// When the owner phone first read the Paid, by its clock (OC-61).
+    pub first_read: u64,
 }
 
-/// What a check found: each on-chain sale's state, the alarms it raises and
-/// the alarms that clear because the payment arrived (OC-62).
+/// What a check found: each on-chain sale's state, the Paids read for the
+/// first time, the alarms it raises and the alarms that clear because the
+/// payment arrived (OC-62).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CheckResult {
     /// The state of every sale paid on chain, in the order given.
     pub checks: Vec<SaleCheck>,
+    /// Sales whose Paid is read for the first time.
+    pub read: Vec<SaleKey>,
     /// Mismatches raised for the first time.
     pub raised: Vec<SaleKey>,
     /// Alarms that cleared because the payment arrived in full.
     pub cleared: Vec<SaleKey>,
+    /// Sales that need no more waiting: seen in full, or not checkable.
+    pub settled: Vec<SaleKey>,
 }
 
 /// OC-60 to OC-62: check the paid sales against the wallet's view.
 ///
-/// `facts` is the wallet's answer for a sale (OC-14). A sale paid over
-/// Lightning is not checked and has no entry. A sale is `Checked` when what
-/// the view verified plus the sale's tolerance on the recorded amount reaches
-/// the recorded amount. Short of that it is `Waiting` while its Paid record is
-/// younger than [`PAID_CHECK_WAIT_SECS`] by `now`, and a `Mismatch` after. A
-/// mismatch is raised once per sale: a sale with a mark, whatever its state,
-/// is not raised again. A raised alarm whose payment has arrived is cleared.
+/// `facts` is the wallet's answer for a sale (OC-14). A sale first paid over
+/// Lightning is not checked and has no entry. A sale is `Checked` when what the
+/// view verified plus the sale's tolerance on the expected amount reaches the
+/// expected amount ([`PaidSale::expected_sats`]). Short of that it is `Waiting`
+/// while the owner phone first read its Paid less than [`PAID_CHECK_WAIT_SECS`]
+/// before `now`, and a `Mismatch` after. A mismatch is raised once per sale: a
+/// sale with an alarm mark, whatever its state, is not raised again. A raised
+/// alarm whose payment has arrived is cleared.
 pub fn check_paid(
     sales: &[PaidSale],
     marks: &PaidMarks,
@@ -560,24 +671,33 @@ pub fn check_paid(
     for sale in sales.iter().filter(|s| s.on_chain()) {
         let key = sale.key();
         let mark = marks.get(&key);
+        let first_read = mark.map_or(now, |m| m.first_read);
+        if mark.is_none() {
+            out.read.push(key);
+        }
+        let alarmed = mark.is_some_and(|m| m.state != MarkState::Reading);
+        let expected = sale.expected_sats();
         let (state, seen) = match facts(key) {
             Err(FactsRefused::ViewNotReady | FactsRefused::ReceiptLogFull) => {
                 (PaidState::NotYet, None)
             }
-            Err(FactsRefused::TooOldForFacts) => (PaidState::NotCheckable, None),
+            Err(FactsRefused::TooOldForFacts) => {
+                out.settled.push(key);
+                (PaidState::NotCheckable, None)
+            }
             // The owner never issued this index to this counter, so no
             // payment there can be the shop's: a mismatch at once, with
             // nothing seen and no wait.
             Err(FactsRefused::NotThisCountersAddress) => {
-                if mark.is_none() {
+                if !alarmed {
                     out.raised.push(key);
                 }
                 (PaidState::Mismatch, Some(0))
             }
             Ok(f) => {
                 let enough = u128::from(f.received_sats)
-                    + u128::from(tolerance(sale.recorded_sats, sale.tolerance_bps))
-                    >= u128::from(sale.recorded_sats);
+                    + u128::from(tolerance(expected, sale.tolerance_bps))
+                    >= u128::from(expected);
                 let state = if enough {
                     match mark.map(|m| m.state) {
                         Some(MarkState::Raised) => {
@@ -585,13 +705,15 @@ pub fn check_paid(
                             PaidState::ClearedByArrival
                         }
                         Some(MarkState::ClearedByArrival) => PaidState::ClearedByArrival,
-                        _ => PaidState::Checked,
+                        _ => {
+                            out.settled.push(key);
+                            PaidState::Checked
+                        }
                     }
-                } else if mark.is_none() && now.saturating_sub(sale.paid_at) < PAID_CHECK_WAIT_SECS
-                {
+                } else if !alarmed && now.saturating_sub(first_read) < PAID_CHECK_WAIT_SECS {
                     PaidState::Waiting
                 } else {
-                    if mark.is_none() {
+                    if !alarmed {
                         out.raised.push(key);
                     }
                     PaidState::Mismatch
@@ -603,6 +725,7 @@ pub fn check_paid(
             sale: key,
             state,
             seen_sats: seen,
+            first_read,
         });
     }
     out
@@ -615,7 +738,7 @@ pub struct DaySummary {
     pub counter: DeviceId,
     /// Sales paid on chain in the day.
     pub sales: u32,
-    /// What the counter recorded as received over them, in satoshis.
+    /// What the check expected over them, in satoshis.
     pub total_sats: u64,
     /// How many the view has seen in a block, in full.
     pub seen: u32,
@@ -643,8 +766,9 @@ pub fn day_bounds(now: u64, offset_secs: i32) -> (u64, u64) {
     (start, start.saturating_add(DAY as u64))
 }
 
-/// OC-63: the day summary of each counter that has a sale paid on chain with
-/// its Paid time in `from..to`, ordered by counter. `checks` is the result of
+/// OC-63: the day summary of each counter that has a sale paid on chain whose
+/// Paid the owner phone first read in `from..to` (the time the counter wrote
+/// in the record is not used), ordered by counter. `checks` is the result of
 /// [`check_paid`] over the same `sales`.
 pub fn day_summary(
     sales: &[PaidSale],
@@ -654,10 +778,13 @@ pub fn day_summary(
 ) -> Vec<DaySummary> {
     let by_sale: BTreeMap<SaleKey, &SaleCheck> = checks.iter().map(|c| (c.sale, c)).collect();
     let mut days: BTreeMap<DeviceId, DaySummary> = BTreeMap::new();
-    for sale in sales
-        .iter()
-        .filter(|s| s.on_chain() && (from..to).contains(&s.paid_at))
-    {
+    for sale in sales.iter().filter(|s| s.on_chain()) {
+        let Some(check) = by_sale.get(&sale.key()) else {
+            continue;
+        };
+        if !(from..to).contains(&check.first_read) {
+            continue;
+        }
         let day = days.entry(sale.counter).or_insert_with(|| DaySummary {
             counter: sale.counter,
             sales: 0,
@@ -670,11 +797,7 @@ pub fn day_summary(
             differs: false,
         });
         day.sales = day.sales.saturating_add(1);
-        day.total_sats = day.total_sats.saturating_add(sale.recorded_sats);
-        let Some(check) = by_sale.get(&sale.key()) else {
-            day.waiting = day.waiting.saturating_add(1);
-            continue;
-        };
+        day.total_sats = day.total_sats.saturating_add(sale.expected_sats());
         day.seen_sats = day.seen_sats.saturating_add(check.seen_sats.unwrap_or(0));
         let count = match check.state {
             PaidState::Checked | PaidState::ClearedByArrival => &mut day.seen,
@@ -690,23 +813,38 @@ pub fn day_summary(
     days.into_values().collect()
 }
 
+/// Why the marks are not kept (OC-64).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaidTrouble {
+    /// The file does not read back, or could not be written: the marks live
+    /// in memory until the owner clears them.
+    NotKept(String),
+    /// There are more marks than a file keeps.
+    Full,
+}
+
 /// The marks and where they are kept (OC-64).
 #[derive(Debug)]
 pub struct PaidChecks {
     dir: PathBuf,
     marks: PaidMarks,
+    /// Why the file did not read back, when it did not. It is not written
+    /// over until the owner clears the checks.
     broken: Option<String>,
+    /// Why the last write failed, when it did.
+    store_failed: Option<String>,
 }
 
 impl PaidChecks {
-    /// The marks in `dir`, read back strictly. A file that does not read
-    /// back does not stop the node: the check then refuses with
-    /// [`PaidCheckRefused::NotKept`] until [`Self::reset`].
+    /// The marks in `dir`, read back strictly. A file that does not read back
+    /// does not stop the node or the checks: they run on marks held in memory,
+    /// and [`Self::trouble`] says so until [`Self::reset`].
     pub fn open(dir: &Path) -> Self {
         let mut checks = Self {
             dir: dir.to_path_buf(),
             marks: PaidMarks::new(),
             broken: None,
+            store_failed: None,
         };
         match read_bounded(dir) {
             Ok(None) => {}
@@ -724,50 +862,52 @@ impl PaidChecks {
         &self.marks
     }
 
-    /// Why the marks cannot be kept, when the file did not read back.
-    pub fn not_kept(&self) -> Option<&str> {
-        self.broken.as_deref()
-    }
-
-    fn ready(&self) -> Result<(), PaidCheckRefused> {
-        match &self.broken {
-            Some(why) => Err(PaidCheckRefused::NotKept { why: why.clone() }),
-            None => Ok(()),
+    /// OC-64: why the checks cannot keep their marks, when they cannot.
+    pub fn trouble(&self) -> Option<PaidTrouble> {
+        if let Some(why) = self.broken.as_ref().or(self.store_failed.as_ref()) {
+            return Some(PaidTrouble::NotKept(why.clone()));
         }
+        self.marks.is_over().then_some(PaidTrouble::Full)
     }
 
-    fn store(&mut self, next: PaidMarks) -> Result<(), PaidCheckRefused> {
-        if next != self.marks {
-            write_file(&self.dir, PAID_CHECK_FILE, &next.to_bytes())
-                .map_err(PaidCheckRefused::Store)?;
-            self.marks = next;
+    /// Whether the last write failed: the run is not counted as done.
+    pub fn store_failed(&self) -> bool {
+        self.store_failed.is_some()
+    }
+
+    fn store(&mut self, next: PaidMarks) {
+        if self.broken.is_none() && (next != self.marks || self.store_failed.is_some()) {
+            let written = write_file(&self.dir, PAID_CHECK_FILE, &next.fitted().to_bytes());
+            self.store_failed = written.err();
         }
-        Ok(())
+        self.marks = next;
     }
 
-    /// OC-60 to OC-62, OC-64: run the check, and keep its marks. The marks
-    /// are stored before they take effect; when they cannot be stored the
-    /// check is refused and nothing is raised.
+    /// OC-60 to OC-62, OC-64: run the check, and keep its marks. The check
+    /// always runs and its result is always given; the marks are written when
+    /// they can be, and [`Self::trouble`] says when they cannot.
     pub fn check(
         &mut self,
         sales: &[PaidSale],
         now: u64,
         facts: impl Fn(SaleKey) -> Result<SaleFacts, FactsRefused>,
-    ) -> Result<CheckResult, PaidCheckRefused> {
-        self.ready()?;
+    ) -> CheckResult {
         let result = check_paid(sales, &self.marks, now, facts);
-        let next = self.marks.after(&result, now)?;
-        self.store(next)?;
-        Ok(result)
+        let next = self.marks.after(&result, now);
+        self.store(next);
+        result
     }
 
     /// OC-62: the owner clears the alarm of a sale. It is a change of this
     /// phone's own marks; no command is signed and the counters do not learn
     /// of it.
     pub fn clear(&mut self, sale: &SaleKey, now: u64) -> Result<(), PaidCheckRefused> {
-        self.ready()?;
         let next = self.marks.cleared_by_owner(sale, now)?;
-        self.store(next)
+        self.store(next);
+        match &self.store_failed {
+            Some(e) => Err(PaidCheckRefused::Store(e.clone())),
+            None => Ok(()),
+        }
     }
 
     /// OC-64: drop every mark, and the file that did not read back. The
@@ -783,6 +923,7 @@ impl PaidChecks {
             .map_err(|e| PaidCheckRefused::Store(e.to_string()))?;
         self.marks = PaidMarks::new();
         self.broken = None;
+        self.store_failed = None;
         Ok(())
     }
 }
