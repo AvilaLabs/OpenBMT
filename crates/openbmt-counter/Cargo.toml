@@ -12,3 +12,7 @@ publish.workspace = true
 openbmt-core = { path = "../openbmt-core" }
 openbmt-watch = { path = "../openbmt-watch" }
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
+
+# The Kani proof harnesses are built only by `cargo kani`.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

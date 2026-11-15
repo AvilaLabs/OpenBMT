@@ -677,6 +677,18 @@ pub fn inspect(sealed: &[u8]) -> Result<Seen, OpenError> {
     Ok(seen)
 }
 
+/// The number check of [`open`]: `got` must be above `last` and at most
+/// [`MAX_NUMBER_JUMP`] above it.
+fn check_number(last: u64, got: u64) -> Result<(), OpenError> {
+    if got <= last {
+        return Err(OpenError::Replay { last, got });
+    }
+    if got.saturating_sub(last) > MAX_NUMBER_JUMP {
+        return Err(OpenError::NumberTooFar { last, got });
+    }
+    Ok(())
+}
+
 /// Open a sealed message (LK-05), checking in this order and stopping at the
 /// first failure: the frame; the reader; the sender on the list (`allowed`
 /// gives its role); the kind (known, and sent by that role to this one: this
@@ -704,19 +716,7 @@ pub fn open(
         return Err(OpenError::KindNotAllowed(kind));
     }
     p.check_signature()?;
-    let last = last_number(&p.sender);
-    if p.number <= last {
-        return Err(OpenError::Replay {
-            last,
-            got: p.number,
-        });
-    }
-    if p.number.saturating_sub(last) > MAX_NUMBER_JUMP {
-        return Err(OpenError::NumberTooFar {
-            last,
-            got: p.number,
-        });
-    }
+    check_number(last_number(&p.sender), p.number)?;
     let eph = PublicKey::from_slice(&p.one_time)
         .map_err(|_| OpenError::Frame(DecodeError::InvalidKey))?;
     let mut shared = Secret32(reader.shared_x(&eph).ok_or(OpenError::Decrypt)?);
@@ -743,4 +743,32 @@ pub fn open(
         kind,
         content,
     })
+}
+
+/// Kani proofs of the number check.
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// `GUARD_MEM=8G ~/.cache/openbmt/guard.sh env CARGO_TARGET_DIR=$HOME/.cache/openbmt/target/kani cargo kani -p openbmt-link --harness number_check_is_exact_window`
+    ///
+    /// For every `last` and `got`: no panic or wrap, and the number is taken
+    /// exactly when `last < got <= last + 2^32` (taken in 128 bits so the sum
+    /// cannot wrap), with the two refusals on the right sides.
+    #[kani::proof]
+    fn number_check_is_exact_window() {
+        let last: u64 = kani::any();
+        let got: u64 = kani::any();
+        let window = u128::from(last) + u128::from(MAX_NUMBER_JUMP);
+        match check_number(last, got) {
+            Ok(()) => assert!(got > last && u128::from(got) <= window),
+            Err(OpenError::Replay { last: l, got: g }) => {
+                assert!(got <= last && l == last && g == got)
+            }
+            Err(OpenError::NumberTooFar { last: l, got: g }) => {
+                assert!(got > last && u128::from(got) > window && l == last && g == got)
+            }
+            Err(_) => assert!(false),
+        }
+    }
 }

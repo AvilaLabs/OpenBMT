@@ -5,7 +5,9 @@
 //! records and settings are signed, and when a payment may be accepted at
 //! once. It does no I/O, keeps no clock and has no async code.
 
-#![forbid(unsafe_code)]
+// The Kani range proofs build a key from zeroed bytes, which needs one unsafe block.
+#![cfg_attr(not(kani), forbid(unsafe_code))]
+#![cfg_attr(kani, deny(unsafe_code))]
 
 pub mod approval;
 pub mod batch;

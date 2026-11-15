@@ -19,3 +19,7 @@ publish.workspace = true
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std", "secp-recovery"] }
 miniscript = { version = "=12.3.5", default-features = false, features = ["std"] }
 bip39 = { version = "=2.2.2", default-features = false, features = ["alloc"] }
+
+# The Kani proof harnesses are built only by `cargo kani`.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

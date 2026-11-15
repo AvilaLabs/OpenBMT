@@ -261,3 +261,139 @@ pub fn tolerance(x: u64, bps: u32) -> u64 {
 pub fn is_enough(received: u64, need: u64, bps: u32) -> bool {
     received > 0 && u128::from(received) + u128::from(tolerance(need, bps)) >= u128::from(need)
 }
+
+/// Kani proofs of the money arithmetic: for every input, not a sample.
+///
+/// Run one at a time, for example:
+/// `GUARD_MEM=8G ~/.cache/openbmt/guard.sh env CARGO_TARGET_DIR=$HOME/.cache/openbmt/target/kani cargo kani -p openbmt-counter --harness <name>`
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// The inputs of the `value_of` proof are below 2^20: the product of two
+    /// symbolic values in 128 bits is large for the solver.
+    const BOUND: u64 = 1 << 20;
+    /// The rates of the `sats_for` proofs are below 2^6: the division by a
+    /// rate in 128 bits did not finish in 12 minutes with a rate below 2^20.
+    const RATE_BOUND: u64 = 1 << 6;
+
+    /// `cargo kani -p openbmt-counter --harness sats_for_never_fewer`
+    ///
+    /// For every amount below 2^32 and every rate below 2^6: no panic, and a
+    /// quote never asks for fewer satoshis than the amount needs:
+    /// `sats * rate >= amount * 100_000_000`.
+    #[kani::proof]
+    #[kani::solver(kissat)]
+    fn sats_for_never_fewer() {
+        let amount: u64 = kani::any();
+        let per_btc: u64 = kani::any();
+        kani::assume(per_btc > 0 && per_btc < RATE_BOUND && amount < (1 << 32));
+        let rate = Rate::new(per_btc).unwrap();
+        if let Some(sats) = sats_for(Amount(amount), rate) {
+            assert!(
+                u128::from(sats) * u128::from(per_btc)
+                    >= u128::from(amount) * u128::from(SATS_PER_BTC)
+            );
+        }
+    }
+
+    /// `cargo kani -p openbmt-counter --harness sats_for_none_only_above_cap`
+    ///
+    /// With small rates (so the cap is reachable), `None` is returned only
+    /// when even the cap's worth of satoshis at the rate falls short of the
+    /// amount, and `Some` never exceeds the cap.
+    #[kani::proof]
+    #[kani::solver(kissat)]
+    fn sats_for_none_only_above_cap() {
+        let amount: u64 = kani::any();
+        let per_btc: u64 = kani::any();
+        kani::assume(per_btc > 0 && per_btc < 64 && amount < (1 << 32));
+        let rate = Rate::new(per_btc).unwrap();
+        let need = u128::from(amount) * u128::from(SATS_PER_BTC);
+        match sats_for(Amount(amount), rate) {
+            None => assert!(u128::from(MAX_SATS) * u128::from(per_btc) < need),
+            Some(s) => assert!(s <= MAX_SATS),
+        }
+    }
+
+    /// `cargo kani -p openbmt-counter --harness value_of_rounds_down`
+    ///
+    /// For every satoshi count and rate in range: no panic; the value is the
+    /// floor of the exact product, stated without a division:
+    /// `v * 100_000_000 <= sats * rate < (v + 1) * 100_000_000`.
+    #[kani::proof]
+    #[kani::solver(kissat)]
+    fn value_of_rounds_down() {
+        let sats: u64 = kani::any();
+        let per_btc: u64 = kani::any();
+        kani::assume(per_btc > 0 && per_btc < BOUND && sats < BOUND);
+        let rate = Rate::new(per_btc).unwrap();
+        let v = u128::from(value_of(sats, rate).0);
+        let p = u128::from(sats) * u128::from(per_btc);
+        let d = u128::from(SATS_PER_BTC);
+        assert!(v * d <= p && p < (v + 1) * d);
+    }
+
+    /// `cargo kani -p openbmt-counter --harness tip_for_percent_exact`
+    ///
+    /// For amounts below 2^32 and every percent: no panic, a tip is always
+    /// made, and it is the exact half-up rounding, stated without a division:
+    /// `t * 100 <= amount * percent + 50 < (t + 1) * 100`; never above the
+    /// amount for percents up to 100.
+    #[kani::proof]
+    #[kani::solver(kissat)]
+    fn tip_for_percent_exact() {
+        let amount: u64 = kani::any();
+        let percent: u8 = kani::any();
+        kani::assume(amount < (1 << 32));
+        let Some(Amount(t)) = tip_for_percent(Amount(amount), percent) else {
+            panic!("a tip below 2^32 always fits");
+        };
+        let t128 = u128::from(t);
+        let p = u128::from(amount) * u128::from(percent) + 50;
+        assert!(t128 * 100 <= p && p < (t128 + 1) * 100);
+        if percent <= 100 {
+            assert!(t <= amount);
+        }
+    }
+
+    /// `cargo kani -p openbmt-counter --harness tolerance_exact`
+    ///
+    /// For every value up to the most satoshis that can exist and every
+    /// basis-point count the settings allow (`MAX_TOLERANCE_BPS`, 500): the
+    /// result is the floor of the exact product over 10,000, stated without
+    /// a division: `t * 10_000 <= x * bps < (t + 1) * 10_000`. (The full
+    /// u64 by u32 domain did not finish in 10 minutes; `tolerance` has no
+    /// panic path there: it saturates and divides by a constant.)
+    #[kani::proof]
+    #[kani::solver(kissat)]
+    fn tolerance_exact() {
+        let x: u64 = kani::any();
+        let bps: u32 = kani::any();
+        kani::assume(x < (1 << 32) && bps <= 500);
+        let t = u128::from(tolerance(x, bps));
+        let p = u128::from(x) * u128::from(bps);
+        assert!(t * 10_000 <= p && p < (t + 1) * 10_000);
+    }
+
+    /// `cargo kani -p openbmt-counter --harness is_enough_is_exact_inequality`
+    ///
+    /// For amounts below 2^16 and the basis points the settings allow,
+    /// `is_enough` equals the exact rational inequality: a payment has
+    /// arrived and `(need - received) * 10_000 <= need * bps` (or
+    /// `received >= need`). The paid check of the owner node uses the same
+    /// comparison without the arrival test.
+    #[kani::proof]
+    #[kani::solver(kissat)]
+    fn is_enough_is_exact_inequality() {
+        let received: u64 = kani::any();
+        let need: u64 = kani::any();
+        let bps: u32 = kani::any();
+        kani::assume(need < (1 << 16) && bps <= 500);
+        let exact = received > 0
+            && (received >= need
+                || (u128::from(need) - u128::from(received)) * 10_000
+                    <= u128::from(need) * u128::from(bps));
+        assert_eq!(is_enough(received, need, bps), exact);
+    }
+}

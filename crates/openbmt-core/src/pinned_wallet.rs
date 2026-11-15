@@ -910,3 +910,127 @@ mod tests {
         }
     }
 }
+
+/// Kani proofs of the index ranges (WL-23 to WL-28). The counter's key is a
+/// fixed all-zero value: the proofs are about the numbers, and a key is only
+/// ever compared with itself, and under Kani keys compare equal (see
+/// `DeviceId`), since the real comparison is a call into the C library.
+///
+/// Run one at a time, for example:
+/// `GUARD_MEM=8G ~/.cache/openbmt/guard.sh env CARGO_TARGET_DIR=$HOME/.cache/openbmt/target/kani cargo kani -p openbmt-core --harness <name>`
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    #[allow(unsafe_code)]
+    fn counter() -> DeviceId {
+        // SAFETY: the key is a plain byte array inside; the proofs only copy
+        // and compare it.
+        unsafe { std::mem::zeroed() }
+    }
+
+    /// `cargo kani -p openbmt-core --harness range_shape_is_exact`
+    ///
+    /// `IndexRange::new` accepts exactly the non-empty ranges that end below
+    /// 2^31 and are at most `MAX_RANGE_LEN` long, and never panics on the
+    /// length subtraction.
+    #[kani::proof]
+    fn range_shape_is_exact() {
+        let start: u32 = kani::any();
+        let end: u32 = kani::any();
+        let ok = IndexRange::new(counter(), start, end).is_ok();
+        let spec = start < end
+            && u64::from(end) < (1u64 << 31)
+            && u64::from(end) - u64::from(start) <= u64::from(MAX_RANGE_LEN);
+        assert_eq!(ok, spec);
+    }
+
+    /// `cargo kani -p openbmt-core --harness book_accept_is_exact`
+    ///
+    /// A book holds one range with `k` of its indexes used (k from 0 to 3, or
+    /// all). A second range is accepted exactly when it has a valid shape
+    /// and overlaps neither an index already used (WL-25) nor a range with
+    /// unused indexes (WL-26), and whenever it is accepted it does not
+    /// overlap the unused part of the first.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn book_accept_is_exact() {
+        let s1: u32 = kani::any();
+        let e1: u32 = kani::any();
+        let s2: u32 = kani::any();
+        let e2: u32 = kani::any();
+        let uses: u32 = kani::any();
+        kani::assume(uses <= 3);
+        let r1 = IndexRange {
+            counter: counter(),
+            start: s1,
+            end: e1,
+        };
+        let r2 = IndexRange {
+            counter: counter(),
+            start: s2,
+            end: e2,
+        };
+        let mut book = RangeBook::new(counter());
+        if book.accept(&r1).is_err() {
+            return;
+        }
+        let mut used = 0u32;
+        for _ in 0..uses {
+            if book.next().is_ok() {
+                used += 1;
+            }
+        }
+        let next = s1 + used;
+        let shape = s2 < e2 && e2 < (1 << 31) && e2 - s2 <= MAX_RANGE_LEN;
+        let hits = |a: u32, b: u32| s2 < b && a < e2;
+        let overlaps_used = next > s1 && hits(s1, next);
+        let overlaps_open = next < e1 && hits(s1, e1);
+        let before = book.clone();
+        let result = book.accept(&r2);
+        assert_eq!(result.is_ok(), shape && !overlaps_used && !overlaps_open);
+        if result.is_ok() {
+            // The new range is clear of every index of the first not yet used
+            // and of every index already used.
+            assert!(e2 <= s1 || s2 >= e1);
+            assert!(e2 < (1 << 31));
+        } else {
+            assert!(book == before);
+        }
+    }
+
+    /// `cargo kani -p openbmt-core --harness book_next_is_in_range_and_rising`
+    ///
+    /// Every index `next` hands out is inside the range taken, below 2^31 and
+    /// one above the last handed out; once the range is used up the book says
+    /// so, and `remaining` counts the unused indexes exactly.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn book_next_is_in_range_and_rising() {
+        let s: u32 = kani::any();
+        let e: u32 = kani::any();
+        let r = IndexRange {
+            counter: counter(),
+            start: s,
+            end: e,
+        };
+        let mut book = RangeBook::new(counter());
+        if book.accept(&r).is_err() {
+            return;
+        }
+        assert_eq!(book.remaining(), u64::from(e - s));
+        let mut expect = s;
+        for _ in 0..4 {
+            match book.next() {
+                Ok(i) => {
+                    assert!(i == expect && i < e && i < (1 << 31));
+                    expect += 1;
+                }
+                Err(err) => {
+                    assert!(err == RangeError::UsedUp && expect == e);
+                }
+            }
+        }
+        assert_eq!(book.remaining(), u64::from(e - expect));
+    }
+}

@@ -385,3 +385,118 @@ mod tests {
         );
     }
 }
+
+/// Kani proofs of the strict reader: for every byte string up to a small
+/// bound, not a sample.
+///
+/// Run one at a time, for example:
+/// `GUARD_MEM=8G ~/.cache/openbmt/guard.sh env CARGO_TARGET_DIR=$HOME/.cache/openbmt/target/kani cargo kani -p openbmt-core --harness <name>`
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// `cargo kani -p openbmt-core --harness reader_framed_never_panics`
+    ///
+    /// `framed` on any input up to 8 bytes never panics, and `Ok` means the
+    /// input begins with the magic and the version byte and the reader holds
+    /// the rest.
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn reader_framed_never_panics() {
+        let buf: [u8; 8] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= 8);
+        let bytes = &buf[..len];
+        let magic: [u8; 4] = kani::any();
+        if let Ok(r) = Reader::framed(bytes, &magic) {
+            assert!(len >= 5);
+            assert!(bytes[..4] == magic && bytes[4] == VERSION);
+            assert!(r.buf == &bytes[5..]);
+        }
+    }
+
+    /// `cargo kani -p openbmt-core --harness reader_take_is_exact`
+    ///
+    /// `take(n)` for any `n` never panics: it gives the first `n` bytes and
+    /// leaves the rest when `n` fits, and `Truncated` with nothing consumed
+    /// when it does not.
+    #[kani::proof]
+    #[kani::unwind(10)]
+    fn reader_take_is_exact() {
+        let buf: [u8; 8] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= 8);
+        let bytes = &buf[..len];
+        let n: usize = kani::any();
+        let mut r = Reader::new(bytes);
+        match r.take(n) {
+            Ok(head) => {
+                assert!(n <= len && head == &bytes[..n] && r.buf == &bytes[n..]);
+            }
+            Err(e) => {
+                assert!(n > len && e == DecodeError::Truncated && r.buf == bytes);
+            }
+        }
+    }
+
+    /// `cargo kani -p openbmt-core --harness reader_count_is_bounded`
+    ///
+    /// `count` on any input up to 12 bytes, any `max` and any `min_elem`
+    /// (the multiplication cannot overflow unnoticed): never panics, and an
+    /// `Ok(n)` means `n <= max` and `n` elements of `min_elem` bytes fit in
+    /// what is left.
+    #[kani::proof]
+    #[kani::unwind(14)]
+    fn reader_count_is_bounded() {
+        let buf: [u8; 12] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= 12);
+        let bytes = &buf[..len];
+        let max: usize = kani::any();
+        let min_elem: usize = kani::any();
+        let mut r = Reader::new(bytes);
+        if let Ok(n) = r.count(max, min_elem) {
+            assert!(len >= 4);
+            assert!(n <= max);
+            assert!((n as u128) * (min_elem as u128) <= (len - 4) as u128);
+            assert!(n as u128 == u128::from(u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]])));
+        }
+    }
+
+    /// `cargo kani -p openbmt-core --harness reader_opt_u64_reencodes`
+    ///
+    /// `opt_u64` on any input up to 10 bytes never panics, and a value read
+    /// is written back by `put_opt_u64` as exactly the bytes it was read
+    /// from (the re-encoding rule).
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn reader_opt_u64_reencodes() {
+        let buf: [u8; 10] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= 10);
+        let bytes = &buf[..len];
+        let mut r = Reader::new(bytes);
+        if let Ok(v) = r.opt_u64() {
+            let used = len - r.buf.len();
+            let mut out = Vec::new();
+            put_opt_u64(&mut out, v);
+            assert!(out.len() == used);
+            assert!(out[..] == bytes[..used]);
+        }
+    }
+
+    /// `cargo kani -p openbmt-core --harness reader_flag_reencodes`
+    ///
+    /// `flag` accepts exactly the bytes 0 and 1, and the flag written back
+    /// as `u8::from(flag)` is the byte read.
+    #[kani::proof]
+    #[kani::unwind(4)]
+    fn reader_flag_reencodes() {
+        let byte: [u8; 1] = kani::any();
+        let mut r = Reader::new(&byte);
+        match r.flag() {
+            Ok(f) => assert!(byte[0] <= 1 && u8::from(f) == byte[0]),
+            Err(_) => assert!(byte[0] > 1),
+        }
+    }
+}
