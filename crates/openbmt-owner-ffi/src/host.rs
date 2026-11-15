@@ -65,7 +65,8 @@ use openbmt_owner_node::lightning_day;
 use openbmt_owner_node::live::DeepLine;
 use openbmt_owner_node::paid_check::{
     day_bounds, day_summary, gate_open_alarms, paid_sales, LightningCounters, MarkState,
-    PaidCheckRefused, PaidChecks, PaidState, PaidTrouble, PAID_ARRIVED_SHOWN_SECS,
+    PaidCheckRefused, PaidChecks, PaidState, PaidTrouble, SaleCheck, MAX_OPEN_ALARMS_PER_COUNTER,
+    PAID_ARRIVED_SHOWN_SECS,
 };
 use openbmt_owner_node::pos::{
     AlertKind as PosKind, PosAlertRef, PosId, PosSaleKey, PosSubject, TenderKey,
@@ -257,6 +258,9 @@ struct State {
     paid_started: bool,
     /// The counters whose records did not fold at the last check (OC-61).
     paid_unreadable: Vec<DeviceId>,
+    /// The counters held back for too many alarms not cleared at the last
+    /// check (OC-61).
+    paid_held: Vec<DeviceId>,
     /// Not before this time is a failed background run tried again.
     paid_retry_at: Option<Instant>,
     /// Key 1's state, or none for a shop with its own wallet.
@@ -529,6 +533,7 @@ fn paid_run(
         link,
         paid,
         paid_unreadable,
+        paid_held,
         lightning_named,
         own,
         dir,
@@ -550,7 +555,8 @@ fn paid_run(
     let tip = node.watcher().chain().tip_height();
     let result = paid.check(&found.sales, now, |k| node.paid_facts(k, tip));
     *paid_unreadable = found.unreadable;
-    paid_alerts(link, paid, paid_unreadable);
+    *paid_held = found.held;
+    paid_alerts(link, paid, paid_unreadable, paid_held);
     Some((found.sales, result))
 }
 
@@ -559,7 +565,12 @@ fn paid_run(
 /// marks that are not kept; so a mismatch is among the owner's other alarms
 /// (the Alerts line on the home page counts it) without the owner opening a
 /// page.
-fn paid_alerts(link: &mut OwnerLink, paid: &PaidChecks, unreadable: &[DeviceId]) {
+fn paid_alerts(
+    link: &mut OwnerLink,
+    paid: &PaidChecks,
+    unreadable: &[DeviceId],
+    held: &[DeviceId],
+) {
     let mut want: Vec<Alert> = paid
         .marks()
         .iter()
@@ -574,6 +585,10 @@ fn paid_alerts(link: &mut OwnerLink, paid: &PaidChecks, unreadable: &[DeviceId])
             .iter()
             .map(|counter| Alert::PaidUnreadable { counter: *counter }),
     );
+    want.extend(
+        held.iter()
+            .map(|counter| Alert::PaidHeld { counter: *counter }),
+    );
     match paid.trouble() {
         Some(PaidTrouble::NotKept(_)) => want.push(Alert::PaidNotKept { full: false }),
         Some(PaidTrouble::Full) => want.push(Alert::PaidNotKept { full: true }),
@@ -584,10 +599,62 @@ fn paid_alerts(link: &mut OwnerLink, paid: &PaidChecks, unreadable: &[DeviceId])
     link.clear_where(|a| {
         matches!(
             a,
-            Alert::PaidNotSeen { .. } | Alert::PaidUnreadable { .. } | Alert::PaidNotKept { .. }
+            Alert::PaidNotSeen { .. }
+                | Alert::PaidUnreadable { .. }
+                | Alert::PaidHeld { .. }
+                | Alert::PaidNotKept { .. }
         ) && !want.contains(a)
     });
     link.raise_alerts(order);
+}
+
+/// OC-61: a counter held back is let go as soon as the owner clears an alarm
+/// of it and it holds fewer than [`MAX_OPEN_ALARMS_PER_COUNTER`]; its sales
+/// are checked again at the next run.
+fn release_held(held: &mut Vec<DeviceId>, paid: &PaidChecks) {
+    let open = paid.marks().open_alarms();
+    held.retain(|c| {
+        open.get(c)
+            .is_some_and(|n| *n >= MAX_OPEN_ALARMS_PER_COUNTER)
+    });
+}
+
+/// The checks of a run by the sale they are of; the first of a sale is kept.
+pub(crate) fn checks_by_key(checks: &[SaleCheck]) -> BTreeMap<SaleKey, &SaleCheck> {
+    let mut out = BTreeMap::new();
+    for c in checks {
+        out.entry(c.sale).or_insert(c);
+    }
+    out
+}
+
+/// The paid sales by key; the first of a key is kept.
+pub(crate) fn sales_by_key(
+    sales: &[openbmt_owner_node::PaidSale],
+) -> BTreeMap<SaleKey, &openbmt_owner_node::PaidSale> {
+    let mut out = BTreeMap::new();
+    for s in sales {
+        out.entry(s.key()).or_insert(s);
+    }
+    out
+}
+
+/// The sales whose check is in `want`, newest read first, each sale looked up
+/// once.
+pub(crate) fn sales_in_state<'a>(
+    sales: &'a [openbmt_owner_node::PaidSale],
+    checks: &BTreeMap<SaleKey, &SaleCheck>,
+    want: PaidState,
+) -> Vec<&'a openbmt_owner_node::PaidSale> {
+    let mut out: Vec<(u64, &openbmt_owner_node::PaidSale)> = sales
+        .iter()
+        .filter_map(|s| {
+            let c = checks.get(&s.key())?;
+            (c.state == want).then_some((c.first_read, s))
+        })
+        .collect();
+    out.sort_by_key(|(read, s)| std::cmp::Reverse((*read, s.index)));
+    out.into_iter().map(|(_, s)| s).collect()
 }
 
 /// How long after a run whose marks could not be written the next is tried.
@@ -609,7 +676,7 @@ fn paid_background(st: &mut State, now: u64) {
     if !st.paid_started {
         st.paid_started = true;
         if let Some(link) = st.link.as_mut() {
-            paid_alerts(link, &st.paid, &st.paid_unreadable);
+            paid_alerts(link, &st.paid, &st.paid_unreadable, &st.paid_held);
         }
     }
     let key = (st.node.view().checked(), st.node.view().ready());
@@ -1249,6 +1316,7 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
             paid_key: None,
             paid_started: false,
             paid_unreadable: Vec::new(),
+            paid_held: Vec::new(),
             paid_retry_at: None,
             key1,
             key1_account: key1_keys.map(|(account, _, _)| account),
@@ -2452,6 +2520,7 @@ impl Entry {
                         Alert::PaidUnreadable { counter } => {
                             (AlertKind::PaidUnreadable, Some(counter), 0)
                         }
+                        Alert::PaidHeld { counter } => (AlertKind::PaidHeld, Some(counter), 0),
                         Alert::PaidNotKept { full } => {
                             (AlertKind::PaidNotKept, None, u64::from(*full))
                         }
@@ -2553,7 +2622,9 @@ impl Entry {
                     sale: u32::try_from(a.value)
                         .map_err(|_| refused_by("alert-unknown", "the alert is not raised"))?,
                 },
-                AlertKind::PaidUnreadable | AlertKind::PaidNotKept => unreachable!(),
+                AlertKind::PaidUnreadable | AlertKind::PaidHeld | AlertKind::PaidNotKept => {
+                    unreachable!()
+                }
             };
             if !link.alerts().contains(&alert) {
                 return Err(refused_by("alert-unknown", "the alert is not raised"));
@@ -2568,6 +2639,7 @@ impl Entry {
                     index: *sale,
                 };
                 st.paid.clear(&key, now).map_err(|e| paid_error(&e))?;
+                release_held(&mut st.paid_held, &st.paid);
             }
             link.clear(&alert);
             Ok(())
@@ -2685,6 +2757,7 @@ impl Entry {
                     kept: true,
                     full: false,
                     unreadable: Vec::new(),
+                    held: Vec::new(),
                     alarms: Vec::new(),
                     arrived: Vec::new(),
                     waiting: Vec::new(),
@@ -2694,8 +2767,10 @@ impl Entry {
                     log_full_more: 0,
                 });
             };
-            let state_of =
-                |sale: &openbmt_owner::SaleKey| result.checks.iter().find(|c| &c.sale == sale);
+            // Each lookup below is by key, so the view is linear in the sales.
+            let checks = checks_by_key(&result.checks);
+            let sales_by_key = sales_by_key(&sales);
+            let state_of = |sale: &SaleKey| checks.get(sale).copied();
             let mut alarms = Vec::new();
             let mut arrived = Vec::new();
             for m in st.paid.marks().iter() {
@@ -2705,7 +2780,7 @@ impl Entry {
                         // longer among the shop's counters, has no sales in
                         // `sales`: its alarm is still shown, with what the mark
                         // holds.
-                        let found = sales.iter().find(|s| s.key() == m.sale);
+                        let found = sales_by_key.get(&m.sale).copied();
                         alarms.push(PaidAlarmView {
                             counter: m.sale.counter.to_bytes().to_vec(),
                             sale: m.sale.index,
@@ -2737,16 +2812,7 @@ impl Entry {
                 recorded_sats: s.expected_sats(),
                 first_read: state_of(&s.key()).map_or(0, |c| c.first_read),
             };
-            let lines = |want: PaidState| {
-                let mut out: Vec<&openbmt_owner_node::PaidSale> = sales
-                    .iter()
-                    .filter(|s| state_of(&s.key()).is_some_and(|c| c.state == want))
-                    .collect();
-                out.sort_by_key(|s| {
-                    std::cmp::Reverse((state_of(&s.key()).map_or(0, |c| c.first_read), s.index))
-                });
-                out
-            };
+            let lines = |want: PaidState| sales_in_state(&sales, &checks, want);
             let waiting = lines(PaidState::Waiting).into_iter().map(line).collect();
             let old = lines(PaidState::NotCheckable);
             let not_checkable_more = count32(old.len().saturating_sub(PAID_OLD_LISTED));
@@ -2761,6 +2827,7 @@ impl Entry {
                     .iter()
                     .map(|c| c.to_bytes().to_vec())
                     .collect(),
+                held: st.paid_held.iter().map(|c| c.to_bytes().to_vec()).collect(),
                 alarms,
                 arrived,
                 waiting,
@@ -2806,8 +2873,9 @@ impl Entry {
                 index: a.sale,
             };
             st.paid.clear(&sale, a.now).map_err(|e| paid_error(&e))?;
+            release_held(&mut st.paid_held, &st.paid);
             if let Some(link) = st.link.as_mut() {
-                paid_alerts(link, &st.paid, &st.paid_unreadable);
+                paid_alerts(link, &st.paid, &st.paid_unreadable, &st.paid_held);
             }
             Ok(())
         })
@@ -2817,8 +2885,9 @@ impl Entry {
     pub(crate) fn paid_check_reset(&self) -> Result<(), AppError> {
         self.run(None, |st| {
             st.paid.reset().map_err(|e| paid_error(&e))?;
+            release_held(&mut st.paid_held, &st.paid);
             if let Some(link) = st.link.as_mut() {
-                paid_alerts(link, &st.paid, &st.paid_unreadable);
+                paid_alerts(link, &st.paid, &st.paid_unreadable, &st.paid_held);
             }
             Ok(())
         })

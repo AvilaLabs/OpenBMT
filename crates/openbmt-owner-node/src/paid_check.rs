@@ -343,6 +343,9 @@ pub struct PaidSales {
     /// The counters with a record that does not read as part of a sale, or a
     /// chain that does not verify: some of their payments cannot be checked.
     pub unreadable: Vec<DeviceId>,
+    /// The counters held back for too many alarms not cleared (OC-61): none of
+    /// their sales are checked.
+    pub held: Vec<DeviceId>,
 }
 
 /// OC-61: put the folds of each counter together. A counter that passed over a
@@ -504,30 +507,27 @@ impl LightningCounters {
 
 /// OC-61: take out the counters that hold
 /// [`MAX_OPEN_ALARMS_PER_COUNTER`] alarms not cleared: they are checked no
-/// further and are listed as unreadable, until the owner clears enough.
+/// further and are listed as held, not as unreadable, until the owner clears
+/// some of them. Both lists are sorted by counter.
 pub fn gate_open_alarms(found: PaidSales, marks: &PaidMarks) -> PaidSales {
     let open = marks.open_alarms();
     let over = |c: &DeviceId| {
         open.get(c)
             .is_some_and(|n| *n >= MAX_OPEN_ALARMS_PER_COUNTER)
     };
-    let mut listed: BTreeSet<DeviceId> = found.unreadable.iter().copied().collect();
-    let mut out = PaidSales {
-        sales: Vec::new(),
-        unreadable: found.unreadable,
-    };
-    for sale in found.sales {
-        if !over(&sale.counter) {
-            out.sales.push(sale);
-        }
+    let held: BTreeSet<DeviceId> = open.keys().filter(|c| over(c)).copied().collect();
+    let mut unreadable: BTreeSet<DeviceId> = found.unreadable.iter().copied().collect();
+    unreadable.retain(|c| !held.contains(c));
+    PaidSales {
+        sales: found
+            .sales
+            .into_iter()
+            .filter(|sale| !over(&sale.counter))
+            .collect(),
+        unreadable: unreadable.into_iter().collect(),
+        // A counter over the cap shows whether or not its fold has a paid sale.
+        held: held.into_iter().collect(),
     }
-    // A counter over the cap shows whether or not its fold has a paid sale.
-    for counter in open.keys().filter(|c| over(c)) {
-        if listed.insert(*counter) {
-            out.unreadable.push(*counter);
-        }
-    }
-    out
 }
 
 /// What a mark says of a sale (OC-61, OC-62, OC-64).

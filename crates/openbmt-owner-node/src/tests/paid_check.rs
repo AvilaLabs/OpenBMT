@@ -974,6 +974,7 @@ fn oc_61_a_counter_copy_of_two_thousand_records_folds_as_the_chain_does() {
         PaidSales {
             sales: fold.sales,
             unreadable: Vec::new(),
+            held: Vec::new(),
         }
     );
 }
@@ -1729,10 +1730,12 @@ fn oc_61_a_counter_at_the_alarm_cap_is_checked_no_further_until_the_owner_clears
         PaidSales {
             sales: all.clone(),
             unreadable: vec![],
+            held: vec![],
         },
         &marks,
     );
-    assert_eq!(found.unreadable, vec![counter()]);
+    assert_eq!(found.held, vec![counter()]);
+    assert!(found.unreadable.is_empty());
     assert!(found.sales.iter().all(|s| s.counter == other_counter()));
     let again = check_paid(&found.sales, &marks, now + 60, none);
     assert!(again.raised.is_empty());
@@ -1747,10 +1750,11 @@ fn oc_61_a_counter_at_the_alarm_cap_is_checked_no_further_until_the_owner_clears
         PaidSales {
             sales: all,
             unreadable: vec![],
+            held: vec![],
         },
         &cleared,
     );
-    assert!(found.unreadable.is_empty());
+    assert!(found.unreadable.is_empty() && found.held.is_empty());
     assert!(found.sales.iter().any(|s| s.counter == counter()));
     // With the sales checked again, the counter raises one more at most.
     let resumed = check_paid(&found.sales, &cleared, now + 200, none);
@@ -1762,6 +1766,70 @@ fn oc_61_a_counter_at_the_alarm_cap_is_checked_no_further_until_the_owner_clears
             .count(),
         1
     );
+}
+
+#[test]
+fn oc_61_a_counter_at_the_cap_is_held_and_not_unreadable_and_one_below_is_neither() {
+    let cap = MAX_OPEN_ALARMS_PER_COUNTER as u32;
+    let sales = missing_sales(counter(), 3);
+    let both = |marks: &PaidMarks, unreadable: Vec<DeviceId>| {
+        gate_open_alarms(
+            PaidSales {
+                sales: sales.clone(),
+                unreadable,
+                held: vec![],
+            },
+            marks,
+        )
+    };
+    // At the cap: held only, none of its sales checked.
+    let at_cap = raised_marks(100, 100 + cap, PAID_AT);
+    let found = both(&at_cap, vec![]);
+    assert_eq!(found.held, vec![counter()]);
+    assert!(found.unreadable.is_empty() && found.sales.is_empty());
+    // Held and unreadable: taken out of unreadable, listed as held only.
+    let found = both(&at_cap, vec![counter()]);
+    assert_eq!(found.held, vec![counter()]);
+    assert!(found.unreadable.is_empty());
+    // Another counter that is only unreadable stays so.
+    let found = both(&at_cap, vec![other_counter(), counter()]);
+    assert_eq!(found.unreadable, vec![other_counter()]);
+    // Both lists are sorted by counter.
+    let (low, high) = if counter() < other_counter() {
+        (counter(), other_counter())
+    } else {
+        (other_counter(), counter())
+    };
+    let found = both(&PaidMarks::new(), vec![high, low]);
+    assert_eq!(found.unreadable, vec![low, high]);
+    let two = raised_marks(100, 100 + cap, PAID_AT).after(
+        &CheckResult {
+            raised: (100..100 + cap)
+                .map(|i| key_of(other_counter(), i))
+                .collect(),
+            ..CheckResult::default()
+        },
+        PAID_AT,
+    );
+    assert_eq!(both(&two, vec![]).held, vec![low, high]);
+    // One below the cap: neither, and its sales are checked.
+    let below = raised_marks(100, 100 + cap - 1, PAID_AT);
+    let found = both(&below, vec![]);
+    assert!(found.held.is_empty() && found.unreadable.is_empty());
+    assert_eq!(found.sales.len(), 3);
+}
+
+#[test]
+fn oc_64_marks_made_at_a_clock_of_zero_read_back() {
+    let result = CheckResult {
+        read: vec![key(0)],
+        raised: vec![key(1)],
+        ..CheckResult::default()
+    };
+    let marks = PaidMarks::new().after(&result, 0);
+    assert_eq!(marks.iter().count(), 2);
+    let back = PaidMarks::from_bytes(&marks.to_bytes()).expect("marks that read back");
+    assert_eq!(back, marks);
 }
 
 #[test]

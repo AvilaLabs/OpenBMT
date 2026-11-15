@@ -227,10 +227,14 @@ pub enum Alert {
     },
     /// A counter has a record that does not read as part of a sale, so some of
     /// its Paids cannot be checked (OC-61); its other sales are still checked.
-    /// The records only grow, so it stays while the counter is on the link,
-    /// except that a counter held back for too many open alarms is listed
-    /// here too until the owner clears enough of them.
+    /// The records only grow, so it stays while the counter is on the link.
     PaidUnreadable {
+        /// The counter.
+        counter: DeviceId,
+    },
+    /// A counter has 256 alarms of the paid check not cleared, so none of its
+    /// sales are checked until the owner clears some of them (OC-61).
+    PaidHeld {
         /// The counter.
         counter: DeviceId,
     },
@@ -1184,7 +1188,8 @@ impl<R: Post> OwnerLink<R> {
                 | Alert::Diverged { counter: c, .. }
                 | Alert::BatchUndelivered { counter: c, .. }
                 | Alert::PaidNotSeen { counter: c, .. }
-                | Alert::PaidUnreadable { counter: c } => *c != counter,
+                | Alert::PaidUnreadable { counter: c }
+                | Alert::PaidHeld { counter: c } => *c != counter,
                 Alert::PaidNotKept { .. } => true,
             });
             // Batches for a counter that is no longer on the link are not

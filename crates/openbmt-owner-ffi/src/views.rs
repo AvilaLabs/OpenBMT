@@ -427,6 +427,9 @@ pub enum AlertKind {
     /// A counter has a record that does not read as part of a sale, so some of
     /// its payments are not checked (OC-61).
     PaidUnreadable,
+    /// A counter is held back for too many alarms not cleared, so none of its
+    /// sales are checked (OC-61).
+    PaidHeld,
     /// The marks of the counter checks are not kept (OC-64); the value is 1
     /// when they are full and 0 when the file is unreadable. No counter.
     PaidNotKept,
@@ -438,7 +441,8 @@ wire_unit_enum!(AlertKind {
     BatchUndelivered = 2,
     PaidNotSeen = 3,
     PaidUnreadable = 4,
-    PaidNotKept = 5
+    PaidNotKept = 5,
+    PaidHeld = 6
 });
 
 /// The arguments of `clear_alert`: the alert as `link_state` showed it.

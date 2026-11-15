@@ -92,6 +92,9 @@ pub struct PaidCheckView {
     /// The counters with a record that does not read as part of a sale, 32
     /// bytes each: some of their payments cannot be checked.
     pub unreadable: Vec<Vec<u8>>,
+    /// The counters held back for too many alarms not cleared, 32 bytes each:
+    /// none of their sales are checked (OC-61).
+    pub held: Vec<Vec<u8>>,
     /// The alarms not cleared, oldest first.
     pub alarms: Vec<PaidAlarmView>,
     /// Alarms that cleared themselves lately.
@@ -113,6 +116,7 @@ wire_record!(PaidCheckView {
     kept,
     full,
     unreadable,
+    held,
     alarms,
     arrived,
     waiting,

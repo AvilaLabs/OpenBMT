@@ -620,12 +620,12 @@ internal fun Controller.showAlerts(message: SayWords? = null): Unit = withNode {
         } else {
             views.add(ui.text(OwnerModel.alertsLine(l.alerts.size), 16f, bold = l.alerts.isNotEmpty()))
             // A mismatch of a counter check is shown with its sale and its Clear button below (OC-62).
-            for (a in l.alerts.filter { it.kind != AlertKind.PaidNotSeen && it.kind != AlertKind.PaidUnreadable && it.kind != AlertKind.PaidNotKept }) {
+            for (a in l.alerts.filter { it.kind != AlertKind.PaidNotSeen && it.kind != AlertKind.PaidUnreadable && it.kind != AlertKind.PaidHeld && it.kind != AlertKind.PaidNotKept }) {
                 val kind = when (a.kind) {
                     AlertKind.MissedCheckIn -> "Missed check-in"
                     AlertKind.Diverged -> "Records do not match"
                     AlertKind.BatchUndelivered -> "New addresses not taken"
-                    AlertKind.PaidNotSeen, AlertKind.PaidUnreadable, AlertKind.PaidNotKept -> ""
+                    AlertKind.PaidNotSeen, AlertKind.PaidUnreadable, AlertKind.PaidHeld, AlertKind.PaidNotKept -> ""
                 }
                 views.add(
                     stack(

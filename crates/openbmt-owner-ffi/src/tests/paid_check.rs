@@ -118,6 +118,7 @@ struct Check {
     kept: bool,
     full: bool,
     unreadable: usize,
+    held: usize,
     alarms: usize,
     arrived: usize,
     waiting: Vec<Line>,
@@ -131,6 +132,7 @@ fn check(rig: &Rig, handle: u64, now: u64) -> Check {
     let kept = r.bool();
     let full = r.bool();
     let unreadable = r.list(|r| r.bytes());
+    let held = r.list(|r| r.bytes());
     let alarms = r.list(|r| {
         (
             r.bytes(),
@@ -155,6 +157,7 @@ fn check(rig: &Rig, handle: u64, now: u64) -> Check {
         kept,
         full,
         unreadable: unreadable.len(),
+        held: held.len(),
         alarms: alarms.len(),
         arrived: arrived.len(),
         waiting,
@@ -453,4 +456,100 @@ fn oc_62_a_mismatch_reaches_the_alerts_without_a_page_and_a_new_tip_raises_it() 
     assert!(paid_alerts(&rig, handle).is_empty());
     rig.mine(handle, &[]);
     assert!(paid_alerts(&rig, handle).is_empty(), "raised once per sale");
+}
+
+#[test]
+fn oc_61_a_counter_at_the_cap_is_held_with_its_own_alert_until_one_alarm_is_cleared() {
+    use openbmt_owner_node::MAX_OPEN_ALARMS_PER_COUNTER;
+    let (rig, handle) = ready_in(|dir| {
+        // The counter holds the most alarms not cleared.
+        let raised: Vec<SaleKey> = (100..100 + MAX_OPEN_ALARMS_PER_COUNTER as u32)
+            .map(|index| SaleKey {
+                counter: counter(),
+                index,
+            })
+            .collect();
+        let marks = PaidMarks::new().after(
+            &CheckResult {
+                raised,
+                ..CheckResult::default()
+            },
+            1_000,
+        );
+        std::fs::write(dir.join("paid-check.bin"), marks.to_bytes()).expect("the marks");
+    });
+    let c = check(&rig, handle, PAID_AT + 10);
+    assert_eq!((c.held, c.unreadable), (1, 0), "held, not unreadable");
+    assert_eq!(alerts_of(&rig, handle, 6), vec![0], "its own alert");
+    assert!(alerts_of(&rig, handle, 4).is_empty());
+    // It is not the owner's to clear on the link.
+    let clear = W::new().u8(6).bytes(&counter_bytes()).u64(0).0;
+    assert_eq!(
+        fault(&rig.call(51, handle, &clear)).rule.as_str(),
+        "alert-unknown"
+    );
+    // Clearing one alarm lets it go.
+    let fields = W::new().u64(PAID_AT).bytes(&counter_bytes()).u32(100).0;
+    Rd::ok(&rig.call(OP_CLEAR, handle, &fields)).done();
+    assert!(alerts_of(&rig, handle, 6).is_empty());
+}
+
+#[test]
+fn oc_61_the_alert_of_a_held_counter_says_none_of_its_sales_are_checked() {
+    let w =
+        crate::say::link_alert_words(&openbmt_owner_node::Alert::PaidHeld { counter: counter() });
+    assert_eq!(w.heading, "Counter not checked");
+    assert_eq!(
+        w.what,
+        "A counter has 256 payment alarms not cleared, so this phone checks none of its sales until some are cleared."
+    );
+    assert_eq!(
+        w.next,
+        "Open the counter checks to see its alarms, then check the counter: it may have been tampered with."
+    );
+    assert_eq!(w.code, Some("OC-61"));
+}
+
+#[test]
+fn oc_61_the_counter_checks_view_looks_up_by_key_and_keeps_its_order() {
+    use crate::host::{checks_by_key, sales_by_key, sales_in_state};
+    use openbmt_owner_node::{PaidHow, PaidSale, PaidState, SaleCheck};
+    const N: u32 = 20_000;
+    let sales: Vec<PaidSale> = (0..N)
+        .map(|index| PaidSale {
+            counter: counter(),
+            index,
+            cashier: String::new(),
+            recorded_sats: 1,
+            quoted_sats: 1,
+            how: PaidHow::AtOnce,
+            tolerance_bps: 50,
+        })
+        .collect();
+    let checks: Vec<SaleCheck> = sales
+        .iter()
+        .map(|s| SaleCheck {
+            sale: s.key(),
+            state: if s.index % 2 == 0 {
+                PaidState::Waiting
+            } else {
+                PaidState::NotCheckable
+            },
+            seen_sats: None,
+            first_read: u64::from(s.index % 100),
+        })
+        .collect();
+    let started = std::time::Instant::now();
+    let by_key = checks_by_key(&checks);
+    assert_eq!(sales_by_key(&sales).len(), N as usize);
+    let waiting = sales_in_state(&sales, &by_key, PaidState::Waiting);
+    // A linear scan per sale would take billions of steps here.
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    assert_eq!(waiting.len(), (N / 2) as usize);
+    // Newest read first, then the higher sale number.
+    assert_eq!(waiting[0].index, 19_998);
+    assert!(waiting.windows(2).all(|p| {
+        let read = |s: &PaidSale| u64::from(s.index % 100);
+        (read(p[0]), p[0].index) > (read(p[1]), p[1].index)
+    }));
 }

@@ -224,14 +224,14 @@ object ProtocolDecoderTest {
         rejects("an alert kind tag") { decodeResponse(posStateFrame(kind = 9)).posState() }
         rejects("a subject tag") { decodeResponse(posStateFrame(subject = 2)).posState() }
         val paid = decodeResponse(paidCheckFrame()).paidCheck()
-        check(paid.kept && paid.full && paid.unreadable.size == 1 && paid.unreadable[0].size == 32 && paid.alarms.size == 1 && paid.arrived.size == 1 && paid.waiting.size == 1 && paid.notCheckable.isEmpty())
+        check(paid.kept && paid.full && paid.unreadable.size == 1 && paid.unreadable[0].size == 32 && paid.held.size == 1 && paid.held[0].size == 32 && paid.held[0][0] == 5.toByte() && paid.alarms.size == 1 && paid.arrived.size == 1 && paid.waiting.size == 1 && paid.notCheckable.isEmpty())
         val alarm = paid.alarms[0]
         check(alarm.counter.size == 32 && alarm.sale == 7L && alarm.cashier == "Ana" && alarm.recordedSats == 5_000L)
         check(alarm.seenSats == 0L && alarm.firstRead == 1_700_000_000L && alarm.raisedAt == 1_700_090_000L)
         check(paid.arrived[0].sale == 8L && paid.arrived[0].clearedAt == 3L && paid.waiting[0].recordedSats == 900L && paid.notCheckableMore == 12L)
         check(alarm.known && paid.logFull.size == 1 && paid.logFull[0].sale == 10L && paid.logFullMore == 3L)
-        val unkept = decodeResponse(header(0, Writer().bool(false).bool(false).u32(0).u32(0).u32(0).u32(0).u32(0).u32(0).u32(0).u32(0).toByteArray())).paidCheck()
-        check(!unkept.kept && !unkept.full && unkept.unreadable.isEmpty() && unkept.alarms.isEmpty() && unkept.notCheckableMore == 0L)
+        val unkept = decodeResponse(header(0, Writer().bool(false).bool(false).u32(0).u32(0).u32(0).u32(0).u32(0).u32(0).u32(0).u32(0).u32(0).toByteArray())).paidCheck()
+        check(!unkept.kept && !unkept.full && unkept.unreadable.isEmpty() && unkept.held.isEmpty() && unkept.alarms.isEmpty() && unkept.notCheckableMore == 0L)
         rejects("a flag that is not 0 or 1") { decodeResponse(header(0, Writer().u8(2).u32(0).u32(0).u32(0).u32(0).u32(0).toByteArray())).paidCheck() }
         val days = decodeResponse(header(0, Writer().u32(1).bytes(ByteArray(32) { 3 }).u32(4).u64(9_000).u32(2).u32(1).u32(0).u32(1).u64(7_000).bool(true).toByteArray())).let { r -> r.list { r.paidDay() } }
         check(days.size == 1 && days[0].sales == 4L && days[0].totalSats == 9_000L && days[0].seen == 2L && days[0].waiting == 1L)
@@ -1046,7 +1046,7 @@ object ProtocolDecoderTest {
     private fun paidCheckFrame(): ByteArray {
         val line = { sale: Long -> Writer().bytes(ByteArray(32) { 2 }).u32(sale).u64(900).u64(1_700_000_000).toByteArray() }
         val out = ByteArrayOutputStream()
-        out.write(Writer().bool(true).bool(true).u32(1).bytes(ByteArray(32) { 4 }).u32(1).bytes(ByteArray(32) { 2 }).u32(7).string("Ana").u64(5_000).u64(0).u64(1_700_000_000).u64(1_700_090_000).bool(true).toByteArray())
+        out.write(Writer().bool(true).bool(true).u32(1).bytes(ByteArray(32) { 4 }).u32(1).bytes(ByteArray(32) { 5 }).u32(1).bytes(ByteArray(32) { 2 }).u32(7).string("Ana").u64(5_000).u64(0).u64(1_700_000_000).u64(1_700_090_000).bool(true).toByteArray())
         out.write(Writer().u32(1).bytes(ByteArray(32) { 2 }).u32(8).u64(3).toByteArray())
         out.write(Writer().u32(1).toByteArray())
         out.write(line(9))

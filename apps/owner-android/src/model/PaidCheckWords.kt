@@ -61,6 +61,11 @@ object PaidCheckWords {
     val unreadableWhat = say("OC61_UNREADABLE_WHAT", "Some records of {counter} do not read as sales, so this phone cannot check the payments in them. Its other sales are still checked.")
     val unreadableNext = say("OC61_UNREADABLE_NEXT", "Check the counter: it may have been tampered with.")
 
+    // ---- a counter held back for too many alarms not cleared (OC-61) ----
+    val heldHeading = say("OC61_HELD_HEADING", "Counter not checked")
+    val heldWhat = say("OC61_HELD_WHAT", "{counter} has 256 payment alarms not cleared, so this phone checks none of its sales until some are cleared.")
+    val heldNext = say("OC61_HELD_NEXT", "Check the counter: it may have been tampered with. Clear each alarm once it is dealt with.")
+
     private fun said(heading: String, what: String, next: String, tone: Int): SayWords =
         SayWords(tone, Who.OWNER, heading, what, next, null, null, null, null)
 
@@ -115,6 +120,14 @@ object PaidCheckWords {
         Tones.STOP,
     )
 
+    /** OC-61: the words of a counter held back for too many alarms not cleared. */
+    fun held(counter: ByteArray): SayWords = said(
+        heldHeading,
+        heldWhat.replace("{counter}", counterName(counter)),
+        heldNext,
+        Tones.STOP,
+    )
+
     /** OC-63: a counter's day. */
     fun day(d: PaidDay): String = dayLine
         .replace("{counter}", counterName(d.counter))
@@ -140,6 +153,7 @@ object PaidCheckWords {
         "notKept" to notKept,
         "full" to full,
         "unreadable" to unreadable(sample.counter),
+        "held" to held(sample.counter),
     )
 
     /** Every key and its text, in order, for docs/screens/owner-app.md. */

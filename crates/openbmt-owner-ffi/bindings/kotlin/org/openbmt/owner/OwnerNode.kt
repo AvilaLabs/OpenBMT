@@ -371,6 +371,7 @@ private const val TAG_ALERT_KIND_BATCH_UNDELIVERED = 2
 private const val TAG_ALERT_KIND_PAID_NOT_SEEN = 3
 private const val TAG_ALERT_KIND_PAID_UNREADABLE = 4
 private const val TAG_ALERT_KIND_PAID_NOT_KEPT = 5
+private const val TAG_ALERT_KIND_PAID_HELD = 6
 private const val TAG_VIEW_KIND_READY = 0
 private const val TAG_VIEW_KIND_RESCANNING = 1
 private const val TAG_VIEW_KIND_DEEP_REORG = 2
@@ -529,7 +530,7 @@ class CashOutArgs(val address: String, val amount: CashAmount, val label: String
 
 class BatchArgs(val counter: ByteArray, val start: Long, val count: Long)
 
-enum class AlertKind { MissedCheckIn, Diverged, BatchUndelivered, PaidNotSeen, PaidUnreadable, PaidNotKept }
+enum class AlertKind { MissedCheckIn, Diverged, BatchUndelivered, PaidNotSeen, PaidUnreadable, PaidNotKept, PaidHeld }
 
 /** An alert as [OwnerNode.linkState] showed it. */
 class ClearArgs(val kind: AlertKind, val counter: ByteArray, val value: Long)
@@ -1588,7 +1589,7 @@ class PaidSaleLine(val counter: ByteArray, val sale: Long, val recordedSats: Lon
 /**
  * What a check shows. When [kept] is false the file of marks does not read back or could not be written: the check
  * still ran, on marks held in memory, until [OwnerNode.paidCheckReset] (OC-64). [full] is true when there are more marks
- * than a file keeps. [unreadable] holds the counters whose records do not read as sales (OC-61). [notCheckableMore]
+ * than a file keeps. [unreadable] holds the counters whose records do not read as sales (OC-61). [held] holds the counters held back for too many alarms not cleared, none of whose sales are checked (OC-61). [notCheckableMore]
  * counts the sales too old to check that are not listed. [logFull] holds the sales that cannot be checked because the
  * receipt log is full, and [logFullMore] counts those not listed.
  */
@@ -1596,6 +1597,7 @@ class PaidCheck(
     val kept: Boolean,
     val full: Boolean,
     val unreadable: List<ByteArray>,
+    val held: List<ByteArray>,
     val alarms: List<PaidAlarm>,
     val arrived: List<PaidArrived>,
     val waiting: List<PaidSaleLine>,
@@ -2120,6 +2122,7 @@ private fun Writer.alertKind(v: AlertKind): Writer =
             AlertKind.PaidNotSeen -> TAG_ALERT_KIND_PAID_NOT_SEEN
             AlertKind.PaidUnreadable -> TAG_ALERT_KIND_PAID_UNREADABLE
             AlertKind.PaidNotKept -> TAG_ALERT_KIND_PAID_NOT_KEPT
+            AlertKind.PaidHeld -> TAG_ALERT_KIND_PAID_HELD
         },
     )
 
@@ -2131,6 +2134,7 @@ private fun Reader.alertKind(): AlertKind =
         TAG_ALERT_KIND_PAID_NOT_SEEN -> AlertKind.PaidNotSeen
         TAG_ALERT_KIND_PAID_UNREADABLE -> AlertKind.PaidUnreadable
         TAG_ALERT_KIND_PAID_NOT_KEPT -> AlertKind.PaidNotKept
+        TAG_ALERT_KIND_PAID_HELD -> AlertKind.PaidHeld
         else -> tag("AlertKind")
     }
 
@@ -2307,6 +2311,7 @@ private fun Reader.paidSaleLine(): PaidSaleLine = PaidSaleLine(bytes(), u32(), u
 internal fun Reader.paidCheck(): PaidCheck = PaidCheck(
     bool(),
     bool(),
+    list { bytes() },
     list { bytes() },
     list { paidAlarm() },
     list { paidArrived() },

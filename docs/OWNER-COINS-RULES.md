@@ -478,10 +478,12 @@ says so when one is missing.
   its payments cannot be checked; its other sales, and every other counter,
   are still checked. A second opening leaves the first as it was. A counter
   with 256 alarms not cleared is held back: its alarms stay, no more are
-  raised for it, and it is checked no further until the owner clears them, so
-  that one counter cannot fill the marks of OC-64 for the others. The check runs each time the owner's
-  view checks a new tip, and when the app starts, and a run that failed is
-  tried again at the next.
+  raised for it, and it is checked no further until the owner clears some of
+  them, so that one counter cannot fill the marks of OC-64 for the others. The
+  owner phone raises an alarm of its own for that counter, that none of its
+  sales are checked. The check runs each time the owner's view checks a new
+  tip, and when the app starts, and a run that failed is tried again at the
+  next.
 - **OC-62.** The mismatch. The owner phone raises an alarm, as it raises a
   cancel (DESIGN §2.7), so that it reaches the owner without the owner looking
   for it, with the counter's name, the sale's number, the cashier, the amount

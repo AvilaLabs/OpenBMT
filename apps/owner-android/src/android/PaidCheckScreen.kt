@@ -30,6 +30,7 @@ internal fun Controller.paidCheckViews(n: OwnerNode, msg: Slot, again: () -> Uni
             ),
         )
     }
+    for (c in check.held) out.add(ui.words(PaidCheckWords.held(c)))
     for (c in check.unreadable) out.add(ui.words(PaidCheckWords.unreadable(c)))
     for (a in check.alarms) {
         out.add(

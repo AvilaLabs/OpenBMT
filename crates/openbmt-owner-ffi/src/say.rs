@@ -673,6 +673,14 @@ pub(crate) fn link_alert_words(alert: &openbmt_owner_node::Alert) -> Words {
             "Check the counter: it may have been tampered with.",
         )
         .code("OC-61"),
+        Alert::PaidHeld { .. } => Words::new(
+            Tone::Stop,
+            "Counter not checked",
+            "A counter has 256 payment alarms not cleared, so this phone checks none of its sales until some are cleared.",
+            Who::Owner,
+            "Open the counter checks to see its alarms, then check the counter: it may have been tampered with.",
+        )
+        .code("OC-61"),
         Alert::PaidNotKept { full: false } => Words::new(
             Tone::Stop,
             "Checks not kept",
@@ -794,6 +802,10 @@ pub fn all_words() -> Vec<(String, Words)> {
         out.push((
             "alert-paid-unreadable".to_string(),
             link_alert_words(&Alert::PaidUnreadable { counter }),
+        ));
+        out.push((
+            "alert-paid-held".to_string(),
+            link_alert_words(&Alert::PaidHeld { counter }),
         ));
     }
     for full in [false, true] {

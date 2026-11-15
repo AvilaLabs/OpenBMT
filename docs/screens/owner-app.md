@@ -1072,3 +1072,6 @@ other names in braces are counts:
 | OC61_UNREADABLE_HEADING | Counter cannot be checked |
 | OC61_UNREADABLE_WHAT | Some records of {counter} do not read as sales, so this phone cannot check the payments in them. Its other sales are still checked. |
 | OC61_UNREADABLE_NEXT | Check the counter: it may have been tampered with. |
+| OC61_HELD_HEADING | Counter not checked |
+| OC61_HELD_WHAT | {counter} has 256 payment alarms not cleared, so this phone checks none of its sales until some are cleared. |
+| OC61_HELD_NEXT | Check the counter: it may have been tampered with. Clear each alarm once it is dealt with. |
