@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bitcoin::consensus::encode::serialize;
 use bitcoin::hashes::{sha256, Hash};
-use bitcoin::{Address, BlockHash, Network, ScriptBuf, Txid};
+use bitcoin::{Address, Block, BlockHash, Network, ScriptBuf, Txid};
 use openbmt_counter_node::DriverPort;
 use openbmt_demo::chain::{payment, SimChain};
 use openbmt_net_io::{AppEvent, EventReceiver};
@@ -28,6 +28,8 @@ struct World {
     events: Sender<AppEvent>,
     watched: Vec<ScriptBuf>,
     paid: u32,
+    /// The blocks mined so far with their heights, for a rescan.
+    mined: Vec<(u32, Block)>,
 }
 
 static WORLD: Mutex<Option<World>> = Mutex::new(None);
@@ -87,7 +89,23 @@ impl OwnerPort for PagePort {
         }
     }
 
-    fn rescan_from(&self, _height: u32) {}
+    /// The driver starts the rescan the node asked for (it is told so), and the blocks above `height` are given again.
+    fn rescan_from(&self, height: u32) {
+        if let Some(w) = world().as_mut() {
+            let mut sent = vec![AppEvent::RescanStarted(height)];
+            for (at, block) in w.mined.iter().filter(|(at, _)| *at > height) {
+                sent.push(AppEvent::Block {
+                    hash: block.block_hash(),
+                    bytes: serialize(block),
+                });
+                sent.push(AppEvent::Checked(*at));
+            }
+            for event in sent {
+                // A node that is not reading has stopped; there is nobody to tell.
+                let _ = w.events.send(event);
+            }
+        }
+    }
 
     fn set_fetch_transactions(&self, _on: bool) {}
 
@@ -107,6 +125,7 @@ pub fn host() -> HostSpawn {
             events: tx,
             watched: scripts,
             paid: 0,
+            mined: Vec::new(),
         });
         Ok(Box::new(PagePort { events: rx.into() }) as Box<dyn OwnerPort + Send>)
     })
@@ -147,6 +166,7 @@ pub fn mine() -> Result<u32, String> {
     let block = w.chain.mine(crate::now());
     let height = w.chain.tip_height();
     let hash = block.block_hash();
+    w.mined.push((height, block.clone()));
     let sent = [
         AppEvent::Chain {
             joined: vec![(height, hash)],
@@ -165,6 +185,14 @@ pub fn mine() -> Result<u32, String> {
             .map_err(|_| "the node is not reading".to_string())?;
     }
     Ok(height)
+}
+
+/// The hash of the pretend chain's tip, as text: the page's check that this
+/// chain and the other module's chain are the same one.
+pub fn tip() -> Result<String, String> {
+    let guard = world();
+    let w = guard.as_ref().ok_or("no node is running")?;
+    Ok(w.chain.tip_hash().to_string())
 }
 
 #[cfg(test)]

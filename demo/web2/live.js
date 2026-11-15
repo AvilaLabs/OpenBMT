@@ -3,22 +3,29 @@
 // (counter-controller.js) from the counter app's own model, whose library runs as WebAssembly on a pretend chain,
 // and that a moment ends when the MODEL says so (the sale opened, the sale turned paid), not on a script.
 //
-// The owner's phone and the customer's wallet are still the sample screens of preview.js: the owner's own code is
-// another lane, and the wallet is only drawn for the demo. The wallet reads the sale's own payment code.
+// The owner's phone runs on the owner app's own code the same way (owner-controller.js, the owner's model and the
+// owner's library as WebAssembly), on the same pretend chain: every chain action goes through one object
+// (one-chain.js) that moves both modules together. The customer's wallet is only drawn for the demo; it reads the
+// sale's own payment code.
 "use strict";
 (async function () {
-  const U = OpenBmtUi, C = OpenBmtChrome, OV = OpenBmtOwnerViews, D = OpenBmtGalleryData;
+  const U = OpenBmtUi, C = OpenBmtChrome;
   const Wl = OpenBmtWallet, QS = OpenBmtQuestions, PC = OpenBmtPaymentCode, CC = OpenBmtCounterController;
+  const OC = OpenBmtOwnerController, { OneChain } = OpenBmtOneChain;
   // Where the files are: the page may say (OpenBmtAssets); the repository's layout otherwise.
   const assets = Object.assign({
     logo: "../ui/logo.png", palette: "../ui/palette.json",
     model: "../../dist/kotlin-js/counter/counter-model.mjs", wasm: "../../dist/demo-counter/counter.wasm", host: "./counter-host.mjs",
+    ownerModel: "../../dist/kotlin-js/owner/owner-model.mjs", ownerWasm: "../../dist/demo-owner/owner.wasm", ownerHost: "./owner-host.mjs",
   }, globalThis.OpenBmtAssets);
   const palette = new U.PaletteOf(await (await fetch(assets.palette)).json());
   const shell = new OpenBmtShell(document.getElementById("app"));
   const wasm = await (await fetch(assets.wasm)).arrayBuffer();
   const { loadCounter } = await import(assets.host);
   const flow = (await import(assets.model)).CounterFlowDemo.getInstance();
+  const ownerWasm = await (await fetch(assets.ownerWasm)).arrayBuffer();
+  const { loadOwner } = await import(assets.ownerHost);
+  const ownerFlow = (await import(assets.ownerModel)).OwnerFlowDemo.getInstance();
 
   // The page's clock. A visitor who jumps to a later step has the seconds a real counter would have waited skipped.
   const clock = { offset: 0, now() { return Math.floor(Date.now() / 1000) + this.offset; }, skip(secs) { this.offset += secs; } };
@@ -41,6 +48,7 @@
     run.dead = true;
     clearInterval(run.timer);
     run.controller.stopNode();
+    run.owner.stopNode();
     run = null;
   }
 
@@ -54,13 +62,18 @@
       flow.heartbeat(now, r.chain.heartbeat());
     }
     flow.pump(now);
+    ownerFlow.pump(now);
     r.controller.onPump(true);
+    r.owner.onPump(true);
   }
 
-  async function startRun(onEvent) {
+  async function startRun(onEvent, withOwner) {
     stopRun();
     const r = { dead: false, beat: 0, aim: null, onEvent };
-    r.chain = await loadCounter(wasm, { now: () => clock.now() });
+    // Two modules, one chain: both read the page's clock, and every chain action is made on both (one-chain.js).
+    const counterChain = await loadCounter(wasm, { now: () => clock.now() });
+    const ownerChain = await loadOwner(ownerWasm, { now: () => clock.now() });
+    r.chain = OneChain(counterChain, ownerChain);
     r.controller = CC.Controller({
       flow, chain: r.chain, clock,
       show(viewOf) {
@@ -70,8 +83,18 @@
       },
       event(kind, data) { if (!r.dead) r.onEvent(kind, data); },
     });
+    r.owner = OC.Controller({
+      flow: ownerFlow, chain: ownerChain, clock,
+      show(viewOf) {
+        // The owner's phone is on the page only on the merchant's path.
+        if (!r.dead && r.ownerShown) shell.show("owner", page(viewOf));
+      },
+    });
+    r.ownerShown = withOwner;
     run = r;
     r.controller.startNode();
+    r.owner.startNode();
+    r.owner.render();
     pump(r);
     r.timer = setInterval(() => pump(r), 1000);
     return r;
@@ -116,7 +139,6 @@
     const c = () => run.controller;
     return [
       { step: 0, enter() {
-        shell.show("owner", page((ui) => OV.showHome(ui, D.owner.home)));
         shell.actor(null);
         shell.light("counter", { owner: "Nothing to do here yet." });
         shell.say("", ["You are the cashier. Tap ", { b: "New sale" }, "."]);
@@ -141,6 +163,7 @@
             payCode(readCode());
             const b = document.querySelector(".actor button");
             if (b) b.disabled = true;
+            shell.say("The customer sent the payment.", ["The counter checks it itself. This takes a few seconds."]);
           },
         });
         S.on = { sale: (d) => { if (d.isPaid) go(); } };
@@ -155,31 +178,23 @@
       }, auto() { c().showHome(); } },
       { step: 3, enter() {
         aim(null);
-        shell.show("owner", page((ui) => OV.showHome(ui, D.owner.home)));
+        // The owner's phone is drawn from the owner model's own state (owner-controller.js); the counter rests.
         shell.light("owner", { counter: "Ready for the next sale." });
-        shell.say("The sale is done at the counter.", ["Now you are the owner. On your phone, tap ", { b: "Money" }, "."]);
+        shell.say("The sale is done at the counter.",
+          ["Now you are the owner. In a real shop the payment is settled when a block holds it, in about ten minutes."],
+          { label: "Skip ahead", onSkip: go });
         shell.questions(QS.merchant.owner);
-        shell.target("owner", "Money", go);
         S.on = null;
       } },
-      { step: 3, enter() {
-        shell.show("owner", page((ui) => OV.showMoney(ui, D.owner.money)));
-        shell.say("", ["Tap ", { b: "Books" }, "."]);
-        shell.target("owner", "Books", go);
-      } },
-      { step: 3, enter() {
-        shell.show("owner", page((ui) => OV.showBooks(ui, D.owner.books)));
-        shell.say("Today's sales are in your books.",
-          ["In a real shop the payment is settled when a block holds it, in about ten minutes."],
-          { label: "Skip ahead", onSkip: go });
-        shell.questions(QS.merchant.books);
-      } },
       { step: 4, enter() {
-        // A block holds the payment, on the pretend chain: the counter's node reads it at its next pump.
+        // A block holds the payment, on the one pretend chain: both modules take it, and the owner's model has it
+        // before the home is drawn again from the model.
         run.chain.mine();
         pump(run);
-        shell.say("A block holds the payment: the sale is settled.",
+        run.owner.takeEvents(clock.now());
+        shell.say("A block holds the payment. Your phone shows it in the shop's wallet.",
           ["That is a whole sale. Tap ", { b: "Start over" }, " to try it as the customer."]);
+        shell.questions(QS.merchant.books);
       } },
     ];
   }
@@ -219,7 +234,7 @@
       { step: 2, enter() {
         shell.show("wallet", () => Wl.sent(read.sats));
         shell.light("counter", { wallet: "Your payment is sent." });
-        shell.say("Your phone sent the payment.", []);
+        shell.say("Your phone sent the payment.", ["Watch the shop's counter: it checks the payment itself."]);
         shell.questions([]);
         const data = run.controller.saleData();
         if (data && data.isPaid) paidNow();
@@ -264,7 +279,7 @@
     await startRun((kind, data) => {
       const handler = S.on && S.on[kind];
       if (handler) handler(data);
-    });
+    }, path.devices.some((d) => d.id === "owner"));
     path.setup();
     // The visitor's taps before the moment they chose, made on the real model.
     for (let j = 0; j < from; j++) if (moments[j].auto) moments[j].auto();

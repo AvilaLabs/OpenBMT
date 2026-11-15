@@ -52,27 +52,33 @@ export async function loadOwner(bytes, { now = () => Math.floor(Date.now() / 100
     return s.slice(3);
   };
   return {
-    /** The demo wallet as the owner's app keeps it, for `start`'s own wallet. */
-    wallet() {
+    /**
+     * What the owner's `start` is given for the demo shop: the shop wallet's description text (the wallet the counter takes
+     * its payments into), the approver's root and Key 1's account key, the last two as bytes the Kotlin side reads.
+     */
+    shop() {
       tick();
-      return Int8Array.from(take(x.owner_wallet()));
+      return {
+        wallet: text(take(x.owner_shop(0))),
+        approverRoot: Int8Array.from(take(x.owner_shop(1))),
+        key1Account: Int8Array.from(take(x.owner_shop(2))),
+      };
     },
-    /** The regtest address of the demo wallet at receive `index`. */
+    /** The regtest address of the shop wallet at receive `index`. */
     address(index) {
       tick();
       return reply(take(x.owner_address(index)));
-    },
-    /** The shop's state with the demo counter's first range given, written under the folder `dir`, before `start`. */
-    seed(dir) {
-      tick();
-      const bytes = new TextEncoder().encode(dir);
-      reply(take(x.owner_seed(put(bytes), bytes.length)));
     },
     /** A customer pays `sats` to `address` on the pretend chain; the transaction's id. */
     pay(address, sats) {
       tick();
       const bytes = new TextEncoder().encode(address);
       return reply(take(x.chain_pay(put(bytes), bytes.length, BigInt(sats))));
+    },
+    /** The hash of the chain's tip, as hex. */
+    tip() {
+      tick();
+      return reply(take(x.chain_tip()));
     },
     /** A block is mined of everything in the pool; the new height. */
     mine() {

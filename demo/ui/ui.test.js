@@ -30,6 +30,8 @@ const SOURCES = {
   },
   // The page's controller for the shop sale (../web2): Controller.kt is the counter's.
   "../web2/counter-controller.js": { "Controller.kt": "apps/counter-android/src/android/Controller.kt" },
+  // The page's controller for the owner's home (../web2): Controller.kt and Screens.kt are the owner's.
+  "../web2/owner-controller.js": { "Controller.kt": "apps/owner-android/src/android/Controller.kt", "Screens.kt": "apps/owner-android/src/android/Screens.kt" },
 };
 
 /** The comments of a JS file that name a Kotlin line: [file, line, name]. */
@@ -63,6 +65,15 @@ test("each Controller.kt function the page's controller ports is a JS function o
   for (const name of new Set(named)) {
     // Controller(act) is the class: the JS function is Controller(host).
     assert.ok(new RegExp(`function ${name}\\(`).test(text), `counter-controller.js has no function ${name}`);
+  }
+});
+
+test("each function the owner page's controller ports is a JS function of the same name", () => {
+  const text = fs.readFileSync(path.join(__dirname, "../web2/owner-controller.js"), "utf8");
+  const named = references("../web2/owner-controller.js").map(([, , name]) => name);
+  assert.ok(named.length >= 5, `only ${named.length} functions`);
+  for (const name of new Set(named)) {
+    assert.ok(new RegExp(`function ${name}\\(`).test(text), `owner-controller.js has no function ${name}`);
   }
 });
 

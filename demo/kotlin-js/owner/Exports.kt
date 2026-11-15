@@ -1,17 +1,26 @@
 package org.openbmt.owner.demo
 
+import org.openbmt.app.Format
+import org.openbmt.app.SayWords
+import org.openbmt.app.WordsModel
 import org.openbmt.owner.BooksDay
 import org.openbmt.owner.Books
 import org.openbmt.owner.Native
 import org.openbmt.owner.OwnerNetwork
 import org.openbmt.owner.OwnerNode
 import org.openbmt.owner.StartConfig
+import org.openbmt.owner.ViewKind
+import org.openbmt.owner.app.AppWords
 import org.openbmt.owner.app.BooksModel
+import org.openbmt.owner.app.OwnerLook
+import org.openbmt.owner.app.OwnerModel
 import org.openbmt.owner.app.RequestForm
 import org.openbmt.owner.app.RequestModel
+import org.openbmt.owner.app.RequestWords
 import org.openbmt.owner.app.StarterChecks
 import org.openbmt.owner.app.StarterHome
 import org.openbmt.owner.app.StarterSetup
+import org.openbmt.owner.app.say
 
 /**
  * What the page's script can call, as the proof that the owner app's own
@@ -55,9 +64,49 @@ object OwnerModelDemo {
     fun nativeAnswerLength(request: ByteArray): Int = Native.call(request)?.size ?: -1
 }
 
+/** What a words shows (WordsModel): the colour's name, the three lines, who as a sentence, the quoted text and the details. */
+@JsExport
+class ShownWords(
+    val colour: String,
+    val heading: String,
+    val what: String,
+    val next: String,
+    val who: String,
+    val quotedLabel: String?,
+    val quotedText: String?,
+    val details: Array<String>,
+)
+
+private fun shown(words: SayWords): ShownWords {
+    val m = WordsModel.of(words)
+    return ShownWords(m.colour.name, m.heading, m.what, m.next, m.who, m.quotedLabel, m.quotedText, m.details.toTypedArray())
+}
+
+/**
+ * What the owner's home draws (Screens.kt showHome): the status of the network and the lines under it, the balance as
+ * its three parts, the waiting card's rows (a title and a count each), the four groups' titles and the line under each,
+ * and the footer's buttons. [signature] changes when anything on it does.
+ */
+@JsExport
+class OwnerHomeData(
+    val status: ShownWords,
+    val extra: Array<ShownWords>,
+    val lead: String,
+    val amount: String,
+    val checked: String,
+    val spend: String,
+    val footer: Array<String>,
+    val waitingTitle: String,
+    val waitingTitles: Array<String>,
+    val waitingCounts: Array<Int>,
+    val groupTitles: Array<String>,
+    val groupSubs: Array<String>,
+    val signature: String,
+)
+
 /**
  * The owner app's own entry points, driven from the page's script: the node is started with [OwnerNode.start] on
- * the demo wallet held as the shop's own, and what it holds is read with [OwnerNode.status],
+ * the demo shop's wallet with the Key app's keys, and what it holds is read with [OwnerNode.status],
  * [OwnerNode.receiptsLine] and [OwnerNode.books], all through [Native.call], which the page answers with the
  * WebAssembly build of the owner's library.
  */
@@ -68,18 +117,19 @@ object OwnerFlowDemo {
     private fun running(): OwnerNode = node ?: error("the node is not started")
 
     /**
-     * Start the node on the folder [dir], which the page has seeded, for the shop with its own wallet [wallet]
-     * (the file the module gives), and take its first events (the app pumps in a loop).
+     * Start the node on the folder [dir] for the demo shop: its wallet text [wallet] (the 2-of-3 wallet the counter takes
+     * its payments into), the approver's root and Key 1's account key, which the module gives; and take its first
+     * events (the app pumps in a loop).
      */
-    fun start(dir: String, now: Double, wallet: ByteArray) {
+    fun start(dir: String, now: Double, wallet: String, approverRoot: ByteArray, key1Account: ByteArray) {
         val config = StartConfig(
             dir = dir,
             network = OwnerNetwork.Regtest,
             now = now.toLong(),
             ownerSecret = ByteArray(32) { 1 },
-            approverRoot = ByteArray(32),
-            wallet = "",
-            key1Account = ByteArray(0),
+            approverRoot = approverRoot,
+            wallet = wallet,
+            key1Account = key1Account,
             key3Xpub = null,
             batchMinCount = 1000,
             refundDepth = 6,
@@ -89,7 +139,7 @@ object OwnerFlowDemo {
             broadcastProxy = null,
             withoutTor = true,
             link = null,
-            ownWallet = wallet,
+            ownWallet = null,
         )
         val started = OwnerNode.start(config)
         node = started
@@ -118,6 +168,41 @@ object OwnerFlowDemo {
     fun booksSummary(): String {
         val books = running().books(0)
         return "${books.currency}|${books.days.size}"
+    }
+
+    /**
+     * What the owner's home draws, from the node's own state, as Controller.showHome reads it: the network's words,
+     * the lines under them when the view is not ready, the balance, the waiting card's counts (the app gives none today),
+     * and the groups' lines. The shop is paid to its own wallet, so Request a payment is in the footer (RQ-35).
+     */
+    fun homeScreen(): OwnerHomeData {
+        val n = running()
+        val s = n.status()
+        val status = when {
+            s.stopped -> AppWords.stopped
+            else -> s.health.words.say()
+        }
+        val extra = ArrayList<ShownWords>()
+        s.halted?.let { extra.add(shown(it.words.say())) }
+        if (s.view != ViewKind.Ready) extra.add(shown(s.viewWords.say()))
+        val balance = OwnerLook.balance(Format.sats(s.balanceSats), s.checkedHeight, s.tipHeight)
+        val counts = listOf<Pair<String, Int?>>("Open approvals" to null, "Waiting to be delivered" to null, "Refund queue" to null)
+        val rows = OwnerLook.waitingRows(counts)
+        val inProgress = OwnerModel.sendsInProgress(n.sendStates())
+        // The demo's phone was set up without a link to counters, as the app's own `setup?.link` says.
+        val subs = arrayOf(
+            OwnerLook.moneySub(inProgress, OwnerModel.sendsLine(inProgress)),
+            OwnerModel.linkLine(null, 0),
+            OwnerModel.alertsLine(0),
+            OwnerLook.SETTINGS_SUB,
+        )
+        val titles = arrayOf(OwnerLook.MONEY, OwnerLook.DEVICES, OwnerLook.ALERTS, OwnerLook.SETTINGS)
+        val footer = if (RequestModel.offered(true)) arrayOf(RequestWords.homeButton) else emptyArray()
+        val signature = listOf(status.toString(), s.balanceSats, s.checkedHeight, s.tipHeight, extra.size, rows.size, subs.joinToString("|")).joinToString("/")
+        return OwnerHomeData(
+            shown(status), extra.toTypedArray(), balance.lead, balance.amount, balance.checked, "Spend", footer,
+            OwnerLook.WAITING_TITLE, rows.map { it.title }.toTypedArray(), rows.map { it.count }.toTypedArray(), titles, subs, signature,
+        )
     }
 
     /** Stop the node. */

@@ -65,6 +65,11 @@ export async function loadCounter(bytes, { now = () => Math.floor(Date.now() / 1
       tick();
       return Int8Array.from(take(x.chain_heartbeat()));
     },
+    /** The hash of the chain's tip, as hex. */
+    tip() {
+      tick();
+      return reply(take(x.chain_tip()));
+    },
     /** A block is mined of everything in the pool; the new height. */
     mine() {
       tick();

@@ -1331,7 +1331,8 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
     let rest = (|| {
         let key1 = match (&key_app, &key1_keys) {
             (Some(description), Some((_, key1_xpub, key3))) => {
-                Some(match std::fs::read(dir.join(KEY1_FILE)) {
+                // The files are the standard library's with the network side, and held in memory without it.
+                Some(match openbmt_counter_node::vfs::fs::read(dir.join(KEY1_FILE)) {
                     Ok(bytes) => SignerState::from_bytes(&bytes, network, key1_xpub)
                         .map_err(|e| refused_by("start-key1", format!("{KEY1_FILE}: {e}")))?,
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => SignerState::register(

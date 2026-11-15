@@ -13,8 +13,9 @@
 //!
 //! No socket, thread or file on a disk is used: the node's files are kept in
 //! memory (the `vfs` of `openbmt-counter-node`), and the shop the demo owner
-//! starts from is made by [`shop`]: the demo wallet, held as the shop's own,
-//! with the demo counter's first range of addresses.
+//! starts from is given by [`shop`]: the demo shop's wallet (the one the demo
+//! counter takes its payments into) with the owner's Key 1 and the approver's
+//! root.
 
 #![deny(missing_docs)]
 

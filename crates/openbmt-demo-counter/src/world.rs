@@ -178,5 +178,13 @@ pub fn mine() -> Result<u32, String> {
     Ok(height)
 }
 
+/// The hash of the pretend chain's tip, as text: the page's check that this
+/// chain and the other module's chain are the same one.
+pub fn tip() -> Result<String, String> {
+    let guard = world();
+    let w = guard.as_ref().ok_or("no node is running")?;
+    Ok(w.chain.tip_hash().to_string())
+}
+
 #[cfg(test)]
 mod tests;

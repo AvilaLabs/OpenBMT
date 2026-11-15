@@ -12,7 +12,8 @@
 <div id="app"></div>
 <!-- Where the files are. From the repository: serve the repository's folder and open /demo/web2/. The site build
      (scripts/site-build.sh) writes the site's own paths. -->
-<script>globalThis.OpenBmtAssets = { logo: "../ui/logo.png", palette: "../ui/palette.json", model: "../../dist/kotlin-js/counter/counter-model.mjs", wasm: "../../dist/demo-counter/counter.wasm", host: "./counter-host.mjs" };</script>
+<script>globalThis.OpenBmtAssets = { logo: "../ui/logo.png", palette: "../ui/palette.json", model: "../../dist/kotlin-js/counter/counter-model.mjs", wasm: "../../dist/demo-counter/counter.wasm", host: "./counter-host.mjs",
+  ownerModel: "../../dist/kotlin-js/owner/owner-model.mjs", ownerWasm: "../../dist/demo-owner/owner.wasm", ownerHost: "./owner-host.mjs" };</script>
 <script src="../ui/ui.js"></script>
 <script src="../ui/chrome.js"></script>
 <script src="../ui/counter-views.js"></script>
@@ -22,7 +23,9 @@
 <script src="payment-code.js"></script>
 <script src="questions.js"></script>
 <script src="shell.js"></script>
+<script src="one-chain.js"></script>
 <script src="counter-controller.js"></script>
+<script src="owner-controller.js"></script>
 <script src="live.js"></script>
 </body>
 </html>

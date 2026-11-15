@@ -5,17 +5,16 @@
 //! - `owner_set_now(secs)`: the time, before each call;
 //! - `owner_call(ptr, len) -> u64`: one framed request of the owner's
 //!   protocol, answered as `ptr << 32 | len`;
-//! - `owner_wallet() -> u64`: the demo wallet as the owner's app keeps it,
-//!   for `start`, in the same form;
-//! - `owner_address(index) -> u64`: the regtest address of the demo wallet
+//! - `owner_shop(part) -> u64`: what `start` is given for the shop, as bytes:
+//!   part 0 the shop wallet's description text, 1 the approver's root, 2 Key
+//!   1's account key;
+//! - `owner_address(index) -> u64`: the regtest address of the shop wallet
 //!   at that receive index; text, `ok:` and the address, or `err:` and why;
-//! - `owner_seed(ptr, len) -> u64`: the shop's state, with the demo counter's
-//!   first range given, written under the folder named at `ptr`, before
-//!   `start` is called on it; text, `ok:` or `err:` and why;
 //! - `chain_pay(ptr, len, sats) -> u64`: a customer pays the address written
 //!   at `ptr` on the pretend chain; the reply is text, `ok:` and the id, or
 //!   `err:` and why;
-//! - `chain_mine() -> u64`: a block is mined; text, `ok:` and the height.
+//! - `chain_mine() -> u64`: a block is mined; text, `ok:` and the height;
+//! - `chain_tip() -> u64`: the tip's hash; text, `ok:` and the hash.
 //!
 //! The one thing the module asks of the page is `openbmt_random(ptr, len)`,
 //! imported from `env`: it fills the bytes with the page's random numbers.
@@ -104,31 +103,23 @@ pub unsafe extern "C" fn owner_call(ptr: *mut u8, len: usize) -> u64 {
     give(crate::call(&request))
 }
 
-/// The demo wallet as the owner's app keeps it; empty when it could not be made.
+/// What the owner's `start` is given for the shop: `part` 0 is the wallet's description text, 1 the approver's root
+/// (32 bytes), 2 Key 1's account key (78 bytes); empty when it could not be made.
 #[no_mangle]
-pub extern "C" fn owner_wallet() -> u64 {
-    give(crate::shop::wallet_file().unwrap_or_default())
+pub extern "C" fn owner_shop(part: u32) -> u64 {
+    let made = match part {
+        0 => crate::shop::wallet_text().map(String::into_bytes),
+        1 => crate::shop::approver_root(),
+        2 => crate::shop::key1(),
+        _ => Err("no such part".to_string()),
+    };
+    give(made.unwrap_or_default())
 }
 
-/// The address of the demo wallet at receive `index`.
+/// The address of the shop wallet at receive `index`.
 #[no_mangle]
 pub extern "C" fn owner_address(index: u32) -> u64 {
     give(text_of(crate::shop::address(index)))
-}
-
-/// The shop's state under the folder of `len` bytes at `ptr` (freed here).
-///
-/// # Safety
-/// `ptr` and `len` must be exactly a buffer from `demo_alloc`, not yet freed.
-#[no_mangle]
-pub unsafe extern "C" fn owner_seed(ptr: *mut u8, len: usize) -> u64 {
-    openbmt_kernel_random::set_host_fill(page_random);
-    // SAFETY: the contract is the caller's, as for `take`.
-    let dir = unsafe { take(ptr, len) };
-    give(match std::str::from_utf8(&dir) {
-        Ok(dir) => text_of(crate::shop::seed(dir, crate::now()).map(|()| String::new())),
-        Err(_) => b"err:the folder is not text".to_vec(),
-    })
 }
 
 /// A customer pays `sats` to the address of `len` bytes at `ptr` (freed here).
@@ -145,6 +136,16 @@ pub unsafe extern "C" fn chain_pay(ptr: *mut u8, len: usize, sats: u64) -> u64 {
             Err(e) => format!("err:{e}"),
         },
         Err(_) => "err:the address is not text".to_string(),
+    };
+    give(text.into_bytes())
+}
+
+/// The hash of the chain's tip.
+#[no_mangle]
+pub extern "C" fn chain_tip() -> u64 {
+    let text = match crate::world::tip() {
+        Ok(hash) => format!("ok:{hash}"),
+        Err(e) => format!("err:{e}"),
     };
     give(text.into_bytes())
 }

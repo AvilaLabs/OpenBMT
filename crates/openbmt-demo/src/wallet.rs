@@ -8,9 +8,12 @@
 //! shop, the counter and the owner are fixed numbers: they sign only the
 //! demo's own records.
 
-use bitcoin::bip32::{Fingerprint, Xpub};
+use bitcoin::bip32::{ChildNumber, DerivationPath, Fingerprint, Xpriv, Xpub};
+use bitcoin::secp256k1::Secp256k1;
+use bitcoin::Network;
 use openbmt_core::batch::BatchPolicy;
 use openbmt_core::identity::Identity;
+use openbmt_core::wallet::{KeySlot, WalletDescription};
 use openbmt_core::pinned_wallet::{IndexRange, PinnedWallet, SignedRange};
 use openbmt_core::wallet_single::{ImportedWallet, SingleKeyWallet};
 use openbmt_counter::OwnPairing;
@@ -41,6 +44,68 @@ pub fn demo_wallet() -> Result<PinnedWallet, String> {
     let xpub = Xpub::from_str(ACCOUNT_XPUB).map_err(|e| format!("{e}"))?;
     let single = SingleKeyWallet::new(fingerprint, 0, xpub).map_err(|e| format!("{e:?}"))?;
     Ok(PinnedWallet::new(ImportedWallet::Single(single)))
+}
+
+/// Key 1 of the demo shop's wallet is the owner phone's: its account key is made from a fixed number, like the demo's
+/// identities, so that the demo owner can be started on the shop's wallet as a shop with the Key app's three keys.
+/// Keys 2 and 3 are public keys only. The wallet is a regtest wallet (`bcrt1...` addresses) and guards nothing.
+const KEY1_SEED: [u8; 32] = [0x11; 32];
+
+/// The fingerprint and the account key at `48h/1h/0h/2h` of Keys 2 and 3, made once from random bytes that were thrown
+/// away. Only these public keys are kept.
+const OTHER_KEYS: [(&str, &str); 2] = [
+    ("7f2dc2e3", "tpubDEmhcxEte8e1JWBZTPZs22Pk1BPSBxiozuB7XN97aanQY6v1HXTRt46TSuiPtkapHZVDhttAF79GTwgUcg3p2U6g7GGRi1kYSdu47E6q4rG"),
+    ("4ed6df90", "tpubDFTXfAqAVw1qU3K9xyiM1q5R5F3dWZ4L1Yr1Hp5ALFWuuAFDjZK1mVg1V1KhHoDqpYYitihDYnPm5iQiUfNVQZTLyAPibWoZE7Lmd9LanZg"),
+];
+
+/// The path of the shop wallet's account keys.
+fn shop_path() -> DerivationPath {
+    DerivationPath::from(vec![
+        ChildNumber::Hardened { index: 48 },
+        ChildNumber::Hardened { index: 1 },
+        ChildNumber::Hardened { index: 0 },
+        ChildNumber::Hardened { index: 2 },
+    ])
+}
+
+/// Key 1 of the demo shop: the fingerprint of its master key and its account key at `48h/1h/0h/2h`.
+fn key1() -> Option<(Fingerprint, Xpriv)> {
+    let secp = Secp256k1::new();
+    let master = Xpriv::new_master(Network::Regtest, &KEY1_SEED).ok()?;
+    let account = master.derive_priv(&secp, &shop_path()).ok()?;
+    Some((master.fingerprint(&secp), account))
+}
+
+/// The account private key of Key 1, as the owner's start takes it (78 bytes).
+pub fn key1_account() -> Option<[u8; 78]> {
+    key1().map(|(_, account)| account.encode())
+}
+
+/// The demo shop's wallet: the 2-of-3 wallet of the counter's pairing, whose
+/// receive scripts the first batch holds. The counter takes a batch of
+/// P2WSH scripts only, and a pairing with a single-key wallet (the demo
+/// wallet of `openbmt_demo::wallet`) is for the main network only, so the
+/// shop's wallet here is a 2-of-3 one on regtest.
+pub fn demo_shop_wallet() -> Option<WalletDescription> {
+    let path = shop_path();
+    let (fingerprint, account) = key1()?;
+    let secp = Secp256k1::new();
+    let first = KeySlot {
+        index: 1,
+        origin_fingerprint: fingerprint,
+        origin_path: path.clone(),
+        xpub: Xpub::from_priv(&secp, &account),
+    };
+    let other = |i: usize| -> Option<KeySlot> {
+        let (fingerprint, xpub) = OTHER_KEYS.get(i)?;
+        Some(KeySlot {
+            index: u8::try_from(i + 2).ok()?,
+            origin_fingerprint: Fingerprint::from_str(fingerprint).ok()?,
+            origin_path: path.clone(),
+            xpub: Xpub::from_str(xpub).ok()?,
+        })
+    };
+    WalletDescription::new(Network::Regtest, [first, other(0)?, other(1)?]).ok()
 }
 
 /// What the demo counter is paired with: the owner, the demo wallet and the

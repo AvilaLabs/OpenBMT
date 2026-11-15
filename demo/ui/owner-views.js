@@ -291,7 +291,7 @@
     for (const b of d.words.footer || []) footer.push(ui.button(b, () => {}));
     const page = screen(ui, { title: "Owner", body: [content], actions: footer, logo: true });
     const views = [];
-    views.push(ui.heroCard(d.status, d.balance, []));
+    views.push(ui.heroCard(d.status, d.balance, (d.extra || []).map((m) => ui.ownerWords(m))));
     const rows = (d.waiting || []).map((r) => ({ title: r.title, count: r.count, onClick: () => {} }));
     const waiting = ui.waitingCard(rows, d.words.waitingTitle);
     if (waiting) views.push(waiting);

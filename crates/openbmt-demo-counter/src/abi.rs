@@ -11,6 +11,7 @@
 //!   at `ptr` on the pretend chain; the reply is text, `ok:` and the id, or
 //!   `err:` and why;
 //! - `chain_mine() -> u64`: a block is mined; text, `ok:` and the height;
+//! - `chain_tip() -> u64`: the tip's hash; text, `ok:` and the hash;
 //! - `chain_heartbeat() -> u64`: the heartbeat the owner's phone would send
 //!   the counter now, signed, as bytes (none when no node is running).
 //!
@@ -113,6 +114,16 @@ pub unsafe extern "C" fn chain_pay(ptr: *mut u8, len: usize, sats: u64) -> u64 {
             Err(e) => format!("err:{e}"),
         },
         Err(_) => "err:the address is not text".to_string(),
+    };
+    give(text.into_bytes())
+}
+
+/// The hash of the chain's tip.
+#[no_mangle]
+pub extern "C" fn chain_tip() -> u64 {
+    let text = match crate::world::tip() {
+        Ok(hash) => format!("ok:{hash}"),
+        Err(e) => format!("err:{e}"),
     };
     give(text.into_bytes())
 }
