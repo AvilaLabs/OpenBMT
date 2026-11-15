@@ -41,6 +41,7 @@ fn shop(rig: &Rig, wallet: &[u8]) -> W {
         .string(rig.dir().to_str().unwrap())
         .bytes(&OWNER_SECRET)
         .bytes(wallet)
+        .u8(0)
 }
 
 fn started_box(name: &str) -> (BoxRunner, std::path::PathBuf) {

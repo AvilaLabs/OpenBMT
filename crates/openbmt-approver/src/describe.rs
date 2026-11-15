@@ -52,6 +52,7 @@ pub(crate) fn shown_name(field: &'static str) -> &'static str {
         "watch_key" => "Watch key",
         "tips_on" => "Ask for a tip",
         "tip_percents" => "Tips",
+        "place" => openbmt_core::say::TODO_WORDS_PLACE_LABEL,
         other => other,
     }
 }
@@ -203,6 +204,7 @@ pub(crate) fn field_values(s: &Settings) -> Vec<(&'static str, String)> {
         ("light_fallback", flag(s.light_fallback)),
         ("tips_on", flag(s.tips_on)),
         ("tip_percents", tip_percents(&s.tip_percents)),
+        ("place", openbmt_core::say::place_value(s.place).to_string()),
     ]
 }
 
@@ -340,6 +342,10 @@ mod tests {
             m("watch_key", Box::new(|s| s.watch_key = Some(dev(43)))),
             m("tips_on", Box::new(|s| s.tips_on = !s.tips_on)),
             m("tip_percents", Box::new(|s| s.tip_percents = vec![10, 15])),
+            m(
+                "place",
+                Box::new(|s| s.place = openbmt_core::settings::Place::Giving),
+            ),
         ]
     }
 

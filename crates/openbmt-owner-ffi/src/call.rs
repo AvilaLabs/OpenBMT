@@ -243,8 +243,8 @@ use crate::views::{
     DeepRequestView, DeliverView, EntryKindView, EntryRow, FloatWatchConfig, HaltedView,
     HealthView, LimitView, LinkConfig, LinkStepView, LinkView, MergeOfferView, NoteKindView,
     OldAddressesView, OldKind, OutboxKind, OutboxRow, OutcomeKind, OutcomeView, OwnerNetwork,
-    PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView,
-    RefundRow, RouteView, SendKind, SendRow, SettingsHeldView, SettingsQueuedView,
+    PlaceView, PumpView, QueueView, QueuedRefund, ReceiptsKind, ReceiptsView, RefundArgs,
+    RefundNoteView, RefundRow, RouteView, SendKind, SendRow, SettingsHeldView, SettingsQueuedView,
     ShopCurrencyView, SkippedView, StageKind, StageView, StartConfig, StatusView, SwapHeldView,
     TakenView, ViewKind, WordsView,
 };
@@ -1410,6 +1410,7 @@ fn definitions() -> Vec<TypeDef> {
         DeepRequestView::define(),
         LimitView::define(),
         CounterShareView::define(),
+        PlaceView::define(),
         SettingsHeldView::define(),
         OutboxKind::define(),
         OutboxRow::define(),

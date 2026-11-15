@@ -10,6 +10,7 @@ import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 import org.openbmt.app.ControlMessage
+import org.openbmt.owner.Place
 import org.openbmt.app.ControlReader
 import org.openbmt.app.Format
 import org.openbmt.app.PickedUri
@@ -438,11 +439,12 @@ object AppModelTest {
         tipsOn: Boolean = false,
         tipPercents: List<Int> = listOf(10, 15, 20),
         currency: ShopCurrency = ShopCurrency.Usd,
+        place: Place = Place.Shop,
     ): SettingsHeld {
         val l = Limit(7000, 7)
         return SettingsHeld(
             3, l, l, l, l, l, l, 105, l, l, l, l, 1, 6, 900, true, false, floor,
-            tipsOn, tipPercents, listOf(ByteArray(32) { 1 }, ByteArray(32) { 2 }), counters, emptyList(), null, currency,
+            tipsOn, tipPercents, listOf(ByteArray(32) { 1 }, ByteArray(32) { 2 }), counters, emptyList(), null, currency, place = place,
         )
     }
 
@@ -1526,7 +1528,7 @@ object AppModelTest {
         val e = source("src/android/SettingsEdit.kt")
         val menu = e.substringAfter("internal fun Controller.showChangeSettings(").substringBefore("internal fun Controller.showEditGroup(")
         for (w in listOf("editGroupShares.heading", "editGroupLightning.heading", "\"Review\"", "\"Start over\"", "settingsDraft = SettingsDraft()")) ok(menu.contains(w), "the menu has $w")
-        ok(SettingsEditModel.groups.size == 6 && SettingsEditModel.groups.map { it.words.heading } == listOf("Currency", "Instant sales", "Payments", "Tips", "Refunds and overrides", "Safety"), "the currency, then five screens of fields: ${SettingsEditModel.groups.map { it.words.heading }}")
+        ok(SettingsEditModel.groups.size == 7 && SettingsEditModel.groups.dropLast(1).map { it.words.heading } == listOf("Currency", "Instant sales", "Payments", "Tips", "Refunds and overrides", "Safety") && SettingsEditModel.groups.last() === SettingsEditModel.place, "the currency, then five screens of fields, then the kind of place (GV-03): ${SettingsEditModel.groups.map { it.words.heading }}")
         ok(AppWords.editGroupShares.heading == "Counters' shares" && AppWords.editGroupLightning.heading == "Lightning node", "the other two")
         ok(SettingsEditModel.fields.map { it.id }.toSet().size == SettingsEditModel.fields.size && SettingsEditModel.fields.size >= 15, "each field once: ${SettingsEditModel.fields.size}")
         ok(e.indexOf("n.queueSettings(") > e.indexOf("n.previewSettings("), "nothing is queued before the preview")
@@ -1536,7 +1538,8 @@ object AppModelTest {
     }
 
     private fun oa_33_each_field_shows_its_words_and_value_and_only_the_shape_is_judged_here() {
-        for (f in SettingsEditModel.fields) {
+        // The place's words are placeholders until they are written (GV-10): they carry no checked word yet.
+        for (f in SettingsEditModel.fields.filter { it.id != "place" }) {
             val w = f.words
             ok(w.heading.length <= 28 && w.what.length <= 140 && SayCheck.problem(w) == null, "words of ${f.id}")
         }
@@ -3572,7 +3575,7 @@ object AppModelTest {
 
         // The first run: Connect follows the advice, Checked's Next goes to the notice, Back at every step.
         val r = FirstRun(ShopPrefs(), "DE")
-        r.next(); r.next(); r.next(); r.next(); r.choose(MoneyChoice.Diy); ok(r.step == FirstRunStep.OwnAdvice, "the advice on a signer the owner builds")
+        r.next(); r.next(); r.next(); r.next(); r.next(); r.choose(MoneyChoice.Diy); ok(r.step == FirstRunStep.OwnAdvice, "the advice on a signer the owner builds")
         r.next(); ok(r.step == FirstRunStep.Connect && r.connect.step == ConnectStep.Intro, "Continue with my wallet: Connect your wallet")
         r.next(); ok(r.step == FirstRunStep.Connect, "Next is nothing before the wallet is checked")
         r.connect.paste(); r.back(); ok(r.step == FirstRunStep.Connect && r.connect.step == ConnectStep.Intro, "Back from the paste: the intro")
@@ -3610,14 +3613,59 @@ object AppModelTest {
         ok(source("src/model/ConnectModel.kt").contains("text.fill(0)") && ui.contains("field.setText(\"\")"), "the text is cleared from the field and the bytes wiped")
     }
 
+    /** docs/GIVING-RULES.md GV-03, GV-13: the first question, the steps a place of giving does not offer, and the place in the settings editor. */
+    private fun gv_03_the_first_run_asks_the_kind_of_place_and_a_place_of_giving_skips_the_shop_steps() {
+        val r = FirstRun(ShopPrefs(), "DE")
+        r.next(); r.next()
+        ok(r.step == FirstRunStep.Place && r.place == Place.Shop, "GV-03: the question comes after Before, before the shop and the wallet, and a shop is the default")
+        r.place = Place.Giving; r.next()
+        ok(r.step == FirstRunStep.Shop, "GV-03: the answer goes on")
+        r.next()
+        ok(r.step == FirstRunStep.Money, "GV-13: a place of giving is not asked for a till")
+        r.back(); r.back()
+        ok(r.step == FirstRunStep.Place, "GV-03: back from the shop is the question")
+        val shop = FirstRun(ShopPrefs(), "DE")
+        shop.next(); shop.next(); shop.next(); shop.next()
+        ok(shop.step == FirstRunStep.Till, "a shop is still asked its till")
+        // The answer is kept in the shop file, and a shop's file is the file every earlier build wrote.
+        val plain = String(ShopPrefs("Cafe").encode())
+        ok(!plain.contains("place:") && ShopPrefs.decode(plain.toByteArray()).place == Place.Shop, "GV-01: a shop's file has no place line")
+        val giving = ShopPrefs("Chapel", place = Place.Giving)
+        ok(String(giving.encode()).endsWith("place: giving\n") && ShopPrefs.decode(giving.encode()).place == Place.Giving, "the place line is written for a place of giving and reads back")
+        val withStep = ShopPrefs("Chapel", step = FirstRunStep.Instant, place = Place.Giving)
+        ok(ShopPrefs.decode(withStep.encode()).let { it.step == FirstRunStep.Instant && it.place == Place.Giving }, "the step line and the place line read back together")
+        ok(giving.with(name = "Hall").place == Place.Giving && giving.withStep(null).place == Place.Giving && FirstRun(giving, "DE").place == Place.Giving, "every save and the first run keep the place")
+        for (bad in listOf("place: shop\n", "place: \n", "place: other\n")) {
+            val text = String(ShopPrefs("Cafe").encode()) + bad
+            ok(try { ShopPrefs.decode(text.toByteArray()); false } catch (_: ConfigFormatException) { true }, "a place line that is not giving is refused: ${bad.trim()}")
+        }
+        // The home screens (GV-13) and the checklist.
+        ok(Giving.homeOffersShopSteps(false) && !Giving.homeOffersShopSteps(true) && Giving.settingsCarriesTill(true) && !Giving.settingsCarriesTill(false), "GV-13: home hides the shop steps at a place of giving, and Settings carries the till")
+        ok(Giving.isGiving(null, giving) && !Giving.isGiving(null, ShopPrefs("Cafe")) && !Giving.isGiving(sampleSettings(), giving) && Giving.isGiving(sampleSettings(place = Place.Giving), ShopPrefs("Cafe")), "the settings in force decide when there are any, the first answer before")
+        ok(Checklist.cardDue(ShopPrefs("Cafe", till = Till.entries.first())) == true && !Checklist.cardDue(ShopPrefs("Chapel", till = Till.entries.first(), place = Place.Giving)), "GV-13: a place of giving is not asked for a staff card")
+        // The settings editor: the place is a switch, sent only when touched.
+        val f = SettingsEditModel.place.fields.single()
+        ok(f.id == "place" && f.kind == FieldKind.Switch && SettingsEditModel.groups.contains(SettingsEditModel.place), "GV-02: the editor has the place")
+        ok(SettingsEditModel.now(f, sampleSettings()).isNotEmpty() && SettingsEditModel.input(f, sampleSettings(place = Place.Giving)) == "1" && SettingsEditModel.input(f, sampleSettings()) == "0", "the place's value is read from the settings in force")
+        val td = SettingsDraft()
+        ok((SettingsEditModel.args(td, sampleSettings()) as Form.Ok).value.place == null, "GV-02: an untouched place is not sent")
+        td.typed["place"] = "1"
+        ok((SettingsEditModel.args(td, sampleSettings()) as Form.Ok).value.place == Place.Giving, "a switch to giving is sent")
+        td.typed["place"] = "0"
+        ok((SettingsEditModel.args(td, sampleSettings(place = Place.Giving)) as Form.Ok).value.place == Place.Shop, "a switch back to a shop is sent")
+        // GV-10: the placeholders are not registered words, and no giving word is written.
+        ok(GivingWords.editGroupPlace.heading.startsWith("TODO_WORDS") && GivingWords.TODO_WORDS_PLACE_QUESTION.startsWith("TODO_WORDS"), "GV-10: the new screens' words are markers")
+        ok(AppWords.editField("tips_on", ShopCurrency.Usd, true).what == AppWords.editField("tips_on", ShopCurrency.Usd, false).what, "GV-10: a giving lookup with no giving word is the shop's word")
+    }
+
     /** The first run of docs/DESIGN.md section 2.1: the order of the steps on each path, the instant limit, the first sale, the checklist and the taps. */
     private fun firstRunPlanTests() {
         val reader: (String) -> ImportedWalletView = { ImportedWalletView(false, "818bc9b6", WL06_ADDRESS) }
         /** A first run at Money, with the number of model actions it took. */
         fun toMoney(): Pair<FirstRun, Int> {
             val r = FirstRun(ShopPrefs(), "DE")
-            r.next(); r.next(); r.next(); r.next()
-            return r to 4
+            r.next(); r.next(); r.next(); r.next(); r.next()
+            return r to 5
         }
         fun connectChecked(r: FirstRun) {
             r.connect.paste(); r.connect.read(WL06_ONE.toByteArray(Charsets.UTF_8), reader); r.connect.same()
@@ -3627,7 +3675,7 @@ object AppModelTest {
         val order = ArrayList<FirstRunStep>()
         val plan = FirstRun(ShopPrefs(), "DE")
         order.add(plan.step)
-        repeat(4) { plan.next(); order.add(plan.step) }
+        repeat(5) { plan.next(); order.add(plan.step) }
         plan.choose(MoneyChoice.Plan); order.add(plan.step)
         plan.next(); order.add(plan.step)
         plan.next(); order.add(plan.step)
@@ -3636,10 +3684,10 @@ object AppModelTest {
         plan.next(); order.add(plan.step)
         ok(
             order == listOf(
-                FirstRunStep.Welcome, FirstRunStep.Before, FirstRunStep.Shop, FirstRunStep.Till, FirstRunStep.Money, FirstRunStep.Hardware,
+                FirstRunStep.Welcome, FirstRunStep.Before, FirstRunStep.Place, FirstRunStep.Shop, FirstRunStep.Till, FirstRunStep.Money, FirstRunStep.Hardware,
                 FirstRunStep.Starter, FirstRunStep.OwnCounter, FirstRunStep.Instant, FirstRunStep.FirstSale, FirstRunStep.Ready,
             ),
-            "the plan path: before, shop, till, money, the buying guide, the starter wallet, the counter, the limit, the first sale, ready",
+            "the plan path: before, the kind of place, shop, till, money, the buying guide, the starter wallet, the counter, the limit, the first sale, ready",
         )
         val own = toMoney().first
         own.choose(MoneyChoice.Own); ok(own.step == FirstRunStep.Connect, "I already have a wallet goes straight to connecting it")
@@ -3704,7 +3752,7 @@ object AppModelTest {
 
         // Back on every new step.
         val b = toMoney().first
-        b.back(); b.back(); b.back(); b.back(); ok(b.step == FirstRunStep.Welcome, "back from Shop goes through Before to Welcome")
+        b.back(); b.back(); b.back(); b.back(); b.back(); ok(b.step == FirstRunStep.Welcome, "back from Shop goes through the kind of place and Before to Welcome")
         b.next(); b.back(); ok(b.step == FirstRunStep.Welcome, "back from Before: Welcome")
         val h = toMoney().first
         h.choose(MoneyChoice.Plan); h.back(); ok(h.step == FirstRunStep.Money, "back from the buying guide: the money")
@@ -3801,15 +3849,15 @@ object AppModelTest {
         // The taps: model actions from Welcome to the first counter. These numbers may only go down.
         var taps = 0
         val tp = FirstRun(ShopPrefs(), "DE")
-        tp.next(); taps++; tp.next(); taps++; tp.next(); taps++; tp.next(); taps++; tp.choose(MoneyChoice.Plan); taps++; tp.next(); taps++; tp.next(); taps++
+        tp.next(); taps++; tp.next(); taps++; tp.next(); taps++; tp.next(); taps++; tp.next(); taps++; tp.choose(MoneyChoice.Plan); taps++; tp.next(); taps++; tp.next(); taps++
         ok(tp.step == FirstRunStep.OwnCounter, "the plan path reaches the counter")
-        ok(taps <= 7, "the plan path takes at most 7 actions from Welcome to the counter (took $taps)")
+        ok(taps <= 8, "the plan path takes at most 8 actions (7 before the kind-of-place question of GV-03) from Welcome to the counter (took $taps)")
         var ownTaps = 0
         val to = FirstRun(ShopPrefs(), "DE")
-        to.next(); ownTaps++; to.next(); ownTaps++; to.next(); ownTaps++; to.next(); ownTaps++; to.choose(MoneyChoice.Own); ownTaps++
+        to.next(); ownTaps++; to.next(); ownTaps++; to.next(); ownTaps++; to.next(); ownTaps++; to.next(); ownTaps++; to.choose(MoneyChoice.Own); ownTaps++
         to.connect.paste(); ownTaps++; to.connect.read(WL06_ONE.toByteArray(Charsets.UTF_8), reader); ownTaps++; to.connect.same(); ownTaps++; to.next(); ownTaps++
         ok(to.step == FirstRunStep.OwnCounter, "the own path reaches the counter")
-        ok(ownTaps <= 9, "the own path takes at most 9 actions from Welcome to the counter (took $ownTaps)")
+        ok(ownTaps <= 10, "the own path takes at most 10 actions (9 before the kind-of-place question of GV-03) from Welcome to the counter (took $ownTaps)")
 
         // The screens: every word from FirstRunWords, the home asks for the checklist once.
         val run = source("src/android/FirstRun.kt")
@@ -3835,6 +3883,7 @@ object AppModelTest {
         val r = FirstRun(ShopPrefs(), "DE")
         ok(r.step == FirstRunStep.Welcome && r.currency == ShopCurrency.Eur, "the money is guessed from the locale")
         r.next(); ok(r.step == FirstRunStep.Before, "before starting")
+        r.next(); ok(r.step == FirstRunStep.Place, "the kind of place (GV-03)")
         r.next(); ok(r.step == FirstRunStep.Shop, "shop")
         r.name = "Cafe Anna"; r.currency = ShopCurrency.Gbp; r.next(); ok(r.step == FirstRunStep.Till, "till")
         r.till = Till.Toast; r.query = "to"; r.next(); ok(r.step == FirstRunStep.Money, "money")
@@ -4149,7 +4198,7 @@ object AppModelTest {
 
         // The first run: the plan leads to the hardware wallet's guide, then to the setup, then to the first counter as Connect does.
         val r = FirstRun(ShopPrefs(), "DE")
-        r.next(); r.next(); r.next(); r.next()
+        r.next(); r.next(); r.next(); r.next(); r.next()
         r.choose(MoneyChoice.Plan); ok(r.step == FirstRunStep.Hardware, "the plan on the money page goes to the buying guide")
         r.next(); ok(r.step == FirstRunStep.Starter, "the guide goes to the starter setup")
         r.back(); ok(r.step == FirstRunStep.Hardware && r.money == MoneyChoice.Plan, "back from the setup: the buying guide")
@@ -4664,6 +4713,7 @@ object AppModelTest {
         conversionTests()
         setupTests()
         configTests()
+        gv_03_the_first_run_asks_the_kind_of_place_and_a_place_of_giving_skips_the_shop_steps()
         approvalTextTests()
         screenTests()
         modelTests()

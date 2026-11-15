@@ -175,6 +175,8 @@ fn nr_26_the_pairing_is_read_before_the_node_starts() {
     assert_eq!(r.string(), "USD");
     // Tips are off, with the first percents (CR-187).
     assert_eq!((r.bool(), r.bytes()), (false, vec![10, 15, 20]));
+    // A shop (GV-01).
+    assert_eq!(r.u8(), 0);
     // The record holds no relay.
     assert_eq!(r.u8(), 0);
     r.done();
@@ -194,6 +196,8 @@ fn nr_26_the_pairing_is_read_before_the_node_starts() {
     );
     assert_eq!(r.string(), "USD");
     assert_eq!((r.bool(), r.bytes()), (false, vec![10, 15, 20]));
+    // A shop (GV-01).
+    assert_eq!(r.u8(), 0);
     assert_eq!(r.u8(), 0);
     r.done();
 }

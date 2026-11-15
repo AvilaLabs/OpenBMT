@@ -18,7 +18,7 @@ object ProtocolDecoderTest {
 
     /** The `start` request of [sampleConfig], as the Rust test of the same name writes it. */
     private const val START_FRAME_HEX =
-        "4f424d6b01010000000000000000000100000064030100000000000000010000000101000000020100000077010000000300040000000500000006000000010100000070010000000100000061000101000100000078010000000701000000010000000809000000000000000a000000000000000000" +
+        "4f424d6b01010000000000000000000100000064030100000000000000010000000101000000020100000077010000000300040000000500000006000000010100000070010000000100000061000101000100000078010000000701000000010000000809000000000000000a00000000000000000000" +
             ""
 
     @JvmStatic
@@ -122,6 +122,9 @@ object ProtocolDecoderTest {
         check(held.boxes.isEmpty())
         check(held.lightningNode!!.size == 33 && held.lightningNode!![0].toInt() == 2)
         check(held.currency == ShopCurrency.Jpy && held.currency.code == "JPY" && held.currency.plural == "yen")
+        check(held.place == Place.Giving)
+        rejects("a place tag that is not a choice") { decodeResponse(settingsFrame().also { it[it.size - 1] = 2 }).let { r -> r.option { r.settingsHeld() } } }
+        check(decodeResponse(settingsFrame().also { it[it.size - 1] = 0 }).let { r -> r.option { r.settingsHeld() } }!!.place == Place.Shop)
         check(decodeResponse(header(0, byteArrayOf(0))).let { r -> r.option { r.settingsHeld() } } == null)
         rejects("a settings flag") { decodeResponse(header(0, byteArrayOf(2))).let { r -> r.option { r.settingsHeld() } } }
         rejects("a short settings") { decodeResponse(settingsFrame().copyOf(40)).let { r -> r.option { r.settingsHeld() } } }
@@ -134,10 +137,10 @@ object ProtocolDecoderTest {
         check(!preview.changes[1].loosening && preview.sharesTotalBps == 8_333L && preview.usdPerBtc == 98_500L && preview.satsPerUsd == 1_015L)
         check(preview.settings.size == 2)
         check(preview.currency == ShopCurrency.Eur && preview.currency.label == "Euro (EUR)")
-        rejects("a currency tag that is not a choice") { decodeResponse(settingsFrame(swap = false).also { it[it.size - 2] = 0 }).let { r -> r.option { r.settingsHeld() } } }
-        check(decodeResponse(settingsFrame(swap = false).also { it[it.size - 2] = 11 }).let { r -> r.option { r.settingsHeld() } }!!.currency == ShopCurrency.Cad)
-        check(decodeResponse(settingsFrame(swap = false).also { it[it.size - 2] = 16 }).let { r -> r.option { r.settingsHeld() } }!!.currency == ShopCurrency.Zar)
-        rejects("a currency tag past the list") { decodeResponse(settingsFrame(swap = false).also { it[it.size - 2] = 17 }).let { r -> r.option { r.settingsHeld() } } }
+        rejects("a currency tag that is not a choice") { decodeResponse(settingsFrame(swap = false).also { it[it.size - 3] = 0 }).let { r -> r.option { r.settingsHeld() } } }
+        check(decodeResponse(settingsFrame(swap = false).also { it[it.size - 3] = 11 }).let { r -> r.option { r.settingsHeld() } }!!.currency == ShopCurrency.Cad)
+        check(decodeResponse(settingsFrame(swap = false).also { it[it.size - 3] = 16 }).let { r -> r.option { r.settingsHeld() } }!!.currency == ShopCurrency.Zar)
+        rejects("a currency tag past the list") { decodeResponse(settingsFrame(swap = false).also { it[it.size - 3] = 17 }).let { r -> r.option { r.settingsHeld() } } }
         rejects("a preview flag") { decodeResponse(previewFrame(needsKeyApp = 2)).settingsPreview() }
         rejects("a short preview") { decodeResponse(previewFrame().copyOf(30)).settingsPreview() }
 
@@ -1042,6 +1045,8 @@ object ProtocolDecoderTest {
         w.u8(4)
         // The swap provider the settings name (CR-218).
         if (swap) w.u8(1).string("Pretend").string("abc.onion").string("/api").u64(1_000_000) else w.u8(0)
+        // The place the settings are of (GV-01): a place of giving.
+        w.u8(1)
         return header(0, w.toByteArray())
     }
 
@@ -1085,7 +1090,7 @@ object ProtocolDecoderTest {
 
     /** The request `previewSettings` writes for [sampleEdit]; the Rust test of the same name writes it too. */
     private const val EDIT_FRAME_HEX =
-        "4f424d6b012f00010000000000000001e803000000000000010a0000000000013200000000000001640000000000000103000001010000000000000000010000000000000000000000000000000000000000000000000000"
+        "4f424d6b012f00010000000000000001e803000000000000010a000000000001320000000000000164000000000000010300000101000000000000000001000000000000000000000000000000000000000000000000000000"
 
     private fun sampleEdit() =
         SettingsEditArgs(

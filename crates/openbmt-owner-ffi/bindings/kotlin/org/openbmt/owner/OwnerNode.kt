@@ -353,6 +353,8 @@ private const val TAG_SHOP_CURRENCY_VIEW_BRL = 13
 private const val TAG_SHOP_CURRENCY_VIEW_TRY = 14
 private const val TAG_SHOP_CURRENCY_VIEW_THB = 15
 private const val TAG_SHOP_CURRENCY_VIEW_ZAR = 16
+private const val TAG_PLACE_VIEW_SHOP = 0
+private const val TAG_PLACE_VIEW_GIVING = 1
 private const val TAG_CURRENCY_ACTION_KEEP = 0
 private const val TAG_CURRENCY_ACTION_USD = 1
 private const val TAG_CURRENCY_ACTION_EUR = 2
@@ -496,6 +498,8 @@ class StartConfig(
     val ownWallet: ByteArray? = null,
     /** FL-05: the float to watch as a wallet of its own, when the shop has one. */
     val float: FloatWatchConfig? = null,
+    /** GV-03: the kind of place the first settings are written for, when the phone holds none yet. */
+    val place: Place = Place.Shop,
 )
 
 /**
@@ -966,7 +970,12 @@ class SettingsHeld(
     val currency: ShopCurrency = ShopCurrency.Usd,
     /** The swap provider the settings name, when they name one (CR-218). */
     val swap: SwapHeld? = null,
+    /** A shop or a place of giving (GV-01). */
+    val place: Place = Place.Shop,
 )
+
+/** The kind of place the settings belong to (GV-01). */
+enum class Place { Shop, Giving }
 
 /** The swap provider the settings in force name (CR-218). */
 class SwapHeld(val name: String, val onion: String, val pathPrefix: String, val maxSaleSats: Long)
@@ -1019,6 +1028,8 @@ data class SettingsEditArgs(
     val swapOnion: String = "",
     val swapPrefix: String = "",
     val swapMaxSats: Long = 0,
+    /** A shop or a place of giving (GV-01, GV-02); null keeps it. */
+    val place: Place? = null,
 )
 
 /** One changed field in the words of a screen; [counter] is set for a counter's share. */
@@ -1312,7 +1323,7 @@ class OwnWaitingView(
 class OwnGapView(val needed: Long, val notice: Boolean)
 
 /** What every call on the own-wallet shop is given: the folder, the owner secret and the wallet's file. */
-class OwnShopArgs(val dir: String, val ownerSecret: ByteArray, val wallet: ByteArray)
+class OwnShopArgs(val dir: String, val ownerSecret: ByteArray, val wallet: ByteArray, val place: Place = Place.Shop)
 
 /** Where a Box is: `host:port` on the local network, or a v3 `.onion` name and port through [proxy]. */
 class BoxLink(val address: String, val proxy: String)
@@ -2171,6 +2182,7 @@ private fun Writer.start(c: StartConfig): Writer =
         .list(c.fixedPeers) { string(it) }.option(c.broadcastProxy) { string(it) }
         .bool(c.withoutTor).option(c.link) { link(it) }.option(c.ownWallet) { bytes(it) }
         .option(c.float) { string(it.description).u32(it.receiveEnd).u32(it.changeEnd).u32(it.birthday) }
+        .place(c.place)
 
 private fun Writer.cashAmount(v: CashAmount): Writer {
     when (v) {
@@ -2606,6 +2618,21 @@ private fun Reader.outboxKind(): OutboxKind =
 
 private fun Reader.limit(): Limit = Limit(u64(), u32())
 
+private fun Reader.place(): Place =
+    when (u8()) {
+        TAG_PLACE_VIEW_SHOP -> Place.Shop
+        TAG_PLACE_VIEW_GIVING -> Place.Giving
+        else -> tag("PlaceView")
+    }
+
+private fun Writer.place(v: Place): Writer =
+    u8(
+        when (v) {
+            Place.Shop -> TAG_PLACE_VIEW_SHOP
+            Place.Giving -> TAG_PLACE_VIEW_GIVING
+        },
+    )
+
 private fun Reader.shopCurrency(): ShopCurrency =
     when (u8()) {
         TAG_SHOP_CURRENCY_VIEW_USD -> ShopCurrency.Usd
@@ -2672,7 +2699,7 @@ internal fun Reader.ownBundleView(): OwnBundleView =
 internal fun Reader.ownWaitingView(): OwnWaitingView =
     OwnWaitingView(bool(), u32(), strings(), strings(), u64(), u64())
 
-internal fun Writer.ownShop(a: OwnShopArgs): Writer = string(a.dir).bytes(a.ownerSecret).bytes(a.wallet)
+internal fun Writer.ownShop(a: OwnShopArgs): Writer = string(a.dir).bytes(a.ownerSecret).bytes(a.wallet).place(a.place)
 
 internal fun Writer.ownMade(m: OwnMade): Writer = bytes(m.code).u64(m.madeAt)
 
@@ -2694,7 +2721,7 @@ internal fun Reader.settingsHeld(): SettingsHeld =
         limit(), limit(), limit(), limit(), u8(), u8(), u32(), bool(), bool(), u64(),
         bool(), bytes().map { it.toInt() and 0xff },
         list { bytes() }, list { CounterShare(bytes(), u32()) }, list { bytes() },
-        option { bytes() }, shopCurrency(), option { SwapHeld(string(), string(), string(), u64()) },
+        option { bytes() }, shopCurrency(), option { SwapHeld(string(), string(), string(), u64()) }, place(),
     )
 
 private fun Reader.settingChange(): SettingChange =
@@ -2834,7 +2861,9 @@ internal fun Writer.settingsEdit(a: SettingsEditArgs): Writer {
     option(a.tipPercents) { p -> bytes(ByteArray(p.size) { i -> p[i].toByte() }) }
     list(a.shares) { bytes(it.counter).u32(it.bps) }
     lightningAction(a.lightning).string(a.lightningText).currencyAction(a.currency)
-    return swapAction(a.swap).string(a.swapName).string(a.swapOnion).string(a.swapPrefix).u64(a.swapMaxSats)
+    swapAction(a.swap).string(a.swapName).string(a.swapOnion).string(a.swapPrefix).u64(a.swapMaxSats)
+    option(a.place) { place(it) }
+    return this
 }
 
 internal fun Reader.outboxRow(): OutboxRow =

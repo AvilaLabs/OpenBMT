@@ -161,7 +161,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "RateSource(string(), string(), string(), string())",
         "Sample(string(), u64(), u64())",
         "Rate(u64(), string(), u64())",
-        "ShopSettings(u32(), bool(), bool(), u64(), string(), bool(), bytes().map { it.toInt() and 0xff })",
+        "ShopSettings(u32(), bool(), bool(), u64(), string(), bool(), bytes().map { it.toInt() and 0xff }, place())",
         "words(), bool(), option { u64() }, bool(), u64(), u64(), option { u64() },",
         "u32(), bool(), option { words() },",
         "LinkStep(linkView(), strings())",
@@ -211,7 +211,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "SwitchSameView: record: words: Words, record: list<u8>",
         "StarterPaymentView: record: txid: list<u8>, sats: u64, time: u64, by_owner: bool, seen: bool",
         "StarterStateView: record: decision: StarterDecisionView, words: option<Words>, cards: option<Words>, held_sats: option<u64>, limit_sats: option<u64>, line_time: option<u64>, payments: list<StarterPaymentView>",
-        "SettingsView: record: version: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, currency: string, tips_on: bool, tip_percents: list<u8>",
+        "SettingsView: record: version: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, currency: string, tips_on: bool, tip_percents: list<u8>, place: PlaceView",
     ] {
         assert!(protocol.contains(line), "{line}");
     }

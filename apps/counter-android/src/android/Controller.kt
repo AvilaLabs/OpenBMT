@@ -58,6 +58,7 @@ import org.openbmt.counter.CounterNode
 import org.openbmt.counter.LnRequest
 import org.openbmt.counter.OwnWalletKind
 import org.openbmt.counter.PairStarted
+import org.openbmt.counter.Place
 import org.openbmt.counter.Pairing
 import org.openbmt.counter.Payment
 import org.openbmt.counter.RateSource
@@ -165,6 +166,27 @@ class Controller(private val act: MainActivity) {
     // What the open screen redraws as the node reports.
     private var tick: (() -> Unit)? = null
 
+    // GV-01, GV-14: the place the settings in force are of, the manager's PIN having been typed at a giving point, and whether the
+    // screen is the gift in progress (the code the giver pays).
+    private var place: Place = Place.Shop
+    private val desk = GivingDesk { SystemClock.elapsedRealtime() / 1000 }
+    private var giftShowing = false
+    private val idleCheck = object : Runnable {
+        override fun run() {
+            if (!visible) return
+            // GV-14: a giving point left alone returns to the amount after IDLE_SECS without a touch.
+            val inGift = giftShowing && showing is Showing.Sale
+            val wasIn = desk.managerIn
+            if (node != null && Giving.isGiving(place) && desk.returnsToAmount(inGift) && (wasIn || showing != Showing.Home)) showHome()
+            main.postDelayed(this, IDLE_CHECK_MS)
+        }
+    }
+
+    /** GV-14: the screen was touched. */
+    fun touched() {
+        desk.touch()
+    }
+
     // TP-20: Android sends a reader's commands to the tag service only while a sale's payment screen is in front.
     private val tapPreference = TapPreference { on -> TapPreferred.set(act, on) }
 
@@ -225,11 +247,15 @@ class Controller(private val act: MainActivity) {
         Feedback.init(act)
         if (scan.asking) return
         locks.backInView()
+        desk.leave()
+        main.removeCallbacks(idleCheck)
+        main.postDelayed(idleCheck, IDLE_CHECK_MS)
         begin()
     }
 
     fun hidden() {
         visible = false
+        main.removeCallbacks(idleCheck)
         tapSet(null)
         if (scan.asking) return
         locks.leftView()
@@ -438,6 +464,9 @@ class Controller(private val act: MainActivity) {
         node = n
         torOnNow = gate.torOn
         money = m
+        // GV-01: a shop or a place of giving, as the settings in force say; the manager's PIN is asked again.
+        place = settings.place
+        desk.leave()
         pumpFault = null
         // CR-197: Bitcoin Standard has no price: no source is asked and there is no book.
         val sources = ShopPrices.sources(m, allSources)
@@ -537,7 +566,8 @@ class Controller(private val act: MainActivity) {
     private fun open(screen: Showing) {
         when (screen) {
             is Showing.Sale -> showSale(screen.index, null, null)
-            Showing.Sales -> showSales()
+            // GV-14: the list of gifts is behind the manager's PIN, so a giving point opens on its amount.
+            Showing.Sales -> if (Giving.isGiving(place)) showHome() else showSales()
             Showing.Home, Showing.Other -> showHome()
         }
     }
@@ -564,13 +594,16 @@ class Controller(private val act: MainActivity) {
 
     /**
      * CR-195, CR-196: whether the settings now in force name another currency than the one this run prices in. The
-     * node is started again, so that the keypad, the price sources and the words follow the new currency.
+     * node is started again, so that the keypad, the price sources and the words follow the new currency. Another
+     * place (GV-01) starts it again for the same reason.
      */
     private fun currencyChanged(): Boolean {
         val rec = record ?: return false
         val code = money?.code ?: return false
         return try {
-            Shop.pairing(rec, nodeDir.path).settings.currency != code
+            // GV-01: the same for the place, so that the screens and the words follow a shop that became a place of giving.
+            val now = Shop.pairing(rec, nodeDir.path).settings
+            now.currency != code || now.place != place
         } catch (_: CounterException) {
             false
         }
@@ -686,6 +719,7 @@ class Controller(private val act: MainActivity) {
         tick = null
         tapSet(null)
         showing = shown
+        giftShowing = false
         act.show(view)
     }
 
@@ -1072,6 +1106,8 @@ class Controller(private val act: MainActivity) {
         if (lockedOut()) return
         val n = node ?: return render()
         val cfg = config ?: return render()
+        // GV-11, GV-14: a giving point opens on the amount the giver types, until the manager has typed the PIN.
+        if (Giving.homeIsAmount(place, desk.managerIn)) return showNewSale(giving = true)
         val health = Slot(act)
         val lines = Slot(act)
         val noteSlot = Slot(act)
@@ -1080,7 +1116,8 @@ class Controller(private val act: MainActivity) {
         val starterSlot = Slot(act)
         val linked = hasLink(n)
         // CR-147: who is at the till, and a way to lock it.
-        val who = locks.who?.takeIf { cashiers.isNotEmpty() }
+        // GV-13: at a place of giving the home screen offers no cashier lock; the list stays in Settings.
+        val who = locks.who?.takeIf { cashiers.isNotEmpty() && Giving.homeOffersTillSteps(place) }
         val bar = ui.bar("Counter", sub = who?.let { "Cashier: ${it.name}" }, logo = true, gear = { showSettings() })
         if (who != null) {
             val row = (bar as org.openbmt.app.BarView).row
@@ -1101,7 +1138,9 @@ class Controller(private val act: MainActivity) {
         tiles.addView(pair, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.topMargin = ui.px(12) })
         // CR-246: bills and tabs, one tile under the others.
         tiles.addView(ui.tile(WordsOfBills.BILLS, Glyph.List, false) { showBills() }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ui.px(104)).also { it.topMargin = ui.px(12) })
-        show(bar, listOf(health, tillSlot, starterSlot, lines, noteSlot, tiles, requestsSlot, counterLine()), emptyList(), Showing.Home)
+        // GV-14: the manager leaves the settings and the lists, and the amount screen is home again.
+        val leave = if (Giving.isGiving(place)) listOf(ui.button(GivingWords.TODO_WORDS_GIVING_LEAVE) { desk.leave(); showHome() }) else emptyList()
+        show(bar, listOf(health, tillSlot, starterSlot, lines, noteSlot, tiles, requestsSlot, counterLine()), leave, Showing.Home)
         var healthSig: String? = null
         var linesSig: String? = null
         var requestsSig: String? = null
@@ -1170,7 +1209,8 @@ class Controller(private val act: MainActivity) {
                 lines.show(ui.homeLines(items, openLines))
             }
             // CR-267: the requests from the till, oldest first, each on its own card above the other lines.
-            val tillRequests = TillModel.shown(tillWaiting(n))
+            // GV-13: the Box till's requests are not on the home screen of a place of giving; the till stays in the settings.
+            val tillRequests = if (Giving.homeOffersTillSteps(place)) TillModel.shown(tillWaiting(n)) else emptyList()
             val ts = TillModel.signature(tillRequests)
             if (ts != tillSig) {
                 tillSig = ts
@@ -1369,6 +1409,7 @@ class Controller(private val act: MainActivity) {
     /** Staff, the own node, the network, Lightning, About, and the sounds; with no cashier listed, the cashier's name first. No PIN is asked here: the screens behind it ask as they do (the name's page asks for the manager's). */
     private fun showSettings() {
         if (lockedOut()) return
+        if (Giving.needsPin(place, desk.managerIn)) return showManagerPin { showSettings() }
         val items = ArrayList<RowItem>()
         // CR-146: with no cashier listed the cashier is the one name of this phone.
         if (cashiers.isEmpty()) items.add(RowItem("Your name", onClick = { showYourName() }))
@@ -1890,7 +1931,7 @@ class Controller(private val act: MainActivity) {
     /** CR-273: the words that stand in the place of a sale when the line says to offer no bitcoin; null when the sale may open. */
     private fun starterStop(): SayWords? = node?.let { StarterModel.stopWords(starterNow(it)) }
 
-    private fun showNewSale() {
+    private fun showNewSale(giving: Boolean = false) {
         if (lockedOut()) return
         val m = money ?: return render()
         starterStop()?.let { return showMessage(it, "Back") { showHome() } }
@@ -1901,7 +1942,7 @@ class Controller(private val act: MainActivity) {
         }
         val msg = Slot(act)
         val centre = Centered(act)
-        centre.addView(ui.text("Amount of the sale", 14f, colour = ui.pal.secondary, medium = true).also { it.gravity = android.view.Gravity.CENTER }, ui.margins())
+        centre.addView(ui.text(if (giving) GivingWords.TODO_WORDS_GIVING_AMOUNT_HEADING else "Amount of the sale", 14f, colour = ui.pal.secondary, medium = true).also { it.gravity = android.view.Gravity.CENTER }, ui.margins())
         centre.addView(display, ui.margins(top = 6))
         priceWords()?.let { centre.addView(ui.text(it.what, 14f, colour = ui.pal.secondary).also { t -> t.gravity = android.view.Gravity.CENTER }, ui.margins(top = 6)) }
         centre.addView(msg, ui.margins(top = 12))
@@ -1914,13 +1955,33 @@ class Controller(private val act: MainActivity) {
             display.text = entry.show()
             msg.show()
         }
-        val open = ui.primary("Open the sale") {
+        val open = ui.primary(if (giving) GivingWords.TODO_WORDS_GIVING_GIVE else "Open the sale") {
             if (entry.minor <= 0) msg.show(note(AppWords.amountNeeded)) else chooseTip(entry.minor) { msg.show(note(it)) }
+        }
+        if (giving) {
+            // GV-11, GV-14: the amount screen of a giving point is home; its one way out is the gear, behind the manager's PIN.
+            return show(ui.bar(GivingWords.TODO_WORDS_GIVING_BAR, logo = true, gear = { showSettings() }), listOf(centre, pad), listOf(open), Showing.Home)
         }
         val request = ui.secondary(WordsOfRequests.REQUEST) {
             if (entry.minor <= 0) msg.show(note(AppWords.amountNeeded)) else showRequestForm(entry.minor)
         }
         show(ui.bar("New sale", back = { showHome() }), listOf(centre, pad), listOf(open, request))
+    }
+
+    /**
+     * GV-14: the page that asks for the manager's PIN before a setting, the gift list or the day's totals at a giving point.
+     * The right PIN lets the manager in until the screen is left alone for [Giving.IDLE_SECS] seconds, and runs [then].
+     */
+    private fun showManagerPin(then: () -> Unit) {
+        val msg = Slot(act)
+        val pinInput = pinField(act, "")
+        val views = ArrayList<View>()
+        views.add(ui.labelled("Manager's PIN", pinInput))
+        views.add(msg)
+        val go = ui.primary(GivingWords.TODO_WORDS_GIVING_PIN_GO) {
+            checkPin(pinInput.text.toString(), pinInput, { desk.managerUnlocked(); then() }, { w -> msg.show(note(w)) })
+        }
+        show(ui.bar(GivingWords.TODO_WORDS_GIVING_PIN_BAR, back = { showHome() }), views, listOf(go))
     }
 
     /** CR-213: the optional note and the lifetime of a request to send, for the amount typed on New sale. */
@@ -2135,6 +2196,8 @@ class Controller(private val act: MainActivity) {
         tick = {
             try {
                 val s = n.judge(nowSecs(), index)
+                // GV-14: the gift in progress, with the code the giver pays, is the screen a giving point does not leave when idle.
+                giftShowing = SaleModel.showsCode(s.state)
                 // The library gives a code only while the sale is open: with none, the code and the copied request are
                 // cleared, so a sale that ended or has no code never shows an earlier one (CR-112).
                 payment = s.payment
@@ -2225,20 +2288,28 @@ class Controller(private val act: MainActivity) {
                                 }
                             },
                         )
-                        body.add(ui.button("Details and refunds") { showSaleDetails(index) })
+                        // GV-14: the gift list is behind the manager's PIN, so the gift in progress has no way to its details.
+                        if (Giving.pageOffersManagerSteps(place, desk.managerIn)) body.add(ui.button("Details and refunds") { showSaleDetails(index) })
                         val actions = ArrayList<Button>()
                         if (b.requote) actions.add(ui.primary("Requote") { requote(index) { w -> flashWith(w) } })
                         if (b.cancel) actions.add(ui.danger("Cancel the sale") { cancelSale(index) { w -> flashWith(w) } })
-                        if (b.override) actions.add(ui.button(if (cashiers.isEmpty()) "Accept by hand (manager)" else "Accept by hand") { showOverride(index) })
+                        if (b.override && Giving.pageOffersManagerSteps(place, desk.managerIn)) actions.add(ui.button(if (cashiers.isEmpty()) "Accept by hand (manager)" else "Accept by hand") { showOverride(index) })
                         actions.add(ui.button("Done") { showHome() })
                         page = ui.page(bar, body, actions)
                     } else {
                         val band = outcomeBand(says.colour)
+                        // GV-12: the end of a gift says that it has arrived and thanks the giver; nothing is handed over.
+                        val gift = Giving.endsAsGift(place, s.state)
                         pageBackground = band.band
                         val centre = Centered(act)
                         centre.addView(OutcomeMark(act, says.colour, band.band), LinearLayout.LayoutParams(ui.px(112), ui.px(112)))
                         centre.addView(
-                            ui.text(says.heading, SaleModel.outcomeHeadingSp(says.heading), bold = true, colour = Palette.WHITE).also { it.gravity = android.view.Gravity.CENTER },
+                            ui.text(
+                                if (gift) GivingWords.TODO_WORDS_GIVING_OUTCOME_HEADING else says.heading,
+                                SaleModel.outcomeHeadingSp(if (gift) GivingWords.TODO_WORDS_GIVING_OUTCOME_HEADING else says.heading),
+                                bold = true,
+                                colour = Palette.WHITE,
+                            ).also { it.gravity = android.view.Gravity.CENTER },
                             ui.margins(top = 16),
                         )
                         centre.addView(
@@ -2249,7 +2320,7 @@ class Controller(private val act: MainActivity) {
                             ui.margins(top = 8),
                         )
                         // CR-254: the sale's number and the till's reference, large enough to copy into the till's payment note.
-                        if (SaleModel.isPaid(s.state)) {
+                        if (SaleModel.isPaid(s.state) && !gift) {
                             for (line in BillModel.paidLines(index, info)) {
                                 centre.addView(ui.text(line.label, 14f, colour = band.sub, medium = true).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 14))
                                 centre.addView(
@@ -2262,8 +2333,12 @@ class Controller(private val act: MainActivity) {
                                 )
                             }
                         }
-                        centre.addView(ui.text(says.what, 17f, colour = Palette.WHITE).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 28))
-                        centre.addView(ui.text(says.next, 17f, bold = true, colour = Palette.WHITE).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 10))
+                        if (gift) {
+                            centre.addView(ui.text(GivingWords.TODO_WORDS_GIVING_OUTCOME_THANKS, 17f, colour = Palette.WHITE).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 28))
+                        } else {
+                            centre.addView(ui.text(says.what, 17f, colour = Palette.WHITE).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 28))
+                            centre.addView(ui.text(says.next, 17f, bold = true, colour = Palette.WHITE).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 10))
+                        }
                         val more = ArrayList<WordsModel>(extra)
                         flash?.let { more.add(0, WordsModel.of(it)) }
                         for (w in more) {
@@ -2277,9 +2352,12 @@ class Controller(private val act: MainActivity) {
                             centre.addView(card, ui.margins(top = 16))
                         }
                         val actions = ArrayList<Button>()
-                        actions.add(ui.onBand("Done", SaleModel.isPaid(s.state) && says.colour == Colour.Green, band.band) { showHome() })
-                        if (b.override) actions.add(ui.onBand(if (cashiers.isEmpty()) "Accept by hand (manager)" else "Accept by hand", false, band.band) { showOverride(index) })
-                        actions.add(ui.onBand("Details and refunds", false, band.band) { showSaleDetails(index) })
+                        actions.add(ui.onBand(if (gift) GivingWords.TODO_WORDS_GIVING_OUTCOME_DONE else "Done", SaleModel.isPaid(s.state) && says.colour == Colour.Green, band.band) { showHome() })
+                        // GV-14: the gift's details and the hand-by-hand accept are the manager's, behind the PIN.
+                        if (Giving.pageOffersManagerSteps(place, desk.managerIn)) {
+                            if (b.override) actions.add(ui.onBand(if (cashiers.isEmpty()) "Accept by hand (manager)" else "Accept by hand", false, band.band) { showOverride(index) })
+                            actions.add(ui.onBand("Details and refunds", false, band.band) { showSaleDetails(index) })
+                        }
                         page = ui.page(bar, listOf(centre), actions)
                         ui.paintBand(page, bar, band, act.window)
                     }
@@ -2449,6 +2527,7 @@ class Controller(private val act: MainActivity) {
 
     private fun showSales() {
         if (lockedOut()) return
+        if (Giving.needsPin(place, desk.managerIn)) return showManagerPin { showSales() }
         val n = node ?: return render()
         val views = ArrayList<View>()
         views.add(label("Sales the counter holds"))
@@ -2476,6 +2555,7 @@ class Controller(private val act: MainActivity) {
     }
 
     private fun showSaleDetails(index: Long, notice: SayWords? = null) {
+        if (Giving.needsPin(place, desk.managerIn)) return showManagerPin { showSaleDetails(index, notice) }
         val n = node ?: return render()
         val m = money ?: return render()
         locks.saleScreen(index)
@@ -2902,6 +2982,7 @@ class Controller(private val act: MainActivity) {
     /** The day's totals from the counter's own records, from local midnight to now; the lines per person only after the manager's PIN. */
     private fun showToday(people: Boolean) {
         if (lockedOut()) return
+        if (Giving.needsPin(place, desk.managerIn)) return showManagerPin { showToday(people) }
         val n = node ?: return render()
         val m = money ?: return render()
         val now = nowSecs()
@@ -3183,6 +3264,7 @@ class Controller(private val act: MainActivity) {
 
     /** CR-246: the bills and tabs the counter holds, open ones and those ended in the last 7 days, and the buttons that open one. */
     private fun showBills(notice: SayWords? = null) {
+        if (Giving.needsPin(place, desk.managerIn)) return showManagerPin { showBills(notice) }
         if (lockedOut()) return
         val n = node ?: return render()
         val m = money ?: return render()
@@ -3451,6 +3533,9 @@ class Controller(private val act: MainActivity) {
 
         /** How long the app waits for the built-in Tor to have a circuit: a little over the minute the words promise (CR-204). */
         const val TOR_WAIT_MS = 90_000L
+
+        /** GV-14: how often a giving point looks at the time since the last touch. */
+        const val IDLE_CHECK_MS = 5_000L
         const val KEY_ALIAS = "openbmt-counter-pairing-v1"
         const val PAIRING_FILE = "pairing.obks"
         const val TYPE_BYTES = "bytes"

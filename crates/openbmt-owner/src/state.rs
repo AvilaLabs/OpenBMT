@@ -9,7 +9,7 @@ use openbmt_core::batch::{AddressBatch, BatchBuilder, BatchPolicy, PinnedRoots};
 use openbmt_core::boxpair::CLAIM_LEN;
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::pairing::{check_request, PairError, PairOffer, PairRequest, SignedPairing};
-use openbmt_core::settings::{classify_change, Change, Settings, SignedSettings};
+use openbmt_core::settings::{classify_change, Change, Place, Settings, SignedSettings};
 use openbmt_core::wallet::WalletDescription;
 use openbmt_core::wallet_single::ImportedWallet;
 use openbmt_session::{label_text_ok, Item, Request, RequestItem, ShopValue};
@@ -309,6 +309,10 @@ pub struct Owner {
     pub(crate) state: State,
     /// AS-100: the shop uses its own wallet, so no Key app signs for it.
     pub(crate) no_key_app: bool,
+    /// GV-03: the kind of place the first settings are written for, when
+    /// the phone holds none yet. A shop at first. Held in memory: the app
+    /// gives it again at each start.
+    pub(crate) starting_place: Place,
 }
 
 impl std::fmt::Debug for Owner {
@@ -366,7 +370,14 @@ impl Owner {
             policy,
             state: State::new(options),
             no_key_app,
+            starting_place: Place::Shop,
         })
+    }
+
+    /// GV-03: the kind of place the first settings are written for. It is
+    /// read only while the phone holds no settings.
+    pub fn set_starting_place(&mut self, place: Place) {
+        self.starting_place = place;
     }
 
     /// AS-65: the owner phone from its stored snapshot.

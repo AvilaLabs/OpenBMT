@@ -7,9 +7,10 @@
 
 use bitcoin::Network;
 use openbmt_core::pairing::network_code;
+use openbmt_core::settings::Place;
 use openbmt_counter_node::{effective_settings_of, own_node_setting, DirStore, PairedRecord};
 
-use crate::codec::wire_record;
+use crate::codec::{wire_record, wire_unit_enum};
 use crate::error::{from_rule, CounterError};
 use crate::views::{CounterNetwork, OwnNodeCheckArgs, PairingView, RelayKind};
 
@@ -33,6 +34,32 @@ pub struct SettingsView {
     /// The suggested tips, in whole percent, in the order the settings give
     /// them (CR-187).
     pub tip_percents: Vec<u8>,
+    /// A shop or a place of giving (GV-01).
+    pub place: PlaceView,
+}
+
+/// The kind of place the settings belong to (GV-01).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaceView {
+    /// A shop.
+    Shop,
+    /// A church or another place that takes gifts.
+    Giving,
+}
+
+wire_unit_enum!(PlaceView {
+    Shop = 0,
+    Giving = 1
+});
+
+impl PlaceView {
+    /// The view of a place.
+    pub fn of(place: Place) -> Self {
+        match place {
+            Place::Shop => Self::Shop,
+            Place::Giving => Self::Giving,
+        }
+    }
 }
 
 wire_record!(SettingsView {
@@ -42,7 +69,8 @@ wire_record!(SettingsView {
     min_sale_sats,
     currency,
     tips_on,
-    tip_percents
+    tip_percents,
+    place
 });
 
 /// The pairing record in `bytes` (`PairingRecord::to_bytes`), read and not
@@ -80,6 +108,7 @@ pub(crate) fn pairing_read(bytes: Vec<u8>, dir: &str) -> Result<PairingView, Cou
             currency: s.currency.code().to_string(),
             tips_on: s.tips_on,
             tip_percents: s.tip_percents.clone(),
+            place: PlaceView::of(s.place),
         },
         relay,
     })

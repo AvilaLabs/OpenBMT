@@ -2,7 +2,8 @@
 
 use std::fmt;
 
-use openbmt_core::say::Words;
+use openbmt_core::say::{at_place, Words};
+use openbmt_core::settings::Place;
 
 use crate::say::words_for;
 
@@ -104,6 +105,31 @@ impl CounterError {
             | Self::Store { text, .. }
             | Self::State { text, .. }
             | Self::Internal { text, .. } => text,
+        }
+    }
+
+    /// The error with the words of a place (GV-10): the giving table is
+    /// read by the error's rule string, and the shop's words stay where it
+    /// has no entry.
+    #[must_use]
+    pub fn at_place(self, place: Place) -> Self {
+        match self {
+            Self::Refused { rule, text, words } => Self::Refused {
+                words: Box::new(at_place(place, &rule, *words)),
+                rule,
+                text,
+            },
+            Self::Store { rule, text, words } => Self::Store {
+                words: Box::new(at_place(place, &rule, *words)),
+                rule,
+                text,
+            },
+            Self::State { rule, text, words } => Self::State {
+                words: Box::new(at_place(place, &rule, *words)),
+                rule,
+                text,
+            },
+            other @ Self::Internal { .. } => other,
         }
     }
 

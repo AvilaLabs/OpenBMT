@@ -14,7 +14,7 @@ use openbmt_owner::{LightningEdit, SettingsEdit, SettingsPreview, SwapEdit};
 
 use crate::codec::{wire_record, wire_record_get, wire_unit_enum};
 use crate::error::{refused_by, AppError};
-use crate::views::{CounterShareView, ShopCurrencyView};
+use crate::views::{CounterShareView, PlaceView, ShopCurrencyView};
 
 /// What an edit does to the Lightning node (AS-76).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -204,6 +204,8 @@ pub struct SettingsEditArgs {
     /// The most the shop takes over Lightning for one sale, in satoshis,
     /// read only when `swap` is `Set`.
     pub swap_max_sats: u64,
+    /// A shop or a place of giving (GV-01, GV-02): `None` keeps it.
+    pub place: Option<PlaceView>,
 }
 
 wire_record_get!(SettingsEditArgs {
@@ -235,7 +237,8 @@ wire_record_get!(SettingsEditArgs {
     swap_name,
     swap_onion,
     swap_prefix,
-    swap_max_sats
+    swap_max_sats,
+    place
 });
 
 wire_record!(SettingsEditArgs {
@@ -267,7 +270,8 @@ wire_record!(SettingsEditArgs {
     swap_name,
     swap_onion,
     swap_prefix,
-    swap_max_sats
+    swap_max_sats,
+    place
 });
 
 /// One changed field, in the words of a screen (AS-77).
@@ -383,6 +387,7 @@ pub(crate) fn to_edit(
         customer_wifi: a.customer_wifi,
         min_sale_sats: a.min_sale_sats,
         tips_on: a.tips_on,
+        place: a.place.map(PlaceView::place),
         tip_percents: a.tip_percents,
         shares,
         lightning_node,
@@ -593,6 +598,13 @@ fn field_words(
             (sats_floor(old.min_sale_sats), sats_floor(new.min_sale_sats)),
         ),
         "tips_on" => ("Ask for a tip", (on_off(old.tips_on), on_off(new.tips_on))),
+        "place" => (
+            openbmt_core::say::TODO_WORDS_PLACE_LABEL,
+            (
+                openbmt_core::say::place_value(old.place).to_string(),
+                openbmt_core::say::place_value(new.place).to_string(),
+            ),
+        ),
         "tip_percents" => (
             "Tips",
             (

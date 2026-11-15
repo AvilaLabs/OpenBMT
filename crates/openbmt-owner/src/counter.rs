@@ -178,7 +178,10 @@ impl Owner {
         let mut settings = match self.state.latest_settings() {
             Some(s) => s.clone(),
             None if usd_per_btc == 0 => return Err(Refusal::NoSettingsRate),
-            None => Settings::defaults(sats_per_usd_at(usd_per_btc)?),
+            None => Settings {
+                place: self.starting_place,
+                ..Settings::defaults(sats_per_usd_at(usd_per_btc)?)
+            },
         };
         settings.version = self
             .state

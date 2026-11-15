@@ -105,7 +105,7 @@ pub use host::{Entry, HostSpawn, MAX_WAIT_MS, SLICE_MS};
 pub use pay::{btc_amount, request_link, request_texts, Payment};
 pub use rates::{RateCombineArgs, RateParseArgs, RateSourceView, RateView, SampleView};
 pub use say::{all_words, words_for};
-pub use shop::SettingsView;
+pub use shop::{PlaceView, SettingsView};
 pub use tap::{tag_content, tap_answer, TapArgs, TapView};
 pub use till::{TillRow, TillSaleView, TillStartArgs};
 pub use views::{

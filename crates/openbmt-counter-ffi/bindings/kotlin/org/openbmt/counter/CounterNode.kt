@@ -143,6 +143,8 @@ private const val TAG_COUNTER_NETWORK_MAINNET = 0
 private const val TAG_COUNTER_NETWORK_TESTNET = 1
 private const val TAG_COUNTER_NETWORK_SIGNET = 2
 private const val TAG_COUNTER_NETWORK_REGTEST = 3
+private const val TAG_PLACE_VIEW_SHOP = 0
+private const val TAG_PLACE_VIEW_GIVING = 1
 private const val TAG_RELAY_KIND_NONE = 0
 private const val TAG_RELAY_KIND_DIRECT = 1
 private const val TAG_RELAY_KIND_ONION = 2
@@ -673,7 +675,8 @@ data class Sample(val source: String, val fetchedAt: Long, val minorPerBtc: Long
 /**
  * What the app needs from the shop's settings before the node runs. [currency] is the shop's currency
  * (CR-193): three capital letters, or "SAT" for Bitcoin Standard, where an amount is satoshis and no
- * price is asked (CR-197). [tipsOn] and [tipPercents] are the tips the counters ask for (CR-187).
+ * price is asked (CR-197). [tipsOn] and [tipPercents] are the tips the counters ask for (CR-187). [place] is
+ * a shop or a place of giving (GV-01).
  */
 class ShopSettings(
     val version: Long,
@@ -683,7 +686,11 @@ class ShopSettings(
     val currency: String = "USD",
     val tipsOn: Boolean = false,
     val tipPercents: List<Int> = listOf(10, 15, 20),
+    val place: Place = Place.Shop,
 )
+
+/** The kind of place the settings belong to (GV-01). */
+enum class Place { Shop, Giving }
 
 /** The rate a sale is opened with, and its source as the counter takes it (CR-57). */
 class Rate(val rate: Long, val sourceLabel: String, val sourceFetchedAt: Long)
@@ -1107,7 +1114,14 @@ internal fun Reader.rateSource(): RateSource = RateSource(string(), string(), st
 
 internal fun Reader.sample(): Sample = Sample(string(), u64(), u64())
 
-internal fun Reader.shopSettings(): ShopSettings = ShopSettings(u32(), bool(), bool(), u64(), string(), bool(), bytes().map { it.toInt() and 0xff })
+private fun Reader.place(): Place =
+    when (u8()) {
+        TAG_PLACE_VIEW_SHOP -> Place.Shop
+        TAG_PLACE_VIEW_GIVING -> Place.Giving
+        else -> tag("PlaceView")
+    }
+
+internal fun Reader.shopSettings(): ShopSettings = ShopSettings(u32(), bool(), bool(), u64(), string(), bool(), bytes().map { it.toInt() and 0xff }, place())
 
 internal fun Reader.rate(): Rate = Rate(u64(), string(), u64())
 

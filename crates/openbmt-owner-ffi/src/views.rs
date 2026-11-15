@@ -219,6 +219,9 @@ pub struct StartConfig {
     pub own_wallet: Option<Vec<u8>>,
     /// FL-05: the refund float to watch, or none.
     pub float: Option<FloatWatchConfig>,
+    /// GV-03: the kind of place the first settings are written for, when
+    /// the owner phone holds none yet.
+    pub place: PlaceView,
 }
 
 wire_record!(StartConfig {
@@ -239,7 +242,8 @@ wire_record!(StartConfig {
     without_tor,
     link,
     own_wallet,
-    float
+    float,
+    place
 });
 wire_record_get!(StartConfig {
     dir,
@@ -259,7 +263,8 @@ wire_record_get!(StartConfig {
     without_tor,
     link,
     own_wallet,
-    float
+    float,
+    place
 });
 
 /// The arguments of `queue_refund`.
@@ -1472,6 +1477,40 @@ pub struct SettingsHeldView {
     pub currency: ShopCurrencyView,
     /// The swap provider the settings name, when they name one (CR-218).
     pub swap: Option<SwapHeldView>,
+    /// A shop or a place of giving (GV-01).
+    pub place: PlaceView,
+}
+
+/// The kind of place the settings belong to (GV-01).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaceView {
+    /// A shop.
+    Shop,
+    /// A church or another place that takes gifts.
+    Giving,
+}
+
+wire_unit_enum!(PlaceView {
+    Shop = 0,
+    Giving = 1
+});
+
+impl PlaceView {
+    /// The view of a place.
+    pub(crate) fn of(place: openbmt_core::settings::Place) -> Self {
+        match place {
+            openbmt_core::settings::Place::Shop => Self::Shop,
+            openbmt_core::settings::Place::Giving => Self::Giving,
+        }
+    }
+
+    /// The place of a view.
+    pub(crate) fn place(self) -> openbmt_core::settings::Place {
+        match self {
+            Self::Shop => openbmt_core::settings::Place::Shop,
+            Self::Giving => openbmt_core::settings::Place::Giving,
+        }
+    }
 }
 
 /// The swap provider the settings in force name (CR-218).
@@ -1520,7 +1559,8 @@ wire_record!(SettingsHeldView {
     boxes,
     lightning_node,
     currency,
-    swap
+    swap,
+    place
 });
 
 /// The kinds of signed object that wait in the outbox.

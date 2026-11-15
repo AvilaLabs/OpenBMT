@@ -159,10 +159,10 @@ pub use views::{
     CashOutRow, ClearArgs, CounterShareView, CounterView, DeepRequestView, DeliverView,
     EntryKindView, EntryRow, FloatWatchConfig, HaltedView, HealthView, LimitView, LinkConfig,
     LinkStepView, LinkView, MergeOfferView, NoteKindView, OldAddressesView, OldKind, OutboxKind,
-    OutboxRow, OutcomeKind, OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund,
-    ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind,
-    SendRow, SettingsHeldView, SettingsQueuedView, ShopCurrencyView, SkippedView, StageKind,
-    StageView, StartConfig, StatusView, SwapHeldView, TakenView, ViewKind, WordsView,
+    OutboxRow, OutcomeKind, OutcomeView, OwnerNetwork, PlaceView, PumpView, QueueView,
+    QueuedRefund, ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView,
+    SendKind, SendRow, SettingsHeldView, SettingsQueuedView, ShopCurrencyView, SkippedView,
+    StageKind, StageView, StartConfig, StatusView, SwapHeldView, TakenView, ViewKind, WordsView,
 };
 pub use web_orders::{
     WebAmountOffView, WebCallKindView, WebCallView, WebCodeView, WebHeaderView, WebOutcome,

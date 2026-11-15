@@ -32,7 +32,7 @@ use openbmt_signer::SignerState;
 
 use crate::host::Port;
 use crate::tests::wire::{frame, Rd, W};
-use crate::{dispatch, OwnerNetwork, Registry, StartConfig};
+use crate::{dispatch, OwnerNetwork, PlaceView, Registry, StartConfig};
 
 /// The first moment of the app's clock.
 pub const T0: u64 = 1_700_000_000;
@@ -143,6 +143,7 @@ pub fn start_config(dir: &str) -> StartConfig {
         link: None,
         own_wallet: None,
         float: None,
+        place: PlaceView::Shop,
     }
 }
 

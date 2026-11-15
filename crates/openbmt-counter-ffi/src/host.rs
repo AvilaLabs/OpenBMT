@@ -512,7 +512,7 @@ impl Entry {
         }
         let network = self.network;
         match catch_unwind(AssertUnwindSafe(|| f(node, held, network))) {
-            Ok(result) => result,
+            Ok(result) => result.map_err(|e| e.at_place(node.settings().place)),
             Err(_) => {
                 self.poisoned.store(true, Ordering::SeqCst);
                 Err(internal("caught a panic: [redacted]"))
@@ -937,7 +937,9 @@ impl Entry {
         }
         ScreenView {
             state: screen.state.into(),
-            words: WordsView(waiting_words.unwrap_or_else(|| screen.words())),
+            words: WordsView(
+                waiting_words.unwrap_or_else(|| screen.words_at(node.settings().place)),
+            ),
             flags: screen.flag_words().into_iter().map(WordsView).collect(),
             check: screen.check_words().map(WordsView),
             received_sats: screen.received_sats,

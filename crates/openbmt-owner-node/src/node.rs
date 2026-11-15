@@ -1217,6 +1217,12 @@ impl<P: OwnerPort> OwnerNode<P> {
         }
     }
 
+    /// GV-03: the kind of place the first settings are written for, when
+    /// the owner's queue holds none yet. It writes nothing.
+    pub fn set_starting_place(&mut self, place: openbmt_core::settings::Place) {
+        self.owner.set_starting_place(place);
+    }
+
     /// The owner's queue, to change. A change is stored through
     /// [`OwnerNode::queue_writer`]; call [`OwnerNode::refresh_marks`]
     /// after one that queues a batch.

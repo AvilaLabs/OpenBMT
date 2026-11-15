@@ -9,8 +9,8 @@ use openbmt_core::currency::ShopCurrency;
 use openbmt_core::identity::DeviceId;
 use openbmt_core::pinned_wallet::PinnedWallet;
 use openbmt_core::settings::{
-    carried_limit_fields, changed_fields, classify_change, Change, FieldChange, Limit, Settings,
-    SwapProvider, LIGHTNING_NODE_BYTES,
+    carried_limit_fields, changed_fields, classify_change, Change, FieldChange, Limit, Place,
+    Settings, SwapProvider, LIGHTNING_NODE_BYTES,
 };
 
 use crate::error::{NodeKeyFault, Refusal};
@@ -100,6 +100,8 @@ pub struct SettingsEdit {
     pub min_sale_sats: Option<u64>,
     /// The counters ask the customer for a tip (CR-187).
     pub tips_on: Option<bool>,
+    /// A shop or a place of giving (GV-01, GV-02): `None` keeps it.
+    pub place: Option<Place>,
     /// The suggested tips, in whole percent, at most three (CR-187): the
     /// whole list replaces the one held, and an empty list suggests none.
     pub tip_percents: Option<Vec<u8>>,
@@ -582,6 +584,9 @@ pub(crate) fn preview_over(
     }
     if let Some(v) = edit.tips_on {
         s.tips_on = v;
+    }
+    if let Some(v) = edit.place {
+        s.place = v;
     }
     if let Some(v) = &edit.tip_percents {
         s.tip_percents.clone_from(v);

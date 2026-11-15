@@ -23,6 +23,7 @@ import org.openbmt.app.UrWords
 import org.openbmt.app.Who
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerNode
+import org.openbmt.owner.Place
 import org.openbmt.owner.ShopCurrency
 
 // The first run of the owner app (docs/DESIGN.md section 2.1): the welcome, the practice shop, the shop, the
@@ -50,6 +51,7 @@ internal fun Controller.showFirstRun() {
     when (r.step) {
         FirstRunStep.Welcome -> showWelcome()
         FirstRunStep.Before -> showBefore(r)
+        FirstRunStep.Place -> showPlace(r)
         FirstRunStep.Shop -> showShop(r)
         FirstRunStep.Till -> showTillChoice(r)
         FirstRunStep.Money -> showMoney(r)
@@ -133,6 +135,48 @@ private fun Controller.showBefore(r: FirstRun) {
     stepScreen(
         FirstRunWords.shopTitle, listOf(ui.beforePicture(), heading(FirstRunWords.beforeTitle), para(FirstRunWords.beforeText), line(FirstRunWords.beforeResume, muted = true)),
         listOf(ui.primary(FirstRunWords.beforeGo) { r.next(); showFirstRun() }), { r.back(); showFirstRun() },
+    )
+}
+
+// ---- what kind of place (GV-03) -----------------------------------------------------------------------------------------------
+
+/** Whether the shop is a place of giving: the settings in force when there are any, else the answer of the first question. */
+internal fun Controller.atGiving(): Boolean {
+    val held = try {
+        node?.settings()
+    } catch (_: OwnerException) {
+        null
+    } catch (_: LinkageError) {
+        null
+    }
+    return Giving.isGiving(held, shopFile.load())
+}
+
+/**
+ * The first question, before the wallet: a shop, or a church or another place that takes gifts. The answer is kept in the
+ * shop file and handed to the library, which writes it in the first settings.
+ */
+private fun Controller.showPlace(r: FirstRun) {
+    val msg = Slot(act)
+    fun choose(place: Place) {
+        try {
+            shopFile.save(shopFile.load().with(place = place))
+            r.place = place
+            ownStore.place = place
+            r.next()
+            showFirstRun()
+        } catch (e: IOException) {
+            msg.show(ui.words(AppWords.fileNotSaved(e.message)))
+        }
+    }
+    stepScreen(
+        GivingWords.TODO_WORDS_PLACE_BAR,
+        listOf(heading(GivingWords.TODO_WORDS_PLACE_QUESTION), msg),
+        listOf(
+            ui.primary(GivingWords.TODO_WORDS_PLACE_CHOICE_SHOP) { choose(Place.Shop) },
+            ui.primary(GivingWords.TODO_WORDS_PLACE_CHOICE_GIVING) { choose(Place.Giving) },
+        ),
+        { r.back(); showFirstRun() },
     )
 }
 

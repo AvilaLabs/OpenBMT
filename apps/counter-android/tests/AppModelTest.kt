@@ -48,6 +48,7 @@ import org.openbmt.counter.TipTally
 import org.openbmt.counter.Quoted
 import org.openbmt.counter.Rate
 import org.openbmt.counter.RateSource
+import org.openbmt.counter.Place
 import org.openbmt.counter.SaleState
 import org.openbmt.counter.Sample
 import org.openbmt.counter.Tally
@@ -1815,6 +1816,62 @@ object AppModelTest {
         }
     }
 
+    // ---- a place of giving (GV-11 to GV-14) -----------------------------------------------------
+
+    private fun gv14GivingTests(appDir: File?) {
+        // GV-11, GV-14: a giving point opens on the amount until the manager has typed the PIN; a shop never does.
+        ok(Giving.homeIsAmount(Place.Giving, false) && !Giving.homeIsAmount(Place.Giving, true), "GV-11: a giving point's home is the amount until the manager is in")
+        ok(!Giving.homeIsAmount(Place.Shop, false) && !Giving.needsPin(Place.Shop, false), "GV-01: a shop keeps its screens and asks for no PIN")
+        ok(Giving.needsPin(Place.Giving, false) && !Giving.needsPin(Place.Giving, true), "GV-14: settings, gifts and totals need the PIN until the manager is in")
+        ok(Giving.pageOffersManagerSteps(Place.Shop, false) && !Giving.pageOffersManagerSteps(Place.Giving, false) && Giving.pageOffersManagerSteps(Place.Giving, true), "GV-14: a gift's page offers the manager's steps only to the manager")
+        // GV-12: a paid gift ends on the giving outcome; nothing else does, and a shop's paid sale does not.
+        for (state in SaleState.values()) {
+            ok(Giving.endsAsGift(Place.Giving, state) == SaleModel.isPaid(state), "GV-12: a gift ends as a gift exactly when it is paid ($state)")
+            ok(!Giving.endsAsGift(Place.Shop, state), "GV-12: a shop's sale never ends as a gift ($state)")
+        }
+        // GV-13: the home screens of a place of giving offer no till steps.
+        ok(Giving.homeOffersTillSteps(Place.Shop) && !Giving.homeOffersTillSteps(Place.Giving), "GV-13: the home screens of a giving point offer no till steps")
+        // GV-14: two minutes, in one constant.
+        ok(Giving.IDLE_SECS == 120L, "GV-14: two minutes without a touch")
+        var t = 1_000L
+        val desk = GivingDesk { t }
+        ok(!desk.managerIn && !desk.idle(), "a new desk has nobody in and is not idle")
+        t += Giving.IDLE_SECS - 1
+        ok(!desk.idle() && !desk.returnsToAmount(false), "GV-14: one second short of two minutes is not idle")
+        desk.touch()
+        t += Giving.IDLE_SECS - 1
+        ok(!desk.idle(), "GV-14: a touch starts the count again")
+        t += 1
+        ok(desk.idle(), "GV-14: two minutes without a touch is idle")
+        ok(!desk.returnsToAmount(true), "GV-14: the gift in progress stays on the screen")
+        ok(desk.idle(), "a screen that stayed is still idle")
+        desk.managerUnlocked()
+        ok(desk.managerIn && !desk.idle(), "the PIN lets the manager in and counts as a touch")
+        t += Giving.IDLE_SECS
+        ok(desk.returnsToAmount(false) && !desk.managerIn, "GV-14: after two minutes the screen returns to the amount and the manager is out")
+        ok(!desk.idle() && !desk.returnsToAmount(false), "the count starts again after the return")
+        ok(Giving.leavesWhenIdle(false) && !Giving.leavesWhenIdle(true), "only the gift in progress is not left")
+        // The placeholder words are named for what they must say and are not in the list of screens.
+        val ids = listOf(
+            GivingWords.TODO_WORDS_GIVING_BAR, GivingWords.TODO_WORDS_GIVING_AMOUNT_HEADING, GivingWords.TODO_WORDS_GIVING_GIVE,
+            GivingWords.TODO_WORDS_GIVING_PIN_BAR, GivingWords.TODO_WORDS_GIVING_PIN_GO, GivingWords.TODO_WORDS_GIVING_LEAVE,
+            GivingWords.TODO_WORDS_GIVING_OUTCOME_HEADING, GivingWords.TODO_WORDS_GIVING_OUTCOME_THANKS, GivingWords.TODO_WORDS_GIVING_OUTCOME_DONE,
+        )
+        ok(ids.all { it.startsWith("TODO_WORDS_GIVING_") } && ids.toSet().size == ids.size, "each placeholder is its own")
+        // The controller reads the place, gates the three screens, counts touches and uses the one constant.
+        val controller = appDir?.let { File(it, "src/android/Controller.kt").readText() }
+        if (controller != null) {
+            for (gate in listOf("showManagerPin { showSettings() }", "showManagerPin { showSales() }", "showManagerPin { showToday(people) }", "showManagerPin { showSaleDetails(index, notice) }")) {
+                ok(controller.contains(gate), "GV-14: gated behind the PIN: $gate")
+            }
+            ok(controller.contains("place = settings.place") && controller.contains("Giving.homeIsAmount(place, desk.managerIn)"), "GV-11: the home screen follows the place")
+            ok(controller.contains("Giving.endsAsGift(place, s.state)"), "GV-12: the sale screen follows the place")
+            ok(!controller.contains("120"), "GV-14: the two minutes are in one constant, not in the controller")
+            val activity = File(appDir, "src/android/MainActivity.kt").readText()
+            ok(activity.contains("override fun dispatchTouchEvent") && activity.contains("controller.touched()"), "GV-14: every touch is counted")
+        }
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
         val screensMd = args.firstOrNull()?.let { File(it) }
@@ -1853,6 +1910,7 @@ object AppModelTest {
         cr273StarterTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr85HoldClockTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr115LightningCaptureTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        gv14GivingTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         println("AppModelTest (counter): $count checks passed")
     }
 }

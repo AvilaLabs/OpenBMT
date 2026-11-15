@@ -5,6 +5,7 @@ import java.io.IOException
 import org.openbmt.app.DurableFile
 import org.openbmt.app.Format
 import org.openbmt.owner.Books
+import org.openbmt.owner.Place
 import org.openbmt.owner.SettingsEditArgs
 import org.openbmt.owner.ShopCurrency
 
@@ -118,7 +119,7 @@ object CueCard {
 /**
  * What the shop's first screens keep: the name, the money, the till, whether the till steps were shown, whether the cue card
  * was printed and, for the steps after the wallet is pinned only, the step the first run is at (a start after the app was
- * stopped goes on there).
+ * stopped goes on there). [place] is the answer of the first question (GV-03): a shop, or a place that takes gifts.
  */
 class ShopPrefs(
     val name: String = "",
@@ -127,6 +128,7 @@ class ShopPrefs(
     val stepsShown: Boolean = false,
     val cardPrinted: Boolean = false,
     val step: FirstRunStep? = null,
+    val place: Place = Place.Shop,
 ) {
     fun encode(): ByteArray {
         val sb = StringBuilder()
@@ -136,6 +138,8 @@ class ShopPrefs(
         sb.append("steps-shown: ").append(if (stepsShown) "yes" else "no").append('\n')
         sb.append("card-printed: ").append(if (cardPrinted) "yes" else "no").append('\n')
         if (step != null) sb.append("step: ").append(step.name).append('\n')
+        // GV-03: written only for a place of giving, so the file of a shop is the file every earlier build wrote.
+        if (place == Place.Giving) sb.append("place: giving\n")
         return sb.toString().toByteArray(Charsets.UTF_8)
     }
 
@@ -145,10 +149,11 @@ class ShopPrefs(
         till: Till? = this.till,
         stepsShown: Boolean = this.stepsShown,
         cardPrinted: Boolean = this.cardPrinted,
-    ): ShopPrefs = ShopPrefs(clean(name), currency, till, stepsShown, cardPrinted, step)
+        place: Place = this.place,
+    ): ShopPrefs = ShopPrefs(clean(name), currency, till, stepsShown, cardPrinted, step, place)
 
     /** The same file with the first run's step set, or with none when [to] is null. */
-    fun withStep(to: FirstRunStep?): ShopPrefs = ShopPrefs(name, currency, till, stepsShown, cardPrinted, to)
+    fun withStep(to: FirstRunStep?): ShopPrefs = ShopPrefs(name, currency, till, stepsShown, cardPrinted, to, place)
 
     companion object {
         const val MAX_NAME = 60
@@ -165,8 +170,9 @@ class ShopPrefs(
             }
             if (!text.endsWith("\n")) throw ConfigFormatException("the shop file does not end with a line end")
             val lines = text.dropLast(1).split('\n')
-            // A file from before the card flag has 4 lines and reads as a card not printed; the step line is the 6th and optional.
-            if (lines.size !in 4..6) throw ConfigFormatException("the shop file does not have 4 to 6 lines")
+            // A file from before the card flag has 4 lines and reads as a card not printed; the step line comes after the card
+            // flag and is optional, and so is the place line after it (GV-03).
+            if (lines.size !in 4..7) throw ConfigFormatException("the shop file does not have 4 to 7 lines")
             fun value(i: Int, key: String): String {
                 val prefix = "$key: "
                 if (!lines[i].startsWith(prefix)) throw ConfigFormatException("line ${i + 1} is not \"$key: ...\"")
@@ -189,11 +195,21 @@ class ShopPrefs(
                 "no" -> false
                 else -> throw ConfigFormatException("card-printed is not yes or no")
             }
-            val step = if (lines.size < 6) null else {
-                val named = value(5, "step")
-                FirstRunStep.PERSISTED.firstOrNull { it.name == named } ?: throw ConfigFormatException("the step is not one the first run keeps")
+            var next = if (lines.size == 4) 4 else 5
+            var step: FirstRunStep? = null
+            if (next < lines.size && lines[next].startsWith("step: ")) {
+                val named = value(next, "step")
+                step = FirstRunStep.PERSISTED.firstOrNull { it.name == named } ?: throw ConfigFormatException("the step is not one the first run keeps")
+                next++
             }
-            return ShopPrefs(name, currency, till, shown, printed, step)
+            var place = Place.Shop
+            if (next < lines.size && lines[next].startsWith("place: ")) {
+                if (value(next, "place") != "giving") throw ConfigFormatException("the place is not giving")
+                place = Place.Giving
+                next++
+            }
+            if (next != lines.size) throw ConfigFormatException("the shop file has a line that is not one of its own")
+            return ShopPrefs(name, currency, till, shown, printed, step, place)
         }
 
         /**
@@ -271,7 +287,7 @@ class MoneyTabs(start: ShopCurrency, private val guess: ShopCurrency) {
 
 /** The screens of the first run, in the order they come. Back from each is [FirstRun.back]. */
 enum class FirstRunStep {
-    Welcome, Before, Shop, Till, Money, Hardware, Helper, OwnAdvice, Connect, Starter, OwnCounter, Instant, FirstSale, Ready, Why, RealCases, Guide, NotYet;
+    Welcome, Before, Place, Shop, Till, Money, Hardware, Helper, OwnAdvice, Connect, Starter, OwnCounter, Instant, FirstSale, Ready, Why, RealCases, Guide, NotYet;
 
     companion object {
         /** The steps that come after the wallet is pinned: the only ones the shop file keeps. */
@@ -294,6 +310,10 @@ class FirstRun(start: ShopPrefs, locale: String) {
     var step = FirstRunStep.Welcome
         private set
     var name = start.name
+
+    /** The answer of the first question, before the wallet (GV-03): a shop, or a place that takes gifts. */
+    var place: Place = start.place
+
     /** The money's tabs; [currency] is theirs. */
     val moneyTabs = MoneyTabs(start.currency ?: ShopPrefs.guessCurrency(locale), ShopPrefs.guessCurrency(locale))
     var currency: ShopCurrency
@@ -312,7 +332,7 @@ class FirstRun(start: ShopPrefs, locale: String) {
         private set
 
     fun prefs(stepsShown: Boolean, cardPrinted: Boolean = false): ShopPrefs =
-        ShopPrefs(ShopPrefs.clean(name), currency, till, stepsShown, cardPrinted, step.takeIf { it in FirstRunStep.PERSISTED })
+        ShopPrefs(ShopPrefs.clean(name), currency, till, stepsShown, cardPrinted, step.takeIf { it in FirstRunStep.PERSISTED }, place)
 
     /**
      * The step after [step]; the Money step goes on to Hardware for the plan, to Connect for a wallet the owner holds,
@@ -323,8 +343,10 @@ class FirstRun(start: ShopPrefs, locale: String) {
     fun next() {
         step = when (step) {
             FirstRunStep.Welcome -> FirstRunStep.Before
-            FirstRunStep.Before -> FirstRunStep.Shop
-            FirstRunStep.Shop -> FirstRunStep.Till
+            FirstRunStep.Before -> FirstRunStep.Place
+            FirstRunStep.Place -> FirstRunStep.Shop
+            // GV-13: a place of giving is not asked which till it rings up on.
+            FirstRunStep.Shop -> if (place == Place.Giving) FirstRunStep.Money else FirstRunStep.Till
             FirstRunStep.Till -> FirstRunStep.Money
             FirstRunStep.Money -> when (money) {
                 MoneyChoice.Make -> FirstRunStep.Why
@@ -449,9 +471,10 @@ class FirstRun(start: ShopPrefs, locale: String) {
         step = when (step) {
             FirstRunStep.Welcome -> FirstRunStep.Welcome
             FirstRunStep.Before -> FirstRunStep.Welcome
-            FirstRunStep.Shop -> FirstRunStep.Before
+            FirstRunStep.Place -> FirstRunStep.Before
+            FirstRunStep.Shop -> FirstRunStep.Place
             FirstRunStep.Till -> FirstRunStep.Shop
-            FirstRunStep.Money -> FirstRunStep.Till
+            FirstRunStep.Money -> if (place == Place.Giving) FirstRunStep.Shop else FirstRunStep.Till
             FirstRunStep.Hardware -> FirstRunStep.Money
             FirstRunStep.Helper -> FirstRunStep.Hardware
             FirstRunStep.OwnAdvice -> FirstRunStep.Money
@@ -664,8 +687,11 @@ object Checklist {
         return out
     }
 
-    /** The cue card is still to print when a till is chosen (any, including No till and Another till) and it was not printed. */
-    fun cardDue(prefs: ShopPrefs): Boolean = prefs.till != null && !prefs.cardPrinted
+    /**
+     * The cue card is still to print when a till is chosen (any, including No till and Another till) and it was not printed.
+     * A place of giving has no till to ring up on and no staff card (GV-13).
+     */
+    fun cardDue(prefs: ShopPrefs): Boolean = prefs.place == Place.Shop && prefs.till != null && !prefs.cardPrinted
 }
 
 /** The screens of the key maker guide, in the order they come. The first six are the steps, in the order of the page's. */

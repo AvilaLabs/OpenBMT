@@ -438,7 +438,7 @@ object FloatModel {
     fun withWatch(base: StartConfig, float: FloatWatchConfig?): StartConfig = StartConfig(
         base.dir, base.network, base.now, base.ownerSecret, base.approverRoot, base.wallet, base.key1Account, base.key3Xpub,
         base.batchMinCount, base.refundDepth, base.birthday, base.proxy, base.fixedPeers, base.broadcastProxy, base.withoutTor,
-        base.link, base.ownWallet, float,
+        base.link, base.ownWallet, float, base.place,
     )
 
     /** FL-22: what the owner reads before proving they are there: the address in full, the amount and the fee rate. */

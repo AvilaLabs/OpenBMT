@@ -44,6 +44,7 @@ fn shop(dir: &Scratch, wallet: &[u8]) -> W {
         .string(dir.path().to_str().unwrap())
         .bytes(&[1u8; 32])
         .bytes(wallet)
+        .u8(0)
 }
 
 #[test]
@@ -210,12 +211,14 @@ fn oa_105_a_secret_of_the_wrong_length_and_a_wallet_that_does_not_read_are_refus
     let short = W::new()
         .string(dir.path().to_str().unwrap())
         .bytes(&[1u8; 31])
-        .bytes(&file);
+        .bytes(&file)
+        .u8(0);
     assert_eq!(refusal(150, &short.u64(T0).0).rule, "id-length");
     let bad = W::new()
         .string(dir.path().to_str().unwrap())
         .bytes(&[1u8; 32])
-        .bytes(&file[..10]);
+        .bytes(&file[..10])
+        .u8(0);
     assert_eq!(refusal(150, &bad.u64(T0).0).rule, "OA-105");
 }
 
@@ -802,7 +805,8 @@ fn ss_41_a_repin_that_waits_comes_back_with_its_words_and_code_and_writes_nothin
     let shop_args = W::new()
         .string(rig.dir().to_str().unwrap())
         .bytes(&OWNER_SECRET)
-        .bytes(&old_file);
+        .bytes(&old_file)
+        .u8(0);
     Rd::ok(&call(150, &shop_args.u64(T0).0)).bytes();
     let before = folder(&rig.dir());
     waits(&repin(handle), "Upgrade waits for a pairing");

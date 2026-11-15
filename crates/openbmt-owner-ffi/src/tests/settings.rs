@@ -131,6 +131,8 @@ impl Edit {
             .string(onion)
             .string(prefix)
             .u64(*most)
+            // The place: not edited here.
+            .u8(0)
             .0
     }
 }

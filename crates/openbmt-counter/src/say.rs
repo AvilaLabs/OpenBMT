@@ -20,7 +20,8 @@ use openbmt_core::command::CommandError;
 use openbmt_core::currency::ShopCurrency;
 use openbmt_core::heartbeat::HeartbeatError;
 use openbmt_core::policy::{CheckMode, InstantLabel, OffReason, WaitReason};
-use openbmt_core::say::{sats, Quoted, Tone, Who, Words};
+use openbmt_core::say::{at_place, sats, Quoted, Tone, Who, Words};
+use openbmt_core::settings::Place;
 use openbmt_watch::say::RefusalGroup;
 use openbmt_watch::Problem;
 
@@ -288,6 +289,16 @@ impl Screen {
     /// [`Screen::flag_words`].
     pub fn words(&self) -> Words {
         let mut words = self.why.words();
+        words.tone = tone_of(self.state.color());
+        words
+    }
+
+    /// [`Screen::words`] at a place (GV-10): the words of giving for the
+    /// reason, named as [`why_name`] names it, where the giving table has
+    /// them, and the shop's words where it has none. The colour stays the
+    /// state's.
+    pub fn words_at(&self, place: Place) -> Words {
+        let mut words = at_place(place, why_name(&self.why), self.words());
         words.tone = tone_of(self.state.color());
         words
     }
@@ -1799,6 +1810,11 @@ impl RefundState {
     /// What the cashier is told about a refund in this state.
     pub fn words(&self) -> Words {
         refund_state_words(*self, None)
+    }
+
+    /// The same at a place (GV-10), keyed by [`refund_state_name`].
+    pub fn words_at(&self, place: Place) -> Words {
+        at_place(place, refund_state_name(*self), self.words())
     }
 }
 

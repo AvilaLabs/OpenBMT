@@ -51,7 +51,7 @@ use openbmt_core::pairing_own::{
 };
 use openbmt_core::pinned_wallet::{IndexRange, PinnedWallet, SignedRange};
 use openbmt_core::relay::SignedRelayHint;
-use openbmt_core::settings::{Settings, SignedSettings};
+use openbmt_core::settings::{Place, Settings, SignedSettings};
 use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_core::words::WORD_COUNT;
 
@@ -488,6 +488,10 @@ pub struct OwnShop {
     /// The one change that waits for a counter's confirmation (OA-121). It
     /// is kept in a file of its own, not in the state.
     held: Option<WaitingChange>,
+    /// GV-03: the kind of place the first settings are written for, when
+    /// the shop holds none yet. A shop at first; given again by the app at
+    /// each open.
+    starting_place: Place,
 }
 
 impl fmt::Debug for OwnShop {
@@ -508,7 +512,14 @@ impl OwnShop {
             state: OwnState::default(),
             recovered: false,
             held: None,
+            starting_place: Place::Shop,
         }
+    }
+
+    /// GV-03: the kind of place the first settings are written for. It is
+    /// read only while the shop holds no settings.
+    pub fn set_starting_place(&mut self, place: Place) {
+        self.starting_place = place;
     }
 
     /// Bring a stored state back. It must be for this owner and this wallet.
@@ -524,6 +535,7 @@ impl OwnShop {
             state,
             recovered,
             held: None,
+            starting_place: Place::Shop,
         })
     }
 }
@@ -836,7 +848,10 @@ impl OwnShop {
         let mut settings = match base {
             Some(s) => s.settings.clone(),
             None if usd_per_btc == 0 => return Err(Refusal::NoSettingsRate),
-            None => Settings::defaults(sats_per_usd_at(usd_per_btc)?),
+            None => Settings {
+                place: self.starting_place,
+                ..Settings::defaults(sats_per_usd_at(usd_per_btc)?)
+            },
         };
         settings.version = base
             .map_or(0, |k| k.settings.version)
@@ -1415,7 +1430,10 @@ impl OwnShop {
         let mut settings = match &self.state.known {
             Some(s) => s.settings.clone(),
             None if usd_per_btc == 0 => return Err(Refusal::NoSettingsRate),
-            None => Settings::defaults(sats_per_usd_at(usd_per_btc)?),
+            None => Settings {
+                place: self.starting_place,
+                ..Settings::defaults(sats_per_usd_at(usd_per_btc)?)
+            },
         };
         settings.version = self
             .state

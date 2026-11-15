@@ -147,7 +147,8 @@ internal fun Controller.showDevices() {
     rows.add(RowItem("Connect your Box") { showConnectBox() })
     // A change that waits for a counter's confirmation (OA-119).
     if (OwnWaitingChange.of(ownStore.args()) != null) rows.add(RowItem(OwnPairWords.waitingRowTitle) { showOwnWaitingChange() })
-    rows.add(RowItem("Till") { showTill() })
+    // GV-13: a place of giving has no till on its home screens; the row is in Settings.
+    if (Giving.homeOffersShopSteps(atGiving())) rows.add(RowItem("Till") { showTill() })
     if (key2Signer) rows.add(RowItem("Register the wallet on your signer") { showHardwareRegister { showHome() } })
     groupPage(OwnerLook.DEVICES, rows)
 }
@@ -161,13 +162,15 @@ internal fun Controller.showSettingsAndPhone() {
         OwnerLook.SETTINGS,
         listOfNotNull(
             RowItem("Settings") { showSettings() },
+            // GV-13: where a place of giving finds the till, which its home screens do not offer.
+            if (Giving.settingsCarriesTill(atGiving())) RowItem("Till") { showTill() } else null,
             RowItem("Change the PIN") { showChangePin(null) },
             RowItem("About") { showAbout() },
             RowItem(AppWords.watchSetting.heading) { showWatch() },
             RowItem(AppWords.torBuiltIn.heading) { showTor() },
             webRow(),
             shopLightningRow(),
-            tillStepsRow { showSettingsAndPhone() },
+            if (Giving.homeOffersShopSteps(atGiving())) tillStepsRow { showSettingsAndPhone() } else null,
         ),
     )
 }

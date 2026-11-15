@@ -136,10 +136,10 @@ use crate::views::{
     CashOutRow, CashPriceView, ClearArgs, CounterShareView, CounterView, DeepRequestView,
     DeliverView, EntryKindView, EntryRow, HaltedView, HealthView, LimitView, LinkConfig,
     LinkStepView, LinkView, MergeOfferView, NoteKindView, OldAddressesView, OldKind, OutboxKind,
-    OutboxRow, OutcomeKind, OutcomeView, OwnerNetwork, PumpView, QueueView, QueuedRefund,
-    ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView, SendKind,
-    SendRow, SettingsHeldView, SettingsQueuedView, ShopCurrencyView, SkippedView, StageKind,
-    StageView, StartConfig, StatusView, SwapHeldView, TakenView, ViewKind, WordsView,
+    OutboxRow, OutcomeKind, OutcomeView, OwnerNetwork, PlaceView, PumpView, QueueView,
+    QueuedRefund, ReceiptsKind, ReceiptsView, RefundArgs, RefundNoteView, RefundRow, RouteView,
+    SendKind, SendRow, SettingsHeldView, SettingsQueuedView, ShopCurrencyView, SkippedView,
+    StageKind, StageView, StartConfig, StatusView, SwapHeldView, TakenView, ViewKind, WordsView,
 };
 use crate::web_orders::{
     self as web, WebPairArgs, WebPairView, WebReplyArgs, WebStateView, WebStepArgs, WebStepKind,
@@ -1327,6 +1327,7 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
         });
     }
     let mut node = OwnerNode::start_with(config, parts, spawn).map_err(|e| node_error(&e))?;
+    node.set_starting_place(req.place.place());
     // From here on a failure lets the node go before it is reported.
     let rest = (|| {
         let key1 = match (&key_app, &key1_keys) {
@@ -3793,6 +3794,7 @@ impl Entry {
                     path_prefix: p.path_prefix.clone(),
                     max_sale_sats: p.max_sale_sats,
                 }),
+                place: PlaceView::of(s.place),
             }))
         })
     }

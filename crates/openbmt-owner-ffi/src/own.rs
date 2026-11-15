@@ -33,7 +33,7 @@ use crate::boxnet::{self, BoxLinkArgs};
 use crate::codec::{wire_record, wire_record_get, wire_unit_enum};
 use crate::counter_views::WaitingCounterView;
 use crate::error::{from_words, internal, AppError, Kind};
-use crate::views::{CounterShareView, WordsView};
+use crate::views::{CounterShareView, PlaceView, WordsView};
 
 /// One call at a time works on the shop's folder.
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
@@ -65,6 +65,9 @@ pub struct OwnShopArgs {
     pub owner_secret: Vec<u8>,
     /// The wallet's file as the app read it back (`OBM)`, OA-105).
     pub wallet: Vec<u8>,
+    /// GV-03: the kind of place the first settings are written for, when
+    /// the shop holds none yet.
+    pub place: PlaceView,
 }
 
 impl fmt::Debug for OwnShopArgs {
@@ -78,12 +81,14 @@ impl fmt::Debug for OwnShopArgs {
 wire_record!(OwnShopArgs {
     dir,
     owner_secret,
-    wallet
+    wallet,
+    place
 });
 wire_record_get!(OwnShopArgs {
     dir,
     owner_secret,
-    wallet
+    wallet,
+    place
 });
 
 /// The owner root the phone made (op 147).
@@ -585,6 +590,7 @@ pub(crate) fn with_shop<T>(
         dir,
         mut owner_secret,
         wallet,
+        place,
     } = a;
     let identity = match <[u8; 32]>::try_from(owner_secret.as_slice()) {
         Ok(secret) => {
@@ -607,6 +613,7 @@ pub(crate) fn with_shop<T>(
         .map_err(|e| crate::error::refused_by("id-length", format!("the owner key: {e}")))?;
     let wallet = wallet_of(&wallet)?;
     let mut node = OwnNode::open(Path::new(&dir), identity, wallet).map_err(node_error)?;
+    node.set_starting_place(place.place());
     f(&mut node)
 }
 

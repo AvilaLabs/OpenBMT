@@ -1,6 +1,7 @@
 package org.openbmt.owner.app
 
 import org.openbmt.app.CameraWords
+import org.openbmt.app.PlaceWords
 import org.openbmt.app.Format
 import org.openbmt.app.SayWords
 import org.openbmt.app.Tones
@@ -1052,8 +1053,13 @@ object AppWords {
         ),
     )
 
-    fun editField(id: String, c: ShopCurrency = ShopCurrency.Usd): SayWords =
-        editFieldsIn(c).firstOrNull { it.first == id }?.second ?: throw IllegalArgumentException("no field $id")
+    fun editField(id: String, c: ShopCurrency = ShopCurrency.Usd, giving: Boolean = false): SayWords {
+        // GV-03: the switch of the kind of place has placeholder words, which are not in the list the words test checks.
+        if (id == "place") return GivingWords.editFieldPlace
+        val shop = editFieldsIn(c).firstOrNull { it.first == id }?.second ?: throw IllegalArgumentException("no field $id")
+        // GV-10: a place of giving speaks the words of giving of this field where it has them.
+        return PlaceWords.at(giving, "editField.$id", shop)
+    }
 
     // ---- the till ------------------------------------------------------------------------------
 

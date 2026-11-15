@@ -284,12 +284,15 @@ object ProtocolDecoderTest {
         val rate = decodeResponse(header(0, Writer().u64(7_355_218).string("med.kc").u64(5).toByteArray()))
             .let { r -> r.rate().also { r.end() } }
         check(rate.rate == 7_355_218L && rate.sourceLabel == "med.kc" && rate.sourceFetchedAt == 5L)
-        val shop = decodeResponse(header(0, Writer().u32(3).u8(1).u8(0).u64(26_000).string("EUR").u8(1).bytes(byteArrayOf(5, 18)).toByteArray()))
+        val shop = decodeResponse(header(0, Writer().u32(3).u8(1).u8(0).u64(26_000).string("EUR").u8(1).bytes(byteArrayOf(5, 18)).u8(1).toByteArray()))
             .let { r -> r.shopSettings().also { r.end() } }
         check(shop.version == 3L && shop.torOn && !shop.customerWifi && shop.minSaleSats == 26_000L && shop.currency == "EUR")
-        check(shop.tipsOn && shop.tipPercents == listOf(5, 18))
+        check(shop.tipsOn && shop.tipPercents == listOf(5, 18) && shop.place == Place.Giving)
+        rejects("a place that is not a choice") {
+            decodeResponse(header(0, Writer().u32(3).u8(1).u8(0).u64(1).string("USD").u8(0).bytes(byteArrayOf()).u8(2).toByteArray())).shopSettings()
+        }
         rejects("a bool in the settings") {
-            decodeResponse(header(0, Writer().u32(3).u8(2).u8(0).u64(1).string("USD").u8(0).bytes(byteArrayOf()).toByteArray())).shopSettings()
+            decodeResponse(header(0, Writer().u32(3).u8(2).u8(0).u64(1).string("USD").u8(0).bytes(byteArrayOf()).u8(0).toByteArray())).shopSettings()
         }
         rejects("trailing bytes in a rate") {
             decodeResponse(header(0, Writer().u64(1).string("a").u64(5).u8(0).toByteArray())).let { it.rate(); it.end() }
@@ -397,7 +400,7 @@ object ProtocolDecoderTest {
             check(s.notes == listOf("a note"))
         }
         // The pairing view ends with the kind of relay; a tag that is not defined is refused.
-        fun relay(tag: Int) = Writer().u8(3).u32(1).u8(0).u8(0).u64(0).string("USD").u8(0).bytes(byteArrayOf(10, 15, 20)).u8(tag).toByteArray()
+        fun relay(tag: Int) = Writer().u8(3).u32(1).u8(0).u8(0).u64(0).string("USD").u8(0).bytes(byteArrayOf(10, 15, 20)).u8(0).u8(tag).toByteArray()
         decodeResponse(header(0, relay(2))).let { r ->
             r.u8()
             r.shopSettings()

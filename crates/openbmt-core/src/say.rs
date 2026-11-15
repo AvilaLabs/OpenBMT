@@ -8,6 +8,8 @@
 
 pub mod import;
 
+use crate::settings::Place;
+
 /// How a screen is coloured (CR-10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
@@ -218,6 +220,42 @@ pub fn clean_foreign(text: &str) -> String {
         }
     }
     out.trim_end().to_string()
+}
+
+/// The label of the setting that says what kind of place this is (GV-01),
+/// as the change screens show it. Placeholder until the words are given.
+pub const TODO_WORDS_PLACE_LABEL: &str = "TODO_WORDS_PLACE_LABEL";
+/// The value of that setting for a shop. Placeholder.
+pub const TODO_WORDS_PLACE_SHOP: &str = "TODO_WORDS_PLACE_SHOP";
+/// The value of that setting for a place of giving. Placeholder.
+pub const TODO_WORDS_PLACE_GIVING: &str = "TODO_WORDS_PLACE_GIVING";
+
+/// The value of the place setting as a change screen shows it.
+pub fn place_value(place: Place) -> &'static str {
+    match place {
+        Place::Shop => TODO_WORDS_PLACE_SHOP,
+        Place::Giving => TODO_WORDS_PLACE_GIVING,
+    }
+}
+
+/// GV-10: the words of a place of giving, by the id of the state or the rule
+/// the shop's words are for (the same ids the shop's words are kept under).
+/// `None` means the place of giving uses the shop's words for that id.
+/// The table is empty until the words are given.
+pub fn giving_words(id: &str) -> Option<Words> {
+    // TODO_WORDS_GIVING_TABLE: one arm per state id, each the words of a gift.
+    let _ = id;
+    None
+}
+
+/// GV-10: the words to show at a place. A shop shows `shop` as it is; a
+/// place of giving shows its own words for `id` where the table has them,
+/// and `shop` where it has none.
+pub fn at_place(place: Place, id: &str, shop: Words) -> Words {
+    match place {
+        Place::Shop => shop,
+        Place::Giving => giving_words(id).unwrap_or(shop),
+    }
 }
 
 /// An amount of satoshis for a sentence: "12,345 sats".

@@ -813,6 +813,11 @@ mod tests {
             ("tor stays", Free, Box::new(|s| s.min_sale_sats += 1)),
             ("tips", Free, Box::new(|s| s.tips_on = true)),
             (
+                "place of giving",
+                Loosen,
+                Box::new(|s| s.place = crate::settings::Place::Giving),
+            ),
+            (
                 "swap provider",
                 Free,
                 Box::new(|s| {
@@ -858,6 +863,16 @@ mod tests {
         cleared.lightning_node = None;
         assert_eq!(classify(&a, &cleared), Free);
         assert_eq!(classify(&cleared, &next(&a)), Redirect);
+    }
+
+    #[test]
+    fn gv_02_a_place_of_giving_is_loosen_and_the_way_back_is_free() {
+        use crate::settings::Place;
+        let old = base();
+        let mut new = next(&old);
+        new.place = Place::Giving;
+        assert_eq!(classify(&old, &new), ChangeClass::Loosen);
+        assert_eq!(classify(&new, &next(&old)), ChangeClass::Free);
     }
 
     #[test]

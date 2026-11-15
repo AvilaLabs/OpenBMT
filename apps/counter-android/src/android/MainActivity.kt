@@ -70,6 +70,12 @@ class MainActivity : Activity() {
         controller.permission(requestCode, grantResults)
     }
 
+    /** GV-14: every touch starts the count of a giving point left alone again. */
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        controller.touched()
+        return super.dispatchTouchEvent(ev)
+    }
+
     /** Shows [page] as the whole content; the flag of [keepOutOfCapture] does not carry over to it. */
     fun show(page: View) {
         window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)

@@ -143,7 +143,7 @@ use crate::rates::{
 };
 use crate::relay::take_relay;
 use crate::say::{TONES, WHOS};
-use crate::shop::{own_node_check, pairing_read, SettingsView};
+use crate::shop::{own_node_check, pairing_read, PlaceView, SettingsView};
 use crate::starter::{StarterDecisionView, StarterPaymentView, StarterSeenArgs, StarterStateView};
 use crate::tap::{tap_op, TapArgs, TapView};
 use crate::till::{TillRow, TillSaleView, TillStartArgs};
@@ -832,6 +832,7 @@ fn definitions() -> Vec<TypeDef> {
         SampleView::define(),
         RateCombineArgs::define(),
         RateView::define(),
+        PlaceView::define(),
         SettingsView::define(),
         LnKind::define(),
         LnSetupArgs::define(),

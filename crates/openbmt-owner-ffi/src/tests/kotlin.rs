@@ -172,7 +172,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "CounterShare(bytes(), u32())",
         "SettingChange(string(), string(), option { bytes() }, string(), string(), bool())",
         "u32(), list { settingChange() }, bool(), bool(), u32(), option { u64() }, option { u64() }, bytes(),",
-        "list { bytes() }, list { CounterShare(bytes(), u32()) }, list { bytes() },\n        option { bytes() }, shopCurrency(), option { SwapHeld(string(), string(), string(), u64()) },\n    )",
+        "list { bytes() }, list { CounterShare(bytes(), u32()) }, list { bytes() },\n        option { bytes() }, shopCurrency(), option { SwapHeld(string(), string(), string(), u64()) }, place(),\n    )",
         "u32(), limit(), limit(), limit(), limit(), limit(), limit(), u32(),",
         "limit(), limit(), limit(), limit(), u8(), u8(), u32(), bool(), bool(), u64(),",
         "list { bytes() }, list { CounterShare(bytes(), u32()) }, list { bytes() },",
@@ -208,7 +208,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "OwnWaitingView(bool(), u32(), strings(), strings(), u64(), u64())",
         "OwnOfferView(r.ownMade(), r.u64(), r.u32(), r.string())",
         "r.bytes(), r.string(), r.strings(), r.bool(), r.list { CounterShare(r.bytes(), r.u32()) }, r.u64(),",
-        "string(a.dir).bytes(a.ownerSecret).bytes(a.wallet)",
+        "string(a.dir).bytes(a.ownerSecret).bytes(a.wallet).place(a.place)",
     ] {
         assert!(text.contains(needle), "{needle}");
     }
@@ -230,7 +230,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "FinishedView: record: record: list<u8>, state_words: Words",
         "CeremonyDefaults: record: batch_min_count: u32, refund_depth: u32, birthday: u32",
         "SetupStageView: record: stage: u8, words: Words",
-        "SettingsEditArgs: record: usd_per_btc: option<u64>, light_per_sale: option<u32>, light_budget: option<u32>, node_per_sale: option<u32>, node_budget: option<u32>, box_per_sale: option<u32>, box_budget: option<u32>, underpayment_tolerance_bps: option<u32>, refund_cap: option<u32>, refund_daily_cap: option<u32>, cashier_override_daily_cap: option<u32>, manager_override_ceiling: option<u32>, min_confirmations: option<u8>, final_confirmations: option<u8>, heartbeat_max_age_secs: option<u32>, tor_on: option<bool>, customer_wifi: option<bool>, min_sale_sats: option<u64>, tips_on: option<bool>, tip_percents: option<list<u8>>, shares: list<CounterShareView>, lightning: LightningAction, lightning_text: string, currency: CurrencyAction, swap: SwapAction, swap_name: string, swap_onion: string, swap_prefix: string, swap_max_sats: u64",
+        "SettingsEditArgs: record: usd_per_btc: option<u64>, light_per_sale: option<u32>, light_budget: option<u32>, node_per_sale: option<u32>, node_budget: option<u32>, box_per_sale: option<u32>, box_budget: option<u32>, underpayment_tolerance_bps: option<u32>, refund_cap: option<u32>, refund_daily_cap: option<u32>, cashier_override_daily_cap: option<u32>, manager_override_ceiling: option<u32>, min_confirmations: option<u8>, final_confirmations: option<u8>, heartbeat_max_age_secs: option<u32>, tor_on: option<bool>, customer_wifi: option<bool>, min_sale_sats: option<u64>, tips_on: option<bool>, tip_percents: option<list<u8>>, shares: list<CounterShareView>, lightning: LightningAction, lightning_text: string, currency: CurrencyAction, swap: SwapAction, swap_name: string, swap_onion: string, swap_prefix: string, swap_max_sats: u64, place: option<PlaceView>",
         "SettingChangeView: record: field: string, label: string, counter: option<list<u8>>, old: string, new: string, loosening: bool",
         "SettingsPreviewView: record: version: u32, changes: list<SettingChangeView>, needs_key_app: bool, nothing_changed: bool, shares_total_bps: u32, usd_per_btc: option<u64>, sats_per_usd: option<u64>, settings: list<u8>, currency: ShopCurrencyView",
         "PriceSourceView: record: id: string, url: string",
@@ -243,7 +243,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "OwnRequestView: record: counter: list<u8>, name: string, session_words: list<string>, needs_rate: bool, shares: list<CounterShareView>, seconds_left: u64",
         "OwnBundleView: record: counter: list<u8>, code: list<u8>, first_start: u32, first_end: u32, settings_version: u32, shares: list<CounterShareView>, waiting: bool",
         "OwnWaitingView: record: present: bool, version: u32, words: list<string>, fields: list<string>, signed_at: u64, ends_at: u64",
-        "OwnShopArgs: record: dir: string, owner_secret: list<u8>, wallet: list<u8>",
+        "OwnShopArgs: record: dir: string, owner_secret: list<u8>, wallet: list<u8>, place: PlaceView",
         "OwnGapView: record: needed: u32, notice: bool",
         "SwitchRowView: record: counter: list<u8>, name: string, state: SwitchStateKind, words: Words",
         "OldAddressesView: record: kind: OldKind, count: u64, days_ago: u64, next: option<u64>, running: bool, words: option<Words>",
@@ -322,7 +322,7 @@ fn the_kotlin_wrapper_validates_no_address_and_reads_no_wallet_state() {
 }
 
 const START_FRAME_HEX: &str =
-    "4f424d6b01010000000000000000000100000064030100000000000000010000000101000000020100000077010000000300040000000500000006000000010100000070010000000100000061000101000100000078010000000701000000010000000809000000000000000a000000000000000000";
+    "4f424d6b01010000000000000000000100000064030100000000000000010000000101000000020100000077010000000300040000000500000006000000010100000070010000000100000061000101000100000078010000000701000000010000000809000000000000000a00000000000000000000";
 
 fn sample() -> StartConfig {
     StartConfig {
@@ -352,6 +352,7 @@ fn sample() -> StartConfig {
         }),
         own_wallet: None,
         float: None,
+        place: crate::PlaceView::Shop,
     }
 }
 
@@ -383,7 +384,7 @@ fn the_start_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
 }
 
 const EDIT_FRAME_HEX: &str =
-    "4f424d6b012f00010000000000000001e803000000000000010a0000000000013200000000000001640000000000000103000001010000000000000000010000000000000000000000000000000000000000000000000000";
+    "4f424d6b012f00010000000000000001e803000000000000010a000000000001320000000000000164000000000000010300000101000000000000000001000000000000000000000000000000000000000000000000000000";
 
 #[test]
 fn the_settings_edit_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness() {
@@ -418,6 +419,7 @@ fn the_settings_edit_request_is_the_same_bytes_in_rust_and_in_the_kotlin_harness
         swap_onion: String::new(),
         swap_prefix: String::new(),
         swap_max_sats: 0,
+        place: None,
     };
     let mut fields = Vec::new();
     crate::codec::Put::put(&edit, &mut fields);

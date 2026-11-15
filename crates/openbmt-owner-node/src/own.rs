@@ -207,6 +207,12 @@ impl OwnNode {
         })
     }
 
+    /// GV-03: the kind of place the first settings are written for, when
+    /// the shop holds none yet. It writes nothing.
+    pub fn set_starting_place(&mut self, place: openbmt_core::settings::Place) {
+        self.shop.set_starting_place(place);
+    }
+
     /// The shop, to read.
     pub fn shop(&self) -> &OwnShop {
         &self.shop

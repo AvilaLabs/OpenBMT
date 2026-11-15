@@ -585,8 +585,19 @@ object CommonModelTest {
         ok(OnePhone.PAIR_ACTIVITY.startsWith(OnePhone.COUNTER_PACKAGE + ".") && OnePhone.COUNTER_MAIN.startsWith(OnePhone.COUNTER_PACKAGE + "."), "the counter's activities are in its package")
     }
 
+    private fun placeWordsTests() {
+        val shop = words("A sale", "The sale is paid.", "Nothing to do.")
+        val gift = words("A gift", "The gift has arrived.", "Nothing to do.")
+        ok(PlaceWords.giving.isEmpty(), "GV-10: the giving table is empty until its words are given")
+        ok(PlaceWords.at(false, "paid", shop) === shop && PlaceWords.at(true, "paid", shop) === shop, "GV-10: an id with no entry is spoken in the shop's words, at both places")
+        ok(PlaceWords.at(true, "paid", shop, mapOf("paid" to gift)) === gift, "GV-10: a place of giving speaks the giving words of an id that has them")
+        ok(PlaceWords.at(false, "paid", shop, mapOf("paid" to gift)) === shop, "GV-10: a shop never speaks the giving words")
+        ok(PlaceWords.at(true, "other", shop, mapOf("paid" to gift)) === shop, "GV-10: another id still has the shop's words")
+    }
+
     @JvmStatic
     fun main(args: Array<String>) {
+        placeWordsTests()
         onePhoneTests()
         lockModelTests()
         checkerTests()

@@ -109,7 +109,7 @@ class Controller(internal val act: MainActivity) {
 
     // A shop with its own wallet (`OwnCounter.kt`): the wallet's sealed file and the owner root's secret, and the pairing in
     // progress, which holds nothing but what is on the screen (OA-105, OA-108 to OA-111).
-    internal val ownStore by lazy { OwnShopStore(dir, KeystoreSealer(AppFiles.OWN_KEY_ALIAS)) }
+    internal val ownStore by lazy { OwnShopStore(dir, KeystoreSealer(AppFiles.OWN_KEY_ALIAS)).also { it.place = shopFile.load().place } }
     internal var ownPairing: OwnPairing? = null
     internal var ownBoxPairing: OwnBoxPairing? = null
 
@@ -504,7 +504,7 @@ class Controller(internal val act: MainActivity) {
                     ownLinkId = null
                     // The secrets are handed over for this start and kept nowhere but in the sealed file (OA-01).
                     val start = if (s != null) {
-                        s.startConfig(nodeDir.path, nowSecs(), proxy)
+                        s.startConfig(nodeDir.path, nowSecs(), proxy, shopFile.load().place)
                     } else {
                         val shop = ownStore.args() ?: return@Thread
                         // The link to the shop's Box, when it keeps one; a file that does not read starts the node without it.

@@ -15,6 +15,7 @@ import org.openbmt.owner.OwnShopArgs
 import org.openbmt.owner.OwnerNetwork
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerOwn
+import org.openbmt.owner.Place
 import org.openbmt.owner.StartConfig
 import org.openbmt.owner.WaitingCounter
 
@@ -25,6 +26,9 @@ import org.openbmt.owner.WaitingCounter
  * save goes through the sealed file's atomic write. Nothing here reads what the library made.
  */
 class OwnShopStore(private val dir: File, sealer: Sealer) {
+    /** GV-03: the kind of place the first settings are written for; the app sets it from the answer of the first question. */
+    var place: Place = Place.Shop
+
     private val wallet = SealedFile(dir, sealer, AppFiles.OWN_WALLET_FILE)
     private val owner = SealedFile(dir, sealer, AppFiles.OWN_OWNER_FILE)
     private val link = SealedFile(dir, sealer, AppFiles.OWN_LINK_FILE)
@@ -65,7 +69,7 @@ class OwnShopStore(private val dir: File, sealer: Sealer) {
     fun args(): OwnShopArgs? {
         val file = wallet.load() ?: return null
         val secret = owner.load() ?: return null
-        return OwnShopArgs(stateDir().absolutePath, secret, file)
+        return OwnShopArgs(stateDir().absolutePath, secret, file, place)
     }
 
     /**
@@ -378,6 +382,7 @@ object OwnStart {
             withoutTor = false,
             link = link?.config(proxy),
             ownWallet = shop.wallet,
+            place = shop.place,
         )
 }
 

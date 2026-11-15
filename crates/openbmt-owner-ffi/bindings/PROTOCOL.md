@@ -256,7 +256,7 @@ RouteView: enum, a tag byte, then: Direct(addr: string) | Onion(proxy: string, h
     tags Direct=0 Onion=1
 LinkConfig: record: route: RouteView, relay_key: list<u8>, counters: list<list<u8>>, heartbeat_every_secs: u64, check_in_grace_secs: u64
 FloatWatchConfig: record: description: string, receive_end: u32, change_end: u32, birthday: u32
-StartConfig: record: dir: string, network: OwnerNetwork, now: u64, owner_secret: list<u8>, approver_root: list<u8>, wallet: string, key1_account: list<u8>, key3_xpub: option<string>, batch_min_count: u32, refund_depth: u32, birthday: u32, proxy: option<string>, fixed_peers: list<string>, broadcast_proxy: option<string>, without_tor: bool, link: option<LinkConfig>, own_wallet: option<list<u8>>, float: option<FloatWatchConfig>
+StartConfig: record: dir: string, network: OwnerNetwork, now: u64, owner_secret: list<u8>, approver_root: list<u8>, wallet: string, key1_account: list<u8>, key3_xpub: option<string>, batch_min_count: u32, refund_depth: u32, birthday: u32, proxy: option<string>, fixed_peers: list<string>, broadcast_proxy: option<string>, without_tor: bool, link: option<LinkConfig>, own_wallet: option<list<u8>>, float: option<FloatWatchConfig>, place: PlaceView
 WatchStart: record: dir: string, network: OwnerNetwork, secret: list<u8>, proxy: option<string>, fixed_peers: list<string>, route: RouteView, relay_key: list<u8>, counters: list<list<u8>>, heartbeat_every_secs: u64
 WatchStepView: record: sent: u64, reached: bool, relay_refused: bool, notes: list<string>
 RefundArgs: record: counter: list<u8>, sale: u32, cashier: string, address: string, sats: u64
@@ -321,7 +321,7 @@ CurrencyAction: enum, one tag byte
     tags Keep=0 Usd=1 Eur=2 Gbp=3 Jpy=4 Aud=5 Inr=6 Krw=7 Idr=8 Sgd=9 Sats=10 Cad=11 Mxn=12 Brl=13 Try=14 Thb=15 Zar=16
 ShopCurrencyView: enum, one tag byte
     tags Usd=1 Eur=2 Gbp=3 Jpy=4 Aud=5 Inr=6 Krw=7 Idr=8 Sgd=9 Sats=10 Cad=11 Mxn=12 Brl=13 Try=14 Thb=15 Zar=16
-SettingsEditArgs: record: usd_per_btc: option<u64>, light_per_sale: option<u32>, light_budget: option<u32>, node_per_sale: option<u32>, node_budget: option<u32>, box_per_sale: option<u32>, box_budget: option<u32>, underpayment_tolerance_bps: option<u32>, refund_cap: option<u32>, refund_daily_cap: option<u32>, cashier_override_daily_cap: option<u32>, manager_override_ceiling: option<u32>, min_confirmations: option<u8>, final_confirmations: option<u8>, heartbeat_max_age_secs: option<u32>, tor_on: option<bool>, customer_wifi: option<bool>, min_sale_sats: option<u64>, tips_on: option<bool>, tip_percents: option<list<u8>>, shares: list<CounterShareView>, lightning: LightningAction, lightning_text: string, currency: CurrencyAction, swap: SwapAction, swap_name: string, swap_onion: string, swap_prefix: string, swap_max_sats: u64
+SettingsEditArgs: record: usd_per_btc: option<u64>, light_per_sale: option<u32>, light_budget: option<u32>, node_per_sale: option<u32>, node_budget: option<u32>, box_per_sale: option<u32>, box_budget: option<u32>, underpayment_tolerance_bps: option<u32>, refund_cap: option<u32>, refund_daily_cap: option<u32>, cashier_override_daily_cap: option<u32>, manager_override_ceiling: option<u32>, min_confirmations: option<u8>, final_confirmations: option<u8>, heartbeat_max_age_secs: option<u32>, tor_on: option<bool>, customer_wifi: option<bool>, min_sale_sats: option<u64>, tips_on: option<bool>, tip_percents: option<list<u8>>, shares: list<CounterShareView>, lightning: LightningAction, lightning_text: string, currency: CurrencyAction, swap: SwapAction, swap_name: string, swap_onion: string, swap_prefix: string, swap_max_sats: u64, place: option<PlaceView>
 SettingChangeView: record: field: string, label: string, counter: option<list<u8>>, old: string, new: string, loosening: bool
 SettingsPreviewView: record: version: u32, changes: list<SettingChangeView>, needs_key_app: bool, nothing_changed: bool, shares_total_bps: u32, usd_per_btc: option<u64>, sats_per_usd: option<u64>, settings: list<u8>, currency: ShopCurrencyView
 OwnSettingsPreviewArgs: record: shop: OwnShopArgs, edit: SettingsEditArgs, starter: bool
@@ -372,7 +372,9 @@ OldAddressesView: record: kind: OldKind, count: u64, days_ago: u64, next: option
 DeepRequestView: record: asked: bool, words: Words
 LimitView: record: sats: u64, display_usd: u32
 CounterShareView: record: counter: list<u8>, bps: u32
-SettingsHeldView: record: version: u32, light_per_sale: LimitView, light_budget: LimitView, node_per_sale: LimitView, node_budget: LimitView, box_per_sale: LimitView, box_budget: LimitView, underpayment_tolerance_bps: u32, refund_cap: LimitView, refund_daily_cap: LimitView, cashier_override_daily_cap: LimitView, manager_override_ceiling: LimitView, min_confirmations: u8, final_confirmations: u8, heartbeat_max_age_secs: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, tips_on: bool, tip_percents: list<u8>, devices: list<list<u8>>, counters: list<CounterShareView>, boxes: list<list<u8>>, lightning_node: option<list<u8>>, currency: ShopCurrencyView, swap: option<SwapHeldView>
+PlaceView: enum, one tag byte
+    tags Shop=0 Giving=1
+SettingsHeldView: record: version: u32, light_per_sale: LimitView, light_budget: LimitView, node_per_sale: LimitView, node_budget: LimitView, box_per_sale: LimitView, box_budget: LimitView, underpayment_tolerance_bps: u32, refund_cap: LimitView, refund_daily_cap: LimitView, cashier_override_daily_cap: LimitView, manager_override_ceiling: LimitView, min_confirmations: u8, final_confirmations: u8, heartbeat_max_age_secs: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, tips_on: bool, tip_percents: list<u8>, devices: list<list<u8>>, counters: list<CounterShareView>, boxes: list<list<u8>>, lightning_node: option<list<u8>>, currency: ShopCurrencyView, swap: option<SwapHeldView>, place: PlaceView
 OutboxKind: enum, one tag byte
     tags Transaction=0 Batch=1 Settings=2 Pairing=3 BoxWelcome=4
 OutboxRow: record: id: u32, kind: OutboxKind, txid: option<string>, counter: option<list<u8>>, version: option<u32>, signed_at: option<u64>, size: u32, words: Words
@@ -397,7 +399,7 @@ CounterConfirmArgs: record: pairing: u32, usd_per_btc: u64
 CounterQueuedView: record: settings: u32, version: u32, batch: u32, batch_count: u32, shares: list<CounterShareView>, words: Words
 WaitingCounterView: record: counter: list<u8>, name: string
 CounterBundleView: record: code: list<u8>, with_batch: bool, words: Words
-OwnShopArgs: record: dir: string, owner_secret: list<u8>, wallet: list<u8>
+OwnShopArgs: record: dir: string, owner_secret: list<u8>, wallet: list<u8>, place: PlaceView
 OwnOwnerMade: record: secret: list<u8>, root: list<u8>
 OwnWalletView: record: file: list<u8>, first_address: string, multisig: bool
 OwnMade: record: code: list<u8>, made_at: u64

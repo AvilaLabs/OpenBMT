@@ -94,7 +94,7 @@ impl W {
             }
         };
         let w = w.opt_bytes(c.own_wallet.as_deref());
-        match &c.float {
+        let w = match &c.float {
             None => w.u8(0),
             Some(f) => w
                 .u8(1)
@@ -102,7 +102,11 @@ impl W {
                 .u32(f.receive_end)
                 .u32(f.change_end)
                 .u32(f.birthday),
-        }
+        };
+        w.u8(match c.place {
+            crate::PlaceView::Shop => 0,
+            crate::PlaceView::Giving => 1,
+        })
     }
 
     /// The fields of `queue_refund`.

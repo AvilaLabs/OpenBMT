@@ -26,6 +26,7 @@ fn shop(rig: &Rig, wallet: &[u8]) -> W {
         .string(rig.dir().to_str().expect("UTF-8"))
         .bytes(&OWNER_SECRET)
         .bytes(wallet)
+        .u8(0)
 }
 
 /// The shop learns its settings by adding a counter (OA-110).

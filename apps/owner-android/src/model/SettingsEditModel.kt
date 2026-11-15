@@ -4,6 +4,7 @@ import org.openbmt.app.Format
 import org.openbmt.app.SayWords
 import org.openbmt.owner.CounterShare
 import org.openbmt.owner.LightningAction
+import org.openbmt.owner.Place
 import org.openbmt.owner.SettingsEditArgs
 import org.openbmt.owner.SettingsHeld
 import org.openbmt.owner.SettingsPreview
@@ -29,8 +30,8 @@ class EditField(
     val words: SayWords get() = AppWords.editField(id)
     val label: String get() = words.heading
 
-    /** The field's words in the shop's currency: its name stands where "dollars" stood. */
-    fun wordsIn(c: ShopCurrency): SayWords = AppWords.editField(id, c)
+    /** The field's words in the shop's currency: its name stands where "dollars" stood. At a place of giving, [giving], they are the words of giving where there are any (GV-10). */
+    fun wordsIn(c: ShopCurrency, giving: Boolean = false): SayWords = AppWords.editField(id, c, giving)
 }
 
 /** One screen of the editor: its words and the fields on it. [wordsIn] gives the words in a currency. */
@@ -126,6 +127,14 @@ object SettingsEditModel {
         ) + tipFields,
     )
 
+    /** GV-02, GV-03: whether the shop is a place of giving. On is a place of giving; the change goes through the class flow like any other. */
+    val place = EditGroup(
+        GivingWords.editGroupPlace,
+        listOf(
+            EditField("place", FieldKind.Switch, { if (it.place == Place.Giving) 1 else 0 }, { a, v -> a.copy(place = if (v == 1L) Place.Giving else Place.Shop) }),
+        ),
+    )
+
     val refunds = EditGroup(
         AppWords.editGroupRefunds,
         listOf(
@@ -147,7 +156,7 @@ object SettingsEditModel {
     )
 
     /** The groups of the menu, in order: the currency, then the screens of fields. The shares and the node have screens of their own. */
-    val groups: List<EditGroup> = listOf(currency, instant, payments, tips, refunds, safety)
+    val groups: List<EditGroup> = listOf(currency, instant, payments, tips, refunds, safety, place)
 
     /** Every field of the screens of fields, in the order of the groups. */
     val fields: List<EditField> = groups.flatMap { it.fields }

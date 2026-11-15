@@ -93,6 +93,17 @@ const WALLET_SIG_VERSION: u8 = 6;
 /// (1 to 3), a length (2 bytes little endian) and a text.
 const WALLET_SIGS_VERSION: u8 = 7;
 
+/// The layout of settings that name a place of giving (GV-01): everything
+/// layout 5 holds, with Shop Lightning behind a flag of its own, then the
+/// place. It is the layout of exactly the settings of a place of giving. It
+/// is carried after a layout byte, in frame 6, 7 or 8.
+const PLACE_LAYOUT: u8 = 6;
+
+/// The frame version of signed settings that carry a layout byte but no
+/// wallet signature: laid out as frame 6 without the wallet signature. It
+/// is the frame of a layout after 5 when no wallet signature is given.
+const LAYOUT_FRAME_VERSION: u8 = 8;
+
 /// Characters of the base32 part of a Tor v3 host name (NR-92).
 const ONION_BASE_CHARS: usize = 56;
 
@@ -397,6 +408,33 @@ impl Limit {
     }
 }
 
+/// The kind of place the settings belong to (GV-01).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Place {
+    /// A shop: sales, prices and a counter. The first value, and the one
+    /// every earlier build wrote.
+    #[default]
+    Shop = 0,
+    /// A church or another place that takes gifts rather than sales.
+    Giving = 1,
+}
+
+impl Place {
+    /// The byte the place is written as.
+    pub fn to_byte(self) -> u8 {
+        self as u8
+    }
+
+    /// The place a byte names, or `None` for any other value.
+    pub fn from_byte(byte: u8) -> Option<Self> {
+        match byte {
+            0 => Some(Self::Shop),
+            1 => Some(Self::Giving),
+            _ => None,
+        }
+    }
+}
+
 /// The shop's settings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
@@ -489,6 +527,8 @@ pub struct Settings {
     /// What the shop prices its sales in, and what every limit above is in
     /// whole units of (CR-193).
     pub currency: ShopCurrency,
+    /// A shop or a place of giving (GV-01). A shop at first.
+    pub place: Place,
 }
 
 impl Settings {
@@ -530,6 +570,7 @@ impl Settings {
             tips_on: false,
             tip_percents: DEFAULT_TIP_PERCENTS.to_vec(),
             currency: ShopCurrency::Usd,
+            place: Place::Shop,
         }
     }
 
@@ -542,12 +583,16 @@ impl Settings {
             || self.tip_percents != DEFAULT_TIP_PERCENTS
     }
 
-    /// The version byte of the frame these settings are written in: 4 when
+    /// The layout of these settings, which is the version byte of the frame
+    /// they are written in up to layout 5: 6 when
+    /// they are a place of giving (GV-01), else 5 when
     /// they name Shop Lightning (SL-71), else 4 when they name an own node
     /// (NR-105), else 3 when they name a swap provider
     /// (CR-218), else 2 when they carry the extension block, else 1.
     fn frame_version(&self) -> u8 {
-        if self.shop_lightning.is_some() {
+        if self.place == Place::Giving {
+            PLACE_LAYOUT
+        } else if self.shop_lightning.is_some() {
             SHOP_LIGHTNING_VERSION
         } else if self.own_node.is_some() {
             OWN_NODE_VERSION
@@ -815,7 +860,34 @@ impl Settings {
         // light fallback. Settings that name no own node never reach it.
         // SL-71: version 5 writes both behind a flag, then the two flags of
         // the own node and the Shop Lightning block.
-        if let Some(sl) = &self.shop_lightning {
+        // GV-01: layout 6 writes the block of layout 5 with Shop Lightning
+        // behind a flag, then the place. Only a place of giving reaches it.
+        if self.place == Place::Giving {
+            match &self.swap {
+                Some(swap) => {
+                    out.push(1);
+                    swap.write(&mut out);
+                }
+                None => out.push(0),
+            }
+            match &self.own_node {
+                Some(own) => {
+                    out.push(1);
+                    own.write(&mut out);
+                }
+                None => out.push(0),
+            }
+            out.push(u8::from(self.node_only));
+            out.push(u8::from(self.light_fallback));
+            match &self.shop_lightning {
+                Some(sl) => {
+                    out.push(1);
+                    sl.write(&mut out);
+                }
+                None => out.push(0),
+            }
+            out.push(self.place.to_byte());
+        } else if let Some(sl) = &self.shop_lightning {
             match &self.swap {
                 Some(swap) => {
                     out.push(1);
@@ -950,8 +1022,35 @@ impl Settings {
             (ShopCurrency::Usd, false, DEFAULT_TIP_PERCENTS.to_vec())
         };
 
+        let mut place = Place::Shop;
         let (swap, own_node, node_only, light_fallback, shop_lightning) =
-            if version_byte >= SHOP_LIGHTNING_VERSION {
+            if version_byte >= PLACE_LAYOUT {
+                let swap = if r.flag()? {
+                    Some(SwapProvider::read(r)?)
+                } else {
+                    None
+                };
+                let own_node = if r.flag()? {
+                    Some(OwnNode::read(r)?)
+                } else {
+                    None
+                };
+                let node_only = r.flag()?;
+                let light_fallback = r.flag()?;
+                let sl = if r.flag()? {
+                    Some(ShopLightning::read(r)?)
+                } else {
+                    None
+                };
+                place = Place::from_byte(r.u8()?)
+                    .ok_or(DecodeError::NonCanonical("the place byte is not a choice"))?;
+                if place == Place::Shop {
+                    return Err(DecodeError::NonCanonical(
+                        "a layout 6 message names a place of giving",
+                    ));
+                }
+                (swap, own_node, node_only, light_fallback, sl)
+            } else if version_byte >= SHOP_LIGHTNING_VERSION {
                 let swap = if r.flag()? {
                     Some(SwapProvider::read(r)?)
                 } else {
@@ -1019,6 +1118,7 @@ impl Settings {
             tips_on,
             tip_percents,
             currency,
+            place,
         })
     }
 
@@ -1309,6 +1409,15 @@ pub fn changed_fields(old: &Settings, new: &Settings) -> Vec<FieldChange> {
         o.push(FieldChange {
             field: "tip_percents",
             direction: Change::Tightening,
+        });
+    }
+    // GV-02: at a place of giving the person paying types the amount, which
+    // a shop must not allow without a counter's confirmation, so a shop that
+    // becomes one loosens and the way back tightens.
+    if old.place != new.place {
+        o.push(FieldChange {
+            field: "place",
+            direction: dir(new.place == Place::Giving),
         });
     }
     out
@@ -1685,7 +1794,9 @@ impl SignedSettings {
     /// also name a swap provider, CR-218, 4 when they name an own node,
     /// NR-105, and 5 when they name Shop Lightning, SL-71; 6 when a wallet
     /// signature follows the others, AP-14, with one more byte after the
-    /// version that gives the number of 1 to 5 the settings would have), the bytes of
+    /// version that gives the layout, 1 to 6, the settings would have; 8
+    /// for the layout of a place of giving, 6, GV-01, without a wallet
+    /// signature, with that layout byte too), the bytes of
     /// [`Settings::encode`] (the
     /// bytes that are hashed and signed), the owner signature, a flag byte
     /// (1 if a Key app signature follows, else 0) and, only when the flag is
@@ -1705,11 +1816,13 @@ impl SignedSettings {
                 } else {
                     WALLET_SIG_VERSION
                 }
+            } else if self.settings.frame_version() >= PLACE_LAYOUT {
+                LAYOUT_FRAME_VERSION
             } else {
                 self.settings.frame_version()
             };
         }
-        if self.wallet_sig.is_some() {
+        if self.wallet_sig.is_some() || self.settings.frame_version() >= PLACE_LAYOUT {
             out.push(self.settings.frame_version());
         }
         out.extend_from_slice(&body);
@@ -1747,11 +1860,13 @@ impl SignedSettings {
     /// [`SignedSettings::verify`].
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
         let (mut r, version) =
-            Reader::framed_up_to(bytes, &wire::MAGIC_SIGNED_SETTINGS, WALLET_SIGS_VERSION)?;
-        let with_sig = version >= WALLET_SIG_VERSION;
-        let layout = if with_sig {
+            Reader::framed_up_to(bytes, &wire::MAGIC_SIGNED_SETTINGS, LAYOUT_FRAME_VERSION)?;
+        let with_layout = version >= WALLET_SIG_VERSION;
+        let layout = if with_layout {
             match r.u8()? {
-                v @ 1..=SHOP_LIGHTNING_VERSION => v,
+                // Frame 8 is the frame of a layout after 5 only; the earlier
+                // layouts are written as frames 1 to 5.
+                v @ 1..=PLACE_LAYOUT if version != LAYOUT_FRAME_VERSION || v == PLACE_LAYOUT => v,
                 v => return Err(DecodeError::UnsupportedVersion(v)),
             }
         } else {
@@ -1812,7 +1927,7 @@ impl SignedSettings {
         };
         // A frame is read back to the bytes it was written as: a layout
         // byte that is not the one the settings give is not canonical.
-        if with_sig && layout != signed.settings.frame_version() {
+        if with_layout && layout != signed.settings.frame_version() {
             return Err(DecodeError::NonCanonical(
                 "the settings layout byte is not the one the settings need",
             ));
@@ -2906,7 +3021,7 @@ mod tests {
         };
         assert_eq!(edit(3, b'X'), DecodeError::BadMagic);
         assert_eq!(edit(4, 0), DecodeError::UnsupportedVersion(0));
-        assert_eq!(edit(4, 8), DecodeError::UnsupportedVersion(8));
+        assert_eq!(edit(4, 9), DecodeError::UnsupportedVersion(9));
         assert!(matches!(edit(TOR_AT, 2), DecodeError::NonCanonical(_)));
         assert!(matches!(edit(TOR_AT + 1, 2), DecodeError::NonCanonical(_)));
         // The Key app signature flag is the last byte but 64.
@@ -4304,10 +4419,10 @@ mod tests {
             ShopCurrency::Usd
         );
         let mut v4 = wire.clone();
-        v4[4] = 8;
+        v4[4] = 9;
         assert_eq!(
             SignedSettings::from_bytes(&v4),
-            Err(DecodeError::UnsupportedVersion(8))
+            Err(DecodeError::UnsupportedVersion(9))
         );
         let mut v0 = wire;
         v0[4] = 0;
@@ -4449,10 +4564,10 @@ mod tests {
         v1[4] = 1;
         assert!(SignedSettings::from_bytes(&v1).is_err());
         let mut v4 = wire;
-        v4[4] = 8;
+        v4[4] = 9;
         assert_eq!(
             SignedSettings::from_bytes(&v4),
-            Err(DecodeError::UnsupportedVersion(8))
+            Err(DecodeError::UnsupportedVersion(9))
         );
     }
 
@@ -4820,5 +4935,134 @@ mod tests {
         on.shop_lightning = old.shop_lightning;
         assert_eq!(changed_fields(&base(), &on)[0].direction, Change::Loosening);
         assert!(changed_fields(&old, &next(&old)).is_empty());
+    }
+
+    fn giving(mut s: Settings) -> Settings {
+        s.place = Place::Giving;
+        s
+    }
+
+    #[test]
+    fn gv_01_a_shop_keeps_its_bytes_and_hash() {
+        let plain = wire_settings();
+        assert_eq!(plain.place, Place::Shop);
+        assert_eq!(Settings::defaults(RATE).place, Place::Shop);
+        assert_eq!(plain.encode(), reference_body(&plain));
+        assert_eq!(
+            hex(&plain.hash()),
+            "b5484507f5d6f8d7d9110b5a96e2e8c5de4fa7fe8de7548894bc812c94d35057",
+            "hash of the version 1 fixture"
+        );
+        assert_eq!(signed_both(plain).to_bytes()[4], 1);
+        let own = with_own_node(wire_settings(), true, true);
+        assert_eq!(
+            hex(&own.hash()),
+            "a5827abd40c2caa9535fc78da3abb33bf98b8c5488b6e681360bfe604c173c1c",
+            "hash of the version 4 fixture"
+        );
+        // A shop with Shop Lightning is still version 5.
+        let sl = with_shop_lightning(wire_settings());
+        assert_eq!(signed_both(sl).to_bytes()[4], 5);
+    }
+
+    #[test]
+    fn gv_01_a_place_of_giving_is_version_six_and_reads_back() {
+        let mut cases = vec![giving(wire_settings())];
+        let mut tips = giving(wire_settings());
+        tips.tips_on = true;
+        cases.push(tips);
+        cases.push(giving(with_own_node(wire_settings(), true, true)));
+        cases.push(giving(with_shop_lightning(wire_settings())));
+        let mut eur = giving(wire_settings());
+        eur.currency = ShopCurrency::Eur;
+        cases.push(eur);
+        for s in cases {
+            assert_eq!(s.validate(), Ok(()));
+            let bytes = signed_both(s.clone()).to_bytes();
+            assert_eq!(bytes[4], 6);
+            let back = SignedSettings::from_bytes(&bytes).unwrap();
+            assert_eq!(back.settings, s);
+            assert_eq!(back.to_bytes(), bytes);
+            let mut shop = s.clone();
+            shop.place = Place::Shop;
+            assert_ne!(s.hash(), shop.hash());
+            // The place is the last byte of the body.
+            let body = s.encode();
+            assert_eq!(body.last(), Some(&1));
+            // Every cut of the body fails, and so does an older frame.
+            let body_end = bytes.len() - 64 - 1 - 64;
+            for cut in 1..=40 {
+                let mut short = bytes[..body_end - cut].to_vec();
+                short.extend_from_slice(&bytes[body_end..]);
+                assert!(SignedSettings::from_bytes(&short).is_err(), "{cut}");
+            }
+            // An older frame is refused, or reads as other settings that
+            // never verify (its signatures are over the version 6 bytes).
+            let (_, _, roots) = roots();
+            for old in 1..=5u8 {
+                let mut frame = bytes.clone();
+                frame[4] = old;
+                let read = SignedSettings::from_bytes(&frame).and_then(|r| {
+                    r.verify_signatures(&roots)
+                        .map_err(|_| DecodeError::Truncated)
+                });
+                assert!(read.is_err(), "v{old}");
+            }
+            let mut v7 = bytes.clone();
+            v7[4] = 7;
+            assert!(SignedSettings::from_bytes(&v7).is_err());
+        }
+    }
+
+    #[test]
+    fn gv_01_the_block_is_written_after_the_version_five_block() {
+        let body = giving(wire_settings()).encode();
+        // No swap provider, no own node, node-only and the light fallback
+        // off, no Shop Lightning, then the place.
+        assert_eq!(&body[body.len() - 6..], &[0, 0, 0, 0, 0, 1]);
+        let with_sl = giving(with_shop_lightning(wire_settings()));
+        let body = with_sl.encode();
+        assert_eq!(body.last(), Some(&1));
+        let plain_sl = with_shop_lightning(wire_settings()).encode();
+        let sl_block = &plain_sl[plain_sl.len() - 153..];
+        let at = body.len() - 1 - sl_block.len();
+        assert_eq!(&body[at..body.len() - 1], sl_block);
+        assert_eq!(body[at - 1], 1);
+    }
+
+    #[test]
+    fn gv_01_a_version_six_message_that_says_shop_or_another_value_is_refused() {
+        let bytes = signed_both(giving(wire_settings())).to_bytes();
+        let place_at = bytes.len() - 64 - 1 - 64 - 1;
+        assert_eq!(bytes[place_at], 1);
+        for bad in [0u8, 2, 255] {
+            let mut b = bytes.clone();
+            b[place_at] = bad;
+            assert!(SignedSettings::from_bytes(&b).is_err(), "place {bad}");
+        }
+        // A flag that is neither 0 nor 1 before the place.
+        for at in 1..=5 {
+            let mut b = bytes.clone();
+            b[place_at - at] = 2;
+            assert!(SignedSettings::from_bytes(&b).is_err(), "flag {at}");
+        }
+        assert_eq!(Place::from_byte(0), Some(Place::Shop));
+        assert_eq!(Place::from_byte(1), Some(Place::Giving));
+        assert_eq!(Place::from_byte(2), None);
+    }
+
+    #[test]
+    fn gv_02_the_place_loosens_one_way_and_tightens_the_other() {
+        let shop = base();
+        let mut place = next(&shop);
+        place.place = Place::Giving;
+        let up = changed_fields(&shop, &place);
+        assert_eq!(up.len(), 1);
+        assert_eq!(up[0].field, "place");
+        assert_eq!(up[0].direction, Change::Loosening);
+        assert_eq!(classify_change(&shop, &place), Change::Loosening);
+        let back = changed_fields(&place, &next(&shop));
+        assert_eq!(back[0].direction, Change::Tightening);
+        assert!(changed_fields(&place, &next(&place)).is_empty());
     }
 }

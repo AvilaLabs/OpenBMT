@@ -127,7 +127,7 @@ payment-acceptance limits, and remaining work.
 - [Design and threat model](docs/DESIGN.md)
 - [Payment checks](docs/WATCHER-RULES.md) · [Counter](docs/COUNTER-RULES.md) · [Owner app](docs/OWNER-APP-RULES.md)
 - [Wallet spending](docs/SPEND-RULES.md) · [Signer](docs/SIGNER-RULES.md) · [Approval sessions](docs/SESSION-RULES.md)
-- [Lightning](docs/LIGHTNING-RULES.md) · [POS matching](docs/POS-RULES.md) · [Books and exports](docs/BOOKS-RULES.md)
+- [Lightning](docs/LIGHTNING-RULES.md) · [POS matching](docs/POS-RULES.md) · [Books and exports](docs/BOOKS-RULES.md) · [Giving](docs/GIVING-RULES.md)
 - [Box setup and packaging](packaging/box/README.md) · [Screen catalogs](docs/screens/)
 - [Bitcoin Core engineering notes](docs/research/)
 

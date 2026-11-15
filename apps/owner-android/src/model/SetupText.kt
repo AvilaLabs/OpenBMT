@@ -3,6 +3,7 @@ package org.openbmt.owner.app
 import org.openbmt.app.Format
 import org.openbmt.owner.LinkConfig
 import org.openbmt.owner.OwnerNetwork
+import org.openbmt.owner.Place
 import org.openbmt.owner.Route
 import org.openbmt.owner.SetupFields
 import org.openbmt.owner.StartConfig
@@ -80,7 +81,7 @@ class OwnerSetup(
      * the Tor proxy [proxy]: the node's peers, the sending of payments and an
      * onion route all use it, and `withoutTor` is never set (OA-05).
      */
-    fun startConfig(dir: String, now: Long, proxy: String): StartConfig = StartConfig(
+    fun startConfig(dir: String, now: Long, proxy: String, place: Place = Place.Shop): StartConfig = StartConfig(
         dir = dir,
         network = network,
         now = now,
@@ -108,6 +109,7 @@ class OwnerSetup(
                 checkInGraceSecs = it.checkInGraceSecs,
             )
         },
+        place = place,
     )
 
     companion object {

@@ -200,7 +200,9 @@ RateParseArgs: record: source: string, response: list<u8>, fetched_at: u64
 SampleView: record: source: string, fetched_at: u64, minor_per_btc: u64
 RateCombineArgs: record: samples: list<SampleView>, now: u64
 RateView: record: rate: u64, source_label: string, source_fetched_at: u64
-SettingsView: record: version: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, currency: string, tips_on: bool, tip_percents: list<u8>
+PlaceView: enum, one tag byte
+    tags Shop=0 Giving=1
+SettingsView: record: version: u32, tor_on: bool, customer_wifi: bool, min_sale_sats: u64, currency: string, tips_on: bool, tip_percents: list<u8>, place: PlaceView
 LnKind: enum, one tag byte
     tags Lnd=0 Cln=1
 LnSetupArgs: record: kind: LnKind, address: string, secret: string, cert: string
