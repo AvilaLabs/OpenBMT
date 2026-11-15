@@ -229,7 +229,8 @@ object ProtocolDecoderTest {
         check(alarm.counter.size == 32 && alarm.sale == 7L && alarm.cashier == "Ana" && alarm.recordedSats == 5_000L)
         check(alarm.seenSats == 0L && alarm.firstRead == 1_700_000_000L && alarm.raisedAt == 1_700_090_000L)
         check(paid.arrived[0].sale == 8L && paid.arrived[0].clearedAt == 3L && paid.waiting[0].recordedSats == 900L && paid.notCheckableMore == 12L)
-        val unkept = decodeResponse(header(0, Writer().bool(false).bool(false).u32(0).u32(0).u32(0).u32(0).u32(0).u32(0).toByteArray())).paidCheck()
+        check(alarm.known && paid.logFull.size == 1 && paid.logFull[0].sale == 10L && paid.logFullMore == 3L)
+        val unkept = decodeResponse(header(0, Writer().bool(false).bool(false).u32(0).u32(0).u32(0).u32(0).u32(0).u32(0).u32(0).u32(0).toByteArray())).paidCheck()
         check(!unkept.kept && !unkept.full && unkept.unreadable.isEmpty() && unkept.alarms.isEmpty() && unkept.notCheckableMore == 0L)
         rejects("a flag that is not 0 or 1") { decodeResponse(header(0, Writer().u8(2).u32(0).u32(0).u32(0).u32(0).u32(0).toByteArray())).paidCheck() }
         val days = decodeResponse(header(0, Writer().u32(1).bytes(ByteArray(32) { 3 }).u32(4).u64(9_000).u32(2).u32(1).u32(0).u32(1).u64(7_000).bool(true).toByteArray())).let { r -> r.list { r.paidDay() } }
@@ -1045,11 +1046,14 @@ object ProtocolDecoderTest {
     private fun paidCheckFrame(): ByteArray {
         val line = { sale: Long -> Writer().bytes(ByteArray(32) { 2 }).u32(sale).u64(900).u64(1_700_000_000).toByteArray() }
         val out = ByteArrayOutputStream()
-        out.write(Writer().bool(true).bool(true).u32(1).bytes(ByteArray(32) { 4 }).u32(1).bytes(ByteArray(32) { 2 }).u32(7).string("Ana").u64(5_000).u64(0).u64(1_700_000_000).u64(1_700_090_000).toByteArray())
+        out.write(Writer().bool(true).bool(true).u32(1).bytes(ByteArray(32) { 4 }).u32(1).bytes(ByteArray(32) { 2 }).u32(7).string("Ana").u64(5_000).u64(0).u64(1_700_000_000).u64(1_700_090_000).bool(true).toByteArray())
         out.write(Writer().u32(1).bytes(ByteArray(32) { 2 }).u32(8).u64(3).toByteArray())
         out.write(Writer().u32(1).toByteArray())
         out.write(line(9))
         out.write(Writer().u32(0).u32(12).toByteArray())
+        out.write(Writer().u32(1).toByteArray())
+        out.write(line(10))
+        out.write(Writer().u32(3).toByteArray())
         return header(0, out.toByteArray())
     }
 
