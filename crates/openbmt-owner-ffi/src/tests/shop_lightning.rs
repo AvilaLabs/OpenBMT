@@ -483,3 +483,61 @@ fn the_request_of_a_turn_on_is_the_bytes_the_kotlin_harness_writes() {
     .put(&mut remove);
     assert_eq!(remove, [vec![2], vec![0; 7]].concat());
 }
+
+/// A node with a link to the test counter, whose settings in force name the
+/// test counter and a Box.
+fn held_with_link() -> (Rig, u64) {
+    let rig = Rig::new();
+    let mut config = start_config(rig.dir().to_str().expect("UTF-8"));
+    config.link = Some(crate::LinkConfig {
+        route: crate::RouteView::Direct {
+            addr: "127.0.0.1:9".to_string(),
+        },
+        relay_key: id(0x41).device_id().to_bytes().to_vec(),
+        counters: vec![counter_bytes()],
+        heartbeat_every_secs: 60,
+        check_in_grace_secs: 3_600,
+    });
+    let handle = Rd::ok(&rig.call(1, 0, &W::new().start(&config).0)).u64();
+    rig.send(vec![peers_event()]);
+    rig.pump(handle);
+    let mut settings = Settings::defaults(1_000);
+    settings.devices.insert(counter());
+    settings.counters.insert(counter(), 10_000);
+    settings.devices.insert(boxed());
+    settings.boxes.insert(boxed());
+    let signed = SignedSettings {
+        owner_sig: settings.sign(&id(0x11)),
+        approver_sig: None,
+        settings,
+    };
+    Rd::ok(&rig.call(46, handle, &W::new().bytes(&signed.to_bytes()).0));
+    approve(&rig, handle, 1);
+    (rig, handle)
+}
+
+fn lightning_counters_file(rig: &Rig) -> Option<Vec<openbmt_core::identity::DeviceId>> {
+    let bytes = std::fs::read(rig.dir().join("lightning-counters.bin")).ok()?;
+    Some(openbmt_owner_node::LightningCounters::from_bytes(&bytes).expect("it reads"))
+}
+
+#[test]
+fn oc_60_a_lightning_counter_is_kept_the_moment_its_settings_come_in_force_and_stays_when_they_go()
+{
+    let (rig, handle) = held_with_link();
+    // Not named yet: nothing is kept.
+    Rd::ok(&rig.call(11, handle, &W::new().u64(T0 + 10).0));
+    assert_eq!(lightning_counters_file(&rig), None);
+    // Turned on and approved; the link's turn sees the settings in force.
+    let on = preview(&rig, handle, &Edit::set()).expect("a preview");
+    queue(&rig, handle, &on.settings);
+    approve(&rig, handle, 2);
+    Rd::ok(&rig.call(11, handle, &W::new().u64(T0 + 20).0));
+    assert_eq!(lightning_counters_file(&rig), Some(vec![counter()]));
+    // Turned off before any check ran: the counter is still kept.
+    let off = preview(&rig, handle, &Edit::none(REMOVE)).expect("a preview");
+    assert!(queue(&rig, handle, &off.settings));
+    assert!(!page(&rig, handle).on);
+    Rd::ok(&rig.call(11, handle, &W::new().u64(T0 + 30).0));
+    assert_eq!(lightning_counters_file(&rig), Some(vec![counter()]));
+}

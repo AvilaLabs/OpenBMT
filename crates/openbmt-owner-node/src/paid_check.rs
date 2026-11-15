@@ -441,6 +441,13 @@ impl LightningCounters {
         self.named.contains(counter)
     }
 
+    /// Add the Lightning counter of settings in force, when they name one.
+    pub fn note_settings(&mut self, settings: &Settings) {
+        if let Some(sl) = &settings.shop_lightning {
+            self.note(&sl.counter);
+        }
+    }
+
     /// Add a counter the settings in force name as the Lightning counter.
     /// Nothing is ever taken out. The file is written when the set grew and
     /// can be written; a failed write is tried again at the next call, and the

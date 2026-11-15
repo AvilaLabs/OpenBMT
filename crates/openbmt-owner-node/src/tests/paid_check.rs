@@ -1404,3 +1404,32 @@ fn oc_64_marks_that_stay_over_keep_the_file_and_report_full() {
         before
     );
 }
+
+fn settings_naming(counter: Option<DeviceId>) -> openbmt_core::settings::Settings {
+    let mut s = openbmt_core::settings::Settings::defaults(1_000);
+    s.shop_lightning = counter.map(|counter| openbmt_core::settings::ShopLightning {
+        counter,
+        node_id: [2; 33],
+        second_device: id(9).device_id(),
+        provider_node_id: [3; 33],
+        provider_addr: "203.0.113.7:9735".parse().unwrap(),
+        cap_sats: 1,
+        max_opening_fee_sats: 1,
+    });
+    s
+}
+
+#[test]
+fn oc_60_settings_in_force_add_their_lightning_counter_and_later_settings_take_none_out() {
+    let dir = Dir::new();
+    let mut set = LightningCounters::open(dir.path());
+    // Settings that name no Lightning counter add nothing.
+    set.note_settings(&settings_naming(None));
+    assert!(!dir.path().join(LIGHTNING_COUNTERS_FILE).exists());
+    // Named, then moved, then removed, with no check between: both stay.
+    set.note_settings(&settings_naming(Some(counter())));
+    set.note_settings(&settings_naming(Some(other_counter())));
+    set.note_settings(&settings_naming(None));
+    let reopened = LightningCounters::open(dir.path());
+    assert!(reopened.contains(&counter()) && reopened.contains(&other_counter()));
+}

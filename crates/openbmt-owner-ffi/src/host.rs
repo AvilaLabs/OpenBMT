@@ -530,18 +530,21 @@ fn paid_run(
         paid,
         paid_unreadable,
         lightning_named,
+        own,
+        dir,
         ..
     } = st;
     let link = link.as_mut()?;
     // OC-60: the Lightning counter of the settings in force, now, is kept.
-    if let Some(counter) = node
-        .owner()
-        .known_settings()
-        .and_then(StoreParties::from_settings)
-        .map(|p| p.counter)
-        .or_else(|| link.shop_lightning_counter())
-    {
-        lightning_named.note(&counter);
+    if let Some(settings) = node.owner().known_settings() {
+        lightning_named.note_settings(settings);
+    }
+    // A shop with its own wallet keeps its settings in the own shop.
+    if let (Some(own), Ok(identity)) = (own.as_ref(), node.owner_identity()) {
+        let _ = own::turn_on_shop(dir, identity, own.wallet.clone(), |shop| {
+            note_own_lightning(shop, lightning_named);
+            Ok(())
+        });
     }
     let found = gate_open_alarms(paid_sales(link, lightning_named), paid.marks());
     let tip = node.watcher().chain().tip_height();
@@ -824,10 +827,17 @@ fn start_link(
 /// settings waiting in the outbox, are the ones the link talks to. A counter
 /// the settings added is talked to at once; one they removed stays until it
 /// holds the settings that removed it.
+///
+/// OC-60: the Lightning counter the settings in force name is added to
+/// `lightning` the moment they are seen in force.
 fn follow_settings(
     node: &OwnerNode<Port>,
     link: &mut OwnerLink,
+    lightning: &mut LightningCounters,
 ) -> Result<(), openbmt_owner_node::OwnerLinkError> {
+    if let Some(settings) = node.owner().known_settings() {
+        lightning.note_settings(settings);
+    }
     let mut counters: Vec<DeviceId> = Vec::new();
     let mut boxes: Vec<DeviceId> = Vec::new();
     let waiting = node.owner().outbox().iter().filter_map(|d| match &d.what {
@@ -865,6 +875,14 @@ fn follow_settings(
     link.follow(&counters, &boxes)
 }
 
+/// OC-60: the Lightning counter of the settings in force of a shop with its
+/// own wallet is added to `lightning`.
+fn note_own_lightning(shop: &openbmt_owner_node::OwnNode, lightning: &mut LightningCounters) {
+    if let Some(signed) = shop.shop().known_settings() {
+        lightning.note_settings(&signed.settings);
+    }
+}
+
 /// The link's turn for a shop with its own wallet: the step, then the owner
 /// node's turn on the shop (OA-112): the live watch follows the book, a
 /// counter running low is given its next range, and the settings in force
@@ -875,6 +893,7 @@ fn own_link_step(
     link: &mut OwnerLink,
     own: &mut OwnShop,
     dir: &std::path::Path,
+    lightning: &mut LightningCounters,
     now: u64,
 ) -> Result<LinkStepView, AppError> {
     link.step(node.watcher_mut(), now);
@@ -892,6 +911,7 @@ fn own_link_step(
     let carried = &mut own.carried;
     let waiting_given = &mut own.waiting_given;
     let turn = own::turn_on_shop(dir, identity, own.wallet.clone(), |shop| {
+        note_own_lightning(shop, lightning);
         shop.tick(node, link, carried, waiting_given, now)
     })
     .map_err(own::node_error)?;
@@ -1211,7 +1231,8 @@ fn build(req: StartConfig, spawn: Spawn, clock: &Arc<AtomicU64>) -> Result<State
             // A shop with its own wallet follows the counters of its own
             // settings, on each turn of the link (OA-112).
             if own_wallet.is_none() {
-                follow_settings(&node, link).map_err(|e| store_by("start-link-files", e))?;
+                follow_settings(&node, link, &mut LightningCounters::open(&dir))
+                    .map_err(|e| store_by("start-link-files", e))?;
             }
         }
         Ok((key1, link, relay, intake))
@@ -1428,15 +1449,16 @@ impl Entry {
                 intake,
                 own,
                 dir,
+                lightning_named,
                 ..
             } = st;
             let link = link
                 .as_mut()
                 .ok_or_else(|| wrong_state("link-none", "the node was started without a link"))?;
             if let Some(own) = own.as_mut() {
-                return own_link_step(node, link, own, dir, now);
+                return own_link_step(node, link, own, dir, lightning_named, now);
             }
-            let followed = follow_settings(node, link);
+            let followed = follow_settings(node, link, lightning_named);
             link.step(node.watcher_mut(), now);
             let done = node
                 .run_refund_intake(intake, link)
@@ -2289,7 +2311,11 @@ impl Entry {
     pub(crate) fn deliver(&self, now: u64) -> Result<DeliverView, AppError> {
         self.run(Some(now), move |st| {
             let State {
-                node, link, own, ..
+                node,
+                link,
+                own,
+                lightning_named,
+                ..
             } = st;
             let link = link
                 .as_mut()
@@ -2313,7 +2339,7 @@ impl Entry {
                 .map(|d| d.id)
                 .collect();
             link.settings_pending(&pending);
-            if let Err(e) = follow_settings(node, link) {
+            if let Err(e) = follow_settings(node, link, lightning_named) {
                 view.notes.push(format!("the link's counters: {e}"));
             }
             let items: Vec<(u32, Delivery)> = node
