@@ -1097,14 +1097,11 @@ const HEARTBEAT: Signed = Signed {
     ),
 };
 
-// TODO_WORDS_HEARTBEAT_TOO_FAR: heading, what happened and what to do, for a
-// check-in whose number is more than 2^32 above the last one taken (CR-54).
-// The text here only stands in so that the screen checker passes; the owner
-// of the words replaces it.
-const TODO_WORDS_HEARTBEAT_TOO_FAR: (&str, &str, &str) = (
-    "Check-in number too high",
-    "The check-in's number is far above the last one this counter took, so it was not taken.",
-    "Nothing to do. The phone sends a new check-in by itself.",
+/// A check-in whose number is more than 2^32 above the last one taken (CR-54).
+const HEARTBEAT_TOO_FAR: (&str, &str, &str) = (
+    "Check-in not taken",
+    "Its number is far above the last check-in this counter took, so it was not taken.",
+    "Nothing to do. The owner's phone sends a new check-in by itself.",
 );
 
 /// The words for the owner's signed message, by the three causes the
@@ -1167,10 +1164,10 @@ impl<E: Display> HeartbeatRefused<E> {
     pub fn words(&self) -> Words {
         match self {
             Self::Refused(e @ HeartbeatError::TooFarAhead { .. }) => refused(
-                TODO_WORDS_HEARTBEAT_TOO_FAR.0,
-                TODO_WORDS_HEARTBEAT_TOO_FAR.1,
+                HEARTBEAT_TOO_FAR.0,
+                HEARTBEAT_TOO_FAR.1,
                 Who::Owner,
-                TODO_WORDS_HEARTBEAT_TOO_FAR.2,
+                HEARTBEAT_TOO_FAR.2,
                 "CR-54",
             )
             .detail(e.to_string()),

@@ -488,12 +488,13 @@ says so when one is missing.
   of their own: read back with no byte left over, every bound checked, and
   refused if writing them again would give other bytes. At most 65,536 marks
   are kept; the oldest cleared marks go first, then the newest marks of sales
-  still waiting, and an alarm not cleared is never dropped (with at most 64
-  counters of at most 256 alarms each, the alarms always fit). The marks also
-  keep, for each sale not yet checked, the time the owner phone first read its
-  Paid (OC-61). When the marks are full, or the file does not read back, the
-  check still runs and shows what it finds, and an alarm says that it cannot
-  keep its marks, until the owner clears them; the node still starts.
+  still waiting, and an alarm not cleared is never dropped: when alarms alone
+  fill the marks, the file is kept as it was and the marks count as full. The
+  marks also keep, for each sale not yet checked, the time the owner phone
+  first read its Paid (OC-61). When the marks are full, or the file does not
+  read back, the check still runs and shows what it finds, and an alarm says
+  that it cannot keep its marks, until the owner clears them; the node still
+  starts.
 - **OC-65.** Tests. A counter record of a Paid with no receipt raises the
   alarm after the wait and not before; a payment arriving later clears it; a
   partial payment within the tolerance is not a mismatch and one outside it
