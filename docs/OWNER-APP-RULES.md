@@ -1121,6 +1121,10 @@ specification, written before the code.
 - **OA-123.** Every state and refusal of this section has words under
   `docs/SCREEN-RULES.md`, checked as every other words are.
 
+### 19a. A counter on the owner's own phone
+
+These rules go with `docs/COUNTER-RULES.md` §23a and section 17.
+
 - **OA-124.** For a shop on its own wallet or the starter wallet, the counter
   step also offers "Use this phone as the counter too". The owner app looks
   for the package `org.openbmt.counter.app` and checks that its signing
