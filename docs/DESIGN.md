@@ -217,10 +217,14 @@ Nobody has to open either.
     the owner phone, or, for someone who sells alone, "Use this phone as
     the counter too" **[to build]**. The counter then shows its line,
     large. "How this works": a stolen counter cannot take any money, and
-    shows the shop's past payments to whoever opens it; a tampered counter
-    could show a false Paid, so the owner phone checks every Paid against
-    the payments it sees itself and raises the alarm when one is missing
-    (§2.7, `docs/OWNER-COINS-RULES.md` OC-60 to OC-63). Then the steps for
+    shows the shop's past payments to whoever opens it; a counter fed a
+    false picture of the network could show a false Paid, so the owner
+    phone checks every Paid against the payments it sees itself and raises
+    the alarm when one is missing (§2.7, `docs/OWNER-COINS-RULES.md` OC-60
+    to OC-63). A counter whose software was changed can also leave a sale
+    out of its records; that shows as a sale in the till with no sale on
+    the owner phone, which is why the day summary lists each counter's
+    sales and totals. Then the steps for
     the chosen till, with a cue card for staff to print.
 12. **Instant payments.** Two sentences and one choice: "Small payments
     count at once. Bigger ones wait about ten minutes, until the payment is

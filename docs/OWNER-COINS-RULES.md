@@ -445,8 +445,11 @@ says so when one is missing.
   payments and surplus explain it (OC-15). A sale paid over the shop's own
   Lightning node has no payment to its address, and nothing on the owner phone
   checks it; its limits are those of Shop Lightning
-  (`docs/SHOP-LIGHTNING-RULES.md`). Nor does this check a manager's override,
-  which is recorded and alarmed as CR-20 says.
+  (`docs/SHOP-LIGHTNING-RULES.md`). That holds only for a counter that
+  settings the owner phone signed have named as the shop's Lightning counter
+  (SL-70): a Lightning payment recorded by any other counter is a mismatch at
+  once, with nothing seen. Nor does this check a manager's override, which is
+  recorded and alarmed as CR-20 says.
 - **OC-61.** When. The wait runs on the owner phone's clock, from the first
   time the owner phone read the Paid in the counter's records; the time the
   counter wrote in it is not used, nor for the day of OC-63. A sale whose Paid
@@ -461,7 +464,10 @@ says so when one is missing.
   a mismatch at once, with nothing seen: no payment there is the shop's. A
   counter whose records do not read as sales is checked no further and raises
   its own alarm, that its payments cannot be checked; every other counter is
-  still checked. The check runs each time the owner's view checks a new tip,
+  still checked. So is a counter with more than 256 alarms not cleared: its
+  alarms stay, no more are raised for it, and it is checked no further until
+  the owner clears them, so that one counter cannot fill the marks of OC-64
+  for the others. The check runs each time the owner's view checks a new tip,
   and when the app starts, and a run that failed is tried again at the next.
 - **OC-62.** The mismatch. The owner phone raises an alarm, as it raises a
   cancel (DESIGN §2.7), so that it reaches the owner without the owner looking
@@ -481,12 +487,13 @@ says so when one is missing.
   time cleared) are kept in the owner node's durable writes, in a strict frame
   of their own: read back with no byte left over, every bound checked, and
   refused if writing them again would give other bytes. At most 65,536 marks
-  are kept; the oldest cleared marks go first, and a mark not cleared is never
-  dropped. The marks also keep, for each sale not yet checked, the time the
-  owner phone first read its Paid (OC-61). When the marks are full, or the
-  file does not read back, the check still runs and shows what it finds, and
-  an alarm says that it cannot keep its marks, until the owner clears them;
-  the node still starts.
+  are kept; the oldest cleared marks go first, then the newest marks of sales
+  still waiting, and an alarm not cleared is never dropped (with at most 64
+  counters of at most 256 alarms each, the alarms always fit). The marks also
+  keep, for each sale not yet checked, the time the owner phone first read its
+  Paid (OC-61). When the marks are full, or the file does not read back, the
+  check still runs and shows what it finds, and an alarm says that it cannot
+  keep its marks, until the owner clears them; the node still starts.
 - **OC-65.** Tests. A counter record of a Paid with no receipt raises the
   alarm after the wait and not before; a payment arriving later clears it; a
   partial payment within the tolerance is not a mismatch and one outside it

@@ -286,7 +286,10 @@ from the owner's device to the counter is not part of these rules.
 - **CR-54.** The last number taken is stored before the heartbeat counts. If
   the store fails, it does not count and its number is not used up. After a
   restart the counter has no verified heartbeat until a new one comes, and
-  the stored number refuses replays.
+  the stored number refuses replays. A heartbeat whose number is more than
+  2^32 above the last one taken is refused and uses up nothing, as a link
+  message's number is (`MAX_NUMBER_JUMP`), so that no one signature can make
+  every later heartbeat stale.
 - **CR-55.** Nothing but an owner-signed heartbeat, or one signed by the
   watch key of the settings in force (CR-186), counts: not the Box's
   "paid" notice, and not a signature of the approver root.
