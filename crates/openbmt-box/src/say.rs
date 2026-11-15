@@ -175,6 +175,8 @@ pub enum PageAnswer {
     InvitationHeld,
     /// A form was posted from another site, or from none the Box can tell.
     NotFromThisPage,
+    /// A form was posted with a setup code that is not the Box's (BX-62).
+    SetupWrong,
 }
 
 impl PageAnswer {
@@ -199,6 +201,13 @@ impl PageAnswer {
                 "Open this page in the browser again and type the invitation in the box on it.",
             )
             .code("BX-58"),
+            Self::SetupWrong => stop(
+                "Setup code wrong",
+                "The setup code does not match the one in this Box's log.".into(),
+                Who::BoxKeeper,
+                "Wait ten seconds, then type the code from the log again.",
+            )
+            .code("BX-62"),
         }
     }
 }
@@ -1840,6 +1849,7 @@ pub fn all_words() -> Vec<(String, Words)> {
         "PageAnswer::NotFromThisPage",
         PageAnswer::NotFromThisPage.words(),
     );
+    add("PageAnswer::SetupWrong", PageAnswer::SetupWrong.words());
     add(
         "BoxStatus::TurnedOff and BoxError::TurnedOff and NoteKind::TurnedOff",
         BoxStatus::TurnedOff.words(),

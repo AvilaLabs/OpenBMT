@@ -50,9 +50,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_fifty_seven_rules() {
+fn the_rules_file_defines_fifty_eight_rules() {
     let all = all_rules();
-    assert_eq!(all.len(), 57);
+    assert_eq!(all.len(), 58);
     assert!(all.contains("BX-01") && all.contains("BX-43") && all.contains("BX-80"));
     assert!(all.contains("BX-90") && all.contains("BX-95"));
 }
@@ -85,7 +85,7 @@ fn section_four_has_its_ten_rules_and_each_has_tests() {
 }
 
 #[test]
-fn section_five_b_has_its_eight_rules_and_each_has_tests() {
+fn section_five_b_has_its_nine_rules_and_each_has_tests() {
     let start = RULES.find("## 5b.").unwrap();
     let end = RULES.find("## 5c.").unwrap();
     let section: BTreeSet<String> = RULES[start..end]
@@ -93,7 +93,7 @@ fn section_five_b_has_its_eight_rules_and_each_has_tests() {
         .filter_map(|l| l.strip_prefix("- **BX-"))
         .map(|rest| format!("BX-{}", &rest[..2]))
         .collect();
-    let expected: BTreeSet<String> = (54..=61).map(|n| format!("BX-{n}")).collect();
+    let expected: BTreeSet<String> = (54..=62).map(|n| format!("BX-{n}")).collect();
     assert_eq!(section, expected);
     let sources: String = TEST_SOURCES.concat();
     for id in &expected {

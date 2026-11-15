@@ -46,7 +46,7 @@ Box's Dockerfile from this folder.
 - **Interfaces.** Two. `box` is a raw TCP interface on port 8986: no proxy,
   no TLS wrapper, using the port binding's `ssl: false` setting. The Box's
   link seals and authenticates its messages itself. `page` is a `ui` interface for the
-  Box's own status page (port 8987, protocol `http`, BX-54 to BX-61): StartOS
+  Box's own status page (port 8987, protocol `http`, BX-54 to BX-62): StartOS
   serves it over HTTP and HTTPS on the addresses the user enables, and it
   opens from the service's page. It shows the Box's state in words and, while
   the Box waits, takes the invitation. StartOS shows the LAN addresses of

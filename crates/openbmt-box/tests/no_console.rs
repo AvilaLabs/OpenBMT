@@ -151,8 +151,9 @@ fn command() -> Command {
     Command::new(env!("CARGO_BIN_EXE_openbmt-box"))
 }
 
-/// The Box with its status page on `127.0.0.1:0`; its address as printed.
-fn start_with_page(dir: &Path) -> (Child, String) {
+/// The Box with its status page on `127.0.0.1:0`; its address as printed,
+/// the setup code as printed, and the line printed after the page's address.
+fn start_with_page_and_code(dir: &Path) -> (Child, String, String, String) {
     let mut child = command()
         .arg(dir)
         .arg("127.0.0.1:0")
@@ -166,6 +167,9 @@ fn start_with_page(dir: &Path) -> (Child, String) {
         .unwrap();
     let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
     let mut page = String::new();
+    let mut code = String::new();
+    let mut after = String::new();
+    let mut previous = String::new();
     loop {
         let line = lines
             .next()
@@ -174,12 +178,23 @@ fn start_with_page(dir: &Path) -> (Child, String) {
         if let Some(addr) = line.strip_prefix("status page: ") {
             page = addr.to_string();
         }
+        if let Some(text) = line.strip_prefix("setup code: ") {
+            code = text.to_string();
+            after = previous.clone();
+        }
         if line.starts_with("state: ") {
             break;
         }
+        previous = line;
     }
     // Keep the pipe open and drained so the Box never blocks on it.
     std::thread::spawn(move || for _ in lines {});
+    (child, page, code, after)
+}
+
+/// The Box with its status page on `127.0.0.1:0`; its address as printed.
+fn start_with_page(dir: &Path) -> (Child, String) {
+    let (child, page, _, _) = start_with_page_and_code(dir);
     (child, page)
 }
 
@@ -200,6 +215,40 @@ fn bx_61_a_box_started_with_a_status_page_address_serves_it() {
     let answer = fetch(&page);
     assert!(answer.starts_with("HTTP/1.1 200 "), "{answer}");
     assert!(answer.contains("Waiting for an invitation"));
+    kill(child);
+}
+
+#[test]
+fn bx_62_the_setup_code_is_printed_after_the_pages_address_and_takes_an_invitation() {
+    let dir = Dir::new("setupcode");
+    let (child, page, code, before) = start_with_page_and_code(&dir.0);
+    assert!(before.starts_with("status page: "), "{before}");
+    let bytes = code.as_bytes();
+    assert_eq!(bytes.len(), 9, "{code}");
+    assert_eq!(bytes.get(4), Some(&b'-'), "{code}");
+    // Never on the page.
+    let answer = fetch(&page);
+    assert!(answer.contains("Setup code"), "the field is there");
+    assert!(!answer.contains(&code));
+    // The code takes an invitation from the page; another does not.
+    let post = |setup: &str| {
+        let body = format!("setup={setup}&invitation=x");
+        let mut s = std::net::TcpStream::connect(&page).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        write!(
+            s,
+            "POST /invitation HTTP/1.1\r\nHost: {page}\r\nOrigin: http://{page}\r\n\
+             Content-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+        let mut out = String::new();
+        let _ = s.read_to_string(&mut out);
+        out
+    };
+    assert!(post("0000-0000").starts_with("HTTP/1.1 403 "));
+    // Inside the hold, the right code is refused as well.
+    assert!(post(&code).starts_with("HTTP/1.1 403 "));
     kill(child);
 }
 

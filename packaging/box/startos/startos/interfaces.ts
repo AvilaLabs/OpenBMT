@@ -27,7 +27,7 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
     query: {},
   })
 
-  // The Box's status page (BX-54 to BX-61): plain HTTP inside, served by
+  // The Box's status page (BX-54 to BX-62): plain HTTP inside, served by
   // StartOS over HTTP and HTTPS on the addresses the user enables. It shows
   // the Box's state and takes the invitation.
   const pageMulti = sdk.MultiHost.of(effects, 'page-multi')

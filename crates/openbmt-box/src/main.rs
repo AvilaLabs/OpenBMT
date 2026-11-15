@@ -27,7 +27,9 @@
 //!
 //! With `--status-page` the Box also serves a web page on that address: its
 //! state in words and a box for the invitation while it waits for one
-//! (BX-54 to BX-61). The page is off without the argument.
+//! (BX-54 to BX-62). While the Box is not paired it prints a setup code
+//! after the page's address, which the page asks for with the invitation. The
+//! page is off without the argument.
 //!
 //! With `--till-listen` the Box also takes sale requests from a till on that
 //! address, as JSON over plain HTTP, each with a token made from the
@@ -190,7 +192,12 @@ fn main() -> ExitCode {
     say(&format!("listening: {}", runner.local_addr()));
     if let Some(addr) = page_addr {
         match runner.serve_status_page(addr, PageConfig::default()) {
-            Ok(bound) => say(&format!("status page: {bound}")),
+            Ok(bound) => {
+                say(&format!("status page: {bound}"));
+                if let Some(code) = runner.setup_code() {
+                    say(&format!("setup code: {code}"));
+                }
+            }
             Err(e) => {
                 complain(render(&e.words()));
                 return ExitCode::FAILURE;

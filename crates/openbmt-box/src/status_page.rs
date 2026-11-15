@@ -1,4 +1,4 @@
-//! The Box's status page (BX-54 to BX-61): a small web page on its own
+//! The Box's status page (BX-54 to BX-62): a small web page on its own
 //! listener, off unless the Box is given an address for it.
 //!
 //! The page is plain HTTP/1.1 written by hand with the standard library
@@ -15,14 +15,16 @@
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use openbmt_core::say::{Tone, Words};
+use openbmt_link::os_random;
 
 use crate::say::{ConsoleAnswer, PageAnswer};
 use crate::state::{BoxError, BoxStatus};
+use crate::till::same_bytes;
 
 /// Most bytes of the request line and the headers (BX-54).
 pub const MAX_HEAD: usize = 8 * 1024;
@@ -36,10 +38,101 @@ pub const READ_SECS: u64 = 5;
 pub const WRITE_SECS: u64 = 5;
 /// The name of the form field that holds the invitation (BX-57).
 pub const FIELD: &str = "invitation";
+/// The name of the form field that holds the setup code (BX-57, BX-62).
+pub const SETUP_FIELD: &str = "setup";
+/// Seconds the page refuses every invitation after a wrong setup code
+/// (BX-57).
+pub const SETUP_REFUSE_SECS: u64 = 10;
+/// The characters of a setup code: Crockford base32, with no I, L, O or U
+/// (BX-62).
+const CROCKFORD: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 /// The most headers a request may have.
 const MAX_HEADERS: usize = 64;
 /// How often a waiting thread looks at the stop flag.
 const POLL: Duration = Duration::from_millis(50);
+
+/// The setup code of BX-62: eight characters of Crockford base32, kept in
+/// memory only, and the time the page refuses invitations until after a
+/// wrong one (BX-57).
+#[derive(Debug)]
+pub struct SetupCode {
+    chars: [u8; 8],
+    hold: Duration,
+    refused_until: Mutex<Option<Instant>>,
+}
+
+impl SetupCode {
+    /// Draw a code from the system's random source; `None` if it gives none.
+    pub fn draw() -> Option<Self> {
+        let mut random = [0u8; 32];
+        os_random(&mut random).ok()?;
+        let mut chars = [0u8; 8];
+        for (to, from) in chars.iter_mut().zip(random) {
+            // 32 divides 256, so every character is as likely as another.
+            *to = *CROCKFORD.get(usize::from(from & 31))?;
+        }
+        Some(Self::with_chars(chars))
+    }
+
+    /// A code of these characters, refusing for [`SETUP_REFUSE_SECS`] after a
+    /// wrong one.
+    pub fn with_chars(chars: [u8; 8]) -> Self {
+        Self {
+            chars,
+            hold: Duration::from_secs(SETUP_REFUSE_SECS),
+            refused_until: Mutex::new(None),
+        }
+    }
+
+    /// The same code with another time of refusal, for a test.
+    pub fn with_hold(mut self, hold: Duration) -> Self {
+        self.hold = hold;
+        self
+    }
+
+    /// The code as shown: two groups of four (BX-62).
+    pub fn shown(&self) -> String {
+        let (a, b) = self.chars.split_at(4);
+        format!(
+            "{}-{}",
+            String::from_utf8_lossy(a),
+            String::from_utf8_lossy(b)
+        )
+    }
+
+    /// BX-57: whether `given` is the code, with or without the dash and
+    /// without regard to case. A wrong or missing code makes the page refuse
+    /// every invitation for [`SETUP_REFUSE_SECS`], the right code included.
+    pub fn check(&self, given: Option<&str>) -> bool {
+        let mut until = self
+            .refused_until
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let now = Instant::now();
+        if until.is_some_and(|t| now < t) {
+            return false;
+        }
+        if self.matches(given.unwrap_or("")) {
+            return true;
+        }
+        *until = Some(now + self.hold);
+        false
+    }
+
+    /// The comparison, in constant time for text of the length of a code.
+    fn matches(&self, given: &str) -> bool {
+        let given = given.trim().to_ascii_uppercase();
+        let bytes = given.as_bytes();
+        let bare: Vec<u8> = match bytes.len() {
+            8 => bytes.to_vec(),
+            9 if bytes.get(4) == Some(&b'-') => {
+                bytes.iter().copied().filter(|&b| b != b'-').collect()
+            }
+            _ => return false,
+        };
+        same_bytes(&bare, &self.chars)
+    }
+}
 
 /// The limits of a page. The defaults are the ones in the rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -400,7 +493,12 @@ pub struct PageView {
     pub last_note: Option<Words>,
     /// The store of Shop Lightning's state is full (BX-92).
     pub store_full: bool,
+    /// The page asks for a setup code with an invitation (BX-62).
+    pub setup: bool,
 }
+
+/// What the page says beside the setup code's field (BX-62).
+const SETUP_HELP: &str = "Find the setup code in this Box's log on the host system, after the line that starts with status page.";
 
 /// The words of a full store (BX-92).
 pub fn store_full_words() -> Words {
@@ -431,6 +529,11 @@ pub trait PageBackend: Send + Sync + 'static {
     fn view(&self) -> PageView;
     /// Take an invitation, only while the Box is waiting for one (BX-57).
     fn enter_invitation(&self, text: &str) -> Entered;
+    /// The setup code a posted invitation must come with, if the page asks
+    /// for one (BX-62).
+    fn setup_code(&self) -> Option<&SetupCode> {
+        None
+    }
 }
 
 fn escape(text: &str) -> String {
@@ -523,8 +626,19 @@ pub fn render_home(view: &PageView, host: &str, outcome: Option<&Words>) -> Stri
         out.push_str(&words_section(&store_full_words()));
     }
     if view.status == BoxStatus::Unpaired {
+        let setup = if view.setup {
+            format!(
+                "<label for=\"setup\">Setup code</label>\
+                 <input id=\"setup\" type=\"text\" name=\"{SETUP_FIELD}\" required maxlength=\"16\" \
+                 autocomplete=\"off\" autocapitalize=\"characters\" spellcheck=\"false\">\
+                 <p>{}</p>",
+                escape(SETUP_HELP)
+            )
+        } else {
+            String::new()
+        };
         out.push_str(&format!(
-            "<form method=\"post\" action=\"/invitation\">\
+            "<form method=\"post\" action=\"/invitation\">{setup}\
              <label for=\"inv\">Invitation from the Key app</label>\
              <input id=\"inv\" type=\"text\" name=\"{FIELD}\" required maxlength=\"64\" \
              autocomplete=\"off\" autocapitalize=\"characters\" spellcheck=\"false\">\
@@ -632,6 +746,19 @@ pub fn answer(backend: &dyn PageBackend, request: &Request) -> Vec<u8> {
                     403,
                     &render_home(&backend.view(), &request.host, Some(&words)),
                 );
+            }
+            if let Some(code) = backend.setup_code() {
+                let given = match form_field(&request.body, SETUP_FIELD) {
+                    Ok(given) => given,
+                    Err(BadForm) => return refusal_response(Refusal::BadRequest),
+                };
+                if !code.check(given.as_deref()) {
+                    let words = PageAnswer::SetupWrong.words();
+                    return html(
+                        403,
+                        &render_home(&backend.view(), &request.host, Some(&words)),
+                    );
+                }
             }
             let text = match form_field(&request.body, FIELD) {
                 Ok(text) => text.unwrap_or_default(),

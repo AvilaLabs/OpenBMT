@@ -222,7 +222,7 @@ pub fn unhex<const N: usize>(text: &str) -> Option<[u8; N]> {
 
 /// Whether two byte strings are equal, taking the same time for any two of
 /// the same length.
-fn same_bytes(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn same_bytes(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
 }
 

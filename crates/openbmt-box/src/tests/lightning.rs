@@ -802,6 +802,7 @@ fn bx_92_the_status_page_shows_the_full_store_and_otherwise_nothing() {
         shop: Some(roots().owner.fingerprint_words()),
         last_note: None,
         store_full,
+        setup: false,
     };
     let words = store_full_words();
     assert_eq!(openbmt_core::say::check(&words), Ok(()));

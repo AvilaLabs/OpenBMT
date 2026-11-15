@@ -55,7 +55,7 @@ use crate::pos::{BoxPos, PosOpenError, PosSetup, PosState};
 use crate::pos_config::{PosConfig, PosConfigError, POS_CONFIG_FILE};
 use crate::say::note_words;
 use crate::state::{BoxCore, BoxError, BoxStatus};
-use crate::status_page::{Entered, PageBackend, PageConfig, PageView, StatusPage};
+use crate::status_page::{Entered, PageBackend, PageConfig, PageView, SetupCode, StatusPage};
 use crate::till::{
     check_till_key, clean_reference, find_counter, make_till_key, parse_amount, KeyCheck, NewSale,
     SaleInfo, TillRefusal, TillTable, TILL_KEY_FILE,
@@ -306,9 +306,14 @@ struct PageHandles {
     clock: Arc<dyn Clock + Send + Sync>,
     notes: Notes,
     relay_port: u16,
+    setup: Option<Arc<SetupCode>>,
 }
 
 impl PageBackend for PageHandles {
+    fn setup_code(&self) -> Option<&SetupCode> {
+        self.setup.as_deref()
+    }
+
     fn view(&self) -> PageView {
         let (status, shop, devices) = {
             let mut core = lock(&self.core);
@@ -332,6 +337,7 @@ impl PageBackend for PageHandles {
             shop,
             last_note,
             store_full: lock(&self.shop).as_ref().is_some_and(ShopStore::is_full),
+            setup: self.setup.is_some(),
         }
     }
 
@@ -800,6 +806,7 @@ pub struct BoxRunner {
     worker: Option<JoinHandle<()>>,
     server: Option<Server>,
     page: Option<StatusPage>,
+    setup: Option<Arc<SetupCode>>,
     till_listener: Option<TillListener>,
     addr: SocketAddr,
     id: DeviceId,
@@ -996,6 +1003,7 @@ impl BoxRunner {
             worker: Some(handle),
             server: Some(server),
             page: None,
+            setup: None,
             till_listener: None,
             addr,
             id,
@@ -1042,13 +1050,22 @@ impl BoxRunner {
     }
 
     /// Serve the status page (BX-54) on `bind`; the address it listens on.
-    /// A second call replaces the first page.
+    /// A Box that is not paired draws a setup code for the page (BX-62). A
+    /// second call replaces the first page and its code.
     pub fn serve_status_page(
         &mut self,
         bind: SocketAddr,
         cfg: PageConfig,
     ) -> Result<SocketAddr, StartFailure> {
         let listener = TcpListener::bind(bind).map_err(StartFailure::Listen)?;
+        let setup = match self.status() {
+            BoxStatus::Unpaired | BoxStatus::InvitationOpen => {
+                Some(Arc::new(SetupCode::draw().ok_or_else(|| {
+                    StartFailure::State(BoxError::NoRandomness)
+                })?))
+            }
+            BoxStatus::Paired | BoxStatus::TurnedOff => None,
+        };
         let backend = Arc::new(PageHandles {
             core: Arc::clone(&self.core),
             relay: Arc::clone(&self.relay),
@@ -1056,11 +1073,19 @@ impl BoxRunner {
             clock: Arc::clone(&self.clock),
             notes: Arc::clone(&self.notes),
             relay_port: self.addr.port(),
+            setup: setup.clone(),
         });
         let page = StatusPage::start(listener, backend, cfg).map_err(StartFailure::Listen)?;
         let addr = page.local_addr();
         self.page = Some(page);
+        self.setup = setup;
         Ok(addr)
+    }
+
+    /// The setup code the status page asks for, as shown, while there is
+    /// one (BX-62).
+    pub fn setup_code(&self) -> Option<String> {
+        self.setup.as_ref().map(|code| code.shown())
     }
 
     /// Serve the till listener (BX-70) on `bind`; the address it listens on.

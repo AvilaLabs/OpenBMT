@@ -4,7 +4,7 @@ import { sdk } from './sdk'
 // The port the Box listens on, inside the container and as published.
 export const boxPort = 8986
 
-// The port of the Box's status page inside the container (BX-54 to BX-61).
+// The port of the Box's status page inside the container (BX-54 to BX-62).
 // StartOS serves it over HTTP and HTTPS as the interface "page".
 export const pagePort = 8987
 

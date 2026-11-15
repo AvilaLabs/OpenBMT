@@ -444,10 +444,15 @@ fn sc_01_no_variant_is_missing() {
     ] {
         need(kind_name(k));
     }
-    for a in [PageAnswer::InvitationHeld, PageAnswer::NotFromThisPage] {
+    for a in [
+        PageAnswer::InvitationHeld,
+        PageAnswer::NotFromThisPage,
+        PageAnswer::SetupWrong,
+    ] {
         need(match a {
             PageAnswer::InvitationHeld => "PageAnswer::InvitationHeld",
             PageAnswer::NotFromThisPage => "PageAnswer::NotFromThisPage",
+            PageAnswer::SetupWrong => "PageAnswer::SetupWrong",
         });
     }
     for w in [

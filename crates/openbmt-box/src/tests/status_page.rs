@@ -15,7 +15,7 @@ use crate::say::{all_words, ConsoleAnswer, PageAnswer};
 use crate::state::{BoxError, BoxStatus};
 use crate::status_page::{
     form_field, parse_request, refusal_response, render_home, same_origin, Entered, PageBackend,
-    PageConfig, PageView, Refusal, Route, StatusPage, MAX_BODY, MAX_HEAD,
+    PageConfig, PageView, Refusal, Route, SetupCode, StatusPage, MAX_BODY, MAX_HEAD,
 };
 use crate::{BoxRunner, KEY_FILE};
 
@@ -272,12 +272,41 @@ fn http(addr: SocketAddr, bytes: &[u8]) -> (u16, String, String) {
     (status, head.to_string(), body.to_string())
 }
 
-fn run_with_page(name: &str, cfg: PageConfig) -> (BoxRunner, SocketAddr, TempDir) {
-    let dir = TempDir::new(name);
-    let (mut r, _) = start(&dir);
+/// The setup code of each page a test started (BX-62), by its address.
+static CODES: Mutex<Vec<(SocketAddr, String)>> = Mutex::new(Vec::new());
+
+/// Serve the status page of `r` on a free port and remember its setup code.
+fn serve_page(r: &mut BoxRunner, cfg: PageConfig) -> SocketAddr {
     let addr = r
         .serve_status_page("127.0.0.1:0".parse().unwrap(), cfg)
         .unwrap();
+    if let Some(code) = r.setup_code() {
+        CODES.lock().unwrap().push((addr, code));
+    }
+    addr
+}
+
+/// The setup code of the page at `addr`, or none for a Box that is paired.
+fn code_of(addr: SocketAddr) -> String {
+    CODES
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|(a, _)| *a == addr)
+        .map(|(_, c)| c.clone())
+        .unwrap_or_default()
+}
+
+/// A form body with the page's setup code and `rest`.
+fn form(addr: SocketAddr, rest: &str) -> String {
+    format!("setup={}&{rest}", code_of(addr))
+}
+
+fn run_with_page(name: &str, cfg: PageConfig) -> (BoxRunner, SocketAddr, TempDir) {
+    let dir = TempDir::new(name);
+    let (mut r, _) = start(&dir);
+    let addr = serve_page(&mut r, cfg);
     (r, addr, dir)
 }
 
@@ -424,6 +453,7 @@ fn view(status: BoxStatus) -> PageView {
             .then(|| roots().owner.fingerprint_words()),
         last_note: None,
         store_full: false,
+        setup: status == BoxStatus::Unpaired,
     }
 }
 
@@ -534,9 +564,7 @@ fn env_version() -> &'static str {
 fn bx_55_the_page_follows_the_state_of_the_box() {
     let dir = TempDir::new("follows");
     let (mut r, clock) = start(&dir);
-    let addr = r
-        .serve_status_page("127.0.0.1:0".parse().unwrap(), PageConfig::default())
-        .unwrap();
+    let addr = serve_page(&mut r, PageConfig::default());
     let page = || http(addr, &get(&host_of(addr))).2;
     assert!(page().contains(&BoxStatus::Unpaired.page_words().heading));
     r.enter_invitation(&invitation(5).to_text()).unwrap();
@@ -578,7 +606,11 @@ fn bx_56_every_answer_carries_the_headers() {
     let (r, addr, _dir) = run_with_page("headers", PageConfig::default());
     let host = host_of(addr);
     let wrong_origin = post(&host, "Origin: http://evil.example\r\n", "invitation=x");
-    let wrong_check = post(&host, &format!("Origin: http://{host}\r\n"), "invitation=x");
+    let wrong_check = post(
+        &host,
+        &format!("Origin: http://{host}\r\n"),
+        &form(addr, "invitation=x"),
+    );
     let cases: Vec<(&str, Vec<u8>)> = vec![
         ("200 home", get(&host)),
         ("400", b"junk\r\n\r\n".to_vec()),
@@ -630,7 +662,7 @@ fn bx_56_a_built_answer_has_the_headers_the_length_and_the_type() {
 
 fn post_invitation(addr: SocketAddr, text: &str) -> (u16, String, String) {
     let host = host_of(addr);
-    let body = format!("invitation={text}");
+    let body = form(addr, &format!("invitation={text}"));
     http(
         addr,
         &post(&host, &format!("Origin: http://{host}\r\n"), &body),
@@ -688,7 +720,11 @@ fn bx_57_wrong_check_characters_are_refused_with_words_and_nothing_changes() {
     let host = host_of(addr);
     let none = http(
         addr,
-        &post(&host, &format!("Origin: http://{host}\r\n"), "other=1"),
+        &post(
+            &host,
+            &format!("Origin: http://{host}\r\n"),
+            &form(addr, "other=1"),
+        ),
     );
     assert_eq!(none.0, 422);
     assert_eq!(r.status(), BoxStatus::Unpaired);
@@ -723,13 +759,247 @@ fn bx_57_a_paired_box_refuses_the_form_with_words() {
 fn bx_57_an_invitation_that_ran_out_lets_the_box_wait_for_another() {
     let dir = TempDir::new("postexpired");
     let (mut r, clock) = start(&dir);
-    let addr = r
-        .serve_status_page("127.0.0.1:0".parse().unwrap(), PageConfig::default())
-        .unwrap();
+    let addr = serve_page(&mut r, PageConfig::default());
     assert_eq!(post_invitation(addr, &invitation(5).to_text()).0, 200);
     clock.advance(1_801);
     // The first ran out and the Box forgot it: another is taken.
     assert_eq!(post_invitation(addr, &invitation(6).to_text()).0, 200);
+    r.stop();
+}
+
+/// A post of `rest` to the page at `addr` with `setup` as its setup code,
+/// from the page's own origin; the status.
+fn post_with_setup(addr: SocketAddr, setup: Option<&str>, rest: &str) -> (u16, String) {
+    let host = host_of(addr);
+    let body = match setup {
+        Some(code) => format!("setup={code}&{rest}"),
+        None => rest.to_string(),
+    };
+    let (status, _, page) = http(
+        addr,
+        &post(&host, &format!("Origin: http://{host}\r\n"), &body),
+    );
+    (status, page)
+}
+
+#[test]
+fn bx_62_a_code_is_drawn_from_the_alphabet_and_shown_in_two_groups() {
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..64 {
+        let code = SetupCode::draw().unwrap().shown();
+        assert_eq!(code.len(), 9, "{code}");
+        assert_eq!(code.as_bytes().get(4), Some(&b'-'), "{code}");
+        for c in code.chars().filter(|c| *c != '-') {
+            assert!("0123456789ABCDEFGHJKMNPQRSTVWXYZ".contains(c), "{code}");
+            assert!(!"ILOU".contains(c), "{code}");
+        }
+        seen.insert(code);
+    }
+    assert!(seen.len() > 60, "the codes differ");
+}
+
+#[test]
+fn bx_62_the_right_code_takes_the_invitation_and_a_wrong_or_missing_one_changes_nothing() {
+    let (r, addr, _dir) = run_with_page("setupwrong", PageConfig::default());
+    let inv = invitation(5).to_text();
+    let rest = format!("invitation={inv}");
+    let words = PageAnswer::SetupWrong.words();
+    // Missing.
+    let (status, page) = post_with_setup(addr, None, &rest);
+    assert_eq!(status, 403);
+    assert!(page.contains(&words.heading));
+    assert!(page.contains(&words.what.replace('\'', "&#39;")));
+    assert!(page.contains(&words.next));
+    assert_eq!(r.status(), BoxStatus::Unpaired);
+    assert!(connect(&r).claim().is_err(), "no claim is on offer");
+    // The page refuses every invitation now, the right code too.
+    let code = code_of(addr);
+    let (status, page) = post_with_setup(addr, Some(&code), &rest);
+    assert_eq!(status, 403);
+    assert!(page.contains(&words.heading));
+    assert_eq!(r.status(), BoxStatus::Unpaired);
+    r.stop();
+}
+
+#[test]
+fn bx_62_a_wrong_code_and_one_from_another_start_are_refused() {
+    let (r, addr, _dir) = run_with_page("setupother", PageConfig::default());
+    let (other, other_addr, _other_dir) = run_with_page("setupother2", PageConfig::default());
+    let inv = invitation(5).to_text();
+    let rest = format!("invitation={inv}");
+    // The code of another Box, which has another start.
+    let theirs = code_of(other_addr);
+    assert_ne!(theirs, code_of(addr));
+    let (status, page) = post_with_setup(addr, Some(&theirs), &rest);
+    assert_eq!(status, 403);
+    assert!(page.contains(&PageAnswer::SetupWrong.words().heading));
+    assert_eq!(r.status(), BoxStatus::Unpaired);
+    // A code of the wrong length or with a character that is not in it.
+    for bad in ["", "ABCD", "ABCD-EFGH-J", "0000-0000"] {
+        let (other_status, _) = post_with_setup(other_addr, Some(bad), &rest);
+        assert_eq!(other_status, 403, "{bad}");
+    }
+    assert_eq!(other.status(), BoxStatus::Unpaired);
+    other.stop();
+    r.stop();
+}
+
+#[test]
+fn bx_62_the_code_is_read_with_or_without_the_dash_and_in_any_case() {
+    let spellings: [(u8, fn(&str) -> String); 4] = [
+        (5, |c: &str| c.to_string()),
+        (6, |c: &str| c.replace('-', "")),
+        (7, |c: &str| c.to_lowercase()),
+        (8, |c: &str| c.to_lowercase().replace('-', "")),
+    ];
+    for (n, spell) in spellings {
+        let (r, addr, _dir) = run_with_page("setupspell", PageConfig::default());
+        let code = spell(&code_of(addr));
+        let (status, _) = post_with_setup(
+            addr,
+            Some(&code),
+            &format!("invitation={}", invitation(n).to_text()),
+        );
+        assert_eq!(status, 200, "{code}");
+        assert_eq!(r.status(), BoxStatus::InvitationOpen);
+        r.stop();
+    }
+}
+
+#[test]
+fn bx_62_after_a_wrong_code_the_page_refuses_for_the_hold_and_then_takes_the_right_one() {
+    struct Gated {
+        gate: SetupCode,
+        taken: Mutex<u32>,
+    }
+    impl PageBackend for Gated {
+        fn view(&self) -> PageView {
+            view(BoxStatus::Unpaired)
+        }
+        fn enter_invitation(&self, _: &str) -> Entered {
+            *self.taken.lock().unwrap() += 1;
+            Entered::Taken
+        }
+        fn setup_code(&self) -> Option<&SetupCode> {
+            Some(&self.gate)
+        }
+    }
+    let backend = Arc::new(Gated {
+        gate: SetupCode::with_chars(*b"7K2M9QX4").with_hold(Duration::from_millis(600)),
+        taken: Mutex::new(0),
+    });
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let page = StatusPage::start(listener, backend.clone(), PageConfig::default()).unwrap();
+    let addr = page.local_addr();
+    assert_eq!(backend.gate.shown(), "7K2M-9QX4");
+    assert_eq!(
+        post_with_setup(addr, Some("7K2M-9QX3"), "invitation=x").0,
+        403
+    );
+    // Inside the hold the right code is refused as well, and nothing is taken.
+    assert_eq!(
+        post_with_setup(addr, Some("7K2M-9QX4"), "invitation=x").0,
+        403
+    );
+    assert_eq!(*backend.taken.lock().unwrap(), 0);
+    std::thread::sleep(Duration::from_millis(700));
+    assert_eq!(
+        post_with_setup(addr, Some("7k2m9qx4"), "invitation=x").0,
+        200
+    );
+    assert_eq!(*backend.taken.lock().unwrap(), 1);
+    // A refused post from another site does not start the hold.
+    let host = host_of(addr);
+    let (status, _, _) = http(
+        addr,
+        &post(
+            &host,
+            "Origin: http://evil.example\r\n",
+            "setup=0000-0000&invitation=x",
+        ),
+    );
+    assert_eq!(status, 403);
+    assert_eq!(
+        post_with_setup(addr, Some("7K2M-9QX4"), "invitation=x").0,
+        200
+    );
+    page.stop();
+}
+
+#[test]
+fn bx_62_the_hold_is_ten_seconds() {
+    assert_eq!(crate::status_page::SETUP_REFUSE_SECS, 10);
+    let code = SetupCode::with_chars(*b"00000000");
+    assert!(!code.check(Some("1111-1111")));
+    assert!(!code.check(Some("0000-0000")), "refused inside the hold");
+}
+
+#[test]
+fn bx_62_a_paired_box_asks_for_no_code_and_the_form_shows_the_field_only_when_it_asks() {
+    let (r, addr, _dir) = run_with_page("setuppaired", PageConfig::default());
+    assert!(r.setup_code().is_some());
+    pair_ok(&r);
+    r.stop();
+    let dir = TempDir::new("setuppaired2");
+    let (mut r, _) = start(&dir);
+    pair_ok(&r);
+    let addr2 = serve_page(&mut r, PageConfig::default());
+    assert_eq!(r.setup_code(), None);
+    assert_eq!(code_of(addr2), "");
+    let (status, _) = post_with_setup(
+        addr2,
+        None,
+        &format!("invitation={}", invitation(8).to_text()),
+    );
+    assert_eq!(status, 409, "the words of a paired Box, as before");
+    let _ = addr;
+    r.stop();
+    // The field is on the page while it asks, with its label and help.
+    let page = render_home(&view(BoxStatus::Unpaired), "box.local:8987", None);
+    assert!(page.contains("<label for=\"setup\">Setup code</label>"));
+    assert!(page.contains("name=\"setup\""));
+    assert!(page.contains(
+        "Find the setup code in this Box&#39;s log on the host system, after the line that starts with status page."
+    ));
+    let mut v = view(BoxStatus::Unpaired);
+    v.setup = false;
+    assert!(!render_home(&v, "box.local:8987", None).contains("name=\"setup\""));
+}
+
+#[test]
+fn bx_59_the_setup_code_is_on_no_page() {
+    let (r, addr, _dir) = run_with_page("setupnopage", PageConfig::default());
+    let code = code_of(addr);
+    let bare = code.replace('-', "");
+    let shown = |page: &str, what: &str| {
+        for needle in [&code, &bare, &code.to_lowercase(), &bare.to_lowercase()] {
+            assert!(
+                !page.contains(needle.as_str()),
+                "{what}: the page holds the code"
+            );
+        }
+    };
+    shown(&http(addr, &get(&host_of(addr))).2, "home");
+    let rest = format!("invitation={}", invitation(5).to_text());
+    shown(&post_with_setup(addr, None, &rest).1, "no code");
+    shown(
+        &post_with_setup(addr, Some("0000-0000"), &rest).1,
+        "wrong code",
+    );
+    shown(
+        &post_with_setup(addr, Some(&code), &rest).1,
+        "the answer to a refusal in the hold",
+    );
+    r.stop();
+    let (r, addr, _dir) = run_with_page("setupnopage2", PageConfig::default());
+    let code = code_of(addr);
+    let (status, page) = post_with_setup(
+        addr,
+        Some(&code),
+        &format!("invitation={}", invitation(5).to_text()),
+    );
+    assert_eq!(status, 200);
+    assert!(!page.contains(&code));
     r.stop();
 }
 
@@ -744,7 +1014,8 @@ fn bx_57_a_form_that_is_not_well_formed_or_repeats_the_field_is_a_400() {
         "invitation=a&invitation=b",
         "invitation=%ff",
     ] {
-        let (status, _, _) = http(addr, &post(&host, &origin, body));
+        let body = form(addr, body);
+        let (status, _, _) = http(addr, &post(&host, &origin, &body));
         assert_eq!(status, 400, "{body}");
     }
     assert_eq!(r.status(), BoxStatus::Unpaired);
@@ -827,7 +1098,7 @@ fn bx_58_the_referer_counts_only_when_there_is_no_origin() {
 fn bx_58_a_post_from_another_site_changes_nothing_and_is_refused_with_words() {
     let (r, addr, _dir) = run_with_page("origin", PageConfig::default());
     let host = host_of(addr);
-    let body = format!("invitation={}", invitation(5).to_text());
+    let body = form(addr, &format!("invitation={}", invitation(5).to_text()));
     let words = PageAnswer::NotFromThisPage.words();
     for extra in [
         "Origin: http://evil.example\r\n".to_string(),
@@ -906,9 +1177,7 @@ fn assert_no_secret(page: &str, secrets: &[String], what: &str) {
 fn bx_59_no_page_in_any_state_holds_a_secret() {
     let dir = TempDir::new("nosecret");
     let (mut r, _) = start(&dir);
-    let addr = r
-        .serve_status_page("127.0.0.1:0".parse().unwrap(), PageConfig::default())
-        .unwrap();
+    let addr = serve_page(&mut r, PageConfig::default());
     let token = "pos-token-SECRET-4711";
     let secrets = secrets(&r, token);
     let page = || http(addr, &get(&host_of(addr))).2;
@@ -999,9 +1268,7 @@ fn bx_60_the_relay_serves_while_the_page_is_full_of_slow_connections() {
         read: Duration::from_secs(20),
         ..PageConfig::default()
     };
-    let addr = r
-        .serve_status_page("127.0.0.1:0".parse().unwrap(), cfg)
-        .unwrap();
+    let addr = serve_page(&mut r, cfg);
     // Far more slow connections than the page has slots: some send half a
     // request and stop, some send a byte at a time, some send nothing.
     let mut held = Vec::new();

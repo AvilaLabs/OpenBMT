@@ -577,7 +577,11 @@ adds no way to do anything else.
 - **BX-57.** `POST /invitation` takes the form field `invitation` and gives
   it to the Box by the path the invitation file takes (BX-10 reading, check
   characters first; BX-12 holding and claim), and only while the Box is
-  waiting for an invitation. A Box that holds one that has not run out, or
+  waiting for an invitation. The form also takes the field `setup`, the
+  setup code of BX-62, and the Box checks it before it reads the
+  invitation: a wrong or missing code is a 403 with words, changes nothing,
+  and makes the page refuse every invitation for ten seconds. A Box that
+  holds one that has not run out, or
   is paired, or is turned off, refuses with words and changes nothing. The
   answer is the page with the outcome in words above the state: taken (the
   claim is on offer), not read or wrong check characters (422), already
@@ -602,6 +606,14 @@ adds no way to do anything else.
   Box prints `status page: <addr>` when it is serving. An address that is not
   an address and a port, or that cannot be bound, stops the Box at the
   start, saying so.
+- **BX-62. The setup code.** While the Box is not paired and the page is
+  on, it draws a setup code at each start, eight characters of Crockford
+  base32 from the system's random source, shown as two groups of four,
+  prints it after the page's address as `setup code: XXXX-XXXX`, and keeps
+  it in memory only. Whoever reads the Box's log on the host system can
+  enter an invitation on the page; whoever can only reach the page cannot.
+  The invitation file and the console need no code: they are the host
+  system's own.
 
 What the code fixes. The shop's four words are those of the owner root's
 fingerprint (the ones the Key app shows for it); they let the keeper tell two
