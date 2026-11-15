@@ -11,6 +11,8 @@ fuzz_target!(|data: &[u8]| {
         Ok(Some(request)) => {
             assert!(request.body.len() <= MAX_REQUEST);
             assert_eq!(request.nonce.len(), 32);
+            assert_eq!(request.mac.len(), 64);
+            assert!(!request.time.is_empty() && request.time.bytes().all(|b| b.is_ascii_digit()));
             let end = data.windows(4).position(|w| w == b"\r\n\r\n");
             assert!(end.is_some_and(|e| e + 4 + request.body.len() <= MAX_REQUEST));
             if request.route != Route::Create {
