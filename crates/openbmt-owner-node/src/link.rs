@@ -107,11 +107,11 @@ pub const BATCH_RESEND_SECS: u64 = 120;
 /// Seconds a batch may wait before the owner is told (LK-73): 24 hours.
 pub const BATCH_ALERT_SECS: u64 = 24 * 60 * 60;
 
-/// Records a counter may send in 24 hours before the owner is told (LK-85):
+/// Records a counter may send in 24 hours before the owner is told (LK-68):
 /// the most a day's totals read, so far more than any shop's sales need.
 pub const RECORDS_DAY_ALARM: u64 = TOTALS_MAX_RECORDS;
 
-/// Hourly buckets of the count of records taken (LK-85): 24 hours.
+/// Hourly buckets of the count of records taken (LK-68): 24 hours.
 const RECORDS_DAY_BUCKETS: usize = 24;
 
 /// The file the newest Lightning report is kept in, under the link's
@@ -262,7 +262,7 @@ pub enum Alert {
         full: bool,
     },
     /// A counter sent more than [`RECORDS_DAY_ALARM`] records in 24 hours
-    /// (LK-85). It goes by itself when the count falls to that or below; the
+    /// (LK-68). It goes by itself when the count falls to that or below; the
     /// records are taken all the same.
     RecordsFlood {
         /// The counter.
@@ -271,7 +271,7 @@ pub enum Alert {
 }
 
 /// The records taken from one counter over the last 24 hours, in hourly
-/// buckets so that the memory for a counter is fixed (LK-85).
+/// buckets so that the memory for a counter is fixed (LK-68).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RecordsDay {
     /// The bucket of an hour is at that hour modulo 24: the hour (owner
@@ -515,7 +515,7 @@ pub struct OwnerLink<R: Post = RelayPost> {
     cfg: OwnerLinkConfig,
     alerts: Vec<Alert>,
     last_check_in_at: BTreeMap<DeviceId, u64>,
-    /// LK-85: the records taken from each counter over the last 24 hours.
+    /// LK-68: the records taken from each counter over the last 24 hours.
     records_day: BTreeMap<DeviceId, RecordsDay>,
     started_at: Option<u64>,
     last_heartbeat_at: Option<u64>,
@@ -1523,7 +1523,7 @@ impl<R: Post> OwnerLink<R> {
         }
     }
 
-    /// LK-85: count the records taken from a counter at `now`.
+    /// LK-68: count the records taken from a counter at `now`.
     pub(crate) fn count_records(&mut self, counter: DeviceId, now: u64, appended: u64) {
         if appended > 0 {
             self.records_day
@@ -1533,7 +1533,7 @@ impl<R: Post> OwnerLink<R> {
         }
     }
 
-    /// LK-85: raise the alert for a counter that sent more than
+    /// LK-68: raise the alert for a counter that sent more than
     /// [`RECORDS_DAY_ALARM`] records over the last 24 hours, and drop it when
     /// the count falls back. An alert the owner cleared is raised again while
     /// the count stays above.

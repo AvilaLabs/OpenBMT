@@ -398,6 +398,15 @@ over is still checked by the rules of the thing it carries.
   text, if there are any, are read and checked as keys, and the link uses
   them only while the owner holds no settings; the first settings replace
   them.
+- **LK-68. Too many records.** The owner phone takes every record that extends
+  a copy (LK-58), however many, so that a real counter is never cut off. It
+  counts, for each counter, the records it took in the current hour of the
+  owner phone's clock and the 23 before it, and raises an alert when a counter
+  sent more than 20,000, the most a day's totals read
+  (`docs/COUNTER-RULES.md`): far more than any shop's sales need, so the
+  counter may have been tampered with. The alert goes by itself once that
+  count is 20,000 or fewer, and the owner can clear it. The count is kept in
+  memory with a fixed size for each counter.
 
 The next four rules are about address batches, which the owner keeps and
 sends again (the settings above have their own outbox, and the two are not
@@ -509,15 +518,6 @@ merged).
   owner node sends a new line when any of these changes, including a spend
   of the starter wallet it did not make, and at least once every heartbeat
   interval. A line is not kept for sending again: the next one replaces it.
-- **LK-85. Too many records.** The owner phone takes every record that extends
-  a copy (LK-58), however many, so that a real counter is never cut off. It
-  counts, for each counter, the records it took in the current hour of the
-  owner phone's clock and the 23 before it, and raises an alert when a counter
-  sent more than 20,000, the most a day's totals read
-  (`docs/COUNTER-RULES.md`): far more than any shop's sales need, so the
-  counter may have been tampered with. The alert goes by itself once that
-  count is 20,000 or fewer, and the owner can clear it. The count is kept in
-  memory with a fixed size for each counter.
 
 The two kinds that involve the Box are carried the same way. A counter sends
 a Paid notice to each Box on its device list when a sale changes state, and

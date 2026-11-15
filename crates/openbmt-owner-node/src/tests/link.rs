@@ -729,7 +729,7 @@ fn floods(alerts: &[Alert]) -> usize {
 }
 
 #[test]
-fn lk_85_twenty_thousand_records_in_a_day_raise_nothing_and_one_more_raises_the_alert() {
+fn lk_68_twenty_thousand_records_in_a_day_raise_nothing_and_one_more_raises_the_alert() {
     use crate::RECORDS_DAY_ALARM;
     assert_eq!(RECORDS_DAY_ALARM, 20_000);
     let mut w = world();
@@ -746,7 +746,7 @@ fn lk_85_twenty_thousand_records_in_a_day_raise_nothing_and_one_more_raises_the_
 }
 
 #[test]
-fn lk_85_records_taken_over_the_message_path_are_counted_and_still_taken() {
+fn lk_68_records_taken_over_the_message_path_are_counted_and_still_taken() {
     let mut w = world();
     let mut c = chain(3, 21);
     c.append_check_in(&id(3));
@@ -765,7 +765,7 @@ fn lk_85_records_taken_over_the_message_path_are_counted_and_still_taken() {
 }
 
 #[test]
-fn lk_85_records_spread_over_25_hours_leave_the_last_24_hours_at_the_limit() {
+fn lk_68_records_spread_over_25_hours_leave_the_last_24_hours_at_the_limit() {
     let mut w = world();
     w.step(T0);
     let hour = 3600;
@@ -796,7 +796,7 @@ fn lk_85_records_spread_over_25_hours_leave_the_last_24_hours_at_the_limit() {
 }
 
 #[test]
-fn lk_85_the_alert_goes_by_itself_when_the_count_falls_back_and_the_owner_can_clear_it() {
+fn lk_68_the_alert_goes_by_itself_when_the_count_falls_back_and_the_owner_can_clear_it() {
     let mut w = world();
     let hour = 3600;
     let start = (T0 / hour + 1) * hour;
@@ -825,7 +825,7 @@ fn lk_85_the_alert_goes_by_itself_when_the_count_falls_back_and_the_owner_can_cl
 }
 
 #[test]
-fn lk_85_the_alert_of_a_counter_that_is_removed_goes_with_it() {
+fn lk_68_the_alert_of_a_counter_that_is_removed_goes_with_it() {
     let mut b = with_box();
     let second = id(7).device_id();
     b.w.link.follow(&[counter(), second], &[box_key()]).unwrap();
@@ -843,7 +843,7 @@ fn lk_85_the_alert_of_a_counter_that_is_removed_goes_with_it() {
 }
 
 #[test]
-fn lk_85_the_count_of_a_counter_has_a_fixed_size() {
+fn lk_68_the_count_of_a_counter_has_a_fixed_size() {
     let mut day = crate::RecordsDay::default();
     let before = std::mem::size_of_val(&day);
     for h in 0..1_000u64 {
