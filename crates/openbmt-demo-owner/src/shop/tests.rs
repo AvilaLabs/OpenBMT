@@ -21,6 +21,9 @@ fn key_1_is_one_of_the_wallets_three_keys_and_the_root_is_the_approvers() {
     let account = Xpriv::decode(&key1().expect("a key")).expect("it reads back");
     let xpub = Xpub::from_priv(&bitcoin::secp256k1::Secp256k1::new(), &account);
     let wallet = demo_shop_wallet().expect("the wallet");
-    assert!(wallet.slots().iter().any(|s| s.xpub == xpub), "Key 1 is in the wallet");
+    assert!(
+        wallet.slots().iter().any(|s| s.xpub == xpub),
+        "Key 1 is in the wallet"
+    );
     assert_eq!(approver_root().expect("a root").len(), 32);
 }
