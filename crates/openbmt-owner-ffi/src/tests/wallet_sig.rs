@@ -171,10 +171,9 @@ fn ap_14_a_good_signature_is_attached_and_a_bad_one_stores_nothing_through_dispa
 const LN_NODE: &str = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
 const LN_PROVIDER: &str = "02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5";
 
-/// The request of op 245 for turning Shop Lightning on at the paired counter,
-/// with the Box given.
-fn shop_lightning_request(dir: &Scratch, file: &[u8], starter: bool) -> Vec<u8> {
-    // The shop has a Box in force, as Shop Lightning needs (SL-73).
+/// The shop has a Box in force, as Shop Lightning needs (SL-73) and as a
+/// change that loosens needs to wait for a confirmation (OA-119).
+fn add_a_box(dir: &Scratch, file: &[u8]) {
     let wallet = openbmt_core::pinned_wallet::PinnedWallet::from_bytes(file).unwrap();
     crate::own::turn_on_shop(dir.path(), id(1), wallet, |node| {
         let (shop, store) = node.shop_and_store();
@@ -183,6 +182,12 @@ fn shop_lightning_request(dir: &Scratch, file: &[u8], starter: bool) -> Vec<u8> 
             .map_err(|e| OwnNodeError::Io(format!("{e:?}")))
     })
     .unwrap_or_else(|e| panic!("a Box was not added: {e}"));
+}
+
+/// The request of op 245 for turning Shop Lightning on at the paired counter,
+/// with the Box given.
+fn shop_lightning_request(dir: &Scratch, file: &[u8], starter: bool) -> Vec<u8> {
+    add_a_box(dir, file);
     let mut w = W::new()
         .string(dir.path().to_str().unwrap())
         .bytes(&[1u8; 32])
@@ -243,4 +248,152 @@ fn ap_15_shop_lightning_on_a_starter_wallet_is_refused_through_dispatch() {
     let (dir, file, _) = paired(65);
     let response = call(245, &shop_lightning_request(&dir, &file, true));
     assert_eq!(Rd::error(&response).expect("refused").rule, "AP-15");
+}
+
+/// Op 243 for `edit`: the settings of the preview.
+fn preview_of(dir: &Scratch, file: &[u8], edit: Vec<u8>) -> Vec<u8> {
+    let response = call(
+        243,
+        &W::new()
+            .string(dir.path().to_str().unwrap())
+            .bytes(&[1u8; 32])
+            .bytes(file)
+            .0
+            .into_iter()
+            .chain(edit)
+            .chain([0u8])
+            .collect::<Vec<u8>>(),
+    );
+    if let Some(f) = Rd::error(&response) {
+        panic!("refused: {f:?}");
+    }
+    let mut r = Rd::ok(&response);
+    let _ = r.u32();
+    let _ = r.list(|r| {
+        (
+            r.string(),
+            r.string(),
+            r.opt(Rd::bytes),
+            r.string(),
+            r.string(),
+            r.bool(),
+        )
+    });
+    let _ = (r.bool(), r.bool(), r.u32(), r.opt(Rd::u64), r.opt(Rd::u64));
+    r.bytes()
+}
+
+/// Op 246: (version, waits), or the rule that refused.
+fn send(dir: &Scratch, file: &[u8], settings: &[u8], now: u64) -> Result<(u32, bool), String> {
+    let response = call(246, &shop(dir, file).bytes(settings).u64(now).0);
+    if let Some(f) = Rd::error(&response) {
+        return Err(f.rule);
+    }
+    let mut r = Rd::ok(&response);
+    let out = (r.u32(), r.bool());
+    r.done();
+    Ok(out)
+}
+
+#[test]
+fn cr_236_a_free_change_is_put_in_force_by_op_246() {
+    let (dir, file, _) = paired(66);
+    let settings = preview_of(&dir, &file, Edit::tor(true).bytes());
+    let (version, waits) = send(&dir, &file, &settings, T0 + 100).unwrap();
+    assert!(!waits);
+    assert_eq!(
+        version,
+        SignedSettings::from_bytes(&settings)
+            .unwrap()
+            .settings
+            .version
+    );
+    // The same edit now changes nothing: the change is the settings in force.
+    let again =
+        SignedSettings::from_bytes(&preview_of(&dir, &file, Edit::tor(true).bytes())).unwrap();
+    assert!(again.settings.tor_on);
+}
+
+#[test]
+fn cr_239_a_change_that_loosens_waits_for_a_counters_confirmation_through_op_246() {
+    let (dir, file, _) = paired(67);
+    add_a_box(&dir, &file);
+    let settings = preview_of(&dir, &file, Edit::raise_light_sale(900).bytes());
+    let (version, waits) = send(&dir, &file, &settings, T0 + 100).unwrap();
+    assert!(waits, "a counter has to confirm it");
+    assert!(version > 0);
+    // It is not in force: a new preview is made over the waiting change and
+    // another change on top of the settings in force still goes.
+    let free = preview_of(&dir, &file, Edit::tor(true).bytes());
+    assert!(SignedSettings::from_bytes(&free).is_ok());
+    // The waiting change is kept in its file.
+    assert!(dir.path().join("own-waiting").exists());
+}
+
+#[test]
+fn sl_77_shop_lightning_is_turned_off_for_a_shop_with_its_own_wallet_through_op_246() {
+    let (dir, file, key) = paired(68);
+    let response = call(245, &shop_lightning_request(&dir, &file, false));
+    let mut r = Rd::ok(&response);
+    let _ = (r.u32(), r.u8(), r.bool(), r.bool());
+    let _ = r.opt(|r| {
+        let _ = (
+            r.bytes(),
+            r.bytes(),
+            r.bytes(),
+            r.bytes(),
+            r.string(),
+            r.u64(),
+            r.u64(),
+        );
+    });
+    let on = r.bytes();
+    let message = wallet_message_for(&SignedSettings::from_bytes(&on).unwrap().settings);
+    attach(&dir, &file, &on, &sign_compact_text(&key, &message)).unwrap();
+    // Off: action Remove, nothing else.
+    let off = W::new()
+        .string(dir.path().to_str().unwrap())
+        .bytes(&[1u8; 32])
+        .bytes(&file)
+        .u8(2)
+        .opt_bytes(None)
+        .opt_string(None)
+        .opt_bytes(None)
+        .opt_string(None)
+        .opt_string(None)
+        .u8(0)
+        .u8(0)
+        .u8(0)
+        .0;
+    let response = call(245, &off);
+    if let Some(f) = Rd::error(&response) {
+        panic!("refused: {f:?}");
+    }
+    let mut r = Rd::ok(&response);
+    let _ = (r.u32(), r.u8(), r.bool(), r.bool());
+    let after = r.opt(|r| r.bytes());
+    assert!(after.is_none(), "it would be off");
+    let settings = r.bytes();
+    let (needs, _, _) = (r.bool(), r.string(), r.string());
+    assert!(!needs, "turning off asks for no signature");
+    let (_, waits) = send(&dir, &file, &settings, T0 + 200).unwrap();
+    assert!(!waits);
+    assert!(SignedSettings::from_bytes(&settings)
+        .unwrap()
+        .settings
+        .shop_lightning
+        .is_none());
+}
+
+#[test]
+fn ap_14_a_redirect_without_the_signature_is_refused_by_op_246_and_stores_nothing() {
+    let (dir, file, _) = paired(69);
+    let (settings, needs, _, _) = ask(&dir, &file, false).unwrap();
+    assert!(needs);
+    assert_eq!(
+        send(&dir, &file, &settings, T0 + 100).unwrap_err(),
+        "OA-110"
+    );
+    // Nothing is in force: the same Redirect is still a Redirect.
+    assert!(ask(&dir, &file, false).unwrap().1);
 }

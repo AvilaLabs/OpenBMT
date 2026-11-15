@@ -242,6 +242,7 @@ private const val OP_PAID_CHECK_RESET = 242
 private const val OP_OWN_SETTINGS_PREVIEW = 243
 private const val OP_OWN_SETTINGS_ATTACH = 244
 private const val OP_OWN_SHOP_LIGHTNING_PREVIEW = 245
+private const val OP_OWN_SETTINGS_SEND = 246
 
 // ---- tag bytes of the enums (PROTOCOL.md) ------------------------------------------
 
@@ -1056,6 +1057,11 @@ class OwnSettingsPreview(
     val message: String,
     val address: String,
 )
+
+/** What [OwnerOwn.settingsSend] did: the [version] of the change, and whether it [waits] for a counter's confirmation. */
+class OwnSettingsSent(val version: Long, val waits: Boolean)
+
+internal fun Reader.ownSettingsSent(): OwnSettingsSent = OwnSettingsSent(u32(), bool())
 
 /** What [OwnerOwn.shopLightningPreview] found, as [OwnSettingsPreview] does for the settings editor. */
 class OwnShopLightningPreview(
@@ -4060,6 +4066,15 @@ object OwnerOwn {
     fun shopLightningPreview(shop: OwnShopArgs, edit: ShopLightningEditArgs, starter: Boolean): OwnShopLightningPreview {
         val r = call(OP_OWN_SHOP_LIGHTNING_PREVIEW, 0) { it.ownShop(shop).shopLightningEdit(edit).bool(starter) }
         return r.ownShopLightningPreview().also { r.end() }
+    }
+
+    /**
+     * A change of a shop with its own wallet that needs no wallet signature (not a Redirect): put in force, or held
+     * to be confirmed by a counter. [now] is Unix seconds. A Redirect is refused (AP-14).
+     */
+    fun settingsSend(shop: OwnShopArgs, settings: ByteArray, now: Long): OwnSettingsSent {
+        val r = call(OP_OWN_SETTINGS_SEND, 0) { it.ownShop(shop).bytes(settings).u64(now) }
+        return r.ownSettingsSent().also { r.end() }
     }
 
     /**

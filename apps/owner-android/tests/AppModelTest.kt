@@ -4694,6 +4694,14 @@ object AppModelTest {
         val screen = source("src/android/WalletSig.kt")
         ok(screen.contains("OwnerOwn.settingsAttach") && screen.contains("showWalletSig(settings, message, address, sig.text.toString()") && screen.contains("scan.begin") && screen.contains("AnimatedQrView.makePlain(act, Who.OWNER, message"), "OA-127: the screen sends through the library, keeps itself on a refusal, scans and shows the code")
         ok(source("src/android/SettingsEdit.kt").contains("ask.needsWalletSig"), "OA-127: the review leads to the screen for a Redirect change")
+        // A change of a shop with its own wallet that needs no signature never goes down the Key-app queue.
+        val editor = source("src/android/SettingsEdit.kt").substringAfter("internal fun Controller.showEditReview")
+        ok(editor.indexOf("sendOwnChange(p.settings, msg)") in 0 until editor.indexOf("n.queueSettings(p.settings)"), "OA-127: the editor's Queue the change sends an own-wallet change before it could reach the Key-app queue")
+        val lightning = source("src/android/ShopLightning.kt").substringAfter("private fun Controller.showSlReview")
+        ok(lightning.indexOf("sendOwnChange(p.settings, msg)") in 0 until lightning.indexOf("n.queueSettings(p.settings)"), "OA-127: Shop Lightning's review, which Turn off goes through, sends an own-wallet change before it could reach the Key-app queue")
+        ok(source("src/android/ShopLightning.kt").contains("showSlReview(ShopLightningModel.turnOff()"), "OA-127: Turn off goes through that review")
+        val send = source("src/android/WalletSig.kt").substringAfter("internal fun Controller.sendOwnChange")
+        ok(send.contains("OwnerOwn.settingsSend(") && !send.contains("queueSettings") && send.contains("showOwnWaitingChange()"), "OA-127: the own-wallet send uses the library's own path and shows the waiting change with the app's words")
     }
 
     /** OA-124 to OA-126: this phone as the counter too. */

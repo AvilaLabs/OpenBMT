@@ -75,3 +75,15 @@ private fun Controller.scanSignature(settings: ByteArray, message: String, addre
         onCancel = { give(SourceResult.Failed(AppWords.counterScanCancelled)) },
     )
 }
+
+/**
+ * A change of a shop with its own wallet that asks for no wallet signature: the library signs it with the owner root
+ * and puts it in force, or holds it for a counter's confirmation, which is shown on the screen of the waiting change
+ * (OA-119, OA-121). A refusal is shown in [msg] and nothing is sent.
+ */
+internal fun Controller.sendOwnChange(settings: ByteArray, msg: Slot, done: () -> Unit) {
+    val shop = ownStore.args() ?: return
+    val sent = attempt(msg) { OwnerOwn.settingsSend(shop, settings, System.currentTimeMillis() / 1000) } ?: return
+    settingsDraft = SettingsDraft()
+    if (sent.waits) showOwnWaitingChange() else done()
+}

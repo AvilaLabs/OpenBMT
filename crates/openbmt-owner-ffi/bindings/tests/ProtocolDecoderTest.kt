@@ -151,6 +151,11 @@ object ProtocolDecoderTest {
         check(lightning.preview.version == 5L && lightning.preview.changeClass == ShopLightningClass.Redirect && lightning.preview.after == null)
         check(lightning.preview.settings.contentEquals(byteArrayOf(7, 7)) && lightning.needsWalletSig && lightning.message == "Message to sign" && lightning.address == "bc1qaddress")
         rejects("a short Shop Lightning own preview") { decodeResponse(ownShopLightningFrame().let { it.copyOf(it.size - 2) }).ownShopLightningPreview() }
+        // Op 246: the version of the change and whether it waits for a counter.
+        val sent = decodeResponse(header(0, Writer().u32(7).bool(true).toByteArray())).ownSettingsSent()
+        check(sent.version == 7L && sent.waits)
+        rejects("a flag of a sent change") { decodeResponse(header(0, Writer().u32(7).u8(2).toByteArray())).ownSettingsSent() }
+        rejects("a short sent change") { decodeResponse(header(0, Writer().u32(7).toByteArray())).ownSettingsSent() }
         rejects("an own preview flag") { decodeResponse(ownPreviewFrame(flag = 2)).ownSettingsPreview() }
         rejects("a short own preview") { decodeResponse(ownPreviewFrame().let { it.copyOf(it.size - 3) }).ownSettingsPreview() }
         rejects("a trailing byte after an own preview") { decodeResponse(ownPreviewFrame() + byteArrayOf(0)).let { r -> r.ownSettingsPreview().also { r.end() } } }

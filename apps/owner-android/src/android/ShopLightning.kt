@@ -311,6 +311,14 @@ private fun Controller.showSlReview(edit: ShopLightningEditArgs, back: () -> Uni
             ui.primary(ShopLightningWords.queue) {
                 // SS-37: a change that loosens or redirects waits while the starter wallet is at its limit or past its date.
                 if (p.changeClass != ShopLightningClass.Free && starterHolds(org.openbmt.owner.StarterChangeKind.Other)) return@primary showStarterHeld { back() }
+                // A shop with its own wallet has no Key app: the owner root signs the change, which is put in force or
+                // held for a counter's confirmation (OA-127).
+                if (ask != null) {
+                    return@primary sendOwnChange(p.settings, msg) {
+                        shopLightningDraft = ShopLightningModel.Draft()
+                        showShopLightning()
+                    }
+                }
                 val q = attempt(msg) { n.queueSettings(p.settings) } ?: return@primary
                 shopLightningDraft = ShopLightningModel.Draft()
                 if (q.tightening) {

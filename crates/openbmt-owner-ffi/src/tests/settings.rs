@@ -65,6 +65,26 @@ impl Edit {
         }
     }
 
+    /// An edit that switches the Tor setting and nothing else (a Free change).
+    pub(super) fn tor(on: bool) -> Edit {
+        Edit {
+            tor: Some(on),
+            ..Edit::default()
+        }
+    }
+
+    /// An edit that raises the light check's largest sale at a price (a
+    /// Loosen change).
+    pub(super) fn raise_light_sale(usd: u32) -> Edit {
+        let mut limits = [None; 10];
+        limits[LIGHT_PER_SALE] = Some(usd);
+        Edit {
+            price: Some(100_000),
+            limits,
+            ..Edit::default()
+        }
+    }
+
     pub(super) fn bytes(&self) -> Vec<u8> {
         let mut w = match self.price {
             None => W::new().u8(0),

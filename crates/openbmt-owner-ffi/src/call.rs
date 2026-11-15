@@ -188,7 +188,8 @@ use crate::own::{
 };
 use crate::own_settings::{
     self, OwnSettingsAttachArgs, OwnSettingsPreviewArgs, OwnSettingsPreviewView,
-    OwnShopLightningPreviewArgs, OwnShopLightningPreviewView,
+    OwnSettingsSendArgs, OwnSettingsSentView, OwnShopLightningPreviewArgs,
+    OwnShopLightningPreviewView,
 };
 use crate::own_spend_views::{
     OwnSpendBuildArgs, OwnSpendBuiltView, OwnSpendFileView, OwnSpendItemView, OwnSpendSessionView,
@@ -1150,6 +1151,12 @@ fn build_ops() -> Vec<Op> {
             Zero,
             |_, a: OwnShopLightningPreviewArgs| own_settings::shop_lightning_preview(a),
         ),
+        op(
+            246,
+            "own_settings_send",
+            Zero,
+            |_, a: OwnSettingsSendArgs| own_settings::send(a),
+        ),
     ]
 }
 
@@ -1338,6 +1345,8 @@ fn definitions() -> Vec<TypeDef> {
         SettingsPreviewView::define(),
         OwnSettingsPreviewArgs::define(),
         OwnSettingsPreviewView::define(),
+        OwnSettingsSendArgs::define(),
+        OwnSettingsSentView::define(),
         OwnShopLightningPreviewArgs::define(),
         OwnShopLightningPreviewView::define(),
         OwnSettingsAttachArgs::define(),

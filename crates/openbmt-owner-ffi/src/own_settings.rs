@@ -6,6 +6,7 @@
 //! a shop with its own wallet they work on no node: each is given the shop's
 //! folder, the owner root secret and the wallet's file.
 
+use openbmt_owner::own_shop::{OwnError, OwnRefusal};
 use openbmt_owner::OwnerError;
 
 use crate::codec::{wire_record, wire_record_get};
@@ -182,4 +183,79 @@ pub(crate) fn shop_lightning_preview(
             address,
         })
     })
+}
+
+/// The arguments of `own_settings_send`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnSettingsSendArgs {
+    /// The shop.
+    pub shop: OwnShopArgs,
+    /// The settings of the preview, as its bytes.
+    pub settings: Vec<u8>,
+    /// The time now, in Unix seconds.
+    pub now: u64,
+}
+
+wire_record!(OwnSettingsSendArgs {
+    shop,
+    settings,
+    now
+});
+wire_record_get!(OwnSettingsSendArgs {
+    shop,
+    settings,
+    now
+});
+
+/// What `own_settings_send` did with the change.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnSettingsSentView {
+    /// The version of the change.
+    pub version: u32,
+    /// The change waits for a counter's confirmation (CR-239) and is not in
+    /// force yet.
+    pub waits: bool,
+}
+
+wire_record!(OwnSettingsSentView { version, waits });
+
+/// Op 246: a change that needs no wallet signature (Free or Loosen) of a shop
+/// with its own wallet, signed by the owner root alone: it is put in force, or
+/// held as the waiting change when a counter must confirm it. A Redirect
+/// change is refused here (AP-14): it goes through op 244 with the wallet's
+/// signature.
+pub(crate) fn send(a: OwnSettingsSendArgs) -> Result<OwnSettingsSentView, AppError> {
+    let signed = openbmt_core::settings::SignedSettings::from_bytes(&a.settings)
+        .map_err(|e| refused_by("settings-bytes", format!("not settings: {e}")))?;
+    if signed.wallet_sig.is_some() {
+        return Err(settings_refused(
+            "AP-14: a signature of the wallet belongs only to a Redirect change",
+        ));
+    }
+    with_shop(a.shop, |node| {
+        if let Some(known) = node.shop().known_settings() {
+            if openbmt_core::approval::classify(&known.settings, &signed.settings)
+                == openbmt_core::approval::ChangeClass::Redirect
+            {
+                return Err(settings_refused(
+                    "AP-14: a change of where payments go needs the signature of the wallet",
+                ));
+            }
+        }
+        let waiting = node.waiting_writer();
+        let (shop, store) = node.shop_and_store();
+        shop.change_settings_with(signed.settings, a.now, |b| store(b), waiting)
+            .map(|(s, waits)| OwnSettingsSentView {
+                version: s.settings.version,
+                waits,
+            })
+            .map_err(own_error)
+    })
+}
+
+/// A refusal of a change as the library words a refused change of settings.
+fn settings_refused(text: &str) -> AppError {
+    own_error(OwnError::Refused(OwnRefusal::Settings(
+        openbmt_owner::Refusal::SettingsInvalid(text.to_string()),
+    )))
 }

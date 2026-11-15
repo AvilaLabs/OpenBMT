@@ -367,6 +367,9 @@ internal fun Controller.showEditReview() {
                 ui.button("Queue the change", ButtonKind.Primary) {
                     // SS-37: a change that loosens waits while the starter wallet is at its limit or past its date.
                     if (p.changes.any { it.loosening } && starterHolds(org.openbmt.owner.StarterChangeKind.Other)) return@button showStarterHeld { showChangeSettings() }
+                    // A shop with its own wallet has no Key app: the owner root signs the change, which is put in force or
+                    // held for a counter's confirmation (OA-127).
+                    if (ask != null) return@button sendOwnChange(p.settings, msg) { showHome() }
                     val q = attempt(msg) { n.queueSettings(p.settings) } ?: return@button
                     settingsDraft = SettingsDraft()
                     if (q.tightening) {
