@@ -3339,6 +3339,125 @@ mod tests {
     }
 
     #[test]
+    fn cr_218_each_edge_of_the_provider_is_checked_on_its_own() {
+        let ok = |f: &dyn Fn(&mut SwapProvider)| {
+            let mut p = swap_provider();
+            f(&mut p);
+            p.validate()
+        };
+        let refused = |r: Result<(), SettingsError>| matches!(r, Err(SettingsError::Invalid(_)));
+        // The name: exactly the most is taken, one more is not.
+        assert_eq!(ok(&|p| p.name = "x".repeat(MAX_SWAP_NAME_BYTES)), Ok(()));
+        assert!(refused(ok(
+            &|p| p.name = "x".repeat(MAX_SWAP_NAME_BYTES + 1)
+        )));
+        // The path prefix: the same two edges.
+        let long = |n: usize| format!("/{}", "a".repeat(n - 1));
+        assert_eq!(ok(&|p| p.path_prefix = long(MAX_SWAP_PREFIX_BYTES)), Ok(()));
+        assert!(refused(ok(
+            &|p| p.path_prefix = long(MAX_SWAP_PREFIX_BYTES + 1)
+        )));
+        // Each path condition alone.
+        assert!(refused(ok(&|p| p.path_prefix = "/a//b".to_string())));
+        assert!(refused(ok(&|p| p.path_prefix = "/a..b".to_string())));
+        assert!(refused(ok(&|p| p.path_prefix = "api".to_string())));
+        assert!(refused(ok(&|p| p.path_prefix = "/api/".to_string())));
+        assert!(refused(ok(&|p| p.path_prefix = "/a b".to_string())));
+        assert_eq!(ok(&|p| p.path_prefix = "/a-b_c.d/e".to_string()), Ok(()));
+        // The most for one sale.
+        assert_eq!(ok(&|p| p.max_sale_sats = MAX_SWAP_SALE_SATS), Ok(()));
+        assert_eq!(ok(&|p| p.max_sale_sats = 1), Ok(()));
+        assert!(refused(ok(&|p| p.max_sale_sats = MAX_SWAP_SALE_SATS + 1)));
+        assert!(refused(ok(&|p| p.max_sale_sats = 0)));
+        // The onion host: 56 characters, one of them bad; 55 good ones.
+        let host = "w2mqd2fcbgiop7oyxoes2ozmdnvgon22oipj7vzh2rquepf7cxauauad";
+        assert_eq!(host.len(), 56);
+        assert!(refused(
+            ok(&|p| p.onion = format!("{}1.onion", &host[..55]))
+        ));
+        assert!(refused(ok(&|p| p.onion = format!("{}.onion", &host[..55]))));
+        assert!(refused(ok(&|p| p.onion = format!("{host}a.onion"))));
+        assert!(refused(ok(&|p| p.onion = host.to_string())));
+    }
+
+    #[test]
+    fn cr_50_the_watch_key_is_refused_as_a_device_a_counter_or_a_box() {
+        let key = identity(90).device_id();
+        let cr50 = |s: &Settings| matches!(s.validate(), Err(SettingsError::Invalid(m)) if m.contains("CR-50"));
+        let mut t = base();
+        t.watch_key = Some(key);
+        assert_eq!(t.validate(), Ok(()));
+        // A device only.
+        let mut as_device = t.clone();
+        as_device.devices.insert(key);
+        assert!(cr50(&as_device));
+        // A counter (which has to be on the device list too).
+        let mut as_counter = as_device.clone();
+        as_counter.counters.insert(key, 10_000);
+        assert!(cr50(&as_counter));
+        // A Box (which has to be on the device list too).
+        let mut as_box = as_device.clone();
+        as_box.boxes.insert(key);
+        assert!(cr50(&as_box));
+        // Neither a counter nor a Box can be there without the device list
+        // first; those settings are refused for that reason.
+        let mut counter_only = t.clone();
+        counter_only.counters.insert(key, 10_000);
+        assert!(counter_only.validate().is_err());
+        let mut box_only = t;
+        box_only.boxes.insert(key);
+        assert!(box_only.validate().is_err());
+    }
+
+    #[test]
+    fn cr_236_verify_signatures_checks_both_signatures_and_the_values() {
+        let (o, a, r) = roots();
+        let s = base();
+        let good = signed_by_both(&s, &o, &a);
+        assert_eq!(good.verify_signatures(&r), Ok(()));
+        assert_eq!(good.verify_signatures_with(&Authority::KeyApp(r)), Ok(()));
+        // The owner signature is wrong.
+        let bad_owner = SignedSettings {
+            owner_sig: s.sign(&a),
+            ..good.clone()
+        };
+        assert_eq!(
+            bad_owner.verify_signatures(&r),
+            Err(SettingsError::OwnerSignatureInvalid)
+        );
+        // The Key app signature is wrong.
+        let bad_approver = SignedSettings {
+            approver_sig: Some(s.sign(&o)),
+            ..good.clone()
+        };
+        assert_eq!(
+            bad_approver.verify_signatures(&r),
+            Err(SettingsError::ApproverSignatureInvalid)
+        );
+        // No Key app signature is fine for the signatures alone.
+        let no_approver = SignedSettings {
+            approver_sig: None,
+            ..good.clone()
+        };
+        assert_eq!(no_approver.verify_signatures(&r), Ok(()));
+        // Under an own wallet any Key app signature is refused.
+        let own = Authority::OwnWallet {
+            owner: o.device_id(),
+        };
+        assert!(matches!(
+            good.verify_signatures_with(&own),
+            Err(SettingsError::Invalid(m)) if m.contains("CR-236")
+        ));
+        assert_eq!(no_approver.verify_signatures_with(&own), Ok(()));
+        // Good signatures over settings that fail validate give its error.
+        let mut broken = s;
+        broken.version = 0;
+        let signed = signed_by_both(&broken, &o, &a);
+        assert_eq!(signed.verify_signatures(&r), broken.validate());
+        assert!(broken.validate().is_err());
+    }
+
+    #[test]
     fn cr_218_naming_changing_or_removing_the_provider_is_a_tightening() {
         let (o, _, roots) = roots();
         let old = base();

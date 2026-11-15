@@ -815,6 +815,39 @@ mod tests {
     }
 
     #[test]
+    fn ap_12_with_a_counter_in_force_a_new_box_is_free_and_another_device_is_loosen() {
+        let mut old = base();
+        let c = identity(41).device_id();
+        old.devices.insert(c);
+        old.counters.insert(c, 10_000);
+        let b = identity(42).device_id();
+        // A new Box, on the device list and in `boxes`.
+        let mut new = next(&old);
+        new.devices.insert(b);
+        new.boxes.insert(b);
+        assert_eq!(field_class(&old, &new, "devices"), ChangeClass::Free);
+        assert_eq!(classify(&old, &new), ChangeClass::Free);
+        // A device that is not a Box.
+        let mut plain = next(&old);
+        plain.devices.insert(b);
+        assert_eq!(field_class(&old, &plain, "devices"), ChangeClass::Loosen);
+        assert_eq!(classify(&old, &plain), ChangeClass::Loosen);
+        // A Box and a plain device together are not free.
+        let mut both = new.clone();
+        both.devices.insert(identity(43).device_id());
+        assert_eq!(field_class(&old, &both, "devices"), ChangeClass::Loosen);
+        // A device in `boxes` of the settings in force but not on their
+        // device list: settings that validate cannot be like that, but the
+        // class is still not Free, as the Box is not new.
+        let mut odd = old.clone();
+        odd.boxes.insert(b);
+        let mut added = next(&odd);
+        added.devices.insert(b);
+        added.boxes.insert(b);
+        assert_eq!(field_class(&odd, &added, "devices"), ChangeClass::Loosen);
+    }
+
+    #[test]
     fn ap_12_no_counter_in_force_and_two_counters_added_is_free() {
         let mut old = base();
         old.devices.clear();
