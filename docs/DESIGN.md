@@ -128,8 +128,8 @@ OpenBMT never holds the shop's money, and never makes the key that holds
 its savings. A new owner should be able to try every screen in the first
 minute and take a first sale in about ten. The hard truths are said once,
 plainly, where they matter: whoever has the words can spend the money; a
-phone is not a vault; OpenBMT is new and has not been checked by an outside
-security firm.
+phone is not a vault; OpenBMT is new, and no independent security audit
+has been done yet.
 
 **Three lines, the same everywhere.**
 
@@ -153,9 +153,9 @@ Nobody has to open either.
    and the phone or tablet for your till, if you use one." Setup stops and
    resumes at any step.
 2. **Welcome.** "Take bitcoin in your shop. It goes straight to your own
-   wallet." Under it, once: "OpenBMT is new. No outside security firm has
-   checked it yet. Start with small amounts." Two buttons: Try it first,
-   and Set up my shop.
+   wallet." Under it, once: "OpenBMT is new, and no independent security
+   audit has been done yet. Start with small amounts." Two buttons: Try it
+   first, and Set up my shop.
 3. **Try it first** (optional). A practice shop on this phone only,
    offline, marked Practice on every screen: a sale (ring up, the customer
    pays, Paid), the books and a refund. One tap deletes it.

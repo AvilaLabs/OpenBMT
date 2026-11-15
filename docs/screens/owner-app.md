@@ -236,7 +236,7 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | welcomeSetup | Set up my shop |
 | welcomeTryNote | A practice shop on this phone. No money, no wallet, nothing to buy. |
 | welcomeLine | Your keys. Your bitcoin. Your shop. |
-| welcomeNew | OpenBMT is new. No outside security firm has checked it yet. Start with small amounts. |
+| welcomeNew | OpenBMT is new, and no independent security audit has been done yet. Start with small amounts. |
 | beforeTitle | Before you start |
 | beforeText | About 10 minutes. You'll need this phone, a pen, and the phone or tablet for your till, if you use one. |
 | beforeResume | You can stop at any step and carry on later. |

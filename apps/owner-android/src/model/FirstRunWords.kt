@@ -12,7 +12,7 @@ object FirstRunWords {
     const val welcomeTitle = "Take bitcoin in your shop."
     const val welcomeText = "It goes straight to your own wallet. Nobody holds it for you, and nobody takes a cut of your sales."
     const val welcomeLine = "Your keys. Your bitcoin. Your shop."
-    const val welcomeNew = "OpenBMT is new. No outside security firm has checked it yet. Start with small amounts."
+    const val welcomeNew = "OpenBMT is new, and no independent security audit has been done yet. Start with small amounts."
     const val welcomeTry = "Try it first"
     const val welcomeSetup = "Set up my shop"
     const val welcomeTryNote = "A practice shop on this phone. No money, no wallet, nothing to buy."
