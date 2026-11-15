@@ -83,6 +83,24 @@ object OwnPairWords {
     const val waitingDropped = "No change is waiting"
     const val pairedLater = "This counter takes sales now. It joins the other devices through the Box once a counter the shop already has confirms the change."
 
+    // ---- this phone as a counter too (OA-124 to OA-126) ----
+    const val oneButton = "Use this phone as the counter too"
+    const val oneNoAppTitle = "The counter app is not on this phone"
+    const val oneNoAppText = "Install OpenBMT Counter on this phone from the same place you got this app, then tap Try again."
+    const val oneTryAgain = "Try again"
+    const val oneOtherSignerTitle = "These two apps cannot pair here"
+    const val oneOtherSignerText = "The counter app on this phone comes from a different publisher than this app. Install both from the same place."
+    const val oneConfirmTitle = "Add this phone as a counter?"
+    const val oneConfirmText = "This phone will take payments as a counter and stays your owner phone. Payments still go only to your wallet."
+    const val oneConfirmAdd = "Add as a counter"
+    const val oneCancel = "Cancel"
+    const val oneEndedText = "The counter app stopped before pairing finished. Nothing was added."
+    const val oneWatchTitle = "Keep instant sales on"
+    const val oneWatchText = "On one phone, the owner app is closed while you sell. Turn on Watch in the background so that small payments still count at once."
+    const val oneWatchOn = "Turn it on"
+    const val oneWatchLater = "Not now"
+    const val oneOpenCounter = "Open the counter"
+
     // ---- refusals of the app's own steps (OA-105, OA-108) ----
     val walletNotSaved = SayWords(
         Tones.STOP, Who.OWNER, "Wallet not saved",
@@ -167,6 +185,12 @@ object OwnPairWords {
         add("waitingDropped", waitingDropped)
         add("pairedLater", pairedLater)
         add("boxStartAgain", boxStartAgain)
+        add("oneButton", oneButton); add("oneNoAppTitle", oneNoAppTitle); add("oneNoAppText", oneNoAppText)
+        add("oneTryAgain", oneTryAgain); add("oneOtherSignerTitle", oneOtherSignerTitle); add("oneOtherSignerText", oneOtherSignerText)
+        add("oneConfirmTitle", oneConfirmTitle); add("oneConfirmText", oneConfirmText); add("oneConfirmAdd", oneConfirmAdd)
+        add("oneCancel", oneCancel); add("oneEndedText", oneEndedText); add("oneWatchTitle", oneWatchTitle)
+        add("oneWatchText", oneWatchText); add("oneWatchOn", oneWatchOn); add("oneWatchLater", oneWatchLater)
+        add("oneOpenCounter", oneOpenCounter)
         for ((k, w) in listOf("boxDifferStopped" to boxDifferStopped, "boxLinkNotSaved" to boxLinkNotSaved)) {
             add("$k.heading", w.heading); add("$k.what", w.what); add("$k.next", w.next)
         }

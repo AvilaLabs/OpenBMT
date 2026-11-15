@@ -195,6 +195,13 @@ class Controller(internal val act: MainActivity) {
     private var pickerDone: ((Uri) -> Unit)? = null
     private var pickerCancel: (() -> Unit)? = null
 
+    // The counter app's pairing activity on this phone, started for a result (OA-124, OA-125): what is done with the
+    // result. It waits as a picker does, so the node keeps running and the same 60 seconds apply.
+    private var oneResult: ((Int, Intent?) -> Unit)? = null
+
+    /** What is done when the turn-on of "Watch in the background" is finished: set by the one-phone steps, null otherwise (OA-126). */
+    internal var watchAfter: (() -> Unit)? = null
+
     // The text on the clipboard that holds a secret, and the timer that takes it off again.
     private var sensitiveClip: String? = null
     private val clearSensitiveClip = Runnable {
@@ -375,7 +382,7 @@ class Controller(internal val act: MainActivity) {
             is Screen.FirstStart -> showFirstStart(null)
             is Screen.TorBlocked -> showMessage(s.words, if (s.words === AppWords.torFailed) "Try again" else "Check again") { begin() }
             is Screen.Starting -> waiting(AppWords.starting)
-            is Screen.Home -> showHome()
+            is Screen.Home -> if (!resumeHeld()) showHome()
         }
     }
 
@@ -952,8 +959,56 @@ class Controller(internal val act: MainActivity) {
         }
     }
 
+    /** Starts the counter app's pairing activity by [intent], for a result; [failed] when it cannot be started (OA-124). */
+    internal fun startOnePhone(code: Int, intent: Intent, failed: () -> Unit, done: (Int, Intent?) -> Unit) {
+        oneResult = done
+        pickerSince = SystemClock.elapsedRealtime()
+        try {
+            @Suppress("DEPRECATION")
+            act.startActivityForResult(intent, code)
+        } catch (_: RuntimeException) {
+            pickerSince = null
+            oneResult = null
+            failed()
+        }
+    }
+
+    /** The answer of the counter app that came while the app was locked, kept in memory until the unlock (OA-125). */
+    internal val oneHold = OneHold()
+
+    private fun onePhoneResult(result: Int, data: Intent?) {
+        val since = pickerSince
+        val done = oneResult
+        pickerSince = null
+        oneResult = null
+        val tooLong = since != null && ExternalWait.decide(since, SystemClock.elapsedRealtime()) == WaitOutcome.Lock
+        val resume: () -> Unit = if (done != null) ({ done(result, data) }) else ({ oneLost() })
+        when (OnePhoneModel.arrival(since != null, done != null, tooLong, node != null)) {
+            OnePhoneModel.Arrival.Resume, OnePhoneModel.Arrival.Lost -> resume()
+            OnePhoneModel.Arrival.Hold, OnePhoneModel.Arrival.HoldLost -> {
+                // OA-62: the lock is not relaxed. The answer waits in memory, with the pairing it belongs to, and
+                // goes on where it leads after the unlock.
+                oneHold.hold(resume)
+                if (tooLong) {
+                    lockNow()
+                    begin()
+                } else if (node != null) {
+                    render()
+                }
+            }
+        }
+    }
+
+    /** Goes on with the answer that was kept, once; false when none was. */
+    private fun resumeHeld(): Boolean {
+        val held = oneHold.take() ?: return false
+        held()
+        return true
+    }
+
     fun picked(code: Int, result: Int, data: Intent?) {
         if (code == REQUEST_CREDENTIAL) return credentialResult(result)
+        if (code == REQUEST_ONE_OFFER || code == REQUEST_ONE_BUNDLE) return onePhoneResult(result, data)
         if (code != REQUEST_PICK) return
         // A result with no wait noted was already dealt with by the resume (OA-62).
         val since = pickerSince ?: return
@@ -1045,6 +1100,10 @@ class Controller(internal val act: MainActivity) {
         const val VERSION = "0.1.0"
         const val REQUEST_PICK = 1
         const val REQUEST_CREDENTIAL = 2
+
+        /** The request codes of the counter app's pairing activity: with the offer, and with the bundle (OA-124, OA-125). */
+        const val REQUEST_ONE_OFFER = 3
+        const val REQUEST_ONE_BUNDLE = 4
 
         /** The request code of the notification permission's dialog (OA-83). */
         const val REQUEST_NOTIFY = 8001

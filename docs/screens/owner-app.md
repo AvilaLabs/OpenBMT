@@ -599,6 +599,22 @@ addresses:
 | waitingDropped | No change is waiting |
 | pairedLater | This counter takes sales now. It joins the other devices through the Box once a counter the shop already has confirms the change. |
 | boxStartAgain | Start again |
+| oneButton | Use this phone as the counter too |
+| oneNoAppTitle | The counter app is not on this phone |
+| oneNoAppText | Install OpenBMT Counter on this phone from the same place you got this app, then tap Try again. |
+| oneTryAgain | Try again |
+| oneOtherSignerTitle | These two apps cannot pair here |
+| oneOtherSignerText | The counter app on this phone comes from a different publisher than this app. Install both from the same place. |
+| oneConfirmTitle | Add this phone as a counter? |
+| oneConfirmText | This phone will take payments as a counter and stays your owner phone. Payments still go only to your wallet. |
+| oneConfirmAdd | Add as a counter |
+| oneCancel | Cancel |
+| oneEndedText | The counter app stopped before pairing finished. Nothing was added. |
+| oneWatchTitle | Keep instant sales on |
+| oneWatchText | On one phone, the owner app is closed while you sell. Turn on Watch in the background so that small payments still count at once. |
+| oneWatchOn | Turn it on |
+| oneWatchLater | Not now |
+| oneOpenCounter | Open the counter |
 | boxDifferStopped.heading | Box not connected |
 | boxDifferStopped.what | The four words differ, so the device that answered may not be your Box, and nothing was sent to it. |
 | boxDifferStopped.next | Check the Box's address, enter a new invitation on it and start again. |

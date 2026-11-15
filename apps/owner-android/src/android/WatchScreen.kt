@@ -17,6 +17,7 @@ import org.openbmt.owner.SettingsQueued
 
 /** The setting's screen: the words, whether it is on, and one button for the other state. [message] is what the last step said. */
 internal fun Controller.showWatch(message: SayWords? = null) {
+    watchAfter = null
     val on = watchStore.enabled()
     val views = ArrayList<View>()
     views.add(para(AppWords.watchSettingMore))
@@ -30,6 +31,19 @@ internal fun Controller.showWatch(message: SayWords? = null) {
     }
     actions.add(ui.button("Back") { showHome() })
     screen(AppWords.watchSetting.heading, views, actions, back = { showHome() }, words = AppWords.watchSetting)
+}
+
+/** The one-phone pairing's offer to keep instant sales on (OA-126): the same turn-on, and [after] when it is finished. */
+internal fun Controller.watchTurnOnThen(after: () -> Unit) {
+    watchAfter = after
+    watchTurnOn()
+}
+
+/** The turn-on is finished: back to what asked for it, or to the setting's screen. */
+private fun Controller.watchDone() {
+    val after = watchAfter
+    watchAfter = null
+    if (after != null) after() else showWatch(null)
 }
 
 /** Turning on: the notification permission first (OA-83), then the key, the file, the settings change and the service. */
@@ -59,9 +73,9 @@ private fun Controller.watchTurnOnGranted() {
         val queued = r.getOrNull()
         WatchService.start(act)
         when {
-            queued == null -> showWatch(null)
-            queued.tightening -> centre(AppWords.editQueuedTightening, listOf(ui.primary("Done") { showWatch(null) }))
-            else -> centre(AppWords.editQueuedLoosening, listOf(ui.primary("Build the request for the Key app") { showSpend() }, ui.button("Later") { showWatch(null) }))
+            queued == null -> watchDone()
+            queued.tightening -> centre(AppWords.editQueuedTightening, listOf(ui.primary("Done") { watchDone() }))
+            else -> centre(AppWords.editQueuedLoosening, listOf(ui.primary("Build the request for the Key app") { showSpend() }, ui.button("Later") { watchDone() }))
         }
     }
 }

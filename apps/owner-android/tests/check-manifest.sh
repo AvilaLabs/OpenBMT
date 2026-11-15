@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Checks what the built APK's manifest says, with the SDK's own aapt2: the
 # permissions are INTERNET, CAMERA, FOREGROUND_SERVICE,
-# FOREGROUND_SERVICE_SPECIAL_USE, POST_NOTIFICATIONS and HIDE_OVERLAY_WINDOWS (SS-12) and nothing else (no
+# FOREGROUND_SERVICE_SPECIAL_USE, POST_NOTIFICATIONS and HIDE_OVERLAY_WINDOWS (SS-12), and PAIR_ON_THIS_PHONE, the
+# app's own signature-level permission (OA-124, CR-277), and nothing else (no
 # network state, wake lock, boot, storage or Bluetooth), the camera is a
 # feature that is not required, backup and device transfer off, cleartext
 # traffic off, not debuggable, nothing exported but the launcher activity, one
 # service of type specialUse that is not exported and names its use, and no
-# receiver, provider or activity alias. The manifest in the APK is the merged
+# receiver, provider or activity alias; one query, for the counter app's package (OA-124). The manifest in the APK is the merged
 # one: no library adds to it. (OA-02, OA-03, OA-89)
 #
 # Usage: tests/check-manifest.sh APK [AAPT2]
@@ -24,9 +25,23 @@ tree="$("$aapt2" dump xmltree --file AndroidManifest.xml "$apk" 2>&1)" || { echo
 
 count() { printf '%s\n' "$tree" | grep -c -E "$1"; }
 
-# 1. The six permissions, and the camera is not required.
+# 1. The six permissions, the app's own seventh (OA-124), and the camera is not required.
 declared="$(printf '%s\n' "$tree" | grep -E 'E: uses-permission' | wc -l)"
-if [ "$declared" -eq 6 ]; then pass "exactly six uses-permission elements"; else fail "$declared uses-permission elements"; fi
+if [ "$declared" -eq 7 ]; then pass "exactly seven uses-permission elements"; else fail "$declared uses-permission elements"; fi
+if [ "$(count 'E: permission( |$)')" -eq 1 ] \
+    && printf '%s\n' "$tree" | grep -A3 'E: permission' | grep -q 'org.openbmt.permission.PAIR_ON_THIS_PHONE' \
+    && printf '%s\n' "$tree" | grep -A3 'E: permission' | grep -q -E 'protectionLevel.*=0x0*2( |$)'; then
+    pass "one permission of its own, PAIR_ON_THIS_PHONE, of protection level signature"
+else
+    fail "the permission of its own is not exactly PAIR_ON_THIS_PHONE of protection level signature"
+fi
+if [ "$(count 'E: queries( |$)')" -eq 1 ] && [ "$(count 'E: package( |$)')" -eq 1 ] \
+    && printf '%s\n' "$tree" | grep -A3 'E: package' | grep -q 'org.openbmt.counter.app' \
+    && [ "$(count 'E: intent( |$)')" -eq 0 ] && [ "$(count 'E: provider( |$)')" -eq 0 ]; then
+    pass "one query, for the counter app's package, and no query for an intent or a provider"
+else
+    fail "the queries are not exactly the counter app's package"
+fi
 for p in INTERNET CAMERA FOREGROUND_SERVICE FOREGROUND_SERVICE_SPECIAL_USE POST_NOTIFICATIONS HIDE_OVERLAY_WINDOWS; do
     if printf '%s\n' "$tree" | grep -q "android.permission.$p"; then pass "$p is declared"; else fail "$p is not declared"; fi
 done
@@ -36,7 +51,7 @@ else
     pass "no other permission name in the manifest"
 fi
 perms="$("$aapt2" dump permissions "$apk" 2>&1 | grep -v -E '^package:' | sed -e 's/^ *//' | sort | tr '\n' ' ')"
-want="uses-permission: name='android.permission.CAMERA' uses-permission: name='android.permission.FOREGROUND_SERVICE' uses-permission: name='android.permission.FOREGROUND_SERVICE_SPECIAL_USE' uses-permission: name='android.permission.HIDE_OVERLAY_WINDOWS' uses-permission: name='android.permission.INTERNET' uses-permission: name='android.permission.POST_NOTIFICATIONS' "
+want="permission: org.openbmt.permission.PAIR_ON_THIS_PHONE uses-permission: name='android.permission.CAMERA' uses-permission: name='android.permission.FOREGROUND_SERVICE' uses-permission: name='android.permission.FOREGROUND_SERVICE_SPECIAL_USE' uses-permission: name='android.permission.HIDE_OVERLAY_WINDOWS' uses-permission: name='android.permission.INTERNET' uses-permission: name='android.permission.POST_NOTIFICATIONS' uses-permission: name='org.openbmt.permission.PAIR_ON_THIS_PHONE' "
 if [ "$perms" = "$want" ]; then
     pass "aapt2 dump permissions lists exactly the six"
 else

@@ -282,6 +282,7 @@ internal fun Controller.triedPin(back: (SayWords?) -> Unit, op: () -> Unit, done
             done()
         } catch (e: OwnerException) {
             if (e.rule == RULE_PIN_WRONG) {
+                oneHold.drop()
                 if (before.wrong >= Tries.WIPE_AT) {
                     wipe()
                 } else {
@@ -321,6 +322,7 @@ internal fun Controller.wipe() {
     resume.clear()
     firstRun = null
     starter.firstRun = null
+    oneHold.drop()
     lockNow()
     // The watch key and what the watcher follows go with the setup (OA-86).
     WatchService.stop(act)

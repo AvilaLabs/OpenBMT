@@ -554,7 +554,7 @@ object AppModelTest {
         ok(!old.contains("<include") && old.contains("<exclude domain=\"file\""), "the old rules include nothing")
     }
 
-    private fun oa_03_the_manifest_asks_for_six_permissions_and_exports_one_activity() {
+    private fun oa_03_the_manifest_asks_for_six_permissions_its_own_and_exports_one_activity() {
         val manifest = source("AndroidManifest.xml")
         val permissions = Regex("<uses-permission android:name=\"([^\"]+)\"").findAll(manifest).map { it.groupValues[1] }.toList()
         ok(
@@ -565,6 +565,7 @@ object AppModelTest {
                 "android.permission.FOREGROUND_SERVICE_SPECIAL_USE",
                 "android.permission.POST_NOTIFICATIONS",
                 "android.permission.HIDE_OVERLAY_WINDOWS",
+                "org.openbmt.permission.PAIR_ON_THIS_PHONE",
             ),
             "the permissions: $permissions",
         )
@@ -576,7 +577,7 @@ object AppModelTest {
         ok(manifest.contains("android:usesCleartextTraffic=\"false\"") && !manifest.contains("debuggable"), "cleartext off, not debuggable")
         ok(manifest.contains("package=\"org.openbmt.owner.app\""), "the package")
         val check = source("tests/check-manifest.sh")
-        ok(check.contains("-eq 6 ]") && check.contains("camera.any") && check.contains("minSdkVersion:'29'") && check.contains("targetSdkVersion:'36'"), "the script checks the APK for the same")
+        ok(check.contains("-eq 7 ]") && check.contains("camera.any") && check.contains("minSdkVersion:'29'") && check.contains("targetSdkVersion:'36'"), "the script checks the APK for the same")
         val build = source("build.sh")
         ok(build.contains("min_sdk=29") && build.contains("target_sdk=36") && build.contains("arm64-v8a:aarch64-linux-android") && build.contains("x86_64:x86_64-linux-android"), "the build's levels and ABIs")
     }
@@ -2416,7 +2417,7 @@ object AppModelTest {
         ok(Regex("<property").findAll(manifest).count() == 1 && !manifest.substring(manifest.indexOf("<service")).contains("<intent-filter"), "one property, and the service has no filter")
         for (bad in listOf("BOOT_COMPLETED", "<receiver", "<provider", "<activity-alias", "WAKE_LOCK", "SCHEDULE_EXACT_ALARM", "USE_EXACT_ALARM")) ok(!manifest.contains(bad), "no $bad")
         val check = source("tests/check-manifest.sh")
-        ok(check.contains("foregroundServiceType.*0x40000000") && check.contains("PROPERTY_SPECIAL_USE_FGS_SUBTYPE") && check.contains("-eq 6 ]") && check.contains("for kind in receiver provider activity-alias"), "the script checks the built APK for all of it")
+        ok(check.contains("foregroundServiceType.*0x40000000") && check.contains("PROPERTY_SPECIAL_USE_FGS_SUBTYPE") && check.contains("-eq 7 ]") && check.contains("for kind in receiver provider activity-alias"), "the script checks the built APK for all of it")
         val key = source("../key-android/AndroidManifest.xml")
         ok(!key.contains("<service") && !key.contains("FOREGROUND_SERVICE") && !key.contains("POST_NOTIFICATIONS"), "the Key app has no service")
         val counter = source("../counter-android/AndroidManifest.xml")
@@ -3476,7 +3477,7 @@ object AppModelTest {
         val rules = Regex("^- \\*\\*OA-(\\d{2,3})\\.\\*\\*", RegexOption.MULTILINE).findAll(rulesMd.readText()).map { it.groupValues[1] }.toList()
         ok(rules.first() == "01" && rules.map { it.toInt() } == rules.map { it.toInt() }.sorted() && rules.toSet().size == rules.size, "the rules are numbered upward from 01, each once: $rules")
         // OA-36 to OA-39 are kept for other work, OA-49 to OA-59 for the next, and OA-66 to OA-69 and OA-75 to OA-79 for more.
-        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..123)
+        val numbered = (1..35) + (40..48) + (60..65) + (70..74) + (80..89) + (90..126)
         ok(rules.map { it.toInt() }.all { it in numbered } && rules.map { it.toInt() } == numbered.filter { it.toString().padStart(2, '0') in rules }, "the rules are numbered from 01 without a gap but the kept numbers: $rules")
         for (id in rules) {
             ok(id in ids || "OA-$id" in notHere, "OA-$id has a test named oa_${id}_... or a reason")
@@ -4650,6 +4651,82 @@ object AppModelTest {
         println("AppModelTest (owner): $count checks passed")
     }
 
+    /** OA-124 to OA-126: this phone as the counter too. */
+    private fun oa_124_this_phone_as_the_counter_too() {
+        // The manifest: the permission declared and used, one query, nothing else new.
+        val manifest = source("AndroidManifest.xml")
+        ok(Regex("<permission android:name=\"org.openbmt.permission.PAIR_ON_THIS_PHONE\"\\s+android:protectionLevel=\"signature\"").containsMatchIn(manifest), "OA-124: the permission is declared, of protection level signature")
+        ok(Regex("<queries>\\s*<package android:name=\"org.openbmt.counter.app\" />\\s*</queries>").containsMatchIn(manifest) && Regex("<queries").findAll(manifest).count() == 1 && Regex("<package").findAll(manifest).count() == 1, "OA-124: one query, for the counter app's package")
+        ok(!manifest.contains("<intent>") && !manifest.contains("QUERY_ALL_PACKAGES"), "OA-124: no other query")
+        val check = source("tests/check-manifest.sh")
+        ok(check.contains("-eq 7 ]") && check.contains("PAIR_ON_THIS_PHONE") && check.contains("E: queries"), "OA-124: the script checks the permission and the query in the built APK")
+    }
+
+    /** OA-125: the answers of the counter app. */
+    private fun oa_125_the_counter_apps_answers() {
+        // The note that a counter is on this phone: strict reading.
+        val id = ByteArray(32) { (it + 1).toByte() }
+        ok(OnePhoneFile.decode(OnePhoneFile.encode(id))!!.contentEquals(id), "OA-125: the note reads back")
+        val note = OnePhoneFile.encode(id)
+        ok(OnePhoneFile.decode(note + byteArrayOf(0)) == null && OnePhoneFile.decode(note.copyOf(36)) == null && OnePhoneFile.decode(ByteArray(0)) == null, "OA-125: a note of another length is no note")
+        ok(OnePhoneFile.decode(note.copyOf().also { it[0] = 'X'.code.toByte() }) == null && OnePhoneFile.decode(note.copyOf().also { it[4] = 2 }) == null, "OA-125: another magic or version is no note")
+        ok(try { OnePhoneFile.encode(ByteArray(31)); false } catch (_: IOException) { true }, "OA-125: an id of another length is not written")
+        val dir = Files.createTempDirectory("onephone").toFile()
+        try {
+            ok(OnePhoneFile.read(dir) == null, "OA-125: no file, no note")
+            OnePhoneFile.write(dir, id)
+            ok(OnePhoneFile.read(dir)!!.contentEquals(id) && !File(dir, OnePhoneFile.NAME + ".tmp").exists(), "OA-125: the note is kept, with no temporary file left")
+            File(dir, OnePhoneFile.NAME).writeBytes(byteArrayOf(1, 2, 3))
+            ok(OnePhoneFile.read(dir) == null, "OA-125: a file that does not read strictly is no note")
+        } finally {
+            dir.deleteRecursively()
+        }
+        // What the counter app's answers come to.
+        val ended = OnePhoneModel.offerAnswer(0, byteArrayOf(1))
+        ok(ended is OnePhoneModel.Answer.Ended && OnePhoneModel.offerAnswer(OnePhoneModel.RESULT_OK, null) is OnePhoneModel.Answer.Ended && OnePhoneModel.offerAnswer(OnePhoneModel.RESULT_OK, ByteArray(0)) is OnePhoneModel.Answer.Ended, "OA-125: a cancel, no request and an empty one end the ceremony")
+        val request = OnePhoneModel.offerAnswer(OnePhoneModel.RESULT_OK, byteArrayOf(1, 2, 3))
+        ok(request is OnePhoneModel.Answer.Request && (request.result as SourceResult.Bytes).bytes.contentEquals(byteArrayOf(1, 2, 3)), "OA-125: a request is judged as the camera's is")
+        val big = OnePhoneModel.offerAnswer(OnePhoneModel.RESULT_OK, ByteArray(CounterModel.MAX_REQUEST_BYTES + 1))
+        ok(big is OnePhoneModel.Answer.Request && big.result is SourceResult.Failed, "OA-125: a request that is too large is refused with the camera's words")
+        ok(OnePhoneModel.paired(OnePhoneModel.RESULT_OK, true) && !OnePhoneModel.paired(OnePhoneModel.RESULT_OK, false) && !OnePhoneModel.paired(OnePhoneModel.RESULT_OK, null) && !OnePhoneModel.paired(0, true), "OA-125: paired only when the result says so")
+        // An answer that comes while the app is locked is kept, not dropped (OA-62).
+        ok(OnePhoneModel.arrival(true, true, false, true) == OnePhoneModel.Arrival.Resume, "OA-125: an answer within the minute goes on at once")
+        ok(OnePhoneModel.arrival(true, true, true, false) == OnePhoneModel.Arrival.Hold && OnePhoneModel.arrival(false, true, false, false) == OnePhoneModel.Arrival.Hold, "OA-62: an answer after the minute, or after the resume relocked, is held")
+        ok(OnePhoneModel.arrival(false, false, false, true) == OnePhoneModel.Arrival.Lost && OnePhoneModel.arrival(false, false, false, false) == OnePhoneModel.Arrival.HoldLost, "OA-125: with no pairing in memory the ceremony is said to have ended, after the unlock when locked")
+        val hold = OneHold()
+        var ran = 0
+        ok(hold.take() == null && !hold.isHeld, "OA-62: nothing held at first")
+        hold.hold { ran++ }
+        ok(hold.isHeld, "OA-62: the answer is held")
+        hold.take()!!.invoke()
+        ok(ran == 1 && hold.take() == null, "OA-62: it goes on once")
+        hold.hold { ran++ }
+        hold.drop()
+        ok(hold.take() == null && ran == 1, "OA-62: a wipe or a wrong PIN drops it")
+        val lock = source("src/android/Lock.kt")
+        ok(lock.substringAfter("internal fun Controller.wipe()").substringBefore("lockNow()").contains("oneHold.drop()") && lock.contains("oneHold.drop()\n                if (before.wrong"), "OA-62: the wipe and a wrong PIN drop the held answer")
+        ok(source("src/android/Controller.kt").contains("if (!resumeHeld()) showHome()"), "OA-62: the held answer goes on when home would show")
+        // The words.
+        ok(OwnPairWords.oneButton == "Use this phone as the counter too" && OwnPairWords.oneOpenCounter == "Open the counter" && OwnPairWords.oneWatchOn == "Turn it on" && OwnPairWords.oneWatchLater == "Not now", "OA-124: the buttons are as written down")
+        ok(OwnPairWords.all().filter { it.first.startsWith("one") }.size == 16, "OA-124: all sixteen words are in the list")
+        // The wiring.
+        val screen = source("src/android/OwnOnePhone.kt")
+        ok(screen.contains("OnePhoneCheck.peer(act, OnePhone.COUNTER_PACKAGE)") && screen.contains("ComponentName(OnePhone.COUNTER_PACKAGE, OnePhone.PAIR_ACTIVITY)") && !screen.contains("AnimatedQrView") && !screen.contains("codeCardOf"), "OA-124: the counter app is found, started by its explicit name, and the offer is not drawn")
+        ok(screen.contains("p.readRequest(q.bytes, nowSecs())") && screen.contains("p.match(nowSecs(), f.value)") && screen.contains("p.paired()") && screen.contains("OnePhoneFile.write("), "OA-125: the request, the match and the mark are the camera's calls")
+    }
+
+    /** OA-126: after a pairing here, the watch; and the row on home. */
+    private fun oa_126_the_watch_and_the_row_on_home() {
+        val id = ByteArray(32) { (it + 1).toByte() }
+        val screen = source("src/android/OwnOnePhone.kt")
+        ok(OnePhoneModel.inForce(id, listOf(ByteArray(32), id.copyOf())) && !OnePhoneModel.inForce(id, listOf(ByteArray(32))) && !OnePhoneModel.inForce(null, listOf(id)) && !OnePhoneModel.inForce(id, emptyList()), "OA-126: the row is for a counter the settings list")
+        ok(screen.contains("watchTurnOnThen(next)") && screen.contains("watchStore.enabled()"), "OA-126: the watch's turn-on is the existing one, and is skipped when it is on")
+        ok(source("src/android/OwnCounter.kt").contains("OwnPairWords.oneButton") && source("src/android/Screens.kt").contains("oneCounterInForce(n)"), "OA-124, OA-126: the button on the counter step and the row on home")
+        ok(!source("src/android/AddCounter.kt").contains("oneButton") && !source("src/android/AddCounter.kt").contains("oneStart"), "OA-124: the Key app's way has no such button")
+        val watch = source("src/android/WatchScreen.kt")
+        ok(watch.contains("watchAfter") && occurs(watch, "private fun Controller.watchTurnOn()") == 1, "OA-126: one turn-on, with a continuation")
+    }
+
     /** A picked file is read or written only when it came from a documents provider, never from the app's own folder (the picker's result). */
     private fun pickedFileTests() {
         val own = "org.openbmt.owner.app"
@@ -4672,7 +4749,7 @@ object AppModelTest {
         ok(reader.contains("onFailed(\"the file took more than 20 seconds to read\")") && reader.indexOf("if (!settled)") in 0 until reader.indexOf("onFailed("), "a read past the deadline is an unreadable file, once")
         ok(occurs(controller, "readPicked(uri, ") == 3, "the setup file, the response file and the other picked files all take the worker")
         ok(occurs(controller, "Intent.ACTION_OPEN_DOCUMENT") + occurs(controller, "Intent.ACTION_CREATE_DOCUMENT") == occurs(controller, "openPicker(intent, "), "every picker intent goes through the one function that checks the result")
-        ok(!controller.contains("ACTION_GET_CONTENT") && occurs(controller, "startActivityForResult(") == 2, "the pickers and the phone's PIN screen are the only calls for a result")
+        ok(!controller.contains("ACTION_GET_CONTENT") && occurs(controller, "startActivityForResult(") == 3, "the pickers, the phone's PIN screen and the counter app's pairing activity are the only calls for a result")
         val others = File(appDir, "src/android").listFiles { f -> f.name.endsWith(".kt") && f.name != "Controller.kt" }!!
         ok(others.none { f -> f.readText().let { it.contains("openInputStream(") || it.contains("openOutputStream(") || it.contains("ACTION_OPEN_DOCUMENT") || it.contains("ACTION_CREATE_DOCUMENT") || it.contains("ACTION_GET_CONTENT") } }, "no other file of the app reads or writes a picked address")
     }

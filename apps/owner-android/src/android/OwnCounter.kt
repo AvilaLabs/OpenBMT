@@ -114,7 +114,9 @@ private fun Controller.showOwnOffer(r: OwnPairExit, p: OwnPairing, message: SayW
     } else {
         ui.primary(OwnPairWords.endedButton) { showOwnCounter(r, p.start(nowSecs())) }
     }
-    stepScreen(OwnPairWords.title, views, listOf(action), back)
+    // OA-124: a shop on its own wallet or the starter wallet may use this phone as the counter too.
+    val actions = if (offer != null && !ended) listOf(action, ui.button(OwnPairWords.oneButton) { oneStart(r, p) }) else listOf(action)
+    stepScreen(OwnPairWords.title, views, actions, back)
 }
 
 /** The 10 minutes are over (OA-108): the words of the design file. */

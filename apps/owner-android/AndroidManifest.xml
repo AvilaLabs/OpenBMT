@@ -8,7 +8,9 @@
      Android 13 and later). One service, not exported, no receiver, no boot
      start. HIDE_OVERLAY_WINDOWS (Android 12 and later, a normal permission that is granted at
      install) lets the screens that show or take the starter wallet's words hide other apps' overlay
-     windows (`docs/START-SIMPLE-RULES.md` SS-12). Nothing else is asked for. tests/check-manifest.sh fails the build
+     windows (`docs/START-SIMPLE-RULES.md` SS-12). One permission of its own, of protection level
+     signature, which the app also uses, and a query for the counter app's package, for pairing a counter on the
+     same phone (OA-124). Nothing else is asked for. tests/check-manifest.sh fails the build
      if the list differs, or if anything but the launcher activity is exported. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.openbmt.owner.app">
@@ -19,6 +21,16 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
+
+    <!-- OA-124: the counter app's pairing activity asks its caller for this permission (CR-277). -->
+    <permission android:name="org.openbmt.permission.PAIR_ON_THIS_PHONE"
+        android:protectionLevel="signature" />
+    <uses-permission android:name="org.openbmt.permission.PAIR_ON_THIS_PHONE" />
+
+    <!-- OA-124: the one package the app looks for. -->
+    <queries>
+        <package android:name="org.openbmt.counter.app" />
+    </queries>
 
     <uses-feature
         android:name="android.hardware.camera.any"

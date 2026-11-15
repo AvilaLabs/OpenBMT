@@ -1056,31 +1056,6 @@ unchanged.
   from the payments the owner node's coin view has seen (the indexes with a
   receipt or a coin) and the highest index any counter's sales opened, and
   changes as payments arrive.
-- **OA-124.** For a shop on its own wallet or the starter wallet, the counter
-  step also offers "Use this phone as the counter too". The owner app looks
-  for the package `org.openbmt.counter.app` and checks that its signing
-  certificate is the owner app's own; when the app is missing, or signed by
-  another certificate, it says so and pairs nothing. Otherwise it makes the
-  offer as OA-108 says, without drawing it, and starts the counter app's
-  pairing activity by its explicit name, for a result
-  (`docs/COUNTER-RULES.md` CR-277 to CR-282). The manifest declares and
-  uses the permission of CR-277, a query for that one package, and nothing
-  more; `tests/check-manifest.sh` checks it.
-- **OA-125.** The request the counter returns is judged as OA-109 says for
-  one read by the camera, and its four words are not shown: the owner is
-  asked "Add this phone as a counter?", and the yes does what "They match"
-  does (OA-110). The bundle goes back to the counter app by the same
-  activity, and the counter is marked paired when that result says it is
-  paired, in place of "The counter shows Paired" (OA-111). The owner app
-  keeps, in a file of its own, that this counter is on this phone. A
-  counter app that ends without a result, or with a refusal, ends the
-  ceremony with words; the counter is not marked paired, and a new try
-  starts from a new offer.
-- **OA-126.** After a counter is paired on this phone, the owner app offers
-  "Watch in the background" (OA-80), since the owner app is closed while the
-  phone sells, and says why. "Not now" goes on. The home screen of a shop
-  with a counter on this phone has "Open the counter", which starts the
-  counter app by its explicit name.
 - **OA-114.** Every state and refusal of this section has words under
   `docs/SCREEN-RULES.md`; until the words are written a placeholder
   constant `WORDS_NEEDED_OA_xxx` names the rule.
@@ -1145,3 +1120,29 @@ specification, written before the code.
   to confirm" on a counter the shop already has.
 - **OA-123.** Every state and refusal of this section has words under
   `docs/SCREEN-RULES.md`, checked as every other words are.
+
+- **OA-124.** For a shop on its own wallet or the starter wallet, the counter
+  step also offers "Use this phone as the counter too". The owner app looks
+  for the package `org.openbmt.counter.app` and checks that its signing
+  certificate is the owner app's own; when the app is missing, or signed by
+  another certificate, it says so and pairs nothing. Otherwise it makes the
+  offer as OA-108 says, without drawing it, and starts the counter app's
+  pairing activity by its explicit name, for a result
+  (`docs/COUNTER-RULES.md` CR-277 to CR-282). The manifest declares and
+  uses the permission of CR-277, a query for that one package, and nothing
+  more; `tests/check-manifest.sh` checks it.
+- **OA-125.** The request the counter returns is judged as OA-109 says for
+  one read by the camera, and its four words are not shown: the owner is
+  asked "Add this phone as a counter?", and the yes does what "They match"
+  does (OA-110). The bundle goes back to the counter app by the same
+  activity, and the counter is marked paired when that result says it is
+  paired, in place of "The counter shows Paired" (OA-111). The owner app
+  keeps, in a file of its own, that this counter is on this phone. A
+  counter app that ends without a result, or with a refusal, ends the
+  ceremony with words; the counter is not marked paired, and a new try
+  starts from a new offer.
+- **OA-126.** After a counter is paired on this phone, the owner app offers
+  "Watch in the background" (OA-80), since the owner app is closed while the
+  phone sells, and says why. "Not now" goes on. The home screen of a shop
+  with a counter on this phone has "Open the counter", which starts the
+  counter app by its explicit name.

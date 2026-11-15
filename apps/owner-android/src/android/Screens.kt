@@ -57,6 +57,8 @@ internal fun Controller.showHome(): Unit = withNode { n ->
     // RQ-35: "Request a payment" is on Home for a shop paid to its own wallet (RQ-01).
     val footer = arrayListOf(ui.primary("Spend") { showSpend() })
     if (RequestModel.offered(ownStore.hasWallet())) footer.add(ui.button(RequestWords.homeButton) { showRequestForm() })
+    // OA-126: a counter of the shop that is on this phone, while it is in force.
+    if (oneCounterInForce(n)) footer.add(ui.button(OwnPairWords.oneOpenCounter) { openCounter() })
     screen("Owner", listOf(content), footer, logo = true)
     tick = tick@{
         try {
