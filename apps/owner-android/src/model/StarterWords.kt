@@ -65,7 +65,7 @@ object StarterWords {
     val patchUnknownWhy = say("SS34_PATCH_UNKNOWN_WHY", "This phone does not say when it was last updated, so it may lack fixes for known attacks.")
     val overlayNote = say("SS33_OVERLAY_NOTE", "Android does not show every app that can draw over others, so one may be on this phone and not be listed here.")
     val confirmButton = say("SS33_CONFIRM_BUTTON", "Go on anyway")
-    val confirmAgain = say("SS33_CONFIRM_AGAIN", "Each thing below was found on this phone. Go on only if you understand it.")
+    val confirmAgain = say("SS33_CONFIRM_AGAIN", "Each thing below was found on this phone. Go on only if you understand it. If someone else set up this phone for you, ask them about each one first.")
 
     // ---- the limit and the date (SS-35) ----
     val limitTitle = say("SS35_TITLE", "Your limit and your date")
@@ -76,7 +76,7 @@ object StarterWords {
     val limitLabel = say("SS35_LIMIT_LABEL", "Most it may hold")
     val priceLabel = say("SS35_PRICE_LABEL", "Price of one bitcoin")
     val dateLabel = say("SS35_DATE_LABEL", "Move to a wallet kept offline by")
-    val boxOnly = say("SS32_BOX_ONLY", "Payments from the starter wallet show on the counters only once the shop has a Box. Until then, this phone alone shows them.")
+    val boxOnly = say("SS32_BOX_ONLY", "Payments from the starter wallet show on the counters only once the shop has a Box, a small computer that stays on at home or in the shop. Until then, this phone alone shows them.")
     val stopLabel = say("SS38_STOP_LABEL", "Stop bitcoin sales above my limit")
     val limitInvalid = say("SS35_LIMIT_INVALID", "Type the most the starter wallet may hold, as a whole number.")
     val dateInvalid = say("SS35_DATE_INVALID", "Type a date after today.")
