@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use openbmt_box::till::{hex, reply_mac, request_mac, till_reply_key, till_request_key};
+use openbmt_box::till::{reply_mac, request_mac, till_reply_key, till_request_key};
 
 struct Dir(PathBuf);
 

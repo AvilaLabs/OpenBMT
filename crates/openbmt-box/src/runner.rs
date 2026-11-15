@@ -1071,11 +1071,9 @@ impl BoxRunner {
     ) -> Result<SocketAddr, StartFailure> {
         let listener = TcpListener::bind(bind).map_err(StartFailure::Listen)?;
         let setup = match self.status() {
-            BoxStatus::Unpaired | BoxStatus::InvitationOpen => {
-                Some(Arc::new(SetupCode::draw().ok_or_else(|| {
-                    StartFailure::State(BoxError::NoRandomness)
-                })?))
-            }
+            BoxStatus::Unpaired | BoxStatus::InvitationOpen => Some(Arc::new(
+                SetupCode::draw().ok_or(StartFailure::State(BoxError::NoRandomness))?,
+            )),
             BoxStatus::Paired | BoxStatus::TurnedOff => None,
         };
         let backend = Arc::new(PageHandles {

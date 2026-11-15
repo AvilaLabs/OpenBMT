@@ -846,7 +846,8 @@ fn bx_62_a_wrong_code_and_one_from_another_start_are_refused() {
 
 #[test]
 fn bx_62_the_code_is_read_with_or_without_the_dash_and_in_any_case() {
-    let spellings: [(u8, fn(&str) -> String); 4] = [
+    type Spelling = (u8, fn(&str) -> String);
+    let spellings: [Spelling; 4] = [
         (5, |c: &str| c.to_string()),
         (6, |c: &str| c.replace('-', "")),
         (7, |c: &str| c.to_lowercase()),
