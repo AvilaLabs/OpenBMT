@@ -59,10 +59,11 @@ Box's Dockerfile from this folder.
   second health check, "Status page", watches port 8987. `till` is a raw
   TCP interface on port 8091 for the till listener, which is on only after
   `till.txt` names it; it has no health check.
-- **Backups.** The whole volume. StartOS stops the service for a backup. The
-  till key and the POS token should be left out (BX-63), but the SDK is not
-  installed here (`node_modules` is absent), so whether `Backups.ofVolumes`
-  takes an exclude option is not checked and `backups.ts` is not changed.
+- **Backups.** The whole volume except `till-key`, `pos.token`,
+  `pos-token.txt` and `pos-token.txt.refused`, which `backups.ts` leaves out
+  with the SDK's `setOptions({ exclude })` (rsync excludes), so that a restore
+  does not bring back a till key or a POS token (BX-63). StartOS stops the
+  service for a backup.
 - **Dependencies.** None. A Bitcoin Core dependency comes with the Box's own
   node.
 - **Languages.** English only.

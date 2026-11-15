@@ -119,10 +119,10 @@ The three files of BX-64 go in the same folder and are read at the next start:
 `.refused` when refused, with the words in the app's log) and `till.txt`
 (`listen=0.0.0.0:8091`, kept). The compose file publishes port 8091 for the
 till behind a comment that says so; the Box answers on it only when
-`till.txt` is there. `umbrel-app.yml` has `backupIgnore` for `data/till-key`
-and `data/pos.token` (BX-63); no file in this repository documents that
-field, so it is written from the Umbrel app format as known, and it is not
-checked against the umbrel-apps linter.
+`till.txt` is there. `umbrel-app.yml` has `backupIgnore` for `data/till-key`,
+`data/pos.token`, `data/pos-token.txt` and `data/pos-token.txt.refused`
+(BX-63): paths under the app's data folder, which the compose file mounts at
+`/data`, in the form the umbrel-apps linter takes.
 
 How the port was chosen. The manifest `port` must be unique across the App
 Store, and `8987` is the port the page listens on inside the container. The

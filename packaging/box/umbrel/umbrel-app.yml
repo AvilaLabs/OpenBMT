@@ -26,6 +26,8 @@ releaseNotes: ""
 backupIgnore:
   - data/till-key
   - data/pos.token
+  - data/pos-token.txt
+  - data/pos-token.txt.refused
 
 developer: Avila Labs
 website: https://github.com/AvilaLabs/OpenBMT
