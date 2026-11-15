@@ -338,7 +338,7 @@ else
       -no-stdlib -no-reflect -Werror -jvm-target 1.8 \
       -classpath "$KLIB/kotlin-stdlib.jar:$KLIB/annotations-13.0.jar" -d "$CLASSES" \
       "$WRAPPER/Native.kt" "$WRAPPER/CounterNode.kt" "$APP/src/model/HostPort.kt" \
-      "$APP/src/model/LightningTransport.kt" "$APP/tests/LightningRealNodeTest.kt" >"$OUT/kotlinc.log" 2>&1 ||
+      "$APP/src/model/LightningOutcome.kt" "$APP/src/model/LightningTransport.kt" "$APP/tests/LightningRealNodeTest.kt" >"$OUT/kotlinc.log" 2>&1 ||
       { tail -20 "$OUT/kotlinc.log"; die "the Kotlin test did not compile"; }
     "${GUARD[@]}" "$JAVA_HOME/bin/java" -Xmx1g -cp "$CLASSES:$KLIB/kotlin-stdlib.jar" \
       org.openbmt.counter.app.LightningRealNodeTest "$JVM"

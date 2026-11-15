@@ -6,8 +6,6 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
 import java.security.SecureRandom
-import javax.crypto.SecretKeyFactory
-import javax.crypto.spec.PBEKeySpec
 import org.openbmt.app.DurableFile
 import org.openbmt.app.HoldCheck
 import org.openbmt.app.PinHold
@@ -16,20 +14,6 @@ import org.openbmt.app.PinNow
 /** What turns a PIN and a salt into the bytes that are stored. The platform's PBKDF2 on Android and on the JVM. */
 fun interface PinHasher {
     fun hash(pin: CharArray, salt: ByteArray, iterations: Int): ByteArray
-}
-
-/** PBKDF2 with HMAC-SHA-256 from the platform's `SecretKeyFactory`: 256 bits out. */
-object Pbkdf2Hasher : PinHasher {
-    override fun hash(pin: CharArray, salt: ByteArray, iterations: Int): ByteArray {
-        val spec = PBEKeySpec(pin, salt, iterations, PinStore.HASH_LEN * 8)
-        try {
-            return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
-        } catch (e: java.security.GeneralSecurityException) {
-            throw IOException("the platform has no PBKDF2 with HMAC-SHA-256", e)
-        } finally {
-            spec.clearPassword()
-        }
-    }
 }
 
 /** The answer to a PIN that was typed. */
