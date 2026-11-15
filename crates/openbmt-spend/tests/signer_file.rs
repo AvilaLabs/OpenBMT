@@ -10,8 +10,8 @@ use bitcoin::Witness;
 use common::*;
 use openbmt_core::wallet::Keychain;
 use openbmt_spend::{
-    check_finished, combine, finalize, psbt_for_signer, take_signer_signatures,
-    transaction_of_final_file, CombineError, SignerFileError,
+    check_finished, combine, finalize, psbt_for_signer, take_own_signatures,
+    take_signer_signatures, transaction_of_final_file, CombineError, SignerFileError,
 };
 
 /// A run with two inputs, and so a change output.
@@ -417,4 +417,171 @@ fn sp_48_a_file_with_every_input_final_is_the_transaction_it_holds() {
     assert_eq!(transaction_of_final_file(&with_sig), None);
     // A file that is not final at all.
     assert_eq!(transaction_of_final_file(&out), None);
+}
+
+// ---- the two halves of each check, one at a time ---------------------------
+
+/// `psbt` as a file of another version.
+fn version_one(psbt: &Psbt) -> Psbt {
+    let mut out = psbt.clone();
+    out.version = 1;
+    out
+}
+
+/// What a wallet that holds all three keys returns: the transaction and
+/// the signatures of keys 1 and 2, nothing else.
+fn returned_by_both(r: &Run) -> Psbt {
+    let mut out = Psbt::from_unsigned_tx(r.base.unsigned_tx.clone()).unwrap();
+    for (into, from) in out.inputs.iter_mut().zip(&r.by1.inputs) {
+        into.partial_sigs = from.partial_sigs.clone();
+    }
+    for (into, from) in out.inputs.iter_mut().zip(&r.by2.inputs) {
+        into.partial_sigs.extend(from.partial_sigs.clone());
+    }
+    out
+}
+
+/// The same file with one output a little smaller.
+fn other_transaction(psbt: &Psbt) -> Psbt {
+    let mut tx = psbt.unsigned_tx.clone();
+    let value = tx.output[0].value.to_sat();
+    tx.output[0].value = bitcoin::Amount::from_sat(value - 1);
+    Psbt::from_unsigned_tx(tx).unwrap()
+}
+
+#[test]
+fn sp_46_a_file_that_is_not_version_zero_is_refused_whichever_of_the_two_it_is() {
+    let r = two_inputs();
+    let out = sent(&r);
+    let back = returned_by(&r, 1);
+    assert!(take_signer_signatures(wallet(), &out, &back, 2).is_ok());
+    assert_eq!(
+        take_signer_signatures(wallet(), &version_one(&out), &back, 2).unwrap_err(),
+        SignerFileError::NotVersionZero
+    );
+    assert_eq!(
+        take_signer_signatures(wallet(), &out, &version_one(&back), 2).unwrap_err(),
+        SignerFileError::NotVersionZero
+    );
+    assert_eq!(
+        take_signer_signatures(wallet(), &version_one(&out), &version_one(&back), 2).unwrap_err(),
+        SignerFileError::NotVersionZero
+    );
+}
+
+#[test]
+fn sp_46_a_returned_file_with_another_transaction_is_refused() {
+    let r = two_inputs();
+    let out = sent(&r);
+    let back = other_transaction(&returned_by(&r, 1));
+    assert_eq!(
+        take_signer_signatures(wallet(), &out, &back, 2).unwrap_err(),
+        SignerFileError::DifferentTransaction
+    );
+}
+
+#[test]
+fn sp_83_the_signatures_of_the_shops_own_wallet_of_three_keys_are_taken() {
+    let r = two_inputs();
+    let both = returned_by_both(&r);
+    let taken = take_own_signatures(wallet(), &r.base, &both).unwrap();
+    for input in &taken.inputs {
+        assert_eq!(input.partial_sigs.len(), 2);
+    }
+    // The result holds both signers' signatures on every input and finishes.
+    for (got, want) in taken.inputs.iter().zip(&both.inputs) {
+        assert_eq!(got.partial_sigs, want.partial_sigs);
+    }
+    let tx = finalize(wallet(), &taken).unwrap();
+    assert_eq!(tx.compute_txid(), r.plan.txid());
+    // The file the owner's signer already signed is a sent file too.
+    assert!(take_own_signatures(wallet(), &r.by1, &both).is_ok());
+}
+
+#[test]
+fn sp_83_one_signature_on_any_input_is_not_enough_and_the_input_is_named() {
+    let r = two_inputs();
+    for short in 0..2 {
+        let mut back = returned_by_both(&r);
+        let key = *back.inputs[short].partial_sigs.keys().next().unwrap();
+        back.inputs[short].partial_sigs.remove(&key);
+        assert_eq!(
+            take_own_signatures(wallet(), &r.base, &back).unwrap_err(),
+            SignerFileError::NotSigned { input: short }
+        );
+    }
+    // None at all.
+    let mut none = returned_by_both(&r);
+    none.inputs[1].partial_sigs.clear();
+    assert_eq!(
+        take_own_signatures(wallet(), &r.base, &none).unwrap_err(),
+        SignerFileError::NotSigned { input: 1 }
+    );
+    // Three signatures are more than enough.
+    let mut three = returned_by_both(&r);
+    let all = {
+        let mut p = r.base.clone();
+        sign_as(&mut p, 2);
+        p
+    };
+    for (into, from) in three.inputs.iter_mut().zip(&all.inputs) {
+        into.partial_sigs.extend(from.partial_sigs.clone());
+    }
+    let taken = take_own_signatures(wallet(), &r.base, &three).unwrap();
+    assert!(taken.inputs.iter().all(|i| i.partial_sigs.len() == 3));
+}
+
+#[test]
+fn sp_83_a_file_that_is_not_version_zero_is_refused_whichever_of_the_two_it_is() {
+    let r = two_inputs();
+    let both = returned_by_both(&r);
+    assert_eq!(
+        take_own_signatures(wallet(), &version_one(&r.base), &both).unwrap_err(),
+        SignerFileError::NotVersionZero
+    );
+    assert_eq!(
+        take_own_signatures(wallet(), &r.base, &version_one(&both)).unwrap_err(),
+        SignerFileError::NotVersionZero
+    );
+}
+
+#[test]
+fn sp_83_a_returned_file_with_another_transaction_is_refused() {
+    let r = two_inputs();
+    let back = other_transaction(&returned_by_both(&r));
+    assert_eq!(
+        take_own_signatures(wallet(), &r.base, &back).unwrap_err(),
+        SignerFileError::DifferentTransaction
+    );
+}
+
+#[test]
+fn sp_45_an_output_with_a_script_or_with_hints_alone_is_refused() {
+    let r = two_inputs();
+    let change = r
+        .by1
+        .outputs
+        .iter()
+        .position(|o| o.witness_script.is_some())
+        .unwrap();
+    assert!(psbt_for_signer(wallet(), &r.by1).is_ok());
+    // A witness script and no hints.
+    let mut script_only = r.by1.clone();
+    script_only.outputs[change].bip32_derivation.clear();
+    assert_eq!(
+        psbt_for_signer(wallet(), &script_only).unwrap_err(),
+        SignerFileError::Output { output: change }
+    );
+    // Hints and no witness script.
+    let mut hints_only = r.by1.clone();
+    hints_only.outputs[change].witness_script = None;
+    assert_eq!(
+        psbt_for_signer(wallet(), &hints_only).unwrap_err(),
+        SignerFileError::Output { output: change }
+    );
+    // Neither is a payment, which is copied as nothing.
+    let mut neither = r.by1.clone();
+    neither.outputs[change].witness_script = None;
+    neither.outputs[change].bip32_derivation.clear();
+    assert!(psbt_for_signer(wallet(), &neither).is_ok());
 }

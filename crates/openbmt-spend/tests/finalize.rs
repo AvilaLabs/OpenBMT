@@ -3,14 +3,18 @@
 mod common;
 
 use bitcoin::absolute::LockTime;
-use bitcoin::bip32::DerivationPath;
+use bitcoin::bip32::{ChildNumber, DerivationPath};
 use bitcoin::psbt::Psbt;
 use bitcoin::secp256k1::Message;
 use bitcoin::transaction::Version;
 use bitcoin::{Amount, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness};
 use common::*;
 use openbmt_core::wallet::Keychain;
-use openbmt_spend::{combine, finalize, finalize_plan, plan, ChangePosition, FinalizeError};
+use openbmt_signer::MAX_MONEY_SATS;
+use openbmt_spend::{
+    check_finished, combine, finalize, finalize_plan, plan, ChangePosition, FinalizeError,
+    SignerFileError,
+};
 
 fn two_input_run() -> Run {
     run(
@@ -460,5 +464,169 @@ fn sp_64_a_file_whose_outputs_were_reordered_is_not_the_plans() {
     assert_eq!(
         finalize_plan(wallet(), &swapped, &first.plan).unwrap_err(),
         FinalizeError::NotThePlan
+    );
+}
+
+// ---- SP-62: the last check, on finished transactions altered afterwards ----
+
+/// The file both signers signed, and the transaction finished from it.
+fn finished() -> (Psbt, Transaction) {
+    let r = two_input_run();
+    let signed = combine(&r.base, &[r.by1.clone(), r.by2.clone()]).unwrap();
+    let tx = finalize(wallet(), &signed).unwrap();
+    (signed, tx)
+}
+
+/// `tx` with item `item` of the witness of input `input` replaced by `f` of it.
+fn with_item(tx: &Transaction, input: usize, item: usize, f: impl Fn(&mut Vec<u8>)) -> Transaction {
+    let mut out = tx.clone();
+    let mut items: Vec<Vec<u8>> = tx.input[input].witness.iter().map(<[u8]>::to_vec).collect();
+    f(&mut items[item]);
+    out.input[input].witness = Witness::from_slice(&items);
+    out
+}
+
+fn final_check_failed(what: &'static str) -> SignerFileError {
+    SignerFileError::Finished(FinalizeError::FinalCheckFailed(what))
+}
+
+#[test]
+fn sp_62_a_witness_whose_first_item_is_not_empty_is_refused() {
+    let (signed, tx) = finished();
+    assert!(check_finished(wallet(), &signed, &tx).is_ok());
+    for input in 0..2 {
+        let one = with_item(&tx, input, 0, |item| item.push(1));
+        assert_eq!(
+            check_finished(wallet(), &signed, &one).unwrap_err(),
+            final_check_failed("a witness does not have the shape of SP-60")
+        );
+    }
+    // A script that is not the wallet's is refused by the same check.
+    let other = with_item(&tx, 0, 3, |item| item[1] ^= 1);
+    assert_eq!(
+        check_finished(wallet(), &signed, &other).unwrap_err(),
+        final_check_failed("a witness does not have the shape of SP-60")
+    );
+}
+
+#[test]
+fn sp_62_one_signature_with_another_hash_type_is_refused() {
+    let (signed, tx) = finished();
+    // The signature bytes still verify: only the last byte changes.
+    for input in 0..2 {
+        for item in [1, 2] {
+            for byte in [0x02u8, 0x81] {
+                let changed = with_item(&tx, input, item, |sig| *sig.last_mut().unwrap() = byte);
+                assert_eq!(
+                    check_finished(wallet(), &signed, &changed).unwrap_err(),
+                    final_check_failed("a signature is not SIGHASH_ALL"),
+                    "input {input}, item {item}, byte {byte:#x}"
+                );
+            }
+        }
+    }
+    // Both at once.
+    let both = with_item(
+        &with_item(&tx, 0, 1, |sig| *sig.last_mut().unwrap() = 0x02),
+        0,
+        2,
+        |sig| *sig.last_mut().unwrap() = 0x02,
+    );
+    assert_eq!(
+        check_finished(wallet(), &signed, &both).unwrap_err(),
+        final_check_failed("a signature is not SIGHASH_ALL")
+    );
+}
+
+/// A file of one input of `input_sats` and one output of `output_sats`,
+/// signed by keys 1 and 2, built by hand: `plan` would not make it.
+fn amounts_file(input_sats: u64, output_sats: u64) -> Psbt {
+    let r = run(&[coin(1, 0, 300_000)], vec![(external(1), 100_000)], 1000);
+    let mut psbt = r.base;
+    psbt.unsigned_tx.output.truncate(1);
+    psbt.outputs.truncate(1);
+    psbt.unsigned_tx.output[0].value = Amount::from_sat(output_sats);
+    let funded = coin(1, 0, input_sats);
+    psbt.unsigned_tx.input[0].previous_output = funded.outpoint;
+    psbt.inputs[0].witness_utxo = Some(funded.prev_tx.output[1].clone());
+    psbt.inputs[0].non_witness_utxo = Some(funded.prev_tx);
+    sign_as(&mut psbt, 0);
+    sign_as(&mut psbt, 1);
+    psbt
+}
+
+#[test]
+fn sp_62_an_output_above_the_most_money_there_is_refused_for_its_amount() {
+    // An output of exactly the most, covered by the input: finished, no fee.
+    let at = amounts_file(MAX_MONEY_SATS, MAX_MONEY_SATS);
+    let tx = finalize(wallet(), &at).unwrap();
+    assert_eq!(tx.output[0].value.to_sat(), MAX_MONEY_SATS);
+    assert_eq!(check_finished(wallet(), &at, &tx).unwrap(), 0);
+    // One more is out of range, not "outputs exceed inputs".
+    let past = amounts_file(MAX_MONEY_SATS, MAX_MONEY_SATS + 1);
+    assert_eq!(
+        finalize(wallet(), &past).unwrap_err(),
+        FinalizeError::AmountOutOfRange
+    );
+}
+
+#[test]
+fn sp_62_an_input_above_the_most_money_there_is_refused_for_its_amount() {
+    let past = amounts_file(MAX_MONEY_SATS + 1, 1000);
+    assert_eq!(
+        finalize(wallet(), &past).unwrap_err(),
+        FinalizeError::AmountOutOfRange
+    );
+    // The same refusal from the check of a finished transaction.
+    assert_eq!(
+        check_finished(wallet(), &past, &past.unsigned_tx).unwrap_err(),
+        SignerFileError::Finished(FinalizeError::AmountOutOfRange)
+    );
+    // Exactly the most is not refused for its amount.
+    let at = amounts_file(MAX_MONEY_SATS, 1000);
+    assert!(finalize(wallet(), &at).is_ok());
+    assert_ne!(
+        check_finished(wallet(), &at, &at.unsigned_tx).unwrap_err(),
+        SignerFileError::Finished(FinalizeError::AmountOutOfRange)
+    );
+}
+
+#[test]
+fn sp_61_two_hints_that_claim_different_places_are_inconsistent_whichever_comes_second() {
+    let r = two_input_run();
+    let signed = combine(&r.base, &[r.by1.clone(), r.by2.clone()]).unwrap();
+    assert!(finalize(wallet(), &signed).is_ok());
+    // One of the three hints, in each place of the map, names another index
+    // of the same chain; its key is still the key at the place of the others.
+    for moved in 0..3 {
+        for index in [7u32, 1] {
+            let mut file = signed.clone();
+            for (at, (_, path)) in file.inputs[0].bip32_derivation.values_mut().enumerate() {
+                if at == moved {
+                    let mut steps: Vec<ChildNumber> = path.as_ref().to_vec();
+                    *steps.last_mut().unwrap() = ChildNumber::Normal { index };
+                    *path = DerivationPath::from(steps);
+                }
+            }
+            assert_eq!(
+                finalize(wallet(), &file).unwrap_err(),
+                FinalizeError::HintsInconsistent { input: 0 },
+                "hint {moved} at index {index}"
+            );
+        }
+    }
+    // One on the other chain.
+    let mut file = signed.clone();
+    for (at, (_, path)) in file.inputs[0].bip32_derivation.values_mut().enumerate() {
+        if at == 2 {
+            let mut steps: Vec<ChildNumber> = path.as_ref().to_vec();
+            let n = steps.len();
+            steps[n - 2] = ChildNumber::Normal { index: 1 };
+            *path = DerivationPath::from(steps);
+        }
+    }
+    assert_eq!(
+        finalize(wallet(), &file).unwrap_err(),
+        FinalizeError::HintsInconsistent { input: 0 }
     );
 }

@@ -409,3 +409,148 @@ fn sp_54_the_same_signer_twice_is_kept_once_and_order_does_not_matter() {
         combine(&r.base, &[b, a]).unwrap()
     );
 }
+
+/// A second valid low-S signature by key 1 on input 0, over the same hash
+/// as `signature_by` makes, with extra nonce data.
+fn another_signature(r: &Run) -> ecdsa::Signature {
+    let hash = bip143(
+        &r.base.unsigned_tx,
+        0,
+        r.base.inputs[0].witness_script.as_ref().unwrap(),
+        amount_of(&r.base, 0),
+    );
+    let child = kit().accounts[0]
+        .derive_priv(
+            secp(),
+            &[
+                bitcoin::bip32::ChildNumber::Normal { index: 0 },
+                bitcoin::bip32::ChildNumber::Normal { index: 0 },
+            ],
+        )
+        .unwrap();
+    ecdsa::Signature {
+        signature: secp().sign_ecdsa_with_noncedata(
+            &Message::from_digest(hash),
+            &child.private_key,
+            &[9u8; 32],
+        ),
+        sighash_type: EcdsaSighashType::All,
+    }
+}
+
+#[test]
+fn sp_54_of_two_valid_signatures_by_one_key_the_one_with_the_smaller_bytes_is_kept() {
+    let r = same_index_run(1000);
+    let (public, sig) = signature_by(&r.base, 0, 0);
+    let other = another_signature(&r);
+    assert_ne!(other.signature, sig.signature);
+    let smaller = if sig.signature.serialize_compact() <= other.signature.serialize_compact() {
+        sig
+    } else {
+        other
+    };
+    let mut a = r.base.clone();
+    a.inputs[0].partial_sigs.insert(public, sig);
+    let mut b = r.base.clone();
+    b.inputs[0].partial_sigs.insert(public, other);
+    // Whichever copy comes first, in the copies and in the base.
+    for result in [
+        combine(&r.base, &[a.clone(), b.clone()]).unwrap(),
+        combine(&r.base, &[b.clone(), a.clone()]).unwrap(),
+        combine(&a, std::slice::from_ref(&b)).unwrap(),
+        combine(&b, std::slice::from_ref(&a)).unwrap(),
+    ] {
+        assert_eq!(result.inputs[0].partial_sigs.len(), 1);
+        assert_eq!(result.inputs[0].partial_sigs[&public], smaller);
+    }
+}
+
+#[test]
+fn sp_50_a_source_is_named_in_words() {
+    assert_eq!(Source::Base.to_string(), "the base file");
+    assert_eq!(Source::Copy(0).to_string(), "signed copy 0");
+    assert_eq!(Source::Copy(7).to_string(), "signed copy 7");
+    let e = CombineError::InputAlreadyFinal {
+        source: Source::Copy(2),
+        input: 1,
+    };
+    assert_eq!(
+        e.to_string(),
+        "SP-50: input 1 of signed copy 2 is already final"
+    );
+    let e = CombineError::InputAlreadyFinal {
+        source: Source::Base,
+        input: 0,
+    };
+    assert_eq!(
+        e.to_string(),
+        "SP-50: input 0 of the base file is already final"
+    );
+}
+
+#[test]
+fn sp_50_a_previous_transaction_missing_from_the_base_or_a_copy_is_refused() {
+    let r = same_index_run(1000);
+    // Missing from the base: the base is refused, whatever the copies hold.
+    let mut bare_base = r.base.clone();
+    bare_base.inputs[1].non_witness_utxo = None;
+    let mut bare_copy = r.by1.clone();
+    bare_copy.inputs[1].non_witness_utxo = None;
+    assert_eq!(
+        combine(&bare_base, std::slice::from_ref(&bare_copy)).unwrap_err(),
+        CombineError::MissingPreviousTransaction { input: 1 }
+    );
+    assert_eq!(
+        combine(&bare_base, std::slice::from_ref(&r.by1)).unwrap_err(),
+        CombineError::MissingPreviousTransaction { input: 1 }
+    );
+    // Missing from a copy only: that copy holds other data than the base.
+    assert_eq!(
+        combine(&r.base, std::slice::from_ref(&bare_copy)).unwrap_err(),
+        CombineError::DifferentInputData { copy: 0, input: 1 }
+    );
+}
+
+#[test]
+fn sp_50_a_witness_script_that_is_not_exactly_three_keys_is_refused_and_never_panics() {
+    let r = same_index_run(1000);
+    let good = r.base.inputs[0].witness_script.clone().unwrap();
+    assert_eq!(good.len(), 105);
+    assert!(combine(&r.base, &[]).is_ok());
+    let with_script = |bytes: Vec<u8>| {
+        let mut base = r.base.clone();
+        base.inputs[0].witness_script = Some(bitcoin::ScriptBuf::from_bytes(bytes));
+        combine(&base, &[])
+    };
+    let shape = CombineError::WitnessScriptShape { input: 0 };
+    // A script cut short anywhere, inside a key too, or longer.
+    for len in 0..good.len() {
+        assert_eq!(
+            with_script(good.as_bytes()[..len].to_vec()).unwrap_err(),
+            shape,
+            "cut at {len}"
+        );
+    }
+    let mut longer = good.as_bytes().to_vec();
+    longer.push(0x75);
+    assert_eq!(with_script(longer).unwrap_err(), shape);
+    // A push of another length before a key that is still 33 bytes of a key,
+    // in each of the three places.
+    for at in [1usize, 35, 69] {
+        for push in [0x00u8, 0x20, 0x22, 0x4c] {
+            let mut bytes = good.as_bytes().to_vec();
+            bytes[at] = push;
+            assert_eq!(
+                with_script(bytes).unwrap_err(),
+                shape,
+                "push {push:#x} at {at}"
+            );
+        }
+    }
+    // Another opcode in front, or at the end.
+    for at in [0usize, 103, 104] {
+        let mut bytes = good.as_bytes().to_vec();
+        bytes[at] ^= 1;
+        assert_eq!(with_script(bytes).unwrap_err(), shape, "byte {at}");
+    }
+}

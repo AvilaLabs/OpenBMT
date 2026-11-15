@@ -1487,3 +1487,139 @@ fn sp_70_hostile_requests_are_errors_not_panics() {
         assert!(p.change().is_none_or(|c| c.sats >= 294));
     }
 }
+
+// ---- the two kinds told apart, one condition at a time ---------------------
+
+/// The file of a plan of the 2-of-3 wallet, unsigned.
+fn three_keys_file() -> Psbt {
+    plan(
+        multisig(),
+        &[multisig_coin(1, 0, 300_000), multisig_coin(2, 1, 300_000)],
+        &request(vec![(external(1), 400_000)], 1000),
+    )
+    .unwrap()
+    .to_psbt(multisig())
+    .unwrap()
+}
+
+fn is_wrong_kind_combine(e: &CombineError) -> bool {
+    matches!(e, CombineError::WrongKind { .. })
+}
+
+#[test]
+fn sp_80_a_wallet_with_one_key_refuses_a_p2wsh_script_and_a_witness_script_each_alone() {
+    let (_, one_key) = two_inputs();
+    let mine = signed(&one_key);
+    // Neither: the file is taken.
+    assert!(combine_wallet(single(), &one_key, &[]).is_ok());
+    assert!(finalize(single(), &mine).is_ok());
+    // A P2WPKH script spent with a witness script.
+    let mut with_script = mine.clone();
+    with_script.inputs[0].witness_script = Some(
+        multisig_inner()
+            .witness_script(Keychain::Receive, 0)
+            .unwrap(),
+    );
+    let wrong = FinalizeError::WrongKind {
+        input: 0,
+        expected: WalletKind::Single,
+    };
+    assert_eq!(finalize(single(), &with_script).unwrap_err(), wrong);
+    assert!(is_wrong_kind_combine(
+        &combine_wallet(single(), &with_script, &[]).unwrap_err()
+    ));
+    // A P2WSH script spent with no witness script.
+    let mut three = three_keys_file();
+    for input in &mut three.inputs {
+        input.witness_script = None;
+    }
+    assert_eq!(finalize(single(), &three).unwrap_err(), wrong);
+    assert!(is_wrong_kind_combine(
+        &combine_wallet(single(), &three, &[]).unwrap_err()
+    ));
+}
+
+#[test]
+fn sp_80_a_wallet_of_three_keys_refuses_a_p2wpkh_script_only_when_it_was_handed_in_typed() {
+    let (_, one_key) = two_inputs();
+    let mine = signed(&one_key);
+    let three = three_keys_file();
+    // Typed: a P2WPKH input is the other kind, a P2WSH input is not.
+    assert_eq!(
+        finalize(multisig(), &mine).unwrap_err(),
+        FinalizeError::WrongKind {
+            input: 0,
+            expected: WalletKind::Multisig
+        }
+    );
+    assert_eq!(
+        finalize(multisig(), &three).unwrap_err(),
+        FinalizeError::NotEnoughSignatures { input: 0, have: 0 }
+    );
+    assert!(combine_wallet(multisig(), &three, &[]).is_ok());
+    // Untyped: a P2WPKH input is not told apart; it is refused as a file the
+    // 2-of-3 wallet has no place for.
+    let e = finalize(multisig_inner(), &mine).unwrap_err();
+    assert!(!matches!(e, FinalizeError::WrongKind { .. }), "{e:?}");
+    let e = combine_wallet(multisig_inner(), &one_key, &[]).unwrap_err();
+    assert!(!is_wrong_kind_combine(&e), "{e:?}");
+    assert_eq!(e, CombineError::WitnessScriptShape { input: 0 });
+    assert!(combine_wallet(multisig_inner(), &three, &[]).is_ok());
+}
+
+#[test]
+fn sp_85_a_signature_of_any_hash_type_but_all_is_refused_by_the_last_check() {
+    let (p, base) = two_inputs();
+    let tx = finalize_plan(single(), &signed(&base), &p).unwrap();
+    for input in 0..2 {
+        for byte in [0x02u8, 0x81] {
+            let mut sig = tx.input[input].witness.nth(0).unwrap().to_vec();
+            *sig.last_mut().unwrap() = byte;
+            let mut changed = tx.clone();
+            changed.input[input].witness =
+                Witness::from_slice(&[sig, tx.input[input].witness.nth(1).unwrap().to_vec()]);
+            assert_eq!(
+                check_finished(single(), &base, &changed).unwrap_err(),
+                SignerFileError::Finished(FinalizeError::FinalCheckFailed(
+                    "a signature is not SIGHASH_ALL"
+                )),
+                "input {input}, byte {byte:#x}"
+            );
+        }
+    }
+}
+
+// ---- the number of inputs --------------------------------------------------
+
+fn many_coins(n: u32) -> Vec<Coin> {
+    (0..n).map(|i| coin(i + 1, 0, 1_000)).collect()
+}
+
+#[test]
+fn sp_25_a_plan_of_exactly_the_most_inputs_is_made_and_one_more_is_refused() {
+    // 1,000 coins of 1,000 satoshis at 1 sat/vB, and a payment that leaves
+    // the fee of 1,000 inputs and one output: every coin is needed, and none
+    // is left over for change.
+    let (_, vsize) = consolidation_size_single(1000).unwrap();
+    let pay = 1_000_000 - vsize;
+    let p = plan(
+        single(),
+        &many_coins(1000),
+        &request(vec![(external(1), pay)], 1000),
+    )
+    .unwrap();
+    assert_eq!(p.inputs().len(), 1000);
+    assert_eq!(p.unsigned_tx().input.len(), 1000);
+    assert_eq!(p.fee_sats(), vsize);
+    // A payment of all of them and more: with 1,000 coins there is not
+    // enough; with a 1,001st it would take more inputs than are allowed.
+    let r = request(vec![(external(1), 1_000_000)], 1000);
+    assert!(matches!(
+        plan(single(), &many_coins(1000), &r),
+        Err(PlanError::InsufficientFunds { .. })
+    ));
+    assert_eq!(
+        plan(single(), &many_coins(1001), &r).unwrap_err(),
+        PlanError::TooManyInputs
+    );
+}
