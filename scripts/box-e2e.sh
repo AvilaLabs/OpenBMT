@@ -73,8 +73,10 @@
 #      Box's notes say curl is not installed on this Box (BX-44 to BX-49).
 #  17. A Box started with --status-page: GET / answers with the security
 #      headers and words that say it is waiting for an invitation; another
-#      path is 404 and another method 405; a wrong invitation posted from the
-#      page's own origin is refused with words; a right one posted with a
+#      path is 404 and another method 405; the setup code is printed after
+#      the page's address and is on no page, a wrong code is refused with
+#      words and holds the page for ten seconds; a wrong invitation posted
+#      with the right code from the page's own origin is refused with words; a right one posted with a
 #      foreign Origin, or with none, is refused and changes nothing; the
 #      right one from the page's own origin is taken, the Key app side claims
 #      and welcomes it, and the page then says paired, with no invitation on
@@ -810,7 +812,7 @@ stop_box 2
 
 # ---- 17 --------------------------------------------------------------------------
 
-say "17. The status page: its words and headers, a wrong invitation, a foreign origin"
+say "17. The status page: its words and headers, a setup code, a wrong invitation, a foreign origin"
 B7="$BASE/box7"
 K7="$BASE/keyapp7"
 mkdir -p "$B7" "$K7"
@@ -828,6 +830,10 @@ for _ in $(seq 1 40); do
   sleep 0.25
 done
 grep -q "^status page: $PAGE7\$" "$PG_LOG" || PG_BAD="$PG_BAD; the Box did not say its page address: $(cat "$PG_LOG")"
+# The setup code is printed right after the page's address (BX-62).
+CODE7=$(sed -n 's/^setup code: //p' "$PG_LOG" | head -1)
+grep -A1 '^status page: ' "$PG_LOG" | grep -q '^setup code: [0-9A-HJKMNP-TV-Z]\{4\}-[0-9A-HJKMNP-TV-Z]\{4\}$' ||
+  PG_BAD="$PG_BAD; the Box did not print its setup code after the page address: $(cat "$PG_LOG")"
 # The page, with its headers.
 PG_GET=$(curl -s --max-time 10 -D "$BASE/pg-head" -o "$BASE/pg-body" -w '%{http_code}' "http://$PAGE7/")
 [ "$PG_GET" = 200 ] || PG_BAD="$PG_BAD; GET / gave $PG_GET"
@@ -839,15 +845,28 @@ grep -q 'Waiting for an invitation' "$BASE/pg-body" || PG_BAD="$PG_BAD; the page
 grep -q 'Next:' "$BASE/pg-body" || PG_BAD="$PG_BAD; the page does not say what to do next"
 grep -q "127.0.0.1:${A7##*:}" "$BASE/pg-body" || PG_BAD="$PG_BAD; the page does not give the relay address"
 if grep -qiE '<script|src=|https?://' "$BASE/pg-body"; then PG_BAD="$PG_BAD; the page is not self-contained"; fi
+grep -q 'name="setup"' "$BASE/pg-body" || PG_BAD="$PG_BAD; the page has no field for the setup code"
+if grep -qF -- "$CODE7" "$BASE/pg-body"; then PG_BAD="$PG_BAD; the setup code is on the page"; fi
 # Another path and another method are refused with the status alone.
 PG_404=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' "http://$PAGE7/nothing")
 PG_405=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' -X DELETE "http://$PAGE7/")
 [ "$PG_404" = 404 ] && [ "$PG_405" = 405 ] || PG_BAD="$PG_BAD; other path $PG_404, other method $PG_405"
-# A wrong invitation, from the page's own origin: refused with words.
+# A right invitation with a wrong setup code, from the page's own origin:
+# refused with words, and the page then refuses everything for ten seconds.
 INV7=$(pair invite "$K7")
+PG_NOCODE=$(curl -s --max-time 10 -o "$BASE/pg-nocode" -w '%{http_code}' -H "Origin: http://$PAGE7" \
+  --data-urlencode "setup=0000-0000" --data-urlencode "invitation=$INV7" "http://$PAGE7/invitation")
+PG_HELD=$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' -H "Origin: http://$PAGE7" \
+  --data-urlencode "setup=$CODE7" --data-urlencode "invitation=$INV7" "http://$PAGE7/invitation")
+[ "$PG_NOCODE" = 403 ] && [ "$PG_HELD" = 403 ] && grep -q 'Setup code wrong' "$BASE/pg-nocode" ||
+  PG_BAD="$PG_BAD; wrong setup code $PG_NOCODE, right code inside the ten seconds $PG_HELD"
+if grep -qF -- "$CODE7" "$BASE/pg-nocode"; then PG_BAD="$PG_BAD; the setup code is on a refusal"; fi
+curl -s --max-time 10 "http://$PAGE7/" | grep -q 'Waiting for an invitation' || PG_BAD="$PG_BAD; a refused code changed the state"
+sleep 11
+# A wrong invitation, from the page's own origin: refused with words.
 WRONG7="${INV7%?}$([ "${INV7: -1}" = 0 ] && echo 1 || echo 0)"
 PG_WRONG=$(curl -s --max-time 10 -o "$BASE/pg-wrong" -w '%{http_code}' -H "Origin: http://$PAGE7" \
-  --data-urlencode "invitation=$WRONG7" "http://$PAGE7/invitation")
+  --data-urlencode "setup=$CODE7" --data-urlencode "invitation=$WRONG7" "http://$PAGE7/invitation")
 [ "$PG_WRONG" = 422 ] && grep -q 'Invitation not read' "$BASE/pg-wrong" || PG_BAD="$PG_BAD; wrong invitation: status $PG_WRONG"
 grep -q 'Waiting for an invitation' "$BASE/pg-wrong" || PG_BAD="$PG_BAD; the Box is not waiting after a wrong invitation"
 # A right invitation from a foreign origin, and with no origin at all: refused.
@@ -860,7 +879,7 @@ curl -s --max-time 10 "http://$PAGE7/" | grep -q 'Waiting for an invitation' || 
 # The right invitation from the page's own origin is taken; the Key app side
 # then claims and welcomes, and the page says paired.
 PG_RIGHT=$(curl -s --max-time 10 -o "$BASE/pg-right" -w '%{http_code}' -H "Origin: http://$PAGE7" \
-  --data-urlencode "invitation=$INV7" "http://$PAGE7/invitation")
+  --data-urlencode "setup=$CODE7" --data-urlencode "invitation=$INV7" "http://$PAGE7/invitation")
 [ "$PG_RIGHT" = 200 ] && grep -q 'Invitation open' "$BASE/pg-right" || PG_BAD="$PG_BAD; right invitation: status $PG_RIGHT"
 CLAIM7=$(pair claim "$K7" "$A7")
 WELCOME7=$(pair welcome "$K7" "$A7")
@@ -868,9 +887,9 @@ grep -q '^claim verified' <<<"$CLAIM7" && [ "$WELCOME7" = welcomed ] || PG_BAD="
 curl -s --max-time 10 "http://$PAGE7/" >"$BASE/pg-paired"
 grep -q '<h2>Paired</h2>' "$BASE/pg-paired" || PG_BAD="$PG_BAD; the page does not say paired"
 if grep -qF -- "$INV7" "$BASE/pg-paired" "$BASE/pg-right"; then PG_BAD="$PG_BAD; the invitation is on a page"; fi
-note "GET $PG_GET; other path $PG_404; other method $PG_405; wrong invitation $PG_WRONG; foreign origin $PG_FOREIGN; no origin $PG_NONE; right invitation $PG_RIGHT"
+note "GET $PG_GET; other path $PG_404; other method $PG_405; wrong setup code $PG_NOCODE; right code inside the hold $PG_HELD; wrong invitation $PG_WRONG; foreign origin $PG_FOREIGN; no origin $PG_NONE; right invitation $PG_RIGHT"
 if [ -z "$PG_BAD" ]; then
-  pass 17 "a Box started with --status-page answered GET / with the security headers and words that say it is waiting for an invitation and what to do next; another path was 404 and another method 405; a wrong invitation was refused with words (422), a right one from a foreign origin or with no origin was refused (403) and changed nothing; the right one from the page's own origin was taken, the Key app side claimed and welcomed it, and the page then said paired with no invitation on it"
+  pass 17 "a Box started with --status-page answered GET / with the security headers and words that say it is waiting for an invitation and what to do next; another path was 404 and another method 405; the setup code was printed right after the page's address and never on a page, a wrong code was refused with words (403) and made the page refuse the right one for ten seconds; a wrong invitation with the right code was refused with words (422), a right one from a foreign origin or with no origin was refused (403) and changed nothing; the right one from the page's own origin was taken, the Key app side claimed and welcomed it, and the page then said paired with no invitation on it"
 else
   bad 17 "${PG_BAD#; }"
 fi
