@@ -36,7 +36,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use openbmt_core::identity::DeviceId;
-use openbmt_core::records::{Chain, DeviceList, RecordKind};
+use openbmt_core::records::{Chain, DeviceList, Record, RecordKind};
 use openbmt_core::settings::{Settings, MAX_DEVICES};
 use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_counter::money::tolerance;
@@ -238,10 +238,15 @@ pub fn paid_sales_from_chain(
     counter: &DeviceId,
 ) -> Result<Fold, FactsError> {
     chain.verify(devices).map_err(FactsError::Chain)?;
+    Ok(fold_records(chain.records(), counter))
+}
+
+/// The fold of one counter's records, which are taken as already checked.
+fn fold_records(records: &[Record], counter: &DeviceId) -> Fold {
     let tolerance_bps = default_tolerance_bps();
     let mut sales: BTreeMap<u32, Acc> = BTreeMap::new();
     let mut passed_over = false;
-    for record in chain.records() {
+    for record in records {
         let holds_events = matches!(
             record.kind,
             RecordKind::Sale | RecordKind::Payment | RecordKind::Override | RecordKind::Conflict
@@ -326,7 +331,7 @@ pub fn paid_sales_from_chain(
             })
         })
         .collect();
-    Ok(Fold { sales, passed_over })
+    Fold { sales, passed_over }
 }
 
 /// The paid sales of every counter, and the counters whose records could not
@@ -365,17 +370,16 @@ pub fn gather(folds: Vec<(DeviceId, Result<Fold, FactsError>)>) -> PaidSales {
 /// OC-60: a Lightning payment is exempt only when recorded by a counter in
 /// `named`, the counters the settings in force have ever named as the shop's
 /// Lightning counter.
+///
+/// The copy's records were checked as they were taken and again from the
+/// first when the copy was opened (LK-58), so they are not checked again here.
 pub fn paid_sales<R: Post>(link: &OwnerLink<R>, named: &LightningCounters) -> PaidSales {
     let mut folds = Vec::new();
     for counter in link.counters() {
         let Some(copy) = link.copy(counter) else {
             continue;
         };
-        let chain = Chain::from_records(copy.records().to_vec());
-        folds.push((
-            *counter,
-            paid_sales_from_chain(&chain, link.devices(), counter),
-        ));
+        folds.push((*counter, Ok(fold_records(copy.records(), counter))));
     }
     let mut found = gather(folds);
     for sale in &mut found.sales {

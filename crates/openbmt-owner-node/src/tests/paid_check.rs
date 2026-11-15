@@ -910,6 +910,75 @@ fn oc_61_one_counter_with_a_bad_record_alarms_while_another_is_still_checked() {
 }
 
 #[test]
+fn oc_62_the_refusals_read_as_their_texts() {
+    assert_eq!(
+        PaidCheckRefused::NoSuchAlarm.to_string(),
+        "OC-62: no alarm of this sale is raised"
+    );
+    assert_eq!(
+        PaidCheckRefused::Store("disk full".to_string()).to_string(),
+        "OC-64: the marks could not be stored: disk full"
+    );
+}
+
+#[test]
+fn oc_61_a_record_of_no_event_kind_by_the_counter_is_not_passed_over() {
+    let fold = fold_of(&[
+        event_record(&opened(0, PAID_AT - 50, 100)),
+        // A settings record holds no sale events: it is skipped, not read.
+        (RecordKind::Setting, vec![0xff, 0xff, 0xff]),
+        event_record(&at_once_for(0, PAID_AT, 5_000)),
+    ]);
+    assert!(!fold.passed_over);
+    assert_eq!(fold.sales.len(), 1);
+    assert_eq!(fold.sales[0].recorded_sats, 5_000);
+}
+
+#[test]
+fn oc_61_an_event_record_by_another_device_is_not_read_as_the_counters() {
+    let other = id(60);
+    let mut chain = openbmt_core::records::Chain::new();
+    let (kind, body) = event_record(&opened(0, PAID_AT - 50, 100));
+    chain.append(&id(3), kind, body).unwrap();
+    // A well-formed sale record from another device on the list.
+    let (kind, body) = event_record(&opened(5, PAID_AT - 40, 100));
+    chain.append(&other, kind, body).unwrap();
+    let (kind, body) = event_record(&at_once_for(5, PAID_AT, 9_000));
+    chain.append(&other, kind, body).unwrap();
+    let (kind, body) = event_record(&at_once_for(0, PAID_AT, 5_000));
+    chain.append(&id(3), kind, body).unwrap();
+    let devices = openbmt_core::records::DeviceList::new([counter(), other.device_id()]);
+    let fold = paid_sales_from_chain(&chain, &devices, &counter()).unwrap();
+    assert!(!fold.passed_over);
+    assert_eq!(fold.sales.len(), 1);
+    assert_eq!(fold.sales[0].index, 0);
+}
+
+#[test]
+fn oc_61_a_counter_copy_of_two_thousand_records_folds_as_the_chain_does() {
+    let mut events = Vec::new();
+    for index in 0..1_000 {
+        events.push(opened(index, PAID_AT - 50, 100));
+        events.push(at_once_for(index, PAID_AT, 900 + u64::from(index)));
+    }
+    let (link, _a, _b) = link_with(&events);
+    let copy = link.copy(&counter()).unwrap();
+    assert_eq!(copy.records().len(), 2_000);
+    let found = paid_sales(&link, &LightningCounters::empty());
+    let chain = openbmt_core::records::Chain::from_records(copy.records().to_vec());
+    let fold = paid_sales_from_chain(&chain, link.devices(), &counter()).unwrap();
+    assert!(!fold.passed_over);
+    assert_eq!(fold.sales.len(), 1_000);
+    assert_eq!(
+        found,
+        PaidSales {
+            sales: fold.sales,
+            unreadable: Vec::new(),
+        }
+    );
+}
+
+#[test]
 fn oc_30_a_chain_that_does_not_verify_gives_no_paid_sales() {
     let chain = openbmt_core::records::Chain::new();
     let devices = openbmt_core::records::DeviceList::new([]);
@@ -1189,6 +1258,44 @@ fn oc_64_a_version_1_file_still_reads_with_the_time_raised_as_the_first_read() {
     let mut bad = old.clone();
     bad[9 + 32 + 4] = 4;
     assert!(PaidMarks::from_bytes(&bad).is_err());
+}
+
+/// A version 1 file: the count, then per mark the counter, the index, the
+/// state, the time raised and the time cleared, with no time of first read.
+fn v1_file(count: u32, marks: &[(u32, u8, u64, u64)]) -> Vec<u8> {
+    let mut out = openbmt_core::wire::start(&MAGIC_PAID_CHECK, 0);
+    out.extend_from_slice(&count.to_le_bytes());
+    for (index, state, raised, cleared) in marks {
+        out.extend_from_slice(&counter().to_bytes());
+        out.extend_from_slice(&index.to_le_bytes());
+        out.push(*state);
+        out.extend_from_slice(&raised.to_le_bytes());
+        out.extend_from_slice(&cleared.to_le_bytes());
+    }
+    out
+}
+
+#[test]
+fn oc_64_a_version_1_file_of_two_marks_reads_and_one_short_of_its_count_is_refused() {
+    let file = v1_file(2, &[(3, 1, 1_000, 0), (7, 3, 2_000, 2_500)]);
+    assert_eq!(file.len(), 9 + 2 * 53);
+    let marks = PaidMarks::from_bytes(&file).unwrap();
+    assert_eq!(marks.len(), 2);
+    let a = marks.get(&key(3)).unwrap();
+    assert_eq!(
+        (a.state, a.first_read, a.raised_at, a.cleared_at),
+        (MarkState::Raised, 1_000, Some(1_000), None)
+    );
+    let b = marks.get(&key(7)).unwrap();
+    assert_eq!(
+        (b.state, b.first_read, b.raised_at, b.cleared_at),
+        (MarkState::ClearedByArrival, 2_000, Some(2_000), Some(2_500))
+    );
+    // The count says three and the file holds two.
+    let short = v1_file(3, &[(3, 1, 1_000, 0), (7, 3, 2_000, 2_500)]);
+    assert!(PaidMarks::from_bytes(&short).is_err());
+    // One byte cut from the last mark is refused too.
+    assert!(PaidMarks::from_bytes(&file[..file.len() - 1]).is_err());
 }
 
 #[test]

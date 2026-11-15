@@ -334,6 +334,31 @@ fn oc_62_alerts_come_back_after_a_restart_from_the_marks() {
 }
 
 #[test]
+fn oc_62_an_arrival_line_is_shown_for_seven_days_after_the_clearing() {
+    const CLEARED: u64 = PAID_AT + 1_000;
+    const WEEK: u64 = 7 * 86_400;
+    // The marks of an earlier run: the alarm of a sale the records do not
+    // hold, cleared by the payment's arrival at `CLEARED`.
+    let (rig, handle) = ready_in(|dir| {
+        let mut file = b"OBM\x17".to_vec();
+        file.push(2);
+        file.extend_from_slice(&1u32.to_le_bytes());
+        file.extend_from_slice(&counter_bytes());
+        file.extend_from_slice(&99u32.to_le_bytes());
+        file.push(3);
+        file.extend_from_slice(&(CLEARED - 500).to_le_bytes());
+        file.extend_from_slice(&(CLEARED - 500).to_le_bytes());
+        file.extend_from_slice(&CLEARED.to_le_bytes());
+        assert_eq!(PaidMarks::from_bytes(&file).expect("marks").len(), 1);
+        std::fs::write(dir.join("paid-check.bin"), file).expect("the marks");
+    });
+    let shown = check(&rig, handle, CLEARED + WEEK - 1);
+    assert_eq!(shown.arrived, 1);
+    let gone = check(&rig, handle, CLEARED + WEEK);
+    assert_eq!(gone.arrived, 0);
+}
+
+#[test]
 fn oc_62_a_failed_run_is_retried_at_the_next_pump() {
     // The marks cannot be written: their temporary file is a folder.
     let (rig, handle) = ready_in(|dir| {
