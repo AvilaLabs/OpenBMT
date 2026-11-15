@@ -40,7 +40,7 @@ const TEST_SOURCES: [&str; 28] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 106] = [
+const NOT_HERE: [(&str, &str); 112] = [
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -479,6 +479,36 @@ const NOT_HERE: [(&str, &str); 106] = [
         "the words are listed in `openbmt-counter-node` and `openbmt-counter-ffi` (SC-12)",
     ),
     (
+        "CR-277",
+        "pairing on the owner's own phone is the Android apps' (the activity, the signer check and the files); \
+         their tests are the apps' JVM tests and manifest checks (`apps/counter-android`, `apps/owner-android`)",
+    ),
+    (
+        "CR-278",
+        "pairing on the owner's own phone is the Android apps' (the activity, the signer check and the files); \
+         their tests are the apps' JVM tests and manifest checks (`apps/counter-android`, `apps/owner-android`)",
+    ),
+    (
+        "CR-279",
+        "pairing on the owner's own phone is the Android apps' (the activity, the signer check and the files); \
+         their tests are the apps' JVM tests and manifest checks (`apps/counter-android`, `apps/owner-android`)",
+    ),
+    (
+        "CR-280",
+        "pairing on the owner's own phone is the Android apps' (the activity, the signer check and the files); \
+         their tests are the apps' JVM tests and manifest checks (`apps/counter-android`, `apps/owner-android`)",
+    ),
+    (
+        "CR-281",
+        "pairing on the owner's own phone is the Android apps' (the activity, the signer check and the files); \
+         their tests are the apps' JVM tests and manifest checks (`apps/counter-android`, `apps/owner-android`)",
+    ),
+    (
+        "CR-282",
+        "pairing on the owner's own phone is the Android apps' (the activity, the signer check and the files); \
+         their tests are the apps' JVM tests and manifest checks (`apps/counter-android`, `apps/owner-android`)",
+    ),
+    (
         "CR-239",
         "the pending change and its file are the counter node's (`confirm`, `node`); their tests are there",
     ),
@@ -565,9 +595,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_two_hundred_and_twenty_six_rules() {
+fn the_rules_file_defines_two_hundred_and_thirty_two_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 226);
+    assert_eq!(ids.len(), 232);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -613,6 +643,7 @@ fn the_rules_file_defines_two_hundred_and_twenty_six_rules() {
             && ids.contains("CR-266")
             && ids.contains("CR-271")
             && ids.contains("CR-276")
+            && ids.contains("CR-282")
     );
 }
 
