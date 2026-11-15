@@ -1864,12 +1864,17 @@ a counter paired with the shop's own wallet.
   root's signature), the settings (CR-231), the range (CR-232). A bundle
   that is not a bundle leaves the ceremony as it was; any other refusal ends
   it.
-- **CR-231.** The settings in the bundle need the owner root's signature
-  only, a version above the offer's settings floor, valid values, and this
-  counter on the device list and among the counters (as CR-95). They are the
-  counter's first settings and not a change from earlier ones, so they need
-  no counter confirmation (`docs/APPROVAL-RULES.md`): the person at this
-  counter has just compared the address and the words.
+- **CR-231.** The settings in the bundle need the owner root's signature only,
+  a version above the offer's settings floor, valid values, and this counter
+  on the device list and among the counters (as CR-95). They are the counter's
+  first settings and not a change from earlier ones, so they need no counter
+  confirmation (`docs/APPROVAL-RULES.md`): the person at this counter has just
+  compared the address and the words. That comparison shows where on-chain
+  payments go and nothing else, so the first settings may name no Lightning
+  node and no Shop Lightning: either would send payments somewhere the person
+  did not see (AP-13), and a shop with its own wallet has no signature yet
+  that approves a redirect (CR-236). A bundle whose settings name either is
+  refused, and the ceremony ends.
 - **CR-232.** The first range must be signed by the owner root, name this
   counter and have a valid shape (WL-23, WL-24, WL-28), and hold at least
   `BATCH_MIN_COUNT` indexes (1000). Nothing in the bundle or the record can
