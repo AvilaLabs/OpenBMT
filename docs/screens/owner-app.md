@@ -1066,5 +1066,5 @@ other names in braces are counts:
 | OC64_FULL_WHAT | This phone's record of the counter checks is full, so new checks are shown but not kept. |
 | OC64_FULL_NEXT | Clear the checks you have dealt with. |
 | OC61_UNREADABLE_HEADING | Counter cannot be checked |
-| OC61_UNREADABLE_WHAT | The records of {counter} do not read as sales, so this phone cannot check the payments of its sales. |
+| OC61_UNREADABLE_WHAT | Some records of {counter} do not read as sales, so this phone cannot check the payments in them. Its other sales are still checked. |
 | OC61_UNREADABLE_NEXT | Check the counter: it may have been tampered with. |

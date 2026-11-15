@@ -2699,17 +2699,19 @@ impl Entry {
             for m in st.paid.marks().iter() {
                 match m.state {
                     MarkState::Raised => {
-                        let Some(s) = sales.iter().find(|s| s.key() == m.sale) else {
-                            continue;
-                        };
+                        // A counter held back for too many open alarms, or whose
+                        // copy no longer verifies, has no sales in `sales`: its
+                        // alarm is still shown, with what the mark holds.
+                        let found = sales.iter().find(|s| s.key() == m.sale);
                         alarms.push(PaidAlarmView {
-                            counter: s.counter.to_bytes().to_vec(),
-                            sale: s.index,
-                            cashier: s.cashier.clone(),
-                            recorded_sats: s.expected_sats(),
+                            counter: m.sale.counter.to_bytes().to_vec(),
+                            sale: m.sale.index,
+                            cashier: found.map(|s| s.cashier.clone()).unwrap_or_default(),
+                            recorded_sats: found.map_or(0, |s| s.expected_sats()),
                             seen_sats: state_of(&m.sale).and_then(|c| c.seen_sats).unwrap_or(0),
                             first_read: m.first_read,
                             raised_at: m.raised_at.unwrap_or(m.first_read),
+                            known: found.is_some(),
                         });
                     }
                     MarkState::ClearedByArrival => {

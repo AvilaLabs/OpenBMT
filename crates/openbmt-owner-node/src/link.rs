@@ -225,8 +225,11 @@ pub enum Alert {
         /// The sale's number.
         sale: u32,
     },
-    /// A counter's records do not read as sales, so its Paids cannot be
-    /// checked (OC-61). It clears itself when they read again.
+    /// A counter has a record that does not read as part of a sale, so some of
+    /// its Paids cannot be checked (OC-61); its other sales are still checked.
+    /// The records only grow, so it stays while the counter is on the link,
+    /// except that a counter held back for too many open alarms is listed
+    /// here too until the owner clears enough of them.
     PaidUnreadable {
         /// The counter.
         counter: DeviceId,

@@ -28,6 +28,8 @@ object PaidCheckWords {
     // ---- the alarm (OC-62) ----
     val mismatchHeading = say("OC62_MISMATCH_HEADING", "Paid on counter, not seen")
     val mismatchWhat = say("OC62_MISMATCH_WHAT", "{counter} showed sale {number} as paid, {amount}, at {time}, taken by {cashier}. This phone sees {seen} paid to that sale's address.")
+    /** The alarm of a sale this phone no longer reads from the counter's records: the amounts and the cashier are not known. */
+    val TODO_WORDS_MISMATCH_UNLISTED_WHAT = "TODO_WORDS_MISMATCH_UNLISTED_WHAT"
     val mismatchNext = say("OC62_MISMATCH_NEXT", "Check the counter: it may have been tampered with. Clear this once you know what happened.")
     val clearButton = say("OC62_CLEAR_BUTTON", "Clear")
     val arrivedLine = say("OC62_ARRIVED_LINE", "The payment for sale {number} has now arrived in full.")
@@ -52,7 +54,7 @@ object PaidCheckWords {
 
     // ---- a counter whose records cannot be checked (OC-61) ----
     val unreadableHeading = say("OC61_UNREADABLE_HEADING", "Counter cannot be checked")
-    val unreadableWhat = say("OC61_UNREADABLE_WHAT", "The records of {counter} do not read as sales, so this phone cannot check the payments of its sales.")
+    val unreadableWhat = say("OC61_UNREADABLE_WHAT", "Some records of {counter} do not read as sales, so this phone cannot check the payments in them. Its other sales are still checked.")
     val unreadableNext = say("OC61_UNREADABLE_NEXT", "Check the counter: it may have been tampered with.")
 
     private fun said(heading: String, what: String, next: String, tone: Int): SayWords =
@@ -62,7 +64,15 @@ object PaidCheckWords {
     fun counterName(counter: ByteArray): String = OwnerModel.counterLabel(counter)
 
     /** OC-62: the alarm of a sale, the facts filled in; the cashier's name is text of the counter's and is cleaned. */
-    fun mismatch(a: PaidAlarm): SayWords = said(
+    fun mismatch(a: PaidAlarm): SayWords = if (!a.known) said(
+        mismatchHeading,
+        TODO_WORDS_MISMATCH_UNLISTED_WHAT
+            .replace("{counter}", counterName(a.counter))
+            .replace("{number}", a.sale.toString())
+            .replace("{time}", Format.localTime(a.firstRead)),
+        mismatchNext,
+        Tones.STOP,
+    ) else said(
         mismatchHeading,
         mismatchWhat
             .replace("{counter}", counterName(a.counter))

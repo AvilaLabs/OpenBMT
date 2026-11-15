@@ -465,9 +465,13 @@ says so when one is missing.
   not checkable, never as a mismatch or as checked. A Paid at an address the
   owner never issued to that counter (OC-14, "not this counter's address") is
   a mismatch at once, with nothing seen: no payment there is the shop's. A
-  counter whose records do not read as sales is checked no further and raises
-  its own alarm, that its payments cannot be checked; every other counter is
-  still checked. So is a counter with more than 256 alarms not cleared: its
+  record of a counter that does not read as part of a sale, such as a second
+  opening of a sale, a payment for a sale never opened, or a record of a kind
+  not known, is passed over, and the counter raises its own alarm, that some
+  of its payments cannot be checked; its other sales, and every other counter,
+  are still checked. A second opening leaves the first as it was, and sales
+  past the 16,384 a counter may hold are passed over the same way. A counter
+  with more than 256 alarms not cleared is checked no further either: its
   alarms stay, no more are raised for it, and it is checked no further until
   the owner clears them, so that one counter cannot fill the marks of OC-64
   for the others. The check runs each time the owner's view checks a new tip,
@@ -502,8 +506,9 @@ says so when one is missing.
   alarm after the wait and not before; a payment arriving later clears it; a
   partial payment within the tolerance is not a mismatch and one outside it
   is; a Lightning sale is not checked; a view not ready judges nothing; a sale
-  too old for facts is not checkable; the day summary's counts; the marks read
-  back strictly.
+  too old for facts is not checkable; a record that does not read as a sale is
+  passed over and the counter's other sales are still checked; the day
+  summary's counts; the marks read back strictly.
 
 ## 9. Setting up the owner's phone
 

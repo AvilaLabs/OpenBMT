@@ -24,6 +24,11 @@ pub struct PaidAlarmView {
     pub first_read: u64,
     /// When the alarm was raised, by this phone's clock.
     pub raised_at: u64,
+    /// The cashier and the amounts are known. False when the sale is no
+    /// longer read from the counter's records (its counter is held back, or
+    /// its copy does not verify): they are then empty and zero, and the
+    /// alarm shows only the counter, the sale and the times.
+    pub known: bool,
 }
 
 wire_record!(PaidAlarmView {
@@ -33,7 +38,8 @@ wire_record!(PaidAlarmView {
     recorded_sats,
     seen_sats,
     first_read,
-    raised_at
+    raised_at,
+    known
 });
 
 /// A sale whose payment arrived in full after an alarm was raised.
@@ -83,7 +89,8 @@ pub struct PaidCheckView {
     pub kept: bool,
     /// There are more marks than a file keeps.
     pub full: bool,
-    /// The counters whose records do not read as sales, 32 bytes each.
+    /// The counters with a record that does not read as part of a sale, 32
+    /// bytes each: some of their payments cannot be checked.
     pub unreadable: Vec<Vec<u8>>,
     /// The alarms not cleared, oldest first.
     pub alarms: Vec<PaidAlarmView>,

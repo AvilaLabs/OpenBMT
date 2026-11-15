@@ -140,6 +140,7 @@ fn check(rig: &Rig, handle: u64, now: u64) -> Check {
             r.u64(),
             r.u64(),
             r.u64(),
+            r.bool(),
         )
     });
     let arrived = r.list(|r| (r.bytes(), r.u32(), r.u64()));

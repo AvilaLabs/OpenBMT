@@ -657,18 +657,18 @@ pub(crate) fn link_alert_words(alert: &openbmt_owner_node::Alert) -> Words {
         .code("LK-59")
         .detail(format!("record {seq}")),
         Alert::BatchUndelivered { since, .. } => openbmt_owner_node::say::batch_undelivered_words(*since),
-        Alert::PaidNotSeen { .. } => Words::new(
+        Alert::PaidNotSeen { sale, .. } => Words::new(
             Tone::Stop,
             "Paid on counter, not seen",
-            "A counter showed a sale as paid and this phone does not see the payment.",
+            format!("A counter showed sale {sale} as paid and this phone sees no payment for it, or less than the sale. The counter may have been tampered with."),
             Who::Owner,
-            "Open the alerts to see the sale, and check the counter.",
+            "Open the counter checks to see the counter, the cashier and the amounts, then check the counter.",
         )
         .code("OC-62"),
         Alert::PaidUnreadable { .. } => Words::new(
             Tone::Stop,
             "Counter cannot be checked",
-            "The records of a counter do not read as sales, so this phone cannot check the payments of its sales.",
+            "Some records of a counter do not read as sales, so this phone cannot check the payments in them. Its other sales are still checked.",
             Who::Owner,
             "Check the counter: it may have been tampered with.",
         )

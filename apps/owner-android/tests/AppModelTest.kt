@@ -5321,7 +5321,7 @@ object AppModelTest {
         ok(said["OC61_UNREADABLE_HEADING"] == "Counter cannot be checked" && said["OC61_UNREADABLE_NEXT"] == "Check the counter: it may have been tampered with.", "the unreadable-counter words")
         ok(said["OC62_CLEAR_BUTTON"] == "Clear", "the button")
         // The alarm's words, filled from a sale; the cashier's name is the counter's text and is cleaned.
-        val alarm = PaidAlarm(ByteArray(32) { 0x1a }, 7, "An\u0007a\u202E", 5_000, 0, 1_700_000_000, 1_700_090_000)
+        val alarm = PaidAlarm(ByteArray(32) { 0x1a }, 7, "An\u0007a\u202E", 5_000, 0, 1_700_000_000, 1_700_090_000, true)
         val w = PaidCheckWords.mismatch(alarm)
         ok(w.heading == PaidCheckWords.mismatchHeading && w.next == PaidCheckWords.mismatchNext && w.tone == Tones.STOP && w.who == Who.OWNER, "the alarm is a stop for the owner")
         ok(w.what == "Counter 1a1a1a1a showed sale 7 as paid, 5,000 sats, at ${Format.localTime(1_700_000_000)}, taken by An a. This phone sees 0 sats paid to that sale's address.", "the alarm names the counter, the sale, both amounts, the time and the cashier: ${w.what}")
@@ -5341,7 +5341,7 @@ object AppModelTest {
         ok(screen.contains("PaidCheckWords.notKept") && screen.contains("PaidCheckWords.full") && screen.contains("n.paidCheckReset()") && screen.indexOf("check.kept") < screen.indexOf("check.alarms"), "checks that are not kept or full are said and cleared before the alarms, which still show")
         ok(screen.contains("PaidCheckWords.unreadable(c)") && screen.contains("check.unreadable"), "a counter whose records cannot be read is named")
         val unreadable = PaidCheckWords.unreadable(ByteArray(32) { 0x1a })
-        ok(unreadable.what == "The records of Counter 1a1a1a1a do not read as sales, so this phone cannot check the payments of its sales." && unreadable.tone == Tones.STOP, "the unreadable words name the counter: ${unreadable.what}")
+        ok(unreadable.what == "Some records of Counter 1a1a1a1a do not read as sales, so this phone cannot check the payments in them. Its other sales are still checked." && unreadable.tone == Tones.STOP, "the unreadable words name the counter: ${unreadable.what}")
         ok(screen.contains("PaidCheckWords.arrived(a)") && screen.contains("ui.words(PaidCheckWords.waiting)") && screen.contains("ui.words(PaidCheckWords.notCheckable)") && screen.contains("PaidCheckWords.day(it)"), "the arrived line, the two lists and the day's line are shown")
         ok(!Regex("\"[A-Z][a-z]+ [a-z]+").containsMatchIn(screen.lines().filter { !it.trim().startsWith("*") && !it.trim().startsWith("/") }.joinToString("\n")), "no sentence is written in the screen file")
         ok(source("src/android/Screens.kt").contains("paidCheckViews(n, msg) { showAlerts() }") && source("src/android/Books.kt").contains("paidDayViews(n, msg)"), "the alarms are on the Alerts page and the day on the Books page")

@@ -1,10 +1,11 @@
 //! A counter's Paid, checked against the owner's own view of the wallet
 //! (`docs/OWNER-COINS-RULES.md`, OC-60 to OC-65).
 
+use openbmt_core::records::RecordKind;
 use openbmt_core::wire::DecodeError;
 use openbmt_counter::{Amount, Event, Role};
 use openbmt_owner::{SaleFacts, SaleKey};
-use openbmt_pos::FactsError;
+use openbmt_pos::{FactsError, MAX_SALES};
 
 use super::pos::{at_once, link_with, opened};
 use super::refunds::{new_owner, view_with, DEPTH, TIP};
@@ -13,10 +14,10 @@ use crate::coins::CoinView;
 use crate::facts::{verified_facts, FactsRefused};
 use crate::paid_check::{
     check_paid, day_summary, default_tolerance_bps, gate_open_alarms, gather, paid_sales,
-    paid_sales_from_chain, CheckResult, LightningCounters, MarkState, PaidCheckRefused, PaidChecks,
-    PaidHow, PaidMarks, PaidSale, PaidSales, PaidState, PaidTrouble, LIGHTNING_COUNTERS_FILE,
-    MAGIC_LIGHTNING_COUNTERS, MAGIC_PAID_CHECK, MAX_OPEN_ALARMS_PER_COUNTER, MAX_PAID_MARKS,
-    PAID_CHECK_FILE, PAID_CHECK_WAIT_SECS,
+    paid_sales_from_chain, CheckResult, Fold, LightningCounters, MarkState, PaidCheckRefused,
+    PaidChecks, PaidHow, PaidMarks, PaidSale, PaidSales, PaidState, PaidTrouble,
+    LIGHTNING_COUNTERS_FILE, MAGIC_LIGHTNING_COUNTERS, MAGIC_PAID_CHECK,
+    MAX_OPEN_ALARMS_PER_COUNTER, MAX_PAID_MARKS, PAID_CHECK_FILE, PAID_CHECK_WAIT_SECS,
 };
 
 const PAID_AT: u64 = 1_800_000_000;
@@ -706,7 +707,13 @@ fn oc_61_one_counter_with_a_bad_record_alarms_while_another_is_still_checked() {
     other_sale.counter = other;
     let found = gather(vec![
         (bad, Err(FactsError::UnknownSale { index: 9 })),
-        (other, Ok(vec![other_sale.clone()])),
+        (
+            other,
+            Ok(Fold {
+                sales: vec![other_sale.clone()],
+                passed_over: false,
+            }),
+        ),
     ]);
     assert_eq!(found.unreadable, vec![bad]);
     assert_eq!(found.sales, vec![other_sale.clone()]);
@@ -723,9 +730,17 @@ fn oc_61_one_counter_with_a_bad_record_alarms_while_another_is_still_checked() {
         FactsError::OpenedTwice { index: 1 },
         FactsError::TooManySales,
     ] {
-        let found = gather(vec![(bad, Err(e)), (other, Ok(vec![]))]);
+        let found = gather(vec![(bad, Err(e)), (other, Ok(Fold::default()))]);
         assert_eq!(found.unreadable, vec![bad]);
     }
+    // A counter that passed over a record is listed, with the sales it read.
+    let passed = Fold {
+        sales: vec![sale(0, 1, PaidHow::AtOnce)],
+        passed_over: true,
+    };
+    let found = gather(vec![(bad, Ok(passed)), (other, Ok(Fold::default()))]);
+    assert_eq!(found.unreadable, vec![bad]);
+    assert_eq!(found.sales.len(), 1);
     // From the records: a copy that does not fold is listed, with no sale.
     let (link, _a, _b) = link_with(&[opened(0, PAID_AT - 50, 100), at_once_for(9, PAID_AT, 1)]);
     let found = paid_sales(&link, &LightningCounters::empty());
@@ -737,9 +752,149 @@ fn oc_61_one_counter_with_a_bad_record_alarms_while_another_is_still_checked() {
 fn oc_30_a_chain_that_does_not_verify_gives_no_paid_sales() {
     let chain = openbmt_core::records::Chain::new();
     let devices = openbmt_core::records::DeviceList::new([]);
-    assert!(paid_sales_from_chain(&chain, &devices, &counter())
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        paid_sales_from_chain(&chain, &devices, &counter()).unwrap(),
+        Fold::default()
+    );
+}
+
+/// The fold of the test counter's records, events and raw records alike.
+fn fold_of(records: &[(RecordKind, Vec<u8>)]) -> Fold {
+    let mut chain = openbmt_core::records::Chain::new();
+    for (kind, body) in records {
+        chain.append(&id(3), *kind, body.clone()).unwrap();
+    }
+    let devices = openbmt_core::records::DeviceList::new([counter()]);
+    paid_sales_from_chain(&chain, &devices, &counter()).unwrap()
+}
+
+fn event_record(e: &Event) -> (RecordKind, Vec<u8>) {
+    (e.kind(), e.encode())
+}
+
+#[test]
+fn oc_61_a_paid_for_a_sale_never_opened_is_passed_over_and_the_next_sale_is_judged() {
+    let (link, _a, _b) = link_with(&[
+        // A Paid for an index that was never opened, then a real sale.
+        at_once_for(9, PAID_AT, 1),
+        opened(0, PAID_AT - 50, 100),
+        at_once_for(0, PAID_AT, 5_000),
+    ]);
+    let found = paid_sales(&link, &named_counters(&[counter()]));
+    assert_eq!(found.unreadable, vec![counter()]);
+    assert_eq!(found.sales.len(), 1);
+    // The sale has no payment: waiting, then its alarm after the wait.
+    let view = view_with(&[]);
+    let dir = Dir::new();
+    let mut checks = PaidChecks::open(dir.path());
+    let first = checks.check(&found.sales, PAID_AT, from_view(&view));
+    assert_eq!(state_of(&first, 0), PaidState::Waiting);
+    let late = checks.check(
+        &found.sales,
+        PAID_AT + PAID_CHECK_WAIT_SECS,
+        from_view(&view),
+    );
+    assert_eq!(state_of(&late, 0), PaidState::Mismatch);
+    assert_eq!(late.raised, vec![key(0)]);
+}
+
+#[test]
+fn oc_61_a_second_opening_is_passed_over_and_the_first_stands() {
+    let quoted = |at: u64, cents: u64, sats: u64| match opened(0, at, cents) {
+        Event::Opened {
+            index,
+            at,
+            amount,
+            tip,
+            currency,
+            minor_per_btc,
+            source,
+            by,
+            ..
+        } => Event::Opened {
+            index,
+            at,
+            amount,
+            tip,
+            currency,
+            needs_sats: sats,
+            minor_per_btc,
+            source,
+            by,
+        },
+        _ => unreachable!(),
+    };
+    let first = quoted(PAID_AT - 50, 100, 7_000);
+    let second = quoted(PAID_AT - 40, 5, 1);
+    let fold = fold_of(&[
+        event_record(&first),
+        event_record(&second),
+        event_record(&at_once_for(0, PAID_AT, 6_000)),
+    ]);
+    assert!(fold.passed_over);
+    assert_eq!(fold.sales.len(), 1);
+    assert_eq!(fold.sales[0].quoted_sats, 7_000);
+    assert_eq!(fold.sales[0].recorded_sats, 6_000);
+    assert_eq!(fold.sales[0].expected_sats(), 7_000);
+}
+
+#[test]
+fn oc_61_a_record_that_does_not_read_is_passed_over() {
+    let fold = fold_of(&[
+        event_record(&opened(0, PAID_AT - 50, 100)),
+        (RecordKind::Sale, vec![0xff, 0xff, 0xff]),
+        event_record(&at_once_for(0, PAID_AT, 5_000)),
+    ]);
+    assert!(fold.passed_over);
+    assert_eq!(fold.sales.len(), 1);
+    assert_eq!(fold.sales[0].recorded_sats, 5_000);
+    // A clean copy passes over nothing.
+    let clean = fold_of(&[
+        event_record(&opened(0, PAID_AT - 50, 100)),
+        event_record(&at_once_for(0, PAID_AT, 5_000)),
+    ]);
+    assert!(!clean.passed_over);
+}
+
+#[test]
+fn oc_61_sales_past_the_most_a_counter_may_hold_are_passed_over() {
+    let mut records = Vec::new();
+    for index in 0..=MAX_SALES as u32 {
+        records.push(event_record(&opened(index, PAID_AT - 50, 100)));
+    }
+    // A sale already held still folds; the one past the most does not.
+    records.push(event_record(&at_once_for(3, PAID_AT, 800)));
+    records.push(event_record(&at_once_for(MAX_SALES as u32, PAID_AT, 900)));
+    let fold = fold_of(&records);
+    assert!(fold.passed_over);
+    assert_eq!(fold.sales.len(), 1);
+    assert_eq!((fold.sales[0].index, fold.sales[0].recorded_sats), (3, 800));
+}
+
+#[test]
+fn oc_61_a_counter_that_passed_over_a_record_does_not_blind_another() {
+    let bad = counter();
+    let other = id(60).device_id();
+    let mut other_sale = sale(3, 5_000, PaidHow::AtOnce);
+    other_sale.counter = other;
+    let found = gather(vec![
+        (
+            bad,
+            Ok(Fold {
+                sales: vec![sale(0, 5_000, PaidHow::AtOnce)],
+                passed_over: true,
+            }),
+        ),
+        (
+            other,
+            Ok(Fold {
+                sales: vec![other_sale],
+                passed_over: false,
+            }),
+        ),
+    ]);
+    assert_eq!(found.unreadable, vec![bad]);
+    assert_eq!(found.sales.len(), 2);
 }
 
 // ---- the marks -----------------------------------------------------------------------

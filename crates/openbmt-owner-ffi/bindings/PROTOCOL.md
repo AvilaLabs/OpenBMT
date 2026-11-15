@@ -336,7 +336,7 @@ ShopLightningEditArgs: record: action: ShopLightningAction, counter: option<list
 ShopLightningClass: enum, one tag byte
     tags Free=0 Loosen=1 Redirect=2
 ShopLightningPreviewView: record: version: u32, class: ShopLightningClass, needs_key_app: bool, nothing_changed: bool, after: option<ShopLightningHeldView>, settings: list<u8>
-PaidAlarmView: record: counter: list<u8>, sale: u32, cashier: string, recorded_sats: u64, seen_sats: u64, first_read: u64, raised_at: u64
+PaidAlarmView: record: counter: list<u8>, sale: u32, cashier: string, recorded_sats: u64, seen_sats: u64, first_read: u64, raised_at: u64, known: bool
 PaidArrivedView: record: counter: list<u8>, sale: u32, cleared_at: u64
 PaidSaleLineView: record: counter: list<u8>, sale: u32, recorded_sats: u64, first_read: u64
 PaidCheckView: record: kept: bool, full: bool, unreadable: list<list<u8>>, alarms: list<PaidAlarmView>, arrived: list<PaidArrivedView>, waiting: list<PaidSaleLineView>, not_checkable: list<PaidSaleLineView>, not_checkable_more: u32

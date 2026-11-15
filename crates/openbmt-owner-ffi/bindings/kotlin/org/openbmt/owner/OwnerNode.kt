@@ -1564,7 +1564,10 @@ class PosAlert(val key: PosAlertKey, val raisedAt: Long, val words: Words)
 
 // ---- the counter checks (ops 239 to 242, `docs/OWNER-COINS-RULES.md` OC-60 to OC-64) ----
 
-/** A counter showed a sale paid and this phone does not see the payment (OC-62). Amounts are in satoshis. */
+/**
+ * A counter showed a sale paid and this phone does not see the payment (OC-62). Amounts are in satoshis. [known] is
+ * false when the sale is no longer read from the counter's records: the cashier and the amounts are then empty and zero.
+ */
 class PaidAlarm(
     val counter: ByteArray,
     val sale: Long,
@@ -1573,6 +1576,7 @@ class PaidAlarm(
     val seenSats: Long,
     val firstRead: Long,
     val raisedAt: Long,
+    val known: Boolean,
 )
 
 /** A sale whose payment arrived in full after its alarm was raised (OC-62). */
@@ -2291,7 +2295,7 @@ private fun Reader.posSubject(): PosSubject =
 
 private fun Reader.posSetup(): PosSetup = PosSetup(posVendor(), string(), strings(), strings())
 
-private fun Reader.paidAlarm(): PaidAlarm = PaidAlarm(bytes(), u32(), string(), u64(), u64(), u64(), u64())
+private fun Reader.paidAlarm(): PaidAlarm = PaidAlarm(bytes(), u32(), string(), u64(), u64(), u64(), u64(), bool())
 
 private fun Reader.paidArrived(): PaidArrived = PaidArrived(bytes(), u32(), u64())
 

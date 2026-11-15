@@ -201,19 +201,37 @@ struct Acc {
     quoted: u64,
 }
 
+/// The fold of one counter's records (OC-60, OC-61).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Fold {
+    /// The paid sales, ordered by sale index.
+    pub sales: Vec<PaidSale>,
+    /// A record was passed over because it does not read as part of a sale.
+    /// The records only grow, so this does not clear.
+    pub passed_over: bool,
+}
+
 /// OC-60: the paid sales of one counter, folded from a copy of its records
 /// that verifies, ordered by sale index. A sale stays in the list once it has
 /// had a Paid: a reopening or a replacement, a later record of less, or a
 /// later Lightning record changes nothing. A manager's acceptance is not a
 /// payment to the address and is not listed unless a payment record follows.
+///
+/// OC-61: a record that does not read as part of a sale is passed over and the
+/// fold goes on, with the fold noted as having passed over a record: a record
+/// that does not decode, a second opening of a sale (the first stands), a
+/// record of a sale never opened, and the opening of a sale past
+/// [`MAX_SALES`] (records of sales already held still fold). Only a copy that
+/// does not verify is refused whole.
 pub fn paid_sales_from_chain(
     chain: &Chain,
     devices: &DeviceList,
     counter: &DeviceId,
-) -> Result<Vec<PaidSale>, FactsError> {
+) -> Result<Fold, FactsError> {
     chain.verify(devices).map_err(FactsError::Chain)?;
     let tolerance_bps = default_tolerance_bps();
     let mut sales: BTreeMap<u32, Acc> = BTreeMap::new();
+    let mut passed_over = false;
     for record in chain.records() {
         let holds_events = matches!(
             record.kind,
@@ -222,10 +240,10 @@ pub fn paid_sales_from_chain(
         if &record.author != counter || !holds_events {
             continue;
         }
-        let event = Event::decode(&record.body).map_err(|error| FactsError::BadEvent {
-            seq: record.seq,
-            error,
-        })?;
+        let Ok(event) = Event::decode(&record.body) else {
+            passed_over = true;
+            continue;
+        };
         // The records of a bill name a bill, not a sale (CR-247).
         if event.bill_number().is_some() {
             continue;
@@ -237,11 +255,9 @@ pub fn paid_sales_from_chain(
             ..
         } = &event
         {
-            if sales.len() >= MAX_SALES && !sales.contains_key(index) {
-                return Err(FactsError::TooManySales);
-            }
-            if sales.contains_key(index) {
-                return Err(FactsError::OpenedTwice { index: *index });
+            if sales.contains_key(index) || sales.len() >= MAX_SALES {
+                passed_over = true;
+                continue;
             }
             sales.insert(
                 *index,
@@ -258,9 +274,8 @@ pub fn paid_sales_from_chain(
             continue;
         }
         let Some(acc) = sales.get_mut(&event.index()) else {
-            return Err(FactsError::UnknownSale {
-                index: event.index(),
-            });
+            passed_over = true;
+            continue;
         };
         let on_chain = acc.how != Some(PaidHow::Lightning);
         match event {
@@ -288,7 +303,7 @@ pub fn paid_sales_from_chain(
             _ => {}
         }
     }
-    Ok(sales
+    let sales = sales
         .into_iter()
         .filter_map(|(index, acc)| {
             Some(PaidSale {
@@ -301,7 +316,8 @@ pub fn paid_sales_from_chain(
                 tolerance_bps,
             })
         })
-        .collect())
+        .collect();
+    Ok(Fold { sales, passed_over })
 }
 
 /// The paid sales of every counter, and the counters whose records could not
@@ -310,18 +326,24 @@ pub fn paid_sales_from_chain(
 pub struct PaidSales {
     /// The paid sales of the counters that fold.
     pub sales: Vec<PaidSale>,
-    /// The counters whose records do not read as sales, for whatever reason:
-    /// their payments cannot be checked.
+    /// The counters with a record that does not read as part of a sale, or a
+    /// copy that does not verify: some of their payments cannot be checked.
     pub unreadable: Vec<DeviceId>,
 }
 
-/// OC-61: put the folds of each counter together. A counter that does not
-/// fold is listed apart, and the others are still checked.
-pub fn gather(folds: Vec<(DeviceId, Result<Vec<PaidSale>, FactsError>)>) -> PaidSales {
+/// OC-61: put the folds of each counter together. A counter that passed over a
+/// record, or whose copy does not verify, is listed apart; the sales that do
+/// read, and every other counter, are still checked.
+pub fn gather(folds: Vec<(DeviceId, Result<Fold, FactsError>)>) -> PaidSales {
     let mut out = PaidSales::default();
     for (counter, fold) in folds {
         match fold {
-            Ok(sales) => out.sales.extend(sales),
+            Ok(fold) => {
+                out.sales.extend(fold.sales);
+                if fold.passed_over {
+                    out.unreadable.push(counter);
+                }
+            }
             Err(_) => out.unreadable.push(counter),
         }
     }

@@ -424,8 +424,8 @@ pub enum AlertKind {
     /// A counter showed a sale paid and the wallet does not show the payment
     /// (OC-62); the value is the sale's number.
     PaidNotSeen,
-    /// A counter's records do not read as sales, so its payments are not
-    /// checked (OC-61).
+    /// A counter has a record that does not read as part of a sale, so some of
+    /// its payments are not checked (OC-61).
     PaidUnreadable,
     /// The marks of the counter checks are not kept (OC-64); the value is 1
     /// when they are full and 0 when the file is unreadable. No counter.
