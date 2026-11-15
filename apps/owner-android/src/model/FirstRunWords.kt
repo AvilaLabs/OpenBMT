@@ -220,7 +220,7 @@ object FirstRunWords {
     const val realCase4Who = "A former teacher who had saved for 15 years for a family home"
     const val realBitcoinText = "Bitcoin in your own wallet is not held by a bank or a payment company. Nobody can put a hold on it, close the account or cap your withdrawals, because there is no account. It moves only when your keys sign."
     const val realKeysTitle = "Why the keys need so much care"
-    const val realKeysText = "With nobody in the middle, nobody can undo a mistake either. Whoever has your 12 words can spend the money, and if every copy is lost, nobody can give it back. So the words are made where no one can see them, written by hand, and later kept on steel plates, which survive fire and water."
+    const val realKeysText = "With nobody in the middle, nobody can undo a mistake either. Whoever has your 12 words can spend the money, and if every copy is lost, nobody can give it back. So the words are made where no one can see them, written by hand, and later copied onto metal plates, which survive fire and water."
     const val realCoinTitle = "Why a coin or a die"
     const val realCoinText = "Phones and computers make random numbers with chips and software, and those have had faults before. A coin or a die has no chip and no software, so nothing can reach into it from outside. The key maker only turns your flips into words, offline, and shows its work so you can check it by hand."
     const val realMore = "More cases, with their sources and how each ended, are in the handbook under \"When someone else holds the money\"."
