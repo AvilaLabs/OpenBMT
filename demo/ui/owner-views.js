@@ -120,7 +120,7 @@
 
   // ---- cards -----------------------------------------------------------------------------------------------
 
-  /** OwnerUi.kt:397 card(radiusDp, fill, line): a card with a one-pixel outline, clipped to its corners. */
+  /** OwnerUi.kt:398 card(radiusDp, fill, line): a card with a one-pixel outline, clipped to its corners. */
   proto.ownerCard = function (radiusDp = 16, fill = null, lineColour = null) {
     const v = LinearLayout("v");
     const g = new GradientDrawable();
@@ -132,7 +132,7 @@
     return v;
   };
 
-  /** OwnerUi.kt:409 divider(colour): a line of one pixel in [colour]. */
+  /** OwnerUi.kt:410 divider(colour): a line of one pixel in [colour]. */
   proto.ownerDivider = function (colour = null) {
     const v = U.View();
     v.style.backgroundColor = css(colour == null ? this.pal.divider : colour);
@@ -142,14 +142,14 @@
     return v;
   };
 
-  /** OwnerUi.kt:414 tap(view, onClick): a view that ripples when pressed and calls [onClick]. */
+  /** OwnerUi.kt:415 tap(view, onClick): a view that ripples when pressed and calls [onClick]. */
   proto.tap = function (view, onClick) {
     const tapColour = this.night ? "rgba(255,255,255,0.133)" : "rgba(0,0,0,0.078)";
     setClickable(view, true, onClick ? () => onClick() : null);
     U.setRippleOnly(view, tapColour, 0);
   };
 
-  /** OwnerUi.kt:422 icon(drawable, dp): an icon view of [dp] by [dp]. */
+  /** OwnerUi.kt:423 icon(drawable, dp): an icon view of [dp] by [dp]. */
   proto.ownerIcon = function (iconView, dp) {
     iconView.style.width = this.px(dp) + "px";
     iconView.style.height = this.px(dp) + "px";
@@ -157,7 +157,7 @@
     return iconView;
   };
 
-  /** OwnerUi.kt:432 statusPill(model): the pill of the network status: its dot and heading in the tone's ink on its tint. */
+  /** OwnerUi.kt:433 statusPill(model): the pill of the network status: its dot and heading in the tone's ink on its tint. */
   proto.statusPill = function (model) {
     const tone = this.pal.of(model.colour);
     const pill = LinearLayout("h");
@@ -179,7 +179,7 @@
     return pill;
   };
 
-  /** OwnerUi.kt:460 heroCard(status, balance, extra, from): the network status as a pill (with its what and next under it when it is not good), the balance, and [extra] under the amount. */
+  /** OwnerUi.kt:461 heroCard(status, balance, extra, from): the network status as a pill (with its what and next under it when it is not good), the balance, and [extra] under the amount. */
   proto.heroCard = function (status, balance, extra) {
     const card = this.ownerCard(20);
     setPadding(card, this.px(20), this.px(18), this.px(20), this.px(18));
@@ -206,7 +206,7 @@
     return card;
   };
 
-  /** OwnerUi.kt:487 waitingCard(rows): the warm card of what waits: a heading, and a row for each of [rows] with its count in a black badge. Null when no row. */
+  /** OwnerUi.kt:488 waitingCard(rows): the warm card of what waits: a heading, and a row for each of [rows] with its count in a black badge. Null when no row. */
   proto.waitingCard = function (rows, title) {
     if (!rows.length) return null;
     const warn = this.pal.warn;
@@ -240,10 +240,10 @@
     return card;
   };
 
-  /** OwnerUi.kt:526 GroupRow(icon, gear, title, sub, onClick). */
+  /** OwnerUi.kt:527 GroupRow(icon, gear, title, sub, onClick). */
   function GroupRow(icon, gear, title, sub, onClick = null) { return { icon, gear, title, sub, onClick }; }
 
-  /** OwnerUi.kt:529 groupCard(items): the group card of home: one surface card of rows, each with an icon tile. */
+  /** OwnerUi.kt:530 groupCard(items): the group card of home: one surface card of rows, each with an icon tile. */
   proto.groupCard = function (items) {
     const card = this.ownerCard(16);
     items.forEach((item, i) => {
@@ -301,7 +301,7 @@
   }
 
   /**
-   * Controller.kt:751 showFirstStart(message): the owner app's first screen: the title block and the next step of the
+   * Controller.kt:757 showFirstStart(message): the owner app's first screen: the title block and the next step of the
    * words, with Make a new shop wallet and Use setup text in the footer. [d] has the words and the two labels.
    */
   function showFirstStart(ui, d) {

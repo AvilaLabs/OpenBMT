@@ -97,10 +97,10 @@ button { font: inherit; cursor: pointer; }
 .bar .right a { border-color: transparent; }
 
 .say {
-  padding-top: 10px; padding-bottom: 10px;
   display: flex; flex-direction: column; justify-content: center; align-items: center;
   text-align: center;
-  padding: 0 24px;
+  padding: 10px 24px;
+  position: relative;
   border-bottom: 1px solid var(--line);
   background: #fff;
 }
@@ -114,15 +114,17 @@ button { font: inherit; cursor: pointer; }
 .say .fresh { animation: rise 0.35s ease-out; }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
+.body { display: grid; grid-template-columns: 1fr 340px; min-height: 0; position: relative; }
 .stage {
+  min-width: 0;
   display: flex; justify-content: center; align-items: flex-start;
-  gap: clamp(24px, 6vw, 96px);
+  gap: clamp(24px, 4vw, 64px);
   padding: 14px 24px 0;
   overflow: hidden;
   position: relative;
 }
 .slot { display: flex; flex-direction: column; align-items: center; gap: 8px; transition: opacity 0.3s ease, filter 0.3s ease; }
-.slot .cap { font-size: 15px; font-weight: 500; color: var(--ink); height: 20px; }
+.slot .cap { font-size: 15px; font-weight: 500; color: var(--ink); height: 28px; display: flex; align-items: center; gap: 12px; white-space: nowrap; }
 .slot .why { font-size: 14px; color: var(--muted); height: 18px; }
 .slot.rest { opacity: 0.38; filter: grayscale(0.6); }
 .slot.rest .phone { pointer-events: none; }
@@ -138,6 +140,65 @@ button { font: inherit; cursor: pointer; }
   transition: box-shadow 0.3s ease;
 }
 .phone .device { border-radius: 36px; overflow: hidden; }
+.phone.tablet { border-radius: 30px; padding: 11px; }
+.phone.tablet .device { border-radius: 20px; }
+
+/* Tablet or phone, on the counter's caption. */
+.kinds { display: inline-flex; background: #e9e9ef; border-radius: 999px; padding: 2px; }
+.kinds button {
+  border: 0; background: none; color: var(--muted);
+  font-size: 13px; font-weight: 400; padding: 3px 10px; border-radius: 999px;
+}
+.kinds button[aria-pressed="true"] { background: #fff; color: var(--ink); font-weight: 500; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+
+/* Questions a visitor may have at this moment: a column beside the stage, closed until asked. */
+.qa {
+  border-left: 1px solid var(--line);
+  background: #fff;
+  padding: 18px 20px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.qa-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; color: var(--muted); margin-bottom: 8px; letter-spacing: 0.02em; }
+.qa-close { background: none; border: 0; color: var(--blue); font-size: 13px; font-weight: 500; padding: 0; }
+.qa-tab { display: none; }
+@media (min-width: 1180px) {
+  .body.folded { grid-template-columns: 1fr 44px; }
+  .body.folded .qa { display: none; }
+  .body.folded .qa-tab {
+    display: block; border: 0; border-left: 1px solid var(--line); background: #fff; color: var(--blue);
+    font-size: 14px; font-weight: 500; writing-mode: vertical-rl; padding: 18px 0; cursor: pointer;
+  }
+  .body.folded .qa-tab:hover { background: #f1f0fb; }
+}
+.qa details { border-top: 1px solid var(--line); padding: 12px 0; }
+.qa details:last-child { border-bottom: 1px solid var(--line); }
+.qa summary { cursor: pointer; font-size: 16px; font-weight: 500; line-height: 1.35; list-style: none; position: relative; padding-right: 22px; }
+.qa summary::-webkit-details-marker { display: none; }
+.qa summary::after { content: "+"; position: absolute; right: 0; top: -1px; font-weight: 300; font-size: 20px; color: var(--blue); }
+.qa details[open] summary::after { content: "–"; }
+.qa p { font-size: 15px; line-height: 1.5; color: #33333d; margin: 10px 0 8px; }
+.qa .more { font-size: 14px; color: var(--blue); font-weight: 500; text-decoration: none; }
+.qa .more:hover { text-decoration: underline; }
+.qa .more::after { content: " →"; }
+.ask {
+  position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+  background: #fff; border: 1px solid var(--line); color: var(--blue);
+  border-radius: 999px; font-size: 14px; font-weight: 500; padding: 6px 14px;
+}
+.ask[hidden] { display: none; }
+@media (min-width: 1180px) { .ask { display: none; } }
+@media (max-width: 1179px) {
+  .body { grid-template-columns: 1fr; }
+  .qa {
+    position: absolute; top: 0; right: 0; bottom: 0; width: min(360px, 100%); z-index: 5;
+    box-shadow: -12px 0 30px rgba(0, 0, 0, 0.12);
+    transform: translateX(105%); transition: transform 0.25s ease;
+  }
+  .qa.open { transform: none; }
+  .qa-close { font-size: 14px; }
+}
 .fit { position: relative; }
 
 /* The next thing to tap, inside the lit phone. */
@@ -150,6 +211,7 @@ button { font: inherit; cursor: pointer; }
 /* The customer the demo plays (merchant path): a card beside the counter. */
 .actor {
   align-self: center;
+  flex: none;
   width: 220px;
   background: #fff; border: 1px solid var(--line); border-radius: 16px;
   padding: 18px; display: grid; gap: 12px;
@@ -170,6 +232,10 @@ button { font: inherit; cursor: pointer; }
   .bar { grid-template-columns: 1fr auto; gap: 8px; padding: 0 12px; }
   .bar .mark span, .steps { display: none; }
   .say .do { font-size: 18px; }
+  .say { padding-bottom: 40px; }
+  .ask { top: auto; bottom: 8px; transform: none; right: 50%; margin-right: -52px; }
+  .qa { top: auto; left: 0; width: auto; max-height: 70%; transform: translateY(105%); border-left: 0; border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; }
+  .qa.open { transform: none; }
   .say .happened { font-size: 14px; }
   .stage { padding-top: 8px; gap: 0; }
   .slot.rest { display: none; }
@@ -177,7 +243,8 @@ button { font: inherit; cursor: pointer; }
   .actor { position: absolute; left: 12px; right: 12px; bottom: 12px; width: auto; z-index: 3; }
   .actor.away { display: none; }
   :root { --say-h: 96px; }
-  .slot .cap { display: flex; align-items: center; gap: 10px; white-space: nowrap; height: 28px; }
+  .slot .cap { gap: 8px; }
+  .kinds button { padding: 3px 8px; }
   .switch {
     display: inline-flex;
     background: #fff; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; font-weight: 400; padding: 4px 10px; color: var(--blue);
@@ -191,5 +258,5 @@ button { font: inherit; cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .target { animation: none; box-shadow: 0 0 0 3px var(--pulse); }
   .say .fresh { animation: none; }
-  .role, .slot, .phone { transition: none; }
+  .role, .slot, .phone, .qa { transition: none; }
 }

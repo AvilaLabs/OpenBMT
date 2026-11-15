@@ -1,11 +1,13 @@
-// The page around the apps: the start screen, the bar with the steps, the one instruction line, and the stage
-// that holds the phones. It knows nothing of sales; a path (demo paths, preview.js) tells it what to show.
-// Clarity rules: one instruction at a time naming the role and the exact button; the phone to tap is lit and the
-// others rest with a caption saying why; after each step one sentence says what just happened.
+// The page around the apps: the start screen, the bar with the steps, the one instruction line, the stage that
+// holds the devices, and the questions a visitor may have at each moment. It knows nothing of sales; a path
+// (preview.js, and the live paths) tells it what to show.
+// Clarity rules: one instruction at a time naming the role and the exact button; the device to tap is lit and the
+// others rest with a line saying why; after each step one sentence says what just happened; questions stay to the
+// side, closed until asked.
 "use strict";
 (function (root) {
-  const DEVICE_W = 412, DEVICE_H = 915, BEZEL = 11;
-  const $ = (sel, el = document) => el.querySelector(sel);
+  const BEZEL = 11;
+  const HANDBOOK = "/handbook/";
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -35,7 +37,7 @@
       const again = el("button", null, "Start over");
       again.addEventListener("click", () => this.onRestart && this.onRestart());
       const book = el("a", null, "Handbook");
-      book.href = "/handbook/";
+      book.href = HANDBOOK;
       right.append(again, book);
       bar.append(mark, this.stepList, right);
 
@@ -43,27 +45,40 @@
       this.sayEl.setAttribute("aria-live", "polite");
       this.happenedEl = el("div", "happened");
       this.doEl = el("div", "do");
-      this.sayEl.append(this.happenedEl, this.doEl);
+      this.askEl = el("button", "ask");
+      this.askEl.hidden = true;
+      this.askEl.addEventListener("click", () => { this.collapse(false); this.qaEl.classList.toggle("open"); });
+      this.sayEl.append(this.happenedEl, this.doEl, this.askEl);
 
+      const body = el("div", "body");
       this.stage = el("main", "stage");
+      this.qaEl = el("aside", "qa");
+      this.qaTab = el("button", "qa-tab", "Questions");
+      this.qaTab.setAttribute("aria-label", "Show the questions");
+      this.qaTab.addEventListener("click", () => this.collapse(false));
+      body.append(this.stage, this.qaEl, this.qaTab);
+      this.body = body;
+      let hidden = false;
+      try { hidden = localStorage.getItem("openbmt-demo-qa") === "hidden"; } catch (e) { /* storage off: shown */ }
+      this.collapse(hidden, true);
       this.switchEl = el("button", "switch");
       this.switchEl.hidden = true;
 
-      demo.append(bar, this.sayEl, this.stage);
+      demo.append(bar, this.sayEl, body);
       this.demo = demo;
       this.root.append(demo);
     }
 
     /** The start screen. [roles]: [{name, what, go, onPick}]. */
     start(roles) {
-      let s = $(".start", this.root);
+      let s = this.root.querySelector(".start");
       if (!s) {
         s = el("div", "start");
         const top = el("div", "top");
         const mark = el("div", "mark");
         mark.innerHTML = '<img src="../ui/logo.png" alt=""><span>OpenBMT</span>';
         const book = el("a", null, "Handbook");
-        book.href = "/handbook/";
+        book.href = HANDBOOK;
         top.append(mark, book);
         const mid = el("div", "mid");
         mid.append(el("h1", null, "Try OpenBMT"),
@@ -84,12 +99,15 @@
       this.demo.hidden = true;
     }
 
-    /** Opens the demo with [steps] (names) and [devices]: [{id, caption}] left to right. */
+    /**
+     * Opens the demo with [steps] (names) and [devices] left to right: [{id, caption, sizes}], where [sizes] is a
+     * list of {label, size} the visitor can switch between (the first is shown first), or one {size}.
+     * [actorAfter] keeps room beside that device for the customer the demo plays.
+     */
     begin(steps, devices, actorAfter) {
-      const s = $(".start", this.root);
+      const s = this.root.querySelector(".start");
       if (s) s.hidden = true;
       this.demo.hidden = false;
-      this.steps = steps;
       this.stepList.replaceChildren();
       steps.forEach((name, i) => {
         const li = el("li");
@@ -99,6 +117,7 @@
         li.append(b);
         this.stepList.append(li);
       });
+      const kept = new Map([...this.slots].map(([k, v]) => [k, v.size]));
       for (const [, slot] of this.slots) slot.wrap.remove();
       this.slots.clear();
       if (this.actorEl) this.actorEl.remove();
@@ -107,16 +126,42 @@
         const wrap = el("div", "slot");
         const cap = el("div", "cap");
         cap.append(el("span", null, d.caption));
+        const size = d.sizes.some((z) => z.size === kept.get(d.id)) ? kept.get(d.id) : d.sizes[0].size;
+        const slot = { wrap, cap, caption: d.caption, sizes: d.sizes, size, build: null, aim: null };
+        if (d.sizes.length > 1) cap.append(this.sizeSwitch(slot));
         const fit = el("div", "fit");
         const phone = el("div", "phone");
         fit.append(phone);
         const why = el("div", "why");
         wrap.append(cap, fit, why);
         this.stage.append(wrap);
-        this.slots.set(d.id, { wrap, fit, phone, why, cap, caption: d.caption });
+        Object.assign(slot, { fit, phone, why });
+        this.slots.set(d.id, slot);
       }
-      if (actorAfter) this.actorRoom(actorAfter);
+      if (actorAfter) {
+        this.actorEl = el("aside", "actor away");
+        this.slots.get(actorAfter).wrap.after(this.actorEl);
+      }
+      this.questions([]);
       this.fit();
+    }
+
+    /** The switch between the device kinds of a slot, such as Tablet and Phone. */
+    sizeSwitch(slot) {
+      const group = el("span", "kinds");
+      group.setAttribute("role", "group");
+      group.setAttribute("aria-label", "Device");
+      for (const k of slot.sizes) {
+        const b = el("button", null, k.label);
+        b.setAttribute("aria-pressed", String(k.size === slot.size));
+        b.addEventListener("click", () => {
+          slot.size = k.size;
+          for (const o of group.children) o.setAttribute("aria-pressed", String(o === b));
+          this.redraw(slot);
+        });
+        group.append(b);
+      }
+      return group;
     }
 
     /** Marks step [i] as the current one. */
@@ -126,10 +171,19 @@
       });
     }
 
-    /** Puts [device] (a demo/ui Device element) into the phone of [id]. */
-    show(id, device) {
+    /** Shows in device [id] the page [build] makes for the device's size: build(size) returns a demo/ui Device. */
+    show(id, build) {
       const s = this.slots.get(id);
-      s.phone.replaceChildren(device);
+      s.build = build;
+      s.aim = null;
+      this.redraw(s);
+    }
+
+    redraw(s) {
+      if (!s.build) return;
+      s.phone.replaceChildren(s.build(s.size));
+      if (s.aim) this.aim(s, s.aim.label, s.aim.onTap);
+      this.fit();
     }
 
     /**
@@ -155,7 +209,48 @@
       this.fit();
     }
 
-    /** Lights the phone [id]; every other phone rests with its [why] line ({id: "why"}). */
+    /**
+     * The questions of this moment: [{q, a, page, anchor}], each closed until asked, with a link to the handbook
+     * page that says more.
+     */
+    questions(list) {
+      this.qaEl.replaceChildren();
+      this.qaEl.classList.remove("open");
+      this.askEl.hidden = !list.length;
+      this.askEl.textContent = "Questions";
+      if (!list.length) return;
+      const head = el("div", "qa-head");
+      head.append(el("span", null, "Questions you might have"));
+      const close = el("button", "qa-close", "Hide");
+      close.setAttribute("aria-label", "Hide the questions");
+      close.addEventListener("click", () => { this.qaEl.classList.remove("open"); this.collapse(true); });
+      head.append(close);
+      this.qaEl.append(head);
+      for (const item of list) {
+        const d = el("details");
+        d.append(el("summary", null, item.q));
+        d.append(el("p", null, item.a));
+        if (item.page) {
+          const a = el("a", "more", "More in the handbook");
+          a.href = HANDBOOK + item.page + (item.anchor ? "#" + item.anchor : "");
+          a.target = "_blank";
+          a.rel = "noopener";
+          d.append(a);
+        }
+        this.qaEl.append(d);
+      }
+    }
+
+    /** Folds the questions column away to a slim tab at the side, or opens it again; the choice is remembered. */
+    collapse(hide, quiet) {
+      this.body.classList.toggle("folded", hide);
+      if (!quiet) {
+        try { localStorage.setItem("openbmt-demo-qa", hide ? "hidden" : "shown"); } catch (e) { /* storage off */ }
+        this.fit();
+      }
+    }
+
+    /** Lights device [id]; every other device rests with its [why] line ({id: "why"}). */
     light(id, why = {}) {
       for (const [k, s] of this.slots) {
         const on = k === id;
@@ -168,11 +263,16 @@
     }
 
     /**
-     * Marks the control whose words are [label] inside phone [id] as the next thing to tap, and calls [onTap]
-     * when it is tapped. Returns false if no such control is shown.
+     * Marks the control whose words are [label] inside device [id] as the next thing to tap, and calls [onTap]
+     * when it is tapped. It stays marked when the device is redrawn in another size. Returns false if no such
+     * control is shown.
      */
     target(id, label, onTap) {
-      const s = this.slots.get(id);
+      return this.aim(this.slots.get(id), label, onTap);
+    }
+
+    aim(s, label, onTap) {
+      s.aim = { label, onTap };
       for (const t of this.root.querySelectorAll(".target")) t.classList.remove("target");
       const all = [...s.phone.querySelectorAll("button, [role=button]")];
       const hit = all.find((b) => b.textContent.trim() === label)
@@ -184,20 +284,12 @@
           ev.stopPropagation();
           hit.removeEventListener("click", once, true);
           hit.classList.remove("target");
+          s.aim = null;
           onTap();
         };
         hit.addEventListener("click", once, true);
       }
       return true;
-    }
-
-    /**
-     * Keeps room beside phone [afterId] for the customer the demo plays, so the phones never move when it appears.
-     */
-    actorRoom(afterId) {
-      this.actorEl = el("aside", "actor");
-      this.actorEl.classList.add("away");
-      this.slots.get(afterId).wrap.after(this.actorEl);
     }
 
     /** The customer the demo plays: [who], one [line] and one button. Null puts it away. */
@@ -212,27 +304,43 @@
       a.classList.remove("away");
     }
 
-    /** Scales the phones to the height there is, never above their real size. */
+    /** Scales each device to the height there is, never above its real size, and all of them to the width. */
     fit() {
-      const h = this.stage.clientHeight;
       const narrow = innerWidth < 900;
-      const room = h - (narrow ? 8 + 28 + 8 : 14 + 20 + 8 + 18 + 8) - 14;
-      const roomW = narrow ? innerWidth - 24 : innerWidth;
-      const k = Math.max(0.3, Math.min(1, room / (DEVICE_H + 2 * BEZEL), roomW / (DEVICE_W + 2 * BEZEL)));
-      for (const [, s] of this.slots) {
-        s.phone.style.transform = `scale(${k})`;
-        s.fit.style.width = (DEVICE_W + 2 * BEZEL) * k + "px";
-        s.fit.style.height = (DEVICE_H + 2 * BEZEL) * k + "px";
+      const room = this.stage.clientHeight - (narrow ? 8 + 28 + 8 : 14 + 28 + 8 + 18 + 8) - 14;
+      const k = new Map();
+      for (const s of this.slots.values()) {
+        const w = s.size.width + 2 * BEZEL, h = s.size.height + 2 * BEZEL;
+        k.set(s, Math.max(0.3, Math.min(1, room / h, (narrow ? innerWidth - 24 : Infinity) / w)));
+      }
+      if (!narrow && this.slots.size) {
+        const cs = getComputedStyle(this.stage);
+        const gap = parseFloat(cs.columnGap) || 0;
+        const items = this.slots.size + (this.actorEl ? 1 : 0);
+        const avail = this.stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+          - gap * (items - 1) - (this.actorEl ? this.actorEl.offsetWidth || 220 : 0) - 8;
+        let total = 0;
+        for (const s of this.slots.values()) total += (s.size.width + 2 * BEZEL) * k.get(s);
+        if (total > avail) for (const s of this.slots.values()) k.set(s, Math.max(0.3, k.get(s) * avail / total));
+      }
+      for (const s of this.slots.values()) {
+        const f = k.get(s), w = s.size.width + 2 * BEZEL, h = s.size.height + 2 * BEZEL;
+        s.phone.style.width = w + "px";
+        s.phone.style.height = h + "px";
+        s.phone.style.transform = `scale(${f})`;
+        s.phone.classList.toggle("tablet", s.size.width > 500);
+        s.fit.style.width = w * f + "px";
+        s.fit.style.height = h * f + "px";
       }
     }
 
-    /** On a narrow window only the lit phone shows; a switch beside its caption shows the other one. */
+    /** On a narrow window only the lit device shows; a switch beside its caption shows the other one. */
     updateSwitch() {
       const others = [...this.slots.keys()].filter((k) => k !== this.lit);
-      for (const [, s] of this.slots) s.wrap.classList.remove("peek");
+      for (const [, s] of this.slots) s.wrap.style.display = "";
       if (!others.length) { this.switchEl.hidden = true; return; }
       const cur = this.slots.get(this.lit), other = this.slots.get(others[0]);
-      const label = (s) => "See " + s.caption.replace(/^The /, "the ");
+      const label = (s) => "See " + s.caption.replace(/^The /, "the ").replace(/^Your /, "your ");
       const showing = (peek) => {
         const on = peek ? other : cur, off = peek ? cur : other;
         on.wrap.style.display = "flex";
@@ -240,6 +348,7 @@
         if (!peek) on.wrap.style.display = "";
         this.switchEl.textContent = label(off);
         on.cap.append(this.switchEl);
+        this.fit();
       };
       this.switchEl.hidden = false;
       let peek = false;
