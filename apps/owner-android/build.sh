@@ -25,6 +25,7 @@
 #   OWNERAPK_SKIP_RUST  set to 1 to reuse the .so files of an earlier run
 #   OWNERAPK_CARGO_TARGET  the cargo target directory (default: ~/.cache/openbmt/target/ownerapk)
 #   OWNERAPK_KEYDIR    where the test key is kept (default: ~/.cache/openbmt/tmp/ownerapk)
+#   OWNERAPK_STOP_AFTER_ALIGN  set to 1 to stop after the aligned, unsigned APK (scripts/release-sign.sh)
 
 set -euo pipefail
 
@@ -177,6 +178,12 @@ export TZ=UTC LC_ALL=C
 "$bt/zipalign" -P 16 -f 4 "$out/unaligned.apk" "$out/aligned.apk"
 "$bt/zipalign" -c -P 16 4 "$out/aligned.apk" || die "the APK is not aligned"
 echo "aligned: 4 bytes for everything, 16 KiB for the stored libraries"
+
+# The release script (scripts/release-sign.sh) signs the aligned APK itself with the release key.
+if [ "${OWNERAPK_STOP_AFTER_ALIGN:-0}" = 1 ]; then
+    echo "stopped after $out/aligned.apk (unsigned)"
+    exit 0
+fi
 
 step "signature"
 ks="$keydir/test-key.p12"
