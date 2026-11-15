@@ -457,28 +457,28 @@ says so when one is missing.
   time the owner phone read the Paid in the counter's records; the time the
   counter wrote in it is not used, nor for the day of OC-63. A first reading
   later than the phone's clock, as when the clock was ahead and is set right,
-  is taken as now, and the wait runs from then. A sale whose Paid
-  the owner phone first read less than `PAID_CHECK_WAIT_SECS` (24 hours) **[to
-  tune]** ago, and whose payment is not yet in a block, is listed as "waiting
-  for a block" and is not a mismatch: a payment with a low fee can wait that
-  long (DESIGN §2.6). After that, a verified amount below the expected one is
-  a mismatch. Nothing is judged while the view is not ready or has not checked
+  is taken as now, and the wait runs from then. A sale whose Paid the owner
+  phone first read less than `PAID_CHECK_WAIT_SECS` (24 hours) **[to tune]**
+  ago, and whose payment is not yet in a block, is listed as "waiting for a
+  block" and is not a mismatch: a payment with a low fee can wait that long
+  (DESIGN §2.6). After that, a verified amount below the expected one is a
+  mismatch. Nothing is judged while the view is not ready or has not checked
   the chain to its tip (OC-14); a sale too old for facts (OC-14) is listed as
   not checkable, never as a mismatch or as checked. While the receipt log is
   full (OC-13) no sale's payment can be checked: its sales are listed as not
-  checkable, not as waiting. A Paid at an address the
-  owner never issued to that counter (OC-14, "not this counter's address") is
-  a mismatch at once, with nothing seen: no payment there is the shop's. A
-  record of a counter that does not read as part of a sale, such as a second
-  opening of a sale, a payment for a sale never opened, or a record of a kind
-  not known, is passed over, and the counter raises its own alarm, that some
-  of its payments cannot be checked; its other sales, and every other counter,
-  are still checked. A second opening leaves the first as it was. A counter
-  with 256 alarms not cleared is held back: its alarms stay, no more are
-  raised for it, and it is checked no further until
-  the owner clears them, so that one counter cannot fill the marks of OC-64
-  for the others. The check runs each time the owner's view checks a new tip,
-  and when the app starts, and a run that failed is tried again at the next.
+  checkable, not as waiting. A Paid at an address the owner never issued to
+  that counter (OC-14, "not this counter's address") is a mismatch at once,
+  with nothing seen: no payment there is the shop's. A record of a counter
+  that does not read as part of a sale, such as a second opening of a sale, a
+  payment for a sale never opened, or a record of a kind not known, is passed
+  over, and the counter raises its own alarm, that some of its payments cannot
+  be checked; its other sales, and every other counter, are still checked. A
+  second opening leaves the first as it was. A counter with 256 alarms not
+  cleared is held back: its alarms stay, no more are raised for it, and it is
+  checked no further until the owner clears them, so that one counter cannot
+  fill the marks of OC-64 for the others. The check runs each time the owner's
+  view checks a new tip, and when the app starts, and a run that failed is
+  tried again at the next.
 - **OC-62.** The mismatch. The owner phone raises an alarm, as it raises a
   cancel (DESIGN §2.7), so that it reaches the owner without the owner looking
   for it, with the counter's name, the sale's number, the cashier, the amount
