@@ -31,7 +31,7 @@ use std::fs;
 use std::io;
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -437,6 +437,8 @@ struct TillHandles {
     clock: Arc<dyn Clock + Send + Sync>,
     table: Till,
     nonces: Mutex<NonceCache>,
+    /// The Box's time when the listener started (BX-80).
+    started: AtomicU64,
 }
 
 impl TillHandles {
@@ -466,6 +468,10 @@ impl TillBackend for TillHandles {
 
     fn take_nonce(&self, nonce: &[u8; 16], now: u64) -> NonceCheck {
         lock(&self.nonces).take(nonce, now)
+    }
+
+    fn time_floor(&self, now: u64) -> u64 {
+        self.started.fetch_min(now, Ordering::SeqCst).min(now)
     }
 
     fn create(&self, body: CreateBody) -> Result<([u8; 16], SaleInfo), TillRefusal> {
@@ -1112,6 +1118,7 @@ impl BoxRunner {
             clock: Arc::clone(&self.clock),
             table: Arc::clone(&self.till),
             nonces: Mutex::new(NonceCache::new()),
+            started: AtomicU64::new(self.clock.now()),
         });
         let till = TillListener::start(listener, backend, cfg).map_err(StartFailure::Listen)?;
         let addr = till.local_addr();

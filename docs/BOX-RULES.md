@@ -263,7 +263,7 @@ screen and not a shared computer.
   The owner phone sends the settings in force to every Box when it starts
   and every six hours, so a restored Box takes the newer settings within
   that time. Where the host system allows it, the till key and the POS
-  token are left out of its backups and are made again after a restore.
+  token are left out of its backups and must be set up again after a restore.
 - **BX-64. Setup by files.** A host system without a console sets the Box
   up with files in its data folder, read at start: `pos-setup.txt` and
   `pos-token.txt` hold what the console's `pos-setup` and `pos-token` take,
@@ -745,31 +745,32 @@ code and checks the payment.
   own order when it reads `paid`.
 - **BX-80. The Box's answers are signed.** The listener is plain HTTP (BX-70),
   so whoever is on the path between the till's server and the Box sees what is
-  sent. The key the till holds is therefore never sent. The till keeps two keys
-  made from it, the request key, the tagged hash `OpenBMT/till-request/v1` of
-  the key, and the reply key, the tagged hash `OpenBMT/till-reply/v1`; the Box
-  keeps both. Every request carries `X-OBM-Nonce`, 32 lowercase hex the till
-  makes fresh for that request, `X-OBM-Time`, the till's Unix time in seconds,
-  and `X-OBM-Request`, 64 lowercase hex: the HMAC-SHA256 under the request key
-  of these, joined by line feeds: `OBM-TILL-REQUEST-1`, the method, the path,
-  the nonce, the time as sent, and the SHA-256 of the body as 64 lowercase hex.
-  A request without them is a 400 `tillBadRequest`. The Box refuses a wrong mac
-  (401 `tillKeyWrong`), a time more than five minutes from its own (401
+  sent. The key the till holds is therefore never sent. The till keeps two
+  keys made from it, the request key, the tagged hash
+  `OpenBMT/till-request/v1` of the key, and the reply key, the tagged hash
+  `OpenBMT/till-reply/v1`; the Box keeps both. Every request carries
+  `X-OBM-Nonce`, 32 lowercase hex the till makes fresh for that request,
+  `X-OBM-Time`, the till's Unix time in seconds, and `X-OBM-Request`, 64
+  lowercase hex: the HMAC-SHA256 under the request key of these, joined by
+  line feeds: `OBM-TILL-REQUEST-1`, the method, the path, the nonce, the time
+  as sent, and the SHA-256 of the body as 64 lowercase hex. A request without
+  them is a 400 `tillBadRequest`. The Box refuses a wrong mac (401
+  `tillKeyWrong`), a time more than five minutes from its own (401
   `tillClock`), and a nonce it has taken in the last ten minutes (401
   `tillReplay`), so a request seen on the path can be neither sent again nor
-  changed. Every answer, refusals included, carries `X-OBM-Reply`, 64 lowercase
-  hex: the HMAC-SHA256 under the reply key of these, joined by line feeds:
-  `OBM-TILL-REPLY-2`, the request's method, its path, its nonce, the SHA-256 of
-  the request's body as 64 lowercase hex (of no bytes for a request without a
-  body), the answer's status as three digits, and the answer's body. The till
-  takes an answer only when it carries the mac of the request it sent, body
-  included, so an answer changed or made up on the path, an old one sent again,
-  or a true answer to a request that was changed on its way, is refused: seeing
-  a request does not let anyone sign. The till also checks that the amount,
-  currency, request and reference of every answer that names a sale are the ones
-  it asked for, and cancels the sale (BX-74) and fails the payment if they are
-  not. A `till-key` file of an earlier form, which holds no request key, is
-  answered 401 `tillKeyOld` until a new key is made.
+  changed. Every answer, refusals included, carries `X-OBM-Reply`, 64
+  lowercase hex: the HMAC-SHA256 under the reply key of these, joined by line
+  feeds: `OBM-TILL-REPLY-2`, the request's method, its path, its nonce, the
+  SHA-256 of the request's body as 64 lowercase hex (of no bytes for a request
+  without a body), the answer's status as three digits, and the answer's body.
+  The till takes an answer only when it carries the mac of the request it
+  sent, body included, so an answer changed or made up on the path, an old one
+  sent again, or a true answer to a request that was changed on its way, is
+  refused: seeing a request does not let anyone sign. The till also checks
+  that the amount, currency, request and reference of every answer that names
+  a sale are the ones it asked for, and cancels the sale (BX-74) and fails the
+  payment if they are not. A `till-key` file of an earlier form, which holds
+  no request key, is answered 401 `tillKeyOld` until a new key is made.
 
 What the code fixes. `till-key` takes no lock on the data directory (BX-02):
 it writes only that one file, by renaming a whole file over the old, and the
@@ -778,10 +779,11 @@ once. The file holds a version byte, the request key and the reply key, each
 made as BIP340 tagged hashes are. A file in an earlier form, which holds only
 a hash of the key or a hash of a bearer token, gets `tillKeyOld` until a new
 key is made. The Box keeps the nonces of the last ten minutes in memory only,
-at most 8,192 of them; when they are full a request is refused 429
-`tillBusy` until older ones have expired. A restart forgets them, so a
-request recorded in the five minutes before a restart can be sent once more
-after it, and not after that.
+at most 8,192 of them; when they are full a request is refused 429 `tillFlood`
+until older ones have expired. A restart forgets them, so a request whose time
+is before the listener started is refused as `tillClock`: one recorded before
+a restart cannot be sent again after it. If the Box's clock goes back past
+that time, the earliest time taken goes back with it.
 The shop's currency is named by its three letters, `SAT` for Bitcoin Standard
 (CR-196). A sale counts as waiting from BX-72 until
 the counter's "opened" notice; at most 32 do, and at most 4,096 sales of any

@@ -30,7 +30,10 @@ use crate::runner::{PosView, StartFailure};
 use crate::state::{
     BoxError, BoxStatus, INVITE_SECS, MAX_MEMBERS, MAX_TOKEN_BYTES, POS_TOKEN_FILE,
 };
-use crate::till::MAX_WAITING;
+use crate::till::{MAX_NONCES, MAX_WAITING};
+
+// The words of `TillAnswer::Flood` name the number.
+const _: () = assert!(MAX_NONCES == 8_192);
 
 /// The text of a `Details` line may hold no control character.
 fn plain(text: &str) -> String {
@@ -1083,6 +1086,8 @@ pub enum TillAnswer {
     Expired,
     /// Too many sales are waiting for a counter.
     Busy,
+    /// Far more requests came from the till than sales need (BX-80).
+    Flood,
     /// The Box does not know the sale: it was restarted.
     Lost,
     /// The counter's sale ended without being paid.
@@ -1115,6 +1120,7 @@ impl TillAnswer {
             Self::BadAmount => "tillBadAmount",
             Self::Expired => "tillExpired",
             Self::Busy => "tillBusy",
+            Self::Flood => "tillFlood",
             Self::Lost => "tillLost",
             Self::Unpaid => "tillUnpaid",
             Self::Cancelled => "tillCancelled",
@@ -1212,6 +1218,13 @@ impl TillAnswer {
                 "Finish or cancel some of them, then try again.",
             )
             .code("BX-76"),
+            Self::Flood => stop(
+                "Too many requests",
+                "The Box took 8,192 requests from the till in ten minutes, far more than sales need. Something may be sending them on purpose.".into(),
+                Who::Cashier,
+                "Wait a few minutes, then try again. If it happens again, tell the owner.",
+            )
+            .code("BX-80"),
             Self::Lost => stop(
                 "The Box restarted",
                 "The Box no longer knows this sale. If the customer paid, the counter shows the sale as paid.".into(),
@@ -2179,6 +2192,7 @@ pub fn till_samples() -> Vec<TillAnswer> {
         TillAnswer::BadAmount,
         TillAnswer::Expired,
         TillAnswer::Busy,
+        TillAnswer::Flood,
         TillAnswer::Lost,
         TillAnswer::Unpaid,
         TillAnswer::Cancelled,

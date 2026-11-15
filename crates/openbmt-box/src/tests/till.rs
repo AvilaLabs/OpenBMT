@@ -1230,6 +1230,7 @@ fn bx_75_a_refusal_is_its_status_its_key_and_its_words() {
         ),
         (TillRefusal::BadAmount, 400, "tillBadAmount"),
         (TillRefusal::Busy, 429, "tillBusy"),
+        (TillRefusal::Flood, 429, "tillFlood"),
         (TillRefusal::Lost, 404, "tillLost"),
     ];
     for (refusal, status, key) in cases {
@@ -1340,6 +1341,14 @@ fn sc_01_the_tills_words_are_the_words_as_written() {
         )
     );
     assert_eq!(
+        words(&TillAnswer::Flood),
+        s(
+            "Too many requests",
+            "The Box took 8,192 requests from the till in ten minutes, far more than sales need. Something may be sending them on purpose.",
+            "Wait a few minutes, then try again. If it happens again, tell the owner."
+        )
+    );
+    assert_eq!(
         words(&TillAnswer::Lost),
         s(
             "The Box restarted",
@@ -1398,13 +1407,14 @@ fn sc_01_every_till_answer_is_in_the_list_and_the_key_is_its_name() {
             | TillAnswer::BadAmount
             | TillAnswer::Expired
             | TillAnswer::Busy
+            | TillAnswer::Flood
             | TillAnswer::Lost
             | TillAnswer::Unpaid
             | TillAnswer::Cancelled
             | TillAnswer::KeyMade => {}
         }
     }
-    assert_eq!(till_samples().len(), 15);
+    assert_eq!(till_samples().len(), 16);
     // No two of them say the same.
     let mut seen = std::collections::BTreeSet::new();
     for a in till_samples() {
@@ -3128,6 +3138,9 @@ fn bx_80_a_request_changed_in_its_body_path_nonce_or_time_is_refused() {
 fn bx_80_a_time_more_than_five_minutes_from_the_box_is_refused() {
     let t = till_box("tillclock");
     let path = format!("/till/v1/sales/{SALE}");
+    // The listener has run five minutes, so that a time five minutes back is
+    // not before it started.
+    t.clock.advance(300);
     let now = test_now();
     let at = |time: u64| {
         let nonce = fresh_nonce();
@@ -3156,6 +3169,47 @@ fn bx_80_a_time_more_than_five_minutes_from_the_box_is_refused() {
     t.clock.advance(301);
     let answer = http_mac(t.addr, &raw);
     assert_eq!((answer.0, error_of(&answer.1).as_str()), (401, "tillClock"));
+}
+
+#[test]
+fn bx_80_a_request_made_before_the_listener_started_is_refused() {
+    let mut t = till_box("tillstart");
+    let path = format!("/till/v1/sales/{SALE}");
+    // One second before the listener started, though within five minutes.
+    let early = request_text_at(
+        "GET",
+        &path,
+        Some(&t.key),
+        Some(&fresh_nonce()),
+        None,
+        test_now() - 1,
+    );
+    let answer = http_mac(t.addr, &early);
+    assert_eq!((answer.0, error_of(&answer.1).as_str()), (401, "tillClock"));
+    // A request recorded and taken, then sent again after the listener
+    // started again with no nonces, is refused.
+    let recorded = request_text("GET", &path, Some(&t.key), Some(&fresh_nonce()), None);
+    assert_eq!(http_mac(t.addr, &recorded).0, 404);
+    t.clock.advance(60);
+    t.addr =
+        t.r.serve_till("127.0.0.1:0".parse().unwrap(), TillConfig::default())
+            .unwrap();
+    let again = http_mac(t.addr, &recorded);
+    assert_eq!((again.0, error_of(&again.1).as_str()), (401, "tillClock"));
+    // A request made now is taken.
+    let fresh = request_text("GET", &path, Some(&t.key), Some(&fresh_nonce()), None);
+    assert_eq!(http_mac(t.addr, &fresh).0, 404);
+}
+
+#[test]
+fn bx_80_the_floor_goes_down_with_a_clock_that_went_back() {
+    let t = till_box("tillback");
+    let path = format!("/till/v1/sales/{SALE}");
+    // The Box's clock is put back an hour after the listener started: a
+    // request at the new time is still taken.
+    t.clock.back(3_600);
+    let raw = request_text("GET", &path, Some(&t.key), Some(&fresh_nonce()), None);
+    assert_eq!(http_mac(t.addr, &raw).0, 404);
 }
 
 #[test]
@@ -3264,7 +3318,8 @@ fn bx_80_a_full_nonce_cache_is_a_429_until_older_nonces_have_expired() {
     });
     let nonce = fresh_nonce();
     let answer = one(&nonce);
-    assert_eq!((answer.0, error_of(&answer.1).as_str()), (429, "tillBusy"));
+    assert_eq!((answer.0, error_of(&answer.1).as_str()), (429, "tillFlood"));
+    assert_eq!(field(&answer.1, "heading"), "Too many requests");
     assert!(mac_is(&t.key, "GET", &path, &nonce, "", &answer));
     // One that is held is still a replay, not busy.
     let held = format!("{:016x}{:016x}", 0xa003, 7);
@@ -3279,7 +3334,7 @@ fn bx_80_a_full_nonce_cache_is_a_429_until_older_nonces_have_expired() {
 }
 
 #[test]
-fn bx_80_a_busy_backend_is_told_to_the_till_as_tillbusy_with_a_mac() {
+fn bx_80_a_full_nonce_cache_is_told_to_the_till_as_tillflood_with_a_mac() {
     struct Full;
     impl TillBackend for Full {
         fn keys(&self) -> KeyCheck {
@@ -3313,7 +3368,7 @@ fn bx_80_a_busy_backend_is_told_to_the_till_as_tillbusy_with_a_mac() {
         till.local_addr(),
         &request_text("GET", &path, Some(&key), Some(&nonce), None),
     );
-    assert_eq!((answer.0, error_of(&answer.1).as_str()), (429, "tillBusy"));
+    assert_eq!((answer.0, error_of(&answer.1).as_str()), (429, "tillFlood"));
     assert!(mac_is(&key, "GET", &path, &nonce, "", &answer));
     till.stop();
 }

@@ -463,6 +463,13 @@ pub trait TillBackend: Send + Sync + 'static {
     fn now(&self) -> u64;
     /// Look at a request's nonce and, when it is fresh, remember it (BX-80).
     fn take_nonce(&self, nonce: &[u8; 16], now: u64) -> NonceCheck;
+    /// The earliest request time taken (BX-80): the Box's time when the
+    /// listener started, as the nonces taken before then are forgotten, or
+    /// `now` if the Box's clock has since gone back before it.
+    fn time_floor(&self, now: u64) -> u64 {
+        let _ = now;
+        0
+    }
     /// BX-72: ask a counter for a sale.
     fn create(&self, body: CreateBody) -> Result<([u8; 16], SaleInfo), TillRefusal>;
     /// BX-73: how a sale stands.
@@ -489,6 +496,7 @@ impl TillRefusal {
             },
             Self::BadAmount => TillAnswer::BadAmount,
             Self::Busy => TillAnswer::Busy,
+            Self::Flood => TillAnswer::Flood,
             Self::Lost => TillAnswer::Lost,
             Self::BadRequest | Self::Fault => return None,
         })
@@ -643,6 +651,12 @@ fn checked(backend: &dyn TillBackend, request: &Request) -> Result<[u8; 32], Vec
     if !time_is_near(&request.time, now) {
         return refuse(TillRefusal::Clock);
     }
+    // The nonces are kept in memory only, so a request made before the
+    // listener started could be one already taken: it is refused.
+    let floor = backend.time_floor(now);
+    if request.time.parse::<u64>().map_or(true, |t| t < floor) {
+        return refuse(TillRefusal::Clock);
+    }
     // The reader took the nonce as 32 lowercase hex.
     let Some(nonce) = unhex::<16>(&request.nonce) else {
         return refuse(TillRefusal::BadRequest);
@@ -650,7 +664,7 @@ fn checked(backend: &dyn TillBackend, request: &Request) -> Result<[u8; 32], Vec
     match backend.take_nonce(&nonce, now) {
         NonceCheck::Fresh => Ok(reply_key),
         NonceCheck::Replay => refuse(TillRefusal::Replay),
-        NonceCheck::Busy => refuse(TillRefusal::Busy),
+        NonceCheck::Busy => refuse(TillRefusal::Flood),
     }
 }
 

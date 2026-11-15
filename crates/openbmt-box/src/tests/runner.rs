@@ -44,6 +44,10 @@ impl TestClock {
     pub fn advance(&self, secs: u64) {
         self.0.fetch_add(secs, Ordering::SeqCst);
     }
+
+    pub fn back(&self, secs: u64) {
+        self.0.fetch_sub(secs, Ordering::SeqCst);
+    }
 }
 
 impl Clock for TestClock {

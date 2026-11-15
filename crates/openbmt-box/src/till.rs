@@ -127,6 +127,9 @@ pub enum TillRefusal {
     BadAmount,
     /// 429: too many sales are waiting.
     Busy,
+    /// 429: the Box holds as many nonces as it keeps, all of the last ten
+    /// minutes (BX-80).
+    Flood,
     /// 404: the Box does not know the sale.
     Lost,
     /// 400: the request does not read. No words: the till's own fault.
@@ -144,7 +147,7 @@ impl TillRefusal {
             Self::UnknownCounter(_) | Self::Lost => 404,
             Self::WrongMoney { .. } => 409,
             Self::BadAmount | Self::BadRequest => 400,
-            Self::Busy => 429,
+            Self::Busy | Self::Flood => 429,
             Self::Fault => 500,
         }
     }

@@ -89,6 +89,7 @@ environment variable `OPENBMT_WRITE_SCREENS=1` to write it again.
 | TillAnswer::tillBadAmount | This amount cannot be taken | The amount is zero, below zero, or has more decimals than the money has. | Check the sale in the till. | the cashier | BX-72 |
 | TillAnswer::tillExpired | Sale not started | Nobody pressed Start on the counter within 5 minutes. | Try again, or take the payment on the counter and pick Bitcoin by hand. | the cashier | BX-76 |
 | TillAnswer::tillBusy | Too many sales are waiting | 32 sales from the till are waiting for a counter. | Finish or cancel some of them, then try again. | the cashier | BX-76 |
+| TillAnswer::tillFlood | Too many requests | The Box took 8,192 requests from the till in ten minutes, far more than sales need. Something may be sending them on purpose. | Wait a few minutes, then try again. If it happens again, tell the owner. | the cashier | BX-80 |
 | TillAnswer::tillLost | The Box restarted | The Box no longer knows this sale. If the customer paid, the counter shows the sale as paid. | Check the counter. If it was paid, pick Bitcoin by hand in the till. | the cashier | BX-76 |
 | TillAnswer::tillUnpaid | The payment did not arrive | The counter's sale ended without being paid. | Ask the customer to try again, or pick another way to pay. | the cashier | BX-78 |
 | TillAnswer::tillCancelled | Sale cancelled | The till cancelled this sale before it was paid. | Nothing to do. | nobody | BX-74 |
