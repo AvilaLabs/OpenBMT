@@ -80,11 +80,12 @@ they do not close orders in either vendor's system.
 A host with no console sets the Box up with files in the data folder, read
 at start and checked as the console's commands are (BX-64): `pos-setup.txt`
 (what `pos-setup` takes, one line) and `pos-token.txt` (what `pos-token`
-takes; the Box must be paired and list the settings) are deleted once read,
-and renamed with `.refused` at the end when refused, with the console's words
-in the Box's log. `till.txt` with `listen=<addr:port>` turns the till
-listener on, as `--till-listen` does (the flag wins) and is kept. A
-`pos-setup.txt` takes effect at the next start, as the console's does.
+takes; the Box must be paired and list the settings) are deleted once read.
+When refused, `pos-setup.txt` is renamed with `.refused` at the end and
+`pos-token.txt` is deleted, with the console's words in the Box's log.
+`till.txt` with `listen=<addr:port>` turns the till listener on, as
+`--till-listen` does (the flag wins) and is kept. The files are read before
+the POS side and the till listener start, so they take effect at that start.
 
 Whoever has the volume has the Box's key and POS token (BOX-RULES section 6).
 Back the volume up as one would a password file.
@@ -115,8 +116,9 @@ as the file `invitation.txt` in the app's data folder
 (`app-data/openbmt-box/data`), read at the next start.
 
 The three files of BX-64 go in the same folder and are read at the next start:
-`pos-setup.txt` and `pos-token.txt` (deleted once read, or renamed with
-`.refused` when refused, with the words in the app's log) and `till.txt`
+`pos-setup.txt` and `pos-token.txt` (deleted once read; when refused,
+`pos-setup.txt` is renamed with `.refused` and `pos-token.txt` is deleted,
+with the words in the app's log) and `till.txt`
 (`listen=0.0.0.0:8091`, kept). The compose file publishes port 8091 for the
 till behind a comment that says so; the Box answers on it only when
 `till.txt` is there. `umbrel-app.yml` has `backupIgnore` for `data/till-key`,

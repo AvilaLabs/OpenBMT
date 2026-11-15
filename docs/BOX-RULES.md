@@ -265,12 +265,17 @@ screen and not a shared computer.
   that time. Where the host system allows it, the till key and the POS
   token are left out of its backups and must be set up again after a restore.
 - **BX-64. Setup by files.** A host system without a console sets the Box
-  up with files in its data folder, read at start: `pos-setup.txt` and
-  `pos-token.txt` hold what the console's `pos-setup` and `pos-token` take,
-  are checked as those are, and are deleted once read; `till.txt` names the
-  till listener's address as `--till-listen` does and is kept. A file that is
-  refused is renamed with `.refused` at the end, and the Box says why in its
-  log.
+  up with files in its data folder, read at start before the POS side and
+  the till listener are set up, so that what they hold works at that start:
+  `pos-setup.txt` and `pos-token.txt` hold what the console's `pos-setup` and
+  `pos-token` take, are checked as those are, and are deleted once read;
+  `till.txt` names the till listener's address as `--till-listen` does and is
+  kept, and the flag wins when both are given. A refused `pos-setup.txt` is
+  renamed with `.refused` at the end; a refused `pos-token.txt` is deleted,
+  because it holds a token. The Box says in its log what it did with each
+  file and why one was refused, and never writes the token there. A file
+  that cannot be deleted is emptied, and an empty file is not applied: the
+  next start only deletes it.
 
 ## 5a. What the code fixes
 
