@@ -85,7 +85,7 @@ fn bundle_bytes(
 }
 
 /// A confirmed ceremony and the honest bundle for it.
-fn ready() -> (Ceremony, Vec<u8>) {
+pub(super) fn ready() -> (Ceremony, Vec<u8>) {
     let (mut c, request) = begun(&offer(), 3, 7);
     c.confirm(T0 + 20).unwrap();
     let bytes = bundle_bytes(
@@ -97,7 +97,7 @@ fn ready() -> (Ceremony, Vec<u8>) {
     (c, bytes)
 }
 
-fn finish(c: &mut Ceremony, bytes: &[u8]) -> Result<PairingRecord, PairRefused> {
+pub(super) fn finish(c: &mut Ceremony, bytes: &[u8]) -> Result<PairingRecord, PairRefused> {
     c.finish(bytes, &SMALL, T0 + 30)
 }
 
