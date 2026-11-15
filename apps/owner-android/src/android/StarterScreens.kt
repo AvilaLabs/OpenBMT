@@ -24,7 +24,7 @@ import org.openbmt.owner.StarterWalletView
 // of `StarterWords`; what the core says is shown as it arrives. The use of the key is in `StarterUse.kt`.
 
 /** What the setup holds between its screens, in memory only. */
-internal class StarterDraft(val limitSats: Long, val moveBy: Long, val rolls: ByteArray) {
+internal class StarterDraft(val limitSats: Long, val moveBy: Long, val rolls: ByteArray, val made: Long) {
     var wallet: StarterWalletView? = null
     var positions: List<Long> = emptyList()
 
@@ -166,13 +166,16 @@ private fun Controller.showStarterFinish(r: FirstRun) {
     }
 }
 
+/** True only when the shop positively has no pinned own wallet; null on any doubt, which keeps the starter's files. */
+private fun Controller.shopHasNoWallet(): Boolean? = try { !ownStore.hasWallet() } catch (e: Exception) { null }
+
 /**
  * A setup that was stopped between its writes leaves a sealed seed or a wrapped key with no wallet or record: they, and the
  * Keystore key, are dropped so that the setup starts again (`StarterOrphan`). Called at the start of the app and at the setup's step.
  */
 internal fun Controller.starterDropOrphan() {
     val s = starter.store
-    if (!StarterOrphan.found(s.hasSealed(), s.hasWrapped(), s.hasWallet(), s.hasRecord(), starter.keeping) { starterPinned() }) return
+    if (!StarterOrphan.found(s.hasSealed(), s.hasWrapped(), s.hasWallet(), s.hasRecord(), starter.keeping) { shopHasNoWallet() }) return
     s.dropOrphan()
     starter.keystore.delete()
     starter.pinned = null
@@ -286,16 +289,18 @@ internal fun Controller.showStarterLimit(message: SayWords? = null) {
     views.add(msg)
     val go = ui.primary(StarterWords.limitContinue) {
         val sats = StarterSetup.limitSats(limit.text.toString(), if (bitcoinStandard) null else price.text.toString().trim().replace(",", "").toLongOrNull())
-        val by = StarterSetup.moveBy(date.text.toString(), nowSecs())
+        // The moment the date is worked out from is the moment the record's "made" is taken from.
+        val now = nowSecs()
+        val by = StarterSetup.moveBy(date.text.toString(), now)
         val rolls = StarterSetup.rolls(dice.text.toString())
         when {
             sats == null -> msg.show(words(StarterWords.said(StarterWords.limitInvalid, Tones.STOP)))
             by == null -> msg.show(words(StarterWords.said(StarterWords.dateInvalid, Tones.STOP)))
-            StarterSetup.tooLate(by, nowSecs()) -> msg.show(words(StarterWords.said(StarterWords.dateTooLate, Tones.STOP)))
+            StarterSetup.tooLate(by, now) -> msg.show(words(StarterWords.said(StarterWords.dateTooLate, Tones.STOP)))
             rolls == null -> msg.show(words(StarterWords.said(StarterWords.diceInvalid, Tones.STOP)))
             else -> {
                 starter.draft?.wipe()
-                starter.draft = StarterDraft(sats, by, rolls)
+                starter.draft = StarterDraft(sats, by, rolls, now)
                 makeStarter()
             }
         }
@@ -485,7 +490,7 @@ private fun Controller.sealStarter() {
         return centre(AppWords.libraryMissing(e.message), listOf(ui.button(StarterWords.backButton) { starterCancel() }), title = StarterWords.screenTitle)
     }
     draft.copy.seal()
-    val record = StarterRecord(draft.limitSats, draft.moveBy, false, null, secondCopyMade = draft.copy.made, made = nowSecs())
+    val record = StarterRecord(draft.limitSats, draft.moveBy, false, null, secondCopyMade = draft.copy.made, made = draft.made)
     keepSealed(sealed, wallet, record) { ok ->
         if (ok) {
             starterLeave()

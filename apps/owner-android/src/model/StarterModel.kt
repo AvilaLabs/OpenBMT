@@ -206,8 +206,8 @@ class StarterRecord(
             if (limit <= 0) throw IOException("the starter record has no limit")
             val moveBy = num("move-by")
             val made = map["made"]?.toLongOrNull()?.takeIf { it > 0 } ?: 0L
-            // The date is at most the 90 days that setup allows from the day the record was made; a record from before that was kept has no check.
-            if (made > 0 && moveBy > made + StarterSetup.MAX_DAYS * 86_400L) throw IOException("the starter record's date is more than 90 days after it was made")
+            // The date is at most the 90 days that setup allows from the day the record was made, with a day of slack; a record from before that was kept has no check.
+            if (made > 0 && moveBy > made + StarterSetup.MAX_DAYS * 86_400L + 86_400L) throw IOException("the starter record's date is more than 90 days after it was made")
             val stop = map["stop-above-limit"]
             if (stop != "true" && stop != "false") throw IOException("the starter record has no stop-above-limit")
             return StarterRecord(
@@ -663,14 +663,15 @@ class StarterStore(base: File, folder: String = DIR) {
  * A starter setup that was stopped between its writes (the sealed seed or the wrapped key kept, the public wallet or the
  * record not): the key was never used and no address of the wallet was shown, because an address is shown only from the
  * wallet that is the shop's pinned one, which is written after both files. Such files are dropped and the setup starts from
- * the beginning. Never while a setup of this run is still writing, and never when the wallet is the shop's pinned wallet.
+ * the beginning. Never while a setup of this run is still writing, and never when the shop has a pinned own wallet of any
+ * kind: the files are dropped only when the shop positively has no wallet at all, and any doubt keeps them.
  */
 object StarterOrphan {
-    fun found(hasSealed: Boolean, hasWrapped: Boolean, hasWallet: Boolean, hasRecord: Boolean, busy: Boolean, pinned: () -> Boolean): Boolean {
+    fun found(hasSealed: Boolean, hasWrapped: Boolean, hasWallet: Boolean, hasRecord: Boolean, busy: Boolean, shopHasNoWallet: () -> Boolean?): Boolean {
         if (busy) return false
         if (!hasSealed && !hasWrapped) return false
         if (hasWallet && hasRecord) return false
-        return !pinned()
+        return shopHasNoWallet() == true
     }
 }
 
