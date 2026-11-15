@@ -6,11 +6,12 @@ use std::collections::BTreeMap;
 
 use bitcoin::absolute::LockTime;
 use bitcoin::block::{Header, Version as BlockVersion};
+use bitcoin::blockdata::constants::genesis_block;
 use bitcoin::hashes::Hash;
 use bitcoin::transaction::Version;
 use bitcoin::{
-    Amount as Sats, Block, BlockHash, CompactTarget, OutPoint, ScriptBuf, Sequence, Transaction,
-    TxIn, TxMerkleNode, TxOut, Txid, WScriptHash, Witness,
+    Amount as Sats, Block, BlockHash, CompactTarget, Network, OutPoint, ScriptBuf, Sequence,
+    Transaction, TxIn, TxMerkleNode, TxOut, Txid, WScriptHash, Witness,
 };
 use openbmt_watch::HeaderChain;
 
@@ -48,6 +49,22 @@ impl SimChain {
             heights: BTreeMap::new(),
             tip: START_HEIGHT,
             tip_hash: BlockHash::all_zeros(),
+            time: now,
+            mempool: Vec::new(),
+            mined: 0,
+            blocks: Vec::new(),
+        }
+    }
+
+    /// A chain that is only the genesis block of `network`, at time `now`:
+    /// the chain a counter's own header view starts from, so that the blocks
+    /// mined here are the ones it is told of.
+    pub fn on_genesis(network: Network, now: u64) -> Self {
+        let genesis = genesis_block(network).block_hash();
+        Self {
+            heights: BTreeMap::from([(genesis, 0)]),
+            tip: 0,
+            tip_hash: genesis,
             time: now,
             mempool: Vec::new(),
             mined: 0,
@@ -192,6 +209,17 @@ pub fn payment(coin: [u8; 32], script: &ScriptBuf, sats: u64) -> Transaction {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_chain_on_genesis_mines_on_the_genesis_block() {
+        let mut chain = SimChain::on_genesis(Network::Regtest, 1_000);
+        let genesis = genesis_block(Network::Regtest).block_hash();
+        assert_eq!(chain.tip_height(), 0);
+        assert_eq!(chain.height_of(&genesis), Some(0));
+        let block = chain.mine(1_010);
+        assert_eq!(block.header.prev_blockhash, genesis);
+        assert_eq!(chain.height_of(&block.block_hash()), Some(1));
+    }
 
     #[test]
     fn a_mined_block_takes_the_mempool_and_becomes_the_tip() {

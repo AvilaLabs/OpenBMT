@@ -12,7 +12,11 @@
 # CC_wasm32_unknown_unknown and AR_wasm32_unknown_unknown name one; with none
 # set, the Android NDK's clang and llvm-ar are used. Nothing is downloaded.
 #
-# The cargo call runs under the memory guard.
+# The counter's own library, without its network side, is built the same way
+# (crates/openbmt-demo-counter) into dist/demo-counter/: counter.wasm and
+# counter-host.mjs, the page's side of the counter's one native call.
+#
+# The cargo calls run under the memory guard.
 #
 # Usage: scripts/demo-build.sh
 #   OPENBMT_GUARD      the memory guard (default: ~/.cache/openbmt/guard.sh)
@@ -28,6 +32,7 @@ target_dir="${OPENBMT_DEMO_TARGET:-$HOME/.cache/openbmt/target/demo}"
 ndk="${ANDROID_NDK_HOME:-$HOME/Android/Sdk/ndk/26.3.11579264}"
 bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
 out="$root/dist/demo"
+counter_out="$root/dist/demo-counter"
 cd "$root"
 
 if ! rustup target list --installed | grep -qx wasm32-unknown-unknown; then
@@ -47,12 +52,18 @@ for words in counter-app owner-app; do
     fi
 done
 
-"$guard" env CARGO_TARGET_DIR="$target_dir" CARGO_BUILD_JOBS=2 \
-    "CC_wasm32_unknown_unknown=$cc" "AR_wasm32_unknown_unknown=$ar" \
-    CARGO_PROFILE_RELEASE_OPT_LEVEL=s CARGO_PROFILE_RELEASE_LTO=true \
-    CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_PROFILE_RELEASE_PANIC=abort \
-    CARGO_PROFILE_RELEASE_STRIP=true \
-    cargo build --release --locked -p openbmt-demo --target wasm32-unknown-unknown
+# Two calls, not one: built together, the demo crate's exports would be
+# switched on in the counter's module too (one set of features for a build).
+build() {
+    "$guard" env CARGO_TARGET_DIR="$target_dir" CARGO_BUILD_JOBS=2 \
+        "CC_wasm32_unknown_unknown=$cc" "AR_wasm32_unknown_unknown=$ar" \
+        CARGO_PROFILE_RELEASE_OPT_LEVEL=s CARGO_PROFILE_RELEASE_LTO=true \
+        CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_PROFILE_RELEASE_PANIC=abort \
+        CARGO_PROFILE_RELEASE_STRIP=true \
+        cargo build --release --locked --target wasm32-unknown-unknown "$@"
+}
+build -p openbmt-demo
+build -p openbmt-demo-counter
 
 rm -rf "$out"
 mkdir -p "$out/words"
@@ -65,4 +76,9 @@ for f in index.html page.css page.js; do
 done
 if [ ! -f demo/web/index.html ]; then cp demo/web/dev.html "$out/index.html"; fi
 cp demo/words/counter-app.json demo/words/owner-app.json "$out/words/"
+rm -rf "$counter_out"
+mkdir -p "$counter_out"
+cp "$target_dir/wasm32-unknown-unknown/release/openbmt_demo_counter.wasm" "$counter_out/counter.wasm"
+cp demo/web2/counter-host.mjs "$counter_out/"
+echo "PASS  dist/demo-counter ($(wc -c <"$counter_out/counter.wasm") bytes of wasm)"
 echo "PASS  dist/demo ($(wc -c <"$out/demo.wasm") bytes of wasm)"

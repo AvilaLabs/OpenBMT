@@ -23,7 +23,7 @@
     )
 )]
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", feature = "abi"))]
 pub mod abi;
 pub mod api;
 pub mod chain;

@@ -734,6 +734,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "openbmt-demo-counter"
+version = "0.1.0"
+dependencies = [
+ "bitcoin",
+ "openbmt-core",
+ "openbmt-counter-ffi",
+ "openbmt-counter-node",
+ "openbmt-demo",
+ "openbmt-kernel-random",
+ "openbmt-net-io",
+ "openbmt-watch",
+]
+
+[[package]]
 name = "openbmt-json"
 version = "0.1.0"
 

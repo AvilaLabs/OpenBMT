@@ -12,6 +12,12 @@ publish.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# The three calls of `abi`. A crate that uses the chain or the wallet of this
+# one inside its own module turns it off, so the two modules' exports do not meet.
+default = ["abi"]
+abi = []
+
 [dependencies]
 openbmt-core = { path = "../openbmt-core" }
 openbmt-counter = { path = "../openbmt-counter" }
