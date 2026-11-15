@@ -96,7 +96,7 @@ private fun Controller.showWelcome() {
 
 private fun Controller.showBefore(r: FirstRun) {
     stepScreen(
-        FirstRunWords.shopTitle, listOf(heading(FirstRunWords.beforeTitle), para(FirstRunWords.beforeText), line(FirstRunWords.beforeResume, muted = true)),
+        FirstRunWords.shopTitle, listOf(ui.beforePicture(), heading(FirstRunWords.beforeTitle), para(FirstRunWords.beforeText), line(FirstRunWords.beforeResume, muted = true)),
         listOf(ui.primary(FirstRunWords.beforeGo) { r.next(); showFirstRun() }), { r.back(); showFirstRun() },
     )
 }
@@ -311,6 +311,7 @@ private fun Controller.fold(title: String, content: View): List<View> {
 
 private fun Controller.showHardware(r: FirstRun) {
     val views = ArrayList<View>()
+    views.add(ui.hardwarePicture())
     views.add(heading(FirstRunWords.hwTitle))
     views.add(para(FirstRunWords.hwText))
     for (rule in HelperPage.rules) views.add(ui.text("\u2022 $rule", 15f))
@@ -324,6 +325,7 @@ private fun Controller.showHardware(r: FirstRun) {
 /** The page for the helper: the rules and the steps, and the same as plain text through Android's share sheet. */
 private fun Controller.showHelper(r: FirstRun) {
     val views = ArrayList<View>()
+    views.add(ui.hardwarePicture())
     views.add(heading(FirstRunWords.helperTitle))
     views.add(para(FirstRunWords.helperIntro))
     views.add(label(FirstRunWords.helperBuy))
@@ -365,6 +367,7 @@ private fun Controller.showInstant(r: FirstRun) {
     val how = stack(para(FirstRunWords.instantHow1), para(FirstRunWords.instantHow2))
     val details = stack(para(FirstRunWords.instantDetails))
     val body = ArrayList<View>()
+    body.add(ui.instantPicture())
     body.add(heading(FirstRunWords.instantTitle))
     body.add(para(FirstRunWords.instantText))
     body.add(ui.labelled(FirstRunWords.instantLabel, limit))
@@ -431,6 +434,7 @@ private fun Controller.showFirstSale(r: FirstRun) {
     val back = { r.back(); showFirstRun() }
     val body = ArrayList<View>()
     val actions = ArrayList<Button>()
+    body.add(ui.firstSalePicture())
     if (!sale.paid) {
         body.add(heading(FirstRunWords.firstSaleTitle))
         body.add(para(FirstRunWords.firstSaleText))

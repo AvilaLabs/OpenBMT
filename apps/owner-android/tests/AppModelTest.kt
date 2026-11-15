@@ -4029,6 +4029,7 @@ object AppModelTest {
             ok((0 until p.loopMs step 10).all { PictureTiming.position(p, it.toLong(), true) in 0f..0.999f }, "${p.name}: the position stays inside the loop")
             ok(PictureTiming.position(p, 1234, false) == PictureTiming.STILL && PictureTiming.position(p, 0, false) == PictureTiming.STILL, "${p.name}: with animations off it is the last frame at any time")
         }
+        for (p in listOf(PictureTiming.Picture.Before, PictureTiming.Picture.Hardware, PictureTiming.Picture.Instant, PictureTiming.Picture.FirstSale)) ok(p.loopMs in 2000..3000, "${p.name}: the new picture loops in two to three seconds")
         ok(PictureTiming.seg(1f, 0.3f, PictureTiming.DONE_BY) == 1f && PictureTiming.seg(PictureTiming.STILL, 0.1f, 0.5f) == 1f, "the last frame is past the end of every move")
         ok(PictureTiming.seg(0f, 0.2f, 0.6f) == 0f && Math.abs(PictureTiming.seg(0.4f, 0.2f, 0.6f) - 0.5f) < 1e-6f, "a move is 0 before it and linear in it")
         ok(PictureTiming.seg(0.5f, 0.5f, 0.5f) == 1f && PictureTiming.seg(0.4f, 0.5f, 0.5f) == 0f, "an empty stretch is a step")

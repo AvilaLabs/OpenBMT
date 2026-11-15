@@ -19,6 +19,10 @@ object PictureTiming {
         Scan(3000),
         Same(2500),
         Shutdown(3000),
+        Before(2500),
+        Hardware(3000),
+        Instant(3000),
+        FirstSale(2500),
     }
 
     /** Every move is over by this position; the rest of the loop holds the finished scene. */

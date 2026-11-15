@@ -85,6 +85,10 @@ fun Ui.offlinePicture(): View = PictureView(context, this, Picture.Offline)
 fun Ui.scanPicture(): View = PictureView(context, this, Picture.Scan)
 fun Ui.samePicture(): View = PictureView(context, this, Picture.Same)
 fun Ui.shutdownPicture(): View = PictureView(context, this, Picture.Shutdown)
+fun Ui.beforePicture(): View = PictureView(context, this, Picture.Before)
+fun Ui.hardwarePicture(): View = PictureView(context, this, Picture.Hardware)
+fun Ui.instantPicture(): View = PictureView(context, this, Picture.Instant)
+fun Ui.firstSalePicture(): View = PictureView(context, this, Picture.FirstSale)
 
 private fun withAlpha(c: Int, a: Float): Int = (c and 0x00FFFFFF) or ((a.coerceIn(0f, 1f) * 255f).toInt() shl 24)
 
@@ -107,6 +111,10 @@ private class Scene(private val c: Canvas, private val p: Paint, private val pal
             Picture.Scan -> scan(t)
             Picture.Same -> same(t)
             Picture.Shutdown -> shutdown(t)
+            Picture.Before -> before(t)
+            Picture.Hardware -> hardware(t)
+            Picture.Instant -> instant(t)
+            Picture.FirstSale -> firstSale(t)
         }
     }
 
@@ -452,5 +460,94 @@ private class Scene(private val c: Canvas, private val p: Paint, private val pal
         rr(s.left, s.top, s.right, s.bottom, 3f, withAlpha(0xFF101418.toInt(), 0.92f * dim))
         // The stick comes out of the side after the screen has gone dark.
         stick(lerp(64f, 8f, ease(seg(t, 0.55f, 0.9f))), withAlpha(Palette.WHITE, 0.5f))
+    }
+
+    private fun before(t: Float) {
+        // A phone, a pen and, lighter and dashed, a small tablet (the till, which is optional) settle in a row.
+        val xs = listOf(70f, 160f, 250f)
+        for (k in 0 until 3) {
+            val s = ease(seg(t, 0.05f + k * 0.22f, 0.27f + k * 0.22f))
+            if (s <= 0f) continue
+            c.save()
+            c.translate(xs[k], 80f - 14f * (1f - s))
+            c.scale(s, s)
+            when (k) {
+                0 -> phone(-28f, -52f, 56f, 104f)
+                1 -> {
+                    rr(-6f, -50f, 6f, 24f, 4f, pal.info.band)
+                    rr(-6f, -50f, 6f, -34f, 4f, pal.secondary)
+                    path.reset(); path.moveTo(-6f, 24f); path.lineTo(6f, 24f); path.lineTo(0f, 46f); path.close()
+                    fill(pal.secondary); c.drawPath(path, p)
+                }
+                else -> {
+                    line(pal.hint, 2.5f, false)
+                    p.pathEffect = DashPathEffect(floatArrayOf(7f, 6f), 0f)
+                    rect.set(-38f, -34f, 38f, 34f)
+                    c.drawRoundRect(rect, 8f, 8f, p)
+                    p.pathEffect = null
+                    dot(0f, 22f, 3f, pal.hint)
+                }
+            }
+            c.restore()
+        }
+    }
+
+    private fun hardware(t: Float) {
+        val screen = phone(36f, 26f, 64f, 108f)
+        // The device: a plain rounded body, a small screen and two small buttons.
+        rr(210f, 42f, 292f, 118f, 10f, pal.secondary)
+        rr(222f, 52f, 280f, 84f, 4f, pal.surface)
+        dot(240f, 102f, 5f, pal.chip)
+        dot(262f, 102f, 5f, pal.chip)
+        val tx = 251f
+        val ty = 68f
+        for (k in 0 until 3) {
+            val from = 0.08f + k * 0.2f
+            val go = ease(seg(t, from, from + 0.2f))
+            val gone = seg(t, from + 0.17f, from + 0.22f)
+            if (gone >= 1f) continue
+            val sx = screen.centerX()
+            val sy = screen.top + 22f + k * 26f
+            coin(lerp(sx, tx, go), lerp(sy, ty, go) - 20f * Math.sin(Math.PI * go).toFloat(), 9f, 1f, 1f - gone)
+        }
+        val ok = ease(seg(t, 0.7f, 0.8f))
+        dot(tx, ty, 13f * ok, pal.good.tint)
+        check(tx, ty, 14f, pal.good.band, 3f, ease(seg(t, 0.74f, 0.9f)))
+    }
+
+    private fun instant(t: Float) {
+        // The till: a small display above, a place for each answer.
+        card(254f, 24f, 308f, 140f, 10f)
+        rr(262f, 32f, 300f, 66f, 5f, pal.chip)
+        val small = ease(seg(t, 0.05f, 0.3f))
+        coin(lerp(28f, 232f, small), 49f, 9f)
+        val a = ease(seg(t, 0.3f, 0.38f))
+        dot(281f, 49f, 12f * a, pal.good.tint)
+        check(281f, 49f, 13f, pal.good.band, 3f, ease(seg(t, 0.32f, 0.5f)))
+        // The large one stops beside a block that fills from the bottom; when it is full, the check shows.
+        val large = ease(seg(t, 0.12f, 0.45f))
+        coin(lerp(28f, 176f, large), 112f, 16f)
+        rrOutline(204f, 92f, 244f, 132f, 4f, pal.secondary)
+        val fillTo = ease(seg(t, 0.48f, 0.82f))
+        if (fillTo > 0f) {
+            fill(pal.good.tint)
+            c.drawRect(206f, 130f - 38f * fillTo, 242f, 130f, p)
+        }
+        val b = ease(seg(t, 0.82f, 0.88f))
+        dot(281f, 112f, 12f * b, pal.good.tint)
+        check(281f, 112f, 13f, pal.good.band, 3f, ease(seg(t, 0.84f, 0.92f)))
+    }
+
+    private fun firstSale(t: Float) {
+        phone(30f, 28f, 56f, 104f)
+        val right = phone(234f, 28f, 56f, 104f)
+        qr(right.centerX() - 18f, right.top + 12f, 36f, pal.text)
+        // One coin crosses from the left phone to the right one, then the check shows on it.
+        val go = ease(seg(t, 0.1f, 0.55f))
+        val gone = seg(t, 0.55f, 0.62f)
+        if (gone < 1f) coin(lerp(58f, right.centerX(), go), lerp(80f, right.bottom - 22f, go) - 34f * Math.sin(Math.PI * go).toFloat(), 11f, 1f, 1f - gone)
+        val pop = ease(seg(t, 0.6f, 0.7f))
+        dot(right.centerX(), right.bottom - 22f, 13f * pop, pal.good.tint)
+        check(right.centerX(), right.bottom - 22f, 14f, pal.good.band, 3f, ease(seg(t, 0.64f, 0.88f)))
     }
 }
