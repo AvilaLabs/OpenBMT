@@ -24,6 +24,9 @@ done
 sed -e 's#\.\./\.\./dist/kotlin-js/counter/#./#g' -e 's#\.\./\.\./dist/demo-counter/#./#g' \
     -e 's#\.\./\.\./dist/kotlin-js/owner/#./#g' -e 's#\.\./\.\./dist/demo-owner/#./#g' \
     -e 's#\.\./ui/#ui/#g' -e 's#\.\./web/#./#g' demo/web2/index.html >dist/site/index.html
+sed -e 's#\.\./\.\./dist/kotlin-js/counter/#./#g' -e 's#\.\./\.\./dist/demo-counter/#./#g' \
+    -e 's#\.\./\.\./dist/kotlin-js/owner/#./#g' -e 's#\.\./\.\./dist/demo-owner/#./#g' \
+    -e 's#\.\./ui/#ui/#g' demo/web2/assets.js >dist/site/assets.js
 sed -i 's#\.\./web/fonts/#fonts/#g' dist/site/shell.css
 cp demo/ui/ui.js demo/ui/chrome.js demo/ui/counter-views.js demo/ui/owner-views.js demo/ui/gallery-data.js \
     demo/ui/ui.css demo/ui/palette.json demo/ui/logo.png dist/site/ui/
@@ -37,5 +40,7 @@ cp dist/demo-owner/owner.wasm dist/site/
 cp -R dist/handbook dist/site/handbook
 # A page that is not found is the handbook's own.
 cp dist/handbook/404.html dist/site/404.html
+# The page runs no script written in the page itself.
+if grep -q "<script>" dist/site/index.html; then echo "an inline script is in the demo page" >&2; exit 1; fi
 cp deploy/handbook/_headers dist/site/_headers
 echo "dist/site ready"
