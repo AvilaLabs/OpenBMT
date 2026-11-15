@@ -5,13 +5,15 @@ The cashier rings up the sale in Odoo as usual and picks the OpenBMT payment
 method. Odoo sends the amount to the shop's Box. The Box asks one counter to
 start the sale, the cashier taps Start on that counter, and the customer pays
 there. Odoo marks the payment done only when the Box says the counter has
-signed that the sale is paid. The Box signs each answer with a key that only
-Odoo and the Box hold and that is never sent, so someone on the network
-between them cannot change an answer or make one up, even though the
-connection is plain HTTP (`docs/BOX-RULES.md` BX-80). The signature covers
-the request it answers, and each answer names the amount, currency, request
-and reference the Box took; Odoo cancels the sale and fails the payment if
-they are not the ones it sent. Odoo cannot check the
+signed that the sale is paid. Odoo signs each request, with a fresh number
+and the time, and the Box signs each answer, with keys made from a key that
+only Odoo and the Box hold and that is never sent, so someone on the network
+between them cannot change a request or an answer, send a request again or
+make an answer up, even though the connection is plain HTTP
+(`docs/BOX-RULES.md` BX-80). The signature of an answer covers the request
+it answers, and each answer names the amount, currency, request and
+reference the Box took; Odoo cancels the sale and fails the payment if they
+are not the ones it sent. Odoo cannot check the
 counter's signature itself: a Box that has been taken over can say a sale is
 paid.
 

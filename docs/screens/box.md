@@ -80,6 +80,8 @@ environment variable `OPENBMT_WRITE_SCREENS=1` to write it again.
 | ConsoleAnswer::BadAddress | Address not understood | The address to listen on is not an address and a port. | Give it as an address, a colon and a port, such as 127.0.0.1:8080. | the Box keeper |  |
 | TillAnswer::tillKeyWrong | Wrong till key | The key in this payment method is not the Box's till key. | Copy the till key from the Box again into this payment method. | the Box keeper | BX-71 |
 | TillAnswer::tillKeyOld | Till key too old | The Box's till key was made by an earlier version of the Box, which did not sign its answers to the till. | Make a new till key on the Box with openbmt-box till-key and copy it into this payment method. | the Box keeper | BX-80 |
+| TillAnswer::tillClock | Clocks differ | The till's server and the Box disagree on the time by more than five minutes. | Set the time on both to the network time, then try again. | the Box keeper | BX-80 |
+| TillAnswer::tillReplay | Request sent twice | The Box has seen this request before, so it did not act on it again. | Try again from the till. | the Box keeper | BX-80 |
 | TillAnswer::tillOff | Till listener is off | The Box was started without its till listener. | Start the Box with the till listener on. The handbook shows how. | the Box keeper | BX-70 |
 | TillAnswer::tillNotPaired | The Box is not set up yet | The Box has not joined the shop, so it cannot reach a counter. | Finish setting up the Box from the owner app. | the owner | BX-72 |
 | TillAnswer::tillUnknownCounter | Counter not found | The shop has no counter with the code 1a2b3c4d. | Check the counter code in this payment method. The owner app shows it after the word Counter. | the Box keeper | BX-72 |

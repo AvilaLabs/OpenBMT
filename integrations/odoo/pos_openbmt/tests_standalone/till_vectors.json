@@ -1,8 +1,15 @@
 {
   "key": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
-  "token": "18afb3f3c19008f87028822e6976ca211c1932569789322755b2cf0d5f28d9d3",
+  "request_key": "e91ebd831e715cd410b28fe73fff45a20b7135fc290f1a7055188c484b783a5c",
   "reply_key": "b7bc0e874f9bb0d479211f75d07eb0440274ee5b407f047dcfdc71f427a254f9",
-  "key_file": "0250e033af1fda010f7d8d6b964573c5766d786fb782322b7f2802340b01b62bf6b7bc0e874f9bb0d479211f75d07eb0440274ee5b407f047dcfdc71f427a254f9",
+  "key_file": "03e91ebd831e715cd410b28fe73fff45a20b7135fc290f1a7055188c484b783a5cb7bc0e874f9bb0d479211f75d07eb0440274ee5b407f047dcfdc71f427a254f9",
+  "request_cases": [
+    {"method": "POST", "path": "/till/v1/sales", "nonce": "0123456789abcdef0123456789abcdef", "time": "1700000000", "body": "{\"counter\":\"1a2b3c4d\",\"amount\":\"12.50\",\"currency\":\"USD\",\"reference\":\"Order 1\",\"request\":\"order-1\"}", "mac": "1b3e543d0702c07143ceec84669ebde122fe546fe08ee740a042ce5c77a60437"},
+    {"method": "GET", "path": "/till/v1/sales/00112233445566778899aabbccddeeff", "nonce": "fedcba9876543210fedcba9876543210", "time": "1700000299", "body": "", "mac": "cadd5d057cc6e3c3c495c710ee1b331946c56d704d33bac04418f1f7631e95d8"},
+    {"method": "POST", "path": "/till/v1/sales/00112233445566778899aabbccddeeff/cancel", "nonce": "00000000000000000000000000000000", "time": "0000000042", "body": "", "mac": "7e535b4eeb0894a639a2eceb99ef57c9bd4b1e0f09ca93f2e28c1095a6e1e19d"},
+    {"method": "GET", "path": "/till/v1/sales/00112233445566778899aabbccddeeff", "nonce": "ffffffffffffffffffffffffffffffff", "time": "1700000000", "body": "", "mac": "c84a04800e0f6c2376588f2ccb69480e12783458ce6f1dd5dc76011a8a48e441"},
+    {"method": "GET", "path": "/till/v1/sales/00112233445566778899aabbccddeeff", "nonce": "0f1e2d3c4b5a69788796a5b4c3d2e1f0", "time": "1700000001", "body": "", "mac": "dd2955492a6ca70827417174d360c9b090ac0c6c0a3f58e5d387f51a11dbe19a"}
+  ],
   "cases": [
     {"method": "POST", "path": "/till/v1/sales", "nonce": "0123456789abcdef0123456789abcdef", "request_body": "{\"counter\":\"1a2b3c4d\",\"amount\":\"12.50\",\"currency\":\"USD\",\"reference\":\"Order 1\",\"request\":\"order-1\"}", "status": 200, "body": "{\"sale\":\"00112233445566778899aabbccddeeff\",\"state\":\"waiting\",\"amount\":\"12.50\",\"currency\":\"USD\",\"request\":\"order-1\",\"reference\":\"Order 1\"}", "mac": "16ebcef4d25d6773a4c54253f2f9345384a2f9da908178c05da65b3ce7d2f8eb"},
     {"method": "GET", "path": "/till/v1/sales/00112233445566778899aabbccddeeff", "nonce": "fedcba9876543210fedcba9876543210", "request_body": "", "status": 200, "body": "{\"sale\":\"00112233445566778899aabbccddeeff\",\"state\":\"paid\",\"amount\":\"12.50\",\"currency\":\"USD\",\"request\":\"order-1\",\"reference\":\"Order 1\",\"words\":{\"heading\":\"\",\"what\":\"Paid in bitcoin.\",\"next\":\"\"}}", "mac": "bf32271e668c9ba10e914dbe8a4dc70eb80602a9a0e1cd98389bb4cc887694c8"},

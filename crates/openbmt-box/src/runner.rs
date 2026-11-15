@@ -58,7 +58,7 @@ use crate::state::{BoxCore, BoxError, BoxStatus};
 use crate::status_page::{Entered, PageBackend, PageConfig, PageView, SetupCode, StatusPage};
 use crate::till::{
     check_till_key, clean_reference, find_counter, make_till_key, parse_amount, KeyCheck, NewSale,
-    SaleInfo, TillRefusal, TillTable, TILL_KEY_FILE,
+    NonceCache, NonceCheck, SaleInfo, TillRefusal, TillTable, TILL_KEY_FILE,
 };
 use crate::till_listener::{CreateBody, TillBackend, TillConfig, TillListener};
 use crate::vendor::{VendorConnector, VENDOR_POLL_SECS};
@@ -367,9 +367,10 @@ impl PageBackend for PageHandles {
     }
 }
 
-/// The till key file as the listener compares against it (BX-71): its bytes
-/// are held here, under a lock of their own, so that a caller who has not
-/// shown the key never takes the core's lock and never waits on the disk. The
+/// The till key file as the listener checks a request against it (BX-71): its
+/// bytes are held here, under a lock of their own, so that a caller whose
+/// request mac is wrong never takes the core's lock and never waits on the
+/// disk. The
 /// copy is loaded when the Box starts and again when the key is made. A file
 /// that was replaced by another process (`openbmt-box till-key` on a running
 /// Box) is noticed by its identity, size and time, which one metadata call
@@ -416,14 +417,14 @@ impl TillKey {
         held.bytes = std::fs::read(&self.path).ok();
     }
 
-    fn check(&self, presented: Option<&str>) -> KeyCheck {
+    fn check(&self) -> KeyCheck {
         let mut held = lock(&self.held);
         let seen = self.seen();
         if seen != held.seen {
             held.seen = seen;
             held.bytes = std::fs::read(&self.path).ok();
         }
-        check_till_key(held.bytes.as_deref(), presented)
+        check_till_key(held.bytes.as_deref())
     }
 }
 
@@ -435,6 +436,7 @@ struct TillHandles {
     key: Arc<TillKey>,
     clock: Arc<dyn Clock + Send + Sync>,
     table: Till,
+    nonces: Mutex<NonceCache>,
 }
 
 impl TillHandles {
@@ -454,8 +456,16 @@ impl TillHandles {
 }
 
 impl TillBackend for TillHandles {
-    fn check_key(&self, presented: Option<&str>) -> KeyCheck {
-        self.key.check(presented)
+    fn keys(&self) -> KeyCheck {
+        self.key.check()
+    }
+
+    fn now(&self) -> u64 {
+        self.clock.now()
+    }
+
+    fn take_nonce(&self, nonce: &[u8; 16], now: u64) -> NonceCheck {
+        lock(&self.nonces).take(nonce, now)
     }
 
     fn create(&self, body: CreateBody) -> Result<([u8; 16], SaleInfo), TillRefusal> {
@@ -1101,6 +1111,7 @@ impl BoxRunner {
             key: Arc::clone(&self.till_key),
             clock: Arc::clone(&self.clock),
             table: Arc::clone(&self.till),
+            nonces: Mutex::new(NonceCache::new()),
         });
         let till = TillListener::start(listener, backend, cfg).map_err(StartFailure::Listen)?;
         let addr = till.local_addr();

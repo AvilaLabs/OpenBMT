@@ -42,17 +42,21 @@ STATES = ('waiting', 'opened', 'paid', 'unpaid', 'expired', 'cancelled')
 ENDED = ('paid', 'unpaid', 'expired', 'cancelled')
 KEY_RE = re.compile(r'^[0-9a-f]{64}$')
 
-# The till key is never sent (docs/BOX-RULES.md BX-80): the module sends a
-# token made from it and checks the mac of each answer under a reply key made
-# from it. The mac covers the request's body too, and the answers that name a
-# sale carry the amount, currency, request and reference the Box took, which
-# the module checks against what it sent (BX-72, BX-73, BX-80). Tagged hashes
-# are made as BIP340 makes them.
-TAG_BEARER = 'OpenBMT/till-bearer/v1'
+# The till key is never sent (docs/BOX-RULES.md BX-80): the module signs each
+# request with a request key made from it, with a fresh nonce and the time, and
+# checks the mac of each answer under a reply key made from it. The mac of the
+# answer covers the request's body too, and the answers that name a sale carry
+# the amount, currency, request and reference the Box took, which the module
+# checks against what it sent (BX-72, BX-73, BX-80). Tagged hashes are made as
+# BIP340 makes them.
+TAG_REQUEST = 'OpenBMT/till-request/v1'
 TAG_REPLY = 'OpenBMT/till-reply/v1'
+REQUEST_LABEL = 'OBM-TILL-REQUEST-1'
 REPLY_LABEL = 'OBM-TILL-REPLY-2'
 REPLY_HEADER = 'X-OBM-Reply'
 NONCE_HEADER = 'X-OBM-Nonce'
+TIME_HEADER = 'X-OBM-Time'
+REQUEST_HEADER = 'X-OBM-Request'
 
 
 def tagged_hash(tag, message):
@@ -60,14 +64,25 @@ def tagged_hash(tag, message):
     return hashlib.sha256(prefix + prefix + message).digest()
 
 
-def till_token(key_hex):
-    """The bearer token for a till key: 64 lowercase hex."""
-    return tagged_hash(TAG_BEARER, bytes.fromhex(key_hex)).hex()
+def till_request_key(key_hex):
+    """The key the till signs its requests with, as 32 bytes."""
+    return tagged_hash(TAG_REQUEST, bytes.fromhex(key_hex))
 
 
 def till_reply_key(key_hex):
     """The key the Box signs its answers with, as 32 bytes."""
     return tagged_hash(TAG_REPLY, bytes.fromhex(key_hex))
+
+
+def request_mac(request_key, method, path, nonce, sent_at, body):
+    """The mac of a request: 64 lowercase hex. `sent_at` is the time as it
+    is sent, decimal Unix seconds, and `body` the bytes of the request's body
+    (none for a request without one)."""
+    message = '%s\n%s\n%s\n%s\n%s\n%s' % (
+        REQUEST_LABEL, method, path, nonce, sent_at,
+        hashlib.sha256(body).hexdigest())
+    return hmac.new(request_key, message.encode('utf-8'),
+                    hashlib.sha256).hexdigest()
 
 
 def reply_mac(reply_key, method, path, nonce, sent, status, body):
@@ -224,8 +239,12 @@ class PosPaymentMethod(models.Model):
         # hash of exactly them.
         sent = b'' if body is None else json.dumps(
             body, separators=(',', ':')).encode('utf-8')
-        headers = {'Authorization': 'Bearer ' + till_token(key),
-                   NONCE_HEADER: nonce,
+        sent_at = '%d' % int(time.time())
+        headers = {NONCE_HEADER: nonce,
+                   TIME_HEADER: sent_at,
+                   REQUEST_HEADER: request_mac(
+                       till_request_key(key), verb, path, nonce, sent_at,
+                       sent),
                    'Accept': 'application/json'}
         if body is not None:
             headers['Content-Type'] = 'application/json'

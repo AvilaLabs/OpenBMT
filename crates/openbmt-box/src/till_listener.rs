@@ -5,9 +5,9 @@
 //! like the status page and with the same kind of bounds, but it is its own
 //! listener on its own threads and it answers JSON only. It takes a sale
 //! request from a till, says how the sale stands, and cancels it. Every
-//! request carries a bearer token made from the till key and a nonce, and
-//! every answer to one with a key carries a mac under the reply key (BX-71,
-//! BX-80).
+//! request carries a nonce, a time and a mac under the request key made from
+//! the till key, and every answer to one with a key carries a mac under the
+//! reply key (BX-71, BX-80).
 //!
 //! [`parse_request`] and [`parse_object`] are the readers of the bytes of one
 //! request and of its JSON body; they are what the fuzz target calls.
@@ -25,7 +25,8 @@ use openbmt_core::say::{clean_foreign, Words};
 use crate::say::{TillAnswer, TILL_PAID};
 use crate::status_page::{head_end, head_is_clean, is_token_byte, response, Slot};
 use crate::till::{
-    hex, reply_mac, request_id_ok, unhex, KeyCheck, SaleInfo, SaleState, TillRefusal,
+    hex, reply_mac, request_id_ok, request_mac_is_good, time_is_near, unhex, KeyCheck, NonceCheck,
+    SaleInfo, SaleState, TillRefusal,
 };
 
 /// Most bytes of a whole request, head and body together (BX-70).
@@ -38,6 +39,8 @@ pub const READ_SECS: u64 = 5;
 pub const WRITE_SECS: u64 = 5;
 /// The most headers a request may have.
 const MAX_HEADERS: usize = 32;
+/// The most digits of the time a request carries.
+const MAX_TIME_DIGITS: usize = 12;
 /// How often a waiting thread looks at the stop flag.
 const POLL: Duration = Duration::from_millis(50);
 
@@ -85,8 +88,10 @@ pub struct Request {
     pub path: String,
     /// The nonce of the request: 32 lowercase hex (BX-80).
     pub nonce: String,
-    /// The bearer token, if the request carried one.
-    pub key: Option<String>,
+    /// The time of the request, in decimal Unix seconds, as sent (BX-80).
+    pub time: String,
+    /// The mac of the request: 64 lowercase hex (BX-80).
+    pub mac: String,
     /// The body (empty unless the route is `Create`).
     pub body: Vec<u8>,
 }
@@ -143,7 +148,8 @@ struct Head {
     method: String,
     path: String,
     nonce: String,
-    key: Option<String>,
+    time: String,
+    mac: String,
     content_length: usize,
 }
 
@@ -168,7 +174,8 @@ fn parse_head(head: &[u8], head_len: usize) -> Result<Head, Reject> {
     }
     let route = route_of(method, target).ok_or(Reject::NotFound)?;
 
-    let mut key = None;
+    let mut mac: Option<String> = None;
+    let mut time: Option<String> = None;
     let mut nonce: Option<String> = None;
     let mut content_length = None;
     let mut json = false;
@@ -184,20 +191,21 @@ fn parse_head(head: &[u8], head_len: usize) -> Result<Head, Reject> {
         }
         let value = value.trim_matches([' ', '\t']);
         match name.to_ascii_lowercase().as_str() {
-            "authorization" => {
-                if key.is_some() {
+            "x-obm-request" => {
+                if mac.is_some() || unhex::<32>(value).is_none() {
                     return Err(Reject::BadRequest);
                 }
-                // A scheme other than Bearer is a key that is not the
-                // Box's, which the answer says; the token is read as
-                // nothing.
-                let token = match value.split_once(' ') {
-                    Some((scheme, token)) if scheme.eq_ignore_ascii_case("bearer") => {
-                        token.trim_matches([' ', '\t'])
-                    }
-                    _ => "",
-                };
-                key = Some(token.to_string());
+                mac = Some(value.to_string());
+            }
+            "x-obm-time" => {
+                if time.is_some()
+                    || value.is_empty()
+                    || value.len() > MAX_TIME_DIGITS
+                    || !value.bytes().all(|b| b.is_ascii_digit())
+                {
+                    return Err(Reject::BadRequest);
+                }
+                time = Some(value.to_string());
             }
             "x-obm-nonce" => {
                 if nonce.is_some() || unhex::<16>(value).is_none() {
@@ -237,15 +245,17 @@ fn parse_head(head: &[u8], head_len: usize) -> Result<Head, Reject> {
         (_, None | Some(0)) => 0,
         (_, Some(_)) => return Err(Reject::BadRequest),
     };
-    // The nonce is looked for after the path and before the key (BX-75,
-    // BX-80).
+    // The three headers of BX-80 are looked for after the path (BX-75).
     let nonce = nonce.ok_or(Reject::BadRequest)?;
+    let time = time.ok_or(Reject::BadRequest)?;
+    let mac = mac.ok_or(Reject::BadRequest)?;
     Ok(Head {
         route,
         method: method.to_string(),
         path: target.to_string(),
         nonce,
-        key,
+        time,
+        mac,
         content_length,
     })
 }
@@ -278,7 +288,8 @@ pub fn parse_request(buf: &[u8]) -> Result<Option<Request>, Reject> {
         method: head.method,
         path: head.path,
         nonce: head.nonce,
-        key: head.key,
+        time: head.time,
+        mac: head.mac,
         body: body.to_vec(),
     }))
 }
@@ -446,9 +457,12 @@ pub struct CreateBody {
 /// The Box as the till listener sees it. Each call takes the state's locks
 /// only for itself, after a whole request was read (BX-60 applies here too).
 pub trait TillBackend: Send + Sync + 'static {
-    /// What the bearer token the till presented comes to against the till
-    /// key file (BX-71, BX-80).
-    fn check_key(&self, presented: Option<&str>) -> KeyCheck;
+    /// What the till key file holds (BX-71, BX-80).
+    fn keys(&self) -> KeyCheck;
+    /// The Box's own time, in Unix seconds (BX-80).
+    fn now(&self) -> u64;
+    /// Look at a request's nonce and, when it is fresh, remember it (BX-80).
+    fn take_nonce(&self, nonce: &[u8; 16], now: u64) -> NonceCheck;
     /// BX-72: ask a counter for a sale.
     fn create(&self, body: CreateBody) -> Result<([u8; 16], SaleInfo), TillRefusal>;
     /// BX-73: how a sale stands.
@@ -463,6 +477,8 @@ impl TillRefusal {
         Some(match self {
             Self::KeyWrong => TillAnswer::KeyWrong,
             Self::KeyOld => TillAnswer::KeyOld,
+            Self::Clock => TillAnswer::Clock,
+            Self::Replay => TillAnswer::Replay,
             Self::NotPaired => TillAnswer::NotPaired,
             Self::UnknownCounter(code) => {
                 TillAnswer::UnknownCounter(clean_foreign(code).chars().take(16).collect())
@@ -592,19 +608,58 @@ fn create_body(fields: &BTreeMap<String, String>) -> Option<CreateBody> {
     request_id_ok(&body.request).then_some(body)
 }
 
-/// The answer to a request that passed the reader. Every answer after the
-/// nonce carries the mac of BX-80 when the Box holds a reply key.
-pub fn answer(backend: &dyn TillBackend, request: &Request) -> Vec<u8> {
-    let reply_key = match backend.check_key(request.key.as_deref()) {
-        KeyCheck::Good(reply) => reply,
-        KeyCheck::Wrong(reply) => {
+/// What a request that passed the reader comes to against the till key, the
+/// clock and the nonces already taken, in the order of BX-80: the mac, then
+/// the time, then the nonce. The nonce is remembered only for a request whose
+/// mac and time are right. The reply key signs the refusal when there is one.
+fn checked(backend: &dyn TillBackend, request: &Request) -> Result<[u8; 32], Vec<u8>> {
+    let (request_key, reply_key) = match backend.keys() {
+        KeyCheck::Held { request, reply } => (request, reply),
+        KeyCheck::Missing => {
             let (status, body) = refusal_parts(&TillRefusal::KeyWrong);
-            return signed(request, reply.as_ref(), status, &body);
+            return Err(signed(request, None, status, &body));
         }
         KeyCheck::Old => {
             let (status, body) = refusal_parts(&TillRefusal::KeyOld);
-            return signed(request, None, status, &body);
+            return Err(signed(request, None, status, &body));
         }
+    };
+    let refuse = |refusal: TillRefusal| {
+        let (status, body) = refusal_parts(&refusal);
+        Err(signed(request, Some(&reply_key), status, &body))
+    };
+    if !request_mac_is_good(
+        &request_key,
+        &request.method,
+        &request.path,
+        &request.nonce,
+        &request.time,
+        &request.body,
+        &request.mac,
+    ) {
+        return refuse(TillRefusal::KeyWrong);
+    }
+    let now = backend.now();
+    if !time_is_near(&request.time, now) {
+        return refuse(TillRefusal::Clock);
+    }
+    // The reader took the nonce as 32 lowercase hex.
+    let Some(nonce) = unhex::<16>(&request.nonce) else {
+        return refuse(TillRefusal::BadRequest);
+    };
+    match backend.take_nonce(&nonce, now) {
+        NonceCheck::Fresh => Ok(reply_key),
+        NonceCheck::Replay => refuse(TillRefusal::Replay),
+        NonceCheck::Busy => refuse(TillRefusal::Busy),
+    }
+}
+
+/// The answer to a request that passed the reader. Every answer after the
+/// nonce carries the mac of BX-80 when the Box holds a reply key.
+pub fn answer(backend: &dyn TillBackend, request: &Request) -> Vec<u8> {
+    let reply_key = match checked(backend, request) {
+        Ok(reply) => reply,
+        Err(bytes) => return bytes,
     };
     let result = match request.route {
         Route::Create => match parse_object(&request.body).as_ref().and_then(create_body) {

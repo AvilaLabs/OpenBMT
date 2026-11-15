@@ -16,6 +16,12 @@ WORDS = {
     'tillKeyWrong': ('Wrong till key',
                      "The key in this payment method is not the Box's till key.",
                      "Copy the till key from the Box again into this payment method."),
+    'tillClock': ('Clocks differ',
+                  "The till's server and the Box disagree on the time by more than five minutes.",
+                  'Set the time on both to the network time, then try again.'),
+    'tillReplay': ('Request sent twice',
+                   'The Box has seen this request before, so it did not act on it again.',
+                   'Try again from the till.'),
     'tillNotPaired': ('The Box is not set up yet',
                       'The Box has not joined the shop, so it cannot reach a counter.',
                       'Finish setting up the Box from the owner app.'),
@@ -49,6 +55,11 @@ END_WORDS = {
                   'Nothing to do.'),
 }
 NONCE_RE = re.compile(r'^[0-9a-f]{32}$')
+MAC_RE = re.compile(r'^[0-9a-f]{64}$')
+TIME_RE = re.compile(r'^[0-9]{1,12}$')
+CLOCK_SECS = 300
+NONCE_SECS = 600
+MAX_NONCES = 8192
 ID_RE = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
 AMOUNT_RE = re.compile(r'^[0-9]+(\.[0-9]{1,2})?$')
 
@@ -56,6 +67,13 @@ AMOUNT_RE = re.compile(r'^[0-9]+(\.[0-9]{1,2})?$')
 def tagged_hash(tag, message):
     prefix = hashlib.sha256(tag.encode('ascii')).digest()
     return hashlib.sha256(prefix + prefix + message).digest()
+
+
+def request_mac_of(request_key, method, path, nonce, sent_at, body):
+    message = ('OBM-TILL-REQUEST-1\n%s\n%s\n%s\n%s\n%s'
+               % (method, path, nonce, sent_at,
+                  hashlib.sha256(body).hexdigest())).encode()
+    return hmac.new(request_key, message, hashlib.sha256).hexdigest()
 
 
 def mac_of(reply_key, method, path, nonce, sent, status, body):
@@ -72,11 +90,14 @@ def words(trio):
 class FakeBox:
     def __init__(self):
         key = bytes.fromhex(KEY)
-        # What the Box keeps of the till key: the hash of the bearer token,
-        # and the reply key.
-        self.key_hash = tagged_hash(
-            'OpenBMT/till-key/v1', tagged_hash('OpenBMT/till-bearer/v1', key))
+        # What the Box keeps of the till key: the request key and the reply
+        # key.
+        self.request_key = tagged_hash('OpenBMT/till-request/v1', key)
         self.reply_key = tagged_hash('OpenBMT/till-reply/v1', key)
+        # The Box's own time, in seconds; None is the system's.
+        self.now = None
+        # The nonces of the last ten minutes: nonce -> the time it was taken.
+        self.taken = {}
         # How answers are signed: good, missing, other_key, other_nonce,
         # other_status, other_body, other_path, other_method or
         # other_request (the mac of a request with another body).
@@ -91,7 +112,7 @@ class FakeBox:
         self.echo = {}
         self.sent = []
         self.requests = {}
-        self.seen = []  # (method, path, authorization)
+        self.seen = []  # (method, path, headers)
         self.nonces = []
         self.mode = 'normal'  # normal, redirect, garbage, slow, shape
         self.delay = 0.0
@@ -204,9 +225,8 @@ class FakeBox:
             return
         raw = h.rfile.read(length) if length else b''
         h.sent = raw
-        auth = h.headers.get('Authorization')
         with self.lock:
-            self.seen.append((verb, h.path, auth))
+            self.seen.append((verb, h.path, dict(h.headers.items())))
             self.sent.append(raw)
             self.nonces.append(nonce)
         if self.mode == 'redirect':
@@ -234,13 +254,36 @@ class FakeBox:
         if h.nonce is None:
             self.send(h, 400, {'error': 'tillBadRequest'}, signed=False)
             return
-        if auth is None or not auth.startswith('Bearer '):
+        sent_at = h.headers.get('X-OBM-Time')
+        mac = h.headers.get('X-OBM-Request')
+        if not (sent_at and TIME_RE.match(sent_at)
+                and mac and MAC_RE.match(mac)):
+            self.send(h, 400, {'error': 'tillBadRequest'}, signed=False)
+            return
+        want = request_mac_of(self.request_key, verb, path, nonce, sent_at,
+                              raw)
+        if not hmac.compare_digest(want.encode(), mac.encode()):
             self.err(h, 401, 'tillKeyWrong')
             return
-        digest = tagged_hash('OpenBMT/till-key/v1', bytes.fromhex(auth[7:])
-                             if re.match(r'^[0-9a-f]{64}$', auth[7:]) else b'x')
-        if digest != self.key_hash:
-            self.err(h, 401, 'tillKeyWrong')
+        now = int(time.time()) if self.now is None else self.now
+        if abs(int(sent_at) - now) > CLOCK_SECS:
+            self.err(h, 401, 'tillClock')
+            return
+        with self.lock:
+            self.taken = {n: t for n, t in self.taken.items()
+                          if now - t < NONCE_SECS}
+            if nonce in self.taken:
+                replay, full = True, False
+            elif len(self.taken) >= MAX_NONCES:
+                replay, full = False, True
+            else:
+                replay, full = False, False
+                self.taken[nonce] = now
+        if replay:
+            self.err(h, 401, 'tillReplay')
+            return
+        if full:
+            self.err(h, 429, 'tillBusy')
             return
         if not self.paired:
             self.err(h, 503, 'tillNotPaired')

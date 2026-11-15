@@ -21,9 +21,24 @@ use crate::state::{BoxError, BoxStatus, POS_TOKEN_FILE};
 
 pub struct TestClock(AtomicU64);
 
+thread_local! {
+    /// The clock the test thread made last, which a till's requests are
+    /// timed by (BX-80).
+    static LAST_CLOCK: std::cell::RefCell<Option<Arc<TestClock>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// The time on the clock the test thread made last, or [`NOW`] before it
+/// made one.
+pub fn test_now() -> u64 {
+    LAST_CLOCK.with(|c| c.borrow().as_ref().map_or(NOW, |clock| clock.now()))
+}
+
 impl TestClock {
     pub fn new(at: u64) -> Arc<Self> {
-        Arc::new(Self(AtomicU64::new(at)))
+        let clock = Arc::new(Self(AtomicU64::new(at)));
+        LAST_CLOCK.with(|c| *c.borrow_mut() = Some(Arc::clone(&clock)));
+        clock
     }
 
     pub fn advance(&self, secs: u64) {

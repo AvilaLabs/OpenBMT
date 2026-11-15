@@ -14,8 +14,8 @@
 # listed in its first settings (`welcome ... with-rc`). The counter is the
 # `counter_regtest` example with `--box-key`: the Box is its relay, a Box of
 # its settings and a Box in its courier's table. The till is played by curl,
-# with the till key from `openbmt-box till-key`, sent as the bearer token and
-# nonce of BX-71 and BX-80, each answer checked by its reply mac. The script
+# with the till key from `openbmt-box till-key`, each request signed with a
+# fresh nonce and the time as BX-80 says, each answer checked by its reply mac. The script
 # carries nothing between the devices: the sale request, the notices and the
 # cancels all go through the Box's own port.
 #
@@ -186,20 +186,24 @@ tagged() { # tag hex-message -> 64 hex
   t=$(printf '%s' "$1" | sha256sum | cut -d' ' -f1)
   { printf '%s%s%s' "$t" "$t" "$2" | xxd -r -p; } | sha256sum | cut -d' ' -f1
 }
-# The till holds the key; it sends the bearer token made from it, a fresh
-# nonce, and takes an answer only when its X-OBM-Reply is the mac of this
-# request, the SHA-256 of its body included (BX-71, BX-80). An answer that does not check is printed as
+# The till holds the key; it signs each request under the request key made
+# from it, with a fresh nonce and the time, and takes an answer only when its
+# X-OBM-Reply is the mac of this request, the SHA-256 of its body included
+# (BX-71, BX-80). An answer that does not check is printed as
 # {"error":"replyNotChecked"}.
 till() { # method path [json]
-  local nonce hdr body status mac want sent
+  local nonce hdr body status mac want sent now rmac
   nonce=$(head -c 16 /dev/urandom | xxd -p)
+  now=$(date +%s)
   hdr=$(mktemp "$BASE/till-hdr-XXXXXX")
   body=$(mktemp "$BASE/till-body-XXXXXX")
-  local args=(-s --max-time 10 -X "$1" -D "$hdr" -o "$body"
-    -H "Authorization: Bearer $TILL_TOKEN" -H "X-OBM-Nonce: $nonce")
   sent=$(printf '' | sha256sum | cut -d' ' -f1)
+  [ $# -ge 3 ] && sent=$(printf '%s' "$3" | sha256sum | cut -d' ' -f1)
+  rmac=$(printf 'OBM-TILL-REQUEST-1\n%s\n%s\n%s\n%s\n%s' "$1" "$2" "$nonce" "$now" "$sent" |
+    openssl dgst -sha256 -mac HMAC -macopt "hexkey:$TILL_REQUEST" -r | cut -d' ' -f1)
+  local args=(-s --max-time 10 -X "$1" -D "$hdr" -o "$body"
+    -H "X-OBM-Nonce: $nonce" -H "X-OBM-Time: $now" -H "X-OBM-Request: $rmac")
   if [ $# -ge 3 ]; then
-    sent=$(printf '%s' "$3" | sha256sum | cut -d' ' -f1)
     args+=(-H 'Content-Type: application/json' --data "$3")
   fi
   curl "${args[@]}" "http://127.0.0.1:$TILL_PORT$2"
@@ -297,7 +301,7 @@ BOX_KEY=$(sed -n 's/^key: //p' "$LOG_BOX" | head -1)
 [ ${#BOX_KEY} = 64 ] || die "no Box key"
 TILL_KEY=$("$BOX_BIN" till-key "$B_DATA" 2>&1 | grep -Eo '[0-9a-f]{64}' | head -1)
 [ ${#TILL_KEY} = 64 ] || die "no till key"
-TILL_TOKEN=$(tagged OpenBMT/till-bearer/v1 "$TILL_KEY")
+TILL_REQUEST=$(tagged OpenBMT/till-request/v1 "$TILL_KEY")
 TILL_REPLY=$(tagged OpenBMT/till-reply/v1 "$TILL_KEY")
 RC_KEY=$("$PAIR_BIN" key "$K_DATA" rc) || die "no counter key"
 CTR=${RC_KEY:0:8}

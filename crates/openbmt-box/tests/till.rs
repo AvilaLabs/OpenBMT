@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use openbmt_box::till::{hex, reply_mac, till_bearer, till_reply_key};
+use openbmt_box::till::{hex, reply_mac, request_mac, till_reply_key, till_request_key};
 
 struct Dir(PathBuf);
 
@@ -56,7 +56,7 @@ fn key_of(lines: &[String]) -> String {
 }
 
 #[test]
-fn bx_71_the_till_key_command_prints_the_key_once_and_stores_only_its_hash() {
+fn bx_71_the_till_key_command_prints_the_key_once_and_stores_only_the_keys_made_from_it() {
     let dir = Dir::new("key");
     let (lines, ok) = till_key(&dir.0);
     assert!(ok);
@@ -66,13 +66,12 @@ fn bx_71_the_till_key_command_prints_the_key_once_and_stores_only_its_hash() {
     assert_eq!(key.len(), 64);
     // Printed on one line only.
     assert_eq!(lines.iter().filter(|l| l.contains(&key)).count(), 1);
-    // Stored as the version, the hash of the token and the reply key, none of
-    // them the key, with mode 0600, and nothing else is left in the
-    // directory.
+    // Stored as the version, the request key and the reply key, none of them
+    // the key, with mode 0600, and nothing else is left in the directory.
     let file = dir.0.join("till-key");
     let stored = std::fs::read(&file).unwrap();
     assert_eq!(stored.len(), 65);
-    assert_eq!(stored[0], 2);
+    assert_eq!(stored[0], 3);
     assert!(!String::from_utf8_lossy(&stored).contains(&key));
     assert_eq!(
         std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
@@ -162,15 +161,23 @@ fn bx_70_with_till_listen_the_box_serves_json_and_says_where() {
         .iter()
         .find_map(|l| l.strip_prefix("till listener: "))
         .expect("the till listener line");
-    let nonce = "0123456789abcdef0123456789abcdef";
     let path = format!("/till/v1/sales/{}", "0".repeat(32));
-    let ask = |bearer: &str| {
+    let now = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .to_string()
+    };
+    // One request, signed under `signer` with the nonce and the time given.
+    let ask = |signer: &[u8; 32], nonce: &str, time: &str| {
+        let mac = request_mac(signer, "GET", &path, nonce, time, b"");
         let mut s = TcpStream::connect(addr).unwrap();
         s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
         s.write_all(
             format!(
                 "GET {path} HTTP/1.1\r\nHost: b\r\nX-OBM-Nonce: {nonce}\r\n\
-                 Authorization: Bearer {bearer}\r\n\r\n"
+                 X-OBM-Time: {time}\r\nX-OBM-Request: {mac}\r\n\r\n"
             )
             .as_bytes(),
         )
@@ -185,38 +192,47 @@ fn bx_70_with_till_listen_the_box_serves_json_and_says_where() {
             .map(str::to_string)
     };
     let body_of = |text: &str| text.split_once("\r\n\r\n").unwrap().1.to_string();
-    // A token that is not the Box's: 401 and the words, signed under the
-    // reply key made from the key.
-    let text = ask(&"0".repeat(64));
+    let reply = till_reply_key(&key_bytes);
+    let signed_ok = |text: &str, nonce: &str, status: u16| {
+        let want = reply_mac(
+            &reply,
+            "GET",
+            &path,
+            nonce,
+            b"",
+            status,
+            body_of(text).as_bytes(),
+        );
+        assert_eq!(mac_of(text), Some(want));
+    };
+    // A mac under a key that is not the request key: 401 and the words,
+    // signed under the reply key made from the key.
+    let n1 = "0123456789abcdef0123456789abcdef";
+    let text = ask(&[0u8; 32], n1, &now());
     assert!(text.starts_with("HTTP/1.1 401 "), "{text}");
     assert!(text.contains("\"error\":\"tillKeyWrong\""), "{text}");
     assert!(text.contains("Content-Type: application/json"));
-    let reply = till_reply_key(&key_bytes);
-    let want = reply_mac(
-        &reply,
-        "GET",
-        &path,
-        nonce,
-        b"",
-        401,
-        body_of(&text).as_bytes(),
-    );
-    assert_eq!(mac_of(&text), Some(want));
-    // The key itself is not the token; the token is, and the answer to it is
-    // signed too.
-    assert!(ask(&key).starts_with("HTTP/1.1 401 "));
-    let text = ask(&hex(&till_bearer(&key_bytes)));
+    signed_ok(&text, n1, 401);
+    // The key itself is not the request key.
+    assert!(ask(&key_bytes, n1, &now()).starts_with("HTTP/1.1 401 "));
+    // The request key is: the answer is the state, signed too. The same
+    // request again is a replay, even though the first was refused for the
+    // state it asked about.
+    let request = till_request_key(&key_bytes);
+    let n2 = "00000000000000000000000000000002";
+    let text = ask(&request, n2, &now());
     assert!(text.starts_with("HTTP/1.1 503 "), "{text}");
-    let want = reply_mac(
-        &reply,
-        "GET",
-        &path,
-        nonce,
-        b"",
-        503,
-        body_of(&text).as_bytes(),
-    );
-    assert_eq!(mac_of(&text), Some(want));
+    signed_ok(&text, n2, 503);
+    let text = ask(&request, n2, &now());
+    assert!(text.starts_with("HTTP/1.1 401 "), "{text}");
+    assert!(text.contains("\"error\":\"tillReplay\""), "{text}");
+    signed_ok(&text, n2, 401);
+    // A time six minutes off is refused.
+    let late = (now().parse::<u64>().unwrap() - 360).to_string();
+    let n3 = "00000000000000000000000000000003";
+    let text = ask(&request, n3, &late);
+    assert!(text.contains("\"error\":\"tillClock\""), "{text}");
+    signed_ok(&text, n3, 401);
     kill(child);
 }
 

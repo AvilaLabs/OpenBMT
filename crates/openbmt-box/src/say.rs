@@ -1060,6 +1060,10 @@ pub enum TillAnswer {
     KeyWrong,
     /// The till key file is of the form before BX-80: a new key is needed.
     KeyOld,
+    /// The time in the request is more than five minutes from the Box's.
+    Clock,
+    /// The Box has seen this request before.
+    Replay,
     /// The Box was started without its till listener.
     Off,
     /// The Box has not joined the shop.
@@ -1102,6 +1106,8 @@ impl TillAnswer {
         match self {
             Self::KeyWrong => "tillKeyWrong",
             Self::KeyOld => "tillKeyOld",
+            Self::Clock => "tillClock",
+            Self::Replay => "tillReplay",
             Self::Off => "tillOff",
             Self::NotPaired => "tillNotPaired",
             Self::UnknownCounter(_) => "tillUnknownCounter",
@@ -1134,6 +1140,20 @@ impl TillAnswer {
                 Who::BoxKeeper,
                 "Make a new till key on the Box with openbmt-box till-key and copy it \
                  into this payment method.",
+            )
+            .code("BX-80"),
+            Self::Clock => stop(
+                "Clocks differ",
+                "The till's server and the Box disagree on the time by more than five minutes.".into(),
+                Who::BoxKeeper,
+                "Set the time on both to the network time, then try again.",
+            )
+            .code("BX-80"),
+            Self::Replay => stop(
+                "Request sent twice",
+                "The Box has seen this request before, so it did not act on it again.".into(),
+                Who::BoxKeeper,
+                "Try again from the till.",
             )
             .code("BX-80"),
             Self::Off => stop(
@@ -2147,6 +2167,8 @@ pub fn till_samples() -> Vec<TillAnswer> {
     vec![
         TillAnswer::KeyWrong,
         TillAnswer::KeyOld,
+        TillAnswer::Clock,
+        TillAnswer::Replay,
         TillAnswer::Off,
         TillAnswer::NotPaired,
         TillAnswer::UnknownCounter("1a2b3c4d".into()),

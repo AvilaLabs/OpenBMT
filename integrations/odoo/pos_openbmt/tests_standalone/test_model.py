@@ -54,6 +54,7 @@ class Base(unittest.TestCase):
         blob = repr(results) + ' '.join(self.logs)
         self.assertNotIn(fake_box.KEY, blob)
         self.assertNotIn('Bearer', blob)
+        self.assertNotIn(mod.till_request_key(fake_box.KEY).hex(), blob)
 
 
 class Selection(unittest.TestCase):
@@ -116,11 +117,19 @@ class States(Base):
         self.box.set_state(sale, 'paid')
         self.assertEqual(self.method.openbmt_cancel(sale)['state'], 'paid')
 
-    def test_bearer_header_sent(self):
+    def test_the_three_headers_are_sent_and_no_bearer_token(self):
         self.start()
-        self.assertEqual(self.box.seen[-1],
-                         ('POST', '/till/v1/sales',
-                          'Bearer ' + mod.till_token(fake_box.KEY)))
+        verb, path, headers = self.box.seen[-1]
+        self.assertEqual((verb, path), ('POST', '/till/v1/sales'))
+        self.assertNotIn('Authorization', headers)
+        self.assertRegex(headers['X-OBM-Nonce'], r'^[0-9a-f]{32}$')
+        self.assertRegex(headers['X-OBM-Time'], r'^[0-9]+$')
+        self.assertLess(abs(int(headers['X-OBM-Time']) - time.time()), 5)
+        self.assertRegex(headers['X-OBM-Request'], r'^[0-9a-f]{64}$')
+        want = mod.request_mac(
+            mod.till_request_key(fake_box.KEY), 'POST', path,
+            headers['X-OBM-Nonce'], headers['X-OBM-Time'], self.box.sent[-1])
+        self.assertEqual(headers['X-OBM-Request'], want)
 
     def test_trailing_slash_address(self):
         m = self.make(openbmt_box_address=self.box.address + '/')
@@ -144,6 +153,63 @@ class Refusals(Base):
     def test_not_paired(self):
         self.box.paired = False
         self.refused(self.start(), 'tillNotPaired')
+
+    def test_the_boxs_clock_five_minutes_off_is_told_with_its_words(self):
+        now = int(time.time())
+        self.box.now = now + 400
+        r = self.start()
+        self.refused(r, 'tillClock')
+        self.assertEqual(r['words']['heading'], 'Clocks differ')
+        self.assertEqual(
+            r['words']['next'],
+            'Set the time on both to the network time, then try again.')
+        self.box.now = now - 400
+        self.refused(self.start(request='req-2'), 'tillClock')
+        # Within five minutes it works.
+        self.box.now = now + 200
+        self.assertEqual(self.start(request='req-3')['state'], 'waiting')
+
+    def test_a_request_the_box_has_seen_is_told_with_its_words(self):
+        import requests
+        self.start()
+        verb, path, headers = self.box.seen[-1]
+        sent = self.box.sent[-1]
+        # Whoever recorded the request sends it again, byte for byte.
+        again = requests.post(
+            self.box.address + path, data=sent, timeout=5,
+            headers={k: v for k, v in headers.items()
+                     if k in ('X-OBM-Nonce', 'X-OBM-Time', 'X-OBM-Request',
+                              'Content-Type')})
+        self.assertEqual(again.status_code, 401)
+        self.assertEqual(again.json()['error'], 'tillReplay')
+        self.assertEqual(again.json()['words']['heading'], 'Request sent twice')
+        # Changed in its body, its path or its time, it is not the till's.
+        for kind in ('body', 'path', 'time'):
+            fresh = dict(headers)
+            nonce = '%032x' % (len(kind) + 12345)
+            fresh['X-OBM-Nonce'] = nonce
+            fresh['X-OBM-Request'] = mod.request_mac(
+                mod.till_request_key(fake_box.KEY), 'POST', path, nonce,
+                headers['X-OBM-Time'], sent)
+            body, to, at = sent, path, fresh['X-OBM-Time']
+            if kind == 'body':
+                body = sent.replace(b'12.50', b'99.50')
+            elif kind == 'path':
+                to = '/till/v1/sales/' + 'a' * 32 + '/cancel'
+            else:
+                at = '%d' % (int(at) + 1)
+            changed = requests.post(
+                self.box.address + to, data=body, timeout=5,
+                headers={'X-OBM-Nonce': nonce, 'X-OBM-Time': at,
+                         'X-OBM-Request': fresh['X-OBM-Request'],
+                         'Content-Type': 'application/json'})
+            self.assertEqual(changed.status_code, 401, kind)
+            self.assertEqual(changed.json()['error'], 'tillKeyWrong', kind)
+
+    def test_a_full_nonce_cache_is_a_busy_answer(self):
+        self.box.taken = {'%032x' % i: int(time.time())
+                          for i in range(fake_box.MAX_NONCES)}
+        self.refused(self.start(), 'tillBusy')
 
     def test_unknown_counter(self):
         m = self.make(openbmt_counter='00000000')
@@ -310,25 +376,52 @@ def vectors():
 class Vectors(unittest.TestCase):
     """What the Box's own code makes, written by its test (BX-80)."""
 
-    def test_token_and_reply_key_of_the_key(self):
+    def test_request_key_and_reply_key_of_the_key(self):
         v = vectors()
-        self.assertEqual(mod.till_token(v['key']), v['token'])
+        self.assertEqual(mod.till_request_key(v['key']).hex(), v['request_key'])
         self.assertEqual(mod.till_reply_key(v['key']).hex(), v['reply_key'])
-        # The stored file: version, hash of the token, reply key.
+        # The stored file: version, request key, reply key.
         stored = bytes.fromhex(v['key_file'])
-        self.assertEqual(stored[0], 2)
-        self.assertEqual(
-            stored[1:33],
-            mod.tagged_hash('OpenBMT/till-key/v1', bytes.fromhex(v['token'])))
+        self.assertEqual(stored[0], 3)
+        self.assertEqual(stored[1:33].hex(), v['request_key'])
         self.assertEqual(stored[33:].hex(), v['reply_key'])
 
     def test_fake_box_derives_the_same(self):
         v = vectors()
         key = bytes.fromhex(v['key'])
         self.assertEqual(
-            fake_box.tagged_hash('OpenBMT/till-bearer/v1', key).hex(), v['token'])
+            fake_box.tagged_hash('OpenBMT/till-request/v1', key).hex(),
+            v['request_key'])
         self.assertEqual(
             fake_box.tagged_hash('OpenBMT/till-reply/v1', key).hex(), v['reply_key'])
+
+    def test_request_macs_of_the_cases(self):
+        v = vectors()
+        request_key = bytes.fromhex(v['request_key'])
+        self.assertTrue(v['request_cases'])
+        self.assertTrue(v['request_cases'][0]['body'])
+        for c in v['request_cases']:
+            args = (c['method'], c['path'], c['nonce'], c['time'],
+                    c['body'].encode('utf-8'))
+            self.assertEqual(mod.request_mac(request_key, *args), c['mac'])
+            self.assertEqual(fake_box.request_mac_of(request_key, *args),
+                             c['mac'])
+
+    def test_a_request_case_changed_in_any_part_has_another_mac(self):
+        v = vectors()
+        request_key = bytes.fromhex(v['request_key'])
+        c = v['request_cases'][0]
+        base = [c['method'], c['path'], c['nonce'], c['time'],
+                c['body'].encode('utf-8')]
+        # The time counts as it is written: a leading zero is another mac.
+        other = [('PUT', 0), ('/till/v1/sales/x', 1), ('f' * 32, 2),
+                 ('0' + c['time'], 3), (c['body'].encode('utf-8') + b' ', 4)]
+        for value, at in other:
+            args = list(base)
+            args[at] = value
+            self.assertNotEqual(mod.request_mac(request_key, *args), c['mac'])
+        self.assertNotEqual(
+            mod.request_mac(bytes(32), *base), c['mac'])
 
     def test_macs_of_the_cases(self):
         v = vectors()
@@ -429,15 +522,18 @@ class Signed(Base):
         self.unsigned(self.status(sale))
         self.assertEqual(len(set(self.box.nonces)), len(self.box.nonces))
 
-    def test_every_request_has_a_fresh_nonce_and_the_token_not_the_key(self):
+    def test_every_request_has_a_fresh_nonce_and_the_key_is_never_sent(self):
         for i in range(5):
             self.start(request='n%d' % i)
         self.assertEqual(len(set(self.box.nonces)), 5)
         for n in self.box.nonces:
             self.assertRegex(n, r'^[0-9a-f]{32}$')
-        for _, _, auth in self.box.seen:
-            self.assertEqual(auth, 'Bearer ' + mod.till_token(fake_box.KEY))
-            self.assertNotIn(fake_box.KEY, auth)
+        for _, _, headers in self.box.seen:
+            self.assertNotIn('Authorization', headers)
+            for value in headers.values():
+                self.assertNotIn(fake_box.KEY, value)
+                self.assertNotIn(mod.till_request_key(fake_box.KEY).hex(),
+                                 value)
 
     def test_an_unsigned_refusal_is_not_taken_either(self):
         # The Box's 401 for a key file of the earlier form, and its 404, 400
