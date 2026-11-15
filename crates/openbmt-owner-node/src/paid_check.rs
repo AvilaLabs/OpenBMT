@@ -43,7 +43,7 @@ use openbmt_counter::money::tolerance;
 use openbmt_counter::Event;
 use openbmt_courier::Post;
 use openbmt_owner::{SaleFacts, SaleKey};
-use openbmt_pos::{FactsError, MAX_SALES};
+use openbmt_pos::FactsError;
 
 use crate::facts::FactsRefused;
 use crate::link::OwnerLink;
@@ -68,10 +68,9 @@ pub const MAGIC_PAID_CHECK: [u8; 4] = *b"OBM\x17";
 pub const MAX_PAID_MARKS: usize = 65_536;
 
 /// Most alarms not cleared one counter may hold (OC-61, OC-64). A counter with
-/// more keeps its alarms, raises no more and is checked no further until the
-/// owner clears enough of them, so that one counter cannot fill the marks for
-/// the others. A run raises at most one alarm above this number for a counter,
-/// and that one is what stops the checks of it.
+/// this many keeps its alarms, raises no more and is checked no further until
+/// the owner clears one, so that one counter cannot fill the marks for the
+/// others.
 pub const MAX_OPEN_ALARMS_PER_COUNTER: usize = 256;
 
 // A counter is a device of the settings (at most MAX_DEVICES), so the alarms
@@ -220,9 +219,9 @@ pub struct Fold {
 /// OC-61: a record that does not read as part of a sale is passed over and the
 /// fold goes on, with the fold noted as having passed over a record: a record
 /// that does not decode, a second opening of a sale (the first stands), a
-/// record of a sale never opened, and the opening of a sale past
-/// [`MAX_SALES`] (records of sales already held still fold). Only a copy that
-/// does not verify is refused whole.
+/// record of a sale never opened. A counter's sales are all
+/// folded, however many it has made: the copy held bounds them. Only a copy
+/// that does not verify is refused whole.
 pub fn paid_sales_from_chain(
     chain: &Chain,
     devices: &DeviceList,
@@ -255,7 +254,7 @@ pub fn paid_sales_from_chain(
             ..
         } = &event
         {
-            if sales.contains_key(index) || sales.len() >= MAX_SALES {
+            if sales.contains_key(index) {
                 passed_over = true;
                 continue;
             }
@@ -483,14 +482,14 @@ impl LightningCounters {
     }
 }
 
-/// OC-61: take out the counters that hold more than
+/// OC-61: take out the counters that hold
 /// [`MAX_OPEN_ALARMS_PER_COUNTER`] alarms not cleared: they are checked no
 /// further and are listed as unreadable, until the owner clears enough.
 pub fn gate_open_alarms(found: PaidSales, marks: &PaidMarks) -> PaidSales {
     let open = marks.open_alarms();
     let over = |c: &DeviceId| {
         open.get(c)
-            .is_some_and(|n| *n > MAX_OPEN_ALARMS_PER_COUNTER)
+            .is_some_and(|n| *n >= MAX_OPEN_ALARMS_PER_COUNTER)
     };
     let mut listed: BTreeSet<DeviceId> = found.unreadable.iter().copied().collect();
     let mut out = PaidSales {
@@ -687,7 +686,8 @@ impl PaidMarks {
     /// OC-61, OC-62: the marks after a check at `now`. A sale read for the
     /// first time is marked as read; a sale found missing is raised, once; a
     /// payment that arrived clears its alarm; a sale that no longer waits for
-    /// a check loses its reading. The oldest cleared marks go first when there
+    /// a check loses its reading; a first reading later than `now` is moved
+    /// to `now`. The oldest cleared marks go first when there
     /// are more than [`MAX_PAID_MARKS`]; one not cleared is never dropped here.
     pub fn after(&self, result: &CheckResult, now: u64) -> Self {
         let mut next = self.clone();
@@ -699,6 +699,11 @@ impl PaidMarks {
                 raised_at: None,
                 cleared_at: None,
             });
+        }
+        for check in &result.checks {
+            if let Some(m) = next.marks.get_mut(&check.sale) {
+                m.first_read = m.first_read.min(now);
+            }
         }
         for sale in &result.raised {
             let first_read = next.marks.get(sale).map_or(now, |m| m.first_read);
@@ -878,7 +883,9 @@ pub fn check_paid(
     for sale in sales.iter().filter(|s| s.on_chain()) {
         let key = sale.key();
         let mark = marks.get(&key);
-        let first_read = mark.map_or(now, |m| m.first_read);
+        // A reading later than the phone's clock (the clock was ahead and is
+        // set right) is taken as now; `PaidMarks::after` stores it so.
+        let first_read = mark.map_or(now, |m| m.first_read.min(now));
         if mark.is_none() {
             out.read.push(key);
         }
@@ -891,11 +898,11 @@ pub fn check_paid(
         } else {
             facts(key)
         };
-        // OC-61: a counter holds at most one alarm above the cap; that one
-        // stops its checks (see `gate_open_alarms`).
+        // OC-61: a counter holds at most the cap of alarms not cleared (see
+        // `gate_open_alarms`).
         let mut raise = |out: &mut CheckResult| {
             let n = open.entry(sale.counter).or_default();
-            if *n <= MAX_OPEN_ALARMS_PER_COUNTER {
+            if *n < MAX_OPEN_ALARMS_PER_COUNTER {
                 *n += 1;
                 out.raised.push(key);
             }

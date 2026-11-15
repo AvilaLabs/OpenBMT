@@ -455,7 +455,9 @@ says so when one is missing.
   override, which is recorded and alarmed as CR-20 says.
 - **OC-61.** When. The wait runs on the owner phone's clock, from the first
   time the owner phone read the Paid in the counter's records; the time the
-  counter wrote in it is not used, nor for the day of OC-63. A sale whose Paid
+  counter wrote in it is not used, nor for the day of OC-63. A first reading
+  later than the phone's clock, as when the clock was ahead and is set right,
+  is taken as now, and the wait runs from then. A sale whose Paid
   the owner phone first read less than `PAID_CHECK_WAIT_SECS` (24 hours) **[to
   tune]** ago, and whose payment is not yet in a block, is listed as "waiting
   for a block" and is not a mismatch: a payment with a low fee can wait that
@@ -471,9 +473,9 @@ says so when one is missing.
   opening of a sale, a payment for a sale never opened, or a record of a kind
   not known, is passed over, and the counter raises its own alarm, that some
   of its payments cannot be checked; its other sales, and every other counter,
-  are still checked. A second opening leaves the first as it was, and sales
-  past the 16,384 a counter may hold are passed over the same way. A counter
-  with more than 256 alarms not cleared is held back: its alarms stay, no more are raised for it, and it is checked no further until
+  are still checked. A second opening leaves the first as it was. A counter
+  with 256 alarms not cleared is held back: its alarms stay, no more are
+  raised for it, and it is checked no further until
   the owner clears them, so that one counter cannot fill the marks of OC-64
   for the others. The check runs each time the owner's view checks a new tip,
   and when the app starts, and a run that failed is tried again at the next.

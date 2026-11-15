@@ -5,7 +5,7 @@ use openbmt_core::records::RecordKind;
 use openbmt_core::wire::DecodeError;
 use openbmt_counter::{Amount, Event, Role};
 use openbmt_owner::{SaleFacts, SaleKey};
-use openbmt_pos::{FactsError, MAX_SALES};
+use openbmt_pos::FactsError;
 
 use super::pos::{at_once, link_with, opened};
 use super::refunds::{new_owner, view_with, DEPTH, TIP};
@@ -94,6 +94,31 @@ fn oc_61_a_paid_with_no_receipt_raises_the_alarm_after_the_wait_and_not_before()
     assert_eq!(late.raised, vec![key(0)]);
     assert_eq!(late.checks[0].seen_sats, Some(0));
     assert_eq!(late.checks[0].first_read, read);
+}
+
+#[test]
+fn oc_61_a_first_reading_ahead_of_the_phones_clock_is_taken_as_now() {
+    let view = view_with(&[]);
+    let sales = [sale(0, 5_000, PaidHow::AtOnce)];
+    let now = PAID_AT;
+    let ahead = now + 10 * 365 * 86_400;
+    let marks = read_at(&sales, ahead);
+    assert_eq!(marks.get(&key(0)).unwrap().first_read, ahead);
+    // The clock is set right: the mark is rewritten to now, and it waits.
+    let result = check_paid(&sales, &marks, now, from_view(&view));
+    assert_eq!(state_of(&result, 0), PaidState::Waiting);
+    assert_eq!(result.checks[0].first_read, now);
+    let marks = marks.after(&result, now);
+    assert_eq!(marks.get(&key(0)).unwrap().first_read, now);
+    // A run a day and a second later raises the alarm.
+    let late = check_paid(
+        &sales,
+        &marks,
+        now + PAID_CHECK_WAIT_SECS + 1,
+        from_view(&view),
+    );
+    assert_eq!(state_of(&late, 0), PaidState::Mismatch);
+    assert_eq!(late.raised, vec![key(0)]);
 }
 
 #[test]
@@ -890,18 +915,27 @@ fn oc_61_a_record_that_does_not_read_is_passed_over() {
 }
 
 #[test]
-fn oc_61_sales_past_the_most_a_counter_may_hold_are_passed_over() {
+fn oc_61_every_sale_of_a_busy_counter_is_judged() {
+    let n = 20_000u32;
     let mut records = Vec::new();
-    for index in 0..=MAX_SALES as u32 {
+    for index in 0..n {
         records.push(event_record(&opened(index, PAID_AT - 50, 100)));
     }
-    // A sale already held still folds; the one past the most does not.
-    records.push(event_record(&at_once_for(3, PAID_AT, 800)));
-    records.push(event_record(&at_once_for(MAX_SALES as u32, PAID_AT, 900)));
+    records.push(event_record(&at_once_for(n - 1, PAID_AT, 900)));
     let fold = fold_of(&records);
-    assert!(fold.passed_over);
+    assert!(!fold.passed_over);
     assert_eq!(fold.sales.len(), 1);
-    assert_eq!((fold.sales[0].index, fold.sales[0].recorded_sats), (3, 800));
+    assert_eq!(fold.sales[0].index, n - 1);
+    let none = |_: SaleKey| {
+        Ok(SaleFacts {
+            received_sats: 0,
+            reached_refund_depth: false,
+        })
+    };
+    let marks = read_at(&fold.sales, PAID_AT);
+    let later = PAID_AT + PAID_CHECK_WAIT_SECS;
+    let result = check_paid(&fold.sales, &marks, later, none);
+    assert_eq!(result.raised, vec![fold.sales[0].key()]);
 }
 
 #[test]
@@ -1446,7 +1480,7 @@ fn missing_sales(counter: DeviceId, n: u32) -> Vec<PaidSale> {
 }
 
 #[test]
-fn oc_61_a_counter_over_the_alarm_cap_is_checked_no_further_until_the_owner_clears() {
+fn oc_61_a_counter_at_the_alarm_cap_is_checked_no_further_until_the_owner_clears() {
     let cap = MAX_OPEN_ALARMS_PER_COUNTER as u32;
     let now = PAID_AT + PAID_CHECK_WAIT_SECS;
     let none = |_: SaleKey| {
@@ -1459,7 +1493,7 @@ fn oc_61_a_counter_over_the_alarm_cap_is_checked_no_further_until_the_owner_clea
     let other = missing_sales(other_counter(), 2);
     let all: Vec<PaidSale> = sales.iter().chain(&other).cloned().collect();
     let marks = read_at(&all, PAID_AT);
-    // One run raises up to one above the cap; the other counter is checked.
+    // One run raises up to the cap; the other counter is checked.
     let result = check_paid(&all, &marks, now, none);
     assert_eq!(
         result
@@ -1467,7 +1501,7 @@ fn oc_61_a_counter_over_the_alarm_cap_is_checked_no_further_until_the_owner_clea
             .iter()
             .filter(|k| k.counter == counter())
             .count(),
-        cap as usize + 1
+        cap as usize
     );
     assert_eq!(
         result
@@ -1478,7 +1512,7 @@ fn oc_61_a_counter_over_the_alarm_cap_is_checked_no_further_until_the_owner_clea
         2
     );
     let marks = marks.after(&result, now);
-    assert_eq!(marks.open_alarms()[&counter()], cap as usize + 1);
+    assert_eq!(marks.open_alarms()[&counter()], cap as usize);
     // The next run: the counter shows as unreadable, none of its sales are
     // checked, and its alarms stay.
     let found = gate_open_alarms(
@@ -1494,11 +1528,11 @@ fn oc_61_a_counter_over_the_alarm_cap_is_checked_no_further_until_the_owner_clea
     assert!(again.raised.is_empty());
     assert_eq!(
         marks.after(&again, now + 60).open_alarms()[&counter()],
-        cap as usize + 1
+        cap as usize
     );
-    // Clearing down to the cap resumes the checks of the counter.
+    // Clearing one resumes the checks of the counter.
     let cleared = marks.cleared_by_owner(&key(0), now + 100).unwrap();
-    assert_eq!(cleared.open_alarms()[&counter()], cap as usize);
+    assert_eq!(cleared.open_alarms()[&counter()], cap as usize - 1);
     let found = gate_open_alarms(
         PaidSales {
             sales: all,
