@@ -13,14 +13,17 @@ crate-type = ["lib", "cdylib", "staticlib"]
 [features]
 # The JNI entry point, compiled for every target so that the host can test
 # it; on Android it is always compiled.
-default = ["jni"]
+default = ["jni", "network"]
 jni = []
+# The node's network side: Shop Lightning's node, the relay thread and the
+# driver's thread. Off for the build for a browser, which gives its own.
+network = ["openbmt-counter-node/network"]
 
 # The same exact versions as the other crates, so the types unify.
 [dependencies]
 openbmt-core = { path = "../openbmt-core" }
 openbmt-counter = { path = "../openbmt-counter" }
-openbmt-counter-node = { path = "../openbmt-counter-node" }
+openbmt-counter-node = { path = "../openbmt-counter-node", default-features = false }
 openbmt-courier = { path = "../openbmt-courier" }
 openbmt-link = { path = "../openbmt-link" }
 openbmt-net-io = { path = "../openbmt-net-io" }

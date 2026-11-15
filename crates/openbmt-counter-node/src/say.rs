@@ -16,6 +16,7 @@ use openbmt_core::settings::SettingsError;
 
 use crate::confirm::{ChangeNotice, ConfirmRefused};
 use crate::dirstore::DirStoreError;
+use crate::lnshim::room::OnChainReason;
 use crate::node::{HeartbeatNotTaken, StartError};
 use crate::paired::{PairRefused, RelayRefused};
 use crate::paired_own::OwnPairRefused;
@@ -24,7 +25,6 @@ use crate::settings::{SettingsFault, SettingsLine, SettingsRefused};
 use crate::shopln::{SeedNotTaken, Why};
 use crate::starter::StarterRefused;
 use crate::switch::{SwitchNotice, SwitchRefused, SwitchStepRefused};
-use openbmt_lightning_node::room::OnChainReason;
 
 impl DirStoreError {
     /// What the owner is told about a file of the counter's data folder.
@@ -176,7 +176,7 @@ fn shopln_said(tone: Tone, key: &'static str, who: Who) -> Words {
 /// is not offered on this counter, or not offered for a sale. The node's own
 /// text is in the detail.
 pub fn shopln_words(why: &Why) -> Words {
-    use openbmt_lightning_node::words as node_words;
+    use crate::lnshim::words as node_words;
     let (key, rule, detail) = match why {
         Why::NoSeed => ("WORDS_NEEDED_SL76_NO_SEED", "SL-76", None),
         Why::Starting => ("WORDS_NEEDED_SL41_STARTING", "SL-41", None),

@@ -19,6 +19,7 @@ use std::io;
 /// Fills `out` with the kernel's random bytes. A short read is read again
 /// for the rest; an interrupted call is tried again; any other error is
 /// returned and `out` is left as it was filled so far (callers drop it).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn fill(out: &mut [u8]) -> io::Result<()> {
     let mut have = 0;
     while have < out.len() {
@@ -42,6 +43,38 @@ pub fn fill(out: &mut [u8]) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// The source the page gives where there is no kernel to ask (WebAssembly in
+/// a browser). It fills the slice and says whether it could.
+#[cfg(target_arch = "wasm32")]
+pub type HostFill = fn(&mut [u8]) -> bool;
+
+#[cfg(target_arch = "wasm32")]
+static HOST_FILL: std::sync::OnceLock<HostFill> = std::sync::OnceLock::new();
+
+/// Gives the source of random bytes on a target without a kernel. The first
+/// call wins; a later one is ignored.
+#[cfg(target_arch = "wasm32")]
+pub fn set_host_fill(f: HostFill) {
+    let _ = HOST_FILL.set(f);
+}
+
+/// Fills `out` from the source the host gave; with none given, or when the
+/// host could not, the error is returned and callers drop what was filled.
+#[cfg(target_arch = "wasm32")]
+pub fn fill(out: &mut [u8]) -> io::Result<()> {
+    match HOST_FILL.get() {
+        Some(f) if f(out) => Ok(()),
+        Some(_) => Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "the host gave no random bytes",
+        )),
+        None => Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "no source of random bytes was given",
+        )),
+    }
 }
 
 /// 32 bytes of the kernel's randomness (SS-01).

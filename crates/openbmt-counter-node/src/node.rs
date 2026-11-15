@@ -100,7 +100,10 @@ use std::collections::{BTreeSet, VecDeque};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use crate::mono::Instant;
+use crate::vfs::{DirLock, FileStorage};
 
 use bitcoin::consensus::deserialize;
 use bitcoin::hashes::Hash;
@@ -133,8 +136,8 @@ use openbmt_counter::{
 };
 use openbmt_lightning::{CertPin, Credential, Reply};
 use openbmt_net_io::{
-    AppEvent, Clock, DirLock, Driver, DriverConfig, EventReceiver, FileStorage, Handle, Key,
-    NetMode, OsRandomness, OwnNode, OwnNodeEvent, Storage, SystemClock,
+    AppEvent, Clock, Driver, DriverConfig, EventReceiver, Handle, Key, NetMode, OsRandomness,
+    OwnNode, OwnNodeEvent, Storage, SystemClock,
 };
 use openbmt_pos::TillMessage;
 use openbmt_watch::{
@@ -3506,8 +3509,8 @@ impl<P: DriverPort> Node<P> {
 
     /// SL-27, SL-40: the node says what became of the funding of a channel
     /// that payments came through while it had not the shop's confirmations.
-    pub(crate) fn funding_event(&mut self, event: openbmt_lightning_node::funding::FundingEvent) {
-        use openbmt_lightning_node::funding::Outcome;
+    pub(crate) fn funding_event(&mut self, event: crate::lnshim::funding::FundingEvent) {
+        use crate::lnshim::funding::Outcome;
         let handled = match event.outcome {
             Outcome::Watching => false,
             // CR-15: the amount leaves the exposure ledger when every funding

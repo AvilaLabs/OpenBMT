@@ -7,6 +7,12 @@ license.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+# Shop Lightning's node (and with it tokio). On by default; the build for a
+# browser turns it off and the counter then offers no Lightning of its own.
+default = ["network"]
+network = ["dep:openbmt-lightning-node", "dep:tokio"]
+
 # The same exact bitcoin version as the other crates, so the types unify.
 [dependencies]
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }
@@ -26,8 +32,8 @@ openbmt-swap = { path = "../openbmt-swap" }
 # Shop Lightning's node (SL-70 to SL-78): the counter that the settings name
 # runs it, and talks to the Box with Store and Stored messages. tokio is the
 # runtime the node needs, at the version the node pins.
-openbmt-lightning-node = { path = "../openbmt-lightning-node" }
-tokio = { version = "=1.54.1", features = ["rt-multi-thread", "time", "sync"] }
+openbmt-lightning-node = { path = "../openbmt-lightning-node", optional = true }
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "time", "sync"], optional = true }
 
 [dev-dependencies]
 # The signing wallet and the signatures of a wallet message (AP-14).

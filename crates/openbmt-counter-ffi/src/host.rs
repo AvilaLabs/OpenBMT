@@ -23,7 +23,7 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use std::sync::mpsc::Receiver;
 
@@ -34,6 +34,7 @@ use openbmt_counter::{
     refund_destination, Actor, Amount, CashRefund, Currency, PosState, Rate, RateSource, RefundAsk,
     RefundRequest, Report, RequestDays, SaleExtras, Screen, StaffChange, StaffEvent,
 };
+use openbmt_counter_node::mono::Instant;
 use openbmt_counter_node::say::{change_confirmed_words, switch_dropped_words, switched_words};
 use openbmt_counter_node::{effective_settings_of, own_node_setting};
 use openbmt_counter_node::{
@@ -108,6 +109,11 @@ impl DriverPort for Port {
 /// How the node starts its driver: given what the node says it must be
 /// started with, the driver, or why not.
 pub(crate) type Spawn = Box<dyn FnOnce(Launch) -> Result<Port, String> + Send>;
+
+/// The driver a host gives in place of the real one: the page's pretend
+/// chain, in the build for a browser.
+pub type HostSpawn =
+    Arc<dyn Fn(Launch) -> Result<Box<dyn DriverPort + Send>, String> + Send + Sync>;
 
 /// The real driver, on the files of the data folder.
 pub(crate) fn real_spawn() -> Spawn {

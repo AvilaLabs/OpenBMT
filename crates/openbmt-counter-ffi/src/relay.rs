@@ -19,10 +19,11 @@ use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::relay::{RelayHint, SignedRelayHint};
+use openbmt_counter_node::mono::Instant;
 use openbmt_counter_node::{
     start_link, CounterLink, DriverPort, LinkLine, LinkNotStarted, LinkState, Node,
     NoticeStoreError, PairedRecord, RelayRefused, SettingsLine,

@@ -26,13 +26,14 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use openbmt_core::identity::{DeviceId, Identity};
 use openbmt_core::records::{Record, RecordKind};
 use openbmt_core::wire::{self, DecodeError, Reader};
+
+use crate::vfs::{fs, File};
 use openbmt_counter::{Counter, Event};
 use openbmt_pos::{NoticeMaker, PaidNotice, PAID_NOTICE_LEN, PAID_NOTICE_TILL_LEN};
 

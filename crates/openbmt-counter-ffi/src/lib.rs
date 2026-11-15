@@ -93,7 +93,7 @@ pub use call::{
     RESPONSE_MAGIC, VERSION,
 };
 pub use error::{CounterError, Kind};
-pub use host::{Entry, MAX_WAIT_MS, SLICE_MS};
+pub use host::{Entry, HostSpawn, MAX_WAIT_MS, SLICE_MS};
 pub use pay::{btc_amount, request_link, request_texts, Payment};
 pub use rates::{RateCombineArgs, RateParseArgs, RateSourceView, RateView, SampleView};
 pub use say::{all_words, words_for};

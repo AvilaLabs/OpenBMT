@@ -33,7 +33,6 @@
 //! whole.
 
 use std::fmt;
-use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 #[cfg(test)]
@@ -43,6 +42,8 @@ use std::sync::{Mutex, PoisonError};
 
 use openbmt_core::records::{Record, MAX_BODY};
 use openbmt_counter::{Slot, Store, Stored};
+
+use crate::vfs::{fs, File, OpenOptions};
 
 /// The longest record the file takes, in bytes: the largest body, the fixed
 /// fields and the signature, with room to spare.
@@ -670,7 +671,7 @@ impl Store for DirStore {
             });
         }
         let path = self.path(RECORDS_FILE);
-        let existed = path.exists();
+        let existed = fs::metadata(&path).is_ok();
         // The index first: a scan after the write would count it twice.
         self.with_index(|_| Ok(()))?;
         let mut file = OpenOptions::new()

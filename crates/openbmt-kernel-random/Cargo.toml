@@ -9,5 +9,5 @@ publish.workspace = true
 
 # libc is the system call layer, the same pin as the stick's. It is in the
 # lock file already.
-[dependencies]
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libc = "=0.2.191"

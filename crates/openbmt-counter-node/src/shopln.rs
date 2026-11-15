@@ -19,7 +19,6 @@
 //! The node itself, its runtime and its link to the Box are in
 //! [`crate::shopln_node`].
 
-use std::fs;
 use std::io::{self, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::Path;
@@ -28,8 +27,10 @@ use openbmt_core::identity::DeviceId;
 use openbmt_core::settings::{Settings, ShopLightning, LIGHTNING_NODE_BYTES};
 use openbmt_core::shop_lightning::{check_seed, node_id, SeedRefused};
 use openbmt_core::wire::{self, DecodeError, Reader};
-use openbmt_lightning_node::room::OnChainReason;
 use openbmt_link::shopln::NotOffered;
+
+use crate::lnshim::room::OnChainReason;
+use crate::vfs::{fs, File};
 
 /// The magic of the seed record, which the app seals (version 1).
 pub const MAGIC_SEED_RECORD: [u8; 4] = *b"OBM\x19";
@@ -476,11 +477,11 @@ impl Book {
     pub fn save(&self, dir: &Path) -> io::Result<()> {
         fs::create_dir_all(dir)?;
         let temp = dir.join(format!("{BOOK_FILE}.tmp"));
-        let mut f = fs::File::create(&temp)?;
+        let mut f = File::create(&temp)?;
         f.write_all(&self.to_bytes())?;
         f.sync_all()?;
         fs::rename(&temp, dir.join(BOOK_FILE))?;
-        fs::File::open(dir)?.sync_all()
+        File::open(dir)?.sync_all()
     }
 
     /// Drops the entries older than [`INVOICE_KEPT_SECS`] at `now`: the node

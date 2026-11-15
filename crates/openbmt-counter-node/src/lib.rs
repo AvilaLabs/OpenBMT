@@ -53,6 +53,8 @@ pub mod confirm;
 pub mod dirstore;
 pub mod lightning;
 pub mod link;
+pub mod lnshim;
+pub mod mono;
 pub mod node;
 pub mod notices;
 pub mod ownnode;
@@ -62,10 +64,15 @@ pub mod relaylink;
 pub mod say;
 pub mod settings;
 pub mod shopln;
+#[cfg(feature = "network")]
+pub mod shopln_node;
+#[cfg(not(feature = "network"))]
+#[path = "shopln_off.rs"]
 pub mod shopln_node;
 pub mod starter;
 pub mod swap;
 pub mod switch;
+pub mod vfs;
 
 #[cfg(test)]
 mod tests;

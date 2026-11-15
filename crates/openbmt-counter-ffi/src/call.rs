@@ -135,7 +135,7 @@ use crate::bills::{
 };
 use crate::codec::{Define, Get, Put, Reader, TypeDef, MAX_REQUEST};
 use crate::error::{internal, refused_by, wrong_state, CounterError};
-use crate::host::{real_spawn, Entry, Spawn};
+use crate::host::{real_spawn, Entry, HostSpawn, Port, Spawn};
 use crate::pay::Payment;
 use crate::rates::{
     rate_combine, rate_parse, rate_sources, RateCombineArgs, RateParseArgs, RateSourceView,
@@ -209,6 +209,9 @@ pub struct Registry {
     /// The pairing with the shop's own wallet under way, if any (CR-228).
     /// Memory only; never alongside a Key app ceremony.
     pub(crate) own_ceremony: Mutex<Option<OwnCeremony>>,
+    /// The driver a host gives, where the real one (sockets and threads)
+    /// is not there. `None` is the real driver.
+    host: Option<HostSpawn>,
     /// The way the next node starts its driver, in tests.
     #[cfg(test)]
     pub(crate) spawner: Mutex<Option<Spawn>>,
@@ -234,10 +237,22 @@ impl Registry {
             }),
             ceremony: Mutex::new(None),
             own_ceremony: Mutex::new(None),
+            host: None,
             #[cfg(test)]
             spawner: Mutex::new(None),
             #[cfg(test)]
             batch_min: Mutex::new(Some(1)),
+        }
+    }
+
+    /// A registry whose nodes take their driver from `host` at each start,
+    /// instead of starting the real one. The build for a browser has no
+    /// sockets or threads; the page gives a port over its own chain, and the
+    /// time comes with each call.
+    pub fn with_host(host: HostSpawn) -> Self {
+        Self {
+            host: Some(host),
+            ..Self::new()
         }
     }
 
@@ -267,7 +282,13 @@ impl Registry {
                 return spawn;
             }
         }
-        real_spawn()
+        match &self.host {
+            Some(host) => {
+                let host = Arc::clone(host);
+                Box::new(move |launch| host(launch).map(Port))
+            }
+            None => real_spawn(),
+        }
     }
 
     fn start(&self, config: StartConfig) -> Result<u64, CounterError> {
