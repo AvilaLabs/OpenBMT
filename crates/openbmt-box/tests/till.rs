@@ -275,3 +275,83 @@ fn bx_70_an_address_that_is_not_one_stops_the_box_at_the_start() {
         .unwrap();
     assert!(!out.status.success());
 }
+
+#[test]
+fn bx_64_till_txt_turns_the_till_listener_on_and_is_kept() {
+    let dir = Dir::new("tillfile");
+    std::fs::write(dir.0.join("till.txt"), "listen=127.0.0.1:0\n").unwrap();
+    let mut child = spawn(&dir.0, &[]);
+    let lines = startup(&mut child);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("till listener: 127.0.0.1:")),
+        "{lines:?}"
+    );
+    assert!(dir.0.join("till.txt").is_file());
+    kill(child);
+}
+
+#[test]
+fn bx_64_the_till_listen_flag_wins_over_till_txt() {
+    let dir = Dir::new("tillflag");
+    // The file names an address that is not one; the flag is used instead,
+    // and the file is not read for it.
+    std::fs::write(dir.0.join("till.txt"), "listen=not-an-address\n").unwrap();
+    let mut child = spawn(&dir.0, &["--till-listen", "127.0.0.1:0"]);
+    let lines = startup(&mut child);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("till listener: 127.0.0.1:")),
+        "{lines:?}"
+    );
+    assert!(lines.iter().all(|l| !l.contains("not-an-address")));
+    kill(child);
+}
+
+#[test]
+fn bx_64_a_till_txt_with_a_bad_address_says_so_and_the_box_runs_on() {
+    let dir = Dir::new("tillbad");
+    std::fs::write(dir.0.join("till.txt"), "listen=localhost\n").unwrap();
+    let mut child = spawn(&dir.0, &[]);
+    let lines = startup(&mut child);
+    assert!(lines.iter().any(|l| l.contains("localhost")), "{lines:?}");
+    assert!(lines.iter().all(|l| !l.starts_with("till listener: ")));
+    assert!(lines.last().unwrap().starts_with("state: "));
+    kill(child);
+}
+
+#[test]
+fn bx_64_the_setup_files_are_read_at_start_and_said_in_the_console_words() {
+    let dir = Dir::new("setupfiles");
+    std::fs::write(
+        dir.0.join("pos-setup.txt"),
+        "vendor=square|location=LOCSQ1|currency=USD|tenders=Bitcoin\n",
+    )
+    .unwrap();
+    // An unpaired Box refuses a token.
+    std::fs::write(dir.0.join("pos-token.txt"), "pos-token-abc\n").unwrap();
+    let mut child = spawn(&dir.0, &[]);
+    let lines = startup(&mut child);
+    assert!(
+        lines.contains(&"setup file: pos-setup.txt taken and deleted".to_string()),
+        "{lines:?}"
+    );
+    assert!(
+        lines.contains(&"pos-setup: square".to_string()),
+        "{lines:?}"
+    );
+    assert!(
+        lines.contains(
+            &"setup file: pos-token.txt refused, renamed pos-token.txt.refused".to_string()
+        ),
+        "{lines:?}"
+    );
+    assert!(!dir.0.join("pos-setup.txt").exists());
+    assert!(dir.0.join("pos-config").is_file());
+    assert!(!dir.0.join("pos-token.txt").exists());
+    assert!(dir.0.join("pos-token.txt.refused").is_file());
+    assert!(!dir.0.join("pos.token").exists());
+    kill(child);
+}

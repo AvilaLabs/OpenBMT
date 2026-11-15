@@ -43,7 +43,12 @@ Box's Dockerfile from this folder.
   `invitation.txt` in the volume and restarts the Box, which reads the file
   once and deletes it (BX-12). The file is read at start with `once()`, so
   the Box's own delete of it does not restart the service.
-- **Interfaces.** Two. `box` is a raw TCP interface on port 8986: no proxy,
+- **Setup by files.** The actions "POS setup", "POS token" and "Till listener
+  address" write `pos-setup.txt`, `pos-token.txt` and `till.txt` in the volume
+  and restart the Box, which reads them at start (BX-64). "New till key" runs
+  `openbmt-box till-key /data` in a temporary container and shows the key
+  once.
+- **Interfaces.** Three. `box` is a raw TCP interface on port 8986: no proxy,
   no TLS wrapper, using the port binding's `ssl: false` setting. The Box's
   link seals and authenticates its messages itself. `page` is a `ui` interface for the
   Box's own status page (port 8987, protocol `http`, BX-54 to BX-62): StartOS
@@ -51,8 +56,13 @@ Box's Dockerfile from this folder.
   opens from the service's page. It shows the Box's state in words and, while
   the Box waits, takes the invitation. StartOS shows the LAN addresses of
   both; a Tor address exists only if the user installs Tor and adds one. A
-  second health check, "Status page", watches port 8987.
-- **Backups.** The whole volume. StartOS stops the service for a backup.
+  second health check, "Status page", watches port 8987. `till` is a raw
+  TCP interface on port 8091 for the till listener, which is on only after
+  `till.txt` names it; it has no health check.
+- **Backups.** The whole volume. StartOS stops the service for a backup. The
+  till key and the POS token should be left out (BX-63), but the SDK is not
+  installed here (`node_modules` is absent), so whether `Backups.ofVolumes`
+  takes an exclude option is not checked and `backups.ts` is not changed.
 - **Dependencies.** None. A Bitcoin Core dependency comes with the Box's own
   node.
 - **Languages.** English only.

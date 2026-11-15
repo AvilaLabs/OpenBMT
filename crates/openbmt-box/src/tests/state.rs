@@ -661,10 +661,14 @@ fn bx_21_a_paired_box_takes_only_higher_versions_signed_by_its_roots() {
     let me = core.device_id();
     // Same version, and the version before: refused. The settings in force
     // do not change.
-    for v in [1, 0] {
-        let s = sign_both(settings_with(v, &me)).to_bytes();
-        assert!(matches!(core.take_settings(&s), Err(BoxError::Settings(_))));
-    }
+    let s = sign_both(settings_with(0, &me)).to_bytes();
+    assert!(matches!(core.take_settings(&s), Err(BoxError::Settings(_))));
+    // The same version with other content is refused, too: only the very
+    // settings the Box holds are taken quietly (BX-63).
+    let mut other = settings_with(1, &me);
+    other.tor_on = !other.tor_on;
+    let s = sign_both(other).to_bytes();
+    assert!(matches!(core.take_settings(&s), Err(BoxError::Settings(_))));
     assert_eq!(core.settings().unwrap().version, 1);
     // Higher: taken.
     let mut v2 = settings_with(2, &me);
@@ -1355,4 +1359,41 @@ fn bx_50_a_write_over_a_wider_stale_temporary_still_makes_a_0600_file() {
         .mode();
     assert_eq!(mode & 0o777, 0o600);
     assert_eq!(files.read("note").unwrap().unwrap(), b"new");
+}
+
+#[test]
+fn bx_63_the_settings_the_box_holds_are_taken_quietly_and_nothing_is_stored() {
+    let (mut core, _) = paired_core();
+    let me = core.device_id();
+    let held = sign_both(settings_with(1, &me)).to_bytes();
+    let before = core.files().read(SETTINGS_FILE).unwrap();
+    let taken = core.take_settings(&held).unwrap();
+    assert!(taken.unchanged && !taken.turned_off && taken.token_error.is_none());
+    assert_eq!(core.settings().unwrap().version, 1);
+    assert_eq!(core.files().read(SETTINGS_FILE).unwrap(), before);
+    // Newer settings are taken as before, and are not "unchanged".
+    let mut v2 = settings_with(2, &me);
+    v2.tor_on = true;
+    let v2 = sign_both(v2).to_bytes();
+    assert!(!core.take_settings(&v2).unwrap().unchanged);
+    // Sent again, they are quiet; the older ones are refused, as before.
+    assert!(core.take_settings(&v2).unwrap().unchanged);
+    assert!(matches!(
+        core.take_settings(&held),
+        Err(BoxError::Settings(_))
+    ));
+    assert_eq!(core.settings().unwrap().version, 2);
+}
+
+#[test]
+fn bx_63_a_box_turned_off_by_the_settings_it_holds_stays_quiet_when_they_come_again() {
+    let (mut core, _) = paired_core();
+    let me = core.device_id();
+    let mut v2 = settings_with(2, &me);
+    v2.boxes.clear();
+    let v2 = sign_both(v2).to_bytes();
+    assert!(core.take_settings(&v2).unwrap().turned_off);
+    let again = core.take_settings(&v2).unwrap();
+    assert!(again.unchanged && !again.turned_off);
+    assert!(core.turned_off());
 }

@@ -44,7 +44,11 @@
 //!   has no such record, so a Box counts as holding a version once the relay
 //!   took the message for it. A version is sent to a device again after
 //!   [`OwnerLinkConfig::settings_resend_secs`], so that a device that is off
-//!   does not fill its mailbox with copies.
+//!   does not fill its mailbox with copies. The settings in force are sent to
+//!   every Box they name again every
+//!   [`OwnerLinkConfig::settings_box_refresh_secs`], whether or not they were
+//!   sent before, so that a Box restored from a backup is brought up to date
+//!   (BX-63). A Box that holds that version takes nothing from it.
 //! - A batch is kept from the moment it is sent. Its first send is made
 //!   there and then; the time it was sent is not stored, so after a restart
 //!   the first step sends the pending batches again. A batch for a counter
@@ -168,6 +172,9 @@ pub struct OwnerLinkConfig {
     /// Seconds before settings that a device does not yet show it holds are
     /// sent to it again (LK-64).
     pub settings_resend_secs: u64,
+    /// Seconds between two sends of the settings in force to each Box they
+    /// name, whether or not they were sent before (BX-63).
+    pub settings_box_refresh_secs: u64,
     /// Fewest seconds between two sends of the pending batches of a counter
     /// (LK-71).
     pub batch_resend_secs: u64,
@@ -183,6 +190,7 @@ impl Default for OwnerLinkConfig {
             poll_secs: 1,
             retry_secs: 5,
             settings_resend_secs: 120,
+            settings_box_refresh_secs: 21_600,
             batch_resend_secs: BATCH_RESEND_SECS,
             batch_alert_secs: BATCH_ALERT_SECS,
         }
@@ -370,6 +378,15 @@ enum Carry {
     CountersOnly,
 }
 
+/// The settings in force, as the link sends them to the Boxes they name
+/// again and again (BX-63).
+#[derive(Debug, Clone)]
+struct InForce {
+    version: u32,
+    bytes: Vec<u8>,
+    boxes: BTreeSet<DeviceId>,
+}
+
 /// One signed settings the link carries.
 #[derive(Debug, Clone)]
 struct Carried {
@@ -455,6 +472,11 @@ pub struct OwnerLink<R: Post = RelayPost> {
     settings_sent: BTreeMap<(DeviceId, u32), u64>,
     /// LK-65: the Boxes the relay took each version for.
     boxes_sent: BTreeSet<(DeviceId, u32)>,
+    /// BX-63: the settings in force, last carried to every device, for the
+    /// Boxes they name to be sent them again.
+    in_force: Option<InForce>,
+    /// BX-63: when the settings in force were last sent to each Box.
+    box_refreshed_at: BTreeMap<DeviceId, u64>,
     /// LK-70, LK-72: the batches sent and not yet shown as held.
     batches: BatchOutbox,
     /// OA-112, LK-77: the ranges sent and not yet shown as held.
@@ -542,6 +564,8 @@ impl<R: Post> OwnerLink<R> {
             last_targets: BTreeMap::new(),
             settings_sent: BTreeMap::new(),
             boxes_sent: BTreeSet::new(),
+            in_force: None,
+            box_refreshed_at: BTreeMap::new(),
             batches,
             ranges,
             switches,
@@ -1091,6 +1115,13 @@ impl<R: Post> OwnerLink<R> {
         }
         if carry == Carry::All {
             self.last_targets = roles_of(settings);
+            if self.in_force.as_ref().is_none_or(|f| f.version <= version) {
+                self.in_force = Some(InForce {
+                    version,
+                    bytes: bytes.clone(),
+                    boxes: settings.boxes.iter().copied().collect(),
+                });
+            }
         }
         self.carried.push(Carried {
             id,
@@ -1300,6 +1331,9 @@ impl<R: Post> OwnerLink<R> {
                 Ok(()) => {
                     if role == Role::Box {
                         self.boxes_sent.insert((device, version));
+                        if self.in_force.as_ref().is_some_and(|f| f.version == version) {
+                            self.box_refreshed_at.insert(device, now);
+                        }
                     }
                 }
                 Err(e) if e.is_retryable() => {
@@ -1308,6 +1342,42 @@ impl<R: Post> OwnerLink<R> {
                 }
                 Err(e) => self.note(format!(
                     "LK-64: settings version {version} were not sent to {device:?}: {e}"
+                )),
+            }
+        }
+        self.refresh_boxes(now)
+    }
+
+    /// BX-63: send the settings in force to each Box they name once every
+    /// [`OwnerLinkConfig::settings_box_refresh_secs`], whether or not they
+    /// were sent before. A Box that holds that version takes nothing from the
+    /// message; one restored from a backup takes what it missed. The first
+    /// time a Box is seen, the turn starts from now: the regular send above
+    /// has just made it. `false` if the relay could not be reached.
+    fn refresh_boxes(&mut self, now: u64) -> bool {
+        let Some(force) = self.in_force.clone() else {
+            return true;
+        };
+        self.box_refreshed_at.retain(|b, _| force.boxes.contains(b));
+        for device in &force.boxes {
+            let Some(&last) = self.box_refreshed_at.get(device) else {
+                self.box_refreshed_at.insert(*device, now);
+                continue;
+            };
+            if now < last.saturating_add(self.cfg.settings_box_refresh_secs) {
+                continue;
+            }
+            // Stamped before the send: a refusal is not tried every step.
+            self.box_refreshed_at.insert(*device, now);
+            match self.courier.send(device, Kind::Settings, &force.bytes) {
+                Ok(()) => {}
+                Err(e) if e.is_retryable() => {
+                    self.box_refreshed_at.insert(*device, last);
+                    return false;
+                }
+                Err(e) => self.note(format!(
+                    "BX-63: settings version {} were not sent again to {device:?}: {e}",
+                    force.version
                 )),
             }
         }

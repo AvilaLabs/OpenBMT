@@ -50,9 +50,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_fifty_eight_rules() {
+fn the_rules_file_defines_sixty_rules() {
     let all = all_rules();
-    assert_eq!(all.len(), 58);
+    assert_eq!(all.len(), 60);
     assert!(all.contains("BX-01") && all.contains("BX-43") && all.contains("BX-80"));
     assert!(all.contains("BX-90") && all.contains("BX-95"));
 }

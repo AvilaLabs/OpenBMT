@@ -1128,3 +1128,48 @@ fn bx_53_a_box_bound_to_the_ipv4_any_address_still_answers() {
         SocketAddr::from(([127, 0, 0, 1], r.local_addr().port())),
     );
 }
+
+#[test]
+fn bx_63_the_settings_in_force_sent_again_to_a_running_box_say_nothing_and_change_nothing() {
+    let dir = TempDir::new("settingsagain");
+    let (r, _) = start(&dir);
+    pair_ok(&r);
+    let me = r.device_id();
+    let mut v2 = settings_with(2, &me);
+    v2.tor_on = true;
+    let v2 = sign_both(v2);
+    send_settings(&r, 1, &v2);
+    eventually("version 2 is taken", || {
+        r.with_core(|c| c.settings().map(|s| s.version)) == Some(2)
+    });
+    let notes = r.notes().len();
+    let file = std::fs::read(dir.path().join(crate::state::SETTINGS_FILE)).unwrap();
+    // The owner sends them again, twice, and then newer ones: the Box
+    // took the newer ones, so the two before them left no note.
+    send_settings(&r, 2, &v2);
+    send_settings(&r, 3, &v2);
+    let mut v3 = settings_with(3, &me);
+    v3.tor_on = true;
+    send_settings(&r, 4, &sign_both(v3));
+    eventually("version 3 is taken", || {
+        r.with_core(|c| c.settings().map(|s| s.version)) == Some(3)
+    });
+    assert_eq!(r.notes().len(), notes, "{:?}", r.notes());
+    assert_ne!(
+        std::fs::read(dir.path().join(crate::state::SETTINGS_FILE)).unwrap(),
+        file
+    );
+    // And the same again, now of version 3: no note and the same file.
+    let file = std::fs::read(dir.path().join(crate::state::SETTINGS_FILE)).unwrap();
+    let mut v3 = settings_with(3, &me);
+    v3.tor_on = true;
+    send_settings(&r, 5, &sign_both(v3));
+    std::thread::sleep(Duration::from_millis(800));
+    assert_eq!(r.notes().len(), notes, "{:?}", r.notes());
+    assert_eq!(
+        std::fs::read(dir.path().join(crate::state::SETTINGS_FILE)).unwrap(),
+        file
+    );
+    assert_eq!(r.status(), BoxStatus::Paired);
+    r.stop();
+}

@@ -77,6 +77,15 @@ description (BX-04). With a POS vendor configured, the Box uses `curl` to
 read Square or Clover orders over HTTPS. These connectors are read-only:
 they do not close orders in either vendor's system.
 
+A host with no console sets the Box up with files in the data folder, read
+at start and checked as the console's commands are (BX-64): `pos-setup.txt`
+(what `pos-setup` takes, one line) and `pos-token.txt` (what `pos-token`
+takes; the Box must be paired and list the settings) are deleted once read,
+and renamed with `.refused` at the end when refused, with the console's words
+in the Box's log. `till.txt` with `listen=<addr:port>` turns the till
+listener on, as `--till-listen` does (the flag wins) and is kept. A
+`pos-setup.txt` takes effect at the next start, as the console's does.
+
 Whoever has the volume has the Box's key and POS token (BOX-RULES section 6).
 Back the volume up as one would a password file.
 
@@ -104,6 +113,16 @@ invitation. The compose file also still maps the Box's raw port as
 do not go through the proxy or the login. An invitation can still be given
 as the file `invitation.txt` in the app's data folder
 (`app-data/openbmt-box/data`), read at the next start.
+
+The three files of BX-64 go in the same folder and are read at the next start:
+`pos-setup.txt` and `pos-token.txt` (deleted once read, or renamed with
+`.refused` when refused, with the words in the app's log) and `till.txt`
+(`listen=0.0.0.0:8091`, kept). The compose file publishes port 8091 for the
+till behind a comment that says so; the Box answers on it only when
+`till.txt` is there. `umbrel-app.yml` has `backupIgnore` for `data/till-key`
+and `data/pos.token` (BX-63); no file in this repository documents that
+field, so it is written from the Umbrel app format as known, and it is not
+checked against the umbrel-apps linter.
 
 How the port was chosen. The manifest `port` must be unique across the App
 Store, and `8987` is the port the page listens on inside the container. The
@@ -176,4 +195,6 @@ Start9's registry.
 - Push wake-ups.
 - A full node beside the Box.
 - Updates outside trading hours.
-- Any POS connector: the program holds none.
+- A setup screen for the POS connector: it is set up by files (BX-64) or the
+  console, and the Umbrel and StartOS packages have no screen of their own
+  beyond the StartOS actions.

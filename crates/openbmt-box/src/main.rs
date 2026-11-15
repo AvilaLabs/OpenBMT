@@ -55,6 +55,7 @@ use openbmt_box::say::{
     invite_lines, members_lines, notes_lines, pos_lines, pos_setup_lines, pos_token_lines, render,
     state_lines, till_key_failed_lines, till_key_lines, unknown_lines, ConsoleAnswer,
 };
+use openbmt_box::setup_files::{take_setup_files, till_file_listen};
 use openbmt_box::{
     make_till_key, read_invitation_file, BoxError, BoxRunner, DirFiles, PageConfig, PosConfigError,
     TillConfig,
@@ -173,6 +174,7 @@ fn main() -> ExitCode {
         },
         None => None,
     };
+    let data_dir = PathBuf::from(&dir);
     let mut runner = match BoxRunner::start(
         dir,
         bind_addr,
@@ -191,6 +193,21 @@ fn main() -> ExitCode {
     ));
     say(&format!("key: {}", hex(&runner.device_id().to_bytes())));
     say(&format!("listening: {}", runner.local_addr()));
+    // BX-64: the files a host without a console sets the Box up with.
+    say_all(take_setup_files(&runner, &data_dir));
+    let till_addr = match till_addr {
+        Some(addr) => Some(addr),
+        None => match till_file_listen(&data_dir) {
+            Some(text) => match text.parse::<SocketAddr>() {
+                Ok(addr) => Some(addr),
+                Err(_) => {
+                    say_all(render(&ConsoleAnswer::BadAddress(text).words()));
+                    None
+                }
+            },
+            None => None,
+        },
+    };
     if let Some(addr) = page_addr {
         match runner.serve_status_page(addr, PageConfig::default()) {
             Ok(bound) => {

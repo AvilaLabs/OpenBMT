@@ -9,6 +9,7 @@ mod pos;
 mod pos_kit;
 mod runner;
 mod say;
+mod setup_files;
 mod state;
 mod status_page;
 mod till;

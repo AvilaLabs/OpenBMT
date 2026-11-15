@@ -22,6 +22,10 @@ description: >-
   Whoever has its data folder has its identity key, so back that folder up as
   one would a password file.
 releaseNotes: ""
+# Left out of Umbrel's backups (BX-63); made again after a restore.
+backupIgnore:
+  - data/till-key
+  - data/pos.token
 
 developer: Avila Labs
 website: https://github.com/AvilaLabs/OpenBMT

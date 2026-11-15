@@ -1174,6 +1174,118 @@ fn lk_64_a_device_takes_the_versions_in_order_and_is_not_sent_one_every_step() {
 }
 
 #[test]
+fn lk_64_the_settings_in_force_are_sent_to_each_box_again_every_six_hours() {
+    assert_eq!(OwnerLinkConfig::default().settings_box_refresh_secs, 21_600);
+    let mut b = with_box();
+    let v1 = listed(1, |_| {});
+    let v2 = signed_by_both(listed(2, |s| s.light_per_sale.sats += 1));
+    b.w.link
+        .carry_settings(1, &v2, &roots(), Some(&v1), T0)
+        .unwrap();
+    assert_eq!(
+        settings_in(&b.box_side.poll().unwrap()),
+        vec![v2.to_bytes()]
+    );
+    // The relay took it: the Box counts as holding it, and is not sent it
+    // every step, nor every two minutes.
+    for t in [1, 130, 3_600, 21_599] {
+        b.w.step(T0 + t);
+        assert!(settings_in(&b.box_side.poll().unwrap()).is_empty(), "{t}");
+    }
+    // Six hours after the last send, with the clock: again, though the Box
+    // was sent it before, and once.
+    b.w.step(T0 + 21_600);
+    assert_eq!(
+        settings_in(&b.box_side.poll().unwrap()),
+        vec![v2.to_bytes()]
+    );
+    b.w.step(T0 + 21_601);
+    b.w.step(T0 + 30_000);
+    assert!(settings_in(&b.box_side.poll().unwrap()).is_empty());
+    // And six hours after that.
+    b.w.step(T0 + 43_199);
+    assert!(settings_in(&b.box_side.poll().unwrap()).is_empty());
+    b.w.step(T0 + 43_200);
+    assert_eq!(
+        settings_in(&b.box_side.poll().unwrap()),
+        vec![v2.to_bytes()]
+    );
+}
+
+#[test]
+fn lk_64_the_refresh_sends_the_newest_settings_and_only_to_a_box_they_name() {
+    let mut b = with_box();
+    let v1 = listed(1, |_| {});
+    let v2 = signed_by_both(listed(2, |s| s.light_per_sale.sats += 1));
+    b.w.link
+        .carry_settings(1, &v2, &roots(), Some(&v1), T0)
+        .unwrap();
+    assert_eq!(
+        settings_in(&b.box_side.poll().unwrap()),
+        vec![v2.to_bytes()]
+    );
+    // Newer settings that still name the Box are what it is sent later.
+    let v3 = signed_by_both(listed(3, |s| s.light_per_sale.sats += 2));
+    b.w.link
+        .carry_settings(2, &v3, &roots(), Some(&v2.settings), T0 + 100)
+        .unwrap();
+    assert_eq!(
+        settings_in(&b.box_side.poll().unwrap()),
+        vec![v3.to_bytes()]
+    );
+    b.w.step(T0 + 21_600);
+    assert!(
+        settings_in(&b.box_side.poll().unwrap()).is_empty(),
+        "not yet"
+    );
+    b.w.step(T0 + 100 + 21_600);
+    assert_eq!(
+        settings_in(&b.box_side.poll().unwrap()),
+        vec![v3.to_bytes()]
+    );
+    // Settings that no longer name the Box are sent to it once, as the
+    // settings that remove it, and it is not sent the settings in force
+    // after that.
+    let v4 = signed_by_both(listed(4, |s| {
+        s.boxes.clear();
+        s.devices.remove(&box_key());
+    }));
+    b.w.link
+        .carry_settings(3, &v4, &roots(), Some(&v3.settings), T0 + 30_000)
+        .unwrap();
+    assert_eq!(
+        settings_in(&b.box_side.poll().unwrap()),
+        vec![v4.to_bytes()]
+    );
+    for t in [60_000, 100_000, 200_000] {
+        b.w.step(T0 + t);
+        assert!(settings_in(&b.box_side.poll().unwrap()).is_empty(), "{t}");
+    }
+}
+
+#[test]
+fn lk_64_a_relay_that_is_down_when_the_refresh_is_due_does_not_use_up_the_turn() {
+    let mut b = with_box();
+    let v1 = listed(1, |_| {});
+    let v2 = signed_by_both(listed(2, |s| s.light_per_sale.sats += 1));
+    b.w.link
+        .carry_settings(1, &v2, &roots(), Some(&v1), T0)
+        .unwrap();
+    assert_eq!(
+        settings_in(&b.box_side.poll().unwrap()),
+        vec![v2.to_bytes()]
+    );
+    b.w.relay.set_down(true);
+    b.w.step(T0 + 21_600);
+    b.w.relay.set_down(false);
+    b.w.step(T0 + 21_601);
+    assert_eq!(
+        settings_in(&b.box_side.poll().unwrap()),
+        vec![v2.to_bytes()]
+    );
+}
+
+#[test]
 fn lk_64_a_device_the_new_settings_remove_gets_the_settings_that_remove_it() {
     let mut b = with_box();
     let v1 = listed(1, |_| {});

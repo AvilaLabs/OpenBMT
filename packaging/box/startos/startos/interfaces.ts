@@ -1,6 +1,6 @@
 import { i18n } from './i18n'
 import { sdk } from './sdk'
-import { boxPort, pagePort } from './utils'
+import { boxPort, pagePort, tillPort } from './utils'
 
 export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
   const boxMulti = sdk.MultiHost.of(effects, 'box-multi')
@@ -46,5 +46,34 @@ export const setInterfaces = sdk.setupInterfaces(async ({ effects }) => {
     query: {},
   })
 
-  return [await boxOrigin.export([box]), await pageOrigin.export([page])]
+  // The till listener (BX-70 to BX-80), raw TCP like the Box's own port: the
+  // till's requests are signed and its answers are too, so the port needs no
+  // TLS wrapper. The Box listens on it only after the action "Till listener
+  // address" has written `till.txt` (BX-64).
+  const tillMulti = sdk.MultiHost.of(effects, 'till-multi')
+  const tillOrigin = await tillMulti.bindPort(tillPort, {
+    protocol: null,
+    addSsl: null,
+    preferredExternalPort: tillPort,
+    secure: { ssl: false },
+  })
+  const till = sdk.createInterface(effects, {
+    name: i18n('Till address'),
+    id: 'till',
+    description: i18n(
+      "The address the point-of-sale system's server gives for the Box's till listener",
+    ),
+    type: 'api',
+    masked: false,
+    schemeOverride: null,
+    username: null,
+    path: '',
+    query: {},
+  })
+
+  return [
+    await boxOrigin.export([box]),
+    await pageOrigin.export([page]),
+    await tillOrigin.export([till]),
+  ]
 })

@@ -778,6 +778,8 @@ impl Worker {
         }
         let result = lock(&self.core).take_settings(&r.content);
         match result {
+            // BX-63: the settings the Box holds, sent again, are no news.
+            Ok(taken) if taken.unchanged => false,
             Ok(taken) => {
                 if taken.turned_off {
                     note(

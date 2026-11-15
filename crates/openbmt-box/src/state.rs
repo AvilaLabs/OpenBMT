@@ -211,6 +211,9 @@ pub struct SettingsTaken {
     /// When the Box was turned off, why the POS token could not be erased,
     /// if it could not.
     pub token_error: Option<io::ErrorKind>,
+    /// The Box held these very settings already (BX-63): nothing was stored
+    /// and nothing changed.
+    pub unchanged: bool,
 }
 
 /// 32 secret bytes that are overwritten when dropped.
@@ -681,6 +684,16 @@ impl<F: BoxFiles> BoxCore<F> {
     /// it off and erase its POS token (BX-23).
     pub fn take_settings(&mut self, settings: &[u8]) -> Result<SettingsTaken, BoxError> {
         let pairing = self.pairing.as_ref().ok_or(BoxError::NotPaired)?;
+        // The owner sends the settings in force again from time to time
+        // (BX-63). The ones the Box holds are not stored again and are not an
+        // error: the Box answers quietly and changes nothing.
+        if self.holds_settings(settings) {
+            return Ok(SettingsTaken {
+                turned_off: false,
+                token_error: None,
+                unchanged: true,
+            });
+        }
         let current = &pairing.signed.settings;
         let signed = match &pairing.roots {
             BoxRoots::KeyApp(roots) => {
@@ -730,7 +743,22 @@ impl<F: BoxFiles> BoxCore<F> {
         Ok(SettingsTaken {
             turned_off: !listed,
             token_error,
+            unchanged: false,
         })
+    }
+
+    /// Whether `bytes` are the signed settings the Box holds, as they are
+    /// stored or inside a confirmation (BX-63).
+    fn holds_settings(&self, bytes: &[u8]) -> bool {
+        let Some(pairing) = self.pairing.as_ref() else {
+            return false;
+        };
+        let held = pairing.signed.to_bytes();
+        if bytes == held.as_slice() {
+            return true;
+        }
+        matches!(pairing.roots, BoxRoots::OwnWallet { .. })
+            && ConfirmedSettings::from_bytes(bytes).is_ok_and(|c| c.signed.to_bytes() == held)
     }
 
     /// Store the POS token (BX-41) in `pos.token`, whole, in a file only the

@@ -257,6 +257,20 @@ screen and not a shared computer.
   does not change that setting. A host that reaches the Box by IPv6 (a
   StartOS raw TCP interface lists IPv6 addresses) needs `[::]` or an IPv6
   address in the bind.
+- **BX-63. A restored Box.** A Box whose data folder is put back from a
+  backup holds the settings, the till key and the POS token it had then, so
+  a counter removed since, or a till key replaced since, works on it again.
+  The owner phone sends the settings in force to every Box when it starts
+  and every six hours, so a restored Box takes the newer settings within
+  that time. Where the host system allows it, the till key and the POS
+  token are left out of its backups and are made again after a restore.
+- **BX-64. Setup by files.** A host system without a console sets the Box
+  up with files in its data folder, read at start: `pos-setup.txt` and
+  `pos-token.txt` hold what the console's `pos-setup` and `pos-token` take,
+  are checked as those are, and are deleted once read; `till.txt` names the
+  till listener's address as `--till-listen` does and is kept. A file that is
+  refused is renamed with `.refused` at the end, and the Box says why in its
+  log.
 
 ## 5a. What the code fixes
 

@@ -21,6 +21,9 @@
 //! - [`status_page`]: the optional web page that shows the Box's state and
 //!   takes an invitation, on its own listener (BX-54 to BX-61).
 //!
+//! - [`setup_files`]: the files a host without a console sets the Box up with
+//!   (BX-64).
+//!
 //! - [`till`] and [`till_listener`]: the optional listener that takes sale
 //!   requests from a till, the till key, and the sales it keeps in memory
 //!   (BX-70 to BX-79).
@@ -56,6 +59,7 @@ pub mod pos;
 pub mod pos_config;
 pub mod runner;
 pub mod say;
+pub mod setup_files;
 pub mod state;
 pub mod status_page;
 pub mod till;
