@@ -176,8 +176,9 @@ final class OpenBmt_Pay_Store {
 
 	/**
 	 * WO-11: how many orders paid by this gateway were made in the last 24
-	 * hours, hold an address and are not paid. Only the orders are read: no
-	 * address of a customer's computer, no customer data.
+	 * hours, hold an address and are not paid. An order cancelled or failed
+	 * still holds its address, so it counts, whatever cancelled it. Only the
+	 * orders are read: no address of a customer's computer, no customer data.
 	 *
 	 * @param int $now The time now, in Unix seconds.
 	 */
@@ -185,7 +186,7 @@ final class OpenBmt_Pay_Store {
 		$orders = wc_get_orders(
 			array(
 				'payment_method' => 'openbmt',
-				'status'         => array( 'on-hold', 'pending' ),
+				'status'         => array( 'on-hold', 'pending', 'cancelled', 'failed' ),
 				'date_created'   => '>' . ( $now - Unpaid::WINDOW_SECS ),
 				'limit'          => Unpaid::MAX + 1,
 				'orderby'        => 'ID',

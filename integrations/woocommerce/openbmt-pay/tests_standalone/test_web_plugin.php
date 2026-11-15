@@ -386,6 +386,10 @@ t_ok( ! OpenBmt_Pay_Store::unpaid_at_cap( $now ), 'wo_11 an order a signed notic
 $unpaid_order( 28, $now - 60 );
 $GLOBALS['obm_e2e_orders']['28']['payment_method'] = 'cod';
 t_eq( 1, OpenBmt_Pay_Store::unpaid_count( $now ), 'wo_11 orders paid another way do not count' );
+// An unpaid order that was cancelled or failed still holds its address, so it counts.
+$unpaid_order( 29, $now - 60, 'cancelled' );
+$unpaid_order( 30, $now - 60, 'failed' );
+t_eq( 3, OpenBmt_Pay_Store::unpaid_count( $now ), 'wo_11 cancelled and failed unpaid orders count' );
 
 // The gateway hides Bitcoin at the cap, and the setting is kept within its bounds.
 t_eq( '1', $gateway->validate_max_unpaid_field( 'max_unpaid', '0' ), 'wo_11 the saved setting is at least 1' );

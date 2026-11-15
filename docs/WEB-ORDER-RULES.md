@@ -129,12 +129,13 @@ funds.**
 - **WO-22. What the owner phone checks.** An order whose address was not in a
   range it sent, or was used before, is refused and shown to the owner. An
   order whose number is more than 10,000,000 above the highest the phone has
-  taken, or above 2^53 − 1, is refused the same way, and no refused order
-  moves the phone's place in the store's orders. When the phone holds a rate
-  of the order's currency (`docs/RATE-RULES.md`), it compares the order's
-  amount with its total at that rate: more than 5% apart, the order is taken
-  and marked for the owner, since a store that was changed could ask the
-  customer for less than the total.
+  taken, or above 2^53 − 1, is refused the same way (a store's first order may
+  have any number up to 2^53 − 1), and no refused order moves the phone's
+  place in the store's orders. When the phone holds a rate of the order's
+  currency (`docs/RATE-RULES.md`), it compares the order's amount with its
+  total at that rate: more than 5% apart, the order is taken and marked for
+  the owner, since a store that was changed could ask the customer for less
+  than the total.
 
 ## 6. Paid
 

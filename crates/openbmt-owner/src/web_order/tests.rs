@@ -490,6 +490,29 @@ fn wo_22_an_order_number_far_past_the_last_is_refused() {
 }
 
 #[test]
+fn wo_22_the_first_order_may_have_any_number_up_to_2_pow_53() {
+    let mut sent = SentRanges::new();
+    let list = addresses(3);
+    sent.add_range(&Range::new(0, list.clone()).expect("a range"))
+        .expect("added");
+    // A store whose orders are numbered past ten million already.
+    assert_eq!(
+        sent.check(&order(25_000_000, &list[0]), 0),
+        Ok(OrderCheck::New)
+    );
+    let top = (1u64 << 53) - 1;
+    assert_eq!(
+        sent.check(&order(top + 1, &list[1]), 0),
+        Err(OrderRefusal::NumberTooFar)
+    );
+    // After it, the next may be at most ten million further.
+    assert_eq!(
+        sent.check(&order(35_000_001, &list[1]), 25_000_000),
+        Err(OrderRefusal::NumberTooFar)
+    );
+}
+
+#[test]
 fn wo_30_a_notice_is_signed_and_opens_under_the_key() {
     let notice = vectors::notice();
     let frame = notice.sign(&vectors::key()).expect("signed");

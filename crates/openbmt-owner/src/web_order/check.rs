@@ -131,13 +131,17 @@ impl SentRanges {
         self.sent.len()
     }
 
-    /// WO-22: checks an order, given `since`, the highest order number taken.
-    /// One whose number is more than [`MAX_ORDER_JUMP`] above `since` or
-    /// above [`MAX_ORDER_NUMBER`], whose address was not in a range sent, or
+    /// WO-22: checks an order, given `since`, the highest order number taken
+    /// (0 before the first). One whose number is above [`MAX_ORDER_NUMBER`],
+    /// or more than [`MAX_ORDER_JUMP`] above `since` once an order has been
+    /// taken, whose address was not in a range sent, or
     /// that was used before by another order, is refused; a refusal changes
     /// nothing. A new order is recorded as using its address.
     pub fn check(&mut self, order: &StoreOrder, since: u64) -> Result<OrderCheck, OrderRefusal> {
-        if order.order > MAX_ORDER_NUMBER || order.order > since.saturating_add(MAX_ORDER_JUMP) {
+        // Before the first order is taken there is no last number to be far
+        // from: a store's first order may have any number.
+        let far = since != 0 && order.order > since.saturating_add(MAX_ORDER_JUMP);
+        if order.order > MAX_ORDER_NUMBER || far {
             return Err(OrderRefusal::NumberTooFar);
         }
         if order.sats == 0 {
