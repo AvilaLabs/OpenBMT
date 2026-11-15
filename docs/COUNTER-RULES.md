@@ -730,7 +730,12 @@ it.
   offer's and are never taken from the bundle, the app or a setting. The
   offer names the network in one byte and it is part of what the four words
   are made from, so an offer for another network gives other words and a
-  request made for it is refused by the Key app.
+  request made for it is refused by the Key app. The counter cannot tell the
+  shop's owner phone from another phone that shows an offer with the shop's
+  wallet in it: the four words match on whichever phone made the offer, and
+  that phone's root is the one pinned. The person pairing the counter is the
+  check that the phone in hand is the shop's. The counter's payments on chain
+  still go only to the wallet whose first address the person checked.
 - **CR-94.** The settings in the bundle are verified against the two pinned
   roots with no earlier settings, so both signatures are needed. Their
   version must be above the pairing's settings floor (the version in force
@@ -2138,11 +2143,12 @@ screen, and a manager's PIN confirms it. The codecs and checks are in
   version 2: version 1's fields, then one byte of flags, of which only bit 0
   is defined (the pinned wallet is a starter wallet) and every other bit must
   be zero. The binding and the four words of CR-229 are made from the whole
-  offer, so the flag is covered by the person's check of the four words.
-  The record of CR-233 becomes version 3 with the same byte after the
-  peers and the relay (version 2 is the record with a relay). A version 1
-  or 2 record, and a version 1 offer, has no flag. A counter whose record has no
-  flag refuses every switch.
+  offer, so a flag changed on its way to the counter gives other words. A
+  flag set by a phone that is not the shop's owner phone is not found by the
+  words; that is the limit of CR-93. The record of CR-233 becomes version 3
+  with the same byte after the peers and the relay (version 2 is the record
+  with a relay). A version 1 or 2 record, and a version 1 offer, has no
+  flag. A counter whose record has no flag refuses every switch.
 - **CR-257. The switch.** The owner sends the switch as a message of kind
   Switch (`docs/LINK-RULES.md` LK-78), the frame `OBM]`, version 1: this
   counter's id (32 bytes), the hash of the wallet now pinned (32 bytes), the
