@@ -9,15 +9,15 @@
   const palette = new U.PaletteOf(await (await fetch("../ui/palette.json")).json());
   const shell = new OpenBmtShell(document.getElementById("app"));
   const ADDRESS = "bcrt1q9p0hpmws4pupj85nrw7d8uxna83wuyp0wnmg50";
-  const SATS = 10876;
+  const SATS = 10877;
 
   // The sample screens at the demo's amount.
   const sale = {
     newSale: Object.assign({}, D.counter.newSale, { entry: "8.00 USD" }),
     unpaid: Object.assign({}, D.counter.unpaid, {
-      amountBig: "8.00 USD", amountSmall: "10,876 sats to send", receivedLine: "Received 0 sats of 10,876 sats",
+      amountBig: "8.00 USD", amountSmall: "10,877 sats to send", receivedLine: "Received 0 sats of 10,877 sats",
     }),
-    paid: Object.assign({}, D.counter.paid, { outcomeLine: "8.00 USD · 10,876 sats" }),
+    paid: Object.assign({}, D.counter.paid, { outcomeLine: "8.00 USD · 10,877 sats" }),
   };
 
   /** A device page: [view] draws it with the Ui of the device's size. */
@@ -53,7 +53,7 @@
         shell.say("The counter shows a code for this sale.",
           ["The customer scans it with their own wallet. Tap ", { b: "The customer pays" }, "."]);
         shell.questions(QS.merchant.code);
-        shell.actor({ who: "The customer", line: "Scans the code and sends 10,876 sats.", button: "The customer pays", onTap: go });
+        shell.actor({ who: "The customer", line: "Scans the code and sends 10,877 sats.", button: "The customer pays", onTap: go });
       } },
       { step: 2, run(go) {
         shell.actor(null);

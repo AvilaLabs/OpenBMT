@@ -22,7 +22,9 @@
 #
 # The cargo calls run under the memory guard.
 #
-# Usage: scripts/demo-build.sh
+# Usage: scripts/demo-build.sh [counter]
+#   counter            build only the counter's module (dist/demo-counter), which is all the site needs;
+#                      the first page of the demo (dist/demo) is left out
 #   OPENBMT_GUARD      the memory guard (default: ~/.cache/openbmt/guard.sh)
 #   OPENBMT_DEMO_TARGET  the cargo target directory
 #                      (default: ~/.cache/openbmt/target/demo)
@@ -30,6 +32,7 @@
 
 set -euo pipefail
 
+only="${1:-all}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 guard="${OPENBMT_GUARD:-$HOME/.cache/openbmt/guard.sh}"
 target_dir="${OPENBMT_DEMO_TARGET:-$HOME/.cache/openbmt/target/demo}"
@@ -50,12 +53,14 @@ if [ ! -x "$cc" ] || [ ! -x "$ar" ]; then
     echo "NOT RUN  no clang and llvm-ar for wasm32 (set CC_wasm32_unknown_unknown and AR_wasm32_unknown_unknown)"
     exit 2
 fi
-for words in counter-app owner-app; do
-    if [ ! -s "demo/words/$words.json" ]; then
-        echo "NOT RUN  demo/words/$words.json is missing (run the app's JVM tests with OPENBMT_WRITE_SCREENS=1)"
-        exit 2
-    fi
-done
+if [ "$only" != counter ]; then
+    for words in counter-app owner-app; do
+        if [ ! -s "demo/words/$words.json" ]; then
+            echo "NOT RUN  demo/words/$words.json is missing (run the app's JVM tests with OPENBMT_WRITE_SCREENS=1)"
+            exit 2
+        fi
+    done
+fi
 
 # Two calls, not one: built together, the demo crate's exports would be
 # switched on in the counter's module too (one set of features for a build).
@@ -67,10 +72,13 @@ build() {
         CARGO_PROFILE_RELEASE_STRIP=true \
         cargo build --release --locked --target wasm32-unknown-unknown "$@"
 }
-build -p openbmt-demo
+if [ "$only" != counter ]; then
+    build -p openbmt-demo
+fi
 build -p openbmt-demo-counter
 build -p openbmt-demo-owner
 
+if [ "$only" != counter ]; then
 rm -rf "$out"
 mkdir -p "$out/words"
 cp "$target_dir/wasm32-unknown-unknown/release/openbmt_demo.wasm" "$out/demo.wasm"
@@ -82,6 +90,7 @@ for f in index.html page.css page.js; do
 done
 if [ ! -f demo/web/index.html ]; then cp demo/web/dev.html "$out/index.html"; fi
 cp demo/words/counter-app.json demo/words/owner-app.json "$out/words/"
+fi
 rm -rf "$counter_out"
 mkdir -p "$counter_out"
 cp "$target_dir/wasm32-unknown-unknown/release/openbmt_demo_counter.wasm" "$counter_out/counter.wasm"
@@ -92,4 +101,6 @@ cp "$target_dir/wasm32-unknown-unknown/release/openbmt_demo_owner.wasm" "$owner_
 cp demo/web2/owner-host.mjs "$owner_out/"
 echo "PASS  dist/demo-owner ($(wc -c <"$owner_out/owner.wasm") bytes of wasm)"
 echo "PASS  dist/demo-counter ($(wc -c <"$counter_out/counter.wasm") bytes of wasm)"
-echo "PASS  dist/demo ($(wc -c <"$out/demo.wasm") bytes of wasm)"
+if [ "$only" != counter ]; then
+    echo "PASS  dist/demo ($(wc -c <"$out/demo.wasm") bytes of wasm)"
+fi

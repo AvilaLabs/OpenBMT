@@ -10,7 +10,9 @@
 //! - `chain_pay(ptr, len, sats) -> u64`: a customer pays the address written
 //!   at `ptr` on the pretend chain; the reply is text, `ok:` and the id, or
 //!   `err:` and why;
-//! - `chain_mine() -> u64`: a block is mined; text, `ok:` and the height.
+//! - `chain_mine() -> u64`: a block is mined; text, `ok:` and the height;
+//! - `chain_heartbeat() -> u64`: the heartbeat the owner's phone would send
+//!   the counter now, signed, as bytes (none when no node is running).
 //!
 //! The one thing the module asks of the page is `openbmt_random(ptr, len)`,
 //! imported from `env`: it fills the bytes with the page's random numbers.
@@ -123,4 +125,11 @@ pub extern "C" fn chain_mine() -> u64 {
         Err(e) => format!("err:{e}"),
     };
     give(text.into_bytes())
+}
+
+/// The owner's heartbeat for the counter, at the time the page last gave.
+#[no_mangle]
+pub extern "C" fn chain_heartbeat() -> u64 {
+    openbmt_kernel_random::set_host_fill(page_random);
+    give(crate::world::heartbeat(crate::now()).unwrap_or_default())
 }

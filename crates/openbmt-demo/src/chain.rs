@@ -72,6 +72,11 @@ impl SimChain {
         }
     }
 
+    /// The hash of the tip.
+    pub fn tip_hash(&self) -> BlockHash {
+        self.tip_hash
+    }
+
     /// Put a transaction in the mempool.
     pub fn broadcast(&mut self, tx: Transaction) {
         self.mempool.push(tx);

@@ -16,7 +16,7 @@ const repo = path.join(__dirname, "..", "..");
 const read = (p) => fs.readFileSync(path.join(repo, p), "utf8");
 const lines = (p) => read(p).split("\n");
 
-// The Kotlin file of a "File.kt" in a comment: Controller.kt is the counter's in counter-views.js and the owner's in owner-views.js.
+// The Kotlin file of a "File.kt" in a comment: Controller.kt is the counter's in counter-views.js and counter-controller.js and the owner's in owner-views.js.
 const SOURCES = {
   "ui.js": { "Ui.kt": "apps/android-common/src/android/Ui.kt", "Icons.kt": "apps/android-common/src/android/Icons.kt", "Palette.kt": "apps/android-common/src/model/Palette.kt", "WordsModel.kt": "apps/android-common/src/model/WordsModel.kt" },
   "counter-views.js": {
@@ -28,6 +28,8 @@ const SOURCES = {
     "OwnerUi.kt": "apps/owner-android/src/android/OwnerUi.kt", "Screens.kt": "apps/owner-android/src/android/Screens.kt",
     "Books.kt": "apps/owner-android/src/android/Books.kt", "Controller.kt": "apps/owner-android/src/android/Controller.kt",
   },
+  // The page's controller for the shop sale (../web2): Controller.kt is the counter's.
+  "../web2/counter-controller.js": { "Controller.kt": "apps/counter-android/src/android/Controller.kt" },
 };
 
 /** The comments of a JS file that name a Kotlin line: [file, line, name]. */
@@ -52,6 +54,16 @@ test("every Kotlin line a comment names holds the name", () => {
     }
   }
   assert.ok(checked > 120, `only ${checked} references`);
+});
+
+test("each Controller.kt function the page's controller ports is a JS function of the same name", () => {
+  const text = fs.readFileSync(path.join(__dirname, "../web2/counter-controller.js"), "utf8");
+  const named = references("../web2/counter-controller.js").map(([, , name]) => name);
+  assert.ok(named.length >= 12, `only ${named.length} functions`);
+  for (const name of new Set(named)) {
+    // Controller(act) is the class: the JS function is Controller(host).
+    assert.ok(new RegExp(`function ${name}\\(`).test(text), `counter-controller.js has no function ${name}`);
+  }
 });
 
 /** The names a Kotlin file declares: fun, class, interface, enum class, object (not the ones nested in a function). */

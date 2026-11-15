@@ -502,6 +502,16 @@
 
   // ---- the screens of Controller.kt ----------------------------------------------------------------------------
 
+  /**
+   * The taps of a screen: [d].taps names what each control does ({newSale, open, done, ...}); a control that is not
+   * named does nothing, as in the gallery. The Android controller sets each of these in the same place, as the
+   * lambda of the control.
+   */
+  function taps(d) {
+    const given = d.taps || {};
+    return (name) => given[name] || (() => {});
+  }
+
   /** Controller.kt:763 left(view): [view] at the left edge of the body, as wide as it is. */
   function left(view) {
     const v = LinearLayout("h");
@@ -515,34 +525,35 @@
    * three tiles, the open requests and the counter's line. [d] holds the words and values of the moment.
    */
   function showHome(ui, d) {
+    const tap = taps(d);
     const health = Slot();
     const lines = Slot();
     const noteSlot = Slot();
     const requestsSlot = Slot();
     const tillSlot = Slot();
     const starterSlot = Slot();
-    const bar = ui.bar("Counter", d.cashier ? `Cashier: ${d.cashier}` : null, null, true, () => {});
+    const bar = ui.bar("Counter", d.cashier ? `Cashier: ${d.cashier}` : null, null, true, tap("settings"));
     if (d.cashier) {
       // Controller.kt:1086: the Lock button goes in before the gear, 4 dp from it.
       const row = bar.row;
       const p = new LayoutParams(WRAP_CONTENT, WRAP_CONTENT);
       p.rightMargin = ui.px(4);
-      const lock = ui.barButton(d.words.lock, () => {});
+      const lock = ui.barButton(d.words.lock, tap("lock"));
       addView(row, lock, p);
       row.insertBefore(lock, row.children[row.children.length - 2]);
     }
     const tiles = LinearLayout("v");
-    addView(tiles, ui.tile(d.words.newSale, Glyph.Plus, true), new LayoutParams(MATCH_PARENT, ui.px(104)));
+    addView(tiles, ui.tile(d.words.newSale, Glyph.Plus, true, tap("newSale")), new LayoutParams(MATCH_PARENT, ui.px(104)));
     const pair = LinearLayout("h");
     const p1 = new LayoutParams(0, ui.px(104), 1); p1.rightMargin = ui.px(6);
-    addView(pair, ui.tile(d.words.sales, Glyph.List, false), p1);
+    addView(pair, ui.tile(d.words.sales, Glyph.List, false, tap("sales")), p1);
     const p2 = new LayoutParams(0, ui.px(104), 1); p2.leftMargin = ui.px(6);
-    addView(pair, ui.tile(d.words.today, Glyph.Calendar, false), p2);
+    addView(pair, ui.tile(d.words.today, Glyph.Calendar, false, tap("today")), p2);
     const pp = new LayoutParams(MATCH_PARENT, WRAP_CONTENT); pp.topMargin = ui.px(12);
     addView(tiles, pair, pp);
     if (d.words.bills) {
       const bp = new LayoutParams(MATCH_PARENT, ui.px(104)); bp.topMargin = ui.px(12);
-      addView(tiles, ui.tile(d.words.bills, Glyph.List, false), bp);
+      addView(tiles, ui.tile(d.words.bills, Glyph.List, false, tap("bills")), bp);
     }
     // counterLine() (Controller.kt:1067): the text of the line, 17 sp, 16 dp above.
     const counterLine = ui.text(d.counterLine || "", Type.BODY);
@@ -578,6 +589,7 @@
    * Request to send. [d] has the entry's text, the price line and the words.
    */
   function showNewSale(ui, d) {
+    const tap = taps(d);
     const display = ui.text(d.entry, 60, true);
     display.style.fontFeatureSettings = '"tnum"';
     setTextGravity(display, Gravity.CENTER);
@@ -597,10 +609,10 @@
       // The entry's own rules are the model's (AmountEntry); the page only draws what it is given.
       if (d.press) d.press(face, display);
     });
-    const open = ui.primary(d.words.open, Colour.Blue, () => {});
+    const open = ui.primary(d.words.open, Colour.Blue, tap("open"));
     const buttons = [open];
-    if (d.words.request) buttons.push(ui.secondary(d.words.request, () => {}));
-    return ui.page(ui.bar("New sale", null, () => {}), [centre, pad], buttons);
+    if (d.words.request) buttons.push(ui.secondary(d.words.request, tap("request")));
+    return ui.page(ui.bar("New sale", null, tap("back")), [centre, pad], buttons);
   }
 
   /**
@@ -610,6 +622,7 @@
    * amounts, the code's modules and the flags.
    */
   function showSale(ui, d) {
+    const tap = taps(d);
     const says = d.says;
     const code = d.code;
     const bar = ui.bar("Sale " + d.number, null, null, false, null, !code);
@@ -652,16 +665,16 @@
       body.push(words);
       for (const w of d.extra || []) body.push(ui.notice(w));
       if (d.request) {
-        body.push(ui.button(d.words.shareLink, () => {}));
-        body.push(ui.button(d.words.shareCode, () => {}));
+        body.push(ui.button(d.words.shareLink, tap("shareLink")));
+        body.push(ui.button(d.words.shareCode, tap("shareCode")));
       }
-      body.push(ui.button(d.words.copy, () => {}));
-      body.push(ui.button(d.words.details, () => {}));
+      body.push(ui.button(d.words.copy, tap("copy")));
+      body.push(ui.button(d.words.details, tap("details")));
       const actions = [];
-      if (d.buttons.requote) actions.push(ui.primary(d.words.requote, Colour.Blue, () => {}));
-      if (d.buttons.cancel) actions.push(ui.danger(d.words.cancel, () => {}));
-      if (d.buttons.override) actions.push(ui.button(d.words.override, () => {}));
-      actions.push(ui.button(d.words.done, () => {}));
+      if (d.buttons.requote) actions.push(ui.primary(d.words.requote, Colour.Blue, tap("requote")));
+      if (d.buttons.cancel) actions.push(ui.danger(d.words.cancel, tap("cancel")));
+      if (d.buttons.override) actions.push(ui.button(d.words.override, tap("override")));
+      actions.push(ui.button(d.words.done, tap("done")));
       page = ui.page(bar, body, actions);
     } else {
       const band = outcomeBand(ui, says.colour);
@@ -702,9 +715,9 @@
         addView(centre, card, ui.margins(16));
       }
       const actions = [];
-      actions.push(ui.onBand(d.words.done, d.isPaid && says.colour === Colour.Green, band.band, () => {}));
-      if (d.buttons.override) actions.push(ui.onBand(d.words.override, false, band.band, () => {}));
-      actions.push(ui.onBand(d.words.details, false, band.band, () => {}));
+      actions.push(ui.onBand(d.words.done, d.isPaid && says.colour === Colour.Green, band.band, tap("done")));
+      if (d.buttons.override) actions.push(ui.onBand(d.words.override, false, band.band, tap("override")));
+      actions.push(ui.onBand(d.words.details, false, band.band, tap("details")));
       page = ui.page(bar, [centre], actions);
       ui.paintBand(page, bar, band);
     }

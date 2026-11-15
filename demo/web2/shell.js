@@ -8,6 +8,8 @@
 (function (root) {
   const BEZEL = 11;
   const HANDBOOK = "/handbook/";
+  // Where the logo is: the page may say (OpenBmtAssets.logo); the repository's own layout otherwise.
+  const LOGO = (root.OpenBmtAssets && root.OpenBmtAssets.logo) || "../ui/logo.png";
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -31,7 +33,7 @@
       demo.hidden = true;
       const bar = el("header", "bar");
       const mark = el("div", "mark");
-      mark.innerHTML = '<img src="../ui/logo.png" alt=""><span>OpenBMT demo</span>';
+      mark.innerHTML = '<img src="' + LOGO + '" alt=""><span>OpenBMT demo</span>';
       this.stepList = el("ol", "steps");
       const right = el("div", "right");
       const again = el("button", null, "Start over");
@@ -76,7 +78,7 @@
         s = el("div", "start");
         const top = el("div", "top");
         const mark = el("div", "mark");
-        mark.innerHTML = '<img src="../ui/logo.png" alt=""><span>OpenBMT</span>';
+        mark.innerHTML = '<img src="' + LOGO + '" alt=""><span>OpenBMT</span>';
         const book = el("a", null, "Handbook");
         book.href = HANDBOOK;
         top.append(mark, book);

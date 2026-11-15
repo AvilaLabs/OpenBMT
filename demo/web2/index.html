@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenBMT demo</title>
+<link rel="icon" href="../web/favicon.svg">
+<link rel="stylesheet" href="../ui/ui.css">
+<link rel="stylesheet" href="shell.css">
+</head>
+<body>
+<div id="app"></div>
+<!-- Where the files are. From the repository: serve the repository's folder and open /demo/web2/. The site build
+     (scripts/site-build.sh) writes the site's own paths. -->
+<script>globalThis.OpenBmtAssets = { logo: "../ui/logo.png", palette: "../ui/palette.json", model: "../../dist/kotlin-js/counter/counter-model.mjs", wasm: "../../dist/demo-counter/counter.wasm", host: "./counter-host.mjs" };</script>
+<script src="../ui/ui.js"></script>
+<script src="../ui/chrome.js"></script>
+<script src="../ui/counter-views.js"></script>
+<script src="../ui/owner-views.js"></script>
+<script src="../ui/gallery-data.js"></script>
+<script src="wallet.js"></script>
+<script src="payment-code.js"></script>
+<script src="questions.js"></script>
+<script src="shell.js"></script>
+<script src="counter-controller.js"></script>
+<script src="live.js"></script>
+</body>
+</html>

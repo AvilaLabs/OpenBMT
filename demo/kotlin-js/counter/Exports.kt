@@ -1,10 +1,23 @@
 package org.openbmt.counter.demo
 
+import org.openbmt.app.Format
+import org.openbmt.app.SayWords
+import org.openbmt.app.WordsModel
+import org.openbmt.counter.CounterException
 import org.openbmt.counter.CounterNode
 import org.openbmt.counter.Native
 import org.openbmt.counter.StartConfig
+import org.openbmt.counter.app.AmountEntry
+import org.openbmt.counter.app.AppWords
+import org.openbmt.counter.app.BillModel
 import org.openbmt.counter.app.Money
 import org.openbmt.counter.app.SaleModel
+import org.openbmt.counter.app.SetupStatus
+import org.openbmt.counter.app.ScreenModel
+import org.openbmt.counter.app.Showing
+import org.openbmt.counter.app.StarterModel
+import org.openbmt.counter.app.sayWords
+import org.openbmt.counter.app.say
 
 /**
  * What the page's script can call, as the first proof that the apps' own
@@ -23,22 +36,96 @@ object CounterModelDemo {
     fun nativeAnswerLength(request: ByteArray): Int = Native.call(request)?.size ?: -1
 }
 
+/** What a words shows (WordsModel): the colour's name, the three lines, who as a sentence, the quoted text and the details. */
+@JsExport
+class ShownWords(
+    val colour: String,
+    val heading: String,
+    val what: String,
+    val next: String,
+    val who: String,
+    val quotedLabel: String?,
+    val quotedText: String?,
+    val details: Array<String>,
+)
+
+private fun shown(words: SayWords): ShownWords {
+    val m = WordsModel.of(words)
+    return ShownWords(m.colour.name, m.heading, m.what, m.next, m.who, m.quotedLabel, m.quotedText, m.details.toTypedArray())
+}
+
+/** What the home screen draws: the health card, its lines in order (with the key of each), the counter's line and the open requests. */
+@JsExport
+class HomeScreenData(
+    val health: ShownWords,
+    val lineKeys: Array<String>,
+    val lines: Array<ShownWords>,
+    val counterLine: String,
+    val requestTitles: Array<String>,
+    val requestSubs: Array<String>,
+)
+
+/**
+ * What a sale's screen draws, as the controller works it out from the library's judgment of the sale. [qrBits]
+ * holds [qrSize] times [qrSize] modules, most significant bit first, row by row (Payment.module).
+ */
+@JsExport
+class SaleScreenData(
+    val number: Int,
+    val state: String,
+    val says: ShownWords,
+    val code: Boolean,
+    val isPaid: Boolean,
+    val amountBig: String,
+    val amountSmall: String,
+    val receivedLine: String,
+    val outcomeLine: String,
+    val outcomeHeadingSp: Double,
+    val requote: Boolean,
+    val cancel: Boolean,
+    val override: Boolean,
+    val extra: Array<ShownWords>,
+    val paidLabels: Array<String>,
+    val paidValues: Array<String>,
+    val qrSize: Int,
+    val qrBits: ByteArray?,
+    val uri: String?,
+    val copyUri: String?,
+    val address: String?,
+    val needsSats: Double,
+    val receivedSats: Double,
+    /** One text of everything the screen says: it is drawn again only when this changes. */
+    val signature: String,
+)
+
 /**
  * The counter app's own entry points, driven from the page's script: the node is started with
  * [CounterNode.start], a sale is opened with [CounterNode.open], and the sale's state is read with
  * [CounterNode.judge] and [SaleModel.isPaid], all through [Native.call], which the page answers with the
- * WebAssembly build of the counter's library.
+ * WebAssembly build of the counter's library. The screens' data is what Controller.kt works out from the same
+ * calls (the page's controller draws it).
  */
 @JsExport
 object CounterFlowDemo {
     private var node: CounterNode? = null
+    private var money: Money? = null
+    private var entry: AmountEntry? = null
+    private val amounts = HashMap<Long, Long>()
 
     private fun running(): CounterNode = node ?: error("the node is not started")
+
+    /** The pretend price of the demo, in minor units of the dollar for one bitcoin: 73,554.18 USD. */
+    const val DEMO_RATE = 7_355_418.0
+
+    /** The source the sales name, in place of a price source. */
+    const val DEMO_SOURCE = "demo"
 
     /** Start the node on the folder [dir] from the pairing [record], and take its first events (the app pumps in a loop). */
     fun start(dir: String, now: Double, record: ByteArray) {
         val started = CounterNode.start(StartConfig(dir, now.toLong(), record, null))
         node = started
+        money = Money.of("USD")
+        amounts.clear()
         started.pump(now.toLong(), 0)
     }
 
@@ -47,6 +134,7 @@ object CounterFlowDemo {
         val opened = running().open(now.toLong(), amountMinor.toLong(), currency, rate.toLong(), "demo", now.toLong())
         lastIndex = opened.index
         needsSats = opened.needsSats
+        amounts[opened.index] = amountMinor.toLong()
         return opened.payment.address
     }
 
@@ -56,6 +144,9 @@ object CounterFlowDemo {
     /** The sats the last sale needs. */
     fun satsNeeded(): Double = needsSats.toDouble()
 
+    /** Take the heartbeat of the owner's phone ([bytes], signed); whether the counter verified it. */
+    fun heartbeat(now: Double, bytes: ByteArray): Boolean = running().heartbeat(now.toLong(), bytes).verified
+
     /** Take the network's events; how many reports left. */
     fun pump(now: Double): Int = running().pump(now.toLong(), 0).reports.size
 
@@ -64,6 +155,151 @@ object CounterFlowDemo {
 
     /** Whether the sale screen's model counts the last sale as paid. */
     fun salePaid(now: Double): Boolean = SaleModel.isPaid(running().judge(now.toLong(), lastIndex).state)
+
+    // ---- Controller.kt: the keypad of a new sale ----------------------------------------------------------------
+
+    /** Controller.kt showNewSale: a new entry on the shop's keypad; what it shows. */
+    fun entryNew(): String {
+        val e = AmountEntry(money ?: error("the node is not started"))
+        entry = e
+        return e.show()
+    }
+
+    /** Controller.kt showNewSale, the keypad: a key's face ("C", the backspace or a digit) pressed; what the entry shows. */
+    fun entryPress(face: String): String {
+        val e = entry ?: error("no entry")
+        when (face) {
+            "C" -> e.clear()
+            "\u232B" -> e.backspace()
+            else -> e.press(face[0])
+        }
+        return e.show()
+    }
+
+    /** What the entry shows now. */
+    fun entryShow(): String = (entry ?: error("no entry")).show()
+
+    /** The entry in minor units. */
+    fun entryMinor(): Double = (entry ?: error("no entry")).minor.toDouble()
+
+    /** Controller.kt priceWords: the price line, the pretend price of the demo. */
+    fun priceWords(): ShownWords = shown(AppWords.priceReady((money ?: error("the node is not started")).show(DEMO_RATE.toLong()), 3))
+
+    /** Controller.kt chooseTip: how many tips the counter offers for [amountMinor]; 0 opens the sale at once. */
+    fun tipChoices(amountMinor: Double): Int = running().tipChoices(amountMinor.toLong()).size
+
+    /**
+     * Controller.kt openSale: opens the sale for [amountMinor] at the pretend price, as the app does with the
+     * price it has; the sale's receive index. A refusal is the library's own exception.
+     */
+    fun openEntered(now: Double, amountMinor: Double): Double {
+        val m = money ?: error("the node is not started")
+        val opened = running().open(now.toLong(), amountMinor.toLong(), m.code, DEMO_RATE.toLong(), DEMO_SOURCE, now.toLong(), null)
+        amounts[opened.index] = amountMinor.toLong()
+        lastIndex = opened.index
+        needsSats = opened.needsSats
+        return opened.index.toDouble()
+    }
+
+    // ---- Controller.kt: what the screens say ----------------------------------------------------------------------
+
+    private fun healthWords(n: CounterNode): SayWords = try {
+        val s = n.status()
+        if (s.stopped) AppWords.stopped else s.health?.words?.say() ?: AppWords.starting
+    } catch (e: CounterException) {
+        e.sayWords()
+    }
+
+    /** Controller.kt showHome: the data of the home screen at [now]. */
+    fun homeScreen(now: Double): HomeScreenData {
+        val n = running()
+        val m = money ?: error("the node is not started")
+        val keys = ArrayList<String>()
+        val lines = ArrayList<ShownWords>()
+        // CR-116: the Lightning line is there only while a connection is saved.
+        try {
+            n.status().lightning?.words?.say()?.let { keys.add("lightning"); lines.add(shown(it)) }
+        } catch (e: CounterException) {
+            keys.add("lightning"); lines.add(shown(e.sayWords()))
+        }
+        // CR-273: a stop, or a line that cannot be checked, with the library's words.
+        val starter = try { n.starterState(now.toLong()) } catch (e: CounterException) { null }
+        StarterModel.homeLine(starter)?.let { keys.add("starter"); lines.add(shown(it)) }
+        keys.add("price")
+        lines.add(shown(AppWords.priceReady(m.show(DEMO_RATE.toLong()), 3)))
+        // CR-215: the open requests, newest first.
+        val open = try { n.requests(now.toLong()) } catch (e: CounterException) { emptyList() }
+        return HomeScreenData(
+            shown(healthWords(n)),
+            keys.toTypedArray(),
+            lines.toTypedArray(),
+            ScreenModel.counterLine(Showing.Home, SetupStatus(true, true, true), null) ?: "",
+            open.map { r -> r.note ?: m.show(r.amountMinor) }.toTypedArray(),
+            open.map { r -> Format.localTime(r.expiresAt) }.toTypedArray(),
+        )
+    }
+
+    /** Controller.kt showSale: the data of the sale [index]'s screen at [now], from the library's judgment. */
+    fun saleScreen(now: Double, index: Double): SaleScreenData {
+        val n = running()
+        val m = money ?: error("the node is not started")
+        val i = index.toLong()
+        val s = n.judge(now.toLong(), i)
+        val info = n.saleInfo(i)
+        val request = info.requestDays > 0
+        val says = if (request && s.state == org.openbmt.counter.SaleState.NotPaidYet) {
+            AppWords.requestOpen(Format.localTime(info.expiresAt))
+        } else {
+            s.words.say()
+        }
+        val extra = ArrayList<SayWords>()
+        s.check?.let { extra.add(it.say()) }
+        for (f in s.flags) extra.add(f.say())
+        val code = SaleModel.showsCode(s.state)
+        val b = SaleModel.buttons(s.state, request)
+        val amount = amounts[i]
+        val payment = s.payment
+        val labels = ArrayList<String>()
+        val values = ArrayList<String>()
+        if (!code && SaleModel.isPaid(s.state)) {
+            for (line in BillModel.paidLines(i, info)) {
+                labels.add(line.label)
+                values.add(line.value)
+            }
+        }
+        val shownSays = shown(says)
+        val shownExtra = extra.map { shown(it) }
+        val signature = listOf(
+            s.state.name, shownSays.heading, shownSays.what, shownSays.next, s.receivedSats, s.needsSats, payment?.copyUri,
+            shownExtra.joinToString("\u0002") { it.heading + it.what + it.next }, info.reference, info.billNumber,
+        ).joinToString("\u0001")
+        return SaleScreenData(
+            number = (i + 1).toInt(),
+            state = s.state.name,
+            says = shownSays,
+            code = code,
+            isPaid = SaleModel.isPaid(s.state),
+            amountBig = SaleModel.amountBig(m, amount, s.needsSats),
+            amountSmall = SaleModel.amountSmall(m, amount, s.needsSats),
+            receivedLine = SaleModel.receivedLine(s.receivedSats, s.needsSats),
+            outcomeLine = SaleModel.outcomeLine(m, amount, s.needsSats),
+            outcomeHeadingSp = SaleModel.outcomeHeadingSp(says.heading).toDouble(),
+            requote = b.requote,
+            cancel = b.cancel,
+            override = b.override,
+            extra = shownExtra.toTypedArray(),
+            paidLabels = labels.toTypedArray(),
+            paidValues = values.toTypedArray(),
+            qrSize = if (code) payment?.qrSize?.toInt() ?: 0 else 0,
+            qrBits = if (code) payment?.qrBits else null,
+            uri = if (code) payment?.uri else null,
+            copyUri = if (code) payment?.copyUri else null,
+            address = payment?.address,
+            needsSats = s.needsSats.toDouble(),
+            receivedSats = s.receivedSats.toDouble(),
+            signature = signature,
+        )
+    }
 
     /** Stop the node. */
     fun stop() {

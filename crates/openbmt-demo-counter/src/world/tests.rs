@@ -6,8 +6,8 @@ use super::*;
 use crate::{call, set_now};
 
 const T0: u64 = 1_700_000_000;
-/// $100,000 per bitcoin, in cents.
-const RATE: u64 = 10_000_000;
+/// The demo's pretend price, 73,554.18 USD per bitcoin, in cents.
+const RATE: u64 = 7_355_418;
 
 fn frame(op: u16, handle: u64, fields: &[u8]) -> Vec<u8> {
     let mut out = b"OBMm".to_vec();
@@ -68,11 +68,11 @@ fn a_sale_paid_on_the_pretend_chain_is_seen_by_the_node() {
     pump.extend_from_slice(&0u32.to_le_bytes());
     ok(&call(&frame(10, handle, &pump)));
 
-    let opened = call(&frame(11, handle, &open_fields(2_450)));
+    let opened = call(&frame(11, handle, &open_fields(800)));
     let body = ok(&opened);
     let index = u32::from_le_bytes(body.get(..4).expect("an index").try_into().unwrap());
     let needs = u64::from_le_bytes(body.get(4..12).expect("sats").try_into().unwrap());
-    assert_eq!(needs, 24_500);
+    assert_eq!(needs, 10_877);
     // index, needs, rate, from, until, then the address string.
     let len = u32::from_le_bytes(body.get(36..40).expect("a length").try_into().unwrap());
     let address = std::str::from_utf8(body.get(40..40 + len as usize).expect("an address"))
@@ -87,6 +87,27 @@ fn a_sale_paid_on_the_pretend_chain_is_seen_by_the_node() {
     let seen = call(&frame(12, handle, &judge));
     let state = *ok(&seen).first().expect("a state");
     assert_ne!(state, 0, "the sale is still not paid yet");
+
+    // The owner's heartbeats and a few seconds of watching: the sale is of
+    // 8.00 USD, under the first instant limit, and the counter accepts it
+    // before a block (state 3, `PaidInstant`).
+    let mut instant = false;
+    for t in 1..=15u64 {
+        set_now(T0 + t);
+        let mut beat = Vec::new();
+        beat.extend_from_slice(&(T0 + t).to_le_bytes());
+        put_bytes(&mut beat, &heartbeat(T0 + t).expect("a heartbeat"));
+        ok(&call(&frame(20, handle, &beat)));
+        let mut pump = Vec::new();
+        pump.extend_from_slice(&(T0 + t).to_le_bytes());
+        pump.extend_from_slice(&0u32.to_le_bytes());
+        ok(&call(&frame(10, handle, &pump)));
+        let mut judge = Vec::new();
+        judge.extend_from_slice(&(T0 + t).to_le_bytes());
+        judge.extend_from_slice(&index.to_le_bytes());
+        instant |= ok(&call(&frame(12, handle, &judge))).first() == Some(&3);
+    }
+    assert!(instant, "the sale of 8.00 USD is accepted at once");
 
     assert_eq!(mine().expect("mined"), 1);
     ok(&call(&frame(10, handle, &pump)));

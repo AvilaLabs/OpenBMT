@@ -60,6 +60,11 @@ export async function loadCounter(bytes, { now = () => Math.floor(Date.now() / 1
       const bytes = new TextEncoder().encode(address);
       return reply(take(x.chain_pay(put(bytes), bytes.length, BigInt(sats))));
     },
+    /** The heartbeat the owner's phone would send the counter now, signed; empty when no node is running. */
+    heartbeat() {
+      tick();
+      return Int8Array.from(take(x.chain_heartbeat()));
+    },
     /** A block is mined of everything in the pool; the new height. */
     mine() {
       tick();
