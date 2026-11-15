@@ -4966,7 +4966,7 @@ mod tests {
     }
 
     #[test]
-    fn gv_01_a_place_of_giving_is_version_six_and_reads_back() {
+    fn gv_01_a_place_of_giving_is_layout_six_in_frame_eight_and_reads_back() {
         let mut cases = vec![giving(wire_settings())];
         let mut tips = giving(wire_settings());
         tips.tips_on = true;
@@ -4979,7 +4979,8 @@ mod tests {
         for s in cases {
             assert_eq!(s.validate(), Ok(()));
             let bytes = signed_both(s.clone()).to_bytes();
-            assert_eq!(bytes[4], 6);
+            assert_eq!(bytes[4], 8);
+            assert_eq!(bytes[5], 6);
             let back = SignedSettings::from_bytes(&bytes).unwrap();
             assert_eq!(back.settings, s);
             assert_eq!(back.to_bytes(), bytes);
@@ -4997,7 +4998,7 @@ mod tests {
                 assert!(SignedSettings::from_bytes(&short).is_err(), "{cut}");
             }
             // An older frame is refused, or reads as other settings that
-            // never verify (its signatures are over the version 6 bytes).
+            // never verify (its signatures are over the layout 6 bytes).
             let (_, _, roots) = roots();
             for old in 1..=5u8 {
                 let mut frame = bytes.clone();
@@ -5011,11 +5012,49 @@ mod tests {
             let mut v7 = bytes.clone();
             v7[4] = 7;
             assert!(SignedSettings::from_bytes(&v7).is_err());
+            let mut v9 = bytes.clone();
+            v9[4] = 9;
+            assert_eq!(
+                SignedSettings::from_bytes(&v9),
+                Err(DecodeError::UnsupportedVersion(9))
+            );
+            // Frame 8 holds layout 6 only: another layout byte is refused.
+            for layout in [0u8, 1, 2, 3, 4, 5, 7] {
+                let mut frame = bytes.clone();
+                frame[5] = layout;
+                assert!(
+                    SignedSettings::from_bytes(&frame).is_err(),
+                    "layout {layout}"
+                );
+            }
         }
     }
 
     #[test]
-    fn gv_01_the_block_is_written_after_the_version_five_block() {
+    fn gv_01_a_shop_is_never_written_in_frame_eight() {
+        let shop = signed_both(wire_settings()).to_bytes();
+        assert!(shop[4] <= 5);
+        // The frame of a shop with a layout byte but no wallet signature is
+        // not one a writer makes.
+        let mut frame = vec![shop[0], shop[1], shop[2], shop[3], 8, shop[4]];
+        frame.extend_from_slice(&shop[5..]);
+        assert!(SignedSettings::from_bytes(&frame).is_err());
+    }
+
+    #[test]
+    fn gv_01_layout_six_is_carried_with_a_wallet_signature_too() {
+        let mut signed = signed_both(giving(wire_settings()));
+        signed.wallet_sig = Some("H1abc".to_string());
+        let bytes = signed.to_bytes();
+        assert_eq!(bytes[4], 6);
+        assert_eq!(bytes[5], 6);
+        let back = SignedSettings::from_bytes(&bytes).unwrap();
+        assert_eq!(back, signed);
+        assert_eq!(back.to_bytes(), bytes);
+    }
+
+    #[test]
+    fn gv_01_the_block_is_written_after_the_layout_five_block() {
         let body = giving(wire_settings()).encode();
         // No swap provider, no own node, node-only and the light fallback
         // off, no Shop Lightning, then the place.
@@ -5031,7 +5070,7 @@ mod tests {
     }
 
     #[test]
-    fn gv_01_a_version_six_message_that_says_shop_or_another_value_is_refused() {
+    fn gv_01_a_layout_six_message_that_says_shop_or_another_value_is_refused() {
         let bytes = signed_both(giving(wire_settings())).to_bytes();
         let place_at = bytes.len() - 64 - 1 - 64 - 1;
         assert_eq!(bytes[place_at], 1);

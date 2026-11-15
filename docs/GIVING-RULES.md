@@ -11,11 +11,15 @@ Tests are named after the rule (`gv_01_...`).
 
 - **GV-01. A setting of the shop.** The signed settings carry `place`: a
   shop (0) or a place of giving (1). At first it is a shop. It is written
-  in a message of version 6, in a block after the block of version 5, only
-  when it is a place of giving: settings of a shop are the bytes every
-  earlier build wrote, with the same hash. A message of version 6 whose
-  block says shop is refused (it would have been written in an earlier
-  version), and so is any other value.
+  only for a place of giving, in settings layout 6: the fields of layout 5
+  with the Shop Lightning block behind a flag of its own (a place of giving
+  may have none), then one byte of the place. Settings of a shop are the
+  bytes every earlier build wrote, with the same hash. A frame carries
+  layout 6 the way it carries any layout after a layout byte: frame
+  version 6 with the owner wallet's signature, 7 with the signatures of
+  two cosigners (`docs/APPROVAL-RULES.md` AP-14, AP-17), and 8 with
+  neither. Layout 6 whose place byte says shop is refused (it would have
+  been written in an earlier layout), and so is any other value of it.
 - **GV-02. Its class.** Changing a shop into a place of giving is Loosen
   (`docs/APPROVAL-RULES.md` AP-01): at a place of giving the person paying
   types the amount (GV-11), which a shop must not allow without a counter's
