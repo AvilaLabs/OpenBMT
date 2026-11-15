@@ -86,12 +86,42 @@ class TillStepsPage(val title: String, val lines: List<Line>, val showsDone: Boo
     }
 }
 
-/** What the shop's first screens keep: the name, the money, the till and whether the till steps were shown. */
+/** One page of the staff cue card: its title, then the lines in order. The last is the line for a doubt, which is not a step. */
+class CueCardPage(val title: String, val lines: List<String>)
+
+/** The cue card for staff (DESIGN 2.1 step 11): what to do at the till, for the chosen till, to print. */
+object CueCard {
+    fun of(till: Till, shopName: String?): CueCardPage {
+        val name = shopName?.trim().orEmpty()
+        val title = if (name.isNotEmpty()) FirstRunWords.cardTitleShop.replace("{shop}", name) else FirstRunWords.cardTitle
+        val out = ArrayList<String>()
+        when (till) {
+            Till.None -> {}
+            Till.Other -> out.add(FirstRunWords.cardRingUpOther)
+            else -> out.add(FirstRunWords.with(FirstRunWords.cardRingUp, till.title))
+        }
+        out.add(FirstRunWords.cardCounter)
+        out.add(FirstRunWords.cardPaid)
+        when (till) {
+            Till.None -> {}
+            Till.Other -> out.add(FirstRunWords.cardTillPickOther)
+            Till.Square -> out.add(FirstRunWords.cardTillSquare)
+            Till.Toast -> out.add(FirstRunWords.cardTillToast)
+            Till.StoreHub -> out.add(FirstRunWords.cardTillStoreHub)
+            else -> out.add(FirstRunWords.with(FirstRunWords.cardTillPick, till.title))
+        }
+        out.add(FirstRunWords.cardDoubt)
+        return CueCardPage(title, out)
+    }
+}
+
+/** What the shop's first screens keep: the name, the money, the till, whether the till steps were shown and whether the cue card was printed. */
 class ShopPrefs(
     val name: String = "",
     val currency: ShopCurrency? = null,
     val till: Till? = null,
     val stepsShown: Boolean = false,
+    val cardPrinted: Boolean = false,
 ) {
     fun encode(): ByteArray {
         val sb = StringBuilder()
@@ -99,11 +129,17 @@ class ShopPrefs(
         sb.append("currency: ").append(currency?.code ?: "").append('\n')
         sb.append("till: ").append(till?.key ?: "").append('\n')
         sb.append("steps-shown: ").append(if (stepsShown) "yes" else "no").append('\n')
+        sb.append("card-printed: ").append(if (cardPrinted) "yes" else "no").append('\n')
         return sb.toString().toByteArray(Charsets.UTF_8)
     }
 
-    fun with(name: String = this.name, currency: ShopCurrency? = this.currency, till: Till? = this.till, stepsShown: Boolean = this.stepsShown): ShopPrefs =
-        ShopPrefs(clean(name), currency, till, stepsShown)
+    fun with(
+        name: String = this.name,
+        currency: ShopCurrency? = this.currency,
+        till: Till? = this.till,
+        stepsShown: Boolean = this.stepsShown,
+        cardPrinted: Boolean = this.cardPrinted,
+    ): ShopPrefs = ShopPrefs(clean(name), currency, till, stepsShown, cardPrinted)
 
     companion object {
         const val MAX_NAME = 60
@@ -120,7 +156,8 @@ class ShopPrefs(
             }
             if (!text.endsWith("\n")) throw ConfigFormatException("the shop file does not end with a line end")
             val lines = text.dropLast(1).split('\n')
-            if (lines.size != 4) throw ConfigFormatException("the shop file does not have 4 lines")
+            // A file from before the card flag has 4 lines and reads as a card not printed.
+            if (lines.size != 4 && lines.size != 5) throw ConfigFormatException("the shop file does not have 4 or 5 lines")
             fun value(i: Int, key: String): String {
                 val prefix = "$key: "
                 if (!lines[i].startsWith(prefix)) throw ConfigFormatException("line ${i + 1} is not \"$key: ...\"")
@@ -138,7 +175,12 @@ class ShopPrefs(
                 "no" -> false
                 else -> throw ConfigFormatException("steps-shown is not yes or no")
             }
-            return ShopPrefs(name, currency, till, shown)
+            val printed = if (lines.size == 4) false else when (value(4, "card-printed")) {
+                "yes" -> true
+                "no" -> false
+                else -> throw ConfigFormatException("card-printed is not yes or no")
+            }
+            return ShopPrefs(name, currency, till, shown, printed)
         }
 
         /**
@@ -251,7 +293,7 @@ class FirstRun(start: ShopPrefs, locale: String) {
     var connect = Connect()
         private set
 
-    fun prefs(stepsShown: Boolean): ShopPrefs = ShopPrefs(ShopPrefs.clean(name), currency, till, stepsShown)
+    fun prefs(stepsShown: Boolean, cardPrinted: Boolean = false): ShopPrefs = ShopPrefs(ShopPrefs.clean(name), currency, till, stepsShown, cardPrinted)
 
     /**
      * The step after [step]; the Money step goes on to Hardware for the plan, to Connect for a wallet the owner holds,
@@ -535,8 +577,8 @@ class FirstSale {
     }
 }
 
-/** One item of the home checklist: its words and, for the first sale, the note under it. */
-class ChecklistItem(val text: String, val note: String? = null)
+/** One item of the home checklist: its words and, for the first sale, the note under it; [cueCard] marks the item that opens the cue card. */
+class ChecklistItem(val text: String, val note: String? = null, val cueCard: Boolean = false)
 
 /** The home checklist (DESIGN 2.1): what is still to do, and gone when nothing is. */
 object Checklist {
@@ -545,14 +587,19 @@ object Checklist {
 
     /**
      * The items for a shop: a first sale until one is paid, and a second copy of the starter words only when the
-     * owner skipped it. Empty when both are done.
+     * owner skipped it, then the cue card for staff while a till is chosen and the card is not printed ([cardDue]).
+     * Empty when all are done.
      */
-    fun items(salePaid: Boolean, copySkipped: Boolean): List<ChecklistItem> {
+    fun items(salePaid: Boolean, copySkipped: Boolean, cardDue: Boolean): List<ChecklistItem> {
         val out = ArrayList<ChecklistItem>()
         if (!salePaid) out.add(ChecklistItem(FirstRunWords.checklistSale, FirstRunWords.checklistNotTested))
         if (copySkipped) out.add(ChecklistItem(FirstRunWords.checklistCopy))
+        if (cardDue) out.add(ChecklistItem(FirstRunWords.checklistCueCard, cueCard = true))
         return out
     }
+
+    /** The cue card is still to print when a till is chosen (any, including No till and Another till) and it was not printed. */
+    fun cardDue(prefs: ShopPrefs): Boolean = prefs.till != null && !prefs.cardPrinted
 }
 
 /** The screens of the key maker guide, in the order they come. The first six are the steps, in the order of the page's. */

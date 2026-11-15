@@ -284,6 +284,26 @@ object FirstRunWords {
     const val checklistCopy = "Write a second copy of your words"
     const val checklistCueCard = "Print the cue card for staff"
 
+    // ---- the staff cue card (DESIGN 2.1) ----
+
+    const val cardScreenTitle = "Cue card for staff"
+    const val cardOpen = "Cue card for staff"
+    const val cardScreenText = "Print it and keep it by the till, where staff can see it."
+    const val cardPrint = "Print"
+    const val cardTitle = "Taking bitcoin"
+    const val cardTitleShop = "Taking bitcoin at {shop}"
+    const val cardRingUp = "Ring up the sale in {till} as usual."
+    const val cardRingUpOther = "Ring up the sale in your till as usual."
+    const val cardCounter = "Type the amount on the counter and show the customer the code."
+    const val cardPaid = "Hand over the goods when the counter shows Paid. A bigger payment can take about ten minutes."
+    const val cardTillSquare = "Then, in Square: Charge, then More, then Custom payment methods, then Bitcoin."
+    const val cardTillToast = "Then, in Toast: Pay, then Other payments, then Bitcoin."
+    const val cardTillStoreHub = "Then pick Bitcoin as the payment in StoreHub. If it is not shown, tap Others."
+    const val cardTillPick = "Then pick Bitcoin as the payment in {till}."
+    const val cardTillPickOther = "Then pick Bitcoin as the payment in your till."
+    const val cardDoubt = "Anything other than Paid: keep the goods and ask the owner."
+    const val cardPrintFailed = "The card could not be printed. Try again, or choose Save as PDF on the print screen."
+
     // ---- three layers (DESIGN 2.1) -------------------------------------------------------------------
 
     const val howThisWorks = "How this works"
@@ -361,6 +381,12 @@ object FirstRunWords {
         add("firstSaleSeeText", firstSaleSeeText); add("firstSaleDone", firstSaleDone)
         add("checklistTitle", checklistTitle); add("checklistSale", checklistSale); add("checklistNotTested", checklistNotTested)
         add("checklistCopy", checklistCopy); add("checklistCueCard", checklistCueCard)
+        add("cardScreenTitle", cardScreenTitle); add("cardOpen", cardOpen); add("cardScreenText", cardScreenText)
+        add("cardPrint", cardPrint); add("cardTitle", cardTitle); add("cardTitleShop", cardTitleShop)
+        add("cardRingUp", cardRingUp); add("cardRingUpOther", cardRingUpOther); add("cardCounter", cardCounter)
+        add("cardPaid", cardPaid); add("cardTillSquare", cardTillSquare); add("cardTillToast", cardTillToast)
+        add("cardTillStoreHub", cardTillStoreHub); add("cardTillPick", cardTillPick); add("cardTillPickOther", cardTillPickOther)
+        add("cardDoubt", cardDoubt); add("cardPrintFailed", cardPrintFailed)
         add("howThisWorks", howThisWorks); add("details", details)
         out.addAll(KeyGuideWords.all())
         return out

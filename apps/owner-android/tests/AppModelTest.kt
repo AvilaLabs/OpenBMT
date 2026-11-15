@@ -3706,11 +3706,31 @@ object AppModelTest {
         ok(FirstSale.paidSales(org.openbmt.owner.Books("USD", listOf(booksDay, booksDay), emptyList(), null)) == 4L, "paid sales are the books' count of sales that received funds")
 
         // The checklist.
-        ok(Checklist.items(false, false).map { it.text } == listOf(FirstRunWords.checklistSale) && Checklist.items(false, false)[0].note == FirstRunWords.checklistNotTested, "a first sale is to do, and not tested yet")
-        ok(Checklist.items(true, false).isEmpty(), "a paid sale: nothing left, the section is gone")
-        ok(Checklist.items(false, true).map { it.text } == listOf(FirstRunWords.checklistSale, FirstRunWords.checklistCopy), "a skipped second copy is the second item")
-        ok(Checklist.items(true, true).map { it.text } == listOf(FirstRunWords.checklistCopy) && Checklist.items(true, true)[0].note == null, "the copy stays after the sale, with no note")
-        ok(FirstRunWords.checklistCueCard.isNotEmpty() && Checklist.items(false, true).none { it.text == FirstRunWords.checklistCueCard }, "the cue card is not listed yet")
+        ok(Checklist.items(false, false, false).map { it.text } == listOf(FirstRunWords.checklistSale) && Checklist.items(false, false, false)[0].note == FirstRunWords.checklistNotTested, "a first sale is to do, and not tested yet")
+        ok(Checklist.items(true, false, false).isEmpty(), "a paid sale: nothing left, the section is gone")
+        ok(Checklist.items(false, true, false).map { it.text } == listOf(FirstRunWords.checklistSale, FirstRunWords.checklistCopy), "a skipped second copy is the second item")
+        ok(Checklist.items(true, true, false).map { it.text } == listOf(FirstRunWords.checklistCopy) && Checklist.items(true, true, false)[0].note == null, "the copy stays after the sale, with no note")
+        ok(Checklist.items(false, true, true).map { it.text } == listOf(FirstRunWords.checklistSale, FirstRunWords.checklistCopy, FirstRunWords.checklistCueCard), "the cue card is the last item when due")
+        ok(Checklist.items(true, false, true).map { it.text } == listOf(FirstRunWords.checklistCueCard) && Checklist.items(true, false, true)[0].cueCard && Checklist.items(true, false, true)[0].note == null, "the cue card alone, marked to open the card")
+        ok(Checklist.items(false, true, false).none { it.cueCard }, "no cue card item when it is not due")
+        ok(Checklist.cardDue(ShopPrefs(till = Till.None)) && Checklist.cardDue(ShopPrefs(till = Till.Other)) && Checklist.cardDue(ShopPrefs(till = Till.Square)), "the card is due for any chosen till")
+        ok(!Checklist.cardDue(ShopPrefs()) && !Checklist.cardDue(ShopPrefs(till = Till.Square, cardPrinted = true)), "no card without a till, none once printed")
+
+        // The cue card.
+        ok(CueCard.of(Till.Square, "Cafe Anna").title == "Taking bitcoin at Cafe Anna", "the card's title names the shop")
+        ok(CueCard.of(Till.Square, null).title == FirstRunWords.cardTitle && CueCard.of(Till.Square, "").title == FirstRunWords.cardTitle && CueCard.of(Till.Square, "   ").title == FirstRunWords.cardTitle, "no name or a blank one: the plain title")
+        ok(CueCard.of(Till.Square, " Cafe ").title == "Taking bitcoin at Cafe", "the name is trimmed")
+        ok(CueCard.of(Till.Square, null).lines == listOf(
+            "Ring up the sale in Square as usual.", FirstRunWords.cardCounter, FirstRunWords.cardPaid, FirstRunWords.cardTillSquare, FirstRunWords.cardDoubt,
+        ), "Square's card")
+        ok(CueCard.of(Till.Toast, null).lines[3] == FirstRunWords.cardTillToast, "Toast's own last line")
+        ok(CueCard.of(Till.StoreHub, null).lines == listOf(
+            "Ring up the sale in StoreHub as usual.", FirstRunWords.cardCounter, FirstRunWords.cardPaid, FirstRunWords.cardTillStoreHub, FirstRunWords.cardDoubt,
+        ), "StoreHub's card")
+        ok(CueCard.of(Till.Shopify, "x").lines[0] == "Ring up the sale in ${Till.Shopify.title} as usual." && CueCard.of(Till.Shopify, "x").lines[3] == "Then pick Bitcoin as the payment in ${Till.Shopify.title}.", "Shopify's card names the till twice")
+        for (t in Till.listed) ok(CueCard.of(t, null).lines.size == 5 && CueCard.of(t, null).lines.last() == FirstRunWords.cardDoubt && CueCard.of(t, null).lines.none { it.contains("{") }, "a listed till's card has five lines and no placeholder left")
+        ok(CueCard.of(Till.Other, null).lines == listOf(FirstRunWords.cardRingUpOther, FirstRunWords.cardCounter, FirstRunWords.cardPaid, FirstRunWords.cardTillPickOther, FirstRunWords.cardDoubt), "Another till's card")
+        ok(CueCard.of(Till.None, "Cafe").lines == listOf(FirstRunWords.cardCounter, FirstRunWords.cardPaid, FirstRunWords.cardDoubt), "No till's card has no till lines")
 
         // The taps: model actions from Welcome to the first counter. These numbers may only go down.
         var taps = 0
@@ -3917,7 +3937,13 @@ object AppModelTest {
             ok(back.name == "Cafe Anna" && back.currency == ShopCurrency.Sats && back.till == Till.Hike && !back.stepsShown, "name, money and till come back")
             f.save(back.with(stepsShown = true))
             ok(f.load().stepsShown && f.load().till == Till.Hike, "the steps are marked shown")
-            ok(String(f.load().encode()) == "name: Cafe Anna\ncurrency: SAT\ntill: hike\nsteps-shown: yes\n", "the file's form")
+            ok(String(f.load().encode()) == "name: Cafe Anna\ncurrency: SAT\ntill: hike\nsteps-shown: yes\ncard-printed: no\n", "the file's form")
+            ok(!f.load().cardPrinted, "the card is not printed at first")
+            f.save(f.load().with(cardPrinted = true))
+            ok(f.load().cardPrinted && f.load().stepsShown && f.load().till == Till.Hike, "the card flag is kept beside the others")
+            ok(ShopPrefs.decode("name: a\ncurrency: \ntill: hike\nsteps-shown: yes\n".toByteArray()).let { it.stepsShown && !it.cardPrinted && it.till == Till.Hike }, "an old file without the flag reads as not printed")
+            throws("a card flag that is not yes or no") { ShopPrefs.decode("name: a\ncurrency: \ntill: \nsteps-shown: no\ncard-printed: maybe\n".toByteArray()) }
+            throws("a sixth line") { ShopPrefs.decode("name: a\ncurrency: \ntill: \nsteps-shown: no\ncard-printed: no\nx: y\n".toByteArray()) }
             ok(ShopPrefs.clean("a\nb\u0007c") == "abc", "a name is one clean line")
             ok(ShopPrefs.clean("x".repeat(100)).length == ShopPrefs.MAX_NAME, "a name is cut at its length")
             File(dir, AppFiles.SHOP_FILE).writeText("garbage")

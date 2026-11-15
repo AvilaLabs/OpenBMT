@@ -257,7 +257,7 @@ private fun Controller.showTillChoice(r: FirstRun) {
         try {
             // A new till is a new set of steps: they are shown again after the first counter.
             val held = shopFile.load()
-            shopFile.save(held.with(till = t, stepsShown = held.stepsShown && held.till == t))
+            shopFile.save(held.with(till = t, stepsShown = held.stepsShown && held.till == t, cardPrinted = held.cardPrinted && held.till == t))
             r.next()
             showFirstRun()
         } catch (e: IOException) {
@@ -494,11 +494,11 @@ internal fun Controller.homeChecklist(n: OwnerNode): View? {
         checklistAt = now
         checklistSaleSeen = (paidSalesOf(n) ?: 0L) >= 1
     }
-    val items = Checklist.items(checklistSaleSeen, secondCopySkipped())
+    val items = Checklist.items(checklistSaleSeen, secondCopySkipped(), Checklist.cardDue(shopFile.load()))
     if (items.isEmpty()) return null
     return stack(
         label(FirstRunWords.checklistTitle),
-        ui.rows(items.map { RowItem(it.text, it.note) }),
+        ui.rows(items.map { i -> RowItem(i.text, i.note, onClick = if (i.cueCard) ({ showCueCard { showHome() } }) else null) }),
         gap = 6,
     )
 }
@@ -612,7 +612,38 @@ internal fun Controller.showTillSteps(till: Till, back: () -> Unit) {
             },
         )
     }
+    views.add(ui.secondary(FirstRunWords.cardOpen) { showCueCard { showTillSteps(till, back) } })
     stepScreen(page.title, views, listOf(ui.primary(FirstRunWords.tillStepsDone) { back() }), back)
+}
+
+/** The staff cue card for the chosen till, to print. [back] is where Back leads. */
+internal fun Controller.showCueCard(back: () -> Unit) {
+    val held = shopFile.load()
+    val till = held.till ?: return back()
+    val card = CueCard.of(till, held.name)
+    val msg = Slot(act)
+    val views = ArrayList<View>()
+    views.add(heading(card.title))
+    card.lines.forEachIndexed { i, l ->
+        views.add(if (i == card.lines.lastIndex) line(l, muted = true) else ui.text("${i + 1}. $l", 16f))
+    }
+    views.add(para(FirstRunWords.cardScreenText))
+    views.add(msg)
+    val print = ui.primary(FirstRunWords.cardPrint) {
+        val sent = printCueCard(
+            card,
+            onPrinted = {
+                try {
+                    shopFile.save(shopFile.load().with(cardPrinted = true))
+                } catch (_: IOException) {
+                    // The card is printed; at worst it is listed once more.
+                }
+            },
+            onFailed = { msg.show(line(FirstRunWords.cardPrintFailed, bold = true)) },
+        )
+        if (!sent) msg.show(line(FirstRunWords.cardPrintFailed, bold = true))
+    }
+    stepScreen(FirstRunWords.cardScreenTitle, views, listOf(print), back)
 }
 
 /** What follows the first counter: the steps for the chosen till once, then home. */

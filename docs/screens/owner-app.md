@@ -428,6 +428,23 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | checklistNotTested | Not tested yet |
 | checklistCopy | Write a second copy of your words |
 | checklistCueCard | Print the cue card for staff |
+| cardScreenTitle | Cue card for staff |
+| cardOpen | Cue card for staff |
+| cardScreenText | Print it and keep it by the till, where staff can see it. |
+| cardPrint | Print |
+| cardTitle | Taking bitcoin |
+| cardTitleShop | Taking bitcoin at {shop} |
+| cardRingUp | Ring up the sale in {till} as usual. |
+| cardRingUpOther | Ring up the sale in your till as usual. |
+| cardCounter | Type the amount on the counter and show the customer the code. |
+| cardPaid | Hand over the goods when the counter shows Paid. A bigger payment can take about ten minutes. |
+| cardTillSquare | Then, in Square: Charge, then More, then Custom payment methods, then Bitcoin. |
+| cardTillToast | Then, in Toast: Pay, then Other payments, then Bitcoin. |
+| cardTillStoreHub | Then pick Bitcoin as the payment in StoreHub. If it is not shown, tap Others. |
+| cardTillPick | Then pick Bitcoin as the payment in {till}. |
+| cardTillPickOther | Then pick Bitcoin as the payment in your till. |
+| cardDoubt | Anything other than Paid: keep the goods and ask the owner. |
+| cardPrintFailed | The card could not be printed. Try again, or choose Save as PDF on the print screen. |
 | howThisWorks | How this works |
 | details | Details |
 | kgTitle | Make your cold wallet |
