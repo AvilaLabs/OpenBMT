@@ -83,6 +83,9 @@ private fun Controller.showWebPaired(n: OwnerNode, state: WebState, views: Array
             views.add(ui.words(r.words.say()))
         }
     }
+    for (a in state.amountOff) {
+        views.add(ui.words(a.words.say()))
+    }
     val visit = ui.primary(WebOrderWords.visitNow) { webVisitNow() }.also { it.isEnabled = WebModel.canVisit(state) }
     val unpair = ui.danger(WebOrderWords.unpair) { showWebUnpair() }
     screen(WebOrderWords.pageTitle, views, listOf(visit, unpair, backHome()), back = { showSettingsAndPhone() })

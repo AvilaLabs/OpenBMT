@@ -16,7 +16,7 @@ use openbmt_requests::Status;
 use super::live::{pay_to_script, START};
 use super::own::{own_receive, own_setup};
 use super::*;
-use crate::requests::{RequestContext, RequestsOff};
+use crate::requests::{CurrencyRate, RequestContext, RequestsOff};
 use crate::web_orders::{
     check_store_url, decode, encode, web_key_seed, WebError, MAGIC_WEB_ORDERS,
 };
@@ -421,7 +421,7 @@ fn wo_20_wo_22_an_order_becomes_a_request_at_its_address_and_bad_ones_are_shown(
         ]
     );
     assert_eq!(
-        info.refused[0].why.words().heading,
+        info.refused[0].why.words(8).heading,
         "Order to an unknown address"
     );
     // The same orders asked for again make nothing more.
@@ -878,4 +878,194 @@ fn wo_43_the_key_is_made_from_the_owner_secret_and_the_file_holds_no_seed() {
         again.key(&other).public(),
         again.key(&owner_secret).public()
     );
+}
+
+/// The file's `since`: the highest order the phone has taken.
+fn kept_since(dir: &Dir) -> u64 {
+    decode(&std::fs::read(dir.path().join(WEB_ORDERS_FILE)).unwrap())
+        .unwrap()
+        .since
+}
+
+/// A dollar rate of $100,000.00 a bitcoin: $25.00 is worth 25,000 sats.
+fn dollar_rate() -> CurrencyRate {
+    CurrencyRate {
+        currency: ShopCurrency::Usd,
+        rate: openbmt_requests::CheckedRate {
+            rate: openbmt_counter::money::Rate::new(10_000_000).unwrap(),
+            source: openbmt_counter::money::RateSource::new("test", START).unwrap(),
+        },
+    }
+}
+
+#[test]
+fn wo_22_an_order_number_far_past_the_last_is_refused_and_does_not_move_the_place() {
+    let dir = Dir::new();
+    let (mut rig, _book, _setup, mut store) = paired(&dir, 1);
+    store.order(7, 50_000);
+    let far = store.pool[0].clone();
+    store.orders.push((u64::MAX, far, 50_000));
+    rig.node.web_visit_soon();
+    visit(&mut rig, &mut store, START + 5, false);
+    let info = rig.node.web_state();
+    let why: Vec<(u64, RefusedWhy)> = info.refused.iter().map(|r| (r.order, r.why)).collect();
+    assert_eq!(why, [(u64::MAX, RefusedWhy::NumberTooFar)]);
+    assert_eq!(info.refused[0].why.words(u64::MAX).heading, "Order refused");
+    assert_eq!(info.orders, 1);
+    assert_eq!(
+        kept_since(&dir),
+        7,
+        "a refused order does not move the place"
+    );
+    // The store reports it again at every visit: it is shown once, and the
+    // next real order is still fetched and taken.
+    store.order(8, 50_000);
+    rig.node.web_visit_soon();
+    visit(&mut rig, &mut store, START + 6, false);
+    let info = rig.node.web_state();
+    assert_eq!(info.refused.len(), 1);
+    assert_eq!(info.orders, 2);
+    assert_eq!(kept_since(&dir), 8);
+}
+
+#[test]
+fn wo_22_an_order_ten_million_past_the_last_is_taken_and_one_more_is_refused() {
+    let dir = Dir::new();
+    let (mut rig, _book, _setup, mut store) = paired(&dir, 1);
+    store.order(7, 50_000);
+    rig.node.web_visit_soon();
+    visit(&mut rig, &mut store, START + 5, false);
+    assert_eq!(kept_since(&dir), 7);
+    let over = store.pool[0].clone();
+    store.orders.push((7 + 10_000_001, over, 50_000));
+    rig.node.web_visit_soon();
+    visit(&mut rig, &mut store, START + 6, false);
+    let info = rig.node.web_state();
+    assert_eq!(info.orders, 1);
+    assert_eq!(
+        info.refused.iter().map(|r| r.why).collect::<Vec<_>>(),
+        [RefusedWhy::NumberTooFar]
+    );
+    assert_eq!(kept_since(&dir), 7);
+    // The same address, a number just inside the jump: taken, and the place moves.
+    store.orders.pop();
+    let inside = store.pool[0].clone();
+    store.orders.push((7 + 10_000_000, inside, 50_000));
+    rig.node.web_visit_soon();
+    visit(&mut rig, &mut store, START + 7, false);
+    assert_eq!(rig.node.web_state().orders, 2);
+    assert_eq!(kept_since(&dir), 10_000_007);
+}
+
+#[test]
+fn wo_22_no_refusal_of_any_kind_moves_the_place() {
+    let dir = Dir::new();
+    let (mut rig, _book, _setup, mut store) = paired(&dir, 1);
+    let address = store.order(7, 50_000);
+    store.orders.push((
+        8,
+        "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4".to_string(),
+        1_000,
+    ));
+    store.orders.push((9, address, 1_000));
+    store.orders.push((10, store.pool[0].clone(), 0));
+    rig.node.web_visit_soon();
+    visit(&mut rig, &mut store, START + 5, false);
+    assert_eq!(rig.node.web_state().refused.len(), 3);
+    assert_eq!(kept_since(&dir), 7);
+}
+
+#[test]
+fn wo_22_an_amount_more_than_5_percent_from_the_total_is_marked_and_the_order_taken() {
+    let dir = Dir::new();
+    let (mut rig, book, setup, mut store) = paired(&dir, 1);
+    rig.node
+        .set_request_context(context(1), Some(dollar_rate()));
+    // $25.00 at $100,000.00 is 25,000 sats: 5% either way is not marked, 5.1% is.
+    for (number, sats) in [
+        (7, 25_000),
+        (8, 26_250),
+        (9, 26_275),
+        (10, 23_750),
+        (11, 23_725),
+    ] {
+        store.order(number, sats);
+    }
+    rig.node.web_visit_soon();
+    visit(&mut rig, &mut store, START + 5, false);
+    let info = rig.node.web_state();
+    assert_eq!(info.orders, 5, "every order is taken");
+    assert_eq!(info.refused.len(), 0);
+    let marked: Vec<u64> = info.amount_off.iter().map(|a| a.order).collect();
+    assert_eq!(marked, [9, 11]);
+    let words = info.amount_off[0].words();
+    assert_eq!(words.heading, "Amount does not match");
+    assert_eq!(
+        words.what,
+        "Web order 9 asks 26275 sats for 25.00 USD, more than 5% from this phone's rate. The store may have been changed."
+    );
+    assert_eq!(
+        words.next,
+        "Check the order in the store before you send the goods."
+    );
+    // The mark is kept with the order: it reads back after a restart.
+    let before = info.amount_off.clone();
+    let rig = restart(rig, &dir, book, &setup);
+    assert_eq!(rig.node.web_state().amount_off, before);
+}
+
+#[test]
+fn wo_22_no_rate_or_a_rate_of_another_currency_marks_nothing() {
+    // No rate held.
+    let dir = Dir::new();
+    let (mut rig, _book, _setup, mut store) = paired(&dir, 1);
+    store.order(7, 1_000_000);
+    rig.node.web_visit_soon();
+    visit(&mut rig, &mut store, START + 5, false);
+    assert_eq!(rig.node.web_state().orders, 1);
+    assert!(rig.node.web_state().amount_off.is_empty());
+    // A euro rate, for an order in dollars.
+    let dir = Dir::new();
+    let (mut rig, _book, _setup, mut store) = paired(&dir, 1);
+    let euros = RequestContext {
+        currency: ShopCurrency::Eur,
+        ..context(1)
+    };
+    let mut rate = dollar_rate();
+    rate.currency = ShopCurrency::Eur;
+    rig.node.set_request_context(euros, Some(rate));
+    store.order(7, 1_000_000);
+    rig.node.web_visit_soon();
+    visit(&mut rig, &mut store, START + 5, false);
+    assert_eq!(rig.node.web_state().orders, 1);
+    assert!(rig.node.web_state().amount_off.is_empty());
+}
+
+#[test]
+fn wo_22_the_mark_is_in_version_2_of_the_file_and_a_file_without_one_stays_version_1() {
+    let dir = Dir::new();
+    let (mut rig, _book, _setup, mut store) = paired(&dir, 1);
+    rig.node
+        .set_request_context(context(1), Some(dollar_rate()));
+    store.order(7, 25_000);
+    rig.node.web_visit_soon();
+    visit(&mut rig, &mut store, START + 5, false);
+    let plain = std::fs::read(dir.path().join(WEB_ORDERS_FILE)).unwrap();
+    assert_eq!(plain[4], 1, "no mark, version 1");
+    store.order(8, 40_000);
+    rig.node.web_visit_soon();
+    visit(&mut rig, &mut store, START + 6, false);
+    let marked = std::fs::read(dir.path().join(WEB_ORDERS_FILE)).unwrap();
+    assert_eq!(marked[4], 2, "a mark, version 2");
+    let state = decode(&marked).unwrap();
+    assert_eq!(encode(&state), marked, "it reads back to the same bytes");
+    assert!(state.orders[1].amount_off.is_some() && state.orders[0].amount_off.is_none());
+    // The version 1 file still reads, and one that claims version 2 with no mark does not.
+    assert!(decode(&plain).is_ok());
+    let mut lying = plain.clone();
+    lying[4] = 2;
+    assert!(decode(&lying).is_err());
+    let mut cut = marked.clone();
+    cut[4] = 3;
+    assert!(decode(&cut).is_err());
 }

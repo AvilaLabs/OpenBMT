@@ -66,14 +66,20 @@ funds.**
   signature and uses each address once, in order.
 - **WO-11. Running low.** With fewer than 20 left the plugin says so in its
   admin page, and the owner phone sends the next range at its next visit
-  (WO-20). With none left, Bitcoin is hidden at checkout. An address is
-  never used twice. The pool, the numbers used once and an order are changed
-  only under the store's lock, which is taken by one atomic insert into the
-  options table. A lock never released is taken over after 30 seconds, by an
-  update that succeeds only on the value that was read, and a request
-  releases only the lock it wrote. An order takes its address with the lock
-  held: the order is read again from the database, an order that already has
-  an address takes none, and the address, the quote and the order are
+  (WO-20). With none left, Bitcoin is hidden at checkout. At most 20 orders
+  made in the last 24 hours may be unpaid at once, a number the owner can set
+  in the admin page from 1 to 100; when that many are, Bitcoin is hidden at
+  checkout and the admin page says why. Each unpaid order holds an address and
+  a wallet looks only a few unused addresses ahead, so a script that opens
+  orders it never pays can use up neither the addresses nor the room the
+  wallet looks in. The plugin keeps no address of a customer's computer for
+  this. An address is never used twice. The pool, the numbers used once and an
+  order are changed only under the store's lock, which is taken by one atomic
+  insert into the options table. A lock never released is taken over after 30
+  seconds, by an update that succeeds only on the value that was read, and a
+  request releases only the lock it wrote. An order takes its address with the
+  lock held: the order is read again from the database, an order that already
+  has an address takes none, and the address, the quote and the order are
   written before the lock is released, so an order sent twice at once takes
   one address.
 - **WO-12. Watched forever.** Every address in a range the plugin accepted is
@@ -121,7 +127,14 @@ funds.**
   waits on hold in the store (WO-17) until the next visit, and its payment
   is counted then. The owner phone shows when it last visited the store.
 - **WO-22. What the owner phone checks.** An order whose address was not in a
-  range it sent, or was used before, is refused and shown to the owner.
+  range it sent, or was used before, is refused and shown to the owner. An
+  order whose number is more than 10,000,000 above the highest the phone has
+  taken, or above 2^53 − 1, is refused the same way, and no refused order
+  moves the phone's place in the store's orders. When the phone holds a rate
+  of the order's currency (`docs/RATE-RULES.md`), it compares the order's
+  amount with its total at that rate: more than 5% apart, the order is taken
+  and marked for the owner, since a store that was changed could ask the
+  customer for less than the total.
 
 ## 6. Paid
 

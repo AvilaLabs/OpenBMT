@@ -45,9 +45,9 @@ use openbmt_watch::HeaderChain;
 
 use crate::node::{OwnerNode, OwnerPort};
 use crate::web_orders::{
-    check_store_url, open, store, web_key_seed, Loaded, NoticeKey, OrderRec, PairState, Pairing,
-    RefusedOrder, RefusedWhy, SentBlock, WebError, LOW_ADDRESSES, MAX_ORDERS, MAX_RANGES,
-    MAX_REFUSALS,
+    check_store_url, open, store, web_key_seed, AmountOff, AmountOffOrder, Loaded, NoticeKey,
+    OrderRec, PairState, Pairing, RefusedOrder, RefusedWhy, SentBlock, WebError, LOW_ADDRESSES,
+    MAX_ORDERS, MAX_RANGES, MAX_REFUSALS,
 };
 
 /// The seconds the first failure waits before the next visit.
@@ -295,6 +295,9 @@ pub struct WebStateInfo {
     pub notices_waiting: u32,
     /// The orders refused, newest last (WO-22).
     pub refused: Vec<RefusedOrder>,
+    /// The orders taken whose amount is more than 5% from their total at the
+    /// phone's rate (WO-22).
+    pub amount_off: Vec<AmountOffOrder>,
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -395,6 +398,7 @@ impl<P: OwnerPort> OwnerNode<P> {
             told: 0,
             notices_waiting: 0,
             refused: Vec::new(),
+            amount_off: Vec::new(),
         };
         let loaded = match &self.web.state {
             Ok(loaded) => loaded,
@@ -425,6 +429,16 @@ impl<P: OwnerPort> OwnerNode<P> {
         info.trouble = s.trouble;
         info.orders = u32::try_from(s.orders.len()).unwrap_or(u32::MAX);
         info.refused = s.refusals.clone();
+        info.amount_off = s
+            .orders
+            .iter()
+            .filter_map(|o| {
+                o.amount_off.map(|off| AmountOffOrder {
+                    order: o.order,
+                    off,
+                })
+            })
+            .collect();
         let wanted = self.web_wanted_notices(loaded);
         let waiting_keys: BTreeSet<u64> = wanted.iter().map(|(o, _, _)| *o).collect();
         info.notices_waiting = u32::try_from(waiting_keys.len()).unwrap_or(u32::MAX);
@@ -1029,8 +1043,16 @@ impl<P: OwnerPort> OwnerNode<P> {
     /// yet, or a file that cannot be stored), so that it is asked for again.
     fn web_take_order(&mut self, next: &mut Loaded, order: &StoreOrder, now: u64) -> bool {
         use openbmt_owner::web_order::OrderCheck;
+        // WO-22: a refused order never moves `since`: the phone's place in the
+        // store's orders is the highest order it took. The store reports a
+        // refused order again at the next visit, so it is shown once.
         let refuse = |next: &mut Loaded, why: RefusedWhy| {
-            next.state.since = next.state.since.max(order.order);
+            let again = |r: &RefusedOrder| {
+                r.order == order.order && r.why == why && r.address == order.address
+            };
+            if next.state.refusals.iter().any(again) {
+                return;
+            }
             if next.state.refusals.len() >= MAX_REFUSALS {
                 next.state.refusals.remove(0);
             }
@@ -1044,7 +1066,7 @@ impl<P: OwnerPort> OwnerNode<P> {
         };
         // What the check records stays only for an order that is taken.
         let before = next.sent.clone();
-        match next.sent.check(order) {
+        match next.sent.check(order, next.state.since) {
             Err(r) => {
                 refuse(next, RefusedWhy::of(r));
                 true
@@ -1082,6 +1104,7 @@ impl<P: OwnerPort> OwnerNode<P> {
                         request,
                         acked: None,
                         refused: None,
+                        amount_off: request.and_then(|_| self.web_amount_off(order)),
                     },
                 );
                 if request.is_none() {
@@ -1091,6 +1114,28 @@ impl<P: OwnerPort> OwnerNode<P> {
                 true
             }
         }
+    }
+
+    /// WO-22: the mark of an order whose amount is more than 5% from its
+    /// total at the rate the phone holds, when that rate is in the order's
+    /// currency. The sats are worked out as the plugin does
+    /// (`Quote::sats_for`): the total over the rate, rounded up, in integers.
+    fn web_amount_off(&self, order: &StoreOrder) -> Option<AmountOff> {
+        let rate = self.kept_rate()?;
+        let currency = self.requests.rate.as_ref()?.currency;
+        if currency.code() != order.currency {
+            return None;
+        }
+        let per_btc = u128::from(rate.rate.minor_per_btc());
+        let top = u128::from(order.total_minor) * 100_000_000;
+        let expected = top.div_ceil(per_btc);
+        let asked = u128::from(order.sats);
+        let apart = asked.abs_diff(expected);
+        (apart * 100 > expected * 5).then_some(AmountOff {
+            sats: order.sats,
+            total_minor: order.total_minor,
+            currency,
+        })
     }
 
     /// RQ-05, WO-22: the request of a web order: in bitcoin, the amount the

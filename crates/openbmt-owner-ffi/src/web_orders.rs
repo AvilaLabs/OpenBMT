@@ -132,6 +132,20 @@ wire_record!(WebRefusedView {
     words
 });
 
+/// One order taken whose amount is more than 5% from its total at the
+/// phone's rate (WO-22).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebAmountOffView {
+    /// The order number the store gave.
+    pub order: u64,
+    /// The satoshis the store asked for.
+    pub sats: u64,
+    /// What is told of it.
+    pub words: WordsView,
+}
+
+wire_record!(WebAmountOffView { order, sats, words });
+
 /// What the store's page shows (WO-21, WO-22).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebStateView {
@@ -169,6 +183,8 @@ pub struct WebStateView {
     pub notices_waiting: u32,
     /// The orders refused, newest last.
     pub refused: Vec<WebRefusedView>,
+    /// The orders taken that are marked for their amount, oldest first.
+    pub amount_off: Vec<WebAmountOffView>,
 }
 
 wire_record!(WebStateView {
@@ -188,7 +204,8 @@ wire_record!(WebStateView {
     waiting,
     told,
     notices_waiting,
-    refused
+    refused,
+    amount_off
 });
 
 /// The arguments of `web_step` (WO-21).
@@ -398,7 +415,16 @@ fn view_of(info: WebStateInfo) -> WebStateView {
                 address: r.address,
                 sats: r.sats,
                 at: r.at,
-                words: WordsView(r.why.words()),
+                words: WordsView(r.why.words(r.order)),
+            })
+            .collect(),
+        amount_off: info
+            .amount_off
+            .into_iter()
+            .map(|a| WebAmountOffView {
+                order: a.order,
+                sats: a.off.sats,
+                words: WordsView(a.words()),
             })
             .collect(),
     }

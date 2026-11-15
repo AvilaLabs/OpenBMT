@@ -682,13 +682,15 @@ object ProtocolDecoderTest {
         val state = Writer().u8(0).u8(2).string("Shop").string("https://shop.example").string("ab12 cd34")
             .u8(0).u8(1).u64(1_700_000_000L).u8(0).u8(0).u8(1).u64(40).u32(100).u8(0)
             .u32(5).u32(1).u32(3).u32(0).u32(1).u64(9).string("bc1qweb").u64(2_500).u64(7).toByteArray()
-        val read = decodeResponse(header(0, state + wordsBytes())).let { it.webState().also { _ -> it.end() } }
+        val off = Writer().u32(1).u64(11).u64(150_000).toByteArray()
+        val read = decodeResponse(header(0, state + wordsBytes() + off + wordsBytes())).let { it.webState().also { _ -> it.end() } }
         check(read.off == null && read.pairing == WebPairing.Paired && read.shopName == "Shop")
         check(read.url == "https://shop.example" && read.fingerprint == "ab12 cd34" && read.code == null)
         check(read.lastVisit == 1_700_000_000L && read.failure == null && read.retryAt == null && read.left == 40L)
         check(read.addressesSent == 100L && read.trouble == null && read.orders == 5L && read.waiting == 1L)
         check(read.told == 3L && read.noticesWaiting == 0L && read.refused.size == 1)
         check(read.refused[0].order == 9L && read.refused[0].sats == 2_500L && read.refused[0].address == "bc1qweb")
+        check(read.amountOff.size == 1 && read.amountOff[0].order == 11L && read.amountOff[0].sats == 150_000L)
         rejects("a pairing that is not defined") {
             decodeResponse(header(0, Writer().u8(0).u8(9).toByteArray())).webState()
         }

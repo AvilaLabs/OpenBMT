@@ -76,8 +76,9 @@ pub fn refusal_words(refusal: &WebOrderRefusal) -> Words {
     }
 }
 
-/// WO-22: the words for an order the owner phone refused and shows.
-pub fn order_refusal_words(refusal: &OrderRefusal) -> Words {
+/// WO-22: the words for an order the owner phone refused and shows. `order`
+/// is the number the store gave it.
+pub fn order_refusal_words(refusal: &OrderRefusal, order: u64) -> Words {
     match refusal {
         OrderRefusal::AddressNotSent => stop(
             "Order to an unknown address",
@@ -103,7 +104,24 @@ pub fn order_refusal_words(refusal: &OrderRefusal) -> Words {
             "Check the order's total in the store and the store's currency in its settings.",
             "WO-22",
         ),
+        OrderRefusal::NumberTooFar => stop(
+            "Order refused",
+            &format!("Web order {order} has a number far past the store's last one, so this phone did not take it."),
+            "Check the store: it may have been changed.",
+            "WO-22",
+        ),
     }
+}
+
+/// WO-22: the words for an order taken whose amount is more than 5% from its
+/// total at this phone's rate. `total` is the total with its currency.
+pub fn amount_off_words(order: u64, sats: u64, total: &str) -> Words {
+    stop(
+        "Amount does not match",
+        &format!("Web order {order} asks {sats} sats for {total}, more than 5% from this phone's rate. The store may have been changed."),
+        "Check the order in the store before you send the goods.",
+        "WO-22",
+    )
 }
 
 /// WO-22: the words for an order the request book would not take.
@@ -317,6 +335,7 @@ mod tests {
             OrderRefusal::AddressUsedBefore,
             OrderRefusal::OrderChanged,
             OrderRefusal::NoAmount,
+            OrderRefusal::NumberTooFar,
         ];
         let visits = [
             VisitTrouble::NotReached,
@@ -353,9 +372,13 @@ mod tests {
         out.extend(
             orders
                 .iter()
-                .map(|r| (format!("{r:?}"), order_refusal_words(r))),
+                .map(|r| (format!("{r:?}"), order_refusal_words(r, 7))),
         );
         out.push(("NoRequest".into(), no_request_words()));
+        out.push((
+            "AmountOff".into(),
+            amount_off_words(7, 150_000, "12.50 USD"),
+        ));
         out.extend(visits.iter().map(|v| (format!("{v:?}"), visit_words(*v))));
         out.extend(stores.iter().map(|v| (format!("{v:?}"), store_words(*v))));
         out.extend(ranges.iter().map(|v| (format!("{v:?}"), range_words(*v))));
@@ -366,7 +389,7 @@ mod tests {
     #[test]
     fn sc_12_the_web_order_words_pass_the_checks_and_differ() {
         let all = all();
-        assert_eq!(all.len(), 34);
+        assert_eq!(all.len(), 36);
         for (name, w) in &all {
             assert_eq!(openbmt_core::say::check(w), Ok(()), "{name}");
             assert!(!w.heading.starts_with("WORDS_NEEDED"), "{name}");
@@ -383,7 +406,7 @@ mod tests {
     fn wo_22_wo_43_the_words_name_their_rule() {
         assert_eq!(refusal_words(&WebOrderRefusal::Random).code, Some("WO-43"));
         assert_eq!(
-            order_refusal_words(&OrderRefusal::AddressNotSent).code,
+            order_refusal_words(&OrderRefusal::AddressNotSent, 7).code,
             Some("WO-22")
         );
         assert_eq!(visit_words(VisitTrouble::NotReached).code, Some("WO-06"));

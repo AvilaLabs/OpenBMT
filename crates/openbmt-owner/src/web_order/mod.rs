@@ -22,7 +22,9 @@ mod tests;
 #[cfg(test)]
 mod vectors;
 
-pub use check::{OrderCheck, OrderRefusal, SentRanges, StoreOrder};
+pub use check::{
+    OrderCheck, OrderRefusal, SentRanges, StoreOrder, MAX_ORDER_JUMP, MAX_ORDER_NUMBER,
+};
 pub use key::{WebOrderKey, FINGERPRINT_BYTES, PUBLIC_BYTES, SIGNATURE_BYTES};
 pub use notice::{Notice, NoticeState, MAX_NOTICE_TXIDS, NOTICE_MAGIC};
 pub use pairing::{

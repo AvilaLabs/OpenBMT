@@ -62,6 +62,7 @@ import org.openbmt.owner.WebCallKind
 import org.openbmt.owner.WebOutcome
 import org.openbmt.owner.WebPair
 import org.openbmt.owner.WebPairing
+import org.openbmt.owner.WebAmountOff
 import org.openbmt.owner.WebRefused
 import org.openbmt.owner.WebState
 import org.openbmt.owner.WebStep
@@ -5218,12 +5219,13 @@ object AppModelTest {
         left: Long? = 100,
         refused: List<WebRefused> = emptyList(),
         lastVisit: Long? = 5,
-    ) = WebState(off, pairing, "Shop", "https://shop.example", "abcd-1234-abcd-1234", null, lastVisit, null, null, left, 100, null, 1, 1, 0, 0, refused)
+        amountOff: List<WebAmountOff> = emptyList(),
+    ) = WebState(off, pairing, "Shop", "https://shop.example", "abcd-1234-abcd-1234", null, lastVisit, null, null, left, 100, null, 1, 1, 0, 0, refused, amountOff)
 
     private class FakeWebPort(val steps: MutableList<WebStep>) : WebPort {
         val forces = ArrayList<Boolean>()
         val replies = ArrayList<Triple<WebOutcome, Long, Int>>()
-        var state = WebState(null, WebPairing.None, "", "", "", null, null, null, null, null, 0, null, 0, 0, 0, 0, emptyList())
+        var state = WebState(null, WebPairing.None, "", "", "", null, null, null, null, null, 0, null, 0, 0, 0, 0, emptyList(), emptyList())
 
         override fun pairStart(ask: RequestAsk, url: String, shopName: String) = WebPair("CODE", "abcd-1234-abcd-1234", shopName, url)
         override fun pairConfirm(ask: RequestAsk) = state
@@ -5264,6 +5266,9 @@ object AppModelTest {
         ok(WebModel.runningLow(webState(left = 19)) && !WebModel.runningLow(webState(left = 20)) && !WebModel.runningLow(webState(left = null)), "the store is low below 20 addresses (WO-11)")
         ok(WebModel.canVisit(webState()) && !WebModel.canVisit(webState(WebPairing.Waiting)) && !WebModel.canVisit(webState(off = words())), "a visit is asked for only of a paired store that is on")
         ok(WebModel.shownKey(webState()) != WebModel.shownKey(webState(lastVisit = 6)) && WebModel.shownKey(webState()) == WebModel.shownKey(webState()), "the page is made again when a visit changed it")
+        val marked = webState(amountOff = listOf(WebAmountOff(9, 150_000, words())))
+        ok(WebModel.shownKey(webState()) != WebModel.shownKey(marked), "WO-22: the page is made again when an order is marked for its amount")
+        ok(screens.contains("state.amountOff") && screens.contains("a.words.say()"), "WO-22: each marked order is shown with its words")
 
         // A visit: each call is sent as it is and its answer handed back; the owner's force holds for the first step only.
         val calls = mutableListOf(WebStep(WebStepKind.Call, webCall(WebCallKind.Orders)), WebStep(WebStepKind.Call, webCall(WebCallKind.Notice)), WebStep(WebStepKind.Idle, null))

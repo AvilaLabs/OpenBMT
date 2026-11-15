@@ -1479,6 +1479,9 @@ enum class WebPairing { None, Waiting, Paired }
 /** One order the owner phone refused (WO-22). */
 class WebRefused(val order: Long, val address: String, val sats: Long, val at: Long, val words: Words)
 
+/** One order taken whose amount is more than 5% from its total at the phone's rate (WO-22). */
+class WebAmountOff(val order: Long, val sats: Long, val words: Words)
+
 /** What the store's page shows (WO-21, WO-22). */
 class WebState(
     val off: Words?,
@@ -1498,6 +1501,7 @@ class WebState(
     val told: Long,
     val noticesWaiting: Long,
     val refused: List<WebRefused>,
+    val amountOff: List<WebAmountOff>,
 )
 
 /** Which call of a visit. */
@@ -1947,6 +1951,7 @@ internal fun Reader.webState(): WebState =
         option { u64() }, option { words() }, option { u64() }, option { u64() }, u32(),
         option { words() }, u32(), u32(), u32(), u32(),
         list { WebRefused(u64(), string(), u64(), u64(), words()) },
+        list { WebAmountOff(u64(), u64(), words()) },
     )
 
 internal fun Reader.webStep(): WebStep {

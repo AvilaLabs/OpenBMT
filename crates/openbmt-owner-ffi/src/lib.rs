@@ -152,7 +152,7 @@ pub use views::{
     StageView, StartConfig, StatusView, SwapHeldView, TakenView, ViewKind, WordsView,
 };
 pub use web_orders::{
-    WebCallKindView, WebCallView, WebCodeView, WebHeaderView, WebOutcome, WebPairArgs, WebPairView,
-    WebPairingKind, WebRefusedView, WebReplyArgs, WebStateView, WebStepArgs, WebStepKind,
-    WebStepView,
+    WebAmountOffView, WebCallKindView, WebCallView, WebCodeView, WebHeaderView, WebOutcome,
+    WebPairArgs, WebPairView, WebPairingKind, WebRefusedView, WebReplyArgs, WebStateView,
+    WebStepArgs, WebStepKind, WebStepView,
 };

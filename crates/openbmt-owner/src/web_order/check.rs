@@ -68,6 +68,8 @@ pub enum OrderRefusal {
     OrderChanged,
     /// The amount is zero.
     NoAmount,
+    /// The number is far past the highest the phone has taken.
+    NumberTooFar,
 }
 
 impl OrderRefusal {
@@ -76,6 +78,12 @@ impl OrderRefusal {
         "WO-22"
     }
 }
+
+/// WO-22: how far past the highest order number taken a new number may be.
+pub const MAX_ORDER_JUMP: u64 = 10_000_000;
+
+/// WO-22: the highest order number that is taken, 2^53 - 1.
+pub const MAX_ORDER_NUMBER: u64 = (1 << 53) - 1;
 
 /// What a checked order is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,10 +131,15 @@ impl SentRanges {
         self.sent.len()
     }
 
-    /// WO-22: checks an order. One whose address was not in a range sent, or
-    /// was used before by another order, is refused; a refusal changes
+    /// WO-22: checks an order, given `since`, the highest order number taken.
+    /// One whose number is more than [`MAX_ORDER_JUMP`] above `since` or
+    /// above [`MAX_ORDER_NUMBER`], whose address was not in a range sent, or
+    /// that was used before by another order, is refused; a refusal changes
     /// nothing. A new order is recorded as using its address.
-    pub fn check(&mut self, order: &StoreOrder) -> Result<OrderCheck, OrderRefusal> {
+    pub fn check(&mut self, order: &StoreOrder, since: u64) -> Result<OrderCheck, OrderRefusal> {
+        if order.order > MAX_ORDER_NUMBER || order.order > since.saturating_add(MAX_ORDER_JUMP) {
+            return Err(OrderRefusal::NumberTooFar);
+        }
         if order.sats == 0 {
             return Err(OrderRefusal::NoAmount);
         }

@@ -403,10 +403,10 @@ fn wo_22_an_order_for_an_address_sent_is_taken_once() {
     let list = addresses(3);
     sent.add_range(&Range::new(0, list.clone()).expect("a range"))
         .expect("added");
-    assert_eq!(sent.check(&order(1, &list[0])), Ok(OrderCheck::New));
-    assert_eq!(sent.check(&order(2, &list[1])), Ok(OrderCheck::New));
+    assert_eq!(sent.check(&order(1, &list[0]), 0), Ok(OrderCheck::New));
+    assert_eq!(sent.check(&order(2, &list[1]), 0), Ok(OrderCheck::New));
     // The same order again, on the next visit.
-    assert_eq!(sent.check(&order(1, &list[0])), Ok(OrderCheck::Known));
+    assert_eq!(sent.check(&order(1, &list[0]), 0), Ok(OrderCheck::Known));
 }
 
 #[test]
@@ -416,11 +416,11 @@ fn wo_22_an_address_not_in_a_range_sent_is_refused() {
     sent.add_range(&Range::new(0, list[..3].to_vec()).expect("a range"))
         .expect("added");
     assert_eq!(
-        sent.check(&order(1, &list[3])),
+        sent.check(&order(1, &list[3]), 0),
         Err(OrderRefusal::AddressNotSent)
     );
     // A refusal records nothing: the order number is free again.
-    assert_eq!(sent.check(&order(1, &list[0])), Ok(OrderCheck::New));
+    assert_eq!(sent.check(&order(1, &list[0]), 0), Ok(OrderCheck::New));
 }
 
 #[test]
@@ -429,9 +429,9 @@ fn wo_22_an_address_used_before_by_another_order_is_refused() {
     let list = addresses(2);
     sent.add_range(&Range::new(0, list.clone()).expect("a range"))
         .expect("added");
-    assert_eq!(sent.check(&order(1, &list[0])), Ok(OrderCheck::New));
+    assert_eq!(sent.check(&order(1, &list[0]), 0), Ok(OrderCheck::New));
     assert_eq!(
-        sent.check(&order(2, &list[0])),
+        sent.check(&order(2, &list[0]), 0),
         Err(OrderRefusal::AddressUsedBefore)
     );
 }
@@ -442,14 +442,51 @@ fn wo_22_an_order_that_changes_its_address_or_has_no_amount_is_refused() {
     let list = addresses(2);
     sent.add_range(&Range::new(0, list.clone()).expect("a range"))
         .expect("added");
-    assert_eq!(sent.check(&order(1, &list[0])), Ok(OrderCheck::New));
+    assert_eq!(sent.check(&order(1, &list[0]), 0), Ok(OrderCheck::New));
     assert_eq!(
-        sent.check(&order(1, &list[1])),
+        sent.check(&order(1, &list[1]), 0),
         Err(OrderRefusal::OrderChanged)
     );
     let mut free = order(2, &list[1]);
     free.sats = 0;
-    assert_eq!(sent.check(&free), Err(OrderRefusal::NoAmount));
+    assert_eq!(sent.check(&free, 0), Err(OrderRefusal::NoAmount));
+}
+
+#[test]
+fn wo_22_an_order_number_far_past_the_last_is_refused() {
+    let mut sent = SentRanges::new();
+    let list = addresses(4);
+    sent.add_range(&Range::new(0, list.clone()).expect("a range"))
+        .expect("added");
+    let since = 7;
+    // u64::MAX is refused, and records nothing.
+    assert_eq!(
+        sent.check(&order(u64::MAX, &list[0]), since),
+        Err(OrderRefusal::NumberTooFar)
+    );
+    // Ten million past the last is taken, one more is not.
+    assert_eq!(
+        sent.check(&order(since + 10_000_000, &list[0]), since),
+        Ok(OrderCheck::New)
+    );
+    assert_eq!(
+        sent.check(&order(since + 10_000_001, &list[1]), since),
+        Err(OrderRefusal::NumberTooFar)
+    );
+    // The bound of 2^53 - 1 holds however far since is.
+    let top = (1u64 << 53) - 1;
+    assert_eq!(
+        sent.check(&order(top, &list[1]), top - 5),
+        Ok(OrderCheck::New)
+    );
+    assert_eq!(
+        sent.check(&order(top + 1, &list[2]), top),
+        Err(OrderRefusal::NumberTooFar)
+    );
+    assert_eq!(
+        sent.check(&order(top + 1, &list[2]), u64::MAX),
+        Err(OrderRefusal::NumberTooFar)
+    );
 }
 
 #[test]

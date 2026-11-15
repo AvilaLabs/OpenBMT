@@ -161,8 +161,8 @@ pub use watch::{
 };
 pub use watcher::{OwnerConfig, OwnerStartError, OwnerWatcher, HEARTBEAT_FILE, NOTE_LOG};
 pub use web_orders::{
-    check_store_url, PairState, RefusedOrder, RefusedWhy, WebError, LOW_ADDRESSES,
-    MAGIC_WEB_ORDERS, MAX_ORDERS, MAX_RANGES, MAX_REFUSALS, WEB_ORDERS_FILE,
+    check_store_url, AmountOff, AmountOffOrder, PairState, RefusedOrder, RefusedWhy, WebError,
+    LOW_ADDRESSES, MAGIC_WEB_ORDERS, MAX_ORDERS, MAX_RANGES, MAX_REFUSALS, WEB_ORDERS_FILE,
 };
 pub use web_visit::{
     trouble_words, OrderStand, WebCall, WebCallKind, WebFailure, WebPairShown, WebStateInfo,

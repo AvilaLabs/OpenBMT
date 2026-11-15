@@ -515,7 +515,8 @@ WebCodeView: record: fingerprint: string, shop_name: string
 WebPairingKind: enum, one tag byte
     tags None=0 Waiting=1 Paired=2
 WebRefusedView: record: order: u64, address: string, sats: u64, at: u64, words: Words
-WebStateView: record: off: option<Words>, pairing: WebPairingKind, shop_name: string, url: string, fingerprint: string, code: option<string>, last_visit: option<u64>, failure: option<Words>, retry_at: option<u64>, left: option<u64>, addresses_sent: u32, trouble: option<Words>, orders: u32, waiting: u32, told: u32, notices_waiting: u32, refused: list<WebRefusedView>
+WebAmountOffView: record: order: u64, sats: u64, words: Words
+WebStateView: record: off: option<Words>, pairing: WebPairingKind, shop_name: string, url: string, fingerprint: string, code: option<string>, last_visit: option<u64>, failure: option<Words>, retry_at: option<u64>, left: option<u64>, addresses_sent: u32, trouble: option<Words>, orders: u32, waiting: u32, told: u32, notices_waiting: u32, refused: list<WebRefusedView>, amount_off: list<WebAmountOffView>
 WebStepArgs: record: ask: RequestAsk, force: bool
 WebStepKind: enum, one tag byte
     tags Idle=0 Busy=1 Call=2

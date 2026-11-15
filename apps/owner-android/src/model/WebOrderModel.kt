@@ -121,7 +121,7 @@ object WebModel {
     /** What the paired page shows that a visit can change: the page is made again when this does. */
     fun shownKey(state: WebState): List<Any?> = listOf(
         state.pairing, state.lastVisit, state.failure?.heading, state.retryAt, state.left, state.addressesSent, state.trouble?.heading,
-        state.orders, state.waiting, state.told, state.noticesWaiting, state.refused.size, state.off?.heading,
+        state.orders, state.waiting, state.told, state.noticesWaiting, state.refused.size, state.amountOff.size, state.off?.heading,
     )
 
     /** WO-21: a visit the owner asks for is possible when a store is paired. */

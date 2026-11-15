@@ -240,9 +240,9 @@ use crate::views::{
 };
 use crate::watch::{self, WatchEntry, WatchStart, WatchStepView};
 use crate::web_orders::{
-    self, WebCallKindView, WebCallView, WebCodeView, WebHeaderView, WebOutcome, WebPairArgs,
-    WebPairView, WebPairingKind, WebRefusedView, WebReplyArgs, WebStateView, WebStepArgs,
-    WebStepKind, WebStepView,
+    self, WebAmountOffView, WebCallKindView, WebCallView, WebCodeView, WebHeaderView, WebOutcome,
+    WebPairArgs, WebPairView, WebPairingKind, WebRefusedView, WebReplyArgs, WebStateView,
+    WebStepArgs, WebStepKind, WebStepView,
 };
 
 /// The first four bytes of a request.
@@ -1483,6 +1483,7 @@ fn definitions() -> Vec<TypeDef> {
         WebCodeView::define(),
         WebPairingKind::define(),
         WebRefusedView::define(),
+        WebAmountOffView::define(),
         WebStateView::define(),
         WebStepArgs::define(),
         WebStepKind::define(),

@@ -27,12 +27,17 @@
 //! made), the number of the last order taken, the sequence of the next range,
 //! when the store was last visited, the addresses the store said it had left,
 //! the store's last refusal of a range, the ranges, the orders and the
-//! orders that were refused. Numbers are little endian.
+//! orders that were refused. Numbers are little endian. Version 1 is the
+//! layout above; version 2 is written only when an order is marked for an
+//! amount that does not match, and then each order's record ends with that
+//! mark: a byte 0 for none, or 1 then the satoshis asked, the total in minor
+//! units and the byte of its currency.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
 
+use openbmt_core::currency::ShopCurrency;
 use openbmt_core::say::Words;
 use openbmt_core::wire::{self, DecodeError, Reader};
 use openbmt_owner::web_order::say as words;
@@ -266,6 +271,50 @@ pub(crate) struct NoticeKey {
     pub(crate) txids: u8,
 }
 
+/// WO-22: an order taken whose amount is more than 5% from its total at the
+/// phone's rate: what the store asked and for what total.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AmountOff {
+    /// The satoshis the store asked for.
+    pub sats: u64,
+    /// The order total in minor units of its currency.
+    pub total_minor: u64,
+    /// The currency of the total.
+    pub currency: ShopCurrency,
+}
+
+/// WO-22: an order marked for its amount, as the store page lists it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AmountOffOrder {
+    /// The order number the store gave.
+    pub order: u64,
+    /// What the store asked for and the total.
+    pub off: AmountOff,
+}
+
+impl AmountOffOrder {
+    /// WO-22: the words for the mark.
+    pub fn words(&self) -> Words {
+        let digits = self.off.currency.minor_digits();
+        let scale = 10u64.pow(digits);
+        let total = if digits == 0 {
+            self.off.total_minor.to_string()
+        } else {
+            format!(
+                "{}.{:0width$}",
+                self.off.total_minor / scale,
+                self.off.total_minor % scale,
+                width = usize::try_from(digits).unwrap_or(2)
+            )
+        };
+        words::amount_off_words(
+            self.order,
+            self.off.sats,
+            &format!("{total} {}", self.off.currency.code()),
+        )
+    }
+}
+
 /// An order taken (WO-20) and what the store was told of it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OrderRec {
@@ -277,6 +326,8 @@ pub(crate) struct OrderRec {
     pub(crate) acked: Option<NoticeKey>,
     /// The notice the store refused: not sent again until it changes.
     pub(crate) refused: Option<NoticeKey>,
+    /// WO-22: the amount is more than 5% from the total at the phone's rate.
+    pub(crate) amount_off: Option<AmountOff>,
 }
 
 /// Why an order was refused and shown (WO-22).
@@ -293,6 +344,8 @@ pub enum RefusedWhy {
     /// The request book would not take the order: the smallest sale, too
     /// many open requests, an amount too large, or a wallet since changed.
     NoRequest,
+    /// The number is far past the highest taken.
+    NumberTooFar,
 }
 
 impl RefusedWhy {
@@ -304,6 +357,7 @@ impl RefusedWhy {
             Self::OrderChanged => 3,
             Self::NoAmount => 4,
             Self::NoRequest => 5,
+            Self::NumberTooFar => 6,
         }
     }
 
@@ -315,18 +369,21 @@ impl RefusedWhy {
             3 => Some(Self::OrderChanged),
             4 => Some(Self::NoAmount),
             5 => Some(Self::NoRequest),
+            6 => Some(Self::NumberTooFar),
             _ => None,
         }
     }
 
-    /// WO-22: the words for the refusal.
-    pub fn words(self) -> Words {
+    /// WO-22: the words for the refusal of the order `order`.
+    pub fn words(self, order: u64) -> Words {
+        let said = |r: OrderRefusal| words::order_refusal_words(&r, order);
         match self {
-            Self::AddressNotSent => words::order_refusal_words(&OrderRefusal::AddressNotSent),
-            Self::AddressUsedBefore => words::order_refusal_words(&OrderRefusal::AddressUsedBefore),
-            Self::OrderChanged => words::order_refusal_words(&OrderRefusal::OrderChanged),
-            Self::NoAmount => words::order_refusal_words(&OrderRefusal::NoAmount),
+            Self::AddressNotSent => said(OrderRefusal::AddressNotSent),
+            Self::AddressUsedBefore => said(OrderRefusal::AddressUsedBefore),
+            Self::OrderChanged => said(OrderRefusal::OrderChanged),
+            Self::NoAmount => said(OrderRefusal::NoAmount),
             Self::NoRequest => words::no_request_words(),
+            Self::NumberTooFar => said(OrderRefusal::NumberTooFar),
         }
     }
 
@@ -336,6 +393,7 @@ impl RefusedWhy {
             OrderRefusal::AddressUsedBefore => Self::AddressUsedBefore,
             OrderRefusal::OrderChanged => Self::OrderChanged,
             OrderRefusal::NoAmount => Self::NoAmount,
+            OrderRefusal::NumberTooFar => Self::NumberTooFar,
         }
     }
 }
@@ -405,7 +463,7 @@ impl Loaded {
                 currency: String::new(),
             };
             if !matches!(
-                sent.check(&order),
+                sent.check(&order, state.since.max(o.order)),
                 Ok(openbmt_owner::web_order::OrderCheck::New)
             ) {
                 return Err("an order has an address that is not its own");
@@ -482,6 +540,13 @@ pub(crate) fn encode(state: &WebState) -> Vec<u8> {
             out.extend_from_slice(address.as_bytes());
         }
     }
+    // Version 2 only for a file that holds a mark.
+    let marked = state.orders.iter().any(|o| o.amount_off.is_some());
+    if marked {
+        if let Some(version) = out.get_mut(4) {
+            *version = 2;
+        }
+    }
     out.extend_from_slice(&wire::len_u32(state.orders.len()).to_le_bytes());
     for o in &state.orders {
         out.extend_from_slice(&o.order.to_le_bytes());
@@ -490,6 +555,17 @@ pub(crate) fn encode(state: &WebState) -> Vec<u8> {
         wire::put_opt_u64(&mut out, o.request);
         put_key(&mut out, o.acked);
         put_key(&mut out, o.refused);
+        if marked {
+            match o.amount_off {
+                Some(a) => {
+                    out.push(1);
+                    out.extend_from_slice(&a.sats.to_le_bytes());
+                    out.extend_from_slice(&a.total_minor.to_le_bytes());
+                    out.push(a.currency.to_byte());
+                }
+                None => out.push(0),
+            }
+        }
     }
     out.extend_from_slice(&wire::len_u32(state.refusals.len()).to_le_bytes());
     for r in &state.refusals {
@@ -546,10 +622,25 @@ fn get_key(r: &mut Reader<'_>) -> Result<Option<NoticeKey>, &'static str> {
     Ok(Some(key))
 }
 
+fn get_amount_off(r: &mut Reader<'_>) -> Result<Option<AmountOff>, &'static str> {
+    if !r.flag().map_err(corrupt)? {
+        return Ok(None);
+    }
+    let sats = r.u64_le().map_err(corrupt)?;
+    let total_minor = r.u64_le().map_err(corrupt)?;
+    let currency = ShopCurrency::from_byte(r.u8().map_err(corrupt)?)
+        .ok_or("the currency of a mark is not one")?;
+    Ok(Some(AmountOff {
+        sats,
+        total_minor,
+        currency,
+    }))
+}
+
 /// Reads the file strictly. A file that is not exactly what [`encode`] makes
 /// of the state it holds is refused whole.
 pub(crate) fn decode(bytes: &[u8]) -> Result<WebState, &'static str> {
-    let mut r = Reader::framed(bytes, &MAGIC_WEB_ORDERS).map_err(corrupt)?;
+    let (mut r, version) = Reader::framed_up_to(bytes, &MAGIC_WEB_ORDERS, 2).map_err(corrupt)?;
     let pairing = match r.u8().map_err(corrupt)? {
         0 => None,
         kind @ (1 | 2) => {
@@ -617,6 +708,11 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<WebState, &'static str> {
         let request = r.opt_u64().map_err(corrupt)?;
         let acked = get_key(&mut r)?;
         let refused = get_key(&mut r)?;
+        let amount_off = if version == 2 {
+            get_amount_off(&mut r)?
+        } else {
+            None
+        };
         if orders.last().is_some_and(|last| last.order >= order) {
             return Err("the orders are not in order, or one is there twice");
         }
@@ -626,6 +722,7 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<WebState, &'static str> {
             request,
             acked,
             refused,
+            amount_off,
         });
     }
     let n = r.count(MAX_REFUSALS, 8 + 1 + 8 + 1 + 8).map_err(corrupt)?;
