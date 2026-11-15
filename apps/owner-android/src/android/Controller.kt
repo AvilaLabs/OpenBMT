@@ -293,6 +293,8 @@ class Controller(internal val act: MainActivity) {
      */
     fun redraw() {
         if (!visible || pickerOpen || scan.asking || ceremony != null) return
+        // The screen drawn again is never a words screen: a picture of words or an open setup is cleared first (SS-11).
+        starterLeave()
         when {
             node != null || setup != null -> render()
             File(dir, AppFiles.SETUP_FILE).exists() -> openStored()
@@ -338,6 +340,8 @@ class Controller(internal val act: MainActivity) {
         stopNode()
         // A wipe that was begun and not finished is finished first (OA-64).
         if (tries.read(pinNow()).wrong >= Tries.WIPE_AT) return wipe()
+        // A starter setup stopped between its writes is dropped, so that it can start again.
+        starterDropOrphan()
         val setupStatus = try {
             config = configFile.load()
             if (config == null && ownStore.hasWallet()) {

@@ -728,8 +728,9 @@ core's own words, which the binding does not carry yet:
 | SS37_NOT_YET_UNTIL | Not yet, until |
 | SS36_DAYS_LEFT | {days} days left |
 | SS36_LAST_DAY | Last day |
+| SS36_RECORD_UNREAD | The starter wallet's record could not be read, so it is treated as past its date. Move to your hardware wallet. |
 | SS36_CARD_TITLE | Time to move your bitcoin offline |
-| SS36_CARD_TEXT | Your starter wallet holds {held} of your {limit} limit, and {days} days are left. A hardware wallet keeps your bitcoin away from the internet. |
+| SS36_CARD_TEXT | Your starter wallet holds {held} of your {limit} limit. {days}. A hardware wallet keeps your bitcoin away from the internet. |
 | SS36_CARD_GO | Set up my hardware wallet |
 | SS36_CARD_NOT_NOW | Not now |
 | SS36_HOME_MOVE | Move to my hardware wallet |

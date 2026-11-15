@@ -50,6 +50,8 @@ internal fun Controller.watchPermissionResult(results: IntArray) {
 
 private fun Controller.watchTurnOnGranted() {
     val n = node ?: return begin()
+    // SS-37: naming the watch key loosens the settings, which waits while the starter wallet is at its limit or past its date.
+    if (starterHolds(org.openbmt.owner.StarterChangeKind.Other)) return showStarterHeld { showWatch(null) }
     waiting(AppWords.working)
     async({ makeWatchReady(n) }) { r ->
         val e = r.exceptionOrNull()

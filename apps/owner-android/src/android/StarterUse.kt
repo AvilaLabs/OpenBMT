@@ -128,19 +128,44 @@ internal fun Controller.starterLine(n: OwnerNode): HomeLine? {
     if (!starter.store.hasSealed()) return null
     // The node watches the pinned wallet: its coins are the starter wallet's only when that is the pinned wallet.
     if (!starterPinned()) return null
-    val record = starterRecord() ?: return null
+    val record = starterRecord()
     val held = try {
         n.starterHeld()
     } catch (_: OwnerException) {
         return null
     }
+    val counted = starterCounted(n)
+    // SS-37: a record that is missing or cannot be read fails closed: the wallet is treated as past its date.
+    if (record == null) return StarterHome.unreadLine(held, counted)
+    starterSeen(record)
     return try {
-        StarterHome.line(LibraryStarter, record, held, nowSecs(), StarterCoreWords.line(LibraryStarter)) { StarterCoreWords.state(LibraryStarter, it) }
+        StarterHome.line(LibraryStarter, record, held, nowSecs(), StarterCoreWords.line(LibraryStarter), counted) { StarterCoreWords.state(LibraryStarter, it) }
     } catch (_: OwnerException) {
         null
     } catch (_: LinkageError) {
         null
     }
+}
+
+/** How much higher than the saved one the wall clock must be before the highest time seen is saved again, so that the home screen's turns do not each write a file. */
+private const val SEEN_STEP_SECS = 3_600L
+
+/** The highest time the phone has seen is kept in the record (best effort): the date, the card and "Not yet" are judged at it, so that moving the clock back does not move them. */
+private fun Controller.starterSeen(record: StarterRecord) {
+    val now = nowSecs()
+    if (now < record.seenMax + SEEN_STEP_SECS) return
+    try {
+        starter.store.saveRecord(record.withSeen(now))
+    } catch (_: IOException) {
+        // The time is judged from memory of this record only until the next turn; at worst a clock set back is believed once.
+    }
+}
+
+/** Whether the node has checked some blocks, so that what the starter wallet holds is counted and not a start-up zero. */
+private fun Controller.starterCounted(n: OwnerNode): Boolean = try {
+    n.status().checkedHeight > 0
+} catch (_: OwnerException) {
+    false
 }
 
 /**
@@ -161,11 +186,12 @@ internal fun Controller.starterLineView(line: HomeLine): View {
 internal fun Controller.starterCardView(line: HomeLine): View? {
     if (line.opensUpgrade) return null
     val record = starterRecord() ?: return null
-    val now = nowSecs()
+    val now = record.judged(nowSecs())
     val fraction = StarterCard.fraction(line.held, line.limit)
     if (!starter.cardOpen) {
         val start = starter.cardStart
-        starter.cardStart = false
+        // The app-start rule needs what the wallet holds: the flag stays until the node has counted it.
+        if (node?.let { starterCounted(it) } == true) starter.cardStart = false
         if (!StarterCard.cardDue(now, record.moveBy, fraction, record.cardLastShown, record.cardNotNowUntil, start)) return null
         try {
             starter.store.saveRecord(record.withCardShown(now))
@@ -184,7 +210,7 @@ internal fun Controller.starterCardView(line: HomeLine): View? {
             val current = starterRecord()
             if (current != null) {
                 try {
-                    starter.store.saveRecord(current.withCardNotNow(StarterCard.notNowUntil(nowSecs(), current.moveBy, fraction)))
+                    starter.store.saveRecord(current.withCardNotNow(StarterCard.notNowUntil(current.judged(nowSecs()), current.moveBy, fraction)))
                 } catch (_: IOException) {
                 }
             }
@@ -211,32 +237,29 @@ internal fun Controller.starterGate(n: OwnerNode): Boolean {
         showStarterUpgrade(line)
         return true
     }
-    val synced = try {
-        n.status().checkedHeight > 0
-    } catch (_: OwnerException) {
-        false
-    }
-    if (synced) starter.gate = false
+    if (starterCounted(n)) starter.gate = false
     return false
 }
 
 internal fun Controller.showStarterUpgrade(line: HomeLine) {
-    screen(
-        StarterWords.upgradeTitle, listOf(ui.facts(line.facts)),
-        listOf(ui.primary(StarterWords.upgradeNow) { showStarterMove() }, ui.button(StarterWords.notYet) { showStarterNotYet() }),
-        words = line.words, logo = true,
-    )
+    // SS-37: "Not yet" is for the limit or the date only, and needs the record to keep it in.
+    val actions = arrayListOf(ui.primary(StarterWords.upgradeNow) { showStarterMove() })
+    if (StarterHome.mayWaitNotYet(line)) actions.add(ui.button(StarterWords.notYet) { showStarterNotYet() })
+    screen(StarterWords.upgradeTitle, listOf(ui.facts(line.facts)), actions, words = line.words, logo = true)
 }
 
 /** SS-37: "Not yet" needs the sentence typed exactly, and lasts at most the library's 7 days. */
 internal fun Controller.showStarterNotYet() {
+    // SS-37: only in the states that hold changes (at the limit or past the date); in any other state nothing is granted.
+    val standing = node?.let { starterLine(it) }
+    if (standing == null || !StarterHome.mayWaitNotYet(standing)) return starterBackToUpgrade()
     val msg = Slot(act)
     val typed = ui.field(StarterWords.notYetSentence)
     val views = listOf(ui.text(StarterWords.notYetAsk, 16f), ui.text(StarterWords.notYetSentence, 16f, bold = true), typed, msg)
     val go = ui.primary(StarterWords.notYetConfirm) {
         val record = starterRecord()
         val until = try {
-            StarterNotYet.grant(LibraryStarter, typed.text.toString(), StarterWords.notYetSentence, nowSecs())
+            StarterNotYet.grant(LibraryStarter, typed.text.toString(), StarterWords.notYetSentence, (record?.judged(nowSecs()) ?: nowSecs()))
         } catch (e: OwnerException) {
             return@primary msg.show(words(e.sayWords()))
         } catch (e: LinkageError) {

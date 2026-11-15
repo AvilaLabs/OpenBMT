@@ -294,6 +294,8 @@ private fun Controller.showSlReview(edit: ShopLightningEditArgs, back: () -> Uni
         body.add(ui.text(needs))
         actions.add(
             ui.primary(ShopLightningWords.queue) {
+                // SS-37: a change that loosens or redirects waits while the starter wallet is at its limit or past its date.
+                if (p.changeClass != ShopLightningClass.Free && starterHolds(org.openbmt.owner.StarterChangeKind.Other)) return@primary showStarterHeld { back() }
                 val q = attempt(msg) { n.queueSettings(p.settings) } ?: return@primary
                 shopLightningDraft = ShopLightningModel.Draft()
                 if (q.tightening) {

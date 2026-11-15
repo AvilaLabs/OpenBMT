@@ -8,6 +8,7 @@ import java.time.ZoneOffset
 import org.openbmt.app.DurableFile
 import org.openbmt.app.Format
 import org.openbmt.app.SayWords
+import org.openbmt.app.Tones
 import org.openbmt.owner.OwnerException
 import org.openbmt.owner.OwnerStarter
 import org.openbmt.owner.StarterChangeKind
@@ -148,12 +149,17 @@ class StarterRecord(
     val cardNotNowUntil: Long? = null,
     /** SS-10: whether the words were shown a second time, for a second card, before the key was sealed. */
     val secondCopyMade: Boolean = false,
+    /** When the record was made, in seconds; 0 for a record from before this was kept. */
+    val made: Long = 0,
+    /** The highest wall-clock time the phone has seen while the record was kept, in seconds; a record from before this reads as [made]. */
+    val seenMax: Long = made,
 ) {
     fun toText(): String = "limit-sats: $limitSats\nmove-by: $moveBy\nstop-above-limit: $stopAboveLimit\n" +
         (if (notYetUntil != null) "not-yet-until: $notYetUntil\n" else "") + "change-index: $changeIndex\n" +
         (if (cardLastShown != null) "card-last-shown: $cardLastShown\n" else "") +
         (if (cardNotNowUntil != null) "card-not-now-until: $cardNotNowUntil\n" else "") +
-        (if (secondCopyMade) "second-copy-made: true\n" else "")
+        (if (secondCopyMade) "second-copy-made: true\n" else "") +
+        (if (made > 0) "made: $made\n" else "") + (if (seenMax > 0) "seen-max: $seenMax\n" else "")
 
     private fun copy(
         notYet: Long? = notYetUntil,
@@ -161,7 +167,8 @@ class StarterRecord(
         stop: Boolean = stopAboveLimit,
         shown: Long? = cardLastShown,
         notNow: Long? = cardNotNowUntil,
-    ) = StarterRecord(limitSats, moveBy, stop, notYet, change, shown, notNow, secondCopyMade)
+        seen: Long = seenMax,
+    ) = StarterRecord(limitSats, moveBy, stop, notYet, change, shown, notNow, secondCopyMade, made, seen)
 
     fun withNotYet(until: Long?) = copy(notYet = until)
 
@@ -176,6 +183,15 @@ class StarterRecord(
     /** SS-36: the record with the card put off until [until]. */
     fun withCardNotNow(until: Long?) = copy(notNow = until)
 
+    /** The record with the highest time seen raised to [now]; the same record when [now] is not higher. */
+    fun withSeen(now: Long) = if (now > seenMax) copy(seen = now) else this
+
+    /**
+     * The time every judgment of the date, the card and "Not yet" is made at: the wall clock, or the highest time the phone
+     * has seen when the clock was moved back, so that moving it back does not move the date.
+     */
+    fun judged(now: Long): Long = maxOf(now, seenMax)
+
     companion object {
         fun parse(text: String): StarterRecord {
             val map = HashMap<String, String>()
@@ -186,13 +202,20 @@ class StarterRecord(
                 map[line.substring(0, i)] = line.substring(i + 2)
             }
             fun num(key: String): Long = map[key]?.toLongOrNull()?.takeIf { it >= 0 } ?: throw IOException("the starter record has no $key")
+            val limit = num("limit-sats")
+            if (limit <= 0) throw IOException("the starter record has no limit")
+            val moveBy = num("move-by")
+            val made = map["made"]?.toLongOrNull()?.takeIf { it > 0 } ?: 0L
+            // The date is at most the 90 days that setup allows from the day the record was made; a record from before that was kept has no check.
+            if (made > 0 && moveBy > made + StarterSetup.MAX_DAYS * 86_400L) throw IOException("the starter record's date is more than 90 days after it was made")
             val stop = map["stop-above-limit"]
             if (stop != "true" && stop != "false") throw IOException("the starter record has no stop-above-limit")
             return StarterRecord(
-                num("limit-sats"), num("move-by"), stop == "true", map["not-yet-until"]?.toLongOrNull(),
+                limit, moveBy, stop == "true", map["not-yet-until"]?.toLongOrNull(),
                 map["change-index"]?.toLongOrNull()?.takeIf { it >= 0 } ?: 0,
                 map["card-last-shown"]?.toLongOrNull()?.takeIf { it >= 0 }, map["card-not-now-until"]?.toLongOrNull()?.takeIf { it >= 0 },
                 map["second-copy-made"] == "true",
+                made, map["seen-max"]?.toLongOrNull()?.takeIf { it > 0 } ?: made,
             )
         }
     }
@@ -309,11 +332,16 @@ class HomeLine(
     val held: Long = 0,
     val limit: Long = 0,
     val daysLeft: Long = 0,
+    /** The record could not be read, so the wallet is treated as past its date (SS-37): the facts hold no limit or date and "Not yet" is not offered. */
+    val unreadable: Boolean = false,
 )
 
 object StarterHome {
     /** SS-37: the owner phone opens on the upgrade screen when the wallet is at its limit or past its date, and "Not yet" is not in force. */
     fun opensUpgrade(state: StarterLimitKind): Boolean = state == StarterLimitKind.AtLimit || state == StarterLimitKind.PastDate
+
+    /** SS-37: whether "Not yet" may be taken: in the states the wallet's changes wait in (at the limit, past the date), and only with a record to keep it in. */
+    fun mayWaitNotYet(line: HomeLine): Boolean = !line.unreadable && opensUpgrade(line.state)
 
     /** The day a time falls on, as the app writes a date. */
     fun date(secs: Long): String = Instant.ofEpochSecond(secs).atZone(ZoneOffset.UTC).toLocalDate().toString()
@@ -327,7 +355,7 @@ object StarterHome {
 
     /** SS-36: what the card says, with the numbers as the home line writes them. */
     fun cardText(held: Long, limit: Long, days: Long): String =
-        StarterWords.cardText.replace("{held}", Format.sats(held)).replace("{limit}", Format.sats(limit)).replace("{days}", days.toString())
+        StarterWords.cardText.replace("{held}", Format.sats(held)).replace("{limit}", Format.sats(limit)).replace("{days}", daysLeftText(days))
 
     /**
      * SS-36: the line that cannot be dismissed: the library's line words, or the words of the state it is in, with
@@ -340,19 +368,31 @@ object StarterHome {
         held: Long,
         now: Long,
         lineWords: SayWords,
+        counted: Boolean = true,
         stateWords: (StarterLimitKind) -> SayWords?,
     ): HomeLine {
-        val limit = core.limitState(held, record.limitSats, now, record.moveBy, record.notYetUntil)
+        val limit = core.limitState(held, record.limitSats, record.judged(now), record.moveBy, record.notYetUntil)
         val facts = ArrayList<Pair<String, String>>()
-        facts.add(StarterWords.lineHeld to Format.sats(held))
+        // Before the node has checked the chain the wallet is not counted: what it holds is not said.
+        if (counted) facts.add(StarterWords.lineHeld to Format.sats(held))
         facts.add(StarterWords.lineLimit to Format.sats(record.limitSats))
         facts.add(StarterWords.lineMoveBy to date(record.moveBy))
         limit.until?.let { facts.add(StarterWords.lineNotYetUntil to date(it)) }
         return HomeLine(
             limit.state, stateWords(limit.state) ?: lineWords, facts, opensUpgrade(limit.state),
-            held, record.limitSats, daysLeft(now, record.moveBy),
+            held, record.limitSats, daysLeft(record.judged(now), record.moveBy),
         )
     }
+
+    /**
+     * SS-37: the line for a starter wallet whose record is missing or cannot be read: it is treated as past its date, so every
+     * hold applies and the upgrade screen opens, with the words that say why.
+     */
+    fun unreadLine(held: Long, counted: Boolean): HomeLine = HomeLine(
+        StarterLimitKind.PastDate, StarterWords.said(StarterWords.recordUnread, Tones.STOP),
+        if (counted) listOf(StarterWords.lineHeld to Format.sats(held)) else emptyList(),
+        true, held, 0, 0, unreadable = true,
+    )
 }
 
 /** SS-36: when the card that asks for the move is shown. */
@@ -555,6 +595,7 @@ class StarterStore(base: File, folder: String = DIR) {
     fun hasSealed() = file(SEALED).isFile
     fun hasWrapped() = file(WRAPPED).isFile
     fun hasWallet() = file(WALLET).isFile
+    fun hasRecord() = file(RECORD).isFile
     fun saveSealed(bytes: ByteArray) = write(SEALED, bytes)
     fun loadSealed(): ByteArray? = read(SEALED)
     fun saveWrapped(bytes: ByteArray) = write(WRAPPED, bytes)
@@ -597,6 +638,13 @@ class StarterStore(base: File, folder: String = DIR) {
         return !file(SEALED).exists() && !file(WRAPPED).exists()
     }
 
+    /** A setup that stopped half way: the sealed seed and the wrapped key are overwritten and deleted, and so are the public wallet and the record if they were written. True when every file is gone. */
+    fun dropOrphan(): Boolean {
+        val keyGone = deleteKey()
+        for (name in listOf(WALLET, RECORD)) file(name).delete()
+        return keyGone && !file(WALLET).exists() && !file(RECORD).exists()
+    }
+
     companion object {
         const val DIR = "starter"
         const val SEALED = "seed.sealed"
@@ -608,6 +656,21 @@ class StarterStore(base: File, folder: String = DIR) {
 
         /** The Keystore key of the starter, apart from every other key of the app. */
         const val KEY_ALIAS = "openbmt-owner-starter-v1"
+    }
+}
+
+/**
+ * A starter setup that was stopped between its writes (the sealed seed or the wrapped key kept, the public wallet or the
+ * record not): the key was never used and no address of the wallet was shown, because an address is shown only from the
+ * wallet that is the shop's pinned one, which is written after both files. Such files are dropped and the setup starts from
+ * the beginning. Never while a setup of this run is still writing, and never when the wallet is the shop's pinned wallet.
+ */
+object StarterOrphan {
+    fun found(hasSealed: Boolean, hasWrapped: Boolean, hasWallet: Boolean, hasRecord: Boolean, busy: Boolean, pinned: () -> Boolean): Boolean {
+        if (busy) return false
+        if (!hasSealed && !hasWrapped) return false
+        if (hasWallet && hasRecord) return false
+        return !pinned()
     }
 }
 

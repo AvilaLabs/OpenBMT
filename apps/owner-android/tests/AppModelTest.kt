@@ -4231,7 +4231,7 @@ object AppModelTest {
         val setupSource = source("src/android/StarterScreens.kt")
         val limitPage = setupSource.substringAfter("internal fun Controller.showStarterLimit").substringBefore("// ---- making the key")
         ok(!limitPage.contains("stopLabel") && !limitPage.contains("CheckBox") && limitPage.contains("StarterWords.boxOnly"), "SS-38: setup has no stop option, and says what a Box is for")
-        ok(setupSource.contains("StarterRecord(draft.limitSats, draft.moveBy, false, null, secondCopyMade = draft.copy.made)"), "SS-38: a new record starts with the stop off")
+        ok(setupSource.contains("StarterRecord(draft.limitSats, draft.moveBy, false, null, secondCopyMade = draft.copy.made, made = nowSecs())"), "SS-38: a new record starts with the stop off")
         val useSource = source("src/android/StarterUse.kt")
         ok(useSource.contains("internal fun Controller.hasBoxLink(): Boolean = StarterLineSettings.boxLinked(ownStore)"), "BX-18: the Box link is the one the own-wallet shop keeps")
         val linkDir = tempDir()
@@ -4339,6 +4339,73 @@ object AppModelTest {
         val homeLineCore = FakeCore()
         val dayLine = StarterHome.line(homeLineCore, StarterRecord(1_000, now + 12 * day, false, null), 500, now, StarterCoreWords.line(homeLineCore)) { StarterCoreWords.state(homeLineCore, it) }
         ok(dayLine.daysLeft == 12L && dayLine.held == 500L && dayLine.limit == 1_000L, "ss_36: the home line holds the days left, what it holds and the limit")
+
+        // G: the card says the days as the home line does.
+        ok(StarterHome.cardText(500, 1_000, 0).contains(StarterWords.lineLastDay) && !StarterHome.cardText(500, 1_000, 0).contains("0 days") &&
+            StarterHome.cardText(500, 1_000, 1).contains(StarterWords.lineLastDay) && !StarterHome.cardText(500, 1_000, 1).contains("1 days") &&
+            StarterHome.cardText(500, 1_000, 2).contains("2 days left") && !StarterHome.cardText(500, 1_000, 2).contains("{"), "G: the card uses the home line's days words for 0, 1 and 2 days")
+
+        // E: before the node has counted the wallet the home line does not say what it holds.
+        val uncounted = StarterHome.line(homeLineCore, StarterRecord(1_000, now + 12 * day, false, null), 0, now, StarterCoreWords.line(homeLineCore), counted = false) { StarterCoreWords.state(homeLineCore, it) }
+        ok(uncounted.facts.map { it.first } == listOf(StarterWords.lineLimit, StarterWords.lineMoveBy) && dayLine.facts.first().first == StarterWords.lineHeld, "E: no Holds figure until the wallet is counted")
+        val useSrc2 = source("src/android/StarterUse.kt")
+        val cardSrc2 = useSrc2.substringAfter("internal fun Controller.starterCardView").substringBefore("/**\n * SS-37: once each time")
+        ok(cardSrc2.contains("if (node?.let { starterCounted(it) } == true) starter.cardStart = false") && !cardSrc2.contains("val start = starter.cardStart\n        starter.cardStart = false"), "E: the card's start flag is kept until the node has counted the wallet")
+
+        // F: "Not yet" only at the limit or past the date, with a record.
+        ok(StarterHome.mayWaitNotYet(StarterHome.line(homeLineCore, StarterRecord(1_000, now + 12 * day, false, null), 1_000, now, StarterCoreWords.line(homeLineCore)) { StarterCoreWords.state(homeLineCore, it) }) && StarterHome.mayWaitNotYet(StarterHome.line(homeLineCore, StarterRecord(1_000, now - 1, false, null), 0, now, StarterCoreWords.line(homeLineCore)) { StarterCoreWords.state(homeLineCore, it) }) && !StarterHome.mayWaitNotYet(dayLine) &&
+            !StarterHome.mayWaitNotYet(StarterHome.unreadLine(0, true)), "F: Not yet is offered only in the states that hold changes, and not for an unreadable record")
+        ok(useSrc2.substringAfter("internal fun Controller.showStarterNotYet").substringBefore("val msg").contains("mayWaitNotYet(standing)") &&
+            useSrc2.contains("if (StarterHome.mayWaitNotYet(line)) actions.add(ui.button(StarterWords.notYet)"), "F: the grant and the button both check the state")
+
+        // I: an unreadable record fails closed; a record that does not hold together does not read.
+        val unread = StarterHome.unreadLine(250, true)
+        ok(unread.state == StarterLimitKind.PastDate && unread.opensUpgrade && unread.unreadable && unread.words.what == StarterWords.recordUnread && unread.facts == listOf(StarterWords.lineHeld to "250 sats") &&
+            homeLineCore.changeHeld(unread.state, StarterChangeKind.AddCounter) && StarterHome.unreadLine(0, false).facts.isEmpty(), "I: a missing record is past the date, every hold applies, with the words")
+        ok(StarterWords.recordUnread == "The starter wallet's record could not be read, so it is treated as past its date. Move to your hardware wallet." && StarterWords.all().any { it.second == StarterWords.recordUnread }, "I: the unreadable-record words, exactly and registered")
+        ok(useSrc2.contains("if (record == null) return StarterHome.unreadLine(held, counted)"), "I: the home line is made for an unreadable record")
+        fun refused(text: String) = try { StarterRecord.parse(text); false } catch (_: java.io.IOException) { true }
+        val madeAt = 1_700_000_000L
+        ok(refused("limit-sats: 0\nmove-by: 2\nstop-above-limit: false\n") && refused("limit-sats: -5\nmove-by: 2\nstop-above-limit: false\n"), "I: a limit of 0 or below does not read")
+        ok(refused("limit-sats: 5\nmove-by: ${madeAt + 91 * day}\nstop-above-limit: false\nmade: $madeAt\n") && !refused("limit-sats: 5\nmove-by: ${madeAt + 90 * day}\nstop-above-limit: false\nmade: $madeAt\n") &&
+            !refused("limit-sats: 5\nmove-by: ${madeAt + 400 * day}\nstop-above-limit: false\n"), "I: a date more than 90 days after the record was made does not read; a record from before the time was kept has no such check")
+        ok(StarterRecord(5, madeAt + day, false, null, made = madeAt).toText().contains("made: $madeAt") && StarterRecord.parse(StarterRecord(5, madeAt + day, false, null, made = madeAt).toText()).made == madeAt, "I: the time the record was made is kept")
+
+        // J: a clock set back does not move the date or the card.
+        val seen = StarterRecord(1_000, now + 5 * day, false, null, made = now - 10 * day, seenMax = now)
+        ok(StarterRecord.parse(seen.toText()).seenMax == now && StarterRecord.parse(StarterRecord(1, 2, false, null, made = 7).toText()).seenMax == 7L && StarterRecord.parse("limit-sats: 1\nmove-by: 2\nstop-above-limit: false\n").seenMax == 0L, "J: the highest time seen is kept; an old record reads as the time it was made")
+        val back100 = now - 100 * day
+        ok(seen.judged(back100) == now && seen.judged(now + day) == now + day && seen.withSeen(back100) === seen && seen.withSeen(now + day).seenMax == now + day && seen.withSeen(now + day).moveBy == seen.moveBy, "J: every judgment uses the higher of the clock and the time seen, which only rises")
+        val lateRec = StarterRecord(1_000, now + 5 * day, false, null, made = now - 100 * day, seenMax = now + 6 * day)
+        ok(StarterHome.line(homeLineCore, lateRec, 0, back100, StarterCoreWords.line(homeLineCore)) { StarterCoreWords.state(homeLineCore, it) }.state == StarterLimitKind.PastDate, "J: with the clock set back 100 days the date still comes")
+        ok(StarterHome.line(homeLineCore, seen, 0, back100, StarterCoreWords.line(homeLineCore)) { StarterCoreWords.state(homeLineCore, it) }.daysLeft == 5L, "J: the days left do not grow when the clock is set back")
+        val seenNow = seen.judged(back100)
+        ok(StarterCard.cardDue(seenNow, seen.moveBy, 0.0, now - 3 * day, null, false) == StarterCard.cardDue(now, seen.moveBy, 0.0, now - 3 * day, null, false) && seenNow - (now - 3 * day) == 3 * day, "J: the card is due as it was at the time seen")
+        ok(useSrc2.contains("val now = record.judged(nowSecs())") && useSrc2.contains("record?.judged(nowSecs())"), "J: the card and Not yet are judged at the higher time")
+
+        // H: a stopped setup's files are dropped, and only then.
+        ok(!StarterOrphan.found(false, false, false, false, false) { error("not asked") } && StarterOrphan.found(true, false, false, false, false) { false } && StarterOrphan.found(false, true, true, false, false) { false } &&
+            StarterOrphan.found(true, true, false, true, false) { false } && !StarterOrphan.found(true, true, true, true, false) { error("not asked") }, "H: sealed or wrapped with no wallet or no record is a stopped setup; a whole one is not")
+        ok(!StarterOrphan.found(true, true, false, false, true) { false } && !StarterOrphan.found(true, true, true, false, false) { true }, "H: not while a setup is writing, and not when the wallet is the shop's pinned one")
+        run {
+            val dir = tempDir()
+            val st = StarterStore(dir)
+            st.saveSealed(byteArrayOf(1, 2)); st.saveWrapped(byteArrayOf(3)); st.saveWallet(StarterWalletView("d", "f", "a"))
+            ok(st.hasSealed() && st.hasWrapped() && st.hasWallet() && !st.hasRecord(), "H: the stopped setup's files are there")
+            ok(st.dropOrphan() && !st.hasSealed() && !st.hasWrapped() && !st.hasWallet() && !st.hasRecord(), "H: all of them are dropped")
+            ok(st.dropOrphan(), "H: nothing left is no trouble")
+            dir.deleteRecursively()
+        }
+        val screensSrc = source("src/android/StarterScreens.kt")
+        ok(screensSrc.contains("starterDropOrphan()") && source("src/android/Controller.kt").contains("starterDropOrphan()") && screensSrc.contains("starter.keeping = true") && screensSrc.contains("made = nowSecs()"), "H: the step and the start of the app drop a stopped setup, never one that is writing")
+
+        // D: the two loosening paths that skipped the hold.
+        ok(source("src/android/ShopLightning.kt").contains("p.changeClass != ShopLightningClass.Free && starterHolds(org.openbmt.owner.StarterChangeKind.Other)") &&
+            source("src/android/WatchScreen.kt").substringAfter("private fun Controller.watchTurnOnGranted").substringBefore("async(").contains("starterHolds(org.openbmt.owner.StarterChangeKind.Other)") &&
+            !source("src/android/WatchScreen.kt").substringAfter("private fun Controller.watchTurnOff").contains("starterHolds"), "D: Shop Lightning and the watch key hold like the settings screen; turning the watch off does not")
+
+        // K: a redraw clears words first.
+        ok(source("src/android/Controller.kt").substringAfter("fun redraw()").substringBefore("when {").contains("starterLeave()"), "K: a redraw clears a picture of words and an open setup")
         val useSrc = source("src/android/StarterUse.kt")
         val lineSrc = useSrc.substringAfter("internal fun Controller.starterLineView").substringBefore("internal fun Controller.starterCardView")
         ok(lineSrc.contains("StarterHome.daysLeftText(line.daysLeft)") && lineSrc.contains("StarterWords.homeMove") && lineSrc.contains("showStarterUpgrade(line)"), "ss_36: the home line has the days left and a button to the upgrade screen")

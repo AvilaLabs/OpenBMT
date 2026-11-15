@@ -55,6 +55,9 @@ internal class StarterRuntime(base: File) {
     /** SS-36: the card is on show on the home screen, from its showing until the owner answers it. */
     var cardOpen = false
 
+    /** True from the first write of a setup's files until it is done, so that the cleanup of a stopped setup never drops one that is running. */
+    var keeping = false
+
     /** The first run, while its "Start simple" step is the one on show: the setup leaves to its Money step, not to home. */
     var firstRun: FirstRun? = null
 
@@ -116,6 +119,7 @@ private fun Controller.starterHome() {
 /** The "Start simple" step of the first run (`docs/OWNER-APP-RULES.md` first run): the setup of the starter wallet, with every check it has. */
 internal fun Controller.showStarterStep(r: FirstRun) {
     starter.firstRun = r
+    starterDropOrphan()
     showStarter()
 }
 
@@ -160,6 +164,18 @@ private fun Controller.showStarterFinish(r: FirstRun) {
     } else {
         centre(StarterWords.notSaved, listOf(ui.button(StarterWords.backButton) { showStarter() }), title = StarterWords.screenTitle)
     }
+}
+
+/**
+ * A setup that was stopped between its writes leaves a sealed seed or a wrapped key with no wallet or record: they, and the
+ * Keystore key, are dropped so that the setup starts again (`StarterOrphan`). Called at the start of the app and at the setup's step.
+ */
+internal fun Controller.starterDropOrphan() {
+    val s = starter.store
+    if (!StarterOrphan.found(s.hasSealed(), s.hasWrapped(), s.hasWallet(), s.hasRecord(), starter.keeping) { starterPinned() }) return
+    s.dropOrphan()
+    starter.keystore.delete()
+    starter.pinned = null
 }
 
 /** What the phone has of the starter wallet decides what the entry shows (SS-20, SS-23, SS-43). */
@@ -469,7 +485,7 @@ private fun Controller.sealStarter() {
         return centre(AppWords.libraryMissing(e.message), listOf(ui.button(StarterWords.backButton) { starterCancel() }), title = StarterWords.screenTitle)
     }
     draft.copy.seal()
-    val record = StarterRecord(draft.limitSats, draft.moveBy, false, null, secondCopyMade = draft.copy.made)
+    val record = StarterRecord(draft.limitSats, draft.moveBy, false, null, secondCopyMade = draft.copy.made, made = nowSecs())
     keepSealed(sealed, wallet, record) { ok ->
         if (ok) {
             starterLeave()
@@ -495,10 +511,12 @@ private fun Controller.sealStarter() {
  */
 private fun Controller.keepSealed(sealed: StarterSealed, wallet: StarterWalletView, record: StarterRecord?, done: (Boolean) -> Unit) {
     val store = starter.store
+    starter.keeping = true
     try {
         store.saveSealed(sealed.sealed)
     } catch (_: IOException) {
         sealed.wipe()
+        starter.keeping = false
         return done(false)
     }
     val dataKey = sealed.dataKey
@@ -515,6 +533,7 @@ private fun Controller.keepSealed(sealed: StarterSealed, wallet: StarterWalletVi
             store.deleteKey()
             starter.keystore.delete()
         }
+        starter.keeping = false
         done(ok)
     }
 }
