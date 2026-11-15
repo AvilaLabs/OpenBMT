@@ -239,6 +239,19 @@ final class Obm_E2e_Order {
 		$row = &$this->row();
 		return true === ( $row['paid'] ?? false );
 	}
+	public function get_date_created() {
+		$row = &$this->row();
+		$at  = (int) ( $row['created'] ?? time() );
+		return new class( $at ) {
+			private $at;
+			public function __construct( int $at ) {
+				$this->at = $at;
+			}
+			public function getTimestamp(): int {
+				return $this->at;
+			}
+		};
+	}
 	public function payment_complete( $transaction_id = '' ): bool {
 		$row                   = &$this->row();
 		$row['paid']           = true;
@@ -280,7 +293,17 @@ function wc_get_orders( array $args ): array {
 			continue;
 		}
 		$ok = true;
+		if ( isset( $args['status'] ) && ! in_array( $row['status'] ?? '', (array) $args['status'], true ) ) {
+			continue;
+		}
+		if ( isset( $args['date_created'] ) && ( (int) ( $row['created'] ?? time() ) <= (int) substr( $args['date_created'], 1 ) ) ) {
+			continue;
+		}
 		foreach ( $args['meta_query'] ?? array() as $q ) {
+			if ( 'EXISTS' === ( $q['compare'] ?? '' ) ) {
+				$ok = $ok && isset( $row['meta'][ $q['key'] ] );
+				continue;
+			}
 			$have = (float) ( $row['meta'][ $q['key'] ] ?? 0 );
 			$ok   = $ok && isset( $row['meta'][ $q['key'] ] ) && $have > (float) $q['value'];
 		}

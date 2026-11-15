@@ -126,6 +126,10 @@ final class OpenBmt_Pay_Admin {
 		} elseif ( $pool->is_low() ) {
 			echo '<div class="notice notice-warning"><p>' . esc_html( OpenBmt_Pay_Words::t( 'WO_11_LOW' ) ) . '</p></div>';
 		}
+		$unpaid = OpenBmt_Pay_Store::unpaid_count( time() );
+		if ( OpenBmtPay\Unpaid::at_cap( $unpaid, OpenBmt_Pay_Store::max_unpaid() ) ) {
+			echo '<div class="notice notice-warning"><p>' . esc_html( sprintf( OpenBmt_Pay_Words::t( 'WO_11_UNPAID_AT_CAP' ), (string) $unpaid ) ) . '</p></div>';
+		}
 		$visit = OpenBmt_Pay_Store::visit();
 		if ( null === $visit ) {
 			echo '<p>' . esc_html( OpenBmt_Pay_Words::t( 'WO_21_NEVER_VISITED' ) ) . '</p>';

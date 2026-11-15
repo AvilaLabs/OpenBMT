@@ -14,6 +14,7 @@ use OpenBmtPay\Bytes;
 use OpenBmtPay\Health;
 use OpenBmtPay\NonceLedger;
 use OpenBmtPay\Pairing;
+use OpenBmtPay\Unpaid;
 
 final class OpenBmt_Pay_Store {
 
@@ -162,6 +163,60 @@ final class OpenBmt_Pay_Store {
 	 */
 	public static function health(): array {
 		return Health::inspect( null !== self::pairing(), get_option( self::OPT_POOL, null ), get_option( self::OPT_NONCES, null ) );
+	}
+
+	/**
+	 * WO-11: the most unpaid orders a day, the owner's setting of the
+	 * gateway (the option `max_unpaid`), within its bounds.
+	 */
+	public static function max_unpaid(): int {
+		$settings = get_option( 'woocommerce_openbmt_settings', array() );
+		return Unpaid::limit( is_array( $settings ) ? ( $settings['max_unpaid'] ?? null ) : null );
+	}
+
+	/**
+	 * WO-11: how many orders paid by this gateway were made in the last 24
+	 * hours, hold an address and are not paid. Only the orders are read: no
+	 * address of a customer's computer, no customer data.
+	 *
+	 * @param int $now The time now, in Unix seconds.
+	 */
+	public static function unpaid_count( int $now ): int {
+		$orders = wc_get_orders(
+			array(
+				'payment_method' => 'openbmt',
+				'status'         => array( 'on-hold', 'pending' ),
+				'date_created'   => '>' . ( $now - Unpaid::WINDOW_SECS ),
+				'limit'          => Unpaid::MAX + 1,
+				'orderby'        => 'ID',
+				'order'          => 'DESC',
+				'meta_query'     => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+					array(
+						'key'     => '_openbmt_address',
+						'compare' => 'EXISTS',
+					),
+				),
+			)
+		);
+		$rows = array();
+		foreach ( $orders as $order ) {
+			$created = $order->get_date_created();
+			$rows[]  = array(
+				'created' => null === $created ? 0 : (int) $created->getTimestamp(),
+				'address' => (string) $order->get_meta( '_openbmt_address' ),
+				'paid'    => $order->is_paid() || '1' === $order->get_meta( '_openbmt_paid' ),
+			);
+		}
+		return Unpaid::count( $rows, $now );
+	}
+
+	/**
+	 * WO-11: whether as many orders are unpaid as the store allows.
+	 *
+	 * @param int $now The time now, in Unix seconds.
+	 */
+	public static function unpaid_at_cap( int $now ): bool {
+		return Unpaid::at_cap( self::unpaid_count( $now ), self::max_unpaid() );
 	}
 
 	public static function save_pool( AddressPool $pool ): void {

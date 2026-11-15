@@ -17,6 +17,7 @@ use OpenBmtPay\Qr;
 use OpenBmtPay\Quote;
 use OpenBmtPay\Rates;
 use OpenBmtPay\Refusal;
+use OpenBmtPay\Unpaid;
 
 class OpenBmt_Pay_Gateway extends WC_Payment_Gateway {
 
@@ -64,7 +65,28 @@ class OpenBmt_Pay_Gateway extends WC_Payment_Gateway {
 				'label'   => OpenBmt_Pay_Words::t( 'WO_01_SETTINGS_ENABLE' ),
 				'default' => 'no',
 			),
+			'max_unpaid' => array(
+				'title'             => OpenBmt_Pay_Words::t( 'WO_11_MAX_UNPAID' ),
+				'type'              => 'number',
+				'description'       => OpenBmt_Pay_Words::t( 'WO_11_MAX_UNPAID_HELP' ),
+				'default'           => (string) Unpaid::DEFAULT_MAX,
+				'custom_attributes' => array(
+					'min'  => (string) Unpaid::MIN,
+					'max'  => (string) Unpaid::MAX,
+					'step' => '1',
+				),
+			),
 		);
+	}
+
+	/**
+	 * WO-11: the number the owner typed, kept within its bounds.
+	 *
+	 * @param string $key   The field's key.
+	 * @param mixed  $value What was typed.
+	 */
+	public function validate_max_unpaid_field( $key, $value ) {
+		return (string) Unpaid::limit( is_string( $value ) ? $value : null );
 	}
 
 	/**
@@ -78,6 +100,10 @@ class OpenBmt_Pay_Gateway extends WC_Payment_Gateway {
 		}
 		// Damaged data and an empty pool both hide Bitcoin; damaged data is never read as an empty pool.
 		if ( ! Health::shows_bitcoin( OpenBmt_Pay_Store::health() ) ) {
+			return false;
+		}
+		// WO-11: as many orders are unpaid as the store allows, so no more address is given.
+		if ( OpenBmt_Pay_Store::unpaid_at_cap( time() ) ) {
 			return false;
 		}
 		$currency = get_woocommerce_currency();
@@ -141,6 +167,10 @@ class OpenBmt_Pay_Gateway extends WC_Payment_Gateway {
 				if ( '' !== (string) $order->get_meta( '_openbmt_address' ) ) {
 					return true;
 				}
+				// WO-11: at the cap, no address is taken and the pool is not touched.
+				if ( OpenBmt_Pay_Store::unpaid_at_cap( time() ) ) {
+					return false;
+				}
 				$pool = OpenBmt_Pay_Store::health()['pool'];
 				if ( null === $pool ) {
 					return null;
@@ -168,6 +198,10 @@ class OpenBmt_Pay_Gateway extends WC_Payment_Gateway {
 				'result'   => 'success',
 				'redirect' => $this->get_return_url( $order ),
 			);
+		}
+		if ( false === $taken ) {
+			wc_add_notice( OpenBmt_Pay_Words::t( 'WO_11_UNPAID_CHECKOUT' ), 'error' );
+			return null;
 		}
 		if ( ! is_array( $taken ) ) {
 			wc_add_notice( OpenBmt_Pay_Words::t( 'WO_15_NO_QUOTE' ), 'error' );

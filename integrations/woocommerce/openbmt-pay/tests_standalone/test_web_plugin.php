@@ -304,4 +304,93 @@ t_eq( 2, $wpdb->inserts, 'wo_20 a replay takes the lock, for the ledger' );
 t_ok( ! array_key_exists( $lock, $opts ), 'wo_20 the lock is free after' );
 t_eq( Health::READY, OpenBmt_Pay_Store::health()['state'], 'wo_20 the store is still sound' );
 
+// WO-11: at most as many unpaid orders of the last day as the owner allows; at the cap no address is taken and the pool is not touched.
+$unpaid_order = static function ( int $number, int $created, string $status = 'on-hold', bool $paid = false, string $address = 'x' ): void {
+	$GLOBALS['obm_e2e_orders'][ (string) $number ] = array(
+		'payment_method' => 'openbmt',
+		'status'         => $status,
+		'paid'           => $paid,
+		'created'        => $created,
+		'meta'           => '' === $address ? array() : array( '_openbmt_address' => $address . $number ),
+	);
+};
+$set_max = static function ( $value ) {
+	$GLOBALS['obm_e2e_options']['woocommerce_openbmt_settings'] = array( 'max_unpaid' => $value );
+};
+t_reset();
+t_eq( 20, OpenBmt_Pay_Store::max_unpaid(), 'wo_11 no setting is 20' );
+$set_max( '3' );
+t_eq( 3, OpenBmt_Pay_Store::max_unpaid(), 'wo_11 the setting is read from the gateway\'s option' );
+$set_max( '500' );
+t_eq( 100, OpenBmt_Pay_Store::max_unpaid(), 'wo_11 a stored number above 100 is read as 100' );
+$set_max( '0' );
+t_eq( 1, OpenBmt_Pay_Store::max_unpaid(), 'wo_11 a stored 0 is read as 1' );
+
+// Under the cap an address is taken.
+t_reset();
+t_pair_store( $id, $secret );
+$set_max( '2' );
+$now = time();
+$unpaid_order( 21, $now - 60 );
+$fresh_order();
+t_eq( 1, OpenBmt_Pay_Store::unpaid_count( $now ), 'wo_11 one unpaid order counts' );
+$GLOBALS['t_notices'] = array();
+$answer = $gateway->process_payment( 8 );
+t_eq( array( 'result' => 'success', 'redirect' => 'return:8' ), $answer, 'wo_11 under the cap the order takes its address' );
+t_eq( 'a0', $GLOBALS['obm_e2e_orders']['8']['meta']['_openbmt_address'], 'wo_11 under the cap the address is the pool\'s next' );
+
+// At the cap none is taken, the pool and the order are unchanged, and the checkout says why.
+t_reset();
+t_pair_store( $id, $secret );
+$set_max( '2' );
+$unpaid_order( 21, $now - 60 );
+$unpaid_order( 22, $now - 120, 'pending' );
+$fresh_order();
+$pool_start = $opts[ OpenBmt_Pay_Store::OPT_POOL ];
+$GLOBALS['t_notices'] = array();
+t_ok( OpenBmt_Pay_Store::unpaid_at_cap( $now ), 'wo_11 two unpaid orders are the cap of 2' );
+$answer = $gateway->process_payment( 8 );
+t_eq( null, $answer, 'wo_11 at the cap the payment fails' );
+t_eq( array( OpenBmt_Pay_Words::t( 'WO_11_UNPAID_CHECKOUT' ) ), $GLOBALS['t_notices'], 'wo_11 at the cap the checkout says Bitcoin is not available' );
+t_eq( $pool_start, $opts[ OpenBmt_Pay_Store::OPT_POOL ], 'wo_11 at the cap the pool is unchanged' );
+t_eq( array(), $GLOBALS['obm_e2e_orders']['8']['meta'], 'wo_11 at the cap the order takes no address' );
+t_eq( 'pending', $GLOBALS['obm_e2e_orders']['8']['status'], 'wo_11 at the cap the order is left alone' );
+t_ok( ! array_key_exists( $lock, $opts ), 'wo_11 the lock is free after' );
+
+// An order that has its address already is not turned away at the cap.
+$GLOBALS['obm_e2e_orders']['7'] = array(
+	'payment_method' => 'openbmt',
+	'status'         => 'pending',
+	'meta'           => array( '_openbmt_address' => 'a9' ),
+);
+t_eq( array( 'result' => 'success', 'redirect' => 'return:7' ), $gateway->process_payment( 7 ), 'wo_11 an order with its address still goes to its payment page at the cap' );
+
+// Paid orders and orders older than 24 hours do not count.
+t_reset();
+t_pair_store( $id, $secret );
+$set_max( '2' );
+$unpaid_order( 21, $now - 60, 'processing', true );
+$unpaid_order( 22, $now - 86400 - 5 );
+$unpaid_order( 23, $now - 100000 );
+$unpaid_order( 24, $now - 60, 'on-hold', false, '' );
+$unpaid_order( 25, $now - 60, 'completed', true );
+$unpaid_order( 26, $now - 60 );
+t_eq( 1, OpenBmt_Pay_Store::unpaid_count( $now ), 'wo_11 paid orders, old ones and ones with no address do not count' );
+t_ok( ! OpenBmt_Pay_Store::unpaid_at_cap( $now ), 'wo_11 so the cap of 2 is not reached' );
+$unpaid_order( 27, $now - 60 );
+t_ok( OpenBmt_Pay_Store::unpaid_at_cap( $now ), 'wo_11 a second recent unpaid order reaches it' );
+// An order the notice marked paid, still on hold, does not count.
+$GLOBALS['obm_e2e_orders']['27']['meta']['_openbmt_paid'] = '1';
+t_ok( ! OpenBmt_Pay_Store::unpaid_at_cap( $now ), 'wo_11 an order a signed notice marked paid does not count' );
+// Another gateway's orders do not count.
+$unpaid_order( 28, $now - 60 );
+$GLOBALS['obm_e2e_orders']['28']['payment_method'] = 'cod';
+t_eq( 1, OpenBmt_Pay_Store::unpaid_count( $now ), 'wo_11 orders paid another way do not count' );
+
+// The gateway hides Bitcoin at the cap, and the setting is kept within its bounds.
+t_eq( '1', $gateway->validate_max_unpaid_field( 'max_unpaid', '0' ), 'wo_11 the saved setting is at least 1' );
+t_eq( '100', $gateway->validate_max_unpaid_field( 'max_unpaid', '1000' ), 'wo_11 the saved setting is at most 100' );
+t_eq( '20', $gateway->validate_max_unpaid_field( 'max_unpaid', 'lots' ), 'wo_11 a setting that is not a number is saved as 20' );
+t_eq( '45', $gateway->validate_max_unpaid_field( 'max_unpaid', '45' ), 'wo_11 a setting in the bounds is saved as it is' );
+
 t_done();

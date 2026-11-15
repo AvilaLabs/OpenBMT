@@ -18,6 +18,7 @@ foreach ( array(
 	'AddressPool',
 	'NonceLedger',
 	'Health',
+	'Unpaid',
 	'Price',
 	'Rates',
 	'Quote',
