@@ -9,7 +9,7 @@ by hand. To write it again, run the test
 | state | heading | what happened | what to do next | who | code |
 |---|---|---|---|---|---|
 | Screen::NotPaidYet | Not paid yet | Nothing has arrived yet. | The customer scans the code on the screen and pays. | the customer | CR-10 |
-| Screen::PartPaid | Part paid | The customer has paid part of it and is short by 6,000 sats. | The customer pays the rest to the same code. | the customer | CR-10 |
+| Screen::PartPaid | Part paid | The customer has paid part of it. | The customer pays the rest to the same code. | the customer | CR-10 |
 | Screen::Waiting/NotSeenEnough | Waiting to be seen | The payment has been seen, but not by enough of the network yet. | Nothing to do. The counter keeps watching, and it turns green when the payment is in a block. | nobody | CR-10 |
 | Screen::Waiting/NotStored | Waiting: not saved | The counter could not save that it accepted this payment at once, so this sale waits for a block. | Wait for a block, in about ten minutes. Tell the owner: the counter cannot save. | the cashier | CR-13 |
 | Screen::Waiting/PauseNotSaved | Waiting: pause not saved | The pause after a cancel is not saved yet, so this sale waits for a block. | Wait for a block, in about ten minutes. Tell the owner: the counter cannot save. | the cashier | CR-14 |

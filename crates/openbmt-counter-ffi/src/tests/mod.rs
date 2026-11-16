@@ -15,6 +15,7 @@ mod own_node;
 mod own_owner;
 mod pairing;
 mod pairing_own;
+mod part_paid;
 mod pay;
 mod protocol;
 mod rates;

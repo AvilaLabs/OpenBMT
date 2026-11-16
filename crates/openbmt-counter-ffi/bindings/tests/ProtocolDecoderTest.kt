@@ -661,6 +661,8 @@ object ProtocolDecoderTest {
             else -> out.write(byteArrayOf(1, 2, 0, 0, 0, 0))
         }
         out.write(lightningFirst)
+        out.write(Writer().u64(0).toByteArray())
+        out.write(byteArrayOf(0, 0, 0, 0, 1))
         if (trailingByte) out.write(0x55)
         return header(0, out.toByteArray())
     }

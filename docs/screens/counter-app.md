@@ -206,6 +206,22 @@ sale's number as the Sales list shows it.
 | redNext | Tap to see what to do. |
 | moreLine | and N more in Sales |
 
+## A part paid sale and a wait (CR-285, CR-286)
+
+The band of a sale that has been paid in part, which leads with what is
+missing, and the words of the time of a wait. N is a number and AMOUNT the
+sale in the shop's currency.
+
+| Key | Text |
+|---|---|
+| heading | Still to pay |
+| toSend | N sats to send |
+| paidLine | Paid N sats of N. The sale is AMOUNT. |
+| paidLineNoAmount | Paid N sats of N. |
+| ring | N s |
+| seenSeconds | Seen N s ago |
+| seenMinutes | Seen N min ago |
+
 ## The counter's line (DESIGN 2.1)
 
 Shown large on the ready-to-sell screen of a paired counter,

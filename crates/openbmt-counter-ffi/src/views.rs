@@ -1257,6 +1257,19 @@ pub struct ScreenView {
     /// CR-283: the code is the Lightning invoice alone, with the line and
     /// the button that show the on-chain code.
     pub lightning_first: bool,
+    /// CR-285: what is still missing, in satoshis; zero unless part paid.
+    pub missing_sats: u64,
+    /// CR-285: the missing sats in the sale's currency, in minor units,
+    /// rounded up; none when the sale has no amount in a currency (CR-197).
+    pub missing_minor: Option<u64>,
+    /// CR-286: the seconds left of the watch for a conflicting payment.
+    pub watch_secs_left: Option<u64>,
+    /// CR-286: the whole of that watch, for the ring that empties over it.
+    pub watch_secs_total: Option<u64>,
+    /// CR-286: the seconds since the unconfirmed payment was first seen.
+    pub seen_secs: Option<u64>,
+    /// CR-286: the counter's check is healthy.
+    pub check_healthy: bool,
 }
 
 wire_record!(ScreenView {
@@ -1273,7 +1286,13 @@ wire_record!(ScreenView {
     reports,
     payment,
     lightning,
-    lightning_first
+    lightning_first,
+    missing_sats,
+    missing_minor,
+    watch_secs_left,
+    watch_secs_total,
+    seen_secs,
+    check_healthy
 });
 
 /// A sale that turned green or red for the first time (CR-284).

@@ -131,16 +131,11 @@ impl Why {
                 "The customer scans the code on the screen and pays.",
             )
             .code("CR-10"),
-            Self::Part {
-                received_sats,
-                needs_sats,
-            } => Words::new(
+            // SC-09: the missing amount is said once, in the band of CR-285.
+            Self::Part { .. } => Words::new(
                 Tone::Info,
                 "Part paid",
-                format!(
-                    "The customer has paid part of it and is short by {}.",
-                    sats(needs_sats.saturating_sub(*received_sats))
-                ),
+                "The customer has paid part of it.",
                 Who::Customer,
                 "The customer pays the rest to the same code.",
             )
@@ -1956,6 +1951,8 @@ fn screen(state: State, why: Why, next: Next) -> Screen {
         own_node_counted: false,
         conflict_seen: false,
         reopened: false,
+        secs_since_first_seen: None,
+        check_healthy: false,
         reports: Vec::new(),
     }
 }

@@ -767,6 +767,16 @@ object AppWords {
         )
         for ((key, text) in LightningFirstWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         out.append(
+            "\n## A part paid sale and a wait (CR-285, CR-286)\n\n" +
+                "The band of a sale that has been paid in part, which leads with what is\n" +
+                "missing, and the words of the time of a wait. N is a number and AMOUNT the\n" +
+                "sale in the shop's currency.\n\n" +
+                "| Key | Text |\n" +
+                "|---|---|\n",
+        )
+        for ((key, text) in StillToPayWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
+        for ((key, text) in WaitWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
+        out.append(
             "\n## The counter's line (DESIGN 2.1)\n\n" +
                 "Shown large on the ready-to-sell screen of a paired counter,\n" +
                 "and on no sale screen. The second is for a counter paired on the owner's phone\n" +

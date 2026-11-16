@@ -219,7 +219,8 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "ScreenView: record: state: StateView, words: Words, flags: list<Words>, check: option<Words>, \
          received_sats: u64, needs_sats: u64, stuck: bool, late: bool, reopened: bool, \
          conflict_seen: bool, reports: list<ReportView>, payment: option<Payment>, \
-         lightning: option<LightningSaleView>, lightning_first: bool"
+         lightning: option<LightningSaleView>, lightning_first: bool, missing_sats: u64, \
+         missing_minor: option<u64>, watch_secs_left: option<u64>, watch_secs_total: option<u64>, seen_secs: option<u64>, check_healthy: bool"
     ));
     assert!(protocol.contains(
         "RefundRow: record: sale: u32, number: option<u64>, asked: u64, value_minor: option<u64>, tip_minor: u64, \

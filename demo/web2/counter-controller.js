@@ -291,26 +291,33 @@
       flow.noticeRemove(index);
       sale = { index, data: flow.saleScreen(nowSecs(), index) };
       let lastSig = sale.data.signature;
-      put((ui) => CV.showSale(ui, saleView(sale.data, notice)), "sale");
+      // Controller.kt:2239 showSale, CR-286: what the screen drawn last can move in place (the numbers of a wait).
+      let live = { update: null };
+      const draw = (show) => { live = { update: null }; show((ui) => CV.showSale(ui, saleView(sale.data, notice, live))); };
+      draw((view) => put(view, "sale"));
       tick = () => {
         sale.data = flow.saleScreen(nowSecs(), index);
         if (sale.data.signature !== lastSig) {
           lastSig = sale.data.signature;
-          display((ui) => CV.showSale(ui, saleView(sale.data, notice)));
+          draw(display);
         }
+        // CR-286: the seconds and minutes of a wait change at each tick without drawing the screen again.
+        if (live.update) live.update(sale.data);
         host.event("sale", sale.data);
       };
       host.event("sale", sale.data);
     }
 
     /** What CV.showSale draws for the model's data of a sale, and what each of its controls does. */
-    function saleView(data, flash) {
+    function saleView(data, flash, live) {
       return {
         number: data.number, says: data.says, code: data.code, isPaid: data.isPaid,
         modules: data.code && data.qrBits ? modulesOf(data.qrSize, data.qrBits) : null,
         amountBig: data.amountBig, amountSmall: data.amountSmall, receivedLine: data.receivedLine,
         outcomeLine: data.outcomeLine, outcomeHeadingSp: data.outcomeHeadingSp,
         paidLines: data.paidLabels.map((label, i) => ({ label, value: data.paidValues[i] })),
+        stillHeading: data.stillHeading, ringSecs: data.ringSecs, ringTotal: data.ringTotal, ringLabel: data.ringLabel,
+        seen: data.seen, pulse: data.pulse, live,
         extra: Array.from(data.extra), request: false, flash: flash || null,
         buttons: { requote: data.requote, cancel: data.cancel, override: data.override },
         // CR-283: the line and the button, from the model.
@@ -323,7 +330,7 @@
       };
     }
 
-    /** Controller.kt:2458 payOnChainInstead(index, refused): the cashier chose the on-chain code for the rest of the sale; the screen is drawn again with it. */
+    /** Controller.kt:2503 payOnChainInstead(index, refused): the cashier chose the on-chain code for the rest of the sale; the screen is drawn again with it. */
     function payOnChainInstead(index, refused) {
       try {
         flow.onChainInstead(index);

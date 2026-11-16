@@ -17,12 +17,12 @@
   const TONES = { info: "Blue", good: "Green", stop: "Red", ended: "Neutral" };
   const proto = Ui.prototype;
 
-  /** CounterViews.kt:38 outcomeBand(colour): paid is green, waiting blue, stop red, ended neutral. */
+  /** CounterViews.kt:41 outcomeBand(colour): paid is green, waiting blue, stop red, ended neutral. */
   function outcomeBand(ui, colour) {
     return { Green: ui.palette.paid, Blue: ui.palette.waiting, Red: ui.palette.stopped, Neutral: ui.palette.ended }[colour];
   }
 
-  /** CounterViews.kt:46 roundedFill(fill, radius, strokeDp, stroke): the surface fill, a corner of [radius] dp. */
+  /** CounterViews.kt:49 roundedFill(fill, radius, strokeDp, stroke): the surface fill, a corner of [radius] dp. */
   proto.roundedFill = function (fill, radius, strokeDp = 0, stroke = 0) {
     const g = new GradientDrawable();
     g.setColor(fill);
@@ -31,9 +31,9 @@
     return g;
   };
 
-  // CounterViews.kt:53 rippleOver(bg, radius) is the function Ui.kt:443 rippleOver under the same name (Ui.rippleOver).
+  // CounterViews.kt:56 rippleOver(bg, radius) is the function Ui.kt:443 rippleOver under the same name (Ui.rippleOver).
 
-  /** CounterViews.kt:63 surfaceCard(): a surface card, corner 16, that holds a column of views. */
+  /** CounterViews.kt:66 surfaceCard(): a surface card, corner 16, that holds a column of views. */
   proto.surfaceCard = function () {
     const v = LinearLayout("v");
     setBackground(v, this.roundedFill(this.pal.surface, 16));
@@ -41,15 +41,15 @@
     return v;
   };
 
-  /** CounterViews.kt:71 line(): a 1 dp line in the divider colour. */
+  /** CounterViews.kt:74 line(): a 1 dp line in the divider colour. */
   proto.line = function () {
     return this.divider();
   };
 
-  /** CounterViews.kt:77 dot(colour, dp): a round dot of [dp] in [colour]. */
+  /** CounterViews.kt:80 dot(colour, dp): a round dot of [dp] in [colour]. */
   // The member Ui.kt:908 dot is the same view; the extension is the one the counter calls.
 
-  /** CounterViews.kt:87 whoChip(model, onDark): the pill that says who does the next step. */
+  /** CounterViews.kt:90 whoChip(model, onDark): the pill that says who does the next step. */
   proto.whoChip = function (model, onDark = false) {
     const t = this.text(model.who, 13, false, false, onDark ? this.palette.WHITE : this.pal.secondary, true);
     setBackground(t, this.roundedFill(onDark ? 0x2EFFFFFF : this.pal.chip, 999));
@@ -57,15 +57,15 @@
     return t;
   };
 
-  /** CounterViews.kt:98 matchWide(): a row's width: the whole of its parent. */
+  /** CounterViews.kt:101 matchWide(): a row's width: the whole of its parent. */
   function matchWide() {
     return new LayoutParams(MATCH_PARENT, WRAP_CONTENT);
   }
 
-  /** CounterViews.kt:101 Glyph. */
+  /** CounterViews.kt:104 Glyph. */
   const Glyph = { Plus: "Plus", List: "List", Calendar: "Calendar", Lock: "Lock" };
 
-  /** CounterViews.kt:104 GlyphDrawable(glyph, colour, width): strokes on a 24 by 24 grid, as an SVG. */
+  /** CounterViews.kt:107 GlyphDrawable(glyph, colour, width): strokes on a 24 by 24 grid, as an SVG. */
   function GlyphView(glyph, colour, width = 2) {
     const c = css(colour);
     const stroke = `fill="none" stroke="${c}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"`;
@@ -84,7 +84,7 @@
     return v;
   }
 
-  /** CounterViews.kt:164 glyph(glyph, colour, dp, width): a glyph as a view of [dp] by [dp]. */
+  /** CounterViews.kt:167 glyph(glyph, colour, dp, width): a glyph as a view of [dp] by [dp]. */
   proto.glyph = function (glyph, colour, dp, width = 2) {
     const v = GlyphView(glyph, colour, width);
     v.style.width = this.px(dp) + "px";
@@ -94,7 +94,7 @@
   };
 
   /**
-   * CounterViews.kt:174 OutcomeMark(colour, band): the mark of an outcome screen, 112 dp: a white disc with a tick
+   * CounterViews.kt:177 OutcomeMark(colour, band): the mark of an outcome screen, 112 dp: a white disc with a tick
    * for good, a clock for waiting and a dash for ended, or a white octagon with a cross for stop, in the band's colour.
    */
   function OutcomeMark(ui, colour, band) {
@@ -119,7 +119,58 @@
     return v;
   }
 
-  /** CounterViews.kt:229 Centered: a column that takes the height that is left in the body of a page and centres what it holds. */
+  /**
+   * CounterViews.kt:236 WaitRing: the ring of a wait that knows its end, 72 dp, in white on the band: it empties over the
+   * whole wait with the seconds left in it. set(secs, total, label) puts the number in and sweeps the ring to the next
+   * second over one second; the same second again changes nothing. With reduced motion the CSS keeps the ring still
+   * and full and only the number changes.
+   */
+  function WaitRing(ui) {
+    const w = css(ui.palette.WHITE);
+    const r = 31;
+    const whole = 2 * Math.PI * r;
+    const v = viewEl("div", "wait-ring");
+    v.innerHTML = `<svg viewBox="0 0 72 72" width="100%" height="100%" style="display:block;overflow:visible">` +
+      `<circle cx="36" cy="36" r="${r}" fill="none" stroke="${w}" stroke-opacity="0.25" stroke-width="5"/>` +
+      `<circle class="sweep" cx="36" cy="36" r="${r}" fill="none" stroke="${w}" stroke-width="5" stroke-linecap="round" ` +
+      `stroke-dasharray="${whole}" stroke-dashoffset="0" transform="rotate(-90 36 36)"/>` +
+      `<text x="36" y="36" text-anchor="middle" dominant-baseline="central" font-size="22" font-weight="700" fill="${w}"></text></svg>`;
+    v.style.width = ui.px(72) + "px";
+    v.style.height = ui.px(72) + "px";
+    v.style.flex = "none";
+    const sweep = v.querySelector(".sweep");
+    const label = v.querySelector("text");
+    let shown = -1;
+    v.set = (secs, total, text) => {
+      if (secs === shown) return;
+      shown = secs;
+      label.textContent = text;
+      if (total <= 0) return;
+      sweep.style.transition = "none";
+      sweep.style.strokeDashoffset = String(whole * (1 - secs / total));
+      sweep.getBoundingClientRect();
+      sweep.style.transition = "stroke-dashoffset 1s linear";
+      sweep.style.strokeDashoffset = String(whole * (1 - (secs - 1) / total));
+    };
+    return v;
+  }
+
+  /**
+   * CounterViews.kt:309 PulseMark: the small mark beside the time of a wait, 10 dp. pulsing(on) makes it pulse, which it
+   * does only while the check is healthy; with reduced motion the CSS keeps it still.
+   */
+  function PulseMark(ui) {
+    const v = viewEl("div", "pulse-mark");
+    v.style.width = ui.px(10) + "px";
+    v.style.height = ui.px(10) + "px";
+    v.style.borderRadius = "50%";
+    v.style.background = css(ui.palette.WHITE);
+    v.style.flex = "none";
+    v.pulsing = (on) => v.classList.toggle("pulsing", !!on);
+    return v;
+  }
+
+  /** CounterViews.kt:350 Centered: a column that takes the height that is left in the body of a page and centres what it holds. */
   function Centered() {
     const v = LinearLayout("v");
     setGravity(v, Gravity.CENTER);
@@ -127,7 +178,7 @@
     return v;
   }
 
-  /** CounterViews.kt:237 stateChip(model): the state of a sale as the chip of its bar: a dot and the heading in the tone's ink, on the tone's tint. */
+  /** CounterViews.kt:358 stateChip(model): the state of a sale as the chip of its bar: a dot and the heading in the tone's ink, on the tone's tint. */
   proto.stateChip = function (model) {
     const tone = this.pal.of(model.colour);
     const v = LinearLayout("h");
@@ -143,7 +194,7 @@
     return v;
   };
 
-  /** CounterViews.kt:253 addToBar(bar, chip, ui): puts [chip] at the right end of a bar made by bar(). */
+  /** CounterViews.kt:374 addToBar(bar, chip, ui): puts [chip] at the right end of a bar made by bar(). */
   function addToBar(bar, chip, ui) {
     const row = bar.row;
     if (!row) return;
@@ -152,7 +203,7 @@
     addView(row, chip, p);
   }
 
-  /** CounterViews.kt:259 barButton(label, onClick): a small outlined button for a bar, 36 dp high. */
+  /** CounterViews.kt:380 barButton(label, onClick): a small outlined button for a bar, 36 dp high. */
   proto.barButton = function (label, onClick) {
     const b = this.secondary(label, onClick);
     b.style.minHeight = this.px(36) + "px";
@@ -162,7 +213,7 @@
     return b;
   };
 
-  /** CounterViews.kt:268 onBand(label, filled, band, onClick): a button on an outcome band. */
+  /** CounterViews.kt:389 onBand(label, filled, band, onClick): a button on an outcome band. */
   proto.onBand = function (label, filled, band, onClick) {
     const b = filled ? this.primary(label, Colour.Blue, onClick) : this.secondary(label, onClick);
     const radius = 14;
@@ -174,7 +225,7 @@
   };
 
   /**
-   * CounterViews.kt:286 paintBand(page, bar, band, window): colours a page made by page() with a bar of
+   * CounterViews.kt:407 paintBand(page, bar, band, window): colours a page made by page() with a bar of
    * onBlack = true as the whole of an outcome screen: the band behind the status bar, the bar and the footer, no
    * divider, the title in the band's second-line colour; the navigation bar's icons are set light.
    */
@@ -193,10 +244,10 @@
     this.window.navLight = false;
   };
 
-  /** CounterViews.kt:322 HomeLine(key, words, extra, retry). */
+  /** CounterViews.kt:443 HomeLine(key, words, extra, retry). */
   function HomeLine(key, words, extra = null, retry = null) { return { key, words, extra, retry }; }
 
-  /** CounterViews.kt:328 healthCard(words): one surface card with the heading and a tone dot, the what under it, and, when the tone is not good, who does the next step and the next line. */
+  /** CounterViews.kt:449 healthCard(words): one surface card with the heading and a tone dot, the what under it, and, when the tone is not good, who does the next step and the next line. */
   proto.healthCard = function (words) {
     const model = words;
     const tone = this.pal.of(model.colour);
@@ -222,7 +273,7 @@
     return card;
   };
 
-  /** CounterViews.kt:356 tillCard(lines, start, notNow): the card of one request from the till, its heading, the lines, and the buttons Start and Not now. [words] holds the card's, start's and not now's words. */
+  /** CounterViews.kt:477 tillCard(lines, start, notNow): the card of one request from the till, its heading, the lines, and the buttons Start and Not now. [words] holds the card's, start's and not now's words. */
   proto.tillCard = function (lines, start, notNow, words) {
     const card = this.surfaceCard();
     const col = LinearLayout("v");
@@ -247,7 +298,7 @@
     return card;
   };
 
-  /** CounterViews.kt:376 starterCard(heading, lines, seen): the card of one payment from the starter wallet that nobody at the counter has seen. [seenLabel] is its button's word. */
+  /** CounterViews.kt:497 starterCard(heading, lines, seen): the card of one payment from the starter wallet that nobody at the counter has seen. [seenLabel] is its button's word. */
   proto.starterCard = function (heading, lines, seen, seenLabel) {
     const card = this.surfaceCard();
     const col = LinearLayout("v");
@@ -270,7 +321,7 @@
   };
 
   /**
-   * CounterViews.kt:397 homeLines(lines, open): the other lines of home in one surface card: each shows its heading
+   * CounterViews.kt:518 homeLines(lines, open): the other lines of home in one surface card: each shows its heading
    * with a tone dot. A line that is good shows only its heading, and a tap shows its what and its next; any other
    * line shows its words at once, with its "Try again" button under it. [open] holds the keys of the lines a tap has opened.
    */
@@ -325,7 +376,7 @@
     return card;
   };
 
-  /** CounterViews.kt:449 tile(label, glyph, brand, onClick): a tile of home: [label] at the bottom and [glyph] at the top. [brand] makes it the brand's fill. */
+  /** CounterViews.kt:570 tile(label, glyph, brand, onClick): a tile of home: [label] at the bottom and [glyph] at the top. [brand] makes it the brand's fill. */
   proto.tile = function (label, glyph, brand, onClick) {
     const ink = brand ? this.palette.ON_BRAND : this.pal.text;
     const fill = brand ? this.roundedFill(this.palette.BRAND, 18) : this.roundedFill(this.pal.surface, 18, 1, this.pal.divider);
@@ -343,12 +394,12 @@
     return v;
   };
 
-  /** CounterViews.kt:468 fillRipple(fill, radius): a ripple of 0x40000000 over a filled drawable. */
+  /** CounterViews.kt:589 fillRipple(fill, radius): a ripple of 0x40000000 over a filled drawable. */
   proto.fillRipple = function (fill, radius) {
     return new U.RippleDrawable("rgba(0,0,0,0.251)", fill, radius);
   };
 
-  /** CounterViews.kt:480 amountPad(press): the keys of the amount of a new sale: 1 to 9, then C, 0 and the delete key, as 64 dp round surface keys. [press] is given the key's face. */
+  /** CounterViews.kt:601 amountPad(press): the keys of the amount of a new sale: 1 to 9, then C, 0 and the delete key, as 64 dp round surface keys. [press] is given the key's face. */
   proto.amountPad = function (press) {
     const faces = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "⌫"];
     const grid = LinearLayout("v");
@@ -378,7 +429,7 @@
     return grid;
   };
 
-  /** CounterViews.kt:522 needRow(colour, title, sub, link, count, amount, onClick): a row of Today that needs a look: a tone dot, the title, and what sits under it, with the number of a total on the right. */
+  /** CounterViews.kt:643 needRow(colour, title, sub, link, count, amount, onClick): a row of Today that needs a look: a tone dot, the title, and what sits under it, with the number of a total on the right. */
   proto.needRow = function (colour, title, sub, link, count, amount, onClick) {
     const row = LinearLayout("h");
     setGravity(row, Gravity.CENTER_VERTICAL);
@@ -414,14 +465,14 @@
     return row;
   };
 
-  /** CounterViews.kt:568 FillsFrame: a column of the body of a page that takes the height that is left, for the scanner. */
+  /** CounterViews.kt:689 FillsFrame: a column of the body of a page that takes the height that is left, for the scanner. */
   function FillsFrame() {
     const v = FrameLayout();
     v.isFills = true;
     return v;
   }
 
-  /** CounterViews.kt:574 CoverLayout(aspectW, aspectH): the camera's surface, scaled to cover the whole of the layout and centred; what runs over the edges is cut. */
+  /** CounterViews.kt:695 CoverLayout(aspectW, aspectH): the camera's surface, scaled to cover the whole of the layout and centred; what runs over the edges is cut. */
   function CoverLayout(aspectW, aspectH) {
     const v = FrameLayout();
     v.style.overflow = "hidden";
@@ -632,10 +683,16 @@
       const body = [];
       if (d.flash) body.push(ui.notice(d.flash));
       const amount = LinearLayout("v");
+      // Controller.kt:2239 showSale, CR-285: a part paid sale leads with what is missing, under its heading.
+      if (d.stillHeading) {
+        const still = ui.text(d.stillHeading, 16, false, false, ui.pal.secondary, true);
+        setTextGravity(still, Gravity.CENTER);
+        addView(amount, still, ui.margins());
+      }
       const big = ui.text(d.amountBig, 48, true);
       big.style.fontFeatureSettings = '"tnum"';
       setTextGravity(big, Gravity.CENTER);
-      addView(amount, big, ui.margins());
+      addView(amount, big, ui.margins(d.stillHeading ? 2 : 0));
       const small = ui.text(d.amountSmall, 16, false, false, ui.pal.secondary);
       small.style.fontFeatureSettings = '"tnum"';
       setTextGravity(small, Gravity.CENTER);
@@ -651,7 +708,7 @@
         addView(qr, QrView(ui, d.modules, side), new LayoutParams(side, side));
         body.push(ui.codeCard(qr));
       }
-      // Controller.kt:2325 lightningFirst: CR-283, over the instant limit the code is the invoice alone; the line says why and the button shows the on-chain code.
+      // Controller.kt:2342 lightningFirst: CR-283, over the instant limit the code is the invoice alone; the line says why and the button shows the on-chain code.
       if (d.lightningFirst) {
         const line = ui.text(d.words.lightningLine, 13, false, false, ui.pal.secondary);
         setTextGravity(line, Gravity.CENTER);
@@ -694,6 +751,36 @@
       line.style.fontFeatureSettings = '"tnum"';
       setTextGravity(line, Gravity.CENTER);
       addView(centre, line, ui.margins(8));
+      // Controller.kt:2239 showSale, CR-286: a short check shows a ring that empties; a wait for a block says how long ago the
+      // payment was seen. The mark beside it pulses only while the check is healthy. The numbers move in place (d.live.update).
+      if (d.ringSecs != null || d.seen != null) {
+        const row = LinearLayout("h");
+        setGravity(row, Gravity.CENTER);
+        let ring = null;
+        let seen = null;
+        if (d.ringSecs != null) {
+          ring = WaitRing(ui);
+          addView(row, ring, new LayoutParams(ui.px(72), ui.px(72)));
+        }
+        if (d.seen != null) {
+          seen = ui.text(d.seen, 17, false, false, ui.palette.WHITE, true);
+          seen.style.fontFeatureSettings = '"tnum"';
+          setTextGravity(seen, Gravity.CENTER);
+          addView(row, seen, new LayoutParams(WRAP_CONTENT, WRAP_CONTENT));
+        }
+        const mark = PulseMark(ui);
+        const mp = new LayoutParams(ui.px(10), ui.px(10));
+        mp.leftMargin = ui.px(10);
+        addView(row, mark, mp);
+        const update = (n) => {
+          if (ring && n.ringSecs != null) ring.set(n.ringSecs, n.ringTotal, n.ringLabel);
+          if (seen && n.seen != null) seen.textContent = n.seen;
+          mark.pulsing(n.pulse);
+        };
+        update(d);
+        if (d.live) d.live.update = update;
+        addView(centre, row, ui.margins(16));
+      }
       // CR-254: the sale's number and the till's reference, large enough to copy into the till's payment note.
       for (const pl of d.paidLines || []) {
         const lbl = ui.text(pl.label, 14, false, false, band.sub, true);
@@ -768,7 +855,7 @@
     return shell;
   }
 
-  /** Controller.kt:2603 showSales(): the label, and one card of rows, one for each sale, newest first. */
+  /** Controller.kt:2648 showSales(): the label, and one card of rows, one for each sale, newest first. */
   function showSales(ui, d) {
     const views = [ui.label(d.words.heading)];
     if (!d.rows.length) views.push(ui.text(d.words.none, 16));
@@ -776,7 +863,7 @@
     return ui.page(ui.bar("Sales", null, () => {}), views, []);
   }
 
-  /** Controller.kt:2632 showSaleDetails(index, notice): a sale's facts, its words, the note and the reference, the refunds, and the buttons. */
+  /** Controller.kt:2677 showSaleDetails(index, notice): a sale's facts, its words, the note and the reference, the refunds, and the buttons. */
   function showSaleDetails(ui, d) {
     const views = [];
     if (d.notice) views.push(ui.notice(d.notice));
@@ -796,7 +883,7 @@
     return ui.page(ui.bar("Details and refunds", null, () => {}), views, actions);
   }
 
-  /** Controller.kt:3046 heroTile(line): a small tile inside the hero card: the label, the amount and what is under it. */
+  /** Controller.kt:3091 heroTile(line): a small tile inside the hero card: the label, the amount and what is under it. */
   function heroTile(ui, line) {
     const v = LinearLayout("v");
     setBackground(v, ui.roundedFill(ui.pal.background, 14));
@@ -816,7 +903,7 @@
   }
 
   /**
-   * Controller.kt:3058 showToday(people): the day's totals: the hero card (what was paid, and how), the rows that need a look
+   * Controller.kt:3103 showToday(people): the day's totals: the hero card (what was paid, and how), the rows that need a look
    * and the quiet lines in one card, and the lines per person behind the manager's PIN (or the PIN's entry).
    */
   function showToday(ui, d) {
@@ -952,7 +1039,7 @@
   }
 
   const api = {
-    CV_KT, CU_KT, CT_KT, TONES, outcomeBand, matchWide, Glyph, GlyphView, OutcomeMark, Centered, addToBar, HomeLine, FillsFrame, CoverLayout,
+    CV_KT, CU_KT, CT_KT, TONES, outcomeBand, matchWide, Glyph, GlyphView, OutcomeMark, WaitRing, PulseMark, Centered, addToBar, HomeLine, FillsFrame, CoverLayout,
     pinField, amountField, Slot, QrView, left, showHome, showNewSale, showSale, withNotices, showSales, showSaleDetails, heroTile, showToday,
   };
   root.OpenBmtCounterViews = api;

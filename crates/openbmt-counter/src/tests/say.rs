@@ -228,7 +228,8 @@ fn sc_09_the_shortfall_is_said_once() {
         needs_sats: 10_000,
     }
     .words();
-    assert!(w.what.contains("6,000 sats"));
+    // The amount is in the band of CR-285, not in these sentences.
+    assert!(!w.what.contains("sats"));
     assert!(!w.next.contains("sats"));
 }
 

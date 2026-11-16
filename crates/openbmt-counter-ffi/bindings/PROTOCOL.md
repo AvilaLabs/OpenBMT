@@ -189,7 +189,7 @@ ReportView: enum, a tag byte, then: PosPaid(index: u32) | PosUnpaid(index: u32) 
     tags PosPaid=0 PosUnpaid=1 BooksFinal=2 SurplusOwed=3 LatePayment=4 Alarm=5 Dust=6
 Payment: record: address: string, uri: string, copy_uri: string, qr_size: u32, qr_bits: list<u8>, tag: list<u8>
 OpenedView: record: index: u32, needs_sats: u64, quote_rate: u64, quote_from: u64, quote_until: u64, payment: Payment
-ScreenView: record: state: StateView, words: Words, flags: list<Words>, check: option<Words>, received_sats: u64, needs_sats: u64, stuck: bool, late: bool, reopened: bool, conflict_seen: bool, reports: list<ReportView>, payment: option<Payment>, lightning: option<LightningSaleView>, lightning_first: bool
+ScreenView: record: state: StateView, words: Words, flags: list<Words>, check: option<Words>, received_sats: u64, needs_sats: u64, stuck: bool, late: bool, reopened: bool, conflict_seen: bool, reports: list<ReportView>, payment: option<Payment>, lightning: option<LightningSaleView>, lightning_first: bool, missing_sats: u64, missing_minor: option<u64>, watch_secs_left: option<u64>, watch_secs_total: option<u64>, seen_secs: option<u64>, check_healthy: bool
 PumpView: record: reports: list<ReportView>, notes: list<string>, stopped: bool, turns: list<TurnView>
 RefundRow: record: sale: u32, number: option<u64>, asked: u64, value_minor: option<u64>, tip_minor: u64, state: RefundStateView, by_role: ActorRole, by_name: string, at: u64, words: Words
 HeartbeatOutcome: record: verified: bool, sent_at: option<u64>, words: Words, reports: list<ReportView>

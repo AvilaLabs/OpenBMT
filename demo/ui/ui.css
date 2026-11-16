@@ -60,6 +60,15 @@ textarea.edit { resize: none; }
 .spinner svg { animation: ui-turn 1s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .spinner svg { animation: none; } }
 
+/* CR-286: the ring of a wait that knows its end empties over the wait, and the mark beside the time pulses while the
+   check is healthy. A reader who has asked for less motion has the ring full and the mark still; the numbers still change. */
+@keyframes ui-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+.pulse-mark.pulsing { animation: ui-pulse 1.8s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .pulse-mark.pulsing { animation: none; }
+  .wait-ring .sweep { transition: none !important; stroke-dashoffset: 0 !important; }
+}
+
 /* The scanner's glow. */
 .scanline { position: absolute; }
 

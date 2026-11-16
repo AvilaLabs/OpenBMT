@@ -1,5 +1,7 @@
 package org.openbmt.counter.app
 
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Canvas
@@ -15,6 +17,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
+import android.view.animation.LinearInterpolator
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -222,6 +225,124 @@ class OutcomeMark(context: Context, private val colour: Colour, private val band
             }
         }
         canvas.restore()
+    }
+}
+
+/**
+ * CR-286: the ring of a wait that knows its end, 72 dp, in white on the band: it empties over the whole wait, with
+ * the seconds left in it. With [animate] false (the system's reduced motion) the ring is still and full and only the
+ * number changes.
+ */
+class WaitRing(context: Context) : View(context) {
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        color = Palette.WHITE
+    }
+    private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Palette.WHITE
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.DEFAULT_BOLD
+    }
+    private var secs = -1L
+    private var fraction = 1f
+    private var sweep: ValueAnimator? = null
+
+    init {
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+
+    /** Shows [secsLeft] of [total]; the ring then empties to the next second over one second. */
+    fun show(secsLeft: Long, total: Long, animate: Boolean) {
+        if (secsLeft == secs) return
+        val first = secs < 0
+        secs = secsLeft
+        sweep?.cancel()
+        sweep = null
+        if (!animate || total <= 0) {
+            fraction = 1f
+            invalidate()
+            return
+        }
+        val from = secsLeft / total.toFloat()
+        val to = (secsLeft - 1) / total.toFloat()
+        fraction = from
+        invalidate()
+        if (first || secsLeft > 0) {
+            sweep = ValueAnimator.ofFloat(from, to).apply {
+                duration = 1000
+                interpolator = LinearInterpolator()
+                addUpdateListener { fraction = it.animatedValue as Float; invalidate() }
+                start()
+            }
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        sweep?.cancel()
+        super.onDetachedFromWindow()
+    }
+
+    override fun onMeasure(widthSpec: Int, heightSpec: Int) {
+        val px = (72 * resources.displayMetrics.density).toInt()
+        setMeasuredDimension(px, px)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val d = resources.displayMetrics.density
+        paint.strokeWidth = 5 * d
+        val inset = 4 * d
+        val box = RectF(inset, inset, width - inset, height - inset)
+        paint.alpha = 64
+        canvas.drawArc(box, 0f, 360f, false, paint)
+        paint.alpha = 255
+        canvas.drawArc(box, -90f, 360f * fraction.coerceIn(0f, 1f), false, paint)
+        label.textSize = 22 * d
+        canvas.drawText(WaitWords.ring(secs.coerceAtLeast(0)), width / 2f, height / 2f - (label.descent() + label.ascent()) / 2f, label)
+    }
+}
+
+/**
+ * CR-286: the small mark beside the time of a wait, 10 dp. It pulses while [pulsing] and the system's motion is on,
+ * and is still otherwise.
+ */
+class PulseMark(context: Context) : View(context) {
+    private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Palette.WHITE }
+    private var pulse: ObjectAnimator? = null
+
+    init {
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+
+    fun pulsing(on: Boolean, motion: Boolean) {
+        val run = on && motion
+        if (run && pulse == null) {
+            pulse = ObjectAnimator.ofFloat(this, ALPHA, 1f, 0.25f).apply {
+                duration = 900
+                repeatCount = ValueAnimator.INFINITE
+                repeatMode = ValueAnimator.REVERSE
+                start()
+            }
+        } else if (!run) {
+            pulse?.cancel()
+            pulse = null
+            alpha = 1f
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        pulse?.cancel()
+        pulse = null
+        super.onDetachedFromWindow()
+    }
+
+    override fun onMeasure(widthSpec: Int, heightSpec: Int) {
+        val px = (10 * resources.displayMetrics.density).toInt()
+        setMeasuredDimension(px, px)
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        canvas.drawCircle(width / 2f, height / 2f, width / 2f, dot)
     }
 }
 

@@ -370,11 +370,17 @@ test_short_payment: {
   assert.equal(part.code, true, 'the code stays for the rest');
   for (let s = 0; s < 10; s++) second();
   assert.equal(last('sale').isPaid, false, 'a short payment stays short');
-  // The rest is exactly what the sale's own data says is missing, to the same address.
+  // CR-285: the band leads with what is missing, and the code asks for exactly that, to the same address.
   const missing = Math.round(part.needsSats - part.receivedSats);
   assert.equal(missing, part.needsSats - 6000);
-  assert.equal(PC.parse(last('sale').copyUri).address, address);
-  chain.pay(address, missing);
+  assert.equal(part.stillHeading, 'Still to pay');
+  assert.equal(part.amountSmall, `${missing.toLocaleString('en-US')} sats to send`);
+  assert.match(part.amountBig, /^\d+\.\d\d USD$/, 'the large amount is in the shop\'s currency');
+  assert.equal(part.receivedLine, `Paid 6,000 sats of ${part.needsSats.toLocaleString('en-US')}. The sale is 8.00 USD.`);
+  const rest = PC.parse(last('sale').copyUri);
+  assert.equal(rest.address, address);
+  assert.equal(rest.sats, missing, 'a wallet that scans the code again is asked for the rest, not the whole sale');
+  chain.pay(rest.address, rest.sats);
   until('paid', () => last('sale').isPaid);
   assert.equal(last('sale').state, 'PaidInstant');
   c.showHome();
@@ -414,6 +420,48 @@ test_lightning_first_line_and_button: {
   // A small sale never shows the line.
   c.showHome();
   assert.equal(sale(['8', '0', '0']).lightningFirst, false);
+  c.showHome();
+}
+
+// CR-286: a payment that waits shows that it is alive: the short check has its seconds left in a ring and the wait for a
+// block says how long ago the payment was seen, in the page's own clock, so a skipped wait shows its minutes truly.
+test_wait_shows_it_is_alive: {
+  c.showHome();
+  sale(['8', '0', '0']);
+  const read = PC.parse(last('sale').copyUri);
+  chain.pay(read.address, read.sats);
+  until('the short check', () => last('sale').ringSecs != null);
+  const check = last('sale');
+  assert.equal(check.state, 'Waiting');
+  assert.ok(check.ringSecs >= 1 && check.ringSecs <= check.ringTotal, 'seconds left of the whole');
+  assert.equal(check.ringLabel, `${check.ringSecs} s`);
+  assert.equal(check.seen, null, 'a ring has no seen line');
+  assert.equal(check.pulse, true, 'the mark pulses while the check is healthy');
+  const sig = check.signature;
+  second();
+  if (last('sale').ringSecs != null) assert.equal(last('sale').signature, sig, 'the seconds move in place: the screen is not drawn again');
+  until('paid', () => last('sale').isPaid);
+  assert.equal(last('sale').ringSecs, null, 'the ring is gone when the wait is over');
+  c.showHome();
+
+  // Over the instant limit on-chain: the wait is for a block, with how long ago the payment was seen.
+  sale(['2', '0', '0', '0']);
+  until('the invoice', () => invoiceOf(last('sale').copyUri));
+  c.payOnChain();
+  second();
+  const big = PC.parse(last('sale').copyUri);
+  chain.pay(big.address, big.sats);
+  until('seen', () => last('sale').seen != null);
+  const waiting = last('sale');
+  assert.equal(waiting.state, 'Waiting');
+  assert.equal(waiting.ringSecs, null, 'a wait for a block has no countdown');
+  assert.match(waiting.seen, /^Seen \d+ s ago$/);
+  clock += 185;
+  flow.heartbeat(clock, chain.heartbeat());
+  flow.pump(clock);
+  c.onPump(true);
+  second();
+  assert.equal(last('sale').seen, 'Seen 3 min ago', 'the page\'s clock shows its minutes');
   c.showHome();
 }
 

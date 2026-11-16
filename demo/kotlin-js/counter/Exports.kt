@@ -23,6 +23,7 @@ import org.openbmt.counter.app.ScreenModel
 import org.openbmt.counter.app.Showing
 import org.openbmt.counter.app.StarterModel
 import org.openbmt.counter.app.TillModel
+import org.openbmt.counter.app.WaitWords
 import org.openbmt.counter.app.sayWords
 import org.openbmt.counter.app.say
 
@@ -113,6 +114,16 @@ class SaleScreenData(
     val receivedSats: Double,
     /** CR-283: the code is the Lightning invoice alone; the screen adds the line and the button that show the on-chain code. */
     val lightningFirst: Boolean,
+    /** CR-285: "Still to pay" over the large amount of a part paid sale; null for every other state. */
+    val stillHeading: String?,
+    /** CR-286: the seconds left of a wait that knows its end and the whole of it, for the ring; null when there is none or it is over. */
+    val ringSecs: Double?,
+    val ringTotal: Double,
+    /** CR-286: the number in the ring ("5 s"), and for a wait for a block how long ago the payment was seen ("Seen 40 s ago"). */
+    val ringLabel: String?,
+    val seen: String?,
+    /** CR-286: the mark beside the time pulses, only while the check is healthy. */
+    val pulse: Boolean,
     /** One text of everything the screen says: it is drawn again only when this changes. */
     val signature: String,
 )
@@ -419,8 +430,12 @@ object CounterFlowDemo {
         }
         val shownSays = shown(says)
         val shownExtra = extra.map { shown(it) }
+        // CR-285: a part paid sale leads with what is missing; CR-286: what a wait shows of its time.
+        val still = if (s.state == org.openbmt.counter.SaleState.PartPaid) SaleModel.stillToPay(m, s.missingSats, s.missingMinor, s.receivedSats, s.needsSats, amount) else null
+        val wait = SaleModel.wait(s.state, s.watchSecsLeft, s.watchSecsTotal, s.seenSecs, s.checkHealthy)
         val signature = listOf(
-            s.state.name, shownSays.heading, shownSays.what, shownSays.next, s.receivedSats, s.needsSats, payment?.copyUri,
+            s.state.name, shownSays.heading, shownSays.what, shownSays.next, s.receivedSats, s.needsSats, s.missingSats, s.missingMinor,
+            wait.ringSecs != null, wait.seen != null, wait.pulse, payment?.copyUri,
             shownExtra.joinToString("\u0002") { it.heading + it.what + it.next }, s.lightningFirst, info.reference, info.billNumber,
         ).joinToString("\u0001")
         return SaleScreenData(
@@ -429,9 +444,9 @@ object CounterFlowDemo {
             says = shownSays,
             code = code,
             isPaid = SaleModel.isPaid(s.state),
-            amountBig = SaleModel.amountBig(m, amount, s.needsSats),
-            amountSmall = SaleModel.amountSmall(m, amount, s.needsSats),
-            receivedLine = SaleModel.receivedLine(s.receivedSats, s.needsSats),
+            amountBig = still?.big ?: SaleModel.amountBig(m, amount, s.needsSats),
+            amountSmall = still?.toSend ?: SaleModel.amountSmall(m, amount, s.needsSats),
+            receivedLine = still?.paid ?: SaleModel.receivedLine(s.receivedSats, s.needsSats),
             outcomeLine = SaleModel.outcomeLine(m, amount, s.needsSats),
             outcomeHeadingSp = SaleModel.outcomeHeadingSp(says.heading).toDouble(),
             requote = b.requote,
@@ -449,6 +464,12 @@ object CounterFlowDemo {
             needsSats = s.needsSats.toDouble(),
             receivedSats = s.receivedSats.toDouble(),
             lightningFirst = s.lightningFirst,
+            stillHeading = still?.heading,
+            ringSecs = wait.ringSecs?.toDouble(),
+            ringTotal = wait.ringTotal.toDouble(),
+            ringLabel = wait.ringSecs?.let { WaitWords.ring(it) },
+            seen = wait.seen,
+            pulse = wait.pulse,
             signature = signature,
         )
     }

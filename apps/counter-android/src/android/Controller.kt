@@ -2249,6 +2249,9 @@ class Controller(private val act: MainActivity) {
         val side = minOf(ui.px(276), act.resources.displayMetrics.widthPixels - ui.px(2 * 20 + 2 * 16), maxPx)
         var lastSig: String? = null
         var lastBackground: Int? = null
+        var liveRing: WaitRing? = null
+        var liveSeen: TextView? = null
+        var livePulse: PulseMark? = null
         val flashWith = { reflash: SayWords? -> flash = reflash; lastSig = null; tick?.invoke(); Unit }
         tick = null
         showing = Showing.Sale(index)
@@ -2295,12 +2298,17 @@ class Controller(private val act: MainActivity) {
                 }
                 // CR-219: with a swap provider set and none for this sale, the code stays on-chain and one small line says so.
                 val notForThisSale = ln != null && ln.notForThisSale
+                // CR-286: what the wait shows of its time; the numbers change in place, the sig only its parts.
+                val wait = SaleModel.wait(s.state, s.watchSecsLeft, s.watchSecsTotal, s.seenSecs, s.checkHealthy)
                 val sig = listOf(
-                    s.state, says.heading, says.what, says.next, s.receivedSats, s.needsSats, payment?.copyUri, flash?.heading,
+                    s.state, says.heading, says.what, says.next, s.receivedSats, s.needsSats, s.missingSats, s.missingMinor, wait.ringSecs != null, wait.seen != null, wait.pulse, payment?.copyUri, flash?.heading,
                     flash?.what, extra.joinToString("\u0002") { it.heading + it.what + it.next }, notForThisSale, s.lightningFirst, info.reference, info.billNumber,
                 ).joinToString("\u0001")
                 if (sig != lastSig) {
                     lastSig = sig
+                    liveRing = null
+                    liveSeen = null
+                    livePulse = null
                     val code = SaleModel.showsCode(s.state)
                     val b = SaleModel.buttons(s.state, request)
                     val amountBig = SaleModel.amountBig(m, amounts[index], s.needsSats)
@@ -2313,9 +2321,18 @@ class Controller(private val act: MainActivity) {
                         val body = ArrayList<View>()
                         flash?.let { body.add(note(it)) }
                         val amount = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
-                        amount.addView(ui.text(amountBig, 48f, bold = true).also { it.gravity = android.view.Gravity.CENTER; it.fontFeatureSettings = "tnum" }, ui.margins())
-                        amount.addView(ui.text(SaleModel.amountSmall(m, amounts[index], s.needsSats), 16f, colour = ui.pal.secondary).also { it.gravity = android.view.Gravity.CENTER; it.fontFeatureSettings = "tnum" }, ui.margins(top = 2))
-                        amount.addView(ui.text(SaleModel.receivedLine(s.receivedSats, s.needsSats), 14f, colour = ui.pal.secondary).also { it.gravity = android.view.Gravity.CENTER; it.fontFeatureSettings = "tnum" }, ui.margins(top = 2))
+                        if (s.state == SaleState.PartPaid) {
+                            // CR-285: what is still missing leads: the heading, the large amount, the sats to send, then what has arrived.
+                            val still = SaleModel.stillToPay(m, s.missingSats, s.missingMinor, s.receivedSats, s.needsSats, amounts[index])
+                            amount.addView(ui.text(still.heading, 16f, colour = ui.pal.secondary, medium = true).also { it.gravity = android.view.Gravity.CENTER }, ui.margins())
+                            amount.addView(ui.text(still.big, 48f, bold = true).also { it.gravity = android.view.Gravity.CENTER; it.fontFeatureSettings = "tnum" }, ui.margins(top = 2))
+                            amount.addView(ui.text(still.toSend, 16f, colour = ui.pal.secondary).also { it.gravity = android.view.Gravity.CENTER; it.fontFeatureSettings = "tnum" }, ui.margins(top = 2))
+                            amount.addView(ui.text(still.paid, 14f, colour = ui.pal.secondary).also { it.gravity = android.view.Gravity.CENTER; it.fontFeatureSettings = "tnum" }, ui.margins(top = 2))
+                        } else {
+                            amount.addView(ui.text(amountBig, 48f, bold = true).also { it.gravity = android.view.Gravity.CENTER; it.fontFeatureSettings = "tnum" }, ui.margins())
+                            amount.addView(ui.text(SaleModel.amountSmall(m, amounts[index], s.needsSats), 16f, colour = ui.pal.secondary).also { it.gravity = android.view.Gravity.CENTER; it.fontFeatureSettings = "tnum" }, ui.margins(top = 2))
+                            amount.addView(ui.text(SaleModel.receivedLine(s.receivedSats, s.needsSats), 14f, colour = ui.pal.secondary).also { it.gravity = android.view.Gravity.CENTER; it.fontFeatureSettings = "tnum" }, ui.margins(top = 2))
+                        }
                         body.add(amount)
                         payment?.let { p ->
                             val qr = FrameLayout(act).apply { addView(QrView(act, p, side), FrameLayout.LayoutParams(side, side)) }
@@ -2383,6 +2400,28 @@ class Controller(private val act: MainActivity) {
                             },
                             ui.margins(top = 8),
                         )
+                        // CR-286: a wait for a block says how long ago the payment was seen; a short check shows a ring that empties.
+                        // The mark beside it pulses only while the check is healthy.
+                        if (wait.any) {
+                            val row = LinearLayout(act).apply {
+                                orientation = LinearLayout.HORIZONTAL
+                                gravity = android.view.Gravity.CENTER
+                            }
+                            wait.ringSecs?.let {
+                                val ring = WaitRing(act)
+                                liveRing = ring
+                                row.addView(ring, LinearLayout.LayoutParams(ui.px(72), ui.px(72)))
+                            }
+                            wait.seen?.let {
+                                val line = ui.text(it, 17f, colour = Palette.WHITE, medium = true).also { t -> t.gravity = android.view.Gravity.CENTER; t.fontFeatureSettings = "tnum" }
+                                liveSeen = line
+                                row.addView(line, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                            }
+                            val mark = PulseMark(act)
+                            livePulse = mark
+                            row.addView(mark, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.setMargins(ui.px(10), 0, 0, 0) })
+                            centre.addView(row, ui.margins(top = 16))
+                        }
                         // CR-254: the sale's number and the till's reference, large enough to copy into the till's payment note.
                         if (SaleModel.isPaid(s.state) && !gift) {
                             for (line in BillModel.paidLines(index, info)) {
@@ -2432,6 +2471,12 @@ class Controller(private val act: MainActivity) {
                     // The first time this sale's screen is green or red, its sound and haptic play, once.
                     if (outcomePlays.first(index, says.colour)) page.post { Feedback.outcome(page, says.colour) }
                 }
+                // CR-286: the numbers of the wait move in place, at each tick, without drawing the screen again. With the
+                // system's reduced motion the ring and the mark are still and the numbers still change.
+                val motion = Feedback.motionOn(act)
+                wait.ringSecs?.let { liveRing?.show(it, wait.ringTotal, motion) }
+                wait.seen?.let { liveSeen?.text = it }
+                livePulse?.pulsing(wait.pulse, motion)
             } catch (e: CounterException) {
                 tapSet(null)
                 act.show(ui.page(ui.bar("Sale ${index + 1}"), listOf(note(e.sayWords()))))

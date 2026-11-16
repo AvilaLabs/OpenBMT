@@ -317,6 +317,8 @@ fn screen_of(state: State, why: Why, next: Next) -> Screen {
         own_node_counted: false,
         conflict_seen: false,
         reopened: false,
+        secs_since_first_seen: None,
+        check_healthy: false,
         reports: Vec::new(),
     }
 }
@@ -4093,6 +4095,9 @@ impl Counter {
             own_node_counted: st.own_node_counted,
             conflict_seen: st.conflict_seen,
             reopened: sale.reopened,
+            secs_since_first_seen: (received > 0 && st.min_confirmations == 0)
+                .then_some(st.secs_since_first_seen),
+            check_healthy: facts.health.healthy,
             reports: Vec::new(),
         };
         let cancel_stored = sale.cancel_recorded;

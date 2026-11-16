@@ -139,6 +139,40 @@ fn cr_10_part_paid_is_shown_as_paid_x_of_y() {
 }
 
 #[test]
+fn cr_285_a_part_paid_screen_says_the_amount_once_and_the_rest_is_in_its_numbers() {
+    let mut w = World::new();
+    let o = w.open_five();
+    let t = w.pay(&o, 2_000);
+    w.see(&t, 1);
+    let screen = w.judge(o.index);
+    let words = screen.words();
+    assert_eq!(words.what, "The customer has paid part of it.");
+    assert_eq!(words.next, "The customer pays the rest to the same code.");
+    assert_eq!(
+        (screen.received_sats, screen.needs_sats),
+        (2_000, 5_000),
+        "the band is made from these"
+    );
+}
+
+#[test]
+fn cr_286_a_waiting_screen_carries_the_seconds_since_first_seen_and_the_health() {
+    let mut w = World::new();
+    w.remote_order = true;
+    let o = w.open_five();
+    let none = w.judge(o.index);
+    assert_eq!(none.secs_since_first_seen, None);
+    let t = w.pay(&o, 5_000);
+    w.tick(10);
+    w.see(&t, 3);
+    w.tick(8);
+    let screen = w.judge(o.index);
+    assert_eq!(screen.state, State::Waiting);
+    assert_eq!(screen.secs_since_first_seen, Some(8));
+    assert!(screen.check_healthy);
+}
+
+#[test]
 fn cr_10_waiting_carries_the_reason_from_the_instant_decision() {
     let mut w = World::new();
     w.remote_order = true;

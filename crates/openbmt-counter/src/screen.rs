@@ -224,6 +224,11 @@ pub struct Screen {
     /// A block that confirmed the payment left the chain and it is not
     /// confirmed again.
     pub reopened: bool,
+    /// CR-286: the seconds since the standing unconfirmed payment was first
+    /// seen, as the watch counts them; none when nothing unconfirmed stands.
+    pub secs_since_first_seen: Option<u64>,
+    /// CR-286: the counter's check is healthy.
+    pub check_healthy: bool,
     /// What leaves the counter now, each stored first (CR-32). Each is
     /// returned once.
     pub reports: Vec<Report>,

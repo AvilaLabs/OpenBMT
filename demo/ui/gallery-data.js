@@ -20,7 +20,7 @@
 
   // docs/screens/counter.md
   const notPaidYet = w("info", "Not paid yet", "Nothing has arrived yet.", "The customer scans the code on the screen and pays.", "customer");
-  const partPaid = w("info", "Part paid", "The customer has paid part of it and is short by 6,000 sats.", "The customer pays the rest to the same code.", "customer");
+  const partPaid = w("info", "Part paid", "The customer has paid part of it.", "The customer pays the rest to the same code.", "customer");
   const waiting = w("info", "Waiting to be seen", "The payment has been seen, but not by enough of the network yet.", "Nothing to do. The counter keeps watching, and it turns green when the payment is in a block.", "nobody");
   const paid = w("good", "Paid", "Accepted at once on this counter's own check, within the owner's limit for sales before a block.", "Hand over the goods. It settles by itself when a block holds it, in about ten minutes.", "cashier");
   const doNotHandOver = w("stop", "Do not hand over", "Another payment took this one's place.", "Take another kind of payment and tell the owner: this payment was replaced. If the goods are gone, tell the owner now.", "cashier");
@@ -92,11 +92,18 @@
     newSale: { entry: "24.50 USD", price: "Bitcoin is priced at 73,554.18 USD, from 3 price sources.", words: counterWords },
     unpaid,
     partPaid: Object.assign({}, unpaid, {
-      says: partPaid, receivedLine: "Received 27,309 sats of 33,309 sats", buttons: { requote: true, cancel: false, override: true }, modules: sampleModules(),
+      says: partPaid, stillHeading: "Still to pay", amountBig: "4.42 USD", amountSmall: "6,000 sats to send",
+      receivedLine: "Paid 27,309 sats of 33,309. The sale is 24.50 USD.", buttons: { requote: true, cancel: false, override: true }, modules: sampleModules(),
     }),
     waiting: {
       number: 1, says: waiting, code: false, outcomeHeadingSp: 40, outcomeLine: "24.50 USD · 33,309 sats", extra: [], flash: null, isPaid: false,
       buttons: { requote: false, cancel: false, override: true }, words: counterWords,
+      ringSecs: 5, ringTotal: 8, ringLabel: "5 s", seen: null, pulse: true,
+    },
+    waitingBlock: {
+      number: 1, says: waiting, code: false, outcomeHeadingSp: 40, outcomeLine: "24.50 USD · 33,309 sats", extra: [], flash: null, isPaid: false,
+      buttons: { requote: false, cancel: false, override: true }, words: counterWords,
+      ringSecs: null, ringTotal: 0, ringLabel: null, seen: "Seen 3 min ago", pulse: true,
     },
     paid: {
       number: 1, says: paid, code: false, outcomeHeadingSp: 56, outcomeLine: "24.50 USD · 33,309 sats", extra: [checkedLight], flash: null, isPaid: true,

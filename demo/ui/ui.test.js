@@ -139,6 +139,7 @@ const SKIPPED = {
     getOpacity: "Drawable plumbing",
     onMeasure: "layout measuring; CSS lays out",
     onDraw: "canvas drawing; OutcomeMark draws with SVG",
+    onDetachedFromWindow: "animation stop; the ring and the mark are CSS animations of their own",
     onLayout: "CoverLayout's layout; CSS covers",
     lightNavigation: "ported inside paintBand",
     dot: "the member of Ui.kt:908, the same view",

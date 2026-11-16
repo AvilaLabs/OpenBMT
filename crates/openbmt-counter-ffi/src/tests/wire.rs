@@ -401,6 +401,12 @@ impl<'a> Rd<'a> {
                 failed: r.opt(Rd::words),
             }),
             lightning_first: self.bool(),
+            missing: self.u64(),
+            missing_minor: self.opt(Rd::u64),
+            watch_secs_left: self.opt(Rd::u64),
+            watch_secs_total: self.opt(Rd::u64),
+            seen_secs: self.opt(Rd::u64),
+            check_healthy: self.bool(),
         }
     }
 
@@ -507,6 +513,12 @@ pub struct Screen {
     pub payment: Option<Payment>,
     pub lightning: Option<LnSale>,
     pub lightning_first: bool,
+    pub missing: u64,
+    pub missing_minor: Option<u64>,
+    pub watch_secs_left: Option<u64>,
+    pub watch_secs_total: Option<u64>,
+    pub seen_secs: Option<u64>,
+    pub check_healthy: bool,
 }
 
 /// What a screen shows of Lightning.

@@ -147,7 +147,7 @@
       },
       event(kind, data) {
         if (r.dead) return;
-        // Controller.kt:2433 first: the first time this sale's screen is green or red, its sound plays, once; the model's
+        // Controller.kt:2472 first: the first time this sale's screen is green or red, its sound plays, once; the model's
         // OutcomePlays (SaleModel.kt:87) keeps count, and the notice of CR-284 shares it. A visitor's skipped taps
         // (r.quiet) are made without it.
         if (kind === "sale" && flow.outcomeFirst(data.number - 1, data.says.colour) && !r.quiet) box.outcome(data.says.colour);
@@ -379,11 +379,6 @@
   // ---- Something goes wrong: a customer's wallet sends too little, then the rest. ----
   function wrongMoments(go, S) {
     const c = () => run.controller;
-    /** What the counter's own sale data says is still missing, in sats. */
-    const missing = () => {
-      const d = c().saleData();
-      return Math.max(0, Math.round(d.needsSats - d.receivedSats));
-    };
     return [
       { step: 0, enter() {
         shell.actor(null);
@@ -413,13 +408,14 @@
         shell.actor({
           who: "The customer", line: "Pays the rest to the same code.", button: "The customer pays the rest",
           onTap() {
-            run.chain.pay(readCode().address, missing());
+            // CR-285: the code of a part paid sale asks for what is missing, so the wallet pays what the code asks.
+            payCode(readCode());
             spendActor();
             sentLine("The customer sent the rest.");
           },
         });
         S.on = { sale: (d) => { if (d.isPaid) go(); } };
-      }, auto() { run.chain.pay(readCode().address, missing()); waitForPaid(); } },
+      }, auto() { payCode(readCode()); waitForPaid(); } },
       { step: 3, enter() {
         shell.actor(null);
         shell.say("Paid. The two payments together cover the sale.", ["Hand over the goods. Tap ", { b: "Done" }, "."]);

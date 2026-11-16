@@ -31,8 +31,9 @@ use bitcoin::{Address, Network, ScriptBuf, Txid};
 use openbmt_core::batch::{BatchPolicy, SignedBatch};
 use openbmt_core::command::SignedCommand;
 use openbmt_counter::{
-    refund_destination, Actor, Amount, CashRefund, Currency, PosState, Rate, RateSource, RefundAsk,
-    RefundRequest, Report, RequestDays, SaleExtras, Screen, StaffChange, StaffEvent,
+    refund_destination, Actor, Amount, CashRefund, Currency, Next, PosState, Rate, RateSource,
+    RefundAsk, RefundRequest, Report, RequestDays, Sale, SaleExtras, Screen, StaffChange,
+    StaffEvent,
 };
 use openbmt_counter_node::mono::Instant;
 use openbmt_counter_node::say::{change_confirmed_words, switch_dropped_words, switched_words};
@@ -232,6 +233,19 @@ fn same_kind(node: &Node<Port>, index: u32) -> Result<(), CounterError> {
         }
     }
     Ok(())
+}
+
+/// CR-285: `missing_sats` of a sale that needs `needs_sats`, in the minor
+/// units of the sale's amount, rounded up so that it never asks for less
+/// than is missing. None for a sale in satoshis (CR-197) and for one that
+/// needs nothing.
+fn missing_in_minor(missing_sats: u64, needs_sats: u64, sale: &Sale) -> Option<u64> {
+    if needs_sats == 0 || Currency::new(*b"SAT") == Some(sale.currency()) {
+        return None;
+    }
+    let whole = u128::from(missing_sats) * u128::from(sale.amount().0);
+    let minor = whole.div_ceil(u128::from(needs_sats));
+    u64::try_from(minor).ok()
 }
 
 /// CR-196, CR-197: a sale priced again or refunded by value is in the
@@ -880,6 +894,25 @@ impl Entry {
 
     fn screen(&self, node: &mut Node<Port>, index: u32, screen: Screen) -> ScreenView {
         let live = node.counter().sale(index).is_some_and(|s| s.is_live());
+        // CR-285: a part paid sale asks for what is missing, not the whole.
+        let part_paid = screen.state == openbmt_counter::State::PartPaid;
+        let missing_sats = if part_paid {
+            screen.needs_sats.saturating_sub(screen.received_sats)
+        } else {
+            0
+        };
+        let code_sats = if part_paid {
+            missing_sats
+        } else {
+            screen.needs_sats
+        };
+        let missing_minor = if part_paid {
+            node.counter()
+                .sale(index)
+                .and_then(|s| missing_in_minor(missing_sats, screen.needs_sats, s))
+        } else {
+            None
+        };
         // CR-113: the on-chain code is there at once; when the invoice has
         // passed the checks it becomes the code of LN-18. A code that cannot
         // be made leaves the screen without one; the reports it carries
@@ -889,9 +922,13 @@ impl Entry {
         let mut waiting_words = None;
         let mut lightning_first = false;
         if live {
-            payment = self.payment(node, index, screen.needs_sats).ok();
+            payment = self.payment(node, index, code_sats).ok();
             match node.lightning_sale(index) {
                 SaleLightning::Off => {}
+                // CR-285: the invoice of a quote is for the whole sale and §12
+                // asks for none for what is missing, so a part paid sale shows
+                // the on-chain code alone, with no Lightning line.
+                SaleLightning::Waiting | SaleLightning::Invoice(_) if part_paid => {}
                 SaleLightning::Waiting => {
                     lightning = Some(LightningSaleView {
                         invoice: false,
@@ -981,6 +1018,22 @@ impl Entry {
             payment,
             lightning,
             lightning_first,
+            missing_sats,
+            missing_minor,
+            watch_secs_left: match screen.next {
+                Next::WatchSeconds { secs_left } => Some(secs_left),
+                _ => None,
+            },
+            watch_secs_total: match screen.next {
+                Next::WatchSeconds { .. } => Some(openbmt_core::policy::CONFLICT_WAIT_SECS),
+                _ => None,
+            },
+            seen_secs: match (screen.state, screen.next) {
+                (_, Next::WatchSeconds { .. }) => None,
+                (openbmt_counter::State::Waiting, _) => screen.secs_since_first_seen,
+                _ => None,
+            },
+            check_healthy: screen.check_healthy,
         }
     }
 

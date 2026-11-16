@@ -113,7 +113,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1 + WordsOfTill.all().size + 1 + WordsOfStarter.all().size + 1 + ShopLightningWords.all().size + 1 + PairHereWords.all().size + 1 + GivingWords.all().size + 1 + LightningFirstWords.all().size + 1 + 1 + 1 + 1, "one row for each words and the header, and for each text of the switch, of the till, of the starter line and of the Lightning key and their headers")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1 + WordsOfTill.all().size + 1 + WordsOfStarter.all().size + 1 + ShopLightningWords.all().size + 1 + PairHereWords.all().size + 1 + GivingWords.all().size + 1 + LightningFirstWords.all().size + 1 + StillToPayWords.all().size + WaitWords.all().size + 1 + 1 + 1 + 1, "one row for each words and the header, and for each text of the switch, of the till, of the starter line and of the Lightning key and their headers")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -1841,6 +1841,49 @@ object AppModelTest {
         }
     }
 
+    // ---- a part paid sale leads with what is missing (CR-285), a wait shows that it is alive (CR-286) ----
+
+    private fun cr285StillToPayTests(appDir: File?) {
+        val usd = Money("USD", 2)
+        val bitcoin = Money("SAT", 0)
+        val band = SaleModel.stillToPay(usd, 4_881, 361, 6_000, 10_881, 800)
+        ok(band.heading == "Still to pay" && band.big == "3.61 USD" && band.toSend == "4,881 sats to send", "CR-285: the heading, the large amount in the shop's currency and the sats to send")
+        ok(band.paid == "Paid 6,000 sats of 10,881. The sale is 8.00 USD.", "CR-285: the line of what has arrived and the sale, as the rule has it")
+        val sats = SaleModel.stillToPay(bitcoin, 4_881, null, 6_000, 10_881, 10_881)
+        ok(sats.big == "4,881 sats" && sats.toSend == "to send" && sats.paid == "Paid 6,000 sats of 10,881.", "CR-285: with no amount in a currency the missing sats are the large amount, said once, and the line ends after the whole")
+        ok(SaleModel.stillToPay(usd, 1, 1, 1, 1, null).paid == "Paid 1 sat of 1.", "CR-285: a sale with no amount ends after the number")
+        ok(SaleModel.stillToPay(usd, 100, 1, 900, 1_000, 10).big == "0.01 USD", "CR-285: the large amount is the missing minor units")
+        ok(StillToPayWords.all().none { it.second.isBlank() || it.second.startsWith("TODO_WORDS") }, "CR-285: every text is written")
+        if (appDir != null) {
+            val controller = File(appDir, "src/android/Controller.kt").readText()
+            val sale = controller.substringAfter("private fun showSale(").substringBefore("private fun requote(")
+            ok(sale.contains("if (s.state == SaleState.PartPaid)") && sale.contains("SaleModel.stillToPay(m, s.missingSats, s.missingMinor"), "CR-285: a part paid sale draws the band of what is missing")
+            ok(sale.contains("s.missingSats, s.missingMinor, wait.ringSecs"), "CR-285: the screen is drawn again when what is missing changes")
+        }
+    }
+
+    private fun cr286WaitTests(appDir: File?) {
+        ok(WaitWords.ring(5) == "5 s" && WaitWords.seen(40) == "Seen 40 s ago" && WaitWords.seen(59) == "Seen 59 s ago", "CR-286: the ring's number and the seconds seen, as the rule has them")
+        ok(WaitWords.seen(60) == "Seen 1 min ago" && WaitWords.seen(185) == "Seen 3 min ago" && WaitWords.seen(7_199) == "Seen 119 min ago", "CR-286: whole minutes, floored, from one minute")
+        val check = SaleModel.wait(SaleState.Waiting, 5, 8, 3, true)
+        ok(check.ringSecs == 5L && check.ringTotal == 8L && check.seen == null && check.pulse, "CR-286: a short check shows the ring, no seen line, and the mark pulses while healthy")
+        ok(SaleModel.wait(SaleState.Waiting, 0, 8, 8, true).let { !it.any && !it.pulse }, "CR-286: at 0 the ring goes and nothing stays")
+        val block = SaleModel.wait(SaleState.Waiting, null, null, 40, true)
+        ok(block.ringSecs == null && block.seen == "Seen 40 s ago" && block.pulse, "CR-286: a wait for a block shows how long ago, with no countdown")
+        ok(!SaleModel.wait(SaleState.Waiting, null, null, 40, false).pulse, "CR-286: the mark pulses only while the check is healthy")
+        ok(!SaleModel.wait(SaleState.Confirmed, 5, 8, 40, true).any && !SaleModel.wait(SaleState.PartPaid, null, null, 40, true).any, "CR-286: only a waiting sale shows a time")
+        ok(!SaleModel.wait(SaleState.Waiting, null, null, null, true).any, "CR-286: a wait with no time known shows none")
+        ok(WaitWords.all().none { it.second.isBlank() || it.second.startsWith("TODO_WORDS") }, "CR-286: every text is written")
+        if (appDir != null) {
+            val controller = File(appDir, "src/android/Controller.kt").readText()
+            val sale = controller.substringAfter("private fun showSale(").substringBefore("private fun requote(")
+            ok(sale.contains("SaleModel.wait(s.state, s.watchSecsLeft, s.watchSecsTotal, s.seenSecs, s.checkHealthy)"), "CR-286: the wait is drawn from what the library says")
+            ok(sale.contains("liveRing?.show(it, wait.ringTotal, motion)") && sale.contains("livePulse?.pulsing(wait.pulse, motion)") && sale.contains("Feedback.motionOn(act)"), "CR-286: the numbers move in place and the ring and the mark are still with reduced motion")
+            val views = File(appDir, "src/android/CounterViews.kt").readText()
+            ok(views.contains("if (!animate || total <= 0)") && views.contains("val run = on && motion"), "CR-286: the ring and the mark do not move without motion")
+        }
+    }
+
     private fun cr284NoticesTests() {
         // CR-284: a sale not on the screen turning green gives one notice and one sound; red likewise.
         val plays = OutcomePlays()
@@ -1965,6 +2008,8 @@ object AppModelTest {
         gv14GivingTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr283LightningFirstTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr284NoticesTests()
+        cr285StillToPayTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        cr286WaitTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         println("AppModelTest (counter): $count checks passed")
     }
 }

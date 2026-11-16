@@ -531,6 +531,18 @@ class Screen(
     val lightning: LightningSale?,
     /** CR-283: the code is the Lightning invoice alone, with the line and the button that show the on-chain code. */
     val lightningFirst: Boolean,
+    /** CR-285: what is still missing, in satoshis; zero unless part paid. */
+    val missingSats: Long,
+    /** CR-285: the missing sats in the sale's currency, in minor units, rounded up; null when the sale has no amount in a currency. */
+    val missingMinor: Long?,
+    /** CR-286: the seconds left of the watch for a conflicting payment; null otherwise. */
+    val watchSecsLeft: Long?,
+    /** CR-286: the whole of that watch, for the ring that empties over it; null otherwise. */
+    val watchSecsTotal: Long?,
+    /** CR-286: the seconds since the unconfirmed payment was first seen; null when none stands. */
+    val seenSecs: Long?,
+    /** CR-286: the counter's check is healthy. */
+    val checkHealthy: Boolean,
 )
 
 /**
@@ -1089,6 +1101,7 @@ internal fun Reader.screen(): Screen =
     Screen(
         saleState(), words(), list { words() }, option { words() }, u64(), u64(), bool(), bool(),
         bool(), bool(), reports(), option { payment() }, option { lightningSale() }, bool(),
+        u64(), option { u64() }, option { u64() }, option { u64() }, option { u64() }, bool(),
     )
 
 private fun Reader.lightningSale(): LightningSale =
