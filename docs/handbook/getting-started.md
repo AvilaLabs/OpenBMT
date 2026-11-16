@@ -53,8 +53,8 @@ Install the Owner app and open it. The first screen offers to try it
 first: a practice shop runs one sale from start to finish with pretend
 money, then deletes itself. It needs no wallet and no second device.
 
-**Status:** built. The apps are Android only and are not yet published for
-download.
+**Status:** built for Android, with iPhone and iPad versions planned. The apps
+are not yet published for download.
 
 ## Step 2. Name the shop and choose your till
 

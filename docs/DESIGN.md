@@ -102,8 +102,8 @@ It is three pieces of software:
     not the wallet description (§5.1).
   - **Owner mode** runs on the owner's own Android phone. It holds key 1,
     queues refunds and cash-outs for the approval session (§2.10), signs the
-    shop's settings, and shows the books. Owner mode is Android-only in v1. An
-    iPhone owner app is a research item (§15).
+    shop's settings, and shows the books. Owner mode is built for Android
+    first; the iPhone and iPad apps follow (R9, §15).
 - **The OpenBMT Key app** is a separate, small signer for key 2. It is the
   second authority for everything that moves money, changes trust or loosens
   safety (§2.10). It asks for no network permission, has its own release key,
@@ -742,6 +742,13 @@ and no TLS certificate company is needed **[design, R5]**.
 
 ### 5.1 Counter mode
 
+The counter is a role, not a device of its own. It runs on what the shop
+already has: beside the register app on the same tablet or iPad (side by
+side, or switched to), on the owner's own phone (`docs/COUNTER-RULES.md`
+§23a), or inside a register that lets an app add a payment button (Clover's
+custom tender). A separate device is needed only where the register runs on
+hardware that takes no other app (Square Register, Square Terminal).
+
 - Holds **signed batches of addresses**, not the wallet description. Owner mode
   derives a batch from the wallet and signs it with key 1. The Key app
   co-signs it (below). The batch gives the counter its own contiguous index
@@ -852,7 +859,7 @@ and no TLS certificate company is needed **[design, R5]**.
 
 ### 5.2 Owner mode
 
-- Holds key 1 (§5.4). Android only in v1.
+- Holds key 1 (§5.4). Android first; iPhone follows (R9).
 - Queues refunds, cash-outs, batches, settings and destinations. Every one is
   approved and signed with key 2 in the approval session (§2.10). It builds its
   own transactions from its own wallet view. The server is never needed to
@@ -1965,8 +1972,15 @@ Each gets a written protocol before it runs.
 - R8: **time-locked vault** (miniscript, a Liana-style path): a recovery path
   that opens after a long delay. Stops a thief who reaches two keys from
   emptying the wallet at once. Researched before it is offered.
-- R9: **iPhone owner app.** Owner mode is Android-only in v1. An iPhone version
-  needs a plan for key storage and background watching.
+- R9: **iPhone and iPad apps.** The owner app and the counter come to iPhone
+  and iPad as well as Android; Android is built first because it is easier
+  to test. The money logic is shared Rust and the screens' logic is Kotlin
+  that already builds for other targets (the demo runs it in a browser), so
+  the Apple apps reuse both and draw their own screens. On an iPad the
+  counter runs beside Square or another register app in Split View, so a
+  shop on an iPad needs no second device. Open: key storage and background
+  watching on iOS (R7), tap to pay at an iPhone counter under Apple's NFC
+  rules, and building on a Mac with an Apple developer account.
 - R10: **per-sale signed payment requests**, so a wallet can show who is being
   paid. No standard exists today.
 
@@ -2063,7 +2077,7 @@ Each gets a written protocol before it runs.
 - The counter gets signed address batches, not the wallet description.
 - Phone-key rules (§5.4).
 - Refunds and cash-outs go out over Tor by default.
-- Owner mode is Android-only in v1.
+- The apps are built for Android first; iPhone and iPad follow (R9).
 
 **Round-3 decisions (2026-11-09).** They fix findings R3-1 to R3-10
 (docs/research/security-review-round3-2026-11-09.md).
