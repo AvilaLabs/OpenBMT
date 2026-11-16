@@ -40,7 +40,13 @@ const TEST_SOURCES: [&str; 28] = [
 /// Rules this crate does not test, each with the reason. The counter
 /// implements every rule except the ones that only state a limit and the
 /// ones that belong to the app it is built into.
-const NOT_HERE: [(&str, &str); 112] = [
+const NOT_HERE: [(&str, &str); 113] = [
+    (
+        "CR-284",
+        "the library draws no notice: the node tells each sale's first turn to green or red \
+         (tested in openbmt-counter-node) and the app keeps and draws the notices (tested in the \
+         counter app's model tests)",
+    ),
     (
         "CR-56",
         "it states what the heartbeat does not guard against (a bad build of the same software \
@@ -595,9 +601,9 @@ fn defined() -> BTreeSet<String> {
 }
 
 #[test]
-fn the_rules_file_defines_two_hundred_and_thirty_two_rules() {
+fn the_rules_file_defines_two_hundred_and_thirty_four_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 232);
+    assert_eq!(ids.len(), 234);
     assert!(
         ids.contains("CR-01")
             && ids.contains("CR-42")
@@ -644,6 +650,8 @@ fn the_rules_file_defines_two_hundred_and_thirty_two_rules() {
             && ids.contains("CR-271")
             && ids.contains("CR-276")
             && ids.contains("CR-282")
+            && ids.contains("CR-283")
+            && ids.contains("CR-284")
     );
 }
 

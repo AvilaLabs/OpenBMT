@@ -98,10 +98,10 @@ pub use refund::{
     MAX_REFUNDS_PER_SALE,
 };
 pub use refusal::{
-    BatchTakeRefused, BillRefused, BlockError, CancelRefused, CommandRefused, DestinationRefused,
-    HeartbeatRefused, JudgeError, LightningRefused, LoadError, NoteRefused, OpenRefused,
-    OverrideRefused, PartRefused, RangeTakeRefused, RefundRefused, RequoteRefused, SightingError,
-    StaffRefused, TillStartRefused, TotalsRefused, WithdrawRefused,
+    BatchTakeRefused, BillRefused, BlockError, CancelRefused, ChooseRefused, CommandRefused,
+    DestinationRefused, HeartbeatRefused, JudgeError, LightningRefused, LoadError, NoteRefused,
+    OpenRefused, OverrideRefused, PartRefused, RangeTakeRefused, RefundRefused, RequoteRefused,
+    SightingError, StaffRefused, TillStartRefused, TotalsRefused, WithdrawRefused,
 };
 pub use sale::{End, LightningPaid, OverrideMark, OwnCheck, PosState, RequestDays, Sale, Segment};
 pub use screen::{Color, Next, Report, Screen, State, Why};

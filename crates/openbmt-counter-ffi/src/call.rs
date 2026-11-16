@@ -93,6 +93,8 @@
 //! - 89 `tap_answer` answers one command of an NFC reader from the tag's
 //!   bytes and the session the app keeps (TP-10 to TP-15); it works on no
 //!   node and keeps nothing.
+//! - 92 `sale_on_chain_instead` keeps the cashier's choice of the on-chain
+//!   code over a Lightning-only one for the rest of a sale (CR-283).
 //! - 90 `shop_lightning_seed` and 91 `shop_lightning` are Shop Lightning
 //!   (SL-70 to SL-78): the first takes the seed code a manager scanned from
 //!   the stick, checks it against the node ID the settings pin (SL-72) and
@@ -158,7 +160,7 @@ use crate::views::{
     RefundRow, RefundStateView, RelayKind, ReportView, RequestRow, RequoteArgs, SaleInfoView,
     ScreenView, ShopLightningView, StaffArgs, StartConfig, StateView, StatusView, SwapReplyArgs,
     SwapRequestView, SwitchSameView, SwitchStateView, TallyView, TipChoiceView, TipTallyView,
-    WithdrawArgs, WordsView,
+    TurnView, WithdrawArgs, WordsView,
 };
 
 /// The first four bytes of a request.
@@ -648,6 +650,9 @@ fn build_ops() -> Vec<Op> {
         op(91, "shop_lightning", Node, |c, ()| {
             c.entry()?.shop_lightning()
         }),
+        op(92, "sale_on_chain_instead", Node, |c, index: u32| {
+            c.entry()?.sale_on_chain_instead(index)
+        }),
         op(200, "pending_switch", Node, |c, now: u64| {
             c.entry()?.pending_switch(now)
         }),
@@ -811,6 +816,7 @@ fn definitions() -> Vec<TypeDef> {
         SaleInfoView::define(),
         RequestRow::define(),
         TipChoiceView::define(),
+        TurnView::define(),
         TipTallyView::define(),
         CancelArgs::define(),
         StaffArgs::define(),

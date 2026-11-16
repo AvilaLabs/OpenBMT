@@ -172,7 +172,15 @@ fn sc_07_waiting_and_instant_off_read_differently() {
     ] {
         let w = Why::Wait(reason).words();
         assert_eq!(w.tone, Tone::Info);
-        assert!(w.next.starts_with("Nothing to do."), "{}", w.next);
+        // A sale over the limits goes on by itself, so the cashier serves the
+        // next customer meanwhile (CR-283).
+        let serves = matches!(reason, WaitReason::OverSaleLimit | WaitReason::SliceFull);
+        let start = if serves {
+            "Serve the next customer while it waits."
+        } else {
+            "Nothing to do."
+        };
+        assert!(w.next.starts_with(start), "{}", w.next);
     }
 }
 

@@ -329,7 +329,9 @@ object ProtocolDecoderTest {
         // Bits 1, 0, 1, 0: the first column is dark.
         check(payment.module(0, 0) && !payment.module(1, 0) && payment.module(0, 1) && !payment.module(1, 1))
 
-        check(screen.check == null && screen.lightning == null)
+        check(screen.check == null && screen.lightning == null && !screen.lightningFirst)
+        decodeResponse(screenFrame(lightningFirst = 1)).screen().also { check(it.lightningFirst) }
+        rejects("a bool in the Lightning-first flag") { decodeResponse(screenFrame(lightningFirst = 2)).screen() }
         decodeResponse(screenFrame(lightning = 1)).screen().also {
             val ln = it.lightning ?: error("a Lightning line")
             check(ln.invoice && !ln.waiting && ln.unavailable == null && !ln.notForThisSale && ln.failed == null)
@@ -359,8 +361,8 @@ object ProtocolDecoderTest {
             decodeResponse(screenFrame(trailingByte = true)).also { it.screen(); it.end() }
         }
 
-        val pump = decodeResponse(header(0, Writer().u32(0).u32(1).string("note").u8(1).toByteArray())).pump()
-        check(pump.reports.isEmpty() && pump.notes == listOf("note") && pump.stopped)
+        val pump = decodeResponse(header(0, Writer().u32(0).u32(1).string("note").u8(1).u32(1).u32(5).u8(1).toByteArray())).pump()
+        check(pump.reports.isEmpty() && pump.notes == listOf("note") && pump.stopped && pump.turns.size == 1 && pump.turns[0].index == 5L && pump.turns[0].green)
         statuses()
         links()
     }
@@ -596,6 +598,7 @@ object ProtocolDecoderTest {
         trailingByte: Boolean = false,
         check: Boolean = false,
         lightning: Int = 0,
+        lightningFirst: Int = 0,
     ): ByteArray {
         val out = ByteArrayOutputStream()
         out.write(state)
@@ -657,6 +660,7 @@ object ProtocolDecoderTest {
             }
             else -> out.write(byteArrayOf(1, 2, 0, 0, 0, 0))
         }
+        out.write(lightningFirst)
         if (trailingByte) out.write(0x55)
         return header(0, out.toByteArray())
     }

@@ -96,7 +96,7 @@
 //! the owner's tip and the node's differ at a height the node holds is
 //! written to the node's log as a disagreement.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
@@ -126,9 +126,9 @@ use openbmt_core::starter_line::StarterLine;
 use openbmt_core::wire::DecodeError;
 use openbmt_counter::{
     Actor, Amount, BatchTakeRefused, BillKind, BillRefused, BillView, BlockError, CancelRefused,
-    CashRefund, CommandRefused, Counter, Currency, DayTotals, Facts, HeartbeatRefused,
-    HeartbeatView, JudgeError, LightningPaid, LoadError, NoteRefused, OpenFacts, OpenRefused,
-    Opened, Overridden, OwnCheck, OwnPairing, Pairing, PartRefused, PartWay, Quote,
+    CashRefund, ChooseRefused, CommandRefused, Counter, Currency, DayTotals, Facts,
+    HeartbeatRefused, HeartbeatView, JudgeError, LightningPaid, LoadError, NoteRefused, OpenFacts,
+    OpenRefused, Opened, Overridden, OwnCheck, OwnPairing, Pairing, PartRefused, PartWay, Quote,
     RangeTakeRefused, Rate, RateSource, RefundRefused, RefundRequest, RefundView, Report,
     RequoteRefused, SaleExtras, Screen, SightingError, Slot, StaffEvent, StaffRefused, Store,
     StoreFault, SwapPaid, TillCancelled, TillDropped, TillRequest, TillStartRefused, TotalsRefused,
@@ -685,6 +685,14 @@ pub struct Node<P: DriverPort = Handle> {
     ln: Lightning,
     /// What a Lightning payment reported, for the next pump.
     ln_reports: Vec<Report>,
+    /// CR-284: the sales that turned green (`true`) or red (`false`) for the
+    /// first time since the app last asked, oldest first.
+    turns: Vec<(u32, bool)>,
+    /// CR-284: the turns already reported, so that a sale reports each colour
+    /// once.
+    turned: BTreeSet<(u32, bool)>,
+    /// CR-284: the colour each sale showed at its last judging in this run.
+    last_color: BTreeMap<u32, openbmt_counter::Color>,
     /// SL-70 to SL-78: Shop Lightning, when the app gave it what it needs.
     shopln: Option<ShopLn>,
     /// CR-218 to CR-226: the driver of Lightning through a swap provider.
@@ -741,6 +749,19 @@ fn load_pending(
         arrived,
         confirmed: false,
     })
+}
+
+/// Which Lightning path a sale's view comes from (CR-283).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LnPath {
+    /// No path shows anything.
+    None,
+    /// Shop Lightning (SL-70).
+    ShopLn,
+    /// The shop's own node (CR-112).
+    OwnNode,
+    /// A swap provider (CR-219).
+    Swap,
 }
 
 /// What a start found of a switch that was being made (CR-261).
@@ -1075,6 +1096,9 @@ impl<P: DriverPort> Node<P> {
             settle_wanted: false,
             ln,
             ln_reports: Vec::new(),
+            turns: Vec::new(),
+            turned: BTreeSet::new(),
+            last_color: BTreeMap::new(),
             shopln,
             swap,
             swap_random: Box::new(os_random),
@@ -1968,6 +1992,9 @@ impl<P: DriverPort> Node<P> {
         self.retry_setting_record();
         reports.append(&mut self.ln_reports);
         self.take_ln_notes();
+        for report in &reports {
+            self.turn_from_report(report);
+        }
         reports
     }
 
@@ -3131,7 +3158,7 @@ impl<P: DriverPort> Node<P> {
             remote_order: false,
             now,
         };
-        match own {
+        let result = match own {
             OwnCheck::Mixed(own) => {
                 self.counter
                     .judge_with_own_node(index, &facts, &own, &mut self.store)
@@ -3140,18 +3167,64 @@ impl<P: DriverPort> Node<P> {
                 self.counter
                     .judge_with_node_only(index, &facts, &health, &mut self.store)
             }
+        };
+        if let Ok(screen) = &result {
+            self.note_turn(index, screen);
         }
+        result
+    }
+
+    /// CR-284: a sale that turns green or red tells the app once. The paid
+    /// and unpaid reports of CR-30 are written once for good, so they mark
+    /// the turns that survive a restart; a red that no report marks (a
+    /// payment replaced before any was accepted) is seen from the colours of
+    /// two judgings in this run.
+    fn note_turn(&mut self, index: u32, screen: &Screen) {
+        use openbmt_counter::Color;
+        let color = screen.state.color();
+        let before = self.last_color.insert(index, color);
+        for report in &screen.reports {
+            self.turn_from_report(report);
+        }
+        if color == Color::Red && before.is_some_and(|c| c != Color::Red) {
+            self.turn(index, false);
+        }
+    }
+
+    fn turn_from_report(&mut self, report: &Report) {
+        match report {
+            Report::PosPaid { index } => self.turn(*index, true),
+            Report::PosUnpaid { index } => self.turn(*index, false),
+            _ => {}
+        }
+    }
+
+    fn turn(&mut self, index: u32, green: bool) {
+        if self.turned.insert((index, green)) {
+            self.turns.push((index, green));
+        }
+    }
+
+    /// CR-284: the sales that turned green (`true`) or red (`false`) for the
+    /// first time since the last call, oldest first.
+    pub fn take_turns(&mut self) -> Vec<(u32, bool)> {
+        std::mem::take(&mut self.turns)
     }
 
     /// CR-113: what the screen of a sale shows of Lightning.
     pub fn lightning_sale(&mut self, index: u32) -> SaleLightning {
+        self.lightning_view(index).0
+    }
+
+    /// [`Node::lightning_sale`], and the path the view comes from.
+    fn lightning_view(&mut self, index: u32) -> (SaleLightning, LnPath) {
         let now = self.clock.now();
         let live = self.counter.sale(index).is_some_and(|s| s.is_live());
         if !live {
             if let Some(shopln) = self.shopln.as_mut() {
                 shopln.sale_closed(index);
             }
-            return SaleLightning::Off;
+            return (SaleLightning::Off, LnPath::None);
         }
         // SL-70: Shop Lightning is one of the Lightning paths, and the
         // settings never set it with another (SL-71).
@@ -3160,13 +3233,13 @@ impl<P: DriverPort> Node<P> {
         if let Some(shopln) = self.shopln.as_mut().filter(|_| !request) {
             let view = shopln.sale_view(index, sats, now);
             if !matches!(view, SaleLightning::Off) {
-                return view;
+                return (view, LnPath::ShopLn);
             }
         }
         let view = self.ln.sale_view(index, now);
         self.take_ln_notes();
         if !matches!(view, SaleLightning::Off) {
-            return view;
+            return (view, LnPath::OwnNode);
         }
         // CR-219: one Lightning path at a time, so only one of the two has
         // anything to show.
@@ -3175,7 +3248,7 @@ impl<P: DriverPort> Node<P> {
             .counter
             .sale(index)
             .is_some_and(|s| s.accepted().is_some() || s.pos() == openbmt_counter::PosState::Paid);
-        match self.swap.sale_view(index, now, reported_paid) {
+        let view = match self.swap.sale_view(index, now, reported_paid) {
             SaleSwap::Off => SaleLightning::Off,
             SaleSwap::Waiting => SaleLightning::Waiting,
             SaleSwap::Invoice(checked) => SaleLightning::Invoice(checked),
@@ -3183,7 +3256,46 @@ impl<P: DriverPort> Node<P> {
             SaleSwap::Unavailable(words) => SaleLightning::Unavailable(words),
             SaleSwap::Confirming(words) => SaleLightning::Confirming(words),
             SaleSwap::Failed(words) => SaleLightning::Failed(words),
+        };
+        (view, LnPath::Swap)
+    }
+
+    /// CR-283: whether the code of the sale is the Lightning invoice alone.
+    /// The sale is open and not a request to send, the cashier has not chosen
+    /// the on-chain code, its invoice has come and is final at once (from the
+    /// shop's own node, or from Shop Lightning over channels whose funding is
+    /// confirmed; never a swap's), and the instant decision for a payment of
+    /// the quote's amount is a wait. Asked again at every quote and after a
+    /// restart: nothing of it is kept but the cashier's choice.
+    pub fn lightning_first(&mut self, index: u32) -> bool {
+        let open = self
+            .counter
+            .sale(index)
+            .is_some_and(|s| s.is_live() && !s.is_request() && !s.on_chain_instead());
+        if !open {
+            return false;
         }
+        let (view, path) = self.lightning_view(index);
+        let final_invoice = matches!(view, SaleLightning::Invoice(_))
+            && match path {
+                LnPath::OwnNode => true,
+                LnPath::ShopLn => self.shopln.as_ref().is_some_and(|s| s.final_at_once(index)),
+                LnPath::Swap | LnPath::None => false,
+            };
+        if !final_invoice {
+            return false;
+        }
+        let now = self.clock.now();
+        let own = self.own_check_now();
+        let health = self.health.unwrap_or(NO_ANSWER_YET);
+        let heartbeat = self.counter.heartbeat_for_policy(now);
+        self.counter
+            .instant_would_wait(index, health, heartbeat, &own, now)
+    }
+
+    /// CR-283: the cashier chose the code of LN-18 for the rest of the sale.
+    pub fn choose_on_chain(&mut self, index: u32) -> Result<(), ChooseRefused<DirStoreError>> {
+        self.counter.choose_on_chain(index, &mut self.store)
     }
 
     /// CR-116: the Lightning line of the status, when a credential is saved.

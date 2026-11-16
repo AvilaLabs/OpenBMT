@@ -284,6 +284,9 @@ fn cr_113_a_sale_shows_its_chain_code_then_the_lightning_code_and_is_paid_at_onc
     let rig = Rig::new();
     let handle = rig.start_with(&config(&rig, Some(node_key(1)), Some(saved(lnd()))));
     open(&rig, handle);
+    // The owner's phone is heard, so a payment of this sale would be taken at
+    // once and the code is not Lightning first (CR-283).
+    Rd::ok(&rig.call(20, handle, &W::new().u64(T0).bytes(&heartbeat_bytes(1)).0));
     // The on-chain code is there at once.
     let early = judge(&rig, handle, T0, 0);
     let chain = early.payment.expect("a code");
@@ -405,4 +408,157 @@ fn cr_114_a_status_that_is_not_a_status_is_refused() {
 /// The DER bytes of the certificate every recorded credential pins.
 fn der_of_pin() -> Vec<u8> {
     openbmt_lightning::testing::der(300, 7)
+}
+
+// ---- CR-283: over the instant limit, Lightning first -------------------
+
+const OP_SALE_ON_CHAIN_INSTEAD: u16 = 92;
+/// $15.00, which needs 15,000 satoshis at the test rate: above the 10,000 the
+/// light check takes at once.
+const FIFTEEN_DOLLARS: u64 = 1_500;
+
+fn heartbeat_bytes(seq: u64) -> Vec<u8> {
+    use bitcoin::hashes::Hash;
+    openbmt_core::heartbeat::WatcherHeartbeat {
+        counter: id(3).device_id(),
+        seq,
+        time: T0,
+        tip_height: 0,
+        tip_hash: genesis().to_byte_array(),
+        healthy: true,
+    }
+    .sign(&id(1))
+    .to_bytes()
+}
+
+/// A rig with Lightning on, the owner's phone heard (instant is asked for
+/// real) and a sale of `minor` cents open, its invoice come.
+fn rig_with_invoice(minor: u64, heard: bool) -> (Rig, u64) {
+    let rig = Rig::new();
+    let handle = rig.start_with(&config(&rig, Some(node_key(1)), Some(saved(lnd()))));
+    rig.send(vec![peers_event()]);
+    rig.call(10, handle, &W::new().u64(T0).u32(50).0);
+    if heard {
+        let response = rig.call(20, handle, &W::new().u64(T0).bytes(&heartbeat_bytes(1)).0);
+        Rd::ok(&response);
+    }
+    let response = rig.call(
+        11,
+        handle,
+        &W::new().open(T0, minor, "USD", RATE, "test-fixed").0,
+    );
+    Rd::ok(&response);
+    let create = next(&rig, handle, T0).expect("an invoice request");
+    reply(&rig, handle, create.id, 200, &created_body(minor * 10));
+    (rig, handle)
+}
+
+#[test]
+fn cr_283_over_the_limit_the_code_is_the_invoice_alone_and_the_button_gives_the_code_of_ln_18() {
+    let (rig, handle) = rig_with_invoice(FIFTEEN_DOLLARS, true);
+    let first = judge(&rig, handle, T0, 0);
+    assert!(first.lightning_first);
+    let code = first.payment.expect("a code");
+    assert!(code.uri.starts_with("LIGHTNING:LNBCRT"), "{}", code.uri);
+    assert!(code.copy_uri.starts_with("lightning:lnbcrt"));
+    assert!(!code.uri.contains("BITCOIN") && !code.copy_uri.contains("bitcoin"));
+    // The tag holds the same text (TP-01).
+    assert_eq!(code.tag, crate::tap::tag_content(&code.copy_uri).unwrap());
+    assert!(!code.tag.is_empty());
+    // The invoice is the node's, as it is in the code of LN-18.
+    let ln = first.lightning.expect("an invoice");
+    assert!(ln.invoice);
+
+    // The button: by anyone, with no PIN, one op.
+    Rd::ok(&rig.call(OP_SALE_ON_CHAIN_INSTEAD, handle, &W::new().u32(0).0)).done();
+    let after = judge(&rig, handle, T0, 0);
+    assert!(!after.lightning_first);
+    let chain = after.payment.expect("a code");
+    assert!(chain.uri.starts_with("BITCOIN:"));
+    assert!(chain.uri.contains("LIGHTNING=LNBCRT"), "{}", chain.uri);
+    assert!(chain.copy_uri.starts_with("bitcoin:"));
+    // The sale, its quote and its address are the same.
+    assert_eq!(chain.address, code.address);
+    assert_eq!(after.needs, first.needs);
+    // Asking again changes nothing.
+    Rd::ok(&rig.call(OP_SALE_ON_CHAIN_INSTEAD, handle, &W::new().u32(0).0)).done();
+    assert!(!judge(&rig, handle, T0, 0).lightning_first);
+}
+
+#[test]
+fn cr_283_under_the_limit_the_code_is_the_one_of_ln_18_with_no_line_and_no_button() {
+    let (rig, handle) = rig_with_invoice(FIVE_DOLLARS, true);
+    let screen = judge(&rig, handle, T0, 0);
+    assert!(!screen.lightning_first);
+    let code = screen.payment.expect("a code");
+    assert!(code.uri.starts_with("BITCOIN:") && code.uri.contains("LIGHTNING=LNBCRT"));
+}
+
+#[test]
+fn cr_283_with_instant_off_the_code_is_the_invoice_alone() {
+    // No heartbeat has come, so a payment would wait whatever it is.
+    let (rig, handle) = rig_with_invoice(FIVE_DOLLARS, false);
+    let screen = judge(&rig, handle, T0, 0);
+    assert!(screen.lightning_first);
+    assert!(screen
+        .payment
+        .expect("a code")
+        .uri
+        .starts_with("LIGHTNING:"));
+}
+
+#[test]
+fn cr_283_a_sale_whose_invoice_has_not_come_shows_the_chain_code_and_no_button() {
+    let rig = Rig::new();
+    let handle = rig.start_with(&config(&rig, Some(node_key(1)), Some(saved(lnd()))));
+    rig.send(vec![peers_event()]);
+    rig.call(10, handle, &W::new().u64(T0).u32(50).0);
+    Rd::ok(&rig.call(20, handle, &W::new().u64(T0).bytes(&heartbeat_bytes(1)).0));
+    Rd::ok(
+        &rig.call(
+            11,
+            handle,
+            &W::new()
+                .open(T0, FIFTEEN_DOLLARS, "USD", RATE, "test-fixed")
+                .0,
+        ),
+    );
+    let waiting = judge(&rig, handle, T0, 0);
+    assert!(!waiting.lightning_first);
+    assert!(waiting.payment.expect("a code").uri.starts_with("BITCOIN:"));
+}
+
+#[test]
+fn cr_283_the_choice_is_refused_on_a_sale_that_is_not_there_or_not_open() {
+    let (rig, handle) = rig_with_invoice(FIFTEEN_DOLLARS, true);
+    let f = super::wire::Rd::error(&rig.call(OP_SALE_ON_CHAIN_INSTEAD, handle, &W::new().u32(9).0))
+        .expect("a refusal");
+    assert_eq!(f.rule, "CR-78");
+    Rd::ok(&rig.call(14, handle, &W::new().u64(T0).u32(0).u8(0).0)).done();
+    let f = super::wire::Rd::error(&rig.call(OP_SALE_ON_CHAIN_INSTEAD, handle, &W::new().u32(0).0))
+        .expect("a refusal");
+    assert_eq!(f.rule, "CR-283");
+}
+
+#[test]
+fn cr_284_a_sale_that_turns_green_is_in_the_pump_once() {
+    let (rig, handle) = rig_with_invoice(FIVE_DOLLARS, true);
+    let lookup = next(&rig, handle, T0).expect("a lookup");
+    reply(
+        &rig,
+        handle,
+        lookup.id,
+        200,
+        &lookup_body("SETTLED", Some(5_000_000)),
+    );
+    let response = rig.call(10, handle, &W::new().u64(T0).u32(50).0);
+    let mut r = Rd::ok(&response);
+    let (_, _, _, turns) = r.pump_turns();
+    r.done();
+    assert_eq!(turns, vec![(0, true)]);
+    let response = rig.call(10, handle, &W::new().u64(T0).u32(0).0);
+    let mut r = Rd::ok(&response);
+    let (_, _, _, again) = r.pump_turns();
+    r.done();
+    assert!(again.is_empty());
 }

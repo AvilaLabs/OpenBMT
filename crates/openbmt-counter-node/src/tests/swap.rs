@@ -2503,3 +2503,14 @@ fn cr_220_a_record_of_the_first_version_is_still_read() {
     assert_eq!(SwapRecord::from_bytes(&kept.to_bytes()).unwrap(), kept);
     assert_eq!(kept.to_bytes().get(4), Some(&2));
 }
+
+#[test]
+fn cr_283_a_swap_invoice_is_never_lightning_first() {
+    let dir = Scratch::new();
+    let mut w = world(&dir);
+    // No heartbeat: instant is off, so a payment of this sale would wait.
+    let index = w.open();
+    w.serve();
+    assert!(matches!(w.view(index), SaleLightning::Invoice(_)));
+    assert!(!w.rig.node.lightning_first(index));
+}

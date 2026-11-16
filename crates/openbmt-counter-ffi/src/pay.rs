@@ -116,6 +116,28 @@ pub(crate) fn payment_with_invoice(
     finish(address, uri, copy_uri)
 }
 
+/// CR-283: the code of a sale that is Lightning first: the invoice alone,
+/// `lightning:` and the invoice, in capitals for the QR code when LN-19
+/// allows (the address is bech32). The text for "copy" and the tag (TP-01)
+/// hold the invoice as the node made it. The address stays on the payment
+/// for the screen that offers the on-chain code.
+pub(crate) fn payment_lightning_only(
+    script: &ScriptBuf,
+    network: Network,
+    invoice: &Checked,
+) -> Result<Payment, CounterError> {
+    let address = Address::from_script(script, network)
+        .map_err(|e| refused_by("pay-address", format!("the script has no address: {e}")))?
+        .to_string();
+    let copy_uri = format!("lightning:{}", invoice.bolt11);
+    let uri = if script.is_witness_program() {
+        copy_uri.to_ascii_uppercase()
+    } else {
+        copy_uri.clone()
+    };
+    finish(address, uri, copy_uri)
+}
+
 /// The payment request of the sale whose address is `script`, for `sats`.
 pub(crate) fn payment_for(
     script: &ScriptBuf,

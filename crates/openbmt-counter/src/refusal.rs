@@ -332,6 +332,41 @@ impl<E: fmt::Display> fmt::Display for RequoteRefused<E> {
 
 impl<E: fmt::Debug + fmt::Display> std::error::Error for RequoteRefused<E> {}
 
+/// Why the choice of the on-chain code was not kept on a sale (CR-283).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChooseRefused<E> {
+    /// CR-78: the counter has no sale with this index.
+    UnknownSale(u32),
+    /// CR-283: the sale is no longer open, so its code is not shown again.
+    SaleEnded,
+    /// CR-40: a write failed.
+    Store(StoreFault<E>),
+}
+
+impl<E> ChooseRefused<E> {
+    /// The rule the refusal belongs to.
+    pub fn rule(&self) -> &'static str {
+        match self {
+            Self::UnknownSale(_) => "CR-78",
+            Self::SaleEnded => "CR-283",
+            Self::Store(_) => "CR-40",
+        }
+    }
+}
+
+impl<E: fmt::Display> fmt::Display for ChooseRefused<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: ", self.rule())?;
+        match self {
+            Self::UnknownSale(i) => write!(f, "there is no sale with index {i}"),
+            Self::SaleEnded => write!(f, "the sale is no longer open"),
+            Self::Store(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl<E: fmt::Debug + fmt::Display> std::error::Error for ChooseRefused<E> {}
+
 /// Why a note was not added to a sale (CR-206).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NoteRefused<E> {

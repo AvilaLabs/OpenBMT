@@ -130,6 +130,7 @@ ops run on another; it waits for at most 250 ms.
  89 tap_answer       handle zero  args TapArgs -> TapView
  90 shop_lightning_seed handle node  args string -> list<u8>
  91 shop_lightning   handle node  args () -> ShopLightningView
+ 92 sale_on_chain_instead handle node  args u32 -> ()
 200 pending_switch   handle node  args u64 -> SwitchStateView
 201 switch_same      handle node  args u64 -> SwitchSameView
 202 switch_record_kept handle node  args u64 -> Words
@@ -164,6 +165,7 @@ AddNoteArgs: record: now: u64, index: u32, note: string
 SaleInfoView: record: note: option<string>, request_days: u8, expires_at: u64, cash_refund_only: bool, reference: option<string>, bill_number: option<u32>, currency: string
 RequestRow: record: index: u32, note: option<string>, amount_minor: u64, opened_at: u64, expires_at: u64, needs_sats: u64
 TipChoiceView: record: percent: u8, tip_minor: u64
+TurnView: record: index: u32, green: bool
 TipTallyView: record: count: u32, minor: u64
 CancelArgs: record: now: u64, index: u32, actor: option<ActorView>
 StaffArgs: record: now: u64, added: bool, name: string, by: string
@@ -187,8 +189,8 @@ ReportView: enum, a tag byte, then: PosPaid(index: u32) | PosUnpaid(index: u32) 
     tags PosPaid=0 PosUnpaid=1 BooksFinal=2 SurplusOwed=3 LatePayment=4 Alarm=5 Dust=6
 Payment: record: address: string, uri: string, copy_uri: string, qr_size: u32, qr_bits: list<u8>, tag: list<u8>
 OpenedView: record: index: u32, needs_sats: u64, quote_rate: u64, quote_from: u64, quote_until: u64, payment: Payment
-ScreenView: record: state: StateView, words: Words, flags: list<Words>, check: option<Words>, received_sats: u64, needs_sats: u64, stuck: bool, late: bool, reopened: bool, conflict_seen: bool, reports: list<ReportView>, payment: option<Payment>, lightning: option<LightningSaleView>
-PumpView: record: reports: list<ReportView>, notes: list<string>, stopped: bool
+ScreenView: record: state: StateView, words: Words, flags: list<Words>, check: option<Words>, received_sats: u64, needs_sats: u64, stuck: bool, late: bool, reopened: bool, conflict_seen: bool, reports: list<ReportView>, payment: option<Payment>, lightning: option<LightningSaleView>, lightning_first: bool
+PumpView: record: reports: list<ReportView>, notes: list<string>, stopped: bool, turns: list<TurnView>
 RefundRow: record: sale: u32, number: option<u64>, asked: u64, value_minor: option<u64>, tip_minor: u64, state: RefundStateView, by_role: ActorRole, by_name: string, at: u64, words: Words
 HeartbeatOutcome: record: verified: bool, sent_at: option<u64>, words: Words, reports: list<ReportView>
 HealthView: record: healthy: bool, behind: bool, words: Words

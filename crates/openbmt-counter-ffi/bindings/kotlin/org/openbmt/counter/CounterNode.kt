@@ -130,6 +130,7 @@ private const val OP_TILL_OF_SALE = 88
 private const val OP_TAP_ANSWER = 89
 private const val OP_SHOP_LIGHTNING_SEED = 90
 private const val OP_SHOP_LIGHTNING = 91
+private const val OP_SALE_ON_CHAIN_INSTEAD = 92
 private const val OP_PENDING_SWITCH = 200
 private const val OP_SWITCH_SAME = 201
 private const val OP_SWITCH_RECORD_KEPT = 202
@@ -528,6 +529,8 @@ class Screen(
     val payment: Payment?,
     /** CR-113: what the sale shows of Lightning; null when Lightning is off. */
     val lightning: LightningSale?,
+    /** CR-283: the code is the Lightning invoice alone, with the line and the button that show the on-chain code. */
+    val lightningFirst: Boolean,
 )
 
 /**
@@ -596,7 +599,10 @@ class SwapRequest(val id: Long, val hostPort: String, val bytes: ByteArray) {
 /** What an answer to a setup request led to: the next request, or the record to seal. */
 class LnStep(val next: LnRequest?, val record: ByteArray?)
 
-class Pump(val reports: List<Report>, val notes: List<String>, val stopped: Boolean)
+/** CR-284: a sale that turned green ([green]) or red for the first time. */
+class Turn(val index: Long, val green: Boolean)
+
+class Pump(val reports: List<Report>, val notes: List<String>, val stopped: Boolean, val turns: List<Turn>)
 
 class RefundRow(
     val sale: Long,
@@ -1082,7 +1088,7 @@ internal fun Reader.openRequest(): OpenRequest =
 internal fun Reader.screen(): Screen =
     Screen(
         saleState(), words(), list { words() }, option { words() }, u64(), u64(), bool(), bool(),
-        bool(), bool(), reports(), option { payment() }, option { lightningSale() },
+        bool(), bool(), reports(), option { payment() }, option { lightningSale() }, bool(),
     )
 
 private fun Reader.lightningSale(): LightningSale =
@@ -1102,7 +1108,7 @@ internal fun Reader.lnRequest(): LnRequest =
 
 internal fun Reader.lnStep(): LnStep = LnStep(option { lnRequest() }, option { bytes() })
 
-internal fun Reader.pump(): Pump = Pump(reports(), strings(), bool())
+internal fun Reader.pump(): Pump = Pump(reports(), strings(), bool(), list { Turn(u32(), bool()) })
 
 private fun Reader.refundRow(): RefundRow =
     RefundRow(
@@ -1711,6 +1717,9 @@ class CounterNode private constructor(private val handle: Long) : AutoCloseable 
     /** The person at the till cancels a sale with nothing received. */
     fun cancel(now: Long, index: Long, actor: Actor? = null) =
         callUnit(OP_CANCEL, handle) { it.u64(now).u32(index).option(actor) { a -> it.actor(a) } }
+
+    /** CR-283: the cashier chose the on-chain code over the Lightning-only one for the rest of the sale. */
+    fun saleOnChainInstead(index: Long) = callUnit(OP_SALE_ON_CHAIN_INSTEAD, handle) { it.u32(index) }
 
     /** Write a change to the cashiers as a record for the owner (CR-143). */
     fun staffRecord(now: Long, added: Boolean, name: String, by: String) =

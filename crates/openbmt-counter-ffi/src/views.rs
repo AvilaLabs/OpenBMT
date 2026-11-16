@@ -1254,6 +1254,9 @@ pub struct ScreenView {
     pub payment: Option<Payment>,
     /// CR-113: what the sale shows of Lightning; none when Lightning is off.
     pub lightning: Option<LightningSaleView>,
+    /// CR-283: the code is the Lightning invoice alone, with the line and
+    /// the button that show the on-chain code.
+    pub lightning_first: bool,
 }
 
 wire_record!(ScreenView {
@@ -1269,8 +1272,20 @@ wire_record!(ScreenView {
     conflict_seen,
     reports,
     payment,
-    lightning
+    lightning,
+    lightning_first
 });
+
+/// A sale that turned green or red for the first time (CR-284).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TurnView {
+    /// The sale.
+    pub index: u32,
+    /// Green when true, red when false.
+    pub green: bool,
+}
+
+wire_record!(TurnView { index, green });
 
 /// What `pump` and `stop` return.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1281,12 +1296,16 @@ pub struct PumpView {
     pub notes: Vec<String>,
     /// The driver has stopped.
     pub stopped: bool,
+    /// CR-284: the sales that turned green or red for the first time since
+    /// the last call, oldest first.
+    pub turns: Vec<TurnView>,
 }
 
 wire_record!(PumpView {
     reports,
     notes,
-    stopped
+    stopped,
+    turns
 });
 
 /// One refund of a sale (CR-72).

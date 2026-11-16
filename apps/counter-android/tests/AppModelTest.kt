@@ -113,7 +113,7 @@ object AppModelTest {
         ok(dirty.detail == "bad text", "a system text is cleaned in the details: ${dirty.detail}")
         ok(SayCheck.problem(dirty) == null, "words with a cleaned detail pass")
         val text = AppWords.screensMarkdown()
-        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1 + WordsOfTill.all().size + 1 + WordsOfStarter.all().size + 1 + ShopLightningWords.all().size + 1 + PairHereWords.all().size + 1 + GivingWords.all().size + 1 + 1 + 1 + 1, "one row for each words and the header, and for each text of the switch, of the till, of the starter line and of the Lightning key and their headers")
+        ok(text.lines().filter { it.startsWith("| ") }.size == all.size + 1 + SwitchWords.all().size + 1 + WordsOfTill.all().size + 1 + WordsOfStarter.all().size + 1 + ShopLightningWords.all().size + 1 + PairHereWords.all().size + 1 + GivingWords.all().size + 1 + LightningFirstWords.all().size + 1 + 1 + 1 + 1, "one row for each words and the header, and for each text of the switch, of the till, of the starter line and of the Lightning key and their headers")
         ok(text.lines().filter { !it.startsWith("|") }.all { it.length <= 80 }, "lines are at most 80 characters")
         if (screensMd != null) {
             if (System.getenv("OPENBMT_WRITE_SCREENS") != null) screensMd.writeText(text)
@@ -1816,6 +1816,61 @@ object AppModelTest {
         }
     }
 
+    // ---- over the instant limit, Lightning first (CR-283) and a sale that turns elsewhere (CR-284) ----
+
+    private fun cr283LightningFirstTests(appDir: File?) {
+        ok(LightningFirstWords.LINE == "Over the instant limit: Lightning is paid at once. On-chain waits for a block, about ten minutes.", "CR-283: the line, as the rule has it")
+        ok(LightningFirstWords.BUTTON == "Pay on-chain instead", "CR-283: the button, as the rule has it")
+        ok(LightningFirstWords.all().none { it.second.isBlank() || it.second.startsWith("WORDS_NEEDED") }, "CR-283: every text is written")
+        ok(LightningFirstWords.all().map { it.second }.toSet().size == LightningFirstWords.all().size, "CR-283: each text once")
+        ok(LightningFirstWords.paidHeading(5) == "Sale 5 is paid" && LightningFirstWords.PAID_NEXT == "Hand over the goods. Tap to see the sale.", "CR-284: the green notice, as the rule has it")
+        ok(LightningFirstWords.redHeading(5) == "Sale 5: do not hand over" && LightningFirstWords.RED_NEXT == "Tap to see what to do.", "CR-284: the red notice, as the rule has it")
+        ok(LightningFirstWords.moreLine(1) == "and 1 more in Sales", "CR-284: the line after three notices")
+        if (appDir != null) {
+            val controller = File(appDir, "src/android/Controller.kt").readText()
+            val sale = controller.substringAfter("private fun showSale(").substringBefore("private fun requote(")
+            ok(sale.contains("if (s.lightningFirst)") && sale.contains("LightningFirstWords.LINE") && sale.contains("LightningFirstWords.BUTTON"), "CR-283: the sale screen shows the line and the button under the code when the library says Lightning first")
+            ok(sale.contains("s.lightningFirst, info.reference"), "CR-283: the screen is drawn again when Lightning first goes")
+            ok(controller.substringAfter("private fun payOnChainInstead(").substringBefore("private fun cancelSale(").contains("n.saleOnChainInstead(index)"), "CR-283: the button asks the library to keep the choice")
+            ok(sale.contains("if (notices.remove(index)) drawNotices()"), "CR-284: a sale's own screen takes its notice away")
+            val turns = controller.substringAfter("private fun onTurns(").substringBefore("private fun openFromNotice(")
+            ok(turns.contains("notices.turned(t.index, colour, on, outcomePlays)") && turns.contains("Feedback.outcome(v, colour)"), "CR-284: a turn gives a notice and the colour's sound")
+            ok(turns.contains("act.setNotices(views)") && turns.contains("openFromNotice(Showing.Sale(n.index))") && turns.contains("openFromNotice(Showing.Sales)"), "CR-284: the notices are drawn over every screen; a tap opens the sale, the more line the list")
+            val open = controller.substringAfter("private fun openFromNotice(").substringBefore("private fun onPump(")
+            ok(open.contains("if (locked())") && open.contains("afterSignIn = to") && open.contains("showWho(null)"), "CR-284: a locked till opens the sale behind the PIN")
+        }
+    }
+
+    private fun cr284NoticesTests() {
+        // CR-284: a sale not on the screen turning green gives one notice and one sound; red likewise.
+        val plays = OutcomePlays()
+        val notices = Notices()
+        ok(notices.turned(3, Colour.Green, 9, plays), "CR-284: a sale that is not on the screen gives a notice, and the caller plays its sound")
+        ok(notices.shown().map { it.index } == listOf(3L) && notices.shown()[0].heading == "Sale 4 is paid", "CR-284: the notice says the sale's number as the Sales list shows it")
+        ok(!notices.turned(3, Colour.Green, 9, plays), "CR-284: the same turn gives no second notice and no second sound")
+        ok(notices.turned(4, Colour.Red, null, plays) && notices.shown()[0].heading == "Sale 5: do not hand over" && notices.shown()[0].next == "Tap to see what to do.", "CR-284: a red turn gives the red notice, at the top")
+        // Its own screen showing gives none, and a screen that showed the colour already played it.
+        val own = Notices()
+        ok(!own.turned(1, Colour.Green, 1, OutcomePlays()) && own.isEmpty, "CR-284: a sale whose own screen shows gets no notice")
+        val shownBefore = OutcomePlays().also { it.first(2, Colour.Green) }
+        ok(!own.turned(2, Colour.Green, null, shownBefore) && own.isEmpty, "CR-284: a sale whose screen showed green gets no notice and no second sound")
+        ok(!own.turned(3, Colour.Blue, null, OutcomePlays()) && !own.turned(3, Colour.Neutral, null, OutcomePlays()), "CR-284: blue and neutral give none")
+        // Four notices show three, the newest first, and one line says how many more.
+        val four = Notices()
+        val p = OutcomePlays()
+        for (i in 0L..3L) four.turned(i, Colour.Green, null, p)
+        ok(four.shown().map { it.index } == listOf(3L, 2L, 1L) && four.more() == 1 && LightningFirstWords.moreLine(four.more()) == "and 1 more in Sales", "CR-284: four notices show three and 'and 1 more in Sales'")
+        // A tap opens the sale and removes the notice; so does the sale's screen showing.
+        ok(four.remove(2) && four.shown().map { it.index } == listOf(3L, 1L, 0L) && four.more() == 0, "CR-284: a tap takes the notice away and the one that was hidden shows")
+        ok(!four.remove(2) && four.remove(0) && four.shown().map { it.index } == listOf(3L, 1L), "CR-284: a sale's screen showing takes its notice away; there is none to take twice")
+        // A sale that turns green and then red has the notice of the red, in the place of the newest.
+        val both = Notices()
+        val q = OutcomePlays()
+        both.turned(7, Colour.Green, null, q)
+        both.turned(8, Colour.Green, null, q)
+        ok(both.turned(7, Colour.Red, null, q) && both.shown().map { it.index to it.colour } == listOf(7L to Colour.Red, 8L to Colour.Green), "CR-284: a red after a green takes the place of the green notice")
+    }
+
     // ---- a place of giving (GV-11 to GV-14) -----------------------------------------------------
 
     private fun gv14GivingTests(appDir: File?) {
@@ -1908,6 +1963,8 @@ object AppModelTest {
         cr85HoldClockTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         cr115LightningCaptureTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
         gv14GivingTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        cr283LightningFirstTests(screensMd?.parentFile?.parentFile?.parentFile?.let { File(it, "apps/counter-android") })
+        cr284NoticesTests()
         println("AppModelTest (counter): $count checks passed")
     }
 }

@@ -62,6 +62,12 @@
 //! and the quote lasts the request's days instead of [`QUOTE_SECS`]. A
 //! request is never paid over Lightning. Every sale without either is
 //! written as before.
+//!
+//! A sale whose cashier chose the on-chain code over a Lightning-only code
+//! (CR-283) is written with one byte more after the fields of its version,
+//! the byte 1. A form that ends where its version ends has not made the
+//! choice, so every earlier file reads back and every sale that made no
+//! choice is written as before.
 
 use bitcoin::hashes::Hash;
 use bitcoin::{ScriptBuf, Txid};
@@ -329,6 +335,10 @@ pub struct Sale {
     pub(crate) request: Option<RequestDays>,
     /// The note on the sale (CR-206): plain text of 1 to 64 characters.
     pub(crate) note: Option<String>,
+    /// CR-283: the cashier chose the code of LN-18 over a Lightning-only
+    /// code, for the rest of the sale. Written as one byte after the fields
+    /// of the sale's version.
+    pub(crate) on_chain_instead: bool,
 }
 
 impl Sale {
@@ -384,6 +394,7 @@ impl Sale {
             funding_lost_accepted: false,
             request: None,
             note: None,
+            on_chain_instead: false,
         }
     }
 
@@ -548,6 +559,12 @@ impl Sale {
     /// lockup is spent, 2 the claim of an accepted sale left the chain.
     pub fn taken_back(&self) -> u8 {
         self.taken_back
+    }
+
+    /// CR-283: whether the cashier chose the on-chain code over a
+    /// Lightning-only one for the rest of the sale.
+    pub fn on_chain_instead(&self) -> bool {
+        self.on_chain_instead
     }
 
     /// Payments that arrived after the sale ended, with what each paid
@@ -931,6 +948,9 @@ impl Sale {
                 entry.write(&mut out);
             }
         }
+        if self.on_chain_instead {
+            out.push(1);
+        }
         out
     }
 
@@ -1221,6 +1241,10 @@ impl Sale {
                 return Err(bad("a funding lost is accepted by a person who did not"));
             }
         }
+        let on_chain_instead = !r.is_empty();
+        if on_chain_instead && !r.flag()? {
+            return Err(bad("a sale that made no choice has a byte more"));
+        }
         r.finish()?;
 
         // CR-05, CR-204: a quote lasts the quote time; the one quote of a
@@ -1295,6 +1319,7 @@ impl Sale {
             funding_lost_accepted,
             request,
             note,
+            on_chain_instead,
         })
     }
 }

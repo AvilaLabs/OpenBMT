@@ -179,6 +179,22 @@ carries two texts: why it is in this state, and what happens next (§2.6).
   (CR-221). This holds until the sale is settled (CR-76); after that the
   counter no longer watches the address, and a payment to it is seen by the
   owner's wallet (CR-80).
+- **CR-284. A sale that turns while another screen shows.** A cashier
+  serves the next customer while a sale waits for a block (CR-283), so a
+  sale can turn green or red while the counter shows another screen. When a
+  sale that is not on the screen turns green or red for the first time, the
+  counter plays that colour's sound once (as the sale's own screen does) and
+  puts a notice at the top of whatever screen shows, the PIN screen
+  included:
+  - green: "Sale N is paid" and "Hand over the goods. Tap to see the sale.";
+  - red: "Sale N: do not hand over" and "Tap to see what to do.";
+  where N is the sale's number as the Sales list shows it. A tap opens that
+  sale's screen, behind the PIN when the counter is locked, and the notice
+  goes. A notice stays until it is tapped or its sale's screen is shown;
+  notices of several sales stand one under the other, the newest first, at
+  most three, then one line "and N more in Sales", which opens the Sales
+  list. A notice never covers the code of the sale on the screen. A sale that
+  turns while its own screen shows has no notice.
 
 ## 3. Overrides
 
@@ -948,6 +964,34 @@ counter holds is not, and never leaves the counter.
   cashier takes another kind of payment if the customer has only Lightning
   and tells the owner what the details say. A sale opened with no Lightning
   credential, or while Lightning is off (CR-116), has no such line.
+- **CR-283. Over the limit, Lightning first.** A customer at the counter
+  who pays on-chain for a sale above the instant limits waits for a block,
+  about ten minutes; one who pays over Lightning is done at once. So when a
+  sale is opened or quoted again at the counter (not a remote order, which
+  always waits, CR-10), the counter asks the instant decision (CR-12 step 7)
+  for the quote's amount as if the light check had just seen a payment of
+  it. If that answer is a wait, for any reason, and the sale's invoice is one
+  whose payment is final at once (from the shop's own node, CR-112, or from
+  Shop Lightning within the room of `docs/SHOP-LIGHTNING-RULES.md` SL-40 over
+  channels whose funding is confirmed; never a swap, CR-219, whose payment
+  over the limit also waits, CR-221), the code shown is the invoice alone,
+  `lightning:` and the invoice, in capitals when LN-19 allows, and the tag
+  holds the same text (`docs/TAP-RULES.md` TP-01). Under the code are one
+  line and one button:
+  - the line: "Over the instant limit: Lightning is paid at once. On-chain
+    waits for a block, about ten minutes."
+  - the button: "Pay on-chain instead".
+  A tap on the button, by anyone at the counter and with no PIN, shows the
+  code of LN-18 (the address and the invoice) for the rest of the sale,
+  quotes again included, and takes the line and the button away. The tap
+  changes only the code shown: the sale, its quote and its address are the
+  same, a payment to the address made before the tap is the sale's as any
+  payment to it is (CR-12), and the sale is judged as it would be without
+  the tap. A sale whose answer is not a wait, whose invoice has not come or
+  failed its checks (CR-113), or whose invoice is a swap's, shows the code of
+  CR-113 with no line and no button. The answer is asked again at each quote,
+  so a sale whose amount drops under the limit shows the code of CR-113 at
+  its next quote.
 - **CR-114.** The app talks to the node over HTTPS only, with no redirect, a
   body of at most 1,000,000 bytes, a connect timeout of 20 seconds through Tor
   and 10 directly, and a read timeout of 15 seconds. It goes through Orbot's

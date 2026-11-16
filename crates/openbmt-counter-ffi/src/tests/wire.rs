@@ -400,6 +400,7 @@ impl<'a> Rd<'a> {
                 not_for_this_sale: r.bool(),
                 failed: r.opt(Rd::words),
             }),
+            lightning_first: self.bool(),
         }
     }
 
@@ -420,9 +421,25 @@ impl<'a> Rd<'a> {
     }
 
     pub fn pump(&mut self) -> (Vec<Report>, Vec<String>, bool) {
-        (self.reports(), self.list(Rd::string), self.bool())
+        let (reports, notes, stopped, _) = self.pump_turns();
+        (reports, notes, stopped)
+    }
+
+    /// [`Rd::pump`] with the sales that turned (CR-284): the number and
+    /// whether it is green.
+    pub fn pump_turns(&mut self) -> Pumped {
+        (
+            self.reports(),
+            self.list(Rd::string),
+            self.bool(),
+            self.list(|r| (r.u32(), r.bool())),
+        )
     }
 }
+
+/// What a pump returns: the reports, the notes, whether the driver stopped
+/// and the turns of CR-284.
+pub type Pumped = (Vec<Report>, Vec<String>, bool, Vec<(u32, bool)>);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkV {
@@ -489,6 +506,7 @@ pub struct Screen {
     pub reports: Vec<Report>,
     pub payment: Option<Payment>,
     pub lightning: Option<LnSale>,
+    pub lightning_first: bool,
 }
 
 /// What a screen shows of Lightning.

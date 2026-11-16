@@ -529,3 +529,97 @@ fn cr_75_a_sale_paid_in_part_is_not_held_to_the_floor_again() {
     w.see(&tx, 1);
     assert!(w.requote(o.index, 20_000_000).is_ok());
 }
+
+// CR-283.
+
+fn mixed() -> crate::OwnCheck {
+    crate::OwnCheck::Mixed(openbmt_watch::OwnNodeHealth::not_configured())
+}
+
+fn would_wait(w: &World, index: u32, own: &crate::OwnCheck) -> bool {
+    w.c.instant_would_wait(index, w.health, heartbeat(), own, w.now)
+}
+
+#[test]
+fn cr_283_a_sale_over_the_light_limit_would_wait_and_one_under_it_would_not() {
+    let mut w = World::new();
+    // The light check takes $10 at once: 10,000 satoshis at the test rate.
+    let over = w.open(1_500).index;
+    let under = w.open_five().index;
+    assert!(would_wait(&w, over, &mixed()));
+    assert!(!would_wait(&w, under, &mixed()));
+    // Nothing was written or kept: the answer is asked again each time.
+    assert!(would_wait(&w, over, &mixed()));
+}
+
+#[test]
+fn cr_283_a_check_that_is_off_or_not_healthy_would_wait_whatever_the_size() {
+    let mut w = World::new();
+    let under = w.open_five().index;
+    assert!(!would_wait(&w, under, &mixed()));
+    // The owner's phone is not heard: instant is off.
+    let silent = openbmt_core::policy::Heartbeat {
+        verified: false,
+        age_secs: 0,
+    };
+    assert!(w
+        .c
+        .instant_would_wait(under, w.health, silent, &mixed(), w.now));
+    w.health = unhealthy(Problem::TipIsOld);
+    assert!(would_wait(&w, under, &mixed()));
+}
+
+#[test]
+fn cr_283_the_own_node_that_can_be_used_raises_the_limit_the_payment_would_have() {
+    let mut w = World::new();
+    let index = w.open(1_500).index;
+    assert!(would_wait(&w, index, &mixed()));
+    let usable = crate::OwnCheck::Mixed(openbmt_watch::OwnNodeHealth {
+        configured: true,
+        usable: true,
+        problem: None,
+        own_height: Some(100),
+        our_height: 100,
+        last_heard: Some(w.now),
+    });
+    // The node's limit is $25: $15 is taken at once.
+    assert!(!would_wait(&w, index, &usable));
+}
+
+#[test]
+fn cr_283_a_sale_that_is_not_open_would_not_wait() {
+    let mut w = World::new();
+    let index = w.open(1_500).index;
+    w.c.cancel(index, w.now, &mut w.m).unwrap();
+    assert!(!would_wait(&w, index, &mixed()));
+    assert!(!would_wait(&w, 99, &mixed()));
+}
+
+#[test]
+fn cr_283_the_choice_of_the_on_chain_code_is_kept_with_the_sale() {
+    let mut w = World::new();
+    let index = w.open(1_500).index;
+    assert!(!w.c.sale(index).unwrap().on_chain_instead());
+    w.c.choose_on_chain(index, &mut w.m).unwrap();
+    assert!(w.c.sale(index).unwrap().on_chain_instead());
+    // The stored form holds it, and what was not chosen is stored as before.
+    let stored = w.c.sale(index).unwrap().to_bytes();
+    assert!(crate::Sale::from_bytes(&stored).unwrap().on_chain_instead());
+    // Asking again changes nothing.
+    w.c.choose_on_chain(index, &mut w.m).unwrap();
+    assert_eq!(w.c.sale(index).unwrap().to_bytes(), stored);
+}
+
+#[test]
+fn cr_283_the_choice_is_refused_for_a_sale_that_is_not_there_or_not_open() {
+    let mut w = World::new();
+    let index = w.open(1_500).index;
+    assert_eq!(
+        w.c.choose_on_chain(99, &mut w.m).unwrap_err(),
+        crate::ChooseRefused::UnknownSale(99)
+    );
+    w.c.cancel(index, w.now, &mut w.m).unwrap();
+    let err = w.c.choose_on_chain(index, &mut w.m).unwrap_err();
+    assert_eq!(err, crate::ChooseRefused::SaleEnded);
+    assert_eq!(err.rule(), "CR-283");
+}

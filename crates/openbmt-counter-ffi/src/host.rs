@@ -52,7 +52,9 @@ use openbmt_watch::HeaderChain;
 
 use crate::error::{from_rule, internal, poisoned, refused_by, wrong_state, CounterError, Kind};
 use crate::pair::refused;
-use crate::pay::{payment_for, payment_with_invoice, request_link, Payment};
+use crate::pay::{
+    payment_for, payment_lightning_only, payment_with_invoice, request_link, Payment,
+};
 use crate::relay::{LinkPlan, LinkSlot, LEASE_WAIT};
 use crate::say::words_for;
 use crate::views::{
@@ -62,8 +64,8 @@ use crate::views::{
     OpenRequestArgs, OpenTipArgs, OpenedView, OverrideArgs, OwnNodeView, PendingChangeView,
     PendingSwitchView, PumpView, RefundArgs, RefundAskView, RefundRow, ReportView, RequestRow,
     RequoteArgs, SaleInfoView, ScreenView, ShopLightningView, StaffArgs, StartConfig, StatusView,
-    SwapReplyArgs, SwapRequestView, SwitchSameView, SwitchStateView, TipChoiceView, WithdrawArgs,
-    WordsView,
+    SwapReplyArgs, SwapRequestView, SwitchSameView, SwitchStateView, TipChoiceView, TurnView,
+    WithdrawArgs, WordsView,
 };
 
 /// The longest a `pump` waits, whatever the app asks for, so that a call
@@ -169,6 +171,14 @@ fn no_link() -> CounterError {
         "link-none",
         "the pairing has no relay, so the counter has no link",
     )
+}
+
+/// CR-284: the sales that turned, as the app reads them.
+fn turn_views(turns: Vec<(u32, bool)>) -> Vec<TurnView> {
+    turns
+        .into_iter()
+        .map(|(index, green)| TurnView { index, green })
+        .collect()
 }
 
 fn reports(list: Vec<Report>) -> Vec<ReportView> {
@@ -531,15 +541,16 @@ impl Entry {
             let mut out = std::mem::take(held);
             out.extend(node.shutdown());
             let notes = node.take_notes();
-            (out, notes, node.stopped())
+            (out, notes, node.stopped(), node.take_turns())
         }));
         // The node, and with it the data folder's lock, is let go here.
         drop(node);
         match result {
-            Ok((out, notes, stopped)) => Ok(PumpView {
+            Ok((out, notes, stopped, turns)) => Ok(PumpView {
                 reports: reports(out),
                 notes,
                 stopped,
+                turns: turn_views(turns),
             }),
             Err(_) => Err(internal("caught a panic: [redacted]")),
         }
@@ -555,6 +566,7 @@ impl Entry {
             reports: Vec::new(),
             notes: Vec::new(),
             stopped: false,
+            turns: Vec::new(),
         };
         loop {
             let slice = deadline
@@ -563,13 +575,18 @@ impl Entry {
             let step = self.run(Some(now), |node, held, _| {
                 let mut got = std::mem::take(held);
                 got.extend(node.pump(slice));
-                Ok((got, node.take_notes(), node.stopped()))
+                Ok((got, node.take_notes(), node.stopped(), node.take_turns()))
             })?;
-            let (got, notes, stopped) = step;
+            let (got, notes, stopped, turns) = step;
             out.reports.extend(reports(got));
             out.notes.extend(notes);
+            out.turns.extend(turn_views(turns));
             out.stopped = stopped;
-            if !out.reports.is_empty() || stopped || Instant::now() >= deadline {
+            if !out.reports.is_empty()
+                || !out.turns.is_empty()
+                || stopped
+                || Instant::now() >= deadline
+            {
                 break;
             }
             // Let a call that waits for the lock take it.
@@ -870,6 +887,7 @@ impl Entry {
         let mut payment = None;
         let mut lightning = None;
         let mut waiting_words = None;
+        let mut lightning_first = false;
         if live {
             payment = self.payment(node, index, screen.needs_sats).ok();
             match node.lightning_sale(index) {
@@ -897,6 +915,17 @@ impl Entry {
                     });
                     if code.is_some() {
                         payment = code;
+                    }
+                    // CR-283: over the instant limits the code is the invoice
+                    // alone, and the cashier may choose the on-chain code.
+                    if node.lightning_first(index) {
+                        let alone = node.counter().sale(index).and_then(|s| {
+                            payment_lightning_only(s.script(), self.network, &checked).ok()
+                        });
+                        if alone.is_some() {
+                            payment = alone;
+                            lightning_first = true;
+                        }
                     }
                 }
                 SaleLightning::Unavailable(words) => {
@@ -951,6 +980,7 @@ impl Entry {
             reports: reports(screen.reports),
             payment,
             lightning,
+            lightning_first,
         }
     }
 
@@ -984,6 +1014,14 @@ impl Entry {
                 quote_until: quote.until,
                 payment: self.payment(node, a.index, needs)?,
             })
+        })
+    }
+
+    /// CR-283: the cashier chose the on-chain code for the rest of the sale.
+    pub(crate) fn sale_on_chain_instead(&self, index: u32) -> Result<(), CounterError> {
+        self.run(None, |node, _, _| {
+            node.choose_on_chain(index)
+                .map_err(|e| from_rule(e.rule(), &e, e.words()))
         })
     }
 

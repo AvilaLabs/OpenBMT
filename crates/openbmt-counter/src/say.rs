@@ -31,7 +31,7 @@ use crate::heartbeat::{HeartbeatView, NotVerified};
 use crate::money::Currency;
 use crate::refund::{RefundState, RefundView};
 use crate::refusal::{
-    BatchTakeRefused, BlockError, CancelRefused, CommandRefused, DestinationRefused,
+    BatchTakeRefused, BlockError, CancelRefused, ChooseRefused, CommandRefused, DestinationRefused,
     HeartbeatRefused, JudgeError, LightningRefused, LoadError, NoteRefused, OpenRefused,
     OverrideRefused, RangeTakeRefused, RefundRefused, RequoteRefused, SightingError, StaffRefused,
     TotalsRefused, WithdrawRefused,
@@ -730,6 +730,39 @@ impl<E: Display> LightningRefused<E> {
                 Tone::Stop,
                 Who::Cashier,
                 "Do not hand over the goods yet. The counter asks again by itself; tell the owner if this stays.",
+            ),
+        }
+    }
+}
+
+impl<E: Display> ChooseRefused<E> {
+    /// What the cashier is told when the choice of the on-chain code cannot
+    /// be kept on a sale. The texts are placeholders that start with "TODO
+    /// words" and keep the rules of SC-12, until the rules give the words.
+    pub fn words(&self) -> Words {
+        match self {
+            Self::UnknownSale(i) => refused(
+                "TODO words: no such sale",
+                "TODO words: what happened when the sale is not found.",
+                Who::Cashier,
+                "TODO words: what to do when the sale is not found.",
+                "CR-78",
+            )
+            .detail(format!("Sale number {i}.")),
+            Self::SaleEnded => refused(
+                "TODO words: sale ended",
+                "TODO words: what happened when the sale is no longer open.",
+                Who::Cashier,
+                "TODO words: what to do when the sale is no longer open.",
+                "CR-283",
+            ),
+            Self::Store(fault) => store_failed(
+                fault,
+                "TODO words: not saved",
+                "the choice was not saved",
+                Tone::Stop,
+                Who::Cashier,
+                "TODO words: what to do when the choice is not saved.",
             ),
         }
     }
@@ -2201,6 +2234,14 @@ pub fn all_words() -> Vec<(String, Words)> {
     ];
     for (name, r) in judge {
         all.push((format!("JudgeError::{name}"), r.words()));
+    }
+    let choose: Vec<(&str, ChooseRefused<String>)> = vec![
+        ("UnknownSale", ChooseRefused::UnknownSale(3)),
+        ("SaleEnded", ChooseRefused::SaleEnded),
+        ("Store", ChooseRefused::Store(w())),
+    ];
+    for (name, r) in choose {
+        all.push((format!("ChooseRefused::{name}"), r.words()));
     }
     let requote: Vec<(&str, RequoteRefused<String>)> = vec![
         ("UnknownSale", RequoteRefused::UnknownSale(3)),

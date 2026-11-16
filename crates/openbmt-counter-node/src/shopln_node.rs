@@ -313,7 +313,10 @@ fn take_folder_lock(path: &Path, give_up: &AtomicBool) -> Result<Option<FolderLo
 /// What a sale's invoice is.
 enum Slot {
     Pending,
-    Ready(Checked),
+    /// The invoice, and whether a payment of it is final at once: it comes
+    /// over channels that are open with their fundings confirmed (SL-40),
+    /// not through a channel the provider opens for it.
+    Ready(Checked, bool),
     Off(Why),
 }
 
@@ -1390,11 +1393,20 @@ impl ShopLn {
                     &Why::Node(OnChainReason::SecondDeviceAway),
                 )),
                 Slot::Pending => SaleLightning::Waiting,
-                Slot::Ready(c) => SaleLightning::Invoice(c.clone()),
+                Slot::Ready(c, _) => SaleLightning::Invoice(c.clone()),
                 Slot::Off(why) => SaleLightning::Unavailable(crate::say::shopln_words(why)),
             },
             None => SaleLightning::Waiting,
         }
+    }
+
+    /// CR-283: whether the invoice shown for the sale is one whose payment is
+    /// final at once (SL-40): it is ready, and comes over channels that are
+    /// open with their fundings confirmed.
+    pub fn final_at_once(&self, index: u32) -> bool {
+        self.slots
+            .get(&index)
+            .is_some_and(|s| matches!(&*lock(&s.state), Slot::Ready(_, true)))
     }
 
     fn ask_invoice(&mut self, index: u32, now: u64) {
@@ -1901,6 +1913,11 @@ async fn make_invoice(node: &LnNode, shared: &Shared, sale: u32, msat: u64, now:
     if let Receive::OnChainOnly(r) = &quote {
         return Slot::Off(Why::Node(*r));
     }
+    // SL-40: a payment over channels whose funding has a confirmation is
+    // final at once; one that opens a channel, or runs over one still
+    // waiting for its funding, rests on a transaction not yet in a block.
+    let final_at_once = matches!(quote, Receive::Invoice)
+        && node.funding_confirmations().iter().all(Option::is_some);
     let made = match node.invoice(msat, &quote, DESCRIPTION).await {
         Ok(made) => made,
         Err(InvoiceError::OnChainOnly(r)) => return Slot::Off(Why::Node(r)),
@@ -1937,7 +1954,7 @@ async fn make_invoice(node: &LnNode, shared: &Shared, sale: u32, msat: u64, now:
         book.invoices.pop();
         return Slot::Off(Why::NotStored);
     }
-    Slot::Ready(checked)
+    Slot::Ready(checked, final_at_once)
 }
 
 /// The Box as the node's second device: Store messages sent straight to it on

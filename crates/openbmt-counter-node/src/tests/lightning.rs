@@ -1038,3 +1038,234 @@ fn cr_208_a_request_is_never_asked_of_the_shops_node() {
         ));
     }
 }
+
+// ---- CR-283: over the instant limit, Lightning first -------------------
+
+/// $15.00, which is 15,000 satoshis at the test rate: above the 10,000 the
+/// light check takes at once.
+fn fifteen_dollars() -> Amount {
+    Amount(1_500)
+}
+
+fn open_for(rig: &mut Rig, amount: Amount) -> u32 {
+    rig.node
+        .open(amount, usd(), rate(), &source_at(&rig.time))
+        .unwrap()
+        .index
+}
+
+/// The owner's phone is heard: instant is asked for real.
+fn heartbeat(rig: &mut Rig, seq: u64) {
+    use bitcoin::hashes::Hash;
+    let beat = openbmt_core::heartbeat::WatcherHeartbeat {
+        counter: id(3).device_id(),
+        seq,
+        time: rig.time.load(Ordering::SeqCst),
+        tip_height: 0,
+        tip_hash: genesis().to_byte_array(),
+        healthy: true,
+    };
+    rig.node.heartbeat(&beat.sign(&id(1)).to_bytes()).unwrap();
+}
+
+/// The invoice of the sale's first quote has come.
+fn invoice_comes(rig: &mut Rig, c: &Credential, index: u32, sats: u64) -> String {
+    let create = rig.node.lightning_next().expect("a request");
+    rig.node
+        .lightning_reply(create.id, &created_for(c, index, sats));
+    assert!(matches!(
+        rig.node.lightning_sale(index),
+        SaleLightning::Invoice(_)
+    ));
+    create.request.path
+}
+
+#[test]
+fn cr_283_a_sale_over_the_instant_limit_with_an_invoice_of_the_own_node_is_lightning_first() {
+    for c in [lnd(), cln()] {
+        let dir = Scratch::new();
+        let mut rig = rig(&dir, c.clone());
+        heartbeat(&mut rig, 1);
+        let index = open_for(&mut rig, fifteen_dollars());
+        // Its invoice has not come: the on-chain code, no line, no button.
+        assert!(!rig.node.lightning_first(index));
+        invoice_comes(&mut rig, &c, index, 15_000);
+        assert!(rig.node.lightning_first(index));
+        // The answer is not kept: it is asked again each time.
+        assert!(rig.node.lightning_first(index));
+    }
+}
+
+#[test]
+fn cr_283_a_sale_under_the_instant_limit_is_not_lightning_first() {
+    let dir = Scratch::new();
+    let c = lnd();
+    let mut rig = rig(&dir, c.clone());
+    heartbeat(&mut rig, 1);
+    let index = open(&mut rig);
+    invoice_comes(&mut rig, &c, index, SATS);
+    assert!(!rig.node.lightning_first(index));
+}
+
+#[test]
+fn cr_283_a_sale_with_instant_off_is_lightning_first() {
+    // No heartbeat from the owner's phone: instant is off, so a payment would
+    // wait whatever its size.
+    let dir = Scratch::new();
+    let c = lnd();
+    let mut rig = rig(&dir, c.clone());
+    let index = open(&mut rig);
+    invoice_comes(&mut rig, &c, index, SATS);
+    assert!(rig.node.lightning_first(index));
+}
+
+#[test]
+fn cr_283_a_remote_order_is_never_lightning_first() {
+    let dir = Scratch::new();
+    let mut rig = rig(&dir, lnd());
+    heartbeat(&mut rig, 1);
+    let facts = SaleExtras {
+        note: None,
+        request: Some(RequestDays::Three),
+        reference: None,
+    };
+    let index = rig
+        .node
+        .open_with_extras(
+            fifteen_dollars(),
+            Amount(0),
+            usd(),
+            rate(),
+            &source_at(&rig.time),
+            None,
+            facts,
+        )
+        .unwrap()
+        .index;
+    assert!(!rig.node.lightning_first(index));
+}
+
+#[test]
+fn cr_283_the_invoice_that_has_not_come_leaves_the_on_chain_code_until_it_does() {
+    let dir = Scratch::new();
+    let c = lnd();
+    let mut rig = rig(&dir, c.clone());
+    heartbeat(&mut rig, 1);
+    let index = open_for(&mut rig, fifteen_dollars());
+    // CR-113: six seconds on, no invoice has come: it is not available.
+    let _ = rig.node.lightning_next();
+    tick(&rig, INVOICE_WINDOW_SECS);
+    assert!(matches!(
+        rig.node.lightning_sale(index),
+        SaleLightning::Unavailable(_)
+    ));
+    assert!(!rig.node.lightning_first(index));
+}
+
+#[test]
+fn cr_283_the_choice_to_pay_on_chain_is_kept_by_a_requote_and_by_a_restart() {
+    let dir = Scratch::new();
+    let c = lnd();
+    let index;
+    {
+        let mut rig = rig(&dir, c.clone());
+        heartbeat(&mut rig, 1);
+        index = open_for(&mut rig, fifteen_dollars());
+        let create_path = invoice_comes(&mut rig, &c, index, 15_000);
+        assert!(rig.node.lightning_first(index));
+        assert!(!rig.node.counter().sale(index).unwrap().on_chain_instead());
+        rig.node.choose_on_chain(index).unwrap();
+        assert!(rig.node.counter().sale(index).unwrap().on_chain_instead());
+        assert!(!rig.node.lightning_first(index));
+        // The price moves, the sale is over the limit still: a new invoice
+        // comes and the choice stands.
+        tick(&rig, 30);
+        let cheaper = Rate::new(5_000_000).unwrap();
+        rig.node
+            .requote(index, usd(), cheaper, &fresh(T0 + 30))
+            .unwrap();
+        while let Some(req) = rig.node.lightning_next() {
+            let reply = if req.request.path == create_path {
+                created_for(&c, index, 30_000)
+            } else {
+                waiting(&c, 15_000)
+            };
+            rig.node.lightning_reply(req.id, &reply);
+        }
+        assert!(matches!(
+            rig.node.lightning_sale(index),
+            SaleLightning::Invoice(_)
+        ));
+        assert!(rig.node.counter().sale(index).unwrap().on_chain_instead());
+        assert!(!rig.node.lightning_first(index));
+        rig.node.shutdown();
+    }
+    let mut rig = rig(&dir, c);
+    assert!(rig.node.counter().sale(index).unwrap().on_chain_instead());
+    heartbeat(&mut rig, 2);
+    assert!(!rig.node.lightning_first(index));
+}
+
+#[test]
+fn cr_283_the_choice_is_refused_for_a_sale_that_is_not_open() {
+    let dir = Scratch::new();
+    let mut rig = rig(&dir, lnd());
+    let index = open(&mut rig);
+    rig.node.cancel(index).unwrap();
+    assert!(matches!(
+        rig.node.choose_on_chain(index),
+        Err(openbmt_counter::ChooseRefused::SaleEnded)
+    ));
+    assert!(matches!(
+        rig.node.choose_on_chain(77),
+        Err(openbmt_counter::ChooseRefused::UnknownSale(77))
+    ));
+}
+
+#[test]
+fn cr_283_a_payment_to_the_address_while_the_code_is_lightning_only_is_the_sales() {
+    use bitcoin::Transaction;
+    use openbmt_net_io::AppEvent;
+    let dir = Scratch::new();
+    let c = lnd();
+    let mut rig = rig(&dir, c.clone());
+    heartbeat(&mut rig, 1);
+    let index = open_for(&mut rig, fifteen_dollars());
+    invoice_comes(&mut rig, &c, index, 15_000);
+    assert!(rig.node.lightning_first(index));
+    // The customer pays the address all the same: it is the sale's payment,
+    // judged as always (above the limit, so it waits for a block).
+    let pay: Transaction = spend(1, &[(&script_of(index), 15_000)]);
+    rig.feed(vec![AppEvent::Sighting {
+        tx: bytes(&pay),
+        from: vec![peer(20), peer(21), peer(22)],
+        own: false,
+    }]);
+    tick(&rig, 10);
+    let screen = rig.node.judge(index).unwrap();
+    assert_eq!(screen.state, State::Waiting, "{:?}", screen.why);
+    assert_eq!(screen.received_sats, 15_000);
+}
+
+#[test]
+fn cr_283_the_stored_sale_reads_back_with_the_choice_and_without_it() {
+    let dir = Scratch::new();
+    let mut rig = rig(&dir, lnd());
+    let index = open(&mut rig);
+    let before = rig.node.counter().sale(index).unwrap().to_bytes();
+    rig.node.choose_on_chain(index).unwrap();
+    let after = rig.node.counter().sale(index).unwrap().to_bytes();
+    assert_eq!(after.len(), before.len() + 1);
+    assert_eq!(&after[..after.len() - 1], &before[..]);
+    let read = openbmt_counter::Sale::from_bytes(&after).unwrap();
+    assert!(read.on_chain_instead());
+    assert!(!openbmt_counter::Sale::from_bytes(&before)
+        .unwrap()
+        .on_chain_instead());
+    // A byte that is not 1 is not a choice.
+    let mut bad = before.clone();
+    bad.push(0);
+    assert!(openbmt_counter::Sale::from_bytes(&bad).is_err());
+    bad.push(1);
+    assert!(openbmt_counter::Sale::from_bytes(&bad).is_err());
+}

@@ -57,6 +57,7 @@ import org.openbmt.counter.CounterException
 import org.openbmt.counter.CounterNode
 import org.openbmt.counter.LnRequest
 import org.openbmt.counter.OwnWalletKind
+import org.openbmt.counter.Turn
 import org.openbmt.counter.PairStarted
 import org.openbmt.counter.Place
 import org.openbmt.counter.Pairing
@@ -161,6 +162,9 @@ class Controller(private val act: MainActivity) {
 
     // The sales that have played their outcome sound in this run, and the lines of home a tap has opened (CR-178 keeps neither across a restart).
     private val outcomePlays = OutcomePlays()
+
+    // CR-284: sales that turned green or red while another screen showed.
+    private val notices = Notices()
     private val openLines = HashSet<String>()
 
     // What the open screen redraws as the node reports.
@@ -499,7 +503,7 @@ class Controller(private val act: MainActivity) {
             while (runId == id) {
                 try {
                     val p = n.pump(nowSecs(), 250)
-                    main.post { if (id == runId) onPump(p.reports.isNotEmpty()) }
+                    main.post { if (id == runId) { onTurns(p.turns); onPump(p.reports.isNotEmpty() || p.turns.isNotEmpty()) } }
                     if (p.stopped) break
                 } catch (e: CounterException) {
                     main.post {
@@ -672,6 +676,59 @@ class Controller(private val act: MainActivity) {
         } catch (_: CounterException) {
             false
         }
+
+    /** CR-284: sales that turned green or red for the first time; each gets a notice and its colour's sound once, unless its own screen shows. */
+    private fun onTurns(turns: List<Turn>) {
+        val on = (showing as? Showing.Sale)?.index
+        var played: Colour? = null
+        for (t in turns) {
+            val colour = if (t.green) Colour.Green else Colour.Red
+            if (notices.turned(t.index, colour, on, outcomePlays)) played = colour
+        }
+        val colour = played ?: return
+        drawNotices()
+        act.window.decorView.let { v -> v.post { Feedback.outcome(v, colour) } }
+    }
+
+    /** CR-284: the notices stand at the top of every screen; a tap opens the sale, behind the PIN when the till is locked. */
+    private fun drawNotices() {
+        val views = ArrayList<View>()
+        for (n in notices.shown()) {
+            val tone = ui.pal.of(n.colour)
+            views.add(
+                LinearLayout(act).apply {
+                    orientation = LinearLayout.VERTICAL
+                    background = ui.roundedFill(tone.tint, 14f)
+                    setPadding(ui.px(16), ui.px(10), ui.px(16), ui.px(10))
+                    addView(ui.text(n.heading, 16f, bold = true, colour = tone.ink))
+                    addView(ui.text(n.next, 14f), ui.margins(top = 2))
+                    setOnClickListener {
+                        notices.remove(n.index)
+                        drawNotices()
+                        openFromNotice(Showing.Sale(n.index))
+                    }
+                },
+            )
+        }
+        if (notices.more() > 0) {
+            views.add(
+                ui.text(LightningFirstWords.moreLine(notices.more()), 14f, bold = true).also {
+                    it.setPadding(ui.px(16), ui.px(8), ui.px(16), ui.px(8))
+                    it.setOnClickListener { openFromNotice(Showing.Sales) }
+                },
+            )
+        }
+        act.setNotices(views)
+    }
+
+    private fun openFromNotice(to: Showing) {
+        if (node == null) return render()
+        if (locked()) {
+            afterSignIn = to
+            return showWho(null)
+        }
+        open(to)
+    }
 
     private fun onPump(reported: Boolean) {
         val now = System.currentTimeMillis()
@@ -2183,6 +2240,8 @@ class Controller(private val act: MainActivity) {
         val n = node ?: return render()
         val m = money ?: return render()
         locks.saleScreen(index)
+        // CR-284: the sale's own screen shows, so its notice goes.
+        if (notices.remove(index)) drawNotices()
         var payment: Payment? = first
         var flash: SayWords? = notice
         val maxPx = (act.resources.displayMetrics.heightPixels * 0.45f).toInt()
@@ -2238,7 +2297,7 @@ class Controller(private val act: MainActivity) {
                 val notForThisSale = ln != null && ln.notForThisSale
                 val sig = listOf(
                     s.state, says.heading, says.what, says.next, s.receivedSats, s.needsSats, payment?.copyUri, flash?.heading,
-                    flash?.what, extra.joinToString("\u0002") { it.heading + it.what + it.next }, notForThisSale, info.reference, info.billNumber,
+                    flash?.what, extra.joinToString("\u0002") { it.heading + it.what + it.next }, notForThisSale, s.lightningFirst, info.reference, info.billNumber,
                 ).joinToString("\u0001")
                 if (sig != lastSig) {
                     lastSig = sig
@@ -2261,6 +2320,11 @@ class Controller(private val act: MainActivity) {
                         payment?.let { p ->
                             val qr = FrameLayout(act).apply { addView(QrView(act, p, side), FrameLayout.LayoutParams(side, side)) }
                             body.add(ui.codeCard(qr))
+                        }
+                        // CR-283: over the instant limit the code is the invoice alone; the line says why and the button shows the on-chain code.
+                        if (s.lightningFirst) {
+                            body.add(ui.text(LightningFirstWords.LINE, 13f, colour = ui.pal.secondary).also { it.gravity = android.view.Gravity.CENTER })
+                            body.add(ui.button(LightningFirstWords.BUTTON) { payOnChainInstead(index) { w -> flashWith(w) } })
                         }
                         if (notForThisSale) {
                             body.add(ui.text(AppWords.lnNotForThisSale, 13f, colour = ui.pal.secondary).also { it.gravity = android.view.Gravity.CENTER })
@@ -2385,6 +2449,17 @@ class Controller(private val act: MainActivity) {
         try {
             val o = n.requote(nowSecs(), index, m.code, rate.rate, rate.sourceLabel, rate.sourceFetchedAt)
             showSale(index, o.payment, null)
+        } catch (e: CounterException) {
+            refused(e.sayWords())
+        }
+    }
+
+    /** CR-283: the cashier chose the on-chain code for the rest of the sale; the screen is drawn again with it. */
+    private fun payOnChainInstead(index: Long, refused: (SayWords) -> Unit) {
+        val n = node ?: return render()
+        try {
+            n.saleOnChainInstead(index)
+            tick?.invoke()
         } catch (e: CounterException) {
             refused(e.sayWords())
         }

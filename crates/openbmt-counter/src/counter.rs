@@ -50,10 +50,10 @@ use crate::refund::{
     RefundRequest, RefundState, RefundView, MAX_REFUNDS_PER_SALE,
 };
 use crate::refusal::{
-    BatchTakeRefused, BillRefused, BlockError, CancelRefused, CommandRefused, HeartbeatRefused,
-    JudgeError, LightningRefused, LoadError, NoteRefused, OpenRefused, OverrideRefused,
-    RangeTakeRefused, RefundRefused, RequoteRefused, SightingError, StaffRefused, TillStartRefused,
-    TotalsRefused, WithdrawRefused,
+    BatchTakeRefused, BillRefused, BlockError, CancelRefused, ChooseRefused, CommandRefused,
+    HeartbeatRefused, JudgeError, LightningRefused, LoadError, NoteRefused, OpenRefused,
+    OverrideRefused, RangeTakeRefused, RefundRefused, RequoteRefused, SightingError, StaffRefused,
+    TillStartRefused, TotalsRefused, WithdrawRefused,
 };
 use crate::sale::{
     End, FundingWait, LightningPaid, OverrideMark, OwnCheck, PosState, RequestDays, Sale,
@@ -2184,6 +2184,89 @@ impl Counter {
         self.finish(store, sale, &[event])
             .map_err(RequoteRefused::Store)?;
         Ok(quote)
+    }
+
+    /// CR-283: whether the instant decision (CR-12 step 7) is a wait for a
+    /// payment of the sale's present quote that the light check had just seen,
+    /// whatever the reason: a sale above the limits, a slice with no room,
+    /// instant off, or a check that is not healthy. The answer is asked
+    /// again at every quote and is kept nowhere. A sale that is not open, and
+    /// a request to send, which always waits (CR-10), answer `false`: the
+    /// code of such a sale is never Lightning first.
+    pub fn instant_would_wait(
+        &self,
+        index: u32,
+        health: Health,
+        heartbeat: Heartbeat,
+        own: &OwnCheck,
+        now: u64,
+    ) -> bool {
+        let Some(sale) = self.sales.get(&index) else {
+            return false;
+        };
+        if !sale.is_live() || sale.is_request() {
+            return false;
+        }
+        // The mode the payment would have: the light check's, or the own
+        // node's too when it can be used (WR-62), or the own node's alone.
+        let mode = match own {
+            OwnCheck::Mixed(h) if h.usable => CheckMode::NodeAlsoSeenByLight,
+            OwnCheck::Mixed(_) => CheckMode::Light,
+            OwnCheck::NodeOnly(h) if h.own.usable => CheckMode::OwnNodeOnly,
+            OwnCheck::NodeOnly(h) if h.light_fallback => CheckMode::Light,
+            // No check could see a payment now: it would wait.
+            OwnCheck::NodeOnly(_) => return true,
+        };
+        if self.pause_unsaved {
+            return true;
+        }
+        let needs = sale.watch.sale_sats();
+        let id = sale_payment_id(index);
+        let outstanding = {
+            let mut ledger = self.exposure.clone();
+            ledger.release_by_owner(&id);
+            ledger.outstanding()
+        };
+        let mut policy = InstantPolicy::for_counter(&self.settings, &self.identity.device_id());
+        policy.underpayment_tolerance_bps = sale.tolerance_bps;
+        let inputs = Inputs {
+            mode,
+            sale_sats: needs,
+            received_sats: needs,
+            outstanding_sats: outstanding,
+            check_healthy: health.healthy,
+            heartbeat,
+            remote_order: false,
+            customer_wifi: self.settings.customer_wifi,
+            tor_on: self.settings.tor_on,
+            pause: self.pause.status(now),
+            conflict_seen: false,
+            // The payment is taken as seen long enough ago for the watch of
+            // the conflict (CR-12): only what lasts decides.
+            secs_since_first_seen: openbmt_core::policy::CONFLICT_WAIT_SECS,
+        };
+        !matches!(evaluate(&policy, &inputs), Decision::Instant { .. })
+    }
+
+    /// CR-283: the cashier chose the code of LN-18 for the rest of the sale.
+    /// The choice is kept with the sale (a requote keeps it, a restart too)
+    /// and changes nothing else; no record is written. Refused for a sale that
+    /// is not open.
+    pub fn choose_on_chain<S: Store>(
+        &mut self,
+        index: u32,
+        store: &mut S,
+    ) -> Result<(), ChooseRefused<S::Error>> {
+        let mut sale = self
+            .sales
+            .get(&index)
+            .cloned()
+            .ok_or(ChooseRefused::UnknownSale(index))?;
+        if !sale.is_live() {
+            return Err(ChooseRefused::SaleEnded);
+        }
+        sale.on_chain_instead = true;
+        self.finish(store, sale, &[]).map_err(ChooseRefused::Store)
     }
 
     /// CR-07: the cashier cancels a sale. Refused if the sale has ended or

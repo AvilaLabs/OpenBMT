@@ -114,5 +114,5 @@ pub use views::{
     OwnNodeCheckArgs, OwnNodeView, PairBeginArgs, PairStartedView, PairingView, PumpView,
     RefundArgs, RefundAskView, RefundRow, RefundStateView, RelayKind, ReportView, RequestRow,
     RequoteArgs, SaleInfoView, ScreenView, StartConfig, StateView, StatusView, TipChoiceView,
-    TipTallyView, WithdrawArgs, WordsView,
+    TipTallyView, TurnView, WithdrawArgs, WordsView,
 };

@@ -190,6 +190,22 @@ that ends a gift.
 | GV_OUTCOME_THANKS | Thank you for your gift. |
 | GV_OUTCOME_DONE | Done |
 
+## Lightning first over the limit, and a sale that turns (CR-283, CR-284)
+
+The line and the button under a code that is the Lightning invoice
+alone, and the notices that stand at the top of every screen. N is the
+sale's number as the Sales list shows it.
+
+| Key | Text |
+|---|---|
+| line | Over the instant limit: Lightning is paid at once. On-chain waits for a block, about ten minutes. |
+| button | Pay on-chain instead |
+| paidHeading | Sale N is paid |
+| paidNext | Hand over the goods. Tap to see the sale. |
+| redHeading | Sale N: do not hand over |
+| redNext | Tap to see what to do. |
+| moreLine | and N more in Sales |
+
 ## The counter's line (DESIGN 2.1)
 
 Shown large on the ready-to-sell screen of a paired counter,

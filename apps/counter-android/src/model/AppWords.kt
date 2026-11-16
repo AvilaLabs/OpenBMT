@@ -758,6 +758,15 @@ object AppWords {
         )
         for ((key, text) in GivingWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
         out.append(
+            "\n## Lightning first over the limit, and a sale that turns (CR-283, CR-284)\n\n" +
+                "The line and the button under a code that is the Lightning invoice\n" +
+                "alone, and the notices that stand at the top of every screen. N is the\n" +
+                "sale's number as the Sales list shows it.\n\n" +
+                "| Key | Text |\n" +
+                "|---|---|\n",
+        )
+        for ((key, text) in LightningFirstWords.all()) out.append("| ${cell(key)} | ${cell(text)} |\n")
+        out.append(
             "\n## The counter's line (DESIGN 2.1)\n\n" +
                 "Shown large on the ready-to-sell screen of a paired counter,\n" +
                 "and on no sale screen. The second is for a counter paired on the owner's phone\n" +

@@ -120,6 +120,11 @@ impl ShopLn {
         SaleLightning::Off
     }
 
+    /// No invoice is shown, so none is final at once.
+    pub fn final_at_once(&self, _index: u32) -> bool {
+        false
+    }
+
     /// Nothing to close.
     pub fn sale_closed(&mut self, _index: u32) {}
 

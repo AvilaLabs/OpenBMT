@@ -836,3 +836,35 @@ fn ss_02_the_nodes_own_random_bytes_come_from_the_checked_read_and_differ() {
     assert_ne!(a, [0u8; 32]);
     assert_ne!(a, b);
 }
+
+#[test]
+fn cr_284_a_sale_that_turns_green_and_then_red_tells_each_turn_once() {
+    let dir = Scratch::new();
+    let (mut rig, pay) = rig_with_a_sale(&dir);
+    assert!(rig.node.take_turns().is_empty());
+    rig.feed(vec![sighting(&pay, vec![peer(20)])]);
+    let mut blocks = Blocks::default();
+    let first = blocks.extend(std::slice::from_ref(&pay)).clone();
+    rig.feed(vec![joined(1, &first), block_event(&first)]);
+    // Green: one turn, taken once, whoever judges the sale after it.
+    assert_eq!(rig.node.take_turns(), vec![(0, true)]);
+    assert_eq!(rig.node.judge(0).unwrap().state, State::Confirmed);
+    assert!(rig.node.take_turns().is_empty());
+
+    // The block is undone: red, once.
+    let alt1 = mine(genesis(), 1, 1, &[]);
+    let alt2 = mine(alt1.block_hash(), 2, 1, &[]);
+    rig.feed(vec![AppEvent::Chain {
+        joined: vec![(1, alt1.block_hash()), (2, alt2.block_hash())],
+        left: vec![first.block_hash()],
+    }]);
+    assert_eq!(rig.node.take_turns(), vec![(0, false)]);
+    assert_eq!(rig.node.judge(0).unwrap().state, State::DoNotHandOver);
+    assert!(rig.node.take_turns().is_empty());
+
+    // Green again is no new turn: a sale tells each colour once.
+    let again = mine(alt2.block_hash(), 3, 1, &[pay]);
+    rig.feed(vec![joined(3, &again), block_event(&again)]);
+    assert_eq!(rig.node.judge(0).unwrap().state, State::Confirmed);
+    assert!(rig.node.take_turns().is_empty());
+}

@@ -148,7 +148,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "saleState(), words(), list { words() }, option { words() }, u64(), u64(), bool(), bool(),",
         "bool(), bool(),",
         "reports(), option { payment() },",
-        "Pump(reports(), strings(), bool())",
+        "Pump(reports(), strings(), bool(), list { Turn(u32(), bool()) })",
         "u32(), option { u64() }, u64(), option { u64() }, u64(), refundState(), role(), string(), u64(),",
         "HeartbeatOutcome(bool(), option { u64() }, words(), reports())",
         "u32(), u32(), option { Health(bool(), bool(), words()) },",
@@ -219,7 +219,7 @@ fn the_kotlin_results_read_their_fields_in_the_order_the_rust_types_write_them()
         "ScreenView: record: state: StateView, words: Words, flags: list<Words>, check: option<Words>, \
          received_sats: u64, needs_sats: u64, stuck: bool, late: bool, reopened: bool, \
          conflict_seen: bool, reports: list<ReportView>, payment: option<Payment>, \
-         lightning: option<LightningSaleView>"
+         lightning: option<LightningSaleView>, lightning_first: bool"
     ));
     assert!(protocol.contains(
         "RefundRow: record: sale: u32, number: option<u64>, asked: u64, value_minor: option<u64>, tip_minor: u64, \

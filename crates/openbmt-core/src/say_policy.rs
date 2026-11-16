@@ -10,6 +10,12 @@ use crate::say::{Tone, Who, Words};
 
 /// What a waiting sale does next: nothing, and it turns green with the
 /// block, or the cashier takes another kind of payment.
+/// What the cashier does while a sale over the limits waits: the sale goes on
+/// by itself, so the counter is free for the next customer (CR-283).
+const WAIT_SERVE_NEXT: &str =
+    "Serve the next customer while it waits. It turns green by itself when \
+     the payment is in a block, in about ten minutes. Hand over the goods then.";
+
 const WAIT_NEXT: &str =
     "Nothing to do. It turns green when the payment is in a block, in about ten \
      minutes, or take another kind of payment.";
@@ -144,14 +150,22 @@ impl WaitReason {
                 "Waiting: less than needed",
                 "Less arrived than the sale needs, so it waits for a block before it counts.",
             ),
-            Self::OverSaleLimit => waiting(
+            Self::OverSaleLimit => Words::new(
+                Tone::Info,
                 "Waiting: over the limit",
                 "This sale is over what this counter accepts before a block.",
-            ),
-            Self::SliceFull => waiting(
+                Who::Cashier,
+                WAIT_SERVE_NEXT,
+            )
+            .code("CR-10"),
+            Self::SliceFull => Words::new(
+                Tone::Info,
                 "Waiting: counter is full",
                 "This counter already holds as much accepted before a block as it is allowed.",
-            ),
+                Who::Cashier,
+                WAIT_SERVE_NEXT,
+            )
+            .code("CR-10"),
             Self::ConflictWatch { .. } => Words::new(
                 Tone::Info,
                 "Waiting: short check",
