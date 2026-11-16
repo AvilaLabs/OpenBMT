@@ -412,3 +412,7 @@ In parallel, compare the same workflows using a merchant-operated BTCPay backend
 Put proactive confirmed-capacity management and adversarial JIT funding tests ahead of claims about effortless Lightning. Keep offline direct channels, atomic capacity acquisition, and factories in explicit research lanes with their own wallet, provider, and recovery gates.
 
 Expansion should follow demonstrated compatibility and operating results. The universal platform remains the objective; each deployment earns its readiness claim separately.
+
+## Lightning and on-chain funds follow-up
+
+The [merchant money system investigation](merchant-money-system-2026-11-16.md) examines one controller for receiving capacity, online exposure, fees, and output economics. It includes synthetic economic replays and Bitcoin Core regtest evidence for combining unilateral swap claims, plus a limited offline authorization for a future savings increase. These experiments validate narrow mechanisms; application integration, service independence, recovery, and sustained merchant economics remain release gates.

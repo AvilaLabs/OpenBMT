@@ -1,0 +1,14 @@
+test_bounded_pipeline_reserves_principal_without_early_capacity_or_spend (test_model.ModelTests.test_bounded_pipeline_reserves_principal_without_early_capacity_or_spend) ... ok
+test_hot_export_fee_is_paid_from_output_once (test_model.ModelTests.test_hot_export_fee_is_paid_from_output_once) ... ok
+test_invalid_runtime_inputs_are_rejected (test_model.ModelTests.test_invalid_runtime_inputs_are_rejected) ... ok
+test_onchain_receipt_is_full_value_one_output_and_payer_fee_excluded (test_model.ModelTests.test_onchain_receipt_is_full_value_one_output_and_payer_fee_excluded) ... ok
+test_receipt_equal_to_its_future_input_cost_has_no_net_value (test_model.ModelTests.test_receipt_equal_to_its_future_input_cost_has_no_net_value) ... ok
+test_reserved_pending_hot_value_cannot_fund_withdrawal (test_model.ModelTests.test_reserved_pending_hot_value_cannot_fund_withdrawal) ... ok
+test_signer_offline_does_not_block_hot_key_swap (test_model.ModelTests.test_signer_offline_does_not_block_hot_key_swap) ... ok
+test_swap_pending_keeps_hot_exposure_and_does_not_restore_inbound (test_model.ModelTests.test_swap_pending_keeps_hot_exposure_and_does_not_restore_inbound) ... ok
+test_uneconomic_export_does_not_assume_extra_hot_buffer (test_model.ModelTests.test_uneconomic_export_does_not_assume_extra_hot_buffer) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.001s
+
+OK
