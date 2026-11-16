@@ -214,6 +214,7 @@
       }, auto() { c().showNewSale(); } },
       { step: 0, enter() {
         shell.say("The customer's order comes to 8.00 USD.", ["Type the amount, then tap ", { b: "Open the sale" }, "."]);
+        OpenBmtRegister.play(shell, { assets, palette, clock, flow, ownerFlow, wasm, ownerWasm, loadCounter, loadOwner, stopRun });
         aim(nextTap(flow.entryMinor()));
         S.on = { entry: (e) => aim(nextTap(e.minor)), sale: go };
       }, auto() { for (const key of AMOUNT) c().press(key); c().openEntered(); } },
