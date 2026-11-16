@@ -51,7 +51,7 @@
     row.append(scan, tap);
     return frame([
       card([el("div", `font-size:15px;color:${MUTED}`, "Balance"), el("div", "font-size:36px;font-weight:500", sats(balance))]),
-      el("div", `font-size:15px;color:${MUTED};padding:4px 2px`, "To pay a shop, scan the code on its screen."),
+      el("div", `font-size:15px;color:${MUTED};padding:4px 2px`, "To pay a shop, scan the code on its screen or tap your phone to the counter."),
     ], [row]);
   }
 
