@@ -94,6 +94,7 @@ fi
 rm -rf "$counter_out"
 mkdir -p "$counter_out"
 cp "$target_dir/wasm32-unknown-unknown/release/openbmt_demo_counter.wasm" "$counter_out/counter.wasm"
+node scripts/demo-record.mjs "$counter_out/counter.wasm" "$counter_out/counter-record.bin"
 cp demo/web2/counter-host.mjs "$counter_out/"
 rm -rf "$owner_out"
 mkdir -p "$owner_out"

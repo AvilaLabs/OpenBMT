@@ -21,6 +21,20 @@
     ownerModel: "../../dist/kotlin-js/owner/owner-model.mjs", ownerWasm: "../../dist/demo-owner/owner.wasm", ownerHost: "./owner-host.mjs",
     sounds: "./sounds/", logoPieces: "../ui/logo-pieces/",
   }, globalThis.OpenBmtAssets);
+  // Both engines are fetched and compiled once, from the moment the page opens, while the visitor reads the start
+  // screen; each run then only instantiates them, which takes moments.
+  const compile = (url) => {
+    const r = fetch(url);
+    return WebAssembly.compileStreaming(r).catch(async () => WebAssembly.compile(await (await fetch(url)).arrayBuffer()));
+  };
+  const engines = {
+    counter: compile(assets.wasm), owner: compile(assets.ownerWasm),
+    host: import(assets.host), ownerHost: import(assets.ownerHost),
+    model: import(assets.model), ownerModel: import(assets.ownerModel),
+    // The pairing record made at build time; without it the counter makes it at each start (about two seconds).
+    record: assets.record ? fetch(assets.record).then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null) : Promise.resolve(null),
+  };
+  for (const k in engines) engines[k].catch(() => {});
   const palette = new U.PaletteOf(await (await fetch(assets.palette)).json());
   const shell = new OpenBmtShell(document.getElementById("app"));
 
@@ -51,12 +65,18 @@
       },
     };
   }
-  const wasm = await (await fetch(assets.wasm)).arrayBuffer();
-  const { loadCounter } = await import(assets.host);
-  const flow = (await import(assets.model)).CounterFlowDemo.getInstance();
-  const ownerWasm = await (await fetch(assets.ownerWasm)).arrayBuffer();
-  const { loadOwner } = await import(assets.ownerHost);
-  const ownerFlow = (await import(assets.ownerModel)).OwnerFlowDemo.getInstance();
+  // Filled in when the engines are ready (ready()); nothing below runs a counter before that.
+  let wasm, loadCounter, flow, ownerWasm, loadOwner, ownerFlow, record;
+  let readyOnce = null;
+  const ready = () => readyOnce || (readyOnce = (async () => {
+    wasm = await engines.counter;
+    ({ loadCounter } = await engines.host);
+    flow = (await engines.model).CounterFlowDemo.getInstance();
+    ownerWasm = await engines.owner;
+    ({ loadOwner } = await engines.ownerHost);
+    ownerFlow = (await engines.ownerModel).OwnerFlowDemo.getInstance();
+    record = await engines.record;
+  })());
 
   // The page's clock. A visitor who jumps to a later step has the seconds a real counter would have waited skipped.
   const clock = { offset: 0, now() { return Math.floor(Date.now() / 1000) + this.offset; }, skip(secs) { this.offset += secs; } };
@@ -98,11 +118,15 @@
     r.owner.onPump(true);
   }
 
+  /** Lets the browser draw what is on the page before the next long step. */
+  const paint = () => new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)));
+
   async function startRun(onEvent, withOwner) {
     stopRun();
+    await ready();
     const r = { dead: false, beat: 0, aim: null, onEvent, plays: OutcomePlays(), quiet: false, host: null };
     // Two modules, one chain: both read the page's clock, and every chain action is made on both (one-chain.js).
-    const counterChain = await loadCounter(wasm, { now: () => clock.now() });
+    const counterChain = await loadCounter(wasm, { now: () => clock.now(), record });
     r.host = counterChain;
     const ownerChain = await loadOwner(ownerWasm, { now: () => clock.now() });
     r.chain = OneChain(counterChain, ownerChain);
@@ -130,7 +154,11 @@
     });
     r.ownerShown = withOwner;
     run = r;
+    // The counter first, then a frame for the browser to draw it, then the owner's phone: each start takes a few
+    // hundred milliseconds, and the page answers between them.
     r.controller.startNode();
+    await paint();
+    if (r.dead) return r;
     r.owner.startNode();
     r.owner.render();
     pump(r);
@@ -280,6 +308,8 @@
       shell.step(moments[i].step);
       moments[i].enter();
     }
+    // The devices' launch screens are drawn before the counter starts.
+    await paint();
     await startRun((kind, data) => {
       const handler = S.on && S.on[kind];
       if (handler) handler(data);

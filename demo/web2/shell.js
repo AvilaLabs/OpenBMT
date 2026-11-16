@@ -11,6 +11,28 @@
   // Where the logo is: the page may say (OpenBmtAssets.logo); the repository's own layout otherwise.
   const LOGO = (root.OpenBmtAssets && root.OpenBmtAssets.logo) || "../ui/logo.png";
 
+  // A screen change: Material's emphasized deceleration, short enough that a tap never waits on it.
+  const ENTER = [{ opacity: 0, transform: "translateY(14px) scale(0.985)" }, { opacity: 1, transform: "none" }];
+  const ENTER_TIMING = { duration: 260, easing: "cubic-bezier(0.05, 0.7, 0.1, 1)" };
+  const motionOn = () => !matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /** What makes two drawings the same screen: its controls. A changed count or a typed digit keeps the screen. */
+  function screenKey(node) {
+    return [...node.querySelectorAll("button, [role=button]")].map((b) => b.textContent.trim()).join("|");
+  }
+
+  /** The launch screen of a device of [size]: the app's logo on the screen's light ground. */
+  function launchScreen(size) {
+    const d = el("div", "device launch");
+    d.style.width = size.width + "px";
+    d.style.height = size.height + "px";
+    const img = el("img");
+    img.src = LOGO;
+    img.alt = "";
+    d.append(img);
+    return d;
+  }
+
   function el(tag, cls, text) {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -151,6 +173,9 @@
         if (d.sizes.length > 1) cap.append(this.sizeSwitch(slot));
         const fit = el("div", "fit");
         const phone = el("div", "phone");
+        // The device's launch screen, as Android shows the app's logo while the app starts: never an empty frame.
+        phone.append(launchScreen(size));
+        slot.key = "launch";
         fit.append(phone);
         const why = el("div", "why");
         wrap.append(cap, fit, why);
@@ -201,7 +226,29 @@
 
     redraw(s) {
       if (!s.build) return;
-      s.phone.replaceChildren(s.build(s.size));
+      const next = s.build(s.size);
+      const key = screenKey(next);
+      const was = s.anim;
+      s.anim = null;
+      if (s.leaving) { s.leaving.remove(); s.leaving = null; }
+      const prev = s.phone.firstElementChild;
+      if (prev && key !== s.key && motionOn()) {
+        // A new screen comes in over the one it replaces, lifted and faded in; the old one goes when it is covered.
+        prev.classList.add("leaving");
+        prev.inert = true;
+        s.leaving = prev;
+        s.phone.append(next);
+        s.anim = next.animate(ENTER, ENTER_TIMING);
+        s.anim.onfinish = () => { if (s.leaving === prev) { prev.remove(); s.leaving = null; } };
+      } else {
+        // The same screen drawn again (a count, a typed digit): in place, carrying on any fade it was in.
+        s.phone.replaceChildren(next);
+        if (was && was.playState === "running" && key === s.key) {
+          s.anim = next.animate(ENTER, ENTER_TIMING);
+          s.anim.currentTime = was.currentTime;
+        }
+      }
+      s.key = key;
       if (s.aim) this.aim(s, s.aim);
       this.fit();
     }
@@ -299,7 +346,7 @@
     aim(s, list) {
       s.aim = list;
       for (const t of this.root.querySelectorAll(".target")) t.classList.remove("target");
-      const all = [...s.phone.querySelectorAll("button, [role=button]")];
+      const all = [...s.phone.querySelectorAll(":scope > :not(.leaving) :is(button, [role=button])")];
       const hits = [];
       for (const { label, onTap } of list) {
         const hit = all.find((b) => b.textContent.trim() === label)

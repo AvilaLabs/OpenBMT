@@ -26,10 +26,11 @@ export function invoiceOf(code) {
   return pair && pair[1] ? pair[1].toLowerCase() : null;
 }
 
-/** Loads the module from `bytes` (an ArrayBuffer or Uint8Array) and installs the call. Returns the chain's controls. */
-export async function loadCounter(bytes, { now = () => Math.floor(Date.now() / 1000) } = {}) {
+/** Loads the module from `bytes` (an ArrayBuffer, a Uint8Array or a compiled WebAssembly.Module) and installs the call. Returns the chain's controls. */
+export async function loadCounter(bytes, { now = () => Math.floor(Date.now() / 1000), record = null } = {}) {
   let memory = null;
-  const { instance } = await WebAssembly.instantiate(bytes, {
+  // A compiled WebAssembly.Module instantiates at once; bytes are compiled first.
+  const made = await WebAssembly.instantiate(bytes, {
     env: {
       openbmt_random(ptr, len) {
         const view = new Uint8Array(memory.buffer, ptr, len);
@@ -38,6 +39,7 @@ export async function loadCounter(bytes, { now = () => Math.floor(Date.now() / 1
       },
     },
   });
+  const instance = made instanceof WebAssembly.Instance ? made : made.instance;
   const x = instance.exports;
   memory = x.memory;
 
@@ -82,9 +84,10 @@ export async function loadCounter(bytes, { now = () => Math.floor(Date.now() / 1
     return s.slice(3);
   };
   return {
-    /** The pairing record of the demo counter. */
+    /** The pairing record of the demo counter: the one made at build time when given (`record`), else made now. */
     record() {
       tick();
+      if (record) return Int8Array.from(new Uint8Array(record));
       return Int8Array.from(take(x.counter_record()));
     },
     /** A customer pays `sats` to `address` on the pretend chain; the transaction's id. */

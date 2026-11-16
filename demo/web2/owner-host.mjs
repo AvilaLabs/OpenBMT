@@ -6,12 +6,13 @@
 // The time is the page's clock, given to the module before every call.
 
 /**
- * Loads the module from `bytes` (an ArrayBuffer or Uint8Array) and installs the call. Returns the chain's controls.
+ * Loads the module from `bytes` (an ArrayBuffer, a Uint8Array or a compiled WebAssembly.Module) and installs the call. Returns the chain's controls.
  * The chain is the same one the counter's module has: move both with the same calls at the same times.
  */
 export async function loadOwner(bytes, { now = () => Math.floor(Date.now() / 1000) } = {}) {
   let memory = null;
-  const { instance } = await WebAssembly.instantiate(bytes, {
+  // A compiled WebAssembly.Module instantiates at once; bytes are compiled first.
+  const made = await WebAssembly.instantiate(bytes, {
     env: {
       openbmt_random(ptr, len) {
         const view = new Uint8Array(memory.buffer, ptr, len);
@@ -20,6 +21,7 @@ export async function loadOwner(bytes, { now = () => Math.floor(Date.now() / 100
       },
     },
   });
+  const instance = made instanceof WebAssembly.Instance ? made : made.instance;
   const x = instance.exports;
   memory = x.memory;
 

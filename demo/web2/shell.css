@@ -142,6 +142,13 @@ button { font: inherit; cursor: pointer; }
   transition: box-shadow 0.3s ease;
 }
 .phone .device { border-radius: 36px; overflow: hidden; }
+/* While a new screen comes in, the old one stays beneath it, in the same place. */
+.phone { position: relative; }
+.phone > * { position: relative; z-index: 1; }
+.phone > .leaving { position: absolute; top: 11px; left: 11px; z-index: 0; }
+.phone .launch { display: flex; align-items: center; justify-content: center; background: #f7f7fa; }
+.phone .launch img { width: 96px; height: 96px; border-radius: 22px; animation: launch 0.9s ease-in-out infinite alternate; }
+@keyframes launch { from { opacity: 0.55; } to { opacity: 1; } }
 .phone.tablet { border-radius: 30px; padding: 11px; }
 .phone.tablet .device { border-radius: 20px; }
 
@@ -262,4 +269,5 @@ button { font: inherit; cursor: pointer; }
   .target { animation: none; box-shadow: 0 0 0 3px var(--pulse); }
   .say .fresh { animation: none; }
   .role, .slot, .phone, .qa { transition: none; }
+  .phone .launch img { animation: none; }
 }
