@@ -85,6 +85,7 @@ impl DriverPort for PagePort {
 pub fn host() -> HostSpawn {
     Arc::new(|launch: Launch| {
         let now = crate::now();
+        crate::lightning::reset();
         let (tx, rx) = channel();
         tx.send(peers_event(0, now))
             .map_err(|_| "the events are closed".to_string())?;

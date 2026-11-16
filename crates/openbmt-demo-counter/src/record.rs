@@ -35,6 +35,8 @@ pub fn demo_record() -> Option<Vec<u8>> {
     let mut settings = Settings::defaults(SATS_PER_USD);
     settings.version = 1;
     settings.customer_wifi = false;
+    // The pretend Lightning node's key: sales ask it for an invoice.
+    settings.lightning_node = Some(crate::lightning::node_key());
     settings.min_sale_sats = 0;
     settings.devices.insert(counter.device_id());
     settings.counters.insert(counter.device_id(), 10_000);

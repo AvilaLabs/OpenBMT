@@ -57,6 +57,9 @@ fn ok(response: &[u8]) -> &[u8] {
 
 #[test]
 fn a_sale_paid_on_the_pretend_chain_is_seen_by_the_node() {
+    let _turn = crate::ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     set_now(T0);
     let record = crate::record::demo_record().expect("a record");
     let started = call(&frame(1, 0, &start_fields(&record)));
