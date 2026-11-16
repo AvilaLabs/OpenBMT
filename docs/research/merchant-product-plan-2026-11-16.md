@@ -4,6 +4,12 @@ Planning update dated 16 November 2026. The wallet authority choices below are a
 
 OpenBMT should provide one merchant checkout across ordinary on-chain payments, Lightning, and optional business-system connections. Cashiers should not manage channels, outputs, or wallet migration during a sale. Merchants retain control of keys, recovery, destinations, and the authority granted to integrations. Shop Lightning remains part of that goal.
 
+## Merchant adoption direction
+
+Treat a merchant's willingness to make OpenBMT the daily checkout as conditional on a better end-to-end experience and low switching burden. A merchant may keep Square or another provider for supported card processing, catalog, hardware, or operating functions; connections preserve only capabilities that are actually supported and tested, not blanket compatibility. Keep OpenBMT integrations inside Clover and other existing POS software as optional routes wherever supported. No provider account is required to accept Bitcoin. In the OpenBMT checkout mode, OpenBMT supplies its own interface and sale record; connecting a provider does not host its full POS application. Keep the app-first, serverless default and existing custody, recovery, and key-authority boundaries unchanged.
+
+Adoption evidence must cover setup and import effort; one sale entry; checkout speed and steps against the merchant's current workflow; clearly disclosed support for essential features; combined records, refunds, and reconciliation; and staff recovery from routine errors or interruptions without interpreting logs or accidentally repeating a charge. Test real merchant tasks across relevant workflows, not simply whether they can use “one app.”
+
 ## Accepted wallet authority choices
 
 ### Start with a local wallet and support an independently created cold wallet
