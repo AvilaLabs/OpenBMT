@@ -19,9 +19,8 @@
 "use strict";
 (function (root) {
   const MINOR = 800;
-  // TODO_WORDS: the line under the title of the choice screen; it must say there are three ways now (the old line, "in one
-  // of two ways", with the number changed).
-  const TODO_WORDS_register_lede = "The counter works beside the register the shop already has, in one of three ways.";
+  // The line under the title of the choice screen.
+  const REGISTER_LEDE = "The counter stands beside the register a shop already has. Pick the register to see how the two work together.";
   const KEYS = "800";
   const groups = (n) => Number(n).toLocaleString("en-US");
 
@@ -371,7 +370,7 @@
       { name: "Clover", what: "The cashier rings it up on Clover, types the amount on the counter, then closes the order as Bitcoin. The owner's phone checks that the two match.", go: "Start", onPick: () => playWay(ways.clover) },
     ], {
       title: "With your register",
-      lede: TODO_WORDS_register_lede,
+      lede: REGISTER_LEDE,
     });
   }
 

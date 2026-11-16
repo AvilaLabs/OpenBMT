@@ -85,6 +85,13 @@ button { font: inherit; cursor: pointer; }
 .open-line { font-weight: 300; font-size: 20px; color: #d9d6ff; }
 /* The register's choice, under the scenario bar. */
 .start.chooser { top: var(--bar-h); grid-template-rows: 1fr; overflow-y: auto; }
+/* The register's ways side by side, each a column of its own. */
+@media (min-width: 900px) {
+  .start.chooser .mid { width: min(1080px, 100%); }
+  .start.chooser .roles { grid-template-columns: repeat(3, 1fr); }
+  .start.chooser .role .name { font-size: 24px; line-height: 1.2; }
+  .start.chooser .role { grid-template-rows: auto 1fr auto; }
+}
 
 /* ---------- the demo ---------- */
 .demo { position: fixed; inset: 0; display: grid; grid-template-rows: var(--bar-h) minmax(var(--say-h), auto) 1fr; }
@@ -149,6 +156,8 @@ button { font: inherit; cursor: pointer; }
   list-style: none; margin: 0 -20px; padding: 0 20px; overflow: hidden;
   background: var(--blue-deep); border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
+/* No scenario playing (the register's choice screen): the row stays, in the bar's own colour, empty. */
+.steps:empty { background: none; border-top-color: transparent; }
 .steps button {
   background: none; border: 0; color: #b9b4ff;
   font-size: 14px; padding: 6px 10px; border-radius: 6px;
