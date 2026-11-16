@@ -128,7 +128,7 @@
     async function startRun(onEvent, withBox, ownerShown) {
       stopMine();
       const r = { dead: false, beat: 0, aim: null, ownerShown, registerPaid: false };
-      const counterChain = await ctx.loadCounter(ctx.wasm, { now: () => clock.now() });
+      const counterChain = await ctx.loadCounter(ctx.wasm, { now: () => clock.now(), record: ctx.record, recordWithBox: ctx.recordWithBox });
       const ownerChain = await ctx.loadOwner(ctx.ownerWasm, { now: () => clock.now() });
       r.chain = OneChain(counterChain, ownerChain);
       r.controller = CC.Controller({
@@ -327,9 +327,13 @@
     const chooser = shell.root.querySelector(".start");
     if (chooser) chooser.remove();
     shell.start([
-      { name: "Your register sends the amount", what: "Registers that can send the amount to the counter. Nothing is typed twice.", go: "", onPick: () => playWay(ways.sends) },
-      { name: "Square, Clover and others", what: "Ring up on your register, type the amount on the counter, then close the order as Bitcoin. The owner's phone checks that they match.", go: "", onPick: () => playWay(ways.any) },
-    ]);
+      { name: "Your register sends the amount", what: "Registers that can send the amount to the counter. Nothing is typed twice.", go: "Start", onPick: () => playWay(ways.sends) },
+      { name: "Square, Clover and others", what: "Ring up on your register, type the amount on the counter, then close the order as Bitcoin. The owner's phone checks that they match.", go: "Start", onPick: () => playWay(ways.any) },
+    ], null, {
+      title: "With your register",
+      lede: "The counter works beside the register the shop already has, in one of two ways.",
+      back: { label: "Back", onTap: () => shell.onRestart() },
+    });
   }
 
   const api = { play, minorOf, requestText, parseVerdict, tillLines, MINOR, KEYS };

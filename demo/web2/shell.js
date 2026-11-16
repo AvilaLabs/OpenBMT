@@ -104,9 +104,10 @@
 
     /**
      * The start screen. [roles]: [{name, what, go, onPick}]. [snap]: {canvas, play()}, the logo that snaps together
-     * once, above the choices, each time the screen is shown.
+     * once, above the choices, each time the screen is shown. [opts]: {title, lede, back: {label, onTap}} for a choice
+     * screen other than the first.
      */
-    start(roles, snap) {
+    start(roles, snap, opts = {}) {
       let s = this.root.querySelector(".start");
       if (!s) {
         s = el("div", "start");
@@ -115,10 +116,14 @@
         mark.innerHTML = '<img src="' + LOGO + '" alt=""><span>OpenBMT</span>';
         const book = el("a", null, "Handbook");
         book.href = HANDBOOK;
-        top.append(mark, book);
+        if (opts.back) {
+          const back = el("button", "back", opts.back.label);
+          back.addEventListener("click", opts.back.onTap);
+          top.append(mark, back, book);
+        } else top.append(mark, book);
         const mid = el("div", "mid");
-        mid.append(el("h1", null, "Try OpenBMT"),
-          el("p", "lede", "Take a bitcoin payment the way a shop does, on the real apps, in this page."));
+        mid.append(el("h1", null, opts.title || "Try OpenBMT"),
+          el("p", "lede", opts.lede || "Take a bitcoin payment the way a shop does, on the real apps, in this page."));
         if (snap) {
           const holder = el("div", "snap");
           holder.append(snap.canvas);

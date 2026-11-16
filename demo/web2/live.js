@@ -27,12 +27,13 @@
     const r = fetch(url);
     return WebAssembly.compileStreaming(r).catch(async () => WebAssembly.compile(await (await fetch(url)).arrayBuffer()));
   };
+  const made = (url) => (url ? fetch(url).then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null) : Promise.resolve(null));
   const engines = {
     counter: compile(assets.wasm), owner: compile(assets.ownerWasm),
     host: import(assets.host), ownerHost: import(assets.ownerHost),
     model: import(assets.model), ownerModel: import(assets.ownerModel),
     // The pairing record made at build time; without it the counter makes it at each start (about two seconds).
-    record: assets.record ? fetch(assets.record).then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null) : Promise.resolve(null),
+    record: made(assets.record), recordWithBox: made(assets.recordWithBox),
   };
   for (const k in engines) engines[k].catch(() => {});
   const palette = new U.PaletteOf(await (await fetch(assets.palette)).json());
@@ -66,7 +67,7 @@
     };
   }
   // Filled in when the engines are ready (ready()); nothing below runs a counter before that.
-  let wasm, loadCounter, flow, ownerWasm, loadOwner, ownerFlow, record;
+  let wasm, loadCounter, flow, ownerWasm, loadOwner, ownerFlow, record, recordWithBox;
   let readyOnce = null;
   const ready = () => readyOnce || (readyOnce = (async () => {
     wasm = await engines.counter;
@@ -76,6 +77,7 @@
     ({ loadOwner } = await engines.ownerHost);
     ownerFlow = (await engines.ownerModel).OwnerFlowDemo.getInstance();
     record = await engines.record;
+    recordWithBox = await engines.recordWithBox;
   })());
 
   // The page's clock. A visitor who jumps to a later step has the seconds a real counter would have waited skipped.
@@ -214,7 +216,7 @@
       }, auto() { c().showNewSale(); } },
       { step: 0, enter() {
         shell.say("The customer's order comes to 8.00 USD.", ["Type the amount, then tap ", { b: "Open the sale" }, "."]);
-        OpenBmtRegister.play(shell, { assets, palette, clock, flow, ownerFlow, wasm, ownerWasm, loadCounter, loadOwner, stopRun });
+        OpenBmtRegister.play(shell, { assets, palette, clock, flow, ownerFlow, wasm, ownerWasm, loadCounter, loadOwner, stopRun, record, recordWithBox });
         aim(nextTap(flow.entryMinor()));
         S.on = { entry: (e) => aim(nextTap(e.minor)), sale: go };
       }, auto() { for (const key of AMOUNT) c().press(key); c().openEntered(); } },

@@ -131,7 +131,9 @@ fn a_sale_paid_on_the_pretend_chain_is_seen_by_the_node() {
 /// and the sale is paid on the pretend chain.
 #[test]
 fn a_request_from_the_till_waits_starts_and_is_paid() {
-    let _one = crate::ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let _one = crate::ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     set_now(T0);
     let record = crate::record::demo_record_with_box().expect("a record");
     let started = call(&frame(1, 0, &start_fields(&record)));
@@ -191,7 +193,9 @@ fn a_request_from_the_till_waits_starts_and_is_paid() {
 
 #[test]
 fn a_counter_with_no_box_in_its_settings_drops_the_request() {
-    let _one = crate::ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let _one = crate::ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     set_now(T0);
     let record = crate::record::demo_record().expect("a record");
     let started = call(&frame(1, 0, &start_fields(&record)));

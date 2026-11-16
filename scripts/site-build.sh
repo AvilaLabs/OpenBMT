@@ -37,7 +37,7 @@ cp demo/web2/sounds/* dist/site/sounds/
 cp demo/web/favicon.svg dist/site/
 cp demo/web/fonts/ubuntu-latin-*.woff2 demo/web/fonts/UBUNTU-FONT-LICENCE.txt dist/site/fonts/
 cp dist/kotlin-js/counter/counter-model.mjs dist/site/
-cp dist/demo-counter/counter.wasm dist/demo-counter/counter-record.bin dist/site/
+cp dist/demo-counter/counter.wasm dist/demo-counter/counter-record.bin dist/demo-counter/counter-record-box.bin dist/site/
 cp dist/kotlin-js/owner/owner-model.mjs dist/site/
 cp dist/demo-owner/owner.wasm dist/site/
 cp -R dist/handbook dist/site/handbook

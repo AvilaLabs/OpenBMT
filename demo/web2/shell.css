@@ -45,6 +45,10 @@ button { font: inherit; cursor: pointer; }
 .mark { display: flex; align-items: center; gap: 10px; font-weight: 500; font-size: 17px; letter-spacing: 0.01em; }
 .mark img { width: 28px; height: 28px; border-radius: 6px; }
 .start a { color: #fff; }
+.start .top .back { margin-left: auto; margin-right: 20px; background: none; border: 1px solid rgba(255, 255, 255, 0.5);
+  color: #fff; font: inherit; font-size: 15px; padding: 6px 14px; border-radius: 8px; cursor: pointer; }
+.start .top .back:hover { border-color: #fff; }
+.start .top .back:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .start .mid { align-self: center; justify-self: center; width: min(880px, 100%); }
 .start h1 { font-weight: 300; font-size: clamp(40px, 7vw, 76px); line-height: 1.02; margin: 0 0 12px; letter-spacing: -0.02em; }
 .start .lede { font-weight: 300; font-size: 20px; margin: 0 0 36px; color: #d9d6ff; }
