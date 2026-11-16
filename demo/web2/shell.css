@@ -15,7 +15,7 @@
   --halo: rgba(23, 0, 171, 0.22);
   --pulse: #2a15d6;
   --sans: "Ubuntu", system-ui, "Helvetica Neue", Arial, sans-serif;
-  --bar-h: 52px;
+  --bar-h: 90px;
   --say-h: 92px;
 }
 
@@ -53,7 +53,7 @@ button { font: inherit; cursor: pointer; }
 .start .mid { align-self: center; justify-self: center; width: min(880px, 100%); }
 .start h1 { font-weight: 300; font-size: clamp(40px, 7vw, 76px); line-height: 1.02; margin: 0 0 12px; letter-spacing: -0.02em; }
 .start .lede { font-weight: 300; font-size: 20px; margin: 0 0 36px; color: #d9d6ff; }
-.start .snap { margin: 0 0 28px; }
+.start .snap { margin: 0 0 22px; }
 .start .snap canvas { display: block; }
 .roles { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .role {
@@ -94,11 +94,15 @@ button { font: inherit; cursor: pointer; }
   background: var(--blue);
   color: #fff;
   display: grid;
-  grid-template-columns: auto auto 1fr auto;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: 54px 36px;
   align-items: center;
-  gap: 16px;
+  column-gap: 20px;
   padding: 0 20px;
 }
+.bar .mark { grid-row: 1; grid-column: 1; }
+.scenarios { grid-row: 1; grid-column: 2; }
+.bar .right { grid-row: 1; grid-column: 3; }
 /* The scenarios: tabs (some with a menu of sub-scenarios) on a wide window, one select on a narrow one. */
 .scenarios { display: flex; gap: 2px; }
 .tab { position: relative; display: flex; align-items: stretch; border-radius: 6px; }
@@ -115,7 +119,9 @@ button { font: inherit; cursor: pointer; }
 }
 .tab .tab-chev { padding: 6px 7px 6px 3px; margin-left: -2px; }
 .tab .tab-chev::after { margin: 0 0 2px; }
-.tab .tab-label[aria-current] + .tab-chev { color: #fff; }
+/* The current tab, its chevron with it, is one white pill. */
+.tab:has(.tab-label[aria-current]) { background: #fff; }
+.tab .tab-label[aria-current] + .tab-chev { color: var(--blue); background: none; }
 .tab [aria-expanded="true"] { color: #fff; background: rgba(255, 255, 255, 0.14); }
 .menu {
   position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; min-width: 100%;
@@ -136,13 +142,13 @@ button { font: inherit; cursor: pointer; }
   border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 6px; padding: 5px 8px; min-width: 0;
 }
 .scenario-select option, .scenario-select optgroup { color: var(--ink); background: #fff; }
-/* A middle width: the scenarios take a row of their own under the mark and the steps. */
-@media (min-width: 900px) and (max-width: 1499px) {
-  :root { --bar-h: 76px; }
-  .bar { grid-template-columns: auto 1fr auto; grid-template-rows: 44px 32px; align-items: center; row-gap: 0; }
-  .scenarios { grid-row: 2; grid-column: 1 / -1; }
+/* The steps of the scenario being played: a row of their own under the bar's first row, the whole width. */
+.steps {
+  grid-row: 2; grid-column: 1 / -1; align-self: stretch;
+  display: flex; justify-content: center; align-items: center; gap: 4px;
+  list-style: none; margin: 0 -20px; padding: 0 20px; overflow: hidden;
+  background: var(--blue-deep); border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
-.steps { display: flex; justify-content: center; gap: 4px; list-style: none; margin: 0; padding: 0; overflow: hidden; }
 .steps button {
   background: none; border: 0; color: #b9b4ff;
   font-size: 14px; padding: 6px 10px; border-radius: 6px;
@@ -150,8 +156,9 @@ button { font: inherit; cursor: pointer; }
 }
 .steps button:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
 .steps .done button { color: #e4e1ff; }
-.steps .now button { color: #fff; font-weight: 500; box-shadow: inset 0 -2px 0 var(--cyan); border-radius: 0; }
+.steps .now button { color: #fff; font-weight: 500; background: rgba(255, 255, 255, 0.12); }
 .steps .n { opacity: 0.7; margin-right: 6px; }
+.steps li + li::before { content: ""; display: inline-block; width: 14px; height: 1px; background: rgba(255, 255, 255, 0.25); vertical-align: middle; margin: 0 2px; }
 .bar .right { display: flex; gap: 6px; align-items: center; }
 .bar .right button, .bar .right a {
   background: none; border: 1px solid rgba(255, 255, 255, 0.35); color: #fff;
@@ -168,8 +175,9 @@ button { font: inherit; cursor: pointer; }
   background: #fff;
 }
 .say .happened { font-size: 15px; color: var(--muted); min-height: 20px; margin-bottom: 4px; }
-.say .do { font-size: 23px; font-weight: 500; line-height: 1.25; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center; }
+.say .do { font-size: 23px; font-weight: 500; line-height: 1.25; min-height: 1.25em; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center; }
 .say .do b { color: var(--blue); font-weight: 500; }
+.say .do:empty { display: none; }
 .say .skip {
   background: var(--blue); color: #fff; border: 0; border-radius: 999px;
   font-size: 15px; font-weight: 500; padding: 8px 16px;
@@ -188,7 +196,7 @@ button { font: inherit; cursor: pointer; }
   min-width: 0;
   display: flex; justify-content: center; align-items: flex-start;
   gap: clamp(24px, 4vw, 64px);
-  padding: 10px 24px 8px;
+  padding: 18px 24px 22px;
   overflow: hidden;
   position: relative;
 }
@@ -201,7 +209,7 @@ button { font: inherit; cursor: pointer; }
   height: 40px; padding: 0 20px; border-radius: 20px; border: 1px solid var(--line); background: #fff;
   color: var(--ink); font-size: 15px; font-weight: 500;
 }
-.slot.rest { opacity: 0.38; filter: grayscale(0.6); }
+.slot.rest { opacity: 0.55; filter: grayscale(0.35); }
 .slot.rest .phone { pointer-events: none; }
 .slot[inert] { pointer-events: none; }
 .slot.lit .phone { box-shadow: 0 0 0 6px var(--halo), 0 18px 50px rgba(17, 6, 134, 0.25); }
@@ -284,17 +292,22 @@ button { font: inherit; cursor: pointer; }
 }
 .fit { position: relative; }
 
-/* The ending card: over the lower part of the stage, the devices dimmed behind it. */
+/* The ending: a veil over the whole stage (the devices out of use behind it), the card in its middle. */
 .stage.finished .slot, .stage.finished .slot.rest { opacity: 0.55; }
+.stage.finished:has(.end-card) .slot { opacity: 1; }
+.stage.finished:has(.end-card)::after {
+  content: ""; position: absolute; inset: 0; z-index: 5;
+  background: rgba(247, 247, 244, 0.74); backdrop-filter: blur(1.5px);
+}
 .end-card {
-  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 6;
-  width: min(620px, calc(100% - 32px)); max-height: calc(100% - 16px); overflow-y: auto;
+  position: absolute; inset: 0; margin: auto; height: fit-content; z-index: 6;
+  width: min(620px, calc(100% - 32px)); max-height: calc(100% - 32px); overflow-y: auto;
   background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 24px 28px 22px;
   box-shadow: 0 18px 50px rgba(17, 6, 134, 0.28);
 }
 .end-card h2 { margin: 0 36px 12px 0; font-size: 26px; font-weight: 500; color: var(--blue); line-height: 1.2; }
 .end-card h2:focus { outline: none; }
-.end-card h2:focus-visible { outline: 3px solid var(--cyan); outline-offset: 4px; }
+.end-card h2:focus-visible { outline: none; }
 .end-card ul { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 8px; }
 .end-card li { position: relative; padding-left: 28px; font-size: 16px; line-height: 1.4; color: #33333d; }
 .end-card li::before {
@@ -306,22 +319,34 @@ button { font: inherit; cursor: pointer; }
   border: 0; background: none; color: var(--muted); font-size: 26px; line-height: 1;
 }
 .end-close:hover { background: #f1f0fb; color: var(--ink); }
-.end-next { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
-.end-label { font-size: 14px; color: var(--muted); margin-right: 4px; }
-.end-next button, .end-acts button {
+/* What to try next: a list of the other scenarios, two to a row, each a plain row with an arrow. */
+.end-next { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 18px; }
+.end-label { grid-column: 1 / -1; font-size: 13px; color: var(--muted); letter-spacing: 0.02em; margin: 2px 0 2px; }
+.end-next button {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left;
   border: 1px solid var(--line); background: #fff; color: var(--ink);
-  font-size: 15px; font-weight: 500; padding: 8px 14px; border-radius: 999px;
+  font-size: 15px; font-weight: 500; padding: 11px 14px; border-radius: 10px;
 }
-.end-next button:hover, .end-acts button:hover { border-color: var(--blue); color: var(--blue); }
-.end-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.end-next button::after { content: "\2192"; color: var(--blue); font-weight: 400; }
+.end-next button:hover { border-color: var(--blue); background: #f6f5fd; color: var(--blue); }
+.end-acts { display: flex; align-items: center; gap: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.end-acts button:first-child {
+  border: 0; background: var(--blue); color: #fff; font-size: 15px; font-weight: 500; padding: 10px 20px; border-radius: 10px;
+}
+.end-acts button:first-child:hover { background: var(--blue-deep); }
+.end-acts button + button {
+  border: 0; background: none; color: var(--blue); font-size: 15px; font-weight: 500; padding: 10px 0;
+  text-decoration: underline; text-underline-offset: 3px;
+}
 @media (max-width: 899px) {
-  .end-card { bottom: 8px; padding: 16px 16px 14px; border-radius: 14px; }
+  .end-card { padding: 16px 16px 14px; border-radius: 14px; }
   .end-card h2 { font-size: 20px; margin-bottom: 8px; }
   .end-card ul { gap: 6px; margin-bottom: 10px; }
   .end-card li { font-size: 14px; }
-  .end-next, .end-acts { gap: 6px; }
-  .end-next { margin-bottom: 8px; }
-  .end-next button, .end-acts button { font-size: 14px; padding: 6px 11px; }
+  .end-next { grid-template-columns: 1fr; gap: 6px; margin-bottom: 12px; }
+  .end-next button { font-size: 14px; padding: 8px 12px; }
+  .end-acts { padding-top: 12px; }
+  .end-acts button:first-child { font-size: 14px; padding: 8px 16px; }
 }
 
 /* The next thing to tap, inside the lit phone. */
@@ -335,7 +360,7 @@ button { font: inherit; cursor: pointer; }
 .actor {
   align-self: center;
   flex: none;
-  width: 220px;
+  width: 250px;
   background: #fff; border: 1px solid var(--line); border-radius: 16px;
   padding: 18px; display: grid; gap: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
@@ -355,6 +380,7 @@ button { font: inherit; cursor: pointer; }
   :root { --bar-h: 88px; }
   .bar { grid-template-columns: 1fr auto; grid-template-rows: 46px 38px; gap: 0 8px; padding: 0 12px; }
   .bar .mark span, .steps, .scenarios { display: none; }
+  .bar .right { grid-column: 2; }
   .scenario-select { display: block; grid-row: 2; grid-column: 1 / -1; width: 100%; }
   .say .do { font-size: 18px; }
   .say { padding-bottom: 40px; }
@@ -367,7 +393,7 @@ button { font: inherit; cursor: pointer; }
   .slot .why { display: none; }
   .actor { position: absolute; left: 12px; right: 12px; bottom: 12px; width: auto; z-index: 3; }
   :root { --say-h: 96px; }
-  .slot .cap { gap: 8px; }
+  .slot .cap { gap: 6px 8px; height: auto; min-height: 28px; flex-wrap: wrap; justify-content: center; white-space: normal; max-width: calc(100vw - 24px); }
   .kinds button { padding: 3px 8px; }
   .switch {
     display: inline-flex;

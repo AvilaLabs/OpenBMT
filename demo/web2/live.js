@@ -475,8 +475,8 @@
         S.on = null;
       }, auto: send },
       { step: 1, enter() {
-        shell.say("The customer sent the payment.",
-          ["The counter makes a short check for a second payment of the same money, paused here until you tap. This customer cancels: tap ", { b: "The customer cancels" }, "."]);
+        shell.say("The customer sent the payment. The counter checks for a second payment of the same money (paused here until you tap).",
+          ["This customer cancels: tap ", { b: "The customer cancels" }, "."]);
         shell.actor({
           who: "The customer", line: "Sends the same money back to their own wallet.", button: "The customer cancels",
           onTap() { cancel(); spendActor(); },

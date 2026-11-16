@@ -142,7 +142,7 @@
         if (data && data.isPaid) paidNow();
         else S.on = { sale: (d) => { if (d.isPaid) { S.on = null; paidNow(); } } };
       } },
-      { step: 3, enter() {
+      { step: 2, enter() {
         shell.light("counter", {});
         shell.say("You paid from your own wallet, straight to the shop's own wallet, with no company in between.", []);
       } },

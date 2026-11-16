@@ -56,7 +56,7 @@
   const tabOf = (name) => (BAR.find((t) => t.name === name || (t.menu && t.menu.includes(name))) || {}).name || null;
   // The spoken name of the chevron beside a tab with a menu.
   const chevronLabel = (tab) => `Choices under ${tab}`;
-  const ACTOR_W = 220;
+  const ACTOR_W = 250;
   /** How long sizes ease when the lit device changes, and the share of its size the other devices keep. */
   const EASE_MS = 300;
   const REST_SHARE = 0.7;
@@ -472,13 +472,13 @@
         book.href = HANDBOOK;
         top.append(mark, book);
         const mid = el("div", "mid");
-        mid.append(el("h1", null, "Try OpenBMT"),
-          el("p", "lede", "Take a bitcoin payment the way a shop does, on the real apps, in this page."));
         if (snap) {
           const holder = el("div", "snap");
           holder.append(snap.canvas);
           mid.append(holder);
         }
+        mid.append(el("h1", null, "Try OpenBMT"),
+          el("p", "lede", "Take a bitcoin payment the way a shop does, on the real apps, in this page."));
         mid.append(this.cards(roles));
         const foot = el("div", "foot", "Everything runs in this page on a pretend blockchain. No real bitcoin moves.");
         s.append(top, mid, foot);
@@ -669,9 +669,12 @@
     say(happened, parts, skip) {
       this.happenedEl.textContent = happened || "";
       this.doEl.replaceChildren();
-      const line = el("span");
-      for (const p of parts) line.append(typeof p === "string" ? document.createTextNode(p) : el("b", null, p.b));
-      this.doEl.append(line);
+      // No instruction (the last moments): the line is left out, so the band holds only what happened, centred.
+      if (parts.length) {
+        const line = el("span");
+        for (const p of parts) line.append(typeof p === "string" ? document.createTextNode(p) : el("b", null, p.b));
+        this.doEl.append(line);
+      }
       if (skip) {
         const b = el("button", "skip", skip.label);
         b.addEventListener("click", skip.onSkip);
