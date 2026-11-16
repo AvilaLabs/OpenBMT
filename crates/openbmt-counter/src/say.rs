@@ -742,27 +742,27 @@ impl<E: Display> ChooseRefused<E> {
     pub fn words(&self) -> Words {
         match self {
             Self::UnknownSale(i) => refused(
-                "TODO words: no such sale",
-                "TODO words: what happened when the sale is not found.",
+                "Sale not found",
+                "The counter has no such sale to change the code of.",
                 Who::Cashier,
-                "TODO words: what to do when the sale is not found.",
+                "Look the sale up again. If it is missing, tell the owner: the counter lost a sale.",
                 "CR-78",
             )
             .detail(format!("Sale number {i}.")),
             Self::SaleEnded => refused(
-                "TODO words: sale ended",
-                "TODO words: what happened when the sale is no longer open.",
+                "Sale already ended",
+                "The sale has ended, so its code does not change.",
                 Who::Cashier,
-                "TODO words: what to do when the sale is no longer open.",
+                "Start a new sale.",
                 "CR-283",
             ),
             Self::Store(fault) => store_failed(
                 fault,
-                "TODO words: not saved",
+                "Choice not saved",
                 "the choice was not saved",
                 Tone::Stop,
                 Who::Cashier,
-                "TODO words: what to do when the choice is not saved.",
+                "The code stays as it was. Try once more. If it fails again, tell the owner: the counter cannot save. See Details.",
             ),
         }
     }

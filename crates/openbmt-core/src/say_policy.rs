@@ -13,8 +13,8 @@ use crate::say::{Tone, Who, Words};
 /// What the cashier does while a sale over the limits waits: the sale goes on
 /// by itself, so the counter is free for the next customer (CR-283).
 const WAIT_SERVE_NEXT: &str =
-    "Serve the next customer while it waits. It turns green by itself when \
-     the payment is in a block, in about ten minutes. Hand over the goods then.";
+    "Serve the next customer while it waits. It turns green when a block \
+     holds the payment, in about ten minutes. Hand over the goods then.";
 
 const WAIT_NEXT: &str =
     "Nothing to do. It turns green when the payment is in a block, in about ten \
