@@ -110,11 +110,24 @@ class OpenBmt_Pay_Gateway extends WC_Payment_Gateway {
 		if ( null === Rates::band( $currency ) ) {
 			return false;
 		}
-		if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
+		$total = '';
+		if ( function_exists( 'is_wc_endpoint_url' ) && is_wc_endpoint_url( 'order-pay' ) ) {
+			// WO-15: on an order's own pay page the cart is empty; the order's total is quoted, in the store's currency alone.
+			$order = wc_get_order( absint( get_query_var( 'order-pay' ) ) );
+			if ( ! $order || $order->get_currency() !== $currency ) {
+				return false;
+			}
+			if ( '' !== (string) $order->get_meta( '_openbmt_address' ) ) {
+				return true;
+			}
+			$total = (string) $order->get_total( 'edit' );
+		} elseif ( function_exists( 'WC' ) && WC()->cart ) {
+			$total = (string) WC()->cart->get_total( 'edit' );
+		} else {
 			return true;
 		}
 		try {
-			$this->quote( $currency, (string) WC()->cart->get_total( 'edit' ) );
+			$this->quote( $currency, $total );
 		} catch ( Refusal $e ) {
 			return false;
 		}

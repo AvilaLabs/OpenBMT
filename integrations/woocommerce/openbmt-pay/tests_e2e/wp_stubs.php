@@ -137,6 +137,33 @@ $GLOBALS['wpdb'] = new Obm_E2e_Wpdb();
 function is_ssl(): bool {
 	return true;
 }
+/** The store's currency, the page being shown, and the cart: set by a test, USD and no cart otherwise. */
+function get_woocommerce_currency(): string {
+	return (string) ( $GLOBALS['obm_e2e_store_currency'] ?? 'USD' );
+}
+function is_wc_endpoint_url( $endpoint = '' ): bool {
+	return ( $GLOBALS['obm_e2e_endpoint'] ?? '' ) === $endpoint;
+}
+function get_query_var( string $var, $default = '' ) {
+	return $GLOBALS['obm_e2e_query'][ $var ] ?? $default;
+}
+function absint( $value ): int {
+	return abs( (int) $value );
+}
+function WC() {
+	return new class() {
+		public $cart = null;
+		public function __construct() {
+			if ( isset( $GLOBALS['obm_e2e_cart_total'] ) ) {
+				$this->cart = new class() {
+					public function get_total( string $context = 'view' ): string {
+						return (string) $GLOBALS['obm_e2e_cart_total'];
+					}
+				};
+			}
+		}
+	};
+}
 function __( string $text, string $domain = 'default' ): string {
 	return $text;
 }

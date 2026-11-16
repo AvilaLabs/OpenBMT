@@ -128,6 +128,9 @@ t_eq( null, OpenBmt_Pay_Store::lock_try(), 'wo_11 a lock younger than LOCK_SECS 
 
 // WO-11, WO-15: an order that has its address takes no other (WC_Payment_Gateway is a stand-in).
 class WC_Payment_Gateway {
+	public function is_available() {
+		return true;
+	}
 	public function get_return_url( $order ) {
 		return 'return:' . $order->get_id();
 	}
@@ -216,6 +219,44 @@ t_eq( $other, $GLOBALS['obm_e2e_orders']['8']['meta'], 'wo_11 the first submit\'
 t_eq( $pool_start, $opts[ OpenBmt_Pay_Store::OPT_POOL ], 'wo_11 the waiting submit took no second address' );
 t_eq( 'pending', $GLOBALS['obm_e2e_orders']['8']['status'], 'wo_11 and left the order alone' );
 t_ok( ! array_key_exists( $lock, $opts ), 'wo_11 the lock is free after' );
+
+// WO-15: Bitcoin at checkout is quoted from the cart; on an order's own pay page, from that order.
+$pay_page = static function ( $cart, $order_id ): void {
+	unset( $GLOBALS['obm_e2e_endpoint'], $GLOBALS['obm_e2e_query'], $GLOBALS['obm_e2e_cart_total'] );
+	if ( null !== $cart ) {
+		$GLOBALS['obm_e2e_cart_total'] = $cart;
+	}
+	if ( null !== $order_id ) {
+		$GLOBALS['obm_e2e_endpoint'] = 'order-pay';
+		$GLOBALS['obm_e2e_query']    = array( 'order-pay' => (string) $order_id );
+	}
+};
+t_reset();
+t_pair_store( $id, $secret );
+$fresh_order();
+$pay_page( '25.00', null );
+t_ok( $gateway->is_available(), 'wo_15 at checkout a cart that can be quoted shows Bitcoin' );
+$pay_page( '0', null );
+t_ok( ! $gateway->is_available(), 'wo_15 at checkout an empty cart is refused and Bitcoin is hidden' );
+$pay_page( null, 8 );
+t_ok( $gateway->is_available(), 'wo_15 the order-pay page with an empty cart shows Bitcoin for a good order' );
+$GLOBALS['obm_e2e_orders']['8']['total'] = '0';
+t_ok( ! $gateway->is_available(), 'wo_15 the order-pay page hides Bitcoin for an order that cannot be quoted' );
+$GLOBALS['obm_e2e_orders']['8']['total'] = '25.00';
+$pay_page( '25.00', 8 );
+$GLOBALS['obm_e2e_orders']['8']['total'] = '0';
+t_ok( ! $gateway->is_available(), 'wo_15 the order-pay page quotes the order, not the cart' );
+$GLOBALS['obm_e2e_orders']['8']['total'] = '25.00';
+$GLOBALS['obm_e2e_orders']['8']['currency'] = 'EUR';
+t_ok( ! $gateway->is_available(), 'wo_15 the order-pay page of an order in another currency hides Bitcoin' );
+$GLOBALS['obm_e2e_orders']['8']['currency'] = 'USD';
+$pay_page( null, 99 );
+t_ok( ! $gateway->is_available(), 'wo_15 the order-pay page of an order that is not found hides Bitcoin' );
+$GLOBALS['obm_e2e_orders']['8']['meta'] = array( '_openbmt_address' => 'a0' );
+$GLOBALS['obm_e2e_orders']['8']['total'] = '0';
+$pay_page( null, 8 );
+t_ok( $gateway->is_available(), 'wo_15 the order-pay page of an order that has its address is shown as it is' );
+$pay_page( null, null );
 
 // WO-05: only an administrator pairs or unpairs, and a pairing in use is not replaced.
 function current_user_can( string $cap ): bool {
