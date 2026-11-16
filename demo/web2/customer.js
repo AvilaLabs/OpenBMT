@@ -109,10 +109,16 @@
         shell.show("wallet", () => Wl.sent(read.sats));
         shell.light("counter", { wallet: "Your payment is sent." });
         if (paidBy === "lightning") {
-          // The counter turned paid on its own state: there is no wait.
-          shell.say("Your phone paid over Lightning. The counter knew at once.",
-            ["The green screen tells the cashier to hand over your order."], { label: "Next", onSkip: go });
-          shell.questions(QS.customer.paid);
+          // The line waits for the counter's own state: the counter asks the shop's node and turns paid.
+          const lnPaid = () => {
+            shell.say("Your phone paid over Lightning. The counter knew at once.",
+              ["The green screen tells the cashier to hand over your order."], { label: "Next", onSkip: go });
+            shell.questions(QS.customer.paidLightning);
+          };
+          shell.questions([]);
+          const now = env.saleData();
+          if (now && now.isPaid) lnPaid();
+          else S.on = { sale: (d) => { if (d.isPaid) { S.on = null; lnPaid(); } } };
           return;
         }
         shell.say("Your phone sent the payment.", ["Watch the shop's counter: it checks the payment itself."]);

@@ -158,7 +158,7 @@ test('Send over Lightning pays the invoice through the host and the counter is p
   assert.equal(p.line(), 'The green screen tells the cashier to hand over your order.');
   assert.equal(said.skip.label, 'Next');
   assert.equal(p.S.on, null, 'there is no wait line');
-  assert.equal(p.log.questions, QS.customer.paid);
+  assert.equal(p.log.questions, QS.customer.paidLightning);
   said.skip.onSkip();
   assert.equal(p.S.index, 4);
 });

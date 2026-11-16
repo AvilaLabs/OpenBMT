@@ -63,6 +63,11 @@
       a: "It checks the payment itself, through its own connection to other computers on the Bitcoin network. It does not ask a payment company.",
       page: "getting-paid.html",
     },
+    fastLightning: {
+      q: "How did the counter know at once?",
+      a: "The shop's own Lightning node received the payment, and the counter asked it. A Lightning payment is final when it arrives, so there is nothing to wait for.",
+      page: "getting-paid.html", anchor: "small-sales-and-lightning",
+    },
     refund: {
       q: "Can you get your money back?",
       a: "Only from the shop. A paid sale stays paid; no bank or card company can pull it back. The shop can refund you from its own wallet.",
@@ -132,6 +137,7 @@
       scan: [Q.anyWallet, Q.code, Q.tap],
       send: [Q.newAddress, Q.fast, Q.lightningOrChain, Q.feeCustomer],
       paid: [Q.fast, Q.refund],
+      paidLightning: [Q.fastLightning, Q.refund],
     },
   };
   if (typeof module !== "undefined" && module.exports) module.exports = root.OpenBmtQuestions;
