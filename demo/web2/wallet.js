@@ -107,7 +107,7 @@
     dev.className = "device";
     const page = el("div", `flex:1;display:flex;flex-direction:column;padding:${C.STATUS_DP}px 0 ${C.NAV_DP}px;`);
     const clock = el("div", "text-align:center;margin-top:56px;");
-    clock.append(el("div", "font-size:76px;font-weight:300;line-height:1;letter-spacing:-1px", "12:30"),
+    clock.append(el("div", "font-size:76px;font-weight:300;line-height:1;letter-spacing:-1px", "3:54"),
       el("div", "font-size:18px;margin-top:10px;opacity:0.8", "Saturday, May 16"));
     const grid = el("div", "display:grid;grid-template-columns:repeat(4,1fr);row-gap:24px;padding:0 14px;");
     for (const [label, color, paths] of APPS) {
