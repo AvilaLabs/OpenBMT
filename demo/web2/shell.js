@@ -47,7 +47,7 @@
   const BAR = [
     { name: "Customer" },
     { name: "Café" },
-    { name: "With your register", screen: true, menu: ["Your register sends the amount", "Square, Clover and others"] },
+    { name: "With your register", screen: true, menu: ["Your register sends the amount", "Square", "Clover"] },
     { name: "When something goes wrong", menu: ["A short payment", "A cancelled payment"] },
   ];
   /** The scenarios that play, by their bar names: a tab without a menu, or a menu's item. */
@@ -61,7 +61,7 @@
   const EASE_MS = 300;
   const REST_SHARE = 0.7;
 
-  /** The ending card of each scenario: a heading and three lines. The register has one card for both of its ways. */
+  /** The ending card of each scenario: a heading and three lines. The register has a card for each of its three ways. */
   const CARDS = {
     Customer: {
       heading: "You paid a shop in bitcoin.",
@@ -87,11 +87,19 @@
         "The register closed its own order when the sale was paid.",
       ],
     },
-    "Register any": {
-      heading: "That is a sale with your register.",
+    Square: {
+      heading: "That is a sale with Square.",
       lines: [
-        "The cashier rang it up on the register and on the counter.",
-        "The register's order was closed as Bitcoin.",
+        "The cashier rang it up on Square and on the counter.",
+        "The order was closed as OpenBMT, so Square's own Bitcoin was not used.",
+        "The owner's phone matched the two, and would raise an alert if they did not match.",
+      ],
+    },
+    Clover: {
+      heading: "That is a sale with Clover.",
+      lines: [
+        "The cashier rang it up on Clover and on the counter.",
+        "The order was closed as Bitcoin.",
         "The owner's phone matched the two, and would raise an alert if they did not match.",
       ],
     },
@@ -506,7 +514,7 @@
     }
 
     /**
-     * A choice inside the demo, under the scenario bar (the register's two ways): [opts] {title, lede}, [roles] as for
+     * A choice inside the demo, under the scenario bar (the register's three ways): [opts] {title, lede}, [roles] as for
      * [start]. The bar stays, and the screen goes when a scenario begins or the start screen comes.
      */
     choice(roles, opts) {

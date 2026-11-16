@@ -55,20 +55,6 @@
   // The sounds are fetched and decoded now, so that the opening screen's first tap finds them ready.
   box.prepare();
 
-  /** SaleModel.kt:87 OutcomePlays: a sale plays the sound of good once and the sound of stop once, in this run. */
-  function OutcomePlays() {
-    const played = new Set();
-    return {
-      /** True the first time [sale] shows [colour] and the colour plays a sound. */
-      first(sale, colour) {
-        if (colour !== "Green" && colour !== "Red") return false;
-        const key = `${sale}:${colour}`;
-        if (played.has(key)) return false;
-        played.add(key);
-        return true;
-      },
-    };
-  }
   // Filled in when the engines are ready (ready()); nothing below runs a counter before that.
   let wasm, loadCounter, flow, ownerWasm, loadOwner, ownerFlow, record, recordWithBox;
   let readyOnce = null;
@@ -146,7 +132,7 @@
   async function startRun(onEvent, withOwner) {
     stopRun();
     await ready();
-    const r = { dead: false, beat: 0, aim: null, onEvent, plays: OutcomePlays(), quiet: false, host: null };
+    const r = { dead: false, beat: 0, aim: null, onEvent, quiet: false, host: null };
     // Two modules, one chain: both read the page's clock, and every chain action is made on both (one-chain.js).
     const counterChain = await loadCounter(wasm, { now: () => clock.now(), record });
     r.host = counterChain;
@@ -161,9 +147,12 @@
       },
       event(kind, data) {
         if (r.dead) return;
-        // Controller.kt:2433 first: the first time this sale's screen is green or red, its sound plays, once.
-        // A visitor's skipped taps (r.quiet) are made without it.
-        if (kind === "sale" && r.plays.first(data.number, data.says.colour) && !r.quiet) box.outcome(data.says.colour);
+        // Controller.kt:2433 first: the first time this sale's screen is green or red, its sound plays, once; the model's
+        // OutcomePlays (SaleModel.kt:87) keeps count, and the notice of CR-284 shares it. A visitor's skipped taps
+        // (r.quiet) are made without it.
+        if (kind === "sale" && flow.outcomeFirst(data.number - 1, data.says.colour) && !r.quiet) box.outcome(data.says.colour);
+        // Controller.kt:681 onTurns: a sale that turned on another screen plays its colour's sound once, with its notice.
+        if (kind === "notice" && !r.quiet) box.outcome(data.colour);
         r.onEvent(kind, data);
       },
     });
@@ -590,7 +579,10 @@
     else { await ready(); OpenBmtRegister.open(shell, registerRun(), name === "With your register" ? undefined : name); }
   };
   const want = new URLSearchParams(location.search).get("path");
-  if (want === "merchant") await play(merchant);
+  // The register's ways by name: sends, square, clover ("any", the way's first name, is Square), and register for the choice.
+  const registerWay = { sends: "Your register sends the amount", square: "Square", any: "Square", clover: "Clover", register: undefined };
+  if (want in registerWay) { await ready(); OpenBmtRegister.open(shell, registerRun(), registerWay[want]); }
+  else if (want === "merchant") await play(merchant);
   else if (want === "customer") await play(customer);
   else if (want === "wrong") await play(wrong);
   else if (want === "cancelled") await play(cancelled);

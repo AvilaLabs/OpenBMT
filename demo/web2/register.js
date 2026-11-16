@@ -1,4 +1,4 @@
-// "With your register": the counter beside the shop's existing register, in two ways. The page plays the register
+// "With your register": the counter beside the shop's existing register, in three ways. The page plays the register
 // (a plain mock, register-views.js) and, in the first way, the shop's Box; everything else is the apps' own code.
 //
 // The first way: a register that can send the amount. The Box tells the counter that the till asks for a sale
@@ -7,8 +7,9 @@
 // says the till's sale is paid, which is what the paid notice that names the till's sale says to the Box (BX-77).
 // The page does not make the Box's seal: the request goes to the node as the link hands it, after the seal is read.
 //
-// The other way: any register. The cashier types the amount on the counter, closes the order on the register with the
-// Bitcoin tender, and the owner's phone matches the register's order to the counter's sale with the matcher of
+// The other two ways, Square and Clover. The cashier rings the sale up on the register (drawn as Square Register or
+// Clover Station look), types the amount on the counter, closes the order on the register as OpenBMT (Square, whose
+// own Bitcoin pays into Square's wallet) or as Bitcoin (Clover's custom tender), and the owner's phone matches the register's order to the counter's sale with the matcher of
 // crates/openbmt-pos, the library the owner app calls. The sale's facts are read by the page from the counter's state;
 // the owner app reads them from the counter's records, which this demo's phone does not hold.
 //
@@ -18,6 +19,9 @@
 "use strict";
 (function (root) {
   const MINOR = 800;
+  // TODO_WORDS: the line under the title of the choice screen; it must say there are three ways now (the old line, "in one
+  // of two ways", with the number changed).
+  const TODO_WORDS_register_lede = "The counter works beside the register the shop already has, in one of three ways.";
   const KEYS = "800";
   const groups = (n) => Number(n).toLocaleString("en-US");
 
@@ -77,7 +81,7 @@
   }
 
   /**
-   * Opens the register's scenarios: its choice of two ways, or, with [wayName] (a way's name on the bar), that way
+   * Opens the register's scenarios: its choice of three ways, or, with [wayName] (a way's name on the bar), that way
    * from its first moment.
    */
   function open(shell, ctx, wayName) {
@@ -169,20 +173,20 @@
       if (label) shell.target("counter", label, null);
     }
 
-    /** The register, drawn on its device: its sale ("sale"), its tender screen ("tender") or its order closed ("paid"). */
-    function showRegister(screen) {
-      shell.show("register", (size) => RV.register({ screen }, size));
+    /** The register, drawn on its device: its sale ("sale"), its payment screen ("tender") or its order closed ("paid"). */
+    function showRegister(way, screen) {
+      shell.show("register", (size) => RV.register({ kind: way.kind, screen }, size));
     }
 
     /**
-     * The cashier's two taps on the register: Charge opens the tender screen, then Bitcoin calls [onBitcoin]. Both are
-     * lit, one after the other.
+     * The cashier's two taps on the register: Charge (or Pay) opens the payment screen, then the way's payment type
+     * (OpenBMT, or Bitcoin) calls [onType]. Both are lit, one after the other.
      */
-    function chargeThenBitcoin(onBitcoin) {
-      showRegister("sale");
-      shell.target("register", RV.CHARGE, () => {
-        showRegister("tender");
-        shell.target("register", "Bitcoin", onBitcoin);
+    function chargeThenType(way, onType) {
+      showRegister(way, "sale");
+      shell.target("register", way.charge, () => {
+        showRegister(way, "tender");
+        shell.target("register", way.type, onType);
       });
     }
 
@@ -225,7 +229,7 @@
     const customerAuto = () => { run.chain.pay(readCode().address, readCode().sats); waitForPaid(); };
 
     // ---- The first way: the register sends the amount. ----
-    function sendsMoments(go, S, facts) {
+    function sendsMoments(go, S, facts, way) {
       const c = () => run.controller;
       const tillRequest = () => { facts.till = run.chain.tillRequest(MINOR); c().tick(); };
       return [
@@ -233,8 +237,8 @@
           shell.actor(null);
           shell.light("register");
           shell.say("A customer's order comes to 8.00 USD on your register.",
-            ["You are the cashier. On the register, tap ", { b: RV.CHARGE }, ", then ", { b: "Bitcoin" }, "."]);
-          chargeThenBitcoin(() => { tillRequest(); go(); });
+            ["You are the cashier. On the register, tap ", { b: way.charge }, ", then ", { b: way.type }, "."]);
+          chargeThenType(way, () => { tillRequest(); go(); });
           S.on = null;
         }, auto() { tillRequest(); } },
         { step: 0, enter() {
@@ -250,7 +254,7 @@
           shell.actor(null);
           // The register closes its own order when the counter's own state says the till's sale is paid (BX-77).
           const paid = c().tillOfSale() === facts.till && (c().saleData() || {}).isPaid === true;
-          showRegister(paid ? "paid" : "sale");
+          showRegister(way, paid ? "paid" : "sale");
           shell.light("counter");
           shell.say("Paid. The register closes the order by itself.", ["Read the green screen: hand over the goods. Then tap ", { b: "Done" }, "."]);
           aim("Done");
@@ -264,7 +268,7 @@
     }
 
     // ---- The other way: any register; the owner's phone matches the register's order to the counter's sale. ----
-    function anyMoments(go, S, facts) {
+    function anyMoments(go, S, facts, way) {
       const c = () => run.controller;
       const closeOrder = () => { if (!facts.closedAt) facts.closedAt = clock.now(); };
       const verdictNow = () => {
@@ -275,8 +279,8 @@
         { step: 0, enter() {
           shell.actor(null);
           shell.light("counter");
-          showRegister("sale");
-          shell.say("A customer's order comes to 8.00 USD on your register.", ["You are the cashier. Type the same amount on the counter: tap ", { b: "New sale" }, "."]);
+          showRegister(way, "sale");
+          shell.say(`A customer's order comes to $8.00 on ${way.name}.`, ["You are the cashier. Type the same amount on the counter: tap ", { b: "New sale" }, "."]);
           aim("New sale");
           S.on = { newSale: go };
         }, auto() { c().showNewSale(); } },
@@ -291,13 +295,13 @@
         { step: 2, enter() {
           shell.actor(null);
           shell.light("register");
-          shell.say("Paid. Now close the order on your register.", ["On the register, tap ", { b: RV.CHARGE }, ", then ", { b: "Bitcoin" }, "."]);
-          chargeThenBitcoin(() => { closeOrder(); showRegister("paid"); go(); });
-        }, auto() { closeOrder(); showRegister("paid"); } },
+          shell.say(`Paid. Now close the order on ${way.name}.`, [`On ${way.name}, tap `, { b: way.charge }, ", then ", { b: way.type }, "."]);
+          chargeThenType(way, () => { closeOrder(); showRegister(way, "paid"); go(); });
+        }, auto() { closeOrder(); showRegister(way, "paid"); } },
         { step: 3, enter() {
           shell.light("owner");
-          showRegister("paid");
-          shell.say("The owner's phone reads the register's orders and matches each Bitcoin payment to a counter sale.", []);
+          showRegister(way, "paid");
+          shell.say(`The owner's phone reads ${way.name}'s orders and matches each ${way.type} payment to a counter sale.`, []);
           // The owner's phone shows its till screen from here on, not its home.
           run.ownerShown = false;
           const lines = tillLines(ownerFlow, verdictNow(), clock.now());
@@ -306,11 +310,18 @@
       ];
     }
 
+    const registerDevice = { id: "register", sizes: REGISTER() };
     const ways = {
-      sends: { sub: "Your register sends the amount", card: "Register sends", steps: ["Ring up", "The customer pays", "Done"], withBox: true, withOwner: false, moments: sendsMoments,
-        devices: [{ id: "register", caption: "Your register", sizes: REGISTER() }, { id: "counter", caption: "The shop's counter", sizes: COUNTER }] },
-      any: { sub: "Square, Clover and others", card: "Register any", steps: ["Ring up", "The customer pays", "Close the order", "The owner's phone"], withBox: false, withOwner: true, moments: anyMoments,
-        devices: [{ id: "register", caption: "Your register", sizes: REGISTER() }, { id: "counter", caption: "The shop's counter", sizes: COUNTER },
+      sends: { sub: "Your register sends the amount", card: "Register sends", kind: "plain", name: "your register", charge: RV.CHARGE, type: "Bitcoin",
+        steps: ["Ring up", "The customer pays", "Done"], withBox: true, withOwner: false, moments: sendsMoments,
+        devices: [{ ...registerDevice, caption: "Your register" }, { id: "counter", caption: "The shop's counter", sizes: COUNTER }] },
+      square: { sub: "Square", card: "Square", kind: "square", name: "Square", charge: RV.SQUARE_CHARGE, type: "OpenBMT",
+        steps: ["Ring up", "The customer pays", "Close the order", "The owner's phone"], withBox: false, withOwner: true, moments: anyMoments,
+        devices: [{ ...registerDevice, caption: "Square Register" }, { id: "counter", caption: "The shop's counter", sizes: COUNTER },
+          { id: "owner", caption: "The owner's phone", sizes: PHONE }] },
+      clover: { sub: "Clover", card: "Clover", kind: "clover", name: "Clover", charge: RV.CLOVER_PAY, type: "Bitcoin",
+        steps: ["Ring up", "The customer pays", "Close the order", "The owner's phone"], withBox: false, withOwner: true, moments: anyMoments,
+        devices: [{ ...registerDevice, caption: "Clover Station" }, { id: "counter", caption: "The shop's counter", sizes: COUNTER },
           { id: "owner", caption: "The owner's phone", sizes: PHONE }] },
     };
 
@@ -321,7 +332,7 @@
       const facts = { totalMinor: MINOR, orderOpened: clock.now(), closedAt: 0, sale: null, till: null };
       shell.begin(way.steps, way.devices, "counter");
       const go = () => enter(S.index + 1);
-      const moments = way.moments(go, S, facts);
+      const moments = way.moments(go, S, facts, way);
       function enter(i) {
         if (i >= moments.length) return;
         S.index = i;
@@ -348,18 +359,19 @@
       };
     }
 
-    const byName = { "Your register sends the amount": ways.sends, "Square, Clover and others": ways.any };
+    const byName = { "Your register sends the amount": ways.sends, Square: ways.square, Clover: ways.clover };
     if (wayName) {
       playWay(byName[wayName]);
       return;
     }
-    // The two ways, under the scenario bar.
+    // The three ways, under the scenario bar.
     shell.choice([
       { name: "Your register sends the amount", what: "Odoo, with the OpenBMT module. The register sends the amount to the counter, so nothing is typed twice.", go: "Start", onPick: () => playWay(ways.sends) },
-      { name: "Square, Clover and others", what: "The cashier types the amount on the register and on the counter, then closes the order as Bitcoin. The owner's phone reads the register's orders and checks that they match.", go: "Start", onPick: () => playWay(ways.any) },
+      { name: "Square", what: "The cashier rings it up on Square, types the amount on the counter, then closes the order as OpenBMT. The owner's phone checks that the two match.", go: "Start", onPick: () => playWay(ways.square) },
+      { name: "Clover", what: "The cashier rings it up on Clover, types the amount on the counter, then closes the order as Bitcoin. The owner's phone checks that the two match.", go: "Start", onPick: () => playWay(ways.clover) },
     ], {
       title: "With your register",
-      lede: "The counter works beside the register the shop already has, in one of two ways.",
+      lede: TODO_WORDS_register_lede,
     });
   }
 

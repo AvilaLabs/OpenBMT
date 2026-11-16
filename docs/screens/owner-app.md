@@ -293,9 +293,10 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | tillSquare | Square |
 | tillSquareStep1 | In Square Dashboard, open Settings, then Payments, then Payment methods. |
 | tillSquareStep2 | Open Custom payment methods and tap Add payment method. |
-| tillSquareStep3 | Name it Bitcoin. Square may not let you rename it later, so check the spelling. |
+| tillSquareStep3 | Name it OpenBMT, not Bitcoin: Square's own Bitcoin method pays into Square's wallet. |
 | tillSquareStep4 | Turn on Activate on Point of Sale, then tap Add. |
-| tillSquareCashier | Cashier: Charge, then More, then Custom payment methods, then Bitcoin. |
+| tillSquareStep5 | To keep all bitcoin in the shop's wallet, turn off Square's own: in the Square app, Settings, Checkout, Payment, then the X by Bitcoin. |
+| tillSquareCashier | Cashier: Charge, then More, then Custom payment methods, then OpenBMT. |
 | tillSquareReports | Reports: bitcoin sales are under Other in the sales summary. |
 | tillToast | Toast |
 | tillToastStep1 | In Toast Web, open the payment settings and find Other payment options. |
@@ -445,7 +446,7 @@ steps, in `FirstRunWords`. `{till}` is the till's name as listed:
 | cardRingUpOther | Ring up the sale in your till as usual. |
 | cardCounter | Type the amount on the counter and show the customer the code. |
 | cardPaid | Hand over the goods when the counter shows Paid. A bigger payment can take about ten minutes. |
-| cardTillSquare | Then, in Square: Charge, then More, then Custom payment methods, then Bitcoin. |
+| cardTillSquare | Then, in Square: Charge, then More, then Custom payment methods, then OpenBMT. |
 | cardTillToast | Then, in Toast: Pay, then Other payments, then Bitcoin. |
 | cardTillStoreHub | Then pick Bitcoin as the payment in StoreHub. If it is not shown, tap Others. |
 | cardTillPick | Then pick Bitcoin as the payment in {till}. |

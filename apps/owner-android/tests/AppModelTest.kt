@@ -4035,7 +4035,7 @@ object AppModelTest {
         val sq = TillStepsPage.of(Till.Square)
         ok(sq.title == "Add Bitcoin to Square", "Square's title")
         ok(sq.lines.first().text == "Do this once, on the computer or tablet where you manage Square. It takes about two minutes.", "Square's intro")
-        ok(sq.lines.filter { it.kind == TillStepsPage.Kind.Step }.map { it.text } == Till.Square.steps.mapIndexed { i, s -> "${i + 1}. $s" } && Till.Square.steps.size == 4, "Square's four numbered steps")
+        ok(sq.lines.filter { it.kind == TillStepsPage.Kind.Step }.map { it.text } == Till.Square.steps.mapIndexed { i, s -> "${i + 1}. $s" } && Till.Square.steps.size == 5, "Square's five numbered steps")
         ok(sq.lines.any { it.text == FirstRunWords.tillSquareCashier } && sq.lines.any { it.text == FirstRunWords.tillSquareReports }, "Square's cashier and report lines")
         ok(sq.lines.last().kind == TillStepsPage.Kind.Small && sq.lines.last().text.startsWith("Steps read on Square's own help pages on 11 November 2026."), "the checked line is last and small")
         ok(sq.lines.any { it.text == "Square does not move the money, so it charges no fee for this payment type." }, "the no-fee line")

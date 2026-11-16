@@ -17,6 +17,10 @@
 // and who is at the till, the settings pages, the sales and today lists, bills, requests
 // to send, refunds, requote and cancel, the price sources, Tor, Lightning, pairing and the sound and haptic of an
 // outcome.
+//
+// Also ported: the line and the button of a sale whose code is the Lightning invoice alone (CR-283: payOnChainInstead),
+// and the notices of CR-284 (onTurns, drawNotices, openFromNotice) that stand at the top of every screen when a sale
+// turns green or red while another screen shows. Their words are the model's (LightningFirstWords).
 "use strict";
 (function (root) {
   const CV = root.OpenBmtCounterViews || require("../ui/counter-views.js");
@@ -51,13 +55,16 @@
    *   withBox   true when the shop has a Box, which is where a request from the till comes from (the pairing record names it);
    *   clock   {now()}: the page's clock, in seconds;
    *   show(viewOf)   puts a screen on the counter's device: viewOf(ui) returns the page of that device's Ui;
-   *   event(kind, data)   tells the page what happened: "home", "newSale", "entry", "sale".
+   *   event(kind, data)   tells the page what happened: "home", "newSale", "entry", "sale", "notice" (the sale's colour
+   *                       whose sound plays, Controller.kt:681 onTurns).
    */
   function Controller(host) {
     const flow = host.flow;
     let tick = null;
     let showing = "home";
     let sale = null;
+    // The screen on show, before the notices of CR-284 are put over it (MainActivity.kt current).
+    let current = null;
 
     /** Controller.kt:238 nowSecs(): the page's clock, in seconds since 1970. */
     function nowSecs() {
@@ -71,7 +78,50 @@
 
     /** Controller.kt:733 onPump(reported): the open screen is made again from the library's state when it changed. */
     function onPump(reported) {
+      onTurns();
       if (reported && tick) tick();
+    }
+
+    /**
+     * MainActivity.kt show(page) and setNotices(views): the page's own screen, with the notices of CR-284 above it when
+     * there are any. The model holds the notices; [viewOf] is kept to draw them again.
+     */
+    function display(viewOf) {
+      current = viewOf;
+      host.show((ui) => CV.withNotices(ui, viewOf(ui), noticeData()));
+    }
+
+    /** What CV.withNotices draws: the notices that show, newest first, the line after them, and what a tap on each does. */
+    function noticeData() {
+      return {
+        notices: Array.from(flow.noticesShown()).map((n) => ({
+          index: n.index, green: n.green, heading: n.heading, next: n.next,
+          tap: () => { flow.noticeRemove(n.index); drawNotices(); openFromNotice(n.index); },
+        })),
+        more: flow.noticesMore() || null,
+      };
+    }
+
+    /**
+     * Controller.kt:681 onTurns(turns): the sales that turned green or red for the first time each get a notice, unless the
+     * screen of the sale shows; the colour's sound plays once (the page plays it on the "notice" event).
+     */
+    function onTurns() {
+      const on = showing === "sale" && sale ? sale.index : -1;
+      const played = flow.takeTurns(on);
+      if (!played) return;
+      drawNotices();
+      host.event("notice", { colour: played });
+    }
+
+    /** Controller.kt:694 drawNotices(): the notices stand at the top of the screen on show, which is drawn again with them. */
+    function drawNotices() {
+      if (current) display(current);
+    }
+
+    /** Controller.kt:724 openFromNotice(to): a tap on a notice opens its sale; the demo's till has no lock. */
+    function openFromNotice(index) {
+      showSale(index, null, null);
     }
 
     /** Controller.kt:742 stopNode(): the node lets go of its folder. */
@@ -84,7 +134,7 @@
     function put(viewOf, shown) {
       tick = null;
       showing = shown;
-      host.show(viewOf);
+      display(viewOf);
     }
 
     /** Controller.kt:345 render(): the screen the state calls for; with the node started, home. */
@@ -130,7 +180,7 @@
         if (sig !== shownSig) {
           shown = next;
           shownSig = sig;
-          host.show((ui) => CV.showHome(ui, shown));
+          display((ui) => CV.showHome(ui, shown));
         }
       };
       host.event("home", {});
@@ -237,6 +287,8 @@
      */
     function showSale(index, first, notice) {
       // The library gives the code with its judgment of the sale, so [first] is not needed here.
+      // Controller.kt:2239 showSale: the sale's own screen shows, so its notice goes (line 2244).
+      flow.noticeRemove(index);
       sale = { index, data: flow.saleScreen(nowSecs(), index) };
       let lastSig = sale.data.signature;
       put((ui) => CV.showSale(ui, saleView(sale.data, notice)), "sale");
@@ -244,7 +296,7 @@
         sale.data = flow.saleScreen(nowSecs(), index);
         if (sale.data.signature !== lastSig) {
           lastSig = sale.data.signature;
-          host.show((ui) => CV.showSale(ui, saleView(sale.data, notice)));
+          display((ui) => CV.showSale(ui, saleView(sale.data, notice)));
         }
         host.event("sale", sale.data);
       };
@@ -261,13 +313,34 @@
         paidLines: data.paidLabels.map((label, i) => ({ label, value: data.paidValues[i] })),
         extra: Array.from(data.extra), request: false, flash: flash || null,
         buttons: { requote: data.requote, cancel: data.cancel, override: data.override },
-        words: WORDS,
-        taps: { done: () => showHome() },
+        // CR-283: the line and the button, from the model.
+        lightningFirst: data.lightningFirst,
+        words: Object.assign({ lightningLine: flow.lightningLine(), lightningButton: flow.lightningButton() }, WORDS),
+        taps: {
+          done: () => showHome(),
+          onChain: () => payOnChainInstead(data.number - 1, (words) => console.warn("refused:", words.heading)),
+        },
       };
     }
 
+    /** Controller.kt:2458 payOnChainInstead(index, refused): the cashier chose the on-chain code for the rest of the sale; the screen is drawn again with it. */
+    function payOnChainInstead(index, refused) {
+      try {
+        flow.onChainInstead(index);
+      } catch (e) {
+        return refused({ heading: String(e && e.message) });
+      }
+      if (tick) tick();
+    }
+
     return {
-      nowSecs, startNode, onPump, stopNode, render, redraw, showHome, showNewSale, chooseTip, openSale, showSale,
+      nowSecs, startNode, onPump, stopNode, render, redraw, showHome, showNewSale, chooseTip, openSale, showSale, payOnChainInstead,
+      /** The tap on Pay on-chain instead, from outside. */
+      payOnChain() { if (sale) payOnChainInstead(sale.index, (words) => console.warn("refused:", words.heading)); },
+      /** The notices that show now: [{index, green, heading, next}], newest first, and the line after them. */
+      notices() { const d = noticeData(); return { shown: d.notices.map(({ tap, ...n }) => n), more: d.more }; },
+      /** A tap on the notice of sale [index], from outside. */
+      tapNotice(index) { const n = noticeData().notices.find((x) => x.index === index); if (n) n.tap(); },
       /** A key of the keypad pressed from outside (the page replaying a visitor's taps). */
       press(face) {
         const text = flow.entryPress(face);

@@ -651,6 +651,13 @@
         addView(qr, QrView(ui, d.modules, side), new LayoutParams(side, side));
         body.push(ui.codeCard(qr));
       }
+      // Controller.kt:2325 lightningFirst: CR-283, over the instant limit the code is the invoice alone; the line says why and the button shows the on-chain code.
+      if (d.lightningFirst) {
+        const line = ui.text(d.words.lightningLine, 13, false, false, ui.pal.secondary);
+        setTextGravity(line, Gravity.CENTER);
+        body.push(line);
+        body.push(ui.button(d.words.lightningButton, tap("onChain")));
+      }
       const words = LinearLayout("v");
       setGravity(words, Gravity.CENTER_HORIZONTAL);
       const what = ui.text(says.what, 16, false, false, ui.pal.secondary);
@@ -722,6 +729,43 @@
       ui.paintBand(page, bar, band);
     }
     return page;
+  }
+
+  /**
+   * Controller.kt:694 drawNotices() and MainActivity's place(): the notices of CR-284 stand one under the other at the
+   * top of whatever screen shows, and the screen is placed under them. [d] has the notices (index, green, heading, next,
+   * tap) and the line "and N more in Sales" or null. With none, [page] is the whole screen.
+   */
+  function withNotices(ui, page, d) {
+    if (!d || (!d.notices.length && !d.more)) return page;
+    const gap = ui.px(8);
+    const column = LinearLayout("v");
+    setPadding(column, gap, ui.barInsets()[1] + gap, gap, 0);
+    column.style.backgroundColor = css(ui.pal.background);
+    column.className += " notices";
+    for (const n of d.notices) {
+      const tone = ui.pal.of(n.green ? Colour.Green : Colour.Red);
+      const v = LinearLayout("v");
+      setBackground(v, ui.rounded(tone.tint, 14));
+      setPadding(v, ui.px(16), ui.px(10), ui.px(16), ui.px(10));
+      addView(v, ui.text(n.heading, 16, true, false, tone.ink));
+      addView(v, ui.text(n.next, 14), ui.margins(2));
+      setClickable(v, true, n.tap);
+      const p = new LayoutParams(MATCH_PARENT, WRAP_CONTENT);
+      p.bottomMargin = gap;
+      addView(column, v, p);
+    }
+    if (d.more) {
+      const more = ui.text(d.more, 14, true);
+      setPadding(more, ui.px(16), ui.px(8), ui.px(16), ui.px(8));
+      addView(column, more);
+    }
+    const shell = LinearLayout("v");
+    addView(shell, column, new LayoutParams(MATCH_PARENT, WRAP_CONTENT));
+    addView(shell, page, new LayoutParams(MATCH_PARENT, 0, 1));
+    shell.style.minHeight = "0";
+    page.style.minHeight = "0";
+    return shell;
   }
 
   /** Controller.kt:2603 showSales(): the label, and one card of rows, one for each sale, newest first. */
@@ -909,7 +953,7 @@
 
   const api = {
     CV_KT, CU_KT, CT_KT, TONES, outcomeBand, matchWide, Glyph, GlyphView, OutcomeMark, Centered, addToBar, HomeLine, FillsFrame, CoverLayout,
-    pinField, amountField, Slot, QrView, left, showHome, showNewSale, showSale, showSales, showSaleDetails, heroTile, showToday,
+    pinField, amountField, Slot, QrView, left, showHome, showNewSale, showSale, withNotices, showSales, showSaleDetails, heroTile, showToday,
   };
   root.OpenBmtCounterViews = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;

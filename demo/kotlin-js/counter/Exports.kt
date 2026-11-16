@@ -10,7 +10,12 @@ import org.openbmt.counter.Native
 import org.openbmt.counter.StartConfig
 import org.openbmt.counter.app.AmountEntry
 import org.openbmt.counter.app.AppWords
+import org.openbmt.app.Colour
+import org.openbmt.counter.Turn
 import org.openbmt.counter.app.BillModel
+import org.openbmt.counter.app.LightningFirstWords
+import org.openbmt.counter.app.Notices
+import org.openbmt.counter.app.OutcomePlays
 import org.openbmt.counter.app.Money
 import org.openbmt.counter.app.SaleModel
 import org.openbmt.counter.app.SetupStatus
@@ -106,8 +111,19 @@ class SaleScreenData(
     val address: String?,
     val needsSats: Double,
     val receivedSats: Double,
+    /** CR-283: the code is the Lightning invoice alone; the screen adds the line and the button that show the on-chain code. */
+    val lightningFirst: Boolean,
     /** One text of everything the screen says: it is drawn again only when this changes. */
     val signature: String,
+)
+
+/** What one notice of CR-284 shows (Notices.kt SaleNotice): the sale's receive index, whether it turned green, and the two lines. */
+@JsExport
+class NoticeData(
+    val index: Double,
+    val green: Boolean,
+    val heading: String,
+    val next: String,
 )
 
 /**
@@ -123,6 +139,11 @@ object CounterFlowDemo {
     private var money: Money? = null
     private var entry: AmountEntry? = null
     private val amounts = HashMap<Long, Long>()
+
+    // Controller.kt's notices (CR-284), the sounds its screens have played, and the sales that turned since the page last asked.
+    private var notices = Notices()
+    private var plays = OutcomePlays()
+    private val turned = ArrayList<Turn>()
 
     private fun running(): CounterNode = node ?: error("the node is not started")
 
@@ -168,6 +189,9 @@ object CounterFlowDemo {
         node = started
         money = Money.of("USD")
         amounts.clear()
+        notices = Notices()
+        plays = OutcomePlays()
+        turned.clear()
         started.pump(now.toLong(), 0)
     }
 
@@ -193,8 +217,49 @@ object CounterFlowDemo {
     fun pump(now: Double): Int {
         val n = running()
         serveLightning(n, now.toLong())
-        return n.pump(now.toLong(), 0).reports.size
+        val p = n.pump(now.toLong(), 0)
+        turned.addAll(p.turns)
+        return p.reports.size
     }
+
+    private fun colourOf(name: String): Colour = if (name == Colour.Green.name) Colour.Green else if (name == Colour.Red.name) Colour.Red else Colour.Blue
+
+    /** SaleModel.kt OutcomePlays.first: true the first time sale [index] shows the colour called [colour] and the colour plays a sound. */
+    fun outcomeFirst(index: Double, colour: String): Boolean = plays.first(index.toLong(), colourOf(colour))
+
+    /**
+     * Controller.kt onTurns: the sales that turned green or red since the last call each get a notice, unless the screen of
+     * sale [showing] (-1 when no sale shows) is theirs. The name of the colour that plays its sound now, or null when none does.
+     */
+    fun takeTurns(showing: Double): String? {
+        val on = if (showing < 0) null else showing.toLong()
+        var played: Colour? = null
+        for (t in turned) {
+            val colour = if (t.green) Colour.Green else Colour.Red
+            if (notices.turned(t.index, colour, on, plays)) played = colour
+        }
+        turned.clear()
+        return played?.name
+    }
+
+    /** Controller.kt drawNotices: the notices that show, newest first. */
+    fun noticesShown(): Array<NoticeData> =
+        notices.shown().map { NoticeData(it.index.toDouble(), it.colour == Colour.Green, it.heading, it.next) }.toTypedArray()
+
+    /** Controller.kt drawNotices: the line after the notices that show, or null when there is none. */
+    fun noticesMore(): String? = notices.more().let { if (it > 0) LightningFirstWords.moreLine(it) else null }
+
+    /** Controller.kt drawNotices, showSale: the notice of sale [index] goes; true when there was one. */
+    fun noticeRemove(index: Double): Boolean = notices.remove(index.toLong())
+
+    /** CR-283: the line under a code that is the Lightning invoice alone. */
+    fun lightningLine(): String = LightningFirstWords.LINE
+
+    /** CR-283: the button that shows the on-chain code. */
+    fun lightningButton(): String = LightningFirstWords.BUTTON
+
+    /** Controller.kt payOnChainInstead: the cashier chose the on-chain code for the rest of sale [index]. A refusal is the library's own exception. */
+    fun onChainInstead(index: Double) = running().saleOnChainInstead(index.toLong())
 
     /** The name of the last sale's state now (the library's own judgment), as the model has it. */
     fun saleState(now: Double): String = running().judge(now.toLong(), lastIndex).state.name
@@ -356,7 +421,7 @@ object CounterFlowDemo {
         val shownExtra = extra.map { shown(it) }
         val signature = listOf(
             s.state.name, shownSays.heading, shownSays.what, shownSays.next, s.receivedSats, s.needsSats, payment?.copyUri,
-            shownExtra.joinToString("\u0002") { it.heading + it.what + it.next }, info.reference, info.billNumber,
+            shownExtra.joinToString("\u0002") { it.heading + it.what + it.next }, s.lightningFirst, info.reference, info.billNumber,
         ).joinToString("\u0001")
         return SaleScreenData(
             number = (i + 1).toInt(),
@@ -383,6 +448,7 @@ object CounterFlowDemo {
             address = payment?.address,
             needsSats = s.needsSats.toDouble(),
             receivedSats = s.receivedSats.toDouble(),
+            lightningFirst = s.lightningFirst,
             signature = signature,
         )
     }

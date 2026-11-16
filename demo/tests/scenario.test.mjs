@@ -85,12 +85,23 @@ const labels = (list) => list.map((x) => x.textContent);
 
 test_words: {
   assert.deepEqual(Shell.BAR.map((t) => t.name), ['Customer', 'Café', 'With your register', 'When something goes wrong']);
-  assert.deepEqual(Shell.BAR[2].menu, ['Your register sends the amount', 'Square, Clover and others']);
+  assert.deepEqual(Shell.BAR[2].menu, ['Your register sends the amount', 'Square', 'Clover']);
   assert.deepEqual(Shell.BAR[3].menu, ['A short payment', 'A cancelled payment']);
-  assert.deepEqual(Shell.SCENARIOS, ['Customer', 'Café', 'Your register sends the amount', 'Square, Clover and others', 'A short payment', 'A cancelled payment']);
+  assert.deepEqual(Shell.SCENARIOS, ['Customer', 'Café', 'Your register sends the amount', 'Square', 'Clover', 'A short payment', 'A cancelled payment']);
   assert.equal(Shell.CARDS.Customer.heading, 'You paid a shop in bitcoin.');
   assert.equal(Shell.CARDS['Café'].heading, 'That is a day at the counter.');
-  assert.equal(Shell.CARDS['Register sends'].heading, Shell.CARDS['Register any'].heading);
+  assert.equal(Shell.CARDS.Square.heading, 'That is a sale with Square.');
+  assert.deepEqual(Shell.CARDS.Square.lines, [
+    'The cashier rang it up on Square and on the counter.',
+    'The order was closed as OpenBMT, so Square\'s own Bitcoin was not used.',
+    'The owner\'s phone matched the two, and would raise an alert if they did not match.',
+  ]);
+  assert.equal(Shell.CARDS.Clover.heading, 'That is a sale with Clover.');
+  assert.deepEqual(Shell.CARDS.Clover.lines, [
+    'The cashier rang it up on Clover and on the counter.',
+    'The order was closed as Bitcoin.',
+    'The owner\'s phone matched the two, and would raise an alert if they did not match.',
+  ]);
   assert.equal(Shell.CARDS['Something goes wrong'].heading, 'A short payment never turns green.');
   assert.equal(Shell.CARDS.Cancelled.heading, 'A cancelled payment turns red.');
   assert.deepEqual(Shell.CARDS.Cancelled.lines, [
@@ -131,8 +142,8 @@ test_bar: {
   assert.equal(chev.getAttribute('aria-expanded'), 'true');
   assert.deepEqual(labels([...tabs[2].items.values()]), Shell.BAR[2].menu);
   // Picking an item starts that sub-scenario and closes the menu.
-  tabs[2].items.get('Square, Clover and others').click();
-  assert.equal(chosen.at(-1), 'Square, Clover and others');
+  tabs[2].items.get('Clover').click();
+  assert.equal(chosen.at(-1), 'Clover');
   assert.ok(tabs[2].list.hidden);
 
   // "When something goes wrong": the label opens the menu (a click, or Enter, which is a click), and carries the chevron.
@@ -191,7 +202,8 @@ test_cards_and_inert_end: {
   const cards = {
     Customer: ['Customer', undefined, 'Customer'], 'Café': ['Café', undefined, 'Café'],
     'Your register sends the amount': ['With your register', 'Your register sends the amount', 'Register sends'],
-    'Square, Clover and others': ['With your register', 'Square, Clover and others', 'Register any'],
+    Square: ['With your register', 'Square', 'Square'],
+    Clover: ['With your register', 'Clover', 'Clover'],
     'A short payment': ['When something goes wrong', 'A short payment', 'Something goes wrong'],
     'A cancelled payment': ['When something goes wrong', 'A cancelled payment', 'Cancelled'],
   };
@@ -381,6 +393,58 @@ test_meal_over_lightning: {
   assert.equal(last('sale').isPaid, true);
   assert.equal(last('sale').number, 2);
 }
+
+// CR-283: over the instant limit the sale carries the line and the button, from the model; Pay on-chain instead makes the
+// code the on-chain one, on the real module.
+test_lightning_first_line_and_button: {
+  const opened = sale(['2', '0', '0', '0']);
+  until('the invoice', () => invoiceOf(last('sale').copyUri));
+  const data = last('sale');
+  assert.equal(data.lightningFirst, true, 'the library says the code is the invoice alone');
+  assert.equal(flow.lightningLine(), 'Over the instant limit: Lightning is paid at once. On-chain waits for a block, about ten minutes.');
+  assert.equal(flow.lightningButton(), 'Pay on-chain instead');
+  assert.ok(!PC.parse(data.copyUri).address, 'no on-chain address before the button');
+  c.payOnChain();
+  second();
+  const after = last('sale');
+  assert.equal(after.lightningFirst, false, 'the line and the button go');
+  assert.match(after.copyUri, /^bitcoin:/, 'the code becomes the bitcoin: one');
+  assert.match(PC.parse(after.copyUri).address, /^bcrt1q/);
+  assert.equal(after.isPaid, false);
+  // A small sale never shows the line.
+  c.showHome();
+  assert.equal(sale(['8', '0', '0']).lightningFirst, false);
+  c.showHome();
+}
+
+// CR-284: a sale that turns green while another screen shows gives a notice at the top of that screen; a tap on it opens
+// the sale, and the sale's own screen takes it away.
+test_notice_of_a_sale_that_turns: {
+  const shown = [];
+  const view = Controller({ flow, chain, clock: { now: () => clock }, show(viewOf) { shown.push(viewOf); }, event(kind, data) { events.push([kind, data]); } });
+  view.showNewSale();
+  for (const k of '800') view.press(k);
+  view.openEntered();
+  const read = PC.parse(view.saleData().copyUri);
+  view.showHome();
+  assert.deepEqual(view.notices(), { shown: [], more: null }, 'no notice yet');
+  chain.pay(read.address, read.sats);
+  for (let s = 0; s < 40 && !view.notices().shown.length; s++) { clock += 1; flow.heartbeat(clock, chain.heartbeat()); flow.pump(clock); view.onPump(true); }
+  const n = view.notices();
+  assert.equal(n.shown.length, 1);
+  assert.equal(n.shown[0].green, true);
+  assert.match(n.shown[0].heading, /^Sale \d+ is paid$/);
+  assert.equal(n.shown[0].next, 'Hand over the goods. Tap to see the sale.');
+  assert.equal(events.filter((e) => e[0] === 'notice').at(-1)[1].colour, 'Green', 'its sound plays once');
+  const before = events.filter((e) => e[0] === 'notice').length;
+  for (let s = 0; s < 5; s++) { clock += 1; flow.pump(clock); view.onPump(true); }
+  assert.equal(events.filter((e) => e[0] === 'notice').length, before, 'once');
+  view.tapNotice(n.shown[0].index);
+  assert.deepEqual(view.notices(), { shown: [], more: null }, 'the sale shows, so its notice is gone');
+  assert.equal(view.saleData().isPaid, true);
+  assert.equal(events.filter((e) => e[0] === 'sale').at(-1)[1].isPaid, true);
+  view.showHome();
+}
 test_cancelled_payment: {
   const opened = sale(['8', '0', '0']);
   const read = PC.parse(opened.copyUri);
@@ -404,6 +468,24 @@ test_cancelled_payment: {
   // The first payment is gone from the pool: it cannot be taken back twice.
   assert.throws(() => chain.cancel(txid), /no longer waiting/);
   c.showHome();
+}
+
+// The register's choice screen: three cards, with the words of the brief; Square and Clover are told apart by name.
+test_register_choice: {
+  globalThis.OpenBmtChrome = require('../ui/chrome.js');
+  globalThis.OpenBmtRegisterViews = require('../web2/register-views.js');
+  globalThis.OpenBmtCounterController = require('../web2/counter-controller.js');
+  globalThis.OpenBmtOwnerController = require('../web2/owner-controller.js');
+  globalThis.OpenBmtOneChain = require('../web2/one-chain.js');
+  const RG = require('../web2/register.js');
+  let choice = null;
+  const stub = { root: { querySelector: () => null }, scenario() {}, choice(cards, opts) { choice = { cards, opts }; } };
+  RG.open(stub, { stopRun() {}, clock: {}, flow: {}, ownerFlow: {} });
+  assert.deepEqual(choice.cards.map((x) => x.name), ['Your register sends the amount', 'Square', 'Clover']);
+  assert.equal(choice.cards[0].what, 'Odoo, with the OpenBMT module. The register sends the amount to the counter, so nothing is typed twice.');
+  assert.equal(choice.cards[1].what, 'The cashier rings it up on Square, types the amount on the counter, then closes the order as OpenBMT. The owner\'s phone checks that the two match.');
+  assert.equal(choice.cards[2].what, 'The cashier rings it up on Clover, types the amount on the counter, then closes the order as Bitcoin. The owner\'s phone checks that the two match.');
+  assert.equal(choice.opts.title, 'With your register');
 }
 
 test_register_views: {
@@ -438,6 +520,49 @@ test_register_views: {
   assert.ok(text(paid).includes('Paid with Bitcoin'));
   assert.ok(!text(paid).includes('How is it paid?'));
   assert.deepEqual(labels(buttons(paid)).filter((x) => x.startsWith('Charge')), [], 'no Charge once it is paid');
+  // Square Register: the search, the tabs, six tiles with no price, the cart, Charge $8.00, the bar.
+  const sq = RV.register({ kind: 'square', screen: 'sale' }, landscape);
+  const sqText = text(sq);
+  for (const w of ['Search', 'Favorites', 'Drinks', 'Bakery', 'All items', 'Coffee', 'Bagel', 'Juice', 'Muffin', 'Tea', 'Cookie', '2 items',
+    'Tax', '$0.00', 'Checkout', 'Inventory', 'Transactions', 'Notifications', 'More']) assert.ok(sqText.includes(w), w);
+  assert.deepEqual(labels(buttons(sq)), ['Save cart', 'Charge $8.00']);
+  assert.equal(sq.all((x) => x.tag === 'div' && x.textContent === 'Coffee $4.00').length, 1, 'the cart line');
+  assert.ok(!sqText.includes('Order 1042') && !sqText.includes('Charge 8.00 USD'), 'nothing of the plain register');
+  let sqCharged = 0;
+  buttons(RV.register({ kind: 'square', screen: 'sale', taps: { charge: () => { sqCharged++; } } }, landscape)).find((b) => text(b) === 'Charge $8.00').click();
+  assert.equal(sqCharged, 1);
+  // Square's payment screen: the amount, Select payment, the rows, the custom group with OpenBMT alone a target, and the note.
+  let sqType = 0;
+  const sqPay = RV.register({ kind: 'square', screen: 'tender', taps: { bitcoin: () => { sqType++; } } }, landscape);
+  assert.deepEqual(labels(buttons(sqPay)), ['Cash', 'Bitcoin', 'Gift card', 'Other payment types', 'OpenBMT']);
+  for (const w of ['$8.00', 'Select payment', 'Custom payment methods', "Bitcoin here is Square's own: it pays into Square's wallet. OpenBMT pays into the shop's own wallet."]) assert.ok(text(sqPay).includes(w), w);
+  for (const b of buttons(sqPay)) b.click();
+  assert.equal(sqType, 1, 'only OpenBMT does anything');
+  const sqDone = RV.register({ kind: 'square', screen: 'paid' }, landscape);
+  for (const w of ['$8.00', 'All done']) assert.ok(text(sqDone).includes(w), w);
+  assert.deepEqual(labels(buttons(sqDone)), ['New sale']);
+  // Clover Station: the top bar, the order, the categories, the quantities, the six cards, the strip.
+  const cl = RV.register({ kind: 'clover', screen: 'sale' }, landscape);
+  const clText = text(cl);
+  for (const w of ['Register', 'Scan barcode or search', 'ORDERS', 'Dine in order', 'Subtotal', 'Tax', 'Total', 'Fast pay with cash', 'Drinks', 'Bakery', 'Breakfast',
+    'QTY', 'CUSTOM', 'Coffee', 'Latte', 'Tea', 'Juice', 'Bagel', 'Muffin', '$3.50', 'ALEX']) assert.ok(clText.includes(w), w);
+  assert.deepEqual(labels(buttons(cl)), ['$5.00', '$10.00', '$20.00', 'Custom', 'Save', 'Pay']);
+  let clPaid = 0;
+  buttons(RV.register({ kind: 'clover', screen: 'sale', taps: { charge: () => { clPaid++; } } }, landscape)).find((b) => text(b) === 'Pay').click();
+  assert.equal(clPaid, 1);
+  let clType = 0;
+  const clPay = RV.register({ kind: 'clover', screen: 'tender', taps: { bitcoin: () => { clType++; } } }, landscape);
+  assert.deepEqual(labels(buttons(clPay)), ['Cash', 'Credit/Debit', 'Bitcoin', 'Gift card']);
+  assert.ok(text(clPay).includes('$8.00'));
+  for (const b of buttons(clPay)) b.click();
+  assert.equal(clType, 1, 'only Bitcoin does anything');
+  const clDone = RV.register({ kind: 'clover', screen: 'paid' }, landscape);
+  assert.ok(text(clDone).includes('Paid') && text(clDone).includes('$8.00'));
+  assert.deepEqual(labels(buttons(clDone)), ['No receipt', 'Print']);
+  // Both draw in the narrow window's size too.
+  for (const kind of ['square', 'clover']) for (const screen of ['sale', 'tender', 'paid']) assert.ok(RV.register({ kind, screen }, { width: 601, height: 962, density: 4 / 3 }));
+  assert.equal(RV.SQUARE_CHARGE, 'Charge $8.00');
+  assert.equal(RV.CLOVER_PAY, 'Pay');
   // The tablet's own size is the fallback for a narrow window.
   assert.ok(text(RV.register({ screen: 'sale' }, { width: 601, height: 962, density: 4 / 3 })).includes('Total 8.00 USD'));
 }
