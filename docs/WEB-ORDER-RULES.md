@@ -97,7 +97,9 @@ funds.**
   currency into bitcoin at a quote it makes itself from the shop's rate
   sources, by the rules of `docs/RATE-RULES.md` for a counter's quote, and
   shares that file's test vectors. A quote it cannot make hides Bitcoin at
-  checkout. The quote lasts 30 minutes. An order that already has its
+  checkout. On an order's own pay page (an order made in the store's admin
+  and sent to the customer as a link to pay it), the total quoted is that
+  order's, never the cart's, which is empty there. The quote lasts 30 minutes. An order that already has its
   address takes no new one: paying again through its order-pay link shows
   the same payment page, with the same address, amount and quote.
 - **WO-16. The payment page.** After "Place order" the customer sees a BIP 321
