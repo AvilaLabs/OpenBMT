@@ -84,7 +84,19 @@
   })());
 
   // The page's clock. A visitor who jumps to a later step has the seconds a real counter would have waited skipped.
-  const clock = { offset: 0, now() { return Math.floor(Date.now() / 1000) + this.offset; }, skip(secs) { this.offset += secs; } };
+  // A held clock stands still (the cancelled payment holds it while the visitor reads); letting it go resumes from
+  // the held second, so no time is skipped.
+  const clock = {
+    offset: 0, held: null,
+    now() { return this.held !== null ? this.held : Math.floor(Date.now() / 1000) + this.offset; },
+    skip(secs) { if (this.held !== null) this.held += secs; else this.offset += secs; },
+    hold() { if (this.held === null) this.held = this.now(); },
+    release() {
+      if (this.held === null) return;
+      this.offset = this.held - Math.floor(Date.now() / 1000);
+      this.held = null;
+    },
+  };
   const AMOUNT = "800";
   // The café's second sale, a meal over the counter's instant limit.
   const MEAL = "2000";
@@ -104,6 +116,7 @@
   let run = null;
 
   function stopRun() {
+    clock.release();
     if (!run) return;
     run.dead = true;
     clearInterval(run.timer);
@@ -148,7 +161,7 @@
       },
       event(kind, data) {
         if (r.dead) return;
-        // Controller.kt:2369 first: the first time this sale's screen is green or red, its sound plays, once.
+        // Controller.kt:2433 first: the first time this sale's screen is green or red, its sound plays, once.
         // A visitor's skipped taps (r.quiet) are made without it.
         if (kind === "sale" && r.plays.first(data.number, data.says.colour) && !r.quiet) box.outcome(data.says.colour);
         r.onEvent(kind, data);
@@ -438,7 +451,10 @@
     const c = () => run.controller;
     // The id of the payment the customer sent: the customer's wallet spends its coin again to take it back.
     let sent = null;
-    const send = () => { const read = readCode(); sent = run.chain.pay(read.address, read.sats); };
+    // The clock is held from the payment until the cancel, so the counter's short check cannot end while the
+    // visitor reads; the counter still judges the payment itself.
+    const send = () => { const read = readCode(); clock.hold(); sent = run.chain.pay(read.address, read.sats); };
+    const cancel = () => { run.chain.cancel(sent); clock.release(); };
     return [
       { step: 0, enter() {
         shell.actor(null);
@@ -458,17 +474,15 @@
         });
         S.on = null;
       }, auto: send },
-      // The page does not move the counter's clock here: the counter's own short check runs in real time, and the
-      // customer cancels within it.
       { step: 1, enter() {
         shell.say("The customer sent the payment.",
-          ["The counter makes a short check for a second payment of the same money. This customer cancels before it ends: tap ", { b: "The customer cancels" }, "."]);
+          ["The counter makes a short check for a second payment of the same money, paused here until you tap. This customer cancels: tap ", { b: "The customer cancels" }, "."]);
         shell.actor({
           who: "The customer", line: "Sends the same money back to their own wallet.", button: "The customer cancels",
-          onTap() { run.chain.cancel(sent); spendActor(); },
+          onTap() { cancel(); spendActor(); },
         });
         S.on = { sale: (d) => { if (d.state === "DoNotHandOver") go(); } };
-      }, auto() { run.chain.cancel(sent); pump(run); } },
+      }, auto() { cancel(); pump(run); } },
       { step: 2, enter() {
         shell.actor(null);
         shell.say("Red: do not hand over the goods.", []);

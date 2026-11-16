@@ -20,6 +20,9 @@
 
 /** The invoice a sale's payment code carries (`lightning=` of BIP 321), in lower case, or null when it has none. */
 export function invoiceOf(code) {
+  // Over the instant limit the code is the invoice alone (CR-283).
+  const alone = /^lightning:(ln[a-z0-9]+)$/i.exec(String(code).trim());
+  if (alone) return alone[1].toLowerCase();
   const query = String(code).trim().split('?')[1];
   if (!query) return null;
   const pair = query.split('&').map((p) => p.split('=')).find((p) => p[0].toLowerCase() === 'lightning');

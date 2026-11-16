@@ -373,7 +373,8 @@ test_meal_over_lightning: {
   assert.equal(opened.amountBig, '20.00 USD');
   until('the invoice', () => invoiceOf(last('sale').copyUri));
   const read = PC.parse(last('sale').copyUri);
-  assert.ok(read.lightning && read.address, 'a code with two ways to pay');
+  // 20.00 USD is over the demo's instant limit of 10 USD: the code is the invoice alone (CR-283).
+  assert.ok(read.lightning && !read.address, 'the Lightning code first');
   assert.equal(last('sale').isPaid, false);
   assert.equal(chain.payLightning(invoiceOf(last('sale').copyUri)), read.sats);
   until('PaidLightning', () => last('sale').state === 'PaidLightning');

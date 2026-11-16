@@ -512,7 +512,7 @@
     return (name) => given[name] || (() => {});
   }
 
-  /** Controller.kt:797 left(view): [view] at the left edge of the body, as wide as it is. */
+  /** Controller.kt:854 left(view): [view] at the left edge of the body, as wide as it is. */
   function left(view) {
     const v = LinearLayout("h");
     addView(v, view, new LayoutParams(WRAP_CONTENT, WRAP_CONTENT));
@@ -520,7 +520,7 @@
   }
 
   /**
-   * Controller.kt:1105 showHome(): the counter's home: the bar with the gear (and a Lock button when a cashier is at
+   * Controller.kt:1162 showHome(): the counter's home: the bar with the gear (and a Lock button when a cashier is at
    * the till), the health card, the cards of the till and of the starter wallet, the other lines, the note, the
    * three tiles, the open requests and the counter's line. [d] holds the words and values of the moment.
    */
@@ -585,7 +585,7 @@
   }
 
   /**
-   * Controller.kt:1934 showNewSale(): the amount of the sale in 60 sp, the keys, and the buttons Open the sale and
+   * Controller.kt:1991 showNewSale(): the amount of the sale in 60 sp, the keys, and the buttons Open the sale and
    * Request to send. [d] has the entry's text, the price line and the words.
    */
   function showNewSale(ui, d) {
@@ -616,7 +616,7 @@
   }
 
   /**
-   * Controller.kt:2182 showSale(...): the sale's screen. While the sale shows its code (not paid yet, part paid) the
+   * Controller.kt:2239 showSale(...): the sale's screen. While the sale shows its code (not paid yet, part paid) the
    * page has the state chip in the bar, the amount, the code in its card, the words, the extra notices and the
    * buttons; every other state is the whole screen in the colour of the outcome. [d] has the state's words, the
    * amounts, the code's modules and the flags.
@@ -724,7 +724,7 @@
     return page;
   }
 
-  /** Controller.kt:2528 showSales(): the label, and one card of rows, one for each sale, newest first. */
+  /** Controller.kt:2603 showSales(): the label, and one card of rows, one for each sale, newest first. */
   function showSales(ui, d) {
     const views = [ui.label(d.words.heading)];
     if (!d.rows.length) views.push(ui.text(d.words.none, 16));
@@ -732,7 +732,7 @@
     return ui.page(ui.bar("Sales", null, () => {}), views, []);
   }
 
-  /** Controller.kt:2557 showSaleDetails(index, notice): a sale's facts, its words, the note and the reference, the refunds, and the buttons. */
+  /** Controller.kt:2632 showSaleDetails(index, notice): a sale's facts, its words, the note and the reference, the refunds, and the buttons. */
   function showSaleDetails(ui, d) {
     const views = [];
     if (d.notice) views.push(ui.notice(d.notice));
@@ -752,7 +752,7 @@
     return ui.page(ui.bar("Details and refunds", null, () => {}), views, actions);
   }
 
-  /** Controller.kt:2971 heroTile(line): a small tile inside the hero card: the label, the amount and what is under it. */
+  /** Controller.kt:3046 heroTile(line): a small tile inside the hero card: the label, the amount and what is under it. */
   function heroTile(ui, line) {
     const v = LinearLayout("v");
     setBackground(v, ui.roundedFill(ui.pal.background, 14));
@@ -772,7 +772,7 @@
   }
 
   /**
-   * Controller.kt:2983 showToday(people): the day's totals: the hero card (what was paid, and how), the rows that need a look
+   * Controller.kt:3058 showToday(people): the day's totals: the hero card (what was paid, and how), the rows that need a look
    * and the quiet lines in one card, and the lines per person behind the manager's PIN (or the PIN's entry).
    */
   function showToday(ui, d) {

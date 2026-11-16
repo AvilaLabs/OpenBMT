@@ -54,8 +54,8 @@
   const SCENARIOS = BAR.flatMap((t) => t.menu || [t.name]);
   /** The tab a scenario (or the tab itself) belongs to. */
   const tabOf = (name) => (BAR.find((t) => t.name === name || (t.menu && t.menu.includes(name))) || {}).name || null;
-  // TODO_WORDS_menu_chevron_label: the spoken name of the chevron beside "With your register" (the tab's own name stands in).
-  const TODO_WORDS_menu_chevron_label = (tab) => tab;
+  // The spoken name of the chevron beside a tab with a menu.
+  const chevronLabel = (tab) => `Choices under ${tab}`;
   const ACTOR_W = 220;
   /** How long sizes ease when the lit device changes, and the share of its size the other devices keep. */
   const EASE_MS = 300;
@@ -224,7 +224,7 @@
         // The label opens the tab's own screen; the chevron beside it opens the menu.
         label.addEventListener("click", () => this.pick(item.name));
         const chev = el("button", "tab-chev");
-        chev.setAttribute("aria-label", TODO_WORDS_menu_chevron_label(item.name));
+        chev.setAttribute("aria-label", chevronLabel(item.name));
         chev.addEventListener("click", () => this.toggleMenu(item.name));
         tab.append(chev);
         opener = chev;
