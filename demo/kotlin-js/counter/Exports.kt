@@ -124,6 +124,12 @@ class SaleScreenData(
     val seen: String?,
     /** CR-286: the mark beside the time pulses, only while the check is healthy. */
     val pulse: Boolean,
+    /** CR-286: the seconds left of the wait for the Lightning invoice and the whole of it, for the ring beside the Lightning line; null when no invoice is waited for or the time is over. */
+    val lnRingSecs: Double?,
+    val lnRingTotal: Double,
+    val lnRingLabel: String?,
+    /** The place of the Lightning line among [extra], or -1 when the screen has none. */
+    val lnRingAt: Int,
     /** One text of everything the screen says: it is drawn again only when this changes. */
     val signature: String,
 )
@@ -416,6 +422,21 @@ object CounterFlowDemo {
         val extra = ArrayList<SayWords>()
         s.check?.let { extra.add(it.say()) }
         for (f in s.flags) extra.add(f.say())
+        // CR-113, CR-286: while the invoice is waited for the sale says so, and the line has the ring of the 6 seconds.
+        val ln = s.lightning
+        var lnRingAt = -1
+        var lnLeft: Long? = null
+        var lnTotal = 0L
+        if (ln != null && ln.waiting) {
+            lnRingAt = extra.size
+            extra.add(AppWords.lightningWaiting)
+            val left = ln.waitSecsLeft
+            val total = ln.waitSecsTotal
+            if (left != null && total != null) {
+                lnLeft = left
+                lnTotal = total
+            }
+        }
         val code = SaleModel.showsCode(s.state)
         val b = SaleModel.buttons(s.state, request)
         val amount = amounts[i]
@@ -435,7 +456,7 @@ object CounterFlowDemo {
         val wait = SaleModel.wait(s.state, s.watchSecsLeft, s.watchSecsTotal, s.seenSecs, s.checkHealthy)
         val signature = listOf(
             s.state.name, shownSays.heading, shownSays.what, shownSays.next, s.receivedSats, s.needsSats, s.missingSats, s.missingMinor,
-            wait.ringSecs != null, wait.seen != null, wait.pulse, payment?.copyUri,
+            wait.ringSecs != null, wait.seen != null, wait.pulse, lnLeft != null, payment?.copyUri,
             shownExtra.joinToString("\u0002") { it.heading + it.what + it.next }, s.lightningFirst, info.reference, info.billNumber,
         ).joinToString("\u0001")
         return SaleScreenData(
@@ -470,6 +491,10 @@ object CounterFlowDemo {
             ringLabel = wait.ringSecs?.let { WaitWords.ring(it) },
             seen = wait.seen,
             pulse = wait.pulse,
+            lnRingSecs = lnLeft?.toDouble(),
+            lnRingTotal = lnTotal.toDouble(),
+            lnRingLabel = lnLeft?.let { WaitWords.ring(it) },
+            lnRingAt = lnRingAt,
             signature = signature,
         )
     }

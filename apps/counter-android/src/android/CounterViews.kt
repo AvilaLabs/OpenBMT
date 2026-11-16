@@ -229,18 +229,18 @@ class OutcomeMark(context: Context, private val colour: Colour, private val band
 }
 
 /**
- * CR-286: the ring of a wait that knows its end, 72 dp, in white on the band: it empties over the whole wait, with
- * the seconds left in it. With [animate] false (the system's reduced motion) the ring is still and full and only the
- * number changes.
+ * CR-286: the ring of a wait that knows its end, [size] dp (72 by default), in [ink] (white on the band): it empties
+ * over the whole wait, with the seconds left in it. With [animate] false (the system's reduced motion) the ring is
+ * still and full and only the number changes.
  */
-class WaitRing(context: Context) : View(context) {
+class WaitRing(context: Context, private val ink: Int = Palette.WHITE, private val size: Int = 72) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
-        color = Palette.WHITE
+        color = ink
     }
     private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Palette.WHITE
+        color = ink
         textAlign = Paint.Align.CENTER
         typeface = Typeface.DEFAULT_BOLD
     }
@@ -284,20 +284,21 @@ class WaitRing(context: Context) : View(context) {
     }
 
     override fun onMeasure(widthSpec: Int, heightSpec: Int) {
-        val px = (72 * resources.displayMetrics.density).toInt()
+        val px = (size * resources.displayMetrics.density).toInt()
         setMeasuredDimension(px, px)
     }
 
     override fun onDraw(canvas: Canvas) {
         val d = resources.displayMetrics.density
-        paint.strokeWidth = 5 * d
-        val inset = 4 * d
+        val scale = d * size / 72f
+        paint.strokeWidth = 5 * scale
+        val inset = 4 * scale
         val box = RectF(inset, inset, width - inset, height - inset)
         paint.alpha = 64
         canvas.drawArc(box, 0f, 360f, false, paint)
         paint.alpha = 255
         canvas.drawArc(box, -90f, 360f * fraction.coerceIn(0f, 1f), false, paint)
-        label.textSize = 22 * d
+        label.textSize = 22 * scale
         canvas.drawText(WaitWords.ring(secs.coerceAtLeast(0)), width / 2f, height / 2f - (label.descent() + label.ascent()) / 2f, label)
     }
 }

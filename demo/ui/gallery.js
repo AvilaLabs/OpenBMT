@@ -12,6 +12,7 @@
     ["counter-home", "Counter: home", (ui) => CV.showHome(ui, D.counter.home)],
     ["counter-new-sale", "Counter: new sale", (ui) => CV.showNewSale(ui, D.counter.newSale)],
     ["counter-sale-unpaid", "Counter: sale, not paid yet", (ui) => CV.showSale(ui, D.counter.unpaid)],
+    ["counter-sale-lightning-waiting", "Counter: sale, waiting for the Lightning code", (ui) => CV.showSale(ui, D.counter.lightningWaiting)],
     ["counter-sale-partpaid", "Counter: sale, part paid", (ui) => CV.showSale(ui, D.counter.partPaid)],
     ["counter-sale-waiting", "Counter: sale, waiting", (ui) => CV.showSale(ui, D.counter.waiting)],
     ["counter-sale-waiting-block", "Counter: sale, waiting for a block", (ui) => CV.showSale(ui, D.counter.waitingBlock)],

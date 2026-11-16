@@ -52,8 +52,16 @@ const opened = await sale(['8', '0', '0']);
 assert.equal(opened.state, 'NotPaidYet');
 assert.equal(opened.amountBig, '8.00 USD');
 assert.equal(opened.needsSats, 10_877);
+// CR-286: while the invoice is waited for, the Lightning line has the ring of the 6 seconds beside its words; it goes
+// when the invoice comes (or the time is over), it does not stay at 0.
+assert.ok(opened.lnRingSecs >= 1 && opened.lnRingSecs <= 6, 'the ring has the seconds left of the wait');
+assert.equal(opened.lnRingTotal, 6);
+assert.equal(opened.lnRingLabel, `${opened.lnRingSecs} s`);
+assert.equal(opened.extra[opened.lnRingAt].heading, 'Lightning code coming', 'the ring is on the Lightning line');
 for (let s = 1; s <= 10 && !invoiceOf(last('sale').copyUri); s++) second();
 const withInvoice = last('sale');
+assert.equal(withInvoice.lnRingSecs, null, 'the ring is gone when the invoice has come');
+assert.equal(withInvoice.lnRingAt, -1);
 const invoice = invoiceOf(withInvoice.copyUri);
 assert.ok(invoice, 'the counter put an invoice in the sale\'s code');
 assert.match(invoice, /^lnbcrt/, 'a regtest invoice');

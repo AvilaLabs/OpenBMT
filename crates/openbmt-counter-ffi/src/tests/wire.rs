@@ -399,6 +399,8 @@ impl<'a> Rd<'a> {
                 unavailable: r.opt(Rd::words),
                 not_for_this_sale: r.bool(),
                 failed: r.opt(Rd::words),
+                wait_secs_left: r.opt(Rd::u64),
+                wait_secs_total: r.opt(Rd::u64),
             }),
             lightning_first: self.bool(),
             missing: self.u64(),
@@ -529,4 +531,6 @@ pub struct LnSale {
     pub unavailable: Option<Words>,
     pub not_for_this_sale: bool,
     pub failed: Option<Words>,
+    pub wait_secs_left: Option<u64>,
+    pub wait_secs_total: Option<u64>,
 }

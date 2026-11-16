@@ -3260,6 +3260,18 @@ impl<P: DriverPort> Node<P> {
         (view, LnPath::Swap)
     }
 
+    /// CR-286: the seconds left of the wait for the invoice of the shop's own
+    /// node and the whole of that wait (CR-113), while it is being waited for.
+    pub fn lightning_wait(&mut self, index: u32) -> Option<(u64, u64)> {
+        let (view, path) = self.lightning_view(index);
+        if !matches!(view, SaleLightning::Waiting) || !matches!(path, LnPath::OwnNode) {
+            return None;
+        }
+        let now = self.clock.now();
+        let left = self.ln.wait_secs_left(index, now)?;
+        Some((left, crate::lightning::INVOICE_WINDOW_SECS))
+    }
+
     /// CR-283: whether the code of the sale is the Lightning invoice alone.
     /// The sale is open and not a request to send, the cashier has not chosen
     /// the on-chain code, its invoice has come and is final at once (from the

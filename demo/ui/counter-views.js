@@ -125,8 +125,8 @@
    * second over one second; the same second again changes nothing. With reduced motion the CSS keeps the ring still
    * and full and only the number changes.
    */
-  function WaitRing(ui) {
-    const w = css(ui.palette.WHITE);
+  function WaitRing(ui, ink = ui.palette.WHITE, size = 72) {
+    const w = css(ink);
     const r = 31;
     const whole = 2 * Math.PI * r;
     const v = viewEl("div", "wait-ring");
@@ -135,8 +135,8 @@
       `<circle class="sweep" cx="36" cy="36" r="${r}" fill="none" stroke="${w}" stroke-width="5" stroke-linecap="round" ` +
       `stroke-dasharray="${whole}" stroke-dashoffset="0" transform="rotate(-90 36 36)"/>` +
       `<text x="36" y="36" text-anchor="middle" dominant-baseline="central" font-size="22" font-weight="700" fill="${w}"></text></svg>`;
-    v.style.width = ui.px(72) + "px";
-    v.style.height = ui.px(72) + "px";
+    v.style.width = ui.px(size) + "px";
+    v.style.height = ui.px(size) + "px";
     v.style.flex = "none";
     const sweep = v.querySelector(".sweep");
     const label = v.querySelector("text");
@@ -156,7 +156,7 @@
   }
 
   /**
-   * CounterViews.kt:309 PulseMark: the small mark beside the time of a wait, 10 dp. pulsing(on) makes it pulse, which it
+   * CounterViews.kt:310 PulseMark: the small mark beside the time of a wait, 10 dp. pulsing(on) makes it pulse, which it
    * does only while the check is healthy; with reduced motion the CSS keeps it still.
    */
   function PulseMark(ui) {
@@ -170,7 +170,7 @@
     return v;
   }
 
-  /** CounterViews.kt:350 Centered: a column that takes the height that is left in the body of a page and centres what it holds. */
+  /** CounterViews.kt:351 Centered: a column that takes the height that is left in the body of a page and centres what it holds. */
   function Centered() {
     const v = LinearLayout("v");
     setGravity(v, Gravity.CENTER);
@@ -178,7 +178,7 @@
     return v;
   }
 
-  /** CounterViews.kt:358 stateChip(model): the state of a sale as the chip of its bar: a dot and the heading in the tone's ink, on the tone's tint. */
+  /** CounterViews.kt:359 stateChip(model): the state of a sale as the chip of its bar: a dot and the heading in the tone's ink, on the tone's tint. */
   proto.stateChip = function (model) {
     const tone = this.pal.of(model.colour);
     const v = LinearLayout("h");
@@ -194,7 +194,7 @@
     return v;
   };
 
-  /** CounterViews.kt:374 addToBar(bar, chip, ui): puts [chip] at the right end of a bar made by bar(). */
+  /** CounterViews.kt:375 addToBar(bar, chip, ui): puts [chip] at the right end of a bar made by bar(). */
   function addToBar(bar, chip, ui) {
     const row = bar.row;
     if (!row) return;
@@ -203,7 +203,7 @@
     addView(row, chip, p);
   }
 
-  /** CounterViews.kt:380 barButton(label, onClick): a small outlined button for a bar, 36 dp high. */
+  /** CounterViews.kt:381 barButton(label, onClick): a small outlined button for a bar, 36 dp high. */
   proto.barButton = function (label, onClick) {
     const b = this.secondary(label, onClick);
     b.style.minHeight = this.px(36) + "px";
@@ -213,7 +213,7 @@
     return b;
   };
 
-  /** CounterViews.kt:389 onBand(label, filled, band, onClick): a button on an outcome band. */
+  /** CounterViews.kt:390 onBand(label, filled, band, onClick): a button on an outcome band. */
   proto.onBand = function (label, filled, band, onClick) {
     const b = filled ? this.primary(label, Colour.Blue, onClick) : this.secondary(label, onClick);
     const radius = 14;
@@ -225,7 +225,7 @@
   };
 
   /**
-   * CounterViews.kt:407 paintBand(page, bar, band, window): colours a page made by page() with a bar of
+   * CounterViews.kt:408 paintBand(page, bar, band, window): colours a page made by page() with a bar of
    * onBlack = true as the whole of an outcome screen: the band behind the status bar, the bar and the footer, no
    * divider, the title in the band's second-line colour; the navigation bar's icons are set light.
    */
@@ -244,10 +244,10 @@
     this.window.navLight = false;
   };
 
-  /** CounterViews.kt:443 HomeLine(key, words, extra, retry). */
+  /** CounterViews.kt:444 HomeLine(key, words, extra, retry). */
   function HomeLine(key, words, extra = null, retry = null) { return { key, words, extra, retry }; }
 
-  /** CounterViews.kt:449 healthCard(words): one surface card with the heading and a tone dot, the what under it, and, when the tone is not good, who does the next step and the next line. */
+  /** CounterViews.kt:450 healthCard(words): one surface card with the heading and a tone dot, the what under it, and, when the tone is not good, who does the next step and the next line. */
   proto.healthCard = function (words) {
     const model = words;
     const tone = this.pal.of(model.colour);
@@ -273,7 +273,7 @@
     return card;
   };
 
-  /** CounterViews.kt:477 tillCard(lines, start, notNow): the card of one request from the till, its heading, the lines, and the buttons Start and Not now. [words] holds the card's, start's and not now's words. */
+  /** CounterViews.kt:478 tillCard(lines, start, notNow): the card of one request from the till, its heading, the lines, and the buttons Start and Not now. [words] holds the card's, start's and not now's words. */
   proto.tillCard = function (lines, start, notNow, words) {
     const card = this.surfaceCard();
     const col = LinearLayout("v");
@@ -298,7 +298,7 @@
     return card;
   };
 
-  /** CounterViews.kt:497 starterCard(heading, lines, seen): the card of one payment from the starter wallet that nobody at the counter has seen. [seenLabel] is its button's word. */
+  /** CounterViews.kt:498 starterCard(heading, lines, seen): the card of one payment from the starter wallet that nobody at the counter has seen. [seenLabel] is its button's word. */
   proto.starterCard = function (heading, lines, seen, seenLabel) {
     const card = this.surfaceCard();
     const col = LinearLayout("v");
@@ -321,7 +321,7 @@
   };
 
   /**
-   * CounterViews.kt:518 homeLines(lines, open): the other lines of home in one surface card: each shows its heading
+   * CounterViews.kt:519 homeLines(lines, open): the other lines of home in one surface card: each shows its heading
    * with a tone dot. A line that is good shows only its heading, and a tap shows its what and its next; any other
    * line shows its words at once, with its "Try again" button under it. [open] holds the keys of the lines a tap has opened.
    */
@@ -394,12 +394,12 @@
     return v;
   };
 
-  /** CounterViews.kt:589 fillRipple(fill, radius): a ripple of 0x40000000 over a filled drawable. */
+  /** CounterViews.kt:590 fillRipple(fill, radius): a ripple of 0x40000000 over a filled drawable. */
   proto.fillRipple = function (fill, radius) {
     return new U.RippleDrawable("rgba(0,0,0,0.251)", fill, radius);
   };
 
-  /** CounterViews.kt:601 amountPad(press): the keys of the amount of a new sale: 1 to 9, then C, 0 and the delete key, as 64 dp round surface keys. [press] is given the key's face. */
+  /** CounterViews.kt:602 amountPad(press): the keys of the amount of a new sale: 1 to 9, then C, 0 and the delete key, as 64 dp round surface keys. [press] is given the key's face. */
   proto.amountPad = function (press) {
     const faces = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "⌫"];
     const grid = LinearLayout("v");
@@ -429,7 +429,7 @@
     return grid;
   };
 
-  /** CounterViews.kt:643 needRow(colour, title, sub, link, count, amount, onClick): a row of Today that needs a look: a tone dot, the title, and what sits under it, with the number of a total on the right. */
+  /** CounterViews.kt:644 needRow(colour, title, sub, link, count, amount, onClick): a row of Today that needs a look: a tone dot, the title, and what sits under it, with the number of a total on the right. */
   proto.needRow = function (colour, title, sub, link, count, amount, onClick) {
     const row = LinearLayout("h");
     setGravity(row, Gravity.CENTER_VERTICAL);
@@ -465,14 +465,14 @@
     return row;
   };
 
-  /** CounterViews.kt:689 FillsFrame: a column of the body of a page that takes the height that is left, for the scanner. */
+  /** CounterViews.kt:690 FillsFrame: a column of the body of a page that takes the height that is left, for the scanner. */
   function FillsFrame() {
     const v = FrameLayout();
     v.isFills = true;
     return v;
   }
 
-  /** CounterViews.kt:695 CoverLayout(aspectW, aspectH): the camera's surface, scaled to cover the whole of the layout and centred; what runs over the edges is cut. */
+  /** CounterViews.kt:696 CoverLayout(aspectW, aspectH): the camera's surface, scaled to cover the whole of the layout and centred; what runs over the edges is cut. */
   function CoverLayout(aspectW, aspectH) {
     const v = FrameLayout();
     v.style.overflow = "hidden";
@@ -708,7 +708,7 @@
         addView(qr, QrView(ui, d.modules, side), new LayoutParams(side, side));
         body.push(ui.codeCard(qr));
       }
-      // Controller.kt:2342 lightningFirst: CR-283, over the instant limit the code is the invoice alone; the line says why and the button shows the on-chain code.
+      // Controller.kt:2353 lightningFirst: CR-283, over the instant limit the code is the invoice alone; the line says why and the button shows the on-chain code.
       if (d.lightningFirst) {
         const line = ui.text(d.words.lightningLine, 13, false, false, ui.pal.secondary);
         setTextGravity(line, Gravity.CENTER);
@@ -727,7 +727,24 @@
       setGravity(chip, Gravity.CENTER_HORIZONTAL);
       addView(words, chip, ui.margins(10));
       body.push(words);
-      for (const w of d.extra || []) body.push(ui.notice(w));
+      (d.extra || []).forEach((w, at) => {
+        if (at === d.lnRingAt && d.lnRingSecs != null) {
+          // Controller.kt:2369 lnWaiting, CR-286: the ring of the 6 seconds for the invoice, beside the words of the Lightning line.
+          const row = LinearLayout("h");
+          setGravity(row, Gravity.CENTER_VERTICAL);
+          const ring = WaitRing(ui, ui.pal.text, 56);
+          const rp = new LayoutParams(ui.px(56), ui.px(56));
+          rp.rightMargin = ui.px(12);
+          addView(row, ring, rp);
+          addView(row, ui.notice(w), new LayoutParams(0, WRAP_CONTENT, 1));
+          const update = (n) => { if (n.lnRingSecs != null) ring.set(n.lnRingSecs, n.lnRingTotal, n.lnRingLabel); };
+          update(d);
+          if (d.live) { const was = d.live.update; d.live.update = (n) => { if (was) was(n); update(n); }; }
+          body.push(row);
+        } else {
+          body.push(ui.notice(w));
+        }
+      });
       if (d.request) {
         body.push(ui.button(d.words.shareLink, tap("shareLink")));
         body.push(ui.button(d.words.shareCode, tap("shareCode")));
@@ -855,7 +872,7 @@
     return shell;
   }
 
-  /** Controller.kt:2648 showSales(): the label, and one card of rows, one for each sale, newest first. */
+  /** Controller.kt:2675 showSales(): the label, and one card of rows, one for each sale, newest first. */
   function showSales(ui, d) {
     const views = [ui.label(d.words.heading)];
     if (!d.rows.length) views.push(ui.text(d.words.none, 16));
@@ -863,7 +880,7 @@
     return ui.page(ui.bar("Sales", null, () => {}), views, []);
   }
 
-  /** Controller.kt:2677 showSaleDetails(index, notice): a sale's facts, its words, the note and the reference, the refunds, and the buttons. */
+  /** Controller.kt:2704 showSaleDetails(index, notice): a sale's facts, its words, the note and the reference, the refunds, and the buttons. */
   function showSaleDetails(ui, d) {
     const views = [];
     if (d.notice) views.push(ui.notice(d.notice));
@@ -883,7 +900,7 @@
     return ui.page(ui.bar("Details and refunds", null, () => {}), views, actions);
   }
 
-  /** Controller.kt:3091 heroTile(line): a small tile inside the hero card: the label, the amount and what is under it. */
+  /** Controller.kt:3118 heroTile(line): a small tile inside the hero card: the label, the amount and what is under it. */
   function heroTile(ui, line) {
     const v = LinearLayout("v");
     setBackground(v, ui.roundedFill(ui.pal.background, 14));
@@ -903,7 +920,7 @@
   }
 
   /**
-   * Controller.kt:3103 showToday(people): the day's totals: the hero card (what was paid, and how), the rows that need a look
+   * Controller.kt:3130 showToday(people): the day's totals: the hero card (what was paid, and how), the rows that need a look
    * and the quiet lines in one card, and the lines per person behind the manager's PIN (or the PIN's entry).
    */
   function showToday(ui, d) {

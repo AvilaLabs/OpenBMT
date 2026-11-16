@@ -216,7 +216,7 @@ LnTransportView: enum, one tag byte
     tags PinRefused=0 Unreachable=1 TimedOut=2 TooBig=3 Redirected=4
 LnFailArgs: record: id: u64, why: LnTransportView
 LnStepView: record: next: option<LnRequestView>, record: option<list<u8>>
-LightningSaleView: record: invoice: bool, waiting: bool, unavailable: option<Words>, not_for_this_sale: bool, failed: option<Words>
+LightningSaleView: record: invoice: bool, waiting: bool, unavailable: option<Words>, not_for_this_sale: bool, failed: option<Words>, wait_secs_left: option<u64>, wait_secs_total: option<u64>
 SwapRequestView: record: id: u64, host_port: string, bytes: list<u8>
 SwapReplyArgs: record: id: u64, bytes: list<u8>
 LightningStatusView: record: ready: bool, words: Words

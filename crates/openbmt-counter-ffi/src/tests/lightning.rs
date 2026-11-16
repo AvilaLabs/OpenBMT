@@ -353,6 +353,44 @@ fn cr_113_six_seconds_without_an_invoice_leaves_the_chain_code_and_one_line() {
 }
 
 #[test]
+fn cr_286_invoice_the_wait_shows_its_seconds_left_and_its_total() {
+    let rig = Rig::new();
+    let handle = rig.start_with(&config(&rig, Some(node_key(1)), Some(saved(lnd()))));
+    open(&rig, handle);
+    for (at, left) in [(0, 6), (1, 5), (5, 1)] {
+        let ln = judge(&rig, handle, T0 + at, 0).lightning.expect("waiting");
+        assert!(ln.waiting && !ln.invoice, "at {at}");
+        assert_eq!(ln.wait_secs_left, Some(left), "at {at}");
+        assert_eq!(ln.wait_secs_total, Some(6), "at {at}");
+    }
+}
+
+#[test]
+fn cr_286_invoice_the_ring_goes_when_the_time_is_over_and_does_not_stay_at_zero() {
+    let rig = Rig::new();
+    let handle = rig.start_with(&config(&rig, Some(node_key(1)), Some(saved(lnd()))));
+    open(&rig, handle);
+    assert!(next(&rig, handle, T0).is_some());
+    let ln = judge(&rig, handle, T0 + 6, 0).lightning.expect("the line");
+    assert!(!ln.waiting && ln.unavailable.is_some());
+    assert_eq!((ln.wait_secs_left, ln.wait_secs_total), (None, None));
+}
+
+#[test]
+fn cr_286_invoice_the_ring_goes_when_the_invoice_comes() {
+    let rig = Rig::new();
+    let handle = rig.start_with(&config(&rig, Some(node_key(1)), Some(saved(lnd()))));
+    open(&rig, handle);
+    let create = next(&rig, handle, T0).expect("an invoice request");
+    reply(&rig, handle, create.id, 200, &created_body(5_000));
+    let ln = judge(&rig, handle, T0 + 2, 0)
+        .lightning
+        .expect("an invoice");
+    assert!(ln.invoice && !ln.waiting);
+    assert_eq!((ln.wait_secs_left, ln.wait_secs_total), (None, None));
+}
+
+#[test]
 fn cr_113_an_invoice_for_another_node_is_never_shown() {
     let rig = Rig::new();
     let handle = rig.start_with(&config(&rig, Some(node_key(1)), Some(saved(lnd()))));

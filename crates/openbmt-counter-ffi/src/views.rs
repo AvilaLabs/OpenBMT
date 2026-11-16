@@ -1563,6 +1563,12 @@ pub struct LightningSaleView {
     pub not_for_this_sale: bool,
     /// CR-223: through a swap provider, the swap failed before its claim.
     pub failed: Option<WordsView>,
+    /// CR-286: the seconds left of the wait for the invoice (CR-113), only
+    /// while it is being waited for; the ring goes when the invoice comes or
+    /// the time is over.
+    pub wait_secs_left: Option<u64>,
+    /// CR-286: the whole of that wait, for the ring that empties over it.
+    pub wait_secs_total: Option<u64>,
 }
 
 wire_record!(LightningSaleView {
@@ -1570,7 +1576,9 @@ wire_record!(LightningSaleView {
     waiting,
     unavailable,
     not_for_this_sale,
-    failed
+    failed,
+    wait_secs_left,
+    wait_secs_total
 });
 
 /// One request for the app to send to the swap provider (CR-225): plain

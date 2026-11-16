@@ -555,6 +555,10 @@ class LightningSale(
     val unavailable: Words?,
     val notForThisSale: Boolean,
     val failed: Words?,
+    /** CR-286: the seconds left of the wait for the invoice, only while it is waited for; null otherwise. */
+    val waitSecsLeft: Long?,
+    /** CR-286: the whole of that wait, for the ring that empties over it; null otherwise. */
+    val waitSecsTotal: Long?,
 )
 
 /** CR-116: the Lightning line of the status. */
@@ -1105,7 +1109,7 @@ internal fun Reader.screen(): Screen =
     )
 
 private fun Reader.lightningSale(): LightningSale =
-    LightningSale(bool(), bool(), option { words() }, bool(), option { words() })
+    LightningSale(bool(), bool(), option { words() }, bool(), option { words() }, option { u64() }, option { u64() })
 
 internal fun Reader.swapRequest(): SwapRequest = SwapRequest(u64(), string(), bytes())
 

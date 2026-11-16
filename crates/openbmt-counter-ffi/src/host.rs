@@ -930,12 +930,17 @@ impl Entry {
                 // the on-chain code alone, with no Lightning line.
                 SaleLightning::Waiting | SaleLightning::Invoice(_) if part_paid => {}
                 SaleLightning::Waiting => {
+                    // CR-286: the wait of CR-113 shows its seconds; the ring
+                    // goes when the time is over, it does not stay at 0.
+                    let wait = node.lightning_wait(index);
                     lightning = Some(LightningSaleView {
                         invoice: false,
                         waiting: true,
                         unavailable: None,
                         not_for_this_sale: false,
                         failed: None,
+                        wait_secs_left: wait.map(|(left, _)| left),
+                        wait_secs_total: wait.map(|(_, total)| total),
                     });
                 }
                 SaleLightning::Invoice(checked) => {
@@ -949,6 +954,8 @@ impl Entry {
                         unavailable: None,
                         not_for_this_sale: false,
                         failed: None,
+                        wait_secs_left: None,
+                        wait_secs_total: None,
                     });
                     if code.is_some() {
                         payment = code;
@@ -972,6 +979,8 @@ impl Entry {
                         unavailable: Some(WordsView(words)),
                         not_for_this_sale: false,
                         failed: None,
+                        wait_secs_left: None,
+                        wait_secs_total: None,
                     });
                 }
                 // CR-219: the code stays on-chain and the small line says so.
@@ -982,6 +991,8 @@ impl Entry {
                         unavailable: None,
                         not_for_this_sale: true,
                         failed: None,
+                        wait_secs_left: None,
+                        wait_secs_total: None,
                     });
                 }
                 // CR-221: the Lightning payment arrived and the sale waits
@@ -997,6 +1008,8 @@ impl Entry {
                         unavailable: None,
                         not_for_this_sale: false,
                         failed: Some(WordsView(words)),
+                        wait_secs_left: None,
+                        wait_secs_total: None,
                     });
                 }
             }

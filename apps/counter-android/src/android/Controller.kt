@@ -2250,6 +2250,7 @@ class Controller(private val act: MainActivity) {
         var lastSig: String? = null
         var lastBackground: Int? = null
         var liveRing: WaitRing? = null
+        var liveLnRing: WaitRing? = null
         var liveSeen: TextView? = null
         var livePulse: PulseMark? = null
         val flashWith = { reflash: SayWords? -> flash = reflash; lastSig = null; tick?.invoke(); Unit }
@@ -2291,9 +2292,18 @@ class Controller(private val act: MainActivity) {
                 val ln = s.lightning
                 val unavailable = ln?.unavailable
                 val failed = ln?.failed
+                // CR-286: while the invoice is waited for, its line shows the ring of the 6 seconds; it goes when the invoice comes or the time is over.
+                var lnWaiting: WordsModel? = null
+                var lnWait: Pair<Long, Long>? = null
                 when {
                     unavailable != null -> extra.add(WordsModel.of(unavailable.say()))
-                    ln != null && ln.waiting -> extra.add(WordsModel.of(AppWords.lightningWaiting))
+                    ln != null && ln.waiting -> {
+                        lnWaiting = WordsModel.of(AppWords.lightningWaiting)
+                        extra.add(lnWaiting)
+                        val left = ln.waitSecsLeft
+                        val total = ln.waitSecsTotal
+                        if (left != null && total != null) lnWait = left to total
+                    }
                     failed != null -> extra.add(WordsModel.of(failed.say()))
                 }
                 // CR-219: with a swap provider set and none for this sale, the code stays on-chain and one small line says so.
@@ -2301,12 +2311,13 @@ class Controller(private val act: MainActivity) {
                 // CR-286: what the wait shows of its time; the numbers change in place, the sig only its parts.
                 val wait = SaleModel.wait(s.state, s.watchSecsLeft, s.watchSecsTotal, s.seenSecs, s.checkHealthy)
                 val sig = listOf(
-                    s.state, says.heading, says.what, says.next, s.receivedSats, s.needsSats, s.missingSats, s.missingMinor, wait.ringSecs != null, wait.seen != null, wait.pulse, payment?.copyUri, flash?.heading,
+                    s.state, says.heading, says.what, says.next, s.receivedSats, s.needsSats, s.missingSats, s.missingMinor, wait.ringSecs != null, wait.seen != null, wait.pulse, lnWait != null, payment?.copyUri, flash?.heading,
                     flash?.what, extra.joinToString("\u0002") { it.heading + it.what + it.next }, notForThisSale, s.lightningFirst, info.reference, info.billNumber,
                 ).joinToString("\u0001")
                 if (sig != lastSig) {
                     lastSig = sig
                     liveRing = null
+                    liveLnRing = null
                     liveSeen = null
                     livePulse = null
                     val code = SaleModel.showsCode(s.state)
@@ -2354,7 +2365,22 @@ class Controller(private val act: MainActivity) {
                         words.addView(ui.text(says.next, 17f, medium = true).also { it.gravity = android.view.Gravity.CENTER }, ui.margins(top = 8))
                         words.addView(left(ui.whoChip(says)).also { (it as LinearLayout).gravity = android.view.Gravity.CENTER_HORIZONTAL }, ui.margins(top = 10))
                         body.add(words)
-                        for (w in extra) body.add(ui.notice(w))
+                        for (w in extra) {
+                            if (w === lnWaiting && lnWait != null) {
+                                // CR-286: the ring beside the words of the Lightning line.
+                                val row = LinearLayout(act).apply {
+                                    orientation = LinearLayout.HORIZONTAL
+                                    gravity = android.view.Gravity.CENTER_VERTICAL
+                                }
+                                val ring = WaitRing(act, ui.pal.text, 56)
+                                liveLnRing = ring
+                                row.addView(ring, LinearLayout.LayoutParams(ui.px(56), ui.px(56)).also { it.setMargins(0, 0, ui.px(12), 0) })
+                                row.addView(ui.notice(w), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                                body.add(row)
+                            } else {
+                                body.add(ui.notice(w))
+                            }
+                        }
                         if (request) {
                             val label = requestLabel(index, info, s.needsSats)
                             body.add(ui.button(WordsOfRequests.SHARE_LINK) { shareLink(index, label) { w -> flashWith(w) } })
@@ -2477,6 +2503,7 @@ class Controller(private val act: MainActivity) {
                 wait.ringSecs?.let { liveRing?.show(it, wait.ringTotal, motion) }
                 wait.seen?.let { liveSeen?.text = it }
                 livePulse?.pulsing(wait.pulse, motion)
+                lnWait?.let { (left, total) -> liveLnRing?.show(left, total, motion) }
             } catch (e: CounterException) {
                 tapSet(null)
                 act.show(ui.page(ui.bar("Sale ${index + 1}"), listOf(note(e.sayWords()))))

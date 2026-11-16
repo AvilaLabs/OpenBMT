@@ -348,6 +348,14 @@ object ProtocolDecoderTest {
             val ln = it.lightning ?: error("a Lightning line")
             check(!ln.notForThisSale && ln.failed?.heading == "Not finished")
         }
+        decodeResponse(screenFrame(lightning = 6)).screen().also {
+            val ln = it.lightning ?: error("a Lightning line")
+            check(ln.waiting && ln.waitSecsLeft == 4L && ln.waitSecsTotal == 6L)
+        }
+        decodeResponse(screenFrame(lightning = 1)).screen().also {
+            val ln = it.lightning ?: error("a Lightning line")
+            check(ln.waitSecsLeft == null && ln.waitSecsTotal == null)
+        }
         rejects("a bool in the Lightning line") { decodeResponse(screenFrame(lightning = 3)).screen() }
         decodeResponse(screenFrame(check = true)).screen().also { check(it.check?.heading == "Light check") }
         decodeResponse(screenFrame(payment = false)).screen().also { check(it.payment == null) }
@@ -658,7 +666,17 @@ object ProtocolDecoderTest {
                 out.write(byteArrayOf(1, 0, 0, 0, 0, 1))
                 words(out, 2, 2, "Not finished".toByteArray(Charsets.UTF_8))
             }
+            6 -> out.write(byteArrayOf(1, 0, 1, 0, 0, 0))
             else -> out.write(byteArrayOf(1, 2, 0, 0, 0, 0))
+        }
+        // CR-286: the seconds of the wait for the invoice follow the Lightning line, when there is one.
+        if (lightning == 6) {
+            out.write(1)
+            out.write(Writer().u64(4).toByteArray())
+            out.write(1)
+            out.write(Writer().u64(6).toByteArray())
+        } else if (lightning != 0) {
+            out.write(byteArrayOf(0, 0))
         }
         out.write(lightningFirst)
         out.write(Writer().u64(0).toByteArray())

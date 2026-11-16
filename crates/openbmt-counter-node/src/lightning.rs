@@ -891,6 +891,23 @@ impl Lightning {
         }
     }
 
+    /// CR-286: the seconds left of the wait for the sale's invoice (CR-113),
+    /// only while it is being waited for and some are left.
+    pub fn wait_secs_left(&mut self, index: u32, now: u64) -> Option<u64> {
+        self.settle_windows(now);
+        let sale = self.sales.get(&index).filter(|s| !s.closed)?;
+        let inv = sale.invs.last()?;
+        let waiting = matches!(
+            inv.phase,
+            Phase::Want { .. } | Phase::Asked | Phase::WantLabel { .. } | Phase::AskedLabel
+        );
+        let left = inv
+            .asked_from
+            .saturating_add(INVOICE_WINDOW_SECS)
+            .saturating_sub(now);
+        (waiting && left > 0).then_some(left.min(INVOICE_WINDOW_SECS))
+    }
+
     /// CR-113: a sale with no invoice [`INVOICE_WINDOW_SECS`] seconds after
     /// its quote has none.
     fn settle_windows(&mut self, now: u64) {

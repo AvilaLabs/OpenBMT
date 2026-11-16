@@ -27,6 +27,7 @@
   // docs/screens/counter.md (CheckMode::Light), the health card and the check line of a paid sale
   const checkedLight = w("good", "Checked by this counter", "This counter checked the payment itself, through its own connection to the network.", "Nothing to do. The sale screen says when to hand over the goods.", "nobody");
   // docs/screens/counter-app.md
+  const lightningWaiting = w("info", "Lightning code coming", "The counter is asking the shop's node for a Lightning code for this sale.", "Let the customer pay on-chain with the code above, or wait a few seconds.", "cashier");
   const priceReady = w("good", "Price ready", "Bitcoin is priced at 73,554.18 USD, from 3 price sources.", "Nothing to do. The app asks the sources again every minute.", "nobody");
   const todayWaiting = w("info", "Why sales are waiting", "A sale waits until its payment is accepted: it may be unpaid, part paid, or paid and not yet confirmed.", "Open the sale from Sales to see which. The count changes once the payment is accepted or the sale ends.", "cashier");
   const todayPeopleNeedPin = w("info", "Lines per person", "The lines per person show who opened each sale and did each override or refund, so they need the manager's PIN.", "Type the manager's PIN, then tap Show the lines.", "manager");
@@ -91,6 +92,10 @@
     },
     newSale: { entry: "24.50 USD", price: "Bitcoin is priced at 73,554.18 USD, from 3 price sources.", words: counterWords },
     unpaid,
+    // CR-286: while the invoice is waited for, the Lightning line has the ring of the 6 seconds beside its words.
+    lightningWaiting: Object.assign({}, unpaid, {
+      extra: [lightningWaiting], lnRingAt: 0, lnRingSecs: 4, lnRingTotal: 6, lnRingLabel: "4 s",
+    }),
     partPaid: Object.assign({}, unpaid, {
       says: partPaid, stillHeading: "Still to pay", amountBig: "4.42 USD", amountSmall: "6,000 sats to send",
       receivedLine: "Paid 27,309 sats of 33,309. The sale is 24.50 USD.", buttons: { requote: true, cancel: false, override: true }, modules: sampleModules(),

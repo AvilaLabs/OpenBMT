@@ -147,7 +147,7 @@
       },
       event(kind, data) {
         if (r.dead) return;
-        // Controller.kt:2472 first: the first time this sale's screen is green or red, its sound plays, once; the model's
+        // Controller.kt:2498 first: the first time this sale's screen is green or red, its sound plays, once; the model's
         // OutcomePlays (SaleModel.kt:87) keeps count, and the notice of CR-284 shares it. A visitor's skipped taps
         // (r.quiet) are made without it.
         if (kind === "sale" && flow.outcomeFirst(data.number - 1, data.says.colour) && !r.quiet) box.outcome(data.says.colour);
