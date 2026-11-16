@@ -742,12 +742,14 @@ and no TLS certificate company is needed **[design, R5]**.
 
 ### 5.1 Counter mode
 
-The counter is a role, not a device of its own. It runs on what the shop
-already has: beside the register app on the same tablet or iPad (side by
-side, or switched to), on the owner's own phone (`docs/COUNTER-RULES.md`
-§23a), or inside a register that lets an app add a payment button (Clover's
-custom tender). A separate device is needed only where the register runs on
-hardware that takes no other app (Square Register, Square Terminal).
+The counter is a role, not a device of its own. The bar is that a shop
+takes bitcoin inside the checkout it already uses: one button, nothing typed
+twice, no extra device. Today that holds for a seller on the owner's own
+phone (`docs/COUNTER-RULES.md` §23a) and for a register that sends the
+amount (Odoo); Clover's custom tender can meet it once built. Beside a
+register that lets no app into its checkout (Square), the cashier types the
+amount on the counter and closes the order by hand, which does not meet the
+bar. How each register can meet it is open (R11).
 
 - Holds **signed batches of addresses**, not the wallet description. Owner mode
   derives a batch from the wallet and signs it with key 1. The Key app
@@ -1976,13 +1978,16 @@ Each gets a written protocol before it runs.
   and iPad as well as Android; Android is built first because it is easier
   to test. The money logic is shared Rust and the screens' logic is Kotlin
   that already builds for other targets (the demo runs it in a browser), so
-  the Apple apps reuse both and draw their own screens. On an iPad the
-  counter runs beside Square or another register app in Split View, so a
-  shop on an iPad needs no second device. Open: key storage and background
-  watching on iOS (R7), tap to pay at an iPhone counter under Apple's NFC
-  rules, and building on a Mac with an Apple developer account.
+  the Apple apps reuse both and draw their own screens. Open: key storage
+  and background watching on iOS (R7), tap to pay at an iPhone counter under
+  Apple's NFC rules, and building on a Mac with an Apple developer account.
 - R10: **per-sale signed payment requests**, so a wallet can show who is being
   paid. No standard exists today.
+- R11: **bitcoin inside each register's own checkout.** For every register
+  shops commonly use, and for the card terminals that run apps: whether an
+  app can add a payment button to its checkout, take the amount from it and
+  close the order, on the device the shop already has, with no custodian and
+  no fee in the path.
 
 ## 16. Decisions and open questions
 
