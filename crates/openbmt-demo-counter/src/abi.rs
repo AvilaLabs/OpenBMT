@@ -23,6 +23,9 @@
 //! - `chain_pay(ptr, len, sats) -> u64`: a customer pays the address written
 //!   at `ptr` on the pretend chain; the reply is text, `ok:` and the id, or
 //!   `err:` and why;
+//! - `chain_replace(ptr, len, sats) -> u64`: the customer takes the payment
+//!   whose id is written at `ptr` back, by spending its coin again to an
+//!   address of their own; text, `ok:` and the new id, or `err:` and why;
 //! - `chain_mine() -> u64`: a block is mined; text, `ok:` and the height;
 //! - `chain_tip() -> u64`: the tip's hash; text, `ok:` and the hash;
 //! - `chain_heartbeat() -> u64`: the heartbeat the owner's phone would send
@@ -149,6 +152,25 @@ pub unsafe extern "C" fn chain_pay(ptr: *mut u8, len: usize, sats: u64) -> u64 {
             Err(e) => format!("err:{e}"),
         },
         Err(_) => "err:the address is not text".to_string(),
+    };
+    give(text.into_bytes())
+}
+
+/// The customer replaces the payment whose id is the text of `len` bytes at
+/// `ptr` (freed here) by one of `sats` to an address of their own.
+///
+/// # Safety
+/// `ptr` and `len` must be exactly a buffer from `demo_alloc`, not yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn chain_replace(ptr: *mut u8, len: usize, sats: u64) -> u64 {
+    // SAFETY: the contract is the caller's, as for `take`.
+    let id = unsafe { take(ptr, len) };
+    let text = match std::str::from_utf8(&id) {
+        Ok(id) => match crate::world::replace(id, sats) {
+            Ok(txid) => format!("ok:{txid}"),
+            Err(e) => format!("err:{e}"),
+        },
+        Err(_) => "err:the id is not text".to_string(),
     };
     give(text.into_bytes())
 }

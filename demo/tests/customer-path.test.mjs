@@ -241,7 +241,7 @@ test('the last moment is the same on every way to pay', () => {
   const p = page(ONCHAIN);
   p.enter(5);
   assert.equal(p.log.says.at(-1).happened, 'You paid from your own wallet, straight to the shop\'s own wallet, with no company in between.');
-  assert.equal(p.line(), 'That is all a customer does. Tap [Start over] to try it as the merchant.');
+  assert.equal(p.line(), '', 'the card says what to do next: no instruction is left');
 });
 
 test('the customer\'s questions carry the new ones with their handbook links', () => {

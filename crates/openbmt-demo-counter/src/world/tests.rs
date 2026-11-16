@@ -203,3 +203,70 @@ fn a_counter_with_no_box_in_its_settings_drops_the_request() {
     assert!(crate::till::request(800).is_err());
     ok(&call(&frame(2, handle, &[])));
 }
+
+/// The state byte of the sale `index` at `at`, after the counter has read what the chain told it.
+fn state_at(handle: u64, index: u32, at: u64) -> u8 {
+    set_now(at);
+    let mut beat = Vec::new();
+    beat.extend_from_slice(&at.to_le_bytes());
+    put_bytes(&mut beat, &heartbeat(at).expect("a heartbeat"));
+    ok(&call(&frame(20, handle, &beat)));
+    let mut pump = Vec::new();
+    pump.extend_from_slice(&at.to_le_bytes());
+    pump.extend_from_slice(&0u32.to_le_bytes());
+    ok(&call(&frame(10, handle, &pump)));
+    let mut judge = Vec::new();
+    judge.extend_from_slice(&at.to_le_bytes());
+    judge.extend_from_slice(&index.to_le_bytes());
+    *ok(&call(&frame(12, handle, &judge)))
+        .first()
+        .expect("a state")
+}
+
+/// A customer who pays and then spends the same coin to an address of their own
+/// within the counter's short check (about eight seconds of its clock): the counter's state is the red
+/// do-not-hand-over state (7), and never a green one.
+#[test]
+fn a_payment_replaced_within_the_short_check_turns_red() {
+    let _one = crate::ONE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    set_now(T0);
+    let record = crate::record::demo_record().expect("a record");
+    let started = call(&frame(1, 0, &start_fields(&record)));
+    let handle = u64::from_le_bytes(ok(&started).get(..8).expect("a handle").try_into().unwrap());
+    let mut pump = Vec::new();
+    pump.extend_from_slice(&T0.to_le_bytes());
+    pump.extend_from_slice(&0u32.to_le_bytes());
+    ok(&call(&frame(10, handle, &pump)));
+    let opened = call(&frame(11, handle, &open_fields(800)));
+    let body = ok(&opened);
+    let index = u32::from_le_bytes(body.get(..4).expect("an index").try_into().unwrap());
+    let needs = u64::from_le_bytes(body.get(4..12).expect("sats").try_into().unwrap());
+    let len = u32::from_le_bytes(body.get(36..40).expect("a length").try_into().unwrap());
+    let address = std::str::from_utf8(body.get(40..40 + len as usize).expect("an address"))
+        .expect("UTF-8")
+        .to_string();
+
+    let txid = pay(&address, needs).expect("paid");
+    let mut states = Vec::new();
+    for t in 1..=3u64 {
+        states.push(state_at(handle, index, T0 + t));
+    }
+    assert!(states.iter().all(|s| *s != 3), "still short of green");
+    let other = replace(&txid, needs).expect("replaced");
+    assert_ne!(other, txid);
+    assert_eq!(world().as_ref().expect("a chain").chain.mempool_len(), 1);
+    assert!(replace(&txid, needs).is_err(), "the first payment is gone");
+    let mut after = Vec::new();
+    for t in 4..=20u64 {
+        after.push(state_at(handle, index, T0 + t));
+    }
+    assert_eq!(after.last(), Some(&7), "the counter turns red");
+    assert!(after.iter().all(|s| *s != 3), "green never shows");
+
+    ok(&call(&frame(2, handle, &[])));
+    let _ = std::fs::remove_dir_all(
+        std::env::temp_dir().join(format!("openbmt-demo-counter-{}", std::process::id())),
+    );
+}

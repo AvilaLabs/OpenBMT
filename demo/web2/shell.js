@@ -40,8 +40,26 @@
     return e;
   }
 
-  /** The scenarios the bar offers, in order. */
-  const SCENARIOS = ["Customer", "Café", "Register", "Something goes wrong"];
+  /**
+   * The bar's tabs, in order. A tab with a [menu] shows a chevron and opens its sub-scenarios; [screen] says the tab's own
+   * label opens a screen too (the register's choice), and the chevron alone opens the menu.
+   */
+  const BAR = [
+    { name: "Customer" },
+    { name: "Café" },
+    { name: "With your register", screen: true, menu: ["Your register sends the amount", "Square, Clover and others"] },
+    { name: "When something goes wrong", menu: ["A short payment", "A cancelled payment"] },
+  ];
+  /** The scenarios that play, by their bar names: a tab without a menu, or a menu's item. */
+  const SCENARIOS = BAR.flatMap((t) => t.menu || [t.name]);
+  /** The tab a scenario (or the tab itself) belongs to. */
+  const tabOf = (name) => (BAR.find((t) => t.name === name || (t.menu && t.menu.includes(name))) || {}).name || null;
+  // TODO_WORDS_menu_chevron_label: the spoken name of the chevron beside "With your register" (the tab's own name stands in).
+  const TODO_WORDS_menu_chevron_label = (tab) => tab;
+  const ACTOR_W = 220;
+  /** How long sizes ease when the lit device changes, and the share of its size the other devices keep. */
+  const EASE_MS = 300;
+  const REST_SHARE = 0.7;
 
   /** The ending card of each scenario: a heading and three lines. The register has one card for both of its ways. */
   const CARDS = {
@@ -85,6 +103,14 @@
         "Green comes only when the whole amount has arrived.",
       ],
     },
+    Cancelled: {
+      heading: "A cancelled payment turns red.",
+      lines: [
+        "The counter watches for a second payment of the same money.",
+        "Caught in time, the sale turns red, and nothing is handed over.",
+        "The cashier asks for another payment.",
+      ],
+    },
   };
   /** How long after the last moment the card comes, and how it comes in (the screen fade's easing). */
   const CARD_DELAY = 1200;
@@ -120,15 +146,19 @@
       this.scenEl.setAttribute("aria-label", "Scenario");
       this.scenSel = el("select", "scenario-select");
       this.scenSel.setAttribute("aria-label", "Scenario");
-      for (const name of SCENARIOS) {
-        const b = el("button", null, name);
-        b.addEventListener("click", () => this.onScenario && this.onScenario(name));
-        this.scenEl.append(b);
-        const o = el("option", null, name);
-        o.value = name;
-        this.scenSel.append(o);
-      }
-      this.scenSel.addEventListener("change", () => this.onScenario && this.onScenario(this.scenSel.value));
+      // Shown (and hidden from the list) while the register's choice screen is open, which the select has no item for.
+      this.scenHold = el("option");
+      this.scenHold.value = "";
+      this.scenHold.hidden = true;
+      this.scenHold.disabled = true;
+      this.scenSel.append(this.scenHold);
+      this.tabs = new Map();
+      for (const item of BAR) this.buildTab(item);
+      this.scenSel.addEventListener("change", () => {
+        if (this.scenSel.value) this.pick(this.scenSel.value);
+      });
+      this.menuAway = (ev) => { if (this.openTab && !this.openTab.contains(ev.target)) this.closeMenu(); };
+      document.addEventListener("click", this.menuAway);
       this.stepList = el("ol", "steps");
       const right = el("div", "right");
       // The sound switch shows the state it is in (see [setSound]); the page decides what a tap does.
@@ -170,14 +200,127 @@
       this.root.append(demo);
     }
 
-    /** Marks scenario [name] as the current one in the tabs and the select; null marks none. */
-    scenario(name) {
-      for (const b of this.scenEl.children) {
-        if (b.textContent === name) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current");
+    /** A tab of the bar, and its place in the narrow window's select. */
+    buildTab(item) {
+      const tab = el("div", "tab" + (item.menu ? " has-menu" : ""));
+      const label = el("button", "tab-label", item.name);
+      tab.append(label);
+      this.tabs.set(item.name, { tab, label, items: new Map() });
+      const entry = this.tabs.get(item.name);
+      if (!item.menu) {
+        label.addEventListener("click", () => this.pick(item.name));
+        const o = el("option", null, item.name);
+        o.value = item.name;
+        this.scenSel.append(o);
+        this.scenEl.append(tab);
+        return;
       }
-      this.scenSel.value = name || SCENARIOS[0];
-      this.current = name;
+      const list = el("ul", "menu");
+      list.setAttribute("role", "menu");
+      list.hidden = true;
+      entry.list = list;
+      let opener = label;
+      if (item.screen) {
+        // The label opens the tab's own screen; the chevron beside it opens the menu.
+        label.addEventListener("click", () => this.pick(item.name));
+        const chev = el("button", "tab-chev");
+        chev.setAttribute("aria-label", TODO_WORDS_menu_chevron_label(item.name));
+        chev.addEventListener("click", () => this.toggleMenu(item.name));
+        tab.append(chev);
+        opener = chev;
+        label.addEventListener("keydown", (ev) => { if (ev.key === "ArrowDown") { ev.preventDefault(); this.openMenu(item.name, true); } });
+      } else {
+        label.addEventListener("click", () => this.toggleMenu(item.name));
+        label.classList.add("chevron");
+      }
+      opener.setAttribute("aria-haspopup", "menu");
+      opener.setAttribute("aria-expanded", "false");
+      opener.addEventListener("keydown", (ev) => { if (ev.key === "ArrowDown") { ev.preventDefault(); this.openMenu(item.name, true); } });
+      entry.opener = opener;
+      const group = el("optgroup");
+      group.label = item.name;
+      for (const name of item.menu) {
+        const li = el("li");
+        const b = el("button", null, name);
+        b.setAttribute("role", "menuitem");
+        b.addEventListener("click", () => { this.closeMenu(); this.pick(name); });
+        b.addEventListener("keydown", (ev) => this.menuKey(ev, item.name, b));
+        li.append(b);
+        list.append(li);
+        entry.items.set(name, b);
+        const o = el("option", null, name);
+        o.value = name;
+        group.append(o);
+      }
+      this.scenSel.append(group);
+      tab.append(list);
+      this.scenEl.append(tab);
     }
+
+    /** The scenario [name] was chosen, in a tab, a menu, the select or the ending card. */
+    pick(name) {
+      this.closeMenu();
+      if (this.onScenario) this.onScenario(name);
+    }
+
+    openMenu(tabName, focusFirst) {
+      this.closeMenu();
+      const entry = this.tabs.get(tabName);
+      if (!entry || !entry.list) return;
+      entry.list.hidden = false;
+      entry.opener.setAttribute("aria-expanded", "true");
+      this.openTab = entry.tab;
+      this.openName = tabName;
+      if (focusFirst) entry.items.values().next().value.focus();
+    }
+
+    toggleMenu(tabName) {
+      if (this.openName === tabName) this.closeMenu(); else this.openMenu(tabName, false);
+    }
+
+    closeMenu(refocus) {
+      if (!this.openName) return;
+      const entry = this.tabs.get(this.openName);
+      entry.list.hidden = true;
+      entry.opener.setAttribute("aria-expanded", "false");
+      this.openTab = null;
+      this.openName = null;
+      if (refocus) entry.opener.focus();
+    }
+
+    /** Arrow keys move through an open menu; Esc closes it and gives the focus back to its tab. */
+    menuKey(ev, tabName, button) {
+      const items = [...this.tabs.get(tabName).items.values()];
+      const at = items.indexOf(button);
+      if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+        ev.preventDefault();
+        items[(at + (ev.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        this.closeMenu(true);
+      }
+    }
+
+    /**
+     * Marks the current scenario in the tabs, the menus and the select: [tab] is the bar's tab and [sub] the menu item
+     * playing under it, if any. Null marks none.
+     */
+    scenario(tab, sub) {
+      for (const [name, entry] of this.tabs) {
+        if (name === tab) entry.label.setAttribute("aria-current", "true"); else entry.label.removeAttribute("aria-current");
+        for (const [item, b] of entry.items) {
+          if (name === tab && item === sub) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current");
+        }
+      }
+      // The select holds the playing scenario; on a tab's own screen it shows the tab's name.
+      this.scenHold.textContent = tab || "";
+      this.scenSel.value = sub || (tab && !this.tabs.get(tab).items.size ? tab : "");
+      this.current = tab;
+      this.sub = sub || null;
+    }
+
+    /** The scenario that is playing, by its bar name (a tab without a menu, or a menu's item). */
+    get leaf() { return this.sub || this.current; }
 
     /** Leaves what the page held for the scenario that ends here (a path's own run), once. */
     leave() {
@@ -187,23 +330,32 @@
     }
 
     /**
-     * The ending card of a scenario, 1.2 s after the call: [spec] is {heading, lines}. It slides up over the lower part
-     * of the stage with the devices dimmed behind it; its close control and Esc hide it and leave the moment as it was.
-     * The card offers the other scenarios, Start over and the handbook.
+     * The end of a scenario, called as its last moment is shown: every device is put out of use at once (no hover, no
+     * taps) and stays so until another scenario or Start over begins. The ending card of [spec], {heading, lines},
+     * comes 1.2 s later and slides up over the lower part of the stage with the devices dimmed behind it. Its close
+     * control and Esc put it away and leave one button in the instruction line that opens it again. The card offers
+     * the other scenarios, Start over and the handbook.
      */
     finish(spec) {
-      this.hideCard();
+      this.reset();
+      this.spec = spec;
+      this.ended = true;
+      for (const t of this.root.querySelectorAll(".target")) t.classList.remove("target");
+      for (const s of this.slots.values()) { s.aim = null; s.wrap.inert = true; }
+      if (this.actorEl) this.actorEl.inert = true;
+      this.stage.classList.add("finished");
       this.cardTimer = setTimeout(() => this.openCard(spec), CARD_DELAY);
     }
 
     openCard(spec) {
       this.cardTimer = null;
+      this.dropSummary();
       const card = el("section", "end-card");
       card.setAttribute("role", "dialog");
       card.setAttribute("aria-labelledby", "end-card-heading");
       const close = el("button", "end-close", "\u00D7");
       close.setAttribute("aria-label", "Close");
-      close.addEventListener("click", () => this.hideCard());
+      close.addEventListener("click", () => this.closeCard());
       const heading = el("h2", null, spec.heading);
       heading.id = "end-card-heading";
       heading.tabIndex = -1;
@@ -212,9 +364,9 @@
       const next = el("div", "end-next");
       next.append(el("span", "end-label", "Try next"));
       for (const name of SCENARIOS) {
-        if (name === this.current) continue;
+        if (name === this.leaf) continue;
         const b = el("button", null, name);
-        b.addEventListener("click", () => this.onScenario && this.onScenario(name));
+        b.addEventListener("click", () => this.pick(name));
         next.append(b);
       }
       const acts = el("div", "end-acts");
@@ -225,21 +377,45 @@
       acts.append(again, book);
       card.append(close, heading, list, next, acts);
       this.stage.append(card);
-      this.stage.classList.add("finished");
       this.cardEl = card;
-      this.escHandler = (ev) => { if (ev.key === "Escape") this.hideCard(); };
+      this.escHandler = (ev) => { if (ev.key === "Escape") this.closeCard(); };
       document.addEventListener("keydown", this.escHandler);
       if (motionOn()) card.animate(CARD_ENTER, CARD_TIMING);
       heading.focus({ preventScroll: true });
-      if (this.onCard) this.onCard();
+      if (this.onCard) this.onCard(this.leaf);
     }
 
-    /** Puts the ending card away (or stops it from coming) and brings the devices back to full strength. */
-    hideCard() {
+    /** The visitor puts the card away: the devices stay out of use and dimmed, and a button brings the card back. */
+    closeCard() {
+      this.removeCard();
+      if (!this.ended || !this.spec) return;
+      this.dropSummary();
+      this.summaryEl = el("button", "summary", "See the summary");
+      this.summaryEl.addEventListener("click", () => this.openCard(this.spec));
+      this.doEl.append(this.summaryEl);
+      this.summaryEl.focus({ preventScroll: true });
+      this.fit();
+    }
+
+    removeCard() {
       if (this.cardTimer) { clearTimeout(this.cardTimer); this.cardTimer = null; }
       if (this.escHandler) { document.removeEventListener("keydown", this.escHandler); this.escHandler = null; }
       if (this.cardEl) { this.cardEl.remove(); this.cardEl = null; }
+    }
+
+    dropSummary() {
+      if (this.summaryEl) { this.summaryEl.remove(); this.summaryEl = null; this.fit(); }
+    }
+
+    /** Puts the ending away entirely (a card, its button, the dimming) for a new start; the devices are made again by [begin]. */
+    reset() {
+      this.removeCard();
+      this.dropSummary();
+      this.ended = false;
+      this.spec = null;
       this.stage.classList.remove("finished");
+      for (const s of this.slots.values()) s.wrap.inert = false;
+      if (this.actorEl) this.actorEl.inert = false;
     }
 
     /** The sound switch reads "Sound on" or "Sound off": the state, not the action. */
@@ -248,12 +424,45 @@
     }
 
     /**
+     * The first screen of the page: the logo's four pieces apart on the start screen's colours, the name under them and
+     * one line, the whole of it one button. The tap calls [spec].play() (the snap, with its sounds) and, [spec].seconds
+     * and 600 ms later, fades the screen out (300 ms) onto what is beneath. With [spec].still (reduced motion) the tap
+     * goes straight there. [spec].done() is called as the screen goes. Returns the button.
+     */
+    opening(canvas, spec) {
+      const o = el("button", "opening");
+      o.setAttribute("aria-label", "Start the demo");
+      const holder = el("span", "open-logo");
+      holder.append(canvas);
+      o.append(holder, el("span", "open-name", "OpenBMT"), el("span", "open-line", "Tap to start the demo."));
+      let tapped = false;
+      const away = () => {
+        if (spec.done) spec.done();
+        o.remove();
+      };
+      o.addEventListener("click", () => {
+        if (tapped) return;
+        tapped = true;
+        if (spec.still) { away(); return; }
+        spec.play();
+        setTimeout(() => {
+          if (motionOn()) o.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, easing: "ease", fill: "forwards" });
+          setTimeout(away, motionOn() ? 300 : 0);
+        }, Math.round(spec.seconds * 1000) + 600);
+      });
+      this.root.append(o);
+      o.focus({ preventScroll: true });
+      this.openingEl = o;
+      return o;
+    }
+
+    /**
      * The start screen. [roles]: [{name, what, go, onPick}]. [snap]: {canvas, play()}, the logo that snaps together
-     * once, above the choices, each time the screen is shown. [opts]: {title, lede, back: {label, onTap}} for a choice
-     * screen other than the first.
+     * once, above the choices, each time the screen is shown. [opts]: {quiet} leaves the snap out this once (the opening
+     * screen has played it).
      */
     start(roles, snap, opts = {}) {
-      let s = this.root.querySelector(".start");
+      let s = this.root.querySelector(".start:not(.chooser)");
       if (!s) {
         s = el("div", "start");
         const top = el("div", "top");
@@ -261,35 +470,61 @@
         mark.innerHTML = '<img src="' + LOGO + '" alt=""><span>OpenBMT</span>';
         const book = el("a", null, "Handbook");
         book.href = HANDBOOK;
-        if (opts.back) {
-          const back = el("button", "back", opts.back.label);
-          back.addEventListener("click", opts.back.onTap);
-          top.append(mark, back, book);
-        } else top.append(mark, book);
+        top.append(mark, book);
         const mid = el("div", "mid");
-        mid.append(el("h1", null, opts.title || "Try OpenBMT"),
-          el("p", "lede", opts.lede || "Take a bitcoin payment the way a shop does, on the real apps, in this page."));
+        mid.append(el("h1", null, "Try OpenBMT"),
+          el("p", "lede", "Take a bitcoin payment the way a shop does, on the real apps, in this page."));
         if (snap) {
           const holder = el("div", "snap");
           holder.append(snap.canvas);
           mid.append(holder);
         }
-        const list = el("div", "roles");
-        for (const r of roles) {
-          const b = el("button", "role");
-          b.append(el("span", "name", r.name), el("span", "what", r.what), el("span", "go", r.go));
-          b.addEventListener("click", r.onPick);
-          list.append(b);
-        }
-        mid.append(list);
+        mid.append(this.cards(roles));
         const foot = el("div", "foot", "Everything runs in this page on a pretend blockchain. No real bitcoin moves.");
         s.append(top, mid, foot);
         this.root.append(s);
       }
       s.hidden = false;
-      this.hideCard();
+      this.reset();
+      this.closeMenu();
       this.demo.hidden = true;
-      if (snap) snap.play();
+      const chooser = this.root.querySelector(".start.chooser");
+      if (chooser) chooser.remove();
+      if (snap && !opts.quiet) snap.play();
+    }
+
+    /** The cards of a choice: [{name, what, go, onPick}] in a grid. */
+    cards(roles) {
+      const list = el("div", "roles");
+      for (const r of roles) {
+        const b = el("button", "role");
+        b.append(el("span", "name", r.name), el("span", "what", r.what), el("span", "go", r.go));
+        b.addEventListener("click", r.onPick);
+        list.append(b);
+      }
+      return list;
+    }
+
+    /**
+     * A choice inside the demo, under the scenario bar (the register's two ways): [opts] {title, lede}, [roles] as for
+     * [start]. The bar stays, and the screen goes when a scenario begins or the start screen comes.
+     */
+    choice(roles, opts) {
+      const old = this.root.querySelector(".start.chooser");
+      if (old) old.remove();
+      this.reset();
+      this.closeMenu();
+      this.clearDevices();
+      const s = el("div", "start chooser");
+      const mid = el("div", "mid");
+      mid.append(el("h1", null, opts.title), el("p", "lede", opts.lede), this.cards(roles));
+      s.append(mid);
+      this.root.append(s);
+      const plain = this.root.querySelector(".start:not(.chooser)");
+      if (plain) plain.hidden = true;
+      this.stepList.replaceChildren();
+      this.say("", []);
+      this.demo.hidden = false;
     }
 
     /**
@@ -298,9 +533,9 @@
      * [actorAfter] keeps room beside that device for the customer the demo plays.
      */
     begin(steps, devices, actorAfter) {
-      this.hideCard();
-      const s = this.root.querySelector(".start");
-      if (s) s.hidden = true;
+      this.reset();
+      this.closeMenu();
+      for (const s of this.root.querySelectorAll(".start")) { if (s.classList.contains("chooser")) s.remove(); else s.hidden = true; }
       this.demo.hidden = false;
       this.stepList.replaceChildren();
       steps.forEach((name, i) => {
@@ -312,10 +547,7 @@
         this.stepList.append(li);
       });
       const kept = new Map([...this.slots].map(([k, v]) => [k, v.size]));
-      for (const [, slot] of this.slots) slot.wrap.remove();
-      this.slots.clear();
-      if (this.actorEl) this.actorEl.remove();
-      this.actorEl = null;
+      this.clearDevices();
       for (const d of devices) {
         const wrap = el("div", "slot");
         const cap = el("div", "cap");
@@ -342,6 +574,15 @@
       }
       this.questions([]);
       this.fit();
+    }
+
+    /** Takes the devices and the customer off the stage. */
+    clearDevices() {
+      for (const [, slot] of this.slots) slot.wrap.remove();
+      this.slots.clear();
+      if (this.actorEl) this.actorEl.remove();
+      this.actorEl = null;
+      this.lit = null;
     }
 
     /** The switch between the device kinds of a slot, such as Tablet and Phone. */
@@ -451,6 +692,9 @@
     questions(list) {
       this.qaEl.replaceChildren();
       this.qaEl.classList.remove("open");
+      // With nothing to ask, the column gives its width to the devices.
+      this.body.classList.toggle("noqa", !list.length);
+      this.fit();
       this.askEl.hidden = !list.length;
       this.askEl.textContent = "Questions";
       if (!list.length) return;
@@ -494,6 +738,7 @@
         s.why.textContent = on ? "" : (why[k] || "");
       }
       this.lit = id;
+      this.easeNext = true;
       this.updateSwitch();
     }
 
@@ -546,43 +791,80 @@
     actor(spec) {
       const a = this.actorEl;
       if (!a) return;
-      if (!spec) { a.classList.add("away"); a.replaceChildren(); return; }
+      if (!spec) { a.classList.add("away"); a.replaceChildren(); this.fit(true); return; }
       a.replaceChildren(el("div", "who", spec.who), el("div", "line", spec.line));
       const b = el("button", null, spec.button);
       b.addEventListener("click", spec.onTap);
       a.append(b);
       a.classList.remove("away");
+      this.fit(true);
     }
 
-    /** Scales each device to the height there is, never above its real size, and all of them to the width. */
-    fit() {
+    /**
+     * Sizes the devices to the stage. The device the visitor acts on (the lit one) is drawn at the largest size the
+     * stage's height allows, never above its real size; the others at [REST_SHARE] of theirs, side by side, unless all of
+     * them fit at full size. What does not fit the width is scaled down together. The devices, and the customer while one
+     * is shown, are centred as one group by the stage. With [ease] (and when the window moves, never) the change eases
+     * over [EASE_MS] on the transform alone: the layout takes its new size at once and each device is drawn from where it
+     * was to where it is.
+     */
+    fit(ease) {
+      ease = ease || this.easeNext;
+      this.easeNext = false;
       const narrow = innerWidth < 900;
-      let below = 0;
-      for (const s of this.slots.values()) below = Math.max(below, s.under.offsetHeight ? s.under.offsetHeight + 8 : 0);
-      const room = this.stage.clientHeight - (narrow ? 8 + 28 + 8 : 14 + 28 + 8 + 18 + 8) - 14 - below;
-      const k = new Map();
-      for (const s of this.slots.values()) {
-        const w = s.size.width + 2 * BEZEL, h = s.size.height + 2 * BEZEL;
-        k.set(s, Math.max(0.3, Math.min(1, room / h, (narrow ? innerWidth - 24 : Infinity) / w)));
+      const slots = [...this.slots.values()];
+      const num = (v) => parseFloat(v) || 0;
+      const cs = getComputedStyle(this.stage);
+      const innerH = (this.stage.clientHeight || 0) - num(cs.paddingTop) - num(cs.paddingBottom);
+      const dims = (s) => ({ w: s.size.width + 2 * BEZEL, h: s.size.height + 2 * BEZEL });
+      const before = new Map();
+      if (ease && !narrow && motionOn()) for (const s of slots) if (s.k && s.phone.getBoundingClientRect && s.phone.getBoundingClientRect().width) before.set(s, s.phone.getBoundingClientRect());
+      // The caption, the rest's line and the button below take height of their own.
+      const own = (s) => (s.wrap.offsetHeight ? s.wrap.offsetHeight - s.fit.offsetHeight : 36);
+      const full = new Map();
+      for (const s of slots) {
+        const { w, h } = dims(s);
+        full.set(s, Math.max(0.3, Math.min(1, (innerH - own(s)) / h, (narrow ? innerWidth - 24 : Infinity) / w)));
       }
-      if (!narrow && this.slots.size) {
-        const cs = getComputedStyle(this.stage);
-        const gap = parseFloat(cs.columnGap) || 0;
-        const items = this.slots.size + (this.actorEl ? 1 : 0);
-        const avail = this.stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
-          - gap * (items - 1) - (this.actorEl ? this.actorEl.offsetWidth || 220 : 0) - 8;
-        let total = 0;
-        for (const s of this.slots.values()) total += (s.size.width + 2 * BEZEL) * k.get(s);
-        if (total > avail) for (const s of this.slots.values()) k.set(s, Math.max(0.3, k.get(s) * avail / total));
+      const k = new Map(full);
+      if (!narrow && slots.length) {
+        const gap = num(cs.columnGap);
+        const actorOn = this.actorEl && !this.actorEl.classList.contains("away");
+        const items = slots.length + (actorOn ? 1 : 0);
+        const fixed = gap * (items - 1) + (actorOn ? ACTOR_W : 0) + 8;
+        const avail = (this.stage.clientWidth || 0) - num(cs.paddingLeft) - num(cs.paddingRight) - fixed;
+        const total = () => slots.reduce((sum, s) => sum + dims(s).w * k.get(s), 0);
+        if (total() > avail && avail > 0) {
+          // The lit device at the scale f, the others at REST_SHARE of it (never above what their own height allows); f
+          // is lowered until they all fit the width.
+          const lit = this.slots.get(this.lit);
+          let f = lit ? full.get(lit) : Math.max(...full.values());
+          for (let i = 0; i < 40; i++) {
+            for (const s of slots) k.set(s, Math.max(0.25, Math.min(s === lit || !lit ? f : f * REST_SHARE, full.get(s))));
+            const t = total();
+            if (t <= avail) break;
+            f *= (avail / t) * 0.995;
+          }
+        }
       }
-      for (const s of this.slots.values()) {
-        const f = k.get(s), w = s.size.width + 2 * BEZEL, h = s.size.height + 2 * BEZEL;
+      for (const s of slots) {
+        const f = k.get(s), { w, h } = dims(s);
         s.phone.style.width = w + "px";
         s.phone.style.height = h + "px";
         s.phone.style.transform = `scale(${f})`;
         s.phone.classList.toggle("tablet", s.size.width > 500);
         s.fit.style.width = w * f + "px";
         s.fit.style.height = h * f + "px";
+        s.k = f;
+        if (s.easing) { s.easing.cancel(); s.easing = null; }
+      }
+      for (const [s, was] of before) {
+        const now = s.phone.getBoundingClientRect(), f = s.k;
+        const from = was.width / dims(s).w;
+        const dx = was.left - now.left, dy = was.top - now.top;
+        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 && Math.abs(from - f) < 0.002) continue;
+        s.easing = s.phone.animate([{ transform: `translate(${dx}px, ${dy}px) scale(${from})` }, { transform: `scale(${f})` }],
+          { duration: EASE_MS, easing: "cubic-bezier(0.2, 0, 0, 1)" });
       }
     }
 
@@ -609,6 +891,7 @@
     }
   }
 
+  Shell.BAR = BAR;
   Shell.SCENARIOS = SCENARIOS;
   Shell.CARDS = CARDS;
   root.OpenBmtShell = Shell;

@@ -50,7 +50,10 @@
   };
   // With reduced motion the logo is still and silent, as the app's is with the animator scale at 0 (Feedback.kt:74 motionOn).
   const motionOn = () => !matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const snap = F.LogoSnapView(await F.loadPieces(assets.logoPieces), innerWidth < 900 ? 96 : 128, box, motionOn);
+  const pieces = await F.loadPieces(assets.logoPieces);
+  const snap = F.LogoSnapView(pieces, innerWidth < 900 ? 96 : 128, box, motionOn);
+  // The sounds are fetched and decoded now, so that the opening screen's first tap finds them ready.
+  box.prepare();
 
   /** SaleModel.kt:87 OutcomePlays: a sale plays the sound of good once and the sound of stop once, in this run. */
   function OutcomePlays() {
@@ -350,8 +353,7 @@
         run.chain.mine();
         pump(run);
         run.owner.takeEvents(clock.now());
-        shell.say("A block holds the payment. Your phone shows it in the shop's wallet.",
-          ["That is a whole sale. Tap ", { b: "Start over" }, " to try it as the customer."]);
+        shell.say("A block holds the payment. Your phone shows it in the shop's wallet.", []);
         shell.questions(QS.merchant.books);
       } },
     ];
@@ -426,6 +428,50 @@
       { step: 3, enter() {
         aim(null);
         shell.actor(null);
+        shell.say("Paid. The two payments together cover the sale.", []);
+      } },
+    ];
+  }
+
+  // ---- Something goes wrong, the other way: the customer takes the payment back within the counter's short check. ----
+  function cancelledMoments(go, S) {
+    const c = () => run.controller;
+    // The id of the payment the customer sent: the customer's wallet spends its coin again to take it back.
+    let sent = null;
+    const send = () => { const read = readCode(); sent = run.chain.pay(read.address, read.sats); };
+    return [
+      { step: 0, enter() {
+        shell.actor(null);
+        shell.light("counter", {});
+        shell.say("A customer's order comes to 8.00 USD.", ["Type the amount, then tap ", { b: "Open the sale" }, "."]);
+        shell.questions(QS.merchant.wrong);
+        aim(nextTap(flow.entryMinor()));
+        S.on = { entry: (e) => aim(nextTap(e.minor)), sale: go };
+      }, auto() { for (const key of AMOUNT) c().press(key); c().openEntered(); } },
+      { step: 1, enter() {
+        aim(null);
+        const read = readCode();
+        shell.say("The counter shows a code for this sale.", ["Tap ", { b: "The customer pays" }, "."]);
+        shell.actor({
+          who: "The customer", line: `Pays ${groups(read.sats)} sats.`, button: "The customer pays",
+          onTap() { send(); spendActor(); go(); },
+        });
+        S.on = null;
+      }, auto: send },
+      // The page does not move the counter's clock here: the counter's own short check runs in real time, and the
+      // customer cancels within it.
+      { step: 1, enter() {
+        shell.say("The customer sent the payment.",
+          ["The counter makes a short check for a second payment of the same money. This customer cancels before it ends: tap ", { b: "The customer cancels" }, "."]);
+        shell.actor({
+          who: "The customer", line: "Sends the same money back to their own wallet.", button: "The customer cancels",
+          onTap() { run.chain.cancel(sent); spendActor(); },
+        });
+        S.on = { sale: (d) => { if (d.state === "DoNotHandOver") go(); } };
+      }, auto() { run.chain.cancel(sent); pump(run); } },
+      { step: 2, enter() {
+        shell.actor(null);
+        shell.say("Red: do not hand over the goods.", []);
       } },
     ];
   }
@@ -448,10 +494,18 @@
   };
 
   const wrong = {
-    scenario: "Something goes wrong", card: "Something goes wrong",
+    scenario: "When something goes wrong", sub: "A short payment", card: "Something goes wrong",
     steps: ["Ring up", "A short payment", "The rest", "Paid"],
     devices: [{ id: "counter", caption: "The shop's counter", sizes: COUNTER }],
     actorAfter: "counter", moments: wrongMoments,
+    setup() { run.controller.showNewSale(); },
+  };
+
+  const cancelled = {
+    scenario: "When something goes wrong", sub: "A cancelled payment", card: "Cancelled",
+    steps: ["Ring up", "The payment", "Cancelled"],
+    devices: [{ id: "counter", caption: "The shop's counter", sizes: COUNTER }],
+    actorAfter: "counter", moments: cancelledMoments,
     setup() { run.controller.showNewSale(); },
   };
 
@@ -462,7 +516,7 @@
     const S = { index: -1, on: null };
     const mine = ++playing;
     shell.begin(path.steps, path.devices, path.actorAfter);
-    shell.scenario(path.scenario);
+    shell.scenario(path.scenario, path.sub);
     const go = () => enter(S.index + 1);
     const moments = path.moments(go, S);
     function enter(i) {
@@ -495,32 +549,51 @@
     };
   }
 
-  const pick = () => {
+  /** The start screen; [first] leaves its snap to the opening screen, which has played it. */
+  const pick = (first) => {
     playing++;
     stopRun();
     shell.scenario(null);
     shell.start([
-      { name: "As a customer", what: "Pay a shop in bitcoin, the way it works at the counter.", go: "Start", onPick: () => play(customer) },
-      { name: "As a merchant", what: "Take a payment at the counter and see it reach the owner's phone.", go: "Start", onPick: () => play(merchant) },
-    ], snap);
+      { name: "As a customer", what: "Pay a shop in bitcoin, the way it works at the counter.", go: "Start", onPick: () => shell.pick("Customer") },
+      { name: "A café", what: "Take a coffee and a meal at the counter, and see them reach the owner's phone.", go: "Start", onPick: () => shell.pick("Café") },
+      { name: "With your register", what: "The counter beside the register a shop already has.", go: "Start", onPick: () => shell.pick("With your register") },
+      { name: "When something goes wrong", what: "A short payment or a cancelled one, and what the counter does.", go: "Start", onPick: () => shell.pick("A short payment") },
+    ], snap, { quiet: first === true });
   };
-  shell.onRestart = pick;
-  // The ending card plays the logo's confirmation sound once, as the box's green outcome does.
-  shell.onCard = () => box.outcome("Green");
-  // A tab starts its scenario from the first moment; the register's tab opens its choice of two ways.
+  shell.onRestart = () => pick();
+  // The ending card plays the logo's confirmation sound once, as the box's green outcome does; a red end has none.
+  shell.onCard = (leaf) => { if (leaf !== "A cancelled payment") box.outcome("Green"); };
+  // A tab, a menu item or a card starts its scenario from the first moment; the register's tab opens its choice.
   shell.onScenario = async (name) => {
     shell.leave();
     playing++;
     stopRun();
     if (name === "Customer") await play(customer);
     else if (name === "Café") await play(merchant);
-    else if (name === "Something goes wrong") await play(wrong);
-    else { await ready(); OpenBmtRegister.open(shell, registerRun()); }
+    else if (name === "A short payment") await play(wrong);
+    else if (name === "A cancelled payment") await play(cancelled);
+    else { await ready(); OpenBmtRegister.open(shell, registerRun(), name === "With your register" ? undefined : name); }
   };
   const want = new URLSearchParams(location.search).get("path");
   if (want === "merchant") await play(merchant);
   else if (want === "customer") await play(customer);
   else if (want === "wrong") await play(wrong);
-  else pick();
+  else if (want === "cancelled") await play(cancelled);
+  else {
+    // The visitor's first tap unlocks the sounds, and the logo snaps together with them on the opening screen.
+    pick(true);
+    const apart = F.LogoSnapView(pieces, innerWidth < 900 ? 120 : 160, box, motionOn);
+    // The mark's start frame has the pieces off the tile; the pieces are drawn a little apart from their places instead.
+    if (motionOn()) {
+      const gap = (dy, alpha = 1) => ({ dy, sx: 1, sy: 1, alpha });
+      const frame = { ...F.SnapTiming.frame(0), top: gap(-40), b: gap(0), bottom: gap(40), word: gap(34, 0.6) };
+      F.onDraw(apart.canvas.getContext("2d"), apart.canvas.width, frame, pieces);
+    }
+    shell.opening(apart.canvas, {
+      play: apart.play, seconds: F.SnapTiming.total,
+      get still() { return !motionOn(); },
+    });
+  }
   document.body.dataset.ready = "1";
 })();

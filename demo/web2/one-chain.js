@@ -24,6 +24,13 @@
       pay(address, sats) {
         return same("the payment", (m) => m.pay(address, sats));
       },
+      /**
+       * A customer takes the payment [txid] back by spending its coin again to an address of their own. The counter's
+       * chain holds it; the owner's module is not given it (the owner's phone is not on the page in that scenario).
+       */
+      cancel(txid) {
+        return counter.cancel(txid);
+      },
       /** A block is mined of everything in the pool, on both chains. The new height. */
       mine() {
         return same("the new height", (m) => m.mine());

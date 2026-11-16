@@ -105,6 +105,15 @@ export async function loadCounter(bytes, { now = () => Math.floor(Date.now() / 1
       const bytes = new TextEncoder().encode(address);
       return reply(take(x.chain_pay(put(bytes), bytes.length, BigInt(sats))));
     },
+    /**
+     * A customer takes the payment `txid` back: its coin is spent again to an address of the customer's own, the first
+     * payment leaves the pool and the replacement is announced. The replacement's id.
+     */
+    cancel(txid) {
+      tick();
+      const bytes = new TextEncoder().encode(txid);
+      return reply(take(x.chain_replace(put(bytes), bytes.length, 546n)));
+    },
     /** A customer's wallet pays `invoice` (from `invoiceOf`) on the pretend Lightning node; the sats paid. */
     payLightning(invoice) {
       tick();

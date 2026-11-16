@@ -92,3 +92,15 @@ test('storage that is off leaves the sound on, and a file that does not load sta
   await settle();
   assert.equal(box.play(F.Sound.Tick), false);
 });
+
+test('the files can be made ready before the first tap, and still stay silent until it', async () => {
+  const a = audio();
+  const box = SoundBox({ ...a.env, storage: store() });
+  box.prepare();
+  await settle();
+  assert.equal(a.fetched.length, Object.keys(F.Sound).length, 'every file is fetched');
+  assert.equal(box.play(F.Sound.Tick), false, 'nothing plays before the tap');
+  box.unlock();
+  assert.equal(box.play(F.Sound.Tick), true, 'the first cue of the snap plays at once after the tap');
+  assert.equal(a.played.length, 1);
+});

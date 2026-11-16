@@ -82,6 +82,14 @@ impl SimChain {
         self.mempool.push(tx);
     }
 
+    /// Take the transaction `txid` out of the mempool, as when a replacement of
+    /// it was mined or relayed instead. True when it was there.
+    pub fn remove(&mut self, txid: &Txid) -> bool {
+        let before = self.mempool.len();
+        self.mempool.retain(|t| t.compute_txid() != *txid);
+        self.mempool.len() != before
+    }
+
     /// How many transactions wait in the mempool.
     pub fn mempool_len(&self) -> usize {
         self.mempool.len()
@@ -224,6 +232,17 @@ mod tests {
         let block = chain.mine(1_010);
         assert_eq!(block.header.prev_blockhash, genesis);
         assert_eq!(chain.height_of(&block.block_hash()), Some(1));
+    }
+
+    #[test]
+    fn a_removed_transaction_leaves_the_mempool() {
+        let mut chain = SimChain::on_genesis(Network::Regtest, 1_000);
+        let tx = payment([6; 32], &miner_script(), 700);
+        let id = tx.compute_txid();
+        chain.broadcast(tx);
+        assert!(chain.remove(&id));
+        assert_eq!(chain.mempool_len(), 0);
+        assert!(!chain.remove(&id), "a second removal finds nothing");
     }
 
     #[test]

@@ -68,7 +68,7 @@
       return sound ? play(sound) : false;
     }
 
-    return { state, unlock, play, outcome, isUnlocked: () => unlocked };
+    return { state, prepare: init, unlock, play, outcome, isUnlocked: () => unlocked };
   }
 
   /** What the page gives it: the page's own fetch, audio and storage. */

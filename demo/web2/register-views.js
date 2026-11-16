@@ -15,37 +15,83 @@
     return e;
   }
 
-  const FONT = '"Roboto", system-ui, sans-serif';
-  const INK = "#16181d", MUTED = "#5f6470", LINE = "#e3e5ea", BG = "#ffffff", SOFT = "#f2f3f6";
+  const FONT = '"Ubuntu", system-ui, "Helvetica Neue", Arial, sans-serif';
+  // A generic modern register: neutral greys, one slate accent, rounded tiles. No company's look.
+  const INK = "#0f172a", MUTED = "#64748b", LINE = "#e2e8f0", GROUND = "#f1f5f9", TILE = "#ffffff", ACCENT = "#334155";
 
-  function button(text, primary, onTap) {
-    const b = el("button", `height:56px;border-radius:28px;font:500 17px ${FONT};border:${primary ? "0" : "1px solid " + LINE};background:${primary ? INK : BG};color:${primary ? "#fff" : INK};`, text);
+  /** The register's size on the stage: the counter tablet's, turned landscape. */
+  const LANDSCAPE = { width: C.TABLET.height, height: C.TABLET.width, density: C.TABLET.density };
+
+  /** The items of the shop and the order on the ticket, as the register shows them. */
+  const ITEMS = [["Coffee", "4.00"], ["Bagel", "4.00"], ["Juice", "5.00"], ["Muffin", "3.50"], ["Tea", "3.00"], ["Cookie", "2.50"]];
+  const LINES = [["Coffee", "4.00"], ["Bagel", "4.00"]];
+  const CHARGE = "Charge 8.00 USD";
+
+  /** A button of the register: [css] is its look; [onTap] is optional (Cash and Card do nothing: only Bitcoin is a target). */
+  function tap(text, css, onTap) {
+    const b = el("button", `border:0;font:inherit;cursor:pointer;${css}`, text);
     if (onTap) b.addEventListener("click", onTap);
     return b;
   }
 
+  /** "Coffee 4.00": the name and the price, one at each end of the row; the text reads with a space between. */
+  function row(name, price, css) {
+    const r = el("div", `display:flex;justify-content:space-between;align-items:baseline;${css}`);
+    r.append(el("span", null, name), document.createTextNode(" "), el("span", null, price));
+    return r;
+  }
+
+  /** A check mark drawn in CSS. */
+  function check(size) {
+    return el("span", `display:inline-block;width:${size * 0.55}px;height:${size}px;border:solid ${ACCENT};border-width:0 ${size * 0.16}px ${size * 0.16}px 0;transform:rotate(40deg) translate(-8%,-12%);margin:0 ${size * 0.35}px 0 ${size * 0.15}px`);
+  }
+
   /**
-   * The shop's register with one order. [d]: {paid} is true once the order is closed with the Bitcoin payment type;
-   * {taps} has bitcoin(), called when Bitcoin is tapped on an order that is not closed. Cash and Card do nothing:
-   * only Bitcoin is a target of the demo.
+   * The shop's register with one order, on a tablet of [size] (landscape or portrait), as a plain mock of any register:
+   * the sale screen with the items and the ticket, and the tender screen. [d]: {screen} is "sale" (the default), "tender"
+   * or "paid" (the sale screen with its order closed as Bitcoin; the tender screen has closed). {taps} has charge(),
+   * called when the Charge button is tapped, and bitcoin(), called when Bitcoin is tapped on the tender screen. Cash and
+   * Card do nothing: only Bitcoin is a target of the demo.
    */
-  function register(d) {
-    const dev = el("div", `width:${W}px;height:${H}px;position:relative;background:${BG};font-family:${FONT};color:${INK};display:flex;flex-direction:column;`);
+  function register(d, size = LANDSCAPE) {
+    const w = size.width, h = size.height, wide = w > h;
+    const dev = el("div", `width:${w}px;height:${h}px;position:relative;background:${GROUND};font-family:${FONT};color:${INK};display:flex;flex-direction:column;`);
     dev.className = "device";
-    const page = el("div", `flex:1;display:flex;flex-direction:column;padding:${C.STATUS_DP}px 0 ${C.NAV_DP}px;`);
-    const head = el("div", "height:64px;display:flex;align-items:center;padding:0 20px;font-size:22px;font-weight:500;", "Register");
-    const body = el("div", "flex:1;display:flex;flex-direction:column;padding:8px 20px;gap:16px;");
-    const order = el("div", `background:${SOFT};border-radius:20px;padding:20px;display:flex;flex-direction:column;gap:6px;`);
-    order.append(el("div", `font-size:15px;color:${MUTED}`, "Order 1042"), el("div", "font-size:34px;font-weight:500", "Total 8.00 USD"));
-    body.append(order);
-    const foot = el("div", "display:flex;flex-direction:column;gap:12px;padding:16px 20px 20px;");
-    if (d.paid) {
-      foot.append(el("div", "text-align:center;font-size:24px;font-weight:500;padding:12px 0", "Paid with Bitcoin"));
+    const page = el("div", `flex:1;min-height:0;display:flex;flex-direction:${wide ? "row" : "column"};padding:${C.STATUS_DP}px 0 ${C.NAV_DP}px;`);
+    const screen = d.screen || (d.paid ? "paid" : "sale");
+    const taps = d.taps || {};
+    if (screen === "tender") {
+      const box = el("div", "flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:36px;padding:0 48px;");
+      box.append(el("div", "font-size:46px;font-weight:500;letter-spacing:-0.01em;", "How is it paid?"));
+      const kinds = el("div", `display:flex;gap:24px;width:100%;max-width:${wide ? 780 : 480}px;${wide ? "" : "flex-direction:column;"}`);
+      const kind = (text, accent, onTap) => tap(text, `flex:1;height:${wide ? 150 : 110}px;border-radius:24px;font-size:34px;font-weight:500;`
+        + (accent ? `background:${ACCENT};color:#fff;` : `background:${TILE};color:${INK};box-shadow:inset 0 0 0 2px ${LINE};`), onTap);
+      kinds.append(kind("Cash", false), kind("Card", false), kind("Bitcoin", true, taps.bitcoin));
+      box.append(kinds, el("div", `font-size:24px;color:${MUTED};text-align:center;`, "Bitcoin is a payment type the shop added."));
+      page.append(box);
     } else {
-      foot.append(button("Cash", false), button("Card", false), button("Bitcoin", true, d.taps && d.taps.bitcoin));
+      // Left two-thirds: the items; right third: the ticket.
+      const items = el("div", `flex:2;min-width:0;min-height:0;display:grid;grid-template-columns:repeat(${wide ? 3 : 2},1fr);grid-auto-rows:1fr;gap:16px;padding:24px;`);
+      for (const [name, price] of ITEMS) {
+        const t = tap("", `background:${TILE};border-radius:22px;box-shadow:inset 0 0 0 2px ${LINE};display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;padding:20px 22px;text-align:left;color:${INK};`);
+        t.append(el("span", "font-size:30px;font-weight:500;", name), document.createTextNode(" "), el("span", `font-size:26px;color:${MUTED};`, price));
+        items.append(t);
+      }
+      const ticket = el("div", `flex:1;min-width:0;background:${TILE};${wide ? `border-left:2px solid ${LINE};` : `border-top:2px solid ${LINE};`}padding:24px 26px;display:flex;flex-direction:column;gap:14px;`);
+      ticket.append(el("div", `font-size:22px;color:${MUTED};`, "Order 1042"));
+      for (const [name, price] of LINES) ticket.append(row(name, price, "font-size:28px;"));
+      ticket.append(el("div", `height:2px;background:${LINE};margin:6px 0;`), row("Total", "8.00 USD", "font-size:30px;font-weight:500;"));
+      ticket.append(el("div", "flex:1"));
+      if (screen === "paid") {
+        const paid = el("div", `display:flex;align-items:center;justify-content:center;height:92px;border-radius:22px;background:${GROUND};font-size:28px;font-weight:500;`);
+        paid.append(check(30), el("span", null, "Paid with Bitcoin"));
+        ticket.append(paid);
+      } else {
+        ticket.append(tap(CHARGE, `height:92px;border-radius:22px;background:${ACCENT};color:#fff;font-size:30px;font-weight:500;`, taps.charge));
+      }
+      page.append(items, ticket);
     }
-    page.append(head, body, foot);
-    dev.append(page, C.statusBar(true), C.navBar(true));
+    dev.append(page, C.statusBar(true, w), C.navBar(true, w));
     return dev;
   }
 
@@ -62,7 +108,7 @@
     });
   }
 
-  const api = { register, tillScreen };
+  const api = { register, tillScreen, LANDSCAPE, CHARGE };
   root.OpenBmtRegisterViews = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis);

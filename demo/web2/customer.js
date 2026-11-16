@@ -144,8 +144,7 @@
       } },
       { step: 3, enter() {
         shell.light("counter", {});
-        shell.say("You paid from your own wallet, straight to the shop's own wallet, with no company in between.",
-          ["That is all a customer does. Tap ", { b: "Start over" }, " to try it as the merchant."]);
+        shell.say("You paid from your own wallet, straight to the shop's own wallet, with no company in between.", []);
       } },
     ];
   }

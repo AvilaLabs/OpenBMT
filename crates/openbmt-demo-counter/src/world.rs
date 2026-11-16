@@ -5,13 +5,15 @@
 //! [`pay`] and [`mine`]. The chain is the one of the books demo
 //! (`openbmt_demo::chain`).
 
+use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bitcoin::consensus::encode::serialize;
 use bitcoin::hashes::{sha256, Hash};
-use bitcoin::{Address, Network, ScriptBuf};
+use bitcoin::{Address, Network, ScriptBuf, Txid};
 use openbmt_core::heartbeat::WatcherHeartbeat;
 use openbmt_counter_ffi::HostSpawn;
 use openbmt_counter_node::{DriverPort, Launch};
@@ -27,8 +29,14 @@ struct World {
     events: Sender<AppEvent>,
     watched: Vec<ScriptBuf>,
     paid: u32,
-    beats: u64,
+    /// The coin each payment spends, by the payment's id: the same coin is
+    /// spent again by a replacement.
+    coins: HashMap<Txid, [u8; 32]>,
 }
+
+/// The heartbeats made so far, over every chain this module has held: the
+/// counter keeps the last number it took, so a new chain goes on counting.
+static BEATS: AtomicU64 = AtomicU64::new(0);
 
 static WORLD: Mutex<Option<World>> = Mutex::new(None);
 
@@ -94,7 +102,7 @@ pub fn host() -> HostSpawn {
             events: tx,
             watched: launch.scripts,
             paid: 0,
-            beats: 0,
+            coins: HashMap::new(),
         });
         Ok(Box::new(PagePort { events: rx.into() }) as Box<dyn DriverPort + Send>)
     })
@@ -115,19 +123,51 @@ pub fn pay(address: &str, sats: u64) -> Result<String, String> {
     let coin = sha256::Hash::hash(&w.paid.to_le_bytes()).to_byte_array();
     let tx = payment(coin, &script, sats);
     let txid = tx.compute_txid();
+    w.coins.insert(txid, coin);
     w.chain.broadcast(tx.clone());
-    // The light check counts a payment seen when peers of three network
-    // groups have announced it (WR-44): each of the three peers does.
+    announce(w, &tx)?;
+    Ok(txid.to_string())
+}
+
+/// The light check counts a payment seen when peers of three network groups
+/// have announced it (WR-44): each of the three peers does.
+fn announce(w: &World, tx: &bitcoin::Transaction) -> Result<(), String> {
     for n in PEER_GROUPS {
         w.events
             .send(AppEvent::Sighting {
-                tx: serialize(&tx),
+                tx: serialize(tx),
                 from: vec![PeerAddr::Ip(std::net::IpAddr::from([n, n, 1, 1]))],
                 own: false,
             })
             .map_err(|_| "the node is not reading".to_string())?;
     }
-    Ok(txid.to_string())
+    Ok(())
+}
+
+/// The script of the pretend customer's own address, to which a cancelled
+/// payment's coin goes back: not the shop's.
+fn customer_script() -> ScriptBuf {
+    ScriptBuf::new_p2wsh(&bitcoin::WScriptHash::from_byte_array([0xc5; 32]))
+}
+
+/// The customer takes a payment back: the payment `txid` is replaced by a
+/// payment of the same coin, `sats_to_other` to an address of the customer's
+/// own. The first leaves the mempool, the replacement is broadcast and
+/// announced as `pay` announces. Returns the replacement's id, as hex.
+pub fn replace(txid: &str, sats_to_other: u64) -> Result<String, String> {
+    let id = Txid::from_str(txid).map_err(|e| format!("the payment's id does not read: {e}"))?;
+    let mut guard = world();
+    let w = guard.as_mut().ok_or("no node is running")?;
+    let coin = *w.coins.get(&id).ok_or("no such payment was made")?;
+    let tx = payment(coin, &customer_script(), sats_to_other);
+    let replacement = tx.compute_txid();
+    if !w.chain.remove(&id) {
+        return Err("the payment is no longer waiting".to_string());
+    }
+    w.coins.insert(replacement, coin);
+    w.chain.broadcast(tx.clone());
+    announce(w, &tx)?;
+    Ok(replacement.to_string())
 }
 
 /// The heartbeat the owner's phone would send the counter at `now`: signed
@@ -136,12 +176,12 @@ pub fn pay(address: &str, sats: u64) -> Result<String, String> {
 pub fn heartbeat(now: u64) -> Result<Vec<u8>, String> {
     let mut guard = world();
     let w = guard.as_mut().ok_or("no node is running")?;
-    w.beats += 1;
+    let seq = BEATS.fetch_add(1, Ordering::SeqCst) + 1;
     let counter = openbmt_demo::wallet::counter()?;
     let owner = openbmt_demo::wallet::owner()?;
     let beat = WatcherHeartbeat {
         counter: counter.device_id(),
-        seq: w.beats,
+        seq,
         time: now,
         tip_height: w.chain.tip_height(),
         tip_hash: w.chain.tip_hash().to_byte_array(),
