@@ -301,8 +301,14 @@
         // The code carries its Lightning invoice a pump or two after the sale opens.
         const show = (data) => {
           const read = PC.parse(data.copyUri);
-          shell.say("The counter shows a code with two ways to pay: on-chain and Lightning.",
-            ["This customer pays with Lightning. Tap ", { b: "The customer pays" }, "."]);
+          if (read.address) {
+            shell.say("The counter shows a code with two ways to pay: on-chain and Lightning.",
+              ["This customer pays with Lightning. Tap ", { b: "The customer pays" }, "."]);
+          } else {
+            // CR-283: over the instant limit the code is the invoice alone, as Lightning is final at once.
+            shell.say("Over the instant limit, the counter shows the Lightning code first.",
+              ["Lightning is final at once, so nothing waits for a block. Tap ", { b: "The customer pays" }, "."]);
+          }
           shell.actor({
             who: "The customer", line: `Pays ${groups(read.sats)} sats over Lightning.`, button: "The customer pays",
             onTap() {
@@ -317,7 +323,7 @@
         if (invoiceOf(now)) show(now);
         else {
           // CR-113: the on-chain code shows at once, and the invoice joins it when the node sends it.
-          shell.say("The counter shows a code for this sale.", ["It adds the Lightning invoice as soon as the shop's node sends it."]);
+          shell.say("The counter shows a code for this sale.", ["The Lightning code follows as soon as the shop's node sends the invoice."]);
           S.on = { sale: (d) => { if (invoiceOf(d)) show(d); } };
         }
       }, auto() { waitForInvoice(); run.host.payLightning(invoiceOf(run.controller.saleData())); waitForPaid(); } },

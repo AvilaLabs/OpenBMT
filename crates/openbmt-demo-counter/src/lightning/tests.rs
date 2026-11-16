@@ -188,7 +188,7 @@ fn a_sale_paid_over_the_pretend_node_is_judged_by_the_counter() {
     assert_eq!(needs, 10_877);
 
     // The counter asks the node for an invoice; the invoice passes LN-17 and
-    // the sale's code carries it beside the address.
+    // the sale's code carries it.
     set_now(t0() + 1);
     assert!(serve(handle, t0() + 1) >= 1);
     let screen = call(&frame(12, handle, &judge_fields(t0() + 1, index)));
@@ -197,12 +197,14 @@ fn a_sale_paid_over_the_pretend_node_is_judged_by_the_counter() {
         invoice.starts_with("lnbcrt"),
         "a regtest invoice: {invoice}"
     );
-    let with_invoice = format!("lightning={invoice}");
+    // No owner's phone sends a heartbeat here, so the counter's own check
+    // would wait for a block: the code is the invoice alone (CR-283).
+    let lightning_only = format!("lightning:{invoice}");
     assert!(
-        contains(&screen, with_invoice.as_bytes()),
-        "the sale's code carries the invoice"
+        contains(&screen, lightning_only.as_bytes()),
+        "the sale's code is the invoice alone"
     );
-    assert!(contains(&screen, b"bitcoin:"), "and the address");
+    assert!(!contains(&screen, b"bitcoin:"), "with no address");
     assert_eq!(node()[0].msat, 10_877_000);
     assert_ne!(state(handle, t0() + 1, index), PAID_LIGHTNING);
 
