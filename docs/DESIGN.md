@@ -471,8 +471,9 @@ payment without knowing, and must understand up front that it can happen.
 - **Words on every sale: Paid, Confirmed (1 block), Final.** An instant sale
   shows "Paid, could still be cancelled for about N min". At 1 block it shows
   **"Confirmed (1 block)"**. (As built, the heading is "Paid" in each case and
-  the words under it carry the difference: "could still be undone", "The
-  payment is in a block", "settled, so a refund can be paid out"; see
+  the words under it carry the difference: "within the owner's limit for
+  sales before a block", "The payment is in a block", "settled, so a refund
+  can be paid out"; see
   `docs/screens/counter.md`.) **"Final" is reserved for the refund depth**,
   which the shop sets (§2.4, §6). "Final" is depth-based: more blocks on top
   make a reversal less likely. It never claims zero risk.

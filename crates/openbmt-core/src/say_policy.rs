@@ -52,13 +52,13 @@ impl InstantLabel {
     pub fn words(&self) -> Words {
         let what = match self {
             Self::LightCheck => {
-                "Accepted at once on this counter's own check, before a block holds it, so it could still be undone."
+                "Accepted at once on this counter's own check, within the owner's limit for sales before a block."
             }
             Self::YourNode => {
-                "Accepted at once on the shop's own system, before a block holds it, so it could still be undone."
+                "Accepted at once on the shop's own system, within the owner's limit for sales before a block."
             }
             Self::YourBox => {
-                "Accepted at once on the Box's report, before a block holds it, so it could still be undone."
+                "Accepted at once on the Box's report, within the owner's limit for sales before a block."
             }
         };
         Words::new(
@@ -66,7 +66,7 @@ impl InstantLabel {
             "Paid",
             what,
             Who::Cashier,
-            "Hand over the goods. It is settled when the payment is in a block, in about ten minutes.",
+            "Hand over the goods. It settles by itself when a block holds it, in about ten minutes.",
         )
         .code("CR-13")
     }

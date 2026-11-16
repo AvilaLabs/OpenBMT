@@ -225,7 +225,7 @@ impl Why {
                     role.text()
                 ),
                 Who::Cashier,
-                "Hand over the goods. It is settled when the payment is in a block, in about ten minutes.",
+                "Hand over the goods. It settles by itself when a block holds it, in about ten minutes.",
             )
             .code("CR-20"),
             Self::Replaced => do_not_hand_over(

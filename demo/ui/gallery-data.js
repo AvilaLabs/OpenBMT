@@ -22,7 +22,7 @@
   const notPaidYet = w("info", "Not paid yet", "Nothing has arrived yet.", "The customer scans the code on the screen and pays.", "customer");
   const partPaid = w("info", "Part paid", "The customer has paid part of it and is short by 6,000 sats.", "The customer pays the rest to the same code.", "customer");
   const waiting = w("info", "Waiting to be seen", "The payment has been seen, but not by enough of the network yet.", "Nothing to do. The counter keeps watching, and it turns green when the payment is in a block.", "nobody");
-  const paid = w("good", "Paid", "Accepted at once on this counter's own check, before a block holds it, so it could still be undone.", "Hand over the goods. It is settled when the payment is in a block, in about ten minutes.", "cashier");
+  const paid = w("good", "Paid", "Accepted at once on this counter's own check, within the owner's limit for sales before a block.", "Hand over the goods. It settles by itself when a block holds it, in about ten minutes.", "cashier");
   const doNotHandOver = w("stop", "Do not hand over", "Another payment took this one's place.", "Take another kind of payment and tell the owner: this payment was replaced. If the goods are gone, tell the owner now.", "cashier");
   // docs/screens/counter.md (CheckMode::Light), the health card and the check line of a paid sale
   const checkedLight = w("good", "Checked by this counter", "This counter checked the payment itself, through its own connection to the network.", "Nothing to do. The sale screen says when to hand over the goods.", "nobody");

@@ -92,7 +92,7 @@ customers.
 | Not paid yet | Blue | Nothing has arrived. |
 | Part paid | Blue | Less than needed has arrived. Ask for the rest or cancel. |
 | Waiting (with the reason, such as "Waiting: over the limit") | Blue | A payment arrived and waits for a block. The screen says why. |
-| Paid (before a block) | Green | Accepted at once within the instant limit. The screen says it could still be undone and which check accepted it. |
+| Paid (before a block) | Green | Accepted at once within the instant limit. The screen says which check accepted it, and that the owner's limit for sales before a block covers it. |
 | Accepted by a person | Green | A cashier or manager accepted it by hand (an override). |
 | Paid (in a block) | Green | The payment is in a block at the shop's depth. |
 | Paid (settled) | Green | At the shop's refund depth: a refund can be paid out if asked. |

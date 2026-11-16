@@ -453,8 +453,9 @@ never been run against a real node.
 ### Never calling an unconfirmed payment final
 
 An unconfirmed payment can be replaced by its sender. The fixed counter
-states (`CR-10`) therefore show "Paid" with "it could still be undone"
-when accepting before a block. A payment is confirmed at the shop's
+states (`CR-10`) therefore say, when accepting before a block, that the
+sale was accepted "within the owner's limit for sales before a block": the
+owner chose that risk, and the cashier hands over the goods. A payment is confirmed at the shop's
 confirmation depth; "final" refers only to its refund depth. The books
 count it as money at that refund depth (`CR-31`). More blocks reduce the
 chance of reversal without making it impossible.
