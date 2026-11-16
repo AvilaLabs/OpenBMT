@@ -34,9 +34,9 @@ cd "$(dirname "$0")/.."
 # com.sparrowwallet:hummingbird:1.7.6 and its one runtime dependency,
 # co.nstant.in:cbor:0.9, from Maven Central. The SHA-1 is the one Maven
 # Central publishes beside each; the SHA-256 is pinned here.
-HB_URL=https://repo1.maven.org/maven2/com/sparrowwallet/hummingbird/1.7.6/hummingbird-1.7.6.jar
+HB_URL=https://repo.maven.apache.org/maven2/com/sparrowwallet/hummingbird/1.7.6/hummingbird-1.7.6.jar
 HB_SHA256=b236ede4c0ee1c348fa034d59c0af229a1760a967f36f5513f8c9569b1ec5b71
-CBOR_URL=https://repo1.maven.org/maven2/co/nstant/in/cbor/0.9/cbor-0.9.jar
+CBOR_URL=https://repo.maven.apache.org/maven2/co/nstant/in/cbor/0.9/cbor-0.9.jar
 CBOR_SHA256=5ef465c47e34c6b13f93ece2ff49e94b933d69cf9f172cc4997418303884da73
 
 tools="${OPENBMT_TOOLS:-$HOME/.cache/openbmt/tools}/hummingbird"

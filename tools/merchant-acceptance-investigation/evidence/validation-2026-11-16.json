@@ -1,0 +1,46 @@
+{
+  "baseline_commit": "93a02c093f631251bb58169d0d064cdc560f1517",
+  "recorded_utc": "2026-11-16T17:23:26.827227+00:00",
+  "ledger_model": {
+    "tests_passed": 10,
+    "adapter_type": "synthetic"
+  },
+  "storage_probe": {
+    "tests_passed": 4,
+    "actual_public_store_functions": true,
+    "remote_backend": "fault-injected synthetic"
+  },
+  "counter_api_probe": {
+    "exit_code": 0,
+    "facts": "synthetic",
+    "reload": "same-process in-memory snapshot"
+  },
+  "funding_publication_probe": {
+    "runs": 6,
+    "normal_controls": 2,
+    "withheld_publication_runs": 4,
+    "preimages_verified": 6,
+    "network": "private localhost regtest"
+  },
+  "port_preflight": {
+    "occupied_port_refused": true,
+    "no_control_connection": true,
+    "returncode": 1
+  },
+  "ci_ur_crosscheck": {
+    "fresh_checksum_pinned_downloads": 2,
+    "cases": 377,
+    "parts_compared": 40277,
+    "cosigner_cases": 65,
+    "expected_refusals": 15,
+    "exit_code": 0
+  },
+  "not_tested": [
+    "native Square SDK",
+    "mobile OS lifecycle",
+    "VSS",
+    "full Lightning monitor crash restore",
+    "physical Box",
+    "mainnet or real customer funds"
+  ]
+}

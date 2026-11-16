@@ -109,6 +109,11 @@ jobs:
           rustup default stable
       - name: Install JDK 21
         run: echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+      - name: Cache verified Hummingbird jars
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/openbmt/tools/hummingbird/*.jar
+          key: ur-crosscheck-${{ runner.os }}-${{ hashFiles('scripts/ur-crosscheck.sh') }}
       # Downloads the Hummingbird and CBOR jars and refuses one whose
       # SHA-256 is not the pinned value in the script.
       - name: Cross-check against Hummingbird

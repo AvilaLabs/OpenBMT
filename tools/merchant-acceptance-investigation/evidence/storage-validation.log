@@ -1,0 +1,19 @@
+Local paths normalized for publication; validation output otherwise unchanged.
+   Compiling openbmt-core v0.1.0 (<repository>/crates/openbmt-core)
+   Compiling openbmt-watch v0.1.0 (<repository>/crates/openbmt-watch)
+   Compiling openbmt-net v0.1.0 (<repository>/crates/openbmt-net)
+   Compiling openbmt-kernel-random v0.1.0 (<repository>/crates/openbmt-kernel-random)
+   Compiling openbmt-net-io v0.1.0 (<repository>/crates/openbmt-net-io)
+   Compiling openbmt-link v0.1.0 (<repository>/crates/openbmt-link)
+   Compiling openbmt-lightning-node v0.1.0 (<repository>/crates/openbmt-lightning-node)
+   Compiling openbmt-recovery-investigation v0.1.0 (<repository>/tools/merchant-acceptance-investigation/storage-probe)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 42.87s
+     Running tests/recovery_limits.rs (<target-directory>/debug/deps/recovery_limits-ff4382d94d79f2fa)
+
+running 4 tests
+test update_number_maps_choose_newer_and_reject_divergence_but_identical_maps_go ... ok
+test sealed_blob_is_authenticated_but_an_older_valid_blob_under_same_name_replays ... ok
+test backend_ack_without_durability_allows_completion_but_fresh_view_finds_nothing ... ok
+test strict_write_keeps_old_local_value_and_completion_waits_for_second_device ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
