@@ -97,10 +97,11 @@ object FirstRunWords {
     val tillSquareSteps = listOf(
         "In Square Dashboard, open Settings, then Payments, then Payment methods.",
         "Open Custom payment methods and tap Add payment method.",
-        "Name it Bitcoin. Square may not let you rename it later, so check the spelling.",
+        "Name it OpenBMT, not Bitcoin: Square's own Bitcoin method pays into Square's wallet.",
         "Turn on Activate on Point of Sale, then tap Add.",
+        "To keep all bitcoin in the shop's wallet, turn off Square's own: in the Square app, Settings, Checkout, Payment, then the X by Bitcoin.",
     )
-    const val tillSquareCashier = "Cashier: Charge, then More, then Custom payment methods, then Bitcoin."
+    const val tillSquareCashier = "Cashier: Charge, then More, then Custom payment methods, then OpenBMT."
     const val tillSquareReports = "Reports: bitcoin sales are under Other in the sales summary."
 
     const val tillToast = "Toast"
@@ -303,7 +304,7 @@ object FirstRunWords {
     const val cardRingUpOther = "Ring up the sale in your till as usual."
     const val cardCounter = "Type the amount on the counter and show the customer the code."
     const val cardPaid = "Hand over the goods when the counter shows Paid. A bigger payment can take about ten minutes."
-    const val cardTillSquare = "Then, in Square: Charge, then More, then Custom payment methods, then Bitcoin."
+    const val cardTillSquare = "Then, in Square: Charge, then More, then Custom payment methods, then OpenBMT."
     const val cardTillToast = "Then, in Toast: Pay, then Other payments, then Bitcoin."
     const val cardTillStoreHub = "Then pick Bitcoin as the payment in StoreHub. If it is not shown, tap Others."
     const val cardTillPick = "Then pick Bitcoin as the payment in {till}."

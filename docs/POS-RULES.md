@@ -91,7 +91,9 @@ effect, and draws what it is told. Times are whole seconds since 1970 UTC.
   tender name or names (at most 8). A tender is a Bitcoin tender when its
   kind is `Bitcoin`, or when its name equals one of the names, compared
   without regard to ASCII case and surrounding spaces. Nothing is compared
-  more loosely than that.
+  more loosely than that. On Square the name is OpenBMT, never Bitcoin:
+  Square has a Bitcoin payment method of its own, paid into Square's wallet,
+  and an order paid with it is not a sale of the shop's counters.
 - **PS-11.** A tender of kind `Other` (or any kind) with another name is
   never guessed to be bitcoin. A tender named like the setting but of
   kind `Cash` or `Card` is counted, because more checking is the safe side.
@@ -425,7 +427,7 @@ the API reference as it was rendered on 2026-11-12.
   `updated_at` of the page (never earlier than the time it was read from), so
   the last order is read again, which PS-75 makes harmless. **[verify, E5:
   how a Square POS "Other" tender names itself (the documentation does not
-  say), that `amount_money` includes the tip, the full list of tender types,
+  say), how an order paid with Square's own Bitcoin method shows its tender, that `amount_money` includes the tip, the full list of tender types,
   that a cancelled payment is shown by the payments reply, and that an order
   rung up in the Square app is seen once it is paid]**
 - **PS-97.** The Clover request is a GET of

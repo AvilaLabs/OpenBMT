@@ -32,6 +32,13 @@ the till, the cashier rings up the sale as usual, takes the bitcoin on the
 counter, then picks Bitcoin as the payment in the till. The till company
 does not move the money, so it charges nothing for that payment type.
 
+Square is the exception. Square has a Bitcoin payment method of its own,
+which pays into a wallet Square holds, so on Square the payment type is
+called OpenBMT and the cashier picks OpenBMT. A shop that wants all its
+bitcoin in its own wallet turns Square's own Bitcoin method off: in the
+Square app, Settings, then Checkout, then Payment, then the X next to
+Bitcoin.
+
 The steps for each till were read on its own help pages in November 2026.
 Menus change; if a till looks different, look for "payment types".
 
