@@ -79,7 +79,7 @@
       page: "getting-paid.html", anchor: "enter-the-sale-and-show-the-code",
     },
     cardWallet: {
-      q: "Can I pay with the wallet app my cards are in?",
+      q: "Can you pay with the wallet app your cards are in?",
       a: "No. A card wallet pays with cards over the card networks and holds no bitcoin. The counter's tap is a bitcoin payment request, so it opens a bitcoin wallet.",
       page: "getting-paid.html", anchor: "enter-the-sale-and-show-the-code",
     },

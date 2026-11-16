@@ -83,7 +83,7 @@ test('the first moment is the phone\'s home screen with Bitcoin Wallet and Hold 
   assert.deepEqual(p.log.targets.map((t) => t.label), ['Bitcoin Wallet', 'Hold to the counter']);
   assert.equal(p.log.shown[0].screen, 'homeScreen');
   assert.equal(p.log.under, 'Hold to the counter');
-  assert.deepEqual(p.log.questions.map((q) => q.q), ['Do you need a special app to pay?', 'What is in the code?', 'What is Tap?', 'Can I pay with the wallet app my cards are in?']);
+  assert.deepEqual(p.log.questions.map((q) => q.q), ['Do you need a special app to pay?', 'What is in the code?', 'What is Tap?', 'Can you pay with the wallet app your cards are in?']);
 });
 
 test('Bitcoin Wallet opens the wallet with one button, Scan; Scan reads the code; the check shows the address', () => {
@@ -249,7 +249,7 @@ test('the customer\'s questions carry the new ones with their handbook links', (
   const tap = find(QS.customer.scan, 'What is Tap?');
   assert.equal(`${tap.page}#${tap.anchor}`, 'getting-paid.html#enter-the-sale-and-show-the-code');
   assert.match(tap.a, /^Hold an unlocked Android phone to the counter\./);
-  const card = find(QS.customer.scan, 'Can I pay with the wallet app my cards are in?');
+  const card = find(QS.customer.scan, 'Can you pay with the wallet app your cards are in?');
   assert.equal(`${card.page}#${card.anchor}`, 'getting-paid.html#enter-the-sale-and-show-the-code');
   assert.equal(QS.customer.scan.indexOf(card), QS.customer.scan.indexOf(tap) + 1);
   const pick = find(QS.customer.send, 'Lightning or on-chain: which should you pick?');
