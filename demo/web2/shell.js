@@ -183,9 +183,10 @@
         slot.key = "launch";
         fit.append(phone);
         const why = el("div", "why");
-        wrap.append(cap, fit, why);
+        const under = el("div", "under");
+        wrap.append(cap, fit, why, under);
         this.stage.append(wrap);
-        Object.assign(slot, { fit, phone, why });
+        Object.assign(slot, { fit, phone, why, under });
         this.slots.set(d.id, slot);
       }
       if (actorAfter) {
@@ -226,7 +227,18 @@
       const s = this.slots.get(id);
       s.build = build;
       s.aim = null;
+      s.under.replaceChildren();
       this.redraw(s);
+    }
+
+    /**
+     * A button below device [id], in the caption area, for a way to act that is not on the device's own screen. It
+     * can be lit with [target] or [targets] like any control, and goes with the next [show]. Call it after [show].
+     */
+    under(id, label) {
+      const s = this.slots.get(id);
+      s.under.replaceChildren(el("button", null, label));
+      this.fit();
     }
 
     redraw(s) {
@@ -351,7 +363,8 @@
     aim(s, list) {
       s.aim = list;
       for (const t of this.root.querySelectorAll(".target")) t.classList.remove("target");
-      const all = [...s.phone.querySelectorAll(":scope > :not(.leaving) :is(button, [role=button])")];
+      const all = [...s.phone.querySelectorAll(":scope > :not(.leaving) :is(button, [role=button])"),
+        ...s.under.querySelectorAll("button")];
       const hits = [];
       for (const { label, onTap } of list) {
         const hit = all.find((b) => b.textContent.trim() === label)
@@ -393,7 +406,9 @@
     /** Scales each device to the height there is, never above its real size, and all of them to the width. */
     fit() {
       const narrow = innerWidth < 900;
-      const room = this.stage.clientHeight - (narrow ? 8 + 28 + 8 : 14 + 28 + 8 + 18 + 8) - 14;
+      let below = 0;
+      for (const s of this.slots.values()) below = Math.max(below, s.under.offsetHeight ? s.under.offsetHeight + 8 : 0);
+      const room = this.stage.clientHeight - (narrow ? 8 + 28 + 8 : 14 + 28 + 8 + 18 + 8) - 14 - below;
       const k = new Map();
       for (const s of this.slots.values()) {
         const w = s.size.width + 2 * BEZEL, h = s.size.height + 2 * BEZEL;

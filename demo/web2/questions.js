@@ -75,7 +75,12 @@
     },
     tap: {
       q: "What is Tap?",
-      a: "A phone that can tap reads the same payment from the counter over NFC, without the camera. Everything after that is the same.",
+      a: "Hold an unlocked Android phone to the counter. It reads the same payment over NFC and opens its bitcoin wallet with the payment filled in, with no app to open first. With two bitcoin wallets, the phone asks which. An iPhone scans the code instead.",
+      page: "getting-paid.html", anchor: "enter-the-sale-and-show-the-code",
+    },
+    cardWallet: {
+      q: "Can I pay with the wallet app my cards are in?",
+      a: "No. A card wallet pays with cards over the card networks and holds no bitcoin. The counter's tap is a bitcoin payment request, so it opens a bitcoin wallet.",
       page: "getting-paid.html", anchor: "enter-the-sale-and-show-the-code",
     },
     lightningOrChain: {
@@ -134,7 +139,7 @@
       books: [Q.pileUp, Q.settled, Q.books],
     },
     customer: {
-      scan: [Q.anyWallet, Q.code, Q.tap],
+      scan: [Q.anyWallet, Q.code, Q.tap, Q.cardWallet],
       send: [Q.newAddress, Q.fast, Q.lightningOrChain, Q.feeCustomer],
       paid: [Q.fast, Q.refund],
       paidLightning: [Q.fastLightning, Q.refund],

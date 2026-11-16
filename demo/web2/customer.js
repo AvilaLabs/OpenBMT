@@ -70,41 +70,56 @@
     }
 
     return [
+      // The customer's phone on its home screen: Bitcoin Wallet to scan, or the phone held to the counter to tap.
       { step: 0, enter() {
-        shell.show("wallet", () => Wl.home(250000));
+        via = "scan";
+        shell.show("wallet", () => Wl.homeScreen());
+        shell.under("wallet", "Hold to the counter");
         shell.light("wallet", { counter: "The cashier's screen. It waits for your payment." });
         shell.say("The cashier rang up your order: 8.00 USD. The counter shows a code.",
-          ["You are the customer. On your phone, tap ", { b: "Scan" }, " or ", { b: "Tap" }, "."]);
+          ["You are the customer. Tap ", { b: "Bitcoin Wallet" }, " to scan the code, or ", { b: "Hold to the counter" }, " to pay with a tap."]);
         shell.questions(QS.customer.scan);
         shell.targets("wallet", [
-          { label: "Scan", onTap() { via = "scan"; go(); } },
-          { label: "Tap", onTap() { via = "tap"; go(); } },
+          { label: "Bitcoin Wallet", onTap() { via = "scan"; go(); } },
+          { label: "Hold to the counter", onTap() { via = "tap"; go(); } },
         ]);
       } },
+      // The wallet opened by the customer, with Scan; or the phone reading the counter's tag for about a second.
       { step: 0, enter() {
         if (via === "tap") {
           shell.show("wallet", () => Wl.tapping());
           shell.say("", ["Your phone reads the payment from the counter, without the camera."]);
-        } else {
-          shell.show("wallet", () => Wl.scanning());
-          shell.say("", ["Your phone reads the code on the counter."]);
+          const at = S.index;
+          setTimeout(() => { if (S.index === at) go(); }, 1000);
+          return;
         }
+        shell.show("wallet", () => Wl.home(250000));
+        shell.say("", ["Your wallet is open. Tap ", { b: "Scan" }, "."]);
+        shell.questions(QS.customer.scan);
+        shell.target("wallet", "Scan", go);
+      } },
+      { step: 0, enter() {
+        // A tap has read the payment already: the wallet opens on the check.
+        if (via === "tap") { go(); return; }
+        shell.show("wallet", () => Wl.scanning());
+        shell.say("", ["Your phone reads the code on the counter."]);
         const at = S.index;
         setTimeout(() => { if (S.index === at) go(); }, 1400);
       } },
       { step: 1, enter() {
         read = readNow();
         method = LIGHTNING;
+        const opened = via === "tap" ? "Your phone read the payment from the counter and opened your wallet." : null;
         if (read.lightning) {
-          shell.say("Your phone read the payment: the amount and two ways to pay it.",
+          shell.say(opened || "Your phone read the payment: the amount and two ways to pay it.",
             ["Pick ", { b: "Lightning" }, " or ", { b: "On-chain" }, ", then tap ", { b: "Send" }, "."]);
         } else {
-          shell.say("Your phone read the code: the amount and the shop's address.",
+          shell.say(opened || "Your phone read the code: the amount and the shop's address.",
             ["Check the amount, then tap ", { b: "Send" }, "."]);
         }
         shell.questions(QS.customer.send);
         drawConfirm();
-      }, auto() { read = readNow(); method = LIGHTNING; send(); env.waitForPaid(); } },
+      }, auto() { via = "tap"; read = readNow(); method = LIGHTNING; send(); env.waitForPaid(); } },
       { step: 2, enter() {
         shell.show("wallet", () => Wl.sent(read.sats));
         shell.light("counter", { wallet: "Your payment is sent." });

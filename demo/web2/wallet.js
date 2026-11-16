@@ -1,6 +1,6 @@
 // The customer's wallet: a plain bitcoin wallet on the customer's phone, no brand, drawn only for the demo.
 // It is not an OpenBMT app; any wallet that scans a payment code works the same way at the counter.
-// Five screens: home, scanning, tapping, the check before sending, and sent.
+// The phone's own home screen, then five wallet screens: home, scanning, tapping, the check before sending, and sent.
 "use strict";
 (function (root) {
   const C = root.OpenBmtChrome;
@@ -43,16 +43,84 @@
 
   const sats = (n) => n.toLocaleString("en-US") + " sats";
 
-  /** Home: the balance, and Scan and Tap side by side to pay. */
+  /** Home: the balance, and Scan to pay. */
   function home(balance) {
-    const row = el("div", "display:flex;gap:12px;");
-    const scan = button("Scan", true), tap = button("Tap", false);
-    scan.style.flex = tap.style.flex = "1";
-    row.append(scan, tap);
     return frame([
       card([el("div", `font-size:15px;color:${MUTED}`, "Balance"), el("div", "font-size:36px;font-weight:500", sats(balance))]),
-      el("div", `font-size:15px;color:${MUTED};padding:4px 2px`, "To pay a shop, scan the code on its screen or tap your phone to the counter."),
-    ], [row]);
+      el("div", `font-size:15px;color:${MUTED};padding:4px 2px`, "To pay a shop, scan the code on its screen or hold your phone to the counter."),
+    ], [button("Scan", true)]);
+  }
+
+  const SVG = "http://www.w3.org/2000/svg";
+
+  /** A glyph of [paths] (an SVG path each) in white strokes on a 24-unit square, [size] px wide. */
+  function glyph(paths, size) {
+    const svg = document.createElementNS(SVG, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("width", String(size));
+    svg.setAttribute("height", String(size));
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "#fff");
+    svg.setAttribute("stroke-width", "1.9");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    for (const d of paths) {
+      const p = document.createElementNS(SVG, "path");
+      p.setAttribute("d", d);
+      svg.append(p);
+    }
+    return svg;
+  }
+
+  const circle = (cx, cy, r) => `M${cx - r} ${cy}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0`;
+
+  /** The apps of the home screen: made-up looks, no real app's icon. */
+  const APPS = [
+    ["Photos", "#b5654e", [circle(8.5, 9, 2), "M3 19l6-6 4 4 3-3 5 5", "M4 4h16v16H4z"]],
+    ["Maps", "#5a8f63", ["M12 21s-6-5.5-6-10a6 6 0 0 1 12 0c0 4.5-6 10-6 10z", circle(12, 11, 2)]],
+    ["Clock", "#5b6f8f", [circle(12, 12, 9), "M12 7v5l3 2"]],
+    ["Calendar", "#8a6fb0", ["M4 6h16v14H4z", "M4 11h16M8 3v4M16 3v4"]],
+    ["Weather", "#4c8ab0", ["M7 18a4 4 0 0 1 0-8 5 5 0 0 1 9.5-1A4.5 4.5 0 0 1 17 18z"]],
+    ["Notes", "#b9923a", ["M5 3h14v18H5z", "M9 8h6M9 12h6M9 16h3"]],
+    ["Calculator", "#6b6f78", ["M5 3h14v18H5z", "M8 7h8", "M9 12h.01M12 12h.01M15 12h.01M9 16h.01M12 16h.01M15 16h.01"]],
+    ["Bitcoin Wallet", "#0f766e", ["M4 8h16v11H4z", "M4 8V6a2 2 0 0 1 2-2h11v4", "M16 13.5h.01"]],
+  ];
+  const DOCK = [
+    ["#5a8f63", ["M6 3h4l2 5-2.5 1.5a11 11 0 0 0 5 5L16 12l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 4 5a2 2 0 0 1 2-2z"]],
+    ["#4c8ab0", ["M4 5h16v11H9l-5 4z"]],
+    ["#6b6f78", ["M4 8h3l2-3h6l2 3h3v11H4z", circle(12, 13, 3.5)]],
+    ["#b5654e", [circle(12, 12, 9), "M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"]],
+  ];
+
+  function tile(color, paths) {
+    const t = el("div", `width:56px;height:56px;border-radius:18px;background:${color};display:grid;place-items:center;box-shadow:0 2px 6px rgba(30,45,60,0.18);`);
+    t.append(glyph(paths, 28));
+    return t;
+  }
+
+  /**
+   * The phone's own home screen, before any app is open: a wallpaper, the clock and date, eight apps and a dock of
+   * four. Only the Bitcoin Wallet icon is a button; the other icons do nothing.
+   */
+  function homeScreen() {
+    const dev = el("div", `width:${W}px;height:${H}px;position:relative;background:linear-gradient(165deg,#bcd3ea 0%,#d6dcef 52%,#e6d9e8 100%);font-family:${FONT};color:#1d2b38;display:flex;flex-direction:column;`);
+    dev.className = "device";
+    const page = el("div", `flex:1;display:flex;flex-direction:column;padding:${C.STATUS_DP}px 0 ${C.NAV_DP}px;`);
+    const clock = el("div", "text-align:center;margin-top:56px;");
+    clock.append(el("div", "font-size:76px;font-weight:300;line-height:1;letter-spacing:-1px", "12:30"),
+      el("div", "font-size:18px;margin-top:10px;opacity:0.8", "Saturday, May 16"));
+    const grid = el("div", "display:grid;grid-template-columns:repeat(4,1fr);row-gap:24px;padding:0 14px;");
+    for (const [label, color, paths] of APPS) {
+      const target = label === "Bitcoin Wallet";
+      const app = el(target ? "button" : "div", "display:flex;flex-direction:column;align-items:center;gap:6px;background:none;border:0;padding:4px 0;border-radius:18px;font:inherit;color:inherit;");
+      app.append(tile(color, paths), el("div", "font-size:12px;text-align:center;line-height:1.15;max-width:84px", label));
+      grid.append(app);
+    }
+    const dock = el("div", "display:flex;justify-content:space-around;margin:26px 14px 14px;padding:12px 0;border-radius:34px;background:rgba(255,255,255,0.45);");
+    for (const [color, paths] of DOCK) dock.append(tile(color, paths));
+    page.append(clock, el("div", "flex:1"), grid, dock);
+    dev.append(page, C.statusBar(true), C.navBar(true));
+    return dev;
   }
 
   /** Scanning: the camera pointed at the counter's code. */
@@ -71,7 +139,7 @@
     for (const r of [200, 140, 80]) {
       rings.append(el("div", `position:absolute;left:50%;top:50%;width:${r}px;height:${r}px;transform:translate(-50%,-50%);border:3px solid rgba(255,255,255,${r === 80 ? 0.95 : r === 140 ? 0.6 : 0.3});border-radius:50%;`));
     }
-    const tip = el("div", "position:absolute;left:0;right:0;bottom:28px;text-align:center;color:#fff;font-size:16px;", "Hold near the counter");
+    const tip = el("div", "position:absolute;left:0;right:0;bottom:28px;text-align:center;color:#fff;font-size:16px;", "Reading the payment…");
     view.append(rings, tip);
     return frame([view], [button("Cancel", false)]);
   }
@@ -120,5 +188,5 @@
     ], [button("Done", true)]);
   }
 
-  root.OpenBmtWallet = { home, scanning, tapping, confirm, sent };
+  root.OpenBmtWallet = { homeScreen, home, scanning, tapping, confirm, sent };
 })(globalThis);
