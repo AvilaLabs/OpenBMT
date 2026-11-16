@@ -427,7 +427,8 @@ the API reference as it was rendered on 2026-11-12.
   `updated_at` of the page (never earlier than the time it was read from), so
   the last order is read again, which PS-75 makes harmless. **[verify, E5:
   how a Square POS "Other" tender names itself (the documentation does not
-  say), how an order paid with Square's own Bitcoin method shows its tender, that `amount_money` includes the tip, the full list of tender types,
+  say), how an order paid with Square's own Bitcoin method shows its tender,
+  that `amount_money` includes the tip, the full list of tender types,
   that a cancelled payment is shown by the payments reply, and that an order
   rung up in the Square app is seen once it is paid]**
 - **PS-97.** The Clover request is a GET of
