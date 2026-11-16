@@ -12,6 +12,7 @@ They are not wired into repository builds or CI.
 | `funding-probe/` | Same-host Bitcoin Core regtest probe of LSPS2 funding publication | See `funding-probe/README.md` |
 | `money-model/` | Synthetic replay of capacity, online-funds limits, settlement delay, and output economics | See `money-model/README.md` |
 | `batch-claim-probe/` | Actual Core regtest checks of unilateral claim aggregation and a limited cold-input authorization | See `batch-claim-probe/README.md` |
+| `onchain-batch-probe/` | Ordinary confirmed address payments combined into one savings output, with fees deducted from receipts | See `onchain-batch-probe/README.md` |
 
 The ledger and storage tools use synthetic fixtures and local state. The funding
 probe uses a same-host regtest fixture and requires explicit paths to the built

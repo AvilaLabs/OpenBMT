@@ -91,7 +91,121 @@ Hardware-wallet support and OpenBMT signer policy are separate gates. The isolat
 
 The second Core regtest transaction confirmed the illustrated 300,000 plus 100,000 plus 100,000 input construction with one 490,000-sat output. The original cold-input signature was unchanged after the claim inputs were appended. It had been prepared before those claim outpoints existed. Local checks rejected a decreased or redirected paired output under that signature. The transaction was 307 virtual bytes with a deliberately chosen 10,000-sat test fee. The fixture's assembly function does not use the cold-input secret, while the test program as a whole contains public fixture secrets. [Execution evidence](../../tools/merchant-acceptance-investigation/evidence/settlement-batching-2026-11-16.json)
 
-## On-chain customers and Payjoin
+## Ordinary on-chain payments through a working wallet
+
+On-chain acceptance does not require the merchant to begin with Bitcoin or
+to purchase receiving capacity. A standard customer payment can fund an empty
+merchant wallet. The merchant can then pay a consolidation transaction's fee
+from those receipts. The relevant design choice is who can sign the received
+outputs while the merchant is busy serving customers.
+
+A merchant-owned online working wallet can accept ordinary address payments
+and periodically combine confirmed outputs into larger payments to offline
+savings. The savings key need not be online to receive that payment. Customers
+need no OpenBMT app, Payjoin support, channel, or swap service for this flow.
+This controls the backlog by spending outputs after receipt; it cannot prevent
+the initial creation of one or more outputs in each customer's transaction.
+
+This would be a new receiving policy, not a silent expansion of the existing
+[refund float](../FLOAT-RULES.md). That float is purpose-limited, does not
+provide sale facts, and keeps savings out of its payment path. Reusing its
+key-separation and wallet primitives is distinct from authorizing customer
+receipts or unattended savings transfers.
+
+The working-wallet proposal needs merchant authorization, independent savings
+destination verification, durable input reservations, confirmation/reorg
+handling, fee budgets, and recoverable settlement transactions. The controller
+can stop issuing working-wallet addresses and route new eligible payments to
+cold storage, but late or unsolicited payments to previously issued addresses
+can still arrive. An online-balance cap is consequently an operational target;
+it cannot impose a Bitcoin consensus rule that rejects excess receipts.
+A compromised working key can also divert ongoing receipts it can spend, so a
+balance cap is not a lifetime theft limit. Savings keys remain separate.
+
+### Ordinary payment experiment
+
+The isolated [on-chain batch probe](../../tools/merchant-acceptance-investigation/onchain-batch-probe/README.md)
+uses Bitcoin Core 32.1 on a fresh local regtest chain. Both merchant wallets
+start empty. A payer sends 100 separate ordinary transactions to 100 distinct
+merchant P2WPKH addresses, 10,000 sats each. All receipts confirm before the
+merchant constructs its batch. The savings address is imported into a wallet
+with private keys disabled; it is a public synthetic fixture, not evidence of
+physical cold-key custody.
+
+The merchant signs one transaction consuming all 100 outputs and paying one
+savings output. Three independently signed alternatives passed Core's mempool
+checks; only the 1 sat/vB version was broadcast and confirmed. These fee rates
+are explicit scenarios, not current network recommendations.
+
+| Settlement fee scenario | Signed transaction size | Merchant fee | Net savings output | Fee share of gross receipts |
+| --- | --- | --- | --- | --- |
+| 1 sat/vB | 6,829 vB | 6,829 sats | 993,171 sats | 0.6829% |
+| 10 sat/vB | 6,829 vB | 68,290 sats | 931,710 sats | 6.829% |
+| 100 sat/vB | 6,829 vB | 682,900 sats | 317,100 sats | 68.29% |
+
+Gross receipts remain 1,000,000 sats in every alternative. The fee is a separate
+expense deducted once from the settlement proceeds. The confirmed transaction
+left zero working-wallet outputs and one savings output. A 1,000 sat/vB funding
+attempt was refused because the receipts could not pay its fee. No initial
+merchant deposit, provider, Lightning operation, or Payjoin exchange was used.
+[Execution evidence](../../tools/merchant-acceptance-investigation/evidence/onchain-batching-2026-11-16.json)
+
+This establishes an ordinary-payment transaction path, not an unattended
+OpenBMT controller or safe instant fulfillment. It does not exercise continuous
+inflow, policy enforcement, lost-device recovery, fee replacement, reorgs,
+hardware signing, or a high-fee backlog. Payer transaction fees and the future
+cost of spending the new savings output are excluded from the table.
+
+### Security and operating choices
+
+| Receiving arrangement | Ordinary customer wallets | Routine signing authority | Main consequence |
+| --- | --- | --- | --- |
+| Direct to offline savings | Standard address payment | Owner signs batches after the outputs are known | Strong savings-key isolation, with periodic owner participation. Small outputs accumulate between batches. |
+| Separate working wallet with automatic savings batches | Standard address payment | Merchant-controlled online working key | No per-batch cold signature, but unswept receipts have online-key exposure. |
+| Working wallet with a merchant-owned policy signer | Standard address payment | Separate signer checks destinations, fees, and inputs | May isolate authority from checkout software; still an online signing system, with deployment and recovery work. No additional device is assumed universally acceptable. |
+| Payjoin alongside ordinary receiving | Customer must support Payjoin for its benefits | Merchant signs eligible contributed inputs | Can consolidate during a cooperating payment. Plain address payments remain supported separately. |
+
+The best candidate for an automated standard-wallet path is the separate
+working wallet, with direct-to-cold receiving available for merchants who
+prefer signing batches themselves. An additional policy signer is a security
+option to compare, not a claim that a general phone keystore enforces Bitcoin
+destination restrictions. The previously tested limited cold-input
+authorization can be evaluated as an optional settlement optimization; it
+cannot provide an infinite chain of unknown future authorizations.
+
+### Economic protection without pretending costs disappear
+
+Batching saves repeated transaction overhead and destination outputs. Each
+received output still contributes input weight when spent. In this probe the
+merchant spent roughly 68 vB per received payment. At a fixed fee rate the
+absolute cost of consuming an input changes little with its value, so a larger
+average ticket has a lower percentage settlement burden. Choosing a different
+script changes costs and signing/security requirements; cheaper recipient
+spending may also shift output costs to the payer.
+
+A controller should reserve that future expense when quoting and measuring
+merchant economics, while keeping estimated costs separate from fees actually
+paid. A merchant could absorb it as an operating expense or choose an explicitly
+priced acceptance policy. Neither creates free block space. Automatic
+consolidation during affordable conditions reduces the risk of carrying a
+large backlog into a fee spike; it cannot guarantee an affordable future
+window.
+
+Fee-engine integration also needs current policy assumptions. OpenBMT's existing
+receipt cost view floors its estimate at 1 sat/vB. Bitcoin Core 30 changed its
+default relay minimum to 0.1 sat/vB while leaving wallet fee defaults unchanged;
+that release explicitly warns that propagation and confirmation depend on
+network adoption and conditions. Fractional-fee support is an optimization to
+evaluate, not an assumed market price or a guarantee of affordable settlement.
+[Core release notes](https://bitcoincore.org/en/releases/30.0/#policy)
+
+When the fee ceiling and online exposure target conflict, the merchant needs a
+specific exception path: approve a more expensive savings transfer, retain the
+working funds temporarily, or direct new payments to cold addresses. Direct
+cold receiving preserves the on-chain option while deferring its own input
+costs and signing work. It does not make arbitrary tiny payments economical.
+
+## Payjoin as an additional receiving capability
 
 For a compatible customer wallet, Payjoin lets the receiver contribute inputs and modify its own output during the customer's payment. This can combine an existing merchant output with new proceeds. The payer must participate and validate the resulting transaction. Plain address payments cannot be retroactively combined through this protocol. [BIP 78](https://github.com/bitcoin/bips/blob/master/bip-0078.mediawiki) describes the consolidation opportunity; [BIP 77](https://github.com/bitcoin/bips/blob/master/bip-0077.md) changes the messaging model rather than removing the need for participation.
 
