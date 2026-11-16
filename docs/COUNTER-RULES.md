@@ -103,7 +103,7 @@ carries two texts: why it is in this state, and what happens next (§2.6).
 - **CR-10.** The states, and the color of each:
   - `NotPaidYet` (blue): nothing has arrived.
   - `PartPaid` (blue): less than the sale needs has arrived, beyond the
-    tolerance. Shown as "Paid X of Y".
+    tolerance. Shown as what is still to pay (CR-285).
   - `Waiting` (blue): enough has arrived and it waits for a confirmation,
     with the reason from the instant decision.
   - `PaidInstant` (green): accepted at once, with the label of the check
@@ -195,6 +195,39 @@ carries two texts: why it is in this state, and what happens next (§2.6).
   most three, then one line "and N more in Sales", which opens the Sales
   list. A notice never covers the code of the sale on the screen. A sale that
   turns while its own screen shows has no notice.
+- **CR-285. A part-paid sale leads with what is missing.** While a sale is
+  `PartPaid`, the large amount on its screen is what is still missing,
+  headed "Still to pay", and the code asks for that amount, not the whole
+  sale (CR-83): a customer who scans it again pays the rest, not the whole
+  amount a second time. The missing amount is in the shop's currency when
+  the sale has an amount in it (SC-09): the missing sats times the sale's
+  amount over the sats it needs, rounded up to the currency's minor unit, so
+  that it never asks for less than is missing. The line under it gives the
+  missing sats ("4,881 sats to send"), and the line under that what has
+  arrived and the whole sale ("Paid 6,000 sats of 10,881. The sale is 8.00
+  USD."). A sale with no amount in a currency (CR-197) shows the missing
+  sats as the large amount. The Lightning part of the code asks for the
+  same amount: a new invoice for what is missing when §12 allows one for
+  the sale, and otherwise the code is the address and the amount alone.
+- **CR-286. A wait shows that it is alive.** A sale's screen that waits
+  shows its time in the way that is true for the wait:
+  - a wait with a known end (the short check of a payment, which knows its
+    seconds left; the 6 seconds for an invoice of CR-113) shows a ring that
+    empties as the time passes, with the seconds left in it ("5 s"). When
+    the time is over and the state has not changed, the ring goes; it does
+    not stay at 0;
+  - a wait for a block shows how long ago the payment was first seen
+    ("Seen 40 s ago", then "Seen 3 min ago" from one minute), counted up
+    while the screen shows. No countdown is shown: blocks come about every
+    ten minutes on average and any one block can take much longer, so no
+    time can be promised;
+  - a mark beside the time pulses while the counter's check is healthy, and
+    only then. A check that stops turns the sale to `DoNotHandOver` (cannot
+    check) by CR-12 rule 7, so a screen never looks as if it waits while
+    nothing is checking.
+
+  With reduced motion the ring and the mark are still; the seconds and
+  minutes still change.
 
 ## 3. Overrides
 
@@ -630,7 +663,8 @@ and sales not yet settled wait for the owner's copy to catch up.
   index and no address. A store fault in a settle is a note and changes
   nothing else.
 - **CR-83.** The payment request the customer scans is the sale's
-  address and what it needs now (CR-08) as a BIP 21 URI. The text of the
+  address and what it still needs (CR-08, less what has arrived; CR-285) as
+  a BIP 21 URI. The text of the
   QR code is `BITCOIN:` and a bech32 address, both in upper case, so that
   the address is in the alphanumeric set, then `?amount=` and the amount
   in bitcoin (`amount` stays lower case, as BIP 21 has it). The amount has
