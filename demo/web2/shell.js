@@ -49,6 +49,7 @@
     { name: "Café" },
     { name: "With your register", screen: true, menu: ["Your register sends the amount", "Square", "Clover"] },
     { name: "When something goes wrong", menu: ["A short payment", "A cancelled payment"] },
+    { name: "OpenBMT checkout" },
   ];
   /** The scenarios that play, by their bar names: a tab without a menu, or a menu's item. */
   const SCENARIOS = BAR.flatMap((t) => t.menu || [t.name]);
@@ -63,6 +64,10 @@
 
   /** The ending card of each scenario: a heading and three lines. The register has a card for each of its three ways. */
   const CARDS = {
+    "OpenBMT checkout": {
+      heading: "One checkout, two ways to pay.",
+      lines: ["The merchant keeps one cart and one amount.", "A demo payment can be interrupted and resumed.", "Receipts and history stay with this proposed checkout."],
+    },
     Customer: {
       heading: "You paid a shop in bitcoin.",
       lines: [
@@ -88,11 +93,11 @@
       ],
     },
     Square: {
-      heading: "That is a sale with Square.",
+      heading: "An earlier manual Square style illustration.",
       lines: [
-        "The cashier rang it up on Square and on the counter.",
-        "The order was closed as OpenBMT, so Square's own Bitcoin was not used.",
-        "The owner's phone matched the two, and would raise an alert if they did not match.",
+        "The cashier rang a separate sale on a Square style screen and the counter.",
+        "This hand built illustration is not a supported Square or OpenBMT tender integration.",
+        "Reconcile the two records manually; no order closes automatically.",
       ],
     },
     Clover: {
@@ -486,9 +491,9 @@
           mid.append(holder);
         }
         mid.append(el("h1", null, "Try OpenBMT"),
-          el("p", "lede", "Take a bitcoin payment the way a shop does, on the real apps, in this page."));
+          el("p", "lede", "Explore the app-backed counter demos, or try the proposed OpenBMT checkout."));
         mid.append(this.cards(roles));
-        const foot = el("div", "foot", "Everything runs in this page on a pretend blockchain. No real bitcoin moves.");
+        const foot = el("div", "foot", "Counter demos use a pretend blockchain; checkout payments are simulations. No real bitcoin or card charge occurs.");
         s.append(top, mid, foot);
         this.root.append(s);
       }

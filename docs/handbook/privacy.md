@@ -25,11 +25,21 @@ what it shares, but does not make the shop's activity invisible.
 | Price sources | That a device requested a price and when. They receive no sale or wallet address. |
 | Someone hosting a Box for you | Order amounts and timing, enough to estimate activity using the public bitcoin price. |
 | Exchange | The deposit and the incoming payments linked when you spend them together. |
+| Square (only in the optional Sandbox debug build) | Sandbox authorization, location, payment amount/currency and attempt reference, plus card-present payment data; additional SDK collection is unverified. |
 
 The [network reference](network-reference.md#who-sees-what) lists every
 contact and the exact data exposed. OpenBMT sends no analytics or crash
 uploads to its publisher. Push wake-ups and a hosted Box service are not
 built yet.
+
+### Optional Square Sandbox checkout
+
+The preceding contact list and no-publisher-analytics statement describe the
+default apps. The separate experimental [Square Sandbox checkout](https://github.com/AvilaLabs/OpenBMT/blob/main/apps/checkout-android/square-sandbox/DEPENDENCIES.md)
+adds direct Square SDK and Sandbox API connections. It supplies Square with
+payment-attempt details and card-present payment data; the SDK's full runtime
+contacts and telemetry have not been independently verified. This exception
+is Sandbox-only and is not approved for production use or redistribution.
 
 ## A fresh address helps, but is not a private account
 

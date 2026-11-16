@@ -18,6 +18,9 @@ jni = []
 # The node's network side: Shop Lightning's node, the relay thread and the
 # driver's thread. Off for the build for a browser, which gives its own.
 network = ["openbmt-counter-node/network"]
+# Test-only native checkout artifact: accept one-peer Regtest health while
+# leaving the health rules and every production/default artifact unchanged.
+checkout-regtest = ["network"]
 
 # The same exact versions as the other crates, so the types unify.
 [dependencies]

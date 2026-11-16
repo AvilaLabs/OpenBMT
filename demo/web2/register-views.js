@@ -166,9 +166,9 @@
     const bar = (text, onTap) => tap(text, `height:${wide ? 44 : 54}px;border-radius:12px;background:${SQ.ROW};color:${SQ.INK};font-size:17px;text-align:left;padding:0 18px;width:100%;`, onTap);
     const list = el("div", "display:flex;flex-direction:column;gap:8px;");
     for (const name of ["Cash", "Bitcoin", "Gift card", "Other payment types"]) list.append(bar(name));
-    list.append(el("div", `font-size:14px;color:${SQ.MUTED};margin-top:8px;`, "Custom payment methods"), bar("OpenBMT", taps.bitcoin));
+    list.append(el("div", `font-size:14px;color:${SQ.MUTED};margin-top:8px;`, "Custom payment methods · illustrative mock"), bar("OpenBMT · mock", taps.bitcoin));
     box.append(list, el("div", `font-size:13px;color:${SQ.MUTED};margin-top:10px;`,
-      "Bitcoin here is Square's own: it pays into Square's wallet. OpenBMT pays into the shop's own wallet."));
+      "Hand-built illustration only. No supported Square tender connection is present."));
     return [box];
   }
 

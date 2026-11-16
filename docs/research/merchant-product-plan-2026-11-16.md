@@ -59,6 +59,14 @@ This adds a network capability absent from the existing app-contact policy. Befo
 
 Local durable events and a query that repairs missed events belong in the core contract. An enabled webhook bridge adds idempotent delivery, retries, delivery history, and manual replay. A sleeping or offline app cannot promise prompt webhook delivery or even observe every new payment immediately; it must catch up and replay after reconnecting. A remote store cannot query a sleeping or unreachable app merely because a query API exists. Remote reconciliation needs a defined outbound synchronization or reachable merchant-operated arrangement. A merchant needing continuous ecommerce automation must select and validate an availability arrangement separately. Do not make an always-on server a default requirement for ordinary checkout, and do not treat this interface decision as having removed the current Shop Lightning backup/Box gate.
 
+## Current checkout proof
+
+The [live proposed checkout](https://openbmt.avilalabs.org/?path=checkout) shows a single cart, tender selection, interruptions, receipt history, and the next order. Its external payment outcomes are explicitly simulated.
+
+The separate [native Android checkout](../../apps/checkout-android/README.md#validation-on-16-november-2026) has observed actual Regtest receipts through the counter FFI, including a partial payment, restart, completion, and restored receipt history. The [optional Square Sandbox harness](../../apps/checkout-android/square-sandbox/README.md) uses the same amount-entry screen and the real Mobile Payments SDK. These experiments leave current wallet signing authority unchanged. Their validation notes distinguish the browser simulation, the native watcher, and Square's test backend.
+
+This is an integration foundation. Merchant onboarding, catalog and operating-system compatibility, physical readers, production SDK permissions and privacy, wallet automation, and Shop Lightning's funding and backup gates still require their own validation. A successful Android Sandbox payment does not establish iPad compatibility or replace Square's complete POS interface.
+
 ## Implementation order
 
 1. Specify authority boundaries, wallet modes, canonical sale/payment states, and the event/API contract. Retain current behavior until each replacement is tested.

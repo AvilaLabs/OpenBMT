@@ -84,17 +84,17 @@ const key = (k) => ({ key: k, preventDefault() {} });
 const labels = (list) => list.map((x) => x.textContent);
 
 test_words: {
-  assert.deepEqual(Shell.BAR.map((t) => t.name), ['Customer', 'Café', 'With your register', 'When something goes wrong']);
+  assert.deepEqual(Shell.BAR.map((t) => t.name), ['Customer', 'Café', 'With your register', 'When something goes wrong', 'OpenBMT checkout']);
   assert.deepEqual(Shell.BAR[2].menu, ['Your register sends the amount', 'Square', 'Clover']);
   assert.deepEqual(Shell.BAR[3].menu, ['A short payment', 'A cancelled payment']);
-  assert.deepEqual(Shell.SCENARIOS, ['Customer', 'Café', 'Your register sends the amount', 'Square', 'Clover', 'A short payment', 'A cancelled payment']);
+  assert.deepEqual(Shell.SCENARIOS, ['Customer', 'Café', 'Your register sends the amount', 'Square', 'Clover', 'A short payment', 'A cancelled payment', 'OpenBMT checkout']);
   assert.equal(Shell.CARDS.Customer.heading, 'You paid a shop in bitcoin.');
   assert.equal(Shell.CARDS['Café'].heading, 'That is a day at the counter.');
-  assert.equal(Shell.CARDS.Square.heading, 'That is a sale with Square.');
+  assert.equal(Shell.CARDS.Square.heading, 'An earlier manual Square style illustration.');
   assert.deepEqual(Shell.CARDS.Square.lines, [
-    'The cashier rang it up on Square and on the counter.',
-    'The order was closed as OpenBMT, so Square\'s own Bitcoin was not used.',
-    'The owner\'s phone matched the two, and would raise an alert if they did not match.',
+    'The cashier rang a separate sale on a Square style screen and the counter.',
+    'This hand built illustration is not a supported Square or OpenBMT tender integration.',
+    'Reconcile the two records manually; no order closes automatically.',
   ]);
   assert.equal(Shell.CARDS.Clover.heading, 'That is a sale with Clover.');
   assert.deepEqual(Shell.CARDS.Clover.lines, [
@@ -118,12 +118,12 @@ test_bar: {
   const chosen = [];
   shell.onScenario = (name) => chosen.push(name);
   const tabs = [...shell.tabs.values()];
-  assert.deepEqual(tabs.map((t) => t.label.textContent), ['Customer', 'Café', 'With your register', 'When something goes wrong']);
+  assert.deepEqual(tabs.map((t) => t.label.textContent), ['Customer', 'Café', 'With your register', 'When something goes wrong', 'OpenBMT checkout']);
   // The select: a place for each scenario without a menu, and an optgroup of items for each menu.
   const groups = shell.scenSel.children.filter((c) => c.tag === 'optgroup');
   assert.deepEqual(groups.map((g) => g.label), ['With your register', 'When something goes wrong']);
   assert.deepEqual(groups.map((g) => labels(g.children)), [Shell.BAR[2].menu, Shell.BAR[3].menu]);
-  assert.deepEqual(labels(shell.scenSel.children.filter((c) => c.tag === 'option' && c.value)), ['Customer', 'Café']);
+  assert.deepEqual(labels(shell.scenSel.children.filter((c) => c.tag === 'option' && c.value)), ['Customer', 'Café', 'OpenBMT checkout']);
 
   // A tab without a menu names its scenario; it has no menu and no chevron.
   tabs[0].label.click();
@@ -191,6 +191,8 @@ test_bar: {
   shell.scenSel.value = 'A short payment';
   for (const f of shell.scenSel.handlers.change) f();
   assert.equal(chosen.at(-1), 'A short payment');
+  tabs[4].label.click();
+  assert.equal(chosen.at(-1), 'OpenBMT checkout');
 }
 
 test_cards_and_inert_end: {
@@ -201,6 +203,7 @@ test_cards_and_inert_end: {
   const device = [{ id: 'counter', caption: 'The shop\'s counter', sizes: [{ size: { width: 100, height: 100 } }] }];
   const cards = {
     Customer: ['Customer', undefined, 'Customer'], 'Café': ['Café', undefined, 'Café'],
+    'OpenBMT checkout': ['OpenBMT checkout', undefined, 'OpenBMT checkout'],
     'Your register sends the amount': ['With your register', 'Your register sends the amount', 'Register sends'],
     Square: ['With your register', 'Square', 'Square'],
     Clover: ['With your register', 'Clover', 'Clover'],
@@ -531,7 +534,7 @@ test_register_choice: {
   RG.open(stub, { stopRun() {}, clock: {}, flow: {}, ownerFlow: {} });
   assert.deepEqual(choice.cards.map((x) => x.name), ['Your register sends the amount', 'Square', 'Clover']);
   assert.equal(choice.cards[0].what, 'Odoo, with the OpenBMT module. The register sends the amount to the counter, so nothing is typed twice.');
-  assert.equal(choice.cards[1].what, 'The cashier rings it up on Square, types the amount on the counter, then closes the order as OpenBMT. The owner\'s phone checks that the two match.');
+  assert.equal(choice.cards[1].what, 'Illustrative manual flow only. This hand-built screen is not a supported OpenBMT tender for Square, and it does not close Square orders automatically.');
   assert.equal(choice.cards[2].what, 'The cashier rings it up on Clover, types the amount on the counter, then closes the order as Bitcoin. The owner\'s phone checks that the two match.');
   assert.equal(choice.opts.title, 'With your register');
 }
@@ -579,13 +582,13 @@ test_register_views: {
   let sqCharged = 0;
   buttons(RV.register({ kind: 'square', screen: 'sale', taps: { charge: () => { sqCharged++; } } }, landscape)).find((b) => text(b) === 'Charge $8.00').click();
   assert.equal(sqCharged, 1);
-  // Square's payment screen: the amount, Select payment, the rows, the custom group with OpenBMT alone a target, and the note.
+  // Square's payment screen: a legacy illustration explicitly labeled as a mock, not a supported tender.
   let sqType = 0;
   const sqPay = RV.register({ kind: 'square', screen: 'tender', taps: { bitcoin: () => { sqType++; } } }, landscape);
-  assert.deepEqual(labels(buttons(sqPay)), ['Cash', 'Bitcoin', 'Gift card', 'Other payment types', 'OpenBMT']);
-  for (const w of ['$8.00', 'Select payment', 'Custom payment methods', "Bitcoin here is Square's own: it pays into Square's wallet. OpenBMT pays into the shop's own wallet."]) assert.ok(text(sqPay).includes(w), w);
+  assert.deepEqual(labels(buttons(sqPay)), ['Cash', 'Bitcoin', 'Gift card', 'Other payment types', 'OpenBMT · mock']);
+  for (const w of ['$8.00', 'Select payment', 'Custom payment methods · illustrative mock', 'Hand-built illustration only. No supported Square tender connection is present.']) assert.ok(text(sqPay).includes(w), w);
   for (const b of buttons(sqPay)) b.click();
-  assert.equal(sqType, 1, 'only OpenBMT does anything');
+  assert.equal(sqType, 1, 'only the illustrative mock target does anything');
   const sqDone = RV.register({ kind: 'square', screen: 'paid' }, landscape);
   for (const w of ['$8.00', 'All done']) assert.ok(text(sqDone).includes(w), w);
   assert.deepEqual(labels(buttons(sqDone)), ['New sale']);

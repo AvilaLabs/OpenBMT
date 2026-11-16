@@ -221,6 +221,23 @@ the Rust lists: the native library of the Guardian Project's `tor-android`.
   not compile the Tor part of `apps/android-common`, and its APK has no
   `libtor.so`.
 
+## Optional Square Sandbox checkout
+
+The experimental Android checkout has a separate Gradle project at
+`apps/checkout-android/square-sandbox/`. Its debug-only Square Mobile Payments
+SDK 2.7.0 and MockReader UI dependencies are not in the default checkout APK
+or the Rust `deps/` lists above. This isolated Android variant has its own
+Gradle dependency verification metadata; that is an explicit experimental
+exception to the normal shipped-program inventory, not evidence that vendor
+license terms or all transitive licenses have passed release review. The
+Square POMs and AARs inspected here do not state/include license notices, and
+the MPS graph declares Datadog logging/tracing libraries. Runtime contacts and
+telemetry have not been fully audited. Do not apply the default apps'
+no-publisher-telemetry statement to this variant. See the [scoped dependency,
+license, and contact inventory](../apps/checkout-android/square-sandbox/DEPENDENCIES.md)
+before evaluating the experiment. It is not approved for production use or
+redistribution.
+
 ## Test tools
 
 Tools that check the code and are never part of a program or its lists.

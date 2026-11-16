@@ -80,6 +80,14 @@ const NOTICES_NEXT: &str = "Restart the app. If it keeps failing, check the phon
 /// The rule strings this layer makes, each with its own words.
 const RULES: &[Entry] = &[
     (
+        "checkout-regtest-network",
+        Kind::Refused,
+        "Regtest test build",
+        "This experimental checkout build accepts only Regtest pairing records. No counter was started.",
+        Who::Owner,
+        "Use the local Regtest fixture for this test build. Do not use real funds.",
+    ),
+    (
         "BX-40",
         Kind::Refused,
         NOTICES_HEADING,

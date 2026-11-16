@@ -38,12 +38,24 @@ with [sealing code](https://github.com/AvilaLabs/OpenBMT/blob/main/crates/openbm
 
 A Bitcoin payment need not carry a customer's name, but its transaction is
 public. An address or transaction ID can let someone connect that payment
-to other activity. OpenBMT keeps these details out of the POS and ordinary
-accounting exports, and does not upload analytics or crash data.
+to other activity. The default apps keep these details out of the POS and
+ordinary accounting exports, and do not upload analytics or crash data.
 
 > **This network behavior is built. It has been checked against Bitcoin
 > Core and observed on test and live networks. The apps have not been run
 > on a phone.**
+
+### Square Sandbox exception
+
+These statements about the default apps do not cover the optional Square
+Sandbox checkout. That separate debug module contacts Square directly for
+authorization, card-present payment, and read-only payment reconciliation.
+Its Mobile Payments SDK dependency graph includes Datadog log/trace packages;
+we have not established the SDK's complete runtime destinations or telemetry
+behavior. Do not read the default no-publisher-analytics statement as covering
+this experimental variant. See the [scoped dependency, contact, and data
+inventory](https://github.com/AvilaLabs/OpenBMT/blob/main/apps/checkout-android/square-sandbox/DEPENDENCIES.md).
+A device network/privacy audit remains necessary before broader use.
 
 ## Who sees what
 
@@ -58,6 +70,7 @@ accounting exports, and does not upload analytics or crash data.
 | Push services | Nothing; push wake-ups are not built yet | |
 | App download host | The downloader's network address and requested version | Download over Tor |
 | Customer's phone | The address and amount for that sale | OpenBMT uses a fresh address for each sale |
+| Square (only in the optional Sandbox debug build) | Sandbox authorization/location, payment amount and attempt reference, and card-present payment data; SDK destinations/telemetry beyond the documented Square calls are unverified | Keep this experimental variant disabled outside the Sandbox test |
 | Cash-out exchange | Its deposit and the coins the owner chooses to send | Use coin control; see the accounting section below |
 
 The counter never sends a shop address or script to a Bitcoin peer
@@ -396,7 +409,7 @@ Several peers from different network groups make interference harder,
 but cannot eliminate it. The counter reports when it lacks enough
 information (`NR-61`; `docs/NETWORK-RULES.md`, section 8).
 
-### Never telemetry, analytics or crash upload
+### No OpenBMT-publisher telemetry in the default apps
 
 OpenBMT does not send the publisher the shop's sales activity. The Key
 app has camera permission only, with no network permission; a build check

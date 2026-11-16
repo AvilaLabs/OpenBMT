@@ -314,7 +314,7 @@
       sends: { sub: "Your register sends the amount", card: "Register sends", kind: "plain", name: "your register", charge: RV.CHARGE, type: "Bitcoin",
         steps: ["Ring up", "The customer pays", "Done"], withBox: true, withOwner: false, moments: sendsMoments,
         devices: [{ ...registerDevice, caption: "Your register" }, { id: "counter", caption: "The shop's counter", sizes: COUNTER }] },
-      square: { sub: "Square", card: "Square", kind: "square", name: "Square", charge: RV.SQUARE_CHARGE, type: "OpenBMT",
+      square: { sub: "Square", card: "Square", kind: "square", name: "Square", charge: RV.SQUARE_CHARGE, type: "OpenBMT · mock",
         steps: ["Ring up", "The customer pays", "Close the order", "The owner's phone"], withBox: false, withOwner: true, moments: anyMoments,
         devices: [{ ...registerDevice, caption: "Square Register" }, { id: "counter", caption: "The shop's counter", sizes: COUNTER },
           { id: "owner", caption: "The owner's phone", sizes: PHONE }] },
@@ -366,7 +366,7 @@
     // The three ways, under the scenario bar.
     shell.choice([
       { name: "Your register sends the amount", what: "Odoo, with the OpenBMT module. The register sends the amount to the counter, so nothing is typed twice.", go: "Start", onPick: () => playWay(ways.sends) },
-      { name: "Square", what: "The cashier rings it up on Square, types the amount on the counter, then closes the order as OpenBMT. The owner's phone checks that the two match.", go: "Start", onPick: () => playWay(ways.square) },
+      { name: "Square", what: "Illustrative manual flow only. This hand-built screen is not a supported OpenBMT tender for Square, and it does not close Square orders automatically.", go: "Start", onPick: () => playWay(ways.square) },
       { name: "Clover", what: "The cashier rings it up on Clover, types the amount on the counter, then closes the order as Bitcoin. The owner's phone checks that the two match.", go: "Start", onPick: () => playWay(ways.clover) },
     ], {
       title: "With your register",

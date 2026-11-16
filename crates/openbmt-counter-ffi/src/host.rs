@@ -50,6 +50,11 @@ use openbmt_net_io::{
     SystemClock,
 };
 use openbmt_watch::HeaderChain;
+#[cfg(feature = "checkout-regtest")]
+use openbmt_watch::{
+    check_health, Health, HealthInput, Problem, MAX_BEHIND_SECS, MAX_CLOCK_BEHIND_SECS,
+    MAX_TIP_AGE_SECS,
+};
 
 use crate::error::{from_rule, internal, poisoned, refused_by, wrong_state, CounterError, Kind};
 use crate::pair::refused;
@@ -492,6 +497,20 @@ impl Entry {
         spawn: Spawn,
         policy: BatchPolicy,
     ) -> Result<Self, CounterError> {
+        #[cfg(feature = "checkout-regtest")]
+        {
+            // This artifact exists only for the local emulator proof. Check
+            // the signed pairing's network before opening the app data dir or
+            // starting any node/driver side effects.
+            let record = PairedRecord::from_bytes(&req.record).map_err(record_refused)?;
+            if record.network() != Network::Regtest {
+                return Err(refused_by(
+                    "checkout-regtest-network",
+                    "this checkout-regtest artifact accepts Regtest pairings only",
+                ));
+            }
+            eprintln!("WARNING: checkout-regtest artifact; single-peer health is a test stand-in, not three-network-group validation");
+        }
         let clock = Arc::new(AtomicU64::new(0));
         let Checked {
             config,
@@ -499,6 +518,18 @@ impl Entry {
             own_refused,
             link,
         } = check_start(req, policy, &clock)?;
+        #[cfg(feature = "checkout-regtest")]
+        let config = {
+            let mut config = config;
+            config.health = Box::new(checkout_regtest_health);
+            // Android's emulator reaches its host-forwarded Core node through
+            // a private/loopback address. This is safe only here because the
+            // artifact has already refused every non-Regtest pairing above.
+            config.driver.allow_local = true;
+            config.driver.target_peers = 1;
+            config.driver.seeds.clear();
+            config
+        };
         let node = Node::start_with(config, spawn).map_err(|e| start_error(&e))?;
         let link = link
             .map(|plan| LinkSlot::start(plan, LEASE_WAIT, &node))
@@ -1554,5 +1585,55 @@ impl Entry {
             f();
             Ok(())
         })
+    }
+}
+
+/// The checkout artifact relaxes only the production network-group quorum.
+/// A live peer that serves filters is still required, and all freshness,
+/// header-lag, and clock checks retain their normal thresholds. Block-body
+/// progress is checked later by `Node::refresh_health` as usual.
+#[cfg(feature = "checkout-regtest")]
+pub(crate) fn checkout_regtest_health(input: &HealthInput<'_>) -> Health {
+    let normal = check_health(input);
+    if normal.healthy {
+        return normal;
+    }
+
+    // Only WR-50 quorum failures can be relaxed. Check the other rules
+    // directly because check_health reports only its first failure.
+    let quorum_only = matches!(
+        normal.problem,
+        Some(Problem::TooFewPeerGroups | Problem::TooFewFilterPeers)
+    );
+    if !quorum_only {
+        return normal;
+    }
+
+    let has_filter_peer = input.peers.iter().any(|peer| peer.serves_filters);
+    let problem = if !has_filter_peer {
+        Some(if input.peers.is_empty() {
+            Problem::TooFewPeerGroups
+        } else {
+            Problem::TooFewFilterPeers
+        })
+    } else if input.now.saturating_sub(input.tip_time) > MAX_TIP_AGE_SECS {
+        Some(Problem::TipIsOld)
+    } else if normal.behind
+        && input
+            .behind_since
+            .is_some_and(|since| input.now.saturating_sub(since) > MAX_BEHIND_SECS)
+    {
+        Some(Problem::HeadersBehind)
+    } else if input.tip_time.saturating_sub(input.now) > MAX_CLOCK_BEHIND_SECS {
+        Some(Problem::ClockMismatch)
+    } else {
+        None
+    };
+    Health {
+        healthy: problem.is_none(),
+        // Retain the behind signal for sale checks and the UI even when the
+        // single-peer Regtest quorum exception applies.
+        behind: normal.behind,
+        problem,
     }
 }

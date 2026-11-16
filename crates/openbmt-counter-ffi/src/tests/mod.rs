@@ -19,6 +19,7 @@ mod part_paid;
 mod pay;
 mod protocol;
 mod rates;
+mod regtest_artifact;
 mod requests;
 mod screen;
 mod shopln;
