@@ -40,6 +40,57 @@
     return e;
   }
 
+  /** The scenarios the bar offers, in order. */
+  const SCENARIOS = ["Customer", "Café", "Register", "Something goes wrong"];
+
+  /** The ending card of each scenario: a heading and three lines. The register has one card for both of its ways. */
+  const CARDS = {
+    Customer: {
+      heading: "You paid a shop in bitcoin.",
+      lines: [
+        "Straight from your own wallet to the shop's own wallet.",
+        "No card, no account, no company in between.",
+        "Scan the code, or hold your phone to the counter.",
+      ],
+    },
+    "Café": {
+      heading: "That is a day at the counter.",
+      lines: [
+        "Small sales turn green in seconds, on the counter's own check.",
+        "Lightning is final at once, at any amount.",
+        "Every payment goes straight to the shop's own wallet.",
+      ],
+    },
+    "Register sends": {
+      heading: "That is a sale with your register.",
+      lines: [
+        "The register sent the amount, so nothing was typed twice.",
+        "The counter checked the payment itself.",
+        "The register closed its own order when the sale was paid.",
+      ],
+    },
+    "Register any": {
+      heading: "That is a sale with your register.",
+      lines: [
+        "The cashier rang it up on the register and on the counter.",
+        "The register's order was closed as Bitcoin.",
+        "The owner's phone matched the two, and would raise an alert if they did not match.",
+      ],
+    },
+    "Something goes wrong": {
+      heading: "A short payment never turns green.",
+      lines: [
+        "The counter shows how much is missing.",
+        "The customer pays the rest to the same code.",
+        "Green comes only when the whole amount has arrived.",
+      ],
+    },
+  };
+  /** How long after the last moment the card comes, and how it comes in (the screen fade's easing). */
+  const CARD_DELAY = 1200;
+  const CARD_ENTER = [{ opacity: 0, transform: "translateY(24px)" }, { opacity: 1, transform: "none" }];
+  const CARD_TIMING = { duration: 320, easing: "cubic-bezier(0.05, 0.7, 0.1, 1)" };
+
   class Shell {
     constructor(rootEl) {
       this.root = rootEl;
@@ -47,6 +98,13 @@
       this.onStep = null;
       this.onRestart = null;
       this.onSound = null;
+      // A tap on a scenario's tab (or its place in the select): called with the scenario's name.
+      this.onScenario = null;
+      // What a path that holds the page leaves with (its own run) does when another scenario is chosen; called once.
+      this.onLeave = null;
+      // Called when the ending card opens (the page plays the logo's confirmation sound).
+      this.onCard = null;
+      this.cardTimer = null;
       this.build();
       addEventListener("resize", () => this.fit());
     }
@@ -57,6 +115,20 @@
       const bar = el("header", "bar");
       const mark = el("div", "mark");
       mark.innerHTML = '<img src="' + LOGO + '" alt=""><span>OpenBMT demo</span>';
+      // The scenario tabs, after the mark: one native select on a narrow window.
+      this.scenEl = el("nav", "scenarios");
+      this.scenEl.setAttribute("aria-label", "Scenario");
+      this.scenSel = el("select", "scenario-select");
+      this.scenSel.setAttribute("aria-label", "Scenario");
+      for (const name of SCENARIOS) {
+        const b = el("button", null, name);
+        b.addEventListener("click", () => this.onScenario && this.onScenario(name));
+        this.scenEl.append(b);
+        const o = el("option", null, name);
+        o.value = name;
+        this.scenSel.append(o);
+      }
+      this.scenSel.addEventListener("change", () => this.onScenario && this.onScenario(this.scenSel.value));
       this.stepList = el("ol", "steps");
       const right = el("div", "right");
       // The sound switch shows the state it is in (see [setSound]); the page decides what a tap does.
@@ -67,7 +139,7 @@
       const book = el("a", null, "Handbook");
       book.href = HANDBOOK;
       right.append(this.soundEl, again, book);
-      bar.append(mark, this.stepList, right);
+      bar.append(mark, this.scenEl, this.scenSel, this.stepList, right);
 
       this.sayEl = el("section", "say");
       this.sayEl.setAttribute("aria-live", "polite");
@@ -85,6 +157,7 @@
       this.qaTab.setAttribute("aria-label", "Show the questions");
       this.qaTab.addEventListener("click", () => this.collapse(false));
       body.append(this.stage, this.qaEl, this.qaTab);
+      this.cardEl = null;
       this.body = body;
       let hidden = false;
       try { hidden = localStorage.getItem("openbmt-demo-qa") === "hidden"; } catch (e) { /* storage off: shown */ }
@@ -95,6 +168,78 @@
       demo.append(bar, this.sayEl, body);
       this.demo = demo;
       this.root.append(demo);
+    }
+
+    /** Marks scenario [name] as the current one in the tabs and the select; null marks none. */
+    scenario(name) {
+      for (const b of this.scenEl.children) {
+        if (b.textContent === name) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current");
+      }
+      this.scenSel.value = name || SCENARIOS[0];
+      this.current = name;
+    }
+
+    /** Leaves what the page held for the scenario that ends here (a path's own run), once. */
+    leave() {
+      const f = this.onLeave;
+      this.onLeave = null;
+      if (f) f();
+    }
+
+    /**
+     * The ending card of a scenario, 1.2 s after the call: [spec] is {heading, lines}. It slides up over the lower part
+     * of the stage with the devices dimmed behind it; its close control and Esc hide it and leave the moment as it was.
+     * The card offers the other scenarios, Start over and the handbook.
+     */
+    finish(spec) {
+      this.hideCard();
+      this.cardTimer = setTimeout(() => this.openCard(spec), CARD_DELAY);
+    }
+
+    openCard(spec) {
+      this.cardTimer = null;
+      const card = el("section", "end-card");
+      card.setAttribute("role", "dialog");
+      card.setAttribute("aria-labelledby", "end-card-heading");
+      const close = el("button", "end-close", "\u00D7");
+      close.setAttribute("aria-label", "Close");
+      close.addEventListener("click", () => this.hideCard());
+      const heading = el("h2", null, spec.heading);
+      heading.id = "end-card-heading";
+      heading.tabIndex = -1;
+      const list = el("ul");
+      for (const line of spec.lines) list.append(el("li", null, line));
+      const next = el("div", "end-next");
+      next.append(el("span", "end-label", "Try next"));
+      for (const name of SCENARIOS) {
+        if (name === this.current) continue;
+        const b = el("button", null, name);
+        b.addEventListener("click", () => this.onScenario && this.onScenario(name));
+        next.append(b);
+      }
+      const acts = el("div", "end-acts");
+      const again = el("button", null, "Start over");
+      again.addEventListener("click", () => this.onRestart && this.onRestart());
+      const book = el("button", null, "Read the handbook");
+      book.addEventListener("click", () => location.assign(HANDBOOK));
+      acts.append(again, book);
+      card.append(close, heading, list, next, acts);
+      this.stage.append(card);
+      this.stage.classList.add("finished");
+      this.cardEl = card;
+      this.escHandler = (ev) => { if (ev.key === "Escape") this.hideCard(); };
+      document.addEventListener("keydown", this.escHandler);
+      if (motionOn()) card.animate(CARD_ENTER, CARD_TIMING);
+      heading.focus({ preventScroll: true });
+      if (this.onCard) this.onCard();
+    }
+
+    /** Puts the ending card away (or stops it from coming) and brings the devices back to full strength. */
+    hideCard() {
+      if (this.cardTimer) { clearTimeout(this.cardTimer); this.cardTimer = null; }
+      if (this.escHandler) { document.removeEventListener("keydown", this.escHandler); this.escHandler = null; }
+      if (this.cardEl) { this.cardEl.remove(); this.cardEl = null; }
+      this.stage.classList.remove("finished");
     }
 
     /** The sound switch reads "Sound on" or "Sound off": the state, not the action. */
@@ -142,6 +287,7 @@
         this.root.append(s);
       }
       s.hidden = false;
+      this.hideCard();
       this.demo.hidden = true;
       if (snap) snap.play();
     }
@@ -152,6 +298,7 @@
      * [actorAfter] keeps room beside that device for the customer the demo plays.
      */
     begin(steps, devices, actorAfter) {
+      this.hideCard();
       const s = this.root.querySelector(".start");
       if (s) s.hidden = true;
       this.demo.hidden = false;
@@ -462,5 +609,8 @@
     }
   }
 
+  Shell.SCENARIOS = SCENARIOS;
+  Shell.CARDS = CARDS;
   root.OpenBmtShell = Shell;
+  if (typeof module !== "undefined" && module.exports) module.exports = Shell;
 })(globalThis);

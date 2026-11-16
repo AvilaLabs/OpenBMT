@@ -81,6 +81,7 @@
     const CC = OpenBmtCounterController, OC = OpenBmtOwnerController, { OneChain } = OpenBmtOneChain;
     const clock = ctx.clock, flow = ctx.flow, ownerFlow = ctx.ownerFlow;
     ctx.stopRun();
+    shell.scenario("Register");
 
     const COUNTER = [{ label: "Tablet", size: C.TABLET }, { label: "Phone", size: C.PHONE }];
     const PHONE = [{ size: C.PHONE }];
@@ -102,6 +103,7 @@
     }
 
     function leave() {
+      shell.onLeave = null;
       stopMine();
       const chooser = shell.root.querySelector(".start");
       if (chooser) chooser.remove();
@@ -110,6 +112,8 @@
       shell.actor(null);
     }
     shell.onRestart = () => { leave(); if (previousRestart) previousRestart(); };
+    // Another scenario's tab ends this view as Start over does, and the scenario goes on from there.
+    shell.onLeave = leave;
 
     /** What the page does for the counter, as live.js does: the owner's heartbeat, the network's events, the tick. */
     function pump(r) {
@@ -285,9 +289,9 @@
     }
 
     const ways = {
-      sends: { steps: ["Ring up", "The customer pays", "Done"], withBox: true, withOwner: false, moments: sendsMoments,
+      sends: { card: "Register sends", steps: ["Ring up", "The customer pays", "Done"], withBox: true, withOwner: false, moments: sendsMoments,
         devices: [{ id: "register", caption: "Your register", sizes: PHONE }, { id: "counter", caption: "The shop's counter", sizes: COUNTER }] },
-      any: { steps: ["Ring up", "The customer pays", "Close the order", "The owner's phone"], withBox: false, withOwner: true, moments: anyMoments,
+      any: { card: "Register any", steps: ["Ring up", "The customer pays", "Close the order", "The owner's phone"], withBox: false, withOwner: true, moments: anyMoments,
         devices: [{ id: "register", caption: "Your register", sizes: PHONE }, { id: "counter", caption: "The shop's counter", sizes: COUNTER },
           { id: "owner", caption: "The owner's phone", sizes: PHONE }] },
     };
@@ -305,6 +309,8 @@
         S.on = null;
         shell.step(moments[i].step);
         moments[i].enter();
+        // The last moment is the end: its card comes after the instruction has been read.
+        if (i === moments.length - 1) shell.finish(OpenBmtShell.CARDS[way.card]);
       }
       await startRun((kind, data) => {
         if (kind === "sale") {
@@ -336,7 +342,7 @@
     });
   }
 
-  const api = { play, minorOf, requestText, parseVerdict, tillLines, MINOR, KEYS };
+  const api = { play, open, minorOf, requestText, parseVerdict, tillLines, MINOR, KEYS };
   root.OpenBmtRegister = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis);

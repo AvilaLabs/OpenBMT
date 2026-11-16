@@ -103,6 +103,24 @@
       a: "The counter needs the internet to check a payment. Without it, it says so and opens no bitcoin sale, so nothing is handed over unpaid.",
       page: "getting-paid.html", anchor: "when-a-sale-does-not-go-as-expected",
     },
+    limit: {
+      q: "Why is there a limit?",
+      a: "A payment that is not yet in a block can still be cancelled by its sender. The limit is the most the shop risks on such payments. The owner sets it, and raising it needs the second key.",
+      page: "getting-paid.html", anchor: "keep-the-total-at-risk-under-control",
+    },
+    overpay: {
+      q: "What if the customer pays too much?",
+      // TODO_WORDS_overpay_answer: the answer given for this question does not match what the counter says or what the
+      // handbook says (the counter's paid screen shows no amount paid over, and the handbook says the surplus is
+      // recorded as owed to the customer and never as revenue, with no word of tips); the coordinator writes it.
+      a: "TODO_WORDS_overpay_answer",
+      page: "getting-paid.html", anchor: "when-a-sale-does-not-go-as-expected",
+    },
+    redScreen: {
+      q: "What does a red screen mean?",
+      a: "Do not hand over the goods. The payment was cancelled or replaced by its sender, or the counter can no longer see it. The counter says what to do, and the owner's phone is told.",
+      page: "getting-paid.html", anchor: "when-a-sale-does-not-go-as-expected",
+    },
     note: {
       q: "Can a sale carry a note?",
       a: "Yes. The cashier can add a short note to a sale, such as a table number, up to 64 characters. It stays in the shop's records and is never written into the payment.",
@@ -134,7 +152,9 @@
     merchant: {
       ringUp: [Q.counter, Q.price, Q.staff, Q.offline, Q.note],
       code: [Q.code, Q.short, Q.feeShop],
-      paid: [Q.confirmed, Q.instant, Q.who],
+      paid: [Q.instant, Q.who],
+      bigger: [Q.limit, Q.confirmed],
+      wrong: [Q.overpay, Q.redScreen, Q.offline],
       owner: [Q.where, Q.pileUp, Q.priceDrops],
       books: [Q.pileUp, Q.settled, Q.books],
     },

@@ -80,10 +80,29 @@ button { font: inherit; cursor: pointer; }
   background: var(--blue);
   color: #fff;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto auto 1fr auto;
   align-items: center;
-  gap: 24px;
+  gap: 16px;
   padding: 0 20px;
+}
+/* The scenarios: tabs on a wide window, one select on a narrow one. */
+.scenarios { display: flex; gap: 2px; }
+.scenarios button {
+  background: none; border: 0; color: #b9b4ff;
+  font-size: 14px; padding: 6px 9px; border-radius: 6px; white-space: nowrap;
+}
+.scenarios button:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
+.scenarios button[aria-current] { color: var(--blue); background: #fff; font-weight: 500; }
+.scenario-select {
+  display: none; font: inherit; font-size: 15px; color: #fff; background: var(--blue-deep);
+  border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 6px; padding: 5px 8px; min-width: 0;
+}
+.scenario-select option { color: var(--ink); background: #fff; }
+/* A middle width: the scenarios take a row of their own under the mark and the steps. */
+@media (min-width: 900px) and (max-width: 1499px) {
+  :root { --bar-h: 88px; }
+  .bar { grid-template-columns: auto 1fr auto; grid-template-rows: 48px 36px; align-items: center; row-gap: 0; }
+  .scenarios { grid-row: 2; grid-column: 1 / -1; }
 }
 .steps { display: flex; justify-content: center; gap: 4px; list-style: none; margin: 0; padding: 0; overflow: hidden; }
 .steps button {
@@ -219,6 +238,46 @@ button { font: inherit; cursor: pointer; }
 }
 .fit { position: relative; }
 
+/* The ending card: over the lower part of the stage, the devices dimmed behind it. */
+.stage.finished .slot, .stage.finished .slot.rest { opacity: 0.55; }
+.end-card {
+  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 6;
+  width: min(620px, calc(100% - 32px)); max-height: calc(100% - 16px); overflow-y: auto;
+  background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 24px 28px 22px;
+  box-shadow: 0 18px 50px rgba(17, 6, 134, 0.28);
+}
+.end-card h2 { margin: 0 36px 12px 0; font-size: 26px; font-weight: 500; color: var(--blue); line-height: 1.2; }
+.end-card h2:focus { outline: none; }
+.end-card h2:focus-visible { outline: 3px solid var(--cyan); outline-offset: 4px; }
+.end-card ul { list-style: none; margin: 0 0 16px; padding: 0; display: grid; gap: 8px; }
+.end-card li { position: relative; padding-left: 28px; font-size: 16px; line-height: 1.4; color: #33333d; }
+.end-card li::before {
+  content: ""; position: absolute; left: 3px; top: 4px; width: 6px; height: 11px;
+  border: solid var(--blue); border-width: 0 2.5px 2.5px 0; transform: rotate(40deg);
+}
+.end-close {
+  position: absolute; top: 10px; right: 12px; width: 36px; height: 36px; border-radius: 50%;
+  border: 0; background: none; color: var(--muted); font-size: 26px; line-height: 1;
+}
+.end-close:hover { background: #f1f0fb; color: var(--ink); }
+.end-next { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.end-label { font-size: 14px; color: var(--muted); margin-right: 4px; }
+.end-next button, .end-acts button {
+  border: 1px solid var(--line); background: #fff; color: var(--ink);
+  font-size: 15px; font-weight: 500; padding: 8px 14px; border-radius: 999px;
+}
+.end-next button:hover, .end-acts button:hover { border-color: var(--blue); color: var(--blue); }
+.end-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 899px) {
+  .end-card { bottom: 8px; padding: 16px 16px 14px; border-radius: 14px; }
+  .end-card h2 { font-size: 20px; margin-bottom: 8px; }
+  .end-card ul { gap: 6px; margin-bottom: 10px; }
+  .end-card li { font-size: 14px; }
+  .end-next, .end-acts { gap: 6px; }
+  .end-next { margin-bottom: 8px; }
+  .end-next button, .end-acts button { font-size: 14px; padding: 6px 11px; }
+}
+
 /* The next thing to tap, inside the lit phone. */
 .target { position: relative; z-index: 2; animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse {
@@ -246,9 +305,11 @@ button { font: inherit; cursor: pointer; }
 /* Phone width: one phone at a time, a switch to look at the other. */
 .switch { display: none; }
 @media (max-width: 899px) {
-  :root { --bar-h: 48px; --say-h: 112px; }
-  .bar { grid-template-columns: 1fr auto; gap: 8px; padding: 0 12px; }
-  .bar .mark span, .steps { display: none; }
+  :root { --say-h: 112px; }
+  :root { --bar-h: 88px; }
+  .bar { grid-template-columns: 1fr auto; grid-template-rows: 46px 38px; gap: 0 8px; padding: 0 12px; }
+  .bar .mark span, .steps, .scenarios { display: none; }
+  .scenario-select { display: block; grid-row: 2; grid-column: 1 / -1; width: 100%; }
   .say .do { font-size: 18px; }
   .say { padding-bottom: 40px; }
   .ask { top: auto; bottom: 8px; transform: none; right: 50%; margin-right: -52px; }

@@ -1,4 +1,4 @@
-// The two paths of the demo on the counter's own code. The moments, the instruction words, the questions and the
+// The paths of the demo on the counter's own code. The moments, the instruction words, the questions and the
 // taps are those of preview.js; what differs is that the counter's screens are drawn by the counter's controller
 // (counter-controller.js) from the counter app's own model, whose library runs as WebAssembly on a pretend chain,
 // and that a moment ends when the MODEL says so (the sale opened, the sale turned paid), not on a script.
@@ -10,7 +10,7 @@
 // logo's snap are the apps' own (demo/ui/feedback.js, sound.js).
 "use strict";
 (async function () {
-  const U = OpenBmtUi, C = OpenBmtChrome;
+  const U = OpenBmtUi, C = OpenBmtChrome, Shell = OpenBmtShell;
   const Wl = OpenBmtWallet, QS = OpenBmtQuestions, PC = OpenBmtPaymentCode, CC = OpenBmtCounterController;
   const OC = OpenBmtOwnerController, { OneChain } = OpenBmtOneChain;
   const F = OpenBmtFeedback, Cu = OpenBmtCustomer;
@@ -83,6 +83,10 @@
   // The page's clock. A visitor who jumps to a later step has the seconds a real counter would have waited skipped.
   const clock = { offset: 0, now() { return Math.floor(Date.now() / 1000) + this.offset; }, skip(secs) { this.offset += secs; } };
   const AMOUNT = "800";
+  // The café's second sale, a meal over the counter's instant limit.
+  const MEAL = "2000";
+  // What a short payment sends of the 8.00 sale (10,877 sats at the demo's price).
+  const SHORT = 6000;
   const groups = (n) => Number(n).toLocaleString("en-US");
 
   /** A device page: [view] draws it with the Ui of the device's size. */
@@ -187,6 +191,14 @@
     run.chain.pay(read.address, read.sats);
   }
 
+  /** The seconds a real counter waits to see a short payment, run at once. */
+  function waitForPartPaid() {
+    for (let i = 0; i < 40 && (run.controller.saleData() || {}).state !== "PartPaid"; i++) {
+      clock.skip(1);
+      pump(run);
+    }
+  }
+
   /** The seconds a real counter waits for its own check, run at once: for a visitor who jumped ahead. */
   function waitForPaid() {
     for (let i = 0; i < 40 && !(run.controller.saleData() || {}).isPaid; i++) {
@@ -195,12 +207,38 @@
     }
   }
 
-  /** The keys of the entry still to type for 8.00, and the next thing to tap. */
-  function nextTap(minor) {
+  /** The keys of the entry still to type for [keys] (8.00 unless said), and the next thing to tap. */
+  function nextTap(minor, keys = AMOUNT) {
     const typed = minor > 0 ? String(minor) : "";
-    if (typed === AMOUNT) return "Open the sale";
-    return AMOUNT.startsWith(typed) ? AMOUNT[typed.length] : "C";
+    if (typed === keys) return "Open the sale";
+    return keys.startsWith(typed) ? keys[typed.length] : "C";
   }
+
+  /** The Lightning invoice the sale's code carries (the counter adds it a pump or two after the sale opens), or null. */
+  function invoiceOf(data) {
+    const read = data && data.copyUri && PC.parse(data.copyUri);
+    return read && read.lightning ? read.lightning : null;
+  }
+
+  /** The seconds a real counter waits for the shop's node to give an invoice, run at once. */
+  function waitForInvoice() {
+    for (let i = 0; i < 20 && !invoiceOf(run.controller.saleData()); i++) {
+      clock.skip(1);
+      pump(run);
+    }
+  }
+
+  /** The wait line while the counter checks a payment the customer sent. */
+  const sentLine = (what) => shell.say(what, ["The counter checks it itself. This takes a few seconds."]);
+
+  /** The actor's button, put out of use once tapped. */
+  function spendActor() {
+    const b = document.querySelector(".actor button");
+    if (b) b.disabled = true;
+  }
+
+  /** What the register's two ways need of this page. */
+  const registerRun = () => ({ assets, palette, clock, flow, ownerFlow, wasm, ownerWasm, loadCounter, loadOwner, stopRun, record, recordWithBox });
 
   // ---- As a merchant: the counter and the owner's phone; the demo plays the customer. ----
   function merchantMoments(go, S) {
@@ -216,7 +254,7 @@
       }, auto() { c().showNewSale(); } },
       { step: 0, enter() {
         shell.say("The customer's order comes to 8.00 USD.", ["Type the amount, then tap ", { b: "Open the sale" }, "."]);
-        OpenBmtRegister.play(shell, { assets, palette, clock, flow, ownerFlow, wasm, ownerWasm, loadCounter, loadOwner, stopRun, record, recordWithBox });
+        OpenBmtRegister.play(shell, registerRun());
         aim(nextTap(flow.entryMinor()));
         S.on = { entry: (e) => aim(nextTap(e.minor)), sale: go };
       }, auto() { for (const key of AMOUNT) c().press(key); c().openEntered(); } },
@@ -245,7 +283,51 @@
         aim("Done");
         S.on = { home: go };
       }, auto() { c().showHome(); } },
+      // The second sale: a meal over the instant limit, paid over Lightning, which is final at once.
       { step: 3, enter() {
+        shell.say("Next customer: a meal of 20.00 USD.",
+          ["That is over this counter's instant limit of $10. Tap ", { b: "New sale" }, "."]);
+        shell.questions(QS.merchant.bigger);
+        aim("New sale");
+        S.on = { newSale: go };
+      }, auto() { c().showNewSale(); } },
+      { step: 3, enter() {
+        shell.say("The meal comes to 20.00 USD.", ["Type the amount, then tap ", { b: "Open the sale" }, "."]);
+        aim(nextTap(flow.entryMinor(), MEAL));
+        S.on = { entry: (e) => aim(nextTap(e.minor, MEAL)), sale: go };
+      }, auto() { for (const key of MEAL) c().press(key); c().openEntered(); } },
+      { step: 3, enter() {
+        aim(null);
+        // The code carries its Lightning invoice a pump or two after the sale opens.
+        const show = (data) => {
+          const read = PC.parse(data.copyUri);
+          shell.say("The counter shows a code with two ways to pay: on-chain and Lightning.",
+            ["This customer pays with Lightning. Tap ", { b: "The customer pays" }, "."]);
+          shell.actor({
+            who: "The customer", line: `Pays ${groups(read.sats)} sats over Lightning.`, button: "The customer pays",
+            onTap() {
+              run.host.payLightning(invoiceOf(run.controller.saleData()));
+              spendActor();
+              sentLine("The customer sent the payment.");
+            },
+          });
+          S.on = { sale: (d) => { if (d.isPaid) go(); } };
+        };
+        const now = run.controller.saleData();
+        if (invoiceOf(now)) show(now);
+        else {
+          shell.say("", []);
+          S.on = { sale: (d) => { if (invoiceOf(d)) show(d); } };
+        }
+      }, auto() { waitForInvoice(); run.host.payLightning(invoiceOf(run.controller.saleData())); waitForPaid(); } },
+      { step: 3, enter() {
+        shell.actor(null);
+        shell.say("Paid at once. Lightning is final, so the limit does not apply.",
+          ["Paid on-chain, a sale over the limit waits for a block, about ten minutes, unless the owner raised the limit. The next sale can start while it waits. Tap ", { b: "Done" }, "."]);
+        aim("Done");
+        S.on = { home: go };
+      }, auto() { c().showHome(); } },
+      { step: 4, enter() {
         aim(null);
         // The owner's phone is drawn from the owner model's own state (owner-controller.js); the counter rests.
         shell.light("owner", { counter: "Ready for the next sale." });
@@ -283,14 +365,74 @@
     }, go, S);
   }
 
+  // ---- Something goes wrong: a customer's wallet sends too little, then the rest. ----
+  function wrongMoments(go, S) {
+    const c = () => run.controller;
+    /** What the counter's own sale data says is still missing, in sats. */
+    const missing = () => {
+      const d = c().saleData();
+      return Math.max(0, Math.round(d.needsSats - d.receivedSats));
+    };
+    return [
+      { step: 0, enter() {
+        shell.actor(null);
+        shell.light("counter", {});
+        shell.say("A customer's order comes to 8.00 USD.", ["Type the amount, then tap ", { b: "Open the sale" }, "."]);
+        shell.questions(QS.merchant.wrong);
+        aim(nextTap(flow.entryMinor()));
+        S.on = { entry: (e) => aim(nextTap(e.minor)), sale: go };
+      }, auto() { for (const key of AMOUNT) c().press(key); c().openEntered(); } },
+      { step: 1, enter() {
+        aim(null);
+        shell.say("The counter shows a code for this sale.",
+          ["This customer's wallet sends too little. Tap ", { b: "The customer pays" }, "."]);
+        shell.actor({
+          who: "The customer", line: `Pays ${groups(SHORT)} sats.`, button: "The customer pays",
+          onTap() {
+            run.chain.pay(readCode().address, SHORT);
+            spendActor();
+            sentLine("The customer sent the payment.");
+          },
+        });
+        S.on = { sale: (d) => { if (d.state === "PartPaid") go(); } };
+      }, auto() { run.chain.pay(readCode().address, SHORT); waitForPartPaid(); } },
+      { step: 2, enter() {
+        shell.say("Part paid: the counter shows how much is missing.",
+          ["Do not hand over the goods yet. Tap ", { b: "The customer pays the rest" }, "."]);
+        shell.actor({
+          who: "The customer", line: "Pays the rest to the same code.", button: "The customer pays the rest",
+          onTap() {
+            run.chain.pay(readCode().address, missing());
+            spendActor();
+            sentLine("The customer sent the rest.");
+          },
+        });
+        S.on = { sale: (d) => { if (d.isPaid) go(); } };
+      }, auto() { run.chain.pay(readCode().address, missing()); waitForPaid(); } },
+      { step: 3, enter() {
+        shell.actor(null);
+        shell.say("Paid. The two payments together cover the sale.", ["Hand over the goods. Tap ", { b: "Done" }, "."]);
+        aim("Done");
+        S.on = { home: go };
+      }, auto() { c().showHome(); } },
+      // The last moment says nothing new: the ending card comes over it.
+      { step: 3, enter() {
+        aim(null);
+        shell.actor(null);
+      } },
+    ];
+  }
+
   // ---- The runner: a moment ends when the model says so; a step tab replays the taps on a fresh model. ----
   const merchant = {
-    steps: ["Ring up", "The customer pays", "Hand over", "The owner's phone"],
+    scenario: "Café", card: "Café",
+    steps: ["Ring up", "The customer pays", "Hand over", "A bigger sale", "The owner's phone"],
     devices: [{ id: "counter", caption: "The shop's counter", sizes: COUNTER }, { id: "owner", caption: "The owner's phone", sizes: PHONE }],
     actorAfter: "counter", moments: merchantMoments,
     setup() { run.controller.showHome(); },
   };
   const customer = {
+    scenario: "Customer", card: "Customer",
     steps: ["Scan", "Send", "Paid"],
     devices: [{ id: "counter", caption: "The shop's counter", sizes: COUNTER }, { id: "wallet", caption: "Your phone", sizes: PHONE }],
     moments: customerMoments,
@@ -298,10 +440,22 @@
     setup() { run.controller.openSale(Number(AMOUNT), 0, (words) => console.warn("refused:", words.heading)); },
   };
 
+  const wrong = {
+    scenario: "Something goes wrong", card: "Something goes wrong",
+    steps: ["Ring up", "A short payment", "The rest", "Paid"],
+    devices: [{ id: "counter", caption: "The shop's counter", sizes: COUNTER }],
+    actorAfter: "counter", moments: wrongMoments,
+    setup() { run.controller.showNewSale(); },
+  };
+
+  let playing = 0;
+
   /** Plays [path] from its moment [from]: a fresh counter, the earlier moments' taps made for the visitor. */
   async function play(path, from = 0) {
     const S = { index: -1, on: null };
+    const mine = ++playing;
     shell.begin(path.steps, path.devices, path.actorAfter);
+    shell.scenario(path.scenario);
     const go = () => enter(S.index + 1);
     const moments = path.moments(go, S);
     function enter(i) {
@@ -310,13 +464,18 @@
       S.on = null;
       shell.step(moments[i].step);
       moments[i].enter();
+      // The last moment is the end: its card comes after the instruction has been read.
+      if (i === moments.length - 1 && path.card) shell.finish(Shell.CARDS[path.card]);
     }
     // The devices' launch screens are drawn before the counter starts.
     await paint();
-    await startRun((kind, data) => {
+    if (mine !== playing) return;
+    const started = await startRun((kind, data) => {
       const handler = S.on && S.on[kind];
       if (handler) handler(data);
     }, path.devices.some((d) => d.id === "owner"));
+    // Another scenario was chosen while this one started: its run is the one to keep.
+    if (mine !== playing) { if (run === started) stopRun(); return; }
     path.setup();
     // The visitor's taps before the moment they chose, made on the real model.
     run.quiet = true;
@@ -330,14 +489,31 @@
   }
 
   const pick = () => {
+    playing++;
     stopRun();
+    shell.scenario(null);
     shell.start([
       { name: "As a customer", what: "Pay a shop in bitcoin, the way it works at the counter.", go: "Start", onPick: () => play(customer) },
       { name: "As a merchant", what: "Take a payment at the counter and see it reach the owner's phone.", go: "Start", onPick: () => play(merchant) },
     ], snap);
   };
   shell.onRestart = pick;
+  // The ending card plays the logo's confirmation sound once, as the box's green outcome does.
+  shell.onCard = () => box.outcome("Green");
+  // A tab starts its scenario from the first moment; the register's tab opens its choice of two ways.
+  shell.onScenario = async (name) => {
+    shell.leave();
+    playing++;
+    stopRun();
+    if (name === "Customer") await play(customer);
+    else if (name === "Café") await play(merchant);
+    else if (name === "Something goes wrong") await play(wrong);
+    else { await ready(); OpenBmtRegister.open(shell, registerRun()); }
+  };
   const want = new URLSearchParams(location.search).get("path");
-  if (want === "merchant") await play(merchant); else if (want === "customer") await play(customer); else pick();
+  if (want === "merchant") await play(merchant);
+  else if (want === "customer") await play(customer);
+  else if (want === "wrong") await play(wrong);
+  else pick();
   document.body.dataset.ready = "1";
 })();
