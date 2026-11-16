@@ -253,6 +253,10 @@
         // A new screen comes in over the one it replaces, lifted and faded in; the old one goes when it is covered.
         prev.classList.add("leaving");
         prev.inert = true;
+        // Pinned in its own style, which a screen's own inline style cannot undo: the old screen stays exactly where
+        // it was, beneath the new one, instead of pushing the new one below it.
+        Object.assign(prev.style, { position: "absolute", top: prev.offsetTop + "px", left: prev.offsetLeft + "px", zIndex: "0" });
+        next.style.zIndex = "1";
         s.leaving = prev;
         s.phone.append(next);
         s.anim = next.animate(ENTER, ENTER_TIMING);
