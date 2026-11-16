@@ -564,7 +564,7 @@
     if (d.lines && d.lines.length) lines.show(ui.homeLines(d.lines.map((l) => HomeLine(l.key, l.words, l.extra, l.retry)), open));
     if (d.tillCards && d.tillCards.length) {
       tillSlot.show(...d.tillCards.map((c) => {
-        const card = ui.tillCard(c.lines, () => {}, () => {}, d.words.till);
+        const card = ui.tillCard(c.lines, c.start || (() => {}), c.notNow || (() => {}), d.words.till);
         card.layoutParams = ui.margins(0, 12);
         return card;
       }));

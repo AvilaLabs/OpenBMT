@@ -15,6 +15,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 openbmt-core = { path = "../openbmt-core" }
+openbmt-counter = { path = "../openbmt-counter" }
 openbmt-counter-node = { path = "../openbmt-counter-node", default-features = false }
 openbmt-demo = { path = "../openbmt-demo", default-features = false }
 openbmt-kernel-random = { path = "../openbmt-kernel-random" }
@@ -22,5 +23,6 @@ openbmt-net-io = { path = "../openbmt-net-io" }
 openbmt-owner = { path = "../openbmt-owner" }
 openbmt-owner-ffi = { path = "../openbmt-owner-ffi", default-features = false }
 openbmt-owner-node = { path = "../openbmt-owner-node", default-features = false }
+openbmt-pos = { path = "../openbmt-pos" }
 openbmt-watch = { path = "../openbmt-watch" }
 bitcoin = { version = "=0.32.8", default-features = false, features = ["std"] }

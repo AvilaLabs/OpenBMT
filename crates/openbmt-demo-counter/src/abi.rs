@@ -15,6 +15,11 @@
 //!   as two bytes (little-endian) and the body;
 //! - `lightning_pay(ptr, len) -> u64`: a customer pays the invoice written at
 //!   `ptr` on the pretend node; text, `ok:` and the sats, or `err:` and why;
+//! - `counter_record_with_box() -> u64`: the same record for a shop with a
+//!   Box, which is the sender of the till's requests;
+//! - `counter_till_request(amount_minor) -> u64`: the Box tells the running
+//!   counter that the till asks for a sale of that amount; text, `ok:` and
+//!   the till's sale as hex, or `err:` and why;
 //! - `chain_pay(ptr, len, sats) -> u64`: a customer pays the address written
 //!   at `ptr` on the pretend chain; the reply is text, `ok:` and the id, or
 //!   `err:` and why;
@@ -106,6 +111,28 @@ pub unsafe extern "C" fn counter_call(ptr: *mut u8, len: usize) -> u64 {
 pub extern "C" fn counter_record() -> u64 {
     openbmt_kernel_random::set_host_fill(page_random);
     give(crate::record::demo_record().unwrap_or_default())
+}
+
+/// The pairing record of the demo counter whose settings name a Box.
+#[no_mangle]
+pub extern "C" fn counter_record_with_box() -> u64 {
+    openbmt_kernel_random::set_host_fill(page_random);
+    give(crate::record::demo_record_with_box().unwrap_or_default())
+}
+
+/// The Box tells the running counter that the till asks for a sale of
+/// `amount_minor`.
+#[no_mangle]
+pub extern "C" fn counter_till_request(amount_minor: u64) -> u64 {
+    openbmt_kernel_random::set_host_fill(page_random);
+    let text = match crate::till::request(amount_minor) {
+        Ok(sale) => format!(
+            "ok:{}",
+            sale.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        ),
+        Err(e) => format!("err:{e}"),
+    };
+    give(text.into_bytes())
 }
 
 /// A customer pays `sats` to the address of `len` bytes at `ptr` (freed here).

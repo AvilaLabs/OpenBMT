@@ -3,7 +3,9 @@
 //! them. The words are the placeholders of the library until they are
 //! written (CR-271).
 
+use openbmt_core::identity::DeviceId;
 use openbmt_counter::{till_cancelled_words, till_card_words, till_start_words, TillRequest};
+use openbmt_counter_node::TillTaken;
 
 use crate::codec::{wire_record, wire_record_get};
 use crate::error::{from_rule, refused_by, CounterError};
@@ -169,6 +171,21 @@ impl Entry {
                 cancelled,
                 words: cancelled.then(|| WordsView(till_cancelled_words())),
             })
+        })
+    }
+
+    /// CR-266, CR-269: take a POS notice from `from`, the Box, as the link
+    /// does when one arrives sealed. For a host that has no link of its own
+    /// (the build for a browser), which gives the notice's content itself;
+    /// the node judges it as it judges one from the link.
+    pub fn take_till_notice(
+        &self,
+        from: &DeviceId,
+        content: &[u8],
+    ) -> Result<TillTaken, CounterError> {
+        self.run(None, |node, _, _| {
+            node.take_till_notice(from, content)
+                .map_err(|e| refused_by("CR-266", e))
         })
     }
 }

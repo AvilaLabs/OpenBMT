@@ -11,9 +11,10 @@
 // The page gives the controller (the `host`): the model (`flow`), the pretend chain (`chain`), the page's clock
 // (`clock`), the place a screen is shown (`show`) and what the page wants to hear (`event`).
 //
-// Ported: the start of the node (startNode), render, home, the new sale with its keypad, the tip choice that opens
-// a sale, the sale's screen with its tick through the paid screen, and Done. Not ported, because the demo's path
-// does not reach them: the till and the staff PINs, the settings pages, the sales and today lists, bills, requests
+// Ported: the start of the node (startNode), render, home with the cards of the requests from the till (the Box's
+// requests: Start and Not now), the new sale with its keypad, the tip choice that opens a sale, the sale's screen with
+// its tick through the paid screen, and Done. Not ported, because the demo's path does not reach them: the staff PINs
+// and who is at the till, the settings pages, the sales and today lists, bills, requests
 // to send, refunds, requote and cancel, the price sources, Tor, Lightning, pairing and the sound and haptic of an
 // outcome.
 "use strict";
@@ -47,6 +48,7 @@
    * Controller.kt:95 Controller(act): the controller of the counter. [host] is the page's side:
    *   flow    CounterFlowDemo of the model module;
    *   chain   the pretend chain's controls (counter-host.mjs);
+   *   withBox   true when the shop has a Box, which is where a request from the till comes from (the pairing record names it);
    *   clock   {now()}: the page's clock, in seconds;
    *   show(viewOf)   puts a screen on the counter's device: viewOf(ui) returns the page of that device's Ui;
    *   event(kind, data)   tells the page what happened: "home", "newSale", "entry", "sale".
@@ -64,7 +66,7 @@
 
     /** Controller.kt:375 startNode(): the node is started on the pairing record and takes its first events. */
     function startNode() {
-      flow.start("/demo/counter", nowSecs(), host.chain.record());
+      flow.start("/demo/counter", nowSecs(), host.chain.record(!!host.withBox));
     }
 
     /** Controller.kt:676 onPump(reported): the open screen is made again from the library's state when it changed. */
@@ -114,10 +116,11 @@
           lines: h.lines.map((words, i) => ({ key: h.lineKeys[i], words })),
           words: WORDS, cashier: null, counterLine: counterLine(h), open: [],
           requests: h.requestTitles.map((title, i) => ({ title, sub: h.requestSubs[i] })),
+          tillCards: tillCards(),
           taps: { newSale: () => showNewSale() },
         };
       };
-      const signature = (d) => JSON.stringify([d.health, d.lines, d.counterLine, d.requests]);
+      const signature = (d) => JSON.stringify([d.health, d.lines, d.counterLine, d.requests, d.tillCards.map((c) => [c.sale, c.lines])]);
       let shown = data();
       let shownSig = signature(shown);
       put((ui) => CV.showHome(ui, shown), "home");
@@ -131,6 +134,47 @@
         }
       };
       host.event("home", {});
+    }
+
+    /** Controller.kt:1285 tillWaiting(n): the requests from the till that wait; the model has them (TillModel.shown). */
+    function tillWaiting() {
+      return Array.from(flow.tillCards(nowSecs()));
+    }
+
+    /**
+     * Controller.kt:1222 tillCard(lines, start, notNow): the card of one request from the till. Start opens the sale for
+     * the request's amount; Not now hides the card and sends nothing.
+     */
+    function tillCard(r) {
+      return {
+        sale: r.sale,
+        lines: Array.from(r.labels).map((label, i) => ({ label, value: r.values[i] })),
+        start: () => startTillSale(r.sale),
+        notNow: () => {
+          flow.tillNotNow(nowSecs(), r.sale);
+          showHome();
+        },
+      };
+    }
+
+    /** The cards (the list of Controller.kt at line 1213) of the requests from the till, oldest first, above the other lines of home. */
+    function tillCards() {
+      return tillWaiting().map(tillCard);
+    }
+
+    /**
+     * Controller.kt:1298 startTillSale(n, request, refused): the counter opens the sale for the request's amount at its
+     * own price, and the sale's screen is shown as for a sale typed here. A refusal is shown and the request stays.
+     */
+    function startTillSale(sale) {
+      let index;
+      try {
+        index = flow.tillStart(nowSecs(), sale);
+      } catch (e) {
+        console.warn("refused:", String(e && e.message));
+        return;
+      }
+      showSale(index, null, null);
     }
 
     /** Controller.kt:1900 priceWords(): the price line of the keypad: the model's words for the pretend price. */
@@ -235,6 +279,10 @@
       tick() { if (tick) tick(); },
       /** The data of the open sale, or null. */
       saleData() { return sale ? sale.data : null; },
+      /** The cards of the requests from the till that wait now. */
+      tillCards,
+      /** CR-268: the till's sale (as hex) the open sale came from, or null when it was typed at the counter. */
+      tillOfSale() { return sale ? flow.tillOfSale(sale.index) || null : null; },
     };
   }
 

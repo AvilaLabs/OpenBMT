@@ -256,6 +256,17 @@ impl Registry {
         }
     }
 
+    /// The one node that runs, for a host that runs only one (the build for a
+    /// browser). `None` when none runs or when more than one does.
+    pub fn only_entry(&self) -> Option<Arc<Entry>> {
+        let state = self.lock();
+        let mut nodes = state.nodes.values();
+        match (nodes.next(), nodes.next()) {
+            (Some(entry), None) => Some(entry.clone()),
+            _ => None,
+        }
+    }
+
     fn lock(&self) -> MutexGuard<'_, RegState> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }

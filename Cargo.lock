@@ -739,6 +739,7 @@ version = "0.1.0"
 dependencies = [
  "bitcoin",
  "openbmt-core",
+ "openbmt-counter",
  "openbmt-counter-ffi",
  "openbmt-counter-node",
  "openbmt-demo",
@@ -746,6 +747,7 @@ dependencies = [
  "openbmt-kernel-random",
  "openbmt-lightning",
  "openbmt-net-io",
+ "openbmt-pos",
  "openbmt-watch",
 ]
 
@@ -755,6 +757,7 @@ version = "0.1.0"
 dependencies = [
  "bitcoin",
  "openbmt-core",
+ "openbmt-counter",
  "openbmt-counter-node",
  "openbmt-demo",
  "openbmt-kernel-random",
@@ -762,6 +765,7 @@ dependencies = [
  "openbmt-owner",
  "openbmt-owner-ffi",
  "openbmt-owner-node",
+ "openbmt-pos",
  "openbmt-watch",
 ]
 

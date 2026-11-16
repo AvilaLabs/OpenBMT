@@ -27,7 +27,7 @@ export function invoiceOf(code) {
 }
 
 /** Loads the module from `bytes` (an ArrayBuffer, a Uint8Array or a compiled WebAssembly.Module) and installs the call. Returns the chain's controls. */
-export async function loadCounter(bytes, { now = () => Math.floor(Date.now() / 1000), record = null } = {}) {
+export async function loadCounter(bytes, { now = () => Math.floor(Date.now() / 1000), record = null, recordWithBox = null } = {}) {
   let memory = null;
   // A compiled WebAssembly.Module instantiates at once; bytes are compiled first.
   const made = await WebAssembly.instantiate(bytes, {
@@ -84,11 +84,20 @@ export async function loadCounter(bytes, { now = () => Math.floor(Date.now() / 1
     return s.slice(3);
   };
   return {
-    /** The pairing record of the demo counter: the one made at build time when given (`record`), else made now. */
-    record() {
+    /**
+     * The pairing record of the demo counter; with [withBox], the one whose settings name the shop's Box. Each is the
+     * one made at build time when given (`record`, `recordWithBox`), else made now.
+     */
+    record(withBox = false) {
       tick();
-      if (record) return Int8Array.from(new Uint8Array(record));
-      return Int8Array.from(take(x.counter_record()));
+      const made = withBox ? recordWithBox : record;
+      if (made) return Int8Array.from(new Uint8Array(made));
+      return Int8Array.from(take(withBox ? x.counter_record_with_box() : x.counter_record()));
+    },
+    /** The shop's Box tells the counter that the till asks for a sale of [amountMinor]; the till's sale as hex. */
+    tillRequest(amountMinor) {
+      tick();
+      return reply(take(x.counter_till_request(BigInt(amountMinor))));
     },
     /** A customer pays `sats` to `address` on the pretend chain; the transaction's id. */
     pay(address, sats) {
