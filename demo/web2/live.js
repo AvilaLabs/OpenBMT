@@ -308,7 +308,7 @@
             onTap() {
               run.host.payLightning(invoiceOf(run.controller.saleData()));
               spendActor();
-              sentLine("The customer sent the payment.");
+              shell.say("The customer paid over Lightning.", ["The counter asks the shop's own Lightning node. This takes a moment."]);
             },
           });
           S.on = { sale: (d) => { if (d.isPaid) go(); } };
@@ -316,7 +316,8 @@
         const now = run.controller.saleData();
         if (invoiceOf(now)) show(now);
         else {
-          shell.say("", []);
+          // CR-113: the on-chain code shows at once, and the invoice joins it when the node sends it.
+          shell.say("The counter shows a code for this sale.", ["It adds the Lightning invoice as soon as the shop's node sends it."]);
           S.on = { sale: (d) => { if (invoiceOf(d)) show(d); } };
         }
       }, auto() { waitForInvoice(); run.host.payLightning(invoiceOf(run.controller.saleData())); waitForPaid(); } },

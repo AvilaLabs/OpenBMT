@@ -110,10 +110,7 @@
     },
     overpay: {
       q: "What if the customer pays too much?",
-      // TODO_WORDS_overpay_answer: the answer given for this question does not match what the counter says or what the
-      // handbook says (the counter's paid screen shows no amount paid over, and the handbook says the surplus is
-      // recorded as owed to the customer and never as revenue, with no word of tips); the coordinator writes it.
-      a: "TODO_WORDS_overpay_answer",
+      a: "The sale turns green as paid. The extra is recorded as owed to the customer, never counted as the shop's money, and the owner can pay it back as a refund.",
       page: "getting-paid.html", anchor: "when-a-sale-does-not-go-as-expected",
     },
     redScreen: {
