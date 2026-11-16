@@ -29,7 +29,8 @@ watches for the payment.
 Today the cashier enters the amount manually. A Square or Clover order
 does not automatically start the counter, and OpenBMT does not automatically
 close the POS order. The cashier closes it using the shop's Bitcoin
-payment type after the counter reports acceptance. Order matching can
+payment type (on Square, the one named OpenBMT) after the counter reports
+acceptance. Order matching can
 later flag a mismatch between the POS and counter records; it cannot
 prove that goods were handed over.
 

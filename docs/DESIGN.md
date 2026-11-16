@@ -309,7 +309,7 @@ If the connection is down at the start, the counter does not offer Bitcoin
 
 As built (2026-11), steps 2 and 4 are not automatic yet. The cashier types the
 amount on the counter's keypad, and once the counter shows "Paid" closes the
-order in the POS with the shop's "Bitcoin" tender; the owner phone then matches
+order in the POS with the shop's "Bitcoin" tender ("OpenBMT" on Square); the owner phone then matches
 each tender to a counter sale (`docs/POS-RULES.md`). Tap to pay is not built,
 so every customer scans. The counter's headings and words are generated in
 `docs/screens/counter.md`: the heading is "Paid", the words say whether a
@@ -1380,7 +1380,7 @@ Notes:
 |---|---|---|---|
 | Clover | Custom tender app (TenderConnector) | Yes | Yes |
 | Lightspeed-style gateway | "Other payment method" opens the counter's own flow and returns "paid". This is the pattern BTCPay's Lightspeed plugin uses (TChukwuleta, v1.1.0, 2026-08-19). | Yes | Yes |
-| Square | Counter device beside Square; the cashier closes the order with a custom "Bitcoin" tender; the Box and the owner read orders only (ORDERS_READ) and match them (`docs/POS-RULES.md`) | Manual tender selection | Manual |
+| Square | Counter device beside Square; the cashier closes the order with a custom tender named "OpenBMT", since Square's own "Bitcoin" method pays into Square's wallet; the Box and the owner read orders only (ORDERS_READ) and match them (`docs/POS-RULES.md`) | Manual tender selection | Manual |
 | Any POS, or no Box | Manual "Bitcoin" payment type; counter device holds the record | Manual | Manual |
 | Cannabis POS (Treez, Cova, Flowhub, Dutchie) | Partner programs with certification | — | — |
 
@@ -1398,7 +1398,8 @@ applies when an order is paid there with an external payment (both read on
 2026-11-10). Closing a Square order through the API (an `EXTERNAL` payment
 of type `CRYPTO`, then PayOrder) would put that fee on every bitcoin sale.
 The connector therefore only reads orders, which needs only `ORDERS_READ`,
-and the cashier closes the order in Square with the shop's "Bitcoin" tender.
+and the cashier closes the order in Square with the shop's custom tender, named
+"OpenBMT" because Square has a Bitcoin method of its own (PS-10).
 The pages do not say whether an order rung up in the Square app and paid
 there with a custom tender is charged; nothing in this design depends on it.
 Forum answers (not Square's documentation) say an order rung up in the

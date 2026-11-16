@@ -59,7 +59,8 @@ and [header implementation](https://github.com/AvilaLabs/OpenBMT/blob/main/crate
    and the address's first and last characters in large type.
 4. The customer scans the code and approves the payment in their wallet.
 5. When the counter turns green, close the POS order with the shop's
-   "Bitcoin" tender.
+   "Bitcoin" tender. On Square it is named "OpenBMT", because Square's own
+   "Bitcoin" method pays into Square's wallet.
 
 The code is a standard `bitcoin:` payment request, so any wallet that reads
 that format can pay it. Each sale gets a new address, saved before it is
@@ -72,7 +73,8 @@ proposes an NFC tag for Android customers. The manifest checks currently
 fail the build if an NFC permission appears.
 
 Square and Clover support read-only order matching. The POS closes the
-order, and the owner phone matches each Bitcoin tender to a counter sale
+order, and the owner phone matches each payment of the shop's tender (named
+OpenBMT on Square) to a counter sale
 under `docs/POS-RULES.md`. The amount still comes from the cashier's entry.
 Matching can flag a discrepancy but cannot prove that goods were handed
 over for a payment (section 10 of those rules). Both readers were written
