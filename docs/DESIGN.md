@@ -7,11 +7,23 @@ regtest (`scripts/restore-drill-core.sh`). Every claim about another system
 cites a source in §17. **[verify]** marks a claim that still needs a primary
 check or a device test before it can be relied on.
 
-Draft 3.3 replaces the setup with a first run in which OpenBMT makes no key
-(§2.1, §5.4.1, D6) and brings Lightning swaps back as an option the shop
-turns on (§8, D7). Other sections still describe the key ceremony and the Key
-app, because the current code implements them; they are being rewritten to
-follow D6.
+The [merchant product plan of 16 November 2026](research/merchant-product-plan-2026-11-16.md)
+records the accepted wallet authority choices and the implementation sequence.
+D9 below adds optional on-chain working-wallet operation while preserving
+direct-to-cold receiving and independent savings keys. This is a planning
+decision; the existing signing rules and release gates remain in force until
+the new modes are implemented and validated. The linked
+[feature benchmark](research/merchant-feature-benchmark-2026-11-16.md) is a
+prioritized recommendation list, not a claim of implemented features.
+
+Draft 3.3 introduced the public-wallet first-run path (D6) and restored
+optional Lightning swaps (D7). D8 subsequently added the explicitly identified
+starter hot key; Shop Lightning and the refund float have their own named
+hot-key rules. D9 now adds the working-wallet planning choice. D6's independent
+savings keys and public-only cold-wallet pairing remain; its earlier blanket
+no-phone-key wording is qualified by those named modes. Descriptions of the
+key ceremony, Key app, and receive-only counter below describe their specific
+roles rather than a promise that no configured OpenBMT device can hold a key.
 
 Draft 3.2 applies four security reviews:
 
@@ -119,8 +131,9 @@ These flows are the spec. The architecture exists to make them true.
 ### 2.1 First run: sell today, then move to a cold wallet
 
 Decided 2026-11-14 (D8), after walk-throughs of the setup in the place of
-six kinds of shop. It keeps D6 (2026-11-12, which replaced the 7-step key
-ceremony of draft 3.2) and changes its order: the starter wallet is the
+six kinds of shop. It preserves D6's independent savings wallet and
+public-only cold-wallet pairing while adding a named starter-key exception.
+The starter wallet is the
 first half of a plan whose second half is a hardware wallet, and a wallet
 the owner already holds is one tap away.
 
@@ -195,8 +208,9 @@ Nobody has to open either.
    step on the phone, the upgrade of `docs/START-SIMPLE-RULES.md` section
    6.
 8. **The starter wallet's limit and date.** "If this phone is stolen or
-   infected, someone could take what the starter wallet holds, and never
-   more than your limit. Choose the most you would be OK losing." Beside
+   infected, someone could take its wallet funds. Choose a small working
+   balance. This target is not a guaranteed maximum loss: new and late
+   payments can add more funds." Beside
    the field, examples and no recommendation: "a day's takings or less",
    and three round amounts in the shop's money. The field starts empty.
    The date is 30 days from today unless the owner changes it, and at most
@@ -956,12 +970,14 @@ service or on the local network (§4.1).
 
 ### 5.4 Keys: the merchant chooses, every choice is safe
 
-Since 2026-11-12 (D6), OpenBMT makes no key and the owner phone holds none.
-The shop's money goes to a wallet the owner holds: their own, or one made
-with the Key Maker below. The 2-of-3 setup with the Key app (§5.4.2) is
-retired from the main path. The current code still implements it, so it
-stays described here until the code follows D6; a multisig remains possible
-through "Use my own wallet".
+In the direct-to-cold path (D6), OpenBMT keeps the public description of an
+independently controlled wallet, with its savings seed outside the phone.
+D8's starter wallet and the Shop Lightning/refund-float modes have explicit
+hot-key rules. D9 adds a separate working-wallet mode to the plan, not to the
+current implementation. These roles must not be conflated with unrestricted
+spending access to savings. The existing 2-of-3 Key app setup (§5.4.2) remains
+documented for the code that implements it; supported single-key and multisig
+wallets can also use the held-wallet path.
 
 #### 5.4.1 The OpenBMT Key Maker
 
@@ -2011,8 +2027,11 @@ Each gets a written protocol before it runs.
   needed now. Hardware wallets for E8 are needed before the key ceremony is
   built.
 
-- **D6. No keys in OpenBMT.** Decided 2026-11-12, replacing D2 and the key
-  ceremony. OpenBMT makes no key, and no phone of the shop holds one. The
+- **D6. Independent savings keys and public-wallet pairing.** Historical
+  decision of 2026-11-12, replacing D2 and the key ceremony. Its original
+  blanket no-phone-key rule was later qualified by D8's starter key and the
+  named Shop Lightning/refund-float modes; D9 adds a further planning choice.
+  The savings seed remains outside the phone. In the direct-to-cold path the
   owner uses their own wallet, makes one with the Key Maker from coin flips
   in Tails (checked in Electrum), or sets up everything else first and adds
   the wallet later. A single-key wallet is accepted because its key lives
@@ -2032,6 +2051,22 @@ Each gets a written protocol before it runs.
   app presses for the move with more weight as the wallet fills and the date
   nears (SS-36, SS-37). No hardware wallet brand is named or recommended: four
   rules for buying one are given instead (§2.1).
+
+- **D9. Wallet authority and the move to independent savings.** Accepted for
+  the plan on 2026-11-16. Support a local hot start and a supported cold wallet
+  created independently, with public-only pairing and address verification.
+  Keep direct-to-cold receiving with owner-signed batches. Also plan a separate,
+  explicitly enabled on-chain working wallet that can combine receipts into
+  verified savings destinations; do not silently repurpose the refund float or
+  remove per-signature authentication from the current starter wallet. Cold
+  keys never enter the checkout or an OpenBMT company service. Limits are
+  operating targets, not hard guarantees of maximum loss. Unattended signing
+  authority, isolation, migration, late receipts, and independent recovery must
+  be validated under the [merchant product plan](research/merchant-product-plan-2026-11-16.md).
+  The default remains app-first/serverless: local payment/event interfaces,
+  with optional outbound webhooks to merchant-selected receivers. This does
+  not require a public device listener, merchant REST server, or publisher
+  backend; endpoint/data disclosure and privacy rules still apply.
 
 **Security-review decisions (Q1–Q4).** Decided on 2026-11-09.
 

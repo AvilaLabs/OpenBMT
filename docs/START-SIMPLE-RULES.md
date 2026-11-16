@@ -144,10 +144,12 @@ funds.**
 ## 5. The limit and the date
 
 - **SS-35. Both the owner's.** At setup the owner sets the most the starter
-  wallet may hold, in the shop's currency, and the date to move to a key made
-  offline. The screen says that a thief of the phone could take what the
-  wallet holds and never more than the limit, and asks for the most the owner
-  would be OK losing; it gives "a day's takings or less" as an example, and
+  wallet should hold, in the shop's currency, and the date to move to a key made
+  offline. This is an operating target. The screen says that a thief of the
+  phone could take its wallet funds and potentially ongoing receipts; new or
+  late payments can exceed the target. It must not describe the target as a
+  guaranteed maximum loss. It asks for a small working balance the owner is
+  comfortable keeping online; it gives "a day's takings or less" as an example, and
   the field starts empty: the app never suggests an amount. The date is 30
   days away unless the owner changes it, and a date more than 90 days away is
   refused. Both are the owner phone's own record, beside the starter wallet,

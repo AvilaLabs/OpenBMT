@@ -416,3 +416,5 @@ Expansion should follow demonstrated compatibility and operating results. The un
 ## Lightning and on-chain funds follow-up
 
 The [merchant money system investigation](merchant-money-system-2026-11-16.md) examines one controller for receiving capacity, online exposure, fees, and output economics. It includes synthetic economic replays and Bitcoin Core regtest evidence for combining unilateral swap claims, plus a limited offline authorization for a future savings increase. These experiments validate narrow mechanisms; application integration, service independence, recovery, and sustained merchant economics remain release gates.
+
+The [merchant product plan](merchant-product-plan-2026-11-16.md) records the accepted wallet authority choices. The [feature benchmark](merchant-feature-benchmark-2026-11-16.md) compares documented merchant capabilities, current OpenBMT components, recommended priorities, and custody/privacy exclusions.

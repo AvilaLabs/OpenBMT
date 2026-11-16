@@ -2,6 +2,13 @@
 
 Date: 2026-11-16. Status: architecture research and isolated experiments; the merchant application has not adopted this design.
 
+The wallet authority choices are now accepted for planning in the
+[merchant product plan](merchant-product-plan-2026-11-16.md): a local hot start,
+independently created cold savings, direct-to-cold receiving, and an explicitly
+enabled separate working wallet. Automatic signing remains implementation and
+validation work. The [feature benchmark](merchant-feature-benchmark-2026-11-16.md)
+extends the backlog with merchant APIs, webhooks, and business workflows.
+
 The strongest direction to test is one merchant-controlled system that plans Lightning receiving capacity, online balances, settlement transactions, and on-chain spending costs together. Routine sales should not require the merchant to understand channels or UTXOs. The controller must expose an actual shortage or an unsatisfied security policy rather than conceal it behind a combined balance.
 
 Two constructions deserve further work: acquiring peer-funded channels with the purchase committed in the funding transaction, and combining eligible swap claims into a single payment to the merchant's savings wallet. A limited pre-authorization from an offline signer may also let a settlement consume one existing savings output without obtaining another signature at settlement time. These mechanisms can reduce trust or maintenance; they do not make liquidity, chain space, or recovery free.
