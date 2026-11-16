@@ -198,57 +198,6 @@ button { font: inherit; cursor: pointer; }
 .say .fresh { animation: rise 0.35s ease-out; }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
-/* Proposed checkout: the merchant's app and its test controls are visibly separate surfaces. */
-.stage:has(.checkout-experience) { align-items: center; }
-.checkout-experience {
-  width: min(1240px, calc(100vw - 48px)); max-height: 100%; margin: auto; overflow: auto;
-  display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(270px, .8fr); gap: 18px; align-items: start;
-}
-.checkout-proposal, .demo-controls {
-  min-width: 0; max-height: 100%; overflow: auto; padding: 22px; background: #fff;
-  border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 14px 36px rgba(17, 6, 134, .10);
-}
-.demo-controls { background: #f0eff8; border-color: #d2cfed; }
-.demo-controls h2 { margin: 0 0 8px; color: var(--blue); font-size: 18px; font-weight: 500; }
-.demo-controls-note { margin: 0 0 14px; color: var(--muted); font-size: 13px; line-height: 1.4; }
-.checkout-storage-warning { margin: 12px 0 0; padding: 10px; color: #6b3900; background: #fff1d6; border-radius: 7px; font-size: 13px; }
-.checkout-top { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
-.checkout-brand { color: var(--blue); font-size: 22px; font-weight: 500; }
-.checkout-order { color: var(--muted); }
-.checkout-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
-.checkout-grid h2, .checkout-history h2 { margin: 0 0 14px; font-size: 20px; font-weight: 500; }
-.checkout-row, .checkout-total { display: flex; justify-content: space-between; gap: 20px; padding: 10px 0; border-bottom: 1px solid #eeeef2; }
-.checkout-qty { display: flex; align-items: center; gap: 8px; }
-.checkout-qty-button { width: 44px; height: 44px; flex: 0 0 44px; padding: 0; color: var(--blue); background: #fff; border: 1px solid var(--line); border-radius: 50%; }
-.checkout-qty-button:disabled { opacity: .4; cursor: default; }
-.checkout-total { margin-top: 8px; font-size: 18px; border: 0; }
-.checkout-invariant { font-size: 13px; color: var(--muted); line-height: 1.45; }
-.checkout-state { min-height: 42px; padding: 12px; border-radius: 9px; background: #f2f1fb; color: var(--blue); font-weight: 500; }
-.checkout-actions { display: grid; gap: 9px; }
-.checkout-button { min-height: 44px; padding: 10px 14px; color: var(--blue); background: #fff; border: 1px solid #b7b2e2; border-radius: 9px; font-weight: 500; text-align: left; }
-.checkout-button:hover { background: #f6f5ff; }
-.checkout-button.primary { color: #fff; background: var(--blue); border-color: var(--blue); }
-.checkout-button.primary:hover { background: var(--blue-deep); }
-.checkout-button.quiet { color: #62616b; border-color: #d8d7dd; }
-.checkout-qr { width: 164px; aspect-ratio: 1; display: grid; grid-template-columns: repeat(9, 1fr); gap: 2px; padding: 8px; margin: 14px auto 8px; background: white; border: 1px solid #d7d6dc; }
-.checkout-qr i { background: #f3f3f3; }
-.checkout-qr i.dark { background: #17171d; }
-.checkout-qr-caption { margin: 0; color: var(--muted); text-align: center; font-size: 12px; }
-.checkout-card-wait, .checkout-alert { padding: 14px; background: #f7f7f4; border-radius: 9px; color: var(--muted); line-height: 1.45; }
-.checkout-alert { color: #764200; background: #fff1d6; }
-.checkout-receipt { margin: 0; padding: 14px; background: #f7f7f4; border-radius: 9px; line-height: 1.45; }
-.checkout-receipt h3 { margin: 0 0 8px; color: var(--blue); }
-.checkout-receipt p { margin: 5px 0; }
-.checkout-history { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
-.checkout-history h3 { margin: 0 0 10px; font-size: 15px; font-weight: 500; }
-.checkout-empty, .checkout-history-row { margin: 6px 0; color: var(--muted); font-size: 13px; }
-@media (max-width: 680px) {
-  .checkout-experience { width: calc(100vw - 24px); grid-template-columns: 1fr; gap: 12px; }
-  .checkout-proposal, .demo-controls { padding: 18px; }
-  .checkout-grid { grid-template-columns: 1fr; gap: 18px; }
-  .checkout-top { align-items: flex-start; flex-direction: column; gap: 5px; }
-}
-
 .body { display: grid; grid-template-columns: 1fr 340px; min-height: 0; position: relative; }
 .body.noqa { grid-template-columns: 1fr; }
 .body.noqa .qa, .body.noqa .qa-tab { display: none; }
@@ -452,6 +401,10 @@ button { font: inherit; cursor: pointer; }
   .slot.rest { display: none; }
   .slot .why { display: none; }
   .actor { position: absolute; left: 12px; right: 12px; bottom: 12px; width: auto; z-index: 3; }
+  /* A walkthrough with both a merchant action and a customer action must keep both reachable. */
+  .stage.actor-flow { flex-direction: column; align-items: center; justify-content: flex-start; overflow-y: auto; }
+  .stage.actor-flow .slot { flex-shrink: 0; }
+  .stage.actor-flow .actor { position: static; flex-shrink: 0; align-self: center; width: 100%; margin-top: 16px; }
   :root { --say-h: 96px; }
   .slot .cap { gap: 6px 8px; height: auto; min-height: 28px; flex-wrap: wrap; justify-content: center; white-space: normal; max-width: calc(100vw - 24px); }
   .kinds button { padding: 3px 8px; }

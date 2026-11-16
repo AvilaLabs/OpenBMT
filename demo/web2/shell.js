@@ -544,9 +544,11 @@
      * Opens the demo with [steps] (names) and [devices] left to right: [{id, caption, sizes}], where [sizes] is a
      * list of {label, size} the visitor can switch between (the first is shown first), or one {size}.
      * [actorAfter] keeps room beside that device for the customer the demo plays.
+     * [opts.actorFlow] places the customer below the device on a narrow screen, preserving access to app actions.
      */
-    begin(steps, devices, actorAfter) {
+    begin(steps, devices, actorAfter, opts = {}) {
       this.reset();
+      this.stage.classList.toggle("actor-flow", !!opts.actorFlow);
       this.closeMenu();
       for (const s of this.root.querySelectorAll(".start")) { if (s.classList.contains("chooser")) s.remove(); else s.hidden = true; }
       this.demo.hidden = false;

@@ -1,161 +1,140 @@
-// Behavior and accessibility checks for the proposed checkout; external outcomes remain demo controls only.
+// The proposed checkout stays inside the shared walkthrough and device frame.
+// All payment actors are illustrative; no external payment service is involved.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 
-class Node_ {
-  constructor(tag) { this.tag = tag; this.children = []; this.handlers = {}; this.attrs = {}; this.text = ''; this.className = ''; this.type = ''; this.hidden = false; this.disabled = false; }
-  set textContent(v) { for (const c of this.children) c.parent = null; this.children = []; this.text = String(v); }
-  get textContent() { return this.text + this.children.map((n) => n.textContent).join(''); }
-  append(...nodes) { for (const node of nodes) { if (node.parent) node.parent.children = node.parent.children.filter((child) => child !== node); this.children.push(node); node.parent = this; } }
-  replaceChildren(...nodes) { for (const child of this.children) child.parent = null; this.children = []; this.append(...nodes); }
-  setAttribute(k, v) { this.attrs[k] = String(v); }
-  addEventListener(k, f) { (this.handlers[k] ||= []).push(f); }
-  click() { if (!this.disabled) for (const f of this.handlers.click || []) f({}); }
-  all(pred, out = []) { if (pred(this)) out.push(this); for (const c of this.children) c.all(pred, out); return out; }
-}
-const memory = new Map();
-globalThis.localStorage = { getItem: (k) => memory.get(k) || null, setItem: (k, v) => memory.set(k, v), removeItem: (k) => memory.delete(k) };
-globalThis.document = { createElement: (tag) => new Node_(tag) };
 const require = createRequire(import.meta.url);
 const Checkout = require('../web2/checkout.js');
-const makeShell = () => ({ stage: new Node_('main'), say() {}, begin() {}, scenario(name) { this.selectedScenario = name; }, onRestart: null, onLeave: null });
-const stageButtons = (shell) => shell.stage.all((x) => x.tag === 'button');
-const find = (shell, label) => stageButtons(shell).find((b) => b.textContent === label);
-const click = (shell, label) => { const b = find(shell, label); assert.ok(b, `button exists: ${label}`); b.click(); };
-const appText = (shell) => shell.stage.all((x) => x.attrs['aria-label'] === 'Juniper Coffee merchant checkout')[0].textContent;
-const controlsText = (shell) => shell.stage.all((x) => x.attrs['aria-label'] === 'Test-only payment simulation controls')[0].textContent;
-const reset = () => { memory.clear(); };
 
-// Merchant sees a single cart and real checkout choices; payment outcomes are outside its app frame.
+function button(label) { return { role: 'button', label, onTap: null }; }
+function uiFor(size) {
+  const ui = {
+    size, pal: { secondary: 'secondary', good: { ink: 'good' }, warn: { ink: 'warn' }, stop: { ink: 'stop' } },
+    context: { width: 600 }, px: (n) => n,
+    text: (text) => ({ text }),
+    facts: (items) => ({ text: items.map((x) => x.join(': ')).join(' | ') }),
+    receipt: (items) => ({ text: items.map((x) => x.text).join(' | ') }),
+    codeCard: (qr) => ({ text: 'sample QR', qr }),
+    bar: (title) => ({ text: title }),
+    page: (_bar, body, actions) => ({ text: body.map((x) => x.text || '').join(' | '), actions }),
+  };
+  for (const kind of ['primary', 'secondary', 'quiet']) ui[kind] = (label) => button(label);
+  return ui;
+}
+
+function makeShell() {
+  const shell = {
+    onStep: null, onLeave: null, onRestart: null, screen: null, actorState: null,
+    targetsByLabel: new Map(), steps: [], devices: [],
+    begin(steps, devices, actorAfter) {
+      this.steps = steps; this.devices = devices; this.actorAfter = actorAfter;
+      this.targetsByLabel.clear(); this.screen = null;
+    },
+    scenario(name) { this.selectedScenario = name; },
+    show(_id, build) { this.screen = build(700); },
+    light(id) { this.lit = id; }, step(i) { this.currentStep = i; },
+    say(_happened, parts) { this.instruction = parts.map((x) => typeof x === 'string' ? x : x.b).join(''); },
+    questions(q) { this.questionList = q; },
+    actor(spec) { this.actorState = spec; },
+    target(_id, label, onTap) { this.targetsByLabel.set(label, onTap); },
+    targets(_id, list) { for (const x of list) this.targetsByLabel.set(x.label, x.onTap); },
+    finish(spec) { this.finished = spec; },
+    tap(label) { const action = this.targetsByLabel.get(label); assert.equal(typeof action, 'function', `target: ${label}`); action(); },
+    chooseStep(i) { assert.equal(typeof this.onStep, 'function'); this.onStep(i); },
+    leave() { this.onLeave?.(); },
+  };
+  return shell;
+}
+
+const U = { LineStyle: { Plain: 'plain', Strong: 'strong' } };
+const C = {
+  TABLET: 'tablet', PHONE: 'phone',
+  deviceUi: (_palette, _dark, _logo, size) => uiFor(size),
+  Device: (_ui, page) => page,
+};
+const CV = { QrView: (_ui, matrix) => ({ text: `QR ${matrix.length}x${matrix[0].length}` }) };
+const context = { U, C, CV, palette: {}, assets: { logo: 'logo' } };
+
+// Bitcoin order: one merchant device, cart, payment view, customer actor and receipt.
 {
-  reset(); const shell = makeShell(); Checkout.open(shell);
+  const shell = makeShell(); Checkout.open(shell, context);
   assert.equal(shell.selectedScenario, 'OpenBMT checkout');
-  assert.match(appText(shell), /Oat latte/); assert.match(appText(shell), /Sesame bagel/);
-  assert.match(appText(shell), /\$10\.00 USD/);
-  assert.doesNotMatch(appText(shell), /Simulate partial|Complete card test|Reconcile/);
-  assert.match(controlsText(shell), /test only/);
-  click(shell, 'Pay with Bitcoin');
-  assert.match(appText(shell), /Waiting for Bitcoin/); assert.match(appText(shell), /Payment request/);
-  click(shell, 'Simulate partial receipt · $4.00');
-  assert.match(appText(shell), /\$4\.00 received/);
-  click(shell, 'Pause payment request');
-  assert.match(appText(shell), /Payment paused/);
-  const resumed = makeShell(); Checkout.open(resumed);
-  click(resumed, 'Resume payment');
-  assert.match(appText(resumed), /\$4\.00 received/);
-  click(resumed, 'Simulate remaining receipt · $6.00');
-  assert.match(appText(resumed), /Payment complete/);
-  assert.match(appText(resumed), /Receipt · Juniper Coffee/);
-  click(resumed, 'Request refund');
-  assert.match(appText(resumed), /awaiting owner review/);
-  click(resumed, 'Review refund request');
-  assert.match(appText(resumed), /awaiting approval/);
-  click(resumed, 'Approve test refund');
-  assert.match(appText(resumed), /simulation still pending/);
-  assert.doesNotMatch(appText(resumed), /Refund simulation complete/);
-  click(resumed, 'Complete refund simulation');
-  assert.match(appText(resumed), /Refund complete/);
+  assert.deepEqual(shell.steps, Checkout.STEPS);
+  assert.deepEqual(shell.devices.map((x) => x.id), ['merchant']);
+  assert.equal(shell.actorAfter, 'merchant');
+  assert.match(shell.screen.text, /Oat latte/);
+  assert.match(shell.instruction, /New sale/);
+
+  shell.tap('New sale');
+  assert.equal(shell.currentStep, 1);
+  assert.match(shell.screen.text, /\$10\.00 USD/);
+  shell.tap('Continue');
+  shell.tap('Bitcoin');
+  assert.equal(shell.currentStep, 3);
+  assert.match(shell.screen.text, /Demo code · no payment/);
+  assert.match(shell.screen.text, /cannot pay this order/);
+  assert.equal(shell.actorState.who, 'Customer');
+  shell.actorState.onTap();
+  assert.equal(shell.currentStep, 4);
+  assert.match(shell.screen.text, /Payment complete/);
+  assert.match(shell.screen.text, /Receipt · Order #1042/);
+  shell.chooseStep(1);
+  assert.equal(shell.currentStep, 4, 'completed order cannot be reopened for a second tender');
+  shell.chooseStep(0);
+  assert.match(shell.screen.text, /Recent receipts/);
+  assert.match(shell.screen.text, /Order #1042/);
+  shell.tap('New sale');
+  assert.match(shell.screen.text, /\$10\.00 USD/);
+  shell.chooseStep(3);
+  assert.equal(shell.currentStep, 2, 'a new sale cannot inherit the previous Bitcoin method');
+  assert.equal(shell.actorState, null, 'a fresh sale does not expose a stale payment actor');
+  assert.match(shell.screen.text, /Choose how to pay/);
+  shell.onRestart();
 }
 
-// A lost card callback blocks a fresh tender until reconciliation resolves the outcome.
+// An unclear card result stays on the same attempt during navigation and recovery.
 {
-  reset(); const shell = makeShell(); Checkout.open(shell);
-  click(shell, 'Pay with card');
-  assert.match(appText(shell), /awaiting result/);
-  click(shell, 'Lose callback · mark result uncertain');
-  assert.match(appText(shell), /do not retry/);
-  assert.doesNotMatch(appText(shell), /Pay with Bitcoin|Pay with card/);
-  click(shell, 'Reconcile · confirm attempt failed');
-  assert.match(appText(shell), /Card attempt failed · no payment received/);
-  click(shell, 'Try payment again');
-  click(shell, 'Pay with card');
-  click(shell, 'Complete card test payment');
-  assert.match(appText(shell), /Payment: Card/);
+  const shell = makeShell(); Checkout.open(shell, context);
+  shell.tap('New sale'); shell.tap('Continue'); shell.tap('Card');
+  shell.actorState.onTap();
+  assert.equal(shell.currentStep, 3);
+  assert.match(shell.screen.text, /Card result not confirmed/);
+  shell.chooseStep(3);
+  assert.match(shell.screen.text, /Card result not confirmed/);
+  assert.equal(shell.targetsByLabel.has('Submit card handoff (demo)'), false);
+  shell.tap('Check card status');
+  assert.match(shell.screen.text, /Checking card attempt/);
+  shell.chooseStep(4);
+  assert.equal(shell.currentStep, 3, 'Receipt cannot resolve an unknown card result');
+  assert.match(shell.screen.text, /Checking card attempt/);
+  shell.actorState.onTap();
+  assert.equal(shell.currentStep, 4);
+  assert.match(shell.screen.text, /Payment · Card/);
+  shell.onRestart();
 }
 
-// Cancelling after partial funds keeps the amount visible and requires owner follow-up before another tender.
+// A waiting sale can be canceled before payment is submitted; uncertain card state cannot.
 {
-  reset(); const shell = makeShell(); Checkout.open(shell);
-  click(shell, 'Pay with Bitcoin');
-  click(shell, 'Simulate partial receipt · $4.00');
-  click(shell, 'Cancel with funds received');
-  assert.match(appText(shell), /\$4\.00 received/);
-  assert.match(appText(shell), /owner follow-up required/);
-  assert.doesNotMatch(appText(shell), /Pay with Bitcoin|Pay with card/);
-  click(shell, 'Record owner follow-up complete');
-  assert.match(appText(shell), /\$4\.00 received · owner follow-up recorded/);
-  assert.match(appText(shell), /funds remain recorded against this order/);
-  assert.match(controlsText(shell), /Owner follow-up recorded/);
-  assert.doesNotMatch(appText(shell), /Pay with Bitcoin|Pay with card/);
+  const shell = makeShell(); Checkout.open(shell, context);
+  shell.tap('New sale'); shell.tap('Continue'); shell.tap('Card');
+  shell.tap('Cancel sale');
+  assert.equal(shell.currentStep, 4);
+  assert.match(shell.screen.text, /Order canceled/);
+  assert.match(shell.screen.text, /No receipt was issued/);
+  shell.onRestart();
 }
 
-// Cart can be adjusted before tender; corrupt persisted state cannot restore a paid screen.
+// Navigation away parks a pending attempt for explicit same-session recovery; Start over discards it.
 {
-  reset(); const shell = makeShell(); Checkout.open(shell);
-  const inc = stageButtons(shell).find((b) => b.attrs['aria-label'] === 'Add one Oat latte');
-  assert.ok(inc); inc.click();
-  assert.match(appText(shell), /\$15\.50 USD/);
-  memory.set(Checkout.KEY, JSON.stringify({ version: 1, order: '1042', status: 'paid', method: 'Bitcoin', paid: 10, qty: [999, 1], history: [] }));
-  const recovered = makeShell(); Checkout.open(recovered);
-  assert.match(appText(recovered), /Choose how your customer will pay/);
-  assert.doesNotMatch(appText(recovered), /Payment complete/);
-  assert.equal(memory.has(Checkout.KEY), false, 'corrupt checkout data is discarded');
-}
-
-// Paid orders can continue without a refund; a bounded receipt snapshot survives the next order and a reload.
-{
-  reset(); const shell = makeShell(); Checkout.open(shell);
-  click(shell, 'Pay with Bitcoin');
-  click(shell, 'Simulate partial receipt · $4.00');
-  click(shell, 'Simulate remaining receipt · $6.00');
-  assert.match(appText(shell), /Receipt · Juniper Coffee/);
-  click(shell, 'Start next order');
-  assert.match(appText(shell), /Order #1043/);
-  assert.match(appText(shell), /Choose how your customer will pay/);
-  assert.match(appText(shell), /Previous demo receipts/);
-  assert.match(appText(shell), /Order #1042 · \$10\.00 USD · Bitcoin · 1 × Oat latte · 1 × Sesame bagel/);
-  assert.doesNotMatch(appText(shell), /Request refund/);
-
-  const reloaded = makeShell(); Checkout.open(reloaded);
-  assert.match(appText(reloaded), /Order #1043/);
-  assert.match(appText(reloaded), /Order #1042 · \$10\.00 USD · Bitcoin · 1 × Oat latte · 1 × Sesame bagel/);
-  assert.doesNotMatch(appText(reloaded), /Refund complete/);
-}
-
-// Version 1 sessions without receipts migrate safely to version 2 with an empty receipt list.
-{
-  reset();
-  memory.set(Checkout.KEY, JSON.stringify({ version: 1, order: '1042', status: 'ready', method: null, paid: 0, qty: [1, 1], history: [] }));
-  const shell = makeShell(); Checkout.open(shell);
-  assert.doesNotMatch(appText(shell), /Previous demo receipts/);
-  click(shell, 'Pay with Bitcoin');
-  const saved = JSON.parse(memory.get(Checkout.KEY));
-  assert.equal(saved.version, 2);
-  assert.deepEqual(saved.receipts, []);
-  const malformedReceipt = { version: 2, order: '1042', status: 'ready', method: null, paid: 0, qty: [1, 1], history: [], receipts: [
-    { order: '1041', total: 'ten dollars', method: 'Bitcoin', items: '1 × Oat latte' },
-  ] };
-  assert.equal(Checkout.validState(malformedReceipt), false, 'receipt snapshots are shape-validated');
-}
-
-// All actions are native keyboard buttons, and dynamic payment state is announced to assistive technology.
-{
-  reset(); const shell = makeShell(); Checkout.open(shell); click(shell, 'Pay with card');
-  for (const b of stageButtons(shell)) {
-    assert.equal(b.type, 'button');
-    assert.notEqual(b.attrs.tabindex, '-1');
-  }
-  const live = shell.stage.all((x) => x.attrs['aria-live'] === 'polite');
-  assert.ok(live.length >= 1);
-}
-
-// A browser that refuses persistence says recovery is unavailable instead of claiming the session was saved.
-{
-  reset();
-  const oldSet = globalThis.localStorage.setItem;
-  globalThis.localStorage.setItem = () => { throw new Error('storage unavailable'); };
-  const shell = makeShell(); Checkout.open(shell);
-  click(shell, 'Pay with Bitcoin');
-  assert.match(controlsText(shell), /could not save the demo session/);
-  globalThis.localStorage.setItem = oldSet;
+  const first = makeShell(); Checkout.open(first, context);
+  first.tap('New sale'); first.tap('Continue'); first.tap('Card'); first.leave();
+  const reopened = makeShell(); Checkout.open(reopened, context);
+  assert.match(reopened.screen.text, /Interrupted order #1042/);
+  reopened.tap('Resume interrupted sale');
+  assert.equal(reopened.currentStep, 3);
+  assert.match(reopened.screen.text, /Card handoff/);
+  reopened.onRestart();
+  const fresh = makeShell(); Checkout.open(fresh, context);
+  assert.match(fresh.screen.text, /Oat latte/);
+  assert.doesNotMatch(fresh.screen.text, /Interrupted order/);
 }

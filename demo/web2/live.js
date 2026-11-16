@@ -129,24 +129,41 @@
   /** Lets the browser draw what is on the page before the next long step. */
   const paint = () => new Promise((done) => requestAnimationFrame(() => setTimeout(done, 0)));
 
-  async function startRun(onEvent, withOwner) {
+  // The Kotlin models call module-global host functions. Keep module installation and node startup together so
+  // an older async route cannot replace the hosts of a newer route while it is starting.
+  let startTail = Promise.resolve();
+  function exclusiveStart(start) {
+    const next = startTail.then(start);
+    startTail = next.catch(() => {});
+    return next;
+  }
+
+  function startRun(onEvent, withOwner, current) {
+    return exclusiveStart(() => startRunNow(onEvent, withOwner, current));
+  }
+
+  async function startRunNow(onEvent, withOwner, current) {
+    if (!current()) return null;
     stopRun();
     await ready();
+    if (!current()) return null;
     const r = { dead: false, beat: 0, aim: null, onEvent, quiet: false, host: null };
     // Two modules, one chain: both read the page's clock, and every chain action is made on both (one-chain.js).
     const counterChain = await loadCounter(wasm, { now: () => clock.now(), record });
+    if (!current()) return null;
     r.host = counterChain;
     const ownerChain = await loadOwner(ownerWasm, { now: () => clock.now() });
+    if (!current()) return null;
     r.chain = OneChain(counterChain, ownerChain);
     r.controller = CC.Controller({
       flow, chain: r.chain, clock,
       show(viewOf) {
-        if (r.dead) return;
+        if (r.dead || !current()) return;
         shell.show("counter", page(viewOf));
         if (r.aim) shell.target("counter", r.aim, null);
       },
       event(kind, data) {
-        if (r.dead) return;
+        if (r.dead || !current()) return;
         // Controller.kt:2498 first: the first time this sale's screen is green or red, its sound plays, once; the model's
         // OutcomePlays (SaleModel.kt:87) keeps count, and the notice of CR-284 shares it. A visitor's skipped taps
         // (r.quiet) are made without it.
@@ -160,7 +177,7 @@
       flow: ownerFlow, chain: ownerChain, clock,
       show(viewOf) {
         // The owner's phone is on the page only on the merchant's path.
-        if (!r.dead && r.ownerShown) shell.show("owner", page(viewOf));
+        if (!r.dead && current() && r.ownerShown) shell.show("owner", page(viewOf));
       },
     });
     r.ownerShown = withOwner;
@@ -169,7 +186,7 @@
     // hundred milliseconds, and the page answers between them.
     r.controller.startNode();
     await paint();
-    if (r.dead) return r;
+    if (r.dead || !current()) return r;
     r.owner.startNode();
     r.owner.render();
     pump(r);
@@ -243,7 +260,7 @@
   }
 
   /** What the register's two ways need of this page. */
-  const registerRun = () => ({ assets, palette, clock, flow, ownerFlow, wasm, ownerWasm, loadCounter, loadOwner, stopRun, record, recordWithBox });
+  const registerRun = () => ({ assets, palette, clock, flow, ownerFlow, wasm, ownerWasm, loadCounter, loadOwner, stopRun, exclusiveStart, record, recordWithBox });
 
   // ---- As a merchant: the counter and the owner's phone; the demo plays the customer. ----
   function merchantMoments(go, S) {
@@ -514,6 +531,7 @@
   async function play(path, from = 0) {
     const S = { index: -1, on: null };
     const mine = ++playing;
+    shell.onStep = null;
     shell.begin(path.steps, path.devices, path.actorAfter);
     shell.scenario(path.scenario, path.sub);
     const go = () => enter(S.index + 1);
@@ -533,9 +551,9 @@
     const started = await startRun((kind, data) => {
       const handler = S.on && S.on[kind];
       if (handler) handler(data);
-    }, path.devices.some((d) => d.id === "owner"));
+    }, path.devices.some((d) => d.id === "owner"), () => mine === playing);
     // Another scenario was chosen while this one started: its run is the one to keep.
-    if (mine !== playing) { if (run === started) stopRun(); return; }
+    if (mine !== playing || !started) { if (run === started) stopRun(); return; }
     path.setup();
     // The visitor's taps before the moment they chose, made on the real model.
     run.quiet = true;
@@ -550,12 +568,14 @@
 
   /** The start screen; [first] leaves its snap to the opening screen, which has played it. */
   const pick = (first) => {
+    shell.leave();
     playing++;
+    shell.onStep = null;
     stopRun();
     shell.scenario(null);
     shell.start([
       { name: "As a customer", what: "Pay a shop in bitcoin, the way it works at the counter.", go: "Start", onPick: () => shell.pick("Customer") },
-      { name: "OpenBMT checkout", what: "One merchant checkout for Bitcoin or card, with recovery and receipts.", go: "Explore", onPick: () => shell.pick("OpenBMT checkout") },
+      { name: "OpenBMT checkout", what: "Walk through one cart for Bitcoin or card, a receipt, and returning to an interrupted sale.", go: "Explore", onPick: () => shell.pick("OpenBMT checkout") },
       { name: "A café", what: "Take a coffee and a meal at the counter, and see them reach the owner's phone.", go: "Start", onPick: () => shell.pick("Café") },
       { name: "With your register", what: "The counter beside the register a shop already has.", go: "Start", onPick: () => shell.pick("With your register") },
       { name: "When something goes wrong", what: "A short payment or a cancelled one, and what the counter does.", go: "Start", onPick: () => shell.pick("A short payment") },
@@ -567,20 +587,25 @@
   // A tab, a menu item or a card starts its scenario from the first moment; the register's tab opens its choice.
   shell.onScenario = async (name) => {
     shell.leave();
-    playing++;
+    const mine = ++playing;
+    shell.onStep = null;
     stopRun();
-    if (name === "OpenBMT checkout") OpenBmtCheckout.open(shell);
+    if (name === "OpenBMT checkout") OpenBmtCheckout.open(shell, { U, C, palette, assets });
     else if (name === "Customer") await play(customer);
     else if (name === "Café") await play(merchant);
     else if (name === "A short payment") await play(wrong);
     else if (name === "A cancelled payment") await play(cancelled);
-    else { await ready(); OpenBmtRegister.open(shell, registerRun(), name === "With your register" ? undefined : name); }
+    else {
+      await ready();
+      if (mine !== playing) return;
+      OpenBmtRegister.open(shell, registerRun(), name === "With your register" ? undefined : name);
+    }
   };
   const want = new URLSearchParams(location.search).get("path");
   // The register's ways by name: sends, square, clover ("any", the way's first name, is Square), and register for the choice.
   const registerWay = { sends: "Your register sends the amount", square: "Square", any: "Square", clover: "Clover", register: undefined };
   if (want in registerWay) { await ready(); OpenBmtRegister.open(shell, registerRun(), registerWay[want]); }
-  else if (want === "checkout") OpenBmtCheckout.open(shell);
+  else if (want === "checkout") OpenBmtCheckout.open(shell, { U, C, palette, assets });
   else if (want === "merchant") await play(merchant);
   else if (want === "customer") await play(customer);
   else if (want === "wrong") await play(wrong);

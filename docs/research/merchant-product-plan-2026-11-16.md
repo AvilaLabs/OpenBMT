@@ -61,7 +61,7 @@ Local durable events and a query that repairs missed events belong in the core c
 
 ## Current checkout proof
 
-The [live proposed checkout](https://openbmt.avilalabs.org/?path=checkout) shows a single cart, tender selection, interruptions, receipt history, and the next order. Its external payment outcomes are explicitly simulated.
+The [live proposed checkout](https://openbmt.avilalabs.org/?path=checkout) uses the existing demo's device frame, numbered steps, guided actions, and customer role panel. It illustrates one cart, Bitcoin or card selection, receipts, the next order, and returning to an interrupted sale within the browser session. Payment outcomes are simulated, the sample QR cannot pay an invoice, and a page refresh resets this illustration. Durable payment recovery is tested separately in the native proof below.
 
 The separate [native Android checkout](../../apps/checkout-android/README.md#validation-on-16-november-2026) has observed actual Regtest receipts through the counter FFI, including a partial payment, restart, completion, and restored receipt history. The [optional Square Sandbox harness](../../apps/checkout-android/square-sandbox/README.md) uses the same amount-entry screen and the real Mobile Payments SDK. These experiments leave current wallet signing authority unchanged. Their validation notes distinguish the browser simulation, the native watcher, and Square's test backend.
 

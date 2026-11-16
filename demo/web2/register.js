@@ -101,18 +101,21 @@
     };
 
     let run = null;
+    let revision = 0, closed = false;
     const previousRestart = shell.onRestart;
 
     function stopMine() {
       if (!run) return;
       run.dead = true;
       clearInterval(run.timer);
-      run.controller.stopNode();
-      run.owner.stopNode();
+      run.controller?.stopNode();
+      run.owner?.stopNode();
       run = null;
     }
 
     function leave() {
+      closed = true;
+      revision++;
       shell.onLeave = null;
       stopMine();
       const chooser = shell.root.querySelector(".start.chooser");
@@ -139,32 +142,39 @@
       r.owner.onPump(true);
     }
 
-    async function startRun(onEvent, withBox, ownerShown) {
+    async function startRun(onEvent, withBox, ownerShown, current) {
       stopMine();
       const r = { dead: false, beat: 0, aim: null, ownerShown, registerPaid: false };
-      const counterChain = await ctx.loadCounter(ctx.wasm, { now: () => clock.now(), record: ctx.record, recordWithBox: ctx.recordWithBox });
-      const ownerChain = await ctx.loadOwner(ctx.ownerWasm, { now: () => clock.now() });
-      r.chain = OneChain(counterChain, ownerChain);
-      r.controller = CC.Controller({
-        flow, chain: r.chain, clock, withBox,
-        show(viewOf) {
-          if (r.dead) return;
-          shell.show("counter", pageOf(viewOf));
-          if (r.aim) shell.target("counter", r.aim, null);
-        },
-        event(kind, data) { if (!r.dead) onEvent(kind, data); },
-      });
-      r.owner = OC.Controller({
-        flow: ownerFlow, chain: ownerChain, clock,
-        show(viewOf) { if (!r.dead && r.ownerShown) shell.show("owner", pageOf(viewOf)); },
-      });
       run = r;
-      r.controller.startNode();
-      r.owner.startNode();
-      r.owner.render();
-      pump(r);
-      r.timer = setInterval(() => pump(r), 1000);
-      return r;
+      const stale = () => r.dead || !current();
+      return ctx.exclusiveStart(async () => {
+        if (stale()) return null;
+        const counterChain = await ctx.loadCounter(ctx.wasm, { now: () => clock.now(), record: ctx.record, recordWithBox: ctx.recordWithBox });
+        if (stale()) return null;
+        const ownerChain = await ctx.loadOwner(ctx.ownerWasm, { now: () => clock.now() });
+        if (stale()) return null;
+        r.chain = OneChain(counterChain, ownerChain);
+        r.controller = CC.Controller({
+          flow, chain: r.chain, clock, withBox,
+          show(viewOf) {
+            if (r.dead) return;
+            shell.show("counter", pageOf(viewOf));
+            if (r.aim) shell.target("counter", r.aim, null);
+          },
+          event(kind, data) { if (!r.dead) onEvent(kind, data); },
+        });
+        r.owner = OC.Controller({
+          flow: ownerFlow, chain: ownerChain, clock,
+          show(viewOf) { if (!r.dead && r.ownerShown) shell.show("owner", pageOf(viewOf)); },
+        });
+        run = r;
+        r.controller.startNode();
+        r.owner.startNode();
+        r.owner.render();
+        pump(r);
+        r.timer = setInterval(() => pump(r), 1000);
+        return r;
+      });
     }
 
     function aim(label) {
@@ -326,6 +336,10 @@
 
     /** Plays [way] from its moment [from]: a fresh counter, the earlier moments' taps made for the visitor. */
     async function playWay(way, from = 0) {
+      if (closed) return;
+      const mine = ++revision;
+      const current = () => !closed && mine === revision;
+      shell.onStep = null;
       shell.scenario("With your register", way.sub);
       const S = { index: -1, on: null };
       const facts = { totalMinor: MINOR, orderOpened: clock.now(), closedAt: 0, sale: null, till: null };
@@ -333,7 +347,7 @@
       const go = () => enter(S.index + 1);
       const moments = way.moments(go, S, facts, way);
       function enter(i) {
-        if (i >= moments.length) return;
+        if (!current() || i >= moments.length) return;
         S.index = i;
         S.on = null;
         shell.step(moments[i].step);
@@ -341,14 +355,15 @@
         // The last moment is the end: its card comes after the instruction has been read.
         if (i === moments.length - 1) shell.finish(OpenBmtShell.CARDS[way.card]);
       }
-      await startRun((kind, data) => {
+      const started = await startRun((kind, data) => {
         if (kind === "sale") {
           if (!facts.sale) facts.sale = { number: data.number, amountMinor: minorOf(data.amountBig), opened: clock.now(), paid: 0 };
           if (data.isPaid && !facts.sale.paid) facts.sale.paid = clock.now();
         }
         const handler = S.on && S.on[kind];
         if (handler) handler(data);
-      }, way.withBox, way.withOwner);
+      }, way.withBox, way.withOwner, current);
+      if (!current() || !started) return;
       run.controller.showHome();
       for (let j = 0; j < from; j++) if (moments[j].auto) moments[j].auto();
       enter(from);

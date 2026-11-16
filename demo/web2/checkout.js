@@ -1,218 +1,295 @@
-// Proposed merchant checkout, with simulated external payment outcomes in a visibly separate demo control area.
-// This is not an SDK integration and local browser state is never evidence of a real settlement.
+// Proposed merchant checkout using the demo shell's walkthrough, device frame, and customer actor.
+// All payment outcomes below are simulations; this path has no payment SDK or card processor.
 "use strict";
 (function (root) {
-  const KEY = "openbmt-proposed-checkout-v1";
   const ITEMS = [{ name: "Oat latte", price: 5.5 }, { name: "Sesame bagel", price: 4.5 }];
-  const STATUSES = new Set(["ready", "bitcoin-pending", "card-pending", "card-uncertain", "paused", "partial-cancelled", "partial-resolved", "failed", "cancelled", "paid", "refund-requested", "refund-review", "refunding", "refunded"]);
-  let storageReadFailed = false;
+  const STEPS = ["Start sale", "Review cart", "Choose payment", "Payment", "Receipt"];
+  const DEVICE_ID = "merchant";
+  // Valid QR modules from crates/openbmt-qr for the explicitly nonpayable text payload "OPENBMT DEMO ONLY - NO PAYMENT".
+  const DEMO_CODE = [
+    "1111111011110000101111111", "1000001011010001101000001", "1011101001001100101011101", "1011101011011110001011101",
+    "1011101000100101101011101", "1000001001110110001000001", "1111111010101010101111111", "0000000011111101000000000",
+    "1011011100010100001001011", "1001110001010010110011111", "0010001001011011010110110", "1100100100010000101110010",
+    "1111111110011100001101011", "0010100011011010000100000", "0110001100110100000111100", "1001100100010000001110011",
+    "0000011010101010111110100", "0000000010000001100010000", "1111111011100110101010011", "1000001011010110100011101",
+    "1011101000100111111110011", "1011101011100001111111101", "1011101011100011111110110", "1000001001011110000011101",
+    "1111111010110000111100001",
+  ].map((row) => Array.from(row, (bit) => bit === "1"));
+  let interrupted = null;
+  let receipts = [];
+  let nextOrder = 1042;
+
   const money = (n) => "$" + n.toFixed(2);
-  const fresh = (order = "1042", history = [], receipts = []) => ({ order, status: "ready", method: null, paid: 0, qty: [1, 1], history, receipts });
-  const validState = (s) => {
-    if (!s || ![1, 2].includes(s.version) || typeof s.order !== "string" || !/^\d{4,8}$/.test(s.order) || !STATUSES.has(s.status)) return false;
-    if (!Array.isArray(s.qty) || s.qty.length !== 2 || s.qty.some((q) => !Number.isInteger(q) || q < 1 || q > 8)) return false;
-    const storedDue = Math.round(ITEMS.reduce((sum, x, i) => sum + x.price * s.qty[i], 0) * 100) / 100;
-    if (!Number.isFinite(s.paid) || s.paid < 0 || s.paid > storedDue || Math.round(s.paid * 100) !== s.paid * 100 || !Array.isArray(s.history) || s.history.length > 40) return false;
-    if (s.history.some((e) => !e || typeof e.label !== "string" || e.label.length > 90 || typeof e.time !== "string")) return false;
-    const receipts = s.receipts === undefined && s.version === 1 ? [] : s.receipts;
-    if (!Array.isArray(receipts) || receipts.length > 12 || receipts.some((r) => !r || typeof r.order !== "string" || !/^\d{4,8}$/.test(r.order)
-      || typeof r.total !== "string" || !/^\$\d+\.\d{2} USD$/.test(r.total)
-      || (r.method !== "Bitcoin" && r.method !== "Card") || typeof r.items !== "string" || r.items.length < 1 || r.items.length > 160)) return false;
-    if (s.method !== null && s.method !== "Bitcoin" && s.method !== "Card") return false;
-    if (s.paid > 0 && s.method !== "Bitcoin") return false;
-    if (s.status === "paid" && !s.history.some((e) => e.label === (s.method === "Bitcoin" ? "Bitcoin test complete" : "Card test complete"))) return false;
-    if (s.status === "refunded" && !s.history.some((e) => e.label === "Refund simulation complete")) return false;
-    if (["bitcoin-pending", "card-pending", "card-uncertain", "paused", "partial-cancelled", "paid", "refund-requested", "refund-review", "refunding", "refunded", "failed"].includes(s.status) && !s.method) return false;
-    if (["bitcoin-pending", "paused", "partial-cancelled", "partial-resolved"].includes(s.status) && s.method !== "Bitcoin") return false;
-    if (["card-pending", "card-uncertain", "failed"].includes(s.status) && s.method !== "Card") return false;
-    return true;
-  };
-  const read = () => {
-    storageReadFailed = false;
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (!raw) return fresh();
-      const value = JSON.parse(raw);
-      if (!validState(value)) { localStorage.removeItem(KEY); return fresh(); }
-      return { ...value, version: 2, receipts: value.receipts || [] };
-    } catch (_) { storageReadFailed = true; return fresh(); }
-  };
-  const element = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const fresh = (order = nextOrder) => ({ order, status: "new", method: null, qty: [1, 1] });
+  const amountOf = (sale) => ITEMS.reduce((n, item, i) => n + item.price * sale.qty[i], 0);
 
-  function open(shell) {
-    shell.begin([], []);
-    shell.scenario("OpenBMT checkout");
-    shell.say("Proposed checkout · payment simulation", ["A single merchant checkout holds the cart and order. Demo controls simulate the payment network."]);
-    shell.stage.replaceChildren();
-    let state = read();
-    let storageWarning = storageReadFailed;
-    const experience = element("div", "checkout-experience");
-    const app = element("section", "checkout-proposal");
-    app.setAttribute("aria-label", "Juniper Coffee merchant checkout");
-    const top = element("header", "checkout-top");
-    const orderLabel = element("span", "checkout-order");
-    top.append(element("div", "checkout-brand", "Juniper Coffee"), orderLabel);
-    const grid = element("div", "checkout-grid");
-    const order = element("section", "checkout-order-card");
-    const pay = element("section", "checkout-pay");
-    const stateLine = element("p", "checkout-state");
-    stateLine.setAttribute("aria-live", "polite"); stateLine.setAttribute("role", "status");
-    const paymentSurface = element("div", "checkout-payment-surface");
-    const receiptList = element("section", "checkout-history");
-    app.append(top, grid, receiptList); grid.append(order, pay); pay.append(element("h2", null, "Payment"), stateLine, paymentSurface);
+  function open(shell, context) {
+    const U = context.U, C = context.C;
+    const device = { id: DEVICE_ID, caption: "Juniper Coffee", sizes: [{ label: "Tablet", size: C.TABLET }, { label: "Phone", size: C.PHONE }] };
+    const previousRestart = shell.onRestart;
+    let state = fresh();
+    let selectedMethod = null;
+    let active = true;
 
-    const controls = element("aside", "demo-controls");
-    controls.setAttribute("aria-label", "Test-only payment simulation controls");
-    const controlsHead = element("h2", null, "Demo controls · test only");
-    const controlsNote = element("p", "demo-controls-note", "These controls simulate external outcomes. They are outside the merchant app and do not move money.");
-    const controlActions = element("div", "checkout-actions");
-    const controlLog = element("section", "checkout-history");
-    const storageNotice = element("p", "checkout-storage-warning", "This browser could not save the demo session. Recovery after refresh is unavailable.");
-    storageNotice.hidden = true;
-    controls.append(controlsHead, controlsNote, controlActions, controlLog, storageNotice);
-    experience.append(app, controls);
+    const total = () => ITEMS.reduce((n, item, i) => n + item.price * state.qty[i], 0);
+    const itemSummary = () => ITEMS.map((item, i) => `${state.qty[i]} × ${item.name}`).join(" · ");
 
-    const button = (label, action, cls = "checkout-button") => {
-      const b = element("button", cls, label); b.type = "button"; b.addEventListener("click", action); return b;
-    };
-    const total = () => ITEMS.reduce((sum, x, i) => sum + x.price * state.qty[i], 0);
-    const persist = () => {
-      try { localStorage.setItem(KEY, JSON.stringify({ ...state, version: 2 })); storageWarning = false; }
-      catch (_) { storageWarning = true; }
-    };
-    const log = (label) => {
-      state.history.unshift({ label, time: new Date().toLocaleString() });
-      state.history = state.history.slice(0, 40); persist();
-    };
-    const completePayment = () => {
-      state.status = "paid";
-      const receipt = {
-        order: state.order,
-        total: money(total()) + " USD",
-        method: state.method,
-        items: ITEMS.map((item, i) => `${state.qty[i]} × ${item.name}`).join(" · "),
-      };
-      state.receipts = [receipt, ...state.receipts.filter((old) => old.order !== receipt.order)].slice(0, 12);
-      log(state.method === "Bitcoin" ? "Bitcoin test complete" : "Card test complete");
-      render();
-    };
-    const startNextOrder = () => {
-      state = fresh(String(Number(state.order) + 1).padStart(4, "0"), state.history, state.receipts);
-      persist();
-      render();
-    };
-    const locked = () => !["ready", "cancelled"].includes(state.status);
-    function render() {
-      orderLabel.textContent = "Order #" + state.order;
-      order.replaceChildren(element("h2", null, "Your order"));
-      ITEMS.forEach((item, i) => {
-        const row = element("div", "checkout-row");
-        const name = element("span", null, item.name + " · " + money(item.price));
-        const qty = element("div", "checkout-qty");
-        const down = button("−", () => { if (state.qty[i] > 1) { state.qty[i]--; persist(); render(); } }, "checkout-qty-button");
-        down.setAttribute("aria-label", "Remove one " + item.name);
-        const count = element("span", null, String(state.qty[i])); count.setAttribute("aria-live", "polite");
-        const up = button("+", () => { if (state.qty[i] < 8) { state.qty[i]++; persist(); render(); } }, "checkout-qty-button");
-        up.setAttribute("aria-label", "Add one " + item.name);
-        down.disabled = locked() || state.qty[i] <= 1; up.disabled = locked() || state.qty[i] >= 8;
-        qty.append(down, count, up); row.append(name, qty); order.append(row);
-      });
-      const due = total();
-      const sum = element("div", "checkout-total"); sum.append(element("strong", null, "Total"), element("strong", null, money(due) + " USD")); order.append(sum);
-      pay.replaceChildren(element("h2", null, "Payment"), stateLine, paymentSurface);
-      const previousReceipts = state.receipts.filter((r) => r.order !== state.order);
-      receiptList.replaceChildren();
-      if (previousReceipts.length) {
-        receiptList.append(element("h3", null, "Previous demo receipts"));
-        for (const r of previousReceipts) receiptList.append(element("p", "checkout-history-row", `Order #${r.order} · ${r.total} · ${r.method} · ${r.items}`));
+    function viewFor(size, screen) {
+      const ui = C.deviceUi(context.palette, false, context.assets.logo, size);
+      const body = [];
+      const moneyLines = (pairs) => ui.facts(pairs);
+      if (screen === "start") {
+        body.push(ui.text("Illustrative catalog", 20, true));
+        body.push(ui.text("Start the walkthrough with a latte and a bagel from this sample catalog.", 14, false, false, ui.pal.secondary));
+        body.push(ui.text("Recovery and prior receipts last only for this browser session.", 13, false, false, ui.pal.secondary));
+        body.push(moneyLines(ITEMS.map((item) => [item.name, money(item.price)])));
+        if (interrupted) body.push(ui.text(`Interrupted order #${interrupted.order} · ${money(amountOf(interrupted))} · ${interrupted.method}`, 14, true));
+        if (receipts.length) {
+          body.push(ui.text("Recent receipts", 16, true));
+          body.push(ui.receipt(receipts.slice(0, 3).map((r) => ({ text: `Order #${r.order} · ${r.total} · ${r.method} · ${r.items}`, style: U.LineStyle.Plain }))));
+        }
+      } else if (screen === "cart") {
+        body.push(ui.text("Your order", 20, true));
+        body.push(ui.receipt([
+          ...ITEMS.map((item, i) => ({ text: `${state.qty[i]} × ${item.name}  ·  ${money(item.price * state.qty[i])}`, style: U.LineStyle.Plain })),
+          { text: `Total  ·  ${money(total())} USD`, style: U.LineStyle.Strong },
+        ]));
+        body.push(ui.text("One cart and amount stay with this order whichever way the customer pays.", 14, false, false, ui.pal.secondary));
+      } else if (screen === "tender") {
+        body.push(ui.text("Choose how to pay", 20, true));
+        body.push(moneyLines([["Order", `#${state.order}`], ["Total", `${money(total())} USD`]]));
+        body.push(ui.text("The merchant checkout keeps the same cart for Bitcoin or card.", 14, false, false, ui.pal.secondary));
+      } else if (screen === "payment") {
+        if (state.status === "paid") {
+          body.push(ui.text("Payment complete", 20, true, false, ui.pal.good.ink));
+          body.push(ui.text(`Order #${state.order} · ${money(total())} USD · ${state.method}`, 14, false, false, ui.pal.secondary));
+          body.push(ui.text("This order is complete. Start a new sale from the receipt.", 14, false, false, ui.pal.secondary));
+        } else if (state.status === "waiting") {
+          body.push(ui.text(state.method === "Bitcoin" ? "Waiting for customer payment" : "Card handoff", 20, true));
+          body.push(moneyLines([["Order", `#${state.order}`], ["Amount", `${money(total())} USD`], ["Method", state.method]]));
+          if (state.method === "Bitcoin") {
+            const QR = (context.CV || root.OpenBmtCounterViews).QrView;
+            const side = Math.min(ui.px(248), ui.context.width - ui.px(56));
+            body.push(ui.codeCard(QR(ui, DEMO_CODE, side)));
+            body.push(ui.text("Demo code · no payment", 13, true, false, ui.pal.secondary));
+            body.push(ui.text("This sample code cannot pay this order.", 13, false, false, ui.pal.secondary));
+          } else {
+            body.push(ui.text("Card provider handoff · proposed", 17, true));
+            body.push(ui.text("A simulated embedded provider screen on this same merchant device. This demo has no card SDK or processor connected.", 14, false, false, ui.pal.secondary));
+          }
+        } else if (state.status === "uncertain") {
+          body.push(ui.text("Card result not confirmed", 20, true, false, ui.pal.warn.ink));
+          body.push(moneyLines([["Order", `#${state.order}`], ["Amount", `${money(total())} USD`]]));
+          body.push(ui.text("Do not retry or hand over the order until the merchant checks the attempt.", 14, false, false, ui.pal.secondary));
+        } else if (state.status === "checking") {
+          body.push(ui.text("Checking card attempt", 20, true));
+          body.push(moneyLines([["Order", `#${state.order}`], ["Amount", `${money(total())} USD`]]));
+          body.push(ui.text("Waiting for the provider response for this attempt.", 14, false, false, ui.pal.secondary));
+        } else if (state.status === "cancelled") {
+          body.push(ui.text("Checkout canceled", 20, true, false, ui.pal.stop.ink));
+          body.push(ui.text("No payment received. No goods handed over.", 14, false, false, ui.pal.secondary));
+        }
+      } else if (screen === "receipt") {
+        if (state.status === "paid") {
+          body.push(ui.text("Payment complete", 20, true, false, ui.pal.good.ink));
+          body.push(ui.receipt([
+            { text: `Receipt · Order #${state.order}`, style: U.LineStyle.Strong },
+            { text: itemSummary(), style: U.LineStyle.Plain },
+            { text: `Total · ${money(total())} USD`, style: U.LineStyle.Strong },
+            { text: `Payment · ${state.method}`, style: U.LineStyle.Plain },
+          ]));
+        } else {
+          body.push(ui.text("Order canceled", 20, true, false, ui.pal.stop.ink));
+          body.push(ui.text("No receipt was issued because payment was not received.", 14, false, false, ui.pal.secondary));
+        }
       }
-      paymentSurface.replaceChildren(); controlActions.replaceChildren();
-      const paymentAllowed = state.status === "ready";
-      if (paymentAllowed) {
-        stateLine.textContent = "Choose how your customer will pay · " + money(due) + " due";
-        paymentSurface.append(button("Pay with Bitcoin", () => { state.method = "Bitcoin"; state.paid = 0; state.status = "bitcoin-pending"; log("Bitcoin request opened"); render(); }, "checkout-button primary"),
-          button("Pay with card", () => { state.method = "Card"; state.paid = 0; state.status = "card-pending"; log("Card test started"); render(); }, "checkout-button"));
-      } else if (state.status === "bitcoin-pending" || state.status === "paused") {
-        stateLine.textContent = state.status === "paused" ? "Payment paused · resume this same order" : (state.paid ? money(state.paid) + " received · " + money(due - state.paid) + " remaining" : "Waiting for Bitcoin · " + money(due));
-        paymentSurface.append(qrGraphic(), element("p", "checkout-qr-caption", "Payment request"));
-        if (state.status === "paused") controlActions.append(button("Resume payment", () => { state.status = "bitcoin-pending"; log("Bitcoin request resumed"); render(); }, "checkout-button primary"));
-      } else if (state.status === "card-pending") {
-        stateLine.textContent = "Card payment in progress · awaiting result";
-        paymentSurface.append(element("p", "checkout-card-wait", "Card payment in progress"));
-      } else if (state.status === "card-uncertain") {
-        stateLine.textContent = "Card result not confirmed · do not retry or hand over the order";
-        paymentSurface.append(element("p", "checkout-alert", "Payment status unknown. Reconciliation is required before another tender."));
-      } else if (state.status === "failed") {
-        stateLine.textContent = "Card attempt failed · no payment received";
-        paymentSurface.append(element("p", "checkout-alert", "The attempt is resolved as failed. No goods handed over."), button("Try payment again", () => { state.status = "ready"; state.method = null; log("Failed attempt resolved; new attempt allowed"); render(); }, "checkout-button"));
-      } else if (state.status === "partial-cancelled") {
-        stateLine.textContent = money(state.paid) + " received · checkout cancelled · owner follow-up required";
-        paymentSurface.append(element("p", "checkout-alert", "No goods handed over. Keep the received funds matched to this order while the owner follows up."));
-      } else if (state.status === "partial-resolved") {
-        stateLine.textContent = money(state.paid) + " received · owner follow-up recorded · order closed";
-        paymentSurface.append(element("p", "checkout-alert", "No goods handed over. The received funds remain recorded against this order."));
-      } else if (state.status === "paid") {
-        stateLine.textContent = "Payment complete · " + money(due) + " · " + state.method;
-        const receipt = element("article", "checkout-receipt");
-        receipt.append(element("h3", null, "Receipt · Juniper Coffee"), element("p", null, "Order #" + state.order + " · " + ITEMS.map((it, i) => state.qty[i] + " × " + it.name).join(" · ") + " · " + money(due) + " USD"), element("p", null, "Payment: " + state.method));
-        paymentSurface.append(receipt,
-          button("Request refund", () => { state.status = "refund-requested"; log("Refund requested"); render(); }, "checkout-button"),
-          button("Start next order", startNextOrder, "checkout-button primary"));
-      } else if (["refund-requested", "refund-review", "refunding", "refunded"].includes(state.status)) {
-        const labels = {
-          "refund-requested": "Refund requested · awaiting owner review",
-          "refund-review": "Refund reviewed · awaiting approval",
-          refunding: "Refund approved · simulation still pending",
-          refunded: "Refund complete",
-        };
-        stateLine.textContent = labels[state.status];
-        const receipt = element("article", "checkout-receipt"); receipt.append(element("h3", null, "Order #" + state.order + " · " + money(due)), element("p", null, "Refund request · awaiting the next step.")); paymentSurface.append(receipt);
-        if (state.status === "refund-requested") controlActions.append(button("Review refund request", () => { state.status = "refund-review"; log("Refund reviewed"); render(); }, "checkout-button"));
-        else if (state.status === "refund-review") controlActions.append(button("Approve test refund", () => { state.status = "refunding"; log("Test refund approved"); render(); }, "checkout-button primary"));
-        else if (state.status === "refunding") controlActions.append(button("Complete refund simulation", () => { state.status = "refunded"; log("Refund simulation complete"); render(); }, "checkout-button primary"));
-        else controlActions.append(button("Start next order", startNextOrder, "checkout-button primary"));
-      } else if (state.status === "cancelled") {
-        stateLine.textContent = "Checkout cancelled · no payment received";
-        paymentSurface.append(element("p", "checkout-card-wait", "No goods handed over."));
-        paymentSurface.append(button("Start this order again", () => { state.status = "ready"; state.method = null; state.paid = 0; log("Order reopened"); render(); }, "checkout-button"));
-      }
-      if (state.status === "bitcoin-pending") {
-        if (state.paid === 0) controlActions.append(button("Simulate partial receipt · $4.00", () => { state.paid = 4; log("Partial Bitcoin test receipt · $4.00"); render(); }, "checkout-button primary"));
-        else controlActions.append(button("Simulate remaining receipt · " + money(due - state.paid), () => { state.paid = due; completePayment(); }, "checkout-button primary"));
-        controlActions.append(button("Pause payment request", () => { state.status = "paused"; log("Payment request paused"); render(); }));
-        controlActions.append(button(state.paid ? "Cancel with funds received" : "Cancel checkout", () => {
-          if (state.paid) { state.status = "partial-cancelled"; log("Cancelled with partial funds · owner follow-up required"); }
-          else { state.status = "cancelled"; state.method = null; log("Checkout cancelled"); }
-          render();
-        }, "checkout-button quiet"));
-      } else if (state.status === "card-pending") {
-        controlActions.append(button("Complete card test payment", completePayment, "checkout-button primary"),
-          button("Lose callback · mark result uncertain", () => { state.status = "card-uncertain"; log("Card result uncertain · reconciliation required"); render(); }, "checkout-button quiet"));
-      } else if (state.status === "card-uncertain") {
-        controlActions.append(button("Reconcile · confirm payment completed", completePayment, "checkout-button primary"),
-          button("Reconcile · confirm attempt failed", () => { state.status = "failed"; log("Card attempt failed"); render(); }, "checkout-button"));
-      } else if (state.status === "partial-cancelled") {
-        controlActions.append(button("Record owner follow-up complete", () => { state.status = "partial-resolved"; log("Owner follow-up recorded"); render(); }, "checkout-button"));
-      } else if (state.status === "partial-resolved") {
-        controlActions.append(button("Start next order", startNextOrder, "checkout-button primary"));
-      }
-      controlLog.replaceChildren(element("h3", null, "Recent activity"));
-      if (!state.history.length) controlLog.append(element("p", "checkout-empty", "No payment activity yet."));
-      else state.history.forEach((item) => controlLog.append(element("p", "checkout-history-row", item.label + " · " + item.time)));
-      storageNotice.hidden = !storageWarning;
+
+      const actions = screenActions(ui, screen);
+      return C.Device(ui, ui.page(ui.bar("Juniper Coffee", null, null), body, actions));
     }
-    render();
-    shell.stage.append(experience);
-    const restart = shell.onRestart;
-    shell.onRestart = () => { shell.onRestart = restart; if (restart) restart(); else open(shell); };
-    shell.onLeave = () => { shell.onRestart = restart; };
+
+    function screenActions(ui, screen) {
+      if (screen === "start") {
+        if (interrupted) return [ui.primary("Resume interrupted sale")];
+        return [ui.primary("New sale")];
+      }
+      if (screen === "cart") return [ui.primary("Continue")];
+      if (screen === "tender") return [ui.primary("Bitcoin"), ui.secondary("Card"), ui.quiet("Cancel sale")];
+      if (screen === "payment") {
+        if (state.status === "uncertain") return [ui.primary("Check card status")];
+        if (state.status === "cancelled") return [ui.primary("New sale"), ui.secondary("Done")];
+        if (state.status === "waiting") return [ui.quiet("Cancel sale")];
+        return [];
+      }
+      if (screen === "receipt") {
+        if (state.status === "paid") return [ui.primary("New sale"), ui.secondary("Done")];
+        return [ui.primary("New sale"), ui.secondary("Done")];
+      }
+      return [];
+    }
+
+    function show(screen) {
+      shell.show(DEVICE_ID, (size) => viewFor(size, screen));
+      shell.light(DEVICE_ID);
+    }
+
+    function recordPayment() {
+      if (!active || !selectedMethod || (state.status !== "waiting" && state.status !== "checking")) return false;
+      state.status = "paid";
+      const receipt = { order: state.order, total: `${money(total())} USD`, method: state.method, items: itemSummary() };
+      receipts = [receipt, ...receipts.filter((r) => r.order !== receipt.order)].slice(0, 12);
+      nextOrder = Math.max(nextOrder, Number(state.order) + 1);
+      return true;
+    }
+
+    function completePayment() {
+      if (!recordPayment()) return;
+      enter(4);
+    }
+
+    function finish() {
+      shell.finish({
+        heading: state.status === "paid" ? `Order #${state.order} is complete.` : `Order #${state.order} was canceled.`,
+        lines: state.status === "paid"
+          ? ["The merchant kept one cart and amount.", `The proposed ${state.method} path reached a simulated completion.`, "The receipt is available in this checkout session."]
+          : ["No payment was received.", "No goods were handed over.", "Start a fresh sale when ready."],
+      });
+    }
+
+    function enter(index) {
+      if (!active) return;
+      shell.actor(null);
+      shell.step(index);
+      shell.questions([
+        { q: "Does this connect to a card processor?", a: "This browser walkthrough simulates the provider screen and a successful response after an interruption. A separate Android Sandbox harness has completed test payments with Square's Mobile Payments SDK. Square's full POS app is not embedded here." },
+        { q: "What has actually been built?", a: "The catalog and unified interface are a proposal. The native Android proof has tested amount entry, Bitcoin Regtest receipts, payment recovery, and Square Sandbox card payments. The other counter scenarios run the Counter app's model on a simulated chain." },
+        { q: "What happens when I leave or refresh?", a: "Changing scenarios keeps an interrupted example available to resume in this tab. Start over or refreshing resets the illustration. Durable restart recovery is tested separately in the native app." },
+      ]);
+      if (index === 0) {
+        show("start");
+        if (interrupted) {
+          shell.say("An interrupted payment is waiting. Recovery is available only while this browser session stays open.", ["Tap ", { b: "Resume interrupted sale" }, " to check this attempt."]);
+          shell.target(DEVICE_ID, "Resume interrupted sale", () => {
+            state = { ...interrupted, qty: [...interrupted.qty] };
+            selectedMethod = state.method;
+            interrupted = null;
+            if (state.status === "checking") state.status = "uncertain";
+            nextOrder = Math.max(nextOrder, Number(state.order) + 1);
+            enter(3);
+          });
+        } else {
+          shell.say("Start a new order from the sample catalog.", ["You are the cashier. Tap ", { b: "New sale" }, "."]);
+          shell.target(DEVICE_ID, "New sale", () => { state = fresh(nextOrder); selectedMethod = null; enter(1); });
+        }
+      } else if (index === 1) {
+        show("cart");
+        shell.say(`The cart is ready: ${itemSummary()}, ${money(total())} USD.`, ["Tap ", { b: "Continue" }, " to choose a payment method."]);
+        shell.target(DEVICE_ID, "Continue", () => enter(2));
+      } else if (index === 2) {
+        state.method = null; selectedMethod = null; state.status = "cart";
+        show("tender");
+        shell.say("The same order can go to Bitcoin or card.", ["Choose ", { b: "Bitcoin" }, ", ", { b: "Card" }, ", or ", { b: "Cancel sale" }, "."]);
+        shell.targets(DEVICE_ID, [
+          { label: "Bitcoin", onTap() { selectedMethod = "Bitcoin"; state.method = selectedMethod; state.status = "waiting"; enter(3); } },
+          { label: "Card", onTap() { selectedMethod = "Card"; state.method = selectedMethod; state.status = "waiting"; enter(3); } },
+          { label: "Cancel sale", onTap() { selectedMethod = null; state.status = "cancelled"; nextOrder = Math.max(nextOrder, Number(state.order) + 1); enter(4); } },
+        ]);
+      } else if (index === 3) {
+        const paymentState = state;
+        show("payment");
+        if (state.status === "paid" || state.status === "cancelled") {
+          shell.say(state.status === "paid" ? "This order is already complete." : "This order is canceled.", ["Review its receipt to start another sale or finish."]);
+          return;
+        }
+        if (state.status === "uncertain") {
+          shell.say("The card result is unclear. Check the existing attempt before proceeding.", ["Tap ", { b: "Check card status" }, "."]);
+          shell.target(DEVICE_ID, "Check card status", () => { state.status = "checking"; enter(3); });
+          return;
+        }
+        if (state.status === "checking") {
+          shell.say("The merchant is checking the existing card attempt.", [root.innerWidth < 900 ? "Scroll below the device and tap " : "As the card provider, tap ", { b: "Confirm payment (demo)" }, "."]);
+          shell.actor({ who: "Card provider", line: "This walkthrough returns a successful result for the same attempt.", button: "Confirm payment (demo)", onTap() { if (state === paymentState) completePayment(); } });
+          return;
+        }
+        const action = state.method === "Bitcoin" ? "Send Bitcoin payment (demo)" : "Submit card handoff (demo)";
+        shell.say(state.method === "Bitcoin"
+          ? "The merchant is waiting for the customer's wallet payment."
+          : "The customer is at the proposed provider handoff. This demo simulates an unclear response, then checks that same attempt.",
+        [root.innerWidth < 900 ? "Scroll below the device. As the customer, tap " : "You are the customer. Tap ", { b: action }, "."]);
+        shell.actor({
+          who: "Customer",
+          line: state.method === "Bitcoin" ? "Pays this sample order from a wallet (simulation)." : "Submits a sample card handoff (simulation).",
+          button: action,
+          onTap() {
+            if (!active || state !== paymentState || state.status !== "waiting") return;
+            if (state.method === "Bitcoin") completePayment();
+            else { state.status = "uncertain"; enter(3); }
+          },
+        });
+        shell.target(DEVICE_ID, "Cancel sale", () => {
+          if (!active || state !== paymentState || state.status !== "waiting") return;
+          state.status = "cancelled";
+          nextOrder = Math.max(nextOrder, Number(state.order) + 1);
+          enter(4);
+        });
+      } else {
+        show("receipt");
+        if (state.status === "paid") {
+          shell.say(`Payment complete for order #${state.order}.`, ["Review the receipt. Tap ", { b: "New sale" }, " or ", { b: "Done" }, "."]);
+        } else {
+          shell.say(`Order #${state.order} was canceled.`, ["No payment was received. Start a ", { b: "New sale" }, " or tap ", { b: "Done" }, "."]);
+        }
+        shell.targets(DEVICE_ID, [
+          { label: "New sale", onTap() { state = fresh(nextOrder); selectedMethod = null; enter(1); } },
+          { label: "Done", onTap: finish },
+        ]);
+      }
+    }
+
+    function replay(index) {
+      const prior = { ...state, qty: [...state.qty] };
+      const method = selectedMethod;
+      // Navigation only redraws the current order. It must never act as a payment
+      // confirmation, especially after an unclear card result.
+      if (interrupted) index = 0;
+      else if (["paid", "cancelled"].includes(prior.status) && index !== 0) index = 4;
+      else if (method && ["waiting", "uncertain", "checking"].includes(prior.status)) index = 3;
+      else if (index > 2 && !method && prior.status !== "cancelled") index = 2;
+      if (index === 4 && !["paid", "cancelled"].includes(prior.status)) index = 3;
+      state = { ...prior, qty: [...prior.qty], method: method || prior.method };
+      selectedMethod = method;
+      begin();
+      enter(index);
+    }
+
+    function begin() {
+      shell.begin(STEPS, [device], DEVICE_ID, { actorFlow: true });
+      shell.scenario("OpenBMT checkout");
+      shell.onStep = replay;
+    }
+
+    function cleanup(restarting) {
+      if (!active) return;
+      active = false;
+      if (!restarting && ["waiting", "uncertain", "checking"].includes(state.status)) interrupted = { ...state, qty: [...state.qty], amount: total() };
+      if (restarting) { interrupted = null; receipts = []; nextOrder = 1042; }
+      shell.onLeave = null;
+      shell.onStep = null;
+      shell.actor(null);
+      shell.onRestart = previousRestart;
+      shell.begin([], []);
+    }
+
+    shell.onLeave = () => cleanup(false);
+    shell.onRestart = () => {
+      cleanup(true);
+      if (previousRestart) previousRestart();
+    };
+    begin();
+    enter(0);
   }
-  function qrGraphic() {
-    const canvas = element("div", "checkout-qr");
-    canvas.setAttribute("role", "img"); canvas.setAttribute("aria-label", "Payment request code");
-    for (let i = 0; i < 81; i++) canvas.append(element("i", [0, 1, 2, 9, 10, 11, 18, 19, 20, 6, 7, 8, 15, 16, 17, 24, 25, 26, 54, 55, 56, 63, 64, 65, 72, 73, 74].includes(i) || (i * 17 + i * i) % 5 < 2 ? "dark" : ""));
-    return canvas;
-  }
-  root.OpenBmtCheckout = { open, KEY, ITEMS, validState };
-  if (typeof module !== "undefined" && module.exports) module.exports = root.OpenBmtCheckout;
+
+  const api = { open, STEPS, DEVICE_ID };
+  root.OpenBmtCheckout = api;
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis);
