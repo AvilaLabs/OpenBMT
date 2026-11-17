@@ -1,0 +1,190 @@
+{
+  "as_of": "2026-11-17",
+  "scope": "Semantic normalization review of the currently present vendor bundles in vendors/*.json, focused on catalog, inventory, customers/loyalty, staff permissions, cash closeout, reporting and multilocation. Alias groups identify comparable merchant-observable jobs while retaining the original claims; collisions record superficially similar claims that must not be unified. No vendor behavior was tested.",
+  "alias_groups": [
+    {
+      "canonical_key": "catalog.sellable_item.define",
+      "claim_ids": ["SHO-C002", "SHO-C035", "SQO-C001", "TOO-C001", "BTM-C023"],
+      "rationale": "Each documents merchant configuration of a sellable catalog entry or its selectable form: product/variant, item variation, menu item, or POS item.",
+      "variant_cautions": "Shopify and Square model variants with option values and per-variant details; Toast describes a hierarchical restaurant menu; BTCPay POS item documentation gives title/price/description/image but not variants. Do not infer common SKU, modifier, price, or inventory semantics."
+    },
+    {
+      "canonical_key": "catalog.item.variant_options",
+      "claim_ids": ["SHO-C035", "SQO-C001"],
+      "rationale": "Both let a merchant represent selectable product variants/options and retain values on the resulting variant records.",
+      "variant_cautions": "Shopify supports named options and variant-level values, bulk combinations and category metafield links; Square applies reusable option sets to generate fixed variations. Their limits and import/price workflows differ. Toast modifiers are add-ons/choices, not equivalent stock-bearing variants."
+    },
+    {
+      "canonical_key": "catalog.item.bulk_import",
+      "claim_ids": ["SHO-C024", "SQO-C014"],
+      "rationale": "Both document bulk ingestion/update of catalog records from structured files rather than editing each item individually.",
+      "variant_cautions": "Shopify uses product CSV with variants and separate multi-location inventory CSV; Square uses a mapped item-library import with row errors. Cancellation, rollback and supported columns differ."
+    },
+    {
+      "canonical_key": "catalog.item.bulk_export",
+      "claim_ids": ["SHO-C024", "SQO-C013"],
+      "rationale": "Both allow export of product/catalog data to a structured file for offline review or migration.",
+      "variant_cautions": "Shopify export covers products/variants and has distinct inventory exports; Square can export a filtered item library. Do not assume equivalent columns or round-trip fidelity."
+    },
+    {
+      "canonical_key": "inventory.quantity.manual_adjust",
+      "claim_ids": ["SHO-C004", "SQO-C002", "TOO-C048", "TOO-C049"],
+      "rationale": "Each documents an operator changing recorded item stock quantity or availability through an adjustment/quick-edit surface.",
+      "variant_cautions": "Shopify Quick counts has POS and admin paths; Square requires tracked stock and a reason; Toast distinguishes In Stock, Out of Stock and remaining Quantity and has Web/POS manager surfaces. Approval, audit history, location scope and decrement behavior differ."
+    },
+    {
+      "canonical_key": "inventory.physical_count.record_review",
+      "claim_ids": ["SHO-C034", "SQO-C003", "SQO-C004"],
+      "rationale": "Each documents counting physical on-hand inventory and using the count to reconcile recorded stock.",
+      "variant_cautions": "Shopify documents scheduled, staff-attributed counts with manager review; Square separates cycle counts (uncounted items unchanged) from full counts. Square submission/approval and Shopify update timing differ."
+    },
+    {
+      "canonical_key": "inventory.transfer.create",
+      "claim_ids": ["SHO-C036", "SQO-C016"],
+      "rationale": "Both document creation of a stock transfer between locations with products/quantities and a transfer record.",
+      "variant_cautions": "Shopify supports draft and shipment lifecycle details; Square documents source/destination, tracking and draft/create/export. Do not infer identical reservation or stock-decrement timing."
+    },
+    {
+      "canonical_key": "inventory.transfer.ship_from_origin",
+      "claim_ids": ["SHO-C005"],
+      "rationale": "The claim documents the origin location preparing/scanning quantities and sending an admin-created transfer shipment.",
+      "variant_cautions": "No Square claim in the reviewed bundle documents the same send/fulfill step at this granularity; keep this as a one-vendor normalized behavior until evidence supports an alias."
+    },
+    {
+      "canonical_key": "inventory.transfer.receive_at_destination",
+      "claim_ids": ["SHO-C006", "SQO-C017"],
+      "rationale": "Both let destination staff record receipt of transferred goods, including quantity reconciliation and full or partial acceptance.",
+      "variant_cautions": "Shopify supports accepting all or reviewing/counting line items and accept/reject behavior; Square documents full/partial receipt and may permit instant transfer. Exception handling and inventory posting timing differ."
+    },
+    {
+      "canonical_key": "customers.profile.create",
+      "claim_ids": ["SHO-C007", "SQO-C019"],
+      "rationale": "Both document creating a customer profile in connection with merchant activity or through a customer-management workflow.",
+      "variant_cautions": "Shopify POS creation collects at least one identity field and separately records marketing consent; Square also supports import, matching and failed-row recovery. Creation does not imply cart attachment, consent, loyalty enrollment or the same required fields."
+    },
+    {
+      "canonical_key": "staff.permissions.profile_assign",
+      "claim_ids": ["SHO-C011", "SQO-C007", "TOO-C008", "BTO-C004", "BTM-C035"],
+      "rationale": "Each documents configuring or assigning a staff/user access profile that governs some merchant or POS actions.",
+      "variant_cautions": "Shopify POS Pro roles gate actions and can require manager approval; Square uses configurable permission sets; Toast groups permissions into jobs; BTCPay documents role names/invitation or API assignment but not a full action matrix. Treat BTCPay role names as labels, not equivalent permissions."
+    },
+    {
+      "canonical_key": "multilocation.location.create",
+      "claim_ids": ["SHO-C029", "SQO-C018"],
+      "rationale": "Both document creating a retail location record in the merchant account.",
+      "variant_cautions": "Shopify describes default fulfillment availability and zero stock for new products at the location; Square claim describes entering profile/contact details. Neither should be conflated with BTCPay's additional payment stores or Toast hierarchy entities."
+    },
+    {
+      "canonical_key": "multilocation.pos.location_context.select",
+      "claim_ids": ["SHO-C030", "SQO-C033"],
+      "rationale": "Both describe choosing/switching the location context used by a POS device and its scoped activity.",
+      "variant_cautions": "Shopify associates POS device location with tax context and Pro subscription; Square switches location-specific catalog/report/device context. Access and subscription rules are product-specific."
+    },
+    {
+      "canonical_key": "cash_drawer.session.reconcile_close",
+      "claim_ids": ["SHO-C013", "SQO-C039", "TOO-C015", "TOO-C016"],
+      "rationale": "Each documents ending/closing a cash handling interval and comparing or recording actual cash against expected activity.",
+      "variant_cautions": "Shopify sessions hold opening float, cash movement and final count; Square can end a drawer with an actual count; Toast has explicit open/paused/closed states and blind/full expected-balance permissions. Session boundaries and variance calculations differ."
+    },
+    {
+      "canonical_key": "cash_drawer.session.opening_float",
+      "claim_ids": ["SHO-C013", "SQO-C009", "TOO-C014"],
+      "rationale": "Each documents establishing or configuring a cash drawer/register with a starting cash float for later reconciliation.",
+      "variant_cautions": "Shopify sets starting float at register session; Square starts a session from POS and requires the Cash Management add-on; Toast configures default starting balance and physical drawer/device cash mode. Toast's cited claim is configuration, not proof of the same session-start UI."
+    },
+    {
+      "canonical_key": "cash_drawer.cash_movement.record",
+      "claim_ids": ["SQO-C038", "TOO-C017", "TOO-C018"],
+      "rationale": "Each provides auditable entry of cash moving into or out of an active drawer outside an ordinary sale payment.",
+      "variant_cautions": "Square exposes generic Pay In/Pay Out with description; Toast separates Cash In, Cash Collected, payout, tip out and cash drop, with different limits/reasons and audit records."
+    },
+    {
+      "canonical_key": "cash_drawer.activity.report",
+      "claim_ids": ["SHO-C032", "TOO-C022", "TOO-C026"],
+      "rationale": "Each exposes cash activity or discrepancy information to support drawer/deposit reconciliation.",
+      "variant_cautions": "Shopify reports register-session discrepancies and cash payments; Toast drawer screens expose balances/activity while deposit reports diagnose expected versus actual deposits. These are related reports, not the same metric or closeout workflow."
+    },
+    {
+      "canonical_key": "reporting.data.export_configure",
+      "claim_ids": ["SHO-C031", "TOO-C028", "SQO-C012"],
+      "rationale": "Each provides an export/print/email path for operational report data or configurable export fields.",
+      "variant_cautions": "Shopify exports/remote-closes register sessions; Toast configures export datasets and columns; Square exports or emails eligible reports with report-specific restrictions. This is an interaction-level alias only; data coverage and file schemas are not equivalent."
+    }
+  ],
+  "collisions": [
+    {
+      "key": "inventory.stock_tracking_and_decrement",
+      "claim_ids": ["BTM-C024", "SQO-C035", "SHO-C001", "TOO-C005", "TOO-C048", "TOO-C049"],
+      "reason": "Do not collapse these into one stock-tracking guarantee. BTCPay-C024 documents only an optional quantity field in POS configuration; it does not establish decrement, reservation, restock or oversell prevention. SQO-C035 documents decrement after supported sales. SHO-C001 describes channel synchronization, not precise decrement rules. Toast claims document stock status/count controls, not necessarily automatic decrement."
+    },
+    {
+      "key": "multilocation.location_or_store",
+      "claim_ids": ["BTM-C036", "BTO-C003", "SHO-C029", "SQO-C018", "TOO-C013"],
+      "reason": "A BTCPay store is a payment/configuration boundary and can be created more than once; it is not documented as a physical location with shared inventory. Shopify/Square location records and Toast enterprise hierarchy ownership have different inventory, tax and access semantics."
+    },
+    {
+      "key": "staff_permissions.role_assignment_vs_signer_authority",
+      "claim_ids": ["BTO-C004", "BTM-C035", "BTO-C029"],
+      "reason": "Role assignment governs account/store access; BTCPay multisig Owner requirement is a signer-participant setup constraint with key-spend implications. Do not normalize multisig ownership to an employee permission profile."
+    },
+    {
+      "key": "staff_permissions.employee_role_vs_api_oauth_scope",
+      "claim_ids": ["SHO-C011", "SQO-C007", "TOO-C008", "CARD-C002", "CARD-C003"],
+      "reason": "Employee roles and permission sets constrain staff actions in a merchant POS. Square SDK OAuth scopes authorize an integration to call seller/account APIs; they do not assign cashier or manager permissions."
+    },
+    {
+      "key": "customers.loyalty_or_subscription",
+      "claim_ids": ["SHO-C019", "SQO-C024", "SQO-C025", "BTM-C013", "BTM-C014"],
+      "reason": "Shopify's claim displays a third-party loyalty status field; Square claims configure/operate points and rewards; BTCPay claims manage subscription plans and prepaid credits. These do not represent equivalent loyalty earning, redemption or customer-account behavior."
+    },
+    {
+      "key": "customers.profile_capture_or_card_recognition",
+      "claim_ids": ["SHO-C007", "SHO-C008", "TOS-C012", "SQO-C019"],
+      "reason": "Explicit staff-entered profile creation, name-only chip-card recognition, automatic guest/contact/order-history capture and customer import are distinct triggers, data sets and consent/privacy surfaces. Do not merge as generic customer creation."
+    },
+    {
+      "key": "cash_drawer.report.view",
+      "claim_ids": ["SQO-C010", "SQO-C040"],
+      "reason": "These Square claims use distinct IDs but describe the same cash drawer history/session detail view with substantially overlapping fields and filters. Treat as a likely duplicate claim pair for integration cleanup, not two independent vendor capabilities."
+    },
+    {
+      "key": "cash_closeout.payout_or_cash_out",
+      "claim_ids": ["BTM-C033", "TOO-C018", "SQO-C038"],
+      "reason": "BTCPay-C033 is an on-chain Bitcoin payout signed/broadcast from a wallet; Toast-C018 and Square-C038 are physical cash drawer removals or register adjustments. BTCPay-C033 is also categorized cash_closeout, which is semantically misleading; normalize it under payout/wallet transaction operations, not cash drawer closeout."
+    },
+    {
+      "key": "reporting.sales_or_closeout_report",
+      "claim_ids": ["BTM-C018", "SHO-C014", "SQO-C011", "TOO-C027", "TOO-C036"],
+      "reason": "The claims cover different report units and scopes: Bitcoin wallet transactions/product quantities/payments; Shopify POS daily/staff sales; Square restaurant close-of-day; Toast product-mix and location-scoped reports. A shared reporting label does not establish equivalent metrics, timing or reconciliation. BTCPay-C018 itself bundles multiple distinct report types and should be split before strict one-report-per-claim normalization."
+    },
+    {
+      "key": "catalog.modifier_or_variant",
+      "claim_ids": ["SHO-C035", "SQO-C001", "TOO-C031", "TOO-C032", "TOO-C002", "SQO-C032"],
+      "reason": "Shopify/Square variants generally carry distinct product option/variation records; Toast modifier groups model choices or add-ons with selection constraints/inheritance; Square modifier behavior controls prompt/receipt presentation. Do not merge modifiers with stock-bearing product variants."
+    },
+    {
+      "key": "inventory.transfer_status_and_posting",
+      "claim_ids": ["SHO-C005", "SHO-C006", "SHO-C036", "SQO-C016", "SQO-C017"],
+      "reason": "Creation, origin shipment and destination receipt are separate merchant-observable steps. Shopify documents a shipment lifecycle and destination verification; Square documents transfer creation and receiving with possible instant transfer. Do not reduce all steps to a single transfer capability or assume identical stock posting time."
+    },
+    {
+      "key": "bitcoin_customer_settlement_and_reporting",
+      "claim_ids": ["SQC-C021", "SQC-C023", "SQC-C025", "BTM-C002", "BTM-C033"],
+      "reason": "Square's documented POS option is Lightning acceptance with custodial Square wallet/balance settlement and gift-card-only refund behavior; BTCPay claims describe merchant-configured Bitcoin wallet receipt and on-chain PSBT payout. Do not imply these are the same Bitcoin rail, custody model, refund method or reporting record, or that Square provides on-chain self-custody acceptance."
+    },
+    {
+      "key": "catalog.inventory_and_product_reports",
+      "claim_ids": ["BTM-C018", "SHO-C014", "TOO-C027", "SQO-C041"],
+      "reason": "Products-sold quantities, inventory-count variance exports, sales ranking and multi-location product-mix comparisons are different measures and event bases. Do not infer that a sales report equals a stock ledger or an inventory count."
+    }
+  ],
+  "notes": [
+    "Aliases are candidate semantic keys for later integration; preserve vendor claim IDs, qualifiers, plan/version gates, payment rail, device conditions, permissions and failure behavior in the normalized record.",
+    "No alias was created for BTCPay POS quantity field and tracked inventory decrement, BTCPay prepaid subscriptions and loyalty, or BTCPay additional stores and retail locations.",
+    "BTCPay's public user guide documents Bitcoin wallet choice and invoice status; Square's Bitcoin claims use a Lightning rail and Square custody/settlement options. Never import the custodial Square mechanism or gift-card refund rule into an OpenBMT Bitcoin capability claim.",
+    "Cash drawer session tracking, cash drawer movement entry, deposits, shift review, close-of-day reporting and Bitcoin wallet payouts are separate merchant jobs. A generic cash-closeout or payout key would erase material workflow differences.",
+    "Reporting claims are especially broad in some bundles. BTCPay-C018, Shopify-SHO-C014, Square-SQO-C011/SQO-C012 and Toast-TOO-C027/TOO-C028/TOO-C036 bundle multiple metrics, delivery modes or scope rules; preserve those distinctions or split claims before claiming report parity.",
+    "Customer profiles, consent, card-name recognition, automatic guest data capture, loyalty status, loyalty rewards and subscription access must remain separate concepts because their triggers, data, consent, custody and customer outcomes differ.",
+    "The current scan included every vendor JSON present during this review, including Shopify and Toast operation bundles. If a vendor bundle changes after this review, rerun normalization for that bundle before final integration."
+  ]
+}

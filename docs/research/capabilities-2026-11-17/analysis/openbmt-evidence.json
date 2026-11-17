@@ -1,0 +1,902 @@
+{
+  "schema": "openbmt-current-evidence-v1",
+  "source_commit": "ff831bd4dc1e7082877e067b5a893e880ebfa920",
+  "as_of": "2026-11-17",
+  "entries": [
+    {
+      "id": "OBM-E001",
+      "canonical_keys": [
+        "checkout.sale.create"
+      ],
+      "category": "checkout",
+      "capability": "Create sale with fixed amount and optional immutable item lines",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "apps/checkout-android/src/android/CheckoutActivity.kt"
+      ],
+      "evidence_notes": "createSale validates positive integer amount/currency and stores item snapshots; UI exposes two sample USD items and manual amount entry.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "No configurable product catalog, sale revisions, or full canonical basket contract."
+    },
+    {
+      "id": "OBM-E002",
+      "canonical_keys": [
+        "checkout.cart.sample_items"
+      ],
+      "category": "catalog",
+      "capability": "Select quantity for two sample products",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/android/CheckoutActivity.kt",
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md"
+      ],
+      "evidence_notes": "UI has two hard-coded sample items and basket review. Plan explicitly calls these a two-item sample cart.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "No catalog CRUD, inventory linkage, product import, modifiers, tax, discount, or tip."
+    },
+    {
+      "id": "OBM-E003",
+      "canonical_keys": [
+        "checkout.cart.exact_total"
+      ],
+      "category": "pricing",
+      "capability": "Compute sample basket totals using integer minor units",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/android/CheckoutActivity.kt",
+        "apps/checkout-android/src/model/CheckoutLedger.kt"
+      ],
+      "evidence_notes": "Basket multiplication and aggregation use exact integer operations; ledger checks item total equals sale total.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "No configurable tax, discounts, tips, or immutable quote terms."
+    },
+    {
+      "id": "OBM-E004",
+      "canonical_keys": [
+        "checkout.pricing.usd_quote"
+      ],
+      "category": "pricing",
+      "capability": "Convert USD amount to sats using fixed developer quote",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/android/CheckoutActivity.kt",
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md"
+      ],
+      "evidence_notes": "Checkout code uses fixed REGTEST_USD_MINOR_PER_BTC; app calls it fixed developer test data.",
+      "workflow_scope": "Regtest test checkout",
+      "limitations": "No live pricing source or production quote/expiry guarantee."
+    },
+    {
+      "id": "OBM-E005",
+      "canonical_keys": [
+        "checkout.pricing.fx_rates"
+      ],
+      "category": "pricing",
+      "capability": "Fetch and apply live market rates in standalone checkout",
+      "status": "not_demonstrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/android/CheckoutActivity.kt",
+        "crates/openbmt-rates/src/lib.rs"
+      ],
+      "evidence_notes": "Reviewed checkout uses fixed test quote, while rates crate supplies rate primitives/providers.",
+      "workflow_scope": "Standalone checkout vs shared rates engine",
+      "limitations": "No inspected integration of live rate source into checkout."
+    },
+    {
+      "id": "OBM-E006",
+      "canonical_keys": [
+        "checkout.sale.snapshot_items"
+      ],
+      "category": "checkout",
+      "capability": "Persist immutable item name, unit amount, and quantity snapshots",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt"
+      ],
+      "evidence_notes": "SaleItem is snapshotted and sale creation verifies its item total.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "Tax, modifiers, discounts, and price-history contract are absent from this snapshot."
+    },
+    {
+      "id": "OBM-E007",
+      "canonical_keys": [
+        "checkout.tender.bitcoin_attempt"
+      ],
+      "category": "payments",
+      "capability": "Persist Bitcoin attempt identity and quote/request reference before receiving",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "apps/checkout-android/src/android/CheckoutActivity.kt"
+      ],
+      "evidence_notes": "beginBitcoinAttempt records attempt ID, expected amount/sats, quote ID/time, and counter index before receiver invocation.",
+      "workflow_scope": "Regtest native checkout",
+      "limitations": "App is marked Regtest only; no mainnet or merchant shift validation."
+    },
+    {
+      "id": "OBM-E008",
+      "canonical_keys": [
+        "checkout.tender.bitcoin_observation"
+      ],
+      "category": "payments",
+      "capability": "Track partial, confirmed, reorged, late, and overpaid evidence",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "apps/checkout-android/src/android/CheckoutActivity.kt"
+      ],
+      "evidence_notes": "Ledger retains Bitcoin evidence and derives payment state; UI flags review/late conditions.",
+      "workflow_scope": "Regtest native checkout",
+      "limitations": "No mainnet validation; not equivalent to a production canonical commerce lifecycle."
+    },
+    {
+      "id": "OBM-E009",
+      "canonical_keys": [
+        "checkout.tender.card_attempt"
+      ],
+      "category": "payments",
+      "capability": "Persist stable provider id before invoking card SDK",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "apps/checkout-android/src/android/CardCheckoutBridge.kt",
+        "apps/checkout-android/square-sandbox/app/src/debug/kotlin/org/openbmt/checkout/square/SquareMpsBridge.kt"
+      ],
+      "evidence_notes": "Checkout ledger supports stable card provider identifiers; optional Square bridge is isolated in debug Sandbox module.",
+      "workflow_scope": "Optional Square virtual Sandbox",
+      "limitations": "Production eligibility, physical reader, country/account/device support unproven."
+    },
+    {
+      "id": "OBM-E010",
+      "canonical_keys": [
+        "checkout.tender.card_reconcile"
+      ],
+      "category": "payments",
+      "capability": "Represent card pending, approved, completed, canceled, failed and unknown outcomes",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "apps/checkout-android/square-sandbox/app/src/debug/kotlin/org/openbmt/checkout/square/SquareSandboxReconciliation.kt"
+      ],
+      "evidence_notes": "Card states and evidence are modeled; scoped Sandbox reconciliation code is present.",
+      "workflow_scope": "Optional Square Sandbox",
+      "limitations": "Does not establish production adapter reliability or production reconciliation."
+    },
+    {
+      "id": "OBM-E011",
+      "canonical_keys": [
+        "checkout.tender.cash_usd"
+      ],
+      "category": "cash",
+      "capability": "Record manually acknowledged USD cash amount applied",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "apps/checkout-android/src/android/CheckoutActivity.kt",
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md"
+      ],
+      "evidence_notes": "CashPayment stores applied/tendered/change values; UI asks cashier to confirm physical receipt.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "USD cash only; manual operator acknowledgment, no drawer verification."
+    },
+    {
+      "id": "OBM-E012",
+      "canonical_keys": [
+        "checkout.tender.cash_change"
+      ],
+      "category": "cash",
+      "capability": "Preview and record change due for cash tender",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "apps/checkout-android/src/android/CheckoutActivity.kt"
+      ],
+      "evidence_notes": "UI computes remaining amount and change; ledger validates cash tender and persists values.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "No drawer integration, cash count, or non-USD cash handling."
+    },
+    {
+      "id": "OBM-E013",
+      "canonical_keys": [
+        "checkout.tender.cash_journal"
+      ],
+      "category": "cash",
+      "capability": "Durably persist cash tender as part of local sale state",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md"
+      ],
+      "evidence_notes": "Cash mutation shares atomic local ledger writes and restart state; plan cites cash/restart checks.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "No opening float, cash-in/out, shift accounting, or cash refund support."
+    },
+    {
+      "id": "OBM-E014",
+      "canonical_keys": [
+        "checkout.tender.split"
+      ],
+      "category": "payments",
+      "capability": "Combine recorded cash with Bitcoin/card attempt amounts",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "apps/checkout-android/src/android/CheckoutActivity.kt"
+      ],
+      "evidence_notes": "Sale tracks remaining balance across tenders and UI offers cash/card actions for an unpaid remainder.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "Complex partial/unknown/refund and canonical sale reconciliation remain incomplete."
+    },
+    {
+      "id": "OBM-E015",
+      "canonical_keys": [
+        "checkout.events.local_epoch"
+      ],
+      "category": "integrations_api",
+      "capability": "Initialize local event epoch and snapshot current sales",
+      "status": "engine_primitive",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "docs/research/merchant-feature-benchmark-2026-11-16.md"
+      ],
+      "evidence_notes": "initializeEvents commits epoch and current sale versions; local event data is internal checkout ledger.",
+      "workflow_scope": "Local Android ledger",
+      "limitations": "Not a versioned merchant event API or owner Requests API."
+    },
+    {
+      "id": "OBM-E016",
+      "canonical_keys": [
+        "checkout.events.local_replay"
+      ],
+      "category": "integrations_api",
+      "capability": "Read local event pages with cursor, floor, and resync indication",
+      "status": "engine_primitive",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "docs/research/merchant-feature-benchmark-2026-11-16.md"
+      ],
+      "evidence_notes": "readEvents handles epoch mismatch/expired cursor with resyncRequired; benchmark notes bounded snapshot/replay.",
+      "workflow_scope": "Local Android ledger",
+      "limitations": "Bounded journal is not webhook delivery or external merchant integration contract."
+    },
+    {
+      "id": "OBM-E017",
+      "canonical_keys": [
+        "checkout.events.durable_atomic_write"
+      ],
+      "category": "offline_availability",
+      "capability": "Write ledger state atomically and detect uncertain outcomes",
+      "status": "engine_primitive",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt"
+      ],
+      "evidence_notes": "Nio storage writes temp file, forces contents, atomic-renames, then forces parent; uncertain outcome poisons/reloads state.",
+      "workflow_scope": "JVM/desktop storage implementation with Android adapter expected",
+      "limitations": "Does not establish Android power-loss behavior or full device recovery."
+    },
+    {
+      "id": "OBM-E018",
+      "canonical_keys": [
+        "checkout.sale.restart_recovery"
+      ],
+      "category": "offline_availability",
+      "capability": "Reload locally persisted sale state after restart",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "apps/checkout-android/tests/CheckoutLedgerTest.kt",
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md"
+      ],
+      "evidence_notes": "Ledger decodes durable local state; plan says Android restart/history checks passed.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "No Box/backup restore, device-loss recovery, or full physical merchant workflow."
+    },
+    {
+      "id": "OBM-E019",
+      "canonical_keys": [
+        "checkout.history.search"
+      ],
+      "category": "reporting",
+      "capability": "Search sale IDs and immutable item names",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutHistory.kt",
+        "apps/checkout-android/src/android/CheckoutActivity.kt"
+      ],
+      "evidence_notes": "searchSales filters query against sale ID/item names, sorted by time; native UI exposes Sales.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "No customer/order-reference search or broad audit attribution."
+    },
+    {
+      "id": "OBM-E020",
+      "canonical_keys": [
+        "checkout.history.tender_filter"
+      ],
+      "category": "reporting",
+      "capability": "Filter history by Bitcoin, card, or cash tender presence",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutHistory.kt",
+        "apps/checkout-android/src/android/CheckoutActivity.kt"
+      ],
+      "evidence_notes": "HistoryTender includes all three; matching reports recorded attempts/payment, not income.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "Presence is not final settlement or revenue report."
+    },
+    {
+      "id": "OBM-E021",
+      "canonical_keys": [
+        "checkout.history.status_filter"
+      ],
+      "category": "reporting",
+      "capability": "Filter paid, unpaid, or owner-review sales",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutHistory.kt"
+      ],
+      "evidence_notes": "Status filter prioritizes requiresReview, then paid/unpaid.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "No advanced exception and fulfillment lifecycle reporting."
+    },
+    {
+      "id": "OBM-E022",
+      "canonical_keys": [
+        "checkout.history.date_filter"
+      ],
+      "category": "reporting",
+      "capability": "Filter sale history by inclusive/exclusive timestamps",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutHistory.kt",
+        "docs/research/merchant-feature-benchmark-2026-11-16.md"
+      ],
+      "evidence_notes": "History query supports fromInclusive/untilExclusive.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "No timezone/day-close report in this screen."
+    },
+    {
+      "id": "OBM-E023",
+      "canonical_keys": [
+        "checkout.receipt.projection"
+      ],
+      "category": "checkout",
+      "capability": "Create privacy-limited receipt projection from sale record",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutReceipt.kt",
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md"
+      ],
+      "evidence_notes": "Projection contains item/tender/refund and payment status facts; strips controls from names.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "Projection/test text only; not proof of issued receipt."
+    },
+    {
+      "id": "OBM-E024",
+      "canonical_keys": [
+        "checkout.receipt.text_export"
+      ],
+      "category": "checkout",
+      "capability": "Format stable plain text receipt for display/test",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutReceipt.kt",
+        "apps/checkout-android/src/android/CheckoutActivity.kt"
+      ],
+      "evidence_notes": "receiptText formats supported USD/SAT amounts using integer units; app renders receipt-like screen.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "No physical printing, email, or network delivery."
+    },
+    {
+      "id": "OBM-E025",
+      "canonical_keys": [
+        "checkout.refund.request_record"
+      ],
+      "category": "refunds",
+      "capability": "Record refund request against original payment attempt",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "apps/checkout-android/src/android/CheckoutActivity.kt"
+      ],
+      "evidence_notes": "App explicitly states recording request does not send Bitcoin or issue Square refund; ledger records request state.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "No customer claim-link/API flow, settlement, or provider refund invocation."
+    },
+    {
+      "id": "OBM-E026",
+      "canonical_keys": [
+        "checkout.refund.payment_evidence"
+      ],
+      "category": "refunds",
+      "capability": "Track externally paid refund evidence separately from request",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "apps/checkout-android/src/android/CheckoutActivity.kt"
+      ],
+      "evidence_notes": "RefundEvidence and refund state track paid minor/sats, pending, and actual paid values.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "External owner evidence input is not an automatic payout."
+    },
+    {
+      "id": "OBM-E027",
+      "canonical_keys": [
+        "refund.owner_counter_onchain"
+      ],
+      "category": "refunds",
+      "capability": "Create and authorize on-chain returns in legacy owner/counter flow",
+      "status": "scoped_workflow_verified",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "crates/openbmt-requests/src/returns.rs",
+        "crates/openbmt-owner/src",
+        "crates/openbmt-counter-node/src",
+        "docs/research/refund-e2e-core-2026-11-10.md"
+      ],
+      "evidence_notes": "Existing request/return and owner-counter flows include refund engine behavior with scoped E2E record.",
+      "workflow_scope": "Legacy owner/counter refund workflow",
+      "limitations": "Not integrated into standalone checkout claim-link or refund payout UI."
+    },
+    {
+      "id": "OBM-E028",
+      "canonical_keys": [
+        "checkout.refund.cash"
+      ],
+      "category": "refunds",
+      "capability": "Issue and reconcile a cash refund from standalone sale",
+      "status": "not_demonstrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md"
+      ],
+      "evidence_notes": "Standalone plan explicitly leaves cash refund support outside current cash implementation.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "No cash return operation evidenced in checkout ledger."
+    },
+    {
+      "id": "OBM-E029",
+      "canonical_keys": [
+        "requests.owner_ledger"
+      ],
+      "category": "payments",
+      "capability": "Store and query owner payment requests and associated facts",
+      "status": "engine_primitive",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "crates/openbmt-requests/src/ledger.rs",
+        "crates/openbmt-requests/src/model.rs",
+        "crates/openbmt-requests/src/list.rs",
+        "crates/openbmt-requests/src/returns.rs"
+      ],
+      "evidence_notes": "Shared Requests crate provides ledger, model/list and returns modules.",
+      "workflow_scope": "Legacy owner Requests engine",
+      "limitations": "Not the standalone checkout data model or a documented merchant API contract."
+    },
+    {
+      "id": "OBM-E030",
+      "canonical_keys": [
+        "requests.counter_records"
+      ],
+      "category": "payments",
+      "capability": "Maintain counter-side payment/request records",
+      "status": "engine_primitive",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "crates/openbmt-counter-node/src/node.rs",
+        "crates/openbmt-counter-node/src/node.rs",
+        "docs/research/counter-e2e-core-2026-11-10.md"
+      ],
+      "evidence_notes": "Counter node owns legacy request/payment records and has scoped counter E2E evidence.",
+      "workflow_scope": "Legacy counter app/node",
+      "limitations": "Does not establish standalone native checkout integration."
+    },
+    {
+      "id": "OBM-E031",
+      "canonical_keys": [
+        "checkout.inventory_adjustment"
+      ],
+      "category": "inventory",
+      "capability": "Reserve or decrement inventory once per sale",
+      "status": "not_demonstrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/android/CheckoutActivity.kt",
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md"
+      ],
+      "evidence_notes": "Reviewed native sale schema has no stock fields; plan lists inventory-once as remaining work.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "No inventory ledger or idempotent stock workflow demonstrated."
+    },
+    {
+      "id": "OBM-E032",
+      "canonical_keys": [
+        "checkout.catalog_configurable"
+      ],
+      "category": "catalog",
+      "capability": "Create/edit reusable products and catalog",
+      "status": "not_demonstrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/android/CheckoutActivity.kt",
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md"
+      ],
+      "evidence_notes": "UI labels sample catalog and says no provider catalog/inventory connected; plan identifies configurable catalog as backlog.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "Only sample products inspected; no CRUD workflow."
+    },
+    {
+      "id": "OBM-E033",
+      "canonical_keys": [
+        "checkout.pricing_tax"
+      ],
+      "category": "pricing",
+      "capability": "Configure or calculate sales tax",
+      "status": "not_demonstrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/android/CheckoutActivity.kt",
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md"
+      ],
+      "evidence_notes": "Native sale has amount/items without tax fields; plan leaves tax/modifier engine as remaining work.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "No tax workflow demonstrated."
+    },
+    {
+      "id": "OBM-E034",
+      "canonical_keys": [
+        "checkout.pricing_discount_tip"
+      ],
+      "category": "pricing",
+      "capability": "Apply discounts or tips to basket total",
+      "status": "not_demonstrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/android/CheckoutActivity.kt",
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md"
+      ],
+      "evidence_notes": "Reviewed cart model tracks product, unit price and quantity only; plan lists discounts/tips as backlog.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "No such checkout controls demonstrated."
+    },
+    {
+      "id": "OBM-E035",
+      "canonical_keys": [
+        "checkout.staff_roles"
+      ],
+      "category": "permissions",
+      "capability": "Authenticate cashier/manager/owner roles in checkout",
+      "status": "not_demonstrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "crates/openbmt-core/src/capabilities.rs",
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md"
+      ],
+      "evidence_notes": "Core capability type is verified metadata; plan says role screens and permission matrix remain backlog.",
+      "workflow_scope": "Shared metadata primitive vs standalone app",
+      "limitations": "Pure metadata is not authentication, staff screens, or enforcement."
+    },
+    {
+      "id": "OBM-E036",
+      "canonical_keys": [
+        "permissions.capability_metadata"
+      ],
+      "category": "permissions",
+      "capability": "Represent verified authorization, revocation, expiry and exact store/register scope",
+      "status": "engine_primitive",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "crates/openbmt-core/src/capabilities.rs",
+        "docs/research/merchant-feature-benchmark-2026-11-16.md"
+      ],
+      "evidence_notes": "Core capabilities model pure verified metadata scoped to store/register.",
+      "workflow_scope": "Shared engine primitive",
+      "limitations": "No authenticated transport, staff UI, or proof checkout actions enforce metadata."
+    },
+    {
+      "id": "OBM-E037",
+      "canonical_keys": [
+        "checkout.books_reconciliation_csv"
+      ],
+      "category": "reporting",
+      "capability": "Export guarded reconciliation CSV with satoshi amounts and timestamps",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "crates/openbmt-books/src",
+        "crates/openbmt-books/src/csv.rs",
+        "docs/research/merchant-feature-benchmark-2026-11-16.md"
+      ],
+      "evidence_notes": "Books reconciliation export records exact satoshi amounts/timestamps and requires payment-disclosure acknowledgment per implementation addendum.",
+      "workflow_scope": "Shared books engine/export",
+      "limitations": "Not complete accounting/day-close report; accountant export narrower."
+    },
+    {
+      "id": "OBM-E038",
+      "canonical_keys": [
+        "books.daily_totals"
+      ],
+      "category": "reporting",
+      "capability": "Aggregate book totals by UTC or local day",
+      "status": "engine_primitive",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "crates/openbmt-books/src/books.rs",
+        "crates/openbmt-books/src/model.rs"
+      ],
+      "evidence_notes": "Books supports UTC/local day totals, currency and tips fields.",
+      "workflow_scope": "Shared books engine",
+      "limitations": "Does not constitute standalone checkout closeout screen or cash reconciliation workflow."
+    },
+    {
+      "id": "OBM-E039",
+      "canonical_keys": [
+        "checkout.day_close"
+      ],
+      "category": "cash",
+      "capability": "Open/close shift, count drawer, and review discrepancy",
+      "status": "not_demonstrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md",
+        "apps/checkout-android/src/model/CheckoutLedger.kt"
+      ],
+      "evidence_notes": "Plan lists opening float, cash-in/out, count, close, discrepancy review as remaining.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "No shift accounting/day-close workflow demonstrated."
+    },
+    {
+      "id": "OBM-E040",
+      "canonical_keys": [
+        "checkout.peripherals"
+      ],
+      "category": "hardware",
+      "capability": "Support physical receipt printer, drawer, barcode scanner or display",
+      "status": "not_demonstrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md",
+        "apps/checkout-android/src/android/CheckoutActivity.kt"
+      ],
+      "evidence_notes": "Standalone plan requires a tested capability matrix; receipt code is projection only.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "No physical peripheral support evidenced in inspected files."
+    },
+    {
+      "id": "OBM-E041",
+      "canonical_keys": [
+        "checkout.square_sandbox"
+      ],
+      "category": "payments",
+      "capability": "Run optional Square Mobile Payments SDK virtual Sandbox flow",
+      "status": "prototype_integrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/square-sandbox/README.md",
+        "apps/checkout-android/square-sandbox/app/src/debug/kotlin/org/openbmt/checkout/square/SquareMpsBridge.kt",
+        "apps/checkout-android/square-sandbox/app/src/debug/kotlin/org/openbmt/checkout/square/SquareSandboxReconciliation.kt",
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md"
+      ],
+      "evidence_notes": "Sandbox module implements optional virtual card flow; documentation explicitly limits scope to Sandbox.",
+      "workflow_scope": "Square virtual Sandbox",
+      "limitations": "Not production card acceptance, reader validation, eligibility, or privacy approval."
+    },
+    {
+      "id": "OBM-E042",
+      "canonical_keys": [
+        "lightning.receive_invoice"
+      ],
+      "category": "lightning",
+      "capability": "Create/observe Lightning receiving requests using configured node engines",
+      "status": "engine_primitive",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "crates/openbmt-lightning/src/node.rs",
+        "crates/openbmt-lightning/src/invoice.rs",
+        "crates/openbmt-counter-node/src/lightning.rs"
+      ],
+      "evidence_notes": "Shared node/invoice types support Lightning receiving interfaces.",
+      "workflow_scope": "Lightning backend primitives",
+      "limitations": "Does not prove standalone checkout integration, funds/capacity readiness, or provider uptime."
+    },
+    {
+      "id": "OBM-E043",
+      "canonical_keys": [
+        "lightning.readiness_assessment"
+      ],
+      "category": "lightning",
+      "capability": "Assess point-in-time confirmed funding and strict/lazy queue status",
+      "status": "engine_primitive",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "crates/openbmt-counter-node/src/node.rs",
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md"
+      ],
+      "evidence_notes": "Node::receiving_assessment reports current confirmed-funding and strict/lazy-queue status.",
+      "workflow_scope": "Counter node receiving assessment",
+      "limitations": "Assessment is not a route or capacity guarantee and not all receiver readiness."
+    },
+    {
+      "id": "OBM-E044",
+      "canonical_keys": [
+        "lightning.funding_gate"
+      ],
+      "category": "lightning",
+      "capability": "Require confirmed funding before selected receiving mode",
+      "status": "scoped_workflow_verified",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "crates/openbmt-counter-node/src/node.rs",
+        "crates/openbmt-counter-node/src/tests/lightning.rs",
+        "docs/research/merchant-feature-benchmark-2026-11-16.md"
+      ],
+      "evidence_notes": "Funding gate exists in configured Lightning flows and specific tested paths.",
+      "workflow_scope": "Scoped configured Lightning receiver modes",
+      "limitations": "Does not establish every receiver mode, route, liquidity, backup freshness, or independent exit readiness."
+    },
+    {
+      "id": "OBM-E045",
+      "canonical_keys": [
+        "onchain.utxo_advisory"
+      ],
+      "category": "onchain_operations",
+      "capability": "Estimate UTXO spend/consolidation costs and report threshold advisories",
+      "status": "engine_primitive",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "crates/openbmt-spend/src/maintenance.rs",
+        "crates/openbmt-spend/src/plan.rs",
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md"
+      ],
+      "evidence_notes": "Maintenance advisory estimates fees and identifies uneconomic outputs; explicitly advisory.",
+      "workflow_scope": "Shared spend engine",
+      "limitations": "No automatic coin selection, consolidation, transaction signing, or execution."
+    },
+    {
+      "id": "OBM-E046",
+      "canonical_keys": [
+        "onchain.payment_plan"
+      ],
+      "category": "onchain_operations",
+      "capability": "Plan transaction inputs, outputs, fees, and change for owner spending",
+      "status": "engine_primitive",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "crates/openbmt-spend/src/plan.rs",
+        "crates/openbmt-spend/src/finalize.rs"
+      ],
+      "evidence_notes": "Spend crate plans and validates transactions for explicit wallet requests.",
+      "workflow_scope": "Owner wallet spending engine",
+      "limitations": "Not checkout receive automation or autonomous UTXO maintenance."
+    },
+    {
+      "id": "OBM-E047",
+      "canonical_keys": [
+        "backup.box_backup"
+      ],
+      "category": "backup_recovery",
+      "capability": "Create/restore Box-based wallet backup artifacts in legacy owner/counter workflow",
+      "status": "scoped_workflow_verified",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "crates/openbmt-box/src",
+        "crates/openbmt-owner/src",
+        "crates/openbmt-counter-node/src",
+        "docs/research/restore-drill-core-2026-11-09.md",
+        "docs/research/box-e2e-2026-11-10.md"
+      ],
+      "evidence_notes": "Box packaging and legacy owner/counter backup/restore workflows have scoped evidence.",
+      "workflow_scope": "Legacy wallet backup workflow",
+      "limitations": "Does not establish standalone checkout ledger backups, device-loss recovery, or Lightning channel-state recovery."
+    },
+    {
+      "id": "OBM-E048",
+      "canonical_keys": [
+        "backup.checkout_restore"
+      ],
+      "category": "backup_recovery",
+      "capability": "Restore standalone checkout ledger after loss or stale backup",
+      "status": "not_demonstrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "apps/checkout-android/res/xml/backup_rules.xml",
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md"
+      ],
+      "evidence_notes": "Checkout ledger is local; plan says Box/device-loss recovery remains incomplete.",
+      "workflow_scope": "Standalone Android prototype",
+      "limitations": "Android backup rules and local ledger persistence do not prove tested restore drill."
+    },
+    {
+      "id": "OBM-E049",
+      "canonical_keys": [
+        "integrations.owner_webhooks"
+      ],
+      "category": "integrations_api",
+      "capability": "Publish merchant webhooks from owner request or local events",
+      "status": "not_demonstrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "crates/openbmt-requests/src/lib.rs",
+        "apps/checkout-android/src/model/CheckoutLedger.kt",
+        "docs/research/merchant-feature-benchmark-2026-11-16.md"
+      ],
+      "evidence_notes": "Benchmark explicitly treats outward webhooks as optional adapter; inspected checkout events are local ledger only.",
+      "workflow_scope": "No webhook path identified in inspected scope",
+      "limitations": "No delivery/retry/signing endpoint established."
+    },
+    {
+      "id": "OBM-E050",
+      "canonical_keys": [
+        "checkout.online_unattended"
+      ],
+      "category": "online_invoices",
+      "capability": "Operate hosted/online unattended checkout workflow",
+      "status": "not_demonstrated",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md",
+        "docs/research/merchant-feature-benchmark-2026-11-16.md"
+      ],
+      "evidence_notes": "Plan defines standalone retail product first; online/unattended workflows are separately deferred.",
+      "workflow_scope": "Standalone retail scope",
+      "limitations": "No public listener or hosted checkout workflow demonstrated."
+    },
+    {
+      "id": "OBM-E051",
+      "canonical_keys": [
+        "pos.legacy_integrations"
+      ],
+      "category": "integrations_api",
+      "capability": "Connect existing POS vendors to OpenBMT payment operations",
+      "status": "scoped_workflow_verified",
+      "evidence_access": "repository_code_and_docs",
+      "paths": [
+        "integrations/woocommerce/openbmt-pay/README.md",
+        "integrations/odoo/pos_openbmt/README.md",
+        "docs/research/standalone-pos-delivery-plan-2026-11-16.md"
+      ],
+      "evidence_notes": "Existing WooCommerce and Odoo integration code and historical scoped test documentation exist. Odoo README describes Odoo 18.0 Community tests with a stand-in Box; WooCommerce standalone/E2E documentation describes WordPress stand-ins. Plan defers broader POS adapters until standalone shift gates.",
+      "workflow_scope": "Specific existing integrations",
+      "limitations": "Specific historical adapter scope with stand-ins, not live multi-vendor/merchant/hardware validation, universal POS parity, or proof of multi-location operations."
+    }
+  ],
+  "unassessed_domains": [
+    "Detailed pricing/plan/country coverage of third-party card providers",
+    "Full physical-device and merchant-shift validation",
+    "Every historical owner/counter workflow beyond the cited scoped E2E artifacts",
+    "Full backup/restore behavior under device loss and Lightning channel recovery",
+    "External integration protocol coverage beyond inspected WooCommerce and Odoo artifacts",
+    "Production/mainnet readiness and real-funds approval"
+  ]
+}

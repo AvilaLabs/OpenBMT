@@ -1,0 +1,1270 @@
+{
+  "schema": "openbmt-capability-research-bundle-v1",
+  "as_of": "2026-11-17",
+  "vendor": "bitcoin_native_requirements",
+  "segment": "merchant Bitcoin jobs beyond conventional POS",
+  "scope": {
+    "purpose": "Atomic merchant requirements derived from Bitcoin protocol and selected official implementation documentation, as a standalone native acceptance design input; this is a separate-origin requirements bundle, not a competitor parity claim.",
+    "basis": "Research/planning only. Protocol capabilities and documented mechanics identify merchant jobs, risks, candidate improvements, measurable proof, and limits. They do not establish OpenBMT implementation or compatibility.",
+    "product_boundaries": [
+      "Follow docs/research/standalone-pos-delivery-plan-2026-11-16.md: merchant-controlled on-chain receiving; Lightning separate and gated by capacity, funding, availability and recovery.",
+      "Preserve local hot start or independently created cold wallet, public-only pairing, verification on wallet display, owner-approved transfer, issued-address/late-payment tracking, and independent recovery.",
+      "Do not alter current signing behavior, imply hard maximum-loss guarantee, require custody or fiat conversion, add settlement network, or imply provider permission for recovery.",
+      "Distinguish key ownership from live Lightning channel-state independence; never describe liquidity as free or prepaid without evidence.",
+      "No code, implementation, tests/builds, accounts, network mutations, or third-party contact were performed."
+    ],
+    "evidence_limit": "Sources are official protocol specifications, official software documentation, or an official device-format source. Functional paraphrases only. Documentation is not tested compatibility; unknowns are retained."
+  },
+  "sources": [
+    {
+      "id": "BTC-S001",
+      "url": "https://github.com/bitcoin/bips/blob/master/bip-0321.mediawiki",
+      "title": "BIP 321: URI Scheme",
+      "section": "Specification, compatibility, user authorization",
+      "accessed": "2026-11-17",
+      "qualifiers": "Bitcoin BIPs repository; current page inspected 2026-11-17.",
+      "evidence_note": "BIP proposes modern Bitcoin payment instruction URIs; receiving software still requires user authorization. Replaces/supersedes BIP 21 context."
+    },
+    {
+      "id": "BTC-S002",
+      "url": "https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki",
+      "title": "BIP 32: Hierarchical Deterministic Wallets",
+      "section": "Abstract and specification",
+      "accessed": "2026-11-17",
+      "qualifiers": "Bitcoin BIPs repository; current page inspected 2026-11-17.",
+      "evidence_note": "HD wallet trees permit sharing public derivation capability without sharing spending private keys, but do not themselves define all wallet policies or operational security."
+    },
+    {
+      "id": "BTC-S003",
+      "url": "https://github.com/bitcoin/bitcoin/blob/master/doc/policy/mempool-replacements.md",
+      "title": "Bitcoin Core: Mempool Replacements",
+      "section": "Current Replace-by-Fee Policy",
+      "accessed": "2026-11-17",
+      "qualifiers": "Bitcoin Core repository; current policy document inspected 2026-11-17; local node policy may differ.",
+      "evidence_note": "Mempool replacement behavior is relay policy, separate from consensus confirmation; a seen transaction can be replaced subject to node policy."
+    },
+    {
+      "id": "BTC-S004",
+      "url": "https://github.com/bitcoin/bitcoin/blob/master/src/wallet/rpc/spend.cpp",
+      "title": "Bitcoin Core wallet spend RPC",
+      "section": "fee_rate, conf_target, replaceable options",
+      "accessed": "2026-11-17",
+      "qualifiers": "Bitcoin Core master source inspected 2026-11-17; option details may change between releases.",
+      "evidence_note": "Wallet spending exposes fee rate and confirmation target choices, demonstrating fee and timing tradeoffs; this is a software interface reference, not a claim about merchant receive requirements."
+    },
+    {
+      "id": "BTC-S005",
+      "url": "https://github.com/lightning/bolts/blob/master/02-peer-protocol.md",
+      "title": "BOLT 2: Peer Protocol for Channel Management",
+      "section": "Channel operation, persistence/reconnection, closing",
+      "accessed": "2026-11-17",
+      "qualifiers": "Lightning BOLTs repository current master inspected 2026-11-17; implementation/version-dependent.",
+      "evidence_note": "Lightning channels have evolving protocol state, coordinated updates, and cooperative or unilateral closing behavior; stale or lost state is safety critical."
+    },
+    {
+      "id": "BTC-S006",
+      "url": "https://github.com/lightning/bolts/blob/master/03-transactions.md",
+      "title": "BOLT 3: Bitcoin Transaction and Script Formats",
+      "section": "Channel funding and commitment transactions",
+      "accessed": "2026-11-17",
+      "qualifiers": "Lightning BOLTs repository current master inspected 2026-11-17.",
+      "evidence_note": "Lightning channels are funded by on-chain transactions and rely on commitment transaction scripts and timelocks."
+    },
+    {
+      "id": "BTC-S007",
+      "url": "https://github.com/lightning/bolts/blob/master/05-onchain.md",
+      "title": "BOLT 5: Recommendations for On-chain Transaction Handling",
+      "section": "On-chain handling and resolution",
+      "accessed": "2026-11-17",
+      "qualifiers": "Lightning BOLTs repository current master inspected 2026-11-17.",
+      "evidence_note": "Channel failure can require on-chain handling and output sweeping; resolution is not equivalent to immediate wallet availability."
+    },
+    {
+      "id": "BTC-S008",
+      "url": "https://github.com/lightning/bolts/blob/master/07-routing-gossip.md",
+      "title": "BOLT 7: P2P Node and Channel Discovery",
+      "section": "Channel discovery, updates, fees, confirmation",
+      "accessed": "2026-11-17",
+      "qualifiers": "Lightning BOLTs repository current master inspected 2026-11-17; public routing data is not a route guarantee.",
+      "evidence_note": "Routing view is derived from distributed announcements and updates; announced channels need confirmation depth and advertised fee/expiry parameters."
+    },
+    {
+      "id": "BTC-S009",
+      "url": "https://github.com/lightning/bolts/blob/master/11-payment-encoding.md",
+      "title": "BOLT 11: Invoice Protocol for Lightning Payments",
+      "section": "Encoding, amount, QR codes, payer/payee requirements",
+      "accessed": "2026-11-17",
+      "qualifiers": "Lightning BOLTs repository current master inspected 2026-11-17.",
+      "evidence_note": "Invoices encode payment requests in a QR-friendly format; amount may be absent, and invoice validity and payment are separate operations."
+    },
+    {
+      "id": "BTC-S010",
+      "url": "https://github.com/lightning/bolts/blob/master/04-onion-routing.md",
+      "title": "BOLT 4: Onion Routing Protocol",
+      "section": "HTLC routing and errors",
+      "accessed": "2026-11-17",
+      "qualifiers": "Lightning BOLTs repository current master inspected 2026-11-17.",
+      "evidence_note": "Lightning payments traverse hops using conditional payments and may fail with encrypted routing errors; failure is a normal operational case."
+    },
+    {
+      "id": "BTC-S011",
+      "url": "https://crates.io/crates/lightning/0.2.8",
+      "title": "LDK rust-lightning 0.2.8 source package",
+      "section": "src/ln/channelmanager.rs: ChannelManager vs ChannelMonitor; initialization and persistence",
+      "accessed": "2026-11-17",
+      "qualifiers": "Cargo.lock pins lightning 0.2.8; matching published crate source inspected locally at .cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lightning-0.2.8/src/ln/channelmanager.rs. docs.rs page was not remotely verified.",
+      "evidence_note": "The source distinguishes off-chain ChannelManager state from on-chain ChannelMonitor enforcement and requires persisted monitors and chain catch-up during restart. This is LDK library behavior, not product deployment proof."
+    },
+    {
+      "id": "BTC-S012",
+      "url": "https://github.com/lightningnetwork/lnd/blob/master/docs/recovery.md",
+      "title": "LND: Recovery",
+      "section": "Recovering using static channel backups",
+      "accessed": "2026-11-17",
+      "qualifiers": "Lightning Labs LND official repository current master inspected 2026-11-17; LND-specific comparator, not generic guarantee.",
+      "evidence_note": "LND recovery describes channel backup restoration as a recovery path involving peers and channel closure, not restoration of a live identical channel state."
+    },
+    {
+      "id": "BTC-S013",
+      "url": "https://nfc-forum.org/uploads/specifications/NFCForum-AD-CPUX-1.1.pdf",
+      "title": "NFC Forum: Introduction to NFC Forum Tags",
+      "section": "NDEF and URI record references",
+      "accessed": "2026-11-17",
+      "qualifiers": "NFC Forum document inspected 2026-11-17; device/app interoperability remains to be tested.",
+      "evidence_note": "NDEF can encode URI records; this source establishes a carrier format, not that a phone opens a payment app or that a Bitcoin payment URI will work cross-device."
+    },
+    {
+      "id": "BTC-S014",
+      "url": "https://github.com/bitcoin/bips/blob/master/bip-0125.mediawiki",
+      "title": "BIP 125: Opt-in Full Replace-by-Fee Signaling",
+      "section": "Abstract and policy",
+      "accessed": "2026-11-17",
+      "qualifiers": "Bitcoin BIPs repository inspected 2026-11-17; use Core current policy source for current behavior.",
+      "evidence_note": "Recipients may defer treating an unconfirmed replaceable transaction as payment; BIP 125 is policy background and current node policies may differ."
+    },
+    {
+      "id": "BTC-S015",
+      "url": "https://bitcoincore.org/en/doc/24.0.0/rpc/wallet/walletcreatefundedpsbt/",
+      "title": "Bitcoin Core walletcreatefundedpsbt RPC",
+      "section": "feeRate, lockUnspents, selected inputs and change outputs",
+      "accessed": "2026-11-17",
+      "qualifiers": "Bitcoin Core 24.0.0 official RPC reference; feature details are version-specific and this is a narrow wallet comparator.",
+      "evidence_note": "Wallet RPC exposes fee-rate selection and optional locking of selected unspent outputs, supporting explicit review and reservation requirements."
+    },
+    {
+      "id": "BTC-S016",
+      "url": "https://github.com/bitcoin/bitcoin/blob/master/src/wallet/wallet.h",
+      "title": "Bitcoin Core wallet data model",
+      "section": "avoid_reuse and previously_spent",
+      "accessed": "2026-11-17",
+      "qualifiers": "Bitcoin Core current master source inspected 2026-11-17; not a universal wallet mandate.",
+      "evidence_note": "Wallet source describes avoid_reuse as a privacy measure to avoid creating transactions that spend from the same addresses."
+    }
+  ],
+  "coverage": [
+    {
+      "id": "BTC-U001",
+      "topic": "Bitcoin receiving authority, HD public derivation, address rotation",
+      "url": "https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki",
+      "status": "reviewed",
+      "reason": "Used as a narrow protocol basis for public-only derivation and independent key authority; does not specify full merchant backup or POS.",
+      "source_ids": [
+        "BTC-S002"
+      ],
+      "claim_ids": [
+        "BTC-C001",
+        "BTC-C002",
+        "BTC-C003",
+        "BTC-C013"
+      ]
+    },
+    {
+      "id": "BTC-U002",
+      "topic": "Bitcoin URI and QR payment instructions",
+      "url": "https://github.com/bitcoin/bips/blob/master/bip-0321.mediawiki",
+      "status": "reviewed",
+      "reason": "BIP 321 current proposal inspected; BIP 21 is superseded context. QR wallet interoperability is not inferred.",
+      "source_ids": [
+        "BTC-S001",
+        "BTC-S009"
+      ],
+      "claim_ids": [
+        "BTC-C005",
+        "BTC-C009",
+        "BTC-C011",
+        "BTC-C023"
+      ]
+    },
+    {
+      "id": "BTC-U003",
+      "topic": "Mempool replacement and confirmation state",
+      "url": "https://github.com/bitcoin/bitcoin/blob/master/doc/policy/mempool-replacements.md",
+      "status": "reviewed",
+      "reason": "Current Bitcoin Core policy source plus BIP 125 background; policy is not consensus and third-party node policies vary.",
+      "source_ids": [
+        "BTC-S003",
+        "BTC-S014"
+      ],
+      "claim_ids": [
+        "BTC-C004",
+        "BTC-C008"
+      ]
+    },
+    {
+      "id": "BTC-U004",
+      "topic": "Fee and UTXO spending economics",
+      "url": "https://github.com/bitcoin/bitcoin/blob/master/src/wallet/rpc/spend.cpp",
+      "status": "reviewed",
+      "reason": "RPC interface used only to ground configurable fee/confirmation tradeoffs; no universal fee estimate or merchant outcome claimed.",
+      "source_ids": [
+        "BTC-S004"
+      ],
+      "claim_ids": [
+        "BTC-C007",
+        "BTC-C008"
+      ]
+    },
+    {
+      "id": "BTC-U005",
+      "topic": "Lightning channels, funding, close, and on-chain resolution",
+      "url": "https://github.com/lightning/bolts/blob/master/02-peer-protocol.md",
+      "status": "reviewed",
+      "reason": "BOLT 2/3/5 protocol documents reviewed for channel state, funding and exit boundaries; exact implementation operation remains unverified.",
+      "source_ids": [
+        "BTC-S005",
+        "BTC-S006",
+        "BTC-S007"
+      ],
+      "claim_ids": [
+        "BTC-C014",
+        "BTC-C015",
+        "BTC-C019",
+        "BTC-C020",
+        "BTC-C021",
+        "BTC-C022"
+      ]
+    },
+    {
+      "id": "BTC-U006",
+      "topic": "Lightning discovery, routing, capacity and fees",
+      "url": "https://github.com/lightning/bolts/blob/master/07-routing-gossip.md",
+      "status": "reviewed",
+      "reason": "Protocol supports dynamic network view and advertised forwarding fees; no route/capacity guarantee or live network measurement.",
+      "source_ids": [
+        "BTC-S008",
+        "BTC-S010"
+      ],
+      "claim_ids": [
+        "BTC-C014",
+        "BTC-C016",
+        "BTC-C018",
+        "BTC-C022"
+      ]
+    },
+    {
+      "id": "BTC-U007",
+      "topic": "Lightning invoice encoding and MPP support",
+      "url": "https://github.com/lightning/bolts/blob/master/11-payment-encoding.md",
+      "status": "reviewed",
+      "reason": "BOLT 11 invoice encoding inspected; multipart receiver compatibility is unresolved for selected product implementation.",
+      "source_ids": [
+        "BTC-S009",
+        "BTC-S010"
+      ],
+      "claim_ids": [
+        "BTC-C016",
+        "BTC-C017",
+        "BTC-C023"
+      ]
+    },
+    {
+      "id": "BTC-U008",
+      "topic": "LDK persistence requirements at pinned release",
+      "url": "https://docs.rs/crate/lightning/0.2.8/source/src/ln/channelmanager.rs",
+      "status": "reviewed",
+      "reason": "Inspected pinned LDK 0.2.8 rustdoc narrowly as implementation comparator; not an endorsement or proof OpenBMT uses this component in a shipping node.",
+      "source_ids": [
+        "BTC-S011"
+      ],
+      "claim_ids": [
+        "BTC-C019"
+      ]
+    },
+    {
+      "id": "BTC-U009",
+      "topic": "LND recovery comparator",
+      "url": "https://github.com/lightningnetwork/lnd/blob/master/docs/recovery.md",
+      "status": "reviewed",
+      "reason": "LND-specific static channel backup recovery reviewed to distinguish recovery/closure from restoring a live identical state.",
+      "source_ids": [
+        "BTC-S012"
+      ],
+      "claim_ids": [
+        "BTC-C019",
+        "BTC-C020",
+        "BTC-C021"
+      ]
+    },
+    {
+      "id": "BTC-U010",
+      "topic": "NFC URI data carrier",
+      "url": "https://nfc-forum.org/uploads/specifications/NFCForum-AD-CPUX-1.1.pdf",
+      "status": "reviewed",
+      "reason": "NDEF URI record support reviewed; exact NFC Forum RTD specification and cross-device Bitcoin app behavior not validated.",
+      "source_ids": [
+        "BTC-S013"
+      ],
+      "claim_ids": [
+        "BTC-C010"
+      ]
+    },
+    {
+      "id": "BTC-U011",
+      "topic": "Cold-wallet vendor manuals and device-specific wallet behavior",
+      "url": "",
+      "status": "excluded",
+      "reason": "No specific merchant target wallet or device was assigned; BIP public derivation standards were used instead. Compatibility and display verification must be tested per named device.",
+      "source_ids": [],
+      "claim_ids": [
+        "BTC-C001",
+        "BTC-C003",
+        "BTC-C009",
+        "BTC-C023"
+      ]
+    },
+    {
+      "id": "BTC-U012",
+      "topic": "Live routing, channel liquidity, fees, and provider availability",
+      "url": "",
+      "status": "excluded",
+      "reason": "No live network queries, provider contact, quote gathering, or account mutation authorized; claims remain conditional and no capacity/route availability is inferred.",
+      "source_ids": [],
+      "claim_ids": [
+        "BTC-C014",
+        "BTC-C015",
+        "BTC-C016",
+        "BTC-C022"
+      ]
+    },
+    {
+      "id": "BTC-U013",
+      "topic": "NFC wallet app launch and end-to-end payment compatibility",
+      "url": "",
+      "status": "reviewed",
+      "reason": "NFC record-carrier semantics were reviewed. Product viability remains unknown until named OS, app routing, phone and NFC reader combinations are tested.",
+      "source_ids": [
+        "BTC-S013"
+      ],
+      "claim_ids": [
+        "BTC-C010"
+      ]
+    },
+    {
+      "id": "BTC-U014",
+      "topic": "OpenBMT shipping Lightning implementation, MPP compatibility, and safe recovery",
+      "url": "",
+      "status": "reviewed",
+      "reason": "BOLTs and pinned LDK 0.2.8 source were reviewed for channel-state/persistence mechanics. Whether the target OpenBMT workflow safely supports MPP, backup restore and exit remains unknown pending product-level validation.",
+      "source_ids": [
+        "BTC-S005",
+        "BTC-S009",
+        "BTC-S011"
+      ],
+      "claim_ids": [
+        "BTC-C017",
+        "BTC-C019",
+        "BTC-C021"
+      ]
+    },
+    {
+      "id": "BTC-U015",
+      "topic": "Lightning inbound liquidity acquisition cost and provider terms",
+      "url": "",
+      "status": "unresolved",
+      "reason": "No current provider/counterparty term sheet, fee quote, or live inbound-liquidity evidence was reviewed. Protocol materials do not establish service price or availability; assess only a named option before relying on it.",
+      "source_ids": [
+        "BTC-S006",
+        "BTC-S008"
+      ],
+      "claim_ids": [
+        "BTC-C022"
+      ]
+    },
+    {
+      "id": "BTC-U016",
+      "topic": "Bitcoin transaction fees, merchant confirmation threshold and reorg risk policy",
+      "url": "",
+      "status": "unresolved",
+      "reason": "Protocol/Core policy sources were reviewed, but no merchant-specific confirmation threshold, fee budget, chain conditions, or reorg risk policy is set. These require a product decision and measured acceptance evidence.",
+      "source_ids": [
+        "BTC-S003",
+        "BTC-S004"
+      ],
+      "claim_ids": [
+        "BTC-C004",
+        "BTC-C007",
+        "BTC-C008"
+      ]
+    },
+    {
+      "id": "BTC-U017",
+      "topic": "URI required parameters, network markers and wallet authorization",
+      "url": "https://github.com/bitcoin/bips/blob/master/bip-0321.mediawiki",
+      "status": "reviewed",
+      "reason": "BIP 321 grammar, required parameters, network-specific address syntax and wallet authorization were inspected. Supported wallet/version behavior remains a product test question.",
+      "source_ids": [
+        "BTC-S001"
+      ],
+      "claim_ids": [
+        "BTC-C009",
+        "BTC-C024",
+        "BTC-C025"
+      ]
+    },
+    {
+      "id": "BTC-U018",
+      "topic": "Bitcoin Core fee budget, UTXO input reservation and address reuse controls",
+      "url": "https://bitcoincore.org/en/doc/24.0.0/rpc/wallet/walletcreatefundedpsbt/",
+      "status": "reviewed",
+      "reason": "Bitcoin Core RPC and wallet source inspected as narrow implementation comparators; OpenBMT behavior is not inferred.",
+      "source_ids": [
+        "BTC-S015",
+        "BTC-S016"
+      ],
+      "claim_ids": [
+        "BTC-C007",
+        "BTC-C008",
+        "BTC-C027",
+        "BTC-C028",
+        "BTC-C032"
+      ]
+    },
+    {
+      "id": "BTC-U019",
+      "topic": "Refund destination validation",
+      "url": "https://github.com/bitcoin/bips/blob/master/bip-0321.mediawiki",
+      "status": "reviewed",
+      "reason": "URI/network request protocol was reviewed; merchant refund destination confirmation is a separately derived workflow requirement because inspected payment URI specs do not define a refund workflow.",
+      "source_ids": [
+        "BTC-S001",
+        "BTC-S004"
+      ],
+      "claim_ids": [
+        "BTC-C026"
+      ]
+    },
+    {
+      "id": "BTC-U020",
+      "topic": "Late address monitoring and recovery window",
+      "url": "https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki",
+      "status": "reviewed",
+      "reason": "HD derivation source reviewed; ongoing scan/retention behavior is an application requirement and needs product acceptance evidence.",
+      "source_ids": [
+        "BTC-S002"
+      ],
+      "claim_ids": [
+        "BTC-C005",
+        "BTC-C029"
+      ]
+    },
+    {
+      "id": "BTC-U021",
+      "topic": "Lightning unilateral close, force-close delay and sweep dependencies",
+      "url": "https://github.com/lightning/bolts/blob/master/03-transactions.md",
+      "status": "reviewed",
+      "reason": "BOLT transaction scripts, on-chain handling, pinned LDK source and LND recovery comparator reviewed; target product exit timing and fee outcomes remain unknown until exercised.",
+      "source_ids": [
+        "BTC-S005",
+        "BTC-S006",
+        "BTC-S007",
+        "BTC-S011",
+        "BTC-S012"
+      ],
+      "claim_ids": [
+        "BTC-C019",
+        "BTC-C020",
+        "BTC-C030"
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "BTC-C001",
+      "canonical_key": "onchain.receive.authority",
+      "category": "onchain_operations",
+      "capability": "Receive to merchant-controlled keys",
+      "merchant_outcome": "Funds are received to keys the merchant controls and can recover independently.",
+      "actor": "Owner",
+      "trigger": "Wallet setup or address issuance",
+      "behavior": "Choose local hot start or independently created cold wallet; pair public-only receive information; verify each displayed address on the wallet’s own trusted display.",
+      "preconditions": "Compatible wallet backup and address derivation are configured.",
+      "qualifiers": "Existing plan accepts these authority modes; current signing behavior is unchanged; no custody or company recovery authority is added.",
+      "recovery_edge_cases": "Lost checkout device must not lose merchant spending authority; recovery procedure is documented and independently exercised.",
+      "source_ids": [
+        "BTC-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Make authority state and the exact public descriptor/address derivation visible, with a recovery artifact check before accepting funds.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Merchant key control can remove dependence on an account provider to authorize receipt or recovery; prove by restore without a company service.",
+      "bitcoin_tradeoffs": "Self-custody shifts key protection and recovery burden to the merchant; public-only pairing does not guarantee recovery by itself.",
+      "acceptance_test": "Recover a test wallet from its merchant-held backup on a clean device and verify derived address matches; no private key is exposed during pairing."
+    },
+    {
+      "id": "BTC-C002",
+      "canonical_key": "onchain.receive.address.rotation",
+      "category": "onchain_operations",
+      "capability": "Use distinct receiving addresses and keep old requests trackable",
+      "merchant_outcome": "The merchant can reconcile each incoming payment to the correct sale while reducing address reuse.",
+      "actor": "Checkout",
+      "trigger": "Create a payment request",
+      "behavior": "Issue a fresh address for each request and retain the mapping to sale, derivation index, issue time, expiry policy, and status.",
+      "preconditions": "Wallet can derive addresses and durable journal stores mappings.",
+      "qualifiers": "BIP32 supports public derivation; the requirement is merchant workflow, not proof of wallet behavior.",
+      "recovery_edge_cases": "On restart or wallet migration, restore issued-address mappings so late transactions still match.",
+      "source_ids": [
+        "BTC-S002"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Persist issued addresses and status independently from device-local UI state; expose restore coverage.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "One-time addresses are compatible with self-controlled derivation and local records; measure correct association across restart and restore.",
+      "bitcoin_tradeoffs": "More addresses increase tracking and backup requirements; address uniqueness does not make transactions anonymous.",
+      "acceptance_test": "Issue 100 requests, restart and restore from backup, then reconcile payments to original sales including an expired request."
+    },
+    {
+      "id": "BTC-C003",
+      "canonical_key": "onchain.receive.watch_only",
+      "category": "onchain_operations",
+      "capability": "Observe receiving without spend authority",
+      "merchant_outcome": "A checkout device can display and monitor receiving requests without holding spending keys.",
+      "actor": "Owner",
+      "trigger": "Pair cold wallet",
+      "behavior": "Import only public derivation material and verify a test address against the cold wallet display; reject secret-bearing pairing payloads.",
+      "preconditions": "Cold wallet exposes compatible public data and merchant verifies on independent screen.",
+      "qualifiers": "Does not alter current signing behavior; an xpub may still disclose privacy-sensitive derivation data.",
+      "recovery_edge_cases": "If watch-only data is lost, restore from owner-held public backup; spending remains on independently held signer.",
+      "source_ids": [
+        "BTC-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show authority labels and provide a redacted export describing exactly what the paired device can derive and see.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Public derivation lets a separate checkout device receive and observe while signing remains with merchant; prove no signing key enters checkout.",
+      "bitcoin_tradeoffs": "Watch-only is not privacy-only: public derivation can reveal transaction history and future addresses.",
+      "acceptance_test": "Inspect pairing artifact and memory/storage inventory; verify receiving works while every spend action requires independent signer approval."
+    },
+    {
+      "id": "BTC-C004",
+      "canonical_key": "onchain.receive.confirmation_state",
+      "category": "onchain_operations",
+      "capability": "Distinguish seen, unconfirmed, confirmed, and reorged payments",
+      "merchant_outcome": "Staff make fulfillment decisions using an honest, current payment state.",
+      "actor": "Cashier",
+      "trigger": "Wallet or node observes a transaction",
+      "behavior": "Show amount, transaction identity, mempool/confirmation depth, observation time, and any conflict or reorganization; do not equate first-seen with settled.",
+      "preconditions": "Reliable chain/mempool observation source with freshness status.",
+      "qualifiers": "Mempool policy is not consensus and differs across nodes; plan defines confirmation/reorg fixture requirement, not a final depth policy.",
+      "recovery_edge_cases": "After reorg, reverse paid/fulfillment eligibility as appropriate, retain audit history, and reconcile replacement transaction.",
+      "source_ids": [
+        "BTC-S003",
+        "BTC-S014"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Tie fulfillment threshold to explicit merchant policy and show evidence/freshness rather than a generic paid badge.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "On-chain settlement provides independently verifiable public confirmation, while confirmation delay and reorg exposure require merchant policy.",
+      "bitcoin_tradeoffs": "Merchant bears latency and confirmation-risk choices; no single confirmation count is universally safe.",
+      "acceptance_test": "Simulate unseen, unconfirmed, confirmed, conflicting, and reorged transaction observations; ensure no stale state authorizes duplicate fulfillment."
+    },
+    {
+      "id": "BTC-C005",
+      "canonical_key": "onchain.receive.late_expired",
+      "category": "onchain_operations",
+      "capability": "Handle payment after request expiry or cancellation",
+      "merchant_outcome": "A late payment remains visible and correctly associated without silently reopening a canceled sale.",
+      "actor": "Cashier",
+      "trigger": "Transaction arrives after request expiry/cancel",
+      "behavior": "Track each request address and sale after expiry; label late, canceled, partial, or unpaid distinctly and route refund/fulfillment decision to policy.",
+      "preconditions": "Address history and sale state persist.",
+      "qualifiers": "Existing product plan explicitly requires late-address tracking; no automatic refund or forced fulfillment is assumed.",
+      "recovery_edge_cases": "Restart, restore, or wallet migration must preserve expired request mappings and late observations.",
+      "source_ids": [
+        "BTC-S001",
+        "BTC-S002"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Provide a durable exception queue with originating sale, received amount, and owner decision path.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Merchant-controlled on-chain request records support independent late-payment reconciliation; prove with a restored ledger.",
+      "bitcoin_tradeoffs": "On-chain transfers cannot be canceled by checkout; late funds may require a separately authorized refund transaction and fee.",
+      "acceptance_test": "Pay an expired address after restart; verify it is flagged to its original sale, not treated as a new current sale, and requires explicit disposition."
+    },
+    {
+      "id": "BTC-C006",
+      "canonical_key": "onchain.receive.partial_overpayment",
+      "category": "onchain_operations",
+      "capability": "Account for partial and excess payments",
+      "merchant_outcome": "Tender totals and balance due remain correct when customer pays in multiple transfers or sends too much.",
+      "actor": "Cashier",
+      "trigger": "One or more payments observed for request",
+      "behavior": "Accumulate received value by request, preserve each transaction, and present remaining due or excess amount without silently changing basket value.",
+      "preconditions": "Exact satoshi arithmetic and durable idempotent observations.",
+      "qualifiers": "Payment URI amount is an instruction to wallet, not an enforcement mechanism; transactions can differ from requested amount.",
+      "recovery_edge_cases": "Deduplicate replayed observations and recover partial state after interruption.",
+      "source_ids": [
+        "BTC-S001"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Make received, remaining, and excess values explicit in ledger and receipt, with owner-controlled resolution.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Bitcoin permits objectively measured on-chain value; the merchant workflow must handle amount variance without a central processor.",
+      "bitcoin_tradeoffs": "Multiple transactions can add confirmation latency and UTXO fragmentation; excess funds create refund/credit policy and fee considerations.",
+      "acceptance_test": "Test underpayment, exact payment, overpayment, duplicate observation, and interrupted multi-transaction payment with exact satoshi reconciliation."
+    },
+    {
+      "id": "BTC-C007",
+      "canonical_key": "onchain.spend.utxo_economics",
+      "category": "onchain_operations",
+      "capability": "Understand future spend cost of received outputs",
+      "merchant_outcome": "Merchant can tell when a small output may be uneconomic to spend later.",
+      "actor": "Owner",
+      "trigger": "Receive output is recorded or spending is planned",
+      "behavior": "Show output value and estimated future spend cost range with assumptions and a threshold advisory; do not autonomously select, consolidate, or spend coins.",
+      "preconditions": "UTXO-level data and fee assumptions available.",
+      "qualifiers": "Standalone plan says advisory only; no coin-selection authority or hard loss guarantee.",
+      "recovery_edge_cases": "Recalculate advisory when fee conditions change; preserve received funds even if currently uneconomic.",
+      "source_ids": [
+        "BTC-S004"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Attach an explainable sat/vB and input-size estimate to each UTXO and state that it is advisory.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Direct merchant receipt enables control over when outputs are combined/spent, with transparent cost consequences.",
+      "bitcoin_tradeoffs": "UTXO privacy and fee optimization can conflict; consolidation itself costs fees and links activity.",
+      "acceptance_test": "Use controlled UTXO values and fee scenarios; advisory accurately estimates spend cost range and never creates/broadcasts a transaction."
+    },
+    {
+      "id": "BTC-C008",
+      "canonical_key": "onchain.spend.fee_authority",
+      "category": "onchain_operations",
+      "capability": "Approve fee and destination before spend",
+      "merchant_outcome": "Merchant controls whether and when a transaction is signed and what fee is paid.",
+      "actor": "Owner",
+      "trigger": "Withdrawal, sweep, or refund is proposed",
+      "behavior": "Display destination, amount, selected inputs, fee rate/absolute fee, confirmation estimate and replacement policy; require owner approval on trusted signer display.",
+      "preconditions": "Current signing mode and approved authority flow remain in force.",
+      "qualifiers": "No signing change is approved; RPC fee options are a comparator for choice, not a proposal to automate.",
+      "recovery_edge_cases": "Handle fee bump failure or stale inputs by returning to explicit review, never by changing destination or amount silently.",
+      "source_ids": [
+        "BTC-S004",
+        "BTC-S003"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Offer an advisory review that makes fee and output tradeoffs understandable before existing owner approval.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Merchant-held keys avoid a third-party spending authorization gate; proof is transaction signing only after local owner approval.",
+      "bitcoin_tradeoffs": "Self-authority entails fee management and safeguarding; replacement can change a transaction before confirmation.",
+      "acceptance_test": "Review and sign a test spend; compare displayed destination, amount, inputs, fee, and actual transaction; verify no unsigned proposal can spend."
+    },
+    {
+      "id": "BTC-C009",
+      "canonical_key": "onchain.request.uri_qr",
+      "category": "checkout",
+      "capability": "Interoperate payment requests through URI and QR",
+      "merchant_outcome": "Customer wallet can scan a standards-based request with amount and sale context.",
+      "actor": "Cashier",
+      "trigger": "Payment request displayed",
+      "behavior": "Encode a Bitcoin payment URI with exact amount and appropriately bounded label/message; render QR and retain plain address/manual fallback.",
+      "preconditions": "Supported address/script type and receiving wallet compatibility.",
+      "qualifiers": "BIP321 is current URI proposal; QR scanning behavior varies by wallet/app; no compatibility is claimed without a test matrix.",
+      "recovery_edge_cases": "If scan fails, show validated address and amount separately; prevent staff from editing address unnoticed.",
+      "source_ids": [
+        "BTC-S001"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show interoperable request plus an address-only/manual route and validate the actual wallet on target devices.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Bitcoin URI/QR supports direct wallet-to-merchant payment without processor checkout integration; prove scan-and-pay across named wallets.",
+      "bitcoin_tradeoffs": "URI fields can expose sale metadata to wallet or screenshots; QR is a transport format and does not ensure payment.",
+      "acceptance_test": "Scan requests with specified wallets/devices; compare decoded network, address, amount and optional metadata, including malformed URI rejection."
+    },
+    {
+      "id": "BTC-C010",
+      "canonical_key": "checkout.request.nfc_uri",
+      "category": "hardware",
+      "capability": "Offer NFC handoff of payment request URI",
+      "merchant_outcome": "Customer can tap a supported terminal to receive the payment request without camera use.",
+      "actor": "Cashier",
+      "trigger": "NFC handoff selected",
+      "behavior": "Expose the same validated payment URI via a standard NFC NDEF URI record and keep QR/manual fallback.",
+      "preconditions": "Terminal and phone support compatible NFC data exchange and app URI handling.",
+      "qualifiers": "NFC format source does not prove payment-app launch or Bitcoin wallet support; per-device interoperability is unknown.",
+      "recovery_edge_cases": "Failed read or wrong app must leave sale unchanged and allow QR/manual route.",
+      "source_ids": [
+        "BTC-S001",
+        "BTC-S013"
+      ],
+      "documented_status": "unknown",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Prototype against named merchant/customer phones only after device support is established; log no customer identifier.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "A standard URI carrier can reduce checkout friction while avoiding provider-controlled payment credentials; prove successful transfer into compatible wallet.",
+      "bitcoin_tradeoffs": "NFC availability and URI routing vary by device/OS; tap can reveal request context to nearby device.",
+      "acceptance_test": "On each target phone, tap and inspect decoded URI, then test fallback and ensure repeated taps do not duplicate or mutate a sale."
+    },
+    {
+      "id": "BTC-C011",
+      "canonical_key": "onchain.receive.privacy",
+      "category": "security_privacy",
+      "capability": "Limit unnecessary disclosure during payment",
+      "merchant_outcome": "The customer and merchant avoid publishing avoidable identifying details in payment instructions or transaction metadata.",
+      "actor": "Owner",
+      "trigger": "Request generated or payment reconciled",
+      "behavior": "Use one-time addresses; keep customer details and sale metadata local by default; warn before exposing transaction disclosure exports.",
+      "preconditions": "Local records and privacy-limited export controls.",
+      "qualifiers": "Public blockchain transactions are observable; BIP321 labels/messages are client-side request fields, not confidential fields.",
+      "recovery_edge_cases": "If receipt or export is shared, disclose fields and scope; preserve local records without publishing sales history.",
+      "source_ids": [
+        "BTC-S001",
+        "BTC-S002"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Minimize external metadata and give merchants per-export disclosure preview.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Direct settlement can avoid a payment processor receiving sales data, but blockchain visibility and address linkage remain.",
+      "bitcoin_tradeoffs": "Public transaction graph analysis can expose relationships; address rotation is not anonymity.",
+      "acceptance_test": "Inspect generated URI, QR, receipt, logs, and exports to confirm no unintended PII; document unavoidable public chain data."
+    },
+    {
+      "id": "BTC-C012",
+      "canonical_key": "onchain.delegate.role_scope",
+      "category": "staff_permissions",
+      "capability": "Delegate checkout without spending authority",
+      "merchant_outcome": "Staff can accept and observe payments without changing wallet authority or spending funds.",
+      "actor": "Owner",
+      "trigger": "Staff role is assigned",
+      "behavior": "Grant request creation and payment status only; reserve authority changes, signing, refunds/spend, and recovery artifacts to owner-approved capabilities.",
+      "preconditions": "Identity/permission controls exist and are enforced at durable API boundary.",
+      "qualifiers": "Product plan requires role separation; exact staff authorization implementation is not established by protocol sources.",
+      "recovery_edge_cases": "Revoke staff access and confirm offline/restored device cannot continue using stale authority beyond documented expiry.",
+      "source_ids": [
+        "BTC-S002"
+      ],
+      "documented_status": "unknown",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Separate public receive data from signing access and report what a role can observe or change.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "Public derivation can support limited receiving roles without spending keys; prove least privilege with adversarial role checks.",
+      "bitcoin_tradeoffs": "Staff may still see customer/payment data; local key separation does not solve device compromise or account misuse.",
+      "acceptance_test": "Cashier can issue request and observe state but cannot export secret material, change destination, sign, or alter owner configuration."
+    },
+    {
+      "id": "BTC-C013",
+      "canonical_key": "backup.onchain.recovery",
+      "category": "backup_recovery",
+      "capability": "Recover on-chain receipt and authority after device loss",
+      "merchant_outcome": "Merchant can restore keys or independently recover funds and still reconcile all issued/late addresses.",
+      "actor": "Owner",
+      "trigger": "Device lost, damaged, or replaced",
+      "behavior": "Document and rehearse recovery from merchant-held backup; include public address derivation and issued-request ledger recovery separately from private keys.",
+      "preconditions": "Backup artifact is current, usable, and held by merchant.",
+      "qualifiers": "Key backup and sales-history backup are different; seed ownership alone does not restore application records.",
+      "recovery_edge_cases": "Restore on clean hardware and reconcile derived addresses, UTXOs, and old issued addresses before retiring old device.",
+      "source_ids": [
+        "BTC-S002"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Provide a recovery checklist and independently verifiable backup freshness/coverage indicator.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Independent key recovery can avoid a vendor account being necessary to regain authority; prove offline restore.",
+      "bitcoin_tradeoffs": "Merchant bears backup secrecy, physical security, and operational testing; backup exposure increases theft risk.",
+      "acceptance_test": "Conduct clean-device recovery using merchant-held artifacts; verify spend authority and identify every issued address mapped to open/late sales."
+    },
+    {
+      "id": "BTC-C014",
+      "canonical_key": "lightning.receive.capacity",
+      "category": "lightning_operations",
+      "capability": "Know inbound liquidity before promising Lightning acceptance",
+      "merchant_outcome": "Cashier only offers Lightning when funds can actually be routed to the merchant.",
+      "actor": "Owner",
+      "trigger": "Lightning enabled or invoice requested",
+      "behavior": "Assess channel direction, inbound capacity, confirmed/funded status, peer availability and current conditions before offering; never infer inbound capacity from wallet key ownership or total channel balance.",
+      "preconditions": "Running node with current channel and route information.",
+      "qualifiers": "Plan requires confirmed capacity/funding/availability gates; not a guarantee of route or payment success.",
+      "recovery_edge_cases": "When capacity becomes insufficient, stop offering Lightning and route customer to on-chain/cash choice without losing sale state.",
+      "source_ids": [
+        "BTC-S005",
+        "BTC-S006",
+        "BTC-S008"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Expose readiness as current evidence and freshness with reason unavailable, not a guaranteed capacity badge.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Merchant-operated node can control its receive availability directly; proof requires successful measured receiving under merchant-owned operational control.",
+      "bitcoin_tradeoffs": "Inbound capacity is finite, directional, may require capital/provider action, and can change; no free or prepaid liquidity assumption.",
+      "acceptance_test": "Vary inbound capacity, funding confirmation, peer connectivity, and stale status; checkout offers Lightning only when declared policy gates pass."
+    },
+    {
+      "id": "BTC-C015",
+      "canonical_key": "lightning.receive.funding_cost",
+      "category": "lightning_operations",
+      "capability": "See capital and on-chain costs before funding channels",
+      "merchant_outcome": "Merchant understands channel opening/funding cost and the opportunity cost of locked funds.",
+      "actor": "Owner",
+      "trigger": "Channel opening or replenishment considered",
+      "behavior": "Show funding amount, on-chain fee estimate, confirmation condition, capital committed, usable inbound/outbound direction, and any provider fee separately.",
+      "preconditions": "Node exposes channel state and fee quote.",
+      "qualifiers": "Protocol requires on-chain channel funding; fees and provider terms are not fixed by protocol. No prepaid/free liquidity claim.",
+      "recovery_edge_cases": "If funding remains unconfirmed, canceled, or reorged, do not report usable capacity; explain recovery path.",
+      "source_ids": [
+        "BTC-S006",
+        "BTC-S008"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Provide a readiness/funding breakdown and distinguish funds committed from capacity usable for incoming payments.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Direct node control may reduce dependence on hosted invoice services but requires explicit capital and chain-fee spending.",
+      "bitcoin_tradeoffs": "Funds are tied up in channel state; opening and closing add chain fees and operational overhead.",
+      "acceptance_test": "For a channel lifecycle, reconcile requested funding, transaction confirmation, usable directional balance, fees, and reorg/failure behavior."
+    },
+    {
+      "id": "BTC-C016",
+      "canonical_key": "lightning.receive.route_fees",
+      "category": "lightning_operations",
+      "capability": "Account for Lightning receiving fees and route failures",
+      "merchant_outcome": "Merchant knows whether a payment completed and what network or liquidity constraints affected attempts.",
+      "actor": "Cashier",
+      "trigger": "Invoice payment attempted",
+      "behavior": "Track invoice amount, payment status, received amount, and applicable route/forwarding or service fees; expose failed versus pending versus settled distinctly.",
+      "preconditions": "Node reports payment lifecycle and invoice identity.",
+      "qualifiers": "BOLT routing fees are peer-advertised and route outcomes are dynamic; exact merchant fee incidence depends on route and arrangement.",
+      "recovery_edge_cases": "On timeout/outage, reconcile payment hash/status before issuing another invoice or changing tender.",
+      "source_ids": [
+        "BTC-S008",
+        "BTC-S010",
+        "BTC-S009"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show invoice expiry, status, and failure reason where available; require reconciliation before retry on ambiguous status.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Bitcoin Lightning can support direct wallet payments but route availability and fees remain part of operating economics.",
+      "bitcoin_tradeoffs": "A route failure does not imply customer did not pay until status is reconciled; fees and success are not guaranteed.",
+      "acceptance_test": "Test paid, rejected, expired, pending, and unknown attempts with repeated customer retries; ensure one completed sale and accurate fees."
+    },
+    {
+      "id": "BTC-C017",
+      "canonical_key": "lightning.receive.mpp",
+      "category": "lightning_operations",
+      "capability": "Support or clearly reject multipart Lightning payments",
+      "merchant_outcome": "Customer can pay a merchant invoice split across routes without ambiguous partial settlement.",
+      "actor": "Checkout",
+      "trigger": "Invoice generated and wallet attempts payment",
+      "behavior": "Declare MPP support only when receiver and invoice features actually support it; track all parts under one payment and fulfill only on final settled status.",
+      "preconditions": "Node implementation supports chosen MPP behavior; customer wallet supports it.",
+      "qualifiers": "BOLT invoice feature support and MPP behavior are protocol/version dependent; library selection alone is not proof.",
+      "recovery_edge_cases": "After partial parts or node restart, recover aggregate status and avoid treating individual unresolved HTLCs as settled revenue.",
+      "source_ids": [
+        "BTC-S009",
+        "BTC-S010"
+      ],
+      "documented_status": "unknown",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Include MPP interoperability in named-wallet acceptance matrix; otherwise surface unsupported status and usable fallback.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "Open protocol invoicing may interoperate across wallets when required features overlap; prove with multiple implementations and partial failure.",
+      "bitcoin_tradeoffs": "MPP can leave unresolved parts and increases state/recovery complexity; must not imply any wallet can pay any invoice.",
+      "acceptance_test": "Exercise multi-part completion, one-part failure, timeout, duplicate parts, restart, and invoice expiry across named sender and receiver versions."
+    },
+    {
+      "id": "BTC-C018",
+      "canonical_key": "lightning.node.availability",
+      "category": "offline_availability",
+      "capability": "Show Lightning outage without losing checkout truth",
+      "merchant_outcome": "Merchant can continue checkout with other tenders when the node, peer, or network is unavailable.",
+      "actor": "Cashier",
+      "trigger": "Node unavailable or stale",
+      "behavior": "Disable or clearly mark Lightning with reason and last-seen time; preserve sale and offer supported alternatives.",
+      "preconditions": "Checkout separates sale state from Lightning node availability.",
+      "qualifiers": "Plan says cash and card availability must not change Bitcoin truth; Lightning is separate receiving mode.",
+      "recovery_edge_cases": "After node returns, reconcile existing invoices/payments before opening new tender attempts or marking a sale unpaid.",
+      "source_ids": [
+        "BTC-S005",
+        "BTC-S010"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Provide deterministic fallback and recovery state for stale node connection and ambiguous invoice outcome.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "A merchant-owned node avoids mandatory hosted payment account reliance, while requiring local uptime and network connectivity.",
+      "bitcoin_tradeoffs": "Node must remain operational and reachable enough for protocol duties; outages can delay or strand operational state.",
+      "acceptance_test": "Disconnect node before and during payment; verify fallback, restart reconciliation, and no duplicate fulfillment across all attempts."
+    },
+    {
+      "id": "BTC-C019",
+      "canonical_key": "lightning.backup.state_independence",
+      "category": "backup_recovery",
+      "capability": "Preserve channel state safely across backup and restore",
+      "merchant_outcome": "Merchant does not mistake a key backup for a complete live Lightning node recovery.",
+      "actor": "Owner",
+      "trigger": "Backup, device migration, restore, or crash",
+      "behavior": "Track freshness and consistency of channel manager/monitor state; stop Lightning if required state is stale or missing; explain that seed/key possession alone may not restore current channels.",
+      "preconditions": "Implementation provides safe persistence and monitor synchronization.",
+      "qualifiers": "LDK 0.2.8 docs and BOLT protocol identify integrator state duties; LND static backup is an implementation-specific recovery comparator.",
+      "recovery_edge_cases": "Use tested implementation recovery procedure; stale state can risk channel funds, and static channel backup may force closure rather than restore live channel state.",
+      "source_ids": [
+        "BTC-S005",
+        "BTC-S007",
+        "BTC-S011",
+        "BTC-S012"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Expose backup health and recovery mode separately from key custody; gate Lightning offers on validated freshness and integrity.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Merchant-owned keys support independent control but do not make Lightning channel state independent of peers or persistence.",
+      "bitcoin_tradeoffs": "Channel state requires careful consistency; recovery can require peers, force close, on-chain fees, and delayed access.",
+      "acceptance_test": "Inject stale/missing manager and monitor backups; verify Lightning stays disabled until safe recovery, then reconcile balances and close outcomes."
+    },
+    {
+      "id": "BTC-C020",
+      "canonical_key": "lightning.exit.independent",
+      "category": "lightning_operations",
+      "capability": "Exit a Lightning provider or node without provider permission",
+      "merchant_outcome": "Merchant can withdraw from a provider arrangement and recover merchant funds through protocol-defined exit paths.",
+      "actor": "Owner",
+      "trigger": "Provider relationship ends, node migration, or provider unavailable",
+      "behavior": "Document channel ownership, peer/provider role, key material, backup artifacts, close procedure, required on-chain fees, timelocks, and dependency on peer response; test unilateral exit.",
+      "preconditions": "Merchant has applicable channel keys and required current state.",
+      "qualifiers": "Key ownership is not identical to channel-state independence; unilateral exit may not be immediate and may depend on valid state and chain access.",
+      "recovery_edge_cases": "If provider does not cooperate, use documented unilateral close and sweep path; track timelocks and fee bump needs.",
+      "source_ids": [
+        "BTC-S005",
+        "BTC-S006",
+        "BTC-S007",
+        "BTC-S012"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Present exit as tested procedure with time/cost estimates and identify any peer/service dependency.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Self-operated channel keys can reduce provider permission dependence; validate unilateral recovery without provider approval.",
+      "bitcoin_tradeoffs": "No guarantee of immediate liquidity; force close requires on-chain fee and waiting periods, and state loss can be serious.",
+      "acceptance_test": "In isolated test channel, remove provider cooperation and recover using merchant-controlled current state; measure time, fees, and inaccessible interval."
+    },
+    {
+      "id": "BTC-C021",
+      "canonical_key": "lightning.node_ownership",
+      "category": "lightning_operations",
+      "capability": "Know who operates the receiving node",
+      "merchant_outcome": "Merchant can identify whether funds and protocol state are operated locally or by a hosted service.",
+      "actor": "Owner",
+      "trigger": "Lightning mode is configured",
+      "behavior": "Name node operator, key holder, channel funder, backup operator, service dependencies, and what the provider can observe or control.",
+      "preconditions": "Deployment architecture and provider terms are known.",
+      "qualifiers": "Plan accepts merchant-controlled authority; no mandatory custody or permission for recovery. Hosted provider capability claims require provider-specific verification.",
+      "recovery_edge_cases": "If provider is removed, merchant knows exact migration/closure and recovery process.",
+      "source_ids": [
+        "BTC-S005",
+        "BTC-S006",
+        "BTC-S012"
+      ],
+      "documented_status": "unknown",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show authority map at setup and in status screen, with unresolved provider dependencies labelled.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "Local node operation may reduce third-party operational dependence, but must prove in actual deployment and recovery.",
+      "bitcoin_tradeoffs": "Running a node shifts uptime, upgrades, backups, network exposure, and channel liquidity operations to merchant.",
+      "acceptance_test": "For each deployment mode, map signing authority, channel state storage, funding ownership, provider permissions and exit test results."
+    },
+    {
+      "id": "BTC-C022",
+      "canonical_key": "lightning.receiving.liquidity_options",
+      "category": "lightning_operations",
+      "capability": "Understand how inbound capacity is acquired and paid for",
+      "merchant_outcome": "Merchant can choose a sustainable way to receive without being told liquidity is free or guaranteed.",
+      "actor": "Owner",
+      "trigger": "Insufficient inbound capacity detected",
+      "behavior": "Explain available paths such as counterparty channel, swap/service, or organic channel flows only when actually supported; disclose funding, service fee, timing, counterparty and privacy tradeoffs.",
+      "preconditions": "A specific path and provider or counterparty are selected and separately validated.",
+      "qualifiers": "No provider availability, pricing, uptime, or compatibility inferred; no pre-paid/free liquidity claim.",
+      "recovery_edge_cases": "If acquisition fails, preserve sale and offer on-chain/cash alternative; do not charge merchant without confirmed terms and approval.",
+      "source_ids": [
+        "BTC-S006",
+        "BTC-S008"
+      ],
+      "documented_status": "unknown",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Provide options only after verifying exact current provider terms and show what each changes in authority and liquidity.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Open protocols can permit multiple liquidity approaches without a single mandatory provider; proof requires measured cost, terms, and exit.",
+      "bitcoin_tradeoffs": "Acquiring inbound capacity may require capital, an on-chain transaction, provider fee, counterparty risk, and operational coordination.",
+      "acceptance_test": "Compare documented options using actual quoted fee, confirmed usable inbound amount, time to readiness, authority map, and exit outcome."
+    },
+    {
+      "id": "BTC-C023",
+      "canonical_key": "lightning.qr_interop",
+      "category": "checkout",
+      "capability": "Interoperate Lightning invoice display with customer wallets",
+      "merchant_outcome": "Customer wallet can read a valid network-specific invoice and merchant can reconcile payment by invoice identity.",
+      "actor": "Cashier",
+      "trigger": "Lightning tender selected",
+      "behavior": "Present QR-compatible invoice with correct network and amount; show expiry and fallback; never treat QR scan as payment.",
+      "preconditions": "Invoice is generated by active receiving node and compatible wallet.",
+      "qualifiers": "BOLT 11 documents encoding; wallet compatibility and current offer formats vary; no test coverage claimed.",
+      "recovery_edge_cases": "On app-switch failure or expiry, regenerate only after checking whether existing invoice was paid.",
+      "source_ids": [
+        "BTC-S009"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test named wallets and show invoice network/amount/expiry in cashier flow.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Standard invoice encoding supports wallet interoperability without processor-specific checkout account; prove with target wallet tests.",
+      "bitcoin_tradeoffs": "Invoice validity expires and QR is not proof of payment; long/complex codes and app handling vary.",
+      "acceptance_test": "Scan invoice using named supported wallets on target devices and test wrong-network, expiry, amount mismatch, and duplicate scan cases."
+    },
+    {
+      "id": "BTC-C024",
+      "canonical_key": "onchain.request.uri_required_parameters",
+      "category": "checkout",
+      "capability": "Safely handle unknown required URI parameters",
+      "merchant_outcome": "Merchant and customer do not make a payment when the wallet cannot honor a required instruction.",
+      "actor": "Customer wallet",
+      "trigger": "Payment URI is parsed",
+      "behavior": "Treat unknown required (`req-`) parameters as unsupported and reject the entire request; ignore only optional unknown fields as permitted by the standard.",
+      "preconditions": "Wallet implementation conforms to URI standard and displays the resulting request for customer authorization.",
+      "qualifiers": "BIP 321 defines required extension handling; compatibility still varies by wallet.",
+      "recovery_edge_cases": "If rejected, preserve sale and allow staff to issue a supported plain request only after validating the same amount and address.",
+      "source_ids": [
+        "BTC-S001"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Validate URI construction and expose unsupported-wallet recovery without weakening required instructions.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Standards-based payment requests can interoperate while safely failing closed on required features; prove against multiple wallets.",
+      "bitcoin_tradeoffs": "Unknown optional data can be safely ignored per standard; unknown required parameters must not be silently discarded.",
+      "acceptance_test": "Create URIs with supported, unknown optional, and unknown `req-` fields; named clients must honor or reject as specified, with no payment on reject."
+    },
+    {
+      "id": "BTC-C025",
+      "canonical_key": "onchain.request.wrong_network",
+      "category": "checkout",
+      "capability": "Prevent wrong-network payment requests",
+      "merchant_outcome": "Customer is not directed to a test or alternate network address for a mainnet sale.",
+      "actor": "Cashier",
+      "trigger": "Request URI created or scanned",
+      "behavior": "Bind request to configured Bitcoin network; validate address/URI network markers before display and refuse mismatched network data.",
+      "preconditions": "Network is explicitly configured and address parser recognizes supported address formats.",
+      "qualifiers": "BIP 321 specifies network indications for certain address forms; wallet behavior must be tested.",
+      "recovery_edge_cases": "Network mismatch leaves sale unpaid and requires regenerating the request from configured merchant wallet.",
+      "source_ids": [
+        "BTC-S001"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show network in cashier and customer wallet review, and block cross-network request construction.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Merchant-controlled receiving supports a direct, verifiable network destination; prove mismatch rejection before payment.",
+      "bitcoin_tradeoffs": "Some address encodings do not expose a simple text prefix; compatibility and network labeling must be correct.",
+      "acceptance_test": "Attempt mainnet sale with testnet/signet URI/address and wrong `tb` parameter; block or reject each mismatched request."
+    },
+    {
+      "id": "BTC-C026",
+      "canonical_key": "onchain.refund.fresh_destination",
+      "category": "refunds_returns",
+      "capability": "Validate refund destination and amount separately",
+      "merchant_outcome": "Customer receives a refund only to a destination they explicitly provided and confirmed for that refund.",
+      "actor": "Owner or authorized refund clerk",
+      "trigger": "Refund requested for an on-chain sale",
+      "behavior": "Collect a fresh destination per refund, validate its network and script support, show exact amount and fee, and require explicit approval before signing.",
+      "preconditions": "Original sale and refund liability are recorded; existing owner signing authority remains unchanged.",
+      "qualifiers": "Bitcoin URI standard does not establish merchant refund protocol; this is a workflow requirement inferred from merchant-controlled outbound payment risks. Never treat a prior receive address or customer identity as proof of refund destination.",
+      "recovery_edge_cases": "If address is invalid, wrong-network, changed, or unconfirmed by customer, do not sign; retain refund as owed/pending.",
+      "source_ids": [
+        "BTC-S001",
+        "BTC-S004"
+      ],
+      "documented_status": "unknown",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Provide a two-person/owner review surface for destination, amount, network, and fee before existing signer approval.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Direct merchant-controlled refund transactions avoid processor permission but require destination verification and explicit fee control.",
+      "bitcoin_tradeoffs": "A valid address does not prove recipient identity; irreversible misdirection and fee expense remain merchant risks.",
+      "acceptance_test": "Refund to fresh test destinations on matching and mismatching networks; alter address between request and approval and ensure signed payload requires renewed review."
+    },
+    {
+      "id": "BTC-C027",
+      "canonical_key": "onchain.spend.fee_budget",
+      "category": "onchain_operations",
+      "capability": "Set a merchant-approved fee budget for outgoing transactions",
+      "merchant_outcome": "Merchant understands and limits the fee exposure for payouts, refunds, and sweeps.",
+      "actor": "Owner",
+      "trigger": "Spend or refund transaction prepared",
+      "behavior": "Show estimated absolute fee, rate, confirmation target and configured maximum budget; refuse automatic signing above budget and allow explicit owner override through existing path.",
+      "preconditions": "Wallet exposes fee estimate and transaction size/inputs; threshold is configured by owner.",
+      "qualifiers": "Bitcoin Core exposes fee-rate and confirmation-target options; fee estimates are software and network dependent.",
+      "recovery_edge_cases": "If fee estimate unavailable or exceeds budget, hold transaction for review and preserve the unpaid/refund-owed status.",
+      "source_ids": [
+        "BTC-S004",
+        "BTC-S015"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Translate fee-rate choices into total merchant cost with a clear budget and fallback.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Merchant-controlled spending allows a locally chosen fee ceiling instead of a provider-defined price; measure overspend avoidance.",
+      "bitcoin_tradeoffs": "A low cap may delay settlement; a high cap may overpay; fee estimate is not confirmation guarantee.",
+      "acceptance_test": "Test transaction size, fee rates, unavailable estimator, budget boundary and override; verify actual fee never exceeds approved amount without renewed authorization."
+    },
+    {
+      "id": "BTC-C028",
+      "canonical_key": "onchain.spend.input_reservation",
+      "category": "onchain_operations",
+      "capability": "Prevent concurrent spends from selecting the same UTXO",
+      "merchant_outcome": "Refund and payout operations do not race, double-reserve funds, or fail after staff believe they were approved.",
+      "actor": "Owner or checkout service",
+      "trigger": "Multiple outgoing transactions are prepared concurrently",
+      "behavior": "Reserve selected UTXOs before authorization; present conflicts and release reservation only on cancel, expiry, or confirmed broadcast outcome.",
+      "preconditions": "Wallet supports input locking or equivalent durable transaction coordination.",
+      "qualifiers": "Bitcoin Core RPC offers optional UTXO locking; implementation-specific behavior must be verified.",
+      "recovery_edge_cases": "After crash, reconcile wallet locks and transaction mempool/chain state before retry or reuse.",
+      "source_ids": [
+        "BTC-S015"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Make reservation state durable and visible across registers while keeping signing authorization owner-controlled.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "Local wallet coordination can avoid external spending approval while preventing conflicting attempts; prove under interruption.",
+      "bitcoin_tradeoffs": "Input reservation can temporarily reduce available balance; stale locks need safe expiry/reconciliation.",
+      "acceptance_test": "Run two concurrent refund/spend preparations against the same UTXO; assert only one reserves it, and crash/restart reconciles lock state without duplicate broadcast."
+    },
+    {
+      "id": "BTC-C029",
+      "canonical_key": "onchain.receive.late_address_monitoring_window",
+      "category": "onchain_operations",
+      "capability": "Retain monitoring for every issued address through late-payment resolution",
+      "merchant_outcome": "A late or delayed payment is discoverable after request expiry, staff shift change, app restart, and wallet recovery.",
+      "actor": "Owner",
+      "trigger": "Payment request expires, sale closes, or merchant changes wallet device",
+      "behavior": "Keep a durable issued-address index and monitor it through an explicit retention/closure policy; display last scan height/time and unresolved late status.",
+      "preconditions": "Wallet/node rescan capability or trusted sync source and durable mapping exist.",
+      "qualifiers": "BIP32 supports derivation, not a monitoring guarantee; merchant tracking is required by existing plan.",
+      "recovery_edge_cases": "After device loss or a long offline interval, rescan from safe height and reconcile late payments before declaring request closed.",
+      "source_ids": [
+        "BTC-S002"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Expose monitoring freshness, covered range, and unresolved old requests in closeout/recovery.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Merchant-held address derivation enables independent monitoring after provider exit; test by rescan after offline period.",
+      "bitcoin_tradeoffs": "Long retention costs storage/sync and creates durable transaction history; no finite expiry erases on-chain transfer possibility.",
+      "acceptance_test": "Issue then expire request, take device offline, restore on clean device and rescan; verify any late transfer links to correct original sale and freshness is explicit."
+    },
+    {
+      "id": "BTC-C030",
+      "canonical_key": "lightning.exit.force_close.dependencies",
+      "category": "lightning_operations",
+      "capability": "Understand unilateral exit dependencies and delayed funds",
+      "merchant_outcome": "Merchant knows what must remain available to force close and when funds can be swept.",
+      "actor": "Owner",
+      "trigger": "Lightning peer/provider unavailable or cooperative close fails",
+      "behavior": "Document need for current channel state/monitor, chain observation/broadcast, fee handling, output scripts, and applicable on-chain delay; report force-close and sweep stages separately.",
+      "preconditions": "Node has valid channel state and keys; chain access and fee strategy are available.",
+      "qualifiers": "BOLT 3 describes delayed local outputs; BOLT 5 on-chain handling; LDK maintains manager/monitor separation. Availability of peers/watchtowers changes operational resilience, not channel state independence.",
+      "recovery_edge_cases": "Lost/stale backup, unavailable peer, reorg, or fee spike can delay exit; follow supported safe recovery procedure and keep funds status unresolved until sweepable.",
+      "source_ids": [
+        "BTC-S005",
+        "BTC-S006",
+        "BTC-S007",
+        "BTC-S011",
+        "BTC-S012"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Expose verified recovery prerequisites and estimated wait/cost from actual channel terms; do not promise immediate exit.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Merchant keys can permit unilateral protocol exit without provider permission, provided current state and on-chain mechanisms are available.",
+      "bitcoin_tradeoffs": "Unilateral closure is slower and may cost more than cooperative close; state, chain fee, timelock, and counterparty/watchtower conditions matter.",
+      "acceptance_test": "In isolated channel fixture, disable cooperation, restore from documented state, publish valid unilateral close, process delay/reorg, sweep outputs, and record elapsed blocks and fees."
+    },
+    {
+      "id": "BTC-C031",
+      "canonical_key": "privacy.payer_request_disclosure",
+      "category": "security_privacy",
+      "capability": "Limit payment request metadata that can identify payer or sale",
+      "merchant_outcome": "A payment request does not unnecessarily reveal a customer name or sensitive sale details.",
+      "actor": "Cashier",
+      "trigger": "URI/QR/NFC payment request is created",
+      "behavior": "Use minimum required amount and merchant reference; do not encode customer name, personal identifier, or detailed basket in publicly visible labels/message unless explicitly needed and disclosed.",
+      "preconditions": "Payment request supports optional fields and merchant has a local sale mapping.",
+      "qualifiers": "BIP 321 labels/messages are request fields, not a confidential channel; payment itself remains publicly observable on-chain.",
+      "recovery_edge_cases": "If a request is copied/shared, retain only intended metadata; regenerate request if exposed details are sensitive and policy allows.",
+      "source_ids": [
+        "BTC-S001"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Default to opaque local reference and preview all fields before generating QR/NFC.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Direct wallet requests can avoid forwarding customer identity to a payment platform, but public ledger data persists.",
+      "bitcoin_tradeoffs": "Metadata minimization does not prevent payer address linkage or network observer inference.",
+      "acceptance_test": "Inspect QR/NFC payload for identifying fields and test screenshots/logs; verify default URI contains no PII and local receipt still resolves sale."
+    },
+    {
+      "id": "BTC-C032",
+      "canonical_key": "privacy.address_reuse",
+      "category": "security_privacy",
+      "capability": "Avoid address reuse and transaction linkage across sales",
+      "merchant_outcome": "Repeated sales are less trivially associated through the same merchant receive address.",
+      "actor": "Owner",
+      "trigger": "New request or transaction planning",
+      "behavior": "Issue distinct receiving addresses and consider address reuse when planning spends; make any reuse explicit with privacy impact.",
+      "preconditions": "Wallet derives fresh receive addresses and records them durably.",
+      "qualifiers": "Core wallet source documents avoid_reuse option as a privacy measure; address uniqueness does not anonymize public transactions.",
+      "recovery_edge_cases": "If derivation state is restored, ensure next index and prior mapping do not roll back into address reuse.",
+      "source_ids": [
+        "BTC-S002",
+        "BTC-S016"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Warn before reusing address and maintain deterministic derivation-index recovery.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Self-controlled derivation can support fresh addresses without provider account creation; prove address uniqueness through backup restore.",
+      "bitcoin_tradeoffs": "Fresh addresses complicate accounting and public history still permits clustering; privacy can conflict with consolidation/input selection.",
+      "acceptance_test": "Generate requests across restart and restore, prove no duplicate address issuance, then exercise explicit reuse override with warning."
+    }
+  ],
+  "limitations": [
+    "Protocol documentation specifies formats and mechanisms but does not show the target merchant’s wallet, device, node, account, region, or staff workflow works.",
+    "No competitor capability comparison is performed; this bundle does not claim POS parity.",
+    "Bitcoin Core mempool rules and fee estimates are policy/software/version-dependent; confirmations and reorg exposure require an explicit merchant policy.",
+    "No wallet vendor or hardware manual was selected as a product comparator; device-specific pairing, QR and NFC interoperability remain unverified.",
+    "Lightning route availability, inbound liquidity, fees, provider terms, channel funding, backup freshness, peer behavior, unilateral exit time, and recovery cost were not measured.",
+    "LDK 0.2.8 and LND docs are narrow implementation references, not evidence of OpenBMT’s selected or deployed Lightning implementation.",
+    "No claim asserts a new technology or feature is implemented. Merchant improvements and acceptance tests are hypotheses/criteria only.",
+    "Further product decisions are required for confirmation/fulfillment threshold, privacy disclosure policy, stale node thresholds, supported wallets/devices, MPP support, and Lightning deployment ownership.",
+    "URI payment standards do not define a merchant refund workflow; fresh refund destination confirmation is a merchant safety requirement requiring product-specific acceptance evidence.",
+    "NFC format source was reviewed, but target phone/app interoperability is unknown pending tests.",
+    "Bitcoin Core wallet RPC/source is a narrow comparator for fee options, UTXO locking, and avoid-reuse behavior; it does not establish OpenBMT behavior.",
+    "LDK 0.2.8 source was inspected from the locally cached published crate matching Cargo.lock; its remote docs page was not verified during this research."
+  ]
+}

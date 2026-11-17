@@ -1,0 +1,320 @@
+{
+  "as_of": "2026-11-17",
+  "decisions": [
+    {
+      "id": "DEC-001",
+      "type": "proposed_mechanism_exception",
+      "title": "Keep payment processor access optional and isolated",
+      "affected_claim_ids": [
+        "SQC-C023",
+        "CARD-C003",
+        "CARD-C036",
+        "BTC-C001",
+        "BTC-C012"
+      ],
+      "affected_keys": [
+        "payments.bitcoin.square_wallet.custody",
+        "card.square.oauth_scopes",
+        "card.stripe.backend_key_isolation",
+        "onchain.receive.authority"
+      ],
+      "proposal": "Keep card access optional and isolated from Bitcoin authority through a replaceable adapter. Do not require processor enrollment for cash or direct Bitcoin receiving.",
+      "preserved_merchant_job": "Complete a retail checkout using the tender the merchant has enabled, with a correct sale ledger and receipt.",
+      "rationale": "The standalone product includes optional third-party card processing. Its account, credential and payment lifecycle must remain separate from merchant Bitcoin keys and authority.",
+      "user_authorization_status": "Established direction: optional card processing, cash, merchant Bitcoin authority and independent recovery. The adapter set, eligibility, hardware and exact setup experience remain undecided.",
+      "proof_or_revisit_trigger": "Review provider credential scopes and data flows; test unknown/canceled/refund outcomes; demonstrate that revoking card access leaves cash and direct Bitcoin receiving available."
+    },
+    {
+      "id": "DEC-002",
+      "type": "proposed_mechanism_exception",
+      "title": "Do not require company server permission for local checkout or recovery",
+      "affected_claim_ids": [
+        "BTC-C001",
+        "BTC-C013",
+        "BTC-C021",
+        "BTO-C017",
+        "BTO-C019",
+        "TOO-C011",
+        "TOO-C012"
+      ],
+      "affected_keys": [
+        "onchain.receive.authority",
+        "backup.onchain.recovery",
+        "lightning.node_ownership",
+        "backup.instance.restore_safety"
+      ],
+      "proposal": "Keep a usable standalone local sale and on-chain receive path without company login/approval, publisher ledger or telemetry. Any server-backed integration stays opt-in and scoped; it cannot become a hidden prerequisite for recovery.",
+      "preserved_merchant_job": "Operate a register, receive Bitcoin, and recover keys and sale records after routine service/device failure.",
+      "rationale": "Accepted purity position rejects mandatory company-server approval for recovery, telemetry, or sales-history upload; however remote-sync UX and support model remain design questions.",
+      "user_authorization_status": "established constraint: no required company permission over Bitcoin funds and independent recovery. A company endpoint is not required for standalone/local cash and on-chain operation per current plan; optional service UX remains undecided.",
+      "proof_or_revisit_trigger": "Demonstrate standalone cash/on-chain checkout and recovery with company endpoints unavailable; review each opt-in sync, webhook or backup service before adding."
+    },
+    {
+      "id": "DEC-003",
+      "type": "proposed_mechanism_exception",
+      "title": "Evaluate bounded owner-approved signing and UTXO protection",
+      "affected_claim_ids": [
+        "BTC-C008",
+        "BTC-C026",
+        "BTC-C027",
+        "BTO-C010",
+        "BTO-C035",
+        "BTC-C020"
+      ],
+      "affected_keys": [
+        "onchain.spend.fee_authority",
+        "onchain.refund.fresh_destination",
+        "wallet.onchain.sign_psbt_hardware",
+        "lightning.exit.independent"
+      ],
+      "proposal": "Preserve the current signing behavior in code while researching owner-approved bounded signing/automation for UTXO protection, fee budgets, reservations, and routine approved transactions. Define explicit transaction/value/fee/destination bounds, owner control, safe failure and recovery before implementing any change.",
+      "preserved_merchant_job": "Protect merchant funds from uneconomic UTXOs or operational mistakes while allowing an owner to authorize routine transfers and refunds safely.",
+      "rationale": "The current code exposes advisory-only UTXO guidance, but that is an implementation boundary, not a permanent rejection of protection or automation. The user said an earlier signing-control proposal was acceptable; architecture evidence and review remain necessary.",
+      "user_authorization_status": "research candidate: bounded owner-approved signing control was acceptable in principle. No exact policy, automatic coin selection, consolidation, fee limits, or signing behavior change has been approved for implementation.",
+      "proof_or_revisit_trigger": "Produce and review a threat model, limits, authority map, state machine, failure recovery, fee/UTXO evidence and transaction-display proof; obtain approval for exact behavior before changing signing."
+    },
+    {
+      "id": "DEC-004",
+      "type": "proposed_mechanism_exception",
+      "title": "Separate recurring payment requests from standing wallet debit authority",
+      "affected_claim_ids": [
+        "BTM-C013",
+        "BTM-C014",
+        "BTM-C015",
+        "BTM-C003",
+        "BTM-C004",
+        "BTC-C009",
+        "BTC-C026"
+      ],
+      "affected_keys": [
+        "customers.subscription.plan_checkout",
+        "customers.subscription.portal_manage",
+        "customers.subscription.lifecycle_notice",
+        "checkout.invoice.create",
+        "onchain.request.uri_qr",
+        "onchain.refund.fresh_destination"
+      ],
+      "proposal": "Preserve subscription plans, cycle invoices, lifecycle notices and merchant-authorized refunds. Default recurring Bitcoin billing to a fresh customer-initiated request per cycle; do not claim a universal wallet can be auto-debited. Research any opt-in recurring spending authority separately with explicit limits, consent, revocation, destination scope and failure handling.",
+      "preserved_merchant_job": "Bill a customer on a recurring schedule, let them pay each due cycle, manage subscription changes, and resolve missed payments or refunds.",
+      "rationale": "Invoice/subscription workflows exist, but URI or invoice creation does not authorize a merchant to spend from a customer self-custody wallet. Preserving the billing job does not require assuming pull-payment capability.",
+      "user_authorization_status": "merchant recurring billing job is in scope for research; customer-authorized invoice flow is a candidate. Universal automatic debit is not an established user constraint or approved mechanism.",
+      "proof_or_revisit_trigger": "Validate repeat invoice lifecycle and customer initiation first. Any reusable debit authority requires explicit user approval, protocol/wallet compatibility, clear consent/revocation, bounded amount/frequency, and recovery/dispute policy."
+    },
+    {
+      "id": "DEC-005",
+      "type": "proposed_mechanism_exception",
+      "title": "Treat fee and UTXO automation as a bounded protection candidate",
+      "affected_claim_ids": [
+        "BTC-C007",
+        "BTC-C027",
+        "BTC-C028",
+        "BTC-C008",
+        "BTO-C035",
+        "BTO-C041"
+      ],
+      "affected_keys": [
+        "onchain.spend.utxo_economics",
+        "onchain.spend.fee_budget",
+        "onchain.spend.input_reservation",
+        "wallet.send.fee_rate_rbf"
+      ],
+      "proposal": "Current UTXO fee guidance is advisory only. Research protection that can block, reserve, or request approval around uneconomic outputs and fee budgets, including bounded owner-approved transaction automation; do not infer autonomous spend authority or promise zero fees/guaranteed confirmation.",
+      "preserved_merchant_job": "Explain what a receipt is worth now and what it may cost to spend later.",
+      "rationale": "The plan describes the current code boundary as advisory with no autonomous selection/consolidation. That does not veto future automation. User accepted a signing-control proposal in principle; implementation requires exact bounds and architecture proof.",
+      "user_authorization_status": "research candidate: UTXO protection and bounded owner-approved automation are acceptable for architecture study; current code remains advisory-only. Exact policy and implementation approval remain open.",
+      "proof_or_revisit_trigger": "Specify value and fee thresholds, privacy effects, reversibility, exception path, recovery, actual fee variance and owner controls; reviewed design before implementation."
+    },
+    {
+      "id": "DEC-006",
+      "type": "research_gate",
+      "title": "Keep Shop Lightning as a core Bitcoin goal with an honest readiness path",
+      "affected_claim_ids": [
+        "SQC-C021",
+        "BTC-C014",
+        "BTC-C015",
+        "BTC-C016",
+        "BTC-C019",
+        "BTC-C020",
+        "BTC-C022",
+        "BTO-C025",
+        "BTO-C040"
+      ],
+      "affected_keys": [
+        "checkout.bitcoin.lightning_acceptance",
+        "lightning.receive.capacity",
+        "lightning.receive.funding_cost",
+        "lightning.receive.route_fees",
+        "lightning.backup.state_independence",
+        "lightning.exit.force_close.dependencies"
+      ],
+      "proposal": "Treat Shop Lightning as a core receiving goal, opt-in in merchant setup, with capital, inbound-liquidity, availability, persistence/recovery and independent-exit gates. On-chain-first release ordering is a proposed sequencing option; it does not defer the long-term Shop Lightning product goal. Avoid free/prepaid-liquidity and guaranteed-route claims.",
+      "preserved_merchant_job": "Receive Bitcoin over a fast channel at the merchant’s own receiving node, and retain a safe on-chain recovery path.",
+      "rationale": "The user’s product goal includes Shop Lightning; the standalone plan requires capacity/funding/availability/recovery gates. Those gates preserve honest economics without turning a proposed first-release order into product exclusion.",
+      "user_authorization_status": "established goal: Shop Lightning receiving. Setup, liquidity source, exact release sequence and device coverage remain proposals to prove; no specific provider or free-liquidity assumption is approved.",
+      "proof_or_revisit_trigger": "Demonstrate node setup, actual funding and inbound capacity, recurring operation, backups, restore, peer/provider loss, route failures, channel exit, timelock and on-chain fees on the chosen version/device."
+    },
+    {
+      "id": "DEC-007",
+      "type": "proposed_mechanism_exception",
+      "title": "Do not promise offline Bitcoin settlement",
+      "affected_claim_ids": [
+        "BTC-C004",
+        "BTC-C018",
+        "SQC-C017",
+        "SQC-C018",
+        "TOS-C013",
+        "TOS-C016",
+        "CARD-C010"
+      ],
+      "affected_keys": [
+        "onchain.receive.confirmation_state",
+        "lightning.node.availability",
+        "offline.device.mode_detection_recovery",
+        "payments.offline.card_authorization_policy"
+      ],
+      "proposal": "When offline, continue only locally supported sale recording and cash tender. Show an on-chain request as awaiting observation and Lightning as unavailable when node status is stale. Keep card offline behavior provider-specific and report pending/unknown until reconciled.",
+      "preserved_merchant_job": "Continue a cashier interaction during connectivity loss without claiming money arrived or fulfilling twice.",
+      "rationale": "Bitcoin settlement requires network/node observation or later reconciliation; cached invoice/QR is not payment proof. Existing plan requires honest Bitcoin observation states and treats missing responses as unknown.",
+      "user_authorization_status": "established requirement: do not misstate Bitcoin settlement when disconnected or stale. Cash fallback and tender-specific offline UX are supported job candidates; exact device behavior remains to validate.",
+      "proof_or_revisit_trigger": "Network/node interruption, device restart, duplicate attempts and reconnect reconciliation on target hardware; verify no false paid state or duplicate fulfillment."
+    },
+    {
+      "id": "DEC-008",
+      "type": "proposed_mechanism_exception",
+      "title": "Keep privacy local-first and multi-location optional",
+      "affected_claim_ids": [
+        "BTC-C011",
+        "BTC-C031",
+        "BTC-C032",
+        "SHO-C001",
+        "SHO-C030",
+        "TOO-C013",
+        "TOO-C036",
+        "BTO-C013"
+      ],
+      "affected_keys": [
+        "privacy.payer_request_disclosure",
+        "privacy.address_reuse",
+        "pos.operations.multichannel.sync",
+        "multilocation.configuration.owner_access",
+        "integrations.webhook.verify_signature"
+      ],
+      "proposal": "Keep customer identity and sales history local by default, use minimal payment-request metadata, and make multi-location synchronization or webhooks explicit opt-in with location-scoped permissions and disclosed data fields.",
+      "preserved_merchant_job": "Complete private local checkout and reconcile each merchant location; offer an optional shared view when the owner chooses it.",
+      "rationale": "Accepted purity position rules out required telemetry and sales-history upload, while the standalone plan defers universal multi-location claims. Optional service design remains undecided.",
+      "user_authorization_status": "Established privacy direction: no mandatory publisher telemetry or sales-history upload. Multi-location release support has not been established; optional synchronization and customer-profile design remain proposals.",
+      "proof_or_revisit_trigger": "Threat/data-flow review, export and webhook preview, location access matrix, retention choice, and offline behavior before enabling any shared service."
+    },
+    {
+      "id": "DEC-009",
+      "type": "research_gate",
+      "title": "Treat card acceptance as replaceable and production-gated",
+      "affected_claim_ids": [
+        "CARD-C004",
+        "CARD-C007",
+        "CARD-C014",
+        "CARD-C026",
+        "CARD-C036",
+        "SHC-C014",
+        "SQC-C023"
+      ],
+      "affected_keys": [
+        "card.square.production_readiness",
+        "card.square.payment_attempt_reference",
+        "card.square.decline_unknown_reconcile",
+        "card.stripe.unknown_timeout",
+        "card.stripe.backend_key_isolation"
+      ],
+      "proposal": "Use the existing Square Sandbox flow as the adapter starting point, retain a provider-neutral tender interface, and do not claim production card acceptance until account, country, device, reader, outage, refund, reconciliation and privacy gates pass.",
+      "preserved_merchant_job": "Accept cards when the merchant’s chosen provider and physical workflow are supported; preserve cash and Bitcoin choices if card service fails.",
+      "rationale": "Accepted plan explicitly bounds current evidence to virtual-card Sandbox and avoids provider/country/device eligibility claims without fresh evidence.",
+      "user_authorization_status": "established_constraint: card optional; production readiness unproven pending gates. A final vendor or adapter selection remains undecided.",
+      "proof_or_revisit_trigger": "Fresh provider eligibility evidence and an end-to-end physical reader shift including lost responses, duplicate submissions, refunds, revocation, force-stop and relaunch."
+    },
+    {
+      "id": "DEC-010",
+      "type": "proposed_scope_deferral",
+      "title": "Use standalone retail as the first measured validation scope",
+      "affected_claim_ids": [
+        "SHC-C001",
+        "SHC-C031",
+        "SHO-C001",
+        "TOO-C002",
+        "BTM-C008",
+        "BTM-C019",
+        "SQC-C015"
+      ],
+      "affected_keys": [
+        "checkout.pos.order_sync_overview",
+        "pos.operations.multichannel.sync",
+        "orders.devices.same_network_replication",
+        "checkout.pos.catalog_cart",
+        "checkout.pos.receipt_view_print"
+      ],
+      "proposal": "Prioritize a complete standalone retail shift and validate sale, tenders, exception handling, receipts, refunds, staff authority and closeout. Treat restaurant, online, unattended and multi-location capabilities as backlog and evidence targets, not rejected jobs or a permanent product boundary. POS integrations follow as proposed sequencing.",
+      "preserved_merchant_job": "Serve merchants who sell at a counter today and preserve their path to restaurant, online or multi-location workflows as their needs and validation evidence justify.",
+      "rationale": "The plan positions standalone retail before integrations and requires measured evidence; it does not establish a final ceiling on product scope. Existing POS later is the accepted sequence, while target workflows beyond retail remain future research.",
+      "user_authorization_status": "Established sequence: standalone product before existing-POS integrations. A retail shift is the proposed first validation scenario; the exact release scope and later adapter priority remain undecided.",
+      "proof_or_revisit_trigger": "Complete a target retail shift, then gather merchant evidence for restaurant/online/multi-location jobs and evaluate the next workflow and integration independently."
+    },
+    {
+      "id": "DEC-011",
+      "type": "research_gate",
+      "title": "Use familiar operational controls without cloning every incumbent feature",
+      "affected_claim_ids": [
+        "SHC-C015",
+        "TOS-C010",
+        "TOO-C025",
+        "SQO-C039",
+        "BTC-C004",
+        "BTC-C005",
+        "BTC-C018"
+      ],
+      "affected_keys": [
+        "refund.order.partial_or_full",
+        "refunds.multi_payment.distribution",
+        "cash.day_close.steps_and_z_report",
+        "cash_drawer.session.end",
+        "onchain.receive.confirmation_state",
+        "onchain.receive.late_expired"
+      ],
+      "proposal": "Use incumbent research to identify familiar merchant jobs and recovery cues—refunds, staff controls, split tender, local outage recovery, receipts, and closeout—then design Bitcoin-specific states and permissions around self-custody. Do not reject merchant jobs merely because one incumbent uses a custodial, hosted, or fiat mechanism.",
+      "preserved_merchant_job": "Cashiers can finish, void, refund, hand off and close a shift with understandable status and manageable exception steps.",
+      "rationale": "A vendor’s mechanism is not the merchant job. Better UX remains an empirical design question and must preserve established authority/purity goals.",
+      "user_authorization_status": "research gate: merchant UX jobs are candidates for observation; exact screens/defaults are undecided. Self-custody and independent recovery remain established constraints.",
+      "proof_or_revisit_trigger": "Cashier observation and usability tasks with named retail workflow; measure completion time, error rate, exception recovery, receipt accuracy and training burden before design commitment."
+    },
+    {
+      "id": "DEC-012",
+      "type": "proposed_mechanism_exception",
+      "title": "Reject mandatory custodial Square Bitcoin and forced fiat conversion by default",
+      "affected_claim_ids": [
+        "SQC-C023",
+        "SQC-C022",
+        "SQC-C025",
+        "SQC-C026",
+        "BTM-C016",
+        "BTM-C017",
+        "BTM-C013",
+        "BTM-C014",
+        "BTM-C015",
+        "BTC-C001",
+        "BTC-C026"
+      ],
+      "affected_keys": [
+        "payments.bitcoin.square_wallet.custody",
+        "checkout.bitcoin.price_quote_limit",
+        "checkout.bitcoin.refund_gift_card",
+        "checkout.bitcoin.sales_reporting_and_loyalty_side_effect",
+        "onchain.receive.authority",
+        "onchain.refund.fresh_destination",
+        "customers.subscription.plan_checkout"
+      ],
+      "proposal": "Treat a Square-style custodial Bitcoin purchase/acceptance flow, fiat conversion, altcoin settlement or required processor account as a mechanism exception requiring separate consent. Default architecture remains direct Bitcoin receipt to merchant keys. Preserve merchant jobs of direct receive, Bitcoin refund to an owner-approved fresh destination, recurring subscription invoices and related lifecycle management; do not silently replace those jobs with gift-card/fiat/processor credit.",
+      "preserved_merchant_job": "Take Bitcoin directly, retain authority and independent recovery, refund Bitcoin under merchant-approved rules, and bill subscriptions on a clear recurring schedule.",
+      "rationale": "A hosted mechanism may simplify quote, conversion or reporting, but changes custody, funds permission and settlement asset. User-established boundaries favor self-custody, no required company funds permission, and Bitcoin-first product intent.",
+      "user_authorization_status": "established constraint: self-custody, independent recovery, Bitcoin-first and no required company funds permission. Custodial Square Bitcoin, forced fiat conversion and altcoin substitution are not authorized as defaults; no product job is rejected.",
+      "proof_or_revisit_trigger": "Only consider a specific custodial/conversion exception after explicit authorization, complete terms and authority map, asset and fees disclosure, refund/subscription path, exit plan, and direct self-custody fallback."
+    }
+  ]
+}

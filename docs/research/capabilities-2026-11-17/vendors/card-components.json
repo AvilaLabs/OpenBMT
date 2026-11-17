@@ -1,0 +1,1339 @@
+{
+  "schema": "openbmt-capability-research-bundle-v1",
+  "as_of": "2026-11-17",
+  "vendor": "card_components",
+  "segment": "Mobile in-person card acceptance SDK components: Square Mobile Payments SDK (Android baseline documented at v2.7.0; documentation also covers iOS variants) and Stripe Terminal SDK (Android-specific operation guide; related platform variants only where noted). Component benchmark, not full POS products.",
+  "scope": "Research only. Inventory official documented SDK/core operation behaviors relevant to merchant onboarding, permissions, payment attempt lifecycle, device/readers, offline behavior, refunds, capture/tips, receipts, privacy, and recovery. Square Android is the existing implementation starting point in OpenBMT; Stripe Terminal is an alternative component research subject only. No final provider recommendation, account access, or implementation. Platform/version/country/hardware qualifiers apply as stated per source.",
+  "sources": [
+    {
+      "id": "CARD-S001",
+      "url": "https://developer.squareup.com/docs/mobile-payments-sdk/android",
+      "title": "Build on Android",
+      "section": "Quickstart; installation; initialize; authorize; take a payment",
+      "accessed": "2026-11-17",
+      "qualifiers": "Mobile Payments SDK Android; current documentation shows SDK 2.7.0; includes Sandbox and production paths",
+      "evidence_note": "Documents Android SDK dependency, application ID initialization, account authorization, Sandbox mock reader flow, and PaymentManager payment initiation."
+    },
+    {
+      "id": "CARD-S002",
+      "url": "https://developer.squareup.com/docs/mobile-payments-sdk/android/take-payments",
+      "title": "Take a Payment",
+      "section": "Requirements and limitations; payment parameters; starting and canceling payments; receipts",
+      "accessed": "2026-11-17",
+      "qualifiers": "Mobile Payments SDK Android; current page; production requirements differ from Sandbox",
+      "evidence_note": "Documents payment setup, required permissions/device/location/currency checks, attempt IDs, payment callback/cancel behavior, and buyer receipt obligations."
+    },
+    {
+      "id": "CARD-S003",
+      "url": "https://developer.squareup.com/docs/mobile-payments-sdk/android/pair-manage-readers",
+      "title": "Pair and Manage Card Readers",
+      "section": "Settings Manager; Reader Manager; pairing; reader status; unpairing; card entry methods",
+      "accessed": "2026-11-17",
+      "qualifiers": "Mobile Payments SDK Android; physical readers production; Mock Reader UI Sandbox",
+      "evidence_note": "Documents reader discovery/pairing/status and forget behavior; physical reader pairing unavailable in Sandbox."
+    },
+    {
+      "id": "CARD-S004",
+      "url": "https://developer.squareup.com/docs/mobile-payments-sdk/android/offline-payments",
+      "title": "Offline Payments",
+      "section": "Processing modes; offline authorization; processing queued payments; limitations",
+      "accessed": "2026-11-17",
+      "qualifiers": "Mobile Payments SDK Android; production; only eligible readers; Sandbox does not support offline",
+      "evidence_note": "Documents AUTO_DETECT/ONLINE_ONLY/OFFLINE_ONLY, seller opt-in, local queueing, upload behavior, and offline constraints."
+    },
+    {
+      "id": "CARD-S005",
+      "url": "https://developer.squareup.com/docs/mobile-payments-sdk/android/tap-to-pay",
+      "title": "Tap to Pay on Android",
+      "section": "Requirements; enable; accept payments; reader readiness",
+      "accessed": "2026-11-17",
+      "qualifiers": "Mobile Payments SDK Android; Tap to Pay availability and device support depend on Square criteria/country",
+      "evidence_note": "Documents Tap to Pay setup and interaction with paired readers; does not establish eligibility for a particular device or region."
+    },
+    {
+      "id": "CARD-S006",
+      "url": "https://developer.squareup.com/docs/mobile-payments-sdk/android/take-payments",
+      "title": "Take a Payment",
+      "section": "Custom prompt; Data privacy consent",
+      "accessed": "2026-11-17",
+      "qualifiers": "Mobile Payments SDK Android; regional privacy consent requirements apply",
+      "evidence_note": "Documents that the default prompt collects privacy consent while custom prompt integrations must collect and record seller consent before payment."
+    },
+    {
+      "id": "CARD-S007",
+      "url": "https://developer.squareup.com/docs/payments-api/refund-payments",
+      "title": "Refund Payments",
+      "section": "Refunding a payment; API operation requirements",
+      "accessed": "2026-11-17",
+      "qualifiers": "Square Payments and Refunds APIs; API/server refund operation",
+      "evidence_note": "Documents refunding Payment objects, including SDK-created payments; separate API surface from mobile payment capture."
+    },
+    {
+      "id": "CARD-S008",
+      "url": "https://developer.squareup.com/docs/mobile-payments-sdk",
+      "title": "Mobile Payments SDK",
+      "section": "Overview; OAuth permissions; settings",
+      "accessed": "2026-11-17",
+      "qualifiers": "Square Mobile Payments SDK; iOS and Android; OAuth permissions current docs",
+      "evidence_note": "Documents required OAuth permissions, token expiration/refresh and SDK settings; not an authorization to use seller data by default."
+    },
+    {
+      "id": "CARD-S009",
+      "url": "https://developer.squareup.com/docs/mobile-payments-sdk/migrate",
+      "title": "Migrate from Reader SDK",
+      "section": "Split tender; tips; signatures; receipts",
+      "accessed": "2026-11-17",
+      "qualifiers": "Mobile Payments SDK; migration guide summarizes SDK behavior",
+      "evidence_note": "Documents custom split tender, no built-in tip/signature workflow, receipt responsibility and returned receipt URL limitation."
+    },
+    {
+      "id": "CARD-S010",
+      "url": "https://developer.squareup.com/docs/payments-api/update-payment",
+      "title": "Update Payment and Tip Amounts",
+      "section": "Update payment; tip amount",
+      "accessed": "2026-11-17",
+      "qualifiers": "Square Payments API; payment update behavior depends on payment state",
+      "evidence_note": "Documents updating tip amount on eligible payment before completion."
+    },
+    {
+      "id": "CARD-S011",
+      "url": "https://docs.stripe.com/terminal/payments/collect-card-payment?terminal-sdk-platform=android",
+      "title": "Collect card payments",
+      "section": "Android; create PaymentIntent; process payment; cancel; failure handling; capture; reconcile",
+      "accessed": "2026-11-17",
+      "qualifiers": "Stripe Terminal Android SDK docs; page currently says SDK 6.0.0 cancellation distinction",
+      "evidence_note": "Documents Android Terminal lifecycle, PaymentIntent reuse, cancel, decline/unknown recovery, manual capture and reconciliation edge cases."
+    },
+    {
+      "id": "CARD-S012",
+      "url": "https://docs.stripe.com/terminal/features/operate-offline/collect-card-payments",
+      "title": "Collect card payments offline",
+      "section": "Android variant index; mobile-reader and smart-reader platform variants",
+      "accessed": "2026-11-17",
+      "qualifiers": "Stripe Terminal Android; the documentation index lists Android variants by reader type; detailed content is reader/platform-specific.",
+      "evidence_note": "Inspected official guide index and Android variant links. This bundle does not assert exact per-device offline limits without reviewing the variant content."
+    },
+    {
+      "id": "CARD-S013",
+      "url": "https://docs.stripe.com/terminal/payments/regional",
+      "title": "Regional considerations",
+      "section": "Availability table; country requirements; local currency; Tap to Pay regional notes",
+      "accessed": "2026-11-17",
+      "qualifiers": "Stripe Terminal; current country and reader matrix; account and reader location same country",
+      "evidence_note": "Documents supported reader families vary by country and both Stripe account and reader location must be same country; local currency rules apply."
+    },
+    {
+      "id": "CARD-S014",
+      "url": "https://docs.stripe.com/terminal/payments/collect-card-payment?terminal-sdk-platform=android",
+      "title": "Collect card payments",
+      "section": "Collect payments with Tap to Pay on Android",
+      "accessed": "2026-11-17",
+      "qualifiers": "Stripe Terminal Android; device and market eligibility must be verified against current official list",
+      "evidence_note": "The Android guide documents Tap to Pay display/payment behavior; market/device eligibility is not established for any untested target device."
+    },
+    {
+      "id": "CARD-S015",
+      "url": "https://docs.stripe.com/api/refunds/create",
+      "title": "Create a refund",
+      "section": "Refund a charge or PaymentIntent; partial refunds; response object",
+      "accessed": "2026-11-17",
+      "qualifiers": "Stripe Terminal payments; server-side Stripe API refund flow",
+      "evidence_note": "The API reference documents card refunds against a Charge or PaymentIntent, including partial refunds and refund object result; this is a server-side API operation."
+    },
+    {
+      "id": "CARD-S016",
+      "url": "https://docs.stripe.com/terminal/features/collecting-tips/on-receipt",
+      "title": "Collect tips on a receipt",
+      "section": "Availability; manual capture; on-receipt tip limits",
+      "accessed": "2026-11-17",
+      "qualifiers": "United States only; eligible MCC and Visa/Mastercard/Discover/Amex brands; manual capture and overcapture eligibility apply.",
+      "evidence_note": "Documents on-receipt tip collection by eligible US merchants through overcapture of manually captured Terminal PaymentIntents, including limits."
+    },
+    {
+      "id": "CARD-S017",
+      "url": "https://docs.stripe.com/terminal/readers/mobile",
+      "title": "Mobile readers",
+      "section": "Reader connection; discover and connect mobile readers",
+      "accessed": "2026-11-17",
+      "qualifiers": "Stripe Terminal Android/iOS mobile-reader documentation; platform and reader model dependent",
+      "evidence_note": "Documents mobile reader discovery/connection and connection token integration; exact accessory compatibility is scoped by reader/platform."
+    },
+    {
+      "id": "CARD-S018",
+      "url": "https://docs.stripe.com/terminal/features/reader-behavior",
+      "title": "Reader behavior",
+      "section": "Reader events; display/input prompts; disconnect behavior",
+      "accessed": "2026-11-17",
+      "qualifiers": "Stripe Terminal SDK; exact events vary by reader model and integration",
+      "evidence_note": "Documents required app-side handling of prompts/input and reader status behavior."
+    },
+    {
+      "id": "CARD-S019",
+      "url": "https://docs.stripe.com/terminal/quickstart?terminal-sdk-platform=android",
+      "title": "Terminal quickstart",
+      "section": "Backend connection token; app initialization; location and reader connection",
+      "accessed": "2026-11-17",
+      "qualifiers": "Stripe Terminal Android SDK; requires backend endpoint for connection tokens and Stripe account",
+      "evidence_note": "Documents SDK initialization, connection token provider, server-backed setup and sample integration."
+    },
+    {
+      "id": "CARD-S020",
+      "url": "https://docs.stripe.com/terminal/payments/collect-card-payment?terminal-sdk-platform=android",
+      "title": "Collect card payments",
+      "section": "Card-present receipt fields and payment reconciliation",
+      "accessed": "2026-11-17",
+      "qualifiers": "Stripe Terminal Android; receipt information supplied via PaymentIntent/Charge; fulfillment/reconciliation remains merchant responsibility",
+      "evidence_note": "Documents Stripe payment result statuses and reconciliation of uncaptured PaymentIntents with order records."
+    }
+  ],
+  "coverage": [
+    {
+      "id": "CARD-U001",
+      "topic": "Square Android SDK setup, auth, Sandbox and base payment lifecycle",
+      "url": "https://developer.squareup.com/docs/mobile-payments-sdk/android",
+      "status": "reviewed",
+      "reason": "Inspected Android quickstart at current version 2.7.0, auth modes, mock Sandbox reader and payment setup/start.",
+      "source_ids": [
+        "CARD-S001"
+      ],
+      "claim_ids": [
+        "CARD-C001",
+        "CARD-C002",
+        "CARD-C003",
+        "CARD-C004",
+        "CARD-C005"
+      ]
+    },
+    {
+      "id": "CARD-U002",
+      "topic": "Square Android taking/canceling payments and receipts",
+      "url": "https://developer.squareup.com/docs/mobile-payments-sdk/android/take-payments",
+      "status": "reviewed",
+      "reason": "Inspected Android requirements, attempt identifiers, unknown-response reconciliation, cancellation and required receipt option.",
+      "source_ids": [
+        "CARD-S002"
+      ],
+      "claim_ids": [
+        "CARD-C006",
+        "CARD-C007",
+        "CARD-C008",
+        "CARD-C009",
+        "CARD-C014",
+        "CARD-C018"
+      ]
+    },
+    {
+      "id": "CARD-U003",
+      "topic": "Square Android production setup, OAuth scopes and account authorization",
+      "url": "https://developer.squareup.com/docs/mobile-payments-sdk",
+      "status": "reviewed",
+      "reason": "Inspected scope list and token expiry; production requirements include enabled account, OAuth and application signing.",
+      "source_ids": [
+        "CARD-S001",
+        "CARD-S008"
+      ],
+      "claim_ids": [
+        "CARD-C002",
+        "CARD-C003",
+        "CARD-C004"
+      ]
+    },
+    {
+      "id": "CARD-U004",
+      "topic": "Square Android reader pair/status/forget and Tap to Pay",
+      "url": "https://developer.squareup.com/docs/mobile-payments-sdk/android/pair-manage-readers",
+      "status": "reviewed",
+      "reason": "Inspected reader manager and current reader state, production-only physical pairing, forget limitations, methods and Tap to Pay handoff.",
+      "source_ids": [
+        "CARD-S003",
+        "CARD-S005"
+      ],
+      "claim_ids": [
+        "CARD-C011",
+        "CARD-C012",
+        "CARD-C013",
+        "CARD-C020"
+      ]
+    },
+    {
+      "id": "CARD-U005",
+      "topic": "Square Android offline payment operation",
+      "url": "https://developer.squareup.com/docs/mobile-payments-sdk/android/offline-payments",
+      "status": "reviewed",
+      "reason": "Inspected modes, offline requirements, local queue/upload behavior and Sandbox/reader constraints.",
+      "source_ids": [
+        "CARD-S004"
+      ],
+      "claim_ids": [
+        "CARD-C010"
+      ]
+    },
+    {
+      "id": "CARD-U006",
+      "topic": "Square privacy consent and custom payment prompts",
+      "url": "https://developer.squareup.com/docs/mobile-payments-sdk/android/data-privacy-consent",
+      "status": "reviewed",
+      "reason": "Inspected consent branch relevant to custom prompt integration.",
+      "source_ids": [
+        "CARD-S002"
+      ],
+      "claim_ids": [
+        "CARD-C019"
+      ]
+    },
+    {
+      "id": "CARD-U007",
+      "topic": "Square refund and capture/tip APIs",
+      "url": "https://developer.squareup.com/docs/payments-api/refund-payments",
+      "status": "reviewed",
+      "reason": "Inspected refund API and the separate SDK/capture/tips guide; these are distinct API operations.",
+      "source_ids": [
+        "CARD-S007",
+        "CARD-S009",
+        "CARD-S010"
+      ],
+      "claim_ids": [
+        "CARD-C015",
+        "CARD-C016",
+        "CARD-C017"
+      ]
+    },
+    {
+      "id": "CARD-U008",
+      "topic": "Stripe Terminal Android PaymentIntent create/process/cancel/decline/unknown/capture/reconcile",
+      "url": "https://docs.stripe.com/terminal/payments/collect-card-payment?terminal-sdk-platform=android",
+      "status": "reviewed",
+      "reason": "Inspected full core Android operation guide including same-intent retry, cancellation, result statuses, server capture and reconciliation.",
+      "source_ids": [
+        "CARD-S011"
+      ],
+      "claim_ids": [
+        "CARD-C021",
+        "CARD-C022",
+        "CARD-C023",
+        "CARD-C024",
+        "CARD-C025",
+        "CARD-C026",
+        "CARD-C027"
+      ]
+    },
+    {
+      "id": "CARD-U009",
+      "topic": "Stripe Terminal offline collection",
+      "url": "https://docs.stripe.com/terminal/features/operate-offline/collect-card-payments",
+      "status": "unresolved",
+      "reason": "Inspected official guide index and confirmed Android variants by reader type; the Android variant page did not load in this research session, so platform-specific offline behavior remains unresolved.",
+      "source_ids": [
+        "CARD-S012"
+      ],
+      "claim_ids": [
+        "CARD-C028"
+      ]
+    },
+    {
+      "id": "CARD-U010",
+      "topic": "Stripe Terminal region and reader availability",
+      "url": "https://docs.stripe.com/terminal/payments/regional",
+      "status": "reviewed",
+      "reason": "Inspected country availability table, account/location country pairing and local-currency constraint.",
+      "source_ids": [
+        "CARD-S013"
+      ],
+      "claim_ids": [
+        "CARD-C029",
+        "CARD-C030",
+        "CARD-C037"
+      ]
+    },
+    {
+      "id": "CARD-U011",
+      "topic": "Stripe Terminal Android Tap to Pay",
+      "url": "https://docs.stripe.com/terminal/payments/collect-card-payment?terminal-sdk-platform=android",
+      "status": "reviewed",
+      "reason": "Inspected the Android core payment guide and its Tap to Pay on Android section; a per-device eligibility claim remains unresolved.",
+      "source_ids": [
+        "CARD-S011",
+        "CARD-S013"
+      ],
+      "claim_ids": [
+        "CARD-C030"
+      ]
+    },
+    {
+      "id": "CARD-U012",
+      "topic": "Stripe Terminal Android mobile reader discovery/connection and prompts",
+      "url": "https://docs.stripe.com/terminal/readers/mobile",
+      "status": "reviewed",
+      "reason": "Inspected mobile reader setup and SDK reader event/display guidance; hardware/platform details remain model scoped.",
+      "source_ids": [
+        "CARD-S017",
+        "CARD-S018"
+      ],
+      "claim_ids": [
+        "CARD-C031",
+        "CARD-C032"
+      ]
+    },
+    {
+      "id": "CARD-U013",
+      "topic": "Stripe Terminal card-present refund and on-receipt tips",
+      "url": "https://docs.stripe.com/terminal/payments/refund",
+      "status": "reviewed",
+      "reason": "Inspected official refund path and US-qualified receipt-tip capture documentation.",
+      "source_ids": [
+        "CARD-S015",
+        "CARD-S016"
+      ],
+      "claim_ids": [
+        "CARD-C033",
+        "CARD-C034"
+      ]
+    },
+    {
+      "id": "CARD-U014",
+      "topic": "Stripe Terminal onboarding, backend token and key isolation",
+      "url": "https://docs.stripe.com/terminal/quickstart?terminal-sdk-platform=android",
+      "status": "reviewed",
+      "reason": "Inspected quickstart setup and server-side connection-token pattern; excludes unrelated Stripe products.",
+      "source_ids": [
+        "CARD-S019"
+      ],
+      "claim_ids": [
+        "CARD-C021",
+        "CARD-C036",
+        "CARD-C037"
+      ]
+    },
+    {
+      "id": "CARD-U015",
+      "topic": "Stripe Terminal receipt data and merchant-side receipt delivery",
+      "url": "https://docs.stripe.com/terminal/payments/collect-card-payment?terminal-sdk-platform=android",
+      "status": "reviewed",
+      "reason": "Inspected payment result and server reconciliation section; receipt delivery/peripherals not established by SDK guide.",
+      "source_ids": [
+        "CARD-S020"
+      ],
+      "claim_ids": [
+        "CARD-C035"
+      ]
+    },
+    {
+      "id": "CARD-U016",
+      "topic": "Excluded Stripe Billing/Connect/banking and web checkout products",
+      "url": "https://docs.stripe.com/terminal",
+      "status": "excluded",
+      "reason": "Outside assigned component scope; Stripe Terminal card-present SDK only. No claims imported from Stripe Billing, Connect, banking, Payment Element/web checkout, or other provider products.",
+      "source_ids": [
+        "CARD-S003",
+        "CARD-S005",
+        "CARD-S013",
+        "CARD-S014"
+      ],
+      "claim_ids": [
+        "CARD-C004",
+        "CARD-C011",
+        "CARD-C013",
+        "CARD-C029",
+        "CARD-C030"
+      ]
+    },
+    {
+      "id": "CARD-U017",
+      "topic": "Unresolved target-specific card account, hardware and country eligibility",
+      "url": "https://developer.squareup.com/docs/mobile-payments-sdk/android/pair-manage-readers",
+      "status": "unresolved",
+      "reason": "No merchant account/device/country was supplied; official eligibility must be checked for target release. Sandbox and documentation alone cannot establish it.",
+      "source_ids": [
+        "CARD-S003",
+        "CARD-S005",
+        "CARD-S013",
+        "CARD-S014"
+      ],
+      "claim_ids": []
+    }
+  ],
+  "claims": [
+    {
+      "id": "CARD-C001",
+      "canonical_key": "card.square.android.install_initialize",
+      "category": "onboarding",
+      "merchant_outcome": "Install and initialize the Square Android payment component",
+      "actor": "developer",
+      "trigger": "Application startup",
+      "behavior": "Add Square Maven dependencies and initialize MobilePaymentsSdk with developer application ID.",
+      "preconditions": "Android app and Square developer application ID.",
+      "qualifiers": "Current Android docs sample dependency version 2.7.0; SDK/API versions can change.",
+      "recovery_edge_cases": "Wrong app ID/environment prevents successful SDK operations.",
+      "source_ids": [
+        "CARD-S001"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Avoid Android startup failures by validating the configured application ID/environment before showing the merchant a payment-ready state.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card SDK installation and provider credential work does not improve Bitcoin settlement; keep the card integration optional so Bitcoin acceptance can initialize and operate without provider credentials.",
+      "bitcoin_tradeoffs": "Separate dependency and credential boundaries reduce card-provider coupling but require the app to maintain two checkout paths and clear tender-specific recovery.",
+      "acceptance_test": "With a valid Android application ID and sandbox configuration, SDK initialization reaches the documented ready state; with a mismatched ID/environment, startup surfaces the initialization failure and does not offer card tender.",
+      "capability": "Install and initialize the Square Android payment component"
+    },
+    {
+      "id": "CARD-C002",
+      "canonical_key": "card.square.account_authorize",
+      "category": "staff_permissions",
+      "merchant_outcome": "Authorize the SDK for a Square seller and location",
+      "actor": "seller/developer",
+      "trigger": "Before payment operations",
+      "behavior": "AuthorizationManager.authorize receives access token and location ID; production documentation says use OAuth, not a deployed personal access token.",
+      "preconditions": "Seller account, access token, location ID.",
+      "qualifiers": "Sandbox personal access token is described for tests only; production auth must use OAuth.",
+      "recovery_edge_cases": "Handle no network/usage errors and reauthorize after expired authorization.",
+      "source_ids": [
+        "CARD-S001",
+        "CARD-S008"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce seller setup retries by making the chosen seller account/location explicit and distinguishing expired authorization from network failure.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Square/Stripe seller authorization and production approval do not authorize Bitcoin; retain separate account credentials and allow the Bitcoin path when card-provider authorization is unavailable.",
+      "bitcoin_tradeoffs": "Provider-specific identity and permissions must stay isolated; staff may need separate setup and reconciliation steps for each tender.",
+      "acceptance_test": "Authorize with a valid seller token and location, then verify readiness; repeat with expired authorization and verify the documented authorization failure is surfaced with reauthorization path.",
+      "capability": "Authorize the SDK for a Square seller and location"
+    },
+    {
+      "id": "CARD-C003",
+      "canonical_key": "card.square.oauth_scopes",
+      "category": "staff_permissions",
+      "merchant_outcome": "Request least required Square OAuth permissions",
+      "actor": "seller/developer",
+      "trigger": "Seller authorizes integration",
+      "behavior": "Docs list MERCHANT_PROFILE_READ, PAYMENTS_WRITE, PAYMENTS_WRITE_IN_PERSON minimum; additional permissions for fees/surcharges and other APIs.",
+      "preconditions": "OAuth app and seller consent.",
+      "qualifiers": "Square OAuth token expires after 30 days; feature-specific scopes may add requirements.",
+      "recovery_edge_cases": "Refresh token/access lifecycle must be handled; revoked/expired authorization behavior needs app handling.",
+      "source_ids": [
+        "CARD-S008"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce consent friction by requesting only documented payment scopes and prompting again when access expires or is revoked.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Square/Stripe seller authorization and production approval do not authorize Bitcoin; retain separate account credentials and allow the Bitcoin path when card-provider authorization is unavailable.",
+      "bitcoin_tradeoffs": "Provider-specific identity and permissions must stay isolated; staff may need separate setup and reconciliation steps for each tender.",
+      "acceptance_test": "Authorize an OAuth app with the three documented minimum scopes; verify payment works, a feature requiring an extra scope is gated, and expired access is refreshed or reauthorized.",
+      "capability": "Request least required Square OAuth permissions"
+    },
+    {
+      "id": "CARD-C004",
+      "canonical_key": "card.square.production_readiness",
+      "category": "onboarding",
+      "merchant_outcome": "Meet Square production prerequisites",
+      "actor": "developer/seller",
+      "trigger": "Before production card use",
+      "behavior": "Production requires enabled payment processing, app signature submission for Android SDK 2.1+, SDK initialized with production application ID, and seller authorization.",
+      "preconditions": "Account activation, production app credentials, application signature, reader permissions.",
+      "qualifiers": "Current version requirements and Square eligibility rules apply.",
+      "recovery_edge_cases": "Sandbox success does not satisfy production approval or account/device support.",
+      "source_ids": [
+        "CARD-S001",
+        "CARD-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Prevent launch-day payment failures by presenting each production prerequisite as a separate setup status: account processing, signature, production app ID and seller authorization.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Square/Stripe seller authorization and production approval do not authorize Bitcoin; retain separate account credentials and allow the Bitcoin path when card-provider authorization is unavailable.",
+      "bitcoin_tradeoffs": "Provider-specific identity and permissions must stay isolated; staff may need separate setup and reconciliation steps for each tender.",
+      "acceptance_test": "Using sandbox-only setup must not be treated as production-ready; verify missing signature or disabled payment processing blocks production readiness while each completed prerequisite is recorded.",
+      "capability": "Meet Square production prerequisites"
+    },
+    {
+      "id": "CARD-C005",
+      "canonical_key": "card.square.sandbox_mock_reader",
+      "category": "hardware",
+      "merchant_outcome": "Test virtual card flows in Square Sandbox",
+      "actor": "developer",
+      "trigger": "Development and QA",
+      "behavior": "Mock Reader UI simulates readers and payment outcomes; physical readers are not supported in Sandbox.",
+      "preconditions": "Sandbox app ID/account and Mock Reader dependency.",
+      "qualifiers": "Square Sandbox only; virtual mock reader.",
+      "recovery_edge_cases": "Move separately to production authorization and physical-device pairing for production claims.",
+      "source_ids": [
+        "CARD-S001",
+        "CARD-S003"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Shorten integration QA by exposing mock-reader status and outcome selection while clearly labeling that it does not exercise a physical reader.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Mock card reader only verifies card SDK behavior; keep Bitcoin payment tests and production readiness separate.",
+      "bitcoin_tradeoffs": "A card sandbox result does not validate Bitcoin invoice settlement, and vice versa; the merchant must test each path separately.",
+      "acceptance_test": "In Sandbox, run mock success and decline outcomes and verify results reach the app; confirm physical reader pairing is unavailable and no production compatibility claim is inferred.",
+      "capability": "Test virtual card flows in Square Sandbox"
+    },
+    {
+      "id": "CARD-C006",
+      "canonical_key": "card.square.payment_prompt",
+      "category": "checkout",
+      "merchant_outcome": "Present Square card-entry payment UI",
+      "actor": "cashier/buyer",
+      "trigger": "Cashier starts a card attempt",
+      "behavior": "Square default prompt offers currently available reader methods; a custom prompt is possible but app must monitor method changes.",
+      "preconditions": "Authorized SDK; configured PaymentParameters and PromptParameters.",
+      "qualifiers": "Only one payment can be in process at a time.",
+      "recovery_edge_cases": "Unavailable entry methods or another in-flight operation should block/recover with visible state.",
+      "source_ids": [
+        "CARD-S001",
+        "CARD-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce cashier hesitation by presenting only the entry methods currently reported available and disabling a second attempt while one is active.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card prompts, reader inputs and pairing do not directly improve Bitcoin acceptance; preserve an independent Bitcoin tender option when the card reader is unavailable.",
+      "bitcoin_tradeoffs": "A shared cashier interface can reduce training, but card reader readiness must not gate Bitcoin or mislabel a Bitcoin action as a card-reader method.",
+      "acceptance_test": "Start one payment and verify another cannot start concurrently; detach a reader or change available methods and verify the prompt refreshes to the documented state.",
+      "capability": "Present Square card-entry payment UI"
+    },
+    {
+      "id": "CARD-C007",
+      "canonical_key": "card.square.payment_attempt_reference",
+      "category": "payments",
+      "merchant_outcome": "Associate each SDK attempt with stable app references",
+      "actor": "cashier/system",
+      "trigger": "Before payment starts",
+      "behavior": "PaymentParameters include amount, paymentAttemptId and optional referenceId; SDK creates idempotency key for the attempt.",
+      "preconditions": "Unique attempt ID and amount.",
+      "qualifiers": "SDK docs describe idempotency behavior and 24-hour key retention for lookup.",
+      "recovery_edge_cases": "For missing server response, query payment status using referenceId/ListPayments before retrying; avoid duplicate charge.",
+      "source_ids": [
+        "CARD-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce duplicate-charge recovery time by persisting the attempt and reference IDs with the order before handing off to card entry.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card provider idempotency and status reconciliation do not improve Bitcoin settlement directly; keep card attempt IDs separate from Bitcoin invoice/payment identifiers while preserving one merchant order reference.",
+      "bitcoin_tradeoffs": "A shared order record simplifies merchant reconciliation, but reusing provider idempotency keys across rails is invalid and can obscure which payment completed.",
+      "acceptance_test": "Start an attempt with stable paymentAttemptId/referenceId, simulate a lost response, query by reference before retry, and verify no second charge is created.",
+      "capability": "Associate each SDK attempt with stable app references"
+    },
+    {
+      "id": "CARD-C008",
+      "canonical_key": "card.square.payment_outcome",
+      "category": "payments",
+      "merchant_outcome": "Receive completed payment or structured payment failure",
+      "actor": "cashier/system",
+      "trigger": "Buyer presents card or chooses supported method",
+      "behavior": "PaymentManager callback returns Payment or PaymentError; successful Payment is accessible in Square Dashboard/Payments API.",
+      "preconditions": "Started payment and SDK callback lifecycle.",
+      "qualifiers": "SDK operation takes screen during buyer card interaction.",
+      "recovery_edge_cases": "Application must render clear status and reconcile after lost/ambiguous callback.",
+      "source_ids": [
+        "CARD-S001",
+        "CARD-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Help staff distinguish approved, declined and unresolved outcomes before marking the sale paid.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card result, cancellation, consent or receipt behavior is provider-specific; maintain separate Bitcoin payment status and receipt/consent record while retaining the same merchant order.",
+      "bitcoin_tradeoffs": "A common order view helps staff, but provider callback and receipt semantics cannot be reused as evidence of Bitcoin settlement or receipt delivery.",
+      "acceptance_test": "Verify Payment callback is recorded as success; inject PaymentError and ambiguous/missing callback states and ensure neither is displayed as completed until reconciled.",
+      "capability": "Receive completed payment or structured payment failure"
+    },
+    {
+      "id": "CARD-C009",
+      "canonical_key": "card.square.cancel",
+      "category": "payments",
+      "merchant_outcome": "Cancel or classify an in-progress payment",
+      "actor": "cashier/system",
+      "trigger": "Cashier cancels or app is interrupted",
+      "behavior": "PaymentHandle.cancel may return CANCELED, NO_PAYMENT_IN_PROGRESS or NOT_CANCELABLE; backgrounding cancels only while still cancelable.",
+      "preconditions": "PaymentHandle from startPaymentActivity.",
+      "qualifiers": "Once sent to Square, backgrounding does not stop payment; callback still receives final result.",
+      "recovery_edge_cases": "NOT_CANCELABLE or uncertain outcome requires payment status reconciliation before retry.",
+      "source_ids": [
+        "CARD-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Prevent a second charge after cancellation by showing whether cancellation succeeded, was too late, or found no active payment.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card result, cancellation, consent or receipt behavior is provider-specific; maintain separate Bitcoin payment status and receipt/consent record while retaining the same merchant order.",
+      "bitcoin_tradeoffs": "A common order view helps staff, but provider callback and receipt semantics cannot be reused as evidence of Bitcoin settlement or receipt delivery.",
+      "acceptance_test": "Cancel while payment is active and verify CANCELED; repeat after request is not cancelable and verify final callback/status is reconciled before retry.",
+      "capability": "Cancel or classify an in-progress payment"
+    },
+    {
+      "id": "CARD-C010",
+      "canonical_key": "card.square.offline_processing",
+      "category": "offline_availability",
+      "merchant_outcome": "Choose online, offline, or automatic processing path",
+      "actor": "cashier/system",
+      "trigger": "Payment attempt initialization",
+      "behavior": "Processing mode supports ONLINE_ONLY, OFFLINE_ONLY, AUTO_DETECT; automatic selects online/offline based on conditions.",
+      "preconditions": "Offline payments enabled by seller and eligible setup.",
+      "qualifiers": "Only specified recent reader models; Sandbox offline unsupported; offline amounts/storage limits and country/device rules apply.",
+      "recovery_edge_cases": "Offline payments queue on device and upload when process is running/connected; app termination does not schedule queued upload; monitor pending/rejected states.",
+      "source_ids": [
+        "CARD-S004"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce offline-payment loss by showing seller opt-in, reader eligibility, queued/pending status and upload outcome before staff closes the sale.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Bitcoin may offer a separate acceptance path when provider connectivity or offline eligibility blocks card acceptance, subject to its own network and confirmation policy.",
+      "bitcoin_tradeoffs": "Bitcoin has separate connectivity/confirmation and reversal properties; do not represent it as equivalent to a queued card authorization or promise acceptance when its own network is unavailable.",
+      "acceptance_test": "For a documented eligible Square reader in offline mode, record queued status, reconnect while app remains running and verify upload result; verify unsupported Sandbox/offline configuration is blocked.",
+      "capability": "Choose online, offline, or automatic processing path"
+    },
+    {
+      "id": "CARD-C011",
+      "canonical_key": "card.square.reader_pairing_status",
+      "category": "hardware",
+      "merchant_outcome": "Pair reader and show readiness, methods, and connection changes",
+      "actor": "cashier",
+      "trigger": "Reader setup or status change",
+      "behavior": "ReaderManager pairs, lists, observes statuses, and exposes reader model/methods; paired readers remembered/reconnect for authorized seller.",
+      "preconditions": "Production reader and required device permissions.",
+      "qualifiers": "Physical readers unavailable in Sandbox; reader pairing is production-only.",
+      "recovery_edge_cases": "Handle scan timeout, unavailable/faulty/firmware states and reconnect result; do not offer non-ready methods.",
+      "source_ids": [
+        "CARD-S003",
+        "CARD-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce reader setup delays by exposing discovery, pairing progress and ready/faulty/unavailable status in the cashier flow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Reader pairing/forgetting and card market eligibility are irrelevant to Bitcoin node or wallet readiness; allow those controls to fail independently.",
+      "bitcoin_tradeoffs": "Hardware-specific card availability does not establish Bitcoin-device or country eligibility; separate capability checks are needed.",
+      "acceptance_test": "Pair a supported physical reader in production, verify READY exposes its reported methods, then disconnect it and confirm checkout stops offering those methods until restored.",
+      "capability": "Pair reader and show readiness, methods, and connection changes"
+    },
+    {
+      "id": "CARD-C012",
+      "canonical_key": "card.square.reader_forget_revoke",
+      "category": "security_privacy",
+      "merchant_outcome": "Disconnect/forget an eligible paired reader",
+      "actor": "cashier/owner",
+      "trigger": "Reader reassignment or removal",
+      "behavior": "readerManager.forget returns forgettable readers to unpaired state; Tap to Pay/magstripe are not forgettable.",
+      "preconditions": "Paired reader and SDK authorization.",
+      "qualifiers": "Per-device differences; forgetting a reader is not same as revoking seller OAuth access.",
+      "recovery_edge_cases": "Check isForgettable; separately deauthorize/revoke Square OAuth integration when access should end.",
+      "source_ids": [
+        "CARD-S003",
+        "CARD-S008"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce reader handoff risk by showing which devices can be forgotten and separating reader removal from seller-account access revocation.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Reader pairing/forgetting and card market eligibility are irrelevant to Bitcoin node or wallet readiness; allow those controls to fail independently.",
+      "bitcoin_tradeoffs": "Hardware-specific card availability does not establish Bitcoin-device or country eligibility; separate capability checks are needed.",
+      "acceptance_test": "Forget an eligible paired reader and verify it returns to unpaired; confirm Tap to Pay and magstripe are reported non-forgettable and OAuth revocation is a separate action.",
+      "capability": "Disconnect/forget an eligible paired reader"
+    },
+    {
+      "id": "CARD-C013",
+      "canonical_key": "card.square.tap_to_pay",
+      "category": "hardware",
+      "merchant_outcome": "Accept contactless card payments using supported Android device",
+      "actor": "cashier/buyer",
+      "trigger": "No reader or Tap to Pay selected",
+      "behavior": "Tap to Pay Android uses same payment flow; ReaderManager reports device capability and available contactless method.",
+      "preconditions": "Compatible device, enabled feature, current SDK, authorization and location.",
+      "qualifiers": "Country/device eligibility varies; paired Square reader may need to be forgotten/disconnected to display Tap to Pay prompt.",
+      "recovery_edge_cases": "Check READY and available card-entry methods before offering; device/account failures need an alternate tender.",
+      "source_ids": [
+        "CARD-S005",
+        "CARD-S003"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Avoid presenting Tap to Pay where device, country or reader state is unverified; show eligibility as unknown until checked for the actual deployment.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card prompts, reader inputs and pairing do not directly improve Bitcoin acceptance; preserve an independent Bitcoin tender option when the card reader is unavailable.",
+      "bitcoin_tradeoffs": "A shared cashier interface can reduce training, but card reader readiness must not gate Bitcoin or mislabel a Bitcoin action as a card-reader method.",
+      "acceptance_test": "On a documented eligible device/region, verify Tap to Pay appears only when capability is ready; with paired reader state that suppresses the prompt, show the documented disconnect/forget path.",
+      "capability": "Accept contactless card payments using supported Android device"
+    },
+    {
+      "id": "CARD-C014",
+      "canonical_key": "card.square.decline_unknown_reconcile",
+      "category": "payments",
+      "merchant_outcome": "Resolve declined or lost-response outcomes without duplicate charges",
+      "actor": "cashier/owner",
+      "trigger": "Decline, timeout or missing response",
+      "behavior": "Re-use payment attempt ID lookup/idempotency key and query ListPayments by referenceId/fields to determine existing status before another attempt.",
+      "preconditions": "Stored stable reference/attempt ID.",
+      "qualifiers": "Square docs state idempotency key retention and fallback if key unavailable.",
+      "recovery_edge_cases": "Unknown remains unresolved until ListPayments/status reconciliation; retry may need a new attempt after known prior incomplete payment.",
+      "source_ids": [
+        "CARD-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce duplicate recovery attempts by making unknown status a hold state and showing the reconciliation result tied to the original reference.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card provider idempotency and status reconciliation do not improve Bitcoin settlement directly; keep card attempt IDs separate from Bitcoin invoice/payment identifiers while preserving one merchant order reference.",
+      "bitcoin_tradeoffs": "A shared order record simplifies merchant reconciliation, but reusing provider idempotency keys across rails is invalid and can obscure which payment completed.",
+      "acceptance_test": "Create a timeout with known referenceId; query ListPayments; if existing payment appears, reconcile it instead of retrying; if absent, follow documented new-attempt flow.",
+      "capability": "Resolve declined or lost-response outcomes without duplicate charges"
+    },
+    {
+      "id": "CARD-C015",
+      "canonical_key": "card.square.refund",
+      "category": "refunds_returns",
+      "merchant_outcome": "Refund eligible payment through Square Refunds API",
+      "actor": "owner",
+      "trigger": "Approved refund request",
+      "behavior": "Refunds API can refund SDK-created payment; creates separate refund operation and object.",
+      "preconditions": "Payment ID, refund API integration and permissions.",
+      "qualifiers": "Refund is not a Mobile Payments SDK action; API availability/limits vary by transaction/provider policy.",
+      "recovery_edge_cases": "Track pending/failure and reconcile Refund object; do not equate local request with paid refund.",
+      "source_ids": [
+        "CARD-S007"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce refund follow-up by showing the Square refund request separately from the final refund object/status.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card capture/refund lifecycle does not apply to Bitcoin settlement; keep a Bitcoin refund/return workflow explicit and allow card operations to remain provider-controlled.",
+      "bitcoin_tradeoffs": "Bitcoin refunds may require a separate outbound transfer and fee/approval flow; merchant must not assume card-style reversal or provider refund state.",
+      "acceptance_test": "Submit refund API request for an eligible SDK-created payment and verify refund object/status is persisted; a pending or failed response must not be shown as completed refund.",
+      "capability": "Refund eligible payment through Square Refunds API"
+    },
+    {
+      "id": "CARD-C016",
+      "canonical_key": "card.square.capture",
+      "category": "payments",
+      "merchant_outcome": "Delay payment capture for eligible checkout workflow",
+      "actor": "owner/system",
+      "trigger": "Order fulfillment or receipt tip requires delayed completion",
+      "behavior": "Set autocomplete false to authorize then later complete or cancel; delayAction can cancel or complete after configured duration.",
+      "preconditions": "PaymentParameters support delayed capture and server/API update where applicable.",
+      "qualifiers": "Duration default/maximum and transaction type constraints apply; not general long-lived authorization.",
+      "recovery_edge_cases": "Capture/complete status can be reconciled; stale uncaptured authorization may expire.",
+      "source_ids": [
+        "CARD-S009",
+        "CARD-S010"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce uncaptured-payment loss by showing authorization age, capture deadline and explicit complete/cancel actions to the operator.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card capture/refund lifecycle does not apply to Bitcoin settlement; keep a Bitcoin refund/return workflow explicit and allow card operations to remain provider-controlled.",
+      "bitcoin_tradeoffs": "Bitcoin refunds may require a separate outbound transfer and fee/approval flow; merchant must not assume card-style reversal or provider refund state.",
+      "acceptance_test": "Create eligible delayed-capture payment, complete before documented expiry and verify completed state; separately cancel and verify order does not remain marked paid.",
+      "capability": "Delay payment capture for eligible checkout workflow"
+    },
+    {
+      "id": "CARD-C017",
+      "canonical_key": "card.square.tips",
+      "category": "pricing_tax",
+      "merchant_outcome": "Add tip through app-owned UI and supported payment update",
+      "actor": "cashier/buyer",
+      "trigger": "Buyer chooses tip before or after authorization",
+      "behavior": "SDK has no built-in tipping UI; app builds UI and may set tip parameter/update eligible payment prior to completion.",
+      "preconditions": "Payment flow and Payments API where needed.",
+      "qualifiers": "Relevant payment state and delayed-capture conditions apply.",
+      "recovery_edge_cases": "Reconcile final total and show tip distinctly on receipt.",
+      "source_ids": [
+        "CARD-S009",
+        "CARD-S010"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce tip-entry errors by keeping tip amount distinct from base amount and reflecting the final supported amount before completion.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card tip update is not a Bitcoin tip workflow; preserve a tender-independent gratuity field only if merchant requirements and Bitcoin accounting can support it.",
+      "bitcoin_tradeoffs": "Tip changes can alter the amount after initial authorization; Bitcoin payments may require a new invoice/settlement rather than a card-style update.",
+      "acceptance_test": "Enter tip through app UI on eligible flow; verify final payment amount includes configured tip and receipt shows tip separately; reject updates after unsupported state.",
+      "capability": "Add tip through app-owned UI and supported payment update"
+    },
+    {
+      "id": "CARD-C018",
+      "canonical_key": "card.square.receipt",
+      "category": "checkout",
+      "merchant_outcome": "Provide buyer printed or digital receipt option",
+      "actor": "cashier/buyer",
+      "trigger": "Payment completion",
+      "behavior": "Square requires app to offer receipt option; app generates required fields from payment response or may use receipt URL when available.",
+      "preconditions": "Completed payment result and app receipt workflow.",
+      "qualifiers": "Square does not directly send receipts; receipt URL only on completed payments.",
+      "recovery_edge_cases": "Handle not-yet-completed/failed payment distinctly and do not claim receipt issued until delivery confirmed.",
+      "source_ids": [
+        "CARD-S002",
+        "CARD-S009"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce missing receipts by treating receipt selection, generation and delivery as distinct states after payment completion.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card result, cancellation, consent or receipt behavior is provider-specific; maintain separate Bitcoin payment status and receipt/consent record while retaining the same merchant order.",
+      "bitcoin_tradeoffs": "A common order view helps staff, but provider callback and receipt semantics cannot be reused as evidence of Bitcoin settlement or receipt delivery.",
+      "acceptance_test": "Complete payment and offer documented receipt choices; verify only completed payment can use receipt URL and failed/incomplete payments cannot be labeled receipted.",
+      "capability": "Provide buyer printed or digital receipt option"
+    },
+    {
+      "id": "CARD-C019",
+      "canonical_key": "card.square.custom_prompt_privacy",
+      "category": "security_privacy",
+      "merchant_outcome": "Collect required data privacy consent when using custom prompt",
+      "actor": "developer/seller",
+      "trigger": "Payment prompt configuration",
+      "behavior": "Default Square prompt collects privacy consent; custom prompt implementer must collect consent and call settingsManager.updateTrackingConsent.",
+      "preconditions": "Custom PromptMode and relevant regional requirements.",
+      "qualifiers": "Consent requirements vary by region.",
+      "recovery_edge_cases": "Payment start can fail with CONSENT_NOT_PROVIDED; recover by capturing seller choice before starting.",
+      "source_ids": [
+        "CARD-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce consent omissions by using the default prompt where appropriate or blocking custom-prompt payment start until seller privacy choice is recorded.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card result, cancellation, consent or receipt behavior is provider-specific; maintain separate Bitcoin payment status and receipt/consent record while retaining the same merchant order.",
+      "bitcoin_tradeoffs": "A common order view helps staff, but provider callback and receipt semantics cannot be reused as evidence of Bitcoin settlement or receipt delivery.",
+      "acceptance_test": "Use custom prompt without consent and verify CONSENT_NOT_PROVIDED; record consent through documented settings update and verify attempt can proceed.",
+      "capability": "Collect required data privacy consent when using custom prompt"
+    },
+    {
+      "id": "CARD-C020",
+      "canonical_key": "card.square.reader_peripheral_constraints",
+      "category": "hardware",
+      "merchant_outcome": "Present available card methods based on reader attachment",
+      "actor": "cashier",
+      "trigger": "Reader inserted, removed, or paired",
+      "behavior": "Reader type determines swipe/contactless/chip entry; custom UI listens for available method changes.",
+      "preconditions": "Supported Square reader/device pairing.",
+      "qualifiers": "No general barcode, cash drawer, printer, or customer display capability is implied by SDK reader support.",
+      "recovery_edge_cases": "If no reader method is available, show manual fallback or other tender; unsupported peripheral scope remains unknown.",
+      "source_ids": [
+        "CARD-S003",
+        "CARD-S002"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Prevent peripheral assumptions from blocking checkout by listing only reader methods the connected Square reader actually reports.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card prompts, reader inputs and pairing do not directly improve Bitcoin acceptance; preserve an independent Bitcoin tender option when the card reader is unavailable.",
+      "bitcoin_tradeoffs": "A shared cashier interface can reduce training, but card reader readiness must not gate Bitcoin or mislabel a Bitcoin action as a card-reader method.",
+      "acceptance_test": "Connect reader types with different supported input methods and verify UI reflects reported methods; confirm no printer, drawer, scanner or display capability is inferred from reader SDK.",
+      "capability": "Present available card methods based on reader attachment"
+    },
+    {
+      "id": "CARD-C021",
+      "canonical_key": "card.stripe.android_sdk_setup",
+      "category": "onboarding",
+      "merchant_outcome": "Initialize Terminal Android SDK and connection token provider",
+      "actor": "developer",
+      "trigger": "Application startup and reader setup",
+      "behavior": "Quickstart requires backend connection-token endpoint, app Terminal initialization, and connection/discovery flow.",
+      "preconditions": "Stripe account, app integration and server endpoint.",
+      "qualifiers": "Stripe Terminal SDK version, Android platform requirements and account model are version-specific.",
+      "recovery_edge_cases": "Handle initialization/token/network errors; no secret key should be embedded in mobile app.",
+      "source_ids": [
+        "CARD-S019"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce first-connection failures by checking backend connection-token availability before the app begins reader discovery.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card SDK installation and provider credential work does not improve Bitcoin settlement; keep the card integration optional so Bitcoin acceptance can initialize and operate without provider credentials.",
+      "bitcoin_tradeoffs": "Separate dependency and credential boundaries reduce card-provider coupling but require the app to maintain two checkout paths and clear tender-specific recovery.",
+      "acceptance_test": "With backend token provider configured, initialize Terminal and connect; make token endpoint unavailable and verify a specific setup error appears without exposing a secret key in the app.",
+      "capability": "Initialize Terminal Android SDK and connection token provider"
+    },
+    {
+      "id": "CARD-C022",
+      "canonical_key": "card.stripe.paymentintent_create",
+      "category": "payments",
+      "merchant_outcome": "Create a server-backed PaymentIntent representing card attempt",
+      "actor": "cashier/system",
+      "trigger": "Sale enters card tender",
+      "behavior": "Create one PaymentIntent with amount/currency and card_present; client may create in limited configurations but secret-key server route is standard.",
+      "preconditions": "Backend Stripe API access or documented client setup; PaymentIntent client secret.",
+      "qualifiers": "Country and local currency restrictions apply; actual processor approval not guaranteed.",
+      "recovery_edge_cases": "Persist reference/order correlation to retrieve same PaymentIntent on retry.",
+      "source_ids": [
+        "CARD-S011"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce orphaned card attempts by storing order/reference correlation when the server creates the PaymentIntent.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card provider idempotency and status reconciliation do not improve Bitcoin settlement directly; keep card attempt IDs separate from Bitcoin invoice/payment identifiers while preserving one merchant order reference.",
+      "bitcoin_tradeoffs": "A shared order record simplifies merchant reconciliation, but reusing provider idempotency keys across rails is invalid and can obscure which payment completed.",
+      "acceptance_test": "Create PaymentIntent for an order, persist its ID/client secret association, and retrieve the same intent after client retry rather than creating a duplicate.",
+      "capability": "Create a server-backed PaymentIntent representing card attempt"
+    },
+    {
+      "id": "CARD-C023",
+      "canonical_key": "card.stripe.collect_process",
+      "category": "checkout",
+      "merchant_outcome": "Collect and process card-present payment with connected reader",
+      "actor": "cashier/buyer",
+      "trigger": "Cashier begins payment",
+      "behavior": "Connected reader prompts for tap/insert; SDK collects encrypted payment method and processes/authorizes PaymentIntent.",
+      "preconditions": "Connected ready reader and PaymentIntent.",
+      "qualifiers": "Tap to Pay full-screen prompt is SDK-managed; reader-specific events vary.",
+      "recovery_edge_cases": "Surface requested card input/retry messages and preserve sale when reader unavailable.",
+      "source_ids": [
+        "CARD-S011",
+        "CARD-S018"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce abandoned card entry by translating reader prompts and retry messages into cashier-visible progress and actions.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card prompts, reader inputs and pairing do not directly improve Bitcoin acceptance; preserve an independent Bitcoin tender option when the card reader is unavailable.",
+      "bitcoin_tradeoffs": "A shared cashier interface can reduce training, but card reader readiness must not gate Bitcoin or mislabel a Bitcoin action as a card-reader method.",
+      "acceptance_test": "Process with ready reader; verify buyer is prompted to tap/insert and app handles documented reader events; disconnect reader mid-flow and show recoverable state without losing order.",
+      "capability": "Collect and process card-present payment with connected reader"
+    },
+    {
+      "id": "CARD-C024",
+      "canonical_key": "card.stripe.capture_mode",
+      "category": "payments",
+      "merchant_outcome": "Choose automatic or manual capture timing",
+      "actor": "owner/system",
+      "trigger": "PaymentIntent configured",
+      "behavior": "Automatic capture completes in the payment flow; manual capture returns requires_capture and requires server capture call.",
+      "preconditions": "PaymentIntent capture method and backend capture endpoint.",
+      "qualifiers": "Some countries/local methods have capture-mode constraints; manual authorization expires if not captured within documented window.",
+      "recovery_edge_cases": "Reconcile uncaptured PaymentIntent against order before capture/cancel.",
+      "source_ids": [
+        "CARD-S011"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce expired authorizations by showing whether automatic or manual capture is selected and tracking requires_capture orders to completion.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card capture/refund lifecycle does not apply to Bitcoin settlement; keep a Bitcoin refund/return workflow explicit and allow card operations to remain provider-controlled.",
+      "bitcoin_tradeoffs": "Bitcoin refunds may require a separate outbound transfer and fee/approval flow; merchant must not assume card-style reversal or provider refund state.",
+      "acceptance_test": "Automatic flow completes as documented; manual flow returns requires_capture and server capture changes status; verify uncaptured item is not shown as paid.",
+      "capability": "Choose automatic or manual capture timing"
+    },
+    {
+      "id": "CARD-C025",
+      "canonical_key": "card.stripe.decline_retry",
+      "category": "payments",
+      "merchant_outcome": "Reuse same PaymentIntent after decline",
+      "actor": "cashier/system",
+      "trigger": "Issuer declines presented payment method",
+      "behavior": "Decline leaves requires_payment_method; collect another payment method with same PaymentIntent, rather than creating new intent.",
+      "preconditions": "Existing PaymentIntent in eligible state.",
+      "qualifiers": "Status-specific retry rules apply.",
+      "recovery_edge_cases": "Do not create another PaymentIntent after decline; avoid duplicate authorization.",
+      "source_ids": [
+        "CARD-S011"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce duplicate intents after issuer decline by keeping the same eligible PaymentIntent active for another payment method.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card provider idempotency and status reconciliation do not improve Bitcoin settlement directly; keep card attempt IDs separate from Bitcoin invoice/payment identifiers while preserving one merchant order reference.",
+      "bitcoin_tradeoffs": "A shared order record simplifies merchant reconciliation, but reusing provider idempotency keys across rails is invalid and can obscure which payment completed.",
+      "acceptance_test": "Cause a decline returning requires_payment_method, collect another method on same intent and verify one intent/order record remains.",
+      "capability": "Reuse same PaymentIntent after decline"
+    },
+    {
+      "id": "CARD-C026",
+      "canonical_key": "card.stripe.unknown_timeout",
+      "category": "payments",
+      "merchant_outcome": "Retry original intent after temporary connectivity problem or unknown timeout",
+      "actor": "cashier/system",
+      "trigger": "SDK reports requires_confirmation or nil intent after timeout",
+      "behavior": "Retry processing/confirmation using same original PaymentIntent; docs warn new intent can create multiple authorizations.",
+      "preconditions": "Retained PaymentIntent/client secret and operation result.",
+      "qualifiers": "Consecutive timeouts may indicate connectivity failure.",
+      "recovery_edge_cases": "Unknown result is not success/failure; resolve original intent status and reconcile before new sale attempt.",
+      "source_ids": [
+        "CARD-S011"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Prevent double authorization after timeout by retaining the original intent and separating unknown from declined/failed.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card provider idempotency and status reconciliation do not improve Bitcoin settlement directly; keep card attempt IDs separate from Bitcoin invoice/payment identifiers while preserving one merchant order reference.",
+      "bitcoin_tradeoffs": "A shared order record simplifies merchant reconciliation, but reusing provider idempotency keys across rails is invalid and can obscure which payment completed.",
+      "acceptance_test": "Simulate timeout with original intent; retry processing that same intent and verify no new PaymentIntent is created until its state is resolved.",
+      "capability": "Retry original intent after temporary connectivity problem or unknown timeout"
+    },
+    {
+      "id": "CARD-C027",
+      "canonical_key": "card.stripe.cancel",
+      "category": "payments",
+      "merchant_outcome": "Cancel active collection or allow buyer cancellation on reader",
+      "actor": "cashier/buyer",
+      "trigger": "Cashier or buyer cancels transaction",
+      "behavior": "Android SDK Cancelable can cancel processing; smart readers show customer cancel by default; SDK and reader cancellation are distinguishable from SDK 6.0.0.",
+      "preconditions": "Active collection and reader/cancellation config.",
+      "qualifiers": "Reader cancellation error differs from programmatic cancellation.",
+      "recovery_edge_cases": "Keep state distinct and reconcile PaymentIntent after cancellation.",
+      "source_ids": [
+        "CARD-S011"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Make cancellation understandable by distinguishing buyer cancel on reader from app-triggered cancel.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card prompts, reader inputs and pairing do not directly improve Bitcoin acceptance; preserve an independent Bitcoin tender option when the card reader is unavailable.",
+      "bitcoin_tradeoffs": "A shared cashier interface can reduce training, but card reader readiness must not gate Bitcoin or mislabel a Bitcoin action as a card-reader method.",
+      "acceptance_test": "Cancel from Android app and via smart-reader customer control; verify distinct documented result/error and reconcile final PaymentIntent before allowing retry.",
+      "capability": "Cancel active collection or allow buyer cancellation on reader"
+    },
+    {
+      "id": "CARD-C028",
+      "canonical_key": "card.stripe.offline",
+      "category": "offline_availability",
+      "merchant_outcome": "Merchant needs to know whether Android Terminal can accept card payments without connectivity.",
+      "actor": "cashier/system",
+      "trigger": "Network unavailable and offline mode eligible",
+      "behavior": "The inspected official page is a platform-variant index that links Android mobile-reader and smart-reader offline guides. Those Android variants were not inspected, so exact merchant behavior, limits and supported devices remain unknown.",
+      "preconditions": [
+        "Exact Android mobile-reader or smart-reader variant guide must be inspected",
+        "Account/device eligibility remains unverified"
+      ],
+      "qualifiers": "Only the official index and variant links were inspected; no Android offline limits or acceptance behavior is asserted.",
+      "recovery_edge_cases": "Do not enable or promise offline acceptance based on the index alone; inspect the precise reader variant and account conditions.",
+      "source_ids": [
+        "CARD-S012"
+      ],
+      "documented_status": "unknown",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Avoid promising offline acceptance until the exact Android mobile-reader or smart-reader guide and merchant eligibility are checked.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Bitcoin may offer a separate acceptance path when provider connectivity or offline eligibility blocks card acceptance, subject to its own network and confirmation policy.",
+      "bitcoin_tradeoffs": "Bitcoin has separate connectivity/confirmation and reversal properties; do not represent it as equivalent to a queued card authorization or promise acceptance when its own network is unavailable.",
+      "acceptance_test": "No acceptance test can be asserted from the inspected index alone; inspect the chosen Android reader variant and verify its offline limits, storage, forwarding and outcomes before enabling a test.",
+      "capability": "Determine Android Terminal offline eligibility and workflow after inspecting exact reader variant."
+    },
+    {
+      "id": "CARD-C029",
+      "canonical_key": "card.stripe.country_reader_matrix",
+      "category": "hardware",
+      "merchant_outcome": "Select supported reader/Tap-to-Pay per country and local currency",
+      "actor": "owner/developer",
+      "trigger": "Merchant configures location/device",
+      "behavior": "Country matrix lists distinct reader availability; account and reader location must be same country and currency local.",
+      "preconditions": "Stripe account, location, and reader market.",
+      "qualifiers": "Country matrix is current docs snapshot; per-country card network/regulatory rules vary.",
+      "recovery_edge_cases": "Block unsupported combinations and route to another tender; verify target region freshly.",
+      "source_ids": [
+        "CARD-S013"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Prevent unsupported equipment purchases by checking account country, reader location and currency before presenting a reader as usable.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Reader pairing/forgetting and card market eligibility are irrelevant to Bitcoin node or wallet readiness; allow those controls to fail independently.",
+      "bitcoin_tradeoffs": "Hardware-specific card availability does not establish Bitcoin-device or country eligibility; separate capability checks are needed.",
+      "acceptance_test": "Select reader and account in same supported country and verify eligibility/local currency; mismatch must be flagged before attempting connection or payment.",
+      "capability": "Select supported reader/Tap-to-Pay per country and local currency"
+    },
+    {
+      "id": "CARD-C030",
+      "canonical_key": "card.stripe.tap_to_pay_android",
+      "category": "hardware",
+      "merchant_outcome": "Accept contactless payment using eligible Android phone",
+      "actor": "cashier/buyer",
+      "trigger": "Tap to Pay reader selected",
+      "behavior": "Terminal SDK displays contactless prompt; buyer taps contactless card or NFC wallet.",
+      "preconditions": "Supported Android phone, NFC/device conditions, market eligibility, app and account setup.",
+      "qualifiers": "Device list and Tap to Pay availability vary by country; no generic Android support implied.",
+      "recovery_edge_cases": "Check capability and location readiness; provide another tender if unsupported.",
+      "source_ids": [
+        "CARD-S014",
+        "CARD-S013"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Avoid checkout dead ends by checking Tap to Pay device and market eligibility before offering phone contactless.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card prompts, reader inputs and pairing do not directly improve Bitcoin acceptance; preserve an independent Bitcoin tender option when the card reader is unavailable.",
+      "bitcoin_tradeoffs": "A shared cashier interface can reduce training, but card reader readiness must not gate Bitcoin or mislabel a Bitcoin action as a card-reader method.",
+      "acceptance_test": "For a verified supported Android device/market, confirm contactless prompt and successful documented flow; for unverified region/device, show unavailable/unknown and offer another tender.",
+      "capability": "Accept contactless payment using eligible Android phone"
+    },
+    {
+      "id": "CARD-C031",
+      "canonical_key": "card.stripe.reader_events_prompts",
+      "category": "hardware",
+      "merchant_outcome": "Show required reader prompts and input methods in app UI",
+      "actor": "cashier/buyer",
+      "trigger": "Reader requests input or displays message",
+      "behavior": "For readers without built-in display, app must render acceptable entry modes and retry prompts from MobileReaderListener.",
+      "preconditions": "Mobile reader integration and listener.",
+      "qualifiers": "Specific prompts and display responsibility depend on reader model.",
+      "recovery_edge_cases": "Do not leave buyer waiting on hidden SDK prompt; handle retry/card change prompts.",
+      "source_ids": [
+        "CARD-S018",
+        "CARD-S011"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce buyer confusion on readers without displays by surfacing every required reader prompt and retry message in the app.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card prompts, reader inputs and pairing do not directly improve Bitcoin acceptance; preserve an independent Bitcoin tender option when the card reader is unavailable.",
+      "bitcoin_tradeoffs": "A shared cashier interface can reduce training, but card reader readiness must not gate Bitcoin or mislabel a Bitcoin action as a card-reader method.",
+      "acceptance_test": "Trigger each documented input/retry event from listener and verify app renders the requested action; no prompt may remain only in hidden SDK state.",
+      "capability": "Show required reader prompts and input methods in app UI"
+    },
+    {
+      "id": "CARD-C032",
+      "canonical_key": "card.stripe.disconnect_reconnect",
+      "category": "hardware",
+      "merchant_outcome": "Connect/disconnect reader and recover reader availability",
+      "actor": "cashier",
+      "trigger": "Reader setup, disconnection, or app reconnect",
+      "behavior": "Mobile reader discovery/connection flow communicates reader state to app.",
+      "preconditions": "Connection token and compatible reader.",
+      "qualifiers": "Accessory/platform details vary; full disconnect semantics must follow model-specific SDK documentation.",
+      "recovery_edge_cases": "Show disconnected/unavailable and require reconnection before card prompt; exact auto-recovery is not universal.",
+      "source_ids": [
+        "CARD-S017",
+        "CARD-S018"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce reconnection time by showing reader disconnect state and requiring a ready connection before new collection.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card prompts, reader inputs and pairing do not directly improve Bitcoin acceptance; preserve an independent Bitcoin tender option when the card reader is unavailable.",
+      "bitcoin_tradeoffs": "A shared cashier interface can reduce training, but card reader readiness must not gate Bitcoin or mislabel a Bitcoin action as a card-reader method.",
+      "acceptance_test": "Disconnect a connected reader and verify UI changes to disconnected, blocks new collection, and returns to ready only after documented reconnection succeeds.",
+      "capability": "Connect/disconnect reader and recover reader availability"
+    },
+    {
+      "id": "CARD-C033",
+      "canonical_key": "card.stripe.refund",
+      "category": "refunds_returns",
+      "merchant_outcome": "Refund card-present payment via Stripe API",
+      "actor": "owner",
+      "trigger": "Approved refund request",
+      "behavior": "Refund is a separate Stripe API/server operation against original payment; track refund status separately.",
+      "preconditions": "Payment reference, backend secret API and eligible payment.",
+      "qualifiers": "Refund timing/partial-refund constraints depend on payment state and rail.",
+      "recovery_edge_cases": "Handle pending/failed refund events; no device-side local request proves payout.",
+      "source_ids": [
+        "CARD-S015"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce refund misreporting by tracking the server refund object separately from original card payment.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card capture/refund lifecycle does not apply to Bitcoin settlement; keep a Bitcoin refund/return workflow explicit and allow card operations to remain provider-controlled.",
+      "bitcoin_tradeoffs": "Bitcoin refunds may require a separate outbound transfer and fee/approval flow; merchant must not assume card-style reversal or provider refund state.",
+      "acceptance_test": "Create full and partial refund requests and verify returned refund amount/status is attached to original payment; pending/failed status remains visible and does not imply settled refund.",
+      "capability": "Refund card-present payment via Stripe API"
+    },
+    {
+      "id": "CARD-C034",
+      "canonical_key": "card.stripe.tips",
+      "category": "pricing_tax",
+      "merchant_outcome": "Collect on-receipt tip by adjusting eligible payment before capture",
+      "actor": "cashier/buyer",
+      "trigger": "Buyer adds tip after initial authorization",
+      "behavior": "Terminal supports on-receipt tips through manual capture/update flow for eligible US users.",
+      "preconditions": "Eligible US user/account and manual capture flow.",
+      "qualifiers": "US-only per docs; capture deadline and other rules apply.",
+      "recovery_edge_cases": "Reconcile adjusted final total and capture result before marking paid.",
+      "source_ids": [
+        "CARD-S016",
+        "CARD-S011"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce missed tips by exposing the US-only eligibility and manual-capture step before staff closes the receipt workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card capture/refund lifecycle does not apply to Bitcoin settlement; keep a Bitcoin refund/return workflow explicit and allow card operations to remain provider-controlled.",
+      "bitcoin_tradeoffs": "Bitcoin refunds may require a separate outbound transfer and fee/approval flow; merchant must not assume card-style reversal or provider refund state.",
+      "acceptance_test": "On eligible US manual-capture flow, add on-receipt tip within documented limit and verify updated payment is captured; on ineligible setup do not offer feature.",
+      "capability": "Collect on-receipt tip by adjusting eligible payment before capture"
+    },
+    {
+      "id": "CARD-C035",
+      "canonical_key": "card.stripe.receipt",
+      "category": "checkout",
+      "merchant_outcome": "Create receipt from card-present payment details",
+      "actor": "cashier/buyer",
+      "trigger": "Payment completes",
+      "behavior": "PaymentIntent/Charge exposes card-present receipt fields; app/merchant integrates receipt delivery and order mapping.",
+      "preconditions": "Payment result and receipt generation/delivery workflow.",
+      "qualifiers": "Reader SDK capability does not establish printer/email or POS receipt operation.",
+      "recovery_edge_cases": "Do not treat payment success as receipt delivery; retry delivery separately.",
+      "source_ids": [
+        "CARD-S020"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce receipt/order mismatches by linking receipt fields to the original PaymentIntent and tracking delivery separately.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card result, cancellation, consent or receipt behavior is provider-specific; maintain separate Bitcoin payment status and receipt/consent record while retaining the same merchant order.",
+      "bitcoin_tradeoffs": "A common order view helps staff, but provider callback and receipt semantics cannot be reused as evidence of Bitcoin settlement or receipt delivery.",
+      "acceptance_test": "Complete a payment and verify receipt fields map to the associated order; simulate delivery failure and ensure payment remains complete while receipt shows retry-needed.",
+      "capability": "Create receipt from card-present payment details"
+    },
+    {
+      "id": "CARD-C036",
+      "canonical_key": "card.stripe.backend_key_isolation",
+      "category": "security_privacy",
+      "merchant_outcome": "Keep Stripe secret key on backend while mobile uses scoped payment/session data",
+      "actor": "developer",
+      "trigger": "App creates or retrieves PaymentIntent / connection token",
+      "behavior": "Quickstart uses server endpoint and client secret/token; secret API key belongs on server.",
+      "preconditions": "Backend service and secure transport.",
+      "qualifiers": "Stripe Terminal requires online service for connection tokens and often payment setup/capture.",
+      "recovery_edge_cases": "Backend outage can prevent new setup/capture; keep Bitcoin/cash checkout independent.",
+      "source_ids": [
+        "CARD-S019",
+        "CARD-S011"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce credential exposure by keeping secret keys server-side and limiting the Android app to documented client secret/connection token.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Card SDK installation and provider credential work does not improve Bitcoin settlement; keep the card integration optional so Bitcoin acceptance can initialize and operate without provider credentials.",
+      "bitcoin_tradeoffs": "Separate dependency and credential boundaries reduce card-provider coupling but require the app to maintain two checkout paths and clear tender-specific recovery.",
+      "acceptance_test": "Inspect configured integration paths: mobile package contains no Stripe secret key; app obtains scoped token/client secret from backend, and backend outage disables new card flow without disabling Bitcoin/cash.",
+      "capability": "Keep Stripe secret key on backend while mobile uses scoped payment/session data"
+    },
+    {
+      "id": "CARD-C037",
+      "canonical_key": "card.stripe.production_account_and_location",
+      "category": "onboarding",
+      "merchant_outcome": "Provision correct account, location and reader association",
+      "actor": "owner/developer",
+      "trigger": "Merchant setup",
+      "behavior": "Locations and readers associate merchant address and country; location config is used by reader.",
+      "preconditions": "Activated Stripe account and correctly configured location.",
+      "qualifiers": "Country pairing and local currency constraints; account eligibility varies.",
+      "recovery_edge_cases": "Reject location/account mismatch with actionable setup error and avoid trying to process.",
+      "source_ids": [
+        "CARD-S013",
+        "CARD-S019"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce location mismatch declines by verifying the selected reader belongs to the active merchant location and supported country before checkout.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Square/Stripe seller authorization and production approval do not authorize Bitcoin; retain separate account credentials and allow the Bitcoin path when card-provider authorization is unavailable.",
+      "bitcoin_tradeoffs": "Provider-specific identity and permissions must stay isolated; staff may need separate setup and reconciliation steps for each tender.",
+      "acceptance_test": "Configure same-country account/location/reader and verify readiness; deliberately mismatch countries and verify preflight blocks card attempt with actionable location correction.",
+      "capability": "Provision correct account, location and reader association"
+    }
+  ],
+  "limitations": [
+    "Documentation only; no vendor accounts, live reader sessions, physical device checks, or merchant tests were performed.",
+    "Square Android docs currently show Mobile Payments SDK 2.7.0; document behavior and APIs can change, and iOS has distinct platform instructions.",
+    "Square Sandbox uses virtual/mock readers and does not establish physical reader or production eligibility.",
+    "Stripe Terminal capabilities vary by platform, reader model, country, account, currency and configuration; general Android documentation is not a device certification.",
+    "Unlisted hardware, country, account, or peripheral behavior is unknown unless the specific official source explicitly states a restriction.",
+    "Square/Stripe components represent card authorization/settlement rails. They do not establish Bitcoin receipt, custody, conversion, or authority behavior. Bitcoin must remain an independently supported tender in any OpenBMT integration.",
+    "Stripe Billing, Connect, Banking, Payment Element/web checkout and other adjacent products are excluded. Square unrelated web/in-app payment products are excluded except Payments/Refund APIs explicitly used to complete SDK lifecycle behavior."
+  ]
+}

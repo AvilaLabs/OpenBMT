@@ -1,0 +1,2135 @@
+{
+  "schema": "openbmt-capability-research-bundle-v1",
+  "as_of": "2026-11-17",
+  "vendor": "Shopify",
+  "segment": "Shopify POS",
+  "scope": "Operator-facing Shopify POS cart/order entry, pricing and tax, discounts, tips, checkout and payment, split/partial payment, refunds, exchanges, receipts, customer display, order search, offline payment behavior, and pickup-order workflows. This is limited to Shopify's public POS operator documentation inspected below; it does not infer undocumented behavior, Shopify online checkout capabilities, SDK capabilities, or processor compatibility beyond stated documentation.",
+  "sources": [
+    {
+      "id": "SHC-S001",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos",
+      "title": "Selling in person with Shopify POS",
+      "section": "Overview and section index",
+      "accessed": "2026-11-17",
+      "qualifiers": "Shopify POS on iOS or Android; features and payment options vary by location, plan, device, and configured payment methods.",
+      "evidence_note": "Overview says POS creates and modifies customer carts, accepts multiple payment methods, syncs orders/inventory with Shopify admin, and requires multi-location activation."
+    },
+    {
+      "id": "SHC-S002",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/edit-remove-item",
+      "title": "Edit the contents of the Shopify POS cart",
+      "section": "Edit quantity; delete product",
+      "accessed": "2026-11-17",
+      "qualifiers": "POS app cart before checkout; POS device/operator context, other product edits not covered on this page.",
+      "evidence_note": "Operators can increase/decrease a cart item's quantity and remove one, selected, or all cart items."
+    },
+    {
+      "id": "SHC-S003",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/process-sales-transaction",
+      "title": "Quick reference - processing a sale",
+      "section": "Apply custom cart discount; apply custom line-item discount",
+      "accessed": "2026-11-17",
+      "qualifiers": "Shopify POS; discount smart-grid tile may need configuration; gift cards excluded from percentage cart discount.",
+      "evidence_note": "Describes percentage/amount/code cart discounts, per-line discounts and price-after-discount entry; cart total and retail subtotal are shown."
+    },
+    {
+      "id": "SHC-S004",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/discount-management/overview",
+      "title": "Overview of managing discounts on Shopify POS",
+      "section": "Types of discounts; per-unit custom discount; Discount Functions; third-party app discounts",
+      "accessed": "2026-11-17",
+      "qualifiers": "Discount permissions required; exchange custom discounts require POS Pro; app discounts apply to both online and POS channels and channel display cannot be restricted.",
+      "evidence_note": "Documents custom discounts, admin-created codes, eligible combinations, per-unit monetary discounts, Discount Functions and third-party app discount behavior."
+    },
+    {
+      "id": "SHC-S005",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/discount-management/combining-discounts",
+      "title": "Discount combinations on POS",
+      "section": "Requirements; POS-specific discount behavior",
+      "accessed": "2026-11-17",
+      "qualifiers": "Shopify POS Pro location; discount combination settings configured in admin; Plus-specific multiple product discount behavior.",
+      "evidence_note": "POS applies best possible total discount for configured combinations; manual custom discounts always apply; certain line-item combinations are blocked."
+    },
+    {
+      "id": "SHC-S006",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/adjust-tax-rates",
+      "title": "Adjust tax rates in the Shopify POS cart",
+      "section": "Cart tax rates; product tax rates",
+      "accessed": "2026-11-17",
+      "qualifiers": "Tax baseline comes from assigned POS location; EU stores may not turn tax rates off due to fiscalization; automatic discounts can override transaction discounts.",
+      "evidence_note": "Operator can toggle applicable cart-level or individual-product tax rates; location tax rates are changed in admin."
+    },
+    {
+      "id": "SHC-S007",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/tips",
+      "title": "Collecting tips with the Shopify POS",
+      "section": "Activate tips; minimum tip amounts; collect/refund a tip",
+      "accessed": "2026-11-17",
+      "qualifiers": "Tips only on credit payments processed with supported reader (Tap & Chip, Chipper 2X BT, WisePad 3, POS Go); currency/order-total cap applies; tip cancellation requires staff PIN.",
+      "evidence_note": "Supports up to three preset percentages, optional custom tips and minimum-dollar presets; customer can choose preset, custom, or no tip; tip can be refunded separately."
+    },
+    {
+      "id": "SHC-S008",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/payment-management/select-payment-methods",
+      "title": "Selecting a payment method",
+      "section": "Select a payment method",
+      "accessed": "2026-11-17",
+      "qualifiers": "Available methods depend on admin and device settings and activated provider support.",
+      "evidence_note": "Payment screen follows Checkout or Charge; customer can use activated methods, split/partial pay, or mark unpaid; manual card entry has separate requirements and fraud risks."
+    },
+    {
+      "id": "SHC-S009",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/payment-management/cash-payments",
+      "title": "Accepting a cash payment",
+      "section": "Cash payment steps",
+      "accessed": "2026-11-17",
+      "qualifiers": "Cash payments on by default, configurable per POS device; supported cash drawer optional.",
+      "evidence_note": "POS enters exact amount by default, allows received amount entry or suggested amounts, calculates change, and tracks cash in drawer."
+    },
+    {
+      "id": "SHC-S010",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/payment-management/multiple-partial-payments",
+      "title": "Multiple and partial payments on Shopify POS",
+      "section": "Requirements; split methods for entire order; first partial payment",
+      "accessed": "2026-11-17",
+      "qualifiers": "Device payment options must enable split and partial payment; EU country limitations include France, Italy, Spain; gift-card-containing checkout must be paid in full.",
+      "evidence_note": "Allows multiple payment methods on an order or accepting first payment and leaving balance for later collection."
+    },
+    {
+      "id": "SHC-S011",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/payment-management/card-payments",
+      "title": "Accepting card payments as the method of payment",
+      "section": "Supported brands; delayed capture; Shopify readers; external reader; manual entry; checkout security",
+      "accessed": "2026-11-17",
+      "qualifiers": "Card brands and reader support vary by country/device/processor; delayed capture only POS Pro and unavailable Germany/Italy; external terminals settle outside POS and require operator mark-paid; manual entry unavailable offline and has elevated fraud risk.",
+      "evidence_note": "Explains supported brands, integrated and external card workflows, manual card entry, delayed capture restrictions, and PIN re-entry after errors/cancellation."
+    },
+    {
+      "id": "SHC-S012",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/complete-refund-orders",
+      "title": "Processing returns and refunds using the Shopify POS app",
+      "section": "Considerations; return/refund workflow",
+      "accessed": "2026-11-17",
+      "qualifiers": "Shopify POS operator app; return/exchange and additional permissions vary; third-party channel orders may require admin; amount refunded to method cannot exceed amount paid by that method.",
+      "evidence_note": "Supports full/partial refunds, item restock at assigned location, refund method selection, and split refund; some existing/in-progress returns block POS processing."
+    },
+    {
+      "id": "SHC-S013",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/unverified-returns",
+      "title": "Processing unverified returns and refunds on Shopify POS",
+      "section": "Considerations; process unverified return/refund",
+      "accessed": "2026-11-17",
+      "qualifiers": "POS Pro only; unavailable France, Spain, Sweden; store/location currencies must match; refund only to gift card; customer profile with email/phone and physical gift card product setup required.",
+      "evidence_note": "Allows no-reference return record and restock; amount uses current item price suggestion and tax is based on return location, toggleable but not editable."
+    },
+    {
+      "id": "SHC-S014",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/exchange",
+      "title": "Exchange an order on Shopify POS",
+      "section": "Considerations; exchange with POS Pro; troubleshooting",
+      "accessed": "2026-11-17",
+      "qualifiers": "Exchange requires POS Pro and permissions; unavailable Sweden; item barcode scanning unsupported during return-item selection; automatic discounts do not apply; bundles have restrictions.",
+      "evidence_note": "Combined return/replacement workflow calculates whether amount is owed/refunded, supports saved/shared exchange cart, manual discount on new item, and location-bound restock."
+    },
+    {
+      "id": "SHC-S015",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/search-orders",
+      "title": "Searching and filtering orders",
+      "section": "Order attributes; global search; navigation search; receipt barcode",
+      "accessed": "2026-11-17",
+      "qualifiers": "All POS and online orders shown; receipt barcode requires printed barcode and 2D scanner or device camera; some offline/$0 POS orders use register-prefix/receipt number.",
+      "evidence_note": "Can search by ID, item, receipt number, customer, or card last-four and filter results; search result displays match reason."
+    },
+    {
+      "id": "SHC-S016",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/receipt-management/customer-receipt-selection",
+      "title": "Customer receipt selection",
+      "section": "Receipt methods; settings; marketing selection",
+      "accessed": "2026-11-17",
+      "qualifiers": "Receipt selection on by default; Shop app option requires Shopify card reader, Shop Pay enabled, connected display, active Shop user and saved payment card; marketing opt-in depends on admin settings.",
+      "evidence_note": "Customer can select print, email, text, Shop app, or no receipt; digital receipt contact can create/associate customer profile; customer can make marketing choice."
+    },
+    {
+      "id": "SHC-S017",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/receipt-management",
+      "title": "Receipt management",
+      "section": "Receipt channels and customization overview",
+      "accessed": "2026-11-17",
+      "qualifiers": "Printer availability/device mapping and receipt configuration apply; detailed printer operation sections were not inspected.",
+      "evidence_note": "Receipts can be printed, emailed, or texted; multiple printers can be assigned default per POS device; receipt appearance can include location, customer information, and order notes."
+    },
+    {
+      "id": "SHC-S018",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/customize-pos/customer-display",
+      "title": "Customize your Shopify POS customer display screens",
+      "section": "Checkout screens; product images; thank-you message; privacy policy",
+      "accessed": "2026-11-17",
+      "qualifiers": "Customization is in Shopify admin POS editor; display preview offers tablet/POS Terminal forms; saving color changes may require completed Shopify Payments setup.",
+      "evidence_note": "Cart summary, receipts, and thank-you screens can be styled; images and thank-you message configurable; privacy policy shown by QR only when published."
+    },
+    {
+      "id": "SHC-S019",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/hardware/customer-view-app",
+      "title": "Customer View app",
+      "section": "Displayed cart information; device requirements; pairing and connectivity",
+      "accessed": "2026-11-17",
+      "qualifiers": "Android 8+ tablet with 7-inch+ display and Play Store; local network pairing; signature unsupported; Wi-Fi/Ethernet switch requires re-pairing.",
+      "evidence_note": "Android customer view displays cart item name, quantity, price, customer, discounts, taxes, subtotal and total; requires apps foreground for persistent/reconnecting link."
+    },
+    {
+      "id": "SHC-S020",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/pickup-in-store-for-online-orders",
+      "title": "Managing pickup in store orders in Shopify POS",
+      "section": "Plan requirement; create pickup; notifications; prepare; mark picked up",
+      "accessed": "2026-11-17",
+      "qualifiers": "Pickup management and notifications require POS Pro; alternative pickup location requires POS 11.8+, inventory there, same country, and configured pickup location; subscriptions unsupported; some channel notifications not sent.",
+      "evidence_note": "POS manages orders needing preparation and ready/picked-up states; can create pickup orders at register; online and register orders supported; fulfillment permission required."
+    },
+    {
+      "id": "SHC-S021",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/selling-offline/offline-payments",
+      "title": "Accepting card payments offline using Shopify POS",
+      "section": "Requirements; limits; activation; offline sale; reconnect processing",
+      "accessed": "2026-11-17",
+      "qualifiers": "Admin activation and staff permission required; supported reader list varies by country; no swipe, Tap to Pay, or manual-entry offline; daily/device and transaction limits; POS Terminal requires functioning Wi-Fi network; customer email/phone required.",
+      "evidence_note": "Offline card acceptance stores payment pending until reconnect; Shopify auto-processes and syncs orders/customer info; declines visibly flagged; cash/manual checkout can work offline without offline-card activation."
+    },
+    {
+      "id": "SHC-S022",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management",
+      "title": "Managing POS orders, refunds, and exchanges",
+      "section": "Workflow index and overview",
+      "accessed": "2026-11-17",
+      "qualifiers": "Operator workflow overview; detailed behaviors are referenced to specific pages separately; online orders and POS orders appear in Orders.",
+      "evidence_note": "Overview explicitly includes pre-checkout cart editing, save-for-later, draft orders, post-sale refund/exchange, shipping/delivery, notes, and additional payment for partially paid order."
+    },
+    {
+      "id": "SHC-S023",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/discount-management/applying-discounts",
+      "title": "Applying discounts in Shopify POS",
+      "section": "Manual/automatic/code/QR discounts and combinations",
+      "accessed": "2026-11-17",
+      "qualifiers": "POS v11.5+ QR/per-unit amount; permissions, eligibility, POS Pro conditions apply.",
+      "evidence_note": "Automatic discounts may override manual discounts; custom discounts can combine; codes require eligible cart."
+    },
+    {
+      "id": "SHC-S024",
+      "url": "https://help.shopify.com/en/manual/taxes/set-adjust-pos-taxes/",
+      "title": "Setting up tax rates for Shopify POS",
+      "section": "Location tax configuration",
+      "accessed": "2026-11-17",
+      "qualifiers": "Tax/admin settings; US Shopify Tax conditions.",
+      "evidence_note": "POS uses assigned location tax settings."
+    },
+    {
+      "id": "SHC-S025",
+      "url": "https://help.shopify.com/en/manual/taxes/tax-overrides/",
+      "title": "Tax overrides and exemptions",
+      "section": "Tax-exempt customers",
+      "accessed": "2026-11-17",
+      "qualifiers": "Customer/admin configuration.",
+      "evidence_note": "Tax-exempt customers not charged tax; overrides apply to POS."
+    },
+    {
+      "id": "SHC-S026",
+      "url": "https://help.shopify.com/en/manual/taxes/tax-collection-impact-on-pricing",
+      "title": "Impact of tax collection on displayed prices",
+      "section": "Tax inclusive/exclusive/dynamic display",
+      "accessed": "2026-11-17",
+      "qualifiers": "Merchant tax settings; calculation unchanged.",
+      "evidence_note": "Default excludes tax; inclusive/dynamic settings change display."
+    },
+    {
+      "id": "SHC-S027",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/manage-recent-carts",
+      "title": "Managing recent carts on Shopify POS",
+      "section": "Save/share/view/rename/delete/expiry",
+      "accessed": "2026-11-17",
+      "qualifiers": "POS Pro, permission, same-store sharing.",
+      "evidence_note": "Recent carts do not reserve inventory; unavailable offline; default 24-hour expiry; removed after checkout."
+    },
+    {
+      "id": "SHC-S028",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/draft-orders",
+      "title": "Managing draft orders on Shopify POS",
+      "section": "Create/load/update/delete/email drafts",
+      "accessed": "2026-11-17",
+      "qualifiers": "POS Pro; permission; custom rate caveat.",
+      "evidence_note": "Drafts load from other locations/admin; timeline records creator/updater; custom shipping rate may be dropped."
+    },
+    {
+      "id": "SHC-S029",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/custom-sales",
+      "title": "Make a custom sale in Shopify POS",
+      "section": "Custom sale creation",
+      "accessed": "2026-11-17",
+      "qualifiers": "Add custom sales permission and tile.",
+      "evidence_note": "Enter optional title, amount, quantity and tax; report differs from catalog item."
+    },
+    {
+      "id": "SHC-S030",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/process-sales-transaction",
+      "title": "Quick reference - processing a sale",
+      "section": "Custom fees, item tax, reprint/gift receipt",
+      "accessed": "2026-11-17",
+      "qualifiers": "Fee tile; printer for gift receipt.",
+      "evidence_note": "One custom fee/cart; cart discount applies; item tax can be removed; receipt can be reprinted."
+    },
+    {
+      "id": "SHC-S031",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/adding-online-cart-items-to-pos-cart",
+      "title": "Adding online cart items to POS",
+      "section": "Import from abandoned checkout",
+      "accessed": "2026-11-17",
+      "qualifiers": "Create customer, view details, view abandoned checkouts permissions.",
+      "evidence_note": "Staff can view/add online items; POS purchase does not close abandoned checkout; cart expires by age."
+    },
+    {
+      "id": "SHC-S032",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/email-cart",
+      "title": "Email cart details to customer",
+      "section": "Email cart for online payment",
+      "accessed": "2026-11-17",
+      "qualifiers": "POS Pro; entire order only; no in-person partial; no payment pre-added.",
+      "evidence_note": "Email creates unpaid draft; customer pays online to complete."
+    },
+    {
+      "id": "SHC-S033",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/update-orders",
+      "title": "Updating an order",
+      "section": "Notes/customer edits/cancellation",
+      "accessed": "2026-11-17",
+      "qualifiers": "Cancel permission; authorized state, internet, up to 15m; regional/payment limits.",
+      "evidence_note": "Cannot cancel split, cash, gift card, Interac/EFTPOS/manual credit and DE/IT."
+    },
+    {
+      "id": "SHC-S034",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/return-rules",
+      "title": "Return rules",
+      "section": "Window/final sale/eligibility/override",
+      "accessed": "2026-11-17",
+      "qualifiers": "POS Pro; admin setup; permission/manager approval.",
+      "evidence_note": "POS shows ineligible reason; rules saved on order; exception can include note."
+    },
+    {
+      "id": "SHC-S035",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/add-shipping",
+      "title": "Shipping orders to customers",
+      "section": "Ship entire order/address/rates",
+      "accessed": "2026-11-17",
+      "qualifiers": "POS Pro; internet; shipping setup and permissions; physical item.",
+      "evidence_note": "Choose address/rate, collect payment; order remains unfulfilled."
+    },
+    {
+      "id": "SHC-S036",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/ship-and-carry-out",
+      "title": "Ship and carry out in one order",
+      "section": "Mixed fulfillment/taxes",
+      "accessed": "2026-11-17",
+      "qualifiers": "POS Pro, supported tax solution, complete shipping; no same variant split, international or subscription.",
+      "evidence_note": "One payment; carry-out fulfilled, shipping lines unfulfilled; tax varies."
+    },
+    {
+      "id": "SHC-S037",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/local-delivery-orders",
+      "title": "Local delivery orders in POS",
+      "section": "Create/prepare/notify/ready/delivered",
+      "accessed": "2026-11-17",
+      "qualifiers": "POS Pro; local delivery setup; cancellation in admin.",
+      "evidence_note": "Save delivery phone/instructions, print slip, mark ready/delivered."
+    },
+    {
+      "id": "SHC-S038",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/ship-from-store",
+      "title": "Ship from store",
+      "section": "Pack/slip/label/tracking",
+      "accessed": "2026-11-17",
+      "qualifiers": "POS Pro; routing/profile/permissions; printer constraints.",
+      "evidence_note": "Save progress, print slip, buy label or add tracking, fulfill."
+    },
+    {
+      "id": "SHC-S039",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/selling-offline/offline-features",
+      "title": "Shopify POS offline features",
+      "section": "Feature and hardware matrix",
+      "accessed": "2026-11-17",
+      "qualifiers": "Offline=no internet; stay signed in/device powered to avoid order loss.",
+      "evidence_note": "Manual discount/cash/manual payment work; tips/gift cards/returns/recent carts/shipping/pickup/code discounts unavailable."
+    },
+    {
+      "id": "SHC-S040",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/receipt-management/managing-receipts",
+      "title": "Managing Shopify POS receipts",
+      "section": "Reprint/gift/digital/Shop receipts",
+      "accessed": "2026-11-17",
+      "qualifiers": "France/Sweden labels and regional reprint limits.",
+      "evidence_note": "Printed receipt max 50 lines; gift receipt omits amount; Shop receipt after full payment."
+    },
+    {
+      "id": "SHC-S041",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/customize-pos/printed-receipts",
+      "title": "Customize printed POS receipts",
+      "section": "Visual/code editor and templates",
+      "accessed": "2026-11-17",
+      "qualifiers": "Visual editor all plans; code editor POS Pro; migration/locale conditions.",
+      "evidence_note": "Printed template and copy count configurable; email/SMS configured separately."
+    },
+    {
+      "id": "SHC-S042",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/customize-pos/printed-receipts/receipt-visual-editor",
+      "title": "Printed receipt visual editor",
+      "section": "Logo/metafield/line properties/location",
+      "accessed": "2026-11-17",
+      "qualifiers": "Visual editor; locale conditions.",
+      "evidence_note": "Selected data can print; blank/underscore properties excluded."
+    },
+    {
+      "id": "SHC-S043",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/customize-pos/printed-receipts/considerations-for-the-visual-editor",
+      "title": "Receipt editor considerations",
+      "section": "Types/scope/regional limits",
+      "accessed": "2026-11-17",
+      "qualifiers": "No CSS/fonts; Italy Epson RT; France required fields protected.",
+      "evidence_note": "Templates vary by receipt type; location overrides insulated from global edits."
+    },
+    {
+      "id": "SHC-S044",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/discount-management/combining-discounts",
+      "title": "Discount combinations on POS",
+      "section": "Combination requirements/behavior",
+      "accessed": "2026-11-17",
+      "qualifiers": "POS Pro; admin combinability; Plus exceptions.",
+      "evidence_note": "Best total discount; manual discount exceptions and line-item limits."
+    }
+  ],
+  "coverage": [
+    {
+      "id": "SHC-U001",
+      "topic": "Cart/order entry: quantity edits and item removal",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/edit-remove-item",
+      "status": "reviewed",
+      "reason": "Dedicated operator article inspected for item quantity and removal actions.",
+      "source_ids": [
+        "SHC-S002"
+      ],
+      "claim_ids": [
+        "SHC-C001",
+        "SHC-C002"
+      ]
+    },
+    {
+      "id": "SHC-U002",
+      "topic": "Pricing and manual discounts",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/process-sales-transaction",
+      "status": "reviewed",
+      "reason": "Quick reference and discount overview inspected; app discount internals are outside POS operator evidence.",
+      "source_ids": [
+        "SHC-S003",
+        "SHC-S004",
+        "SHC-S005"
+      ],
+      "claim_ids": [
+        "SHC-C003",
+        "SHC-C004",
+        "SHC-C005",
+        "SHC-C006"
+      ]
+    },
+    {
+      "id": "SHC-U003",
+      "topic": "Tax controls",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/adjust-tax-rates",
+      "status": "reviewed",
+      "reason": "Cart and item tax toggling documented; jurisdiction-specific legal correctness is not established by this guide.",
+      "source_ids": [
+        "SHC-S006"
+      ],
+      "claim_ids": [
+        "SHC-C007"
+      ]
+    },
+    {
+      "id": "SHC-U004",
+      "topic": "Tips and checkout payment selection",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/tips",
+      "status": "reviewed",
+      "reason": "Tip setup and supported reader/payment limits inspected, along with checkout method selection.",
+      "source_ids": [
+        "SHC-S007",
+        "SHC-S008"
+      ],
+      "claim_ids": [
+        "SHC-C008",
+        "SHC-C009"
+      ]
+    },
+    {
+      "id": "SHC-U005",
+      "topic": "Cash, split, partial, unpaid and card checkout",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/payment-management",
+      "status": "reviewed",
+      "reason": "Cash, split/partial, integrated/external/manual card behaviors inspected. Other local payment types were not individually reviewed.",
+      "source_ids": [
+        "SHC-S008",
+        "SHC-S009",
+        "SHC-S010",
+        "SHC-S011"
+      ],
+      "claim_ids": [
+        "SHC-C010",
+        "SHC-C011",
+        "SHC-C012",
+        "SHC-C013",
+        "SHC-C014"
+      ]
+    },
+    {
+      "id": "SHC-U006",
+      "topic": "Order refunds, unverified returns and exchanges",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management",
+      "status": "reviewed",
+      "reason": "Dedicated standard refund, unverified return and exchange operator articles inspected; country and plan exclusions captured.",
+      "source_ids": [
+        "SHC-S012",
+        "SHC-S013",
+        "SHC-S014"
+      ],
+      "claim_ids": [
+        "SHC-C015",
+        "SHC-C016",
+        "SHC-C017",
+        "SHC-C018"
+      ]
+    },
+    {
+      "id": "SHC-U007",
+      "topic": "Order search and retrieval",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/search-orders",
+      "status": "reviewed",
+      "reason": "Global/navigation search, filters, searchable attributes and receipt barcode lookup inspected.",
+      "source_ids": [
+        "SHC-S015"
+      ],
+      "claim_ids": [
+        "SHC-C019",
+        "SHC-C020"
+      ]
+    },
+    {
+      "id": "SHC-U008",
+      "topic": "Receipts and customer-facing display",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/receipt-management",
+      "status": "reviewed",
+      "reason": "Receipt selection and customer screen behaviors inspected; detailed printer management only covered at overview level.",
+      "source_ids": [
+        "SHC-S016",
+        "SHC-S017",
+        "SHC-S018",
+        "SHC-S019"
+      ],
+      "claim_ids": [
+        "SHC-C021",
+        "SHC-C022",
+        "SHC-C023",
+        "SHC-C024"
+      ]
+    },
+    {
+      "id": "SHC-U009",
+      "topic": "Pickup-order fulfillment in POS",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/pickup-in-store-for-online-orders",
+      "status": "reviewed",
+      "reason": "POS pickup preparation, notification and picked-up flows inspected; POS Pro and channel/device limitations recorded.",
+      "source_ids": [
+        "SHC-S020"
+      ],
+      "claim_ids": [
+        "SHC-C025",
+        "SHC-C026",
+        "SHC-C027"
+      ]
+    },
+    {
+      "id": "SHC-U010",
+      "topic": "Offline payment acceptance and recovery",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/selling-offline/offline-payments",
+      "status": "reviewed",
+      "reason": "Requirements, offline acceptance limits, pending/paid/declined state and reconnect behavior inspected; offline feature compatibility article not separately reviewed.",
+      "source_ids": [
+        "SHC-S021"
+      ],
+      "claim_ids": [
+        "SHC-C028",
+        "SHC-C029",
+        "SHC-C030"
+      ]
+    },
+    {
+      "id": "SHC-U011",
+      "topic": "Additional sale/order workflow branches in assigned domain",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management",
+      "status": "reviewed",
+      "reason": "Public assigned order-index branches were followed to operator pages mapped in SHC-U013 through SHC-U024. Account-specific and undocumented behavior remains unknown, not inferred.",
+      "source_ids": [
+        "SHC-S027",
+        "SHC-S028",
+        "SHC-S029",
+        "SHC-S030",
+        "SHC-S031",
+        "SHC-S032",
+        "SHC-S033",
+        "SHC-S034",
+        "SHC-S035",
+        "SHC-S036",
+        "SHC-S037",
+        "SHC-S038"
+      ],
+      "claim_ids": [
+        "SHC-C032",
+        "SHC-C033",
+        "SHC-C034",
+        "SHC-C035",
+        "SHC-C036",
+        "SHC-C037",
+        "SHC-C043",
+        "SHC-C044",
+        "SHC-C045",
+        "SHC-C046",
+        "SHC-C047",
+        "SHC-C048",
+        "SHC-C049"
+      ]
+    },
+    {
+      "id": "SHC-U012",
+      "topic": "POS sales overview and platform boundary",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos",
+      "status": "reviewed",
+      "reason": "Top-level first-party overview inspected; app/API/online checkout capabilities intentionally excluded from operator scope.",
+      "source_ids": [
+        "SHC-S001"
+      ],
+      "claim_ids": [
+        "SHC-C031"
+      ]
+    },
+    {
+      "id": "SHC-U013",
+      "topic": "Recent carts",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/manage-recent-carts",
+      "status": "reviewed",
+      "reason": "Official public operator page inspected; branch conditions and limits captured by linked claims.",
+      "source_ids": [
+        "SHC-S027"
+      ],
+      "claim_ids": [
+        "SHC-C032"
+      ]
+    },
+    {
+      "id": "SHC-U014",
+      "topic": "Draft orders",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/draft-orders",
+      "status": "reviewed",
+      "reason": "Official public operator page inspected; branch conditions and limits captured by linked claims.",
+      "source_ids": [
+        "SHC-S028"
+      ],
+      "claim_ids": [
+        "SHC-C033"
+      ]
+    },
+    {
+      "id": "SHC-U015",
+      "topic": "Custom sale and fees",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/custom-sales",
+      "status": "reviewed",
+      "reason": "Official public operator page inspected; branch conditions and limits captured by linked claims.",
+      "source_ids": [
+        "SHC-S029",
+        "SHC-S030"
+      ],
+      "claim_ids": [
+        "SHC-C036",
+        "SHC-C037"
+      ]
+    },
+    {
+      "id": "SHC-U016",
+      "topic": "Abandoned cart/email cart",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/adding-online-cart-items-to-pos-cart",
+      "status": "reviewed",
+      "reason": "Official public operator page inspected; branch conditions and limits captured by linked claims.",
+      "source_ids": [
+        "SHC-S031",
+        "SHC-S032"
+      ],
+      "claim_ids": [
+        "SHC-C034",
+        "SHC-C035"
+      ]
+    },
+    {
+      "id": "SHC-U017",
+      "topic": "Order notes/customer edit/cancel",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/update-orders",
+      "status": "reviewed",
+      "reason": "Official public operator page inspected; branch conditions and limits captured by linked claims.",
+      "source_ids": [
+        "SHC-S033"
+      ],
+      "claim_ids": [
+        "SHC-C043",
+        "SHC-C044"
+      ]
+    },
+    {
+      "id": "SHC-U018",
+      "topic": "Return rules",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/return-rules",
+      "status": "reviewed",
+      "reason": "Official public operator page inspected; branch conditions and limits captured by linked claims.",
+      "source_ids": [
+        "SHC-S034"
+      ],
+      "claim_ids": [
+        "SHC-C045"
+      ]
+    },
+    {
+      "id": "SHC-U019",
+      "topic": "Shipping/mixed fulfillment/ship from store",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/add-shipping",
+      "status": "reviewed",
+      "reason": "Official public operator page inspected; branch conditions and limits captured by linked claims.",
+      "source_ids": [
+        "SHC-S035",
+        "SHC-S036",
+        "SHC-S038"
+      ],
+      "claim_ids": [
+        "SHC-C046",
+        "SHC-C047",
+        "SHC-C049"
+      ]
+    },
+    {
+      "id": "SHC-U020",
+      "topic": "Local delivery",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/order-management/local-delivery-orders",
+      "status": "reviewed",
+      "reason": "Official public operator page inspected; branch conditions and limits captured by linked claims.",
+      "source_ids": [
+        "SHC-S037"
+      ],
+      "claim_ids": [
+        "SHC-C048"
+      ]
+    },
+    {
+      "id": "SHC-U021",
+      "topic": "Tax exemption and price display",
+      "url": "https://help.shopify.com/en/manual/taxes/set-adjust-pos-taxes/",
+      "status": "reviewed",
+      "reason": "Official public operator page inspected; branch conditions and limits captured by linked claims.",
+      "source_ids": [
+        "SHC-S024",
+        "SHC-S025",
+        "SHC-S026"
+      ],
+      "claim_ids": [
+        "SHC-C038",
+        "SHC-C039",
+        "SHC-C040"
+      ]
+    },
+    {
+      "id": "SHC-U022",
+      "topic": "Discount handling",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/discount-management/applying-discounts",
+      "status": "reviewed",
+      "reason": "Official public operator page inspected; branch conditions and limits captured by linked claims.",
+      "source_ids": [
+        "SHC-S023",
+        "SHC-S044"
+      ],
+      "claim_ids": [
+        "SHC-C041",
+        "SHC-C042"
+      ]
+    },
+    {
+      "id": "SHC-U023",
+      "topic": "Offline matrix",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/selling-offline/offline-features",
+      "status": "reviewed",
+      "reason": "Official public operator page inspected; branch conditions and limits captured by linked claims.",
+      "source_ids": [
+        "SHC-S039"
+      ],
+      "claim_ids": [
+        "SHC-C050",
+        "SHC-C051",
+        "SHC-C052",
+        "SHC-C053"
+      ]
+    },
+    {
+      "id": "SHC-U024",
+      "topic": "Receipt and template flows",
+      "url": "https://help.shopify.com/en/manual/sell-in-person/shopify-pos/receipt-management/managing-receipts",
+      "status": "reviewed",
+      "reason": "Official public operator page inspected; branch conditions and limits captured by linked claims.",
+      "source_ids": [
+        "SHC-S040",
+        "SHC-S041",
+        "SHC-S042",
+        "SHC-S043"
+      ],
+      "claim_ids": [
+        "SHC-C054",
+        "SHC-C055",
+        "SHC-C056"
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "SHC-C001",
+      "canonical_key": "checkout.cart.quantity.change",
+      "category": "checkout",
+      "capability": "Increase or decrease a product quantity from its cart row before checkout.",
+      "merchant_outcome": "Correct the quantity and order total without rebuilding the sale.",
+      "actor": "POS staff",
+      "trigger": "Customer changes the requested quantity before checkout.",
+      "behavior": "Staff opens a cart item and taps plus or minus to change its quantity.",
+      "preconditions": "Item is present in POS cart and checkout is not complete.",
+      "qualifiers": "No plan qualification stated on inspected article; device UI is Shopify POS.",
+      "recovery_edge_cases": "The inspected article does not describe quantity limits or restoration of an earlier quantity.",
+      "source_ids": [
+        "SHC-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "A visible quantity-change history and undo could reduce cashier correction time; measure correction frequency and seconds per correction.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Quantity editing is independent of payment rail; verify identical edit behavior for cash, card, and Bitcoin tender.",
+      "bitcoin_tradeoffs": "A payment rail must not lock cart edits before settlement; changing quantity after authorization can require recalculating the due amount.",
+      "acceptance_test": "Add two units, decrease to one, increase to three, and verify displayed line total and final charged amount update each time."
+    },
+    {
+      "id": "SHC-C002",
+      "canonical_key": "checkout.cart.item.remove",
+      "category": "checkout",
+      "capability": "Remove one, selected multiple, or all products from the open cart.",
+      "merchant_outcome": "Correct a cart that contains unwanted products.",
+      "actor": "POS staff",
+      "trigger": "Customer removes one or more products before payment.",
+      "behavior": "Staff selects a cart item, optionally selects additional items or all, then removes them.",
+      "preconditions": "Cart contains one or more items and is still open.",
+      "qualifiers": "Shopify POS app; no plan qualification stated.",
+      "recovery_edge_cases": "Guide does not specify undo behavior after removal.",
+      "source_ids": [
+        "SHC-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Offer an undo action after removal to reduce re-scans; measure accidental removals and recovery time.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Item removal should remain available before tender settles regardless of cash, card, or Bitcoin selection.",
+      "bitcoin_tradeoffs": "If authorization has already occurred, item removal must trigger a safe amount adjustment or void/refund path.",
+      "acceptance_test": "Remove one item, then remove two selected items, then clear a cart and verify each remaining subtotal."
+    },
+    {
+      "id": "SHC-C003",
+      "canonical_key": "pricing.discount.cart.custom",
+      "category": "pricing_tax",
+      "capability": "Apply a percentage or amount custom discount to the cart, or enter a discount code.",
+      "merchant_outcome": "Honor a negotiated or campaign discount at the register.",
+      "actor": "POS staff",
+      "trigger": "A sale qualifies for an order-level or customer-specific discount.",
+      "behavior": "Staff uses the Apply discount tile and selects Percentage, Amount, or Code; total reflects discount while retail price remains visible below subtotal.",
+      "preconditions": "Discount tile available; staff has Apply custom discounts or Apply discount codes permission as applicable.",
+      "qualifiers": "Percentage cart option excludes gift cards; discounts may require POS smart-grid configuration.",
+      "recovery_edge_cases": "Automatic discount settings can override cart or item discounts; see tax page/source for transaction-specific removal behavior.",
+      "source_ids": [
+        "SHC-S003",
+        "SHC-S004"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show discount basis and affected items before tender to reduce disputes; measure discount correction and void rates.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Discount calculation should be tender-agnostic and produce a single amount due in the selected settlement unit.",
+      "bitcoin_tradeoffs": "Fiat-denominated discounts need an explicit exchange-rate timestamp if converting a final discounted price to Bitcoin.",
+      "acceptance_test": "Apply a cart percentage and fixed amount separately, confirm displayed retail/subtotal/discount/total, and verify a gift card is excluded from percentage discount."
+    },
+    {
+      "id": "SHC-C004",
+      "canonical_key": "pricing.discount.line_item.custom",
+      "category": "pricing_tax",
+      "capability": "Apply a percentage, amount, or final price custom discount to one or more cart line items.",
+      "merchant_outcome": "Price an individual item differently without changing other items.",
+      "actor": "POS staff",
+      "trigger": "Staff applies a line-level promotion or price adjustment.",
+      "behavior": "Staff selects one or multiple items and applies percentage, amount, or price-after-discount value.",
+      "preconditions": "Items in cart; staff has custom discount permission.",
+      "qualifiers": "Exchange-item discount requires POS Pro. Monetary line-item amount applies per unit, not once to the whole line.",
+      "recovery_edge_cases": "Discount codes cannot be applied to exchange items; custom line-item discounts cannot be applied to a split line item; later product codes can be blocked on the discounted item.",
+      "source_ids": [
+        "SHC-S003",
+        "SHC-S004",
+        "SHC-S005"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Display per-unit versus extended discount impact before commit; measure cashier discount corrections and customer disputes.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Discounting should be applied to the merchandise amount before payment-method-specific settlement conversion.",
+      "bitcoin_tradeoffs": "Rounding can differ when converting per-unit amounts; preserve the fiat ledger amount and disclose any converted tender amount.",
+      "acceptance_test": "Set quantity two, apply a $20 line discount, and verify the total discount is $40; repeat with final price and percentage modes."
+    },
+    {
+      "id": "SHC-C005",
+      "canonical_key": "pricing.discount.combination.resolve",
+      "category": "pricing_tax",
+      "capability": "Combine eligible configured discounts and select the best total discount for a POS order.",
+      "merchant_outcome": "Apply permitted stacking while avoiding a less favorable discount combination.",
+      "actor": "POS system and staff",
+      "trigger": "The cart qualifies for multiple automatic, code, or custom discounts.",
+      "behavior": "POS evaluates configured combinations; eligible automatic discounts and codes follow admin combination rules, while manually applied custom discounts always apply.",
+      "preconditions": "POS Pro location; discounts configured as combinable in Shopify admin.",
+      "qualifiers": "Some same-line product combinations are Plus-specific; custom line-item constraints apply.",
+      "recovery_edge_cases": "The guide documents cases where a manual discount can override combination restrictions; staff must verify the resulting total.",
+      "source_ids": [
+        "SHC-S005"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Provide a reason for each applied or excluded discount; measure time spent investigating discount totals.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Discount eligibility and selection can remain independent of settlement rail.",
+      "bitcoin_tradeoffs": "Rate conversion timing can affect displayed savings if discount policy is denominated in fiat.",
+      "acceptance_test": "Configure two combinable discounts and one incompatible discount, build a qualifying cart, and verify the applied set and final total."
+    },
+    {
+      "id": "SHC-C006",
+      "canonical_key": "pricing.discount.third_party_pos",
+      "category": "pricing_tax",
+      "capability": "Use a third-party app discount in POS where that discount app supports the POS channel.",
+      "merchant_outcome": "Reuse eligible discount offers across the online store and register.",
+      "actor": "POS staff and installed discount app",
+      "trigger": "Cart qualifies for an app-created automatic discount or code.",
+      "behavior": "App discount can reduce products, subtotal, or shipping/delivery; app-created discounts apply to both online and POS and cannot be restricted to selected channels.",
+      "preconditions": "App discount integration is installed, published/configured for POS as needed, and applies to cart.",
+      "qualifiers": "This describes operator-observable app discounts, not the developer Discount Functions API; compatibility varies by app.",
+      "recovery_edge_cases": "Channel access cannot be controlled from the discount settings described; app-specific failures are not documented here.",
+      "source_ids": [
+        "SHC-S004"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Surface app source and eligibility reason in cart; measure discount support tickets and unexpected cross-channel promotions.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Discount source should not determine whether cash/card/Bitcoin can pay the resulting amount.",
+      "bitcoin_tradeoffs": "External app rules could assume fiat checkout context; validate app-specific display and rounding before relying on it.",
+      "acceptance_test": "Install a POS-enabled discount app in a test store, trigger a product and order discount in POS, and compare its visible result with the online channel."
+    },
+    {
+      "id": "SHC-C007",
+      "canonical_key": "pricing.tax.cart_and_item_toggle",
+      "category": "pricing_tax",
+      "capability": "Toggle applicable tax rates for all cart items or one selected product.",
+      "merchant_outcome": "Correct an exceptional tax treatment at cart or item level.",
+      "actor": "POS staff",
+      "trigger": "A transaction or specific product requires tax to be toggled.",
+      "behavior": "Staff uses Taxes in cart to toggle order rates, or opens an item and toggles its rates; baseline rates derive from assigned POS location.",
+      "preconditions": "POS cart exists; location tax settings configured in Shopify admin.",
+      "qualifiers": "EU stores may be prevented from turning taxes off for fiscalization compliance; setting changes do not establish legal tax correctness.",
+      "recovery_edge_cases": "Automatic discounts may override discounts applied to the cart/items; exact tax recalculation and audit behavior is not explained in inspected guide.",
+      "source_ids": [
+        "SHC-S006"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Require an explanatory reason and show before/after tax amount for overrides; measure tax correction rates and audit completeness.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Compute legally applicable tax in merchant ledger currency before tender conversion; Bitcoin support should not change tax rules.",
+      "bitcoin_tradeoffs": "Rounding and exchange-rate treatment can make tender totals diverge from tax ledger totals; preserve both values and rate timestamp.",
+      "acceptance_test": "Toggle cart tax, restore it, then toggle one item's tax and verify the tax lines and total at each step; test fiscalization-restricted locale behavior."
+    },
+    {
+      "id": "SHC-C008",
+      "canonical_key": "checkout.tip.collect",
+      "category": "checkout",
+      "capability": "Offer preset, custom, or no-tip choices during eligible POS card checkout.",
+      "merchant_outcome": "Let a customer add a gratuity to a supported in-person card payment.",
+      "actor": "Customer with staff facilitating checkout",
+      "trigger": "Staff selects an eligible credit payment method and tip collection is active.",
+      "behavior": "Checkout shows up to three configured percentage presets, optional custom amount, and no-tip; configurable minimum-dollar presets can replace percentages below a transaction threshold.",
+      "preconditions": "Tips enabled and supported card reader/payment method used.",
+      "qualifiers": "Supported readers: Tap & Chip, Chipper 2X BT, WisePad 3, POS Go; tips only credit payments via supported reader; maximum depends on currency and total; cancelled tip prompts staff PIN.",
+      "recovery_edge_cases": "If customer cancels before tip processing, staff PIN is required; guide provides currency/total maximums, including split payment cap.",
+      "source_ids": [
+        "SHC-S007"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show gratuity amount and percent together and provide an accessible no-tip option; measure tip selection completion and reversals.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "A Bitcoin tender flow could offer an optional gratuity in the same checkout intent, with a clear separate merchant allocation.",
+      "bitcoin_tradeoffs": "Tips may be subject to different accounting, employee payout and refund rules; do not assume wallet payment implies employee custody or conversion.",
+      "acceptance_test": "Enable two presets and custom tips, process eligible and ineligible payment types, select each tip choice, and verify cap enforcement and no-tip path."
+    },
+    {
+      "id": "SHC-C009",
+      "canonical_key": "checkout.payment_method.select",
+      "category": "payments",
+      "capability": "Choose among payment methods enabled for the POS device/store after reviewing the final cart.",
+      "merchant_outcome": "Collect payment through an available tender type at checkout.",
+      "actor": "POS staff",
+      "trigger": "Customer is ready to pay for the finalized cart.",
+      "behavior": "Checkout/Charge opens the payment option screen, which lists activated methods; staff chooses a method or selects split/partial/unpaid paths.",
+      "preconditions": "A cart exists and payment methods are configured in admin or POS device settings.",
+      "qualifiers": "Actual methods vary by country, processor, device and configured activation; no claim of universal payment support.",
+      "recovery_edge_cases": "If card reader is not connected, POS provides connection instructions; manual entry has separate requirements, rates and fraud risks.",
+      "source_ids": [
+        "SHC-S008"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show payment-method readiness and fallback availability before checkout; measure abandoned checkouts caused by unavailable tender.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "Add Bitcoin as an optional enabled tender while retaining cash and card choices and preserving merchant-controlled settlement preferences.",
+      "bitcoin_tradeoffs": "Rate source, quote expiry, refunds, settlement custody and local acceptance requirements need explicit configuration and disclosure.",
+      "acceptance_test": "Enable cash, integrated card and a custom external tender, verify each appears only when enabled, and confirm the customer can choose among them."
+    },
+    {
+      "id": "SHC-C010",
+      "canonical_key": "checkout.payment.cash",
+      "category": "payments",
+      "capability": "Accept a cash payment and calculate change due.",
+      "merchant_outcome": "Complete a sale for customers paying with notes and coins and reconcile expected drawer cash.",
+      "actor": "POS staff",
+      "trigger": "Customer selects cash and presents payment.",
+      "behavior": "Cash is enabled by default; POS prefills exact total or staff enters received amount; POS calculates change and tracks cash in drawer.",
+      "preconditions": "Cash payment enabled on the POS device; optional supported drawer configured.",
+      "qualifiers": "Change tracking is recorded by POS; drawer hardware is optional.",
+      "recovery_edge_cases": "Guide does not describe handling a short tender or correcting a mistaken received amount after acceptance.",
+      "source_ids": [
+        "SHC-S009"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Offer a visible confirmation of received cash and change before acceptance; measure cash over/short events.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Bitcoin support should be an additional tender and preserve cash payment as an available customer choice.",
+      "bitcoin_tradeoffs": "Do not require conversion of cash proceeds or force custody of Bitcoin to settle a sale.",
+      "acceptance_test": "Pay an uneven total with a larger entered amount and verify accepted cash, change due, payment status, and drawer tracking."
+    },
+    {
+      "id": "SHC-C011",
+      "canonical_key": "checkout.payment.split",
+      "category": "payments",
+      "capability": "Complete one order with multiple payment methods.",
+      "merchant_outcome": "Accommodate a customer dividing the total across tenders.",
+      "actor": "POS staff and customer",
+      "trigger": "Customer requests to divide payment across methods.",
+      "behavior": "Staff selects Split payment, enters an amount for each method, completes each tender sequentially, and POS defaults later tender amount to outstanding balance.",
+      "preconditions": "Accept split payments enabled for the device; supported tender available.",
+      "qualifiers": "EU restrictions may prevent split or partial unpaid states in France, Italy and Spain; split method limits and tender rules can vary.",
+      "recovery_edge_cases": "Change due may be presented after tenders; split-order cancellation restrictions exist for some payment/order types.",
+      "source_ids": [
+        "SHC-S010",
+        "SHC-S011"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show remaining balance and tender breakdown clearly after each leg; measure checkout completion and cashier arithmetic errors.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "Allow a customer to split among cash, card and Bitcoin in one order while keeping fiat tender available and merchant settlement choice independent.",
+      "bitcoin_tradeoffs": "Volatile conversion rates and partial settlement failure require quote locking and an explicit unwind or balance-due flow.",
+      "acceptance_test": "Split an order across cash and card, verify each amount and final balance; then simulate a declined second tender and verify recoverable outstanding balance."
+    },
+    {
+      "id": "SHC-C012",
+      "canonical_key": "checkout.payment.partial_balance",
+      "category": "payments",
+      "capability": "Accept an initial payment and leave the order partially paid for later collection.",
+      "merchant_outcome": "Complete a sale when the customer cannot pay the full balance immediately.",
+      "actor": "POS staff",
+      "trigger": "Customer can pay only a portion now.",
+      "behavior": "After receiving first split payment, staff marks order partially paid; staff can retrieve it later and collect the remaining balance using a chosen method.",
+      "preconditions": "Partial-payment option enabled on POS device and allowed in region.",
+      "qualifiers": "Gift-card-containing checkout must be paid in full; some EU locations restrict partial/unpaid checkout.",
+      "recovery_edge_cases": "Refunding a multi-payment order or editing it can prevent additional payments; outstanding balance collection details depend on order state.",
+      "source_ids": [
+        "SHC-S010",
+        "SHC-S012"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show due date, balance, and follow-up status in the order view; measure aged balances and missed collections.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "Permit a Bitcoin or other tender for a later balance payment without forcing original tender or custodial conversion, subject to merchant policy.",
+      "bitcoin_tradeoffs": "Partial payment rates and invoices must state currency basis and avoid silently repricing the outstanding amount.",
+      "acceptance_test": "Take a partial cash payment, retrieve the order, accept remaining amount by card, and verify status and payment history."
+    },
+    {
+      "id": "SHC-C013",
+      "canonical_key": "checkout.payment.mark_unpaid",
+      "category": "payments",
+      "capability": "Record a checkout as unpaid for later payment.",
+      "merchant_outcome": "Record an order without collecting money at the register.",
+      "actor": "POS staff",
+      "trigger": "Customer is approved to pay later or the transaction is otherwise completed unpaid.",
+      "behavior": "Staff selects Mark unpaid; order is processed with a zero payment and can be paid later.",
+      "preconditions": "Method enabled/available in region and payment policy permits unpaid orders.",
+      "qualifiers": "Gift card items must be paid in full; EU country restrictions apply to marking unpaid.",
+      "recovery_edge_cases": "Unpaid order tracking and collection timing are not detailed on payment selection page.",
+      "source_ids": [
+        "SHC-S008",
+        "SHC-S010"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Expose unpaid status, balance due and next collection action at order retrieval; measure uncollected balances.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Later collection can be any merchant-enabled tender, including a future Bitcoin option, without eliminating cash/card.",
+      "bitcoin_tradeoffs": "Outstanding amount should remain anchored to the order's stated currency unless customer and merchant agree otherwise.",
+      "acceptance_test": "Mark an eligible order unpaid, find it later, collect its balance, and verify paid state and history; confirm restricted locale blocks the flow."
+    },
+    {
+      "id": "SHC-C014",
+      "canonical_key": "checkout.payment.card.processing",
+      "category": "payments",
+      "capability": "Accept in-person card payment using an integrated reader, external terminal, or supported manual-entry workflow.",
+      "merchant_outcome": "Take card payments through a supported processor configuration.",
+      "actor": "POS staff and customer",
+      "trigger": "Customer selects card or a configured card tender.",
+      "behavior": "Integrated reader processes card; an external terminal processes outside Shopify and staff then marks POS order paid; manual card entry charges through configured provider.",
+      "preconditions": "Compatible reader/processor, region, device and payment setup; external path requires provider account and custom payment type; manual card entry requires provider/device support.",
+      "qualifiers": "Supported brands vary by country; manual entry is card-not-present, higher fraud risk, rate may differ, and unavailable offline. POS Pro supports delayed capture except Germany/Italy.",
+      "recovery_edge_cases": "Checkout errors or cancellations, including tip cancellation, require staff PIN re-entry; external transaction success must be confirmed before marking paid.",
+      "source_ids": [
+        "SHC-S011"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show processor, confirmation and fallback state consistently; measure payment retries, duplicate charges and manual-entry fraud loss.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "Add a QR-based Bitcoin tender as a parallel operator-selected method and confirm settlement status before marking the order paid.",
+      "bitcoin_tradeoffs": "Processor and wallet support are environment-dependent; provide explicit on-chain/Lightning mode, quote expiry, network fees, refund policy and merchant custody choice. Do not force fiat conversion.",
+      "acceptance_test": "In a test setup, process one integrated card, one external terminal payment and one manual entry; verify paid state, receipt and PIN/failure handling for each."
+    },
+    {
+      "id": "SHC-C015",
+      "canonical_key": "refund.order.partial_or_full",
+      "category": "refunds_returns",
+      "capability": "Return selected quantities and issue a full or partial refund for an eligible order.",
+      "merchant_outcome": "Resolve returns and refund customers within the amount they paid.",
+      "actor": "POS staff",
+      "trigger": "Customer requests return/refund for an existing order.",
+      "behavior": "Staff selects items/quantities, optionally shipping/tip/reason/note, chooses refund payment method and can edit the partial refund amount; split refund can allocate across methods.",
+      "preconditions": "Staff has Return and exchange orders permission and any specific permissions required for ineligible/in-progress returns.",
+      "qualifiers": "Refund by a method cannot exceed the amount originally paid by that method; custom payment orders refund only through that custom method; third-party channel orders may require admin.",
+      "recovery_edge_cases": "Existing admin return in progress blocks POS refund until closed; restock returns to assigned POS location except fulfillment-provider cases.",
+      "source_ids": [
+        "SHC-S012"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Preview refund allocation, inventory destination and residual amount before confirmation; measure refund corrections and service time.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "Offer a merchant-configured refund destination including original Bitcoin tender where operationally supported, while retaining eligible cash/card/custom-method paths.",
+      "bitcoin_tradeoffs": "Refunding Bitcoin can return a different fiat value as exchange rates move; disclose currency basis, amount, fees, timing and destination and never silently require custody or conversion.",
+      "acceptance_test": "Refund a partial quantity, shipping and tip separately; verify total ceiling by original tender, split allocation, receipt and restock destination."
+    },
+    {
+      "id": "SHC-C016",
+      "canonical_key": "refund.tip.separate",
+      "category": "refunds_returns",
+      "capability": "Refund a tip independently of the merchandise order total.",
+      "merchant_outcome": "Correct a tip without reversing a completed sale.",
+      "actor": "POS staff",
+      "trigger": "Customer or merchant needs to reverse an earlier gratuity.",
+      "behavior": "Staff opens the order, selects Refund, adjusts tip refund quantity, confirms, and can provide an email/text receipt.",
+      "preconditions": "Order includes a tip and staff is authorized to refund the order.",
+      "qualifiers": "Applicable card/provider refund conditions are not exhaustively specified in the tip guide.",
+      "recovery_edge_cases": "Guide supports tip-only refund; provider availability and settlement timing remain unspecified.",
+      "source_ids": [
+        "SHC-S007",
+        "SHC-S012"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Make tip-only refund explicit in the order detail and report; measure accidental merchandise refunds and tip adjustments.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "A tip can be refunded as its own ledger amount, with destination chosen under merchant policy.",
+      "bitcoin_tradeoffs": "Employee payout and exchange-rate treatment may differ from merchandise; do not assume automatic custody or fiat conversion.",
+      "acceptance_test": "Refund only the tip on an order and verify merchandise remains paid and customer receipt communicates the isolated adjustment."
+    },
+    {
+      "id": "SHC-C017",
+      "canonical_key": "refund.return.unverified",
+      "category": "refunds_returns",
+      "capability": "Record an unverified return when the customer has no matching order reference and refund to a gift card.",
+      "merchant_outcome": "Record a no-receipt return with a traceable record and inventory decision.",
+      "actor": "POS staff",
+      "trigger": "Customer presents an item without a reference order.",
+      "behavior": "Staff selects customer, item and quantity, optionally restocks, records reason/note, selects digital/physical gift card, sets eligible refund amount and processes.",
+      "preconditions": "POS Pro, required staff permissions, customer profile with email/phone, gift cards activated and physical gift card product present.",
+      "qualifiers": "Not available France, Spain, Sweden; location currency must match default store currency; only gift card refund allowed; amount >0 and no more than current variant price; bundles excluded.",
+      "recovery_edge_cases": "Tax assumed for return location and can be turned off or location changed but amount cannot be directly changed; processed order cannot later be canceled.",
+      "source_ids": [
+        "SHC-S013"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Add policy prompts and provenance capture for no-reference return; measure abuse incidents and operator time.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Bitcoin could be offered only as an additional merchant-approved refund path where identity and return controls support it.",
+      "bitcoin_tradeoffs": "Shopify's documented flow is intentionally gift-card-only; expanding refund destination requires fraud controls, value/date basis, and must not force Bitcoin or custodial handling.",
+      "acceptance_test": "Attempt eligible and ineligible no-reference returns across supported and excluded currencies/markets; verify gift-card-only destination, limits, tax location and durable return record."
+    },
+    {
+      "id": "SHC-C018",
+      "canonical_key": "refund.exchange.replace_item",
+      "category": "refunds_returns",
+      "capability": "Exchange returned merchandise for a replacement item and collect or pay the price difference.",
+      "merchant_outcome": "Complete return and replacement in one operator flow.",
+      "actor": "POS staff",
+      "trigger": "Customer exchanges one or more items from an existing order.",
+      "behavior": "Staff selects returned items, sets restock/reason, adds replacement item, and POS presents Checkout amount owed or Refund amount to return; cart may be saved/shared.",
+      "preconditions": "POS Pro location and return/exchange and related permissions.",
+      "qualifiers": "Unavailable Sweden; bundles must be exchanged item-by-item and cannot be selected as replacements; automatic discounts do not apply; returned stock goes to current POS location; manual discount allowed on exchange item.",
+      "recovery_edge_cases": "Admin return in progress blocks POS exchange until closed; if replacement is not added, view shows refund only; barcode scan unsupported on returned-item selection.",
+      "source_ids": [
+        "SHC-S014"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show both goods movement and net amount due before completing the exchange; measure incomplete exchanges and mis-restocked items.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "Support an optional Bitcoin payment for a positive exchange balance or a merchant-defined refund method when balance is negative.",
+      "bitcoin_tradeoffs": "Exchange valuation and refund currency can change with Bitcoin price; preserve original order value and disclose any new tender quote and fees.",
+      "acceptance_test": "Exchange a lower-priced and higher-priced item, verify refund-versus-collect paths, manual discount eligibility, saved-cart resume and correct stock location."
+    },
+    {
+      "id": "SHC-C019",
+      "canonical_key": "orders.search.attributes",
+      "category": "checkout",
+      "capability": "Search POS and online orders by order ID, item name, receipt number, customer name, or card last four digits.",
+      "merchant_outcome": "Retrieve a transaction using information available to the customer or cashier.",
+      "actor": "POS staff",
+      "trigger": "A customer needs a receipt, return, or order assistance.",
+      "behavior": "Staff searches from global search or Orders screen; matching reason is displayed; filters can narrow the list.",
+      "preconditions": "Orders accessible to signed-in POS user.",
+      "qualifiers": "Some offline-completed or zero-paid POS orders display register ID prefix and receipt number instead of typical order number.",
+      "recovery_edge_cases": "Guide does not specify result visibility permissions or retention window; alternate receipt identifier may be needed.",
+      "source_ids": [
+        "SHC-S015"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Offer guided search from receipt fields and explain identifier formats; measure time-to-retrieve and failed lookups.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Order lookup should search all orders independent of tender type and settlement rail.",
+      "bitcoin_tradeoffs": "Do not expose sensitive payment credentials; last-four search should remain a limited lookup hint.",
+      "acceptance_test": "Search the same order by ID, item, customer, receipt number and card last four; verify matching reason and offline/$0 receipt-number case."
+    },
+    {
+      "id": "SHC-C020",
+      "canonical_key": "orders.search.receipt_barcode",
+      "category": "checkout",
+      "capability": "Open an order by scanning a barcode printed on its receipt.",
+      "merchant_outcome": "Retrieve a sale quickly for support or return.",
+      "actor": "POS staff",
+      "trigger": "Customer presents a receipt with barcode.",
+      "behavior": "Staff scans receipt barcode with 2D scanner or device camera; if scan fails, can enter receipt number manually.",
+      "preconditions": "Receipt barcode printed; compatible scanner or camera available.",
+      "qualifiers": "Barcode scanning support specified for 2D barcode scanner only; camera instructions refer to iPad front camera.",
+      "recovery_edge_cases": "Manual receipt-number entry is documented fallback when scan fails.",
+      "source_ids": [
+        "SHC-S015"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Provide visible scan failure reason and direct fallback entry; measure retrieval latency and scan failures.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Receipt retrieval should remain available regardless of how the order was paid.",
+      "bitcoin_tradeoffs": "A printed order identifier is not proof of settlement; confirm current order payment status before refunds.",
+      "acceptance_test": "Scan a printed receipt barcode using a 2D scanner and camera; then enter its number manually after an intentional scan failure."
+    },
+    {
+      "id": "SHC-C021",
+      "canonical_key": "checkout.receipt.customer_choice",
+      "category": "checkout",
+      "capability": "Let a customer choose printed, email, SMS, Shop app, or no receipt when eligible.",
+      "merchant_outcome": "Deliver proof of purchase in the customer's preferred channel.",
+      "actor": "Customer, supported by POS staff/display",
+      "trigger": "Checkout reaches receipt selection.",
+      "behavior": "Customer selects available receipt option; if no customer display is connected staff turns POS device to customer; selected digital contact can be associated with an order/customer profile.",
+      "preconditions": "Customer receipt selection enabled; channel-specific devices/accounts configured.",
+      "qualifiers": "Shop app requires Shopify card reader, Shop Pay enabled, connected display, active Shop account and saved payment card; email/SMS availability depends on entered contact.",
+      "recovery_edge_cases": "Customer may select No receipt; without matches customer must enter contact details for digital receipt.",
+      "source_ids": [
+        "SHC-S016"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Make channel-specific eligibility clear and avoid duplicate profile creation; measure receipt delivery success and contact correction rates.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Receipt options should be independent from tender and include transaction/tender detail without requiring wallet custody.",
+      "bitcoin_tradeoffs": "A wallet receipt or transaction reference must not replace ordinary receipt channels or expose customer wallet identity by default.",
+      "acceptance_test": "Offer print, email, text, no receipt and eligible Shop app; verify selected channel, fallback behavior, and profile/order association."
+    },
+    {
+      "id": "SHC-C022",
+      "canonical_key": "checkout.receipt.print_email_sms",
+      "category": "checkout",
+      "capability": "Provide receipts by printer, email, or text and configure a default printer per POS device.",
+      "merchant_outcome": "Issue proof of purchase at the register or digitally.",
+      "actor": "POS staff",
+      "trigger": "Sale or refund completes and receipt is requested.",
+      "behavior": "POS can print, email or text a receipt; when multiple printers are available a POS device can use a chosen default; receipt can include location, customer and order-note details.",
+      "preconditions": "Printer connected/configured for print; valid contact for digital receipt.",
+      "qualifiers": "Detailed printer compatibility/configuration steps not inspected; available methods depend on device settings.",
+      "recovery_edge_cases": "Guide overview does not document print/email delivery failure recovery.",
+      "source_ids": [
+        "SHC-S017",
+        "SHC-S012"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show delivery result and retry action for each channel; measure failed/duplicate receipts.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Include tender type, amount and relevant settlement reference on a standard receipt while retaining print and digital delivery choices.",
+      "bitcoin_tradeoffs": "Do not expose secret keys or full wallet details; clarify any exchange-rate amount printed.",
+      "acceptance_test": "Issue receipts by print/email/text on supported devices; verify configured default printer and that location/customer/order note fields appear when enabled."
+    },
+    {
+      "id": "SHC-C023",
+      "canonical_key": "checkout.customer_display.cart_summary",
+      "category": "checkout",
+      "capability": "Show cart line items and customer-facing checkout and thank-you screens on a paired display.",
+      "merchant_outcome": "Let the customer review the transaction while staff operates POS.",
+      "actor": "Customer",
+      "trigger": "Staff adds cart items or completes payment.",
+      "behavior": "Shopify Customer View on Android can show item name, quantity, price, customer, discounts, taxes, subtotal and total; screens progress through cart, receipt and thank-you states.",
+      "preconditions": "For Customer View: Android 8+, tablet at least 7 inches, Google Play and same local network; built-in POS display availability varies by device.",
+      "qualifiers": "Signature is unsupported; both apps should remain foreground for reconnection; device sleep/navigation can disconnect; Wi-Fi/Ethernet changes require re-pairing.",
+      "recovery_edge_cases": "Unlock/reopen apps to reconnect; use re-pair flow if connection fails.",
+      "source_ids": [
+        "SHC-S018",
+        "SHC-S019"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show connection health and cached current amount prominently; measure customer disputes and checkout delays caused by display disconnect.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Display tender, quote and amount due to customer before approval on the same customer-visible surface.",
+      "bitcoin_tradeoffs": "Quote expiration and conversion amount must remain synchronized with cashier view; customer display should not expose wallet secrets.",
+      "acceptance_test": "Pair a supported Android display, confirm all cart fields sync, finish checkout and test reconnect after sleep and Wi-Fi/Ethernet switch."
+    },
+    {
+      "id": "SHC-C024",
+      "canonical_key": "checkout.customer_display.privacy_policy",
+      "category": "security_privacy",
+      "capability": "Present a customer-facing Privacy Policy button and QR code during checkout when a policy is published.",
+      "merchant_outcome": "Give customers a way to review store privacy terms during an in-person transaction.",
+      "actor": "Customer",
+      "trigger": "Customer taps Privacy Policy on the customer display cart screen.",
+      "behavior": "Display presents QR code linking to the store's published Privacy Policy; customer dismisses to return to cart; button is omitted if no policy is published.",
+      "preconditions": "Published Shopify Privacy Policy and customer-facing cart summary screen.",
+      "qualifiers": "Inspected customer-display guide; actual customer device needs QR-capable camera/network to open policy.",
+      "recovery_edge_cases": "No policy publication means the button does not display; guide does not specify offline policy fallback.",
+      "source_ids": [
+        "SHC-S018"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Offer a readable short link and offline copy for customers without QR/network access; measure policy access success.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Payment method should not alter privacy-policy visibility or customer ability to review terms.",
+      "bitcoin_tradeoffs": "Bitcoin acceptance may require additional data disclosures; keep them explicit and avoid collecting wallet identifiers unnecessarily.",
+      "acceptance_test": "Publish a policy and verify QR is accessible and dismiss returns to cart; remove policy and verify button is hidden."
+    },
+    {
+      "id": "SHC-C025",
+      "canonical_key": "orders.pickup.create_at_register",
+      "category": "checkout",
+      "capability": "Create a pickup-in-store order at the register for a customer who will collect items later.",
+      "merchant_outcome": "Take payment and reserve a later handoff for physical goods.",
+      "actor": "POS staff",
+      "trigger": "In-person customer wants to pay now and collect later.",
+      "behavior": "Staff adds items, chooses Pickup all items, can choose a pickup location, adds or creates customer, then checks out; receipt includes pickup location.",
+      "preconditions": "Pickup location configured and in-stock items at selected pickup site.",
+      "qualifiers": "POS Pro; alternate location requires app 11.8+, configured eligible pickup location, available inventory and same country; subscriptions unsupported; digital goods auto-fulfill, gift cards cannot be picked up.",
+      "recovery_edge_cases": "If no alternate pickup site is eligible, current POS location is default; item mix may require manual fulfillment for physical items.",
+      "source_ids": [
+        "SHC-S020"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show pickup-site eligibility and inventory reason before checkout; measure changed-location and canceled pickup rates.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Pickup order acceptance should allow any merchant-enabled tender without changing pickup eligibility or requiring Bitcoin conversion.",
+      "bitcoin_tradeoffs": "Payment confirmation and pickup authorization must stay distinct; a pending Bitcoin payment should not trigger handoff as paid.",
+      "acceptance_test": "Create a pickup order with physical and digital items, choose eligible alternate same-country location, complete payment and verify receipt location and fulfillment states."
+    },
+    {
+      "id": "SHC-C026",
+      "canonical_key": "orders.pickup.prepare_notify",
+      "category": "checkout",
+      "capability": "Prepare a pickup order, mark it ready, and notify the customer from POS.",
+      "merchant_outcome": "Coordinate store staff preparation and customer arrival.",
+      "actor": "POS staff",
+      "trigger": "A pickup order needs physical preparation.",
+      "behavior": "Staff opens order, taps Ready for pickup, sets items aside, optionally prints pickup slip, and sends ready notification.",
+      "preconditions": "POS Pro; staff has fulfillment permission; order is a supported pickup order.",
+      "qualifiers": "Notifications use device order-notification setting and device notification services; Facebook & Instagram channel ready notification is not sent by Shopify even when action is tapped.",
+      "recovery_edge_cases": "For Facebook & Instagram orders, staff must contact customer directly; pickup order edits are only in Shopify admin/mobile app, not POS.",
+      "source_ids": [
+        "SHC-S020"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show channel-specific notification delivery status and direct-contact reminder; measure orders ready but customers not informed.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Preparation notification should depend on fulfillment status, not payment rail, with paid-state confirmation visible.",
+      "bitcoin_tradeoffs": "Pending/declined tender states must prevent accidental handoff; support manual override with audit trail.",
+      "acceptance_test": "Prepare supported online and register pickup orders, send ready notice and verify status; confirm unsupported sales channel prompts staff to contact customer."
+    },
+    {
+      "id": "SHC-C027",
+      "canonical_key": "orders.pickup.mark_collected",
+      "category": "checkout",
+      "capability": "Mark a prepared pickup order as picked up and optionally send confirmation.",
+      "merchant_outcome": "Record customer handoff and close fulfillment.",
+      "actor": "POS staff",
+      "trigger": "Customer arrives and collects the order.",
+      "behavior": "Staff finds the order, checks order number/customer name, marks picked up, optionally selects email/text confirmation, and completes.",
+      "preconditions": "POS Pro and Fulfill shipping and pickup orders permission; order is prepared for pickup.",
+      "qualifiers": "Printed pickup slip QR can accelerate retrieval; confirmation choice depends on available contact channel.",
+      "recovery_edge_cases": "Staff is instructed to confirm order number and customer name; alternate verification processes are not described.",
+      "source_ids": [
+        "SHC-S020"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Add clear recipient confirmation and undo/audit when pickup is marked in error; measure mistaken handoffs and fulfillment reopenings.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Handoff should require the order's merchant-defined paid/authorized state regardless of tender.",
+      "bitcoin_tradeoffs": "A payment pending on reconnect must not be treated as settled; keep merchant exception authority and audit trail.",
+      "acceptance_test": "Find a ready order by QR and by search, mark collected, issue confirmation and verify fulfillment status and audit detail."
+    },
+    {
+      "id": "SHC-C028",
+      "canonical_key": "checkout.offline.card.accept",
+      "category": "offline_availability",
+      "capability": "Accept supported credit/debit card payments while POS has no internet connection, within configured limits.",
+      "merchant_outcome": "Continue eligible sales during an internet outage.",
+      "actor": "POS staff and customer",
+      "trigger": "POS is offline and customer pays by supported card reader.",
+      "behavior": "Offline checkout collects customer email or phone, accepts tap/insert via a supported reader, and stores card order as payment pending until connection returns.",
+      "preconditions": "Offline payments enabled in admin, staff has offline credit/debit permission, compatible reader, daily device and per-transaction limits configured.",
+      "qualifiers": "Supported reader list includes Verifone Victa, POS Go, POS Terminal, Tap & Chip, Chipper 2X BT, WisePad 3; availability varies by location. POS Terminal requires local Wi-Fi to remain functional; no swipe, Tap to Pay, or manual card entry offline.",
+      "recovery_edge_cases": "Over-limit order requires alternate tender such as cash; staff can use cash/manual offline checkout without enabling offline card payments.",
+      "source_ids": [
+        "SHC-S021"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show remaining offline transaction and daily limits before tender; measure outage sales recovered and limit-related abandonment.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "A separately designed offline Bitcoin intent may permit later settlement but must be clearly marked pending and should not compel conversion or custody.",
+      "bitcoin_tradeoffs": "Offline Bitcoin acceptance creates double-spend and settlement uncertainty; merchant must choose risk limits and may prefer cash/card offline behavior.",
+      "acceptance_test": "Disconnect internet with offline payments enabled, make below-limit tap and insert transactions, then exceed per-order and daily limits and verify blocked/fallback paths."
+    },
+    {
+      "id": "SHC-C029",
+      "canonical_key": "checkout.offline.card.reconcile",
+      "category": "offline_availability",
+      "capability": "Automatically process stored offline card payments and sync orders after connectivity returns.",
+      "merchant_outcome": "Reconcile outage transactions without re-entering each sale.",
+      "actor": "POS app",
+      "trigger": "POS device reconnects to internet after offline checkout.",
+      "behavior": "POS submits offline card payments, syncs orders to admin, and attaches entered customer information to the correct customer/order.",
+      "preconditions": "Device reconnects and can process pending payments; POS session and card reader remain/re-establish connectivity.",
+      "qualifiers": "Logged-out state requires staff to log in and reconnect reader before processing pending payments.",
+      "recovery_edge_cases": "Payment can be declined and then order displays Card declined; pending state is not equivalent to paid.",
+      "source_ids": [
+        "SHC-S021"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Provide a reconciliation queue with retry/result explanations and owner alerts; measure unresolved pending duration and manual reconciliation work.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "A Bitcoin workflow could synchronize transaction proof later while retaining a clearly pending or risk-accepted state.",
+      "bitcoin_tradeoffs": "Offline proof is not final settlement and may be double-spent; do not describe it as guaranteed payment or force post-event fiat conversion.",
+      "acceptance_test": "Reconnect after multiple offline card sales, verify automatic sync and customer linkage, then force a declined transaction and confirm status changes and recovery visibility."
+    },
+    {
+      "id": "SHC-C030",
+      "canonical_key": "checkout.offline.card.status",
+      "category": "offline_availability",
+      "capability": "Display pending, paid, or declined state for offline card orders as reconciliation proceeds.",
+      "merchant_outcome": "Know whether an outage sale has actually been paid after reconnection.",
+      "actor": "POS staff",
+      "trigger": "Offline payment is stored or subsequently processed.",
+      "behavior": "Orders show Payment pending while offline, Paid after successful processing, or Card declined after failure.",
+      "preconditions": "Offline card payment feature used with supported reader/configuration.",
+      "qualifiers": "Status behavior documented for offline card orders; precise alerts, retry controls and timeouts not specified.",
+      "recovery_edge_cases": "If staff is logged out while offline, must log back in and reconnect reader to process stored payments; declined payment needs alternate resolution not detailed by guide.",
+      "source_ids": [
+        "SHC-S021"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Place pending/declined alerts on order and pickup screens with actionable next steps; measure unpaid handoffs and stale pending orders.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Any asynchronous tender needs distinct pending, settled and failed states before order fulfillment or refund.",
+      "bitcoin_tradeoffs": "Bitcoin confirmations and payment-request expiry differ by network; avoid equating detected transaction with final settlement.",
+      "acceptance_test": "Observe order state while offline, after successful reconnect, and after declined reconnect; confirm fulfillment workflow distinguishes unpaid/paid."
+    },
+    {
+      "id": "SHC-C031",
+      "canonical_key": "checkout.pos.order_sync_overview",
+      "category": "checkout",
+      "capability": "Sync POS order records with Shopify admin and display POS and online orders in the POS order screen.",
+      "merchant_outcome": "Use one POS order view to locate and manage store and online transactions.",
+      "actor": "POS app",
+      "trigger": "POS orders are completed and online orders exist in the store.",
+      "behavior": "POS syncs with Shopify admin for order/inventory tracking and Orders screen displays online and in-person orders.",
+      "preconditions": "Shopify POS configured; multi-location activated in store settings for POS use.",
+      "qualifiers": "This is a high-level operator overview; sync timing/failure semantics are not specified here. Online Shopify checkout features are outside this record.",
+      "recovery_edge_cases": "Offline card orders have separately documented delayed sync behavior; other sync errors are unresolved in inspected source.",
+      "source_ids": [
+        "SHC-S001",
+        "SHC-S022"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show sync freshness and unsynced order count; measure time to detect reconciliation gaps.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Order record synchronization should carry payment method/status and remain tender-neutral.",
+      "bitcoin_tradeoffs": "Never use an order's mere presence as evidence of settlement; preserve separate payment state and reconciliation records.",
+      "acceptance_test": "Complete a POS order and locate it in POS Orders and admin; verify online orders can also be searched and compare documented sync status."
+    },
+    {
+      "id": "SHC-C032",
+      "canonical_key": "checkout.cart.save_recent",
+      "category": "checkout",
+      "capability": "Save/share/resume recent carts",
+      "merchant_outcome": "Save/share/resume recent carts",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Cart auto-saves; staff can reopen, rename or delete and same-store devices can open a copy.",
+      "preconditions": "POS Pro and Manage recent carts permission.",
+      "qualifiers": "No inventory reservation; offline unavailable; default 24h expiry; deletes after checkout.",
+      "recovery_edge_cases": "Opened elsewhere becomes a separate copy; no cross-store sharing.",
+      "source_ids": [
+        "SHC-S027"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C033",
+      "canonical_key": "checkout.cart.draft_order",
+      "category": "checkout",
+      "capability": "Create/load/update/delete/email draft orders",
+      "merchant_outcome": "Create/load/update/delete/email draft orders",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Save cart, load across location/admin, update, email link or delete; timeline shows creator/updater.",
+      "preconditions": "POS Pro; permissions for cross-location access.",
+      "qualifiers": "Custom shipping rate may be removed on load; discount can be removed if disabled.",
+      "recovery_edge_cases": "Without discount permission, order may still process but discount is removed.",
+      "source_ids": [
+        "SHC-S028"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C034",
+      "canonical_key": "checkout.cart.abandoned_online_import",
+      "category": "checkout",
+      "capability": "Import selected items from customer abandoned online cart",
+      "merchant_outcome": "Import selected items from customer abandoned online cart",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Staff views up to three items or full list and adds selected products to POS cart.",
+      "preconditions": "Customer email and create-customer/view-details/abandoned-checkout permissions.",
+      "qualifiers": "Expires 90 days after creation or 30 days after update; POS purchase does not close it.",
+      "recovery_edge_cases": "Switch customer after saving current cart if necessary.",
+      "source_ids": [
+        "SHC-S031"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C035",
+      "canonical_key": "checkout.cart.email_for_online_payment",
+      "category": "checkout",
+      "capability": "Email POS cart for online completion",
+      "merchant_outcome": "Email POS cart for online completion",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Email creates unpaid draft and checkout link; payment online converts draft to order.",
+      "preconditions": "POS Pro; full order only; no payment attached.",
+      "qualifiers": "Partial in-person payment then Email cart unsupported; pre-added payment disables action.",
+      "recovery_edge_cases": "Email recipient change does not alter attached customer.",
+      "source_ids": [
+        "SHC-S032"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C036",
+      "canonical_key": "checkout.sale.custom_item",
+      "category": "pricing_tax",
+      "capability": "Add custom item with title, amount, quantity and tax selection",
+      "merchant_outcome": "Add custom item with title, amount, quantity and tax selection",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Staff creates ad hoc sale line using smart-grid tile.",
+      "preconditions": "Add custom sale permission/tile.",
+      "qualifiers": "Reports lack catalog product detail.",
+      "recovery_edge_cases": "Tax can be adjusted at entry.",
+      "source_ids": [
+        "SHC-S029",
+        "SHC-S030"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C037",
+      "canonical_key": "checkout.fee.custom",
+      "category": "pricing_tax",
+      "capability": "Add or remove one custom fee",
+      "merchant_outcome": "Add or remove one custom fee",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Fee tile adds one amount; multiple fees must be combined.",
+      "preconditions": "Custom fee tile configured.",
+      "qualifiers": "Cart discounts apply to fee.",
+      "recovery_edge_cases": "Only one fee line per cart.",
+      "source_ids": [
+        "SHC-S030"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C038",
+      "canonical_key": "pricing.tax.exempt_item",
+      "category": "pricing_tax",
+      "capability": "Remove tax from item",
+      "merchant_outcome": "Remove tax from item",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Staff can toggle tax on item at cart entry.",
+      "preconditions": "Tax set for assigned POS location.",
+      "qualifiers": "EU stores may not be able to turn tax off.",
+      "recovery_edge_cases": "UI action does not itself validate legal exemption evidence.",
+      "source_ids": [
+        "SHC-S030",
+        "SHC-S006"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C039",
+      "canonical_key": "pricing.tax.exempt_customer",
+      "category": "pricing_tax",
+      "capability": "Honor tax-exempt customer configuration",
+      "merchant_outcome": "Honor tax-exempt customer configuration",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Tax-exempt customer is not charged tax; overrides apply to POS.",
+      "preconditions": "Customer tax profile and correct association.",
+      "qualifiers": "Tax-inclusive pricing may still charge listed price; detailed POS proof procedure not documented.",
+      "recovery_edge_cases": "Dynamic regional pricing can change display.",
+      "source_ids": [
+        "SHC-S025",
+        "SHC-S026"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C040",
+      "canonical_key": "pricing.tax.inclusive_display",
+      "category": "pricing_tax",
+      "capability": "Display tax inclusive/exclusive according to region settings",
+      "merchant_outcome": "Display tax inclusive/exclusive according to region settings",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Tax inclusion changes display, not calculation.",
+      "preconditions": "Merchant tax settings.",
+      "qualifiers": "POS locale rendering not fully enumerated; tax portion computed from listed price.",
+      "recovery_edge_cases": "Market setting can change shown amount.",
+      "source_ids": [
+        "SHC-S026",
+        "SHC-S024"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C041",
+      "canonical_key": "pricing.discount.automatic_precedence",
+      "category": "pricing_tax",
+      "capability": "Apply automatic discount or deactivate for one transaction",
+      "merchant_outcome": "Apply automatic discount or deactivate for one transaction",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Automatic discounts apply to qualifying cart and can override manual discount; staff can deactivate for current transaction.",
+      "preconditions": "Discount configured; POS Pro for POS automatic discount.",
+      "qualifiers": "Admin combination settings matter.",
+      "recovery_edge_cases": "Manual discount has distinct stacking rules.",
+      "source_ids": [
+        "SHC-S023",
+        "SHC-S044"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C042",
+      "canonical_key": "pricing.discount.code_qr",
+      "category": "pricing_tax",
+      "capability": "Apply eligible discount code by typing or QR",
+      "merchant_outcome": "Apply eligible discount code by typing or QR",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "POS applies code/QR when cart meets eligibility.",
+      "preconditions": "Discount permission; app 11.5+ for QR.",
+      "qualifiers": "Codes cannot apply on exchange.",
+      "recovery_edge_cases": "Invalid/ineligible code is not applied.",
+      "source_ids": [
+        "SHC-S023"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C043",
+      "canonical_key": "checkout.order.cancel_authorized",
+      "category": "checkout",
+      "capability": "Cancel eligible authorized order within cancellation window",
+      "merchant_outcome": "Cancel eligible authorized order within cancellation window",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Staff cancels, selects reason/restock and confirms.",
+      "preconditions": "Cancel permission, internet, authorized state, typically up to 15 minutes.",
+      "qualifiers": "Unavailable Germany/Italy; split/cash/gift/Interac/EFTPOS/manual credit excluded.",
+      "recovery_edge_cases": "After capture use refund.",
+      "source_ids": [
+        "SHC-S033"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C044",
+      "canonical_key": "checkout.order.note_customer_edit",
+      "category": "checkout",
+      "capability": "Edit order notes and customer attribution",
+      "merchant_outcome": "Edit order notes and customer attribution",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Staff edits note/customer data; replacement requires removing current customer first.",
+      "preconditions": "Order/customer access permissions.",
+      "qualifiers": "Audit/length limits not specified.",
+      "recovery_edge_cases": "Current customer must be removed before adding correct one.",
+      "source_ids": [
+        "SHC-S033"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C045",
+      "canonical_key": "refund.return.policy_eligibility",
+      "category": "refunds_returns",
+      "capability": "Show return rule eligibility and support documented override",
+      "merchant_outcome": "Show return rule eligibility and support documented override",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "POS sorts eligible/ineligible products and explains reason; staff can override with note/reason.",
+      "preconditions": "POS Pro, rules active, return permission/manager approval.",
+      "qualifiers": "Rules fixed on order; fee rules not enforced in POS; exchanged order exception.",
+      "recovery_edge_cases": "Override records reason.",
+      "source_ids": [
+        "SHC-S034"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C046",
+      "canonical_key": "checkout.shipping.full_order",
+      "category": "checkout",
+      "capability": "Ship full POS order to customer at chosen rate",
+      "merchant_outcome": "Ship full POS order to customer at chosen rate",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Staff selects address/rate, accepts payment; order remains unfulfilled.",
+      "preconditions": "POS Pro, internet, shipping settings, permission, shippable item.",
+      "qualifiers": "Tax cannot toggle; shipping inventory follows routing.",
+      "recovery_edge_cases": "Offline prevents completion.",
+      "source_ids": [
+        "SHC-S035"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C047",
+      "canonical_key": "checkout.fulfillment.ship_carryout",
+      "category": "checkout",
+      "capability": "Ship selected variants and carry out others in one order",
+      "merchant_outcome": "Ship selected variants and carry out others in one order",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "One payment; carry-out items fulfill and ship items remain unfulfilled.",
+      "preconditions": "POS Pro, supported tax solution, shipping setup and internet.",
+      "qualifiers": "No same variant split, subscription or international shipping; tax varies by region/service.",
+      "recovery_edge_cases": "Same variant needed in both methods requires two transactions.",
+      "source_ids": [
+        "SHC-S036"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C048",
+      "canonical_key": "checkout.fulfillment.local_delivery",
+      "category": "checkout",
+      "capability": "Create and progress local delivery order",
+      "merchant_outcome": "Create and progress local delivery order",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Staff stores phone/instructions, prepares, prints optional slip and marks ready/delivered.",
+      "preconditions": "POS Pro and local delivery admin setup.",
+      "qualifiers": "Delivery cancellation in admin.",
+      "recovery_edge_cases": "Instructions visible on order.",
+      "source_ids": [
+        "SHC-S037"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C049",
+      "canonical_key": "checkout.fulfillment.ship_from_store",
+      "category": "checkout",
+      "capability": "Pack/label/track shipping order from POS",
+      "merchant_outcome": "Pack/label/track shipping order from POS",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Select/scan items, save progress, print slip, buy label or add tracking, fulfill.",
+      "preconditions": "POS Pro, routing/profile/permissions and supported printer.",
+      "qualifiers": "Brother QL unsupported on POS Go; external label purchased externally.",
+      "recovery_edge_cases": "Resume in In progress.",
+      "source_ids": [
+        "SHC-S038"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C050",
+      "canonical_key": "checkout.offline.pickup_block",
+      "category": "offline_availability",
+      "capability": "Block pickup fulfillment while offline",
+      "merchant_outcome": "Block pickup fulfillment while offline",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Feature matrix disables BOPIS fulfillment and explains why.",
+      "preconditions": "POS offline.",
+      "qualifiers": "Remote status may be stale.",
+      "recovery_edge_cases": "Reconnect before handoff.",
+      "source_ids": [
+        "SHC-S039"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C051",
+      "canonical_key": "checkout.offline.manual_discount",
+      "category": "offline_availability",
+      "capability": "Allow manual discounts offline, block codes/automatic discounts",
+      "merchant_outcome": "Allow manual discounts offline, block codes/automatic discounts",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Offline manual discount remains; code/automatic unavailable.",
+      "preconditions": "Signed-in POS and discount permission.",
+      "qualifiers": "Eligibility/sync may be limited.",
+      "recovery_edge_cases": "Reconnect and sync; retain session.",
+      "source_ids": [
+        "SHC-S039"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C052",
+      "canonical_key": "checkout.offline.tip_giftcard",
+      "category": "offline_availability",
+      "capability": "Disable tips/gift cards offline but allow cash/manual payment",
+      "merchant_outcome": "Disable tips/gift cards offline but allow cash/manual payment",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Offline matrix blocks tips and gift cards; allows cash/custom manual tender.",
+      "preconditions": "Signed-in POS; tender enabled.",
+      "qualifiers": "Customer search/edit/create unavailable.",
+      "recovery_edge_cases": "Do not log out/power off due to order-loss risk.",
+      "source_ids": [
+        "SHC-S039"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C053",
+      "canonical_key": "checkout.offline.cart_sync",
+      "category": "offline_availability",
+      "capability": "Block recent cart sharing offline and sync records after reconnect",
+      "merchant_outcome": "Block recent cart sharing offline and sync records after reconnect",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Recent carts unavailable; order/inventory sync pauses then resumes automatically or manually.",
+      "preconditions": "Keep POS signed in and powered.",
+      "qualifiers": "Bluetooth/USB/local network may continue while cloud sync unavailable.",
+      "recovery_edge_cases": "Logging out/power-down risks offline orders.",
+      "source_ids": [
+        "SHC-S039"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C054",
+      "canonical_key": "checkout.receipt.reprint_gift",
+      "category": "checkout",
+      "capability": "Reprint sale/return/exchange receipt or price-free gift receipt",
+      "merchant_outcome": "Reprint sale/return/exchange receipt or price-free gift receipt",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Order receipt can be reprinted; gift receipt omits price.",
+      "preconditions": "Order available; printer for print.",
+      "qualifiers": "50-line print cap; gift full order only; Sweden reprint restrictions.",
+      "recovery_edge_cases": "Email/SMS can provide full long receipt.",
+      "source_ids": [
+        "SHC-S040",
+        "SHC-S030"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C055",
+      "canonical_key": "checkout.receipt.template",
+      "category": "checkout",
+      "capability": "Customize printed receipt layout and location content",
+      "merchant_outcome": "Customize printed receipt layout and location content",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Visual editor adjusts logo/content/header/footer/copies; location templates supported.",
+      "preconditions": "POS editor; advanced code features may require POS Pro.",
+      "qualifiers": "No CSS/fonts; Italy Epson managed; France protected fields; migration caveat.",
+      "recovery_edge_cases": "Location-specific template not updated by global edits.",
+      "source_ids": [
+        "SHC-S041",
+        "SHC-S042",
+        "SHC-S043"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C056",
+      "canonical_key": "checkout.receipt.shop_after_full_payment",
+      "category": "checkout",
+      "capability": "Send Shop receipt after full payment on split/partial order",
+      "merchant_outcome": "Send Shop receipt after full payment on split/partial order",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Receipt is sent after final payment.",
+      "preconditions": "Eligible Shop receipt setup.",
+      "qualifiers": "France/Sweden digital receipt naming differs.",
+      "recovery_edge_cases": "Other receipt options remain available.",
+      "source_ids": [
+        "SHC-S040",
+        "SHC-S016"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    },
+    {
+      "id": "SHC-C057",
+      "canonical_key": "checkout.customer_display.signature",
+      "category": "checkout",
+      "capability": "Android Customer View does not support signature capture",
+      "merchant_outcome": "Android Customer View does not support signature capture",
+      "actor": "POS staff and customer",
+      "trigger": "Merchant or customer reaches the documented workflow.",
+      "behavior": "Official guide states no signatures supported.",
+      "preconditions": "Android Customer View app.",
+      "qualifiers": "Other displays not assessed.",
+      "recovery_edge_cases": "Use separate authorized process if needed.",
+      "source_ids": [
+        "SHC-S019"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Show state, eligibility and next action before commit; measure correction rate and time to complete this workflow.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep this workflow tender-neutral and allow merchant-enabled cash/card choices alongside any future Bitcoin tender.",
+      "bitcoin_tradeoffs": "Preserve currency basis and payment status separately; do not force merchant custody or fiat conversion.",
+      "acceptance_test": "Run the documented happy path plus the stated restriction/failure case; verify amount, order status and recovery behavior."
+    }
+  ],
+  "limitations": [
+    "Research records public operator-facing documentation only. No merchant account, live POS terminal, processor configuration, SDK, app API, or transaction was tested; evidence_access is documented_only throughout.",
+    "Country and feature availability can change. This bundle records the conditions stated on inspected pages and does not establish legal/tax compliance for a merchant jurisdiction.",
+    "Shopify POS guides describe checkout and payment options inside POS. Shopify online checkout API/SDK capabilities are intentionally excluded and must not be inferred from these operator workflows.",
+    "The assigned corpus covers Shopify public POS operator guidance for the specified cart, pricing, checkout, order, return, receipt, pickup, shipping, delivery and offline branches. Index and linked pages inspected are mapped in coverage rows. Third-party app-specific behavior, private help pages, SDK/API capabilities and account-dependent processor outcomes remain unknown and are not inferred.",
+    "The Bitcoin hypotheses are acceptance-test proposals, not claims of existing Shopify Bitcoin POS support. They preserve merchant choice, permit fiat/cash/card, and do not assume merchant custody or fiat conversion."
+  ]
+}

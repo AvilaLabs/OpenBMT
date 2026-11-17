@@ -1,0 +1,2282 @@
+{
+  "schema": "openbmt-capability-research-bundle-v1",
+  "as_of": "2026-11-17",
+  "vendor": "Square",
+  "segment": [
+    "Retail",
+    "Restaurants",
+    "General"
+  ],
+  "scope": "US public Square Support Center documentation, operations domain: catalog and item variants/options; inventory counts, adjustments, transfers and purchasing; vendors; staff permissions and time tracking; cash drawers and closeout; reporting; location and hardware conditions. Checkout, payment acceptance, tax, discounts, tips, refunds and receipts are assigned to another Square researcher. Adjacent Square Payroll and financial/banking services are recorded as coverage exclusions; this bundle makes no product implementation commitment for those services.",
+  "sources": [
+    {
+      "id": "SQO-S001",
+      "url": "https://squareup.com/help/us/en/article/6689-item-options",
+      "title": "Create and edit item options and variations",
+      "section": "About custom item variations and option sets; Step 1: Create Variations; Step 2: Create and manage option sets",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US support guide",
+        "Dashboard and POS app flows",
+        "requires item library and relevant permissions"
+      ],
+      "evidence_note": "Fixed variations can have distinct cost, price and SKU; reusable option sets can generate variation combinations. Variations are fixed product forms, distinct from sale-time modifiers."
+    },
+    {
+      "id": "SQO-S002",
+      "url": "https://squareup.com/help/us/en/article/8331-set-up-inventory-tracking",
+      "title": "Adjust inventory levels",
+      "section": "About inventory tracking; Before you begin; Adjust inventory levels",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "stock tracking must be enabled",
+        "Manage stock modal desktop/laptop only"
+      ],
+      "evidence_note": "Tracked stock updates from POS sales, Square Invoices and online store shipped orders. Dashboard supports per-variation tracking, manual changes and bulk import; stock actions accept reasons; modal supports keyboard navigation."
+    },
+    {
+      "id": "SQO-S003",
+      "url": "https://squareup.com/help/us/en/article/8249-conduct-full-inventory-counts-with-square-for-retail",
+      "title": "Conduct, review, and approve inventory counts",
+      "section": "About inventory counts; Before you begin; Conduct a full inventory count",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Square Plus/Premium; device support includes iOS and Android, Register, Terminal and Handheld",
+        "review and approval required for full count"
+      ],
+      "evidence_note": "Full and cycle counts are supported. Full count sets uncounted stock to zero; cycle count leaves excluded items unchanged. Cycle count frequency recommendation is at least every 90 days. Counts accept configured units with conversion."
+    },
+    {
+      "id": "SQO-S004",
+      "url": "https://squareup.com/help/us/en/article/8251-view-and-export-inventory-variance-report-with-square-for-retail",
+      "title": "View and export inventory variance report",
+      "section": "About inventory variance reports; Before you begin; Export inventory variance report",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Retail Plus/Premium or Square Plus/Premium with advanced inventory capabilities",
+        "ongoing cycle count blocks full-count access"
+      ],
+      "evidence_note": "Completed counts can be reviewed; Items CSV includes counts and variance, Count summary CSV includes counters, reviewers and timestamps. Missing unit costs can make inventory value and total variance inaccurate."
+    },
+    {
+      "id": "SQO-S005",
+      "url": "https://squareup.com/help/us/en/article/8258-create-purchase-orders-with-square-for-retail",
+      "title": "Create and manage purchase orders",
+      "section": "About purchase orders; Before you begin; Create purchase orders",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Retail Plus/Premium or Plus/Premium with advanced inventory; retail mode for POS app",
+        "POS creation supports iOS; not available in-app on Square Terminal",
+        "maximum 500 unique items; quantities whole-number only"
+      ],
+      "evidence_note": "POs can be created in Dashboard or eligible POS, include vendor, delivery location, expected date, items and optional tax/note, and be sent or saved as PDF/CSV. Editing does not automatically email an updated PO."
+    },
+    {
+      "id": "SQO-S006",
+      "url": "https://squareup.com/help/us/en/article/5958-vendor-management",
+      "title": "Create, import, edit, and deactivate vendors",
+      "section": "About managing vendors; Create a vendor",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Retail Plus/Premium, Restaurants Plus/Premium, or Square Plus/Premium with advanced inventory/restaurants capabilities",
+        "items and inventory permission"
+      ],
+      "evidence_note": "Vendor directory supports create/import/edit/deactivate; item-level SKU and vendor codes can aid matching, and barcode vendor codes can be scanned to receive stock for orders in Retail POS."
+    },
+    {
+      "id": "SQO-S007",
+      "url": "https://squareup.com/help/us/en/article/8300-create-transfer-orders-with-square-for-retail",
+      "title": "Create and manage transfer orders",
+      "section": "Create and manage transfer orders",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Retail inventory feature; specific plans/device eligibility not fully surfaced in search result, inspect full page before relying on detailed limits"
+      ],
+      "evidence_note": "Official guide index confirms transfer-order workflow and search by transfer number, item, variation and tracking number; detailed transfer lifecycle has not been inspected in this pass."
+    },
+    {
+      "id": "SQO-S008",
+      "url": "https://squareup.com/help/us/en/article/5822-employee-permissions",
+      "title": "Create and edit permission sets",
+      "section": "About permission sets; Create a custom permission set",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Dashboard team management permission"
+      ],
+      "evidence_note": "Permission sets specify team member access, can be customized and assigned access points; full access includes all permissions except bank-account management. Shared team passcodes do not attribute sales, time or activity to individual members."
+    },
+    {
+      "id": "SQO-S009",
+      "url": "https://squareup.com/help/us/en/article/8389-set-up-time-tracking",
+      "title": "Set up time tracking",
+      "section": "About time tracking; Before you begin",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Shifts Free/Plus, Retail Free/Plus/Premium, Restaurants Free/Plus/Premium, Square Plus/Premium",
+        "personal passcode required for team clock-in"
+      ],
+      "evidence_note": "Timecards record in-progress/completed shifts; track hours, breaks, shift history and overtime; team members may clock in/out and view or print workday summaries."
+    },
+    {
+      "id": "SQO-S010",
+      "url": "https://squareup.com/help/us/en/article/8344-start-and-end-a-cash-drawer-session",
+      "title": "Start and end a cash drawer session",
+      "section": "About cash drawer sessions; Start a cash drawer session; Record cash paid in/out; End a cash drawer session",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Cash Management Add-on required",
+        "session starts from POS app, not Dashboard",
+        "remote Dashboard end prevents subsequent Pay In/Out"
+      ],
+      "evidence_note": "Drawer session records opening cash, sales/refunds, paid-in/out and expected cash; ending records actual amount, distinct from simply ending. Sessions open over 30 days with 7 inactive days auto-end."
+    },
+    {
+      "id": "SQO-S011",
+      "url": "https://squareup.com/help/us/en/article/8358-view-cash-drawer-reports",
+      "title": "View cash drawer reports",
+      "section": "About cash drawer reports; View your drawer history",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "reports permission",
+        "POS report requires compatible drawer connected to printer and Cash Drawer Management enabled"
+      ],
+      "evidence_note": "Drawer history can be viewed in Dashboard or POS; Dashboard filters dates/location and adds paid-in/out, device and location columns. Dashboard cash drawer reports cannot be printed or exported."
+    },
+    {
+      "id": "SQO-S012",
+      "url": "https://squareup.com/help/us/en/article/6594-end-of-day-reporting-with-square-for-restaurants",
+      "title": "Set up and run your restaurant’s close of day report",
+      "section": "About close of day reports",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Restaurants Plus/Premium or Square Plus/Premium",
+        "full, quick-service or bar mode on Register or compatible iPad"
+      ],
+      "evidence_note": "Managers can configure closeout requirements for open checks, tip adjustments, cash drawer totals and clock-outs; report summarizes checks, gross/net sales, payment methods, categories and items."
+    },
+    {
+      "id": "SQO-S013",
+      "url": "https://squareup.com/help/us/en/article/8362-print-export-or-email-your-reports",
+      "title": "Print, export, or email your reports",
+      "section": "About printing, exporting, and emailing your reports; Before you begin",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "reports permission",
+        "POS printing requires connected printer"
+      ],
+      "evidence_note": "Dashboard report export supports offline analysis, with exceptions: cash drawer reports cannot be printed/exported; custom reports can only be exported; transaction-status reports can only be printed."
+    },
+    {
+      "id": "SQO-S014",
+      "url": "https://squareup.com/help/us/en/topic/items-and-inventory",
+      "title": "Items and inventory",
+      "section": "Item library management; Item creation and import; Item customization",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US Support Center topic index",
+        "index reviewed; linked guide detail not inspected for all listed features"
+      ],
+      "evidence_note": "Official coverage index lists item create/edit, bulk import, barcode creation, archive, bundles, modifiers, variations, categories, units, custom attributes and images; this is a map, not evidence of each feature's details."
+    },
+    {
+      "id": "SQO-S015",
+      "url": "https://squareup.com/help/us/en/article/5153-import-items-online",
+      "title": "Bulk import items",
+      "section": "Download template; upload updated item library",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Dashboard spreadsheet import/export",
+        "Excel recommended; CSV cannot create/update unit type/precision"
+      ],
+      "evidence_note": "Filtered export includes currently viewed items; required columns include location enablement for multi-location accounts; spreadsheet software can corrupt leading-zero SKUs; nested modifier relationships require Dashboard setup after import."
+    },
+    {
+      "id": "SQO-S016",
+      "url": "https://squareup.com/help/us/en/article/8430-mark-items-and-modifiers-as-sold-out",
+      "title": "Mark items and modifiers as sold out",
+      "section": "About sold out; mark modifiers sold out",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Items/inventory permission; Dashboard/POS"
+      ],
+      "evidence_note": "Sold-out options are hidden by default; modifier setting can keep them visible at bottom; nested modifiers and future-date orders have caveats."
+    },
+    {
+      "id": "SQO-S017",
+      "url": "https://squareup.com/help/us/en/article/8300-create-transfer-orders-with-square-for-retail",
+      "title": "Create and manage transfer orders",
+      "section": "Create; edit; receive; instantly transfer",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Retail Plus/Premium or Square Premium advanced inventory",
+        "2+ locations",
+        "Dashboard create/edit"
+      ],
+      "evidence_note": "Can draft/create, search/filter/export, partially receive; only Dashboard creates/edits; eligible POS can receive; cannot reduce quantity below already received; Dashboard supports instant transfer."
+    },
+    {
+      "id": "SQO-S018",
+      "url": "https://squareup.com/help/us/en/article/5580-manage-multiple-locations-with-square",
+      "title": "Create and manage multiple locations",
+      "section": "About locations; create; edit; deactivate",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Account/settings permission",
+        "Dashboard create"
+      ],
+      "evidence_note": "Distinct profiles/hours/reporting/devices; max 300; created locations cannot be deleted but can be deactivated; fees may apply; device-code Register cannot switch location."
+    },
+    {
+      "id": "SQO-S019",
+      "url": "https://squareup.com/help/us/en/article/5498-manage-your-customer-directory-online",
+      "title": "Add new customers to your Customer Directory",
+      "section": "About adding new customers; instant customer profiles; bulk import customers",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Customers permission",
+        "Bulk import Dashboard only"
+      ],
+      "evidence_note": "Dashboard/POS add flows and Dashboard-only spreadsheet import; imported rows report imported/matched/failed; matched rows update existing profiles, failed rows can be downloaded/reimported, imported groups can be deleted; import cannot subscribe previously unsubscribed customers to email marketing. Manually entering email in profile automatically opts into email marketing. Sensitive info must not be stored in notes."
+    },
+    {
+      "id": "SQO-S020",
+      "url": "https://squareup.com/help/us/en/article/8401-edit-merge-or-delete-customer-profiles",
+      "title": "Edit, merge, or delete customer profiles",
+      "section": "Customer profile; duplicate suggestions; merge; delete",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Customers permission",
+        "Dashboard/POS"
+      ],
+      "evidence_note": "Profile contains contact, marketing, files, loyalty/activity; match email/phone suggests duplicates; merge is irreversible and combines files; accidental deletion may be restored by Support within 30 days."
+    },
+    {
+      "id": "SQO-S021",
+      "url": "https://squareup.com/help/us/en/article/7871-export-card-on-file-to-third-party-payment-processors",
+      "title": "Export card on file data to third-party processors",
+      "section": "Export card-on-file data",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Customer directory migration"
+      ],
+      "evidence_note": "Official credential migration export exists; average timeframe up to two weeks; this does not document general customer-directory CSV export."
+    },
+    {
+      "id": "SQO-S022",
+      "url": "https://squareup.com/us/en/legal/general/privacy",
+      "title": "Privacy Notice for Square account users",
+      "section": "Retention; customer data roles",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US legal notice; scope Square users/services"
+      ],
+      "evidence_note": "Retention depends on purpose/legal duties; account data may be retained while account exists and usage data for account lifetime; notice describes Square handling of customers’ data."
+    },
+    {
+      "id": "SQO-S023",
+      "url": "https://squareup.com/help/us/en/article/3952-create-a-loyalty-program-with-square",
+      "title": "Create a loyalty program",
+      "section": "Earning rules; rewards; locations; expiration",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Loyalty permission",
+        "Loyalty subscription or Square Plus/Premium"
+      ],
+      "evidence_note": "Dashboard configures spend/item/visit points, rewards and locations; up to 15 rewards; optional points expiry; free-item rewards require item/category mapped at each location."
+    },
+    {
+      "id": "SQO-S024",
+      "url": "https://squareup.com/help/us/en/article/5347-how-customers-redeem-their-rewards",
+      "title": "Enroll in a Square seller loyalty program",
+      "section": "Checkout; invitation; invoice enrollment",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Customer workflow"
+      ],
+      "evidence_note": "Phone enrollment at checkout or post-purchase invitation; invoice earns points but cannot redeem; redemption at POS or Square Online."
+    },
+    {
+      "id": "SQO-S025",
+      "url": "https://squareup.com/help/us/en/article/8402-sell-and-send-gift-cards",
+      "title": "Sell and send gift cards",
+      "section": "Sell; resend; online gift cards",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "POS/Dashboard; Square website for online"
+      ],
+      "evidence_note": "Sell eGift/physical in POS/Dashboard, enable online page and resend; max $2,000/card and $10,000/person/day; eGift unsupported with custom domains, eCommerce partners and API integrations."
+    },
+    {
+      "id": "SQO-S026",
+      "url": "https://squareup.com/help/us/en/article/8404-accept-gift-cards",
+      "title": "Accept gift cards",
+      "section": "Physical/eGift acceptance",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Latest POS on compatible device",
+        "Unsupported offline"
+      ],
+      "evidence_note": "Accept physical/eGift; eGift redeemable at all locations; physical QR/barcode scan only iOS; insufficient physical balance allows split tender or cancel; linked eGift profile lookup available."
+    },
+    {
+      "id": "SQO-S027",
+      "url": "https://squareup.com/help/us/en/article/8403-reload-egift-cards",
+      "title": "Reload eGift cards",
+      "section": "POS and online reload",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Items permission for seller POS reload"
+      ],
+      "evidence_note": "Seller reloads at POS using number/QR/barcode; customer reloads online from email/profile/order page with number, PIN if applicable and payment card."
+    },
+    {
+      "id": "SQO-S028",
+      "url": "https://squareup.com/help/us/en/article/8405-check-gift-card-balances",
+      "title": "Check gift card balances",
+      "section": "POS check; customer balance page",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "PIN may apply"
+      ],
+      "evidence_note": "Cashier checks by swipe/scan/camera/number; customer checks via balance link/profile using card number and PIN or no-PIN path; failed PIN lookup directs to seller."
+    },
+    {
+      "id": "SQO-S029",
+      "url": "https://squareup.com/help/us/en/article/6535-set-up-square-terminal",
+      "title": "Set up Square Terminal",
+      "section": "On-device setup guide; printer test; accessories",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Terminal"
+      ],
+      "evidence_note": "On-device setup guide available after sign-in; print test path and model-specific accessory compatibility list documented."
+    },
+    {
+      "id": "SQO-S030",
+      "url": "https://squareup.com/help/us/en/article/8246-connect-a-printer-to-square",
+      "title": "Connect printer to POS",
+      "section": "Ethernet/Wi-Fi/USB/Bluetooth/AirPrint setup; profiles",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Supported printer/device/network"
+      ],
+      "evidence_note": "Wi-Fi must share network; USB bound to one compatible POS and direct iOS USB unsupported; unprofiled printer limited; profile routes job types/device."
+    },
+    {
+      "id": "SQO-S031",
+      "url": "https://squareup.com/help/us/en/topic/hardware",
+      "title": "Hardware",
+      "section": "Device setup; device management; printer/scanner setup",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US topic index"
+      ],
+      "evidence_note": "Index lists Register, Handheld, Stand, Terminal, Reader, Kiosk, modes, device codes, accessibility and printer/scanner topics; not full matrix evidence."
+    },
+    {
+      "id": "SQO-S032",
+      "url": "https://squareup.com/help/us/en/article/5119-create-and-manage-item-modifiers",
+      "title": "Create and manage item modifiers",
+      "section": "Modifier settings",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "POS mode specific"
+      ],
+      "evidence_note": "Settings include hide on receipts, conversational buttons for Restaurants POS, sort sold-out modifiers last; conversational mode conflicts with multiple quantities and sort-last; text max 150 characters."
+    },
+    {
+      "id": "SQO-S033",
+      "url": "https://squareup.com/help/us/en/article/7121-general-data-protection-regulation-gdpr",
+      "title": "Comply with GDPR requirements",
+      "section": "Forget; portability; access",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US-hosted guide describing EU data subject rights"
+      ],
+      "evidence_note": "Merchant handles own data/processors; contact Square for data held there; portability described as machine-readable merchant-held data plus Square-held data request. Not a universal US legal workflow."
+    },
+    {
+      "id": "SQO-S034",
+      "url": "https://squareup.com/help/us/en/article/8495-beta-item-availability",
+      "title": "Manage item availability",
+      "section": "About availability; before you begin",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Guide marked beta",
+        "Eligible Retail/Restaurants plans/modes"
+      ],
+      "evidence_note": "Availability can sync across POS, online and integrated channels; reset defaults to end of business day; available without quantity means unlimited; distinguishes on-hand from committed stock."
+    },
+    {
+      "id": "SQO-S035",
+      "url": "https://squareup.com/help/us/en/article/8258-create-purchase-orders-with-square-for-retail",
+      "title": "Create and manage purchase orders",
+      "section": "Receive a purchase order",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Retail mode in POS",
+        "Square Retail Plus/Premium or Square Plus/Premium with advanced inventory"
+      ],
+      "evidence_note": "Dashboard supports receive all/none or partial quantity; eligible Retail POS supports partial/full receipt; additional shipping/handling fees can be allocated across items for COGS; damaged/won’t-fulfill items can be recorded."
+    },
+    {
+      "id": "SQO-S036",
+      "url": "https://squareup.com/help/us/en/article/5143-bar-code-scanners-with-square-point-of-sale",
+      "title": "Connect a barcode scanner to your point of sale",
+      "section": "Scanner compatibility; Bluetooth/USB/camera setup",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Account/settings permission",
+        "Device/model restrictions"
+      ],
+      "evidence_note": "USB supported on Stand/Register/selected Android (Android 9+ and OTG/host); Bluetooth scanners only iPhone/iPad; camera scanning uses compatible iOS/Android with permission/settings; scanner pairing and indicator behavior documented."
+    },
+    {
+      "id": "SQO-S037",
+      "url": "https://squareup.com/help/us/en/article/5516-troubleshoot-your-bar-code-scanner",
+      "title": "Troubleshoot your barcode scanner",
+      "section": "Bluetooth scanner; camera scanner troubleshooting",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Device and scanner compatibility"
+      ],
+      "evidence_note": "Guide includes charge/pairing checks, reset path, Bluetooth/camera permission, supported screen, lighting and restart steps."
+    },
+    {
+      "id": "SQO-S038",
+      "url": "https://squareup.com/help/us/en/article/8498-set-up-square-handheld",
+      "title": "Set up Square Handheld",
+      "section": "Before you begin; network; update; sign in; accessories",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Square Handheld"
+      ],
+      "evidence_note": "Requires Wi-Fi/internet; captive portal networks unsupported; first activation update mandatory (~15 minutes); setup guide on device; country-certified hardware only for designated country."
+    },
+    {
+      "id": "SQO-S039",
+      "url": "https://squareup.com/help/us/en/article/8687-set-up-square-kiosk",
+      "title": "Set up Square Kiosk",
+      "section": "About; Before you begin; setup/mode/location",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Square Kiosk subscription; Square Plus/Premium or advanced restaurants capability"
+      ],
+      "evidence_note": "Standalone device, indoor use, stable internet; no offline or cash payment support; configure Dashboard mode/device code, location, menus and settings; legacy plans may require switching to Square plan."
+    },
+    {
+      "id": "SQO-S040",
+      "url": "https://squareup.com/us/en/compatibility/accessories",
+      "title": "Accessory Compatibility",
+      "section": "Compatible accessory selector",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Model-specific selection"
+      ],
+      "evidence_note": "Official selector offers categories and model/connection/setup details; exact compatibility depends on selected Square device."
+    },
+    {
+      "id": "SQO-S041",
+      "url": "https://squareup.com/help/us/en/article/5976-get-started-with-email-collection-tools",
+      "title": "Collect customer information",
+      "section": "About collecting customer information; Before you begin; POS sign-up screen; Hosted sign-up page; Embedded sign-up form",
+      "accessed": "2026-11-17",
+      "qualifiers": [
+        "US",
+        "Customers permission",
+        "Email Marketing add-on on Square POS/Retail POS, not Square Register",
+        "directly provided versus other-seller contact distinction"
+      ],
+      "evidence_note": "Customer-provided names/emails are saved in Customer Directory and can be used with Square Marketing or exported for a third-party marketing service; signups appear in Collected Emails group. Directly provided checkout data is co-controlled by merchant and Square; another seller-provided contact is Square-controlled and masked. Merchant may send receipts/marketing to masked contacts only if customer purchased from merchant within past 12 months. Signup options include post-purchase POS, hosted page and embedded website form. US guide does not document general directory CSV export fields or steps."
+    }
+  ],
+  "coverage": [
+    {
+      "id": "SQO-U001",
+      "topic": "Catalog items, variants/options, catalog imports and modifiers stock availability",
+      "url": "https://squareup.com/help/us/en/topic/items-and-inventory",
+      "status": "reviewed",
+      "reason": "Inspected exact variant, import/export, sold-out modifier and modifier settings leaf guides.",
+      "source_ids": [
+        "SQO-S001",
+        "SQO-S014",
+        "SQO-S015",
+        "SQO-S016",
+        "SQO-S032",
+        "SQO-S034"
+      ],
+      "claim_ids": [
+        "SQO-C001",
+        "SQO-C013",
+        "SQO-C014",
+        "SQO-C015",
+        "SQO-C032",
+        "SQO-C034"
+      ]
+    },
+    {
+      "id": "SQO-U002",
+      "topic": "Inventory tracking and adjustment",
+      "url": "https://squareup.com/help/us/en/article/8331-set-up-inventory-tracking",
+      "status": "reviewed",
+      "reason": "Guide inspected; availability depends on tracking setup, permissions, and UI/device path.",
+      "source_ids": [
+        "SQO-S002"
+      ],
+      "claim_ids": [
+        "SQO-C002",
+        "SQO-C035",
+        "SQO-C034"
+      ]
+    },
+    {
+      "id": "SQO-U003",
+      "topic": "Inventory full/cycle counts, approvals, close and variance exports",
+      "url": "https://squareup.com/help/us/en/article/8249-conduct-full-inventory-counts-with-square-for-retail",
+      "status": "reviewed",
+      "reason": "Count and variance guides inspected, including destructive zeroing edge for uncounted full-count items.",
+      "source_ids": [
+        "SQO-S003",
+        "SQO-S004"
+      ],
+      "claim_ids": [
+        "SQO-C003",
+        "SQO-C004",
+        "SQO-C041"
+      ]
+    },
+    {
+      "id": "SQO-U004",
+      "topic": "Vendor records and purchasing",
+      "url": "https://squareup.com/help/us/en/article/8258-create-purchase-orders-with-square-for-retail",
+      "status": "reviewed",
+      "reason": "Vendor and PO guides inspected. Need inspect receive/partial receipt, cancel, import PO and PO-specific restrictions before claiming full lifecycle coverage.",
+      "source_ids": [
+        "SQO-S005",
+        "SQO-S006",
+        "SQO-S035"
+      ],
+      "claim_ids": [
+        "SQO-C005",
+        "SQO-C006",
+        "SQO-C036",
+        "SQO-C037"
+      ]
+    },
+    {
+      "id": "SQO-U005",
+      "topic": "Inter-location inventory transfer orders",
+      "url": "https://squareup.com/help/us/en/article/8300-create-transfer-orders-with-square-for-retail",
+      "status": "reviewed",
+      "reason": "Full official transfer guide inspected for create/edit/receive/partial receive/instant transfer.",
+      "source_ids": [
+        "SQO-S007",
+        "SQO-S017"
+      ],
+      "claim_ids": [
+        "SQO-C016",
+        "SQO-C017"
+      ]
+    },
+    {
+      "id": "SQO-U006",
+      "topic": "Staff permission sets and passcodes",
+      "url": "https://squareup.com/help/us/en/article/5822-employee-permissions",
+      "status": "reviewed",
+      "reason": "Guide inspected, including shared-passcode attribution limitation.",
+      "source_ids": [
+        "SQO-S008"
+      ],
+      "claim_ids": [
+        "SQO-C007"
+      ]
+    },
+    {
+      "id": "SQO-U007",
+      "topic": "Time tracking, shifts and timecards",
+      "url": "https://squareup.com/help/us/en/article/8389-set-up-time-tracking",
+      "status": "reviewed",
+      "reason": "Setup overview inspected; edit request and schedule rules not comprehensively mapped. Payroll processing is adjacent and out of scope.",
+      "source_ids": [
+        "SQO-S009"
+      ],
+      "claim_ids": [
+        "SQO-C008"
+      ]
+    },
+    {
+      "id": "SQO-U008",
+      "topic": "Cash drawer opening, paid-in/out, ending, close and reports",
+      "url": "https://squareup.com/help/us/en/article/8344-start-and-end-a-cash-drawer-session",
+      "status": "reviewed",
+      "reason": "Start/end and reporting guides inspected; Cash Management Add-on and reporting export limitation recorded.",
+      "source_ids": [
+        "SQO-S010",
+        "SQO-S011"
+      ],
+      "claim_ids": [
+        "SQO-C009",
+        "SQO-C038",
+        "SQO-C039",
+        "SQO-C010"
+      ]
+    },
+    {
+      "id": "SQO-U009",
+      "topic": "Sales reports, restaurant end-of-day, exports",
+      "url": "https://squareup.com/help/us/en/article/6594-end-of-day-reporting-with-square-for-restaurants",
+      "status": "reviewed",
+      "reason": "Restaurant close-of-day and general report export guides inspected; report-specific scope varies by plan/mode.",
+      "source_ids": [
+        "SQO-S012",
+        "SQO-S013"
+      ],
+      "claim_ids": [
+        "SQO-C011",
+        "SQO-C012"
+      ]
+    },
+    {
+      "id": "SQO-U010",
+      "topic": "Locations, hardware compatibility, setup, hardware accessories",
+      "url": "https://squareup.com/help/us/en/",
+      "status": "reviewed",
+      "reason": "Inspected Terminal setup, printer connection and hardware index; exact model matrix/scanner setup still needs additional leaf review. Full matrix/scanner branches have separate unresolved coverage row SQO-U016.",
+      "source_ids": [
+        "SQO-S029",
+        "SQO-S030",
+        "SQO-S031"
+      ],
+      "claim_ids": [
+        "SQO-C030",
+        "SQO-C031"
+      ]
+    },
+    {
+      "id": "SQO-U011",
+      "topic": "Customers, customer data, loyalty and gift cards",
+      "url": "https://squareup.com/help/us/en/",
+      "status": "reviewed",
+      "reason": "Inspected customer create/import, merge/delete, loyalty program/enrollment, and gift card sell/accept/reload/balance leaves.",
+      "source_ids": [
+        "SQO-S019",
+        "SQO-S020",
+        "SQO-S023",
+        "SQO-S024",
+        "SQO-S025",
+        "SQO-S026",
+        "SQO-S027",
+        "SQO-S028",
+        "SQO-S041"
+      ],
+      "claim_ids": [
+        "SQO-C019",
+        "SQO-C020",
+        "SQO-C024",
+        "SQO-C025",
+        "SQO-C026",
+        "SQO-C027",
+        "SQO-C028",
+        "SQO-C029",
+        "SQO-C046",
+        "SQO-C047",
+        "SQO-C049",
+        "SQO-C050"
+      ]
+    },
+    {
+      "id": "SQO-U012",
+      "topic": "Privacy, data export, deletion, backup and recovery",
+      "url": "https://squareup.com/help/us/en/",
+      "status": "reviewed",
+      "reason": "Inspected Square privacy notice, GDPR guide, profile deletion and card-on-file migration export. General contact-list CSV export remains unresolved: official leaf not surfaced; nonofficial community results excluded. General directory export has separate unresolved coverage row SQO-U015.",
+      "source_ids": [
+        "SQO-S020",
+        "SQO-S021",
+        "SQO-S022",
+        "SQO-S033"
+      ],
+      "claim_ids": [
+        "SQO-C021",
+        "SQO-C022",
+        "SQO-C023"
+      ]
+    },
+    {
+      "id": "SQO-U013",
+      "topic": "Square Payroll and banking/financial services",
+      "url": "https://squareup.com/help/us/en/",
+      "status": "excluded",
+      "reason": "Adjacent platform product area outside operational acceptance scope; no claim of implementation or financial-product coverage.",
+      "source_ids": [],
+      "claim_ids": []
+    },
+    {
+      "id": "SQO-U014",
+      "topic": "Checkout, payments, tax, discounts, tips, refunds and receipts",
+      "url": "https://squareup.com/help/us/en/",
+      "status": "excluded",
+      "reason": "Owned by separate Square transaction researcher; avoid duplicate coverage and claims.",
+      "source_ids": [],
+      "claim_ids": []
+    },
+    {
+      "id": "SQO-U015",
+      "topic": "General customer directory contact export",
+      "url": "https://squareup.com/help/us/en/",
+      "status": "unresolved",
+      "reason": "Opened the official US Customer Directory and Collect Customer Information guides. The US email-collection guide documents limited customer-provided names/emails use/export for third-party marketing, but does not specify general directory CSV fields, filters or export steps. General contact-list export schema/workflow remains unresolved; do not substitute AU guide.",
+      "source_ids": [
+        "SQO-S021",
+        "SQO-S041"
+      ],
+      "claim_ids": [
+        "SQO-C023",
+        "SQO-C048"
+      ]
+    },
+    {
+      "id": "SQO-U016",
+      "topic": "Full hardware/accessory matrix, barcode scanners and device recovery",
+      "url": "https://squareup.com/help/us/en/topic/hardware",
+      "status": "reviewed",
+      "reason": "Reviewed official compatibility selector, hardware index, Terminal/Handheld/Stand/Register/Kiosk/Reader setup leaves, printer setup, barcode scanner connect and troubleshooting leaves. Bundle covers representative merchant setup and constraints; exact accessory compatibility remains model-specific and should be checked in live selector.",
+      "source_ids": [
+        "SQO-S029",
+        "SQO-S030",
+        "SQO-S031",
+        "SQO-S036",
+        "SQO-S037",
+        "SQO-S038",
+        "SQO-S039",
+        "SQO-S040"
+      ],
+      "claim_ids": [
+        "SQO-C030",
+        "SQO-C031",
+        "SQO-C042",
+        "SQO-C043",
+        "SQO-C044",
+        "SQO-C045"
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "SQO-C001",
+      "canonical_key": "catalog.variation.manage",
+      "category": "catalog",
+      "capability": "Create fixed item variations from reusable option sets",
+      "merchant_outcome": "Merchant can represent sellable size/color variants with distinct SKU, price and cost while reusing option combinations across items.",
+      "actor": "Owner or team member with item permissions",
+      "trigger": "Merchant creates a catalog item with multiple fixed forms",
+      "behavior": "Create variation rows or apply a reusable option set to generate combinations; each variation can retain its own SKU, price and cost.",
+      "preconditions": [
+        "An item exists in the item library",
+        "Relevant item permissions"
+      ],
+      "qualifiers": [
+        "US",
+        "Square Dashboard or POS app",
+        "Options are fixed product variants; sale-time customization is a separate modifier concept"
+      ],
+      "recovery_edge_cases": [
+        "Option-set and modifier behavior needs detailed guide inspection before treating all customization workflows as covered."
+      ],
+      "source_ids": [
+        "SQO-S001"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure time and error rate to create a batch of variants across multiple products; improve reuse and validation if duplicate or inconsistent option sets are common.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Variant maintenance is independent of payment rail; a Bitcoin tender should leave item identity and stock decrement tied to the same item/variation.",
+      "bitcoin_tradeoffs": "A new tender may create integration and reconciliation work without improving catalog maintenance; preserve existing catalog IDs and stock semantics.",
+      "acceptance_test": "Given an item with size and color options, an authorized merchant generates the expected combinations once and reuses that set on a second item; each selected variation retains its configured SKU and price."
+    },
+    {
+      "id": "SQO-C002",
+      "canonical_key": "inventory.stock.adjust",
+      "category": "inventory",
+      "capability": "Manually adjust tracked stock with a reason",
+      "merchant_outcome": "Merchant can record a stock correction and its reason for a specific item or variation.",
+      "actor": "Owner or team member with item/inventory permissions",
+      "trigger": "Stock arrives, a count changes, or loss/damage/return is recorded",
+      "behavior": "With tracking enabled, user updates quantity and selects a reason; Dashboard supports per-location variation updates and keyboard navigation.",
+      "preconditions": [
+        "Item exists in item library",
+        "Inventory tracking enabled",
+        "Current Square app for mobile workflows"
+      ],
+      "qualifiers": [
+        "US",
+        "Stock workflows in Dashboard or POS; modal desktop/laptop only",
+        "per-variation tracking requires advanced stock tracking setting"
+      ],
+      "recovery_edge_cases": [
+        "Uninitialized items may require baseline entry; bulk tracking enable can set uncounted items to zero."
+      ],
+      "source_ids": [
+        "SQO-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Track correction frequency, time per stock adjustment and unexplained variance; reduce repeated navigation while retaining reason attribution and auditability.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Tender rail does not change the stock adjustment job; ensure any completed Bitcoin sale posts the same item/variation decrement once.",
+      "bitcoin_tradeoffs": "Separate settlement and inventory systems can create duplicate or missed decrements if event ownership is unclear; test idempotent sale-to-stock linkage.",
+      "acceptance_test": "For a tracked variation at one location, record damaged units with reason and verify updated on-hand quantity and adjustment reason."
+    },
+    {
+      "id": "SQO-C003",
+      "canonical_key": "inventory.count.cycle",
+      "category": "inventory",
+      "capability": "Run a cycle count without changing uncounted stock",
+      "merchant_outcome": "Merchant can verify a subset of variations periodically and preserve levels for items outside the count.",
+      "actor": "Inventory counter; authorized reviewer",
+      "trigger": "Merchant begins an audit of selected stock",
+      "behavior": "Start a cycle count, enter or scan counted quantities using configured units, submit and review/commit the count; excluded items retain their current stock.",
+      "preconditions": [
+        "Inventory count entitlement and permissions",
+        "Items/variations configured",
+        "Supported iOS/Android or Square Register/Terminal/Handheld"
+      ],
+      "qualifiers": [
+        "US",
+        "Square Plus/Premium documented",
+        "Guide recommends counting each variation at least once per 90 days"
+      ],
+      "recovery_edge_cases": [
+        "Full-count workflow is unavailable while a cycle count remains in progress; discard or commit the cycle count first."
+      ],
+      "source_ids": [
+        "SQO-S003",
+        "SQO-S004"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure count completion time and variance resolution; make count progress and excluded-stock semantics explicit before commit.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Inventory counts remain a physical operation independent of Bitcoin; reconcile count deltas against all completed sales regardless of tender.",
+      "bitcoin_tradeoffs": "If Bitcoin sales are omitted from sales-to-stock events, physical and system counts diverge; validate every channel's decrement feed.",
+      "acceptance_test": "Start a cycle count containing a subset of variations, submit and approve it, then verify counted quantities are updated and a non-included variation remains unchanged."
+    },
+    {
+      "id": "SQO-C004",
+      "canonical_key": "inventory.count.full",
+      "category": "inventory",
+      "capability": "Submit and approve a full physical stock count",
+      "merchant_outcome": "Merchant can reconcile all inventory at one location.",
+      "actor": "Inventory counter and reviewer",
+      "trigger": "Merchant conducts a complete physical stocktake",
+      "behavior": "Record every item/variation quantity, submit progress for review and approval.",
+      "preconditions": [
+        "Count feature entitlement and permissions",
+        "All stock at the location is counted before submission"
+      ],
+      "qualifiers": [
+        "US",
+        "full counts available on iOS/Android and supported Square Register, Terminal, Handheld",
+        "variance valuation depends on unit costs"
+      ],
+      "recovery_edge_cases": [
+        "Any uncounted stock in full count is set to zero; ongoing cycle count blocks full count access."
+      ],
+      "source_ids": [
+        "SQO-S003"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce accidental zeroing with a pre-submit checklist for uncounted catalog items and surface missing unit costs before valuation export.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Tender does not alter physical count rules; ensure Bitcoin sales are represented in inventory movements before comparing book and physical stock.",
+      "bitcoin_tradeoffs": "A count can expose prior sale-event omissions but cannot identify tender source unless reporting retains it.",
+      "acceptance_test": "Submit a full count containing all location items and verify count requires review and approval and updates recorded quantities."
+    },
+    {
+      "id": "SQO-C005",
+      "canonical_key": "inventory.purchase_order.create",
+      "category": "inventory",
+      "capability": "Create and send or save a supplier purchase order",
+      "merchant_outcome": "Retail merchant can prepare a replenishment order tied to a vendor and delivery location, then share or export it.",
+      "actor": "Owner or team member with item/inventory permissions",
+      "trigger": "Merchant decides to replenish items",
+      "behavior": "Create a PO in Dashboard or eligible Retail POS, select vendor/location/date and items, add optional tax/note, then send, save as draft, PDF or CSV.",
+      "preconditions": [
+        "Eligible plan/capability and retail mode for POS",
+        "Vendor or ability to create one",
+        "Items exist or are entered manually"
+      ],
+      "qualifiers": [
+        "US",
+        "Retail Plus/Premium or Square Plus/Premium with advanced inventory",
+        "Maximum 500 unique items per PO; whole-number quantities only; in-app creation unavailable on Square Terminal"
+      ],
+      "recovery_edge_cases": [
+        "Editing does not automatically email updated PO; explicit resend required. Receiving is a separate workflow."
+      ],
+      "source_ids": [
+        "SQO-S005"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure order preparation time and supplier correction rate; preserve draft state and clearly distinguish saved, sent and revised versions.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Supplier purchasing is a separate merchant workflow from customer tender; do not assume Bitcoin adoption changes vendor ordering.",
+      "bitcoin_tradeoffs": "Adding a payment rail does not make supplier PO settlement available; avoid implying PO payment or supplier payout support.",
+      "acceptance_test": "Eligible user creates a PO with vendor, destination, expected date, item and quantity, saves as draft, exports it, then sends an edited version and confirms the documented explicit resend step."
+    },
+    {
+      "id": "SQO-C006",
+      "canonical_key": "inventory.vendor.manage",
+      "category": "inventory",
+      "capability": "Create, import, edit or deactivate vendor records",
+      "merchant_outcome": "Merchant can maintain a supplier directory used in purchasing.",
+      "actor": "Owner or team member with item/inventory permissions",
+      "trigger": "Merchant onboards a supplier or reconciles an item identifier",
+      "behavior": "Authorized user creates, imports, edits or deactivates vendors in Dashboard.",
+      "preconditions": [
+        "Eligible Retail/Restaurants subscription or advanced inventory/restaurants capability",
+        "Item/inventory permission"
+      ],
+      "qualifiers": [
+        "US",
+        "Barcode-based receiving described for Square Retail POS"
+      ],
+      "recovery_edge_cases": [
+        "Vendor lifecycle guide includes purchase-order access conditions; vendor-code matching is a separate item-level operation."
+      ],
+      "source_ids": [
+        "SQO-S006"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure supplier-code lookup failures and receiving corrections; guide the merchant through code mapping and surface ambiguity before stock is applied.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Vendor setup and stock receiving should remain independent of customer Bitcoin acceptance.",
+      "bitcoin_tradeoffs": "Do not imply Square vendor management settles supplier invoices in Bitcoin; no such behavior was documented in inspected guide.",
+      "acceptance_test": "Create a vendor, edit its details, then deactivate and verify it remains available in deactivated state."
+    },
+    {
+      "id": "SQO-C007",
+      "canonical_key": "staff.permissions.configure",
+      "category": "staff_permissions",
+      "capability": "Assign granular team permissions and shared POS access",
+      "merchant_outcome": "Owner can tailor what staff can see/do and which access points a permission set can use.",
+      "actor": "Owner or team member with team management permission",
+      "trigger": "Merchant onboards staff or changes responsibilities",
+      "behavior": "Create/edit permission set, choose standard/enhanced/full level, customize permissions and access points, then assign a passcode/access route.",
+      "preconditions": [
+        "Dashboard team management permission"
+      ],
+      "qualifiers": [
+        "US",
+        "Full access includes all permissions except bank-account management",
+        "shared team passcode does not attribute sales, time or activity to an individual"
+      ],
+      "recovery_edge_cases": [
+        "Shared credentials reduce individual attribution; configure individual credentials where staff-level activity tracking is needed."
+      ],
+      "source_ids": [
+        "SQO-S008"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure permission misconfiguration and manager access corrections; expose effective access in a role preview before saving.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Any added tender-specific actions should follow existing least-privilege controls and be attributable to the acting team member.",
+      "bitcoin_tradeoffs": "A new tender may add sensitive actions; extending full access broadly would increase exposure without operational need.",
+      "acceptance_test": "Create a custom role with reporting but without team management, assign it to a test team member, and verify the member can access reports but cannot change permissions; shared passcode activity is clearly not presented as individual attribution."
+    },
+    {
+      "id": "SQO-C008",
+      "canonical_key": "staff.timeclock.record",
+      "category": "staff_permissions",
+      "capability": "Record shifts and review workday hours",
+      "merchant_outcome": "Team and manager can record hours, breaks, shift history and overtime and review workday summaries.",
+      "actor": "Team member and manager/owner with shifts permissions",
+      "trigger": "Team member starts or ends a work shift",
+      "behavior": "Team member uses personal passcode to clock in/out; timecard captures shift and break records and can be reviewed/printed as a workday summary.",
+      "preconditions": [
+        "Eligible Shifts/Retail/Restaurants/Square plan",
+        "Personal passcode assigned"
+      ],
+      "qualifiers": [
+        "US",
+        "Detailed editing, schedule and labor rule workflows not fully inspected"
+      ],
+      "recovery_edge_cases": [
+        "Team member without passcode cannot use the documented clock-in flow; edits to prior timecards are a separate workflow."
+      ],
+      "source_ids": [
+        "SQO-S009"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure missed punches and correction delay; provide a low-friction request/review path while retaining a trace of changes.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Timekeeping is independent of tender; do not infer payroll or compensation processing from shift records.",
+      "bitcoin_tradeoffs": "Payroll adjacency may be separately subscribed and regulated; keep recorded time data portable and clearly distinct from pay disbursement.",
+      "acceptance_test": "A team member with personal passcode clocks in, records a break, clocks out, and the manager views the shift duration and break in timecard history."
+    },
+    {
+      "id": "SQO-C009",
+      "canonical_key": "cash_drawer.session.start",
+      "category": "cash_closeout",
+      "capability": "Start a cash drawer session with starting cash",
+      "merchant_outcome": "Cashier establishes opening cash balance for drawer session.",
+      "actor": "Seller/team member with reports permission",
+      "trigger": "Cash drawer begins or ends a work session",
+      "behavior": "With Cash Management Add-on, start the session from POS by entering starting cash and optional description.",
+      "preconditions": [
+        "Cash Management Add-on configured",
+        "Cash drawer session initiated in POS"
+      ],
+      "qualifiers": [
+        "US",
+        "Cannot start from Dashboard",
+        "Dashboard remote end prevents further paid-in/out adjustments",
+        "long-open inactive sessions can auto-end"
+      ],
+      "recovery_edge_cases": [
+        "Cannot start drawer from Dashboard; sessions open over 30 days with at least seven days inactive auto-end."
+      ],
+      "source_ids": [
+        "SQO-S010"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure drawer variance and close duration; make expected balance, paid-in/out reasons and remote-end consequences visible before a manager closes.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Bitcoin tender can reduce physical cash tender volume while leaving a cash drawer workflow necessary for cash sales and payouts; retain cash closeout for remaining cash jobs.",
+      "bitcoin_tradeoffs": "If non-cash tender is mixed into drawer expectations incorrectly, variance becomes misleading; separate tender settlement from counted physical cash and test mixed-tender closeout.",
+      "acceptance_test": "Start drawer in POS with starting amount and verify Dashboard cannot start a session."
+    },
+    {
+      "id": "SQO-C010",
+      "canonical_key": "cash_drawer.report.view",
+      "category": "reporting",
+      "capability": "Review cash drawer history with session detail",
+      "merchant_outcome": "Owner/manager can inspect drawer sessions by date and location and see device and cash movements.",
+      "actor": "Owner or team member with reports permission",
+      "trigger": "Manager reviews cash drawer closeout or variance",
+      "behavior": "View drawer history in Dashboard or POS; Dashboard filters date/location and can add paid-in/out, device and location columns.",
+      "preconditions": [
+        "Reports permission",
+        "POS view requires connected drawer/printer and Cash Drawer Management"
+      ],
+      "qualifiers": [
+        "US",
+        "Dashboard cash drawer reports cannot be printed or exported"
+      ],
+      "recovery_edge_cases": [
+        "For offline analysis, Dashboard cash drawer export is unavailable in the inspected guide; POS may email/print with supported printer."
+      ],
+      "source_ids": [
+        "SQO-S011"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure closeout investigation time; provide a permitted portable audit format while preserving session detail and access controls.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Separate Bitcoin receipts from drawer cash totals while allowing the merchant to compare tender summaries during closeout.",
+      "bitcoin_tradeoffs": "Dashboard export limitation may complicate reconciliation; any additional report must clearly distinguish payment settlement records from physical drawer movements.",
+      "acceptance_test": "A reports-authorized manager filters drawer sessions by date and location and sees paid-in/out, device and location details; the UI communicates Dashboard export/print limitation and supported POS email/print path."
+    },
+    {
+      "id": "SQO-C011",
+      "canonical_key": "reporting.restaurant.close_day",
+      "category": "reporting",
+      "capability": "Configure restaurant end-of-day requirements and run closeout report",
+      "merchant_outcome": "Restaurant manager can require key close tasks and review a day summary before the restaurant closes.",
+      "actor": "Manager with reports permission",
+      "trigger": "End of restaurant operating day",
+      "behavior": "Configure requirements for open checks, tip adjustments, drawer totals and clock-outs; run close-of-day report showing check details, gross/net sales, payment methods, categories and items.",
+      "preconditions": [
+        "Eligible Restaurants/Square subscription",
+        "Full service, quick service or bar mode on supported Register/iPad"
+      ],
+      "qualifiers": [
+        "US",
+        "Restaurants Plus/Premium or Square Plus/Premium documented"
+      ],
+      "recovery_edge_cases": [
+        "Staff may need to declare cash tips before clock-out; exact behavior depends on enabled procedures and staff still clocked in."
+      ],
+      "source_ids": [
+        "SQO-S012"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure incomplete close tasks and next-day corrections; clearly identify blockers and accountable staff before the manager finalizes day close.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "A Bitcoin payment method should appear distinctly in the tender summary while preserving close tasks for open checks, drawers and clocked-in staff.",
+      "bitcoin_tradeoffs": "Settlement timing and tender conversion can differ from sales day boundaries; report should avoid presenting settlement as equivalent to sales recognition.",
+      "acceptance_test": "At a configured restaurant location, leave one required close task incomplete and verify the manager can identify it; after completion run report and reconcile checks, sales, payment methods, category and item summaries."
+    },
+    {
+      "id": "SQO-C012",
+      "canonical_key": "reporting.export",
+      "category": "reporting",
+      "capability": "Export or email eligible reports for offline analysis",
+      "merchant_outcome": "Manager can retain or further analyze reporting data outside Dashboard or POS where supported.",
+      "actor": "Owner or team member with reports permission",
+      "trigger": "Merchant needs offline records or custom analysis",
+      "behavior": "Select eligible report and print, download, export or email it; Dashboard custom reports are export-only and transaction-status reports print-only.",
+      "preconditions": [
+        "Reports permission",
+        "Printer connection for POS printing"
+      ],
+      "qualifiers": [
+        "US",
+        "Cash drawer reports excluded from Dashboard print/export"
+      ],
+      "recovery_edge_cases": [
+        "The report type determines available output; don't promise a universal export format or export path."
+      ],
+      "source_ids": [
+        "SQO-S013"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure failed export attempts and manual reconciliation time; disclose format and channel limitations before users configure reports.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "If a merchant accepts Bitcoin, export should preserve tender identity, timing and amount fields needed to reconcile sales with settlement without replacing existing report exports.",
+      "bitcoin_tradeoffs": "A new tender may create sensitive financial records and accounting complexity; validate privacy, timestamp, denomination and conversion fields with merchants before design.",
+      "acceptance_test": "For a standard eligible report, export or email the report and verify rows remain analyzable; for custom, transaction-status and cash drawer reports, verify the documented output limitation is accurately shown."
+    },
+    {
+      "id": "SQO-C013",
+      "canonical_key": "catalog.library.bulk_export",
+      "category": "catalog",
+      "capability": "Export filtered item library",
+      "merchant_outcome": "Merchant can review/edit selected catalog scope offline.",
+      "actor": "Catalog manager",
+      "trigger": "Bulk maintenance",
+      "behavior": "Filter and export all or matching items as Excel/CSV.",
+      "preconditions": [
+        "Dashboard catalog access"
+      ],
+      "qualifiers": [
+        "US",
+        "Excel recommended"
+      ],
+      "recovery_edge_cases": "Filtered export is only currently viewed items; CSV cannot edit unit types/precision; spreadsheet software may alter leading-zero SKU.",
+      "source_ids": [
+        "SQO-S015"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure reimport errors; preview scope and row count.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Tender does not alter catalog export.",
+      "bitcoin_tradeoffs": "Keep customer/payment data separate from catalog export.",
+      "acceptance_test": "Export filtered items and verify only matching rows and identifiers are present."
+    },
+    {
+      "id": "SQO-C014",
+      "canonical_key": "catalog.library.bulk_import",
+      "category": "catalog",
+      "capability": "Bulk import item updates",
+      "merchant_outcome": "Merchant can update many items in one upload.",
+      "actor": "Catalog manager",
+      "trigger": "Catalog change",
+      "behavior": "Prepare template, upload spreadsheet, map columns, correct errors.",
+      "preconditions": [
+        "Dashboard item permissions",
+        "Required fields"
+      ],
+      "qualifiers": [
+        "US",
+        "Multilocation requires enabled-location column"
+      ],
+      "recovery_edge_cases": "CSV cannot update unit precision; nested modifier relationships need Dashboard; SKU leading zero corruption risk.",
+      "source_ids": [
+        "SQO-S015"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure import error and recovery rates.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Payment rail does not change import.",
+      "bitcoin_tradeoffs": "Separate catalog and financial data.",
+      "acceptance_test": "Import valid catalog and malformed row; verify errors are surfaced for correction."
+    },
+    {
+      "id": "SQO-C015",
+      "canonical_key": "inventory.availability.modifier",
+      "category": "inventory",
+      "capability": "Mark modifier sold out per location",
+      "merchant_outcome": "Merchant can prevent unavailable add-on selection.",
+      "actor": "Item/inventory-authorized staff",
+      "trigger": "Modifier depleted",
+      "behavior": "Toggle modifier in-stock off at affected location.",
+      "preconditions": [
+        "Modifier exists",
+        "Permissions"
+      ],
+      "qualifiers": [
+        "US",
+        "Dashboard/POS"
+      ],
+      "recovery_edge_cases": "Sold-out-last keeps visible; nested modifier behavior differs by surface.",
+      "source_ids": [
+        "SQO-S016",
+        "SQO-S032"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure wrong modifier picks after depletion.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Availability independent of tender.",
+      "bitcoin_tradeoffs": "Bitcoin tender must honor same state.",
+      "acceptance_test": "Mark sold out at one location and verify location-specific availability and configured visibility."
+    },
+    {
+      "id": "SQO-C016",
+      "canonical_key": "inventory.transfer.create",
+      "category": "inventory",
+      "capability": "Create location stock transfer",
+      "merchant_outcome": "Merchant can plan inter-store movement.",
+      "actor": "Inventory manager",
+      "trigger": "Stock relocation",
+      "behavior": "Create Dashboard order with source/destination/date/tracking/items; draft/create/export.",
+      "preconditions": [
+        "2+ locations",
+        "Items at origin and destination",
+        "Eligible plan"
+      ],
+      "qualifiers": [
+        "US",
+        "Dashboard create/edit only"
+      ],
+      "recovery_edge_cases": "Only origin-available items listed; receive is separate.",
+      "source_ids": [
+        "SQO-S017",
+        "SQO-S018"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure transfer prep and mismatch.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Transfer independent of tender.",
+      "bitcoin_tradeoffs": "Tender does not change inventory location.",
+      "acceptance_test": "Create transfer draft between two locations and verify source/destination/item constraints."
+    },
+    {
+      "id": "SQO-C017",
+      "canonical_key": "inventory.transfer.receive",
+      "category": "inventory",
+      "capability": "Receive full or partial transfer",
+      "merchant_outcome": "Merchant can reconcile delivered quantities.",
+      "actor": "Destination receiver",
+      "trigger": "Transfer arrives",
+      "behavior": "Record received quantities and confirm in Dashboard or eligible POS; Dashboard can transfer instantly.",
+      "preconditions": [
+        "Existing transfer order",
+        "Eligible role/device"
+      ],
+      "qualifiers": [
+        "US",
+        "Partial receipt supported"
+      ],
+      "recovery_edge_cases": "Cannot lower requested amount below already received; detailed damaged/cancel receipt behavior not explicit in inspected guide.",
+      "source_ids": [
+        "SQO-S017"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure transfer discrepancy and closure time.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Goods receipt independent of tender.",
+      "bitcoin_tradeoffs": "Keep transfer accounting distinct from settlement.",
+      "acceptance_test": "Receive partial quantity and verify received amount recorded and remaining amount stays actionable."
+    },
+    {
+      "id": "SQO-C018",
+      "canonical_key": "multilocation.location.create",
+      "category": "multilocation",
+      "capability": "Create location",
+      "merchant_outcome": "Merchant can separate profile, hours, reporting and device/catalog context.",
+      "actor": "Account/settings authorized owner",
+      "trigger": "New operating site",
+      "behavior": "Create location in Dashboard and enter profile/contact details.",
+      "preconditions": [
+        "Account/settings permission"
+      ],
+      "qualifiers": [
+        "US",
+        "Maximum 300 locations",
+        "Fees may apply"
+      ],
+      "recovery_edge_cases": "Cannot delete; deactivate only; device-code Register cannot switch location.",
+      "source_ids": [
+        "SQO-S018"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure second-site setup errors.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Location model independent of tender.",
+      "bitcoin_tradeoffs": "Tender records must retain origin location.",
+      "acceptance_test": "Create second location and verify report scope plus deactivate-not-delete behavior."
+    },
+    {
+      "id": "SQO-C019",
+      "canonical_key": "customers.profile.create_import",
+      "category": "customers_loyalty",
+      "capability": "Create/import customer profile",
+      "merchant_outcome": "Merchant can retain customer details and interaction history.",
+      "actor": "Customers-authorized staff",
+      "trigger": "Customer identified or list migration",
+      "behavior": "Create directly, during/after sale, or import from Dashboard; import summary distinguishes created, matched and failed rows, with failed-row download/reimport; changes sync with POS.",
+      "preconditions": [
+        "Customers permission"
+      ],
+      "qualifiers": [
+        "US",
+        "Bulk import Dashboard only"
+      ],
+      "recovery_edge_cases": [
+        "Import can take minutes; matched records may be updated; failed rows produce correction file; deleting imported group does not remove pre-existing loyalty accounts. Import does not resubscribe unsubscribed customers."
+      ],
+      "source_ids": [
+        "SQO-S019"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure duplicate/import failure rate.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Customer record independent of tender.",
+      "bitcoin_tradeoffs": "Minimize customer data collected for Bitcoin tender.",
+      "acceptance_test": "Import profile and verify sync to POS; confirm note field sensitive-data guidance."
+    },
+    {
+      "id": "SQO-C020",
+      "canonical_key": "customers.profile.merge_delete",
+      "category": "customers_loyalty",
+      "capability": "Merge duplicate or delete customer profile",
+      "merchant_outcome": "Merchant can correct directory duplicates or honor deletion request.",
+      "actor": "Customers-authorized staff",
+      "trigger": "Duplicate or deletion request",
+      "behavior": "Review phone/email duplicate suggestion; merge or delete in Dashboard/POS.",
+      "preconditions": [
+        "Customers permission"
+      ],
+      "qualifiers": [
+        "US",
+        "Merge combines files"
+      ],
+      "recovery_edge_cases": "Merge irreversible; accidental delete recovery requires Support within 30 days.",
+      "source_ids": [
+        "SQO-S020"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Preview merge consequences before commit.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Customer records independent of tender.",
+      "bitcoin_tradeoffs": "Do not add wallet data to profile without need.",
+      "acceptance_test": "Merge duplicates after review and verify irreversible confirmation and recovery guidance."
+    },
+    {
+      "id": "SQO-C021",
+      "canonical_key": "customers.data.card_export",
+      "category": "security_privacy",
+      "capability": "Migrate stored card-on-file data",
+      "merchant_outcome": "Merchant can request credential export for processor migration.",
+      "actor": "Account owner",
+      "trigger": "Processor migration",
+      "behavior": "Use documented card-on-file export process.",
+      "preconditions": [
+        "Dashboard",
+        "Receiving processor"
+      ],
+      "qualifiers": [
+        "US",
+        "Average up to two weeks"
+      ],
+      "recovery_edge_cases": "Not general customer-contact export.",
+      "source_ids": [
+        "SQO-S021"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Provide status visibility and destination verification.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Bitcoin does not replace stored-card migration.",
+      "bitcoin_tradeoffs": "Merchant may still need migration for card customers.",
+      "acceptance_test": "Track card export request and distinguish it from directory CSV export."
+    },
+    {
+      "id": "SQO-C022",
+      "canonical_key": "customers.data.privacy_request",
+      "category": "security_privacy",
+      "capability": "Route customer data access/deletion/portability requests",
+      "merchant_outcome": "Merchant can distinguish its data from Square-held data.",
+      "actor": "Merchant data controller",
+      "trigger": "Privacy request",
+      "behavior": "Handle own copies/processors and contact Square for data Square holds.",
+      "preconditions": [
+        "Applicable jurisdiction/request verification"
+      ],
+      "qualifiers": [
+        "US-hosted GDPR guide scoped to EU rights"
+      ],
+      "recovery_edge_cases": "Not universal US legal workflow; retention exceptions vary.",
+      "source_ids": [
+        "SQO-S022",
+        "SQO-S033"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure completeness and resolution time.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Applies across tender types.",
+      "bitcoin_tradeoffs": "New tender data does not remove retention duties.",
+      "acceptance_test": "For an EU request, identify merchant/Square-held data and route applicable request."
+    },
+    {
+      "id": "SQO-C023",
+      "canonical_key": "customers.directory.export_contacts",
+      "category": "security_privacy",
+      "capability": "Export customer contact list",
+      "merchant_outcome": "Merchant wants portable directory.",
+      "actor": "Directory manager",
+      "trigger": "Migration or offline analysis",
+      "behavior": "No official leaf documenting general contact CSV export surfaced; community pages are nonofficial and excluded.",
+      "preconditions": [
+        "Directory access"
+      ],
+      "qualifiers": [
+        "US",
+        "General export format/fields unknown"
+      ],
+      "recovery_edge_cases": [
+        "Opened official customer-directory guide documents bulk import, but no general export workflow or output schema. Official card-on-file credential migration export is separate. Keep general export behavior unknown."
+      ],
+      "source_ids": [
+        "SQO-S019"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Document schema and privacy controls.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Portability independent of tender.",
+      "bitcoin_tradeoffs": "Bitcoin does not remove portability need.",
+      "acceptance_test": "Acceptance remains undefined until official source is found."
+    },
+    {
+      "id": "SQO-C024",
+      "canonical_key": "loyalty.program.configure",
+      "category": "customers_loyalty",
+      "capability": "Configure loyalty earning/rewards/locations",
+      "merchant_outcome": "Merchant defines point earning and reward rules.",
+      "actor": "Loyalty-authorized owner",
+      "trigger": "Launch or update program",
+      "behavior": "Dashboard configures spend/item/visit points, rewards, location participation and optional expiry.",
+      "preconditions": [
+        "Loyalty subscription or Square Plus/Premium",
+        "Permission"
+      ],
+      "qualifiers": [
+        "US",
+        "Up to 15 rewards"
+      ],
+      "recovery_edge_cases": "Free item/combo needs local item/category configured at every location.",
+      "source_ids": [
+        "SQO-S023"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure rule setup and location failures.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Program earns regardless of payment method.",
+      "bitcoin_tradeoffs": "Preserve eligibility across tender unless merchant rules differ.",
+      "acceptance_test": "Configure two-location free item reward and verify location mapping is required."
+    },
+    {
+      "id": "SQO-C025",
+      "canonical_key": "loyalty.enroll_redeem",
+      "category": "customers_loyalty",
+      "capability": "Enroll and redeem loyalty reward",
+      "merchant_outcome": "Customer can join program and use eligible reward.",
+      "actor": "Customer/cashier",
+      "trigger": "Eligible purchase",
+      "behavior": "Enter phone at checkout or claim via invite; redeem POS or Square Online.",
+      "preconditions": [
+        "Active program",
+        "Phone/email"
+      ],
+      "qualifiers": [
+        "US",
+        "Invoice earns points but cannot redeem"
+      ],
+      "recovery_edge_cases": "Post-sale invite may be delayed; invoice redemption unavailable.",
+      "source_ids": [
+        "SQO-S024"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure enroll and claim completion.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Earning documented regardless how customer pays.",
+      "bitcoin_tradeoffs": "Preserve earn/redeem workflow for Bitcoin tender.",
+      "acceptance_test": "Enroll and redeem at POS; separately verify invoice earns but cannot redeem."
+    },
+    {
+      "id": "SQO-C026",
+      "canonical_key": "giftcards.sell_send",
+      "category": "customers_loyalty",
+      "capability": "Sell and deliver gift card",
+      "merchant_outcome": "Merchant sells stored value via POS/Dashboard or online page.",
+      "actor": "Seller/buyer",
+      "trigger": "Gift purchase",
+      "behavior": "Sell physical/eGift; enable online page; resend eGift if needed.",
+      "preconditions": [
+        "Gift cards enabled",
+        "Supported channel"
+      ],
+      "qualifiers": [
+        "US",
+        "Max $2,000/card and $10,000/person/day",
+        "eGift restrictions on custom domains/API/eCommerce partners"
+      ],
+      "recovery_edge_cases": "POS cannot auto-text eGift; online page is Square-based.",
+      "source_ids": [
+        "SQO-S025"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure delivery failure and expose limits.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Gift value distinct from Bitcoin tender.",
+      "bitcoin_tradeoffs": "Do not treat Bitcoin receipt as stored value.",
+      "acceptance_test": "Sell within limits, verify activation and resend to corrected recipient."
+    },
+    {
+      "id": "SQO-C027",
+      "canonical_key": "giftcards.accept",
+      "category": "customers_loyalty",
+      "capability": "Accept gift card and handle insufficient balance",
+      "merchant_outcome": "Merchant redeems stored value and completes remainder if needed.",
+      "actor": "Cashier",
+      "trigger": "Gift card presented",
+      "behavior": "Scan/swipe/enter code; split tender or cancel if insufficient physical balance.",
+      "preconditions": [
+        "Latest compatible POS",
+        "Gift cards enabled"
+      ],
+      "qualifiers": [
+        "US",
+        "Offline unsupported",
+        "Physical QR/barcode only iOS"
+      ],
+      "recovery_edge_cases": "Location attribution uses selected reporting location.",
+      "source_ids": [
+        "SQO-S026"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure declines and split completion.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Gift card and Bitcoin are separate tenders.",
+      "bitcoin_tradeoffs": "Reconcile each balance separately.",
+      "acceptance_test": "Redeem low-balance card with split tender and confirm offline restriction."
+    },
+    {
+      "id": "SQO-C028",
+      "canonical_key": "giftcards.reload",
+      "category": "customers_loyalty",
+      "capability": "Reload eGift card",
+      "merchant_outcome": "Seller or customer adds stored value.",
+      "actor": "Items-authorized seller/customer",
+      "trigger": "Reload request",
+      "behavior": "Seller reloads in POS using number/QR; customer can reload online with number and applicable PIN.",
+      "preconditions": [
+        "16-digit code/QR",
+        "Seller items permission"
+      ],
+      "qualifiers": [
+        "US",
+        "Seller POS-only; customer online supported"
+      ],
+      "recovery_edge_cases": "PIN may be required online.",
+      "source_ids": [
+        "SQO-S027"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure lookup failures.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Reload independent of Bitcoin.",
+      "bitcoin_tradeoffs": "Keep stored-value liability separate.",
+      "acceptance_test": "Reload via POS QR and online credentials and verify amount."
+    },
+    {
+      "id": "SQO-C029",
+      "canonical_key": "giftcards.balance.check",
+      "category": "customers_loyalty",
+      "capability": "Check gift card balance",
+      "merchant_outcome": "Customer or cashier confirms remaining value.",
+      "actor": "Customer/cashier",
+      "trigger": "Balance inquiry",
+      "behavior": "Staff scans/swipes/enters number; customer uses balance page/profile with PIN or no-PIN option.",
+      "preconditions": [
+        "Card identifier",
+        "PIN where applicable"
+      ],
+      "qualifiers": [
+        "US"
+      ],
+      "recovery_edge_cases": "If PIN lookup fails, customer contacts seller.",
+      "source_ids": [
+        "SQO-S028"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce lookup failure and support burden.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Independent of tender.",
+      "bitcoin_tradeoffs": "Do not conflate gift balance with Bitcoin balance.",
+      "acceptance_test": "Check PIN and no-PIN card paths and seller fallback."
+    },
+    {
+      "id": "SQO-C030",
+      "canonical_key": "hardware.printer.configure",
+      "category": "hardware",
+      "capability": "Connect printer and assign print profile",
+      "merchant_outcome": "Merchant routes receipt/kitchen jobs to device.",
+      "actor": "Hardware setup staff",
+      "trigger": "Printer installation",
+      "behavior": "Connect compatible network/USB/Bluetooth/AirPrint printer, create profile and assign jobs/device.",
+      "preconditions": [
+        "Compatible printer/device"
+      ],
+      "qualifiers": [
+        "US",
+        "Same network required for Wi-Fi"
+      ],
+      "recovery_edge_cases": "USB tied to one POS; iOS direct USB unsupported; unprofiled device limited; profile affects all assigned printers.",
+      "source_ids": [
+        "SQO-S030"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure pairing/misrouting errors.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Printer independent of tender.",
+      "bitcoin_tradeoffs": "Tender-specific print content requires separate evidence.",
+      "acceptance_test": "Connect printer, assign profile, test; verify same-network and unprofiled conditions."
+    },
+    {
+      "id": "SQO-C031",
+      "canonical_key": "hardware.terminal.setup",
+      "category": "hardware",
+      "capability": "Set up Terminal and check accessories",
+      "merchant_outcome": "Merchant prepares portable POS device.",
+      "actor": "Operator",
+      "trigger": "New Terminal deployment",
+      "behavior": "Use on-device setup guide, load paper, test printer, select exact model for accessory list.",
+      "preconditions": [
+        "Square Terminal",
+        "Account sign-in"
+      ],
+      "qualifiers": [
+        "US",
+        "Accessory compatibility is model-specific"
+      ],
+      "recovery_edge_cases": "Check exact accessory SKU before purchase.",
+      "source_ids": [
+        "SQO-S029",
+        "SQO-S031"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure setup completion and accessory mismatch.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Hardware setup independent of tender.",
+      "bitcoin_tradeoffs": "This guide does not establish Bitcoin software compatibility.",
+      "acceptance_test": "Run printer test and verify compatibility list keyed to Terminal."
+    },
+    {
+      "id": "SQO-C032",
+      "canonical_key": "catalog.modifier.configure",
+      "category": "catalog",
+      "capability": "Configure modifier set behavior",
+      "merchant_outcome": "Merchant controls prompts, receipt visibility and sold-out presentation.",
+      "actor": "Catalog manager",
+      "trigger": "Create/edit customization set",
+      "behavior": "Configure receipt hiding, conversational prompts and sort-sold-out-last.",
+      "preconditions": [
+        "Modifier set"
+      ],
+      "qualifiers": [
+        "US",
+        "Supported mode"
+      ],
+      "recovery_edge_cases": "Conversational and multi-quantity options conflict; sort-last also conflicts with conversational.",
+      "source_ids": [
+        "SQO-S032"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Preview incompatible settings before saving.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Modifiers should behave the same across tender.",
+      "bitcoin_tradeoffs": "Tender must not bypass required modifiers.",
+      "acceptance_test": "Set text limit and attempt incompatible settings; verify constraints are explained."
+    },
+    {
+      "id": "SQO-C033",
+      "canonical_key": "multilocation.location.switch",
+      "category": "multilocation",
+      "capability": "Switch location and view scoped activity",
+      "merchant_outcome": "Operator works in correct site context.",
+      "actor": "Operator",
+      "trigger": "Move between stores or review results",
+      "behavior": "Switch POS location and view location-specific catalog/report/device context.",
+      "preconditions": [
+        "Multiple locations",
+        "Device/role access"
+      ],
+      "qualifiers": [
+        "US",
+        "Device-code Register cannot switch"
+      ],
+      "recovery_edge_cases": "Location cannot be deleted.",
+      "source_ids": [
+        "SQO-S018"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce wrong-location activity.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Tender should retain location.",
+      "bitcoin_tradeoffs": "Bitcoin activity reports under originating location.",
+      "acceptance_test": "Switch compatible POS location and verify scope; disclose Register device-code limitation."
+    },
+    {
+      "id": "SQO-C034",
+      "canonical_key": "inventory.item.availability",
+      "category": "inventory",
+      "capability": "Set item availability and sellable quantity",
+      "merchant_outcome": "Merchant can pause or cap sales independently from stocktake.",
+      "actor": "Items-authorized staff",
+      "trigger": "Prepared item low or unavailable",
+      "behavior": "Set available/sold out/quantity and reset; status syncs across supported sales channels.",
+      "preconditions": [
+        "Eligible plan/mode",
+        "Items permission"
+      ],
+      "qualifiers": [
+        "US",
+        "Guide marked beta"
+      ],
+      "recovery_edge_cases": "Available without quantity means unlimited; reset defaults to end business day; on-hand differs from committed stock.",
+      "source_ids": [
+        "SQO-S034",
+        "SQO-S016"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce oversells and stale state.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Availability applies irrespective tender.",
+      "bitcoin_tradeoffs": "Bitcoin flow honors availability and committed quantity.",
+      "acceptance_test": "Set quantity cap and reset; verify channel propagation and committed/on-hand distinction."
+    },
+    {
+      "id": "SQO-C035",
+      "canonical_key": "inventory.sales.decrement",
+      "category": "inventory",
+      "capability": "Decrement tracked stock after supported sale",
+      "merchant_outcome": "Merchant stock reflects completed sales from configured Square channels.",
+      "actor": "Square inventory service",
+      "trigger": "Tracked item sells through supported channel",
+      "behavior": "Stock updates from POS, Invoices and online-store shipped orders.",
+      "preconditions": [
+        "Item tracking enabled"
+      ],
+      "qualifiers": [
+        "US",
+        "Square POS, Square Invoices, online shipped orders"
+      ],
+      "recovery_edge_cases": "Untracked items do not decrement; do not assume external integrated channels without documentation.",
+      "source_ids": [
+        "SQO-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure sale-to-stock lag and duplicate/missed decrements.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Completed tender sale must decrement exactly once.",
+      "bitcoin_tradeoffs": "Additional tender integration can duplicate or omit decrement without clear event ownership.",
+      "acceptance_test": "Sell one tracked unit through each documented channel and verify one decrement for each sale."
+    },
+    {
+      "id": "SQO-C036",
+      "canonical_key": "inventory.purchase_order.receive",
+      "category": "inventory",
+      "capability": "Receive all, none or part of purchase order",
+      "merchant_outcome": "Merchant can update stock to match supplier delivery and record ancillary costs.",
+      "actor": "Inventory receiver",
+      "trigger": "Supplier delivery arrives",
+      "behavior": "Mark all/none or enter partial quantity; add shipping/handling fee when receiving; record damaged or unfulfilled quantity.",
+      "preconditions": [
+        "Eligible PO",
+        "Inventory permission"
+      ],
+      "qualifiers": [
+        "US",
+        "Dashboard and eligible Retail POS",
+        "Whole-number quantity constraint for ordering/receiving"
+      ],
+      "recovery_edge_cases": [
+        "Damaged/theft/loss flags do not appear in COGS per guide; fees allocate across items and do not change unit cost."
+      ],
+      "source_ids": [
+        "SQO-S005",
+        "SQO-S035"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure discrepancy handling and cost allocation clarity.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Supplier receipt job is independent of customer tender.",
+      "bitcoin_tradeoffs": "Avoid implying Bitcoin settles supplier invoice.",
+      "acceptance_test": "Partially receive a PO, record damaged quantity and shipping fee, then verify received units and COGS allocation."
+    },
+    {
+      "id": "SQO-C037",
+      "canonical_key": "inventory.vendor.item_code",
+      "category": "inventory",
+      "capability": "Associate vendor code with item for lookup",
+      "merchant_outcome": "Merchant can match supplier identifiers to catalog variations during ordering/receiving.",
+      "actor": "Inventory manager",
+      "trigger": "Supplier uses distinct item code",
+      "behavior": "Add vendor code alongside Square SKU; search by vendor code or scan supported barcode when receiving.",
+      "preconditions": [
+        "Vendor/item exists",
+        "Eligible Retail POS for barcode receipt"
+      ],
+      "qualifiers": [
+        "US",
+        "Vendor codes distinct from Square SKU"
+      ],
+      "recovery_edge_cases": [
+        "CSV/spreadsheet formatting may alter identifiers; verify leading zeroes."
+      ],
+      "source_ids": [
+        "SQO-S006",
+        "SQO-S015"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure item lookup failures and wrong-item receipt.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Vendor lookup independent of tender.",
+      "bitcoin_tradeoffs": "Keep supplier identifiers separate from payment reference.",
+      "acceptance_test": "Add vendor code with leading zero, search and scan it in supported Retail POS; verify correct variation selected."
+    },
+    {
+      "id": "SQO-C038",
+      "canonical_key": "cash_drawer.pay_in_out",
+      "category": "cash_closeout",
+      "capability": "Record cash paid in or paid out during active drawer",
+      "merchant_outcome": "Manager can document cash movement outside sales.",
+      "actor": "Cashier/manager",
+      "trigger": "Cash added to or removed from drawer",
+      "behavior": "Enter amount and description and choose Pay In or Pay Out on POS.",
+      "preconditions": [
+        "Active drawer session",
+        "Cash Management Add-on"
+      ],
+      "qualifiers": [
+        "US",
+        "POS app"
+      ],
+      "recovery_edge_cases": [
+        "Remote Dashboard end prevents further paid-in/out adjustments."
+      ],
+      "source_ids": [
+        "SQO-S010"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure unannotated cash movement and reconciliation time.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Cash movements remain separate from Bitcoin settlement.",
+      "bitcoin_tradeoffs": "Do not include non-cash receipts in physical drawer paid-in/out.",
+      "acceptance_test": "Record one pay-in and one pay-out with descriptions and verify both appear in drawer history."
+    },
+    {
+      "id": "SQO-C039",
+      "canonical_key": "cash_drawer.session.end",
+      "category": "cash_closeout",
+      "capability": "End or close cash drawer session",
+      "merchant_outcome": "Manager can record actual counted cash and finish drawer session.",
+      "actor": "Cashier/manager with reporting permission",
+      "trigger": "Shift or business day closes",
+      "behavior": "End drawer from POS or Dashboard; when closing with count, enter actual amount, description and report email.",
+      "preconditions": [
+        "Active session",
+        "Cash Management Add-on"
+      ],
+      "qualifiers": [
+        "US",
+        "Dashboard or POS end",
+        "Ending differs from closing with actual amount"
+      ],
+      "recovery_edge_cases": [
+        "Dashboard remote end prevents subsequent paid-in/out; active sessions may auto-end after long inactivity."
+      ],
+      "source_ids": [
+        "SQO-S010"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure variance investigation and incomplete closes.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Cash closeout retains value when Bitcoin reduces cash tender mix.",
+      "bitcoin_tradeoffs": "Expected-versus-counted cash must exclude noncash Bitcoin sales.",
+      "acceptance_test": "End a session with actual cash amount and verify expected and counted values; separately end without count and verify distinction."
+    },
+    {
+      "id": "SQO-C041",
+      "canonical_key": "inventory.count.variance_export",
+      "category": "reporting",
+      "capability": "Export inventory count variance and summary",
+      "merchant_outcome": "Merchant can review count discrepancy and identify who counted/reviewed and when.",
+      "actor": "Inventory reviewer",
+      "trigger": "Count completed",
+      "behavior": "Export Items CSV with item counts/variance or Count summary CSV with counters/reviewers/timestamps.",
+      "preconditions": [
+        "Eligible count feature",
+        "Completed or supported in-progress full count"
+      ],
+      "qualifiers": [
+        "US",
+        "Plus/Premium or advanced inventory capability"
+      ],
+      "recovery_edge_cases": [
+        "Missing unit costs may make inventory valuation and total variance inaccurate; active cycle count blocks full count access."
+      ],
+      "source_ids": [
+        "SQO-S004"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure time to resolve stock variance; surface missing unit costs before export.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Variance reporting independent of tender.",
+      "bitcoin_tradeoffs": "Ensure sale feed includes all accepted tender before comparing physical count.",
+      "acceptance_test": "Export both CSVs and verify item variance and reviewer/timestamp summary fields."
+    },
+    {
+      "id": "SQO-C042",
+      "canonical_key": "hardware.scanner.connect",
+      "category": "hardware",
+      "capability": "Connect a compatible barcode scanner",
+      "merchant_outcome": "Merchant can scan items for lookup, checkout and inventory workflows.",
+      "actor": "Hardware-authorized operator",
+      "trigger": "Scanner added to POS",
+      "behavior": "Pair supported Bluetooth scanner on iOS, plug compatible USB scanner into hub/Android OTG, or enable camera scanning on compatible phone/tablet.",
+      "preconditions": [
+        "Account/settings permission",
+        "Compatible device/scanner"
+      ],
+      "qualifiers": [
+        "US",
+        "Bluetooth only iPhone/iPad",
+        "USB limited to Stand/Register/selected Android",
+        "Android USB requires Android 9+ and OTG/host"
+      ],
+      "recovery_edge_cases": "Scanner compatibility varies by model; iOS camera requires camera permission; supported scan page indicator is shown.",
+      "source_ids": [
+        "SQO-S036"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure setup failures and scan latency; identify device/scanner compatibility before pairing.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Scanning workflow independent of tender.",
+      "bitcoin_tradeoffs": "Ensure scanning selects same catalog item regardless tender.",
+      "acceptance_test": "Pair compatible Bluetooth scanner on iPad and scan item; separately verify unsupported Android Bluetooth path is not offered and camera permission path works."
+    },
+    {
+      "id": "SQO-C043",
+      "canonical_key": "hardware.scanner.recover",
+      "category": "hardware",
+      "capability": "Recover barcode scanner pairing or camera failures",
+      "merchant_outcome": "Operator can restore scanning without replacing POS workflow.",
+      "actor": "Hardware-authorized operator",
+      "trigger": "Scanner fails to pair or camera scan stops",
+      "behavior": "Check charge, compatibility, pairing/device attachment, Bluetooth/camera settings, permissions, supported screen and lighting; reset/restart as guide directs.",
+      "preconditions": [
+        "Scanner previously configured"
+      ],
+      "qualifiers": [
+        "US",
+        "Recovery differs by scanner and OS"
+      ],
+      "recovery_edge_cases": "A scanner paired to a different device may need unpair/reset; restarting app/device may be required.",
+      "source_ids": [
+        "SQO-S037"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure time to restore scanning; present diagnostics based on scanner type and operating system.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Recovery is tender-independent.",
+      "bitcoin_tradeoffs": "Payment method changes should not disrupt item scanning.",
+      "acceptance_test": "Induce disconnected Bluetooth and camera permission cases; follow recovery guide and confirm scanning resumes."
+    },
+    {
+      "id": "SQO-C044",
+      "canonical_key": "hardware.handheld.setup",
+      "category": "hardware",
+      "capability": "Set up Square Handheld for a location",
+      "merchant_outcome": "Merchant can deploy a portable inventory/order device.",
+      "actor": "Owner/operator",
+      "trigger": "New Handheld deployment",
+      "behavior": "Connect power/network, perform mandatory first software update, sign in and configure date/time/language.",
+      "preconditions": [
+        "Wi-Fi/internet",
+        "Account credentials"
+      ],
+      "qualifiers": [
+        "US-certified hardware",
+        "Captive portal network unsupported"
+      ],
+      "recovery_edge_cases": "Mandatory activation update cannot be skipped; third-party charger/accessory compatibility not guaranteed.",
+      "source_ids": [
+        "SQO-S038"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure first setup completion and connection failure.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Setup independent of tender.",
+      "bitcoin_tradeoffs": "Do not assume unsupported networks support payment operations.",
+      "acceptance_test": "Set up Handheld on private Wi-Fi, complete update, and verify captive portal is rejected with actionable guidance."
+    },
+    {
+      "id": "SQO-C045",
+      "canonical_key": "hardware.kiosk.setup",
+      "category": "hardware",
+      "capability": "Set up self-service Square Kiosk mode and location",
+      "merchant_outcome": "Merchant can deploy a configured self-service ordering station.",
+      "actor": "Owner or device-management authorized staff",
+      "trigger": "Merchant installs kiosk",
+      "behavior": "Install mount, connect stable network, create Dashboard kiosk mode/device code, select location/menu/settings and sign in.",
+      "preconditions": [
+        "Square Kiosk subscription",
+        "Square Plus/Premium or eligible advanced restaurants capability",
+        "Active POS device",
+        "Indoor stable network/power"
+      ],
+      "qualifiers": [
+        "US",
+        "New standalone Square Kiosk",
+        "Legacy restaurant plans may require migration"
+      ],
+      "recovery_edge_cases": "Offline and cash payments unsupported; indoor only; mount hardware sold separately; stable network required for voice ordering.",
+      "source_ids": [
+        "SQO-S039"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure setup and menu/location mismatch; provide readiness gate for subscription, network, mode, menu and mounting.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Hardware setup independent of tender.",
+      "bitcoin_tradeoffs": "Kiosk offline/cash limitations must be respected regardless of other tender availability.",
+      "acceptance_test": "Create kiosk mode with location/menu, sign in, verify location-specific menu, and confirm offline/cash paths are unavailable."
+    },
+    {
+      "id": "SQO-C046",
+      "canonical_key": "customers.import.reconcile",
+      "category": "customers_loyalty",
+      "capability": "Review customer import matching and failed rows",
+      "merchant_outcome": "Merchant can update existing records from import while identifying errors and undoing import batch changes.",
+      "actor": "Directory manager",
+      "trigger": "Customer list import completes",
+      "behavior": "Review created/matched/failed summary; download failed rows for correction/reimport; delete imported group if rollback needed.",
+      "preconditions": [
+        "Dashboard customers permission",
+        "Spreadsheet import"
+      ],
+      "qualifiers": [
+        "US"
+      ],
+      "recovery_edge_cases": "Matched rows may add details to existing profiles; deleting group does not affect loyalty accounts that predated import.",
+      "source_ids": [
+        "SQO-S019"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure import matching accuracy and rollback errors.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Import reconciliation independent of payment method.",
+      "bitcoin_tradeoffs": "Do not use payment rail identifiers as uncontrolled customer matching keys.",
+      "acceptance_test": "Import duplicate and invalid rows; verify matched data updates, failures downloadable and group rollback preserves pre-existing loyalty."
+    },
+    {
+      "id": "SQO-C047",
+      "canonical_key": "customers.marketing.email_optin",
+      "category": "security_privacy",
+      "capability": "Apply documented email marketing status on profile entry",
+      "merchant_outcome": "Merchant understands effect of entering customer email into profile.",
+      "actor": "Customer-directory staff",
+      "trigger": "Staff manually enters email",
+      "behavior": "Square guide states manually entering email into profile automatically opts customer into email marketing.",
+      "preconditions": [
+        "Customer profile entry",
+        "US guide"
+      ],
+      "qualifiers": [
+        "US"
+      ],
+      "recovery_edge_cases": "Import tool cannot subscribe previously unsubscribed customers; ensure staff follows applicable consent requirements.",
+      "source_ids": [
+        "SQO-S019"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure consent confusion and opt-out requests; make subscription state and consent basis visible at capture.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Marketing subscription independent of Bitcoin.",
+      "bitcoin_tradeoffs": "Do not condition marketing enrollment on tender selection.",
+      "acceptance_test": "Enter an email on a test profile and verify resulting marketing status is visible; verify import does not resubscribe an unsubscribed profile."
+    },
+    {
+      "id": "SQO-C048",
+      "canonical_key": "customers.marketing.contact_export",
+      "category": "security_privacy",
+      "capability": "Export customer-provided names and emails for third-party marketing",
+      "merchant_outcome": "Merchant can reuse contact details customers provided directly to the business in an external marketing service.",
+      "actor": "Customer directory manager",
+      "trigger": "Merchant plans marketing outside Square",
+      "behavior": "Use Customer Directory information provided by customers for Square Marketing or export for a third-party marketing service.",
+      "preconditions": [
+        "Customers permission",
+        "Customer-provided names/emails saved in Customer Directory"
+      ],
+      "qualifiers": [
+        "US guide documents permitted use/export purpose, not general CSV schema or export steps"
+      ],
+      "recovery_edge_cases": "Contacts supplied to another seller for automatic receipts/marketing are Square-controlled and masked, not merchant-owned export data.",
+      "source_ids": [
+        "SQO-S041"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure successful export and field completeness; distinguish directly provided records from masked contacts before export.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep card-provider and Bitcoin transaction metadata out of marketing lists unless the customer separately provides/authorizes contact use.",
+      "bitcoin_tradeoffs": "External marketing export adds privacy and format work and does not improve Bitcoin settlement; preserve tender-independent consent and contact handling.",
+      "acceptance_test": "Verify customer-provided names/emails are eligible for external marketing use and another seller’s masked contact is not. Do not assert CSV fields or button path from this US guide."
+    },
+    {
+      "id": "SQO-C049",
+      "canonical_key": "customers.marketing.signup_channels",
+      "category": "customers_loyalty",
+      "capability": "Collect mailing-list signups through POS, hosted page or embedded form",
+      "merchant_outcome": "Merchant can collect voluntary mailing-list signups at checkout or online.",
+      "actor": "Customer and marketing manager",
+      "trigger": "Customer chooses to join mailing list",
+      "behavior": "Enable post-purchase POS signup, share hosted URL, or embed signup widget; collected name/email is added to Customer Directory.",
+      "preconditions": [
+        "Customer permission",
+        "Email Marketing add-on for POS signup"
+      ],
+      "qualifiers": [
+        "US",
+        "Email Marketing add-on not available on Square Register"
+      ],
+      "recovery_edge_cases": "Signup choice is distinct from required transaction handling or receipt delivery.",
+      "source_ids": [
+        "SQO-S041"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure signup completion and form errors; show resulting Collected Emails group and channel.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Keep marketing signup independent of whether customer pays by card or Bitcoin.",
+      "bitcoin_tradeoffs": "Shared order flow may reduce duplicate entry, but consent/contact capture remains a separate customer choice.",
+      "acceptance_test": "Configure POS, hosted and embedded signup paths; submit test entries and verify directory group; verify Square Register add-on limitation is shown."
+    },
+    {
+      "id": "SQO-C050",
+      "canonical_key": "customers.marketing.masked_contact_boundary",
+      "category": "security_privacy",
+      "capability": "Respect masked contact boundary for other-seller customer data",
+      "merchant_outcome": "Merchant can distinguish directly provided contacts from Square-masked contacts another seller collected.",
+      "actor": "Marketing operator",
+      "trigger": "Merchant views contact or plans outreach",
+      "behavior": "Directly provided checkout details are co-controlled and visible; another-seller contacts remain Square-controlled and masked, with outreach limited to customers who purchased from merchant within the prior 12 months.",
+      "preconditions": [
+        "Customer contact available through Square",
+        "Qualifying merchant purchase history for allowed masked outreach"
+      ],
+      "qualifiers": [
+        "US",
+        "12-month purchase window in guide"
+      ],
+      "recovery_edge_cases": "Do not export masked address or treat it as merchant-owned.",
+      "source_ids": [
+        "SQO-S041"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Reduce inappropriate outreach by showing contact source/ownership and purchase window.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Bitcoin tender does not change ownership or masking status of customer contact data.",
+      "bitcoin_tradeoffs": "Merchant may need separate customer-provided contact for follow-up; payment metadata does not grant unmasking or marketing permission.",
+      "acceptance_test": "Compare directly provided and other-seller contact records: verify direct data visible/co-controlled, other record masked, and outreach qualification uses past-12-month purchase condition."
+    }
+  ],
+  "limitations": [
+    "All evidence is public US Square Support Center documentation inspected on the recorded date; no Square account or workflow was tested. Documentation does not prove real-world compatibility.",
+    "This is a partial domain bundle, not exhaustive Square research. Coverage ledger marks uninspected customer, loyalty, gift card, privacy/export/deletion, location and hardware areas unresolved.",
+    "Square guide eligibility changes by product mode, country, subscription, device, permissions and add-on. Exact conditions in each inspected source should be checked against current merchant configuration.",
+    "Transfer order guide body and full lifecycle were not inspected; only index/search result evidence is recorded.",
+    "Catalog import/export, modifier stock availability, customer directory/data portability, loyalty, gift cards, hardware compatibility/setup and multi-location setup require further exact-guide inspection.",
+    "Square payroll and banking/financial services are adjacent coverage exclusions. No implementation or acceptance commitment is made for them."
+  ]
+}

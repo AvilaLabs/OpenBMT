@@ -1,0 +1,1728 @@
+{
+  "schema": "openbmt-capability-research-bundle-v1",
+  "as_of": "2026-11-17",
+  "vendor": "BTCPay Server",
+  "segment": "self-hosted Bitcoin merchant payment server",
+  "scope": "Public merchant/user documentation for store setup, Bitcoin receiving, invoices and checkout lifecycle, merchant-facing POS, payment requests, subscriptions, refund claims and payout review, receipts, and reporting. Covers documented user-visible capabilities only; no live instance was used and no compatibility was tested.",
+  "sources": [
+    {
+      "id": "BTM-S001",
+      "url": "https://docs.btcpayserver.org/Users/",
+      "title": "User Guide",
+      "section": "Overview; Set Up an Account and Store; Create a Store; Set Up a Wallet; Receive a First Payment; Next Steps",
+      "accessed": "2026-11-17",
+      "qualifiers": "Merchant/user guide; server registration, enabled payment methods, plugins, and wallet features are controlled by the instance administrator.",
+      "evidence_note": "Inspected guidance on account/store creation, default currency, Bitcoin wallet choices, first invoice, payment settlement, and operator boundary."
+    },
+    {
+      "id": "BTM-S002",
+      "url": "https://docs.btcpayserver.org/Invoices/",
+      "title": "Invoices",
+      "section": "Invoice statuses; Invoice filtering; Invoice details; Refunding an invoice; Archiving invoices; Invoice export",
+      "accessed": "2026-11-17",
+      "qualifiers": "Store scoped; actions depend on invoice state and user permissions; payment-method settlement rules apply.",
+      "evidence_note": "Inspected invoice state and exceptions, search/filtering, metadata, refund creation, archive behavior, and CSV export."
+    },
+    {
+      "id": "BTM-S003",
+      "url": "https://docs.btcpayserver.org/FAQ/Stores/",
+      "title": "Stores FAQ",
+      "section": "Allow anyone to create invoice; invoice expiry; confirmation policy; RBF; underpayment threshold; buyer information; invoice redirect; currency/rates",
+      "accessed": "2026-11-17",
+      "qualifiers": "FAQ describes configurable store or wallet settings. Interface and behavior can vary with version and administrator policy.",
+      "evidence_note": "Inspected invoice expiry and confirmation configuration, underpayment tolerance, public invoice creation, checkout redirect, and documented buyer-data limitation."
+    },
+    {
+      "id": "BTM-S004",
+      "url": "https://docs.btcpayserver.org/features/apps/",
+      "title": "BTCPay Server Apps",
+      "section": "Point of Sale App; Payment Button",
+      "accessed": "2026-11-17",
+      "qualifiers": "Apps are store dependent. POS is an app; availability may depend on server configuration. Browser device required; documentation does not certify a particular hardware terminal.",
+      "evidence_note": "Inspected POS static/cart/light views, item setup, cart, tips/custom payment options, app link, and embeddable payment button overview."
+    },
+    {
+      "id": "BTM-S005",
+      "url": "https://docs.btcpayserver.org/Users/payment-requests/",
+      "title": "Payment Requests",
+      "section": "Create a Payment Request; Share and Receive Payment; Track and Manage Requests",
+      "accessed": "2026-11-17",
+      "qualifiers": "Store must have a configured payment method; generated invoices use the exchange rate and fresh address at payment time.",
+      "evidence_note": "Inspected long lived request lifecycle, custom partial amounts, optional expiration/data, customer page, remaining balance, cloning, archiving, and printing/export."
+    },
+    {
+      "id": "BTM-S006",
+      "url": "https://docs.btcpayserver.org/Users/offerings/",
+      "title": "Offerings and Recurring Payments",
+      "section": "Concepts; Subscription Flow; Subscriber Portal; Plan Lifecycle; Email Rules",
+      "accessed": "2026-11-17",
+      "qualifiers": "Subscription feature; email requires server email configuration; service must interpret entitlements. Bitcoin does not provide automatic merchant initiated wallet debits.",
+      "evidence_note": "Inspected prepaid credit renewal, checkout, portal, plan/trial/grace/activation options, and email notifications."
+    },
+    {
+      "id": "BTM-S007",
+      "url": "https://docs.btcpayserver.org/Refund/",
+      "title": "Refunds",
+      "section": "Create a refund; Processing refund",
+      "accessed": "2026-11-17",
+      "qualifiers": "Bitcoin refund requires a customer payout destination claim and merchant approval/signing; payment confirmation depends on Bitcoin network.",
+      "evidence_note": "Inspected customer claim link, payout queue, approve/send, transaction signing/broadcast, in-progress and completed states."
+    },
+    {
+      "id": "BTM-S008",
+      "url": "https://docs.btcpayserver.org/Payouts/",
+      "title": "Payouts",
+      "section": "How does it work?; Example; Using Greenfield API",
+      "accessed": "2026-11-17",
+      "qualifiers": "Payout flow may include supported payment methods; Bitcoin on-chain payout requires destination review and transaction signing. API reference is outside this merchant bundle.",
+      "evidence_note": "Inspected payout claim statuses and merchant review/approval/send controls, batching, and completed history."
+    },
+    {
+      "id": "BTM-S009",
+      "url": "https://docs.btcpayserver.org/Reporting/",
+      "title": "Reporting in BTCPay",
+      "section": "Reporting; available reports",
+      "accessed": "2026-11-17",
+      "qualifiers": "Report availability and data depend on the store's recorded activity and enabled features.",
+      "evidence_note": "Inspected overview and documented On-Chain Wallets, Products Sold, and Payments report types with tabular data/aggregates and CSV export description."
+    },
+    {
+      "id": "BTM-S010",
+      "url": "https://docs.btcpayserver.org/AdvancedForms/",
+      "title": "Forms",
+      "section": "Forms overview; form definition",
+      "accessed": "2026-11-17",
+      "qualifiers": "Advanced form capability; configuration is schema based and availability may depend on installed version/features.",
+      "evidence_note": "Inspected statement that a configurable form may be required before payment and the example field model; did not infer unsupported field types or validation behavior."
+    },
+    {
+      "id": "BTM-S011",
+      "url": "https://docs.btcpayserver.org/Conference-PoS-guide/",
+      "title": "Setting up BTCPay Server for Conference / Event / Local Community",
+      "section": "PoS device payment testing; optional merchant payment-history access; receipt printing",
+      "accessed": "2026-11-17",
+      "qualifiers": "Example uses Android PoS device, third-party receipt printer, and an optional Blink plugin/service for Lightning. Those integrations are not core Bitcoin POS guarantees.",
+      "evidence_note": "Inspected example for browser-based POS, audio feedback, receipt view/print, and optional merchant history access."
+    },
+    {
+      "id": "BTM-S012",
+      "url": "https://docs.btcpayserver.org/Subscriptions/",
+      "title": "Subscriptions",
+      "section": "Recurring payment models; plans; checkout; customer portal; subscriber management; automated emails",
+      "accessed": "2026-11-17",
+      "qualifiers": "Newer subscription documentation; API access notes instance version v2.3.0 or later; server email configuration required for email. The merchant-facing features are not claims of automatic Bitcoin debit.",
+      "evidence_note": "Inspected manual recurring vs pre-funded balance modes, plans, portal actions, subscriber management, and event-driven email options."
+    },
+    {
+      "id": "BTM-S013",
+      "url": "https://docs.btcpayserver.org/Apps/",
+      "title": "BTCPay Server Apps",
+      "section": "Point of Sale App; Payment Button",
+      "accessed": "2026-11-17",
+      "qualifiers": "Built-in app docs; POS is a store-dependent app; public page says setup on browser devices, without tested hardware compatibility.",
+      "evidence_note": "Inspected static, cart and light views, item setup, product inventory, tips, custom payment options, POS creation and plugin Pay Button setup."
+    },
+    {
+      "id": "BTM-S014",
+      "url": "https://docs.btcpayserver.org/FAQ/Apps/",
+      "title": "Apps FAQ",
+      "section": "Point of Sale; custom amount pay button",
+      "accessed": "2026-11-17",
+      "qualifiers": "FAQ describes workaround and notes Pay Button itself lacks custom amount; POS/app availability and host setup may be operator dependent.",
+      "evidence_note": "Inspected POS public link on web devices, app count/store association, and custom-amount pay button workaround using POS."
+    },
+    {
+      "id": "BTM-S015",
+      "url": "https://docs.btcpayserver.org/Developers/api/invoice-metadata/",
+      "title": "Invoice metadata",
+      "section": "Well-known properties; Point of Sale product/cart/keypad examples",
+      "accessed": "2026-11-17",
+      "qualifiers": "Developer metadata guide; fields supplied by apps/integrations; documented examples do not prove a merchant UI control or actual instance version.",
+      "evidence_note": "Inspected POS cart receipt/cart/tip metadata, keypad totals, receiptData, taxIncluded/taxOnTip fields and privacy guidance."
+    },
+    {
+      "id": "BTM-S016",
+      "url": "https://docs.btcpayserver.org/API/Greenfield/v1/",
+      "title": "BTCPay Greenfield API (v1)",
+      "section": "Update a Point of Sale app: defaultView, showItems, showCustomAmount, showDiscount, enableTips, customTipPercentages, item inventory",
+      "accessed": "2026-11-17",
+      "qualifiers": "API reference; use as documentation of configuration fields, not as observed merchant UI or compatibility. Optional instance version/plugins may matter.",
+      "evidence_note": "Inspected POS app config schema and example with fixed/custom prices, tip percentages and inventory values."
+    },
+    {
+      "id": "BTM-S017",
+      "url": "https://docs.btcpayserver.org/Wallet/",
+      "title": "BTCPay Server Wallet",
+      "section": "Transactions; Receive; Payouts; PSBT",
+      "accessed": "2026-11-17",
+      "qualifiers": "Bitcoin on-chain wallet guide; signing methods depend on wallet configuration; hot wallet has added compromise risk.",
+      "evidence_note": "Inspected transaction history/labels, receive address, payout queue, PSBT construction/export/signing and transaction signing methods."
+    },
+    {
+      "id": "BTM-S018",
+      "url": "https://docs.btcpayserver.org/FAQ/Apps/",
+      "title": "Apps FAQ",
+      "section": "Custom amount payment button; POS app link",
+      "accessed": "2026-11-17",
+      "qualifiers": "FAQ-level documented workaround; Pay Button plugin capability differs from POS app capability.",
+      "evidence_note": "Inspected explicit limitation of Pay Button custom amount and documented route to POS-based custom amount embed."
+    },
+    {
+      "id": "BTM-S019",
+      "url": "https://docs.btcpayserver.org/AdvancedForms/",
+      "title": "Forms",
+      "section": "Well-known field names; stored metadata; mirror fields",
+      "accessed": "2026-11-17",
+      "qualifiers": "Advanced form documentation; form definitions write submitted values to invoice metadata; exact UI exposure depends on app/integration.",
+      "evidence_note": "Inspected metadata storage, amount/currency adjustment field names and mirror field behavior."
+    },
+    {
+      "id": "BTM-S020",
+      "url": "https://docs.btcpayserver.org/Users/",
+      "title": "User Guide",
+      "section": "User and Operator Responsibilities; permissions and feature availability",
+      "accessed": "2026-11-17",
+      "qualifiers": "The user guide makes permissions/features instance dependent; staff role management is principally in API/admin documentation and outside this merchant UI pass.",
+      "evidence_note": "Inspected user/operator responsibility boundary and account/store-scoped access conditions."
+    },
+    {
+      "id": "BTM-S021",
+      "url": "https://docs.btcpayserver.org/API/Greenfield/v1/",
+      "title": "BTCPay Greenfield API (v1)",
+      "section": "Update a store user role; default roles",
+      "accessed": "2026-11-17",
+      "qualifiers": "API reference only: operation requires store settings modification permission and does not document a merchant UI workflow or the exact action matrix for each role.",
+      "evidence_note": "Inspected operation input for updating a store user role and documented default role names Owner, Manager, Employee and Guest."
+    }
+  ],
+  "coverage": [
+    {
+      "id": "BTM-U001",
+      "topic": "Merchant account/store onboarding, default currency, Bitcoin receiving wallet choices and first test invoice",
+      "url": "https://docs.btcpayserver.org/Users/",
+      "status": "reviewed",
+      "reason": "Inspected user setup, wallet choice, first invoice workflow and administrator-controlled constraints.",
+      "source_ids": [
+        "BTM-S001"
+      ],
+      "claim_ids": [
+        "BTM-C001",
+        "BTM-C002"
+      ]
+    },
+    {
+      "id": "BTM-U002",
+      "topic": "Invoice create, checkout settlement, confirmation policy, expiry and late/partial/overpayment exceptions",
+      "url": "https://docs.btcpayserver.org/Invoices/",
+      "status": "reviewed",
+      "reason": "Inspected base states, exceptions, settlement policy and edge-case review guidance; store settings details cross-checked against FAQ.",
+      "source_ids": [
+        "BTM-S002",
+        "BTM-S003"
+      ],
+      "claim_ids": [
+        "BTM-C003",
+        "BTM-C004",
+        "BTM-C005",
+        "BTM-C027",
+        "BTM-C028",
+        "BTM-C029",
+        "BTM-C030",
+        "BTM-C031"
+      ]
+    },
+    {
+      "id": "BTM-U003",
+      "topic": "Invoice search, metadata, archive and accounting export",
+      "url": "https://docs.btcpayserver.org/Invoices/",
+      "status": "reviewed",
+      "reason": "Inspected invoice filtering, archived record semantics and CSV export fields/row behavior.",
+      "source_ids": [
+        "BTM-S002"
+      ],
+      "claim_ids": [
+        "BTM-C006",
+        "BTM-C007"
+      ]
+    },
+    {
+      "id": "BTM-U004",
+      "topic": "Merchant-facing POS catalog/cart/keypad, tips and payment buttons",
+      "url": "https://docs.btcpayserver.org/features/apps/",
+      "status": "reviewed",
+      "reason": "Inspected built-in Apps guide. App availability/configuration is operator dependent; physical terminal hardware compatibility is not established.",
+      "source_ids": [
+        "BTM-S004"
+      ],
+      "claim_ids": [
+        "BTM-C008",
+        "BTM-C009",
+        "BTM-C020",
+        "BTM-C021",
+        "BTM-C022",
+        "BTM-C023",
+        "BTM-C024",
+        "BTM-C025",
+        "BTM-C026"
+      ]
+    },
+    {
+      "id": "BTM-U005",
+      "topic": "Long-lived payment requests and installment tracking",
+      "url": "https://docs.btcpayserver.org/Users/payment-requests/",
+      "status": "reviewed",
+      "reason": "Inspected request setup, customer-facing payment page, fresh invoices/address/rate per payment attempt, partial balance, and management actions.",
+      "source_ids": [
+        "BTM-S005"
+      ],
+      "claim_ids": [
+        "BTM-C010",
+        "BTM-C011"
+      ]
+    },
+    {
+      "id": "BTM-U006",
+      "topic": "Customer information forms before payment",
+      "url": "https://docs.btcpayserver.org/AdvancedForms/",
+      "status": "reviewed",
+      "reason": "Inspected overview and field model only; form field types, validation, data retention and all supported surfaces were not exhaustively documented in the inspected section.",
+      "source_ids": [
+        "BTM-S010"
+      ],
+      "claim_ids": [
+        "BTM-C012"
+      ]
+    },
+    {
+      "id": "BTM-U007",
+      "topic": "Recurring subscriptions, credit renewals, customer self-service, plan lifecycle and notices",
+      "url": "https://docs.btcpayserver.org/Users/offerings/",
+      "status": "reviewed",
+      "reason": "Inspected merchant and customer subscription workflows; manual recurring and pre-funded credit models kept distinct.",
+      "source_ids": [
+        "BTM-S006",
+        "BTM-S012"
+      ],
+      "claim_ids": [
+        "BTM-C013",
+        "BTM-C014",
+        "BTM-C015"
+      ]
+    },
+    {
+      "id": "BTM-U008",
+      "topic": "Refund claims, payout approval, signing and completion",
+      "url": "https://docs.btcpayserver.org/Refund/",
+      "status": "reviewed",
+      "reason": "Inspected refund creation, customer claim, merchant review and Bitcoin transaction lifecycle.",
+      "source_ids": [
+        "BTM-S007",
+        "BTM-S008",
+        "BTM-S002"
+      ],
+      "claim_ids": [
+        "BTM-C016",
+        "BTM-C017",
+        "BTM-C033"
+      ]
+    },
+    {
+      "id": "BTM-U009",
+      "topic": "Merchant reporting, sales/payment/wallet reports and CSV",
+      "url": "https://docs.btcpayserver.org/Reporting/",
+      "status": "reviewed",
+      "reason": "Inspected documented report overview. Tax recognition, fiat accounting reconciliation and report completeness guarantees are not asserted.",
+      "source_ids": [
+        "BTM-S009",
+        "BTM-S002"
+      ],
+      "claim_ids": [
+        "BTM-C018",
+        "BTM-C034"
+      ]
+    },
+    {
+      "id": "BTM-U010",
+      "topic": "POS receipt presentation/printing and device-specific peripherals",
+      "url": "https://docs.btcpayserver.org/Conference-PoS-guide/",
+      "status": "reviewed",
+      "reason": "Inspected a concrete event setup example; receipt printer and device are example hardware, not general compatibility commitments.",
+      "source_ids": [
+        "BTM-S011"
+      ],
+      "claim_ids": [
+        "BTM-C019",
+        "BTM-C032"
+      ]
+    },
+    {
+      "id": "BTM-U011",
+      "topic": "Third-party cart integrations and custom Greenfield API/webhook implementation",
+      "url": "https://docs.btcpayserver.org/Development/ecommerce-integration-guide/",
+      "status": "excluded",
+      "reason": "Outside assigned merchant UI domain; integration behavior must be separately researched by the API/integrations owner. The user guide's existence of integrations is noted, not inventoried here.",
+      "source_ids": [],
+      "claim_ids": []
+    },
+    {
+      "id": "BTM-U012",
+      "topic": "Server deployment, hosting, upgrades, database backup, node administration and disaster recovery",
+      "url": "https://docs.btcpayserver.org/",
+      "status": "excluded",
+      "reason": "Operator/admin domain assigned to another researcher; user setup records the operator boundary only.",
+      "source_ids": [
+        "BTM-S001"
+      ],
+      "claim_ids": []
+    },
+    {
+      "id": "BTM-U013",
+      "topic": "Altcoin payment methods, altcoin wallet backends and non-Bitcoin settlement semantics",
+      "url": "https://docs.btcpayserver.org/",
+      "status": "excluded",
+      "reason": "Outside Bitcoin merchant capability inventory. Optional altcoin rails can require different backends and are not treated as Bitcoin behavior or implied OpenBMT requirements.",
+      "source_ids": [],
+      "claim_ids": []
+    },
+    {
+      "id": "BTM-U014",
+      "topic": "Lightning node setup, liquidity management, channel operations, Lightning backup and service plugins",
+      "url": "https://docs.btcpayserver.org/",
+      "status": "excluded",
+      "reason": "Operational Lightning domain is assigned to the operator/API researcher. Bitcoin on-chain and Lightning checkout are distinguished only where merchant invoice settlement documentation requires it; no LN operations are claimed.",
+      "source_ids": [
+        "BTM-S001",
+        "BTM-S002"
+      ],
+      "claim_ids": [
+        "BTM-C004"
+      ]
+    },
+    {
+      "id": "BTM-U015",
+      "topic": "Staff role administration, multi-location operations, inventory synchronization, tax and accounting compliance",
+      "url": "https://docs.btcpayserver.org/Users/",
+      "status": "unresolved",
+      "reason": "Store role names/API assignment, additional stores, inventory quantity field and tax metadata were reviewed and linked separately. Detailed role action matrix, location abstraction/synchronized stock, tax calculation and compliance remain unresolved; unknown does not mean unavailable.",
+      "source_ids": [
+        "BTM-S001",
+        "BTM-S015",
+        "BTM-S020",
+        "BTM-S021"
+      ],
+      "claim_ids": [
+        "BTM-C035",
+        "BTM-C036"
+      ]
+    },
+    {
+      "id": "BTM-U016",
+      "topic": "POS offline acceptance and recovery after connectivity loss",
+      "url": "https://docs.btcpayserver.org/features/apps/",
+      "status": "unresolved",
+      "reason": "Inspected POS overview does not establish offline operation or recovery semantics; no absence conclusion is made.",
+      "source_ids": [
+        "BTM-S004"
+      ],
+      "claim_ids": []
+    },
+    {
+      "id": "BTM-U017",
+      "topic": "Device, edition, plugin and instance-version compatibility matrix",
+      "url": "https://docs.btcpayserver.org/Users/",
+      "status": "unresolved",
+      "reason": "POS app configuration fields and one Android/printer example were reviewed; no complete device/version/plugin compatibility matrix is documented in inspected sources.",
+      "source_ids": [
+        "BTM-S001",
+        "BTM-S004",
+        "BTM-S011",
+        "BTM-S016"
+      ],
+      "claim_ids": []
+    },
+    {
+      "id": "BTM-U018",
+      "topic": "POS display modes: fixed/static item choices, cart checkout and keypad-only view",
+      "url": "https://docs.btcpayserver.org/Apps/",
+      "status": "reviewed",
+      "reason": "Reviewed POS user guide; modes are separately represented below.",
+      "source_ids": [
+        "BTM-S013"
+      ],
+      "claim_ids": [
+        "BTM-C020",
+        "BTM-C021",
+        "BTM-C022"
+      ]
+    },
+    {
+      "id": "BTM-U019",
+      "topic": "POS item attributes, custom amount and finite inventory fields",
+      "url": "https://docs.btcpayserver.org/API/Greenfield/v1/",
+      "status": "reviewed",
+      "reason": "Reviewed public Apps guide and POS config schema; inventory field is documented, but stock decrement/restock semantics are not established.",
+      "source_ids": [
+        "BTM-S013",
+        "BTM-S016"
+      ],
+      "claim_ids": [
+        "BTM-C023",
+        "BTM-C024"
+      ]
+    },
+    {
+      "id": "BTM-U020",
+      "topic": "POS tips, percentage presets, cart totals and receipt metadata",
+      "url": "https://docs.btcpayserver.org/Developers/api/invoice-metadata/",
+      "status": "reviewed",
+      "reason": "Reviewed Apps guide, configuration schema and POS receipt examples; merchant-facing detailed tip behavior remains partially documented.",
+      "source_ids": [
+        "BTM-S013",
+        "BTM-S015",
+        "BTM-S016"
+      ],
+      "claim_ids": [
+        "BTM-C025",
+        "BTM-C026"
+      ]
+    },
+    {
+      "id": "BTM-U021",
+      "topic": "Invoice expiration, confirmation threshold and underpayment tolerance",
+      "url": "https://docs.btcpayserver.org/FAQ/Stores/",
+      "status": "reviewed",
+      "reason": "Reviewed store settings FAQ and invoice state guide; exact global defaults may vary by instance/version.",
+      "source_ids": [
+        "BTM-S002",
+        "BTM-S003"
+      ],
+      "claim_ids": [
+        "BTM-C027",
+        "BTM-C028"
+      ]
+    },
+    {
+      "id": "BTM-U022",
+      "topic": "Invoice paid partial, paid late, paid over and invalid scenarios",
+      "url": "https://docs.btcpayserver.org/Invoices/",
+      "status": "reviewed",
+      "reason": "Reviewed each documented exception and merchant decision guidance; no live transactions were run.",
+      "source_ids": [
+        "BTM-S002",
+        "BTM-S003"
+      ],
+      "claim_ids": [
+        "BTM-C029",
+        "BTM-C030",
+        "BTM-C031"
+      ]
+    },
+    {
+      "id": "BTM-U023",
+      "topic": "Invoice detail receipt data and POS cart itemization",
+      "url": "https://docs.btcpayserver.org/Developers/api/invoice-metadata/",
+      "status": "reviewed",
+      "reason": "Reviewed receiptData metadata examples; actual print layout and connected printer behavior are only shown in a setup example.",
+      "source_ids": [
+        "BTM-S002",
+        "BTM-S015",
+        "BTM-S011"
+      ],
+      "claim_ids": [
+        "BTM-C032"
+      ]
+    },
+    {
+      "id": "BTM-U024",
+      "topic": "Bitcoin wallet payout signing via hardware/PSBT and broadcast tracking",
+      "url": "https://docs.btcpayserver.org/Wallet/",
+      "status": "reviewed",
+      "reason": "Reviewed wallet signing and payout sections; supported external signer availability is configuration dependent.",
+      "source_ids": [
+        "BTM-S017",
+        "BTM-S008"
+      ],
+      "claim_ids": [
+        "BTM-C033"
+      ]
+    },
+    {
+      "id": "BTM-U025",
+      "topic": "Store staff roles, permission boundaries and merchant history access",
+      "url": "https://docs.btcpayserver.org/Users/",
+      "status": "reviewed",
+      "reason": "Reviewed user/operator boundary and documented access conditions; a full merchant UI role workflow is outside inspected user-guide branches, so role administration details remain unresolved.",
+      "source_ids": [
+        "BTM-S001",
+        "BTM-S020",
+        "BTM-S011"
+      ],
+      "claim_ids": []
+    },
+    {
+      "id": "BTM-U026",
+      "topic": "Tax and fee metadata on invoices/receipts",
+      "url": "https://docs.btcpayserver.org/Developers/api/invoice-metadata/",
+      "status": "reviewed",
+      "reason": "Reviewed recognized taxIncluded and taxOnTip metadata. This documents metadata fields only, not jurisdictional tax calculation, filing or compliance.",
+      "source_ids": [
+        "BTM-S015"
+      ],
+      "claim_ids": [
+        "BTM-C034"
+      ]
+    },
+    {
+      "id": "BTM-U027",
+      "topic": "BTCPay Apps FAQ: custom amount Pay Button limitation and POS workaround",
+      "url": "https://docs.btcpayserver.org/FAQ/Apps/",
+      "status": "reviewed",
+      "reason": "Inspected this official FAQ branch and separated plugin Pay Button behavior from POS custom amount.",
+      "source_ids": [
+        "BTM-S014",
+        "BTM-S018"
+      ],
+      "claim_ids": [
+        "BTM-C025"
+      ]
+    },
+    {
+      "id": "BTM-U028",
+      "topic": "BTCPay Wallet user guide: on-chain transaction overview, receive, payout and PSBT signing",
+      "url": "https://docs.btcpayserver.org/Wallet/",
+      "status": "reviewed",
+      "reason": "Inspected the wallet branch for merchant transaction/payout signing only; infrastructure and node operations remain outside this scope.",
+      "source_ids": [
+        "BTM-S017"
+      ],
+      "claim_ids": [
+        "BTM-C002",
+        "BTM-C033"
+      ]
+    },
+    {
+      "id": "BTM-U029",
+      "topic": "BTCPay invoice metadata guide: receipt, POS cart, buyer and tax metadata",
+      "url": "https://docs.btcpayserver.org/Developers/api/invoice-metadata/",
+      "status": "reviewed",
+      "reason": "Inspected exact properties/examples relevant to merchant checkout outcomes; API implementation details remain outside the claim scope.",
+      "source_ids": [
+        "BTM-S015"
+      ],
+      "claim_ids": [
+        "BTM-C006",
+        "BTM-C021",
+        "BTM-C026",
+        "BTM-C032",
+        "BTM-C034"
+      ]
+    },
+    {
+      "id": "BTM-U030",
+      "topic": "Greenfield POS app schema: views, custom amount, tip and inventory configuration fields",
+      "url": "https://docs.btcpayserver.org/API/Greenfield/v1/",
+      "status": "reviewed",
+      "reason": "Inspected exact POS schema/example. Records documented configuration surface only, not live UI behavior or end-to-end compatibility.",
+      "source_ids": [
+        "BTM-S016"
+      ],
+      "claim_ids": [
+        "BTM-C022",
+        "BTM-C024",
+        "BTM-C025",
+        "BTM-C026"
+      ]
+    },
+    {
+      "id": "BTM-U031",
+      "topic": "Store role assignment and additional stores as merchant boundaries; detailed role matrix/multilocation features unresolved",
+      "url": "https://docs.btcpayserver.org/API/Greenfield/v1/",
+      "status": "reviewed",
+      "reason": "Inspected API role update operation and user guide additional-store creation. Role action matrix and full multi-location inventory/reporting behavior remain unresolved, not absent.",
+      "source_ids": [
+        "BTM-S001",
+        "BTM-S021"
+      ],
+      "claim_ids": [
+        "BTM-C035",
+        "BTM-C036"
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "BTM-C001",
+      "canonical_key": "onboarding.store.create",
+      "category": "onboarding",
+      "capability": "A merchant can create a store with a business/project name and default invoice currency.",
+      "merchant_outcome": "Establishes the store context used for payment and checkout settings.",
+      "actor": "Merchant account holder",
+      "trigger": "After registration or from the store selector",
+      "behavior": "The user names the store, chooses a default currency and creates it; store settings can later be changed.",
+      "preconditions": [
+        "Access to an instance permitting account registration and store creation"
+      ],
+      "qualifiers": [
+        "Registration and available options are administrator-controlled."
+      ],
+      "recovery_edge_cases": [
+        "If registration is unavailable, the merchant must obtain access from the instance administrator; no self-service bypass is documented."
+      ],
+      "source_ids": [
+        "BTM-S001"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test a guided setup that previews which choices affect invoice display and allows a merchant to verify currency and price source before first sale.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Bitcoin-only receiving can reduce checkout-method configuration complexity; test whether a first-time merchant can connect the intended wallet and create a verified test invoice without needing a hosted processor account.",
+      "bitcoin_tradeoffs": "Direct wallet control shifts setup and recovery responsibility to the merchant; the setup should make wallet mode and seed custody consequences clear without asking users to expose a seed.",
+      "acceptance_test": "On a fresh permitted account, a merchant creates a named store in a chosen currency, then can identify the selected store and change its default settings within 3 minutes; verify no payment is accepted until a receiving method is configured."
+    },
+    {
+      "id": "BTM-C002",
+      "canonical_key": "onchain.wallet.connect",
+      "category": "onchain_operations",
+      "capability": "A merchant can connect an existing public wallet, create a watch-only wallet, or create a hot wallet for on-chain receiving.",
+      "merchant_outcome": "Allows selection of a receiving setup with different signing and custody arrangements.",
+      "actor": "Merchant/store owner",
+      "trigger": "Wallet setup in the selected store",
+      "behavior": "Existing wallet public data can be imported, a new watch-only wallet can retain public receiving data while private key is erased from server, or a hot wallet can keep a spend key on the server.",
+      "preconditions": [
+        "Bitcoin wallet feature enabled by server administrator"
+      ],
+      "qualifiers": [
+        "The hot wallet convenience/security tradeoff is explicit; wallet setup option availability is admin controlled."
+      ],
+      "recovery_edge_cases": [
+        "A watch-only wallet needs a recovery seed or external signer to spend; a lost seed for a generated wallet may prevent recovery. Documentation advises testing recovery/signing before significant value."
+      ],
+      "source_ids": [
+        "BTM-S001"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure whether a guided wallet choice explains receive versus spend capability and signing responsibility before setup, then verify with a successful test receipt and restore drill.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Bitcoin allows the merchant to receive to a wallet they control; evaluate whether standard public-key import and external signing can make that control understandable and safe for a nontechnical merchant.",
+      "bitcoin_tradeoffs": "Self-custody removes intermediary control but makes key backup and signer recovery the merchant's responsibility; hot-wallet compromise can expose funds.",
+      "acceptance_test": "For each supported wallet mode, create a receive invoice and verify the address against the intended wallet; attempt recovery/signing with documented credentials before accepting production funds; never enter an existing seed into the server."
+    },
+    {
+      "id": "BTM-C003",
+      "canonical_key": "checkout.invoice.create",
+      "category": "online_invoices",
+      "capability": "A store user can manually create an invoice with an amount, currency, optional order/item context, and selected payment methods.",
+      "merchant_outcome": "Produces a customer checkout page and a trackable payment record without a separate cart integration.",
+      "actor": "Store user",
+      "trigger": "Payments > Invoices > Create Invoice",
+      "behavior": "The merchant enters invoice amount/currency and optional reference details, chooses at least one configured method, creates the invoice, and can open its checkout page.",
+      "preconditions": [
+        "Store access and at least one configured payment method"
+      ],
+      "qualifiers": [
+        "UI options and available methods depend on account permissions and server support."
+      ],
+      "recovery_edge_cases": [
+        "If the invoice is not detected as paid, verify node/indexer synchronization, destination and transaction broadcast; a hosted user should provide invoice and transaction IDs to the administrator, never wallet secrets."
+      ],
+      "source_ids": [
+        "BTM-S001",
+        "BTM-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test a minimal guided invoice form with a clear customer preview and actionable explanation when no payment method is configured.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Bitcoin invoice checkout can direct payment to the merchant's configured wallet; test whether the merchant can confirm wallet receipt and invoice linkage without reconciling a separate processor balance.",
+      "bitcoin_tradeoffs": "The rate lock and expiry introduce time pressure, while on-chain confirmation policy can delay fulfillment; communicate those costs and let merchant fulfillment policy govern release.",
+      "acceptance_test": "Create a small invoice with an order reference, open checkout in a separate browser, pay from a separate Bitcoin wallet, and confirm the invoice displays the correct payment and settlement state."
+    },
+    {
+      "id": "BTM-C004",
+      "canonical_key": "payments.invoice.settlement_status",
+      "category": "payments",
+      "capability": "An invoice exposes payment and settlement state so the merchant can distinguish new, processing, settled, expired, and invalid payments.",
+      "merchant_outcome": "Supports fulfillment decisions based on actual payment progress and configured confirmation policy.",
+      "actor": "Merchant/store user",
+      "trigger": "Customer pays a Bitcoin invoice",
+      "behavior": "On-chain full payment can remain processing until configured confirmation conditions are met; Lightning payment normally settles without on-chain confirmations. The merchant can inspect invoice status and payment details.",
+      "preconditions": [
+        "Invoice created and store payment method configured"
+      ],
+      "qualifiers": [
+        "Confirmation count and monitoring policy are store/wallet settings; Lightning operations are out of scope here."
+      ],
+      "recovery_edge_cases": [
+        "Do not fulfill merely on broadcast; inspect status. A fully paid transaction that fails settlement monitoring may become invalid and needs business review."
+      ],
+      "source_ids": [
+        "BTM-S001",
+        "BTM-S002",
+        "BTM-S003"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test whether the status page explains the next merchant action and expected confirmation condition for each state, reducing premature fulfillment and unnecessary refreshes.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Bitcoin settlement evidence can be checked against the public transaction and confirmation count; test a merchant-readable status that links transaction evidence to the configured fulfillment threshold.",
+      "bitcoin_tradeoffs": "On-chain finality is not immediate and a zero-confirmation acceptance policy adds risk; the merchant must choose a policy appropriate to goods value and loss tolerance.",
+      "acceptance_test": "For an on-chain invoice, observe new, processing, then settled as confirmations accrue under the configured threshold; verify a staff member does not mark the order fulfilled before the chosen threshold. Record Lightning as a distinct, separately verified payment-method case."
+    },
+    {
+      "id": "BTM-C005",
+      "canonical_key": "payments.invoice.exception_handling",
+      "category": "payments",
+      "capability": "Invoice details and filters expose partial, overpaid, late, invalid, and manually marked exceptions for merchant review.",
+      "merchant_outcome": "Helps identify payment discrepancies that need a fulfillment, additional-payment, or refund decision.",
+      "actor": "Merchant/store user",
+      "trigger": "Payment amount or timing differs from invoice expectation, settlement fails, or staff manually changes status",
+      "behavior": "Base invoice status is accompanied by an exception indicator; the merchant can search/filter unusual invoices and inspect amount, payment method, transaction and status history before action.",
+      "preconditions": [
+        "Invoice has received relevant payment activity or manual status change"
+      ],
+      "qualifiers": [
+        "Manual marking is an accounting decision and does not establish on-chain confirmation."
+      ],
+      "recovery_edge_cases": [
+        "Partial payments can result from a wrong amount or payment-service fee; late or partial payments on expired invoices require review, and archived invoices continue to be monitored."
+      ],
+      "source_ids": [
+        "BTM-S002",
+        "BTM-S003"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure resolution time and mis-fulfillment rate with a guided exception queue that presents amount short/over, timing, transaction evidence, and permitted next actions.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Bitcoin's transaction-level payment evidence may support clear short/over reconciliation; test whether the merchant can map each transaction to invoice amount without assuming a third party will net or correct it.",
+      "bitcoin_tradeoffs": "Fee deduction and exchange-wallet behavior can leave an invoice short; accepting a tolerance trades revenue certainty for fewer manual exceptions, and manual settlement marking carries fulfillment risk.",
+      "acceptance_test": "Exercise underpayment, overpayment, payment after expiry, unconfirmed/invalid payment, and manual mark. For each, confirm invoice remains findable in the unusual filter, displayed exception matches scenario, and fulfillment remains blocked pending an explicit merchant decision."
+    },
+    {
+      "id": "BTM-C006",
+      "canonical_key": "payments.invoice.search_filter",
+      "category": "reporting",
+      "capability": "A merchant can find invoices using indexed payment/order fields and filters for date, status, exception, app and archive state.",
+      "merchant_outcome": "Enables a store user to locate a payment during customer support or closeout.",
+      "actor": "Store user",
+      "trigger": "Open invoice list and enter search terms or filters",
+      "behavior": "Invoice list supports search across invoice/order IDs, buyer email, amount, destination and other indexed information, plus status/exception/application/date filters; date means invoice creation date.",
+      "preconditions": [
+        "Store user can view invoices"
+      ],
+      "qualifiers": [
+        "Searchability depends on fields being present and indexed."
+      ],
+      "recovery_edge_cases": [
+        "Multiple selected status/exception filters use any-match behavior; users can include archived records when a historical invoice is not in the default list."
+      ],
+      "source_ids": [
+        "BTM-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test common lookup tasks by order ID, buyer email, transaction destination and creation date; show the date basis and filter logic to reduce missed records.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Bitcoin transaction IDs and destinations can help trace payment evidence; evaluate whether receipt and invoice search can expose the correct public transaction reference without requiring manual wallet-log searching.",
+      "bitcoin_tradeoffs": "Public transaction identifiers can reveal sensitive purchase/payment patterns if shared broadly; restrict staff access and minimize customer data in search results.",
+      "acceptance_test": "Create at least 10 test invoices with distinct order IDs, email metadata, statuses, dates, archived/unarchived and exceptions; verify each documented query/filter returns the expected set and date filtering uses creation time."
+    },
+    {
+      "id": "BTM-C007",
+      "canonical_key": "reporting.invoice.csv_export",
+      "category": "reporting",
+      "capability": "A merchant can export invoice activity as CSV over an invoice creation date range.",
+      "merchant_outcome": "Provides payment, invoice and metadata rows for downstream bookkeeping.",
+      "actor": "Store user",
+      "trigger": "Open invoice reporting from invoice list and choose a date range",
+      "behavior": "CSV includes invoice, payment, payment method, rate, fee and metadata fields; an invoice with multiple payments can produce multiple rows.",
+      "preconditions": [
+        "Permission to view invoices/reports"
+      ],
+      "qualifiers": [
+        "Unpaid plain New/Expired invoices are omitted; archived invoices with reportable activity remain included. This is not an accounting or tax compliance assurance."
+      ],
+      "recovery_edge_cases": [
+        "Before reconciling, account for multi-payment rows and omitted unpaid invoices; documentation does not establish automatic reconciliation to external accounting software."
+      ],
+      "source_ids": [
+        "BTM-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure time to reconcile a date-range closeout and missed/duplicated payment count; improve column labels and provide a preview of row-granularity and exclusions.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "Bitcoin transaction references and fees may allow independently auditable payment records; test a clean mapping from invoice to transaction and exchange-rate basis for merchant bookkeeping.",
+      "bitcoin_tradeoffs": "On-chain amounts are denominated in BTC while merchant books may use fiat valuation; rate source/time and fees must remain visible, and CSV alone does not settle accounting policy.",
+      "acceptance_test": "Export a range containing paid, multi-payment, partial, archived and unpaid invoices; reconcile every exported row to invoice/payment detail and verify documented inclusion/exclusion rules."
+    },
+    {
+      "id": "BTM-C008",
+      "canonical_key": "checkout.pos.catalog_cart",
+      "category": "checkout",
+      "capability": "A store can publish a browser POS app with item listings and static, cart, or keypad-only views.",
+      "merchant_outcome": "Lets a cashier or customer start a Bitcoin payment from a web device, with cart view for item selection and light view for an entered amount.",
+      "actor": "Store owner configures; cashier/customer operates",
+      "trigger": "Create a Point of Sale app attached to a store",
+      "behavior": "Merchant adds items with prices, photos and descriptions, selects a view and saves a public app URL; cart supports checkout and light view provides a keypad.",
+      "preconditions": [
+        "POS app available/enabled on the instance; selected store has a payment method"
+      ],
+      "qualifiers": [
+        "Store dependent app and browser-based flow; no general dedicated terminal or offline compatibility is implied."
+      ],
+      "recovery_edge_cases": [
+        "If app is unavailable, ask instance administrator; specific device/browser compatibility is not documented in the overview."
+      ],
+      "source_ids": [
+        "BTM-S004"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Observe a cashier completing itemized sale and custom-amount sale on a tablet; target under 20 seconds to create checkout with no wrong-item or amount errors.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "A browser POS can direct payments to the merchant's Bitcoin wallet without a card-terminal processor; test how clearly customers and staff recognize a Bitcoin invoice and settlement state at the counter.",
+      "bitcoin_tradeoffs": "A browser app depends on working connectivity and the configured receiving wallet; checkout initiation is not proof of payment or settlement.",
+      "acceptance_test": "Configure one item and one custom amount; on a phone and tablet, issue checkout, pay from a separate Bitcoin wallet, confirm invoice status, and verify the sale total and item context are correct."
+    },
+    {
+      "id": "BTM-C009",
+      "canonical_key": "checkout.pos.tip_custom_amount",
+      "category": "checkout",
+      "capability": "POS supports configurable tips and custom payment options in addition to listed products.",
+      "merchant_outcome": "Allows a merchant to accept a gratuity or amount not represented by a catalog item.",
+      "actor": "Store owner configures; cashier/customer selects",
+      "trigger": "POS checkout for a product or custom amount",
+      "behavior": "POS app can be configured with tips and custom payment options; documentation describes use for donations and small e-commerce as well as in-person sales.",
+      "preconditions": [
+        "POS app installed/available and configured"
+      ],
+      "qualifiers": [
+        "The inspected overview does not specify tip presets, percentage math, tip edit timing, tax interaction, or receipt line-item behavior."
+      ],
+      "recovery_edge_cases": [
+        "Those detailed calculation and receipt cases remain unresolved; do not assume a tax treatment."
+      ],
+      "source_ids": [
+        "BTM-S004"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test whether customer can add or decline a tip without obscuring total due, and whether merchant can reconcile tip separately; design an explicit receipt breakdown if not clear.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Bitcoin payment can include the final gratuity in the amount the customer authorizes; test whether a customer can confirm the total before paying and whether merchant records distinguish tip from sale value.",
+      "bitcoin_tradeoffs": "Bitcoin transactions cannot be charged again after payment; an unclear tip prompt can cause a short or unwanted payment and may require a separate refund/payout workflow.",
+      "acceptance_test": "Run zero-tip, fixed-tip, percentage-tip and custom-amount cases if exposed by the installed version; verify displayed total before payment, invoice amount, order record and printed receipt all agree. Mark unsupported cases unknown rather than failed."
+    },
+    {
+      "id": "BTM-C010",
+      "canonical_key": "checkout.payment_request.create_share",
+      "category": "online_invoices",
+      "capability": "A merchant can create a shareable long-lived payment request with amount, currency, optional expiration, memo and customer data prompts.",
+      "merchant_outcome": "Allows a customer to pay an invoice or bill later through a reusable request page.",
+      "actor": "Store owner",
+      "trigger": "Create a payment request for a customer or purpose",
+      "behavior": "Request creates a public URL; each customer payment attempt opens a fresh invoice at the then-current rate and address rather than fixing a rate/address when request is created.",
+      "preconditions": [
+        "Store payment method configured"
+      ],
+      "qualifiers": [
+        "Payment request persists until paid or optional expiry; each generated invoice follows normal invoice settlement rules."
+      ],
+      "recovery_edge_cases": [
+        "A stale or expired request may not accept further payment; customer data requested is limited to selected fields and privacy/retention policy is not specified in inspected guide."
+      ],
+      "source_ids": [
+        "BTM-S005"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure request creation and customer comprehension across emailed bill and donation use cases; explain rate-at-payment and expiry at the point the link is shared.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "A reusable request can avoid repeatedly sending static Bitcoin addresses and stale BTC amounts; test whether each payment generates a correctly tracked fresh Bitcoin invoice without address reuse.",
+      "bitcoin_tradeoffs": "The BTC equivalent can change between request creation and payment; the merchant gets current-rate pricing rather than a locked quote, which may not suit fixed-price arrangements.",
+      "acceptance_test": "Create an expiring and non-expiring request, share with a second browser, make two partial Bitcoin payments at different times, and verify each creates a distinct invoice/address and updates the remaining balance until settled."
+    },
+    {
+      "id": "BTM-C011",
+      "canonical_key": "checkout.payment_request.partial_payment",
+      "category": "payments",
+      "capability": "A merchant may allow custom invoice amounts on a payment request and track the remaining amount until the request is fully paid.",
+      "merchant_outcome": "Supports installments while preserving a visible outstanding balance for both parties.",
+      "actor": "Merchant enables; payee makes installment",
+      "trigger": "A payment request is configured to permit custom payment amounts",
+      "behavior": "Customer chooses a partial amount; request page tracks payment history and amount due; status becomes settled when the full requested amount is received.",
+      "preconditions": [
+        "Request created with custom amount payments enabled"
+      ],
+      "qualifiers": [
+        "Merchant may disable custom amounts and require full outstanding amount; each installment's exchange rate is set when paid."
+      ],
+      "recovery_edge_cases": [
+        "A partial payment leaves a balance outstanding; expiration behavior and any dispute/collection procedure are merchant policy."
+      ],
+      "source_ids": [
+        "BTM-S005"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test customer and merchant understanding of balance due, installment history, and expiration; target no mistaken fulfillment while a balance remains.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Bitcoin installments can be independently tracked as separate payments; test whether total received and remaining BTC/fiat obligation are understandable across changing rates.",
+      "bitcoin_tradeoffs": "At each installment current exchange rates can change; the requested fiat target and total bitcoin received may differ from a single locked-rate invoice.",
+      "acceptance_test": "Configure a request for 100 units with custom payments; make 30 and then 70 at separate times, verify balance progression and settled status only after total receipt; repeat with a short payment and verify it remains outstanding."
+    },
+    {
+      "id": "BTM-C012",
+      "canonical_key": "checkout.customer_form.collect",
+      "category": "checkout",
+      "capability": "The advanced Forms feature can require customers to complete a configurable form before payment.",
+      "merchant_outcome": "Collects merchant-defined customer details as part of the payment flow.",
+      "actor": "Store/app integrator configures; customer submits",
+      "trigger": "Customer starts checkout on a form-enabled payment surface",
+      "behavior": "A form definition can include named fields, labels, help text, type, value and required status; completion is requested before payment.",
+      "preconditions": [
+        "Forms feature supported by instance and configured for the relevant payment surface"
+      ],
+      "qualifiers": [
+        "Inspected documentation does not establish all field types, validation rules, supported surfaces, retention, or privacy controls."
+      ],
+      "recovery_edge_cases": [
+        "Incomplete required fields block progression per feature overview; handling of invalid field values and abandoned form data is unresolved."
+      ],
+      "source_ids": [
+        "BTM-S010"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test form completion time, abandonment, and data minimization; expose only required fields and give a clear correction path for invalid input.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "A direct Bitcoin checkout can still collect only the minimum delivery/contact data needed for fulfillment; test whether merchant can associate those details with an invoice without forcing identity collection for an in-person Bitcoin payment.",
+      "bitcoin_tradeoffs": "More buyer data may improve fulfillment but can weaken privacy and increase retention burden; Bitcoin's address-level privacy does not remove merchant-held form data risk.",
+      "acceptance_test": "Configure required email and optional name; verify required omission blocks payment, valid submission associates details to the correct invoice, and an unrelated invoice exposes no form data. Record field validation and deletion behavior as unresolved if docs do not specify it."
+    },
+    {
+      "id": "BTM-C013",
+      "canonical_key": "customers.subscription.plan_checkout",
+      "category": "customers_loyalty",
+      "capability": "A merchant can define an offering and plans, then share a plan checkout for customers to subscribe or add credit.",
+      "merchant_outcome": "Supports recurring service or donation enrollment with tier and billing-period choices.",
+      "actor": "Merchant defines offering/plan; customer selects plan and pays",
+      "trigger": "Merchant creates offering and shares plan checkout link",
+      "behavior": "Plans define price and period; checkout can create a subscriber, collect an email and begin a paid or trial enrollment. Bitcoin subscription semantics are manual period payments or pre-funded credit deductions, not an automatic wallet debit.",
+      "preconditions": [
+        "Subscriptions feature available on instance; store payment method and any required customer email flow configured"
+      ],
+      "qualifiers": [
+        "Plan and subscriber features/intervals vary by documented subscription version; service must enforce entitlements itself."
+      ],
+      "recovery_edge_cases": [
+        "If balance is insufficient, customer must pay/top up or subscription may enter configured grace period then expire; optimistic activation may later be revoked if payment fails."
+      ],
+      "source_ids": [
+        "BTM-S006",
+        "BTM-S012"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test whether a customer understands renewal model, next due date, price and what access means before subscribing; show manual versus credit-based billing plainly.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Bitcoin payment can fund a prepaid balance without storing a reusable debit credential; evaluate whether manual reminders or credit top-up give the merchant predictable renewal while the customer retains control over each payment.",
+      "bitcoin_tradeoffs": "Bitcoin does not provide a unified automatic recurring debit; prepaid credits require the customer to fund ahead and expose the merchant to unused-credit accounting and service-access reconciliation.",
+      "acceptance_test": "Create a monthly plan, complete checkout with a test subscriber, verify balance and first term, then confirm renewal only occurs with sufficient prepaid credit or a new manual payment; verify no customer wallet is charged automatically."
+    },
+    {
+      "id": "BTM-C014",
+      "canonical_key": "customers.subscription.portal_manage",
+      "category": "customers_loyalty",
+      "capability": "A subscriber portal lets customers view status, plan, credit/history and billing records, and manage allowed plan changes or renewal settings.",
+      "merchant_outcome": "Reduces merchant support for subscription status and top-ups.",
+      "actor": "Subscriber/customer",
+      "trigger": "Customer opens a temporary portal link supplied by merchant or service",
+      "behavior": "Portal can show plan/status, entitlements, balance/history, invoices/receipts; customer may add credit, change plan if allowed, or disable automatic renewal.",
+      "preconditions": [
+        "Subscriber exists and application/service supplies access link"
+      ],
+      "qualifiers": [
+        "Temporary link access is used to limit exposure; exact expiry and invalidation behavior was not documented in inspected section."
+      ],
+      "recovery_edge_cases": [
+        "Lost/expired link recovery path is not established in inspected guide; service may need to issue a new link."
+      ],
+      "source_ids": [
+        "BTM-S006",
+        "BTM-S012"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure whether a subscriber can find next renewal, change plan, or add credit without support; ensure portal links are time limited and recoverable.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Customer-controlled top-ups are compatible with Bitcoin payment consent; test whether a customer can review what balance funds and choose when to pay rather than silently authorizing recurring transfers.",
+      "bitcoin_tradeoffs": "More customer agency can reduce involuntary charging but increases lapse risk when credit is insufficient; merchants need clear reminders and grace-period rules.",
+      "acceptance_test": "With a test subscriber, open portal through supplied link, inspect billing history, add credit and change plan where allowed; confirm another customer cannot access that subscriber by reusing a public nonsecret page URL."
+    },
+    {
+      "id": "BTM-C015",
+      "canonical_key": "customers.subscription.lifecycle_notice",
+      "category": "customers_loyalty",
+      "capability": "Subscription plans support trial, grace-period and activation rules, with optional event-based email notices when server email is configured.",
+      "merchant_outcome": "Lets the merchant define when service access starts/continues and notify customers before payment or access changes.",
+      "actor": "Merchant configures plan/rules; system emails subscriber",
+      "trigger": "Trial ending, payment due, state change, expiration or grace-period event",
+      "behavior": "Trial grants temporary access, grace period may retain access after insufficient renewal credit, and configurable email rules can send reminders/notices when SMTP is set up.",
+      "preconditions": [
+        "Subscription feature; SMTP configured for outbound email if notices are required"
+      ],
+      "qualifiers": [
+        "Entitlement enforcement remains with merchant's own service; emails may not be available where operator has not configured email."
+      ],
+      "recovery_edge_cases": [
+        "If email delivery fails or is not configured, the guide does not document an alternate guaranteed notice channel; optimistic activation can be reversed if payment later fails."
+      ],
+      "source_ids": [
+        "BTM-S006",
+        "BTM-S012"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure notice delivery and account access-state mismatch; provide an auditable event history and a customer-visible due date regardless of email availability.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Explicit reminders before a customer-authorized Bitcoin payment can support recurring service without an automatic debit mandate; test whether notice timing gives enough time to pay before access changes.",
+      "bitcoin_tradeoffs": "Manual customer payment adds friction and failed email may cause unexpected lapse; optimistic activation risks access being granted before payment settles.",
+      "acceptance_test": "Exercise trial end, insufficient credit, grace period payment and grace expiry with test subscriber; verify access state, status history, configured email event and fallback visibility agree at each transition."
+    },
+    {
+      "id": "BTM-C016",
+      "canonical_key": "refunds.invoice.issue_claim",
+      "category": "refunds_returns",
+      "capability": "A merchant can create a refund claim from an eligible invoice and share a link where the customer supplies a payout destination.",
+      "merchant_outcome": "Starts a refund without requiring the merchant to collect the customer's Bitcoin address in advance.",
+      "actor": "Merchant creates claim; customer claims",
+      "trigger": "Issue Refund from invoice detail",
+      "behavior": "Merchant selects payout method, suggested/custom amount, exchange-rate basis and optional deduction, creates refund and shares claim URL; customer enters destination and claims it.",
+      "preconditions": [
+        "Eligible invoice, user permission and supported payout method"
+      ],
+      "qualifiers": [
+        "Refund amount can be based on original rate, current rate or payment currency; deduction should follow merchant policy."
+      ],
+      "recovery_edge_cases": [
+        "An active refund is reopened rather than duplicated; a claimed refund enters payout review and is not yet sent."
+      ],
+      "source_ids": [
+        "BTM-S002",
+        "BTM-S007"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test refund initiation for correctness of amount, currency/rate basis and customer destination entry; surface these choices in plain language before sending the claim link.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "A customer-provided Bitcoin destination lets the merchant return funds directly without a custodial processor balance; test whether address confirmation and refund denomination reduce misdirected or value-disputed refunds.",
+      "bitcoin_tradeoffs": "Refund value can differ with selected rate basis and on-chain fees; sending to a wrong address is difficult or impossible to reverse and the customer must control the supplied destination.",
+      "acceptance_test": "Issue original-rate, current-rate and payment-currency refunds with a test invoice; verify claim displays correct amount and destination entry, existing active claim cannot be duplicated, and merchant can review the claimed destination before sending."
+    },
+    {
+      "id": "BTM-C017",
+      "canonical_key": "refunds.payout.review_send",
+      "category": "refunds_returns",
+      "capability": "A merchant can review claimed payouts, approve or cancel them, then sign and broadcast selected Bitcoin transactions and track completion.",
+      "merchant_outcome": "Provides a review gate before Bitcoin leaves the store wallet and a status visible to the claimant.",
+      "actor": "Authorized store user",
+      "trigger": "One or more customers claim pending payouts",
+      "behavior": "Payout appears awaiting approval; merchant checks destination/amount/fee treatment, approves and sends, signs/broadcasts, and monitors in-progress until confirmed/completed; payouts can be batched.",
+      "preconditions": [
+        "Authorized payout user; funds and signing method available"
+      ],
+      "qualifiers": [
+        "Signing workflow depends on wallet configuration; completion follows network confirmation."
+      ],
+      "recovery_edge_cases": [
+        "Incorrect destination or amount must be caught before signing; pending claims may be cancelled; confirmation delay leaves payout in progress."
+      ],
+      "source_ids": [
+        "BTM-S007",
+        "BTM-S008"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test review burden and payout mistakes; require explicit destination/amount confirmation and provide queue age, fee and stuck transaction guidance.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Merchant-controlled signing provides a direct approval step for Bitcoin refunds; test integration with watch-only/external signer workflows so approval does not require server-held hot keys.",
+      "bitcoin_tradeoffs": "The review/signing step protects funds but adds operational work; network fees, confirmation delay and transaction irreversibility require clear expectations for customer and staff.",
+      "acceptance_test": "Submit two test claims, verify awaiting approval, inspect each amount/destination, cancel one, approve/sign/broadcast the other and confirm claimant sees in-progress then completed after Bitcoin confirmation."
+    },
+    {
+      "id": "BTM-C018",
+      "canonical_key": "reporting.store.reports",
+      "category": "reporting",
+      "capability": "BTCPay provides store reports with tabular data and aggregates, including on-chain wallet transactions, products sold and accounted payments.",
+      "merchant_outcome": "Provides a review and export surface for payment and product sales activity.",
+      "actor": "Store user",
+      "trigger": "Open Reporting and select an available report",
+      "behavior": "Report surfaces include rows representing on-chain wallet transactions, sold-product quantities and accounted invoice payments; store data can be visualized/exported as CSV.",
+      "preconditions": [
+        "Report permission and reportable store activity"
+      ],
+      "qualifiers": [
+        "Report names and availability may depend on instance version/features; tax treatment or comprehensive accounting reconciliation is not promised."
+      ],
+      "recovery_edge_cases": [
+        "If expected records are missing, compare report criteria with source invoice/wallet data; inspected guide does not document a universal sync/reconciliation mechanism."
+      ],
+      "source_ids": [
+        "BTM-S009",
+        "BTM-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test daily closeout from paid invoices to wallet transactions and sales quantities; show provenance and missing-data indicators and measure unreconciled rows.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "A wallet transaction report can support direct verification of Bitcoin receipts; test a report that preserves invoice-to-transaction links, confirmation status, fee and valuation basis.",
+      "bitcoin_tradeoffs": "Wallet transaction history and invoice payments answer different questions; on-chain receipts do not automatically provide fiat valuation or tax categorization.",
+      "acceptance_test": "Run each listed report for a controlled store with known invoice and wallet transactions, export CSV and reconcile each row and aggregate against source details; document any version-dependent reports as unknown."
+    },
+    {
+      "id": "BTM-C019",
+      "canonical_key": "checkout.pos.receipt_view_print",
+      "category": "hardware",
+      "capability": "The POS invoice flow can expose a customer receipt view; a documented event-device setup demonstrates printing it through a selected receipt printer.",
+      "merchant_outcome": "Lets staff provide a sale record at the point of sale.",
+      "actor": "Cashier",
+      "trigger": "After POS payment, cashier chooses View receipt and print action",
+      "behavior": "The receipt is viewable from the POS flow; an example Android device workflow selects a POS printer and prints the receipt.",
+      "preconditions": [
+        "POS app and receipt-capable device setup; compatible printer selected/configured for the example workflow"
+      ],
+      "qualifiers": [
+        "Printer/device pairing in the guide is an example and not a general supported-device guarantee. Receipt content/layout/customization was not established in the inspected sections."
+      ],
+      "recovery_edge_cases": [
+        "Printer discovery, paper-out, reprint and offline behavior are not documented in inspected sources and remain unknown."
+      ],
+      "source_ids": [
+        "BTM-S011",
+        "BTM-S002"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test receipt findability, print success, reprint and sale-to-invoice matching across common browser devices/printers; measure checkout-to-receipt time and failed print rate.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "A Bitcoin POS receipt can make payment status and transaction reference clear to buyer and cashier; test whether it distinguishes invoice settlement from broadcast and does not expose unnecessary customer wallet data.",
+      "bitcoin_tradeoffs": "A transaction reference can aid verification but may reveal payment linkage; receipt printing also depends on external hardware and network access.",
+      "acceptance_test": "On documented Android/POS printer setup, pay a small Bitcoin POS invoice, open receipt, print and match receipt amount/order to settled invoice; repeat with disconnected printer and verify failure is visible and reprint path documented or marked unknown."
+    },
+    {
+      "id": "BTM-C020",
+      "canonical_key": "checkout.pos.static_catalog",
+      "category": "catalog",
+      "capability": "POS Static view presents a set of configured items for sale.",
+      "merchant_outcome": "Lets customer select a pre-priced item from the app.",
+      "actor": "Cashier/customer",
+      "trigger": "Open a POS app configured to Static view",
+      "behavior": "The app displays configured products as selectable items; owner can set item title, price, image and description.",
+      "preconditions": [
+        "POS app available and attached to store"
+      ],
+      "qualifiers": [
+        "Browser web app; static view definition is documented; item option detail depends on app configuration."
+      ],
+      "recovery_edge_cases": [
+        "Invalid or stale item price behavior not documented."
+      ],
+      "source_ids": [
+        "BTM-S013"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test item discovery and price visibility on a small screen; reduce wrong-item selection.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Test if displayed Bitcoin-denominated price and fiat equivalent are understandable before invoice creation.",
+      "bitcoin_tradeoffs": "Direct wallet payment removes a card-terminal intermediary but requires a supported web device and connectivity.",
+      "acceptance_test": "Configure fixed-price item in Static view; select it, pay an on-chain invoice and verify amount/item description on invoice details."
+    },
+    {
+      "id": "BTM-C021",
+      "canonical_key": "checkout.pos.cart_view",
+      "category": "checkout",
+      "capability": "POS Cart view lets a user select items into a cart before checkout.",
+      "merchant_outcome": "Combines multiple products into a single customer payment.",
+      "actor": "Cashier/customer",
+      "trigger": "Open POS app configured to Cart",
+      "behavior": "Items can be selected into a cart for checkout; cart context is associated with the generated invoice.",
+      "preconditions": [
+        "POS app and configured products"
+      ],
+      "qualifiers": [
+        "Docs describe cart view; inventory mutation and cart editing edge cases not specified in inspected guide."
+      ],
+      "recovery_edge_cases": [
+        "Test duplicate items, quantity edits and cart abandonment; documentation does not specify all rules."
+      ],
+      "source_ids": [
+        "BTM-S013",
+        "BTM-S015"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure number of taps and cart total errors for multi-item sale; show item lines and subtotal before payment.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Test whether one Bitcoin invoice preserves each cart line and final total for staff reconciliation.",
+      "bitcoin_tradeoffs": "A single Bitcoin payment settles the cart total; individual item fulfillment and stock handling remain merchant responsibilities.",
+      "acceptance_test": "Add two products; verify cart line items and displayed total match invoice metadata and receipt example after payment."
+    },
+    {
+      "id": "BTM-C022",
+      "canonical_key": "checkout.pos.keypad_view",
+      "category": "checkout",
+      "capability": "POS Light view presents a keypad for entering a payment amount.",
+      "merchant_outcome": "Supports quick payment for an unlisted amount.",
+      "actor": "Cashier",
+      "trigger": "Open POS configured to Light view",
+      "behavior": "The app presents a keypad-only view for quick payments and produces an invoice with entered amount context.",
+      "preconditions": [
+        "POS app available and configured"
+      ],
+      "qualifiers": [
+        "View is called Light in app guide and configuration enum; exact keypad controls vary by version."
+      ],
+      "recovery_edge_cases": [
+        "Correction/backspace and accidental amount recovery not established in inspected docs."
+      ],
+      "source_ids": [
+        "BTM-S013",
+        "BTM-S015",
+        "BTM-S016"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test keypad entry, correction and amount confirmation under counter conditions; reduce erroneous charges.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Test whether a cashier can enter and confirm BTC or fiat-denominated amount before directing customer to merchant wallet payment.",
+      "bitcoin_tradeoffs": "Bitcoin payments cannot be edited after broadcast; clear pre-payment total and cancellation path are important.",
+      "acceptance_test": "Enter a known amount, inspect checkout before payment, pay it and verify invoice amount equals entered amount; separately test correction affordance where exposed."
+    },
+    {
+      "id": "BTM-C023",
+      "canonical_key": "catalog.pos.item_attributes",
+      "category": "catalog",
+      "capability": "POS items can be configured with title, price, description and image.",
+      "merchant_outcome": "Provides a recognizable small product catalog at checkout.",
+      "actor": "Store owner",
+      "trigger": "Create/edit POS item",
+      "behavior": "Merchant adds own items with price, photo and description.",
+      "preconditions": [
+        "POS app available"
+      ],
+      "qualifiers": [
+        "No documented variants/options, SKU management or bulk import in inspected Apps guide."
+      ],
+      "recovery_edge_cases": [
+        "If item image/description fails to load, fallback is not specified."
+      ],
+      "source_ids": [
+        "BTM-S013"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test catalog creation from a short product list and improve preview of customer-facing item details.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Test whether item identity remains attached to Bitcoin invoice/receipt for fulfillment and reconciliation.",
+      "bitcoin_tradeoffs": "On-chain payment carries no native product semantics; merchant context must be preserved in invoice metadata.",
+      "acceptance_test": "Configure two items with distinct descriptions and prices; create invoices from each and verify right item context appears in details/report."
+    },
+    {
+      "id": "BTM-C024",
+      "canonical_key": "inventory.pos.item_limit",
+      "category": "inventory",
+      "capability": "POS item configuration can include an inventory quantity field.",
+      "merchant_outcome": "May let merchant represent limited stock in an app catalog.",
+      "actor": "Store owner",
+      "trigger": "Configure a POS item inventory value",
+      "behavior": "Public POS config schema shows an optional inventory quantity for items.",
+      "preconditions": [
+        "POS feature and configuration support"
+      ],
+      "qualifiers": [
+        "This is documented in API schema/example; semantics for decrement, out-of-stock behavior, variants, restocking and concurrency are not established by inspected user docs."
+      ],
+      "recovery_edge_cases": [
+        "Do not assume stock is decremented or sale blocked; validate per installed instance."
+      ],
+      "source_ids": [
+        "BTM-S016"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test two simultaneous purchases against a one-unit item and show stock reservation/result clearly if supported.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Test whether Bitcoin invoice settlement and inventory quantity remain synchronized without assuming an external inventory service.",
+      "bitcoin_tradeoffs": "A payment may arrive after availability changed; without documented reservation semantics, oversell risk remains unresolved.",
+      "acceptance_test": "Set inventory to 1, initiate two purchases concurrently and record whether one is blocked, reserved or both accepted; classify undocumented behavior as unknown."
+    },
+    {
+      "id": "BTM-C025",
+      "canonical_key": "checkout.pos.custom_amount",
+      "category": "checkout",
+      "capability": "POS configuration can expose a customer-entered custom amount.",
+      "merchant_outcome": "Allows donations or variable-price charges.",
+      "actor": "Store owner/cashier/customer",
+      "trigger": "Configure custom amount in POS and open checkout",
+      "behavior": "POS settings include a custom amount option; Apps FAQ documents using POS to embed a custom amount button because Pay Button itself does not support it.",
+      "preconditions": [
+        "POS app or POS-linked button configured"
+      ],
+      "qualifiers": [
+        "Feature is POS-level, not native Pay Button behavior; custom amount bounds/validation are not stated in inspected docs."
+      ],
+      "recovery_edge_cases": [
+        "If invalid or zero amount submitted, handling is not specified."
+      ],
+      "source_ids": [
+        "BTM-S014",
+        "BTM-S016"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test input bounds and confirmation, and expose custom amount clearly before invoice creation.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Test a customer-entered Bitcoin donation amount that is confirmed before invoice and sent to configured wallet.",
+      "bitcoin_tradeoffs": "A custom amount can be mistyped; Bitcoin transfers are not reversible through the payment protocol.",
+      "acceptance_test": "Enable custom amount, embed POS route if desired, enter a known amount and confirm invoice total; compare native Pay Button behavior to its documented limitation."
+    },
+    {
+      "id": "BTM-C026",
+      "canonical_key": "checkout.pos.tip_percentage",
+      "category": "checkout",
+      "capability": "POS configuration can enable tips and define custom percentage presets.",
+      "merchant_outcome": "Lets a customer choose a configured gratuity before payment.",
+      "actor": "Store owner/customer",
+      "trigger": "Enable POS tips and configure tip presets",
+      "behavior": "POS schema includes enabled-tip flag, tip prompt text and custom percentage options; cart example records tip and final total in invoice metadata/receipt data.",
+      "preconditions": [
+        "POS version supporting these settings"
+      ],
+      "qualifiers": [
+        "Detailed UI sequence, default/no-tip selection, tax handling and refund allocation not defined by inspected POS user guide."
+      ],
+      "recovery_edge_cases": [
+        "Confirm payment total and receipt line before invoice creation; taxOnTip is metadata, not automatic tax calculation."
+      ],
+      "source_ids": [
+        "BTM-S013",
+        "BTM-S015",
+        "BTM-S016"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure tip opt-in errors and cashier confusion; let customer see base, tip and total separately before paying.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Test Bitcoin payment of subtotal plus customer-selected tip with clear consent and immutable final total.",
+      "bitcoin_tradeoffs": "A mistaken tip cannot be reversed by Bitcoin; refund handling is a separate merchant-initiated payout.",
+      "acceptance_test": "Configure tip prompt with presets, test no-tip and each preset; confirm checkout total, invoice metadata and receipt line values agree."
+    },
+    {
+      "id": "BTM-C027",
+      "canonical_key": "payments.invoice.expiration",
+      "category": "payments",
+      "capability": "Store settings let merchant define invoice expiry when full payment is not received.",
+      "merchant_outcome": "Limits how long a quote remains payable at its locked exchange rate.",
+      "actor": "Store owner configures; customer pays",
+      "trigger": "Invoice remains unpaid past configured timer",
+      "behavior": "An unpaid invoice expires after configured interval; payment is assessed against invoice expiration and monitoring policy.",
+      "preconditions": [
+        "Store settings permission"
+      ],
+      "qualifiers": [
+        "Default timer may vary by instance/configuration; exact values in legacy FAQ should not be assumed current."
+      ],
+      "recovery_edge_cases": [
+        "Payment after expiry must be reviewed as late; transaction monitoring may continue."
+      ],
+      "source_ids": [
+        "BTM-S002",
+        "BTM-S003"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test whether countdown, expiry message and outstanding obligation are clear to customers; expose renewed invoice action.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Test Bitcoin amount/rate lock remains understandable and customer can request a fresh invoice after expiration.",
+      "bitcoin_tradeoffs": "Expiry limits rate exposure but can create customer friction; after expiry merchants need to assess late payment and possible refund.",
+      "acceptance_test": "Set short test expiry; verify unpaid invoice changes state at expected time and late transaction is surfaced for review."
+    },
+    {
+      "id": "BTM-C028",
+      "canonical_key": "payments.invoice.underpayment_tolerance",
+      "category": "payments",
+      "capability": "Store wallet settings can define a percentage underpayment threshold for treating a short payment as fully paid.",
+      "merchant_outcome": "Can reduce manual review when payment services deduct a small amount.",
+      "actor": "Store owner configures",
+      "trigger": "Customer pays less than requested invoice amount",
+      "behavior": "Configured percentage tolerance controls whether a small shortfall is accepted; otherwise invoice remains partially paid.",
+      "preconditions": [
+        "Ability to adjust wallet/store setting"
+      ],
+      "qualifiers": [
+        "Policy is optional and tolerance is a merchant setting; never infer the same threshold across stores."
+      ],
+      "recovery_edge_cases": [
+        "Too high a threshold can accept material underpayments; too low can leave fee-deducted payments unresolved."
+      ],
+      "source_ids": [
+        "BTM-S003",
+        "BTM-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Make threshold and financial impact visible in setup; test false acceptance and avoid configuring silently.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Test Bitcoin payment amount against exact invoice target and configured tolerance; show BTC shortfall and fiat equivalent to merchant.",
+      "bitcoin_tradeoffs": "Exchanges may deduct withdrawal fees causing short payment; tolerance improves convenience while giving up exact-price collection.",
+      "acceptance_test": "Send payments just below and above configured tolerance and confirm resulting invoice state and amount due match documented policy."
+    },
+    {
+      "id": "BTM-C029",
+      "canonical_key": "payments.invoice.partial_exception",
+      "category": "payments",
+      "capability": "Invoice shows a Paid partial exception when detected payments total below requested amount.",
+      "merchant_outcome": "Alerts staff that the sale is not fully covered.",
+      "actor": "Merchant/store user",
+      "trigger": "Payment arrives below required amount",
+      "behavior": "Invoice retains a partial exception and amount evidence; staff can review and decide whether to collect remainder, fulfill or refund.",
+      "preconditions": [
+        "Invoice received partial payment"
+      ],
+      "qualifiers": [
+        "Partial may result from wrong amount or payer service fee."
+      ],
+      "recovery_edge_cases": [
+        "Archived invoices continue monitoring; partial state does not itself decide fulfillment."
+      ],
+      "source_ids": [
+        "BTM-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test exception queue presents short amount and clear collect/review actions, reducing mistaken fulfillment.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Test tracking separate Bitcoin transactions against remaining invoice balance and ensure staff see exact BTC/fiat shortfall.",
+      "bitcoin_tradeoffs": "Repeated partial transactions add reconciliation work and rate changes may affect value; do not assume one transaction per invoice.",
+      "acceptance_test": "Pay 60% of invoice, verify Paid partial is searchable and remaining amount visible; pay remainder and confirm state progression."
+    },
+    {
+      "id": "BTM-C030",
+      "canonical_key": "payments.invoice.late_exception",
+      "category": "payments",
+      "capability": "Invoice marks a full payment received after expiry as Paid late while base status remains expired until action.",
+      "merchant_outcome": "Flags a payment that may have a changed exchange-rate or fulfillment implication.",
+      "actor": "Merchant/store user",
+      "trigger": "Full payment is received after invoice expiration",
+      "behavior": "Invoice details preserve expired base state plus paid-late exception for merchant review.",
+      "preconditions": [
+        "Expired invoice receives subsequent full payment"
+      ],
+      "qualifiers": [
+        "Merchant decision needed; no automatic fulfillment implied."
+      ],
+      "recovery_edge_cases": [
+        "Verify amount, timing and transaction before accepting/settling; refund may be needed under business policy."
+      ],
+      "source_ids": [
+        "BTM-S002",
+        "BTM-S003"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Measure time to resolve late payments and show payment timestamp, invoice rate and current state together.",
+      "bitcoin_classification": "tradeoff",
+      "bitcoin_hypothesis": "Test Bitcoin transaction arriving after invoice timer with clear original request and payment evidence before fulfillment.",
+      "bitcoin_tradeoffs": "Bitcoin settlement can arrive after a volatile quote expires; accepting it may create rate risk while rejecting it creates refund effort.",
+      "acceptance_test": "Create short-lived invoice, let it expire, pay afterward; verify expired + late indicator and no automatic settled fulfillment status."
+    },
+    {
+      "id": "BTM-C031",
+      "canonical_key": "payments.invoice.overpayment_exception",
+      "category": "payments",
+      "capability": "Invoice indicates an overpayment exception when detected payments exceed requested amount.",
+      "merchant_outcome": "Helps merchant identify excess value and decide whether to refund or reconcile it.",
+      "actor": "Merchant/store user",
+      "trigger": "Total detected payments exceeds invoice target",
+      "behavior": "Invoice details expose overpaid exception and payment activity for review.",
+      "preconditions": [
+        "Invoice receives more than requested"
+      ],
+      "qualifiers": [
+        "Exact excess-handling policy is merchant-defined; docs do not promise automatic change/refund."
+      ],
+      "recovery_edge_cases": [
+        "Review payment transactions before fulfillment or payout; retain report evidence."
+      ],
+      "source_ids": [
+        "BTM-S002"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test queue displays excess amount and suggested policy choices without silently retaining or refunding it.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Test direct Bitcoin transactions totaling more than target and expose excess amount per transaction.",
+      "bitcoin_tradeoffs": "Bitcoin cannot automatically return excess to payer without destination and payout approval; refund adds fees and operational steps.",
+      "acceptance_test": "Pay target plus 10%; verify overpaid exception and excess amount in details/report; confirm no automatic refund is initiated."
+    },
+    {
+      "id": "BTM-C032",
+      "canonical_key": "checkout.receipt.metadata",
+      "category": "checkout",
+      "capability": "Invoice metadata can populate customer-facing receipt data, including POS cart and tip summary examples.",
+      "merchant_outcome": "Gives customer a sale record linked to invoice.",
+      "actor": "Customer/store user",
+      "trigger": "Open invoice receipt after checkout",
+      "behavior": "receiptData is displayed on customer receipt and invoice detail; POS cart example includes product lines, quantities and tip amount.",
+      "preconditions": [
+        "Invoice created with receipt metadata"
+      ],
+      "qualifiers": [
+        "Developer metadata documentation; no general receipt printer, layout or content completeness guarantee."
+      ],
+      "recovery_edge_cases": [
+        "Avoid including unnecessary personal data in public receipt metadata."
+      ],
+      "source_ids": [
+        "BTM-S002",
+        "BTM-S015"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test whether receipt answers what was bought, total paid and invoice status while minimizing personal data.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Test receipt connects Bitcoin payment proof to item details without exposing buyer wallet identity.",
+      "bitcoin_tradeoffs": "Transaction IDs can create linkability; receipt sharing should not expose more purchase or customer context than needed.",
+      "acceptance_test": "Create POS cart with two items and a tip, pay, open public receipt, verify lines/total align with invoice and metadata."
+    },
+    {
+      "id": "BTM-C033",
+      "canonical_key": "payout.bitcoin.psbt_sign_broadcast",
+      "category": "cash_closeout",
+      "capability": "Bitcoin wallet payouts can be signed via supported wallet methods including PSBT, then broadcast and tracked.",
+      "merchant_outcome": "Allows merchant approval and key control before outgoing Bitcoin transaction.",
+      "actor": "Authorized wallet/payout operator",
+      "trigger": "Approve a payout requiring Bitcoin spend",
+      "behavior": "BTCPay constructs unsigned PSBT, exports for compatible wallet signer, imports signed transaction and broadcasts; on-chain status is tracked.",
+      "preconditions": [
+        "Wallet supports Bitcoin spend; signer permission and compatible hardware/software wallet"
+      ],
+      "qualifiers": [
+        "External signer support depends on configured wallet; do not expose seed/private key to server."
+      ],
+      "recovery_edge_cases": [
+        "Unsigned or rejected PSBT can be reviewed; broadcast transaction may remain unconfirmed or fail policy."
+      ],
+      "source_ids": [
+        "BTM-S017",
+        "BTM-S008"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test hardware/PSBT path with merchant and staff, show transaction fee and destination before signature, and shorten payout review time.",
+      "bitcoin_classification": "direct_benefit_candidate",
+      "bitcoin_hypothesis": "Test that merchant can keep Bitcoin private keys outside server while reviewing and authorizing a refund payout.",
+      "bitcoin_tradeoffs": "External signing improves key separation but adds device steps and staff coordination; broadcast is difficult to reverse.",
+      "acceptance_test": "Create test payout, export PSBT, sign with compatible offline wallet, import and broadcast; verify exact destination/amount and transaction status in payout view."
+    },
+    {
+      "id": "BTM-C034",
+      "canonical_key": "pricing_tax.invoice_metadata",
+      "category": "pricing_tax",
+      "capability": "Invoice metadata supports taxIncluded and taxOnTip values for display/data association.",
+      "merchant_outcome": "Can preserve tax amounts supplied by a checkout integration in invoice data.",
+      "actor": "Integrator/merchant",
+      "trigger": "Invoice created with tax metadata",
+      "behavior": "Metadata schema documents optional tax amount and tax attributable to a tip, constrained/rounded at invoice creation.",
+      "preconditions": [
+        "Integration or app supplies metadata"
+      ],
+      "qualifiers": [
+        "Metadata field support is not tax computation, jurisdiction rules or filing compliance."
+      ],
+      "recovery_edge_cases": [
+        "Incorrect tax metadata may misstate receipt/report; validate against merchant accounting system."
+      ],
+      "source_ids": [
+        "BTM-S015"
+      ],
+      "documented_status": "documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test tax data provenance and receipt/report presentation while keeping tax computation policy explicit.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Test a Bitcoin POS transaction with separately recorded sale/tip tax values and clear final amount.",
+      "bitcoin_tradeoffs": "Bitcoin payment does not calculate tax obligations; merchant remains responsible for correct tax rules and records.",
+      "acceptance_test": "Create test invoice with taxIncluded and taxOnTip metadata; confirm stored/visible values are rounded as documented and do not assume system computed them."
+    },
+    {
+      "id": "BTM-C035",
+      "canonical_key": "staff_permissions.store_role_assign",
+      "category": "staff_permissions",
+      "capability": "A store user role can be updated through the API to a documented default role: Owner, Manager, Employee or Guest.",
+      "merchant_outcome": "Allows a store administrator to assign a broad user role to another account.",
+      "actor": "Authorized store settings user",
+      "trigger": "Update store user role",
+      "behavior": "API operation changes a selected user role; role names are documented but detailed permission matrix is not in the inspected section.",
+      "preconditions": [
+        "Access to store role update API and required permission"
+      ],
+      "qualifiers": [
+        "API-facing behavior; this is not evidence that the same operation is exposed in a merchant UI or that each role has a specific action matrix."
+      ],
+      "recovery_edge_cases": [
+        "Wrong role selection can change access; exact rollback and audit trail behavior unknown from inspected docs."
+      ],
+      "source_ids": [
+        "BTM-S021"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test role setup with cashier and owner accounts; expose an understandable action matrix and least-privilege defaults.",
+      "bitcoin_classification": "neutral",
+      "bitcoin_hypothesis": "Bitcoin merchant access should let cashier create/inspect sale without unrestricted wallet spending; verify role separation for receiving versus signing.",
+      "bitcoin_tradeoffs": "A direct Bitcoin wallet needs key controls; overly broad store access can expose payment and payout functions.",
+      "acceptance_test": "Assign each documented role to test users, attempt invoice viewing/creation and payout signing, then document actual role matrix from instance without assuming undocumented rights."
+    },
+    {
+      "id": "BTM-C036",
+      "canonical_key": "multilocation.store_partition",
+      "category": "multilocation",
+      "capability": "A merchant can create additional stores under an account, each with its own store configuration context.",
+      "merchant_outcome": "Can separate payment configuration across distinct business units or projects.",
+      "actor": "Account holder",
+      "trigger": "Create another store from store selector",
+      "behavior": "User guide documents creating another store; it does not establish multi-location inventory sync, consolidated reporting or location-level staff controls.",
+      "preconditions": [
+        "Account permitted to create stores"
+      ],
+      "qualifiers": [
+        "Store separation is documented; mapping stores to physical locations and cross-store operations are not documented in inspected user guide."
+      ],
+      "recovery_edge_cases": [
+        "No consolidated closeout or inventory recovery behavior established; reconcile stores separately unless verified."
+      ],
+      "source_ids": [
+        "BTM-S001"
+      ],
+      "documented_status": "partially_documented",
+      "evidence_access": "documented_only",
+      "improvement_hypothesis": "Test if a multi-site merchant can switch stores without cashier confusion and produce per-location closeout; identify needs for consolidated view.",
+      "bitcoin_classification": "possible_redesign",
+      "bitcoin_hypothesis": "Test whether each location can receive to a Bitcoin wallet it controls while an owner can review receipts centrally.",
+      "bitcoin_tradeoffs": "Separate wallets/stores increase operational separation but complicate accounting, liquidity and staff access.",
+      "acceptance_test": "Create two stores with distinct labels and payment settings; confirm invoices remain scoped to selected store. Treat consolidated reporting and inventory synchronization as unknown until separately documented."
+    }
+  ],
+  "limitations": [
+    "Evidence is public documentation only, not observed behavior on a live BTCPay instance; documentation is not compatibility testing.",
+    "Public guide pages were inspected for assigned merchant branches, not every linked page or every branch in the BTCPay documentation corpus; coverage explicitly records exclusions and unresolved areas.",
+    "The user-facing docs make feature availability dependent on instance administrator, enabled apps/plugins, permissions, wallet configuration, SMTP, version and device. No specific hosting plan or edition was assumed.",
+    "POS tips/custom amount behavior, form validation/retention, receipt layout and hardware matrix, offline acceptance, staff/multilocation/inventory/tax closeout, and some failure recovery details remain unknown where the inspected docs do not specify them.",
+    "Bitcoin on-chain and Lightning are different payment rails. This bundle treats on-chain Bitcoin as the primary scope, notes Lightning only where invoice settlement documentation requires it, and does not merge optional altcoin plugins or third-party Lightning services into core Bitcoin capability claims.",
+    "No claim establishes that any feature is absent when documentation is incomplete. Improvement hypotheses and acceptance tests are proposals for OpenBMT evaluation, not statements that an incumbent feature has been tested or that OpenBMT currently implements it."
+  ]
+}
