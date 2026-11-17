@@ -145,7 +145,30 @@ not a production feature.
    test-card path for success, then a fresh sale and its decline path to
    exercise a decline. Confirm each payment in the Sandbox Dashboard.
 
-## Validation on 16 November 2026
+## Integrated checkout milestone on 16 November 2026
+
+This milestone was recorded on 16 November in America/New_York (17 November
+UTC). The Square Sandbox path was exercised from the native OpenBMT cart using
+Mobile Payments SDK 2.7.0 and its virtual reader. One latte ($5.50) and one bagel
+($4.50) produced a single $10.00 sale in the native ledger. The completed
+virtual-card payment was independently confirmed by Square's read-only
+Payments API; the Square payment ID and attempt reference matched the native
+ledger.
+
+The app was then force-stopped after payment. On relaunch, the native ledger
+bytes were identical, and Sales showed the same itemized sale with a paid card
+receipt. This verifies the completed-payment recovery case for this Sandbox
+flow. It does not demonstrate recovery from termination during a pending SDK
+request, when status is still unknown.
+
+The build used the shared Regtest-only native libraries. Both Android ABIs,
+the APK and SDK module builds, and native method-signature alignment passed.
+The virtual reader is not physical hardware. This remains a Sandbox integration
+proof, not production payment processing, a Square POS replacement, or evidence
+of catalog, inventory, peripheral, iPad, onboarding, or multi-merchant support.
+
+### Earlier exploratory Sandbox runs (16 November 2026)
+
 
 The coordinator built this module with MPS 2.7.0, AGP 9.1.1 and Gradle 9.3.1,
 then ran it on the API 35 Android emulator. The private Square application

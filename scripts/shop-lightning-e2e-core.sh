@@ -16,8 +16,9 @@
 #      `openbmt-lightning-node`, made from the BIP-85 text's master key).
 #   3. Checks, one `PASS` line each:
 #        - the node id is the one the BIP-85 child gives (SL-10)
-#        - the first payment opens a channel at the fee shown (SL-28, SL-29)
-#          and the channel is unannounced (SL-31)
+#        - each fresh JIT channel's first payment fails back without a
+#          preimage; after that exact provider funding confirms, retrying the
+#          same invoice pays at the fee shown (SL-27 to SL-31)
 #        - the second payment uses the same channel
 #        - an amount above the room is not offered as an invoice, and one
 #          whose fee is above the owner's limit or above the provider's
@@ -55,11 +56,10 @@
 #          the funding confirms, the room comes back to about the cap, a
 #          payment then goes through a channel with a confirmed funding, and
 #          the fee counts in the fees paid (SL-28, SL-29, SL-35, SL-40, SL-45)
-#        - a payment claimed through a channel whose funding Core is told never
-#          to mine (`prioritisetransaction` with a large negative fee delta,
-#          so the funding stays in the mempool and out of every block): after
-#          144 blocks mined in one call the node reports the funding lost, it
-#          force-closes that channel, and no payment can use it (SL-27, SL-40)
+#        - an unconfirmed JIT payment whose funding Core is told never to mine
+#          is failed without releasing a preimage or recording PaymentClaimed;
+#          after Core mines that exact funding, retrying the invoice succeeds
+#          (SL-27)
 #   The script ends `ALL PASS` only if every check printed PASS.
 #
 #   With SHOP_CHAIN=filters the run is another one, on the same network: the
@@ -67,8 +67,9 @@
 #   peer layer (SL-26, SL-27), not from RPC (Core is started to serve filters
 #   and given no RPC login by the node). It checks:
 #        - the node reaches Core's tip with no RPC
-#        - a first payment opens a channel, the funding transaction is seen
-#          confirmed through a filter-matched block, a second payment uses it
+#        - an unconfirmed first JIT payment is failed without a preimage; after
+#          its funding is seen confirmed through a filter-matched block, retry
+#          of the same invoice succeeds and a second payment uses the channel
 #        - a reorganization that takes the funding transaction out of the best
 #          chain: the node unconfirms it (the library then closes the ready
 #          channel, as it does for any such reorganization), the closing
@@ -93,6 +94,7 @@
 #   DRILL_DIR      scratch directory (default a new one under ~/.cache/openbmt)
 #   DRILL_KEEP=1   keep the scratch directory afterwards
 #   SHOP_BIN       the `shop_regtest` example binary
+#   MONITOR_AUDIT_BIN the test-only `shop_monitor_audit` example binary
 #   DEVICE_BIN     the `shop-lightning-device` binary
 #   LSP_BIN        the `shop-lightning-lsp` binary
 #   LSPS1          `1` turns LSPS1 on at the provider (`lsps1=on`) and runs the
@@ -232,11 +234,17 @@ guarded() {
   if [ -x "$guard" ]; then "$guard" env CARGO_BUILD_JOBS=2 "$@"; else env CARGO_BUILD_JOBS=2 "$@"; fi
 }
 if [ -z "${SHOP_BIN:-}" ] || [ -z "${DEVICE_BIN:-}" ]; then
-  say "Build the node's example and the second device"
+  say "Build the node examples and the second device"
   guarded CARGO_TARGET_DIR="$TARGET" cargo build --quiet --locked --manifest-path "$ROOT/Cargo.toml" \
-    -p openbmt-lightning-node --features tcp-device --bins --example shop_regtest || die "the build of the node failed"
+    -p openbmt-lightning-node --features tcp-device --bins --example shop_regtest --example shop_monitor_audit || die "the build of the node failed"
   SHOP_BIN=${SHOP_BIN:-$TARGET/debug/examples/shop_regtest}
   DEVICE_BIN=${DEVICE_BIN:-$TARGET/debug/shop-lightning-device}
+fi
+MONITOR_AUDIT_BIN=${MONITOR_AUDIT_BIN:-$TARGET/debug/examples/shop_monitor_audit}
+if [ ! -x "$MONITOR_AUDIT_BIN" ]; then
+  say "Build the test-only monitor audit example"
+  guarded CARGO_TARGET_DIR="$TARGET" cargo build --quiet --locked --manifest-path "$ROOT/Cargo.toml" \
+    -p openbmt-lightning-node --example shop_monitor_audit || die "the monitor audit build failed"
 fi
 if [ -z "${LSP_BIN:-}" ]; then
   say "Build the test provider"
@@ -244,7 +252,7 @@ if [ -z "${LSP_BIN:-}" ]; then
     --manifest-path "$ROOT/tools/shop-lightning-lsp/Cargo.toml" || die "the build of the provider failed"
   LSP_BIN=$LSP_TARGET/debug/shop-lightning-lsp
 fi
-for bin in SHOP_BIN DEVICE_BIN LSP_BIN; do
+for bin in SHOP_BIN DEVICE_BIN LSP_BIN MONITOR_AUDIT_BIN; do
   [ -x "${!bin}" ] || die "no binary at ${!bin} ($bin)"
 done
 
@@ -378,7 +386,67 @@ pay() { # invoice [timeout]; returns lncli's status
     --rpcserver="127.0.0.1:$LND_RPC" --no-macaroons payinvoice --pay_req="$1" --force --timeout="${2:-60s}" >"$BASE/pay.out" 2>&1
 }
 pay_status() { # hash
-  lnc listpayments --include_incomplete | jq -r --arg h "$1" '.payments[]|select(.payment_hash==$h)|.status' | head -1
+  lnc listpayments --include_incomplete | jq -r --arg h "$1" '.payments[]|select(.payment_hash==$h)|.status' | tail -1
+}
+payment_preimage_absent() { # hash -> evidence file; true only for empty or nonmatching all-zero default
+  local hash=$1 payment_json raw candidate_hash classification absent=0
+  payment_json=$(lnc listpayments --include_incomplete | jq -c --arg h "$hash" '[.payments[]|select(.payment_hash==$h)]|last // {}')
+  raw=$(jq -r '.payment_preimage // empty' <<<"$payment_json")
+  candidate_hash=
+  if [[ "$raw" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    candidate_hash=$(python3 - "$raw" <<'PYHASH'
+import hashlib, sys
+print(hashlib.sha256(bytes.fromhex(sys.argv[1])).hexdigest())
+PYHASH
+)
+  fi
+  if [ -z "$raw" ]; then
+    classification=empty
+    absent=1
+  elif [[ "$raw" =~ ^0{64}$ ]] && [ "$candidate_hash" != "$hash" ]; then
+    classification=zero_default_nonmatching
+    absent=1
+  elif [[ "$raw" =~ ^0{64}$ ]]; then
+    classification=zero_default_hash_matches_invoice
+  else
+    classification=unexpected_nonzero
+  fi
+  printf 'payment_hash=%s\npayment_status=%s\npayment_preimage_raw=%s\npayment_preimage_class=%s\npayment_preimage_absent=%s\npayment_preimage_hash=%s\n' \
+    "$hash" "$(jq -r '.status // empty' <<<"$payment_json")" "${raw:-empty}" "$classification" "$absent" "${candidate_hash:-none}" >"$BASE/unconfirmed-payer-evidence-$hash.txt"
+  [ "$absent" = 1 ]
+}
+assert_unconfirmed_claim_refused() { # hash
+  local hash=$1 rc
+  if pay "$INVOICE" 90s; then rc=0; else rc=$?; fi
+  [ "$rc" -ne 0 ] || return 1
+  [ "$(pay_status "$hash")" = FAILED ] || return 1
+  ! grep -qi 'preimage:' "$BASE/pay.out" || return 1
+  payment_preimage_absent "$hash" || return 1
+  ctl "$SHOP_CTL" paid >"$BASE/unconfirmed-paid-$hash.txt"
+  ! grep -Fq "paid $hash " "$BASE/unconfirmed-paid-$hash.txt"
+}
+funding_txid_for_shop() {
+  ctl "$LSP_CTL" channels | grep "cp=$SHOP_ID" | sed -n 's/.*funding_txo=Some(OutPoint { txid: \([0-9a-f]*\), vout: [0-9]* }).*/\1/p' | head -1
+}
+await_funding_confirmation() { # exact txid, expected shop channel count
+  local txid=$1 expected_channels=$2 core_conf=0 conf some_count=0 positive_count=0
+  for _ in $(seq 1 30); do bcli getmempoolentry "$txid" >/dev/null 2>&1 && break; sleep 1; done
+  bcli getmempoolentry "$txid" >/dev/null 2>&1 || return 1
+  # Mine only after identifying the exact funding output of the just-failed JIT attempt.
+  mine 3
+  for _ in $(seq 1 120); do
+    core_conf=$(bcli getrawtransaction "$txid" true 2>/dev/null | jq -r '.confirmations // 0' || echo 0)
+    conf=$(ctl "$SHOP_CTL" confirmations || true)
+    some_count=$(grep -o 'Some(' <<<"$conf" | wc -l)
+    positive_count=$(grep -oE 'Some\([1-9][0-9]*\)' <<<"$conf" | wc -l)
+    if [ "$core_conf" -ge 1 ] && [ "$some_count" -eq "$expected_channels" ] \
+        && [ "$positive_count" -eq "$expected_channels" ] && ! grep -q None <<<"$conf"; then
+      FUNDING_CONFIRMATIONS=$conf
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
 }
 shop_invoice() { # sats -> sets INVOICE and the reply
   REPLY=$(ctl "$SHOP_CTL" invoice "$1")
@@ -436,13 +504,14 @@ if [ "$SHOP_CHAIN" = filters ]; then
   H1=$(hash_of "$INVOICE")
   [ -n "$INVOICE" ] && [ "$(field fee_msat "$REPLY")" = 1000000 ]
   check "SL-29: the provider's fee is named before the invoice is made" $?
-  pay "$INVOICE" 90s && await_paid "$H1" 30
-  check "SL-21, SL-28: the first payment opens a channel and is reported paid" $?
-  FUNDING=$(ctl "$LSP_CTL" channels | grep "cp=$SHOP_ID" | sed -n 's/.*funding_txo=Some(OutPoint { txid: \([0-9a-f]*\), vout: \([0-9]*\) }).*/\1:\2/p')
-  FTX=${FUNDING%%:*}
+  assert_unconfirmed_claim_refused "$H1"
+  check "SL-27: the first unconfirmed JIT attempt fails back with no preimage or paid record" $?
+  FTX=$(funding_txid_for_shop)
   [ -n "$FTX" ]
-  check "the channel's funding transaction is $FTX" $?
+  check "the provider channel's funding transaction is $FTX" $?
   for _ in $(seq 1 30); do bcli getmempoolentry "$FTX" >/dev/null 2>&1 && break; sleep 1; done
+  bcli getmempoolentry "$FTX" >/dev/null 2>&1
+  check "the funding-first provider published the channel transaction" $?
   mine 3
   CONF=
   for _ in $(seq 1 150); do
@@ -453,6 +522,10 @@ if [ "$SHOP_CHAIN" = filters ]; then
   note "confirmations: $CONF"
   case "$CONF" in *"Some("[1-9]*) true ;; *) false ;; esac
   check "SL-26, SL-27: the funding transaction is seen confirmed through a block the filter matched" $?
+  pay "$INVOICE" 90s && await_paid "$H1" 30
+  check "SL-21, SL-27: the same invoice succeeds after the funding reaches the shop's confirmation depth" $?
+  grep -q "paid $H1 amount_msat=49000000 .* funding=confirmed" "$PAID_LOG"
+  check "the paid event records the 49,000-sat receipt on confirmed funding" $?
   FBLOCK=$(bcli getrawtransaction "$FTX" true | jq -r .blockhash)
   FHEIGHT=$(bcli getblockheader "$FBLOCK" | jq -r .height)
   note "funding in block $FBLOCK at height $FHEIGHT"
@@ -511,8 +584,17 @@ if [ "$SHOP_CHAIN" = filters ]; then
   # A new payment opens a new channel through the provider.
   shop_invoice 50000
   H3=$(hash_of "$INVOICE")
+  assert_unconfirmed_claim_refused "$H3"
+  check "after reorganization, an unconfirmed new JIT channel cannot settle the first attempt" $?
+  FTX_NEW=$(funding_txid_for_shop)
+  [ -n "$FTX_NEW" ] && [ "$FTX_NEW" != "$FTX" ]
+  check "the provider opened a replacement channel with new funding $FTX_NEW" $?
+  for _ in $(seq 1 30); do bcli getmempoolentry "$FTX_NEW" >/dev/null 2>&1 && break; sleep 1; done
+  bcli getmempoolentry "$FTX_NEW" >/dev/null 2>&1
+  check "the replacement funding transaction is published" $?
+  mine 3
   pay "$INVOICE" 90s && await_paid "$H3" 30
-  check "a payment after the reorganization opens a new channel and is paid" $?
+  check "the same invoice succeeds after replacement funding confirms" $?
   mine 3
   TIP=$(bcli getblockcount)
   await_status "chain_ok=true height=$TIP .*channels=1 usable=1" 150
@@ -618,39 +700,40 @@ note "$(sed 's/^\(invoice [a-z0-9]\{20\}\)[^ ]*/\1.../' <<<"$REPLY")"
 H1=$(hash_of "$INVOICE")
 [ -n "$INVOICE" ] && [ "$(field fee_msat "$REPLY")" = 1000000 ]
 check "SL-29: the provider's fee is named before the invoice is made: 1,000 sat for 50,000 sat" $?
-pay "$INVOICE" 90s
-check "SL-28: the payment through the provider is paid" $?
-await_paid "$H1" 30
-check "SL-21: the sale is reported paid on the claim, 49,000 sat after the fee" $?
-grep -q "paid $H1 amount_msat=49000000" "$PAID_LOG"
-check "SL-29: what arrived is the amount less the fee shown" $?
+assert_unconfirmed_claim_refused "$H1"
+check "SL-27: the first unconfirmed JIT attempt fails back without a preimage or paid record" $?
+FUNDING_1=$(ctl "$LSP_CTL" channels | grep "cp=$SHOP_ID" | sed -n 's/.*funding_txo=Some(OutPoint { txid: \([0-9a-f]*\), vout: \([0-9]*\) }).*/\1:\2/p')
+FUNDING_TXID=${FUNDING_1%%:*}
+[ -n "$FUNDING_TXID" ] && [ "$(lsp_channels_with_shop)" = 1 ]
+check "SL-28: the first attempt opens one provider channel, with funding $FUNDING_1" $?
+for _ in $(seq 1 30); do bcli getmempoolentry "$FUNDING_TXID" >/dev/null 2>&1 && break; sleep 1; done
+bcli getmempoolentry "$FUNDING_TXID" >/dev/null 2>&1
+check "the funding-first provider published the channel transaction" $?
+mine 3
+CONFIRMED=0
+for _ in $(seq 1 120); do
+  CONF=$(ctl "$SHOP_CTL" confirmations)
+  case "$CONF" in *"Some("[1-9]*) CONFIRMED=1; break ;; esac
+  sleep 1
+done
+note "funding confirmations before retry: $CONF"
+[ "$CONFIRMED" = 1 ]
+check "SL-27: the node sees the funding at the shop's configured confirmation depth" $?
+pay "$INVOICE" 90s && await_paid "$H1" 30
+check "retry of the same invoice succeeds after funding confirmation" $?
+grep -q "paid $H1 amount_msat=49000000 .* funding=confirmed" "$PAID_LOG"
+check "SL-21, SL-29: one claim is recorded for 49,000 sat after the 1,000-sat fee" $?
 S=$(shop_status)
 [ "$(field usable "$S")" = 1 ] && [ "$(lsp_channels_with_shop)" = 1 ]
-check "SL-28: the first payment opened one channel from the provider" $?
+check "SL-28: the confirmed channel is usable" $?
 ctl "$LSP_CTL" channels | grep "cp=$SHOP_ID" | grep -q 'announced=false'
 check "SL-31: the channel is unannounced" $?
-FUNDING_1=$(ctl "$LSP_CTL" channels | grep "cp=$SHOP_ID" | sed -n 's/.*funding_txo=Some(OutPoint { txid: \([0-9a-f]*\), vout: \([0-9]*\) }).*/\1:\2/p')
 note "channel $FUNDING_1, room $(field room_msat "$S") msat"
 
-# SL-27: a payment claimed before its channel's funding confirmed names that
-# funding, and its first confirmation is told to the counter once.
-FUNDING_TXID=${FUNDING_1%%:*}
+# SL-27: the successful retry follows the funding confirmation gate.
 PAID_FUNDING=$(sed -n "s/^paid $H1 .* funding=//p" "$PAID_LOG" | head -1)
-[ "$PAID_FUNDING" = confirmed ] || [ "$PAID_FUNDING" = "$FUNDING_TXID" ]
-check "SL-27: the first payment's paid event says its channel funding was confirmed, or names it" $?
-if [ "$PAID_FUNDING" = "$FUNDING_TXID" ]; then
-  mine 1
-  for _ in $(seq 1 30); do
-    ctl "$SHOP_CTL" funding >>"$PAID_LOG"
-    grep -q "funding $FUNDING_TXID confirmed" "$PAID_LOG" && break
-    sleep 1
-  done
-  grep -q "funding $FUNDING_TXID confirmed" "$PAID_LOG"
-  check "SL-27: the funding's first confirmation is told to the counter" $?
-  ctl "$SHOP_CTL" ackfunding "$FUNDING_TXID" >/dev/null
-else
-  note "the funding was confirmed before the payment was claimed"
-fi
+[ "$PAID_FUNDING" = confirmed ]
+check "SL-27: the first paid event only follows confirmed funding" $?
 
 # ---- the second payment uses it ------------------------------------------------
 
@@ -730,6 +813,8 @@ check "SL-23: the second device reads reachable again with nothing waiting" $?
 
 say "Restore and the older copy"
 stop_shop
+"$MONITOR_AUDIT_BIN" "$SHOP_DIR/state" "$DEV_DIR" 0
+check "SL-24: exact plaintext channel-monitor and monitor-update state matches on the quiesced local/device copies" $?
 cp -a "$SHOP_DIR/state" "$BASE/old-local"
 cp -a "$DEV_DIR" "$BASE/old-device"
 note "copies of the state taken (T1)"
@@ -906,8 +991,16 @@ stop_shop
 start_shop max_fee_msat=3000000
 check "the node starts again with that invoice unpaid" $?
 await_status "provider=true channels=0" 60
+assert_unconfirmed_claim_refused "$H10"
+check "SL-27: after restart the invoice's first unconfirmed JIT attempt fails without a preimage or paid record" $?
+FUNDING_10=$(funding_txid_for_shop)
+[ -n "$FUNDING_10" ]
+check "the provider opened the fresh channel with funding $FUNDING_10" $?
+await_funding_confirmation "$FUNDING_10" 1
+check "SL-27: Core and the shop confirm that exact funding before retry" $?
+note "funding confirmations before retry: $FUNDING_CONFIRMATIONS"
 pay "$INVOICE_10" 90s
-check "SL-20: the invoice made before the restart is paid through the provider's opening after it" $?
+check "SL-20: the same invoice made before restart pays after the provider funding confirms" $?
 await_paid "$H10" 30
 check "SL-20: and reported paid: the recorded expectation survived the restart (paid $H10)" $?
 await_status "channels=1 usable=1" 30
@@ -1004,25 +1097,44 @@ start_shop max_fee_msat=20000000 || die "the node did not start: $(cat "$BASE/sh
 await_status "provider=true channels=0" 60 || die "the node still holds a channel"
 shop_invoice 20000
 H12=$(hash_of "$INVOICE")
+assert_unconfirmed_claim_refused "$H12"
+check "SL-27: a fresh JIT channel cannot settle its first unconfirmed attempt" $?
+FUNDING_12=$(funding_txid_for_shop)
+[ -n "$FUNDING_12" ]
+check "the provider opened the new channel with funding $FUNDING_12" $?
+await_funding_confirmation "$FUNDING_12" 1
+check "the exact new channel funding reaches the shop's confirmation depth" $?
 pay "$INVOICE" 90s && await_paid "$H12" 30
-check "a payment with no channel opens the one that is open from here on" $?
+check "retry of the same invoice succeeds on the confirmed new channel" $?
 stop_shop
 start_shop max_fee_msat=20000000 || die "the node did not start"
 await_status "provider=true channels=1 usable=1" 60 || die "no channel after the restart"
 S=$(shop_status)
 ROOM=$(field room_msat "$S")
-AMT=$((ROOM / 1000 + 100))
+MAX_FEE_13=20000000
+# Even after the largest opening skim this invoice cannot fit in the already
+# confirmed channel. It therefore needs the additional JIT channel whose
+# funding must pass the claim-time confirmation gate.
+AMT=$(((ROOM + MAX_FEE_13) / 1000 + 1))
 Q=$(ctl "$SHOP_CTL" quote "$AMT")
-note "room $ROOM msat; $AMT sat quotes: $Q"
+note "room $ROOM msat; $AMT sat quotes: $Q (net amount exceeds old room after up to $MAX_FEE_13 msat skim)"
 CH_BEFORE=$(lsp_channels_with_shop)
+FUNDING_BEFORE_13=$(funding_txid_for_shop)
 grep -q '^newchannel' <<<"$Q"
 check "SL-40: an amount above the room of the open channel needs a new one: $Q" $?
 shop_invoice "$AMT"
 H13=$(hash_of "$INVOICE")
 FEE13=$(field fee_msat "$REPLY")
 note "fee shown: $FEE13 msat"
+assert_unconfirmed_claim_refused "$H13"
+check "SL-27: the payment needing a fresh channel fails before its funding confirms" $?
+FUNDING_13=$(ctl "$LSP_CTL" channels | grep "cp=$SHOP_ID" | sed -n 's/.*funding_txo=Some(OutPoint { txid: \([0-9a-f]*\), vout: [0-9]* }).*/\1/p' | grep -Fvx "$FUNDING_BEFORE_13" | head -1)
+[ -n "$FUNDING_13" ] && [ "$(lsp_channels_with_shop)" = $((CH_BEFORE + 1)) ]
+check "the provider opened an additional channel with funding $FUNDING_13" $?
+await_funding_confirmation "$FUNDING_13" "$((CH_BEFORE + 1))"
+check "the exact additional channel funding reaches the shop's confirmation depth" $?
 pay "$INVOICE" 90s && await_paid "$H13" 30
-check "SL-21, SL-29: with a channel already open, the payment that needs a new one is paid" $?
+check "SL-21, SL-29: retry uses the confirmed additional channel and is paid" $?
 GOT_MSAT=$(sed -n "s/^paid $H13 amount_msat=\([0-9]*\).*/\1/p" "$PAID_LOG" | head -1)
 SKIM=$((AMT * 1000 - ${GOT_MSAT:-0}))
 [ -n "$GOT_MSAT" ] && [ "$SKIM" -gt 0 ] && [ "$SKIM" -le "$FEE13" ]
@@ -1165,14 +1277,13 @@ else
   stop_shop
 fi
 
-# ---- a funding that never confirms ---------------------------------------------
+# ---- a funding that remains unconfirmed, then confirms -------------------------
 
-say "A payment through a channel whose funding is kept out of every block"
-# SL-27: the provider's zero-conf channel carries a payment, its funding stays
-# in Core's mempool (Core is told by `prioritisetransaction` not to mine it),
-# and 144 blocks later the node judges it lost and force-closes the channel.
-# Nothing here waits on the earlier steps: it starts from the provider closing
-# every channel the shop has, and the 144 blocks are mined in one call.
+say "An unconfirmed payment fails; a retry follows its funding confirmation"
+# The first HTLC reaches an unconfirmed provider channel, but the claim gate
+# fails it back. Core then keeps that exact funding transaction out of blocks
+# for 144 blocks. It is mined only after the test removes the negative fee
+# delta, after which the same invoice is retried.
 FUNDING_LOG="$BASE/funding.log"
 : >"$FUNDING_LOG"
 start_shop max_fee_msat=20000000 || die "the node did not start: $(cat "$BASE/shop.out" "$BASE/shop.err" | tail -3)"
@@ -1189,17 +1300,14 @@ shop_invoice 50000
 HL=$(hash_of "$INVOICE")
 [ -n "$INVOICE" ] && grep -q "fee_msat=[1-9]" <<<"$REPLY"
 check "with no channel the invoice is one that opens one" $?
-pay "$INVOICE" 90s && await_paid_keep "$HL" 30
-check "SL-21: the payment through the new channel is claimed and reported paid" $?
-FUNDING_L=$(ctl "$LSP_CTL" channels | grep "cp=$SHOP_ID" | sed -n 's/.*funding_txo=Some(OutPoint { txid: \([0-9a-f]*\), vout: \([0-9]*\) }).*/\1/p')
+assert_unconfirmed_claim_refused "$HL"
+check "SL-27: the first unconfirmed attempt fails without a payer preimage or paid record" $?
+FUNDING_L=$(funding_txid_for_shop)
 [ -n "$FUNDING_L" ] && [ "$(lsp_channels_with_shop)" = 1 ]
-check "the payment opened one channel, funded by $FUNDING_L" $?
+check "the attempt opened one provider channel, funded by $FUNDING_L" $?
 for _ in $(seq 1 30); do bcli getmempoolentry "$FUNDING_L" >/dev/null 2>&1 && break; sleep 1; done
 bcli getmempoolentry "$FUNDING_L" >/dev/null 2>&1
 check "the funding transaction is in Core's mempool, in no block" $?
-PAID_FUNDING_L=$(sed -n "s/^paid $HL .* funding=//p" "$PAID_LOG" | head -1)
-[ "$PAID_FUNDING_L" = "$FUNDING_L" ]
-check "SL-27, SL-40: the paid event names the funding that has no confirmation: $PAID_FUNDING_L" $?
 # Core is told not to mine the funding: with a fee delta that large its
 # modified fee is under the block minimum, so no block template takes it.
 bcli prioritisetransaction "$FUNDING_L" 0 -100000000 >/dev/null
@@ -1211,26 +1319,20 @@ TIP=$(bcli getblockcount)
 check "after 144 blocks mined in one call (height $TIP) the funding transaction is still in no block" $?
 await_status "chain_ok=true height=$TIP " 150
 check "SL-26: the node follows to the tip, $TIP" $?
-LOST=1
-for _ in $(seq 1 90); do
-  ctl "$SHOP_CTL" funding >>"$FUNDING_LOG"
-  grep -q "funding $FUNDING_L lost" "$FUNDING_LOG" && { LOST=0; break; }
-  sleep 1
-done
-check "SL-27: the node reports the funding lost, 144 blocks after the claim, with none confirming" $LOST
-grep -q "funding Lost(TimedOut)" "$SHOP_DIR/node.log"
-check "SL-27: the node's log gives the reason as the timeout" $?
-await_status "provider=true channels=0 usable=0" 60
-check "SL-27: the node force-closed the channel: it is no longer in the shop's channel list" $?
-case "$(ctl "$SHOP_CTL" quote 5000)" in invoice*) false ;; *) true ;; esac
-check "SL-27, SL-40: no payment is possible through that channel: the node no longer quotes an invoice on an open channel ($(ctl "$SHOP_CTL" quote 5000))" $?
-ctl "$LSP_CTL" channels | grep "cp=$SHOP_ID" | grep "$FUNDING_L" | grep -q 'usable=true'
-[ $? != 0 ]
-check "the provider does not hold that channel usable either" $?
-# Put things back as they were: the funding may be mined now.
+ctl "$SHOP_CTL" funding >"$FUNDING_LOG"
+! grep -q "funding $FUNDING_L " "$FUNDING_LOG"
+check "SL-27: no claim means there is no paid-funding outcome to report after 144 blocks" $?
+! grep -q "paid $HL " "$PAID_LOG"
+check "SL-21: the payer's refused first attempt still has no paid ledger record" $?
+# Put things back as they were: confirm the exact funding, then retry the same
+# invoice whose expectation was retained because no PaymentClaimed event arose.
 bcli prioritisetransaction "$FUNDING_L" 0 100000000 >/dev/null
-mine 3
-ctl "$SHOP_CTL" ackfunding "$FUNDING_L" >/dev/null
+await_funding_confirmation "$FUNDING_L" 1
+check "Core and the shop observe the funding confirmed before the retry" $?
+pay "$INVOICE" 90s && await_paid_keep "$HL" 30
+check "the same invoice succeeds once its funding is confirmed" $?
+grep -q "paid $HL .* funding=confirmed" "$PAID_LOG"
+check "SL-21, SL-27: the one successful paid record names confirmed funding" $?
 stop_shop
 
 echo

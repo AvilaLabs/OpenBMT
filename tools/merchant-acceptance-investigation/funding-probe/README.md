@@ -1,13 +1,14 @@
 # LSPS2 funding publication probe
 
-This same-host Bitcoin Core regtest harness compares ordinary provider behavior
-with a deliberate RPC proxy that suppresses the exact provider funding txid and
-retries. It checks the payer's preimage hash, the merchant's paid/funding record,
-and live Core results for that exact transaction. The `withhold` mode passes only
-when Core returns exact `-5` not-found results for both mempool and raw transaction
-queries; the `honest` control requires the transaction to appear in both queries.
-The proxy does not suppress honest mode. The checks are not weakened by the
-packaging changes.
+This same-host Bitcoin Core regtest harness checks the strict claim-time funding
+gate. Before funding reaches the shop's configured depth, the first payment must
+fail back with no payer preimage and no merchant `PaymentClaimed` record. In
+`withhold` mode, a proxy suppresses the exact provider funding transaction; Core
+must return exact `-5` not-found results for both mempool and raw transaction
+queries. In `honest` mode, the funding transaction is visible but unconfirmed, so
+the first payment must still fail. The harness mines that same transaction, then
+retries the same still-live invoice and requires success with exactly one paid
+record. The shop regtest example defaults to a one-confirmation claim depth.
 
 ## Requirements and run
 
@@ -40,8 +41,8 @@ Then use `$investigation_target/debug/examples/shop_regtest`,
 The tested payer version is LND 0.21.8. Bash, Python 3, jq, GNU timeout and the
 specified Bitcoin Core 32.1 binaries are also required.
 
-For each run, choose a new, empty directory and pass it as `PROBE_RUN_DIR`. The
-probe refuses nonempty directories and retains logs and state there. For example:
+Run both modes separately, each in a new, empty directory. The probe refuses
+nonempty directories and retains logs and state there. For example:
 
 ```sh
 RUN_DIR=$(mktemp -d /tmp/openbmt-merchant-honest.XXXXXX)
@@ -59,13 +60,25 @@ Run the withhold case separately with another new directory and
 isolated private regtest chain but uses fixed ports 19700–19714; ensure they are
 free and do not run a conflicting regtest harness at the same time.
 
+In the honest case, a failed first payment leaves its invoice expectation in the
+shop's book: the node forgets the expectation only after `PaymentClaimed`. The
+probe therefore retries that invoice after mining the funding transaction. It
+checks that the retry preimage matches the invoice hash, the paid record reports
+`funding=confirmed`, and a second drain returns no duplicate record. This does not
+establish that providers using the LSPS2 secret-first trust model can complete a
+first JIT payment under the gate; a provider that waits for the claim before
+broadcasting cannot satisfy the confirmation requirement.
+
 ## Limits
 
 This is a same-host regtest fixture, including a local TCP device fixture. It uses
 no real funds and does not test physical hardware or an actual Box service. A
-payer preimage and merchant `paid` event do not mean the cashier fulfilled the
-sale. Results do not establish VSS, native SDK behavior, production deployment
-behavior, or ordinary provider behavior beyond the observed control run. Inspect
-retained evidence before drawing conclusions.
+node `PaymentClaimed` record is separate from cashier fulfillment. The result
+only tests this receiver and the bundled funding-first provider on regtest; it
+does not establish VSS, native SDK behavior, production deployment behavior, or
+compatibility with arbitrary LSPS2 providers. Inspect retained evidence before
+drawing conclusions.
 
-Captured results are in [the execution summary](../evidence/funding-publication-2026-11-16.json).
+The captured results in [the earlier execution summary](../evidence/funding-publication-2026-11-16.json)
+predate the strict claim gate; they document the original claim-before-publication
+finding and are not results of this updated probe.

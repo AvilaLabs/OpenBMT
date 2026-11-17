@@ -15,6 +15,13 @@ The USD flow uses the fixed developer rate of 10,000,000 minor units per BTC
 price. The app accepts only a Regtest pairing record with USD or SAT pricing.
 The Regtest pairing is watch-only for checkout and cannot sign spends.
 
+The USD cashier screen includes a small sample basket (latte $5.50 and bagel
+$4.50), exact integer totals, quantity controls, and a review step. The saved
+sale includes an immutable copy of item names, prices, and quantities. This is
+not a merchant product catalog or inventory integration. Manual amount entry
+remains available, including for SAT-priced shops. After saving the sale, the
+cashier chooses Bitcoin or the optional Square Sandbox path for that same sale.
+
 ## Pairing and fixture setup
 
 Use the camera to scan the owner's public-wallet offer and bundle through the
@@ -55,33 +62,34 @@ results remain pending until reconciled.
 
 ## Validation on 16 November 2026
 
-The coordinator built both Android ABIs and ran the x86_64 APK on the existing
-API 35 emulator against an isolated Bitcoin Core 32.1 Regtest node. A signed
-Key app fixture supplied 1,000 public receive scripts; the checkout held no
-wallet spending key. The feature build relaxed network-group quorum for this
-single-node lab, required a connected filter-serving peer, and retained chain
-freshness, clock, header-lag, and block-progress checks.
+The coordinator built both Android ABIs, the APK and Square SDK module, and
+verified matching native method signatures. The milestone date is 16 November
+in America/New_York (17 November UTC). The checkout now saves a native
+basket as an immutable sale snapshot: one latte at $5.50 and one bagel at $4.50,
+for $10.00 total, in ledger version 4. A force-stop before tender creation
+restored the same sale ledger and allowed tender creation to resume. The
+preceding version-3 ledger remains preserved.
+JVM migration tests passed for version 2 and 3 records, including
+conservative handling of historical refund state.
 
-An $8.00 request at the explicit developer quote requested 8,000 sats. The
-counter observed a confirmed 4,000-sat partial payment and updated the same
-address's request to the remaining 4,000 sats. A forced process restart
-restored that receipt and address. After a second payment and block, the
-counter reported 8,000 sats confirmed. A second process restart restored the
-paid sale in receipt history. These were actual Core transactions and native
-FFI observations, not a browser simulation or a manually marked paid state.
-A refund request then reserved 8,000 sats, continued to show zero returned,
-and removed the duplicate full-refund action. It did not send a transaction.
+On the API 35 Android emulator, the app created a 10,000-sat Bitcoin request on
+an isolated Bitcoin Core 32.1 Regtest node. A 4,000-sat confirmed payment was
+observed as partial. After force-stopping and restarting the app, the identical
+ledger was restored and the same address presented the 6,000-sat remainder.
+After the remainder was paid, the sale became paid and the itemized receipt was
+restored unchanged after another force-stop. These are actual Core transactions
+and native FFI observations, not simulated or manually marked payment states.
 
-The pure JVM ledger recovery tests and all 227 default counter-FFI tests
-passed. Five focused tests cover the optional artifact's network refusal,
-local-peer configuration, and retained health checks. The feature build also
-passed clippy. Ledger cases include uncertain writes, duplicate evidence,
-unknown card outcomes, late canceled Bitcoin receipts, overpayment, and a
-refund request followed by reorganization and restart.
+The Square SDK path used Mobile Payments SDK 2.7.0 in the same cart. A virtual
+card payment for $10.00 completed; Square's independent Payments API result
+matched the native payment ID/reference. Square Sandbox and a virtual reader
+were used, not production processing or physical hardware. See the separate
+[Square validation record](square-sandbox/README.md#validation-on-16-november-2026).
 
-This establishes a narrow native on-chain integration proof. It does not
-establish physical-device, iOS, Square-reader, Lightning, production wallet,
-catalog, or merchant adoption readiness. The [Square harness](square-sandbox/README.md)
-records its own SDK validation separately. The browser's proposed checkout
-is an explicitly labeled simulation and does not use these native payment
-observations.
+The native checkout's limits remain: Regtest only, fixed developer exchange
+rate, no wallet spending key, no Lightning payment path, and no physical-device,
+iOS, production-reader, catalog/inventory, merchant onboarding, or adoption
+validation. The cart is a test fixture, not a merchant catalog. This prototype
+does not reproduce Square's full POS interface or feature set. The browser
+checkout remains an explicitly labeled simulation and does not use these native
+payment observations.

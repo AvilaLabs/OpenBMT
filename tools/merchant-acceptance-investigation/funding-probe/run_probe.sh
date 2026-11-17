@@ -123,32 +123,55 @@ INVOICE=$(sed -n 's/^invoice \([^ ]*\) .*/\1/p' <<<"$INVOICE_REPLY")
 printf '%s\n' "$INVOICE_REPLY" >"$BASE/invoice.txt"
 # Gate only after invoice negotiation. The honest control leaves this absent.
 if [ "$PROBE_MODE" = withhold ]; then touch "$GATE"; fi
-set +e
- timeout 110 "$LND_DIR/lncli" --lnddir="$LND" --tlscertpath="$LND/tls.cert" --network=regtest --rpcserver="127.0.0.1:$LND_RPC" --no-macaroons \
-   payinvoice --pay_req="$INVOICE" --force --timeout=90s >"$BASE/pay.log" 2>&1
-PAY_RC=$?
-set -e
-sleep 2
 HASH=$(lnc decodepayreq "$INVOICE" | jq -r .payment_hash)
-PAYMENT_JSON=$(lnc listpayments --include_incomplete | jq -c --arg h "$HASH" '.payments[]|select(.payment_hash==$h)' | head -1)
-[ -n "$PAYMENT_JSON" ] || PAYMENT_JSON='{}'
-PAY_STATUS=$(jq -r '.status // empty' <<<"$PAYMENT_JSON")
-PREIMAGE=$(jq -r '.payment_preimage // empty' <<<"$PAYMENT_JSON")
-printf 'payment_hash=%s\npayment_status=%s\npayment_preimage=%s\n' "$HASH" "${PAY_STATUS:-missing}" "${PREIMAGE:-missing}" >"$BASE/payer-evidence.txt"
-PREIMAGE_HASH=
-if [[ "$PREIMAGE" =~ ^[0-9a-fA-F]{64}$ ]]; then PREIMAGE_HASH=$(python3 - "$PREIMAGE" <<'PYHASH'
+run_payment(){
+  local label=$1; local pay_req=$2; local rc
+  set +e
+  timeout 110 "$LND_DIR/lncli" --lnddir="$LND" --tlscertpath="$LND/tls.cert" --network=regtest --rpcserver="127.0.0.1:$LND_RPC" --no-macaroons \
+    payinvoice --pay_req="$pay_req" --force --timeout=90s >"$BASE/pay-$label.log" 2>&1
+  rc=$?
+  set -e
+  echo "$rc"
+}
+last_payment(){
+  lnc listpayments --include_incomplete | jq -c --arg h "$HASH" '[.payments[]|select(.payment_hash==$h)]|last // {}'
+}
+preimage_hash(){
+  local secret=$1
+  if [[ "$secret" =~ ^[0-9a-fA-F]{64}$ ]]; then python3 - "$secret" <<'PYHASH'
 import hashlib, sys
 print(hashlib.sha256(bytes.fromhex(sys.argv[1])).hexdigest())
 PYHASH
-); fi
+  fi
+}
+classify_absent_preimage(){ # candidate invoice_hash -> PREIMAGE_CLASS / PREIMAGE_HASH
+  local candidate=$1 invoice_hash=$2
+  PREIMAGE_HASH=$(preimage_hash "$candidate")
+  if [ -z "$candidate" ]; then PREIMAGE_CLASS=empty; return 0; fi
+  if [[ "$candidate" =~ ^0{64}$ ]]; then
+    if [ "$PREIMAGE_HASH" != "$invoice_hash" ]; then PREIMAGE_CLASS=zero_default_nonmatching; return 0; fi
+    PREIMAGE_CLASS=zero_default_hash_matches_invoice; return 1
+  fi
+  PREIMAGE_CLASS=unexpected_nonzero
+  return 1
+}
+payment_one_rc=$(run_payment first "$INVOICE")
+sleep 2
+PAYMENT_ONE_JSON=$(last_payment)
+PAYMENT_ONE_STATUS=$(jq -r '.status // empty' <<<"$PAYMENT_ONE_JSON")
+PREIMAGE_ONE=$(jq -r '.payment_preimage // empty' <<<"$PAYMENT_ONE_JSON")
+if classify_absent_preimage "$PREIMAGE_ONE" "$HASH"; then PREIMAGE_ONE_ABSENT=1; else PREIMAGE_ONE_ABSENT=0; fi
+PREIMAGE_ONE_HASH=$PREIMAGE_HASH
+PREIMAGE_ONE_CLASS=$PREIMAGE_CLASS
 PAID=$(ctl "$SHOP_CTL" paid || true)
-printf '%s\n' "$PAID" >"$BASE/paid.txt"
-SHOP_LINE=$(grep -F "paid $HASH " "$BASE/paid.txt" | head -1 || true)
-SHOP_FUNDING=${SHOP_LINE##* funding=}
+printf '%s\n' "$PAID" >"$BASE/paid-before-confirmation.txt"
+PAID_BEFORE_COUNT=$(grep -Fc "paid $HASH " "$BASE/paid-before-confirmation.txt" || true)
 PROXY_TXID=$(cat "$MARKER" 2>/dev/null || true)
-if [ "$PROBE_MODE" = withhold ]; then TXID=$PROXY_TXID; else TXID=$SHOP_FUNDING; fi
 CHANNELS=$(ctl "$LSP_CTL" channels || true)
 printf '%s\n' "$CHANNELS" >"$BASE/provider-channels.txt"
+CHANNEL_LINE=$(grep -F "cp=$SHOP_ID " <<<"$CHANNELS" | head -1 || true)
+CHANNEL_TXID=$(sed -n 's/.*funding_txo=Some(OutPoint { txid: \([0-9a-f]*\), vout: [0-9]* }).*/\1/p' <<<"$CHANNEL_LINE")
+if [ "$PROBE_MODE" = withhold ]; then TXID=$PROXY_TXID; else TXID=$CHANNEL_TXID; fi
 BLOCKCHAIN=$(bcli getblockchaininfo 2>"$BASE/core-live.err" || true)
 CORE_LIVE=0
 if jq -e '.chain == "regtest"' >/dev/null 2>&1 <<<"$BLOCKCHAIN"; then CORE_LIVE=1; fi
@@ -164,14 +187,69 @@ if [ -n "$TXID" ] && [ "$CORE_LIVE" = 1 ]; then
   if bcli getrawtransaction "$TXID" true >"$BASE/rawtx.result" 2>&1; then RAWTX_FOUND=1
   elif grep -Fq 'error code: -5' "$BASE/rawtx.result"; then RAWTX_ABSENT=1; fi
 fi
-printf 'RESULT mode=%s payer_rc=%s payer_status=%s preimage_hash=%s invoice_hash=%s shop_line=%s shop_funding=%s proxy_suppressed_txid=%s evidence_txid=%s core_live_regtest=%s mempool_found=%s mempool_absent_error_minus5=%s rawtx_found=%s rawtx_absent_error_minus5=%s\n' \
- "$PROBE_MODE" "$PAY_RC" "${PAY_STATUS:-missing}" "${PREIMAGE_HASH:-missing}" "$HASH" "${SHOP_LINE:-missing}" "${SHOP_FUNDING:-missing}" "${PROXY_TXID:-none}" "${TXID:-missing}" "$CORE_LIVE" "$MEMPOOL_FOUND" "$MEMPOOL_ABSENT" "$RAWTX_FOUND" "$RAWTX_ABSENT"
-if [ "$PAY_RC" = 0 ] && [ "$PAY_STATUS" = SUCCEEDED ] && [ "$PREIMAGE_HASH" = "$HASH" ] && [ "$SHOP_FUNDING" = "$TXID" ] && [ "$CORE_LIVE" = 1 ]; then
-  if [ "$PROBE_MODE" = withhold ] && [ "$TXID" = "$PROXY_TXID" ] && [ "$MEMPOOL_ABSENT" = 1 ] && [ "$RAWTX_ABSENT" = 1 ]; then
-    echo 'DECISIVE: preimage hash matches and Shop/payment settle while Core returns exact -5 not-found for both queries.'
+printf 'payment_hash=%s\nfirst_payment_rc=%s\nfirst_payment_status=%s\nfirst_payment_preimage_raw=%s\nfirst_payment_preimage_class=%s\nfirst_payment_preimage_absent=%s\nfirst_payment_preimage_hash=%s\nfirst_paid_record_count=%s\nchannel_funding_txid=%s\nproxy_suppressed_txid=%s\n' \
+  "$HASH" "$payment_one_rc" "${PAYMENT_ONE_STATUS:-missing}" "${PREIMAGE_ONE:-empty}" "$PREIMAGE_ONE_CLASS" "$PREIMAGE_ONE_ABSENT" "${PREIMAGE_ONE_HASH:-none}" "$PAID_BEFORE_COUNT" "${CHANNEL_TXID:-missing}" "${PROXY_TXID:-none}" >"$BASE/payer-evidence.txt"
+
+if [ "$PROBE_MODE" = withhold ]; then
+  printf 'RESULT mode=%s first_payer_rc=%s first_payer_status=%s first_preimage_hash=%s invoice_hash=%s first_paid_record_count=%s channel_funding_txid=%s proxy_suppressed_txid=%s evidence_txid=%s core_live_regtest=%s mempool_found=%s mempool_absent_error_minus5=%s rawtx_found=%s rawtx_absent_error_minus5=%s\n' \
+    "$PROBE_MODE" "$payment_one_rc" "${PAYMENT_ONE_STATUS:-missing}" "${PREIMAGE_ONE_HASH:-missing}" "$HASH" "$PAID_BEFORE_COUNT" "${CHANNEL_TXID:-missing}" "${PROXY_TXID:-none}" "${TXID:-missing}" "$CORE_LIVE" "$MEMPOOL_FOUND" "$MEMPOOL_ABSENT" "$RAWTX_FOUND" "$RAWTX_ABSENT"
+  if [ "$payment_one_rc" -ne 0 ] && [ "$PAYMENT_ONE_STATUS" = FAILED ] && [ "$PREIMAGE_ONE_ABSENT" = 1 ] && [ "$PAID_BEFORE_COUNT" = 0 ] \
+      && [ "$TXID" = "$PROXY_TXID" ] && [ "$CHANNEL_TXID" = "$PROXY_TXID" ] \
+      && [ "$MEMPOOL_ABSENT" = 1 ] && [ "$RAWTX_ABSENT" = 1 ] && [ "$CORE_LIVE" = 1 ]; then
+    echo 'PASS: withheld funding failed the payer attempt; no preimage or PaymentClaimed paid record was observed, and Core returned exact -5 for mempool and raw transaction queries.'
     exit 0
-  elif [ "$PROBE_MODE" = honest ] && [ -z "$PROXY_TXID" ] && [ "$MEMPOOL_FOUND" = 1 ] && [ "$RAWTX_FOUND" = 1 ]; then
-    echo 'CONTROL observed: honest provider broadcast appears in live Core mempool and transaction lookup (unconfirmed).'
+  fi
+  echo 'INCONCLUSIVE: withheld case did not meet the strict claim-gate evidence; inspect retained logs and state.'
+  exit 3
+fi
+
+# The funding-first provider publishes before the first payment. The strict
+# claim gate must still refuse the unconfirmed first attempt. Mine that exact
+# Core-visible transaction, then retry the same still-live invoice.
+if [ -z "$PROXY_TXID" ] && [ -n "$TXID" ] && [ "$payment_one_rc" -ne 0 ] \
+    && [ "$PAYMENT_ONE_STATUS" = FAILED ] && [ "$PREIMAGE_ONE_ABSENT" = 1 ] && [ "$PAID_BEFORE_COUNT" = 0 ] \
+    && [ "$MEMPOOL_FOUND" = 1 ] && [ "$RAWTX_FOUND" = 1 ] && [ "$CORE_LIVE" = 1 ]; then
+  bw miner generatetoaddress 1 "$MINER_ADDR" >"$BASE/mine-funding.json"
+  for _ in $(seq 1 60); do
+    confirmations=$(bcli getrawtransaction "$TXID" true 2>/dev/null | jq -r '.confirmations // 0' || echo 0)
+    [ "$confirmations" -ge 1 ] && break
+    sleep 1
+  done
+  [ "${confirmations:-0}" -ge 1 ] || { echo 'INCONCLUSIVE: Core did not confirm the provider funding transaction' >&2; exit 3; }
+  shop_confirmations=
+  for _ in $(seq 1 90); do
+    shop_confirmations=$(ctl "$SHOP_CTL" confirmations || true)
+    case "$shop_confirmations" in *"Some("[1-9]*) break ;; esac
+    sleep 1
+  done
+  case "$shop_confirmations" in *"Some("[1-9]*) ;; *) echo 'INCONCLUSIVE: the shop did not reach its configured funding confirmation depth' >&2; exit 3 ;; esac
+  payment_two_rc=$(run_payment confirmed-retry "$INVOICE")
+  sleep 2
+  PAYMENT_TWO_JSON=$(last_payment)
+  PAYMENT_TWO_STATUS=$(jq -r '.status // empty' <<<"$PAYMENT_TWO_JSON")
+  PREIMAGE_TWO=$(jq -r '.payment_preimage // empty' <<<"$PAYMENT_TWO_JSON")
+  PREIMAGE_TWO_HASH=$(preimage_hash "$PREIMAGE_TWO")
+  PAID_FINAL=
+  for _ in $(seq 1 30); do
+    paid_now=$(ctl "$SHOP_CTL" paid || true)
+    if grep -Fq "paid $HASH " <<<"$paid_now"; then
+      printf '%s\n' "$paid_now" >>"$BASE/paid-after-confirmation.txt"
+      PAID_FINAL=$(grep -F "paid $HASH " "$BASE/paid-after-confirmation.txt" | head -1 || true)
+      break
+    fi
+    sleep 1
+  done
+  PAID_FINAL_COUNT=$(grep -Fc "paid $HASH " "$BASE/paid-after-confirmation.txt" 2>/dev/null || true)
+  SHOP_FUNDING=${PAID_FINAL##* funding=}
+  ctl "$SHOP_CTL" paid >"$BASE/paid-after-confirmation-extra.txt" || true
+  EXTRA_PAID_COUNT=$(grep -Fc "paid $HASH " "$BASE/paid-after-confirmation-extra.txt" || true)
+  printf 'first_payment_rc=%s\nfirst_payment_status=%s\nfirst_payment_preimage_hash=%s\nconfirmed_retry_rc=%s\nconfirmed_retry_status=%s\nconfirmed_retry_preimage_hash=%s\ninvoice_hash=%s\ncore_confirmations=%s\nshop_confirmations=%s\nshop_paid_line=%s\npaid_record_count=%s\nextra_paid_record_count=%s\n' \
+    "$payment_one_rc" "${PAYMENT_ONE_STATUS:-missing}" "${PREIMAGE_ONE_HASH:-missing}" "$payment_two_rc" "${PAYMENT_TWO_STATUS:-missing}" "${PREIMAGE_TWO_HASH:-missing}" "$HASH" "$confirmations" "$shop_confirmations" "${PAID_FINAL:-missing}" "$PAID_FINAL_COUNT" "$EXTRA_PAID_COUNT" >>"$BASE/payer-evidence.txt"
+  printf 'RESULT mode=%s first_payer_rc=%s first_payer_status=%s first_preimage_hash=%s retry_rc=%s retry_status=%s retry_preimage_hash=%s invoice_hash=%s funding_txid=%s core_confirmations=%s shop_confirmations=%s shop_funding=%s paid_record_count=%s extra_paid_record_count=%s core_live_regtest=%s\n' \
+    "$PROBE_MODE" "$payment_one_rc" "${PAYMENT_ONE_STATUS:-missing}" "${PREIMAGE_ONE_HASH:-missing}" "$payment_two_rc" "${PAYMENT_TWO_STATUS:-missing}" "${PREIMAGE_TWO_HASH:-missing}" "$HASH" "$TXID" "$confirmations" "$shop_confirmations" "${SHOP_FUNDING:-missing}" "$PAID_FINAL_COUNT" "$EXTRA_PAID_COUNT" "$CORE_LIVE"
+  if [ "$payment_two_rc" = 0 ] && [ "$PAYMENT_TWO_STATUS" = SUCCEEDED ] && [ "$PREIMAGE_TWO_HASH" = "$HASH" ] \
+      && [ "$SHOP_FUNDING" = confirmed ] && [ "$PAID_FINAL_COUNT" = 1 ] && [ "$EXTRA_PAID_COUNT" = 0 ] && [ "$confirmations" -ge 1 ]; then
+    echo 'PASS: the unconfirmed attempt failed without a preimage or paid record; after Core confirmed the same funding, retrying the same invoice succeeded and produced exactly one paid record.'
     exit 0
   fi
 fi

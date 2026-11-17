@@ -14,6 +14,8 @@ import java.nio.file.StandardOpenOption
 
 private const val MAX_LEDGER_FILE_BYTES = 4 * 1024 * 1024
 
+private class LegacyRefundUnverifiableException(message: String) : IllegalStateException(message)
+
 /** Writes may throw after an uncertain/committed rename; callers must reload and never reuse stale state. */
 interface DurableLedgerStorage {
     fun read(): ByteArray?
@@ -121,6 +123,14 @@ data class Refund(
     val actuallyPaidSats: Long,
 )
 
+/** Immutable line snapshot used to reproduce the exact basket after restart. */
+data class SaleItem(
+    val productId: String,
+    val name: String,
+    val unitMinor: Long,
+    val quantity: Int,
+)
+
 data class Sale(
     val saleId: String,
     val amountMinor: Long,
@@ -135,6 +145,7 @@ data class Sale(
     val lateBitcoinReceipt: Boolean,
     val overpaidMinor: Long,
     val overpaidSats: Long,
+    val items: List<SaleItem> = emptyList(),
 )
 
 /** Append-only observations and stable attempt identifiers. Every successful mutation is durable on return. */
@@ -143,12 +154,15 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
     private var state: State = decode(storage.read())
     private var poisoned = false
 
-    fun createSale(saleId: String, amountMinor: Long, currency: String, createdAt: Long): Sale = mutate {
+    fun createSale(saleId: String, amountMinor: Long, currency: String, createdAt: Long,
+                   items: List<SaleItem> = emptyList()): Sale = mutate {
         validId(saleId, "sale id"); positive(amountMinor, "sale amount"); validCurrency(currency)
         require(createdAt >= 0) { "invalid creation time" }
         require(!sales.containsKey(saleId)) { "sale already exists" }
         require(sales.size < MAX_SALES) { "sale limit reached" }
-        sales[saleId] = SaleData(saleId, amountMinor, currency, createdAt)
+        val snapshot = snapshotItems(items)
+        if (snapshot.isNotEmpty()) require(itemTotal(snapshot) == amountMinor) { "basket total does not match sale amount" }
+        sales[saleId] = SaleData(saleId, amountMinor, currency, createdAt, snapshot)
         view(sales.getValue(saleId))
     }
 
@@ -355,7 +369,7 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
         }.map { it.receivedMinor })
         return Sale(s.id, s.amountMinor, s.currency, s.createdAt, attempts, refunds, total,
             (s.amountMinor - total).coerceAtLeast(0), settled >= s.amountMinor && settled > 0 && !requiresReview,
-            requiresReview, lateBitcoinReceipt, overpaidMinor, overpaidSats)
+            requiresReview, lateBitcoinReceipt, overpaidMinor, overpaidSats, s.items.map { it.copy() })
     }
 
     private fun saleOverpaidSats(s: SaleData): List<Long> = s.attempts.filter { it.tender == Tender.BITCOIN }.map { a ->
@@ -363,7 +377,7 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
     }
 
     private class State(val sales: LinkedHashMap<String, SaleData> = LinkedHashMap())
-    private data class SaleData(val id: String, val amountMinor: Long, val currency: String, val createdAt: Long,
+    private data class SaleData(val id: String, val amountMinor: Long, val currency: String, val createdAt: Long, val items: List<SaleItem> = emptyList(),
                                 val attempts: MutableList<AttemptData> = ArrayList(), val refunds: MutableList<RefundData> = ArrayList())
     private data class AttemptData(val attemptId: String, val tender: Tender, val amountMinor: Long, val expectedSats: Long?, val quoteId: String?, val quotedAt: Long?, val counterIndex: Long?,
                                    val provider: String?, val stableId: String?, var cancellationRequested: Boolean = false,
@@ -400,11 +414,28 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
     private fun nonnegative(v: Long, label: String) { require(v >= 0) { "invalid $label" } }
     private fun safeSum(values: Iterable<Long>): Long = values.fold(0L) { sum, value -> Math.addExact(sum, value) }
 
-    private fun validateDecoded(s: State) {
+    private fun snapshotItems(items: List<SaleItem>): List<SaleItem> {
+        require(items.size <= MAX_ITEMS_PER_SALE) { "too many basket items" }
+        for (item in items) {
+            validId(item.productId, "product id")
+            require(item.name.isNotBlank() && item.name.length <= MAX_ITEM_NAME_CHARS && item.name.none { it.isISOControl() } && item.name.toByteArray(Charsets.UTF_8).size <= MAX_ITEM_NAME_BYTES) { "invalid product name" }
+            positive(item.unitMinor, "item price")
+            require(item.quantity in 1..MAX_ITEM_QUANTITY) { "invalid item quantity" }
+            Math.multiplyExact(item.unitMinor, item.quantity.toLong())
+        }
+        return items.map { it.copy() }
+    }
+
+    private fun itemTotal(items: List<SaleItem>): Long = safeSum(items.map { Math.multiplyExact(it.unitMinor, it.quantity.toLong()) })
+
+    private fun validateDecoded(s: State, version: Int) {
         val indexes = HashSet<Long>()
         val cardIds = HashSet<Pair<String, String>>()
         for (sale in s.sales.values) {
             require(sale.attempts.size <= MAX_ATTEMPTS && sale.refunds.size <= MAX_REFUNDS)
+            require(sale.items.size <= MAX_ITEMS_PER_SALE)
+            val copiedItems = snapshotItems(sale.items)
+            if (copiedItems.isNotEmpty()) require(itemTotal(copiedItems) == sale.amountMinor) { "stored basket total differs from sale amount" }
             for (a in sale.attempts) {
                 require(a.bitcoinEvidence.size <= MAX_EVIDENCE && a.cardEvidence.size <= MAX_EVIDENCE)
                 if (a.tender == Tender.BITCOIN) require(indexes.add(a.counterIndex!!)) { "Bitcoin counter index is duplicated" }
@@ -418,7 +449,12 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
                 val sats = safeSum(requests.map { it.amountSats })
                 val historicalMinor = if (a.tender == Tender.CARD) a.cardEvidence.maxOfOrNull { it.historicalCompletedMinor } ?: 0L else 0L
                 val historicalSats = if (a.tender == Tender.BITCOIN) safeSum(a.bitcoinEvidence.map { it.historicalConfirmedSats }) else 0L
-                require(minor <= historicalMinor && sats <= historicalSats) { "refund requests exceed historically settled payment" }
+                if (minor > historicalMinor || sats > historicalSats) {
+                    if (version == LEGACY_VERSION_2) throw LegacyRefundUnverifiableException(
+                        "legacy v2 refund cannot be verified from stored confirmation evidence; file preserved"
+                    )
+                    require(false) { "refund requests exceed historically settled payment" }
+                }
                 for (refund in requests) {
                     require(refund.evidence.size <= MAX_EVIDENCE)
                     val view = refundView(refund)
@@ -436,6 +472,9 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
             out.writeInt(MAGIC); out.writeInt(VERSION); out.writeInt(s.sales.size)
             for (sale in s.sales.values) {
                 out.str(sale.id); out.writeLong(sale.amountMinor); out.str(sale.currency); out.writeLong(sale.createdAt)
+                require(sale.items.size <= MAX_ITEMS_PER_SALE)
+                out.writeInt(sale.items.size)
+                for (item in sale.items) { out.str(item.productId); out.str(item.name); out.writeLong(item.unitMinor); out.writeInt(item.quantity) }
                 out.writeInt(sale.attempts.size)
                 for (a in sale.attempts) {
                     out.str(a.attemptId); out.writeInt(a.tender.ordinal); out.writeLong(a.amountMinor); out.nullLong(a.expectedSats); out.nullStr(a.quoteId); out.nullLong(a.quotedAt); out.nullLong(a.counterIndex)
@@ -460,13 +499,23 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
         require(bytes.size <= MAX_LEDGER_FILE_BYTES) { "ledger file exceeds size limit" }
         try {
             DataInputStream(ByteArrayInputStream(bytes)).use { input ->
-                require(input.readInt() == MAGIC && input.readInt() == VERSION) { "unknown or corrupt ledger format" }
+                require(input.readInt() == MAGIC) { "unknown or corrupt ledger format" }
+                val version = input.readInt()
+                require(version in LEGACY_VERSION_2..VERSION) { "unknown or corrupt ledger format" }
                 val sales = input.count(MAX_SALES); val state = State()
                 repeat(sales) {
                     val id = input.str(); val amount = input.readLong(); val currency = input.str(); val created = input.readLong()
                     validId(id, "sale id"); positive(amount, "sale amount"); validCurrency(currency); nonnegative(created, "creation time")
                     require(!state.sales.containsKey(id)) { "duplicate sale" }
-                    val s = SaleData(id, amount, currency, created); state.sales[id] = s
+                    val items = if (version >= ITEM_SNAPSHOT_VERSION) {
+                        val count = input.count(MAX_ITEMS_PER_SALE)
+                        List(count) {
+                            val item = SaleItem(input.str(), input.str(), input.readLong(), input.readInt())
+                            snapshotItems(listOf(item)).single()
+                        }
+                    } else emptyList()
+                    if (items.isNotEmpty()) require(itemTotal(items) == amount) { "stored basket total differs from sale amount" }
+                    val s = SaleData(id, amount, currency, created, items); state.sales[id] = s
                     val attempts = input.count(MAX_ATTEMPTS)
                     repeat(attempts) {
                         val aid = input.str(); val tender = Tender.entries.getOrNull(input.readInt()) ?: error("invalid tender")
@@ -481,14 +530,19 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
                         require(s.attempts.none { it.attemptId == aid }) { "duplicate attempt" }
                         val a = AttemptData(aid, tender, aamount, expectedSats, quoteId, quotedAt, counter, provider, stable, cancel, cancelAck, cancelUnknown); s.attempts.add(a)
                         repeat(input.count(MAX_EVIDENCE)) {
-                            val ev = BitcoinEvidence(input.str(), input.str(), input.readLong(), input.readInt(), input.readInt(), input.readLong(), BitcoinChainState.entries.getOrNull(input.readInt()) ?: error("invalid chain state"), input.readLong())
+                            val evidenceId = input.str(); val sourceId = input.str(); val receivedSats = input.readLong(); val confirmations = input.readInt(); val required = input.readInt(); val observed = input.readLong(); val chain = BitcoinChainState.entries.getOrNull(input.readInt()) ?: error("invalid chain state")
+                            val historical = if (version >= HISTORICAL_EVIDENCE_VERSION) input.readLong()
+                                else if (chain == BitcoinChainState.ACTIVE && confirmations >= required) receivedSats else 0L
+                            val ev = BitcoinEvidence(evidenceId, sourceId, receivedSats, confirmations, required, observed, chain, historical)
                             validId(ev.evidenceId, "Bitcoin evidence id"); validId(ev.sourceId, "Bitcoin evidence source")
                             nonnegative(ev.receivedSats, "received sats"); require(ev.confirmations >= 0 && ev.requiredConfirmations >= 1); nonnegative(ev.observedAt, "evidence time"); nonnegative(ev.historicalConfirmedSats, "historical confirmed sats")
                             require(ev.historicalConfirmedSats >= if (ev.chainState == BitcoinChainState.ACTIVE && ev.confirmations >= ev.requiredConfirmations) ev.receivedSats else 0L)
                             require(tender == Tender.BITCOIN && a.bitcoinEvidence.none { it.evidenceId == ev.evidenceId } && a.bitcoinEvidence.none { it.sourceId == ev.sourceId }); a.bitcoinEvidence.add(ev)
                         }
                         repeat(input.count(MAX_EVIDENCE)) {
-                            val ev = CardEvidence(input.str(), input.str(), CardResult.entries.getOrNull(input.readInt()) ?: error("invalid card result"), input.readLong(), input.readLong(), input.readLong())
+                            val evidenceId = input.str(); val evidenceStable = input.str(); val result = CardResult.entries.getOrNull(input.readInt()) ?: error("invalid card result"); val amountMinor = input.readLong(); val observed = input.readLong()
+                            val historical = if (version >= HISTORICAL_EVIDENCE_VERSION) input.readLong() else if (result == CardResult.COMPLETED) amountMinor else 0L
+                            val ev = CardEvidence(evidenceId, evidenceStable, result, amountMinor, observed, historical)
                             validId(ev.evidenceId, "card evidence id"); require(ev.stableId == stable); require(ev.amountMinor >= 0 && ev.amountMinor <= aamount); nonnegative(ev.observedAt, "evidence time"); require(ev.historicalCompletedMinor in 0..aamount)
                             require(ev.historicalCompletedMinor >= if (ev.result == CardResult.COMPLETED) ev.amountMinor else 0L)
                             require(tender == Tender.CARD && a.cardEvidence.none { it.evidenceId == ev.evidenceId }); a.cardEvidence.add(ev)
@@ -511,11 +565,12 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
                         }
                     }
                 }
-                validateDecoded(state)
+                validateDecoded(state, version)
                 require(input.available() == 0) { "trailing ledger data" }
                 return state
             }
-        } catch (e: Exception) { throw IllegalStateException("ledger is corrupt; refusing to reset", e) }
+        } catch (e: LegacyRefundUnverifiableException) { throw e }
+        catch (e: Exception) { throw IllegalStateException("ledger is corrupt; refusing to reset", e) }
     }
 
     private fun DataOutputStream.str(v: String) { val b = v.toByteArray(Charsets.UTF_8); require(b.size <= MAX_TEXT_BYTES); writeInt(b.size); write(b) }
@@ -529,8 +584,15 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
 
     private companion object {
         const val MAGIC = 0x4f42434c // OBCL
-        const val VERSION = 3
+        const val LEGACY_VERSION_2 = 2
+        const val HISTORICAL_EVIDENCE_VERSION = 3
+        const val ITEM_SNAPSHOT_VERSION = 4
+        const val VERSION = 4
         const val MAX_TEXT_BYTES = 1024
+        const val MAX_ITEM_NAME_CHARS = 120
+        const val MAX_ITEM_NAME_BYTES = 320
+        const val MAX_ITEM_QUANTITY = 999
+        const val MAX_ITEMS_PER_SALE = 100
         const val MAX_SALES = 2000
         const val MAX_ATTEMPTS = 100
         const val MAX_EVIDENCE = 1000

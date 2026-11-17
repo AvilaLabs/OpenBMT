@@ -159,36 +159,45 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   no upper limit on the rate the provider sets; it refuses only one below the
   floor. No rate is ever below the fixed floor the
   node uses with Core, and until the first sample the fixed rates are used.
-- **SL-27. What it watches.** The funding output of each channel and every
-  output the library registers with `chain::Filter`. When a block that holds a
-  channel's funding leaves the chain, the library closes that channel by
-  force, and the shop's money comes back as from any close (SL-33, SL-36); a
-  later payment opens a new channel (SL-29). A channel the provider opened for
-  a payment is used before its funding confirms (SL-40). If that funding has
-  no confirmation within 144 blocks **[to tune]** of the payment, it is lost
-  and the money in the channel may never come; a funding beaten by another
-  transaction is found that way, since its channel never closes by itself. A
-  channel that closes before its funding is in a block loses it too. A funding
-  that was in a block is not lost when its channel closes: it counts as
-  confirmed once the shop's depth of blocks has passed since the block the
-  node last saw it in while the channel was open. A funding whose block left
-  the chain before the close was not in a block. A payment that came through a
-  channel already gone when the payment is taken is a payment through a lost
-  funding, unless the node last saw that channel's funding in a block: at the
-  shop's depth it is confirmed, and short of it, it is judged by that block as
-  above. What the node saw of a channel is kept in memory only, so after a
-  restart a payment through a channel that closed in between is a payment
-  through a lost funding. The node closes the channel of a lost funding by
-  force at once, and again at each check while it is still open, so nothing
-  more comes through it. Each sale paid at once through it, or accepted by a
-  person (CR-20) before any of its fundings was lost, is a cancel, as CR-14
-  says: the alarm, the pause, "Do not hand over" on its screen, and the POS
-  told it is unpaid (CR-30). A sale still waiting for that funding is told so,
-  and a manager can still accept it. A later payment through a funding already
-  lost is never paid at once. The counter tells the manager, and the owner
-  phone lists the sales paid through it: the first 64 by number, and the count
-  of all. If a write fails partway through, what was recorded before it is
-  still reported, and the rest is tried again.
+- **SL-27. Funding before the claim.** An inbound channel may carry a
+  claimable HTLC before its funding confirms, but the node does not release
+  the payment preimage until every channel that carried the payment has a
+  known funding output and at least the shop's configured confirmation depth
+  (at least one). An unconfirmed or unknown channel makes the HTLC fail back;
+  the invoice expectation remains available so the payer can retry after the
+  funding confirms. This protects the claim boundary, not just the later
+  cashier decision. The node also watches the funding output of each channel
+  and every output the library registers with `chain::Filter`. When a block
+  that holds a channel's funding leaves the chain, the library closes that
+  channel by force, and the shop's money comes back as from any close (SL-33,
+  SL-36); a later payment opens a new channel (SL-29). A funding that does not
+  confirm has no successful payment claim through this gate; an attempted
+  payment is failed back before the preimage is released. If funding tracking
+  has already recorded a claim, an unconfirmed funding with no confirmation
+  within 144 blocks **[to tune]** of that claim is lost and the money in the
+  channel may never come; a funding beaten by another transaction is found
+  that way, since its channel never closes by itself. A channel that closes
+  before its funding is in a block loses it too. A funding that was in a block
+  is not lost when its channel closes: it counts as confirmed once the shop's
+  depth of blocks has passed since the block the node last saw it in while
+  the channel was open. A funding whose block left the chain before the close
+  was not in a block. A payment that came through a channel already gone when
+  the payment is taken is a payment through a lost funding, unless the node
+  last saw that channel's funding in a block: at the shop's depth it is
+  confirmed, and short of it, it is judged by that block as above. What the
+  node saw of a channel is kept in memory only, so after a restart a payment
+  through a channel that closed in between is a payment through a lost
+  funding. The node closes the channel of a lost funding by force at once, and
+  again at each check while it is still open, so nothing more comes through
+  it. Each sale paid at once through it, or accepted by a person (CR-20)
+  before any of its fundings was lost, is a cancel, as CR-14 says: the alarm,
+  the pause, "Do not hand over" on its screen, and the POS told it is unpaid
+  (CR-30). A sale still waiting for that funding is told so, and a manager can
+  still accept it. A later payment through a funding already lost is never
+  paid at once. The counter tells the manager, and the owner phone lists the
+  sales paid through it: the first 64 by number, and the count of all. If a
+  write fails partway through, what was recorded before it is still reported,
+  and the rest is tried again.
 
 ## 5. The provider
 
@@ -197,9 +206,12 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
   (`lightning-liquidity` 0.2.8: `request_opening_params`,
   `select_opening_params`). `client_trusts_lsp` is the provider's own setting:
   with it false the provider sends the funding before the payment, and with it
-  true it may hold the funding back until the shop has taken the payment;
-  SL-27 and SL-40 cover a funding that does not come. The provider can be
-  changed at any time. OpenBMT runs none and takes nothing. When the provider
+  true it may hold the funding back until the shop has taken the payment. That
+  secret-first flow cannot complete a first just-in-time payment under SL-27
+  unless the funding is already confirmed; the payer must retry after funding
+  confirmation or use capacity funded ahead. The client does not change the
+  provider's trust setting. The provider can be changed at any time. OpenBMT
+  runs none and takes nothing. When the provider
   also offers LSPS1 (bLIP-51), the node buys room ahead: once the room to
   receive (SL-40) is under half the cap, it orders a channel that brings the
   room up to the cap (none when the provider's smallest channel is more than
@@ -348,13 +360,17 @@ on. The prototype used `ldk-node`; this crate does not (SL-02).
 ## 9. Tests
 
 - **SL-50. Regtest, end to end.** Against Bitcoin Core 32.1 and an LSPS2
-  provider: a first payment opens a channel; a second uses it; a sweep pays
+  provider: a first payment through unconfirmed funding is failed without
+  releasing a preimage or recording a paid claim; after Core confirms that
+  funding, a retry of the same invoice succeeds and a second payment uses the
+  channel; a sweep pays
   the counter's own address; a payment too big is never offered; the second
   device away holds a payment without a panic and finishes it on return; a
   restore from the newer copy works and from the older is refused; 1,000
   blocks offline then back is safe; a payment through a channel whose funding
-  Core is told never to mine is claimed, and 144 blocks later the funding is
-  reported lost and the channel is closed by force (SL-27).
+  Core is told never to mine is failed without releasing its preimage or
+  recording a paid claim; after Core confirms that exact funding, retrying the
+  same invoice succeeds (SL-27).
 - **SL-51. The key.** BIP-85 vectors (SL-10), on the stick and on the node.
   For three roots, the vector's and two sets of words, and indexes from 0 up
   to the highest, 2,147,483,647, the stick's child equals the node's byte for

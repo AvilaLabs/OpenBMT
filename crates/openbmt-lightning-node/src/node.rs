@@ -404,6 +404,35 @@ struct Shared {
     stop: Notify,
 }
 
+/// The funding facts needed before the node releases an inbound payment
+/// preimage. This is deliberately separate from the later paid-event funding
+/// log: that log is for cashier policy, while this gate protects settlement.
+#[derive(Debug, Clone, Copy)]
+struct ClaimChannelFunding {
+    channel_id: [u8; 32],
+    confirmations: Option<u32>,
+    has_funding_output: bool,
+}
+
+/// Whether every channel carrying a claimable payment has funding that LDK
+/// reports confirmed to the shop's configured depth. An empty/incomplete
+/// channel list, unknown channel, or unavailable expected output fails closed.
+fn claim_funding_ready(
+    receiving_channels: &[[u8; 32]],
+    channels: &[ClaimChannelFunding],
+    depth: u32,
+) -> bool {
+    let depth = depth.max(1);
+    !receiving_channels.is_empty()
+        && receiving_channels.iter().all(|channel_id| {
+            channels.iter().any(|channel| {
+                &channel.channel_id == channel_id
+                    && channel.has_funding_output
+                    && channel.confirmations.unwrap_or(0) >= depth
+            })
+        })
+}
+
 /// What the chain poll tells of each block: the monitors, the manager and the
 /// sweeper, in that order.
 struct Listeners {
@@ -2565,6 +2594,7 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
             purpose,
             amount_msat,
             counterparty_skimmed_fee_msat,
+            receiving_channel_ids,
             ..
         } => {
             // Only invoices this node made, not expired, and no more skimmed
@@ -2578,13 +2608,34 @@ async fn handle_event(shared: Arc<Shared>, event: Event) -> Result<(), ReplayEve
                 PaymentPurpose::Bolt11InvoicePayment { .. } => purpose.preimage(),
                 _ => None,
             };
-            let allowed = claim == Claim::Allowed;
+            // Never release the secret for a just-in-time payment until every
+            // channel that carried it has funding confirmed to the shop's
+            // policy depth. The later PaymentClaimed funding record is for
+            // cashier policy and cannot undo an already-released preimage.
+            let receiving_channels: Vec<[u8; 32]> = receiving_channel_ids
+                .iter()
+                .map(|(channel_id, _)| channel_id.0)
+                .collect();
+            let channel_fundings: Vec<ClaimChannelFunding> = shared
+                .manager
+                .list_channels()
+                .iter()
+                .map(|channel| ClaimChannelFunding {
+                    channel_id: channel.channel_id.0,
+                    confirmations: channel.confirmations,
+                    has_funding_output: channel.funding_txo.is_some()
+                        && channel.get_funding_output().is_some(),
+                })
+                .collect();
+            let funding_ready =
+                claim_funding_ready(&receiving_channels, &channel_fundings, shared.confirm_depth);
+            let allowed = claim == Claim::Allowed && funding_ready;
             match (preimage, allowed) {
                 (Some(p), true) => shared.manager.claim_funds(p),
                 _ => {
                     log(
                         Level::Warn,
-                        format!("refused a payment of {amount_msat} msat, skimmed {counterparty_skimmed_fee_msat}: {claim:?}"),
+                        format!("refused a payment of {amount_msat} msat, skimmed {counterparty_skimmed_fee_msat}: {claim:?}, funding_ready={funding_ready}"),
                     );
                     shared.manager.fail_htlc_backwards(&payment_hash);
                 }
@@ -2842,6 +2893,62 @@ mod tests {
     use crate::testutil::temp_dir;
     use lightning::routing::router::Router;
     use std::str::FromStr;
+
+    fn claim_channel(
+        id: u8,
+        confirmations: Option<u32>,
+        has_funding_output: bool,
+    ) -> ClaimChannelFunding {
+        ClaimChannelFunding {
+            channel_id: [id; 32],
+            confirmations,
+            has_funding_output,
+        }
+    }
+
+    #[test]
+    fn claim_gate_rejects_empty_or_unknown_receiving_channel_ids() {
+        assert!(!claim_funding_ready(
+            &[],
+            &[claim_channel(1, Some(2), true)],
+            1
+        ));
+        assert!(!claim_funding_ready(
+            &[[2; 32]],
+            &[claim_channel(1, Some(2), true)],
+            1
+        ));
+    }
+
+    #[test]
+    fn claim_gate_requires_a_known_funding_output_and_configured_depth() {
+        assert!(!claim_funding_ready(
+            &[[1; 32]],
+            &[claim_channel(1, Some(2), false)],
+            1
+        ));
+        assert!(!claim_funding_ready(
+            &[[1; 32]],
+            &[claim_channel(1, Some(1), true)],
+            2
+        ));
+        assert!(!claim_funding_ready(
+            &[[1; 32]],
+            &[claim_channel(1, None, true)],
+            1
+        ));
+    }
+
+    #[test]
+    fn claim_gate_requires_every_mpp_channel_and_accepts_confirmed_channels() {
+        let ids = [[1; 32], [2; 32]];
+        let channels = [
+            claim_channel(1, Some(2), true),
+            claim_channel(2, Some(1), true),
+        ];
+        assert!(!claim_funding_ready(&ids, &channels, 2));
+        assert!(claim_funding_ready(&ids, &channels, 1));
+    }
 
     /// A config whose files go in a directory of this test's own, since
     /// tests run at once and one test's start must not show in another's.

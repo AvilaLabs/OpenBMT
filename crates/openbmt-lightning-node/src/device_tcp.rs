@@ -157,19 +157,35 @@ async fn answer(device: &dyn SecondDevice, body: &[u8]) -> Vec<u8> {
         r.extend_from_slice(why.as_bytes());
         r
     };
-    if body.len() < 7 || body[..4] != MAGIC_SHOP_DEVICE {
+    let Some(magic) = body.get(..4) else {
+        return refused("magic");
+    };
+    if magic != MAGIC_SHOP_DEVICE {
         return refused("magic");
     }
-    let op = body[4];
-    let name_len = u16::from_be_bytes([body[5], body[6]]) as usize;
-    if body.len() < 7 + name_len {
+    let Some(op) = body.get(4).copied() else {
+        return refused("magic");
+    };
+    let Some(name_len_bytes) = body.get(5..7) else {
+        return refused("magic");
+    };
+    let Ok(name_len_bytes) = <[u8; 2]>::try_from(name_len_bytes) else {
+        return refused("magic");
+    };
+    let name_len = usize::from(u16::from_be_bytes(name_len_bytes));
+    let Some(name_end) = 7usize.checked_add(name_len) else {
         return refused("length");
-    }
-    let name = match std::str::from_utf8(&body[7..7 + name_len]) {
+    };
+    let Some(name_bytes) = body.get(7..name_end) else {
+        return refused("length");
+    };
+    let name = match std::str::from_utf8(name_bytes) {
         Ok(n) => n,
         Err(_) => return refused("name"),
     };
-    let blob = &body[7 + name_len..];
+    let Some(blob) = body.get(name_end..) else {
+        return refused("length");
+    };
     if op != OP_LIST && !name_is_valid(name) {
         return refused("name");
     }
@@ -247,6 +263,22 @@ mod tests {
         assert_eq!(dev.list().await.unwrap(), vec!["z".to_string()]);
         assert!(dev.write("../x", vec![1]).await.is_err());
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn truncated_tcp_request_headers_keep_the_protocol_refusals() {
+        let device = DirDevice::new(temp_dir("tcp-short-request")).unwrap();
+        assert_eq!(
+            answer(&device, &[]).await,
+            vec![ST_REFUSED, b'm', b'a', b'g', b'i', b'c']
+        );
+
+        let mut short_name = MAGIC_SHOP_DEVICE.to_vec();
+        short_name.extend_from_slice(&[OP_READ, 0, 2, b'x']);
+        assert_eq!(
+            answer(&device, &short_name).await,
+            vec![ST_REFUSED, b'l', b'e', b'n', b'g', b't', b'h']
+        );
     }
 
     #[tokio::test]

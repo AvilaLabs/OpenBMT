@@ -65,3 +65,7 @@ required-features = ["tcp-device"]
 name = "shop_regtest"
 path = "examples/shop_regtest.rs"
 required-features = ["tcp-device"]
+
+[[example]]
+name = "shop_monitor_audit"
+path = "examples/shop_monitor_audit.rs"

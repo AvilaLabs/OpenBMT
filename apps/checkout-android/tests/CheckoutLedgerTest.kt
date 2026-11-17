@@ -1,5 +1,8 @@
 package org.openbmt.checkout
 
+import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
+
 /** JVM harness tests for durable transitions; the coordinator owns compilation and execution. */
 object CheckoutLedgerTest {
     @JvmStatic fun main(args: Array<String>) {
@@ -10,6 +13,7 @@ object CheckoutLedgerTest {
         tenderExclusionAndQuoteFiatSnapshot()
         globalIdentifiersAndEvidenceBounds()
         refundSurvivesBitcoinReorgRestart()
+        immutableBasketAndLegacyMigration()
         duplicateAndCorruptStorage()
     }
 
@@ -174,6 +178,92 @@ object CheckoutLedgerTest {
         check(recovered.refunds.single().state == RefundState.REQUESTED)
         check(recovered.requiresReview && !recovered.paid)
         check(runCatching { ledger.beginCardAttempt("refund-reorg", "card-after-reorg", "square-sandbox", "stable-after-reorg", 1000) }.isFailure)
+    }
+
+    private fun immutableBasketAndLegacyMigration() {
+        val storage = MemoryStorage()
+        val ledger = CheckoutLedger(storage)
+        val mutableCart = mutableListOf(SaleItem("tea", "Green tea", 250, 2), SaleItem("mug", "Small mug", 500, 1))
+        val sale = ledger.createSale("basket", 1000, "USD", 70, mutableCart)
+        check(sale.items == mutableCart && sale.items.size == 2)
+        ledger.beginCardAttempt("basket", "basket-card", "square-sandbox", "basket-stable", 1000)
+        ledger.recordCardEvidence("basket", "basket-card", "basket-payment", "basket-stable", CardResult.COMPLETED, 1000, 71)
+        ledger.requestRefund("basket", "basket-refund", "basket-card", 250, 0, 72)
+        mutableCart[0] = SaleItem("tea", "Changed later", 1, 1)
+        check(ledger.getSale("basket").items == listOf(SaleItem("tea", "Green tea", 250, 2), SaleItem("mug", "Small mug", 500, 1)))
+        val exposed = ledger.getSale("basket").items as MutableList<SaleItem>
+        exposed.clear()
+        val restored = CheckoutLedger(storage).getSale("basket")
+        check(restored.items.size == 2 && restored.refunds.single().state == RefundState.REQUESTED)
+        check(runCatching { ledger.createSale("wrong-total", 999, "USD", 73, listOf(SaleItem("tea", "Green tea", 250, 2), SaleItem("mug", "Small mug", 500, 1))) }.isFailure)
+        check(runCatching { ledger.createSale("overflow-price", Long.MAX_VALUE, "USD", 74, listOf(SaleItem("big", "Big", Long.MAX_VALUE, 2))) }.isFailure)
+        check(runCatching { ledger.createSale("bad-quantity", 100, "USD", 75, listOf(SaleItem("tea", "Green tea", 100, 0))) }.isFailure)
+        check(runCatching { ledger.createSale("too-many-items", 101, "USD", 76, List(101) { SaleItem("p$it", "Item", 1, 1) }) }.isFailure)
+        check(runCatching { ledger.createSale("bad-name", 1, "USD", 77, listOf(SaleItem("tea", " ", 1, 1))) }.isFailure)
+        check(runCatching { ledger.createSale("bad-unit", 1, "USD", 78, listOf(SaleItem("tea", "Tea", 0, 1))) }.isFailure)
+
+        for (version in listOf(2, 3)) {
+            val legacyStorage = MemoryStorage().also { it.bytes = legacySaleBytes(version, "legacy-v$version") }
+            val migrated = CheckoutLedger(legacyStorage)
+            check(migrated.getSale("legacy-v$version").let { it.items.isEmpty() && it.paid && it.attempts.single().state == PaymentState.CONFIRMED })
+            migrated.createSale("after-migration-v$version", 25, "USD", 79, listOf(SaleItem("water", "Water", 25, 1)))
+            val recovered = CheckoutLedger(legacyStorage)
+            check(recovered.getSale("legacy-v$version").let { it.items.isEmpty() && it.paid && it.attempts.single().state == PaymentState.CONFIRMED })
+            check(recovered.getSale("after-migration-v$version").items.single().productId == "water")
+        }
+        for ((case, chainState, confirmations) in listOf(
+            Triple("unconfirmed", BitcoinChainState.ACTIVE, 0),
+            Triple("reorged", BitcoinChainState.REORGED, 0),
+        )) {
+            val legacyStorage = MemoryStorage().also { it.bytes = legacySaleBytes(2, "legacy-v2-$case", chainState, confirmations) }
+            val migrated = CheckoutLedger(legacyStorage)
+            val oldSale = migrated.getSale("legacy-v2-$case")
+            check(oldSale.attempts.single().bitcoinEvidence.single().historicalConfirmedSats == 0L)
+            check(runCatching { migrated.requestRefund("legacy-v2-$case", "unproven-refund", "legacy-btc", 0, 500, 80) }.isFailure)
+        }
+        val unverifiableRefund = MemoryStorage().also {
+            it.bytes = legacySaleBytes(2, "legacy-v2-refund", BitcoinChainState.REORGED, 0, refundRequest = true)
+        }
+        val originalBytes = unverifiableRefund.bytes!!.copyOf()
+        val loadFailure = runCatching { CheckoutLedger(unverifiableRefund) }.exceptionOrNull()
+        check(loadFailure?.message?.contains("legacy v2 refund cannot be verified") == true)
+        check(unverifiableRefund.bytes!!.contentEquals(originalBytes)) // fail closed without rewriting the legacy file
+    }
+
+    /** A v2/v3 on-disk paid sale, before v4 introduced item snapshots. */
+    private fun legacySaleBytes(version: Int, saleId: String, chainState: BitcoinChainState = BitcoinChainState.ACTIVE,
+                                confirmations: Int = 1, refundRequest: Boolean = false): ByteArray = ByteArrayOutputStream().also { bytes ->
+        DataOutputStream(bytes).use { out ->
+            out.writeInt(0x4f42434c); out.writeInt(version); out.writeInt(1)
+            writeString(out, saleId); out.writeLong(500); writeString(out, "USD"); out.writeLong(69)
+            out.writeInt(1) // attempts
+            writeString(out, "legacy-btc"); out.writeInt(Tender.BITCOIN.ordinal); out.writeLong(500)
+            out.writeBoolean(true); out.writeLong(1000) // expected sats
+            writeNullableString(out, "legacy-quote"); out.writeBoolean(true); out.writeLong(68) // quote id / time
+            out.writeBoolean(true); out.writeLong(900) // counter index
+            out.writeBoolean(false); out.writeBoolean(false) // card provider / stable id
+            out.writeBoolean(false); out.writeBoolean(false); out.writeBoolean(false) // cancel / ack / unknown
+            out.writeInt(1) // Bitcoin evidence
+            writeString(out, "legacy-output"); writeString(out, "legacy-tx:0"); out.writeLong(1000)
+            out.writeInt(confirmations); out.writeInt(1); out.writeLong(67); out.writeInt(chainState.ordinal)
+            if (version >= 3) out.writeLong(1000) // v3 historical confirmed sats
+            out.writeInt(0) // card evidence
+            out.writeInt(if (refundRequest) 1 else 0)
+            if (refundRequest) {
+                writeString(out, "legacy-refund"); writeString(out, "legacy-btc")
+                out.writeLong(0); out.writeLong(500); out.writeLong(68); out.writeInt(0)
+            }
+        }
+    }.toByteArray()
+
+    private fun writeNullableString(out: DataOutputStream, value: String?) {
+        out.writeBoolean(value != null)
+        if (value != null) writeString(out, value)
+    }
+
+    private fun writeString(out: DataOutputStream, value: String) {
+        val bytes = value.toByteArray(Charsets.UTF_8)
+        out.writeInt(bytes.size); out.write(bytes)
     }
 
     private class MemoryStorage : DurableLedgerStorage {

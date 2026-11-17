@@ -14,7 +14,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Button
-import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -29,8 +29,11 @@ import java.util.UUID
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import org.openbmt.app.AnimatedQrView
+import org.openbmt.app.ButtonKind
 import org.openbmt.app.DurableFile
 import org.openbmt.app.KeystoreSealer
+import org.openbmt.app.LineStyle
+import org.openbmt.app.ReceiptLine
 import org.openbmt.app.ScanFailure
 import org.openbmt.app.ScanFlow
 import org.openbmt.app.SealedFile
@@ -68,7 +71,6 @@ open class CheckoutActivity : Activity() {
     private val nativeLock = ReentrantLock(true)
     private var activeSaleId: String? = null
     private var activeAttemptId: String? = null
-    private var amountField: EditText? = null
     private var config: org.openbmt.counter.PairingInfo? = null
     private var latestCounterLine = "Counter is starting."
     private var lastNativeRefreshAt = 0L
@@ -81,8 +83,18 @@ open class CheckoutActivity : Activity() {
     private var receiptToResume: String? = null
     private var navigationRevision = 0L
     private var homeStatusView: TextView? = null
-    private var openBitcoinButton: Button? = null
-    private var cardSandboxButton: Button? = null
+    private var homePrimaryButton: Button? = null
+    private var homePrimaryAllowed = false
+    private var tenderStatusView: TextView? = null
+    private var tenderBitcoinButton: Button? = null
+    private val cartQuantities = linkedMapOf<String, Int>()
+
+    private data class CatalogProduct(val id: String, val name: String, val unitMinor: Long)
+
+    private val sampleCatalog = listOf(
+        CatalogProduct("latte", "Latte", 550L),
+        CatalogProduct("bagel", "Bagel", 450L),
+    )
 
     /** The plain APK has no Square class on its class path. The Sandbox project overrides this. */
     protected open fun createCardCheckoutBridge(): CardCheckoutBridge? = null
@@ -100,12 +112,19 @@ open class CheckoutActivity : Activity() {
             // A damaged ledger is a blocking fault. Never replace it with an empty ledger on startup.
             ledger = CheckoutLedger(AndroidLedgerStorage(noBackup, LEDGER_FILE))
             pairing = pairingFile.load()
+            restoreSavedUiState(savedInstanceState)
         } catch (e: Exception) {
             show("Saved test data cannot be opened", "No saved checkout data was reset or changed. Close this test app and report the storage fault.", listOf("Close test app" to { finish() }), "Details: ${safeDetail(e)}")
             return
         }
         if (pairing == null) consumePrivateFixture()
-        if (pairing == null) showSetup() else showHome()
+        if (pairing == null) showSetup() else {
+            val savedReceipt = receiptToResume
+            if (savedReceipt == null) showHome() else try { showReceipt(savedReceipt) } catch (_: Exception) {
+                receiptToResume = null
+                showSalesIfPossible()
+            }
+        }
     }
 
     override fun onStart() {
@@ -132,6 +151,25 @@ open class CheckoutActivity : Activity() {
     override fun onDestroy() {
         scan.stop()
         super.onDestroy()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putStringArrayList(CART_IDS_KEY, ArrayList(cartQuantities.keys))
+        outState.putIntArray(CART_QUANTITIES_KEY, cartQuantities.values.toIntArray())
+        outState.putString(RECEIPT_KEY, receiptToResume)
+        super.onSaveInstanceState(outState)
+    }
+
+    private fun restoreSavedUiState(saved: Bundle?) {
+        receiptToResume = saved?.getString(RECEIPT_KEY)
+        val ids = saved?.getStringArrayList(CART_IDS_KEY) ?: return
+        val quantities = saved.getIntArray(CART_QUANTITIES_KEY) ?: return
+        cartQuantities.clear()
+        for (index in 0 until minOf(ids.size, quantities.size)) {
+            val id = ids[index]
+            val quantity = quantities[index]
+            if (sampleCatalog.any { it.id == id } && quantity in 1..MAX_CART_QUANTITY) cartQuantities[id] = quantity
+        }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -346,9 +384,14 @@ open class CheckoutActivity : Activity() {
                     latestCounterLine = "Counter connected to Regtest."
                     resumePendingSale()
                     val receiptId = receiptToResume
+                    val pendingTenderId = pendingTenderSaleId()
                     when {
                         receiptId != null -> showReceipt(receiptId)
-                        navigationRevision == startupNavigationRevision -> if (activeSaleId != null) renderActiveSale() else showHome()
+                        navigationRevision == startupNavigationRevision -> when {
+                            pendingTenderId != null -> showTenderChoice(pendingTenderId)
+                            activeSaleId != null -> renderActiveSale()
+                            else -> showHome()
+                        }
                         else -> Unit
                     }
                     startPump(run, started)
@@ -419,6 +462,10 @@ open class CheckoutActivity : Activity() {
         }
     }
 
+    private fun pendingTenderSaleId(): String? = ledger.listSales().asReversed().firstOrNull { sale ->
+        sale.attempts.isEmpty() && sale.remainingMinor > 0 && !sale.requiresReview
+    }?.saleId
+
     private fun reconcileBitcoinAttempts() {
         val currentNode = node ?: return
         val runSales = ledger.listSales()
@@ -477,69 +524,228 @@ open class CheckoutActivity : Activity() {
         val info = config ?: try { pairing?.let { Shop.pairing(it, nodeDir.path) } } catch (_: Exception) { null }
         if (info == null) return showStatus("Regtest checkout is not ready", "The pairing could not be read. No payment code is available.")
         config = info
-        val currency = info.settings.currency
         val healthy = try { node?.let { nativeLock.withLock { it.status().health?.healthy == true } } ?: false } catch (_: Exception) { false }
         latestCounterLine = when {
+            hasUnresolvedSale() -> "An earlier sale needs follow-up. New orders will be saved separately."
             node == null -> "Counter is starting."
-            hasUnresolvedSale() -> "Resolve the saved sale before starting another checkout."
             healthy -> "Regtest counter checks are healthy."
             else -> "Waiting for the Regtest counter's native network checks."
         }
-        val title = if (currency == "SAT") "Amount in sats" else "Amount in USD"
-        val field = EditText(this).apply {
-            hint = if (currency == "SAT") "e.g. 8000" else "e.g. 8.00"
-            inputType = if (currency == "SAT") android.text.InputType.TYPE_CLASS_NUMBER else android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
-            setSingleLine(true)
-        }
-        amountField = field
-        val quoteLine = if (currency == "SAT") "Bitcoin Standard: the entered amount is satoshis; no price is fetched." else "DEVELOPER REGTEST QUOTE: USD 100,000 per BTC. This is fixed test data, not a live price."
-        showWithEdit(
-            "Regtest Bitcoin checkout",
-            "TEST ONLY · REGTEST · NO REAL FUNDS\n\n$quoteLine\n\nEnter a test amount. The app creates the code and uses the counter's watcher for payment evidence. There is no manual paid button.",
-            title,
-            field,
-            listOf(
-                "Create Bitcoin payment code" to { openBitcoinSale(field.text.toString()) },
-                "Sales and receipts" to { showSales() },
-                "Card Sandbox" to { startCardFlow() },
-                "About this test app" to { showAbout() },
-            ),
-            status = text(latestCounterLine, 14f, true).also { homeStatusView = it },
-        )
-        openBitcoinButton = rootButtonByText("Create Bitcoin payment code")
-        openBitcoinButton?.isEnabled = healthy && !hasUnresolvedSale()
-        cardSandboxButton = rootButtonByText("Card Sandbox")
-        cardSandboxButton?.isEnabled = cardBridge != null
+        if (info.settings.currency == "USD") showCatalog(healthy) else showManualCheckout(healthy)
     }
 
-    private fun openBitcoinSale(raw: String) {
-        val currentNode = node ?: return showStatus("Counter is starting", "Wait until the Regtest counter is connected. No code has been made.")
-        val healthy = try { nativeLock.withLock { currentNode.status().health?.healthy == true } } catch (_: Exception) { false }
-        if (hasUnresolvedSale()) return showHomeWithError("Resolve the saved sale before opening another checkout. No sale or attempt was created.")
-        if (!healthy) return showHomeWithError("The counter's native network checks are not ready. No sale or attempt was created.")
-        val info = config ?: return showHome()
-        if (info.network != CounterNetwork.Regtest) return showHome()
-        val amount = try { parseAmount(raw, info.settings.currency) } catch (e: Exception) {
-            return showHomeWithError("Enter a positive ${if (info.settings.currency == "SAT") "whole satoshi amount" else "USD amount with at most two decimal places"}.")
+    private fun showCatalog(healthy: Boolean) {
+        val body = ArrayList<View>()
+        body.add(ui.receipt(listOf(
+            ReceiptLine("Sample catalog · USD", LineStyle.Strong),
+            ReceiptLine("TEST ONLY · Regtest · no real funds or handover", LineStyle.Small),
+        )))
+        body.add(ui.text("Sample items only. No provider catalog or inventory is connected.", 14f, colour = ui.pal.secondary))
+        if (hasUnresolvedSale()) body.add(ui.receipt(listOf(
+            ReceiptLine("Earlier sale needs follow-up", LineStyle.Strong),
+            ReceiptLine("It remains in Sales with its original attempts and evidence. This basket creates a separate sale.", LineStyle.Small),
+        )))
+        for (product in sampleCatalog) {
+            val quantity = cartQuantities[product.id] ?: 0
+            body.add(ui.receipt(listOf(
+                ReceiptLine(product.name, LineStyle.Strong),
+                ReceiptLine("${formatAmount(product.unitMinor, "USD")} each · quantity $quantity"),
+            )))
+            val controls = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val removeButton = ui.button("Remove", ButtonKind.Secondary) {
+                val current = cartQuantities[product.id] ?: 0
+                if (current <= 1) cartQuantities.remove(product.id) else cartQuantities[product.id] = current - 1
+                showCatalog(healthy)
+            }
+            removeButton.isEnabled = quantity > 0
+            controls.addView(removeButton, LinearLayout.LayoutParams(0, -2, 1f).also { it.rightMargin = ui.px(6) })
+            controls.addView(ui.button("Add", ButtonKind.Primary) {
+                val current = cartQuantities[product.id] ?: 0
+                if (current >= MAX_CART_QUANTITY) {
+                    Toast.makeText(this, "Maximum quantity is $MAX_CART_QUANTITY per item", Toast.LENGTH_SHORT).show()
+                } else {
+                    cartQuantities[product.id] = current + 1
+                    showCatalog(healthy)
+                }
+            }, LinearLayout.LayoutParams(0, -2, 1f).also { it.leftMargin = ui.px(6) })
+            body.add(controls)
+        }
+        val total = try { cartTotalMinor() } catch (_: ArithmeticException) {
+            return showHomeWithError("The sample basket total is outside the supported range.")
+        }
+        body.add(ui.facts(listOf(
+            "Items" to cartQuantities.values.sum().toString(),
+            "Total" to formatAmount(total, "USD"),
+        )))
+        val statusView = ui.text(latestCounterLine, 13f, colour = ui.pal.secondary)
+        body.add(statusView)
+        val review = ui.primary("Review basket · ${formatAmount(total, "USD")}") { showCartReview(healthy) }
+        review.isEnabled = cartQuantities.isNotEmpty()
+        val actions = mutableListOf(
+            review,
+            ui.secondary("Manual amount") { showManualCheckout(healthy) },
+            ui.quiet("Sales and receipts") { showSales() },
+        )
+        showUiPage(ui.bar("Checkout", sub = "Sample items", logo = true, gear = { showAbout() }), body, actions)
+        homeStatusView = statusView
+        homePrimaryButton = review
+        homePrimaryAllowed = cartQuantities.isNotEmpty()
+    }
+
+    private fun showCartReview(healthy: Boolean) {
+        if (cartQuantities.isEmpty()) return showCatalog(healthy)
+        val items = cartItemsSnapshot()
+        val total = checkedItemsTotal(items)
+        val body = ArrayList<View>()
+        body.add(ui.text("Review the basket before creating its saved sale.", 15f))
+        body.add(ui.receipt(items.map { item ->
+            ReceiptLine("${item.name} · ${item.quantity} × ${formatAmount(item.unitMinor, "USD")} = ${formatAmount(Math.multiplyExact(item.unitMinor, item.quantity.toLong()), "USD")}")
+        }))
+        body.add(ui.facts(listOf("Total" to formatAmount(total, "USD"))))
+        body.add(ui.text("The item names, unit prices and quantities will be saved with this receipt.", 13f, colour = ui.pal.secondary))
+        val charge = ui.primary("Charge once · choose payment") {
+            confirmSaleCreation(total, "USD", items)
+        }
+        showUiPage(
+            ui.bar("Review basket", back = { showCatalog(healthy) }), body,
+            listOf(charge, ui.secondary("Keep editing") { showCatalog(healthy) }),
+        )
+    }
+
+    private fun showManualCheckout(healthy: Boolean) {
+        val info = config ?: return showSetup()
+        val currency = info.settings.currency
+        val quoteLine = if (currency == "SAT") "Bitcoin Standard uses the entered whole-satoshi amount." else "Developer Regtest quote: $100,000/BTC. This is fixed test data, not a live price."
+        val field = ui.field(if (currency == "SAT") "Amount in sats" else "Amount in USD")
+        field.inputType = if (currency == "SAT") android.text.InputType.TYPE_CLASS_NUMBER else android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        field.setSingleLine(true)
+        val statusView = ui.text(latestCounterLine, 13f, colour = ui.pal.secondary)
+        val body = listOf(
+            ui.receipt(listOf(ReceiptLine("Manual amount", LineStyle.Strong), ReceiptLine("TEST ONLY · Regtest", LineStyle.Small))),
+            if (hasUnresolvedSale()) ui.receipt(listOf(
+                ReceiptLine("Earlier sale needs follow-up", LineStyle.Strong),
+                ReceiptLine("This manual amount creates a separate sale; earlier attempts remain unchanged.", LineStyle.Small),
+            )) else ui.text("Manual test amount", 13f, colour = ui.pal.secondary),
+            ui.text(quoteLine, 14f, colour = ui.pal.secondary),
+            field,
+            statusView,
+        )
+        val review = ui.primary("Review amount · choose payment") { createManualSale(field.text.toString()) }
+        review.isEnabled = true
+        showUiPage(
+            ui.bar(if (currency == "SAT") "Amount in sats" else "Manual amount", back = { if (currency == "USD") showCatalog(healthy) else showHome() }, logo = true),
+            body,
+            listOf(review, ui.quiet("Sales and receipts") { showSales() }),
+        )
+        homeStatusView = statusView
+        homePrimaryButton = review
+        homePrimaryAllowed = true
+    }
+
+    private fun createManualSale(raw: String) {
+        val info = config ?: return showSetup()
+        val amount = try { parseAmount(raw, info.settings.currency) } catch (_: Exception) {
+            return Toast.makeText(this, "Enter a positive ${if (info.settings.currency == "SAT") "whole-satoshi" else "USD"} amount.", Toast.LENGTH_LONG).show()
         }
         val quote = quote(info.settings.currency, amount)
-        if (quote.expectedSats <= 0 || quote.expectedSats > 2_100_000_000_000_000L) return showHomeWithError("This test amount is outside the supported range.")
+        if (quote.expectedSats <= 0 || quote.expectedSats > MAX_SUPPORTED_SATS) return showHomeWithError("This test amount is outside the supported range.")
         if (quote.expectedSats < info.settings.minSaleSats) return showHomeWithError("This test amount is below the paired counter's minimum sale of ${formatSats(info.settings.minSaleSats)}.")
-        val saleId = UUID.randomUUID().toString()
+        confirmSaleCreation(amount, info.settings.currency, emptyList())
+    }
+
+    private fun confirmSaleCreation(amountMinor: Long, currency: String, items: List<SaleItem>) {
+        val followup = latestFollowupSale()
+        val create = {
+            val saleId = UUID.randomUUID().toString()
+            try {
+                ledger.createSale(saleId, amountMinor, currency, nowSecs(), items)
+                if (items.isNotEmpty()) cartQuantities.clear()
+                showTenderChoice(saleId)
+            } catch (e: Exception) {
+                showHomeWithError("The sale could not be saved. No payment attempt was started. Details: ${safeDetail(e)}")
+            }
+        }
+        if (followup == null) return create()
+        AlertDialog.Builder(this)
+            .setTitle("Earlier sale needs follow-up")
+            .setMessage("${formatAmount(followup.amountMinor, followup.currency)} · ${saleStateLabel(followup)}\n\nIts attempts and evidence will stay unchanged. Start a separate sale only if this is a different customer order.")
+            .setNegativeButton("Resume earlier sale") { _, _ ->
+                if (followup.attempts.isEmpty()) showTenderChoice(followup.saleId) else showReceipt(followup.saleId)
+            }
+            .setNeutralButton("Cancel", null)
+            .setPositiveButton("Start separate sale") { _, _ -> create() }
+            .show()
+    }
+
+    private fun showTenderChoice(saleId: String) {
+        receiptToResume = null
+        val sale = try { ledger.getSale(saleId) } catch (_: Exception) { return showSalesIfPossible() }
+        val body = ArrayList<View>()
+        body.add(ui.receipt(sale.items.map { item ->
+            ReceiptLine("${item.name} · ${item.quantity} × ${formatAmount(item.unitMinor, sale.currency)}")
+        }.ifEmpty { listOf(ReceiptLine("Manual amount sale", LineStyle.Small)) }))
+        body.add(ui.facts(listOf("Sale total" to formatAmount(sale.amountMinor, sale.currency))))
+        body.add(ui.text("Choose one payment method for this saved sale. The payment attempt is recorded before the counter or card SDK is called.", 14f, colour = ui.pal.secondary))
+        if (sale.currency == "USD" && cardBridge == null) body.add(ui.text("Square Sandbox is not included in this base build.", 13f, colour = ui.pal.secondary))
+        val healthy = try { node?.let { nativeLock.withLock { it.status().health?.healthy == true } } ?: false } catch (_: Exception) { false }
+        val statusView = ui.text(
+            if (healthy) "Native Bitcoin checks are ready." else "Waiting for native Regtest network checks.",
+            13f,
+            colour = ui.pal.secondary,
+        )
+        body.add(statusView)
+        val bitcoin = ui.primary("Pay with Bitcoin") { openBitcoinSale(saleId) }
+        bitcoin.isEnabled = healthy
+        val actions = mutableListOf(bitcoin)
+        if (sale.currency == "USD" && cardBridge != null) {
+            actions.add(ui.secondary("Pay with Square Sandbox") { beginSquareAttempt(saleId, sale.remainingMinor) })
+        }
+        actions.add(ui.quiet("Sales and receipts") { showSales() })
+        showUiPage(ui.bar("Choose payment", back = { showReceipt(saleId) }), body, actions)
+        tenderStatusView = statusView
+        tenderBitcoinButton = bitcoin
+    }
+
+    private fun cartItemsSnapshot(): List<SaleItem> = sampleCatalog.mapNotNull { product ->
+        val quantity = cartQuantities[product.id] ?: return@mapNotNull null
+        if (quantity <= 0) return@mapNotNull null
+        SaleItem(product.id, product.name, product.unitMinor, quantity)
+    }
+
+    private fun checkedItemsTotal(items: List<SaleItem>): Long = items.fold(0L) { total, item ->
+        Math.addExact(total, Math.multiplyExact(item.unitMinor, item.quantity.toLong()))
+    }
+
+    private fun cartTotalMinor(): Long = checkedItemsTotal(cartItemsSnapshot())
+
+    private fun openBitcoinSale(saleId: String) {
+        val currentNode = node ?: return showStatus("Counter is starting", "Wait until the Regtest counter is connected. No code has been made.")
+        val healthy = try { nativeLock.withLock { currentNode.status().health?.healthy == true } } catch (_: Exception) { false }
+        if (!healthy) return showMessage("Bitcoin is not ready", "The native Regtest counter has not passed its network checks. No Bitcoin attempt was created; you can choose Square Sandbox if enabled.") { showTenderChoice(saleId) }
+        val info = config ?: return showHome()
+        if (info.network != CounterNetwork.Regtest) return showHome()
+        val sale = try { ledger.getSale(saleId) } catch (_: Exception) { return showSalesIfPossible() }
+        val amount = sale.remainingMinor
+        if (amount <= 0) return showReceipt(saleId)
+        val quote = quote(info.settings.currency, amount)
+        if (quote.expectedSats <= 0 || quote.expectedSats > MAX_SUPPORTED_SATS) return showReceipt(saleId)
+        if (quote.expectedSats < info.settings.minSaleSats) return showMessage("Amount is below the counter minimum", "No Bitcoin attempt was created. Choose another payment method or review the saved sale.") { showTenderChoice(saleId) }
         val attemptId = UUID.randomUUID().toString()
         val createdAt = nowSecs()
         try {
             // The native index is predictable before open because this prototype permits one live node and no concurrent cashier.
             val existing = nativeLock.withLock { currentNode.status().sales }
             val counterIndex = (existing.maxOrNull() ?: -1L) + 1L
-            ledger.createSale(saleId, amount, info.settings.currency, createdAt)
             ledger.beginBitcoinAttempt(saleId, attemptId, counterIndex, amount, quote.expectedSats, quote.id, quote.at)
             val opened: Opened = nativeLock.withLock {
                 currentNode.open(createdAt, amount, info.settings.currency, quote.rate, quote.source, quote.at)
             }
             if (opened.index != counterIndex) {
                 ledger.requestCancellation(saleId, attemptId)
-                showMessage("No payment code was shown", "The native counter returned an unexpected sale index. Stop here and report this test-build fault.", "Expected $counterIndex · received ${opened.index}") { showHome() }
+                showMessage("No payment code was shown", "The native counter returned an unexpected sale index. Stop here and report this test-build fault.", "Expected $counterIndex · received ${opened.index}") { showReceipt(saleId) }
                 return
             }
             activeSaleId = saleId
@@ -549,7 +755,7 @@ open class CheckoutActivity : Activity() {
             activeNativeScreen = nativeLock.withLock { currentNode.judge(nowSecs(), opened.index) }
             renderActiveSale()
         } catch (e: Exception) {
-            showHomeWithError("The attempt was saved, but no usable payment code was opened. Keep it in Sales for reconciliation. Details: ${safeDetail(e)}")
+            showMessage("Bitcoin attempt needs review", "The sale and attempt remain saved. No payment code is available; inspect the receipt before choosing another tender.", safeDetail(e)) { showReceipt(saleId) }
         }
     }
 
@@ -577,9 +783,10 @@ open class CheckoutActivity : Activity() {
         val attemptId = activeAttemptId ?: return showHome()
         val sale = try { ledger.getSale(saleId) } catch (_: Exception) { return showHome() }
         val attempt = sale.attempts.firstOrNull { it.attemptId == attemptId } ?: return showHome()
+        if (sale.paid && !sale.requiresReview) return showReceipt(saleId)
         val native = activeNativeScreen
         val amountText = formatAmount(sale.amountMinor, sale.currency)
-        val received = if (sale.currency == "SAT") formatSats(attempt.receivedSats) else "${formatAmount(sale.receivedMinor, sale.currency)} received in the ledger · ${formatSats(attempt.receivedSats)} observed"
+        val received = formatAmount(sale.receivedMinor, sale.currency)
         val state = when {
             sale.requiresReview -> "OWNER REVIEW REQUIRED · review payment and refund evidence before fulfillment"
             native?.state == SaleState.Final || attempt.state == PaymentState.CONFIRMED || attempt.state == PaymentState.PAID -> "Confirmed by the Regtest counter"
@@ -596,7 +803,7 @@ open class CheckoutActivity : Activity() {
         val payment = if (attempt.cancellationAcknowledged) null else activePayment ?: native?.payment
         val uri = if (attempt.cancellationAcknowledged) "" else payment?.copyUri ?: activeUri.orEmpty()
         val actions = ArrayList<Pair<String, () -> Unit>>()
-        if (!attempt.cancellationAcknowledged) actions.add("Copy Bitcoin payment code" to { copyText(uri); Toast.makeText(this, "Copied the Bitcoin payment code", Toast.LENGTH_SHORT).show() })
+        if (!attempt.cancellationAcknowledged && uri.isNotEmpty()) actions.add("Copy Bitcoin payment code" to { copyText(uri); Toast.makeText(this, "Copied the Bitcoin payment code", Toast.LENGTH_SHORT).show() })
         if (!attempt.cancellationAcknowledged && attempt.state !in setOf(PaymentState.CONFIRMED, PaymentState.PAID)) {
             actions.add((if (attempt.cancellationRequested) "Try cancellation again" else "Cancel checkout") to {
                 val index = attempt.counterIndex
@@ -613,14 +820,38 @@ open class CheckoutActivity : Activity() {
             native?.reopened, uri, actions.joinToString("|") { it.first },
         ).joinToString("\u0000")
         if (activeSaleRootShown && renderKey == lastActiveSaleRenderKey) return
-        val qrView = payment?.let { PaymentQrView(this, it) }
-        showWithExtra(
-            "Bitcoin payment · TEST ONLY",
-            "Amount: $amountText\n$state\n$received\n${if (attempt.cancellationAcknowledged) "\nThe counter acknowledged cancellation. The old payment code is hidden, and late evidence continues to be watched." else ""}\n\nTEST ONLY · REGTEST · Do not hand over goods. No real funds.\n\n${native?.words?.what.orEmpty()}\n${native?.words?.next.orEmpty()}",
-            uri,
-            qrView,
-            actions,
-        )
+        val body = ArrayList<View>()
+        body.add(ui.text(amountText, 32f, bold = true))
+        body.add(ui.text(state, 15f, bold = sale.requiresReview || attempt.state in setOf(PaymentState.REORGED, PaymentState.UNCONFIRMED)))
+        body.add(ui.text("TEST ONLY · Regtest · do not hand over goods", 12f, colour = ui.pal.secondary))
+        if (attempt.cancellationAcknowledged) {
+            body.add(ui.receipt(listOf(
+                ReceiptLine("Cancellation acknowledged", LineStyle.Strong),
+                ReceiptLine("The old payment code is hidden. Late evidence continues to be watched.", LineStyle.Small),
+            )))
+        }
+        payment?.let { payment ->
+            body.add(FrameLayout(this).apply {
+                minimumHeight = dp(240)
+                addView(PaymentQrView(this@CheckoutActivity, payment), FrameLayout.LayoutParams(-1, dp(240)))
+            })
+        }
+        val progress = if (sale.currency == "SAT") {
+            "Received $received · Remaining ${formatAmount(sale.remainingMinor, sale.currency)}"
+        } else {
+            "Received $received · ${formatSats(attempt.receivedSats)} observed · Remaining ${formatAmount(sale.remainingMinor, sale.currency)}"
+        }
+        body.add(ui.text(progress, 13f, colour = ui.pal.secondary))
+        if (uri.isNotEmpty()) body.add(ui.text(uri, 12f, mono = true, colour = ui.pal.secondary))
+        val actionButtons = actions.map { (label, action) ->
+            when {
+                label == "Copy Bitcoin payment code" -> ui.primary(label, onClick = action)
+                label == "Cancel checkout" || label == "Try cancellation again" -> ui.button(label, ButtonKind.Danger, action)
+                label == "Sales and receipts" -> ui.quiet(label, action)
+                else -> ui.secondary(label, action)
+            }
+        }
+        showUiPage(ui.bar("Bitcoin payment", sub = "TEST ONLY · Regtest", back = { showSales() }, logo = true), body, actionButtons)
         lastActiveSaleRenderKey = renderKey
         activeSaleRootShown = true
     }
@@ -651,58 +882,81 @@ open class CheckoutActivity : Activity() {
         activeSaleShowing = false
         val sales = ledger.listSales().asReversed()
         if (sales.isEmpty()) return showHomeWithError("There are no test sales yet.")
-        val choices = sales.map { sale ->
-            val label = "${formatAmount(sale.amountMinor, sale.currency)} · ${saleStateLabel(sale)}"
-            label to { showReceipt(sale.saleId) }
-        }.toMutableList()
-        choices.add("Back to checkout" to { showHome() })
-        show("Sales and receipts", "Durable local test ledger · newest first\n\nEvery row comes from a saved sale and payment attempt. A card approval is not shown as paid.", choices)
+        val body = ArrayList<View>()
+        if (hasUnresolvedSale()) body.add(ui.receipt(listOf(
+            ReceiptLine("Follow-up needed", LineStyle.Strong),
+            ReceiptLine("Each sale keeps its own attempts and evidence. Start another order only through the separate-sale acknowledgement.", LineStyle.Small),
+        )))
+        for (sale in sales) {
+            val lines = ArrayList<ReceiptLine>()
+            lines.add(ReceiptLine("${formatAmount(sale.amountMinor, sale.currency)} · ${saleStateLabel(sale)}", LineStyle.Strong))
+            val itemSummary = sale.items.joinToString(", ") { "${it.quantity} × ${it.name}" }
+            lines.add(ReceiptLine(if (itemSummary.isEmpty()) "Manual amount" else itemSummary, LineStyle.Small))
+            body.add(ui.receipt(lines))
+            body.add(ui.secondary("Open receipt") { showReceipt(sale.saleId) })
+        }
+        showUiPage(
+            ui.bar("Sales and receipts", back = { showHome() }, logo = true),
+            body,
+            listOf(ui.secondary("Back to checkout") { showHome() }),
+        )
     }
 
     private fun showReceipt(saleId: String) {
         receiptToResume = saleId
         activeSaleShowing = false
         val sale = ledger.getSale(saleId)
-        val lines = ArrayList<String>()
-        lines.add("Sale: ${sale.saleId}")
-        lines.add("Amount: ${formatAmount(sale.amountMinor, sale.currency)}")
-        lines.add("Received in ledger: ${formatAmount(sale.receivedMinor, sale.currency)}")
-        lines.add("Remaining: ${formatAmount(sale.remainingMinor, sale.currency)}")
-        lines.add("Created: ${java.time.Instant.ofEpochSecond(sale.createdAt)}")
+        val body = ArrayList<View>()
         if (sale.requiresReview) {
-            lines.add("")
-            lines.add("OWNER REVIEW REQUIRED · review payment and refund evidence before fulfilling or closing this sale.")
-            if (sale.lateBitcoinReceipt) lines.add("Bitcoin arrived after the counter acknowledged cancellation.")
-            if (sale.overpaidMinor > 0) lines.add("Excess received: ${formatAmount(sale.overpaidMinor, sale.currency)}")
-            if (sale.overpaidSats > 0) lines.add("Excess Bitcoin observed: ${formatSats(sale.overpaidSats)}")
+            val review = ArrayList<ReceiptLine>()
+            review.add(ReceiptLine("OWNER REVIEW REQUIRED", LineStyle.Strong))
+            review.add(ReceiptLine("Review late or excess payment evidence before fulfilling or closing this sale.", LineStyle.Small))
+            if (sale.lateBitcoinReceipt) review.add(ReceiptLine("Bitcoin arrived after cancellation was acknowledged.", LineStyle.Small))
+            if (sale.overpaidMinor > 0) review.add(ReceiptLine("Excess received: ${formatAmount(sale.overpaidMinor, sale.currency)}", LineStyle.Small))
+            if (sale.overpaidSats > 0) review.add(ReceiptLine("Excess Bitcoin: ${formatSats(sale.overpaidSats)}", LineStyle.Small))
+            body.add(ui.receipt(review))
         }
+        val receiptLines = ArrayList<ReceiptLine>()
+        for (item in sale.items) {
+            receiptLines.add(ReceiptLine("${item.name} · ${item.quantity} × ${formatAmount(item.unitMinor, sale.currency)} = ${formatAmount(Math.multiplyExact(item.unitMinor, item.quantity.toLong()), sale.currency)}"))
+        }
+        if (receiptLines.isEmpty()) receiptLines.add(ReceiptLine("Manual amount sale", LineStyle.Small))
+        body.add(ui.receipt(receiptLines))
+        val paymentLines = ArrayList<ReceiptLine>()
+        paymentLines.add(ReceiptLine("${saleStateLabel(sale)} · ${formatAmount(sale.amountMinor, sale.currency)}", LineStyle.Strong))
+        paymentLines.add(ReceiptLine("Received · ${formatAmount(sale.receivedMinor, sale.currency)}"))
+        paymentLines.add(ReceiptLine("Remaining · ${formatAmount(sale.remainingMinor, sale.currency)}"))
+        paymentLines.add(ReceiptLine("TEST ONLY · Regtest", LineStyle.Small))
+        body.add(ui.receipt(paymentLines))
         for (attempt in sale.attempts) {
-            lines.add("")
-            lines.add("${attempt.tender} · ${attempt.state}")
-            lines.add("Attempt: ${attempt.attemptId}")
-            attempt.expectedSats?.let { lines.add("Quoted Bitcoin amount: ${formatSats(it)} · ${attempt.quoteId}") }
-            lines.add("Bitcoin observed: ${formatSats(attempt.receivedSats)}")
-            lines.add("Cancellation requested: ${attempt.cancellationRequested}")
-            lines.add("Cancellation acknowledged by counter: ${attempt.cancellationAcknowledged}")
-            if (attempt.tender == Tender.CARD && attempt.state == PaymentState.UNKNOWN) {
-                lines.add("Outcome is unknown. Reconcile this attempt before any new card payment.")
+            val shortTender = if (attempt.tender == Tender.BITCOIN) "Bitcoin" else "Card"
+            val stateLine = when {
+                attempt.tender == Tender.CARD && attempt.state == PaymentState.UNKNOWN -> "Card outcome needs reconciliation; do not retry this sale."
+                attempt.state == PaymentState.UNCONFIRMED -> "Bitcoin seen; waiting for the counter's configured confirmation check."
+                attempt.state == PaymentState.REORGED -> "Bitcoin confirmation reopened; do not hand over goods."
+                attempt.cancellationAcknowledged -> "Cancellation acknowledged; late Bitcoin is still monitored."
+                attempt.cancellationRequested -> "Cancellation requested; late Bitcoin is still monitored."
+                else -> null
             }
-            for (e in attempt.cardEvidence) lines.add("Card evidence: ${e.result} · ${e.amountMinor} minor units · ${e.evidenceId}")
-            for (e in attempt.bitcoinEvidence) {
-                val depth = if (e.confirmations >= e.requiredConfirmations) "counter's configured confirmation check satisfied" else "counter's configured confirmation check still waiting"
-                lines.add("Counter evidence: ${e.receivedSats} sats · $depth · ${e.chainState}")
-            }
+            body.add(ui.receipt(listOfNotNull(
+                ReceiptLine("$shortTender · ${attempt.state}", LineStyle.Strong),
+                stateLine?.let { ReceiptLine(it, LineStyle.Small) },
+            )))
         }
         for (refund in sale.refunds) {
             val original = sale.attempts.firstOrNull { it.attemptId == refund.paymentAttemptId }
             val amount = if (refund.amountSats > 0) formatSats(refund.amountSats) else formatAmount(refund.amountMinor, sale.currency)
             val returned = if (refund.amountSats > 0) formatSats(refund.actuallyPaidSats) else formatAmount(refund.actuallyPaidMinor, sale.currency)
-            lines.add("")
-            lines.add("Refund request ${refund.refundId} · ${refund.state} · $amount")
-            lines.add("Original attempt: ${original?.attemptId ?: refund.paymentAttemptId}")
-            lines.add("Evidence of funds returned: $returned")
+            body.add(ui.receipt(listOf(
+                ReceiptLine("Refund requested · $amount · ${refund.state}", LineStyle.Strong),
+                ReceiptLine("Original payment · ${if (original?.tender == Tender.BITCOIN) "Bitcoin" else "card"}"),
+                ReceiptLine("Funds returned with evidence · $returned", LineStyle.Small),
+            )))
         }
         val actions = ArrayList<Pair<String, () -> Unit>>()
+        if (sale.attempts.isEmpty() && sale.remainingMinor > 0) {
+            actions.add("Choose payment" to { showTenderChoice(sale.saleId) })
+        }
         val resumableBitcoin = sale.attempts.lastOrNull { it.tender == Tender.BITCOIN && it.state !in setOf(PaymentState.CONFIRMED, PaymentState.PAID, PaymentState.CANCELED) }
         if (resumableBitcoin != null) actions.add("Resume Bitcoin request" to {
             activeSaleId = sale.saleId
@@ -725,17 +979,74 @@ open class CheckoutActivity : Activity() {
             actions.add(label to { confirmRefundRequest(sale.saleId, attempt.attemptId) })
         }
         if (attemptsNeedCardReconcile(sale)) actions.add("Reconcile Square outcome" to { reconcileCard(sale.saleId) })
+        actions.add("Payment details" to { showReceiptDetails(sale.saleId) })
+        actions.add("New sale" to { showHome() })
         actions.add("Back to sales" to { showSales() })
-        actions.add("Back to checkout" to { showHome() })
         val bitcoinBlocksCard = sale.attempts.any { it.tender == Tender.BITCOIN && it.state !in setOf(PaymentState.CANCELED, PaymentState.CONFIRMED, PaymentState.PAID) }
         val cardOutcomeUnknown = sale.attempts.any { it.tender == Tender.CARD && it.state == PaymentState.UNKNOWN }
         if (!sale.requiresReview && sale.currency == "USD" && sale.remainingMinor > 0 && cardBridge != null && !bitcoinBlocksCard && !cardOutcomeUnknown) {
             actions.add(0, "Pay remaining by Square Sandbox" to { beginSquareAttempt(sale.saleId, sale.remainingMinor) })
         }
-        show(if (sale.requiresReview) "OWNER REVIEW REQUIRED · test receipt" else "Sale receipt · test record", lines.joinToString("\n"), actions)
+        val fixedActions = ArrayList<Pair<String, () -> Unit>>()
+        for ((label, action) in actions) {
+            when {
+                label.startsWith("Request refund") -> body.add(ui.secondary(label, action))
+                label == "Payment details" -> body.add(ui.quiet(label, action))
+                else -> fixedActions.add(label to action)
+            }
+        }
+        var primaryUsed = false
+        val finalButtons = fixedActions.map { (label, action) ->
+            val mainAction = label == "Choose payment" || label == "Resume Bitcoin request" || label == "Reconcile Square outcome" ||
+                label == "Pay remaining by Square Sandbox" || (label == "New sale" && sale.paid && !sale.requiresReview)
+            when {
+                label.startsWith("Request refund") -> ui.secondary(label, action)
+                label == "Payment details" || label == "Back to sales" -> ui.quiet(label, action)
+                label == "Back to checkout" -> ui.secondary(label, action)
+                mainAction && !primaryUsed -> {
+                    primaryUsed = true
+                    ui.primary(label, onClick = action)
+                }
+                label == "New sale" && !primaryUsed -> {
+                    primaryUsed = true
+                    ui.primary(label, onClick = action)
+                }
+                label == "Cancel checkout" || label == "Try cancellation again" -> ui.button(label, ButtonKind.Danger, action)
+                else -> ui.secondary(label, action)
+            }
+        }
+        showUiPage(ui.bar(if (sale.requiresReview) "Owner review" else "Sale receipt", sub = "TEST ONLY · Regtest", back = { showSales() }, logo = true), body, finalButtons)
+    }
+
+    private fun showReceiptDetails(saleId: String) {
+        val sale = ledger.getSale(saleId)
+        val lines = ArrayList<ReceiptLine>()
+        lines.add(ReceiptLine("Sale ID · ${sale.saleId}", LineStyle.Small))
+        lines.add(ReceiptLine("Created · ${java.time.Instant.ofEpochSecond(sale.createdAt)}", LineStyle.Small))
+        for (attempt in sale.attempts) {
+            lines.add(ReceiptLine("${attempt.tender} attempt ID · ${attempt.attemptId}", LineStyle.Small))
+            attempt.expectedSats?.let { lines.add(ReceiptLine("Bitcoin quote · ${formatSats(it)} · ${attempt.quoteId}", LineStyle.Small)) }
+            lines.add(ReceiptLine("Bitcoin observed · ${formatSats(attempt.receivedSats)}", LineStyle.Small))
+            lines.add(ReceiptLine("Cancellation requested · ${attempt.cancellationRequested} · acknowledged · ${attempt.cancellationAcknowledged}", LineStyle.Small))
+            for (e in attempt.cardEvidence) lines.add(ReceiptLine("Card evidence · ${e.result} · ${e.amountMinor} minor units · ${e.evidenceId}", LineStyle.Small))
+            for (e in attempt.bitcoinEvidence) {
+                val depth = if (e.confirmations >= e.requiredConfirmations) "counter configured confirmation check satisfied" else "counter configured confirmation check waiting"
+                lines.add(ReceiptLine("Counter evidence · ${e.receivedSats} sats · $depth · ${e.chainState} · ${e.evidenceId}", LineStyle.Small))
+            }
+        }
+        for (refund in sale.refunds) {
+            lines.add(ReceiptLine("Refund request ID · ${refund.refundId}", LineStyle.Small))
+            for (e in refund.evidence) lines.add(ReceiptLine("Refund evidence · ${e.evidenceId} · pending ${e.pending} · ${e.paidMinor} minor units · ${e.paidSats} sats", LineStyle.Small))
+        }
+        showUiPage(
+            ui.bar("Payment details", back = { showReceipt(saleId) }, logo = true),
+            listOf(ui.receipt(lines)),
+            listOf(ui.secondary("Back to receipt") { showReceipt(saleId) }),
+        )
     }
 
     private fun saleStateLabel(sale: Sale): String = when {
+        sale.attempts.isEmpty() -> "Tender not selected"
         sale.requiresReview -> "Owner review required"
         sale.paid -> "Paid in test ledger"
         sale.attempts.any { it.state == PaymentState.REORGED } -> "Payment check reopened"
@@ -785,28 +1096,10 @@ open class CheckoutActivity : Activity() {
             .show()
     }
 
-    private fun startCardFlow() {
-        if (cardBridge == null) return showMessage("Card is not available in this build", "No card attempt was created. Use the Regtest Bitcoin path or install the optional Sandbox build.", "Square SDK is not present in the base APK.") { showHome() }
-        val info = config ?: return showHome()
-        if (info.network != CounterNetwork.Regtest) return showHome()
-        if (info.settings.currency != "USD") return showMessage("Square Sandbox uses USD only", "No card attempt was created. Use the Bitcoin path for this SAT-priced test shop.") { showHome() }
-        val amount = try { parseAmount(amountField?.text?.toString().orEmpty(), "USD") } catch (_: Exception) {
-            return showHomeWithError("Enter a positive USD amount with at most two decimal places first.")
-        }
-        if (hasUnresolvedSale()) return showHomeWithError("Resolve the saved sale before opening another checkout. No card attempt was created.")
-        val saleId = UUID.randomUUID().toString()
-        try {
-            ledger.createSale(saleId, amount, "USD", nowSecs())
-            beginSquareAttempt(saleId, amount)
-        } catch (e: Exception) {
-            showHomeWithError("The card sale could not be saved. No Square payment was started. Details: ${safeDetail(e)}")
-        }
-    }
-
     private fun beginSquareAttempt(saleId: String, amountMinor: Long) {
         val bridge = cardBridge ?: return showMessage("Square is unavailable in this build", "No card attempt was created. Use Bitcoin or install the Sandbox-only build.") { showReceipt(saleId) }
         val sale = ledger.getSale(saleId)
-        if (sale.currency != "USD" || amountMinor <= 0 || amountMinor > sale.remainingMinor) {
+        if (sale.requiresReview || sale.currency != "USD" || amountMinor <= 0 || amountMinor > sale.remainingMinor) {
             return showMessage("This card amount cannot be started", "The saved sale was not changed. Check its amount and currency.") { showReceipt(saleId) }
         }
         val attemptId = UUID.randomUUID().toString()
@@ -856,15 +1149,16 @@ open class CheckoutActivity : Activity() {
     }
 
     private fun refreshHomeReadiness() {
-        if (homeStatusView == null || activeSaleShowing) return
+        if ((homeStatusView == null && tenderStatusView == null) || activeSaleShowing) return
         val current = node ?: return
         val healthy = try { nativeLock.withLock { current.status().health?.healthy == true } } catch (_: Exception) { false }
         latestCounterLine = if (healthy) "Regtest counter checks are healthy." else "Waiting for the Regtest counter's native network checks."
         val unresolved = hasUnresolvedSale()
-        if (unresolved) latestCounterLine = "Resolve the saved sale before starting another checkout."
+        if (unresolved) latestCounterLine = "An earlier sale needs follow-up. New orders remain separate."
         homeStatusView?.text = latestCounterLine
-        openBitcoinButton?.isEnabled = healthy && !unresolved
-        cardSandboxButton?.isEnabled = cardBridge != null
+        tenderStatusView?.text = if (healthy) "Native Bitcoin checks are ready." else "Waiting for native Regtest network checks."
+        tenderBitcoinButton?.isEnabled = healthy
+        homePrimaryButton?.isEnabled = homePrimaryAllowed
     }
 
     private fun showMessage(title: String, body: String, details: String? = null, next: (() -> Unit)? = null) {
@@ -877,17 +1171,6 @@ open class CheckoutActivity : Activity() {
         val column = baseColumn(title)
         column.addView(text(body, 16f), margins(top = 16))
         if (!details.isNullOrBlank()) column.addView(text(details, 12f), margins(top = 12))
-        for ((label, action) in actions) column.addView(button(label, action), margins(top = 10))
-        showRoot(column)
-    }
-
-    private fun showWithEdit(title: String, body: String, fieldLabel: String, field: EditText, actions: List<Pair<String, () -> Unit>>, status: TextView? = null) {
-        activeSaleShowing = false
-        val column = baseColumn(title)
-        column.addView(text(body, 15f), margins(top = 12))
-        if (status != null) column.addView(status, margins(top = 12))
-        column.addView(text(fieldLabel, 14f, true), margins(top = 20))
-        column.addView(field, margins(top = 6))
         for ((label, action) in actions) column.addView(button(label, action), margins(top = 10))
         showRoot(column)
     }
@@ -919,13 +1202,27 @@ open class CheckoutActivity : Activity() {
 
     @Suppress("DEPRECATION")
     private fun showRoot(column: LinearLayout, scroll: Boolean = true) {
-        navigationRevision++
         activeSaleRootShown = false
         val root: View = if (scroll) ScrollView(this).apply { isFillViewport = true; addView(column) } else column
         root.setOnApplyWindowInsetsListener { view, insets ->
             view.setPadding(view.paddingLeft, dp(16) + insets.systemWindowInsetTop, view.paddingRight, view.paddingBottom)
             insets
         }
+        installRoot(root)
+    }
+
+    private fun showUiPage(bar: View, body: List<View>, actions: List<Button>) {
+        installRoot(ui.page(bar, body, actions))
+    }
+
+    private fun installRoot(root: View) {
+        navigationRevision++
+        activeSaleRootShown = false
+        homeStatusView = null
+        homePrimaryButton = null
+        homePrimaryAllowed = false
+        tenderStatusView = null
+        tenderBitcoinButton = null
         setContentView(root)
     }
 
@@ -953,15 +1250,6 @@ open class CheckoutActivity : Activity() {
 
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
 
-    private fun rootButtonByText(label: String): Button? {
-        fun find(v: View): Button? {
-            if (v is Button && v.text.toString() == label) return v
-            if (v is ViewGroup) for (i in 0 until v.childCount) find(v.getChildAt(i))?.let { return it }
-            return null
-        }
-        return find(window.decorView)
-    }
-
     private fun copyText(value: String) {
         val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
         clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Bitcoin payment code", value))
@@ -977,12 +1265,14 @@ open class CheckoutActivity : Activity() {
 
     private fun safeDetail(e: Throwable): String = (e.message ?: e.javaClass.simpleName).filter { it >= ' ' && it != '\u007f' }.take(160)
 
-    private fun hasUnresolvedSale(): Boolean = ledger.listSales().any { sale ->
-        sale.attempts.any { attempt ->
+    private fun latestFollowupSale(): Sale? = ledger.listSales().asReversed().firstOrNull(::saleNeedsFollowup)
+
+    private fun hasUnresolvedSale(): Boolean = ledger.listSales().any(::saleNeedsFollowup)
+
+    private fun saleNeedsFollowup(sale: Sale): Boolean = sale.requiresReview || sale.attempts.isEmpty() || sale.attempts.any { attempt ->
             (attempt.tender == Tender.BITCOIN && attempt.state !in setOf(PaymentState.CONFIRMED, PaymentState.PAID, PaymentState.CANCELED)) ||
                 (attempt.tender == Tender.CARD && attempt.state in setOf(PaymentState.UNKNOWN, PaymentState.PARTIAL))
         }
-    }
 
     private fun readLimited(input: java.io.InputStream, limit: Int): ByteArray {
         val output = ByteArrayOutputStream()
@@ -1035,6 +1325,11 @@ open class CheckoutActivity : Activity() {
         private const val FIXTURE_FILE = "fixture.pending"
         private const val REGTEST_USD_MINOR_PER_BTC = 10_000_000L
         private const val SATS_PER_BTC = 100_000_000L
+        private const val MAX_CART_QUANTITY = 99
+        private const val MAX_SUPPORTED_SATS = 2_100_000_000_000_000L
+        private const val CART_IDS_KEY = "checkout.cart.ids"
+        private const val CART_QUANTITIES_KEY = "checkout.cart.quantities"
+        private const val RECEIPT_KEY = "checkout.receipt.resume"
         private const val MAX_PAIRING_BYTES = 1024 * 1024
     }
 

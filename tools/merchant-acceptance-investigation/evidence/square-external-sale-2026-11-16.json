@@ -1,0 +1,53 @@
+{
+  "recorded_date_local": "2026-11-16",
+  "environment": "Square Sandbox",
+  "api_version": "2026-09-16",
+  "api_base": "https://connect.squareupsandbox.com/v2",
+  "application_id_sandbox_prefix_validated": true,
+  "origin": "New order created through the Orders API, not an existing POS cart or ticket",
+  "sale": {
+    "catalog_quantity": 1,
+    "item_minor": 1000,
+    "tax_percent": 10,
+    "tax_minor": 100,
+    "total_minor": 1100,
+    "currency": "USD"
+  },
+  "payment": {
+    "source_type": "EXTERNAL",
+    "external_type": "CRYPTO",
+    "status": "COMPLETED",
+    "linked_original_test_order": true,
+    "actual_bitcoin_transferred": false,
+    "card_charged": false
+  },
+  "order_readback": {
+    "state": "COMPLETED",
+    "total_minor": 1100,
+    "tax_minor": 100
+  },
+  "inventory": {
+    "initial": "10",
+    "after_payment": "9",
+    "observed_decrements": 1,
+    "idempotent_retry_tested": false
+  },
+  "subsequent_pay_order": {
+    "http_status": 400,
+    "exact_error": "BAD_REQUEST: The order is already paid.",
+    "interpretation": "The immediate external payment had already completed this API-created order; this is not a successful delayed-capture PayOrder test."
+  },
+  "source_evidence_sha256": "965bd4eb2a694beb94ac6e493738ed74df6bb7cc7127a5878b90060d2848e464",
+  "identifiers": "Private test account and object identifiers omitted from this summary.",
+  "not_verified": [
+    "Existing Square POS open ticket visibility or external-payment closure",
+    "Square POS device UI",
+    "Kitchen routing",
+    "Staff and tip attribution",
+    "Daily and tax report UI",
+    "Billing or Orders API fee exemption",
+    "Idempotent payment replay",
+    "Real Bitcoin settlement",
+    "Production eligibility"
+  ]
+}
