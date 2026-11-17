@@ -8,6 +8,7 @@ FROM rust:1.89-slim-trixie@sha256:8cffb8fe4e8a95cf0d6a2060375e5a28aff4c752155aa9
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
+COPY vendor ./vendor
 COPY scripts/box-build.sh ./scripts/box-build.sh
 # The same build as outside the container, with the build directories mapped
 # to fixed names (scripts/box-build.sh), so that the binary does not depend

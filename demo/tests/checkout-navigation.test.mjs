@@ -109,7 +109,13 @@ const uiFor = () => {
   };
 };
 const context = {
-  U: { LineStyle: { Plain: 'plain', Strong: 'strong' } },
+  U: {
+    LineStyle: { Plain: 'plain', Strong: 'strong' },
+    WRAP_CONTENT: -2,
+    LinearLayout: () => new Node_('div'),
+    LayoutParams: class { constructor(width, height) { this.width = width; this.height = height; } },
+    addView(parent, child) { parent.append(child); },
+  },
   C: {
     TABLET: size(700, 900), PHONE: size(360, 740),
     deviceUi: () => uiFor(),
@@ -159,20 +165,20 @@ function run() {
   assert.notEqual(shell.onStep, staleStep, 'checkout replaces the previous route step callback');
   assert.equal(staleStepCalled, 0);
   assert.equal(currentStep(shell), 0);
-  assert.match(checkoutText(shell), /Illustrative catalog/);
+  assert.match(checkoutText(shell), /Illustrative sample catalog/);
 
   // Drive the actual checkout steps using Shell target handlers and role actor; then replay Payment from the step bar.
   clickShell(shell, 'New sale');
-  assert.equal(currentStep(shell), 1); assert.match(checkoutText(shell), /Your order/);
+  assert.equal(currentStep(shell), 1); assert.match(checkoutText(shell), /Edit your order/);
   clickShell(shell, 'Continue');
   assert.equal(currentStep(shell), 2); assert.match(checkoutText(shell), /Choose how to pay/);
   clickShell(shell, 'Bitcoin');
   assert.equal(currentStep(shell), 3);
-  assert.match(checkoutText(shell), /Waiting for customer payment/);
+  assert.match(checkoutText(shell), /Bitcoin receipt example/);
   // Skipping to Receipt cannot manufacture payment; replay stays on the pending Payment step.
   shell.stepList.children[4].querySelector('button').click();
   assert.equal(currentStep(shell), 3);
-  assert.match(checkoutText(shell), /Waiting for customer payment/);
+  assert.match(checkoutText(shell), /Bitcoin receipt example/);
   assert.doesNotMatch(checkoutText(shell), /Payment complete/);
 
   // Replaying Payment preserves the pending attempt; the role actor completes it only afterward.
@@ -180,9 +186,9 @@ function run() {
   paymentStep.click();
   assert.equal(currentStep(shell), 3, 'the Payment step invokes checkout replay');
   assert.equal(staleStepCalled, 0, 'old route callback does not fire when a new step target is used');
-  assert.match(checkoutText(shell), /Waiting for customer payment/);
+  assert.match(checkoutText(shell), /Bitcoin receipt example/);
   assert.match(checkoutText(shell), /Order · #1042/, 'replay keeps the same sale ID');
-  clickShell(shell, 'Send Bitcoin payment (demo)');
+  clickShell(shell, 'Simulate Bitcoin receipt');
   assert.equal(currentStep(shell), 4); assert.match(checkoutText(shell), /Payment complete/);
   assert.match(checkoutText(shell), /Order #1042/);
   // Receipt replay preserves the completed order instead of starting the next order.
@@ -202,13 +208,13 @@ function run() {
   shell.stepList.children[3].querySelector('button').click();
   assert.equal(currentStep(shell), 2, 'a new sale jumping to Payment first requires a fresh tender choice');
   assert.match(checkoutText(shell), /Choose how to pay/);
-  assert.equal(button(shell.root, 'Send Bitcoin payment (demo)'), undefined, 'the previous Bitcoin actor is cleared');
-  assert.equal(button(shell.root, 'Submit card handoff (demo)'), undefined, 'the previous card actor is cleared');
+  assert.equal(button(shell.root, 'Simulate Bitcoin receipt'), undefined, 'the previous Bitcoin actor is cleared');
+  assert.equal(button(shell.root, 'Simulate card submission'), undefined, 'the previous card actor is cleared');
   assert.match(checkoutText(shell), /Order · #1043/, 'the new sale has its own order ID');
 
   // Cancel the selected Bitcoin tender before payment. A detached actor is inert and the next sale gets a new ID.
   clickShell(shell, 'Bitcoin');
-  const lateActor = button(shell.root, 'Send Bitcoin payment (demo)');
+  const lateActor = button(shell.root, 'Simulate Bitcoin receipt');
   assert.ok(lateActor);
   clickShell(shell, 'Cancel sale');
   assert.match(checkoutText(shell), /Order canceled/);
@@ -219,12 +225,12 @@ function run() {
   assert.match(checkoutText(shell), /Order · #1044/, 'cancellation consumes an order number without reusing it');
   clickShell(shell, 'Card');
   assert.equal(currentStep(shell), 3);
-  clickShell(shell, 'Submit card handoff (demo)');
+  clickShell(shell, 'Simulate card submission');
   assert.match(checkoutText(shell), /Card result not confirmed/);
   shell.stepList.children[3].querySelector('button').click();
   assert.equal(currentStep(shell), 3);
   assert.match(checkoutText(shell), /Card result not confirmed/, 'Payment replay preserves an unresolved card result');
-  assert.equal(button(shell.root, 'Submit card handoff (demo)'), undefined, 'uncertain card payment cannot be submitted again');
+  assert.equal(button(shell.root, 'Simulate card submission'), undefined, 'uncertain card payment cannot be submitted again');
 
   // Leaving through another tab invokes checkout cleanup; Shell.begin removes its slot before the next view appears.
   shell.pick('Café');
@@ -233,7 +239,7 @@ function run() {
   assert.equal(shell.slots.size, 1);
   assert.ok(shell.slots.has('merchant'));
   assert.match(shell.stage.textContent, /Sale · Tablet/);
-  assert.doesNotMatch(shell.stage.textContent, /Illustrative catalog|Payment complete/);
+  assert.doesNotMatch(shell.stage.textContent, /Illustrative sample catalog|Payment complete/);
   shell.stepList.children[1].querySelector('button').click();
   assert.match(shell.stage.textContent, /Receipt · Tablet/);
   shell.pick('OpenBMT checkout');
@@ -250,10 +256,10 @@ function run() {
   assert.ok(shell.root.querySelector('.start'));
   shell.pick('OpenBMT checkout');
   assert.equal(currentStep(shell), 0);
-  assert.match(checkoutText(shell), /Illustrative catalog/);
-  assert.doesNotMatch(checkoutText(shell), /Interrupted order|Recent receipts/);
+  assert.match(checkoutText(shell), /Illustrative sample catalog/);
+  assert.doesNotMatch(checkoutText(shell), /Interrupted order|Recent orders/);
   shell.pick('Café');
-  assert.equal(shell.slots.size, 1); assert.doesNotMatch(shell.stage.textContent, /Illustrative catalog|Interrupted order/);
+  assert.equal(shell.slots.size, 1); assert.doesNotMatch(shell.stage.textContent, /Illustrative sample catalog|Interrupted order/);
 }
 
 run();

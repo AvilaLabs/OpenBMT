@@ -78,10 +78,12 @@ saved-state bundle, so they survive opening a receipt and returning to history.
 
 ## Local event journal foundation
 
-Ledger version 6 adds a local, append-only event journal as an SDK foundation.
-The journal begins only after an explicit `initializeEvents()` call. The native
-cashier UI does not initialize or export it. There are no webhooks, remote
-delivery, staff tooling, or complete team workflows in this prototype.
+Ledger version 6 adds a local, append-only event journal. The native checkout
+initializes its journal epoch during startup before showing checkout UI; this
+also seeds the current sale versions when upgrading an existing ledger. Journal
+data remains in app-private storage and is not exported by the cashier UI. There
+are no webhooks, remote delivery, staff tooling, or complete team workflows in
+this prototype.
 
 ## Limits
 

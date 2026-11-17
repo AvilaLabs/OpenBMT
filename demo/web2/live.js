@@ -575,7 +575,7 @@
     shell.scenario(null);
     shell.start([
       { name: "As a customer", what: "Pay a shop in bitcoin, the way it works at the counter.", go: "Start", onPick: () => shell.pick("Customer") },
-      { name: "OpenBMT checkout", what: "Walk through one cart for Bitcoin or card, a receipt, and returning to an interrupted sale.", go: "Explore", onPick: () => shell.pick("OpenBMT checkout") },
+      { name: "OpenBMT checkout", what: "Explore an editable sample cart, simulated Bitcoin, card or cash payments, receipts, and order history.", go: "Explore", onPick: () => shell.pick("OpenBMT checkout") },
       { name: "A café", what: "Take a coffee and a meal at the counter, and see them reach the owner's phone.", go: "Start", onPick: () => shell.pick("Café") },
       { name: "With your register", what: "The counter beside the register a shop already has.", go: "Start", onPick: () => shell.pick("With your register") },
       { name: "When something goes wrong", what: "A short payment or a cancelled one, and what the counter does.", go: "Start", onPick: () => shell.pick("A short payment") },

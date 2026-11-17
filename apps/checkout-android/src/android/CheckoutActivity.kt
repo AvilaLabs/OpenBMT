@@ -120,10 +120,12 @@ open class CheckoutActivity : Activity() {
             pairingFile = SealedFile(noBackup, KeystoreSealer(PAIRING_KEY_ALIAS), PAIRING_FILE)
             // A damaged ledger is a blocking fault. Never replace it with an empty ledger on startup.
             ledger = CheckoutLedger(AndroidLedgerStorage(noBackup, LEDGER_FILE))
+            // Commit the local event epoch before serving checkout UI or accepting mutations.
+            ledger.initializeEvents()
             pairing = pairingFile.load()
             restoreSavedUiState(savedInstanceState)
         } catch (e: Exception) {
-            show("Saved test data cannot be opened", "No saved checkout data was reset or changed. Close this test app and report the storage fault.", listOf("Close test app" to { finish() }), "Details: ${safeDetail(e)}")
+            show("Saved test data needs checking", "No saved checkout data was reset. A startup write may have an uncertain outcome. Close and reopen this test app, then inspect Sales before continuing. If the problem remains, report the storage fault.", listOf("Close test app" to { finish() }), "Details: ${safeDetail(e)}")
             return
         }
         if (pairing == null) consumePrivateFixture()
@@ -703,7 +705,7 @@ open class CheckoutActivity : Activity() {
             ReceiptLine("${item.name} · ${item.quantity} × ${formatAmount(item.unitMinor, sale.currency)}")
         }.ifEmpty { listOf(ReceiptLine("Manual amount sale", LineStyle.Small)) }))
         body.add(ui.facts(listOf("Sale total" to formatAmount(sale.amountMinor, sale.currency))))
-        body.add(ui.text("Choose one payment method for this saved sale. The payment attempt is recorded before the counter or card SDK is called.", 14f, colour = ui.pal.secondary))
+        body.add(ui.text("Choose a payment method for this balance. The payment attempt is recorded before the counter or card SDK is called.", 14f, colour = ui.pal.secondary))
         if (sale.currency == "USD" && cardBridge == null) body.add(ui.text("Square Sandbox is not included in this base build.", 13f, colour = ui.pal.secondary))
         val healthy = try { node?.let { nativeLock.withLock { it.status().health?.healthy == true } } ?: false } catch (_: Exception) { false }
         val statusView = ui.text(

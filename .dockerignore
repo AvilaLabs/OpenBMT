@@ -1,5 +1,5 @@
-# The Box image is built from the workspace manifests, crates/ and the Box's
-# build script only.
+# The Box image is built from the workspace manifests, crates/, vendor/ and
+# the Box's build script only.
 target/
 **/target/
 .git

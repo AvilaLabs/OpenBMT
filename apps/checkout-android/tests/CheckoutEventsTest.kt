@@ -71,11 +71,7 @@ object CheckoutEventsTest {
         check(reopened.eventSnapshot().highWater == 1L)
         check(reopened.readEvents(reopened.eventSnapshot().epoch!!, 0, 2).events.single().saleId == "committed")
 
-        val initFailure = MemoryStorage()
-        initFailure.mode = FailureMode.BEFORE_COMMIT
-        check(runCatching { CheckoutLedger(initFailure).initializeEvents() }.isFailure)
-        initFailure.mode = FailureMode.NONE
-        check(!CheckoutLedger(initFailure).eventSnapshot().initialized)
+        initializeFailureOutcomes()
 
         val corruptBase = MemoryStorage()
         val corruptLedger = CheckoutLedger(corruptBase)
@@ -111,6 +107,58 @@ object CheckoutEventsTest {
         check(cash.amountMinor == 250L && cash.changeMinor == 50L)
         check(cashLedger.recordCashPayment("cash-sale", "cash-payment", 300, 21) == cash)
         check(cashLedger.eventSnapshot().highWater == cashCursor)
+    }
+
+    private fun initializeFailureOutcomes() {
+        val before = MemoryStorage()
+        val beforeLedger = CheckoutLedger(before)
+        beforeLedger.createSale("before-init", 125, "USD", 1)
+        val original = before.bytes!!.copyOf()
+        before.mode = FailureMode.BEFORE_COMMIT
+        check(runCatching { beforeLedger.initializeEvents() }.isFailure)
+        check(runCatching { beforeLedger.eventSnapshot() }.isFailure) // uncertain writes poison this instance
+        before.mode = FailureMode.NONE
+        var reopened = CheckoutLedger(before)
+        check(!reopened.eventSnapshot().initialized)
+        check(reopened.getSale("before-init").amountMinor == 125L)
+        check(before.bytes!!.contentEquals(original))
+        val beforeEpoch = reopened.initializeEvents().epoch!!
+        check(reopened.eventSnapshot().saleVersions == mapOf("before-init" to 0L))
+        reopened.createSale("after-before-init", 50, "USD", 2)
+        check(reopened.readEvents(beforeEpoch, 0, 10).events.single().saleId == "after-before-init")
+
+        val after = MemoryStorage()
+        var afterLedger = CheckoutLedger(after)
+        afterLedger.createSale("after-init", 225, "USD", 3)
+        after.mode = FailureMode.AFTER_COMMIT
+        check(runCatching { afterLedger.initializeEvents() }.isFailure)
+        check(runCatching { afterLedger.getSale("after-init") }.isFailure)
+        after.mode = FailureMode.NONE
+        afterLedger = CheckoutLedger(after)
+        val committedEpoch = afterLedger.eventSnapshot().epoch!!
+        check(afterLedger.eventSnapshot().initialized)
+        check(afterLedger.getSale("after-init").amountMinor == 225L)
+        check(afterLedger.initializeEvents().epoch == committedEpoch) // retry does not rotate a committed epoch
+        check(afterLedger.eventSnapshot().saleVersions == mapOf("after-init" to 0L))
+        afterLedger.createSale("after-commit-init", 75, "USD", 4)
+        check(afterLedger.readEvents(committedEpoch, 0, 10).events.single().saleId == "after-commit-init")
+
+        val legacy = MemoryStorage().also { it.bytes = legacyV5() }
+        val legacyOriginal = legacy.bytes!!.copyOf()
+        val legacyLedger = CheckoutLedger(legacy)
+        check(legacyLedger.getSale("legacy").cashPayments.single().changeMinor == 20L)
+        legacy.mode = FailureMode.BEFORE_COMMIT
+        check(runCatching { legacyLedger.initializeEvents() }.isFailure)
+        check(runCatching { legacyLedger.eventSnapshot() }.isFailure)
+        legacy.mode = FailureMode.NONE
+        var legacyReopened = CheckoutLedger(legacy)
+        check(!legacyReopened.eventSnapshot().initialized)
+        check(legacy.bytes!!.contentEquals(legacyOriginal)) // failed initialization preserves raw v5 bytes
+        val upgradedEpoch = legacyReopened.initializeEvents().epoch!!
+        legacyReopened = CheckoutLedger(legacy)
+        check(legacyReopened.eventSnapshot().epoch == upgradedEpoch)
+        check(legacyReopened.eventSnapshot().saleVersions == mapOf("legacy" to 0L))
+        check(legacyReopened.getSale("legacy").let { it.amountMinor == 100L && it.cashPayments.single().paymentId == "cash-legacy" })
     }
 
     private enum class FailureMode { NONE, BEFORE_COMMIT, AFTER_COMMIT }
