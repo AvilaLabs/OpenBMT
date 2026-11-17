@@ -7,11 +7,13 @@ license.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
-# The LDK library, at exact versions and never forked or patched. ldk-node is
+# The LDK library, at exact versions. ldk-node is
 # not used here (SL-02). lightning-block-sync 0.2.0 is the release that goes
 # with lightning 0.2.8 (there is no 0.2.8 of it). The bitcoin crate is at the
 # version the rest of the workspace pins. ChaCha20-Poly1305 is the package the
 # link and the lock already list, with the same features.
+# lightning-liquidity 0.2.8 is locally vendored with only its datetime backend
+# changed from unmaintained chrono to time; see vendor/lightning-liquidity/UPSTREAM.md.
 #
 # openbmt-core is here for the shop's pinned wallet (`PinnedWallet`, WL-20): the
 # node derives the address the sweep, the splice out and the close pay to

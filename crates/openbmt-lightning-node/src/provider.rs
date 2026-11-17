@@ -89,7 +89,7 @@ pub fn choose_offer(
     let (mut expired, mut outside, mut short) = (0usize, 0usize, 0usize);
     let mut best: Option<Offer> = None;
     for p in menu {
-        if p.valid_until.0.timestamp() < now_unix {
+        if p.valid_until.unix_timestamp() < now_unix {
             expired += 1;
             continue;
         }

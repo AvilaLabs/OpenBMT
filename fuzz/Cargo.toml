@@ -51,6 +51,9 @@ bip39 = { version = "=2.2.2", default-features = false, features = ["std"] }
 # Not a member of the main workspace.
 [workspace]
 
+[patch.crates-io]
+lightning-liquidity = { path = "../vendor/lightning-liquidity" }
+
 [[bin]]
 name = "signed_batch_decode"
 path = "fuzz_targets/signed_batch_decode.rs"

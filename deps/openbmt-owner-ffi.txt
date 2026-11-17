@@ -1,7 +1,6 @@
 aead v0.5.2
 argon2 v0.5.3
 arrayvec v0.7.8
-autocfg v1.5.1
 base58ck v0.1.101
 base64ct v1.8.3
 bech32 v0.11.1
@@ -21,13 +20,13 @@ cfg-if v1.0.5
 chacha20 v0.9.1
 chacha20-poly1305 v0.1.2
 chacha20poly1305 v0.10.1
-chrono v0.4.45
 chunked_transfer v1.5.0
 cipher v0.4.4
 cpufeatures v0.2.17
 crypto-common v0.1.7
 curve25519-dalek v4.1.3
 curve25519-dalek-derive v0.1.1
+deranged v0.5.8
 digest v0.10.7
 dnssec-prover v0.6.10
 ed25519 v2.2.3
@@ -47,7 +46,7 @@ lightning v0.2.8
 lightning-background-processor v0.2.3
 lightning-block-sync v0.2.0
 lightning-invoice v0.34.2
-lightning-liquidity v0.2.8
+lightning-liquidity v0.2.8 (vendored)
 lightning-macros v0.2.1
 lightning-net-tokio v0.2.0
 lightning-persister v0.2.8
@@ -56,12 +55,13 @@ lightning-types v0.3.5
 memchr v2.8.3
 miniscript v12.3.5
 mio v1.2.4
-num-traits v0.2.19
+num-conv v0.2.2
 opaque-debug v0.3.1
 password-hash v0.5.0
 pin-project-lite v0.2.17
 poly1305 v0.8.0
 possiblyrandom v0.2.1
+powerfmt v0.2.0
 proc-macro2 v1.0.107
 quote v1.0.47
 rand_core v0.6.4
@@ -80,6 +80,8 @@ socket2 v0.6.5
 subtle v2.6.1
 syn v2.0.119
 syn v3.0.10
+time v0.3.55
+time-core v0.1.9
 tinyvec v1.13.3
 tokio v1.54.1
 tokio-macros v2.7.2

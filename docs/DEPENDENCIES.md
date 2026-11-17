@@ -6,19 +6,22 @@ the parts a machine can enforce is `scripts/deps-check.sh`, run in CI.
 
 ## Where things stand
 
-The numbers are external packages, normal and build dependencies together,
-for each program that ships. The lists themselves are in `deps/`.
+The numbers are third-party packages, normal and build dependencies together,
+for each program that ships. This includes registry packages and packages
+vendored beneath a `vendor/` directory; first-party workspace crates are not
+counted. A vendored line has the form `name vX.Y.Z (vendored)` so its canonical
+package version remains visible. The lists themselves are in `deps/`.
 
 | Program | List | Packages |
 |---|---|---|
 | Signer and core rules | `deps/openbmt-signer.txt` | 19 |
-| Counter | `deps/openbmt-counter-node.txt` | 38 |
-| Owner | `deps/openbmt-owner-node.txt` | 52 |
-| Box | `deps/openbmt-box.txt` | 38 |
+| Counter | `deps/openbmt-counter-node.txt` | 78 |
+| Owner | `deps/openbmt-owner-node.txt` | 88 |
+| Box | `deps/openbmt-box.txt` | 39 |
 | Books export | `deps/openbmt-books.txt` | 42 |
-| Key app library | `deps/openbmt-key-ffi.txt` | 43 |
-| Counter app library | `deps/openbmt-counter-ffi.txt` | 39 |
-| Owner app library | `deps/openbmt-owner-ffi.txt` | 59 |
+| Key app library | `deps/openbmt-key-ffi.txt` | 44 |
+| Counter app library | `deps/openbmt-counter-ffi.txt` | 79 |
+| Owner app library | `deps/openbmt-owner-ffi.txt` | 94 |
 | QR code encoder | `deps/openbmt-qr.txt` | 0 |
 | Price sources | `deps/openbmt-rates.txt` | 19 |
 
@@ -45,6 +48,18 @@ Where they come from:
   secp256k1, the curve already in every list.
 - **Encrypted peer connections, 3 more.** The `bip324` crate and its two
   helpers, from the rust-bitcoin project, with no further dependencies.
+
+- **Shop Lightning's LSPS dates.** Upstream `lightning-liquidity` 0.2.8
+  depended on `chrono`, which RustSec now marks unmaintained for all versions
+  (RUSTSEC-2026-0543). We keep the pinned LDK release and vendor that crate
+  with only its datetime backend changed to `time` 0.3.55. The patch preserves
+  the LSPS RFC3339 wire formats and parsing behavior; its provenance, exact
+  patch, upstream checksum and licenses are in
+  `vendor/lightning-liquidity/UPSTREAM.md`. The vendored crate appears in the
+  five program lists that use LSPS, marked `(vendored)`; its licence is checked
+  alongside registry package licences. The inventory check includes any path
+  package beneath a `vendor/` directory and keeps ordinary workspace crates
+  out of third-party counts.
 - **The books export, 4 more.** Argon2, for the passphrase (BK-24).
 - **The Key app library, 24 more.** `jni-sys`, the declarations of the
   Java native interface, with no dependencies of its own, and the PIN lock
@@ -271,7 +286,8 @@ apply: pinned, from the publisher's registry, checked against a digest.
 - **It does not review the packages.** Reading a diff before an update is
   not an audit. No independent review of the dependency set has been
   done yet.
-- **It does not vendor.** The design asks for the Key app's crates to be
+- **Full dependency vendoring is incomplete.** The LSPS datetime exception
+  above vendors one crate. The design asks for the Key app's crates to be
   copied into the tree and reviewed by someone other than the author of
   the app; that is not done yet.
 - **Builds repeat on one machine, not yet across machines.** Two builds of

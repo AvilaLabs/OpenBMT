@@ -3,9 +3,10 @@
 #
 # For each shipped program, the external packages it is built from (normal
 # and build dependencies, with versions) must be exactly the list in
-# deps/<program>.txt. Every package in both lock files must come from
-# crates.io, every path package must be inside this folder, and every
-# external package's licence must be on the list in deps/licences.txt.
+# deps/<program>.txt. Every registry package in both lock files must come
+# from crates.io; every path package must be inside this folder. Vendored
+# packages under a vendor directory are included in inventories and their
+# licences must be on deps/licences.txt.
 #
 #   scripts/deps-check.sh           check; exit 1 on any difference
 #   scripts/deps-check.sh --write   rewrite the lists from the lock file
@@ -25,8 +26,22 @@ externals() {
     CARGO_TERM_COLOR=never cargo tree --color never --locked --offline \
         -p "$1" -e normal,build --prefix none \
         -f '{p}' 2>/dev/null |
-        sed 's/ (\*)$//' | grep -v ' (/' | grep -v '^$' |
-        sed 's/ (proc-macro)$//' | sort -u
+        sed 's/ (\*)$//' | grep -v '^$' |
+        python3 -I -c '
+import os, re, sys
+for line in sys.stdin:
+    line = line.rstrip("\n")
+    match = re.fullmatch(r"(.*?) \(([^()]*)\)", line)
+    if match and os.path.isabs(match.group(2)):
+        package, path = match.groups()
+        # Cargo tree prints path packages with a parenthesized manifest dir.
+        # Workspace crates are internal; packages beneath any vendor/ directory
+        # are third-party dependencies and remain visible in the inventory.
+        if "vendor" in path.replace("\\", "/").split("/"):
+            print(package + " (vendored)")
+    else:
+        print(line)
+' | sed 's/ (proc-macro)$//' | sort -u
 }
 
 for p in $PROGRAMS; do
@@ -62,7 +77,7 @@ for p in $PROGRAMS; do
     fi
 done
 
-# Sources: crates.io or the workspace itself, nothing else.
+# Registry sources must be crates.io. In-tree workspace and vendored paths are checked below.
 for lock in Cargo.lock fuzz/Cargo.lock; do
     other="$(grep '^source = ' "$lock" | sort -u |
         grep -v '"registry+https://github.com/rust-lang/crates.io-index"' || true)"
@@ -71,7 +86,7 @@ for lock in Cargo.lock fuzz/Cargo.lock; do
         echo "$other"
         fail=1
     else
-        echo "PASS  $lock: every package is from crates.io"
+        echo "PASS  $lock: all registry sources are crates.io"
     fi
 done
 
@@ -97,15 +112,18 @@ for p in json.load(sys.stdin)["packages"]:
     fi
 done
 
-# Licences of everything in the main lock file.
+# Licences of registry packages and vendored path packages in the main lock
+# file. Workspace path packages are first-party and do not enter this gate.
 bad="$(cargo metadata --locked --offline --format-version 1 2>/dev/null |
     python3 -I -c '
-import json, sys
+import json, os, sys
 allowed = [l.strip() for l in open("deps/licences.txt")
            if l.strip() and not l.startswith("#")]
 meta = json.load(sys.stdin)
 for p in meta["packages"]:
-    if p["source"] is None:
+    path_parts = os.path.realpath(p["manifest_path"]).split(os.sep)
+    vendored = "vendor" in path_parts
+    if p["source"] is None and not vendored:
         continue
     lic = p.get("license") or ""
     parts = lic.replace("(", " ").replace(")", " ").replace("/", " OR ")

@@ -751,7 +751,7 @@ pub fn judge_payment(
     if invoice.recover_payee_pub_key() != *provider {
         return Err(PayRefusal::WrongPayee);
     }
-    if bolt11.expires_at.0.timestamp() < now_unix as i64
+    if bolt11.expires_at.unix_timestamp() < now_unix as i64
         || invoice.would_expire(Duration::from_secs(now_unix))
     {
         return Err(PayRefusal::Expired);
