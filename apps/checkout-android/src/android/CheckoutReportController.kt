@@ -6,12 +6,14 @@ import android.app.DatePickerDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.net.Uri
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.atomic.AtomicReference
 import org.openbmt.app.Ui
 
 /** Native, read-only reporting screen. The Activity supplies page installation and back navigation. */
@@ -19,6 +21,11 @@ class CheckoutReportController(
     private val activity: Activity,
     private val ui: Ui,
     private val ledger: CheckoutLedger,
+    private val executeCapability: (
+        capability: CheckoutAuthorityCapability,
+        operation: () -> Unit,
+        completion: (Exception?) -> Unit,
+    ) -> Unit,
     private val render: (bar: View, body: List<View>, actions: List<Button>) -> Unit,
     private val onBack: () -> Unit,
 ) {
@@ -27,54 +34,128 @@ class CheckoutReportController(
     private var throughDate: LocalDate = fromDate
     private var report: CheckoutReport? = null
     private var faultText: String? = null
+    private var loading = false
+    private var readRevision = 0L
     private var pendingExportCsv: String? = null
+    private var pendingExportUri: Uri? = null
+    private var exportInFlight = false
 
     /** Render the selected local-date cohort. Re-reads an immutable ledger event snapshot each time. */
     fun show() {
-        try {
-            val from = fromDate.atStartOfDay(zone).toEpochSecond()
-            val until = throughDate.plusDays(1).atStartOfDay(zone).toEpochSecond()
+        val revision = ++readRevision
+        val fromDateSnapshot = fromDate
+        val throughDateSnapshot = throughDate
+        val nextReport = AtomicReference<CheckoutReport?>()
+        report = null
+        faultText = null
+        loading = true
+        pendingExportCsv = null
+        renderReport()
+
+        executeCapability(CheckoutAuthorityCapability.REPORT_READ, {
+            val from = fromDateSnapshot.atStartOfDay(zone).toEpochSecond()
+            val until = throughDateSnapshot.plusDays(1).atStartOfDay(zone).toEpochSecond()
             require(from < until) { "invalid date range" }
             val snapshot = ledger.eventSnapshot()
-            report = CheckoutReporting.build(snapshot.sales, CheckoutReportRange(from, until))
-            faultText = null
-        } catch (e: Exception) {
-            report = null
-            faultText = safeMessage(e)
+            nextReport.set(CheckoutReporting.build(snapshot.sales, CheckoutReportRange(from, until)))
+        }) { error ->
+            if (revision != readRevision) return@executeCapability
+            loading = false
+            when (error) {
+                null -> {
+                    report = nextReport.get()
+                    faultText = if (report == null) "The report could not be created." else null
+                }
+                is CheckoutAuthorityDeniedException -> {
+                    report = null
+                    pendingExportCsv = null
+                    faultText = "Report access denied. Sign in with a role that can view reports."
+                }
+                is CheckoutAuthorityUnavailableException -> {
+                    report = null
+                    pendingExportCsv = null
+                    faultText = "Report access is unavailable. Sign in again before viewing reports."
+                }
+                else -> {
+                    report = null
+                    pendingExportCsv = null
+                    faultText = safeMessage(error)
+                }
+            }
+            renderReport()
         }
-        render(buildBar(), buildBody(), buildActions())
     }
 
     /** Forward the matching document-picker result from the hosting Activity. */
     fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
         if (requestCode != REQUEST_CREATE_DOCUMENT) return false
         val csv = pendingExportCsv
-        pendingExportCsv = null
         if (csv == null) {
             message("Export interrupted", "The reviewed CSV snapshot was not retained while the file picker was open. No report content was written. Review the current report before exporting again; the selected destination may be empty.")
             return true
         }
-        if (resultCode != Activity.RESULT_OK) return true
+        if (resultCode != Activity.RESULT_OK) {
+            pendingExportCsv = null
+            pendingExportUri = null
+            return true
+        }
         val uri = data?.data
         if (uri == null) {
+            pendingExportCsv = null
+            pendingExportUri = null
             message("CSV not saved", "The document picker returned no destination. The checkout data was not changed.")
             return true
         }
-        try {
+        // The picker normally backgrounds the Activity, which locks authority. Retain this exact
+        // reviewed snapshot and destination only in memory; Activity resumes it after fresh sign-in.
+        pendingExportUri = uri
+        return true
+    }
+
+    /** Continue an exact picker result only after Activity has published a fresh signed-in state. */
+    fun resumePendingExportAfterSignIn(): Boolean {
+        val csv = pendingExportCsv ?: return exportInFlight
+        val uri = pendingExportUri ?: return false
+        if (exportInFlight) return true
+        exportInFlight = true
+        executeCapability(CheckoutAuthorityCapability.REPORT_EXPORT, {
             val stream = activity.contentResolver.openOutputStream(uri, "w")
                 ?: throw IllegalStateException("The selected destination could not be opened.")
             stream.bufferedWriter(Charsets.UTF_8).use { writer -> writer.write(csv) }
-            message("CSV saved", "The reviewed report snapshot was written to the selected location.")
-        } catch (e: Exception) {
-            message("CSV not saved", "The selected destination could not be fully written. A partial file may remain there. The checkout data was not changed. ${safeMessage(e)}")
+        }) { error ->
+            exportInFlight = false
+            when (error) {
+                null -> {
+                    pendingExportCsv = null
+                    pendingExportUri = null
+                    show()
+                    message("CSV saved", "The reviewed report snapshot was written after fresh manager authorization.")
+                }
+                is CheckoutAuthorityDeniedException, is CheckoutAuthorityUnavailableException -> Unit
+                else -> {
+                    pendingExportCsv = null
+                    pendingExportUri = null
+                    show()
+                    message("CSV not saved", "The selected destination could not be fully written. A partial file may remain there. The checkout data was not changed. ${safeMessage(error)}")
+                }
+            }
         }
         return true
+    }
+
+    private fun renderReport() {
+        render(buildBar(), buildBody(), buildActions())
     }
 
     private fun buildBar(): View = ui.bar("Sales report", "Created in range · ${zone.id}", back = onBack)
 
     private fun buildBody(): List<View> {
         val body = ArrayList<View>()
+        if (loading) {
+            body += ui.text("Checking report access…", bold = true)
+            body += ui.text("The saved report will appear after access is confirmed.")
+            return body
+        }
         body += ui.text("Date range", bold = true)
         body += ui.text("Sales are grouped by their creation date. Refund values show current cumulative requests and payments for those sales, not refund cash flow by day.")
         body += ui.text("Timezone basis: ${zone.id}. Local-day boundaries use the device timezone, including daylight-saving changes.")
@@ -92,7 +173,7 @@ class CheckoutReportController(
         val value = report
         if (value == null) {
             body += ui.text("Report unavailable", bold = true)
-            body += ui.text("Saved checkout data could not be read or reported. No data was reset. Reopen or inspect the saved ledger before continuing.")
+            body += ui.text("No cached report is displayed. Resolve the access or storage issue shown below before trying again.")
             body += ui.text(faultText ?: "Unknown report fault")
             return body
         }
@@ -145,29 +226,56 @@ class CheckoutReportController(
     }
 
     private fun launchSave(csv: String) {
-        // Retain this exact reviewed snapshot until the picker returns; never rebuild from a newer ledger state.
-        pendingExportCsv = csv
-        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "text/csv"
-            putExtra(Intent.EXTRA_TITLE, "sales-${fromDate.format(FILE_DATE)}-through-${throughDate.format(FILE_DATE)}.csv")
-        }
-        try {
-            activity.startActivityForResult(intent, REQUEST_CREATE_DOCUMENT)
-        } catch (e: Exception) {
-            pendingExportCsv = null
-            message("CSV not saved", "A file picker could not be opened. No checkout data was changed. ${safeMessage(e)}")
+        executeCapability(CheckoutAuthorityCapability.REPORT_EXPORT, { Unit }) { error ->
+            when (error) {
+                null -> {
+                    // Retain this exact reviewed snapshot until the picker returns; never rebuild from a newer ledger state.
+                    pendingExportCsv = csv
+                    pendingExportUri = null
+                    val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "text/csv"
+                        putExtra(Intent.EXTRA_TITLE, "sales-${fromDate.format(FILE_DATE)}-through-${throughDate.format(FILE_DATE)}.csv")
+                    }
+                    try {
+                        activity.startActivityForResult(intent, REQUEST_CREATE_DOCUMENT)
+                    } catch (e: Exception) {
+                        pendingExportCsv = null
+                        message("CSV not saved", "A file picker could not be opened. No checkout data was changed. ${safeMessage(e)}")
+                    }
+                }
+                is CheckoutAuthorityDeniedException, is CheckoutAuthorityUnavailableException ->
+                    clearReportForAuthorityFailure(error)
+                else -> message("CSV not saved", safeMessage(error))
+            }
         }
     }
 
     private fun copy(csv: String) {
-        try {
+        executeCapability(CheckoutAuthorityCapability.REPORT_EXPORT, {
             val clipboard = activity.getSystemService(Activity.CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText("Sales report CSV", csv))
-            message("CSV copied", "The reviewed report snapshot was copied. The clipboard may be visible to other apps.")
-        } catch (e: Exception) {
-            message("CSV not copied", safeMessage(e))
+        }) { error ->
+            when (error) {
+                null -> message("CSV copied", "The reviewed report snapshot was copied. The clipboard may be visible to other apps.")
+                is CheckoutAuthorityDeniedException, is CheckoutAuthorityUnavailableException ->
+                    clearReportForAuthorityFailure(error)
+                else -> message("CSV not copied", safeMessage(error))
+            }
         }
+    }
+
+    private fun clearReportForAuthorityFailure(error: Exception) {
+        report = null
+        pendingExportCsv = null
+        pendingExportUri = null
+        exportInFlight = false
+        loading = false
+        faultText = when (error) {
+            is CheckoutAuthorityDeniedException -> "Report export access denied. The report was cleared; sign in with an authorized role and review it again."
+            else -> "Report export access is unavailable. The report was cleared; sign in again and review it before exporting."
+        }
+        renderReport()
     }
 
     private fun message(title: String, body: String) {

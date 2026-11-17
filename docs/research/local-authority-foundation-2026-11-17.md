@@ -6,6 +6,8 @@
 
 **Status:** model implemented and JVM-tested; Android/product enforcement not implemented
 
+**Follow-up:** the Android/product integration described as open in this record was subsequently implemented and bounded in [Android authority and cash-attribution integration](android-authority-cash-foundation-2026-11-17.md). This file remains the model-foundation checkpoint rather than being rewritten as later evidence.
+
 ## Outcome
 
 The checkout model now has a durable, fail-closed local staff-authority foundation. It establishes reusable identity and authorization primitives without claiming that current Android checkout actions are protected.

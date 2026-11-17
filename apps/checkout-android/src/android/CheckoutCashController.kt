@@ -14,13 +14,18 @@ import java.util.UUID
 import org.openbmt.app.Ui
 
 /**
- * TEST ONLY manual cash-session screens. Operator labels are audit text, not authentication.
+ * TEST ONLY manual cash-session screens. New writes use the signed-in actor; legacy labels are
+ * displayed as unverified historical text and are never accepted as authority.
  * The renderer and navigation belong to the host Activity; this controller owns no view tree.
  */
 class CheckoutCashController(
     private val activity: Activity,
     private val store: CheckoutCashSessionStore,
     private val ledger: CheckoutLedger,
+    private val executeAuthorized: (
+        operation: (CheckoutAuthoritySession) -> Unit,
+        completion: (Exception?) -> Unit,
+    ) -> Unit,
     private val render: (bar: View, body: List<View>, actions: List<Button>) -> Unit,
     private val onBack: () -> Unit,
 ) {
@@ -38,7 +43,7 @@ class CheckoutCashController(
         val current = sessions.firstOrNull { it.drawerId == drawerId && it.status == CashSessionStatus.OPEN }
         val body = mutableListOf<View>()
         body += ui.text("TEST ONLY · MANUAL CASH SESSION", 13f, bold = true)
-        body += ui.text("Cash and staff details are entered by the operator. Staff labels are not authenticated. No drawer hardware or physical cash verification is connected.", 13f)
+        body += ui.text("Cash entries are attributed to the signed-in staff member. Historical labels remain explicitly unverified. No drawer hardware or physical cash verification is connected.", 13f)
         if (message != null) body += ui.text(message, 14f, bold = true, colour = ui.pal.secondary)
         if (current == null) {
             body += ui.text("Main drawer has no open session.", 17f, bold = true)
@@ -76,21 +81,18 @@ class CheckoutCashController(
 
     private fun showOpen() {
         val floatField = amountField("Opening float in USD", "0.00")
-        val staffField = ui.field("Operator label (not authenticated)")
         val body = listOf(
             ui.text("Open the main drawer session", 18f, bold = true),
-            ui.text("Enter starting cash and an operator label. This records your input only; it does not read a drawer.", 14f, colour = ui.pal.secondary),
-            floatField, staffField,
+            ui.text("Enter starting cash. The saved entry uses the currently signed-in staff identity; it does not read a drawer.", 14f, colour = ui.pal.secondary),
+            floatField,
         )
         val operationId = UUID.randomUUID().toString()
         val sessionId = UUID.randomUUID().toString()
         val submit = ui.primary("Open session") {
             val float = parseUsd(floatField, "Opening float") ?: return@primary
-            val staff = staffField.text.toString().trim().ifEmpty { showInputError("Enter an operator label."); return@primary }
-            perform("The session was not opened.") {
-                store.openSession(operationId, sessionId, drawerId, staff, float, nowSeconds())
-                showHome("Cash session opened. Record only observed operator entries.")
-            }
+            performAuthorized("The session was not opened.", {
+                store.openSession(it, operationId, sessionId, float, nowSeconds())
+            }) { showHome("Cash session opened for the signed-in staff member. Record only observed entries.") }
         }
         render(ui.bar("Open cash session", back = { showHome() }), body,
             listOf(submit, ui.quiet("Cancel") { showHome() }))
@@ -100,23 +102,20 @@ class CheckoutCashController(
         val title = if (kind == CashMovementKind.CASH_IN) "Cash in" else "Cash out"
         val amountField = amountField("Amount in USD", "")
         val reasonField = ui.field("Reason")
-        val staffField = ui.field("Operator label (not authenticated)").apply { setText(session.staffId) }
         val body = listOf(
             ui.text("Record $title", 18f, bold = true),
-            ui.text("Entry changes expected cash only after this explicit save. It does not move or verify physical cash.", 14f, colour = ui.pal.secondary),
-            amountField, reasonField, staffField,
+            ui.text("Entry changes expected cash only after this explicit save and is attributed to the signed-in staff member. It does not move or verify physical cash.", 14f, colour = ui.pal.secondary),
+            amountField, reasonField,
         )
         val operationId = UUID.randomUUID().toString()
         val submit = ui.primary("Save $title") {
             val amount = parseUsd(amountField, "Amount") ?: return@primary
             if (amount <= 0) { showInputError("Amount must be greater than $0.00."); return@primary }
             val reason = reasonField.text.toString().trim()
-            val staff = staffField.text.toString().trim()
-            if (reason.isEmpty() || staff.isEmpty()) { showInputError("Enter a reason and operator label."); return@primary }
-            perform("The cash movement was not saved.") {
-                store.recordMovement(session.sessionId, operationId, kind, amount, reason, staff, nowSeconds())
-                showHome("$title saved to the manual cash journal.")
-            }
+            if (reason.isEmpty()) { showInputError("Enter a reason."); return@primary }
+            performAuthorized("The cash movement was not saved.", {
+                store.recordMovement(it, session.sessionId, operationId, kind, amount, reason, nowSeconds())
+            }) { showHome("$title saved with signed-in staff attribution.") }
         }
         render(ui.bar(title, back = { showHome() }), body,
             listOf(submit, ui.quiet("Cancel") { showHome() }))
@@ -126,21 +125,18 @@ class CheckoutCashController(
         val session = store.getSession(sessionId)
         if (session.status != CashSessionStatus.OPEN) return showHistory()
         val countField = amountField("Counted cash in USD", "")
-        val staffField = ui.field("Closing operator label (not authenticated)").apply { setText(session.staffId) }
         val body = listOf(
             ui.receipt(listOf(
                 org.openbmt.app.ReceiptLine("EXPECTED CASH", org.openbmt.app.LineStyle.Strong),
                 org.openbmt.app.ReceiptLine(money(session.expectedCashMinor), org.openbmt.app.LineStyle.Strong),
                 org.openbmt.app.ReceiptLine("Opening float ${money(session.openingFloatMinor)} · ${session.sales.size} linked sales · ${session.movements.size} movements"),
             )),
-            countField, staffField,
+            countField,
             ui.text("Closing stores an immutable count snapshot. A positive discrepancy is over; a negative discrepancy is short. No physical count is verified by this app.", 13f, colour = ui.pal.secondary),
         )
         val closeOperationId = UUID.randomUUID().toString()
         val countButton = ui.primary("Review and close session") {
             val count = parseUsd(countField, "Counted cash") ?: return@primary
-            val staff = staffField.text.toString().trim()
-            if (staff.isEmpty()) { showInputError("Enter a closing operator label."); return@primary }
             val discrepancy = runCatching { Math.subtractExact(count, session.expectedCashMinor) }.getOrElse {
                 showInputError("The discrepancy is outside the supported amount range."); return@primary
             }
@@ -149,10 +145,9 @@ class CheckoutCashController(
                 .setMessage("Expected: ${money(session.expectedCashMinor)}\nCounted: ${money(count)}\nDiscrepancy: ${signedMoney(discrepancy)}\n\nClosing cannot be edited or reopened.")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Close session") { _, _ ->
-                    perform("The cash session was not closed.") {
-                        store.closeSession(sessionId, closeOperationId, count, staff, nowSeconds())
-                        showHistory()
-                    }
+                    performAuthorized("The cash session was not closed.", {
+                        store.closeSession(it, sessionId, closeOperationId, count, nowSeconds())
+                    }) { showHistory() }
                 }.show()
         }
         render(ui.bar("Cash count", back = { showHome() }), body,
@@ -163,7 +158,7 @@ class CheckoutCashController(
         val sessions = store.sessions().filter { it.status == CashSessionStatus.CLOSED }
             .sortedWith(compareByDescending<CashSession> { it.closeout?.closedAt ?: 0L }.thenBy { it.sessionId })
         val body = mutableListOf<View>()
-        body += ui.text("Closed sessions keep their original count, expected balance, discrepancy and staff label.", 14f, colour = ui.pal.secondary)
+        body += ui.text("Closed sessions keep their original count, expected balance, discrepancy and event-time staff attribution. Legacy labels remain unverified.", 14f, colour = ui.pal.secondary)
         if (sessions.isEmpty()) body += ui.text("No closed cash sessions yet.", 16f)
         sessions.forEach { session ->
             val closeout = session.closeout ?: return@forEach
@@ -195,8 +190,6 @@ class CheckoutCashController(
         body += ui.text("Review each candidate before linking it to ${session.sessionId}. Only USD cash payments with recordedAt at or after this session opened are shown. A link does not collect cash or change the sale.", 14f, colour = ui.pal.secondary)
         body += ui.text("Drawer ${session.drawerId}. This screen does not reconcile payments from another open drawer automatically.", 13f, colour = ui.pal.secondary)
         if (candidates.isEmpty()) body += ui.text("No eligible unlinked cash payments were found.", 16f)
-        val staffField = ui.field("Operator label (not authenticated)").apply { setText(session.staffId) }
-        body += staffField
         val actions = mutableListOf<Button>()
         candidates.forEach { (sale, payment) ->
             body += ui.receipt(listOf(
@@ -206,22 +199,25 @@ class CheckoutCashController(
             ))
             val operationId = deterministicOperationId(session.sessionId, payment.paymentId)
             actions += ui.secondary("Link this cash payment") {
-                val staff = staffField.text.toString().trim()
-                if (staff.isEmpty()) { showInputError("Enter an operator label."); return@secondary }
-                perform("Payment was not linked. No cash was collected.") {
-                    store.linkCashSale(session.sessionId, operationId, sale.saleId, payment.paymentId,
-                        staff, payment.recordedAt, ledger)
-                    showReconcile(store.getSession(session.sessionId))
-                }
+                performAuthorized("Payment was not linked. No cash was collected.", {
+                    store.linkCashSale(it, session.sessionId, operationId, sale.saleId, payment.paymentId,
+                        payment.recordedAt, ledger)
+                }) { showReconcile(store.getSession(session.sessionId)) }
             }
         }
         actions += ui.quiet("Back to cash drawer") { showHome() }
         render(ui.bar("Reconcile cash payments", back = { showHome() }), body, actions)
     }
 
-    private fun perform(failureMessage: String, action: () -> Unit) {
+    private fun performAuthorized(
+        failureMessage: String,
+        action: (CheckoutAuthoritySession) -> Unit,
+        success: () -> Unit,
+    ) {
         if (blocked) return showBlocked()
-        try { action() } catch (e: Exception) { handleError(e, failureMessage) }
+        executeAuthorized(action) { error ->
+            if (error == null) success() else handleError(error, failureMessage)
+        }
     }
 
     private fun handleError(error: Exception, fallback: String) {

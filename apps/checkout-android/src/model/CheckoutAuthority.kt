@@ -147,7 +147,8 @@ enum class CheckoutAuthorityCapability(val id: String) {
     REPORT_READ("report.read"),
     CATALOG_MANAGE("catalog.manage"),
     INVENTORY_MANAGE("inventory.manage"),
-    REPORT_EXPORT("report.export");
+    REPORT_EXPORT("report.export"),
+    WALLET_CONFIGURE("wallet.configure");
 
     companion object {
         fun fromId(id: String): CheckoutAuthorityCapability? = entries.firstOrNull { it.id == id }
@@ -164,6 +165,23 @@ class ActorAttribution private constructor(
     val scope: CheckoutAuthorityScope,
     val eventTimeMillis: Long,
 ) {
+    override fun equals(other: Any?): Boolean = other is ActorAttribution &&
+        actorId == other.actorId && displayNameAtEvent == other.displayNameAtEvent &&
+        role == other.role && capabilityId == other.capabilityId &&
+        policyGeneration == other.policyGeneration && scope == other.scope &&
+        eventTimeMillis == other.eventTimeMillis
+
+    override fun hashCode(): Int {
+        var result = actorId.hashCode()
+        result = 31 * result + displayNameAtEvent.hashCode()
+        result = 31 * result + role.hashCode()
+        result = 31 * result + capabilityId.hashCode()
+        result = 31 * result + policyGeneration.hashCode()
+        result = 31 * result + scope.hashCode()
+        result = 31 * result + eventTimeMillis.hashCode()
+        return result
+    }
+
     companion object {
         internal fun create(
             actorId: String, displayNameAtEvent: String, role: CheckoutAuthorityRole,
@@ -989,6 +1007,8 @@ class CheckoutAuthority(
         )
         private val MANAGER_GRANTS = CASHIER_GRANTS + setOf(
             CheckoutAuthorityCapability.STAFF_MANAGE, CheckoutAuthorityCapability.REPORT_READ,
+            CheckoutAuthorityCapability.CATALOG_MANAGE, CheckoutAuthorityCapability.INVENTORY_MANAGE,
+            CheckoutAuthorityCapability.REPORT_EXPORT, CheckoutAuthorityCapability.WALLET_CONFIGURE,
         )
 
         private fun hex(bytes: ByteArray): String {

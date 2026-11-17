@@ -1,5 +1,7 @@
 # Standalone POS staff authority review
 
+> Historical design checkpoint: the Android authority, enrollment, recovery, lifecycle, capability-gate and cash-attribution integration described here as absent was subsequently implemented with explicit remaining boundaries. See [Android authority and cash-attribution integration](android-authority-cash-foundation-2026-11-17.md).
+
 Review date: 17 November 2026. This note traces the native checkout and the existing counter/owner authentication primitives. It is an integration design, not evidence that the standalone checkout has staff authorization today.
 
 ## Findings

@@ -70,6 +70,8 @@ open class CheckoutActivity : Activity() {
     private lateinit var cashController: CheckoutCashController
     private lateinit var inventoryController: CheckoutInventoryController
     private lateinit var reportController: CheckoutReportController
+    private lateinit var authorityFlow: AndroidCheckoutAuthorityFlow
+    private lateinit var authorityUi: CheckoutAuthorityUi
     private var catalogReady = false
     private var cashSessionsReady = false
     private var inventoryReady = false
@@ -80,6 +82,9 @@ open class CheckoutActivity : Activity() {
     private lateinit var ui: Ui
     private val nodeDir by lazy { File(noBackupFilesDir, "counter-node") }
     private var pairing: ByteArray? = null
+    private var pendingPairingImport: ByteArray? = null
+    private var pendingPairingFixture: File? = null
+    private var pairingImportInFlight = false
     private var node: CounterNode? = null
     private var torLease: TorLease? = null
     private var pumpThread: Thread? = null
@@ -119,6 +124,9 @@ open class CheckoutActivity : Activity() {
     private var discountDraft = ""
     private var taxRateDraft = ""
     private var tipDraft = ""
+    private var businessStoresInitialized = false
+    private var businessStartupFault: String? = null
+    private var pendingSavedUiState: Bundle? = null
 
     /** The plain APK has no Square class on its class path. The Sandbox project overrides this. */
     protected open fun createCardCheckoutBridge(): CardCheckoutBridge? = null
@@ -130,31 +138,129 @@ open class CheckoutActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         ui = Ui(this)
         scan = ScanFlow(this, ui)
-        try {
-            val noBackup = noBackupFilesDir
-            pairingFile = SealedFile(noBackup, KeystoreSealer(PAIRING_KEY_ALIAS), PAIRING_FILE)
-            // A damaged ledger is a blocking fault. Never replace it with an empty ledger on startup.
-            ledger = CheckoutLedger(AndroidLedgerStorage(noBackup, LEDGER_FILE))
-            // Commit the local event epoch before serving checkout UI or accepting mutations.
-            ledger.initializeEvents()
-            pairing = pairingFile.load()
-        } catch (e: Exception) {
-            show("Saved test data needs checking", "No saved checkout data was reset. A startup write may have an uncertain outcome. Close and reopen this test app, then inspect Sales before continuing. If the problem remains, report the storage fault.", listOf("Close test app" to { finish() }), "Details: ${safeDetail(e)}")
+        // Take this snapshot before any ledger/catalog/session initializer can create a file.
+        // It is the fail-closed fresh-install evidence used by manager bootstrap.
+        val initialBusinessFiles = BUSINESS_FILE_NAMES.map { File(noBackupFilesDir, it).exists() }
+        pendingSavedUiState = savedInstanceState
+        authorityUi = CheckoutAuthorityUi(this)
+        authorityFlow = AndroidCheckoutAuthorityFlow(
+            this,
+            businessFilesWereAbsentAtLaunch = initialBusinessFiles.none { it },
+            onState = ::onAuthorityState,
+        )
+        renderAuthorityGate()
+        authorityFlow.start()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        visible = true
+        if (::authorityFlow.isInitialized) {
+            authorityFlow.refresh()
+            // refresh publishes Loading synchronously; replace the previous checkout page before
+            // returning to the event loop rather than waiting for the posted state callback.
+            renderAuthorityGate(CheckoutAccessState.Loading)
+        }
+    }
+
+    override fun onStop() {
+        visible = false
+        stopCounterForAuthorityLock()
+        if (::authorityFlow.isInitialized) authorityFlow.lock()
+        super.onStop()
+    }
+
+    private fun stopCounterForAuthorityLock() {
+        generation++
+        if (!scan.asking) scan.stop()
+        pumpThread?.interrupt()
+        pumpThread = null
+        nativeLock.withLock {
+            node?.close()
+            node = null
+        }
+        torLease?.close()
+        torLease = null
+    }
+
+    override fun onDestroy() {
+        scan.stop()
+        pendingPairingImport?.fill(0)
+        pendingPairingImport = null
+        if (::authorityFlow.isInitialized) authorityFlow.destroy()
+        super.onDestroy()
+    }
+
+    private fun onAuthorityState(state: CheckoutAccessState) {
+        if (state !is CheckoutAccessState.SignedIn) {
+            // Timeout, denial, recovery and storage faults must stop the payment observer just as
+            // backgrounding does. Native state remains durable and is reconciled after sign-in.
+            stopCounterForAuthorityLock()
+            renderAuthorityGate(state)
             return
         }
+        window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        initializeBusinessStores()
+        if (businessStartupFault != null) {
+            show("Saved test data needs checking", "No saved checkout data was reset. A startup storage operation failed, so checkout and the Regtest counter remain unavailable.", listOf("Close test app" to { finish() }), businessStartupFault)
+            return
+        }
+        if (!businessStoresInitialized) return
+        if (reportController.resumePendingExportAfterSignIn()) {
+            if (visible && pairing != null && node == null) startCounter()
+            return
+        }
+        if (commitPendingPairingImport()) return
+        showInitialCheckoutRoute()
+        if (visible && pairing != null && node == null) startCounter()
+    }
+
+    private fun renderAuthorityGate(state: CheckoutAccessState = authorityFlow.state()) {
+        if (!::authorityUi.isInitialized || authorityFlow.isSignedIn()) return
+        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        authorityUi.render(state, object : CheckoutAuthorityUi.Actions {
+            override fun refresh() = authorityFlow.refresh()
+            override fun prepareManagerEnrollment() = authorityFlow.prepareManagerEnrollment()
+            override fun confirmRecoveryCode(value: CharArray) = authorityFlow.confirmRecoveryCode(value)
+            override fun enrollManager(name: String, pin: CharArray) = authorityFlow.enrollManager(name, pin)
+            override fun signIn(actorId: String, pin: CharArray) = authorityFlow.signIn(actorId, pin)
+            override fun beginManagerRecovery() = authorityFlow.beginManagerRecovery()
+            override fun prepareManagerRecovery(currentCode: CharArray, newPin: CharArray) =
+                authorityFlow.prepareManagerRecovery(currentCode, newPin)
+            override fun confirmNextRecoveryCode(value: CharArray) = authorityFlow.confirmNextRecoveryCode(value)
+        })
+    }
+
+    /** Business stores are opened only after local authority has produced a signed-in actor. */
+    private fun initializeBusinessStores() {
+        if (businessStoresInitialized || !authorityFlow.isSignedIn()) return
+        businessStoresInitialized = true
         val noBackup = noBackupFilesDir
         val renderer: (View, List<View>, List<Button>) -> Unit = { bar, body, actions -> showUiPage(bar, body, actions) }
         try {
+            pairingFile = SealedFile(noBackup, KeystoreSealer(PAIRING_KEY_ALIAS), PAIRING_FILE)
+            // A damaged ledger is a blocking fault. Never replace it with an empty ledger on startup.
+            ledger = CheckoutLedger(AndroidLedgerStorage(noBackup, LEDGER_FILE))
+            ledger.initializeEvents()
+            pairing = pairingFile.load()
+        } catch (e: Exception) {
+            businessStartupFault = safeDetail(e)
+            return
+        }
+        try {
             catalog = CheckoutCatalog(AndroidLedgerStorage(noBackup, CATALOG_FILE))
-            seedSampleCatalog()
             catalogReady = true
         } catch (e: Exception) {
             catalogFault = safeDetail(e)
             catalogWriteBlocked = catalogFault!!.contains("uncertain", true) || catalogFault!!.contains("poisoned", true)
         }
         try {
-            cashSessions = CheckoutCashSessionStore(AndroidLedgerStorage(noBackup, CASH_SESSIONS_FILE))
-            cashController = CheckoutCashController(this, cashSessions, ledger, renderer) { showHome() }
+            cashSessions = authorityFlow.cashSessionStore(
+                AndroidLedgerStorage(noBackup, CASH_SESSIONS_FILE), MAIN_CASH_DRAWER_ID,
+            )
+            cashController = CheckoutCashController(
+                this, cashSessions, ledger, authorityFlow::executeCommand, renderer,
+            ) { showHome() }
             cashSessionsReady = true
         } catch (e: Exception) {
             cashSessionsFault = safeDetail(e)
@@ -166,14 +272,22 @@ open class CheckoutActivity : Activity() {
             inventoryFault = safeDetail(e)
         }
         if (catalogReady && inventoryReady) try {
-            inventoryController = CheckoutInventoryController(this, catalog, inventory, ledger, renderer) { showCatalogManagement(true) }
+            inventoryController = CheckoutInventoryController(
+                this, catalog, inventory, ledger, authorityFlow::executeCapability, renderer,
+            ) { showCatalogManagement(true) }
         } catch (e: Exception) {
             inventoryReady = false
             inventoryFault = safeDetail(e)
         }
-        reportController = CheckoutReportController(this, ui, ledger, renderer) { showHome() }
-        restoreSavedUiState(savedInstanceState)
+        reportController = CheckoutReportController(
+            this, ui, ledger, authorityFlow::executeCapability, renderer,
+        ) { showHome() }
+        restoreSavedUiState(pendingSavedUiState)
+        pendingSavedUiState = null
         if (pairing == null) consumePrivateFixture()
+    }
+
+    private fun showInitialCheckoutRoute() {
         if (pairing == null) showSetup() else {
             val savedReceipt = receiptToResume
             if (savedReceipt == null) showHome() else try { showReceipt(savedReceipt) } catch (_: Exception) {
@@ -181,32 +295,6 @@ open class CheckoutActivity : Activity() {
                 showSalesIfPossible()
             }
         }
-    }
-
-    override fun onStart() {
-        super.onStart()
-        visible = true
-        if (pairing != null && node == null) startCounter()
-    }
-
-    override fun onStop() {
-        visible = false
-        generation++
-        if (!scan.asking) scan.stop()
-        pumpThread?.interrupt()
-        pumpThread = null
-        nativeLock.withLock {
-            node?.close()
-            node = null
-        }
-        torLease?.close()
-        torLease = null
-        super.onStop()
-    }
-
-    override fun onDestroy() {
-        scan.stop()
-        super.onDestroy()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -259,14 +347,6 @@ open class CheckoutActivity : Activity() {
         catalogSearchDraft = saved?.getString(CATALOG_SEARCH_KEY).orEmpty().take(128)
     }
 
-    private fun seedSampleCatalog() {
-        val existing = catalog.listProducts(includeArchived = true).map { it.productId }.toSet()
-        val seedIds = setOf("latte", "bagel")
-        if (existing.isNotEmpty() && !seedIds.containsAll(existing)) return
-        if ("latte" !in existing) catalog.createProduct("seed-latte-v1", "latte", "Latte", listOf(CatalogVariant("default", "Regular", 550L)))
-        if ("bagel" !in existing) catalog.createProduct("seed-bagel-v1", "bagel", "Bagel", listOf(CatalogVariant("default", "Regular", 450L)))
-    }
-
     private fun restoreFrozenCart(saved: Bundle) {
         val lineIds = saved.getStringArrayList(CART_LINE_IDS_KEY) ?: return
         val productIds = saved.getStringArrayList(CART_PRODUCT_IDS_KEY) ?: return
@@ -314,9 +394,7 @@ open class CheckoutActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (::reportController.isInitialized && reportController.onActivityResult(requestCode, resultCode, data)) {
-            // The picker can stop/restart the Activity while a counter startup is pending.
-            // Reinstall the report page and advance navigation so that startup cannot replace it with home.
-            reportController.show()
+            if (authorityFlow.isSignedIn()) reportController.resumePendingExportAfterSignIn()
             return
         }
         if (requestCode != PICK_REGTEST_RECORD || resultCode != RESULT_OK) return
@@ -325,7 +403,7 @@ open class CheckoutActivity : Activity() {
             val stream = contentResolver.openInputStream(uri) ?: throw IOException("The selected file could not be opened.")
             stream.use { input ->
                 val bytes = readLimited(input, MAX_PAIRING_BYTES)
-                importPairingRecord(bytes)
+                queuePairingImport(bytes)
             }
         } catch (e: Exception) {
             showSetup("The selected file was not saved. It must be a valid Regtest pairing record. Details: ${safeDetail(e)}")
@@ -338,24 +416,54 @@ open class CheckoutActivity : Activity() {
         if (!pending.isFile) return
         try {
             if (pending.length() > MAX_PAIRING_BYTES) throw IOException("The private fixture is too large.")
-            importPairingRecord(pending.readBytes())
-            pending.delete()
+            queuePairingImport(pending.readBytes(), pending)
         } catch (e: Exception) {
             showSetup("The private fixture was not accepted. It must be a Regtest pairing record. Details: ${safeDetail(e)}")
         }
     }
 
-    private fun importPairingRecord(bytes: ByteArray) {
-        val info = Shop.pairing(bytes, nodeDir.path)
-        require(info.network == CounterNetwork.Regtest) { "Only Regtest records are accepted by this test app." }
-        require(info.settings.currency == "USD" || info.settings.currency == "SAT") { "This test app accepts USD or SAT pricing." }
-        pairingFile.save(bytes)
-        pairing = bytes.copyOf()
-        config = info
-        showMessage("Regtest setup saved", "The app sealed the watch-only pairing in private app storage. This is a test environment; do not accept real funds or hand over goods.", "Network: Regtest · Pricing: ${info.settings.currency}") {
-            showHome()
-            if (visible) startCounter()
+    private fun queuePairingImport(bytes: ByteArray, fixture: File? = null) {
+        pendingPairingImport?.fill(0)
+        pendingPairingImport = bytes.copyOf()
+        pendingPairingFixture = fixture
+        if (authorityFlow.isSignedIn()) commitPendingPairingImport()
+    }
+
+    /** Persist receive configuration only after a fresh manager capability check. */
+    private fun commitPendingPairingImport(): Boolean {
+        val bytes = pendingPairingImport ?: return pairingImportInFlight
+        if (pairingImportInFlight) return true
+        pairingImportInFlight = true
+        var imported: org.openbmt.counter.PairingInfo? = null
+        authorityFlow.executeCapability(CheckoutAuthorityCapability.WALLET_CONFIGURE, {
+            val info = Shop.pairing(bytes, nodeDir.path)
+            require(info.network == CounterNetwork.Regtest) { "Only Regtest records are accepted by this test app." }
+            require(info.settings.currency == "USD" || info.settings.currency == "SAT") { "This test app accepts USD or SAT pricing." }
+            pairingFile.save(bytes)
+            imported = info
+        }) { error ->
+            pairingImportInFlight = false
+            if (error is CheckoutAuthorityDeniedException || error is CheckoutAuthorityUnavailableException) return@executeCapability
+            if (error != null) {
+                pendingPairingImport?.fill(0)
+                pendingPairingImport = null
+                pendingPairingFixture = null
+                showSetup("The pairing record was not saved. Details: ${safeDetail(error)}")
+                return@executeCapability
+            }
+            val info = imported ?: return@executeCapability showSetup("The pairing record was not saved. Reopen setup and try again.")
+            pairing = bytes.copyOf()
+            config = info
+            pendingPairingImport?.fill(0)
+            pendingPairingImport = null
+            pendingPairingFixture?.delete()
+            pendingPairingFixture = null
+            showMessage("Regtest setup saved", "The app sealed the watch-only pairing after fresh manager authorization. This is a test environment; do not accept real funds or hand over goods.", "Network: Regtest · Pricing: ${info.settings.currency}") {
+                showHome()
+                if (visible) startCounter()
+            }
         }
+        return true
     }
 
     private fun showSetup(message: String? = null) {
@@ -466,7 +574,7 @@ open class CheckoutActivity : Activity() {
         try {
             val record = Pairing.finish(nowSecs(), bundle)
             endPairing()
-            importPairingRecord(record)
+            queuePairingImport(record)
         } catch (e: Exception) {
             endPairing()
             showSetup("The owner bundle was not saved. Details: ${safeDetail(e)}")
@@ -485,6 +593,7 @@ open class CheckoutActivity : Activity() {
     }
 
     private fun startCounter() {
+        if (!::authorityFlow.isInitialized || !authorityFlow.isSignedIn() || !businessStoresInitialized || businessStartupFault != null) return
         if (!visible || node != null) return
         val record = pairing ?: return showSetup("No pairing record is saved.")
         val info = try { Shop.pairing(record, nodeDir.path) } catch (e: Exception) {
@@ -748,7 +857,7 @@ open class CheckoutActivity : Activity() {
     private fun showShopTools(healthy: Boolean) {
         val body = arrayListOf<View>(
             ui.text("TEST ONLY · local app data · no real funds", 14f, bold = true),
-            ui.text("No provider catalog sync, camera or physical scanner, authenticated staff role, or production payment processing is connected. Inventory counts are configured separately from item prices.", 13f, colour = ui.pal.secondary),
+            ui.text("Local test-only staff authority is active. Provider catalog sync, camera or physical scanner, and production payment processing are not connected. Inventory counts are configured separately from item prices.", 13f, colour = ui.pal.secondary),
             ui.button("Manual amount") { showManualCheckout(healthy) },
             ui.button("Manage items") { showCatalogManagement(healthy) },
             ui.button("Local inventory · test only") { showInventoryStock() },
@@ -849,9 +958,14 @@ open class CheckoutActivity : Activity() {
         val followup = latestFollowupSale()
         val create = {
             val saleId = UUID.randomUUID().toString()
-            try {
-                if (pricing != null) ledger.createPricedSale(saleId, currency, nowSecs(), pricing)
-                else ledger.createSale(saleId, amountMinor, currency, nowSecs(), items)
+            executeAuthorized(
+                CheckoutAuthorityCapability.SALE_CREATE,
+                "The sale could not be saved. No payment attempt was started.",
+                {
+                    if (pricing != null) ledger.createPricedSale(saleId, currency, nowSecs(), pricing)
+                    else ledger.createSale(saleId, amountMinor, currency, nowSecs(), items)
+                },
+            ) {
                 if (items.isNotEmpty()) {
                     cartSelections.clear()
                     cartQuantities.clear()
@@ -860,8 +974,6 @@ open class CheckoutActivity : Activity() {
                     tipDraft = ""
                 }
                 showTenderChoice(saleId)
-            } catch (e: Exception) {
-                showHomeWithError("The sale could not be saved. No payment attempt was started. Details: ${safeDetail(e)}")
             }
         }
         if (followup == null) return create()
@@ -1110,17 +1222,27 @@ open class CheckoutActivity : Activity() {
                 val barcodeValue = barcode.text.toString().trim().takeIf { it.isNotEmpty() }
                 val versions = existing?.variants?.toMutableList() ?: mutableListOf()
                 val commandId = UUID.randomUUID().toString()
-                val savedProduct = if (existing == null) {
-                    val id = UUID.randomUUID().toString()
-                    catalog.createProduct(commandId, id, itemName, listOf(CatalogVariant("default", variantLabel, priceMinor, skuValue, barcodeValue)))
-                } else {
-                    val idx = versions.indexOfFirst { it.variantId == variantId }
-                    require(idx >= 0) { "The selected variant is no longer available." }
-                    versions[idx] = CatalogVariant(versions[idx].variantId, variantLabel, priceMinor, skuValue, barcodeValue)
-                    catalog.editProduct(commandId, existing.productId, existing.version, itemName, versions, existing.modifiers)
+                var savedProduct: CatalogProduct? = null
+                authorityFlow.executeCapability(CheckoutAuthorityCapability.CATALOG_MANAGE, {
+                    savedProduct = if (existing == null) {
+                        val id = UUID.randomUUID().toString()
+                        catalog.createProduct(commandId, id, itemName,
+                            listOf(CatalogVariant("default", variantLabel, priceMinor, skuValue, barcodeValue)))
+                    } else {
+                        val idx = versions.indexOfFirst { it.variantId == variantId }
+                        require(idx >= 0) { "The selected variant is no longer available." }
+                        versions[idx] = CatalogVariant(versions[idx].variantId, variantLabel, priceMinor, skuValue, barcodeValue)
+                        catalog.editProduct(commandId, existing.productId, existing.version, itemName, versions, existing.modifiers)
+                    }
+                }) { error ->
+                    if (error == null) {
+                        val saved = checkNotNull(savedProduct)
+                        Toast.makeText(this, "Saved ${saved.name} · revision ${saved.version}", Toast.LENGTH_SHORT).show()
+                        showCatalogManagement(healthy)
+                    } else if (error !is CheckoutAuthorityDeniedException && error !is CheckoutAuthorityUnavailableException) {
+                        if (!handleCatalogFailure(error)) Toast.makeText(this, error.message ?: "Check the item details.", Toast.LENGTH_LONG).show()
+                    }
                 }
-                Toast.makeText(this, "Saved ${savedProduct.name} · revision ${savedProduct.version}", Toast.LENGTH_SHORT).show()
-                showCatalogManagement(healthy)
             } catch (e: Exception) {
                 if (!handleCatalogFailure(e)) Toast.makeText(this, e.message ?: "Check the item details.", Toast.LENGTH_LONG).show()
             }
@@ -1134,11 +1256,12 @@ open class CheckoutActivity : Activity() {
             .setMessage("Archived items disappear from checkout. Saved sales and frozen basket lines keep their original details.")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Archive") { _, _ ->
-                try {
+                authorityFlow.executeCapability(CheckoutAuthorityCapability.CATALOG_MANAGE, {
                     catalog.archiveProduct(UUID.randomUUID().toString(), product.productId, product.version)
-                    showCatalogManagement(healthy)
-                } catch (e: Exception) {
-                    if (!handleCatalogFailure(e)) Toast.makeText(this, safeDetail(e), Toast.LENGTH_LONG).show()
+                }) { error ->
+                    if (error == null) showCatalogManagement(healthy)
+                    else if (error !is CheckoutAuthorityDeniedException && error !is CheckoutAuthorityUnavailableException &&
+                        !handleCatalogFailure(error)) Toast.makeText(this, safeDetail(error), Toast.LENGTH_LONG).show()
                 }
             }.show()
     }
@@ -1331,23 +1454,21 @@ open class CheckoutActivity : Activity() {
             record.setOnClickListener {
                 val tendered = parsedTender() ?: return@setOnClickListener
                 if (tendered < remaining) return@setOnClickListener
-                try {
-                    // Preserve the destination before the durable write so recreation can reopen its receipt.
-                    receiptToResume = saleId
+                // Preserve the destination before the durable write so recreation can reopen its receipt.
+                receiptToResume = saleId
+                dialog.dismiss()
+                authorityFlow.executeCapability(CheckoutAuthorityCapability.TENDER_BEGIN, {
                     ledger.recordCashPayment(saleId, paymentId, tendered, recordedAt)
-                    dialog.dismiss()
-                    showReceipt(saleId)
-                } catch (e: Exception) {
-                    dialog.dismiss()
-                    val uncertain = (e.message ?: "").contains("uncertain", ignoreCase = true)
+                }) { error ->
+                    if (error == null) return@executeCapability showReceipt(saleId)
+                    if (error is CheckoutAuthorityDeniedException || error is CheckoutAuthorityUnavailableException) return@executeCapability
+                    val uncertain = (error.message ?: "").contains("uncertain", ignoreCase = true)
                     if (!uncertain) receiptToResume = null
                     showMessage(
                         if (uncertain) "Cash record needs checking" else "Cash payment was not recorded",
                         "The cash may have been received even though this screen did not confirm the ledger result. Do not collect or record it again until you have inspected the sale in Sales.",
-                        safeDetail(e),
-                    ) {
-                        if (uncertain) finish() else showReceipt(saleId)
-                    }
+                        safeDetail(error),
+                    ) { if (uncertain) finish() else showReceipt(saleId) }
                 }
             }
             refreshPreview()
@@ -1382,18 +1503,35 @@ open class CheckoutActivity : Activity() {
         if (quote.expectedSats < info.settings.minSaleSats) return showMessage("Amount is below the counter minimum", "No Bitcoin attempt was created. Choose another payment method or review the saved sale.") { showTenderChoice(saleId) }
         val attemptId = UUID.randomUUID().toString()
         val createdAt = nowSecs()
-        try {
-            // The native index is predictable before open because this prototype permits one live node and no concurrent cashier.
+        var expectedIndex = -1L
+        var openedResult: Opened? = null
+        var unexpectedIndex = false
+        authorityFlow.executeCapability(CheckoutAuthorityCapability.TENDER_BEGIN, {
+            // The native index is predictable before open because this prototype permits one live
+            // node and no concurrent cashier. Persist the attempt before exposing its payment code.
             val existing = nativeLock.withLock { currentNode.status().sales }
-            val counterIndex = (existing.maxOrNull() ?: -1L) + 1L
-            ledger.beginBitcoinAttempt(saleId, attemptId, counterIndex, amount, quote.expectedSats, quote.id, quote.at)
-            val opened: Opened = nativeLock.withLock {
+            expectedIndex = (existing.maxOrNull() ?: -1L) + 1L
+            ledger.beginBitcoinAttempt(saleId, attemptId, expectedIndex, amount, quote.expectedSats, quote.id, quote.at)
+            openedResult = nativeLock.withLock {
                 currentNode.open(createdAt, amount, info.settings.currency, quote.rate, quote.source, quote.at)
             }
-            if (opened.index != counterIndex) {
+            if (openedResult!!.index != expectedIndex) {
+                unexpectedIndex = true
                 ledger.requestCancellation(saleId, attemptId)
-                showMessage("No payment code was shown", "The native counter returned an unexpected sale index. Stop here and report this test-build fault.", "Expected $counterIndex · received ${opened.index}") { showReceipt(saleId) }
-                return
+            }
+        }) { error ->
+            if (error is CheckoutAuthorityDeniedException || error is CheckoutAuthorityUnavailableException) return@executeCapability
+            if (error != null) {
+                showMessage("Bitcoin attempt needs review", "The sale and attempt remain saved. No payment code is available; inspect the receipt before choosing another tender.", safeDetail(error)) { showReceipt(saleId) }
+                return@executeCapability
+            }
+            val opened = openedResult ?: return@executeCapability showMessage(
+                "Bitcoin attempt needs review",
+                "The payment request was not returned. Inspect the saved sale before choosing another tender.",
+            ) { showReceipt(saleId) }
+            if (unexpectedIndex) {
+                showMessage("No payment code was shown", "The native counter returned an unexpected sale index. Stop here and report this test-build fault.", "Expected $expectedIndex · received ${opened.index}") { showReceipt(saleId) }
+                return@executeCapability
             }
             activeSaleId = saleId
             activeAttemptId = attemptId
@@ -1401,8 +1539,6 @@ open class CheckoutActivity : Activity() {
             activeUri = opened.payment.copyUri
             activeNativeScreen = nativeLock.withLock { currentNode.judge(nowSecs(), opened.index) }
             renderActiveSale()
-        } catch (e: Exception) {
-            showMessage("Bitcoin attempt needs review", "The sale and attempt remain saved. No payment code is available; inspect the receipt before choosing another tender.", safeDetail(e)) { showReceipt(saleId) }
         }
     }
 
@@ -1504,8 +1640,14 @@ open class CheckoutActivity : Activity() {
     }
 
     private fun cancelBitcoin(saleId: String, attemptId: String, counterIndex: Long) {
-        try {
+        authorityFlow.executeCapability(CheckoutAuthorityCapability.TENDER_BEGIN, {
             ledger.requestCancellation(saleId, attemptId)
+        }) { error ->
+            if (error is CheckoutAuthorityDeniedException || error is CheckoutAuthorityUnavailableException) return@executeCapability
+            if (error != null) {
+                showStatus("Cancellation was not saved", "The attempt remains on file. Do not start another payment until Sales shows its current state.", safeDetail(error))
+                return@executeCapability
+            }
             val currentNode = node
             if (currentNode != null) {
                 try {
@@ -1519,8 +1661,6 @@ open class CheckoutActivity : Activity() {
                 }
             }
             renderActiveSale()
-        } catch (e: Exception) {
-            showStatus("Cancellation was not saved", "The attempt remains on file. Do not start another payment until Sales shows its current state.", safeDetail(e))
         }
     }
 
@@ -1833,11 +1973,13 @@ open class CheckoutActivity : Activity() {
             .setMessage("Original attempt: ${attempt.attemptId}\nRequested amount: $amountText\n\nThis records a refund request only. It does not send Bitcoin, issue a Square refund, or move funds. Keep this sale open until an owner records external refund evidence.")
             .setNegativeButton("Keep sale open", null)
             .setPositiveButton("Record request") { _, _ ->
-                try {
+                authorityFlow.executeCapability(CheckoutAuthorityCapability.REFUND_REQUEST, {
                     ledger.requestRefund(saleId, UUID.randomUUID().toString(), attemptId, amount.first, amount.second, nowSecs())
-                    showReceipt(saleId)
-                } catch (e: Exception) {
-                    showMessage("Refund request was not saved", "No refund was sent. Keep the sale open and review its current payment evidence.", safeDetail(e)) { showReceipt(saleId) }
+                }) { error ->
+                    if (error == null) showReceipt(saleId)
+                    else if (error !is CheckoutAuthorityDeniedException && error !is CheckoutAuthorityUnavailableException) {
+                        showMessage("Refund request was not saved", "No refund was sent. Keep the sale open and review its current payment evidence.", safeDetail(error)) { showReceipt(saleId) }
+                    }
                 }
             }
             .show()
@@ -1851,27 +1993,35 @@ open class CheckoutActivity : Activity() {
         }
         val attemptId = UUID.randomUUID().toString()
         val referenceId = attemptId
-        try {
+        authorityFlow.executeCapability(CheckoutAuthorityCapability.TENDER_BEGIN, {
             // The stable attempt ID is also the persisted Square reference ID used after restart.
             ledger.beginCardAttempt(saleId, attemptId, "square", attemptId, amountMinor)
+        }) { error ->
+            if (error is CheckoutAuthorityDeniedException || error is CheckoutAuthorityUnavailableException) return@executeCapability
+            if (error != null) {
+                showMessage("Square outcome needs checking", "The card flow was not opened. Inspect the saved sale before retrying or switching tender.", safeDetail(error)) { showReceipt(saleId) }
+                return@executeCapability
+            }
             receiptToResume = saleId
             showMessage("Square Sandbox is opening", "A card attempt was saved before the Square SDK was called. Approval alone is not payment. This is a test environment; do not hand over goods.", "Reference: $referenceId") { showReceipt(saleId) }
-            bridge.begin(attemptId, referenceId, amountMinor, "USD", object : CardCheckoutBridge.Listener {
-                override fun onEvidence(evidenceId: String, result: CardResult, amountMinor: Long) {
-                    val latest = ledger.getSale(saleId).attempts.first { it.attemptId == attemptId }.cardEvidence.maxByOrNull { it.observedAt }
-                    val observedAt = maxOf(nowSecs(), (latest?.observedAt ?: -1L) + 1L)
-                    ledger.recordCardEvidence(saleId, attemptId, evidenceId, attemptId, result, amountMinor, observedAt)
-                    main.post { showReceipt(saleId) }
-                }
+            try {
+                bridge.begin(attemptId, referenceId, amountMinor, "USD", object : CardCheckoutBridge.Listener {
+                    override fun onEvidence(evidenceId: String, result: CardResult, amountMinor: Long) {
+                        val latest = ledger.getSale(saleId).attempts.first { it.attemptId == attemptId }.cardEvidence.maxByOrNull { it.observedAt }
+                        val observedAt = maxOf(nowSecs(), (latest?.observedAt ?: -1L) + 1L)
+                        ledger.recordCardEvidence(saleId, attemptId, evidenceId, attemptId, result, amountMinor, observedAt)
+                        main.post { showReceipt(saleId) }
+                    }
 
-                override fun onUncertain() {
-                    ledger.markCancellationUnknown(saleId, attemptId)
-                    main.post { showMessage("Card payment outcome is unknown", "The saved Square attempt stays locked. Do not retry the card or switch tender until it is reconciled.", "Attempt: $attemptId · reference: $referenceId") { showReceipt(saleId) } }
-                }
-            })
-        } catch (e: Exception) {
-            try { ledger.markCancellationUnknown(saleId, attemptId) } catch (_: Exception) {}
-            showMessage("Square outcome needs checking", "The saved attempt remains locked. Do not retry or switch tender.", safeDetail(e)) { showReceipt(saleId) }
+                    override fun onUncertain() {
+                        ledger.markCancellationUnknown(saleId, attemptId)
+                        main.post { showMessage("Card payment outcome is unknown", "The saved Square attempt stays locked. Do not retry the card or switch tender until it is reconciled.", "Attempt: $attemptId · reference: $referenceId") { showReceipt(saleId) } }
+                    }
+                })
+            } catch (e: Exception) {
+                try { ledger.markCancellationUnknown(saleId, attemptId) } catch (_: Exception) {}
+                showMessage("Square outcome needs checking", "The saved attempt remains locked. Do not retry or switch tender.", safeDetail(e)) { showReceipt(saleId) }
+            }
         }
     }
 
@@ -1884,6 +2034,21 @@ open class CheckoutActivity : Activity() {
         if (config == null) return showSetup(message)
         showHome()
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+    }
+
+    private fun executeAuthorized(
+        capability: CheckoutAuthorityCapability,
+        failureMessage: String,
+        operation: () -> Unit,
+        success: () -> Unit,
+    ) {
+        authorityFlow.executeCapability(capability, operation) { error ->
+            when (error) {
+                null -> success()
+                is CheckoutAuthorityDeniedException, is CheckoutAuthorityUnavailableException -> Unit
+                else -> showHomeWithError("$failureMessage Details: ${safeDetail(error)}")
+            }
+        }
     }
 
     private fun showStatus(title: String, body: String, details: String? = null) {
@@ -1963,6 +2128,10 @@ open class CheckoutActivity : Activity() {
     }
 
     private fun installRoot(root: View) {
+        if (::authorityFlow.isInitialized && !authorityFlow.isSignedIn()) {
+            renderAuthorityGate()
+            return
+        }
         navigationRevision++
         activeSaleRootShown = false
         homeStatusView = null
@@ -2038,23 +2207,30 @@ open class CheckoutActivity : Activity() {
         val attempt = sale.attempts.lastOrNull { it.tender == Tender.CARD && it.state == PaymentState.UNKNOWN }
             ?: return showReceipt(saleId)
         val referenceId = attempt.attemptId
-        try {
-            bridge.reconcile(attempt.attemptId, referenceId, attempt.amountMinor, sale.currency, object : CardCheckoutBridge.Listener {
-                override fun onEvidence(evidenceId: String, result: CardResult, amountMinor: Long) {
-                    val latest = ledger.getSale(saleId).attempts.first { it.attemptId == attempt.attemptId }.cardEvidence.maxByOrNull { it.observedAt }
-                    val observedAt = maxOf(nowSecs(), (latest?.observedAt ?: -1L) + 1L)
-                    ledger.recordCardEvidence(saleId, attempt.attemptId, evidenceId, attempt.stableId!!, result, amountMinor, observedAt)
-                    main.post { showReceipt(saleId) }
-                }
+        authorityFlow.executeCapability(CheckoutAuthorityCapability.TENDER_BEGIN, { Unit }) { error ->
+            if (error is CheckoutAuthorityDeniedException || error is CheckoutAuthorityUnavailableException) return@executeCapability
+            if (error != null) {
+                showMessage("Square could not be opened", "The unresolved attempt remains locked. Sign in again before reconciling it.", safeDetail(error)) { showReceipt(saleId) }
+                return@executeCapability
+            }
+            try {
+                bridge.reconcile(attempt.attemptId, referenceId, attempt.amountMinor, sale.currency, object : CardCheckoutBridge.Listener {
+                    override fun onEvidence(evidenceId: String, result: CardResult, amountMinor: Long) {
+                        val latest = ledger.getSale(saleId).attempts.first { it.attemptId == attempt.attemptId }.cardEvidence.maxByOrNull { it.observedAt }
+                        val observedAt = maxOf(nowSecs(), (latest?.observedAt ?: -1L) + 1L)
+                        ledger.recordCardEvidence(saleId, attempt.attemptId, evidenceId, attempt.stableId!!, result, amountMinor, observedAt)
+                        main.post { showReceipt(saleId) }
+                    }
 
-                override fun onUncertain() {
-                    ledger.markCancellationUnknown(saleId, attempt.attemptId)
-                    main.post { showMessage("Square still has no final answer", "This attempt remains locked. Do not retry the card or switch tender.", referenceId) { showReceipt(saleId) } }
-                }
-            })
-        } catch (e: Exception) {
-            ledger.markCancellationUnknown(saleId, attempt.attemptId)
-            showMessage("Square could not confirm the outcome", "The attempt remains locked. Do not retry the card or switch tender.", safeDetail(e)) { showReceipt(saleId) }
+                    override fun onUncertain() {
+                        ledger.markCancellationUnknown(saleId, attempt.attemptId)
+                        main.post { showMessage("Square still has no final answer", "This attempt remains locked. Do not retry the card or switch tender.", referenceId) { showReceipt(saleId) } }
+                    }
+                })
+            } catch (e: Exception) {
+                ledger.markCancellationUnknown(saleId, attempt.attemptId)
+                showMessage("Square could not confirm the outcome", "The attempt remains locked. Do not retry the card or switch tender.", safeDetail(e)) { showReceipt(saleId) }
+            }
         }
     }
 
@@ -2098,6 +2274,8 @@ open class CheckoutActivity : Activity() {
         private const val HISTORY_TENDER_KEY = "checkout.history.tender"
         private const val HISTORY_STATUS_KEY = "checkout.history.status"
         private const val MAX_PAIRING_BYTES = 1024 * 1024
+        private const val MAIN_CASH_DRAWER_ID = "main-drawer"
+        private val BUSINESS_FILE_NAMES = listOf(LEDGER_FILE, CATALOG_FILE, CASH_SESSIONS_FILE, INVENTORY_FILE)
     }
 
     private class AndroidLedgerStorage(private val dir: File, private val name: String) : DurableLedgerStorage {

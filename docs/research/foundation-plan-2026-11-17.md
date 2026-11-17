@@ -78,6 +78,8 @@ This slice establishes infrastructure; it does not by itself close the five staf
 
 The local authority model and JVM contract tests are now implemented. They include compare-and-swap persistence, prepared recovery credentials, duplicate-PIN refusal, strict scope/role/session enforcement, and non-secret login-directory projection. The Android Keystore adapter, enrollment/sign-in screens, lifecycle lock, business command wiring, actor-attributed journals, and admin event log remain open; therefore the related capability statuses are unchanged. See [the implementation record](local-authority-foundation-2026-11-17.md).
 
+The next integration checkpoint adds the Android Keystore adapter, authenticated provisioning state, enrollment/sign-in/recovery UI, lifecycle expiry/lock, exact capability gates across current merchant-started commands, report authorization, and v4 cash-session actor attribution. Non-cash records still drop actor attribution, the audit-journal model is not Android-wired, and device workflow evidence remains open, so canonical capability statuses are still unchanged. See [the Android integration record](android-authority-cash-foundation-2026-11-17.md).
+
 ## Sequence after authority
 
 1. Thread scope and actor context through the existing catalog, sale, tender, cash, inventory, refund, report, and event records. Close authoritative remaining balance and provider-neutral tender completion without replacing exact-money logic.

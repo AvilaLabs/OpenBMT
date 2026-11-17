@@ -65,20 +65,24 @@ uncertain commit. JVM contract tests cover scope, role, expiry, revocation,
 lockout, recovery, stale concurrent instances, duplicate PIN refusal,
 corruption and uncertain writes.
 
-That authority model is **not connected to the Android screens or business
-stores yet**. The Android app does not create a Keystore-sealed authority
-store, enroll or sign in staff, authorize commands, lock a session on
-background, or persist actor attribution in sales/cash records. Existing cash
-operator fields remain unauthenticated labels. No staff-permission capability
-is claimed complete from the model alone.
+The Android test host now connects that model to a Keystore-sealed authority
+store, authenticated installation descriptor, first-manager enrollment,
+staff PIN sign-in, manager recovery, five-minute expiry and lifecycle lock.
+Current merchant-started sale, tender, refund, catalog, inventory and report
+commands pass exact capability checks. Cash-session v4 records persist actor
+and scope attribution; v1-v3 labels remain explicitly legacy/unverified.
+Non-cash business records do not yet persist the returned actor attribution,
+and the model audit journal is not Android-wired or transactionally atomic
+with authority changes. No staff-permission capability is claimed complete
+from this integration alone.
 
 The coordinator's current implementation and validation record is
 [native POS foundations (17 November 2026)](../../docs/research/native-pos-foundations-2026-11-17.md).
-Coordinator validation is in progress. That record lists implementation scope,
-proof status and remaining validation; this README makes no new test or emulator
-pass claim. The Shop Lightning work in this batch is an owner-app readiness
-report only. **The native checkout still has no integrated Lightning tender
-path.**
+The later [Android authority and cash-attribution record](../../docs/research/android-authority-cash-foundation-2026-11-17.md)
+lists the exact local proof and remaining boundaries. No emulator or physical
+device authority workflow has yet been claimed. The Shop Lightning work in
+this batch is an owner-app readiness report only. **The native checkout still
+has no integrated Lightning tender path.**
 
 ## Pairing and fixture setup
 
@@ -140,15 +144,15 @@ the attempt so late payment evidence can still be reconciled. A Square Sandbox
 approval is not completion, and uncertain card results remain pending until
 reconciled.
 
-Staff/operator labels are not authentication. A tested local authority model
-exists, but no product command path currently enforces it and its Android
-Keystore storage, enrollment, sign-in, lifecycle and admin-audit wiring remain
-open. Physical devices, production card provider approval, merchant
-onboarding, independent Lightning recovery, actual merchant shifts, and
-mainnet/real-funds gates remain open. Partial native UI and model tests do not
-establish POS parity or merchant readiness. The browser checkout is a separate
-explicitly labeled simulation and does not use these native payment
-observations.
+Legacy staff/operator labels are not authentication. New cash-session writes
+require a signed-in actor, and current Android merchant commands enforce local
+capabilities, but non-cash actor persistence, Android admin-audit wiring,
+tamper-evident business journals, and device workflow evidence remain open.
+Physical devices, production card provider approval, merchant onboarding,
+independent Lightning recovery, actual merchant shifts, and mainnet/real-funds
+gates remain open. Partial native UI and model tests do not establish POS
+parity or merchant readiness. The browser checkout is a separate explicitly
+labeled simulation and does not use these native payment observations.
 
 ## Historical validation milestone: 16 November 2026
 

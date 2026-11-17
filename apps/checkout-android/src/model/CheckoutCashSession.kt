@@ -12,14 +12,23 @@ import java.util.Collections
 enum class CashSessionStatus { OPEN, CLOSED }
 enum class CashMovementKind { CASH_IN, CASH_OUT }
 
+/** Historical labels are display text only; newly written events require authority attribution. */
+sealed interface CashActorAttribution {
+    data class Authenticated(val value: ActorAttribution) : CashActorAttribution
+    data class LegacyLabel(val value: String?) : CashActorAttribution
+}
+
 data class CashMovement(
     val operationId: String,
     val kind: CashMovementKind,
     val amountMinor: Long,
     val reason: String,
-    val staffId: String,
+    val actor: CashActorAttribution,
     val recordedAt: Long,
-)
+) {
+    /** Compatibility display only. This value is never used as authorization or identity. */
+    val staffId: String get() = actor.displayLabel()
+}
 
 data class CashSaleLink(
     val saleId: String,
@@ -29,23 +38,32 @@ data class CashSaleLink(
     val tenderedMinor: Long,
     val changeMinor: Long,
     val recordedAt: Long,
-    /** Null only for records loaded from codec v1/v2, which did not persist the operator label. */
-    val staffId: String? = null,
-)
+    /** Legacy sale-link records from v1/v2 have no stored actor or label. */
+    val actor: CashActorAttribution,
+) {
+    /** Compatibility display only. This value is never used as authorization or identity. */
+    val staffId: String? get() = when (val a = actor) {
+        is CashActorAttribution.Authenticated -> a.value.displayNameAtEvent
+        is CashActorAttribution.LegacyLabel -> a.value?.let { "Legacy label: $it" }
+    }
+}
 
 data class CashCloseoutSnapshot(
     val countedMinor: Long,
     val expectedMinor: Long,
     /** Positive is over; negative is short. */
     val discrepancyMinor: Long,
-    val staffId: String,
+    val actor: CashActorAttribution,
     val closedAt: Long,
-)
+) {
+    /** Compatibility display only. This value is never used as authorization or identity. */
+    val staffId: String get() = actor.displayLabel()
+}
 
 data class CashSession(
     val sessionId: String,
     val drawerId: String,
-    val staffId: String,
+    val openedBy: CashActorAttribution,
     val openedAt: Long,
     val openingFloatMinor: Long,
     val status: CashSessionStatus,
@@ -55,17 +73,61 @@ data class CashSession(
     val closeout: CashCloseoutSnapshot?,
     /** All session amounts are USD cents; non-USD drawer sessions are not supported. */
     val currency: String = "USD",
+) {
+    /** Compatibility display only. This value is never used as authorization or identity. */
+    val staffId: String get() = openedBy.displayLabel()
+}
+
+private fun CashActorAttribution.displayLabel(): String = when (this) {
+    is CashActorAttribution.Authenticated -> value.displayNameAtEvent
+    is CashActorAttribution.LegacyLabel -> value?.let { "Legacy label: $it" } ?: "Unknown (legacy; no actor recorded)"
+}
+
+private val UNCONFIGURED_CASH_SCOPE = CheckoutAuthorityScope(
+    "cash-unconfigured", "cash-unconfigured", "cash-unconfigured", "cash-unconfigured", "cash-unconfigured",
 )
 
+private fun unavailableCashAuthority() = CheckoutAuthority(CashUnavailableStorage, CashUnavailableClock())
+
+private object CashUnavailableStorage : CheckoutAuthorityStorage {
+    override fun read(): ByteArray? = null
+    override fun compareAndSwap(expectedBytes: ByteArray?, nextBytes: ByteArray): Boolean =
+        throw CheckoutAuthorityUnavailableException()
+}
+
+private class CashUnavailableClock : CheckoutAuthorityClock {
+    override fun elapsedRealtimeMillis(): Long = 0
+    override fun wallTimeMillis(): Long = 0
+    override fun bootIdentity(): String = "cash-unconfigured"
+}
+
 /**
- * Durable manual cash-session accounting. It records operator-entered counts and movements;
- * it does not observe a physical drawer, prove cash presence, or authenticate the staff label.
- * Sale links are accepted only from a canonical CheckoutLedger cash payment.
+ * Durable manual cash-session accounting. New writes require an authorized local actor, while
+ * historical v1-v3 labels remain explicitly unauthenticated. This store does not observe a
+ * physical drawer or prove cash presence. Sale links come only from a canonical cash payment.
  */
-class CheckoutCashSessionStore(private val storage: DurableLedgerStorage) {
+class CheckoutCashSessionStore(
+    private val storage: DurableLedgerStorage,
+    private val authority: CheckoutAuthority,
+    private val authorityScope: CheckoutAuthorityScope,
+    private val cashDrawerId: String,
+) {
+    /**
+     * Transitional read-only construction for call sites not yet wired to staff authority.
+     * Every legacy write overload below fails closed; this constructor grants no authority.
+     */
+    @Deprecated("Inject CheckoutAuthority, its exact scope, and the configured cash drawer")
+    constructor(storage: DurableLedgerStorage) : this(
+        storage, unavailableCashAuthority(), UNCONFIGURED_CASH_SCOPE, "main-drawer",
+    )
+
     private val lock = Any()
     private var state = decode(storage.read())
     private var poisoned = false
+
+    init { validId(cashDrawerId, "cash drawer id") }
+
+    private fun deniedLegacyMutation(): Nothing = throw CheckoutAuthorityUnavailableException()
 
     fun sessions(): List<CashSession> = synchronized(lock) {
         healthy()
@@ -76,49 +138,75 @@ class CheckoutCashSessionStore(private val storage: DurableLedgerStorage) {
         healthy(); view(state.sessions[sessionId] ?: error("cash session not found"))
     }
 
+    /** Legacy call-site bridge; deliberately never writes without an opaque authority session. */
+    @Deprecated("Use the overload that supplies CheckoutAuthoritySession")
     fun openSession(operationId: String, sessionId: String, drawerId: String, staffId: String,
-                    openingFloatMinor: Long, openedAt: Long): CashSession = mutate { next ->
-        validId(operationId, "operation id"); validId(sessionId, "session id"); validId(drawerId, "drawer id")
-        validId(staffId, "staff id"); nonnegative(openingFloatMinor, "opening float"); nonnegative(openedAt, "opening time")
-        val payload = fingerprint("OPEN", sessionId, drawerId, staffId, openingFloatMinor.toString(), openedAt.toString())
+                    openingFloatMinor: Long, openedAt: Long): CashSession = deniedLegacyMutation()
+
+    /** Legacy call-site bridge; deliberately never writes without an opaque authority session. */
+    @Deprecated("Use the overload that supplies CheckoutAuthoritySession")
+    fun recordMovement(sessionId: String, operationId: String, kind: CashMovementKind,
+                       amountMinor: Long, reason: String, staffId: String, recordedAt: Long): CashSession = deniedLegacyMutation()
+
+    /** Legacy call-site bridge; deliberately never writes without an opaque authority session. */
+    @Deprecated("Use the overload that supplies CheckoutAuthoritySession")
+    fun linkCashSale(sessionId: String, operationId: String, saleId: String, paymentId: String,
+                     staffId: String, recordedAt: Long, ledger: CheckoutLedger): CashSession = deniedLegacyMutation()
+
+    /** Legacy call-site bridge; deliberately never writes without an opaque authority session. */
+    @Deprecated("Use the overload that supplies CheckoutAuthoritySession")
+    fun closeSession(sessionId: String, operationId: String, countedMinor: Long,
+                     staffId: String, closedAt: Long): CashSession = deniedLegacyMutation()
+
+    fun openSession(authoritySession: CheckoutAuthoritySession, operationId: String, sessionId: String,
+                    openingFloatMinor: Long, openedAt: Long): CashSession = mutate(
+        authoritySession, CheckoutAuthorityCapability.CASH_SESSION_OPEN,
+    ) { next, actor ->
+        validId(operationId, "operation id"); validId(sessionId, "session id")
+        nonnegative(openingFloatMinor, "opening float"); nonnegative(openedAt, "opening time")
+        val payload = fingerprint("OPEN", sessionId, cashDrawerId, openingFloatMinor.toString(), openedAt.toString(), *actorFingerprint(actor))
         replay(next, operationId, payload)?.let { return@mutate view(next.sessions.getValue(it)) }
         require(next.sessions.size < MAX_SESSIONS) { "cash session limit reached" }
-        require(next.sessions.values.none { it.drawerId == drawerId && it.status == CashSessionStatus.OPEN }) {
-            "drawer already has an open cash session"
+        require(next.sessions.values.none { it.drawerId == cashDrawerId && it.status == CashSessionStatus.OPEN }) {
+            "cash drawer already has an open cash session"
         }
         require(!next.sessions.containsKey(sessionId)) { "cash session id already exists" }
-        val data = SessionData(sessionId, drawerId, staffId, openedAt, openingFloatMinor, CashSessionStatus.OPEN,
+        val data = SessionData(sessionId, cashDrawerId, CashActorAttribution.Authenticated(actor), openedAt, openingFloatMinor, CashSessionStatus.OPEN,
             mutableListOf(), mutableListOf(), openingFloatMinor, null)
         next.sessions[sessionId] = data
         recordOperation(next, operationId, payload, sessionId)
         view(data)
     }
 
-    fun recordMovement(sessionId: String, operationId: String, kind: CashMovementKind,
-                       amountMinor: Long, reason: String, staffId: String, recordedAt: Long): CashSession = mutate { next ->
+    fun recordMovement(authoritySession: CheckoutAuthoritySession, sessionId: String, operationId: String, kind: CashMovementKind,
+                       amountMinor: Long, reason: String, recordedAt: Long): CashSession = mutate(
+        authoritySession, CheckoutAuthorityCapability.CASH_SESSION_MOVEMENT_RECORD, sessionId,
+    ) { next, actor ->
         validId(sessionId, "session id")
-        validId(operationId, "operation id"); validId(staffId, "staff id")
+        validId(operationId, "operation id")
         nonnegative(amountMinor, "movement amount"); require(amountMinor > 0) { "movement amount must be positive" }
         validText(reason, "movement reason"); nonnegative(recordedAt, "movement time")
-        val payload = fingerprint("MOVE", sessionId, kind.name, amountMinor.toString(), reason, staffId, recordedAt.toString())
+        val payload = fingerprint("MOVE", sessionId, kind.name, amountMinor.toString(), reason, recordedAt.toString(), *actorFingerprint(actor))
         replay(next, operationId, payload)?.let { return@mutate view(next.sessions.getValue(it)) }
         val s = open(next, sessionId)
         require(s.movements.size < MAX_MOVEMENTS) { "cash movement limit reached" }
         val signed = if (kind == CashMovementKind.CASH_IN) amountMinor else Math.negateExact(amountMinor)
         s.expectedCashMinor = Math.addExact(s.expectedCashMinor, signed)
         require(s.expectedCashMinor >= 0) { "cash out exceeds expected drawer balance" }
-        s.movements.add(CashMovement(operationId, kind, amountMinor, reason, staffId, recordedAt))
+        s.movements.add(CashMovement(operationId, kind, amountMinor, reason, CashActorAttribution.Authenticated(actor), recordedAt))
         recordOperation(next, operationId, payload, sessionId)
         view(s)
     }
 
     /** Link an already recorded sale payment. Cash is counted by amountMinor (net of change). */
-    fun linkCashSale(sessionId: String, operationId: String, saleId: String, paymentId: String,
-                     staffId: String, recordedAt: Long, ledger: CheckoutLedger): CashSession = mutate { next ->
+    fun linkCashSale(authoritySession: CheckoutAuthoritySession, sessionId: String, operationId: String,
+                     saleId: String, paymentId: String, recordedAt: Long, ledger: CheckoutLedger): CashSession = mutate(
+        authoritySession, CheckoutAuthorityCapability.CASH_SESSION_SALE_LINK, sessionId,
+    ) { next, actor ->
         validId(sessionId, "session id")
         validId(operationId, "operation id"); validId(saleId, "sale id"); validId(paymentId, "payment id")
-        validId(staffId, "staff id"); nonnegative(recordedAt, "link time")
-        val payload = fingerprint("SALE", sessionId, saleId, paymentId, staffId, recordedAt.toString())
+        nonnegative(recordedAt, "link time")
+        val payload = fingerprint("SALE", sessionId, saleId, paymentId, recordedAt.toString(), *actorFingerprint(actor))
         replay(next, operationId, payload)?.let { return@mutate view(next.sessions.getValue(it)) }
         val s = open(next, sessionId)
         val payment = ledger.getSale(saleId).cashPayments.firstOrNull { it.paymentId == paymentId }
@@ -132,32 +220,52 @@ class CheckoutCashSessionStore(private val storage: DurableLedgerStorage) {
         }
         require(s.sales.size < MAX_SALES_PER_SESSION) { "cash sale link limit reached" }
         val link = CashSaleLink(saleId, paymentId, payment.amountMinor, payment.tenderedMinor,
-            payment.changeMinor, recordedAt, staffId)
+            payment.changeMinor, recordedAt, CashActorAttribution.Authenticated(actor))
         s.expectedCashMinor = Math.addExact(s.expectedCashMinor, payment.amountMinor)
         s.sales.add(link)
         recordOperation(next, operationId, payload, sessionId)
         view(s)
     }
 
-    fun closeSession(sessionId: String, operationId: String, countedMinor: Long,
-                     staffId: String, closedAt: Long): CashSession = mutate { next ->
-        validId(sessionId, "session id"); validId(operationId, "operation id"); validId(staffId, "staff id")
+    fun closeSession(authoritySession: CheckoutAuthoritySession, sessionId: String, operationId: String,
+                     countedMinor: Long, closedAt: Long): CashSession = mutate(
+        authoritySession, CheckoutAuthorityCapability.CASH_SESSION_CLOSE, sessionId,
+    ) { next, actor ->
+        validId(sessionId, "session id"); validId(operationId, "operation id")
         nonnegative(countedMinor, "closing count"); nonnegative(closedAt, "closing time")
-        val payload = fingerprint("CLOSE", sessionId, countedMinor.toString(), staffId, closedAt.toString())
+        val payload = fingerprint("CLOSE", sessionId, countedMinor.toString(), closedAt.toString(), *actorFingerprint(actor))
         replay(next, operationId, payload)?.let { return@mutate view(next.sessions.getValue(it)) }
         val s = next.sessions[sessionId] ?: error("cash session not found")
         if (s.status == CashSessionStatus.CLOSED) error("cash session is already closed")
         val discrepancy = Math.subtractExact(countedMinor, s.expectedCashMinor)
-        s.closeout = CashCloseoutSnapshot(countedMinor, s.expectedCashMinor, discrepancy, staffId, closedAt)
+        s.closeout = CashCloseoutSnapshot(countedMinor, s.expectedCashMinor, discrepancy,
+            CashActorAttribution.Authenticated(actor), closedAt)
         s.status = CashSessionStatus.CLOSED
         recordOperation(next, operationId, payload, sessionId)
         view(s)
     }
 
-    private inline fun <T> mutate(change: (State) -> T): T = synchronized(lock) {
+    private inline fun <T> mutate(
+        authoritySession: CheckoutAuthoritySession,
+        capability: CheckoutAuthorityCapability,
+        targetSessionId: String? = null,
+        change: (State, ActorAttribution) -> T,
+    ): T = synchronized(lock) {
         healthy()
+        // Authorize before replay lookup or state access so a stale/foreign token cannot use a
+        // mutation call as an unauthenticated session read. This is the command boundary.
+        val actor = authority.authorize(authoritySession, capability, authorityScope)
+        require(actor.capabilityId == capability.id && actor.scope == authorityScope &&
+            actor.policyGeneration >= 0 && actor.eventTimeMillis >= 0) {
+            "cash command authority did not match the requested operation"
+        }
+        targetSessionId?.let { id ->
+            val target = state.sessions[id] ?: error("cash session not found")
+            require(target.drawerId == cashDrawerId) { "cash session is outside this register" }
+            require(target.isInAuthorityScope(authorityScope)) { "cash session is outside this authority scope" }
+        }
         val candidate = state.copyDeep()
-        val result = change(candidate)
+        val result = change(candidate, actor)
         val encoded = encode(candidate)
         try {
             storage.writeAtomically(encoded)
@@ -175,6 +283,26 @@ class CheckoutCashSessionStore(private val storage: DurableLedgerStorage) {
         return prior.sessionId
     }
 
+    /** Stable auth context belongs in replay identity; display name and auth event time do not. */
+    private fun actorFingerprint(actor: ActorAttribution): Array<String> = arrayOf(
+        actor.actorId, actor.role.name, actor.capabilityId, actor.policyGeneration.toString(),
+        actor.scope.merchantId, actor.scope.storeId, actor.scope.locationId,
+        actor.scope.registerId, actor.scope.deviceId,
+    )
+
+    private fun SessionData.isInAuthorityScope(scope: CheckoutAuthorityScope): Boolean {
+        val attributions = buildList {
+            add(openedBy)
+            movements.forEach { add(it.actor) }
+            sales.forEach { add(it.actor) }
+            closeout?.let { add(it.actor) }
+        }
+        // Legacy records have no trustworthy scope; they stay explicitly legacy but can be
+        // continued only through this store's configured drawer and an authorized current scope.
+        return attributions.filterIsInstance<CashActorAttribution.Authenticated>()
+            .all { it.value.scope == scope }
+    }
+
     private fun recordOperation(s: State, id: String, payload: String, sessionId: String) {
         require(s.operations.size < MAX_OPERATIONS) { "cash operation limit reached" }
         s.operations[id] = Operation(payload, sessionId)
@@ -187,7 +315,7 @@ class CheckoutCashSessionStore(private val storage: DurableLedgerStorage) {
         return value
     }
 
-    private fun view(s: SessionData) = CashSession(s.id, s.drawerId, s.staffId, s.openedAt, s.openingFloatMinor,
+    private fun view(s: SessionData) = CashSession(s.id, s.drawerId, s.openedBy, s.openedAt, s.openingFloatMinor,
         s.status, immutable(s.movements), immutable(s.sales), s.expectedCashMinor, s.closeout, "USD")
 
     private fun healthy() { check(!poisoned) { "cash session store has an uncertain write; reopen before continuing" } }
@@ -197,7 +325,7 @@ class CheckoutCashSessionStore(private val storage: DurableLedgerStorage) {
         fun copyDeep() = State(LinkedHashMap(sessions.mapValues { it.value.copyDeep() }), LinkedHashMap(operations))
     }
     private data class Operation(val payload: String, val sessionId: String)
-    private data class SessionData(val id: String, val drawerId: String, val staffId: String, val openedAt: Long,
+    private data class SessionData(val id: String, val drawerId: String, val openedBy: CashActorAttribution, val openedAt: Long,
         val openingFloatMinor: Long, var status: CashSessionStatus, val movements: MutableList<CashMovement>,
         val sales: MutableList<CashSaleLink>, var expectedCashMinor: Long, var closeout: CashCloseoutSnapshot?) {
         fun copyDeep() = copy(movements = movements.toMutableList(), sales = sales.toMutableList())
@@ -213,14 +341,20 @@ class CheckoutCashSessionStore(private val storage: DurableLedgerStorage) {
                 require(version in 1..VERSION) { "unsupported cash session file version" }
                 val state = State()
                 repeat(input.count(MAX_SESSIONS)) {
-                    val id = input.str(); val drawer = input.str(); val staff = input.str(); val openedAt = input.readLong()
+                    val id = input.str(); val drawer = input.str()
+                    val openedBy = if (version >= 4) input.actorAttribution(CheckoutAuthorityCapability.CASH_SESSION_OPEN)
+                        else CashActorAttribution.LegacyLabel(input.str())
+                    val openedAt = input.readLong()
                     val opening = input.readLong(); val status = enumAt<CashSessionStatus>(input.readInt())
                     val expected = input.readLong()
                     require(openedAt >= 0 && opening >= 0 && expected >= 0) { "invalid cash session values" }
                     val movements = mutableListOf<CashMovement>()
                     repeat(input.count(MAX_MOVEMENTS)) {
                         val op = input.str(); val kind = enumAt<CashMovementKind>(input.readInt()); val amount = input.readLong()
-                        val reason = input.str(); val actor = input.str(); val at = input.readLong()
+                        val reason = input.str()
+                        val actor = if (version >= 4) input.actorAttribution(CheckoutAuthorityCapability.CASH_SESSION_MOVEMENT_RECORD)
+                            else CashActorAttribution.LegacyLabel(input.str())
+                        val at = input.readLong()
                         require(amount > 0 && at >= 0 && reason.isNotBlank()) { "invalid cash movement" }
                         movements.add(CashMovement(op, kind, amount, reason, actor, at))
                     }
@@ -229,17 +363,20 @@ class CheckoutCashSessionStore(private val storage: DurableLedgerStorage) {
                         val saleId = input.str(); val paymentId = input.str(); val amount = input.readLong()
                         val tender = input.readLong(); val change = input.readLong(); val at = input.readLong()
                         require(amount >= 0 && tender >= amount && change == Math.subtractExact(tender, amount) && at >= 0) { "invalid cash sale link" }
-                        val staffId = if (version >= 3 && input.readBoolean()) input.str() else null
-                        sales.add(CashSaleLink(saleId, paymentId, amount, tender, change, at, staffId))
+                        val actor = if (version >= 4) input.actorAttribution(CheckoutAuthorityCapability.CASH_SESSION_SALE_LINK)
+                            else CashActorAttribution.LegacyLabel(if (version >= 3 && input.readBoolean()) input.str() else null)
+                        sales.add(CashSaleLink(saleId, paymentId, amount, tender, change, at, actor))
                     }
                     val closeout = if (input.readBoolean()) {
                         val counted = input.readLong(); val expectedAtClose = input.readLong(); val discrepancy = input.readLong()
-                        val actor = input.str(); val at = input.readLong()
+                        val actor = if (version >= 4) input.actorAttribution(CheckoutAuthorityCapability.CASH_SESSION_CLOSE)
+                            else CashActorAttribution.LegacyLabel(input.str())
+                        val at = input.readLong()
                         require(counted >= 0 && expectedAtClose == expected && discrepancy == Math.subtractExact(counted, expected) && at >= 0) { "invalid closeout snapshot" }
                         CashCloseoutSnapshot(counted, expectedAtClose, discrepancy, actor, at)
                     } else null
                     require((status == CashSessionStatus.CLOSED) == (closeout != null)) { "cash session close state is inconsistent" }
-                    val session = SessionData(id, drawer, staff, openedAt, opening, status, movements, sales, expected, closeout)
+                    val session = SessionData(id, drawer, openedBy, openedAt, opening, status, movements, sales, expected, closeout)
                     require(state.sessions.put(id, session) == null) { "duplicate cash session" }
                 }
                 repeat(input.count(MAX_OPERATIONS)) {
@@ -259,17 +396,17 @@ class CheckoutCashSessionStore(private val storage: DurableLedgerStorage) {
         val bytes = ByteArrayOutputStream().also { buffer -> DataOutputStream(buffer).use { out ->
             out.writeInt(MAGIC); out.writeInt(VERSION); out.writeInt(s.sessions.size)
             s.sessions.values.forEach { v ->
-                out.str(v.id); out.str(v.drawerId); out.str(v.staffId); out.writeLong(v.openedAt); out.writeLong(v.openingFloatMinor)
+                out.str(v.id); out.str(v.drawerId); out.actorAttribution(v.openedBy); out.writeLong(v.openedAt); out.writeLong(v.openingFloatMinor)
                 out.writeInt(v.status.ordinal); out.writeLong(v.expectedCashMinor)
                 out.writeInt(v.movements.size); v.movements.forEach { m ->
-                    out.str(m.operationId); out.writeInt(m.kind.ordinal); out.writeLong(m.amountMinor); out.str(m.reason); out.str(m.staffId); out.writeLong(m.recordedAt)
+                    out.str(m.operationId); out.writeInt(m.kind.ordinal); out.writeLong(m.amountMinor); out.str(m.reason); out.actorAttribution(m.actor); out.writeLong(m.recordedAt)
                 }
                 out.writeInt(v.sales.size); v.sales.forEach { sale ->
                     out.str(sale.saleId); out.str(sale.paymentId); out.writeLong(sale.amountMinor); out.writeLong(sale.tenderedMinor); out.writeLong(sale.changeMinor); out.writeLong(sale.recordedAt)
-                    out.writeBoolean(sale.staffId != null); sale.staffId?.let { out.str(it) }
+                    out.actorAttribution(sale.actor)
                 }
                 out.writeBoolean(v.closeout != null); v.closeout?.let { c ->
-                    out.writeLong(c.countedMinor); out.writeLong(c.expectedMinor); out.writeLong(c.discrepancyMinor); out.str(c.staffId); out.writeLong(c.closedAt)
+                    out.writeLong(c.countedMinor); out.writeLong(c.expectedMinor); out.writeLong(c.discrepancyMinor); out.actorAttribution(c.actor); out.writeLong(c.closedAt)
                 }
             }
             out.writeInt(s.operations.size); s.operations.forEach { (id, op) -> out.str(id); out.str(op.payload); out.str(op.sessionId) }
@@ -285,11 +422,13 @@ class CheckoutCashSessionStore(private val storage: DurableLedgerStorage) {
         }
         val paymentIds = mutableSetOf<String>()
         s.sessions.values.forEach { session ->
-            validId(session.id, "session id"); validId(session.drawerId, "drawer id"); validId(session.staffId, "staff id")
+            validId(session.id, "session id"); validId(session.drawerId, "drawer id")
+            validateAttribution(session.openedBy, CheckoutAuthorityCapability.CASH_SESSION_OPEN)
             require(session.expectedCashMinor >= 0 && session.openingFloatMinor >= 0)
             var derived = session.openingFloatMinor
             session.movements.forEach { movement ->
-                validId(movement.operationId, "operation id"); validText(movement.reason, "movement reason"); validId(movement.staffId, "staff id")
+                validId(movement.operationId, "operation id"); validText(movement.reason, "movement reason")
+                validateAttribution(movement.actor, CheckoutAuthorityCapability.CASH_SESSION_MOVEMENT_RECORD)
                 require(movement.amountMinor > 0 && movement.recordedAt >= 0)
                 val amount = if (movement.kind == CashMovementKind.CASH_IN) movement.amountMinor
                     else Math.negateExact(movement.amountMinor)
@@ -297,7 +436,7 @@ class CheckoutCashSessionStore(private val storage: DurableLedgerStorage) {
             }
             session.sales.forEach { sale ->
                 validId(sale.saleId, "sale id"); validId(sale.paymentId, "payment id")
-                sale.staffId?.let { validId(it, "staff id") }
+                validateAttribution(sale.actor, CheckoutAuthorityCapability.CASH_SESSION_SALE_LINK, nullableLegacy = true)
                 require(sale.amountMinor >= 0 && sale.tenderedMinor >= sale.amountMinor &&
                     sale.changeMinor == Math.subtractExact(sale.tenderedMinor, sale.amountMinor) && sale.recordedAt >= 0)
                 derived = Math.addExact(derived, sale.amountMinor)
@@ -305,9 +444,65 @@ class CheckoutCashSessionStore(private val storage: DurableLedgerStorage) {
             require(derived == session.expectedCashMinor) { "cash session expected balance is inconsistent" }
             require(session.sales.all { paymentIds.add(it.paymentId) }) { "duplicate cash payment link" }
             require((session.status == CashSessionStatus.CLOSED) == (session.closeout != null))
-            session.closeout?.let { validId(it.staffId, "staff id") }
+            session.closeout?.let { validateAttribution(it.actor, CheckoutAuthorityCapability.CASH_SESSION_CLOSE) }
         }
         s.operations.keys.forEach { validId(it, "operation id") }
+    }
+
+    private fun validateAttribution(
+        attribution: CashActorAttribution,
+        expected: CheckoutAuthorityCapability,
+        nullableLegacy: Boolean = false,
+    ) {
+        when (attribution) {
+            is CashActorAttribution.LegacyLabel -> {
+                val value = attribution.value
+                if (value == null) require(nullableLegacy) { "missing legacy actor label" }
+                else validId(value, "legacy actor label")
+            }
+            is CashActorAttribution.Authenticated -> {
+                val actor = attribution.value
+                validId(actor.actorId, "actor id")
+                validText(actor.displayNameAtEvent, "actor display name")
+                require(actor.capabilityId == expected.id) { "actor capability does not match cash event" }
+                require(actor.policyGeneration >= 0 && actor.eventTimeMillis >= 0) { "invalid actor policy/time" }
+                // Reconstructing the scope from disk applies the authority module's strict ID rules.
+                CheckoutAuthorityScope(actor.scope.merchantId, actor.scope.storeId, actor.scope.locationId,
+                    actor.scope.registerId, actor.scope.deviceId)
+            }
+        }
+    }
+
+    private fun DataOutputStream.actorAttribution(value: CashActorAttribution) {
+        when (value) {
+            is CashActorAttribution.LegacyLabel -> {
+                writeByte(0); writeBoolean(value.value != null); value.value?.let { str(it) }
+            }
+            is CashActorAttribution.Authenticated -> {
+                val actor = value.value
+                writeByte(1)
+                str(actor.actorId); str(actor.displayNameAtEvent); writeInt(actor.role.ordinal)
+                str(actor.capabilityId); writeLong(actor.policyGeneration)
+                str(actor.scope.merchantId); str(actor.scope.storeId); str(actor.scope.locationId)
+                str(actor.scope.registerId); str(actor.scope.deviceId); writeLong(actor.eventTimeMillis)
+            }
+        }
+    }
+
+    private fun DataInputStream.actorAttribution(expected: CheckoutAuthorityCapability): CashActorAttribution = when (readUnsignedByte()) {
+        0 -> CashActorAttribution.LegacyLabel(if (readBoolean()) str() else null)
+        1 -> {
+            val actorId = str(); val displayName = str()
+            val role = CheckoutAuthorityRole.entries.getOrNull(readInt()) ?: error("invalid actor role")
+            val capabilityId = str()
+            require(CheckoutAuthorityCapability.fromId(capabilityId) == expected) { "invalid actor capability" }
+            val generation = readLong()
+            val scope = CheckoutAuthorityScope(str(), str(), str(), str(), str())
+            val eventTime = readLong()
+            CashActorAttribution.Authenticated(ActorAttribution.create(actorId, displayName, role, capabilityId,
+                generation, scope, eventTime))
+        }
+        else -> error("invalid cash actor attribution tag")
     }
 
     private inline fun <reified T : Enum<T>> enumAt(index: Int): T = enumValues<T>().getOrNull(index) ?: error("invalid enum value")
@@ -341,7 +536,7 @@ class CheckoutCashSessionStore(private val storage: DurableLedgerStorage) {
 
     private companion object {
         const val MAGIC = 0x4f424353 // OBCS
-        const val VERSION = 3
+        const val VERSION = 4
         const val MAX_FILE_BYTES = 2 * 1024 * 1024
         const val MAX_TEXT_BYTES = 512
         const val MAX_TEXT_CHARS = 256

@@ -94,6 +94,8 @@ jobs:
         run: crates/openbmt-owner-ffi/bindings/tests/run-jvm.sh
       - name: Run checkout ledger recovery tests
         run: apps/checkout-android/tests/run-jvm.sh
+      - name: Check checkout authority Android wiring
+        run: python3 apps/checkout-android/tests/test_authority_activity_source.py
 
   qr-crosscheck:
     name: QR encoder against ZXing

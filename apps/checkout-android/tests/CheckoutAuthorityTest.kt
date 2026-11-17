@@ -21,6 +21,8 @@ object CheckoutAuthorityTest {
         duplicatePinsCannotImpersonateEnabledActors()
         loginProfileExposesOnlyNonSecretEnabledDirectory()
         nioStorageProvidesRealCompareAndSwap()
+        SealedCheckoutAuthorityStorageTest.run()
+        CheckoutInstallationScopeStoreTest.run()
         secretsDoNotLeakThroughStringsOrErrors()
     }
 
@@ -66,6 +68,8 @@ object CheckoutAuthorityTest {
         expectDenied { authority.authorize(cashierSession, CheckoutAuthorityCapability.REPORT_READ, SCOPE) }
         expectDenied { authority.authorize(cashierSession, CheckoutAuthorityCapability.CATALOG_MANAGE, SCOPE) }
         expectDenied { authority.authorize(cashierSession, CheckoutAuthorityCapability.INVENTORY_MANAGE, SCOPE) }
+        expectDenied { authority.authorize(cashierSession, CheckoutAuthorityCapability.WALLET_CONFIGURE, SCOPE) }
+        check(authority.authorize(refreshedManager, CheckoutAuthorityCapability.WALLET_CONFIGURE, SCOPE).role == CheckoutAuthorityRole.MANAGER)
         expectDenied { authority.authorize(cashierSession, "wallet.sign", SCOPE) }
         expectDenied { authority.authorize(cashierSession, "payment.destination.change", SCOPE) }
         expectDenied { authority.authorize(cashierSession, "unknown.future.action", SCOPE) }

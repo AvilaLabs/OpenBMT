@@ -19,6 +19,11 @@ class CheckoutInventoryController(
     private val catalog: CheckoutCatalog,
     private val inventory: CheckoutInventory,
     private val ledger: CheckoutLedger,
+    private val executeCapability: (
+        capability: CheckoutAuthorityCapability,
+        operation: () -> Unit,
+        completion: (Exception?) -> Unit,
+    ) -> Unit,
     private val render: (View, List<View>, List<Button>) -> Unit,
     private val onBack: () -> Unit,
 ) {
@@ -130,18 +135,23 @@ class CheckoutInventoryController(
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Confirm handoff") { _, _ ->
                 if (inventoryBlocked) return@setPositiveButton showReopen()
-                try {
+                executeCapability(CheckoutAuthorityCapability.INVENTORY_MANAGE, {
                     ledger.withStableSale(saleId, expectedVersion) { stableSale ->
                         require(aggregateManifest(stableSale.items.map { InventoryPurchaseLine(it.productId, it.quantity) }) == manifest) { "Sale lines changed; refresh before fulfillment." }
                         inventory.fulfill(stableSale, expectedVersion, expectedVersion, fulfillmentId, System.currentTimeMillis() / 1000L)
                     }
+                }) { error ->
+                    if (error == null) {
                     fulfillmentIds.remove(saleId)
                     showFulfillment(saleId, onReturn)
-                } catch (_: InsufficientInventoryException) {
+                    } else if (error is CheckoutAuthorityDeniedException || error is CheckoutAuthorityUnavailableException) {
+                        Unit
+                    } else if (error is InsufficientInventoryException) {
                     showMessage("Insufficient stock", "Stock is unchanged. Adjust the count or switch to manual mode, then review the sale again.", onReturn)
-                } catch (_: Exception) {
+                    } else {
                     if (inventoryWriteUncertain()) showReopen()
                     else showMessage("Handoff not recorded", "The sale changed or inventory was insufficient. Return to Sales and review the current sale and stock before trying again.", onReturn)
+                    }
                 }
             }
             .show()
@@ -168,8 +178,9 @@ class CheckoutInventoryController(
                 val opening = if (tracked) count.text.toString().toIntOrNull() else 0
                 val why = reason.text.toString().trim()
                 if (opening == null || opening !in 0..999999 || why.isBlank()) return@setPositiveButton showMessage("Check the values", "Enter a whole number from 0 to 999999 and a reason.") { showStock() }
-                try { inventory.addProduct(productId, opening, tracked, why, operationId); if (revision == stockPageRevision) showStock() }
-                catch (_: Exception) { if (inventoryWriteUncertain()) showReopen() else showMessage("Stock mode not saved", "Review the current stock mode before making another change.") { showStock() } }
+                executeCapability(CheckoutAuthorityCapability.INVENTORY_MANAGE, {
+                    inventory.addProduct(productId, opening, tracked, why, operationId)
+                }) { error -> handleInventoryWrite(error, revision, "Stock mode not saved", "Review the current stock mode before making another change.") }
             }.setNegativeButton("Cancel", null).show()
     }
 
@@ -184,8 +195,9 @@ class CheckoutInventoryController(
                 if (inventoryBlocked) return@setPositiveButton showReopen()
                 val amount = delta.text.toString().toIntOrNull(); val why = reason.text.toString().trim()
                 if (amount == null || amount == 0 || why.isBlank()) return@setPositiveButton showMessage("Check the values", "Enter a nonzero signed count change and a reason.") { showStock() }
-                try { inventory.adjustStock(productId, amount, why, operationId, expectedVersion); if (revision == stockPageRevision) showStock() }
-                catch (_: Exception) { if (inventoryWriteUncertain()) showReopen() else showMessage("Count not changed", "Stock changed since you opened this form. Review the current count before making another adjustment.") { showStock() } }
+                executeCapability(CheckoutAuthorityCapability.INVENTORY_MANAGE, {
+                    inventory.adjustStock(productId, amount, why, operationId, expectedVersion)
+                }) { error -> handleInventoryWrite(error, revision, "Count not changed", "Stock changed since you opened this form. Review the current count before making another adjustment.") }
             }.setNegativeButton("Cancel", null).show()
     }
 
@@ -200,13 +212,22 @@ class CheckoutInventoryController(
                 if (inventoryBlocked) return@setPositiveButton showReopen()
                 val why = reason.text.toString().trim()
                 if (why.isBlank()) return@setPositiveButton showMessage("Reason required", "Enter a reason for this mode change.") { showStock() }
-                try { inventory.setTracked(productId, target, why, operationId, expectedVersion); if (revision == stockPageRevision) showStock() }
-                catch (_: Exception) { if (inventoryWriteUncertain()) showReopen() else showMessage("Mode not changed", "The product mode changed since you opened this form. Review the current mode before making another change.") { showStock() } }
+                executeCapability(CheckoutAuthorityCapability.INVENTORY_MANAGE, {
+                    inventory.setTracked(productId, target, why, operationId, expectedVersion)
+                }) { error -> handleInventoryWrite(error, revision, "Mode not changed", "The product mode changed since you opened this form. Review the current mode before making another change.") }
             }.setNegativeButton("Cancel", null).show()
     }
 
     private fun showMessage(title: String, message: String, next: (() -> Unit)? = null) {
         AlertDialog.Builder(activity).setTitle(title).setMessage(message).setPositiveButton("OK") { _, _ -> next?.invoke() }.show()
+    }
+
+    private fun handleInventoryWrite(error: Exception?, revision: Int, title: String, message: String) {
+        when (error) {
+            null -> if (revision == stockPageRevision) showStock()
+            is CheckoutAuthorityDeniedException, is CheckoutAuthorityUnavailableException -> Unit
+            else -> if (inventoryWriteUncertain()) showReopen() else showMessage(title, message) { showStock() }
+        }
     }
 
     private fun inventoryWriteUncertain(): Boolean = try {
