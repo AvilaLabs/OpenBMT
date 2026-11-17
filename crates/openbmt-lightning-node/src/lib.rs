@@ -124,6 +124,7 @@ pub mod lsps1;
 pub mod node;
 pub mod paid;
 pub mod provider;
+pub mod receiving;
 pub mod room;
 pub mod seal;
 pub mod state;

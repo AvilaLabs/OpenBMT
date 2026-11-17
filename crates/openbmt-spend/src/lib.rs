@@ -39,6 +39,7 @@ mod combine;
 mod common;
 mod finalize;
 mod kind;
+mod maintenance;
 mod plan;
 mod psbt;
 pub mod say;
@@ -48,6 +49,10 @@ pub use coin::{Coin, CoinError};
 pub use combine::{combine, combine_wallet, CombineError, Source};
 pub use finalize::{finalize, finalize_plan, FinalizeError};
 pub use kind::{WalletKind, WalletRef};
+pub use maintenance::{
+    assess_maintenance, MaintenanceAssessment, MaintenanceBatch, MaintenanceDeferReason,
+    MaintenanceError,
+};
 pub use plan::{
     consolidation_cost_sats, consolidation_cost_sats_single, consolidation_size,
     consolidation_size_single, dust_limit, plan, receipt_spend_cost_sats,

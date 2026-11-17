@@ -45,6 +45,87 @@ fn id_of(key: &SaleKey) -> SaleId {
 }
 
 impl Books {
+    /// BK-49: a reconciliation export with one row per sale, including
+    /// unfinished sales. Values and times are copied from the verified
+    /// records; fields not carried by those records stay explicitly unknown.
+    pub fn reconciliation_export(&self, _ack: RevealsPayments) -> Result<String, ExportError> {
+        let mut out = String::new();
+        const COLUMNS: [&str; 14] = [
+            "Sale ID",
+            "State",
+            "Counting",
+            "Method",
+            "Opened (UTC)",
+            "Funds first recorded (UTC)",
+            "Payment first seen (UTC)",
+            "Currency",
+            "Sale amount",
+            "Tip",
+            "Total due",
+            "Received (sats)",
+            "Sales tax",
+            "Historical value at first seen",
+        ];
+        push_row(&mut out, &[Cell::text(format!("# {LEDGER_WARNING}"))]);
+        push_row(&mut out, &COLUMNS.map(Cell::text));
+        for sale in &self.sales {
+            let due = sale.due_minor().ok_or(ExportError::Overflow)?;
+            let mut row = vec![Cell::Empty; COLUMNS.len()];
+            set(&mut row, 0, Cell::text(sale.id.to_string()));
+            set(&mut row, 1, Cell::text(sale.state.text()));
+            set(&mut row, 2, Cell::text(sale.counting().text()));
+            set(&mut row, 3, Cell::text(sale.payment_mode.text()));
+            set(&mut row, 4, time_cell(sale.opened_at)?);
+            if let Some(at) = sale.first_funds_at {
+                set(&mut row, 5, time_cell(at)?);
+            }
+            if let Some(at) = sale.first_seen_at {
+                set(&mut row, 6, time_cell(at)?);
+            }
+            set(&mut row, 7, Cell::text(sale.currency.to_string()));
+            set(
+                &mut row,
+                8,
+                Cell::Number(format_minor(sale.amount_minor, sale.currency)),
+            );
+            set(
+                &mut row,
+                9,
+                match &sale.tip {
+                    Some(tip) => Cell::Number(format_minor(tip.minor, sale.currency)),
+                    None => Cell::Number(format_minor(0, sale.currency)),
+                },
+            );
+            set(&mut row, 10, Cell::Number(format_minor(due, sale.currency)));
+            set(
+                &mut row,
+                11,
+                match &sale.sats_received {
+                    Value::Known(v) => Cell::Number(v.to_string()),
+                    Value::Unknown(_) => Cell::text("unknown"),
+                },
+            );
+            set(
+                &mut row,
+                12,
+                match &sale.sales_tax_minor {
+                    Value::Known(v) => Cell::Number(format_minor(*v, sale.currency)),
+                    Value::Unknown(_) => Cell::text("unknown"),
+                },
+            );
+            set(
+                &mut row,
+                13,
+                match &sale.value_at_first_seen_minor {
+                    Value::Known(v) => Cell::Number(format_minor(*v, sale.currency)),
+                    Value::Unknown(_) => Cell::text("unknown"),
+                },
+            );
+            push_row(&mut out, &row);
+        }
+        Ok(out)
+    }
+
     /// BK-17, BK-18, BK-21, BK-22: the accounting export, one CSV per UTC
     /// calendar month, oldest first. Lines hold the opaque sale ID only.
     pub fn accounting_export(&self) -> Result<Vec<(YearMonth, String)>, ExportError> {

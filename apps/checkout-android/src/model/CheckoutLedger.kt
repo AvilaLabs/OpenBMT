@@ -11,6 +11,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
+import java.util.UUID
 
 private const val MAX_LEDGER_FILE_BYTES = 4 * 1024 * 1024
 
@@ -123,6 +124,15 @@ data class Refund(
     val actuallyPaidSats: Long,
 )
 
+/** Manual cash acknowledgment. amountMinor is applied to the sale; tenderedMinor includes returned change. */
+data class CashPayment(
+    val paymentId: String,
+    val amountMinor: Long,
+    val tenderedMinor: Long,
+    val changeMinor: Long,
+    val recordedAt: Long,
+)
+
 /** Immutable line snapshot used to reproduce the exact basket after restart. */
 data class SaleItem(
     val productId: String,
@@ -146,13 +156,65 @@ data class Sale(
     val overpaidMinor: Long,
     val overpaidSats: Long,
     val items: List<SaleItem> = emptyList(),
+    val cashPayments: List<CashPayment> = emptyList(),
 )
+
+enum class CheckoutEventType { SALE_CREATED, PAYMENT_CHANGED, REFUND_CHANGED }
+data class CheckoutEvent(val eventId: String, val epoch: String, val cursor: Long, val saleId: String,
+                         val saleVersion: Long, val type: CheckoutEventType)
+data class EventSnapshot(val epoch: String?, val highWater: Long, val floor: Long,
+                         val saleVersions: Map<String, Long>, val initialized: Boolean,
+                         val sales: List<Sale>)
+data class EventPage(val events: List<CheckoutEvent>, val highWater: Long, val floor: Long,
+                     val resyncRequired: Boolean, val nextCursor: Long, val hasMore: Boolean)
 
 /** Append-only observations and stable attempt identifiers. Every successful mutation is durable on return. */
 class CheckoutLedger(private val storage: DurableLedgerStorage) {
     private val lock = Any()
     private var state: State = decode(storage.read())
     private var poisoned = false
+
+    /** Explicitly commits the event epoch; legacy reads alone never rewrite their source file.
+     * Restoring an older raw ledger file is not detectable here; callers must rotate the epoch
+     * through an authorized restore workflow before serving cursors from that restored copy.
+     */
+    fun initializeEvents(): EventSnapshot = synchronized(lock) {
+        ensureHealthy()
+        if (!state.eventsInitialized) {
+            val before = encode(state)
+            state.eventsInitialized = true
+            state.eventEpoch = UUID.randomUUID().toString()
+            state.events.clear(); state.eventHighWater = 0; state.eventFloor = 0
+            state.saleVersions.clear()
+            state.sales.keys.forEach { state.saleVersions[it] = 0L }
+            val next = try { encode(state) } catch (e: Throwable) { state = decode(before); throw e }
+            try { storage.writeAtomically(next) } catch (e: Throwable) {
+                poisoned = true
+                try { state = decode(storage.read()) } catch (_: Throwable) { }
+                throw IllegalStateException("ledger write outcome is uncertain; reopen before continuing", e)
+            }
+        }
+        eventSnapshotLocked()
+    }
+
+    fun eventSnapshot(): EventSnapshot = synchronized(lock) { ensureHealthy(); eventSnapshotLocked() }
+
+    /** A null epoch means no history is available and requires a current-state resync. */
+    fun readEvents(epoch: String, afterCursor: Long, limit: Int): EventPage = synchronized(lock) {
+        ensureHealthy(); require(limit in 1..MAX_EVENT_PAGE) { "invalid event page size" }
+        require(afterCursor >= 0) { "invalid event cursor" }
+        val snapshot = eventSnapshotLocked()
+        if (!snapshot.initialized || epoch != snapshot.epoch || afterCursor < snapshot.floor)
+            return@synchronized EventPage(emptyList(), snapshot.highWater, snapshot.floor, true, afterCursor, false)
+        require(afterCursor <= snapshot.highWater) { "event cursor is ahead of the ledger" }
+        val available = state.events.filter { it.cursor > afterCursor }
+        val events = available.take(limit)
+        EventPage(events, snapshot.highWater, snapshot.floor, false,
+            events.lastOrNull()?.cursor ?: afterCursor, available.size > events.size)
+    }
+
+    private fun eventSnapshotLocked() = EventSnapshot(state.eventEpoch, state.eventHighWater, state.eventFloor,
+        state.saleVersions.toMap(), state.eventsInitialized, state.sales.values.map(::view))
 
     fun createSale(saleId: String, amountMinor: Long, currency: String, createdAt: Long,
                    items: List<SaleItem> = emptyList()): Sale = mutate {
@@ -193,6 +255,39 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
         require(sale.attempts.size < MAX_ATTEMPTS) { "attempt limit reached" }
         val a = AttemptData(attemptId, Tender.CARD, amountMinor, null, null, null, null, provider, stableId)
         sale.attempts.add(a); attemptView(a)
+    }
+
+    /** Records a manual cash acknowledgment. This records operator input, not processor or cash verification. */
+    fun recordCashPayment(saleId: String, paymentId: String, tenderedMinor: Long, recordedAt: Long): CashPayment = mutate {
+        val sale = sale(saleId)
+        validId(paymentId, "cash payment id"); positive(tenderedMinor, "cash tendered amount")
+        require(recordedAt >= 0) { "invalid cash payment time" }
+        val prior = state.sales.values.flatMap { other -> other.cashPayments.map { other.id to it } }.firstOrNull { it.second.paymentId == paymentId }
+        if (prior != null) {
+            require(prior.first == saleId && prior.second.tenderedMinor == tenderedMinor && prior.second.recordedAt == recordedAt) {
+                "cash payment id was already used with different details"
+            }
+            return@mutate prior.second
+        }
+        require(sale.cashPayments.size < MAX_CASH_PAYMENTS) { "cash payment limit reached" }
+        require(sale.currency == "USD") { "cash payments are supported only for USD sales" }
+        val current = view(sale)
+        require(!current.requiresReview) { "sale requires review before cash payment" }
+        require(canStartTender(sale)) { "another payment attempt must be resolved first" }
+        require(current.remainingMinor > 0) { "sale has no remaining balance" }
+        require(tenderedMinor >= current.remainingMinor) { "cash tendered is less than remaining balance" }
+        val change = Math.subtractExact(tenderedMinor, current.remainingMinor)
+        val payment = CashPayment(paymentId, current.remainingMinor, tenderedMinor, change, recordedAt)
+        sale.cashPayments.add(payment)
+        payment
+    }
+
+    /** Eligibility hint for the cash UI. recordCashPayment rechecks every guard when recording. */
+    fun canRecordCashPayment(saleId: String): Boolean = synchronized(lock) {
+        ensureHealthy()
+        val sale = sale(saleId)
+        sale.currency == "USD" && sale.cashPayments.size < MAX_CASH_PAYMENTS &&
+            view(sale).let { it.remainingMinor > 0 && !it.requiresReview } && canStartTender(sale)
     }
 
     fun requestCancellation(saleId: String, attemptId: String): PaymentAttempt = mutate {
@@ -283,8 +378,33 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
 
     private inline fun <T> mutate(block: State.() -> T): T = synchronized(lock) {
         ensureHealthy()
+        val beforeSales = state.sales.keys.associateWith { view(state.sales.getValue(it)) }
         val before = encode(state)
         val result = try { state.block() } catch (e: Throwable) { state = decode(before); throw e }
+        if (state.eventsInitialized) {
+            val changed = LinkedHashSet<String>()
+            (beforeSales.keys + state.sales.keys).forEach { id ->
+                val old = beforeSales[id]
+                val now = state.sales[id]?.let(::view)
+                if (old != now) changed.add(id)
+            }
+            try {
+                for (id in changed) {
+                    check(state.eventHighWater < Long.MAX_VALUE) { "event cursor exhausted" }
+                    val version = Math.addExact(state.saleVersions[id] ?: 0L, 1L)
+                    state.saleVersions[id] = version
+                    state.eventHighWater++
+                    val type = when {
+                        beforeSales[id] == null -> CheckoutEventType.SALE_CREATED
+                        beforeSales[id]?.refunds != state.sales[id]?.let { sale -> view(sale).refunds } -> CheckoutEventType.REFUND_CHANGED
+                        else -> CheckoutEventType.PAYMENT_CHANGED
+                    }
+                    state.events.add(CheckoutEvent(UUID.randomUUID().toString(), state.eventEpoch!!, state.eventHighWater, id, version, type))
+                }
+                while (state.events.size > MAX_EVENTS) state.events.removeAt(0)
+                state.eventFloor = state.events.firstOrNull()?.cursor?.minus(1) ?: state.eventHighWater
+            } catch (e: Throwable) { state = decode(before); throw e }
+        }
         val next = try { encode(state) } catch (e: Throwable) { state = decode(before); throw e }
         try { storage.writeAtomically(next) } catch (e: Throwable) {
             poisoned = true
@@ -354,7 +474,7 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
     private fun view(s: SaleData): Sale {
         val attempts = s.attempts.map(::attemptView)
         val refunds = s.refunds.map(::refundView)
-        val total = safeSum(attempts.map { it.receivedMinor })
+        val total = safeSum(attempts.map { it.receivedMinor } + s.cashPayments.map { it.amountMinor })
         val overpaidMinor = (total - s.amountMinor).coerceAtLeast(0L)
         val overpaidSats = safeSum(saleOverpaidSats(s))
         val lateBitcoinReceipt = s.attempts.any { a -> a.tender == Tender.BITCOIN && a.cancellationAcknowledged && a.bitcoinEvidence.any { it.receivedSats > 0 } }
@@ -366,18 +486,23 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
         val requiresReview = lateBitcoinReceipt || overpaidMinor > 0 || overpaidSats > 0 || refundAtRisk
         val settled = safeSum(attempts.filter { it.state == PaymentState.PAID || it.state == PaymentState.CONFIRMED ||
             (it.state == PaymentState.PARTIAL && (it.tender == Tender.CARD || it.bitcoinEvidence.filter { ev -> ev.chainState == BitcoinChainState.ACTIVE && ev.receivedSats > 0 }.all { ev -> ev.confirmations >= ev.requiredConfirmations }))
-        }.map { it.receivedMinor })
+        }.map { it.receivedMinor } + s.cashPayments.map { it.amountMinor })
         return Sale(s.id, s.amountMinor, s.currency, s.createdAt, attempts, refunds, total,
             (s.amountMinor - total).coerceAtLeast(0), settled >= s.amountMinor && settled > 0 && !requiresReview,
-            requiresReview, lateBitcoinReceipt, overpaidMinor, overpaidSats, s.items.map { it.copy() })
+            requiresReview, lateBitcoinReceipt, overpaidMinor, overpaidSats, s.items.map { it.copy() }, s.cashPayments.map { it.copy() })
     }
 
     private fun saleOverpaidSats(s: SaleData): List<Long> = s.attempts.filter { it.tender == Tender.BITCOIN }.map { a ->
         (paidSats(a) - a.expectedSats!!).coerceAtLeast(0L)
     }
 
-    private class State(val sales: LinkedHashMap<String, SaleData> = LinkedHashMap())
+    private class State(val sales: LinkedHashMap<String, SaleData> = LinkedHashMap(),
+                        var eventsInitialized: Boolean = false, var eventEpoch: String? = null,
+                        var eventHighWater: Long = 0, var eventFloor: Long = 0,
+                        val saleVersions: LinkedHashMap<String, Long> = LinkedHashMap(),
+                        val events: MutableList<CheckoutEvent> = ArrayList())
     private data class SaleData(val id: String, val amountMinor: Long, val currency: String, val createdAt: Long, val items: List<SaleItem> = emptyList(),
+                                val cashPayments: MutableList<CashPayment> = ArrayList(),
                                 val attempts: MutableList<AttemptData> = ArrayList(), val refunds: MutableList<RefundData> = ArrayList())
     private data class AttemptData(val attemptId: String, val tender: Tender, val amountMinor: Long, val expectedSats: Long?, val quoteId: String?, val quotedAt: Long?, val counterIndex: Long?,
                                    val provider: String?, val stableId: String?, var cancellationRequested: Boolean = false,
@@ -431,11 +556,21 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
     private fun validateDecoded(s: State, version: Int) {
         val indexes = HashSet<Long>()
         val cardIds = HashSet<Pair<String, String>>()
+        val cashIds = HashSet<String>()
         for (sale in s.sales.values) {
             require(sale.attempts.size <= MAX_ATTEMPTS && sale.refunds.size <= MAX_REFUNDS)
             require(sale.items.size <= MAX_ITEMS_PER_SALE)
             val copiedItems = snapshotItems(sale.items)
             if (copiedItems.isNotEmpty()) require(itemTotal(copiedItems) == sale.amountMinor) { "stored basket total differs from sale amount" }
+            require(sale.cashPayments.size <= MAX_CASH_PAYMENTS)
+            require(safeSum(sale.cashPayments.map { it.amountMinor }) <= sale.amountMinor) { "stored cash payments exceed sale amount" }
+            for (cash in sale.cashPayments) {
+                validId(cash.paymentId, "cash payment id"); positive(cash.amountMinor, "cash payment amount")
+                positive(cash.tenderedMinor, "cash tendered amount"); nonnegative(cash.changeMinor, "cash change"); nonnegative(cash.recordedAt, "cash payment time")
+                require(cashIds.add(cash.paymentId)) { "cash payment id is duplicated" }
+                require(sale.currency == "USD") { "cash payment on unsupported currency" }
+                require(Math.addExact(cash.amountMinor, cash.changeMinor) == cash.tenderedMinor) { "cash amount and change do not match tendered amount" }
+            }
             for (a in sale.attempts) {
                 require(a.bitcoinEvidence.size <= MAX_EVIDENCE && a.cardEvidence.size <= MAX_EVIDENCE)
                 if (a.tender == Tender.BITCOIN) require(indexes.add(a.counterIndex!!)) { "Bitcoin counter index is duplicated" }
@@ -462,6 +597,7 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
                 }
             }
             safeSum(sale.attempts.map { if (it.tender == Tender.BITCOIN) fiatForSats(it) else received(it) })
+            safeSum(sale.cashPayments.map { it.amountMinor })
         }
     }
 
@@ -489,6 +625,22 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
                     out.str(r.refundId); out.str(r.paymentAttemptId); out.writeLong(r.amountMinor); out.writeLong(r.amountSats); out.writeLong(r.requestedAt); out.writeInt(r.evidence.size)
                     for (e in r.evidence) { out.str(e.evidenceId); out.writeLong(e.paidMinor); out.writeLong(e.paidSats); out.writeBoolean(e.pending); out.writeLong(e.observedAt) }
                 }
+                require(sale.cashPayments.size <= MAX_CASH_PAYMENTS)
+                out.writeInt(sale.cashPayments.size)
+                for (cash in sale.cashPayments) {
+                    out.str(cash.paymentId); out.writeLong(cash.amountMinor); out.writeLong(cash.tenderedMinor)
+                    out.writeLong(cash.changeMinor); out.writeLong(cash.recordedAt)
+                }
+            }
+            out.writeBoolean(s.eventsInitialized)
+            out.nullStr(s.eventEpoch)
+            out.writeLong(s.eventHighWater); out.writeLong(s.eventFloor)
+            out.writeInt(s.saleVersions.size)
+            for ((id, version) in s.saleVersions) { out.str(id); out.writeLong(version) }
+            out.writeInt(s.events.size)
+            for (event in s.events) {
+                out.str(event.eventId); out.str(event.epoch); out.writeLong(event.cursor); out.str(event.saleId)
+                out.writeLong(event.saleVersion); out.writeInt(event.type.ordinal)
             }
         }
         return bytes.toByteArray().also { require(it.size <= MAX_LEDGER_FILE_BYTES) { "ledger exceeds storage limit" } }
@@ -564,6 +716,47 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
                             require(r.evidence.none { it.evidenceId == ev.evidenceId }); r.evidence.add(ev)
                         }
                     }
+                    if (version >= CASH_PAYMENT_VERSION) repeat(input.count(MAX_CASH_PAYMENTS)) {
+                        val cash = CashPayment(input.str(), input.readLong(), input.readLong(), input.readLong(), input.readLong())
+                        validId(cash.paymentId, "cash payment id"); positive(cash.amountMinor, "cash payment amount")
+                        positive(cash.tenderedMinor, "cash tendered amount"); nonnegative(cash.changeMinor, "cash change"); nonnegative(cash.recordedAt, "cash payment time")
+                        require(cash.tenderedMinor == Math.addExact(cash.amountMinor, cash.changeMinor)) { "cash amount and change do not match tendered amount" }
+                        require(s.cashPayments.none { it.paymentId == cash.paymentId }) { "duplicate cash payment id" }
+                        require(currency == "USD") { "cash payment on unsupported currency" }
+                        s.cashPayments.add(cash)
+                    }
+                }
+                if (version >= EVENT_VERSION) {
+                    state.eventsInitialized = input.readBool()
+                    state.eventEpoch = input.nullStr()
+                    state.eventHighWater = input.readLong(); state.eventFloor = input.readLong()
+                    repeat(input.count(MAX_SALES)) {
+                        val id = input.str(); val saleVersion = input.readLong()
+                        validId(id, "sale id"); require(saleVersion >= 0 && state.sales.containsKey(id) && !state.saleVersions.containsKey(id))
+                        state.saleVersions[id] = saleVersion
+                    }
+                    repeat(input.count(MAX_EVENTS)) {
+                        val eventId = input.str(); val eventEpoch = input.str(); val cursor = input.readLong(); val saleId = input.str()
+                        val saleVersion = input.readLong(); val type = CheckoutEventType.entries.getOrNull(input.readInt()) ?: error("invalid event type")
+                        validId(eventId, "event id"); validId(eventEpoch, "event epoch"); validId(saleId, "event sale id")
+                        require(state.sales.containsKey(saleId) && cursor > 0 && saleVersion > 0)
+                        state.events.add(CheckoutEvent(eventId, eventEpoch, cursor, saleId, saleVersion, type))
+                    }
+                    require(state.eventHighWater >= 0 && state.eventFloor >= 0 && state.eventFloor <= state.eventHighWater)
+                    if (state.eventsInitialized) {
+                        validId(state.eventEpoch ?: error("missing event epoch"), "event epoch")
+                        require(state.saleVersions.keys == state.sales.keys)
+                        require(state.events.all { it.epoch == state.eventEpoch && it.cursor in (state.eventFloor + 1)..state.eventHighWater })
+                        require(state.events.map { it.eventId }.toSet().size == state.events.size)
+                        require(state.events.zipWithNext().all { (a, b) -> b.cursor == Math.addExact(a.cursor, 1L) })
+                        require(if (state.events.isEmpty()) state.eventFloor == state.eventHighWater
+                            else state.events.first().cursor == state.eventFloor + 1L && state.events.last().cursor == state.eventHighWater)
+                        val latestBySale = state.events.groupBy { it.saleId }.mapValues { (_, events) -> events.last().saleVersion }
+                        for ((id, versions) in state.events.groupBy { it.saleId }) {
+                            require(versions.zipWithNext().all { (a, b) -> b.saleVersion == Math.addExact(a.saleVersion, 1L) })
+                            require(latestBySale[id] == state.saleVersions[id])
+                        }
+                    } else require(state.eventEpoch == null && state.events.isEmpty() && state.saleVersions.isEmpty() && state.eventHighWater == 0L && state.eventFloor == 0L)
                 }
                 validateDecoded(state, version)
                 require(input.available() == 0) { "trailing ledger data" }
@@ -587,7 +780,9 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
         const val LEGACY_VERSION_2 = 2
         const val HISTORICAL_EVIDENCE_VERSION = 3
         const val ITEM_SNAPSHOT_VERSION = 4
-        const val VERSION = 4
+        const val CASH_PAYMENT_VERSION = 5
+        const val EVENT_VERSION = 6
+        const val VERSION = 6
         const val MAX_TEXT_BYTES = 1024
         const val MAX_ITEM_NAME_CHARS = 120
         const val MAX_ITEM_NAME_BYTES = 320
@@ -597,5 +792,8 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
         const val MAX_ATTEMPTS = 100
         const val MAX_EVIDENCE = 1000
         const val MAX_REFUNDS = 1000
+        const val MAX_CASH_PAYMENTS = 100
+        const val MAX_EVENTS = 1000
+        const val MAX_EVENT_PAGE = 500
     }
 }

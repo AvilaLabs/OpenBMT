@@ -14,6 +14,7 @@ object CheckoutLedgerTest {
         globalIdentifiersAndEvidenceBounds()
         refundSurvivesBitcoinReorgRestart()
         immutableBasketAndLegacyMigration()
+        cashAcknowledgmentAndMigration()
         duplicateAndCorruptStorage()
     }
 
@@ -126,9 +127,81 @@ object CheckoutLedgerTest {
         storage.failNextWrite = true
         check(runCatching { ledger.createSale("not-durable", 20, "USD", 32) }.isFailure)
         check(runCatching { ledger.getSale("sale-3") }.isFailure) // uncertain writes poison this instance
+        check(runCatching { ledger.canRecordCashPayment("sale-3") }.isFailure) // eligibility must not hide uncertain storage as false
         check(CheckoutLedger(storage).getSale("sale-3").saleId == "sale-3")
         storage.bytes = byteArrayOf(0, 1, 2)
         check(runCatching { CheckoutLedger(storage) }.isFailure) // never silently reset corruption
+    }
+
+    private fun cashAcknowledgmentAndMigration() {
+        val storage = MemoryStorage()
+        var ledger = CheckoutLedger(storage)
+        ledger.createSale("cash-exact", 725, "USD", 100)
+        check(ledger.canRecordCashPayment("cash-exact"))
+        val exact = ledger.recordCashPayment("cash-exact", "cash-1", 725, 101)
+        check(exact == CashPayment("cash-1", 725, 725, 0, 101))
+        check(ledger.getSale("cash-exact").let { it.paid && it.receivedMinor == 725L && it.remainingMinor == 0L && it.cashPayments.single() == exact })
+        check(!ledger.canRecordCashPayment("cash-exact"))
+        check(ledger.recordCashPayment("cash-exact", "cash-1", 725, 101) == exact) // stable retry after completion
+        check(runCatching { ledger.recordCashPayment("cash-exact", "cash-1", 726, 101) }.isFailure)
+        check(runCatching { ledger.recordCashPayment("cash-exact", "cash-1", 725, 102) }.isFailure)
+        check(runCatching { ledger.recordCashPayment("cash-exact", "cash-2", 1, 102) }.isFailure)
+        check(runCatching { ledger.recordCashPayment("cash-exact", "bad-id", 0, 102) }.isFailure)
+        check(runCatching { ledger.recordCashPayment("cash-exact", "bad-time", 725, -1) }.isFailure)
+        val restarted = CheckoutLedger(storage)
+        check(restarted.getSale("cash-exact").cashPayments.single() == exact)
+        check(restarted.recordCashPayment("cash-exact", "cash-1", 725, 101) == exact)
+
+        ledger.createSale("cash-change", 1300, "USD", 103)
+        val change = ledger.recordCashPayment("cash-change", "cash-2", 2000, 104)
+        check(change == CashPayment("cash-2", 1300, 2000, 700, 104))
+        check(ledger.getSale("cash-change").let { it.paid && it.receivedMinor == 1300L && it.overpaidMinor == 0L && it.cashPayments.single().changeMinor == 700L })
+        ledger.createSale("cash-after-partial-card", 1000, "USD", 104)
+        check(runCatching { ledger.recordCashPayment("cash-after-partial-card", "cash-2", 2000, 104) }.isFailure) // payment ids are global across sales
+        ledger.beginCardAttempt("cash-after-partial-card", "partial-card", "square", "partial-stable", 1000)
+        check(!ledger.canRecordCashPayment("cash-after-partial-card"))
+        ledger.recordCardEvidence("cash-after-partial-card", "partial-card", "partial-payment", "partial-stable", CardResult.COMPLETED, 300, 105)
+        check(ledger.canRecordCashPayment("cash-after-partial-card"))
+        val balanceCash = ledger.recordCashPayment("cash-after-partial-card", "balance-cash", 800, 106)
+        check(balanceCash == CashPayment("balance-cash", 700, 800, 100, 106))
+        check(ledger.getSale("cash-after-partial-card").let { it.paid && it.receivedMinor == 1000L && it.attempts.single().receivedMinor == 300L })
+
+        ledger.createSale("cash-under", 500, "USD", 105)
+        check(runCatching { ledger.recordCashPayment("cash-under", "under", 499, 106) }.isFailure)
+        check(ledger.getSale("cash-under").remainingMinor == 500L)
+        ledger.createSale("cash-overflow", Long.MAX_VALUE, "USD", 107)
+        check(ledger.recordCashPayment("cash-overflow", "max-cash", Long.MAX_VALUE, 108).changeMinor == 0L)
+        check(ledger.getSale("cash-overflow").let { it.paid && it.receivedMinor == Long.MAX_VALUE })
+
+        ledger.createSale("cash-non-usd", 100, "CAD", 109)
+        check(runCatching { ledger.recordCashPayment("cash-non-usd", "cad-cash", 100, 110) }.isFailure)
+        ledger.createSale("cash-card-unknown", 100, "USD", 111)
+        ledger.beginCardAttempt("cash-card-unknown", "unknown-card", "square", "unknown-stable", 100)
+        check(!ledger.canRecordCashPayment("cash-card-unknown"))
+        check(runCatching { ledger.recordCashPayment("cash-card-unknown", "blocked-card", 100, 112) }.isFailure)
+        ledger.createSale("cash-btc-active", 100, "USD", 113)
+        ledger.beginBitcoinAttempt("cash-btc-active", "active-btc", 991, 100, 100, "active-q", 114)
+        check(!ledger.canRecordCashPayment("cash-btc-active"))
+        check(runCatching { ledger.recordCashPayment("cash-btc-active", "blocked-btc", 100, 115) }.isFailure)
+
+        ledger.createSale("cash-late-btc", 100, "USD", 116)
+        ledger.beginBitcoinAttempt("cash-late-btc", "late-btc", 992, 100, 100, "late-q", 117)
+        ledger.requestCancellation("cash-late-btc", "late-btc")
+        ledger.acknowledgeBitcoinCancellation("cash-late-btc", "late-btc")
+        ledger.recordCashPayment("cash-late-btc", "before-late", 100, 118)
+        ledger.recordBitcoinEvidence("cash-late-btc", "late-btc", "late-output", "late-tx:0", 100, 1, 1, 119)
+        check(ledger.getSale("cash-late-btc").let { it.requiresReview && !it.paid && it.lateBitcoinReceipt && it.overpaidMinor == 100L })
+        check(runCatching { ledger.recordCashPayment("cash-late-btc", "after-late", 1, 120) }.isFailure)
+
+        val legacy = MemoryStorage().also { it.bytes = legacySaleBytes(4, "legacy-v4") }
+        val beforeRead = legacy.bytes!!.copyOf()
+        val oldLedger = CheckoutLedger(legacy)
+        check(oldLedger.getSale("legacy-v4").let { it.paid && it.cashPayments.isEmpty() })
+        check(legacy.bytes!!.contentEquals(beforeRead)) // opening and reading legacy data never rewrites it
+        oldLedger.createSale("after-v4", 25, "USD", 120, listOf(SaleItem("water", "Water", 25, 1)))
+        val afterMigration = CheckoutLedger(legacy)
+        check(afterMigration.getSale("legacy-v4").let { it.paid && it.cashPayments.isEmpty() })
+        check(afterMigration.getSale("after-v4").items.single().productId == "water")
     }
 
     private fun tenderExclusionAndQuoteFiatSnapshot() {
@@ -230,12 +303,13 @@ object CheckoutLedgerTest {
         check(unverifiableRefund.bytes!!.contentEquals(originalBytes)) // fail closed without rewriting the legacy file
     }
 
-    /** A v2/v3 on-disk paid sale, before v4 introduced item snapshots. */
+    /** A v2/v3/v4 on-disk paid sale. */
     private fun legacySaleBytes(version: Int, saleId: String, chainState: BitcoinChainState = BitcoinChainState.ACTIVE,
                                 confirmations: Int = 1, refundRequest: Boolean = false): ByteArray = ByteArrayOutputStream().also { bytes ->
         DataOutputStream(bytes).use { out ->
             out.writeInt(0x4f42434c); out.writeInt(version); out.writeInt(1)
             writeString(out, saleId); out.writeLong(500); writeString(out, "USD"); out.writeLong(69)
+            if (version >= 4) out.writeInt(0) // v4 item snapshots
             out.writeInt(1) // attempts
             writeString(out, "legacy-btc"); out.writeInt(Tender.BITCOIN.ordinal); out.writeLong(500)
             out.writeBoolean(true); out.writeLong(1000) // expected sats

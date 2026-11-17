@@ -289,6 +289,14 @@ impl DualStore {
     pub fn status(&self) -> Arc<DeviceStatus> {
         Arc::clone(&self.inner.status)
     }
+
+    /// Number of background changes currently owed to the second device.
+    /// This point-in-time count includes writes and removals, with newer
+    /// changes replacing older ones for the same name. Zero means only that
+    /// this in-memory queue is empty; it is not a durability guarantee.
+    pub fn pending_background_writes(&self) -> usize {
+        self.inner.lazy.lock_recover().len()
+    }
 }
 
 impl KVStore for DualStore {
@@ -514,6 +522,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sl_21_device_ack_before_local_failure_can_be_restored_from_device() {
+        let r = rig("store-device-ack-local-failure");
+        // Force FilesystemStore's later write to fail after the remote
+        // `SecondDevice::write` has durably acknowledged the sealed blob.
+        // This models the boundary between the two awaited writes without
+        // relying on timing or a real device.
+        std::fs::create_dir_all(&r.local_dir).unwrap();
+        std::fs::write(r.local_dir.join("monitors"), b"block directory creation").unwrap();
+        let result = r
+            .store
+            .write("monitors", "", "a_0", b"monitor-before-crash".to_vec())
+            .await;
+        assert!(result.is_err());
+        assert_eq!(r.status.snapshot().stored_writes, 1);
+        assert_eq!(r.status.snapshot().pending_writes, 0);
+        let name = "monitors~~a_0";
+        let sealed = r.device.read(name).await.unwrap().unwrap();
+        assert_eq!(
+            open(&r.key, name, &sealed).unwrap(),
+            b"monitor-before-crash"
+        );
+
+        // A fresh local store (the counter's disk is lost) can recover the
+        // acknowledged monitor blob from the second device.
+        let restored_dir = temp_dir("store-device-ack-restored");
+        let restored = FilesystemStore::new(restored_dir.clone());
+        let n = crate::state::pull(&restored_dir, &restored, &view_of(&r))
+            .await
+            .unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(
+            KVStore::read(&restored, "monitors", "", "a_0")
+                .await
+                .unwrap(),
+            b"monitor-before-crash"
+        );
+    }
+
+    #[tokio::test]
     async fn sl_24_the_second_device_is_written_first_and_a_device_away_holds_the_write() {
         let r = rig("store-order");
         r.device.set_away(true);
@@ -599,6 +646,8 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
+        assert_eq!(r.store.pending_background_writes(), 1);
+        assert_eq!(r.status.snapshot().pending_writes, 0);
         tokio::time::timeout(
             Duration::from_secs(1),
             bg.write("", "", "manager", b"m2".to_vec()),
@@ -610,18 +659,23 @@ mod tests {
             KVStore::read(&*r.local, "", "", "manager").await.unwrap(),
             b"m2"
         );
+        assert_eq!(r.store.pending_background_writes(), 1);
+        assert_eq!(r.status.snapshot().pending_writes, 0);
         settle(500).await;
         assert!(r.device.inner().list().await.unwrap().is_empty());
         // The device returns: it gets the latest, and only the latest matters.
         r.device.set_away(false);
         for _ in 0..50 {
             settle(100).await;
-            if !r.device.inner().list().await.unwrap().is_empty() {
+            if !r.device.inner().list().await.unwrap().is_empty()
+                && r.store.pending_background_writes() == 0
+            {
                 break;
             }
         }
         let sealed = r.device.read("~~manager").await.unwrap().unwrap();
         assert_eq!(open(&r.key, "~~manager", &sealed).unwrap(), b"m2");
+        assert_eq!(r.store.pending_background_writes(), 0);
     }
 
     #[tokio::test]

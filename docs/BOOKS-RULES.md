@@ -182,6 +182,23 @@ Nothing here says what a merchant owes. It writes down what the records say.
 - **BK-22.** An amount is a decimal with the currency's minor digits (two for
   most, none for the yen, three for the dinar) and no thousands separator.
   The accounting export has dates, the ledger has `YYYY-MM-DDTHH:MM:SSZ`.
+- **BK-49.** `reconciliation_export` writes one CSV row for every sale,
+  including pending and no-funds sales. It carries the opaque sale ID, state,
+  counting status, payment method, opening/funds/first-seen timestamps,
+  currency, sale amount, tip, total due (sale amount plus tip), satoshis
+  received, sales tax and historical value at first seen. Total due is the
+  requested amount and is not a receipt. Satoshis received are copied from
+  the record's known/unknown value, including after a withdrawal or reorg;
+  they are not inferred from the sale state. Missing timestamps are blank;
+  unknown tax, received amount or fiat value is `unknown`. The fiat value is
+  the value derived from the sale's own quote at first seen, not a current
+  market conversion. The export does not report actual processor fees: the
+  book records no such field. It does not infer fees, tax or conversion.
+  Amounts use the currency's minor digits and CSV follows BK-20 and BK-21.
+  Because received satoshis and first-seen times reveal chain payment
+  activity, it requires `RevealsPayments::Acknowledged` and begins with the
+  BK-19 warning comment row. This is an owner-sensitive reconciliation file;
+  it does not replace the narrower accountant-facing BK-17 export.
 
 ## 6. The encrypted export file
 

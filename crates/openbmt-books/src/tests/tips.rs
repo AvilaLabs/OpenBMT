@@ -93,6 +93,16 @@ fn bk_38_the_ledger_has_the_tip_in_the_column_tips() {
 }
 
 #[test]
+fn bk_49_reconciliation_labels_due_separately_from_received_sats() {
+    let csv = day()
+        .books()
+        .reconciliation_export(RevealsPayments::Acknowledged)
+        .expect("reconciliation");
+    assert!(csv.contains(",USD,18.50,2.75,21.25,4321987,unknown,"));
+    assert!(csv.contains(",USD,7.00,0.70,7.70,unknown,"));
+}
+
+#[test]
 fn bk_39_the_totals_of_a_day_have_the_tips_in_all_and_for_each_person() {
     let books = day().books();
     let totals = books.utc_day_totals().expect("totals");

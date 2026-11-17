@@ -28,12 +28,24 @@ use common::{amount_of, bip143, external, high_s, request, secp, Rng};
 use openbmt_core::wallet::{KeySlot, Keychain, WalletDescription};
 use openbmt_core::wallet_single::{ImportedWallet, SingleKeyWallet};
 use openbmt_spend::{
-    check_finished, combine, combine_wallet, consolidation_cost_sats_single,
+    assess_maintenance, check_finished, combine, combine_wallet, consolidation_cost_sats_single,
     consolidation_size_single, finalize, finalize_plan, plan, psbt_for_signer,
     take_signer_signatures, take_wallet_signature, transaction_of_final_file, ChangePosition, Coin,
     CoinError, CombineError, FinalizeError, Plan, PlanError, PsbtError, SignerFileError,
     SpendRequest, WalletKind,
 };
+
+#[test]
+fn sp_88_maintenance_uses_single_key_consolidation_shape() {
+    let input = coin(0xdead, 0, 100_000);
+    let assessment = assess_maintenance(single(), &[input], 1, 1_000, u64::MAX).unwrap();
+    let expected_fee = consolidation_cost_sats_single(1, 1_000).unwrap();
+    assert_eq!(assessment.batches[0].estimated_fee_sats, expected_fee);
+    assert_eq!(
+        assessment.batches[0].estimated_output_sats,
+        Some(100_000 - expected_fee)
+    );
+}
 
 // ---- the kit -------------------------------------------------------------
 

@@ -358,3 +358,23 @@ fn bk_22_the_ledger_has_full_times_and_the_accounting_export_has_dates() {
     let jan = kit.books().accounting_export().expect("export").remove(0).1;
     assert!(jan.contains("\r\n2025-01-31,Sale "));
 }
+
+#[test]
+fn bk_49_reconciliation_keeps_pending_rows_and_unknown_facts_explicit() {
+    let kit = rich_kit();
+    let csv = kit
+        .books()
+        .reconciliation_export(RevealsPayments::Acknowledged)
+        .expect("reconciliation");
+    assert_eq!(csv.lines().count(), 2 + kit.books().sales().len());
+    assert!(csv.starts_with(&format!("# {LEDGER_WARNING}\r\nSale ID,State,Counting,Method,Opened (UTC),Funds first recorded (UTC),Payment first seen (UTC),Currency,Sale amount,Tip,Total due,Received (sats),Sales tax,Historical value at first seen\r\n")));
+    assert!(csv.contains(",pending,on-chain,"));
+    assert!(csv.contains(",final,counted,on-chain,"));
+    // Sale 4 has confirmed funds but is not final, so received sats are known
+    // while its final-record fiat value remains unknown.
+    assert!(csv.contains(",USD,25.00,0.00,25.00,4321987,unknown,unknown\r\n"));
+    assert!(csv.contains(",expired,no funds,on-chain,"));
+    assert!(csv.contains(",USD,5.00,0.00,5.00,0,unknown,unknown\r\n"));
+    assert!(!csv.to_ascii_lowercase().contains("fee"));
+    assert!(csv.ends_with("\r\n"));
+}

@@ -14,11 +14,17 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import android.text.InputType
+import android.text.InputFilter
+import android.text.TextWatcher
+import android.text.Editable
+import android.view.inputmethod.EditorInfo
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
@@ -87,6 +93,9 @@ open class CheckoutActivity : Activity() {
     private var homePrimaryAllowed = false
     private var tenderStatusView: TextView? = null
     private var tenderBitcoinButton: Button? = null
+    private var historyQueryText = ""
+    private var historyTenderFilter: HistoryTender? = null
+    private var historyStatusFilter: HistoryStatus? = null
     private val cartQuantities = linkedMapOf<String, Int>()
 
     private data class CatalogProduct(val id: String, val name: String, val unitMinor: Long)
@@ -157,11 +166,17 @@ open class CheckoutActivity : Activity() {
         outState.putStringArrayList(CART_IDS_KEY, ArrayList(cartQuantities.keys))
         outState.putIntArray(CART_QUANTITIES_KEY, cartQuantities.values.toIntArray())
         outState.putString(RECEIPT_KEY, receiptToResume)
+        outState.putString(HISTORY_TEXT_KEY, historyQueryText)
+        outState.putString(HISTORY_TENDER_KEY, historyTenderFilter?.name)
+        outState.putString(HISTORY_STATUS_KEY, historyStatusFilter?.name)
         super.onSaveInstanceState(outState)
     }
 
     private fun restoreSavedUiState(saved: Bundle?) {
         receiptToResume = saved?.getString(RECEIPT_KEY)
+        historyQueryText = saved?.getString(HISTORY_TEXT_KEY).orEmpty().take(128)
+        historyTenderFilter = saved?.getString(HISTORY_TENDER_KEY)?.let { value -> runCatching { HistoryTender.valueOf(value) }.getOrNull() }
+        historyStatusFilter = saved?.getString(HISTORY_STATUS_KEY)?.let { value -> runCatching { HistoryStatus.valueOf(value) }.getOrNull() }
         val ids = saved?.getStringArrayList(CART_IDS_KEY) ?: return
         val quantities = saved.getIntArray(CART_QUANTITIES_KEY) ?: return
         cartQuantities.clear()
@@ -703,6 +718,9 @@ open class CheckoutActivity : Activity() {
         if (sale.currency == "USD" && cardBridge != null) {
             actions.add(ui.secondary("Pay with Square Sandbox") { beginSquareAttempt(saleId, sale.remainingMinor) })
         }
+        if (canOfferCash(saleId)) {
+            actions.add(ui.secondary("Cash") { showCashEntry(saleId) })
+        }
         actions.add(ui.quiet("Sales and receipts") { showSales() })
         showUiPage(ui.bar("Choose payment", back = { showReceipt(saleId) }), body, actions)
         tenderStatusView = statusView
@@ -713,6 +731,97 @@ open class CheckoutActivity : Activity() {
         val quantity = cartQuantities[product.id] ?: return@mapNotNull null
         if (quantity <= 0) return@mapNotNull null
         SaleItem(product.id, product.name, product.unitMinor, quantity)
+    }
+
+    private fun canOfferCash(saleId: String): Boolean = try {
+        ledger.canRecordCashPayment(saleId)
+    } catch (_: Exception) {
+        false
+    }
+
+    /** Cash entry records only after the cashier explicitly confirms physical receipt. */
+    private fun showCashEntry(saleId: String, stablePaymentId: String = UUID.randomUUID().toString(), stableRecordedAt: Long = nowSecs()) {
+        val sale = try { ledger.getSale(saleId) } catch (_: Exception) { return showSalesIfPossible() }
+        if (!canOfferCash(saleId)) {
+            return showReceipt(saleId)
+        }
+        val paymentId = stablePaymentId
+        val recordedAt = stableRecordedAt
+        val remaining = sale.remainingMinor
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setSingleLine(true)
+            hint = "0.00"
+            contentDescription = "Cash received in USD"
+        }
+        val preview = TextView(this).apply {
+            textSize = 14f
+            setTextColor(Color.rgb(24, 34, 43))
+            text = "Amount applied · ${formatAmount(remaining, "USD")}\nEnter cash received to preview change."
+        }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(8), dp(4), dp(8), dp(2))
+            addView(input, LinearLayout.LayoutParams(-1, -2))
+            addView(preview, LinearLayout.LayoutParams(-1, -2).also { it.topMargin = dp(12) })
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Cash received · USD")
+            .setMessage("Remaining balance: ${formatAmount(remaining, "USD")}\nEnter the physical cash received.")
+            .setView(content)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Record cash received", null)
+            .create()
+        fun parsedTender(): Long? = try { parseCashTendered(input.text.toString()) } catch (_: Exception) { null }
+        fun refreshPreview() {
+            val tendered = parsedTender()
+            preview.text = when {
+                tendered == null -> "Amount applied · ${formatAmount(remaining, "USD")}\nEnter a USD amount with up to two decimal places."
+                tendered < remaining -> "Amount applied · ${formatAmount(remaining, "USD")}\nCash received · ${formatAmount(tendered, "USD")}\nStill due · ${formatAmount(remaining - tendered, "USD")}"
+                else -> "Amount applied · ${formatAmount(remaining, "USD")}\nCash received · ${formatAmount(tendered, "USD")}\nChange due · ${formatAmount(Math.subtractExact(tendered, remaining), "USD")}"
+            }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = tendered != null && tendered >= remaining
+        }
+        input.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = refreshPreview()
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
+        dialog.setOnShowListener {
+            val record = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+            record.isEnabled = false
+            record.setOnClickListener {
+                val tendered = parsedTender() ?: return@setOnClickListener
+                if (tendered < remaining) return@setOnClickListener
+                try {
+                    // Preserve the destination before the durable write so recreation can reopen its receipt.
+                    receiptToResume = saleId
+                    ledger.recordCashPayment(saleId, paymentId, tendered, recordedAt)
+                    dialog.dismiss()
+                    showReceipt(saleId)
+                } catch (e: Exception) {
+                    dialog.dismiss()
+                    val uncertain = (e.message ?: "").contains("uncertain", ignoreCase = true)
+                    if (!uncertain) receiptToResume = null
+                    showMessage(
+                        if (uncertain) "Cash record needs checking" else "Cash payment was not recorded",
+                        "The cash may have been received even though this screen did not confirm the ledger result. Do not collect or record it again until you have inspected the sale in Sales.",
+                        safeDetail(e),
+                    ) {
+                        if (uncertain) finish() else showReceipt(saleId)
+                    }
+                }
+            }
+            refreshPreview()
+        }
+        dialog.show()
+    }
+
+    private fun parseCashTendered(raw: String): Long {
+        require(raw.matches(Regex("(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,2})?"))) { "Enter USD using digits and up to two decimal places." }
+        val minor = BigDecimal(raw).setScale(2, RoundingMode.UNNECESSARY).movePointRight(2).longValueExact()
+        require(minor > 0) { "Cash received must be positive." }
+        return minor
     }
 
     private fun checkedItemsTotal(items: List<SaleItem>): Long = items.fold(0L) { total, item ->
@@ -880,13 +989,82 @@ open class CheckoutActivity : Activity() {
     private fun showSales() {
         receiptToResume = null
         activeSaleShowing = false
-        val sales = ledger.listSales().asReversed()
-        if (sales.isEmpty()) return showHomeWithError("There are no test sales yet.")
+        val allSales = ledger.listSales()
+        val sales = searchSales(allSales, SaleHistoryQuery(historyQueryText, historyTenderFilter, historyStatusFilter))
         val body = ArrayList<View>()
         if (hasUnresolvedSale()) body.add(ui.receipt(listOf(
             ReceiptLine("Follow-up needed", LineStyle.Strong),
             ReceiptLine("Each sale keeps its own attempts and evidence. Start another order only through the separate-sale acknowledgement.", LineStyle.Small),
         )))
+        val search = ui.field("Search receipt ID or item name").apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+            filters = arrayOf(InputFilter.LengthFilter(128))
+            setSingleLine(true)
+            setText(historyQueryText)
+            setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                    historyQueryText = text.toString()
+                    showSales()
+                    true
+                } else false
+            }
+        }
+        body.add(search)
+        body.add(ui.secondary("Search") {
+            historyQueryText = search.text.toString()
+            showSales()
+        })
+        val filterControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val tenderLabel = when (historyTenderFilter) {
+            null -> "All"
+            HistoryTender.BITCOIN -> "Bitcoin"
+            HistoryTender.CARD -> "Card"
+            HistoryTender.CASH -> "Cash"
+        }
+        val statusLabel = when (historyStatusFilter) {
+            null -> "All"
+            HistoryStatus.PAID -> "Paid"
+            HistoryStatus.UNPAID -> "Unpaid"
+            HistoryStatus.REVIEW -> "Needs review"
+        }
+        filterControls.addView(ui.secondary("Tender · $tenderLabel") {
+            historyQueryText = search.text.toString()
+            historyTenderFilter = when (historyTenderFilter) {
+                null -> HistoryTender.BITCOIN
+                HistoryTender.BITCOIN -> HistoryTender.CARD
+                HistoryTender.CARD -> HistoryTender.CASH
+                HistoryTender.CASH -> null
+            }
+            showSales()
+        }, LinearLayout.LayoutParams(0, -2, 1f).also { it.rightMargin = ui.px(4) })
+        filterControls.addView(ui.secondary("Status · $statusLabel") {
+            historyQueryText = search.text.toString()
+            historyStatusFilter = when (historyStatusFilter) {
+                null -> HistoryStatus.PAID
+                HistoryStatus.PAID -> HistoryStatus.UNPAID
+                HistoryStatus.UNPAID -> HistoryStatus.REVIEW
+                HistoryStatus.REVIEW -> null
+            }
+            showSales()
+        }, LinearLayout.LayoutParams(0, -2, 1f).also { it.leftMargin = ui.px(4) })
+        body.add(filterControls)
+        body.add(ui.quiet("Clear search and filters") {
+            historyQueryText = ""
+            historyTenderFilter = null
+            historyStatusFilter = null
+            showSales()
+        })
+        body.add(ui.text("${sales.size} of ${allSales.size} sales", 13f, colour = ui.pal.secondary))
+        if (sales.isEmpty()) {
+            body.add(ui.receipt(listOf(
+                ReceiptLine("No matching sales", LineStyle.Strong),
+                ReceiptLine("Clear the search or reset filters to see saved sales.", LineStyle.Small),
+            )))
+        }
         for (sale in sales) {
             val lines = ArrayList<ReceiptLine>()
             lines.add(ReceiptLine("${formatAmount(sale.amountMinor, sale.currency)} · ${saleStateLabel(sale)}", LineStyle.Strong))
@@ -926,8 +1104,18 @@ open class CheckoutActivity : Activity() {
         paymentLines.add(ReceiptLine("${saleStateLabel(sale)} · ${formatAmount(sale.amountMinor, sale.currency)}", LineStyle.Strong))
         paymentLines.add(ReceiptLine("Received · ${formatAmount(sale.receivedMinor, sale.currency)}"))
         paymentLines.add(ReceiptLine("Remaining · ${formatAmount(sale.remainingMinor, sale.currency)}"))
+        for (cash in sale.cashPayments) {
+            paymentLines.add(ReceiptLine("Cash applied · ${formatAmount(cash.amountMinor, "USD")}"))
+            paymentLines.add(ReceiptLine("Cash received · ${formatAmount(cash.tenderedMinor, "USD")}"))
+            paymentLines.add(ReceiptLine("Change · ${formatAmount(cash.changeMinor, "USD")}"))
+        }
         paymentLines.add(ReceiptLine("TEST ONLY · Regtest", LineStyle.Small))
         body.add(ui.receipt(paymentLines))
+        body.add(ui.secondary("Copy receipt") {
+            val receiptText = "TEST ONLY · REGTEST\n\n${CheckoutReceipt.receiptText(sale)}"
+            copyText(receiptText, "OpenBMT test receipt")
+            Toast.makeText(this, "Copied the test receipt", Toast.LENGTH_SHORT).show()
+        })
         for (attempt in sale.attempts) {
             val shortTender = if (attempt.tender == Tender.BITCOIN) "Bitcoin" else "Card"
             val stateLine = when {
@@ -956,6 +1144,9 @@ open class CheckoutActivity : Activity() {
         val actions = ArrayList<Pair<String, () -> Unit>>()
         if (sale.attempts.isEmpty() && sale.remainingMinor > 0) {
             actions.add("Choose payment" to { showTenderChoice(sale.saleId) })
+        }
+        if (canOfferCash(sale.saleId)) {
+            actions.add("Pay remaining by Cash" to { showCashEntry(sale.saleId) })
         }
         val resumableBitcoin = sale.attempts.lastOrNull { it.tender == Tender.BITCOIN && it.state !in setOf(PaymentState.CONFIRMED, PaymentState.PAID, PaymentState.CANCELED) }
         if (resumableBitcoin != null) actions.add("Resume Bitcoin request" to {
@@ -1023,6 +1214,10 @@ open class CheckoutActivity : Activity() {
         val lines = ArrayList<ReceiptLine>()
         lines.add(ReceiptLine("Sale ID · ${sale.saleId}", LineStyle.Small))
         lines.add(ReceiptLine("Created · ${java.time.Instant.ofEpochSecond(sale.createdAt)}", LineStyle.Small))
+        for (cash in sale.cashPayments) {
+            lines.add(ReceiptLine("Cash payment ID · ${cash.paymentId}", LineStyle.Small))
+            lines.add(ReceiptLine("Cash recorded · ${java.time.Instant.ofEpochSecond(cash.recordedAt)}", LineStyle.Small))
+        }
         for (attempt in sale.attempts) {
             lines.add(ReceiptLine("${attempt.tender} attempt ID · ${attempt.attemptId}", LineStyle.Small))
             attempt.expectedSats?.let { lines.add(ReceiptLine("Bitcoin quote · ${formatSats(it)} · ${attempt.quoteId}", LineStyle.Small)) }
@@ -1046,9 +1241,11 @@ open class CheckoutActivity : Activity() {
     }
 
     private fun saleStateLabel(sale: Sale): String = when {
-        sale.attempts.isEmpty() -> "Tender not selected"
         sale.requiresReview -> "Owner review required"
+        sale.paid && sale.cashPayments.isNotEmpty() && sale.cashPayments.sumOf { it.amountMinor } == sale.amountMinor -> "Paid in cash"
+        sale.paid && sale.cashPayments.isNotEmpty() -> "Paid · mixed tenders"
         sale.paid -> "Paid in test ledger"
+        sale.attempts.isEmpty() -> "Tender not selected"
         sale.attempts.any { it.state == PaymentState.REORGED } -> "Payment check reopened"
         sale.attempts.any { it.state == PaymentState.UNCONFIRMED } -> "Payment seen, unconfirmed"
         sale.attempts.any { it.state == PaymentState.PARTIAL } -> "Partial payment"
@@ -1250,9 +1447,9 @@ open class CheckoutActivity : Activity() {
 
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
 
-    private fun copyText(value: String) {
+    private fun copyText(value: String, label: String = "Bitcoin payment code") {
         val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Bitcoin payment code", value))
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText(label, value))
     }
 
     private fun formatAmount(minor: Long, currency: String): String = if (currency == "SAT") "${minor} sats" else "${BigDecimal.valueOf(minor, 2).setScale(2)} USD"
@@ -1330,6 +1527,9 @@ open class CheckoutActivity : Activity() {
         private const val CART_IDS_KEY = "checkout.cart.ids"
         private const val CART_QUANTITIES_KEY = "checkout.cart.quantities"
         private const val RECEIPT_KEY = "checkout.receipt.resume"
+        private const val HISTORY_TEXT_KEY = "checkout.history.text"
+        private const val HISTORY_TENDER_KEY = "checkout.history.tender"
+        private const val HISTORY_STATUS_KEY = "checkout.history.status"
         private const val MAX_PAIRING_BYTES = 1024 * 1024
     }
 

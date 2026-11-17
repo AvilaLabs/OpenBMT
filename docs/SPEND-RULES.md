@@ -383,3 +383,18 @@ such a wallet and are unchanged for a wallet of three keys.
   finishes, and is accepted by `testmempoolaccept`. A test on a private
   test network proves it. The fuzz target `spend_combine` also feeds the
   path of a wallet with one key (SP-70).
+- **SP-88.** `assess_maintenance` is advisory only. It checks every supplied
+  coin as SP-01 to SP-03 require, even below the requested depth, and refuses
+  a confirmation threshold of 0. It reports supplied and eligible balances
+  separately, orders eligible coins as SP-11 does, and divides them into
+  consecutive batches of at most `MAX_CONSOLIDATION_INPUTS`. It estimates each
+  batch fee using the wallet's SP-38 or SP-81 shape and the caller's explicit
+  rate. It reports each estimated fee separately from balances and from fees
+  actually paid. A batch is deferred when its fee consumes its value, its
+  estimated output is dust, or it exceeds the remaining caller-supplied fee
+  budget. A deferred batch does not consume that budget. One-input batches are
+  cost scenarios only; the assessment does not claim they improve wallet
+  structure or economics. The function does not track spent or reserved coins,
+  obtain fee quotes, make a transaction plan, authorize, sign, broadcast, or
+  enforce an online-balance cap. The caller refreshes chain state and uses
+  `plan` for any actual spend.

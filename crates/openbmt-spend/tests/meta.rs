@@ -5,11 +5,12 @@ mod common;
 use bitcoin::OutPoint;
 use common::*;
 use openbmt_spend::{
-    CoinError, CombineError, FinalizeError, PlanError, PsbtError, SignerFileError, Source,
+    CoinError, CombineError, FinalizeError, MaintenanceError, PlanError, PsbtError,
+    SignerFileError, Source,
 };
 
 const RULES: &str = include_str!("../../../docs/SPEND-RULES.md");
-const TEST_SOURCES: [&str; 11] = [
+const TEST_SOURCES: [&str; 12] = [
     include_str!("coins.rs"),
     include_str!("choice.rs"),
     include_str!("outputs.rs"),
@@ -21,6 +22,7 @@ const TEST_SOURCES: [&str; 11] = [
     include_str!("signer_file.rs"),
     include_str!("hostile.rs"),
     include_str!("single.rs"),
+    include_str!("maintenance.rs"),
 ];
 
 /// Every rule ID that the rules file defines (in bold at the start of a
@@ -41,9 +43,9 @@ fn rule_ids() -> Vec<String> {
 #[test]
 fn the_rules_file_defines_the_rules_the_tests_name() {
     let ids = rule_ids();
-    assert_eq!(ids.len(), 51);
+    assert_eq!(ids.len(), 52);
     assert!(ids.contains(&"SP-01".to_string()) && ids.contains(&"SP-71".to_string()));
-    assert!(ids.contains(&"SP-80".to_string()) && ids.contains(&"SP-87".to_string()));
+    assert!(ids.contains(&"SP-80".to_string()) && ids.contains(&"SP-88".to_string()));
     let mut sorted = ids.clone();
     sorted.sort();
     sorted.dedup();
@@ -168,6 +170,7 @@ fn every_error_says_which_rule_in_words() {
         SignerFileError::DifferentTransaction.to_string(),
         SignerFileError::NotSigned { input: 0 }.to_string(),
         SignerFileError::Slot.to_string(),
+        MaintenanceError::UnconfirmedNotAllowed.to_string(),
     ];
     let ids = rule_ids();
     for t in &texts {

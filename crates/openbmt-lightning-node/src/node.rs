@@ -28,6 +28,7 @@ use crate::logger::Logger;
 use crate::lsps1::{self, OrderBook, OrderRecord, OrderState, OrderWhy, Orders};
 use crate::paid::{PaidLog, PaidRecord};
 use crate::provider::{choose_offer, Offer, ProviderConfig, Refusal};
+use crate::receiving::{self, AssessmentInput, ChannelFact, ReceivingAssessment};
 use crate::room::{decide, room_to_receive_msat, OnChainReason, ReceiveDecision, Situation};
 use crate::seal::SealKey;
 use crate::state::{self, StartFrom, StateError};
@@ -1337,6 +1338,52 @@ impl Node {
             lsps1_fees_paid_sat: book.fees_paid_sat,
             lsps1_stopped: stopped,
         }
+    }
+
+    /// An advisory snapshot of confirmed receiving capacity for the app.
+    /// This uses the same live LDK channel list as the node, but does not
+    /// guarantee a route: capacity can fragment across channels or change
+    /// before payment. It does not alter invoice, claim, or POS behavior.
+    pub fn receiving_assessment(
+        &self,
+        amount_msat: Option<u64>,
+        opening_fee_msat: Option<u64>,
+        max_opening_fee_msat: Option<u64>,
+    ) -> ReceivingAssessment {
+        let now = now_secs();
+        let device = self.shared.device_status.snapshot();
+        // DeviceStatus tracks strict writes only. The background queue has a
+        // separate lazy backlog, so include it and require a successful
+        // device observation before reporting the backup caught up.
+        let backup_reachable = device.state == DeviceState::Reachable;
+        let backup_caught_up = backup_reachable
+            && device.last_stored_unix > 0
+            && device.pending_writes == 0
+            && self.shared.store.pending_background_writes() == 0;
+        let channels = self.shared.manager.list_usable_channels();
+        let facts: Vec<ChannelFact> = channels
+            .iter()
+            .map(|channel| ChannelFact {
+                usable: true,
+                inbound_capacity_msat: channel.inbound_capacity_msat,
+                funding_confirmations: channel.confirmations,
+                has_funding_output: channel.funding_txo.is_some()
+                    && channel.get_funding_output().is_some(),
+            })
+            .collect();
+        receiving::assess(&AssessmentInput {
+            observed_at_unix: now,
+            now_unix: now,
+            node_running: !self.shared.stopping.load(Ordering::SeqCst),
+            backup_reachable,
+            backup_caught_up,
+            chain_healthy: self.shared.chain_ok(),
+            confirmation_depth: self.shared.confirm_depth,
+            channels: &facts,
+            amount_msat,
+            opening_fee_msat,
+            max_opening_fee_msat,
+        })
     }
 
     /// The second device's status (SL-23).

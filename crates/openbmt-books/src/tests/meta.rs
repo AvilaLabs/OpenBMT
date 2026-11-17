@@ -46,13 +46,13 @@ fn sources() -> String {
 #[test]
 fn the_rules_file_defines_its_rules() {
     let ids = defined();
-    assert_eq!(ids.len(), 48, "{ids:?}");
-    assert!(ids.contains("BK-01") && ids.contains("BK-48"));
+    assert_eq!(ids.len(), 49, "{ids:?}");
+    assert!(ids.contains("BK-01") && ids.contains("BK-49"));
     let numbers: Vec<u32> = ids
         .iter()
         .map(|i| i[3..].parse().expect("a number"))
         .collect();
-    assert_eq!(numbers, (1..=48).collect::<Vec<u32>>());
+    assert_eq!(numbers, (1..=49).collect::<Vec<u32>>());
 }
 
 #[test]
