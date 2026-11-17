@@ -1,7 +1,8 @@
 {
   "title": "Capability execution ledger",
   "as_of": "2026-11-17",
-  "status_policy": "All 502 rows remain pending_unverified. Phase sequencing and dependency gates are planning only; they do not assess implementation or close any capability. Existing evidence references remain candidates only.",
+  "status_policy": "OpenBMT capability completion and exact benchmark parity are tracked separately. A row becomes verified_supported when the current product exposes the canonical merchant job and meaningful source, test or observed-workflow evidence validates it. Vendor-specific mechanisms and qualifiers remain open under benchmark_parity_status until separately demonstrated. Planning phases and adjacent primitives never close a row by themselves.",
+  "closure_audit": "capability-closure-audit-2026-11-17.md",
   "source_register": "capabilities-2026-11-17/capability-register.json",
   "planning_sources": [
     "capabilities-2026-11-17/roadmap.md",
@@ -10,7 +11,7 @@
     "standalone-sale-contract-2026-11-17.md",
     "standalone-sale-first-batch-2026-11-17.md"
   ],
-  "execution_context": "The native foundations batch is implemented as seven bounded, locally validated candidates with unmet capability boundaries. All row statuses remain pending_unverified. Next independent work includes staff authority, catalog/pricing configuration, shift/refund reconciliation and Bitcoin receiving/recovery; shared contracts and cross-cutting safety gates still apply. This ledger sequences work and is not new competitor research.",
+  "execution_context": "The native foundations batch is implemented as seven bounded, locally validated candidates. A two-axis audit closes seven canonical OpenBMT merchant capabilities while retaining every linked benchmark qualifier as a separate open obligation. Next independent work includes staff authority, catalog/pricing configuration, shift/refund reconciliation and Bitcoin receiving/recovery; shared contracts and cross-cutting safety gates still apply. This ledger sequences work and is not new competitor research.",
   "workstream_order": [
     "P1 core sale foundation",
     "P2 ordinary POS operations",
@@ -881,10 +882,10 @@
         ],
         "required_scope": "Evidence must cover this capability\u2019s merchant action, linked variants and qualifiers, plus relevant failure/recovery and authority boundaries. Code, a screen, documentation, adjacent primitives, simulations, or candidate evidence alone do not close it.",
         "unmet_scope": [
-          "No parity or support claim is made; inspect the exact workflow and code path before treating this as absent or supported."
+          "Toast physical drawer opening and Cash Activity Audit parity remain open benchmark obligations."
         ]
       },
-      "status": "pending_unverified",
+      "status": "verified_supported",
       "existing_evidence_candidates": [],
       "proposed_disposition": {
         "register_disposition": "match_or_improve_merchant_job",
@@ -903,7 +904,15 @@
       "sequencing_note": "Build on the minimal durable sale/tender contract; this work need not wait for Bitcoin readiness items.",
       "dependency_capability_ids": [
         "CAP-C008F84ED2"
-      ]
+      ],
+      "benchmark_parity_status": "partial_unverified",
+      "closure_evidence": [
+        "apps/checkout-android/src/model/CheckoutCashSession.kt",
+        "apps/checkout-android/src/android/CheckoutCashController.kt",
+        "apps/checkout-android/tests/CheckoutCashSessionTest.kt",
+        "tools/merchant-acceptance-investigation/evidence/native-pos-foundations-2026-11-17.json"
+      ],
+      "closure_note": "OpenBMT exposes a reasoned Cash In command on an open local session and durably updates expected cash. Toast drawer hardware and Cash Activity Audit parity remain open."
     },
     {
       "id": "CAP-F4987B3942",
@@ -929,10 +938,10 @@
         ],
         "required_scope": "Evidence must cover this capability\u2019s merchant action, linked variants and qualifiers, plus relevant failure/recovery and authority boundaries. Code, a screen, documentation, adjacent primitives, simulations, or candidate evidence alone do not close it.",
         "unmet_scope": [
-          "No parity or support claim is made; inspect the exact workflow and code path before treating this as absent or supported."
+          "Toast physical movement, payout/drop distinctions and undo parity remain open benchmark obligations."
         ]
       },
-      "status": "pending_unverified",
+      "status": "verified_supported",
       "existing_evidence_candidates": [],
       "proposed_disposition": {
         "register_disposition": "match_or_improve_merchant_job",
@@ -951,7 +960,15 @@
       "sequencing_note": "Build on the minimal durable sale/tender contract; this work need not wait for Bitcoin readiness items.",
       "dependency_capability_ids": [
         "CAP-C008F84ED2"
-      ]
+      ],
+      "benchmark_parity_status": "partial_unverified",
+      "closure_evidence": [
+        "apps/checkout-android/src/model/CheckoutCashSession.kt",
+        "apps/checkout-android/src/android/CheckoutCashController.kt",
+        "apps/checkout-android/tests/CheckoutCashSessionTest.kt",
+        "tools/merchant-acceptance-investigation/evidence/native-pos-foundations-2026-11-17.json"
+      ],
+      "closure_note": "OpenBMT exposes a reasoned Cash Out command, updates expected cash and refuses an impossible negative balance. Toast physical movement, payout/drop distinctions and undo parity remain open."
     },
     {
       "id": "CAP-FDC07B0B6B",
@@ -978,10 +995,10 @@
         ],
         "required_scope": "Evidence must cover this capability\u2019s merchant action, linked variants and qualifiers, plus relevant failure/recovery and authority boundaries. Code, a screen, documentation, adjacent primitives, simulations, or candidate evidence alone do not close it.",
         "unmet_scope": [
-          "No parity or support claim is made; inspect the exact workflow and code path before treating this as absent or supported."
+          "Toast paused-drawer, authorized correction/reopen and physical drawer parity remain open benchmark obligations."
         ]
       },
-      "status": "pending_unverified",
+      "status": "verified_supported",
       "existing_evidence_candidates": [],
       "proposed_disposition": {
         "register_disposition": "match_or_improve_merchant_job",
@@ -1000,7 +1017,15 @@
       "sequencing_note": "Build on the minimal durable sale/tender contract; this work need not wait for Bitcoin readiness items.",
       "dependency_capability_ids": [
         "CAP-C008F84ED2"
-      ]
+      ],
+      "benchmark_parity_status": "partial_unverified",
+      "closure_evidence": [
+        "apps/checkout-android/src/model/CheckoutCashSession.kt",
+        "apps/checkout-android/src/android/CheckoutCashController.kt",
+        "apps/checkout-android/tests/CheckoutCashSessionTest.kt",
+        "tools/merchant-acceptance-investigation/evidence/native-pos-foundations-2026-11-17.json"
+      ],
+      "closure_note": "OpenBMT records actual count, expected balance and over/short, closes the session immutably and rejects later movements. Toast pause/reopen/correction and physical drawer parity remain open."
     },
     {
       "id": "CAP-12C961D393",
@@ -1340,10 +1365,10 @@
         ],
         "required_scope": "Evidence must cover this capability\u2019s merchant action, linked variants and qualifiers, plus relevant failure/recovery and authority boundaries. Code, a screen, documentation, adjacent primitives, simulations, or candidate evidence alone do not close it.",
         "unmet_scope": [
-          "No opening float, cash movement, drawer open/close, count, discrepancy review, or shift control in the native checkout flow."
+          "Toast blind/full permission separation and authorized close-entry correction remain open benchmark obligations; operator labels are not authentication."
         ]
       },
-      "status": "pending_unverified",
+      "status": "verified_supported",
       "existing_evidence_candidates": [
         {
           "evidence_id": "OBM-E011",
@@ -1388,7 +1413,15 @@
       "sequencing_note": "Build on the minimal durable sale/tender contract; this work need not wait for Bitcoin readiness items.",
       "dependency_capability_ids": [
         "CAP-C008F84ED2"
-      ]
+      ],
+      "benchmark_parity_status": "partial_unverified",
+      "closure_evidence": [
+        "apps/checkout-android/src/model/CheckoutCashSession.kt",
+        "apps/checkout-android/src/android/CheckoutCashController.kt",
+        "apps/checkout-android/tests/CheckoutCashSessionTest.kt",
+        "tools/merchant-acceptance-investigation/evidence/native-pos-foundations-2026-11-17.json"
+      ],
+      "closure_note": "OpenBMT displays expected cash, accepts actual count and durably records signed over/short. Toast blind/full visibility and role enforcement remain open."
     },
     {
       "id": "CAP-4305F69F29",
@@ -12588,10 +12621,10 @@
         ],
         "required_scope": "Evidence must cover this capability\u2019s merchant action, linked variants and qualifiers, plus relevant failure/recovery and authority boundaries. Code, a screen, documentation, adjacent primitives, simulations, or candidate evidence alone do not close it.",
         "unmet_scope": [
-          "No stock reservation, decrement, count, purchase order, or transfer workflow is demonstrated in this app slice."
+          "Automatic decrement across Square POS, invoice and shipped-online channels remains an open benchmark obligation; OpenBMT's supported local path uses explicit handoff."
         ]
       },
-      "status": "pending_unverified",
+      "status": "verified_supported",
       "existing_evidence_candidates": [
         {
           "evidence_id": "OBM-E031",
@@ -12616,7 +12649,15 @@
       "sequencing_note": "Start with the priced-sale foundation and active native durable priced-sale snapshot.",
       "dependency_capability_ids": [
         "CAP-F01F234915"
-      ]
+      ],
+      "benchmark_parity_status": "partial_unverified",
+      "closure_evidence": [
+        "apps/checkout-android/src/model/CheckoutInventory.kt",
+        "apps/checkout-android/src/android/CheckoutInventoryController.kt",
+        "apps/checkout-android/tests/CheckoutInventoryTest.kt",
+        "tools/merchant-acceptance-investigation/evidence/native-pos-foundations-2026-11-17.json"
+      ],
+      "closure_note": "An eligible local sale handoff decrements tracked stock exactly once; tests and emulator evidence cover replay, restart and recovery. Square channel parity remains open."
     },
     {
       "id": "CAP-CB3EDC2272",
@@ -12642,10 +12683,10 @@
         ],
         "required_scope": "Evidence must cover this capability\u2019s merchant action, linked variants and qualifiers, plus relevant failure/recovery and authority boundaries. Code, a screen, documentation, adjacent primitives, simulations, or candidate evidence alone do not close it.",
         "unmet_scope": [
-          "No stock reservation, decrement, count, purchase order, or transfer workflow is demonstrated in this app slice."
+          "Square location, variation and channel-specific adjustment workflow remains an open benchmark obligation."
         ]
       },
-      "status": "pending_unverified",
+      "status": "verified_supported",
       "existing_evidence_candidates": [
         {
           "evidence_id": "OBM-E031",
@@ -12666,7 +12707,15 @@
       "dependency_keys": [
         "GATE-SALE-01"
       ],
-      "sequencing_note": "Start with the priced-sale foundation and active native durable priced-sale snapshot."
+      "sequencing_note": "Start with the priced-sale foundation and active native durable priced-sale snapshot.",
+      "benchmark_parity_status": "partial_unverified",
+      "closure_evidence": [
+        "apps/checkout-android/src/model/CheckoutInventory.kt",
+        "apps/checkout-android/src/android/CheckoutInventoryController.kt",
+        "apps/checkout-android/tests/CheckoutInventoryTest.kt",
+        "tools/merchant-acceptance-investigation/evidence/native-pos-foundations-2026-11-17.json"
+      ],
+      "closure_note": "OpenBMT exposes a reasoned stock correction and durably guards replay, changed payload and stale versions. Exact Square workflow parity remains open."
     },
     {
       "id": "CAP-44B39BFE6D",
@@ -24259,10 +24308,10 @@
         ],
         "required_scope": "Evidence must cover this capability\u2019s merchant action, linked variants and qualifiers, plus relevant failure/recovery and authority boundaries. Code, a screen, documentation, adjacent primitives, simulations, or candidate evidence alone do not close it.",
         "unmet_scope": [
-          "No parity or support claim is made; inspect the exact workflow and code path before treating this as absent or supported."
+          "Square report-type output limits, email/print paths and permission/geography qualifiers remain open benchmark obligations."
         ]
       },
-      "status": "pending_unverified",
+      "status": "verified_supported",
       "existing_evidence_candidates": [],
       "proposed_disposition": {
         "register_disposition": "match_or_improve_merchant_job",
@@ -24277,7 +24326,15 @@
       "dependency_keys": [
         "GATE-SALE-01"
       ],
-      "sequencing_note": "Build on the minimal durable sale/tender contract; this work need not wait for Bitcoin readiness items."
+      "sequencing_note": "Build on the minimal durable sale/tender contract; this work need not wait for Bitcoin readiness items.",
+      "benchmark_parity_status": "partial_unverified",
+      "closure_evidence": [
+        "apps/checkout-android/src/model/CheckoutReport.kt",
+        "apps/checkout-android/src/android/CheckoutReportController.kt",
+        "apps/checkout-android/tests/CheckoutReportTest.kt",
+        "tools/merchant-acceptance-investigation/evidence/native-pos-foundations-2026-11-17.json"
+      ],
+      "closure_note": "OpenBMT exports a reviewed local sales report as analyzable CSV; emulator evidence validates analyzable rows, successful system-file save and the reviewed snapshot. Square report-type, email/print and permission parity remains open."
     },
     {
       "id": "CAP-47E781A981",
