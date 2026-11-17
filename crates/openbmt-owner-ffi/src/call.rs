@@ -222,8 +222,8 @@ use crate::settings_edit::{
 use crate::setup_lock::{self, PinChangeArgs};
 use crate::shop_lightning::{
     LightningReportView, Lsps1OfferView, NotOfferedView, OrderStateView, OrderWhyView,
-    ShopLightningAction, ShopLightningClass, ShopLightningEditArgs, ShopLightningHeldView,
-    ShopLightningPreviewView, ShopLightningView,
+    ReceivingBackupView, ReceivingSnapshotView, ShopLightningAction, ShopLightningClass,
+    ShopLightningEditArgs, ShopLightningHeldView, ShopLightningPreviewView, ShopLightningView,
 };
 use crate::signer_views::{
     FirstAddressArgs, FirstAddressKind, FirstAddressView, RegistrationView, SignerBuiltView,
@@ -1384,6 +1384,8 @@ fn definitions() -> Vec<TypeDef> {
         Lsps1OfferView::define(),
         OrderStateView::define(),
         OrderWhyView::define(),
+        ReceivingBackupView::define(),
+        ReceivingSnapshotView::define(),
         ShopLightningHeldView::define(),
         LightningReportView::define(),
         ShopLightningView::define(),

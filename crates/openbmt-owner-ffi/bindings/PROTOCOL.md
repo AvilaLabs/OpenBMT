@@ -342,8 +342,11 @@ OrderStateView: enum, one tag byte
     tags None=0 Open=1 Paid=2 Done=3 Failed=4
 OrderWhyView: enum, one tag byte
     tags None=0 FeeAboveMax=1 CannotPay=2 Refused=3 Expired=4 PaymentFailed=5 Refunded=6 NotPossible=7 NoChannel=8 Stopped=9
+ReceivingBackupView: enum, one tag byte
+    tags Unknown=0 Away=1 Behind=2 CaughtUp=3
+ReceivingSnapshotView: record: captured_at_unix: u64, chain_height: u32, confirmation_depth: u32, confirmed_room_msat: u64, pending_or_unknown_channels: u16, backup_state: ReceivingBackupView, strict_pending_writes: u32, background_pending_writes: u32, last_device_store_unix: u64, chain_healthy: bool
 ShopLightningHeldView: record: counter: list<u8>, node_id: list<u8>, second_device: list<u8>, provider_node_id: list<u8>, provider_addr: string, cap_sats: u64, max_opening_fee_sats: u64
-LightningReportView: record: taken_at: u64, balance_sats: u64, receive_room_sats: u64, opening_fees_paid_sats: u64, last_stored_at: u64, last_sweep_at: u64, not_offered: NotOfferedView, lsps1: Lsps1OfferView, order_state: OrderStateView, order_why: OrderWhyView, order_fee_sats: u64, lost_funding_sales: list<u32>, lost_funding_total: u32
+LightningReportView: record: taken_at: u64, balance_sats: u64, receive_room_sats: u64, opening_fees_paid_sats: u64, last_stored_at: u64, last_sweep_at: u64, not_offered: NotOfferedView, lsps1: Lsps1OfferView, order_state: OrderStateView, order_why: OrderWhyView, order_fee_sats: u64, lost_funding_sales: list<u32>, lost_funding_total: u32, receiving: option<ReceivingSnapshotView>
 ShopLightningView: record: on: bool, own_wallet: bool, counters: list<list<u8>>, boxes: list<list<u8>>, held: option<ShopLightningHeldView>, report: option<LightningReportView>
 ShopLightningAction: enum, one tag byte
     tags Set=0 Change=1 Remove=2

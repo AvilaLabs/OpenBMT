@@ -3129,6 +3129,7 @@ fn report(balance: u64, not_offered: NotOffered) -> LightningReport {
         order_fee_sats: 0,
         lost_funding_sales: Vec::new(),
         lost_funding_total: 0,
+        receiving: None,
     }
 }
 
@@ -3214,9 +3215,9 @@ fn sl_27_the_sales_paid_through_a_lost_funding_are_kept_with_the_report() {
         w.link.lightning_report().unwrap().report.lost_funding_total,
         70
     );
-    // The file is the version 2 report, and a link started again reads it.
+    // The file is the version 3 report, and a link started again reads it.
     let bytes = fs::read(w.dir.path().join(crate::LIGHTNING_REPORT_FILE)).unwrap();
-    assert_eq!(bytes[32 + 8 + 4], 2);
+    assert_eq!(bytes[32 + 8 + 4], 3);
     let kept = w.link.lightning_report().unwrap().clone();
     let again_dir = Dir::new();
     let mut again = OwnerLink::new(

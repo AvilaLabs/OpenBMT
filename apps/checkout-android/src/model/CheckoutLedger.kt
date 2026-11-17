@@ -157,6 +157,7 @@ data class Sale(
     val overpaidSats: Long,
     val items: List<SaleItem> = emptyList(),
     val cashPayments: List<CashPayment> = emptyList(),
+    val pricing: CheckoutPricingSnapshot? = null,
 )
 
 enum class CheckoutEventType { SALE_CREATED, PAYMENT_CHANGED, REFUND_CHANGED }
@@ -173,6 +174,7 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
     private val lock = Any()
     private var state: State = decode(storage.read())
     private var poisoned = false
+    private var stableSaleCallbackActive = false
 
     /** Explicitly commits the event epoch; legacy reads alone never rewrite their source file.
      * Restoring an older raw ledger file is not detectable here; callers must rotate the epoch
@@ -180,6 +182,7 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
      */
     fun initializeEvents(): EventSnapshot = synchronized(lock) {
         ensureHealthy()
+        check(!stableSaleCallbackActive) { "ledger mutation is blocked during stable sale callback" }
         if (!state.eventsInitialized) {
             val before = encode(state)
             state.eventsInitialized = true
@@ -199,6 +202,20 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
 
     fun eventSnapshot(): EventSnapshot = synchronized(lock) { ensureHealthy(); eventSnapshotLocked() }
 
+    /** Runs one synchronous local commit against a verified sale version while ledger mutations are excluded.
+     * The callback must not perform network or UI waits. Reentrant reads are allowed; reentrant mutations fail.
+     */
+    fun <T> withStableSale(saleId: String, expectedVersion: Long, action: (Sale) -> T): T = synchronized(lock) {
+        ensureHealthy()
+        check(!stableSaleCallbackActive) { "stable sale callback is already active" }
+        require(state.eventsInitialized) { "sale versions are not initialized" }
+        val actualVersion = state.saleVersions[saleId] ?: error("sale not found")
+        require(expectedVersion >= 0 && actualVersion == expectedVersion) { "sale changed since inventory review" }
+        val snapshot = view(sale(saleId))
+        stableSaleCallbackActive = true
+        try { action(snapshot) } finally { stableSaleCallbackActive = false }
+    }
+
     /** A null epoch means no history is available and requires a current-state resync. */
     fun readEvents(epoch: String, afterCursor: Long, limit: Int): EventPage = synchronized(lock) {
         ensureHealthy(); require(limit in 1..MAX_EVENT_PAGE) { "invalid event page size" }
@@ -217,14 +234,30 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
         state.saleVersions.toMap(), state.eventsInitialized, state.sales.values.map(::view))
 
     fun createSale(saleId: String, amountMinor: Long, currency: String, createdAt: Long,
-                   items: List<SaleItem> = emptyList()): Sale = mutate {
+                   items: List<SaleItem> = emptyList()): Sale = createSaleInternal(saleId, amountMinor, currency, createdAt, items, null)
+
+    /** Creates a sale from a frozen canonical price. Its total is the amount due for every tender. */
+    fun createPricedSale(saleId: String, currency: String, createdAt: Long,
+                         pricing: CheckoutPricingSnapshot): Sale {
+        require(currency == "USD") { "priced checkout currently supports USD only" }
+        val frozen = freezePricing(pricing)
+        return createSaleInternal(saleId, frozen.totalMinor, currency, createdAt,
+            pricingItems(frozen), frozen)
+    }
+
+    private fun createSaleInternal(saleId: String, amountMinor: Long, currency: String, createdAt: Long,
+                   items: List<SaleItem>, pricing: CheckoutPricingSnapshot?): Sale = mutate {
         validId(saleId, "sale id"); positive(amountMinor, "sale amount"); validCurrency(currency)
         require(createdAt >= 0) { "invalid creation time" }
         require(!sales.containsKey(saleId)) { "sale already exists" }
         require(sales.size < MAX_SALES) { "sale limit reached" }
-        val snapshot = snapshotItems(items)
-        if (snapshot.isNotEmpty()) require(itemTotal(snapshot) == amountMinor) { "basket total does not match sale amount" }
-        sales[saleId] = SaleData(saleId, amountMinor, currency, createdAt, snapshot)
+        val snapshot = snapshotItems(items, allowZeroUnit = pricing != null)
+        if (pricing == null && snapshot.isNotEmpty()) require(itemTotal(snapshot) == amountMinor) { "basket total does not match sale amount" }
+        if (pricing != null) {
+            require(pricing.totalMinor == amountMinor && snapshot == pricingItems(pricing))
+            require(snapshot.isNotEmpty())
+        }
+        sales[saleId] = SaleData(saleId, amountMinor, currency, createdAt, snapshot, pricing = pricing)
         view(sales.getValue(saleId))
     }
 
@@ -378,6 +411,7 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
 
     private inline fun <T> mutate(block: State.() -> T): T = synchronized(lock) {
         ensureHealthy()
+        check(!stableSaleCallbackActive) { "ledger mutation is blocked during stable sale callback" }
         val beforeSales = state.sales.keys.associateWith { view(state.sales.getValue(it)) }
         val before = encode(state)
         val result = try { state.block() } catch (e: Throwable) { state = decode(before); throw e }
@@ -489,7 +523,7 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
         }.map { it.receivedMinor } + s.cashPayments.map { it.amountMinor })
         return Sale(s.id, s.amountMinor, s.currency, s.createdAt, attempts, refunds, total,
             (s.amountMinor - total).coerceAtLeast(0), settled >= s.amountMinor && settled > 0 && !requiresReview,
-            requiresReview, lateBitcoinReceipt, overpaidMinor, overpaidSats, s.items.map { it.copy() }, s.cashPayments.map { it.copy() })
+            requiresReview, lateBitcoinReceipt, overpaidMinor, overpaidSats, s.items.map { it.copy() }, s.cashPayments.map { it.copy() }, s.pricing?.let(::freezePricing))
     }
 
     private fun saleOverpaidSats(s: SaleData): List<Long> = s.attempts.filter { it.tender == Tender.BITCOIN }.map { a ->
@@ -503,7 +537,8 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
                         val events: MutableList<CheckoutEvent> = ArrayList())
     private data class SaleData(val id: String, val amountMinor: Long, val currency: String, val createdAt: Long, val items: List<SaleItem> = emptyList(),
                                 val cashPayments: MutableList<CashPayment> = ArrayList(),
-                                val attempts: MutableList<AttemptData> = ArrayList(), val refunds: MutableList<RefundData> = ArrayList())
+                                val attempts: MutableList<AttemptData> = ArrayList(), val refunds: MutableList<RefundData> = ArrayList(),
+                                var pricing: CheckoutPricingSnapshot? = null)
     private data class AttemptData(val attemptId: String, val tender: Tender, val amountMinor: Long, val expectedSats: Long?, val quoteId: String?, val quotedAt: Long?, val counterIndex: Long?,
                                    val provider: String?, val stableId: String?, var cancellationRequested: Boolean = false,
                                    var cancellationAcknowledged: Boolean = false,
@@ -539,12 +574,12 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
     private fun nonnegative(v: Long, label: String) { require(v >= 0) { "invalid $label" } }
     private fun safeSum(values: Iterable<Long>): Long = values.fold(0L) { sum, value -> Math.addExact(sum, value) }
 
-    private fun snapshotItems(items: List<SaleItem>): List<SaleItem> {
+    private fun snapshotItems(items: List<SaleItem>, allowZeroUnit: Boolean = false): List<SaleItem> {
         require(items.size <= MAX_ITEMS_PER_SALE) { "too many basket items" }
         for (item in items) {
             validId(item.productId, "product id")
             require(item.name.isNotBlank() && item.name.length <= MAX_ITEM_NAME_CHARS && item.name.none { it.isISOControl() } && item.name.toByteArray(Charsets.UTF_8).size <= MAX_ITEM_NAME_BYTES) { "invalid product name" }
-            positive(item.unitMinor, "item price")
+            if (allowZeroUnit) nonnegative(item.unitMinor, "item price") else positive(item.unitMinor, "item price")
             require(item.quantity in 1..MAX_ITEM_QUANTITY) { "invalid item quantity" }
             Math.multiplyExact(item.unitMinor, item.quantity.toLong())
         }
@@ -553,6 +588,92 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
 
     private fun itemTotal(items: List<SaleItem>): Long = safeSum(items.map { Math.multiplyExact(it.unitMinor, it.quantity.toLong()) })
 
+    private fun freezePricing(value: CheckoutPricingSnapshot): CheckoutPricingSnapshot {
+        require(value.lines.size in 1..MAX_PRICED_LINES && value.taxes.size <= 1) { "priced sale exceeds limits" }
+        val inputs = value.lines.map { line ->
+            require(line.lineId.length <= MAX_PRICING_ID_CHARS && line.productId.length <= MAX_PRICING_ID_CHARS)
+            require(line.name.length <= MAX_ITEM_NAME_CHARS && line.name.toByteArray(Charsets.UTF_8).size <= MAX_ITEM_NAME_BYTES)
+            require(line.quantity in 1..MAX_ITEM_QUANTITY)
+            require(line.modifiers.size <= MAX_MODIFIERS_PER_LINE)
+            val modifiers = line.modifiers.map {
+                require(it.modifierId.length <= MAX_PRICING_ID_CHARS && it.name.length <= MAX_ITEM_NAME_CHARS)
+                require(it.name.toByteArray(Charsets.UTF_8).size <= MAX_ITEM_NAME_BYTES)
+                it
+            }
+            CheckoutLineInput(line.lineId, line.productId, line.name, line.unitMinor, line.quantity,
+                modifiers.map { SelectedModifier(it.modifierId, it.name, it.amountMinor) })
+        }
+        val tax = value.taxes.singleOrNull()?.let {
+            require(it.taxId.length <= MAX_PRICING_ID_CHARS && it.name.length <= MAX_ITEM_NAME_CHARS)
+            require(it.name.toByteArray(Charsets.UTF_8).size <= MAX_ITEM_NAME_BYTES)
+            CheckoutTaxRule(it.taxId, it.name, it.rateBasisPoints, it.treatment)
+        }
+        val result = CheckoutPricing.freeze(inputs, value.discountMinor, tax, value.tipMinor)
+        require(samePricing(result, value)) { "pricing snapshot outputs do not match its inputs" }
+        return result
+    }
+
+    private fun pricingItems(pricing: CheckoutPricingSnapshot): List<SaleItem> = pricing.lines.map { line ->
+        val effectiveUnit = line.modifiers.fold(line.unitMinor) { sum, modifier -> Math.addExact(sum, modifier.amountMinor) }
+        SaleItem(line.productId, line.name, effectiveUnit, line.quantity)
+    }
+
+    private fun samePricing(a: CheckoutPricingSnapshot, b: CheckoutPricingSnapshot): Boolean =
+        a.subtotalMinor == b.subtotalMinor && a.discountMinor == b.discountMinor &&
+            a.taxableAfterDiscountMinor == b.taxableAfterDiscountMinor && a.taxMinor == b.taxMinor &&
+            a.tipMinor == b.tipMinor && a.totalMinor == b.totalMinor && a.taxes == b.taxes &&
+            a.lines == b.lines
+
+    private fun writePricing(out: DataOutputStream, pricing: CheckoutPricingSnapshot?) {
+        out.writeBoolean(pricing != null)
+        if (pricing == null) return
+        out.writeInt(pricing.lines.size)
+        for (line in pricing.lines) {
+            out.str(line.lineId); out.str(line.productId); out.str(line.name); out.writeLong(line.unitMinor)
+            out.writeInt(line.quantity); out.writeInt(line.modifiers.size)
+            for (modifier in line.modifiers) { out.str(modifier.modifierId); out.str(modifier.name); out.writeLong(modifier.amountMinor) }
+            out.writeLong(line.subtotalMinor); out.writeLong(line.discountMinor); out.writeLong(line.taxMinor)
+        }
+        out.writeLong(pricing.subtotalMinor); out.writeLong(pricing.discountMinor); out.writeLong(pricing.taxableAfterDiscountMinor)
+        out.writeInt(pricing.taxes.size)
+        for (tax in pricing.taxes) {
+            out.str(tax.taxId); out.str(tax.name); out.writeInt(tax.rateBasisPoints); out.writeInt(tax.treatment.ordinal); out.writeLong(tax.amountMinor)
+        }
+        out.writeLong(pricing.taxMinor); out.writeLong(pricing.tipMinor); out.writeLong(pricing.totalMinor)
+    }
+
+    private fun readPricing(input: DataInputStream): CheckoutPricingSnapshot? {
+        if (!input.readBool()) return null
+        val lines = List(input.count(MAX_PRICED_LINES)) {
+            val lineId = input.str(); val productId = input.str(); val name = input.str(); val unit = input.readLong()
+            val quantity = input.readInt()
+            val modifiers = List(input.count(MAX_MODIFIERS_PER_LINE)) {
+                SelectedModifier(input.str(), input.str(), input.readLong())
+            }
+            val subtotal = input.readLong(); val discount = input.readLong(); val tax = input.readLong()
+            Triple(CheckoutLineInput(lineId, productId, name, unit, quantity, modifiers), Triple(subtotal, discount, tax), Unit)
+        }
+        val subtotal = input.readLong(); val discount = input.readLong(); val taxable = input.readLong()
+        val taxes = List(input.count(1)) {
+            val id = input.str(); val name = input.str(); val rate = input.readInt()
+            val treatment = TaxTreatment.entries.getOrNull(input.readInt()) ?: error("invalid tax treatment")
+            TaxSnapshot(id, name, rate, treatment, input.readLong())
+        }
+        val taxTotal = input.readLong(); val tip = input.readLong(); val total = input.readLong()
+        val rule = taxes.singleOrNull()?.let { CheckoutTaxRule(it.taxId, it.name, it.rateBasisPoints, it.treatment) }
+        val result = CheckoutPricing.freeze(lines.map { it.first }, discount, rule, tip)
+        require(result.lines.indices.all { index ->
+            val saved = lines[index].second
+            result.lines[index].let { it.subtotalMinor == saved.first && it.discountMinor == saved.second && it.taxMinor == saved.third }
+        }) { "stored priced lines do not match their inputs" }
+        require(result.subtotalMinor == subtotal && result.discountMinor == discount &&
+            result.taxableAfterDiscountMinor == taxable && result.taxes == taxes &&
+            result.taxMinor == taxTotal && result.tipMinor == tip && result.totalMinor == total) {
+            "stored pricing totals do not match their inputs"
+        }
+        return freezePricing(result)
+    }
+
     private fun validateDecoded(s: State, version: Int) {
         val indexes = HashSet<Long>()
         val cardIds = HashSet<Pair<String, String>>()
@@ -560,8 +681,8 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
         for (sale in s.sales.values) {
             require(sale.attempts.size <= MAX_ATTEMPTS && sale.refunds.size <= MAX_REFUNDS)
             require(sale.items.size <= MAX_ITEMS_PER_SALE)
-            val copiedItems = snapshotItems(sale.items)
-            if (copiedItems.isNotEmpty()) require(itemTotal(copiedItems) == sale.amountMinor) { "stored basket total differs from sale amount" }
+            val copiedItems = snapshotItems(sale.items, allowZeroUnit = sale.pricing != null)
+            if (sale.pricing == null && copiedItems.isNotEmpty()) require(itemTotal(copiedItems) == sale.amountMinor) { "stored basket total differs from sale amount" }
             require(sale.cashPayments.size <= MAX_CASH_PAYMENTS)
             require(safeSum(sale.cashPayments.map { it.amountMinor }) <= sale.amountMinor) { "stored cash payments exceed sale amount" }
             for (cash in sale.cashPayments) {
@@ -570,6 +691,10 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
                 require(cashIds.add(cash.paymentId)) { "cash payment id is duplicated" }
                 require(sale.currency == "USD") { "cash payment on unsupported currency" }
                 require(Math.addExact(cash.amountMinor, cash.changeMinor) == cash.tenderedMinor) { "cash amount and change do not match tendered amount" }
+            }
+            sale.pricing?.let { pricing ->
+                require(sale.currency == "USD" && freezePricing(pricing).totalMinor == sale.amountMinor) { "stored pricing total differs from sale amount" }
+                require(sale.items == pricingItems(pricing)) { "stored basket differs from pricing lines" }
             }
             for (a in sale.attempts) {
                 require(a.bitcoinEvidence.size <= MAX_EVIDENCE && a.cardEvidence.size <= MAX_EVIDENCE)
@@ -631,6 +756,7 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
                     out.str(cash.paymentId); out.writeLong(cash.amountMinor); out.writeLong(cash.tenderedMinor)
                     out.writeLong(cash.changeMinor); out.writeLong(cash.recordedAt)
                 }
+                writePricing(out, sale.pricing)
             }
             out.writeBoolean(s.eventsInitialized)
             out.nullStr(s.eventEpoch)
@@ -663,10 +789,9 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
                         val count = input.count(MAX_ITEMS_PER_SALE)
                         List(count) {
                             val item = SaleItem(input.str(), input.str(), input.readLong(), input.readInt())
-                            snapshotItems(listOf(item)).single()
+                            snapshotItems(listOf(item), allowZeroUnit = version >= PRICING_SNAPSHOT_VERSION).single()
                         }
                     } else emptyList()
-                    if (items.isNotEmpty()) require(itemTotal(items) == amount) { "stored basket total differs from sale amount" }
                     val s = SaleData(id, amount, currency, created, items); state.sales[id] = s
                     val attempts = input.count(MAX_ATTEMPTS)
                     repeat(attempts) {
@@ -725,6 +850,14 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
                         require(currency == "USD") { "cash payment on unsupported currency" }
                         s.cashPayments.add(cash)
                     }
+                    if (version >= PRICING_SNAPSHOT_VERSION) s.pricing = readPricing(input)
+                    if (s.pricing != null) {
+                        require(currency == "USD" && s.pricing!!.totalMinor == amount) { "stored pricing total differs from sale amount" }
+                        require(items == pricingItems(s.pricing!!)) { "stored basket differs from pricing lines" }
+                    } else {
+                        val validItems = snapshotItems(items)
+                        if (validItems.isNotEmpty()) require(itemTotal(validItems) == amount) { "stored basket total differs from sale amount" }
+                    }
                 }
                 if (version >= EVENT_VERSION) {
                     state.eventsInitialized = input.readBool()
@@ -782,12 +915,16 @@ class CheckoutLedger(private val storage: DurableLedgerStorage) {
         const val ITEM_SNAPSHOT_VERSION = 4
         const val CASH_PAYMENT_VERSION = 5
         const val EVENT_VERSION = 6
-        const val VERSION = 6
+        const val PRICING_SNAPSHOT_VERSION = 7
+        const val VERSION = 7
         const val MAX_TEXT_BYTES = 1024
         const val MAX_ITEM_NAME_CHARS = 120
         const val MAX_ITEM_NAME_BYTES = 320
         const val MAX_ITEM_QUANTITY = 999
         const val MAX_ITEMS_PER_SALE = 100
+        const val MAX_PRICED_LINES = 100
+        const val MAX_MODIFIERS_PER_LINE = 32
+        const val MAX_PRICING_ID_CHARS = 160
         const val MAX_SALES = 2000
         const val MAX_ATTEMPTS = 100
         const val MAX_EVIDENCE = 1000

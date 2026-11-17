@@ -756,6 +756,13 @@ object ProtocolDecoderTest {
             "01" + "02000000" + "6364" + "01" + "09000000" + "312e322e332e343a35" + "01" + "0500000000000000" +
             "01" + "0600000000000000"
 
+    // Exact OBMl success responses emitted by Rust's `Put` implementation;
+    // the paired Rust golden assertion lives in `src/tests/shop_lightning.rs`.
+    private val SHOP_LIGHTNING_REPORT_V3_POPULATED_HEX =
+        "4f424d6c010001000100000020000000111111111111111111111111111111111111111111111111111111111111111100000000000164f153650000000040e2010000000000d21e0000000000002a00000000000000f0c9536500000000e0a25365000000000002000000000000000000000200000007000000090000000a0000000165f153650000000041d10c000300000015cd5b0700000000020002040000000500000000f153650000000001"
+    private val SHOP_LIGHTNING_REPORT_V3_ABSENT_HEX =
+        "4f424d6c010001000100000020000000111111111111111111111111111111111111111111111111111111111111111100000000000164f153650000000040e2010000000000d21e0000000000002a00000000000000f0c9536500000000e0a25365000000000002000000000000000000000200000007000000090000000a00000000"
+
     private fun shopLightningFrames() {
         val edit = ShopLightningEditArgs(
             ShopLightningAction.Set,
@@ -780,7 +787,7 @@ object ProtocolDecoderTest {
 
         val held = Writer().bytes(ByteArray(32) { 1 }).bytes(ByteArray(33) { 2 }).bytes(ByteArray(32) { 3 })
             .bytes(ByteArray(33) { 4 }).string("203.0.113.7:9735").u64(5_000_000).u64(20_000).toByteArray()
-        val report = Writer().u64(1_000).u64(11).u64(22).u64(33).u64(44).u64(55).u8(2).u8(1).u8(4).u8(1).u64(9_000).u32(2).u32(4).u32(9).u32(70).toByteArray()
+        val report = Writer().u64(1_000).u64(11).u64(22).u64(33).u64(44).u64(55).u8(2).u8(1).u8(4).u8(1).u64(9_000).u32(2).u32(4).u32(9).u32(70).u8(0).toByteArray()
         val off = Writer().bool(false).bool(false).u32(1).bytes(ByteArray(32) { 1 }).u32(0).u8(0).u8(0).toByteArray()
         val offState = decodeResponse(header(0, off)).let { it.shopLightningState().also { _ -> it.end() } }
         check(!offState.on && !offState.ownWallet && offState.counters.size == 1 && offState.boxes.isEmpty())
@@ -795,24 +802,50 @@ object ProtocolDecoderTest {
         check(r.lastStoredAt == 44L && r.lastSweepAt == 55L && r.notOffered == NotOffered.ChainBehind)
         check(r.lsps1 == Lsps1Offer.Offered && r.orderState == OrderState.Failed && r.orderWhy == OrderWhy.FeeAboveMax && r.orderFeeSats == 9_000L)
         check(r.lostFundingSales == listOf(4L, 9L) && r.lostFundingTotal == 70L) { r.lostFundingSales.toString() }
+
+        val populated = decodeResponse(unhex(SHOP_LIGHTNING_REPORT_V3_POPULATED_HEX)).let {
+            it.shopLightningState().also { _ -> it.end() }
+        }.report!!.receiving!!
+        check(populated.capturedAtUnix == 1_700_000_101L)
+        check(populated.chainHeight == 840_001L && populated.confirmationDepth == 3L)
+        check(populated.confirmedRoomMsat == 123_456_789L && populated.pendingOrUnknownChannels == 2)
+        check(populated.backupState == ReceivingBackup.Behind)
+        check(populated.strictPendingWrites == 4L && populated.backgroundPendingWrites == 5L)
+        check(populated.lastDeviceStoreUnix == 1_700_000_000L && populated.chainHealthy)
+        val absent = decodeResponse(unhex(SHOP_LIGHTNING_REPORT_V3_ABSENT_HEX)).let {
+            it.shopLightningState().also { _ -> it.end() }
+        }
+        check(absent.report?.receiving == null)
+        rejects("a receiving backup tag") {
+            val bad = unhex(SHOP_LIGHTNING_REPORT_V3_POPULATED_HEX).also { it[157] = 0xff.toByte() }
+            decodeResponse(bad).shopLightningState()
+        }
+        rejects("a truncated receiving snapshot") {
+            val bytes = unhex(SHOP_LIGHTNING_REPORT_V3_POPULATED_HEX)
+            decodeResponse(bytes.copyOf(bytes.size - 1)).shopLightningState()
+        }
+        rejects("trailing bytes after a receiving snapshot") {
+            val bytes = unhex(SHOP_LIGHTNING_REPORT_V3_POPULATED_HEX) + byteArrayOf(0)
+            decodeResponse(bytes).let { r -> r.shopLightningState().also { r.end() } }
+        }
         for ((tag, cause) in listOf(0 to NotOffered.Offered, 1 to NotOffered.SecondDeviceAway, 3 to NotOffered.NoUsableChannel, 4 to NotOffered.ProviderSilent)) {
-            val one = Writer().bool(false).bool(false).u32(0).u32(0).u8(0).u8(1).u64(1).u64(2).u64(3).u64(4).u64(5).u64(6).u8(tag).u8(0).u8(0).u8(0).u64(0).u32(0).u32(0).toByteArray()
+            val one = Writer().bool(false).bool(false).u32(0).u32(0).u8(0).u8(1).u64(1).u64(2).u64(3).u64(4).u64(5).u64(6).u8(tag).u8(0).u8(0).u8(0).u64(0).u32(0).u32(0).u8(0).toByteArray()
             val got = decodeResponse(header(0, one)).let { it.shopLightningState().also { _ -> it.end() } }
             check(got.report!!.notOffered == cause)
         }
         run {
-            val stopped = Writer().bool(false).bool(false).u32(0).u32(0).u8(0).u8(1).u64(1).u64(2).u64(3).u64(4).u64(5).u64(6).u8(0).u8(1).u8(4).u8(9).u64(7).u32(0).u32(0).toByteArray()
+            val stopped = Writer().bool(false).bool(false).u32(0).u32(0).u8(0).u8(1).u64(1).u64(2).u64(3).u64(4).u64(5).u64(6).u8(0).u8(1).u8(4).u8(9).u64(7).u32(0).u32(0).u8(0).toByteArray()
             val got = decodeResponse(header(0, stopped)).let { it.shopLightningState().also { _ -> it.end() } }
             check(got.report!!.orderState == OrderState.Failed && got.report!!.orderWhy == OrderWhy.Stopped && got.report!!.orderFeeSats == 7L)
         }
         rejects("a cause that is not defined") {
-            val bad = Writer().bool(false).bool(false).u32(0).u32(0).u8(0).u8(1).u64(1).u64(2).u64(3).u64(4).u64(5).u64(6).u8(5).u8(0).u8(0).u8(0).u64(0).u32(0).u32(0).toByteArray()
+            val bad = Writer().bool(false).bool(false).u32(0).u32(0).u8(0).u8(1).u64(1).u64(2).u64(3).u64(4).u64(5).u64(6).u8(5).u8(0).u8(0).u8(0).u64(0).u32(0).u32(0).u8(0).toByteArray()
             decodeResponse(header(0, bad)).shopLightningState()
         }
         for ((what, tags) in listOf("an offer" to listOf(3, 0, 0), "an order state" to listOf(0, 5, 0), "an order cause" to listOf(0, 0, 10))) {
             rejects("$what that is not defined") {
                 val bad = Writer().bool(false).bool(false).u32(0).u32(0).u8(0).u8(1).u64(1).u64(2).u64(3).u64(4).u64(5).u64(6).u8(0)
-                    .u8(tags[0]).u8(tags[1]).u8(tags[2]).u64(0).u32(0).u32(0).toByteArray()
+                    .u8(tags[0]).u8(tags[1]).u8(tags[2]).u64(0).u32(0).u32(0).u8(0).toByteArray()
                 decodeResponse(header(0, bad)).shopLightningState()
             }
         }

@@ -139,6 +139,8 @@ import org.openbmt.owner.NotOffered
 import org.openbmt.owner.ShopLightningAction
 import org.openbmt.owner.ShopLightningHeld
 import org.openbmt.owner.ShopLightningState
+import org.openbmt.owner.ReceivingBackup
+import org.openbmt.owner.ReceivingSnapshot
 
 /**
  * The tests of the pure parts of the owner app: its words, the setup text,
@@ -5595,8 +5597,18 @@ object AppModelTest {
         ok(ShopLightningModel.lostFundingNote(lost) == ShopLightningWords.lostFundingWhat && ShopLightningModel.lostFundingNote(null) == null, "SL-27: the page says what the list is")
         // SL-35: the room to receive is followed by the line that says a sweep does not give room back.
         ok(ShopLightningModel.lines(held, report).single { it.label == ShopLightningWords.roomLabel }.note == ShopLightningWords.roomNote, "SL-35: the room to receive carries the note about a sweep")
-        ok(ShopLightningModel.lines(held, null).none { it.note != null }, "SL-35: with no report there is no room shown and no note")
-        ok(ShopLightningModel.lines(held, lost).filter { it.note != null }.map { it.label } == listOf(ShopLightningWords.roomLabel), "SL-35: only the room has a note")
+        ok(ShopLightningModel.lines(held, null).none { it.label == ShopLightningWords.roomLabel }, "SL-35: with no report there is no legacy room line")
+        ok(ShopLightningModel.lines(held, lost).single { it.label == ShopLightningWords.roomLabel }.note == ShopLightningWords.roomNote, "SL-35: the legacy room line keeps its sweep note")
+        val snapshot = ReceivingSnapshot(1_000, 900_000, 3, 12_345_000, 2, ReceivingBackup.Behind, 1, 2, 990, true)
+        val recent = ShopLightningModel.receivingLines(snapshot, 1_000, 1_010).associate { it.label to it.value }
+        ok(recent[ShopLightningWords.confirmedRoomLabel] == Format.sats(12_345) && recent[ShopLightningWords.backupStateLabel] == ShopLightningWords.backupBehind, "a recent node snapshot shows confirmed room and backup lag")
+        ok(recent[ShopLightningWords.amountCheckLabel] == ShopLightningWords.amountCheckUnknown, "a receiving snapshot is not an amount-specific quote")
+        val stale = ShopLightningModel.receivingLines(snapshot, 1_000, 1_031).associate { it.label to it.value }
+        ok(stale[ShopLightningWords.backupStateLabel] == ShopLightningWords.backupUnknown && stale[ShopLightningWords.confirmedRoomLabel] == ShopLightningWords.receivingUnknown, "a stale snapshot leaves capacity and backup unknown")
+        val future = ShopLightningModel.receivingLines(snapshot, 1_000, 999).associate { it.label to it.value }
+        ok(future[ShopLightningWords.backupStateLabel] == ShopLightningWords.backupUnknown, "a future-dated snapshot leaves backup unknown")
+        val missing = ShopLightningModel.receivingLines(null, 1_000, 1_010).associate { it.label to it.value }
+        ok(missing[ShopLightningWords.confirmedRoomLabel] == ShopLightningWords.receivingUnknown && missing[ShopLightningWords.amountCheckLabel] == ShopLightningWords.amountCheckUnknown, "a missing snapshot or quote remains unknown")
         // SL-34: the suggestion is offered when there is one, and fills the cap field with its number.
         ok(ShopLightningModel.suggestionLine(null) == null, "SL-34: no suggestion, no line")
         ok(ShopLightningModel.suggestionLine(150_000)!!.contains(Format.sats(150_000)) && !ShopLightningModel.suggestionLine(150_000)!!.contains("{sats}"), "SL-34: the line shows the suggested amount")

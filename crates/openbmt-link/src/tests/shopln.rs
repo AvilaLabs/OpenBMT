@@ -782,6 +782,22 @@ fn report() -> LightningReport {
         order_fee_sats: 9_000,
         lost_funding_sales: Vec::new(),
         lost_funding_total: 0,
+        receiving: None,
+    }
+}
+
+fn receiving_snapshot(backup_state: ReceivingBackupState) -> ReceivingSnapshot {
+    ReceivingSnapshot {
+        captured_at_unix: 1_700_000_001,
+        chain_height: 900_000,
+        confirmation_depth: 3,
+        confirmed_room_msat: 2_500_000,
+        pending_or_unknown_channels: 2,
+        backup_state,
+        strict_pending_writes: 0,
+        background_pending_writes: 0,
+        last_device_store_unix: 1_700_000_000,
+        chain_healthy: true,
     }
 }
 
@@ -810,11 +826,11 @@ fn lk_84_the_report_round_trips_and_decodes_strictly() {
 }
 
 #[test]
-fn lk_84_the_report_is_five_u64_four_u16_a_u64_a_list_and_a_total_after_the_frame() {
+fn lk_84_the_report_v3_keeps_the_v2_fields_and_adds_an_optional_snapshot_marker() {
     let bytes = report().to_bytes();
-    assert_eq!(bytes.len(), 4 + 1 + 5 * 8 + 4 * 2 + 8 + 4 + 4);
+    assert_eq!(bytes.len(), 4 + 1 + 5 * 8 + 4 * 2 + 8 + 4 + 4 + 1);
     assert_eq!(&bytes[..4], b"OBM\x1f");
-    assert_eq!(bytes[4], 2);
+    assert_eq!(bytes[4], 3);
     assert_eq!(&bytes[5..13], &123_456u64.to_le_bytes());
     assert_eq!(&bytes[13..21], &4_000_000u64.to_le_bytes());
     assert_eq!(&bytes[21..29], &2_500u64.to_le_bytes());
@@ -826,7 +842,8 @@ fn lk_84_the_report_is_five_u64_four_u16_a_u64_a_list_and_a_total_after_the_fram
     assert_eq!(&bytes[51..53], &1u16.to_le_bytes());
     assert_eq!(&bytes[53..61], &9_000u64.to_le_bytes());
     assert_eq!(&bytes[61..65], &0u32.to_le_bytes());
-    assert_eq!(&bytes[65..], &0u32.to_le_bytes());
+    assert_eq!(&bytes[65..69], &0u32.to_le_bytes());
+    assert_eq!(bytes[69], 0);
 }
 
 #[test]
@@ -880,6 +897,51 @@ fn lk_84_the_lsps1_and_order_facts_round_trip_and_decode_strictly() {
 }
 
 #[test]
+fn receiving_snapshot_is_optional_bounded_and_strict() {
+    for backup_state in [
+        ReceivingBackupState::Unknown,
+        ReceivingBackupState::Away,
+        ReceivingBackupState::Behind,
+        ReceivingBackupState::CaughtUp,
+    ] {
+        let snapshot = receiving_snapshot(backup_state);
+        let r = LightningReport {
+            receiving: Some(snapshot),
+            ..report()
+        };
+        let bytes = r.to_bytes();
+        assert_eq!(LightningReport::from_bytes(&bytes).unwrap(), r);
+        strict(
+            &bytes,
+            LightningReport::from_bytes,
+            LightningReport::to_bytes,
+        );
+        assert!(LightningReport::from_bytes(&bytes[..bytes.len() - 1]).is_err());
+    }
+
+    let bytes = LightningReport {
+        receiving: Some(receiving_snapshot(ReceivingBackupState::CaughtUp)),
+        ..report()
+    }
+    .to_bytes();
+    let mut bad = bytes.clone();
+    bad[96] = 255; // unknown backup state
+    assert!(LightningReport::from_bytes(&bad).is_err());
+    let mut bad = bytes.clone();
+    bad[94..96].copy_from_slice(&4097u16.to_le_bytes());
+    assert!(LightningReport::from_bytes(&bad).is_err());
+    let mut bad = bytes.clone();
+    bad[82..86].copy_from_slice(&0u32.to_le_bytes());
+    assert!(LightningReport::from_bytes(&bad).is_err());
+    let mut bad = bytes.clone();
+    bad[113] = 2; // noncanonical boolean
+    assert!(LightningReport::from_bytes(&bad).is_err());
+    let mut bad = bytes;
+    bad[97..101].copy_from_slice(&1u32.to_le_bytes()); // caught up with pending write
+    assert!(LightningReport::from_bytes(&bad).is_err());
+}
+
+#[test]
 fn lk_84_a_cause_without_a_failure_a_failure_without_a_cause_and_a_fee_without_an_order_are_refused(
 ) {
     let bad = |r: LightningReport| LightningReport::from_bytes(&r.to_bytes()).is_err();
@@ -918,13 +980,23 @@ fn lk_84_a_report_of_version_1_still_reads_with_the_new_facts_unknown() {
     assert_eq!(r.order_state, OrderState::None);
     assert_eq!(r.order_why, OrderWhy::None);
     assert_eq!(r.order_fee_sats, 0);
-    // Version 1 has nothing after its six fields, and version 3 is not read.
+    // Version 1 has nothing after its six fields, and version 3 with tail is
+    // not read as version 1.
     let mut long = v1.clone();
     long.push(0);
     assert!(LightningReport::from_bytes(&long).is_err());
-    let mut v3 = report().to_bytes();
-    v3[4] = 3;
+    let mut v3 = LightningReport {
+        receiving: Some(receiving_snapshot(ReceivingBackupState::CaughtUp)),
+        ..report()
+    }
+    .to_bytes();
+    v3[4] = 1;
     assert!(LightningReport::from_bytes(&v3).is_err());
+    // Version 2 still reads with the advisory snapshot unknown.
+    let mut v2 = report().to_bytes();
+    v2.pop();
+    v2[4] = 2;
+    assert_eq!(LightningReport::from_bytes(&v2).unwrap().receiving, None);
     // A version 2 report cut short is refused.
     assert!(LightningReport::from_bytes(&report().to_bytes()[..47]).is_err());
 }
@@ -965,43 +1037,45 @@ fn lk_84_a_report_is_no_record_and_travels_in_the_main_count() {
 }
 
 #[test]
-fn sl_27_a_report_carries_all_five_facts_in_the_one_version_2() {
+fn sl_27_a_report_carries_all_five_facts_in_the_one_version_3() {
     let r = LightningReport {
         lost_funding_sales: vec![3, 9, 4_000_000_000],
         lost_funding_total: 3,
         ..report()
     };
     let bytes = r.to_bytes();
-    assert_eq!(bytes[4], 2);
-    assert_eq!(bytes.len(), 4 + 1 + 5 * 8 + 4 * 2 + 8 + 4 + 3 * 4 + 4);
+    assert_eq!(bytes[4], 3);
+    assert_eq!(bytes.len(), 4 + 1 + 5 * 8 + 4 * 2 + 8 + 4 + 3 * 4 + 4 + 1);
     assert_eq!(&bytes[61..65], &3u32.to_le_bytes());
     assert_eq!(&bytes[65..69], &3u32.to_le_bytes());
     assert_eq!(&bytes[69..73], &9u32.to_le_bytes());
     assert_eq!(&bytes[73..77], &4_000_000_000u32.to_le_bytes());
-    assert_eq!(&bytes[77..], &3u32.to_le_bytes());
+    assert_eq!(&bytes[77..81], &3u32.to_le_bytes());
+    assert_eq!(bytes[81], 0);
     assert_eq!(LightningReport::from_bytes(&bytes).unwrap(), r);
     strict(
         &bytes,
         LightningReport::from_bytes,
         LightningReport::to_bytes,
     );
-    // The encoder always writes version 2, with no sale as a count of 0 and a
-    // total of 0.
-    assert_eq!(report().to_bytes()[4], 2);
-    // Version 1 still reads: the new facts are unknown or empty.
+    // The encoder writes version 3, with no snapshot when its marker is 0.
+    assert_eq!(report().to_bytes()[4], 3);
+    let mut v2 = bytes[..81].to_vec();
+    v2[4] = 2;
+    let r2 = LightningReport::from_bytes(&v2).unwrap();
+    assert_eq!(r2.receiving, None);
+    // Version 1 still reads: the newer facts are unknown or empty.
     let mut v1 = bytes[..47].to_vec();
     v1[4] = 1;
     let r1 = LightningReport::from_bytes(&v1).unwrap();
     assert_eq!(r1.lsps1, Lsps1Offer::Unknown);
+    assert_eq!(r1.receiving, None);
     assert_eq!(r1.order_state, OrderState::None);
     assert!(r1.lost_funding_sales.is_empty());
     assert_eq!(r1.lost_funding_total, 0);
-    // Version 1 with the version 2 tail behind it, and version 3, are refused.
+    // Version 1 with the version 2 tail behind it is refused.
     let mut b = bytes.clone();
     b[4] = 1;
-    assert!(LightningReport::from_bytes(&b).is_err());
-    let mut b = bytes.clone();
-    b[4] = 3;
     assert!(LightningReport::from_bytes(&b).is_err());
     // The list: a count past the limit or past the bytes, sales that do not
     // rise or repeat, bytes behind the total, a list or a total cut short.
@@ -1013,6 +1087,7 @@ fn sl_27_a_report_carries_all_five_facts_in_the_one_version_2() {
             b.extend_from_slice(&s.to_le_bytes());
         }
         b.extend_from_slice(&total.to_le_bytes());
+        b.push(0);
         b
     };
     assert!(LightningReport::from_bytes(&with(0, &[], 0)).is_ok());

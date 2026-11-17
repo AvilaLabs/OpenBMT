@@ -6,6 +6,8 @@ import org.openbmt.owner.ShopLightningAction
 import org.openbmt.owner.ShopLightningEditArgs
 import org.openbmt.owner.ShopLightningHeld
 import org.openbmt.owner.ShopLightningState
+import org.openbmt.owner.ReceivingBackup
+import org.openbmt.owner.ReceivingSnapshot
 
 /**
  * The Shop Lightning page (`docs/SHOP-LIGHTNING-RULES.md` SL-45, SL-76 to SL-78): which page the state calls for, the
@@ -127,7 +129,11 @@ object ShopLightningModel {
         ShopLightningWords.lostFundingWhat.takeIf { report != null && report.lostFundingSales.isNotEmpty() }
 
     /** The facts of SL-45 as labelled lines: the settings' cap and provider, and the newest report's numbers (SL-78). */
-    fun lines(held: ShopLightningHeld, report: LightningReport?): List<Line> {
+    fun lines(
+        held: ShopLightningHeld,
+        report: LightningReport?,
+        nowUnix: Long = System.currentTimeMillis() / 1000,
+    ): List<Line> {
         val out = ArrayList<Line>()
         out.add(Line(ShopLightningWords.counterLabel, OwnerModel.counterLabel(held.counter)))
         out.add(Line(ShopLightningWords.nodeLabel, short(hex(held.nodeId))))
@@ -136,6 +142,9 @@ object ShopLightningModel {
         out.add(Line(ShopLightningWords.feeLabel, Format.sats(held.maxOpeningFeeSats)))
         out.add(Line(ShopLightningWords.boxLabel, short(hex(held.secondDevice))))
         if (report == null) {
+            out.add(Line(ShopLightningWords.confirmedRoomLabel, ShopLightningWords.receivingUnknown))
+            out.add(Line(ShopLightningWords.backupStateLabel, ShopLightningWords.backupUnknown, ShopLightningWords.receivingUnknown))
+            out.add(Line(ShopLightningWords.amountCheckLabel, ShopLightningWords.amountCheckUnknown, ShopLightningWords.receivingQuote))
             out.add(Line(ShopLightningWords.cameLabel, ShopLightningWords.noReport))
             return out
         }
@@ -152,11 +161,56 @@ object ShopLightningModel {
         out.add(Line(ShopLightningWords.lastStoredLabel, if (report.lastStoredAt == 0L) ShopLightningWords.neverStored else Format.localTime(report.lastStoredAt)))
         out.add(Line(ShopLightningWords.lastSweepLabel, if (report.lastSweepAt == 0L) ShopLightningWords.noSweep else Format.localTime(report.lastSweepAt)))
         out.add(Line(ShopLightningWords.whyLabel, ShopLightningWords.cause(report.notOffered)))
+        out.addAll(receivingLines(report.receiving, report.takenAt, nowUnix))
         // SL-27: the sales paid through a channel whose funding was lost, as the numbers the counter gave.
         if (report.lostFundingSales.isNotEmpty()) out.add(Line(ShopLightningWords.lostFundingLabel, report.lostFundingSales.joinToString(", ")))
         // Past the most the report lists, it also says how many in all.
         if (report.lostFundingTotal > report.lostFundingSales.size) out.add(Line(ShopLightningWords.lostFundingTotalLabel, report.lostFundingTotal.toString()))
         out.add(Line(ShopLightningWords.cameLabel, Format.localTime(report.takenAt)))
         return out
+    }
+
+    /** A missing, stale, or future-dated snapshot remains unknown. The
+     * counter's wall clock is shown as provenance, never treated as proof of
+     * synchronized time or a route. */
+    fun receivingLines(snapshot: ReceivingSnapshot?, reportTakenAt: Long, nowUnix: Long): List<Line> {
+        if (snapshot == null || reportTakenAt <= 0 || snapshot.capturedAtUnix <= 0 ||
+            nowUnix < reportTakenAt || nowUnix < snapshot.capturedAtUnix ||
+            nowUnix - reportTakenAt > 30 || nowUnix - snapshot.capturedAtUnix > 30
+        ) {
+            return listOf(
+                Line(ShopLightningWords.confirmedRoomLabel, ShopLightningWords.receivingUnknown),
+                Line(ShopLightningWords.backupStateLabel, ShopLightningWords.backupUnknown, ShopLightningWords.receivingStale),
+                Line(ShopLightningWords.amountCheckLabel, ShopLightningWords.amountCheckUnknown, ShopLightningWords.receivingQuote),
+            )
+        }
+        val backup = when (snapshot.backupState) {
+            ReceivingBackup.Unknown -> ShopLightningWords.backupUnknown
+            ReceivingBackup.Away -> ShopLightningWords.backupAway
+            ReceivingBackup.Behind -> ShopLightningWords.backupBehind
+            ReceivingBackup.CaughtUp -> ShopLightningWords.backupCaughtUp
+        }
+        val room = Format.sats(snapshot.confirmedRoomMsat / 1000)
+        return listOf(
+            Line(ShopLightningWords.confirmedRoomLabel, room, ShopLightningWords.receivingCapacity),
+            Line(ShopLightningWords.backupStateLabel, backup),
+            Line(
+                ShopLightningWords.backupPendingLabel,
+                (snapshot.strictPendingWrites + snapshot.backgroundPendingWrites).toString(),
+            ),
+            Line(
+                ShopLightningWords.lastDeviceStoreSnapshotLabel,
+                if (snapshot.lastDeviceStoreUnix == 0L) ShopLightningWords.neverStored else Format.localTime(snapshot.lastDeviceStoreUnix),
+            ),
+            Line(ShopLightningWords.pendingChannelsLabel, snapshot.pendingOrUnknownChannels.toString()),
+            Line(ShopLightningWords.confirmationDepthLabel, snapshot.confirmationDepth.toString()),
+            Line(ShopLightningWords.snapshotTimeLabel, Format.localTime(snapshot.capturedAtUnix), ShopLightningWords.receivingClock),
+            Line(ShopLightningWords.chainHealthLabel, if (snapshot.chainHealthy) ShopLightningWords.chainHealthy else ShopLightningWords.snapshotChainBehind),
+            Line(
+                ShopLightningWords.chainAtLabel,
+                if (snapshot.chainHeight == 0L) ShopLightningWords.chainUnknown else snapshot.chainHeight.toString(),
+            ),
+            Line(ShopLightningWords.amountCheckLabel, ShopLightningWords.amountCheckUnknown, ShopLightningWords.receivingQuote),
+        )
     }
 }

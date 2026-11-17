@@ -31,6 +31,7 @@ import java.io.IOException
 import java.math.BigDecimal
 import java.math.BigInteger
 import java.math.RoundingMode
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -63,6 +64,18 @@ open class CheckoutActivity : Activity() {
     private val main = Handler(Looper.getMainLooper())
     private lateinit var scan: ScanFlow
     private lateinit var ledger: CheckoutLedger
+    private lateinit var catalog: CheckoutCatalog
+    private lateinit var cashSessions: CheckoutCashSessionStore
+    private lateinit var inventory: CheckoutInventory
+    private lateinit var cashController: CheckoutCashController
+    private lateinit var inventoryController: CheckoutInventoryController
+    private lateinit var reportController: CheckoutReportController
+    private var catalogReady = false
+    private var cashSessionsReady = false
+    private var inventoryReady = false
+    private var catalogFault: String? = null
+    private var cashSessionsFault: String? = null
+    private var inventoryFault: String? = null
     private lateinit var pairingFile: SealedFile
     private lateinit var ui: Ui
     private val nodeDir by lazy { File(noBackupFilesDir, "counter-node") }
@@ -97,13 +110,15 @@ open class CheckoutActivity : Activity() {
     private var historyTenderFilter: HistoryTender? = null
     private var historyStatusFilter: HistoryStatus? = null
     private val cartQuantities = linkedMapOf<String, Int>()
-
-    private data class CatalogProduct(val id: String, val name: String, val unitMinor: Long)
-
-    private val sampleCatalog = listOf(
-        CatalogProduct("latte", "Latte", 550L),
-        CatalogProduct("bagel", "Bagel", 450L),
-    )
+    private data class CartSelection(val lineId: String, val productId: String, val variantId: String,
+                                    val productVersion: Long, val name: String, val unitMinor: Long, val quantity: Int,
+                                    val modifiers: List<SelectedModifier> = emptyList())
+    private val cartSelections = linkedMapOf<String, CartSelection>()
+    private var catalogSearchDraft = ""
+    private var catalogWriteBlocked = false
+    private var discountDraft = ""
+    private var taxRateDraft = ""
+    private var tipDraft = ""
 
     /** The plain APK has no Square class on its class path. The Sandbox project overrides this. */
     protected open fun createCardCheckoutBridge(): CardCheckoutBridge? = null
@@ -123,11 +138,41 @@ open class CheckoutActivity : Activity() {
             // Commit the local event epoch before serving checkout UI or accepting mutations.
             ledger.initializeEvents()
             pairing = pairingFile.load()
-            restoreSavedUiState(savedInstanceState)
         } catch (e: Exception) {
             show("Saved test data needs checking", "No saved checkout data was reset. A startup write may have an uncertain outcome. Close and reopen this test app, then inspect Sales before continuing. If the problem remains, report the storage fault.", listOf("Close test app" to { finish() }), "Details: ${safeDetail(e)}")
             return
         }
+        val noBackup = noBackupFilesDir
+        val renderer: (View, List<View>, List<Button>) -> Unit = { bar, body, actions -> showUiPage(bar, body, actions) }
+        try {
+            catalog = CheckoutCatalog(AndroidLedgerStorage(noBackup, CATALOG_FILE))
+            seedSampleCatalog()
+            catalogReady = true
+        } catch (e: Exception) {
+            catalogFault = safeDetail(e)
+            catalogWriteBlocked = catalogFault!!.contains("uncertain", true) || catalogFault!!.contains("poisoned", true)
+        }
+        try {
+            cashSessions = CheckoutCashSessionStore(AndroidLedgerStorage(noBackup, CASH_SESSIONS_FILE))
+            cashController = CheckoutCashController(this, cashSessions, ledger, renderer) { showHome() }
+            cashSessionsReady = true
+        } catch (e: Exception) {
+            cashSessionsFault = safeDetail(e)
+        }
+        try {
+            inventory = CheckoutInventory(AndroidLedgerStorage(noBackup, INVENTORY_FILE))
+            inventoryReady = true
+        } catch (e: Exception) {
+            inventoryFault = safeDetail(e)
+        }
+        if (catalogReady && inventoryReady) try {
+            inventoryController = CheckoutInventoryController(this, catalog, inventory, ledger, renderer) { showCatalogManagement(true) }
+        } catch (e: Exception) {
+            inventoryReady = false
+            inventoryFault = safeDetail(e)
+        }
+        reportController = CheckoutReportController(this, ui, ledger, renderer) { showHome() }
+        restoreSavedUiState(savedInstanceState)
         if (pairing == null) consumePrivateFixture()
         if (pairing == null) showSetup() else {
             val savedReceipt = receiptToResume
@@ -167,6 +212,23 @@ open class CheckoutActivity : Activity() {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putStringArrayList(CART_IDS_KEY, ArrayList(cartQuantities.keys))
         outState.putIntArray(CART_QUANTITIES_KEY, cartQuantities.values.toIntArray())
+        val savedLines = cartSelections.values.toList()
+        outState.putStringArrayList(CART_LINE_IDS_KEY, ArrayList(savedLines.map { it.lineId }))
+        outState.putStringArrayList(CART_PRODUCT_IDS_KEY, ArrayList(savedLines.map { it.productId }))
+        outState.putStringArrayList(CART_VARIANT_IDS_KEY, ArrayList(savedLines.map { it.variantId }))
+        outState.putLongArray(CART_PRODUCT_VERSIONS_KEY, savedLines.map { it.productVersion }.toLongArray())
+        outState.putStringArrayList(CART_LINE_NAMES_KEY, ArrayList(savedLines.map { it.name }))
+        outState.putLongArray(CART_LINE_PRICES_KEY, savedLines.map { it.unitMinor }.toLongArray())
+        outState.putIntArray(CART_LINE_QUANTITIES_KEY, savedLines.map { it.quantity }.toIntArray())
+        val savedModifiers = savedLines.flatMap { line -> line.modifiers.map { line.lineId to it } }
+        outState.putStringArrayList(CART_MODIFIER_LINE_IDS_KEY, ArrayList(savedModifiers.map { it.first }))
+        outState.putStringArrayList(CART_MODIFIER_IDS_KEY, ArrayList(savedModifiers.map { it.second.modifierId }))
+        outState.putStringArrayList(CART_MODIFIER_NAMES_KEY, ArrayList(savedModifiers.map { it.second.name }))
+        outState.putLongArray(CART_MODIFIER_PRICES_KEY, savedModifiers.map { it.second.amountMinor }.toLongArray())
+        outState.putString(CATALOG_SEARCH_KEY, catalogSearchDraft)
+        outState.putString(DISCOUNT_DRAFT_KEY, discountDraft)
+        outState.putString(TAX_DRAFT_KEY, taxRateDraft)
+        outState.putString(TIP_DRAFT_KEY, tipDraft)
         outState.putString(RECEIPT_KEY, receiptToResume)
         outState.putString(HISTORY_TEXT_KEY, historyQueryText)
         outState.putString(HISTORY_TENDER_KEY, historyTenderFilter?.name)
@@ -175,18 +237,72 @@ open class CheckoutActivity : Activity() {
     }
 
     private fun restoreSavedUiState(saved: Bundle?) {
+        discountDraft = saved?.getString(DISCOUNT_DRAFT_KEY).orEmpty().take(12)
+        taxRateDraft = saved?.getString(TAX_DRAFT_KEY).orEmpty().take(12)
+        tipDraft = saved?.getString(TIP_DRAFT_KEY).orEmpty().take(12)
         receiptToResume = saved?.getString(RECEIPT_KEY)
         historyQueryText = saved?.getString(HISTORY_TEXT_KEY).orEmpty().take(128)
         historyTenderFilter = saved?.getString(HISTORY_TENDER_KEY)?.let { value -> runCatching { HistoryTender.valueOf(value) }.getOrNull() }
         historyStatusFilter = saved?.getString(HISTORY_STATUS_KEY)?.let { value -> runCatching { HistoryStatus.valueOf(value) }.getOrNull() }
-        val ids = saved?.getStringArrayList(CART_IDS_KEY) ?: return
-        val quantities = saved.getIntArray(CART_QUANTITIES_KEY) ?: return
-        cartQuantities.clear()
-        for (index in 0 until minOf(ids.size, quantities.size)) {
-            val id = ids[index]
-            val quantity = quantities[index]
-            if (sampleCatalog.any { it.id == id } && quantity in 1..MAX_CART_QUANTITY) cartQuantities[id] = quantity
+        val ids = saved?.getStringArrayList(CART_IDS_KEY)
+        val quantities = saved?.getIntArray(CART_QUANTITIES_KEY)
+        if (ids != null && quantities != null) {
+            cartQuantities.clear()
+            for (index in 0 until minOf(ids.size, quantities.size)) {
+                val id = ids[index]
+                val quantity = quantities[index]
+                if ((id == "latte" || id == "bagel") && quantity in 1..MAX_CART_QUANTITY) cartQuantities[id] = quantity
+            }
         }
+        saved?.let(::restoreFrozenCart)
+        migrateLegacySampleCart()
+        catalogSearchDraft = saved?.getString(CATALOG_SEARCH_KEY).orEmpty().take(128)
+    }
+
+    private fun seedSampleCatalog() {
+        val existing = catalog.listProducts(includeArchived = true).map { it.productId }.toSet()
+        val seedIds = setOf("latte", "bagel")
+        if (existing.isNotEmpty() && !seedIds.containsAll(existing)) return
+        if ("latte" !in existing) catalog.createProduct("seed-latte-v1", "latte", "Latte", listOf(CatalogVariant("default", "Regular", 550L)))
+        if ("bagel" !in existing) catalog.createProduct("seed-bagel-v1", "bagel", "Bagel", listOf(CatalogVariant("default", "Regular", 450L)))
+    }
+
+    private fun restoreFrozenCart(saved: Bundle) {
+        val lineIds = saved.getStringArrayList(CART_LINE_IDS_KEY) ?: return
+        val productIds = saved.getStringArrayList(CART_PRODUCT_IDS_KEY) ?: return
+        val variantIds = saved.getStringArrayList(CART_VARIANT_IDS_KEY) ?: return
+        val versions = saved.getLongArray(CART_PRODUCT_VERSIONS_KEY) ?: return
+        val names = saved.getStringArrayList(CART_LINE_NAMES_KEY) ?: return
+        val prices = saved.getLongArray(CART_LINE_PRICES_KEY) ?: return
+        val quantities = saved.getIntArray(CART_LINE_QUANTITIES_KEY) ?: return
+        val modifierLines = saved.getStringArrayList(CART_MODIFIER_LINE_IDS_KEY).orEmpty()
+        val modifierIds = saved.getStringArrayList(CART_MODIFIER_IDS_KEY).orEmpty()
+        val modifierNames = saved.getStringArrayList(CART_MODIFIER_NAMES_KEY).orEmpty()
+        val modifierPrices = saved.getLongArray(CART_MODIFIER_PRICES_KEY) ?: LongArray(0)
+        val modifiersByLine = linkedMapOf<String, MutableList<SelectedModifier>>()
+        for (i in 0 until minOf(modifierLines.size, modifierIds.size, modifierNames.size, modifierPrices.size, MAX_CART_LINES * MAX_SAVED_MODIFIERS)) {
+            if (modifierIds[i].isNotBlank() && modifierNames[i].isNotBlank() && modifierPrices[i] >= 0) {
+                modifiersByLine.getOrPut(modifierLines[i]) { mutableListOf() }.add(SelectedModifier(modifierIds[i], modifierNames[i].take(120), modifierPrices[i]))
+            }
+        }
+        val count = minOf(lineIds.size, productIds.size, variantIds.size, versions.size, names.size, prices.size, quantities.size, MAX_CART_LINES)
+        cartSelections.clear()
+        for (i in 0 until count) {
+            if (lineIds[i].isNotBlank() && productIds[i].isNotBlank() && variantIds[i].isNotBlank() && names[i].isNotBlank() && prices[i] >= 0 && quantities[i] in 1..MAX_CART_QUANTITY) {
+                cartSelections[lineIds[i]] = CartSelection(lineIds[i], productIds[i], variantIds[i], versions[i], names[i].take(320), prices[i], quantities[i], modifiersByLine[lineIds[i]].orEmpty().take(MAX_SAVED_MODIFIERS))
+            }
+        }
+        cartQuantities.clear()
+    }
+
+    private fun migrateLegacySampleCart() {
+        if (!catalogReady || cartSelections.isNotEmpty() || cartQuantities.isEmpty()) return
+        for ((productId, quantity) in cartQuantities.toMap()) {
+            val product = catalog.getProduct(productId) ?: continue
+            val variant = product.variants.firstOrNull() ?: continue
+            addCatalogSelection(product, variant, amount = quantity)
+        }
+        cartQuantities.clear()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -197,6 +313,12 @@ open class CheckoutActivity : Activity() {
     @Deprecated("The Android document picker returns its URI here on the minimum supported API.")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (::reportController.isInitialized && reportController.onActivityResult(requestCode, resultCode, data)) {
+            // The picker can stop/restart the Activity while a counter startup is pending.
+            // Reinstall the report page and advance navigation so that startup cannot replace it with home.
+            reportController.show()
+            return
+        }
         if (requestCode != PICK_REGTEST_RECORD || resultCode != RESULT_OK) return
         val uri = data?.data ?: return
         try {
@@ -551,80 +673,128 @@ open class CheckoutActivity : Activity() {
         if (info.settings.currency == "USD") showCatalog(healthy) else showManualCheckout(healthy)
     }
 
-    private fun showCatalog(healthy: Boolean) {
+    private fun showCatalog(healthy: Boolean, query: String = catalogSearchDraft) {
+        if (!catalogReady || catalogWriteBlocked) return showManualCheckout(healthy, catalogUnavailableMessage())
+        catalogSearchDraft = query.take(128)
         val body = ArrayList<View>()
         body.add(ui.receipt(listOf(
-            ReceiptLine("Sample catalog · USD", LineStyle.Strong),
+            ReceiptLine("Saved local catalog · USD", LineStyle.Strong),
             ReceiptLine("TEST ONLY · Regtest · no real funds or handover", LineStyle.Small),
         )))
-        body.add(ui.text("Sample items only. No provider catalog or inventory is connected.", 14f, colour = ui.pal.secondary))
+        body.add(ui.text("Local saved items", 13f, colour = ui.pal.secondary))
         if (hasUnresolvedSale()) body.add(ui.receipt(listOf(
-            ReceiptLine("Earlier sale needs follow-up", LineStyle.Strong),
-            ReceiptLine("It remains in Sales with its original attempts and evidence. This basket creates a separate sale.", LineStyle.Small),
+            ReceiptLine("Earlier payment needs review. Open Sales.", LineStyle.Strong),
         )))
-        for (product in sampleCatalog) {
-            val quantity = cartQuantities[product.id] ?: 0
-            body.add(ui.receipt(listOf(
-                ReceiptLine(product.name, LineStyle.Strong),
-                ReceiptLine("${formatAmount(product.unitMinor, "USD")} each · quantity $quantity"),
-            )))
+        val searchField = ui.field("Search items or identifiers")
+        searchField.setSingleLine(true)
+        searchField.setText(catalogSearchDraft)
+        val searchRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        searchRow.addView(searchField, LinearLayout.LayoutParams(0, -2, 1f).also { it.rightMargin = ui.px(6) })
+        searchRow.addView(ui.button("Search", ButtonKind.Secondary) { showCatalog(healthy, searchField.text.toString()) }, LinearLayout.LayoutParams(-2, -2))
+        searchRow.addView(ui.button("Add code", ButtonKind.Secondary) { lookupCatalogCode(searchField.text.toString(), healthy) }, LinearLayout.LayoutParams(-2, -2))
+        body.add(searchRow)
+        val products = try {
+            if (catalogSearchDraft.isBlank()) catalog.listProducts().take(MAX_MANAGE_PRODUCTS) else catalog.search(catalogSearchDraft)
+        } catch (e: Exception) { return showCatalogBlocked(safeDetail(e)) }
+        if (products.isEmpty()) body.add(ui.text("No matching saved items.", 14f, colour = ui.pal.secondary))
+        for (product in products) {
+            body.add(ui.receipt(listOf(ReceiptLine(product.name, LineStyle.Strong))))
+            for (variant in product.variants) {
+                val quantity = cartSelections.values.filter { it.productId == product.productId && it.variantId == variant.variantId }.sumOf { it.quantity }
+                body.add(ui.receipt(listOf(
+                    ReceiptLine("${variant.name} · ${formatAmount(variant.priceMinor, "USD")} each", LineStyle.Strong),
+                    ReceiptLine(listOfNotNull(variant.sku?.let { "SKU $it" }, variant.barcode?.let { "Barcode $it" }, "In basket $quantity", if (product.modifiers.isNotEmpty()) "Options" else null).joinToString(" · ")),
+                )))
             val controls = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
             val removeButton = ui.button("Remove", ButtonKind.Secondary) {
-                val current = cartQuantities[product.id] ?: 0
-                if (current <= 1) cartQuantities.remove(product.id) else cartQuantities[product.id] = current - 1
-                showCatalog(healthy)
+                    removeCatalogSelection(product.productId, variant.variantId)
+                    showCatalog(healthy)
             }
             removeButton.isEnabled = quantity > 0
             controls.addView(removeButton, LinearLayout.LayoutParams(0, -2, 1f).also { it.rightMargin = ui.px(6) })
             controls.addView(ui.button("Add", ButtonKind.Primary) {
-                val current = cartQuantities[product.id] ?: 0
-                if (current >= MAX_CART_QUANTITY) {
-                    Toast.makeText(this, "Maximum quantity is $MAX_CART_QUANTITY per item", Toast.LENGTH_SHORT).show()
-                } else {
-                    cartQuantities[product.id] = current + 1
+                    addCatalogSelection(product, variant)
                     showCatalog(healthy)
-                }
             }, LinearLayout.LayoutParams(0, -2, 1f).also { it.leftMargin = ui.px(6) })
             body.add(controls)
+            }
         }
         val total = try { cartTotalMinor() } catch (_: ArithmeticException) {
-            return showHomeWithError("The sample basket total is outside the supported range.")
+            return showHomeWithError("The saved basket total is outside the supported range.")
         }
+        val cartCount = cartSelections.values.sumOf { it.quantity }
         body.add(ui.facts(listOf(
-            "Items" to cartQuantities.values.sum().toString(),
+            "Items" to cartCount.toString(),
             "Total" to formatAmount(total, "USD"),
         )))
         val statusView = ui.text(latestCounterLine, 13f, colour = ui.pal.secondary)
         body.add(statusView)
         val review = ui.primary("Review basket · ${formatAmount(total, "USD")}") { showCartReview(healthy) }
-        review.isEnabled = cartQuantities.isNotEmpty()
+        review.isEnabled = cartSelections.isNotEmpty()
         val actions = mutableListOf(
             review,
-            ui.secondary("Manual amount") { showManualCheckout(healthy) },
             ui.quiet("Sales and receipts") { showSales() },
+            ui.secondary("Shop tools") { showShopTools(healthy) },
         )
-        showUiPage(ui.bar("Checkout", sub = "Sample items", logo = true, gear = { showAbout() }), body, actions)
+        showUiPage(ui.bar("Checkout", sub = "Regtest · local items", logo = true, gear = { showAbout() }), body, actions)
         homeStatusView = statusView
         homePrimaryButton = review
-        homePrimaryAllowed = cartQuantities.isNotEmpty()
+        homePrimaryAllowed = cartSelections.isNotEmpty()
+    }
+
+    private fun showShopTools(healthy: Boolean) {
+        val body = arrayListOf<View>(
+            ui.text("TEST ONLY · local app data · no real funds", 14f, bold = true),
+            ui.text("No provider catalog sync, camera or physical scanner, authenticated staff role, or production payment processing is connected. Inventory counts are configured separately from item prices.", 13f, colour = ui.pal.secondary),
+            ui.button("Manual amount") { showManualCheckout(healthy) },
+            ui.button("Manage items") { showCatalogManagement(healthy) },
+            ui.button("Local inventory · test only") { showInventoryStock() },
+            ui.button("Cash sessions · test only") { showCashSessions() },
+            ui.button("Reports · local ledger") { reportController.show() },
+        )
+        showUiPage(ui.bar("Shop tools", back = { showCatalog(healthy) }), body,
+            listOf(ui.secondary("Back to checkout") { showCatalog(healthy) }))
     }
 
     private fun showCartReview(healthy: Boolean) {
-        if (cartQuantities.isEmpty()) return showCatalog(healthy)
+        if (cartSelections.isEmpty()) return showCatalog(healthy)
+        if (cartSelections.size > MAX_CART_LINES || cartSelections.values.any { it.quantity !in 1..MAX_CART_QUANTITY })
+            return showHomeWithError("The saved basket exceeds supported line or quantity limits.")
         val items = cartItemsSnapshot()
-        val total = checkedItemsTotal(items)
+        checkedItemsTotal(items) // Validate the current cart before presenting editable adjustments.
         val body = ArrayList<View>()
         body.add(ui.text("Review the basket before creating its saved sale.", 15f))
-        body.add(ui.receipt(items.map { item ->
-            ReceiptLine("${item.name} · ${item.quantity} × ${formatAmount(item.unitMinor, "USD")} = ${formatAmount(Math.multiplyExact(item.unitMinor, item.quantity.toLong()), "USD")}")
-        }))
-        body.add(ui.facts(listOf("Total" to formatAmount(total, "USD"))))
-        body.add(ui.text("The item names, unit prices and quantities will be saved with this receipt.", 13f, colour = ui.pal.secondary))
-        val charge = ui.primary("Charge once · choose payment") {
-            confirmSaleCreation(total, "USD", items)
+        body.add(ui.receipt(cartReviewReceiptLines()))
+        body.add(ui.text("Explicit order adjustments · test merchant settings only. Tax is one exclusive flat rate entered by the merchant; no jurisdiction lookup or automatic tax calculation.", 13f, colour = ui.pal.secondary))
+        val discount = reviewAmountField("Order discount (USD)", discountDraft)
+        val tax = reviewPercentField("Merchant tax rate (%)", taxRateDraft)
+        val tip = reviewAmountField("Optional tip (USD)", tipDraft)
+        body.add(discount); body.add(tax); body.add(tip)
+        val pricingView = ui.text("", 14f)
+        body.add(pricingView)
+        val updateDrafts = {
+            discountDraft = discount.text.toString().take(12)
+            taxRateDraft = tax.text.toString().take(12)
+            tipDraft = tip.text.toString().take(12)
+            updatePricingPreview(discountDraft, taxRateDraft, tipDraft, pricingView)
+        }
+        listOf(discount, tax, tip).forEach { field -> field.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = updateDrafts()
+            override fun afterTextChanged(s: Editable?) = Unit
+        }) }
+        updatePricingPreview(discountDraft, taxRateDraft, tipDraft, pricingView)
+        val charge = ui.primary("Save priced sale · choose payment") {
+            try {
+                val pricing = freezeCartPricing(discountDraft, taxRateDraft, tipDraft)
+                if (pricing.totalMinor <= 0) throw IllegalArgumentException("The final sale total must be positive.")
+                confirmSaleCreation(pricing.totalMinor, "USD", items, pricing)
+            } catch (e: Exception) {
+                Toast.makeText(this, e.message ?: "Check the price adjustments.", Toast.LENGTH_LONG).show()
+            }
         }
         showUiPage(
             ui.bar("Review basket", back = { showCatalog(healthy) }), body,
@@ -632,7 +802,7 @@ open class CheckoutActivity : Activity() {
         )
     }
 
-    private fun showManualCheckout(healthy: Boolean) {
+    private fun showManualCheckout(healthy: Boolean, notice: String? = null) {
         val info = config ?: return showSetup()
         val currency = info.settings.currency
         val quoteLine = if (currency == "SAT") "Bitcoin Standard uses the entered whole-satoshi amount." else "Developer Regtest quote: $100,000/BTC. This is fixed test data, not a live price."
@@ -642,7 +812,7 @@ open class CheckoutActivity : Activity() {
         val statusView = ui.text(latestCounterLine, 13f, colour = ui.pal.secondary)
         val body = listOf(
             ui.receipt(listOf(ReceiptLine("Manual amount", LineStyle.Strong), ReceiptLine("TEST ONLY · Regtest", LineStyle.Small))),
-            if (hasUnresolvedSale()) ui.receipt(listOf(
+            notice?.let { ui.text(it, 13f, colour = ui.pal.secondary) } ?: if (hasUnresolvedSale()) ui.receipt(listOf(
                 ReceiptLine("Earlier sale needs follow-up", LineStyle.Strong),
                 ReceiptLine("This manual amount creates a separate sale; earlier attempts remain unchanged.", LineStyle.Small),
             )) else ui.text("Manual test amount", 13f, colour = ui.pal.secondary),
@@ -655,7 +825,9 @@ open class CheckoutActivity : Activity() {
         showUiPage(
             ui.bar(if (currency == "SAT") "Amount in sats" else "Manual amount", back = { if (currency == "USD") showCatalog(healthy) else showHome() }, logo = true),
             body,
-            listOf(review, ui.quiet("Sales and receipts") { showSales() }),
+            listOf(review, ui.secondary("Cash sessions · test only") { showCashSessions() },
+                ui.secondary("Reports · local ledger") { reportController.show() },
+                ui.quiet("Sales and receipts") { showSales() }),
         )
         homeStatusView = statusView
         homePrimaryButton = review
@@ -673,13 +845,20 @@ open class CheckoutActivity : Activity() {
         confirmSaleCreation(amount, info.settings.currency, emptyList())
     }
 
-    private fun confirmSaleCreation(amountMinor: Long, currency: String, items: List<SaleItem>) {
+    private fun confirmSaleCreation(amountMinor: Long, currency: String, items: List<SaleItem>, pricing: CheckoutPricingSnapshot? = null) {
         val followup = latestFollowupSale()
         val create = {
             val saleId = UUID.randomUUID().toString()
             try {
-                ledger.createSale(saleId, amountMinor, currency, nowSecs(), items)
-                if (items.isNotEmpty()) cartQuantities.clear()
+                if (pricing != null) ledger.createPricedSale(saleId, currency, nowSecs(), pricing)
+                else ledger.createSale(saleId, amountMinor, currency, nowSecs(), items)
+                if (items.isNotEmpty()) {
+                    cartSelections.clear()
+                    cartQuantities.clear()
+                    discountDraft = ""
+                    taxRateDraft = ""
+                    tipDraft = ""
+                }
                 showTenderChoice(saleId)
             } catch (e: Exception) {
                 showHomeWithError("The sale could not be saved. No payment attempt was started. Details: ${safeDetail(e)}")
@@ -701,9 +880,15 @@ open class CheckoutActivity : Activity() {
         receiptToResume = null
         val sale = try { ledger.getSale(saleId) } catch (_: Exception) { return showSalesIfPossible() }
         val body = ArrayList<View>()
-        body.add(ui.receipt(sale.items.map { item ->
-            ReceiptLine("${item.name} · ${item.quantity} × ${formatAmount(item.unitMinor, sale.currency)}")
-        }.ifEmpty { listOf(ReceiptLine("Manual amount sale", LineStyle.Small)) }))
+        body.add(ui.receipt(pricedItemReceiptLines(sale)))
+        sale.pricing?.let { pricing ->
+            val priceLines = mutableListOf(ReceiptLine("Subtotal · ${formatAmount(pricing.subtotalMinor, sale.currency)}"))
+            priceLines.add(ReceiptLine("Order discount · ${if (pricing.discountMinor > 0) "−" else ""}${formatAmount(pricing.discountMinor, sale.currency)}"))
+            pricing.taxes.forEach { tax -> priceLines.add(ReceiptLine(taxReceiptLabel(tax, sale.currency))) }
+            if (pricing.taxes.isEmpty()) priceLines.add(ReceiptLine("Tax · ${formatAmount(pricing.taxMinor, sale.currency)} · not configured"))
+            priceLines.add(ReceiptLine("Tip · +${formatAmount(pricing.tipMinor, sale.currency)}"))
+            body.add(ui.receipt(priceLines))
+        }
         body.add(ui.facts(listOf("Sale total" to formatAmount(sale.amountMinor, sale.currency))))
         body.add(ui.text("Choose a payment method for this balance. The payment attempt is recorded before the counter or card SDK is called.", 14f, colour = ui.pal.secondary))
         if (sale.currency == "USD" && cardBridge == null) body.add(ui.text("Square Sandbox is not included in this base build.", 13f, colour = ui.pal.secondary))
@@ -729,10 +914,361 @@ open class CheckoutActivity : Activity() {
         tenderBitcoinButton = bitcoin
     }
 
-    private fun cartItemsSnapshot(): List<SaleItem> = sampleCatalog.mapNotNull { product ->
-        val quantity = cartQuantities[product.id] ?: return@mapNotNull null
-        if (quantity <= 0) return@mapNotNull null
-        SaleItem(product.id, product.name, product.unitMinor, quantity)
+    private fun cartItemsSnapshot(): List<SaleItem> = cartSelections.values.map { selected ->
+        val effectiveUnit = selected.modifiers.fold(selected.unitMinor) { total, modifier -> Math.addExact(total, modifier.amountMinor) }
+        SaleItem(selected.productId, selected.name, effectiveUnit, selected.quantity)
+    }
+
+    private fun cartReviewReceiptLines(): List<ReceiptLine> = cartSelections.values.flatMap { line ->
+        buildList {
+            add(ReceiptLine("${line.name} · ${line.quantity} × ${formatAmount(line.unitMinor, "USD")} base each"))
+            line.modifiers.forEach { modifier ->
+                add(ReceiptLine("  ${modifier.name} modifier · +${formatAmount(modifier.amountMinor, "USD")} each × ${line.quantity} = +${formatAmount(Math.multiplyExact(modifier.amountMinor, line.quantity.toLong()), "USD")}"))
+            }
+            val effectiveUnit = line.modifiers.fold(line.unitMinor) { total, modifier -> Math.addExact(total, modifier.amountMinor) }
+            add(ReceiptLine("  Line subtotal · ${formatAmount(Math.multiplyExact(effectiveUnit, line.quantity.toLong()), "USD")}"))
+        }
+    }
+
+    private fun addCatalogSelection(product: CatalogProduct, variant: CatalogVariant,
+                                    selectedModifierIds: List<String> = emptyList(), amount: Int = 1) {
+        if (!catalogReady || catalogWriteBlocked) return showManualCheckout(false, catalogUnavailableMessage())
+        val selectedIds = selectedModifierIds.sorted()
+        val currentName = "${product.name} — ${variant.name}"
+        val currentModifiers = selectedIds.mapNotNull { id -> product.modifiers.firstOrNull { it.modifierId == id } }
+        val existing = cartSelections.values.firstOrNull { line ->
+            line.productId == product.productId && line.variantId == variant.variantId &&
+                line.productVersion == product.version && line.name == currentName && line.unitMinor == variant.priceMinor &&
+                line.modifiers.map { it.modifierId }.sorted() == selectedIds &&
+                line.modifiers.zip(currentModifiers).all { (saved, current) -> saved.name == current.name && saved.amountMinor == current.amountMinor }
+        }
+        if (existing != null) {
+            if (existing.quantity + amount > MAX_CART_QUANTITY) {
+                Toast.makeText(this, "Maximum quantity is $MAX_CART_QUANTITY per saved item", Toast.LENGTH_LONG).show()
+                return
+            }
+            cartSelections[existing.lineId] = existing.copy(quantity = existing.quantity + amount)
+            return
+        }
+        if (cartSelections.size >= MAX_CART_LINES) {
+            Toast.makeText(this, "A basket can contain at most $MAX_CART_LINES distinct item lines", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            val lineId = frozenCatalogLineId(product, variant, selectedIds)
+            val frozen = catalog.snapshotLine(lineId, product.productId, variant.variantId, amount, selectedIds)
+            cartSelections[frozen.lineId] = CartSelection(frozen.lineId, product.productId, variant.variantId,
+                product.version, frozen.name, frozen.unitMinor, amount, frozen.modifiers.toList())
+        } catch (e: Exception) {
+            if (!handleCatalogFailure(e)) Toast.makeText(this, safeDetail(e), Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun frozenCatalogLineId(product: CatalogProduct, variant: CatalogVariant, modifierIds: List<String>): String {
+        val identity = listOf(product.productId, variant.variantId, product.version.toString()) + modifierIds.sorted()
+        val selected = identity.joinToString("") { "${it.toByteArray(Charsets.UTF_8).size}:$it" }
+        val digest = MessageDigest.getInstance("SHA-256").digest(selected.toByteArray(Charsets.UTF_8))
+        val identityToken = digest.joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        return "v${product.version}-$identityToken"
+    }
+
+    private fun removeCatalogSelection(productId: String, variantId: String) {
+        val existing = cartSelections.values.lastOrNull { it.productId == productId && it.variantId == variantId } ?: return
+        if (existing.quantity <= 1) cartSelections.remove(existing.lineId)
+        else cartSelections[existing.lineId] = existing.copy(quantity = existing.quantity - 1)
+    }
+
+    private fun chooseVariant(product: CatalogProduct, healthy: Boolean) {
+        if (product.variants.size == 1) {
+            chooseModifiers(product, product.variants.single(), healthy)
+            return
+        }
+        val variants = product.variants
+        AlertDialog.Builder(this)
+            .setTitle("Choose ${product.name} variant")
+            .setItems(variants.map { "${it.name} · ${formatAmount(it.priceMinor, "USD")}" }.toTypedArray()) { _, which ->
+                chooseModifiers(product, variants[which], healthy)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun chooseModifiers(product: CatalogProduct, variant: CatalogVariant, healthy: Boolean) {
+        if (product.modifiers.isEmpty()) {
+            addCatalogSelection(product, variant)
+            showCatalog(healthy)
+            return
+        }
+        val modifiers = product.modifiers
+        val selected = BooleanArray(modifiers.size)
+        AlertDialog.Builder(this)
+            .setTitle("Choose ${product.name} options")
+            .setMultiChoiceItems(modifiers.map { "${it.name} · +${formatAmount(it.amountMinor, "USD")} each" }.toTypedArray(), selected) { _, which, checked -> selected[which] = checked }
+            .setPositiveButton("Add to basket") { _, _ ->
+                val ids = modifiers.indices.filter { selected[it] }.map { modifiers[it].modifierId }
+                addCatalogSelection(product, variant, ids)
+                showCatalog(healthy)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun lookupCatalogCode(raw: String, healthy: Boolean) {
+        if (!catalogReady || catalogWriteBlocked) return showManualCheckout(healthy, catalogUnavailableMessage())
+        val code = raw.trim()
+        if (code.isEmpty() || code.length > 160) return Toast.makeText(this, "Enter a barcode or SKU up to 160 characters.", Toast.LENGTH_LONG).show()
+        try {
+            val barcodeMatch = catalog.findByBarcode(code)
+            val skuMatch = catalog.findBySku(code)
+            if (barcodeMatch == null && skuMatch == null) {
+                return Toast.makeText(this, "No saved item matches that barcode or SKU.", Toast.LENGTH_LONG).show()
+            }
+            val sameVariant = barcodeMatch != null && skuMatch != null &&
+                barcodeMatch.first.productId == skuMatch.first.productId && barcodeMatch.second.variantId == skuMatch.second.variantId
+            if (barcodeMatch != null && skuMatch != null && !sameVariant) {
+                val matches = listOf("Barcode" to barcodeMatch, "SKU" to skuMatch)
+                AlertDialog.Builder(this)
+                    .setTitle("Choose exact code match")
+                    .setItems(matches.map { (kind, pair) ->
+                        "$kind · ${pair.first.name} — ${pair.second.name} · ${formatAmount(pair.second.priceMinor, "USD")}"
+                    }.toTypedArray()) { _, which ->
+                        val selected = matches[which].second
+                        chooseModifiers(selected.first, selected.second, healthy)
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            } else {
+                val match = barcodeMatch ?: skuMatch!!
+                chooseModifiers(match.first, match.second, healthy)
+            }
+        } catch (e: Exception) {
+            if (!handleCatalogFailure(e)) Toast.makeText(this, safeDetail(e), Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showCatalogManagement(healthy: Boolean) {
+        if (!catalogReady || catalogWriteBlocked) return showManualCheckout(healthy, catalogUnavailableMessage())
+        val body = arrayListOf<View>(
+            ui.text("Manage the saved local test catalog. Changes apply to future basket additions; items already in the basket keep their saved name and price.", 14f),
+            ui.text("Catalog updates are not provider-synced and do not configure real tax or inventory.", 13f, colour = ui.pal.secondary),
+        )
+        val allProducts = try { catalog.listProducts(includeArchived = true) } catch (e: Exception) { return showCatalogBlocked(safeDetail(e)) }
+        val products = allProducts.take(MAX_MANAGE_PRODUCTS)
+        if (allProducts.size > products.size) body.add(ui.text("Showing the first $MAX_MANAGE_PRODUCTS catalog products.", 13f, colour = ui.pal.secondary))
+        if (products.isEmpty()) body.add(ui.text("No saved products.", 14f, colour = ui.pal.secondary))
+        products.forEach { product ->
+            body.add(ui.receipt(listOf(
+                ReceiptLine(product.name + if (product.archived) " · ARCHIVED" else "", LineStyle.Strong),
+                ReceiptLine("Revision ${product.version} · ${product.variants.joinToString { "${it.name} ${formatAmount(it.priceMinor, "USD")}" }}"),
+            )))
+            if (!product.archived) {
+                body.add(ui.button("Edit ${product.name}", ButtonKind.Secondary) { chooseVariantForEdit(product, healthy) })
+                body.add(ui.quiet("Archive ${product.name}") { confirmArchiveProduct(product, healthy) })
+            }
+        }
+        showUiPage(ui.bar("Manage items", back = { showCatalog(healthy) }), body,
+            listOf(ui.primary("Add item") { showProductEditor(null, null, healthy) },
+                ui.secondary("Local inventory · test only") { showInventoryStock() },
+                ui.secondary("Back to checkout") { showCatalog(healthy) }))
+    }
+
+    private fun chooseVariantForEdit(product: CatalogProduct, healthy: Boolean) {
+        if (product.variants.size == 1) return showProductEditor(product.productId, product.variants.single().variantId, healthy)
+        val variants = product.variants
+        AlertDialog.Builder(this).setTitle("Choose variant to edit")
+            .setItems(variants.map { "${it.name} · ${formatAmount(it.priceMinor, "USD")}" }.toTypedArray()) { _, which ->
+                showProductEditor(product.productId, variants[which].variantId, healthy)
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun showProductEditor(productId: String?, variantId: String?, healthy: Boolean) {
+        val existing = productId?.let { catalog.getProduct(it) }
+        val variant = existing?.variants?.firstOrNull { it.variantId == variantId }
+        val name = ui.field("Item name")
+        name.setSingleLine(true); name.filters = arrayOf(InputFilter.LengthFilter(120)); name.setText(existing?.name.orEmpty())
+        val variantName = ui.field("Variant name")
+        variantName.setSingleLine(true); variantName.filters = arrayOf(InputFilter.LengthFilter(120)); variantName.setText(variant?.name ?: "Regular")
+        val price = ui.field("Price in USD")
+        price.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        price.setSingleLine(true); price.filters = arrayOf(InputFilter.LengthFilter(12)); price.setText(variant?.let { moneyInput(it.priceMinor) }.orEmpty())
+        val sku = ui.field("SKU · optional")
+        sku.setSingleLine(true); sku.filters = arrayOf(InputFilter.LengthFilter(160)); sku.setText(variant?.sku.orEmpty())
+        val barcode = ui.field("Barcode · optional")
+        barcode.setSingleLine(true); barcode.filters = arrayOf(InputFilter.LengthFilter(160)); barcode.setText(variant?.barcode.orEmpty())
+        val body = arrayListOf<View>(
+            ui.text(if (existing == null) "Create one item with one saved variant." else "Edit the selected variant. Other variants and saved modifiers are preserved.", 14f),
+            name, variantName, price, sku, barcode,
+            ui.text("This test screen supports one-variant item creation and editing one existing variant at a time. Modifier definitions are preserved but not configured here.", 13f, colour = ui.pal.secondary),
+        )
+        val save = ui.primary("Save item") {
+            try {
+                val itemName = name.text.toString().trim()
+                val variantLabel = variantName.text.toString().trim()
+                val priceMinor = parseExactUsd(price.text.toString(), allowZero = false)
+                require(priceMinor <= MAX_CATALOG_PRICE_MINOR) { "Item price exceeds the ${formatAmount(MAX_CATALOG_PRICE_MINOR, "USD")} test-app limit." }
+                val skuValue = sku.text.toString().trim().takeIf { it.isNotEmpty() }
+                val barcodeValue = barcode.text.toString().trim().takeIf { it.isNotEmpty() }
+                val versions = existing?.variants?.toMutableList() ?: mutableListOf()
+                val commandId = UUID.randomUUID().toString()
+                val savedProduct = if (existing == null) {
+                    val id = UUID.randomUUID().toString()
+                    catalog.createProduct(commandId, id, itemName, listOf(CatalogVariant("default", variantLabel, priceMinor, skuValue, barcodeValue)))
+                } else {
+                    val idx = versions.indexOfFirst { it.variantId == variantId }
+                    require(idx >= 0) { "The selected variant is no longer available." }
+                    versions[idx] = CatalogVariant(versions[idx].variantId, variantLabel, priceMinor, skuValue, barcodeValue)
+                    catalog.editProduct(commandId, existing.productId, existing.version, itemName, versions, existing.modifiers)
+                }
+                Toast.makeText(this, "Saved ${savedProduct.name} · revision ${savedProduct.version}", Toast.LENGTH_SHORT).show()
+                showCatalogManagement(healthy)
+            } catch (e: Exception) {
+                if (!handleCatalogFailure(e)) Toast.makeText(this, e.message ?: "Check the item details.", Toast.LENGTH_LONG).show()
+            }
+        }
+        showUiPage(ui.bar(if (existing == null) "Add item" else "Edit item", back = { showCatalogManagement(healthy) }), body,
+            listOf(save, ui.secondary("Cancel") { showCatalogManagement(healthy) }))
+    }
+
+    private fun confirmArchiveProduct(product: CatalogProduct, healthy: Boolean) {
+        AlertDialog.Builder(this).setTitle("Archive ${product.name}?")
+            .setMessage("Archived items disappear from checkout. Saved sales and frozen basket lines keep their original details.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Archive") { _, _ ->
+                try {
+                    catalog.archiveProduct(UUID.randomUUID().toString(), product.productId, product.version)
+                    showCatalogManagement(healthy)
+                } catch (e: Exception) {
+                    if (!handleCatalogFailure(e)) Toast.makeText(this, safeDetail(e), Toast.LENGTH_LONG).show()
+                }
+            }.show()
+    }
+
+    private fun handleCatalogFailure(error: Exception): Boolean {
+        val detail = safeDetail(error)
+        if (detail.contains("uncertain", ignoreCase = true) || detail.contains("poisoned", ignoreCase = true)) {
+            catalogWriteBlocked = true
+            catalogReady = false
+            catalogFault = detail
+            showManualCheckout(false, catalogUnavailableMessage())
+            return true
+        }
+        return false
+    }
+
+    private fun showCatalogBlocked(detail: String? = null) {
+        catalogReady = false
+        catalogFault = detail ?: catalogFault
+        showManualCheckout(false, catalogUnavailableMessage())
+    }
+
+    private fun catalogUnavailableMessage(): String = buildString {
+        append("Local catalog unavailable. No empty catalog was substituted. Close and reopen the test app and inspect Manage items before editing again.")
+        catalogFault?.let { append(" Details: ").append(it) }
+    }
+
+    private fun showCashSessions() {
+        if (cashSessionsReady && ::cashController.isInitialized) cashController.show()
+        else show("Cash sessions unavailable", "Local drawer session data could not be read. No empty session history was substituted. Close and reopen the test app to inspect it. Canonical cash tender on a saved sale remains available; drawer reconciliation is unavailable until this local data is repaired.",
+            listOf("Sales and receipts" to { showSales() }, "Close test app" to { finish() }), cashSessionsFault)
+    }
+
+    private fun showInventoryStock() {
+        if (inventoryReady && catalogReady && ::inventoryController.isInitialized) inventoryController.showStock()
+        else showInventoryBlocked(null)
+    }
+
+    private fun showInventoryBlocked(saleId: String?) {
+        val detail = inventoryFault ?: catalogFault
+        show("Inventory unavailable", "Local inventory data could not be read. No empty stock counts were substituted. Close and reopen the test app to inspect it. Checkout and payment remain available; tracked handoff recording is unavailable until local inventory is repaired.",
+            buildList {
+                if (saleId != null) add("Back to saved receipt" to { showReceipt(saleId) })
+                add("Sales and receipts" to { showSales() })
+                add("Close test app" to { finish() })
+            }, detail)
+    }
+
+    private fun moneyInput(value: Long): String = "${value / 100}.${(value % 100).toString().padStart(2, '0')}"
+
+    private fun pricedItemReceiptLines(sale: Sale): List<ReceiptLine> {
+        val pricing = sale.pricing
+        if (pricing == null) return sale.items.map { item ->
+            ReceiptLine("${item.name} · ${item.quantity} × ${formatAmount(item.unitMinor, sale.currency)}")
+        }.ifEmpty { listOf(ReceiptLine("Manual amount sale", LineStyle.Small)) }
+        return pricing.lines.flatMap { line ->
+            buildList {
+                add(ReceiptLine("${line.name} · ${line.quantity} × ${formatAmount(line.unitMinor, sale.currency)} base = ${formatAmount(Math.multiplyExact(line.unitMinor, line.quantity.toLong()), sale.currency)}"))
+                line.modifiers.forEach { modifier ->
+                    add(ReceiptLine("  ${modifier.name} modifier · +${formatAmount(modifier.amountMinor, sale.currency)} each × ${line.quantity} = +${formatAmount(Math.multiplyExact(modifier.amountMinor, line.quantity.toLong()), sale.currency)}"))
+                }
+            }
+        }
+    }
+
+    private fun taxReceiptLabel(tax: TaxSnapshot, currency: String): String {
+        val rate = "${tax.rateBasisPoints / 100}.${(tax.rateBasisPoints % 100).toString().padStart(2, '0')}%"
+        return if (tax.treatment == TaxTreatment.EXCLUSIVE)
+            "${tax.name} · $rate exclusive · +${formatAmount(tax.amountMinor, currency)}"
+        else "${tax.name} · $rate included in price · extracted ${formatAmount(tax.amountMinor, currency)}"
+    }
+
+    private fun reviewAmountField(label: String, initial: String): EditText = ui.field(label).apply {
+        inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+        filters = arrayOf(InputFilter.LengthFilter(12))
+        setSingleLine(true)
+        setText(initial)
+    }
+
+    private fun reviewPercentField(label: String, initial: String): EditText = reviewAmountField(label, initial)
+
+    private fun freezeCartPricing(discountText: String, taxText: String, tipText: String): CheckoutPricingSnapshot {
+        val discount = parseOptionalUsd(discountText)
+        val tip = parseOptionalUsd(tipText)
+        val rate = parseOptionalRate(taxText)
+        val tax = if (rate == 0) null else CheckoutTaxRule("merchant-flat-exclusive", "Merchant configured tax", rate, TaxTreatment.EXCLUSIVE)
+        val lines = cartSelections.values.map { CheckoutLineInput(it.lineId, it.productId, it.name, it.unitMinor, it.quantity, it.modifiers) }
+        return CheckoutPricing.freeze(lines, discount, tax, tip)
+    }
+
+    private fun parseOptionalUsd(raw: String): Long {
+        if (raw.isBlank()) return 0L
+        val value = parseExactUsd(raw.trim(), allowZero = true)
+        require(value >= 0) { "Amounts must be zero or greater." }
+        require(value <= 100_000_000L) { "Adjustment exceeds the supported USD limit." }
+        return value
+    }
+
+    private fun parseExactUsd(raw: String, allowZero: Boolean): Long {
+        require(raw.matches(Regex("(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,2})?"))) {
+            "Enter USD using digits and up to two decimal places."
+        }
+        val value = BigDecimal(raw).setScale(2, RoundingMode.UNNECESSARY).movePointRight(2).longValueExact()
+        require(if (allowZero) value >= 0 else value > 0) { if (allowZero) "Amount cannot be negative." else "Price must be positive." }
+        return value
+    }
+
+    private fun parseOptionalRate(raw: String): Int {
+        if (raw.isBlank()) return 0
+        require(raw.matches(Regex("(?:0|[1-9][0-9]*)(?:\\.[0-9]{1,2})?"))) {
+            "Enter a rate using digits and up to two decimal places."
+        }
+        val value = BigDecimal(raw).setScale(2, RoundingMode.UNNECESSARY).movePointRight(2).intValueExact()
+        require(value in 0..100_000) { "Tax rate must be between 0% and 1000%." }
+        return value
+    }
+
+    private fun updatePricingPreview(discount: String, rate: String, tip: String, target: View) {
+        try {
+            val pricing = freezeCartPricing(discount, rate, tip)
+            val lines = mutableListOf("Subtotal · ${formatAmount(pricing.subtotalMinor, "USD")}",
+                "Order discount · ${if (pricing.discountMinor > 0) "−" else ""}${formatAmount(pricing.discountMinor, "USD")}")
+            pricing.taxes.forEach { lines.add("${it.name} · ${it.rateBasisPoints / 100}.${(it.rateBasisPoints % 100).toString().padStart(2, '0')}% exclusive · ${formatAmount(it.amountMinor, "USD")}") }
+            if (pricing.taxes.isEmpty()) lines.add("Tax · ${formatAmount(pricing.taxMinor, "USD")} · not configured")
+            lines.add("Tip · ${formatAmount(pricing.tipMinor, "USD")}")
+            lines.add("Total · ${formatAmount(pricing.totalMinor, "USD")}")
+            (target as? TextView)?.text = lines.joinToString("\n")
+        } catch (e: Exception) {
+            (target as? TextView)?.text = "Check adjustment amounts: ${e.message ?: "invalid input"}"
+        }
     }
 
     private fun canOfferCash(saleId: String): Boolean = try {
@@ -1097,10 +1633,15 @@ open class CheckoutActivity : Activity() {
             body.add(ui.receipt(review))
         }
         val receiptLines = ArrayList<ReceiptLine>()
-        for (item in sale.items) {
-            receiptLines.add(ReceiptLine("${item.name} · ${item.quantity} × ${formatAmount(item.unitMinor, sale.currency)} = ${formatAmount(Math.multiplyExact(item.unitMinor, item.quantity.toLong()), sale.currency)}"))
+        receiptLines.addAll(pricedItemReceiptLines(sale))
+        sale.pricing?.let { pricing ->
+            receiptLines.add(ReceiptLine("Subtotal · ${formatAmount(pricing.subtotalMinor, sale.currency)}"))
+            receiptLines.add(ReceiptLine("Order discount · ${if (pricing.discountMinor > 0) "−" else ""}${formatAmount(pricing.discountMinor, sale.currency)}"))
+            pricing.taxes.forEach { tax -> receiptLines.add(ReceiptLine(taxReceiptLabel(tax, sale.currency))) }
+            if (pricing.taxes.isEmpty()) receiptLines.add(ReceiptLine("Tax · ${formatAmount(pricing.taxMinor, sale.currency)} · not configured"))
+            receiptLines.add(ReceiptLine("Tip · +${formatAmount(pricing.tipMinor, sale.currency)}"))
+            receiptLines.add(ReceiptLine("Frozen total · ${formatAmount(pricing.totalMinor, sale.currency)}", LineStyle.Strong))
         }
-        if (receiptLines.isEmpty()) receiptLines.add(ReceiptLine("Manual amount sale", LineStyle.Small))
         body.add(ui.receipt(receiptLines))
         val paymentLines = ArrayList<ReceiptLine>()
         paymentLines.add(ReceiptLine("${saleStateLabel(sale)} · ${formatAmount(sale.amountMinor, sale.currency)}", LineStyle.Strong))
@@ -1173,6 +1714,13 @@ open class CheckoutActivity : Activity() {
         }
         if (attemptsNeedCardReconcile(sale)) actions.add("Reconcile Square outcome" to { reconcileCard(sale.saleId) })
         actions.add("Payment details" to { showReceiptDetails(sale.saleId) })
+        if (sale.paid && !sale.requiresReview && sale.items.isNotEmpty()) {
+            actions.add("Record local handoff · test only" to {
+                if (inventoryReady && catalogReady && ::inventoryController.isInitialized)
+                    inventoryController.showFulfillment(sale.saleId) { showReceipt(sale.saleId) }
+                else showInventoryBlocked(sale.saleId)
+            })
+        }
         actions.add("New sale" to { showHome() })
         actions.add("Back to sales" to { showSales() })
         val bitcoinBlocksCard = sale.attempts.any { it.tender == Tender.BITCOIN && it.state !in setOf(PaymentState.CANCELED, PaymentState.CONFIRMED, PaymentState.PAID) }
@@ -1464,14 +2012,9 @@ open class CheckoutActivity : Activity() {
 
     private fun safeDetail(e: Throwable): String = (e.message ?: e.javaClass.simpleName).filter { it >= ' ' && it != '\u007f' }.take(160)
 
-    private fun latestFollowupSale(): Sale? = ledger.listSales().asReversed().firstOrNull(::saleNeedsFollowup)
+    private fun latestFollowupSale(): Sale? = ledger.listSales().asReversed().firstOrNull(::needsPaymentFollowup)
 
-    private fun hasUnresolvedSale(): Boolean = ledger.listSales().any(::saleNeedsFollowup)
-
-    private fun saleNeedsFollowup(sale: Sale): Boolean = sale.requiresReview || sale.attempts.isEmpty() || sale.attempts.any { attempt ->
-            (attempt.tender == Tender.BITCOIN && attempt.state !in setOf(PaymentState.CONFIRMED, PaymentState.PAID, PaymentState.CANCELED)) ||
-                (attempt.tender == Tender.CARD && attempt.state in setOf(PaymentState.UNKNOWN, PaymentState.PARTIAL))
-        }
+    private fun hasUnresolvedSale(): Boolean = ledger.listSales().any(::needsPaymentFollowup)
 
     private fun readLimited(input: java.io.InputStream, limit: Int): ByteArray {
         val output = ByteArrayOutputStream()
@@ -1521,13 +2064,35 @@ open class CheckoutActivity : Activity() {
         private const val PAIRING_KEY_ALIAS = "openbmt-checkout-pairing-regtest-v1"
         private const val PAIRING_FILE = "pairing.obks"
         private const val LEDGER_FILE = "checkout-ledger.bin"
+        private const val CATALOG_FILE = "checkout-catalog.bin"
+        private const val CASH_SESSIONS_FILE = "checkout-cash-sessions.bin"
+        private const val INVENTORY_FILE = "checkout-inventory.bin"
         private const val FIXTURE_FILE = "fixture.pending"
         private const val REGTEST_USD_MINOR_PER_BTC = 10_000_000L
         private const val SATS_PER_BTC = 100_000_000L
-        private const val MAX_CART_QUANTITY = 99
+        private const val MAX_CART_QUANTITY = 999
+        private const val MAX_CART_LINES = 100
+        private const val MAX_MANAGE_PRODUCTS = 100
+        private const val MAX_SAVED_MODIFIERS = 32
+        private const val MAX_CATALOG_PRICE_MINOR = 100_000_000L
         private const val MAX_SUPPORTED_SATS = 2_100_000_000_000_000L
         private const val CART_IDS_KEY = "checkout.cart.ids"
         private const val CART_QUANTITIES_KEY = "checkout.cart.quantities"
+        private const val CART_LINE_IDS_KEY = "checkout.cart.line.ids"
+        private const val CART_PRODUCT_IDS_KEY = "checkout.cart.product.ids"
+        private const val CART_VARIANT_IDS_KEY = "checkout.cart.variant.ids"
+        private const val CART_PRODUCT_VERSIONS_KEY = "checkout.cart.product.versions"
+        private const val CART_LINE_NAMES_KEY = "checkout.cart.line.names"
+        private const val CART_LINE_PRICES_KEY = "checkout.cart.line.prices"
+        private const val CART_LINE_QUANTITIES_KEY = "checkout.cart.line.quantities"
+        private const val CART_MODIFIER_LINE_IDS_KEY = "checkout.cart.modifier.line.ids"
+        private const val CART_MODIFIER_IDS_KEY = "checkout.cart.modifier.ids"
+        private const val CART_MODIFIER_NAMES_KEY = "checkout.cart.modifier.names"
+        private const val CART_MODIFIER_PRICES_KEY = "checkout.cart.modifier.prices"
+        private const val CATALOG_SEARCH_KEY = "checkout.catalog.search"
+        private const val DISCOUNT_DRAFT_KEY = "checkout.cart.discount"
+        private const val TAX_DRAFT_KEY = "checkout.cart.tax"
+        private const val TIP_DRAFT_KEY = "checkout.cart.tip"
         private const val RECEIPT_KEY = "checkout.receipt.resume"
         private const val HISTORY_TEXT_KEY = "checkout.history.text"
         private const val HISTORY_TENDER_KEY = "checkout.history.tender"

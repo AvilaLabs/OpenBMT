@@ -143,8 +143,8 @@ pub use settings_edit::{
 pub use setup_lock::PinChangeArgs;
 pub use shop_lightning::{
     LightningReportView, Lsps1OfferView, NotOfferedView, OrderStateView, OrderWhyView,
-    ShopLightningAction, ShopLightningClass, ShopLightningEditArgs, ShopLightningHeldView,
-    ShopLightningPreviewView, ShopLightningView,
+    ReceivingBackupView, ReceivingSnapshotView, ShopLightningAction, ShopLightningClass,
+    ShopLightningEditArgs, ShopLightningHeldView, ShopLightningPreviewView, ShopLightningView,
 };
 pub use starter::{
     OwnRepinKind, OwnRepinView, StarterChangeKind, StarterCheckView, StarterCoinView,

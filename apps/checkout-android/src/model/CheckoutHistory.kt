@@ -5,6 +5,19 @@ import java.util.Locale
 enum class HistoryTender { BITCOIN, CARD, CASH }
 enum class HistoryStatus { PAID, UNPAID, REVIEW }
 
+/** True when a saved sale still needs payment/resolution attention before a new order is safe. */
+fun needsPaymentFollowup(sale: Sale): Boolean {
+    if (sale.requiresReview) return true
+    if (sale.paid) return false
+    if (sale.attempts.isEmpty()) return true
+    return sale.attempts.any { attempt ->
+        when (attempt.tender) {
+            Tender.BITCOIN -> attempt.state !in setOf(PaymentState.CONFIRMED, PaymentState.PAID, PaymentState.CANCELED)
+            Tender.CARD -> attempt.state !in setOf(PaymentState.PAID, PaymentState.CANCELED)
+        }
+    }
+}
+
 /** A pure filter over caller-provided sale snapshots. Times are Unix epoch seconds. */
 data class SaleHistoryQuery(
     val text: String = "",

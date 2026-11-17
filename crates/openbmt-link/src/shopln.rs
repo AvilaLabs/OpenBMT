@@ -4,7 +4,8 @@
 //! Store:   OBM 0x1e | version | request ID 16 | action u8 | body
 //! Stored:  OBM_ | version | request ID 16 | action u8 | result u8 | data
 //! Report:  OBM 0x1f | version | six fields (LK-84), version 2 with four more,
-//!          the sales paid through a funding that was lost, and their total
+//!          the sales paid through a funding that was lost, and their total;
+//!          version 3 adds an optional advisory receiving snapshot
 //! ```
 //!
 //! Decoding is strict, as in [`openbmt_core::wire`]: bytes decode only if
@@ -690,10 +691,124 @@ impl OrderWhy {
     }
 }
 
-/// The version of the report that adds the provider's LSPS1, the last order
-/// and the sales paid through a lost funding. Version 1, with the six first
-/// fields, still reads.
-pub const REPORT_VERSION: u8 = 2;
+/// Version 3 adds a receiving snapshot to the version 2 report. Versions 1
+/// and 2 still read. Older owner builds that only accept through version 2
+/// reject version 3, so counter upgrades must follow owner upgrades.
+pub const REPORT_VERSION: u8 = 3;
+
+/// Backup state observed for an advisory receiving snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReceivingBackupState {
+    /// No live assessment was available.
+    Unknown,
+    /// The second device could not be reached.
+    Away,
+    /// Reachable, but not caught up.
+    Behind,
+    /// Reachable and both write queues were empty.
+    CaughtUp,
+}
+
+impl ReceivingBackupState {
+    fn to_byte(self) -> u8 {
+        match self {
+            Self::Unknown => 0,
+            Self::Away => 1,
+            Self::Behind => 2,
+            Self::CaughtUp => 3,
+        }
+    }
+
+    fn from_byte(byte: u8) -> Option<Self> {
+        [Self::Unknown, Self::Away, Self::Behind, Self::CaughtUp]
+            .into_iter()
+            .find(|state| state.to_byte() == byte)
+    }
+}
+
+/// A bounded live-node assessment. It reports confirmed inbound capacity
+/// and node facts, never a quote or a promised route for a merchant amount.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReceivingSnapshot {
+    /// When the counter's node made the assessment, seconds since 1970.
+    pub captured_at_unix: u64,
+    /// Chain height observed by the node; zero means unavailable.
+    pub chain_height: u32,
+    /// Funding confirmation depth used by the node, at least one.
+    pub confirmation_depth: u32,
+    /// Confirmed usable inbound capacity after the node's safety margin.
+    pub confirmed_room_msat: u64,
+    /// Usable channels with pending or unknown funding.
+    pub pending_or_unknown_channels: u16,
+    /// Second-device state observed by the node.
+    pub backup_state: ReceivingBackupState,
+    /// Strict writes pending for the second device.
+    pub strict_pending_writes: u32,
+    /// Lazy writes pending for the second device.
+    pub background_pending_writes: u32,
+    /// Last successful second-device write, seconds since 1970; zero if none.
+    pub last_device_store_unix: u64,
+    /// Whether the node's chain poll was healthy at capture.
+    pub chain_healthy: bool,
+}
+
+const MAX_REPORT_CHANNELS: u16 = 4096;
+const MAX_REPORT_PENDING_WRITES: u32 = 1_000_000;
+
+impl ReceivingSnapshot {
+    fn write_to(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.captured_at_unix.to_le_bytes());
+        out.extend_from_slice(&self.chain_height.to_le_bytes());
+        out.extend_from_slice(&self.confirmation_depth.to_le_bytes());
+        out.extend_from_slice(&self.confirmed_room_msat.to_le_bytes());
+        out.extend_from_slice(&self.pending_or_unknown_channels.to_le_bytes());
+        out.push(self.backup_state.to_byte());
+        out.extend_from_slice(&self.strict_pending_writes.to_le_bytes());
+        out.extend_from_slice(&self.background_pending_writes.to_le_bytes());
+        out.extend_from_slice(&self.last_device_store_unix.to_le_bytes());
+        out.push(u8::from(self.chain_healthy));
+    }
+
+    fn read_from(r: &mut Reader<'_>) -> Result<Self, DecodeError> {
+        let snapshot = Self {
+            captured_at_unix: r.u64_le()?,
+            chain_height: r.u32_le()?,
+            confirmation_depth: r.u32_le()?,
+            confirmed_room_msat: r.u64_le()?,
+            pending_or_unknown_channels: r.u16_le()?,
+            backup_state: ReceivingBackupState::from_byte(r.u8()?).ok_or(
+                DecodeError::NonCanonical("the backup state is not a choice"),
+            )?,
+            strict_pending_writes: r.u32_le()?,
+            background_pending_writes: r.u32_le()?,
+            last_device_store_unix: r.u64_le()?,
+            chain_healthy: match r.u8()? {
+                0 => false,
+                1 => true,
+                _ => {
+                    return Err(DecodeError::NonCanonical(
+                        "the chain health is not a choice",
+                    ))
+                }
+            },
+        };
+        if snapshot.captured_at_unix == 0
+            || snapshot.confirmation_depth == 0
+            || snapshot.pending_or_unknown_channels > MAX_REPORT_CHANNELS
+            || snapshot.strict_pending_writes > MAX_REPORT_PENDING_WRITES
+            || snapshot.background_pending_writes > MAX_REPORT_PENDING_WRITES
+            || (snapshot.backup_state == ReceivingBackupState::CaughtUp
+                && (snapshot.strict_pending_writes != 0
+                    || snapshot.background_pending_writes != 0
+                    || snapshot.last_device_store_unix == 0))
+        {
+            return Err(DecodeError::NonCanonical(
+                "the receiving snapshot is out of range",
+            ));
+        }
+        Ok(snapshot)
+    }
+}
 
 /// The facts the Lightning counter reports with each check-in (LK-84,
 /// SL-78). The cap and the provider are not in it: the owner phone shows
@@ -729,10 +844,13 @@ pub struct LightningReport {
     /// How many sales were named lost in all: at least those listed, and
     /// more when the list kept only the newest [`MAX_LOST_FUNDING_SALES`].
     pub lost_funding_total: u32,
+    /// Version 3 live-node advisory facts; absent in older reports or when
+    /// the node could not make an assessment.
+    pub receiving: Option<ReceivingSnapshot>,
 }
 
 impl LightningReport {
-    /// The content bytes, in version 2.
+    /// The content bytes, in version 3.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut out = wire::start(&MAGIC_LIGHTNING_REPORT, 66);
         out[4] = REPORT_VERSION;
@@ -755,12 +873,18 @@ impl LightningReport {
             out.extend_from_slice(&sale.to_le_bytes());
         }
         out.extend_from_slice(&self.lost_funding_total.to_le_bytes());
+        if let Some(snapshot) = &self.receiving {
+            out.push(1);
+            snapshot.write_to(&mut out);
+        } else {
+            out.push(0);
+        }
         out
     }
 
-    /// Read the content strictly: version 2, or version 1 with the LSPS1,
-    /// order and lost-sale facts unknown. An order that failed says why,
-    /// nothing else does, no order has no fee, and the lost sales rise.
+    /// Read the content strictly: versions 1 and 2 remain readable with
+    /// newer facts unknown. An order that failed says why, nothing else does,
+    /// no order has no fee, and the lost sales rise.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, DecodeError> {
         let (mut r, version) =
             Reader::framed_up_to(bytes, &MAGIC_LIGHTNING_REPORT, REPORT_VERSION)?;
@@ -778,6 +902,7 @@ impl LightningReport {
             order_fee_sats: 0,
             lost_funding_sales: Vec::new(),
             lost_funding_total: 0,
+            receiving: None,
         };
         if version >= 2 {
             report.lsps1 = Lsps1Offer::from_code(r.u16_le()?)
@@ -811,6 +936,17 @@ impl LightningReport {
                     "the total of lost sales is less than those listed",
                 ));
             }
+        }
+        if version >= 3 {
+            report.receiving = match r.u8()? {
+                0 => None,
+                1 => Some(ReceivingSnapshot::read_from(&mut r)?),
+                _ => {
+                    return Err(DecodeError::NonCanonical(
+                        "the receiving snapshot marker is not a choice",
+                    ))
+                }
+            };
         }
         r.finish()?;
         Ok(report)

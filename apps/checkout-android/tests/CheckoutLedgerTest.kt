@@ -2,6 +2,9 @@ package org.openbmt.checkout
 
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 /** JVM harness tests for durable transitions; the coordinator owns compilation and execution. */
 object CheckoutLedgerTest {
@@ -14,6 +17,8 @@ object CheckoutLedgerTest {
         globalIdentifiersAndEvidenceBounds()
         refundSurvivesBitcoinReorgRestart()
         immutableBasketAndLegacyMigration()
+        pricedSaleRoundTripAndV6Upgrade()
+        stableSaleSerializesLocalCommit()
         cashAcknowledgmentAndMigration()
         duplicateAndCorruptStorage()
     }
@@ -301,6 +306,117 @@ object CheckoutLedgerTest {
         val loadFailure = runCatching { CheckoutLedger(unverifiableRefund) }.exceptionOrNull()
         check(loadFailure?.message?.contains("legacy v2 refund cannot be verified") == true)
         check(unverifiableRefund.bytes!!.contentEquals(originalBytes)) // fail closed without rewriting the legacy file
+    }
+
+    private fun pricedSaleRoundTripAndV6Upgrade() {
+        val lineInputs = listOf(
+            CheckoutLineInput("latte-1", "latte", "Latte", 550, 2,
+                listOf(SelectedModifier("oat", "Oat milk", 75))),
+            CheckoutLineInput("bagel-1", "bagel", "Bagel", 450, 1),
+            CheckoutLineInput("sample-1", "sample", "Free sample", 0, 1),
+        )
+        val pricing = CheckoutPricing.freeze(lineInputs, discountMinor = 125,
+            tax = CheckoutTaxRule("sales-tax", "Sales tax", 825, TaxTreatment.EXCLUSIVE), tipMinor = 200)
+        val storage = MemoryStorage()
+        var ledger = CheckoutLedger(storage)
+        ledger.initializeEvents()
+        val sale = ledger.createPricedSale("priced", "USD", 90, pricing)
+        check(sale.amountMinor == pricing.totalMinor && sale.pricing?.totalMinor == pricing.totalMinor)
+        val initialPage = ledger.readEvents(ledger.eventSnapshot().epoch!!, 0, 10)
+        check(initialPage.events.single().type == CheckoutEventType.SALE_CREATED)
+        check(initialPage.events.single().saleVersion == 1L)
+        val savedPricing = sale.pricing!!
+        check(runCatching { (savedPricing.lines as MutableList).clear() }.isFailure)
+        ledger = CheckoutLedger(storage)
+        val recovered = ledger.getSale("priced")
+        check(recovered.amountMinor == pricing.totalMinor && recovered.pricing?.lines == pricing.lines)
+        check(recovered.pricing?.taxes == pricing.taxes)
+        check(recovered.items == listOf(SaleItem("latte", "Latte", 625, 2), SaleItem("bagel", "Bagel", 450, 1), SaleItem("sample", "Free sample", 0, 1)))
+        check(ledger.eventSnapshot().highWater == 1L) // opening/reloading a snapshot adds no event
+        check(runCatching { ledger.createPricedSale("bad-currency", "SAT", 91, pricing) }.isFailure)
+        val inconsistent = CheckoutPricingSnapshot(pricing.lines, pricing.subtotalMinor, pricing.discountMinor,
+            pricing.taxableAfterDiscountMinor, pricing.taxes, pricing.taxMinor, pricing.tipMinor,
+            Math.addExact(pricing.totalMinor, 1))
+        check(runCatching { ledger.createPricedSale("bad-snapshot", "USD", 92, inconsistent) }.isFailure)
+        val allFree = CheckoutPricing.freeze(listOf(CheckoutLineInput("free-line", "free", "Free", 0, 1)))
+        check(runCatching { ledger.createPricedSale("all-free", "USD", 93, allFree) }.isFailure)
+        check(runCatching { ledger.getSale("all-free") }.isFailure) // zero-total sale was never persisted
+
+        val legacy = MemoryStorage().also { it.bytes = legacyV6WithCash() }
+        val rawBefore = legacy.bytes!!.copyOf()
+        val oldLedger = CheckoutLedger(legacy)
+        val oldSale = oldLedger.getSale("legacy-v6")
+        check(oldSale.amountMinor == 100L && oldSale.pricing == null && oldSale.cashPayments.single().changeMinor == 20L)
+        check(legacy.bytes!!.contentEquals(rawBefore)) // v6 read stays read-only
+        oldLedger.createPricedSale("new-after-v6", "USD", 3, CheckoutPricing.freeze(
+            listOf(CheckoutLineInput("cookie-line", "cookie", "Cookie", 125, 1))))
+        val upgraded = CheckoutLedger(legacy)
+        check(upgraded.getSale("legacy-v6").let { it.amountMinor == 100L && it.pricing == null && it.cashPayments.single().paymentId == "cash-v6" })
+        check(upgraded.getSale("new-after-v6").pricing?.totalMinor == 125L)
+        check(upgraded.getSale("legacy-v6").attempts.isEmpty())
+        check(runCatching {
+            upgraded.createPricedSale("bad-snapshot", "USD", 4,
+                CheckoutPricing.freeze(listOf(CheckoutLineInput("overflow", "p", "Huge", Long.MAX_VALUE, 1)), tipMinor = 1))
+        }.isFailure)
+    }
+
+    /** v6 uninitialized event ledger with one cash-only manual sale. */
+    private fun legacyV6WithCash(): ByteArray = ByteArrayOutputStream().also { bytes ->
+        DataOutputStream(bytes).use { out ->
+            out.writeInt(0x4f42434c); out.writeInt(6); out.writeInt(1)
+            writeString(out, "legacy-v6"); out.writeLong(100); writeString(out, "USD"); out.writeLong(1)
+            out.writeInt(0); out.writeInt(0); out.writeInt(0) // items, attempts, refunds
+            out.writeInt(1); writeString(out, "cash-v6"); out.writeLong(100); out.writeLong(120); out.writeLong(20); out.writeLong(2)
+            out.writeBoolean(false); out.writeBoolean(false); out.writeLong(0); out.writeLong(0)
+            out.writeInt(0); out.writeInt(0) // sale versions, events
+        }
+    }.toByteArray()
+
+    private fun stableSaleSerializesLocalCommit() {
+        val ledger = CheckoutLedger(MemoryStorage())
+        ledger.createSale("stable", 100, "USD", 1)
+        ledger.beginCardAttempt("stable", "card-stable", "processor", "stable-id", 100)
+        val initial = ledger.initializeEvents()
+        val version = initial.saleVersions.getValue("stable")
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val mutationStarted = CountDownLatch(1)
+        val mutationDone = CountDownLatch(1)
+        val failure = AtomicReference<Throwable?>(null)
+
+        val inventoryCommit = Thread {
+            try {
+                val total = ledger.withStableSale("stable", version) { snapshot ->
+                    check(snapshot.amountMinor == 100L)
+                    check(ledger.getSale("stable").amountMinor == 100L) // reads are allowed
+                    check(runCatching { ledger.createSale("reentrant", 1, "USD", 2) }.isFailure)
+                    entered.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                    snapshot.amountMinor
+                }
+                check(total == 100L)
+            } catch (e: Throwable) { failure.set(e) }
+        }
+        val paymentUpdate = Thread {
+            try {
+                check(entered.await(5, TimeUnit.SECONDS))
+                mutationStarted.countDown()
+                ledger.recordCardEvidence("stable", "card-stable", "payment-stable", "stable-id", CardResult.COMPLETED, 100, 3)
+            } catch (e: Throwable) { failure.compareAndSet(null, e) }
+            finally { mutationDone.countDown() }
+        }
+        inventoryCommit.start(); paymentUpdate.start()
+        check(mutationStarted.await(5, TimeUnit.SECONDS))
+        check(!mutationDone.await(150, TimeUnit.MILLISECONDS)) // payment evidence cannot interleave local commit
+        release.countDown()
+        inventoryCommit.join(5000); paymentUpdate.join(5000)
+        check(!inventoryCommit.isAlive && !paymentUpdate.isAlive)
+        failure.get()?.let { throw AssertionError("stable-sale concurrency failed", it) }
+        check(mutationDone.count == 0L && ledger.getSale("stable").paid)
+        check(runCatching { ledger.withStableSale("stable", version) { it.amountMinor } }.isFailure)
+        check(runCatching { ledger.withStableSale("stable", version + 1) { throw IllegalStateException("callback failure") } }.isFailure)
+        ledger.createSale("after-callback-error", 50, "USD", 4) // finally released the mutation guard
+        check(ledger.getSale("after-callback-error").amountMinor == 50L)
     }
 
     /** A v2/v3/v4 on-disk paid sale. */

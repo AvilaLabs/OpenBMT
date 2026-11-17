@@ -93,7 +93,10 @@ use openbmt_lightning_node::provider::ProviderConfig;
 use openbmt_lightning_node::room::OnChainReason;
 use openbmt_lightning_node::state::StartFrom;
 use openbmt_link::numbers::{STORE_INBOX_FILE, STORE_OUTBOX_FILE};
-use openbmt_link::shopln::{LightningReport, Lsps1Offer, NotOffered, OrderState, OrderWhy};
+use openbmt_link::shopln::{
+    LightningReport, Lsps1Offer, NotOffered, OrderState, OrderWhy, ReceivingBackupState,
+    ReceivingSnapshot,
+};
 use openbmt_link::{Client, ClientConfig, Inbox, Outbox, Route};
 use openbmt_net_io::DriverConfig;
 use tokio::runtime::{Builder, Runtime};
@@ -463,6 +466,30 @@ fn order_facts(
         ln::OrderWhy::NoChannel => OrderWhy::NoChannel,
     };
     (offer, state, why, o.fee_sat)
+}
+
+/// Keep the serialized backup label consistent with the exact counters
+/// serialized beside it. The live assessment can race with these separate
+/// observations, so it supplies capacity only, never this label.
+fn receiving_backup_state(
+    node_running: bool,
+    device_state: DeviceState,
+    strict_pending_writes: u32,
+    background_pending_writes: u32,
+    last_device_store_unix: u64,
+) -> ReceivingBackupState {
+    if !node_running {
+        ReceivingBackupState::Unknown
+    } else if device_state == DeviceState::Away {
+        ReceivingBackupState::Away
+    } else if strict_pending_writes != 0
+        || background_pending_writes != 0
+        || last_device_store_unix == 0
+    {
+        ReceivingBackupState::Behind
+    } else {
+        ReceivingBackupState::CaughtUp
+    }
 }
 
 /// What Home and the app read about Shop Lightning.
@@ -1786,12 +1813,66 @@ impl ShopLn {
             order_fee_sats: 0,
             lost_funding_sales: book.lost_funding_sales.clone(),
             lost_funding_total: book.lost_funding_total,
+            receiving: None,
         };
         if let Some(node) = self.node() {
             let status = node.status();
             report.balance_sats = node.balance_sat();
             report.receive_room_sats = status.room_msat / 1000;
             report.last_stored_at = status.device.last_stored_unix;
+            // This is advisory only. The node's own assessment supplies
+            // confirmed capacity and backup blockers; no amount or fee is
+            // quoted here, and this report never gates invoice creation.
+            if self.named
+                && self
+                    .inst
+                    .as_ref()
+                    .is_some_and(|i| i.phase == Phase::Serving)
+            {
+                let assessment = node.receiving_assessment(None, None, None);
+                let pending_channels = u16::try_from(assessment.pending_or_unknown_channels).ok();
+                let strict_pending = u32::try_from(status.device.pending_writes).ok();
+                let background_pending = u32::try_from(node.pending_background_writes()).ok();
+                let captured_at_unix = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .ok()
+                    .map(|d| d.as_secs());
+                if let (
+                    Some(pending_channels @ 0..=4096),
+                    Some(strict_pending @ 0..=1_000_000),
+                    Some(background_pending @ 0..=1_000_000),
+                    Some(captured_at_unix @ 1..),
+                ) = (
+                    pending_channels,
+                    strict_pending,
+                    background_pending,
+                    captured_at_unix,
+                ) {
+                    let last_device_store_unix = status.device.last_stored_unix;
+                    let node_running = !assessment
+                        .not_ready
+                        .contains(&openbmt_lightning_node::receiving::NotReady::NodeStopped);
+                    let backup_state = receiving_backup_state(
+                        node_running,
+                        status.device.state,
+                        strict_pending,
+                        background_pending,
+                        last_device_store_unix,
+                    );
+                    report.receiving = Some(ReceivingSnapshot {
+                        captured_at_unix,
+                        chain_height: status.chain_height,
+                        confirmation_depth: self.confirm_depth.max(1),
+                        confirmed_room_msat: assessment.confirmed_room_msat,
+                        pending_or_unknown_channels: pending_channels,
+                        backup_state,
+                        strict_pending_writes: strict_pending,
+                        background_pending_writes: background_pending,
+                        last_device_store_unix,
+                        chain_healthy: status.chain_ok,
+                    });
+                }
+            }
             // SL-45: the fees of rooms bought ahead count with the openings'.
             report.opening_fees_paid_sats = report
                 .opening_fees_paid_sats
@@ -2071,6 +2152,88 @@ mod tests {
     use openbmt_core::relay::RelayRoute;
     use openbmt_core::settings::LIGHTNING_NODE_BYTES;
     use openbmt_core::shop_lightning::node_id;
+
+    #[test]
+    fn report_backup_state_matches_the_serialized_queue_snapshot_and_decodes() {
+        for (running, device, strict, background, last_store, expected) in [
+            (
+                true,
+                DeviceState::Reachable,
+                0,
+                0,
+                10,
+                ReceivingBackupState::CaughtUp,
+            ),
+            // A write may enter the lazy queue after the assessment took its
+            // earlier view. The enum follows the count actually serialized.
+            (
+                true,
+                DeviceState::Reachable,
+                0,
+                1,
+                10,
+                ReceivingBackupState::Behind,
+            ),
+            (
+                true,
+                DeviceState::Reachable,
+                1,
+                0,
+                10,
+                ReceivingBackupState::Behind,
+            ),
+            (
+                true,
+                DeviceState::Away,
+                0,
+                0,
+                10,
+                ReceivingBackupState::Away,
+            ),
+            (
+                false,
+                DeviceState::Reachable,
+                0,
+                0,
+                10,
+                ReceivingBackupState::Unknown,
+            ),
+        ] {
+            let backup_state =
+                receiving_backup_state(running, device, strict, background, last_store);
+            assert_eq!(backup_state, expected);
+            let report = LightningReport {
+                balance_sats: 0,
+                receive_room_sats: 0,
+                opening_fees_paid_sats: 0,
+                last_stored_at: last_store,
+                last_sweep_at: 0,
+                not_offered: NotOffered::Offered,
+                lsps1: Lsps1Offer::Unknown,
+                order_state: OrderState::None,
+                order_why: OrderWhy::None,
+                order_fee_sats: 0,
+                lost_funding_sales: Vec::new(),
+                lost_funding_total: 0,
+                receiving: Some(ReceivingSnapshot {
+                    captured_at_unix: 10,
+                    chain_height: 1,
+                    confirmation_depth: 1,
+                    confirmed_room_msat: 0,
+                    pending_or_unknown_channels: 1,
+                    backup_state,
+                    strict_pending_writes: strict,
+                    background_pending_writes: background,
+                    last_device_store_unix: last_store,
+                    chain_healthy: true,
+                }),
+            };
+            assert_eq!(
+                LightningReport::from_bytes(&report.to_bytes()).unwrap(),
+                report
+            );
+        }
+    }
 
     fn id(n: u8) -> Identity {
         Identity::from_secret_bytes(&[n; 32]).unwrap()

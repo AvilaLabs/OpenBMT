@@ -1,0 +1,273 @@
+{
+  "date_local": "2026-11-17",
+  "timezone": "America/New_York",
+  "source_base_commit": "a79db1a90dfb0f76d72ebfeb983507bb9cbb51d8",
+  "scope": "Native standalone POS foundations and advisory Shop Lightning report. TEST ONLY: isolated Regtest and synthetic local data; no real funds, production card transaction, merchant release or competitor parity claim. No browser demo changes or deployment.",
+  "source_files_sha256": {
+    "apps/checkout-android/README.md": "b6a11c10121dd9c4e094bd4d869d702b8e1eb75fb87a1f56c269b5fdbcc48bbc",
+    "apps/checkout-android/src/android/CheckoutActivity.kt": "d23ab044c192af3373a2dc0f82db8ca7dff37e9bb06307fb458f2e59911d1064",
+    "apps/checkout-android/src/android/CheckoutCashController.kt": "113152d347164c3b27f005812cf223fffe0edb3bc7ede88debc84d9f7ba9ff95",
+    "apps/checkout-android/src/android/CheckoutInventoryController.kt": "6bbcc3abb125382452dc23ec62d8c8740e45eaef4dc36af9be83bef350db0aa7",
+    "apps/checkout-android/src/android/CheckoutReportController.kt": "498f5cf10141c856c65fc050610a8ec248483bf952d10e2c65e82ff5457a94f9",
+    "apps/checkout-android/src/model/CheckoutCashSession.kt": "d74ea5e7bd540682205d8001312b102c84ef8694de25d5836b24644846b2c736",
+    "apps/checkout-android/src/model/CheckoutCatalog.kt": "27c895ebe751f652dab7970c312e05f88dc828f1de315fdafaecc3836a5e5755",
+    "apps/checkout-android/src/model/CheckoutHistory.kt": "e6f373b7dad59cb55186c06879d989b6d4108d4b4f9b16ac798491d29adf0beb",
+    "apps/checkout-android/src/model/CheckoutInventory.kt": "eaefc92821e9a2ac37a5f14e81adbc07ae5dd251aadc3b1c12fbb15781c31d3b",
+    "apps/checkout-android/src/model/CheckoutLedger.kt": "20779cbad2db720d559a6765d3446c9ed9664183b6f813db349413d5d9599c24",
+    "apps/checkout-android/src/model/CheckoutPricing.kt": "d830e6754c480afd3088926cd7967bbb0beb1eb93ceefaa3f606c3c0e96975a4",
+    "apps/checkout-android/src/model/CheckoutReceipt.kt": "5c04f2ceac382f94ee11620387bb869ee257d272265b9be89fbd5429b19da15e",
+    "apps/checkout-android/src/model/CheckoutReport.kt": "59c51ef44e00bf6af941480ea397342fab4d3fd613ed10711bd481acd6ba294f",
+    "apps/checkout-android/tests/CheckoutCashSessionTest.kt": "dcbfb1f9b7d51839eec29ad4e0da6632339e35d2f558377145fb62827b7ebccd",
+    "apps/checkout-android/tests/CheckoutCatalogTest.kt": "ff413c0ab31931ba7be8617d0ac7da3889a097b40db22ded8ae7b96116f0659c",
+    "apps/checkout-android/tests/CheckoutHistoryTest.kt": "a50443856ce70618b557b9574a1a85f8923867815d62af1b65a9dc60391485db",
+    "apps/checkout-android/tests/CheckoutInventoryTest.kt": "58521892658265c651ae1541c5cf479fdc404117f5d19bf7969fca270731be23",
+    "apps/checkout-android/tests/CheckoutLedgerTest.kt": "986aca2cfa5ab5978aecfed595d0390abffab09f982d2dd415b9b98568466c69",
+    "apps/checkout-android/tests/CheckoutPricingTest.kt": "cc9251a274cb3c5a87ebb2afcd4c6cdf4f703a06dd6c9748e798bb9332d8c981",
+    "apps/checkout-android/tests/CheckoutReceiptTest.kt": "db934cca1f70a28bd4355b94624e5cdeeddc4fd0551a368be71096261b01f163",
+    "apps/checkout-android/tests/CheckoutReportTest.kt": "5602070129eb772543ace6e0bd943bb83cdfb93f41ee940826f1f5760f1d8d84",
+    "apps/checkout-android/tests/run-jvm.sh": "9ab79d93a3500b84eaad447c9fa83b05f1ac46f9e4a279c025b72707bde5fd1b",
+    "apps/owner-android/src/model/ShopLightningModel.kt": "6b4b7e3c10bf7c0dffd5d9a8342eaab44ebed5edb8bf649b65e6aa170eae3375",
+    "apps/owner-android/src/model/ShopLightningWords.kt": "ae120912bfefc38f1ab9b44f0d5f5c5a4c94dd18aeab1fa2a1c0e03b279764dc",
+    "apps/owner-android/tests/AppModelTest.kt": "1b921caca4d81eb5752c04ab7b78792187dd7e3cc3d5a550c797bbb2faf41490",
+    "crates/openbmt-counter-node/examples/counter_regtest.rs": "56079defdecd8664c30d3d4fa385f635d30bbe85fc37d3c9f7f84225105148a2",
+    "crates/openbmt-counter-node/src/shopln_node.rs": "290f64cdd01857ea3c68f834b9ae8832753ea9a3a23198de7e2efa229b5edea4",
+    "crates/openbmt-lightning-node/src/node.rs": "a5b262a7a37b781e214d15c3e9f7a4417d77679f925e9bb3a74a7dc5075a4a4c",
+    "crates/openbmt-link/src/shopln.rs": "ab5b57d3fc6b922b7d49278d91296aa76878d487398c6d2c7a6702550409249c",
+    "crates/openbmt-link/src/tests/shopln.rs": "bbebf3f6eda939a52f946de2e3a7714321df4beb019cb55bad18eb6978b5c87c",
+    "crates/openbmt-owner-ffi/bindings/PROTOCOL.md": "34a591f400f0a451a1aa5ca0a971ce670a79ea33f7cc654b341e838657df4aa4",
+    "crates/openbmt-owner-ffi/bindings/kotlin/org/openbmt/owner/OwnerNode.kt": "b51a8a034171c76b81d8fee12fed7ca162ae2dc9a93a7f2d7d4f4d6331f51956",
+    "crates/openbmt-owner-ffi/bindings/tests/ProtocolDecoderTest.kt": "fb26a08d0690a7e1539145c13a790b3156cdc89bc83aac28080b1597d04342e7",
+    "crates/openbmt-owner-ffi/src/call.rs": "a2d111e7739f9c2196025ee70a35e2aaa8762b0f3a95ca185f9d8a2eac9724e7",
+    "crates/openbmt-owner-ffi/src/codec.rs": "709084939ee198edbffeafee262dd50b3a9d21ba4b616e2deb2714130396bdf3",
+    "crates/openbmt-owner-ffi/src/lib.rs": "48af5c9840561f28684719ec12eee2b87bd799e5d9571ad793029fa113298364",
+    "crates/openbmt-owner-ffi/src/shop_lightning.rs": "6218269afa8c29b22491e0efa2a7d854a814e59bfd0108d30f6d297e944af2f0",
+    "crates/openbmt-owner-ffi/src/tests/shop_lightning.rs": "0f1f90e6021c90afaa2190b979e068947bfff2bf409ef17803769da36614f270",
+    "crates/openbmt-owner-node/src/tests/link.rs": "8f98308b4c026ae13a86d168297813c4dd970770e4245c42f447afc5a56dd5e6",
+    "scripts/shop-lightning-counter-e2e-core.sh": "0e71fca64c3a986d8f8b5549562b2a250c9192429d16ee3966421d31c72712f5"
+  },
+  "capability_register": {
+    "capabilities": 502,
+    "benchmark_variants": 514,
+    "implementation_candidates": 7,
+    "candidate_capability_links": 23,
+    "candidate_variant_references": 24,
+    "row_status": "pending_unverified",
+    "candidate_status": "in_progress_unverified",
+    "rows_closed": 0,
+    "audit": "Unique/exact capability ID set and per-row variant lists match source register; every candidate source path exists."
+  },
+  "checkout_jvm": {
+    "command": "JAVA_HOME=<jdk21> KOTLIN_HOME=<kotlinc2.2.20> apps/checkout-android/tests/run-jvm.sh <scratch>",
+    "exit_code": 0,
+    "groups": [
+      "Ledger",
+      "Events",
+      "History",
+      "Receipt",
+      "Pricing",
+      "Catalog",
+      "Inventory",
+      "CashSession",
+      "Report"
+    ],
+    "includes": [
+      "v2-v6 sale migration with unknown pricing breakdown",
+      "v7 canonical pricing encode/decode and output recomputation",
+      "cash-session v3 operator attribution, v2 unknown legacy attribution, restart and idempotent replay",
+      "stable-sale locking, stale versions and reentrant mutation refusal",
+      "bounded duplicate product quantities: 1200-unit handoff and restart/replay",
+      "uncertain writes, corrupt data, command identity and immutable snapshots"
+    ]
+  },
+  "rust": {
+    "workspace": {
+      "command": "cargo test --locked --offline --workspace -- --skip every_flipped_bit_is_refused_or_handled_without_a_panic",
+      "passed": 6867,
+      "filtered": 2,
+      "note": "Both filtered exhaustive bit-flip tests passed in the earlier current-code workspace run; that run failed only generated PROTOCOL.md synchronization, which was regenerated before the successful workspace run. Final hosted CI remains independent validation."
+    },
+    "lightning_tcp_device": {
+      "command": "cargo test --locked --offline -p openbmt-lightning-node --features tcp-device",
+      "passed": 222
+    },
+    "clippy": {
+      "command": "cargo clippy --workspace --all-targets --locked --offline -- -D warnings",
+      "exit_code": 0
+    },
+    "fmt": {
+      "command": "cargo fmt --all -- --check",
+      "exit_code": 0
+    },
+    "dependencies": {
+      "command": "scripts/deps-check.sh",
+      "exit_code": 0,
+      "result": "ALL PASS",
+      "dependency_changes": false
+    }
+  },
+  "owner_jvm": {
+    "binding_protocol_decoder": "passed, including Rust-generated null/populated receiving-snapshot golden fixtures",
+    "app_model_checks": 6699,
+    "palette_checks": 136,
+    "feedback_checks": 57
+  },
+  "android_builds": {
+    "abis": [
+      "arm64-v8a",
+      "x86_64"
+    ],
+    "page_alignment_bytes": 16384,
+    "signature_checks": "passed test-only APK build verification",
+    "owner_apk_sha256": "b9762dece79d66a556cb3051a5abd6ebf3c57e6480f6d4f2eac238b02c1c0fc8",
+    "checkout_apk_sha256": "bc3aa725c1cfc4e3a4e869a91f13b95c7b04a04d5d7e01cb26c790bf81d73f18"
+  },
+  "emulator": {
+    "device": "Android API 35 emulator-5554, synthetic Regtest checkout only",
+    "no_data_clear": true,
+    "original_sale_count": 4,
+    "final_sale_count": 5,
+    "canonical_event_high_water": 4,
+    "sale_versions": [
+      0,
+      0,
+      0,
+      2,
+      2
+    ],
+    "priced_cash_sale": {
+      "sale_id": "948baec6-0b32-4a91-9f7c-e77ef5301b2b",
+      "frozen_unit_minor": [
+        400,
+        500
+      ],
+      "quantities": [
+        1,
+        1
+      ],
+      "subtotal_minor": 900,
+      "discount_minor": 100,
+      "tax_minor": 66,
+      "tip_minor": 50,
+      "total_minor": 916,
+      "cash_tendered_minor": 1000,
+      "cash_applied_minor": 916,
+      "cash_change_minor": 84,
+      "paid": true,
+      "requires_review": false,
+      "needs_payment_followup": false
+    },
+    "underpayment": {
+      "entered_minor": 900,
+      "record_button_enabled": false,
+      "ledger_bytes_unchanged": true
+    },
+    "inventory": {
+      "opening_count": 5,
+      "handed_off_quantity": 2,
+      "remaining_count": 3,
+      "repeat_opens_existing_record": true,
+      "restart_count_verified": true
+    },
+    "cash_session": {
+      "opening_float_minor": 2000,
+      "linked_net_cash_minor": 916,
+      "eligible_payment_disappears_after_link": true,
+      "expected_minor": 2916,
+      "counted_minor": 2900,
+      "discrepancy_minor": -16,
+      "closed_history_verified": true,
+      "legacy_operator_display": "Unknown (legacy record), verified after final upgrade; new labels persist in JVM v3 restart/replay test"
+    },
+    "report_export": {
+      "system_picker": "ACTION_CREATE_DOCUMENT",
+      "save_succeeded": true,
+      "local_zone": "America/New_York",
+      "created_date": "2026-11-17",
+      "csv_rows": 2,
+      "cash_total_minor": 1466,
+      "legacy_550_breakdown_unknown": true,
+      "priced_916_breakdown_present": true,
+      "export_csv_sha256": "193d5bffb15a33af457c072cc361b250d8bc6ddea459741ac71a6c2001dc3808",
+      "final_apk_returns_to_report": true,
+      "final_export_matches_reviewed_csv": true
+    },
+    "optional_module_faults": [
+      {
+        "module": "checkout-inventory.bin",
+        "manual_checkout_available": true,
+        "invalid_file_not_reset": true,
+        "ledger_byte_unchanged": true,
+        "restored_byte_exact": true
+      },
+      {
+        "module": "checkout-catalog.bin",
+        "manual_checkout_available": true,
+        "invalid_file_not_reset": true,
+        "ledger_byte_unchanged": true,
+        "restored_byte_exact": true
+      }
+    ],
+    "upgrade_preservation": {
+      "ledger_catalog_cash_bytes_identical_across_prior_upgrade": true,
+      "final_upgrade_validation": "passed: ledger, catalog, cash-session and inventory files byte-identical across final in-place APK update",
+      "final_store_sha256": {
+        "checkout-ledger.bin": "1841df5d2f9007cc3cb9b0a33663a636d9d33fd109c89650b23c1473359b600f",
+        "checkout-catalog.bin": "49ddc547417c21d553ff2f28ba6862b6c5cdf13fd2c58cbe17a6f13d69013ffa",
+        "checkout-cash-sessions.bin": "cac8f7011a427ce1f98da1b9c3146455b86b68cbe898e58130afe6c872e97ec0",
+        "checkout-inventory.bin": "05fca4ee9122e14022f3e41a14d0c2fdc8b7cfa83e11d6a3236c57adb6cf27e5"
+      }
+    },
+    "catalog_identifier_collision": {
+      "input": "0123456789012",
+      "matches": [
+        "Barcode \u00b7 Vanilla cup \u2014 Regular \u00b7 5.00 USD",
+        "SKU \u00b7 QA alias item \u2014 Regular \u00b7 1.00 USD"
+      ],
+      "explicit_choice_required": true,
+      "no_item_added_before_choice": true
+    }
+  },
+  "live_core_lnd": {
+    "command": "DRILL_PORTS=23180 DRILL_DIR=<scratch>/live-lnd-proof-5 DRILL_KEEP=1 bash scripts/shop-lightning-counter-e2e-core.sh",
+    "bitcoin_core": "32.1",
+    "lnd": "0.21.8-beta",
+    "exit_code": 0,
+    "result": "ALL PASS",
+    "assertions_passed": 25,
+    "scenarios": [
+      "Wrong node seed and malformed seed refused; correct pinned seed and restart",
+      "First zero-conf JIT HTLC refused and sale remains unpaid; snapshot pending=1, confirmed_room_msat=0",
+      "Mine required Regtest block, wait current report height114, pending=0 and confirmed_room_msat=290060000; identical invoice succeeds once; backup monitor present before paid observation; paid state survives restart",
+      "Backup Box outage reports Away and queued strict/background writes, on-chain only; return restores Lightning and payment succeeds",
+      "Other counter offers on-chain only with no Lightning seed/folder; disabling Shop Lightning via signed settings closes channel cooperatively and deletes seed after exit state permits"
+    ],
+    "scope_limit": "Pinned public descriptor fixture uses mainnet-format bc1 output encoding over strictly loopback Regtest transport. No claim of valid production sweep destinations, independent recovery, zero-confirmation acceptance, automatic starter onboarding, routing/liquidity guarantees, or native standalone Lightning tender."
+  },
+  "known_open_gates": [
+    "Authenticated staff roles and command authorization (labels remain unauthenticated)",
+    "Catalog modifier-definition/multiple-variant UI and persistent pricing/tax configuration",
+    "Cash sale-to-drawer cross-store atomicity/reconciliation and cash refund/deposit workflows",
+    "Native checkout Lightning tender and default-wallet onboarding",
+    "Amount-specific Lightning route/fee/liquidity readiness and independent backup recovery",
+    "Production providers, card hardware, jurisdiction qualification, actual merchant shifts, mainnet/real funds",
+    "All 502 capability dispositions require individual acceptance evidence; none closed by this batch"
+  ],
+  "publication": {
+    "hosted_ci": "Not claimed by this local record; inspect workflows for published commit.",
+    "demo_deployed": false
+  },
+  "local_log_sha256": {
+    "workspace-tests.log": "71970070bfecc6de9c5b49f23581b7e79d01bcc9ae0eeda3634f675a4a066403",
+    "workspace-before-protocol-refresh.log": "fd6f6cef57bca47844ca7f2295d7d65d0a090f6bd46ccc53a94ba1cc4de38122",
+    "lightning-tests.log": "cef191fe17ca106df2d77472d6e214ab1d0cd437e8f0436692b9e040f6fc31e8",
+    "owner-bindings-jvm.log": "6373549e1835c0443351d96139532ca43766dfe679ed42f768fdaec10c25e1df",
+    "owner-jvm.log": "da1ffa4892b065b4f81df5e29cf18b783ffda1372fd76699f9146cb8bf567839",
+    "live-lnd-proof-5.log": "91866d262e0470a0a2185d0032761e31c892e4c87a7d57a2ad0740de92a08f40",
+    "jvm-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "clippy-final.log": "066a0e34845e554445495f067a11253038ecdb22b337ebd4e389a4356a673696",
+    "deps-final.log": "aa5c5e94f72db8f9f91ce9c01b14a35a2f37bbc19cddecfb09880814fd142107",
+    "android-release-candidate.log": "ea436b8bee666cca8431f9f76bbacdab0ff88a46f772ef944620298626b42f9e",
+    "final-upgrade-preservation.json": "317d633e3515ed00ce6c62b07c1730aca64a1870c6db528e20fc86463638c11f",
+    "module-fault-results.json": "4aacec0fd5c0beab91d96c39d291131e62acc8f4a901b60de5ac9ffa6617d5a6"
+  }
+}

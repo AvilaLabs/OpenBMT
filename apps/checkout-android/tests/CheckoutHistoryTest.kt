@@ -30,6 +30,40 @@ object CheckoutHistoryTest {
         check(searchSales(listOf(sameTimeZ, sameTimeA), SaleHistoryQuery()).map { it.saleId } == listOf("a-tie", "z-tie"))
         check(runCatching { searchSales(all, SaleHistoryQuery(text = "x".repeat(129))) }.isFailure)
         check(runCatching { searchSales(all, SaleHistoryQuery(fromInclusive = 20, untilExclusive = 20)) }.isFailure)
+        paymentFollowupStates()
+    }
+
+    private fun paymentFollowupStates() {
+        val unattempted = sale("unattempted", 1, paid = false)
+        val pendingBitcoin = sale("pending-btc", 2, attempts = listOf(attempt(Tender.BITCOIN, PaymentState.UNCONFIRMED)), paid = false)
+        val unknownCard = sale("unknown-card", 3, attempts = listOf(attempt(Tender.CARD, PaymentState.UNKNOWN)), paid = false)
+        val awaitingCard = sale("awaiting-card", 4, attempts = listOf(attempt(Tender.CARD, PaymentState.AWAITING)), paid = false)
+        val canceledBitcoin = sale("canceled-btc", 5, attempts = listOf(attempt(Tender.BITCOIN, PaymentState.CANCELED)), paid = false)
+        val reviewed = sale("reviewed", 6, attempts = listOf(attempt(Tender.CARD, PaymentState.PAID)), paid = true, review = true)
+        check(needsPaymentFollowup(unattempted))
+        check(needsPaymentFollowup(pendingBitcoin))
+        check(needsPaymentFollowup(unknownCard))
+        check(needsPaymentFollowup(awaitingCard))
+        check(!needsPaymentFollowup(canceledBitcoin))
+        check(needsPaymentFollowup(reviewed))
+
+        var stored: ByteArray? = null
+        val storage = object : DurableLedgerStorage {
+            override fun read(): ByteArray? = stored?.copyOf()
+            override fun writeAtomically(bytes: ByteArray) { stored = bytes.copyOf() }
+        }
+        val ledger = CheckoutLedger(storage)
+        ledger.createSale("paid-cash", 550, "USD", 10)
+        ledger.recordCashPayment("paid-cash", "cash-1", 550, 11)
+        check(ledger.getSale("paid-cash").paid)
+        check(!needsPaymentFollowup(ledger.getSale("paid-cash")))
+
+        ledger.createSale("split-card-cash", 1000, "USD", 12)
+        ledger.beginCardAttempt("split-card-cash", "card-1", "square-sandbox", "stable-card-1", 300)
+        ledger.recordCardEvidence("split-card-cash", "card-1", "payment-1", "stable-card-1", CardResult.COMPLETED, 300, 13)
+        ledger.recordCashPayment("split-card-cash", "cash-2", 700, 14)
+        check(ledger.getSale("split-card-cash").let { it.paid && it.attempts.single().state == PaymentState.PAID })
+        check(!needsPaymentFollowup(ledger.getSale("split-card-cash")))
     }
 
     private fun sale(

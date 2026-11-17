@@ -168,6 +168,7 @@ macro_rules! primitive {
 }
 
 primitive!(u8, "u8", u8);
+primitive!(u16, "u16", u16);
 primitive!(u32, "u32", u32);
 primitive!(i32, "i32", i32);
 primitive!(u64, "u64", u64);

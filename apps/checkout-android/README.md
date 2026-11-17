@@ -1,13 +1,13 @@
 # OpenBMT Checkout for Android (experimental)
 
-This is a separate, experimental Android checkout shell built from plain
-`android.widget` views. It is distinct from the Counter app. Its first payment
-path is Bitcoin on **Regtest only**; it uses the existing counter FFI to make
-the BIP21 payment request and observe the counter's real peer and chain checks.
-It does not sign or hold wallet spending keys. The durable checkout ledger is
-the source for sale and receipt history. Square is an optional Sandbox-only
+This is a separate experimental Android checkout shell built from plain
+`android.widget` views. It is distinct from the Counter app. Checkout payments
+remain **Regtest only** and use the existing counter FFI to create a BIP21
+payment request and observe the counter's peer and chain checks. The checkout
+does not sign or hold wallet spending keys. The durable checkout ledger is the
+source for sale and receipt history. Square remains an optional Sandbox-only
 path supplied by `square-sandbox`; the base build has no Square SDK and does
-not claim that card payment is enabled.
+not claim production card acceptance.
 
 **TEST ONLY. No mainnet, real funds, production payments or goods handover.**
 The USD flow uses the fixed developer rate of 10,000,000 minor units per BTC
@@ -15,22 +15,53 @@ The USD flow uses the fixed developer rate of 10,000,000 minor units per BTC
 price. The app accepts only a Regtest pairing record with USD or SAT pricing.
 The Regtest pairing is watch-only for checkout and cannot sign spends.
 
-The USD cashier screen includes a small sample basket (latte $5.50 and bagel
-$4.50), exact integer totals, quantity controls, and a review step. The saved
-sale includes an immutable copy of item names, prices, and quantities. This is
-not a merchant product catalog or inventory integration. Manual amount entry
-remains available, including for SAT-priced shops. After saving the sale, the
-cashier chooses Bitcoin, an explicit cash received entry, or the optional Square
-Sandbox path for that same USD sale. Cash entry records an amount applied,
-tendered amount, change, stable payment ID, and cashier-entered timestamp in the
-durable checkout ledger before opening the itemized receipt. The cashier must
-confirm that physical cash was received; the app does not detect cash or connect
-to a drawer. The cash payment survives process death with the sale ledger; if
-the app restarts before the receipt is visible, open the saved sale from Sales.
-An uncertain storage result requires reopening the app and inspecting that sale
-before any cash is collected or recorded again. A cashier can copy the stable
-receipt projection from the receipt screen; copied text is marked TEST ONLY ·
-REGTEST and is not sent externally.
+## Current unpublished native batch
+
+The current Android batch adds a durable local catalog with product revisions,
+create/edit/archive, a bounded one-variant item editor, optional SKU/barcode
+lookup by manual entry, and frozen basket selections. It adds a separate local
+stock store with tracked or manual mode, reasoned count adjustments, and an
+explicit sale-linked handoff that records stock changes once. It does not
+connect to a physical scanner or prove that goods were physically handed over.
+
+USD catalog checkout now freezes an integer-minor-unit pricing snapshot before
+tender: item and modifier amounts, quantities, fixed order discount, one flat
+tax component, optional fixed tip, and exact total. Tax arithmetic supports
+inclusive extraction or exclusive addition, but the current Android form
+exposes a merchant-entered exclusive flat rate. A final zero-total sale is not
+supported. The snapshot is stored in checkout ledger format version 7. Ledger
+versions 2–6 remain readable; they retain historical totals without an invented
+pricing breakdown.
+
+Cash tender remains an explicit cashier acknowledgment: the cashier records
+cash received, amount applied, change, stable payment ID, and timestamp in the
+canonical sale ledger. A separate local cash-session store records opening
+float, reasoned cash in/out movements, links to canonical cash payments,
+operator-entered count, close and discrepancy. A payment link records an
+existing payment; it does not collect cash again. The sale ledger and session
+store are separate, so an interrupted link must be reconciled before retrying.
+Neither the cash tender nor session count detects or verifies physical cash or
+a drawer.
+
+A local report provides a device-timezone sale-created date range, tender-aware
+observed/applied totals, refund totals, pricing breakdown where known, and
+reviewed CSV copy/save. It is not a full shift close, cashbook or accounting
+report. Receipt projections include saved pricing and tender details. No
+printer or email delivery is qualified.
+
+Catalog, inventory and cash-session storage are independent local modules.
+An optional module startup fault does not erase its records or disable the
+separate payment ledger/manual checkout; the affected module is unavailable
+until its saved state is reopened and inspected. An uncertain write requires
+reopen and inspection before repeating the action.
+
+The coordinator's current implementation and validation record is
+[native POS foundations (17 November 2026)](../../docs/research/native-pos-foundations-2026-11-17.md).
+Coordinator validation is in progress. That record lists implementation scope,
+proof status and remaining validation; this README makes no new test or emulator
+pass claim. The Shop Lightning work in this batch is an owner-app readiness
+report only. **The native checkout still has no integrated Lightning tender
+path.**
 
 ## Pairing and fixture setup
 
@@ -55,87 +86,86 @@ the repository. It refuses to fetch missing Rust targets and uses Cargo's
 offline mode. The counter FFI is built with the artifact-only
 `checkout-regtest` feature, which is forbidden for non-Regtest records; the
 normal Counter and Owner build paths do not enable it. The Android native
-libraries are the repository's `openbmt-counter-ffi` and QR JNI plus the Tor library from
-the SHA-256-pinned `tor-android` AAR described in `docs/DEPENDENCIES.md`.
-Square is not part of this build. Building the APK does not establish that it
-has been run on a device or that the end-to-end Regtest payment path works.
+libraries are the repository's `openbmt-counter-ffi` and QR JNI plus the Tor
+library from the SHA-256-pinned `tor-android` AAR described in
+`docs/DEPENDENCIES.md`. Square is not part of this build. Building the APK does
+not establish that it has been run on a device or that the end-to-end Regtest
+payment path works.
 
-## Cash prototype limits
+## Cash and tender limits
 
-The cash path records a cashier-entered payment in the durable ledger. It does
-not provide cash refunds, drawer automation, register shifts, denomination
-tracking, or cash reconciliation. Cash is offered for eligible USD balances
-when earlier tender outcomes are resolved and the sale does not require owner review. A
-resolved card or canceled Bitcoin attempt can leave a balance eligible for cash.
-SAT-priced sales do not offer cash.
+Cash is offered for eligible USD balances when earlier tender outcomes are
+resolved and the sale does not require owner review. SAT-priced sales do not
+offer cash. Cash refunds, drawer automation, denomination tracking, and
+physical cash verification are not provided. The Square path is Sandbox-only;
+a virtual reader or Sandbox approval does not establish production processing
+or physical-hardware support. Unknown provider results remain pending until
+reconciled.
 
-## Sales history
+## Sales history and local journal
 
-Sales history searches saved receipt IDs and immutable basket item names without
-remote queries. Tender filters cover Bitcoin, card, and cash; status filters
-cover paid, unpaid, and needs review. Search filters are stored in the Activity
-saved-state bundle, so they survive opening a receipt and returning to history.
-
-## Local event journal foundation
-
-Ledger version 6 adds a local, append-only event journal. The native checkout
-initializes its journal epoch during startup before showing checkout UI; this
-also seeds the current sale versions when upgrading an existing ledger. Journal
-data remains in app-private storage and is not exported by the cashier UI. There
-are no webhooks, remote delivery, staff tooling, or complete team workflows in
-this prototype.
+Sales history searches saved receipt IDs and immutable basket item names
+without remote queries. Tender filters cover Bitcoin, card and cash; status
+filters cover paid, unpaid and needs review. Search filters are stored in the
+Activity saved-state bundle. The local append-only checkout event journal is
+initialized before checkout UI is served. Journal data remains in app-private
+storage and is not exported by the cashier UI. There are no webhooks, remote
+delivery, or complete team workflows in this prototype.
 
 ## Limits
 
-This is a checkout integration prototype, not a release app or a security
-review. It has not been independently audited. Regtest and the developer quote
-are mandatory. The on-screen status comes from the counter node's watcher and
-the durable ledger. Bitcoin/card payment states require their recorded evidence; cash is an explicit cashier acknowledgment. Cancellation records a
-request and retains the attempt so late payment evidence can still be
-reconciled. A Square Sandbox approval is not completion, and uncertain card
-results remain pending until reconciled.
+This remains an experimental checkout integration, not a merchant-ready
+release or security review. Regtest and the fixed developer quote are mandatory.
+The on-screen Bitcoin status comes from the counter node's watcher and durable
+ledger. Bitcoin/card payment states require recorded evidence; cash is an
+explicit cashier acknowledgment. Cancellation records a request and retains
+the attempt so late payment evidence can still be reconciled. A Square Sandbox
+approval is not completion, and uncertain card results remain pending until
+reconciled.
 
-## Validation on 16 November 2026
+Staff/operator labels are not authentication and no staff role authorization
+is implemented. Physical devices, production card provider approval, merchant
+onboarding, independent Lightning recovery, actual merchant shifts, and
+mainnet/real-funds gates remain open. Partial native UI and model tests do not
+establish POS parity or merchant readiness. The browser checkout is a separate
+explicitly labeled simulation and does not use these native payment
+observations.
 
-The coordinator built both Android ABIs, the APK and Square SDK module, and
-verified matching native method signatures. The milestone date is 16 November
-in America/New_York (17 November UTC). The checkout now saves a native
-basket as an immutable sale snapshot: one latte at $5.50 and one bagel at $4.50,
-for $10.00 total, in ledger version 4. A force-stop before tender creation
-restored the same sale ledger and allowed tender creation to resume. The
-preceding version-3 ledger remains preserved.
-JVM migration tests passed for version 2 and 3 records, including
-conservative handling of historical refund state.
+## Historical validation milestone: 16 November 2026
 
-On the API 35 Android emulator, the app created a 10,000-sat Bitcoin request on
-an isolated Bitcoin Core 32.1 Regtest node. A 4,000-sat confirmed payment was
-observed as partial. After force-stopping and restarting the app, the identical
-ledger was restored and the same address presented the 6,000-sat remainder.
-After the remainder was paid, the sale became paid and the itemized receipt was
-restored unchanged after another force-stop. These are actual Core transactions
-and native FFI observations, not simulated or manually marked payment states.
+The following is the prior November 16 milestone, not validation of the current
+unpublished native batch. At that milestone, the coordinator built both Android
+ABIs, the APK and Square SDK module, and verified matching native method
+signatures. The checkout saved a native sample basket as an immutable sale
+snapshot in ledger version 4; force-stop recovery restored the sale, and the
+preceding version-3 ledger remained preserved. JVM migration tests passed for
+version 2 and 3 records, including conservative handling of historical refund
+state.
+
+On the API 35 Android emulator, that milestone's app created a 10,000-sat
+Bitcoin request on an isolated Bitcoin Core 32.1 Regtest node. A 4,000-sat
+confirmed payment was observed as partial. After force-stop and restart, the
+same address showed the 6,000-sat remainder. Paying the remainder completed
+the sale, and the itemized receipt restored unchanged after another force-stop.
+These were actual Core transactions and native FFI observations, not simulated
+or manually marked payment states.
 
 The Square SDK path used Mobile Payments SDK 2.7.0 in the same cart. A virtual
 card payment for $10.00 completed; Square's independent Payments API result
-matched the native payment ID/reference. Square Sandbox and a virtual reader
-were used, not production processing or physical hardware. See the separate
+matched the native payment ID/reference. This used Square Sandbox and a virtual
+reader, not production processing or physical hardware. See the separate
 [Square validation record](square-sandbox/README.md#validation-on-16-november-2026).
 
-The native checkout's limits remain: Regtest only, fixed developer exchange
-rate, no wallet spending key, no Lightning payment path, and no physical-device,
-iOS, production-reader, catalog/inventory, merchant onboarding, or adoption
-validation. The cart is a test fixture, not a merchant catalog. This prototype
-does not reproduce Square's full POS interface or feature set. The browser
-checkout remains an explicitly labeled simulation and does not use these native
-payment observations.
+The historical standalone foundations validation also exercised the ledger,
+history, receipt and event JVM harness, and the prior cash flow on an Android
+emulator: a $5 cash entry against a $10 sample basket was refused, $20 tender
+showed $10 change, and the saved cash ledger/receipt survived force-stop and
+relaunch. History filters, no-match search, reset and receipt copy were
+exercised. That evidence used synthetic cash acknowledgment and no additional
+card or Bitcoin payment. See the
+[captured November 16 evidence](../../tools/merchant-acceptance-investigation/evidence/standalone-foundations-2026-11-16.json).
 
-## Standalone foundation validation
-
-The full ledger/history/receipt/event JVM harness passed. The final Regtest APK
-and Square Sandbox module built with matching native libraries for both ABIs;
-signature and 16 KiB alignment checks passed. On the Android emulator, a $10
-sample basket refused a $5 cash entry, showed $10 change from $20, and retained
-the identical saved cash ledger and itemized receipt after force-stop/relaunch.
-History tender/status filters, no-match search, reset, and receipt copy were
-exercised. This used synthetic cash acknowledgment and no additional card or
-Bitcoin payment. The [captured evidence](../../tools/merchant-acceptance-investigation/evidence/standalone-foundations-2026-11-16.json) records scope and limits.
+Those historical observations do not validate the current catalog, pricing
+snapshot, inventory, cash-session, reporting or Shop Lightning changes. Current
+coordinator validation remains in progress; see the linked native foundations
+record for exact scope and outstanding checks.

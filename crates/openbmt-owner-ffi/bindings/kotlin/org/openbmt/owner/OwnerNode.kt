@@ -306,6 +306,10 @@ private const val TAG_ORDER_WHY_VIEW_REFUNDED = 6
 private const val TAG_ORDER_WHY_VIEW_NOT_POSSIBLE = 7
 private const val TAG_ORDER_WHY_VIEW_NO_CHANNEL = 8
 private const val TAG_ORDER_WHY_VIEW_STOPPED = 9
+private const val TAG_RECEIVING_BACKUP_VIEW_UNKNOWN = 0
+private const val TAG_RECEIVING_BACKUP_VIEW_AWAY = 1
+private const val TAG_RECEIVING_BACKUP_VIEW_BEHIND = 2
+private const val TAG_RECEIVING_BACKUP_VIEW_CAUGHT_UP = 3
 private const val TAG_SHOP_LIGHTNING_ACTION_SET = 0
 private const val TAG_SHOP_LIGHTNING_ACTION_CHANGE = 1
 private const val TAG_SHOP_LIGHTNING_ACTION_REMOVE = 2
@@ -1128,6 +1132,23 @@ enum class OrderWhy {
     None, FeeAboveMax, CannotPay, Refused, Expired, PaymentFailed, Refunded, NotPossible, NoChannel, Stopped,
 }
 
+/** Backup state in the counter's timestamped receiving snapshot. */
+enum class ReceivingBackup { Unknown, Away, Behind, CaughtUp }
+
+/** A timestamped advisory snapshot from the Lightning node. It contains no amount-specific quote. */
+class ReceivingSnapshot(
+    val capturedAtUnix: Long,
+    val chainHeight: Long,
+    val confirmationDepth: Long,
+    val confirmedRoomMsat: Long,
+    val pendingOrUnknownChannels: Int,
+    val backupState: ReceivingBackup,
+    val strictPendingWrites: Long,
+    val backgroundPendingWrites: Long,
+    val lastDeviceStoreUnix: Long,
+    val chainHealthy: Boolean,
+)
+
 /** The Shop Lightning the settings in force name (SL-71): the cap and the provider the page shows are these (SL-78). */
 class ShopLightningHeld(
     /** The Lightning counter, 32 bytes. */
@@ -1164,6 +1185,7 @@ class LightningReport(
     val lostFundingSales: List<Long>,
     /** How many sales were named lost in all: more than listed when the list kept only the newest. */
     val lostFundingTotal: Long,
+    val receiving: ReceivingSnapshot? = null,
 )
 
 /**
@@ -2776,11 +2798,23 @@ private fun Reader.orderWhy(): OrderWhy =
         else -> tag("OrderWhyView")
     }
 
+private fun Reader.receivingBackup(): ReceivingBackup =
+    when (u8()) {
+        TAG_RECEIVING_BACKUP_VIEW_UNKNOWN -> ReceivingBackup.Unknown
+        TAG_RECEIVING_BACKUP_VIEW_AWAY -> ReceivingBackup.Away
+        TAG_RECEIVING_BACKUP_VIEW_BEHIND -> ReceivingBackup.Behind
+        TAG_RECEIVING_BACKUP_VIEW_CAUGHT_UP -> ReceivingBackup.CaughtUp
+        else -> tag("ReceivingBackupView")
+    }
+
+private fun Reader.receivingSnapshot(): ReceivingSnapshot =
+    ReceivingSnapshot(u64(), u32().toLong(), u32().toLong(), u64(), u16(), receivingBackup(), u32().toLong(), u32().toLong(), u64(), bool())
+
 private fun Reader.shopLightningHeld(): ShopLightningHeld =
     ShopLightningHeld(bytes(), bytes(), bytes(), bytes(), string(), u64(), u64())
 
 private fun Reader.lightningReport(): LightningReport =
-    LightningReport(u64(), u64(), u64(), u64(), u64(), u64(), notOffered(), lsps1Offer(), orderState(), orderWhy(), u64(), list { u32() }, u32())
+    LightningReport(u64(), u64(), u64(), u64(), u64(), u64(), notOffered(), lsps1Offer(), orderState(), orderWhy(), u64(), list { u32() }, u32(), option { receivingSnapshot() })
 
 internal fun Reader.shopLightningState(): ShopLightningState =
     ShopLightningState(

@@ -146,7 +146,7 @@ stop_pid() { # name
   PIDS[$1]=
 }
 cleanup() {
-  exec 3>&- 4>&- 2>/dev/null || true
+  exec 3>&- 4>&- || true
   stop_pid counter
   stop_pid other
   stop_pid box
@@ -289,9 +289,9 @@ start_counter() { # name data-dir log extra args...
   if [ "$name" = counter ]; then exec 3<>"$fifo"; else exec 4<>"$fifo"; fi
   : >"$log"
   if [ "$name" = counter ]; then
-    "$COUNTER_BIN" "$data" "127.0.0.1:$BTC_P2P" --regtest-single-peer --own-wallet test "$@" <&3 >"$log" 2>&1 &
+    "$COUNTER_BIN" "$data" "127.0.0.1:$BTC_P2P" --regtest-single-peer --own-wallet test --nonstarter-test-wallet "$@" <&3 >"$log" 2>&1 &
   else
-    "$COUNTER_BIN" "$data" "127.0.0.1:$BTC_P2P" --regtest-single-peer --own-wallet test "$@" <&4 >"$log" 2>&1 &
+    "$COUNTER_BIN" "$data" "127.0.0.1:$BTC_P2P" --regtest-single-peer --own-wallet test --nonstarter-test-wallet "$@" <&4 >"$log" 2>&1 &
   fi
   PIDS[$name]=$!
   local i
@@ -312,7 +312,7 @@ stop_c() {
   local i
   for i in $(seq 1 60); do kill -0 "${PIDS[counter]}" 2>/dev/null || break; sleep 0.5; done
   stop_pid counter
-  exec 3>&- 2>/dev/null || true
+  exec 3>&- || true
 }
 xcmd() { # command [seconds] ; the counter
   local before i n
@@ -336,6 +336,21 @@ xcmd() { # command [seconds] ; the counter
 kv() { # line key
   sed -nE "s/^(.* )?$2=([^ ]*).*/\2/p" <<<"$1" | head -1
 }
+await_report_field() { # key regex seconds; writes the newest shop-report line to REPORT_LINE
+  local key=$1 pattern=$2 seconds=${3:-30} i value
+  REPORT_LINE=
+  for i in $(seq 1 "$seconds"); do
+    if ! xcmd shop-report 10; then
+      REPORT_LINE=$(grep '^shop-report ' <<<"$LAST" | head -1)
+      return 1
+    fi
+    REPORT_LINE=$(grep '^shop-report ' <<<"$LAST" | head -1)
+    value=$(kv "$REPORT_LINE" "$key")
+    if [[ "$value" =~ $pattern ]]; then return 0; fi
+    sleep 0.5
+  done
+  return 1
+}
 # The counter has the chain's tip and a healthy check.
 await_tip() {
   local tip i
@@ -347,6 +362,8 @@ await_tip() {
   return 1
 }
 start_c || die "the counter did not start: $(tail -3 "$LOG_C")"
+xcmd "shop-settings on 2"
+grep -q "^settings taken version=2" <<<"$LAST" || die "the wallet-authorized Shop Lightning settings were not taken: $LAST"
 await_tip || die "the counter did not reach the tip: $LAST"
 say "The counter is at height $(bcli getblockcount), linked to the Box"
 
@@ -459,6 +476,70 @@ check "SL-40, SL-42: the Lightning counter offers an invoice for the first sale"
 STATE_BEFORE=$(sale_state "$S1")
 [ "$STATE_BEFORE" = NotPaidYet ]
 check "the sale is not paid before the payer pays ($STATE_BEFORE)" $?
+pay "$INVOICE" 30s &
+PAYER=$!
+wait "$PAYER"
+FIRST_PAY_RC=$?
+cp "$BASE/pay.out" "$BASE/pay-first-attempt.out"
+FIRST_PAY_STATE=$(sale_state "$S1")
+FIRST_FAIL_CLOSED=1
+if [ "$FIRST_PAY_RC" -ne 0 ] &&
+  grep -q "Payment status: FAILED, reason: FAILURE_REASON_INCORRECT_PAYMENT_DETAILS" "$BASE/pay-first-attempt.out" &&
+  [ "$FIRST_PAY_STATE" = NotPaidYet ]; then
+  FIRST_FAIL_CLOSED=0
+fi
+check "SL-21 safety: the first zero-confirmation HTLC is rejected and leaves the sale unpaid (payer rc $FIRST_PAY_RC; state $FIRST_PAY_STATE; $(tail -1 "$BASE/pay-first-attempt.out"))" "$FIRST_FAIL_CLOSED"
+[ "$FIRST_FAIL_CLOSED" = 0 ] || die "the zero-confirmation attempt did not fail closed; refusing a second payment"
+[ "$(lsp_channels_with_shop)" = 1 ]
+check "SL-28: the provider holds one channel with the shop's node ($NODE_ID)" $?
+await_report_field pending_or_unknown_channels '^[1-9][0-9]*$' 30 || true
+REPORT_LINE=${REPORT_LINE:-$(grep '^shop-report ' <<<"$LAST" | head -1)}
+note "$REPORT_LINE"
+REPORT_OK=1
+if [ -n "$REPORT_LINE" ] &&
+  [ "$(kv "$REPORT_LINE" stored_at)" != 0 ] &&
+  [ "$(kv "$REPORT_LINE" receiving_present)" = true ] &&
+  [[ "$(kv "$REPORT_LINE" receiving_at)" =~ ^[1-9][0-9]*$ ]] &&
+  [[ "$(kv "$REPORT_LINE" chain_height)" =~ ^[1-9][0-9]*$ ]] &&
+  [[ "$(kv "$REPORT_LINE" confirmation_depth)" =~ ^[1-9][0-9]*$ ]] &&
+  [[ "$(kv "$REPORT_LINE" pending_or_unknown_channels)" =~ ^[1-9][0-9]*$ ]] &&
+  [ "$(kv "$REPORT_LINE" confirmed_room_msat)" = 0 ] &&
+  [[ "$(kv "$REPORT_LINE" backup_state)" =~ ^(Away|Behind|CaughtUp)$ ]] &&
+  [[ "$(kv "$REPORT_LINE" strict_pending_writes)" =~ ^[0-9]+$ ]] &&
+  [[ "$(kv "$REPORT_LINE" background_pending_writes)" =~ ^[0-9]+$ ]] &&
+  [[ "$(kv "$REPORT_LINE" last_device_store_at)" =~ ^[0-9]+$ ]] &&
+  [[ "$(kv "$REPORT_LINE" chain_healthy)" =~ ^(true|false)$ ]]; then
+  REPORT_OK=0
+fi
+check "SL-78: the live report has a timestamped node snapshot; the first zero-conf JIT channel is pending, not confirmed capacity ($REPORT_LINE)" "$REPORT_OK"
+
+# LSPS2 opened the JIT channel in response to the first HTLC. The counter
+# fails that zero-confirmation attempt closed. Confirm the funding transaction
+# on Regtest and wait for the counter's own chain and report before retrying
+# the still-unpaid sale's same invoice.
+HEIGHT_BEFORE_CONFIRM=$(bcli getblockcount)
+mine 1 || die "could not mine the JIT channel funding confirmation"
+HEIGHT_AFTER_CONFIRM=$(bcli getblockcount)
+[ "$HEIGHT_AFTER_CONFIRM" -gt "$HEIGHT_BEFORE_CONFIRM" ] || die "Regtest did not advance for the JIT channel confirmation"
+await_tip || die "the counter did not reach the confirmation height $HEIGHT_AFTER_CONFIRM: $LAST"
+await_report_field pending_or_unknown_channels '^0$' 60 || die "the counter did not report the JIT channel confirmed: $REPORT_LINE"
+CONFIRMED_ROOM=$(kv "$REPORT_LINE" confirmed_room_msat)
+CONFIRM_HEIGHT=$(kv "$REPORT_LINE" chain_height)
+CONFIRM_DEPTH=$(kv "$REPORT_LINE" confirmation_depth)
+CONFIRMED_REPORT_OK=1
+if [[ "$CONFIRMED_ROOM" =~ ^[1-9][0-9]*$ ]] &&
+  [[ "$CONFIRM_HEIGHT" =~ ^[0-9]+$ ]] && [ "$CONFIRM_HEIGHT" -ge "$HEIGHT_AFTER_CONFIRM" ] &&
+  [[ "$CONFIRM_DEPTH" =~ ^[1-9][0-9]*$ ]]; then
+  CONFIRMED_REPORT_OK=0
+fi
+check "SL-78: retry waits for a current snapshot with confirmed receiving capacity and configured depth (target height $HEIGHT_AFTER_CONFIRM; $REPORT_LINE)" "$CONFIRMED_REPORT_OK"
+[ "$CONFIRMED_REPORT_OK" = 0 ] || die "the counter has not proved confirmed capacity; refusing to retry payment"
+STATE_BEFORE_RETRY=$(sale_state "$S1")
+[ "$STATE_BEFORE_RETRY" = NotPaidYet ] || die "sale $S1 is not unpaid before retry: $STATE_BEFORE_RETRY"
+
+# `pay` already uses LND's explicit --force for a failed payment hash. The
+# first attempt failed backwards without a preimage, so retry the same invoice
+# only after the funding confirmation satisfies the counter's policy.
 pay "$INVOICE" 90s &
 PAYER=$!
 PAIDSEEN=1
@@ -466,7 +547,7 @@ MONITOR_AT_PAID=1
 for _ in $(seq 1 240); do
   S=$(sale_state "$S1")
   if [ "$S" = PaidLightning ]; then
-    # The moment the counter says paid, what the Box holds is looked at.
+    # Check the Box's monitor at the first successful paid observation.
     box_has_monitor && MONITOR_AT_PAID=0
     PAIDSEEN=0
     break
@@ -475,14 +556,9 @@ for _ in $(seq 1 240); do
 done
 wait "$PAYER"
 PAYRC=$?
-check "SL-21: the first payment opens a channel through the provider and the sale is paid by Lightning (payer rc $PAYRC)" "$PAIDSEEN"
+check "SL-21: after funding confirmation the same invoice succeeds and the sale is paid by Lightning once (payer rc $PAYRC; $(tail -1 "$BASE/pay.out"))" "$([ "$PAIDSEEN" = 0 ] && [ "$PAYRC" = 0 ] && echo 0 || echo 1)"
+[ "$PAIDSEEN" = 0 ] && [ "$PAYRC" = 0 ] || die "the confirmed-channel payment did not succeed; inspect pay.out and the counter log"
 check "SL-21, LK-82: when the sale was first reported paid the Box already held the channel monitor ($(find "$BOX_LN_DIR" -type f 2>/dev/null | wc -l) files)" "$MONITOR_AT_PAID"
-[ "$(lsp_channels_with_shop)" = 1 ]
-check "SL-28: the provider holds one channel with the shop's node ($NODE_ID)" $?
-xcmd shop-report
-note "$(grep '^shop-report' <<<"$LAST")"
-[ "$(kv "$(grep '^shop-report' <<<"$LAST")" stored_at)" != 0 ]
-check "SL-78: the Lightning report says when the Box last stored the state" $?
 # The sale is given once: the same payment is not given again after a restart.
 stop_c
 start_c || die "the counter did not start again: $(tail -3 "$LOG_C")"
@@ -502,6 +578,11 @@ if await_offer "$S2" 45; then GOT=1; else GOT=0; fi
 note "with the Box away: $LNLINE"
 [ "$GOT" = 0 ] && grep -q "^lightning unavailable" <<<"$LNLINE" && [ -n "$SADDR" ]
 check "SL-41: with the Box stopped the sale has its on-chain address and no invoice ($LNLINE)" $?
+if [ "$GOT" = 0 ]; then
+  if await_report_field backup_state '^(Away|Behind)$' 30; then REPORT_BACKUP=0; else REPORT_BACKUP=1; fi
+  note "after the unavailable quote: $REPORT_LINE"
+  check "the live readiness snapshot reports the Box away or backup writes behind ($REPORT_LINE)" "$REPORT_BACKUP"
+fi
 # The Box comes back, from the same folder and port.
 LOG_BOX="$BASE/box2.log"
 : >"$LOG_BOX"
@@ -543,6 +624,8 @@ xother() { # command
   return 1
 }
 DONE_D=0
+xother "shop-settings on 2"
+grep -q "^settings taken version=2" <<<"$LAST" || die "the other counter's wallet-authorized settings were not taken: $LAST"
 for _ in $(seq 1 240); do
   xother status && grep -q "^status tip=$(bcli getblockcount) " <<<"$LAST" && break
   sleep 0.5
@@ -561,7 +644,7 @@ check "SL-70: the counter the settings do not name has an on-chain code, no Ligh
 echo quit >&4
 for _ in $(seq 1 40); do kill -0 "${PIDS[other]}" 2>/dev/null || break; sleep 0.5; done
 stop_pid other
-exec 4>&- 2>/dev/null || true
+exec 4>&- || true
 [ ! -e "$D_DATA/shop-seed.bin" ] && [ -z "$(find "$D_DATA" -ipath '*shop-lightning*' -type f 2>/dev/null)" ]
 check "SL-70: that counter made no Shop Lightning folder and no seed record" $?
 

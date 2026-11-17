@@ -11,11 +11,13 @@ data class ReceiptProjection(
     val paid: Boolean,
     val requiresReview: Boolean,
     val items: List<ReceiptItem>,
+    val pricing: CheckoutPricingSnapshot? = null,
     val tenders: List<ReceiptTender>,
     val refunds: List<ReceiptRefund>,
 )
 
-data class ReceiptItem(val name: String, val unitMinor: Long, val quantity: Int)
+data class ReceiptItem(val name: String, val unitMinor: Long, val quantity: Int, val modifiers: List<ReceiptModifier> = emptyList())
+data class ReceiptModifier(val name: String, val amountMinor: Long)
 data class ReceiptObservation(val state: String, val amountMinor: Long, val amountSats: Long)
 data class ReceiptTender(
     val tender: String,
@@ -42,7 +44,10 @@ object CheckoutReceipt {
             sale.saleId, sale.currency, sale.amountMinor, sale.receivedMinor,
             appliedMinor, sale.remainingMinor,
             sale.paid, sale.requiresReview,
-            sale.items.map { ReceiptItem(sanitizeName(it.name), it.unitMinor, it.quantity) },
+            if (sale.pricing == null) sale.items.map { ReceiptItem(sanitizeName(it.name), it.unitMinor, it.quantity) }
+            else sale.pricing!!.lines.map { line -> ReceiptItem(sanitizeName(line.name), line.unitMinor, line.quantity,
+                line.modifiers.map { ReceiptModifier(sanitizeName(it.name), it.amountMinor) }) },
+            sale.pricing,
             sale.attempts.map { attempt ->
                 val observations = when (attempt.tender) {
                     Tender.BITCOIN -> attempt.bitcoinEvidence.map { ev ->
@@ -89,6 +94,24 @@ object CheckoutReceipt {
         else receipt.items.forEach { item ->
             out.append(item.quantity).append(" × ").append(item.name).append(" — ")
                 .append(money(item.unitMinor, receipt.currency)).append(" each\n")
+            item.modifiers.forEach { modifier ->
+                out.append("  ").append(modifier.name).append(" modifier — +")
+                    .append(money(modifier.amountMinor, receipt.currency)).append(" each × ").append(item.quantity)
+                    .append(" = +").append(money(Math.multiplyExact(modifier.amountMinor, item.quantity.toLong()), receipt.currency)).append('\n')
+            }
+        }
+        receipt.pricing?.let { pricing ->
+            out.append("\nPrice details\n")
+            out.append("Subtotal: ").append(money(pricing.subtotalMinor, receipt.currency)).append('\n')
+            out.append("Order discount: ").append(if (pricing.discountMinor > 0) "−" else "")
+                .append(money(pricing.discountMinor, receipt.currency)).append('\n')
+            pricing.taxes.forEach { tax ->
+                out.append(safeLine(tax.name)).append(" (").append(tax.treatment.name.lowercase()).append(", ").append(formatRate(tax.rateBasisPoints))
+                    .append("%): ").append(if (tax.treatment == TaxTreatment.EXCLUSIVE) "+" else "included/extracted ")
+                    .append(money(tax.amountMinor, receipt.currency)).append('\n')
+            }
+            if (pricing.taxes.isEmpty()) out.append("Tax: ").append(money(pricing.taxMinor, receipt.currency)).append(" (not configured)\n")
+            out.append("Tip: +").append(money(pricing.tipMinor, receipt.currency)).append('\n')
         }
         out.append("Total: ").append(money(receipt.totalMinor, receipt.currency)).append('\n')
         out.append("Received / observed: ").append(money(receipt.observedMinor, receipt.currency)).append('\n')
@@ -132,6 +155,8 @@ object CheckoutReceipt {
             else -> throw IllegalArgumentException("receipt currency is not supported: $currency")
         }
     }
+
+    private fun formatRate(basisPoints: Int): String = "${basisPoints / 100}.${(basisPoints % 100).toString().padStart(2, '0')}"
 
     private fun sanitizeName(value: String): String = safeLine(value.take(160))
     private fun safeLine(value: String): String = buildString {

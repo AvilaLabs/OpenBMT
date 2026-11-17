@@ -8,7 +8,9 @@
 use openbmt_core::approval::{classify, ChangeClass};
 use openbmt_core::identity::DeviceId;
 use openbmt_core::settings::{ShopLightning, SignedSettings};
-use openbmt_link::shopln::{Lsps1Offer, NotOffered, OrderState, OrderWhy};
+use openbmt_link::shopln::{
+    Lsps1Offer, NotOffered, OrderState, OrderWhy, ReceivingBackupState, ReceivingSnapshot,
+};
 use openbmt_owner::{
     SettingsEdit, SettingsPreview, ShopLightningChange, ShopLightningEdit, ShopLightningSet,
 };
@@ -171,6 +173,93 @@ impl OrderWhyView {
     }
 }
 
+/// Backup status in the counter's timestamped receiving snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReceivingBackupView {
+    /// The counter could not make a live assessment.
+    Unknown,
+    /// The second device was not reachable at capture time.
+    Away,
+    /// The second device was reachable, but at least one write queue was not empty.
+    Behind,
+    /// The second device was reachable and both write queues were empty.
+    CaughtUp,
+}
+
+wire_unit_enum!(ReceivingBackupView {
+    Unknown = 0,
+    Away = 1,
+    Behind = 2,
+    CaughtUp = 3
+});
+
+impl ReceivingBackupView {
+    fn of(state: ReceivingBackupState) -> Self {
+        match state {
+            ReceivingBackupState::Unknown => Self::Unknown,
+            ReceivingBackupState::Away => Self::Away,
+            ReceivingBackupState::Behind => Self::Behind,
+            ReceivingBackupState::CaughtUp => Self::CaughtUp,
+        }
+    }
+}
+
+/// Versioned live-node facts for the owner page. The captured time is from
+/// the counter clock; the owner cannot verify that clock's alignment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReceivingSnapshotView {
+    /// Counter clock time when the node captured these facts, in seconds since 1970.
+    pub captured_at_unix: u64,
+    /// Chain tip height observed at capture; zero means unavailable.
+    pub chain_height: u32,
+    /// Number of funding confirmations the node requires, at least one.
+    pub confirmation_depth: u32,
+    /// Confirmed usable inbound capacity after the node's safety margin, in millisatoshis.
+    pub confirmed_room_msat: u64,
+    /// Usable channels whose funding is unconfirmed or unknown.
+    pub pending_or_unknown_channels: u16,
+    /// Reachability and synchronization state of the second device at capture.
+    pub backup_state: ReceivingBackupView,
+    /// Persistence writes waiting for the second device in the strict queue.
+    pub strict_pending_writes: u32,
+    /// Persistence writes waiting for the second device in the lazy queue.
+    pub background_pending_writes: u32,
+    /// Counter clock time of the last successful second-device write; zero if none.
+    pub last_device_store_unix: u64,
+    /// Whether the node considered its chain data healthy at capture.
+    pub chain_healthy: bool,
+}
+
+wire_record!(ReceivingSnapshotView {
+    captured_at_unix,
+    chain_height,
+    confirmation_depth,
+    confirmed_room_msat,
+    pending_or_unknown_channels,
+    backup_state,
+    strict_pending_writes,
+    background_pending_writes,
+    last_device_store_unix,
+    chain_healthy
+});
+
+impl ReceivingSnapshotView {
+    fn of(snapshot: &ReceivingSnapshot) -> Self {
+        Self {
+            captured_at_unix: snapshot.captured_at_unix,
+            chain_height: snapshot.chain_height,
+            confirmation_depth: snapshot.confirmation_depth,
+            confirmed_room_msat: snapshot.confirmed_room_msat,
+            pending_or_unknown_channels: snapshot.pending_or_unknown_channels,
+            backup_state: ReceivingBackupView::of(snapshot.backup_state),
+            strict_pending_writes: snapshot.strict_pending_writes,
+            background_pending_writes: snapshot.background_pending_writes,
+            last_device_store_unix: snapshot.last_device_store_unix,
+            chain_healthy: snapshot.chain_healthy,
+        }
+    }
+}
+
 /// The Shop Lightning the settings in force name (SL-71): the cap and the
 /// provider the page shows are these (SL-78).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -247,6 +336,9 @@ pub struct LightningReportView {
     /// How many sales were named lost in all: more than listed when the list
     /// kept only the newest.
     pub lost_funding_total: u32,
+    /// Absent for reports from older counters or when no live assessment was
+    /// available.
+    pub receiving: Option<ReceivingSnapshotView>,
 }
 
 wire_record!(LightningReportView {
@@ -262,7 +354,8 @@ wire_record!(LightningReportView {
     order_why,
     order_fee_sats,
     lost_funding_sales,
-    lost_funding_total
+    lost_funding_total,
+    receiving
 });
 
 impl LightningReportView {
@@ -281,6 +374,7 @@ impl LightningReportView {
             order_fee_sats: t.report.order_fee_sats,
             lost_funding_sales: t.report.lost_funding_sales.clone(),
             lost_funding_total: t.report.lost_funding_total,
+            receiving: t.report.receiving.as_ref().map(ReceivingSnapshotView::of),
         }
     }
 }

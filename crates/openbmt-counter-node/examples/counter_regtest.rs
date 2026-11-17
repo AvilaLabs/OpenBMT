@@ -6,6 +6,7 @@
 //! counter_regtest <data dir> <node address> [--regtest-single-peer]
 //!     [--heartbeat-max-age <seconds>] [--customers-off-wifi]
 //!     [--regtest-own-node] [--own-wallet <description>]
+//!     [--nonstarter-test-wallet]
 //!     [--relay <address> --relay-key <hex>] [--box-key <hex>] [--box-owner-fixed]
 //!     [--shop-ln <node id> <provider id> <provider address> <cap sats> <max fee sats>]
 //!     [--shop-ln-other]
@@ -56,12 +57,14 @@
 //! commands `switch-take`, `switch-state`, `switch-same`, `switch-kept` and
 //! `switch-different` below drive the switch.
 //!
-//! `--shop-ln ...` puts a `shop_lightning` block in the settings the
-//! own-wallet record is made with (SL-70, SL-71): this counter is the
-//! Lightning counter (with `--shop-ln-other`, a counter that is not this one), the Box
-//! of `--box-key` is the second device, and the node ID and the provider are
-//! the ones given. The counter's seed record is the file `shop-seed.bin` in
-//! the data directory, which the app would keep sealed. The wallet of
+//! `--shop-ln ...` supplies the Shop Lightning settings used by the
+//! `shop-settings on <version>` fixture command (SL-70, SL-71): the counter
+//! must first pair with its own wallet using ordinary first settings, then
+//! the wallet signs this later Redirect change (CR-231, AP-14). This counter
+//! is the Lightning counter (with `--shop-ln-other`, a counter that is not
+//! this one), the Box of `--box-key` is the second device, and the node ID and
+//! provider are the ones given. The counter's seed record is `shop-seed.bin`
+//! in the data directory, which the app would keep sealed. The wallet of
 //! `--own-wallet test` is a fixed single-key wallet. `--shop-ln-id` prints
 //! the node ID of a seed and stops. Commands: `shop-seed <128 hex>` (SL-72,
 //! SL-76), `shop-status` (SL-41, SL-76, SL-77; it deletes the file when the
@@ -207,9 +210,10 @@ use openbmt_counter::{
     refund_destination, Actor, Amount, BatchHeld, Currency, HeartbeatView, Pairing, Rate,
     RateSource, RefundAsk, RefundRequest, Report, Role as CashierRole,
 };
+use openbmt_counter_node::dirstore::DirStore;
 use openbmt_counter_node::{
-    CounterLink, CounterLinkConfig, DriverPort, Node, NodeConfig, OwnCeremony, OwnPairingRecord,
-    MAX_OWN_ASKS,
+    effective_settings_of, CounterLink, CounterLinkConfig, DriverPort, Node, NodeConfig,
+    OwnCeremony, OwnPairingRecord, PairedRecord, MAX_OWN_ASKS,
 };
 use openbmt_courier::{Courier, CourierConfig, FirstStart};
 use openbmt_link::{ClientConfig, Role, Route};
@@ -225,6 +229,7 @@ use openbmt_watch::{
 const USAGE: &str = "usage: counter_regtest <data dir> <node address> [--regtest-single-peer] \
                      [--heartbeat-max-age <seconds>] [--customers-off-wifi] \
                      [--regtest-own-node] [--own-wallet <description>] \
+                     [--nonstarter-test-wallet] \
                      [--relay <address> --relay-key <hex>] [--box-key <hex>] \
                      [--box-owner-fixed] \
                      [--shop-ln <node id> <provider id> <provider address> <cap sats> \
@@ -276,7 +281,7 @@ fn test_wallet_text() -> Result<String, String> {
 }
 
 /// SL-71: the Box as a device and a Box of the settings, and the
-/// `shop_lightning` block, when `--shop-ln` was given.
+/// `shop_lightning` block for the authorized post-pair settings change.
 fn shop_ln_settings(settings: &mut Settings, counter: &Identity) -> Result<(), String> {
     let (Some(plan), Some(box_key)) = (SHOP_LN.get(), BOX_KEY.get()) else {
         return Ok(());
@@ -595,10 +600,15 @@ fn health_fn(seen: &Arc<Mutex<Seen>>, single_peer: bool) -> openbmt_counter_node
 
 /// The pairing record of a counter paired with the shop's own wallet, from
 /// the file when there is one, and otherwise made by the whole ceremony of
-/// CR-227 to CR-232: the offer of a starter wallet (CR-256), the counter's
-/// request, the owner's bundle (the owner is the fixed test key) and the
-/// counter's finish.
-fn own_record(dir: &str, wallet: &PinnedWallet) -> Result<OwnPairingRecord, String> {
+/// CR-227 to CR-232: the offer of a wallet, the counter's request, the owner's
+/// bundle (the owner is the fixed test key) and the counter's finish. The
+/// test-only flag selects a nonstarter offer so its later wallet-authorized
+/// Shop Lightning Redirect is permitted; first settings never name it (CR-231).
+fn own_record(
+    dir: &str,
+    wallet: &PinnedWallet,
+    nonstarter_test_wallet: bool,
+) -> Result<OwnPairingRecord, String> {
     let path = Path::new(dir).join(OWN_RECORD_FILE);
     if let Ok(bytes) = std::fs::read(&path) {
         return OwnPairingRecord::from_bytes(&bytes).map_err(|e| format!("the record: {e}"));
@@ -608,7 +618,7 @@ fn own_record(dir: &str, wallet: &PinnedWallet) -> Result<OwnPairingRecord, Stri
     let now = now_secs();
     let offer = OwnOffer::new(Network::Bitcoin, owner.device_id(), 0, wallet.clone())
         .map_err(|e| format!("the offer: {e}"))?
-        .with_starter(true);
+        .with_starter(!nonstarter_test_wallet);
     let (mut ceremony, shown) =
         OwnCeremony::begin(&offer.to_bytes(), now).map_err(|e| e.to_string())?;
     say(format!(
@@ -626,7 +636,6 @@ fn own_record(dir: &str, wallet: &PinnedWallet) -> Result<OwnPairingRecord, Stri
     settings.version = 1;
     settings.devices.insert(counter.device_id());
     settings.counters.insert(counter.device_id(), 10_000);
-    shop_ln_settings(&mut settings, &counter)?;
     let signed = SignedSettings {
         owner_sig: settings.sign(&owner),
         approver_sig: None,
@@ -656,15 +665,25 @@ fn setup_own(
     peer: SocketAddr,
     single_peer: bool,
     wallet_text: &str,
+    nonstarter_test_wallet: bool,
     seen: &Arc<Mutex<Seen>>,
 ) -> Result<Setup, String> {
     let wallet = PinnedWallet::from_text(wallet_text).map_err(|e| format!("the wallet: {e}"))?;
-    let record = own_record(dir, &wallet)?;
+    let record = own_record(dir, &wallet, nonstarter_test_wallet)?;
     let counter = identity(&COUNTER_SECRET)?;
     let policy = BatchPolicy {
         min_count: openbmt_core::batch::DEFAULT_MIN_COUNT,
     };
-    let settings = record.settings.settings.clone();
+    // Use the same verified persisted settings source as the app's normal
+    // startup path. After shop-settings accepts a wallet-signed change, the
+    // pairing record remains the immutable floor; the settings file carries
+    // the current signed version that satisfies CR-163 on restart.
+    let paired = PairedRecord::OwnWallet(Box::new(record.clone()));
+    let store = DirStore::open(dir).map_err(|e| format!("settings store: {e}"))?;
+    let settings = effective_settings_of(&store, &paired)
+        .map_err(|e| format!("effective settings: {e}"))?
+        .signed
+        .settings;
     let mut driver = DriverConfig::new(Network::Regtest, 0);
     driver.allow_local = true;
     driver.fixed_peers = vec![peer];
@@ -957,15 +976,37 @@ fn command<P: DriverPort>(
         },
         Some("shop-report") => match node.shop_lightning_report() {
             None => say("shop-report none"),
-            Some(r) => say(format!(
-                "shop-report balance={} room={} fees={} stored_at={} swept_at={} not_offered={:?}",
-                r.balance_sats,
-                r.receive_room_sats,
-                r.opening_fees_paid_sats,
-                r.last_stored_at,
-                r.last_sweep_at,
-                r.not_offered
-            )),
+            Some(r) => {
+                let receiving = r.receiving.as_ref().map_or_else(
+                    || {
+                        "receiving_present=false receiving_at=0 chain_height=0 confirmation_depth=0 confirmed_room_msat=0 pending_or_unknown_channels=0 backup_state=Unknown strict_pending_writes=0 background_pending_writes=0 last_device_store_at=0 chain_healthy=false".to_string()
+                    },
+                    |s| {
+                        format!(
+                            "receiving_present=true receiving_at={} chain_height={} confirmation_depth={} confirmed_room_msat={} pending_or_unknown_channels={} backup_state={:?} strict_pending_writes={} background_pending_writes={} last_device_store_at={} chain_healthy={}",
+                            s.captured_at_unix,
+                            s.chain_height,
+                            s.confirmation_depth,
+                            s.confirmed_room_msat,
+                            s.pending_or_unknown_channels,
+                            s.backup_state,
+                            s.strict_pending_writes,
+                            s.background_pending_writes,
+                            s.last_device_store_unix,
+                            s.chain_healthy,
+                        )
+                    },
+                );
+                say(format!(
+                    "shop-report balance={} room={} fees={} stored_at={} swept_at={} not_offered={:?} {receiving}",
+                    r.balance_sats,
+                    r.receive_room_sats,
+                    r.opening_fees_paid_sats,
+                    r.last_stored_at,
+                    r.last_sweep_at,
+                    r.not_offered
+                ));
+            }
         },
         Some("lightning") => {
             let index: u32 = number(words.next(), "the index")?;
@@ -1313,6 +1354,7 @@ fn run(args: &[String]) -> Result<(), String> {
     let mut customers_off_wifi = false;
     let mut own_node = false;
     let mut own_wallet: Option<String> = None;
+    let mut nonstarter_test_wallet = false;
     let mut shop_ln_other = false;
     let mut relay: Option<SocketAddr> = None;
     let mut relay_key: Option<DeviceId> = None;
@@ -1350,6 +1392,8 @@ fn run(args: &[String]) -> Result<(), String> {
             } else {
                 text.clone()
             });
+        } else if arg == "--nonstarter-test-wallet" {
+            nonstarter_test_wallet = true;
         } else if arg == "--shop-ln-id" {
             let text = args.next().ok_or(USAGE)?;
             let seed: [u8; 64] = unhex(Some(text))?
@@ -1406,7 +1450,7 @@ fn run(args: &[String]) -> Result<(), String> {
         mut config,
         settings,
     } = match own_wallet.as_deref() {
-        Some(text) => setup_own(dir, peer, single_peer, text, &seen)?,
+        Some(text) => setup_own(dir, peer, single_peer, text, nonstarter_test_wallet, &seen)?,
         None => setup(
             dir,
             peer,

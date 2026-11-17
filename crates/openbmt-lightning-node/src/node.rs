@@ -471,6 +471,13 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+fn backup_is_caught_up(device: DeviceSnapshot, background_pending_writes: usize) -> bool {
+    device.state == DeviceState::Reachable
+        && device.last_stored_unix > 0
+        && device.pending_writes == 0
+        && background_pending_writes == 0
+}
+
 /// The shop's Lightning node, running.
 pub struct Node {
     shared: Arc<Shared>,
@@ -1356,10 +1363,8 @@ impl Node {
         // separate lazy backlog, so include it and require a successful
         // device observation before reporting the backup caught up.
         let backup_reachable = device.state == DeviceState::Reachable;
-        let backup_caught_up = backup_reachable
-            && device.last_stored_unix > 0
-            && device.pending_writes == 0
-            && self.shared.store.pending_background_writes() == 0;
+        let backup_caught_up =
+            backup_is_caught_up(device, self.shared.store.pending_background_writes());
         let channels = self.shared.manager.list_usable_channels();
         let facts: Vec<ChannelFact> = channels
             .iter()
@@ -1384,6 +1389,13 @@ impl Node {
             opening_fee_msat,
             max_opening_fee_msat,
         })
+    }
+
+    /// The number of lazy persistence writes still waiting for the second
+    /// device. This is exposed for the Shop Lightning advisory report only;
+    /// it is not a payment or claim gate.
+    pub fn pending_background_writes(&self) -> usize {
+        self.shared.store.pending_background_writes()
     }
 
     /// The second device's status (SL-23).
@@ -2940,6 +2952,26 @@ mod tests {
     use crate::testutil::temp_dir;
     use lightning::routing::router::Router;
     use std::str::FromStr;
+
+    #[test]
+    fn receiving_backup_is_behind_when_either_write_queue_has_backlog() {
+        let mut device = DeviceSnapshot {
+            state: DeviceState::Reachable,
+            pending_writes: 0,
+            last_stored_unix: 100,
+            stored_writes: 1,
+        };
+        assert!(backup_is_caught_up(device, 0));
+        assert!(!backup_is_caught_up(device, 1));
+        device.pending_writes = 1;
+        assert!(!backup_is_caught_up(device, 0));
+        device.pending_writes = 0;
+        device.last_stored_unix = 0;
+        assert!(!backup_is_caught_up(device, 0));
+        device.last_stored_unix = 100;
+        device.state = DeviceState::Away;
+        assert!(!backup_is_caught_up(device, 0));
+    }
 
     fn claim_channel(
         id: u8,

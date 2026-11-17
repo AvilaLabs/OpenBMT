@@ -10,7 +10,10 @@
 use std::collections::BTreeSet;
 
 use openbmt_core::settings::{Settings, SignedSettings};
-use openbmt_link::shopln::{LightningReport, Lsps1Offer, NotOffered, OrderState, OrderWhy};
+use openbmt_link::shopln::{
+    LightningReport, Lsps1Offer, NotOffered, OrderState, OrderWhy, ReceivingBackupState,
+    ReceivingSnapshot,
+};
 use openbmt_owner_node::TakenReport;
 
 use super::kit::*;
@@ -382,6 +385,69 @@ fn sl_71_an_edit_that_is_missing_what_its_step_needs_is_refused() {
 }
 
 #[test]
+fn sl_78_the_owner_ffi_receiving_snapshot_matches_the_kotlin_jvm_golden() {
+    fn bytes_for(receiving: Option<shop_lightning::ReceivingSnapshotView>) -> Vec<u8> {
+        let view = shop_lightning::ShopLightningView {
+            on: true,
+            own_wallet: false,
+            counters: vec![vec![0x11; 32]],
+            boxes: Vec::new(),
+            held: None,
+            report: Some(shop_lightning::LightningReportView {
+                taken_at: 1_700_000_100,
+                balance_sats: 123_456,
+                receive_room_sats: 7_890,
+                opening_fees_paid_sats: 42,
+                last_stored_at: 1_699_990_000,
+                last_sweep_at: 1_699_980_000,
+                not_offered: shop_lightning::NotOfferedView::Offered,
+                lsps1: shop_lightning::Lsps1OfferView::NotOffered,
+                order_state: shop_lightning::OrderStateView::None,
+                order_why: shop_lightning::OrderWhyView::None,
+                order_fee_sats: 0,
+                lost_funding_sales: vec![7, 9],
+                lost_funding_total: 10,
+                receiving,
+            }),
+        };
+        let mut bytes = b"OBMl\x01\x00".to_vec();
+        crate::codec::Put::put(&view, &mut bytes);
+        bytes
+    }
+    fn from_hex(hex: &str) -> Vec<u8> {
+        let (chunks, remainder) = hex.as_bytes().as_chunks::<2>();
+        assert!(
+            remainder.is_empty(),
+            "hex fixture has an odd number of digits"
+        );
+        chunks
+            .iter()
+            .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+            .collect()
+    }
+    let snapshot = shop_lightning::ReceivingSnapshotView {
+        captured_at_unix: 1_700_000_101,
+        chain_height: 840_001,
+        confirmation_depth: 3,
+        confirmed_room_msat: 123_456_789,
+        pending_or_unknown_channels: 2,
+        backup_state: shop_lightning::ReceivingBackupView::Behind,
+        strict_pending_writes: 4,
+        background_pending_writes: 5,
+        last_device_store_unix: 1_700_000_000,
+        chain_healthy: true,
+    };
+    assert_eq!(
+        bytes_for(Some(snapshot)),
+        from_hex("4f424d6c010001000100000020000000111111111111111111111111111111111111111111111111111111111111111100000000000164f153650000000040e2010000000000d21e0000000000002a00000000000000f0c9536500000000e0a25365000000000002000000000000000000000200000007000000090000000a0000000165f153650000000041d10c000300000015cd5b0700000000020002040000000500000000f153650000000001"),
+    );
+    assert_eq!(
+        bytes_for(None),
+        from_hex("4f424d6c010001000100000020000000111111111111111111111111111111111111111111111111111111111111111100000000000164f153650000000040e2010000000000d21e0000000000002a00000000000000f0c9536500000000e0a25365000000000002000000000000000000000200000007000000090000000a00000000"),
+    );
+}
+
+#[test]
 fn sl_78_the_view_gives_the_newest_report_with_its_time_and_cause() {
     let mut settings = Settings::defaults(1_000);
     settings.devices.insert(counter());
@@ -402,6 +468,18 @@ fn sl_78_the_view_gives_the_newest_report_with_its_time_and_cause() {
             order_fee_sats: 66,
             lost_funding_sales: vec![4, 9],
             lost_funding_total: 70,
+            receiving: Some(ReceivingSnapshot {
+                captured_at_unix: 1_233,
+                chain_height: 42,
+                confirmation_depth: 3,
+                confirmed_room_msat: 21_000,
+                pending_or_unknown_channels: 2,
+                backup_state: ReceivingBackupState::Behind,
+                strict_pending_writes: 1,
+                background_pending_writes: 2,
+                last_device_store_unix: 1_200,
+                chain_healthy: true,
+            }),
         },
     };
     let view = shop_lightning::view(false, Some(&settings), Some(&report));
@@ -425,6 +503,13 @@ fn sl_78_the_view_gives_the_newest_report_with_its_time_and_cause() {
     assert_eq!(r.order_state, shop_lightning::OrderStateView::Failed);
     assert_eq!(r.order_why, shop_lightning::OrderWhyView::FeeAboveMax);
     assert_eq!(r.order_fee_sats, 66);
+    let receiving = r.receiving.expect("the live snapshot is passed through");
+    assert_eq!(receiving.confirmed_room_msat, 21_000);
+    assert_eq!(
+        receiving.backup_state,
+        shop_lightning::ReceivingBackupView::Behind
+    );
+    assert_eq!(receiving.background_pending_writes, 2);
     assert!(!view.on && view.held.is_none());
     let names: BTreeSet<_> = view.counters.iter().collect();
     assert_eq!(names.len(), 1);
