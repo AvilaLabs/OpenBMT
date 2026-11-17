@@ -55,6 +55,23 @@ separate payment ledger/manual checkout; the affected module is unavailable
 until its saved state is reopened and inspected. An uncertain write requires
 reopen and inspection before repeating the action.
 
+The model layer now also contains a local authority foundation: typed
+merchant/store/location/register/device scope; stable staff IDs; fixed cashier
+and manager grants; salted PIN verification; durable throttling; process-local
+expiring sessions; compare-and-swap persistence; designated-manager recovery;
+and event-time actor attribution. The authority record format is strict and
+versioned, and prepared recovery codes remain known to the caller across an
+uncertain commit. JVM contract tests cover scope, role, expiry, revocation,
+lockout, recovery, stale concurrent instances, duplicate PIN refusal,
+corruption and uncertain writes.
+
+That authority model is **not connected to the Android screens or business
+stores yet**. The Android app does not create a Keystore-sealed authority
+store, enroll or sign in staff, authorize commands, lock a session on
+background, or persist actor attribution in sales/cash records. Existing cash
+operator fields remain unauthenticated labels. No staff-permission capability
+is claimed complete from the model alone.
+
 The coordinator's current implementation and validation record is
 [native POS foundations (17 November 2026)](../../docs/research/native-pos-foundations-2026-11-17.md).
 Coordinator validation is in progress. That record lists implementation scope,
@@ -123,8 +140,10 @@ the attempt so late payment evidence can still be reconciled. A Square Sandbox
 approval is not completion, and uncertain card results remain pending until
 reconciled.
 
-Staff/operator labels are not authentication and no staff role authorization
-is implemented. Physical devices, production card provider approval, merchant
+Staff/operator labels are not authentication. A tested local authority model
+exists, but no product command path currently enforces it and its Android
+Keystore storage, enrollment, sign-in, lifecycle and admin-audit wiring remain
+open. Physical devices, production card provider approval, merchant
 onboarding, independent Lightning recovery, actual merchant shifts, and
 mainnet/real-funds gates remain open. Partial native UI and model tests do not
 establish POS parity or merchant readiness. The browser checkout is a separate

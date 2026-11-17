@@ -1,0 +1,45 @@
+{
+  "title": "Local authority foundation validation",
+  "as_of": "2026-11-17",
+  "scope": "Checkout authority model, graph assembly, JVM contract suite and experimental two-ABI Android package build. This does not validate Android authority enrollment, sign-in, Keystore persistence or business-command enforcement because those paths are not implemented.",
+  "checks": [
+    {
+      "name": "foundation graph assembly",
+      "command": "node tools/merchant-acceptance-investigation/assemble-foundation-graph.mjs /tmp/openbmt-foundation-graph /tmp/foundation-graph-final.json docs/research/foundation-tranche-selection-2026-11-17.json",
+      "result": "passed; generated output byte-matched docs/research/foundation-dependency-graph-2026-11-17.json",
+      "summary": {
+        "capabilities": 502,
+        "source_lanes": 12,
+        "dependency_edges": 711,
+        "dependency_cycles": 0,
+        "selected_capabilities": 40,
+        "shared_primitives": 9
+      }
+    },
+    {
+      "name": "complete checkout JVM model suite",
+      "command": "JAVA_HOME=<jdk21> KOTLIN_HOME=<kotlinc-2.2.20> apps/checkout-android/tests/run-jvm.sh /tmp/openbmt-checkout-authority-tests-final",
+      "result": "passed with -Werror and jvm-target 1.8; includes CheckoutAuthorityTest plus every pre-existing checkout model test"
+    },
+    {
+      "name": "experimental checkout Android package",
+      "command": "OPENBMT_GUARD=<temporary direct coordinator runner> CHECKOUTAPK_OUT=/tmp/openbmt-checkout-apk CHECKOUTAPK_KEYDIR=/tmp/openbmt-checkout-keys CHECKOUTAPK_CARGO_TARGET=/tmp/openbmt-checkout-cargo apps/checkout-android/build.sh",
+      "result": "passed; Rust native libraries built for arm64-v8a and x86_64, Kotlin compiled with -Werror, APK dexed, aligned and test-signed",
+      "artifact": {
+        "path": "/tmp/openbmt-checkout-apk/openbmt-checkout-test.apk",
+        "bytes": 62621487,
+        "sha256": "64a30495a798841c75f0cdf78dd64ecb018f0247411bdb6ba1205e5f710ae680",
+        "signature": "apksigner verification passed with one test signer using APK Signature Scheme v3"
+      }
+    }
+  ],
+  "open_gates": [
+    "No Android CheckoutAuthorityStorage implementation with Keystore-backed authenticated sealing is wired.",
+    "No first-manager enrollment, recovery acknowledgement, staff sign-in or lifecycle lock UI is wired.",
+    "No sale, tender, cash, refund, catalog, inventory, report or integration command calls CheckoutAuthority.",
+    "No actor attribution is persisted in business journals and no authority-admin audit log exists.",
+    "The local recovery bearer code is not Owner-app approval and is not exposed as a completed recovery workflow.",
+    "No emulator or physical-device authority workflow was run."
+  ],
+  "claim_boundary": "The evidence supports a compiled and tested reusable model foundation only. Canonical capability statuses and benchmark parity remain unchanged."
+}

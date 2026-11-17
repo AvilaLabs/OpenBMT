@@ -27,6 +27,7 @@ object CheckoutTestRunner {
         CheckoutInventoryTest.run()
         CheckoutCashSessionTest.run()
         CheckoutReportTest.run()
+        CheckoutAuthorityTest.run()
     }
 }
 KOTLIN

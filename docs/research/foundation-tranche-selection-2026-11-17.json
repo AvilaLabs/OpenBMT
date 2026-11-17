@@ -1,0 +1,107 @@
+{
+  "title": "OpenBMT recommended first foundation tranche",
+  "as_of": "2026-11-17",
+  "purpose": "A dependency-prioritized focus set for shared standalone-POS foundations. It intentionally relies on some already implemented or separately researched anchors outside the set. Inclusion does not mean the capability is complete or that every capability requires a separate subsystem.",
+  "immediate_code_slice": "Add typed merchant/store/location/register/device scope, authenticated local actors, fixed fail-closed grants, and immutable operation attribution. Then thread that context through existing durable transaction records without replacing their money or recovery invariants.",
+  "groups": [
+    {
+      "rank": 1,
+      "primitive": "merchant_store_location_register_device_scope",
+      "capability_ids": [
+        "CAP-6A5843392F",
+        "CAP-7506E394AB",
+        "CAP-D43AD7DE36"
+      ]
+    },
+    {
+      "rank": 2,
+      "primitive": "authenticated_actor_grants_and_audit",
+      "capability_ids": [
+        "CAP-7490EEDBCF",
+        "CAP-FF921BD61F",
+        "CAP-B554F6817A",
+        "CAP-A1F539309D",
+        "CAP-CE8A35BA24"
+      ]
+    },
+    {
+      "rank": 3,
+      "primitive": "canonical_sale_and_exact_pricing_snapshot",
+      "capability_ids": [
+        "CAP-96E3C240DF",
+        "CAP-9708B96F30",
+        "CAP-484405857B",
+        "CAP-D7525A42AA",
+        "CAP-EB41F9A721",
+        "CAP-A51B302A7A"
+      ]
+    },
+    {
+      "rank": 4,
+      "primitive": "provider_neutral_tender_allocation_and_completion",
+      "capability_ids": [
+        "CAP-6274D7D58F",
+        "CAP-F01F234915",
+        "CAP-99857E3F8B",
+        "CAP-6954509154",
+        "CAP-17A99A728B"
+      ]
+    },
+    {
+      "rank": 5,
+      "primitive": "refund_case_balance_and_permission_boundary",
+      "capability_ids": [
+        "CAP-73EA55919C",
+        "CAP-A1DB0CCC60",
+        "CAP-D9E8226FE2"
+      ]
+    },
+    {
+      "rank": 6,
+      "primitive": "merchant_controlled_onchain_receiving_and_observation",
+      "capability_ids": [
+        "CAP-811A1D3781",
+        "CAP-EFE71242FD",
+        "CAP-9F0997827C",
+        "CAP-1322613FED",
+        "CAP-420EFF71B3"
+      ]
+    },
+    {
+      "rank": 7,
+      "primitive": "utxo_economics_spend_safety_and_recovery",
+      "capability_ids": [
+        "CAP-F5115A4D41",
+        "CAP-5C60F8602D",
+        "CAP-D29AA9E0D8",
+        "CAP-97D6309746",
+        "CAP-D0F43729B0"
+      ]
+    },
+    {
+      "rank": 8,
+      "primitive": "shop_lightning_ownership_readiness_liquidity_and_recovery",
+      "capability_ids": [
+        "CAP-63BC2442E6",
+        "CAP-A4F19CD247",
+        "CAP-D686BEF539",
+        "CAP-EE1239290C",
+        "CAP-D24DC4EC84"
+      ]
+    },
+    {
+      "rank": 9,
+      "primitive": "offline_truth_and_local_event_contract",
+      "capability_ids": [
+        "CAP-25E7D01382",
+        "CAP-4BB44FDEBE",
+        "CAP-257CCB0320"
+      ]
+    }
+  ],
+  "validation": {
+    "selected_capabilities": 40,
+    "unique_capability_ids": 40,
+    "shared_primitives": 9
+  }
+}

@@ -31,6 +31,8 @@ These narrow slices are implemented in the current tree, with scoped checks pass
 
 The native ledger also has searchable payment history (ID/item search, tender/status filters, and API date-range filters); a privacy-limited receipt copy/test projection (no actual printing or email); a two-item sample cart (not configurable catalog CRUD or tax/modifier engine); and `openbmt-core::capabilities` for verified authorization/revocation/expiry metadata scoped to exact store/register (no authenticated transport or staff screens). Scoped checks passed. These additions do not complete catalog, staff controls, physical receipt output, or the merchant workflow.
 
+The later [local authority foundation](local-authority-foundation-2026-11-17.md) adds a JVM-tested checkout model for typed merchant/device scope, staff PINs, fixed grants, lockout, expiring sessions, CAS persistence and prepared recovery. It is not wired to Android screens or business command paths, so it does not complete staff controls or change canonical capability status.
+
 ## Delivery slices
 
 Each slice has a reviewable artifact and exit evidence. Keep scope vertical and finite; defer additional providers, catalogs, and deployment types until the relevant gate passes.
